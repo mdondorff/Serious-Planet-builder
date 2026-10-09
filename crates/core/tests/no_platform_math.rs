@@ -2,7 +2,13 @@
 
 use std::path::Path;
 
-const BANNED: [&str; 24] = [
+const PATH_BANNED: [&str; 16] =
+    ["sin", "cos", "tan", "asin", "acos", "atan", "atan2", "exp", "exp2", "ln", "log", "log2", "log10", "powf", "hypot", "cbrt"];
+
+const BANNED: [&str; 27] = [
+    ".asinh(",
+    ".acosh(",
+    ".atanh(",
     ".sin(",
     ".cos(",
     ".tan(",
@@ -34,6 +40,13 @@ fn scan(source: &str) -> Vec<(usize, &'static str)> {
     let mut hits = Vec::new();
     for (n, line) in source.lines().enumerate() {
         let code = line.split("//").next().unwrap_or("");
+        for t in ["f64", "f32"] {
+            for name in PATH_BANNED {
+                if code.contains(&format!("{t}::{name}(")) {
+                    hits.push((n + 1, "UFCS platform maths call"));
+                }
+            }
+        }
         for b in BANNED {
             if code.contains(b) {
                 hits.push((n + 1, b));
@@ -59,6 +72,14 @@ fn rust_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
 fn the_scanner_flags_banned_calls_and_ignores_comments() {
     let hits = scan("let a = x.sin();\nlet b = libm::sin(x); // x.cos() is fine in a comment\nlet c = y.powf(2.0);\n");
     assert_eq!(hits, [(1, ".sin("), (3, ".powf(")]);
+    assert_eq!(
+        scan(
+            "let a = f64::sin(x);
+let b = f32::powf(a, 2.0);"
+        )
+        .len(),
+        2
+    );
 }
 
 // spec: COORD-009
@@ -67,6 +88,7 @@ fn generator_relevant_crates_use_libm_only() {
     let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut offences = Vec::new();
     for name in ["core", "world-def", "generators", "cache"] {
+        assert!(crates.join(name).join("src").is_dir(), "crate directory {name} is missing: the scan would check nothing");
         let mut files = Vec::new();
         rust_files(&crates.join(name).join("src"), &mut files);
         for f in files {

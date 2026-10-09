@@ -102,8 +102,16 @@ impl TileId {
     /// Tile at `level` containing the direction.
     pub fn from_direction(map: &dyn FaceMapping, dir: Vec3, level: u8) -> TileId {
         let (face, s, t) = direction_to_face(map, dir);
+        assert!(level <= MAX_LEVEL, "level {level} exceeds the maximum {MAX_LEVEL}");
         let n = (1u64 << level) as f64;
-        let idx = |c: f64| (((c + 1.0) * 0.5 * n).floor().max(0.0) as u64).min((1u64 << level) - 1) as u32;
+        // floor(c·n/2) is exact (power-of-two scaling); adding the integer n/2 afterwards avoids the rounding of c + 1.
+        let idx = |c: f64| -> u32 {
+            if level == 0 {
+                return 0;
+            }
+            let i = (c * 0.5 * n).floor() as i64 + (1i64 << (level - 1));
+            i.clamp(0, (1i64 << level) - 1) as u32
+        };
         TileId::new(face, level, idx(s), idx(t)).expect("valid level")
     }
 
@@ -128,6 +136,10 @@ impl TileId {
     /// faces, give bit-identical directions (COORD-007).
     pub fn sample_direction(self, map: &dyn FaceMapping, res: u32, k: u32, l: u32) -> Vec3 {
         assert!(res.is_power_of_two() && k <= res && l <= res, "sample grid must be a power of two and in range");
+        assert!(
+            u32::from(self.level()) + res.trailing_zeros() <= 52,
+            "level + log2(res) must be <= 52 so lattice indices stay exact in f64"
+        );
         let n = (1u64 << self.level()) as f64 * f64::from(res);
         let lat = |tile_index: u32, i: u32| 2.0 * (f64::from(tile_index) * f64::from(res) + f64::from(i)) / n - 1.0;
         face_to_direction(map, self.face(), lat(self.x(), k), lat(self.y(), l))

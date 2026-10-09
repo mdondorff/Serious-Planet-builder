@@ -16,3 +16,8 @@ Proposed follow-up: `crates/render/tests/oracle_shader_validation.rs` (REND-002)
 What happened: `gh` is not on PATH in Git Bash or PowerShell, so `gh pr create`, CI status checks and the "merge only when CI is green" rule in CLAUDE.md cannot be followed. The remote `origin` is configured (https://github.com/mdondorff/Serious-Planet-builder.git).
 Assumption it changes: starter doc §2 (install table) assumed `gh` present.
 Proposed follow-up: owner installs `winget install GitHub.cli` and runs `gh auth login`; until then work stays on local branches and CI has not run (listed under "Waiting for the owner" in docs/status.md).
+
+## 2026-10-10 Bit-identical directions do not give crack-free coarse tiles
+What happened: numerics review of `core` (m1-coordinates). Face-edge directions are bit-identical from both faces (tested exhaustively to level 3, randomly to level 28 at res 32), but f32 tile-local offsets meet 1 mm only down to level 9 (measured, `coarse_tiles_need_more_than_f32_tile_local_offsets`); at level 0 offsets reach about 3.7e6 m and a shared border vertex quantises differently per tile (about 0.1 to 0.2 m).
+Assumption it changes: ADR 0001 / CON-08 (seam work): identical directions are necessary, not sufficient.
+Proposed follow-up: the M2 terrain change must rebuild border positions from shared data (or use skirts/morphing), and the lattice exactness needs `level + log2(res) <= 52` (now asserted in `sample_direction`). Float known answers now pin libm bits; libm is pinned to `=0.2.16`; hash has no domain separation yet (add a tag before HASH_VERSION 1 is used for real cache keys).

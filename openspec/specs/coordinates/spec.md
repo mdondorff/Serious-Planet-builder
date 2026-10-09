@@ -9,7 +9,7 @@ TBD - created by archiving change m0-foundations. Update Purpose after archive.
 Authoritative positions SHALL be float64 vectors in the PlanetFixed frame (right-handed, +Z through the north pole, +X through latitude 0 and longitude 0, +Y through longitude 90° east), and the type system SHALL keep PlanetFixed, TileLocal and CameraRelative values distinct.
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-11, ADR 0001
 
 #### Scenario: Frame axes
@@ -20,7 +20,7 @@ Source: CON-11, ADR 0001
 The CPU SHALL compute `tile_origin − camera_position` in float64 and hand the GPU only the float32 result; for a point within 10 km of the camera at any planet location the conversion error SHALL be below 1 mm.
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-11, CON-13, ADR 0001
 
 #### Scenario: Far from the origin
@@ -31,7 +31,7 @@ Source: CON-11, CON-13, ADR 0001
 Geo-coordinates (latitude, longitude, height) SHALL convert to PlanetFixed and back with an error of at most 1 mm everywhere on the surface, including both poles, the antimeridian and the eight cube corners.
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-13, CON-15, ADR 0011
 
 #### Scenario: Property test
@@ -42,7 +42,7 @@ Source: CON-13, CON-15, ADR 0011
 Geo conversions SHALL go through a `ReferenceSurface` interface whose sphere implementation is the default, and every implementation SHALL pass the same contract suite (round trip, surface normal, monotone height).
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-15, ADR 0011
 
 #### Scenario: Second implementation
@@ -53,7 +53,7 @@ Source: CON-15, ADR 0011
 The six cube faces (+X, −X, +Y, −Y, +Z, −Z) SHALL map face coordinates in [−1, 1]² to unit directions through the configured warp and back, with every direction belonging to exactly one face (ties at edges resolved by a fixed rule), and a round-trip direction error of at most 1e-12 radians.
 
 Verify: A
-Status: planned
+Status: active
 Source: ADR 0003
 
 #### Scenario: Bijection
@@ -64,7 +64,7 @@ Source: ADR 0003
 A tile identifier SHALL be a 64-bit value holding face (3 bits), level (5 bits, 0 to 28) and a Morton-interleaved child path, with total functions for parent, children, level and containing tile of a direction, and decoding SHALL reject invalid values.
 
 Verify: A
-Status: planned
+Status: active
 Source: ADR 0003
 
 #### Scenario: Round trip
@@ -72,10 +72,10 @@ Source: ADR 0003
 - **THEN** the same components result, and the parent of each child is the original tile
 
 ### Requirement: COORD-007 Cross-face neighbours
-Neighbour lookup SHALL work across all twelve face edges and the eight face corners, SHALL be symmetric (A's east neighbour has A as its west neighbour, after the corresponding orientation change), and positions on a shared border SHALL evaluate to the same 3D direction from both sides.
+Neighbour lookup SHALL work across all twelve face edges and the eight face corners, SHALL be symmetric (A's east neighbour has A as its west neighbour, after the corresponding orientation change), and positions on a shared border SHALL evaluate to the same 3D direction, bit for bit, from both sides (guaranteed by evaluating face lattice samples with exact edge values and an odd warp, see design).
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-08, ADR 0003
 
 #### Scenario: Shared border
@@ -86,7 +86,7 @@ Source: CON-08, ADR 0003
 Hash and random-number functions SHALL operate on integer inputs, be specified and versioned, and produce committed known-answer values identical on every platform.
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-14, ADR 0010
 
 #### Scenario: Known answers
@@ -97,7 +97,7 @@ Source: CON-14, ADR 0010
 Code that produces tile data SHALL call `libm` for transcendental functions and SHALL NOT call the platform implementations (`f64::sin`, `cos`, `tan`, `atan2`, `exp`, `ln`, `powf` and similar).
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-14, ADR 0010
 
 #### Scenario: Banned call
@@ -108,7 +108,7 @@ Source: CON-14, ADR 0010
 Tile vertices SHALL be stored relative to the tile origin so that quantisation error at the finest level is at most 1 mm.
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-13
 
 #### Scenario: Finest level

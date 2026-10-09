@@ -9,5 +9,5 @@
 
 ## 2. Close-out
 
-- [ ] 2.1 numerics-reviewer, verifier and spec-guardian reports addressed
-- [ ] 2.2 Archive the change, log in docs/status.md
+- [x] 2.1 numerics-reviewer, verifier and spec-guardian reports addressed
+- [x] 2.2 Archive the change, log in docs/status.md

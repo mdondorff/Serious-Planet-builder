@@ -101,6 +101,7 @@ pub fn direction_to_face(map: &dyn FaceMapping, dir: Vec3) -> (Face, f64, f64) {
     };
     let face = Face(face);
     let w = dir.dot(face.normal());
+    assert!(w > 0.0 && w.is_finite(), "direction {dir:?} is zero or not finite");
     let u = dir.dot(face.u_axis()) / w;
     let v = dir.dot(face.v_axis()) / w;
     (face, map.plane_to_face(u), map.plane_to_face(v))

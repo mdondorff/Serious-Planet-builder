@@ -49,6 +49,11 @@ impl SplitMix64 {
 
     /// Uniform in [lo, hi).
     pub fn range(&mut self, lo: f64, hi: f64) -> f64 {
-        lo + (hi - lo) * self.next_f64()
+        let v = lo + (hi - lo) * self.next_f64();
+        if v >= hi {
+            hi.next_down()
+        } else {
+            v
+        }
     }
 }
