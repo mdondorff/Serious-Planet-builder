@@ -297,7 +297,7 @@ fn net_draws_tile_grid_lines() {
     let img = face_net(&TangentWarp, cell, 2);
     for (f, &(cx, cy)) in planet_generators::dump::NET_CELLS.iter().enumerate() {
         let on_line = img.pixel(cx * cell, cy * cell + 11);
-        let off_line = img.pixel(cx * cell + 3, cy * cell + 3 + 0);
+        let off_line = img.pixel(cx * cell + 3, cy * cell + 3);
         let base = FACE_COLORS[f];
         assert_eq!(on_line, [base[0] / 2, base[1] / 2, base[2] / 2, 255], "grid line at the left edge of face {f}");
         assert_eq!(off_line, base, "interior pixel of face {f}");
