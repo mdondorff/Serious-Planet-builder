@@ -13,3 +13,10 @@ ADR 0006 (purity, versioning), ADR 0010 (determinism), report §5 and §16. The 
 ## Risks
 
 Value noise is visually crude; it is a test generator, not the final terrain (M3 replaces/extends it with a new generator version).
+
+## Review follow-ups (numerics-reviewer, verifier)
+
+- Hash domain separation: lattice hashes now include a layer tag and the octave as hashed values (`GENERATOR_VERSION` 2); aliasing seeds are tested. `cache_key` combines every ingredient of a tile's content.
+- The cube net was misoriented at the polar faces; +Z/-Z now sit above/below -Y, and a continuity test covers every shared edge.
+- GEN-005/GEN-006 are exact by construction for a point-function generator; the tests say so and pin the property.
+- Open for M3: store tile-local heights (height minus a per-tile f64 base) before fine octaves are added, since f32 steps at 4 km are 0.24 mm.

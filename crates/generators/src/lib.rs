@@ -7,4 +7,4 @@
 pub mod dump;
 pub mod height;
 
-pub use height::{generate_region, generate_tile, TileData, GENERATOR_VERSION, IMPLEMENTATION_ID};
+pub use height::{cache_key, generate_region, generate_tile, TileData, GENERATOR_VERSION, IMPLEMENTATION_ID};

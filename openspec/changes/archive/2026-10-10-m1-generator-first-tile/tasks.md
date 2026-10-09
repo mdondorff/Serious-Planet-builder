@@ -8,5 +8,5 @@
 
 ## 2. Close-out
 
-- [ ] 2.1 Reviewer reports addressed
-- [ ] 2.2 Archive, log in docs/status.md
+- [x] 2.1 Reviewer reports addressed
+- [x] 2.2 Archive, log in docs/status.md

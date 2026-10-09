@@ -67,7 +67,7 @@ Source: CON-08, report §16
 - **THEN** the maximum difference is within the tolerance and is reported when exceeded
 
 ### Requirement: GEN-009 Field dumps
-CPU code SHALL be able to write height maps, field maps and the unfolded six-face cube net to PNG without any GPU.
+CPU code SHALL be able to write tile height maps (further field maps as fields appear) and the unfolded six-face cube net, whose cells are laid out so that shared edges are continuous, to PNG without any GPU.
 
 Verify: A
 Status: active

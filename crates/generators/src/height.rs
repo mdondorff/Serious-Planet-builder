@@ -9,17 +9,19 @@ use planet_core::hash::{hash_u64s, unit_f64, HASH_VERSION};
 use planet_core::{TileId, Vec3};
 
 /// Bump whenever any output of this module changes (ADR 0006).
-pub const GENERATOR_VERSION: u32 = 1;
+pub const GENERATOR_VERSION: u32 = 2;
 /// Names this implementation in cache keys: CPU reference, hash version, and the face-mapping id is added by callers.
-pub const IMPLEMENTATION_ID: &str = "cpu-ref-height-v1";
+pub const IMPLEMENTATION_ID: &str = "cpu-ref-height-v2";
 
+/// Domain tag so lattices of different layers never alias for the same seed.
+const LAYER_HEIGHT: u64 = 0x4845_4947_4854;
 const OCTAVES: u32 = 5;
 const BASE_FREQUENCY: f64 = 4.0;
 /// Peak amplitude of the summed noise in metres.
 const AMPLITUDE_M: f64 = 4000.0;
 
 fn lattice_value(seed: u64, octave: u32, ix: i64, iy: i64, iz: i64) -> f64 {
-    let h = hash_u64s(seed ^ (u64::from(octave) << 56), &[ix as u64, iy as u64, iz as u64]);
+    let h = hash_u64s(seed, &[LAYER_HEIGHT, u64::from(octave), ix as u64, iy as u64, iz as u64]);
     unit_f64(h) * 2.0 - 1.0
 }
 
@@ -104,4 +106,17 @@ pub fn generate_region(seed: u64, map: &(dyn FaceMapping + Sync), ids: &[TileId]
         }
     });
     out
+}
+
+fn fold_str(s: &str) -> Vec<u64> {
+    s.bytes().map(u64::from).collect()
+}
+
+/// Key under which a generated tile may be cached: everything its content depends on (ADR 0006). Changing the
+/// generator version, hash version, implementation id, face mapping, seed, tile or resolution changes the key.
+pub fn cache_key(map: &dyn FaceMapping, seed: u64, id: TileId, res: u32) -> u64 {
+    let mut v = vec![u64::from(GENERATOR_VERSION), u64::from(HASH_VERSION), seed, id.raw(), u64::from(res)];
+    v.push(hash_u64s(1, &fold_str(IMPLEMENTATION_ID)));
+    v.push(hash_u64s(2, &fold_str(map.id())));
+    hash_u64s(0x6b65_79, &v)
 }

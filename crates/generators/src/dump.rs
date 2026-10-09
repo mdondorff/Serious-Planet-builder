@@ -64,8 +64,9 @@ pub fn tile_height_map(tile: &TileData) -> Rgba {
     Rgba { width: n, height: n, data }
 }
 
-/// Cell of each face in the unfolded cross (4 columns by 3 rows).
-pub const NET_CELLS: [(u32, u32); 6] = [(1, 1), (3, 1), (2, 1), (0, 1), (1, 0), (1, 2)];
+/// Cell of each face in the unfolded cross (4 columns by 3 rows). +Z sits above -Y and -Z below it, the only
+/// placements where U and V continue across the shared edge (checked by a continuity test).
+pub const NET_CELLS: [(u32, u32); 6] = [(1, 1), (3, 1), (2, 1), (0, 1), (0, 0), (0, 2)];
 
 /// Unfolded six-face cube net, `cell` pixels per face. Pixels outside the six cells are `NET_BACKGROUND`.
 /// Each face pixel is coloured by the face found from its own 3D direction, so a wrong mapping shows up as a wrong colour;
@@ -83,7 +84,7 @@ pub fn face_net(map: &dyn FaceMapping, cell: u32, grid_level: u8) -> Rgba {
                 let (face, _, _) = direction_to_face(map, face_to_direction(map, Face(f as u8), s, t));
                 let mut colour = FACE_COLORS[face.0 as usize];
                 let (gs, gt) = ((s + 1.0) * 0.5 * n, (t + 1.0) * 0.5 * n);
-                let line = 0.5 / f64::from(cell) * n;
+                let line = 1.0 / f64::from(cell) * n;
                 if gs - libm::floor(gs) < line || gt - libm::floor(gt) < line {
                     colour = [colour[0] / 2, colour[1] / 2, colour[2] / 2, 255];
                 }
