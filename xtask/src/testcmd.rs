@@ -84,7 +84,8 @@ pub fn test(root: &Path, args: &[String]) -> Res {
         }
     }
     let adapter = if real { "hardware" } else { "software" };
-    let env = [("PLANET_ADAPTER", adapter), ("PLANET_GOLDEN_STRICT", if strict { "1" } else { "0" })];
+    let env_strict = std::env::var("PLANET_GOLDEN_STRICT").unwrap_or_default() == "1";
+    let env = [("PLANET_ADAPTER", adapter), ("PLANET_GOLDEN_STRICT", if strict || env_strict { "1" } else { "0" })];
     let started = Instant::now();
 
     let mut cmd: Vec<String> = vec!["nextest".into(), "run".into(), "--no-tests=pass".into()];

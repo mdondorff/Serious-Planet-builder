@@ -204,3 +204,35 @@ pub fn hello_triangle(ctx: &GpuContext, size: u32) -> RgbaFrame {
     readback.unmap();
     RgbaFrame { width: size, height: size, rgba }
 }
+
+/// Adapter class, so layers above `render` need no wgpu types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdapterKind {
+    Discrete,
+    Integrated,
+    Software,
+    Other,
+}
+
+impl GpuContext {
+    pub fn kind(&self) -> AdapterKind {
+        match self.info.device_type {
+            wgpu::DeviceType::DiscreteGpu => AdapterKind::Discrete,
+            wgpu::DeviceType::IntegratedGpu => AdapterKind::Integrated,
+            wgpu::DeviceType::Cpu => AdapterKind::Software,
+            _ => AdapterKind::Other,
+        }
+    }
+}
+
+impl RgbaFrame {
+    pub fn write_png(&self, path: &std::path::Path) -> std::io::Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(path)?), self.width, self.height);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().map_err(std::io::Error::other)?.write_image_data(&self.rgba).map_err(std::io::Error::other)
+    }
+}

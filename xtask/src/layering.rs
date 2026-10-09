@@ -26,11 +26,16 @@ pub fn check_manifest(dir: &str, manifest: &str) -> Vec<String> {
     for line in manifest.lines() {
         let t = line.trim();
         if t.starts_with('[') {
-            in_deps = t == "[dependencies]";
+            in_deps = t == "[dependencies]" || t == "[build-dependencies]" || (t.starts_with("[target.") && t.ends_with(".dependencies]"));
             continue;
         }
         if !in_deps {
             continue;
+        }
+        if t.starts_with("planet-testkit") {
+            errors.push(format!(
+                "crate '{dir}' lists planet-testkit outside [dev-dependencies]; the test kit is test support only (ADR 0008)"
+            ));
         }
         let dep = t.split(|c: char| c == '.' || c == '=' || c.is_whitespace()).next().unwrap_or("");
         if let Some(i) = CHAIN.iter().position(|c| package_name(c) == dep) {
@@ -89,6 +94,17 @@ mod tests {
         assert!(e[0].contains("'render'") && e[0].contains("downward only"), "{e:?}");
         let side = "[dependencies]\nplanet-cache.workspace = true\n";
         assert_eq!(check_manifest("cache", side).len(), 1, "a crate must not depend on itself");
+        let tk = "[dependencies]
+planet-testkit.workspace = true
+";
+        assert_eq!(check_manifest("app", tk).len(), 1, "testkit is dev-dependency only");
+        assert!(check_manifest(
+            "app",
+            "[dev-dependencies]
+planet-testkit.workspace = true
+"
+        )
+        .is_empty());
         // dev-dependencies (e.g. the test kit) are not part of the layering.
         assert!(check_manifest("core", "[dev-dependencies]\nplanet-render.workspace = true\n").is_empty());
     }

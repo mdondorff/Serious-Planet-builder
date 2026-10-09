@@ -46,7 +46,7 @@ Source: ADR 0009, report §16
 - **THEN** `test fast` selects every crate
 
 ### Requirement: BUILD-004 Three run modes
-The single binary SHALL provide the modes `editor`, `generate` and `test-render`, each of which starts and exits cleanly with `--smoke`, and `test-render` SHALL render a scene headless to a PNG on the software adapter.
+The single binary SHALL provide the modes `editor`, `generate` and `test-render`, each of which starts and exits cleanly with `--smoke`; headless PNG output of `test-render` is covered by TEST-004 and REND-007.
 
 Verify: A
 Status: active

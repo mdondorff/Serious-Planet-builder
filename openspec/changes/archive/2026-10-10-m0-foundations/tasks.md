@@ -25,6 +25,6 @@
 
 ## 5. Close-out
 
-- [ ] 5.1 `cargo xtask accept M0` green apart from CI, goldens and Rasierklinge items
-- [ ] 5.2 Verifier agent report with no failures
-- [ ] 5.3 Archive the change, log in `docs/status.md`
+- [x] 5.1 `cargo xtask accept M0` green apart from CI, goldens and Rasierklinge items
+- [x] 5.2 Verifier agent report with no failures
+- [x] 5.3 Archive the change, log in `docs/status.md`

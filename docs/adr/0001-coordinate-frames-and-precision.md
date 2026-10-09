@@ -12,7 +12,7 @@ Precision cannot be retrofitted cheaply (Star Citizen spent eight months convert
 3. float32 with floating-origin rebasing. Cheap, but rebasing events leak into physics, caches and authored data (KSP "Kraken" class of bugs).
 
 ## Decision
-Option 1. Frames, in order: `PlanetInertial` (reserved, f64) → **`PlanetFixed`** (f64, right-handed, +Z through the north pole, +X through lat 0 / lon 0, +Y through lat 0 / lon 90°E; the authoritative frame for all world data) → `TileLocal` (f32, origin = tile centre in PlanetFixed) → `CameraRelative` (f32; the only thing shaders see) → `LocalTangent` (ENU, f64 origin + f32 offsets; authored objects, physics islands, gizmos).
+Option 1. Frames, in order: `PlanetInertial` (reserved, f64) → **`PlanetFixed`** (f64, right-handed, +Z through the north pole, +X through lat 0 / lon 0, +Y through lat 0 / lon 90°E; the authoritative frame for all world data) → `TileLocal` (f32, origin = tile centre in PlanetFixed) → `CameraRelative` (f32; shaders see only this and TileLocal offsets) → `LocalTangent` (ENU, f64 origin + f32 offsets; authored objects, physics islands, gizmos).
 - Per frame the CPU computes `tile_origin − camera_position` in f64 and uploads it as f32.
 - Tile vertices are stored as f32 (or quantised) offsets from the tile origin, so vertex precision is bounded by tile size, not planet size.
 - No shader computes a value of planet-radius magnitude (CON-11); this is checked by review and by the 1 m altitude precision test.

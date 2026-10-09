@@ -36,7 +36,7 @@ publish = false
 
 [workspace.dependencies]
 libm = "0.2.16"
-wgpu = { version = "30.0.1", default-features = false, features = ["wgsl", "dx12", "vulkan"] }
+wgpu = { version = "=30.0.1", default-features = false, features = ["wgsl", "dx12", "vulkan"] }
 pollster = "1.0.1"
 png = "0.18.1"
 

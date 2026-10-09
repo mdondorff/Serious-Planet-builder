@@ -22,3 +22,5 @@ Option 1. Binary `planet` (package `planet`, crate directory `crates/app`) with 
 
 ## Licences of adopted code or techniques
 None.
+
+Addendum (proposed, M0 review): `planet-testkit` may appear only under `[dev-dependencies]` (enforced by `xtask layering`); dev-dependencies of chain crates on `testkit` are the only allowed upward edge. `planet-perf` has no dependencies. Types of the graphics API stay inside `render`: layers above see `render`'s own types (for example `AdapterKind`).

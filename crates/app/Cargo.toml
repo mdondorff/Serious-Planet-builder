@@ -19,4 +19,6 @@ planet-frame.workspace = true
 planet-render.workspace = true
 planet-editor.workspace = true
 planet-perf.workspace = true
+
+[dev-dependencies]
 planet-testkit.workspace = true

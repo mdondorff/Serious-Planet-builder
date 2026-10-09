@@ -46,7 +46,7 @@ A flat-colour triangle SHALL render headless on the software adapter to a 256 by
 
 Verify: C
 Status: active
-Source: report §9, §15 (M0)
+Source: CON-18, ADR 0009
 
 #### Scenario: Hello triangle
 - **WHEN** the hello-triangle test runs on WARP or lavapipe

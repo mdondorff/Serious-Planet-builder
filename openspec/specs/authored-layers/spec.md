@@ -1,4 +1,9 @@
-## ADDED Requirements
+# authored-layers Specification
+
+## Purpose
+TBD - created by archiving change m0-foundations. Update Purpose after archive.
+
+## Requirements
 
 ### Requirement: AUTH-001 Separate, geo-anchored storage
 Authored content SHALL be stored separately from the procedural base, anchored in geo-coordinates (latitude, longitude, height, heading), as text files that merge cleanly in git, with binary payloads in content-addressed blobs.
@@ -38,7 +43,7 @@ Edits SHALL be commands over the WorldDefinition recorded in an append-only log;
 
 Verify: A
 Status: planned
-Source: report §6
+Source: ADR 0007
 
 #### Scenario: Undo all
 - **WHEN** 1,000 random edits are applied and then undone

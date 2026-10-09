@@ -17,7 +17,7 @@ Face warps considered (report §2): tangent-adjusted gnomonic (`u = tan(s·π/4)
 Option 1. Details:
 - **Faces** 0..5 = +X, −X, +Y, −Y, +Z, −Z of PlanetFixed (ADR 0001). Each face has axes `(u, v)` with `u × v = outward normal`: +X (u=+Y, v=+Z), −X (u=−Y, v=+Z), +Y (u=−X, v=+Z), −Y (u=+X, v=+Z), +Z (u=+X, v=+Y), −Z (u=+X, v=−Y).
 - **Face warp:** start with the **tangent-adjusted warp** behind a `FaceMapping` seam. It is closed form and invertible with `libm`, and its distortion numbers are published. *This departs from the report's leaning (approximately equal-area)* because the warp is a cache-only choice that can be swapped behind the seam, and the equal-area variants are evaluated at the M2 go/no-go gate against real LOD error. Everything near face edges is computed from the 3D unit direction, never from face UV (report §2).
-- **Tile id:** 64-bit: bits 63..61 face, bits 60..56 level (0..=28), the low `2·level` bits hold the Morton-interleaved child path (x bit above y bit at each level), unused bits zero. 28 levels cover about 10 cm at 256 samples per tile (report §4, §17).
+- **Tile id:** 64-bit: bits 63..61 face, bits 60..56 level (0..=28), the low `2·level` bits hold the Morton-interleaved child path (x bit above y bit at each level), unused bits zero. 28 levels fit in 64 bits; about 19 levels are needed for 10 cm detail (report §4, §17 item 11), so the capacity is ample.
 - Hilbert-ordered storage keys (S2 style) are a separate decision with the tile storage ADR (M3–M4).
 
 ## Consequences

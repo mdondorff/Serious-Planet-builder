@@ -85,10 +85,10 @@ fn facts(ctx: &GpuContext) -> AdapterFacts {
     AdapterFacts {
         name: ctx.info.name.clone(),
         backend: format!("{:?}", ctx.info.backend),
-        kind: match ctx.info.device_type {
-            planet_render::wgpu::DeviceType::DiscreteGpu => DeviceKind::Discrete,
-            planet_render::wgpu::DeviceType::IntegratedGpu => DeviceKind::Integrated,
-            planet_render::wgpu::DeviceType::Cpu => DeviceKind::Cpu,
+        kind: match ctx.kind() {
+            planet_render::AdapterKind::Discrete => DeviceKind::Discrete,
+            planet_render::AdapterKind::Integrated => DeviceKind::Integrated,
+            planet_render::AdapterKind::Software => DeviceKind::Cpu,
             _ => DeviceKind::Other,
         },
     }
@@ -110,8 +110,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         "hello-triangle" => {
             let frame = planet_render::hello_triangle(&ctx, 256);
             if let Some(path) = &o.out {
-                let img = planet_testkit::Image::new(frame.width, frame.height, frame.rgba);
-                planet_testkit::write_png(path, &img).map_err(|e| format!("writing {}: {e}", path.display()))?;
+                frame.write_png(path).map_err(|e| format!("writing {}: {e}", path.display()))?;
                 writeln!(out, "wrote {}", path.display()).map_err(err)?;
             }
             Ok(())

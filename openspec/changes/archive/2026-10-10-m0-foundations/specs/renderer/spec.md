@@ -16,7 +16,7 @@ Every shipped shader module SHALL pass backend validation on the software adapte
 
 Verify: B
 Status: active
-Source: report §16
+Source: ADR 0004, CON-17
 
 #### Scenario: Invalid shader
 - **WHEN** a shader module fails validation
@@ -67,11 +67,11 @@ Source: CON-18, report §16
 - **THEN** the images are identical
 
 ### Requirement: REND-007 Adapter selection and logging
-The renderer SHALL request the high-performance adapter for interactive and performance runs and the software adapter for test runs, and SHALL log the chosen adapter's backend, name and type at start-up.
+The headless harness SHALL select the software adapter for test runs (and the high-performance adapter when asked for performance runs), and SHALL log the chosen adapter's backend, name and type as its first output line; interactive adapter selection becomes a requirement when the editor gets a window (M2).
 
 Verify: C
 Status: active
-Source: report §8
+Source: CON-21, report §8
 
 #### Scenario: Test render log
 - **WHEN** `planet test-render` runs on the software adapter

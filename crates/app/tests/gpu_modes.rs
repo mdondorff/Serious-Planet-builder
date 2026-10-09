@@ -13,7 +13,8 @@ fn run(args: &[&str]) -> Result<String, String> {
 fn test_render_mode_writes_a_png() {
     let path = std::env::temp_dir().join(format!("planet-test-render-{}.png", std::process::id()));
     let out = run(&["test-render", "--adapter", "software", "--out", path.to_str().unwrap()]).unwrap();
-    assert!(out.contains("adapter:"), "adapter must be logged: {out}");
+    assert!(out.starts_with("adapter: "), "adapter line must come first: {out}");
+    assert!(out.contains("Dx12") || out.contains("Vulkan"), "backend must be named: {out}");
     let img = read_png(&path).unwrap();
     assert_eq!((img.width, img.height), (256, 256));
     assert_eq!(img.pixel(128, 128), planet_render::HELLO_FILL);
