@@ -1,0 +1,22 @@
+[package]
+name = "planet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "planet"
+path = "src/main.rs"
+
+[dependencies]
+planet-core.workspace = true
+planet-world-def.workspace = true
+planet-generators.workspace = true
+planet-cache.workspace = true
+planet-streaming.workspace = true
+planet-frame.workspace = true
+planet-render.workspace = true
+planet-editor.workspace = true
+planet-perf.workspace = true
+planet-testkit.workspace = true

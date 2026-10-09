@@ -1,0 +1,9 @@
+[package]
+name = "planet-perf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Performance-harness protocol (report §8, CON-21). GPU-free: adapter facts arrive as plain structs.
+[dependencies]
