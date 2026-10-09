@@ -329,8 +329,8 @@ mod tests {
     fn the_reference_frame_fills_exactly_the_planned_rectangles() {
         let p = plan(DebugView::Face);
         let f = reference_frame(&p, &[]).unwrap();
-        let fill = f.rgba.chunks_exact(4).filter(|px| px == &p.draws[0].color).count();
+        let fill = f.rgba.as_chunks::<4>().0.iter().filter(|px| **px == p.draws[0].color).count();
         assert_eq!(fill, 32 * 32);
-        assert!(!f.rgba.chunks_exact(4).any(|px| px == &p.clear_color));
+        assert!(!f.rgba.as_chunks::<4>().0.iter().any(|px| *px == p.clear_color));
     }
 }
