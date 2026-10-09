@@ -8,3 +8,4 @@ publish.workspace = true
 [dependencies]
 planet-core.workspace = true
 planet-streaming.workspace = true
+planet-generators.workspace = true
