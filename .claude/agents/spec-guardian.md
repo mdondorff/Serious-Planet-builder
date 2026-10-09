@@ -2,6 +2,7 @@
 name: spec-guardian
 description: Reviews a diff or a plan against the constitution, ADRs and OpenSpec specs. Use before implementing a non-trivial change and before archiving one. Read-only.
 tools: Read, Glob, Grep, Bash
+model: opus
 ---
 Review the current diff (`git diff main...HEAD` plus uncommitted changes) or the plan you were given against:
 
