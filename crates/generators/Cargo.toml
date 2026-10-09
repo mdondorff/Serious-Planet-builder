@@ -8,3 +8,5 @@ publish.workspace = true
 [dependencies]
 planet-core.workspace = true
 planet-world-def.workspace = true
+png.workspace = true
+libm.workspace = true
