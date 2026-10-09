@@ -118,5 +118,5 @@ pub fn cache_key(map: &dyn FaceMapping, seed: u64, id: TileId, res: u32) -> u64 
     let mut v = vec![u64::from(GENERATOR_VERSION), u64::from(HASH_VERSION), seed, id.raw(), u64::from(res)];
     v.push(hash_u64s(1, &fold_str(IMPLEMENTATION_ID)));
     v.push(hash_u64s(2, &fold_str(map.id())));
-    hash_u64s(0x6b65_79, &v)
+    hash_u64s(0x006b_6579, &v)
 }
