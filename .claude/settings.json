@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(cargo *)",
+      "Bash(rustup *)",
+      "Bash(git *)",
+      "Bash(gh pr *)",
+      "Bash(gh run *)",
+      "Bash(gh workflow *)",
+      "Bash(gh repo view *)",
+      "Bash(openspec *)",
+      "Bash(nvidia-smi *)",
+      "PowerShell(cargo *)",
+      "PowerShell(git *)",
+      "PowerShell(gh pr *)",
+      "PowerShell(gh run *)",
+      "PowerShell(openspec *)",
+      "PowerShell(nvidia-smi *)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:crates.io)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:gpuweb.github.io)",
+      "WebFetch(domain:www.w3.org)"
+    ],
+    "deny": [
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(gh repo delete *)",
+      "PowerShell(git push --force *)",
+      "PowerShell(git push -f *)",
+      "PowerShell(Remove-Item *)"
+    ]
+  }
+}
