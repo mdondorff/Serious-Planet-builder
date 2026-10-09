@@ -331,6 +331,6 @@ mod tests {
         let f = reference_frame(&p, &[]).unwrap();
         let fill = f.rgba.as_chunks::<4>().0.iter().filter(|px| **px == p.draws[0].color).count();
         assert_eq!(fill, 32 * 32);
-        assert!(!f.rgba.as_chunks::<4>().0.iter().any(|px| *px == p.clear_color));
+        assert!(!f.rgba.as_chunks::<4>().0.contains(&p.clear_color));
     }
 }
