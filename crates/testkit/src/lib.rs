@@ -261,7 +261,7 @@ mod tests {
         assert!(!root.join("tests/goldens/a/t.png").exists(), "a golden must never be created by a test");
     }
 
-    // spec: TEST-002
+    // spec: TEST-002, TEST-007
     #[test]
     fn mismatch_reports_numbers_and_writes_diff_image() {
         let root = tmp("match");

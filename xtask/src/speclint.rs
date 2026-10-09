@@ -36,15 +36,25 @@ pub fn is_trace_id(s: &str) -> bool {
 pub fn parse_requirements(spec_name: &str, text: &str) -> (Vec<Requirement>, Vec<String>) {
     let mut reqs: Vec<Requirement> = Vec::new();
     let mut errors = Vec::new();
+    let mut removed = false;
     for (n, line) in text.lines().enumerate() {
+        if let Some(h) = line.strip_prefix("## ") {
+            removed = h.trim_start().starts_with("REMOVED");
+        }
         if let Some(rest) = line.strip_prefix("### Requirement:") {
             let rest = rest.trim();
             let id = rest.split_whitespace().next().unwrap_or("");
             if !is_trace_id(id) {
                 errors.push(format!("{spec_name}:{}: requirement heading '{rest}' does not start with a trace ID like COORD-003", n + 1));
             }
-            reqs.push(Requirement { id: id.to_string(), spec: spec_name.to_string(), ..Default::default() });
-        } else if let Some(r) = reqs.last_mut() {
+            let mut r = Requirement { id: id.to_string(), spec: spec_name.to_string(), ..Default::default() };
+            if removed {
+                // Removed by a change delta: outside the coverage rules.
+                r.tier = Some('A');
+                r.status = Some("deprecated".into());
+            }
+            reqs.push(r);
+        } else if let (false, Some(r)) = (removed, reqs.last_mut()) {
             let t = line.trim();
             if let Some(v) = t.strip_prefix("Verify:") {
                 r.tier = v.trim().chars().next();
@@ -84,11 +94,19 @@ pub struct Report {
 
 pub fn lint(specs: &BTreeMap<String, String>, sources: &BTreeMap<PathBuf, String>, constitution: &str) -> Report {
     let mut errors = Vec::new();
-    let mut reqs = Vec::new();
-    for (name, text) in specs {
-        let (r, e) = parse_requirements(name, text);
-        reqs.extend(r);
+    let mut reqs: Vec<Requirement> = Vec::new();
+    // Main specs first, then change deltas (names starting with "change:"). A delta requirement replaces a
+    // main requirement of the same ID (MODIFIED) or is added (ADDED).
+    let is_delta = |n: &str| n.starts_with("change:");
+    for (name, text) in specs.iter().filter(|(n, _)| !is_delta(n)).chain(specs.iter().filter(|(n, _)| is_delta(n))) {
+        let (parsed, e) = parse_requirements(name, text);
         errors.extend(e);
+        for req in parsed {
+            match reqs.iter().position(|x| x.id == req.id && is_delta(name) && !is_delta(&x.spec)) {
+                Some(i) => reqs[i] = req,
+                None => reqs.push(req),
+            }
+        }
     }
     let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
     for r in &reqs {
@@ -153,12 +171,22 @@ pub fn lint(specs: &BTreeMap<String, String>, sources: &BTreeMap<PathBuf, String
 
 pub fn run(root: &Path) -> Res {
     let mut specs = BTreeMap::new();
-    let spec_dir = root.join("openspec").join("specs");
-    let rd = std::fs::read_dir(&spec_dir).map_err(|e| format!("{}: {e}", spec_dir.display()))?;
-    for e in rd.flatten() {
-        let f = e.path().join("spec.md");
-        if f.is_file() {
-            specs.insert(e.file_name().to_string_lossy().into_owned(), std::fs::read_to_string(&f).map_err(|e| e.to_string())?);
+    let openspec = root.join("openspec");
+    // Main specs, plus the delta specs of changes in progress (not the archive).
+    let mut dirs = vec![(String::new(), openspec.join("specs"))];
+    if let Ok(rd) = std::fs::read_dir(openspec.join("changes")) {
+        for e in rd.flatten().filter(|e| e.file_name() != "archive" && e.path().is_dir()) {
+            dirs.push((format!("change:{}/", e.file_name().to_string_lossy()), e.path().join("specs")));
+        }
+    }
+    for (prefix, dir) in dirs {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for e in rd.flatten() {
+            let f = e.path().join("spec.md");
+            if f.is_file() {
+                let name = format!("{prefix}{}", e.file_name().to_string_lossy());
+                specs.insert(name, std::fs::read_to_string(&f).map_err(|e| e.to_string())?);
+            }
         }
     }
     let mut files = Vec::new();
@@ -236,6 +264,22 @@ Status: active
         assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
         assert!(r.errors[0].contains("NOPE-001"));
         assert!(lint_with(&spec, "// spec: COORD-003, CON-15\n").errors.is_empty());
+    }
+
+    // spec: TEST-001
+    #[test]
+    fn change_deltas_replace_main_requirements_and_removed_ones_leave_the_rules() {
+        let main =
+            "### Requirement: COORD-003 Geo\nVerify: A\nStatus: planned\n\n### Requirement: COORD-009 Old\nVerify: A\nStatus: active\n";
+        let delta = "## MODIFIED Requirements\n### Requirement: COORD-003 Geo\nVerify: A\nStatus: active\n\n\
+                     ## REMOVED Requirements\n### Requirement: COORD-009 Old\n**Reason**: gone\n";
+        let specs =
+            BTreeMap::from([("coordinates".to_string(), main.to_string()), ("change:m1/coordinates".to_string(), delta.to_string())]);
+        let sources = BTreeMap::new();
+        let r = lint(&specs, &sources, "");
+        // COORD-003 is active in the delta and uncited; COORD-009 is removed, so not reported, and no duplicate error.
+        assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
+        assert!(r.errors[0].starts_with("COORD-003"), "{:?}", r.errors);
     }
 
     // spec: TEST-001

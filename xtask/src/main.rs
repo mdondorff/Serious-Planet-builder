@@ -2,6 +2,7 @@
 
 mod accept;
 mod layering;
+mod repocheck;
 mod speclint;
 mod testcmd;
 mod util;

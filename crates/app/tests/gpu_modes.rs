@@ -8,7 +8,7 @@ fn run(args: &[&str]) -> Result<String, String> {
     planet::run(&args, &mut buf).map(|_| String::from_utf8(buf).unwrap())
 }
 
-// spec: BUILD-004
+// spec: BUILD-004, REND-007
 #[test]
 fn test_render_mode_writes_a_png() {
     let path = std::env::temp_dir().join(format!("planet-test-render-{}.png", std::process::id()));
