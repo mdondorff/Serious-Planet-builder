@@ -84,9 +84,22 @@ pub fn repo_root() -> PathBuf {
     }
 }
 
-/// Turn an adapter description into a directory-safe key, e.g. `dx12-microsoft-basic-render-driver`.
+/// Turn an adapter description into a directory-safe key of the adapter *family*, e.g.
+/// `dx12-microsoft-basic-render-driver` or `vulkan-llvmpipe`: parenthesised details (LLVM version, bit width) are
+/// dropped so a driver or runner-image update does not orphan the goldens. The full driver string is recorded in
+/// `driver.txt` beside the goldens and printed on every mismatch.
 pub fn adapter_key(backend: &str, name: &str) -> String {
-    let raw = format!("{backend}-{name}").to_lowercase();
+    let mut family = String::new();
+    let mut depth = 0u32;
+    for c in name.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => family.push(c),
+            _ => {}
+        }
+    }
+    let raw = format!("{backend}-{family}").to_lowercase();
     let mut key = String::new();
     for c in raw.chars() {
         if c.is_ascii_alphanumeric() {
@@ -239,24 +252,81 @@ pub fn adapter_has_goldens(root: &Path, adapter: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Test-facing wrapper: panics with an actionable message on mismatch. A missing golden is reported loudly and
-/// fails when `PLANET_GOLDEN_STRICT=1` or when the adapter already has blessed goldens (so a deleted or
-/// forgotten golden of a blessed adapter cannot pass silently); an adapter with none yet only reports pending.
-pub fn assert_golden(adapter: &str, name: &str, img: &Image, tol: Tolerance) {
-    let outcome = compare_golden_in(&repo_root(), adapter, name, img, tol).expect("golden I/O");
+/// Why a missing golden fails (or `None` when it only reports). Strict mode fails every missing golden; an adapter that
+/// already has blessed goldens fails unless the name is listed as pending; and with `require_adapter_goldens` (CI) an
+/// adapter with no golden directory at all fails, so a key change cannot turn every golden into a silent PENDING.
+pub fn pending_failure(root: &Path, adapter: &str, name: &str, strict: bool, require_adapter_goldens: bool) -> Option<&'static str> {
+    if strict {
+        return Some("strict mode: every golden must exist");
+    }
+    if require_adapter_goldens && !adapter_has_goldens(root, adapter) {
+        return Some("this adapter has no golden directory (did its key or driver family change?); bless goldens for it or fix the key");
+    }
+    if adapter_has_goldens(root, adapter) && !is_listed_pending(root, name) {
+        return Some("this adapter has blessed goldens, so a missing one is an error unless listed in tests/goldens/pending.txt");
+    }
+    None
+}
+
+/// The driver string recorded beside an adapter's goldens (`tests/goldens/<adapter>/driver.txt`), if any.
+pub fn recorded_driver(root: &Path, adapter: &str) -> Option<String> {
+    std::fs::read_to_string(root.join("tests").join("goldens").join(adapter).join("driver.txt")).ok().map(|s| s.trim().to_string())
+}
+
+/// Test-facing wrapper: panics with an actionable message (numbers, paths and both driver strings) on mismatch. A
+/// missing golden is reported loudly and fails per [`pending_failure`]; the environment selects strictness
+/// (`PLANET_GOLDEN_STRICT=1`, and `PLANET_REQUIRE_ADAPTER_GOLDENS=1` in CI).
+pub fn assert_golden(adapter: &str, driver: &str, name: &str, img: &Image, tol: Tolerance) {
+    let root = repo_root();
+    let outcome = compare_golden_in(&root, adapter, name, img, tol).expect("golden I/O");
+    // Record the full driver string with the candidates, so a bless can commit it beside the goldens.
+    let sidecar = root.join("target").join("review").join("candidates").join(adapter).join("driver.txt");
+    let _ = std::fs::create_dir_all(sidecar.parent().expect("dir"));
+    let _ = std::fs::write(&sidecar, format!("{driver}\n"));
+    let drivers = || {
+        format!(
+            "driver now: {driver}; driver recorded with the goldens: {}",
+            recorded_driver(&root, adapter).unwrap_or_else(|| "none".into())
+        )
+    };
     match &outcome {
         GoldenOutcome::Match => {}
         GoldenOutcome::Pending { .. } => {
             eprintln!("{name} [{adapter}]: {outcome}");
-            let root = repo_root();
-            // Strict mode (`PLANET_GOLDEN_STRICT=1`, used by acceptance) fails on every missing golden; otherwise a blessed
-            // adapter fails unless the name is listed as waiting for blessing.
             let strict = std::env::var("PLANET_GOLDEN_STRICT").as_deref() == Ok("1");
-            if strict || (adapter_has_goldens(&root, adapter) && !is_listed_pending(&root, name)) {
-                panic!("{name} [{adapter}]: {outcome}");
+            let require = std::env::var("PLANET_REQUIRE_ADAPTER_GOLDENS").as_deref() == Ok("1");
+            if let Some(why) = pending_failure(&root, adapter, name, strict, require) {
+                panic!("{name} [{adapter}]: {outcome}\n  {why}\n  {}", drivers());
             }
         }
-        GoldenOutcome::Mismatch { .. } => panic!("{name} [{adapter}]: {outcome}"),
+        GoldenOutcome::Mismatch { .. } => panic!("{name} [{adapter}]: {outcome}\n  {}", drivers()),
+    }
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+
+    // spec: TEST-002
+    #[test]
+    fn a_running_adapter_without_golden_directory_fails_when_required() {
+        let root = std::env::temp_dir().join(format!("planet-testkit-require-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        // CI: no goldens for this adapter at all -> fatal.
+        assert!(pending_failure(&root, "new-key", "t", false, true).is_some());
+        // Local, nothing blessed yet: only reports.
+        assert!(pending_failure(&root, "new-key", "t", false, false).is_none());
+        // Blessed adapter: a missing golden fails unless listed pending.
+        write_png(&root.join("tests/goldens/a/x.png"), &Image::filled(1, 1, [0, 0, 0, 255])).unwrap();
+        assert!(pending_failure(&root, "a", "t", false, true).is_some());
+        assert!(pending_failure(&root, "a", "t", true, false).is_some());
+        std::fs::write(root.join("tests/goldens/pending.txt"), "t\n").unwrap();
+        assert!(pending_failure(&root, "a", "t", false, true).is_none());
+        // The recorded driver string is read back for mismatch messages.
+        std::fs::write(root.join("tests/goldens/a/driver.txt"), "llvmpipe (LLVM 20.1.2)\n").unwrap();
+        assert_eq!(recorded_driver(&root, "a").as_deref(), Some("llvmpipe (LLVM 20.1.2)"));
+        assert_eq!(recorded_driver(&root, "b"), None);
     }
 }
 
@@ -355,6 +425,9 @@ new_view
     #[test]
     fn adapter_keys_are_directory_safe() {
         assert_eq!(adapter_key("Dx12", "Microsoft Basic Render Driver"), "dx12-microsoft-basic-render-driver");
-        assert_eq!(adapter_key("Vulkan", "llvmpipe (LLVM 15.0.7, 256 bits)"), "vulkan-llvmpipe-llvm-15-0-7-256-bits");
+        // The family key ignores driver and compiler versions: a Mesa or LLVM update must not orphan the goldens.
+        assert_eq!(adapter_key("Vulkan", "llvmpipe (LLVM 15.0.7, 256 bits)"), "vulkan-llvmpipe");
+        assert_eq!(adapter_key("Vulkan", "llvmpipe (LLVM 20.1.2, 256 bits)"), adapter_key("Vulkan", "llvmpipe (LLVM 21.0.0, 128 bits)"));
+        assert_eq!(adapter_key("Vulkan", "NVIDIA GeForce RTX 3080 Ti Laptop GPU"), "vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu");
     }
 }

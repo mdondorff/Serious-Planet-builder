@@ -158,13 +158,13 @@ fn selected_views_match_the_adapters_goldens() {
         let (_, plan) = plan_for(index, view);
         let meshes = meshes_for(&plan);
         let (img, _) = render(&ctx, &plan, &meshes);
-        assert_golden(&ctx.adapter_key(), golden, &img, Tolerance::Exact);
+        assert_golden(&ctx.adapter_key(), &ctx.driver_string(), golden, &img, Tolerance::Exact);
     }
     // The normals golden looks straight down at the cube corner from 3,000 km: the normal colour then changes across
     // all three faces, and a seam would show as a step. (The ground cameras only see a plane.)
     let plan = corner_normals_plan();
     let (img, _) = render(&ctx, &plan, &meshes_for(&plan));
-    assert_golden(&ctx.adapter_key(), "terrain_cube_corner_normals", &img, Tolerance::Exact);
+    assert_golden(&ctx.adapter_key(), &ctx.driver_string(), "terrain_cube_corner_normals", &img, Tolerance::Exact);
 }
 
 fn corner_normals_plan() -> TerrainPlan {
