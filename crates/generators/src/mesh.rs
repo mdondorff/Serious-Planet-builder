@@ -7,7 +7,7 @@
 
 use crate::height::{cache_key_field, HeightField, Reference};
 use planet_core::cube::FaceMapping;
-use planet_core::hash::hash_u64s;
+use planet_core::hash::{hash_u64s, HASH_VERSION};
 use planet_core::{PlanetFixed, TileId, Vec3};
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -71,6 +71,47 @@ fn mesh_key_chain(height_key: u64, cells: u32, radius_m: f64, version: u32, skir
 /// exactly [`mesh_key`] and any other field (other implementation id or version) gets other keys (ADR 0006).
 pub fn mesh_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> u64 {
     mesh_key_chain(cache_key_field(field, map, id, cells), cells, radius_m, MESH_VERSION, SKIRT_FRACTION)
+}
+
+/// [`mesh_key_field`] for many tiles of one field, mapping, grid size and radius: the string hashes of the field's
+/// implementation id and the mapping id are computed once instead of per tile (planning a 5,000-node view calls
+/// this 5,000 times). `key(tile)` equals `mesh_key_field(field, map, tile, cells, radius_m)` exactly.
+pub struct MeshKeyer {
+    version: u64,
+    seed: u64,
+    cells: u32,
+    radius_bits: u64,
+    implementation_hash: u64,
+    mapping_hash: u64,
+}
+
+impl MeshKeyer {
+    pub fn new(field: &dyn HeightField, map: &dyn FaceMapping, cells: u32, radius_m: f64) -> MeshKeyer {
+        MeshKeyer {
+            version: u64::from(field.version()),
+            seed: field.seed(),
+            cells,
+            radius_bits: radius_m.to_bits(),
+            implementation_hash: hash_u64s(1, &crate::height::fold_str(field.implementation_id())),
+            mapping_hash: hash_u64s(2, &crate::height::fold_str(map.id())),
+        }
+    }
+
+    pub fn key(&self, id: TileId) -> u64 {
+        let height_key = hash_u64s(
+            0x006b_6579,
+            &[
+                self.version,
+                u64::from(HASH_VERSION),
+                self.seed,
+                id.raw(),
+                u64::from(self.cells),
+                self.implementation_hash,
+                self.mapping_hash,
+            ],
+        );
+        mesh_key_chain(height_key, self.cells, f64::from_bits(self.radius_bits), MESH_VERSION, SKIRT_FRACTION)
+    }
 }
 
 impl TileMesh {

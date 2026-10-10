@@ -183,7 +183,7 @@ Source: CON-20
 - **THEN** the draw calls, triangles and uploaded vertex bytes the renderer reports equal the counts derived from the plan
 
 ### Requirement: TEST-012 Terrain performance workload
-The performance harness SHALL provide a terrain frame workload at 1440p over scripted views from orbit to 1 m that generates and uploads meshes once, then reports per run the GPU time (timestamp queries), CPU planning time, CPU record time, wall time and the deterministic counts (nodes, draw calls, triangles, resident vertex bytes), checks the terrain budget (median GPU time at most 8 ms, p99 frame time at most 20 ms), refuses unready machines like every performance run, and offers a labelled smoke mode that exercises the path on any adapter without being a measurement.
+The performance harness SHALL provide a terrain frame workload at 1440p over scripted views from orbit to 1 m that generates and uploads meshes once, then reports per run the GPU time (timestamp queries), CPU planning time, CPU record time, wall time and the deterministic counts (nodes, draw calls, triangles, resident vertex bytes), checks the terrain budget (median GPU time at most 8 ms, p99 frame time at most 20 ms) and the CPU planning budget (median time to plan a frame from scratch at most 8 ms per view), refuses unready machines like every performance run, and offers a labelled smoke mode that exercises the path on any adapter without being a measurement.
 
 Verify: C
 Status: active
@@ -196,6 +196,10 @@ Source: CON-20, CON-21
 #### Scenario: Smoke
 - **WHEN** the smoke mode runs on the software adapter
 - **THEN** it prints that it is not a measurement, completes every view and writes no log unless asked
+
+#### Scenario: Plan time verdict
+- **WHEN** the terrain workload has planned a view
+- **THEN** it reports the median CPU plan time with the 8 ms budget and a verdict (ok or OVER) for that view
 
 ### Requirement: TEST-013 Flight sequence for the real-GPU review
 `planet test-render --scene terrain --flight N --out-dir DIR` SHALL render a scripted, deterministic flight (a log-spaced dive from 20,000 km to 1 m above the terrain, then a glide at 1 m in steps of 5 cm) through the persistent terrain renderer with the production LOD defaults (cells 32, tau 6 px; overridable with `--cells`, `--tau`) at a chosen size on the adapter selected by `--adapter` or `PLANET_ADAPTER`, writing `frame_NNNN.png` and an index `flight.txt` (frame, altitude above terrain, node count, plan hash). Options a flight would ignore, and flight-only options outside a flight, SHALL be rejected before any GPU work.

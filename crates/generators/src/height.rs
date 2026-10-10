@@ -152,7 +152,7 @@ pub fn generate_region(seed: u64, map: &(dyn FaceMapping + Sync), ids: &[TileId]
     out
 }
 
-fn fold_str(s: &str) -> Vec<u64> {
+pub(crate) fn fold_str(s: &str) -> Vec<u64> {
     s.bytes().map(u64::from).collect()
 }
 

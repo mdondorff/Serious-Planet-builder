@@ -475,6 +475,14 @@ mod metric_tests {
 /// Terrain budget of milestone M2 (report §15) and the frame-time gate (CON-21).
 pub const TERRAIN_GPU_BUDGET_MS: f64 = 8.0;
 pub const FRAME_P99_BUDGET_MS: f64 = 20.0;
+/// CPU time to plan one frame from scratch (selection and plan; M2 gate follow-up 3): half of a 60 Hz frame. The static
+/// camera of the workload makes this a full recompute, the worst case.
+pub const PLAN_CPU_BUDGET_MS: f64 = 8.0;
+
+/// Median planning time must be at most [`PLAN_CPU_BUDGET_MS`] (inclusive).
+pub fn plan_budget_ok(plan_median_ms: f64) -> bool {
+    plan_median_ms <= PLAN_CPU_BUDGET_MS
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BudgetVerdict {
@@ -498,6 +506,7 @@ mod budget_tests {
         assert_eq!(budget_verdict(Some(8.0), 20.0), BudgetVerdict { gpu_ok: Some(true), frame_ok: true });
         assert_eq!(budget_verdict(Some(8.0001), 20.0).gpu_ok, Some(false));
         assert!(!budget_verdict(Some(1.0), 20.0001).frame_ok);
+        assert!(plan_budget_ok(8.0) && !plan_budget_ok(8.0001) && !plan_budget_ok(f64::NAN), "NaN must not pass a budget");
         assert_eq!(budget_verdict(None, 5.0).gpu_ok, None, "no timestamps: no GPU verdict");
     }
 

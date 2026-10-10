@@ -439,6 +439,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     let mut renderer = TerrainRenderer::new(ctx, size, o.cells);
     let mut reports: Vec<RunReport> = Vec::new();
     let mut budget_lines = Vec::new();
+    let mut plan_lines: Vec<(&str, f64)> = Vec::new();
     if smoke {
         writeln!(out, "SMOKE RUN: exercises the perf path only; the numbers are not a measurement").map_err(err)?;
     }
@@ -465,13 +466,14 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         }
         let started = Instant::now();
         let new_meshes = upload_missing_meshes(ctx, &mut renderer, &plan, o.seed, o.cells)?;
+        let plan_median = summarize(&plan_samples, 0).map_or(f64::NAN, |s| s.median);
+        plan_lines.push((name, plan_median));
         writeln!(
             out,
-            "{name}: {} nodes ({} new meshes in {:.1} s), plan {:.2} ms",
+            "{name}: {} nodes ({} new meshes in {:.1} s), plan {plan_median:.2} ms",
             plan.nodes.len(),
             new_meshes,
             started.elapsed().as_secs_f64(),
-            summarize(&plan_samples, 0).map_or(f64::NAN, |s| s.median)
         )
         .map_err(err)?;
         for _ in 0..warmup {
@@ -513,6 +515,10 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         }
     }
     let scheme = planet_perf::query_power_scheme();
+    for (name, median) in &plan_lines {
+        let word = if planet_perf::plan_budget_ok(*median) { "ok" } else { "OVER" };
+        writeln!(out, "  {name}: CPU plan median {median:.2} ms (budget {}) {word}", planet_perf::PLAN_CPU_BUDGET_MS).map_err(err)?;
+    }
     for w in planet_perf::session_warnings(&crate::facts(ctx), scheme.as_deref(), &reports, smoke) {
         writeln!(out, "WARNING (not valid for time budgets): {w}").map_err(err)?;
     }

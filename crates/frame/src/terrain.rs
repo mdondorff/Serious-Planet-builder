@@ -125,6 +125,7 @@ pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Resu
     }
     req.lod.validate().map_err(PlanError::InvalidLod)?;
     let selection = select_nodes_in_view(map.as_ref(), &req.camera, &req.lod);
+    let keyer = planet_generators::mesh::MeshKeyer::new(field, map.as_ref(), req.lod.cells, req.lod.radius_m);
     let nodes = selection
         .nodes
         .iter()
@@ -151,7 +152,7 @@ pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Resu
                 morph_start_m: start as f32,
                 morph_end_m: end as f32,
                 color,
-                mesh_key: planet_generators::mesh::mesh_key_field(field, map.as_ref(), n.tile, req.lod.cells, req.lod.radius_m),
+                mesh_key: keyer.key(n.tile),
             }
         })
         .collect();
