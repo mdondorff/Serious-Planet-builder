@@ -5,6 +5,7 @@
 //! neighbouring leaves differ by at most one level, and each leaf gets a morph interval (distances between which it
 //! blends towards its parent's geometry) so that a merge or split never pops.
 
+use crate::camera::{Camera, Frustum};
 use planet_core::cube::FaceMapping;
 use planet_core::{Face, PlanetFixed, Side, TileId, Vec3};
 use std::collections::BTreeSet;
@@ -93,13 +94,28 @@ fn children_of(t: TileId) -> [TileId; 4] {
     t.children().expect("below the maximum level")
 }
 
-/// Select the nodes to draw for `camera`.
+/// Select the nodes to draw for a camera position, ignoring view direction (whole visible hemisphere).
 pub fn select_nodes(map: &dyn FaceMapping, camera: PlanetFixed, p: &LodParams) -> NodeSelection {
+    select_impl(map, camera, None, p)
+}
+
+/// Select the nodes to draw for a camera, also dropping nodes outside its side frustum planes (padded by the terrain height).
+pub fn select_nodes_in_view(map: &dyn FaceMapping, camera: &Camera, p: &LodParams) -> NodeSelection {
+    select_impl(map, camera.position, Some(camera.frustum()), p)
+}
+
+fn select_impl(map: &dyn FaceMapping, camera: PlanetFixed, frustum: Option<Frustum>, p: &LodParams) -> NodeSelection {
     let mut leaves: BTreeSet<TileId> = BTreeSet::new();
     let mut stack: Vec<TileId> = Face::ALL.iter().map(|&f| TileId::new(f, 0, 0, 0).expect("root")).collect();
     while let Some(t) = stack.pop() {
         if p.cull_horizon && below_horizon(map, t, camera, p) {
             continue;
+        }
+        if let Some(fr) = &frustum {
+            let (c, r) = bounding_sphere(map, t, p);
+            if fr.culls_sphere(c, r + p.max_height_m) {
+                continue;
+            }
         }
         if t.level() < p.max_level && surface_distance(map, t, camera, p) < p.split_distance(t.level()) {
             stack.extend(children_of(t));

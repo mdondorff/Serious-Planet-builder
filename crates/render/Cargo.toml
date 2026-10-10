@@ -12,6 +12,8 @@ wgpu.workspace = true
 pollster.workspace = true
 png.workspace = true
 
+planet-generators.workspace = true
+
 [dev-dependencies]
 planet-testkit.workspace = true
-planet-generators.workspace = true
+libm.workspace = true

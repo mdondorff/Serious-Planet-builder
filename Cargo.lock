@@ -507,6 +507,7 @@ version = "0.0.0"
 name = "planet-render"
 version = "0.0.0"
 dependencies = [
+ "libm",
  "planet-core",
  "planet-frame",
  "planet-generators",

@@ -135,13 +135,21 @@ impl TileId {
     /// of two). Computed from the face lattice index, so equal border samples of neighbouring tiles, also across
     /// faces, give bit-identical directions (COORD-007).
     pub fn sample_direction(self, map: &dyn FaceMapping, res: u32, k: u32, l: u32) -> Vec3 {
-        assert!(res.is_power_of_two() && k <= res && l <= res, "sample grid must be a power of two and in range");
+        assert!(k <= res && l <= res, "sample indices must be within the tile");
+        self.sample_direction_ext(map, res, i64::from(k), i64::from(l))
+    }
+
+    /// Like `sample_direction` but allows indices from -1 to `res + 1` (a one-sample halo, used for normals). Beyond a face
+    /// edge the point continues on the extended cube plane.
+    pub fn sample_direction_ext(self, map: &dyn FaceMapping, res: u32, k: i64, l: i64) -> Vec3 {
+        assert!(res.is_power_of_two(), "sample grid must be a power of two");
+        assert!((-1..=i64::from(res) + 1).contains(&k) && (-1..=i64::from(res) + 1).contains(&l), "halo of one sample only");
         assert!(
             u32::from(self.level()) + res.trailing_zeros() <= 52,
             "level + log2(res) must be <= 52 so lattice indices stay exact in f64"
         );
         let n = (1u64 << self.level()) as f64 * f64::from(res);
-        let lat = |tile_index: u32, i: u32| 2.0 * (f64::from(tile_index) * f64::from(res) + f64::from(i)) / n - 1.0;
+        let lat = |tile_index: u32, i: i64| 2.0 * ((i64::from(tile_index) * i64::from(res) + i) as f64) / n - 1.0;
         face_to_direction(map, self.face(), lat(self.x(), k), lat(self.y(), l))
     }
 
