@@ -1,5 +1,5 @@
 # 0004 Language and graphics layer
-Status: proposed
+Status: accepted
 Date: 2026-10-10
 Source: background report §9, Recommendations 6; constitution CON-02, CON-26
 
