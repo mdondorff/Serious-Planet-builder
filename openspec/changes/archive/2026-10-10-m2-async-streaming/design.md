@@ -14,3 +14,9 @@ Report §4 (scheduling), §10 (injected time and I/O), §15 (M2 minimal async, M
 ## Risks
 
 - Re-dispatch after cancellation shows up as duplicate dispatches (9 in the dive); acceptable, but M4 should avoid cancelling work that is nearly done.
+
+## Review follow-ups (verifier)
+
+- A panicking source is caught and becomes a failure with the usual retry delay (it used to wedge the tile and a pool slot); cancellation is an enum, not a magic string; success clears the failure record; dispatch recording is opt-in (`record_dispatches`).
+- New tests: a job cancelled before it starts never calls the source, LRU order (oldest evicted first), panicking source; the thread-pool test declares its release channel after the pool so an assertion failure cannot deadlock the unwind, and `.config/nextest.toml` terminates tests that run for 3 x 60 s.
+- Known and left: dispatch counts a cancelled-after-start job as both cancelled and completed; a tile cancelled in flight and wanted again is re-dispatched one frame later; `ThreadPool::drop` runs queued jobs before joining; the STRM-001/002 scenarios about 200 ms latency are modelled as jobs per frame, not clock latency.

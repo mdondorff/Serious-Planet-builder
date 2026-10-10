@@ -6,4 +6,4 @@
 
 ## 2. Close-out
 
-- [ ] 2.1 Reviews, archive
+- [x] 2.1 Reviews, archive

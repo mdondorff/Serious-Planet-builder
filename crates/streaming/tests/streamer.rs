@@ -46,7 +46,7 @@ fn fixture(source: TestSource, config: StreamConfig) -> Fixture {
 // spec: STRM-002
 #[test]
 fn a_wanted_tile_shows_its_nearest_resident_ancestor_until_it_arrives() {
-    let (mut s, sp, _) = fixture(TestSource::default(), StreamConfig { max_in_flight: 1, ..Default::default() });
+    let (mut s, sp, _) = fixture(TestSource::default(), StreamConfig { max_in_flight: 1, record_dispatches: true, ..Default::default() });
     let deep = id(2, 4, 5, 9);
     let r = s.begin_frame(&[(deep, 1.0)]);
     assert_eq!(r[0].shown, Some(id(2, 0, 0, 0)), "only the root is resident at first");
@@ -66,7 +66,7 @@ fn a_wanted_tile_shows_its_nearest_resident_ancestor_until_it_arrives() {
 // spec: STRM-002, STRM-005
 #[test]
 fn ancestors_are_dispatched_before_descendants() {
-    let (mut s, sp, _) = fixture(TestSource::default(), StreamConfig { max_in_flight: 2, ..Default::default() });
+    let (mut s, sp, _) = fixture(TestSource::default(), StreamConfig { max_in_flight: 2, record_dispatches: true, ..Default::default() });
     let deep = id(0, 5, 17, 3);
     for _ in 0..12 {
         s.begin_frame(&[(deep, 1.0)]);
@@ -91,7 +91,7 @@ fn ancestors_are_dispatched_before_descendants() {
 // spec: STRM-005
 #[test]
 fn lower_priority_numbers_run_first_and_unwanted_requests_are_cancelled() {
-    let (mut s, sp, _) = fixture(TestSource::default(), StreamConfig { max_in_flight: 1, ..Default::default() });
+    let (mut s, sp, _) = fixture(TestSource::default(), StreamConfig { max_in_flight: 1, record_dispatches: true, ..Default::default() });
     let (near, far) = (id(1, 1, 0, 0), id(3, 1, 1, 1));
     s.begin_frame(&[(far, 50.0), (near, 5.0)]);
     assert_eq!(s.dispatch_log, [near], "the nearer tile (priority 5) goes first");
@@ -107,7 +107,10 @@ fn lower_priority_numbers_run_first_and_unwanted_requests_are_cancelled() {
 // spec: STRM-005
 #[test]
 fn a_job_cancelled_while_in_flight_is_not_counted_as_failure() {
-    let (mut s, sp, clock) = fixture(TestSource::default(), StreamConfig { max_in_flight: 1, retry_after_ms: 10, ..Default::default() });
+    let (mut s, sp, clock) = fixture(
+        TestSource::default(),
+        StreamConfig { max_in_flight: 1, retry_after_ms: 10, record_dispatches: true, ..Default::default() },
+    );
     let t = id(4, 2, 1, 1);
     s.begin_frame(&[(t, 1.0)]);
     // Its parent is dispatched first (parent-first); drop everything before it runs.
@@ -125,7 +128,7 @@ fn failed_tiles_are_retried_only_after_the_delay_on_the_injected_clock() {
     let flaky = id(5, 1, 1, 0);
     let (mut s, sp, clock) = fixture(
         TestSource { fail: [flaky].into(), fail_first: 1, ..Default::default() },
-        StreamConfig { max_in_flight: 4, retry_after_ms: 1000, ..Default::default() },
+        StreamConfig { max_in_flight: 4, retry_after_ms: 1000, record_dispatches: true, ..Default::default() },
     );
     s.begin_frame(&[(flaky, 1.0)]);
     sp.run(4);
@@ -151,7 +154,8 @@ fn failed_tiles_are_retried_only_after_the_delay_on_the_injected_clock() {
 #[test]
 fn the_same_inputs_give_the_same_dispatch_order() {
     let run = || {
-        let (mut s, sp, _) = fixture(TestSource::default(), StreamConfig { max_in_flight: 3, ..Default::default() });
+        let (mut s, sp, _) =
+            fixture(TestSource::default(), StreamConfig { max_in_flight: 3, record_dispatches: true, ..Default::default() });
         let wanted: Vec<(TileId, f64)> =
             (0..20).map(|i| (id((i % 6) as u8, 3, (i % 8) as u32, ((i * 3) % 8) as u32), f64::from(i) * 0.5)).collect();
         for _ in 0..15 {
@@ -166,7 +170,8 @@ fn the_same_inputs_give_the_same_dispatch_order() {
 // spec: STRM-007
 #[test]
 fn capacity_evicts_least_recently_used_tiles_but_never_roots_or_tiles_in_use() {
-    let (mut s, sp, _) = fixture(TestSource::default(), StreamConfig { max_in_flight: 8, capacity: 12, ..Default::default() });
+    let (mut s, sp, _) =
+        fixture(TestSource::default(), StreamConfig { max_in_flight: 8, capacity: 12, record_dispatches: true, ..Default::default() });
     let a: Vec<(TileId, f64)> = (0..4).map(|x| (id(0, 2, x, 0), 1.0)).collect();
     for _ in 0..6 {
         s.begin_frame(&a);
@@ -202,8 +207,10 @@ fn the_thread_pool_never_blocks_the_frame() {
             Ok(tile.raw())
         }
     }
-    let (release, gate) = std::sync::mpsc::channel();
+    // Declaration order matters: on a failing assertion `release` must drop before the pool joins its workers, or the
+    // worker stuck in `recv` would deadlock the unwind.
     let pool = Arc::new(ThreadPool::new(2));
+    let (release, gate) = std::sync::mpsc::channel();
     let clock = Arc::new(FakeClock::default());
     let mut s = Streamer::new(Arc::new(Gated(Mutex::new(gate))), pool.clone() as Arc<dyn Spawner>, clock, StreamConfig::default());
     s.load_roots_blocking().unwrap();
@@ -224,4 +231,95 @@ fn the_thread_pool_never_blocks_the_frame() {
     assert!(exact, "the tile must arrive once the source is released");
     drop(s);
     drop(pool);
+}
+
+// spec: STRM-005
+#[test]
+fn an_in_flight_job_cancelled_before_it_starts_never_calls_the_source() {
+    let source = Arc::new(TestSource::default());
+    let spawner = Arc::new(ManualSpawner::default());
+    let mut s = Streamer::new(
+        source.clone(),
+        spawner.clone() as Arc<dyn Spawner>,
+        Arc::new(FakeClock::default()),
+        StreamConfig { max_in_flight: 4, record_dispatches: true, ..Default::default() },
+    );
+    s.load_roots_blocking().unwrap();
+    let t = id(1, 1, 0, 1);
+    s.begin_frame(&[(t, 1.0)]);
+    assert_eq!(s.stats().in_flight, 1, "the job was handed to the spawner but has not run");
+    s.begin_frame(&[]); // nobody needs it any more: the token is set
+    spawner.run(5);
+    s.begin_frame(&[]);
+    assert!(!source.attempts.lock().unwrap().contains_key(&t), "a cancelled job must not load");
+    assert_eq!(s.stats().failed, 0);
+    assert!(!s.is_resident(t));
+}
+
+// spec: STRM-007
+#[test]
+fn eviction_removes_the_least_recently_used_tile_first() {
+    let (mut s, sp, _) =
+        fixture(TestSource::default(), StreamConfig { max_in_flight: 8, capacity: 9, record_dispatches: true, ..Default::default() });
+    // Six roots are resident; three more tiles arrive one after another (a oldest, c newest), then interest moves to d.
+    let (a, b, c, d) = (id(0, 1, 0, 0), id(0, 1, 1, 0), id(0, 1, 0, 1), id(0, 1, 1, 1));
+    for t in [a, b, c] {
+        for _ in 0..4 {
+            s.begin_frame(&[(t, 1.0)]);
+            sp.run(8);
+        }
+    }
+    for t in [a, b, c] {
+        assert!(s.is_resident(t));
+    }
+    for _ in 0..4 {
+        s.begin_frame(&[(d, 1.0)]);
+        sp.run(8);
+    }
+    s.begin_frame(&[(d, 1.0)]);
+    // 10 resident, capacity 9: exactly the least recently used one (a) goes.
+    assert!(!s.is_resident(a), "the oldest tile must be evicted first");
+    assert!(s.is_resident(b) && s.is_resident(c) && s.is_resident(d), "newer tiles must survive");
+}
+
+// spec: STRM-001
+#[test]
+fn a_panicking_source_becomes_a_failure_with_retry_not_a_stuck_tile() {
+    struct Panics(Mutex<u32>);
+    impl TileSource<u64> for Panics {
+        fn load(&self, tile: TileId) -> Result<u64, String> {
+            if tile.level() > 0 {
+                let mut n = self.0.lock().unwrap();
+                *n += 1;
+                if *n == 1 {
+                    drop(n);
+                    panic!("injected panic");
+                }
+            }
+            Ok(tile.raw())
+        }
+    }
+    let spawner = Arc::new(ManualSpawner::default());
+    let clock = Arc::new(FakeClock::default());
+    let mut s = Streamer::new(
+        Arc::new(Panics(Mutex::new(0))),
+        spawner.clone() as Arc<dyn Spawner>,
+        clock.clone(),
+        StreamConfig { max_in_flight: 1, retry_after_ms: 50, ..Default::default() },
+    );
+    s.load_roots_blocking().unwrap();
+    let t = id(3, 1, 1, 1);
+    s.begin_frame(&[(t, 1.0)]);
+    spawner.run(1);
+    s.begin_frame(&[(t, 1.0)]);
+    assert_eq!(s.stats().failed, 1);
+    assert_eq!(s.stats().in_flight, 0, "the slot must be free again");
+    assert!(s.last_error(t).is_some_and(|m| m.contains("panicked")));
+    clock.advance(60);
+    for _ in 0..4 {
+        s.begin_frame(&[(t, 1.0)]);
+        spawner.run(2);
+    }
+    assert!(s.begin_frame(&[(t, 1.0)])[0].exact(), "the retry succeeds");
+    assert!(s.failed_tiles().is_empty() && s.last_error(t).is_none(), "success clears the failure record");
 }

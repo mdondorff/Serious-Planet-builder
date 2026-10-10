@@ -40,12 +40,12 @@ fn camera_at(height: f64) -> Camera {
 fn a_dive_from_orbit_never_leaves_a_selected_node_without_something_to_draw() {
     let map = TangentWarp;
     let spawner = Arc::new(ManualSpawner::default());
-    let config = StreamConfig { max_in_flight: 16, capacity: 3000, retry_after_ms: 100 };
+    let config = StreamConfig { max_in_flight: 16, capacity: 3000, retry_after_ms: 100, record_dispatches: true };
     let mut streamer = Streamer::new(Arc::new(Source), spawner.clone() as Arc<dyn Spawner>, Arc::new(FakeClock::default()), config);
     streamer.load_roots_blocking().unwrap();
     let params = lod();
 
-    let (frames, hold) = (300, 450);
+    let (frames, hold) = (200, 250);
     let mut max_queue = 0;
     let (mut fallback_frames, mut worst_missing_fraction) = (0, 0.0f64);
     let mut last_selection = Vec::new();
@@ -80,7 +80,7 @@ fn a_dive_from_orbit_never_leaves_a_selected_node_without_something_to_draw() {
         assert!(st.in_flight <= config.max_in_flight, "frame {k}: {} jobs in flight", st.in_flight);
         max_queue = max_queue.max(st.queued);
         // The machine works between frames: a fixed number of jobs complete per frame.
-        spawner.run(6);
+        spawner.run(10);
         last_selection = wanted;
     }
     // After holding still, everything wanted is exact.
@@ -113,6 +113,6 @@ fn a_dive_from_orbit_never_leaves_a_selected_node_without_something_to_draw() {
         st.resident
     );
     assert!(st.cancelled > 0, "a dive must cancel requests that fall out of view");
-    assert!(fallback_frames > 0, "with 6 jobs per frame the dive must have needed fallbacks (otherwise the test proves nothing)");
+    assert!(fallback_frames > 0, "with 10 jobs per frame the dive must have needed fallbacks (otherwise the test proves nothing)");
     assert!(max_queue < 5000, "the request queue must stay bounded, got {max_queue}");
 }

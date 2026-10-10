@@ -171,11 +171,13 @@ pub struct StreamConfig {
     pub capacity: usize,
     /// A failed tile is retried after this many milliseconds.
     pub retry_after_ms: u64,
+    /// Keep the order in which tiles were dispatched in `dispatch_log` (tests and diagnostics; grows without bound).
+    pub record_dispatches: bool,
 }
 
 impl Default for StreamConfig {
     fn default() -> Self {
-        Self { max_in_flight: 4, capacity: 4096, retry_after_ms: 1000 }
+        Self { max_in_flight: 4, capacity: 4096, retry_after_ms: 1000, record_dispatches: false }
     }
 }
 
@@ -184,10 +186,15 @@ struct Resident<T> {
     last_used: u64,
 }
 
-/// Marker error of a job that was cancelled before it started; not a failure.
-const CANCELLED: &str = "cancelled";
+/// How a job ended.
+enum Outcome<T> {
+    Done(T),
+    Failed(String),
+    /// Skipped because it was cancelled before it started; not a failure.
+    Cancelled,
+}
 
-type Completion<T> = (TileId, Result<T, String>);
+type Completion<T> = (TileId, Outcome<T>);
 
 pub struct Streamer<T: Send + Sync + 'static> {
     source: Arc<dyn TileSource<T>>,
@@ -200,11 +207,12 @@ pub struct Streamer<T: Send + Sync + 'static> {
     queued_key: HashMap<TileId, u64>,
     in_flight: HashMap<TileId, Arc<AtomicBool>>,
     failed_at: HashMap<TileId, u64>,
+    last_error: HashMap<TileId, String>,
     tx: Sender<Completion<T>>,
     rx: Receiver<Completion<T>>,
     frame: u64,
     stats: StreamStats,
-    /// Order in which tiles were handed to the spawner (for tests and diagnostics).
+    /// Order in which tiles were handed to the spawner; filled only with `StreamConfig::record_dispatches`.
     pub dispatch_log: Vec<TileId>,
 }
 
@@ -231,6 +239,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             queued_key: HashMap::new(),
             in_flight: HashMap::new(),
             failed_at: HashMap::new(),
+            last_error: HashMap::new(),
             tx,
             rx,
             frame: 0,
@@ -280,12 +289,15 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         while let Ok((tile, result)) = self.rx.try_recv() {
             self.in_flight.remove(&tile);
             match result {
-                Ok(data) => {
+                Outcome::Done(data) => {
                     self.stats.completed += 1;
+                    self.failed_at.remove(&tile);
+                    self.last_error.remove(&tile);
                     self.resident.insert(tile, Resident { data: Arc::new(data), last_used: self.frame });
                 }
-                Err(e) if e == CANCELLED => {}
-                Err(_) => {
+                Outcome::Cancelled => {}
+                Outcome::Failed(message) => {
+                    self.last_error.insert(tile, message);
                     self.stats.failed += 1;
                     self.failed_at.insert(tile, now);
                 }
@@ -344,16 +356,22 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             self.queued_key.remove(&tile);
             let token = Arc::new(AtomicBool::new(false));
             self.in_flight.insert(tile, Arc::clone(&token));
-            self.dispatch_log.push(tile);
+            if self.config.record_dispatches {
+                self.dispatch_log.push(tile);
+            }
             let (source, tx) = (Arc::clone(&self.source), self.tx.clone());
             self.spawner.spawn(Box::new(move || {
                 if token.load(Ordering::SeqCst) {
-                    let _ = tx.send((tile, Err(CANCELLED.to_string())));
+                    let _ = tx.send((tile, Outcome::Cancelled));
                     return;
                 }
-                let result = source.load(tile);
-                // A cancelled job's result is dropped by the receiver side only if nobody needs it; keep it, it is valid.
-                let _ = tx.send((tile, result));
+                // A panicking source must not wedge the tile: it becomes a failure with the usual retry delay.
+                let outcome = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| source.load(tile))) {
+                    Ok(Ok(data)) => Outcome::Done(data),
+                    Ok(Err(e)) => Outcome::Failed(e),
+                    Err(_) => Outcome::Failed(format!("source panicked while loading {tile:?}")),
+                };
+                let _ = tx.send((tile, outcome));
             }));
         }
         // 6. Evict least recently used tiles beyond capacity (never roots or tiles used this frame).
@@ -368,6 +386,11 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             }
         }
         wanted.iter().map(|&(t, _)| Resolved { wanted: t, shown: self.nearest_resident(t) }).collect()
+    }
+
+    /// The message of the last failure of `tile`, if any.
+    pub fn last_error(&self, tile: TileId) -> Option<&str> {
+        self.last_error.get(&tile).map(String::as_str)
     }
 
     /// Tiles whose requests ended in failure and are waiting for the retry delay.

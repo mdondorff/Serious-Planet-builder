@@ -232,7 +232,7 @@ fn streamed_meshes(
 ) -> Result<Vec<std::sync::Arc<planet_generators::mesh::TileMesh>>, String> {
     use planet_streaming::{StreamConfig, Streamer, SystemClock, ThreadPool};
     let pool = std::sync::Arc::new(ThreadPool::new(4));
-    let config = StreamConfig { max_in_flight: 8, capacity: plan.nodes.len() * 2 + 64, retry_after_ms: 1000 };
+    let config = StreamConfig { max_in_flight: 8, capacity: plan.nodes.len() * 2 + 64, retry_after_ms: 1000, record_dispatches: false };
     let mut streamer =
         Streamer::new(std::sync::Arc::new(MeshSource { seed: o.seed }), pool, std::sync::Arc::new(SystemClock::new()), config);
     streamer.load_roots_blocking()?;

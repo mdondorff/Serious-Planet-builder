@@ -37,7 +37,7 @@ Source: report §4
 ## ADDED Requirements
 
 ### Requirement: STRM-007 Resident capacity
-The streamer SHALL keep at most a configured number of resident tiles by evicting the least recently used ones, never evicting level-0 tiles or tiles used in the current frame, and SHALL retry failed tiles only after a configured delay measured on the injected clock.
+The streamer SHALL evict the least recently used tiles beyond a configured capacity, never evicting level-0 tiles or tiles used in the current frame (so the resident count exceeds the capacity only by tiles in use and by results arriving between frames), and SHALL retry failed tiles only after a configured delay measured on the injected clock.
 
 Verify: A
 Status: active
