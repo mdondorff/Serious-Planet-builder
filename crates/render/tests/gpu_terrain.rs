@@ -2,7 +2,8 @@
 //! (generator -> node selection -> TerrainPlan -> GPU -> pixels).
 
 use planet_core::cube::TangentWarp;
-use planet_core::Vec3;
+use planet_core::{PlanetFixed, Vec3};
+use planet_frame::Camera;
 use planet_frame::{level_color, plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
 use planet_generators::dump::FACE_COLORS;
 use planet_generators::mesh::{grid_indices, tile_mesh, TileMesh};
@@ -109,8 +110,12 @@ fn every_debug_view_renders_and_obeys_its_colour_rules() {
                 assert!(distinct.len() >= 3, "a perspective view must show several levels, got {}", distinct.len());
             }
             TerrainView::Normals => assert!(covered.iter().any(|p| p[0] != p[1] || p[1] != p[2]), "normals view must be coloured"),
-            TerrainView::Height | TerrainView::Morph | TerrainView::Depth => {
+            TerrainView::Height | TerrainView::Depth => {
                 assert!(covered.iter().all(|p| p[0] == p[1] && p[1] == p[2]), "{} view must be grey", view.name());
+            }
+            TerrainView::Morph => {
+                // Red is the morph value and blue its complement (up to rounding), so the view is a blue-to-red ramp.
+                assert!(covered.iter().all(|p| (i32::from(p[0]) + i32::from(p[2]) - 255).abs() <= 1), "morph view must be a blue-red ramp");
             }
             TerrainView::TileId => {}
         }
@@ -146,8 +151,7 @@ fn selected_views_match_the_adapters_goldens() {
     for (index, view, golden) in [
         (0, TerrainView::TileId, "terrain_orbit_tile_id"),
         (3, TerrainView::Level, "terrain_aerial20km_level"),
-        (5, TerrainView::Height, "terrain_ground200m_height"),
-        (8, TerrainView::Normals, "terrain_cube_corner_normals"),
+        (2, TerrainView::Height, "terrain_aerial200km_height"),
         (6, TerrainView::Depth, "terrain_ground1m_depth"),
         (4, TerrainView::Morph, "terrain_low2km_morph"),
     ] {
@@ -155,6 +159,53 @@ fn selected_views_match_the_adapters_goldens() {
         let meshes = meshes_for(&plan);
         let (img, _) = render(&ctx, &plan, &meshes);
         assert_golden(&ctx.adapter_key(), golden, &img, Tolerance::Exact);
+    }
+    // The normals golden looks straight down at the cube corner from 3,000 km: the normal colour then changes across
+    // all three faces, and a seam would show as a step. (The ground cameras only see a plane.)
+    let plan = corner_normals_plan();
+    let (img, _) = render(&ctx, &plan, &meshes_for(&plan));
+    assert_golden(&ctx.adapter_key(), "terrain_cube_corner_normals", &img, Tolerance::Exact);
+}
+
+fn corner_normals_plan() -> TerrainPlan {
+    let (la, lo) = (35.264_389_682_754_654f64.to_radians(), 45f64.to_radians());
+    let dir = Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la));
+    let camera = Camera::at_surface_point(
+        PlanetFixed(dir * (R + 3.0e6)),
+        Vec3::new(0.0, 0.0, 1.0),
+        85f64.to_radians(),
+        60f64.to_radians(),
+        f64::from(SIZE.0) / f64::from(SIZE.1),
+        0.1,
+    );
+    plan_terrain(&TerrainRequest { camera, size: SIZE, view: TerrainView::Normals, lod: lod(), face_mapping: "tangent-v1".into(), seed: 1 })
+        .unwrap()
+}
+
+// spec: REND-006
+#[test]
+fn height_contours_and_depth_bands_are_visible() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    // Dark pixels inside a smooth area of the ramp are the lines: compare against the same view's local neighbours.
+    for (index, view) in [(2usize, TerrainView::Height), (6, TerrainView::Depth)] {
+        let (name, plan) = plan_for(index, view);
+        let (img, _) = render(&ctx, &plan, &meshes_for(&plan));
+        let grey = |x: u32, y: u32| f64::from(img.pixel(x, y)[0]);
+        let mut lines = 0;
+        for y in 1..img.height - 1 {
+            for x in 1..img.width - 1 {
+                // Skip the horizon: next to the sky colour every terrain pixel looks like a dip.
+                if [(x, y), (x, y - 1), (x, y + 1)].iter().any(|&(px, py)| img.pixel(px, py) == plan.clear_color) {
+                    continue;
+                }
+                let (c, a, b) = (grey(x, y), grey(x, y - 1), grey(x, y + 1));
+                // A line is a local dip against both vertical neighbours.
+                if a - c > 12.0 && b - c > 12.0 {
+                    lines += 1;
+                }
+            }
+        }
+        assert!(lines >= 20, "{name} {}: only {lines} line pixels; contours or bands are missing", view.name());
     }
 }
 

@@ -1,7 +1,7 @@
 # Goldens that are waiting for the owner's /bless (one name per line). /bless removes a line when it promotes the golden.
 terrain_orbit_tile_id
 terrain_aerial20km_level
-terrain_ground200m_height
+terrain_aerial200km_height
 terrain_cube_corner_normals
 terrain_ground1m_depth
 terrain_low2km_morph

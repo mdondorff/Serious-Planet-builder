@@ -42,26 +42,43 @@ fn vs(@location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) 
     return out;
 }
 
+// Distance in pixels to the nearest integer of `x`, so lines stay about one pixel wide at any scale.
+fn line(x: f32, w: f32) -> f32 {
+    let d = abs(fract(x + 0.5) - 0.5);
+    return 1.0 - smoothstep(0.0, max(w, 1e-6) * 1.5, d);
+}
+
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let mode = g.mode.x;
+    // Derivatives are taken before any branch (uniform control flow).
+    // Contours every 10 m, coarsened by decades where they would be closer than ~6 px, so they never turn to moire.
+    let h10 = in.height / 10.0;
+    let decade = pow(10.0, max(ceil(log2(6.0 * fwidth(h10)) / 3.3219281), 0.0));
+    let contour_h = h10 / decade;
+    let band_z = log2(max(in.pos.z, 1e-30));
+    let w_h = fwidth(h10) / decade;
+    let w_z = fwidth(band_z);
     if (mode <= 2u) {
         return vec4<f32>(node.color.rgb, 1.0);
     }
     if (mode == 3u) {
-        return vec4<f32>(in.morph, in.morph, in.morph, 1.0);
+        // Blue = full detail, red = fully morphed onto the coarser grid; red stays the morph value.
+        return vec4<f32>(in.morph, 0.0, 1.0 - in.morph, 1.0);
     }
     if (mode == 4u) {
         let t = clamp((in.height - g.range.x) / (g.range.y - g.range.x), 0.0, 1.0);
         let v = floor(t * 255.0 + 0.5) / 255.0;
-        return vec4<f32>(v, v, v, 1.0);
+        let k = 1.0 - 0.8 * line(contour_h, w_h);
+        return vec4<f32>(v * k, v * k, v * k, 1.0);
     }
     if (mode == 5u) {
         let n = normalize(in.normal) * 0.5 + vec3<f32>(0.5, 0.5, 0.5);
         return vec4<f32>(n, 1.0);
     }
-    let v = clamp(log2(in.pos.z) / 40.0 + 1.0, 0.0, 1.0);
-    return vec4<f32>(v, v, v, 1.0);
+    let v = clamp(band_z / 40.0 + 1.0, 0.0, 1.0);
+    let k = 1.0 - 0.8 * line(band_z, w_z);
+    return vec4<f32>(v * k, v * k, v * k, 1.0);
 }
 "#;
 
