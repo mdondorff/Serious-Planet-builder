@@ -7,4 +7,4 @@
 
 ## 2. Close-out
 
-- [x] 2.1 Verifier, spec-guardian, numerics-reviewer, archive, status line
+- [x] 2.1 Verifier, spec-guardian, numerics-reviewer (findings fixed: option conflicts rejected before GPU work, flight test on PLANET_ADAPTER, BUILD-003 delta, TEST-014 split, tier_filter test), archive, status line

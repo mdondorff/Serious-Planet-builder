@@ -1,6 +1,7 @@
-//! Tier C: the flight sequence for the owner's real-GPU jitter review (TEST-013).
+//! Tier C: the flight sequence for the owner's real-GPU jitter review (TEST-013). Runs on `PLANET_ADAPTER` (software by
+//! default, the real GPU under `cargo xtask test gpu --real`).
 
-use planet_testkit::read_png;
+use planet_testkit::{read_png, Image};
 use std::path::{Path, PathBuf};
 
 fn run(args: &[&str]) -> Result<String, String> {
@@ -9,32 +10,33 @@ fn run(args: &[&str]) -> Result<String, String> {
     planet::run(&args, &mut buf).map(|_| String::from_utf8(buf).unwrap())
 }
 
+/// Output under `target/review/flight-test/` so a failing run leaves its frames where the review tooling looks.
 fn dir(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("planet-flight-{}-{name}", std::process::id()));
+    let d = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/review/flight-test").join(format!("{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     d
 }
 
 fn flight(out: &Path) -> String {
     let o = out.to_str().unwrap();
-    let args = [
-        "test-render",
-        "--scene",
-        "terrain",
-        "--flight",
-        "12",
-        "--out-dir",
-        o,
-        "--size",
-        "160x120",
-        "--cells",
-        "8",
-        "--view",
-        "level",
-        "--adapter",
-        "software",
-    ];
-    run(&args).unwrap()
+    run(&["test-render", "--scene", "terrain", "--flight", "12", "--out-dir", o, "--size", "160x120", "--cells", "8", "--view", "level"])
+        .unwrap()
+}
+
+/// Number of differing pixels, the first one and the largest channel delta.
+fn delta(a: &Image, b: &Image) -> (usize, Option<(u32, u32)>, u8) {
+    let (mut n, mut first, mut worst) = (0, None, 0u8);
+    for y in 0..a.height {
+        for x in 0..a.width {
+            let (p, q) = (a.pixel(x, y), b.pixel(x, y));
+            if p != q {
+                n += 1;
+                first.get_or_insert((x, y));
+                worst = worst.max((0..4).map(|c| p[c].abs_diff(q[c])).max().unwrap_or(0));
+            }
+        }
+    }
+    (n, first, worst)
 }
 
 // spec: TEST-013
@@ -53,9 +55,16 @@ fn the_flight_writes_a_deterministic_frame_sequence_and_an_index() {
     let mut frames = Vec::new();
     for i in 0..12 {
         let name = format!("frame_{i:04}.png");
-        let img = read_png(&a.join(&name)).unwrap();
+        let (img, again) = (read_png(&a.join(&name)).unwrap(), read_png(&b.join(&name)).unwrap());
         assert_eq!((img.width, img.height), (160, 120), "{name}");
-        assert_eq!(img, read_png(&b.join(&name)).unwrap(), "{name} differs between two runs on one adapter");
+        let (n, first, worst) = delta(&img, &again);
+        assert_eq!(
+            n,
+            0,
+            "{name}: {n} pixels differ between two runs on one adapter, first at {first:?}, max delta {worst}; see {} and {}",
+            a.display(),
+            b.display()
+        );
         frames.push(img);
     }
     assert_ne!(frames[0], frames[11], "orbit and 1 m frames must differ");
@@ -66,17 +75,10 @@ fn the_flight_writes_a_deterministic_frame_sequence_and_an_index() {
 
 // spec: TEST-013
 #[test]
-fn bad_flight_arguments_are_actionable() {
-    let o = dir("bad");
-    let p = o.to_str().unwrap();
-    let e = run(&["test-render", "--scene", "terrain", "--flight", "5", "--out-dir", p, "--adapter", "software"]).unwrap_err();
-    assert!(e.contains("at least 10 frames"), "{e}");
-    let e = run(&["test-render", "--scene", "terrain", "--flight", "12", "--adapter", "software"]).unwrap_err();
-    assert!(e.contains("needs --out-dir"), "{e}");
-    let e = run(&["test-render", "--scene", "tiles", "--flight", "12", "--out-dir", p, "--adapter", "software"]).unwrap_err();
-    assert!(e.contains("only available for --scene terrain"), "{e}");
-    let e = run(&["test-render", "--scene", "terrain", "--flight", "12", "--out-dir", p, "--size", "160x90", "--adapter", "software"])
-        .unwrap_err();
+fn a_size_that_fails_lod_validation_writes_no_frames() {
+    let o = dir("bad-size");
+    let e =
+        run(&["test-render", "--scene", "terrain", "--flight", "12", "--out-dir", o.to_str().unwrap(), "--size", "160x90"]).unwrap_err();
     assert!(e.contains("morph interval"), "{e}");
-    assert!(run(&["test-render", "--size", "12x12"]).unwrap_err().contains("--size must be WxH"));
+    assert!(!o.exists(), "a rejected flight must not create {}", o.display());
 }

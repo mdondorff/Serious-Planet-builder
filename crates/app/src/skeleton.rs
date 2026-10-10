@@ -371,10 +371,8 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
     if frames < 10 {
         return Err(format!("--flight needs at least 10 frames, got {frames}"));
     }
+    // Option conflicts are rejected in `check_flight_options` before the GPU starts.
     let dir = o.out_dir.as_ref().ok_or("--flight needs --out-dir")?;
-    if o.out.is_some() || o.bundle_out.is_some() || o.stream || o.perf || o.perf_smoke {
-        return Err("--flight writes a frame sequence; it excludes --out, --bundle, --stream, --perf and --perf-smoke".into());
-    }
     let view = TerrainView::parse(&o.view)
         .ok_or_else(|| format!("--view must be one of face, tile-id, level, morph, height, normals, depth, got '{}'", o.view))?;
     let size = o.size.unwrap_or((1280, 720));
@@ -388,7 +386,7 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
         let req = TerrainRequest { camera, size, view, lod: lod.clone(), face_mapping: TangentWarp.id().to_string(), seed: o.seed };
         let plan = plan_terrain(&req).map_err(|e| format!("frame {i}: {e}"))?;
         let missing = plan.nodes.iter().filter(|n| !renderer.has_mesh(n.tile, n.mesh_key)).count();
-        if renderer.resident_tiles() + missing > FLIGHT_RESIDENT_CAP {
+        if renderer.resident_tiles() > 0 && renderer.resident_tiles() + missing > FLIGHT_RESIDENT_CAP {
             renderer = TerrainRenderer::new(ctx, size, o.cells);
         }
         upload_missing_meshes(ctx, &mut renderer, &plan, o.seed, o.cells)?;

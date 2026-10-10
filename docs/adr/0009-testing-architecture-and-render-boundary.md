@@ -12,7 +12,7 @@ The renderer is the hardest part to test. If it also made decisions (which nodes
 
 ## Decision
 Option 2.
-- **Tiers:** A pure (anywhere, seconds), B oracle (GPU code vs a CPU twin, or backend validation of shaders; software adapter), C pixels (wiring, per-adapter goldens, debug views compared exactly), D human (approved once by the owner, then becomes tier C).
+- **Tiers:** A pure (anywhere, seconds), B oracle (GPU code vs a CPU twin, or backend validation of shaders; software adapter by default, and the real adapter under `cargo xtask test gpu --real`), C pixels (wiring, per-adapter goldens, debug views compared exactly), D human (approved once by the owner, then becomes tier C).
 - **Naming convention for the runner** (`cargo xtask test`, nextest filtersets): integration test files `gpu_*.rs` are tier C, `oracle_*.rs` tier B, all other tests tier A.
 - **FramePlan:** `frame` turns camera, world state and settings into a serializable `FramePlan` (visible nodes with LOD and morph intervals, resident tile handles and mesh keys, instance batches, atmosphere and exposure parameters, debug-view selection). `render` executes it and decides nothing. Terrain node selection is a pure CPU function; GPU culling is allowed only for instances, behind a differential test.
 - **Every scene's plan** (tile scene, terrain, later ones) has a full text form with floats as bit patterns, a committed snapshot test over all fields, and a repro bundle with replay (CON-19). A summary hash is not a substitute.

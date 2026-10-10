@@ -19,7 +19,7 @@ fn flight_dives_from_orbit_to_one_metre_then_glides_in_small_steps() {
     assert_eq!(path.len(), frames);
     assert_eq!(path, flight_path(R, 16.0 / 9.0, 1, frames), "the path is deterministic");
     let dive = frames * 4 / 5;
-    assert!((altitude(&path[0]) - FLIGHT_START_M).abs() < 1e-3 * FLIGHT_START_M, "start {}", altitude(&path[0]));
+    assert!((altitude(&path[0]) - FLIGHT_START_M).abs() < 1e-6, "start {} m", altitude(&path[0]));
     for w in path[..dive].windows(2) {
         assert!(altitude(&w[1]) < altitude(&w[0]), "the dive descends every frame");
     }

@@ -20,7 +20,8 @@ modes:
     --cells N --tau PX --frames N   terrain perf workload parameters (defaults 32, 6, 300)
     --perf-smoke             run the terrain perf path briefly on any adapter (labelled, never a measurement)
     --flight N --out-dir DIR [--size WxH]   render the scripted orbit-to-1 m flight (TEST-013) as DIR/frame_0000.png... plus DIR/flight.txt
-                             with production LOD parameters (--cells, --tau; default size 1280x720) for the real-GPU jitter review
+                             with the production LOD defaults (override with --cells, --tau; --view applies; default size 1280x720,
+                             small sizes can fail LOD validation) for the real-GPU jitter review
     --stream                 generate terrain tiles asynchronously through the streaming path (same image as the default)
     --view face|tile-id|level|morph|height|normals|depth   debug view (tiles scene: face, tile-id, height)
     --tile FACE,LEVEL,X,Y    tile to draw (repeatable; default: a tile and its east neighbour)
@@ -67,6 +68,8 @@ pub struct Options {
     pub flight: Option<usize>,
     pub out_dir: Option<PathBuf>,
     pub size: Option<(u32, u32)>,
+    /// Every option given on the command line, so modes can reject options they would otherwise ignore.
+    pub given: std::collections::BTreeSet<String>,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -103,8 +106,10 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         flight: None,
         out_dir: None,
         size: None,
+        given: Default::default(),
     };
     while let Some(a) = it.next() {
+        o.given.insert(a.clone());
         match a.as_str() {
             "--smoke" => o.smoke = true,
             "--perf" => o.perf = true,
@@ -145,6 +150,42 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         }
     }
     Ok(o)
+}
+
+/// Options a `--flight` run would ignore, and the flight-only options other runs would ignore (TEST-013).
+const FLIGHT_EXCLUDES: [&str; 12] = [
+    "--perf",
+    "--perf-smoke",
+    "--repro",
+    "--out",
+    "--bundle",
+    "--stream",
+    "--tile",
+    "--script",
+    "--frames",
+    "--res",
+    "--manifest",
+    "--face-net",
+];
+const FLIGHT_ONLY: [&str; 2] = ["--size", "--out-dir"];
+
+/// Reject option combinations that would be silently ignored, before any GPU work.
+fn check_flight_options(o: &Options) -> Result<(), String> {
+    if o.flight.is_some() {
+        if o.scene != "terrain" {
+            return Err("--flight is only available for --scene terrain".into());
+        }
+        let clash: Vec<&str> = FLIGHT_EXCLUDES.iter().copied().filter(|f| o.given.contains(*f)).collect();
+        if !clash.is_empty() {
+            return Err(format!("--flight writes a frame sequence and excludes {}", clash.join(", ")));
+        }
+        if o.out_dir.is_none() {
+            return Err("--flight needs --out-dir".into());
+        }
+    } else if let Some(f) = FLIGHT_ONLY.iter().find(|f| o.given.contains(**f)) {
+        return Err(format!("{f} only applies to --flight"));
+    }
+    Ok(())
 }
 
 fn parse_size(s: &str) -> Result<(u32, u32), String> {
@@ -190,6 +231,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.smoke {
         return writeln!(out, "planet test-render [smoke ok]").map_err(err);
     }
+    check_flight_options(o)?;
     let policy = o.adapter.unwrap_or_else(AdapterPolicy::from_env);
     let ctx = GpuContext::new(policy).map_err(|e| e.to_string())?;
     // Hybrid-graphics rule (report §8): always log which adapter we got.
@@ -200,15 +242,11 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.perf_smoke && o.scene != "terrain" {
         return Err("--perf-smoke is only available for --scene terrain".into());
     }
+    if o.flight.is_some() {
+        return skeleton::render_flight(&ctx, o, out);
+    }
     if o.perf || o.perf_smoke {
         return if o.scene == "terrain" { skeleton::perf_terrain(o, &ctx, out) } else { perf_skeleton(o, &ctx, out) };
-    }
-    if o.flight.is_some() {
-        return if o.scene == "terrain" {
-            skeleton::render_flight(&ctx, o, out)
-        } else {
-            Err("--flight is only available for --scene terrain".into())
-        };
     }
     if let Some(bundle) = &o.repro {
         return skeleton::replay(&ctx, bundle, o.out.as_deref(), out);
@@ -296,6 +334,31 @@ mod tests {
         assert!(run_str(&["frobnicate"]).unwrap_err().contains("usage:"));
         assert!(run_str(&["test-render", "--adapter", "gpu"]).unwrap_err().contains("software or hardware"));
         assert!(run_str(&["test-render", "--scene"]).unwrap_err().contains("needs a value"));
+    }
+
+    // spec: TEST-013
+    #[test]
+    fn flight_options_that_would_be_ignored_are_rejected_before_any_gpu_work() {
+        let d = std::env::temp_dir().join(format!("planet-flight-args-{}", std::process::id()));
+        let p = d.to_str().unwrap();
+        let flight = |extra: &[&str]| {
+            let mut a = vec!["test-render", "--scene", "terrain", "--flight", "12", "--out-dir", p];
+            a.extend_from_slice(extra);
+            run_str(&a).unwrap_err()
+        };
+        assert!(flight(&["--perf-smoke"]).contains("excludes --perf-smoke"));
+        assert!(flight(&["--perf", "--machine-ready"]).contains("excludes --perf"));
+        assert!(flight(&["--repro", "x.repro"]).contains("excludes --repro"));
+        assert!(flight(&["--script", "6", "--tile", "0,0,0,0"]).contains("--tile, --script"));
+        let e = run_str(&["test-render", "--scene", "tiles", "--flight", "12", "--out-dir", p]).unwrap_err();
+        assert!(e.contains("only available for --scene terrain"), "{e}");
+        assert!(run_str(&["test-render", "--scene", "terrain", "--flight", "12"]).unwrap_err().contains("needs --out-dir"));
+        assert!(run_str(&["test-render", "--scene", "terrain", "--size", "160x120"])
+            .unwrap_err()
+            .contains("--size only applies to --flight"));
+        assert!(run_str(&["test-render", "--out-dir", p]).unwrap_err().contains("--out-dir only applies to --flight"));
+        assert!(run_str(&["test-render", "--size", "12x12"]).unwrap_err().contains("--size must be WxH"));
+        assert!(!d.exists(), "no rejected run may create the output directory");
     }
 
     // spec: GEN-003
