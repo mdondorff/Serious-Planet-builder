@@ -107,6 +107,9 @@ pub fn render_offscreen(o: &Options, out: &mut dyn Write) -> Result<(), String> 
 /// Replay a repro bundle: refuse on version mismatch, rebuild the plan from the recorded request, compare, render.
 pub fn replay(ctx: &GpuContext, path: &Path, png: Option<&Path>, out: &mut dyn Write) -> Result<(), String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+    if text.starts_with("planet-terrain-repro") {
+        return replay_terrain(ctx, &text, path, png, out);
+    }
     let b = ReproBundle::from_text(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     if b.generator_version != GENERATOR_VERSION || b.implementation_id != IMPLEMENTATION_ID {
         return Err(format!(
@@ -203,9 +206,8 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
         max_level: 26,
         ..LodParams::earth_1080p()
     };
-    let plan =
-        plan_terrain(&TerrainRequest { camera, size: TERRAIN_SIZE, view, lod, face_mapping: TangentWarp.id().to_string(), seed: o.seed })
-            .map_err(|e| e.to_string())?;
+    let request = TerrainRequest { camera, size: TERRAIN_SIZE, view, lod, face_mapping: TangentWarp.id().to_string(), seed: o.seed };
+    let plan = plan_terrain(&request).map_err(|e| e.to_string())?;
     let meshes: Vec<std::sync::Arc<planet_generators::mesh::TileMesh>> = if o.stream {
         streamed_meshes(o, &plan)?
     } else {
@@ -216,10 +218,77 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
     };
     let refs: Vec<&planet_generators::mesh::TileMesh> = meshes.iter().map(|m| m.as_ref()).collect();
     let (frame, stats) = planet_render::execute_terrain(ctx, &plan, &refs).map_err(|e| e.to_string())?;
-    writeln!(out, "terrain {name} ({}): {}; {} draw calls, {} triangles", view.name(), plan.summary(), stats.draw_calls, stats.triangles)
-        .map_err(err)?;
+    writeln!(
+        out,
+        "terrain {name} ({}): {}; plan {:016x}; {} draw calls, {} triangles",
+        view.name(),
+        plan.summary(),
+        plan.plan_hash(),
+        stats.draw_calls,
+        stats.triangles
+    )
+    .map_err(err)?;
     if let Some(path) = &o.out {
         write_frame(&frame, path, out)?;
+    }
+    if let Some(path) = &o.bundle_out {
+        let bundle = planet_frame::TerrainBundle {
+            generator_version: GENERATOR_VERSION,
+            implementation_id: IMPLEMENTATION_ID.to_string(),
+            mesh_version: planet_generators::mesh::MESH_VERSION,
+            definition_hash: 0,
+            adapter: ctx.adapter_key(),
+            request,
+            plan,
+        };
+        std::fs::write(path, bundle.to_text()).map_err(|e| format!("writing {}: {e}", path.display()))?;
+        writeln!(out, "wrote repro bundle {}", path.display()).map_err(err)?;
+    }
+    Ok(())
+}
+
+/// Replay a terrain repro bundle: refuse on version mismatch, replan from the recorded request, compare every field of
+/// the plan, then render with meshes generated from the recorded seed.
+fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>, out: &mut dyn Write) -> Result<(), String> {
+    use planet_frame::{plan_terrain, TerrainBundle};
+    let b = TerrainBundle::from_text(text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mesh_version = planet_generators::mesh::MESH_VERSION;
+    if b.generator_version != GENERATOR_VERSION || b.implementation_id != IMPLEMENTATION_ID || b.mesh_version != mesh_version {
+        return Err(format!(
+            "bundle was recorded with generator {} ({}) and mesh version {}, this build has {} ({}) and {}; check out the matching commit to replay it",
+            b.generator_version, b.implementation_id, b.mesh_version, GENERATOR_VERSION, IMPLEMENTATION_ID, mesh_version
+        ));
+    }
+    let rebuilt = plan_terrain(&b.request).map_err(|e| e.to_string())?;
+    let diff = rebuilt.diff(&b.plan);
+    if !diff.is_empty() {
+        return Err(format!(
+            "replayed terrain plan differs from the recorded plan:
+  {}",
+            diff.join(
+                "
+  "
+            )
+        ));
+    }
+    writeln!(
+        out,
+        "replay: terrain plan identical ({:016x}), {} nodes, recorded on adapter {}",
+        rebuilt.plan_hash(),
+        rebuilt.nodes.len(),
+        b.adapter
+    )
+    .map_err(err)?;
+    let map = planet_frame::plan::face_mapping_by_id(&b.request.face_mapping)
+        .ok_or_else(|| format!("unknown face mapping '{}'", b.request.face_mapping))?;
+    let (seed, cells, radius) = (b.request.seed, b.request.lod.cells, b.request.lod.radius_m);
+    let meshes: Vec<planet_generators::mesh::TileMesh> =
+        rebuilt.nodes.iter().map(|n| planet_generators::mesh::tile_mesh(seed, map.as_ref(), n.tile, cells, radius)).collect();
+    let refs: Vec<&planet_generators::mesh::TileMesh> = meshes.iter().collect();
+    let (frame, stats) = planet_render::execute_terrain(ctx, &rebuilt, &refs).map_err(|e| e.to_string())?;
+    writeln!(out, "replay: {} draw calls, {} triangles", stats.draw_calls, stats.triangles).map_err(err)?;
+    if let Some(p) = png {
+        write_frame(&frame, p, out)?;
     }
     Ok(())
 }
