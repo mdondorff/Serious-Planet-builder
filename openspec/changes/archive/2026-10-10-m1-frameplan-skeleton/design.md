@@ -15,3 +15,11 @@ ADR 0009 (FramePlan boundary, tiers), ADR 0001 (frames), report §10, §16.
 
 - Goldens are per adapter; four candidates now wait for the owner. Tier-C tests still assert adapter-independent metrics (no holes, exact face colour, determinism, grey-level count).
 - Shader code is validated by the tier-B validation test and by executing it on WARP only; real-GPU and lavapipe behaviour is unverified until the owner runs `cargo xtask test gpu --real` / CI runs.
+
+## Review follow-ups (numerics-reviewer, spec-guardian, verifier)
+
+- `FramePlan::diff` now compares every field bit-exactly (clear colour, height range, -0/NaN) and replay also compares plan hashes; colours parse as bytes; rectangle checks use `checked_add`; height range and tile resolution (`MAX_TILE_RES` 2048) are validated; `--res` is validated in the CLI.
+- `editor --offscreen --repro` replays; `generate` rejects frame options; replay uses the bundle's recorded face mapping.
+- The tier-B height-view tolerance is limited to pixels within 1e-3 of a rounding boundary, and reports how many used it.
+- Spec edits: BUILD-004 left unchanged and the skeleton moved to BUILD-007 (tier C); the six-face scenario of TEST-010 is kept; REND-006 lists only implemented views; REND-001 keeps the nodes/levels/batches ban.
+- Deferred (recorded, not done): scene/request construction still lives in `app` (move to `frame` with M2 scenes); bundles do not yet record per-tile content hashes; no test pins the WGSL uniform layout (add a naga-based test when the layout next changes).

@@ -98,6 +98,9 @@ pub fn render_offscreen(o: &Options, out: &mut dyn Write) -> Result<(), String> 
     let ctx = GpuContext::new(o.adapter.unwrap_or(AdapterPolicy::Software)).map_err(|e| e.to_string())?;
     writeln!(out, "adapter: {:?} {} ({:?}), key {}", ctx.info.backend, ctx.info.name, ctx.info.device_type, ctx.adapter_key())
         .map_err(err)?;
+    if let Some(bundle) = &o.repro {
+        return replay(&ctx, bundle, o.out.as_deref(), out);
+    }
     render_tiles(&ctx, o, out)
 }
 
@@ -113,11 +116,20 @@ pub fn replay(ctx: &GpuContext, path: &Path, png: Option<&Path>, out: &mut dyn W
     }
     let rebuilt = plan_tiles(&b.request).map_err(|e| e.to_string())?;
     let diff = rebuilt.diff(&b.plan);
+    if diff.is_empty() && rebuilt.plan_hash() != b.plan.plan_hash() {
+        return Err(format!(
+            "replayed plan hash {:016x} differs from the recorded {:016x} although no field differs: the plan text form changed",
+            rebuilt.plan_hash(),
+            b.plan.plan_hash()
+        ));
+    }
     if !diff.is_empty() {
         return Err(format!("replayed plan differs from the recorded plan:\n  {}", diff.join("\n  ")));
     }
     writeln!(out, "replay: plan identical ({:016x}), recorded on adapter {}", rebuilt.plan_hash(), b.adapter).map_err(err)?;
-    let tiles: Vec<TileData> = b.request.tiles.iter().map(|&id| generate_tile(b.seed, &TangentWarp, id, b.res)).collect();
+    let map = planet_frame::plan::face_mapping_by_id(&b.request.face_mapping)
+        .ok_or_else(|| format!("unknown face mapping '{}'", b.request.face_mapping))?;
+    let tiles: Vec<TileData> = b.request.tiles.iter().map(|&id| generate_tile(b.seed, map.as_ref(), id, b.res)).collect();
     let (frame, stats) = run_plan(ctx, &rebuilt, &tiles)?;
     writeln!(out, "replay: {} draw calls", stats.draw_calls).map_err(err)?;
     if let Some(p) = png {
@@ -128,6 +140,9 @@ pub fn replay(ctx: &GpuContext, path: &Path, png: Option<&Path>, out: &mut dyn W
 
 /// `generate`: headless CPU generation of one tile with its hash, height map and optionally the face net.
 pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    if o.repro.is_some() || o.bundle_out.is_some() {
+        return Err("generate has no frames: --repro and --bundle belong to test-render and editor --offscreen".into());
+    }
     let id = tiles_of(o)?[0];
     let tile = generate_tile(o.seed, &TangentWarp, id, o.res);
     writeln!(

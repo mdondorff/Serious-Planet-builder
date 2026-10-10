@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: REND-001 FramePlan executor
-The renderer SHALL execute a FramePlan and SHALL make no decisions about which tiles, rectangles or colours to draw; the number of draw calls SHALL equal the number of draws in the plan, and a plan that cannot be executed (missing resource, rectangle outside the frame) SHALL be reported, not guessed.
+The renderer SHALL execute a FramePlan and SHALL make no decisions about which nodes, levels, batches, tiles, rectangles or colours to draw; the number of draw calls SHALL equal the number of draws in the plan, and a plan that cannot be executed (a resource the selected view needs is missing, rectangle outside the frame, unusable height range or resolution) SHALL be reported, not guessed.
 
 Verify: C
 Status: active
@@ -16,7 +16,7 @@ Source: CON-03, ADR 0009
 - **THEN** execution fails with the tile id
 
 ### Requirement: REND-006 Deterministic debug views
-Debug views (tile ID, face, level, morph, normals, depth, streaming state) SHALL render flat, lighting-independent colours that compare exactly against goldens of the same adapter.
+Debug views SHALL render flat, lighting-independent colours (or a grey ramp of data) that compare exactly against goldens of the same adapter. M1 provides face, tile-id and height; level, morph, normals, depth and streaming state are added with the changes that introduce those quantities.
 
 Verify: C
 Status: active

@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: TEST-008 Repro bundles
-Every visual bug SHALL be reproducible from a bundle containing camera pose or path, definition hash, generator version, settings and adapter information, replayed by `cargo xtask repro <bundle>` in every run mode.
+Every visual bug SHALL be reproducible from a bundle containing camera pose or path, definition hash (zero until the WorldDefinition exists in M3), generator version, settings and adapter information, replayed by `cargo xtask repro <bundle>` in every run mode that renders (`test-render` and `editor --offscreen`); replay SHALL refuse a version mismatch and report any difference between the rebuilt and the recorded plan in numbers.
 
 Verify: A
 Status: active
@@ -30,8 +30,8 @@ Status: active
 Source: CON-18
 
 #### Scenario: Face view
-- **WHEN** the face debug view of two generated tiles is rendered
-- **THEN** each planned rectangle is exactly the colour of its face, with no background pixels (the whole-planet version arrives with the LOD change in M2)
+- **WHEN** the face debug view is rendered
+- **THEN** the six faces appear in six distinct flat colours with no background pixels inside the planet disc (checked from the LOD change in M2; M1 checks the two-tile case below)
 
 #### Scenario: Tile views
 - **WHEN** the face, tile-id and height views of two generated tiles are rendered

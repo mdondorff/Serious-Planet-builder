@@ -15,7 +15,8 @@ M1 exit criteria require the walking skeleton: one CPU-generated tile through `F
 ### Modified Capabilities
 - `testing`: TEST-008, TEST-009, TEST-010.
 - `renderer`: REND-001, REND-006; new REND-008 (planned).
-- `build-tooling`: BUILD-004.
+- `terrain-lod`: new LOD-006.
+- `build-tooling`: new BUILD-007.
 
 ## Impact
 

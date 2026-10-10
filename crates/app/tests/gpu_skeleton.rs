@@ -15,7 +15,7 @@ fn tmp(name: &str) -> PathBuf {
     d.join(name)
 }
 
-// spec: BUILD-004, REND-001
+// spec: BUILD-007, REND-001
 #[test]
 fn the_skeleton_runs_in_all_three_modes_and_they_agree() {
     let (a, b) = (tmp("test-render.png"), tmp("editor.png"));
@@ -67,7 +67,7 @@ fn a_repro_bundle_replays_to_the_same_pixels_and_refuses_a_version_mismatch() {
     assert!(e.contains("recorded with generator 1") && e.contains("this build has 2"), "{e}");
 }
 
-// spec: TEST-010
+// spec: BUILD-004
 #[test]
 fn unknown_views_and_tiles_are_reported_with_the_expected_form() {
     let e = run(&["test-render", "--scene", "tiles", "--view", "sepia", "--adapter", "software"]).unwrap_err();
@@ -76,4 +76,31 @@ fn unknown_views_and_tiles_are_reported_with_the_expected_form() {
     assert!(e.contains("not a valid tile"), "{e}");
     let e = run(&["test-render", "--scene", "tiles", "--tile", "1,2", "--adapter", "software"]).unwrap_err();
     assert!(e.contains("FACE,LEVEL,X,Y"), "{e}");
+}
+
+// spec: TEST-008, BUILD-007
+#[test]
+fn editor_offscreen_replays_bundles_and_generate_rejects_frame_options() {
+    let (png, bundle, again) = (tmp("e1.png"), tmp("e.repro"), tmp("e2.png"));
+    run(&[
+        "test-render",
+        "--scene",
+        "tiles",
+        "--view",
+        "face",
+        "--adapter",
+        "software",
+        "--out",
+        png.to_str().unwrap(),
+        "--bundle",
+        bundle.to_str().unwrap(),
+    ])
+    .unwrap();
+    let log = run(&["editor", "--offscreen", "--repro", bundle.to_str().unwrap(), "--out", again.to_str().unwrap()]).unwrap();
+    assert!(log.contains("plan identical"), "{log}");
+    assert_eq!(read_png(&png).unwrap(), read_png(&again).unwrap());
+    let e = run(&["generate", "--repro", bundle.to_str().unwrap()]).unwrap_err();
+    assert!(e.contains("generate has no frames"), "{e}");
+    let e = run(&["generate", "--res", "3"]).unwrap_err();
+    assert!(e.contains("power of two"), "{e}");
 }

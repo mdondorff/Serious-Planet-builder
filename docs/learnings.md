@@ -21,3 +21,13 @@ Proposed follow-up: owner installs `winget install GitHub.cli` and runs `gh auth
 What happened: numerics review of `core` (m1-coordinates). Face-edge directions are bit-identical from both faces (tested exhaustively to level 3, randomly to level 28 at res 32), but f32 tile-local offsets meet 1 mm only down to level 9 (measured, `coarse_tiles_need_more_than_f32_tile_local_offsets`); at level 0 offsets reach about 3.7e6 m and a shared border vertex quantises differently per tile (about 0.1 to 0.2 m).
 Assumption it changes: ADR 0001 / CON-08 (seam work): identical directions are necessary, not sufficient.
 Proposed follow-up: the M2 terrain change must rebuild border positions from shared data (or use skirts/morphing), and the lattice exactness needs `level + log2(res) <= 52` (now asserted in `sample_direction`). Float known answers now pin libm bits; libm is pinned to `=0.2.16`; hash has no domain separation yet (add a tag before HASH_VERSION 1 is used for real cache keys).
+
+## 2026-10-10 Fragment `@builtin(position)` ignores the viewport origin assumption
+What happened: the debug-view shader derives texel indices from `@builtin(position)` (framebuffer coordinates) minus the draw rectangle origin; this is correct because the viewport and scissor equal the rectangle, and passes on WARP with GPU == CPU twin. It is not verified on other adapters.
+Assumption it changes: ADR 0004 (wgpu fit): confirmed on WARP only.
+Proposed follow-up: run `cargo xtask test` on lavapipe (CI) and `--real` on Rasierklinge.
+
+## 2026-10-10 Height debug view has low contrast at coarse levels
+What happened: with a fixed +-4000 m range the value-noise generator shows about 40 to 75 grey levels per tile at level 3.
+Assumption it changes: none; design note for the M2 views.
+Proposed follow-up: a per-plan height range is a plan decision (frame), not a renderer one.

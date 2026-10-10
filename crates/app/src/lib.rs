@@ -86,7 +86,12 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--view" => o.view = it.next().ok_or("--view needs a value")?.clone(),
             "--tile" => o.tiles.push(it.next().ok_or("--tile needs FACE,LEVEL,X,Y")?.clone()),
             "--seed" => o.seed = it.next().ok_or("--seed needs a value")?.parse().map_err(|e| format!("--seed: {e}"))?,
-            "--res" => o.res = it.next().ok_or("--res needs a value")?.parse().map_err(|e| format!("--res: {e}"))?,
+            "--res" => {
+                o.res = it.next().ok_or("--res needs a value")?.parse().map_err(|e| format!("--res: {e}"))?;
+                if !o.res.is_power_of_two() || o.res > planet_render::exec::MAX_TILE_RES {
+                    return Err(format!("--res must be a power of two up to {}, got {}", planet_render::exec::MAX_TILE_RES, o.res));
+                }
+            }
             "--bundle" => o.bundle_out = Some(PathBuf::from(it.next().ok_or("--bundle needs a path")?)),
             "--repro" => o.repro = Some(PathBuf::from(it.next().ok_or("--repro needs a path")?)),
             "--face-net" => o.face_net = Some(PathBuf::from(it.next().ok_or("--face-net needs a path")?)),

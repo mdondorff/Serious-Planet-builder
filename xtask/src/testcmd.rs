@@ -167,9 +167,11 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
     let Some(bundle) = args.iter().find(|a| !a.starts_with("--")) else {
         return Err("usage: cargo xtask repro <bundle> [--real]".into());
     };
-    if !root.join(bundle).is_file() && !Path::new(bundle).is_file() {
-        return Err(format!("repro bundle '{bundle}' not found"));
-    }
+    let bundle = std::fs::canonicalize(bundle)
+        .or_else(|_| std::fs::canonicalize(root.join(bundle)))
+        .map_err(|e| format!("repro bundle '{bundle}' not found: {e}"))?;
+    let bundle = bundle.to_string_lossy().trim_start_matches("\\?\\").to_string();
+    let bundle = bundle.as_str();
     let adapter = if args.iter().any(|a| a == "--real") { "hardware" } else { "software" };
     let out = "target/review/repro.png";
     run(root, "cargo", &["run", "-q", "-p", "planet", "--", "test-render", "--adapter", adapter, "--repro", bundle, "--out", out], &[])

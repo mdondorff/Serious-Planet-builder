@@ -56,7 +56,7 @@ fn malformed_plans_are_rejected_with_the_offending_line() {
     assert!(FramePlan::from_text(&bad).unwrap_err().contains("cannot parse plan line"));
 }
 
-// spec: CON-03
+// spec: LOD-006
 #[test]
 fn builder_lays_out_tiles_and_converts_to_camera_relative_in_f64_first() {
     let req = request(DebugView::TileId);
@@ -78,7 +78,7 @@ fn builder_lays_out_tiles_and_converts_to_camera_relative_in_f64_first() {
     assert_eq!(plan, plan_tiles(&req).unwrap());
 }
 
-// spec: CON-03
+// spec: LOD-006
 #[test]
 fn builder_reports_unusable_requests() {
     let mut r = request(DebugView::Face);
@@ -132,4 +132,35 @@ fn rebuilding_the_plan_from_the_recorded_request_reproduces_it() {
     moved.camera = PlanetFixed(Vec3::new(1.0e7 + 1.0, -2.0e6, 3.0e6));
     let d = plan_tiles(&moved).unwrap().diff(&b.plan);
     assert!(d.iter().any(|l| l.starts_with("camera")) && d.iter().any(|l| l.contains("camera-relative origin")), "{d:?}");
+}
+
+// spec: TEST-008
+#[test]
+fn diff_sees_every_plan_field_and_agrees_with_the_hash() {
+    let base = plan_tiles(&request(DebugView::Height)).unwrap();
+    let mut p = base.clone();
+    p.height_range[0] = -3999.0;
+    assert!(base.diff(&p).iter().any(|l| l.starts_with("height range")), "{:?}", base.diff(&p));
+    let mut p = base.clone();
+    p.clear_color = [0, 0, 0, 255];
+    assert!(base.diff(&p).iter().any(|l| l.starts_with("clear colour")));
+    // -0.0 and NaN: diff emptiness must coincide with hash equality (both are bit-exact).
+    let mut z = base.clone();
+    z.camera = PlanetFixed(Vec3::new(z.camera.0.x, -0.0, z.camera.0.z));
+    let mut pz = base.clone();
+    pz.camera = PlanetFixed(Vec3::new(z.camera.0.x, 0.0, z.camera.0.z));
+    assert_eq!(z.diff(&pz).is_empty(), z.plan_hash() == pz.plan_hash());
+    assert!(!z.diff(&pz).is_empty(), "-0.0 and +0.0 are different bit patterns");
+    let mut n = base.clone();
+    n.camera = PlanetFixed(Vec3::new(f64::NAN, 0.0, 0.0));
+    let back = FramePlan::from_text(&n.to_text()).unwrap();
+    assert!(n.diff(&back).is_empty() && n.plan_hash() == back.plan_hash(), "a NaN plan must round-trip as identical");
+}
+
+// spec: TEST-009
+#[test]
+fn colour_values_outside_a_byte_are_rejected() {
+    let good = plan_tiles(&request(DebugView::Face)).unwrap().to_text();
+    let bad = good.replacen("clear 255 0 255 255", "clear 300 0 255 255", 1);
+    assert!(FramePlan::from_text(&bad).unwrap_err().contains("bad colour value '300'"));
 }

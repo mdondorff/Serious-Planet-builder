@@ -201,13 +201,14 @@ impl FramePlan {
         for line in lines.filter(|l| !l.trim().is_empty()) {
             let t: Vec<&str> = line.split_whitespace().collect();
             let num = |s: &str| s.parse::<u32>().map_err(|e| format!("bad number '{s}' in '{line}': {e}"));
+            let byte = |s: &str| s.parse::<u8>().map_err(|e| format!("bad colour value '{s}' in '{line}': {e}"));
             match t.as_slice() {
                 ["size", w, h] => size = Some((num(w)?, num(h)?)),
                 ["view", v] => view = Some(DebugView::parse(v).ok_or(format!("unknown view '{v}'"))?),
                 ["camera", x, y, z] => {
                     camera = Some(PlanetFixed(planet_core::Vec3::new(parse_hex64(x)?, parse_hex64(y)?, parse_hex64(z)?)))
                 }
-                ["clear", r, g, b, a] => clear = Some([num(r)? as u8, num(g)? as u8, num(b)? as u8, num(a)? as u8]),
+                ["clear", r, g, b, a] => clear = Some([byte(r)?, byte(g)?, byte(b)?, byte(a)?]),
                 ["height_range", a, b] => range = Some([parse_hex32(a)?, parse_hex32(b)?]),
                 ["draw", id, "origin", ox, oy, oz, "rel", rx, ry, rz, "rect", x, y, w, h, "color", r, g, b, a] => {
                     let raw = u64::from_str_radix(id, 16).map_err(|e| format!("bad tile id '{id}': {e}"))?;
@@ -216,7 +217,7 @@ impl FramePlan {
                         origin: PlanetFixed(planet_core::Vec3::new(parse_hex64(ox)?, parse_hex64(oy)?, parse_hex64(oz)?)),
                         camera_relative_origin: [parse_hex32(rx)?, parse_hex32(ry)?, parse_hex32(rz)?],
                         rect: [num(x)?, num(y)?, num(w)?, num(h)?],
-                        color: [num(r)? as u8, num(g)? as u8, num(b)? as u8, num(a)? as u8],
+                        color: [byte(r)?, byte(g)?, byte(b)?, byte(a)?],
                     });
                 }
                 _ => return Err(format!("cannot parse plan line '{line}'")),
@@ -247,8 +248,16 @@ impl FramePlan {
         if self.view != other.view {
             d.push(format!("view {} vs {}", self.view.name(), other.view.name()));
         }
-        if self.camera != other.camera {
+        let v3 = |p: &PlanetFixed| [p.0.x.to_bits(), p.0.y.to_bits(), p.0.z.to_bits()];
+        if v3(&self.camera) != v3(&other.camera) {
             d.push(format!("camera {:?} vs {:?}", self.camera.0, other.camera.0));
+        }
+        if self.clear_color != other.clear_color {
+            d.push(format!("clear colour {:?} vs {:?}", self.clear_color, other.clear_color));
+        }
+        let r32 = |r: &[f32; 2]| [r[0].to_bits(), r[1].to_bits()];
+        if r32(&self.height_range) != r32(&other.height_range) {
+            d.push(format!("height range {:?} vs {:?}", self.height_range, other.height_range));
         }
         if self.draws.len() != other.draws.len() {
             d.push(format!("{} draws vs {}", self.draws.len(), other.draws.len()));
@@ -257,10 +266,10 @@ impl FramePlan {
             if a.tile != b.tile {
                 d.push(format!("draw {i}: tile {:?} vs {:?}", a.tile, b.tile));
             }
-            if a.origin != b.origin {
+            if v3(&a.origin) != v3(&b.origin) {
                 d.push(format!("draw {i}: origin differs by {:e} m", a.origin.0.distance(b.origin.0)));
             }
-            if a.camera_relative_origin != b.camera_relative_origin {
+            if a.camera_relative_origin.map(f32::to_bits) != b.camera_relative_origin.map(f32::to_bits) {
                 d.push(format!("draw {i}: camera-relative origin {:?} vs {:?}", a.camera_relative_origin, b.camera_relative_origin));
             }
             if a.rect != b.rect || a.color != b.color {

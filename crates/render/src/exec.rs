@@ -15,16 +15,20 @@ pub struct TileResource<'a> {
     pub heights: &'a [f32],
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum ExecError {
     MissingTile(TileId),
     BadResource { id: TileId, expected: usize, got: usize },
     OutsideFrame { index: usize, rect: [u32; 4], size: (u32, u32) },
+    BadHeightRange { lo: f32, hi: f32 },
+    BadResolution { id: TileId, res: u32 },
 }
 
 impl fmt::Display for ExecError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            ExecError::BadHeightRange { lo, hi } => write!(f, "height range [{lo}, {hi}] must be finite with lo < hi"),
+            ExecError::BadResolution { id, res } => write!(f, "tile {id:?}: resolution {res} is outside 1..={MAX_TILE_RES}"),
             ExecError::MissingTile(id) => write!(f, "the plan draws tile {id:?} but no resource for it was supplied"),
             ExecError::BadResource { id, expected, got } => write!(f, "tile {id:?}: expected {expected} height samples, got {got}"),
             ExecError::OutsideFrame { index, rect, size } => {
@@ -35,6 +39,9 @@ impl fmt::Display for ExecError {
 }
 
 impl std::error::Error for ExecError {}
+
+/// Largest tile resolution (cells) the executor accepts; keeps `(res + 1)²` far from overflow and inside GPU texture limits.
+pub const MAX_TILE_RES: u32 = 2048;
 
 /// Counts that are deterministic on every adapter (CON-20).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -93,13 +100,20 @@ fn view_index(v: DebugView) -> u32 {
 }
 
 fn check(plan: &FramePlan, tiles: &[TileResource]) -> Result<(), ExecError> {
+    let [lo, hi] = plan.height_range;
+    if !(lo.is_finite() && hi.is_finite() && lo < hi) {
+        return Err(ExecError::BadHeightRange { lo, hi });
+    }
     for (index, d) in plan.draws.iter().enumerate() {
         let [x, y, w, h] = d.rect;
-        if w == 0 || h == 0 || x + w > plan.size.0 || y + h > plan.size.1 {
+        if w == 0 || h == 0 || x.checked_add(w).is_none_or(|e| e > plan.size.0) || y.checked_add(h).is_none_or(|e| e > plan.size.1) {
             return Err(ExecError::OutsideFrame { index, rect: d.rect, size: plan.size });
         }
         if plan.view == DebugView::Height {
             let t = tiles.iter().find(|t| t.id == d.tile).ok_or(ExecError::MissingTile(d.tile))?;
+            if t.res == 0 || t.res > MAX_TILE_RES {
+                return Err(ExecError::BadResolution { id: t.id, res: t.res });
+            }
             let expected = ((t.res + 1) * (t.res + 1)) as usize;
             if t.heights.len() != expected {
                 return Err(ExecError::BadResource { id: t.id, expected, got: t.heights.len() });
@@ -332,5 +346,41 @@ mod tests {
         let fill = f.rgba.as_chunks::<4>().0.iter().filter(|px| **px == p.draws[0].color).count();
         assert_eq!(fill, 32 * 32);
         assert!(!f.rgba.as_chunks::<4>().0.contains(&p.clear_color));
+    }
+}
+
+#[cfg(test)]
+mod more_tests {
+    use super::*;
+    use planet_core::{Face, PlanetFixed, Vec3};
+    use planet_frame::{plan_tiles, PlanRequest};
+
+    fn plan() -> FramePlan {
+        plan_tiles(&PlanRequest {
+            tiles: vec![TileId::new(Face(1), 2, 1, 1).unwrap()],
+            camera: PlanetFixed(Vec3::new(1.0e7, 0.0, 0.0)),
+            size: (32, 32),
+            view: DebugView::Height,
+            radius_m: 6_371_000.0,
+            face_mapping: "tangent-v1".into(),
+        })
+        .unwrap()
+    }
+
+    // spec: REND-001
+    #[test]
+    fn hostile_rectangles_ranges_and_resolutions_are_errors_not_panics() {
+        let mut p = plan();
+        p.draws[0].rect = [u32::MAX, 0, 2, 1];
+        assert!(matches!(reference_frame(&p, &[]).unwrap_err(), ExecError::OutsideFrame { .. }));
+        let mut p = plan();
+        p.height_range = [5.0, 5.0];
+        assert!(matches!(reference_frame(&p, &[]).unwrap_err(), ExecError::BadHeightRange { .. }));
+        p.height_range = [f32::NAN, 1.0];
+        assert!(matches!(reference_frame(&p, &[]).unwrap_err(), ExecError::BadHeightRange { .. }));
+        let p = plan();
+        let id = p.draws[0].tile;
+        let e = reference_frame(&p, &[TileResource { id, res: 65_535, heights: &[] }]).unwrap_err();
+        assert_eq!(e, ExecError::BadResolution { id, res: 65_535 });
     }
 }

@@ -15,5 +15,5 @@
 
 ## 4. Close-out
 
-- [ ] 4.1 Reviewer reports addressed
-- [ ] 4.2 Archive, log in docs/status.md
+- [x] 4.1 Reviewer reports addressed
+- [x] 4.2 Archive, log in docs/status.md
