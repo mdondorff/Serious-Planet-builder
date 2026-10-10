@@ -3,10 +3,8 @@
 Newest entries at the top. One line per event (change archived, ADR drafted, spike opened or closed, quarantine, milestone report). Stop reports get a short section.
 
 ## Waiting for the owner
-- **Window surface and egui painting owner** (from the m2-wgpu-seam review): an egui-wgpu integration in `editor` would pull wgpu above `render`, which ADR 0004 (accepted: render's public API is the seam, no internal HAL until a second backend) forbids. Decide before the editor window work: `render` owns the surface and paints egui, or a later ADR changes the rule.
 - **M2 go/no-go gate** (docs/milestones/M2-report.md): recommendation Go with changes. Nothing in M3 has been started.
-- **Accept or change the proposed ADRs** 0007, 0009, 0013 and 0014 (ADRs 0001-0006, 0008, 0010-0012 accepted 2026-10-10). Work proceeds on their leanings.
-- **Performance on Rasierklinge**: set the Windows power profile to High performance (your first run used Balanced and an idle GPU), connect the charger, then run `cargo xtask perf --machine-ready` (terrain workload at 1440p, four views, 3 runs each, GPU timestamps; takes a minute or two plus mesh generation). Read the verdict lines (GPU median at most 8 ms, frame p99 at most 20 ms) and send me perf/logs/terrain.json; the session is marked invalid if the machine is not ready.
+- **Accept or change the proposed ADRs** 0007, 0009, 0013, 0014 and 0015 (ADRs 0001-0006, 0008, 0010-0012 accepted 2026-10-10). Work proceeds on their leanings.
 - Tool note: `gh` is installed at `C:\Program Files\GitHub CLI\gh.exe` but is not on the Git Bash PATH.
 
 ## Queued for agents
@@ -29,6 +27,8 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
   Also low: `gpu_renderer.rs:59` panics when a timestamp delta is 0.
 
 ## Log
+- 2026-10-10 ADR 0015 Window surface and UI painting live in render: proposed (records the owner's decision that wgpu must not leak above `render`; `render` owns the surface and paints egui output).
+- 2026-10-10 Performance on Rasierklinge: the owner reports `cargo xtask perf --machine-ready` done, all verdicts ok. The numbers (perf/logs/terrain.json) are not yet recorded in the repo.
 - 2026-10-10 Golden blessing items closed: WARP, llvmpipe and NVIDIA each hold the 10 goldens blessed in #20, `pending.txt` is empty, and the latest CI run on `main` produced no Linux candidates (owner's `/bless` for llvmpipe found nothing to promote).
 - 2026-10-10 ADR 0009 updated from review (still proposed): adapter-family golden keys with driver sidecar and CI failure on missing golden directories, golden classes, every scene's plan bit-exact with a repro bundle, reject-never-substitute rule, tier-B oracles for per-vertex functions, spec-lint tier check, counts from the plan. Six follow-ups queued.
 - 2026-10-10 m2-wgpu-seam archived (BUILD-001 modified): render no longer re-exports wgpu, GpuContext fields private, accessors, layering bans graphics-API crates outside render (table form, quoted keys, renames) and wgpu types in render's pub signatures. Goldens byte-identical.

@@ -10,7 +10,7 @@ The workspace SHALL contain the crates `core`, `world-def`, `generators`, `cache
 
 Verify: A
 Status: active
-Source: CON-02, ADR 0004, ADR 0008
+Source: CON-02, ADR 0004, ADR 0008, ADR 0015
 
 #### Scenario: Upward dependency
 - **WHEN** a crate lists a crate at its own or a higher layer under `[dependencies]`
