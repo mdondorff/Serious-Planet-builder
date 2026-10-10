@@ -71,3 +71,28 @@ fn frames_are_timed_and_a_missing_tile_is_an_error() {
     // Wrong resolution is rejected.
     assert!(r.upload(&ctx, &tile_mesh(1, &TangentWarp, p.nodes[0].tile, 8, R)).is_err());
 }
+
+// spec: REND-013
+#[test]
+fn a_mesh_with_another_key_replaces_the_resident_buffer() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let p = plan(5);
+    let tile = p.nodes[0].tile;
+    let (one, two) = (tile_mesh(1, &TangentWarp, tile, CELLS, R), tile_mesh(2, &TangentWarp, tile, CELLS, R));
+    assert_ne!(one.key, two.key);
+    let mut r = TerrainRenderer::new(&ctx, SIZE, CELLS);
+    r.upload(&ctx, &one).unwrap();
+    let after_one = r.uploaded_bytes;
+    r.upload(&ctx, &two).unwrap();
+    assert_eq!((r.tile_key(tile), r.resident_tiles()), (Some(two.key), 1), "the seed-2 mesh must replace the seed-1 buffer");
+    assert!(r.uploaded_bytes > after_one, "replacing uploads the new vertices");
+    // Draw that single tile and compare with a renderer that only ever saw the seed-2 mesh.
+    let mut single = plan(5);
+    single.nodes.truncate(1);
+    r.render(&ctx, &single, false).unwrap();
+    let replaced = r.read_color(&ctx);
+    let mut fresh = TerrainRenderer::new(&ctx, SIZE, CELLS);
+    fresh.upload(&ctx, &two).unwrap();
+    fresh.render(&ctx, &single, false).unwrap();
+    assert_eq!(replaced, fresh.read_color(&ctx), "a replaced buffer must draw exactly like a fresh upload of the new mesh");
+}

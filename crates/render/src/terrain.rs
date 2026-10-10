@@ -136,7 +136,7 @@ pub struct TerrainRenderer {
     stride: u64,
     indices: crate::wgpu::Buffer,
     index_count: u32,
-    vertex_buffers: HashMap<planet_core::TileId, crate::wgpu::Buffer>,
+    vertex_buffers: HashMap<planet_core::TileId, (u64, crate::wgpu::Buffer)>,
     color: crate::wgpu::Texture,
     color_view: crate::wgpu::TextureView,
     depth_view: crate::wgpu::TextureView,
@@ -330,7 +330,8 @@ impl TerrainRenderer {
         if mesh.cells != self.cells {
             return Err(ExecError::BadResolution { id: mesh.id, res: mesh.cells });
         }
-        if self.vertex_buffers.contains_key(&mesh.id) {
+        // Resident with the same key: nothing to do. A different key (other seed, radius, mesh version) replaces it.
+        if self.vertex_buffers.get(&mesh.id).is_some_and(|(key, _)| *key == mesh.key) {
             return Ok(());
         }
         let bytes = vertex_bytes(&mesh.vertices);
@@ -340,12 +341,17 @@ impl TerrainRenderer {
             contents: &bytes,
             usage: wgpu::BufferUsages::VERTEX,
         });
-        self.vertex_buffers.insert(mesh.id, buffer);
+        self.vertex_buffers.insert(mesh.id, (mesh.key, buffer));
         Ok(())
     }
 
     pub fn has_tile(&self, tile: planet_core::TileId) -> bool {
         self.vertex_buffers.contains_key(&tile)
+    }
+
+    /// Key of the resident mesh of `tile`, if any.
+    pub fn tile_key(&self, tile: planet_core::TileId) -> Option<u64> {
+        self.vertex_buffers.get(&tile).map(|(key, _)| *key)
     }
 
     pub fn resident_tiles(&self) -> usize {
@@ -421,7 +427,7 @@ impl TerrainRenderer {
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
             for (i, d) in plan.nodes.iter().enumerate() {
                 pass.set_bind_group(0, &self.bind, &[(i as u64 * self.stride) as u32]);
-                pass.set_vertex_buffer(0, self.vertex_buffers[&d.tile].slice(..));
+                pass.set_vertex_buffer(0, self.vertex_buffers[&d.tile].1.slice(..));
                 pass.draw_indexed(0..self.index_count, 0, 0..1);
                 stats.draw_calls += 1;
                 stats.triangles += u64::from(self.index_count) / 3;

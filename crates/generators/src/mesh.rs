@@ -5,8 +5,9 @@
 //! Positions are computed in float64 on the planet-fixed frame and rounded once to f32 after subtracting the origin,
 //! so vertex precision is bounded by tile size (plus the height range within the tile), never by planet size.
 
-use crate::height::height_at;
+use crate::height::{cache_key, height_at};
 use planet_core::cube::FaceMapping;
+use planet_core::hash::hash_u64s;
 use planet_core::{PlanetFixed, TileId, Vec3};
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -28,6 +29,8 @@ pub struct MeshVertex {
 pub struct TileMesh {
     pub id: TileId,
     pub cells: u32,
+    /// Key of everything this mesh depends on ([`mesh_key`]); a renderer replaces a resident buffer whose key differs.
+    pub key: u64,
     /// Tile centre at its terrain height, planet-fixed f64 (identical to the origin in `TerrainPlan`).
     pub origin: PlanetFixed,
     /// `(cells + 1)²` grid vertices (row `j` major), then the skirt vertices.
@@ -44,6 +47,36 @@ pub fn vertex_count(cells: u32) -> usize {
 
 /// Fraction of the tile edge length by which skirts hang below the surface.
 pub const SKIRT_FRACTION: f64 = 0.08;
+
+/// Version of the mesh construction (ADR 0006): bump it whenever vertex output changes for the same inputs (skirt
+/// depth, normal stencil, origin rule, vertex layout). History: 1 = first meshes; 2 = seam-consistent normals (#15).
+pub const MESH_VERSION: u32 = 2;
+
+/// Key of a mesh: the height key of the tile (generator, seed, mapping, tile; resolution = `cells`), the grid size, the
+/// radius bits, the skirt fraction bits and [`MESH_VERSION`].
+pub fn mesh_key(map: &dyn FaceMapping, seed: u64, id: TileId, cells: u32, radius_m: f64) -> u64 {
+    mesh_key_with(map, seed, id, cells, radius_m, MESH_VERSION, SKIRT_FRACTION)
+}
+
+/// [`mesh_key`] with the construction constants as arguments, so tests can show that each one changes the key.
+pub fn mesh_key_with(map: &dyn FaceMapping, seed: u64, id: TileId, cells: u32, radius_m: f64, version: u32, skirt_fraction: f64) -> u64 {
+    hash_u64s(
+        0x006d_6573,
+        &[u64::from(version), cache_key(map, seed, id, cells), u64::from(cells), radius_m.to_bits(), skirt_fraction.to_bits()],
+    )
+}
+
+impl TileMesh {
+    /// Hash of the exact vertex bits and origin, for known-answer tests (CON-14).
+    pub fn content_hash(&self) -> u64 {
+        let mut v =
+            vec![self.id.raw(), u64::from(self.cells), self.origin.0.x.to_bits(), self.origin.0.y.to_bits(), self.origin.0.z.to_bits()];
+        for vert in &self.vertices {
+            v.extend(vert.to_floats().iter().map(|f| u64::from(f.to_bits())));
+        }
+        hash_u64s(0x006d_6873, &v)
+    }
+}
 
 /// Build the mesh. `cells` must be a power of two of at least 2.
 pub fn tile_mesh(seed: u64, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> TileMesh {
@@ -111,7 +144,7 @@ pub fn tile_mesh(seed: u64, map: &dyn FaceMapping, id: TileId, cells: u32, radiu
             |p: [f32; 3]| [(f64::from(p[0]) - radial.x) as f32, (f64::from(p[1]) - radial.y) as f32, (f64::from(p[2]) - radial.z) as f32];
         vertices.push(MeshVertex { pos: down(v.pos), coarse: down(v.coarse), ref_pos: down(v.ref_pos), ..v });
     }
-    TileMesh { id, cells, origin, vertices }
+    TileMesh { id, cells, key: mesh_key(map, seed, id, cells, radius_m), origin, vertices }
 }
 
 /// Triangle indices for the grid and its skirts; identical for every tile of a given `cells`.
