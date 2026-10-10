@@ -87,7 +87,7 @@ let b = f32::powf(a, 2.0);"
 fn generator_relevant_crates_use_libm_only() {
     let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut offences = Vec::new();
-    for name in ["core", "world-def", "generators", "cache"] {
+    for name in ["core", "world-def", "generators", "cache", "streaming", "frame"] {
         assert!(crates.join(name).join("src").is_dir(), "crate directory {name} is missing: the scan would check nothing");
         let mut files = Vec::new();
         rust_files(&crates.join(name).join("src"), &mut files);

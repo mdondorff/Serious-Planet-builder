@@ -1,9 +1,4 @@
-# terrain-lod Specification
-
-## Purpose
-TBD - created by archiving change m0-foundations. Update Purpose after archive.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: LOD-001 CPU node selection
 Terrain node selection (which quadtree nodes at which level, with morph factors) SHALL be a pure function of camera, parameters and the tree, implemented in GPU-free code, and its result SHALL be plain data (`NodeSelection`) that the plan builder consumes; terrain draws in the FramePlan arrive with the terrain render change.
@@ -49,24 +44,3 @@ Source: report §2 (CDLOD)
 - **WHEN** the camera moves away from a node in small steps
 - **THEN** its morph factor never decreases and changes by at most the step bound
 
-### Requirement: LOD-005 No cracks in debug views
-Scripted views SHALL show no background-coloured pixel inside the planet disc in the tile-ID debug view.
-
-Verify: C
-Status: planned
-Source: report §16
-
-#### Scenario: Ten scripted views
-- **WHEN** the ten scripted views are rendered in the tile-ID debug view
-- **THEN** the hole-pixel count of each is zero
-
-### Requirement: LOD-006 Plan builder
-The GPU-free plan builder SHALL lay tiles out in pixel rectangles, compute each camera-relative origin as the float64 difference rounded once to float32, place tile origins on the reference sphere, give distinct stable colours to distinct tile IDs, and reject unusable requests (no tiles, unknown face mapping, frame too small) with a message.
-
-Verify: A
-Status: active
-Source: CON-03, CON-11, ADR 0001
-
-#### Scenario: Two tiles
-- **WHEN** two tiles are planned into a 256 by 128 frame
-- **THEN** their rectangles are [0,0,128,128] and [128,0,128,128] and each camera-relative origin equals the f64 difference rounded once
