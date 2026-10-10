@@ -7,6 +7,7 @@ use crate::plan::{face_mapping_by_id, PlanError, CLEAR_COLOR, HEIGHT_RANGE};
 use planet_core::hash::hash_u64s;
 use planet_core::{PlanetFixed, TileId, Vec3};
 use planet_generators::dump::FACE_COLORS;
+use planet_generators::height::HeightField;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TerrainView {
@@ -102,6 +103,12 @@ fn tile_id_color(id: TileId) -> [u8; 4] {
 }
 
 pub fn plan_terrain(req: &TerrainRequest) -> Result<TerrainPlan, PlanError> {
+    plan_terrain_field(req, &planet_generators::height::Reference(req.seed))
+}
+
+/// [`plan_terrain`] with tile origins and mesh keys from `field` (stress tests). `field.seed()` must equal `req.seed`.
+pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Result<TerrainPlan, PlanError> {
+    assert_eq!(field.seed(), req.seed, "the height field's seed must be the request's seed");
     let map = face_mapping_by_id(&req.face_mapping).ok_or_else(|| PlanError::UnknownFaceMapping(req.face_mapping.clone()))?;
     if req.size.0 == 0 || req.size.1 == 0 {
         return Err(PlanError::FrameTooSmall { size: req.size, tiles: 0 });
@@ -113,7 +120,7 @@ pub fn plan_terrain(req: &TerrainRequest) -> Result<TerrainPlan, PlanError> {
         .iter()
         .map(|n| {
             let centre = n.tile.center_direction(map.as_ref());
-            let origin = PlanetFixed(centre * (req.lod.radius_m + planet_generators::height::height_at(req.seed, centre)));
+            let origin = PlanetFixed(centre * (req.lod.radius_m + field.height(centre)));
             let rel = origin.0 - req.camera.position.0;
             let (start, end) = match n.tile.level() {
                 0 => (1.0e30, 1.0e30),
@@ -134,7 +141,7 @@ pub fn plan_terrain(req: &TerrainRequest) -> Result<TerrainPlan, PlanError> {
                 morph_start_m: start as f32,
                 morph_end_m: end as f32,
                 color,
-                mesh_key: planet_generators::mesh::mesh_key(map.as_ref(), req.seed, n.tile, req.lod.cells, req.lod.radius_m),
+                mesh_key: planet_generators::mesh::mesh_key_field(field, map.as_ref(), n.tile, req.lod.cells, req.lod.radius_m),
             }
         })
         .collect();
@@ -168,18 +175,23 @@ impl TerrainPlan {
 
 /// Point `h` metres above the terrain of the generator with `seed` (not above the reference sphere) at a latitude and
 /// longitude in degrees. Shared by the scripted views and the flight.
-fn above_terrain(radius_m: f64, seed: u64, lat_deg: f64, lon_deg: f64, h: f64) -> PlanetFixed {
+fn above_terrain(radius_m: f64, field: &dyn HeightField, lat_deg: f64, lon_deg: f64, h: f64) -> PlanetFixed {
     let (la, lo) = (lat_deg.to_radians(), lon_deg.to_radians());
     let dir = Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la));
-    PlanetFixed(dir * (radius_m + planet_generators::height::height_at(seed, dir) + h))
+    PlanetFixed(dir * (radius_m + field.height(dir) + h))
 }
 
 /// Ten scripted cameras (orbit down to 1 m, poles, a cube corner and a face edge), shared by golden tests,
 /// the performance harness and manual review (report §16). Looking direction is horizontal-north pitched down,
 /// except at orbit where the camera looks at the planet centre.
 pub fn scripted_views(radius_m: f64, aspect: f64, seed: u64) -> Vec<(&'static str, Camera)> {
+    scripted_views_field(radius_m, aspect, &planet_generators::height::Reference(seed))
+}
+
+/// [`scripted_views`] with camera heights measured above `field` (stress tests).
+pub fn scripted_views_field(radius_m: f64, aspect: f64, field: &dyn HeightField) -> Vec<(&'static str, Camera)> {
     let fov = 60f64.to_radians();
-    let at = |lat: f64, lon: f64, h: f64| above_terrain(radius_m, seed, lat, lon, h);
+    let at = |lat: f64, lon: f64, h: f64| above_terrain(radius_m, field, lat, lon, h);
     let north = Vec3::new(0.0, 0.0, 1.0);
     let near = 0.1;
     let surf = |lat, lon, h, pitch_deg: f64| Camera::at_surface_point(at(lat, lon, h), north, pitch_deg.to_radians(), fov, aspect, near);
@@ -213,7 +225,8 @@ pub fn flight_path(radius_m: f64, aspect: f64, seed: u64, frames: usize) -> Vec<
     assert!(frames >= 10, "a flight needs at least 10 frames, got {frames}");
     let fov = 60f64.to_radians();
     let north = Vec3::new(0.0, 0.0, 1.0);
-    let at = |lat: f64, lon: f64, h: f64| above_terrain(radius_m, seed, lat, lon, h);
+    let reference = planet_generators::height::Reference(seed);
+    let at = |lat: f64, lon: f64, h: f64| above_terrain(radius_m, &reference, lat, lon, h);
     let dive = frames * 4 / 5;
     let ratio = FLIGHT_END_M / FLIGHT_START_M;
     (0..frames)

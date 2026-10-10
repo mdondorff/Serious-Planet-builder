@@ -34,7 +34,7 @@ fn lerp(a: f64, b: f64, t: f64) -> f64 {
 }
 
 /// Single-octave value noise at `p`, in [-1, 1].
-fn value_noise(seed: u64, octave: u32, p: Vec3) -> f64 {
+pub(crate) fn value_noise(seed: u64, octave: u32, p: Vec3) -> f64 {
     let (fx, fy, fz) = (libm::floor(p.x), libm::floor(p.y), libm::floor(p.z));
     let (tx, ty, tz) = (smooth(p.x - fx), smooth(p.y - fy), smooth(p.z - fz));
     let (ix, iy, iz) = (fx as i64, fy as i64, fz as i64);
@@ -44,6 +44,39 @@ fn value_noise(seed: u64, octave: u32, p: Vec3) -> f64 {
     let x01 = lerp(c(0, 0, 1), c(1, 0, 1), tx);
     let x11 = lerp(c(0, 1, 1), c(1, 1, 1), tx);
     lerp(lerp(x00, x10, ty), lerp(x01, x11, ty), tz)
+}
+
+/// A height field over unit directions. The reference generator is [`Reference`]; [`crate::stress::Steep`] is a
+/// test-only stress field. Mesh and plan code take a field so stress tests can swap it without touching production paths.
+pub trait HeightField: Sync {
+    /// Height in metres at a unit direction.
+    fn height(&self, dir: Vec3) -> f64;
+    /// The seed (part of every key).
+    fn seed(&self) -> u64;
+    /// Folded into mesh keys so meshes of different fields never alias; `None` for [`Reference`], whose keys are
+    /// exactly the ones without a field.
+    fn key_salt(&self) -> Option<u64>;
+    /// Bound on `|height|` in metres.
+    fn max_abs_height_m(&self) -> f64;
+}
+
+/// The reference generator ([`height_at`]) with a seed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Reference(pub u64);
+
+impl HeightField for Reference {
+    fn height(&self, dir: Vec3) -> f64 {
+        height_at(self.0, dir)
+    }
+    fn seed(&self) -> u64 {
+        self.0
+    }
+    fn key_salt(&self) -> Option<u64> {
+        None
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        AMPLITUDE_M
+    }
 }
 
 /// Height in metres at a unit direction.
