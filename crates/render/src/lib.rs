@@ -120,18 +120,58 @@ impl GpuContext {
         }
     }
 
-    /// Backend + name as a directory-safe key, e.g. `dx12-microsoft-basic-render-driver`.
+    /// Adapter family as a directory-safe key, e.g. `dx12-microsoft-basic-render-driver` or `vulkan-llvmpipe`:
+    /// parenthesised details (LLVM version, bit width) are dropped so driver updates do not orphan the goldens
+    /// (same rule as `planet_testkit::adapter_key`).
     pub fn adapter_key(&self) -> String {
-        let backend = format!("{:?}", self.info.backend);
-        let mut key = String::new();
-        for c in format!("{backend}-{}", self.info.name).to_lowercase().chars() {
-            if c.is_ascii_alphanumeric() {
-                key.push(c);
-            } else if !key.ends_with('-') {
-                key.push('-');
-            }
+        family_key(&format!("{:?}", self.info.backend), &self.info.name)
+    }
+
+    /// Everything that identifies the driver: name, backend, device type, driver and driver info. Recorded beside the
+    /// goldens and printed on every mismatch.
+    pub fn driver_string(&self) -> String {
+        format!(
+            "{} | {:?} | {:?} | driver '{}' '{}'",
+            self.info.name, self.info.backend, self.info.device_type, self.info.driver, self.info.driver_info
+        )
+    }
+}
+
+/// Directory-safe family key of an adapter: parenthesised details are dropped (`planet_testkit::adapter_key` applies the
+/// same rule; both are pinned by tests against the same table).
+fn family_key(backend: &str, name: &str) -> String {
+    let mut family = String::new();
+    let mut depth = 0u32;
+    for c in name.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => family.push(c),
+            _ => {}
         }
-        key.trim_matches('-').to_string()
+    }
+    let mut key = String::new();
+    for c in format!("{backend}-{family}").to_lowercase().chars() {
+        if c.is_ascii_alphanumeric() {
+            key.push(c);
+        } else if !key.ends_with('-') {
+            key.push('-');
+        }
+    }
+    key.trim_matches('-').to_string()
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::family_key;
+
+    // spec: TEST-002
+    #[test]
+    fn the_family_key_ignores_driver_and_compiler_versions() {
+        assert_eq!(family_key("Dx12", "Microsoft Basic Render Driver"), "dx12-microsoft-basic-render-driver");
+        assert_eq!(family_key("Vulkan", "llvmpipe (LLVM 15.0.7, 256 bits)"), "vulkan-llvmpipe");
+        assert_eq!(family_key("Vulkan", "llvmpipe (LLVM 20.1.2, 256 bits)"), family_key("Vulkan", "llvmpipe (LLVM 21.0.0, 128 bits)"));
+        assert_eq!(family_key("Vulkan", "NVIDIA GeForce RTX 3080 Ti Laptop GPU"), "vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu");
     }
 }
 

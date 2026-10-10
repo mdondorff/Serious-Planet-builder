@@ -16,6 +16,23 @@ mod tests {
         assert!(found.is_empty(), "CON-25: no scripts in the repo, add an xtask command instead: {found:?}");
     }
 
+    // spec: TEST-002
+    #[test]
+    fn every_golden_directory_records_its_driver() {
+        let dir = repo_root().join("tests/goldens");
+        for e in std::fs::read_dir(&dir).expect("tests/goldens").flatten() {
+            if e.path().is_dir() {
+                let sidecar = e.path().join("driver.txt");
+                let text = std::fs::read_to_string(&sidecar).unwrap_or_default();
+                assert!(
+                    !text.trim().is_empty(),
+                    "{} must record the driver string the goldens were blessed on (ADR 0009)",
+                    sidecar.display()
+                );
+            }
+        }
+    }
+
     fn workflow() -> String {
         std::fs::read_to_string(repo_root().join(".github/workflows/ci.yml")).expect("CI workflow .github/workflows/ci.yml")
     }
@@ -26,7 +43,8 @@ mod tests {
         let w = workflow();
         for needle in [
             "windows-latest",
-            "ubuntu-latest",
+            "ubuntu-24.04",
+            "PLANET_REQUIRE_ADAPTER_GOLDENS",
             "mesa-vulkan-drivers",
             "cargo xtask check",
             "cargo xtask spec-lint",
@@ -37,6 +55,8 @@ mod tests {
         ] {
             assert!(w.contains(needle), "ci.yml is missing `{needle}`");
         }
+        // The runner image is pinned: a moving `-latest` Linux image changes Mesa and LLVM under the goldens.
+        assert!(!w.contains("ubuntu-latest"), "ci.yml must pin the Linux runner image (ubuntu-24.04), not ubuntu-latest");
     }
 
     // spec: BUILD-006

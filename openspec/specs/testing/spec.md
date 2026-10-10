@@ -21,7 +21,7 @@ Source: CON-16, ADR 0012
 - **THEN** `cargo xtask spec-lint` fails and names the file and the ID
 
 ### Requirement: TEST-002 Per-adapter goldens, owner-only blessing
-Golden images SHALL be stored per adapter under `tests/goldens/<adapter>/`; a test SHALL never create or overwrite a golden; when a golden is missing the test SHALL write a candidate to `target/review/candidates/<adapter>/` and report it as pending (failing in strict mode, and always when the adapter already has blessed goldens) unless its name is listed in `tests/goldens/pending.txt`; debug views SHALL compare exactly.
+Golden images SHALL be stored per adapter family under `tests/goldens/<adapter>/` (the key drops driver and compiler versions, e.g. `vulkan-llvmpipe`), with the full driver string recorded in `driver.txt` beside them and printed on every mismatch; a test SHALL never create or overwrite a golden; when a golden is missing the test SHALL write a candidate to `target/review/candidates/<adapter>/` and report it as pending (failing in strict mode, and always when the adapter already has blessed goldens) unless its name is listed in `tests/goldens/pending.txt`; an adapter that runs where `PLANET_REQUIRE_ADAPTER_GOLDENS=1` (CI) and has no golden directory SHALL fail; debug views SHALL compare exactly.
 
 Verify: A
 Status: active
@@ -42,6 +42,14 @@ Source: CON-18, ADR 0009
 #### Scenario: Waiting for blessing
 - **WHEN** a golden is missing but its name is listed in `tests/goldens/pending.txt`
 - **THEN** the test reports it as pending and passes, and the line is removed when the owner blesses the golden
+
+#### Scenario: Adapter family key
+- **WHEN** two llvmpipe adapters differ only in the LLVM version or bit width
+- **THEN** they share one golden directory key, and a mismatch message shows both the current and the recorded driver string
+
+#### Scenario: No golden directory in CI
+- **WHEN** `PLANET_REQUIRE_ADAPTER_GOLDENS=1` and the running adapter's key has no golden directory
+- **THEN** the golden test fails and says the key or driver family may have changed
 
 ### Requirement: TEST-003 Image metrics
 The test kit SHALL provide metrics that hold without a golden, including exact pixel counts, so that a hole (background colour inside the rendered object) or a stray colour is detectable.
@@ -107,7 +115,7 @@ Source: CLAUDE.md, report §16
 - **THEN** the report states 1 differing pixel, a maximum channel delta of 5, its coordinates, and the diff image path
 
 ### Requirement: TEST-008 Repro bundles
-Every visual bug SHALL be reproducible from a bundle containing camera pose or path, definition hash (zero until the WorldDefinition exists in M3), generator version, settings and adapter information, replayed by `cargo xtask repro <bundle>` in every run mode that renders (`test-render` and `editor --offscreen`); replay SHALL refuse a version mismatch and report any difference between the rebuilt and the recorded plan in numbers.
+Every visual bug SHALL be reproducible from a bundle containing camera pose or path, definition hash (zero until the WorldDefinition exists in M3), generator version, settings and adapter information, replayed by `cargo xtask repro <bundle>` (tile scenes and terrain scenes) in every run mode that renders (`test-render` and `editor --offscreen`); replay SHALL refuse a version mismatch and report any difference between the rebuilt and the recorded plan in numbers.
 
 Verify: A
 Status: active
@@ -117,8 +125,12 @@ Source: CON-19
 - **WHEN** a bundle is replayed
 - **THEN** the same FramePlan is produced and the run reports any difference in numbers
 
+#### Scenario: Terrain replay
+- **WHEN** a terrain bundle recorded with a seed is replayed with another seed, another generator or mesh version, or a tampered plan
+- **THEN** the replay refuses a version mismatch, rejects a corrupt bundle by its plan hash, and reports the differing plan lines (for example mesh keys) in numbers; an unchanged bundle replays to the recorded pixels
+
 ### Requirement: TEST-009 FramePlan snapshots
-A FramePlan SHALL be serialisable to a stable text form that can be snapshot-tested, diffed between versions and stored in a repro bundle.
+A FramePlan and a TerrainPlan SHALL each be serialisable to a stable text form that can be snapshot-tested, diffed between versions and stored in a repro bundle; the terrain text form SHALL carry every field of the plan (size, view, cells, the f64 camera, view-projection, clear colour, height range and per node tile, level, origin, camera-relative origin, morph values, colour and mesh key) so that a change to any one of them changes the text and its hash.
 
 Verify: A
 Status: active
@@ -127,6 +139,10 @@ Source: CON-03, ADR 0009
 #### Scenario: Round trip
 - **WHEN** a FramePlan is serialised and read back
 - **THEN** it is equal to the original
+
+#### Scenario: Every terrain plan field
+- **WHEN** any single field of a terrain plan is changed (down to one ulp of an f64 or f32 value)
+- **THEN** its text form and plan hash change, and the diff names the difference
 
 ### Requirement: TEST-010 Debug view per visual feature
 Every visual feature SHALL ship with a flat-colour debug view and at least one tier-C test; debug views SHALL be independent of lighting and compare exactly.

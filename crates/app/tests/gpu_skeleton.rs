@@ -115,3 +115,42 @@ fn streamed_terrain_equals_synchronous_terrain() {
     assert!(log_a.contains("draw calls") && log_b.contains("draw calls"));
     assert_eq!(read_png(&a).unwrap(), read_png(&b).unwrap(), "the streaming path must produce the same frame");
 }
+
+// spec: TEST-008
+#[test]
+fn a_terrain_bundle_replays_to_the_same_pixels_and_refuses_changed_inputs() {
+    let (png, bundle, again) = (tmp("t1.png"), tmp("t.repro"), tmp("t2.png"));
+    run(&[
+        "test-render",
+        "--scene",
+        "terrain",
+        "--script",
+        "4",
+        "--view",
+        "level",
+        "--adapter",
+        "software",
+        "--out",
+        png.to_str().unwrap(),
+        "--bundle",
+        bundle.to_str().unwrap(),
+    ])
+    .unwrap();
+    let log =
+        run(&["test-render", "--adapter", "software", "--repro", bundle.to_str().unwrap(), "--out", again.to_str().unwrap()]).unwrap();
+    assert!(log.contains("terrain plan identical"), "{log}");
+    assert_eq!(read_png(&png).unwrap(), read_png(&again).unwrap(), "the replay must draw the recorded pixels");
+
+    let text = std::fs::read_to_string(&bundle).unwrap();
+    // A version mismatch is refused before anything is replanned.
+    let bad = tmp("told.repro");
+    std::fs::write(&bad, text.replacen("mesh_version 2", "mesh_version 1", 1)).unwrap();
+    let e = run(&["test-render", "--adapter", "software", "--repro", bad.to_str().unwrap()]).unwrap_err();
+    assert!(e.contains("mesh version 1") && e.contains("this build has"), "{e}");
+    // Another seed leaves the recorded plan text intact but replans to other mesh keys: the replay reports the difference.
+    let other = tmp("tseed.repro");
+    assert!(text.contains("\nseed 1\n"));
+    std::fs::write(&other, text.replacen("\nseed 1\n", "\nseed 2\n", 1)).unwrap();
+    let e = run(&["test-render", "--adapter", "software", "--repro", other.to_str().unwrap()]).unwrap_err();
+    assert!(e.contains("replayed terrain plan differs") && e.contains("mesh_key"), "{e}");
+}
