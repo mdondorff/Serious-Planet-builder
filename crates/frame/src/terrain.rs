@@ -191,3 +191,39 @@ pub fn scripted_views(radius_m: f64, aspect: f64, seed: u64) -> Vec<(&'static st
         ("face-edge-1km", surf(0.0, 45.0, 1000.0, 15.0)),
     ]
 }
+
+/// Altitude at the start of [`flight_path`] (above the terrain).
+pub const FLIGHT_START_M: f64 = 2.0e7;
+/// Altitude of the final glide of [`flight_path`] (above the terrain).
+pub const FLIGHT_END_M: f64 = 1.0;
+/// Ground distance per frame during the final glide: small enough that vertex swimming shows between frames.
+pub const FLIGHT_GLIDE_STEP_M: f64 = 0.05;
+
+/// The scripted flight for the real-GPU jitter review (tier D): `frames` cameras, the first 80 % diving from
+/// [`FLIGHT_START_M`] to [`FLIGHT_END_M`] above the terrain at 20° N 30° E (log-spaced altitude, pitch from 85° to 8°,
+/// heading north), the rest gliding north at [`FLIGHT_END_M`] by [`FLIGHT_GLIDE_STEP_M`] per frame. Pure and
+/// deterministic. `frames` must be at least 10.
+pub fn flight_path(radius_m: f64, aspect: f64, seed: u64, frames: usize) -> Vec<Camera> {
+    assert!(frames >= 10, "a flight needs at least 10 frames, got {frames}");
+    let fov = 60f64.to_radians();
+    let north = Vec3::new(0.0, 0.0, 1.0);
+    let at = |lat_deg: f64, lon_deg: f64, h: f64| {
+        let (la, lo) = (lat_deg.to_radians(), lon_deg.to_radians());
+        let dir = Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la));
+        PlanetFixed(dir * (radius_m + planet_generators::height::height_at(seed, dir) + h))
+    };
+    let dive = frames * 4 / 5;
+    let ratio = FLIGHT_END_M / FLIGHT_START_M;
+    (0..frames)
+        .map(|i| {
+            let (lat, h, pitch_deg) = if i < dive {
+                let t = i as f64 / (dive - 1) as f64;
+                (20.0, FLIGHT_START_M * libm::pow(ratio, t), 85.0 - 77.0 * t)
+            } else {
+                let s = (i - dive + 1) as f64 * FLIGHT_GLIDE_STEP_M;
+                (20.0 + (s / radius_m).to_degrees(), FLIGHT_END_M, 8.0)
+            };
+            Camera::at_surface_point(at(lat, 30.0, h), north, pitch_deg.to_radians(), fov, aspect, 0.1)
+        })
+        .collect()
+}

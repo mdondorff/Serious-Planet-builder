@@ -8,6 +8,7 @@ use std::time::Instant;
 const TIER_A: &str = "not binary(~gpu_) and not binary(~oracle_)";
 const TIER_AB: &str = "not binary(~gpu_)";
 const TIER_C: &str = "binary(~gpu_)";
+const TIER_BC_REAL: &str = "binary(~gpu_) or binary(~oracle_)";
 const FAST_BUDGET_SECS: f64 = 10.0;
 
 fn package(dir: &str) -> String {
@@ -100,7 +101,12 @@ pub fn test(root: &Path, args: &[String]) -> Res {
         }
         Some("gpu") => {
             cmd.push("--workspace".into());
-            TIER_C
+            // On the real GPU the tier-B oracles run too: they compare its shaders with the CPU twins (TEST-013).
+            if real {
+                TIER_BC_REAL
+            } else {
+                TIER_C
+            }
         }
         _ => {
             cmd.push("--workspace".into());

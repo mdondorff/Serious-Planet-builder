@@ -11,7 +11,8 @@ const RES: u32 = 16;
 // spec: REND-001
 #[test]
 fn gpu_frames_match_the_cpu_twin() {
-    let ctx = GpuContext::new(AdapterPolicy::Software).expect("software adapter");
+    // PLANET_ADAPTER (software by default; `cargo xtask test gpu --real` runs the oracles on the real GPU too, TEST-013).
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let m = TangentWarp;
     let a = TileId::new(Face(3), 3, 5, 2).unwrap();
     let tiles_ids = vec![a, a.neighbor(&m, Side::East), TileId::new(Face(0), 0, 0, 0).unwrap()];
