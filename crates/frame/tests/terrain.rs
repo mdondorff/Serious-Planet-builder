@@ -197,3 +197,36 @@ fn terrain_plan_summaries_match_the_committed_snapshot() {
         diff.join("\n")
     );
 }
+
+// spec: REND-013
+#[test]
+fn every_planned_draw_expects_the_mesh_of_its_own_seed() {
+    use planet_generators::mesh::mesh_key;
+    let (_, camera) = scripted_views(R, 4.0 / 3.0, 1)[3];
+    let plan_for = |seed: u64| {
+        plan_terrain(&TerrainRequest {
+            camera,
+            size: (128, 96),
+            view: TerrainView::Level,
+            lod: lod(),
+            face_mapping: "tangent-v1".into(),
+            seed,
+        })
+        .unwrap()
+    };
+    let (one, two) = (plan_for(1), plan_for(2));
+    assert!(!one.nodes.is_empty());
+    for (seed, plan) in [(1, &one), (2, &two)] {
+        for n in &plan.nodes {
+            assert_eq!(
+                n.mesh_key,
+                mesh_key(&TangentWarp, seed, n.tile, plan.cells, R),
+                "{:?}: key does not follow the seed {seed}",
+                n.tile
+            );
+        }
+    }
+    let shared =
+        one.nodes.iter().filter_map(|a| two.nodes.iter().find(|b| b.tile == a.tile).map(|b| (a, b))).next().expect("a common tile");
+    assert_ne!(shared.0.mesh_key, shared.1.mesh_key, "the same tile must expect different meshes for different seeds");
+}

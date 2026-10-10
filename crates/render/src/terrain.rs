@@ -345,8 +345,9 @@ impl TerrainRenderer {
         Ok(())
     }
 
-    pub fn has_tile(&self, tile: planet_core::TileId) -> bool {
-        self.vertex_buffers.contains_key(&tile)
+    /// Whether `tile` is resident with exactly the mesh `key` (what a plan draw expects): the test for "needs an upload".
+    pub fn has_mesh(&self, tile: planet_core::TileId, key: u64) -> bool {
+        self.tile_key(tile) == Some(key)
     }
 
     /// Key of the resident mesh of `tile`, if any.
@@ -369,8 +370,12 @@ impl TerrainRenderer {
             return Err(ExecError::BadResolution { id: planet_core::TileId::from_raw(0).expect("root"), res: plan.cells });
         }
         for d in &plan.nodes {
-            if !self.vertex_buffers.contains_key(&d.tile) {
-                return Err(ExecError::MissingTile(d.tile));
+            match self.vertex_buffers.get(&d.tile) {
+                None => return Err(ExecError::MissingTile(d.tile)),
+                Some((key, _)) if *key != d.mesh_key => {
+                    return Err(ExecError::StaleMesh { tile: d.tile, resident: *key, planned: d.mesh_key })
+                }
+                Some(_) => {}
             }
         }
         let [lo, hi] = plan.height_range;

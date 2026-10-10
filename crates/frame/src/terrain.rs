@@ -61,6 +61,9 @@ pub struct TerrainDraw {
     pub morph_end_m: f32,
     /// Flat colour of the face, tile-id and level views.
     pub color: [u8; 4],
+    /// Key of the mesh this draw expects ([`planet_generators::mesh::mesh_key`]): a resident buffer with another key is
+    /// stale and must not be drawn.
+    pub mesh_key: u64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -129,6 +132,7 @@ pub fn plan_terrain(req: &TerrainRequest) -> Result<TerrainPlan, PlanError> {
                 morph_start_m: start as f32,
                 morph_end_m: end as f32,
                 color,
+                mesh_key: planet_generators::mesh::mesh_key(map.as_ref(), req.seed, n.tile, req.lod.cells, req.lod.radius_m),
             }
         })
         .collect();

@@ -36,6 +36,12 @@ pub enum ExecError {
         id: TileId,
         res: u32,
     },
+    /// A resident mesh was built from other inputs (seed, radius, mesh version) than the plan expects.
+    StaleMesh {
+        tile: TileId,
+        resident: u64,
+        planned: u64,
+    },
     /// The plan was made for another frame size than the renderer's render targets.
     SizeMismatch {
         plan: (u32, u32),
@@ -51,6 +57,12 @@ impl fmt::Display for ExecError {
                 write!(f, "the plan is for a {}x{} frame but the renderer was created for {}x{}", plan.0, plan.1, renderer.0, renderer.1)
             }
             ExecError::BadResolution { id, res } => write!(f, "tile {id:?}: resolution {res} is outside 1..={MAX_TILE_RES}"),
+            ExecError::StaleMesh { tile, resident, planned } => {
+                write!(
+                    f,
+                    "tile {tile:?}: the resident mesh has key {resident:#x} but the plan expects {planned:#x}; upload the current mesh"
+                )
+            }
             ExecError::MissingTile(id) => write!(f, "the plan draws tile {id:?} but no resource for it was supplied"),
             ExecError::BadResource { id, expected, got } => write!(f, "tile {id:?}: expected {expected} height samples, got {got}"),
             ExecError::OutsideFrame { index, rect, size } => {
