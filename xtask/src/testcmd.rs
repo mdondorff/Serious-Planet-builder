@@ -142,6 +142,11 @@ fn candidates(root: &Path) -> Vec<(String, String)> {
         let Ok(rel) = f.strip_prefix(&base) else { continue };
         let parts: Vec<String> = rel.iter().map(|s| s.to_string_lossy().into_owned()).collect();
         if let [adapter, name] = parts.as_slice() {
+            // Stale candidates identical to the committed golden are not waiting for anyone.
+            let golden = root.join("tests").join("goldens").join(adapter).join(name);
+            if std::fs::read(&golden).ok().as_deref() == std::fs::read(&f).ok().as_deref() && golden.is_file() {
+                continue;
+            }
             out.push((adapter.clone(), name.clone()));
         }
     }
@@ -235,5 +240,28 @@ mod repro_tests {
     fn repro_needs_an_existing_bundle() {
         assert!(repro(Path::new("."), &[]).unwrap_err().contains("usage"));
         assert!(repro(Path::new("."), &["no-such-bundle.repro".to_string()]).unwrap_err().contains("not found"));
+    }
+}
+
+#[cfg(test)]
+mod candidate_tests {
+    use super::*;
+
+    // spec: TEST-002
+    #[test]
+    fn candidates_list_only_new_or_changed_images() {
+        let root = std::env::temp_dir().join(format!("xtask-candidates-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (cand, gold) = (root.join("target/review/candidates/a"), root.join("tests/goldens/a"));
+        std::fs::create_dir_all(&cand).unwrap();
+        std::fs::create_dir_all(&gold).unwrap();
+        std::fs::write(cand.join("same.png"), b"1").unwrap();
+        std::fs::write(gold.join("same.png"), b"1").unwrap();
+        std::fs::write(cand.join("changed.png"), b"2").unwrap();
+        std::fs::write(gold.join("changed.png"), b"1").unwrap();
+        std::fs::write(cand.join("new.png"), b"3").unwrap();
+        let mut got = candidates(&root);
+        got.sort();
+        assert_eq!(got, [("a".to_string(), "changed.png".to_string()), ("a".to_string(), "new.png".to_string())]);
     }
 }
