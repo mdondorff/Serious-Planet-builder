@@ -5,10 +5,10 @@ use std::path::Path;
 use std::time::Instant;
 
 /// Test binaries named `gpu_*` are tier C, `oracle_*` tier B; everything else is tier A.
-const TIER_A: &str = "not binary(~gpu_) and not binary(~oracle_)";
-const TIER_AB: &str = "not binary(~gpu_)";
-const TIER_C: &str = "binary(~gpu_)";
-const TIER_BC_REAL: &str = "binary(~gpu_) or binary(~oracle_)";
+const TIER_A: &str = "not binary(/^gpu_/) and not binary(/^oracle_/)";
+const TIER_AB: &str = "not binary(/^gpu_/)";
+const TIER_C: &str = "binary(/^gpu_/)";
+const TIER_BC_REAL: &str = "binary(/^gpu_/) or binary(/^oracle_/)";
 const FAST_BUDGET_SECS: f64 = 10.0;
 
 fn package(dir: &str) -> String {
@@ -269,7 +269,7 @@ mod tests {
         assert_eq!(tier_filter(Some("fast"), false), TIER_A);
         assert_eq!(tier_filter(None, false), TIER_AB);
         assert_eq!(tier_filter(Some("gpu"), false), TIER_C);
-        assert_eq!(tier_filter(Some("gpu"), true), "binary(~gpu_) or binary(~oracle_)");
+        assert_eq!(tier_filter(Some("gpu"), true), "binary(/^gpu_/) or binary(/^oracle_/)");
     }
 
     // spec: BUILD-002

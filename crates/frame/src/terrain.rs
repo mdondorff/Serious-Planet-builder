@@ -54,7 +54,9 @@ pub struct TerrainDraw {
     pub origin: PlanetFixed,
     /// `origin - camera`, float64 difference rounded once to f32.
     pub camera_relative_origin: [f32; 3],
-    /// Selection-level morph (0..1), shown by the morph view for the node centre.
+    /// Selection-level morph (0..1) of the node centre as the CPU selection computed it: a diagnostic carried in the
+    /// plan text and snapshots. The renderer does not upload it; the shader derives the per-vertex morph from the
+    /// interval below.
     pub morph: f32,
     /// Vertex distances (metres) between which a vertex morphs to the parent grid.
     pub morph_start_m: f32,
