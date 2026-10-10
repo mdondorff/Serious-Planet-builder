@@ -63,7 +63,7 @@ fn holes(plan: &TerrainPlan, img: &Image) -> Vec<(u32, u32)> {
     out
 }
 
-// spec: LOD-005, REND-001
+// spec: LOD-005, REND-001, TEST-011
 #[test]
 fn ten_scripted_views_have_no_holes_and_exact_draw_counts() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
@@ -75,6 +75,14 @@ fn ten_scripted_views_have_no_holes_and_exact_draw_counts() {
         let (img, stats) = render(&ctx, &plan, &meshes);
         assert_eq!(stats.draw_calls as usize, plan.nodes.len(), "{name}: draw calls must equal planned nodes");
         assert_eq!(stats.triangles, plan.nodes.len() as u64 * index_triangles, "{name}");
+        // The renderer matches the counts the plan implies (TEST-011): tier A asserts the budgets on the plan, tier C
+        // checks that what the GPU path did equals them.
+        let counts = plan.counts();
+        assert_eq!(
+            (stats.draw_calls, stats.triangles, stats.vertex_bytes),
+            (counts.draw_calls, counts.triangles, counts.upload_bytes),
+            "{name}"
+        );
         let h = holes(&plan, &img);
         assert!(
             h.is_empty(),

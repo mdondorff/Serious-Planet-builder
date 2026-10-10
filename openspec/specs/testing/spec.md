@@ -168,15 +168,19 @@ Source: CON-18
 - **THEN** no clear-colour pixel appears inside a planned rectangle, the face view is exactly the face colour, and the images match the adapter's goldens (or are written as candidates)
 
 ### Requirement: TEST-011 Count-based budgets
-Draw calls, triangles, resident tiles, upload bytes and allocated VRAM SHALL be asserted in tests on any adapter; time-based budgets SHALL be measured only on the reference machine.
+Draw calls, triangles, resident tiles and upload bytes SHALL be derived from the plan and asserted against budgets in tier A tests on any machine, and tier C tests SHALL check that the renderer drew and uploaded exactly those counts (allocated VRAM joins them when the renderer allocates budgeted pools); time-based budgets SHALL be measured only on the reference machine.
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-20
 
 #### Scenario: Budget exceeded
 - **WHEN** a frame plan exceeds its draw-call budget
 - **THEN** the test fails and prints the count and the budget
+
+#### Scenario: Renderer matches the plan
+- **WHEN** a terrain plan is rendered
+- **THEN** the draw calls, triangles and uploaded vertex bytes the renderer reports equal the counts derived from the plan
 
 ### Requirement: TEST-012 Terrain performance workload
 The performance harness SHALL provide a terrain frame workload at 1440p over scripted views from orbit to 1 m that generates and uploads meshes once, then reports per run the GPU time (timestamp queries), CPU planning time, CPU record time, wall time and the deterministic counts (nodes, draw calls, triangles, resident vertex bytes), checks the terrain budget (median GPU time at most 8 ms, p99 frame time at most 20 ms), refuses unready machines like every performance run, and offers a labelled smoke mode that exercises the path on any adapter without being a measurement.

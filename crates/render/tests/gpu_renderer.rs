@@ -15,7 +15,7 @@ fn plan(index: usize) -> planet_frame::TerrainPlan {
     plan_terrain(&TerrainRequest { camera, size: SIZE, view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 1 }).unwrap()
 }
 
-// spec: REND-013
+// spec: REND-013, TEST-011
 #[test]
 fn a_persistent_renderer_uploads_each_tile_once_and_matches_the_one_shot_path() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
@@ -42,6 +42,13 @@ fn a_persistent_renderer_uploads_each_tile_once_and_matches_the_one_shot_path() 
         assert_eq!(frame, one_shot, "the persistent renderer must draw exactly what the one-shot path draws");
     }
     assert_eq!((r.uploaded_bytes, r.resident_tiles()), (uploaded, resident), "rendering must not upload");
+    // A renderer that only ever saw one plan holds exactly the tiles and bytes the plan implies (TEST-011).
+    let mut single = TerrainRenderer::new(&ctx, SIZE, CELLS);
+    for n in &p_near.nodes {
+        single.upload(&ctx, &tile_mesh(1, &TangentWarp, n.tile, CELLS, R)).unwrap();
+    }
+    let counts = p_near.counts();
+    assert_eq!((single.resident_tiles() as u32, single.uploaded_bytes), (counts.resident_tiles, counts.upload_bytes));
 }
 
 // spec: REND-013

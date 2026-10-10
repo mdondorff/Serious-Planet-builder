@@ -386,3 +386,42 @@ cells 17
     assert!(TerrainBundle::from_text(&text.replacen("mesh_key ", "mesh_key 1", 1)).is_err());
     assert!(TerrainBundle::from_text("planet-terrain-repro 9\n---\n").unwrap_err().contains("unsupported"));
 }
+
+// spec: TEST-011
+#[test]
+fn plan_counts_stay_within_the_budget_over_the_scripted_views() {
+    use planet_frame::CountBudget;
+    // Production-like parameters at 1440p: cells 32, tau 6 px, the ten scripted views from orbit to 1 m.
+    let size = (2560u32, 1440u32);
+    let lod = LodParams { cells: 32, viewport_h_px: f64::from(size.1), tau_px: 6.0, max_level: 26, ..LodParams::earth_1080p() };
+    let mut worst = 0;
+    for (name, camera) in scripted_views(R, f64::from(size.0) / f64::from(size.1), 1) {
+        let plan = plan_terrain(&TerrainRequest {
+            camera,
+            size,
+            view: TerrainView::Level,
+            lod: lod.clone(),
+            face_mapping: "tangent-v1".into(),
+            seed: 1,
+        })
+        .unwrap();
+        let c = plan.counts();
+        // The counts follow from the plan: one draw call per node, equal triangle counts per node, one buffer per tile.
+        assert_eq!(c.draw_calls as usize, plan.nodes.len(), "{name}");
+        // Per-tile constants at cells = 32 (the budget below is derived from them): 2 x 32^2 grid triangles plus 4 skirt strips of
+        // 32 quads; 33^2 grid vertices plus 4 x 33 skirt vertices at 13 f32 each.
+        assert_eq!(c.triangles, plan.nodes.len() as u64 * 2_304, "{name}");
+        assert_eq!(c.upload_bytes, u64::from(c.resident_tiles) * 1_221 * 52, "{name}");
+        assert_eq!(c.resident_tiles as usize, plan.nodes.len(), "{name}: every node of a plan is a distinct tile");
+        c.check(&CountBudget::REFERENCE_1440P).unwrap_or_else(|e| panic!("{name}: {e}"));
+        worst = worst.max(c.draw_calls);
+    }
+    assert!(worst > 1_000, "the workload must reach a high node count to mean something (worst {worst})");
+    // A budget that is exceeded names the count and the budget.
+    let tight = CountBudget { max_draw_calls: 10, ..CountBudget::REFERENCE_1440P };
+    let (_, camera) = scripted_views(R, f64::from(size.0) / f64::from(size.1), 1)[6];
+    let plan =
+        plan_terrain(&TerrainRequest { camera, size, view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 1 }).unwrap();
+    let e = plan.counts().check(&tight).unwrap_err();
+    assert!(e.contains("draw calls") && e.contains("> budget 10"), "{e}");
+}
