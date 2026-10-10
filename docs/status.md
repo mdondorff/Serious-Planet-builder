@@ -36,3 +36,4 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
 - 2026-10-10 ADRs 0001-0012 drafted (proposed).
 - 2026-10-10 M0 archived (docs/milestones/M0-report.md).
 - 2026-10-09 Repository seeded from the starter bundle (constitution v1, CLAUDE.md, agents, skills).
+- 2026-10-11 m2-readable-terrain-views archived (REND-006): depth bands, height contours, morph blue-red ramp, normals golden from 3,000 km above the cube corner; height golden renamed terrain_aerial200km_height. Four reworked candidates await /bless.
