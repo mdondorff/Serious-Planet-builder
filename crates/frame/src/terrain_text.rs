@@ -1,0 +1,323 @@
+//! Text forms of the terrain plan and of terrain repro bundles (CON-19, ADR 0009): every field of the plan, floats as
+//! hexadecimal bit patterns, so a plan can be committed as a snapshot, diffed and replayed exactly.
+
+use crate::camera::Camera;
+use crate::lod::LodParams;
+use crate::terrain::{TerrainDraw, TerrainPlan, TerrainRequest, TerrainView};
+use planet_core::hash::hash_u64s;
+use planet_core::{PlanetFixed, TileId, Vec3};
+
+pub const TERRAIN_PLAN_FORMAT_VERSION: u32 = 1;
+pub const TERRAIN_BUNDLE_FORMAT_VERSION: u32 = 1;
+
+fn h64(v: f64) -> String {
+    format!("{:016x}", v.to_bits())
+}
+
+fn h32(v: f32) -> String {
+    format!("{:08x}", v.to_bits())
+}
+
+fn p64(s: &str) -> Result<f64, String> {
+    u64::from_str_radix(s, 16).map(f64::from_bits).map_err(|e| format!("bad f64 bits '{s}': {e}"))
+}
+
+fn p32(s: &str) -> Result<f32, String> {
+    u32::from_str_radix(s, 16).map(f32::from_bits).map_err(|e| format!("bad f32 bits '{s}': {e}"))
+}
+
+fn vec3(v: Vec3) -> String {
+    format!("{} {} {}", h64(v.x), h64(v.y), h64(v.z))
+}
+
+fn parse_vec3(t: &[&str]) -> Result<Vec3, String> {
+    match t {
+        [x, y, z] => Ok(Vec3::new(p64(x)?, p64(y)?, p64(z)?)),
+        _ => Err("expected three f64 bit patterns".into()),
+    }
+}
+
+impl TerrainPlan {
+    /// Stable text form with every field of the plan: size, view, the f64 camera, the f32 view-projection, clear
+    /// colour, height range, cells and one line per node (tile, level, origin, camera-relative origin, morph values,
+    /// colour and the expected mesh key).
+    pub fn to_text(&self) -> String {
+        // Exhaustiveness guards: adding a field to the plan, the camera or a draw is a compile error here until the text
+        // form below carries it (and `from_text` reads it).
+        let TerrainPlan { size: _, view: _, camera: _, view_projection: _, clear_color: _, height_range: _, cells: _, nodes: _ } = self;
+        let Camera { position: _, forward: _, up: _, fov_y_rad: _, aspect: _, near_m: _ } = self.camera;
+        let c = &self.camera;
+        let mut s = format!("planet-terrainplan {TERRAIN_PLAN_FORMAT_VERSION}\n");
+        s += &format!("size {} {}\nview {}\ncells {}\n", self.size.0, self.size.1, self.view.name(), self.cells);
+        s += &format!(
+            "camera {} forward {} up {} fov {} aspect {} near {}\n",
+            vec3(c.position.0),
+            vec3(c.forward),
+            vec3(c.up),
+            h64(c.fov_y_rad),
+            h64(c.aspect),
+            h64(c.near_m)
+        );
+        s += &format!("view_projection {}\n", self.view_projection.iter().map(|f| h32(*f)).collect::<Vec<_>>().join(" "));
+        let k = self.clear_color;
+        s += &format!(
+            "clear {} {} {} {}\nheight_range {} {}\n",
+            k[0],
+            k[1],
+            k[2],
+            k[3],
+            h32(self.height_range[0]),
+            h32(self.height_range[1])
+        );
+        for n in &self.nodes {
+            let TerrainDraw {
+                tile: _,
+                level: _,
+                origin: _,
+                camera_relative_origin: _,
+                morph: _,
+                morph_start_m: _,
+                morph_end_m: _,
+                color: _,
+                mesh_key: _,
+            } = n;
+            let r = n.camera_relative_origin;
+            s += &format!(
+                "node {:016x} level {} origin {} rel {} {} {} morph {} {} {} color {} {} {} {} mesh_key {:016x}\n",
+                n.tile.raw(),
+                n.level,
+                vec3(n.origin.0),
+                h32(r[0]),
+                h32(r[1]),
+                h32(r[2]),
+                h32(n.morph),
+                h32(n.morph_start_m),
+                h32(n.morph_end_m),
+                n.color[0],
+                n.color[1],
+                n.color[2],
+                n.color[3],
+                n.mesh_key
+            );
+        }
+        s
+    }
+
+    pub fn from_text(text: &str) -> Result<TerrainPlan, String> {
+        let mut lines = text.lines();
+        let head = lines.next().ok_or("empty terrain plan")?;
+        if head != format!("planet-terrainplan {TERRAIN_PLAN_FORMAT_VERSION}") {
+            return Err(format!(
+                "unsupported terrain plan header '{head}' (this build reads planet-terrainplan {TERRAIN_PLAN_FORMAT_VERSION})"
+            ));
+        }
+        let (mut size, mut view, mut cells, mut camera, mut vp, mut clear, mut range) = (None, None, None, None, None, None, None);
+        let mut nodes = Vec::new();
+        for line in lines.filter(|l| !l.trim().is_empty()) {
+            let t: Vec<&str> = line.split_whitespace().collect();
+            let int = |s: &str| s.parse::<u32>().map_err(|e| format!("bad number '{s}' in '{line}': {e}"));
+            let byte = |s: &str| s.parse::<u8>().map_err(|e| format!("bad colour value '{s}' in '{line}': {e}"));
+            match t.as_slice() {
+                ["size", w, h] => size = Some((int(w)?, int(h)?)),
+                ["view", v] => view = Some(TerrainView::parse(v).ok_or(format!("unknown view '{v}'"))?),
+                ["cells", c] => cells = Some(int(c)?),
+                ["camera", px, py, pz, "forward", fx, fy, fz, "up", ux, uy, uz, "fov", fov, "aspect", asp, "near", near] => {
+                    camera = Some(Camera {
+                        position: PlanetFixed(parse_vec3(&[px, py, pz])?),
+                        forward: parse_vec3(&[fx, fy, fz])?,
+                        up: parse_vec3(&[ux, uy, uz])?,
+                        fov_y_rad: p64(fov)?,
+                        aspect: p64(asp)?,
+                        near_m: p64(near)?,
+                    })
+                }
+                ["view_projection", rest @ ..] => {
+                    let v = rest.iter().map(|s| p32(s)).collect::<Result<Vec<_>, _>>()?;
+                    vp = Some(<[f32; 16]>::try_from(v).map_err(|v| format!("view_projection needs 16 values, got {}", v.len()))?);
+                }
+                ["clear", r, g, b, a] => clear = Some([byte(r)?, byte(g)?, byte(b)?, byte(a)?]),
+                ["height_range", a, b] => range = Some([p32(a)?, p32(b)?]),
+                ["node", id, "level", level, "origin", ox, oy, oz, "rel", rx, ry, rz, "morph", m, ms, me, "color", r, g, b, a, "mesh_key", key] =>
+                {
+                    let raw = u64::from_str_radix(id, 16).map_err(|e| format!("bad tile id '{id}': {e}"))?;
+                    nodes.push(TerrainDraw {
+                        tile: TileId::from_raw(raw).ok_or(format!("invalid tile id {raw:#x}"))?,
+                        level: level.parse().map_err(|e| format!("bad level '{level}': {e}"))?,
+                        origin: PlanetFixed(parse_vec3(&[ox, oy, oz])?),
+                        camera_relative_origin: [p32(rx)?, p32(ry)?, p32(rz)?],
+                        morph: p32(m)?,
+                        morph_start_m: p32(ms)?,
+                        morph_end_m: p32(me)?,
+                        color: [byte(r)?, byte(g)?, byte(b)?, byte(a)?],
+                        mesh_key: u64::from_str_radix(key, 16).map_err(|e| format!("bad mesh key '{key}': {e}"))?,
+                    });
+                }
+                _ => return Err(format!("cannot parse terrain plan line '{line}'")),
+            }
+        }
+        Ok(TerrainPlan {
+            size: size.ok_or("plan has no size")?,
+            view: view.ok_or("plan has no view")?,
+            camera: camera.ok_or("plan has no camera")?,
+            view_projection: vp.ok_or("plan has no view_projection")?,
+            clear_color: clear.ok_or("plan has no clear colour")?,
+            height_range: range.ok_or("plan has no height range")?,
+            cells: cells.ok_or("plan has no cells")?,
+            nodes,
+        })
+    }
+
+    /// Hash of the full text form: any field change changes it.
+    pub fn plan_hash(&self) -> u64 {
+        let bytes: Vec<u64> = self.to_text().bytes().map(u64::from).collect();
+        hash_u64s(0x7465_7261, &bytes)
+    }
+
+    /// Human-readable differences to `other` (the first lines that differ, with both values); empty when equal.
+    pub fn diff(&self, other: &TerrainPlan) -> Vec<String> {
+        let (a, b) = (self.to_text(), other.to_text());
+        let (a, b): (Vec<&str>, Vec<&str>) = (a.lines().collect(), b.lines().collect());
+        let mut d: Vec<String> = a
+            .iter()
+            .zip(&b)
+            .enumerate()
+            .filter(|(_, (x, y))| x != y)
+            .take(8)
+            .map(|(i, (x, y))| format!("line {}: replayed `{x}` vs recorded `{y}`", i + 1))
+            .collect();
+        if a.len() != b.len() {
+            d.push(format!("{} lines (replayed) vs {} lines (recorded): node counts differ", a.len(), b.len()));
+        }
+        d
+    }
+}
+
+/// A terrain repro bundle: the request that produced a plan, the plan itself and the versions it needs to replay.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TerrainBundle {
+    pub generator_version: u32,
+    pub implementation_id: String,
+    pub mesh_version: u32,
+    /// Hash of the WorldDefinition read set; 0 until `world-def` exists (M3).
+    pub definition_hash: u64,
+    /// Adapter the bundle was recorded on (informational: views compare per adapter).
+    pub adapter: String,
+    pub request: TerrainRequest,
+    pub plan: TerrainPlan,
+}
+
+impl TerrainBundle {
+    pub fn to_text(&self) -> String {
+        let r = &self.request;
+        let l = &r.lod;
+        let mut s = format!("planet-terrain-repro {TERRAIN_BUNDLE_FORMAT_VERSION}\n");
+        s += &format!(
+            "generator_version {}\nimplementation_id {}\nmesh_version {}\nseed {}\n",
+            self.generator_version, self.implementation_id, self.mesh_version, r.seed
+        );
+        s += &format!("definition_hash {:016x}\nadapter {}\n", self.definition_hash, self.adapter);
+        s += &format!("face_mapping {}\nview {}\nsize {} {}\n", r.face_mapping, r.view.name(), r.size.0, r.size.1);
+        let c = &r.camera;
+        s += &format!(
+            "camera {} forward {} up {} fov {} aspect {} near {}\n",
+            vec3(c.position.0),
+            vec3(c.forward),
+            vec3(c.up),
+            h64(c.fov_y_rad),
+            h64(c.aspect),
+            h64(c.near_m)
+        );
+        s += &format!(
+            "lod radius {} max_height {} fov {} viewport_h {} tau {} cells {} max_level {} morph_band {} cull_horizon {}\n",
+            h64(l.radius_m),
+            h64(l.max_height_m),
+            h64(l.fov_y_rad),
+            h64(l.viewport_h_px),
+            h64(l.tau_px),
+            l.cells,
+            l.max_level,
+            h64(l.morph_band),
+            l.cull_horizon
+        );
+        s += &format!("plan_hash {:016x}\n---\n", self.plan.plan_hash());
+        s += &self.plan.to_text();
+        s
+    }
+
+    pub fn from_text(text: &str) -> Result<TerrainBundle, String> {
+        let (head, plan_text) = text.split_once("\n---\n").ok_or("bundle has no '---' separator before the plan")?;
+        let mut lines = head.lines();
+        let first = lines.next().ok_or("empty bundle")?;
+        if first != format!("planet-terrain-repro {TERRAIN_BUNDLE_FORMAT_VERSION}") {
+            return Err(format!(
+                "unsupported bundle header '{first}' (this build reads planet-terrain-repro {TERRAIN_BUNDLE_FORMAT_VERSION})"
+            ));
+        }
+        let plan = TerrainPlan::from_text(plan_text)?;
+        let (mut gv, mut imp, mut mv, mut seed, mut dh, mut adapter) = (None, None, None, None, 0u64, String::new());
+        let (mut mapping, mut view, mut size, mut camera, mut lod, mut recorded) = (None, None, None, None, None, None);
+        for line in lines {
+            let t: Vec<&str> = line.split_whitespace().collect();
+            let bad = |e: std::num::ParseIntError| format!("bad value in '{line}': {e}");
+            match t.as_slice() {
+                ["generator_version", v] => gv = Some(v.parse().map_err(bad)?),
+                ["implementation_id", v] => imp = Some(v.to_string()),
+                ["mesh_version", v] => mv = Some(v.parse().map_err(bad)?),
+                ["seed", v] => seed = Some(v.parse::<u64>().map_err(bad)?),
+                ["definition_hash", v] => dh = u64::from_str_radix(v, 16).map_err(bad)?,
+                ["adapter", v] => adapter = v.to_string(),
+                ["face_mapping", v] => mapping = Some(v.to_string()),
+                ["view", v] => view = Some(TerrainView::parse(v).ok_or(format!("unknown view '{v}'"))?),
+                ["size", w, h] => size = Some((w.parse::<u32>().map_err(bad)?, h.parse::<u32>().map_err(bad)?)),
+                ["camera", px, py, pz, "forward", fx, fy, fz, "up", ux, uy, uz, "fov", fov, "aspect", asp, "near", near] => {
+                    camera = Some(Camera {
+                        position: PlanetFixed(parse_vec3(&[px, py, pz])?),
+                        forward: parse_vec3(&[fx, fy, fz])?,
+                        up: parse_vec3(&[ux, uy, uz])?,
+                        fov_y_rad: p64(fov)?,
+                        aspect: p64(asp)?,
+                        near_m: p64(near)?,
+                    })
+                }
+                ["lod", "radius", r, "max_height", mh, "fov", fov, "viewport_h", vh, "tau", tau, "cells", cells, "max_level", ml, "morph_band", mb, "cull_horizon", ch] => {
+                    lod = Some(LodParams {
+                        radius_m: p64(r)?,
+                        max_height_m: p64(mh)?,
+                        fov_y_rad: p64(fov)?,
+                        viewport_h_px: p64(vh)?,
+                        tau_px: p64(tau)?,
+                        cells: cells.parse().map_err(bad)?,
+                        max_level: ml.parse().map_err(bad)?,
+                        morph_band: p64(mb)?,
+                        cull_horizon: ch.parse().map_err(|e| format!("bad bool '{ch}': {e}"))?,
+                    })
+                }
+                ["plan_hash", v] => recorded = Some(u64::from_str_radix(v, 16).map_err(bad)?),
+                _ => return Err(format!("cannot parse bundle line '{line}'")),
+            }
+        }
+        let recorded = recorded.ok_or("bundle has no plan_hash")?;
+        if recorded != plan.plan_hash() {
+            return Err(format!(
+                "bundle is corrupt: recorded plan hash {recorded:016x}, embedded plan hashes to {:016x}",
+                plan.plan_hash()
+            ));
+        }
+        Ok(TerrainBundle {
+            generator_version: gv.ok_or("bundle has no generator_version")?,
+            implementation_id: imp.ok_or("bundle has no implementation_id")?,
+            mesh_version: mv.ok_or("bundle has no mesh_version")?,
+            definition_hash: dh,
+            adapter,
+            request: TerrainRequest {
+                camera: camera.ok_or("bundle has no camera")?,
+                size: size.ok_or("bundle has no size")?,
+                view: view.ok_or("bundle has no view")?,
+                lod: lod.ok_or("bundle has no lod line")?,
+                face_mapping: mapping.ok_or("bundle has no face_mapping")?,
+                seed: seed.ok_or("bundle has no seed")?,
+            },
+            plan,
+        })
+    }
+}

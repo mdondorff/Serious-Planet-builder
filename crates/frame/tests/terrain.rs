@@ -232,3 +232,157 @@ fn every_planned_draw_expects_the_mesh_of_its_own_seed() {
         one.nodes.iter().filter_map(|a| two.nodes.iter().find(|b| b.tile == a.tile).map(|b| (a, b))).next().expect("a common tile");
     assert_ne!(shared.0.mesh_key, shared.1.mesh_key, "the same tile must expect different meshes for different seeds");
 }
+
+fn plan_of(index: usize, view: TerrainView, seed: u64) -> planet_frame::TerrainPlan {
+    let (_, camera) = scripted_views(R, 4.0 / 3.0, seed)[index];
+    plan_terrain(&TerrainRequest { camera, size: (128, 96), view, lod: lod(), face_mapping: "tangent-v1".into(), seed }).unwrap()
+}
+
+fn check_snapshot(file: &str, text: &str) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(file);
+    if std::env::var("PLANET_UPDATE_SNAPSHOTS").as_deref() == Ok("1") {
+        std::fs::write(&path, text).unwrap();
+    }
+    let expected =
+        std::fs::read_to_string(&path).unwrap_or_else(|_| panic!("{file} missing; run with PLANET_UPDATE_SNAPSHOTS=1 and review the diff"));
+    if text != expected {
+        let diff: Vec<String> = text
+            .lines()
+            .zip(expected.lines())
+            .enumerate()
+            .filter(|(_, (a, b))| a != b)
+            .take(6)
+            .map(|(i, (a, b))| format!("  line {}: now `{a}` / snapshot `{b}`", i + 1))
+            .collect();
+        panic!(
+            "{file} differs from the committed snapshot ({} vs {} lines):\n{}",
+            text.lines().count(),
+            expected.lines().count(),
+            diff.join("\n")
+        );
+    }
+}
+
+// spec: TEST-009, TEST-008
+#[test]
+fn the_terrain_plan_text_form_round_trips_exactly() {
+    for index in [0usize, 3, 5, 8] {
+        let plan = plan_of(index, TerrainView::Level, 1);
+        let back = planet_frame::TerrainPlan::from_text(&plan.to_text()).unwrap();
+        assert_eq!(back, plan, "view {index}: plan changed in a text round trip");
+        assert_eq!(back.plan_hash(), plan.plan_hash());
+        assert!(back.diff(&plan).is_empty());
+    }
+    let e = planet_frame::TerrainPlan::from_text("planet-terrainplan 9\n").unwrap_err();
+    assert!(e.contains("unsupported"), "{e}");
+    assert!(planet_frame::TerrainPlan::from_text("planet-terrainplan 1\nsize 1 1\nbogus\n").unwrap_err().contains("cannot parse"));
+}
+
+// spec: TEST-009, TEST-008
+#[test]
+fn every_plan_field_changes_the_text_form() {
+    let base = plan_of(3, TerrainView::Level, 1);
+    let h = base.plan_hash();
+    let mut variants: Vec<(&str, planet_frame::TerrainPlan)> = Vec::new();
+    let mut v = base.clone();
+    v.size.0 += 1;
+    variants.push(("size", v));
+    let mut v = base.clone();
+    v.view = TerrainView::Depth;
+    variants.push(("view", v));
+    let mut v = base.clone();
+    v.cells += 1;
+    variants.push(("cells", v));
+    let mut v = base.clone();
+    v.clear_color[0] ^= 1;
+    variants.push(("clear_color", v));
+    let mut v = base.clone();
+    v.height_range[1] += 1.0;
+    variants.push(("height_range", v));
+    let mut v = base.clone();
+    v.view_projection[5] = f32::from_bits(v.view_projection[5].to_bits() ^ 1);
+    variants.push(("view_projection (one ulp)", v));
+    let mut v = base.clone();
+    v.camera.position.0.x = f64::from_bits(v.camera.position.0.x.to_bits() ^ 1);
+    variants.push(("camera position (one f64 ulp)", v));
+    let mut v = base.clone();
+    v.camera.near_m *= 2.0;
+    variants.push(("camera near", v));
+    let mut v = base.clone();
+    v.nodes[0].color[1] ^= 1;
+    variants.push(("node colour", v));
+    let mut v = base.clone();
+    v.nodes[0].mesh_key ^= 1;
+    variants.push(("node mesh_key", v));
+    let mut v = base.clone();
+    v.nodes[0].morph_end_m += 1.0;
+    variants.push(("node morph interval", v));
+    let mut v = base.clone();
+    v.nodes[0].origin.0.z = f64::from_bits(v.nodes[0].origin.0.z.to_bits() ^ 1);
+    variants.push(("node origin (one f64 ulp)", v));
+    let mut v = base.clone();
+    v.nodes.pop();
+    variants.push(("node count", v));
+    for (what, plan) in variants {
+        assert_ne!(plan.plan_hash(), h, "the text form ignores the {what}");
+        assert!(!plan.diff(&base).is_empty(), "diff does not report the {what}");
+    }
+}
+
+// spec: TEST-009, TEST-008
+#[test]
+fn terrain_plans_match_the_committed_snapshots() {
+    // Every field of every plan over the ten scripted views is covered by the hash of its text form; one small plan is
+    // committed in full so a change can be reviewed line by line.
+    let mut summary = String::new();
+    for (i, (name, _)) in scripted_views(R, 4.0 / 3.0, 1).iter().enumerate() {
+        let p = plan_of(i, TerrainView::Level, 1);
+        summary += &format!("{name}: {} nodes, plan {:016x}\n", p.nodes.len(), p.plan_hash());
+    }
+    // The face view colours nodes by cube face and the depth view differs only in the view field: cover both.
+    for (i, view) in [(0usize, TerrainView::Face), (3, TerrainView::Face), (8, TerrainView::Depth)] {
+        let p = plan_of(i, view, 1);
+        summary +=
+            &format!("{} [{}]: {} nodes, plan {:016x}\n", scripted_views(R, 4.0 / 3.0, 1)[i].0, view.name(), p.nodes.len(), p.plan_hash());
+    }
+    check_snapshot("terrain_plans.txt", &summary);
+    check_snapshot("terrain_plan_orbit.txt", &plan_of(0, TerrainView::Level, 1).to_text());
+}
+
+// spec: TEST-009, TEST-008
+#[test]
+fn a_terrain_bundle_round_trips_and_detects_corruption() {
+    use planet_frame::TerrainBundle;
+    let (_, camera) = scripted_views(R, 4.0 / 3.0, 1)[4];
+    let request =
+        TerrainRequest { camera, size: (128, 96), view: TerrainView::Morph, lod: lod(), face_mapping: "tangent-v1".into(), seed: 7 };
+    let plan = plan_terrain(&request).unwrap();
+    let bundle = TerrainBundle {
+        generator_version: 2,
+        implementation_id: "cpu-ref-height-v2".into(),
+        mesh_version: 2,
+        definition_hash: 0,
+        adapter: "test-adapter".into(),
+        request: request.clone(),
+        plan: plan.clone(),
+    };
+    let text = bundle.to_text();
+    assert_eq!(TerrainBundle::from_text(&text).unwrap(), bundle);
+    // The recorded request replans to the recorded plan (the replay contract).
+    assert!(plan_terrain(&bundle.request).unwrap().diff(&bundle.plan).is_empty());
+    // A changed value inside the plan is caught by the recorded hash.
+    let corrupt = text.replacen(
+        "
+cells 16
+",
+        "
+cells 17
+",
+        1,
+    );
+    assert_ne!(corrupt, text);
+    assert!(TerrainBundle::from_text(&corrupt).unwrap_err().contains("corrupt"), "corruption must be detected");
+    // An unparsable value is reported, too.
+    assert!(TerrainBundle::from_text(&text.replacen("mesh_key ", "mesh_key 1", 1)).is_err());
+    assert!(TerrainBundle::from_text("planet-terrain-repro 9\n---\n").unwrap_err().contains("unsupported"));
+}

@@ -8,6 +8,7 @@ pub mod lod;
 pub mod plan;
 pub mod repro;
 pub mod terrain;
+pub mod terrain_text;
 
 pub use camera::{Camera, Frustum};
 pub use controller::{CameraController, CameraInput, CameraMode, ControllerParams};
@@ -16,3 +17,4 @@ pub use lod::{balance_leaves, select_nodes, select_nodes_in_view, LodParams, Nod
 pub use plan::{plan_tiles, DebugView, FramePlan, PlanError, PlanRequest, TileDraw};
 pub use repro::ReproBundle;
 pub use terrain::{level_color, plan_terrain, scripted_views, TerrainDraw, TerrainPlan, TerrainRequest, TerrainView};
+pub use terrain_text::TerrainBundle;
