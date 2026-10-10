@@ -6,7 +6,9 @@ use std::fmt;
 pub use wgpu;
 
 pub mod exec;
+pub mod terrain;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
+pub use terrain::{execute_terrain, TerrainStats, TERRAIN_SHADERS};
 
 /// Which adapter the process wants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

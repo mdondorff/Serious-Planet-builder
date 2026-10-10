@@ -223,6 +223,15 @@ pub fn compare_golden_in(root: &Path, adapter: &str, name: &str, img: &Image, to
     }
 }
 
+/// Names listed (one per line, `#` comments allowed) in `tests/goldens/pending.txt` are goldens that are waiting for
+/// the owner's `/bless`; a missing golden of such a name is reported but does not fail, even for a blessed adapter.
+/// `/bless` removes the line when it promotes the golden.
+pub fn is_listed_pending(root: &Path, name: &str) -> bool {
+    std::fs::read_to_string(root.join("tests").join("goldens").join("pending.txt"))
+        .map(|t| t.lines().map(str::trim).any(|l| l == name))
+        .unwrap_or(false)
+}
+
 /// True when the owner has blessed at least one golden for this adapter.
 pub fn adapter_has_goldens(root: &Path, adapter: &str) -> bool {
     std::fs::read_dir(root.join("tests").join("goldens").join(adapter))
@@ -240,7 +249,10 @@ pub fn assert_golden(adapter: &str, name: &str, img: &Image, tol: Tolerance) {
         GoldenOutcome::Pending { .. } => {
             eprintln!("{name} [{adapter}]: {outcome}");
             let root = repo_root();
-            if std::env::var("PLANET_GOLDEN_STRICT").as_deref() == Ok("1") || adapter_has_goldens(&root, adapter) {
+            // Strict mode (`PLANET_GOLDEN_STRICT=1`, used by acceptance) fails on every missing golden; otherwise a blessed
+            // adapter fails unless the name is listed as waiting for blessing.
+            let strict = std::env::var("PLANET_GOLDEN_STRICT").as_deref() == Ok("1");
+            if strict || (adapter_has_goldens(&root, adapter) && !is_listed_pending(&root, name)) {
                 panic!("{name} [{adapter}]: {outcome}");
             }
         }
@@ -301,6 +313,23 @@ mod tests {
         write_png(&root.join("tests/goldens/a/t.png"), &Image::filled(1, 1, [0, 0, 0, 255])).unwrap();
         assert!(adapter_has_goldens(&root, "a"));
         assert!(!adapter_has_goldens(&root, "b"));
+    }
+
+    // spec: TEST-002
+    #[test]
+    fn pending_list_exempts_only_the_listed_names() {
+        let root = tmp("pendinglist");
+        std::fs::create_dir_all(root.join("tests/goldens")).unwrap();
+        std::fs::write(
+            root.join("tests/goldens/pending.txt"),
+            "# waiting for /bless
+new_view
+",
+        )
+        .unwrap();
+        assert!(is_listed_pending(&root, "new_view"));
+        assert!(!is_listed_pending(&root, "other_view"));
+        assert!(!is_listed_pending(&tmp("nolist"), "new_view"));
     }
 
     // spec: TEST-003

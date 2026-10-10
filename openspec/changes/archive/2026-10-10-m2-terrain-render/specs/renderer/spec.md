@@ -1,35 +1,4 @@
-# renderer Specification
-
-## Purpose
-TBD - created by archiving change m0-foundations. Update Purpose after archive.
-
-## Requirements
-
-### Requirement: REND-001 FramePlan executor
-The renderer SHALL execute a FramePlan and SHALL make no decisions about which nodes, levels, batches, tiles, rectangles or colours to draw; the number of draw calls SHALL equal the number of draws in the plan, and a plan that cannot be executed (a resource the selected view needs is missing, rectangle outside the frame, unusable height range or resolution) SHALL be reported, not guessed.
-
-Verify: C
-Status: active
-Source: CON-03, ADR 0009
-
-#### Scenario: Plan in, pixels out
-- **WHEN** a FramePlan listing two tiles is executed
-- **THEN** exactly those two rectangles are drawn, the draw-call count is 2, and the GPU frame equals the CPU twin of the executor (exactly for flat views, within 1 grey level for the height view)
-
-#### Scenario: Unexecutable plan
-- **WHEN** the plan names a tile whose resource is missing
-- **THEN** execution fails with the tile id
-
-### Requirement: REND-002 Shader validation
-Every shipped shader module SHALL pass backend validation on the software adapter in CI.
-
-Verify: B
-Status: active
-Source: ADR 0004, CON-17
-
-#### Scenario: Invalid shader
-- **WHEN** a shader module fails validation
-- **THEN** the test fails and prints the shader name and the validation message
+## MODIFIED Requirements
 
 ### Requirement: REND-003 Reversed-Z depth
 Rendering SHALL use reversed-Z with a 32-bit float depth buffer, compare function greater, clear value 0 and an infinite far plane.
@@ -75,27 +44,8 @@ Source: CON-18, report §16
 - **WHEN** a debug view is rendered twice on one adapter
 - **THEN** the images are identical
 
-### Requirement: REND-007 Adapter selection and logging
-The headless harness SHALL select the software adapter for test runs (and the high-performance adapter when asked for performance runs), and SHALL log the chosen adapter's backend, name and type as its first output line; interactive adapter selection becomes a requirement when the editor gets a window (M2).
 
-Verify: C
-Status: active
-Source: CON-21, report §8
-
-#### Scenario: Test render log
-- **WHEN** `planet test-render` runs on the software adapter
-- **THEN** its output begins with an `adapter:` line naming backend, name and device type
-
-### Requirement: REND-008 GPU culling differential
-GPU-side culling, when added for instances, SHALL be covered by a differential test against a CPU reference on the software adapter.
-
-Verify: B
-Status: planned
-Source: CON-03, ADR 0009
-
-#### Scenario: Differential
-- **WHEN** a GPU culling pass and the CPU reference run on the same instances and frustum
-- **THEN** the visible sets are equal
+## ADDED Requirements
 
 ### Requirement: REND-009 Terrain mesh
 Each terrain tile SHALL be a regular grid whose vertices are float32 offsets from the tile origin (quantisation at the finest level at most 1 mm), with unit outward normals, a morph target on the parent grid for every vertex, skirts hanging below the border vertices, and border vertices of neighbouring tiles, also across cube faces, agreeing within float32 rounding of the tile-local offsets.

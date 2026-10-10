@@ -31,3 +31,13 @@ Proposed follow-up: run `cargo xtask test` on lavapipe (CI) and `--real` on Rasi
 What happened: with a fixed +-4000 m range the value-noise generator shows about 40 to 75 grey levels per tile at level 3.
 Assumption it changes: none; design note for the M2 views.
 Proposed follow-up: a per-plan height range is a plan decision (frame), not a renderer one.
+
+## 2026-10-10 A hole test can pass while the geometry is garbage
+What happened: adding the `ref_pos` attribute without serialising it misaligned every vertex on the GPU. The tile-id hole test still passed in nine of ten views and only a 24-pixel hole at orbit exposed it; the orbit image showed ragged blobs instead of a disc. Fixed by single-sourcing the vertex layout and adding an oracle test that checks where nodes project.
+Assumption it changes: ADR 0009 (tier C metrics): hole counts alone do not prove correct geometry; pair them with a CPU projection oracle.
+Proposed follow-up: every GPU-fed buffer layout gets one serialisation function and a test; new visual features get a CPU-projection oracle, not only a coverage metric.
+
+## 2026-10-10 Tile origins on the reference sphere cost precision
+What happened: with origins on the reference sphere the f32 jitter test gave 0.22 px at 2.5 km terrain (budget 0.25) because offsets and camera-relative origins both carry the terrain height. Placing the origin at the tile centre height gives 0.0002 px.
+Assumption it changes: ADR 0001 (TileLocal origin = tile centre): refined; the centre includes terrain height.
+Proposed follow-up: none; M3 per-node height bounds will also fix LOD distance near mountains.

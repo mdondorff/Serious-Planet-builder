@@ -5,6 +5,7 @@
 //! neighbouring leaves differ by at most one level, and each leaf gets a morph interval (distances between which it
 //! blends towards its parent's geometry) so that a merge or split never pops.
 
+use crate::camera::{Camera, Frustum};
 use planet_core::cube::FaceMapping;
 use planet_core::{Face, PlanetFixed, Side, TileId, Vec3};
 use std::collections::BTreeSet;
@@ -45,6 +46,36 @@ impl LodParams {
     /// Distance (to the node's bounding sphere surface) below which a node of `level` is split.
     pub fn split_distance(&self, level: u8) -> f64 {
         self.sample_spacing(level) * self.viewport_h_px / (2.0 * libm::tan(self.fov_y_rad / 2.0) * self.tau_px)
+    }
+
+    /// Upper bound of a node's bounding-sphere radius at `level`: three quarters of the tile edge (half diagonal 0.71, margin).
+    pub fn node_radius_bound(&self, level: u8) -> f64 {
+        0.75 * self.sample_spacing(level) * f64::from(self.cells)
+    }
+
+    /// Vertex distances `(start, end)` between which a node of `level >= 1` morphs from its own grid (0) to its parent's (1).
+    /// The end is the parent's split distance, so every vertex is fully morphed when the parent stops splitting. The start is
+    /// never earlier than `split(level) + 2 r`: a node that still borders finer leaves has vertices up to that far away and
+    /// must not have started to morph yet, or the finer side cannot meet it.
+    pub fn morph_interval(&self, level: u8) -> (f64, f64) {
+        let end = self.split_distance(level - 1);
+        let start = ((1.0 - self.morph_band) * end).max(self.split_distance(level) + 2.0 * self.node_radius_bound(level));
+        (start, end)
+    }
+
+    /// Reject parameters for which crack-free morphing is impossible (the morph interval would vanish at some level).
+    pub fn validate(&self) -> Result<(), String> {
+        for level in 1..=self.max_level {
+            let (start, end) = self.morph_interval(level);
+            if end - start < 0.05 * end {
+                return Err(format!(
+                    "level {level}: morph interval [{start:.1}, {end:.1}] m is empty; increase viewport_h_px / tau_px or reduce cells (need viewport_h_px / tau_px > about {:.0} for {} cells)",
+                    2.0 * self.cells as f64,
+                    self.cells
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Worst-case sample spacing on the sphere at `level`, metres (face centre, tangent warp).
@@ -93,13 +124,28 @@ fn children_of(t: TileId) -> [TileId; 4] {
     t.children().expect("below the maximum level")
 }
 
-/// Select the nodes to draw for `camera`.
+/// Select the nodes to draw for a camera position, ignoring view direction (whole visible hemisphere).
 pub fn select_nodes(map: &dyn FaceMapping, camera: PlanetFixed, p: &LodParams) -> NodeSelection {
+    select_impl(map, camera, None, p)
+}
+
+/// Select the nodes to draw for a camera, also dropping nodes outside its side frustum planes (padded by the terrain height).
+pub fn select_nodes_in_view(map: &dyn FaceMapping, camera: &Camera, p: &LodParams) -> NodeSelection {
+    select_impl(map, camera.position, Some(camera.frustum()), p)
+}
+
+fn select_impl(map: &dyn FaceMapping, camera: PlanetFixed, frustum: Option<Frustum>, p: &LodParams) -> NodeSelection {
     let mut leaves: BTreeSet<TileId> = BTreeSet::new();
     let mut stack: Vec<TileId> = Face::ALL.iter().map(|&f| TileId::new(f, 0, 0, 0).expect("root")).collect();
     while let Some(t) = stack.pop() {
         if p.cull_horizon && below_horizon(map, t, camera, p) {
             continue;
+        }
+        if let Some(fr) = &frustum {
+            let (c, r) = bounding_sphere(map, t, p);
+            if fr.culls_sphere(c, r + p.max_height_m) {
+                continue;
+            }
         }
         if t.level() < p.max_level && surface_distance(map, t, camera, p) < p.split_distance(t.level()) {
             stack.extend(children_of(t));

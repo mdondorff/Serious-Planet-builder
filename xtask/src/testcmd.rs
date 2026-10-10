@@ -129,7 +129,30 @@ pub fn test(root: &Path, args: &[String]) -> Res {
 pub fn check(root: &Path) -> Res {
     run(root, "cargo", &["fmt", "--all", "--", "--check"], &[])?;
     run(root, "cargo", &["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"], &[])?;
-    crate::layering::run(root)
+    crate::layering::run(root)?;
+    stale_pending(root)
+}
+
+/// Names in `tests/goldens/pending.txt` that already have a golden for some adapter: `/bless` must remove them.
+pub fn stale_pending_names(root: &Path) -> Vec<String> {
+    let list = std::fs::read_to_string(root.join("tests").join("goldens").join("pending.txt")).unwrap_or_default();
+    let mut files = Vec::new();
+    files_with_ext(&root.join("tests").join("goldens"), "png", &mut files);
+    list.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter(|name| files.iter().any(|f| f.file_stem().is_some_and(|s| s == *name)))
+        .map(String::from)
+        .collect()
+}
+
+fn stale_pending(root: &Path) -> Res {
+    let stale = stale_pending_names(root);
+    if stale.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("tests/goldens/pending.txt lists goldens that are already blessed (remove the lines): {}", stale.join(", ")))
+    }
 }
 
 /// Candidate goldens under `target/review/candidates/<adapter>/<name>.png` that have no golden yet or differ from it.
@@ -263,5 +286,31 @@ mod candidate_tests {
         let mut got = candidates(&root);
         got.sort();
         assert_eq!(got, [("a".to_string(), "changed.png".to_string()), ("a".to_string(), "new.png".to_string())]);
+    }
+}
+
+#[cfg(test)]
+mod pending_tests {
+    use super::*;
+
+    // spec: TEST-002
+    #[test]
+    fn blessed_names_must_leave_the_pending_list() {
+        let root = std::env::temp_dir().join(format!("xtask-pending-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let g = root.join("tests/goldens");
+        std::fs::create_dir_all(g.join("a")).unwrap();
+        std::fs::write(g.join("pending.txt"), "# comment\nwaiting\nblessed\n").unwrap();
+        std::fs::write(g.join("a/blessed.png"), b"x").unwrap();
+        assert_eq!(stale_pending_names(&root), ["blessed"]);
+        assert!(stale_pending(&root).unwrap_err().contains("blessed"));
+        std::fs::remove_file(g.join("a/blessed.png")).unwrap();
+        assert!(stale_pending(&root).is_ok());
+    }
+
+    // spec: TEST-002
+    #[test]
+    fn the_repository_pending_list_is_clean() {
+        assert!(stale_pending(&crate::util::repo_root()).is_ok());
     }
 }

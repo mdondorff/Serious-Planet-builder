@@ -167,3 +167,42 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     }
     Ok(())
 }
+
+const TERRAIN_SIZE: (u32, u32) = (256, 192);
+const TERRAIN_CELLS: u32 = 16;
+
+/// `--scene terrain`: node selection -> TerrainPlan -> meshes -> GPU, one of the ten scripted cameras.
+pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainRequest, TerrainView};
+    let view = TerrainView::parse(&o.view)
+        .ok_or_else(|| format!("--view must be one of face, tile-id, level, morph, height, normals, depth, got '{}'", o.view))?;
+    let views = scripted_views(RADIUS_M, f64::from(TERRAIN_SIZE.0) / f64::from(TERRAIN_SIZE.1), o.seed);
+    let index = match o.script.parse::<usize>() {
+        Ok(i) => i,
+        Err(_) => views
+            .iter()
+            .position(|(n, _)| *n == o.script)
+            .ok_or_else(|| format!("--script '{}' is neither an index nor one of the scripted names", o.script))?,
+    };
+    let (name, camera) = *views.get(index).ok_or_else(|| format!("--script {index} is out of range (0..{})", views.len()))?;
+    let lod = LodParams {
+        cells: TERRAIN_CELLS,
+        viewport_h_px: f64::from(TERRAIN_SIZE.1),
+        tau_px: 4.0,
+        max_level: 26,
+        ..LodParams::earth_1080p()
+    };
+    let plan =
+        plan_terrain(&TerrainRequest { camera, size: TERRAIN_SIZE, view, lod, face_mapping: TangentWarp.id().to_string(), seed: o.seed })
+            .map_err(|e| e.to_string())?;
+    let meshes: Vec<planet_generators::mesh::TileMesh> =
+        plan.nodes.iter().map(|n| planet_generators::mesh::tile_mesh(o.seed, &TangentWarp, n.tile, TERRAIN_CELLS, RADIUS_M)).collect();
+    let refs: Vec<&planet_generators::mesh::TileMesh> = meshes.iter().collect();
+    let (frame, stats) = planet_render::execute_terrain(ctx, &plan, &refs).map_err(|e| e.to_string())?;
+    writeln!(out, "terrain {name} ({}): {}; {} draw calls, {} triangles", view.name(), plan.summary(), stats.draw_calls, stats.triangles)
+        .map_err(err)?;
+    if let Some(path) = &o.out {
+        write_frame(&frame, path, out)?;
+    }
+    Ok(())
+}
