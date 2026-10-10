@@ -17,7 +17,7 @@ pub use lod::{balance_leaves, select_nodes, select_nodes_in_view, LodParams, Nod
 pub use plan::{plan_tiles, DebugView, FramePlan, PlanError, PlanRequest, TileDraw};
 pub use repro::ReproBundle;
 pub use terrain::{
-    flight_path, level_color, plan_terrain, plan_terrain_field, scripted_views, scripted_views_field, TerrainDraw, TerrainPlan,
-    TerrainRequest, TerrainView,
+    flight_path, level_color, plan_terrain, plan_terrain_field, scripted_views, scripted_views_field, CountBudget, PlanCounts, TerrainDraw,
+    TerrainPlan, TerrainRequest, TerrainView,
 };
 pub use terrain_text::TerrainBundle;

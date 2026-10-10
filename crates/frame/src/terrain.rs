@@ -167,7 +167,77 @@ pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Resu
     })
 }
 
+/// Counts a plan implies, derived from the plan alone so that tier A can assert budgets on any machine and tier C can
+/// check that the renderer matches them (TEST-011, CON-20).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlanCounts {
+    pub draw_calls: u32,
+    pub triangles: u64,
+    /// Distinct tiles that must be resident to draw the plan.
+    pub resident_tiles: u32,
+    /// Vertex bytes uploaded to draw the plan from a cold start (one buffer per resident tile).
+    pub upload_bytes: u64,
+}
+
+/// Upper limits for [`PlanCounts`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CountBudget {
+    pub max_draw_calls: u32,
+    pub max_triangles: u64,
+    pub max_resident_tiles: u32,
+    pub max_upload_bytes: u64,
+}
+
+impl CountBudget {
+    /// Budget for the 1440p production-like workload (cells 32, tau 6 px; ADR 0013): measured worst case is 5,108 draws at
+    /// 1 m altitude, so 6,000 leaves headroom without hiding a doubling.
+    pub const REFERENCE_1440P: CountBudget = CountBudget {
+        max_draw_calls: 6_000,
+        max_triangles: 6_000 * 2_304,
+        max_resident_tiles: 6_000,
+        max_upload_bytes: 6_000 * 1_221 * 52,
+    };
+}
+
+impl PlanCounts {
+    /// `Err` names every exceeded count with its value and budget.
+    pub fn check(&self, budget: &CountBudget) -> Result<(), String> {
+        let mut over = Vec::new();
+        if self.draw_calls > budget.max_draw_calls {
+            over.push(format!("draw calls {} > budget {}", self.draw_calls, budget.max_draw_calls));
+        }
+        if self.triangles > budget.max_triangles {
+            over.push(format!("triangles {} > budget {}", self.triangles, budget.max_triangles));
+        }
+        if self.resident_tiles > budget.max_resident_tiles {
+            over.push(format!("resident tiles {} > budget {}", self.resident_tiles, budget.max_resident_tiles));
+        }
+        if self.upload_bytes > budget.max_upload_bytes {
+            over.push(format!("upload bytes {} > budget {}", self.upload_bytes, budget.max_upload_bytes));
+        }
+        if over.is_empty() {
+            Ok(())
+        } else {
+            Err(over.join("; "))
+        }
+    }
+}
+
 impl TerrainPlan {
+    /// The deterministic counts this plan implies: one draw call and one index set per node, one vertex buffer per
+    /// distinct tile.
+    pub fn counts(&self) -> PlanCounts {
+        let per_tile_triangles = (planet_generators::mesh::grid_indices(self.cells).len() / 3) as u64;
+        let tiles: std::collections::BTreeSet<_> = self.nodes.iter().map(|n| n.tile).collect();
+        let vertex_bytes = planet_generators::mesh::vertex_count(self.cells) as u64 * planet_generators::mesh::MeshVertex::STRIDE;
+        PlanCounts {
+            draw_calls: self.nodes.len() as u32,
+            triangles: self.nodes.len() as u64 * per_tile_triangles,
+            resident_tiles: tiles.len() as u32,
+            upload_bytes: tiles.len() as u64 * vertex_bytes,
+        }
+    }
+
     /// Compact text for snapshots: node count, per-level counts and a hash over everything numeric in the plan.
     pub fn summary(&self) -> String {
         let mut hist = [0usize; 29];
