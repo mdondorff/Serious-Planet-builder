@@ -15,8 +15,9 @@ modes:
   editor        interactive editor/viewer (window arrives in M2); --smoke starts and exits; --offscreen runs the skeleton without a window
   generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --smoke starts and exits
   test-render   headless render harness
-    --scene hello-triangle|tiles   render a scene (default hello-triangle)
-    --view face|tile-id|height   debug view of the tiles scene
+    --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
+    --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
+    --view face|tile-id|level|morph|height|normals|depth   debug view (tiles scene: face, tile-id, height)
     --tile FACE,LEVEL,X,Y    tile to draw (repeatable; default: a tile and its east neighbour)
     --seed N --res N         generator seed and tile resolution (cells, power of two)
     --bundle <file>          write a repro bundle of the render
@@ -51,6 +52,7 @@ pub struct Options {
     pub repro: Option<PathBuf>,
     pub face_net: Option<PathBuf>,
     pub offscreen: bool,
+    pub script: String,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -77,12 +79,14 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         repro: None,
         face_net: None,
         offscreen: false,
+        script: "3".into(),
     };
     while let Some(a) = it.next() {
         match a.as_str() {
             "--smoke" => o.smoke = true,
             "--perf" => o.perf = true,
             "--offscreen" => o.offscreen = true,
+            "--script" => o.script = it.next().ok_or("--script needs an index or name")?.clone(),
             "--view" => o.view = it.next().ok_or("--view needs a value")?.clone(),
             "--tile" => o.tiles.push(it.next().ok_or("--tile needs FACE,LEVEL,X,Y")?.clone()),
             "--seed" => o.seed = it.next().ok_or("--seed needs a value")?.parse().map_err(|e| format!("--seed: {e}"))?,
@@ -157,6 +161,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     }
     match o.scene.as_str() {
         "tiles" => skeleton::render_tiles(&ctx, o, out),
+        "terrain" => skeleton::render_terrain(&ctx, o, out),
         "hello-triangle" => {
             let frame = planet_render::hello_triangle(&ctx, 256);
             if let Some(path) = &o.out {
@@ -165,7 +170,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
             }
             Ok(())
         }
-        other => Err(format!("unknown scene '{other}' (known: hello-triangle, tiles)")),
+        other => Err(format!("unknown scene '{other}' (known: hello-triangle, tiles, terrain)")),
     }
 }
 

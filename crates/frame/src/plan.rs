@@ -69,6 +69,7 @@ pub struct PlanRequest {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum PlanError {
+    InvalidLod(String),
     UnknownFaceMapping(String),
     NoTiles,
     FrameTooSmall { size: (u32, u32), tiles: usize },
@@ -78,6 +79,7 @@ impl std::fmt::Display for PlanError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PlanError::UnknownFaceMapping(m) => write!(f, "unknown face mapping '{m}' (known: tangent-v1)"),
+            PlanError::InvalidLod(m) => write!(f, "invalid LOD parameters: {m}"),
             PlanError::NoTiles => write!(f, "a plan needs at least one tile"),
             PlanError::FrameTooSmall { size, tiles } => write!(f, "frame {}x{} is too small for {tiles} tiles", size.0, size.1),
         }
