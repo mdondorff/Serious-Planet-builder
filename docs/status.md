@@ -10,6 +10,13 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
 - **Performance on Rasierklinge**: set the Windows power profile to High performance (your first run used Balanced and an idle GPU), connect the charger, then run `cargo xtask perf --machine-ready` (terrain workload at 1440p, four views, 3 runs each, GPU timestamps; takes a minute or two plus mesh generation). Read the verdict lines (GPU median at most 8 ms, frame p99 at most 20 ms) and send me perf/logs/terrain.json; the session is marked invalid if the machine is not ready. Real-GPU candidates (adapter vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu) can be blessed next to the WARP goldens: debug views are byte-identical, three terrain views differ by at most 1 LSB.
 - Tool note: `gh` is installed at `C:\Program Files\GitHub CLI\gh.exe` but is not on the Git Bash PATH.
 
+## Queued for agents
+- **ADR 0006 review follow-ups** (2026-10-10, owner asked for these to be picked up by the M2 agent; ADR 0006 updated, still proposed):
+  1. GPU vertex buffers are keyed by `TileId` alone; `upload` keeps a stale buffer when the mesh changes (`crates/render/src/terrain.rs:115`, `:309`). Key by mesh key or replace on mismatch; test: upload seed 1 then seed 2 for one tile.
+  2. Meshes have no key, version or known answers: add `MESH_VERSION`, `mesh_key(height_key, cells, radius bits, MESH_VERSION)` and known-answer hashes for 2-3 meshes (`crates/generators/src/mesh.rs:49`; inputs `radius_m`, `cells`, `SKIRT_FRACTION`, normal stencil, tile origin).
+  3. Tie the known-answer tile table to its version: `assert_eq!(GENERATOR_VERSION, 2)` beside `KNOWN_TILE_HASHES` (`crates/generators/tests/pipeline.rs:16`), as `hash_known_answers.rs` does for `HASH_VERSION`.
+  4. M3 (not M2): minimal `GenContext`; `replay` rejects a non-zero `definition_hash` once `world-def` exists (`crates/app/src/skeleton.rs:112`).
+
 ## Log
 - 2026-10-10 m2-seam-normals archived (from the ADR 0003 review): probe measured 0.076 degrees of cross-face normal mismatch, now 0; TileId::corner_neighbors added; partition test independent of from_direction. terrain_cube_corner_normals may be blessed (its WARP candidate is unchanged; the normals view carries little information).
 - 2026-10-10 m2-terrain-perf archived (REND-013, TEST-012): persistent terrain renderer with GPU timestamps and a terrain perf workload; first measurement is the owner's run. Observation: planning 3,078 nodes takes about 11 ms of CPU per full recompute (software-adapter smoke, cells 16, tau 4).
