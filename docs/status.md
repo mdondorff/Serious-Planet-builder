@@ -31,6 +31,7 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
   Also low: `gpu_renderer.rs:59` panics when a timestamp delta is 0.
 
 ## Log
+- 2026-10-10 m2-golden-adapter-family archived (TEST-002 modified; ADR 0009 follow-up 1): golden keys by adapter family (vulkan-llvmpipe), driver.txt beside every golden directory and printed on mismatch, CI requires adapter goldens, runner pinned to ubuntu-24.04 (Mesa package not pinned: runner apt index; Mesa 25.2.8 recorded). Linux goldens moved with git mv, byte-identical. ADR 0009 follow-ups 2-6 still open.
 - 2026-10-10 ADR 0009 updated from review (still proposed): adapter-family golden keys with driver sidecar and CI failure on missing golden directories, golden classes, every scene's plan bit-exact with a repro bundle, reject-never-substitute rule, tier-B oracles for per-vertex functions, spec-lint tier check, counts from the plan. Six follow-ups queued.
 - 2026-10-10 m2-wgpu-seam archived (BUILD-001 modified): render no longer re-exports wgpu, GpuContext fields private, accessors, layering bans graphics-API crates outside render (table form, quoted keys, renames) and wgpu types in render's pub signatures. Goldens byte-identical.
 - 2026-10-10 ADR 0004 updated from review and accepted by the owner: render's public API is the seam (no internal HAL), M2 gate outcome recorded (wgpu kept), wgpu upgrades keep goldens byte-identical, DX12 and Vulkan only.
