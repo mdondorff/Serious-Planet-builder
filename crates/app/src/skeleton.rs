@@ -303,7 +303,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
             plan_samples.push(t.elapsed().as_secs_f64() * 1000.0);
         }
         // Generate the missing meshes in parallel, then upload.
-        let missing: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).filter(|t| !renderer.has_tile(*t)).collect();
+        let missing: Vec<TileId> = plan.nodes.iter().filter(|n| !renderer.has_mesh(n.tile, n.mesh_key)).map(|n| n.tile).collect();
         let started = Instant::now();
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
         let chunk = missing.len().div_ceil(threads).max(1);

@@ -179,3 +179,7 @@ Source: CON-20, CON-21, ADR 0013
 #### Scenario: Changed mesh
 - **WHEN** a mesh with the same tile id but a different key (other seed) is uploaded
 - **THEN** the resident buffer is replaced and the next frame equals the one-shot render of the new mesh
+
+#### Scenario: Stale mesh
+- **WHEN** a plan expects a mesh key that differs from the resident buffer's key (the seed changed and the mesh was not re-uploaded)
+- **THEN** rendering fails with the tile id and both keys instead of drawing the stale buffer

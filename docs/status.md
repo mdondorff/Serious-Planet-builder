@@ -18,6 +18,7 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
   4. M3 (not M2): minimal `GenContext`; `replay` rejects a non-zero `definition_hash` once `world-def` exists (`crates/app/src/skeleton.rs:112`).
 
 ## Log
+- 2026-10-10 m2-key-aware-residency archived (REND-013 Stale mesh): plan draws carry mesh_key, render() fails with StaleMesh on a mismatch, has_mesh replaces has_tile. Known gap: no test changes the seed on a live app renderer (the editor will); StaleMesh makes a regression loud instead of silent.
 - 2026-10-10 m2-mesh-keys archived (GEN-010, REND-013): MESH_VERSION 2, mesh_key, known-answer mesh hashes, renderer replaces buffers whose mesh key differs, GENERATOR_VERSION asserted beside KNOWN_TILE_HASHES. Open note: perf_terrain decides which meshes to generate by has_tile (ignores the key); fine while the seed is fixed per run.
 - 2026-10-10 m2-seam-normals archived (from the ADR 0003 review): probe measured 0.076 degrees of cross-face normal mismatch, now 0; TileId::corner_neighbors added; partition test independent of from_direction. terrain_cube_corner_normals may be blessed (its WARP candidate is unchanged; the normals view carries little information).
 - 2026-10-10 m2-terrain-perf archived (REND-013, TEST-012): persistent terrain renderer with GPU timestamps and a terrain perf workload; first measurement is the owner's run. Observation: planning 3,078 nodes takes about 11 ms of CPU per full recompute (software-adapter smoke, cells 16, tau 4).

@@ -89,10 +89,31 @@ fn a_mesh_with_another_key_replaces_the_resident_buffer() {
     // Draw that single tile and compare with a renderer that only ever saw the seed-2 mesh.
     let mut single = plan(5);
     single.nodes.truncate(1);
+    single.nodes[0].mesh_key = two.key; // the plan of a seed-2 request expects the seed-2 mesh
     r.render(&ctx, &single, false).unwrap();
     let replaced = r.read_color(&ctx);
     let mut fresh = TerrainRenderer::new(&ctx, SIZE, CELLS);
     fresh.upload(&ctx, &two).unwrap();
     fresh.render(&ctx, &single, false).unwrap();
     assert_eq!(replaced, fresh.read_color(&ctx), "a replaced buffer must draw exactly like a fresh upload of the new mesh");
+}
+
+// spec: REND-013
+#[test]
+fn a_plan_for_another_seed_refuses_stale_buffers() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let p = plan(5); // seed 1
+    let mut r = TerrainRenderer::new(&ctx, SIZE, CELLS);
+    for n in &p.nodes {
+        r.upload(&ctx, &tile_mesh(2, &TangentWarp, n.tile, CELLS, R)).unwrap(); // seed 2: stale for this plan
+    }
+    let e = r.render(&ctx, &p, false).unwrap_err();
+    assert!(matches!(e, planet_render::ExecError::StaleMesh { tile, .. } if tile == p.nodes[0].tile), "{e}");
+    assert!(!r.has_mesh(p.nodes[0].tile, p.nodes[0].mesh_key));
+    // Re-uploading the current meshes makes the plan drawable.
+    for n in &p.nodes {
+        r.upload(&ctx, &tile_mesh(1, &TangentWarp, n.tile, CELLS, R)).unwrap();
+    }
+    assert!(r.has_mesh(p.nodes[0].tile, p.nodes[0].mesh_key));
+    r.render(&ctx, &p, false).unwrap();
 }
