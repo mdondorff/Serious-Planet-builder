@@ -9,7 +9,7 @@ TBD - created by archiving change m0-foundations. Update Purpose after archive.
 A generator SHALL be a pure function of its recorded definition reads, `generator_version`, `implementation_id` and tile ID, with no global state, wall-clock time or unseeded randomness.
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-06, ADR 0006
 
 #### Scenario: Repeat
@@ -20,7 +20,7 @@ Source: CON-06, ADR 0006
 Generator output SHALL not depend on the number of threads, and reductions SHALL use a fixed order.
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-14
 
 #### Scenario: Thread counts
@@ -31,7 +31,7 @@ Source: CON-14
 Tile hashes of a committed set of tiles SHALL be identical on Windows and Linux.
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-14, ADR 0010
 
 #### Scenario: CI comparison
@@ -42,7 +42,7 @@ Source: CON-14, ADR 0010
 Neighbouring tiles SHALL agree on every shared border sample, including across cube-face edges and at the eight corners.
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-08, report §16
 
 #### Scenario: Face edge
@@ -53,7 +53,7 @@ Source: CON-08, report §16
 Generating a region as one large tile or as many small tiles SHALL give the same values at every common sample.
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-08, report §16
 
 #### Scenario: Split
@@ -64,7 +64,7 @@ Source: CON-08, report §16
 A coarse tile SHALL agree with its four children within a stated tolerance at the coarse sample positions.
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-08, report §16
 
 #### Scenario: Tolerance
@@ -94,10 +94,10 @@ Source: CON-07, CON-14
 - **THEN** its read-back output matches the CPU output within 1e-4 relative error
 
 ### Requirement: GEN-009 Field dumps
-CPU code SHALL be able to write height maps, field maps and the unfolded six-face cube net to PNG without any GPU.
+CPU code SHALL be able to write tile height maps (further field maps as fields appear) and the unfolded six-face cube net, whose cells are laid out so that shared edges are continuous, to PNG without any GPU.
 
 Verify: A
-Status: planned
+Status: active
 Source: report §16
 
 #### Scenario: Face net

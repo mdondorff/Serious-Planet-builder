@@ -5,6 +5,9 @@ use std::fmt;
 
 pub use wgpu;
 
+pub mod exec;
+pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
+
 /// Which adapter the process wants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdapterPolicy {
@@ -154,15 +157,6 @@ pub fn hello_triangle(ctx: &GpuContext, size: u32) -> RgbaFrame {
         cache: None,
     });
 
-    let unpadded = size * 4;
-    let padded = unpadded.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-    let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("hello-readback"),
-        size: (padded * size) as u64,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("hello") });
     {
         let [r, g, b, a] = HELLO_CLEAR.map(|v| f64::from(v) / 255.0);
@@ -182,27 +176,8 @@ pub fn hello_triangle(ctx: &GpuContext, size: u32) -> RgbaFrame {
         pass.set_pipeline(&pipeline);
         pass.draw(0..3, 0..1);
     }
-    encoder.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo { texture: &target, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &readback,
-            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: Some(size) },
-        },
-        wgpu::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
-    );
     ctx.queue.submit([encoder.finish()]);
-
-    let slice = readback.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |r| r.expect("readback map failed"));
-    device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
-    let data = slice.get_mapped_range().expect("readback range");
-    let mut rgba = Vec::with_capacity((unpadded * size) as usize);
-    for row in data.chunks_exact(padded as usize) {
-        rgba.extend_from_slice(&row[..unpadded as usize]);
-    }
-    drop(data);
-    readback.unmap();
-    RgbaFrame { width: size, height: size, rgba }
+    read_rgba8(ctx, &target, size, size)
 }
 
 /// Adapter class, so layers above `render` need no wgpu types.
@@ -235,4 +210,37 @@ impl RgbaFrame {
         enc.set_depth(png::BitDepth::Eight);
         enc.write_header().map_err(std::io::Error::other)?.write_image_data(&self.rgba).map_err(std::io::Error::other)
     }
+}
+
+/// Copy an `Rgba8Unorm` texture (usage `COPY_SRC`) to the CPU as tightly packed pixels.
+pub fn read_rgba8(ctx: &GpuContext, texture: &wgpu::Texture, width: u32, height: u32) -> RgbaFrame {
+    let unpadded = width * 4;
+    let padded = unpadded.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let readback = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("readback"),
+        size: u64::from(padded * height),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("readback") });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &readback,
+            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: Some(height) },
+        },
+        wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+    );
+    ctx.queue.submit([encoder.finish()]);
+    let slice = readback.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |r| r.expect("readback map failed"));
+    ctx.device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
+    let data = slice.get_mapped_range().expect("readback range");
+    let mut rgba = Vec::with_capacity((unpadded * height) as usize);
+    for row in data.chunks_exact(padded as usize) {
+        rgba.extend_from_slice(&row[..unpadded as usize]);
+    }
+    drop(data);
+    readback.unmap();
+    RgbaFrame { width, height, rgba }
 }

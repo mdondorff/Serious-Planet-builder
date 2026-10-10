@@ -163,11 +163,18 @@ pub fn bless_list(root: &Path) -> Res {
     Ok(())
 }
 
-pub fn repro(_root: &Path, args: &[String]) -> Res {
-    let Some(bundle) = args.first() else {
-        return Err("usage: cargo xtask repro <bundle>".into());
+pub fn repro(root: &Path, args: &[String]) -> Res {
+    let Some(bundle) = args.iter().find(|a| !a.starts_with("--")) else {
+        return Err("usage: cargo xtask repro <bundle> [--real]".into());
     };
-    Err(format!("cannot replay '{bundle}': the repro bundle format and replayer arrive with the M1 change m1-repro-bundle (TEST-008)"))
+    let bundle = std::fs::canonicalize(bundle)
+        .or_else(|_| std::fs::canonicalize(root.join(bundle)))
+        .map_err(|e| format!("repro bundle '{bundle}' not found: {e}"))?;
+    let bundle = bundle.to_string_lossy().trim_start_matches("\\?\\").to_string();
+    let bundle = bundle.as_str();
+    let adapter = if args.iter().any(|a| a == "--real") { "hardware" } else { "software" };
+    let out = "target/review/repro.png";
+    run(root, "cargo", &["run", "-q", "-p", "planet", "--", "test-render", "--adapter", adapter, "--repro", bundle, "--out", out], &[])
 }
 
 pub fn perf(root: &Path, args: &[String]) -> Res {
@@ -216,5 +223,17 @@ mod tests {
     fn perf_needs_the_owner_flag() {
         let e = perf(Path::new("."), &[]).unwrap_err();
         assert!(e.contains("--machine-ready") && e.contains("owner"), "{e}");
+    }
+}
+
+#[cfg(test)]
+mod repro_tests {
+    use super::*;
+
+    // spec: TEST-008
+    #[test]
+    fn repro_needs_an_existing_bundle() {
+        assert!(repro(Path::new("."), &[]).unwrap_err().contains("usage"));
+        assert!(repro(Path::new("."), &["no-such-bundle.repro".to_string()]).unwrap_err().contains("not found"));
     }
 }

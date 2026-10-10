@@ -1,5 +1,5 @@
 # 0002 Depth buffer
-Status: proposed
+Status: accepted
 Date: 2026-10-10
 Source: background report §3 (Depth), Key Finding 3; constitution CON-12
 

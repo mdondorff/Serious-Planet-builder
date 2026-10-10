@@ -1,6 +1,8 @@
 //! The single binary's run modes (CON-01): `editor` (interactive viewer), `generate` (headless CLI)
 //! and `test-render` (headless harness). M0 only wires them up; real work arrives with M1+.
 
+pub mod skeleton;
+
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -10,10 +12,15 @@ use planet_render::{AdapterPolicy, GpuContext};
 
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
-  editor        interactive editor/viewer (window arrives in M2); --smoke starts and exits
-  generate      headless generator CLI; --smoke starts and exits
+  editor        interactive editor/viewer (window arrives in M2); --smoke starts and exits; --offscreen runs the skeleton without a window
+  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --smoke starts and exits
   test-render   headless render harness
-    --scene hello-triangle   render a scene (default)
+    --scene hello-triangle|tiles   render a scene (default hello-triangle)
+    --view face|tile-id|height   debug view of the tiles scene
+    --tile FACE,LEVEL,X,Y    tile to draw (repeatable; default: a tile and its east neighbour)
+    --seed N --res N         generator seed and tile resolution (cells, power of two)
+    --bundle <file>          write a repro bundle of the render
+    --repro <file>           replay a repro bundle (see cargo xtask repro)
     --out <file.png>         write the image
     --adapter software|hardware   adapter policy (default: PLANET_ADAPTER or software)
     --perf                   performance-harness skeleton (needs --adapter hardware and --machine-ready)
@@ -36,6 +43,14 @@ pub struct Options {
     pub adapter: Option<AdapterPolicy>,
     pub perf: bool,
     pub machine_ready: bool,
+    pub view: String,
+    pub tiles: Vec<String>,
+    pub seed: u64,
+    pub res: u32,
+    pub bundle_out: Option<PathBuf>,
+    pub repro: Option<PathBuf>,
+    pub face_net: Option<PathBuf>,
+    pub offscreen: bool,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -46,11 +61,40 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         Some("test-render") => Mode::TestRender,
         Some(other) => return Err(format!("unknown mode '{other}'\n{USAGE}")),
     };
-    let mut o = Options { mode, smoke: false, scene: "hello-triangle".into(), out: None, adapter: None, perf: false, machine_ready: false };
+    let mut o = Options {
+        mode,
+        smoke: false,
+        scene: "hello-triangle".into(),
+        out: None,
+        adapter: None,
+        perf: false,
+        machine_ready: false,
+        view: "face".into(),
+        tiles: vec![],
+        seed: 1,
+        res: 16,
+        bundle_out: None,
+        repro: None,
+        face_net: None,
+        offscreen: false,
+    };
     while let Some(a) = it.next() {
         match a.as_str() {
             "--smoke" => o.smoke = true,
             "--perf" => o.perf = true,
+            "--offscreen" => o.offscreen = true,
+            "--view" => o.view = it.next().ok_or("--view needs a value")?.clone(),
+            "--tile" => o.tiles.push(it.next().ok_or("--tile needs FACE,LEVEL,X,Y")?.clone()),
+            "--seed" => o.seed = it.next().ok_or("--seed needs a value")?.parse().map_err(|e| format!("--seed: {e}"))?,
+            "--res" => {
+                o.res = it.next().ok_or("--res needs a value")?.parse().map_err(|e| format!("--res: {e}"))?;
+                if !o.res.is_power_of_two() || o.res > planet_render::exec::MAX_TILE_RES {
+                    return Err(format!("--res must be a power of two up to {}, got {}", planet_render::exec::MAX_TILE_RES, o.res));
+                }
+            }
+            "--bundle" => o.bundle_out = Some(PathBuf::from(it.next().ok_or("--bundle needs a path")?)),
+            "--repro" => o.repro = Some(PathBuf::from(it.next().ok_or("--repro needs a path")?)),
+            "--face-net" => o.face_net = Some(PathBuf::from(it.next().ok_or("--face-net needs a path")?)),
             "--machine-ready" => o.machine_ready = true,
             "--scene" => o.scene = it.next().ok_or("--scene needs a value")?.clone(),
             "--out" => o.out = Some(PathBuf::from(it.next().ok_or("--out needs a value")?)),
@@ -71,13 +115,15 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     let o = parse_args(args)?;
     let smoke = if o.smoke { " [smoke ok]" } else { "" };
     match o.mode {
-        Mode::Editor => writeln!(out, "planet editor: no window yet (arrives in M2){smoke}").map_err(err),
-        Mode::Generate => writeln!(out, "planet generate: no generators wired yet{smoke}").map_err(err),
+        Mode::Editor if o.offscreen => skeleton::render_offscreen(&o, out),
+        Mode::Editor => writeln!(out, "planet editor: no window yet (arrives in M2; use --offscreen for the skeleton){smoke}").map_err(err),
+        Mode::Generate if !o.smoke => skeleton::generate(&o, out),
+        Mode::Generate => writeln!(out, "planet generate: ready{smoke}").map_err(err),
         Mode::TestRender => test_render(&o, out),
     }
 }
 
-fn err(e: std::io::Error) -> String {
+pub(crate) fn err(e: std::io::Error) -> String {
     e.to_string()
 }
 
@@ -106,7 +152,11 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.perf {
         return perf_skeleton(o, &ctx, out);
     }
+    if let Some(bundle) = &o.repro {
+        return skeleton::replay(&ctx, bundle, o.out.as_deref(), out);
+    }
     match o.scene.as_str() {
+        "tiles" => skeleton::render_tiles(&ctx, o, out),
         "hello-triangle" => {
             let frame = planet_render::hello_triangle(&ctx, 256);
             if let Some(path) = &o.out {
@@ -115,7 +165,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
             }
             Ok(())
         }
-        other => Err(format!("unknown scene '{other}' (known: hello-triangle)")),
+        other => Err(format!("unknown scene '{other}' (known: hello-triangle, tiles)")),
     }
 }
 

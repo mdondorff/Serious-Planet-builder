@@ -484,6 +484,7 @@ name = "planet-frame"
 version = "0.0.0"
 dependencies = [
  "planet-core",
+ "planet-generators",
  "planet-streaming",
 ]
 
@@ -491,8 +492,10 @@ dependencies = [
 name = "planet-generators"
 version = "0.0.0"
 dependencies = [
+ "libm",
  "planet-core",
  "planet-world-def",
+ "png",
 ]
 
 [[package]]
@@ -505,6 +508,7 @@ version = "0.0.0"
 dependencies = [
  "planet-core",
  "planet-frame",
+ "planet-generators",
  "planet-testkit",
  "png",
  "pollster",
