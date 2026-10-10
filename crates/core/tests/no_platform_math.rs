@@ -87,7 +87,7 @@ let b = f32::powf(a, 2.0);"
 fn generator_relevant_crates_use_libm_only() {
     let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut offences = Vec::new();
-    for name in ["core", "world-def", "generators", "cache", "streaming", "frame"] {
+    for name in ["core", "world-def", "generators", "cache", "streaming", "frame", "app"] {
         assert!(crates.join(name).join("src").is_dir(), "crate directory {name} is missing: the scan would check nothing");
         let mut files = Vec::new();
         rust_files(&crates.join(name).join("src"), &mut files);
@@ -99,4 +99,17 @@ fn generator_relevant_crates_use_libm_only() {
         }
     }
     assert!(offences.is_empty(), "use libm instead of platform maths (ADR 0010):\n{}", offences.join("\n"));
+}
+
+// spec: COORD-009
+#[test]
+fn clippy_toml_bans_every_scanned_method_on_both_float_types() {
+    // The clippy list is the real enforcement (cargo xtask check); deleting an entry must not go unnoticed.
+    let toml = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../clippy.toml")).expect("clippy.toml");
+    for b in BANNED {
+        let name = b.trim_start_matches('.').trim_end_matches('(');
+        for t in ["f64", "f32"] {
+            assert!(toml.contains(&format!("\"{t}::{name}\"")), "clippy.toml does not ban {t}::{name}");
+        }
+    }
 }
