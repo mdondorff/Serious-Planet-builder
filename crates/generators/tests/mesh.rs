@@ -221,3 +221,92 @@ fn vertex_serialisation_matches_the_documented_gpu_layout() {
     assert_eq!(&f[o[4]..o[4] + 3], &v.ref_pos);
     assert_eq!(planet_generators::mesh::MeshVertex::STRIDE, 52);
 }
+
+/// Worst angle (degrees) between the normals of coincident border vertices of two neighbouring tiles.
+fn worst_border_normal_angle(a: &TileMesh, b: &TileMesh, side: Side) -> f64 {
+    let n = CELLS;
+    let nrm = |m: &TileMesh, i: u32, j: u32| {
+        let v = m.vertices[(j * (n + 1) + i) as usize];
+        Vec3::new(f64::from(v.normal[0]), f64::from(v.normal[1]), f64::from(v.normal[2]))
+    };
+    let mut worst = 0.0f64;
+    for k in 0..=n {
+        let (i, j) = match side {
+            Side::East => (n, k),
+            Side::West => (0, k),
+            Side::North => (k, n),
+            Side::South => (k, 0),
+        };
+        let p = world(a, i, j);
+        // The partner: the border vertex of `b` at the same position.
+        let mut best = (f64::MAX, Vec3::ZERO);
+        for m in 0..=n {
+            for (bi, bj) in [(0, m), (n, m), (m, 0), (m, n)] {
+                let d = world(b, bi, bj).distance(p);
+                if d < best.0 {
+                    best = (d, nrm(b, bi, bj));
+                }
+            }
+        }
+        assert!(best.0 < 0.5, "no partner vertex found for {i},{j}: nearest {} m", best.0);
+        let (x, y) = (nrm(a, i, j), best.1);
+        worst = worst.max(libm::atan2(x.cross(y).length(), x.dot(y)).to_degrees());
+    }
+    worst
+}
+
+// spec: REND-009, GEN-004
+#[test]
+fn border_normals_match_across_every_cube_edge_and_within_faces() {
+    // Every tile of level 2 on every face, every side: normals of coincident border vertices agree (bit-level).
+    let m = TangentWarp;
+    let (mut cross_pairs, mut same_pairs) = (0, 0);
+    let mut worst = 0.0f64;
+    for f in 0..6u8 {
+        for x in 0..4u32 {
+            for y in 0..4u32 {
+                let t = id(f, 2, x, y);
+                let a = tile_mesh(1, &m, t, CELLS, R);
+                for side in Side::ALL {
+                    let nb = t.neighbor(&m, side);
+                    let angle = worst_border_normal_angle(&a, &tile_mesh(1, &m, nb, CELLS, R), side);
+                    worst = worst.max(angle);
+                    if nb.face() != t.face() {
+                        cross_pairs += 1;
+                    } else {
+                        same_pairs += 1;
+                    }
+                }
+            }
+        }
+    }
+    // 12 cube edges x 4 tiles x 2 directions = 96 cross-face pairs.
+    assert_eq!(cross_pairs, 96, "the test must cross every cube edge");
+    assert!(same_pairs > 100);
+    assert!(worst < 1e-6, "border normals of neighbouring tiles differ by up to {worst} degrees (ADR 0003)");
+}
+
+// spec: REND-009
+#[test]
+fn normals_follow_the_terrain_and_agree_with_the_lattice_slope() {
+    // The seam fix must not turn normals into something that ignores the terrain or is smoothed by a wrong step.
+    let m = TangentWarp;
+    let mut max_tilt = 0.0f64;
+    for (f, l, x, y) in [(0u8, 6u8, 20u32, 33u32), (3, 9, 100, 200), (5, 12, 1000, 2000), (2, 20, 400_000, 700_000)] {
+        let t = id(f, l, x, y);
+        let mesh = tile_mesh(1, &m, t, CELLS, R);
+        for (i, j) in [(3u32, 3u32), (8, 8), (12, 5), (5, 12)] {
+            let v = mesh.vertices[(j * (CELLS + 1) + i) as usize];
+            let normal = Vec3::new(f64::from(v.normal[0]), f64::from(v.normal[1]), f64::from(v.normal[2]));
+            // Reference: the plain lattice central difference of the mesh itself.
+            let lattice =
+                (world(&mesh, i + 1, j) - world(&mesh, i - 1, j)).cross(world(&mesh, i, j + 1) - world(&mesh, i, j - 1)).normalized();
+            let angle = |a: Vec3, b: Vec3| libm::atan2(a.cross(b).length(), a.dot(b)).to_degrees();
+            let radial = world(&mesh, i, j).normalized();
+            max_tilt = max_tilt.max(angle(lattice, radial));
+            let off = angle(normal, lattice);
+            assert!(off < 0.02, "tile {t:?} vertex ({i},{j}): normal is {off} degrees from the lattice slope");
+        }
+    }
+    assert!(max_tilt > 0.05, "the terrain must tilt the normals measurably for this test to mean anything, got {max_tilt} degrees");
+}

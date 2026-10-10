@@ -12,5 +12,5 @@ pub mod vec3;
 pub use cube::{Face, FaceMapping, TangentWarp};
 pub use frames::{CameraRelative, PlanetFixed, TileLocal};
 pub use surface::{Geo, ReferenceSurface, Sphere};
-pub use tile::{Side, TileId};
+pub use tile::{Corner, Side, TileId};
 pub use vec3::Vec3;
