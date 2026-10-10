@@ -202,3 +202,39 @@ fn the_eight_corners_are_shared_by_exactly_three_faces_with_one_direction() {
         }
     }
 }
+
+fn triangle_area(a: Vec3, b: Vec3, c: Vec3) -> f64 {
+    // Solid angle of a spherical triangle (Van Oosterom and Strackee).
+    2.0 * libm::atan2(a.dot(b.cross(c)).abs(), 1.0 + a.dot(b) + b.dot(c) + c.dot(a))
+}
+
+// spec: CON-15
+#[test]
+fn tangent_warp_tile_areas_stay_within_the_published_distortion() {
+    // Measured for ADR 0003 and the M2 gate: the ratio between the largest and smallest tile of one level.
+    let m = TangentWarp;
+    for level in [2u8, 4, 6] {
+        let n = 1u32 << level;
+        let (mut lo, mut hi, mut sum) = (f64::MAX, 0.0f64, 0.0);
+        for x in 0..n {
+            for y in 0..n {
+                let t = TileId::new(Face(0), level, x, y).unwrap();
+                let (s0, s1, t0, t1) = t.bounds();
+                let p = |s, t| face_to_direction(&m, Face(0), s, t);
+                let (a, b, c, d) = (p(s0, t0), p(s1, t0), p(s1, t1), p(s0, t1));
+                let area = triangle_area(a, b, c) + triangle_area(a, c, d);
+                lo = lo.min(area);
+                hi = hi.max(area);
+                sum += area;
+            }
+        }
+        // One face covers 4 pi / 6 steradians.
+        assert!((sum - 4.0 * core::f64::consts::PI / 6.0).abs() < 1e-9, "level {level}: tiles must tile the face, area {sum}");
+        let ratio = hi / lo;
+        eprintln!("level {level}: tile area ratio max/min = {ratio:.4}");
+        assert!(
+            ratio > 1.15 && ratio < 1.5,
+            "tile area ratio {ratio} at level {level} (published: about 1.41 for the adjusted gnomonic warp)"
+        );
+    }
+}
