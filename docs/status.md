@@ -4,23 +4,25 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
 
 ## Waiting for the owner
 - **M2 go/no-go gate** (docs/milestones/M2-report.md): recommendation Go with changes. Nothing in M3 has been started.
-- **Accept or change the proposed ADRs** 0004, 0007, 0009, 0013 and 0014 (ADRs 0001-0003, 0005, 0006, 0008, 0010-0012 accepted 2026-10-10). Work proceeds on their leanings. ADR 0003 departs from the report's leaning (tangent-adjusted warp first, equal-area evaluated at the M2 gate).
+- **Accept or change the proposed ADRs** 0004, 0007, 0009, 0013 and 0014 (ADRs 0001-0003, 0005, 0006, 0008, 0010-0012 accepted 2026-10-10). Work proceeds on their leanings.
 - **Bless the six terrain goldens** (adapter dx12 WARP; listed in tests/goldens/pending.txt; candidates in target/review/candidates/): terrain_orbit_tile_id, terrain_aerial20km_level, terrain_ground200m_height, terrain_cube_corner_normals, terrain_ground1m_depth, terrain_low2km_morph. `/bless` must also remove the names from pending.txt (`cargo xtask check` fails otherwise). Two of them (ground200m height, cube-corner normals) carry little information; say if you prefer other views.
 - **Bless the Linux goldens** (adapter `vulkan-llvmpipe-llvm-20-1-2-256-bits`): the four CI candidates are byte-identical to the blessed WARP goldens. They are in the `review-Linux` artifact of the latest CI run on `main` (download with `gh run download <id> -n review-Linux`).
 - **Performance on Rasierklinge**: set the Windows power profile to High performance (your first run used Balanced and an idle GPU), connect the charger, then run `cargo xtask perf --machine-ready` (terrain workload at 1440p, four views, 3 runs each, GPU timestamps; takes a minute or two plus mesh generation). Read the verdict lines (GPU median at most 8 ms, frame p99 at most 20 ms) and send me perf/logs/terrain.json; the session is marked invalid if the machine is not ready. Real-GPU candidates (adapter vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu) can be blessed next to the WARP goldens: debug views are byte-identical, three terrain views differ by at most 1 LSB.
 - Tool note: `gh` is installed at `C:\Program Files\GitHub CLI\gh.exe` but is not on the Git Bash PATH.
 
 ## Queued for agents
-- **ADR 0006 review follow-ups** (items 1-3 DONE in m2-mesh-keys, 2026-10-10; only item 4 remains, for M3; owner asked for these to be picked up by the M2 agent; ADR 0006 updated, still proposed):
+- **ADR 0006 review follow-ups** (items 1-3 DONE in m2-mesh-keys, 2026-10-10; only item 4 remains, for M3; owner asked for these to be picked up by the M2 agent; ADR 0006 accepted):
   1. GPU vertex buffers are keyed by `TileId` alone; `upload` keeps a stale buffer when the mesh changes (`crates/render/src/terrain.rs:115`, `:309`). Key by mesh key or replace on mismatch; test: upload seed 1 then seed 2 for one tile.
   2. Meshes have no key, version or known answers: add `MESH_VERSION`, `mesh_key(height_key, cells, radius bits, MESH_VERSION)` and known-answer hashes for 2-3 meshes (`crates/generators/src/mesh.rs:49`; inputs `radius_m`, `cells`, `SKIRT_FRACTION`, normal stencil, tile origin).
   3. Tie the known-answer tile table to its version: `assert_eq!(GENERATOR_VERSION, 2)` beside `KNOWN_TILE_HASHES` (`crates/generators/tests/pipeline.rs:16`), as `hash_known_answers.rs` does for `HASH_VERSION`.
   4. M3 (not M2): minimal `GenContext`; `replay` rejects a non-zero `definition_hash` once `world-def` exists (`crates/app/src/skeleton.rs:112`).
 
-- **ADR 0010 review follow-ups** (2026-10-10, owner asked; ADR 0010 updated, still proposed):
-  1. Enforce the platform-maths ban with clippy `disallowed-methods` in `clippy.toml` (all `f64::`/`f32::` transcendentals plus `powi`, `powf`, `mul_add`, `sin_cos`, `exp_m1`, `ln_1p`, the hyperbolic family) over the whole workspace; keep or retire `crates/core/tests/no_platform_math.rs` (today it misses `f64::powi(`, `f64::mul_add(`, `.map(f64::sin)`, `<f64>::sin(`, a space before `(`, and does not scan `app`).
+- **ADR 0010 review follow-ups** (2026-10-10, owner asked; ADR 0010 accepted):
+  1. Enforce the platform-maths ban with clippy `disallowed-methods` in `clippy.toml` (all `f64::`/`f32::` transcendentals plus `powi`, `powf`, `mul_add`, `sin_cos`, `exp_m1`, `ln_1p`, the hyperbolic family) over the whole workspace; keep or retire `crates/core/tests/no_platform_math.rs` (today it misses `f64::powi(`, `f64::mul_add(`, `.map(f64::sin)`, `<f64>::sin(`, a space before `(`, and does not scan `app`). Sent to the M2 agent 2026-10-10.
+- **ADR 0004 review follow-up** (2026-10-10, owner asked; sent to the M2 agent): render's public API is the seam to wgpu. Remove `pub use wgpu` (`crates/render/src/lib.rs:6`), make the `GpuContext` fields private with accessors for adapter facts (used by `facts()` and the adapter log line in `crates/app/src/lib.rs`), and extend `cargo xtask layering` so only `render` depends on wgpu. Goldens stay byte-identical.
 
 ## Log
+- 2026-10-10 ADR 0004 updated from review (still proposed): render's public API is the seam (no internal HAL), M2 gate outcome recorded (wgpu kept), wgpu upgrades keep goldens byte-identical, DX12 and Vulkan only.
 - 2026-10-10 ADRs 0005, 0006, 0008, 0010, 0011, 0012 accepted by the owner; CON-14 amended (constitution v1.1, per-field CPU/GPU bounds); con14-tolerance archived (GEN-008 modified).
 - 2026-10-10 det-manifest archived (GEN-003 modified): Windows/Linux determinism manifest and `cargo xtask det-diff`; CI `determinism` job. ADR 0003 accepted; ADR 0010 updated with a proposed CON-14 tolerance amendment.
 - 2026-10-10 m2-key-aware-residency archived (REND-013 Stale mesh): plan draws carry mesh_key, render() fails with StaleMesh on a mismatch, has_mesh replaces has_tile. Known gap: no test changes the seed on a live app renderer (the editor will); StaleMesh makes a regression loud instead of silent.
