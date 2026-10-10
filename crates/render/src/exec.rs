@@ -143,8 +143,9 @@ fn check(plan: &FramePlan, tiles: &[TileResource]) -> Result<(), ExecError> {
         if w == 0 || h == 0 || x.checked_add(w).is_none_or(|e| e > plan.size.0) || y.checked_add(h).is_none_or(|e| e > plan.size.1) {
             return Err(ExecError::OutsideFrame { index, rect: d.rect, size: plan.size });
         }
+        // The renderer never substitutes for a missing resource: every drawn tile needs its resource in every view.
+        let t = tiles.iter().find(|t| t.id == d.tile).ok_or(ExecError::MissingTile(d.tile))?;
         if plan.view == DebugView::Height {
-            let t = tiles.iter().find(|t| t.id == d.tile).ok_or(ExecError::MissingTile(d.tile))?;
             if t.res == 0 || t.res > MAX_TILE_RES {
                 return Err(ExecError::BadResolution { id: t.id, res: t.res });
             }
@@ -242,10 +243,11 @@ pub fn execute(ctx: &GpuContext, plan: &FramePlan, tiles: &[TileResource]) -> Re
     let mut stats = ExecStats::default();
     let mut bind_groups = Vec::new();
     for d in &plan.draws {
-        let (res, heights): (u32, Vec<f32>) = match tiles.iter().find(|t| t.id == d.tile) {
-            Some(t) if plan.view == DebugView::Height => (t.res, t.heights.to_vec()),
-            _ => (0, vec![0.0]),
-        };
+        // `check` guarantees a resource for every draw. Only the height view samples it; the other views still need
+        // the binding to exist, so they bind a 1x1 layout placeholder that the shader never reads (no data is
+        // substituted: a missing tile is an error above).
+        let t = tiles.iter().find(|t| t.id == d.tile).ok_or(ExecError::MissingTile(d.tile))?;
+        let (res, heights): (u32, Vec<f32>) = if plan.view == DebugView::Height { (t.res, t.heights.to_vec()) } else { (0, vec![0.0]) };
         let n = res + 1;
         let tex = device.create_texture_with_data(
             &ctx.queue,
@@ -363,6 +365,11 @@ mod tests {
         let p = plan(DebugView::Height);
         let id = p.draws[0].tile;
         assert_eq!(reference_frame(&p, &[]).unwrap_err(), ExecError::MissingTile(id));
+        // No view substitutes for a missing resource: the flat-colour views fail like the height view.
+        for view in [DebugView::Face, DebugView::TileId] {
+            let p = plan(view);
+            assert_eq!(check(&p, &[]).unwrap_err(), ExecError::MissingTile(p.draws[0].tile), "{view:?}");
+        }
         let short = [0.0f32; 3];
         let e = reference_frame(&p, &[TileResource { id, res: 4, heights: &short }]).unwrap_err();
         assert_eq!(e, ExecError::BadResource { id, expected: 25, got: 3 });
@@ -375,7 +382,9 @@ mod tests {
     #[test]
     fn the_reference_frame_fills_exactly_the_planned_rectangles() {
         let p = plan(DebugView::Face);
-        let f = reference_frame(&p, &[]).unwrap();
+        // Every drawn tile needs its resource even in the flat-colour views (no substitution), though it is not sampled.
+        let heights = [0.0f32; 4];
+        let f = reference_frame(&p, &[TileResource { id: p.draws[0].tile, res: 1, heights: &heights }]).unwrap();
         let fill = f.rgba.as_chunks::<4>().0.iter().filter(|px| **px == p.draws[0].color).count();
         assert_eq!(fill, 32 * 32);
         assert!(!f.rgba.as_chunks::<4>().0.contains(&p.clear_color));
