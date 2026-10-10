@@ -10,3 +10,6 @@ planet-core.workspace = true
 planet-streaming.workspace = true
 planet-generators.workspace = true
 libm.workspace = true
+
+[dev-dependencies]
+planet-generators = { workspace = true, features = ["stress"] }

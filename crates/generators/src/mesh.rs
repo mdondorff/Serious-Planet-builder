@@ -5,7 +5,7 @@
 //! Positions are computed in float64 on the planet-fixed frame and rounded once to f32 after subtracting the origin,
 //! so vertex precision is bounded by tile size (plus the height range within the tile), never by planet size.
 
-use crate::height::{cache_key, height_at};
+use crate::height::{cache_key_field, HeightField, Reference};
 use planet_core::cube::FaceMapping;
 use planet_core::hash::hash_u64s;
 use planet_core::{PlanetFixed, TileId, Vec3};
@@ -60,10 +60,17 @@ pub fn mesh_key(map: &dyn FaceMapping, seed: u64, id: TileId, cells: u32, radius
 
 /// [`mesh_key`] with the construction constants as arguments, so tests can show that each one changes the key.
 pub fn mesh_key_with(map: &dyn FaceMapping, seed: u64, id: TileId, cells: u32, radius_m: f64, version: u32, skirt_fraction: f64) -> u64 {
-    hash_u64s(
-        0x006d_6573,
-        &[u64::from(version), cache_key(map, seed, id, cells), u64::from(cells), radius_m.to_bits(), skirt_fraction.to_bits()],
-    )
+    mesh_key_chain(cache_key_field(&Reference(seed), map, id, cells), cells, radius_m, version, skirt_fraction)
+}
+
+fn mesh_key_chain(height_key: u64, cells: u32, radius_m: f64, version: u32, skirt_fraction: f64) -> u64 {
+    hash_u64s(0x006d_6573, &[u64::from(version), height_key, u64::from(cells), radius_m.to_bits(), skirt_fraction.to_bits()])
+}
+
+/// [`mesh_key`] for a height field: it chains the field's height key ([`cache_key_field`]), so [`Reference`] gives
+/// exactly [`mesh_key`] and any other field (other implementation id or version) gets other keys (ADR 0006).
+pub fn mesh_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> u64 {
+    mesh_key_chain(cache_key_field(field, map, id, cells), cells, radius_m, MESH_VERSION, SKIRT_FRACTION)
 }
 
 impl TileMesh {
@@ -80,6 +87,11 @@ impl TileMesh {
 
 /// Build the mesh. `cells` must be a power of two of at least 2.
 pub fn tile_mesh(seed: u64, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> TileMesh {
+    tile_mesh_field(&Reference(seed), map, id, cells, radius_m)
+}
+
+/// [`tile_mesh`] over any height field (stress tests use `stress::Steep`).
+pub fn tile_mesh_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> TileMesh {
     assert!(cells >= 2 && cells.is_power_of_two(), "cells must be a power of two >= 2");
     let n = i64::from(cells);
     let width = (cells + 1) as usize;
@@ -90,7 +102,7 @@ pub fn tile_mesh(seed: u64, map: &dyn FaceMapping, id: TileId, cells: u32, radiu
     for j in 0..=n {
         for i in 0..=n {
             let dir = id.sample_direction(map, cells, i as u32, j as u32);
-            let h = height_at(seed, dir);
+            let h = field.height(dir);
             let idx = j as usize * width + i as usize;
             world[idx] = dir * (radius_m + h);
             heights[idx] = h;
@@ -103,7 +115,7 @@ pub fn tile_mesh(seed: u64, map: &dyn FaceMapping, id: TileId, cells: u32, radiu
     // The origin sits at the tile centre including its terrain height, so tile-local offsets and the camera-relative
     // origin stay small (a few tile sizes), never terrain-height sized.
     let centre_dir = id.center_direction(map);
-    let origin = PlanetFixed(centre_dir * (radius_m + height_at(seed, centre_dir)));
+    let origin = PlanetFixed(centre_dir * (radius_m + field.height(centre_dir)));
     let local = |p: Vec3| {
         let d = p - origin.0;
         [d.x as f32, d.y as f32, d.z as f32]
@@ -112,7 +124,7 @@ pub fn tile_mesh(seed: u64, map: &dyn FaceMapping, id: TileId, cells: u32, radiu
     let mut vertices = Vec::with_capacity(vertex_count(cells));
     for j in 0..=n {
         for i in 0..=n {
-            let normal = surface_normal(seed, dirs[j as usize * width + i as usize], eps, radius_m);
+            let normal = surface_normal_field(field, dirs[j as usize * width + i as usize], eps, radius_m);
             // Geomorph target on the parent grid (diagonal (i-1,j-1)-(i+1,j+1) matches the triangulation).
             let coarse = match (i % 2, j % 2) {
                 (0, 0) => at(i, j),
@@ -144,7 +156,7 @@ pub fn tile_mesh(seed: u64, map: &dyn FaceMapping, id: TileId, cells: u32, radiu
             |p: [f32; 3]| [(f64::from(p[0]) - radial.x) as f32, (f64::from(p[1]) - radial.y) as f32, (f64::from(p[2]) - radial.z) as f32];
         vertices.push(MeshVertex { pos: down(v.pos), coarse: down(v.coarse), ref_pos: down(v.ref_pos), ..v });
     }
-    TileMesh { id, cells, key: mesh_key(map, seed, id, cells, radius_m), origin, vertices }
+    TileMesh { id, cells, key: mesh_key_field(field, map, id, cells, radius_m), origin, vertices }
 }
 
 /// Triangle indices for the grid and its skirts; identical for every tile of a given `cells`.
@@ -190,6 +202,11 @@ impl MeshVertex {
 /// that is a pure function of `dir` (not of any tile's lattice). Border vertices shared by tiles of the same level, also
 /// across cube faces, have bit-identical directions and the same `eps`, so they get bit-identical normals (ADR 0003).
 pub fn surface_normal(seed: u64, dir: Vec3, eps: f64, radius_m: f64) -> Vec3 {
+    surface_normal_field(&Reference(seed), dir, eps, radius_m)
+}
+
+/// [`surface_normal`] over any height field.
+pub fn surface_normal_field(field: &dyn HeightField, dir: Vec3, eps: f64, radius_m: f64) -> Vec3 {
     // Tangent frame from `dir` alone: the world axis least aligned with it seeds t1; t2 = dir x t1, so t1 x t2 = dir.
     let (ax, ay, az) = (dir.x.abs(), dir.y.abs(), dir.z.abs());
     let axis = if ax <= ay && ax <= az {
@@ -203,7 +220,7 @@ pub fn surface_normal(seed: u64, dir: Vec3, eps: f64, radius_m: f64) -> Vec3 {
     let t2 = dir.cross(t1);
     let p = |t: Vec3, sign: f64| {
         let d = (dir + t * (sign * eps)).normalized();
-        d * (radius_m + height_at(seed, d))
+        d * (radius_m + field.height(d))
     };
     (p(t1, 1.0) - p(t1, -1.0)).cross(p(t2, 1.0) - p(t2, -1.0)).normalized()
 }
