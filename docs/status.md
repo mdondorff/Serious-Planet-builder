@@ -10,6 +10,7 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
 - Tool note: `gh` is installed at `C:\Program Files\GitHub CLI\gh.exe` but is not on the Git Bash PATH.
 
 ## Log
+- 2026-10-10 m2-camera-graph-instances archived (REND-010, 011, 012 active; SPIKE-01 and SPIKE-02 closed; ADRs 0013, 0014 proposed). Process note: a PR was once merged while its Windows job was still pending (it finished green); merges now wait for explicit green on both jobs.
 - 2026-10-10 m2-async-streaming archived (STRM-001, 002, 005, 007 active).
 - 2026-10-10 m2-terrain-render archived (LOD-005, LOD-007, REND-003..006, REND-009 active). Six terrain goldens wait for /bless (tests/goldens/pending.txt).
 - 2026-10-10 m2-node-selection archived (LOD-001..004 active).
