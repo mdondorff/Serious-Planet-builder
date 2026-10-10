@@ -1,5 +1,7 @@
 //! CON-16: every requirement has a trace ID and a verification tier; every cited ID exists; every
-//! active tier A/B/C requirement is cited by at least one automated test; tier D names a review artefact.
+//! active tier A/B/C requirement is cited by a `#[test]` function of its own tier (a `// spec:` comment counts only when
+//! it sits directly above a `#[test]` fn; integration test files `tests/gpu_*.rs` are tier C, `tests/oracle_*.rs` tier B, everything else tier A);
+//! tier D names a review artefact.
 //!
 //! Requirement format (OpenSpec headings, metadata lines in the body):
 //! ```text
@@ -82,6 +84,89 @@ pub fn parse_citations(text: &str) -> Vec<String> {
     ids
 }
 
+/// Trace IDs cited by `// spec:` comments that are attached to a `#[test]` function: the comment is followed only by
+/// more comments and attributes, one of which is `#[test]`, and then the `fn`.
+pub fn parse_test_citations(text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut ids = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let t = line.trim_start();
+        let Some(c) = t.strip_prefix("//") else { continue };
+        let Some(list) = c.trim_start_matches(['/', '!']).trim_start().strip_prefix("spec:") else { continue };
+        let (mut saw_test, mut attached, mut depth) = (false, false, 0i32);
+        for next in &lines[i + 1..] {
+            let n = next.trim();
+            if depth > 0 {
+                // Continuation of a multi-line attribute such as a wrapped `#[should_panic(expected = "x")]`.
+                depth += bracket_balance(n);
+                continue;
+            }
+            if n.starts_with("//") {
+                continue;
+            }
+            if n.starts_with("#[") {
+                let code = n.split("//").next().unwrap_or("").trim();
+                saw_test |= code == "#[test]";
+                depth = bracket_balance(code);
+                continue;
+            }
+            attached = saw_test && starts_fn_item(n);
+            break;
+        }
+        if attached {
+            ids.extend(list.split([',', ' ']).map(str::trim).filter(|s| is_trace_id(s)).map(String::from));
+        }
+    }
+    ids
+}
+
+/// Unclosed `[` minus `]` in `line` (attribute continuation tracking; brackets inside string literals are rare enough
+/// in attributes that this is good enough, and a miscount only makes a citation detach loudly).
+fn bracket_balance(line: &str) -> i32 {
+    line.chars().map(|c| i32::from(c == '[') - i32::from(c == ']')).sum()
+}
+
+/// Whether `line` starts a function item: optional `pub`/`pub(..)`, then `const`/`async`/`unsafe`/`extern ".."`, then `fn`.
+fn starts_fn_item(line: &str) -> bool {
+    let mut rest = line;
+    if let Some(r) = rest.strip_prefix("pub") {
+        rest = r.trim_start();
+        if rest.starts_with('(') {
+            match rest.find(')') {
+                Some(i) => rest = rest[i + 1..].trim_start(),
+                None => return false,
+            }
+        }
+    }
+    loop {
+        let before = rest;
+        for kw in ["const ", "async ", "unsafe "] {
+            if let Some(r) = rest.strip_prefix(kw) {
+                rest = r.trim_start();
+            }
+        }
+        if rest == before {
+            break;
+        }
+    }
+    rest.starts_with("fn ")
+}
+
+/// Verification tier of the tests in a source file (ADR 0009, TEST-001), matching the runner's `binary(/^gpu_/)` filters:
+/// integration test files `tests/gpu_*.rs` are tier C, `tests/oracle_*.rs` tier B; every other file, including unit
+/// tests under `src/`, is tier A.
+pub fn test_tier(path: &Path) -> char {
+    let in_tests_dir = path.parent().and_then(|p| p.file_name()).is_some_and(|d| d == "tests");
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    if in_tests_dir && stem.starts_with("gpu_") {
+        'C'
+    } else if in_tests_dir && stem.starts_with("oracle_") {
+        'B'
+    } else {
+        'A'
+    }
+}
+
 /// Constitution rule IDs (`CON-01`..), which tests may also cite.
 fn constitution_ids(text: &str) -> BTreeSet<String> {
     text.split("**").filter(|s| s.starts_with("CON-") && is_trace_id(s)).map(String::from).collect()
@@ -128,7 +213,8 @@ pub fn lint(specs: &BTreeMap<String, String>, sources: &BTreeMap<PathBuf, String
 
     let known: BTreeSet<&str> = reqs.iter().map(|r| r.id.as_str()).collect();
     let con = constitution_ids(constitution);
-    let mut cited: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    // id -> tiers of the `#[test]` functions that cite it.
+    let mut cited: BTreeMap<String, BTreeSet<char>> = BTreeMap::new();
     for (path, text) in sources {
         for id in parse_citations(text) {
             if !known.contains(id.as_str()) && !con.contains(&id) {
@@ -137,19 +223,29 @@ pub fn lint(specs: &BTreeMap<String, String>, sources: &BTreeMap<PathBuf, String
                     path.display()
                 ));
             }
-            cited.entry(id).or_default().push(path.display().to_string());
+        }
+        for id in parse_test_citations(text) {
+            cited.entry(id).or_default().insert(test_tier(path));
         }
     }
     for r in &reqs {
         let active = r.status.as_deref() == Some("active");
-        if active && matches!(r.tier, Some('A' | 'B' | 'C')) && !cited.contains_key(&r.id) {
-            errors.push(format!(
-                "{} ({}): active tier-{} requirement is not cited by any test (add `// spec: {}` to the test that covers it, or mark it planned)",
+        let Some(tier @ ('A' | 'B' | 'C')) = r.tier else { continue };
+        if !active {
+            continue;
+        }
+        match cited.get(&r.id) {
+            None => errors.push(format!(
+                "{} ({}): active tier-{tier} requirement is not cited by any test (put `// spec: {}` directly above the `#[test]` fn that covers it, or mark the requirement planned)",
+                r.id, r.spec, r.id
+            )),
+            Some(tiers) if !tiers.contains(&tier) => errors.push(format!(
+                "{} ({}): requires a tier-{tier} test but is cited only by tier {} tests (tests/gpu_*.rs are tier C, tests/oracle_*.rs tier B, everything else tier A): add a tier-{tier} test or change the requirement's Verify tier",
                 r.id,
                 r.spec,
-                r.tier.unwrap_or('?'),
-                r.id
-            ));
+                tiers.iter().collect::<String>()
+            )),
+            Some(_) => {}
         }
     }
 
@@ -260,10 +356,10 @@ Status: active
     #[test]
     fn citing_an_unknown_id_is_reported_and_known_ids_pass() {
         let spec = SPEC.replace("Verify: D\nStatus: active", "Verify: D\nStatus: active\nReview: contact sheet");
-        let r = lint_with(&spec, "// spec: COORD-003\n// spec: NOPE-001\n");
+        let r = lint_with(&spec, "// spec: COORD-003\n#[test]\nfn t() {}\n// spec: NOPE-001\n");
         assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
         assert!(r.errors[0].contains("NOPE-001"));
-        assert!(lint_with(&spec, "// spec: COORD-003, CON-15\n").errors.is_empty());
+        assert!(lint_with(&spec, "// spec: COORD-003, CON-15\n#[test]\nfn t() {}\n").errors.is_empty());
     }
 
     // spec: TEST-001
@@ -289,5 +385,186 @@ Status: active
         let r = lint_with(spec, "");
         let j = r.errors.join("\n");
         assert!(j.contains("duplicate") && j.contains("Verify") && j.contains("Status"), "{j}");
+    }
+
+    fn lint_at(spec: &str, path: &str, source: &str) -> Report {
+        let specs = BTreeMap::from([("coordinates".to_string(), spec.to_string())]);
+        let sources = BTreeMap::from([(PathBuf::from(path), source.to_string())]);
+        lint(&specs, &sources, "- **CON-15** x")
+    }
+
+    const ONE: &str = "### Requirement: COORD-003 Geo round-trip
+The system SHALL round-trip.
+Verify: A
+Status: active
+";
+
+    // spec: TEST-001
+    #[test]
+    fn only_citations_attached_to_a_test_function_count() {
+        let attached = "// spec: COORD-003
+#[test]
+fn t() {}
+";
+        assert!(lint_at(ONE, "a.rs", attached).errors.is_empty());
+        // Attributes and further comments between the citation and the fn are fine.
+        assert!(lint_at(
+            ONE,
+            "a.rs",
+            "// spec: COORD-003
+// more
+#[test]
+#[ignore]
+fn t() {}
+"
+        )
+        .errors
+        .is_empty());
+        // A citation above a helper, a constant, a module or a test-less fn covers nothing.
+        for loose in [
+            "// spec: COORD-003
+fn helper() {}
+",
+            "// spec: COORD-003
+const X: u32 = 1;
+",
+            "// spec: COORD-003
+mod tests {
+    #[test]
+    fn t() {}
+}
+",
+            "// spec: COORD-003
+#[cfg(test)]
+fn not_a_test() {}
+",
+            "// spec: COORD-003
+",
+        ] {
+            let r = lint_at(ONE, "a.rs", loose);
+            assert!(
+                r.errors.iter().any(|e| e.contains("not cited by any test") && e.contains("directly above")),
+                "{loose}: {:?}",
+                r.errors
+            );
+        }
+        // A stray citation of an unknown ID is still reported wherever it sits.
+        assert!(lint_at(
+            ONE,
+            "a.rs",
+            "// spec: NOPE-001
+fn helper() {}
+"
+        )
+        .errors
+        .iter()
+        .any(|e| e.contains("NOPE-001")));
+    }
+
+    // spec: TEST-001
+    #[test]
+    fn a_requirement_needs_a_test_of_its_own_tier() {
+        let test = "// spec: COORD-003
+#[test]
+fn t() {}
+";
+        for (tier, ok_path, bad_path) in [
+            ('A', "x/src/a.rs", "x/tests/gpu_a.rs"),
+            ('B', "x/tests/oracle_a.rs", "x/tests/a.rs"),
+            ('C', "x/tests/gpu_a.rs", "x/tests/oracle_a.rs"),
+        ] {
+            let spec = ONE.replace("Verify: A", &format!("Verify: {tier}"));
+            assert!(lint_at(&spec, ok_path, test).errors.is_empty(), "tier {tier} at {ok_path}");
+            let r = lint_at(&spec, bad_path, test);
+            let j = r.errors.join(
+                "
+",
+            );
+            assert!(
+                j.contains(&format!("requires a tier-{tier} test")) && j.contains("cited only by tier"),
+                "tier {tier} at {bad_path}: {j}"
+            );
+        }
+        // One test of the right tier among several of others is enough.
+        let spec = ONE.replace("Verify: A", "Verify: C");
+        let specs = BTreeMap::from([("coordinates".to_string(), spec)]);
+        let sources =
+            BTreeMap::from([(PathBuf::from("a/tests/x.rs"), test.to_string()), (PathBuf::from("a/tests/gpu_x.rs"), test.to_string())]);
+        assert!(lint(&specs, &sources, "").errors.is_empty());
+    }
+
+    // spec: TEST-001
+    #[test]
+    fn test_files_are_classified_by_name() {
+        assert_eq!(test_tier(Path::new("crates/render/tests/gpu_terrain.rs")), 'C');
+        assert_eq!(test_tier(Path::new("crates/render/tests/oracle_shader_validation.rs")), 'B');
+        assert_eq!(test_tier(Path::new("crates/core/tests/cube_sphere.rs")), 'A');
+        assert_eq!(test_tier(Path::new("xtask/src/speclint.rs")), 'A');
+        // Only top-level integration test files count: a gpu_* file under src/ is a unit-test module (tier A) and a
+        // substring match (debug_gpu_x) is not the runner's prefix match.
+        assert_eq!(test_tier(Path::new("crates/x/src/gpu_util.rs")), 'A');
+        assert_eq!(test_tier(Path::new("crates/x/tests/debug_gpu_x.rs")), 'A');
+    }
+
+    // spec: TEST-001
+    #[test]
+    fn realistic_test_declarations_are_attached() {
+        for decl in [
+            "#[test]
+pub(crate) fn t() {}
+",
+            "#[test] // checks the thing
+fn t() {}
+",
+            "#[test]
+#[should_panic(
+    expected = \"boom\"
+)]
+fn t() {}
+",
+            "#[test]
+#[cfg_attr(
+    miri,
+    ignore
+)]
+pub fn t() {}
+",
+            "#[should_panic]
+#[test]
+fn t() {}
+",
+            "#[test]
+unsafe fn t() {}
+",
+        ] {
+            let src = format!(
+                "// spec: COORD-003
+{decl}"
+            );
+            assert!(lint_at(ONE, "a.rs", &src).errors.is_empty(), "{decl}");
+        }
+        // Still detached: a code line or a blank line in between, a non-test attribute only, a non-fn item.
+        for decl in [
+            "const X: u32 = 1;
+#[test]
+fn t() {}
+",
+            "
+#[test]
+fn t() {}
+",
+            "#[inline]
+fn t() {}
+",
+            "#[test]
+struct S;
+",
+        ] {
+            let src = format!(
+                "// spec: COORD-003
+{decl}"
+            );
+            assert!(!lint_at(ONE, "a.rs", &src).errors.is_empty(), "{decl}");
+        }
     }
 }
