@@ -293,6 +293,16 @@ mod tests {
         assert!(matches!(compare_golden_in(&root, "a", "t", &bad, Tolerance::MaxChannelDelta(5)).unwrap(), GoldenOutcome::Match));
     }
 
+    // spec: TEST-002
+    #[test]
+    fn adapters_with_blessed_goldens_are_detected() {
+        let root = tmp("blessed");
+        assert!(!adapter_has_goldens(&root, "a"));
+        write_png(&root.join("tests/goldens/a/t.png"), &Image::filled(1, 1, [0, 0, 0, 255])).unwrap();
+        assert!(adapter_has_goldens(&root, "a"));
+        assert!(!adapter_has_goldens(&root, "b"));
+    }
+
     // spec: TEST-003
     #[test]
     fn counts_hole_pixels() {
