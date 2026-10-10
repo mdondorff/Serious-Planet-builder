@@ -249,3 +249,162 @@ fn streamed_meshes(
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
 }
+
+/// `test-render --perf --scene terrain`: the terrain frame workload at 1440p on the reference GPU (CON-21). Meshes are
+/// generated and uploaded once per view; frames then only update two small buffers and draw. Reports GPU time (timestamp
+/// queries), CPU record/submit time, wall time, CPU planning time and the deterministic counts, per run, and checks the
+/// terrain budget (median GPU <= 8 ms, p99 frame <= 20 ms).
+pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
+    use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainRequest, TerrainView};
+    use planet_perf::{summarize, Protocol, RunReport, Stats};
+    use planet_render::TerrainRenderer;
+    // `--smoke` runs the same code path briefly on any adapter to prove it works; it is labelled and never a measurement.
+    let smoke = o.perf_smoke;
+    if !smoke {
+        if !o.machine_ready {
+            return Err(
+                "--machine-ready is required: the owner must confirm charger, performance power profile and discrete GPU mode".into()
+            );
+        }
+        planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
+    }
+    let size = if smoke { (1280u32, 720u32) } else { (2560u32, 1440u32) };
+    let lod = LodParams { cells: o.cells, viewport_h_px: f64::from(size.1), tau_px: o.tau, max_level: 26, ..LodParams::earth_1080p() };
+    lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, o.tau))?;
+    let (warmup, measured, runs) = if smoke { (2usize, 5usize, 1usize) } else { (60usize, o.frames.max(10), 3usize) };
+    let protocol =
+        Protocol { warmup_frames: warmup, measured_frames: measured, runs, internal_resolution: size, smoke, ..Protocol::default() };
+    let views = scripted_views(RADIUS_M, f64::from(size.0) / f64::from(size.1), o.seed);
+    let mut renderer = TerrainRenderer::new(ctx, size, o.cells);
+    let mut reports: Vec<RunReport> = Vec::new();
+    let mut budget_lines = Vec::new();
+    if smoke {
+        writeln!(out, "SMOKE RUN: exercises the perf path only; the numbers are not a measurement").map_err(err)?;
+    }
+    writeln!(out, "terrain perf: {}x{}, cells {}, tau {} px, timestamps {}", size.0, size.1, o.cells, o.tau, ctx.timestamps_supported())
+        .map_err(err)?;
+    for index in [0usize, 3, 5, 6] {
+        let (name, camera) = views[index];
+        let req = TerrainRequest {
+            camera,
+            size,
+            view: TerrainView::Level,
+            lod: lod.clone(),
+            face_mapping: TangentWarp.id().to_string(),
+            seed: o.seed,
+        };
+        // CPU planning time (selection + plan), measured separately: the camera is static during frame measurements.
+        let mut plan_samples = Vec::new();
+        let mut plan = plan_terrain(&req).map_err(|e| e.to_string())?;
+        for _ in 0..20 {
+            let t = Instant::now();
+            plan = plan_terrain(&req).map_err(|e| e.to_string())?;
+            plan_samples.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        // Generate the missing meshes in parallel, then upload.
+        let missing: Vec<TileId> = plan.nodes.iter().map(|n| n.tile).filter(|t| !renderer.has_tile(*t)).collect();
+        let started = Instant::now();
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let chunk = missing.len().div_ceil(threads).max(1);
+        let (seed, cells) = (o.seed, o.cells);
+        let meshes: Vec<planet_generators::mesh::TileMesh> = std::thread::scope(|s| {
+            let handles: Vec<_> = missing
+                .chunks(chunk)
+                .map(|part| {
+                    s.spawn(move || {
+                        part.iter().map(|&t| planet_generators::mesh::tile_mesh(seed, &TangentWarp, t, cells, RADIUS_M)).collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            handles.into_iter().flat_map(|h| h.join().expect("mesh thread")).collect()
+        });
+        for m in &meshes {
+            renderer.upload(ctx, m).map_err(|e| e.to_string())?;
+        }
+        writeln!(
+            out,
+            "{name}: {} nodes ({} new meshes in {:.1} s), plan {:.2} ms",
+            plan.nodes.len(),
+            meshes.len(),
+            started.elapsed().as_secs_f64(),
+            summarize(&plan_samples, 0).map_or(f64::NAN, |s| s.median)
+        )
+        .map_err(err)?;
+        for _ in 0..warmup {
+            renderer.render(ctx, &plan, true).map_err(|e| e.to_string())?;
+        }
+        for _ in 0..runs {
+            let before = planet_perf::query_nvidia_smi();
+            let (mut total, mut cpu, mut gpu) = (Vec::new(), Vec::new(), Vec::new());
+            let mut counts = planet_render::TerrainStats::default();
+            for _ in 0..measured {
+                let (t, s) = renderer.render(ctx, &plan, true).map_err(|e| e.to_string())?;
+                total.push(t.total_ms);
+                cpu.push(t.cpu_ms);
+                gpu.extend(t.gpu_ms);
+                counts = s;
+            }
+            let stat = |v: &[f64]| summarize(v, 0).ok_or_else(|| "no valid samples".to_string());
+            let mut metrics: Vec<(String, Stats)> = vec![("cpu_ms".into(), stat(&cpu)?), ("plan_ms".into(), stat(&plan_samples)?)];
+            if !gpu.is_empty() {
+                metrics.push(("gpu_ms".into(), stat(&gpu)?));
+            }
+            let (t_stats, g_stats) = (stat(&total)?, metrics.iter().find(|(n, _)| n == "gpu_ms").map(|(_, s)| s.clone()));
+            budget_lines.push((name, t_stats.clone(), g_stats));
+            reports.push(RunReport {
+                path_name: format!("terrain/{name}"),
+                vram_cap_gb: 8,
+                stats: t_stats,
+                clocks_before: before,
+                clocks_after: planet_perf::query_nvidia_smi(),
+                metrics,
+                counts: vec![
+                    ("nodes".into(), plan.nodes.len() as u64),
+                    ("draw_calls".into(), u64::from(counts.draw_calls)),
+                    ("triangles".into(), counts.triangles),
+                    ("vertex_bytes_resident".into(), renderer.uploaded_bytes),
+                    ("resident_tiles".into(), renderer.resident_tiles() as u64),
+                ],
+            });
+        }
+    }
+    let scheme = planet_perf::query_power_scheme();
+    for w in planet_perf::session_warnings(&crate::facts(ctx), scheme.as_deref(), &reports, smoke) {
+        writeln!(out, "WARNING (not valid for time budgets): {w}").map_err(err)?;
+    }
+    for (name, total, gpu) in &budget_lines {
+        let v = planet_perf::budget_verdict(gpu.as_ref().map(|g| g.median), total.p99);
+        let word = |ok: bool| if ok { "ok" } else { "OVER" };
+        let verdict = match gpu {
+            Some(g) => format!(
+                "GPU median {:.2} ms (budget {}) {}; frame p99 {:.2} ms (budget {}) {}",
+                g.median,
+                planet_perf::TERRAIN_GPU_BUDGET_MS,
+                word(v.gpu_ok == Some(true)),
+                total.p99,
+                planet_perf::FRAME_P99_BUDGET_MS,
+                word(v.frame_ok)
+            ),
+            None => format!("no GPU timestamps; frame median {:.2} ms, p99 {:.2} ms (no GPU verdict)", total.median, total.p99),
+        };
+        writeln!(out, "  {name}: {verdict}").map_err(err)?;
+    }
+    // Run-to-run noise within each view (its three runs), reported as the worst view.
+    let mut worst_noise = 0.0f64;
+    let names: std::collections::BTreeSet<&str> = budget_lines.iter().map(|(n, _, _)| *n).collect();
+    for name in names {
+        let medians: Vec<f64> = reports.iter().filter(|r| r.path_name == format!("terrain/{name}")).map(|r| r.stats.median).collect();
+        worst_noise = worst_noise.max(planet_perf::run_to_run_noise(&medians).unwrap_or(0.0));
+    }
+    writeln!(out, "worst run-to-run noise within a view (max-min)/median: {worst_noise:.3}").map_err(err)?;
+    let json = planet_perf::report_json(&crate::facts(ctx), scheme.as_deref(), o.machine_ready && !smoke, &protocol, &reports);
+    if smoke && o.out.is_none() {
+        return writeln!(out, "smoke run: no log written (pass --out to keep it)").map_err(err);
+    }
+    let path = o.out.clone().unwrap_or_else(|| std::path::Path::new("perf").join("logs").join("terrain.json"));
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(err)?;
+    }
+    std::fs::write(&path, json).map_err(err)?;
+    writeln!(out, "wrote {}", path.display()).map_err(err)
+}
