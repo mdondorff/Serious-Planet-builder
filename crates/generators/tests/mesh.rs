@@ -151,3 +151,73 @@ fn indices_are_in_range_and_cover_the_grid_and_skirts() {
     let used: std::collections::BTreeSet<u32> = idx.iter().copied().collect();
     assert_eq!(used.len(), vertex_count(CELLS));
 }
+
+// spec: REND-009, LOD-004
+#[test]
+fn a_fully_morphed_border_meets_the_coarser_neighbours_border_across_faces() {
+    // For a tile T and its same-level neighbour N across `side`, whose parent P is a coarser leaf: T's morph targets on
+    // that border must lie on P's border polyline (vertices of P's grid, or midpoints of two adjacent ones).
+    let m = TangentWarp;
+    let mut checked = 0;
+    for (f, l, x, y) in [(0u8, 1u8, 0u32, 0u32), (0, 1, 1, 0), (0, 1, 0, 1), (0, 2, 3, 0), (2, 3, 7, 7), (4, 1, 1, 1), (3, 2, 0, 3)] {
+        let t = id(f, l, x, y);
+        let tm = tile_mesh(1, &m, t, CELLS, R);
+        for side in Side::ALL {
+            let nb = t.neighbor(&m, side);
+            let Some(p) = nb.parent() else { continue };
+            if Some(p) == t.parent() {
+                continue; // same parent: the neighbour is a sibling, not a coarser leaf
+            }
+            let pm = tile_mesh(1, &m, p, CELLS, R);
+            // Border polyline of P: all border vertices of the parent mesh (any side).
+            let n = CELLS;
+            let border: Vec<Vec3> =
+                (0..=n).flat_map(|k| [world(&pm, k, 0), world(&pm, k, n), world(&pm, 0, k), world(&pm, n, k)]).collect();
+            let polyline_dist = |q: Vec3| {
+                let mut best = f64::MAX;
+                for a in &border {
+                    for b in &border {
+                        // Only segments of adjacent lattice points count: lattice spacing bound.
+                        if a.distance(*b) < 1.0e-6
+                            || a.distance(*b) > 1.2 * R * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << p.level()) / f64::from(n)
+                        {
+                            continue;
+                        }
+                        let ab = *b - *a;
+                        let tt = ((q - *a).dot(ab) / ab.dot(ab)).clamp(0.0, 1.0);
+                        best = best.min((q - (*a + ab * tt)).length());
+                    }
+                }
+                best
+            };
+            let ks: Vec<(u32, u32)> = (0..=n)
+                .map(|k| match side {
+                    Side::East => (n, k),
+                    Side::West => (0, k),
+                    Side::North => (k, n),
+                    Side::South => (k, 0),
+                })
+                .collect();
+            let worst = ks.iter().map(|&(i, j)| polyline_dist(coarse_world(&tm, i, j))).fold(0.0f64, f64::max);
+            assert!(worst < 0.5, "{t:?} {side:?}: morphed border vertex is {worst} m off the coarser neighbour's border");
+            checked += 1;
+        }
+    }
+    assert!(checked >= 6, "only {checked} borders checked");
+}
+
+// spec: REND-009
+#[test]
+fn vertex_serialisation_matches_the_documented_gpu_layout() {
+    let m = tile_mesh(1, &TangentWarp, id(2, 4, 3, 5), CELLS, R);
+    let v = m.vertices[40];
+    let f = v.to_floats();
+    assert_eq!(f.len(), planet_generators::mesh::MeshVertex::FLOATS);
+    let o = planet_generators::mesh::MeshVertex::OFFSETS;
+    assert_eq!(&f[o[0]..o[0] + 3], &v.pos);
+    assert_eq!(&f[o[1]..o[1] + 3], &v.coarse);
+    assert_eq!(&f[o[2]..o[2] + 3], &v.normal);
+    assert_eq!(f[o[3]], v.height);
+    assert_eq!(&f[o[4]..o[4] + 3], &v.ref_pos);
+    assert_eq!(planet_generators::mesh::MeshVertex::STRIDE, 52);
+}

@@ -249,8 +249,10 @@ pub fn assert_golden(adapter: &str, name: &str, img: &Image, tol: Tolerance) {
         GoldenOutcome::Pending { .. } => {
             eprintln!("{name} [{adapter}]: {outcome}");
             let root = repo_root();
-            let strict = std::env::var("PLANET_GOLDEN_STRICT").as_deref() == Ok("1") || adapter_has_goldens(&root, adapter);
-            if strict && !is_listed_pending(&root, name) {
+            // Strict mode (`PLANET_GOLDEN_STRICT=1`, used by acceptance) fails on every missing golden; otherwise a blessed
+            // adapter fails unless the name is listed as waiting for blessing.
+            let strict = std::env::var("PLANET_GOLDEN_STRICT").as_deref() == Ok("1");
+            if strict || (adapter_has_goldens(&root, adapter) && !is_listed_pending(&root, name)) {
                 panic!("{name} [{adapter}]: {outcome}");
             }
         }

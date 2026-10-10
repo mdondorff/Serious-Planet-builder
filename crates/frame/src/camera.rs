@@ -16,9 +16,25 @@ pub struct Camera {
 }
 
 /// Orthonormal camera basis (right, up, forward).
+/// The world axis least aligned with `f`, a safe fallback when `up` is (nearly) parallel to the view direction.
+fn least_aligned_axis(f: Vec3) -> Vec3 {
+    let (ax, ay, az) = (f.x.abs(), f.y.abs(), f.z.abs());
+    if ax <= ay && ax <= az {
+        Vec3::new(1.0, 0.0, 0.0)
+    } else if ay <= az {
+        Vec3::new(0.0, 1.0, 0.0)
+    } else {
+        Vec3::new(0.0, 0.0, 1.0)
+    }
+}
+
 fn basis(c: &Camera) -> (Vec3, Vec3, Vec3) {
     let f = c.forward.normalized();
-    let r = f.cross(c.up).normalized();
+    let mut r = f.cross(c.up);
+    if r.length() < 1e-9 {
+        r = f.cross(least_aligned_axis(f));
+    }
+    let r = r.normalized();
     let u = r.cross(f);
     (r, u, f)
 }
@@ -30,7 +46,9 @@ impl Camera {
         let up = position.0.normalized();
         let mut north = heading_hint - up * heading_hint.dot(up);
         if north.length() < 1e-9 {
-            north = Vec3::new(1.0, 0.0, 0.0) - up * up.x; // at a pole: any tangent will do
+            // Hint parallel to the local up (a pole for a north hint): any tangent will do.
+            let axis = least_aligned_axis(up);
+            north = axis - up * axis.dot(up);
         }
         let north = north.normalized();
         let forward = north * libm::cos(pitch_rad) + (-up) * libm::sin(pitch_rad);

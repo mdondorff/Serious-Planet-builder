@@ -83,6 +83,8 @@ pub struct TerrainRequest {
     pub view: TerrainView,
     pub lod: LodParams,
     pub face_mapping: String,
+    /// Generator seed: tile origins sit at their centre terrain height, so the plan needs the height function.
+    pub seed: u64,
 }
 
 pub fn level_color(level: u8) -> [u8; 4] {
@@ -99,19 +101,18 @@ pub fn plan_terrain(req: &TerrainRequest) -> Result<TerrainPlan, PlanError> {
     if req.size.0 == 0 || req.size.1 == 0 {
         return Err(PlanError::FrameTooSmall { size: req.size, tiles: 0 });
     }
+    req.lod.validate().map_err(PlanError::InvalidLod)?;
     let selection = select_nodes_in_view(map.as_ref(), &req.camera, &req.lod);
     let nodes = selection
         .nodes
         .iter()
         .map(|n| {
-            let origin = PlanetFixed(n.tile.center_direction(map.as_ref()) * req.lod.radius_m);
+            let centre = n.tile.center_direction(map.as_ref());
+            let origin = PlanetFixed(centre * (req.lod.radius_m + planet_generators::height::height_at(req.seed, centre)));
             let rel = origin.0 - req.camera.position.0;
             let (start, end) = match n.tile.level() {
                 0 => (1.0e30, 1.0e30),
-                l => {
-                    let end = req.lod.split_distance(l - 1);
-                    (end * (1.0 - req.lod.morph_band), end)
-                }
+                l => req.lod.morph_interval(l),
             };
             let color = match req.view {
                 TerrainView::Face => FACE_COLORS[n.tile.face().0 as usize],

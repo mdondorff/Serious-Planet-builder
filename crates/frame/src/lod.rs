@@ -48,6 +48,36 @@ impl LodParams {
         self.sample_spacing(level) * self.viewport_h_px / (2.0 * libm::tan(self.fov_y_rad / 2.0) * self.tau_px)
     }
 
+    /// Upper bound of a node's bounding-sphere radius at `level`: three quarters of the tile edge (half diagonal 0.71, margin).
+    pub fn node_radius_bound(&self, level: u8) -> f64 {
+        0.75 * self.sample_spacing(level) * f64::from(self.cells)
+    }
+
+    /// Vertex distances `(start, end)` between which a node of `level >= 1` morphs from its own grid (0) to its parent's (1).
+    /// The end is the parent's split distance, so every vertex is fully morphed when the parent stops splitting. The start is
+    /// never earlier than `split(level) + 2 r`: a node that still borders finer leaves has vertices up to that far away and
+    /// must not have started to morph yet, or the finer side cannot meet it.
+    pub fn morph_interval(&self, level: u8) -> (f64, f64) {
+        let end = self.split_distance(level - 1);
+        let start = ((1.0 - self.morph_band) * end).max(self.split_distance(level) + 2.0 * self.node_radius_bound(level));
+        (start, end)
+    }
+
+    /// Reject parameters for which crack-free morphing is impossible (the morph interval would vanish at some level).
+    pub fn validate(&self) -> Result<(), String> {
+        for level in 1..=self.max_level {
+            let (start, end) = self.morph_interval(level);
+            if end - start < 0.05 * end {
+                return Err(format!(
+                    "level {level}: morph interval [{start:.1}, {end:.1}] m is empty; increase viewport_h_px / tau_px or reduce cells (need viewport_h_px / tau_px > about {:.0} for {} cells)",
+                    2.0 * self.cells as f64,
+                    self.cells
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Worst-case sample spacing on the sphere at `level`, metres (face centre, tangent warp).
     pub fn sample_spacing(&self, level: u8) -> f64 {
         // A face spans 2R·(π/4)·(2/1) ≈ R·π/2 along the middle; level L divides it into 2^L tiles of `cells` cells.

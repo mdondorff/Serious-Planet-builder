@@ -192,8 +192,9 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
         max_level: 26,
         ..LodParams::earth_1080p()
     };
-    let plan = plan_terrain(&TerrainRequest { camera, size: TERRAIN_SIZE, view, lod, face_mapping: TangentWarp.id().to_string() })
-        .map_err(|e| e.to_string())?;
+    let plan =
+        plan_terrain(&TerrainRequest { camera, size: TERRAIN_SIZE, view, lod, face_mapping: TangentWarp.id().to_string(), seed: o.seed })
+            .map_err(|e| e.to_string())?;
     let meshes: Vec<planet_generators::mesh::TileMesh> =
         plan.nodes.iter().map(|n| planet_generators::mesh::tile_mesh(o.seed, &TangentWarp, n.tile, TERRAIN_CELLS, RADIUS_M)).collect();
     let refs: Vec<&planet_generators::mesh::TileMesh> = meshes.iter().collect();

@@ -1,14 +1,14 @@
 //! Camera, reversed-Z projection, frustum selection, the terrain plan, and precision at the far side of the planet.
 
 use planet_core::cube::TangentWarp;
-use planet_core::{Face, PlanetFixed, TileId, Vec3};
+use planet_core::{PlanetFixed, TileId, Vec3};
 use planet_frame::{plan_terrain, scripted_views, select_nodes, select_nodes_in_view, Camera, LodParams, TerrainRequest, TerrainView};
 use planet_generators::mesh::tile_mesh;
 
 const R: f64 = 6_371_000.0;
 
 fn lod() -> LodParams {
-    LodParams { cells: 16, viewport_h_px: 96.0, tau_px: 4.0, max_level: 26, ..LodParams::earth_1080p() }
+    LodParams { cells: 16, viewport_h_px: 96.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() }
 }
 
 /// Evaluate `view_projection * (p, 1)` in f32 exactly as a shader does (column-major, row-by-row dot products).
@@ -51,37 +51,52 @@ fn projection_is_reversed_z_with_infinite_far() {
 // spec: REND-004
 #[test]
 fn far_side_vertices_project_within_a_quarter_pixel_at_one_metre() {
-    // A tile on the far side of the planet (x ~ -R), camera 1 m from a vertex, moved in 0.1 mm steps.
+    // Vertices at the highest terrain found among random directions (largest origin and offset magnitudes), with the
+    // camera 1 m away moved in 0.1 mm steps; a plain vertex, a half-morphed one and a fully morphed one.
     let map = TangentWarp;
-    let tile = TileId::new(Face(1), 26, 20_000_000, 33_000_000).unwrap();
-    let mesh = tile_mesh(1, &map, tile, 16, R);
-    let v = mesh.vertices[8 * 17 + 8];
-    let vertex_world = mesh.origin.0 + Vec3::new(f64::from(v.pos[0]), f64::from(v.pos[1]), f64::from(v.pos[2]));
-    let up = vertex_world.normalized();
+    let mut rng = planet_core::hash::SplitMix64(31);
+    let mut best = (f64::MIN, Vec3::new(1.0, 0.0, 0.0));
+    for _ in 0..4000 {
+        let d = Vec3::new(rng.range(-1.0, 1.0), rng.range(-1.0, 1.0), rng.range(-1.0, 1.0)).normalized();
+        let h = planet_generators::height::height_at(1, d);
+        if h > best.0 {
+            best = (h, d);
+        }
+    }
     let (w, h) = (1920.0f64, 1080.0f64);
     let mut worst = 0.0f64;
-    for step in 0..200 {
-        let along = Vec3::new(1.0, 0.0, 0.0) - up * up.x;
-        let cam_pos = PlanetFixed(
-            vertex_world + along.normalized() * (1.0 + step as f64 * 1e-4) * 0.0 + up * 1.0 + along.normalized() * (step as f64 * 1e-4),
-        );
-        let cam = Camera::at_surface_point(cam_pos, Vec3::new(0.0, 0.0, 1.0), 45f64.to_radians(), 60f64.to_radians(), w / h, 0.1);
-        // Exactly the shader path: origin_rel (f64 diff -> f32) + local offset (f32), all in f32, then the f32 matrix.
-        let rel = [
-            (mesh.origin.0.x - cam.position.0.x) as f32,
-            (mesh.origin.0.y - cam.position.0.y) as f32,
-            (mesh.origin.0.z - cam.position.0.z) as f32,
-        ];
-        let p = [rel[0] + v.pos[0], rel[1] + v.pos[1], rel[2] + v.pos[2]];
-        let c = clip_f32(&cam.view_projection(), p);
-        let exact = cam.project(vertex_world - cam.position.0);
-        let px = |x: f64, wv: f64, size: f64| x / wv * size / 2.0;
-        let (gx, gy) = (px(f64::from(c[0]), f64::from(c[3]), w), px(f64::from(c[1]), f64::from(c[3]), h));
-        let (ex, ey) = (px(exact[0], exact[3], w), px(exact[1], exact[3], h));
-        worst = worst.max(((gx - ex).powi(2) + (gy - ey).powi(2)).sqrt());
+    let tile = TileId::from_direction(&map, best.1, 26);
+    let mesh = tile_mesh(1, &map, tile, 16, R);
+    for (vi, vj, m) in [(8usize, 8usize, 0.0f32), (9, 8, 0.5), (9, 9, 1.0)] {
+        let v = mesh.vertices[vj * 17 + vi];
+        let fine_world = mesh.origin.0 + Vec3::new(f64::from(v.pos[0]), f64::from(v.pos[1]), f64::from(v.pos[2]));
+        let coarse_world = mesh.origin.0 + Vec3::new(f64::from(v.coarse[0]), f64::from(v.coarse[1]), f64::from(v.coarse[2]));
+        let exact_world = fine_world * f64::from(1.0 - m) + coarse_world * f64::from(m);
+        let up = fine_world.normalized();
+        let along = (Vec3::new(1.0, 0.0, 0.0) - up * up.x).normalized();
+        for step in 0..200 {
+            let cam_pos = PlanetFixed(fine_world + up * 1.0 + along * (step as f64 * 1e-4));
+            let cam = Camera::at_surface_point(cam_pos, Vec3::new(0.0, 0.0, 1.0), 45f64.to_radians(), 60f64.to_radians(), w / h, 0.1);
+            // Exactly the shader path: origin_rel (f64 difference -> f32) + local offset (f32), mix in f32, then the f32 matrix.
+            let rel = [
+                (mesh.origin.0.x - cam.position.0.x) as f32,
+                (mesh.origin.0.y - cam.position.0.y) as f32,
+                (mesh.origin.0.z - cam.position.0.z) as f32,
+            ];
+            let fine = [rel[0] + v.pos[0], rel[1] + v.pos[1], rel[2] + v.pos[2]];
+            let coarse = [rel[0] + v.coarse[0], rel[1] + v.coarse[1], rel[2] + v.coarse[2]];
+            let p = [0, 1, 2].map(|k| fine[k] * (1.0 - m) + coarse[k] * m);
+            let c = clip_f32(&cam.view_projection(), p);
+            let exact = cam.project(exact_world - cam.position.0);
+            let px = |x: f64, wv: f64, size: f64| x / wv * size / 2.0;
+            let (gx, gy) = (px(f64::from(c[0]), f64::from(c[3]), w), px(f64::from(c[1]), f64::from(c[3]), h));
+            let (ex, ey) = (px(exact[0], exact[3], w), px(exact[1], exact[3], h));
+            worst = worst.max(((gx - ex).powi(2) + (gy - ey).powi(2)).sqrt());
+        }
     }
-    assert!(worst < 0.25, "projected position jitter {worst} px at 1 m on the far side of the planet; budget 0.25 px");
-    eprintln!("worst jitter {worst} px");
+    eprintln!("terrain height {:.0} m: worst jitter {worst} px", best.0);
+    assert!(best.0 > 1500.0, "the test must exercise high terrain, found only {:.0} m", best.0);
+    assert!(worst < 0.25, "projected position jitter {worst} px at 1 m on high far-side terrain; budget 0.25 px");
 }
 
 // spec: LOD-001, LOD-007
@@ -128,7 +143,8 @@ fn frustum_selection_is_a_subset_of_the_hemisphere_and_covers_the_view() {
 fn terrain_plan_is_deterministic_and_camera_relative() {
     let views = scripted_views(R, 4.0 / 3.0, 1);
     let (name, cam) = views[4];
-    let req = TerrainRequest { camera: cam, size: (128, 96), view: TerrainView::Level, lod: lod(), face_mapping: "tangent-v1".into() };
+    let req =
+        TerrainRequest { camera: cam, size: (128, 96), view: TerrainView::Level, lod: lod(), face_mapping: "tangent-v1".into(), seed: 1 };
     let a = plan_terrain(&req).unwrap();
     assert_eq!(a, plan_terrain(&req).unwrap());
     assert!(!a.nodes.is_empty(), "{name}");
@@ -157,6 +173,7 @@ fn terrain_plan_summaries_match_the_committed_snapshot() {
             view: TerrainView::TileId,
             lod: lod(),
             face_mapping: "tangent-v1".into(),
+            seed: 1,
         })
         .unwrap();
         assert!(plan.nodes.len() < 4000, "{name}: {} nodes", plan.nodes.len());

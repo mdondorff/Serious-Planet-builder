@@ -30,9 +30,9 @@ struct VsOut {
 };
 
 @vertex
-fn vs(@location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) normal: vec3<f32>, @location(3) height: f32) -> VsOut {
-    let fine = node.origin_rel.xyz + pos;
-    let m = clamp((length(fine) - node.morph.x) / max(node.morph.y - node.morph.x, 1e-6), 0.0, 1.0);
+fn vs(@location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) normal: vec3<f32>, @location(3) height: f32, @location(4) ref_pos: vec3<f32>) -> VsOut {
+    // The morph distance is measured to the height-free reference position, the same quantity node selection uses.
+    let m = clamp((length(node.origin_rel.xyz + ref_pos) - node.morph.x) / max(node.morph.y - node.morph.x, 1e-6), 0.0, 1.0);
     let p = node.origin_rel.xyz + mix(pos, coarse, m);
     var out: VsOut;
     out.pos = g.view_proj * vec4<f32>(p, 1.0);
@@ -84,22 +84,7 @@ fn f32_bytes(values: &[f32]) -> Vec<u8> {
 }
 
 fn vertex_bytes(vertices: &[MeshVertex]) -> Vec<u8> {
-    let mut b = Vec::with_capacity(vertices.len() * 40);
-    for v in vertices {
-        b.extend(f32_bytes(&[
-            v.pos[0],
-            v.pos[1],
-            v.pos[2],
-            v.coarse[0],
-            v.coarse[1],
-            v.coarse[2],
-            v.normal[0],
-            v.normal[1],
-            v.normal[2],
-            v.height,
-        ]));
-    }
-    b
+    vertices.iter().flat_map(|v| f32_bytes(&v.to_floats())).collect()
 }
 
 /// Execute the plan on the GPU and read the frame back.
@@ -151,7 +136,7 @@ pub fn execute_terrain(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[&TileMesh
         contents: &globals,
         usage: wgpu::BufferUsages::UNIFORM,
     });
-    let stride = u64::from(device.limits().min_uniform_buffer_offset_alignment).max(48);
+    let stride = 48u64.next_multiple_of(u64::from(device.limits().min_uniform_buffer_offset_alignment));
     let mut nodes = vec![0u8; (stride as usize) * plan.nodes.len().max(1)];
     for (i, d) in plan.nodes.iter().enumerate() {
         let r = d.camera_relative_origin;
@@ -205,10 +190,11 @@ pub fn execute_terrain(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[&TileMesh
         immediate_size: 0,
     });
     let attrs = [
-        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
-        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 12, shader_location: 1 },
-        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 24, shader_location: 2 },
-        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 36, shader_location: 3 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 4 * MeshVertex::OFFSETS[0] as u64, shader_location: 0 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 4 * MeshVertex::OFFSETS[1] as u64, shader_location: 1 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 4 * MeshVertex::OFFSETS[2] as u64, shader_location: 2 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 4 * MeshVertex::OFFSETS[3] as u64, shader_location: 3 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 4 * MeshVertex::OFFSETS[4] as u64, shader_location: 4 },
     ];
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("terrain-pipeline"),
@@ -217,7 +203,11 @@ pub fn execute_terrain(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[&TileMesh
             module: &module,
             entry_point: Some("vs"),
             compilation_options: Default::default(),
-            buffers: &[Some(wgpu::VertexBufferLayout { array_stride: 40, step_mode: wgpu::VertexStepMode::Vertex, attributes: &attrs })],
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: MeshVertex::STRIDE,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &attrs,
+            })],
         },
         fragment: Some(wgpu::FragmentState {
             module: &module,
