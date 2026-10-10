@@ -329,6 +329,88 @@ fn streamed_meshes(
     }
 }
 
+/// Generate the meshes `plan` needs that `renderer` does not hold (by tile and mesh key) in parallel, then upload them.
+/// Returns the number of new meshes.
+fn upload_missing_meshes(
+    ctx: &GpuContext,
+    renderer: &mut planet_render::TerrainRenderer,
+    plan: &planet_frame::TerrainPlan,
+    seed: u64,
+    cells: u32,
+) -> Result<usize, String> {
+    let missing: Vec<TileId> = plan.nodes.iter().filter(|n| !renderer.has_mesh(n.tile, n.mesh_key)).map(|n| n.tile).collect();
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let chunk = missing.len().div_ceil(threads).max(1);
+    let meshes: Vec<planet_generators::mesh::TileMesh> = std::thread::scope(|s| {
+        let handles: Vec<_> = missing
+            .chunks(chunk)
+            .map(|part| {
+                s.spawn(move || {
+                    part.iter().map(|&t| planet_generators::mesh::tile_mesh(seed, &TangentWarp, t, cells, RADIUS_M)).collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|h| h.join().expect("mesh thread")).collect()
+    });
+    for m in &meshes {
+        renderer.upload(ctx, m).map_err(|e| e.to_string())?;
+    }
+    Ok(meshes.len())
+}
+
+/// Most meshes a flight keeps resident; the renderer is rebuilt (dropping every mesh) when a frame would exceed it.
+const FLIGHT_RESIDENT_CAP: usize = 12_000;
+
+/// `test-render --scene terrain --flight N --out-dir DIR`: the scripted orbit-to-1 m flight (TEST-013) rendered frame by
+/// frame through the persistent terrain renderer with production LOD parameters, for the owner's real-GPU jitter review
+/// (tier D). Writes `frame_NNNN.png` and `flight.txt` (frame, altitude above terrain, nodes, plan hash).
+pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    use planet_frame::{flight_path, plan_terrain, LodParams, TerrainRequest, TerrainView};
+    use planet_render::TerrainRenderer;
+    let frames = o.flight.unwrap_or(0);
+    if frames < 10 {
+        return Err(format!("--flight needs at least 10 frames, got {frames}"));
+    }
+    // Option conflicts are rejected in `check_flight_options` before the GPU starts.
+    let dir = o.out_dir.as_ref().ok_or("--flight needs --out-dir")?;
+    let view = TerrainView::parse(&o.view)
+        .ok_or_else(|| format!("--view must be one of face, tile-id, level, morph, height, normals, depth, got '{}'", o.view))?;
+    let size = o.size.unwrap_or((1280, 720));
+    let lod = LodParams { cells: o.cells, viewport_h_px: f64::from(size.1), tau_px: o.tau, max_level: 26, ..LodParams::earth_1080p() };
+    lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, o.tau))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+    let cameras = flight_path(RADIUS_M, f64::from(size.0) / f64::from(size.1), o.seed, frames);
+    let mut renderer = TerrainRenderer::new(ctx, size, o.cells);
+    let mut index = String::from("# frame altitude_above_terrain_m nodes plan_hash\n");
+    for (i, camera) in cameras.into_iter().enumerate() {
+        let req = TerrainRequest { camera, size, view, lod: lod.clone(), face_mapping: TangentWarp.id().to_string(), seed: o.seed };
+        let plan = plan_terrain(&req).map_err(|e| format!("frame {i}: {e}"))?;
+        let missing = plan.nodes.iter().filter(|n| !renderer.has_mesh(n.tile, n.mesh_key)).count();
+        if renderer.resident_tiles() > 0 && renderer.resident_tiles() + missing > FLIGHT_RESIDENT_CAP {
+            renderer = TerrainRenderer::new(ctx, size, o.cells);
+        }
+        upload_missing_meshes(ctx, &mut renderer, &plan, o.seed, o.cells)?;
+        renderer.render(ctx, &plan, false).map_err(|e| format!("frame {i}: {e}"))?;
+        let path = dir.join(format!("frame_{i:04}.png"));
+        renderer.read_color(ctx).write_png(&path).map_err(|e| format!("writing {}: {e}", path.display()))?;
+        let p = camera.position.0;
+        let altitude = p.length() - RADIUS_M - planet_generators::height::height_at(o.seed, p.normalized());
+        index.push_str(&format!("{i:04} {altitude:.3} {} {:016x}\n", plan.nodes.len(), plan.plan_hash()));
+    }
+    std::fs::write(dir.join("flight.txt"), &index).map_err(|e| format!("writing flight.txt: {e}"))?;
+    writeln!(
+        out,
+        "flight: wrote {frames} frames to {} ({}x{}, cells {}, tau {} px, view {})",
+        dir.display(),
+        size.0,
+        size.1,
+        o.cells,
+        o.tau,
+        view.name()
+    )
+    .map_err(err)
+}
+
 /// `test-render --perf --scene terrain`: the terrain frame workload at 1440p on the reference GPU (CON-21). Meshes are
 /// generated and uploaded once per view; frames then only update two small buffers and draw. Reports GPU time (timestamp
 /// queries), CPU record/submit time, wall time, CPU planning time and the deterministic counts, per run, and checks the
@@ -381,31 +463,13 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
             plan = plan_terrain(&req).map_err(|e| e.to_string())?;
             plan_samples.push(t.elapsed().as_secs_f64() * 1000.0);
         }
-        // Generate the missing meshes in parallel, then upload.
-        let missing: Vec<TileId> = plan.nodes.iter().filter(|n| !renderer.has_mesh(n.tile, n.mesh_key)).map(|n| n.tile).collect();
         let started = Instant::now();
-        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
-        let chunk = missing.len().div_ceil(threads).max(1);
-        let (seed, cells) = (o.seed, o.cells);
-        let meshes: Vec<planet_generators::mesh::TileMesh> = std::thread::scope(|s| {
-            let handles: Vec<_> = missing
-                .chunks(chunk)
-                .map(|part| {
-                    s.spawn(move || {
-                        part.iter().map(|&t| planet_generators::mesh::tile_mesh(seed, &TangentWarp, t, cells, RADIUS_M)).collect::<Vec<_>>()
-                    })
-                })
-                .collect();
-            handles.into_iter().flat_map(|h| h.join().expect("mesh thread")).collect()
-        });
-        for m in &meshes {
-            renderer.upload(ctx, m).map_err(|e| e.to_string())?;
-        }
+        let new_meshes = upload_missing_meshes(ctx, &mut renderer, &plan, o.seed, o.cells)?;
         writeln!(
             out,
             "{name}: {} nodes ({} new meshes in {:.1} s), plan {:.2} ms",
             plan.nodes.len(),
-            meshes.len(),
+            new_meshes,
             started.elapsed().as_secs_f64(),
             summarize(&plan_samples, 0).map_or(f64::NAN, |s| s.median)
         )

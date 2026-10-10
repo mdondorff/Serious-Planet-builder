@@ -49,3 +49,14 @@ Proposed follow-up: shaders must output values that are exact in 8 bits; a real 
 
 ## 2026-10-10: one-pixel rasteriser difference at a tile border (lavapipe)
 terrain_aerial20km_level differs between lavapipe and WARP/NVIDIA in a single pixel (86,89): it sits on the diagonal border of two tiles of different levels and takes the neighbour's colour. Two independent CI runs produced byte-identical Linux images, so it is deterministic per adapter (CON-20), not flakiness; WARP and NVIDIA agree. Cause: edge-tie rasterisation of a shared border differs by implementation. Consequence: goldens stay per adapter, and tile-border pixels must never be compared across adapters.
+
+## 2026-10-10 The tier-B oracles hold on the real NVIDIA GPU with the software-adapter tolerances
+What happened: with the oracles following `PLANET_ADAPTER`, `cargo xtask test gpu --real` ran `oracle_debug_views` (face and tile-id exact, height within 1 at rounding boundaries) and `oracle_shader_validation` on the RTX 3080 Ti (Vulkan) and both passed unchanged; all NVIDIA goldens matched in the same run (27 tests).
+Assumption it changes: ADR 0009 (tier B on the software adapter): the CPU twins and their tolerances also hold on the reference GPU, so tier B is not WARP-specific.
+Proposed follow-up: none; keep running `test gpu --real` at milestone gates.
+
+## 2026-10-11 Height-ignorant selection puts a low camera inside steep terrain, not just under coarse tiles
+What happened: on the steep stress field (TEST-015) the ground-1m view (terrain 687.4 m, camera 688.4 m) selects a level-16 leaf under the camera (9.5 m cells; reference ground-1m gets level 19), and because morph is also measured to the height-free reference position the leaf is drawn fully morphed to the level-15 grid (19 m). On slopes up to 72 degrees the interpolated surface rises above the camera (nearest vertex 689.5 m): the frame shows one tile from inside the terrain. The no-holes oracle and morph checks still pass, because the frame is fully covered.
+Assumption it changes: ADR 0014 ("a camera low over high terrain gets coarser near tiles than ideal"): the consequence on steep terrain is a camera below the drawn surface. Coverage metrics alone again proved insufficient (see the earlier hole-test learning).
+Proposed follow-up: LOD-008 (planned) as the first M3 change: per-node height bounds in selection and morph distances, with a camera-above-surface check in every scripted view on both fields.
+

@@ -14,7 +14,7 @@ const USAGE: &str = "cargo xtask <command>
 
   test fast            tier A for changed crates (and the crates above them)
   test                 tiers A + B on the software adapter
-  test gpu             tier C goldens and debug views (software adapter; --real for the GPU)
+  test gpu             tier C goldens and debug views (software adapter; --real for the GPU, which also runs the tier-B oracles)
   check                rustfmt --check, clippy -D warnings, layering
   layering             crate layering and GPU-free dependency check (CON-02)
   spec-lint            trace IDs, tiers, requirement coverage (CON-16)

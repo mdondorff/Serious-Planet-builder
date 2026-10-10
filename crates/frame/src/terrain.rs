@@ -7,6 +7,7 @@ use crate::plan::{face_mapping_by_id, PlanError, CLEAR_COLOR, HEIGHT_RANGE};
 use planet_core::hash::hash_u64s;
 use planet_core::{PlanetFixed, TileId, Vec3};
 use planet_generators::dump::FACE_COLORS;
+use planet_generators::height::HeightField;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TerrainView {
@@ -102,6 +103,22 @@ fn tile_id_color(id: TileId) -> [u8; 4] {
 }
 
 pub fn plan_terrain(req: &TerrainRequest) -> Result<TerrainPlan, PlanError> {
+    plan_terrain_field(req, &planet_generators::height::Reference(req.seed))
+}
+
+/// [`plan_terrain`] with tile origins and mesh keys from `field` (stress tests). `field.seed()` must equal `req.seed`,
+/// and the field's height bound must fit `req.lod.max_height_m` (horizon and frustum padding).
+pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Result<TerrainPlan, PlanError> {
+    if field.seed() != req.seed {
+        return Err(PlanError::HeightField(format!("field seed {} differs from request seed {}", field.seed(), req.seed)));
+    }
+    if field.max_abs_height_m() > req.lod.max_height_m {
+        return Err(PlanError::HeightField(format!(
+            "heights up to {} m exceed max_height_m {} m used for horizon and frustum padding",
+            field.max_abs_height_m(),
+            req.lod.max_height_m
+        )));
+    }
     let map = face_mapping_by_id(&req.face_mapping).ok_or_else(|| PlanError::UnknownFaceMapping(req.face_mapping.clone()))?;
     if req.size.0 == 0 || req.size.1 == 0 {
         return Err(PlanError::FrameTooSmall { size: req.size, tiles: 0 });
@@ -113,7 +130,7 @@ pub fn plan_terrain(req: &TerrainRequest) -> Result<TerrainPlan, PlanError> {
         .iter()
         .map(|n| {
             let centre = n.tile.center_direction(map.as_ref());
-            let origin = PlanetFixed(centre * (req.lod.radius_m + planet_generators::height::height_at(req.seed, centre)));
+            let origin = PlanetFixed(centre * (req.lod.radius_m + field.height(centre)));
             let rel = origin.0 - req.camera.position.0;
             let (start, end) = match n.tile.level() {
                 0 => (1.0e30, 1.0e30),
@@ -134,7 +151,7 @@ pub fn plan_terrain(req: &TerrainRequest) -> Result<TerrainPlan, PlanError> {
                 morph_start_m: start as f32,
                 morph_end_m: end as f32,
                 color,
-                mesh_key: planet_generators::mesh::mesh_key(map.as_ref(), req.seed, n.tile, req.lod.cells, req.lod.radius_m),
+                mesh_key: planet_generators::mesh::mesh_key_field(field, map.as_ref(), n.tile, req.lod.cells, req.lod.radius_m),
             }
         })
         .collect();
@@ -236,17 +253,25 @@ impl TerrainPlan {
     }
 }
 
+/// Point `h` metres above the terrain of the generator with `seed` (not above the reference sphere) at a latitude and
+/// longitude in degrees. Shared by the scripted views and the flight.
+fn above_terrain(radius_m: f64, field: &dyn HeightField, lat_deg: f64, lon_deg: f64, h: f64) -> PlanetFixed {
+    let (la, lo) = (lat_deg.to_radians(), lon_deg.to_radians());
+    let dir = Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la));
+    PlanetFixed(dir * (radius_m + field.height(dir) + h))
+}
+
 /// Ten scripted cameras (orbit down to 1 m, poles, a cube corner and a face edge), shared by golden tests,
 /// the performance harness and manual review (report §16). Looking direction is horizontal-north pitched down,
 /// except at orbit where the camera looks at the planet centre.
 pub fn scripted_views(radius_m: f64, aspect: f64, seed: u64) -> Vec<(&'static str, Camera)> {
+    scripted_views_field(radius_m, aspect, &planet_generators::height::Reference(seed))
+}
+
+/// [`scripted_views`] with camera heights measured above `field` (stress tests).
+pub fn scripted_views_field(radius_m: f64, aspect: f64, field: &dyn HeightField) -> Vec<(&'static str, Camera)> {
     let fov = 60f64.to_radians();
-    let at = |lat: f64, lon: f64, h: f64| {
-        let (la, lo) = (lat.to_radians(), lon.to_radians());
-        let dir = Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la));
-        // `h` is the height above the terrain of the generator with `seed`, not above the reference sphere.
-        PlanetFixed(dir * (radius_m + planet_generators::height::height_at(seed, dir) + h))
-    };
+    let at = |lat: f64, lon: f64, h: f64| above_terrain(radius_m, field, lat, lon, h);
     let north = Vec3::new(0.0, 0.0, 1.0);
     let near = 0.1;
     let surf = |lat, lon, h, pitch_deg: f64| Camera::at_surface_point(at(lat, lon, h), north, pitch_deg.to_radians(), fov, aspect, near);
@@ -262,4 +287,38 @@ pub fn scripted_views(radius_m: f64, aspect: f64, seed: u64) -> Vec<(&'static st
         ("cube-corner-1km", surf(35.264_389_682_754_654, 45.0, 1000.0, 15.0)),
         ("face-edge-1km", surf(0.0, 45.0, 1000.0, 15.0)),
     ]
+}
+
+/// Altitude at the start of [`flight_path`] (above the terrain).
+pub const FLIGHT_START_M: f64 = 2.0e7;
+/// Altitude of the final glide of [`flight_path`] (above the terrain).
+pub const FLIGHT_END_M: f64 = 1.0;
+/// Distance per frame during the final glide, measured on the reference sphere (at the camera's radius the step is
+/// longer by (R + terrain + 1 m) / R, below 1e-3 relative): small enough that vertex swimming shows between frames.
+pub const FLIGHT_GLIDE_STEP_M: f64 = 0.05;
+
+/// The scripted flight for the real-GPU jitter review (tier D): `frames` cameras, the first 80 % diving from
+/// [`FLIGHT_START_M`] to [`FLIGHT_END_M`] above the terrain at 20° N 30° E (log-spaced altitude, pitch from 85° to 8°,
+/// heading north), the rest gliding north at [`FLIGHT_END_M`] by [`FLIGHT_GLIDE_STEP_M`] per frame. Pure and
+/// deterministic. `frames` must be at least 10.
+pub fn flight_path(radius_m: f64, aspect: f64, seed: u64, frames: usize) -> Vec<Camera> {
+    assert!(frames >= 10, "a flight needs at least 10 frames, got {frames}");
+    let fov = 60f64.to_radians();
+    let north = Vec3::new(0.0, 0.0, 1.0);
+    let reference = planet_generators::height::Reference(seed);
+    let at = |lat: f64, lon: f64, h: f64| above_terrain(radius_m, &reference, lat, lon, h);
+    let dive = frames * 4 / 5;
+    let ratio = FLIGHT_END_M / FLIGHT_START_M;
+    (0..frames)
+        .map(|i| {
+            let (lat, h, pitch_deg) = if i < dive {
+                let t = i as f64 / (dive - 1) as f64;
+                (20.0, FLIGHT_START_M * libm::pow(ratio, t), 85.0 - 77.0 * t)
+            } else {
+                let s = (i - dive + 1) as f64 * FLIGHT_GLIDE_STEP_M;
+                (20.0 + (s / radius_m).to_degrees(), FLIGHT_END_M, 8.0)
+            };
+            Camera::at_surface_point(at(lat, 30.0, h), north, pitch_deg.to_radians(), fov, aspect, 0.1)
+        })
+        .collect()
 }

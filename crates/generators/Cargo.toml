@@ -10,3 +10,10 @@ planet-core.workspace = true
 planet-world-def.workspace = true
 png.workspace = true
 libm.workspace = true
+
+[features]
+# Test-only stress terrain (`stress::Steep`, TEST-015). Enabled only through dev-dependencies, never in a product build.
+stress = []
+
+[dev-dependencies]
+planet-generators = { path = ".", features = ["stress"] }
