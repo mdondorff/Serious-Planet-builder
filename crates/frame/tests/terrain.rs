@@ -37,8 +37,10 @@ fn projection_is_reversed_z_with_infinite_far() {
     assert!((depth(1.0) - 0.1).abs() < 1e-6);
     assert!(depth(1.0e7) > 0.0 && depth(1.0e7) < 1e-7, "very far points approach 0 but stay positive: {}", depth(1.0e7));
     let mut prev = f32::MAX;
-    for k in 0..40 {
-        let d = 0.1 * 1.5f32.powi(k);
+    let mut scale = 1.0f32;
+    for _ in 0..40 {
+        let d = 0.1 * scale;
+        scale *= 1.5;
         assert!(depth(d) < prev, "depth must decrease with distance (reversed-Z), failed at {d}");
         prev = depth(d);
     }
@@ -91,7 +93,7 @@ fn far_side_vertices_project_within_a_quarter_pixel_at_one_metre() {
             let px = |x: f64, wv: f64, size: f64| x / wv * size / 2.0;
             let (gx, gy) = (px(f64::from(c[0]), f64::from(c[3]), w), px(f64::from(c[1]), f64::from(c[3]), h));
             let (ex, ey) = (px(exact[0], exact[3], w), px(exact[1], exact[3], h));
-            worst = worst.max(((gx - ex).powi(2) + (gy - ey).powi(2)).sqrt());
+            worst = worst.max(((gx - ex) * (gx - ex) + (gy - ey) * (gy - ey)).sqrt());
         }
     }
     eprintln!("terrain height {:.0} m: worst jitter {worst} px", best.0);

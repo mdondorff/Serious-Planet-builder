@@ -51,7 +51,7 @@ fn a_dive_from_orbit_never_leaves_a_selected_node_without_something_to_draw() {
     let mut last_selection = Vec::new();
     for k in 0..frames + hold {
         // Descend geometrically from 20,000 km to 1 m in `frames` frames, then hold still for `hold` frames.
-        let height = 2.0e7 * (1.0e-7f64).powf((k.min(frames) as f64) / frames as f64);
+        let height = 2.0e7 * libm::pow(1.0e-7f64, (k.min(frames) as f64) / frames as f64);
         let cam = camera_at(height);
         let selection = select_nodes_in_view(&map, &cam, &params);
         let wanted: Vec<(TileId, f64)> = selection.nodes.iter().map(|n| (n.tile, n.distance_m)).collect();
