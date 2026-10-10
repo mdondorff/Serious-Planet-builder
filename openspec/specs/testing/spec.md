@@ -77,7 +77,7 @@ Source: CON-21, report §8
 - **THEN** it exits with an error naming the adapter and the corrective action, and no frame is measured
 
 ### Requirement: TEST-006 Performance protocol
-The performance harness SHALL discard warm-up samples, report median and 99th percentile (nearest rank) per run, reject non-finite samples, log GPU clocks, power, temperature, throttle reasons and the active power scheme, record the owner's machine-ready confirmation, and report run-to-run noise as the relative spread of run medians.
+The performance harness SHALL discard warm-up samples, report median and 99th percentile (nearest rank) per run, reject non-finite samples, log GPU clocks, power, temperature, throttle reasons and the active power scheme, record the owner's machine-ready confirmation, and report run-to-run noise as the relative spread of run medians, and SHALL mark a session invalid for time budgets (with the reasons in the log and on the console) when the power scheme is not a performance scheme or the GPU was in a low performance state when a run started.
 
 Verify: A
 Status: active
@@ -86,6 +86,10 @@ Source: CON-21, report §8
 #### Scenario: Statistics
 - **WHEN** samples 1 to 100 follow two warm-up outliers
 - **THEN** the median is 50.5, the p99 is 99 and the outliers are ignored
+
+#### Scenario: Balanced power profile
+- **WHEN** a session ran under the Balanced power scheme or started with the GPU idle
+- **THEN** the log contains `valid_for_budgets` false and a warning naming the scheme or the performance state
 
 #### Scenario: Log content
 - **WHEN** a run report is serialised
@@ -149,3 +153,18 @@ Source: CON-20
 #### Scenario: Budget exceeded
 - **WHEN** a frame plan exceeds its draw-call budget
 - **THEN** the test fails and prints the count and the budget
+
+### Requirement: TEST-012 Terrain performance workload
+The performance harness SHALL provide a terrain frame workload at 1440p over scripted views from orbit to 1 m that generates and uploads meshes once, then reports per run the GPU time (timestamp queries), CPU planning time, CPU record time, wall time and the deterministic counts (nodes, draw calls, triangles, resident vertex bytes), checks the terrain budget (median GPU time at most 8 ms, p99 frame time at most 20 ms), refuses unready machines like every performance run, and offers a labelled smoke mode that exercises the path on any adapter without being a measurement.
+
+Verify: C
+Status: active
+Source: CON-20, CON-21
+
+#### Scenario: Refusal
+- **WHEN** the workload is started on a software adapter with the machine-ready flag
+- **THEN** it refuses with the adapter and the corrective action
+
+#### Scenario: Smoke
+- **WHEN** the smoke mode runs on the software adapter
+- **THEN** it prints that it is not a measurement, completes every view and writes no log unless asked

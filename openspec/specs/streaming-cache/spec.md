@@ -9,7 +9,7 @@ TBD - created by archiving change m0-foundations. Update Purpose after archive.
 Streaming and scheduling code SHALL receive time, I/O and task spawning through injected interfaces, and tests SHALL be able to run it with a fake clock, fake I/O with injectable latency and failures, and a deterministic single-threaded spawner.
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-04
 
 #### Scenario: Fake clock
@@ -20,7 +20,7 @@ Source: CON-04
 For every visible node some level of detail SHALL be available: missing tiles SHALL be requested parent-first, and a frame SHALL never wait for generation or I/O.
 
 Verify: A
-Status: planned
+Status: active
 Source: CON-22
 
 #### Scenario: Fast dive
@@ -50,10 +50,10 @@ Source: CON-05, report §16
 - **THEN** cache-verify reports the tile ID and the differing bytes' offset
 
 ### Requirement: STRM-005 Cancellation and prioritisation
-Generation jobs SHALL be cancellable, and requests SHALL be ordered by screen-space error times visibility with parents before children.
+Queued and in-flight requests SHALL be cancelled when nothing needs them any more, and requests SHALL be ordered by screen-space error times visibility with parents before children.
 
 Verify: A
-Status: planned
+Status: active
 Source: report §4
 
 #### Scenario: Cancel
@@ -70,3 +70,14 @@ Source: CON-20, CON-21
 #### Scenario: Cap
 - **WHEN** residency demand exceeds the cap
 - **THEN** the least valuable tiles are evicted and the allocated total stays at or below the cap
+
+### Requirement: STRM-007 Resident capacity
+The streamer SHALL evict the least recently used tiles beyond a configured capacity, never evicting level-0 tiles or tiles used in the current frame (so the resident count exceeds the capacity only by tiles in use and by results arriving between frames), and SHALL retry failed tiles only after a configured delay measured on the injected clock.
+
+Verify: A
+Status: active
+Source: CON-04, CON-20
+
+#### Scenario: Interest moves away
+- **WHEN** the wanted set moves to other tiles and the capacity is exceeded
+- **THEN** the oldest unused tiles are evicted, roots and tiles in use stay, and a failed tile is not retried before the delay

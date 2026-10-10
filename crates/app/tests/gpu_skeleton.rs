@@ -104,3 +104,14 @@ fn editor_offscreen_replays_bundles_and_generate_rejects_frame_options() {
     let e = run(&["generate", "--res", "3"]).unwrap_err();
     assert!(e.contains("power of two"), "{e}");
 }
+
+// spec: STRM-002, BUILD-007
+#[test]
+fn streamed_terrain_equals_synchronous_terrain() {
+    let (a, b) = (tmp("terrain-sync.png"), tmp("terrain-stream.png"));
+    let base = ["test-render", "--scene", "terrain", "--script", "aerial-200km", "--view", "tile-id", "--adapter", "software", "--out"];
+    let log_a = run(&[&base[..], &[a.to_str().unwrap()]].concat()).unwrap();
+    let log_b = run(&[&base[..], &[b.to_str().unwrap(), "--stream"]].concat()).unwrap();
+    assert!(log_a.contains("draw calls") && log_b.contains("draw calls"));
+    assert_eq!(read_png(&a).unwrap(), read_png(&b).unwrap(), "the streaming path must produce the same frame");
+}

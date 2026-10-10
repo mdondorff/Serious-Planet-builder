@@ -18,16 +18,38 @@ pub struct TileResource<'a> {
 #[derive(Debug, PartialEq)]
 pub enum ExecError {
     MissingTile(TileId),
-    BadResource { id: TileId, expected: usize, got: usize },
-    OutsideFrame { index: usize, rect: [u32; 4], size: (u32, u32) },
-    BadHeightRange { lo: f32, hi: f32 },
-    BadResolution { id: TileId, res: u32 },
+    BadResource {
+        id: TileId,
+        expected: usize,
+        got: usize,
+    },
+    OutsideFrame {
+        index: usize,
+        rect: [u32; 4],
+        size: (u32, u32),
+    },
+    BadHeightRange {
+        lo: f32,
+        hi: f32,
+    },
+    BadResolution {
+        id: TileId,
+        res: u32,
+    },
+    /// The plan was made for another frame size than the renderer's render targets.
+    SizeMismatch {
+        plan: (u32, u32),
+        renderer: (u32, u32),
+    },
 }
 
 impl fmt::Display for ExecError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ExecError::BadHeightRange { lo, hi } => write!(f, "height range [{lo}, {hi}] must be finite with lo < hi"),
+            ExecError::SizeMismatch { plan, renderer } => {
+                write!(f, "the plan is for a {}x{} frame but the renderer was created for {}x{}", plan.0, plan.1, renderer.0, renderer.1)
+            }
             ExecError::BadResolution { id, res } => write!(f, "tile {id:?}: resolution {res} is outside 1..={MAX_TILE_RES}"),
             ExecError::MissingTile(id) => write!(f, "the plan draws tile {id:?} but no resource for it was supplied"),
             ExecError::BadResource { id, expected, got } => write!(f, "tile {id:?}: expected {expected} height samples, got {got}"),

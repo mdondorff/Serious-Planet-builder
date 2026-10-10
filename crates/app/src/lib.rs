@@ -17,6 +17,9 @@ modes:
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
+    --cells N --tau PX --frames N   terrain perf workload parameters (defaults 32, 6, 300)
+    --perf-smoke             run the terrain perf path briefly on any adapter (labelled, never a measurement)
+    --stream                 generate terrain tiles asynchronously through the streaming path (same image as the default)
     --view face|tile-id|level|morph|height|normals|depth   debug view (tiles scene: face, tile-id, height)
     --tile FACE,LEVEL,X,Y    tile to draw (repeatable; default: a tile and its east neighbour)
     --seed N --res N         generator seed and tile resolution (cells, power of two)
@@ -35,7 +38,7 @@ pub enum Mode {
     TestRender,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct Options {
     pub mode: Mode,
     pub smoke: bool,
@@ -53,6 +56,11 @@ pub struct Options {
     pub face_net: Option<PathBuf>,
     pub offscreen: bool,
     pub script: String,
+    pub stream: bool,
+    pub cells: u32,
+    pub tau: f64,
+    pub frames: usize,
+    pub perf_smoke: bool,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -80,12 +88,22 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         face_net: None,
         offscreen: false,
         script: "3".into(),
+        stream: false,
+        cells: 32,
+        tau: 6.0,
+        frames: 300,
+        perf_smoke: false,
     };
     while let Some(a) = it.next() {
         match a.as_str() {
             "--smoke" => o.smoke = true,
             "--perf" => o.perf = true,
             "--offscreen" => o.offscreen = true,
+            "--stream" => o.stream = true,
+            "--perf-smoke" => o.perf_smoke = true,
+            "--cells" => o.cells = it.next().ok_or("--cells needs a value")?.parse().map_err(|e| format!("--cells: {e}"))?,
+            "--tau" => o.tau = it.next().ok_or("--tau needs a value")?.parse().map_err(|e| format!("--tau: {e}"))?,
+            "--frames" => o.frames = it.next().ok_or("--frames needs a value")?.parse().map_err(|e| format!("--frames: {e}"))?,
             "--script" => o.script = it.next().ok_or("--script needs an index or name")?.clone(),
             "--view" => o.view = it.next().ok_or("--view needs a value")?.clone(),
             "--tile" => o.tiles.push(it.next().ok_or("--tile needs FACE,LEVEL,X,Y")?.clone()),
@@ -131,7 +149,7 @@ pub(crate) fn err(e: std::io::Error) -> String {
     e.to_string()
 }
 
-fn facts(ctx: &GpuContext) -> AdapterFacts {
+pub(crate) fn facts(ctx: &GpuContext) -> AdapterFacts {
     AdapterFacts {
         name: ctx.info.name.clone(),
         backend: format!("{:?}", ctx.info.backend),
@@ -153,8 +171,14 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     // Hybrid-graphics rule (report §8): always log which adapter we got.
     writeln!(out, "adapter: {:?} {} ({:?}), key {}", ctx.info.backend, ctx.info.name, ctx.info.device_type, ctx.adapter_key())
         .map_err(err)?;
-    if o.perf {
-        return perf_skeleton(o, &ctx, out);
+    if o.perf && o.perf_smoke {
+        return Err("--perf and --perf-smoke exclude each other: a smoke run is never a measurement".into());
+    }
+    if o.perf_smoke && o.scene != "terrain" {
+        return Err("--perf-smoke is only available for --scene terrain".into());
+    }
+    if o.perf || o.perf_smoke {
+        return if o.scene == "terrain" { skeleton::perf_terrain(o, &ctx, out) } else { perf_skeleton(o, &ctx, out) };
     }
     if let Some(bundle) = &o.repro {
         return skeleton::replay(&ctx, bundle, o.out.as_deref(), out);
@@ -198,10 +222,16 @@ fn perf_skeleton(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(
             stats,
             clocks_before: before,
             clocks_after: planet_perf::query_nvidia_smi(),
+            metrics: vec![],
+            counts: vec![],
         });
     }
     let medians: Vec<f64> = runs.iter().map(|r| r.stats.median).collect();
     writeln!(out, "run-to-run noise (max-min)/median: {:.3}", planet_perf::run_to_run_noise(&medians).unwrap_or(f64::NAN)).map_err(err)?;
+    let scheme = planet_perf::query_power_scheme();
+    for w in planet_perf::session_warnings(&facts(ctx), scheme.as_deref(), &runs, false) {
+        writeln!(out, "WARNING (not valid for time budgets): {w}").map_err(err)?;
+    }
     let json = planet_perf::report_json(&facts(ctx), planet_perf::query_power_scheme().as_deref(), o.machine_ready, &protocol, &runs);
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("skeleton.json"));
     if let Some(dir) = path.parent() {

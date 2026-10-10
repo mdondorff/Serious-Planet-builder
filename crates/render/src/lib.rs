@@ -6,9 +6,10 @@ use std::fmt;
 pub use wgpu;
 
 pub mod exec;
+pub mod graph;
 pub mod terrain;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
-pub use terrain::{execute_terrain, TerrainStats, TERRAIN_SHADERS};
+pub use terrain::{execute_terrain, FrameTiming, TerrainRenderer, TerrainStats, TERRAIN_SHADERS};
 
 /// Which adapter the process wants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,7 +83,12 @@ impl GpuContext {
             .map_err(|e| GpuError::NoAdapter(format!("{e} (policy {policy:?})")))?;
         let info = adapter.get_info();
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor { label: Some("planet"), ..Default::default() })
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("planet"),
+                // Timestamp queries time the GPU in the performance harness; request them only when the adapter has them.
+                required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
+                ..Default::default()
+            })
             .await
             .map_err(|e| GpuError::Device(e.to_string()))?;
         Ok(Self { device, queue, info })
@@ -115,7 +121,7 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
 
 @fragment
 fn fs() -> @location(0) vec4<f32> {
-    return vec4<f32>(1.0, 0.5, 0.0, 1.0);
+    return vec4<f32>(1.0, 128.0 / 255.0, 0.0, 1.0);
 }
 "#;
 
@@ -245,4 +251,11 @@ pub fn read_rgba8(ctx: &GpuContext, texture: &wgpu::Texture, width: u32, height:
     drop(data);
     readback.unmap();
     RgbaFrame { width, height, rgba }
+}
+
+impl GpuContext {
+    /// Whether GPU timestamp queries are available on this device.
+    pub fn timestamps_supported(&self) -> bool {
+        self.device.features().contains(wgpu::Features::TIMESTAMP_QUERY)
+    }
 }

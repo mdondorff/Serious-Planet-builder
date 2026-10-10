@@ -1,0 +1,48 @@
+## MODIFIED Requirements
+
+### Requirement: STRM-001 Injected time, I/O and spawning
+Streaming and scheduling code SHALL receive time, I/O and task spawning through injected interfaces, and tests SHALL be able to run it with a fake clock, fake I/O with injectable latency and failures, and a deterministic single-threaded spawner.
+
+Verify: A
+Status: active
+Source: CON-04
+
+#### Scenario: Fake clock
+- **WHEN** a scheduler test advances a fake clock by 5 s
+- **THEN** exactly the jobs due within 5 s run, in a reproducible order
+
+### Requirement: STRM-002 Never block a frame
+For every visible node some level of detail SHALL be available: missing tiles SHALL be requested parent-first, and a frame SHALL never wait for generation or I/O.
+
+Verify: A
+Status: active
+Source: CON-22
+
+#### Scenario: Fast dive
+- **WHEN** a scripted orbit-to-ground dive runs with fake I/O of 200 ms latency
+- **THEN** every frame has a resident tile for every visible node
+
+### Requirement: STRM-005 Cancellation and prioritisation
+Queued and in-flight requests SHALL be cancelled when nothing needs them any more, and requests SHALL be ordered by screen-space error times visibility with parents before children.
+
+Verify: A
+Status: active
+Source: report §4
+
+#### Scenario: Cancel
+- **WHEN** a node leaves view before its job starts
+- **THEN** the job is cancelled and never runs
+
+
+## ADDED Requirements
+
+### Requirement: STRM-007 Resident capacity
+The streamer SHALL evict the least recently used tiles beyond a configured capacity, never evicting level-0 tiles or tiles used in the current frame (so the resident count exceeds the capacity only by tiles in use and by results arriving between frames), and SHALL retry failed tiles only after a configured delay measured on the injected clock.
+
+Verify: A
+Status: active
+Source: CON-04, CON-20
+
+#### Scenario: Interest moves away
+- **WHEN** the wanted set moves to other tiles and the capacity is exceeded
+- **THEN** the oldest unused tiles are evicted, roots and tiles in use stay, and a failed tile is not retried before the delay
