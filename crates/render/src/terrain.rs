@@ -16,6 +16,8 @@ struct Globals {
 struct Node {
     origin_rel: vec4<f32>,
     color: vec4<f32>,
+    // x, y: vertex distances between which a vertex morphs to the parent grid; z, w: padding (the plan's node-level
+    // `morph` is a diagnostic of the CPU selection and is not read by the shader).
     morph: vec4<f32>,
 };
 
@@ -387,8 +389,7 @@ impl TerrainRenderer {
         for (i, d) in plan.nodes.iter().enumerate() {
             let r = d.camera_relative_origin;
             let c = d.color.map(|v| f32::from(v) / 255.0);
-            let b =
-                f32_bytes(&[r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, d.morph, f32::from(d.level)]);
+            let b = f32_bytes(&[r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, 0.0, 0.0]);
             nodes[i * self.stride as usize..i * self.stride as usize + 48].copy_from_slice(&b);
         }
         ctx.queue.write_buffer(&self.nodes, 0, &nodes);
