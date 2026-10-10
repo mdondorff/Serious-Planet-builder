@@ -2,6 +2,7 @@
 name: numerics-reviewer
 description: Reviews code touching coordinates, precision, determinism, noise, hashing, generators or shaders for large-world numeric bugs. Use for any change in core, generators or shader code. Read-only.
 tools: Read, Glob, Grep, Bash
+model: opus
 ---
 Review the diff (`git diff main...HEAD` plus uncommitted changes) for:
 
