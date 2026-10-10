@@ -6,4 +6,4 @@
 
 ## 2. Close-out
 
-- [ ] 2.1 Verifier, archive, status line
+- [x] 2.1 Verifier, archive, status line
