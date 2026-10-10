@@ -8,6 +8,7 @@ use std::time::Instant;
 const TIER_A: &str = "not binary(/^gpu_/) and not binary(/^oracle_/)";
 const TIER_AB: &str = "not binary(/^gpu_/)";
 const TIER_C: &str = "binary(/^gpu_/)";
+const TIER_BC_REAL: &str = "binary(/^gpu_/) or binary(/^oracle_/)";
 const FAST_BUDGET_SECS: f64 = 10.0;
 
 fn package(dir: &str) -> String {
@@ -65,6 +66,17 @@ fn changed_paths(root: &Path) -> Vec<String> {
     paths
 }
 
+/// The nextest filter of a `test` subcommand. On the real GPU (`test gpu --real`) the tier-B oracles run with tier C:
+/// they compare its shaders with the CPU twins (BUILD-003).
+fn tier_filter(sub: Option<&str>, real: bool) -> &'static str {
+    match sub {
+        Some("fast") => TIER_A,
+        Some("gpu") if real => TIER_BC_REAL,
+        Some("gpu") => TIER_C,
+        _ => TIER_AB,
+    }
+}
+
 pub fn test(root: &Path, args: &[String]) -> Res {
     let mut sub = None;
     let (mut strict, mut real) = (false, false);
@@ -89,24 +101,16 @@ pub fn test(root: &Path, args: &[String]) -> Res {
     let started = Instant::now();
 
     let mut cmd: Vec<String> = vec!["nextest".into(), "run".into(), "--no-tests=pass".into()];
-    let filter = match sub {
-        Some("fast") => {
-            let pkgs = packages_for_changes(&changed_paths(root));
-            eprintln!("test fast: {}", pkgs.join(", "));
-            for p in pkgs {
-                cmd.extend(["-p".into(), p]);
-            }
-            TIER_A
+    if sub == Some("fast") {
+        let pkgs = packages_for_changes(&changed_paths(root));
+        eprintln!("test fast: {}", pkgs.join(", "));
+        for p in pkgs {
+            cmd.extend(["-p".into(), p]);
         }
-        Some("gpu") => {
-            cmd.push("--workspace".into());
-            TIER_C
-        }
-        _ => {
-            cmd.push("--workspace".into());
-            TIER_AB
-        }
-    };
+    } else {
+        cmd.push("--workspace".into());
+    }
+    let filter = tier_filter(sub, real);
     cmd.extend(["-E".into(), filter.into()]);
     cmd.extend(passthrough.iter().map(|s| s.to_string()));
     let args: Vec<&str> = cmd.iter().map(String::as_str).collect();
@@ -257,6 +261,15 @@ mod tests {
             assert!(packages_for_changes(&s(paths)).len() >= 12, "{paths:?}");
         }
         assert_eq!(packages_for_changes(&s(&["xtask/src/main.rs"])), ["xtask"]);
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn each_subcommand_selects_its_tiers_and_the_real_gpu_adds_the_oracles() {
+        assert_eq!(tier_filter(Some("fast"), false), TIER_A);
+        assert_eq!(tier_filter(None, false), TIER_AB);
+        assert_eq!(tier_filter(Some("gpu"), false), TIER_C);
+        assert_eq!(tier_filter(Some("gpu"), true), "binary(/^gpu_/) or binary(/^oracle_/)");
     }
 
     // spec: BUILD-002

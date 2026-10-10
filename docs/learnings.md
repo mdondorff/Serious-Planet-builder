@@ -49,3 +49,8 @@ Proposed follow-up: shaders must output values that are exact in 8 bits; a real 
 
 ## 2026-10-10: one-pixel rasteriser difference at a tile border (lavapipe)
 terrain_aerial20km_level differs between lavapipe and WARP/NVIDIA in a single pixel (86,89): it sits on the diagonal border of two tiles of different levels and takes the neighbour's colour. Two independent CI runs produced byte-identical Linux images, so it is deterministic per adapter (CON-20), not flakiness; WARP and NVIDIA agree. Cause: edge-tie rasterisation of a shared border differs by implementation. Consequence: goldens stay per adapter, and tile-border pixels must never be compared across adapters.
+
+## 2026-10-10 The tier-B oracles hold on the real NVIDIA GPU with the software-adapter tolerances
+What happened: with the oracles following `PLANET_ADAPTER`, `cargo xtask test gpu --real` ran `oracle_debug_views` (face and tile-id exact, height within 1 at rounding boundaries) and `oracle_shader_validation` on the RTX 3080 Ti (Vulkan) and both passed unchanged; all NVIDIA goldens matched in the same run (27 tests).
+Assumption it changes: ADR 0009 (tier B on the software adapter): the CPU twins and their tolerances also hold on the reference GPU, so tier B is not WARP-specific.
+Proposed follow-up: none; keep running `test gpu --real` at milestone gates.
