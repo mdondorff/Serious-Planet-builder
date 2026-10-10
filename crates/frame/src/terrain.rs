@@ -104,9 +104,19 @@ pub fn plan_terrain(req: &TerrainRequest) -> Result<TerrainPlan, PlanError> {
     plan_terrain_field(req, &planet_generators::height::Reference(req.seed))
 }
 
-/// [`plan_terrain`] with tile origins and mesh keys from `field` (stress tests). `field.seed()` must equal `req.seed`.
+/// [`plan_terrain`] with tile origins and mesh keys from `field` (stress tests). `field.seed()` must equal `req.seed`,
+/// and the field's height bound must fit `req.lod.max_height_m` (horizon and frustum padding).
 pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Result<TerrainPlan, PlanError> {
-    assert_eq!(field.seed(), req.seed, "the height field's seed must be the request's seed");
+    if field.seed() != req.seed {
+        return Err(PlanError::HeightField(format!("field seed {} differs from request seed {}", field.seed(), req.seed)));
+    }
+    if field.max_abs_height_m() > req.lod.max_height_m {
+        return Err(PlanError::HeightField(format!(
+            "heights up to {} m exceed max_height_m {} m used for horizon and frustum padding",
+            field.max_abs_height_m(),
+            req.lod.max_height_m
+        )));
+    }
     let map = face_mapping_by_id(&req.face_mapping).ok_or_else(|| PlanError::UnknownFaceMapping(req.face_mapping.clone()))?;
     if req.size.0 == 0 || req.size.1 == 0 {
         return Err(PlanError::FrameTooSmall { size: req.size, tiles: 0 });

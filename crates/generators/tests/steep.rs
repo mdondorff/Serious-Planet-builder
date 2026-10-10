@@ -4,9 +4,9 @@
 use planet_core::cube::TangentWarp;
 use planet_core::hash::SplitMix64;
 use planet_core::{Face, Side, TileId, Vec3};
-use planet_generators::height::{HeightField, Reference};
+use planet_generators::height::{cache_key, cache_key_field, HeightField, Reference};
 use planet_generators::mesh::{mesh_key, mesh_key_field, tile_mesh, tile_mesh_field, TileMesh};
-use planet_generators::stress::{Steep, STEEP_AMPLITUDE_M};
+use planet_generators::stress::{Steep, STEEP_AMPLITUDE_M, STEEP_VERSION};
 
 const R: f64 = 6_371_000.0;
 const CELLS: u32 = 16;
@@ -60,7 +60,8 @@ fn the_stress_field_is_high_and_steep() {
     }
     eprintln!("steep field: heights {lo:.0}..{hi:.0} m, steepest 20 m slope {:.0} degrees", libm::atan(slope).to_degrees());
     assert!(hi - lo > 6000.0, "the stress field must have several km of relief, got {:.0} m", hi - lo);
-    assert!(slope > 0.5, "the stress field must have slopes above 27 degrees, got {:.2}", slope);
+    let min_slope = libm::tan(27f64.to_radians());
+    assert!(slope > min_slope, "the stress field must have slopes above 27 degrees, got {:.1}", libm::atan(slope).to_degrees());
 }
 
 // spec: TEST-015
@@ -69,9 +70,22 @@ fn reference_field_meshes_and_keys_are_unchanged_and_steep_keys_never_alias() {
     let t = id(3, 9, 100, 200);
     assert_eq!(tile_mesh_field(&Reference(1), &TangentWarp, t, CELLS, R), tile_mesh(1, &TangentWarp, t, CELLS, R));
     assert_eq!(mesh_key_field(&Reference(1), &TangentWarp, t, CELLS, R), mesh_key(&TangentWarp, 1, t, CELLS, R));
+    assert_eq!(cache_key_field(&Reference(1), &TangentWarp, t, CELLS), cache_key(&TangentWarp, 1, t, CELLS));
     let steep = tile_mesh_field(&STEEP, &TangentWarp, t, CELLS, R);
     assert_ne!(steep.key, mesh_key(&TangentWarp, 1, t, CELLS, R), "a stress mesh must never be served as a reference mesh");
+    assert_ne!(cache_key_field(&STEEP, &TangentWarp, t, CELLS), cache_key(&TangentWarp, 1, t, CELLS));
     assert_ne!(steep.vertices, tile_mesh(1, &TangentWarp, t, CELLS, R).vertices);
+}
+
+/// Committed known answer of one stress mesh, tied to the stress field's version (ADR 0006 version guard).
+const KNOWN_STEEP_MESH: u64 = 5320681286931286506;
+
+// spec: TEST-015
+#[test]
+fn the_stress_field_has_a_version_guarded_known_answer() {
+    assert_eq!(STEEP_VERSION, 1, "bump KNOWN_STEEP_MESH together with STEEP_VERSION");
+    let h = tile_mesh_field(&STEEP, &TangentWarp, id(4, 12, 1000, 2000), CELLS, R).content_hash();
+    assert_eq!(h, KNOWN_STEEP_MESH, "stress mesh output changed (got {h}): bump STEEP_VERSION and update the known answer");
 }
 
 // spec: TEST-015
@@ -143,22 +157,24 @@ fn a_fully_morphed_steep_border_lies_on_the_coarser_neighbours_border() {
                 continue;
             }
             let pm = tile_mesh_field(&STEEP, &m, p, CELLS, R);
-            let pb: Vec<Vec3> =
-                (0..=CELLS).flat_map(|k| [world(&pm, k, 0), world(&pm, k, CELLS), world(&pm, 0, k), world(&pm, CELLS, k)]).collect();
-            let spacing = 1.2 * R * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << p.level()) / f64::from(CELLS);
+            // Segments between adjacent lattice points of the parent's four borders: the border polyline itself.
+            let segments: Vec<(Vec3, Vec3)> = Side::ALL
+                .into_iter()
+                .flat_map(|s| {
+                    let pts: Vec<Vec3> = border(s, CELLS).into_iter().map(|(i, j)| world(&pm, i, j)).collect();
+                    pts.windows(2).map(|w| (w[0], w[1])).collect::<Vec<_>>()
+                })
+                .collect();
+            let spacing = R * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << p.level()) / f64::from(CELLS);
             let on_polyline = |q: Vec3| {
-                let mut best = f64::MAX;
-                for a in &pb {
-                    for b in &pb {
+                segments
+                    .iter()
+                    .map(|(a, b)| {
                         let ab = *b - *a;
-                        if ab.length() < 1e-9 || ab.length() > spacing + 2.0 * STEEP_AMPLITUDE_M {
-                            continue;
-                        }
                         let s = ((q - *a).dot(ab) / ab.dot(ab)).clamp(0.0, 1.0);
-                        best = best.min((q - (*a + ab * s)).length());
-                    }
-                }
-                best
+                        (q - (*a + ab * s)).length()
+                    })
+                    .fold(f64::MAX, f64::min)
             };
             let worst = border(side, CELLS).into_iter().map(|(i, j)| on_polyline(coarse_world(&tm, i, j))).fold(0.0f64, f64::max);
             let tol = spacing * 1e-6 + 2e-3;

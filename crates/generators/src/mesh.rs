@@ -5,7 +5,7 @@
 //! Positions are computed in float64 on the planet-fixed frame and rounded once to f32 after subtracting the origin,
 //! so vertex precision is bounded by tile size (plus the height range within the tile), never by planet size.
 
-use crate::height::{cache_key, HeightField, Reference};
+use crate::height::{cache_key_field, HeightField, Reference};
 use planet_core::cube::FaceMapping;
 use planet_core::hash::hash_u64s;
 use planet_core::{PlanetFixed, TileId, Vec3};
@@ -60,19 +60,17 @@ pub fn mesh_key(map: &dyn FaceMapping, seed: u64, id: TileId, cells: u32, radius
 
 /// [`mesh_key`] with the construction constants as arguments, so tests can show that each one changes the key.
 pub fn mesh_key_with(map: &dyn FaceMapping, seed: u64, id: TileId, cells: u32, radius_m: f64, version: u32, skirt_fraction: f64) -> u64 {
-    hash_u64s(
-        0x006d_6573,
-        &[u64::from(version), cache_key(map, seed, id, cells), u64::from(cells), radius_m.to_bits(), skirt_fraction.to_bits()],
-    )
+    mesh_key_chain(cache_key_field(&Reference(seed), map, id, cells), cells, radius_m, version, skirt_fraction)
 }
 
-/// [`mesh_key`] for a height field: the reference field gives exactly [`mesh_key`]; any other field salts it.
+fn mesh_key_chain(height_key: u64, cells: u32, radius_m: f64, version: u32, skirt_fraction: f64) -> u64 {
+    hash_u64s(0x006d_6573, &[u64::from(version), height_key, u64::from(cells), radius_m.to_bits(), skirt_fraction.to_bits()])
+}
+
+/// [`mesh_key`] for a height field: it chains the field's height key ([`cache_key_field`]), so [`Reference`] gives
+/// exactly [`mesh_key`] and any other field (other implementation id or version) gets other keys (ADR 0006).
 pub fn mesh_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> u64 {
-    let key = mesh_key(map, field.seed(), id, cells, radius_m);
-    match field.key_salt() {
-        None => key,
-        Some(salt) => hash_u64s(0x0066_6c64, &[key, salt]),
-    }
+    mesh_key_chain(cache_key_field(field, map, id, cells), cells, radius_m, MESH_VERSION, SKIRT_FRACTION)
 }
 
 impl TileMesh {
@@ -92,7 +90,7 @@ pub fn tile_mesh(seed: u64, map: &dyn FaceMapping, id: TileId, cells: u32, radiu
     tile_mesh_field(&Reference(seed), map, id, cells, radius_m)
 }
 
-/// [`tile_mesh`] over any height field (stress tests use [`crate::stress::Steep`]).
+/// [`tile_mesh`] over any height field (stress tests use `stress::Steep`).
 pub fn tile_mesh_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> TileMesh {
     assert!(cells >= 2 && cells.is_power_of_two(), "cells must be a power of two >= 2");
     let n = i64::from(cells);
