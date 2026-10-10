@@ -4,7 +4,7 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
 
 ## Waiting for the owner
 - **M2 go/no-go gate** (docs/milestones/M2-report.md): recommendation Go with changes. Nothing in M3 has been started.
-- **Accept or change the proposed ADRs** 0007, 0009, 0013, 0014 and 0015 (ADRs 0001-0006, 0008, 0010-0012 accepted 2026-10-10). Work proceeds on their leanings.
+- **Accept or change the proposed ADRs** 0009, 0013 and 0014 (ADRs 0001-0008, 0010-0012 and 0015 accepted 2026-10-10; 0009 is accepted once its queued follow-ups land without surprises). Work proceeds on their leanings.
 - Tool note: `gh` is installed at `C:\Program Files\GitHub CLI\gh.exe` but is not on the Git Bash PATH.
 
 ## Queued for agents
@@ -27,6 +27,7 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
   Also low: `gpu_renderer.rs:59` panics when a timestamp delta is 0.
 
 ## Log
+- 2026-10-10 ADR 0007 updated from review (TOML item files, `TileId`-cell spatial index as the read-set unit, base hash plus per-generator versions, stable ids and deterministic stacking, canonical parsed hashing, `BodyId` and reference-surface id on anchors, authored layers as stages; M6 items named as deferred) and accepted by the owner. ADR 0015 accepted by the owner.
 - 2026-10-10 ADR 0015 Window surface and UI painting live in render: proposed (records the owner's decision that wgpu must not leak above `render`; `render` owns the surface and paints egui output).
 - 2026-10-10 Performance on Rasierklinge: the owner reports `cargo xtask perf --machine-ready` done, all verdicts ok. The numbers (perf/logs/terrain.json) are not yet recorded in the repo.
 - 2026-10-10 Golden blessing items closed: WARP, llvmpipe and NVIDIA each hold the 10 goldens blessed in #20, `pending.txt` is empty, and the latest CI run on `main` produced no Linux candidates (owner's `/bless` for llvmpipe found nothing to promote).

@@ -1,5 +1,5 @@
 # 0015 Window surface and UI painting live in render
-Status: proposed
+Status: accepted
 Date: 2026-10-10
 Source: m2-wgpu-seam review (docs/status.md); ADR 0004, ADR 0008; constitution CON-02, CON-03
 
