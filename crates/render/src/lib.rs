@@ -120,11 +120,22 @@ impl GpuContext {
         }
     }
 
-    /// Backend + name as a directory-safe key, e.g. `dx12-microsoft-basic-render-driver`.
+    /// Adapter family as a directory-safe key, e.g. `dx12-microsoft-basic-render-driver` or `vulkan-llvmpipe`:
+    /// parenthesised details (LLVM version, bit width) are dropped so driver updates do not orphan the goldens
+    /// (same rule as `planet_testkit::adapter_key`).
     pub fn adapter_key(&self) -> String {
-        let backend = format!("{:?}", self.info.backend);
+        let mut family = String::new();
+        let mut depth = 0u32;
+        for c in self.info.name.chars() {
+            match c {
+                '(' => depth += 1,
+                ')' => depth = depth.saturating_sub(1),
+                _ if depth == 0 => family.push(c),
+                _ => {}
+            }
+        }
         let mut key = String::new();
-        for c in format!("{backend}-{}", self.info.name).to_lowercase().chars() {
+        for c in format!("{:?}-{family}", self.info.backend).to_lowercase().chars() {
             if c.is_ascii_alphanumeric() {
                 key.push(c);
             } else if !key.ends_with('-') {
@@ -132,6 +143,15 @@ impl GpuContext {
             }
         }
         key.trim_matches('-').to_string()
+    }
+
+    /// Everything that identifies the driver: name, backend, device type, driver and driver info. Recorded beside the
+    /// goldens and printed on every mismatch.
+    pub fn driver_string(&self) -> String {
+        format!(
+            "{} | {:?} | {:?} | driver '{}' '{}'",
+            self.info.name, self.info.backend, self.info.device_type, self.info.driver, self.info.driver_info
+        )
     }
 }
 

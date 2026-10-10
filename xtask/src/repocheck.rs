@@ -26,7 +26,8 @@ mod tests {
         let w = workflow();
         for needle in [
             "windows-latest",
-            "ubuntu-latest",
+            "ubuntu-24.04",
+            "PLANET_REQUIRE_ADAPTER_GOLDENS",
             "mesa-vulkan-drivers",
             "cargo xtask check",
             "cargo xtask spec-lint",
@@ -37,6 +38,8 @@ mod tests {
         ] {
             assert!(w.contains(needle), "ci.yml is missing `{needle}`");
         }
+        // The runner image is pinned: a moving `-latest` Linux image changes Mesa and LLVM under the goldens.
+        assert!(!w.contains("ubuntu-latest"), "ci.yml must pin the Linux runner image (ubuntu-24.04), not ubuntu-latest");
     }
 
     // spec: BUILD-006
