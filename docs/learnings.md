@@ -41,3 +41,8 @@ Proposed follow-up: every GPU-fed buffer layout gets one serialisation function 
 What happened: with origins on the reference sphere the f32 jitter test gave 0.22 px at 2.5 km terrain (budget 0.25) because offsets and camera-relative origins both carry the terrain height. Placing the origin at the tile centre height gives 0.0002 px.
 Assumption it changes: ADR 0001 (TileLocal origin = tile centre): refined; the centre includes terrain height.
 Proposed follow-up: none; M3 per-node height bounds will also fix LOD distance near mountains.
+
+## 2026-10-10 First real-GPU runs: one rounding difference, and a perf log that proved nothing
+What happened: on the RTX 3080 Ti Laptop (Vulkan) 15 of 16 tier-C tests passed immediately, including the vertex-placement, morph and depth oracles. The hello triangle failed: the shader returned 0.5 (127.5 in 8 bits), WARP rounds to 128 and NVIDIA to 127. The performance skeleton log (owner run) shows the Balanced power scheme and the GPU in P8 at 210 MHz with throttle reason 0x1 (idle): the 0.43 ms medians are a CPU round trip, not a frame time. Real-GPU debug-view images are byte-identical to the WARP goldens; three terrain views differ by at most 1 in one channel.
+Assumption it changes: ADR 0009 (exact debug-view goldens, per adapter): confirmed and justified; report §8 (performance protocol): the harness now flags an unready machine.
+Proposed follow-up: shaders must output values that are exact in 8 bits; a real frame workload (M2 terrain) is needed before any budget run; consider blessing the NVIDIA goldens next to the WARP ones.

@@ -203,6 +203,35 @@ fn clock_json(c: &Option<ClockSample>) -> String {
     }
 }
 
+/// Whether a Windows power scheme name is a performance scheme (English, German and the "Ultimate" scheme).
+pub fn is_performance_scheme(scheme: &str) -> bool {
+    let s = scheme.to_lowercase();
+    ["high performance", "höchstleistung", "hochleistung", "ultimate", "maximale leistung"].iter().any(|k| s.contains(k))
+}
+
+/// Reasons a session cannot be used for time budgets (CON-21): not a performance power scheme, or the GPU was idle
+/// (low performance state) when a run started, so the workload did not raise the clocks.
+pub fn session_warnings(power_scheme: Option<&str>, runs: &[RunReport]) -> Vec<String> {
+    let mut w = Vec::new();
+    match power_scheme {
+        Some(s) if is_performance_scheme(s) => {}
+        Some(s) => {
+            w.push(format!("power scheme is '{}', not a performance scheme; set the performance profile before measuring", s.trim()))
+        }
+        None => w.push("the active power scheme could not be read".to_string()),
+    }
+    for r in runs {
+        if let Some(c) = &r.clocks_before {
+            let low = c.pstate.trim_start_matches('P').parse::<u32>().is_ok_and(|n| n >= 5);
+            if low {
+                w.push(format!("run '{}' started with the GPU in {} at {} MHz: the workload is too light or the warm-up too short to reach steady clocks", r.path_name, c.pstate, c.graphics_mhz));
+                break;
+            }
+        }
+    }
+    w
+}
+
 /// Serialise a whole harness session to JSON (hand-written to keep this crate dependency-free).
 pub fn report_json(
     adapter: &AdapterFacts,
@@ -211,6 +240,7 @@ pub fn report_json(
     protocol: &Protocol,
     runs: &[RunReport],
 ) -> String {
+    let warnings = session_warnings(power_scheme, runs);
     let run_json: Vec<String> = runs
         .iter()
         .map(|r| {
@@ -230,11 +260,13 @@ pub fn report_json(
         })
         .collect();
     format!(
-        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_confirmed_machine_ready\":{},\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}]}},\"runs\":[{}]}}\n",
+        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_confirmed_machine_ready\":{},\"valid_for_budgets\":{},\"warnings\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}]}},\"runs\":[{}]}}\n",
         json_str(&adapter.name),
         json_str(&adapter.backend),
         power_scheme.map_or("null".to_string(), json_str),
         owner_confirmed,
+        warnings.is_empty() && owner_confirmed,
+        warnings.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
         protocol.warmup_frames,
         protocol.measured_frames,
         protocol.runs,
@@ -314,5 +346,52 @@ mod tests {
         ] {
             assert!(j.contains(needle), "missing {needle} in {j}");
         }
+    }
+}
+
+#[cfg(test)]
+mod warning_tests {
+    use super::*;
+
+    fn run_with(pstate: &str) -> RunReport {
+        let c = parse_nvidia_smi(&format!("X, 210, 405, 15, 50, {pstate}, 0x1")).unwrap();
+        RunReport {
+            path_name: "skeleton".into(),
+            vram_cap_gb: 8,
+            stats: summarize(&[1.0, 2.0], 0).unwrap(),
+            clocks_before: Some(c),
+            clocks_after: None,
+        }
+    }
+
+    // spec: TEST-006
+    #[test]
+    fn balanced_power_scheme_and_idle_gpu_make_a_session_invalid_for_budgets() {
+        let balanced = "GUID des Energieschemas: 381b4222 (Ausbalanciert)";
+        let w = session_warnings(Some(balanced), &[run_with("P8")]);
+        assert_eq!(w.len(), 2, "{w:?}");
+        assert!(w[0].contains("Ausbalanciert") && w[1].contains("P8"), "{w:?}");
+        let j = report_json(
+            &AdapterFacts { name: "RTX 3080 Ti".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete },
+            Some(balanced),
+            true,
+            &Protocol::default(),
+            &[run_with("P8")],
+        );
+        assert!(j.contains("\"valid_for_budgets\":false") && j.contains("\"warnings\":[\"power scheme"), "{j}");
+    }
+
+    // spec: TEST-006
+    #[test]
+    fn performance_schemes_in_two_languages_and_a_busy_gpu_are_valid() {
+        for s in ["Power Scheme GUID: x  (High performance)", "GUID des Energieschemas: y  (Höchstleistung)", "Ultimate Performance"] {
+            assert!(session_warnings(Some(s), &[run_with("P0")]).is_empty(), "{s}");
+        }
+        assert!(session_warnings(None, &[]).iter().any(|w| w.contains("could not be read")));
+        let a = AdapterFacts { name: "RTX 3080 Ti".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete };
+        let j = report_json(&a, Some("High performance"), true, &Protocol::default(), &[run_with("P0")]);
+        assert!(j.contains("\"valid_for_budgets\":true"), "{j}");
+        let j = report_json(&a, Some("High performance"), false, &Protocol::default(), &[run_with("P0")]);
+        assert!(j.contains("\"valid_for_budgets\":false"), "without the owner's confirmation nothing is valid for budgets");
     }
 }
