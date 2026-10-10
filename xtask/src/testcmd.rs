@@ -5,9 +5,9 @@ use std::path::Path;
 use std::time::Instant;
 
 /// Test binaries named `gpu_*` are tier C, `oracle_*` tier B; everything else is tier A.
-const TIER_A: &str = "not binary(~gpu_) and not binary(~oracle_)";
-const TIER_AB: &str = "not binary(~gpu_)";
-const TIER_C: &str = "binary(~gpu_)";
+const TIER_A: &str = "not binary(/^gpu_/) and not binary(/^oracle_/)";
+const TIER_AB: &str = "not binary(/^gpu_/)";
+const TIER_C: &str = "binary(/^gpu_/)";
 const FAST_BUDGET_SECS: f64 = 10.0;
 
 fn package(dir: &str) -> String {
