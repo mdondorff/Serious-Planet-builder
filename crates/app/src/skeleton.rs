@@ -144,6 +144,17 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.repro.is_some() || o.bundle_out.is_some() {
         return Err("generate has no frames: --repro and --bundle belong to test-render and editor --offscreen".into());
     }
+    if let Some(path) = &o.manifest {
+        if !o.tiles.is_empty() || o.out.is_some() || o.face_net.is_some() {
+            return Err("--manifest writes a fixed tile set; it excludes --tile, --out and --face-net".into());
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+        }
+        let text = planet_generators::manifest::determinism_manifest();
+        std::fs::write(path, &text).map_err(|e| format!("writing {}: {e}", path.display()))?;
+        return writeln!(out, "wrote {} ({} lines)", path.display(), text.lines().count()).map_err(err);
+    }
     let id = tiles_of(o)?[0];
     let tile = generate_tile(o.seed, &TangentWarp, id, o.res);
     writeln!(

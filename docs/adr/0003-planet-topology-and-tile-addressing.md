@@ -1,5 +1,5 @@
 # 0003 Planet topology and tile addressing
-Status: proposed
+Status: accepted
 Date: 2026-10-10
 Source: background report §2, §17 item 11; constitution CON-08, CON-15
 

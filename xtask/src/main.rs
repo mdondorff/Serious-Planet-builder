@@ -1,6 +1,7 @@
 //! `cargo xtask`: the only command surface (CON-25). std only, so it builds in about a second.
 
 mod accept;
+mod detdiff;
 mod layering;
 mod repocheck;
 mod speclint;
@@ -20,6 +21,7 @@ const USAGE: &str = "cargo xtask <command>
   accept <milestone>   run milestone acceptance, e.g. M0
   repro <bundle>       replay a repro bundle (format arrives in M1)
   perf [--machine-ready]   performance harness on Rasierklinge (owner confirms the machine first)
+  det-diff <a> <b>     compare two determinism manifests (GEN-003; CI diffs Windows against Linux)
   bless                list candidate goldens (promotion is the owner's /bless skill)
 
 options for test: --strict (a missing golden fails), --real (use the discrete GPU), extra args after `--` go to nextest";
@@ -35,6 +37,7 @@ fn main() -> ExitCode {
         Some("accept") => accept::run(&root, &args[1..]),
         Some("repro") => testcmd::repro(&root, &args[1..]),
         Some("perf") => testcmd::perf(&root, &args[1..]),
+        Some("det-diff") => detdiff::run(&root, &args[1..]),
         Some("bless") => testcmd::bless_list(&root),
         _ => {
             eprintln!("{USAGE}");

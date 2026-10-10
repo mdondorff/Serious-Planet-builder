@@ -38,6 +38,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers libvulkan1 vulkan-tools
           vulkaninfo --summary
+      - name: determinism manifest (GEN-003)
+        run: cargo run -q -p planet -- generate --manifest target/det/manifest-${{ runner.os }}.txt
+      - name: upload determinism manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: det-manifest-${{ runner.os }}
+          path: target/det/manifest-${{ runner.os }}.txt
+          if-no-files-found: error
       - name: check (fmt, clippy, layering)
         run: cargo xtask check
       - name: spec-lint
@@ -60,3 +68,21 @@ jobs:
           name: review-${{ runner.os }}
           path: target/review/
           if-no-files-found: ignore
+
+  # GEN-003 / ADR 0010: CPU output must be bit-identical on Windows and Linux.
+  determinism:
+    name: determinism (Windows vs Linux)
+    needs: test
+    # Runs even when a later step of either OS leg failed: the manifests are uploaded before the tests.
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: det-manifest-*
+          path: target/det
+          merge-multiple: true
+      - name: diff manifests
+        run: cargo xtask det-diff target/det/manifest-Windows.txt target/det/manifest-Linux.txt

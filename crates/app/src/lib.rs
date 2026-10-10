@@ -13,7 +13,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
   editor        interactive editor/viewer (window arrives in M2); --smoke starts and exits; --offscreen runs the skeleton without a window
-  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --smoke starts and exits
+  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
@@ -54,6 +54,7 @@ pub struct Options {
     pub bundle_out: Option<PathBuf>,
     pub repro: Option<PathBuf>,
     pub face_net: Option<PathBuf>,
+    pub manifest: Option<PathBuf>,
     pub offscreen: bool,
     pub script: String,
     pub stream: bool,
@@ -86,6 +87,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         bundle_out: None,
         repro: None,
         face_net: None,
+        manifest: None,
         offscreen: false,
         script: "3".into(),
         stream: false,
@@ -116,6 +118,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--bundle" => o.bundle_out = Some(PathBuf::from(it.next().ok_or("--bundle needs a path")?)),
             "--repro" => o.repro = Some(PathBuf::from(it.next().ok_or("--repro needs a path")?)),
+            "--manifest" => o.manifest = Some(PathBuf::from(it.next().ok_or("--manifest needs a path")?)),
             "--face-net" => o.face_net = Some(PathBuf::from(it.next().ok_or("--face-net needs a path")?)),
             "--machine-ready" => o.machine_ready = true,
             "--scene" => o.scene = it.next().ok_or("--scene needs a value")?.clone(),
@@ -266,5 +269,17 @@ mod tests {
         assert!(run_str(&["frobnicate"]).unwrap_err().contains("usage:"));
         assert!(run_str(&["test-render", "--adapter", "gpu"]).unwrap_err().contains("software or hardware"));
         assert!(run_str(&["test-render", "--scene"]).unwrap_err().contains("needs a value"));
+    }
+
+    // spec: GEN-003
+    #[test]
+    fn generate_manifest_writes_the_determinism_manifest() {
+        let path = std::env::temp_dir().join(format!("planet-manifest-{}", std::process::id())).join("m.txt");
+        let out = run_str(&["generate", "--manifest", path.to_str().unwrap()]).unwrap();
+        assert!(out.contains("wrote"), "{out}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), planet_generators::manifest::determinism_manifest());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+        assert!(run_str(&["generate", "--manifest", "x.txt", "--tile", "0,0,0,0"]).unwrap_err().contains("excludes --tile"));
+        assert!(run_str(&["generate", "--manifest"]).unwrap_err().contains("needs a path"));
     }
 }
