@@ -7,7 +7,7 @@ Four feature changes are archived: `m2-node-selection`, `m2-terrain-render`, `m2
 | Criterion | Result | Evidence |
 |---|---|---|
 | Orbit to 1 m altitude without jitter | pass on the emulated shader path; real-GPU flight needs the owner | `far_side_vertices_project_within_a_quarter_pixel_at_one_metre`: 0.0002 px on the highest terrain found (budget 0.25 px), plain, half-morphed and fully morphed vertices |
-| Terrain at most 8 ms at 1440p (mid-range tier) | **not measured** | needs `cargo xtask perf` on Rasierklinge; the harness is a skeleton and has never run on the real GPU |
+| Terrain at most 8 ms at 1440p (mid-range tier) | **met** | owner run 2026-10-10 on RTX 3080 Ti Laptop (Vulkan), 2560x1440, cells 32, tau 6 px, no session warnings: GPU median 1.69-1.83 ms at 1 m (5,108 draws), 1.37 ms at 200 m, 0.45 ms at 20 km, 0.03 ms in orbit; frame p99 at most 6.2 ms (budget 20); run-to-run noise up to 0.24 |
 | No cracks in 10 scripted views | pass on WARP and lavapipe | `ten_scripted_views_have_no_holes...` (0 hole pixels), morph and border tests (tier A) that close the level transitions, oracle tests for geometry placement and GPU morph values |
 | Node selection snapshot tests | pass | `lod_views.txt` (cull-less selection) and `terrain_views.txt` (plans) snapshots, coverage, balance, morph continuity |
 | Minimal async generation | pass | dive test: orbit to 1 m, 10 jobs per frame, something drawable in every frame, parent-first dispatch, cancellation, settles; `--stream` image equals the synchronous image |
@@ -29,7 +29,7 @@ Four feature changes are archived: `m2-node-selection`, `m2-terrain-render`, `m2
 ## Open risks
 - No real-GPU run yet for anything: timings, golden images, or the WGSL integer texel and morph paths.
 - Six terrain goldens and the Linux goldens await `/bless`; the height and normals views are weak goldens.
-- The 1 m view needs about 3,000 draws with production-like parameters; the 8 ms budget is unproven.
+- The 1 m view needs about 3,000 draws with production-like parameters; the 8 ms budget is met on Rasierklinge even at 5,108 draws (GPU median 1.8 ms); draw-count mitigation is not needed for M2, but CPU planning (~15 ms per full recompute) is the next cost to watch.
 - The test generator is smooth; steep terrain and real detail are untested (SPIKE-02 caveat).
 - Proposed ADRs 0001, 0003 to 0014 await acceptance (0001 has an acceptance branch from the owner).
 
