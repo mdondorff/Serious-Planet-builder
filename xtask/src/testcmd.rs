@@ -142,6 +142,11 @@ fn candidates(root: &Path) -> Vec<(String, String)> {
         let Ok(rel) = f.strip_prefix(&base) else { continue };
         let parts: Vec<String> = rel.iter().map(|s| s.to_string_lossy().into_owned()).collect();
         if let [adapter, name] = parts.as_slice() {
+            // Stale candidates identical to the committed golden are not waiting for anyone.
+            let golden = root.join("tests").join("goldens").join(adapter).join(name);
+            if std::fs::read(&golden).ok().as_deref() == std::fs::read(&f).ok().as_deref() && golden.is_file() {
+                continue;
+            }
             out.push((adapter.clone(), name.clone()));
         }
     }

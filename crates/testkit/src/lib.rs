@@ -223,15 +223,24 @@ pub fn compare_golden_in(root: &Path, adapter: &str, name: &str, img: &Image, to
     }
 }
 
-/// Test-facing wrapper: panics with an actionable message on mismatch. A missing golden is reported
-/// loudly and fails only when `PLANET_GOLDEN_STRICT=1` (set in CI once the owner has blessed goldens).
+/// True when the owner has blessed at least one golden for this adapter.
+pub fn adapter_has_goldens(root: &Path, adapter: &str) -> bool {
+    std::fs::read_dir(root.join("tests").join("goldens").join(adapter))
+        .map(|rd| rd.flatten().any(|e| e.path().extension().is_some_and(|x| x == "png")))
+        .unwrap_or(false)
+}
+
+/// Test-facing wrapper: panics with an actionable message on mismatch. A missing golden is reported loudly and
+/// fails when `PLANET_GOLDEN_STRICT=1` or when the adapter already has blessed goldens (so a deleted or
+/// forgotten golden of a blessed adapter cannot pass silently); an adapter with none yet only reports pending.
 pub fn assert_golden(adapter: &str, name: &str, img: &Image, tol: Tolerance) {
     let outcome = compare_golden_in(&repo_root(), adapter, name, img, tol).expect("golden I/O");
     match &outcome {
         GoldenOutcome::Match => {}
         GoldenOutcome::Pending { .. } => {
             eprintln!("{name} [{adapter}]: {outcome}");
-            if std::env::var("PLANET_GOLDEN_STRICT").as_deref() == Ok("1") {
+            let root = repo_root();
+            if std::env::var("PLANET_GOLDEN_STRICT").as_deref() == Ok("1") || adapter_has_goldens(&root, adapter) {
                 panic!("{name} [{adapter}]: {outcome}");
             }
         }
