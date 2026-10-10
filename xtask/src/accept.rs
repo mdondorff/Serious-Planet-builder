@@ -32,7 +32,7 @@ fn manual_criteria(milestone: &str) -> &'static [&'static str] {
         "M2" => &[
             "Orbit to 1 m altitude without jitter: the f32 shader-path emulation passes (REND-004); a visual flight on the real GPU needs the owner",
             "Terrain at most 8 ms at 1440p on the mid-range tier: needs a performance run on Rasierklinge (the owner confirms the machine first)",
-            "No cracks in 10 scripted views: checked on the software adapters (LOD-005); a real-GPU run needs the owner (`cargo xtask test gpu --real`)",
+            "No cracks in 10 scripted views: checked on the software adapters (LOD-005); the real-GPU run is `cargo xtask test gpu --real` (agents may run it unattended; record the result in the report)",
             "Six terrain goldens blessed by the owner (/bless), and the Linux goldens",
             "GO/NO-GO gate: the owner decides after reading docs/milestones/M2-report.md",
         ],
