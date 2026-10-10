@@ -1,5 +1,5 @@
 # 0008 App structure
-Status: proposed
+Status: accepted
 Date: 2026-10-10
 Source: background report §10; constitution CON-01, CON-02, CON-04
 

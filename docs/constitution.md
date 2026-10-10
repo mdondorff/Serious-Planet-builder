@@ -1,6 +1,6 @@
 # Constitution
 
-**Status:** v1, 2026-10-09. Owner: Matthias Dondorff.
+**Status:** v1.1, 2026-10-10 (CON-14 tolerance amended by the owner, ADR 0010). v1: 2026-10-09. Owner: Matthias Dondorff.
 
 This file holds the project's non-negotiable rules. Every rule has an ID and a verification tier (A pure, B CPU oracle, C pixels, D human; see `openspec/specs/testing`). Rules are deliberately short; the reasoning lives in the ADRs and in `docs/background/architecture-report.md`.
 
@@ -29,7 +29,7 @@ This file holds the project's non-negotiable rules. Every rule has an ID and a v
 - **CON-11** Authoritative positions are float64 in the planet-fixed frame. The GPU receives only tile-local or camera-relative float32 values. No shader computes values of planet-radius magnitude. *Verify: A, C* (precision test at 1 m altitude, far from the origin).
 - **CON-12** Depth uses reversed-Z with a 32-bit float depth buffer and an infinite far plane. *Verify: C.*
 - **CON-13** Precision budget: render jitter < 0.25 px at 1 m camera distance anywhere on the planet; tile-vertex quantization ≤ 1 mm at the finest LOD; geo-anchor round-trip error ≤ 1 mm. *Verify: A, C.*
-- **CON-14** Determinism: hashing and noise lattices are integer-based; generator code uses the `libm` crate for transcendental functions; no fast-math; reductions have a fixed order independent of thread count. CPU outputs are bit-exact across runs, thread counts, and Windows and Linux. CPU and GPU float outputs agree within 1e-4 relative error. *Verify: A, B* (CI compares tile hashes across operating systems).
+- **CON-14** Determinism: hashing and noise lattices are integer-based; generator code uses the `libm` crate for transcendental functions; no fast-math; reductions have a fixed order independent of thread count. CPU outputs are bit-exact across runs, thread counts, and Windows and Linux. CPU and GPU outputs agree per field within a mixed bound `|Δ| ≤ max(rel·|v|, abs)` stated in the field's spec (heights: rel 1e-6, abs 1 mm; normals: 0.01°; masks: abs 1e-4). Neighbouring tiles in one cache share one `implementation_id`, so CPU and GPU tiles never meet at a seam. *Verify: A, B* (CI compares tile hashes across operating systems).
 - **CON-15** Geo conversions go through a `ReferenceSurface` interface (sphere first). Geo-coordinates are the serialization format for authored anchors. *Verify: A.*
 
 ## 4. Verification

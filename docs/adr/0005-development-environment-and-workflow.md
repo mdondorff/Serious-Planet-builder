@@ -1,5 +1,5 @@
 # 0005 Development environment and workflow
-Status: proposed
+Status: accepted
 Date: 2026-10-10
 Source: background report §9 (Development workflow), Key Finding 8; starter doc; constitution CON-25, CON-26
 
