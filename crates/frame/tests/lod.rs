@@ -305,3 +305,65 @@ fn scripted_view_summaries_match_the_committed_snapshot() {
         );
     }
 }
+
+/// The straightforward algorithm (full rescans, walk up to the root): the reference for `balance_leaves`.
+fn reference_balance(m: &TangentWarp, leaves: &mut BTreeSet<TileId>) {
+    loop {
+        let mut to_split = BTreeSet::new();
+        for &t in leaves.iter() {
+            if t.level() < 2 {
+                continue;
+            }
+            for side in planet_core::Side::ALL {
+                let mut a = t.neighbor(m, side).parent().and_then(|p| p.parent());
+                while let Some(x) = a {
+                    if leaves.contains(&x) {
+                        to_split.insert(x);
+                    }
+                    a = x.parent();
+                }
+            }
+        }
+        if to_split.is_empty() {
+            return;
+        }
+        for t in to_split {
+            leaves.remove(&t);
+            leaves.extend(t.children().unwrap());
+        }
+    }
+}
+
+// spec: LOD-003
+#[test]
+fn balancing_equals_the_reference_algorithm_on_random_partitions() {
+    let m = TangentWarp;
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = move || {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (state >> 33) as u32
+    };
+    let mut needed_splits = 0;
+    for _ in 0..60 {
+        // A random quadtree: split random leaves up to level 7 (also across faces), then drop a few leaves (culled holes).
+        let mut leaves: BTreeSet<TileId> = planet_core::Face::ALL.iter().map(|&f| TileId::new(f, 0, 0, 0).unwrap()).collect();
+        for _ in 0..(40 + next() % 200) {
+            let pick = *leaves.iter().nth(next() as usize % leaves.len()).unwrap();
+            if pick.level() < 7 {
+                leaves.remove(&pick);
+                leaves.extend(pick.children().unwrap());
+            }
+        }
+        let holes: Vec<TileId> = leaves.iter().copied().filter(|_| next() % 23 == 0).collect();
+        for h in holes {
+            leaves.remove(&h);
+        }
+        let (mut fast, mut slow) = (leaves.clone(), leaves.clone());
+        planet_frame::balance_leaves(&m, &mut fast);
+        reference_balance(&m, &mut slow);
+        needed_splits += usize::from(fast.len() > leaves.len());
+        assert_eq!(fast, slow, "balance_leaves differs from the reference on a random partition of {} leaves", leaves.len());
+        assert_balanced("random", &fast);
+    }
+    assert!(needed_splits >= 30, "only {needed_splits} of 60 random trees needed balancing: the test would prove little");
+}

@@ -347,3 +347,18 @@ fn mesh_keys_follow_every_input() {
     assert_ne!(base, mesh_key_with(&TangentWarp, 1, t, CELLS, R, MESH_VERSION + 1, SKIRT_FRACTION), "the key ignores the mesh version");
     assert_ne!(base, mesh_key_with(&TangentWarp, 1, t, CELLS, R, MESH_VERSION, SKIRT_FRACTION * 1.5), "the key ignores the skirt fraction");
 }
+
+// spec: GEN-010
+#[test]
+fn the_batch_keyer_gives_exactly_the_per_tile_keys() {
+    use planet_generators::height::Reference;
+    use planet_generators::mesh::{mesh_key_field, MeshKeyer};
+    for seed in [1u64, 77] {
+        let field = Reference(seed);
+        let keyer = MeshKeyer::new(&field, &TangentWarp, CELLS, R);
+        for (f, l, x, y) in [(0u8, 0u8, 0u32, 0u32), (3, 3, 5, 2), (5, 12, 1000, 77), (2, 28, 123_456, 654_321)] {
+            let t = id(f, l, x, y);
+            assert_eq!(keyer.key(t), mesh_key_field(&field, &TangentWarp, t, CELLS, R), "seed {seed} tile {t:?}");
+        }
+    }
+}
