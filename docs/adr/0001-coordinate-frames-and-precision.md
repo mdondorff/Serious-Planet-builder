@@ -1,5 +1,5 @@
 # 0001 Coordinate frames and precision
-Status: proposed
+Status: accepted
 Date: 2026-10-10
 Source: background report §3, §17 item 7; constitution CON-11, CON-13
 
@@ -16,7 +16,14 @@ Option 1. Frames, in order: `PlanetInertial` (reserved, f64) → **`PlanetFixed`
 - Per frame the CPU computes `tile_origin − camera_position` in f64 and uploads it as f32.
 - Tile vertices are stored as f32 (or quantised) offsets from the tile origin, so vertex precision is bounded by tile size, not planet size.
 - No shader computes a value of planet-radius magnitude (CON-11); this is checked by review and by the 1 m altitude precision test.
-- The i64-cell scheme is reserved for a multi-system extension; nothing in M0–M5 depends on it.
+- The i64-cell scheme is reserved for a multi-system extension; nothing in M0–M5 depends on it. The seams below are built now so that extension is additive.
+
+### Multi-body and galaxy extension (seams built now, behaviour deferred)
+f64 is the precision of one body's frame, not a global coordinate. A galaxy needs integer cells above `PlanetFixed` (f64 spacing is about 1 m at 1 ly); the planet scheme itself does not change.
+- `PlanetInertial` is the body's placement in a parent frame: a `Placement` of i64 cell plus offset, with a rotation driven by an injected clock (CON-04). Until a parent exists it is the identity.
+- Every body has a `BodyId` (0 for the single-planet case). `BodyId` is part of the frame types, tile addressing and cache keys (see ADRs 0003 and 0006), so adding bodies later invalidates nothing.
+- Body parameters (radius, rotation, axial tilt, gravity, seed) are inputs to the WorldDefinition and never constants in `core`, `generators` or shaders. A body's seed derives from a world seed and its `BodyId`.
+- Rendering one body from far away (impostors, atmosphere, sub-pixel LOD) is a rendering feature outside this ADR. Depth precision is handled in ADR 0002.
 
 ## Consequences
 - `core` offers typed positions per frame (`PlanetFixed`, `TileLocal`, `CameraRelative`) so frames cannot be mixed by accident.
