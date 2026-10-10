@@ -1,7 +1,7 @@
 # M2 Planet LOD skeleton: report (2026-10-10) and go/no-go gate
 
 ## Summary
-Seven changes are archived: `m2-node-selection`, `m2-terrain-render`, `m2-async-streaming`, `m2-camera-graph-instances` (and the M1 follow-up `m1-golden-strictness`). The pipeline now runs end to end: scripted camera (orbit to 1 m) → CDLOD node selection on the cube sphere (balanced, horizon and frustum culled) → TerrainPlan (camera-relative f32, reversed-Z projection, morph intervals) → tile meshes with geomorph targets and skirts → GPU executor with seven debug views, fed by an asynchronous streaming path (thread pool, parent-first, cancellation). Two spikes are closed and ADRs 0013 and 0014 are proposed. CI is green on Windows (WARP) and Linux (lavapipe).
+Four feature changes are archived: `m2-node-selection`, `m2-terrain-render`, `m2-async-streaming`, `m2-camera-graph-instances`, plus `m2-acceptance` (this report); the M1 follow-up `m1-golden-strictness` came just before. The pipeline now runs end to end: scripted camera (orbit to 1 m) → CDLOD node selection on the cube sphere (balanced, horizon and frustum culled) → TerrainPlan (camera-relative f32, reversed-Z projection, morph intervals) → tile meshes with geomorph targets and skirts → GPU executor with seven debug views, fed by an asynchronous streaming path (thread pool, parent-first, cancellation). Two spikes are closed and ADRs 0013 and 0014 are proposed. CI is green on Windows (WARP) and Linux (lavapipe).
 
 ## Criteria (report §15, M2)
 | Criterion | Result | Evidence |
@@ -14,11 +14,11 @@ Seven changes are archived: `m2-node-selection`, `m2-terrain-render`, `m2-async-
 | Go/no-go gate | **owner decision** | see below |
 
 ## Measurements for the gate
-- Node counts (one draw per node): 5 at orbit; with the small test parameters (cells 16, 96 px) 772 at the 1 m view (1,069 without frustum culling); with production-like parameters (`earth_1080p`: cells 32, 1080 px, tau 6) 3,003 at the 1 m view (4,243 without frustum culling). Frustum culling cuts counts 3x in aerial views but only 1.4x to 1.9x near the ground.
+- Node counts (one draw per node): 14 at orbit with the small test parameters (51 with production-like ones); with the small test parameters (cells 16, 96 px) 772 at the 1 m view (1,069 without frustum culling); with production-like parameters (`earth_1080p`: cells 32, 1080 px, tau 6) 3,003 at the 1 m view (4,243 without frustum culling). Frustum culling cuts counts 3x in aerial views but only 1.4x to 1.9x near the ground.
 - Tangent warp (ADR 0003): tile-area ratio largest/smallest is 1.20 at level 2, 1.35 at level 4 and 1.40 at level 6, converging to the published 1.41. That is a 40 % spread of tile size across a face, which the LOD distances absorb; an equal-area warp would remove it but nothing found so far needs that.
-- Streaming dive (test): 1,873 dispatches for 750 frames, 7 cancellations, queue peak 478, no frame without something to draw.
+- Streaming dive (test, 450 frames, 10 jobs per frame): 1,871 dispatches, 4 cancellations, queue peak 371, a coarser ancestor used in 221 of 450 frames (in at least one frame every node), and no frame without something to draw. Counts above were measured at a 4:3 aspect.
 - wgpu 30 advertises indirect-first-instance, multi-draw-indirect-count, binding arrays, immediates and timestamp queries on WARP and the RTX 3080 Ti (SPIKE-01).
-- Test suite: 142 tests in tiers A and B, 20 in tier C; `test fast` about 6 s warm.
+- Test suite: 143 tests in tiers A and B, 16 in tier C; `test fast` about 6 s warm.
 
 ## What was found on the way (see docs/learnings.md)
 - A hole test alone passed while every GPU vertex was misaligned; geometry oracles now accompany coverage metrics.
@@ -37,7 +37,7 @@ Seven changes are archived: `m2-node-selection`, `m2-terrain-render`, `m2-async-
 The foundation (precision, depth, selection, streaming, determinism, test architecture) holds, and CI exercises it on two operating systems. Before M3 starts:
 1. Run `cargo xtask test gpu --real` and `cargo xtask perf --machine-ready` on Rasierklinge and read the node count against the 8 ms budget; if it misses, reduce draw count first (larger cells, merged draws) before anything else.
 2. Bless the terrain goldens (or choose better views) and the Linux goldens.
-3. Accept or amend ADRs 0003 (tangent warp stays; measured area ratio 1.41), 0013 and 0014.
+3. Accept or amend ADRs 0003 (tangent warp stays; measured area ratio 1.41; the equal-area variants promised for this gate were NOT evaluated and that evaluation is deferred unless you ask for it), 0013 and 0014.
 4. Decide whether to keep wgpu (this report finds no blocker; the HAL seam from ADR 0004 is still not introduced).
 
 Stop here: M3 (field pipeline and cache) is not started until the owner decides.

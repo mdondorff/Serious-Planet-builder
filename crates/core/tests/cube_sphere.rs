@@ -208,7 +208,7 @@ fn triangle_area(a: Vec3, b: Vec3, c: Vec3) -> f64 {
     2.0 * libm::atan2(a.dot(b.cross(c)).abs(), 1.0 + a.dot(b) + b.dot(c) + c.dot(a))
 }
 
-// spec: COORD-005
+// spec: CON-15
 #[test]
 fn tangent_warp_tile_areas_stay_within_the_published_distortion() {
     // Measured for ADR 0003 and the M2 gate: the ratio between the largest and smallest tile of one level.
