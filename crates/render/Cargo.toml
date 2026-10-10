@@ -15,5 +15,6 @@ png.workspace = true
 planet-generators.workspace = true
 
 [dev-dependencies]
+planet-generators = { workspace = true, features = ["stress"] }
 planet-testkit.workspace = true
 libm.workspace = true

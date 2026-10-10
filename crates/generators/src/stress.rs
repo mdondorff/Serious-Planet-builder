@@ -1,8 +1,9 @@
-//! Test-only stress terrain (M2 gate, TEST-015): a steep ridged field with about 8 km of relief and fine-scale slopes,
-//! used to check that cracks, morphing, borders and jitter hold on terrain the smooth reference generator never
-//! produces. Never used by production paths; its mesh keys are salted so they cannot alias reference meshes.
+//! Test-only stress terrain (M2 gate, TEST-015), compiled only with the `stress` feature (dev-dependencies): a steep
+//! ridged field (`|h| <= 8 km`, about -5.5 to +6 km in practice, 20 m slopes up to about 72 degrees) used to check that
+//! cracks, morphing, borders and jitter hold on terrain the smooth reference generator never produces. Its own
+//! implementation id and version enter its height and mesh keys, so its artefacts never alias reference ones.
 
-use crate::height::{value_noise, HeightField};
+use crate::height::{layer_noise, HeightField};
 use planet_core::Vec3;
 
 /// Peak `|height|` of [`Steep`] in metres.
@@ -11,20 +12,23 @@ const OCTAVES: u32 = 16;
 const BASE_FREQUENCY: f64 = 8.0;
 /// Octave gain above 0.5: the amplitude falls slower than the wavelength, so fine octaves dominate the slope.
 const GAIN: f64 = 0.7;
-/// Domain tag so the stress lattice never correlates with the reference lattice for the same seed.
-const STEEP_TAG: u64 = 0x5354_4545_5021;
+/// Lattice layer of the stress field: its lattice values never coincide with the reference height layer's.
+const LAYER_STEEP: u64 = 0x5354_4545_5021;
+/// Bump whenever [`Steep`]'s output changes (ADR 0006); part of its height and mesh keys.
+pub const STEEP_VERSION: u32 = 1;
+/// Names the stress field in keys.
+pub const STEEP_IMPLEMENTATION_ID: &str = "test-steep-ridged-v1";
 
 /// Ridged multifractal: `2·(1-|n|)² - 1` per octave, 16 octaves from 8 to 262,144 cycles per radian
-/// (finest wavelength about 150 m on an Earth-sized sphere).
+/// (finest lattice cell about 24 m on an Earth-sized sphere).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Steep(pub u64);
 
 impl HeightField for Steep {
     fn height(&self, dir: Vec3) -> f64 {
-        let seed = self.0 ^ STEEP_TAG;
         let (mut sum, mut amp, mut norm, mut freq) = (0.0, 1.0, 0.0, BASE_FREQUENCY);
         for octave in 0..OCTAVES {
-            let r = 1.0 - value_noise(seed, octave, dir * freq).abs();
+            let r = 1.0 - layer_noise(self.0, LAYER_STEEP, octave, dir * freq).abs();
             sum += amp * (2.0 * r * r - 1.0);
             norm += amp;
             amp *= GAIN;
@@ -35,8 +39,11 @@ impl HeightField for Steep {
     fn seed(&self) -> u64 {
         self.0
     }
-    fn key_salt(&self) -> Option<u64> {
-        Some(STEEP_TAG)
+    fn implementation_id(&self) -> &'static str {
+        STEEP_IMPLEMENTATION_ID
+    }
+    fn version(&self) -> u32 {
+        STEEP_VERSION
     }
     fn max_abs_height_m(&self) -> f64 {
         STEEP_AMPLITUDE_M
