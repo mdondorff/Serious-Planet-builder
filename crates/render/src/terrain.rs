@@ -52,12 +52,19 @@ fn line(x: f32, w: f32) -> f32 {
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let mode = g.mode.x;
     // Derivatives are taken before any branch (uniform control flow).
-    // Contours every 10 m, coarsened by decades where they would be closer than ~6 px, so they never turn to moire.
+    // Contours every 10 m, 100 m, 1 km and 10 km. Each decade fades out continuously once its lines would be closer
+    // than ~6 px, over a window of 2.5 octaves of spacing (no discrete switch, and a slope change of tens of percent between triangles moves a fade only a little).
     let h10 = in.height / 10.0;
-    let decade = pow(10.0, max(ceil(log2(6.0 * fwidth(h10)) / 3.3219281), 0.0));
-    let contour_h = h10 / decade;
+    let w10 = fwidth(h10);
+    var contour = 0.0;
+    var scale = 1.0;
+    for (var d = 0; d < 4; d = d + 1) {
+        let w = w10 / scale;
+        let fade = clamp((log2(1.0 / max(w, 1e-6)) - 2.5) / 2.5, 0.0, 1.0);
+        contour = max(contour, line(h10 / scale, w) * fade);
+        scale = scale * 10.0;
+    }
     let band_z = log2(max(in.pos.z, 1e-30));
-    let w_h = fwidth(h10) / decade;
     let w_z = fwidth(band_z);
     if (mode <= 2u) {
         return vec4<f32>(node.color.rgb, 1.0);
@@ -69,7 +76,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     if (mode == 4u) {
         let t = clamp((in.height - g.range.x) / (g.range.y - g.range.x), 0.0, 1.0);
         let v = floor(t * 255.0 + 0.5) / 255.0;
-        let k = 1.0 - 0.8 * line(contour_h, w_h);
+        let k = 1.0 - 0.8 * contour;
         return vec4<f32>(v * k, v * k, v * k, 1.0);
     }
     if (mode == 5u) {
