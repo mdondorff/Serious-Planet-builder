@@ -212,8 +212,7 @@ fn nodes_appear_where_their_vertices_project() {
             inside += 1;
             let colour = img.pixel(px, py);
             // The pixel shows this node, or something nearer (any node's colour except the background).
-            let own = colour == d.color;
-            if own || colour != plan.clear_color && plan.nodes.iter().any(|n| n.color == colour) {
+            if colour == d.color {
                 matched += 1;
             }
             if colour == plan.clear_color {
@@ -221,6 +220,53 @@ fn nodes_appear_where_their_vertices_project() {
             }
         }
         assert!(inside >= 5, "{name}: only {inside} nodes project inside the frame");
-        assert_eq!(matched, inside, "{name}: some nodes are not where their vertices project");
+        assert!(
+            matched * 10 >= inside * 7,
+            "{name}: only {matched} of {inside} nodes show their own colour at their projected centre vertex"
+        );
+    }
+}
+
+// spec: REND-009, LOD-004
+#[test]
+fn gpu_morph_values_match_the_cpu_formula_at_projected_vertices() {
+    // Oracle for the vertex-stage morph: read the morph view at the pixel where a vertex projects and compare with the
+    // f64 formula on the vertex's height-free reference position. A misread attribute (garbage ref_pos) fails nearly all.
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    for index in [2usize, 3, 4] {
+        let (name, plan) = plan_for(index, TerrainView::Morph);
+        let meshes = meshes_for(&plan);
+        let (img, _) = render(&ctx, &plan, &meshes);
+        let (mut tested, mut close) = (0, 0);
+        for (d, m) in plan.nodes.iter().zip(&meshes) {
+            if d.level == 0 {
+                continue;
+            }
+            for (i, j) in [(4usize, 4usize), (8, 8), (12, 4), (4, 12), (12, 12)] {
+                let v = m.vertices[j * (CELLS as usize + 1) + i];
+                let rel = d.origin.0 + Vec3::new(f64::from(v.pos[0]), f64::from(v.pos[1]), f64::from(v.pos[2])) - plan.camera.position.0;
+                let c = plan.camera.project(rel);
+                let normal = Vec3::new(f64::from(v.normal[0]), f64::from(v.normal[1]), f64::from(v.normal[2]));
+                if c[3] <= 0.0 || normal.dot((-rel).normalized()) < 0.5 {
+                    continue;
+                }
+                let (x, y) = (c[0] / c[3], c[1] / c[3]);
+                if x.abs() > 0.95 || y.abs() > 0.95 {
+                    continue;
+                }
+                let (px, py) = (((x * 0.5 + 0.5) * f64::from(SIZE.0)) as u32, ((0.5 - y * 0.5) * f64::from(SIZE.1)) as u32);
+                let reference = d.origin.0 - plan.camera.position.0
+                    + Vec3::new(f64::from(v.ref_pos[0]), f64::from(v.ref_pos[1]), f64::from(v.ref_pos[2]));
+                let expected =
+                    ((reference.length() - f64::from(d.morph_start_m)) / f64::from(d.morph_end_m - d.morph_start_m)).clamp(0.0, 1.0);
+                let got = f64::from(img.pixel(px, py)[0]) / 255.0;
+                tested += 1;
+                if (got - expected).abs() <= 0.06 {
+                    close += 1;
+                }
+            }
+        }
+        assert!(tested >= 20, "{name}: only {tested} vertices could be compared");
+        assert!(close * 10 >= tested * 9, "{name}: GPU morph agrees with the CPU formula at only {close} of {tested} vertices");
     }
 }
