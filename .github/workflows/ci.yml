@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: never
+  # A missing golden fails CI once the owner has blessed the first goldens (see docs/status.md).
+  PLANET_GOLDEN_STRICT: "0"
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows (WARP)
+            os: windows-latest
+          - name: linux (lavapipe)
+            os: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-deny
+      - name: Software Vulkan (lavapipe)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers libvulkan1 vulkan-tools
+          vulkaninfo --summary
+      - name: check (fmt, clippy, layering)
+        run: cargo xtask check
+      - name: spec-lint
+        run: cargo xtask spec-lint
+      - name: licences (CON-27)
+        run: cargo deny check licenses bans sources
+      - name: test (tiers A+B)
+        run: cargo xtask test
+      - name: test gpu (tier C, software adapter)
+        run: cargo xtask test gpu
+      - name: run modes start (CON-01)
+        run: |
+          cargo run -q -p planet -- editor --smoke
+          cargo run -q -p planet -- generate --smoke
+          cargo run -q -p planet -- test-render --smoke
+      - name: review images
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-${{ runner.os }}
+          path: target/review/
+          if-no-files-found: ignore

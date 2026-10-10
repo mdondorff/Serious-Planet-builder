@@ -1,0 +1,62 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/world-def",
+    "crates/generators",
+    "crates/cache",
+    "crates/streaming",
+    "crates/frame",
+    "crates/render",
+    "crates/editor",
+    "crates/app",
+    "crates/testkit",
+    "crates/perf",
+    "xtask",
+]
+default-members = [
+    "crates/core",
+    "crates/world-def",
+    "crates/generators",
+    "crates/cache",
+    "crates/streaming",
+    "crates/frame",
+    "crates/render",
+    "crates/editor",
+    "crates/app",
+    "crates/testkit",
+    "crates/perf",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+libm = "=0.2.16"
+wgpu = { version = "=30.0.1", default-features = false, features = ["wgsl", "dx12", "vulkan"] }
+pollster = "1.0.1"
+png = "0.18.1"
+
+planet-core = { path = "crates/core" }
+planet-world-def = { path = "crates/world-def" }
+planet-generators = { path = "crates/generators" }
+planet-cache = { path = "crates/cache" }
+planet-streaming = { path = "crates/streaming" }
+planet-frame = { path = "crates/frame" }
+planet-render = { path = "crates/render" }
+planet-editor = { path = "crates/editor" }
+planet-testkit = { path = "crates/testkit" }
+planet-perf = { path = "crates/perf" }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# Math and noise stay fast in the dev profile (report §16 build-speed measures).
+[profile.dev.package.planet-core]
+opt-level = 3

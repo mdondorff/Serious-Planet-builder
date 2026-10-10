@@ -1,0 +1,11 @@
+[package]
+name = "planet-cache"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+planet-core.workspace = true
+planet-world-def.workspace = true
+planet-generators.workspace = true
