@@ -22,5 +22,5 @@ fn hello_triangle_renders_headless() {
     let expected = (SIZE * SIZE) as f64 * 0.28125;
     assert!((fill as f64 - expected).abs() < expected * 0.01, "filled area {fill} px, expected about {expected}");
 
-    assert_golden(&ctx.adapter_key(), "hello_triangle", &img, Tolerance::Exact);
+    assert_golden(&ctx.adapter_key(), &ctx.driver_string(), "hello_triangle", &img, Tolerance::Exact);
 }

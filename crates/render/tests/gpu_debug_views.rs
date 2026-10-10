@@ -52,7 +52,13 @@ fn debug_views_have_no_holes_are_deterministic_and_match_goldens() {
             let greys: std::collections::BTreeSet<u8> = img.pixels().map(|p| p[0]).collect();
             assert!(greys.len() > 15, "height view should show relief, got {} grey levels", greys.len());
         }
-        assert_golden(&planet_render_key(&ctx), &format!("debug_view_{}", view.name().replace('-', "_")), &img, Tolerance::Exact);
+        assert_golden(
+            &planet_render_key(&ctx),
+            &ctx.driver_string(),
+            &format!("debug_view_{}", view.name().replace('-', "_")),
+            &img,
+            Tolerance::Exact,
+        );
     }
 }
 

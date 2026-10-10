@@ -10,6 +10,9 @@ env:
   CARGO_TERM_COLOR: never
   # A missing golden fails CI once the owner has blessed the first goldens (see docs/status.md).
   PLANET_GOLDEN_STRICT: "0"
+  # An adapter that runs in CI must have a golden directory: a key or driver-family change then fails loudly instead
+  # of turning every golden into a silent PENDING (ADR 0009).
+  PLANET_REQUIRE_ADAPTER_GOLDENS: "1"
 
 jobs:
   test:
@@ -22,7 +25,7 @@ jobs:
           - name: windows (WARP)
             os: windows-latest
           - name: linux (lavapipe)
-            os: ubuntu-latest
+            os: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -38,6 +41,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mesa-vulkan-drivers libvulkan1 vulkan-tools
           vulkaninfo --summary
+          apt-cache policy mesa-vulkan-drivers | head -4
       - name: determinism manifest (GEN-003)
         run: cargo run -q -p planet -- generate --manifest target/det/manifest-${{ runner.os }}.txt
       - name: upload determinism manifest
@@ -75,7 +79,7 @@ jobs:
     needs: test
     # Runs even when a later step of either OS leg failed: the manifests are uploaded before the tests.
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
