@@ -8,6 +8,7 @@ use planet_generators::{generate_tile, TileData, GENERATOR_VERSION, IMPLEMENTATI
 use planet_render::{execute, AdapterPolicy, ExecStats, GpuContext, RgbaFrame, TileResource};
 use std::io::Write;
 use std::path::Path;
+use std::time::Instant;
 
 const FRAME_SIZE: (u32, u32) = (256, 128);
 const RADIUS_M: f64 = 6_371_000.0;
@@ -195,9 +196,15 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
     let plan =
         plan_terrain(&TerrainRequest { camera, size: TERRAIN_SIZE, view, lod, face_mapping: TangentWarp.id().to_string(), seed: o.seed })
             .map_err(|e| e.to_string())?;
-    let meshes: Vec<planet_generators::mesh::TileMesh> =
-        plan.nodes.iter().map(|n| planet_generators::mesh::tile_mesh(o.seed, &TangentWarp, n.tile, TERRAIN_CELLS, RADIUS_M)).collect();
-    let refs: Vec<&planet_generators::mesh::TileMesh> = meshes.iter().collect();
+    let meshes: Vec<std::sync::Arc<planet_generators::mesh::TileMesh>> = if o.stream {
+        streamed_meshes(o, &plan)?
+    } else {
+        plan.nodes
+            .iter()
+            .map(|n| std::sync::Arc::new(planet_generators::mesh::tile_mesh(o.seed, &TangentWarp, n.tile, TERRAIN_CELLS, RADIUS_M)))
+            .collect()
+    };
+    let refs: Vec<&planet_generators::mesh::TileMesh> = meshes.iter().map(|m| m.as_ref()).collect();
     let (frame, stats) = planet_render::execute_terrain(ctx, &plan, &refs).map_err(|e| e.to_string())?;
     writeln!(out, "terrain {name} ({}): {}; {} draw calls, {} triangles", view.name(), plan.summary(), stats.draw_calls, stats.triangles)
         .map_err(err)?;
@@ -205,4 +212,40 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
         write_frame(&frame, path, out)?;
     }
     Ok(())
+}
+
+struct MeshSource {
+    seed: u64,
+}
+
+impl planet_streaming::TileSource<planet_generators::mesh::TileMesh> for MeshSource {
+    fn load(&self, tile: TileId) -> Result<planet_generators::mesh::TileMesh, String> {
+        Ok(planet_generators::mesh::tile_mesh(self.seed, &TangentWarp, tile, TERRAIN_CELLS, RADIUS_M))
+    }
+}
+
+/// Generate the plan's tile meshes through the asynchronous streaming path (thread pool, parent-first requests) and
+/// wait, frame by frame, until every wanted tile is resident. The result equals the synchronous path.
+fn streamed_meshes(
+    o: &Options,
+    plan: &planet_frame::TerrainPlan,
+) -> Result<Vec<std::sync::Arc<planet_generators::mesh::TileMesh>>, String> {
+    use planet_streaming::{StreamConfig, Streamer, SystemClock, ThreadPool};
+    let pool = std::sync::Arc::new(ThreadPool::new(4));
+    let config = StreamConfig { max_in_flight: 8, capacity: plan.nodes.len() * 2 + 64, retry_after_ms: 1000, record_dispatches: false };
+    let mut streamer =
+        Streamer::new(std::sync::Arc::new(MeshSource { seed: o.seed }), pool, std::sync::Arc::new(SystemClock::new()), config);
+    streamer.load_roots_blocking()?;
+    let wanted: Vec<(TileId, f64)> = plan.nodes.iter().enumerate().map(|(i, n)| (n.tile, i as f64)).collect();
+    let started = Instant::now();
+    loop {
+        let resolved = streamer.begin_frame(&wanted);
+        if resolved.iter().all(|r| r.exact()) {
+            return Ok(wanted.iter().map(|(t, _)| streamer.get(*t).expect("resident")).collect());
+        }
+        if started.elapsed().as_secs() > 120 {
+            return Err(format!("streaming did not finish within 120 s ({:?})", streamer.stats()));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
 }

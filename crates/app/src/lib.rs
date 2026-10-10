@@ -17,6 +17,7 @@ modes:
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
+    --stream                 generate terrain tiles asynchronously through the streaming path (same image as the default)
     --view face|tile-id|level|morph|height|normals|depth   debug view (tiles scene: face, tile-id, height)
     --tile FACE,LEVEL,X,Y    tile to draw (repeatable; default: a tile and its east neighbour)
     --seed N --res N         generator seed and tile resolution (cells, power of two)
@@ -53,6 +54,7 @@ pub struct Options {
     pub face_net: Option<PathBuf>,
     pub offscreen: bool,
     pub script: String,
+    pub stream: bool,
 }
 
 pub fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -80,12 +82,14 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         face_net: None,
         offscreen: false,
         script: "3".into(),
+        stream: false,
     };
     while let Some(a) = it.next() {
         match a.as_str() {
             "--smoke" => o.smoke = true,
             "--perf" => o.perf = true,
             "--offscreen" => o.offscreen = true,
+            "--stream" => o.stream = true,
             "--script" => o.script = it.next().ok_or("--script needs an index or name")?.clone(),
             "--view" => o.view = it.next().ok_or("--view needs a value")?.clone(),
             "--tile" => o.tiles.push(it.next().ok_or("--tile needs FACE,LEVEL,X,Y")?.clone()),
