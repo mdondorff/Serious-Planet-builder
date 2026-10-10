@@ -8,7 +8,7 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
   - *M2 agent:* ADR 0009 follow-up 6 (counts from the plan) is in progress (`change/m2-plan-counts`); M2 gate follow-up 3 (CPU plan time 17.1 ms at ground-1m) is not started.
   - *Owner review pending:* TEST-014, the real-GPU flight `target/review/flight-nvidia/` and the steep views `target/review/steep/<adapter>/` (both in the smb-adr-review worktree).
   - *Recommendation:* **Go with changes** once follow-up 6 lands and the owner accepts that LOD-008 (height-aware selection) is the **first M3 change** before any realistic terrain, together with the plan-time fix. M3's field pipeline does not depend on LOD-008, but every M3 visual check at low altitude does. Record the go here and then start `m3-agent` with "Queued for M3" below.
-- **Accept or change the proposed ADRs** 0009, 0013 and 0014 (ADRs 0001-0008, 0010-0012 and 0015 accepted 2026-10-10; 0009 is accepted once its queued follow-ups land without surprises). Work proceeds on their leanings.
+- **Accept or change the proposed ADRs** 0013 and 0014 (ADRs 0001-0012 and 0015 accepted; 0009 on 2026-10-11 after its six follow-ups landed). Work proceeds on their leanings.
 - Tool note: `gh` is installed at `C:\Program Files\GitHub CLI\gh.exe` but is not on the Git Bash PATH.
 
 ## Queued for agents
