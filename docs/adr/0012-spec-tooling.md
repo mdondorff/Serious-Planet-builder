@@ -1,5 +1,5 @@
 # 0012 Spec tooling
-Status: proposed
+Status: accepted
 Date: 2026-10-10
 Source: background report §12 (Spec tooling), starter doc §4; constitution CON-16, CON-23, CON-24
 

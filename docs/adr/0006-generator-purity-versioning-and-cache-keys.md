@@ -1,5 +1,5 @@
 # 0006 Generator purity, versioning and cache keys
-Status: proposed
+Status: accepted
 Date: 2026-10-10
 Source: background report §4 (Cache tiers), §5, §11, §17 items 6 and 9; constitution CON-05..08
 

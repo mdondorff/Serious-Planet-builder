@@ -1,5 +1,5 @@
 # 0011 Reference surface
-Status: proposed
+Status: accepted
 Date: 2026-10-10
 Source: background report §17 item 8; constitution CON-15
 
