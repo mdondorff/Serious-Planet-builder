@@ -214,7 +214,7 @@ pub fn perf(root: &Path, args: &[String]) -> Res {
     run(
         root,
         "cargo",
-        &["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--adapter", "hardware", "--machine-ready"],
+        &["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", "terrain", "--adapter", "hardware", "--machine-ready"],
         &[],
     )
 }

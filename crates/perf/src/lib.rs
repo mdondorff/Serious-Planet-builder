@@ -147,11 +147,20 @@ pub struct Protocol {
     /// Residency VRAM caps (GB) measured in turn: mid-range tier and high tier.
     pub vram_caps_gb: Vec<u32>,
     pub internal_resolution: (u32, u32),
+    /// A smoke run: never valid for budgets.
+    pub smoke: bool,
 }
 
 impl Default for Protocol {
     fn default() -> Self {
-        Self { warmup_frames: 120, measured_frames: 600, runs: 5, vram_caps_gb: vec![8, 14], internal_resolution: (2560, 1440) }
+        Self {
+            warmup_frames: 120,
+            measured_frames: 600,
+            runs: 5,
+            vram_caps_gb: vec![8, 14],
+            internal_resolution: (2560, 1440),
+            smoke: false,
+        }
     }
 }
 
@@ -162,6 +171,10 @@ pub struct RunReport {
     pub stats: Stats,
     pub clocks_before: Option<ClockSample>,
     pub clocks_after: Option<ClockSample>,
+    /// Further named frame-time series of the run (milliseconds), for example `gpu_ms`, `cpu_ms`, `plan_ms`.
+    pub metrics: Vec<(String, Stats)>,
+    /// Deterministic counts of the run (draw calls, triangles, nodes, vertex bytes), CON-20.
+    pub counts: Vec<(String, u64)>,
 }
 
 fn json_str(s: &str) -> String {
@@ -211,8 +224,14 @@ pub fn is_performance_scheme(scheme: &str) -> bool {
 
 /// Reasons a session cannot be used for time budgets (CON-21): not a performance power scheme, or the GPU was idle
 /// (low performance state) when a run started, so the workload did not raise the clocks.
-pub fn session_warnings(power_scheme: Option<&str>, runs: &[RunReport]) -> Vec<String> {
+pub fn session_warnings(adapter: &AdapterFacts, power_scheme: Option<&str>, runs: &[RunReport], smoke: bool) -> Vec<String> {
     let mut w = Vec::new();
+    if smoke {
+        w.push("this was a smoke run (reduced frame size and counts): it exercises the code path and is never a measurement".to_string());
+    }
+    if let Err(r) = check_reference_adapter(adapter) {
+        w.push(format!("not the reference adapter: {r}"));
+    }
     match power_scheme {
         Some(s) if is_performance_scheme(s) => {}
         Some(s) => {
@@ -240,12 +259,12 @@ pub fn report_json(
     protocol: &Protocol,
     runs: &[RunReport],
 ) -> String {
-    let warnings = session_warnings(power_scheme, runs);
+    let warnings = session_warnings(adapter, power_scheme, runs, protocol.smoke);
     let run_json: Vec<String> = runs
         .iter()
         .map(|r| {
             format!(
-                "{{\"path\":{},\"vram_cap_gb\":{},\"samples\":{},\"median_ms\":{},\"p99_ms\":{},\"min_ms\":{},\"max_ms\":{},\"mean_ms\":{},\"clocks_before\":{},\"clocks_after\":{}}}",
+                "{{\"path\":{},\"vram_cap_gb\":{},\"samples\":{},\"median_ms\":{},\"p99_ms\":{},\"min_ms\":{},\"max_ms\":{},\"mean_ms\":{},\"clocks_before\":{},\"clocks_after\":{},\"metrics\":{{{}}},\"counts\":{{{}}}}}",
                 json_str(&r.path_name),
                 r.vram_cap_gb,
                 r.stats.samples,
@@ -255,7 +274,9 @@ pub fn report_json(
                 json_f(r.stats.max),
                 json_f(r.stats.mean),
                 clock_json(&r.clocks_before),
-                clock_json(&r.clocks_after)
+                clock_json(&r.clocks_after),
+                r.metrics.iter().map(|(n, s)| format!("{}:{{\"median\":{},\"p99\":{},\"max\":{},\"mean\":{},\"samples\":{}}}", json_str(n), json_f(s.median), json_f(s.p99), json_f(s.max), json_f(s.mean), s.samples)).collect::<Vec<_>>().join(","),
+                r.counts.iter().map(|(n, v)| format!("{}:{v}", json_str(n))).collect::<Vec<_>>().join(",")
             )
         })
         .collect();
@@ -335,7 +356,15 @@ mod tests {
         let a = gpu("NVIDIA GeForce RTX 3080 Ti Laptop GPU", DeviceKind::Discrete);
         let stats = summarize(&[16.0, 16.5, 17.0], 0).unwrap();
         let clock = parse_nvidia_smi("X, 1, 2, 3, 4, P0, 0x0").unwrap();
-        let run = RunReport { path_name: "orbit".into(), vram_cap_gb: 8, stats, clocks_before: Some(clock), clocks_after: None };
+        let run = RunReport {
+            path_name: "orbit".into(),
+            vram_cap_gb: 8,
+            stats,
+            clocks_before: Some(clock),
+            clocks_after: None,
+            metrics: vec![],
+            counts: vec![],
+        };
         let j = report_json(&a, Some("Power Scheme GUID: x (High performance)"), true, &Protocol::default(), &[run]);
         for needle in [
             "\"owner_confirmed_machine_ready\":true",
@@ -353,6 +382,10 @@ mod tests {
 mod warning_tests {
     use super::*;
 
+    fn rtx() -> AdapterFacts {
+        AdapterFacts { name: "NVIDIA GeForce RTX 3080 Ti Laptop GPU".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete }
+    }
+
     fn run_with(pstate: &str) -> RunReport {
         let c = parse_nvidia_smi(&format!("X, 210, 405, 15, 50, {pstate}, 0x1")).unwrap();
         RunReport {
@@ -361,6 +394,8 @@ mod warning_tests {
             stats: summarize(&[1.0, 2.0], 0).unwrap(),
             clocks_before: Some(c),
             clocks_after: None,
+            metrics: vec![],
+            counts: vec![],
         }
     }
 
@@ -368,7 +403,7 @@ mod warning_tests {
     #[test]
     fn balanced_power_scheme_and_idle_gpu_make_a_session_invalid_for_budgets() {
         let balanced = "GUID des Energieschemas: 381b4222 (Ausbalanciert)";
-        let w = session_warnings(Some(balanced), &[run_with("P8")]);
+        let w = session_warnings(&rtx(), Some(balanced), &[run_with("P8")], false);
         assert_eq!(w.len(), 2, "{w:?}");
         assert!(w[0].contains("Ausbalanciert") && w[1].contains("P8"), "{w:?}");
         let j = report_json(
@@ -385,13 +420,80 @@ mod warning_tests {
     #[test]
     fn performance_schemes_in_two_languages_and_a_busy_gpu_are_valid() {
         for s in ["Power Scheme GUID: x  (High performance)", "GUID des Energieschemas: y  (Höchstleistung)", "Ultimate Performance"] {
-            assert!(session_warnings(Some(s), &[run_with("P0")]).is_empty(), "{s}");
+            assert!(session_warnings(&rtx(), Some(s), &[run_with("P0")], false).is_empty(), "{s}");
         }
-        assert!(session_warnings(None, &[]).iter().any(|w| w.contains("could not be read")));
+        assert!(session_warnings(&rtx(), None, &[], false).iter().any(|w| w.contains("could not be read")));
         let a = AdapterFacts { name: "RTX 3080 Ti".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete };
         let j = report_json(&a, Some("High performance"), true, &Protocol::default(), &[run_with("P0")]);
         assert!(j.contains("\"valid_for_budgets\":true"), "{j}");
         let j = report_json(&a, Some("High performance"), false, &Protocol::default(), &[run_with("P0")]);
         assert!(j.contains("\"valid_for_budgets\":false"), "without the owner's confirmation nothing is valid for budgets");
+    }
+}
+
+#[cfg(test)]
+mod metric_tests {
+    use super::*;
+
+    // spec: TEST-006
+    #[test]
+    fn named_metrics_and_counts_are_logged() {
+        let a = AdapterFacts { name: "RTX 3080 Ti".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete };
+        let run = RunReport {
+            path_name: "terrain/ground-1m".into(),
+            vram_cap_gb: 8,
+            stats: summarize(&[5.0, 6.0, 7.0], 0).unwrap(),
+            clocks_before: None,
+            clocks_after: None,
+            metrics: vec![("gpu_ms".into(), summarize(&[3.0, 4.0, 5.0], 0).unwrap())],
+            counts: vec![("draw_calls".into(), 772), ("triangles".into(), 790_528)],
+        };
+        let j = report_json(&a, Some("High performance"), true, &Protocol::default(), &[run]);
+        for needle in ["\"metrics\":{\"gpu_ms\":{\"median\":4", "\"counts\":{\"draw_calls\":772,\"triangles\":790528}"] {
+            assert!(j.contains(needle), "missing {needle} in {j}");
+        }
+    }
+}
+
+/// Terrain budget of milestone M2 (report §15) and the frame-time gate (CON-21).
+pub const TERRAIN_GPU_BUDGET_MS: f64 = 8.0;
+pub const FRAME_P99_BUDGET_MS: f64 = 20.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BudgetVerdict {
+    /// `None` when the device has no GPU timestamps.
+    pub gpu_ok: Option<bool>,
+    pub frame_ok: bool,
+}
+
+/// Median GPU time must be at most 8 ms and p99 frame time at most 20 ms (both inclusive).
+pub fn budget_verdict(gpu_median_ms: Option<f64>, frame_p99_ms: f64) -> BudgetVerdict {
+    BudgetVerdict { gpu_ok: gpu_median_ms.map(|g| g <= TERRAIN_GPU_BUDGET_MS), frame_ok: frame_p99_ms <= FRAME_P99_BUDGET_MS }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    // spec: TEST-012
+    #[test]
+    fn budgets_are_inclusive_and_missing_timestamps_are_not_a_pass() {
+        assert_eq!(budget_verdict(Some(8.0), 20.0), BudgetVerdict { gpu_ok: Some(true), frame_ok: true });
+        assert_eq!(budget_verdict(Some(8.0001), 20.0).gpu_ok, Some(false));
+        assert!(!budget_verdict(Some(1.0), 20.0001).frame_ok);
+        assert_eq!(budget_verdict(None, 5.0).gpu_ok, None, "no timestamps: no GPU verdict");
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn smoke_and_software_adapters_are_never_valid_for_budgets() {
+        let soft = AdapterFacts { name: "Microsoft Basic Render Driver".into(), backend: "Dx12".into(), kind: DeviceKind::Cpu };
+        let w = session_warnings(&soft, Some("High performance"), &[], true);
+        assert!(w.iter().any(|m| m.contains("smoke run")) && w.iter().any(|m| m.contains("not the reference adapter")), "{w:?}");
+        let proto = Protocol { smoke: true, ..Protocol::default() };
+        let rtx =
+            AdapterFacts { name: "NVIDIA GeForce RTX 3080 Ti Laptop GPU".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete };
+        let j = report_json(&rtx, Some("High performance"), true, &proto, &[]);
+        assert!(j.contains("\"valid_for_budgets\":false") && j.contains("smoke run"), "{j}");
     }
 }
