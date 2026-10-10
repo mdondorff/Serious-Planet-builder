@@ -1,5 +1,5 @@
 # 0010 Cross-platform numeric determinism
-Status: proposed
+Status: accepted
 Date: 2026-10-10
 Source: background report §3 (Determinism policy), §17 item 5; constitution CON-14
 
