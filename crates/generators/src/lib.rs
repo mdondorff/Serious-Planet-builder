@@ -6,6 +6,7 @@
 
 pub mod dump;
 pub mod height;
+pub mod manifest;
 pub mod mesh;
 
 pub use height::{cache_key, generate_region, generate_tile, TileData, GENERATOR_VERSION, IMPLEMENTATION_ID};
