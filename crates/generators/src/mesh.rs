@@ -49,20 +49,24 @@ pub const SKIRT_FRACTION: f64 = 0.08;
 pub fn tile_mesh(seed: u64, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> TileMesh {
     assert!(cells >= 2 && cells.is_power_of_two(), "cells must be a power of two >= 2");
     let n = i64::from(cells);
-    let width = (cells + 3) as usize;
-    // World position of lattice point (i, j), -1 <= i, j <= cells + 1.
+    let width = (cells + 1) as usize;
+    // World position and height of lattice point (i, j), 0 <= i, j <= cells.
     let mut world = vec![Vec3::ZERO; width * width];
     let mut heights = vec![0.0f64; width * width];
-    for j in -1..=n + 1 {
-        for i in -1..=n + 1 {
-            let dir = id.sample_direction_ext(map, cells, i, j);
+    let mut dirs = vec![Vec3::ZERO; width * width];
+    for j in 0..=n {
+        for i in 0..=n {
+            let dir = id.sample_direction(map, cells, i as u32, j as u32);
             let h = height_at(seed, dir);
-            let idx = ((j + 1) as usize) * width + (i + 1) as usize;
+            let idx = j as usize * width + i as usize;
             world[idx] = dir * (radius_m + h);
             heights[idx] = h;
+            dirs[idx] = dir;
         }
     }
-    let at = |i: i64, j: i64| world[((j + 1) as usize) * width + (i + 1) as usize];
+    let at = |i: i64, j: i64| world[j as usize * width + i as usize];
+    // Angular step of the normal stencil: one cell of this level (identical for tiles of the same level).
+    let eps = core::f64::consts::FRAC_PI_2 / f64::from(1u32 << id.level()) / f64::from(cells);
     // The origin sits at the tile centre including its terrain height, so tile-local offsets and the camera-relative
     // origin stay small (a few tile sizes), never terrain-height sized.
     let centre_dir = id.center_direction(map);
@@ -75,7 +79,7 @@ pub fn tile_mesh(seed: u64, map: &dyn FaceMapping, id: TileId, cells: u32, radiu
     let mut vertices = Vec::with_capacity(vertex_count(cells));
     for j in 0..=n {
         for i in 0..=n {
-            let normal = (at(i + 1, j) - at(i - 1, j)).cross(at(i, j + 1) - at(i, j - 1)).normalized();
+            let normal = surface_normal(seed, dirs[j as usize * width + i as usize], eps, radius_m);
             // Geomorph target on the parent grid (diagonal (i-1,j-1)-(i+1,j+1) matches the triangulation).
             let coarse = match (i % 2, j % 2) {
                 (0, 0) => at(i, j),
@@ -87,7 +91,7 @@ pub fn tile_mesh(seed: u64, map: &dyn FaceMapping, id: TileId, cells: u32, radiu
                 pos: local(at(i, j)),
                 coarse: local(coarse),
                 normal: [normal.x as f32, normal.y as f32, normal.z as f32],
-                height: heights[((j + 1) as usize) * width + (i + 1) as usize] as f32,
+                height: heights[j as usize * width + i as usize] as f32,
                 ref_pos: local(at(i, j).normalized() * radius_m),
             });
         }
@@ -147,4 +151,26 @@ impl MeshVertex {
         let (p, c, n, r) = (self.pos, self.coarse, self.normal, self.ref_pos);
         [p[0], p[1], p[2], c[0], c[1], c[2], n[0], n[1], n[2], self.height, r[0], r[1], r[2]]
     }
+}
+
+/// Outward surface normal at the unit direction `dir`, from central differences of the height field in a tangent frame
+/// that is a pure function of `dir` (not of any tile's lattice). Border vertices shared by tiles of the same level, also
+/// across cube faces, have bit-identical directions and the same `eps`, so they get bit-identical normals (ADR 0003).
+pub fn surface_normal(seed: u64, dir: Vec3, eps: f64, radius_m: f64) -> Vec3 {
+    // Tangent frame from `dir` alone: the world axis least aligned with it seeds t1; t2 = dir x t1, so t1 x t2 = dir.
+    let (ax, ay, az) = (dir.x.abs(), dir.y.abs(), dir.z.abs());
+    let axis = if ax <= ay && ax <= az {
+        Vec3::new(1.0, 0.0, 0.0)
+    } else if ay <= az {
+        Vec3::new(0.0, 1.0, 0.0)
+    } else {
+        Vec3::new(0.0, 0.0, 1.0)
+    };
+    let t1 = (axis - dir * axis.dot(dir)).normalized();
+    let t2 = dir.cross(t1);
+    let p = |t: Vec3, sign: f64| {
+        let d = (dir + t * (sign * eps)).normalized();
+        d * (radius_m + height_at(seed, d))
+    };
+    (p(t1, 1.0) - p(t1, -1.0)).cross(p(t2, 1.0) - p(t2, -1.0)).normalized()
 }

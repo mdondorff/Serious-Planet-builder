@@ -96,10 +96,33 @@ fn tile_ids_round_trip_and_reject_invalid_values() {
     assert_eq!(TileId::new(Face(5), 1, 1, 0).unwrap().raw(), (5u64 << 61) | (1 << 56) | 0b10);
 }
 
+/// Independent of `from_direction` and `contains`: face by the largest absolute component, coordinates by the plain
+/// tangent formula, tile membership by the exact dyadic bounds (half-open, closed at the face edge).
+fn holds(t: TileId, dir: Vec3) -> bool {
+    let (ax, ay, az) = (dir.x.abs(), dir.y.abs(), dir.z.abs());
+    let (axis, sign) = if ax >= ay && ax >= az {
+        (0, dir.x)
+    } else if ay >= az {
+        (1, dir.y)
+    } else {
+        (2, dir.z)
+    };
+    let face = 2 * axis + usize::from(sign < 0.0);
+    if t.face().0 as usize != face {
+        return false;
+    }
+    let f = t.face();
+    let w = dir.dot(f.normal());
+    let coord = |axis: Vec3| libm::atan(dir.dot(axis) / w) / core::f64::consts::FRAC_PI_4;
+    let (s, tt) = (coord(f.u_axis()), coord(f.v_axis()));
+    let (s0, s1, t0, t1) = t.bounds();
+    let inside = |c: f64, lo: f64, hi: f64| c >= lo && (c < hi || (hi == 1.0 && c <= 1.0));
+    inside(s, s0, s1) && inside(tt, t0, t1)
+}
+
 // spec: COORD-006
 #[test]
 fn every_direction_belongs_to_exactly_one_tile_per_level() {
-    let map = TangentWarp;
     let mut rng = SplitMix64(3);
     for level in 0..=3u8 {
         let n = 1u32 << level;
@@ -108,8 +131,10 @@ fn every_direction_belongs_to_exactly_one_tile_per_level() {
         assert_eq!(tiles.len(), 6 * (n * n) as usize);
         for _ in 0..2000 {
             let d = random_dir(&mut rng);
-            let holders = tiles.iter().filter(|t| t.contains(&map, d)).count();
-            assert_eq!(holders, 1, "direction {d:?} at level {level}");
+            let holders: Vec<TileId> = tiles.iter().copied().filter(|t| holds(*t, d)).collect();
+            assert_eq!(holders.len(), 1, "direction {d:?} at level {level} is held by {holders:?}");
+            // The library agrees with the independent definition.
+            assert_eq!(TileId::from_direction(&TangentWarp, d, level), holders[0]);
         }
     }
 }
@@ -236,5 +261,89 @@ fn tangent_warp_tile_areas_stay_within_the_published_distortion() {
             ratio > 1.15 && ratio < 1.5,
             "tile area ratio {ratio} at level {level} (published: about 1.41 for the adjusted gnomonic warp)"
         );
+    }
+}
+
+// spec: COORD-007
+#[test]
+fn corner_neighbours_are_three_at_ordinary_corners_and_two_at_the_cube_corners() {
+    let m = TangentWarp;
+    for level in 1..=3u8 {
+        let n = 1u32 << level;
+        let all: Vec<TileId> =
+            Face::ALL.iter().flat_map(|&f| (0..n).flat_map(move |x| (0..n).map(move |y| TileId::new(f, level, x, y).unwrap()))).collect();
+        let mut cube_corner_cases = 0;
+        for &t in &all {
+            for corner in planet_core::Corner::ALL {
+                let c = t.corner_direction(&m, corner);
+                let nb = t.corner_neighbors(&m, corner);
+                // Independent ground truth: every tile of the level with a corner at exactly this direction (bit for bit).
+                let sharing: Vec<TileId> = all
+                    .iter()
+                    .copied()
+                    .filter(|o| *o != t && planet_core::Corner::ALL.iter().any(|k| o.corner_direction(&m, *k) == c))
+                    .collect();
+                let mut expected = sharing.clone();
+                expected.sort();
+                assert_eq!(nb, expected, "{t:?} {corner:?}");
+                let is_cube_corner = (c.x.abs() - c.y.abs()).abs() < 1e-12 && (c.y.abs() - c.z.abs()).abs() < 1e-12;
+                assert_eq!(nb.len(), if is_cube_corner { 2 } else { 3 }, "{t:?} {corner:?} at {c:?}");
+                cube_corner_cases += usize::from(is_cube_corner);
+                // Symmetry: every neighbour lists this tile back at its own matching corner.
+                for o in &nb {
+                    let back =
+                        planet_core::Corner::ALL.iter().any(|k| o.corner_direction(&m, *k) == c && o.corner_neighbors(&m, *k).contains(&t));
+                    assert!(back, "{o:?} does not list {t:?} as a corner neighbour");
+                }
+            }
+        }
+        assert_eq!(cube_corner_cases, 24, "8 cube corners x 3 tiles at level {level}");
+    }
+}
+
+// spec: COORD-007
+#[test]
+fn corner_labels_match_their_face_coordinates() {
+    let m = TangentWarp;
+    for t in [TileId::new(Face(2), 3, 5, 2).unwrap(), TileId::new(Face(5), 1, 0, 1).unwrap()] {
+        let (s0, s1, t0, t1) = t.bounds();
+        let at = |s, tt| face_to_direction(&m, t.face(), s, tt);
+        assert_eq!(t.corner_direction(&m, planet_core::Corner::SouthWest), at(s0, t0));
+        assert_eq!(t.corner_direction(&m, planet_core::Corner::SouthEast), at(s1, t0));
+        assert_eq!(t.corner_direction(&m, planet_core::Corner::NorthWest), at(s0, t1));
+        assert_eq!(t.corner_direction(&m, planet_core::Corner::NorthEast), at(s1, t1));
+    }
+}
+
+// spec: COORD-006
+#[test]
+fn ties_on_cube_edges_corners_and_tile_boundaries_have_exactly_one_holder_that_the_library_agrees_with() {
+    let m = TangentWarp;
+    let mut dirs: Vec<Vec3> = Vec::new();
+    for a in [-1.0, 0.0, 1.0] {
+        for b in [-1.0, 0.0, 1.0] {
+            for c in [-1.0, 0.0, 1.0] {
+                if a != 0.0 || b != 0.0 || c != 0.0 {
+                    dirs.push(Vec3::new(a, b, c).normalized());
+                }
+            }
+        }
+    }
+    for f in Face::ALL {
+        for i in 0..=8 {
+            for j in 0..=8 {
+                dirs.push(face_to_direction(&m, f, -1.0 + f64::from(i) / 4.0, -1.0 + f64::from(j) / 4.0));
+            }
+        }
+    }
+    for level in [1u8, 3] {
+        let n = 1u32 << level;
+        let tiles: Vec<TileId> =
+            Face::ALL.iter().flat_map(|&f| (0..n).flat_map(move |x| (0..n).map(move |y| TileId::new(f, level, x, y).unwrap()))).collect();
+        for d in &dirs {
+            let holders: Vec<TileId> = tiles.iter().copied().filter(|t| holds(*t, *d)).collect();
+            assert_eq!(holders.len(), 1, "tie direction {d:?} at level {level}: {holders:?}");
+            assert_eq!(TileId::from_direction(&m, *d, level), holders[0], "library and independent definition disagree at {d:?}");
+        }
     }
 }

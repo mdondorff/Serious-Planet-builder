@@ -11,6 +11,7 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
 - Tool note: `gh` is installed at `C:\Program Files\GitHub CLI\gh.exe` but is not on the Git Bash PATH.
 
 ## Log
+- 2026-10-10 m2-seam-normals archived (from the ADR 0003 review): probe measured 0.076 degrees of cross-face normal mismatch, now 0; TileId::corner_neighbors added; partition test independent of from_direction. terrain_cube_corner_normals may be blessed (its WARP candidate is unchanged; the normals view carries little information).
 - 2026-10-10 m2-terrain-perf archived (REND-013, TEST-012): persistent terrain renderer with GPU timestamps and a terrain perf workload; first measurement is the owner's run. Observation: planning 3,078 nodes takes about 11 ms of CPU per full recompute (software-adapter smoke, cells 16, tau 4).
 - 2026-10-10 m2-real-gpu-findings archived (hello-triangle colour exact on NVIDIA; perf sessions flag Balanced power scheme and idle GPU). Owner real-GPU run: 15 of 16 passed before the fix, 16 of 16 after.
 - 2026-10-10 M2 report written (docs/milestones/M2-report.md): go/no-go gate reached; stopped for the owner. Automated acceptance steps pass; timing and real-GPU criteria need Rasierklinge.

@@ -139,7 +139,7 @@ impl TileId {
         self.sample_direction_ext(map, res, i64::from(k), i64::from(l))
     }
 
-    /// Like `sample_direction` but allows indices from -1 to `res + 1` (a one-sample halo, used for normals). Beyond a face
+    /// Like `sample_direction` but allows indices from -1 to `res + 1` (a one-sample halo). Beyond a face
     /// edge the point continues on the extended cube plane.
     pub fn sample_direction_ext(self, map: &dyn FaceMapping, res: u32, k: i64, l: i64) -> Vec3 {
         assert!(res.is_power_of_two(), "sample grid must be a power of two");
@@ -183,5 +183,65 @@ impl TileId {
             Side::South => (sm, t0 - d),
         };
         TileId::from_direction(map, face_to_direction(map, self.face(), s, t), self.level())
+    }
+}
+
+/// One of the four corners of a tile in face coordinates `(s, t)`: `(s0, t0)`, `(s1, t0)`, `(s0, t1)`, `(s1, t1)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Corner {
+    SouthWest,
+    SouthEast,
+    NorthWest,
+    NorthEast,
+}
+
+impl Corner {
+    pub const ALL: [Corner; 4] = [Corner::SouthWest, Corner::SouthEast, Corner::NorthWest, Corner::NorthEast];
+
+    /// Lattice offsets `(k, l)` (0 or 1) of the corner within the tile.
+    fn offsets(self) -> (u32, u32) {
+        match self {
+            Corner::SouthWest => (0, 0),
+            Corner::SouthEast => (1, 0),
+            Corner::NorthWest => (0, 1),
+            Corner::NorthEast => (1, 1),
+        }
+    }
+}
+
+impl TileId {
+    /// Direction of one corner of this tile, bit-identical to the same corner point seen from any tile sharing it.
+    pub fn corner_direction(self, map: &dyn FaceMapping, corner: Corner) -> Vec3 {
+        let (k, l) = corner.offsets();
+        self.sample_direction(map, 1, k, l)
+    }
+
+    /// The other tiles of the same level that share `corner` with this tile: the two edge neighbours and the diagonal
+    /// one (three tiles) at an ordinary corner, and the two edge neighbours (two tiles, no diagonal) where the corner is
+    /// one of the eight cube corners. Sorted by id.
+    pub fn corner_neighbors(self, map: &dyn FaceMapping, corner: Corner) -> Vec<TileId> {
+        let c = self.corner_direction(map, corner);
+        // A tangent frame at the corner point, and probe directions all around it, much closer than a tile.
+        let axis = if c.x.abs() <= c.y.abs() && c.x.abs() <= c.z.abs() {
+            Vec3::new(1.0, 0.0, 0.0)
+        } else if c.y.abs() <= c.z.abs() {
+            Vec3::new(0.0, 1.0, 0.0)
+        } else {
+            Vec3::new(0.0, 0.0, 1.0)
+        };
+        let t1 = (axis - c * axis.dot(c)).normalized();
+        let t2 = c.cross(t1);
+        let delta = core::f64::consts::FRAC_PI_2 / f64::from(1u32 << self.level()) * 1e-3;
+        let mut found: Vec<TileId> = Vec::new();
+        for k in 0..8 {
+            let a = f64::from(k) * core::f64::consts::FRAC_PI_4;
+            let probe = (c + (t1 * libm::cos(a) + t2 * libm::sin(a)) * delta).normalized();
+            let t = TileId::from_direction(map, probe, self.level());
+            if t != self && !found.contains(&t) {
+                found.push(t);
+            }
+        }
+        found.sort();
+        found
     }
 }
