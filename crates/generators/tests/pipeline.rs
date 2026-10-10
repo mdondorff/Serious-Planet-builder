@@ -38,6 +38,8 @@ fn generation_is_repeatable_and_not_degenerate() {
 // spec: GEN-001, GEN-003
 #[test]
 fn tile_hashes_match_the_committed_known_answers() {
+    // The table belongs to this generator version: a version bump must come with new answers.
+    assert_eq!(planet_generators::height::GENERATOR_VERSION, 2);
     for ((f, l, x, y), expected) in KNOWN_TILE_HASHES {
         let h = generate_tile(SEED, &TangentWarp, id(f, l, x, y), RES).content_hash();
         assert_eq!(h, expected, "tile face {f} level {l} ({x},{y}): hash changed; bump GENERATOR_VERSION if the change is intended");
