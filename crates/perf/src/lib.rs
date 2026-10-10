@@ -216,9 +216,15 @@ fn clock_json(c: &Option<ClockSample>) -> String {
     }
 }
 
-/// Whether a Windows power scheme name is a performance scheme (English, German and the "Ultimate" scheme).
+/// Whether a Windows power scheme is a performance scheme. The scheme GUID is language- and encoding-independent
+/// (powercfg prints localised names in the OEM code page, which arrive garbled), so it is checked first; names
+/// (English, German, "Ultimate") are the fallback.
 pub fn is_performance_scheme(scheme: &str) -> bool {
     let s = scheme.to_lowercase();
+    // High performance, Ultimate performance.
+    if ["8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c", "e9a42b02-d5df-448d-aa00-03f14749eb61"].iter().any(|g| s.contains(g)) {
+        return true;
+    }
     ["high performance", "höchstleistung", "hochleistung", "ultimate", "maximale leistung"].iter().any(|k| s.contains(k))
 }
 
@@ -418,8 +424,19 @@ mod warning_tests {
 
     // spec: TEST-006
     #[test]
+    fn the_balanced_scheme_guid_is_not_a_performance_scheme() {
+        assert!(!is_performance_scheme("GUID des Energieschemas: 381b4222-f694-41f0-9685-ff5bb260df2e  (Ausbalanciert)"));
+    }
+
+    // spec: TEST-006
+    #[test]
     fn performance_schemes_in_two_languages_and_a_busy_gpu_are_valid() {
-        for s in ["Power Scheme GUID: x  (High performance)", "GUID des Energieschemas: y  (Höchstleistung)", "Ultimate Performance"] {
+        for s in [
+            "Power Scheme GUID: x  (High performance)",
+            "GUID des Energieschemas: y  (Höchstleistung)",
+            "Ultimate Performance",
+            "GUID des Energieschemas: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (H\u{fffd}chstleistung)",
+        ] {
             assert!(session_warnings(&rtx(), Some(s), &[run_with("P0")], false).is_empty(), "{s}");
         }
         assert!(session_warnings(&rtx(), None, &[], false).iter().any(|w| w.contains("could not be read")));
