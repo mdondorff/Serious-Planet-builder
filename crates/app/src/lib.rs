@@ -206,6 +206,10 @@ fn perf_skeleton(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(
     }
     let medians: Vec<f64> = runs.iter().map(|r| r.stats.median).collect();
     writeln!(out, "run-to-run noise (max-min)/median: {:.3}", planet_perf::run_to_run_noise(&medians).unwrap_or(f64::NAN)).map_err(err)?;
+    let scheme = planet_perf::query_power_scheme();
+    for w in planet_perf::session_warnings(scheme.as_deref(), &runs) {
+        writeln!(out, "WARNING (not valid for time budgets): {w}").map_err(err)?;
+    }
     let json = planet_perf::report_json(&facts(ctx), planet_perf::query_power_scheme().as_deref(), o.machine_ready, &protocol, &runs);
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("skeleton.json"));
     if let Some(dir) = path.parent() {
