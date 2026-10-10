@@ -283,7 +283,8 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     }
     writeln!(out, "terrain perf: {}x{}, cells {}, tau {} px, timestamps {}", size.0, size.1, o.cells, o.tau, ctx.timestamps_supported())
         .map_err(err)?;
-    for index in [0usize, 3, 5, 6] {
+    // Heaviest first: the light orbit view never raises idle clocks by itself, so it runs after the GPU is busy.
+    for index in [6usize, 5, 3, 0] {
         let (name, camera) = views[index];
         let req = TerrainRequest {
             camera,
