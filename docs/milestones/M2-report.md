@@ -41,3 +41,18 @@ The foundation (precision, depth, selection, streaming, determinism, test archit
 4. Decide whether to keep wgpu (this report finds no blocker; the HAL seam from ADR 0004 is still not introduced).
 
 Stop here: M3 (field pipeline and cache) is not started until the owner decides.
+
+## Addendum 2026-10-10: owner's performance run on Rasierklinge
+`cargo xtask perf --machine-ready`, release build, Vulkan on NVIDIA GeForce RTX 3080 Ti Laptop GPU, 2560x1440, cells 32, tau 6 px, GPU timestamps, three runs per view.
+
+| View | Nodes | CPU plan | GPU median (3 runs) | Frame p99 (3 runs) |
+|---|---|---|---|---|
+| ground-1m | 5,108 | 17.08 ms | 1.85 / 2.00 / 1.96 ms | 6.80 / 6.40 / 6.71 ms |
+| ground-200m | 4,053 | 12.86 ms | 1.41 / 2.06 / 1.90 ms | 6.58 / 8.71 / 6.37 ms |
+| aerial-20km | 1,071 | 4.67 ms | 0.54 / 0.53 / 0.52 ms | 2.13 / 2.32 / 2.25 ms |
+| orbit-20000km | 52 | 0.19 ms | 0.04 ms | 0.70 / 0.59 / 0.42 ms |
+
+- Budgets: GPU median 8 ms, frame p99 20 ms. All verdicts ok; the worst GPU median is 2.06 ms (about 4x headroom).
+- Validity: the Windows power scheme was Balanced, so the harness marks the session as not valid for time budgets, and run-to-run noise was high (worst (max-min)/median 0.749). The owner accepts the result for the gate because the headroom is far larger than the noise. A rerun on the High performance profile is needed before any number is used as a regression baseline.
+- **New risk:** CPU node selection (`plan_terrain`) takes 17.1 ms at ground-1m and 12.9 ms at ground-200m, longer than a 60 Hz frame. Frame p99 does not include it, so the harness does not budget it yet. Queued as an M2 gate follow-up (docs/status.md).
+- Node counts at 1440p are higher than the 1080p estimate in this report (5,108 vs 3,003 at 1 m); the GPU handles them easily, so draw-call merging is not urgent.
