@@ -310,3 +310,40 @@ fn normals_follow_the_terrain_and_agree_with_the_lattice_slope() {
     }
     assert!(max_tilt > 0.05, "the terrain must tilt the normals measurably for this test to mean anything, got {max_tilt} degrees");
 }
+
+/// Committed known answers (mesh version 2, generator version 2, hash version 1): identical on every platform.
+const KNOWN_MESH_HASHES: [((u8, u8, u32, u32), u64); 3] =
+    [((0, 0, 0, 0), 2371465966009586768), ((3, 3, 5, 2), 17991577032367091872), ((5, 12, 1000, 77), 7790493056220614039)];
+
+// spec: GEN-010
+#[test]
+fn mesh_hashes_match_the_committed_known_answers() {
+    // The table belongs to these versions: bumping either must come with new answers.
+    assert_eq!((planet_generators::mesh::MESH_VERSION, planet_generators::height::GENERATOR_VERSION), (2, 2));
+    for ((f, l, x, y), want) in KNOWN_MESH_HASHES {
+        let got = tile_mesh(1, &TangentWarp, id(f, l, x, y), CELLS, R).content_hash();
+        assert_eq!(got, want, "mesh ({f},{l},{x},{y}) changed: if intended, bump MESH_VERSION and update the table (got {got})");
+    }
+}
+
+// spec: GEN-010
+#[test]
+fn mesh_keys_follow_every_input() {
+    use planet_generators::mesh::mesh_key;
+    let t = id(3, 3, 5, 2);
+    let base = mesh_key(&TangentWarp, 1, t, CELLS, R);
+    assert_eq!(base, mesh_key(&TangentWarp, 1, t, CELLS, R));
+    assert_eq!(base, tile_mesh(1, &TangentWarp, t, CELLS, R).key, "the mesh carries its key");
+    for (what, other) in [
+        ("seed", mesh_key(&TangentWarp, 2, t, CELLS, R)),
+        ("tile", mesh_key(&TangentWarp, 1, id(3, 3, 5, 3), CELLS, R)),
+        ("cells", mesh_key(&TangentWarp, 1, t, CELLS * 2, R)),
+        ("radius", mesh_key(&TangentWarp, 1, t, CELLS, R + 1.0)),
+    ] {
+        assert_ne!(base, other, "the key ignores the {what}");
+    }
+    use planet_generators::mesh::{mesh_key_with, MESH_VERSION, SKIRT_FRACTION};
+    assert_eq!(base, mesh_key_with(&TangentWarp, 1, t, CELLS, R, MESH_VERSION, SKIRT_FRACTION));
+    assert_ne!(base, mesh_key_with(&TangentWarp, 1, t, CELLS, R, MESH_VERSION + 1, SKIRT_FRACTION), "the key ignores the mesh version");
+    assert_ne!(base, mesh_key_with(&TangentWarp, 1, t, CELLS, R, MESH_VERSION, SKIRT_FRACTION * 1.5), "the key ignores the skirt fraction");
+}
