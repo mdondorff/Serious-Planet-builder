@@ -65,3 +65,27 @@ fn debug_views_have_no_holes_are_deterministic_and_match_goldens() {
 fn planet_render_key(ctx: &GpuContext) -> String {
     ctx.adapter_key()
 }
+
+// spec: REND-001
+#[test]
+fn a_missing_resource_fails_execution_in_every_view_and_draws_nothing() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let m = TangentWarp;
+    let ids = vec![TileId::new(Face(3), 3, 5, 2).unwrap()];
+    for view in [DebugView::Face, DebugView::TileId, DebugView::Height] {
+        let plan = plan_tiles(&PlanRequest {
+            tiles: ids.clone(),
+            camera: PlanetFixed(Vec3::new(1.2e7, 1.0e6, -3.0e6)),
+            size: SIZE,
+            view,
+            radius_m: 6_371_000.0,
+            face_mapping: "tangent-v1".into(),
+        })
+        .unwrap();
+        let e = execute(&ctx, &plan, &[]).unwrap_err();
+        assert_eq!(e, planet_render::ExecError::MissingTile(ids[0]), "{view:?}: a missing resource must be an error, not a substitution");
+        // The same plan with its resource executes.
+        let t = generate_tile(1, &m, ids[0], RES);
+        execute(&ctx, &plan, &[TileResource { id: t.id, res: t.res, heights: &t.heights }]).unwrap();
+    }
+}

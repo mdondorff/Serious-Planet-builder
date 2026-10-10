@@ -6,7 +6,7 @@ TBD - created by archiving change m0-foundations. Update Purpose after archive.
 ## Requirements
 
 ### Requirement: REND-001 FramePlan executor
-The renderer SHALL execute a FramePlan and SHALL make no decisions about which nodes, levels, batches, tiles, rectangles or colours to draw; the number of draw calls SHALL equal the number of draws in the plan, and a plan that cannot be executed (a resource the selected view needs is missing, rectangle outside the frame, unusable height range or resolution) SHALL be reported, not guessed.
+The renderer SHALL execute a FramePlan and SHALL make no decisions about which nodes, levels, batches, tiles, rectangles or colours to draw; the number of draw calls SHALL equal the number of draws in the plan, and a plan that cannot be executed (a resource for any drawn tile is missing, in any view, rectangle outside the frame, unusable height range or resolution) SHALL be reported, not guessed.
 
 Verify: C
 Status: active
@@ -19,6 +19,10 @@ Source: CON-03, ADR 0009
 #### Scenario: Unexecutable plan
 - **WHEN** the plan names a tile whose resource is missing
 - **THEN** execution fails with the tile id
+
+#### Scenario: Missing resource in a flat-colour view
+- **WHEN** the face or tile-id view is executed with a plan that names a tile for which no resource was supplied
+- **THEN** execution fails with the tile id and draws nothing; no placeholder data is substituted
 
 ### Requirement: REND-002 Shader validation
 Every shipped shader module SHALL pass backend validation on the software adapter in CI.

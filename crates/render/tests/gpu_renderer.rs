@@ -59,7 +59,8 @@ fn frames_are_timed_and_a_missing_tile_is_an_error() {
     assert!(t.cpu_ms > 0.0 && t.total_ms >= t.cpu_ms, "{t:?}");
     if ctx.timestamps_supported() {
         let g = t.gpu_ms.expect("timestamps are supported, so GPU time must be reported");
-        assert!(g > 0.0 && g < 10_000.0, "implausible GPU time {g} ms");
+        // A very fast frame can quantise to a zero timestamp delta: that is a valid measurement, not a failure.
+        assert!((0.0..10_000.0).contains(&g), "implausible GPU time {g} ms");
     } else {
         assert!(t.gpu_ms.is_none());
     }
