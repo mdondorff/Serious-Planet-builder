@@ -9,3 +9,4 @@ publish.workspace = true
 planet-core.workspace = true
 planet-streaming.workspace = true
 planet-generators.workspace = true
+libm.workspace = true

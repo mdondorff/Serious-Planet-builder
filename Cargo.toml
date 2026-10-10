@@ -60,3 +60,9 @@ opt-level = 2
 # Math and noise stay fast in the dev profile (report §16 build-speed measures).
 [profile.dev.package.planet-core]
 opt-level = 3
+
+[profile.dev.package.planet-frame]
+opt-level = 3
+
+[profile.dev.package.planet-generators]
+opt-level = 3
