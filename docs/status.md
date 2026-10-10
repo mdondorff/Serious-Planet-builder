@@ -3,6 +3,7 @@
 Newest entries at the top. One line per event (change archived, ADR drafted, spike opened or closed, quarantine, milestone report). Stop reports get a short section.
 
 ## Waiting for the owner
+- **ADR 0004 seam wording** (from the m2-wgpu-seam review): render's public API is now the seam to wgpu (enforced by `xtask layering`), but ADR 0004 also describes an internal device/buffer/pipeline interface inside render, due 'at the first real pass (M2)'. Decide: revise ADR 0004 (proposed) so the seam is render's public API and the internal interface waits for a second backend, or schedule the interface. Also decide who owns the window surface and egui painting (an egui-wgpu integration in editor would pull wgpu above render).
 - **M2 go/no-go gate** (docs/milestones/M2-report.md): recommendation Go with changes. Nothing in M3 has been started.
 - **Accept or change the proposed ADRs** 0007, 0009, 0013 and 0014 (ADRs 0001-0006, 0008, 0010-0012 accepted 2026-10-10). Work proceeds on their leanings.
 - **Bless the six terrain goldens** (adapter dx12 WARP; listed in tests/goldens/pending.txt; candidates in target/review/candidates/): terrain_orbit_tile_id, terrain_aerial20km_level, terrain_ground200m_height, terrain_cube_corner_normals, terrain_ground1m_depth, terrain_low2km_morph. `/bless` must also remove the names from pending.txt (`cargo xtask check` fails otherwise). Two of them (ground200m height, cube-corner normals) carry little information; say if you prefer other views.
@@ -22,6 +23,7 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
 - **ADR 0004 review follow-up** (2026-10-10, owner asked; sent to the M2 agent): render's public API is the seam to wgpu. Remove `pub use wgpu` (`crates/render/src/lib.rs:6`), make the `GpuContext` fields private with accessors for adapter facts (used by `facts()` and the adapter log line in `crates/app/src/lib.rs`), and extend `cargo xtask layering` so only `render` depends on wgpu. Goldens stay byte-identical.
 
 ## Log
+- 2026-10-10 m2-wgpu-seam archived (BUILD-001 modified): render no longer re-exports wgpu, GpuContext fields private, accessors, layering bans graphics-API crates outside render (table form, quoted keys, renames) and wgpu types in render's pub signatures. Goldens byte-identical.
 - 2026-10-10 ADR 0004 updated from review and accepted by the owner: render's public API is the seam (no internal HAL), M2 gate outcome recorded (wgpu kept), wgpu upgrades keep goldens byte-identical, DX12 and Vulkan only.
 - 2026-10-10 ADRs 0005, 0006, 0008, 0010, 0011, 0012 accepted by the owner; CON-14 amended (constitution v1.1, per-field CPU/GPU bounds); con14-tolerance archived (GEN-008 modified).
 - 2026-10-10 m2-clippy-math-ban archived (COORD-009 modified): clippy disallowed-methods over the workspace, verifier probed 24 forms/locations. Known gap: third-party float traits (num_traits::Float, glam, nalgebra) are not seen by clippy; a layering rule or dependency review must keep them out of generator crates (none present today). ADR 0010 follow-up 1 done.

@@ -127,33 +127,32 @@ pub struct FrameTiming {
 pub struct TerrainRenderer {
     size: (u32, u32),
     cells: u32,
-    pipeline: crate::wgpu::RenderPipeline,
-    bgl: crate::wgpu::BindGroupLayout,
-    globals: crate::wgpu::Buffer,
-    nodes: crate::wgpu::Buffer,
+    pipeline: wgpu::RenderPipeline,
+    bgl: wgpu::BindGroupLayout,
+    globals: wgpu::Buffer,
+    nodes: wgpu::Buffer,
     node_capacity: usize,
-    bind: crate::wgpu::BindGroup,
+    bind: wgpu::BindGroup,
     stride: u64,
-    indices: crate::wgpu::Buffer,
+    indices: wgpu::Buffer,
     index_count: u32,
-    vertex_buffers: HashMap<planet_core::TileId, (u64, crate::wgpu::Buffer)>,
-    color: crate::wgpu::Texture,
-    color_view: crate::wgpu::TextureView,
-    depth_view: crate::wgpu::TextureView,
+    vertex_buffers: HashMap<planet_core::TileId, (u64, wgpu::Buffer)>,
+    color: wgpu::Texture,
+    color_view: wgpu::TextureView,
+    depth_view: wgpu::TextureView,
     timing: Option<TimingResources>,
     /// Bytes of vertex data uploaded so far.
     pub uploaded_bytes: u64,
 }
 
 struct TimingResources {
-    queries: crate::wgpu::QuerySet,
-    resolve: crate::wgpu::Buffer,
-    readback: crate::wgpu::Buffer,
+    queries: wgpu::QuerySet,
+    resolve: wgpu::Buffer,
+    readback: wgpu::Buffer,
 }
 
 impl TerrainRenderer {
     pub fn new(ctx: &GpuContext, size: (u32, u32), cells: u32) -> Self {
-        use crate::wgpu;
         use wgpu::util::DeviceExt;
         let device = &ctx.device;
         let format = wgpu::TextureFormat::Rgba8Unorm;
@@ -290,22 +289,16 @@ impl TerrainRenderer {
         }
     }
 
-    fn node_buffer(device: &crate::wgpu::Device, stride: u64, capacity: usize) -> crate::wgpu::Buffer {
-        device.create_buffer(&crate::wgpu::BufferDescriptor {
+    fn node_buffer(device: &wgpu::Device, stride: u64, capacity: usize) -> wgpu::Buffer {
+        device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("nodes"),
             size: stride * capacity as u64,
-            usage: crate::wgpu::BufferUsages::UNIFORM | crate::wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         })
     }
 
-    fn bind_group(
-        device: &crate::wgpu::Device,
-        bgl: &crate::wgpu::BindGroupLayout,
-        globals: &crate::wgpu::Buffer,
-        nodes: &crate::wgpu::Buffer,
-    ) -> crate::wgpu::BindGroup {
-        use crate::wgpu;
+    fn bind_group(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, nodes: &wgpu::Buffer) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("terrain-bind"),
             layout: bgl,
@@ -325,7 +318,6 @@ impl TerrainRenderer {
 
     /// Upload a tile's vertices once; later calls for the same tile do nothing.
     pub fn upload(&mut self, ctx: &GpuContext, mesh: &TileMesh) -> Result<(), ExecError> {
-        use crate::wgpu;
         use wgpu::util::DeviceExt;
         if mesh.cells != self.cells {
             return Err(ExecError::BadResolution { id: mesh.id, res: mesh.cells });
@@ -361,7 +353,6 @@ impl TerrainRenderer {
 
     /// Draw the plan. Every planned tile must have been uploaded. With `timed`, GPU time is measured when supported.
     pub fn render(&mut self, ctx: &GpuContext, plan: &TerrainPlan, timed: bool) -> Result<(FrameTiming, TerrainStats), ExecError> {
-        use crate::wgpu;
         let started = std::time::Instant::now();
         if plan.size != self.size {
             return Err(ExecError::SizeMismatch { plan: plan.size, renderer: self.size });

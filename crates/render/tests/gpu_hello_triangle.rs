@@ -9,7 +9,7 @@ const SIZE: u32 = 256;
 #[test]
 fn hello_triangle_renders_headless() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
-    eprintln!("adapter: {:?} {} ({:?})", ctx.info.backend, ctx.info.name, ctx.info.device_type);
+    eprintln!("{}", ctx.adapter_log_line());
     let frame = hello_triangle(&ctx, SIZE);
     let img = Image::new(frame.width, frame.height, frame.rgba);
 

@@ -97,8 +97,7 @@ pub fn render_tiles(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resul
 /// `editor --offscreen`: the same skeleton as the viewer will run, without a window (the window arrives in M2).
 pub fn render_offscreen(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let ctx = GpuContext::new(o.adapter.unwrap_or(AdapterPolicy::Software)).map_err(|e| e.to_string())?;
-    writeln!(out, "adapter: {:?} {} ({:?}), key {}", ctx.info.backend, ctx.info.name, ctx.info.device_type, ctx.adapter_key())
-        .map_err(err)?;
+    writeln!(out, "{}", ctx.adapter_log_line()).map_err(err)?;
     if let Some(bundle) = &o.repro {
         return replay(&ctx, bundle, o.out.as_deref(), out);
     }
