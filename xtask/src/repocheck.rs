@@ -16,6 +16,23 @@ mod tests {
         assert!(found.is_empty(), "CON-25: no scripts in the repo, add an xtask command instead: {found:?}");
     }
 
+    // spec: TEST-002
+    #[test]
+    fn every_golden_directory_records_its_driver() {
+        let dir = repo_root().join("tests/goldens");
+        for e in std::fs::read_dir(&dir).expect("tests/goldens").flatten() {
+            if e.path().is_dir() {
+                let sidecar = e.path().join("driver.txt");
+                let text = std::fs::read_to_string(&sidecar).unwrap_or_default();
+                assert!(
+                    !text.trim().is_empty(),
+                    "{} must record the driver string the goldens were blessed on (ADR 0009)",
+                    sidecar.display()
+                );
+            }
+        }
+    }
+
     fn workflow() -> String {
         std::fs::read_to_string(repo_root().join(".github/workflows/ci.yml")).expect("CI workflow .github/workflows/ci.yml")
     }
