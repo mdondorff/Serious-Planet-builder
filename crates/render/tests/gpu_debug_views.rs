@@ -34,7 +34,7 @@ fn render(ctx: &GpuContext, view: DebugView) -> (FramePlan, Image, u32) {
 #[test]
 fn debug_views_have_no_holes_are_deterministic_and_match_goldens() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
-    eprintln!("adapter: {:?} {}", ctx.info.backend, ctx.info.name);
+    eprintln!("{}", ctx.adapter_log_line());
     for view in [DebugView::Face, DebugView::TileId, DebugView::Height] {
         let (plan, img, draws) = render(&ctx, view);
         assert_eq!(draws as usize, plan.draws.len(), "draw calls must equal the plan's draws");

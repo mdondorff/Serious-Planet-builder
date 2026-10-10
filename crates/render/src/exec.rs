@@ -176,7 +176,6 @@ fn params_bytes(rect: [u32; 4], res: u32, view: u32, color: [u8; 4], range: [f32
 
 /// Execute the plan on the GPU and read the frame back.
 pub fn execute(ctx: &GpuContext, plan: &FramePlan, tiles: &[TileResource]) -> Result<(RgbaFrame, ExecStats), ExecError> {
-    use crate::wgpu;
     use wgpu::util::DeviceExt;
     check(plan, tiles)?;
     let device = &ctx.device;

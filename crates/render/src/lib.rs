@@ -3,8 +3,6 @@
 
 use std::fmt;
 
-pub use wgpu;
-
 pub mod exec;
 pub mod graph;
 pub mod terrain;
@@ -56,9 +54,10 @@ pub struct RgbaFrame {
 }
 
 pub struct GpuContext {
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
-    pub info: wgpu::AdapterInfo,
+    // wgpu stays behind render's API (ADR 0004): other crates see names and verdicts, never wgpu types.
+    pub(crate) device: wgpu::Device,
+    pub(crate) queue: wgpu::Queue,
+    pub(crate) info: wgpu::AdapterInfo,
 }
 
 impl GpuContext {
@@ -92,6 +91,33 @@ impl GpuContext {
             .await
             .map_err(|e| GpuError::Device(e.to_string()))?;
         Ok(Self { device, queue, info })
+    }
+
+    /// Adapter name as the driver reports it.
+    pub fn adapter_name(&self) -> &str {
+        &self.info.name
+    }
+
+    /// Graphics backend, e.g. `Vulkan` or `Dx12`.
+    pub fn backend_name(&self) -> String {
+        format!("{:?}", self.info.backend)
+    }
+
+    /// The first output line of every run (hybrid-graphics rule, report §8): backend, name, type and the golden key.
+    pub fn adapter_log_line(&self) -> String {
+        format!("adapter: {:?} {} ({:?}), key {}", self.info.backend, self.info.name, self.info.device_type, self.adapter_key())
+    }
+
+    /// Validate one WGSL module on this device; `Err` carries the backend's message.
+    pub fn validate_wgsl(&self, name: &str, source: &str) -> Result<(), String> {
+        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let _module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(name), source: wgpu::ShaderSource::Wgsl(source.into()) });
+        match pollster::block_on(scope.pop()) {
+            Some(err) => Err(format!("shader '{name}' failed validation: {err}")),
+            None => Ok(()),
+        }
     }
 
     /// Backend + name as a directory-safe key, e.g. `dx12-microsoft-basic-render-driver`.
@@ -221,7 +247,7 @@ impl RgbaFrame {
 }
 
 /// Copy an `Rgba8Unorm` texture (usage `COPY_SRC`) to the CPU as tightly packed pixels.
-pub fn read_rgba8(ctx: &GpuContext, texture: &wgpu::Texture, width: u32, height: u32) -> RgbaFrame {
+pub(crate) fn read_rgba8(ctx: &GpuContext, texture: &wgpu::Texture, width: u32, height: u32) -> RgbaFrame {
     let unpadded = width * 4;
     let padded = unpadded.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
     let readback = ctx.device.create_buffer(&wgpu::BufferDescriptor {

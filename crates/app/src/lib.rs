@@ -154,8 +154,8 @@ pub(crate) fn err(e: std::io::Error) -> String {
 
 pub(crate) fn facts(ctx: &GpuContext) -> AdapterFacts {
     AdapterFacts {
-        name: ctx.info.name.clone(),
-        backend: format!("{:?}", ctx.info.backend),
+        name: ctx.adapter_name().to_string(),
+        backend: ctx.backend_name(),
         kind: match ctx.kind() {
             planet_render::AdapterKind::Discrete => DeviceKind::Discrete,
             planet_render::AdapterKind::Integrated => DeviceKind::Integrated,
@@ -172,8 +172,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let policy = o.adapter.unwrap_or_else(AdapterPolicy::from_env);
     let ctx = GpuContext::new(policy).map_err(|e| e.to_string())?;
     // Hybrid-graphics rule (report §8): always log which adapter we got.
-    writeln!(out, "adapter: {:?} {} ({:?}), key {}", ctx.info.backend, ctx.info.name, ctx.info.device_type, ctx.adapter_key())
-        .map_err(err)?;
+    writeln!(out, "{}", ctx.adapter_log_line()).map_err(err)?;
     if o.perf && o.perf_smoke {
         return Err("--perf and --perf-smoke exclude each other: a smoke run is never a measurement".into());
     }

@@ -10,6 +10,9 @@ pub const CHAIN: [&str; 9] = ["core", "world-def", "generators", "cache", "strea
 pub const GPU_FREE: usize = 6;
 const GRAPHICS_CRATES: [&str; 8] = ["wgpu", "wgpu-core", "wgpu-hal", "naga", "winit", "ash", "egui", "eframe"];
 
+/// Graphics-API crates only `render` may depend on (ADR 0004: render's public API is the seam to wgpu).
+const RENDER_ONLY: [&str; 5] = ["wgpu", "wgpu-core", "wgpu-hal", "naga", "ash"];
+
 fn package_name(dir: &str) -> String {
     if dir == "app" {
         "planet".to_string()
@@ -51,6 +54,84 @@ pub fn check_manifest(dir: &str, manifest: &str) -> Vec<String> {
     errors
 }
 
+/// Errors when a manifest other than `render`'s names a graphics-API crate in any dependency section (dev and
+/// build dependencies included: tests of other crates must not reach wgpu either).
+pub fn check_graphics_isolation(dir: &str, manifest: &str) -> Vec<String> {
+    if dir == "render" {
+        return Vec::new();
+    }
+    let mut errors = Vec::new();
+    let mut flag = |dep: &str| {
+        errors.push(format!("'{dir}' depends on '{dep}': only render may depend on the graphics API; use render's public API (ADR 0004)"))
+    };
+    let unquote = |t: &str| t.trim().trim_matches(|c| c == '"' || c == '\'').to_string();
+    let mut in_deps = false;
+    for line in manifest.lines() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            let header = t.trim_start_matches('[').trim_end_matches(']');
+            // `[dependencies]`, `[dev-dependencies]`, `[target.'cfg'.dependencies]` or the table form
+            // `[dependencies.wgpu]` / `[target.'cfg'.dev-dependencies.wgpu]`.
+            let (head, tail) = match header.rfind("dependencies.") {
+                Some(i) if header[..i + 12].ends_with("dependencies") => (&header[..i + 12], Some(unquote(&header[i + 13..]))),
+                _ => (header, None),
+            };
+            in_deps = head.ends_with("dependencies");
+            if let Some(name) = tail.filter(|n| in_deps && RENDER_ONLY.contains(&n.as_str())) {
+                flag(&name);
+            }
+            continue;
+        }
+        if !in_deps {
+            continue;
+        }
+        let key = unquote(t.split(|c: char| c == '.' || c == '=' || c.is_whitespace()).next().unwrap_or(""));
+        if RENDER_ONLY.contains(&key.as_str()) {
+            flag(&key);
+        }
+        // A renamed dependency: `gfx = { package = "wgpu", ... }` or a `package = "wgpu"` line in a table.
+        if let Some(i) = t.find("package") {
+            let rest = t[i + 7..].trim_start();
+            if let Some(v) = rest.strip_prefix('=') {
+                let name = unquote(v.trim_start().split([',', '}']).next().unwrap_or(""));
+                if RENDER_ONLY.contains(&name.as_str()) {
+                    flag(&name);
+                }
+            }
+        }
+    }
+    errors
+}
+
+/// Public items of render's sources whose signature or field type names a wgpu type: render's public API must not
+/// expose the graphics API (ADR 0004). `(line, text)`; `pub(crate)` and friends are fine.
+pub fn wgpu_in_public_api(source: &str) -> Vec<(usize, String)> {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut hits = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        let t = l.trim_start();
+        if !t.starts_with("pub ") {
+            continue;
+        }
+        // The item head: up to the first `{` or `;`; a field (`pub x: T,`) ends with its line.
+        let field = !t.contains("fn ") && !t.contains('(');
+        let mut head = String::new();
+        for l2 in &lines[i..] {
+            head.push_str(l2.trim());
+            head.push(' ');
+            let end = l2.trim_end();
+            if field || end.ends_with('{') || end.ends_with(';') || end.contains('{') {
+                break;
+            }
+        }
+        let head = head.split('{').next().unwrap_or("").split(" where ").next().unwrap_or("");
+        if head.contains("wgpu::") && !head.trim_start().starts_with("pub use") {
+            hits.push((i + 1, t.to_string()));
+        }
+    }
+    hits
+}
+
 /// Errors for the output of `cargo tree --prefix none`: any graphics crate in a GPU-free crate.
 pub fn check_tree(dir: &str, tree: &str) -> Vec<String> {
     tree.lines()
@@ -71,6 +152,28 @@ pub fn run(root: &Path) -> Res {
             errors.extend(check_tree(dir, &tree));
         }
     }
+    for e in std::fs::read_dir(root.join("crates/render/src")).map_err(|e| e.to_string())?.flatten() {
+        if e.path().extension().is_some_and(|x| x == "rs") {
+            let text = std::fs::read_to_string(e.path()).map_err(|e| e.to_string())?;
+            for (line, item) in wgpu_in_public_api(&text) {
+                errors.push(format!(
+                    "{}:{line}: public item exposes a wgpu type: {item} (render's public API is the seam, ADR 0004)",
+                    e.path().display()
+                ));
+            }
+        }
+    }
+    // Every workspace member, chain or not (testkit, perf, xtask): only render may name a graphics-API crate.
+    let mut members: Vec<(String, std::path::PathBuf)> = Vec::new();
+    for e in std::fs::read_dir(root.join("crates")).map_err(|e| e.to_string())?.flatten() {
+        members.push((e.file_name().to_string_lossy().into_owned(), e.path().join("Cargo.toml")));
+    }
+    members.push(("xtask".to_string(), root.join("xtask").join("Cargo.toml")));
+    for (dir, path) in members {
+        if let Ok(manifest) = std::fs::read_to_string(&path) {
+            errors.extend(check_graphics_isolation(&dir, &manifest));
+        }
+    }
     if errors.is_empty() {
         eprintln!("layering ok: {} crates, {} GPU-free", CHAIN.len(), GPU_FREE);
         Ok(())
@@ -82,6 +185,73 @@ pub fn run(root: &Path) -> Res {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: BUILD-001
+    #[test]
+    fn wgpu_types_in_public_signatures_are_flagged() {
+        let src = "pub fn a(x: &wgpu::Texture) -> u32 {
+}
+pub(crate) fn b(x: &wgpu::Texture) {}
+fn c(x: wgpu::Device) {}
+pub struct S {
+    pub device: wgpu::Device,
+    pub(crate) q: wgpu::Queue,
+    pub n: u32,
+}
+pub fn d(
+    ctx: &C,
+    t: &wgpu::Texture,
+) -> u32 {
+}
+pub fn e() { let _ = wgpu::Instance::new(); }
+";
+        let hits: Vec<usize> = wgpu_in_public_api(src).iter().map(|h| h.0).collect();
+        assert_eq!(hits, [1, 6, 10], "{hits:?}");
+    }
+
+    // spec: BUILD-001
+    #[test]
+    fn only_render_may_depend_on_the_graphics_api() {
+        let wgpu = "[dependencies]
+wgpu.workspace = true
+";
+        assert!(check_graphics_isolation("render", wgpu).is_empty());
+        for dir in ["app", "frame", "testkit", "perf", "xtask"] {
+            let e = check_graphics_isolation(dir, wgpu);
+            assert_eq!(e.len(), 1, "{dir}: {e:?}");
+            assert!(e[0].contains("only render"), "{e:?}");
+        }
+        // Dev- and build-dependencies count; unrelated names and other sections do not.
+        assert_eq!(
+            check_graphics_isolation(
+                "app",
+                "[dev-dependencies]
+wgpu = { version = \"1\" }
+"
+            )
+            .len(),
+            1
+        );
+        assert_eq!(
+            check_graphics_isolation(
+                "app",
+                "[target.'cfg(windows)'.dependencies]
+naga = \"1\"
+"
+            )
+            .len(),
+            1
+        );
+        assert!(check_graphics_isolation(
+            "app",
+            "[dependencies]
+planet-render.workspace = true
+[package]
+name = \"wgpu\"
+"
+        )
+        .is_empty());
+    }
 
     // spec: BUILD-001
     #[test]

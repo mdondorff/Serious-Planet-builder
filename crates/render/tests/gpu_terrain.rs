@@ -67,7 +67,7 @@ fn holes(plan: &TerrainPlan, img: &Image) -> Vec<(u32, u32)> {
 #[test]
 fn ten_scripted_views_have_no_holes_and_exact_draw_counts() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
-    eprintln!("adapter: {:?} {}", ctx.info.backend, ctx.info.name);
+    eprintln!("{}", ctx.adapter_log_line());
     let index_triangles = (grid_indices(CELLS).len() / 3) as u64;
     for i in 0..10 {
         let (name, plan) = plan_for(i, TerrainView::TileId);
