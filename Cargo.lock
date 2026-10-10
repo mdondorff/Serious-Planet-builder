@@ -483,6 +483,7 @@ dependencies = [
 name = "planet-frame"
 version = "0.0.0"
 dependencies = [
+ "libm",
  "planet-core",
  "planet-generators",
  "planet-streaming",

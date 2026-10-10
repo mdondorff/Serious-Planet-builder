@@ -9,6 +9,7 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
 - Tool note: `gh` is installed at `C:\Program Files\GitHub CLI\gh.exe` but is not on the Git Bash PATH.
 
 ## Log
+- 2026-10-10 m2-node-selection archived (LOD-001..004 active).
 - 2026-10-10 M1 accepted automatically (docs/milestones/M1-report.md); verifier: all 5 exit criteria pass. CI green on Windows (WARP) and Linux (lavapipe) on `main`.
 - 2026-10-10 m1-golden-strictness archived (TEST-002: missing golden fails for blessed adapters; bless listing ignores stale candidates).
 - 2026-10-10 Goldens blessed by the owner for dx12-microsoft-basic-render-driver (hello_triangle, debug_view_face, debug_view_tile_id, debug_view_height). PR #1 merged by the owner's request to bootstrap CI; PR #4 merged after green CI (#2 and #3 superseded by #4).
