@@ -10,6 +10,7 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
 - Tool note: `gh` is installed at `C:\Program Files\GitHub CLI\gh.exe` but is not on the Git Bash PATH.
 
 ## Log
+- 2026-10-10 m2-async-streaming archived (STRM-001, 002, 005, 007 active).
 - 2026-10-10 m2-terrain-render archived (LOD-005, LOD-007, REND-003..006, REND-009 active). Six terrain goldens wait for /bless (tests/goldens/pending.txt).
 - 2026-10-10 m2-node-selection archived (LOD-001..004 active).
 - 2026-10-10 M1 accepted automatically (docs/milestones/M1-report.md); verifier: all 5 exit criteria pass. CI green on Windows (WARP) and Linux (lavapipe) on `main`.
