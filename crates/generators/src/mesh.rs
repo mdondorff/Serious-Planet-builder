@@ -20,6 +20,9 @@ pub struct MeshVertex {
     pub normal: [f32; 3],
     /// Terrain height above the sphere, metres.
     pub height: f32,
+    /// Height after morphing to the parent grid: the parent-grid rule applied to heights, exactly as `coarse` applies it to
+    /// positions (edge or diagonal midpoint of the parent cell's corner heights), so the height morphs with the position.
+    pub coarse_height: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -48,7 +51,7 @@ pub const SKIRT_FRACTION: f64 = 0.08;
 /// Version of the mesh construction (ADR 0006): bump it whenever vertex output changes for the same inputs (skirt
 /// depth, normal stencil, origin rule, vertex layout). History: 1 = first meshes; 2 = seam-consistent normals (#15);
 /// 3 = no `ref_pos` attribute: the morph distance is measured to the real vertex position (LOD-008).
-pub const MESH_VERSION: u32 = 3;
+pub const MESH_VERSION: u32 = 4;
 
 /// Key of a mesh: the height key of the tile (generator, seed, mapping, tile; resolution = `cells`), the grid size, the
 /// radius bits, the skirt fraction bits and [`MESH_VERSION`].
@@ -199,11 +202,19 @@ pub fn tile_mesh_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
                 (0, 1) => (at(i, j - 1) + at(i, j + 1)) * 0.5,
                 _ => (at(i - 1, j - 1) + at(i + 1, j + 1)) * 0.5,
             };
+            let h = |i: i64, j: i64| heights[j as usize * width + i as usize];
+            let coarse_height = match (i % 2, j % 2) {
+                (0, 0) => h(i, j),
+                (1, 0) => (h(i - 1, j) + h(i + 1, j)) * 0.5,
+                (0, 1) => (h(i, j - 1) + h(i, j + 1)) * 0.5,
+                _ => (h(i - 1, j - 1) + h(i + 1, j + 1)) * 0.5,
+            };
             vertices.push(MeshVertex {
                 pos: local(at(i, j)),
                 coarse: local(coarse),
                 normal: [normal.x as f32, normal.y as f32, normal.z as f32],
-                height: heights[j as usize * width + i as usize] as f32,
+                height: h(i, j) as f32,
+                coarse_height: coarse_height as f32,
             });
         }
     }
@@ -251,16 +262,16 @@ pub fn grid_indices(cells: u32) -> Vec<u32> {
 }
 
 impl MeshVertex {
-    /// Number of f32 values per vertex in GPU order: `pos`, `coarse`, `normal`, `height`.
-    pub const FLOATS: usize = 10;
+    /// Number of f32 values per vertex in GPU order: `pos`, `coarse`, `normal`, `height`, `coarse_height`.
+    pub const FLOATS: usize = 11;
     /// Byte stride of a vertex buffer entry.
     pub const STRIDE: u64 = (Self::FLOATS * 4) as u64;
-    /// The attribute offsets (in floats) of `pos`, `coarse`, `normal` and `height`.
-    pub const OFFSETS: [usize; 4] = [0, 3, 6, 9];
+    /// The attribute offsets (in floats) of `pos`, `coarse`, `normal`, `height` and `coarse_height`.
+    pub const OFFSETS: [usize; 5] = [0, 3, 6, 9, 10];
 
     pub fn to_floats(&self) -> [f32; Self::FLOATS] {
         let (p, c, n) = (self.pos, self.coarse, self.normal);
-        [p[0], p[1], p[2], c[0], c[1], c[2], n[0], n[1], n[2], self.height]
+        [p[0], p[1], p[2], c[0], c[1], c[2], n[0], n[1], n[2], self.height, self.coarse_height]
     }
 }
 

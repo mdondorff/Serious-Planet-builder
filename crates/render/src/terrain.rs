@@ -7,14 +7,20 @@ use planet_frame::{TerrainPlan, TerrainView};
 use planet_generators::mesh::{grid_indices, MeshVertex, TileMesh};
 use std::collections::HashMap;
 
-/// Bytes of one node uniform (origin, colour, morph interval, grid phases); the dynamic offset stride rounds it up.
-const NODE_BYTES: u64 = 80;
+/// Grid line spacings of the relief view (metres): 1 cm to 1,000 km, one decade apart.
+pub const GRID_SPACINGS_M: [f64; 9] = [0.01, 0.1, 1.0, 10.0, 100.0, 1.0e3, 1.0e4, 1.0e5, 1.0e6];
 
-/// The relief grid's anchors for a tile origin (planet-fixed, f64): the origin modulo 1 m and modulo 1,000 km, per axis.
-/// Added to a tile-local coordinate they give the world coordinate modulo that period, exactly where f32 can hold it, so
-/// two tiles agree on where a grid line is (CON-11: remainders, never planet-radius values).
-pub fn grid_phases(origin: [f64; 3]) -> ([f32; 3], [f32; 3]) {
-    (origin.map(|v| v.rem_euclid(1.0) as f32), origin.map(|v| v.rem_euclid(1.0e6) as f32))
+/// Bytes of one node uniform (origin, colour, morph interval, one grid phase per decade); the dynamic offset stride
+/// rounds it up.
+const NODE_BYTES: u64 = 48 + 16 * GRID_SPACINGS_M.len() as u64;
+
+/// The relief grid's anchors for a tile origin (planet-fixed, f64): for each decade the fractional part of
+/// `origin / spacing`, per axis, in cells. The shader adds `local / spacing` to it, so the line coordinate stays a small
+/// number (a tile-local offset in cells plus a fraction) at every decade: adding a planet-radius-sized or even a
+/// 1,000 km phase in metres would round to centimetres in f32 and turn the coarse decades into wide plateau bands. Two
+/// tiles agree on where a grid line is (CON-11: fractions, never planet-radius values).
+pub fn grid_phases(origin: [f64; 3]) -> [[f32; 3]; 9] {
+    GRID_SPACINGS_M.map(|s| origin.map(|v| (v / s).rem_euclid(1.0) as f32))
 }
 
 const SHADER: &str = r#"
@@ -29,10 +35,10 @@ struct Node {
     // x, y: vertex distances between which a vertex morphs to the parent grid; z, w: padding (the plan's node-level
     // `morph` is a diagnostic of the CPU selection and is not read by the shader).
     morph: vec4<f32>,
-    // Planet-fixed tile origin modulo 1 m (xyz) and modulo 1,000 km (xyz), taken in f64 on the CPU: they anchor the
-    // relief grid to the world instead of to this tile, so neighbouring tiles and LOD splits draw the same lines.
-    phase_fine: vec4<f32>,
-    phase_coarse: vec4<f32>,
+    // Per grid decade (1 cm .. 1,000 km) the fractional part of (planet-fixed tile origin / spacing), xyz, taken in f64 on
+    // the CPU: they anchor the relief grid to the world instead of to this tile, so neighbouring tiles and LOD splits draw
+    // the same lines, and keep the line coordinates small.
+    phase: array<vec4<f32>, 9>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -45,10 +51,11 @@ struct VsOut {
     @location(2) morph: f32,
     // Morphed position relative to the tile origin: small, tile-local, and what the relief grid is anchored to.
     @location(3) local: vec3<f32>,
+    @location(4) height_fine: f32,
 };
 
 @vertex
-fn vs(@location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) normal: vec3<f32>, @location(3) height: f32) -> VsOut {
+fn vs(@location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) normal: vec3<f32>, @location(3) height: f32, @location(4) coarse_height: f32) -> VsOut {
     // The morph distance is measured to the vertex's real position: node selection and the morph interval use bounding
     // volumes that include the node's height range.
     let m = clamp((length(node.origin_rel.xyz + pos) - node.morph.x) / max(node.morph.y - node.morph.x, 1e-6), 0.0, 1.0);
@@ -57,7 +64,10 @@ fn vs(@location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) 
     var out: VsOut;
     out.pos = g.view_proj * vec4<f32>(p, 1.0);
     out.normal = normal;
-    out.height = height;
+    // The height morphs with the position, so contours, tint and the metric of every height-reading view agree with the
+    // geometry and with the coarser neighbour at a border.
+    out.height = mix(height, coarse_height, m);
+    out.height_fine = height;
     out.morph = m;
     out.local = local;
     return out;
@@ -69,17 +79,31 @@ fn line(x: f32, w: f32) -> f32 {
     return 1.0 - smoothstep(0.0, max(w, 1e-6) * 1.5, d);
 }
 
-// Lines at every multiple of `base` * 10^k (k < count) of the world coordinate x (metres), given as `xf` (valid modulo
-// 1 m) for the decades up to 1 m and `xc` (valid modulo 1,000 km) above. A decade fades out continuously once its lines
-// would be closer than ~6 px, like the height contours (the width `wx` is taken by the caller).
-fn decades(xf: f32, xc: f32, wx: f32, base: f32, count: i32) -> f32 {
+// Lines at every multiple of `base` * 10^k (k < count) of x (metres). A decade fades out continuously once its lines would
+// be closer than ~6 px, like the height contours (the width `wx` is taken by the caller in uniform control flow).
+fn decades(x: f32, wx: f32, base: f32, count: i32) -> f32 {
     var acc = 0.0;
     var s = base;
     for (var k = 0; k < count; k = k + 1) {
         let w = wx / s;
         let fade = clamp((log2(1.0 / max(w, 1e-6)) - 2.5) / 2.5, 0.0, 1.0);
-        let x = select(xf, xc, s > 5.0);
         acc = max(acc, line(x / s, w) * fade);
+        s = s * 10.0;
+    }
+    return acc;
+}
+
+// The same for the world-anchored grid along one axis: a line coordinate per decade is the tile-local offset in cells plus
+// the node's f64-derived fractional phase of that decade, so it never carries a large magnitude. An f32 fraction is good
+// to about 6e-8 cells, so a decade whose pixel is narrower than ~4e-7 cells (its line could be a fraction of a pixel off)
+// fades out: distant 10 km .. 1,000 km lines vanish near the ground and the others keep their place to under 0.15 px.
+fn grid_axis(lx: f32, wx: f32, axis: i32) -> f32 {
+    var acc = 0.0;
+    var s = 0.01;
+    for (var k = 0; k < 9; k = k + 1) {
+        let w = wx / s;
+        let fade = clamp((log2(1.0 / max(w, 1e-6)) - 2.5) / 2.5, 0.0, 1.0) * smoothstep(2.0e-7, 4.0e-7, w);
+        acc = max(acc, line(lx / s + node.phase[k][axis], w) * fade);
         s = s * 10.0;
     }
     return acc;
@@ -99,15 +123,13 @@ fn relief(in: VsOut) -> vec4<f32> {
     let shade = 0.3 + 0.7 * wrap * wrap;
     let lx = in.local;
     let wgt = clamp(vec3<f32>(1.0) - abs(n) * 1.25, vec3<f32>(0.0), vec3<f32>(1.0));
-    let xf = lx + node.phase_fine.xyz;
-    let xc = lx + node.phase_coarse.xyz;
     let grid = max(
-        max(decades(xf.x, xc.x, fwidth(lx.x), 0.01, 9) * wgt.x, decades(xf.y, xc.y, fwidth(lx.y), 0.01, 9) * wgt.y),
-        decades(xf.z, xc.z, fwidth(lx.z), 0.01, 9) * wgt.z,
+        max(grid_axis(lx.x, fwidth(lx.x), 0) * wgt.x, grid_axis(lx.y, fwidth(lx.y), 1) * wgt.y),
+        grid_axis(lx.z, fwidth(lx.z), 2) * wgt.z,
     );
     // Contours start at 1 m: the f32 height is only good to a fraction of a millimetre at a few km, so finer lines would
     // flicker between glide frames.
-    let contour = decades(in.height, in.height, fwidth(in.height), 1.0, 5);
+    let contour = decades(in.height, fwidth(in.height), 1.0, 5);
     var c = tint * shade;
     c = mix(c, vec3<f32>(0.36, 0.1, 0.05), 0.7 * contour);
     c = mix(c, vec3<f32>(0.04, 0.06, 0.14), 0.8 * grid);
@@ -151,6 +173,12 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     }
     if (mode == 7u) {
         return relief(in);
+    }
+    if (mode == 8u) {
+        // The morphed minus the vertex's own height, over the plan's height range as the delta window.
+        let t = clamp((in.height - in.height_fine - g.range.x) / max(g.range.y - g.range.x, 1e-6), 0.0, 1.0);
+        let v = floor(t * 255.0 + 0.5) / 255.0;
+        return vec4<f32>(v, v, v, 1.0);
     }
     let v = clamp(band_z / 40.0 + 1.0, 0.0, 1.0);
     let k = 1.0 - 0.8 * line(band_z, w_z);
@@ -278,6 +306,7 @@ impl TerrainRenderer {
             attr(wgpu::VertexFormat::Float32x3, 1, 1),
             attr(wgpu::VertexFormat::Float32x3, 2, 2),
             attr(wgpu::VertexFormat::Float32, 3, 3),
+            attr(wgpu::VertexFormat::Float32, 4, 4),
         ];
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("terrain-pipeline"),
@@ -455,29 +484,11 @@ impl TerrainRenderer {
         for (i, d) in plan.nodes.iter().enumerate() {
             let r = d.camera_relative_origin;
             let c = d.color.map(|v| f32::from(v) / 255.0);
-            let (pf, pc) = grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]);
-            let b = f32_bytes(&[
-                r[0],
-                r[1],
-                r[2],
-                0.0,
-                c[0],
-                c[1],
-                c[2],
-                c[3],
-                d.morph_start_m,
-                d.morph_end_m,
-                0.0,
-                0.0,
-                pf[0],
-                pf[1],
-                pf[2],
-                0.0,
-                pc[0],
-                pc[1],
-                pc[2],
-                0.0,
-            ]);
+            let mut floats = vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, 0.0, 0.0];
+            for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
+                floats.extend([p[0], p[1], p[2], 0.0]);
+            }
+            let b = f32_bytes(&floats);
             nodes[i * self.stride as usize..i * self.stride as usize + NODE_BYTES as usize].copy_from_slice(&b);
         }
         ctx.queue.write_buffer(&self.nodes, 0, &nodes);

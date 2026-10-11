@@ -135,4 +135,4 @@ fn the_key_format_version_is_the_one_the_body_fields_belong_to() {
 }
 
 const KNOWN_HEIGHT_KEY: u64 = 16898139709241435207;
-const KNOWN_MESH_KEY: u64 = 17514838993888437677;
+const KNOWN_MESH_KEY: u64 = 15113604773123732121; // mesh version 4 (coarse_height)
