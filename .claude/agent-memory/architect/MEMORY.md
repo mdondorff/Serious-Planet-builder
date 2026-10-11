@@ -22,9 +22,12 @@ Confirm everything here against `main` and `docs/status.md` before acting on it.
   pipeline and hydrology (SPIKE-03), item 7 M3 acceptance and report (the gate: stop and report to the owner).
 
 ## Open threads to follow up
-1. **Morph-height defect** (sonnet-explorer): `crates/render/src/terrain.rs` vertex shader morphs the position but not the
-   height attribute, so contours and height tint step at morph borders (relief flight frame_0200). Fix: coarse height
-   per vertex mixed with the same `m`, MESH_VERSION bump, tier A/B/C tests, goldens via golden-review. Check it lands.
+1. **Ragged band in the relief flight** (sonnet-explorer, `change/morph-height`, merging after reviewers): two causes.
+   (a) Real but minor: the height attribute was not geomorphed (fixed: `coarse_height`, MESH_VERSION 4, 44-byte vertex;
+   moves `terrain_aerial200km_height` by about 850 px, max delta 33, a shaded golden that can auto-bless if declared).
+   (b) The actual band: the relief grid's coarse phase was added to tile-local f32 offsets (~6 cm rounding), making the
+   10 m decade a staircase; fixed with per-decade f64 phases. My first diagnosis named only (a): check that the merged
+   change covers both and that its goldens went through golden-review.
 2. **Relief goldens** `terrain_orbit_relief`, `terrain_ground1m_relief`: first goldens, classed lit, pending for the
    owner's `/bless`. Hold until thread 1 lands (their candidates change). Review sequence:
    `C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-explorer\target\review\flight-relief-nvidia\` (contact sheet).
@@ -47,6 +50,9 @@ Confirm everything here against `main` and `docs/status.md` before acting on it.
   the file; coders merge them.
 - An idle peer session does not read its inbox until it gets a turn (also when it hit a session limit). For a new
   coder, write the briefing to a file and ask the owner to paste it; if a coder stays idle, ask the owner to nudge it.
+- Your own diagnoses can be incomplete too: the ragged band was blamed on the unmorphed height (real, but millimetres at
+  1 m); sonnet-explorer found the real cause by switching shader parts off one at a time. Ask coders to confirm a
+  diagnosis by ablation before fixing.
 - Check reviewers' claims in the source before relaying them: they were wrong once (a mapping id already in the key)
   and right in ways that mattered (stale golden candidates, the missing driver gate, the morph-height defect).
 - Stacked PRs and squash merges conflict: after the base is squash-merged, cherry-pick the stacked commits onto a new
