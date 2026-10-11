@@ -209,31 +209,27 @@ pub fn repro(root: &Path, args: &[String]) -> Res {
     run(root, "cargo", &["run", "-q", "-p", "planet", "--", "test-render", "--adapter", adapter, "--repro", bundle, "--out", out], &[])
 }
 
-pub fn perf(root: &Path, args: &[String]) -> Res {
-    if !args.iter().any(|a| a == "--machine-ready") {
-        return Err("refusing to run: pass --machine-ready only after the owner confirms Rasierklinge is ready \
-                    (charger connected, performance power profile, discrete GPU mode). CLAUDE.md: never run perf on your own."
-            .into());
+/// The `cargo` arguments of a perf run. The harness decides readiness itself (ADR 0020: AC power, performance scheme,
+/// reference adapter, quiet machine, load and temperature, measured and refused, not asserted); `--machine-ready` is
+/// only the owner's override of a failed gate and is passed through when given.
+fn perf_cargo_args(args: &[String]) -> Result<Vec<&'static str>, String> {
+    let mut v = vec!["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", "terrain", "--adapter", "hardware"];
+    for a in args {
+        match a.as_str() {
+            "--machine-ready" => v.push("--machine-ready"),
+            other => {
+                return Err(format!(
+                    "unknown perf option '{other}' (known: --machine-ready, the owner's override of a failed readiness gate)"
+                ))
+            }
+        }
     }
-    run(
-        root,
-        "cargo",
-        &[
-            "run",
-            "--release",
-            "-p",
-            "planet",
-            "--",
-            "test-render",
-            "--perf",
-            "--scene",
-            "terrain",
-            "--adapter",
-            "hardware",
-            "--machine-ready",
-        ],
-        &[],
-    )
+    Ok(v)
+}
+
+pub fn perf(root: &Path, args: &[String]) -> Res {
+    let cargo_args = perf_cargo_args(args)?;
+    run(root, "cargo", &cargo_args, &[])
 }
 
 #[cfg(test)]
@@ -274,9 +270,13 @@ mod tests {
 
     // spec: BUILD-002
     #[test]
-    fn perf_needs_the_owner_flag() {
-        let e = perf(Path::new("."), &[]).unwrap_err();
-        assert!(e.contains("--machine-ready") && e.contains("owner"), "{e}");
+    fn perf_no_longer_needs_the_owner_flag_and_passes_it_through_only_as_an_override() {
+        let plain = perf_cargo_args(&[]).unwrap();
+        assert!(plain.contains(&"--perf") && plain.contains(&"hardware") && !plain.contains(&"--machine-ready"), "{plain:?}");
+        let over = perf_cargo_args(&s(&["--machine-ready"])).unwrap();
+        assert_eq!(over.last(), Some(&"--machine-ready"));
+        let e = perf_cargo_args(&s(&["--force"])).unwrap_err();
+        assert!(e.contains("--force") && e.contains("override"), "{e}");
     }
 }
 

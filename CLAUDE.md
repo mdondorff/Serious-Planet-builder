@@ -19,7 +19,7 @@ Working files: `docs/status.md` (progress log and stop reports), `docs/spikes.md
 - `cargo xtask accept <milestone>`: milestone acceptance
 - `cargo xtask repro <bundle>`: replay a repro bundle
 - `cargo xtask golden-review [--proposal <file>] [--extra <dir>]... [--apply]`: classify golden candidates under ADR 0017 (the `golden-review` skill)
-- `cargo xtask perf`: Rasierklinge only. Until the readiness gate of ADR 0020 is merged, only after the owner confirms the machine is ready (charger, power profile); after that, the harness's gate decides and only the architect session starts perf runs (coders never do)
+- `cargo xtask perf`: Rasierklinge only. The harness's readiness gate (ADR 0020) measures the machine and refuses when it is not ready; only the architect session starts perf runs (coders never do). `--machine-ready` is the owner's override of a failed gate
 
 Until an xtask command exists, create it in `xtask/` rather than writing a script. The shell is Git Bash on Windows; keep commands portable and never add `.sh` or `.ps1` files to the repo.
 
@@ -49,7 +49,7 @@ Write a stop report in `docs/status.md` (what was done, what is blocked, what yo
 - a test can't be made deterministic;
 - a decision is needed that no ADR or spec covers **and** it is hard to reverse (draft the ADR as "proposed" first). Easy-to-reverse decisions: draft a "proposed" ADR and keep going on it. Proposed ADRs from the background report's "decide now" list may be built on before the owner accepts them;
 - golden images are waiting for blessing and further work depends on them;
-- a performance measurement is needed on Rasierklinge;
+- a performance measurement is needed on Rasierklinge: ask the architect session to run it (it opens a perf window and the harness's gate decides); do not run `cargo xtask perf` yourself;
 - a milestone go/no-go gate is reached (after M2 and after M5);
 - the constitution would have to change.
 Otherwise, keep going.

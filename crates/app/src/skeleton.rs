@@ -446,13 +446,10 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     use planet_render::TerrainRenderer;
     // `--smoke` runs the same code path briefly on any adapter to prove it works; it is labelled and never a measurement.
     let smoke = o.perf_smoke;
+    let mut owner_override: Vec<String> = Vec::new();
     if !smoke {
-        if !o.machine_ready {
-            return Err(
-                "--machine-ready is required: the owner must confirm charger, performance power profile and discrete GPU mode".into()
-            );
-        }
         planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
+        owner_override = crate::readiness_gate(o, ctx, out)?;
     }
     let size = if smoke { (1280u32, 720u32) } else { (2560u32, 1440u32) };
     let lod = LodParams { cells: o.cells, viewport_h_px: f64::from(size.1), tau_px: o.tau, max_level: 26, ..LodParams::earth_1080p() };
@@ -465,6 +462,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     let mut reports: Vec<RunReport> = Vec::new();
     let mut budget_lines = Vec::new();
     let mut plan_lines: Vec<(&str, f64)> = Vec::new();
+    let mut noisy: Vec<(String, f64)> = Vec::new();
     if smoke {
         writeln!(out, "SMOKE RUN: exercises the perf path only; the numbers are not a measurement").map_err(err)?;
     }
@@ -516,42 +514,70 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         for _ in 0..warmup {
             renderer.render(ctx, &plan, true).map_err(|e| e.to_string())?;
         }
-        for _ in 0..runs {
-            let before = planet_perf::query_nvidia_smi();
-            let (mut total, mut cpu, mut gpu) = (Vec::new(), Vec::new(), Vec::new());
-            let mut counts = planet_render::TerrainStats::default();
-            for _ in 0..measured {
-                let (t, s) = renderer.render(ctx, &plan, true).map_err(|e| e.to_string())?;
-                total.push(t.total_ms);
-                cpu.push(t.cpu_ms);
-                gpu.extend(t.gpu_ms);
-                counts = s;
+        // Run-to-run noise above the limit gets one retry of this view's runs (ADR 0020); still noisy: the session is invalid.
+        let mut attempt = 0;
+        let batch_start = reports.len();
+        let budget_start = budget_lines.len();
+        loop {
+            for _ in 0..runs {
+                let before = planet_perf::query_nvidia_smi();
+                let (mut total, mut cpu, mut gpu) = (Vec::new(), Vec::new(), Vec::new());
+                let mut counts = planet_render::TerrainStats::default();
+                for _ in 0..measured {
+                    let (t, s) = renderer.render(ctx, &plan, true).map_err(|e| e.to_string())?;
+                    total.push(t.total_ms);
+                    cpu.push(t.cpu_ms);
+                    gpu.extend(t.gpu_ms);
+                    counts = s;
+                }
+                let stat = |v: &[f64]| summarize(v, 0).ok_or_else(|| "no valid samples".to_string());
+                let mut metrics: Vec<(String, Stats)> = vec![("cpu_ms".into(), stat(&cpu)?), ("plan_ms".into(), stat(&plan_samples)?)];
+                if !gpu.is_empty() {
+                    metrics.push(("gpu_ms".into(), stat(&gpu)?));
+                }
+                let (t_stats, g_stats) = (stat(&total)?, metrics.iter().find(|(n, _)| n == "gpu_ms").map(|(_, s)| s.clone()));
+                budget_lines.push((name, t_stats.clone(), g_stats));
+                reports.push(RunReport {
+                    path_name: format!("terrain/{name}"),
+                    vram_cap_gb: 8,
+                    stats: t_stats,
+                    clocks_before: before,
+                    clocks_after: planet_perf::query_nvidia_smi(),
+                    metrics,
+                    counts: vec![
+                        ("nodes".into(), plan.nodes.len() as u64),
+                        ("draw_calls".into(), u64::from(counts.draw_calls)),
+                        ("triangles".into(), counts.triangles),
+                        ("vertex_bytes_resident".into(), renderer.uploaded_bytes),
+                        ("resident_tiles".into(), renderer.resident_tiles() as u64),
+                    ],
+                });
             }
-            let stat = |v: &[f64]| summarize(v, 0).ok_or_else(|| "no valid samples".to_string());
-            let mut metrics: Vec<(String, Stats)> = vec![("cpu_ms".into(), stat(&cpu)?), ("plan_ms".into(), stat(&plan_samples)?)];
-            if !gpu.is_empty() {
-                metrics.push(("gpu_ms".into(), stat(&gpu)?));
+            let medians: Vec<f64> = reports[batch_start..].iter().map(|r| r.stats.median).collect();
+            if smoke || !planet_perf::gate::noise_needs_retry(&medians) || attempt == 1 {
+                if !smoke && planet_perf::gate::noise_needs_retry(&medians) {
+                    noisy.push((format!("terrain/{name}"), planet_perf::run_to_run_noise(&medians).unwrap_or(f64::NAN)));
+                }
+                break;
             }
-            let (t_stats, g_stats) = (stat(&total)?, metrics.iter().find(|(n, _)| n == "gpu_ms").map(|(_, s)| s.clone()));
-            budget_lines.push((name, t_stats.clone(), g_stats));
-            reports.push(RunReport {
-                path_name: format!("terrain/{name}"),
-                vram_cap_gb: 8,
-                stats: t_stats,
-                clocks_before: before,
-                clocks_after: planet_perf::query_nvidia_smi(),
-                metrics,
-                counts: vec![
-                    ("nodes".into(), plan.nodes.len() as u64),
-                    ("draw_calls".into(), u64::from(counts.draw_calls)),
-                    ("triangles".into(), counts.triangles),
-                    ("vertex_bytes_resident".into(), renderer.uploaded_bytes),
-                    ("resident_tiles".into(), renderer.resident_tiles() as u64),
-                ],
-            });
+            writeln!(
+                out,
+                "{name}: run-to-run noise {:.3} above {}: one retry",
+                planet_perf::run_to_run_noise(&medians).unwrap_or(f64::NAN),
+                planet_perf::gate::MAX_NOISE
+            )
+            .map_err(err)?;
+            reports.truncate(batch_start);
+            budget_lines.truncate(budget_start);
+            attempt += 1;
         }
     }
     let scheme = planet_perf::query_power_scheme();
+    let throttled: Vec<String> = reports.iter().filter(|r| crate::run_throttled(r)).map(|r| r.path_name.clone()).collect();
+    let validity = if smoke { planet_perf::gate::Validity::default() } else { planet_perf::gate::validity(&throttled, &noisy) };
+    if !smoke {
+        crate::session_verdict_line(out, &validity, &owner_override)?;
+    }
     for (name, median) in &plan_lines {
         let word = if planet_perf::plan_budget_ok(*median) { "ok" } else { "OVER" };
         writeln!(out, "  {name}: CPU plan median {median:.2} ms (budget {}) {word}", planet_perf::PLAN_CPU_BUDGET_MS).map_err(err)?;
@@ -584,7 +610,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         worst_noise = worst_noise.max(planet_perf::run_to_run_noise(&medians).unwrap_or(0.0));
     }
     writeln!(out, "worst run-to-run noise within a view (max-min)/median: {worst_noise:.3}").map_err(err)?;
-    let json = planet_perf::report_json(&crate::facts(ctx), scheme.as_deref(), o.machine_ready && !smoke, &protocol, &reports);
+    let json = planet_perf::report_json(&crate::facts(ctx), scheme.as_deref(), &owner_override, &validity, &protocol, &reports);
     if smoke && o.out.is_none() {
         return writeln!(out, "smoke run: no log written (pass --out to keep it)").map_err(err);
     }

@@ -30,8 +30,9 @@ fn perf_harness_refuses_the_software_adapter() {
 // spec: TEST-012
 #[test]
 fn the_terrain_perf_workload_refuses_unready_machines_and_the_smoke_run_is_labelled() {
+    // The adapter is checked before any sampling and is never overridable: without the flag it refuses just the same.
     let e = run(&["test-render", "--perf", "--scene", "terrain", "--adapter", "software"]).unwrap_err();
-    assert!(e.contains("--machine-ready is required"), "{e}");
+    assert!(e.contains("not a discrete GPU"), "{e}");
     let e = run(&["test-render", "--perf", "--scene", "terrain", "--adapter", "software", "--machine-ready"]).unwrap_err();
     assert!(e.contains("not a discrete GPU"), "{e}");
     let e = run(&["test-render", "--perf", "--perf-smoke", "--scene", "terrain", "--adapter", "software", "--machine-ready"]).unwrap_err();
