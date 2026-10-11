@@ -20,7 +20,8 @@ const USAGE: &str = "cargo xtask <command>
   spec-lint            trace IDs, tiers, requirement coverage (CON-16)
   accept <milestone>   run milestone acceptance, e.g. M0
   repro <bundle>       replay a repro bundle (format arrives in M1)
-  perf [--machine-ready]   performance harness on Rasierklinge (owner confirms the machine first)
+  perf [--machine-ready]   performance harness on Rasierklinge; the harness measures readiness and refuses (ADR 0020);
+                           --machine-ready is the owner's override. Only the architect session runs it
   det-diff <a> <b>     compare two determinism manifests (GEN-003; CI diffs Windows against Linux)
   golden-review [--proposal <file>] [--extra <dir>]... [--apply]   classify golden candidates under ADR 0017 (auto-bless or escalate)
   bless                list candidate goldens (agents promote under ADR 0017 via golden-review; the rest is the owner's /bless)

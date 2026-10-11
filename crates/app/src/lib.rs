@@ -31,7 +31,7 @@ modes:
     --out <file.png>         write the image
     --adapter software|hardware   adapter policy (default: PLANET_ADAPTER or software)
     --perf                   performance-harness skeleton (needs --adapter hardware and --machine-ready)
-    --machine-ready          the owner confirms charger, power profile and discrete GPU mode
+    --machine-ready          owner override of a failed readiness gate (ADR 0020); recorded in the log
     --smoke                  start and exit";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -214,6 +214,34 @@ pub(crate) fn err(e: std::io::Error) -> String {
     e.to_string()
 }
 
+/// ADR 0020: measure the machine and refuse (listing every failed condition with its measured value) unless it is ready.
+/// `--machine-ready` is the owner's explicit override: the failed conditions are printed and recorded in the log.
+/// The adapter itself is checked by the caller before this (it is never overridable and costs no sampling time).
+pub(crate) fn readiness_gate(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<Vec<String>, String> {
+    writeln!(out, "readiness gate: sampling the machine for {} s ...", planet_perf::gate::LOAD_WINDOW_S).map_err(err)?;
+    let failures = planet_perf::gate::readiness(&planet_perf::gate::measure_machine(facts(ctx)));
+    if failures.is_empty() {
+        writeln!(out, "readiness gate: ok").map_err(err)?;
+        return Ok(Vec::new());
+    }
+    let lines: Vec<String> = failures.iter().map(ToString::to_string).collect();
+    if o.machine_ready {
+        for l in &lines {
+            writeln!(out, "readiness gate FAILED (owner override --machine-ready, recorded in the log): {l}").map_err(err)?;
+        }
+        return Ok(lines);
+    }
+    Err(format!(
+        "refusing to measure: the machine is not ready (ADR 0020):\n  {}\nFix these and retry; only the owner overrides with --machine-ready.",
+        lines.join("\n  ")
+    ))
+}
+
+/// Whether a run reported throttling at its start or end (clock samples from `nvidia-smi`).
+pub(crate) fn run_throttled(r: &planet_perf::RunReport) -> bool {
+    [&r.clocks_before, &r.clocks_after].iter().filter_map(|c| c.as_ref()).any(|c| planet_perf::gate::is_throttling(&c.throttle_reasons))
+}
+
 pub(crate) fn facts(ctx: &GpuContext) -> AdapterFacts {
     AdapterFacts {
         name: ctx.adapter_name().to_string(),
@@ -270,9 +298,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
 /// It times the hello-triangle round trip as a stand-in for a frame until the renderer exists (M2).
 fn perf_skeleton(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
     planet_perf::check_reference_adapter(&facts(ctx)).map_err(|r| r.to_string())?;
-    if !o.machine_ready {
-        return Err("--machine-ready is required: the owner must confirm charger, performance power profile and discrete GPU mode".into());
-    }
+    let owner_override = readiness_gate(o, ctx, out)?;
     let protocol = Protocol { warmup_frames: 10, measured_frames: 50, runs: 3, ..Protocol::default() };
     let mut runs = Vec::new();
     for _ in 0..protocol.runs {
@@ -300,7 +326,13 @@ fn perf_skeleton(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(
     for w in planet_perf::session_warnings(&facts(ctx), scheme.as_deref(), &runs, false) {
         writeln!(out, "WARNING (not valid for time budgets): {w}").map_err(err)?;
     }
-    let json = planet_perf::report_json(&facts(ctx), planet_perf::query_power_scheme().as_deref(), o.machine_ready, &protocol, &runs);
+    let throttled: Vec<String> = runs.iter().filter(|r| run_throttled(r)).map(|r| r.path_name.clone()).collect();
+    let validity = planet_perf::gate::validity(&throttled, &[]);
+    for r in &validity.reasons {
+        writeln!(out, "INVALID SESSION: {r}").map_err(err)?;
+    }
+    let json =
+        planet_perf::report_json(&facts(ctx), planet_perf::query_power_scheme().as_deref(), &owner_override, &validity, &protocol, &runs);
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("skeleton.json"));
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(err)?;
