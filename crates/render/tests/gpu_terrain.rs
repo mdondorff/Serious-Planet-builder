@@ -8,7 +8,7 @@ use planet_frame::{level_color, plan_terrain, scripted_views, LodParams, Terrain
 use planet_generators::dump::FACE_COLORS;
 use planet_generators::mesh::{grid_indices, tile_mesh, TileMesh};
 use planet_render::{execute_terrain, AdapterPolicy, GpuContext};
-use planet_testkit::{assert_golden, Image, Tolerance};
+use planet_testkit::{GoldenChecks, Image, Tolerance};
 
 const R: f64 = 6_371_000.0;
 const SIZE: (u32, u32) = (128, 96);
@@ -156,6 +156,8 @@ fn depth_view_is_reversed_z_near_is_brighter_than_far() {
 #[test]
 fn selected_views_match_the_adapters_goldens() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    // Every golden is checked before the test fails, so one run writes every candidate (ADR 0017).
+    let mut goldens = GoldenChecks::new(&ctx.adapter_key(), &ctx.driver_string());
     for (index, view, golden) in [
         (0, TerrainView::TileId, "terrain_orbit_tile_id"),
         (3, TerrainView::Level, "terrain_aerial20km_level"),
@@ -166,13 +168,14 @@ fn selected_views_match_the_adapters_goldens() {
         let (_, plan) = plan_for(index, view);
         let meshes = meshes_for(&plan);
         let (img, _) = render(&ctx, &plan, &meshes);
-        assert_golden(&ctx.adapter_key(), &ctx.driver_string(), golden, &img, Tolerance::Exact);
+        goldens.check(golden, &img, Tolerance::Exact);
     }
     // The normals golden looks straight down at the cube corner from 3,000 km: the normal colour then changes across
     // all three faces, and a seam would show as a step. (The ground cameras only see a plane.)
     let plan = corner_normals_plan();
     let (img, _) = render(&ctx, &plan, &meshes_for(&plan));
-    assert_golden(&ctx.adapter_key(), &ctx.driver_string(), "terrain_cube_corner_normals", &img, Tolerance::Exact);
+    goldens.check("terrain_cube_corner_normals", &img, Tolerance::Exact);
+    goldens.finish();
 }
 
 fn corner_normals_plan() -> TerrainPlan {
