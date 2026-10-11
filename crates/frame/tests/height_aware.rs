@@ -302,3 +302,43 @@ fn the_node_radius_bound_covers_the_bounding_sphere_of_every_tile() {
         }
     }
 }
+
+// spec: LOD-008
+// spec: TEST-012
+#[test]
+fn a_warm_selection_cache_never_changes_a_plan() {
+    // The cache holds pure per-tile work: plans from a cache that has seen many frames (and other fields) must equal
+    // plans from nothing, bit for bit.
+    let lod = LodParams { cells: 32, viewport_h_px: 1440.0, tau_px: 6.0, max_level: 26, ..LodParams::earth_1080p() };
+    let field = Reference(1);
+    let mut cache = planet_frame::SelectionCache::new();
+    let (_, start) = scripted_views_field(R, 16.0 / 9.0, &field)[5];
+    let mut cam = start;
+    for i in 0..12 {
+        cam.position = PlanetFixed(
+            cam.position.0 + Vec3::new(0.0, 0.0, 0.0) + cam.position.0.normalized().cross(Vec3::new(0.0, 0.0, 1.0)).normalized() * 3.0,
+        );
+        let req = TerrainRequest {
+            camera: cam,
+            size: (256, 144),
+            view: TerrainView::Level,
+            lod: lod.clone(),
+            face_mapping: "tangent-v1".into(),
+            seed: 1,
+        };
+        let warm = planet_frame::plan_terrain_cached(&req, &field, &mut cache).unwrap();
+        let cold = plan_terrain_field(&req, &field).unwrap();
+        assert_eq!(warm.summary(), cold.summary(), "frame {i}");
+        assert_eq!(warm, cold, "frame {i}");
+        if i == 6 {
+            // Another field and another radius must not be served from the Reference entries.
+            let steep = Steep(1);
+            let other =
+                TerrainRequest { seed: 1, lod: LodParams { cells: 4, viewport_h_px: 192.0, tau_px: 2.5, ..lod.clone() }, ..req.clone() };
+            let w = planet_frame::plan_terrain_cached(&other, &steep, &mut cache);
+            let c = plan_terrain_field(&other, &steep);
+            assert_eq!(w.map(|p| p.summary()), c.map(|p| p.summary()));
+        }
+    }
+    assert!(!cache.is_empty());
+}

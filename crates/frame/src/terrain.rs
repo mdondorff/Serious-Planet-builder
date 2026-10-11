@@ -2,7 +2,7 @@
 //! Everything the terrain renderer needs is decided here (CON-03).
 
 use crate::camera::Camera;
-use crate::lod::{select_nodes_in_view_field, LodParams};
+use crate::lod::{select_nodes_in_view_cached, LodParams, SelectionCache};
 use crate::plan::{face_mapping_by_id, PlanError, CLEAR_COLOR, HEIGHT_RANGE};
 use planet_core::hash::hash_u64s;
 use planet_core::{PlanetFixed, TileId, Vec3};
@@ -109,6 +109,12 @@ pub fn plan_terrain(req: &TerrainRequest) -> Result<TerrainPlan, PlanError> {
 /// [`plan_terrain`] with tile origins and mesh keys from `field` (stress tests). `field.seed()` must equal `req.seed`,
 /// and the field's height bound must fit `req.lod.max_height_m` (horizon and frustum padding).
 pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Result<TerrainPlan, PlanError> {
+    plan_terrain_cached(req, field, &mut SelectionCache::new())
+}
+
+/// [`plan_terrain_field`] reusing the per-tile selection work of earlier plans in `cache` (a renderer plans every frame;
+/// the plan is identical to the uncached one).
+pub fn plan_terrain_cached(req: &TerrainRequest, field: &dyn HeightField, cache: &mut SelectionCache) -> Result<TerrainPlan, PlanError> {
     if field.seed() != req.seed {
         return Err(PlanError::HeightField(format!("field seed {} differs from request seed {}", field.seed(), req.seed)));
     }
@@ -124,7 +130,7 @@ pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Resu
         return Err(PlanError::FrameTooSmall { size: req.size, tiles: 0 });
     }
     req.lod.validate().map_err(PlanError::InvalidLod)?;
-    let selection = select_nodes_in_view_field(map.as_ref(), &req.camera, field, &req.lod);
+    let selection = select_nodes_in_view_cached(map.as_ref(), &req.camera, field, &req.lod, cache);
     // A morph interval that cannot be crack-free (the neighbourhood's height extent leaves no room) is an error, never a
     // narrowed interval: relief this steep at this tile size needs a larger viewport_h_px / tau_px or fewer cells.
     if let Some(n) = selection.nodes.iter().find(|n| n.tile.level() > 0 && n.morph_start_m > 0.95 * n.morph_end_m) {
