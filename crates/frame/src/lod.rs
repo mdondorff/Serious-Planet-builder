@@ -184,12 +184,13 @@ type IdMap<V> = std::collections::HashMap<TileId, V, std::hash::BuildHasherDefau
 
 /// Memo of the per-tile geometry and height-aware volume across selections. Both are pure functions of the tile, the
 /// face mapping, the radius and the height field, so a frame-to-frame cache changes no result (it is only looked up by
-/// key, so hash order cannot leak into results); it is emptied when any of those inputs changes and when it grows past
+/// key, so hash order cannot leak into results); it is keyed by (face mapping, field implementation id, version and seed, radius): a `HeightField` with inputs beyond those must change one of them when it changes, or its entries go stale. It is emptied when the key changes and when it grows past
 /// [`SelectionCache::MAX_TILES`]. Consecutive frames of a moving camera share most of their tiles, which is what
 /// makes planning fit a frame.
 #[derive(Default)]
 pub struct SelectionCache {
     key: u64,
+    misses: u64,
     tiles: IdMap<TileGeom>,
     volumes: IdMap<Volume>,
 }
@@ -205,6 +206,11 @@ impl SelectionCache {
     pub fn clear(&mut self) {
         self.tiles.clear();
         self.volumes.clear();
+    }
+
+    /// Tiles whose geometry had to be computed (cache misses) since the cache was created.
+    pub fn misses(&self) -> u64 {
+        self.misses
     }
 
     pub fn len(&self) -> usize {
@@ -241,12 +247,17 @@ struct GeomCache<'a> {
     p: &'a LodParams,
     tiles: &'a mut IdMap<TileGeom>,
     volumes: &'a mut IdMap<Volume>,
+    misses: &'a mut u64,
 }
 
 impl GeomCache<'_> {
     fn get(&mut self, tile: TileId) -> TileGeom {
         let (map, p) = (self.map, self.p);
-        *self.tiles.entry(tile).or_insert_with(|| tile_geom(map, tile, p))
+        let misses = &mut *self.misses;
+        *self.tiles.entry(tile).or_insert_with(|| {
+            *misses += 1;
+            tile_geom(map, tile, p)
+        })
     }
 
     /// Height-aware volume of a tile, computed on first use (the height bounds cost lattice lookups per octave).
@@ -351,8 +362,8 @@ fn select_impl(
     cache: &mut SelectionCache,
 ) -> NodeSelection {
     cache.prepare(map, field, p);
-    let SelectionCache { tiles, volumes, .. } = cache;
-    let mut geoms = GeomCache { map, field, p, tiles, volumes };
+    let SelectionCache { tiles, volumes, misses, .. } = cache;
+    let mut geoms = GeomCache { map, field, p, tiles, volumes, misses };
     let mut leaves: BTreeSet<TileId> = BTreeSet::new();
     let mut stack: Vec<TileId> = Face::ALL.iter().map(|&f| TileId::new(f, 0, 0, 0).expect("root")).collect();
     while let Some(t) = stack.pop() {
