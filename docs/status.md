@@ -5,7 +5,7 @@ Newest entries at the top. One line per event (change archived, ADR drafted, spi
 ## Waiting for the owner
 - **m3-lod-height-aware (#43): owner items resolved 2026-10-11.** (1) Five goldens blessed on WARP, llvmpipe and NVIDIA (the fifth: terrain_cube_corner_normals). (2) Perf on Rasierklinge: CPU plan 25.75 ms at ground-1m against the 8 ms budget (GPU 2.9 ms median); fixed by #46 (warm selection cache), whose official rerun is still the owner's. Draw-call budget 6,000 -> 10,000 accepted with ADR 0016. (3) ADR 0016 accepted by the owner. (4) Steep stress tests at cells 4 / ratio 77 stand; M3 acceptance must show realistic terrain planning at production parameters (cells 32, ratio 240).
 - **M2 gate: GO recorded by the owner (2026-10-11), "go with changes".** Condition: the steep-terrain finding (LOD-008, height-aware selection and morph) is the first M3 change, before any realistic terrain. Pending owner reviews carried into M3: TEST-014 flight (`target/review/flight-nvidia/`), steep views (`target/review/steep/`), ADRs 0013/0014 with an official perf run.
-- **Accept or change the proposed ADRs** 0013 and 0014 (ADRs 0001-0012 and 0015 accepted; 0009 on 2026-10-11 after its six follow-ups landed). Work proceeds on their leanings.
+- **Accept or change the proposed ADRs** 0013 and 0014 (ADRs 0001-0012 and 0015-0020 accepted; 0018 and 0019 on 2026-10-11 after the review amendments). Work proceeds on their leanings.
 - Tool note: `gh` is installed at `C:\Program Files\GitHub CLI\gh.exe` but is not on the Git Bash PATH.
 
 ## Queued for agents
