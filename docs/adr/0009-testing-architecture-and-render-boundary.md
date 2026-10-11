@@ -1,5 +1,5 @@
 # 0009 Testing architecture and render boundary
-Status: proposed
+Status: accepted
 Date: 2026-10-10
 Source: background report §16, §17; constitution CON-03, CON-16..20
 
