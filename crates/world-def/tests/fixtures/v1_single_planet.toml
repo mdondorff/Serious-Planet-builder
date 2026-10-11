@@ -1,0 +1,8 @@
+# A hand-written definition, schema version 1: comments, key order and spacing never matter to its hash.
+schema_version = 1
+
+[world]
+seed   = 42
+
+[body.0]
+radius_m = 6371000.0

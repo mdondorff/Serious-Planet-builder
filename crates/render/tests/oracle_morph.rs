@@ -27,13 +27,12 @@ fn render(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[TileMesh]) -> Image {
     Image::new(frame.width, frame.height, frame.rgba)
 }
 
-/// The shader's formula in f64: distance from the camera to the height-free reference position, mapped over the node's
+/// The shader's formula in f64: distance from the camera to the vertex position, mapped over the node's
 /// morph interval.
 fn cpu_morph(plan: &TerrainPlan, node: usize, mesh: &TileMesh, vertex: usize) -> f64 {
     let d = &plan.nodes[node];
     let v = mesh.vertices[vertex];
-    let reference =
-        d.origin.0 - plan.camera.position.0 + Vec3::new(f64::from(v.ref_pos[0]), f64::from(v.ref_pos[1]), f64::from(v.ref_pos[2]));
+    let reference = d.origin.0 - plan.camera.position.0 + Vec3::new(f64::from(v.pos[0]), f64::from(v.pos[1]), f64::from(v.pos[2]));
     ((reference.length() - f64::from(d.morph_start_m)) / f64::from(d.morph_end_m - d.morph_start_m)).clamp(0.0, 1.0)
 }
 

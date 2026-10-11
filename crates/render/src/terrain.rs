@@ -48,9 +48,10 @@ struct VsOut {
 };
 
 @vertex
-fn vs(@location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) normal: vec3<f32>, @location(3) height: f32, @location(4) ref_pos: vec3<f32>) -> VsOut {
-    // The morph distance is measured to the height-free reference position, the same quantity node selection uses.
-    let m = clamp((length(node.origin_rel.xyz + ref_pos) - node.morph.x) / max(node.morph.y - node.morph.x, 1e-6), 0.0, 1.0);
+fn vs(@location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) normal: vec3<f32>, @location(3) height: f32) -> VsOut {
+    // The morph distance is measured to the vertex's real position: node selection and the morph interval use bounding
+    // volumes that include the node's height range.
+    let m = clamp((length(node.origin_rel.xyz + pos) - node.morph.x) / max(node.morph.y - node.morph.x, 1e-6), 0.0, 1.0);
     let local = mix(pos, coarse, m);
     let p = node.origin_rel.xyz + local;
     var out: VsOut;
@@ -277,7 +278,6 @@ impl TerrainRenderer {
             attr(wgpu::VertexFormat::Float32x3, 1, 1),
             attr(wgpu::VertexFormat::Float32x3, 2, 2),
             attr(wgpu::VertexFormat::Float32, 3, 3),
-            attr(wgpu::VertexFormat::Float32x3, 4, 4),
         ];
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("terrain-pipeline"),

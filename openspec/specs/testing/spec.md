@@ -93,7 +93,7 @@ Source: CON-21, report §8
 - **THEN** it exits with an error naming the adapter and the corrective action, and no frame is measured
 
 ### Requirement: TEST-006 Performance protocol
-The performance harness SHALL discard warm-up samples, report median and 99th percentile (nearest rank) per run, reject non-finite samples, log GPU clocks, power, temperature, throttle reasons and the active power scheme, record the owner's machine-ready confirmation, and report run-to-run noise as the relative spread of run medians, and SHALL mark a session invalid for time budgets (with the reasons in the log and on the console) when the power scheme is not a performance scheme or the GPU was in a low performance state when a run started.
+The performance harness SHALL discard warm-up samples, report median and 99th percentile (nearest rank) per run, reject non-finite samples, log GPU clocks, power, temperature, throttle reasons and the active power scheme, record the owner's override of the readiness gate (`owner_override`, empty when the gate passed), and report run-to-run noise as the relative spread of run medians, and SHALL mark a session invalid for time budgets (with the reasons in the log and on the console) when the power scheme is not a performance scheme or the GPU was in a low performance state when a run started.
 
 Verify: A
 Status: active
@@ -123,15 +123,19 @@ Source: CLAUDE.md, report §16
 - **THEN** the report states 1 differing pixel, a maximum channel delta of 5, its coordinates, and the diff image path
 
 ### Requirement: TEST-008 Repro bundles
-Every visual bug SHALL be reproducible from a bundle containing camera pose or path, definition hash (zero until the WorldDefinition exists in M3), generator version, settings and adapter information, replayed by `cargo xtask repro <bundle>` (tile scenes and terrain scenes) in every run mode that renders (`test-render` and `editor --offscreen`); replay SHALL refuse a version mismatch and report any difference between the rebuilt and the recorded plan in numbers.
+Every visual bug SHALL be reproducible from a bundle containing camera pose or path, the definition hash, generator version, settings and adapter information, replayed by `cargo xtask repro <bundle>` (tile scenes and terrain scenes) in every run mode that renders (`test-render` and `editor --offscreen`); replay SHALL refuse a version mismatch, SHALL refuse a definition hash this build cannot rebuild (the single planet of the recorded seed and radius is the only definition it can) and a missing (zero) hash, each with the recorded and rebuilt hashes, and SHALL report any difference between the rebuilt and the recorded plan in numbers.
 
 Verify: A
 Status: active
-Source: CON-19
+Source: CON-19, ADR 0006
 
 #### Scenario: Replay
 - **WHEN** a bundle is replayed
 - **THEN** the same FramePlan is produced and the run reports any difference in numbers
+
+#### Scenario: Foreign definition
+- **WHEN** a bundle records a definition hash this build cannot rebuild, or none
+- **THEN** replay refuses it with the hashes and what to do, before replanning
 
 #### Scenario: Terrain replay
 - **WHEN** a terrain bundle recorded with a seed is replayed with another seed, another generator or mesh version, or a tampered plan
@@ -183,15 +187,15 @@ Source: CON-20
 - **THEN** the draw calls, triangles and uploaded vertex bytes the renderer reports equal the counts derived from the plan
 
 ### Requirement: TEST-012 Terrain performance workload
-The performance harness SHALL provide a terrain frame workload at 1440p over scripted views from orbit to 1 m that generates and uploads meshes once, then reports per run the GPU time (timestamp queries), CPU planning time, CPU record time, wall time and the deterministic counts (nodes, draw calls, triangles, resident vertex bytes), checks the terrain budget (median GPU time at most 8 ms, p99 frame time at most 20 ms) and the CPU planning budget (median time to plan a frame from scratch at most 8 ms per view), refuses unready machines like every performance run, and offers a labelled smoke mode that exercises the path on any adapter without being a measurement.
+The performance harness SHALL provide a terrain frame workload at 1440p over scripted views from orbit to 1 m that generates and uploads meshes once, then reports per run the GPU time (timestamp queries), CPU planning time, CPU record time, wall time and the deterministic counts (nodes, draw calls, triangles, resident vertex bytes), checks the terrain budget (median GPU time at most 8 ms, p99 frame time at most 20 ms) and the CPU planning budget (median time to plan a frame at most 8 ms per view in steady state: with the per-tile selection cache warm and the camera stepping a few centimetres per plan; the cold first plan is reported beside it), measures the machine before any measured run and refuses, listing every failed condition with its measured value, unless it is ready (ADR 0020): AC power connected, a performance power scheme, the reference adapter, no `cargo`, `rustc`, `cargo-nextest`, `planet` or `clippy-driver` process outside the harness's own process tree, mean CPU load below 15 % and mean GPU utilisation below 10 % over 10 s, GPU temperature below 70 degrees C; the owner's `--machine-ready` overrides a failed gate and the override and the failed conditions are recorded in the log (`owner_override`); after the run the session is valid only if no run reported GPU throttling in the clock samples taken at its start and end (a missing sample counts) and the run-to-run noise of every view is at most 10 % (one retry of that view's runs), otherwise the session says so before it prints any verdict (`SESSION INVALID for budgets`, and in the log) and its verdicts do not count; it offers a labelled smoke mode that exercises the path on any adapter without being a measurement. Every gate and validity rule is a pure function over measured facts.
 
 Verify: C
 Status: active
 Source: CON-20, CON-21
 
 #### Scenario: Refusal
-- **WHEN** the workload is started on a software adapter with the machine-ready flag
-- **THEN** it refuses with the adapter and the corrective action
+- **WHEN** the workload is started on a software adapter, with or without the machine-ready flag
+- **THEN** it refuses with the adapter and the corrective action (the adapter is never overridable: CON-21 requires the discrete GPU confirmed by the harness)
 
 #### Scenario: Smoke
 - **WHEN** the smoke mode runs on the software adapter
@@ -199,7 +203,27 @@ Source: CON-20, CON-21
 
 #### Scenario: Plan time verdict
 - **WHEN** the terrain workload has planned a view
-- **THEN** it reports the median CPU plan time with the 8 ms budget and a verdict (ok or OVER) for that view
+- **THEN** it reports the median warm CPU plan time with the 8 ms budget and a verdict (ok or OVER), and the cold plan time, for that view
+
+#### Scenario: Cache equivalence
+- **WHEN** plans are made with a cache that has seen earlier frames and another field
+- **THEN** every plan equals the plan made without a cache, bit for bit
+
+#### Scenario: Readiness gate refusal
+- **WHEN** the gate sees battery power, a non-performance power scheme, a build process outside the harness's process tree, CPU load or GPU utilisation at or above its limit, or a GPU temperature at or above 70 degrees C
+- **THEN** it refuses and reports every failed condition with its measured value; a value that could not be read is a refusal, never a pass
+
+#### Scenario: Harness process tree
+- **WHEN** the process table holds `cargo` ancestors of the harness and a child of the harness
+- **THEN** they are not counted; a `cargo` or `rustc` process elsewhere (including a sibling of an ancestor) is
+
+#### Scenario: Owner override
+- **WHEN** the gate fails and the owner passed `--machine-ready`
+- **THEN** the run continues, the failed conditions are printed, the log records them under `owner_override`, and the session is not valid for budgets
+
+#### Scenario: Session validity
+- **WHEN** a run reports throttling (software power cap, hardware slowdown, thermal or power brake) or a view's run-to-run noise stays above 10 % after one retry
+- **THEN** the session prints `SESSION INVALID for budgets` with the reasons before any verdict and the log has `valid_for_budgets` false
 
 ### Requirement: TEST-013 Flight sequence for the real-GPU review
 `planet test-render --scene terrain --flight N --out-dir DIR` SHALL render a scripted, deterministic flight (a log-spaced dive from 20,000 km to 1 m above the terrain, then a glide at 1 m in steps of 5 cm) through the persistent terrain renderer with the production LOD defaults (cells 32, tau 6 px; overridable with `--cells`, `--tau`) at a chosen size on the adapter selected by `--adapter` or `PLANET_ADAPTER`, in the `relief` view unless `--view` names another, writing `frame_NNNN.png`, an index `flight.txt` (frame, altitude above terrain, node count, plan hash, finest level) and `contact_sheet.png` (up to 12 frames evenly spaced from the first to the last, each labelled with its frame number and altitude). Options a flight would ignore, and flight-only options outside a flight, SHALL be rejected before any GPU work.
@@ -237,11 +261,11 @@ Source: CON-13, CON-18, ADR 0014
 - **THEN** the owner confirms or rejects it, and the verdict is recorded in `docs/status.md`
 
 ### Requirement: TEST-015 Steep-terrain stress
-A test-only steep height field (`generators::stress::Steep`, behind the `stress` feature that only dev-dependencies enable: ridged, `|h| <= 8 km`, about -5.5 to +6 km in practice, 20 m slopes above 27 degrees; its own implementation id and version enter its height and mesh keys) SHALL pass the crack, morph, border and precision invariants of the reference terrain with the reference tolerances (GEN-004, REND-009, LOD-004, LOD-005): border positions and normals of neighbouring tiles across every cube edge, fully morphed borders on the coarser neighbour's border polyline, morph closing every level transition in the ten scripted views, deep-tile vertices within 1 mm, vertices within 0.25 px at 1 m on the leaf that selection picks under the camera, and no holes in the ten scripted views on the GPU. Plans with a field whose seed or height bound does not fit the request SHALL be rejected with a plan error. The reference field through the field-generic paths SHALL be bit-identical to the existing paths.
+A test-only steep height field (`generators::stress::Steep`, behind the `stress` feature that only dev-dependencies enable: ridged, `|h| <= 8 km`, about -5.5 to +6 km in practice, 20 m slopes above 27 degrees; its own implementation id and version enter its height and mesh keys) SHALL pass the crack, morph, border and precision invariants of the reference terrain with the reference tolerances (GEN-004, REND-009, LOD-004, LOD-005, LOD-008): border positions and normals of neighbouring tiles across every cube edge, fully morphed borders on the coarser neighbour's border polyline, morph closing every level transition in the ten scripted views, deep-tile vertices within 1 mm, vertices within 0.25 px at 1 m on the leaf that selection picks under the camera, and no holes in the ten scripted views on the GPU (with the leaf level capped at 19: on WARP a full-depth view exceeds the test time limit; levels 20 to 26 are covered by the tier-A checks). The selection-dependent checks SHALL run with parameters for which a crack-free morph interval exists on this field (`viewport_h_px / tau_px` of about 17 times `cells` or more: cells 4 at 77 and cells 8 at 180 in the tests), and the plan SHALL reject production parameters (cells 32 at 240) on this field with a plan error (LOD-008). Plans with a field whose seed or height bound does not fit the request SHALL be rejected with a plan error. The reference field through the field-generic paths SHALL equal the default paths.
 
 Verify: C
 Status: active
-Source: CON-11, CON-13, ADR 0003, ADR 0006, ADR 0014, M2 report (SPIKE-02 caveat)
+Source: CON-11, CON-13, ADR 0003, ADR 0006, ADR 0014, ADR 0016, M2 report (SPIKE-02 caveat)
 
 #### Scenario: Steep invariants
 - **WHEN** the tier-A and tier-C checks run on the steep field
@@ -249,7 +273,7 @@ Source: CON-11, CON-13, ADR 0003, ADR 0006, ADR 0014, M2 report (SPIKE-02 caveat
 
 #### Scenario: Reference unchanged
 - **WHEN** a mesh, height or mesh key, plan or scripted view is built through the field-generic path with the reference field
-- **THEN** it equals the existing path bit for bit (mesh and key compared directly; plans and views through the unchanged snapshots of TEST-009 and LOD-002 and the determinism manifest of GEN-003)
+- **THEN** it equals the default path bit for bit (mesh and key compared directly; plans and views through the same snapshots and the determinism manifest of GEN-003)
 
 #### Scenario: Stress field versioned
 - **WHEN** the committed stress mesh is generated

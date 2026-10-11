@@ -33,7 +33,7 @@ Source: CON-02, ADR 0004, ADR 0008, ADR 0015
 - **THEN** `cargo xtask layering` fails with file and line
 
 ### Requirement: BUILD-002 Single command surface
-All build, test and tooling commands SHALL be available through `cargo xtask`, the repository SHALL contain no `.sh` or `.ps1` files, and the performance command SHALL refuse to run unless the owner's machine-ready flag is given.
+All build, test and tooling commands SHALL be available through `cargo xtask`, the repository SHALL contain no `.sh` or `.ps1` files, and the performance command SHALL leave readiness to the harness's measured gate (ADR 0020), passing the owner's `--machine-ready` only as an override of a failed gate and rejecting other options.
 
 Verify: A
 Status: active
@@ -43,9 +43,9 @@ Source: CON-25, CLAUDE.md
 - **WHEN** a `.sh` or `.ps1` file exists in the repository outside `target/`
 - **THEN** the repository check test fails and lists the file
 
-#### Scenario: Perf without confirmation
-- **WHEN** `cargo xtask perf` runs without `--machine-ready`
-- **THEN** it exits with an error that names the owner confirmation and runs nothing
+#### Scenario: Perf options
+- **WHEN** `cargo xtask perf` is built into a command line
+- **THEN** `--machine-ready` is passed through only when given, and any other option is an error naming the override
 
 ### Requirement: BUILD-003 Tiered test commands
 `cargo xtask test fast` SHALL run tier A tests for the changed crates and every crate above them, `cargo xtask test` SHALL run tiers A and B, and `cargo xtask test gpu` SHALL run tier C; tiers SHALL be selected by test-binary name (`gpu_*` is tier C, `oracle_*` tier B, all others tier A) on the software adapter unless `--real` is given. `cargo xtask test gpu --real` SHALL also run the tier-B oracles, on the real adapter.

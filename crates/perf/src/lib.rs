@@ -2,6 +2,8 @@
 //! warm-up, medians and p99, JSON run logs. GPU-free: adapter facts arrive as plain structs and the
 //! frame loop itself is supplied by the renderer once it exists (M2).
 
+pub mod gate;
+
 use std::process::Command;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -261,11 +263,16 @@ pub fn session_warnings(adapter: &AdapterFacts, power_scheme: Option<&str>, runs
 pub fn report_json(
     adapter: &AdapterFacts,
     power_scheme: Option<&str>,
-    owner_confirmed: bool,
+    owner_override: &[String],
+    validity: &gate::Validity,
     protocol: &Protocol,
     runs: &[RunReport],
 ) -> String {
-    let warnings = session_warnings(adapter, power_scheme, runs, protocol.smoke);
+    let mut warnings = session_warnings(adapter, power_scheme, runs, protocol.smoke);
+    warnings.extend(validity.reasons.iter().cloned());
+    if !owner_override.is_empty() {
+        warnings.push(format!("the owner overrode the readiness gate (failed: {})", owner_override.join("; ")));
+    }
     let run_json: Vec<String> = runs
         .iter()
         .map(|r| {
@@ -287,12 +294,12 @@ pub fn report_json(
         })
         .collect();
     format!(
-        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_confirmed_machine_ready\":{},\"valid_for_budgets\":{},\"warnings\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}]}},\"runs\":[{}]}}\n",
+        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"warnings\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}]}},\"runs\":[{}]}}\n",
         json_str(&adapter.name),
         json_str(&adapter.backend),
         power_scheme.map_or("null".to_string(), json_str),
-        owner_confirmed,
-        warnings.is_empty() && owner_confirmed,
+        owner_override.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
+        warnings.is_empty(),
         warnings.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
         protocol.warmup_frames,
         protocol.measured_frames,
@@ -371,14 +378,10 @@ mod tests {
             metrics: vec![],
             counts: vec![],
         };
-        let j = report_json(&a, Some("Power Scheme GUID: x (High performance)"), true, &Protocol::default(), &[run]);
-        for needle in [
-            "\"owner_confirmed_machine_ready\":true",
-            "\"median_ms\":16.5",
-            "\"clocks_after\":null",
-            "\"power_w\":3",
-            "\"vram_caps_gb\":[8, 14]",
-        ] {
+        let j =
+            report_json(&a, Some("Power Scheme GUID: x (High performance)"), &[], &gate::Validity::default(), &Protocol::default(), &[run]);
+        for needle in ["\"owner_override\":[]", "\"median_ms\":16.5", "\"clocks_after\":null", "\"power_w\":3", "\"vram_caps_gb\":[8, 14]"]
+        {
             assert!(j.contains(needle), "missing {needle} in {j}");
         }
     }
@@ -415,7 +418,8 @@ mod warning_tests {
         let j = report_json(
             &AdapterFacts { name: "RTX 3080 Ti".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete },
             Some(balanced),
-            true,
+            &[],
+            &gate::Validity::default(),
             &Protocol::default(),
             &[run_with("P8")],
         );
@@ -441,10 +445,17 @@ mod warning_tests {
         }
         assert!(session_warnings(&rtx(), None, &[], false).iter().any(|w| w.contains("could not be read")));
         let a = AdapterFacts { name: "RTX 3080 Ti".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete };
-        let j = report_json(&a, Some("High performance"), true, &Protocol::default(), &[run_with("P0")]);
+        let j = report_json(&a, Some("High performance"), &[], &gate::Validity::default(), &Protocol::default(), &[run_with("P0")]);
         assert!(j.contains("\"valid_for_budgets\":true"), "{j}");
-        let j = report_json(&a, Some("High performance"), false, &Protocol::default(), &[run_with("P0")]);
-        assert!(j.contains("\"valid_for_budgets\":false"), "without the owner's confirmation nothing is valid for budgets");
+        let over = ["AC power connected: running on battery".to_string()];
+        let j = report_json(&a, Some("High performance"), &over, &gate::Validity::default(), &Protocol::default(), &[run_with("P0")]);
+        assert!(
+            j.contains("\"valid_for_budgets\":false") && j.contains("\"owner_override\":[\"AC power"),
+            "an overridden gate is recorded and not valid: {j}"
+        );
+        let noisy = gate::validity(&[], &[("terrain/x".into(), 0.2)]);
+        let j = report_json(&a, Some("High performance"), &[], &noisy, &Protocol::default(), &[run_with("P0")]);
+        assert!(j.contains("\"valid_for_budgets\":false") && j.contains("noise 0.200"), "{j}");
     }
 }
 
@@ -465,7 +476,7 @@ mod metric_tests {
             metrics: vec![("gpu_ms".into(), summarize(&[3.0, 4.0, 5.0], 0).unwrap())],
             counts: vec![("draw_calls".into(), 772), ("triangles".into(), 790_528)],
         };
-        let j = report_json(&a, Some("High performance"), true, &Protocol::default(), &[run]);
+        let j = report_json(&a, Some("High performance"), &[], &gate::Validity::default(), &Protocol::default(), &[run]);
         for needle in ["\"metrics\":{\"gpu_ms\":{\"median\":4", "\"counts\":{\"draw_calls\":772,\"triangles\":790528}"] {
             assert!(j.contains(needle), "missing {needle} in {j}");
         }
@@ -519,7 +530,7 @@ mod budget_tests {
         let proto = Protocol { smoke: true, ..Protocol::default() };
         let rtx =
             AdapterFacts { name: "NVIDIA GeForce RTX 3080 Ti Laptop GPU".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete };
-        let j = report_json(&rtx, Some("High performance"), true, &proto, &[]);
+        let j = report_json(&rtx, Some("High performance"), &[], &gate::Validity::default(), &proto, &[]);
         assert!(j.contains("\"valid_for_budgets\":false") && j.contains("smoke run"), "{j}");
     }
 }

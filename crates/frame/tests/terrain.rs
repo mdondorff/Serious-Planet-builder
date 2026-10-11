@@ -360,7 +360,7 @@ fn a_terrain_bundle_round_trips_and_detects_corruption() {
     let bundle = TerrainBundle {
         generator_version: 2,
         implementation_id: "cpu-ref-height-v2".into(),
-        mesh_version: 2,
+        mesh_version: planet_generators::mesh::MESH_VERSION,
         definition_hash: 0,
         adapter: "test-adapter".into(),
         request: request.clone(),
@@ -409,9 +409,9 @@ fn plan_counts_stay_within_the_budget_over_the_scripted_views() {
         // The counts follow from the plan: one draw call per node, equal triangle counts per node, one buffer per tile.
         assert_eq!(c.draw_calls as usize, plan.nodes.len(), "{name}");
         // Per-tile constants at cells = 32 (the budget below is derived from them): 2 x 32^2 grid triangles plus 4 skirt strips of
-        // 32 quads; 33^2 grid vertices plus 4 x 33 skirt vertices at 13 f32 each.
+        // 32 quads; 33^2 grid vertices plus 4 x 33 skirt vertices at 10 f32 each.
         assert_eq!(c.triangles, plan.nodes.len() as u64 * 2_304, "{name}");
-        assert_eq!(c.upload_bytes, u64::from(c.resident_tiles) * 1_221 * 52, "{name}");
+        assert_eq!(c.upload_bytes, u64::from(c.resident_tiles) * 1_221 * 40, "{name}");
         assert_eq!(c.resident_tiles as usize, plan.nodes.len(), "{name}: every node of a plan is a distinct tile");
         c.check(&CountBudget::REFERENCE_1440P).unwrap_or_else(|e| panic!("{name}: {e}"));
         worst = worst.max(c.draw_calls);

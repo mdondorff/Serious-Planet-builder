@@ -2,7 +2,7 @@
 //! Everything the terrain renderer needs is decided here (CON-03).
 
 use crate::camera::Camera;
-use crate::lod::{select_nodes_in_view, LodParams};
+use crate::lod::{select_nodes_in_view_cached, LodParams, SelectionCache};
 use crate::plan::{face_mapping_by_id, PlanError, CLEAR_COLOR, HEIGHT_RANGE};
 use planet_core::hash::hash_u64s;
 use planet_core::{PlanetFixed, TileId, Vec3};
@@ -114,6 +114,12 @@ pub fn plan_terrain(req: &TerrainRequest) -> Result<TerrainPlan, PlanError> {
 /// [`plan_terrain`] with tile origins and mesh keys from `field` (stress tests). `field.seed()` must equal `req.seed`,
 /// and the field's height bound must fit `req.lod.max_height_m` (horizon and frustum padding).
 pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Result<TerrainPlan, PlanError> {
+    plan_terrain_cached(req, field, &mut SelectionCache::new())
+}
+
+/// [`plan_terrain_field`] reusing the per-tile selection work of earlier plans in `cache` (a renderer plans every frame;
+/// the plan is identical to the uncached one).
+pub fn plan_terrain_cached(req: &TerrainRequest, field: &dyn HeightField, cache: &mut SelectionCache) -> Result<TerrainPlan, PlanError> {
     if field.seed() != req.seed {
         return Err(PlanError::HeightField(format!("field seed {} differs from request seed {}", field.seed(), req.seed)));
     }
@@ -129,7 +135,21 @@ pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Resu
         return Err(PlanError::FrameTooSmall { size: req.size, tiles: 0 });
     }
     req.lod.validate().map_err(PlanError::InvalidLod)?;
-    let selection = select_nodes_in_view(map.as_ref(), &req.camera, &req.lod);
+    let selection = select_nodes_in_view_cached(map.as_ref(), &req.camera, field, &req.lod, cache);
+    // A morph interval that cannot be crack-free (the neighbourhood's height extent leaves no room) is an error, never a
+    // narrowed interval: relief this steep at this tile size needs a larger viewport_h_px / tau_px or fewer cells.
+    if let Some(n) = selection.nodes.iter().find(|n| n.tile.level() > 0 && n.morph_start_m > 0.95 * n.morph_end_m) {
+        return Err(PlanError::InvalidLod(format!(
+            "tile {:?} (level {}): morph interval [{:.1}, {:.1}] m is empty because the height extent of its neighbourhood leaves no room; \
+             this terrain is too steep for cells {} and viewport_h_px / tau_px {:.0}: raise viewport_h_px / tau_px or reduce cells",
+            n.tile,
+            n.tile.level(),
+            n.morph_start_m,
+            n.morph_end_m,
+            req.lod.cells,
+            req.lod.viewport_h_px / req.lod.tau_px
+        )));
+    }
     let keyer = planet_generators::mesh::MeshKeyer::new(field, map.as_ref(), req.lod.cells, req.lod.radius_m);
     let nodes = selection
         .nodes
@@ -138,10 +158,6 @@ pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Resu
             let centre = n.tile.center_direction(map.as_ref());
             let origin = PlanetFixed(centre * (req.lod.radius_m + field.height(centre)));
             let rel = origin.0 - req.camera.position.0;
-            let (start, end) = match n.tile.level() {
-                0 => (1.0e30, 1.0e30),
-                l => req.lod.morph_interval(l),
-            };
             let color = match req.view {
                 TerrainView::Face => FACE_COLORS[n.tile.face().0 as usize],
                 TerrainView::TileId => tile_id_color(n.tile),
@@ -154,8 +170,8 @@ pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Resu
                 origin,
                 camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32],
                 morph: n.morph,
-                morph_start_m: start as f32,
-                morph_end_m: end as f32,
+                morph_start_m: n.morph_start_m as f32,
+                morph_end_m: n.morph_end_m as f32,
                 color,
                 mesh_key: keyer.key(n.tile),
             }
@@ -195,13 +211,14 @@ pub struct CountBudget {
 }
 
 impl CountBudget {
-    /// Budget for the 1440p production-like workload (cells 32, tau 6 px; ADR 0013): measured worst case is 5,108 draws at
-    /// 1 m altitude, so 6,000 leaves headroom without hiding a doubling.
+    /// Budget for the 1440p production-like workload (cells 32, tau 6 px; ADR 0013): the measured worst case is 8,687 draws at
+    /// 1 m above the terrain (LOD-008: 5,108 while selection mistook the terrain height for altitude), so 10,000 leaves
+    /// headroom without hiding a doubling.
     pub const REFERENCE_1440P: CountBudget = CountBudget {
-        max_draw_calls: 6_000,
-        max_triangles: 6_000 * 2_304,
-        max_resident_tiles: 6_000,
-        max_upload_bytes: 6_000 * 1_221 * 52,
+        max_draw_calls: 10_000,
+        max_triangles: 10_000 * 2_304,
+        max_resident_tiles: 10_000,
+        max_upload_bytes: 10_000 * 1_221 * 40,
     };
 }
 

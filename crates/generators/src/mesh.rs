@@ -20,9 +20,6 @@ pub struct MeshVertex {
     pub normal: [f32; 3],
     /// Terrain height above the sphere, metres.
     pub height: f32,
-    /// Position on the reference sphere (height 0) below this vertex, same space as `pos`: the height-free point the
-    /// morph distance is measured to, matching how node selection measures distance.
-    pub ref_pos: [f32; 3],
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -49,8 +46,9 @@ pub fn vertex_count(cells: u32) -> usize {
 pub const SKIRT_FRACTION: f64 = 0.08;
 
 /// Version of the mesh construction (ADR 0006): bump it whenever vertex output changes for the same inputs (skirt
-/// depth, normal stencil, origin rule, vertex layout). History: 1 = first meshes; 2 = seam-consistent normals (#15).
-pub const MESH_VERSION: u32 = 2;
+/// depth, normal stencil, origin rule, vertex layout). History: 1 = first meshes; 2 = seam-consistent normals (#15);
+/// 3 = no `ref_pos` attribute: the morph distance is measured to the real vertex position (LOD-008).
+pub const MESH_VERSION: u32 = 3;
 
 /// Key of a mesh: the height key of the tile (generator, seed, mapping, tile; resolution = `cells`), the grid size, the
 /// radius bits, the skirt fraction bits and [`MESH_VERSION`].
@@ -60,17 +58,35 @@ pub fn mesh_key(map: &dyn FaceMapping, seed: u64, id: TileId, cells: u32, radius
 
 /// [`mesh_key`] with the construction constants as arguments, so tests can show that each one changes the key.
 pub fn mesh_key_with(map: &dyn FaceMapping, seed: u64, id: TileId, cells: u32, radius_m: f64, version: u32, skirt_fraction: f64) -> u64 {
-    mesh_key_chain(cache_key_field(&Reference(seed), map, id, cells), cells, radius_m, version, skirt_fraction)
+    let field = Reference(seed);
+    mesh_key_chain(cache_key_field(&field, map, id, cells), cells, body_params(&field, radius_m), version, skirt_fraction)
 }
 
-fn mesh_key_chain(height_key: u64, cells: u32, radius_m: f64, version: u32, skirt_fraction: f64) -> u64 {
-    hash_u64s(0x006d_6573, &[u64::from(version), height_key, u64::from(cells), radius_m.to_bits(), skirt_fraction.to_bits()])
+/// The body parameter hash of a field (ADR 0001, 0007): body id, seed, radius and reference surface.
+fn body_params(field: &dyn HeightField, radius_m: f64) -> u64 {
+    planet_world_def::body_params_hash(field.body(), field.seed(), radius_m, field.surface_id())
+}
+
+fn mesh_key_chain(height_key: u64, cells: u32, body_params: u64, version: u32, skirt_fraction: f64) -> u64 {
+    // The key format version is named here too: it reaches the height key's words, but a mesh-only change of this
+    // composition must have a constant to bump.
+    hash_u64s(
+        0x006d_6573,
+        &[
+            u64::from(version),
+            u64::from(crate::height::KEY_FORMAT_VERSION),
+            height_key,
+            u64::from(cells),
+            body_params,
+            skirt_fraction.to_bits(),
+        ],
+    )
 }
 
 /// [`mesh_key`] for a height field: it chains the field's height key ([`cache_key_field`]), so [`Reference`] gives
 /// exactly [`mesh_key`] and any other field (other implementation id or version) gets other keys (ADR 0006).
 pub fn mesh_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> u64 {
-    mesh_key_chain(cache_key_field(field, map, id, cells), cells, radius_m, MESH_VERSION, SKIRT_FRACTION)
+    mesh_key_chain(cache_key_field(field, map, id, cells), cells, body_params(field, radius_m), MESH_VERSION, SKIRT_FRACTION)
 }
 
 /// [`mesh_key_field`] for many tiles of one field, mapping, grid size and radius: the string hashes of the field's
@@ -78,9 +94,10 @@ pub fn mesh_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId
 /// this 5,000 times). `key(tile)` equals `mesh_key_field(field, map, tile, cells, radius_m)` exactly.
 pub struct MeshKeyer {
     version: u64,
-    seed: u64,
+    inputs: u64,
     cells: u32,
-    radius_bits: u64,
+    body_params: u64,
+    body_words: [u64; 3],
     implementation_hash: u64,
     mapping_hash: u64,
 }
@@ -89,9 +106,10 @@ impl MeshKeyer {
     pub fn new(field: &dyn HeightField, map: &dyn FaceMapping, cells: u32, radius_m: f64) -> MeshKeyer {
         MeshKeyer {
             version: u64::from(field.version()),
-            seed: field.seed(),
+            inputs: field.inputs_hash(),
             cells,
-            radius_bits: radius_m.to_bits(),
+            body_params: body_params(field, radius_m),
+            body_words: crate::height::body_key_words(field),
             implementation_hash: hash_u64s(1, &crate::height::fold_str(field.implementation_id())),
             mapping_hash: hash_u64s(2, &crate::height::fold_str(map.id())),
         }
@@ -103,14 +121,17 @@ impl MeshKeyer {
             &[
                 self.version,
                 u64::from(HASH_VERSION),
-                self.seed,
+                self.inputs,
                 id.raw(),
                 u64::from(self.cells),
                 self.implementation_hash,
                 self.mapping_hash,
+                self.body_words[0],
+                self.body_words[1],
+                self.body_words[2],
             ],
         );
-        mesh_key_chain(height_key, self.cells, f64::from_bits(self.radius_bits), MESH_VERSION, SKIRT_FRACTION)
+        mesh_key_chain(height_key, self.cells, self.body_params, MESH_VERSION, SKIRT_FRACTION)
     }
 }
 
@@ -178,7 +199,6 @@ pub fn tile_mesh_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
                 coarse: local(coarse),
                 normal: [normal.x as f32, normal.y as f32, normal.z as f32],
                 height: heights[j as usize * width + i as usize] as f32,
-                ref_pos: local(at(i, j).normalized() * radius_m),
             });
         }
     }
@@ -195,7 +215,7 @@ pub fn tile_mesh_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
         let radial = (origin.0 + Vec3::new(f64::from(v.pos[0]), f64::from(v.pos[1]), f64::from(v.pos[2]))).normalized() * depth;
         let down =
             |p: [f32; 3]| [(f64::from(p[0]) - radial.x) as f32, (f64::from(p[1]) - radial.y) as f32, (f64::from(p[2]) - radial.z) as f32];
-        vertices.push(MeshVertex { pos: down(v.pos), coarse: down(v.coarse), ref_pos: down(v.ref_pos), ..v });
+        vertices.push(MeshVertex { pos: down(v.pos), coarse: down(v.coarse), ..v });
     }
     TileMesh { id, cells, key: mesh_key_field(field, map, id, cells, radius_m), origin, vertices }
 }
@@ -226,16 +246,16 @@ pub fn grid_indices(cells: u32) -> Vec<u32> {
 }
 
 impl MeshVertex {
-    /// Number of f32 values per vertex in GPU order: `pos`, `coarse`, `normal`, `height`, `ref_pos`.
-    pub const FLOATS: usize = 13;
+    /// Number of f32 values per vertex in GPU order: `pos`, `coarse`, `normal`, `height`.
+    pub const FLOATS: usize = 10;
     /// Byte stride of a vertex buffer entry.
     pub const STRIDE: u64 = (Self::FLOATS * 4) as u64;
-    /// The attribute offsets (in floats) of `pos`, `coarse`, `normal`, `height` and `ref_pos`.
-    pub const OFFSETS: [usize; 5] = [0, 3, 6, 9, 10];
+    /// The attribute offsets (in floats) of `pos`, `coarse`, `normal` and `height`.
+    pub const OFFSETS: [usize; 4] = [0, 3, 6, 9];
 
     pub fn to_floats(&self) -> [f32; Self::FLOATS] {
-        let (p, c, n, r) = (self.pos, self.coarse, self.normal, self.ref_pos);
-        [p[0], p[1], p[2], c[0], c[1], c[2], n[0], n[1], n[2], self.height, r[0], r[1], r[2]]
+        let (p, c, n) = (self.pos, self.coarse, self.normal);
+        [p[0], p[1], p[2], c[0], c[1], c[2], n[0], n[1], n[2], self.height]
     }
 }
 

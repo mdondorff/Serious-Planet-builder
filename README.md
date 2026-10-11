@@ -55,7 +55,7 @@ Everything goes through `cargo xtask`:
 | `cargo xtask repro <bundle>` | replay a repro bundle |
 | `cargo xtask det-diff <a> <b>` | compare Windows and Linux determinism manifests |
 | `cargo xtask bless` | list candidate golden images (promotion is the owner's `/bless`) |
-| `cargo xtask perf --machine-ready` | performance harness; only on the owner's machine once charger and power profile are set |
+| `cargo xtask perf` | performance harness on Rasierklinge; it measures readiness (AC power, performance scheme, quiet machine, load, temperature) and refuses otherwise; architect session only; `--machine-ready` is the owner's override |
 
 Golden images are never updated by agents: candidates are queued in `tests/goldens/pending.txt` for the owner. Failure output goes to `target/review/` (diff images, numeric deltas).
 

@@ -15,7 +15,7 @@ fn lod() -> LodParams {
 // spec: REND-009, LOD-004
 #[test]
 fn morph_closes_the_gap_between_levels_in_every_scripted_view() {
-    // The shader formula in f64: a vertex distance is measured to its height-free reference position.
+    // The shader formula in f64: a vertex distance is measured to the vertex position.
     let map = TangentWarp;
     let configs = [
         ("test", lod()),
@@ -42,8 +42,7 @@ fn morph_closes_the_gap_between_levels_in_every_scripted_view() {
                 let mesh = tile_mesh(1, &map, d.tile, params.cells, R);
                 let morph_at = |i: usize, j: usize| {
                     let v = mesh.vertices[j * (n + 1) + i];
-                    let rel = mesh.origin.0 - cam.position.0
-                        + Vec3::new(f64::from(v.ref_pos[0]), f64::from(v.ref_pos[1]), f64::from(v.ref_pos[2]));
+                    let rel = mesh.origin.0 - cam.position.0 + Vec3::new(f64::from(v.pos[0]), f64::from(v.pos[1]), f64::from(v.pos[2]));
                     ((rel.length() - f64::from(d.morph_start_m)) / f64::from((d.morph_end_m - d.morph_start_m).max(1e-6))).clamp(0.0, 1.0)
                 };
                 for side in Side::ALL {

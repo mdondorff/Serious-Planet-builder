@@ -83,7 +83,7 @@ pub fn render_tiles(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resul
             implementation_id: IMPLEMENTATION_ID.to_string(),
             seed: o.seed,
             res: o.res,
-            definition_hash: 0,
+            definition_hash: definition_hash(o.seed, RADIUS_M),
             adapter: ctx.adapter_key(),
             request,
             plan,
@@ -104,6 +104,29 @@ pub fn render_offscreen(o: &Options, out: &mut dyn Write) -> Result<(), String> 
     render_tiles(&ctx, o, out)
 }
 
+/// Hash of the definition a seed and radius describe: the single planet (WDEF-003). Bundles record it; this build can
+/// rebuild only that definition, so replay checks the recorded hash against it.
+fn definition_hash(seed: u64, radius_m: f64) -> u64 {
+    planet_world_def::WorldDefinition::single_planet(radius_m, seed).hash()
+}
+
+/// Refuse a bundle recorded against a definition this build cannot rebuild (CON-19): a hash of zero predates the
+/// definition, any other hash must equal the single planet of the recorded seed and radius.
+fn check_definition(recorded: u64, seed: u64, radius_m: f64) -> Result<(), String> {
+    let rebuilt = definition_hash(seed, radius_m);
+    if recorded == rebuilt {
+        return Ok(());
+    }
+    if recorded == 0 {
+        return Err(format!(
+            "bundle records no definition hash (it predates the WorldDefinition); this build rebuilds the single planet of seed {seed} as {rebuilt:016x}: record the bundle again"
+        ));
+    }
+    Err(format!(
+        "bundle was recorded against definition {recorded:016x}, but this build can only rebuild the single planet of seed {seed} and radius {radius_m} m ({rebuilt:016x}); the definition store arrives with authored layers"
+    ))
+}
+
 /// Replay a repro bundle: refuse on version mismatch, rebuild the plan from the recorded request, compare, render.
 pub fn replay(ctx: &GpuContext, path: &Path, png: Option<&Path>, out: &mut dyn Write) -> Result<(), String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
@@ -117,6 +140,7 @@ pub fn replay(ctx: &GpuContext, path: &Path, png: Option<&Path>, out: &mut dyn W
             b.generator_version, b.implementation_id, GENERATOR_VERSION, IMPLEMENTATION_ID
         ));
     }
+    check_definition(b.definition_hash, b.seed, RADIUS_M)?;
     let rebuilt = plan_tiles(&b.request).map_err(|e| e.to_string())?;
     let diff = rebuilt.diff(&b.plan);
     if diff.is_empty() && rebuilt.plan_hash() != b.plan.plan_hash() {
@@ -236,7 +260,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
             generator_version: GENERATOR_VERSION,
             implementation_id: IMPLEMENTATION_ID.to_string(),
             mesh_version: planet_generators::mesh::MESH_VERSION,
-            definition_hash: 0,
+            definition_hash: definition_hash(request.seed, request.lod.radius_m),
             adapter: ctx.adapter_key(),
             request,
             plan,
@@ -259,6 +283,7 @@ fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>,
             b.generator_version, b.implementation_id, b.mesh_version, GENERATOR_VERSION, IMPLEMENTATION_ID, mesh_version
         ));
     }
+    check_definition(b.definition_hash, b.request.seed, b.request.lod.radius_m)?;
     let rebuilt = plan_terrain(&b.request).map_err(|e| e.to_string())?;
     let diff = rebuilt.diff(&b.plan);
     if !diff.is_empty() {
@@ -434,18 +459,15 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
 /// queries), CPU record/submit time, wall time, CPU planning time and the deterministic counts, per run, and checks the
 /// terrain budget (median GPU <= 8 ms, p99 frame <= 20 ms).
 pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
-    use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainRequest, TerrainView};
+    use planet_frame::{scripted_views, LodParams, TerrainRequest, TerrainView};
     use planet_perf::{summarize, Protocol, RunReport, Stats};
     use planet_render::TerrainRenderer;
     // `--smoke` runs the same code path briefly on any adapter to prove it works; it is labelled and never a measurement.
     let smoke = o.perf_smoke;
+    let mut owner_override: Vec<String> = Vec::new();
     if !smoke {
-        if !o.machine_ready {
-            return Err(
-                "--machine-ready is required: the owner must confirm charger, performance power profile and discrete GPU mode".into()
-            );
-        }
         planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
+        owner_override = crate::readiness_gate(o, ctx, out)?;
     }
     let size = if smoke { (1280u32, 720u32) } else { (2560u32, 1440u32) };
     let lod = LodParams { cells: o.cells, viewport_h_px: f64::from(size.1), tau_px: o.tau, max_level: 26, ..LodParams::earth_1080p() };
@@ -458,6 +480,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     let mut reports: Vec<RunReport> = Vec::new();
     let mut budget_lines = Vec::new();
     let mut plan_lines: Vec<(&str, f64)> = Vec::new();
+    let mut noisy: Vec<(String, f64)> = Vec::new();
     if smoke {
         writeln!(out, "SMOKE RUN: exercises the perf path only; the numbers are not a measurement").map_err(err)?;
     }
@@ -474,21 +497,33 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
             face_mapping: TangentWarp.id().to_string(),
             seed: o.seed,
         };
-        // CPU planning time (selection + plan), measured separately: the camera is static during frame measurements.
+        // CPU planning time (selection + plan), measured separately: the camera is static during frame measurements. A
+        // renderer plans every frame with a warm per-tile cache, so the budget applies to steady state: the camera
+        // steps 5 cm per plan (a slow walk), the cold first plan is reported beside it.
+        let field = planet_generators::height::Reference(o.seed);
+        let mut cache = planet_frame::SelectionCache::new();
+        let t_cold = Instant::now();
+        planet_frame::plan_terrain_cached(&req, &field, &mut cache).map_err(|e| e.to_string())?;
+        let cold_ms = t_cold.elapsed().as_secs_f64() * 1000.0;
         let mut plan_samples = Vec::new();
-        let mut plan = plan_terrain(&req).map_err(|e| e.to_string())?;
+        let mut moving = req.clone();
+        let up = camera.position.0.normalized();
+        let axis = if up.z.abs() > 0.9 { planet_core::Vec3::new(1.0, 0.0, 0.0) } else { planet_core::Vec3::new(0.0, 0.0, 1.0) };
+        let step = up.cross(axis).normalized() * 0.05;
         for _ in 0..20 {
+            moving.camera.position = planet_core::PlanetFixed(moving.camera.position.0 + step);
             let t = Instant::now();
-            plan = plan_terrain(&req).map_err(|e| e.to_string())?;
+            planet_frame::plan_terrain_cached(&moving, &field, &mut cache).map_err(|e| e.to_string())?;
             plan_samples.push(t.elapsed().as_secs_f64() * 1000.0);
         }
+        let plan = planet_frame::plan_terrain_cached(&req, &field, &mut cache).map_err(|e| e.to_string())?;
         let started = Instant::now();
         let new_meshes = upload_missing_meshes(ctx, &mut renderer, &plan, o.seed, o.cells)?;
         let plan_median = summarize(&plan_samples, 0).map_or(f64::NAN, |s| s.median);
         plan_lines.push((name, plan_median));
         writeln!(
             out,
-            "{name}: {} nodes ({} new meshes in {:.1} s), plan {plan_median:.2} ms",
+            "{name}: {} nodes ({} new meshes in {:.1} s), plan {plan_median:.2} ms warm, {cold_ms:.2} ms cold",
             plan.nodes.len(),
             new_meshes,
             started.elapsed().as_secs_f64(),
@@ -497,42 +532,70 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         for _ in 0..warmup {
             renderer.render(ctx, &plan, true).map_err(|e| e.to_string())?;
         }
-        for _ in 0..runs {
-            let before = planet_perf::query_nvidia_smi();
-            let (mut total, mut cpu, mut gpu) = (Vec::new(), Vec::new(), Vec::new());
-            let mut counts = planet_render::TerrainStats::default();
-            for _ in 0..measured {
-                let (t, s) = renderer.render(ctx, &plan, true).map_err(|e| e.to_string())?;
-                total.push(t.total_ms);
-                cpu.push(t.cpu_ms);
-                gpu.extend(t.gpu_ms);
-                counts = s;
+        // Run-to-run noise above the limit gets one retry of this view's runs (ADR 0020); still noisy: the session is invalid.
+        let mut attempt = 0;
+        let batch_start = reports.len();
+        let budget_start = budget_lines.len();
+        loop {
+            for _ in 0..runs {
+                let before = planet_perf::query_nvidia_smi();
+                let (mut total, mut cpu, mut gpu) = (Vec::new(), Vec::new(), Vec::new());
+                let mut counts = planet_render::TerrainStats::default();
+                for _ in 0..measured {
+                    let (t, s) = renderer.render(ctx, &plan, true).map_err(|e| e.to_string())?;
+                    total.push(t.total_ms);
+                    cpu.push(t.cpu_ms);
+                    gpu.extend(t.gpu_ms);
+                    counts = s;
+                }
+                let stat = |v: &[f64]| summarize(v, 0).ok_or_else(|| "no valid samples".to_string());
+                let mut metrics: Vec<(String, Stats)> = vec![("cpu_ms".into(), stat(&cpu)?), ("plan_ms".into(), stat(&plan_samples)?)];
+                if !gpu.is_empty() {
+                    metrics.push(("gpu_ms".into(), stat(&gpu)?));
+                }
+                let (t_stats, g_stats) = (stat(&total)?, metrics.iter().find(|(n, _)| n == "gpu_ms").map(|(_, s)| s.clone()));
+                budget_lines.push((name, t_stats.clone(), g_stats));
+                reports.push(RunReport {
+                    path_name: format!("terrain/{name}"),
+                    vram_cap_gb: 8,
+                    stats: t_stats,
+                    clocks_before: before,
+                    clocks_after: planet_perf::query_nvidia_smi(),
+                    metrics,
+                    counts: vec![
+                        ("nodes".into(), plan.nodes.len() as u64),
+                        ("draw_calls".into(), u64::from(counts.draw_calls)),
+                        ("triangles".into(), counts.triangles),
+                        ("vertex_bytes_resident".into(), renderer.uploaded_bytes),
+                        ("resident_tiles".into(), renderer.resident_tiles() as u64),
+                    ],
+                });
             }
-            let stat = |v: &[f64]| summarize(v, 0).ok_or_else(|| "no valid samples".to_string());
-            let mut metrics: Vec<(String, Stats)> = vec![("cpu_ms".into(), stat(&cpu)?), ("plan_ms".into(), stat(&plan_samples)?)];
-            if !gpu.is_empty() {
-                metrics.push(("gpu_ms".into(), stat(&gpu)?));
+            let medians: Vec<f64> = reports[batch_start..].iter().map(|r| r.stats.median).collect();
+            if smoke || !planet_perf::gate::noise_needs_retry(&medians) || attempt == 1 {
+                if !smoke && planet_perf::gate::noise_needs_retry(&medians) {
+                    noisy.push((format!("terrain/{name}"), planet_perf::run_to_run_noise(&medians).unwrap_or(f64::NAN)));
+                }
+                break;
             }
-            let (t_stats, g_stats) = (stat(&total)?, metrics.iter().find(|(n, _)| n == "gpu_ms").map(|(_, s)| s.clone()));
-            budget_lines.push((name, t_stats.clone(), g_stats));
-            reports.push(RunReport {
-                path_name: format!("terrain/{name}"),
-                vram_cap_gb: 8,
-                stats: t_stats,
-                clocks_before: before,
-                clocks_after: planet_perf::query_nvidia_smi(),
-                metrics,
-                counts: vec![
-                    ("nodes".into(), plan.nodes.len() as u64),
-                    ("draw_calls".into(), u64::from(counts.draw_calls)),
-                    ("triangles".into(), counts.triangles),
-                    ("vertex_bytes_resident".into(), renderer.uploaded_bytes),
-                    ("resident_tiles".into(), renderer.resident_tiles() as u64),
-                ],
-            });
+            writeln!(
+                out,
+                "{name}: run-to-run noise {:.3} above {}: one retry",
+                planet_perf::run_to_run_noise(&medians).unwrap_or(f64::NAN),
+                planet_perf::gate::MAX_NOISE
+            )
+            .map_err(err)?;
+            reports.truncate(batch_start);
+            budget_lines.truncate(budget_start);
+            attempt += 1;
         }
     }
     let scheme = planet_perf::query_power_scheme();
+    let throttled: Vec<String> = reports.iter().filter(|r| crate::run_throttled(r)).map(|r| r.path_name.clone()).collect();
+    let validity = if smoke { planet_perf::gate::Validity::default() } else { planet_perf::gate::validity(&throttled, &noisy) };
+    if !smoke {
+        crate::session_verdict_line(out, &validity, &owner_override)?;
+    }
     for (name, median) in &plan_lines {
         let word = if planet_perf::plan_budget_ok(*median) { "ok" } else { "OVER" };
         writeln!(out, "  {name}: CPU plan median {median:.2} ms (budget {}) {word}", planet_perf::PLAN_CPU_BUDGET_MS).map_err(err)?;
@@ -565,7 +628,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         worst_noise = worst_noise.max(planet_perf::run_to_run_noise(&medians).unwrap_or(0.0));
     }
     writeln!(out, "worst run-to-run noise within a view (max-min)/median: {worst_noise:.3}").map_err(err)?;
-    let json = planet_perf::report_json(&crate::facts(ctx), scheme.as_deref(), o.machine_ready && !smoke, &protocol, &reports);
+    let json = planet_perf::report_json(&crate::facts(ctx), scheme.as_deref(), &owner_override, &validity, &protocol, &reports);
     if smoke && o.out.is_none() {
         return writeln!(out, "smoke run: no log written (pass --out to keep it)").map_err(err);
     }
@@ -575,4 +638,21 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     }
     std::fs::write(&path, json).map_err(err)?;
     writeln!(out, "wrote {}", path.display()).map_err(err)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // spec: TEST-008
+    #[test]
+    fn a_bundle_definition_hash_is_checked_against_the_single_planet_it_names() {
+        let right = definition_hash(3, RADIUS_M);
+        assert!(check_definition(right, 3, RADIUS_M).is_ok());
+        let none = check_definition(0, 3, RADIUS_M).unwrap_err();
+        assert!(none.contains("predates the WorldDefinition") && none.contains(&format!("{right:016x}")), "{none}");
+        let other = check_definition(right, 4, RADIUS_M).unwrap_err();
+        assert!(other.contains("can only rebuild") && other.contains(&format!("{right:016x}")), "{other}");
+        assert!(check_definition(right, 3, RADIUS_M + 1.0).is_err(), "the radius is part of the definition");
+    }
 }
