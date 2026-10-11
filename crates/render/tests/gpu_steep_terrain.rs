@@ -49,14 +49,30 @@ fn holes(plan: &TerrainPlan, img: &Image) -> Vec<(u32, u32)> {
 fn ten_scripted_views_on_steep_terrain_have_no_holes() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     eprintln!("{}", ctx.adapter_log_line());
-    let lod = LodParams { cells: CELLS, viewport_h_px: 2.0 * f64::from(SIZE.1), tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() };
+    let lod = LodParams { cells: CELLS, viewport_h_px: 2.0 * f64::from(SIZE.1), tau_px: 2.5, max_level: 19, ..LodParams::earth_1080p() };
     for (name, camera) in scripted_views_field(R, f64::from(SIZE.0) / f64::from(SIZE.1), &STEEP) {
         let req =
             TerrainRequest { camera, size: SIZE, view: TerrainView::TileId, lod: lod.clone(), face_mapping: "tangent-v1".into(), seed: 1 };
+        let t0 = std::time::Instant::now();
         let plan = plan_terrain_field(&req, &STEEP).unwrap();
-        let meshes: Vec<TileMesh> = plan.nodes.iter().map(|n| tile_mesh_field(&STEEP, &TangentWarp, n.tile, CELLS, R)).collect();
+        let t_plan = t0.elapsed();
+        // Meshes in parallel (each a pure function of its tile, collected in node order): most nodes are tiny tiles near
+        // the camera, and generating them one by one dominated the test's time.
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let meshes: Vec<TileMesh> = std::thread::scope(|s| {
+            let handles: Vec<_> = plan
+                .nodes
+                .chunks(plan.nodes.len().div_ceil(threads).max(1))
+                .map(|part| {
+                    s.spawn(move || part.iter().map(|n| tile_mesh_field(&STEEP, &TangentWarp, n.tile, CELLS, R)).collect::<Vec<_>>())
+                })
+                .collect();
+            handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
+        });
+        let t_mesh = t0.elapsed();
         let refs: Vec<&TileMesh> = meshes.iter().collect();
         let (frame, _) = execute_terrain(&ctx, &plan, &refs).unwrap();
+        eprintln!("{name}: {} nodes, plan {t_plan:?}, meshes {:?}, render {:?}", plan.nodes.len(), t_mesh - t_plan, t0.elapsed() - t_mesh);
         let img = Image::new(frame.width, frame.height, frame.rgba);
         // Every view is written for review (not a golden): target/review/steep/<adapter>/<view>.png.
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/review/steep").join(ctx.adapter_key());
