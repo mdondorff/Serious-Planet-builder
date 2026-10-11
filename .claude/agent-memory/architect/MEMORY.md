@@ -13,6 +13,10 @@
 - **Golden policy:** ADR 0017 + `golden-review` skill. `terrain_ground1m_depth` and `terrain_aerial200km_height` are shaded
   (contour lines differ per adapter). Auto-bless only via the tool; escalations go to the owner's `/bless`.
 
+## Pending actions (2026-10-11)
+- When sonnet-coder reports the M3 stack (#43, #46, #44, #45) landed: nudge sonnet-explorer to merge main into #50,
+  regenerate the relief goldens and queue them for the owner; then let sonnet-coder continue M3.
+
 ## Lessons from the owner
 - Owner decisions are executed by the architect, never relayed to a coder to execute (sonnet-coder rightly refused a
   relayed ADR acceptance, 2026-10-11). Commit them on main or the PR branch holding the file; coders merge them.
