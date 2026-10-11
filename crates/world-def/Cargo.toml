@@ -7,4 +7,5 @@ publish.workspace = true
 
 [dependencies]
 planet-core.workspace = true
+libm.workspace = true
 toml.workspace = true

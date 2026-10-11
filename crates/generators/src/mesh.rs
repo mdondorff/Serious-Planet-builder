@@ -92,9 +92,9 @@ pub fn mesh_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId
 /// [`mesh_key_field`] for many tiles of one field, mapping, grid size and radius: the string hashes of the field's
 /// implementation id and the mapping id are computed once instead of per tile (planning a 5,000-node view calls
 /// this 5,000 times). `key(tile)` equals `mesh_key_field(field, map, tile, cells, radius_m)` exactly.
-pub struct MeshKeyer {
+pub struct MeshKeyer<'a> {
+    field: &'a dyn HeightField,
     version: u64,
-    inputs: u64,
     cells: u32,
     body_params: u64,
     body_words: [u64; 3],
@@ -102,11 +102,11 @@ pub struct MeshKeyer {
     mapping_hash: u64,
 }
 
-impl MeshKeyer {
-    pub fn new(field: &dyn HeightField, map: &dyn FaceMapping, cells: u32, radius_m: f64) -> MeshKeyer {
+impl<'a> MeshKeyer<'a> {
+    pub fn new(field: &'a dyn HeightField, map: &dyn FaceMapping, cells: u32, radius_m: f64) -> MeshKeyer<'a> {
         MeshKeyer {
+            field,
             version: u64::from(field.version()),
-            inputs: field.inputs_hash(),
             cells,
             body_params: body_params(field, radius_m),
             body_words: crate::height::body_key_words(field),
@@ -121,7 +121,7 @@ impl MeshKeyer {
             &[
                 self.version,
                 u64::from(HASH_VERSION),
-                self.inputs,
+                self.field.inputs_hash_for(id),
                 id.raw(),
                 u64::from(self.cells),
                 self.implementation_hash,

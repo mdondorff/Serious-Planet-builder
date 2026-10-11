@@ -5,9 +5,11 @@
 //! Generators read the definition only through a [`GenContext`], which records every read; the hash of the recorded
 //! read set enters cache keys (WDEF-004). Authored items, TOML files and the cell index follow in later M3 changes.
 
+pub mod cells;
 pub mod toml_io;
 
 use planet_core::hash::{hash_u64s, HASH_VERSION};
+use planet_core::{TileId, Vec3};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
@@ -72,6 +74,11 @@ pub fn set_hash(entries: &BTreeMap<NodePath, u64>) -> u64 {
 #[derive(Clone, Debug, PartialEq)]
 pub struct WorldDefinition {
     nodes: BTreeMap<NodePath, NodeValue>,
+    /// Authored items by `(body, cell)`: item id to content hash (WDEF-005). The payloads belong to M6; the index only
+    /// needs where an item is and what it hashes to.
+    cells: BTreeMap<(BodyId, u64), BTreeMap<u64, u64>>,
+    /// Where each item currently is, for moving and removing it.
+    item_cell: BTreeMap<(BodyId, u64), u64>,
 }
 
 impl WorldDefinition {
@@ -79,11 +86,11 @@ impl WorldDefinition {
 
     /// No nodes at all (every read fails).
     pub fn empty() -> WorldDefinition {
-        WorldDefinition { nodes: BTreeMap::new() }
+        WorldDefinition { nodes: BTreeMap::new(), cells: BTreeMap::new(), item_cell: BTreeMap::new() }
     }
 
     pub fn new(world_seed: u64) -> WorldDefinition {
-        let mut d = WorldDefinition { nodes: BTreeMap::new() };
+        let mut d = WorldDefinition { nodes: BTreeMap::new(), cells: BTreeMap::new(), item_cell: BTreeMap::new() };
         d.set(Self::SEED_PATH, NodeValue::U64(world_seed));
         d
     }
@@ -115,14 +122,62 @@ impl WorldDefinition {
         self.nodes.get(path).copied()
     }
 
-    /// Hash of every node (WDEF-003): equal for definitions with the same nodes however they were built.
+    /// Hash of the whole definition (WDEF-003): the nodes and, if there are authored items, the cells that hold them.
+    /// Equal for definitions with the same content however they were built; a definition without items hashes exactly
+    /// as its nodes do.
     pub fn hash(&self) -> u64 {
+        let base = self.base_hash();
+        if self.cells.is_empty() {
+            return base;
+        }
+        let mut v = vec![u64::from(HASH_VERSION), base, self.cells.len() as u64];
+        for ((body, cell), items) in &self.cells {
+            v.extend([u64::from(body.0), *cell, cells::cell_hash(items)]);
+        }
+        hash_u64s(0x0069_7465, &v)
+    }
+
+    /// Hash of the procedural base: the nodes without the authored layers (ADR 0007). Authored items record the base
+    /// hash they were made against, so adding an item never makes other items look stale.
+    pub fn base_hash(&self) -> u64 {
         set_hash(&self.nodes.iter().map(|(p, v)| (p.clone(), node_hash(p, *v))).collect())
     }
 
-    /// Hash of the procedural base: the definition without authored layers (none exist yet, so all nodes).
-    pub fn base_hash(&self) -> u64 {
-        self.hash()
+    /// Add or move the authored item `id` of `body` to the cell containing the unit direction `dir`, with the given
+    /// content hash. The cell level comes from the body's radius node. Returns the cell.
+    pub fn put_item(&mut self, body: BodyId, id: u64, dir: Vec3, content_hash: u64) -> Result<TileId, MissingNode> {
+        let path = body_radius_path(body);
+        let radius = match self.get(&path) {
+            Some(NodeValue::F64(r)) => r,
+            Some(NodeValue::U64(_)) => return Err(MissingNode(format!("{path} (not a number)"))),
+            None => return Err(MissingNode(path)),
+        };
+        let cell = cells::cell_of(radius, dir);
+        self.remove_item(body, id);
+        self.cells.entry((body, cell.raw())).or_default().insert(id, content_hash);
+        self.item_cell.insert((body, id), cell.raw());
+        Ok(cell)
+    }
+
+    /// Remove an item; `false` if there was none.
+    pub fn remove_item(&mut self, body: BodyId, id: u64) -> bool {
+        let Some(cell) = self.item_cell.remove(&(body, id)) else { return false };
+        if let Some(items) = self.cells.get_mut(&(body, cell)) {
+            items.remove(&id);
+            if items.is_empty() {
+                self.cells.remove(&(body, cell));
+            }
+        }
+        true
+    }
+
+    /// The items of one cell, `(id, content hash)` in id order.
+    pub fn items_in_cell(&self, body: BodyId, cell: TileId) -> Vec<(u64, u64)> {
+        self.cells.get(&(body, cell.raw())).map(|m| m.iter().map(|(a, b)| (*a, *b)).collect()).unwrap_or_default()
+    }
+
+    fn cell_hash_of(&self, body: BodyId, cell: TileId) -> u64 {
+        self.cells.get(&(body, cell.raw())).map_or_else(cells::empty_cell_hash, cells::cell_hash)
     }
 }
 
@@ -144,6 +199,11 @@ impl core::fmt::Display for MissingNode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "the definition has no node '{}'", self.0)
     }
+}
+
+/// Path under which a spatial query of one cell is recorded in a read set, in the `derived.` namespace.
+pub fn cell_query_path(body: BodyId, cell: TileId) -> NodePath {
+    format!("derived.cell.{}.{:016x}", body.0, cell.raw())
 }
 
 /// Id of the reference surface the geo conversions use (CON-15); the sphere is the only one so far.
@@ -205,6 +265,35 @@ impl<'a> GenContext<'a> {
             NodeValue::F64(r) => Ok(r),
             NodeValue::U64(_) => Err(MissingNode(format!("{} (not a number)", body_radius_path(body)))),
         }
+    }
+
+    /// The level of the body's cells; reads (and so records) the body's radius.
+    pub fn cell_level(&self, body: BodyId) -> Result<u8, MissingNode> {
+        Ok(cells::cell_level(self.body_radius_m(body)?))
+    }
+
+    /// The items of one cell (WDEF-005). The read records the cell's hash, also when the cell is empty, so adding an
+    /// item to a cell that was queried and found empty changes the key. `cell` must be at the body's cell level.
+    pub fn query_cell(&self, body: BodyId, cell: TileId) -> Result<Vec<(u64, u64)>, MissingNode> {
+        let level = self.cell_level(body)?;
+        if cell.level() != level {
+            return Err(MissingNode(format!("a cell of body {} at level {level} (got level {})", body.0, cell.level())));
+        }
+        let path = cell_query_path(body, cell);
+        self.reads.borrow_mut().insert(path, self.def.cell_hash_of(body, cell));
+        Ok(self.def.items_in_cell(body, cell))
+    }
+
+    /// The items of every cell the tile's footprint touches, in cell order, each cell read and recorded. `None` when the
+    /// tile touches more than `max_cells` cells (a coarse tile reads the whole body, not cells).
+    pub fn query_tile(&self, body: BodyId, tile: TileId, max_cells: usize) -> Result<Option<Vec<(u64, u64)>>, MissingNode> {
+        let level = self.cell_level(body)?;
+        let Some(covering) = cells::cells_covering(tile, level, max_cells) else { return Ok(None) };
+        let mut out = Vec::new();
+        for cell in covering {
+            out.extend(self.query_cell(body, cell)?);
+        }
+        Ok(Some(out))
     }
 
     /// Hash of everything read so far (WDEF-004): the definition part of a cache key.

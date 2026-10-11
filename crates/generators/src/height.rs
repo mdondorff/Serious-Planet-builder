@@ -217,6 +217,13 @@ pub trait HeightField: Sync {
     fn inputs_hash(&self) -> u64 {
         single_planet_seed_read_hash(self.seed())
     }
+    /// [`inputs_hash`](HeightField::inputs_hash) for one tile: the field-wide read set plus what the tile's own spatial
+    /// queries read (the cells of its footprint, empty ones included; WDEF-005). A field that reads nothing spatially
+    /// keeps the default, so every tile shares the field's hash; a field that does must override this, or an edit in
+    /// one cell would leave the keys of the tiles that read it unchanged.
+    fn inputs_hash_for(&self, _tile: TileId) -> u64 {
+        self.inputs_hash()
+    }
     /// The body this field describes; part of every height and mesh key (ADR 0001). A field built directly from a seed
     /// stands for the single planet.
     fn body(&self) -> BodyId {
@@ -345,7 +352,7 @@ pub fn cache_key(map: &dyn FaceMapping, seed: u64, id: TileId, res: u32) -> u64 
 /// [`cache_key`] for any height field: its version, implementation id and input hash take the place of the
 /// reference generator's, so [`Reference`] gives exactly [`cache_key`].
 pub fn cache_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, res: u32) -> u64 {
-    let mut v = vec![u64::from(field.version()), u64::from(HASH_VERSION), field.inputs_hash(), id.raw(), u64::from(res)];
+    let mut v = vec![u64::from(field.version()), u64::from(HASH_VERSION), field.inputs_hash_for(id), id.raw(), u64::from(res)];
     v.push(hash_u64s(1, &fold_str(field.implementation_id())));
     v.push(hash_u64s(2, &fold_str(map.id())));
     v.extend_from_slice(&body_key_words(field));
