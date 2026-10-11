@@ -1,6 +1,6 @@
 //! WDEF-002 (schema version and migrations) and WDEF-003 (canonical hashing) through the TOML format.
 
-use planet_world_def::toml_io::{parse_definition, parse_with, to_toml, LoadError, Migration, SCHEMA_VERSION};
+use planet_world_def::toml_io::{parse_definition, parse_with, to_toml, LoadError, Migration, MIGRATIONS, SCHEMA_VERSION};
 use planet_world_def::{BodyId, NodeValue, WorldDefinition};
 
 type Check = fn(&LoadError) -> bool;
@@ -17,6 +17,7 @@ fn the_committed_fixture_loads_to_the_definition_it_describes() {
     assert_eq!(parse_definition(FIXTURE).unwrap(), planet());
 }
 
+// spec: WDEF-002
 // spec: WDEF-003
 #[test]
 fn the_canonical_text_is_pinned_and_round_trips() {
@@ -26,6 +27,7 @@ fn the_canonical_text_is_pinned_and_round_trips() {
     assert_eq!(parse_definition(&text).unwrap(), planet());
 }
 
+// spec: WDEF-002
 // spec: WDEF-003
 #[test]
 fn every_value_round_trips_bit_for_bit() {
@@ -69,6 +71,7 @@ fn comments_order_spacing_and_table_style_never_change_the_hash() {
     }
 }
 
+// spec: WDEF-002
 // spec: WDEF-003
 #[test]
 fn a_value_that_cannot_be_stored_exactly_is_an_error_naming_its_path() {
@@ -98,6 +101,7 @@ fn a_value_that_cannot_be_stored_exactly_is_an_error_naming_its_path() {
     );
 }
 
+// spec: WDEF-002
 // spec: WDEF-003
 #[test]
 fn a_path_cannot_be_both_a_value_and_a_table() {
@@ -174,4 +178,119 @@ fn a_gap_in_the_chain_or_a_failing_step_is_a_named_error_not_a_guess() {
     let e = parse_with(no_world, 3, &chain).unwrap_err();
     assert!(matches!(&e, LoadError::Migration { from: 1, message } if message.contains("`world` is missing")), "{e}");
     assert!(e.to_string().contains("schema version 1"));
+}
+
+// spec: WDEF-002
+#[test]
+fn a_float_node_accepts_an_exact_integer_literal_and_an_integer_node_rejects_a_float() {
+    let hand_written = "schema_version = 1\n[world]\nseed = 42\n[body.0]\nradius_m = 6371000\n";
+    let d = parse_definition(hand_written).unwrap();
+    assert_eq!(d, planet());
+    assert_eq!(d.hash(), planet().hash());
+    assert_eq!(d.get("body.0.radius_m"), Some(NodeValue::F64(6_371_000.0)));
+    let e = parse_definition("schema_version = 1\n[world]\nseed = 42.0\n").unwrap_err();
+    assert_eq!(e, LoadError::WrongType { path: "world.seed".into(), expected: "an integer", found: "a float" });
+    assert!(e.to_string().contains("world.seed"));
+    // Too large to be exact as a float: name the fix.
+    let e = parse_definition("schema_version = 1\n[body.0]\nradius_m = 9007199254740993\n").unwrap_err();
+    assert!(matches!(&e, LoadError::NotCanonical { path, .. } if path == "body.0.radius_m"), "{e}");
+    // A path the program does not read keeps the type of its literal.
+    assert_eq!(parse_definition("schema_version = 1\n[x]\ny = 3\n").unwrap().get("x.y"), Some(NodeValue::U64(3)));
+    assert_eq!(parse_definition("schema_version = 1\n[x]\ny = 3.0\n").unwrap().get("x.y"), Some(NodeValue::F64(3.0)));
+}
+
+// spec: WDEF-002
+#[test]
+fn a_quoted_number_is_accepted_only_above_the_integer_range_and_in_canonical_form() {
+    let load = |v: &str| parse_definition(&format!("schema_version = 1\n[world]\nseed = {v}\n"));
+    assert_eq!(load("\"9223372036854775808\"").unwrap().get("world.seed"), Some(NodeValue::U64(1 << 63)));
+    assert_eq!(load("\"18446744073709551615\"").unwrap().get("world.seed"), Some(NodeValue::U64(u64::MAX)));
+    for small in ["\"42\"", "\"0042\"", "\"9223372036854775807\""] {
+        assert!(matches!(load(small), Err(LoadError::NotCanonical { .. })), "{small}");
+    }
+    for bad in ["\"+5\"", "\" 5\"", "\"-1\"", "\"1e3\"", "\"\"", "\"18446744073709551616\""] {
+        assert!(matches!(load(bad), Err(LoadError::Unsupported { .. })), "{bad}");
+    }
+}
+
+// spec: WDEF-002
+#[test]
+fn names_the_file_format_owns_cannot_be_nodes() {
+    for path in ["schema_version", "schema_version.x", "derived"] {
+        let mut d = WorldDefinition::new(1);
+        d.set(path, NodeValue::U64(5));
+        assert!(matches!(to_toml(&d), Err(LoadError::BadPath { .. })), "{path}");
+    }
+    assert!(matches!(parse_definition("schema_version = 1\nderived = 3\n"), Err(LoadError::BadPath { .. })));
+}
+
+// spec: WDEF-002
+#[test]
+fn a_chain_with_two_steps_for_one_version_is_rejected() {
+    let twice = [Migration { from: 1, apply: |_| Ok(()) }, Migration { from: 1, apply: |_| Ok(()) }];
+    let e = parse_with(FIXTURE, 2, &twice).unwrap_err();
+    assert!(matches!(&e, LoadError::Migration { from: 1, message } if message.contains("two migration steps")), "{e}");
+    let missing = parse_with(FIXTURE, 3, &[]).unwrap_err();
+    assert!(missing.to_string().contains("add the missing migration step"), "{missing}");
+}
+
+// spec: WDEF-002
+#[test]
+fn every_schema_version_has_a_frozen_fixture_and_exactly_one_migration() {
+    // The structure behind "files of every older schema version load": a bumped version without its fixture and its
+    // migration step fails here, not silently.
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    for n in 1..=SCHEMA_VERSION {
+        let prefix = format!("v{n}_");
+        let fixtures: Vec<&String> = names.iter().filter(|f| f.starts_with(&prefix) && f.ends_with(".toml")).collect();
+        assert!(!fixtures.is_empty(), "schema version {n} has no frozen fixture tests/fixtures/{prefix}*.toml");
+        for fx in fixtures {
+            let text = std::fs::read_to_string(dir.join(fx)).unwrap();
+            assert!(text.contains(&format!("schema_version = {n}")), "{fx} must be written in schema version {n}");
+            assert_eq!(parse_definition(&text).unwrap(), planet(), "{fx} must load to the current definition of its content");
+        }
+    }
+    for from in 1..SCHEMA_VERSION {
+        assert_eq!(MIGRATIONS.iter().filter(|m| m.from == from).count(), 1, "exactly one migration step from version {from}");
+    }
+    assert_eq!(MIGRATIONS.len() as u32, SCHEMA_VERSION - 1);
+}
+
+// spec: WDEF-002
+#[test]
+fn a_sweep_of_float_bit_patterns_round_trips_exactly() {
+    let mut x = 0x9e37_79b9_7f4a_7c15u64;
+    let mut bits: Vec<u64> = vec![
+        1,
+        0x000f_ffff_ffff_ffff,
+        0x0010_0000_0000_0000,
+        (1u64 << 53) + 1,
+        1e16f64.to_bits(),
+        9.999999999999998e15f64.to_bits(),
+        1e-5f64.to_bits(),
+        9.999999999999999e-6f64.to_bits(),
+        f64::MAX.to_bits(),
+        f64::MIN_POSITIVE.to_bits(),
+        0x8000_0000_0000_0001,
+    ];
+    for _ in 0..100_000 {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        bits.push(x);
+    }
+    let mut d = WorldDefinition::new(1);
+    let mut kept = 0;
+    for (i, b) in bits.iter().enumerate() {
+        let v = f64::from_bits(*b);
+        if v.is_finite() {
+            d.set(&format!("sweep.v{i}"), NodeValue::F64(v));
+            kept += 1;
+        }
+    }
+    assert!(kept > 90_000);
+    let back = parse_definition(&to_toml(&d).unwrap()).unwrap();
+    assert_eq!(back, d, "a float changed its bits through TOML text");
 }

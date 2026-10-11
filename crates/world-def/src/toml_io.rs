@@ -5,8 +5,12 @@
 //! file bytes, so comments, key order, whitespace and formatting never change a key. Writing is canonical: the version
 //! first, root values, then one table per path prefix, everything sorted, floats in Rust's shortest round-trip form.
 //!
-//! Supported values: non-negative integers (a `u64` beyond TOML's `i64` range is written as a decimal string and read
-//! back from one) and finite floats. Anything else is an error naming the path, never a silent default.
+//! Supported values: non-negative integers (a `u64` beyond TOML's `i64` range, and only that, is written as a decimal
+//! string and read back from one) and finite floats. Anything else is an error naming the path, never a silent default.
+//!
+//! Typing: a node's type is the type of its literal, except for the paths the program itself reads, whose type is fixed
+//! (`world.seed` is an integer, `body.<n>.radius_m` a float): there an integer literal for a float is accepted when it
+//! is exact and a float for an integer is an error, so `radius_m = 6371000` and `6371000.0` are one definition.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -42,6 +46,8 @@ pub enum LoadError {
     NonFinite { path: String },
     BadPath { path: String, why: &'static str },
     Conflict { path: String, other: String },
+    WrongType { path: String, expected: &'static str, found: &'static str },
+    NotCanonical { path: String, hint: &'static str },
 }
 
 impl fmt::Display for LoadError {
@@ -53,7 +59,11 @@ impl fmt::Display for LoadError {
             LoadError::NewerSchema { found, known } => {
                 write!(f, "schema version {found} is newer than this build understands ({known}): update the program")
             }
-            LoadError::NoMigration { from } => write!(f, "no migration from schema version {from}: the file cannot be loaded"),
+            LoadError::NoMigration { from } => write!(
+                f,
+                "no migration from schema version {from} to {}: load it with a build that still reads version {from}, or add the missing migration step",
+                from + 1
+            ),
             LoadError::Migration { from, message } => write!(f, "migrating from schema version {from} failed: {message}"),
             LoadError::Unsupported { path, what } => {
                 write!(f, "`{path}`: a {what} is not a supported value (use a non-negative integer or a float)")
@@ -63,6 +73,8 @@ impl fmt::Display for LoadError {
             }
             LoadError::NonFinite { path } => write!(f, "`{path}`: infinite and NaN values are not supported"),
             LoadError::BadPath { path, why } => write!(f, "`{path}`: {why}"),
+            LoadError::WrongType { path, expected, found } => write!(f, "`{path}` must be {expected}, found {found}"),
+            LoadError::NotCanonical { path, hint } => write!(f, "`{path}`: {hint}"),
             LoadError::Conflict { path, other } => write!(f, "`{path}` is a value and `{other}` is below it: a path cannot be both"),
         }
     }
@@ -87,6 +99,11 @@ pub fn parse_with(text: &str, current: u32, migrations: &[Migration]) -> Result<
     if found > current {
         return Err(LoadError::NewerSchema { found, known: current });
     }
+    for (i, m) in migrations.iter().enumerate() {
+        if migrations[..i].iter().any(|n| n.from == m.from) {
+            return Err(LoadError::Migration { from: m.from, message: "two migration steps start at this version".into() });
+        }
+    }
     let mut version = found;
     while version < current {
         let step = migrations.iter().find(|m| m.from == version).ok_or(LoadError::NoMigration { from: version })?;
@@ -98,6 +115,26 @@ pub fn parse_with(text: &str, current: u32, migrations: &[Migration]) -> Result<
     let mut def = WorldDefinition::empty();
     flatten("", &table, &mut def)?;
     Ok(def)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Integer,
+    Float,
+}
+
+/// The fixed type of the paths the program reads (`GenContext`), if `path` is one of them.
+fn expected_kind(path: &str) -> Option<Kind> {
+    if path == WorldDefinition::SEED_PATH {
+        return Some(Kind::Integer);
+    }
+    let rest = path.strip_prefix("body.")?;
+    let (index, leaf) = rest.split_once('.')?;
+    (leaf == "radius_m" && !index.is_empty() && index.bytes().all(|b| b.is_ascii_digit())).then_some(Kind::Float)
+}
+
+fn reserved(path: &str) -> bool {
+    path == "derived" || path.starts_with("derived.") || path == VERSION_KEY || path.starts_with("schema_version.")
 }
 
 fn valid_segment(s: &str) -> bool {
@@ -112,20 +149,45 @@ fn flatten(prefix: &str, table: &toml::Table, def: &mut WorldDefinition) -> Resu
         }
         match value {
             toml::Value::Table(t) => flatten(&path, t, def)?,
-            toml::Value::Integer(i) => {
-                let v = u64::try_from(*i).map_err(|_| LoadError::NegativeInteger { path: path.clone() })?;
-                set(def, &path, NodeValue::U64(v))?;
-            }
+            toml::Value::Integer(i) => match expected_kind(&path) {
+                Some(Kind::Float) => {
+                    // An integer literal for a float node is the same number when it is exactly representable.
+                    if i.unsigned_abs() > 1 << 53 {
+                        return Err(LoadError::NotCanonical {
+                            path,
+                            hint: "an integer this large is not exact as a float: write it with a decimal point",
+                        });
+                    }
+                    set(def, &path, NodeValue::F64(*i as f64))?;
+                }
+                _ => {
+                    let v = u64::try_from(*i).map_err(|_| LoadError::NegativeInteger { path: path.clone() })?;
+                    set(def, &path, NodeValue::U64(v))?;
+                }
+            },
             toml::Value::Float(f) => {
                 if !f.is_finite() {
                     return Err(LoadError::NonFinite { path });
                 }
+                if expected_kind(&path) == Some(Kind::Integer) {
+                    return Err(LoadError::WrongType { path, expected: "an integer", found: "a float" });
+                }
                 set(def, &path, NodeValue::F64(*f))?;
             }
-            // A `u64` beyond TOML's integer range travels as a decimal string.
-            toml::Value::String(s) if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) && s.parse::<u64>().is_ok() => {
-                set(def, &path, NodeValue::U64(s.parse().expect("checked above")))?;
-            }
+            // A `u64` beyond TOML's integer range, and only that, travels as a canonical decimal string.
+            toml::Value::String(s) if s.bytes().all(|b| b.is_ascii_digit()) && !s.is_empty() => match s.parse::<u64>() {
+                Ok(v) if i64::try_from(v).is_err() && expected_kind(&path) != Some(Kind::Float) => set(def, &path, NodeValue::U64(v))?,
+                Ok(_) if expected_kind(&path) == Some(Kind::Float) => {
+                    return Err(LoadError::WrongType { path, expected: "a float", found: "a string" })
+                }
+                Ok(_) => {
+                    return Err(LoadError::NotCanonical {
+                        path,
+                        hint: "a quoted number is only for values above 9223372036854775807: write it as a plain integer",
+                    })
+                }
+                Err(_) => return Err(LoadError::Unsupported { path, what: "string" }),
+            },
             toml::Value::String(_) => return Err(LoadError::Unsupported { path, what: "string" }),
             toml::Value::Boolean(_) => return Err(LoadError::Unsupported { path, what: "boolean" }),
             toml::Value::Datetime(_) => return Err(LoadError::Unsupported { path, what: "date or time" }),
@@ -136,8 +198,8 @@ fn flatten(prefix: &str, table: &toml::Table, def: &mut WorldDefinition) -> Resu
 }
 
 fn set(def: &mut WorldDefinition, path: &str, value: NodeValue) -> Result<(), LoadError> {
-    if path.starts_with("derived.") {
-        return Err(LoadError::BadPath { path: path.to_string(), why: "the `derived` namespace is reserved for computed values" });
+    if reserved(path) {
+        return Err(LoadError::BadPath { path: path.to_string(), why: "this name is reserved (`derived`, `schema_version`)" });
     }
     def.set(path, value);
     Ok(())
@@ -152,6 +214,9 @@ pub fn to_toml(def: &WorldDefinition) -> Result<String, LoadError> {
     for (path, value) in def.nodes() {
         if path.split('.').any(|s| !valid_segment(s)) {
             return Err(LoadError::BadPath { path: path.to_string(), why: "keys may contain only letters, digits, `_` and `-`" });
+        }
+        if reserved(path) {
+            return Err(LoadError::BadPath { path: path.to_string(), why: "this name is reserved (`derived`, `schema_version`)" });
         }
         // A value and a table cannot share a path.
         let mut prefix = path;

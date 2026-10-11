@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: WDEF-002 Schema version and migrations
-The WorldDefinition SHALL be stored as TOML with a top-level `schema_version`, independent of the generator version. Loading SHALL require the version, reject a newer one and a gap in the migration chain with an error that names what to do, apply the migrations from the file's version to the current one in order, and fail with the step's message when a migration fails. Files of every older schema version in the fixture set SHALL load through tested migrations and equal the current-layout definition of the same content. Values SHALL be non-negative integers (a `u64` beyond TOML's integer range as a decimal string) and finite floats; any other value, a negative integer, a key outside letters, digits, `_` and `-`, or a path in the reserved `derived` namespace SHALL be an error naming the path. Writing SHALL be canonical (version first, sorted tables, shortest round-trip floats) and reading it back SHALL give the same nodes bit for bit.
+The WorldDefinition SHALL be stored as TOML with a top-level `schema_version`, independent of the generator version. Loading SHALL require the version, reject a newer one and a gap in the migration chain with an error that names what to do, apply the migrations from the file's version to the current one in order, and fail with the step's message when a migration fails. Files of every older schema version in the fixture set SHALL load through tested migrations and equal the current-layout definition of the same content. Values SHALL be non-negative integers (a `u64` above `i64::MAX`, and only that, as a canonical decimal string) and finite floats, typed by their literal except for the paths the program reads (`world.seed` an integer, `body.<n>.radius_m` a float, where an exact integer literal is accepted for the float and a float for the integer is an error); any other value, a negative integer, a key outside letters, digits, `_` and `-`, or a reserved name (`derived`, `schema_version`) SHALL be an error naming the path. Writing SHALL be canonical (version first, sorted tables, shortest round-trip floats) and reading it back SHALL give the same nodes bit for bit.
 
 Verify: A
 Status: active
@@ -21,6 +21,10 @@ Every definition node SHALL have a content hash over a canonical byte encoding (
 Verify: A
 Status: active
 Source: ADR 0006
+
+#### Scenario: Formatting
+- **WHEN** the same definition is written with other comments, key order, spacing, table style or numeric spelling of an exact value (`6.371e6`, `6371000`)
+- **THEN** it loads to the same nodes and the same hash
 
 #### Scenario: Reordered fields
 - **WHEN** the same definition is built with its entries inserted in a different order
