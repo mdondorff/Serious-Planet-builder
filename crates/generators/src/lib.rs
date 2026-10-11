@@ -8,6 +8,7 @@ pub mod dump;
 pub mod height;
 pub mod manifest;
 pub mod mesh;
+pub mod stage;
 /// Test-only stress terrain; only test builds enable the `stress` feature (dev-dependencies).
 #[cfg(feature = "stress")]
 pub mod stress;
