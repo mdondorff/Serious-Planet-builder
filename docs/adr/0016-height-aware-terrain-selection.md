@@ -1,5 +1,5 @@
 # 0016 Height-aware terrain selection and morph
-Status: proposed
+Status: accepted (owner, 2026-10-11)
 Date: 2026-10-11
 Source: learnings 2026-10-11 (steep ground-1m), M2 gate follow-ups, LOD-008, TEST-015; supersedes the height note of ADR 0014 ("selection ignores terrain height ... per-node height bounds (M3) fix that") and its "height-free reference position" morph distance; constitution CON-03, CON-11
 
