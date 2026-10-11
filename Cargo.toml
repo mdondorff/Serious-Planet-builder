@@ -39,6 +39,7 @@ libm = "=0.2.16"
 wgpu = { version = "=30.0.1", default-features = false, features = ["wgsl", "dx12", "vulkan"] }
 pollster = "1.0.1"
 png = "0.18.1"
+toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
 
 planet-core = { path = "crates/core" }
 planet-world-def = { path = "crates/world-def" }
