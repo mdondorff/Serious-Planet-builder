@@ -1,6 +1,6 @@
 ---
 name: bless
-description: Owner-only review of candidate golden images; promotes approved candidates to goldens.
+description: Owner review of candidate golden images that the golden-review policy (ADR 0017) escalates; promotes approved candidates to goldens.
 disable-model-invocation: true
 ---
 1. List candidate images waiting for approval (`target/review/candidates/`), grouped by test and adapter.
@@ -9,6 +9,6 @@ disable-model-invocation: true
 4. Copy only approved candidates to `tests/goldens/<adapter>/`. Leave rejected ones in place and add a line to `docs/status.md` naming the test and the reason given.
 5. Commit approved goldens on the current branch with the message `bless: <tests>`.
 
-Never approve anything without an explicit answer from the owner in this session.
+Never approve anything without an explicit answer from the owner in this session. Agents bless only through the `golden-review` skill (ADR 0017); this skill is for what that policy escalates.
 
 Scope: $ARGUMENTS

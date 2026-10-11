@@ -60,3 +60,8 @@ What happened: on the steep stress field (TEST-015) the ground-1m view (terrain 
 Assumption it changes: ADR 0014 ("a camera low over high terrain gets coarser near tiles than ideal"): the consequence on steep terrain is a camera below the drawn surface. Coverage metrics alone again proved insufficient (see the earlier hole-test learning).
 Proposed follow-up: LOD-008 (planned) as the first M3 change: per-node height bounds in selection and morph distances, with a camera-above-surface check in every scripted view on both fields.
 
+## 2026-10-11 Contour-line goldens are not comparable across adapters, and golden tests hid later mismatches
+What happened: for PR #43 (LOD-008) `terrain_ground1m_depth` changed about 940 pixels on WARP and NVIDIA but 7 on llvmpipe; every difference sat on derivative-drawn (`fwidth`) contour lines, which lavapipe rasterises differently. Separately, the golden test stopped at its first mismatch, so llvmpipe produced one candidate per CI run (five rounds for five goldens).
+Assumption it changes: ADR 0009 (debug views compare exactly and alike on every adapter): views with derivative-drawn lines are exact per adapter only; they are classed shaded in `tests/goldens/classes.txt` and skip the cross-adapter check of ADR 0017.
+Proposed follow-up: none beyond ADR 0017 and `GoldenChecks`; new views with screen-space derivatives start as shaded.
+
