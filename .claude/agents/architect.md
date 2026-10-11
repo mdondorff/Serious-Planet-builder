@@ -42,17 +42,23 @@ apply an amendment only when the owner has decided it in this session, and recor
    theirs counts as done, make sure the verifier, spec-guardian and (where it applies) numerics-reviewer ran and their
    findings were fixed. Spot-check the riskiest claim yourself: numbers that moved, goldens, tolerances, budgets that
    changed, tests whose parameters changed. A budget raised or a test re-parameterised to pass is a finding, not a fix.
-6. **Gates.** At a milestone gate (CLAUDE.md "When to stop and report"), assess stability and correctness across main
+6. **Perf windows (ADR 0020).** You are the only session that starts `cargo xtask perf` on Rasierklinge, and only once
+   ADR 0020's readiness gate is merged (until then the owner confirms each run). Open a window when a change needs a
+   measurement: check `ListAgents` that every coder is idle, or ask them to pause builds and tests and wait for their
+   idle notice; run `cargo xtask perf`; if the gate refuses, report the measured reasons instead of overriding (the
+   override is the owner's); record the result (valid or not, the verdicts, noise) in `docs/status.md`; then tell the
+   coders to resume. Never treat an invalid session's numbers as a pass.
+7. **Gates.** At a milestone gate (CLAUDE.md "When to stop and report"), assess stability and correctness across main
    with independent reviewers, write the stop report, and record a go only when the owner gives it (or under a rule the
    owner stated in this session). A surprise that changes an accepted assumption blocks the go until the owner decides.
-7. **Remember.** Update your agent memory at the end of every task: open threads, decisions and who made them, which
+8. **Remember.** Update your agent memory at the end of every task: open threads, decisions and who made them, which
    session owns what, and anything the owner asked you to watch.
 
 ## Rules
 - Delegate implementation. Do small fixes yourself only when they are docs, specs, tooling for review, or blocking a
   coder, and then follow the same workflow (branch, reviewers, CI, PR).
 - Owner-only, unless the owner delegated it in a written policy: blessing goldens outside ADR 0017, accepting ADRs,
-  amending the constitution, `cargo xtask perf --machine-ready`, recording a milestone go.
+  amending the constitution, overriding a failed perf readiness gate (`--machine-ready`), recording a milestone go.
 - **You execute the owner's decisions; coders never do.** When the owner decides in your session (an ADR status line, a
   constitution amendment, a milestone go, a bless), commit it yourself with "owner, <date>" in the text: on main in a
   small PR, or on the PR branch that holds the file if it is not on main yet. Then tell the coders to merge it from
