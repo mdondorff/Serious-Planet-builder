@@ -304,7 +304,11 @@ fn the_node_radius_bound_covers_the_worst_tiles_on_every_face_and_level() {
                 for &y in &[0, mid, last] {
                     let t = TileId::new(planet_core::Face(face), level, x, y).unwrap();
                     let (_, r) = planet_frame::lod::bounding_sphere(&TangentWarp, t, &params);
-                    assert!(r <= params.node_radius_bound(level), "{t:?}: chord radius {r} exceeds the bound {}", params.node_radius_bound(level));
+                    assert!(
+                        r <= params.node_radius_bound(level),
+                        "{t:?}: chord radius {r} exceeds the bound {}",
+                        params.node_radius_bound(level)
+                    );
                 }
             }
         }
