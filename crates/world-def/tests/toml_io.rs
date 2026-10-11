@@ -252,7 +252,8 @@ fn every_schema_version_has_a_frozen_fixture_and_exactly_one_migration() {
             assert_eq!(parse_definition(&text).unwrap(), planet(), "{fx} must load to the current definition of its content");
         }
     }
-    for from in 1..SCHEMA_VERSION {
+    let current = std::hint::black_box(SCHEMA_VERSION);
+    for from in 1..current {
         assert_eq!(MIGRATIONS.iter().filter(|m| m.from == from).count(), 1, "exactly one migration step from version {from}");
     }
     assert_eq!(MIGRATIONS.len() as u32, SCHEMA_VERSION - 1);
