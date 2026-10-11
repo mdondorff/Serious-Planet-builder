@@ -5,4 +5,4 @@
 ## 3. Bundles
 - [x] 3.1 Bundles record the definition hash; replay refuses what it cannot rebuild
 ## 4. Close-out
-- [ ] 4.1 Reviews, archive, status line
+- [x] 4.1 Reviews, archive, status line
