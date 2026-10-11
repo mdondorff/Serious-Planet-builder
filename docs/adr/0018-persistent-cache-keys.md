@@ -1,4 +1,4 @@
-# 0017 Persistent cache keys: 128 bits from BLAKE3 over a canonical encoding
+# 0018 Persistent cache keys: 128 bits from BLAKE3 over a canonical encoding
 Status: proposed
 Date: 2026-10-11
 Source: ADR 0006 ("persistent and remote keys are at least 128 bits from a collision-resistant hash; the concrete function is fixed in the M3 cache change and recorded in an ADR before any disk format ships"), ADR 0010, M3 queue item 5; constitution CON-05, CON-06, CON-14, CON-27
@@ -29,7 +29,7 @@ Option 1.
 - Tests (A): known-answer keys; every input changes the key (property test over version, implementation id, mapping, tile, each output parameter, each read entry); encoding is injective on a generated sample; keys equal on Windows and Linux.
 
 ## Follow-ups
-- The storage ADR (0018) fixes how keys index the pack.
+- The storage ADR (0019) fixes how keys index the pack.
 - If BLAKE3 turns out to be unwelcome (licence review, supply chain), SHA-256 is a drop-in at the same width; the format tag changes.
 
 ## Licences of adopted code or techniques
