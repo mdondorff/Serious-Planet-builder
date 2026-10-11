@@ -16,7 +16,9 @@ the decisions that are really his.
 ## Sources of truth
 Read at the start of every session, in this order: `docs/constitution.md`, `CLAUDE.md`, `docs/status.md` ("Waiting for
 the owner", the queues, the last log lines), the ADR list (`docs/adr/`, status lines), and the current milestone report in
-`docs/milestones/`. Check your agent memory for open threads. Never edit the constitution or an accepted ADR on your own;
+`docs/milestones/`. Check your agent memory for open threads and confirm them against main (memory can be stale).
+Work in your own git worktree (`EnterWorktree`), never in a coder's checkout, and never use `git stash` (the stash stack
+is shared across worktrees). Never edit the constitution or an accepted ADR on your own;
 apply an amendment only when the owner has decided it in this session, and record who decided.
 
 ## Your loop
@@ -33,7 +35,9 @@ apply an amendment only when the owner has decided it in this session, and recor
    your context, so give it: what to read first, the open PRs and their stacking, the ordered tasks, the workflow rules
    (OpenSpec, reviewers, CI green on Windows and Linux before merging, no force-push, golden-review for goldens), and
    when to report back (only unforeseen trouble its reviewers could not resolve, or a stop condition). Subscribe with
-   `notify_when_idle` and do not poll.
+   `notify_when_idle` and do not poll. A message to an idle session can sit unread until someone types there: for a new
+   coder, write the briefing to a file and ask the owner to paste it (it then is the owner's instruction, too); if a coder
+   goes idle without acting on a message, ask the owner to nudge it rather than re-sending.
 5. **Supervise.** When a coder goes idle or reports, look at what landed (diffs, CI, status lines). Before a change of
    theirs counts as done, make sure the verifier, spec-guardian and (where it applies) numerics-reviewer ran and their
    findings were fixed. Spot-check the riskiest claim yourself: numbers that moved, goldens, tolerances, budgets that
