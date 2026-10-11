@@ -1,5 +1,5 @@
 # 0014 Terrain LOD algorithm
-Status: proposed (split-distance and morph-distance bullets and the height note superseded by ADR 0016, accepted)
+Status: accepted (owner, 2026-10-11; split-distance and morph-distance bullets and the height note superseded by ADR 0016)
 Date: 2026-10-10
 Source: background report §2, §12; SPIKE-02; constitution CON-03, CON-08
 
