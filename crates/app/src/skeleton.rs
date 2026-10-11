@@ -213,7 +213,7 @@ const TERRAIN_CELLS: u32 = 16;
 pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Result<(), String> {
     use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainRequest, TerrainView};
     let view = TerrainView::parse(&o.view)
-        .ok_or_else(|| format!("--view must be one of face, tile-id, level, morph, height, normals, depth, got '{}'", o.view))?;
+        .ok_or_else(|| format!("--view must be one of face, tile-id, level, morph, height, normals, depth, relief, got '{}'", o.view))?;
     let views = scripted_views(RADIUS_M, f64::from(TERRAIN_SIZE.0) / f64::from(TERRAIN_SIZE.1), o.seed);
     let index = match o.script.parse::<usize>() {
         Ok(i) => i,
@@ -385,6 +385,10 @@ fn upload_missing_meshes(
 
 /// Most meshes a flight keeps resident; the renderer is rebuilt (dropping every mesh) when a frame would exceed it.
 const FLIGHT_RESIDENT_CAP: usize = 12_000;
+/// The flight's contact sheet: this many frames from orbit to 1 m, in this many columns, thumbnails at most this wide.
+const SHEET_FRAMES: usize = 12;
+const SHEET_COLUMNS: usize = 4;
+const SHEET_THUMB_W: u32 = 320;
 
 /// `test-render --scene terrain --flight N --out-dir DIR`: the scripted orbit-to-1 m flight (TEST-013) rendered frame by
 /// frame through the persistent terrain renderer with production LOD parameters, for the owner's real-GPU jitter review
@@ -398,15 +402,20 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
     }
     // Option conflicts are rejected in `check_flight_options` before the GPU starts.
     let dir = o.out_dir.as_ref().ok_or("--flight needs --out-dir")?;
-    let view = TerrainView::parse(&o.view)
-        .ok_or_else(|| format!("--view must be one of face, tile-id, level, morph, height, normals, depth, got '{}'", o.view))?;
+    // The flat-colour views are one colour per tile, which is a solid frame once the camera is a metre above the ground,
+    // so a flight defaults to the relief view unless `--view` says otherwise (TEST-013).
+    let view_name = if o.given.contains("--view") { o.view.as_str() } else { "relief" };
+    let view = TerrainView::parse(view_name)
+        .ok_or_else(|| format!("--view must be one of face, tile-id, level, morph, height, normals, depth, relief, got '{view_name}'"))?;
     let size = o.size.unwrap_or((1280, 720));
     let lod = LodParams { cells: o.cells, viewport_h_px: f64::from(size.1), tau_px: o.tau, max_level: 26, ..LodParams::earth_1080p() };
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, o.tau))?;
     std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
     let cameras = flight_path(RADIUS_M, f64::from(size.0) / f64::from(size.1), o.seed, frames);
     let mut renderer = TerrainRenderer::new(ctx, size, o.cells);
-    let mut index = String::from("# frame altitude_above_terrain_m nodes plan_hash\n");
+    let mut index = String::from("# frame altitude_above_terrain_m nodes plan_hash finest_level\n");
+    let on_sheet = crate::sheet::sheet_indices(frames, SHEET_FRAMES);
+    let mut sheet = Vec::new();
     for (i, camera) in cameras.into_iter().enumerate() {
         let req = TerrainRequest { camera, size, view, lod: lod.clone(), face_mapping: TangentWarp.id().to_string(), seed: o.seed };
         let plan = plan_terrain(&req).map_err(|e| format!("frame {i}: {e}"))?;
@@ -417,11 +426,20 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
         upload_missing_meshes(ctx, &mut renderer, &plan, o.seed, o.cells)?;
         renderer.render(ctx, &plan, false).map_err(|e| format!("frame {i}: {e}"))?;
         let path = dir.join(format!("frame_{i:04}.png"));
-        renderer.read_color(ctx).write_png(&path).map_err(|e| format!("writing {}: {e}", path.display()))?;
+        let image = renderer.read_color(ctx);
+        image.write_png(&path).map_err(|e| format!("writing {}: {e}", path.display()))?;
         let p = camera.position.0;
         let altitude = p.length() - RADIUS_M - planet_generators::height::height_at(o.seed, p.normalized());
-        index.push_str(&format!("{i:04} {altitude:.3} {} {:016x}\n", plan.nodes.len(), plan.plan_hash()));
+        let finest = plan.nodes.iter().map(|n| n.level).max().unwrap_or(0);
+        index.push_str(&format!("{i:04} {altitude:.3} {} {:016x} {finest}\n", plan.nodes.len(), plan.plan_hash()));
+        if on_sheet.contains(&i) {
+            sheet.push((image, crate::sheet::label(i, altitude)));
+        }
     }
+    let sheet_path = dir.join("contact_sheet.png");
+    crate::sheet::contact_sheet(&sheet, SHEET_COLUMNS, SHEET_THUMB_W)
+        .write_png(&sheet_path)
+        .map_err(|e| format!("writing {}: {e}", sheet_path.display()))?;
     std::fs::write(dir.join("flight.txt"), &index).map_err(|e| format!("writing flight.txt: {e}"))?;
     writeln!(
         out,

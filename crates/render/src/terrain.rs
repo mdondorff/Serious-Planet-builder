@@ -7,6 +7,16 @@ use planet_frame::{TerrainPlan, TerrainView};
 use planet_generators::mesh::{grid_indices, MeshVertex, TileMesh};
 use std::collections::HashMap;
 
+/// Bytes of one node uniform (origin, colour, morph interval, grid phases); the dynamic offset stride rounds it up.
+const NODE_BYTES: u64 = 80;
+
+/// The relief grid's anchors for a tile origin (planet-fixed, f64): the origin modulo 1 m and modulo 1,000 km, per axis.
+/// Added to a tile-local coordinate they give the world coordinate modulo that period, exactly where f32 can hold it, so
+/// two tiles agree on where a grid line is (CON-11: remainders, never planet-radius values).
+pub fn grid_phases(origin: [f64; 3]) -> ([f32; 3], [f32; 3]) {
+    (origin.map(|v| v.rem_euclid(1.0) as f32), origin.map(|v| v.rem_euclid(1.0e6) as f32))
+}
+
 const SHADER: &str = r#"
 struct Globals {
     view_proj: mat4x4<f32>,
@@ -19,6 +29,10 @@ struct Node {
     // x, y: vertex distances between which a vertex morphs to the parent grid; z, w: padding (the plan's node-level
     // `morph` is a diagnostic of the CPU selection and is not read by the shader).
     morph: vec4<f32>,
+    // Planet-fixed tile origin modulo 1 m (xyz) and modulo 1,000 km (xyz), taken in f64 on the CPU: they anchor the
+    // relief grid to the world instead of to this tile, so neighbouring tiles and LOD splits draw the same lines.
+    phase_fine: vec4<f32>,
+    phase_coarse: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -29,6 +43,8 @@ struct VsOut {
     @location(0) normal: vec3<f32>,
     @location(1) height: f32,
     @location(2) morph: f32,
+    // Morphed position relative to the tile origin: small, tile-local, and what the relief grid is anchored to.
+    @location(3) local: vec3<f32>,
 };
 
 @vertex
@@ -36,12 +52,14 @@ fn vs(@location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) 
     // The morph distance is measured to the vertex's real position: node selection and the morph interval use bounding
     // volumes that include the node's height range.
     let m = clamp((length(node.origin_rel.xyz + pos) - node.morph.x) / max(node.morph.y - node.morph.x, 1e-6), 0.0, 1.0);
-    let p = node.origin_rel.xyz + mix(pos, coarse, m);
+    let local = mix(pos, coarse, m);
+    let p = node.origin_rel.xyz + local;
     var out: VsOut;
     out.pos = g.view_proj * vec4<f32>(p, 1.0);
     out.normal = normal;
     out.height = height;
     out.morph = m;
+    out.local = local;
     return out;
 }
 
@@ -49,6 +67,51 @@ fn vs(@location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) 
 fn line(x: f32, w: f32) -> f32 {
     let d = abs(fract(x + 0.5) - 0.5);
     return 1.0 - smoothstep(0.0, max(w, 1e-6) * 1.5, d);
+}
+
+// Lines at every multiple of `base` * 10^k (k < count) of the world coordinate x (metres), given as `xf` (valid modulo
+// 1 m) for the decades up to 1 m and `xc` (valid modulo 1,000 km) above. A decade fades out continuously once its lines
+// would be closer than ~6 px, like the height contours (the width `wx` is taken by the caller).
+fn decades(xf: f32, xc: f32, wx: f32, base: f32, count: i32) -> f32 {
+    var acc = 0.0;
+    var s = base;
+    for (var k = 0; k < count; k = k + 1) {
+        let w = wx / s;
+        let fade = clamp((log2(1.0 / max(w, 1e-6)) - 2.5) / 2.5, 0.0, 1.0);
+        let x = select(xf, xc, s > 5.0);
+        acc = max(acc, line(x / s, w) * fade);
+        s = s * 10.0;
+    }
+    return acc;
+}
+
+// Relief: fixed-sun (wrapped) hillshade of the vertex normals on a height tint, a metric grid of the tile-local axes (each axis
+// weighted by how square it cuts the surface) from 1 cm to 1,000 km, and height contours from 1 m to 10 km. Unlike the
+// flat-colour views it keeps structure at any altitude, so a flight down to 1 m stays readable.
+fn relief(in: VsOut) -> vec4<f32> {
+    let n = normalize(in.normal);
+    let t = clamp((in.height - g.range.x) / max(g.range.y - g.range.x, 1e-6), 0.0, 1.0);
+    let low = mix(vec3<f32>(0.18, 0.36, 0.56), vec3<f32>(0.36, 0.56, 0.26), smoothstep(0.0, 0.35, t));
+    let tint = mix(low, mix(vec3<f32>(0.66, 0.56, 0.38), vec3<f32>(0.95, 0.95, 0.95), smoothstep(0.7, 1.0, t)), smoothstep(0.35, 0.7, t));
+    let sun = normalize(vec3<f32>(0.5, 0.6, 0.62));
+    // Wrapped lighting: the night side keeps a gentle slope gradient instead of going flat.
+    let wrap = 0.5 + 0.5 * dot(n, sun);
+    let shade = 0.3 + 0.7 * wrap * wrap;
+    let lx = in.local;
+    let wgt = clamp(vec3<f32>(1.0) - abs(n) * 1.25, vec3<f32>(0.0), vec3<f32>(1.0));
+    let xf = lx + node.phase_fine.xyz;
+    let xc = lx + node.phase_coarse.xyz;
+    let grid = max(
+        max(decades(xf.x, xc.x, fwidth(lx.x), 0.01, 9) * wgt.x, decades(xf.y, xc.y, fwidth(lx.y), 0.01, 9) * wgt.y),
+        decades(xf.z, xc.z, fwidth(lx.z), 0.01, 9) * wgt.z,
+    );
+    // Contours start at 1 m: the f32 height is only good to a fraction of a millimetre at a few km, so finer lines would
+    // flicker between glide frames.
+    let contour = decades(in.height, in.height, fwidth(in.height), 1.0, 5);
+    var c = tint * shade;
+    c = mix(c, vec3<f32>(0.36, 0.1, 0.05), 0.7 * contour);
+    c = mix(c, vec3<f32>(0.04, 0.06, 0.14), 0.8 * grid);
+    return vec4<f32>(c, 1.0);
 }
 
 @fragment
@@ -85,6 +148,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     if (mode == 5u) {
         let n = normalize(in.normal) * 0.5 + vec3<f32>(0.5, 0.5, 0.5);
         return vec4<f32>(n, 1.0);
+    }
+    if (mode == 7u) {
+        return relief(in);
     }
     let v = clamp(band_z / 40.0 + 1.0, 0.0, 1.0);
     let k = 1.0 - 0.8 * line(band_z, w_z);
@@ -180,7 +246,7 @@ impl TerrainRenderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let stride = 48u64.next_multiple_of(u64::from(device.limits().min_uniform_buffer_offset_alignment));
+        let stride = NODE_BYTES.next_multiple_of(u64::from(device.limits().min_uniform_buffer_offset_alignment));
         let node_capacity = 256;
         let nodes = Self::node_buffer(device, stride, node_capacity);
         let module = device
@@ -191,7 +257,7 @@ impl TerrainRenderer {
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Uniform,
                 has_dynamic_offset: dynamic,
-                min_binding_size: if dynamic { wgpu::BufferSize::new(48) } else { None },
+                min_binding_size: if dynamic { wgpu::BufferSize::new(NODE_BYTES) } else { None },
             },
             count: None,
         };
@@ -311,7 +377,7 @@ impl TerrainRenderer {
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
                         buffer: nodes,
                         offset: 0,
-                        size: wgpu::BufferSize::new(48),
+                        size: wgpu::BufferSize::new(NODE_BYTES),
                     }),
                 },
             ],
@@ -389,8 +455,30 @@ impl TerrainRenderer {
         for (i, d) in plan.nodes.iter().enumerate() {
             let r = d.camera_relative_origin;
             let c = d.color.map(|v| f32::from(v) / 255.0);
-            let b = f32_bytes(&[r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, 0.0, 0.0]);
-            nodes[i * self.stride as usize..i * self.stride as usize + 48].copy_from_slice(&b);
+            let (pf, pc) = grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]);
+            let b = f32_bytes(&[
+                r[0],
+                r[1],
+                r[2],
+                0.0,
+                c[0],
+                c[1],
+                c[2],
+                c[3],
+                d.morph_start_m,
+                d.morph_end_m,
+                0.0,
+                0.0,
+                pf[0],
+                pf[1],
+                pf[2],
+                0.0,
+                pc[0],
+                pc[1],
+                pc[2],
+                0.0,
+            ]);
+            nodes[i * self.stride as usize..i * self.stride as usize + NODE_BYTES as usize].copy_from_slice(&b);
         }
         ctx.queue.write_buffer(&self.nodes, 0, &nodes);
 
