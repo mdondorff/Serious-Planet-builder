@@ -9,4 +9,4 @@
 - [x] 3.2 Snapshots updated; four terrain goldens changed (candidates queued for the owner); plan time measured (about 19 ms at ground-1m)
 
 ## 4. Close-out
-- [ ] 4.1 ADR 0016 proposed, numerics-reviewer, spec-guardian, verifier, archive, status line
+- [x] 4.1 ADR 0016 proposed, numerics-reviewer, spec-guardian, verifier, archive, status line

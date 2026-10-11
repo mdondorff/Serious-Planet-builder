@@ -74,4 +74,7 @@ Proposed follow-up: selection now equalises the start per level (test `same_leve
 What happened: for PR #43 (LOD-008) `terrain_ground1m_depth` changed about 940 pixels on WARP and NVIDIA but 7 on llvmpipe; every difference sat on derivative-drawn (`fwidth`) contour lines, which lavapipe rasterises differently. Separately, the golden test stopped at its first mismatch, so llvmpipe produced one candidate per CI run (five rounds for five goldens).
 Assumption it changes: ADR 0009 (debug views compare exactly and alike on every adapter): views with derivative-drawn lines are exact per adapter only; they are classed shaded in `tests/goldens/classes.txt` and skip the cross-adapter check of ADR 0017.
 Proposed follow-up: none beyond ADR 0017 and `GoldenChecks`; new views with screen-space derivatives start as shaded.
-
+## 2026-10-11 Full-depth steep GPU views exceed the test time limit on WARP
+What happened: `gpu_steep_terrain` at ground-1m planned about 51k nodes (cells 4, ratio 77, max level 26); WARP costs about 0.2 ms per draw call, so the test ran over the 180 s nextest limit. a45ddb2 capped the leaf level at 19 (25k nodes, 40 s). The spec-guardian review of PR #43 noted the cap leaves levels 20-26 on the steep field unrasterised.
+Assumption it changes: "a tier-C test may use the production depth": GPU views on the software adapter are bounded by draw calls, not by pixels. Deep-level behaviour on steep terrain is covered on the CPU (tier A, max level 26), not by pixels.
+Proposed follow-up: TEST-015 now states the cap. Revisit with a slow-test group, instanced or merged draws, or the real GPU (`test gpu --real`) if deep-level pixel coverage is wanted.

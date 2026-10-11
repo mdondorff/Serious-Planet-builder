@@ -192,6 +192,7 @@ fn camera_is_above_the_drawn_surface_in_every_scripted_view_on_the_steep_field()
 }
 
 // spec: LOD-008
+// spec: TEST-015
 #[test]
 fn terrain_too_steep_for_the_parameters_is_a_plan_error_naming_the_fix() {
     // Production-like parameters (cells 32, 240 pixels of tile detail per ratio) leave the steep field's neighbourhoods no
