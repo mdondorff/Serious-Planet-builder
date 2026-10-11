@@ -16,7 +16,7 @@ Source: CON-06, ADR 0006
 - **THEN** their keys differ
 
 ### Requirement: WDEF-005 Incremental invalidation
-Authored items SHALL be indexed by spatial cell, a `TileId` of the tangent-warp mapping at one level per body chosen so a cell is about 40 km wide (level 8 at Earth's radius, computed with `libm`), and a generator SHALL read items only through cell queries that record the hash of every cell read, an empty cell included, with the body's radius that fixes the cell level. A field that queries cells SHALL report the read set of each tile separately (`inputs_hash_for`), so that adding, moving, editing or removing an item changes the keys of exactly the tiles whose footprint contains its cell and no others, and editing a node no generator read changes no key. A tile touching more cells than a limit reads the whole body instead. The definition hash SHALL cover the items, and the base hash (ADR 0007) SHALL cover the nodes only.
+Authored items SHALL be indexed by spatial cell, a `TileId` of the tangent-warp mapping at a level per body chosen so a cell is about 40 km wide (level 8 at Earth's radius, computed with `libm` from the body's radius), re-filed whenever the body's radius changes, and each item SHALL keep its unit direction so a move inside a cell is a change. A generator SHALL read items only through cell queries that record the hash of every cell read, an empty cell included, together with the radius that fixes the cell level; a tile's query covers the cells of its footprint plus a margin ring of cells (its closed border row, the normal halo and an item's reach), across cube faces, and a tile touching more cells than a limit reads the whole body (one recorded entry), so a query is never silently stale. A field that queries cells SHALL say so (`reads_cells`) and report the read set of each tile (`inputs_hash_for`, given the mapping, which must be the tangent warp), so that adding, moving, editing or removing an item changes the keys of exactly the tiles that read its cell and no others, and editing a node no generator read changes no key. The definition hash SHALL cover the items, the base hash (ADR 0007) the nodes only, and a definition with items SHALL NOT be written to a TOML file that cannot carry them.
 
 Verify: A
 Status: active
@@ -24,12 +24,31 @@ Source: report §5, ADR 0006, ADR 0007
 
 #### Scenario: Local edit
 - **WHEN** an item in one cell is added, moved, edited or removed
-- **THEN** only tiles whose footprint contains the old or new cell change height and mesh key, and restoring the item restores every key exactly
+- **THEN** only tiles that read the old or the new cell (footprint and margin ring) change height and mesh key, and restoring the item restores every key exactly
 
 #### Scenario: Empty cell
 - **WHEN** a generator queried a cell and found nothing, and an item is then added there
 - **THEN** its read set and so the keys of the tiles that queried it change; an item in another cell changes nothing
 
+#### Scenario: Radius edit
+- **WHEN** a body's radius changes across a cell-level boundary
+- **THEN** its items follow to the cells of the new level and are still returned by the queries that cover them
+
 #### Scenario: Hashes
 - **WHEN** items are inserted in any order, or all removed
 - **THEN** the definition hash is equal for equal content and equals the node hash when there are no items; the base hash never changes with items
+
+### Requirement: WDEF-002 Schema version and migrations
+The WorldDefinition SHALL be stored as TOML with a top-level `schema_version`, independent of the generator version. Loading SHALL require the version, reject a newer one and a gap in the migration chain with an error that names what to do, apply the migrations from the file's version to the current one in order, and fail with the step's message when a migration fails. Files of every older schema version in the fixture set SHALL load through tested migrations and equal the current-layout definition of the same content. Values SHALL be non-negative integers (a `u64` above `i64::MAX`, and only that, as a canonical decimal string) and finite floats, typed by their literal except for the paths the program reads (`world.seed` an integer, `body.<n>.radius_m` a float, where an exact integer literal is accepted for the float and a float for the integer is an error); any other value, a negative integer, a key outside letters, digits, `_` and `-`, or a reserved name (`derived`, `schema_version`) SHALL be an error naming the path. Writing SHALL be canonical (version first, sorted tables, shortest round-trip floats) and reading it back SHALL give the same nodes bit for bit.
+
+Verify: A
+Status: active
+Source: CON-10
+
+#### Scenario: Old fixture
+- **WHEN** a fixture written by an older schema version is loaded
+- **THEN** it migrates and equals the current-version fixture of the same content (until a second schema version exists the engine is tested with a synthetic three-version chain)
+
+#### Scenario: Unloadable file
+- **WHEN** the version is missing, newer than the build, or has no migration path, or a value cannot be stored exactly
+- **THEN** loading fails with an error that names the version or the path

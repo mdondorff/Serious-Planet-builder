@@ -2,8 +2,8 @@
 
 use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId, Vec3};
-use planet_world_def::cells::{cell_level, cell_of, cells_covering, empty_cell_hash};
-use planet_world_def::{cell_query_path, BodyId, GenContext, NodeValue, WorldDefinition};
+use planet_world_def::cells::{cell_level, cell_of, cells_covering, empty_cell_hash, with_margin};
+use planet_world_def::{cell_query_all_path, cell_query_path, BodyId, GenContext, ItemError, NodeValue, WorldDefinition};
 
 const R: f64 = 6_371_000.0;
 
@@ -92,9 +92,19 @@ fn items_change_the_definition_hash_but_not_the_base_hash_and_order_does_not_mat
 fn an_item_needs_its_bodys_radius_and_moves_between_cells() {
     let mut d = WorldDefinition::new(1);
     let e = d.put_item(BodyId(2), 1, dir(1.0, 0.0, 0.0), 5).unwrap_err();
-    assert!(e.0.contains("body.2.radius_m"), "{e}");
+    assert!(matches!(&e, ItemError::Radius(m) if m.0.contains("body.2.radius_m")), "{e}");
+    assert!(e.to_string().contains("radius of its body"));
     d.set("body.0.radius_m", NodeValue::U64(5));
-    assert!(d.put_item(BodyId::PLANET, 1, dir(1.0, 0.0, 0.0), 5).unwrap_err().0.contains("not a number"));
+    assert!(matches!(d.put_item(BodyId::PLANET, 1, dir(1.0, 0.0, 0.0), 5), Err(ItemError::Radius(m)) if m.0.contains("not a number")));
+    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        d.set_body_radius(BodyId::PLANET, bad);
+        assert!(matches!(d.put_item(BodyId::PLANET, 1, dir(1.0, 0.0, 0.0), 5), Err(ItemError::Radius(_))), "radius {bad}");
+    }
+    d.set_body_radius(BodyId::PLANET, R);
+    for bad in [Vec3::new(0.0, 0.0, 0.0), Vec3::new(f64::NAN, 1.0, 0.0), Vec3::new(f64::INFINITY, 0.0, 0.0), Vec3::new(1e-300, 0.0, 0.0)] {
+        assert_eq!(d.put_item(BodyId::PLANET, 1, bad, 5), Err(ItemError::Direction), "{bad:?}");
+    }
+    assert!(!d.has_items());
     let mut d = planet();
     let from = d.put_item(BodyId::PLANET, 9, dir(1.0, 0.2, 0.1), 5).unwrap();
     assert_eq!(d.items_in_cell(BodyId::PLANET, from), vec![(9, 5)]);
@@ -140,8 +150,101 @@ fn adding_an_item_changes_the_read_set_of_a_queried_cell_and_of_no_other() {
     // Whole-tile queries record every cell of the footprint, and say so when the footprint is too large.
     let ctx = GenContext::new(&with_far);
     let tile = TileId::from_direction(&TangentWarp, far, 7);
-    let items = ctx.query_tile(BodyId::PLANET, tile, 16).unwrap().unwrap();
+    let items = ctx.query_tile(BodyId::PLANET, tile, 0, 16).unwrap();
     assert_eq!(items, vec![(1, 1)]);
     assert_eq!(ctx.reads().iter().filter(|(p, _)| p.starts_with("derived.cell.0.")).count(), 4);
-    assert_eq!(ctx.query_tile(BodyId::PLANET, tile, 3).unwrap(), None);
+    // A margin of one cell reads the ring around the four cells too.
+    let ringed = GenContext::new(&with_far);
+    assert_eq!(ringed.query_tile(BodyId::PLANET, tile, 1, 64).unwrap(), vec![(1, 1)]);
+    assert!(ringed.reads().iter().filter(|(p, _)| p.starts_with("derived.cell.0.")).count() >= 16);
+}
+
+// spec: WDEF-005
+#[test]
+fn a_tile_over_the_cell_limit_reads_the_whole_body_and_is_never_silently_stale() {
+    let near = dir(1.0, 0.2, 0.1);
+    let far = dir(-1.0, 0.3, 0.2);
+    let tile = TileId::from_direction(&TangentWarp, near, 5); // 4^3 = 64 cells
+    let hash_of = |d: &WorldDefinition, max: usize| {
+        let ctx = GenContext::new(d);
+        let items = ctx.query_tile(BodyId::PLANET, tile, 0, max).unwrap();
+        (ctx.read_set_hash(), items, ctx.reads())
+    };
+    let plain = planet();
+    let mut other_place = planet();
+    other_place.put_item(BodyId::PLANET, 1, far, 1).unwrap();
+    // Within the limit the tile does not depend on an item elsewhere; over it, it reads everything.
+    assert_eq!(hash_of(&plain, 64).0, hash_of(&other_place, 64).0);
+    let (over_plain, items, reads) = hash_of(&plain, 63);
+    let (over_other, items_other, _) = hash_of(&other_place, 63);
+    assert!(items.is_empty() && items_other == vec![(1, 1)]);
+    assert_ne!(over_plain, over_other, "the whole-body read sees every item");
+    assert!(reads.iter().any(|(p, _)| *p == cell_query_all_path(BodyId::PLANET)), "{reads:?}");
+}
+
+// spec: WDEF-005
+#[test]
+fn changing_the_radius_across_a_cell_level_boundary_refiles_the_items() {
+    // 4.60e6 m is level 7 and 4.62e6 m is level 8 (the boundary is at about 4.6096e6 m).
+    assert_eq!((cell_level(4_600_000.0), cell_level(4_620_000.0)), (7, 8));
+    let d_item = dir(1.0, 0.2, 0.1);
+    let mut d = WorldDefinition::single_planet(4_600_000.0, 7);
+    d.put_item(BodyId::PLANET, 1, d_item, 42).unwrap();
+    let tile = TileId::from_direction(&TangentWarp, d_item, 11);
+    let read = |d: &WorldDefinition| GenContext::new(d).query_tile(BodyId::PLANET, tile, 0, 64).unwrap();
+    assert_eq!(read(&d), vec![(1, 42)]);
+    d.set_body_radius(BodyId::PLANET, 4_620_000.0);
+    assert_eq!(read(&d), vec![(1, 42)], "the item must follow the body to its new cell level");
+    assert_eq!(d.items_in_cell(BodyId::PLANET, cell_of(4_620_000.0, d_item)), vec![(1, 42)]);
+    assert!(d.items_in_cell(BodyId::PLANET, cell_of(4_600_000.0, d_item)).is_empty());
+    // The same definition built the other way round is the same definition.
+    let mut e = WorldDefinition::single_planet(4_620_000.0, 7);
+    e.put_item(BodyId::PLANET, 1, d_item, 42).unwrap();
+    assert_eq!(d, e);
+    assert_eq!(d.hash(), e.hash());
+    // Removing after the change empties the right cell.
+    assert!(d.remove_item(BodyId::PLANET, 1));
+    assert!(!d.has_items());
+    assert_eq!(d, WorldDefinition::single_planet(4_620_000.0, 7));
+}
+
+// spec: WDEF-005
+#[test]
+fn moving_an_item_inside_its_cell_changes_the_definition_hash_and_the_cell_hash() {
+    let a = dir(1.0, 0.2, 0.1);
+    let b = dir(1.0, 0.2000001, 0.1);
+    assert_eq!(cell_of(R, a), cell_of(R, b), "the two places are in one cell");
+    let mut one = planet();
+    one.put_item(BodyId::PLANET, 1, a, 5).unwrap();
+    let mut two = planet();
+    two.put_item(BodyId::PLANET, 1, b, 5).unwrap();
+    assert_ne!(one.hash(), two.hash());
+    let read = |d: &WorldDefinition| {
+        let ctx = GenContext::new(d);
+        ctx.query_cell(BodyId::PLANET, cell_of(R, a)).unwrap();
+        ctx.read_set_hash()
+    };
+    assert_ne!(read(&one), read(&two), "a tile that read the cell must re-key when an item moves within it");
+}
+
+// spec: WDEF-005
+#[test]
+fn the_margin_ring_reaches_across_face_edges_and_cube_corners() {
+    let interior = cell_of(R, dir(1.0, 0.2, 0.1));
+    let ring = with_margin(&[interior], 1);
+    assert_eq!(ring.len(), 9, "an interior cell and its eight neighbours");
+    assert!(ring.contains(&interior));
+    assert!(ring.windows(2).all(|w| w[0].raw() < w[1].raw()));
+    assert_eq!(with_margin(&[interior], 0), vec![interior]);
+    assert_eq!(with_margin(&[interior], 2).len(), 25);
+    // On a face edge the ring continues on the next face.
+    let edge = cell_of(R, dir(1.0, 0.999999, 0.1));
+    let faces: std::collections::BTreeSet<u8> = with_margin(&[edge], 1).iter().map(|c| c.face().0).collect();
+    assert!(faces.len() >= 2, "{faces:?}");
+    // At a cube corner there is no diagonal tile: eight cells, not nine.
+    let corner = cell_of(R, dir(1.0, 1.0, 1.0));
+    let ring = with_margin(&[corner], 1);
+    assert!(ring.len() == 7 || ring.len() == 8, "{}", ring.len());
+    let corner_faces: std::collections::BTreeSet<u8> = ring.iter().map(|c| c.face().0).collect();
+    assert_eq!(corner_faces.len(), 3, "a cube corner ring touches three faces");
 }

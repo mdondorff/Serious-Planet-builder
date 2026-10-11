@@ -47,6 +47,7 @@ pub enum LoadError {
     BadPath { path: String, why: &'static str },
     Conflict { path: String, other: String },
     WrongType { path: String, expected: &'static str, found: &'static str },
+    ItemsNotSupported,
     NotCanonical { path: String, hint: &'static str },
 }
 
@@ -73,6 +74,7 @@ impl fmt::Display for LoadError {
             }
             LoadError::NonFinite { path } => write!(f, "`{path}`: infinite and NaN values are not supported"),
             LoadError::BadPath { path, why } => write!(f, "`{path}`: {why}"),
+            LoadError::ItemsNotSupported => write!(f, "the definition has authored items, which this file format cannot carry yet (M6): refusing to write a file that would load to a different definition"),
             LoadError::WrongType { path, expected, found } => write!(f, "`{path}` must be {expected}, found {found}"),
             LoadError::NotCanonical { path, hint } => write!(f, "`{path}`: {hint}"),
             LoadError::Conflict { path, other } => write!(f, "`{path}` is a value and `{other}` is below it: a path cannot be both"),
@@ -208,6 +210,9 @@ fn set(def: &mut WorldDefinition, path: &str, value: NodeValue) -> Result<(), Lo
 /// The canonical TOML text of a definition. `parse_definition(&to_toml(&d)?)` gives back a definition equal to `d`
 /// (bit for bit), and equal definitions give equal text.
 pub fn to_toml(def: &WorldDefinition) -> Result<String, LoadError> {
+    if def.has_items() {
+        return Err(LoadError::ItemsNotSupported);
+    }
     let paths: BTreeSet<&str> = def.nodes().map(|(p, _)| p).collect();
     let mut root = Vec::new();
     let mut tables: std::collections::BTreeMap<&str, Vec<String>> = std::collections::BTreeMap::new();
