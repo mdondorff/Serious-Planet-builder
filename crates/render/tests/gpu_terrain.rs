@@ -135,6 +135,17 @@ fn every_debug_view_renders_and_obeys_its_colour_rules() {
     }
 }
 
+// spec: REND-006
+#[test]
+fn the_relief_view_renders_identically_twice() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    for index in [0usize, 6] {
+        let (name, plan) = plan_for(index, TerrainView::Relief);
+        let meshes = meshes_for(&plan);
+        assert_eq!(render(&ctx, &plan, &meshes).0, render(&ctx, &plan, &meshes).0, "{name}: the relief view is not deterministic");
+    }
+}
+
 // spec: REND-003
 #[test]
 fn depth_view_is_reversed_z_near_is_brighter_than_far() {

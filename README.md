@@ -30,14 +30,15 @@ cargo run -p planet -- generate --tile 0,3,2,2 --out height.png
 # Render the terrain headlessly from a scripted camera, with a debug view
 cargo run -p planet -- test-render --scene terrain --view normals --out terrain.png
 
-# Render the scripted orbit-to-1 m flight as a frame sequence (use --adapter hardware for the GPU)
+# Render the scripted orbit-to-1 m flight (relief view by default) as frames, flight.txt and a labelled contact_sheet.png
+# (use --adapter hardware for the GPU)
 cargo run --release -p planet -- test-render --scene terrain --flight 240 --out-dir flight --size 1280x720
 
 # Editor/viewer skeleton (no window yet)
 cargo run -p planet -- editor --offscreen
 ```
 
-Useful options of `test-render`: `--scene hello-triangle|tiles|terrain`, `--view face|tile-id|level|morph|height|normals|depth`, `--script N|name`, `--adapter software|hardware` (default from `PLANET_ADAPTER`), `--bundle <file>` to write a repro bundle, `--repro <file>` to replay one.
+Useful options of `test-render`: `--scene hello-triangle|tiles|terrain`, `--view face|tile-id|level|morph|height|normals|depth|relief` (`relief`, a shaded view with a metric grid and contours, stays readable from orbit to 1 m and is the flight default), `--script N|name`, `--adapter software|hardware` (default from `PLANET_ADAPTER`), `--bundle <file>` to write a repro bundle, `--repro <file>` to replay one.
 
 ## Building, testing, checking
 

@@ -83,24 +83,36 @@ fn a_size_that_fails_lod_validation_writes_no_frames() {
     assert!(!o.exists(), "a rejected flight must not create {}", o.display());
 }
 
-/// Share of the terrain pixels (everything but the sky) that differ from the most common terrain colour: 0 for a solid
-/// frame, towards 1 for a frame full of structure.
+/// Structure of a frame: the share of its terrain pixels (those whose right and lower neighbours are not the sky too) that
+/// sit next to a clearly different pixel (a channel differs by at least 12). A solid colour or a few big flat tiles score
+/// near 0; a grid, contours or shading gradients score higher.
 fn structure(img: &Image) -> f64 {
-    let mut counts = std::collections::HashMap::new();
-    for p in img.pixels().filter(|p| *p != planet_frame::plan::CLEAR_COLOR) {
-        *counts.entry(p).or_insert(0usize) += 1;
+    let clear = planet_frame::plan::CLEAR_COLOR;
+    let differs = |a: [u8; 4], b: [u8; 4]| (0..3).any(|c| a[c].abs_diff(b[c]) >= 12);
+    let (mut terrain, mut edges) = (0usize, 0usize);
+    for y in 0..img.height - 1 {
+        for x in 0..img.width - 1 {
+            let (p, r, d) = (img.pixel(x, y), img.pixel(x + 1, y), img.pixel(x, y + 1));
+            if p == clear || r == clear || d == clear {
+                continue;
+            }
+            terrain += 1;
+            if differs(p, r) || differs(p, d) {
+                edges += 1;
+            }
+        }
     }
-    let total: usize = counts.values().sum();
-    if total == 0 {
-        return 0.0;
+    if terrain == 0 {
+        0.0
+    } else {
+        edges as f64 / terrain as f64
     }
-    1.0 - *counts.values().max().unwrap() as f64 / total as f64
 }
 
 fn flight_structure(name: &str, extra: &[&str]) -> Vec<f64> {
     let d = dir(name);
     let mut args =
-        vec!["test-render", "--scene", "terrain", "--flight", "30", "--out-dir", d.to_str().unwrap(), "--size", "160x120", "--cells", "8"];
+        vec!["test-render", "--scene", "terrain", "--flight", "30", "--out-dir", d.to_str().unwrap(), "--size", "768x432", "--cells", "32"];
     args.extend_from_slice(extra);
     run(&args).unwrap();
     let s: Vec<f64> = (0..30).map(|i| structure(&read_png(&d.join(format!("frame_{i:04}.png"))).unwrap())).collect();
@@ -108,8 +120,36 @@ fn flight_structure(name: &str, extra: &[&str]) -> Vec<f64> {
     s
 }
 
-/// A frame whose terrain is at least this structured is legible; the flat-colour views fall below it near the ground.
-const LEGIBLE: f64 = 0.4;
+// spec: TEST-013
+#[test]
+fn the_default_relief_flight_is_deterministic_including_the_contact_sheet() {
+    let (a, b) = (dir("rel-a"), dir("rel-b"));
+    for d in [&a, &b] {
+        run(&[
+            "test-render",
+            "--scene",
+            "terrain",
+            "--flight",
+            "12",
+            "--out-dir",
+            d.to_str().unwrap(),
+            "--size",
+            "160x120",
+            "--cells",
+            "8",
+        ])
+        .unwrap();
+    }
+    for name in ["contact_sheet.png", "frame_0000.png", "frame_0006.png", "frame_0011.png", "flight.txt"] {
+        assert_eq!(std::fs::read(a.join(name)).unwrap(), std::fs::read(b.join(name)).unwrap(), "{name} differs between two runs");
+    }
+    for d in [a, b] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}
+
+/// A frame at least this structured is legible; the flat-colour views fall below it near the ground.
+const LEGIBLE: f64 = 0.10;
 
 // spec: TEST-017
 #[test]
@@ -133,7 +173,7 @@ fn the_check_has_teeth_the_tile_id_view_is_solid_at_one_metre() {
     assert!(last < LEGIBLE, "the tile-id glide frame should be nearly solid, got structure {last:.2}; all frames {s:.2?}");
 }
 
-// spec: TEST-013, TEST-017
+// spec: TEST-013
 #[test]
 fn a_flight_writes_a_labelled_contact_sheet_and_the_finest_level_per_frame() {
     let d = dir("sheet");

@@ -34,19 +34,39 @@ Source: CON-18
 - **WHEN** the face, tile-id and height views of two generated tiles are rendered
 - **THEN** no clear-colour pixel appears inside a planned rectangle, the face view is exactly the face colour, and the images match the adapter's goldens (or are written as candidates)
 
+### Requirement: TEST-014 Real-GPU flight review
+The owner SHALL review the TEST-013 flight rendered on the reference GPU once, in the default relief view, and confirm that it shows no jitter, vertex swimming, cracks or popping beyond the LOD transitions.
+
+Verify: D
+Status: planned
+Review: `target/review/flight-relief-nvidia/` (240 frames, 1280x720, relief view, RTX 3080 Ti) is rendered and waits for the owner. The earlier `target/review/flight-nvidia/` (tile-id view) approved at the M2 gate covered the dive; its glide frames were solid colour and showed nothing.
+Source: CON-13, CON-18, ADR 0014
+
+#### Scenario: Glide at 1 m
+- **WHEN** the owner steps through the glide frames at 1 m
+- **THEN** the grid lines and contours of the relief view move smoothly with the camera and no vertex jumps between consecutive frames
+
+#### Scenario: Relief flight
+- **WHEN** the owner reviews the relief flight rendered on the reference GPU
+- **THEN** the owner confirms or rejects it, and the verdict is recorded in `docs/status.md`
+
 ## ADDED Requirements
 
 ### Requirement: TEST-017 Flight legibility
-Every frame of a flight in its default view SHALL show structure: at least 40 % of its terrain pixels (everything but the clear colour) differ from the frame's most common terrain colour. The check SHALL be shown to fail on the flat-colour `tile-id` flight at 1 m, so that it cannot pass vacuously.
+Every frame of a flight in its default view SHALL show structure: at least 10 % of its terrain pixels sit next to a clearly different pixel (a channel differs by at least 12). The check SHALL be shown to fail on the flat-colour `tile-id` flight, so that it cannot pass vacuously.
 
 Verify: C
 Status: active
 Source: CON-13, CON-18, ADR 0014
 
+#### Scenario: Measure
+- **WHEN** a frame is measured
+- **THEN** terrain pixels are those whose right and lower neighbours are not the clear colour either, and the check uses the production LOD parameters (cells 32) because the flat-colour views only turn solid when tiles are large
+
 #### Scenario: Default view
-- **WHEN** a 30-frame flight is rendered in the default view at 160x120
+- **WHEN** a 30-frame flight is rendered in the default view at 768x432 with cells 32
 - **THEN** no frame, orbit or glide, falls below the structure threshold
 
 #### Scenario: Negative control
 - **WHEN** the same flight is rendered with `--view tile-id`
-- **THEN** its last (1 m) frame falls below the threshold
+- **THEN** every frame of its 1 m glide falls below the threshold
