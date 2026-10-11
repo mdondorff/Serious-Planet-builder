@@ -1,10 +1,10 @@
-# 0018 Tile storage: an append-only pack with a rebuildable index, Hilbert-ordered
+# 0019 Tile storage: an append-only pack with a rebuildable index, Hilbert-ordered
 Status: proposed
 Date: 2026-10-11
-Source: background report §4 (Formats), ADR 0003 ("Hilbert-ordered storage keys are a separate decision with the tile storage ADR"), ADR 0006, ADR 0017, M3 queue item 5; constitution CON-05, CON-14, CON-22
+Source: background report §4 (Formats), ADR 0003 ("Hilbert-ordered storage keys are a separate decision with the tile storage ADR"), ADR 0006, ADR 0018, M3 queue item 5; constitution CON-05, CON-14, CON-22
 
 ## Context
-Tiles are disposable caches of the WorldDefinition (CON-05), keyed by 128-bit content keys (ADR 0017). The disk tier sits between the RAM LRU and the generators and must serve a tile in well under a millisecond, never block a frame (CON-22), survive a crash without corrupting later reads, and let the editor and the headless `generate` mode share one store. Spatial locality matters: a camera needs a tile and its neighbours and parents together.
+Tiles are disposable caches of the WorldDefinition (CON-05), keyed by 128-bit content keys (ADR 0018). The disk tier sits between the RAM LRU and the generators and must serve a tile in well under a millisecond, never block a frame (CON-22), survive a crash without corrupting later reads, and let the editor and the headless `generate` mode share one store. Spatial locality matters: a camera needs a tile and its neighbours and parents together.
 
 ## Options (with trade-offs)
 1. **Custom pack: append-only data file plus an index that can be rebuilt by scanning the data.** Pure Rust, no unsafe or C, deterministic bytes, trivially diffable by hash; durability is not required because every entry is regenerable.
