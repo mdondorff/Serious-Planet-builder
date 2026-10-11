@@ -3,7 +3,7 @@
 //! cracks, morphing, borders and jitter hold on terrain the smooth reference generator never produces. Its own
 //! implementation id and version enter its height and mesh keys, so its artefacts never alias reference ones.
 
-use crate::height::{layer_noise, HeightField};
+use crate::height::{layer_noise, layer_noise_bounds, HeightField};
 use planet_core::Vec3;
 
 /// Peak `|height|` of [`Steep`] in metres.
@@ -47,5 +47,20 @@ impl HeightField for Steep {
     }
     fn max_abs_height_m(&self) -> f64 {
         STEEP_AMPLITUDE_M
+    }
+    fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
+        let (mut lo, mut hi, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
+        for octave in 0..OCTAVES {
+            let (a, b) = layer_noise_bounds(self.0, LAYER_STEEP, octave, centre, angular_radius, freq);
+            // |n| in [near, far]; the octave term 2 (1 - |n|)^2 - 1 falls as |n| grows.
+            let far = a.abs().max(b.abs());
+            let near = if a <= 0.0 && b >= 0.0 { 0.0 } else { a.abs().min(b.abs()) };
+            lo += amp * (2.0 * (1.0 - far) * (1.0 - far) - 1.0);
+            hi += amp * (2.0 * (1.0 - near) * (1.0 - near) - 1.0);
+            norm += amp;
+            amp *= GAIN;
+            freq *= 2.0;
+        }
+        (STEEP_AMPLITUDE_M * lo / norm - 1e-6, STEEP_AMPLITUDE_M * hi / norm + 1e-6)
     }
 }

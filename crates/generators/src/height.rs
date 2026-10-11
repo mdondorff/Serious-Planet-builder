@@ -52,6 +52,42 @@ pub(crate) fn layer_noise(seed: u64, layer: u64, octave: u32, p: Vec3) -> f64 {
     lerp(lerp(x00, x10, ty), lerp(x01, x11, ty), tz)
 }
 
+/// Largest gradient magnitude of [`layer_noise`] per unit of its argument: each partial derivative is a lattice
+/// difference (at most 2) times the derivative of `smooth` (at most 1.5), so at most 3, and three axes give 3 sqrt(3).
+const NOISE_GRADIENT_BOUND: f64 = 5.196_152_422_706_632;
+
+/// Bounds of [`layer_noise`] over all points `freq * u` with `u` a unit direction within the angle `theta` of `centre`.
+///
+/// Two sound bounds, intersected. Trilinear interpolation with monotone weights stays inside the hull of the lattice
+/// corners it blends, so one bound is the extremes over the corners of every lattice cell the cap can touch (none when
+/// the cap touches more than 64 corners: then the octave is finer than the cap and the bound would be loose anyway). The
+/// other is the value at the centre plus or minus the gradient bound times the largest distance in the argument.
+#[cfg_attr(not(feature = "stress"), allow(dead_code))]
+pub(crate) fn layer_noise_bounds(seed: u64, layer: u64, octave: u32, centre: Vec3, theta: f64, freq: f64) -> (f64, f64) {
+    // The chord is shorter than the arc; the margin absorbs rounding in the direction maths and in `floor`.
+    let reach = freq * (theta * (1.0 + 1e-9) + 1e-12);
+    let range = |c: f64| (libm::floor(freq * c - reach) as i64, libm::floor(freq * c + reach) as i64);
+    let ((x0, x1), (y0, y1), (z0, z1)) = (range(centre.x), range(centre.y), range(centre.z));
+    let slack = NOISE_GRADIENT_BOUND * reach * (1.0 + 1e-9) + 1e-12;
+    let n0 = layer_noise(seed, layer, octave, centre * freq);
+    let (mut lo, mut hi) = ((n0 - slack).max(-1.0), (n0 + slack).min(1.0));
+    let corners = (x1 - x0 + 2).saturating_mul(y1 - y0 + 2).saturating_mul(z1 - z0 + 2);
+    if corners > 64 {
+        return (lo, hi);
+    }
+    let (mut hlo, mut hhi) = (f64::MAX, f64::MIN);
+    for ix in x0..=x1 + 1 {
+        for iy in y0..=y1 + 1 {
+            for iz in z0..=z1 + 1 {
+                let v = lattice_value(seed, layer, octave, ix, iy, iz);
+                hlo = hlo.min(v);
+                hhi = hhi.max(v);
+            }
+        }
+    }
+    (lo.max(hlo), hi.min(hhi))
+}
+
 /// A height field over unit directions. The reference generator is [`Reference`]; the test-only stress field
 /// `stress::Steep` exists behind the `stress` feature. Mesh and plan code take a field so stress tests can swap it
 /// without touching production paths. To be folded into the M3 `Generator` / `GenContext` design (ADR 0006).
@@ -66,6 +102,13 @@ pub trait HeightField: Sync {
     fn version(&self) -> u32;
     /// Bound on `|height|` in metres.
     fn max_abs_height_m(&self) -> f64;
+    /// `(min, max)` of the height in metres over all directions within the angle `angular_radius` (radians) of the unit
+    /// direction `centre`. The bounds are sound (never excluded a real height) but need not be tight; the default is the
+    /// global `+-max_abs_height_m`. Node selection uses them for the bounding volume of a tile (LOD-008).
+    fn height_bounds(&self, _centre: Vec3, _angular_radius: f64) -> (f64, f64) {
+        let m = self.max_abs_height_m();
+        (-m, m)
+    }
 }
 
 /// The reference generator ([`height_at`]) with a seed.
@@ -87,6 +130,19 @@ impl HeightField for Reference {
     }
     fn max_abs_height_m(&self) -> f64 {
         AMPLITUDE_M
+    }
+    fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
+        let (mut lo, mut hi, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
+        for octave in 0..OCTAVES {
+            let (a, b) = layer_noise_bounds(self.0, LAYER_HEIGHT, octave, centre, angular_radius, freq);
+            lo += amp * a;
+            hi += amp * b;
+            norm += amp;
+            amp *= 0.5;
+            freq *= 2.0;
+        }
+        // Rounding margin: the sum above is evaluated in the same order as `height_at` but with different operands.
+        (AMPLITUDE_M * lo / norm - 1e-6, AMPLITUDE_M * hi / norm + 1e-6)
     }
 }
 
