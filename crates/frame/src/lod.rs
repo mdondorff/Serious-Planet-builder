@@ -180,13 +180,67 @@ fn tile_geom(map: &dyn FaceMapping, tile: TileId, p: &LodParams) -> TileGeom {
     TileGeom { dir: centre_dir, centre, radius, angular_radius: worst * 1.001 }
 }
 
-/// Memo of [`TileGeom`] by tile for one selection (only ever looked up by key, so hash order cannot leak into results).
+type IdMap<V> = std::collections::HashMap<TileId, V, std::hash::BuildHasherDefault<IdHasher>>;
+
+/// Memo of the per-tile geometry and height-aware volume across selections. Both are pure functions of the tile, the
+/// face mapping, the radius and the height field, so a frame-to-frame cache changes no result (it is only looked up by
+/// key, so hash order cannot leak into results); it is emptied when any of those inputs changes and when it grows past
+/// [`SelectionCache::MAX_TILES`]. Consecutive frames of a moving camera share most of their tiles, which is what
+/// makes planning fit a frame.
+#[derive(Default)]
+pub struct SelectionCache {
+    key: u64,
+    tiles: IdMap<TileGeom>,
+    volumes: IdMap<Volume>,
+}
+
+impl SelectionCache {
+    /// Upper bound on cached tiles (some tens of MB) before the cache starts over.
+    pub const MAX_TILES: usize = 400_000;
+
+    pub fn new() -> SelectionCache {
+        SelectionCache::default()
+    }
+
+    pub fn clear(&mut self) {
+        self.tiles.clear();
+        self.volumes.clear();
+    }
+
+    pub fn len(&self) -> usize {
+        self.tiles.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tiles.is_empty()
+    }
+
+    fn prepare(&mut self, map: &dyn FaceMapping, field: &dyn HeightField, p: &LodParams) {
+        let text = |s: &str| s.bytes().map(u64::from).collect::<Vec<_>>();
+        let key = planet_core::hash::hash_u64s(
+            0x0063_6163,
+            &[
+                planet_core::hash::hash_u64s(1, &text(map.id())),
+                planet_core::hash::hash_u64s(2, &text(field.implementation_id())),
+                u64::from(field.version()),
+                field.seed(),
+                p.radius_m.to_bits(),
+            ],
+        );
+        if key != self.key || self.tiles.len() > Self::MAX_TILES {
+            self.clear();
+            self.key = key;
+        }
+    }
+}
+
+/// One selection's view of a [`SelectionCache`].
 struct GeomCache<'a> {
     map: &'a dyn FaceMapping,
     field: &'a dyn HeightField,
     p: &'a LodParams,
-    tiles: std::collections::HashMap<TileId, TileGeom, std::hash::BuildHasherDefault<IdHasher>>,
-    volumes: std::collections::HashMap<TileId, Volume, std::hash::BuildHasherDefault<IdHasher>>,
+    tiles: &'a mut IdMap<TileGeom>,
+    volumes: &'a mut IdMap<Volume>,
 }
 
 impl GeomCache<'_> {
@@ -257,24 +311,35 @@ impl HeightField for Flat {
 
 /// Select the nodes to draw for a camera position over flat terrain, ignoring view direction (whole visible hemisphere).
 pub fn select_nodes(map: &dyn FaceMapping, camera: PlanetFixed, p: &LodParams) -> NodeSelection {
-    select_impl(map, camera, None, &Flat, p)
+    select_impl(map, camera, None, &Flat, p, &mut SelectionCache::new())
 }
 
 /// Select the nodes to draw for a camera over flat terrain, also dropping nodes outside its side frustum planes (padded
 /// by the terrain height).
 pub fn select_nodes_in_view(map: &dyn FaceMapping, camera: &Camera, p: &LodParams) -> NodeSelection {
-    select_impl(map, camera.position, Some(camera.frustum()), &Flat, p)
+    select_impl(map, camera.position, Some(camera.frustum()), &Flat, p, &mut SelectionCache::new())
 }
 
 /// [`select_nodes`] over the terrain of `field`: distances go to bounding volumes that include each node's height
 /// bounds (LOD-008).
 pub fn select_nodes_field(map: &dyn FaceMapping, camera: PlanetFixed, field: &dyn HeightField, p: &LodParams) -> NodeSelection {
-    select_impl(map, camera, None, field, p)
+    select_impl(map, camera, None, field, p, &mut SelectionCache::new())
 }
 
 /// [`select_nodes_in_view`] over the terrain of `field`.
 pub fn select_nodes_in_view_field(map: &dyn FaceMapping, camera: &Camera, field: &dyn HeightField, p: &LodParams) -> NodeSelection {
-    select_impl(map, camera.position, Some(camera.frustum()), field, p)
+    select_impl(map, camera.position, Some(camera.frustum()), field, p, &mut SelectionCache::new())
+}
+
+/// [`select_nodes_in_view_field`] reusing the per-tile work of earlier selections in `cache`: the result is identical.
+pub fn select_nodes_in_view_cached(
+    map: &dyn FaceMapping,
+    camera: &Camera,
+    field: &dyn HeightField,
+    p: &LodParams,
+    cache: &mut SelectionCache,
+) -> NodeSelection {
+    select_impl(map, camera.position, Some(camera.frustum()), field, p, cache)
 }
 
 fn select_impl(
@@ -283,8 +348,11 @@ fn select_impl(
     frustum: Option<Frustum>,
     field: &dyn HeightField,
     p: &LodParams,
+    cache: &mut SelectionCache,
 ) -> NodeSelection {
-    let mut geoms = GeomCache { map, field, p, tiles: Default::default(), volumes: Default::default() };
+    cache.prepare(map, field, p);
+    let SelectionCache { tiles, volumes, .. } = cache;
+    let mut geoms = GeomCache { map, field, p, tiles, volumes };
     let mut leaves: BTreeSet<TileId> = BTreeSet::new();
     let mut stack: Vec<TileId> = Face::ALL.iter().map(|&f| TileId::new(f, 0, 0, 0).expect("root")).collect();
     while let Some(t) = stack.pop() {

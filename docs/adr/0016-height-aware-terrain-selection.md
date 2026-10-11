@@ -27,7 +27,7 @@ Option 1.
 
 ## Follow-ups
 - Per-tile stored height bounds (field pipeline), hierarchical so that a child's bounds sit inside its parent's.
-- If plan time over budget on Rasierklinge: cache volumes between frames (they depend on the tile only) and make selection incremental.
+- Plan time over budget on Rasierklinge (25.75 ms at ground-1m, cold): done in m3-plan-cache (per-tile cache across frames, warm 6.8 ms measured on the development machine); incremental selection only if the owner's rerun still shows OVER.
 - Oriented boxes if sphere slack dominates node counts.
 - Per-edge and per-corner morph starts (symmetric by construction, static) to remove the per-level maximum and its time discontinuity on rugged terrain.
 
