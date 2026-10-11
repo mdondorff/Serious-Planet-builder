@@ -105,7 +105,7 @@ fn coarse_heights_are_the_parent_grid_heights() {
                 worst = worst.max((expected - f64::from(cm.vertices[(j * w + i) as usize].coarse_height)).abs());
             }
         }
-        assert!(worst < 0.01, "child {child:?}: coarse heights differ from the parent grid by {worst} m");
+        assert!(worst < 0.002, "child {child:?}: coarse heights differ from the parent grid by {worst} m");
     }
 }
 
@@ -240,7 +240,7 @@ fn a_fully_morphed_border_meets_the_coarser_neighbours_border_across_faces() {
             assert!(worst < 0.5, "{t:?} {side:?}: morphed border vertex is {worst} m off the coarser neighbour's border");
             // The height morphs with the position: fully morphed, the border height is the coarser neighbour's own
             // (linearly interpolated) border height there, so a morphed tile meets its coarser neighbour without a step.
-            assert!(worst_h < 0.01, "{t:?} {side:?}: morphed border height is {worst_h} m off the coarser neighbour's border height");
+            assert!(worst_h < 0.002, "{t:?} {side:?}: morphed border height is {worst_h} m off the coarser neighbour's border height");
             checked += 1;
         }
     }

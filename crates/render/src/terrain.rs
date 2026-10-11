@@ -20,7 +20,17 @@ const NODE_BYTES: u64 = 48 + 16 * GRID_SPACINGS_M.len() as u64;
 /// 1,000 km phase in metres would round to centimetres in f32 and turn the coarse decades into wide plateau bands. Two
 /// tiles agree on where a grid line is (CON-11: fractions, never planet-radius values).
 pub fn grid_phases(origin: [f64; 3]) -> [[f32; 3]; 9] {
-    GRID_SPACINGS_M.map(|s| origin.map(|v| (v / s).rem_euclid(1.0) as f32))
+    GRID_SPACINGS_M.map(|s| {
+        origin.map(|v| {
+            // The f32 rounding of a fraction just under 1 can reach 1.0 (the same line, but a phase is a fraction in [0, 1)).
+            let f = (v / s).rem_euclid(1.0) as f32;
+            if f >= 1.0 {
+                0.0
+            } else {
+                f
+            }
+        })
+    })
 }
 
 const SHADER: &str = r#"
@@ -80,13 +90,15 @@ fn line(x: f32, w: f32) -> f32 {
 }
 
 // Lines at every multiple of `base` * 10^k (k < count) of x (metres). A decade fades out continuously once its lines would
-// be closer than ~6 px, like the height contours (the width `wx` is taken by the caller in uniform control flow).
-fn decades(x: f32, wx: f32, base: f32, count: i32) -> f32 {
+// be closer than ~6 px, like the height contours (the width `wx` is taken by the caller in uniform control flow). `res` is
+// the resolution of x itself (its f32 spacing): where x changes by less than that between pixels (`wx` under 4 `res`) it is a
+// staircase of plateaus and every plateau at an integer crossing would draw as a wide band, so the lines fade out.
+fn decades(x: f32, wx: f32, base: f32, count: i32, res: f32) -> f32 {
     var acc = 0.0;
     var s = base;
     for (var k = 0; k < count; k = k + 1) {
         let w = wx / s;
-        let fade = clamp((log2(1.0 / max(w, 1e-6)) - 2.5) / 2.5, 0.0, 1.0);
+        let fade = clamp((log2(1.0 / max(w, 1e-6)) - 2.5) / 2.5, 0.0, 1.0) * smoothstep(res, 4.0 * res, wx);
         acc = max(acc, line(x / s, w) * fade);
         s = s * 10.0;
     }
@@ -95,14 +107,15 @@ fn decades(x: f32, wx: f32, base: f32, count: i32) -> f32 {
 
 // The same for the world-anchored grid along one axis: a line coordinate per decade is the tile-local offset in cells plus
 // the node's f64-derived fractional phase of that decade, so it never carries a large magnitude. An f32 fraction is good
-// to about 6e-8 cells, so a decade whose pixel is narrower than ~4e-7 cells (its line could be a fraction of a pixel off)
-// fades out: distant 10 km .. 1,000 km lines vanish near the ground and the others keep their place to under 0.15 px.
+// to about 6e-8 cells, so a decade whose pixel is narrower than ~8e-7 cells (its line could be a fraction of a pixel off)
+// fades out, fully off below 4e-7: distant 10 km .. 1,000 km lines vanish near the ground, and a decade at full strength
+// keeps its place to under 0.15 px (up to ~0.3 px while it fades in).
 fn grid_axis(lx: f32, wx: f32, axis: i32) -> f32 {
     var acc = 0.0;
     var s = 0.01;
     for (var k = 0; k < 9; k = k + 1) {
         let w = wx / s;
-        let fade = clamp((log2(1.0 / max(w, 1e-6)) - 2.5) / 2.5, 0.0, 1.0) * smoothstep(2.0e-7, 4.0e-7, w);
+        let fade = clamp((log2(1.0 / max(w, 1e-6)) - 2.5) / 2.5, 0.0, 1.0) * smoothstep(4.0e-7, 8.0e-7, w);
         acc = max(acc, line(lx / s + node.phase[k][axis], w) * fade);
         s = s * 10.0;
     }
@@ -127,9 +140,9 @@ fn relief(in: VsOut) -> vec4<f32> {
         max(grid_axis(lx.x, fwidth(lx.x), 0) * wgt.x, grid_axis(lx.y, fwidth(lx.y), 1) * wgt.y),
         grid_axis(lx.z, fwidth(lx.z), 2) * wgt.z,
     );
-    // Contours start at 1 m: the f32 height is only good to a fraction of a millimetre at a few km, so finer lines would
-    // flicker between glide frames.
-    let contour = decades(in.height, fwidth(in.height), 1.0, 5);
+    // Contours start at 1 m, and fade out wherever the f32 height (spacing about 2.4e-7 of its size) changes by less than
+    // a few steps between pixels, which would otherwise draw plateaus of one height as wide bands.
+    let contour = decades(in.height, fwidth(in.height), 1.0, 5, max(abs(in.height), 1.0) * 2.4e-7);
     var c = tint * shade;
     c = mix(c, vec3<f32>(0.36, 0.1, 0.05), 0.7 * contour);
     c = mix(c, vec3<f32>(0.04, 0.06, 0.14), 0.8 * grid);

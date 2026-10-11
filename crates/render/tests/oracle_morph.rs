@@ -57,6 +57,7 @@ fn the_vertex_shader_morph_matches_the_cpu_twin_within_a_data_derived_bound() {
             max_offset_px: f64::MAX,
             share_factor: 1.5,
             min_tested: 300,
+            min_informative: 30,
             max_worst_error: 0.05,
         },
         |_| None,
@@ -78,6 +79,7 @@ fn the_vertex_shader_height_morph_matches_the_cpu_twin_within_a_data_derived_bou
         max_offset_px: 0.15,
         share_factor: 5.0,
         min_tested: 60,
+        min_informative: 60,
         max_worst_error: 0.25,
     };
     check_vertex_function(oracle, |meshes| {
@@ -108,13 +110,15 @@ struct Oracle {
     /// Scale of the interpolation share in the derived bound (1.5: smooth; more where neighbours alternate).
     share_factor: f64,
     min_tested: usize,
+    /// At least this many compared vertices must actually morph (so a shader that skips the morph cannot pass).
+    min_informative: usize,
     /// The worst observed error must stay below this, so the derived bound cannot be loosened unnoticed.
     max_worst_error: f64,
 }
 
 /// Runs the pixel-versus-CPU-twin comparison of `oracle`; `window` may set the plan's height range from the meshes.
 fn check_vertex_function(oracle: Oracle, window: impl Fn(&[TileMesh]) -> Option<[f32; 2]>) {
-    let Oracle { view, value, views, neutral, max_offset_px, share_factor, min_tested, max_worst_error } = oracle;
+    let Oracle { view, value, views, neutral, max_offset_px, share_factor, min_tested, min_informative, max_worst_error } = oracle;
     let ctx = GpuContext::new(AdapterPolicy::Software).expect("software adapter");
     let (mut tested, mut informative, mut worst_excess, mut worst_err) = (0usize, 0usize, f64::MIN, 0.0f64);
     for &index in views {
@@ -145,6 +149,9 @@ fn check_vertex_function(oracle: Oracle, window: impl Fn(&[TileMesh]) -> Option<
                         continue;
                     }
                     let (fx, fy) = ((x * 0.5 + 0.5) * f64::from(SIZE.0), (0.5 - y * 0.5) * f64::from(SIZE.1));
+                    // (The pixel is found from the vertex's own position; a morphing vertex is drawn at `mix(pos, coarse, m)`.
+                    // At the high views compared here that moves it by a small fraction of a pixel; a lower view would have to
+                    // project the morphed position.)
                     let (px, py) = (fx.floor() as u32, fy.floor() as u32);
                     // Only pixels that show this node (not a nearer one).
                     if ids.pixel(px, py) != id_plan.nodes[n].color {
@@ -194,7 +201,10 @@ fn check_vertex_function(oracle: Oracle, window: impl Fn(&[TileMesh]) -> Option<
         }
     }
     assert!(tested >= min_tested, "only {tested} vertices could be compared");
-    assert!(informative >= 30, "only {informative} of {tested} compared vertices actually morph: a shader that skips the morph would pass");
+    assert!(
+        informative >= min_informative,
+        "only {informative} of {tested} compared vertices actually morph: a shader that skips the morph would pass"
+    );
     // The derived bound must be tight enough to mean something (a few 8-bit steps for the smooth morph value; for the
     // height delta, whose neighbours alternate between morphed and not, a fraction of the window).
     assert!(worst_err < max_worst_error, "worst error {worst_err} (excess over bound {worst_excess}) is too large for a tight oracle");
