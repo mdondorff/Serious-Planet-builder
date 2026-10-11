@@ -18,7 +18,7 @@ Confirm everything here against `main` and `docs/status.md` before acting on it.
 - Constitution v1.2 (CON-14 per-field CPU/GPU bounds; CON-18 golden approval by owner or ADR 0017 policy).
 - M3 done on main: perf gate (#55), LOD-008 (#43), plan cache (#52, the owner's run: 6.3 ms warm at ground-1m against
   8 ms), world-def/GenContext (#53), TOML definitions (#57), cell index (#58), multi-body keys (#56), stage model (#60).
-- M3 next (sonnet-coder): item 5 cache keys and tile storage (`change/m3-cache-keys` pushed, no PR yet), item 6 field
+- M3 next (sonnet-coder): item 5 tile storage (128-bit cache keys done in #61; next the pack store, cache-verify, cache-compact), item 6 field
   pipeline and hydrology (SPIKE-03), item 7 M3 acceptance and report (the gate: stop and report to the owner).
 
 ## Open threads to follow up
