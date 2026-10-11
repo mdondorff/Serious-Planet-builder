@@ -1,5 +1,5 @@
 # 0013 Render graph and GPU-driven baseline
-Status: proposed
+Status: accepted (owner, 2026-10-11)
 Date: 2026-10-10
 Source: background report §8, §12 (ADR candidates), §17 item 12; SPIKE-01; constitution CON-03
 
