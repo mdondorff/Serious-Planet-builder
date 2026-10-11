@@ -64,11 +64,23 @@ pub fn mesh_key_with(map: &dyn FaceMapping, seed: u64, id: TileId, cells: u32, r
 
 /// The body parameter hash of a field (ADR 0001, 0007): body id, seed, radius and reference surface.
 fn body_params(field: &dyn HeightField, radius_m: f64) -> u64 {
-    planet_world_def::body_params_hash(field.body(), field.seed(), radius_m, planet_world_def::SPHERE_SURFACE_ID)
+    planet_world_def::body_params_hash(field.body(), field.seed(), radius_m, field.surface_id())
 }
 
 fn mesh_key_chain(height_key: u64, cells: u32, body_params: u64, version: u32, skirt_fraction: f64) -> u64 {
-    hash_u64s(0x006d_6573, &[u64::from(version), height_key, u64::from(cells), body_params, skirt_fraction.to_bits()])
+    // The key format version is named here too: it reaches the height key's words, but a mesh-only change of this
+    // composition must have a constant to bump.
+    hash_u64s(
+        0x006d_6573,
+        &[
+            u64::from(version),
+            u64::from(crate::height::KEY_FORMAT_VERSION),
+            height_key,
+            u64::from(cells),
+            body_params,
+            skirt_fraction.to_bits(),
+        ],
+    )
 }
 
 /// [`mesh_key`] for a height field: it chains the field's height key ([`cache_key_field`]), so [`Reference`] gives
@@ -97,7 +109,7 @@ impl MeshKeyer {
             inputs: field.inputs_hash(),
             cells,
             body_params: body_params(field, radius_m),
-            body_words: crate::height::body_key_words(field.body()),
+            body_words: crate::height::body_key_words(field),
             implementation_hash: hash_u64s(1, &crate::height::fold_str(field.implementation_id())),
             mapping_hash: hash_u64s(2, &crate::height::fold_str(map.id())),
         }

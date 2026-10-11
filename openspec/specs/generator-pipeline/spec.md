@@ -28,7 +28,7 @@ Source: CON-14
 - **THEN** all outputs are bit-identical
 
 ### Requirement: GEN-003 Cross-OS tile hashes
-A determinism manifest SHALL list output hashes for a committed set of tiles (height and mesh, every face, cube corners, levels 0 to 28) and reference-surface round trips, plus the generator, hash and mesh versions. CI SHALL write it on Windows and Linux and fail when the two differ, naming every differing entry.
+A determinism manifest SHALL list output hashes for a committed set of tiles (height and mesh, every face, cube corners, levels 0 to 28) and reference-surface round trips, plus the generator, hash, mesh and key-format versions and the height and mesh keys of the same tiles for the planet and for a moon built through the generator. CI SHALL write it on Windows and Linux and fail when the two differ, naming every differing entry.
 
 Verify: A
 Status: active

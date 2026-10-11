@@ -6,6 +6,41 @@ use planet_generators::height::{cache_key_field, HeightField, Reference, KEY_FOR
 use planet_generators::mesh::{mesh_key_field, MeshKeyer};
 use planet_world_def::{body_params_hash, BodyId, SPHERE_SURFACE_ID};
 
+/// A field identical to `Reference(seed)` in everything but the reference surface it names.
+struct OnSurface(Reference, &'static str);
+
+impl HeightField for OnSurface {
+    fn height(&self, dir: Vec3) -> f64 {
+        self.0.height(dir)
+    }
+    fn seed(&self) -> u64 {
+        self.0.seed()
+    }
+    fn implementation_id(&self) -> &'static str {
+        self.0.implementation_id()
+    }
+    fn version(&self) -> u32 {
+        self.0.version()
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        self.0.max_abs_height_m()
+    }
+    fn surface_id(&self) -> &'static str {
+        self.1
+    }
+}
+
+// spec: GEN-012
+#[test]
+fn the_reference_surface_alone_changes_the_height_key_and_the_mesh_key() {
+    let sphere = OnSurface(Reference(7), SPHERE_SURFACE_ID);
+    let ellipsoid = OnSurface(Reference(7), "ellipsoid");
+    let hk = |f: &dyn HeightField| cache_key_field(f, &TangentWarp, tile(), 16);
+    assert_eq!(hk(&sphere), hk(&Reference(7)));
+    assert_ne!(hk(&sphere), hk(&ellipsoid));
+    assert_ne!(mesh_key_field(&sphere, &TangentWarp, tile(), 16, R), mesh_key_field(&ellipsoid, &TangentWarp, tile(), 16, R));
+}
+
 const R: f64 = 6_371_000.0;
 
 fn tile() -> TileId {
@@ -100,4 +135,4 @@ fn the_key_format_version_is_the_one_the_body_fields_belong_to() {
 }
 
 const KNOWN_HEIGHT_KEY: u64 = 16898139709241435207;
-const KNOWN_MESH_KEY: u64 = 2429064358667009365;
+const KNOWN_MESH_KEY: u64 = 17514838993888437677;

@@ -13,6 +13,8 @@ fn manifest_is_reproducible_and_covers_heights_meshes_and_geo() {
     assert_eq!(count("mesh "), tiles);
     assert_eq!(count("heightkey "), tiles);
     assert_eq!(count("meshkey "), tiles);
+    assert_eq!(count("moonheightkey "), tiles);
+    assert_eq!(count("moonmeshkey "), tiles);
     assert_eq!(count("geo "), 88, "geo round trips");
     assert_eq!(count("version "), 5);
     let mut keys: Vec<&str> = a.lines().map(|l| l.rsplit_once(' ').unwrap().0).collect();

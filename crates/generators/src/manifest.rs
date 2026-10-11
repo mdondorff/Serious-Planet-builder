@@ -7,7 +7,9 @@ use planet_core::hash::{hash_u64s, HASH_VERSION};
 use planet_core::{Face, Geo, ReferenceSurface, Sphere, TileId};
 
 use crate::height::{cache_key, generate_tile, GENERATOR_VERSION, IMPLEMENTATION_ID, KEY_FORMAT_VERSION};
-use crate::mesh::{mesh_key, tile_mesh, MESH_VERSION};
+use crate::height::{HeightField, HeightGenerator, ReferenceGenerator};
+use crate::mesh::{mesh_key, mesh_key_field, tile_mesh, MESH_VERSION};
+use planet_world_def::{BodyId, GenContext, WorldDefinition};
 
 /// Seed, grid size and radius of every manifest entry.
 pub const MANIFEST_SEED: u64 = 1;
@@ -46,6 +48,11 @@ pub fn determinism_manifest() -> String {
     let mut s = String::new();
     s.push_str(&format!("version generator {GENERATOR_VERSION}\nversion hash {HASH_VERSION}\nversion mesh {MESH_VERSION}\nversion key {KEY_FORMAT_VERSION}\n"));
     s.push_str(&format!("version implementation {IMPLEMENTATION_ID}\n"));
+    // A moon built through the generator: the body id, the derived seed and the read set are part of its keys.
+    let mut def = WorldDefinition::single_planet(MANIFEST_RADIUS_M, MANIFEST_SEED);
+    def.set_body_radius(BodyId(1), 1_737_400.0);
+    let moon: Box<dyn HeightField> =
+        ReferenceGenerator.field(&GenContext::new(&def), BodyId(1)).expect("the moon's seed derives from the world seed");
     for id in manifest_tiles() {
         let key = format!("{}/{}/{}/{}", id.face().0, id.level(), id.x(), id.y());
         let h = generate_tile(MANIFEST_SEED, &TangentWarp, id, MANIFEST_RES).content_hash();
@@ -57,6 +64,10 @@ pub fn determinism_manifest() -> String {
         s.push_str(&format!("heightkey {key} {hk:016x}\n"));
         let mk = mesh_key(&TangentWarp, MANIFEST_SEED, id, MANIFEST_RES, MANIFEST_RADIUS_M);
         s.push_str(&format!("meshkey {key} {mk:016x}\n"));
+        let mhk = crate::height::cache_key_field(moon.as_ref(), &TangentWarp, id, MANIFEST_RES);
+        s.push_str(&format!("moonheightkey {key} {mhk:016x}\n"));
+        let mmk = mesh_key_field(moon.as_ref(), &TangentWarp, id, MANIFEST_RES, 1_737_400.0);
+        s.push_str(&format!("moonmeshkey {key} {mmk:016x}\n"));
     }
     let sphere = Sphere { radius_m: MANIFEST_RADIUS_M };
     for (i, g) in manifest_geos().into_iter().enumerate() {
