@@ -205,3 +205,100 @@ fn terrain_too_steep_for_the_parameters_is_a_plan_error_naming_the_fix() {
     // The reference field plans the same request.
     assert!(plan_terrain_field(&req, &Reference(1)).is_ok());
 }
+
+fn above_terrain(field: &dyn HeightField, h: f64) -> PlanetFixed {
+    let dir = Vec3::new(0.8, 0.5, 0.33).normalized();
+    PlanetFixed(dir * (R + field.height(dir) + h))
+}
+
+// spec: LOD-004
+#[test]
+fn morph_is_bounded_and_merges_do_not_pop_over_real_terrain() {
+    let params = LodParams::earth_1080p();
+    for field in [&Reference(1) as &dyn HeightField, &Steep(1)] {
+        let nadir = above_terrain(field, 0.0).0.normalized();
+        let mut prev: Option<(u8, f32)> = None;
+        let (mut h, mut merges) = (30.0f64, 0);
+        while h < 2.0e5 {
+            let cam = above_terrain(field, h);
+            let sel = planet_frame::select_nodes_field(&TangentWarp, cam, field, &params);
+            let n = sel.nodes.iter().find(|n| n.tile.contains(&TangentWarp, nadir)).expect("a leaf contains the nadir");
+            assert!((0.0..=1.0).contains(&n.morph), "morph {} at height {h}", n.morph);
+            if let Some((pl, pm)) = prev {
+                assert!(n.tile.level() <= pl, "level must not increase while receding (height {h})");
+                if n.tile.level() < pl {
+                    assert!(pm >= 0.8 && n.morph <= 0.5, "merge at height {h}: morph {pm} before, {} after", n.morph);
+                    merges += 1;
+                }
+            }
+            prev = Some((n.tile.level(), n.morph));
+            h *= 1.03;
+        }
+        assert!(merges >= 8, "expected many level changes, saw {merges}");
+    }
+}
+
+// spec: LOD-008
+#[test]
+fn a_leafs_morph_interval_does_not_depend_on_the_camera() {
+    // Static tile geometry only: otherwise a neighbour splitting would move a leaf's interval and pop its border.
+    let params = LodParams::earth_1080p();
+    let field = Reference(1);
+    let a = planet_frame::select_nodes_field(&TangentWarp, above_terrain(&field, 300.0), &field, &params);
+    let b = planet_frame::select_nodes_field(&TangentWarp, above_terrain(&field, 450.0), &field, &params);
+    let common: Vec<_> = a.nodes.iter().filter_map(|x| b.nodes.iter().find(|y| y.tile == x.tile).map(|y| (x, y))).collect();
+    assert!(common.len() > 50, "only {} common leaves", common.len());
+    for (x, y) in common {
+        assert_eq!((x.morph_start_m, x.morph_end_m), (y.morph_start_m, y.morph_end_m), "{:?}", x.tile);
+    }
+}
+
+// spec: LOD-008
+#[test]
+fn the_reference_field_plans_at_production_parameters_along_the_whole_flight() {
+    // A plan error means nothing is drawn (CON-22): the reference field must never hit the steepness rejection.
+    let lod = LodParams { cells: 32, viewport_h_px: 1440.0, tau_px: 6.0, max_level: 26, ..LodParams::earth_1080p() };
+    let frames = planet_frame::flight_path(R, 16.0 / 9.0, 1, 40);
+    for (i, cam) in frames.into_iter().enumerate() {
+        let req = TerrainRequest {
+            camera: cam,
+            size: (256, 144),
+            view: TerrainView::Level,
+            lod: lod.clone(),
+            face_mapping: "tangent-v1".into(),
+            seed: 1,
+        };
+        plan_terrain_field(&req, &Reference(1)).unwrap_or_else(|e| panic!("flight frame {i}: {e}"));
+    }
+}
+
+// spec: LOD-008
+#[test]
+fn same_level_neighbours_share_one_morph_interval_on_rugged_terrain() {
+    // Shared border vertices morph by each tile's own formula: unequal intervals would open the border.
+    let field = Steep(1);
+    let params = steep_params();
+    for (name, cam) in scripted_views_field(R, 4.0 / 3.0, &field) {
+        let sel = planet_frame::select_nodes_in_view_field(&TangentWarp, &cam, &field, &params);
+        let mut per_level: std::collections::BTreeMap<u8, (f64, f64)> = Default::default();
+        for n in sel.nodes.iter().filter(|n| n.tile.level() > 0) {
+            let e = per_level.entry(n.tile.level()).or_insert((n.morph_start_m, n.morph_end_m));
+            assert_eq!(*e, (n.morph_start_m, n.morph_end_m), "{name}: level {} has two intervals", n.tile.level());
+        }
+    }
+}
+
+// spec: LOD-008
+#[test]
+fn the_node_radius_bound_covers_the_bounding_sphere_of_every_tile() {
+    let params = LodParams::earth_1080p();
+    let mut rng = planet_core::hash::SplitMix64(5);
+    for level in 1..=20u8 {
+        for _ in 0..400 {
+            let (x, y) = ((rng.next_u64() % (1u64 << level)) as u32, (rng.next_u64() % (1u64 << level)) as u32);
+            let t = TileId::new(planet_core::Face((rng.next_u64() % 6) as u8), level, x, y).unwrap();
+            let (_, r) = planet_frame::lod::bounding_sphere(&TangentWarp, t, &params);
+            assert!(r <= params.node_radius_bound(level), "{t:?}: chord radius {r} exceeds the bound {}", params.node_radius_bound(level));
+        }
+    }
+}

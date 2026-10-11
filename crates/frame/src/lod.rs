@@ -44,14 +44,16 @@ impl LodParams {
         }
     }
 
-    /// Distance (to the node's bounding sphere surface) below which a node of `level` is split.
+    /// Distance (to the node's bounding volume, LOD-008) below which a node of `level` is split.
     pub fn split_distance(&self, level: u8) -> f64 {
         self.sample_spacing(level) * self.viewport_h_px / (2.0 * libm::tan(self.fov_y_rad / 2.0) * self.tau_px)
     }
 
-    /// Upper bound of a node's bounding-sphere radius at `level`: three quarters of the tile edge (half diagonal 0.71, margin).
+    /// Upper bound of a node's bounding-sphere radius at `level`: 0.82 of the tile edge at the face centre. The half
+    /// diagonal is 0.71 there, and tangent-warp tiles near cube corners are up to 9 % larger than at the face centre
+    /// (measured chord radius over this edge: 0.816 at most; a test checks the bound on random tiles).
     pub fn node_radius_bound(&self, level: u8) -> f64 {
-        0.75 * self.sample_spacing(level) * f64::from(self.cells)
+        0.82 * self.sample_spacing(level) * f64::from(self.cells)
     }
 
     /// Vertex distances `(start, end)` between which a node of `level >= 1` morphs from its own grid (0) to its parent's (1).
@@ -94,7 +96,7 @@ pub struct SelectedNode {
     /// Distance from the camera to the node's bounding volume (height bounds included), metres.
     pub distance_m: f64,
     /// Vertex distances `(start, end)` between which the node morphs to its parent's grid (see
-    /// [`LodParams::morph_interval`]; the start also clears the height extent of the node and its neighbours).
+    /// [`LodParams::morph_interval`]; the start also clears the height extent of its neighbours).
     pub morph_start_m: f64,
     pub morph_end_m: f64,
 }
@@ -106,8 +108,8 @@ pub struct NodeSelection {
 }
 
 /// Bounding sphere of a tile on the reference sphere: centre on the surface, radius covering corners and edge midpoints.
-/// Terrain height is deliberately not added: selection works on distance to the reference surface (padding by
-/// `max_height_m` would force full subdivision around a ground-level camera); culling will pad it.
+/// Terrain height is not included: culling pads it by `max_height_m`, and selection uses the height-aware volume of the
+/// node (`tile_volume`).
 pub fn bounding_sphere(map: &dyn FaceMapping, tile: TileId, p: &LodParams) -> (Vec3, f64) {
     let (s0, s1, t0, t1) = tile.bounds();
     let (sm, tm) = (0.5 * (s0 + s1), 0.5 * (t0 + t1));
@@ -304,7 +306,7 @@ fn select_impl(
         }
     }
     balance_leaves(map, &mut leaves);
-    let nodes = leaves
+    let mut nodes: Vec<SelectedNode> = leaves
         .iter()
         .map(|&tile| {
             let distance_m = geoms.distance(tile, camera);
@@ -320,11 +322,22 @@ fn select_impl(
             SelectedNode { tile, morph: morph as f32, distance_m, morph_start_m, morph_end_m }
         })
         .collect();
+    // Two leaves of one level share border vertices, which both morph by the shader formula: their intervals must be
+    // equal or the border opens. One start per level, the largest any leaf of the level needs. Where the terrain keeps
+    // every leaf at the base start (the reference field at production parameters) this is the level constant of old.
+    let mut level_start = [0.0f64; 32];
+    for n in nodes.iter().filter(|n| n.tile.level() > 0) {
+        let s = &mut level_start[n.tile.level() as usize];
+        *s = s.max(n.morph_start_m);
+    }
+    for n in nodes.iter_mut().filter(|n| n.tile.level() > 0) {
+        n.morph_start_m = level_start[n.tile.level() as usize];
+    }
     NodeSelection { nodes }
 }
 
-/// The morph interval of a leaf: [`LodParams::morph_interval`] with the margin for the extent of the node and its
-/// same-level neighbours taken from their height bounds. A vertex of the leaf on a border with a finer neighbour is
+/// The morph interval a leaf needs: [`LodParams::morph_interval`] with the margin for the extent of its four same-level
+/// neighbours taken from their height bounds (the selection then equalises the start over each level). A vertex of the leaf on a border with a finer neighbour is
 /// up to two bounding radii of the neighbour's volume further away than that volume's surface, and must not have started
 /// to morph by then.
 fn morph_interval_for(geoms: &mut GeomCache, tile: TileId) -> (f64, f64) {

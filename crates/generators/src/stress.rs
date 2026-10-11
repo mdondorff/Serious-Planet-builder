@@ -61,6 +61,6 @@ impl HeightField for Steep {
             amp *= GAIN;
             freq *= 2.0;
         }
-        (STEEP_AMPLITUDE_M * lo / norm - 1e-6, STEEP_AMPLITUDE_M * hi / norm + 1e-6)
+        ((STEEP_AMPLITUDE_M * lo / norm - 1e-6).max(-STEEP_AMPLITUDE_M), (STEEP_AMPLITUDE_M * hi / norm + 1e-6).min(STEEP_AMPLITUDE_M))
     }
 }

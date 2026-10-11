@@ -360,7 +360,7 @@ fn a_terrain_bundle_round_trips_and_detects_corruption() {
     let bundle = TerrainBundle {
         generator_version: 2,
         implementation_id: "cpu-ref-height-v2".into(),
-        mesh_version: 2,
+        mesh_version: planet_generators::mesh::MESH_VERSION,
         definition_hash: 0,
         adapter: "test-adapter".into(),
         request: request.clone(),

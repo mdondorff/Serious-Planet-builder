@@ -57,10 +57,10 @@ pub(crate) fn layer_noise(seed: u64, layer: u64, octave: u32, p: Vec3) -> f64 {
 const NOISE_GRADIENT_BOUND: f64 = 5.196_152_422_706_632;
 
 /// Lipschitz constant of the gradient of [`layer_noise`] (the gradient is continuous across cell borders because the
-/// derivative of `smooth` vanishes there): the Frobenius norm of the Hessian is at most sqrt(3 * 12^2 + 6 * 9^2), with
+/// derivative of `smooth` vanishes there): the Frobenius norm of the Hessian is at most sqrt(3 * 12^2 + 6 * 9^2) = 30.3 (rounded up), with
 /// second differences of the lattice values (at most 2 along an axis, 4 across two) times `smooth''` (at most 6) or the
 /// product of two `smooth'` (at most 1.5 each).
-const NOISE_HESSIAN_BOUND: f64 = 30.299_834_983_209_53;
+const NOISE_HESSIAN_BOUND: f64 = 30.3;
 
 /// Value and gradient of [`layer_noise`] at `p`. The value is computed with the same operations as `layer_noise`.
 fn layer_noise_with_gradient(seed: u64, layer: u64, octave: u32, p: Vec3) -> (f64, [f64; 3]) {
@@ -159,7 +159,6 @@ fn noise_box_range(seed: u64, layer: u64, octave: u32, centre: Vec3, u: f64) -> 
 /// largest distance in the argument. (3) The first-order Taylor expansion at the centre with the Lipschitz constant of
 /// the gradient for the remainder. (4) The hull of the lattice corners of the cells the cap touches (trilinear
 /// interpolation with monotone weights stays inside it), when those are at most 64.
-#[cfg_attr(not(feature = "stress"), allow(dead_code))]
 pub(crate) fn layer_noise_bounds(seed: u64, layer: u64, octave: u32, centre: Vec3, theta: f64, freq: f64) -> (f64, f64) {
     // The chord is shorter than the arc; the margin absorbs rounding in the direction maths and in `floor`.
     let reach = freq * (theta * (1.0 + 1e-9) + 1e-12);
@@ -248,7 +247,7 @@ impl HeightField for Reference {
             freq *= 2.0;
         }
         // Rounding margin: the sum above is evaluated in the same order as `height_at` but with different operands.
-        (AMPLITUDE_M * lo / norm - 1e-6, AMPLITUDE_M * hi / norm + 1e-6)
+        ((AMPLITUDE_M * lo / norm - 1e-6).max(-AMPLITUDE_M), (AMPLITUDE_M * hi / norm + 1e-6).min(AMPLITUDE_M))
     }
 }
 
