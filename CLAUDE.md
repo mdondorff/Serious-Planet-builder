@@ -19,7 +19,7 @@ Working files: `docs/status.md` (progress log and stop reports), `docs/spikes.md
 - `cargo xtask accept <milestone>`: milestone acceptance
 - `cargo xtask repro <bundle>`: replay a repro bundle
 - `cargo xtask golden-review [--proposal <file>] [--extra <dir>]... [--apply]`: classify golden candidates under ADR 0017 (the `golden-review` skill)
-- `cargo xtask perf`: Rasierklinge only, and only after the owner confirms the machine is ready (charger, power profile)
+- `cargo xtask perf`: Rasierklinge only. Until the readiness gate of ADR 0020 is merged, only after the owner confirms the machine is ready (charger, power profile); after that, the harness's gate decides and only the architect session starts perf runs (coders never do)
 
 Until an xtask command exists, create it in `xtask/` rather than writing a script. The shell is Git Bash on Windows; keep commands portable and never add `.sh` or `.ps1` files to the repo.
 
