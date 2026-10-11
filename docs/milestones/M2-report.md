@@ -56,3 +56,6 @@ Stop here: M3 (field pipeline and cache) is not started until the owner decides.
 - Validity: the Windows power scheme was Balanced, so the harness marks the session as not valid for time budgets, and run-to-run noise was high (worst (max-min)/median 0.749). The owner accepts the result for the gate because the headroom is far larger than the noise. A rerun on the High performance profile is needed before any number is used as a regression baseline.
 - **New risk:** CPU node selection (`plan_terrain`) takes 17.1 ms at ground-1m and 12.9 ms at ground-200m, longer than a 60 Hz frame. Frame p99 does not include it, so the harness does not budget it yet. Queued as an M2 gate follow-up (docs/status.md).
 - Node counts at 1440p are higher than the 1080p estimate in this report (5,108 vs 3,003 at 1 m); the GPU handles them easily, so draw-call merging is not urgent.
+
+## Decision 2026-10-11
+**Go with changes**, recorded by the owner. M2 follow-ups landed: golden adapter families, terrain plan text and repro bundles, spec-lint tiers, morph oracle, no substitution in render, counts from the plan, CPU plan time (17 -> about 6 ms at ground-1m), flight sequence (TEST-013), steep stress test (TEST-015). Condition: the steep-terrain finding (camera inside steep terrain at ground-1m because selection and morph ignore height; LOD-008) is the first M3 change.
