@@ -9,6 +9,8 @@ use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 
+pub mod review;
+
 /// An 8-bit RGBA image, row-major, no padding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Image {
@@ -277,7 +279,49 @@ pub fn recorded_driver(root: &Path, adapter: &str) -> Option<String> {
 /// missing golden is reported loudly and fails per [`pending_failure`]; the environment selects strictness
 /// (`PLANET_GOLDEN_STRICT=1`, and `PLANET_REQUIRE_ADAPTER_GOLDENS=1` in CI).
 pub fn assert_golden(adapter: &str, driver: &str, name: &str, img: &Image, tol: Tolerance) {
-    let root = repo_root();
+    if let Some(msg) = golden_failure(&repo_root(), adapter, driver, name, img, tol) {
+        panic!("{msg}");
+    }
+}
+
+/// Collects golden checks of one test and fails once at the end, listing every failure, so one run writes every
+/// candidate of an adapter (ADR 0017) instead of stopping at the first mismatch.
+pub struct GoldenChecks {
+    root: PathBuf,
+    adapter: String,
+    driver: String,
+    failures: Vec<String>,
+}
+
+impl GoldenChecks {
+    pub fn new(adapter: &str, driver: &str) -> Self {
+        Self::new_in(&repo_root(), adapter, driver)
+    }
+
+    /// [`GoldenChecks::new`] against the golden tree under `root` (tests).
+    pub fn new_in(root: &Path, adapter: &str, driver: &str) -> Self {
+        GoldenChecks { root: root.to_path_buf(), adapter: adapter.to_string(), driver: driver.to_string(), failures: Vec::new() }
+    }
+
+    /// Compare `img` with its golden (as [`assert_golden`]) and remember a failure instead of panicking.
+    pub fn check(&mut self, name: &str, img: &Image, tol: Tolerance) {
+        if let Some(msg) = golden_failure(&self.root, &self.adapter, &self.driver, name, img, tol) {
+            eprintln!("{msg}");
+            self.failures.push(msg);
+        }
+    }
+
+    /// Panic with every recorded failure, if any.
+    pub fn finish(self) {
+        if !self.failures.is_empty() {
+            panic!("{} golden check(s) failed:\n{}", self.failures.len(), self.failures.join("\n"));
+        }
+    }
+}
+
+/// The failure message of one golden check, or `None` when it passes (a missing golden that only reports also passes).
+fn golden_failure(root: &Path, adapter: &str, driver: &str, name: &str, img: &Image, tol: Tolerance) -> Option<String> {
+    let root = root.to_path_buf();
     let outcome = compare_golden_in(&root, adapter, name, img, tol).expect("golden I/O");
     // Record the full driver string with the candidates, so a bless can commit it beside the goldens.
     let sidecar = root.join("target").join("review").join("candidates").join(adapter).join("driver.txt");
@@ -290,16 +334,15 @@ pub fn assert_golden(adapter: &str, driver: &str, name: &str, img: &Image, tol: 
         )
     };
     match &outcome {
-        GoldenOutcome::Match => {}
+        GoldenOutcome::Match => None,
         GoldenOutcome::Pending { .. } => {
             eprintln!("{name} [{adapter}]: {outcome}");
             let strict = std::env::var("PLANET_GOLDEN_STRICT").as_deref() == Ok("1");
             let require = std::env::var("PLANET_REQUIRE_ADAPTER_GOLDENS").as_deref() == Ok("1");
-            if let Some(why) = pending_failure(&root, adapter, name, strict, require) {
-                panic!("{name} [{adapter}]: {outcome}\n  {why}\n  {}", drivers());
-            }
+            pending_failure(&root, adapter, name, strict, require)
+                .map(|why| format!("{name} [{adapter}]: {outcome}\n  {why}\n  {}", drivers()))
         }
-        GoldenOutcome::Mismatch { .. } => panic!("{name} [{adapter}]: {outcome}\n  {}", drivers()),
+        GoldenOutcome::Mismatch { .. } => Some(format!("{name} [{adapter}]: {outcome}\n  {}", drivers())),
     }
 }
 
@@ -339,6 +382,29 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    // spec: TEST-016
+    #[test]
+    fn golden_checks_report_every_mismatch_of_a_run_before_failing() {
+        let root = tmp("checks");
+        let (a, b) = (Image::filled(4, 4, [1, 2, 3, 255]), Image::filled(4, 4, [9, 9, 9, 255]));
+        for n in ["g1", "g2", "g3"] {
+            write_png(&root.join(format!("tests/goldens/ad/{n}.png")), &a).unwrap();
+        }
+        let mut checks = GoldenChecks::new_in(&root, "ad", "driver x");
+        checks.check("g1", &b, Tolerance::Exact);
+        checks.check("g2", &a, Tolerance::Exact);
+        checks.check("g3", &b, Tolerance::Exact);
+        let msg = *std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| checks.finish())).unwrap_err().downcast::<String>().unwrap();
+        assert!(
+            msg.starts_with("2 golden check(s) failed") && msg.contains("g1 [ad]") && msg.contains("g3 [ad]") && !msg.contains("g2 [ad]"),
+            "{msg}"
+        );
+        for n in ["g1", "g3"] {
+            assert!(root.join(format!("target/review/candidates/ad/{n}.png")).is_file(), "{n}: every candidate of the run is written");
+        }
+        GoldenChecks::new_in(&root, "ad", "driver x").finish();
     }
 
     // spec: TEST-002

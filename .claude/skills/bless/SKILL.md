@@ -9,6 +9,6 @@ disable-model-invocation: true
 4. Copy only approved candidates to `tests/goldens/<adapter>/`. Leave rejected ones in place and add a line to `docs/status.md` naming the test and the reason given.
 5. Commit approved goldens on the current branch with the message `bless: <tests>`.
 
-Never approve anything without an explicit answer from the owner in this session.
+Never approve anything without an explicit answer from the owner in this session. Agents bless only through the `golden-review` skill (ADR 0017); this skill is for what that policy escalates.
 
 Scope: $ARGUMENTS

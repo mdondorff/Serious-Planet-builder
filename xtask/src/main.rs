@@ -22,6 +22,7 @@ const USAGE: &str = "cargo xtask <command>
   repro <bundle>       replay a repro bundle (format arrives in M1)
   perf [--machine-ready]   performance harness on Rasierklinge (owner confirms the machine first)
   det-diff <a> <b>     compare two determinism manifests (GEN-003; CI diffs Windows against Linux)
+  golden-review [--proposal <file>] [--extra <dir>]... [--apply]   classify golden candidates under ADR 0017 (auto-bless or escalate)
   bless                list candidate goldens (promotion is the owner's /bless skill)
 
 options for test: --strict (a missing golden fails), --real (use the discrete GPU), extra args after `--` go to nextest";
@@ -38,6 +39,11 @@ fn main() -> ExitCode {
         Some("repro") => testcmd::repro(&root, &args[1..]),
         Some("perf") => testcmd::perf(&root, &args[1..]),
         Some("det-diff") => detdiff::run(&root, &args[1..]),
+        Some("golden-review") => {
+            let mut a = vec!["run", "-q", "-p", "planet-testkit", "--bin", "golden-review", "--"];
+            a.extend(args[1..].iter().map(String::as_str));
+            util::run(&root, "cargo", &a, &[])
+        }
         Some("bless") => testcmd::bless_list(&root),
         _ => {
             eprintln!("{USAGE}");

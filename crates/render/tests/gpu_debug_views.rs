@@ -6,7 +6,7 @@ use planet_frame::{plan_tiles, DebugView, FramePlan, PlanRequest};
 use planet_generators::dump::FACE_COLORS;
 use planet_generators::generate_tile;
 use planet_render::{execute, AdapterPolicy, GpuContext, TileResource};
-use planet_testkit::{assert_golden, Image, Tolerance};
+use planet_testkit::{GoldenChecks, Image, Tolerance};
 
 const RES: u32 = 16;
 const SIZE: (u32, u32) = (128, 64);
@@ -35,6 +35,7 @@ fn render(ctx: &GpuContext, view: DebugView) -> (FramePlan, Image, u32) {
 fn debug_views_have_no_holes_are_deterministic_and_match_goldens() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     eprintln!("{}", ctx.adapter_log_line());
+    let mut goldens = GoldenChecks::new(&planet_render_key(&ctx), &ctx.driver_string());
     for view in [DebugView::Face, DebugView::TileId, DebugView::Height] {
         let (plan, img, draws) = render(&ctx, view);
         assert_eq!(draws as usize, plan.draws.len(), "draw calls must equal the plan's draws");
@@ -52,14 +53,9 @@ fn debug_views_have_no_holes_are_deterministic_and_match_goldens() {
             let greys: std::collections::BTreeSet<u8> = img.pixels().map(|p| p[0]).collect();
             assert!(greys.len() > 15, "height view should show relief, got {} grey levels", greys.len());
         }
-        assert_golden(
-            &planet_render_key(&ctx),
-            &ctx.driver_string(),
-            &format!("debug_view_{}", view.name().replace('-', "_")),
-            &img,
-            Tolerance::Exact,
-        );
+        goldens.check(&format!("debug_view_{}", view.name().replace('-', "_")), &img, Tolerance::Exact);
     }
+    goldens.finish();
 }
 
 fn planet_render_key(ctx: &GpuContext) -> String {

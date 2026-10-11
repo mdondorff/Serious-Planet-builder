@@ -35,7 +35,7 @@ Until an xtask command exists, create it in `xtask/` rather than writing a scrip
 - f64 on the CPU, tile-local or camera-relative f32 on the GPU; no planet-radius values in shaders (CON-11).
 - `libm` for transcendentals in generator code; no thread-count-dependent results (CON-14).
 - Failure output must be actionable: numeric deltas, tile IDs, diff images in `target/review/`.
-- Never bless golden images; queue candidates and ask the owner (`/bless` is owner-only).
+- Bless goldens only through the `golden-review` skill's policy (ADR 0017): it auto-blesses rounding noise and declared, cross-checked debug/shaded changes and escalates everything else to the owner's `/bless`. Never copy a candidate into `tests/goldens/` by hand.
 - Never weaken, skip or delete a test to make a build green. Quarantine only with a tracking entry in `docs/status.md`.
 
 ## Git
