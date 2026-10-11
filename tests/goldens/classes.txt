@@ -1,0 +1,13 @@
+# Golden classes (ADR 0009, ADR 0017): <golden name> <debug|shaded|lit>
+# debug: exact on every adapter, changes must agree across adapters. shaded: exact per adapter (adapter-specific
+# rasterisation, e.g. derivative-drawn contour lines). lit: tolerances approved by the owner; never auto-blessed.
+hello_triangle debug
+debug_view_face debug
+debug_view_tile_id debug
+debug_view_height debug
+terrain_orbit_tile_id debug
+terrain_aerial20km_level debug
+terrain_low2km_morph debug
+terrain_cube_corner_normals debug
+terrain_aerial200km_height shaded
+terrain_ground1m_depth shaded

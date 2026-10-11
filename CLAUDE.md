@@ -18,6 +18,7 @@ Working files: `docs/status.md` (progress log and stop reports), `docs/spikes.md
 - `cargo xtask spec-lint`: trace IDs, tiers, requirement coverage
 - `cargo xtask accept <milestone>`: milestone acceptance
 - `cargo xtask repro <bundle>`: replay a repro bundle
+- `cargo xtask golden-review [--proposal <file>] [--extra <dir>]... [--apply]`: classify golden candidates under ADR 0017 (the `golden-review` skill)
 - `cargo xtask perf`: Rasierklinge only, and only after the owner confirms the machine is ready (charger, power profile)
 
 Until an xtask command exists, create it in `xtask/` rather than writing a script. The shell is Git Bash on Windows; keep commands portable and never add `.sh` or `.ps1` files to the repo.
@@ -35,7 +36,7 @@ Until an xtask command exists, create it in `xtask/` rather than writing a scrip
 - f64 on the CPU, tile-local or camera-relative f32 on the GPU; no planet-radius values in shaders (CON-11).
 - `libm` for transcendentals in generator code; no thread-count-dependent results (CON-14).
 - Failure output must be actionable: numeric deltas, tile IDs, diff images in `target/review/`.
-- Never bless golden images; queue candidates and ask the owner (`/bless` is owner-only).
+- Bless goldens only through the `golden-review` skill's policy (ADR 0017): it auto-blesses rounding noise and declared changes (debug views also cross-checked across adapters) and escalates everything else to the owner's `/bless`. Never copy a candidate into `tests/goldens/` by hand.
 - Never weaken, skip or delete a test to make a build green. Quarantine only with a tracking entry in `docs/status.md`.
 
 ## Git
