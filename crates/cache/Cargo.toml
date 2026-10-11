@@ -11,3 +11,4 @@ planet-core.workspace = true
 planet-world-def.workspace = true
 planet-generators.workspace = true
 blake3.workspace = true
+lz4_flex.workspace = true

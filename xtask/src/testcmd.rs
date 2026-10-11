@@ -227,6 +227,37 @@ fn perf_cargo_args(args: &[String]) -> Result<Vec<&'static str>, String> {
     Ok(v)
 }
 
+/// The `cargo` arguments of a `cache-verify` run: `planet generate --verify-cache <dir>` plus the options that select the
+/// definition and the sample size. Unknown options are refused rather than ignored.
+fn cache_verify_args(args: &[String]) -> Result<Vec<String>, String> {
+    let mut it = args.iter();
+    let dir = it
+        .next()
+        .filter(|a| !a.starts_with("--"))
+        .ok_or("usage: cargo xtask cache-verify <dir> [--world <file> | --seed N] [--sample N]")?;
+    let mut v: Vec<String> =
+        ["run", "-q", "--release", "-p", "planet", "--", "generate", "--verify-cache"].iter().map(|s| s.to_string()).collect();
+    v.push(dir.clone());
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--world" | "--seed" | "--sample" => {
+                let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
+                v.push(a.clone());
+                v.push(value.clone());
+            }
+            other => return Err(format!("unknown cache-verify option '{other}' (known: --world, --seed, --sample)")),
+        }
+    }
+    Ok(v)
+}
+
+/// `cargo xtask cache-verify`: regenerate a sample of a tile store from the definition and compare it with the store.
+pub fn cache_verify(root: &Path, args: &[String]) -> Res {
+    let cargo_args = cache_verify_args(args)?;
+    let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+    run(root, "cargo", &refs, &[])
+}
+
 pub fn perf(root: &Path, args: &[String]) -> Res {
     let cargo_args = perf_cargo_args(args)?;
     run(root, "cargo", &cargo_args, &[])
@@ -266,6 +297,19 @@ mod tests {
         assert_eq!(tier_filter(None, false), TIER_AB);
         assert_eq!(tier_filter(Some("gpu"), false), TIER_C);
         assert_eq!(tier_filter(Some("gpu"), true), "binary(/^gpu_/) or binary(/^oracle_/)");
+    }
+
+    // spec: STRM-004
+    #[test]
+    fn cache_verify_passes_the_directory_and_known_options_to_the_generate_mode_and_refuses_the_rest() {
+        let a = cache_verify_args(&s(&["target/cache", "--seed", "7", "--sample", "50"])).unwrap();
+        assert!(a.windows(2).any(|w| w == ["--verify-cache", "target/cache"]), "{a:?}");
+        assert_eq!(&a[a.len() - 4..], ["--seed", "7", "--sample", "50"]);
+        assert!(cache_verify_args(&s(&[])).unwrap_err().contains("usage"));
+        assert!(cache_verify_args(&s(&["--seed", "7"])).unwrap_err().contains("usage"));
+        assert!(cache_verify_args(&s(&["d", "--sample"])).unwrap_err().contains("needs a value"));
+        let e = cache_verify_args(&s(&["d", "--fix"])).unwrap_err();
+        assert!(e.contains("--fix") && e.contains("known"), "{e}");
     }
 
     // spec: BUILD-002

@@ -342,10 +342,16 @@ impl TileData {
 
 /// Generate a tile on a `res`×`res` cell grid (`res` a power of two).
 pub fn generate_tile(seed: u64, map: &dyn FaceMapping, id: TileId, res: u32) -> TileData {
+    generate_tile_field(&Reference(seed), map, id, res)
+}
+
+/// [`generate_tile`] for any height field: the field's heights at the tile's samples, rounded to `f32`. [`Reference`]
+/// gives exactly [`generate_tile`].
+pub fn generate_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, res: u32) -> TileData {
     let mut heights = Vec::with_capacity(((res + 1) * (res + 1)) as usize);
     for l in 0..=res {
         for k in 0..=res {
-            heights.push(height_at(seed, id.sample_direction(map, res, k, l)) as f32);
+            heights.push(field.height(id.sample_direction(map, res, k, l)) as f32);
         }
     }
     TileData { id, res, heights }

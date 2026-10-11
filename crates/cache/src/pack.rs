@@ -596,6 +596,37 @@ impl TileStore {
     }
 }
 
+/// A record read from a store together with where it was found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stored {
+    pub record: Record,
+    pub pack: String,
+    pub offset: u64,
+}
+
+impl TileStore {
+    /// `count` evenly spaced entries of the store in index order (all of them when `count` is 0 or at least the number of
+    /// entries), read and CRC-checked. An entry that cannot be read is an `Err` in its place, so a verifier can report it.
+    pub fn sample_records(&self, count: usize) -> Vec<Result<Stored, PackError>> {
+        let total = self.len();
+        let picks: Vec<usize> =
+            if count == 0 || count >= total { (0..total).collect() } else { (0..count).map(|i| i * total / count).collect() };
+        let mut out = Vec::with_capacity(picks.len());
+        for n in picks {
+            let mut left = n;
+            for pack in &self.packs {
+                if left < pack.entries.len() {
+                    let e = &pack.entries[left];
+                    out.push(pack.read(e).map(|record| Stored { record, pack: pack.path.display().to_string(), offset: e.offset }));
+                    break;
+                }
+                left -= pack.entries.len();
+            }
+        }
+        out
+    }
+}
+
 /// The pack a writer is appending to.
 struct Current {
     seq: u32,

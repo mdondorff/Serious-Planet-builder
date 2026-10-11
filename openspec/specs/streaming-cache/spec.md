@@ -55,15 +55,23 @@ Source: CON-05, CON-06, CON-14, ADR 0006, ADR 0018
 - **THEN** the key changes in the first case and not in the second
 
 ### Requirement: STRM-004 Cache verification
-`cargo xtask cache-verify` SHALL regenerate a sample of cached tiles from scratch and compare them with the cached bytes, reporting each mismatching tile ID.
+`cargo xtask cache-verify <dir>` SHALL regenerate an evenly spaced sample (or all) of the entries of a tile store from the definition (`--world <file>` or the default planet with `--seed`) and compare each with what the store holds: an entry whose key is the key the current definition gives for its tile SHALL equal the regeneration sample for sample (bit for bit, judged on the decoded heights, not on the compressed bytes); a difference SHALL fail the command and be reported with the tile (id, face, level, x, y), the pack and its offset, the key and the first differing sample with both values. An entry under a key the current definition no longer gives SHALL be counted as stale, not failed; an entry of a kind the verifier does not regenerate SHALL be counted; an entry that cannot be read or decoded SHALL be reported with its pack and offset and fail the command. `generate --cache-dir <dir> --region FACE,LEVEL` SHALL write the tiles of one face at one level into a store, reusing tiles already stored under the current key so that a second run writes nothing.
 
 Verify: A
-Status: planned
-Source: CON-05, report §16
+Status: active
+Source: CON-05, report §16, ADR 0006, ADR 0019
 
 #### Scenario: Missing input in a key
 - **WHEN** a cached tile was produced with an input that is not part of its key
-- **THEN** cache-verify reports the tile ID and the differing bytes' offset
+- **THEN** cache-verify reports the tile ID, the pack offset and the first differing sample, and fails
+
+#### Scenario: Clean store
+- **WHEN** every sampled entry was generated from the current definition
+- **THEN** all match and the command passes, whatever the sample size
+
+#### Scenario: Changed definition
+- **WHEN** the definition changed since the entries were stored
+- **THEN** they are counted as stale and the command passes
 
 ### Requirement: STRM-008 Tile store
 Tiles SHALL be stored in append-only packs with a rebuildable index (ADR 0019, clarified by proposed ADR 0024): each record carries its content key, kind, tile, versions, node set id, payload length and a CRC-32C of the payload and of its own header and is never updated in place; the index is a sorted array ordered by (kind, face, level, Hilbert index of the tile), written atomically and always rebuildable from the data by one scan, and a missing, damaged or stale index, or one that names records outside the data, SHALL be rebuilt, never trusted. A torn tail (a record cut short, or a zero-filled remainder) SHALL be truncated by the writer and ignored by readers; a record whose payload fails its CRC SHALL be skipped (a miss to regenerate, naming the file, offset and key when it is read) without cutting the records after it; a header that fails its CRC in the middle of a pack SHALL stop readers there and leave the pack untouched while the writer continues in a new one; and a read error SHALL be an error, never a torn tail. A cache SHALL degrade to misses: a pack still being created, shorter than its header, made under an older hash version or not a pack SHALL be skipped by readers and reported, never fail the store, and a pack of another body SHALL be refused naming the file. A lookup SHALL binary-search the run of entries with the tile's sort key and match the content key, several keys per tile SHALL coexist, and when a key is held twice the later record in a pack and the newer pack win. A pack SHALL roll over at a size limit and sequence numbers SHALL never wrap. One writer per directory SHALL hold an advisory OS lock that a crash releases, across rollovers, a second writer SHALL be refused naming the holder, and readers SHALL need no lock. The Hilbert curve SHALL be the standard one (consecutive indices are neighbouring cells, the four children of a cell take four consecutive indices) and the CRC the standard CRC-32C.
@@ -95,6 +103,25 @@ Source: CON-05, CON-22, ADR 0003, ADR 0019, ADR 0024
 #### Scenario: Stores
 - **WHEN** a pack is of an older hash version, still being created, or not a pack
 - **THEN** readers skip it and report it, and a pack of another body is refused naming the file
+
+### Requirement: STRM-009 Height tile payload
+A height tile SHALL be stored as a payload with a codec version, its resolution and the raw length, followed by an LZ4 block of its `(res + 1)^2` heights as little-endian `f32` bytes shuffled by byte index (ADR 0019). Decoding SHALL give back every `f32` bit pattern exactly (NaN payloads, signed zeros, subnormals), SHALL refuse a payload that is short, of another version, of a resolution that is not a power of two up to 4096, whose raw length does not match its resolution or whose block is damaged, and SHALL never allocate more than the resolution allows. Tiles SHALL be compared on decoded heights, never on compressed bytes.
+
+Verify: A
+Status: active
+Source: CON-05, CON-14, ADR 0019
+
+#### Scenario: Round trip
+- **WHEN** a tile is encoded and decoded
+- **THEN** every height has the same bits, and a smooth tile is smaller than its raw size
+
+#### Scenario: Layout
+- **WHEN** a hand-built payload of the documented layout is decoded
+- **THEN** it gives the expected heights, independent of the compressor in use
+
+#### Scenario: Hostile payload
+- **WHEN** a payload is truncated, has another version, resolution or raw length, or a damaged block
+- **THEN** decoding fails with an error naming what is wrong
 
 ### Requirement: STRM-005 Cancellation and prioritisation
 Queued and in-flight requests SHALL be cancelled when nothing needs them any more, and requests SHALL be ordered by screen-space error times visibility with parents before children.
