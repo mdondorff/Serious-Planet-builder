@@ -238,7 +238,8 @@ mod tests {
         assert_ne!(base, node_hash("body.0.radius_m", NodeValue::F64(2.0)));
         assert_ne!(base, node_hash("body.0.radius_m", NodeValue::U64(1.0f64.to_bits())));
         assert_ne!(node_hash("x", NodeValue::F64(0.0)), node_hash("x", NodeValue::F64(-0.0)));
-        // Known answer (hash version 1): identical on every platform.
+        // Known answer, tied to the hash version it was recorded with: identical on every platform.
+        assert_eq!(HASH_VERSION, 1, "new known answers belong with a new hash version");
         assert_eq!(WorldDefinition::single_planet(6_371_000.0, 1).hash(), 6_345_583_285_605_900_286);
     }
 
@@ -302,6 +303,7 @@ mod tests {
         WorldDefinition::new(1).set("derived.body.0.seed", NodeValue::U64(99));
     }
 
+    // spec: WDEF-004
     #[test]
     fn body_seeds_derive_from_the_world_seed() {
         assert_eq!(derive_body_seed(9, BodyId::PLANET), 9);

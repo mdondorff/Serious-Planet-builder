@@ -583,3 +583,20 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     std::fs::write(&path, json).map_err(err)?;
     writeln!(out, "wrote {}", path.display()).map_err(err)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // spec: TEST-008
+    #[test]
+    fn a_bundle_definition_hash_is_checked_against_the_single_planet_it_names() {
+        let right = definition_hash(3, RADIUS_M);
+        assert!(check_definition(right, 3, RADIUS_M).is_ok());
+        let none = check_definition(0, 3, RADIUS_M).unwrap_err();
+        assert!(none.contains("predates the WorldDefinition") && none.contains(&format!("{right:016x}")), "{none}");
+        let other = check_definition(right, 4, RADIUS_M).unwrap_err();
+        assert!(other.contains("can only rebuild") && other.contains(&format!("{right:016x}")), "{other}");
+        assert!(check_definition(right, 3, RADIUS_M + 1.0).is_err(), "the radius is part of the definition");
+    }
+}

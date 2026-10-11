@@ -47,7 +47,9 @@ fn contract(g: &dyn HeightGenerator, direct: &dyn HeightField) {
     let mut other = def.clone();
     other.set_body_radius(BodyId::PLANET, 1.0);
     other.set("body.3.radius_m", NodeValue::F64(5.0));
-    assert_eq!(key(f.as_ref()), key(build(g, &other).as_ref()));
+    let unrelated = build(g, &other);
+    assert_eq!(key(f.as_ref()), key(unrelated.as_ref()));
+    assert_eq!(f.height(d).to_bits(), unrelated.height(d).to_bits());
     // A node it reads changes the key and the field.
     let mut seeded = def.clone();
     seeded.set(WorldDefinition::SEED_PATH, NodeValue::U64(direct.seed() + 1));
