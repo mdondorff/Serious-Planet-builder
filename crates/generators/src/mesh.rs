@@ -76,7 +76,7 @@ pub fn mesh_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId
 /// this 5,000 times). `key(tile)` equals `mesh_key_field(field, map, tile, cells, radius_m)` exactly.
 pub struct MeshKeyer {
     version: u64,
-    seed: u64,
+    inputs: u64,
     cells: u32,
     radius_bits: u64,
     implementation_hash: u64,
@@ -87,7 +87,7 @@ impl MeshKeyer {
     pub fn new(field: &dyn HeightField, map: &dyn FaceMapping, cells: u32, radius_m: f64) -> MeshKeyer {
         MeshKeyer {
             version: u64::from(field.version()),
-            seed: field.seed(),
+            inputs: field.inputs_hash(),
             cells,
             radius_bits: radius_m.to_bits(),
             implementation_hash: hash_u64s(1, &crate::height::fold_str(field.implementation_id())),
@@ -101,7 +101,7 @@ impl MeshKeyer {
             &[
                 self.version,
                 u64::from(HASH_VERSION),
-                self.seed,
+                self.inputs,
                 id.raw(),
                 u64::from(self.cells),
                 self.implementation_hash,

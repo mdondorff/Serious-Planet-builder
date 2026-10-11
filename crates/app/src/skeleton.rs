@@ -83,7 +83,7 @@ pub fn render_tiles(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resul
             implementation_id: IMPLEMENTATION_ID.to_string(),
             seed: o.seed,
             res: o.res,
-            definition_hash: 0,
+            definition_hash: definition_hash(o.seed, RADIUS_M),
             adapter: ctx.adapter_key(),
             request,
             plan,
@@ -104,6 +104,29 @@ pub fn render_offscreen(o: &Options, out: &mut dyn Write) -> Result<(), String> 
     render_tiles(&ctx, o, out)
 }
 
+/// Hash of the definition a seed and radius describe: the single planet (WDEF-003). Bundles record it; this build can
+/// rebuild only that definition, so replay checks the recorded hash against it.
+fn definition_hash(seed: u64, radius_m: f64) -> u64 {
+    planet_world_def::WorldDefinition::single_planet(radius_m, seed).hash()
+}
+
+/// Refuse a bundle recorded against a definition this build cannot rebuild (CON-19): a hash of zero predates the
+/// definition, any other hash must equal the single planet of the recorded seed and radius.
+fn check_definition(recorded: u64, seed: u64, radius_m: f64) -> Result<(), String> {
+    let rebuilt = definition_hash(seed, radius_m);
+    if recorded == rebuilt {
+        return Ok(());
+    }
+    if recorded == 0 {
+        return Err(format!(
+            "bundle records no definition hash (it predates the WorldDefinition); this build rebuilds the single planet of seed {seed} as {rebuilt:016x}: record the bundle again"
+        ));
+    }
+    Err(format!(
+        "bundle was recorded against definition {recorded:016x}, but this build can only rebuild the single planet of seed {seed} and radius {radius_m} m ({rebuilt:016x}); the definition store arrives with authored layers"
+    ))
+}
+
 /// Replay a repro bundle: refuse on version mismatch, rebuild the plan from the recorded request, compare, render.
 pub fn replay(ctx: &GpuContext, path: &Path, png: Option<&Path>, out: &mut dyn Write) -> Result<(), String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
@@ -117,6 +140,7 @@ pub fn replay(ctx: &GpuContext, path: &Path, png: Option<&Path>, out: &mut dyn W
             b.generator_version, b.implementation_id, GENERATOR_VERSION, IMPLEMENTATION_ID
         ));
     }
+    check_definition(b.definition_hash, b.seed, RADIUS_M)?;
     let rebuilt = plan_tiles(&b.request).map_err(|e| e.to_string())?;
     let diff = rebuilt.diff(&b.plan);
     if diff.is_empty() && rebuilt.plan_hash() != b.plan.plan_hash() {
@@ -236,7 +260,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
             generator_version: GENERATOR_VERSION,
             implementation_id: IMPLEMENTATION_ID.to_string(),
             mesh_version: planet_generators::mesh::MESH_VERSION,
-            definition_hash: 0,
+            definition_hash: definition_hash(request.seed, request.lod.radius_m),
             adapter: ctx.adapter_key(),
             request,
             plan,
@@ -259,6 +283,7 @@ fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>,
             b.generator_version, b.implementation_id, b.mesh_version, GENERATOR_VERSION, IMPLEMENTATION_ID, mesh_version
         ));
     }
+    check_definition(b.definition_hash, b.request.seed, b.request.lod.radius_m)?;
     let rebuilt = plan_terrain(&b.request).map_err(|e| e.to_string())?;
     let diff = rebuilt.diff(&b.plan);
     if !diff.is_empty() {
@@ -569,4 +594,21 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     }
     std::fs::write(&path, json).map_err(err)?;
     writeln!(out, "wrote {}", path.display()).map_err(err)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // spec: TEST-008
+    #[test]
+    fn a_bundle_definition_hash_is_checked_against_the_single_planet_it_names() {
+        let right = definition_hash(3, RADIUS_M);
+        assert!(check_definition(right, 3, RADIUS_M).is_ok());
+        let none = check_definition(0, 3, RADIUS_M).unwrap_err();
+        assert!(none.contains("predates the WorldDefinition") && none.contains(&format!("{right:016x}")), "{none}");
+        let other = check_definition(right, 4, RADIUS_M).unwrap_err();
+        assert!(other.contains("can only rebuild") && other.contains(&format!("{right:016x}")), "{other}");
+        assert!(check_definition(right, 3, RADIUS_M + 1.0).is_err(), "the radius is part of the definition");
+    }
 }

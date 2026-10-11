@@ -147,10 +147,27 @@ fn a_terrain_bundle_replays_to_the_same_pixels_and_refuses_changed_inputs() {
     std::fs::write(&bad, text.replacen("mesh_version 3", "mesh_version 2", 1)).unwrap();
     let e = run(&["test-render", "--adapter", "software", "--repro", bad.to_str().unwrap()]).unwrap_err();
     assert!(e.contains("mesh version 2") && e.contains("this build has"), "{e}");
+    // The bundle records the definition it was made from; a hash this build cannot rebuild is refused (CON-19).
+    let line = text.lines().find(|l| l.starts_with("definition_hash ")).expect("definition_hash line").to_string();
+    assert_ne!(line, "definition_hash 0000000000000000", "a new bundle records the real definition hash");
+    for (replacement, needle) in
+        [("definition_hash 0000000000000000", "predates the WorldDefinition"), ("definition_hash 0000000000000001", "can only rebuild")]
+    {
+        let bad = tmp("tdef.repro");
+        std::fs::write(&bad, text.replacen(&line, replacement, 1)).unwrap();
+        let e = run(&["test-render", "--adapter", "software", "--repro", bad.to_str().unwrap()]).unwrap_err();
+        assert!(e.contains(needle), "{e}");
+    }
     // Another seed leaves the recorded plan text intact but replans to other mesh keys: the replay reports the difference.
     let other = tmp("tseed.repro");
     assert!(text.contains("\nseed 1\n"));
-    std::fs::write(&other, text.replacen("\nseed 1\n", "\nseed 2\n", 1)).unwrap();
+    let seed2 = text.replacen("\nseed 1\n", "\nseed 2\n", 1);
+    // With the old definition hash the replay refuses before replanning; with the hash of seed 2 it replans and reports.
+    std::fs::write(&other, &seed2).unwrap();
+    let e = run(&["test-render", "--adapter", "software", "--repro", other.to_str().unwrap()]).unwrap_err();
+    assert!(e.contains("can only rebuild"), "{e}");
+    let hash2 = planet_world_def::WorldDefinition::single_planet(6_371_000.0, 2).hash();
+    std::fs::write(&other, seed2.replacen(&line, &format!("definition_hash {hash2:016x}"), 1)).unwrap();
     let e = run(&["test-render", "--adapter", "software", "--repro", other.to_str().unwrap()]).unwrap_err();
     assert!(e.contains("replayed terrain plan differs") && e.contains("mesh_key"), "{e}");
 }

@@ -64,3 +64,24 @@ impl HeightField for Steep {
         ((STEEP_AMPLITUDE_M * lo / norm - 1e-6).max(-STEEP_AMPLITUDE_M), (STEEP_AMPLITUDE_M * hi / norm + 1e-6).min(STEEP_AMPLITUDE_M))
     }
 }
+
+/// [`Steep`] as a generator: reads the body's seed.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SteepGenerator;
+
+impl crate::height::HeightGenerator for SteepGenerator {
+    fn implementation_id(&self) -> &'static str {
+        STEEP_IMPLEMENTATION_ID
+    }
+    fn version(&self) -> u32 {
+        STEEP_VERSION
+    }
+    fn field(
+        &self,
+        ctx: &planet_world_def::GenContext,
+        body: planet_world_def::BodyId,
+    ) -> Result<Box<dyn HeightField>, planet_world_def::MissingNode> {
+        let seed = ctx.body_seed(body)?;
+        Ok(Box::new(crate::height::Bound::new(Steep(seed), ctx.read_set_hash())))
+    }
+}
