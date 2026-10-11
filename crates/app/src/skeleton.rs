@@ -466,7 +466,9 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         let cold_ms = t_cold.elapsed().as_secs_f64() * 1000.0;
         let mut plan_samples = Vec::new();
         let mut moving = req.clone();
-        let step = camera.position.0.normalized().cross(planet_core::Vec3::new(0.0, 0.0, 1.0)).normalized() * 0.05;
+        let up = camera.position.0.normalized();
+        let axis = if up.z.abs() > 0.9 { planet_core::Vec3::new(1.0, 0.0, 0.0) } else { planet_core::Vec3::new(0.0, 0.0, 1.0) };
+        let step = up.cross(axis).normalized() * 0.05;
         for _ in 0..20 {
             moving.camera.position = planet_core::PlanetFixed(moving.camera.position.0 + step);
             let t = Instant::now();

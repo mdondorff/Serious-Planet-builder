@@ -369,3 +369,42 @@ fn a_warm_selection_cache_never_changes_a_plan() {
     }
     assert!(!cache.is_empty());
 }
+
+// spec: TEST-012
+#[test]
+fn every_part_of_the_selection_cache_key_invalidates_and_warm_frames_reuse() {
+    let lod = LodParams { cells: 16, viewport_h_px: 96.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() };
+    let (_, cam) = scripted_views_field(R, 4.0 / 3.0, &Reference(1))[4];
+    let request = |seed: u64, lod: &LodParams| TerrainRequest {
+        camera: cam,
+        size: (128, 96),
+        view: TerrainView::Level,
+        lod: lod.clone(),
+        face_mapping: "tangent-v1".into(),
+        seed,
+    };
+    let mut cache = planet_frame::SelectionCache::new();
+    let first = request(1, &lod);
+    planet_frame::plan_terrain_cached(&first, &Reference(1), &mut cache).unwrap();
+    // A warm frame computes nothing new.
+    let misses = cache.misses();
+    assert!(misses > 100);
+    planet_frame::plan_terrain_cached(&first, &Reference(1), &mut cache).unwrap();
+    assert_eq!(cache.misses(), misses, "an identical plan must be served entirely from the cache");
+    // Each part of the key, changed alone, gives the plan of a cold computation (and refills the cache).
+    let smaller = LodParams { radius_m: 6_000_000.0, ..lod.clone() };
+    let cases: [(&str, TerrainRequest, Box<dyn HeightField>); 3] = [
+        ("seed", request(2, &lod), Box::new(Reference(2))),
+        ("radius", request(1, &smaller), Box::new(Reference(1))),
+        ("implementation", request(1, &lod), Box::new(Steep(1))),
+    ];
+    for (what, req, field) in cases {
+        let before = cache.misses();
+        let warm = planet_frame::plan_terrain_cached(&req, field.as_ref(), &mut cache);
+        let cold = plan_terrain_field(&req, field.as_ref());
+        assert!(cache.misses() > before, "{what}: the cache must have started over");
+        assert_eq!(warm.map(|p| p.summary()), cold.map(|p| p.summary()), "{what}");
+        // Back to the first key: also a fresh start, never entries of the other key.
+        planet_frame::plan_terrain_cached(&first, &Reference(1), &mut cache).unwrap();
+    }
+}
