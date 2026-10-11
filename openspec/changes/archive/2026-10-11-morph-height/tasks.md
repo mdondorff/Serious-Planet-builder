@@ -13,5 +13,5 @@
 
 ## 3. Close-out
 
-- [ ] 3.1 Golden review (terrain_aerial200km_height), numerics-reviewer, spec-guardian, verifier; relief candidates regenerated for the owner
-- [ ] 3.2 Archive, status line, learning
+- [x] 3.1 Golden review (terrain_aerial200km_height blessed AUTO-E on three adapters), numerics-reviewer, spec-guardian, verifier (findings fixed); relief candidates regenerated for the owner
+- [x] 3.2 Archive, status line, learning
