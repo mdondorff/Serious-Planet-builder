@@ -537,6 +537,7 @@ dependencies = [
 name = "planet-world-def"
 version = "0.0.0"
 dependencies = [
+ "libm",
  "planet-core",
  "toml",
 ]
