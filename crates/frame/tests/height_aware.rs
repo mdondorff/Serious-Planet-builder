@@ -291,6 +291,28 @@ fn same_level_neighbours_share_one_morph_interval_on_rugged_terrain() {
 
 // spec: LOD-008
 #[test]
+fn the_node_radius_bound_covers_the_worst_tiles_on_every_face_and_level() {
+    // The ratio peaks at cube-corner tiles and approaches sqrt(2/3) = 0.81650 from below as the level grows, so random
+    // sampling cannot see a bound that is slightly too small; check the corners, edge middles and centres exactly.
+    let params = LodParams::earth_1080p();
+    assert!(params.node_radius_bound(20) > (2.0f64 / 3.0).sqrt());
+    for face in 0..6u8 {
+        for level in 0..=params.max_level {
+            let last = ((1u64 << level) - 1) as u32;
+            let mid = if level == 0 { 0 } else { 1u32 << (level - 1) };
+            for &x in &[0, mid, last] {
+                for &y in &[0, mid, last] {
+                    let t = TileId::new(planet_core::Face(face), level, x, y).unwrap();
+                    let (_, r) = planet_frame::lod::bounding_sphere(&TangentWarp, t, &params);
+                    assert!(r <= params.node_radius_bound(level), "{t:?}: chord radius {r} exceeds the bound {}", params.node_radius_bound(level));
+                }
+            }
+        }
+    }
+}
+
+// spec: LOD-008
+#[test]
 fn the_node_radius_bound_covers_the_bounding_sphere_of_every_tile() {
     let params = LodParams::earth_1080p();
     let mut rng = planet_core::hash::SplitMix64(5);
