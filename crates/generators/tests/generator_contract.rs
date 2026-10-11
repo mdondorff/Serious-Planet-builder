@@ -76,6 +76,18 @@ fn the_steep_generator_meets_the_contract() {
 
 // spec: WDEF-004
 #[test]
+fn generator_built_fields_carry_the_body_they_were_built_for() {
+    let mut def = WorldDefinition::single_planet(R, 7);
+    def.set_body_radius(BodyId(1), 1_737_400.0);
+    for g in [&ReferenceGenerator as &dyn HeightGenerator, &SteepGenerator] {
+        for body in [BodyId::PLANET, BodyId(1)] {
+            assert_eq!(g.field(&GenContext::new(&def), body).unwrap().body(), body, "{}", g.implementation_id());
+        }
+    }
+}
+
+// spec: GEN-012
+#[test]
 fn bodies_get_other_seeds_and_so_other_keys() {
     let mut def = WorldDefinition::single_planet(R, 7);
     def.set_body_radius(BodyId(1), 1_737_400.0);

@@ -7,7 +7,8 @@
 use planet_core::cube::FaceMapping;
 use planet_core::hash::{hash_u64s, unit_f64, HASH_VERSION};
 use planet_core::{TileId, Vec3};
-use planet_world_def::{single_planet_seed_read_hash, BodyId, GenContext, MissingNode};
+pub use planet_world_def::BodyId;
+use planet_world_def::{single_planet_seed_read_hash, GenContext, MissingNode, SPHERE_SURFACE_ID};
 
 /// Bump whenever any output of this module changes (ADR 0006).
 pub const GENERATOR_VERSION: u32 = 2;
@@ -216,6 +217,15 @@ pub trait HeightField: Sync {
     fn inputs_hash(&self) -> u64 {
         single_planet_seed_read_hash(self.seed())
     }
+    /// The body this field describes; part of every height and mesh key (ADR 0001). A field built directly from a seed
+    /// stands for the single planet.
+    fn body(&self) -> BodyId {
+        BodyId::PLANET
+    }
+    /// Id of the reference surface of this field's body (CON-15); part of every height and mesh key.
+    fn surface_id(&self) -> &'static str {
+        SPHERE_SURFACE_ID
+    }
     /// `(min, max)` of the height in metres over all directions within the angle `angular_radius` (radians) of the unit
     /// direction `centre`. The bounds are sound (never excluded a real height) but need not be tight; the default is the
     /// global `+-max_abs_height_m`. Node selection uses them for the bounding volume of a tile (LOD-008).
@@ -338,7 +348,18 @@ pub fn cache_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
     let mut v = vec![u64::from(field.version()), u64::from(HASH_VERSION), field.inputs_hash(), id.raw(), u64::from(res)];
     v.push(hash_u64s(1, &fold_str(field.implementation_id())));
     v.push(hash_u64s(2, &fold_str(map.id())));
+    v.extend_from_slice(&body_key_words(field));
     hash_u64s(0x006b_6579, &v)
+}
+
+/// Version of the key composition (which inputs enter a height or mesh key and how). History: 1 = generator, hash and
+/// field versions, implementation id, mapping, tile and inputs; 2 = plus the body id and the reference surface (ADR 0001).
+pub const KEY_FORMAT_VERSION: u32 = 2;
+
+/// The words every height key adds for the body: the key format version, the body id and the reference surface id.
+/// Radius and seed enter through the read set and the mesh key's body parameter hash.
+pub(crate) fn body_key_words(field: &dyn HeightField) -> [u64; 3] {
+    [u64::from(KEY_FORMAT_VERSION), u64::from(field.body().0), hash_u64s(3, &fold_str(field.surface_id()))]
 }
 
 /// A field together with the read set of the context it was built from (see [`HeightGenerator`]). Its keys follow the
@@ -348,13 +369,14 @@ pub fn cache_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
 pub struct Bound<F: HeightField> {
     field: F,
     inputs: u64,
+    body: BodyId,
 }
 
 impl<F: HeightField> Bound<F> {
     /// Only generators in this crate build one, from the same context that produced the field's inputs: `inputs` must be
     /// that context's read set, or the key would name inputs the heights do not come from.
-    pub(crate) fn new(field: F, inputs: u64) -> Bound<F> {
-        Bound { field, inputs }
+    pub(crate) fn new(field: F, inputs: u64, body: BodyId) -> Bound<F> {
+        Bound { field, inputs, body }
     }
 }
 
@@ -376,6 +398,12 @@ impl<F: HeightField> HeightField for Bound<F> {
     }
     fn inputs_hash(&self) -> u64 {
         self.inputs
+    }
+    fn body(&self) -> BodyId {
+        self.body
+    }
+    fn surface_id(&self) -> &'static str {
+        self.field.surface_id()
     }
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         self.field.height_bounds(centre, angular_radius)
@@ -405,6 +433,6 @@ impl HeightGenerator for ReferenceGenerator {
     }
     fn field(&self, ctx: &GenContext, body: BodyId) -> Result<Box<dyn HeightField>, MissingNode> {
         let seed = ctx.body_seed(body)?;
-        Ok(Box::new(Bound::new(Reference(seed), ctx.read_set_hash())))
+        Ok(Box::new(Bound::new(Reference(seed), ctx.read_set_hash(), body)))
     }
 }

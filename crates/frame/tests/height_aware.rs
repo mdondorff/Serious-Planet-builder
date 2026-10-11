@@ -6,7 +6,7 @@
 use planet_core::cube::TangentWarp;
 use planet_core::{PlanetFixed, TileId, Vec3};
 use planet_frame::{plan_terrain_field, scripted_views_field, LodParams, TerrainDraw, TerrainRequest, TerrainView};
-use planet_generators::height::{HeightField, Reference};
+use planet_generators::height::{BodyId, HeightField, Reference};
 use planet_generators::mesh::{grid_indices, tile_mesh_field};
 use planet_generators::stress::Steep;
 
@@ -368,6 +368,62 @@ fn a_warm_selection_cache_never_changes_a_plan() {
         }
     }
     assert!(!cache.is_empty());
+}
+
+/// `Reference(seed)` with another body and another recorded read set: same heights, other identity.
+struct Variant {
+    inner: Reference,
+    inputs: u64,
+    body: BodyId,
+}
+
+impl HeightField for Variant {
+    fn height(&self, dir: Vec3) -> f64 {
+        self.inner.height(dir)
+    }
+    fn seed(&self) -> u64 {
+        self.inner.seed()
+    }
+    fn implementation_id(&self) -> &'static str {
+        self.inner.implementation_id()
+    }
+    fn version(&self) -> u32 {
+        self.inner.version()
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        self.inner.max_abs_height_m()
+    }
+    fn inputs_hash(&self) -> u64 {
+        self.inputs
+    }
+    fn body(&self) -> BodyId {
+        self.body
+    }
+    fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
+        self.inner.height_bounds(centre, angular_radius)
+    }
+}
+
+// spec: TEST-012
+#[test]
+fn the_selection_cache_starts_over_for_another_body_or_another_read_set() {
+    let lod = reference_params();
+    let (_, cam) = scripted_views_field(R, 4.0 / 3.0, &Reference(1))[4];
+    let req = TerrainRequest { camera: cam, size: (128, 96), view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 1 };
+    let base = Variant { inner: Reference(1), inputs: Reference(1).inputs_hash(), body: BodyId::PLANET };
+    let other_inputs = Variant { inner: Reference(1), inputs: 99, body: BodyId::PLANET };
+    let other_body = Variant { inner: Reference(1), inputs: base.inputs, body: BodyId(1) };
+    let mut cache = planet_frame::SelectionCache::new();
+    planet_frame::plan_terrain_cached(&req, &base, &mut cache).unwrap();
+    let after_base = cache.misses();
+    planet_frame::plan_terrain_cached(&req, &base, &mut cache).unwrap();
+    assert_eq!(cache.misses(), after_base, "the same identity is served from the cache");
+    for (what, field) in [("read set", &other_inputs), ("body", &other_body)] {
+        let before = cache.misses();
+        planet_frame::plan_terrain_cached(&req, field, &mut cache).unwrap();
+        assert!(cache.misses() > before, "{what}: the cache must have started over");
+        planet_frame::plan_terrain_cached(&req, &base, &mut cache).unwrap();
+    }
 }
 
 // spec: TEST-012

@@ -230,6 +230,9 @@ impl SelectionCache {
                 planet_core::hash::hash_u64s(2, &text(field.implementation_id())),
                 u64::from(field.version()),
                 field.seed(),
+                // What the heights (and so the bounds) depend on beyond the seed: the body and the recorded read set.
+                field.inputs_hash(),
+                u64::from(field.body().0),
                 p.radius_m.to_bits(),
             ],
         );
