@@ -23,7 +23,7 @@ const USAGE: &str = "cargo xtask <command>
   perf [--machine-ready]   performance harness on Rasierklinge (owner confirms the machine first)
   det-diff <a> <b>     compare two determinism manifests (GEN-003; CI diffs Windows against Linux)
   golden-review [--proposal <file>] [--extra <dir>]... [--apply]   classify golden candidates under ADR 0017 (auto-bless or escalate)
-  bless                list candidate goldens (promotion is the owner's /bless skill)
+  bless                list candidate goldens (agents promote under ADR 0017 via golden-review; the rest is the owner's /bless)
 
 options for test: --strict (a missing golden fails), --real (use the discrete GPU), extra args after `--` go to nextest";
 

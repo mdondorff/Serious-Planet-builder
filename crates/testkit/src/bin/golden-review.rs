@@ -4,10 +4,10 @@
 //! Reads candidates from `target/review/candidates/<adapter>/` and every `--extra` directory, compares each with
 //! `tests/goldens/<adapter>/<name>.png`, writes golden | candidate | diff triptychs and `report.md` to
 //! `target/review/golden-review/`, prints one verdict per candidate and, with `--apply`, copies only the auto verdicts
-//! (and the adapter's `driver.txt`) into `tests/goldens/`. Exits 0 when nothing escalates and 3 otherwise (`cargo xtask
+//! into `tests/goldens/`. A candidate whose `driver.txt` differs from the recorded one always escalates. Exits 0 when nothing escalates and 3 otherwise (`cargo xtask
 //! golden-review` then reports a failure); 2 on bad arguments.
 
-use planet_testkit::review::{classify, declared_goldens, parse_classes, Change, Observation, Verdict};
+use planet_testkit::review::{classify, declared_goldens, driver_gate, parse_classes, Change, Observation, Verdict};
 use planet_testkit::{read_png, repo_root, write_png, Image};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -147,7 +147,14 @@ fn main() {
         }
         for adapter in adapters.iter().filter(|a| candidates.contains_key(&((*a).clone(), name.clone()))) {
             let class = classes.get(name).copied();
-            let verdict = classify(adapter, name, &seen, class, declared.contains(name));
+            let src = &candidates[&(adapter.clone(), name.clone())];
+            let read = |p: PathBuf| std::fs::read_to_string(p).ok();
+            let recorded = read(goldens.join(adapter).join("driver.txt"));
+            let cand_driver = src.parent().and_then(|d| read(d.join("driver.txt")));
+            let verdict = match driver_gate(adapter, recorded.as_deref(), cand_driver.as_deref()) {
+                Some(reason) => Verdict::Escalate(reason),
+                None => classify(adapter, name, &seen, class, declared.contains(name)),
+            };
             let (px, delta) = match seen.get(adapter) {
                 Some(Observation::Changed(c)) => (c.pixels.to_string(), c.max_delta.to_string()),
                 _ => ("-".into(), "-".into()),
@@ -170,13 +177,9 @@ fn main() {
             if matches!(verdict, Verdict::Escalate(_)) {
                 escalated += 1;
             } else if apply {
-                let src = &candidates[&(adapter.clone(), name.clone())];
+                // The driver gate passed, so the recorded driver.txt stays as it is.
                 let dst = goldens.join(adapter).join(format!("{name}.png"));
                 std::fs::copy(src, &dst).expect("copy candidate");
-                let driver = src.parent().map(|d| d.join("driver.txt"));
-                if let Some(d) = driver.filter(|d| d.is_file()) {
-                    std::fs::copy(d, goldens.join(adapter).join("driver.txt")).expect("copy driver.txt");
-                }
                 applied.push(format!("{adapter}/{name}"));
             }
         }

@@ -1,6 +1,6 @@
 ---
 name: bless
-description: Owner-only review of candidate golden images; promotes approved candidates to goldens.
+description: Owner review of candidate golden images that the golden-review policy (ADR 0017) escalates; promotes approved candidates to goldens.
 disable-model-invocation: true
 ---
 1. List candidate images waiting for approval (`target/review/candidates/`), grouped by test and adapter.

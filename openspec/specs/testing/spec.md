@@ -28,12 +28,12 @@ Source: CON-16, ADR 0009, ADR 0012
 - **WHEN** an active tier C requirement is cited only by tests outside `gpu_*` files
 - **THEN** `cargo xtask spec-lint` fails and says which tiers cite it and which tier is required
 
-### Requirement: TEST-002 Per-adapter goldens, owner-only blessing
-Golden images SHALL be stored per adapter family under `tests/goldens/<adapter>/` (the key drops driver and compiler versions, e.g. `vulkan-llvmpipe`), with the full driver string recorded in `driver.txt` beside them and printed on every mismatch; a test SHALL never create or overwrite a golden; when a golden is missing the test SHALL write a candidate to `target/review/candidates/<adapter>/` and report it as pending (failing in strict mode, and always when the adapter already has blessed goldens) unless its name is listed in `tests/goldens/pending.txt`; an adapter that runs where `PLANET_REQUIRE_ADAPTER_GOLDENS=1` (CI) and has no golden directory SHALL fail; debug views SHALL compare exactly.
+### Requirement: TEST-002 Per-adapter goldens and candidates
+Golden images SHALL be stored per adapter family under `tests/goldens/<adapter>/` (the key drops driver and compiler versions, e.g. `vulkan-llvmpipe`), with the full driver string recorded in `driver.txt` beside them and printed on every mismatch; a test SHALL never create or overwrite a golden; when a golden is missing the test SHALL write a candidate to `target/review/candidates/<adapter>/` and report it as pending (failing in strict mode, and always when the adapter already has blessed goldens) unless its name is listed in `tests/goldens/pending.txt`; an adapter that runs where `PLANET_REQUIRE_ADAPTER_GOLDENS=1` (CI) and has no golden directory SHALL fail; debug views SHALL compare exactly. Candidates are promoted only by the owner's `/bless` or under the golden review policy (TEST-016, ADR 0017).
 
 Verify: A
 Status: active
-Source: CON-18, ADR 0009
+Source: CON-18, ADR 0009, ADR 0017
 
 #### Scenario: Missing golden
 - **WHEN** a golden test runs without a golden for the adapter
@@ -248,7 +248,7 @@ Source: CON-11, CON-13, ADR 0003, ADR 0006, ADR 0014, M2 report (SPIKE-02 caveat
 - **THEN** its content hash equals the known answer recorded for its version
 
 ### Requirement: TEST-016 Golden review policy
-Golden tests SHALL check every golden of a test before failing and write every candidate of the run. `cargo xtask golden-review [--proposal <file>] [--extra <dir>]... [--apply]` SHALL compare every candidate with its golden on every adapter, write a golden | candidate | diff triptych and `report.md` to `target/review/golden-review/`, and classify each candidate under ADR 0017: auto-bless rounding noise (a debug or shaded view, at most 32 changed pixels, max delta 1) and declared changes (listed under `Expected golden changes:` in the change's proposal; debug views also agreeing across adapters within +-5 %), and escalate everything else (lit views, first goldens, new adapters, disagreement, undeclared changes, size changes, unclassified goldens) with a reason. `--apply` SHALL copy only the auto verdicts.
+Golden tests SHALL check every golden of a test before failing and write every candidate of the run. `cargo xtask golden-review [--proposal <file>] [--extra <dir>]... [--apply]` SHALL compare every candidate with its golden on every adapter, write a golden | candidate | diff triptych and `report.md` to `target/review/golden-review/`, and classify each candidate under ADR 0017: auto-bless rounding noise (a debug or shaded view, at most 32 changed pixels, max delta 1) and declared changes (listed under `Expected golden changes:` in the change's proposal; for debug views also on at least two adapters, with changed pixels agreeing within the larger of 5 % and 8 pixels and max deltas within the larger of 5 % and 1), and escalate everything else (a changed driver, lit views, first goldens, new adapters, disagreement, a size change on any adapter, undeclared changes, unclassified goldens) with a reason. `--apply` SHALL copy only the auto verdicts and never touch `driver.txt`. The test's own oracles, open review findings and earlier owner reverts are checked by the agent applying the `golden-review` skill.
 
 Verify: A
 Status: active

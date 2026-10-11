@@ -109,6 +109,17 @@ pub fn classify(adapter: &str, name: &str, seen: &BTreeMap<String, Observation>,
     Verdict::AutoExplained
 }
 
+/// A candidate rendered with another driver than the one recorded beside the goldens escalates, whatever its pixels:
+/// driver and wgpu upgrades are re-blessed by the owner (ADR 0004, ADR 0009). `None` when the recorded and the candidate
+/// driver strings agree (or the candidate has none, e.g. an artefact without its sidecar: then nothing is overwritten).
+pub fn driver_gate(adapter: &str, recorded: Option<&str>, candidate: Option<&str>) -> Option<String> {
+    match (recorded.map(str::trim), candidate.map(str::trim)) {
+        (Some(r), Some(c)) if r != c => Some(format!("driver changed on {adapter}: recorded '{r}', candidate '{c}'")),
+        (None, Some(c)) => Some(format!("{adapter} has no recorded driver; candidate driver '{c}'")),
+        _ => None,
+    }
+}
+
 /// Golden names listed under `Expected golden changes:` in a proposal (`- <name>: <reason>` lines until the next heading
 /// or blank line). A line without a reason does not count.
 pub fn declared_goldens(proposal: &str) -> Vec<String> {
@@ -210,6 +221,46 @@ mod tests {
         assert!(
             reason(classify("warp", "g", &seen(&[("warp", Observation::SizeChanged)]), Some(GoldenClass::Debug), true)).contains("size")
         );
+    }
+
+    // spec: TEST-016
+    #[test]
+    fn a_driver_change_escalates_whatever_the_pixels() {
+        assert_eq!(driver_gate("warp", Some("WARP 10.0\n"), Some("WARP 10.0")), None);
+        assert_eq!(driver_gate("warp", Some("WARP 10.0"), None), None);
+        assert!(driver_gate("lavapipe", Some("Mesa 25.2.8"), Some("Mesa 25.3.0")).unwrap().contains("driver changed on lavapipe"));
+        assert!(driver_gate("nv", None, Some("581.57")).is_some());
+    }
+
+    // spec: TEST-016
+    #[test]
+    fn the_owner_decisions_on_pr_43_are_reproduced() {
+        // Changed pixels and max deltas of PR #43's candidates (LOD-008), which the owner approved on 2026-10-11.
+        let (w, l, n) = ("dx12-microsoft-basic-render-driver", "vulkan-llvmpipe", "vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu");
+        type Case = (&'static str, GoldenClass, [(usize, u8); 3]);
+        let cases: [Case; 5] = [
+            ("terrain_aerial20km_level", GoldenClass::Debug, [(665, 97), (666, 97), (665, 97)]),
+            ("terrain_aerial200km_height", GoldenClass::Shaded, [(7, 2), (7, 1), (12, 1)]),
+            ("terrain_ground1m_depth", GoldenClass::Shaded, [(951, 147), (7, 147), (938, 148)]),
+            ("terrain_low2km_morph", GoldenClass::Debug, [(1655, 76), (1656, 76), (1657, 76)]),
+            ("terrain_cube_corner_normals", GoldenClass::Debug, [(4, 1), (4, 1), (8, 1)]),
+        ];
+        let (mut with, mut without) = (0, 0);
+        for (name, class, px) in cases {
+            let s = seen(&[(w, ch(px[0].0, px[0].1)), (l, ch(px[1].0, px[1].1)), (n, ch(px[2].0, px[2].1))]);
+            for a in [w, l, n] {
+                let declared = name != "terrain_cube_corner_normals";
+                assert!(
+                    !matches!(classify(a, name, &s, Some(class), declared), Verdict::Escalate(_)),
+                    "{a} {name} must auto-bless with the declarations"
+                );
+                with += 1;
+                if matches!(classify(a, name, &s, Some(class), false), Verdict::Escalate(_)) {
+                    without += 1;
+                }
+            }
+        }
+        assert_eq!((with, without), (15, 10), "15 auto with the declarations; every real change escalates without them");
     }
 
     // spec: TEST-016
