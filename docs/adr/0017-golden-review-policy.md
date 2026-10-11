@@ -27,9 +27,9 @@ Golden tests report every mismatch of a run before failing (`testkit::GoldenChec
 
 ## Consequences
 - Constitution v1.2: CON-18 reads "Golden images are approved by the owner, or by an agent under the owner's policy in ADR 0017."
-- CLAUDE.md: "Never bless golden images" becomes "Bless goldens only through the `golden-review` skill's policy (ADR 0017); everything it escalates waits for the owner's `/bless`."
+- CLAUDE.md: "Never bless golden images" becomes "Bless goldens only through the `golden-review` skill's policy (ADR 0017)", which escalates everything else to the owner's `/bless`.
 - Easier: visual changes no longer stall on rounding and declared debug-view changes. Harder: OpenSpec changes that move pixels must declare their expected golden changes up front.
-- Tests: the policy classifier is pure and tested at tier A (`xtask golden-review` unit tests); the collector is tested at tier A in testkit.
+- Tests: the policy classifier (`testkit::review`) and the collector (`testkit::GoldenChecks`) are pure and tested at tier A; a matching golden removes any stale candidate of its name, so only current candidates are reviewed.
 
 ## Licences of adopted code or techniques
 None.

@@ -6,7 +6,8 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`. Never bless outs
 
 1. **Declare.** If the change moves pixels on purpose, its OpenSpec `proposal.md` must have a section
    `Expected golden changes:` with one line per golden: `- <golden name>: <reason>`. Add it before collecting.
-2. **Collect candidates for every adapter that has the golden.**
+2. **Collect candidates for every adapter that has the golden.** Start from an empty `target/review/candidates/`
+   (delete it first) so nothing from an earlier run is reviewed.
    - WARP: `cargo xtask test gpu` (writes `target/review/candidates/dx12-microsoft-basic-render-driver/`).
    - NVIDIA (Rasierklinge): `cargo xtask test gpu --real`.
    - llvmpipe: push the branch, then `gh run download <run> -n review-Linux -D target/review/ci-linux` (gh lives at `C:\Program Files\GitHub CLI\gh.exe`).
@@ -15,6 +16,9 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`. Never bless outs
    It writes `target/review/golden-review/report.md` and a golden | candidate | diff triptych per candidate, and prints
    one verdict per candidate: `AUTO-R`, `AUTO-E` or `ESCALATE <reason>`. Look at every triptych yourself; if a picture
    contradicts its verdict (a hole, a seam, a colour that should not exist), treat it as `ESCALATE`.
+   An `AUTO-E` also needs, per ADR 0017: the test's own oracles pass on the candidate frame (no holes, coverage, colour
+   rules: every assertion of the golden test other than the golden comparison), and the change's verifier and reviewers
+   have no open finding about pixels. If either fails, or any reviewer objects, treat the candidate as `ESCALATE`.
 4. **Bless the auto verdicts.** `cargo xtask golden-review ... --apply` copies only `AUTO-R`/`AUTO-E` candidates (and
    the adapter's `driver.txt`) into `tests/goldens/<adapter>/`. Commit them on the change's branch as
    `bless(auto): <tests> [R|E]`, with the per-candidate numbers from the report in the message body, and add one line to

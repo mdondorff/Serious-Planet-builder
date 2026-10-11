@@ -228,7 +228,13 @@ pub fn compare_golden_in(root: &Path, adapter: &str, name: &str, img: &Image, to
         });
     }
     match diff(&expected, img, tol) {
-        None => Ok(GoldenOutcome::Match),
+        None => {
+            // A stale candidate or diff from an earlier run must not survive a match: golden-review would treat it as
+            // current (ADR 0017).
+            let _ = fs::remove_file(&candidate);
+            let _ = fs::remove_file(review.join("diffs").join(adapter).join(format!("{name}.png")));
+            Ok(GoldenOutcome::Match)
+        }
         Some(d) => {
             write_png(&candidate, img)?;
             let diff_path = review.join("diffs").join(adapter).join(format!("{name}.png"));
@@ -306,7 +312,6 @@ impl GoldenChecks {
     /// Compare `img` with its golden (as [`assert_golden`]) and remember a failure instead of panicking.
     pub fn check(&mut self, name: &str, img: &Image, tol: Tolerance) {
         if let Some(msg) = golden_failure(&self.root, &self.adapter, &self.driver, name, img, tol) {
-            eprintln!("{msg}");
             self.failures.push(msg);
         }
     }
@@ -405,6 +410,19 @@ mod tests {
             assert!(root.join(format!("target/review/candidates/ad/{n}.png")).is_file(), "{n}: every candidate of the run is written");
         }
         GoldenChecks::new_in(&root, "ad", "driver x").finish();
+    }
+
+    // spec: TEST-016
+    #[test]
+    fn a_match_removes_a_stale_candidate_of_that_name() {
+        let root = tmp("stale");
+        let img = Image::filled(4, 4, [5, 6, 7, 255]);
+        write_png(&root.join("tests/goldens/a/t.png"), &img).unwrap();
+        let stale = root.join("target/review/candidates/a/t.png");
+        write_png(&stale, &Image::filled(4, 4, [0, 0, 0, 255])).unwrap();
+        write_png(&root.join("target/review/diffs/a/t.png"), &img).unwrap();
+        assert!(matches!(compare_golden_in(&root, "a", "t", &img, Tolerance::Exact).unwrap(), GoldenOutcome::Match));
+        assert!(!stale.exists() && !root.join("target/review/diffs/a/t.png").exists(), "a match leaves no candidate or diff behind");
     }
 
     // spec: TEST-002

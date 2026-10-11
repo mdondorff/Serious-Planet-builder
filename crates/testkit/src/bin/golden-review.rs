@@ -4,7 +4,8 @@
 //! Reads candidates from `target/review/candidates/<adapter>/` and every `--extra` directory, compares each with
 //! `tests/goldens/<adapter>/<name>.png`, writes golden | candidate | diff triptychs and `report.md` to
 //! `target/review/golden-review/`, prints one verdict per candidate and, with `--apply`, copies only the auto verdicts
-//! (and the adapter's `driver.txt`) into `tests/goldens/`. Exit code 0 when nothing escalates, 3 otherwise.
+//! (and the adapter's `driver.txt`) into `tests/goldens/`. Exits 0 when nothing escalates and 3 otherwise (`cargo xtask
+//! golden-review` then reports a failure); 2 on bad arguments.
 
 use planet_testkit::review::{classify, declared_goldens, parse_classes, Change, Observation, Verdict};
 use planet_testkit::{read_png, repo_root, write_png, Image};
@@ -54,8 +55,17 @@ fn main() {
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--proposal" => proposal = it.next().map(PathBuf::from),
-            "--extra" => extras.extend(it.next().map(PathBuf::from)),
+            "--proposal" | "--extra" => {
+                let Some(v) = it.next() else {
+                    eprintln!("golden-review: {a} needs a value");
+                    std::process::exit(2);
+                };
+                if a == "--proposal" {
+                    proposal = Some(PathBuf::from(v));
+                } else {
+                    extras.push(PathBuf::from(v));
+                }
+            }
             "--apply" => apply = true,
             other => {
                 eprintln!(

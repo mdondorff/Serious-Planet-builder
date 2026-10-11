@@ -98,7 +98,8 @@ pub fn classify(adapter: &str, name: &str, seen: &BTreeMap<String, Observation>,
                 }
             }
             Observation::Unchanged => return Verdict::Escalate(format!("{name} changed on {adapter} but not on {other}")),
-            Observation::NoGolden | Observation::SizeChanged => {}
+            Observation::SizeChanged => return Verdict::Escalate(format!("{name} changed size on {other}")),
+            Observation::NoGolden => {}
         }
     }
     let changed = seen.values().filter(|o| matches!(o, Observation::Changed(_))).count();
@@ -200,6 +201,8 @@ mod tests {
         assert!(reason(classify("warp", "g", &disagree, Some(GoldenClass::Debug), true)).contains("disagree"));
         let half = seen(&[("warp", ch(951, 147)), ("nv", Observation::Unchanged)]);
         assert!(reason(classify("warp", "g", &half, Some(GoldenClass::Debug), true)).contains("not on nv"));
+        let resized = seen(&[("warp", ch(951, 147)), ("nv", ch(938, 148)), ("lavapipe", Observation::SizeChanged)]);
+        assert!(reason(classify("warp", "g", &resized, Some(GoldenClass::Debug), true)).contains("size on lavapipe"));
         let alone = seen(&[("warp", ch(951, 147))]);
         assert!(reason(classify("warp", "g", &alone, Some(GoldenClass::Debug), true)).contains("only one adapter"));
         assert!(reason(classify("warp", "g", &seen(&[("warp", Observation::NoGolden)]), Some(GoldenClass::Debug), true))
