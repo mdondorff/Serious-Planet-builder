@@ -5,8 +5,7 @@
 - **Coder:** `sonnet-coder` owns M3 (briefed 2026-10-11; `sonnet-worker` is deprecated). Briefing: accept ADR 0016, land
   the stack #43 -> #46 -> #44 -> #45 (renumber #45's ADRs to 0018/0019), then the "Queued for M3" list up to the M3 report.
   The briefing may have been held for the owner's approval; if nothing landed, check with the owner.
-- **ADRs:** 0001-0012, 0015, 0017 accepted; 0016 accepted by the owner 2026-10-11 (status line still to be changed on
-  #43); 0013, 0014 proposed (review with the perf numbers).
+- **ADRs:** 0001-0012, 0015, 0016 (executed on #43, 01e9853), 0017 accepted; 0013, 0014 proposed (review with the perf numbers).
 - **Owner reviews pending:** TEST-014 flight sequence; steep views; official perf rerun on #46 (plan time was 25.75 ms
   at ground-1m on #43, #46 measured about 6.8 ms warm on a dev machine).
 - **Watch:** M3 acceptance must show realistic terrain planning at production parameters (cells 32, ratio 240); ADR 0016
@@ -15,6 +14,10 @@
   (contour lines differ per adapter). Auto-bless only via the tool; escalations go to the owner's `/bless`.
 
 ## Lessons from the owner
+- Owner decisions are executed by the architect, never relayed to a coder to execute (sonnet-coder rightly refused a
+  relayed ADR acceptance, 2026-10-11). Commit them on main or the PR branch holding the file; coders merge them.
+- An idle peer session does not read its inbox until it gets a turn: a briefing sent to an idle session waits until the
+  owner types there. For a new coder, ask the owner to paste the first briefing.
 - He wants one ADR at a time: explain, highlight, recommend, then he decides; small focused PRs per decision.
 - He prefers autonomy: decide and proceed where a decision is reversible, ask only for owner-level choices, give a
   recommended option with every question.
