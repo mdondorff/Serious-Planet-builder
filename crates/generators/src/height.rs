@@ -7,6 +7,7 @@
 use planet_core::cube::FaceMapping;
 use planet_core::hash::{hash_u64s, unit_f64, HASH_VERSION};
 use planet_core::{TileId, Vec3};
+use planet_world_def::{single_planet_seed_read_hash, BodyId, GenContext, MissingNode};
 
 /// Bump whenever any output of this module changes (ADR 0006).
 pub const GENERATOR_VERSION: u32 = 2;
@@ -207,6 +208,12 @@ pub trait HeightField: Sync {
     fn version(&self) -> u32;
     /// Bound on `|height|` in metres.
     fn max_abs_height_m(&self) -> f64;
+    /// Hash of the definition inputs this field was built from (the recorded read set of its [`GenContext`], WDEF-004).
+    /// It enters every key in place of the seed. The default is the read set of a generator that reads only the seed of
+    /// the single planet, so a field built directly from a seed keys exactly like one built through a context.
+    fn inputs_hash(&self) -> u64 {
+        single_planet_seed_read_hash(self.seed())
+    }
     /// `(min, max)` of the height in metres over all directions within the angle `angular_radius` (radians) of the unit
     /// direction `centre`. The bounds are sound (never excluded a real height) but need not be tight; the default is the
     /// global `+-max_abs_height_m`. Node selection uses them for the bounding volume of a tile (LOD-008).
@@ -326,8 +333,70 @@ pub fn cache_key(map: &dyn FaceMapping, seed: u64, id: TileId, res: u32) -> u64 
 /// [`cache_key`] for any height field: its version, implementation id and seed take the place of the reference
 /// generator's, so [`Reference`] gives exactly [`cache_key`].
 pub fn cache_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, res: u32) -> u64 {
-    let mut v = vec![u64::from(field.version()), u64::from(HASH_VERSION), field.seed(), id.raw(), u64::from(res)];
+    let mut v = vec![u64::from(field.version()), u64::from(HASH_VERSION), field.inputs_hash(), id.raw(), u64::from(res)];
     v.push(hash_u64s(1, &fold_str(field.implementation_id())));
     v.push(hash_u64s(2, &fold_str(map.id())));
     hash_u64s(0x006b_6579, &v)
+}
+
+/// A field together with the read set of the context it was built from (see [`HeightGenerator`]).
+pub struct Bound<F: HeightField> {
+    field: F,
+    inputs: u64,
+}
+
+impl<F: HeightField> Bound<F> {
+    pub fn new(field: F, inputs: u64) -> Bound<F> {
+        Bound { field, inputs }
+    }
+}
+
+impl<F: HeightField> HeightField for Bound<F> {
+    fn height(&self, dir: Vec3) -> f64 {
+        self.field.height(dir)
+    }
+    fn seed(&self) -> u64 {
+        self.field.seed()
+    }
+    fn implementation_id(&self) -> &'static str {
+        self.field.implementation_id()
+    }
+    fn version(&self) -> u32 {
+        self.field.version()
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        self.field.max_abs_height_m()
+    }
+    fn inputs_hash(&self) -> u64 {
+        self.inputs
+    }
+    fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
+        self.field.height_bounds(centre, angular_radius)
+    }
+}
+
+/// A height generator (CON-06): it reads the definition only through a [`GenContext`] and returns the pure field it
+/// describes. Open a fresh context per field: the field's key covers everything that context recorded. The inner loops
+/// then run on plain values, so reads are recorded once per tile or plan, not per sample.
+pub trait HeightGenerator {
+    fn implementation_id(&self) -> &'static str;
+    fn version(&self) -> u32;
+    fn field(&self, ctx: &GenContext, body: BodyId) -> Result<Box<dyn HeightField>, MissingNode>;
+}
+
+/// [`Reference`] as a generator: reads the body's seed.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ReferenceGenerator;
+
+impl HeightGenerator for ReferenceGenerator {
+    fn implementation_id(&self) -> &'static str {
+        IMPLEMENTATION_ID
+    }
+    fn version(&self) -> u32 {
+        GENERATOR_VERSION
+    }
+    fn field(&self, ctx: &GenContext, body: BodyId) -> Result<Box<dyn HeightField>, MissingNode> {
+        let seed = ctx.body_seed(body)?;
+        Ok(Box::new(Bound::new(Reference(seed), ctx.read_set_hash())))
+    }
 }
