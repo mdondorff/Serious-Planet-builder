@@ -125,6 +125,11 @@ fn every_debug_view_renders_and_obeys_its_colour_rules() {
                 // Red is the morph value and blue its complement (up to rounding), so the view is a blue-to-red ramp.
                 assert!(covered.iter().all(|p| (i32::from(p[0]) + i32::from(p[2]) - 255).abs() <= 1), "morph view must be a blue-red ramp");
             }
+            TerrainView::Relief => {
+                // Hillshade, tint, grid and contours: a coloured image with many distinct values, not a few flat colours.
+                let distinct: std::collections::BTreeSet<_> = covered.iter().collect();
+                assert!(distinct.len() > 200, "relief view must show structure, got {} distinct colours", distinct.len());
+            }
             TerrainView::TileId => {}
         }
     }
@@ -164,6 +169,8 @@ fn selected_views_match_the_adapters_goldens() {
         (2, TerrainView::Height, "terrain_aerial200km_height"),
         (6, TerrainView::Depth, "terrain_ground1m_depth"),
         (4, TerrainView::Morph, "terrain_low2km_morph"),
+        (0, TerrainView::Relief, "terrain_orbit_relief"),
+        (6, TerrainView::Relief, "terrain_ground1m_relief"),
     ] {
         let (_, plan) = plan_for(index, view);
         let meshes = meshes_for(&plan);

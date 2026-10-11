@@ -29,18 +29,22 @@ struct VsOut {
     @location(0) normal: vec3<f32>,
     @location(1) height: f32,
     @location(2) morph: f32,
+    // Morphed position relative to the tile origin: small, tile-local, and what the relief grid is anchored to.
+    @location(3) local: vec3<f32>,
 };
 
 @vertex
 fn vs(@location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) normal: vec3<f32>, @location(3) height: f32, @location(4) ref_pos: vec3<f32>) -> VsOut {
     // The morph distance is measured to the height-free reference position, the same quantity node selection uses.
     let m = clamp((length(node.origin_rel.xyz + ref_pos) - node.morph.x) / max(node.morph.y - node.morph.x, 1e-6), 0.0, 1.0);
-    let p = node.origin_rel.xyz + mix(pos, coarse, m);
+    let local = mix(pos, coarse, m);
+    let p = node.origin_rel.xyz + local;
     var out: VsOut;
     out.pos = g.view_proj * vec4<f32>(p, 1.0);
     out.normal = normal;
     out.height = height;
     out.morph = m;
+    out.local = local;
     return out;
 }
 
@@ -48,6 +52,40 @@ fn vs(@location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) 
 fn line(x: f32, w: f32) -> f32 {
     let d = abs(fract(x + 0.5) - 0.5);
     return 1.0 - smoothstep(0.0, max(w, 1e-6) * 1.5, d);
+}
+
+// Lines at every multiple of `base` * 10^k (k < count) of `x` (metres). A decade fades out continuously once its lines
+// would be closer than ~6 px, like the height contours (derivatives are taken by the caller in uniform control flow).
+fn decades(x: f32, wx: f32, base: f32, count: i32) -> f32 {
+    var acc = 0.0;
+    var s = base;
+    for (var k = 0; k < count; k = k + 1) {
+        let w = wx / s;
+        let fade = clamp((log2(1.0 / max(w, 1e-6)) - 2.5) / 2.5, 0.0, 1.0);
+        acc = max(acc, line(x / s, w) * fade);
+        s = s * 10.0;
+    }
+    return acc;
+}
+
+// Relief: fixed-sun hillshade of the vertex normals on a height tint, a metric grid of the tile-local axes (each axis
+// weighted by how square it cuts the surface) from 1 cm to 1,000 km, and height contours from 1 cm to 10 km. Unlike the
+// flat-colour views it keeps structure at any altitude, so a flight down to 1 m stays readable.
+fn relief(in: VsOut) -> vec4<f32> {
+    let n = normalize(in.normal);
+    let t = clamp((in.height - g.range.x) / max(g.range.y - g.range.x, 1e-6), 0.0, 1.0);
+    let low = mix(vec3<f32>(0.18, 0.36, 0.56), vec3<f32>(0.36, 0.56, 0.26), smoothstep(0.0, 0.35, t));
+    let tint = mix(low, mix(vec3<f32>(0.66, 0.56, 0.38), vec3<f32>(0.95, 0.95, 0.95), smoothstep(0.7, 1.0, t)), smoothstep(0.35, 0.7, t));
+    let sun = normalize(vec3<f32>(0.5, 0.6, 0.62));
+    let shade = 0.28 + 0.72 * max(dot(n, sun), 0.0);
+    let lx = in.local;
+    let wgt = clamp(vec3<f32>(1.0) - abs(n) * 1.25, vec3<f32>(0.0), vec3<f32>(1.0));
+    let grid = max(max(decades(lx.x, fwidth(lx.x), 0.01, 9) * wgt.x, decades(lx.y, fwidth(lx.y), 0.01, 9) * wgt.y), decades(lx.z, fwidth(lx.z), 0.01, 9) * wgt.z);
+    let contour = decades(in.height, fwidth(in.height), 0.01, 7);
+    var c = tint * shade;
+    c = mix(c, vec3<f32>(0.36, 0.1, 0.05), 0.5 * contour);
+    c = mix(c, vec3<f32>(0.04, 0.06, 0.14), 0.6 * grid);
+    return vec4<f32>(c, 1.0);
 }
 
 @fragment
@@ -66,6 +104,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         contour = max(contour, line(h10 / scale, w) * fade);
         scale = scale * 10.0;
     }
+    let rel = relief(in);
     let band_z = log2(max(in.pos.z, 1e-30));
     let w_z = fwidth(band_z);
     if (mode <= 2u) {
@@ -84,6 +123,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     if (mode == 5u) {
         let n = normalize(in.normal) * 0.5 + vec3<f32>(0.5, 0.5, 0.5);
         return vec4<f32>(n, 1.0);
+    }
+    if (mode == 7u) {
+        return rel;
     }
     let v = clamp(band_z / 40.0 + 1.0, 0.0, 1.0);
     let k = 1.0 - 0.8 * line(band_z, w_z);

@@ -18,10 +18,13 @@ pub enum TerrainView {
     Height,
     Normals,
     Depth,
+    /// Fixed-sun hillshade with a height tint, an adaptive metric grid and fine contours: stays readable from orbit down
+    /// to 1 m, where the flat-colour views are a single colour. Appended last so the other views keep their shader index.
+    Relief,
 }
 
 impl TerrainView {
-    pub const ALL: [TerrainView; 7] = [
+    pub const ALL: [TerrainView; 8] = [
         TerrainView::Face,
         TerrainView::TileId,
         TerrainView::Level,
@@ -29,6 +32,7 @@ impl TerrainView {
         TerrainView::Height,
         TerrainView::Normals,
         TerrainView::Depth,
+        TerrainView::Relief,
     ];
 
     pub fn name(self) -> &'static str {
@@ -40,6 +44,7 @@ impl TerrainView {
             TerrainView::Height => "height",
             TerrainView::Normals => "normals",
             TerrainView::Depth => "depth",
+            TerrainView::Relief => "relief",
         }
     }
 
