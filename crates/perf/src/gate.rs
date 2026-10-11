@@ -8,7 +8,7 @@ use std::process::Command;
 use crate::{check_reference_adapter, is_performance_scheme, AdapterFacts};
 
 /// Names of processes that distort a CPU-plan-time measurement when they run beside the harness (lower case, no `.exe`).
-pub const BUSY_PROCESSES: [&str; 5] = ["cargo", "rustc", "cargo-nextest", "planet", "clippy-driver"];
+pub const BUSY_PROCESSES: [&str; 6] = ["cargo", "rustc", "cargo-nextest", "nextest", "planet", "clippy-driver"];
 /// Mean CPU load over the sampling window must stay below this (percent).
 pub const MAX_CPU_LOAD_PCT: f64 = 15.0;
 /// Mean GPU utilisation over the sampling window must stay below this (percent).
@@ -25,6 +25,9 @@ pub const MAX_NOISE: f64 = 0.10;
 pub struct ProcInfo {
     pub pid: u32,
     pub ppid: u32,
+    /// Creation time as a sortable number (`yyyyMMddHHmmssfff`). A recorded parent that is younger than its child is a
+    /// reused pid, not the parent.
+    pub created: u64,
     pub name: String,
 }
 
@@ -64,7 +67,11 @@ pub fn offending_processes(procs: &[ProcInfo], own_pid: u32) -> Vec<String> {
             break;
         }
         match procs.iter().find(|p| p.pid == pid) {
-            Some(p) if p.ppid != 0 => pid = p.ppid,
+            Some(p) if p.ppid != 0 => match procs.iter().find(|q| q.pid == p.ppid) {
+                Some(parent) if parent.created <= p.created => pid = p.ppid,
+                // The parent is gone and its pid was reused (or is unknown): the chain ends here.
+                _ => break,
+            },
             _ => break,
         }
     }
@@ -73,7 +80,9 @@ pub fn offending_processes(procs: &[ProcInfo], own_pid: u32) -> Vec<String> {
     loop {
         let before = tree.len();
         for p in procs {
-            if tree.contains(&p.ppid) {
+            // A child counts only if its parent existed when it started (otherwise the parent pid was reused).
+            let parent_older = procs.iter().any(|q| q.pid == p.ppid && q.created <= p.created);
+            if tree.contains(&p.ppid) && parent_older {
                 tree.insert(p.pid);
             }
         }
@@ -187,15 +196,16 @@ pub fn validity(throttled: &[String], noisy: &[(String, f64)]) -> Validity {
 
 // ---- platform queries (thin; the rules above take their output) ----
 
-/// Parse the CSV of `pid,ppid,name` lines produced by [`query_processes`].
+/// Parse the CSV of `pid,ppid,created,name` lines produced by [`query_processes`].
 pub fn parse_process_csv(csv: &str) -> Vec<ProcInfo> {
     csv.lines()
         .filter_map(|l| {
-            let mut it = l.trim().splitn(3, ',');
+            let mut it = l.trim().splitn(4, ',');
             let pid = it.next()?.trim().parse().ok()?;
             let ppid = it.next()?.trim().parse().ok()?;
+            let created = it.next()?.trim().parse().ok()?;
             let name = it.next()?.trim().to_string();
-            (!name.is_empty()).then_some(ProcInfo { pid, ppid, name })
+            (!name.is_empty()).then_some(ProcInfo { pid, ppid, created, name })
         })
         .collect()
 }
@@ -216,17 +226,18 @@ pub fn query_ac_power() -> Option<bool> {
     }
 }
 
-/// The process table as `(pid, parent pid, name)`.
+/// The process table as `(pid, parent pid, creation time, name)`.
 pub fn query_processes() -> Option<Vec<ProcInfo>> {
-    let s = powershell("Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId),$($_.ParentProcessId),$($_.Name)\" }")?;
+    let s = powershell("Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId),$($_.ParentProcessId),$($_.CreationDate.ToString('yyyyMMddHHmmssfff')),$($_.Name)\" }")?;
     let v = parse_process_csv(&s);
     (!v.is_empty()).then_some(v)
 }
 
-/// Mean total CPU load over `seconds` (Windows performance counter, one sample per second).
+/// Mean total CPU load over `seconds`, one sample per second. Uses the CIM class `Win32_PerfFormattedData_PerfOS_Processor`
+/// (counter paths of `Get-Counter` are localised and fail on a German Windows, which is Rasierklinge's).
 pub fn query_cpu_load(seconds: u32) -> Option<f64> {
     let script = format!(
-        "(Get-Counter '\\Processor(_Total)\\% Processor Time' -SampleInterval 1 -MaxSamples {seconds}).CounterSamples | ForEach-Object {{ $_.CookedValue }}"
+        "1..{seconds} | ForEach-Object {{ (Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter \"Name='_Total'\").PercentProcessorTime; Start-Sleep -Seconds 1 }}"
     );
     let s = powershell(&script)?;
     let v: Vec<f64> = s.lines().filter_map(|l| l.trim().replace(',', ".").parse().ok()).collect();
@@ -293,7 +304,7 @@ mod tests {
             adapter: adapter(DeviceKind::Discrete),
             ac_power: Some(true),
             power_scheme: Some("Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)".into()),
-            processes: Some(vec![ProcInfo { pid: 10, ppid: 1, name: "explorer.exe".into() }]),
+            processes: Some(vec![ProcInfo { pid: 10, ppid: 1, created: 10, name: "explorer.exe".into() }]),
             own_pid: 20,
             cpu_load_pct: Some(3.0),
             gpu_util_pct: Some(1.0),
@@ -346,12 +357,12 @@ mod tests {
     fn a_build_process_outside_the_harness_tree_is_refused_by_name_and_pid() {
         let mut f = ready();
         f.processes = Some(vec![
-            ProcInfo { pid: 1, ppid: 0, name: "System".into() },
-            ProcInfo { pid: 5, ppid: 1, name: "cargo.exe".into() },
-            ProcInfo { pid: 6, ppid: 5, name: "rustc.exe".into() },
-            ProcInfo { pid: 7, ppid: 1, name: "cargo-nextest.exe".into() },
-            ProcInfo { pid: 8, ppid: 1, name: "Clippy-Driver.exe".into() },
-            ProcInfo { pid: 9, ppid: 1, name: "planet.exe".into() },
+            ProcInfo { pid: 1, ppid: 0, created: 1, name: "System".into() },
+            ProcInfo { pid: 5, ppid: 1, created: 5, name: "cargo.exe".into() },
+            ProcInfo { pid: 6, ppid: 5, created: 6, name: "rustc.exe".into() },
+            ProcInfo { pid: 7, ppid: 1, created: 7, name: "cargo-nextest.exe".into() },
+            ProcInfo { pid: 8, ppid: 1, created: 8, name: "Clippy-Driver.exe".into() },
+            ProcInfo { pid: 9, ppid: 1, created: 9, name: "planet.exe".into() },
         ]);
         let r = readiness(&f);
         assert_eq!(r.len(), 1);
@@ -369,12 +380,12 @@ mod tests {
     fn the_harness_own_ancestors_and_descendants_are_not_other_sessions() {
         // xtask (pid 3) -> cargo run (pid 4) -> planet (pid 20, the harness) -> a child (pid 21).
         let procs = vec![
-            ProcInfo { pid: 2, ppid: 1, name: "bash.exe".into() },
-            ProcInfo { pid: 3, ppid: 2, name: "cargo.exe".into() },
-            ProcInfo { pid: 4, ppid: 3, name: "cargo.exe".into() },
-            ProcInfo { pid: 20, ppid: 4, name: "planet.exe".into() },
-            ProcInfo { pid: 21, ppid: 20, name: "rustc.exe".into() },
-            ProcInfo { pid: 30, ppid: 1, name: "cargo.exe".into() },
+            ProcInfo { pid: 2, ppid: 1, created: 2, name: "bash.exe".into() },
+            ProcInfo { pid: 3, ppid: 2, created: 3, name: "cargo.exe".into() },
+            ProcInfo { pid: 4, ppid: 3, created: 4, name: "cargo.exe".into() },
+            ProcInfo { pid: 20, ppid: 4, created: 20, name: "planet.exe".into() },
+            ProcInfo { pid: 21, ppid: 20, created: 21, name: "rustc.exe".into() },
+            ProcInfo { pid: 30, ppid: 1, created: 30, name: "cargo.exe".into() },
         ];
         assert_eq!(offending_processes(&procs, 20), ["cargo.exe (pid 30)"]);
     }
@@ -382,7 +393,10 @@ mod tests {
     // spec: TEST-012
     #[test]
     fn a_cyclic_process_table_terminates() {
-        let procs = vec![ProcInfo { pid: 1, ppid: 2, name: "a".into() }, ProcInfo { pid: 2, ppid: 1, name: "cargo".into() }];
+        let procs = vec![
+            ProcInfo { pid: 1, ppid: 2, created: 1, name: "a".into() },
+            ProcInfo { pid: 2, ppid: 1, created: 2, name: "cargo".into() },
+        ];
         assert_eq!(offending_processes(&procs, 1), Vec::<String>::new());
     }
 
@@ -451,10 +465,47 @@ mod tests {
     // spec: TEST-012
     #[test]
     fn platform_output_parsers_accept_the_documented_forms_and_reject_garbage() {
-        let p = parse_process_csv("4,0,System\r\n812,4,cargo.exe\nbad line\n,,x\n");
-        assert_eq!(p, vec![ProcInfo { pid: 4, ppid: 0, name: "System".into() }, ProcInfo { pid: 812, ppid: 4, name: "cargo.exe".into() }]);
+        let p = parse_process_csv("4,0,20261011120000001,System\r\n812,4,20261011120000002,cargo.exe\nbad line\n,,,x\n");
+        assert_eq!(
+            p,
+            vec![
+                ProcInfo { pid: 4, ppid: 0, created: 20261011120000001, name: "System".into() },
+                ProcInfo { pid: 812, ppid: 4, created: 20261011120000002, name: "cargo.exe".into() }
+            ]
+        );
         assert_eq!(parse_gpu_util_temp("7, 52\n"), Some((7.0, 52.0)));
         assert_eq!(parse_gpu_util_temp("[N/A], 52"), None);
         assert_eq!(parse_gpu_util_temp(""), None);
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn a_sibling_under_a_listed_ancestor_is_not_exempt() {
+        // xtask (3) runs the harness (20); a second build (31) runs under the same shell (2).
+        let procs = vec![
+            ProcInfo { pid: 2, ppid: 1, created: 2, name: "bash.exe".into() },
+            ProcInfo { pid: 3, ppid: 2, created: 3, name: "cargo.exe".into() },
+            ProcInfo { pid: 20, ppid: 3, created: 20, name: "planet.exe".into() },
+            ProcInfo { pid: 31, ppid: 2, created: 31, name: "cargo.exe".into() },
+        ];
+        assert_eq!(offending_processes(&procs, 20), ["cargo.exe (pid 31)"]);
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn a_reused_parent_pid_does_not_make_a_stranger_an_ancestor_or_a_child() {
+        // The harness (20) was started by a parent (pid 7) that has exited; pid 7 now belongs to another session's cargo,
+        // created after the harness. It must not count as an ancestor.
+        let procs = vec![
+            ProcInfo { pid: 7, ppid: 1, created: 500, name: "cargo.exe".into() },
+            ProcInfo { pid: 20, ppid: 7, created: 100, name: "planet.exe".into() },
+        ];
+        assert_eq!(offending_processes(&procs, 20), ["cargo.exe (pid 7)"]);
+        // An orphan whose dead parent's pid the harness now holds is not the harness's child.
+        let procs = vec![
+            ProcInfo { pid: 20, ppid: 1, created: 500, name: "planet.exe".into() },
+            ProcInfo { pid: 40, ppid: 20, created: 100, name: "rustc.exe".into() },
+        ];
+        assert_eq!(offending_processes(&procs, 20), ["rustc.exe (pid 40)"]);
     }
 }

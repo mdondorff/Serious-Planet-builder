@@ -573,6 +573,11 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         }
     }
     let scheme = planet_perf::query_power_scheme();
+    let throttled: Vec<String> = reports.iter().filter(|r| crate::run_throttled(r)).map(|r| r.path_name.clone()).collect();
+    let validity = if smoke { planet_perf::gate::Validity::default() } else { planet_perf::gate::validity(&throttled, &noisy) };
+    if !smoke {
+        crate::session_verdict_line(out, &validity, &owner_override)?;
+    }
     for (name, median) in &plan_lines {
         let word = if planet_perf::plan_budget_ok(*median) { "ok" } else { "OVER" };
         writeln!(out, "  {name}: CPU plan median {median:.2} ms (budget {}) {word}", planet_perf::PLAN_CPU_BUDGET_MS).map_err(err)?;
@@ -605,11 +610,6 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         worst_noise = worst_noise.max(planet_perf::run_to_run_noise(&medians).unwrap_or(0.0));
     }
     writeln!(out, "worst run-to-run noise within a view (max-min)/median: {worst_noise:.3}").map_err(err)?;
-    let throttled: Vec<String> = reports.iter().filter(|r| crate::run_throttled(r)).map(|r| r.path_name.clone()).collect();
-    let validity = if smoke { planet_perf::gate::Validity::default() } else { planet_perf::gate::validity(&throttled, &noisy) };
-    for r in &validity.reasons {
-        writeln!(out, "INVALID SESSION: {r}").map_err(err)?;
-    }
     let json = planet_perf::report_json(&crate::facts(ctx), scheme.as_deref(), &owner_override, &validity, &protocol, &reports);
     if smoke && o.out.is_none() {
         return writeln!(out, "smoke run: no log written (pass --out to keep it)").map_err(err);

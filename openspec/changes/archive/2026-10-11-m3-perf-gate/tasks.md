@@ -11,4 +11,4 @@
 ## 3. Close-out
 - [x] 3.1 TEST-012 modified; CLAUDE.md stop condition reworded
 - [x] 3.2 Reviews (numerics n/a), verifier, archive, status line
-- [ ] 3.3 First real gate run is the architect's (tell opus-planner); coders never run `cargo xtask perf`
+- [x] 3.3 Handed over: the first real gate run is the architect's (docs/status.md, Waiting for the owner/architect); coders never run `cargo xtask perf`

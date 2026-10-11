@@ -30,7 +30,7 @@ modes:
     --repro <file>           replay a repro bundle (see cargo xtask repro)
     --out <file.png>         write the image
     --adapter software|hardware   adapter policy (default: PLANET_ADAPTER or software)
-    --perf                   performance-harness skeleton (needs --adapter hardware and --machine-ready)
+    --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
     --machine-ready          owner override of a failed readiness gate (ADR 0020); recorded in the log
     --smoke                  start and exit";
 
@@ -237,9 +237,30 @@ pub(crate) fn readiness_gate(o: &Options, ctx: &GpuContext, out: &mut dyn Write)
     ))
 }
 
-/// Whether a run reported throttling at its start or end (clock samples from `nvidia-smi`).
+/// Whether a run reported throttling in the clock samples taken at its start or end (`nvidia-smi`, the boundary
+/// approximation of "during measured frames"). A missing sample cannot show the absence of throttling, so it counts.
 pub(crate) fn run_throttled(r: &planet_perf::RunReport) -> bool {
-    [&r.clocks_before, &r.clocks_after].iter().filter_map(|c| c.as_ref()).any(|c| planet_perf::gate::is_throttling(&c.throttle_reasons))
+    [&r.clocks_before, &r.clocks_after].iter().any(|c| c.as_ref().is_none_or(|c| planet_perf::gate::is_throttling(&c.throttle_reasons)))
+}
+
+/// The session verdict, printed before any budget verdict so a bad session never shows "ok" first (ADR 0020). An invalid
+/// or overridden session's verdicts do not count.
+pub(crate) fn session_verdict_line(
+    out: &mut dyn Write,
+    validity: &planet_perf::gate::Validity,
+    owner_override: &[String],
+) -> Result<(), String> {
+    if validity.is_valid() && owner_override.is_empty() {
+        return writeln!(out, "SESSION VALID for budgets").map_err(err);
+    }
+    writeln!(out, "SESSION INVALID for budgets: the verdicts below do not count").map_err(err)?;
+    for r in &validity.reasons {
+        writeln!(out, "  INVALID SESSION: {r}").map_err(err)?;
+    }
+    for r in owner_override {
+        writeln!(out, "  INVALID SESSION: owner override of the readiness gate ({r})").map_err(err)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn facts(ctx: &GpuContext) -> AdapterFacts {
@@ -321,15 +342,19 @@ fn perf_skeleton(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(
         });
     }
     let medians: Vec<f64> = runs.iter().map(|r| r.stats.median).collect();
+    let throttled: Vec<String> = runs.iter().filter(|r| run_throttled(r)).map(|r| r.path_name.clone()).collect();
+    // The skeleton is a stand-in workload: its noise is judged on its three runs without a retry.
+    let noisy: Vec<(String, f64)> = if planet_perf::gate::noise_needs_retry(&medians) {
+        vec![("skeleton-hello-triangle".into(), planet_perf::run_to_run_noise(&medians).unwrap_or(f64::NAN))]
+    } else {
+        Vec::new()
+    };
+    let validity = planet_perf::gate::validity(&throttled, &noisy);
+    session_verdict_line(out, &validity, &owner_override)?;
     writeln!(out, "run-to-run noise (max-min)/median: {:.3}", planet_perf::run_to_run_noise(&medians).unwrap_or(f64::NAN)).map_err(err)?;
     let scheme = planet_perf::query_power_scheme();
     for w in planet_perf::session_warnings(&facts(ctx), scheme.as_deref(), &runs, false) {
         writeln!(out, "WARNING (not valid for time budgets): {w}").map_err(err)?;
-    }
-    let throttled: Vec<String> = runs.iter().filter(|r| run_throttled(r)).map(|r| r.path_name.clone()).collect();
-    let validity = planet_perf::gate::validity(&throttled, &[]);
-    for r in &validity.reasons {
-        writeln!(out, "INVALID SESSION: {r}").map_err(err)?;
     }
     let json =
         planet_perf::report_json(&facts(ctx), planet_perf::query_power_scheme().as_deref(), &owner_override, &validity, &protocol, &runs);
