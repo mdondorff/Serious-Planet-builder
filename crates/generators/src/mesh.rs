@@ -58,17 +58,23 @@ pub fn mesh_key(map: &dyn FaceMapping, seed: u64, id: TileId, cells: u32, radius
 
 /// [`mesh_key`] with the construction constants as arguments, so tests can show that each one changes the key.
 pub fn mesh_key_with(map: &dyn FaceMapping, seed: u64, id: TileId, cells: u32, radius_m: f64, version: u32, skirt_fraction: f64) -> u64 {
-    mesh_key_chain(cache_key_field(&Reference(seed), map, id, cells), cells, radius_m, version, skirt_fraction)
+    let field = Reference(seed);
+    mesh_key_chain(cache_key_field(&field, map, id, cells), cells, body_params(&field, radius_m), version, skirt_fraction)
 }
 
-fn mesh_key_chain(height_key: u64, cells: u32, radius_m: f64, version: u32, skirt_fraction: f64) -> u64 {
-    hash_u64s(0x006d_6573, &[u64::from(version), height_key, u64::from(cells), radius_m.to_bits(), skirt_fraction.to_bits()])
+/// The body parameter hash of a field (ADR 0001, 0007): body id, seed, radius and reference surface.
+fn body_params(field: &dyn HeightField, radius_m: f64) -> u64 {
+    planet_world_def::body_params_hash(field.body(), field.seed(), radius_m, planet_world_def::SPHERE_SURFACE_ID)
+}
+
+fn mesh_key_chain(height_key: u64, cells: u32, body_params: u64, version: u32, skirt_fraction: f64) -> u64 {
+    hash_u64s(0x006d_6573, &[u64::from(version), height_key, u64::from(cells), body_params, skirt_fraction.to_bits()])
 }
 
 /// [`mesh_key`] for a height field: it chains the field's height key ([`cache_key_field`]), so [`Reference`] gives
 /// exactly [`mesh_key`] and any other field (other implementation id or version) gets other keys (ADR 0006).
 pub fn mesh_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> u64 {
-    mesh_key_chain(cache_key_field(field, map, id, cells), cells, radius_m, MESH_VERSION, SKIRT_FRACTION)
+    mesh_key_chain(cache_key_field(field, map, id, cells), cells, body_params(field, radius_m), MESH_VERSION, SKIRT_FRACTION)
 }
 
 /// [`mesh_key_field`] for many tiles of one field, mapping, grid size and radius: the string hashes of the field's
@@ -78,7 +84,8 @@ pub struct MeshKeyer {
     version: u64,
     inputs: u64,
     cells: u32,
-    radius_bits: u64,
+    body_params: u64,
+    body_words: [u64; 3],
     implementation_hash: u64,
     mapping_hash: u64,
 }
@@ -89,7 +96,8 @@ impl MeshKeyer {
             version: u64::from(field.version()),
             inputs: field.inputs_hash(),
             cells,
-            radius_bits: radius_m.to_bits(),
+            body_params: body_params(field, radius_m),
+            body_words: crate::height::body_key_words(field.body()),
             implementation_hash: hash_u64s(1, &crate::height::fold_str(field.implementation_id())),
             mapping_hash: hash_u64s(2, &crate::height::fold_str(map.id())),
         }
@@ -106,9 +114,12 @@ impl MeshKeyer {
                 u64::from(self.cells),
                 self.implementation_hash,
                 self.mapping_hash,
+                self.body_words[0],
+                self.body_words[1],
+                self.body_words[2],
             ],
         );
-        mesh_key_chain(height_key, self.cells, f64::from_bits(self.radius_bits), MESH_VERSION, SKIRT_FRACTION)
+        mesh_key_chain(height_key, self.cells, self.body_params, MESH_VERSION, SKIRT_FRACTION)
     }
 }
 

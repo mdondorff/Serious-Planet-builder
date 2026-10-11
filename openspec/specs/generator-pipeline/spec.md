@@ -113,7 +113,7 @@ Source: report §16
 - **THEN** the PNG contains six distinct face colours and no background pixels inside the net
 
 ### Requirement: GEN-010 Mesh keys and known answers
-A tile mesh SHALL carry a key covering everything its vertices depend on (tile height key, grid size, radius, skirt fraction and a mesh version), and the mesh version SHALL be bumped whenever vertex output changes for the same inputs. Known-answer hashes of committed meshes SHALL be identical on every platform and SHALL be asserted next to the version they belong to.
+A tile mesh SHALL carry a key covering everything its vertices depend on (tile height key, grid size, the body parameter hash with the radius, skirt fraction and a mesh version), and the mesh version SHALL be bumped whenever vertex output changes for the same inputs. Known-answer hashes of committed meshes SHALL be identical on every platform and SHALL be asserted next to the version they belong to.
 
 Verify: A
 Status: active
@@ -126,6 +126,21 @@ Source: ADR 0006, CON-14
 #### Scenario: Known answers
 - **WHEN** the committed meshes are generated
 - **THEN** their content hashes equal the committed values, and the test fails if the mesh version differs from the one the values belong to
+
+### Requirement: GEN-012 Body identity in keys
+Every height key and mesh key SHALL cover the identity and parameters of the body it belongs to (ADR 0001, 0007): the body id, the id of its reference surface and, for a mesh, the body parameter hash (id, seed, radius and reference surface). Two bodies SHALL never share a key for the same tile, even with equal seeds, inputs and radii, a field built directly from a seed SHALL stand for the single planet (`BodyId(0)`), and a key composition that gains an input SHALL bump `KEY_FORMAT_VERSION` and re-record the known answers, which the determinism manifest compares between operating systems.
+
+Verify: A
+Status: active
+Source: ADR 0001, ADR 0006, ADR 0007, M3 queue item 4
+
+#### Scenario: Body alone changes the key
+- **WHEN** two fields differ only in the body they describe
+- **THEN** their height keys and mesh keys differ, and the planet through the default equals the field built directly from the seed
+
+#### Scenario: Body parameters
+- **WHEN** the body id, seed, radius or reference surface changes
+- **THEN** the body parameter hash, and with it the mesh key, changes
 
 ### Requirement: GEN-011 Height bounds
 A height field SHALL report sound bounds `(min, max)` of its height over every spherical cap (centre direction, angular radius), never excluding a height the field takes inside the cap, and the bounds of small caps SHALL follow the local relief closely enough for node volumes to hug the terrain; the default is the field's global range.

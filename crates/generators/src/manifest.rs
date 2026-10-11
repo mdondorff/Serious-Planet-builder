@@ -6,8 +6,8 @@ use planet_core::cube::TangentWarp;
 use planet_core::hash::{hash_u64s, HASH_VERSION};
 use planet_core::{Face, Geo, ReferenceSurface, Sphere, TileId};
 
-use crate::height::{generate_tile, GENERATOR_VERSION, IMPLEMENTATION_ID};
-use crate::mesh::{tile_mesh, MESH_VERSION};
+use crate::height::{cache_key, generate_tile, GENERATOR_VERSION, IMPLEMENTATION_ID, KEY_FORMAT_VERSION};
+use crate::mesh::{mesh_key, tile_mesh, MESH_VERSION};
 
 /// Seed, grid size and radius of every manifest entry.
 pub const MANIFEST_SEED: u64 = 1;
@@ -44,7 +44,7 @@ fn manifest_geos() -> Vec<Geo> {
 /// The manifest text. Pure and single-threaded: the same build gives the same bytes on every platform (CON-14).
 pub fn determinism_manifest() -> String {
     let mut s = String::new();
-    s.push_str(&format!("version generator {GENERATOR_VERSION}\nversion hash {HASH_VERSION}\nversion mesh {MESH_VERSION}\n"));
+    s.push_str(&format!("version generator {GENERATOR_VERSION}\nversion hash {HASH_VERSION}\nversion mesh {MESH_VERSION}\nversion key {KEY_FORMAT_VERSION}\n"));
     s.push_str(&format!("version implementation {IMPLEMENTATION_ID}\n"));
     for id in manifest_tiles() {
         let key = format!("{}/{}/{}/{}", id.face().0, id.level(), id.x(), id.y());
@@ -52,6 +52,11 @@ pub fn determinism_manifest() -> String {
         s.push_str(&format!("height {key} {h:016x}\n"));
         let m = tile_mesh(MANIFEST_SEED, &TangentWarp, id, MANIFEST_RES, MANIFEST_RADIUS_M).content_hash();
         s.push_str(&format!("mesh {key} {m:016x}\n"));
+        // Cache keys (ADR 0006, 0018): the persistent key's inputs must agree on every platform too.
+        let hk = cache_key(&TangentWarp, MANIFEST_SEED, id, MANIFEST_RES);
+        s.push_str(&format!("heightkey {key} {hk:016x}\n"));
+        let mk = mesh_key(&TangentWarp, MANIFEST_SEED, id, MANIFEST_RES, MANIFEST_RADIUS_M);
+        s.push_str(&format!("meshkey {key} {mk:016x}\n"));
     }
     let sphere = Sphere { radius_m: MANIFEST_RADIUS_M };
     for (i, g) in manifest_geos().into_iter().enumerate() {
