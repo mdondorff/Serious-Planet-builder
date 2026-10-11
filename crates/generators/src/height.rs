@@ -8,7 +8,9 @@ use planet_core::cube::FaceMapping;
 use planet_core::hash::{hash_u64s, unit_f64, HASH_VERSION};
 use planet_core::{TileId, Vec3};
 pub use planet_world_def::BodyId;
-use planet_world_def::{single_planet_seed_read_hash, GenContext, MissingNode, SPHERE_SURFACE_ID};
+use planet_world_def::{
+    records_hash64, single_planet_seed_read_hash, single_planet_seed_records, GenContext, MissingNode, ReadRecord, SPHERE_SURFACE_ID,
+};
 
 /// Bump whenever any output of this module changes (ADR 0006).
 pub const GENERATOR_VERSION: u32 = 2;
@@ -217,6 +219,19 @@ pub trait HeightField: Sync {
     fn inputs_hash(&self) -> u64 {
         single_planet_seed_read_hash(self.seed())
     }
+    /// The typed reads behind [`inputs_hash`](HeightField::inputs_hash), for the 128-bit persistent keys (ADR 0018).
+    /// The default is the read set of a generator that reads only the seed of the single planet, matching the default
+    /// `inputs_hash`; a field built through a context returns that context's records.
+    fn read_records(&self) -> Vec<ReadRecord> {
+        single_planet_seed_records(self.seed())
+    }
+    /// [`read_records`](HeightField::read_records) for one tile: the field-wide reads plus what the tile's own spatial
+    /// queries read (the cells of its footprint and their margin, empty ones included; WDEF-005). A field that
+    /// [`reads_cells`](HeightField::reads_cells) must override this: it is the single source of both the 128-bit
+    /// persistent key and the 64-bit [`inputs_hash_for`](HeightField::inputs_hash_for).
+    fn read_records_for(&self, _tile: TileId, _map: &dyn FaceMapping) -> Vec<ReadRecord> {
+        self.read_records()
+    }
     /// Whether this field reads authored items through cell queries. Only then does [`inputs_hash_for`] differ from tile
     /// to tile; every other field has one hash for all tiles, which the batch keyer computes once.
     ///
@@ -224,15 +239,20 @@ pub trait HeightField: Sync {
     fn reads_cells(&self) -> bool {
         false
     }
-    /// [`inputs_hash`](HeightField::inputs_hash) for one tile (WDEF-005): the field-wide read set plus what the tile's own
-    /// spatial queries read (the cells of its footprint and their margin, empty ones included). A field that
-    /// [`reads_cells`](HeightField::reads_cells) must override this, or an edit in one cell would leave the keys of the
-    /// tiles that read it unchanged. The cell grid is the tangent-warp grid: `map` is the mapping the tile id was made
-    /// with, and a field that queries cells must refuse any other. The reads are declared here, at plan time, not
-    /// recorded while `height` runs: a generator that reads more than it declares would key wrongly, which only a
-    /// contract test over the generator can catch (learning 2026-10-11).
-    fn inputs_hash_for(&self, _tile: TileId, _map: &dyn FaceMapping) -> u64 {
-        self.inputs_hash()
+    /// [`inputs_hash`](HeightField::inputs_hash) for one tile (WDEF-005): the field-wide hash, or for a field that
+    /// [`reads_cells`](HeightField::reads_cells) the hash of its per-tile [`read_records_for`], so an edit in one cell
+    /// re-keys the tiles that read it in both key paths. The cell grid is the tangent-warp grid: `map` is the mapping the
+    /// tile id was made with, and a field that queries cells must refuse any other. The reads are declared here, at plan
+    /// time, not recorded while `height` runs: a generator that reads more than it declares would key wrongly, which only
+    /// a contract test over the generator can catch (learning 2026-10-11).
+    ///
+    /// [`read_records_for`]: HeightField::read_records_for
+    fn inputs_hash_for(&self, tile: TileId, map: &dyn FaceMapping) -> u64 {
+        if self.reads_cells() {
+            records_hash64(&self.read_records_for(tile, map))
+        } else {
+            self.inputs_hash()
+        }
     }
     /// The body this field describes; part of every height and mesh key (ADR 0001). A field built directly from a seed
     /// stands for the single planet.
@@ -386,14 +406,15 @@ pub(crate) fn body_key_words(field: &dyn HeightField) -> [u64; 3] {
 pub struct Bound<F: HeightField> {
     field: F,
     inputs: u64,
+    records: Vec<ReadRecord>,
     body: BodyId,
 }
 
 impl<F: HeightField> Bound<F> {
     /// Only generators in this crate build one, from the same context that produced the field's inputs: `inputs` must be
     /// that context's read set, or the key would name inputs the heights do not come from.
-    pub(crate) fn new(field: F, inputs: u64, body: BodyId) -> Bound<F> {
-        Bound { field, inputs, body }
+    pub(crate) fn new(field: F, ctx: &GenContext, body: BodyId) -> Bound<F> {
+        Bound { field, inputs: ctx.read_set_hash(), records: ctx.read_records(), body }
     }
 }
 
@@ -415,6 +436,9 @@ impl<F: HeightField> HeightField for Bound<F> {
     }
     fn inputs_hash(&self) -> u64 {
         self.inputs
+    }
+    fn read_records(&self) -> Vec<ReadRecord> {
+        self.records.clone()
     }
     fn body(&self) -> BodyId {
         self.body
@@ -450,6 +474,6 @@ impl HeightGenerator for ReferenceGenerator {
     }
     fn field(&self, ctx: &GenContext, body: BodyId) -> Result<Box<dyn HeightField>, MissingNode> {
         let seed = ctx.body_seed(body)?;
-        Ok(Box::new(Bound::new(Reference(seed), ctx.read_set_hash(), body)))
+        Ok(Box::new(Bound::new(Reference(seed), ctx, body)))
     }
 }
