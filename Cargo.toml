@@ -33,6 +33,7 @@ version = "0.0.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
+rust-version = "1.89"
 
 [workspace.dependencies]
 libm = "=0.2.16"

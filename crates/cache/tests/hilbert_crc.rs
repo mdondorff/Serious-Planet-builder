@@ -21,8 +21,10 @@ fn hilbert_known_answers_follow_the_standard_curve() {
     // Corners of a large grid, to catch overflow: the curve starts at (0, 0) and ends at (n-1, 0) or (0, n-1).
     assert_eq!(xy_to_d(28, 0, 0), 0);
     let last = (1u64 << 56) - 1;
-    let (x, y) = d_to_xy(28, last);
-    assert!((x, y) == ((1 << 28) - 1, 0) || (x, y) == (0, (1 << 28) - 1), "{x} {y}");
+    // Every order ends at the far corner of the bottom edge, (n - 1, 0).
+    assert_eq!(d_to_xy(28, last), ((1 << 28) - 1, 0));
+    assert_eq!(d_to_xy(31, (1u64 << 62) - 1), ((1u32 << 31) - 1, 0));
+    assert_eq!(xy_to_d(31, (1u32 << 31) - 1, 0), (1u64 << 62) - 1);
 }
 
 // spec: STRM-008
