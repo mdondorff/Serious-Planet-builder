@@ -1,0 +1,3 @@
+- [x] 1. SelectionCache, cached select and plan, equivalence test
+- [x] 2. Harness measures warm and cold plan time
+- [x] 3. Reviews, archive, status; owner reruns `cargo xtask perf`
