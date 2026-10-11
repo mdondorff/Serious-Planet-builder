@@ -196,7 +196,9 @@ pub(crate) fn layer_noise_bounds(seed: u64, layer: u64, octave: u32, centre: Vec
 
 /// A height field over unit directions. The reference generator is [`Reference`]; the test-only stress field
 /// `stress::Steep` exists behind the `stress` feature. Mesh and plan code take a field so stress tests can swap it
-/// without touching production paths. To be folded into the M3 `Generator` / `GenContext` design (ADR 0006).
+/// without touching production paths. Generators (`HeightGenerator`) build a field through a `GenContext`; production paths still
+/// build `Reference(seed)` directly (the planet's seed), which keys identically (`inputs_hash`). Plans for other bodies take
+/// their field from the generator (multi-body seams).
 pub trait HeightField: Sync {
     /// Height in metres at a unit direction.
     fn height(&self, dir: Vec3) -> f64;
@@ -330,8 +332,8 @@ pub fn cache_key(map: &dyn FaceMapping, seed: u64, id: TileId, res: u32) -> u64 
     cache_key_field(&Reference(seed), map, id, res)
 }
 
-/// [`cache_key`] for any height field: its version, implementation id and seed take the place of the reference
-/// generator's, so [`Reference`] gives exactly [`cache_key`].
+/// [`cache_key`] for any height field: its version, implementation id and input hash take the place of the
+/// reference generator's, so [`Reference`] gives exactly [`cache_key`].
 pub fn cache_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, res: u32) -> u64 {
     let mut v = vec![u64::from(field.version()), u64::from(HASH_VERSION), field.inputs_hash(), id.raw(), u64::from(res)];
     v.push(hash_u64s(1, &fold_str(field.implementation_id())));
@@ -381,7 +383,8 @@ impl<F: HeightField> HeightField for Bound<F> {
 }
 
 /// A height generator (CON-06): it reads the definition only through a [`GenContext`] and returns the pure field it
-/// describes. Open a fresh context per field: the field's key covers everything that context recorded. The inner loops
+/// describes. Open a fresh context per field: the field's key covers everything that context recorded, so a reused
+/// context would key a field by what was read before it. The inner loops
 /// then run on plain values, so reads are recorded once per tile or plan, not per sample.
 pub trait HeightGenerator {
     fn implementation_id(&self) -> &'static str;

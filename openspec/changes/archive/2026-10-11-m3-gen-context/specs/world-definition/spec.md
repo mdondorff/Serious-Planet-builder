@@ -12,7 +12,7 @@ Source: ADR 0006
 - **THEN** the node hashes and the definition hash are equal
 
 ### Requirement: WDEF-004 Read recording
-Generators SHALL read definition inputs only through a context that records every read with the hash of the node read; the hash of the recorded read set SHALL be what enters cache keys in place of the seed, a body's id SHALL be part of that read set, and a missing node SHALL be an error naming it. A field built directly from a seed SHALL key exactly like one built through a context over a definition with that seed.
+Generators SHALL read definition inputs only through a context that records every read with the hash of the node read; the hash of the recorded read set SHALL be what enters cache keys in place of the seed, a body's id SHALL be part of that read set, and a missing node SHALL be an error naming it. A field built directly from a seed (`Reference(seed)`, the single planet's seed) SHALL key exactly like one built through a context over a definition with that world seed for `BodyId(0)`; other bodies key by their derived seed and id, so their fields come from the generator.
 
 Verify: A
 Status: active
@@ -25,7 +25,3 @@ Source: CON-06, ADR 0006
 #### Scenario: Bodies
 - **WHEN** the same generator reads two bodies of one definition
 - **THEN** their keys differ
-
-#### Scenario: Bundles
-- **WHEN** a repro bundle records a definition hash this build cannot rebuild, or none
-- **THEN** replay refuses it with the hashes and what to do
