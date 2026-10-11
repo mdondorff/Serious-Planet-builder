@@ -339,14 +339,19 @@ pub fn cache_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
     hash_u64s(0x006b_6579, &v)
 }
 
-/// A field together with the read set of the context it was built from (see [`HeightGenerator`]).
+/// A field together with the read set of the context it was built from (see [`HeightGenerator`]). Its keys follow the
+/// read set, so a body other than the planet keys differently from a field built directly from the same seed with
+/// `Reference(seed)` (which stands for the planet): plans for other bodies must take their field from the generator
+/// (multi-body seams, next change).
 pub struct Bound<F: HeightField> {
     field: F,
     inputs: u64,
 }
 
 impl<F: HeightField> Bound<F> {
-    pub fn new(field: F, inputs: u64) -> Bound<F> {
+    /// Only generators in this crate build one, from the same context that produced the field's inputs: `inputs` must be
+    /// that context's read set, or the key would name inputs the heights do not come from.
+    pub(crate) fn new(field: F, inputs: u64) -> Bound<F> {
         Bound { field, inputs }
     }
 }
