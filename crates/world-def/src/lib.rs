@@ -5,6 +5,8 @@
 //! Generators read the definition only through a [`GenContext`], which records every read; the hash of the recorded
 //! read set enters cache keys (WDEF-004). Authored items, TOML files and the cell index follow in later M3 changes.
 
+pub mod toml_io;
+
 use planet_core::hash::{hash_u64s, HASH_VERSION};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -102,6 +104,11 @@ impl WorldDefinition {
 
     pub fn set_body_radius(&mut self, body: BodyId, radius_m: f64) {
         self.set(&body_radius_path(body), NodeValue::F64(radius_m));
+    }
+
+    /// Every node in path order.
+    pub fn nodes(&self) -> impl Iterator<Item = (&str, NodeValue)> {
+        self.nodes.iter().map(|(p, v)| (p.as_str(), *v))
     }
 
     pub fn get(&self, path: &str) -> Option<NodeValue> {
