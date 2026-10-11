@@ -21,7 +21,7 @@ Not there yet: the interactive editor window (`editor` runs headless with `--off
 
 ## Running it
 
-All modes are `cargo run -p planet -- <mode> [options]`; `planet` without arguments prints the full usage.
+All modes are `cargo run -p planet -- <mode> [options]`; an unknown mode or option prints the full usage (no arguments starts the editor skeleton).
 
 ```sh
 # Generate one height tile (face,level,x,y) as a PNG; prints content hash and cache key
@@ -48,7 +48,7 @@ Everything goes through `cargo xtask`:
 | `cargo xtask test fast` | tier A (unit/property) for changed crates |
 | `cargo xtask test` | tiers A + B on the software adapter |
 | `cargo xtask test gpu [--real]` | tier C goldens and debug views, on the software adapter or the discrete GPU |
-| `cargo xtask check` | rustfmt, clippy `-D warnings`, crate layering |
+| `cargo xtask check` | rustfmt, clippy `-D warnings`, crate layering, stale `pending.txt` entries |
 | `cargo xtask spec-lint` | requirement IDs, tiers and coverage |
 | `cargo xtask accept <milestone>` | milestone acceptance, e.g. `M2` |
 | `cargo xtask repro <bundle>` | replay a repro bundle |
