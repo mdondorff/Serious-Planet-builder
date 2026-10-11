@@ -8,12 +8,13 @@
 use crate::camera::{Camera, Frustum};
 use planet_core::cube::FaceMapping;
 use planet_core::{Face, PlanetFixed, Side, TileId, Vec3};
+use planet_generators::height::HeightField;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LodParams {
     pub radius_m: f64,
-    /// Highest terrain height above the sphere, metres (used for culling, not for selection).
+    /// Highest terrain height above the sphere, metres (padding for horizon and frustum culling).
     pub max_height_m: f64,
     pub fov_y_rad: f64,
     pub viewport_h_px: f64,
@@ -90,8 +91,12 @@ pub struct SelectedNode {
     pub tile: TileId,
     /// 0 = full detail, 1 = fully morphed to the parent's geometry.
     pub morph: f32,
-    /// Distance from the camera to the node's bounding sphere surface, metres.
+    /// Distance from the camera to the node's bounding volume (height bounds included), metres.
     pub distance_m: f64,
+    /// Vertex distances `(start, end)` between which the node morphs to its parent's grid (see
+    /// [`LodParams::morph_interval`]; the start also clears the height extent of the node and its neighbours).
+    pub morph_start_m: f64,
+    pub morph_end_m: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -117,12 +122,44 @@ pub fn bounding_sphere(map: &dyn FaceMapping, tile: TileId, p: &LodParams) -> (V
 
 /// Per-tile geometry used by selection: computed once per visited tile (each evaluation needs nine face-to-direction
 /// transforms with transcendentals) and shared by the horizon test, the frustum test, the split distance and the morph.
-/// Per-node height bounds (LOD-008) belong here too.
 #[derive(Clone, Copy, Debug)]
 struct TileGeom {
+    /// Unit direction of the tile centre.
+    dir: Vec3,
+    /// Tile centre on the reference sphere.
     centre: Vec3,
     radius: f64,
     angular_radius: f64,
+}
+
+/// Bounding volume of a tile including its height bounds (LOD-008): the sphere around the tile's column at mid-height
+/// that covers its horizontal extent (stretched to the highest point of the column) and half of its height range.
+#[derive(Clone, Copy, Debug)]
+struct Volume {
+    centre: Vec3,
+    radius: f64,
+    /// Half the height range, metres.
+    half_range: f64,
+    /// Upper height bound, metres.
+    max_height: f64,
+}
+
+fn tile_volume(g: &TileGeom, field: &dyn HeightField, p: &LodParams) -> Volume {
+    let (lo, hi) = field.height_bounds(g.dir, g.angular_radius);
+    let half_range = 0.5 * (hi - lo);
+    let centre = g.dir * (p.radius_m + 0.5 * (hi + lo));
+    // Terrain points sit further from the planet axis than reference points by up to the factor 1 + hi/R.
+    let horizontal = g.radius * (1.0 + hi.max(0.0) / p.radius_m);
+    Volume { centre, radius: extent(horizontal, half_range), half_range, max_height: hi }
+}
+
+/// Radius of a sphere covering a horizontal extent `a` and a vertical half range `b` (exactly `a` when `b` is zero).
+fn extent(a: f64, b: f64) -> f64 {
+    if b == 0.0 {
+        a
+    } else {
+        (a * a + b * b).sqrt()
+    }
 }
 
 fn tile_geom(map: &dyn FaceMapping, tile: TileId, p: &LodParams) -> TileGeom {
@@ -138,14 +175,16 @@ fn tile_geom(map: &dyn FaceMapping, tile: TileId, p: &LodParams) -> TileGeom {
         radius = radius.max((d * p.radius_m - centre).length());
         worst = worst.max(libm::atan2(centre_dir.cross(d).length(), centre_dir.dot(d)));
     }
-    TileGeom { centre, radius, angular_radius: worst * 1.001 }
+    TileGeom { dir: centre_dir, centre, radius, angular_radius: worst * 1.001 }
 }
 
 /// Memo of [`TileGeom`] by tile for one selection (only ever looked up by key, so hash order cannot leak into results).
 struct GeomCache<'a> {
     map: &'a dyn FaceMapping,
+    field: &'a dyn HeightField,
     p: &'a LodParams,
     tiles: std::collections::HashMap<TileId, TileGeom, std::hash::BuildHasherDefault<IdHasher>>,
+    volumes: std::collections::HashMap<TileId, Volume, std::hash::BuildHasherDefault<IdHasher>>,
 }
 
 impl GeomCache<'_> {
@@ -153,28 +192,97 @@ impl GeomCache<'_> {
         let (map, p) = (self.map, self.p);
         *self.tiles.entry(tile).or_insert_with(|| tile_geom(map, tile, p))
     }
-}
 
-fn surface_distance_geom(g: &TileGeom, camera: PlanetFixed) -> f64 {
-    ((camera.0 - g.centre).length() - g.radius).max(0.0)
+    /// Height-aware volume of a tile, computed on first use (the height bounds cost lattice lookups per octave).
+    fn volume(&mut self, tile: TileId) -> Volume {
+        if let Some(v) = self.volumes.get(&tile) {
+            return *v;
+        }
+        let g = self.get(tile);
+        let v = tile_volume(&g, self.field, self.p);
+        self.volumes.insert(tile, v);
+        v
+    }
+
+    /// Distance from the camera to the tile's volume, metres (0 inside).
+    fn distance(&mut self, tile: TileId, camera: PlanetFixed) -> f64 {
+        let v = self.volume(tile);
+        ((camera.0 - v.centre).length() - v.radius).max(0.0)
+    }
+
+    /// A lower bound of [`GeomCache::distance`] that needs no height bounds: every volume lies within the field's global
+    /// height range around the reference sphere.
+    fn distance_lower_bound(&mut self, tile: TileId, camera: PlanetFixed) -> f64 {
+        let g = self.get(tile);
+        let h = self.field.max_abs_height_m();
+        ((camera.0 - g.centre).length() - g.radius * (1.0 + h / self.p.radius_m) - h).max(0.0)
+    }
+
+    /// Radius of the volume of a tile of `level` with height extent `v` (the level's radius bound stands in for the exact
+    /// horizontal extent, which keeps the margin of [`LodParams::morph_interval`] where terrain is flat).
+    fn radius_bound(&self, level: u8, v: &Volume) -> f64 {
+        extent(self.p.node_radius_bound(level) * (1.0 + v.max_height.max(0.0) / self.p.radius_m), v.half_range)
+    }
 }
 
 fn children_of(t: TileId) -> [TileId; 4] {
     t.children().expect("below the maximum level")
 }
 
-/// Select the nodes to draw for a camera position, ignoring view direction (whole visible hemisphere).
+/// Terrain at height zero everywhere: selection by distance to the reference sphere (what selection did before LOD-008).
+struct Flat;
+
+impl HeightField for Flat {
+    fn height(&self, _: Vec3) -> f64 {
+        0.0
+    }
+    fn seed(&self) -> u64 {
+        0
+    }
+    fn implementation_id(&self) -> &'static str {
+        "flat"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        0.0
+    }
+    fn height_bounds(&self, _: Vec3, _: f64) -> (f64, f64) {
+        (0.0, 0.0)
+    }
+}
+
+/// Select the nodes to draw for a camera position over flat terrain, ignoring view direction (whole visible hemisphere).
 pub fn select_nodes(map: &dyn FaceMapping, camera: PlanetFixed, p: &LodParams) -> NodeSelection {
-    select_impl(map, camera, None, p)
+    select_impl(map, camera, None, &Flat, p)
 }
 
-/// Select the nodes to draw for a camera, also dropping nodes outside its side frustum planes (padded by the terrain height).
+/// Select the nodes to draw for a camera over flat terrain, also dropping nodes outside its side frustum planes (padded
+/// by the terrain height).
 pub fn select_nodes_in_view(map: &dyn FaceMapping, camera: &Camera, p: &LodParams) -> NodeSelection {
-    select_impl(map, camera.position, Some(camera.frustum()), p)
+    select_impl(map, camera.position, Some(camera.frustum()), &Flat, p)
 }
 
-fn select_impl(map: &dyn FaceMapping, camera: PlanetFixed, frustum: Option<Frustum>, p: &LodParams) -> NodeSelection {
-    let mut geoms = GeomCache { map, p, tiles: Default::default() };
+/// [`select_nodes`] over the terrain of `field`: distances go to bounding volumes that include each node's height
+/// bounds (LOD-008).
+pub fn select_nodes_field(map: &dyn FaceMapping, camera: PlanetFixed, field: &dyn HeightField, p: &LodParams) -> NodeSelection {
+    select_impl(map, camera, None, field, p)
+}
+
+/// [`select_nodes_in_view`] over the terrain of `field`.
+pub fn select_nodes_in_view_field(map: &dyn FaceMapping, camera: &Camera, field: &dyn HeightField, p: &LodParams) -> NodeSelection {
+    select_impl(map, camera.position, Some(camera.frustum()), field, p)
+}
+
+fn select_impl(
+    map: &dyn FaceMapping,
+    camera: PlanetFixed,
+    frustum: Option<Frustum>,
+    field: &dyn HeightField,
+    p: &LodParams,
+) -> NodeSelection {
+    let mut geoms = GeomCache { map, field, p, tiles: Default::default(), volumes: Default::default() };
     let mut leaves: BTreeSet<TileId> = BTreeSet::new();
     let mut stack: Vec<TileId> = Face::ALL.iter().map(|&f| TileId::new(f, 0, 0, 0).expect("root")).collect();
     while let Some(t) = stack.pop() {
@@ -187,7 +295,9 @@ fn select_impl(map: &dyn FaceMapping, camera: PlanetFixed, frustum: Option<Frust
                 continue;
             }
         }
-        if t.level() < p.max_level && surface_distance_geom(&g, camera) < p.split_distance(t.level()) {
+        let split = p.split_distance(t.level());
+        // The bound that needs no height bounds rules most tiles out before the bounds are computed.
+        if t.level() < p.max_level && geoms.distance_lower_bound(t, camera) < split && geoms.distance(t, camera) < split {
             stack.extend(children_of(t));
         } else {
             leaves.insert(t);
@@ -197,18 +307,43 @@ fn select_impl(map: &dyn FaceMapping, camera: PlanetFixed, frustum: Option<Frust
     let nodes = leaves
         .iter()
         .map(|&tile| {
-            let distance_m = surface_distance_geom(&geoms.get(tile), camera);
-            let morph = match tile.parent() {
-                None => 0.0,
+            let distance_m = geoms.distance(tile, camera);
+            let (morph, morph_start_m, morph_end_m) = match tile.parent() {
+                None => (0.0, 1.0e30, 1.0e30),
                 Some(parent) => {
-                    let d = surface_distance_geom(&geoms.get(parent), camera) / p.split_distance(parent.level());
-                    ((d - (1.0 - p.morph_band)) / p.morph_band).clamp(0.0, 1.0)
+                    let d = geoms.distance(parent, camera) / p.split_distance(parent.level());
+                    let morph = ((d - (1.0 - p.morph_band)) / p.morph_band).clamp(0.0, 1.0);
+                    let (start, end) = morph_interval_for(&mut geoms, tile);
+                    (morph, start, end)
                 }
             };
-            SelectedNode { tile, morph: morph as f32, distance_m }
+            SelectedNode { tile, morph: morph as f32, distance_m, morph_start_m, morph_end_m }
         })
         .collect();
     NodeSelection { nodes }
+}
+
+/// The morph interval of a leaf: [`LodParams::morph_interval`] with the margin for the extent of the node and its
+/// same-level neighbours taken from their height bounds. A vertex of the leaf on a border with a finer neighbour is
+/// up to two bounding radii of the neighbour's volume further away than that volume's surface, and must not have started
+/// to morph by then.
+fn morph_interval_for(geoms: &mut GeomCache, tile: TileId) -> (f64, f64) {
+    let p = geoms.p;
+    let level = tile.level();
+    let end = p.split_distance(level - 1);
+    let base = (1.0 - p.morph_band) * end;
+    let split = p.split_distance(level);
+    let h = geoms.field.max_abs_height_m();
+    // Even the largest possible volume radius leaves the base start in force: no bounds needed.
+    if split + 2.0 * (p.node_radius_bound(level) * (1.0 + h / p.radius_m) + h) <= base {
+        return (base, end);
+    }
+    let mut rho = 0.0f64;
+    for side in Side::ALL {
+        let v = geoms.volume(tile.neighbor(geoms.map, side));
+        rho = rho.max(geoms.radius_bound(level, &v));
+    }
+    (base.max(split + 2.0 * rho), end)
 }
 
 /// Hasher for tile ids (already well-mixed bit patterns): one multiply, no SipHash.

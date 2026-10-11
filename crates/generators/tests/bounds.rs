@@ -45,15 +45,17 @@ fn sound(field: &dyn HeightField, seed: u64) -> (f64, f64) {
     (worst_margin, width_small)
 }
 
-// spec: LOD-008
+// spec: GEN-011
 #[test]
 fn reference_bounds_hold_for_every_point_of_random_caps_and_are_tight_for_small_caps() {
     let (margin, width_small) = sound(&Reference(1), 11);
-    eprintln!("reference: smallest distance of a height to its bound {margin:.6} m, widest bound of a cap under 2e-5 rad {width_small:.1} m");
+    eprintln!(
+        "reference: smallest distance of a height to its bound {margin:.6} m, widest bound of a cap under 2e-5 rad {width_small:.1} m"
+    );
     assert!(width_small < 40.0, "bounds of a 130 m cap are {width_small} m wide: useless for node volumes");
 }
 
-// spec: LOD-008
+// spec: GEN-011
 // spec: TEST-015
 #[test]
 fn steep_bounds_hold_for_every_point_of_random_caps_and_are_tight_for_small_caps() {
@@ -63,7 +65,7 @@ fn steep_bounds_hold_for_every_point_of_random_caps_and_are_tight_for_small_caps
     assert!(width_small < 2000.0, "bounds of a 130 m cap are {width_small} m wide: useless for node volumes");
 }
 
-// spec: LOD-008
+// spec: GEN-011
 #[test]
 fn the_default_bounds_are_the_global_range() {
     struct Flat;

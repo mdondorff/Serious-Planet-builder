@@ -290,7 +290,7 @@ fn nodes_appear_where_their_vertices_project() {
 #[test]
 fn gpu_morph_values_match_the_cpu_formula_at_projected_vertices() {
     // Oracle for the vertex-stage morph: read the morph view at the pixel where a vertex projects and compare with the
-    // f64 formula on the vertex's height-free reference position. A misread attribute (garbage ref_pos) fails nearly all.
+    // f64 formula on the vertex position. A misread attribute (garbage pos) fails nearly all.
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     for index in [2usize, 3, 4] {
         let (name, plan) = plan_for(index, TerrainView::Morph);
@@ -314,8 +314,8 @@ fn gpu_morph_values_match_the_cpu_formula_at_projected_vertices() {
                     continue;
                 }
                 let (px, py) = (((x * 0.5 + 0.5) * f64::from(SIZE.0)) as u32, ((0.5 - y * 0.5) * f64::from(SIZE.1)) as u32);
-                let reference = d.origin.0 - plan.camera.position.0
-                    + Vec3::new(f64::from(v.ref_pos[0]), f64::from(v.ref_pos[1]), f64::from(v.ref_pos[2]));
+                let reference =
+                    d.origin.0 - plan.camera.position.0 + Vec3::new(f64::from(v.pos[0]), f64::from(v.pos[1]), f64::from(v.pos[2]));
                 let expected =
                     ((reference.length() - f64::from(d.morph_start_m)) / f64::from(d.morph_end_m - d.morph_start_m)).clamp(0.0, 1.0);
                 let got = f64::from(img.pixel(px, py)[0]) / 255.0;

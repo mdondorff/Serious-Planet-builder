@@ -12,7 +12,8 @@ use planet_testkit::Image;
 
 const R: f64 = 6_371_000.0;
 const SIZE: (u32, u32) = (128, 96);
-const CELLS: u32 = 16;
+/// The steep field needs few cells per tile and a large split distance for a crack-free morph interval to exist.
+const CELLS: u32 = 4;
 const STEEP: Steep = Steep(1);
 
 /// Pixels whose view ray hits the sphere just below the lowest steep terrain but show the background.
@@ -48,7 +49,7 @@ fn holes(plan: &TerrainPlan, img: &Image) -> Vec<(u32, u32)> {
 fn ten_scripted_views_on_steep_terrain_have_no_holes() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     eprintln!("{}", ctx.adapter_log_line());
-    let lod = LodParams { cells: CELLS, viewport_h_px: f64::from(SIZE.1), tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() };
+    let lod = LodParams { cells: CELLS, viewport_h_px: 2.0 * f64::from(SIZE.1), tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() };
     for (name, camera) in scripted_views_field(R, f64::from(SIZE.0) / f64::from(SIZE.1), &STEEP) {
         let req =
             TerrainRequest { camera, size: SIZE, view: TerrainView::TileId, lod: lod.clone(), face_mapping: "tangent-v1".into(), seed: 1 };

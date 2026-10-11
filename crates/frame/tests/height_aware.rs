@@ -13,15 +13,20 @@ use planet_generators::stress::Steep;
 const R: f64 = 6_371_000.0;
 const NEAR: f64 = 0.1;
 
-fn small_params() -> LodParams {
+fn reference_params() -> LodParams {
     LodParams { cells: 16, viewport_h_px: 96.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() }
+}
+
+/// The steep field's relief at tile scale needs a larger ratio of split distance to tile size than the reference
+/// field's, or no crack-free morph interval exists (the plan rejects such parameters).
+fn steep_params() -> LodParams {
+    LodParams { cells: 4, viewport_h_px: 192.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() }
 }
 
 /// The leaf's grid vertices as the shader draws them (morphed by their distance to the camera), camera-relative, f64.
 fn drawn_vertices(field: &dyn HeightField, d: &TerrainDraw, cam: PlanetFixed, cells: u32) -> Vec<Vec3> {
     let mesh = tile_mesh_field(field, &TangentWarp, d.tile, cells, R);
-    mesh
-        .vertices
+    mesh.vertices
         .iter()
         .map(|v| {
             let at = |p: [f32; 3]| mesh.origin.0 + Vec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2]));
@@ -104,9 +109,8 @@ fn drawn_surface_offset(drawn: &[Vec3], cam: PlanetFixed, cells: u32) -> Option<
     best
 }
 
-fn check_field(field: &dyn HeightField, label: &str) {
+fn check_field(field: &dyn HeightField, label: &str, params: LodParams) {
     let map = TangentWarp;
-    let params = small_params();
     let mut failures = Vec::new();
     for (name, cam) in scripted_views_field(R, 4.0 / 3.0, field) {
         let req = TerrainRequest {
@@ -138,7 +142,10 @@ fn check_field(field: &dyn HeightField, label: &str) {
         let above_terrain = cam.position.0.length() - (R + field.height(dir));
         let spacing = R * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << d.level) / f64::from(params.cells);
         let px = spacing * params.viewport_h_px / (2.0 * libm::tan(60f64.to_radians() / 2.0) * above_terrain.max(NEAR));
-        eprintln!("{label} {name}: leaf level {}, drawn surface {:.3} m below the camera, {above_terrain:.1} m above terrain, {px:.2} px", d.level, -s);
+        eprintln!(
+            "{label} {name}: leaf level {}, drawn surface {:.3} m below the camera, {above_terrain:.1} m above terrain, {px:.2} px",
+            d.level, -s
+        );
         if s > -NEAR {
             failures.push(format!(
                 "{label} {name}: camera is {:.3} m above the drawn surface of leaf {:?} (level {}); need at least the near plane {NEAR} m",
@@ -150,7 +157,7 @@ fn check_field(field: &dyn HeightField, label: &str) {
         let mut nearest = distance_to_drawn_surface(&drawn, params.cells);
         for other in plan.nodes.iter().filter(|o| o.tile != d.tile) {
             let reach = 2.0 * params.node_radius_bound(other.level);
-            if (other.origin.0 - cam.position.0).length() < reach + 1000.0 {
+            if (other.origin.0 - cam.position.0).length() < 1.5 * reach {
                 let v = drawn_vertices(field, other, cam.position, params.cells);
                 nearest = nearest.min(distance_to_drawn_surface(&v, params.cells));
             }
@@ -174,12 +181,27 @@ fn check_field(field: &dyn HeightField, label: &str) {
 // spec: LOD-008
 #[test]
 fn camera_is_above_the_drawn_surface_in_every_scripted_view_on_the_reference_field() {
-    check_field(&Reference(1), "reference");
+    check_field(&Reference(1), "reference", reference_params());
 }
 
 // spec: LOD-008
 // spec: TEST-015
 #[test]
 fn camera_is_above_the_drawn_surface_in_every_scripted_view_on_the_steep_field() {
-    check_field(&Steep(1), "steep");
+    check_field(&Steep(1), "steep", steep_params());
+}
+
+// spec: LOD-008
+#[test]
+fn terrain_too_steep_for_the_parameters_is_a_plan_error_naming_the_fix() {
+    // Production-like parameters (cells 32, 240 pixels of tile detail per ratio) leave the steep field's neighbourhoods no
+    // crack-free morph interval at ground level: the plan must say so, not narrow the interval.
+    let field = Steep(1);
+    let lod = LodParams { cells: 32, viewport_h_px: 1440.0, tau_px: 6.0, max_level: 26, ..LodParams::earth_1080p() };
+    let (name, cam) = scripted_views_field(R, 16.0 / 9.0, &field)[5];
+    let req = TerrainRequest { camera: cam, size: (256, 144), view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 1 };
+    let e = plan_terrain_field(&req, &field).expect_err(name).to_string();
+    assert!(e.contains("morph interval") && e.contains("viewport_h_px / tau_px 240") && e.contains("reduce cells"), "{e}");
+    // The reference field plans the same request.
+    assert!(plan_terrain_field(&req, &Reference(1)).is_ok());
 }
