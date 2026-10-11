@@ -32,6 +32,13 @@ fn contract(g: &dyn HeightGenerator, direct: &dyn HeightField) {
     assert_eq!(key(f.as_ref()), key(again.as_ref()));
     // It is the field built directly from the seed, and keys like it.
     assert_eq!(f.height(d).to_bits(), direct.height(d).to_bits());
+    // Every field method agrees with the direct field, and the key's inputs are those of the seed the field uses.
+    let caps = [(d, 1e-3), (Vec3::new(1.0, 0.0, 0.0), 1e-6)];
+    for (c, a) in caps {
+        assert_eq!(f.height_bounds(c, a), direct.height_bounds(c, a));
+    }
+    assert_eq!(f.max_abs_height_m(), direct.max_abs_height_m());
+    assert_eq!(f.inputs_hash(), planet_world_def::single_planet_seed_read_hash(f.seed()));
     assert_eq!(f.implementation_id(), g.implementation_id());
     assert_eq!(f.version(), g.version());
     assert_eq!(key(f.as_ref()), key(direct));

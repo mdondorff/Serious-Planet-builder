@@ -18,10 +18,18 @@ impl BodyId {
 }
 
 /// One value of a definition: what a generator can read and what a read set records.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub enum NodeValue {
     U64(u64),
     F64(f64),
+}
+
+/// Equality is bit equality, the same relation the hash uses: `0.0` and `-0.0` differ, a NaN equals itself, so that
+/// equal definitions and equal hashes always agree.
+impl PartialEq for NodeValue {
+    fn eq(&self, other: &NodeValue) -> bool {
+        self.words() == other.words()
+    }
 }
 
 impl NodeValue {
@@ -85,7 +93,10 @@ impl WorldDefinition {
         d
     }
 
+    /// Set a node. Paths under `derived.` are reserved for values computed from nodes (read sets record them) and
+    /// panic here: a stored node must never share a path with a derived one.
     pub fn set(&mut self, path: &str, value: NodeValue) {
+        assert!(!path.starts_with("derived."), "the path '{path}' is in the reserved derived namespace");
         self.nodes.insert(path.to_string(), value);
     }
 
@@ -112,8 +123,10 @@ pub fn body_radius_path(body: BodyId) -> NodePath {
     format!("body.{}.radius_m", body.0)
 }
 
+/// Path under which the seed derived for a body is recorded in a read set. It lives in its own `derived.` namespace,
+/// which definitions cannot set (see [`WorldDefinition::set`]), so it can never collide with a stored node.
 pub fn body_seed_path(body: BodyId) -> NodePath {
-    format!("body.{}.seed", body.0)
+    format!("derived.body.{}.seed", body.0)
 }
 
 /// A read that failed: the node is missing from the definition.
@@ -257,7 +270,10 @@ mod tests {
         let reads = ctx.reads();
         assert_eq!(reads.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), ["body.0.radius_m"]);
         ctx.body_seed(BodyId(2)).unwrap();
-        assert_eq!(ctx.reads().iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), ["body.0.radius_m", "body.2.seed", "world.seed"]);
+        assert_eq!(
+            ctx.reads().iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(),
+            ["body.0.radius_m", "derived.body.2.seed", "world.seed"]
+        );
     }
 
     // spec: WDEF-004
@@ -268,6 +284,22 @@ mod tests {
         ctx.body_seed(BodyId::PLANET).unwrap();
         assert_eq!(ctx.read_set_hash(), single_planet_seed_read_hash(42));
         assert_ne!(single_planet_seed_read_hash(42), single_planet_seed_read_hash(43));
+    }
+
+    // spec: WDEF-003
+    #[test]
+    fn equality_and_hash_agree_for_signed_zero_and_nan() {
+        let (a, b) = (WorldDefinition::single_planet(0.0, 1), WorldDefinition::single_planet(-0.0, 1));
+        assert_eq!(a == b, a.hash() == b.hash());
+        let (n, m) = (WorldDefinition::single_planet(f64::NAN, 1), WorldDefinition::single_planet(f64::NAN, 1));
+        assert!(n == m && n.hash() == m.hash());
+    }
+
+    // spec: WDEF-004
+    #[test]
+    #[should_panic(expected = "reserved derived namespace")]
+    fn stored_nodes_cannot_use_the_derived_namespace() {
+        WorldDefinition::new(1).set("derived.body.0.seed", NodeValue::U64(99));
     }
 
     #[test]
