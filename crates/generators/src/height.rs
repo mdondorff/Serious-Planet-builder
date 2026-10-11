@@ -8,7 +8,9 @@ use planet_core::cube::FaceMapping;
 use planet_core::hash::{hash_u64s, unit_f64, HASH_VERSION};
 use planet_core::{TileId, Vec3};
 pub use planet_world_def::BodyId;
-use planet_world_def::{single_planet_seed_read_hash, single_planet_seed_records, GenContext, MissingNode, ReadRecord, SPHERE_SURFACE_ID};
+use planet_world_def::{
+    records_hash64, single_planet_seed_read_hash, single_planet_seed_records, GenContext, MissingNode, ReadRecord, SPHERE_SURFACE_ID,
+};
 
 /// Bump whenever any output of this module changes (ADR 0006).
 pub const GENERATOR_VERSION: u32 = 2;
@@ -223,8 +225,10 @@ pub trait HeightField: Sync {
     fn read_records(&self) -> Vec<ReadRecord> {
         single_planet_seed_records(self.seed())
     }
-    /// [`read_records`](HeightField::read_records) for one tile, the typed form of
-    /// [`inputs_hash_for`](HeightField::inputs_hash_for): a field that reads cells must override both.
+    /// [`read_records`](HeightField::read_records) for one tile: the field-wide reads plus what the tile's own spatial
+    /// queries read (the cells of its footprint and their margin, empty ones included; WDEF-005). A field that
+    /// [`reads_cells`](HeightField::reads_cells) must override this: it is the single source of both the 128-bit
+    /// persistent key and the 64-bit [`inputs_hash_for`](HeightField::inputs_hash_for).
     fn read_records_for(&self, _tile: TileId, _map: &dyn FaceMapping) -> Vec<ReadRecord> {
         self.read_records()
     }
@@ -235,15 +239,20 @@ pub trait HeightField: Sync {
     fn reads_cells(&self) -> bool {
         false
     }
-    /// [`inputs_hash`](HeightField::inputs_hash) for one tile (WDEF-005): the field-wide read set plus what the tile's own
-    /// spatial queries read (the cells of its footprint and their margin, empty ones included). A field that
-    /// [`reads_cells`](HeightField::reads_cells) must override this, or an edit in one cell would leave the keys of the
-    /// tiles that read it unchanged. The cell grid is the tangent-warp grid: `map` is the mapping the tile id was made
-    /// with, and a field that queries cells must refuse any other. The reads are declared here, at plan time, not
-    /// recorded while `height` runs: a generator that reads more than it declares would key wrongly, which only a
-    /// contract test over the generator can catch (learning 2026-10-11).
-    fn inputs_hash_for(&self, _tile: TileId, _map: &dyn FaceMapping) -> u64 {
-        self.inputs_hash()
+    /// [`inputs_hash`](HeightField::inputs_hash) for one tile (WDEF-005): the field-wide hash, or for a field that
+    /// [`reads_cells`](HeightField::reads_cells) the hash of its per-tile [`read_records_for`], so an edit in one cell
+    /// re-keys the tiles that read it in both key paths. The cell grid is the tangent-warp grid: `map` is the mapping the
+    /// tile id was made with, and a field that queries cells must refuse any other. The reads are declared here, at plan
+    /// time, not recorded while `height` runs: a generator that reads more than it declares would key wrongly, which only
+    /// a contract test over the generator can catch (learning 2026-10-11).
+    ///
+    /// [`read_records_for`]: HeightField::read_records_for
+    fn inputs_hash_for(&self, tile: TileId, map: &dyn FaceMapping) -> u64 {
+        if self.reads_cells() {
+            records_hash64(&self.read_records_for(tile, map))
+        } else {
+            self.inputs_hash()
+        }
     }
     /// The body this field describes; part of every height and mesh key (ADR 0001). A field built directly from a seed
     /// stands for the single planet.

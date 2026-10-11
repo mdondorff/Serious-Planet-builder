@@ -16,7 +16,8 @@ use planet_world_def::cells::ItemEntry;
 use planet_world_def::{BodyId, NodeValue, ReadRecord};
 
 /// Version of the encoding. Changing the encoding bumps this and invalidates every stored entry; it never aliases one.
-pub const KEY_FORMAT_TAG: u8 = 1;
+/// History: 1 = first layout; 2 = a presence byte before the source key (a missing source and an all-zero key differ).
+pub const KEY_FORMAT_TAG: u8 = 2;
 
 const KEY_CONTEXT: &str = "planet-builder cache key v1";
 const NODE_CONTEXT: &str = "planet-builder node hash v1";
@@ -97,8 +98,13 @@ pub struct KeyInputs {
     pub reads: Vec<ReadEntry>,
 }
 
+/// A length that must fit the encoding's `u32` prefix; a longer part would alias another input, so it fails loudly.
+fn len32(len: usize) -> [u8; 4] {
+    u32::try_from(len).expect("a key part longer than u32::MAX bytes").to_le_bytes()
+}
+
 fn put_str(out: &mut Vec<u8>, s: &str) {
-    out.extend_from_slice(&(s.len() as u32).to_le_bytes());
+    out.extend_from_slice(&len32(s.len()));
     out.extend_from_slice(s.as_bytes());
 }
 
@@ -138,8 +144,8 @@ pub fn body_params_hash128(body: BodyId, seed: u64, radius_m: f64, surface_id: &
 /// result is the hash of the empty input, so a query that found nothing is still a read whose result can change.
 pub fn query_result_hash128(items: &[ItemEntry]) -> [u8; 16] {
     let mut sorted: Vec<&ItemEntry> = items.iter().collect();
-    sorted.sort_by_key(|e| e.0);
-    let mut m = Vec::with_capacity(sorted.len() * 40);
+    sorted.sort_unstable();
+    let mut m = Vec::with_capacity(sorted.len() * 48);
     for (id, content, dir) in sorted {
         m.extend_from_slice(&id.to_le_bytes());
         m.extend_from_slice(&content.to_le_bytes());
@@ -176,11 +182,20 @@ pub fn encode(inputs: &KeyInputs) -> Vec<u8> {
     out.extend_from_slice(&inputs.body.0.to_le_bytes());
     out.extend_from_slice(&inputs.body_params);
     out.extend_from_slice(&inputs.tile.raw().to_le_bytes());
-    out.extend_from_slice(&inputs.source.unwrap_or(CacheKey::NONE).0);
-    out.extend_from_slice(&(inputs.output_params.len() as u32).to_le_bytes());
+    match inputs.source {
+        Some(k) => {
+            out.push(1);
+            out.extend_from_slice(&k.0);
+        }
+        None => {
+            out.push(0);
+            out.extend_from_slice(&[0; 16]);
+        }
+    }
+    out.extend_from_slice(&len32(inputs.output_params.len()));
     for (tag, bytes) in &inputs.output_params {
         out.push(*tag);
-        out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(&len32(bytes.len()));
         out.extend_from_slice(bytes);
     }
     // Nodes first, sorted by path bytes; then queries, sorted by (kind, parameter bytes); duplicates collapse.
@@ -196,7 +211,8 @@ pub fn encode(inputs: &KeyInputs) -> Vec<u8> {
     nodes.dedup();
     queries.sort_unstable();
     queries.dedup();
-    out.extend_from_slice(&((nodes.len() + queries.len()) as u32).to_le_bytes());
+    debug_assert!(nodes.windows(2).all(|w| w[0].0 != w[1].0), "one node path read with two different hashes");
+    out.extend_from_slice(&len32(nodes.len() + queries.len()));
     for (path, hash) in nodes {
         out.push(0x01);
         put_str(&mut out, path);
@@ -205,7 +221,7 @@ pub fn encode(inputs: &KeyInputs) -> Vec<u8> {
     for (kind, params, result) in queries {
         out.push(0x02);
         out.push(kind);
-        out.extend_from_slice(&(params.len() as u32).to_le_bytes());
+        out.extend_from_slice(&len32(params.len()));
         out.extend_from_slice(params);
         out.extend_from_slice(result);
     }
@@ -223,6 +239,15 @@ pub const PARAM_SKIRT_FRACTION: u8 = 2;
 pub const PARAM_MESH_VERSION: u8 = 3;
 
 fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> KeyInputs {
+    assert!(
+        radius_m.is_finite() && radius_m > 0.0,
+        "the body radius of a key must be the finite positive radius of the definition, got {radius_m}"
+    );
+    let reads: Vec<ReadEntry> = field.read_records_for(tile, map).iter().map(read_entry).collect();
+    assert!(
+        !field.reads_cells() || reads.iter().any(|r| matches!(r, ReadEntry::Query { .. })),
+        "a field that reads cells must report its cell queries in read_records_for"
+    );
     KeyInputs {
         kind,
         hash_version: planet_core::hash::HASH_VERSION,
@@ -234,7 +259,7 @@ fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile
         tile,
         source: None,
         output_params: BTreeMap::new(),
-        reads: field.read_records_for(tile, map).iter().map(read_entry).collect(),
+        reads,
     }
 }
 

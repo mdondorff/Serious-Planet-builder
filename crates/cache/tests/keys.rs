@@ -5,10 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use planet_cache::key::*;
 use planet_core::cube::TangentWarp;
 use planet_core::hash::HASH_VERSION;
-use planet_core::{Face, TileId, Vec3};
+use planet_core::{Face, FaceMapping, TileId, Vec3};
 use planet_generators::height::{HeightField, HeightGenerator, Reference, ReferenceGenerator};
 use planet_world_def::cells::{cell_of, ItemEntry};
-use planet_world_def::{BodyId, GenContext, NodeValue, WorldDefinition};
+use planet_world_def::{BodyId, GenContext, NodeValue, ReadRecord, WorldDefinition};
 
 const R: f64 = 6_371_000.0;
 
@@ -248,7 +248,7 @@ fn the_keys_of_a_planet_a_moon_and_a_mesh_follow_their_body_their_source_and_the
 // spec: STRM-003
 #[test]
 fn known_answers_pin_the_encoding_and_the_hashes_on_every_platform() {
-    assert_eq!(KEY_FORMAT_TAG, 1, "a new encoding needs a new tag and new known answers");
+    assert_eq!(KEY_FORMAT_TAG, 2, "a new encoding needs a new tag and new known answers");
     assert_eq!(HASH_VERSION, 1, "known answers belong to this hash version");
     assert_eq!(cache_key(&base()).to_hex(), KNOWN_BASE);
     let planet = Reference(7);
@@ -263,9 +263,9 @@ fn hex(b: [u8; 16]) -> String {
     CacheKey(b).to_hex()
 }
 
-const KNOWN_BASE: &str = "2abeb3edaf3d2edad125d27921cb5232";
-const KNOWN_HEIGHT: &str = "53f87da2f39e79bf0a9d2ca916be5b20";
-const KNOWN_MESH: &str = "7d33f902f2d0940da34848868b2ef824";
+const KNOWN_BASE: &str = "b00fa2b4b0f9accc87be74b4dd9d40ca";
+const KNOWN_HEIGHT: &str = "340480159ae2ca791db08d1cae1232ce";
+const KNOWN_MESH: &str = "205f5e7fe133b4a22ea61bc66eb023b6";
 const KNOWN_NODE: &str = "dd934e9e858a828bb73c45e8a4eb4d45";
 const KNOWN_BODY: &str = "91f0cebc78907779e2f87196650d468e";
 const KNOWN_EMPTY_QUERY: &str = "a97668a9d9614a3f4a73f2fceae97219";
@@ -276,3 +276,152 @@ fn the_dependency_is_the_official_blake3() {
     // Independent of this crate's encoding: the official BLAKE3 hash of the empty input.
     assert_eq!(blake3::hash(b"").to_hex().as_str(), "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262");
 }
+
+/// `Reference(7)` that reads the items under each tile's footprint, as a stamp generator would. It overrides only
+/// `reads_cells` and `read_records_for`: the 64-bit per-tile hash comes from the same records.
+struct Stamped<'a> {
+    inner: Reference,
+    def: &'a WorldDefinition,
+}
+
+impl HeightField for Stamped<'_> {
+    fn height(&self, d: Vec3) -> f64 {
+        self.inner.height(d)
+    }
+    fn seed(&self) -> u64 {
+        self.inner.seed()
+    }
+    fn implementation_id(&self) -> &'static str {
+        "stamped-test"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        self.inner.max_abs_height_m()
+    }
+    fn reads_cells(&self) -> bool {
+        true
+    }
+    fn read_records_for(&self, tile: TileId, _map: &dyn FaceMapping) -> Vec<ReadRecord> {
+        let ctx = GenContext::new(self.def);
+        ctx.body_seed(BodyId::PLANET).unwrap();
+        ctx.query_tile(BodyId::PLANET, tile, 1, 64).unwrap();
+        ctx.read_records()
+    }
+}
+
+/// A field that says it reads cells but reports none: the persistent key refuses to build.
+struct Liar;
+
+impl HeightField for Liar {
+    fn height(&self, d: Vec3) -> f64 {
+        Reference(7).height(d)
+    }
+    fn seed(&self) -> u64 {
+        7
+    }
+    fn implementation_id(&self) -> &'static str {
+        "liar"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        1.0
+    }
+    fn reads_cells(&self) -> bool {
+        true
+    }
+}
+
+// spec: STRM-003
+#[test]
+fn an_item_edit_changes_the_persistent_keys_of_exactly_the_tiles_that_read_its_cell() {
+    let item_at = dir(1.0, 0.2, 0.1);
+    let elsewhere = dir(-1.0, 0.3, 0.2);
+    let tiles = [
+        TileId::from_direction(&TangentWarp, item_at, 11),
+        TileId::from_direction(&TangentWarp, item_at, 7),
+        TileId::from_direction(&TangentWarp, elsewhere, 11),
+    ];
+    let keys = |d: &WorldDefinition| {
+        let f = Stamped { inner: Reference(7), def: d };
+        tiles.map(|t| (height_key(&f, &TangentWarp, t, 16, R), mesh_key(&f, &TangentWarp, t, 16, R), f.inputs_hash_for(t, &TangentWarp)))
+    };
+    let plain = WorldDefinition::single_planet(R, 7);
+    let mut edited = plain.clone();
+    edited.put_item(BodyId::PLANET, 1, item_at, 5).unwrap();
+    let (before, after) = (keys(&plain), keys(&edited));
+    for i in 0..3 {
+        let affected = i < 2;
+        assert_eq!(before[i].0 != after[i].0, affected, "height key, tile {i}");
+        assert_eq!(before[i].1 != after[i].1, affected, "mesh key, tile {i}");
+        assert_eq!(before[i].2 != after[i].2, affected, "64-bit per-tile hash, tile {i}: both key paths follow the same reads");
+    }
+    edited.remove_item(BodyId::PLANET, 1);
+    assert_eq!(keys(&edited), before);
+}
+
+// spec: STRM-003
+#[test]
+#[should_panic(expected = "a field that reads cells must report its cell queries in read_records_for")]
+fn a_field_that_reads_cells_but_reports_none_cannot_be_keyed() {
+    let _ = height_key(&Liar, &TangentWarp, tile(), 16, R);
+}
+
+// spec: STRM-003
+#[test]
+fn the_radius_of_a_key_must_be_the_finite_positive_radius_of_the_definition() {
+    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let r = std::panic::catch_unwind(|| height_key(&Reference(7), &TangentWarp, tile(), 16, bad));
+        assert!(r.is_err(), "radius {bad}");
+    }
+}
+
+// spec: STRM-003
+#[test]
+fn a_missing_source_and_an_all_zero_source_key_are_different_inputs() {
+    let none = base();
+    let mut zero = base();
+    zero.source = Some(CacheKey::NONE);
+    assert_ne!(encode(&none), encode(&zero));
+    assert_ne!(cache_key(&none), cache_key(&zero));
+}
+
+// spec: STRM-003
+#[test]
+fn a_parameter_that_spells_out_the_next_parameter_is_another_input() {
+    // Same number of parameters, same total bytes: one parameter spelling the second one out versus two parameters.
+    let mut one = base();
+    one.output_params = BTreeMap::from([(1, vec![2, 1, 0, 0, 0, 9]), (9, vec![])]);
+    let mut two = base();
+    two.output_params = BTreeMap::from([(1, vec![2]), (1 + 1, vec![]), (9, vec![9])]);
+    assert_ne!(encode(&one), encode(&two));
+    let mut a = base();
+    a.output_params = BTreeMap::from([(1, vec![0, 0, 0, 0]), (2, vec![])]);
+    let mut b = base();
+    b.output_params = BTreeMap::from([(1, vec![]), (2, vec![0, 0, 0, 0])]);
+    assert_ne!(encode(&a), encode(&b), "a value moving from one parameter to the next");
+}
+
+// spec: STRM-003
+#[test]
+fn a_cell_record_pins_its_parameter_layout_and_ignores_the_order_of_its_items() {
+    let cell = TileId::new(Face(1), 8, 100, 50).unwrap();
+    let items: Vec<ItemEntry> = vec![(2, 20, [1, 2, 3]), (1, 10, [4, 5, 6])];
+    let reversed: Vec<ItemEntry> = items.iter().rev().copied().collect();
+    let a = read_entry(&ReadRecord::Cell { body: BodyId(3), cell, items });
+    let b = read_entry(&ReadRecord::Cell { body: BodyId(3), cell, items: reversed });
+    assert_eq!(a, b);
+    let ReadEntry::Query { kind, params, result } = a else { panic!("a cell read is a query entry") };
+    assert_eq!(kind, QUERY_CELL);
+    let mut expected = 3u32.to_le_bytes().to_vec();
+    expected.extend_from_slice(&cell.raw().to_le_bytes());
+    assert_eq!(params, expected, "body u32 LE then cell raw id u64 LE");
+    assert_eq!(hex(result), KNOWN_CELL_RESULT);
+    let whole = read_entry(&ReadRecord::Body { body: BodyId(3), items: vec![] });
+    assert_eq!(whole, ReadEntry::Query { kind: QUERY_BODY, params: 3u32.to_le_bytes().to_vec(), result: query_result_hash128(&[]) });
+}
+
+const KNOWN_CELL_RESULT: &str = "b37c2d466779663723ca2943a728a242";

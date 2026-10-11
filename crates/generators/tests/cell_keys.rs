@@ -43,12 +43,12 @@ impl HeightField for Stamped<'_> {
     fn reads_cells(&self) -> bool {
         true
     }
-    fn inputs_hash_for(&self, tile: TileId, map: &dyn FaceMapping) -> u64 {
+    fn read_records_for(&self, tile: TileId, map: &dyn FaceMapping) -> Vec<planet_world_def::ReadRecord> {
         assert_eq!(map.id(), CELL_MAPPING_ID, "cells are tangent-warp cells: refuse any other mapping");
         let ctx = GenContext::new(self.def);
         ctx.body_seed(BodyId::PLANET).unwrap();
         ctx.query_tile(BodyId::PLANET, tile, MARGIN, 64).unwrap();
-        ctx.read_set_hash()
+        ctx.read_records()
     }
 }
 
