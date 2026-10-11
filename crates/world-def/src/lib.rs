@@ -258,14 +258,8 @@ impl WorldDefinition {
         (id, rec.content, rec.dir)
     }
 
-    fn cell_hash_of(&self, body: BodyId, cell: TileId) -> u64 {
-        cells::cell_hash(&self.cell_entries(body, cell))
-    }
-
-    /// Hash of every item of one body (what a read of the whole body sees).
-    fn body_items_hash(&self, body: BodyId) -> u64 {
-        let all: Vec<cells::ItemEntry> = self.items.range((body, 0)..=(body, u64::MAX)).map(|((_, id), _)| self.entry(body, *id)).collect();
-        cells::cell_hash(&all)
+    fn all_entries(&self, body: BodyId) -> Vec<cells::ItemEntry> {
+        self.items.range((body, 0)..=(body, u64::MAX)).map(|((_, id), _)| self.entry(body, *id)).collect()
     }
 }
 
@@ -324,11 +318,50 @@ pub fn derive_body_seed(world_seed: u64, body: BodyId) -> u64 {
     }
 }
 
+/// One recorded read, with what a 128-bit persistent key needs (ADR 0018): the value read, not only its 64-bit hash.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ReadRecord {
+    /// A node (or the derived seed of a body, recorded under its `derived.` path) and the value read.
+    Node { path: NodePath, value: NodeValue },
+    /// A spatial query of one cell and the items found there (empty included).
+    Cell { body: BodyId, cell: TileId, items: Vec<cells::ItemEntry> },
+    /// A read of every item of a body (a tile over the cell limit).
+    Body { body: BodyId, items: Vec<cells::ItemEntry> },
+}
+
+impl ReadRecord {
+    /// The path this read is recorded under.
+    pub fn path(&self) -> NodePath {
+        match self {
+            ReadRecord::Node { path, .. } => path.clone(),
+            ReadRecord::Cell { body, cell, .. } => cell_query_path(*body, *cell),
+            ReadRecord::Body { body, .. } => cell_query_all_path(*body),
+        }
+    }
+
+    /// The 64-bit hash of this read, as the in-memory read-set hash sees it.
+    pub fn hash64(&self) -> u64 {
+        match self {
+            ReadRecord::Node { path, value } => node_hash(path, *value),
+            ReadRecord::Cell { items, .. } | ReadRecord::Body { items, .. } => cells::cell_hash(items),
+        }
+    }
+}
+
+/// The 64-bit read-set hash of a list of typed reads: equal to [`GenContext::read_set_hash`] of the context they were
+/// recorded in. Fields that read cells report their per-tile reads as records and get their 64-bit per-tile hash from
+/// here, so the two key paths share one source.
+pub fn records_hash64(records: &[ReadRecord]) -> u64 {
+    set_hash(&records.iter().map(|r| (r.path(), r.hash64())).collect())
+}
+
 /// The only way generators read the definition. Every read is recorded with the hash of the node read; the recorded
 /// set is what keys are built from, so an unread node cannot affect a key and a read node always does.
 pub struct GenContext<'a> {
     def: &'a WorldDefinition,
-    reads: RefCell<BTreeMap<NodePath, u64>>,
+    /// Every read by path: its 64-bit hash (what in-memory keys use) and the typed record (what persistent keys use),
+    /// inserted together so the two views of the read set can never drift apart.
+    reads: RefCell<BTreeMap<NodePath, (u64, ReadRecord)>>,
 }
 
 impl<'a> GenContext<'a> {
@@ -338,7 +371,7 @@ impl<'a> GenContext<'a> {
 
     fn read(&self, path: &str) -> Result<NodeValue, MissingNode> {
         let v = self.def.get(path).ok_or_else(|| MissingNode(path.to_string()))?;
-        self.reads.borrow_mut().insert(path.to_string(), node_hash(path, v));
+        self.record(path.to_string(), ReadRecord::Node { path: path.to_string(), value: v });
         Ok(v)
     }
 
@@ -354,8 +387,7 @@ impl<'a> GenContext<'a> {
     pub fn body_seed(&self, body: BodyId) -> Result<u64, MissingNode> {
         let seed = derive_body_seed(self.world_seed()?, body);
         let path = body_seed_path(body);
-        let h = node_hash(&path, NodeValue::U64(seed));
-        self.reads.borrow_mut().insert(path, h);
+        self.record(path.clone(), ReadRecord::Node { path, value: NodeValue::U64(seed) });
         Ok(seed)
     }
 
@@ -364,6 +396,12 @@ impl<'a> GenContext<'a> {
             NodeValue::F64(r) => Ok(r),
             NodeValue::U64(_) => Err(MissingNode(format!("{} (not a number)", body_radius_path(body)))),
         }
+    }
+
+    /// Record one read under its path: the only place a read enters the context.
+    fn record(&self, path: NodePath, record: ReadRecord) {
+        let hash = record.hash64();
+        self.reads.borrow_mut().insert(path, (hash, record));
     }
 
     /// The level of the body's cells; reads (and so records) the body's radius.
@@ -379,7 +417,7 @@ impl<'a> GenContext<'a> {
             return Err(MissingNode(format!("a cell of body {} at level {level} (got level {})", body.0, cell.level())));
         }
         let path = cell_query_path(body, cell);
-        self.reads.borrow_mut().insert(path, self.def.cell_hash_of(body, cell));
+        self.record(path, ReadRecord::Cell { body, cell, items: self.def.cell_entries(body, cell) });
         Ok(self.def.items_in_cell(body, cell))
     }
 
@@ -400,19 +438,32 @@ impl<'a> GenContext<'a> {
                 return Ok(out);
             }
         }
-        self.reads.borrow_mut().insert(cell_query_all_path(body), self.def.body_items_hash(body));
+        self.record(cell_query_all_path(body), ReadRecord::Body { body, items: self.def.all_entries(body) });
         Ok(self.def.items.range((body, 0)..=(body, u64::MAX)).map(|((_, id), rec)| (*id, rec.content)).collect())
     }
 
     /// Hash of everything read so far (WDEF-004): the definition part of a cache key.
     pub fn read_set_hash(&self) -> u64 {
-        set_hash(&self.reads.borrow())
+        set_hash(&self.reads.borrow().iter().map(|(p, (h, _))| (p.clone(), *h)).collect())
+    }
+
+    /// The recorded reads with their values, sorted by path: what a 128-bit persistent key is built from (ADR 0018).
+    pub fn read_records(&self) -> Vec<ReadRecord> {
+        self.reads.borrow().values().map(|(_, r)| r.clone()).collect()
     }
 
     /// The recorded reads, for diagnostics and tests: path and node hash, sorted by path.
     pub fn reads(&self) -> Vec<(NodePath, u64)> {
-        self.reads.borrow().iter().map(|(p, h)| (p.clone(), *h)).collect()
+        self.reads.borrow().iter().map(|(p, (h, _))| (p.clone(), *h)).collect()
     }
+}
+
+/// The reads of a generator that reads only the seed of the single planet, as typed records.
+pub fn single_planet_seed_records(seed: u64) -> Vec<ReadRecord> {
+    let def = WorldDefinition::new(seed);
+    let ctx = GenContext::new(&def);
+    ctx.body_seed(BodyId::PLANET).expect("the seed node exists");
+    ctx.read_records()
 }
 
 /// The read-set hash of a generator that reads only the seed of the single planet. A field built directly from a seed
