@@ -82,6 +82,6 @@ impl crate::height::HeightGenerator for SteepGenerator {
         body: planet_world_def::BodyId,
     ) -> Result<Box<dyn HeightField>, planet_world_def::MissingNode> {
         let seed = ctx.body_seed(body)?;
-        Ok(Box::new(crate::height::Bound::new(Steep(seed), ctx.read_set_hash(), body)))
+        Ok(Box::new(crate::height::Bound::new(Steep(seed), ctx, body)))
     }
 }
