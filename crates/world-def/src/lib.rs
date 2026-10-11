@@ -139,6 +139,15 @@ impl core::fmt::Display for MissingNode {
     }
 }
 
+/// Id of the reference surface the geo conversions use (CON-15); the sphere is the only one so far.
+pub const SPHERE_SURFACE_ID: &str = "sphere";
+
+/// Hash of the parameters of a body that every key covers (ADR 0001, 0007): its id, its seed, its radius and the id of
+/// its reference surface. Two bodies never share it, whatever their tile ids, and a change of any parameter changes it.
+pub fn body_params_hash(body: BodyId, seed: u64, radius_m: f64, surface_id: &str) -> u64 {
+    hash_u64s(0x626f_6479_7061, &[u64::from(body.0), seed, radius_m.to_bits(), hash_u64s(3, &path_words(surface_id))])
+}
+
 /// Seed of a body derived from the world seed (ADR 0001): the single planet uses the world seed itself, so existing
 /// single-planet content keeps its identity; other bodies mix their id in.
 pub fn derive_body_seed(world_seed: u64, body: BodyId) -> u64 {
