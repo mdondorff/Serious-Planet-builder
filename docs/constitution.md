@@ -1,6 +1,6 @@
 # Constitution
 
-**Status:** v1.1, 2026-10-10 (CON-14 tolerance amended by the owner, ADR 0010). v1: 2026-10-09. Owner: Matthias Dondorff.
+**Status:** v1.2, 2026-10-11 (CON-18 golden approval amended by the owner, ADR 0017). v1.1: 2026-10-10 (CON-14, ADR 0010). v1: 2026-10-09. Owner: Matthias Dondorff.
 
 This file holds the project's non-negotiable rules. Every rule has an ID and a verification tier (A pure, B CPU oracle, C pixels, D human; see `openspec/specs/testing`). Rules are deliberately short; the reasoning lives in the ADRs and in `docs/background/architecture-report.md`.
 
@@ -36,7 +36,7 @@ This file holds the project's non-negotiable rules. Every rule has an ID and a v
 
 - **CON-16** Every requirement in `openspec/specs/` has a trace ID and a declared verification tier. Every automated test cites the requirement ID it covers (`// spec: COORD-003`). `cargo xtask spec-lint` enforces both. *Verify: A.*
 - **CON-17** Verify at the cheapest tier that can falsify the requirement. Tests are deterministic; a flaky test is fixed or quarantined with a tracking entry, never retried silently. *Verify: A.*
-- **CON-18** Every visual feature ships with a debug view and at least one tier-C test. Golden images are approved ("blessed") only by the owner. *Verify: C, D.*
+- **CON-18** Every visual feature ships with a debug view and at least one tier-C test. Golden images are approved ("blessed") by the owner, or by an agent under the owner's policy in ADR 0017; everything that policy escalates waits for the owner. *Verify: C, D.*
 - **CON-19** Every visual bug gets a repro bundle (camera path, definition hash, generator version, settings, adapter) that `cargo xtask repro` replays. *Verify: A.*
 - **CON-20** Count-based budgets (draw calls, triangles, resident tiles, upload bytes, VRAM allocated) are asserted in tests on any adapter. Time-based budgets are measured only on the reference machine, using the performance-harness protocol. *Verify: A, C.*
 

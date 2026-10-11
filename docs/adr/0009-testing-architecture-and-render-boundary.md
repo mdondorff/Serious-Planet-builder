@@ -1,5 +1,5 @@
 # 0009 Testing architecture and render boundary
-Status: accepted
+Status: accepted (the "promotion is owner-only" clause superseded by ADR 0017)
 Date: 2026-10-10
 Source: background report §16, §17; constitution CON-03, CON-16..20
 
