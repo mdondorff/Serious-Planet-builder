@@ -20,9 +20,6 @@ pub struct MeshVertex {
     pub normal: [f32; 3],
     /// Terrain height above the sphere, metres.
     pub height: f32,
-    /// Position on the reference sphere (height 0) below this vertex, same space as `pos`: the height-free point the
-    /// morph distance is measured to, matching how node selection measures distance.
-    pub ref_pos: [f32; 3],
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -49,8 +46,9 @@ pub fn vertex_count(cells: u32) -> usize {
 pub const SKIRT_FRACTION: f64 = 0.08;
 
 /// Version of the mesh construction (ADR 0006): bump it whenever vertex output changes for the same inputs (skirt
-/// depth, normal stencil, origin rule, vertex layout). History: 1 = first meshes; 2 = seam-consistent normals (#15).
-pub const MESH_VERSION: u32 = 2;
+/// depth, normal stencil, origin rule, vertex layout). History: 1 = first meshes; 2 = seam-consistent normals (#15);
+/// 3 = no `ref_pos` attribute: the morph distance is measured to the real vertex position (LOD-008).
+pub const MESH_VERSION: u32 = 3;
 
 /// Key of a mesh: the height key of the tile (generator, seed, mapping, tile; resolution = `cells`), the grid size, the
 /// radius bits, the skirt fraction bits and [`MESH_VERSION`].
@@ -178,7 +176,6 @@ pub fn tile_mesh_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
                 coarse: local(coarse),
                 normal: [normal.x as f32, normal.y as f32, normal.z as f32],
                 height: heights[j as usize * width + i as usize] as f32,
-                ref_pos: local(at(i, j).normalized() * radius_m),
             });
         }
     }
@@ -195,7 +192,7 @@ pub fn tile_mesh_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
         let radial = (origin.0 + Vec3::new(f64::from(v.pos[0]), f64::from(v.pos[1]), f64::from(v.pos[2]))).normalized() * depth;
         let down =
             |p: [f32; 3]| [(f64::from(p[0]) - radial.x) as f32, (f64::from(p[1]) - radial.y) as f32, (f64::from(p[2]) - radial.z) as f32];
-        vertices.push(MeshVertex { pos: down(v.pos), coarse: down(v.coarse), ref_pos: down(v.ref_pos), ..v });
+        vertices.push(MeshVertex { pos: down(v.pos), coarse: down(v.coarse), ..v });
     }
     TileMesh { id, cells, key: mesh_key_field(field, map, id, cells, radius_m), origin, vertices }
 }
@@ -226,16 +223,16 @@ pub fn grid_indices(cells: u32) -> Vec<u32> {
 }
 
 impl MeshVertex {
-    /// Number of f32 values per vertex in GPU order: `pos`, `coarse`, `normal`, `height`, `ref_pos`.
-    pub const FLOATS: usize = 13;
+    /// Number of f32 values per vertex in GPU order: `pos`, `coarse`, `normal`, `height`.
+    pub const FLOATS: usize = 10;
     /// Byte stride of a vertex buffer entry.
     pub const STRIDE: u64 = (Self::FLOATS * 4) as u64;
-    /// The attribute offsets (in floats) of `pos`, `coarse`, `normal`, `height` and `ref_pos`.
-    pub const OFFSETS: [usize; 5] = [0, 3, 6, 9, 10];
+    /// The attribute offsets (in floats) of `pos`, `coarse`, `normal` and `height`.
+    pub const OFFSETS: [usize; 4] = [0, 3, 6, 9];
 
     pub fn to_floats(&self) -> [f32; Self::FLOATS] {
-        let (p, c, n, r) = (self.pos, self.coarse, self.normal, self.ref_pos);
-        [p[0], p[1], p[2], c[0], c[1], c[2], n[0], n[1], n[2], self.height, r[0], r[1], r[2]]
+        let (p, c, n) = (self.pos, self.coarse, self.normal);
+        [p[0], p[1], p[2], c[0], c[1], c[2], n[0], n[1], n[2], self.height]
     }
 }
 

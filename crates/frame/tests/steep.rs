@@ -24,8 +24,9 @@ fn clip_f32(m: &[f32; 16], p: [f32; 3]) -> [f32; 4] {
 #[test]
 fn morph_closes_the_gap_between_levels_on_steep_terrain_in_every_scripted_view() {
     let map = TangentWarp;
-    let params = LodParams { cells: 16, viewport_h_px: 96.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() };
+    let params = LodParams { cells: 4, viewport_h_px: 192.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() };
     let n = params.cells as usize;
+    let cells = params.cells;
     let (mut coarse_cases, mut fine_cases) = (0, 0);
     for (name, cam) in scripted_views_field(R, 4.0 / 3.0, &STEEP) {
         let req = TerrainRequest {
@@ -44,15 +45,16 @@ fn morph_closes_the_gap_between_levels_on_steep_terrain_in_every_scripted_view()
         let meshes: Vec<_> = std::thread::scope(|s| {
             let handles: Vec<_> = nodes
                 .chunks(nodes.len().div_ceil(threads).max(1))
-                .map(|part| s.spawn(move || part.iter().map(|d| tile_mesh_field(&STEEP, &TangentWarp, d.tile, 16, R)).collect::<Vec<_>>()))
+                .map(|part| {
+                    s.spawn(move || part.iter().map(|d| tile_mesh_field(&STEEP, &TangentWarp, d.tile, cells, R)).collect::<Vec<_>>())
+                })
                 .collect();
             handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
         });
         for (d, mesh) in nodes.into_iter().zip(meshes) {
             let morph_at = |i: usize, j: usize| {
                 let v = mesh.vertices[j * (n + 1) + i];
-                let rel =
-                    mesh.origin.0 - cam.position.0 + Vec3::new(f64::from(v.ref_pos[0]), f64::from(v.ref_pos[1]), f64::from(v.ref_pos[2]));
+                let rel = mesh.origin.0 - cam.position.0 + Vec3::new(f64::from(v.pos[0]), f64::from(v.pos[1]), f64::from(v.pos[2]));
                 ((rel.length() - f64::from(d.morph_start_m)) / f64::from((d.morph_end_m - d.morph_start_m).max(1e-6))).clamp(0.0, 1.0)
             };
             for side in Side::ALL {
@@ -94,7 +96,7 @@ fn morph_closes_the_gap_between_levels_on_steep_terrain_in_every_scripted_view()
 #[test]
 fn height_fields_that_do_not_fit_the_request_are_plan_errors() {
     let (_, cam) = scripted_views_field(R, 4.0 / 3.0, &STEEP)[3];
-    let lod = LodParams { cells: 16, viewport_h_px: 96.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() };
+    let lod = LodParams { cells: 4, viewport_h_px: 96.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() };
     let req = TerrainRequest {
         camera: cam,
         size: (128, 96),
@@ -128,7 +130,7 @@ fn steep_vertices_project_within_a_quarter_pixel_at_one_metre() {
     }
     let (w, h) = (1920.0f64, 1080.0f64);
     let ground = best.1 * (R + best.0);
-    let lod = LodParams { cells: 16, viewport_h_px: h, tau_px: 6.0, max_level: 26, ..LodParams::earth_1080p() };
+    let lod = LodParams { cells: 8, viewport_h_px: h, tau_px: 6.0, max_level: 26, ..LodParams::earth_1080p() };
     let probe = Camera::at_surface_point(
         PlanetFixed(ground + best.1 * 1.0),
         Vec3::new(0.0, 0.0, 1.0),
@@ -143,27 +145,27 @@ fn steep_vertices_project_within_a_quarter_pixel_at_one_metre() {
     let under = TileId::from_direction(&map, best.1, 26);
     let contains = |t: TileId| std::iter::successors(Some(under), |x| x.parent()).any(|x| x == t);
     let leaf = plan.nodes.iter().map(|d| d.tile).find(|t| contains(*t)).expect("a leaf under the camera");
-    let mesh = tile_mesh_field(&STEEP, &map, leaf, 16, R);
+    let mesh = tile_mesh_field(&STEEP, &map, leaf, 8, R);
     // The grid vertex nearest the camera's ground point and two neighbours (plain, half- and fully-morphed).
     let (mut ni, mut nj, mut nd) = (0usize, 0usize, f64::MAX);
-    for j in 0..=16usize {
-        for i in 0..=16usize {
-            let v = mesh.vertices[j * 17 + i];
+    for j in 0..=8usize {
+        for i in 0..=8usize {
+            let v = mesh.vertices[j * 9 + i];
             let p = mesh.origin.0 + Vec3::new(f64::from(v.pos[0]), f64::from(v.pos[1]), f64::from(v.pos[2]));
             if p.distance(ground) < nd {
                 (ni, nj, nd) = (i, j, p.distance(ground));
             }
         }
     }
-    let (ni, nj) = (ni.clamp(0, 15), nj.clamp(0, 15));
+    let (ni, nj) = (ni.clamp(0, 7), nj.clamp(0, 7));
     eprintln!(
         "jitter probe: leaf level {} (cell {:.1} m)",
         leaf.level(),
-        R * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << leaf.level()) / 16.0
+        R * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << leaf.level()) / 8.0
     );
     let mut worst = 0.0f64;
     for (vi, vj, m) in [(ni, nj, 0.0f32), (ni + 1, nj, 0.5), (ni + 1, nj + 1, 1.0)] {
-        let v = mesh.vertices[vj * 17 + vi];
+        let v = mesh.vertices[vj * 9 + vi];
         let fine_world = mesh.origin.0 + Vec3::new(f64::from(v.pos[0]), f64::from(v.pos[1]), f64::from(v.pos[2]));
         let coarse_world = mesh.origin.0 + Vec3::new(f64::from(v.coarse[0]), f64::from(v.coarse[1]), f64::from(v.coarse[2]));
         let exact_world = fine_world * f64::from(1.0 - m) + coarse_world * f64::from(m);

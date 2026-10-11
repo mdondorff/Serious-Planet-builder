@@ -144,9 +144,9 @@ fn a_terrain_bundle_replays_to_the_same_pixels_and_refuses_changed_inputs() {
     let text = std::fs::read_to_string(&bundle).unwrap();
     // A version mismatch is refused before anything is replanned.
     let bad = tmp("told.repro");
-    std::fs::write(&bad, text.replacen("mesh_version 2", "mesh_version 1", 1)).unwrap();
+    std::fs::write(&bad, text.replacen("mesh_version 3", "mesh_version 2", 1)).unwrap();
     let e = run(&["test-render", "--adapter", "software", "--repro", bad.to_str().unwrap()]).unwrap_err();
-    assert!(e.contains("mesh version 1") && e.contains("this build has"), "{e}");
+    assert!(e.contains("mesh version 2") && e.contains("this build has"), "{e}");
     // Another seed leaves the recorded plan text intact but replans to other mesh keys: the replay reports the difference.
     let other = tmp("tseed.repro");
     assert!(text.contains("\nseed 1\n"));

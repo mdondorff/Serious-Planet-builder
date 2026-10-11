@@ -189,11 +189,11 @@ Source: CON-20, CON-21, ADR 0013
 - **THEN** rendering fails with the tile id and both keys instead of drawing the stale buffer
 
 ### Requirement: REND-014 Vertex-shader morph
-The terrain vertex shader SHALL morph each vertex from its own position towards its parent-grid position by the factor `clamp((d - start) / (end - start), 0, 1)`, where `d` is the camera distance to the vertex's height-free reference position and `start`, `end` are the node's morph interval from the plan; the shader SHALL read no other morph input.
+The terrain vertex shader SHALL morph each vertex from its own position towards its parent-grid position by the factor `clamp((d - start) / (end - start), 0, 1)`, where `d` is the camera distance to the vertex's own position and `start`, `end` are the node's morph interval from the plan; the shader SHALL read no other morph input.
 
 Verify: B
 Status: active
-Source: CON-11, ADR 0014
+Source: CON-11, ADR 0014, ADR 0016
 
 #### Scenario: GPU against CPU twin
 - **WHEN** the morph debug view of a scripted view is rendered on the software adapter

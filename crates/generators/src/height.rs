@@ -52,6 +52,147 @@ pub(crate) fn layer_noise(seed: u64, layer: u64, octave: u32, p: Vec3) -> f64 {
     lerp(lerp(x00, x10, ty), lerp(x01, x11, ty), tz)
 }
 
+/// Largest gradient magnitude of [`layer_noise`] per unit of its argument: each partial derivative is a lattice
+/// difference (at most 2) times the derivative of `smooth` (at most 1.5), so at most 3, and three axes give 3 sqrt(3).
+const NOISE_GRADIENT_BOUND: f64 = 5.196_152_422_706_632;
+
+/// Lipschitz constant of the gradient of [`layer_noise`] (the gradient is continuous across cell borders because the
+/// derivative of `smooth` vanishes there): the Frobenius norm of the Hessian is at most sqrt(3 * 12^2 + 6 * 9^2) = 30.3 (rounded up), with
+/// second differences of the lattice values (at most 2 along an axis, 4 across two) times `smooth''` (at most 6) or the
+/// product of two `smooth'` (at most 1.5 each).
+const NOISE_HESSIAN_BOUND: f64 = 30.3;
+
+/// Value and gradient of [`layer_noise`] at `p`. The value is computed with the same operations as `layer_noise`.
+fn layer_noise_with_gradient(seed: u64, layer: u64, octave: u32, p: Vec3) -> (f64, [f64; 3]) {
+    let (fx, fy, fz) = (libm::floor(p.x), libm::floor(p.y), libm::floor(p.z));
+    let (ux, uy, uz) = (p.x - fx, p.y - fy, p.z - fz);
+    let (tx, ty, tz) = (smooth(ux), smooth(uy), smooth(uz));
+    let (ix, iy, iz) = (fx as i64, fy as i64, fz as i64);
+    let c = |dx: i64, dy: i64, dz: i64| lattice_value(seed, layer, octave, ix + dx, iy + dy, iz + dz);
+    let (c000, c100, c010, c110) = (c(0, 0, 0), c(1, 0, 0), c(0, 1, 0), c(1, 1, 0));
+    let (c001, c101, c011, c111) = (c(0, 0, 1), c(1, 0, 1), c(0, 1, 1), c(1, 1, 1));
+    let x00 = lerp(c000, c100, tx);
+    let x10 = lerp(c010, c110, tx);
+    let x01 = lerp(c001, c101, tx);
+    let x11 = lerp(c011, c111, tx);
+    let value = lerp(lerp(x00, x10, ty), lerp(x01, x11, ty), tz);
+    // `smooth'(t) = 6 t (1 - t)`.
+    let (dx, dy, dz) = (6.0 * ux * (1.0 - ux), 6.0 * uy * (1.0 - uy), 6.0 * uz * (1.0 - uz));
+    let gx = dx * lerp(lerp(c100 - c000, c110 - c010, ty), lerp(c101 - c001, c111 - c011, ty), tz);
+    let gy = dy * lerp(lerp(c010 - c000, c110 - c100, tx), lerp(c011 - c001, c111 - c101, tx), tz);
+    let gz = dz * lerp(lerp(c001 - c000, c101 - c100, tx), lerp(c011 - c010, c111 - c110, tx), ty);
+    (value, [gx, gy, gz])
+}
+
+/// Exact range of [`layer_noise`] over the axis-aligned box `centre +- u` (all in the argument space of the noise), or
+/// `None` when the box spans too many lattice cells for the small fixed-size evaluation below.
+///
+/// Inside one lattice cell the noise is multilinear in the smoothed coordinates, and `smooth` is monotone, so its
+/// extremes over a sub-box lie at the sub-box's corners. Cutting the box at the integer coordinates it contains gives
+/// sub-boxes inside single cells, and every corner of every sub-box is a point of the grid of the box's lower and upper
+/// coordinates plus those integers: the range is the range of the noise over that grid.
+fn noise_box_range(seed: u64, layer: u64, octave: u32, centre: Vec3, u: f64) -> Option<(f64, f64)> {
+    const MAX_CELLS: usize = 3;
+    let c = [centre.x, centre.y, centre.z];
+    let mut cells = [0i64; 3];
+    let mut count = [0usize; 3];
+    let mut coords = [[0.0f64; 4]; 3];
+    for k in 0..3 {
+        let (lo, hi) = (c[k] - u, c[k] + u);
+        let (f0, f1) = (libm::floor(lo) as i64, libm::floor(hi) as i64);
+        if f1 - f0 + 1 > MAX_CELLS as i64 {
+            return None;
+        }
+        cells[k] = f0;
+        let mut n = 0;
+        coords[k][n] = lo;
+        n += 1;
+        for int in f0 + 1..=f1 {
+            if (int as f64) > lo && (int as f64) < hi {
+                coords[k][n] = int as f64;
+                n += 1;
+            }
+        }
+        coords[k][n] = hi;
+        count[k] = n + 1;
+    }
+    // Lattice corners of the cells the box touches: (cells + 1) per axis, at most 4 each.
+    let size = [
+        (libm::floor(c[0] + u) as i64 - cells[0] + 2) as usize,
+        (libm::floor(c[1] + u) as i64 - cells[1] + 2) as usize,
+        (libm::floor(c[2] + u) as i64 - cells[2] + 2) as usize,
+    ];
+    let mut corner = [[[0.0f64; 4]; 4]; 4];
+    for (i, plane) in corner.iter_mut().enumerate().take(size[0]) {
+        for (j, row) in plane.iter_mut().enumerate().take(size[1]) {
+            for (k, v) in row.iter_mut().enumerate().take(size[2]) {
+                *v = lattice_value(seed, layer, octave, cells[0] + i as i64, cells[1] + j as i64, cells[2] + k as i64);
+            }
+        }
+    }
+    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+    for &x in &coords[0][..count[0]] {
+        for &y in &coords[1][..count[1]] {
+            for &z in &coords[2][..count[2]] {
+                let (fx, fy, fz) = (libm::floor(x), libm::floor(y), libm::floor(z));
+                let (tx, ty, tz) = (smooth(x - fx), smooth(y - fy), smooth(z - fz));
+                let (i, j, k) = ((fx as i64 - cells[0]) as usize, (fy as i64 - cells[1]) as usize, (fz as i64 - cells[2]) as usize);
+                let q = |a: usize, b: usize, c: usize| corner[i + a][j + b][k + c];
+                let x00 = lerp(q(0, 0, 0), q(1, 0, 0), tx);
+                let x10 = lerp(q(0, 1, 0), q(1, 1, 0), tx);
+                let x01 = lerp(q(0, 0, 1), q(1, 0, 1), tx);
+                let x11 = lerp(q(0, 1, 1), q(1, 1, 1), tx);
+                let v = lerp(lerp(x00, x10, ty), lerp(x01, x11, ty), tz);
+                lo = lo.min(v);
+                hi = hi.max(v);
+            }
+        }
+    }
+    // Rounding margin: the evaluation above follows `layer_noise` but the argument differs in the last bits.
+    Some((lo - 1e-9, hi + 1e-9))
+}
+
+/// Bounds of [`layer_noise`] over all points `freq * u` with `u` a unit direction within the angle `theta` of `centre`.
+///
+/// Sound bounds, intersected. (1) The exact range over the axis-aligned box that contains the cap ([`noise_box_range`]),
+/// when the box is small against the lattice. (2) The value at the centre plus or minus the gradient bound times the
+/// largest distance in the argument. (3) The first-order Taylor expansion at the centre with the Lipschitz constant of
+/// the gradient for the remainder. (4) The hull of the lattice corners of the cells the cap touches (trilinear
+/// interpolation with monotone weights stays inside it), when those are at most 64.
+pub(crate) fn layer_noise_bounds(seed: u64, layer: u64, octave: u32, centre: Vec3, theta: f64, freq: f64) -> (f64, f64) {
+    // The chord is shorter than the arc; the margin absorbs rounding in the direction maths and in `floor`.
+    let reach = freq * (theta * (1.0 + 1e-9) + 1e-12);
+    if let Some((lo, hi)) = noise_box_range(seed, layer, octave, centre * freq, reach) {
+        let (n0, g) = layer_noise_with_gradient(seed, layer, octave, centre * freq);
+        let slack = NOISE_GRADIENT_BOUND * reach * (1.0 + 1e-9) + 1e-12;
+        let taylor = (g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt() * reach + 0.5 * NOISE_HESSIAN_BOUND * reach * reach;
+        let slack = slack.min(taylor * (1.0 + 1e-9) + 1e-12);
+        return (lo.max(n0 - slack).max(-1.0), hi.min(n0 + slack).min(1.0));
+    }
+    let range = |c: f64| (libm::floor(freq * c - reach) as i64, libm::floor(freq * c + reach) as i64);
+    let ((x0, x1), (y0, y1), (z0, z1)) = (range(centre.x), range(centre.y), range(centre.z));
+    let (n0, g) = layer_noise_with_gradient(seed, layer, octave, centre * freq);
+    let slack = NOISE_GRADIENT_BOUND * reach * (1.0 + 1e-9) + 1e-12;
+    let taylor = (g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt() * reach + 0.5 * NOISE_HESSIAN_BOUND * reach * reach;
+    let slack = slack.min(taylor * (1.0 + 1e-9) + 1e-12);
+    let (lo, hi) = ((n0 - slack).max(-1.0), (n0 + slack).min(1.0));
+    let corners = (x1 - x0 + 2).saturating_mul(y1 - y0 + 2).saturating_mul(z1 - z0 + 2);
+    if corners > 64 {
+        return (lo, hi);
+    }
+    let (mut hlo, mut hhi) = (f64::MAX, f64::MIN);
+    for ix in x0..=x1 + 1 {
+        for iy in y0..=y1 + 1 {
+            for iz in z0..=z1 + 1 {
+                let v = lattice_value(seed, layer, octave, ix, iy, iz);
+                hlo = hlo.min(v);
+                hhi = hhi.max(v);
+            }
+        }
+    }
+    (lo.max(hlo), hi.min(hhi))
+}
+
 /// A height field over unit directions. The reference generator is [`Reference`]; the test-only stress field
 /// `stress::Steep` exists behind the `stress` feature. Mesh and plan code take a field so stress tests can swap it
 /// without touching production paths. To be folded into the M3 `Generator` / `GenContext` design (ADR 0006).
@@ -66,6 +207,13 @@ pub trait HeightField: Sync {
     fn version(&self) -> u32;
     /// Bound on `|height|` in metres.
     fn max_abs_height_m(&self) -> f64;
+    /// `(min, max)` of the height in metres over all directions within the angle `angular_radius` (radians) of the unit
+    /// direction `centre`. The bounds are sound (never excluded a real height) but need not be tight; the default is the
+    /// global `+-max_abs_height_m`. Node selection uses them for the bounding volume of a tile (LOD-008).
+    fn height_bounds(&self, _centre: Vec3, _angular_radius: f64) -> (f64, f64) {
+        let m = self.max_abs_height_m();
+        (-m, m)
+    }
 }
 
 /// The reference generator ([`height_at`]) with a seed.
@@ -87,6 +235,19 @@ impl HeightField for Reference {
     }
     fn max_abs_height_m(&self) -> f64 {
         AMPLITUDE_M
+    }
+    fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
+        let (mut lo, mut hi, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
+        for octave in 0..OCTAVES {
+            let (a, b) = layer_noise_bounds(self.0, LAYER_HEIGHT, octave, centre, angular_radius, freq);
+            lo += amp * a;
+            hi += amp * b;
+            norm += amp;
+            amp *= 0.5;
+            freq *= 2.0;
+        }
+        // Rounding margin: the sum above is evaluated in the same order as `height_at` but with different operands.
+        ((AMPLITUDE_M * lo / norm - 1e-6).max(-AMPLITUDE_M), (AMPLITUDE_M * hi / norm + 1e-6).min(AMPLITUDE_M))
     }
 }
 

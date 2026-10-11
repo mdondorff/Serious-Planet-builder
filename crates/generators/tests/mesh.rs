@@ -218,8 +218,7 @@ fn vertex_serialisation_matches_the_documented_gpu_layout() {
     assert_eq!(&f[o[1]..o[1] + 3], &v.coarse);
     assert_eq!(&f[o[2]..o[2] + 3], &v.normal);
     assert_eq!(f[o[3]], v.height);
-    assert_eq!(&f[o[4]..o[4] + 3], &v.ref_pos);
-    assert_eq!(planet_generators::mesh::MeshVertex::STRIDE, 52);
+    assert_eq!(planet_generators::mesh::MeshVertex::STRIDE, 40);
 }
 
 /// Worst angle (degrees) between the normals of coincident border vertices of two neighbouring tiles.
@@ -311,15 +310,15 @@ fn normals_follow_the_terrain_and_agree_with_the_lattice_slope() {
     assert!(max_tilt > 0.05, "the terrain must tilt the normals measurably for this test to mean anything, got {max_tilt} degrees");
 }
 
-/// Committed known answers (mesh version 2, generator version 2, hash version 1): identical on every platform.
+/// Committed known answers (mesh version 3, generator version 2, hash version 1): identical on every platform.
 const KNOWN_MESH_HASHES: [((u8, u8, u32, u32), u64); 3] =
-    [((0, 0, 0, 0), 2371465966009586768), ((3, 3, 5, 2), 17991577032367091872), ((5, 12, 1000, 77), 7790493056220614039)];
+    [((0, 0, 0, 0), 15776459141216401953), ((3, 3, 5, 2), 6673722714559880990), ((5, 12, 1000, 77), 6693367380330789677)];
 
 // spec: GEN-010
 #[test]
 fn mesh_hashes_match_the_committed_known_answers() {
     // The table belongs to these versions: bumping either must come with new answers.
-    assert_eq!((planet_generators::mesh::MESH_VERSION, planet_generators::height::GENERATOR_VERSION), (2, 2));
+    assert_eq!((planet_generators::mesh::MESH_VERSION, planet_generators::height::GENERATOR_VERSION), (3, 2));
     for ((f, l, x, y), want) in KNOWN_MESH_HASHES {
         let got = tile_mesh(1, &TangentWarp, id(f, l, x, y), CELLS, R).content_hash();
         assert_eq!(got, want, "mesh ({f},{l},{x},{y}) changed: if intended, bump MESH_VERSION and update the table (got {got})");
