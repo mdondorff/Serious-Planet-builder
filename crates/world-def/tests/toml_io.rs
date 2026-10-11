@@ -295,3 +295,12 @@ fn a_sweep_of_float_bit_patterns_round_trips_exactly() {
     let back = parse_definition(&to_toml(&d).unwrap()).unwrap();
     assert_eq!(back, d, "a float changed its bits through TOML text");
 }
+
+// spec: WDEF-002
+#[test]
+fn a_definition_with_authored_items_is_not_written_as_a_file_that_would_lose_them() {
+    let mut d = planet();
+    d.put_item(BodyId::PLANET, 1, planet_core::Vec3::new(1.0, 0.0, 0.0), 5).unwrap();
+    assert_eq!(to_toml(&d), Err(LoadError::ItemsNotSupported));
+    assert!(LoadError::ItemsNotSupported.to_string().contains("authored items"));
+}
