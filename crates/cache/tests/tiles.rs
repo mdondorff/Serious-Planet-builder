@@ -263,6 +263,9 @@ fn the_node_set_id_is_a_pinned_derive_key_hash_of_the_sorted_length_prefixed_pat
 
     // A value change of a node leaves the id alone (it is about which nodes are read); another seed reads the same nodes.
     assert_eq!(world(8).node_set_id(), w.node_set_id());
+    // A generator whose field declares no field-wide reads covers other nodes: another id.
+    let fewer = World::from_generator(&WorldDefinition::single_planet(R, 7), &WorldSeedOnly).unwrap();
+    assert_ne!(fewer.node_set_id(), w.node_set_id(), "a different set of nodes read gives a different id");
     // Every stored record carries it.
     let d = Dir::new("node-set");
     let tiles = region_tiles(Face(0), 1).unwrap();
@@ -306,6 +309,21 @@ fn an_empty_store_compares_nothing_and_fails_even_when_stale_entries_are_allowed
     let other = verify_store(&TileStore::open(d.path(), w.params()).unwrap(), &w, 0);
     assert_eq!((other.checked, other.unsupported, other.matching, other.stale), (1, 1, 0, 0));
     assert!(other.compared_nothing() && !other.passed() && !other.passed_allowing_stale(), "{other:?}");
+
+    // A store whose only pack was made under another hash version is skipped by the reader: nothing to compare either.
+    let old = Dir::new("empty-old-hash");
+    let mut pack = PackWriter::open(
+        old.path(),
+        planet_cache::pack::StoreParams { hash_version: w.params().hash_version + 1, body: 0 },
+        DEFAULT_MAX_PACK_BYTES,
+    )
+    .unwrap();
+    pack.append(&w.tile_record(t, 4).unwrap()).unwrap();
+    pack.finish().unwrap();
+    let store = TileStore::open(old.path(), w.params()).unwrap();
+    assert_eq!(store.len(), 0, "the pack of another hash version is skipped");
+    let skipped = verify_store(&store, &w, 0);
+    assert!(skipped.compared_nothing() && !skipped.passed() && !skipped.passed_allowing_stale(), "{skipped:?}");
 }
 
 // spec: STRM-004
@@ -422,6 +440,45 @@ impl HeightGenerator for Versioned {
     fn field(&self, ctx: &GenContext, body: BodyId) -> Result<Box<dyn HeightField>, MissingNode> {
         ctx.body_seed(body)?;
         Ok(Box::new(VersionedField(self.0)))
+    }
+}
+
+/// `Reference` heights from a field that declares no field-wide reads: only the body radius node is left in its id.
+struct NoReadsField;
+
+impl HeightField for NoReadsField {
+    fn height(&self, d: Vec3) -> f64 {
+        Reference(7).height(d)
+    }
+    fn seed(&self) -> u64 {
+        7
+    }
+    fn implementation_id(&self) -> &'static str {
+        "reference"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        Reference(7).max_abs_height_m()
+    }
+    fn read_records(&self) -> Vec<ReadRecord> {
+        Vec::new()
+    }
+}
+
+/// A generator whose field reads nothing field-wide, where `Reference` reads the body seed and the world seed.
+struct WorldSeedOnly;
+
+impl HeightGenerator for WorldSeedOnly {
+    fn implementation_id(&self) -> &'static str {
+        "reference"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn field(&self, _ctx: &GenContext, _body: BodyId) -> Result<Box<dyn HeightField>, MissingNode> {
+        Ok(Box::new(NoReadsField))
     }
 }
 
