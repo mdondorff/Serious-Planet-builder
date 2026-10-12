@@ -245,7 +245,7 @@ fn the_node_set_id_is_a_pinned_derive_key_hash_of_the_sorted_length_prefixed_pat
     paths.push("body.0.radius_m".to_string());
     paths.sort();
     paths.dedup();
-    assert!(paths.len() >= 2, "{paths:?}");
+    assert_eq!(paths, ["body.0.radius_m", "derived.body.0.seed", "world.seed"], "the paths the id covers");
     let mut material = Vec::new();
     for p in &paths {
         material.extend_from_slice(&(p.len() as u32).to_le_bytes());

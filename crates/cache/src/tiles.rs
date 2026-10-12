@@ -6,8 +6,8 @@
 //! not, an input of the tile is missing from its key, and the report names the tile, the pack offset and the first
 //! differing sample. A stored tile whose key is no longer the definition's key is *stale*: *explained* when its versions or
 //! node set id differ from the current ones, *unexplained* when they are all equal (a node value changed, or the key
-//! function drifted: the report keeps the two apart). A run that compared nothing, because every entry is stale, is not a
-//! pass unless the caller says stale entries are expected.
+//! function drifted: the report keeps the two apart). A run that compared nothing (an empty store, only other kinds, every entry stale) is not a
+//! pass; with `--allow-stale` it passes only if at least one entry is stale (ADR 0025 point 4).
 //!
 //! What a same-definition verify can and cannot find: regenerating from the same definition and generator finds
 //! nondeterminism, damage and records that disagree with their key's metadata; it finds an input missing from a key only
