@@ -350,6 +350,20 @@ pub fn bake_blocks(
     threads: usize,
     sink: &mut dyn FnMut(TileId, Vec<GlobalSample>),
 ) -> Result<TiledBakeStats, BakeError> {
+    bake_blocks_where(seed, map, level, cells, threads, &|_| true, sink)
+}
+
+/// [`bake_blocks`] for the blocks `want` accepts only: a rebuild that finds a block already stored does not compute it. The
+/// accepted blocks come in the same order, in batches of at most `threads`.
+pub fn bake_blocks_where(
+    seed: u64,
+    map: &(dyn FaceMapping + Sync),
+    level: u8,
+    cells: u32,
+    threads: usize,
+    want: &(dyn Fn(TileId) -> bool + Sync),
+    sink: &mut dyn FnMut(TileId, Vec<GlobalSample>),
+) -> Result<TiledBakeStats, BakeError> {
     if cells == 0 || !cells.is_power_of_two() || cells > MAX_BLOCK_CELLS {
         return Err(BakeError::BadBlock(cells));
     }
@@ -372,13 +386,20 @@ pub fn bake_blocks(
     let mut next = 0u64;
     while next < total {
         // The tiles of this batch come from a running index (face, row, column): no list of all tiles is ever built.
-        let end = (next + threads as u64).min(total);
-        let batch: Vec<TileId> = (next..end)
-            .map(|i| {
-                let (face, rest) = (i / (side * side), i % (side * side));
-                TileId::new(Face(face as u8), level, (rest % side) as u32, (rest / side) as u32).expect("in range")
-            })
-            .collect();
+        let mut batch: Vec<TileId> = Vec::with_capacity(threads.min(1024));
+        let mut end = next;
+        while end < total && batch.len() < threads {
+            let (face, rest) = (end / (side * side), end % (side * side));
+            let tile = TileId::new(Face(face as u8), level, (rest % side) as u32, (rest / side) as u32).expect("in range");
+            if want(tile) {
+                batch.push(tile);
+            }
+            end += 1;
+        }
+        if batch.is_empty() {
+            next = end;
+            continue;
+        }
         let blocks: Vec<Vec<GlobalSample>> = std::thread::scope(|scope| {
             let (live, peak) = (&live, &peak);
             let handles: Vec<_> = batch

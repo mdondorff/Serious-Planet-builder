@@ -65,7 +65,7 @@ pub fn valid_res(res: u32) -> bool {
     res.is_power_of_two() && res <= MAX_RES
 }
 
-fn shuffle(heights: &[f32]) -> Vec<u8> {
+pub(crate) fn shuffle(heights: &[f32]) -> Vec<u8> {
     let n = heights.len();
     let mut out = vec![0u8; n * 4];
     for (i, h) in heights.iter().enumerate() {
@@ -77,7 +77,7 @@ fn shuffle(heights: &[f32]) -> Vec<u8> {
     out
 }
 
-fn unshuffle(bytes: &[u8]) -> Vec<f32> {
+pub(crate) fn unshuffle(bytes: &[u8]) -> Vec<f32> {
     let n = bytes.len() / 4;
     (0..n).map(|i| f32::from_le_bytes([bytes[i], bytes[n + i], bytes[2 * n + i], bytes[3 * n + i]])).collect()
 }
