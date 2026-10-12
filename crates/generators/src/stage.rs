@@ -105,7 +105,7 @@ pub struct OutputContext<'a> {
     pub surface_id: &'a str,
     pub inputs_hash: u64,
     pub face_mapping_id: &'a str,
-    /// Samples per tile edge for a tile output, per face edge for the global bake.
+    /// Cells (intervals) per tile edge for a tile output, per face edge for the global bake.
     pub resolution: u32,
 }
 

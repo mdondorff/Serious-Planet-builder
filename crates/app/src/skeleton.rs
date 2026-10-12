@@ -174,12 +174,21 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         if !o.tiles.is_empty() || o.out.is_some() || o.face_net.is_some() {
             return Err("--manifest writes a fixed tile set; it excludes --tile, --out and --face-net".into());
         }
+        if let Some(f) = crate::STORE_OPTIONS.iter().find(|f| o.given.contains(**f)) {
+            return Err(format!("--manifest writes a fixed tile set; it excludes {f} (a tile store option)"));
+        }
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
         }
         let text = planet_generators::manifest::determinism_manifest();
         std::fs::write(path, &text).map_err(|e| format!("writing {}: {e}", path.display()))?;
         return writeln!(out, "wrote {} ({} lines)", path.display(), text.lines().count()).map_err(err);
+    }
+    if o.cache_dir.is_some() || o.verify_cache.is_some() {
+        return generate_store(o, out);
+    }
+    if let Some(f) = crate::STORE_OPTIONS.iter().find(|f| o.given.contains(**f)) {
+        return Err(format!("{f} belongs to the tile store commands: use it with --cache-dir (and --region) or --verify-cache"));
     }
     let id = tiles_of(o)?[0];
     let tile = generate_tile(o.seed, &TangentWarp, id, o.res);
@@ -204,6 +213,110 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         writeln!(out, "wrote {}", path.display()).map_err(err)?;
     }
     Ok(())
+}
+
+/// The definition `generate --cache-dir` and `--verify-cache` work on: a TOML file, or the default single planet.
+fn world_of(o: &Options) -> Result<planet_cache::tiles::World, String> {
+    let def = match &o.world {
+        Some(path) => {
+            let text = std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+            planet_world_def::toml_io::parse_definition(&text).map_err(|e| format!("{}: {e}", path.display()))?
+        }
+        None => planet_world_def::WorldDefinition::single_planet(RADIUS_M, o.seed),
+    };
+    planet_cache::tiles::World::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))
+}
+
+/// `generate --cache-dir DIR --region F,L`: generate a face region into a tile store. `generate --verify-cache DIR`:
+/// regenerate a sample of a store from the definition and compare; a mismatch fails the command.
+fn generate_store(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    let clash: Vec<&str> =
+        ["--tile", "--out", "--face-net", "--manifest", "--smoke"].into_iter().filter(|f| o.given.contains(*f)).collect();
+    if !clash.is_empty() {
+        return Err(format!("--cache-dir and --verify-cache work on a tile store and exclude {}", clash.join(", ")));
+    }
+    if o.given.contains("--world") && o.given.contains("--seed") {
+        return Err("--world and --seed both name the definition: give one".into());
+    }
+    let world = world_of(o)?;
+    if let Some(dir) = &o.verify_cache {
+        if o.cache_dir.is_some() || o.given.contains("--res") {
+            return Err("--verify-cache only reads: it excludes --cache-dir, --region and --res (a tile carries its own resolution)".into());
+        }
+        if o.given.contains("--cache-dir") || o.given.contains("--region") {
+            return Err("--verify-cache only reads: it excludes --cache-dir and --region".into());
+        }
+        if !dir.is_dir() {
+            return Err(format!("{}: no such cache directory (check the path; an empty store would verify nothing)", dir.display()));
+        }
+        let store = planet_cache::pack::TileStore::open(dir, world.params()).map_err(|e| e.to_string())?;
+        for p in store.problems() {
+            writeln!(out, "WARNING: {p}").map_err(err)?;
+        }
+        let report = planet_cache::tiles::verify_store(&store, &world, o.sample);
+        writeln!(
+            out,
+            "cache-verify {}: checked {} of {} entries: {} match, {} stale (versions or node set changed), {} stale without a known reason, {} of another kind, {} differ, {} unreadable",
+            dir.display(),
+            report.checked,
+            store.len(),
+            report.matching,
+            report.stale,
+            report.unexplained_stale,
+            report.unsupported,
+            report.mismatches.len(),
+            report.unreadable.len()
+        )
+        .map_err(err)?;
+        for m in &report.mismatches {
+            writeln!(
+                out,
+                "MISMATCH tile {:#018x} (face {} level {} x {} y {}) key {} in {} at offset {}: {}",
+                m.tile.raw(),
+                m.tile.face().0,
+                m.tile.level(),
+                m.tile.x(),
+                m.tile.y(),
+                m.key,
+                m.pack,
+                m.offset,
+                m.detail
+            )
+            .map_err(err)?;
+        }
+        for u in &report.unreadable {
+            writeln!(out, "UNREADABLE {u}").map_err(err)?;
+        }
+        if report.passed_allowing_stale() && report.compared_nothing() && !o.allow_stale {
+            return Err(format!(
+                "cache-verify compared nothing: all {} entries are stale, so the store was built from another definition (or seed) than the one given; check --world/--seed, or pass --allow-stale if the definition changed on purpose",
+                report.stale + report.unexplained_stale
+            ));
+        }
+        return if report.passed_allowing_stale() {
+            Ok(())
+        } else {
+            Err(format!("cache-verify found {} differing and {} unreadable entries", report.mismatches.len(), report.unreadable.len()))
+        };
+    }
+    let dir = o.cache_dir.as_ref().expect("checked by the caller");
+    if o.given.contains("--sample") || o.given.contains("--allow-stale") {
+        return Err("--sample and --allow-stale only apply to --verify-cache".into());
+    }
+    let (face, level) = o.region.ok_or("--cache-dir needs --region FACE,LEVEL (which tiles to generate)")?;
+    let tiles = planet_cache::tiles::region_tiles(planet_core::Face(face), level)?;
+    let report = planet_cache::tiles::build_tiles(dir, &world, &tiles, o.res, planet_cache::pack::DEFAULT_MAX_PACK_BYTES)
+        .map_err(|e| e.to_string())?;
+    writeln!(
+        out,
+        "cache {}: face {face} level {level}, {} tiles at {} cells per edge: {} generated, {} already stored",
+        dir.display(),
+        tiles.len(),
+        o.res,
+        report.written,
+        report.reused
+    )
+    .map_err(err)
 }
 
 const TERRAIN_SIZE: (u32, u32) = (256, 192);

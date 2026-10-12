@@ -285,11 +285,30 @@ enum Tail {
     Damaged(u64),
 }
 
+/// A record a scan could not use: where it is and why.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Damage {
+    pub pack: String,
+    pub offset: u64,
+    /// The record's key, if its header could be read.
+    pub key: Option<CacheKey>,
+    pub why: &'static str,
+}
+
+impl fmt::Display for Damage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.key {
+            Some(k) => write!(f, "{}: key {k} at offset {}: {}", self.pack, self.offset, self.why),
+            None => write!(f, "{}: offset {}: {}", self.pack, self.offset, self.why),
+        }
+    }
+}
+
 struct Scan {
     entries: Vec<IndexEntry>,
     tail: Tail,
-    /// Complete records whose payload failed its CRC and were skipped.
-    bad_payloads: usize,
+    /// Records skipped (payload CRC failed) and the damaged header that ended the scan, if any.
+    damage: Vec<Damage>,
 }
 
 /// CRC-32C of `len` bytes at `pos`, streamed in fixed chunks.
@@ -325,7 +344,8 @@ fn all_zero_from(file: &mut File, pos: u64, len: u64, path: &Path) -> Result<boo
 /// Scan a pack's records. A read error is an error, never a torn tail: only the data itself decides what is torn.
 fn scan(file: &mut File, len: u64, path: &Path) -> Result<Scan, PackError> {
     let mut entries = Vec::new();
-    let mut bad_payloads = 0;
+    let mut damage = Vec::new();
+    let pack = path.display().to_string();
     let mut pos = PACK_HEADER_LEN;
     let mut head = [0u8; RECORD_HEADER_LEN];
     let tail = loop {
@@ -338,7 +358,16 @@ fn scan(file: &mut File, len: u64, path: &Path) -> Result<Scan, PackError> {
         io(file.seek(SeekFrom::Start(pos)), "seeking in", path)?;
         io(file.read_exact(&mut head), "reading", path)?;
         let Some(h) = decode_header(&head) else {
-            break if all_zero_from(file, pos, len, path)? { Tail::Torn(pos) } else { Tail::Damaged(pos) };
+            if all_zero_from(file, pos, len, path)? {
+                break Tail::Torn(pos);
+            }
+            damage.push(Damage {
+                pack: pack.clone(),
+                offset: pos,
+                key: None,
+                why: "the record header fails its CRC; the records after it are unreachable",
+            });
+            break Tail::Damaged(pos);
         };
         let Some(end) = pos.checked_add(RECORD_HEADER_LEN as u64 + u64::from(h.length)).filter(|end| *end <= len) else {
             break Tail::Torn(pos);
@@ -346,11 +375,11 @@ fn scan(file: &mut File, len: u64, path: &Path) -> Result<Scan, PackError> {
         if stream_crc(file, pos + RECORD_HEADER_LEN as u64, u64::from(h.length), path)? == h.crc {
             entries.push(IndexEntry { sort: sort_key(h.kind, h.tile), key: h.key, offset: pos, length: h.length });
         } else {
-            bad_payloads += 1;
+            damage.push(Damage { pack: pack.clone(), offset: pos, key: Some(h.key), why: "the payload fails its CRC and is skipped" });
         }
         pos = end;
     };
-    Ok(Scan { entries: normalise(entries), tail, bad_payloads })
+    Ok(Scan { entries: normalise(entries), tail, damage })
 }
 
 /// Sort entries by `(sort key, key, offset)` and keep only the last record of each `(sort key, key)`: the later offset
@@ -388,7 +417,7 @@ fn encode_index(entries: &[IndexEntry], data_len: u64, tail: u32) -> Vec<u8> {
 }
 
 /// Read an index file: its entries, if it is well formed, was built from exactly the data of length `data_len` whose tail
-/// has CRC `tail`, is strictly sorted and names only records inside the data. Anything else is stale and the caller
+/// has CRC `tail`, is strictly sorted by (sort key, key) and names only records inside the data. Anything else is stale and the caller
 /// rebuilds.
 fn read_index(path: &Path, data_len: u64, tail: u32) -> Option<Vec<IndexEntry>> {
     let b = fs::read(path).ok()?;
@@ -403,7 +432,10 @@ fn read_index(path: &Path, data_len: u64, tail: u32) -> Option<Vec<IndexEntry>> 
         return None;
     }
     let entries: Vec<IndexEntry> = b[INDEX_HEADER_LEN..].as_chunks::<INDEX_ENTRY_LEN>().0.iter().map(IndexEntry::decode).collect();
-    (entries.windows(2).all(|w| w[0] < w[1]) && entries.iter().all(|e| e.inside(data_len))).then_some(entries)
+    // Strictly increasing by (sort key, key): two entries for one record would make `find` return the earlier offset,
+    // and the later record wins.
+    (entries.windows(2).all(|w| (w[0].sort, w[0].key) < (w[1].sort, w[1].key)) && entries.iter().all(|e| e.inside(data_len)))
+        .then_some(entries)
 }
 
 fn write_index_atomic(path: &Path, entries: &[IndexEntry], data_len: u64, tail: u32) -> Result<(), PackError> {
@@ -456,6 +488,7 @@ fn pack_sequences(dir: &Path) -> Result<Vec<u32>, PackError> {
 struct PackFile {
     path: PathBuf,
     entries: Vec<IndexEntry>,
+    damage: Vec<Damage>,
     file: Mutex<File>,
 }
 
@@ -477,6 +510,7 @@ impl PackFile {
             Err(e) => return Err(e),
         }
         let tail = tail_crc(&mut file, len, &data_path)?;
+        let mut damage = Vec::new();
         let entries = match read_index(&index_path, len, tail) {
             Some(e) => e,
             // A missing or stale index is rebuilt by one scan, never trusted. A reader leaves the files alone.
@@ -488,13 +522,15 @@ impl PackFile {
                         data_path.display()
                     ));
                 }
-                if s.bad_payloads > 0 {
-                    problems.push(format!("{}: {} record(s) fail their payload CRC and are skipped", data_path.display(), s.bad_payloads));
+                let skipped = s.damage.iter().filter(|d| d.key.is_some()).count();
+                if skipped > 0 {
+                    problems.push(format!("{}: {skipped} record(s) fail their payload CRC and are skipped", data_path.display()));
                 }
+                damage = s.damage;
                 s.entries
             }
         };
-        Ok(Some(PackFile { path: data_path, entries, file: Mutex::new(file) }))
+        Ok(Some(PackFile { path: data_path, entries, damage, file: Mutex::new(file) }))
     }
 
     fn find(&self, sort: &SortKey, key: CacheKey) -> Option<&IndexEntry> {
@@ -549,6 +585,12 @@ impl TileStore {
         &self.problems
     }
 
+    /// Records a scan found unusable while opening (a payload that fails its CRC, a damaged header): reported with pack,
+    /// offset and key so a verifier can fail on them. Damage that only shows when an entry is read is `get`'s `Corrupt`.
+    pub fn damaged(&self) -> Vec<Damage> {
+        self.packs.iter().flat_map(|p| p.damage.iter().cloned()).collect()
+    }
+
     /// The record of `kind` for `tile` with content key `key`, if any pack holds it. If two packs hold the same key the
     /// newest pack wins (within a pack the later offset already won). A payload that fails its CRC, or an entry that points
     /// outside its pack, is [`PackError::Corrupt`]: the caller treats it as a miss, regenerates and logs.
@@ -591,6 +633,42 @@ impl TileStore {
         let mut out = Vec::new();
         for pack in &self.packs {
             out.extend(pack.entries.iter().map(|e| (e.sort[0], e.key)));
+        }
+        out
+    }
+}
+
+/// The `i`-th of `count` evenly spaced picks among `total` entries (`i < count < total`), without overflow on any target.
+pub fn pick(i: usize, count: usize, total: usize) -> usize {
+    (i as u128 * total as u128 / count as u128) as usize
+}
+
+/// A record read from a store together with where it was found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Stored {
+    pub record: Record,
+    pub pack: String,
+    pub offset: u64,
+}
+
+impl TileStore {
+    /// `count` evenly spaced entries of the store in index order (all of them when `count` is 0 or at least the number of
+    /// entries), read and CRC-checked. An entry that cannot be read is an `Err` in its place, so a verifier can report it.
+    pub fn sample_records(&self, count: usize) -> Vec<Result<Stored, PackError>> {
+        let total = self.len();
+        let picks: Vec<usize> =
+            if count == 0 || count >= total { (0..total).collect() } else { (0..count).map(|i| pick(i, count, total)).collect() };
+        let mut out = Vec::with_capacity(picks.len());
+        for n in picks {
+            let mut left = n;
+            for pack in &self.packs {
+                if left < pack.entries.len() {
+                    let e = &pack.entries[left];
+                    out.push(pack.read(e).map(|record| Stored { record, pack: pack.path.display().to_string(), offset: e.offset }));
+                    break;
+                }
+                left -= pack.entries.len();
+            }
         }
         out
     }

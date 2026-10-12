@@ -263,7 +263,9 @@ fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile
     }
 }
 
-/// The persistent key of the height tile of `field` at `tile` with `res` samples per edge. `radius_m` is the body's
+/// The persistent key of the height tile of `field` at `tile` with `res` cells (intervals) per edge, so `(res + 1)^2`
+/// samples: the unit of `TileData::res` and of the mesh's `cells`, which is why a mesh key chains the height key of the
+/// same number. `radius_m` is the body's
 /// radius: heights of the reference generator do not depend on it, but the body parameter hash covers it (ADR 0018).
 pub fn height_key(field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, res: u32, radius_m: f64) -> CacheKey {
     let mut inputs = field_inputs(Kind::Height, field, map, tile, radius_m);
@@ -271,13 +273,18 @@ pub fn height_key(field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, 
     cache_key(&inputs)
 }
 
-/// The persistent key of the mesh of that tile: chained to its height key, with the grid size, the skirt fraction and the
-/// mesh version as output parameters.
-pub fn mesh_key(field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, cells: u32, radius_m: f64) -> CacheKey {
+/// The inputs of the persistent key of the mesh of that tile: chained to the height key of the same tile at the same number
+/// of cells (`source`), with the grid size, the skirt fraction and the mesh version as output parameters.
+pub fn mesh_key_inputs(field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, cells: u32, radius_m: f64) -> KeyInputs {
     let mut inputs = field_inputs(Kind::Mesh, field, map, tile, radius_m);
     inputs.source = Some(height_key(field, map, tile, cells, radius_m));
     inputs.output_params.insert(PARAM_RESOLUTION, cells.to_le_bytes().to_vec());
     inputs.output_params.insert(PARAM_SKIRT_FRACTION, SKIRT_FRACTION.to_bits().to_le_bytes().to_vec());
     inputs.output_params.insert(PARAM_MESH_VERSION, MESH_VERSION.to_le_bytes().to_vec());
-    cache_key(&inputs)
+    inputs
+}
+
+/// The persistent key of the mesh of that tile (see [`mesh_key_inputs`]).
+pub fn mesh_key(field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, cells: u32, radius_m: f64) -> CacheKey {
+    cache_key(&mesh_key_inputs(field, map, tile, cells, radius_m))
 }
