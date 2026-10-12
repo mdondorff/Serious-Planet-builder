@@ -230,7 +230,9 @@ impl HeightField for TerrainField<'_> {
                     return global;
                 }
             };
-            let spread = (du + dv) * reach * (1.0 + 1e-9) + 1e-6;
+            // The anchor and the base at a cap point are both rounded to f32 by the blend: one ulp (2^-23 relative) apart at most
+            // beyond the slope term.
+            let spread = (du + dv) * reach * (1.0 + 1e-9) + 1e-6 + anchor.abs() * 2.4e-7;
             lo = lo.min(flo.max(anchor - spread));
             hi = hi.max(fhi.min(anchor + spread));
         }

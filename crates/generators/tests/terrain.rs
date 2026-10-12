@@ -18,7 +18,7 @@ fn grid(res: u32) -> GlobalGrid {
     bake(seed, &TangentWarp, res, 4).unwrap()
 }
 
-fn field<'a>(src: &'a GridSource<'a>, key: [u8; 16]) -> TerrainField<'a> {
+fn field<'a>(src: &'a dyn planet_generators::global::LatticeSource, key: [u8; 16]) -> TerrainField<'a> {
     let def = WorldDefinition::single_planet(R, SEED);
     TerrainGenerator.field(&GenContext::new(&def), BodyId::PLANET, src, key).unwrap()
 }
@@ -111,6 +111,45 @@ fn bounds_hug_the_terrain_on_small_caps_and_cover_f32_rounded_heights() {
     }
     // A 640 m cap holds a few tens of metres of relief, not kilometres.
     assert!(worst < 400.0, "worst extent {worst} m");
+}
+
+/// A lattice whose adjacent samples differ by one f32 ulp just above a binade.
+struct Ulp(f32);
+
+impl planet_generators::global::LatticeSource for Ulp {
+    fn res(&self) -> u32 {
+        4
+    }
+    fn at(&self, _: Face, i: u32, _: u32) -> Result<planet_generators::global::GlobalSample, planet_generators::global::ReadError> {
+        let e = if i % 2 == 0 { self.0 } else { f32::from_bits(self.0.to_bits() + 1) };
+        Ok(planet_generators::global::GlobalSample { continent: 1.0, elevation_m: e, temperature_c: 0.0, precipitation_mm: 0.0 })
+    }
+}
+
+// spec: GEN-016
+#[test]
+fn bounds_cover_f32_rounded_heights_where_adjacent_samples_are_one_ulp_apart() {
+    for base in [130.0f32, 4100.0] {
+        let src = Ulp(base);
+        let f = field(&src, KEY);
+        // Caps around the rounding midpoint of the blend between two samples of the face's centre cell.
+        let mut worst = 0usize;
+        for n in 0..4000 {
+            // Lattice position u = (s + 1) * 2 = 1.5 is the midpoint between samples 1 and 2 (weight 1/2).
+            let s = -0.25 + (f64::from(n) - 2000.0) * 1e-10;
+            let c = face_to_direction(&TangentWarp, Face(0), s, 0.1);
+            for theta in [1e-9, 1e-8, 1e-7] {
+                let (lo, hi) = f.height_bounds(c, theta);
+                for k in 0..8 {
+                    let h = f64::from(f.height(offset(c, theta, f64::from(k) * 0.8)) as f32);
+                    if !(lo <= h && h <= hi) {
+                        worst += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(worst, 0, "{worst} f32 heights outside the bounds at base {base}");
+    }
 }
 
 // spec: GEN-016
