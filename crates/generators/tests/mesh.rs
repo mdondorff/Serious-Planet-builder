@@ -80,6 +80,35 @@ fn coarse_positions_are_the_parent_grid_points() {
     }
 }
 
+// spec: LOD-004, REND-009
+#[test]
+fn coarse_heights_are_the_parent_grid_heights() {
+    // The height morphs with the position: a child's coarse height follows the same parent-grid rule as its coarse position
+    // (even-even: the parent vertex; edge and diagonal: the midpoint of the parent cell's corner heights).
+    let parent = id(4, 5, 7, 9);
+    let pm = tile_mesh(1, &TangentWarp, parent, CELLS, R);
+    let w = CELLS + 1;
+    let ph = |i: u32, j: u32| f64::from(pm.vertices[(j * w + i) as usize].height);
+    for child in parent.children().unwrap() {
+        let cm = tile_mesh(1, &TangentWarp, child, CELLS, R);
+        let (cx, cy) = ((child.x() - 2 * parent.x()) * (CELLS / 2), (child.y() - 2 * parent.y()) * (CELLS / 2));
+        let mut worst = 0.0f64;
+        for j in 0..=CELLS {
+            for i in 0..=CELLS {
+                let (pi, pj) = (cx + i / 2, cy + j / 2);
+                let expected = match (i % 2, j % 2) {
+                    (0, 0) => ph(pi, pj),
+                    (1, 0) => (ph(pi, pj) + ph(pi + 1, pj)) * 0.5,
+                    (0, 1) => (ph(pi, pj) + ph(pi, pj + 1)) * 0.5,
+                    _ => (ph(pi, pj) + ph(pi + 1, pj + 1)) * 0.5,
+                };
+                worst = worst.max((expected - f64::from(cm.vertices[(j * w + i) as usize].coarse_height)).abs());
+            }
+        }
+        assert!(worst < 0.002, "child {child:?}: coarse heights differ from the parent grid by {worst} m");
+    }
+}
+
 // spec: GEN-004, REND-009
 #[test]
 fn neighbouring_meshes_share_border_positions_across_faces() {
@@ -171,12 +200,13 @@ fn a_fully_morphed_border_meets_the_coarser_neighbours_border_across_faces() {
             let pm = tile_mesh(1, &m, p, CELLS, R);
             // Border polyline of P: all border vertices of the parent mesh (any side).
             let n = CELLS;
-            let border: Vec<Vec3> =
-                (0..=n).flat_map(|k| [world(&pm, k, 0), world(&pm, k, n), world(&pm, 0, k), world(&pm, n, k)]).collect();
-            let polyline_dist = |q: Vec3| {
-                let mut best = f64::MAX;
-                for a in &border {
-                    for b in &border {
+            let at = |i: u32, j: u32| (world(&pm, i, j), f64::from(pm.vertices[(j * (n + 1) + i) as usize].height));
+            let border: Vec<(Vec3, f64)> = (0..=n).flat_map(|k| [at(k, 0), at(k, n), at(0, k), at(n, k)]).collect();
+            // Nearest point on P's border polyline to `q`, with the distance and P's height linearly interpolated there.
+            let polyline = |q: Vec3| {
+                let (mut best, mut height) = (f64::MAX, 0.0);
+                for (a, ha) in &border {
+                    for (b, hb) in &border {
                         // Only segments of adjacent lattice points count: lattice spacing bound.
                         if a.distance(*b) < 1.0e-6
                             || a.distance(*b) > 1.2 * R * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << p.level()) / f64::from(n)
@@ -185,10 +215,13 @@ fn a_fully_morphed_border_meets_the_coarser_neighbours_border_across_faces() {
                         }
                         let ab = *b - *a;
                         let tt = ((q - *a).dot(ab) / ab.dot(ab)).clamp(0.0, 1.0);
-                        best = best.min((q - (*a + ab * tt)).length());
+                        let dist = (q - (*a + ab * tt)).length();
+                        if dist < best {
+                            (best, height) = (dist, ha + (hb - ha) * tt);
+                        }
                     }
                 }
-                best
+                (best, height)
             };
             let ks: Vec<(u32, u32)> = (0..=n)
                 .map(|k| match side {
@@ -198,8 +231,16 @@ fn a_fully_morphed_border_meets_the_coarser_neighbours_border_across_faces() {
                     Side::South => (k, 0),
                 })
                 .collect();
-            let worst = ks.iter().map(|&(i, j)| polyline_dist(coarse_world(&tm, i, j))).fold(0.0f64, f64::max);
+            let (mut worst, mut worst_h) = (0.0f64, 0.0f64);
+            for &(i, j) in &ks {
+                let (dist, expected_h) = polyline(coarse_world(&tm, i, j));
+                worst = worst.max(dist);
+                worst_h = worst_h.max((expected_h - f64::from(tm.vertices[(j * (n + 1) + i) as usize].coarse_height)).abs());
+            }
             assert!(worst < 0.5, "{t:?} {side:?}: morphed border vertex is {worst} m off the coarser neighbour's border");
+            // The height morphs with the position: fully morphed, the border height is the coarser neighbour's own
+            // (linearly interpolated) border height there, so a morphed tile meets its coarser neighbour without a step.
+            assert!(worst_h < 0.002, "{t:?} {side:?}: morphed border height is {worst_h} m off the coarser neighbour's border height");
             checked += 1;
         }
     }
@@ -218,7 +259,8 @@ fn vertex_serialisation_matches_the_documented_gpu_layout() {
     assert_eq!(&f[o[1]..o[1] + 3], &v.coarse);
     assert_eq!(&f[o[2]..o[2] + 3], &v.normal);
     assert_eq!(f[o[3]], v.height);
-    assert_eq!(planet_generators::mesh::MeshVertex::STRIDE, 40);
+    assert_eq!(f[o[4]], v.coarse_height);
+    assert_eq!(planet_generators::mesh::MeshVertex::STRIDE, 44);
 }
 
 /// Worst angle (degrees) between the normals of coincident border vertices of two neighbouring tiles.
@@ -310,15 +352,15 @@ fn normals_follow_the_terrain_and_agree_with_the_lattice_slope() {
     assert!(max_tilt > 0.05, "the terrain must tilt the normals measurably for this test to mean anything, got {max_tilt} degrees");
 }
 
-/// Committed known answers (mesh version 3, generator version 2, hash version 1): identical on every platform.
+/// Committed known answers (mesh version 4, generator version 2, hash version 1): identical on every platform.
 const KNOWN_MESH_HASHES: [((u8, u8, u32, u32), u64); 3] =
-    [((0, 0, 0, 0), 15776459141216401953), ((3, 3, 5, 2), 6673722714559880990), ((5, 12, 1000, 77), 6693367380330789677)];
+    [((0, 0, 0, 0), 4309492847019539682), ((3, 3, 5, 2), 10016309921869509435), ((5, 12, 1000, 77), 12398387814155396584)];
 
 // spec: GEN-010
 #[test]
 fn mesh_hashes_match_the_committed_known_answers() {
     // The table belongs to these versions: bumping either must come with new answers.
-    assert_eq!((planet_generators::mesh::MESH_VERSION, planet_generators::height::GENERATOR_VERSION), (3, 2));
+    assert_eq!((planet_generators::mesh::MESH_VERSION, planet_generators::height::GENERATOR_VERSION), (4, 2));
     for ((f, l, x, y), want) in KNOWN_MESH_HASHES {
         let got = tile_mesh(1, &TangentWarp, id(f, l, x, y), CELLS, R).content_hash();
         assert_eq!(got, want, "mesh ({f},{l},{x},{y}) changed: if intended, bump MESH_VERSION and update the table (got {got})");

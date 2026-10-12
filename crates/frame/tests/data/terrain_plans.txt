@@ -1,13 +1,13 @@
-orbit-20000km: 14 nodes, plan 8538025fdf638214
-high-2000km: 71 nodes, plan f7d5a8a8d1049f48
-aerial-200km: 100 nodes, plan 85a39b04865dd163
-aerial-20km: 171 nodes, plan b69eb0ab88f1f6d7
-low-2km: 378 nodes, plan 9bc194338084f1eb
-ground-200m: 662 nodes, plan d1711bad9bb7b924
-ground-1m: 1330 nodes, plan 9406197dacf9c95f
-north-pole-1km: 402 nodes, plan 737250e7a5f6bde4
-cube-corner-1km: 541 nodes, plan aaa59f70fc1f69bd
-face-edge-1km: 534 nodes, plan 8105cf10175a9d17
-orbit-20000km [face]: 14 nodes, plan 1d0c6a3cd3a66ced
-aerial-20km [face]: 171 nodes, plan e9023c41782c460d
-cube-corner-1km [depth]: 541 nodes, plan 41ceefaae9833f13
+orbit-20000km: 14 nodes, plan 3f49bd44082a2022
+high-2000km: 71 nodes, plan 8b29b065e0e3f431
+aerial-200km: 100 nodes, plan c9d30c8cfbb12f6b
+aerial-20km: 171 nodes, plan 3324345bf21f6c20
+low-2km: 378 nodes, plan 8ab98f256eb16080
+ground-200m: 662 nodes, plan 432229540e08107a
+ground-1m: 1330 nodes, plan 8be5d7362cb8bbc3
+north-pole-1km: 402 nodes, plan ab068dfa3211e072
+cube-corner-1km: 541 nodes, plan e1e36ccc5befcf17
+face-edge-1km: 534 nodes, plan 930e85a187016068
+orbit-20000km [face]: 14 nodes, plan cf03b49ef16aa4d7
+aerial-20km [face]: 171 nodes, plan aee10a93a6103558
+cube-corner-1km [depth]: 541 nodes, plan 2f96377e5ab4b9ea

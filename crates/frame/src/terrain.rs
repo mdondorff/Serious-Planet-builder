@@ -21,10 +21,13 @@ pub enum TerrainView {
     /// Fixed-sun hillshade with a height tint, an adaptive metric grid and fine contours: stays readable from orbit down
     /// to 1 m, where the flat-colour views are a single colour. Appended last so the other views keep their shader index.
     Relief,
+    /// Grey ramp of the height the shader morphs to minus the vertex's own height, over the plan's height range used as the
+    /// delta window (a test or a human sets a narrow range to see centimetres): the observable of the height geomorph.
+    MorphHeight,
 }
 
 impl TerrainView {
-    pub const ALL: [TerrainView; 8] = [
+    pub const ALL: [TerrainView; 9] = [
         TerrainView::Face,
         TerrainView::TileId,
         TerrainView::Level,
@@ -33,6 +36,7 @@ impl TerrainView {
         TerrainView::Normals,
         TerrainView::Depth,
         TerrainView::Relief,
+        TerrainView::MorphHeight,
     ];
 
     pub fn name(self) -> &'static str {
@@ -45,6 +49,7 @@ impl TerrainView {
             TerrainView::Normals => "normals",
             TerrainView::Depth => "depth",
             TerrainView::Relief => "relief",
+            TerrainView::MorphHeight => "morph-height",
         }
     }
 
@@ -218,7 +223,7 @@ impl CountBudget {
         max_draw_calls: 10_000,
         max_triangles: 10_000 * 2_304,
         max_resident_tiles: 10_000,
-        max_upload_bytes: 10_000 * 1_221 * 40,
+        max_upload_bytes: 10_000 * 1_221 * 44,
     };
 }
 

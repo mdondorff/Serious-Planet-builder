@@ -144,9 +144,10 @@ fn a_terrain_bundle_replays_to_the_same_pixels_and_refuses_changed_inputs() {
     let text = std::fs::read_to_string(&bundle).unwrap();
     // A version mismatch is refused before anything is replanned.
     let bad = tmp("told.repro");
-    std::fs::write(&bad, text.replacen("mesh_version 3", "mesh_version 2", 1)).unwrap();
+    let (current, old) = (planet_generators::mesh::MESH_VERSION, planet_generators::mesh::MESH_VERSION - 1);
+    std::fs::write(&bad, text.replacen(&format!("mesh_version {current}"), &format!("mesh_version {old}"), 1)).unwrap();
     let e = run(&["test-render", "--adapter", "software", "--repro", bad.to_str().unwrap()]).unwrap_err();
-    assert!(e.contains("mesh version 2") && e.contains("this build has"), "{e}");
+    assert!(e.contains(&format!("mesh version {old}")) && e.contains("this build has"), "{e}");
     // The bundle records the definition it was made from; a hash this build cannot rebuild is refused (CON-19).
     let line = text.lines().find(|l| l.starts_with("definition_hash ")).expect("definition_hash line").to_string();
     assert_ne!(line, "definition_hash 0000000000000000", "a new bundle records the real definition hash");

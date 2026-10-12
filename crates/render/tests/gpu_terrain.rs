@@ -118,7 +118,7 @@ fn every_debug_view_renders_and_obeys_its_colour_rules() {
                 assert!(distinct.len() >= 3, "a perspective view must show several levels, got {}", distinct.len());
             }
             TerrainView::Normals => assert!(covered.iter().any(|p| p[0] != p[1] || p[1] != p[2]), "normals view must be coloured"),
-            TerrainView::Height | TerrainView::Depth => {
+            TerrainView::Height | TerrainView::Depth | TerrainView::MorphHeight => {
                 assert!(covered.iter().all(|p| p[0] == p[1] && p[1] == p[2]), "{} view must be grey", view.name());
             }
             TerrainView::Morph => {
@@ -132,6 +132,84 @@ fn every_debug_view_renders_and_obeys_its_colour_rules() {
             }
             TerrainView::TileId => {}
         }
+    }
+}
+
+/// Share of the terrain pixels that belong to a wide dark band: dark pixels (clearly darker than the typical terrain
+/// pixel) at the centre of a `size` x `size` window that is at least 80 % dark. A thin line, or the crossing of two thin
+/// lines, fills far less of such a window whatever its slope; a band at least `size` pixels wide fills it.
+fn wide_dark_share(img: &Image, clear: [u8; 4], size: u32) -> f64 {
+    let luma = |p: [u8; 4]| 0.299 * f64::from(p[0]) + 0.587 * f64::from(p[1]) + 0.114 * f64::from(p[2]);
+    let mut lumas: Vec<f64> = img.pixels().filter(|p| *p != clear).map(luma).collect();
+    if lumas.is_empty() {
+        return 0.0;
+    }
+    lumas.sort_by(f64::total_cmp);
+    let dark_below = 0.75 * lumas[lumas.len() / 2];
+    let (w, h) = (img.width as usize, img.height as usize);
+    let dark: Vec<bool> = (0..w * h)
+        .map(|i| {
+            let p = img.pixel((i % w) as u32, (i / w) as u32);
+            p != clear && luma(p) < dark_below
+        })
+        .collect();
+    // Summed-area table of the dark mask: sat[(y + 1) * (w + 1) + x + 1] counts dark pixels in [0, x] x [0, y].
+    let mut sat = vec![0u32; (w + 1) * (h + 1)];
+    for y in 0..h {
+        for x in 0..w {
+            sat[(y + 1) * (w + 1) + x + 1] =
+                u32::from(dark[y * w + x]) + sat[y * (w + 1) + x + 1] + sat[(y + 1) * (w + 1) + x] - sat[y * (w + 1) + x];
+        }
+    }
+    let half = (size / 2) as usize;
+    let mut wide = 0usize;
+    for y in half..h.saturating_sub(half) {
+        for x in half..w.saturating_sub(half) {
+            if !dark[y * w + x] {
+                continue;
+            }
+            let (x0, y0, x1, y1) = (x - half, y - half, x - half + size as usize, y - half + size as usize);
+            let count = sat[y1 * (w + 1) + x1] + sat[y0 * (w + 1) + x0] - sat[y0 * (w + 1) + x1] - sat[y1 * (w + 1) + x0];
+            if f64::from(count) >= 0.8 * f64::from(size * size) {
+                wide += 1;
+            }
+        }
+    }
+    wide as f64 / lumas.len() as f64
+}
+
+/// The relief view of the ground-1m camera as it looked before the grid fix: a wide dark band (the 10 m grid decade lost
+/// centimetres to f32 rounding, which made plateaus) along the diagonal. 256x192, rendered by `test-render --script 6`.
+const BAND_BEFORE_FIX: &str = "tests/data/relief_band_before_fix.png";
+
+// spec: REND-006
+#[test]
+fn the_band_detector_flags_the_pre_fix_relief_image() {
+    let img = planet_testkit::read_png(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(BAND_BEFORE_FIX)).unwrap();
+    let share = wide_dark_share(&img, planet_frame::plan::CLEAR_COLOR, 6);
+    assert!(share > 0.01, "the detector must flag the known defect image (wide dark share {share:.5}, expected about 0.018)");
+}
+
+// spec: REND-006
+#[test]
+fn the_relief_grid_has_only_thin_lines_at_the_ground_cameras() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    for index in [5usize, 6] {
+        let (name, camera) = scripted_views(R, 256.0 / 192.0, SEED)[index];
+        let lod = LodParams { cells: 16, viewport_h_px: 192.0, tau_px: 4.0, max_level: 26, ..LodParams::earth_1080p() };
+        let plan = plan_terrain(&TerrainRequest {
+            camera,
+            size: (256, 192),
+            view: TerrainView::Relief,
+            lod,
+            face_mapping: "tangent-v1".into(),
+            seed: 1,
+        })
+        .unwrap();
+        let meshes: Vec<TileMesh> = plan.nodes.iter().map(|n| tile_mesh(SEED, &TangentWarp, n.tile, 16, R)).collect();
+        let (img, _) = render(&ctx, &plan, &meshes);
+        let share = wide_dark_share(&img, plan.clear_color, 6);
+        assert!(share < 0.001, "{name}: {:.2} % of the terrain is a wide dark band, not thin grid lines (grid precision?)", share * 100.0);
     }
 }
 

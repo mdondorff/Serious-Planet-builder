@@ -325,8 +325,9 @@ const TERRAIN_CELLS: u32 = 16;
 /// `--scene terrain`: node selection -> TerrainPlan -> meshes -> GPU, one of the ten scripted cameras.
 pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Result<(), String> {
     use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainRequest, TerrainView};
-    let view = TerrainView::parse(&o.view)
-        .ok_or_else(|| format!("--view must be one of face, tile-id, level, morph, height, normals, depth, relief, got '{}'", o.view))?;
+    let view = TerrainView::parse(&o.view).ok_or_else(|| {
+        format!("--view must be one of face, tile-id, level, morph, height, normals, depth, relief, morph-height, got '{}'", o.view)
+    })?;
     let views = scripted_views(RADIUS_M, f64::from(TERRAIN_SIZE.0) / f64::from(TERRAIN_SIZE.1), o.seed);
     let index = match o.script.parse::<usize>() {
         Ok(i) => i,
@@ -518,8 +519,9 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
     // The flat-colour views are one colour per tile, which is a solid frame once the camera is a metre above the ground,
     // so a flight defaults to the relief view unless `--view` says otherwise (TEST-013).
     let view_name = if o.given.contains("--view") { o.view.as_str() } else { "relief" };
-    let view = TerrainView::parse(view_name)
-        .ok_or_else(|| format!("--view must be one of face, tile-id, level, morph, height, normals, depth, relief, got '{view_name}'"))?;
+    let view = TerrainView::parse(view_name).ok_or_else(|| {
+        format!("--view must be one of face, tile-id, level, morph, height, normals, depth, relief, morph-height, got '{view_name}'")
+    })?;
     let size = o.size.unwrap_or((1280, 720));
     let lod = LodParams { cells: o.cells, viewport_h_px: f64::from(size.1), tau_px: o.tau, max_level: 26, ..LodParams::earth_1080p() };
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, o.tau))?;

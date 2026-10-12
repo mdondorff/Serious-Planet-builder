@@ -24,7 +24,7 @@ modes:
                              with the production LOD defaults (override with --cells, --tau; --view applies; default size 1280x720,
                              small sizes can fail LOD validation) for the real-GPU jitter review
     --stream                 generate terrain tiles asynchronously through the streaming path (same image as the default)
-    --view face|tile-id|level|morph|height|normals|depth|relief   debug view (tiles scene: face, tile-id, height; a flight defaults to relief)
+    --view face|tile-id|level|morph|height|normals|depth|relief|morph-height   debug view (tiles scene: face, tile-id, height; a flight defaults to relief)
     --tile FACE,LEVEL,X,Y    tile to draw (repeatable; default: a tile and its east neighbour)
     --seed N --res N         generator seed and tile resolution (cells, power of two)
     --bundle <file>          write a repro bundle of the render
