@@ -1,5 +1,5 @@
 # 0019 Tile storage: an append-only pack with a rebuildable index, Hilbert-ordered
-Status: accepted (owner, 2026-10-11; decided in the opus-planner session after the review amendments; amended in part by ADR 0024, 2026-10-12)
+Status: accepted (owner, 2026-10-11; decided in the opus-planner session after the review amendments; amended in part by ADRs 0024 and 0025, 2026-10-12)
 Date: 2026-10-11
 Source: background report §4 (Formats), ADR 0003 ("Hilbert-ordered storage keys are a separate decision with the tile storage ADR"), ADR 0006, ADR 0018, M3 queue item 5; constitution CON-05, CON-14, CON-22
 
