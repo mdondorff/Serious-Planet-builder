@@ -234,6 +234,16 @@ pub fn baseline_path(log: &std::path::Path) -> std::path::PathBuf {
     log.with_file_name(format!("{stem}.last-valid.json"))
 }
 
+/// The log to compare with: the stored baseline, or, before one exists, the previous log of the scene.
+pub fn choose_baseline(stored: Option<Vec<u8>>, previous_log: Option<Vec<u8>>) -> Option<Vec<u8>> {
+    stored.or(previous_log)
+}
+
+/// Whether a session's log replaces the baseline: only a valid session does.
+pub fn replaces_baseline(new: &[u8]) -> bool {
+    summarize_log(new).is_ok_and(|s| s.valid)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rise {
     pub path: String,
@@ -403,6 +413,18 @@ mod tests {
         assert!(one(Some(&good), &small)[0].contains("2560x1440") && one(Some(&good), &small)[0].contains("1280x720"));
         assert!(one(Some("{not json"), &good)[0].contains("could not be read"));
         assert!(one(Some(&good), "{not json")[0].contains("could not be read"));
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn only_a_valid_session_replaces_the_baseline_and_the_previous_log_stands_in_before_one_exists() {
+        let good = log(true, (2560, 1440), [3.0; 3], [0.06; 3], 8687);
+        let bad = log(false, (2560, 1440), [3.0; 3], [0.06; 3], 8687);
+        assert!(replaces_baseline(good.as_bytes()));
+        assert!(!replaces_baseline(bad.as_bytes()) && !replaces_baseline(b"{not json"));
+        assert_eq!(choose_baseline(Some(b"a".to_vec()), Some(b"b".to_vec())), Some(b"a".to_vec()));
+        assert_eq!(choose_baseline(None, Some(b"b".to_vec())), Some(b"b".to_vec()));
+        assert_eq!(choose_baseline(None, None), None);
     }
 
     // spec: TEST-012

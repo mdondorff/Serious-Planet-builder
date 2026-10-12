@@ -985,13 +985,13 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     // Compare with the last valid session of this scene (report only), then keep this one as the baseline if it is valid.
     let baseline = planet_perf::compare::baseline_path(&path);
     // Without a baseline file yet, the previous log of this scene stands in (it is used only if it was valid).
-    let last_valid = std::fs::read(&baseline).ok().or_else(|| std::fs::read(&path).ok());
+    let last_valid = planet_perf::compare::choose_baseline(std::fs::read(&baseline).ok(), std::fs::read(&path).ok());
     let lines = planet_perf::compare::comparison_lines(last_valid.as_deref(), json.as_bytes());
     for line in &lines {
         writeln!(out, "{line}").map_err(err)?;
     }
     std::fs::write(&path, &json).map_err(err)?;
-    if planet_perf::compare::summarize_log(json.as_bytes()).is_ok_and(|s| s.valid) {
+    if planet_perf::compare::replaces_baseline(json.as_bytes()) {
         std::fs::write(&baseline, &json).map_err(err)?;
     }
     writeln!(out, "wrote {}", path.display()).map_err(err)

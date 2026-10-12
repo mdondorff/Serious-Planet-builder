@@ -471,6 +471,10 @@ fn every_standard_view_stays_within_its_own_pinned_counts() {
         if let Err(e) = plan.counts().check(&budget) {
             failures.push(format!("{name}: {e} (nodes {} against pin {pin})", plan.nodes.len()));
         }
+        // A pin stays tight: a view more than 10 % under its pin has its pin lowered with it.
+        if u64::from(pin) > plan.nodes.len() as u64 * 10 / 9 {
+            failures.push(format!("{name}: {} nodes is more than 10 % under its pin {pin}: lower the pin", plan.nodes.len()));
+        }
     }
     assert!(failures.is_empty(), "plan counts above their pins:\n{}", failures.join("\n"));
 }
