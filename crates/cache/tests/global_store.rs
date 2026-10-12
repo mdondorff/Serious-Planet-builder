@@ -140,6 +140,10 @@ fn a_block_key_covers_the_tile_the_cells_the_grid_and_the_stage_key_and_the_know
     assert_ne!(base, w.block_key(tile(), 4), "B is an output parameter");
     assert_ne!(base, w.block_key(TileId::new(Face(2), 3, 1, 3).unwrap(), cells), "the grid (cells << level) is an output parameter");
     assert_ne!(base, world(8).block_key(tile(), cells), "another seed");
+    let mut two = WorldDefinition::single_planet(R, 7);
+    two.set_body_radius(BodyId(1), R);
+    let moon = GlobalWorld::from_definition_of_body(&two, BodyId(1)).unwrap();
+    assert_ne!(base, moon.block_key(tile(), cells), "another body");
     // The key is the ADR 0018 encoding of kind 3: source key, B under tag 1, res under tag 4, empty read set.
     let inputs = w.block_key_inputs(tile(), cells);
     assert_eq!(inputs.kind, Kind::GlobalBlock);
