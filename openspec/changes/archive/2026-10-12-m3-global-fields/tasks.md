@@ -1,0 +1,3 @@
+- [x] 1.1 Field, bake, products
+- [x] 1.2 GEN-013 and tests, known answers
+- [x] 1.3 numerics-reviewer, spec-guardian, verifier, status line

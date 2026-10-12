@@ -5,6 +5,7 @@
 //! bit-identical across platforms and thread counts.
 
 pub mod dump;
+pub mod global;
 pub mod height;
 pub mod manifest;
 pub mod mesh;
