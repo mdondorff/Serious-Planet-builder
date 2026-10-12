@@ -99,16 +99,16 @@ pub struct KeyInputs {
 }
 
 /// A length that must fit the encoding's `u32` prefix; a longer part would alias another input, so it fails loudly.
-fn len32(len: usize) -> [u8; 4] {
+pub(crate) fn len32(len: usize) -> [u8; 4] {
     u32::try_from(len).expect("a key part longer than u32::MAX bytes").to_le_bytes()
 }
 
-fn put_str(out: &mut Vec<u8>, s: &str) {
+pub(crate) fn put_str(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(&len32(s.len()));
     out.extend_from_slice(s.as_bytes());
 }
 
-fn derive(context: &str, material: &[u8]) -> [u8; 16] {
+pub(crate) fn derive(context: &str, material: &[u8]) -> [u8; 16] {
     let full = blake3::derive_key(context, material);
     full[..16].try_into().expect("16 of 32 bytes")
 }

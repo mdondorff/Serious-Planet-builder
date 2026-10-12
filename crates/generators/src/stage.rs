@@ -43,7 +43,7 @@ impl Stage {
     }
 
     /// The number the key sees: fixed here so reordering the variants cannot re-key every output.
-    fn tag(self) -> u64 {
+    pub fn tag(self) -> u64 {
         match self {
             Stage::GlobalCoarse => 0,
             Stage::Regional => 1,
@@ -76,7 +76,7 @@ impl Scope {
 }
 
 /// The scope a stage's outputs have: the global bake is per body, regional and local outputs are per tile.
-fn scope_fits(stage: Stage, scope: Scope) -> bool {
+pub fn scope_fits(stage: Stage, scope: Scope) -> bool {
     matches!((stage, scope), (Stage::GlobalCoarse, Scope::Global) | (Stage::Regional | Stage::Local, Scope::Tile(_)))
 }
 
