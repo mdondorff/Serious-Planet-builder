@@ -65,6 +65,8 @@ impl fmt::Debug for CacheKey {
 pub enum Kind {
     Height = 1,
     Mesh = 2,
+    /// A block of the global-coarse bake (ADR 0026 point 6).
+    GlobalBlock = 3,
 }
 
 /// One entry of a read set, in its 128-bit form (ADR 0018).
@@ -237,6 +239,8 @@ pub fn cache_key(inputs: &KeyInputs) -> CacheKey {
 pub const PARAM_RESOLUTION: u8 = 1;
 pub const PARAM_SKIRT_FRACTION: u8 = 2;
 pub const PARAM_MESH_VERSION: u8 = 3;
+/// Cells per face edge of a stored global bake (a block's own `PARAM_RESOLUTION` is its cells per block edge, ADR 0026 point 6).
+pub const PARAM_GRID_RES: u8 = 4;
 
 fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> KeyInputs {
     assert!(

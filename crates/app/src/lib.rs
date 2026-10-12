@@ -14,7 +14,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
   editor        interactive editor/viewer (window arrives in M2); --smoke starts and exits; --offscreen runs the skeleton without a window
-  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --smoke starts and exits
+  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-level L --global-cells B] bakes the global-coarse field (continents, elevation, climate) of cells B << L per face edge into a tile store as blocks and prints the time per sample; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
@@ -71,6 +71,20 @@ pub struct Options {
     pub sample: usize,
     /// `--verify-cache`: entries that are all stale are expected (the definition changed on purpose), not a failure.
     pub allow_stale: bool,
+    /// `generate`: bake the global-coarse field into a tile store in this directory as blocks (STRM-012).
+    pub global_dir: Option<PathBuf>,
+    /// `--global-dir`: the tile level of the blocks (a grid of cells << level cells per face edge).
+    pub global_level: u8,
+    /// `--global-dir`: cells per block edge (a power of two up to 1024).
+    pub global_cells: u32,
+    /// `generate`: regenerate a sample of the global bake stored in this directory and compare.
+    pub verify_global: Option<PathBuf>,
+    /// `generate`: write the data products (cube nets and maps) of an in-memory bake into this directory.
+    pub global_products: Option<PathBuf>,
+    /// `--global-products`: cells per face edge of the in-memory bake.
+    pub global_res: u32,
+    /// `--global-dir`: worker threads (0 = all cores).
+    pub threads: usize,
     pub offscreen: bool,
     pub script: String,
     pub stream: bool,
@@ -115,6 +129,13 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         verify_cache: None,
         sample: 0,
         allow_stale: false,
+        global_dir: None,
+        global_level: 3,
+        global_cells: 256,
+        verify_global: None,
+        global_products: None,
+        global_res: 256,
+        threads: 0,
         offscreen: false,
         script: "3".into(),
         stream: false,
@@ -157,6 +178,19 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--cache-dir" => o.cache_dir = Some(PathBuf::from(it.next().ok_or("--cache-dir needs a directory")?)),
             "--verify-cache" => o.verify_cache = Some(PathBuf::from(it.next().ok_or("--verify-cache needs a directory")?)),
             "--allow-stale" => o.allow_stale = true,
+            "--global-dir" => o.global_dir = Some(PathBuf::from(it.next().ok_or("--global-dir needs a directory")?)),
+            "--global-level" => {
+                o.global_level = it.next().ok_or("--global-level needs a value")?.parse().map_err(|e| format!("--global-level: {e}"))?
+            }
+            "--global-cells" => {
+                o.global_cells = it.next().ok_or("--global-cells needs a value")?.parse().map_err(|e| format!("--global-cells: {e}"))?
+            }
+            "--verify-global" => o.verify_global = Some(PathBuf::from(it.next().ok_or("--verify-global needs a directory")?)),
+            "--global-products" => o.global_products = Some(PathBuf::from(it.next().ok_or("--global-products needs a directory")?)),
+            "--global-res" => {
+                o.global_res = it.next().ok_or("--global-res needs a value")?.parse().map_err(|e| format!("--global-res: {e}"))?
+            }
+            "--threads" => o.threads = it.next().ok_or("--threads needs a count")?.parse().map_err(|e| format!("--threads: {e}"))?,
             "--sample" => o.sample = it.next().ok_or("--sample needs a count")?.parse().map_err(|e| format!("--sample: {e}"))?,
             "--region" => {
                 let v = it.next().ok_or("--region needs FACE,LEVEL")?;
@@ -189,7 +223,21 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
 use planet_cache::tiles::MAX_REGION_LEVEL;
 
 /// Options that only the tile store commands of `generate` understand.
-pub(crate) const STORE_OPTIONS: [&str; 6] = ["--world", "--cache-dir", "--verify-cache", "--region", "--sample", "--allow-stale"];
+pub(crate) const STORE_OPTIONS: [&str; 13] = [
+    "--world",
+    "--cache-dir",
+    "--verify-cache",
+    "--region",
+    "--sample",
+    "--allow-stale",
+    "--global-dir",
+    "--global-level",
+    "--global-cells",
+    "--verify-global",
+    "--global-products",
+    "--global-res",
+    "--threads",
+];
 
 /// Options a `--flight` run would ignore, and the flight-only options other runs would ignore (TEST-013).
 const FLIGHT_EXCLUDES: [&str; 12] = [
@@ -464,6 +512,71 @@ mod tests {
         // Unless stale entries are expected (the definition changed on purpose).
         let stale = run_str(&["generate", "--verify-cache", &store, "--seed", "4", "--allow-stale"]).unwrap();
         assert!(stale.contains("4 stale without a known reason") && stale.contains("0 differ"), "{stale}");
+    }
+
+    // spec: STRM-012
+    #[test]
+    fn generate_bakes_the_global_field_into_blocks_and_verify_global_checks_them() {
+        let d = TempDir::new("global");
+        let store = d.s("store");
+        let built =
+            run_str(&["generate", "--global-dir", &store, "--global-level", "1", "--global-cells", "4", "--seed", "3", "--threads", "2"])
+                .unwrap();
+        assert!(built.contains("8 cells per face edge") && built.contains("24 blocks written, 0 already stored"), "{built}");
+        let again = run_str(&["generate", "--global-dir", &store, "--global-level", "1", "--global-cells", "4", "--seed", "3"]).unwrap();
+        assert!(again.contains("0 blocks written, 24 already stored"), "{again}");
+        let ok = run_str(&["generate", "--verify-global", &store, "--seed", "3"]).unwrap();
+        assert!(ok.contains("checked 24 of 24 entries: 24 match"), "{ok}");
+        let sampled = run_str(&["generate", "--verify-global", &store, "--seed", "3", "--sample", "5"]).unwrap();
+        assert!(sampled.contains("checked 5 of 24 entries: 5 match"), "{sampled}");
+        // Another seed: all stale, nothing compared.
+        let e = run_str(&["generate", "--verify-global", &store, "--seed", "4"]).unwrap_err();
+        assert!(e.contains("compared nothing") && e.contains("--allow-stale"), "{e}");
+        assert!(run_str(&["generate", "--verify-global", &store, "--seed", "4", "--allow-stale"]).is_ok());
+        // A missing directory is refused, not an empty store.
+        let missing = d.s("nowhere");
+        assert!(run_str(&["generate", "--verify-global", &missing]).unwrap_err().contains("no such cache directory"));
+        // Bad blocks are refused naming the limit.
+        let bad = run_str(&["generate", "--global-dir", &d.s("bad"), "--global-cells", "3"]).unwrap_err();
+        assert!(!std::path::Path::new(&d.s("bad")).exists(), "a refused bake creates nothing");
+        assert!(bad.contains("power-of-two") && bad.contains("1024"), "{bad}");
+    }
+
+    // spec: STRM-012
+    #[test]
+    fn the_global_commands_refuse_options_they_would_ignore_and_combinations_of_commands() {
+        let d = TempDir::new("global-refuse");
+        let s = d.s("store");
+        for (args, needle) in [
+            (vec!["generate", "--global-dir", s.as_str(), "--verify-global", s.as_str()], "separate commands"),
+            (vec!["generate", "--global-dir", s.as_str(), "--cache-dir", s.as_str()], "exclude"),
+            (vec!["generate", "--global-dir", s.as_str(), "--sample", "2"], "only apply to --verify-global"),
+            (vec!["generate", "--global-dir", s.as_str(), "--global-res", "64"], "only applies to --global-products"),
+            (vec!["generate", "--verify-global", s.as_str(), "--global-level", "2"], "excludes --global-level"),
+            (vec!["generate", "--global-products", s.as_str(), "--global-level", "2"], "--global-res"),
+            (vec!["generate", "--cache-dir", s.as_str(), "--region", "0,1", "--global-level", "2"], "exclude"),
+            (vec!["generate", "--tile", "0,1,0,0", "--global-level", "2"], "belongs to the tile store"),
+            (vec!["generate", "--cache-dir", s.as_str(), "--region", "0,1", "--threads", "2"], "exclude --threads"),
+            (vec!["generate", "--verify-global", s.as_str(), "--threads", "2"], "excludes --threads"),
+        ] {
+            let e = run_str(&args).unwrap_err();
+            assert!(e.contains(needle), "{args:?}: {e}");
+        }
+        let e = run_str(&["test-render", "--global-dir", s.as_str()]).unwrap_err();
+        assert!(e.contains("only applies to `generate`"), "{e}");
+    }
+
+    // spec: STRM-012
+    #[test]
+    fn global_products_writes_cube_nets_and_maps_for_review() {
+        let d = TempDir::new("global-products");
+        let dir = d.s("img");
+        let out = run_str(&["generate", "--global-products", &dir, "--global-res", "16", "--seed", "3", "--threads", "2"]).unwrap();
+        assert!(out.contains("4 cube nets and 4 maps"), "{out}");
+        for ch in ["continent", "elevation", "temperature", "precipitation"] {
+            assert!(std::path::Path::new(&dir).join(format!("{ch}-net.png")).is_file(), "{ch} net");
+            assert!(std::path::Path::new(&dir).join(format!("{ch}-map.png")).is_file(), "{ch} map");
+        }
     }
 
     // spec: STRM-004

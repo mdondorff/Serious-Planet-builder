@@ -173,6 +173,25 @@ Source: CON-05, CON-07, CON-08, CON-14, ADR 0006, ADR 0022, ADR 0023, ADR 0026
 - **WHEN** the encoding of a small global field is written out byte by byte
 - **THEN** it equals the encoding, and the keys of a three-stage example equal their known answers
 
+### Requirement: STRM-012 Global bake blocks
+A global-coarse bake SHALL be stored in the tile store as blocks (ADR 0026 points 2 and 6): block `b` of a grid of `res = B << L` cells per face edge is the level-`L` tile `b`, a pack record of kind 3 holding its `(B + 1)^2` samples of four `f32` channels (continentalness, elevation, temperature, precipitation). The payload SHALL be `codec version (u8 = 1) | B (u32 LE, a power of two up to 1024) | raw length (u32 LE, 16 (B + 1)^2) | LZ4 block` of four planes in that channel order, each `(B + 1)^2` little-endian `f32` row-major (`k` fastest) and byte-shuffled, one plane after the other; decoding SHALL give back every `f32` pattern exactly, SHALL refuse a short payload, another version, a `B` that is not a power of two up to the limit, a wrong raw length or a damaged block without allocating more than `B` allows, and the encoder SHALL refuse what the decoder would. The bake SHALL have one stage key (STRM-011, `Scope::Global`, `res` as the resolution), and each block's content key SHALL be the ADR 0018 encoding with kind 3, the block's tile, the stage key as its source, `B` under tag 1 and `res` under tag 4, the face mapping and body parameter fields as in the stage key and an empty read set; two blocks of one bake, another `B`, another `res`, another seed and another body SHALL have different keys, and the keys SHALL have pinned known answers. The node set id of every block SHALL be ADR 0025 point 3's construction over the body's seed node path only (`world.seed` for body 0, `derived.body.N.seed` otherwise; not the radius, which only the body parameter hash covers; ADR 0026 consequences), with a pinned known answer written out from the ADR text. A block's grid (`res`) SHALL be derived from its tile level and its cells, never passed separately, and a record whose cells and level make no grid the tiled bake accepts SHALL be unreadable, never keyed. A build SHALL refuse a bad shape before it opens or creates anything, SHALL write again a block whose stored payload has other cells than its key says, SHALL accept no further block for computing after a write fails (the batch already running finishes), and SHALL bound the blocks alive by a memory budget whatever the thread count. Building SHALL write the blocks the store does not hold under their current key and compute no others, hold at most one batch of blocks in memory, and write nothing on a second run. `generate --global-dir` SHALL build a bake and print the time per sample, `generate --verify-global` SHALL regenerate stored blocks and compare them bit for bit by the rules of STRM-004 (decode first, stale entries counted, a run that compared nothing fails unless `--allow-stale` and something is stale, a missing directory refused), `generate --global-products` SHALL write the cube nets and maps, and options they would ignore, combinations of them and unknown block sizes SHALL be refused naming the limit.
+
+Verify: A
+Status: active
+Source: CON-05, CON-14, ADR 0018, ADR 0019, ADR 0025, ADR 0026
+
+#### Scenario: Round trip and layout
+- **WHEN** blocks of 1 to 32 cells with NaN patterns and signed zeros are encoded and decoded, and a one-cell block is written out by hand
+- **THEN** every bit comes back and the bytes equal the documented layout
+
+#### Scenario: Keys
+- **WHEN** a block key is computed for another tile, `B`, `res`, seed or body
+- **THEN** it differs, and the stage key, block key and node set id equal their known answers
+
+#### Scenario: Build and verify
+- **WHEN** a bake is built twice and verified, then verified under another seed, or with a block made from another seed or a damaged payload
+- **THEN** the second build writes nothing, the first verify matches every block, the other seed is stale and compares nothing, and the bad blocks are reported with tile, pack, offset and first differing sample
+
 ### Requirement: STRM-005 Cancellation and prioritisation
 Queued and in-flight requests SHALL be cancelled when nothing needs them any more, and requests SHALL be ordered by screen-space error times visibility with parents before children.
 

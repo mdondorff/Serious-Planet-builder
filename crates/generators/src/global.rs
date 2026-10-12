@@ -329,6 +329,34 @@ pub fn bake_block(seed: u64, map: &dyn FaceMapping, tile: TileId, cells: u32) ->
     v
 }
 
+/// The most bytes of baked blocks a tiled bake keeps alive at once: 1 GiB, about 64 blocks of 1024 cells. The batch is
+/// `min(threads, MAX_BATCH_BYTES / block bytes)` blocks, so a large thread count cannot exhaust memory (CON-21).
+pub const MAX_BATCH_BYTES: u64 = 1 << 30;
+
+/// How many blocks of `cells` cells a tiled bake bakes at once with `threads` threads: the thread count, at most
+/// [`MAX_BATCH_BYTES`] of blocks, and at least one.
+pub fn batch_blocks(cells: u32, threads: usize) -> usize {
+    let block_bytes = 16 * (u64::from(cells) + 1) * (u64::from(cells) + 1);
+    threads.max(1).min(usize::try_from((MAX_BATCH_BYTES / block_bytes).max(1)).unwrap_or(usize::MAX))
+}
+
+/// Check the shape of a tiled bake before anything is allocated, opened or written: `cells` a power of two up to
+/// [`MAX_BLOCK_CELLS`], `level` at most [`MAX_TILED_LEVEL`] (checked before any shift), and at most [`MAX_TILED_RES`] cells per
+/// face edge. Returns the cells per face edge.
+pub fn check_tiled(level: u8, cells: u32) -> Result<u32, BakeError> {
+    if cells == 0 || !cells.is_power_of_two() || cells > MAX_BLOCK_CELLS {
+        return Err(BakeError::BadBlock(cells));
+    }
+    if level > MAX_TILED_LEVEL {
+        return Err(BakeError::BadLevel(level));
+    }
+    let res = u64::from(cells) << level;
+    if res > MAX_TILED_RES {
+        return Err(BakeError::BadResolution(u32::try_from(res).unwrap_or(u32::MAX)));
+    }
+    Ok(res as u32)
+}
+
 /// What a tiled bake did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TiledBakeStats {
@@ -350,21 +378,26 @@ pub fn bake_blocks(
     threads: usize,
     sink: &mut dyn FnMut(TileId, Vec<GlobalSample>),
 ) -> Result<TiledBakeStats, BakeError> {
-    if cells == 0 || !cells.is_power_of_two() || cells > MAX_BLOCK_CELLS {
-        return Err(BakeError::BadBlock(cells));
-    }
-    // The level is checked before any shift; a grid is at most 65536 cells per face edge and at most 6 * 4^12 blocks, so
-    // neither the tile numbering below nor the number of blocks can outgrow the bake's own bookkeeping.
-    if level > MAX_TILED_LEVEL {
-        return Err(BakeError::BadLevel(level));
-    }
-    let res = u64::from(cells) << level;
-    if res > MAX_TILED_RES {
-        return Err(BakeError::BadResolution(u32::try_from(res).unwrap_or(u32::MAX)));
-    }
+    bake_blocks_where(seed, map, level, cells, threads, &|_| true, sink)
+}
+
+/// [`bake_blocks`] for the blocks `want` accepts only: a rebuild that finds a block already stored does not compute it. The
+/// accepted blocks come in the same order, in batches of at most `threads`.
+pub fn bake_blocks_where(
+    seed: u64,
+    map: &(dyn FaceMapping + Sync),
+    level: u8,
+    cells: u32,
+    threads: usize,
+    want: &(dyn Fn(TileId) -> bool + Sync),
+    sink: &mut dyn FnMut(TileId, Vec<GlobalSample>),
+) -> Result<TiledBakeStats, BakeError> {
+    check_tiled(level, cells)?;
     let side = 1u64 << level;
     let total = 6 * side * side;
-    let threads = threads.max(1);
+    // A batch is bounded by a memory budget, not by the caller's thread count: at most MAX_BATCH_BYTES of blocks (and at
+    // least one) are alive at once (CON-21).
+    let threads = batch_blocks(cells, threads);
     // Blocks alive between their creation and their delivery to the sink: measured, not derived from the batch size.
     let live = AtomicUsize::new(0);
     let peak = AtomicUsize::new(0);
@@ -372,13 +405,20 @@ pub fn bake_blocks(
     let mut next = 0u64;
     while next < total {
         // The tiles of this batch come from a running index (face, row, column): no list of all tiles is ever built.
-        let end = (next + threads as u64).min(total);
-        let batch: Vec<TileId> = (next..end)
-            .map(|i| {
-                let (face, rest) = (i / (side * side), i % (side * side));
-                TileId::new(Face(face as u8), level, (rest % side) as u32, (rest / side) as u32).expect("in range")
-            })
-            .collect();
+        let mut batch: Vec<TileId> = Vec::with_capacity(threads.min(1024));
+        let mut end = next;
+        while end < total && batch.len() < threads {
+            let (face, rest) = (end / (side * side), end % (side * side));
+            let tile = TileId::new(Face(face as u8), level, (rest % side) as u32, (rest / side) as u32).expect("in range");
+            if want(tile) {
+                batch.push(tile);
+            }
+            end += 1;
+        }
+        if batch.is_empty() {
+            next = end;
+            continue;
+        }
         let blocks: Vec<Vec<GlobalSample>> = std::thread::scope(|scope| {
             let (live, peak) = (&live, &peak);
             let handles: Vec<_> = batch

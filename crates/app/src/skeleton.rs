@@ -184,6 +184,9 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         std::fs::write(path, &text).map_err(|e| format!("writing {}: {e}", path.display()))?;
         return writeln!(out, "wrote {} ({} lines)", path.display(), text.lines().count()).map_err(err);
     }
+    if o.global_dir.is_some() || o.verify_global.is_some() || o.global_products.is_some() {
+        return generate_global(o, out);
+    }
     if o.cache_dir.is_some() || o.verify_cache.is_some() {
         return generate_store(o, out);
     }
@@ -227,11 +230,165 @@ fn world_of(o: &Options) -> Result<planet_cache::tiles::World, String> {
     planet_cache::tiles::World::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))
 }
 
+/// The definition of the global commands: a TOML file, or the default single planet.
+fn global_world_of(o: &Options) -> Result<planet_cache::global_store::GlobalWorld, String> {
+    let def = match &o.world {
+        Some(path) => {
+            let text = std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+            planet_world_def::toml_io::parse_definition(&text).map_err(|e| format!("{}: {e}", path.display()))?
+        }
+        None => planet_world_def::WorldDefinition::single_planet(RADIUS_M, o.seed),
+    };
+    planet_cache::global_store::GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))
+}
+
+/// `generate --global-dir DIR`: bake the global-coarse field (continents, elevation, climate) into a tile store as blocks and
+/// print the time per sample. `--verify-global DIR`: regenerate a sample of the stored blocks and compare.
+/// `--global-products DIR`: write cube-net and map images of an in-memory bake for review.
+fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    let modes = [o.global_dir.is_some(), o.verify_global.is_some(), o.global_products.is_some()];
+    if modes.iter().filter(|m| **m).count() > 1 {
+        return Err("--global-dir, --verify-global and --global-products are separate commands: give one".into());
+    }
+    let clash: Vec<&str> = ["--tile", "--out", "--face-net", "--manifest", "--smoke", "--cache-dir", "--verify-cache", "--region", "--res"]
+        .into_iter()
+        .filter(|f| o.given.contains(*f))
+        .collect();
+    if !clash.is_empty() {
+        return Err(format!("the global bake commands exclude {}", clash.join(", ")));
+    }
+    if o.given.contains("--world") && o.given.contains("--seed") {
+        return Err("--world and --seed both name the definition: give one".into());
+    }
+    let threads = if o.threads == 0 { std::thread::available_parallelism().map_or(1, |n| n.get()) } else { o.threads };
+    let world = global_world_of(o)?;
+    if let Some(dir) = &o.verify_global {
+        if o.given.contains("--global-level") || o.given.contains("--global-cells") || o.given.contains("--global-res") {
+            return Err(
+                "--verify-global reads the blocks' own cells and level: it excludes --global-level, --global-cells and --global-res".into(),
+            );
+        }
+        if o.given.contains("--threads") {
+            return Err("--verify-global regenerates blocks one by one: it excludes --threads".into());
+        }
+        if !dir.is_dir() {
+            return Err(format!("{}: no such cache directory (check the path; an empty store would verify nothing)", dir.display()));
+        }
+        let store = planet_cache::pack::TileStore::open(dir, world.params()).map_err(|e| e.to_string())?;
+        for p in store.problems() {
+            writeln!(out, "WARNING: {p}").map_err(err)?;
+        }
+        let report = planet_cache::global_store::verify_global(&store, &world, o.sample);
+        writeln!(
+            out,
+            "verify-global {}: checked {} of {} entries: {} match, {} stale (versions or node set changed), {} stale without a known reason, {} of another kind, {} differ, {} unreadable",
+            dir.display(),
+            report.checked,
+            store.len(),
+            report.matching,
+            report.stale,
+            report.unexplained_stale,
+            report.unsupported,
+            report.mismatches.len(),
+            report.unreadable.len()
+        )
+        .map_err(err)?;
+        for m in &report.mismatches {
+            writeln!(out, "MISMATCH block {:#018x} key {} in {} at offset {}: {}", m.tile.raw(), m.key, m.pack, m.offset, m.detail)
+                .map_err(err)?;
+        }
+        for u in &report.unreadable {
+            writeln!(out, "UNREADABLE {u}").map_err(err)?;
+        }
+        let stale = report.stale + report.unexplained_stale;
+        if report.clean() && report.compared_nothing() {
+            return Err(if stale == 0 {
+                format!("verify-global compared nothing: {} entries looked at, none of them a block of this definition", report.checked)
+            } else if !o.allow_stale {
+                format!("verify-global compared nothing: all {stale} entries are stale; check --world/--seed, or pass --allow-stale if the definition changed on purpose")
+            } else {
+                return Ok(());
+            });
+        }
+        return if report.passed_allowing_stale() {
+            Ok(())
+        } else {
+            Err(format!("verify-global found {} differing and {} unreadable entries", report.mismatches.len(), report.unreadable.len()))
+        };
+    }
+    if o.given.contains("--sample") || o.given.contains("--allow-stale") {
+        return Err("--sample and --allow-stale only apply to --verify-global".into());
+    }
+    if let Some(dir) = &o.global_products {
+        if o.given.contains("--global-level") || o.given.contains("--global-cells") {
+            return Err("--global-products bakes in memory: it takes --global-res, not --global-level or --global-cells".into());
+        }
+        let grid = planet_generators::global::bake(world.seed(), &TangentWarp, o.global_res, threads).map_err(|e| e.to_string())?;
+        for ch in planet_generators::global::Channel::ALL {
+            let path = dir.join(format!("{}-net.png", ch.name()));
+            planet_generators::global::product(&grid, ch).write_png(&path).map_err(|e| format!("writing {}: {e}", path.display()))?;
+            let map = dir.join(format!("{}-map.png", ch.name()));
+            planet_generators::global::equirect_product(world.seed(), (o.global_res * 4).min(2048), ch)
+                .write_png(&map)
+                .map_err(|e| format!("writing {}: {e}", map.display()))?;
+        }
+        return writeln!(out, "wrote 4 cube nets and 4 maps of a {}-cell bake to {}", o.global_res, dir.display()).map_err(err);
+    }
+    if o.given.contains("--global-res") {
+        return Err("--global-res only applies to --global-products".into());
+    }
+    let dir = o.global_dir.as_ref().expect("checked by the caller");
+    let start = std::time::Instant::now();
+    let report = planet_cache::global_store::build_global(
+        dir,
+        &world,
+        o.global_level,
+        o.global_cells,
+        threads,
+        planet_cache::pack::DEFAULT_MAX_PACK_BYTES,
+    )
+    .map_err(|e| e.to_string())?;
+    let secs = start.elapsed().as_secs_f64();
+    let res = u64::from(o.global_cells) << o.global_level;
+    let edge = f64::from(o.global_cells) + 1.0;
+    let samples = report.written as f64 * edge * edge;
+    writeln!(
+        out,
+        "global bake {}: {} cells per face edge in blocks of {} (level {}): {} blocks written, {} already stored, at most {} blocks in memory; {:.1} s on {} threads, {:.2} us per sample per core",
+        dir.display(),
+        res,
+        o.global_cells,
+        o.global_level,
+        report.written,
+        report.reused,
+        report.peak_resident_blocks,
+        secs,
+        threads,
+        if samples > 0.0 { secs * threads as f64 / samples * 1e6 } else { 0.0 }
+    )
+    .map_err(err)
+}
+
 /// `generate --cache-dir DIR --region F,L`: generate a face region into a tile store. `generate --verify-cache DIR`:
 /// regenerate a sample of a store from the definition and compare; a mismatch fails the command.
 fn generate_store(o: &Options, out: &mut dyn Write) -> Result<(), String> {
-    let clash: Vec<&str> =
-        ["--tile", "--out", "--face-net", "--manifest", "--smoke"].into_iter().filter(|f| o.given.contains(*f)).collect();
+    let clash: Vec<&str> = [
+        "--tile",
+        "--out",
+        "--face-net",
+        "--manifest",
+        "--smoke",
+        "--global-dir",
+        "--verify-global",
+        "--global-products",
+        "--global-level",
+        "--global-cells",
+        "--global-res",
+        "--threads",
+    ]
+    .into_iter()
+    .filter(|f| o.given.contains(*f))
+    .collect();
     if !clash.is_empty() {
         return Err(format!("--cache-dir and --verify-cache work on a tile store and exclude {}", clash.join(", ")));
     }

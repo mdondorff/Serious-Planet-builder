@@ -2,6 +2,7 @@
 
 pub mod codec;
 pub mod crc32c;
+pub mod global_store;
 pub mod hilbert;
 pub mod key;
 pub mod pack;
