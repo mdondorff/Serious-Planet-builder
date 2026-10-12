@@ -1,6 +1,6 @@
 # Architect memory
 
-Refreshed 2026-10-11 at the hand-over from the long `opus-planner` session (the session that drafted this agent).
+Refreshed 2026-10-11 (updated 2026-10-12 for #64, #65) at the hand-over from the long `opus-planner` session (the session that drafted this agent).
 Confirm everything here against `main` and `docs/status.md` before acting on it.
 
 ## Sessions
@@ -18,18 +18,15 @@ Confirm everything here against `main` and `docs/status.md` before acting on it.
 - Constitution v1.2 (CON-14 per-field CPU/GPU bounds; CON-18 golden approval by owner or ADR 0017 policy).
 - M3 done on main: perf gate (#55), LOD-008 (#43), plan cache (#52, the owner's run: 6.3 ms warm at ground-1m against
   8 ms), world-def/GenContext (#53), TOML definitions (#57), cell index (#58), multi-body keys (#56), stage model (#60).
-- M3 next (sonnet-coder): item 5 tile storage (128-bit cache keys done in #61; next the pack store, cache-verify, cache-compact), item 6 field
+- M3 next (sonnet-coder): item 5 tile storage (128-bit keys #61 and the Hilbert-ordered tile pack #64 done; next cache-verify, cache-compact, compaction/eviction), item 6 field
   pipeline and hydrology (SPIKE-03), item 7 M3 acceptance and report (the gate: stop and report to the owner).
 
 ## Open threads to follow up
-1. **Ragged band in the relief flight** (sonnet-explorer, `change/morph-height`, merging after reviewers): two causes.
-   (a) Real but minor: the height attribute was not geomorphed (fixed: `coarse_height`, MESH_VERSION 4, 44-byte vertex;
-   moves `terrain_aerial200km_height` by about 850 px, max delta 33, a shaded golden that can auto-bless if declared).
-   (b) The actual band: the relief grid's coarse phase was added to tile-local f32 offsets (~6 cm rounding), making the
-   10 m decade a staircase; fixed with per-decade f64 phases. My first diagnosis named only (a): check that the merged
-   change covers both and that its goldens went through golden-review.
+1. **Ragged band: DONE** (#65, 2026-10-12): both causes fixed (height now geomorphed, MESH_VERSION 4; the relief
+   grid's f32 phase replaced by per-decade f64 phases). `terrain_aerial200km_height` was auto-blessed under ADR 0017
+   (AUTO-E: 849 / 829 / 843 px). Open follow-up: normals are still not geomorphed (only if it shows in a view).
 2. **Relief goldens** `terrain_orbit_relief`, `terrain_ground1m_relief`: first goldens, classed lit, pending for the
-   owner's `/bless`. Hold until thread 1 lands (their candidates change). Review sequence:
+   owner's `/bless`; candidates regenerated after #65, so the owner can review them now. Review sequence:
    `C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-explorer\target\review\flight-relief-nvidia\` (contact sheet).
    This is the TEST-014 owner review.
 3. **First perf-gate run** (ADR 0020): open a perf window (ask coders to pause builds and tests, wait for their idle
