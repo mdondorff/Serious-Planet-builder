@@ -263,10 +263,8 @@ fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let threads = if o.threads == 0 { std::thread::available_parallelism().map_or(1, |n| n.get()) } else { o.threads };
     let world = global_world_of(o)?;
     if let Some(dir) = &o.verify_global {
-        if o.given.contains("--global-level") || o.given.contains("--global-cells") || o.given.contains("--global-res") {
-            return Err(
-                "--verify-global reads the blocks' own cells and level: it excludes --global-level, --global-cells and --global-res".into(),
-            );
+        if o.given.contains("--global-res") {
+            return Err("--verify-global reads the blocks' own grid: it excludes --global-res".into());
         }
         if o.given.contains("--threads") {
             return Err("--verify-global regenerates blocks one by one: it excludes --threads".into());
@@ -320,9 +318,6 @@ fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         return Err("--sample and --allow-stale only apply to --verify-global".into());
     }
     if let Some(dir) = &o.global_products {
-        if o.given.contains("--global-level") || o.given.contains("--global-cells") {
-            return Err("--global-products bakes in memory: it takes --global-res, not --global-level or --global-cells".into());
-        }
         let grid = planet_generators::global::bake(world.seed(), &TangentWarp, o.global_res, threads).map_err(|e| e.to_string())?;
         for ch in planet_generators::global::Channel::ALL {
             let path = dir.join(format!("{}-net.png", ch.name()));
@@ -334,31 +329,21 @@ fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         }
         return writeln!(out, "wrote 4 cube nets and 4 maps of a {}-cell bake to {}", o.global_res, dir.display()).map_err(err);
     }
-    if o.given.contains("--global-res") {
-        return Err("--global-res only applies to --global-products".into());
-    }
     let dir = o.global_dir.as_ref().expect("checked by the caller");
+    let (level, cells) = world.layout(o.global_res).map_err(|e| e.to_string())?;
     let start = std::time::Instant::now();
-    let report = planet_cache::global_store::build_global(
-        dir,
-        &world,
-        o.global_level,
-        o.global_cells,
-        threads,
-        planet_cache::pack::DEFAULT_MAX_PACK_BYTES,
-    )
-    .map_err(|e| e.to_string())?;
+    let report = planet_cache::global_store::build_global(dir, &world, o.global_res, threads, planet_cache::pack::DEFAULT_MAX_PACK_BYTES)
+        .map_err(|e| e.to_string())?;
     let secs = start.elapsed().as_secs_f64();
-    let res = u64::from(o.global_cells) << o.global_level;
-    let edge = f64::from(o.global_cells) + 1.0;
+    let edge = f64::from(cells) + 1.0;
     let samples = report.written as f64 * edge * edge;
     writeln!(
         out,
         "global bake {}: {} cells per face edge in blocks of {} (level {}): {} blocks written, {} already stored, at most {} blocks in memory; {:.1} s on {} threads, {:.2} us per sample per core",
         dir.display(),
-        res,
-        o.global_cells,
-        o.global_level,
+        o.global_res,
+        cells,
+        level,
         report.written,
         report.reused,
         report.peak_resident_blocks,
@@ -381,8 +366,6 @@ fn generate_store(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         "--global-dir",
         "--verify-global",
         "--global-products",
-        "--global-level",
-        "--global-cells",
         "--global-res",
         "--threads",
     ]
