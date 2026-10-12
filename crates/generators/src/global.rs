@@ -444,6 +444,118 @@ pub fn bake_blocks_where(
     Ok(stats)
 }
 
+/// Version of the reader (ADR 0027): the position arithmetic, the interpolation formula and the halo rule. A reader field
+/// folds it into its own version; changing any of them bumps it.
+pub const READER_VERSION: u32 = 1;
+
+/// Why a read failed: the lattice sample could not be had from the source.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReadError {
+    /// A block or sample the source should hold is missing or unreadable; the message names it.
+    Source(String),
+    /// A tile sample grid the reader does not accept (`cells` not a power of two, or the level too deep).
+    Shape(String),
+}
+
+impl std::fmt::Display for ReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReadError::Source(s) => write!(f, "the global bake cannot be read: {s}"),
+            ReadError::Shape(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+impl std::error::Error for ReadError {}
+
+/// Where a reader gets the baked lattice samples: vertex `(i, j)` of face `face` of a grid of [`LatticeSource::res`] cells per
+/// face edge, `0 <= i, j <= res`. Implemented by an in-memory grid and by the tile store (`planet_cache::global_store`).
+pub trait LatticeSource: Sync {
+    fn res(&self) -> u32;
+    fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError>;
+}
+
+/// A [`GlobalGrid`] as a lattice source.
+pub struct GridSource<'a>(pub &'a GlobalGrid);
+
+impl LatticeSource for GridSource<'_> {
+    fn res(&self) -> u32 {
+        self.0.res
+    }
+
+    fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+        if i > self.0.res || j > self.0.res {
+            return Err(ReadError::Source(format!("vertex ({i}, {j}) of a {}-cell grid", self.0.res)));
+        }
+        Ok(self.0.at(face, i, j))
+    }
+}
+
+/// `a (1 - w) + b w` for exact dyadic `w`: the edge-symmetric form of ADR 0027 point 3 (the same two products added in
+/// either order when a face edge is read from the other face, where the neighbours swap and `w` becomes `1 - w`).
+fn blend(a: f64, b: f64, w: f64) -> f64 {
+    a * (1.0 - w) + b * w
+}
+
+fn blend_samples(a: &GlobalSample, b: &GlobalSample, w: f64) -> [f64; 4] {
+    [
+        blend(f64::from(a.continent), f64::from(b.continent), w),
+        blend(f64::from(a.elevation_m), f64::from(b.elevation_m), w),
+        blend(f64::from(a.temperature_c), f64::from(b.temperature_c), w),
+        blend(f64::from(a.precipitation_mm), f64::from(b.precipitation_mm), w),
+    ]
+}
+
+/// Read the global field at integer position `(u, v)` of the lattice of `2^n_log2` cells per face edge (the sample index of
+/// a tile: `x m + k`), by bilinear interpolation of the bake's own lattice (ADR 0027 points 2 to 5). The position is clamped
+/// into `[0, 2^n_log2]` on both axes first (a halo beyond a face edge holds the edge value, point 4). Both lattices are
+/// powers of two, so cell and weight come from the integer: with `s = n_log2 - log2 res`, `s >= 0` gives cell `u >> s` and weight
+/// `(u mod 2^s) / 2^s`, and `s < 0` a lattice point (weight 0). Channels are blended in `f64` from the stored `f32` and
+/// rounded to `f32` once.
+pub fn read_lattice(src: &dyn LatticeSource, face: Face, u: i64, v: i64, n_log2: u32) -> Result<GlobalSample, ReadError> {
+    let res = src.res();
+    if res == 0 || !res.is_power_of_two() || n_log2 > 52 {
+        return Err(ReadError::Shape(format!(
+            "a reader needs a power-of-two bake resolution and at most 2^52 cells per face edge (res {res}, 2^{n_log2})"
+        )));
+    }
+    let res_log2 = res.trailing_zeros();
+    let n = 1i64 << n_log2;
+    let (u, v) = (u.clamp(0, n), v.clamp(0, n));
+    // Cell index and weight of one axis.
+    let axis = |p: i64| -> (u32, f64) {
+        if n_log2 >= res_log2 {
+            let s = n_log2 - res_log2;
+            let cell = (p >> s) as u32;
+            let frac = (p & ((1i64 << s) - 1)) as f64 / (1u64 << s) as f64;
+            (cell.min(res), if cell >= res { 0.0 } else { frac })
+        } else {
+            ((p << (res_log2 - n_log2)) as u32, 0.0)
+        }
+    };
+    let ((i, wu), (j, wv)) = (axis(u), axis(v));
+    let (i1, j1) = ((i + 1).min(res), (j + 1).min(res));
+    let (a, b) = (src.at(face, i, j)?, src.at(face, i1, j)?);
+    let (c, d) = (src.at(face, i, j1)?, src.at(face, i1, j1)?);
+    let (r0, r1) = (blend_samples(&a, &b, wu), blend_samples(&c, &d, wu));
+    let ch = |k: usize| blend(r0[k], r1[k], wv) as f32;
+    Ok(GlobalSample { continent: ch(0), elevation_m: ch(1), temperature_c: ch(2), precipitation_mm: ch(3) })
+}
+
+/// Read the global field at sample `(k, l)` of tile `tile` on a grid of `cells` cells per tile edge (`-1..=cells + 1`, a halo of
+/// one sample), by [`read_lattice`]: the tile's lattice index is `x cells + k` on a face lattice of `cells << level` cells.
+pub fn read_tile_sample(src: &dyn LatticeSource, tile: TileId, cells: u32, k: i64, l: i64) -> Result<GlobalSample, ReadError> {
+    if cells == 0 || !cells.is_power_of_two() {
+        return Err(ReadError::Shape(format!("a tile grid needs a power-of-two number of cells, got {cells}")));
+    }
+    if !(-1..=i64::from(cells) + 1).contains(&k) || !(-1..=i64::from(cells) + 1).contains(&l) {
+        return Err(ReadError::Shape(format!("sample ({k}, {l}) is more than one sample outside a {cells}-cell tile")));
+    }
+    let n_log2 = u32::from(tile.level()) + cells.trailing_zeros();
+    let (x, y) = (i64::from(tile.x()) * i64::from(cells), i64::from(tile.y()) * i64::from(cells));
+    read_lattice(src, tile.face(), x + k, y + l, n_log2)
+}
+
 /// A 64-bit hash of every bit of every channel of a grid, in face and row-major order, with the resolution and
 /// [`GLOBAL_VERSION`]: the quick equality check of tests and the pinned known answer of a small bake.
 pub fn grid_hash(g: &GlobalGrid) -> u64 {

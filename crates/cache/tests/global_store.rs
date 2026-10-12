@@ -39,7 +39,8 @@ impl Drop for Dir {
 }
 
 fn world(seed: u64) -> GlobalWorld {
-    GlobalWorld::from_definition(&WorldDefinition::single_planet(R, seed)).unwrap()
+    // A small block limit (store policy, ADR 0027 point 1) so small grids still have blocks of level above 0.
+    GlobalWorld::from_definition(&WorldDefinition::single_planet(R, seed)).unwrap().with_block_limit(4)
 }
 
 fn tile() -> TileId {
@@ -186,10 +187,10 @@ fn the_node_set_id_covers_the_seed_reads_only_and_is_pinned() {
 fn a_bake_is_built_once_reused_afterwards_and_verifies_clean() {
     let d = Dir::new("build");
     let w = world(7);
-    let r = build_global(d.path(), &w, 1, 4, 3, DEFAULT_MAX_PACK_BYTES).unwrap();
+    let r = build_global(d.path(), &w, 8, 3, DEFAULT_MAX_PACK_BYTES).unwrap();
     assert_eq!((r.written, r.reused), (24, 0));
     assert!(r.peak_resident_blocks <= 3);
-    let again = build_global(d.path(), &w, 1, 4, 3, DEFAULT_MAX_PACK_BYTES).unwrap();
+    let again = build_global(d.path(), &w, 8, 3, DEFAULT_MAX_PACK_BYTES).unwrap();
     assert_eq!((again.written, again.reused), (0, 24), "a second run computes and writes nothing");
 
     let store = TileStore::open(d.path(), w.params()).unwrap();
@@ -259,8 +260,8 @@ fn a_bad_shape_is_refused_before_anything_is_created_and_a_wrong_cells_record_is
     let w = world(7);
     let d = Dir::new("refuse");
     let target = d.path().join("never");
-    for (level, cells) in [(0u8, 3u32), (13, 1), (0, 2048), (9, 1024)] {
-        assert!(build_global(&target, &w, level, cells, 2, DEFAULT_MAX_PACK_BYTES).is_err(), "level {level} cells {cells}");
+    for res in [0u32, 3, 100, 1 << 17] {
+        assert!(build_global(&target, &w, res, 2, DEFAULT_MAX_PACK_BYTES).is_err(), "res {res}");
     }
     assert!(!target.exists(), "a refused build leaves no directory, lock or pack behind");
 
@@ -273,7 +274,7 @@ fn a_bad_shape_is_refused_before_anything_is_created_and_a_wrong_cells_record_is
     let mut writer = PackWriter::open(dir.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
     writer.append(&wrong).unwrap();
     writer.finish().unwrap();
-    let r = build_global(dir.path(), &w, 1, 4, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
+    let r = build_global(dir.path(), &w, 8, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
     assert_eq!((r.written, r.reused), (24, 0), "the wrong record was not reused");
     let store = TileStore::open(dir.path(), w.params()).unwrap();
     let rec = store.get(KIND_GLOBAL_BLOCK, t, w.block_key(t, 4)).unwrap().unwrap();
@@ -296,6 +297,79 @@ fn a_bad_shape_is_refused_before_anything_is_created_and_a_wrong_cells_record_is
     assert_eq!((r.checked, r.unreadable.len()), (1, 1), "{r:?}");
     assert!(r.unreadable[0].contains("is not a grid"), "{}", r.unreadable[0]);
     assert!(matches!(w.block_record(forged_tile, 1024, &[]), Err(BlockCodecError::Grid { level: 22, cells: 1024 })));
+}
+
+// spec: STRM-012
+#[test]
+fn the_stored_bake_reads_like_the_in_memory_bake_and_a_missing_block_is_an_error_naming_it() {
+    use planet_generators::global::{bake, read_lattice, read_tile_sample, GridSource, LatticeSource};
+    let d = Dir::new("source");
+    let w = world(7);
+    // 16 cells per face edge in blocks of 4: level 2, 96 blocks, so block borders and face edges are all exercised.
+    build_global(d.path(), &w, 16, 3, DEFAULT_MAX_PACK_BYTES).unwrap();
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    let src = planet_cache::global_store::StoreSource::new(&store, &w, 16).unwrap();
+    let grid = bake(7, &TangentWarp, 16, 2).unwrap();
+    let mem = GridSource(&grid);
+    assert_eq!(src.res(), 16);
+    for f in 0..6u8 {
+        // Every lattice vertex, including the far edges (the last block of a row holds them).
+        for j in 0..=16 {
+            for i in 0..=16 {
+                assert_eq!(bits(&src.at(Face(f), i, j).unwrap()), bits(&mem.at(Face(f), i, j).unwrap()), "face {f} vertex ({i}, {j})");
+            }
+        }
+        // Reads between lattice points and on a finer target lattice, through the stored blocks.
+        for (u, v, n) in [(5i64, 37i64, 6u32), (64, 0, 6), (0, 63, 6), (33, 33, 7), (-1, 70, 6)] {
+            assert_eq!(
+                bits(&read_lattice(&src, Face(f), u, v, n).unwrap()),
+                bits(&read_lattice(&mem, Face(f), u, v, n).unwrap()),
+                "face {f} ({u}, {v}) at 2^{n}"
+            );
+        }
+        let t = TileId::new(Face(f), 3, 2, 5).unwrap();
+        assert_eq!(bits(&read_tile_sample(&src, t, 8, 3, 8).unwrap()), bits(&read_tile_sample(&mem, t, 8, 3, 8).unwrap()));
+    }
+    // A store without the blocks: the error names the block, its key and why.
+    let empty = Dir::new("source-empty");
+    fs::create_dir_all(empty.path()).unwrap();
+    let nothing = TileStore::open(empty.path(), w.params()).unwrap();
+    let missing = planet_cache::global_store::StoreSource::new(&nothing, &w, 16).unwrap();
+    let e = missing.at(Face(2), 5, 9).unwrap_err().to_string();
+    assert!(
+        e.contains("not stored under the current key")
+            && e.contains("face 2 level 2 x 1 y 2")
+            && e.contains(&w.block_key(TileId::new(Face(2), 2, 1, 2).unwrap(), 4).to_hex()),
+        "{e}"
+    );
+    assert!(planet_cache::global_store::StoreSource::new(&nothing, &w, 100).is_err());
+    assert!(src.at(Face(0), 17, 0).is_err());
+}
+
+// spec: STRM-012
+#[test]
+fn only_the_canonical_layout_of_a_grid_is_built_keyed_or_accepted() {
+    // ADR 0027 point 1: blocks of min(res, limit) cells, the tiles of the level that covers the grid.
+    let real = GlobalWorld::from_definition(&WorldDefinition::single_planet(R, 7)).unwrap();
+    for (res, want) in [(1u32, (0u8, 1u32)), (256, (0, 256)), (1024, (0, 1024)), (2048, (1, 1024)), (16384, (4, 1024))] {
+        assert_eq!(real.layout(res).unwrap(), want, "res {res}");
+    }
+    assert_eq!(world(7).layout(8).unwrap(), (1, 4), "a store policy of 4 cells per block");
+    for res in [0u32, 3, 1 << 17] {
+        assert!(real.layout(res).is_err(), "res {res}");
+    }
+    // A block of another layout (4 cells at level 1 is a grid of 8 cells, whose canonical layout is one block per face at the
+    // real limit) is refused by the keyer and unreadable for verify, so a grid is never stored twice.
+    let t = TileId::new(Face(0), 1, 0, 0).unwrap();
+    assert!(matches!(real.block_record(t, 4, &bake_block(7, &TangentWarp, t, 4)), Err(BlockCodecError::Grid { level: 1, cells: 4 })));
+    let forged = world(7).block_record(t, 4, &bake_block(7, &TangentWarp, t, 4)).unwrap();
+    let d = Dir::new("noncanonical");
+    let mut writer = PackWriter::open(d.path(), real.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    writer.append(&forged).unwrap();
+    writer.finish().unwrap();
+    let r = verify_global(&TileStore::open(d.path(), real.params()).unwrap(), &real, 0);
+    assert_eq!((r.checked, r.unreadable.len()), (1, 1), "{r:?}");
+    assert!(r.unreadable[0].contains("not the canonical layout"), "{}", r.unreadable[0]);
 }
 
 // spec: STRM-012

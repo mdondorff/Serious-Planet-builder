@@ -14,13 +14,14 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use planet_core::cube::TangentWarp;
 use planet_core::hash::HASH_VERSION;
-use planet_core::{FaceMapping, TileId};
+use planet_core::{Face, FaceMapping, TileId};
 use planet_generators::global::{
-    bake_block, bake_blocks_where, check_tiled, BakeError, GlobalCoarseGenerator, GlobalSample, GLOBAL_VERSION, IMPLEMENTATION_ID,
-    MAX_BLOCK_CELLS,
+    bake_block, bake_blocks_where, check_tiled, BakeError, GlobalCoarseGenerator, GlobalSample, LatticeSource, ReadError, GLOBAL_VERSION,
+    IMPLEMENTATION_ID, MAX_BLOCK_CELLS,
 };
 use planet_generators::stage::{FieldGraph, FieldSpec, Scope, Stage};
 use planet_world_def::{body_radius_path, body_seed_path, BodyId, GenContext, MissingNode, NodeValue, WorldDefinition, SPHERE_SURFACE_ID};
@@ -170,10 +171,36 @@ pub struct GlobalWorld {
     radius_m: f64,
     reads: Vec<ReadEntry>,
     node_set_id: [u8; 16],
+    /// Cells per block edge at most (store policy, ADR 0027 point 1): not a key input, it decides `B`.
+    block_limit: u32,
     graph: FieldGraph,
 }
 
 impl GlobalWorld {
+    /// A smaller block limit (a power of two, at most [`MAX_BLOCK_CELLS`]): the store policy that decides `B = min(res, limit)`.
+    /// Tests use it to exercise levels above 0 with small grids; a store keeps one limit for good.
+    pub fn with_block_limit(mut self, limit: u32) -> GlobalWorld {
+        assert!(
+            limit.is_power_of_two() && limit <= MAX_BLOCK_CELLS,
+            "a block limit is a power of two up to {MAX_BLOCK_CELLS}, got {limit}"
+        );
+        self.block_limit = limit;
+        self
+    }
+
+    /// The canonical layout of a bake of `res` cells per face edge (ADR 0027 point 1): `B = min(res, limit)` cells per
+    /// block and the blocks are the tiles of level `log2(res / B)`. Returns `(level, cells)`. A `res` that is not a power of
+    /// two, or a grid the tiled bake refuses, is an error.
+    pub fn layout(&self, res: u32) -> Result<(u8, u32), BakeError> {
+        if res == 0 || !res.is_power_of_two() {
+            return Err(BakeError::BadResolution(res));
+        }
+        let cells = res.min(self.block_limit);
+        let level = (res / cells).trailing_zeros() as u8;
+        check_tiled(level, cells)?;
+        Ok((level, cells))
+    }
+
     /// Build the world of body 0. The seed is read through a fresh [`GenContext`] (CON-06); the radius is part of the body
     /// parameter hash of every key (ADR 0018) but is not an input of the field, so it is read from the definition directly
     /// and does not enter the read set.
@@ -209,7 +236,7 @@ impl GlobalWorld {
             halo_fraction: 0.0,
         }])
         .expect("one global field is a valid graph");
-        Ok(GlobalWorld { seed: field.seed(), body, radius_m, reads, node_set_id, graph })
+        Ok(GlobalWorld { seed: field.seed(), body, radius_m, reads, node_set_id, graph, block_limit: MAX_BLOCK_CELLS })
     }
 
     pub fn seed(&self) -> u64 {
@@ -269,7 +296,10 @@ impl GlobalWorld {
 
     /// The record of a block of samples.
     pub fn block_record(&self, tile: TileId, cells: u32, samples: &[GlobalSample]) -> Result<Record, BlockCodecError> {
-        grid_res(tile, cells).ok_or(BlockCodecError::Grid { level: tile.level(), cells })?;
+        let res = grid_res(tile, cells).ok_or(BlockCodecError::Grid { level: tile.level(), cells })?;
+        if self.layout(res).ok() != Some((tile.level(), cells)) {
+            return Err(BlockCodecError::Grid { level: tile.level(), cells });
+        }
         Ok(Record {
             key: self.block_key(tile, cells),
             kind: KIND_GLOBAL_BLOCK,
@@ -279,6 +309,81 @@ impl GlobalWorld {
             node_set_id: self.node_set_id,
             payload: encode_block(cells, samples)?,
         })
+    }
+}
+
+/// The stored bake of `res` cells per face edge as a [`LatticeSource`] for the reader (ADR 0027 point 7): it finds the block
+/// that holds a lattice vertex through the canonical layout, decodes it once and keeps the most recent few. A block that is
+/// missing, damaged or of another shape is an error naming the block and its key, never a default.
+pub struct StoreSource<'a> {
+    store: &'a TileStore,
+    world: &'a GlobalWorld,
+    res: u32,
+    level: u8,
+    cells: u32,
+    cache: Mutex<Vec<(TileId, Arc<Vec<GlobalSample>>)>>,
+}
+
+/// Decoded blocks a [`StoreSource`] keeps: 16 blocks of at most 16 MB.
+const SOURCE_CACHE_BLOCKS: usize = 16;
+
+impl<'a> StoreSource<'a> {
+    /// The reader of the bake of `res` cells per face edge in `store` (the canonical layout of `world`).
+    pub fn new(store: &'a TileStore, world: &'a GlobalWorld, res: u32) -> Result<StoreSource<'a>, BakeError> {
+        let (level, cells) = world.layout(res)?;
+        Ok(StoreSource { store, world, res, level, cells, cache: Mutex::new(Vec::new()) })
+    }
+
+    fn block(&self, tile: TileId) -> Result<Arc<Vec<GlobalSample>>, ReadError> {
+        let mut cache = self.cache.lock().expect("block cache mutex");
+        if let Some((_, b)) = cache.iter().find(|(t, _)| *t == tile) {
+            return Ok(Arc::clone(b));
+        }
+        let key = self.world.block_key(tile, self.cells);
+        let what = |why: String| {
+            ReadError::Source(format!(
+                "block {:#018x} (face {} level {} x {} y {}) key {key}: {why}",
+                tile.raw(),
+                tile.face().0,
+                tile.level(),
+                tile.x(),
+                tile.y()
+            ))
+        };
+        let rec = self
+            .store
+            .get(KIND_GLOBAL_BLOCK, tile, key)
+            .map_err(|e| what(e.to_string()))?
+            .ok_or_else(|| what("not stored under the current key".into()))?;
+        let (cells, samples) = decode_block(&rec.payload).map_err(|e| what(e.to_string()))?;
+        if cells != self.cells {
+            return Err(what(format!("its payload has {cells} cells per edge, the layout says {}", self.cells)));
+        }
+        let block = Arc::new(samples);
+        if cache.len() >= SOURCE_CACHE_BLOCKS {
+            cache.remove(0);
+        }
+        cache.push((tile, Arc::clone(&block)));
+        Ok(block)
+    }
+}
+
+impl LatticeSource for StoreSource<'_> {
+    fn res(&self) -> u32 {
+        self.res
+    }
+
+    fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+        if i > self.res || j > self.res {
+            return Err(ReadError::Source(format!("vertex ({i}, {j}) of a {}-cell grid", self.res)));
+        }
+        // The block that holds a vertex: the last block of a row holds the far edge as its own last sample.
+        let side = 1u32 << self.level;
+        let (bx, by) = ((i / self.cells).min(side - 1), (j / self.cells).min(side - 1));
+        let tile = TileId::new(face, self.level, bx, by).expect("a tile of the grid");
+        let block = self.block(tile)?;
+        let (k, l) = (i - bx * self.cells, j - by * self.cells);
+        Ok(block[(l * (self.cells + 1) + k) as usize])
     }
 }
 
@@ -327,18 +432,18 @@ pub struct GlobalBuildReport {
     pub peak_resident_blocks: usize,
 }
 
-/// Bake the grid of `cells << level` cells per face edge into the store in `dir` as blocks of `cells` cells. A block the store
-/// already holds under the current key, and whose payload decodes, is reused and not computed, so a second run writes nothing.
+/// Bake the grid of `res` cells per face edge into the store in `dir` in its canonical layout (ADR 0027 point 1: blocks of
+/// `min(res, limit)` cells, the tiles of the level that covers the grid). A block the store already holds under the current
+/// key, and whose payload decodes, is reused and not computed, so a second run writes nothing.
 pub fn build_global(
     dir: &Path,
     world: &GlobalWorld,
-    level: u8,
-    cells: u32,
+    res: u32,
     threads: usize,
     max_pack_bytes: u64,
 ) -> Result<GlobalBuildReport, GlobalBuildError> {
     // Refuse a bad shape before anything is opened, created or written.
-    check_tiled(level, cells)?;
+    let (level, cells) = world.layout(res)?;
     // The writer first (it takes the directory's lock), then a snapshot of what is stored: a run that waited for the lock
     // sees the blocks the run before it wrote and does not compute them again.
     let mut writer = PackWriter::open(dir, world.params(), max_pack_bytes)?;
@@ -411,8 +516,17 @@ pub fn verify_global(store: &TileStore, world: &GlobalWorld, sample: usize) -> V
             }
         };
         // A forged record whose cells and level make no grid the tiled bake accepts is unreadable, never keyed.
-        if grid_res(r.tile, cells).is_none() {
+        let Some(res) = grid_res(r.tile, cells) else {
             report.unreadable.push(format!("{where_}: {cells} cells per block at level {} is not a grid this build bakes", r.tile.level()));
+            continue;
+        };
+        // Only the canonical layout of a grid is stored (ADR 0027 point 1): another one would double the bake.
+        if world.layout(res).ok() != Some((r.tile.level(), cells)) {
+            report.unreadable.push(format!(
+                "{where_}: {cells} cells per block at level {} is not the canonical layout of a {res}-cell grid (blocks of min(res, {}) cells)",
+                r.tile.level(),
+                world.block_limit
+            ));
             continue;
         }
         let metadata_current =
