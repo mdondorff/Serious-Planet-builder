@@ -332,6 +332,42 @@ fn an_index_that_names_records_outside_the_pack_is_not_trusted() {
 
 // spec: STRM-008
 #[test]
+fn an_index_with_two_entries_for_one_key_is_rebuilt_not_trusted() {
+    // Two records of one tile, then the index edited so both entries carry the first record's key: sorted as whole entries,
+    // but one (sort key, key) twice. `find` would return the earlier offset; the index must be rebuilt instead.
+    let d = Dir::new("duplicate-index");
+    let t = tile(5);
+    let rec = |n: u32| Record {
+        key: key(n),
+        kind: 1,
+        tile: t,
+        generator_version: 1,
+        hash_version: 1,
+        node_set_id: [0; 16],
+        payload: vec![n as u8; 12],
+    };
+    let mut w = PackWriter::open(d.path(), PARAMS, DEFAULT_MAX_PACK_BYTES).unwrap();
+    w.append(&rec(10)).unwrap();
+    w.append(&rec(11)).unwrap();
+    w.finish().unwrap();
+    let idx_path = index_file(d.path(), 1);
+    let mut idx = fs::read(&idx_path).unwrap();
+    assert_eq!(idx.len(), 40 + 2 * 40);
+    let first_key: Vec<u8> = idx[40 + 11..40 + 27].to_vec();
+    idx[40 + 40 + 11..40 + 40 + 27].copy_from_slice(&first_key);
+    fs::write(&idx_path, &idx).unwrap();
+    let store = TileStore::open(d.path(), PARAMS).unwrap();
+    assert_eq!(store.len(), 2, "rebuilt from the data: both records, each under its own key");
+    assert_eq!(store.get(1, t, key(10)).unwrap().unwrap().payload, vec![10; 12]);
+    assert_eq!(store.get(1, t, key(11)).unwrap().unwrap().payload, vec![11; 12]);
+    // The writer rewrites a clean index the same way.
+    PackWriter::open(d.path(), PARAMS, DEFAULT_MAX_PACK_BYTES).unwrap().finish().unwrap();
+    let clean = fs::read(&idx_path).unwrap();
+    assert_ne!(clean[40 + 40 + 11..40 + 40 + 27], first_key[..]);
+}
+
+// spec: STRM-008
+#[test]
 fn index_entries_are_in_hilbert_order_within_a_kind_face_and_level() {
     let d = Dir::new("order");
     let mut w = PackWriter::open(d.path(), PARAMS, DEFAULT_MAX_PACK_BYTES).unwrap();

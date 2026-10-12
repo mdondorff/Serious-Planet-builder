@@ -240,12 +240,13 @@ fn cache_verify_args(args: &[String]) -> Result<Vec<String>, String> {
     v.push(dir.clone());
     while let Some(a) = it.next() {
         match a.as_str() {
+            "--allow-stale" => v.push(a.clone()),
             "--world" | "--seed" | "--sample" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 v.push(a.clone());
                 v.push(value.clone());
             }
-            other => return Err(format!("unknown cache-verify option '{other}' (known: --world, --seed, --sample)")),
+            other => return Err(format!("unknown cache-verify option '{other}' (known: --world, --seed, --sample, --allow-stale)")),
         }
     }
     Ok(v)

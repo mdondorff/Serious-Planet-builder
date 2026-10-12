@@ -22,7 +22,7 @@ const USAGE: &str = "cargo xtask <command>
   repro <bundle>       replay a repro bundle (format arrives in M1)
   perf [--machine-ready]   performance harness on Rasierklinge; the harness measures readiness and refuses (ADR 0020);
                            --machine-ready is the owner's override. Only the architect session runs it
-  cache-verify <dir> [--world <file>|--seed N] [--sample N]   regenerate a sample of a tile store from the definition and compare (STRM-004)
+  cache-verify <dir> [--world <file>|--seed N] [--sample N] [--allow-stale]   regenerate a sample of a tile store from the definition and compare (STRM-004)
   det-diff <a> <b>     compare two determinism manifests (GEN-003; CI diffs Windows against Linux)
   golden-review [--proposal <file>] [--extra <dir>]... [--apply]   classify golden candidates under ADR 0017 (auto-bless or escalate)
   bless                list candidate goldens (agents promote under ADR 0017 via golden-review; the rest is the owner's /bless)

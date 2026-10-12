@@ -14,7 +14,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
   editor        interactive editor/viewer (window arrives in M2); --smoke starts and exits; --offscreen runs the skeleton without a window
-  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N); --smoke starts and exits
+  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
@@ -69,6 +69,8 @@ pub struct Options {
     pub verify_cache: Option<PathBuf>,
     /// `--verify-cache`: how many evenly spaced entries to check; 0 is all.
     pub sample: usize,
+    /// `--verify-cache`: entries that are all stale are expected (the definition changed on purpose), not a failure.
+    pub allow_stale: bool,
     pub offscreen: bool,
     pub script: String,
     pub stream: bool,
@@ -112,6 +114,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         region: None,
         verify_cache: None,
         sample: 0,
+        allow_stale: false,
         offscreen: false,
         script: "3".into(),
         stream: false,
@@ -153,6 +156,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--world" => o.world = Some(PathBuf::from(it.next().ok_or("--world needs a path to a definition file")?)),
             "--cache-dir" => o.cache_dir = Some(PathBuf::from(it.next().ok_or("--cache-dir needs a directory")?)),
             "--verify-cache" => o.verify_cache = Some(PathBuf::from(it.next().ok_or("--verify-cache needs a directory")?)),
+            "--allow-stale" => o.allow_stale = true,
             "--sample" => o.sample = it.next().ok_or("--sample needs a count")?.parse().map_err(|e| format!("--sample: {e}"))?,
             "--region" => {
                 let v = it.next().ok_or("--region needs FACE,LEVEL")?;
@@ -182,8 +186,10 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
     Ok(o)
 }
 
-/// Deepest level `generate --region` accepts: 4^6 = 4,096 tiles of one face.
-pub const MAX_REGION_LEVEL: u8 = 6;
+use planet_cache::tiles::MAX_REGION_LEVEL;
+
+/// Options that only the tile store commands of `generate` understand.
+pub(crate) const STORE_OPTIONS: [&str; 6] = ["--world", "--cache-dir", "--verify-cache", "--region", "--sample", "--allow-stale"];
 
 /// Options a `--flight` run would ignore, and the flight-only options other runs would ignore (TEST-013).
 const FLIGHT_EXCLUDES: [&str; 12] = [
@@ -233,6 +239,11 @@ fn parse_size(s: &str) -> Result<(u32, u32), String> {
 
 pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     let o = parse_args(args)?;
+    if !matches!(o.mode, Mode::Generate) {
+        if let Some(f) = STORE_OPTIONS.iter().find(|f| o.given.contains(**f)) {
+            return Err(format!("{f} only applies to `generate` (the tile store commands)"));
+        }
+    }
     let smoke = if o.smoke { " [smoke ok]" } else { "" };
     match o.mode {
         Mode::Editor if o.offscreen => skeleton::render_offscreen(&o, out),
@@ -447,9 +458,12 @@ mod tests {
         assert!(ok.contains("checked 4 of 4 entries: 4 match, 0 stale"), "{ok}");
         let sampled = run_str(&["generate", "--verify-cache", &store, "--seed", "3", "--sample", "2"]).unwrap();
         assert!(sampled.contains("checked 2 of 4 entries: 2 match"), "{sampled}");
-        // Another seed: the stored tiles are stale (not the definition's any more), which is not a failure.
-        let stale = run_str(&["generate", "--verify-cache", &store, "--seed", "4"]).unwrap();
-        assert!(stale.contains("4 stale") && stale.contains("0 differ"), "{stale}");
+        // Another seed: every stored tile is stale, nothing could be compared: that is not a pass.
+        let e = run_str(&["generate", "--verify-cache", &store, "--seed", "4"]).unwrap_err();
+        assert!(e.contains("compared nothing") && e.contains("--allow-stale") && e.contains("4 entries"), "{e}");
+        // Unless stale entries are expected (the definition changed on purpose).
+        let stale = run_str(&["generate", "--verify-cache", &store, "--seed", "4", "--allow-stale"]).unwrap();
+        assert!(stale.contains("4 stale without a known reason") && stale.contains("0 differ"), "{stale}");
     }
 
     // spec: STRM-004
@@ -463,15 +477,8 @@ mod tests {
             planet_cache::tiles::World::from_definition(&planet_world_def::WorldDefinition::single_planet(RADIUS_M_TEST, 3)).unwrap();
         let t = planet_core::TileId::new(planet_core::Face(1), 2, 1, 1).unwrap();
         let wrong = planet_generators::generate_tile(5, &planet_core::cube::TangentWarp, t, 8);
-        let bad = planet_cache::pack::Record {
-            key: world.tile_key(t, 8),
-            kind: planet_cache::tiles::KIND_HEIGHT,
-            tile: t,
-            generator_version: 1,
-            hash_version: planet_core::hash::HASH_VERSION,
-            node_set_id: [0; 16],
-            payload: planet_cache::codec::encode_height_tile(&wrong),
-        };
+        let mut bad = world.tile_record(t, 8).unwrap();
+        bad.payload = planet_cache::codec::encode_height_tile(&wrong).unwrap();
         let mut w =
             planet_cache::pack::PackWriter::open(std::path::Path::new(&store), world.params(), planet_cache::pack::DEFAULT_MAX_PACK_BYTES)
                 .unwrap();
@@ -511,12 +518,33 @@ mod tests {
         std::fs::write(&world, "schema_version = 1\n[world]\nseed = 3\n").unwrap();
         assert!(run_str(&["generate", "--verify-cache", &store, "--world", &world]).unwrap_err().contains("body.0.radius_m"));
 
+        // The store options belong to `generate`'s store commands and nowhere else, and nothing is silently ignored.
+        for (args, needle) in [
+            (vec!["generate", "--verify-cache", store.as_str(), "--world", world.as_str(), "--seed", "3"], "give one"),
+            (vec!["generate", "--verify-cache", store.as_str(), "--region", "0,1"], "only reads"),
+            (vec!["generate", "--cache-dir", store.as_str(), "--region", "0,1", "--sample", "0"], "only apply to --verify-cache"),
+            (vec!["generate", "--cache-dir", store.as_str(), "--region", "0,1", "--allow-stale"], "only apply to --verify-cache"),
+            (vec!["generate", "--manifest", "m.txt", "--world", world.as_str()], "--world"),
+            (vec!["generate", "--manifest", "m.txt", "--cache-dir", store.as_str()], "--cache-dir"),
+            (vec!["editor", "--world", world.as_str()], "only applies to `generate`"),
+            (vec!["editor", "--smoke", "--sample", "3"], "only applies to `generate`"),
+            (vec!["test-render", "--cache-dir", store.as_str()], "only applies to `generate`"),
+            (vec!["generate", "--cache-dir", store.as_str(), "--region", "0,7"], "--region must be"),
+        ] {
+            let e = run_str(&args).unwrap_err();
+            assert!(e.contains(needle), "{args:?}: {e}");
+        }
+        let missing = d.s("no-such-store");
+        let e = run_str(&["generate", "--verify-cache", &missing, "--seed", "3"]).unwrap_err();
+        assert!(e.contains("no such cache directory"), "{e}");
+        let too_big = run_str(&["generate", "--cache-dir", &d.s("big"), "--region", "0,6", "--res", "2048"]).unwrap_err();
+        assert!(too_big.contains("use a lower level or resolution"), "{too_big}");
         let no_region = run_str(&["generate", "--cache-dir", &store]).unwrap_err();
         assert!(no_region.contains("--region"), "{no_region}");
         for (args, needle) in [
-            (vec!["generate", "--region", "0,1"], "--region needs --cache-dir"),
-            (vec!["generate", "--sample", "3"], "--sample needs --verify-cache"),
-            (vec!["generate", "--cache-dir", store.as_str(), "--region", "0,1", "--sample", "3"], "--sample only applies"),
+            (vec!["generate", "--region", "0,1"], "belongs to the tile store commands"),
+            (vec!["generate", "--sample", "3"], "belongs to the tile store commands"),
+            (vec!["generate", "--cache-dir", store.as_str(), "--region", "0,1", "--sample", "3"], "only apply to --verify-cache"),
             (vec!["generate", "--verify-cache", store.as_str(), "--cache-dir", store.as_str()], "only reads"),
             (vec!["generate", "--verify-cache", store.as_str(), "--res", "8"], "only reads"),
             (vec!["generate", "--cache-dir", store.as_str(), "--region", "0,1", "--tile", "0,0,0,0"], "exclude"),
