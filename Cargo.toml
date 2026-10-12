@@ -13,6 +13,7 @@ members = [
     "crates/testkit",
     "crates/perf",
     "xtask",
+    "spikes/erosion-variants",
 ]
 default-members = [
     "crates/core",

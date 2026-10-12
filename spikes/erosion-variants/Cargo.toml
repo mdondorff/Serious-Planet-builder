@@ -1,0 +1,15 @@
+[package]
+name = "erosion-variants"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+
+[dependencies]
+planet-core.workspace = true
+planet-world-def.workspace = true
+planet-generators.workspace = true
+planet-frame.workspace = true
+planet-render.workspace = true
+libm.workspace = true

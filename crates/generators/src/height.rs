@@ -44,7 +44,7 @@ fn value_noise(seed: u64, octave: u32, p: Vec3) -> f64 {
 
 /// Single-octave value noise of lattice layer `layer` at `p`, in [-1, 1]; layers never share lattice values.
 #[cfg_attr(not(feature = "stress"), allow(dead_code))]
-pub(crate) fn layer_noise(seed: u64, layer: u64, octave: u32, p: Vec3) -> f64 {
+pub fn layer_noise(seed: u64, layer: u64, octave: u32, p: Vec3) -> f64 {
     let (fx, fy, fz) = (libm::floor(p.x), libm::floor(p.y), libm::floor(p.z));
     let (tx, ty, tz) = (smooth(p.x - fx), smooth(p.y - fy), smooth(p.z - fz));
     let (ix, iy, iz) = (fx as i64, fy as i64, fz as i64);
@@ -67,7 +67,7 @@ const NOISE_GRADIENT_BOUND: f64 = 5.196_152_422_706_632;
 const NOISE_HESSIAN_BOUND: f64 = 30.3;
 
 /// Value and gradient of [`layer_noise`] at `p`. The value is computed with the same operations as `layer_noise`.
-fn layer_noise_with_gradient(seed: u64, layer: u64, octave: u32, p: Vec3) -> (f64, [f64; 3]) {
+pub fn layer_noise_with_gradient(seed: u64, layer: u64, octave: u32, p: Vec3) -> (f64, [f64; 3]) {
     let (fx, fy, fz) = (libm::floor(p.x), libm::floor(p.y), libm::floor(p.z));
     let (ux, uy, uz) = (p.x - fx, p.y - fy, p.z - fz);
     let (tx, ty, tz) = (smooth(ux), smooth(uy), smooth(uz));
