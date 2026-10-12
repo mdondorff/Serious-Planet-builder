@@ -297,6 +297,13 @@ impl GlobalWorld {
         cache_key(&self.block_key_inputs(tile, cells))
     }
 
+    /// Whether a stored global block is still current for this world: its generator version, hash version and node set id
+    /// equal the world's (STRM-013). Other kinds are not this world's to judge: `true`.
+    pub fn is_live(&self, record: &Record) -> bool {
+        record.kind != KIND_GLOBAL_BLOCK
+            || (record.generator_version == GLOBAL_VERSION && record.hash_version == HASH_VERSION && record.node_set_id == self.node_set_id)
+    }
+
     /// The record of a block of samples.
     pub fn block_record(&self, tile: TileId, cells: u32, samples: &[GlobalSample]) -> Result<Record, BlockCodecError> {
         let res = grid_res(tile, cells).ok_or(BlockCodecError::Grid { level: tile.level(), cells })?;

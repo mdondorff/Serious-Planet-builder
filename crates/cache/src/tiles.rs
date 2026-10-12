@@ -102,6 +102,15 @@ impl World {
     fn generator_version(&self) -> u32 {
         self.field.version()
     }
+
+    /// Whether a stored height record is still current for this world: its generator version, hash version and node set
+    /// id equal the world's (ADR 0019 space reclamation, STRM-013). Other kinds are not this world's to judge: `true`.
+    pub fn is_live(&self, record: &Record) -> bool {
+        record.kind != KIND_HEIGHT
+            || (record.generator_version == self.generator_version()
+                && record.hash_version == HASH_VERSION
+                && record.node_set_id == self.node_set_id)
+    }
 }
 
 /// Every tile of one face at one level, in row order. A face above 5 or a level above [`MAX_REGION_LEVEL`] is refused.

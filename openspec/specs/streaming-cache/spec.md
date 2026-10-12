@@ -192,6 +192,25 @@ Source: CON-05, CON-14, ADR 0018, ADR 0019, ADR 0025, ADR 0026
 - **WHEN** a bake is built twice and verified, then verified under another seed, or with a block made from another seed or a damaged payload
 - **THEN** the second build writes nothing, the first verify matches every block, the other seed is stale and compares nothing, and the bad blocks are reported with tile, pack, offset and first differing sample
 
+### Requirement: STRM-013 Compaction and the size cap
+`planet_cache::pack::compact` (`cargo xtask cache-compact <dir>`, `planet generate --compact-cache <dir>`) SHALL rewrite the live records of a store directory into fresh packs and remove the packs it read, under the directory's writer lock (a held lock is refused, naming the holder), never editing a pack in place (ADR 0019 space reclamation, ADR 0024). A record is live when the caller's predicate says so (for the CLI: a height tile or a global block whose generator version, hash version and definition node set id equal the current definition's; a record of a kind the build does not know is kept); each key keeps its winning copy only (the newest pack, the later offset within a pack), and a key whose newest copy is damaged is dropped with the older copies it hides (ADR 0024 point 8). Packs of another hash version SHALL be removed with the packs read, a file that is not a usable pack of the store SHALL be left alone and reported, and a pack of another body SHALL be an error that removes nothing. The kept records SHALL be written in index order (kind, face, level, Hilbert, then content key) into packs that roll over at the size limit, numbered after the highest existing sequence number, so the output bytes are a pure function of the set of records kept: independent of which pack held a record, of the order the records were first written, of dead and duplicate records and of timing (CON-14); compacting an already compact store rewrites the same bytes under new sequence numbers; the report carries a BLAKE3-128 hash of a framed stream of the output packs (per pack: the marker "pack", its header, its records, the marker "end", its length), independent of file names. When a cap in bytes is given and the live records exceed it (headers and payloads of the kept records; pack headers and index files come on top), records SHALL be evicted by rank, lowest first, ties to the later index order, stopping at the first record that does not fit: the default rank is the sequence number of the pack of the winning copy (write order, not last use; after a compaction the ranks tie and the later index order goes first, ADR 0029); the kept set therefore depends on the rank input, and for a given rank the output bytes are as above; the rank is an input, so a last-hit sidecar (ADR 0019) replaces it without changing the mechanism. Records after a damaged record header in a pack are dropped (they were unreachable); a key with an intact copy and a CRC-failed copy in the same pack keeps the intact one, as the reader does. Eviction happens only through this rewrite. Not covered: an entry whose read nodes changed value but not path set cannot be told dead from the metadata (ADR 0019); until the node set id is per tile (ADR 0026), a global block's liveness is that of the bake's seed node.
+
+Verify: A
+Status: active
+Source: CON-05, CON-14, CON-22, ADR 0019, ADR 0024, ADR 0025, ADR 0029
+
+#### Scenario: Dead and superseded records
+- **WHEN** a store holds records of an old generator version and older copies of keys written again
+- **THEN** compaction keeps one copy of each live key, every kept record reads back equal, and the dead ones are gone
+
+#### Scenario: Byte determinism
+- **WHEN** the same live set was written in different orders, split into different packs and with dead records mixed in
+- **THEN** the compacted packs are byte for byte equal and their hashes match
+
+#### Scenario: Size cap
+- **WHEN** the live records exceed the cap
+- **THEN** the lowest-ranked (by default the oldest) are evicted, the kept bytes are within the cap, and a second run changes nothing
+
 ### Requirement: STRM-005 Cancellation and prioritisation
 Queued and in-flight requests SHALL be cancelled when nothing needs them any more, and requests SHALL be ordered by screen-space error times visibility with parents before children.
 
