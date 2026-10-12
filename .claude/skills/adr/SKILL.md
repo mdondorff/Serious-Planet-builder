@@ -22,6 +22,6 @@ Rules:
 - Link the ADR from the affected spec(s) in `openspec/specs/`.
 - If it supersedes an ADR, change only the old ADR's status line to `superseded by NNNN`.
 - If the decision would change a constitution rule, say so in Context and name the rule ID; do not edit the constitution.
-- Add one line to `docs/status.md`: date, ADR number, title, status.
+- Add one line at the top of `docs/log.md`: date, ADR number, title, status.
 
 Topic: $ARGUMENTS

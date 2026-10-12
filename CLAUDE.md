@@ -9,7 +9,7 @@ A planet-scale generator, editor and real-time renderer: Rust + wgpu, one binary
 3. `openspec/specs/`: current subsystem specs. Read only the 2–3 specs your task touches.
 4. `docs/background/`: frozen research and setup docs. **Read only when an ADR, spec or task points at a specific section** (e.g. "background report §5"). Never treat them as requirements, never update them.
 
-Working files: `docs/status.md` (progress log and stop reports), `docs/spikes.md` (spike register), `docs/learnings.md` (append-only findings).
+Working files: `docs/status.md` (forward state: waiting for the owner, queues, stop reports, the most recent log lines), `docs/log.md` (the full log, newest first), `docs/spikes.md` (spike register), `docs/learnings.md` (append-only findings).
 
 ## Commands (always via xtask)
 - `cargo xtask test fast`: tier A for changed crates (< 10 s)
@@ -28,7 +28,7 @@ Until an xtask command exists, create it in `xtask/` rather than writing a scrip
 2. For each task: write the failing test at the cheapest tier that can falsify it, then implement. Every test cites its requirement ID (`// spec: COORD-003`).
 3. Run the `numerics-reviewer` agent for changes in `core`, `generators` or shaders, and the `spec-guardian` agent before archiving a change.
 4. Run the `verifier` agent before declaring any task done. Fix what it finds; don't argue with it.
-5. Archive the change in OpenSpec when all its requirements pass, then log one line in `docs/status.md`.
+5. Archive the change in OpenSpec when all its requirements pass, then add one line at the top of `docs/log.md`.
 6. A new decision → `/adr`. A time-boxed experiment → `/spike`. A surprise or a corrected assumption → `/learning`.
 
 ## Rules that are easy to break
