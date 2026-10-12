@@ -337,7 +337,7 @@ fn a_tiled_bake_is_thread_and_block_size_independent_in_order_and_holds_at_most_
 // spec: GEN-013
 #[test]
 fn the_peak_of_live_blocks_is_counted_between_creation_and_delivery() {
-    // A sink that is slow does not change what the bake itself keeps: at most one batch is alive, whatever `threads` is.
+    // What the bake itself keeps alive is at most one batch, whatever `threads` is.
     for threads in [1usize, 4, 16] {
         let mut delivered = 0usize;
         let stats = bake_blocks(SEED, &TangentWarp, 1, 2, threads, &mut |_, _| delivered += 1).unwrap();
