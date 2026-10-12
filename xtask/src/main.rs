@@ -22,6 +22,7 @@ const USAGE: &str = "cargo xtask <command>
   repro <bundle>       replay a repro bundle (format arrives in M1)
   perf [--machine-ready]   performance harness on Rasierklinge; the harness measures readiness and refuses (ADR 0020);
                            --machine-ready is the owner's override. Only the architect session runs it
+  perf global-bake [--global-res N] [--threads N] [--machine-ready]   the GEN-014 global bake (default 16384 cells per face edge) under the same gate
   cache-verify <dir> [--world <file>|--seed N] [--sample N] [--allow-stale]   regenerate a sample of a tile store from the definition and compare (STRM-004)
   det-diff <a> <b>     compare two determinism manifests (GEN-003; CI diffs Windows against Linux)
   golden-review [--proposal <file>] [--extra <dir>]... [--apply]   classify golden candidates under ADR 0017 (auto-bless or escalate)

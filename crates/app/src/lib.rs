@@ -1,6 +1,7 @@
 //! The single binary's run modes (CON-01): `editor` (interactive viewer), `generate` (headless CLI)
 //! and `test-render` (headless harness). M0 only wires them up; real work arrives with M1+.
 
+pub mod globalperf;
 pub mod sheet;
 pub mod skeleton;
 
@@ -274,7 +275,10 @@ fn parse_size(s: &str) -> Result<(u32, u32), String> {
 pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     let o = parse_args(args)?;
     if !matches!(o.mode, Mode::Generate) {
-        if let Some(f) = STORE_OPTIONS.iter().find(|f| o.given.contains(**f)) {
+        // The global-bake perf scene takes the definition, grid size and thread count of the global commands.
+        let bake_scene = matches!(o.mode, Mode::TestRender) && o.perf && o.scene == "global-bake";
+        let allowed: &[&str] = if bake_scene { &["--world", "--global-res", "--threads"] } else { &[] };
+        if let Some(f) = STORE_OPTIONS.iter().find(|f| o.given.contains(**f) && !allowed.contains(f)) {
             return Err(format!("{f} only applies to `generate` (the tile store commands)"));
         }
     }
@@ -373,7 +377,11 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         return skeleton::render_flight(&ctx, o, out);
     }
     if o.perf || o.perf_smoke {
-        return if o.scene == "terrain" { skeleton::perf_terrain(o, &ctx, out) } else { perf_skeleton(o, &ctx, out) };
+        return match o.scene.as_str() {
+            "terrain" => skeleton::perf_terrain(o, &ctx, out),
+            "global-bake" => globalperf::perf_global_bake(o, &ctx, out),
+            _ => perf_skeleton(o, &ctx, out),
+        };
     }
     if let Some(bundle) = &o.repro {
         return skeleton::replay(&ctx, bundle, o.out.as_deref(), out);
