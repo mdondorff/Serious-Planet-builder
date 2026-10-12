@@ -123,7 +123,7 @@ impl planet_generators::global::LatticeSource for Ulp {
         4
     }
     fn at(&self, _: Face, i: u32, _: u32) -> Result<planet_generators::global::GlobalSample, planet_generators::global::ReadError> {
-        let e = if i % 2 == 0 { self.0 } else { f32::from_bits(self.0.to_bits() + 1) };
+        let e = if i.is_multiple_of(2) { self.0 } else { f32::from_bits(self.0.to_bits() + 1) };
         Ok(planet_generators::global::GlobalSample { continent: 1.0, elevation_m: e, temperature_c: 0.0, precipitation_mm: 0.0 })
     }
 }
