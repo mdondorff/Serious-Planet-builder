@@ -212,30 +212,92 @@ fn above_terrain(field: &dyn HeightField, h: f64) -> PlanetFixed {
     PlanetFixed(dir * (R + field.height(dir) + h))
 }
 
+/// Recede from `lo` to `hi` metres above the terrain in 3 % steps and check the leaf under the camera: morph in [0, 1],
+/// levels never increase, and every merge happens from a nearly fully morphed leaf to a barely morphed one. The sweep
+/// starts one step below `lo` so the first step of a chunk is compared with its predecessor: the chunks together check
+/// the heights one sweep from 30 m to 200 km would (30 * 1.03^k, up to rounding), split only so the test tier runs
+/// them in parallel. Returns the number of merges seen.
+fn morph_sweep(field: &dyn HeightField, lo: f64, hi: f64) -> usize {
+    let params = LodParams::earth_1080p();
+    let nadir = above_terrain(field, 0.0).0.normalized();
+    let mut prev: Option<(u8, f32)> = None;
+    let (mut h, mut merges) = (lo / 1.03, 0);
+    while h < hi {
+        let cam = above_terrain(field, h);
+        let sel = planet_frame::select_nodes_field(&TangentWarp, cam, field, &params);
+        let n = sel.nodes.iter().find(|n| n.tile.contains(&TangentWarp, nadir)).expect("a leaf contains the nadir");
+        assert!((0.0..=1.0).contains(&n.morph), "morph {} at height {h}", n.morph);
+        if let Some((pl, pm)) = prev {
+            assert!(n.tile.level() <= pl, "level must not increase while receding (height {h})");
+            if n.tile.level() < pl {
+                // One level per merge, so the level span over the chunk bounds equals the number of merges (see the guard test).
+                assert_eq!(n.tile.level() + 1, pl, "merge at height {h} drops more than one level");
+                assert!(pm >= 0.8 && n.morph <= 0.5, "merge at height {h}: morph {pm} before, {} after", n.morph);
+                merges += 1;
+            }
+        }
+        prev = Some((n.tile.level(), n.morph));
+        h *= 1.03;
+    }
+    merges
+}
+
+/// Ten consecutive chunks (balanced by measured cost, not by height) of the sweep from 30 m to 200 km (3 % steps): each starts where the last ended.
+fn chunk_bounds(i: u32) -> (f64, f64) {
+    const STEPS: [u32; 11] = [0, 15, 30, 48, 68, 92, 125, 170, 215, 255, 299];
+    let at = |k: u32| (0..k).fold(30.0f64, |h, _| h * 1.03);
+    (at(STEPS[i as usize]), if i == 9 { 2.0e5 } else { at(STEPS[i as usize + 1]) })
+}
+
+macro_rules! morph_sweep_tests {
+    ($($name:ident: $field:expr, $chunk:expr;)*) => {$(
+        // spec: LOD-004
+        #[test]
+        fn $name() {
+            let (lo, hi) = chunk_bounds($chunk);
+            morph_sweep(&$field, lo, hi);
+        }
+    )*};
+}
+
+morph_sweep_tests! {
+    morph_is_bounded_and_merges_do_not_pop_reference_chunk_0: Reference(1), 0;
+    morph_is_bounded_and_merges_do_not_pop_reference_chunk_1: Reference(1), 1;
+    morph_is_bounded_and_merges_do_not_pop_reference_chunk_2: Reference(1), 2;
+    morph_is_bounded_and_merges_do_not_pop_reference_chunk_3: Reference(1), 3;
+    morph_is_bounded_and_merges_do_not_pop_reference_chunk_4: Reference(1), 4;
+    morph_is_bounded_and_merges_do_not_pop_reference_chunk_5: Reference(1), 5;
+    morph_is_bounded_and_merges_do_not_pop_reference_chunk_6: Reference(1), 6;
+    morph_is_bounded_and_merges_do_not_pop_reference_chunk_7: Reference(1), 7;
+    morph_is_bounded_and_merges_do_not_pop_reference_chunk_8: Reference(1), 8;
+    morph_is_bounded_and_merges_do_not_pop_reference_chunk_9: Reference(1), 9;
+    morph_is_bounded_and_merges_do_not_pop_steep_chunk_0: Steep(1), 0;
+    morph_is_bounded_and_merges_do_not_pop_steep_chunk_1: Steep(1), 1;
+    morph_is_bounded_and_merges_do_not_pop_steep_chunk_2: Steep(1), 2;
+    morph_is_bounded_and_merges_do_not_pop_steep_chunk_3: Steep(1), 3;
+    morph_is_bounded_and_merges_do_not_pop_steep_chunk_4: Steep(1), 4;
+    morph_is_bounded_and_merges_do_not_pop_steep_chunk_5: Steep(1), 5;
+    morph_is_bounded_and_merges_do_not_pop_steep_chunk_6: Steep(1), 6;
+    morph_is_bounded_and_merges_do_not_pop_steep_chunk_7: Steep(1), 7;
+    morph_is_bounded_and_merges_do_not_pop_steep_chunk_8: Steep(1), 8;
+    morph_is_bounded_and_merges_do_not_pop_steep_chunk_9: Steep(1), 9;
+}
+
 // spec: LOD-004
 #[test]
-fn morph_is_bounded_and_merges_do_not_pop_over_real_terrain() {
+fn the_chunked_morph_sweep_covers_many_level_changes_from_ground_to_orbit() {
+    // The unchunked sweep asserted at least 8 merges per field; chunks cannot count across their bounds, so the level under
+    // the camera at the chunk bounds must fall monotonically and span at least 8 levels.
     let params = LodParams::earth_1080p();
     for field in [&Reference(1) as &dyn HeightField, &Steep(1)] {
         let nadir = above_terrain(field, 0.0).0.normalized();
-        let mut prev: Option<(u8, f32)> = None;
-        let (mut h, mut merges) = (30.0f64, 0);
-        while h < 2.0e5 {
-            let cam = above_terrain(field, h);
-            let sel = planet_frame::select_nodes_field(&TangentWarp, cam, field, &params);
-            let n = sel.nodes.iter().find(|n| n.tile.contains(&TangentWarp, nadir)).expect("a leaf contains the nadir");
-            assert!((0.0..=1.0).contains(&n.morph), "morph {} at height {h}", n.morph);
-            if let Some((pl, pm)) = prev {
-                assert!(n.tile.level() <= pl, "level must not increase while receding (height {h})");
-                if n.tile.level() < pl {
-                    assert!(pm >= 0.8 && n.morph <= 0.5, "merge at height {h}: morph {pm} before, {} after", n.morph);
-                    merges += 1;
-                }
-            }
-            prev = Some((n.tile.level(), n.morph));
-            h *= 1.03;
-        }
-        assert!(merges >= 8, "expected many level changes, saw {merges}");
+        let level_at = |h: f64| {
+            let sel = planet_frame::select_nodes_field(&TangentWarp, above_terrain(field, h), field, &params);
+            sel.nodes.iter().find(|n| n.tile.contains(&TangentWarp, nadir)).expect("a leaf contains the nadir").tile.level()
+        };
+        let levels: Vec<u8> = (0..10).map(|i| level_at(chunk_bounds(i).0)).chain([level_at(chunk_bounds(9).1)]).collect();
+        assert!(levels.windows(2).all(|w| w[1] <= w[0]), "levels {levels:?} must not increase while receding");
+        assert!(levels[0] >= levels[10] + 8, "levels {levels:?}: expected at least 8 level changes");
     }
 }
 
