@@ -1,0 +1,4 @@
+- [x] 1.1 per-view pinned counts (tier A, TEST-011)
+- [x] 1.2 log comparison against the last valid session (TEST-012), wired into the terrain scene
+- [x] 1.3 ground-1m GPU rise: analysis and the A/B proposal (learning)
+- [x] 1.4 specs, log line
