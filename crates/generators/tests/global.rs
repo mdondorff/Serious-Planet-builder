@@ -175,7 +175,9 @@ fn another_seed_is_another_world_and_the_same_seed_the_same() {
 #[test]
 fn a_bake_refuses_resolutions_it_cannot_hold() {
     for res in [0, 3, 100, MAX_BAKE_RES * 2] {
-        assert_eq!(bake(SEED, &TangentWarp, res, 1).unwrap_err(), BakeError::BadResolution(res));
+        let e = bake(SEED, &TangentWarp, res, 1).unwrap_err();
+        assert_eq!(e, BakeError::BadResolution(res));
+        assert!(e.to_string().contains(&MAX_BAKE_RES.to_string()), "the message names the limit: {e}");
     }
     assert!(bake(SEED, &TangentWarp, 1, 1).is_ok());
 }
@@ -205,10 +207,10 @@ fn the_data_products_show_the_world_in_every_channel() {
 
     // Written for review (not goldens): target/review/global-coarse/<channel>-net.png and <channel>-map.png.
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/review/global-coarse");
-    let big = bake(SEED, &TangentWarp, 128, 4).unwrap();
+    let big = bake(SEED, &TangentWarp, 64, 4).unwrap();
     for ch in Channel::ALL {
         product(&big, ch).write_png(&dir.join(format!("{}-net.png", ch.name()))).unwrap();
-        equirect_product(SEED, 512, ch).write_png(&dir.join(format!("{}-map.png", ch.name()))).unwrap();
+        equirect_product(SEED, 256, ch).write_png(&dir.join(format!("{}-map.png", ch.name()))).unwrap();
     }
 }
 
