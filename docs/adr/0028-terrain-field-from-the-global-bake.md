@@ -1,5 +1,5 @@
 # 0028 The terrain field: a pure function of the direction over the global bake
-Status: proposed (sonnet-explorer, 2026-10-12; answers the architect's four questions on the height_at plan; easy to reverse until a terrain field is stored; build on it while proposed, ship no stored terrain field before ADRs 0027 and 0028 are accepted)
+Status: accepted (owner's delegation of 2026-10-12: the architect accepts ADRs that reviewers find sound and unambiguous; accepted by opus-planner after the numerics review and its fixes (Lipschitz constant, f32 coverage, detail bound); drafted by sonnet-explorer)
 Date: 2026-10-12
 Source: ADR 0027 (reading the global bake, proposed), ADR 0026, ADR 0016 (height-aware LOD), ADR 0025 point 2 (what cache-verify compares), ADR 0022, ADR 0006; constitution CON-05, CON-08, CON-11, CON-14; COORD-007
 
@@ -18,6 +18,7 @@ The first regional field turns the baked global channels into terrain heights: e
 - No new pipeline path; direction-based consumers stay consistent by construction.
 - `HeightField` gains `source_key` (default `None`); `height_key` uses it.
 - The field is slower per sample than the reference (a bake read and several detail octaves); the 3 detail octaves that matter at coarse LOD are the same function, nothing is cached per tile.
+- The steepness check at the production parameters (cells 32, ratio 240) was first run on a bake of 256 cells per face edge; a finer bake resolves steeper global relief, so M3 acceptance repeats it on a bake at the production resolution (16384 cells per face edge, or a region of it with the same lattice).
 
 ## Licences of adopted code or techniques
 None.
