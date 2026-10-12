@@ -539,6 +539,7 @@ dependencies = [
  "planet-core",
  "planet-generators",
  "planet-streaming",
+ "planet-world-def",
 ]
 
 [[package]]

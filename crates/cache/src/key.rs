@@ -261,7 +261,9 @@ fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile
         body: field.body(),
         body_params: body_params_hash128(field.body(), field.seed(), radius_m, field.surface_id()),
         tile,
-        source: None,
+        // A field built over a baked input names that bake's stage key as its source (ADR 0028 point 5); a mesh key replaces it with
+        // its height key, which already carries it.
+        source: field.source_key().map(CacheKey),
         output_params: BTreeMap::new(),
         reads,
     }

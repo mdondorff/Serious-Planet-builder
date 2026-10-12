@@ -259,6 +259,12 @@ pub trait HeightField: Sync {
     fn body(&self) -> BodyId {
         BodyId::PLANET
     }
+    /// The 128-bit stage key of the baked input this field reads (STRM-011, ADR 0028 point 5), if it reads one: the source
+    /// of its persistent height key, so a change of the bake re-keys the tiles made from it. Fields that read only
+    /// definition nodes have none.
+    fn source_key(&self) -> Option<[u8; 16]> {
+        None
+    }
     /// Id of the reference surface of this field's body (CON-15); part of every height and mesh key.
     fn surface_id(&self) -> &'static str {
         SPHERE_SURFACE_ID
@@ -448,6 +454,9 @@ impl<F: HeightField> HeightField for Bound<F> {
     }
     fn body(&self) -> BodyId {
         self.body
+    }
+    fn source_key(&self) -> Option<[u8; 16]> {
+        self.field.source_key()
     }
     fn surface_id(&self) -> &'static str {
         self.field.surface_id()

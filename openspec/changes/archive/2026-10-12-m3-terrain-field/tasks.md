@@ -1,0 +1,4 @@
+- [x] 1.1 read_direction, TerrainField, bounds, source_key
+- [x] 1.2 tests (generators, cache keys, frame production planning)
+- [x] 1.3 GEN-016, ADR 0028 (accepted)
+- [x] 1.4 reviews, verifier, status line
