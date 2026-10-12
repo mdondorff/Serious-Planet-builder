@@ -468,6 +468,18 @@ mod tests {
 
     // spec: STRM-004
     #[test]
+    fn cache_verify_of_an_existing_empty_directory_compared_nothing_and_fails_even_with_allow_stale() {
+        let d = TempDir::new("empty-store");
+        let store = d.s("store");
+        std::fs::create_dir_all(&store).unwrap();
+        let e = run_str(&["generate", "--verify-cache", &store, "--seed", "3"]).unwrap_err();
+        assert!(e.contains("compared nothing") && e.contains("0 entries"), "{e}");
+        let e = run_str(&["generate", "--verify-cache", &store, "--seed", "3", "--allow-stale"]).unwrap_err();
+        assert!(e.contains("compared nothing") && e.contains("does not help"), "{e}");
+    }
+
+    // spec: STRM-004
+    #[test]
     fn cache_verify_fails_naming_a_tile_made_with_an_input_missing_from_its_key() {
         let d = TempDir::new("bad-store");
         let store = d.s("store");

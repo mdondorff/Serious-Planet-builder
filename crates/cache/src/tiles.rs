@@ -75,6 +75,11 @@ impl World {
         self.radius_m
     }
 
+    /// The node set id stored in every record of this world (STRM-010, ADR 0025 point 3).
+    pub fn node_set_id(&self) -> [u8; 16] {
+        self.node_set_id
+    }
+
     /// The persistent key of the height tile `tile` at `res` cells per edge (the unit of the mesh's `cells`).
     pub fn tile_key(&self, tile: TileId, res: u32) -> CacheKey {
         height_key(self.field.as_ref(), &TangentWarp, tile, res, self.radius_m)
@@ -233,9 +238,10 @@ impl VerifyReport {
         self.mismatches.is_empty() && self.unreadable.is_empty()
     }
 
-    /// Whether entries were looked at but none could be compared with the definition, because all of them are stale.
+    /// Whether no entry could be compared with the definition: the store is empty, or every entry is stale, of another
+    /// kind or unreadable (ADR 0025 point 4).
     pub fn compared_nothing(&self) -> bool {
-        self.stale + self.unexplained_stale > 0 && self.matching + self.mismatches.len() == 0
+        self.matching + self.mismatches.len() == 0
     }
 
     /// Whether the store passes: clean, and something was actually compared.
@@ -243,9 +249,11 @@ impl VerifyReport {
         self.clean() && !self.compared_nothing()
     }
 
-    /// Whether the store passes when stale entries are expected (the definition changed on purpose).
+    /// Whether the store passes when stale entries are expected (the definition changed on purpose): clean, and either
+    /// something was compared or at least one entry is stale. An empty store, or one with only entries of another kind,
+    /// still fails (ADR 0025 point 4).
     pub fn passed_allowing_stale(&self) -> bool {
-        self.clean()
+        self.clean() && (!self.compared_nothing() || self.stale + self.unexplained_stale > 0)
     }
 }
 

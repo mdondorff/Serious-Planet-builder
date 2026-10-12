@@ -1,0 +1,1 @@
+Deltas were applied directly to openspec/specs/streaming-cache/spec.md: STRM-004 (modified: nothing-compared rule, scenario "Nothing to compare"), STRM-010 (added), Source lines of STRM-004 and STRM-009.
