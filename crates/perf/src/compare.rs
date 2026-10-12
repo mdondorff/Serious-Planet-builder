@@ -221,10 +221,7 @@ pub fn summarize_log(text: &[u8]) -> Result<LogSummary, String> {
             }
         }
     }
-    let medians = samples
-        .into_iter()
-        .map(|(p, m)| (p, m.into_iter().map(|(name, v)| (name, median_of(v))).collect()))
-        .collect();
+    let medians = samples.into_iter().map(|(p, m)| (p, m.into_iter().map(|(name, v)| (name, median_of(v))).collect())).collect();
     Ok(LogSummary { valid, resolution: res, medians, counts })
 }
 
@@ -281,15 +278,23 @@ pub fn comparison_lines(last_valid: Option<&[u8]>, new: &[u8]) -> Vec<String> {
         Err(e) => return vec![format!("regression check skipped: this session's log could not be read ({e})")],
     };
     if !new.valid {
-        return vec!["regression check skipped: this session is not valid for budgets, so it is neither compared nor kept as the baseline".into()];
+        return vec![
+            "regression check skipped: this session is not valid for budgets, so it is neither compared nor kept as the baseline".into()
+        ];
     }
     let Some(old_text) = last_valid else {
         return vec!["regression check: no earlier valid log for this scene; this session becomes the baseline".into()];
     };
     let old = match summarize_log(old_text) {
         Ok(s) if s.valid => s,
-        Ok(_) => return vec!["regression check skipped: the stored baseline is not valid for budgets; this session becomes the baseline".into()],
-        Err(e) => return vec![format!("regression check skipped: the stored baseline could not be read ({e}); this session becomes the baseline")],
+        Ok(_) => {
+            return vec!["regression check skipped: the stored baseline is not valid for budgets; this session becomes the baseline".into()]
+        }
+        Err(e) => {
+            return vec![format!(
+                "regression check skipped: the stored baseline could not be read ({e}); this session becomes the baseline"
+            )]
+        }
     };
     if old.resolution != new.resolution {
         return vec![format!(
@@ -320,8 +325,12 @@ pub fn comparison_lines(last_valid: Option<&[u8]>, new: &[u8]) -> Vec<String> {
         }
     }
     if found.is_empty() {
-        let compared: usize = new.medians.iter().map(|(p, m)| m.keys().filter(|k| old.medians.get(p).is_some_and(|o| o.contains_key(*k))).count()).sum();
-        lines.push(format!("regression check: {compared} medians compared with the last valid log, none up by more than {:.0} %", REGRESSION_THRESHOLD * 100.0));
+        let compared: usize =
+            new.medians.iter().map(|(p, m)| m.keys().filter(|k| old.medians.get(p).is_some_and(|o| o.contains_key(*k))).count()).sum();
+        lines.push(format!(
+            "regression check: {compared} medians compared with the last valid log, none up by more than {:.0} %",
+            REGRESSION_THRESHOLD * 100.0
+        ));
     }
     lines
 }
