@@ -1,0 +1,13 @@
+[package]
+name = "hydrology-spike"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+rust-version.workspace = true
+
+[dependencies]
+planet-core.workspace = true
+planet-generators.workspace = true
+planet-render.workspace = true
+libm.workspace = true

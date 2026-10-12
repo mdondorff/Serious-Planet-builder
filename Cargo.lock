@@ -263,6 +263,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hydrology-spike"
+version = "0.0.0"
+dependencies = [
+ "libm",
+ "planet-core",
+ "planet-generators",
+ "planet-render",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
