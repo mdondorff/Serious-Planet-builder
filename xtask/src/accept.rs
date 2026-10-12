@@ -1,5 +1,6 @@
 //! `cargo xtask accept <milestone>`: runs the automated part of milestone acceptance and writes
-//! `target/review/accept-<milestone>.md`. Criteria that need CI, the owner or Rasierklinge are listed
+//! `target/review/accept-<milestone>.md`. The tier C run covers both the software adapter and the discrete GPU
+//! (`--real`; the command fails on a machine without one). Criteria that need CI, the owner or Rasierklinge are listed
 //! as such, never as passed.
 
 use crate::util::{run as exec, Res};
@@ -32,7 +33,7 @@ fn manual_criteria(milestone: &str) -> &'static [&'static str] {
         "M2" => &[
             "Orbit to 1 m altitude without jitter: the f32 shader-path emulation passes (REND-004); a visual flight on the real GPU needs the owner",
             "Terrain at most 8 ms at 1440p on the mid-range tier: needs a performance run on Rasierklinge (the owner confirms the machine first)",
-            "No cracks in 10 scripted views: checked on the software adapters (LOD-005); a real-GPU run needs the owner (`cargo xtask test gpu --real`)",
+            "No cracks in 10 scripted views: checked on the software adapters and, by the `test gpu --real` step above, on the discrete GPU (LOD-005)",
             "Six terrain goldens blessed by the owner (/bless), and the Linux goldens",
             "GO/NO-GO gate: the owner decides after reading docs/milestones/M2-report.md",
         ],
@@ -50,6 +51,7 @@ pub fn run(root: &Path, args: &[String]) -> Res {
         step("spec-lint", || crate::speclint::run(root)),
         step("test (tiers A+B, software adapter)", || crate::testcmd::test(root, &[])),
         step("test gpu (tier C, software adapter)", || crate::testcmd::test(root, &["gpu".to_string()])),
+        step("test gpu --real (tier C, discrete GPU)", || crate::testcmd::test(root, &["gpu".to_string(), "--real".to_string()])),
         step("run mode editor --smoke", || exec(root, "cargo", &["run", "-q", "-p", "planet", "--", "editor", "--smoke"], &[])),
         step("run mode generate --smoke", || exec(root, "cargo", &["run", "-q", "-p", "planet", "--", "generate", "--smoke"], &[])),
         step("run mode test-render --smoke", || exec(root, "cargo", &["run", "-q", "-p", "planet", "--", "test-render", "--smoke"], &[])),
