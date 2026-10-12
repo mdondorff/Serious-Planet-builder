@@ -30,7 +30,7 @@ fn the_bake_is_bit_identical_for_every_thread_count_and_equals_the_pointwise_fie
     // Every baked sample is the pointwise field at the direction of the same lattice vertex of a level-0 tile.
     for f in 0..6u8 {
         let root = TileId::new(Face(f), 0, 0, 0).unwrap();
-        for (k, l) in [(0, 0), (1, 0), (5, 9), (16, 16), (0, 16), (16, 3)] {
+        for (k, l) in (0..=16).flat_map(|l| (0..=16).map(move |k| (k, l))) {
             let d = root.sample_direction(&TangentWarp, 16, k, l);
             assert_eq!(bits(&one.at(Face(f), k, l)), bits(&sample(SEED, d)), "face {f} vertex ({k}, {l})");
         }
@@ -58,7 +58,7 @@ fn samples_on_a_shared_face_edge_are_one_value() {
             }
         }
     }
-    assert!(shared >= 12 * 9 - 8 * 2, "{shared} shared vertices found: the six faces share 12 edges of 9 vertices");
+    assert_eq!(shared, 100, "6 x 81 listed vertices minus 386 distinct directions: every edge and corner vertex is shared");
 }
 
 // spec: GEN-013
@@ -84,7 +84,7 @@ fn the_field_has_continents_oceans_mountains_and_latitude_bands() {
                 if s.is_land() {
                     assert!(s.elevation_m > 0.0, "land below sea level at {y}: {s:?}");
                 } else {
-                    assert!(s.elevation_m < 0.0, "ocean above sea level: {s:?}");
+                    assert!(s.elevation_m <= 0.0, "ocean above sea level: {s:?}");
                 }
                 if y.abs() < 0.1 && !s.is_land() {
                     t_equator += f64::from(s.temperature_c);
@@ -109,6 +109,33 @@ fn the_field_has_continents_oceans_mountains_and_latitude_bands() {
     assert!(n_equator > 20 && n_pole > 20 && n_itcz > 20 && n_desert > 20, "too few samples to judge the climate");
     assert!(t_equator / f64::from(n_equator) > t_pole / f64::from(n_pole) + 30.0, "the equator is much warmer than the poles");
     assert!(p_itcz / f64::from(n_itcz) > p_desert / f64::from(n_desert), "the rain belt at the equator is wetter than the subtropics");
+}
+
+// spec: GEN-013
+#[test]
+fn land_is_above_and_ocean_at_or_below_sea_level_for_any_direction() {
+    // Land is decided from the stored (f32) continentalness, the same number that shapes the elevation, so the two never
+    // disagree, also within rounding of the coast; the field is continuous across it (no coastal cliff).
+    let (mut land, mut coastal) = (0, 0);
+    for i in 0..60_000u64 {
+        let h = |k: u64| planet_core::hash::unit_f64(planet_core::hash::hash_u64s(SEED, &[i, k])) * 2.0 - 1.0;
+        let v = Vec3::new(h(0), h(1), h(2));
+        if v.length() < 1e-3 {
+            continue;
+        }
+        let s = sample(SEED, v.normalized());
+        if s.is_land() {
+            land += 1;
+            assert!(s.elevation_m > 0.0, "land at or below sea level: {s:?}");
+        } else {
+            assert!(s.elevation_m <= 0.0, "ocean above sea level: {s:?}");
+        }
+        if (f64::from(s.continent) - SEA_LEVEL_C).abs() < 0.01 {
+            coastal += 1;
+            assert!(s.elevation_m.abs() < 60.0, "a coastal sample far from sea level (a cliff): {s:?}");
+        }
+    }
+    assert!(land > 10_000 && coastal > 100, "{land} land and {coastal} coastal samples");
 }
 
 // spec: GEN-013
@@ -200,8 +227,8 @@ fn known_answers_pin_the_field_on_every_platform() {
     assert_eq!(format!("{got:08x?}"), KNOWN_POINTS, "pointwise known answers");
     assert_eq!(format!("{:016x}", grid_hash(&grid(16, 3))), KNOWN_GRID_HASH, "the hash of the 16-cell bake");
     // The sea level is part of the field's contract.
-    assert!((SEA_LEVEL_C - 0.10).abs() < 1e-12);
+    assert_eq!(SEA_LEVEL_C, 0.10);
 }
 
-const KNOWN_POINTS: &str = "[[3f3ef54b, 44c8e309, 41a2a155, 45032416], [be83b213, c4d3cf81, c1cfa1d5, 442c4f54], [bed97260, c5340701, 41eb8eac, 451e5422], [3e25822e, 431d8031, 418fde77, 430d7a6e], [beff7496, c5532674, 40aa0957, 446de42a]]";
-const KNOWN_GRID_HASH: &str = "6bcc870a6084100c";
+const KNOWN_POINTS: &str = "[[3f3ef54b, 44cb75f7, 41a18f38, 45032416], [be83b213, c4c37fdb, c1cfa1d5, 442c4f54], [bed97260, c52f51c0, 41eb8eac, 451e5422], [3e25822e, 42c5afc0, 4192eb50, 430d7a6e], [beff7496, c54fe3c7, 40aa0957, 446de42a]]";
+const KNOWN_GRID_HASH: &str = "3ae54edffe001637";

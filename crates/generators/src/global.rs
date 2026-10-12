@@ -2,7 +2,7 @@
 //!
 //! One field with four channels, because under ADR 0022 option 1 a chain of steps is one field: the continent mask feeds
 //! the elevation and the elevation feeds the temperature, all inside [`sample`]. It is a pure function of `(seed,
-//! unit direction)`: integer hashing, IEEE `+ - * /`, `libm::floor`, `libm::sqrt`, `libm::asin`, `libm::exp`, so results
+//! unit direction)`: integer hashing, IEEE `+ - * /`, `libm::floor`, `libm::asin`, `libm::exp`, so results
 //! are bit-identical across platforms and thread counts (CON-14). The bake evaluates it at the vertices of a cube-face
 //! grid (the same directions as the tile samples of the same level), so a shared border sample is one value, and the
 //! result does not depend on the order or the number of threads that computed it.
@@ -83,17 +83,18 @@ pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
         fbm(seed, LAYER_WARP, d + Vec3::new(0.0, 31.0, 0.0), 1.3, 3),
     );
     let warped = d + warp * 0.45;
-    let continent = fbm(seed, LAYER_CONTINENT, warped, 1.1, 5) * 1.7;
+    // Rounded to the stored f32 first, so land and the sign of the elevation are decided from the same number.
+    let continent = f64::from((fbm(seed, LAYER_CONTINENT, warped, 1.1, 5) * 1.7) as f32);
 
     // Elevation: ocean basins and shelves from the continent value, mountain ranges from ridged noise inside range
     // zones, rising inland.
     let land_depth = continent - SEA_LEVEL_C;
     let base = if land_depth < 0.0 {
-        // Shelf then abyss: -200 m at the coast down to -4500 m far from it.
-        -200.0 - 4300.0 * smoothstep(0.0, 0.9, -land_depth)
+        // Sea level at the coast, down to -4500 m far from it (the field is continuous across the coast).
+        -4500.0 * smoothstep(0.0, 0.9, -land_depth)
     } else {
-        // Lowlands rising slowly to plateaus.
-        60.0 + 900.0 * smoothstep(0.0, 0.9, land_depth)
+        // Sea level at the coast, rising slowly to plateaus.
+        1000.0 * smoothstep(0.0, 0.9, land_depth)
     };
     let ridge = {
         let n = fbm(seed, LAYER_RIDGE, warped, 3.0, 5);
@@ -115,7 +116,7 @@ pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
     let precipitation = (bands * wetness).clamp(0.0, 4500.0);
 
     GlobalSample {
-        continent: continent as f32,
+        continent: continent as f32, // exact: already rounded above
         elevation_m: elevation as f32,
         temperature_c: temperature as f32,
         precipitation_mm: precipitation as f32,
