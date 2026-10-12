@@ -258,8 +258,6 @@ fn selected_views_match_the_adapters_goldens() {
         (2, TerrainView::Height, "terrain_aerial200km_height"),
         (6, TerrainView::Depth, "terrain_ground1m_depth"),
         (4, TerrainView::Morph, "terrain_low2km_morph"),
-        (0, TerrainView::Relief, "terrain_orbit_relief"),
-        (6, TerrainView::Relief, "terrain_ground1m_relief"),
     ] {
         let (_, plan) = plan_for(index, view);
         let meshes = meshes_for(&plan);
@@ -313,6 +311,45 @@ fn height_contours_and_depth_bands_are_visible() {
             }
         }
         assert!(lines >= 20, "{name} {}: only {lines} line pixels; contours or bands are missing", view.name());
+    }
+}
+
+/// Pixels that are a local luminance dip against both vertical neighbours (a thin dark line: grid or contour), skipping the
+/// horizon.
+fn relief_line_pixels(img: &Image, clear: [u8; 4]) -> usize {
+    let luma = |x: u32, y: u32| {
+        let p = img.pixel(x, y);
+        0.299 * f64::from(p[0]) + 0.587 * f64::from(p[1]) + 0.114 * f64::from(p[2])
+    };
+    let mut lines = 0;
+    for y in 1..img.height - 1 {
+        for x in 0..img.width {
+            if [(x, y), (x, y - 1), (x, y + 1)].iter().any(|&(px, py)| img.pixel(px, py) == clear) {
+                continue;
+            }
+            let c = luma(x, y);
+            if luma(x, y - 1) - c > 6.0 && luma(x, y + 1) - c > 6.0 {
+                lines += 1;
+            }
+        }
+    }
+    lines
+}
+
+// spec: REND-006, TEST-014
+#[test]
+fn the_relief_view_shows_terrain_below_the_horizon_with_grid_and_contour_lines() {
+    // The automatic check of the relief view at both flight-review cameras (TEST-014: the owner's review of the 1280x720
+    // flight is the other half). Removing the grid and contours from the relief shader makes the line count fall to zero.
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    for index in [0usize, 6] {
+        let (name, plan) = plan_for(index, TerrainView::Relief);
+        let (img, _) = render(&ctx, &plan, &meshes_for(&plan));
+        let h = holes(&plan, &img);
+        assert!(h.is_empty(), "{name}: {} clear-colour pixels below the horizon, first at {:?}", h.len(), h[0]);
+        let lines = relief_line_pixels(&img, plan.clear_color);
+        eprintln!("{name}: {lines} line pixels");
+        assert!(lines >= 20, "{name}: only {lines} line pixels; the relief grid and contours are missing");
     }
 }
 

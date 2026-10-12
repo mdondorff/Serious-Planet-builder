@@ -1,3 +1,1 @@
 # Goldens that are waiting for the owner's /bless (one name per line). /bless removes a line when it promotes the golden.
-terrain_orbit_relief
-terrain_ground1m_relief
