@@ -1,6 +1,7 @@
 //! The single binary's run modes (CON-01): `editor` (interactive viewer), `generate` (headless CLI)
 //! and `test-render` (headless harness). M0 only wires them up; real work arrives with M1+.
 
+pub mod globalperf;
 pub mod sheet;
 pub mod skeleton;
 
@@ -373,7 +374,11 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         return skeleton::render_flight(&ctx, o, out);
     }
     if o.perf || o.perf_smoke {
-        return if o.scene == "terrain" { skeleton::perf_terrain(o, &ctx, out) } else { perf_skeleton(o, &ctx, out) };
+        return match o.scene.as_str() {
+            "terrain" => skeleton::perf_terrain(o, &ctx, out),
+            "global-bake" => globalperf::perf_global_bake(o, &ctx, out),
+            _ => perf_skeleton(o, &ctx, out),
+        };
     }
     if let Some(bundle) = &o.repro {
         return skeleton::replay(&ctx, bundle, o.out.as_deref(), out);

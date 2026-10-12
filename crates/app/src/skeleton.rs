@@ -231,7 +231,7 @@ fn world_of(o: &Options) -> Result<planet_cache::tiles::World, String> {
 }
 
 /// The definition of the global commands: a TOML file, or the default single planet.
-fn global_world_of(o: &Options) -> Result<planet_cache::global_store::GlobalWorld, String> {
+pub(crate) fn global_world_of(o: &Options) -> Result<planet_cache::global_store::GlobalWorld, String> {
     let def = match &o.world {
         Some(path) => {
             let text = std::fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;

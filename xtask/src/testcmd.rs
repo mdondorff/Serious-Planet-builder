@@ -259,7 +259,39 @@ pub fn cache_verify(root: &Path, args: &[String]) -> Res {
     run(root, "cargo", &refs, &[])
 }
 
+/// The `cargo` arguments of `perf global-bake` (GEN-014): the global-bake scene under the same readiness gate, with the grid
+/// size and thread count as options. The default grid is the 1 km one of GEN-014 (16384 cells per face edge).
+fn perf_global_bake_args(args: &[String]) -> Result<Vec<String>, String> {
+    let mut v: Vec<String> =
+        ["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", "global-bake", "--adapter", "hardware"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--machine-ready" => v.push(a.clone()),
+            "--global-res" | "--threads" => {
+                let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
+                v.push(a.clone());
+                v.push(value.clone());
+            }
+            other => {
+                return Err(format!(
+                    "unknown perf global-bake option '{other}' (known: --global-res, --threads, --machine-ready, the owner's override of a failed readiness gate)"
+                ))
+            }
+        }
+    }
+    Ok(v)
+}
+
 pub fn perf(root: &Path, args: &[String]) -> Res {
+    if args.first().map(String::as_str) == Some("global-bake") {
+        let cargo_args = perf_global_bake_args(&args[1..])?;
+        let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+        return run(root, "cargo", &refs, &[]);
+    }
     let cargo_args = perf_cargo_args(args)?;
     run(root, "cargo", &cargo_args, &[])
 }
@@ -321,6 +353,21 @@ mod tests {
         let over = perf_cargo_args(&s(&["--machine-ready"])).unwrap();
         assert_eq!(over.last(), Some(&"--machine-ready"));
         let e = perf_cargo_args(&s(&["--force"])).unwrap_err();
+        assert!(e.contains("--force") && e.contains("override"), "{e}");
+    }
+
+    // spec: GEN-014, BUILD-002
+    #[test]
+    fn perf_global_bake_runs_the_scene_under_the_gate_and_takes_the_grid_size() {
+        let a = perf_global_bake_args(&s(&["--global-res", "1024", "--machine-ready"])).unwrap();
+        assert!(
+            a.contains(&"global-bake".to_string()) && a.contains(&"--perf".to_string()) && a.contains(&"hardware".to_string()),
+            "{a:?}"
+        );
+        assert_eq!(a[a.iter().position(|x| x == "--global-res").unwrap() + 1], "1024");
+        assert!(a.contains(&"--machine-ready".to_string()));
+        assert!(perf_global_bake_args(&s(&["--global-res"])).unwrap_err().contains("needs a value"));
+        let e = perf_global_bake_args(&s(&["--force"])).unwrap_err();
         assert!(e.contains("--force") && e.contains("override"), "{e}");
     }
 }
