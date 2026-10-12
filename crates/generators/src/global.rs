@@ -12,6 +12,7 @@
 
 use planet_core::cube::{face_to_direction, FaceMapping};
 use planet_core::{Face, Vec3};
+use planet_world_def::{BodyId, GenContext, MissingNode, ReadRecord};
 
 use crate::height::layer_noise;
 
@@ -33,6 +34,76 @@ pub const SEA_LEVEL_C: f64 = 0.10;
 /// Lowest and highest elevation in metres (clamps).
 pub const MIN_ELEVATION_M: f64 = -9000.0;
 pub const MAX_ELEVATION_M: f64 = 9000.0;
+
+/// The global-coarse field of one body, built through a [`GenContext`] (CON-06, GEN-001): the seed is read from the
+/// definition, so the read set (the world seed and the body's derived seed) is recorded and is what a key covers.
+/// [`sample`] and [`bake`] are pure functions of that seed and read nothing else.
+pub struct GlobalCoarseField {
+    seed: u64,
+    body: BodyId,
+    inputs: u64,
+    records: Vec<ReadRecord>,
+}
+
+impl GlobalCoarseField {
+    /// The seed this field was built from.
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
+    pub fn body(&self) -> BodyId {
+        self.body
+    }
+
+    pub fn implementation_id(&self) -> &'static str {
+        IMPLEMENTATION_ID
+    }
+
+    pub fn version(&self) -> u32 {
+        GLOBAL_VERSION
+    }
+
+    /// Hash of the recorded read set (the 64-bit form of the key's definition part).
+    pub fn inputs_hash(&self) -> u64 {
+        self.inputs
+    }
+
+    /// The recorded reads, sorted by path: what a persistent key is built from (ADR 0018, STRM-011).
+    pub fn read_records(&self) -> Vec<ReadRecord> {
+        self.records.clone()
+    }
+
+    pub fn sample(&self, d: Vec3) -> GlobalSample {
+        sample(self.seed, d)
+    }
+
+    /// Bake this field on the six cube-face grids (see [`bake`]).
+    pub fn bake(&self, map: &(dyn FaceMapping + Sync), res: u32, threads: usize) -> Result<GlobalGrid, BakeError> {
+        bake(self.seed, map, res, threads)
+    }
+}
+
+/// Builds the [`GlobalCoarseField`] of a body from a definition.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GlobalCoarseGenerator;
+
+impl GlobalCoarseGenerator {
+    pub fn implementation_id(&self) -> &'static str {
+        IMPLEMENTATION_ID
+    }
+
+    pub fn version(&self) -> u32 {
+        GLOBAL_VERSION
+    }
+
+    /// The field of `body`: reads the body's seed (and with it the world seed) through `ctx`. A missing node is an error
+    /// naming it, not a default.
+    pub fn field(&self, ctx: &GenContext, body: BodyId) -> Result<GlobalCoarseField, MissingNode> {
+        assert!(ctx.reads().is_empty(), "a field is built from a fresh context: its key covers the whole read set of the context");
+        let seed = ctx.body_seed(body)?;
+        Ok(GlobalCoarseField { seed, body, inputs: ctx.read_set_hash(), records: ctx.read_records() })
+    }
+}
 
 /// The four channels of the global-coarse field at one point.
 #[derive(Clone, Copy, Debug, PartialEq)]

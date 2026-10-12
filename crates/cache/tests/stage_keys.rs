@@ -264,6 +264,47 @@ fn the_implementation_id_and_query_reads_are_covered_and_query_order_does_not_ma
     assert_ne!(keys(&g, &ctx(&one))["coarse"], keys(&g, &ctx(&changed))["coarse"], "a query result is part of the key");
 }
 
+// spec: STRM-011
+#[test]
+fn the_key_of_the_global_coarse_bake_is_sensitive_to_resolution_seed_and_body() {
+    use planet_cache::key::read_entry;
+    use planet_generators::global::{GlobalCoarseGenerator, GLOBAL_VERSION, IMPLEMENTATION_ID};
+    use planet_world_def::{GenContext, WorldDefinition};
+    let g = FieldGraph::new(&[FieldSpec {
+        id: "global-coarse",
+        stage: Stage::GlobalCoarse,
+        reads: &[],
+        version: GLOBAL_VERSION,
+        implementation_id: IMPLEMENTATION_ID,
+        halo_fraction: 0.0,
+    }])
+    .unwrap();
+    let key_of = |def: &WorldDefinition, body: BodyId, res: u32| {
+        let c = GenContext::new(def);
+        let f = GlobalCoarseGenerator.field(&c, body).unwrap();
+        let reads: Vec<ReadEntry> = f.read_records().iter().map(read_entry).collect();
+        let radius = c.body_radius_m(body).unwrap();
+        let ctx = StageKeyContext {
+            body,
+            body_params: body_params_hash128(body, f.seed(), radius, "sphere"),
+            face_mapping_id: "tangent-v1",
+            resolution: res,
+            reads: &reads,
+        };
+        stage_key(&g, "global-coarse", Scope::Global, &ctx, &BTreeMap::new())
+    };
+    let def = WorldDefinition::single_planet(6_371_000.0, 7);
+    let base = key_of(&def, BodyId::PLANET, 1024);
+    assert_eq!(base, key_of(&def, BodyId::PLANET, 1024));
+    assert_ne!(base, key_of(&def, BodyId::PLANET, 2048), "another resolution is another bake");
+    let mut seeded = def.clone();
+    seeded.set(WorldDefinition::SEED_PATH, NodeValue::U64(8));
+    assert_ne!(base, key_of(&seeded, BodyId::PLANET, 1024), "another world seed");
+    let mut two = def.clone();
+    two.set_body_radius(BodyId(1), 6_371_000.0);
+    assert_ne!(base, key_of(&two, BodyId(1), 1024), "another body");
+}
+
 const KNOWN_LAYOUT_KEY: &str = "3fa6ad5dff9f501ab224456cabd21384";
 const KNOWN_COARSE: &str = "f7eb6786122ed161a75229e125d91653";
 const KNOWN_TERRAIN: &str = "222fb7bc04027214cfffd092d0f271f2";
