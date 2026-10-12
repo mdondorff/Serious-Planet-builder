@@ -424,4 +424,24 @@ fn a_cell_record_pins_its_parameter_layout_and_ignores_the_order_of_its_items() 
     assert_eq!(whole, ReadEntry::Query { kind: QUERY_BODY, params: 3u32.to_le_bytes().to_vec(), result: query_result_hash128(&[]) });
 }
 
+// spec: STRM-003, GEN-016
+#[test]
+fn a_terrain_height_key_chains_the_bake_it_was_made_from() {
+    use planet_generators::global::{bake, GridSource};
+    use planet_generators::terrain::TerrainGenerator;
+    let def = WorldDefinition::single_planet(R, 7);
+    let seed = GenContext::new(&def).body_seed(BodyId::PLANET).unwrap();
+    let grid = bake(seed, &TangentWarp, 8, 1).unwrap();
+    let src = GridSource(&grid);
+    let key_of = |bake_key: [u8; 16]| {
+        let f = TerrainGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, bake_key).unwrap();
+        height_key(&f, &TangentWarp, tile(), 32, R)
+    };
+    assert_eq!(key_of([1; 16]), key_of([1; 16]));
+    assert_ne!(key_of([1; 16]), key_of([2; 16]), "another bake re-keys the tile");
+    // A field without a source (the reference field) keeps the key it had.
+    let reference = height_key(&Reference(7), &TangentWarp, tile(), 32, R);
+    assert_ne!(reference, key_of([1; 16]));
+}
+
 const KNOWN_CELL_RESULT: &str = "b37c2d466779663723ca2943a728a242";

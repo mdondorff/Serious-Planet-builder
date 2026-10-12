@@ -225,3 +225,22 @@ Source: CON-05, CON-08, CON-14, ADR 0006, ADR 0022, ADR 0026, ADR 0027
 #### Scenario: Halo and errors
 - **WHEN** a position one sample beyond a face edge is read, or a tile shape or source is bad
 - **THEN** the edge value comes back, or the error names the shape or the missing block
+
+### Requirement: GEN-016 The terrain field
+The terrain field SHALL be a pure function of the unit direction (ADR 0028): the global bake's elevation read at the direction (`read_direction`: face and face coordinates from the direction, bilinear blend of the lattice cell in floating point) plus detail noise in the direction whose amplitude is a nondecreasing function of that elevation, at most `DETAIL_MAX_M`. Every consumer SHALL call `height(dir)`, so the same world point has the same height bits from any tile, parent or child, neighbour across a face edge or cube corner, thread or consumer (COORD-007). Its `height_bounds` SHALL contain the height (also rounded to `f32`) of every direction of the cap, by the face-coordinate Lipschitz bound of ADR 0028 point 3 (faces scanned where the centre's extended coordinates are within `1 + L theta`; the global range for larger caps), and SHALL hug the terrain on small caps. A read failure of the bake SHALL give NaN and be reported by `error()`, never a plausible height. Its keys SHALL chain the bake: `inputs_hash` covers the bake's stage key and the persistent height key carries it as `source` (`HeightField::source_key`). The implementation id (`cpu-terrain-v1`) and `TERRAIN_VERSION` SHALL be pinned with known answers, and planning at cells 32 and viewport / tau 240 along the standard flight SHALL not be rejected for steepness (ADR 0016).
+
+Verify: A
+Status: active
+Source: CON-05, CON-08, CON-14, COORD-007, ADR 0016, ADR 0022, ADR 0028
+
+#### Scenario: One point, one height
+- **WHEN** the same direction is sampled by tiles of different levels, across face edges and cube corners, and from several threads
+- **THEN** the height bits are equal
+
+#### Scenario: Sound and tight bounds
+- **WHEN** caps are centred at random points, near edge midpoints and at corners
+- **THEN** every height in the cap lies within the bounds, and caps of a few hundred metres have bounds a few hundred metres wide
+
+#### Scenario: Production planning
+- **WHEN** the standard flight is planned at cells 32 and viewport / tau 240
+- **THEN** no node is rejected for steepness

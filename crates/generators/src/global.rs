@@ -541,6 +541,12 @@ pub fn read_lattice(src: &dyn LatticeSource, face: Face, u: i64, v: i64, n_log2:
         }
     };
     let ((i, wu), (j, wv)) = (axis(u), axis(v));
+    blend_cell(src, face, i, j, wu, wv)
+}
+
+/// The bilinear blend of cell `(i, j)` of `face` with weights `(wu, wv)` (ADR 0027 point 3): the shared core of every read.
+pub(crate) fn blend_cell(src: &dyn LatticeSource, face: Face, i: u32, j: u32, wu: f64, wv: f64) -> Result<GlobalSample, ReadError> {
+    let res = src.res();
     // The far neighbour is read only when its weight is not zero: a lattice point is its own sample (a stored -0.0 stays -0.0,
     // an infinite or missing neighbour cannot change it) and reads touch no block they do not need.
     let i1 = if wu == 0.0 { i } else { (i + 1).min(res) };
@@ -573,6 +579,32 @@ pub fn read_tile_sample(src: &dyn LatticeSource, tile: TileId, cells: u32, k: i6
     let n_log2 = u32::from(tile.level()) + cells.trailing_zeros();
     let (x, y) = (i64::from(tile.x()) * i64::from(cells), i64::from(tile.y()) * i64::from(cells));
     read_lattice(src, tile.face(), x + k, y + l, n_log2)
+}
+
+/// Read the global field at the unit direction `dir`: the face and face coordinates come from `direction_to_face`, the
+/// position in the bake's lattice from the face coordinates in floating point, and the blend is [`read_lattice`]'s. A pure
+/// function of `dir` (the same direction bits, the same value), which is what a direction-based height field needs: shared
+/// border samples of tiles, also across faces, have identical direction bits (COORD-007) and so identical heights. Unlike
+/// [`read_tile_sample`] its weights are not exact dyadic fractions and it is not bit-equal to a lattice read of the same
+/// sample; a field uses one or the other, never both (ADR 0028).
+pub fn read_direction(src: &dyn LatticeSource, map: &dyn FaceMapping, dir: Vec3) -> Result<GlobalSample, ReadError> {
+    let res = src.res();
+    if res == 0 || !res.is_power_of_two() {
+        return Err(ReadError::Shape(format!("a reader needs a power-of-two bake resolution (res {res})")));
+    }
+    let (face, s, t) = planet_core::cube::direction_to_face(map, dir);
+    // Face coordinates run over [-1, 1]; the bake's lattice has `res` cells over that range.
+    let pos = |c: f64| ((c + 1.0) * 0.5 * f64::from(res)).clamp(0.0, f64::from(res));
+    let axis = |p: f64| -> (u32, f64) {
+        let cell = libm::floor(p) as u32;
+        if cell >= res {
+            (res, 0.0)
+        } else {
+            (cell, p - f64::from(cell))
+        }
+    };
+    let ((i, wu), (j, wv)) = (axis(pos(s)), axis(pos(t)));
+    blend_cell(src, face, i, j, wu, wv)
 }
 
 /// A 64-bit hash of every bit of every channel of a grid, in face and row-major order, with the resolution and
