@@ -48,7 +48,7 @@ impl World {
 
     /// Build the world of body 0 with any height generator: its field comes through a context, so its keys follow the
     /// recorded read set. The node set id is the BLAKE3-128 (context `planet-builder node set v1`) of the sorted,
-    /// deduplicated, u32-length-prefixed paths of the field's reads and of the body's radius node (ADR 0024).
+    /// deduplicated, u32-length-prefixed paths of the field's reads and of the body's radius node (ADR 0025 point 3).
     pub fn from_generator(def: &WorldDefinition, generator: &dyn HeightGenerator) -> Result<World, MissingNode> {
         let ctx = GenContext::new(def);
         let field = generator.field(&ctx, BodyId::PLANET)?;
