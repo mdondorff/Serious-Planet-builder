@@ -7,6 +7,6 @@ description: Run milestone acceptance and write a milestone report. Use when all
 3. Run the `verifier` agent on the milestone as a whole and include its table.
 4. Write `docs/milestones/<milestone>-report.md` with: summary, criteria table, open risks, learnings from this milestone, proposed ADRs awaiting the owner, and the recommendation for the next milestone.
 5. If this is a go/no-go gate (M2, M5), end the report with an explicit "Go / No-go / Go with changes" recommendation and stop for the owner.
-6. Add one line to `docs/status.md`.
+6. Add one line at the top of `docs/log.md`, and write the stop report in `docs/status.md`.
 
 Milestone: $ARGUMENTS
