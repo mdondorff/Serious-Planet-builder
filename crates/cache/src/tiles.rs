@@ -59,7 +59,7 @@ impl World {
         paths.dedup();
         let mut material = Vec::new();
         for p in &paths {
-            material.extend_from_slice(&(p.len() as u32).to_le_bytes());
+            material.extend_from_slice(&u32::try_from(p.len()).expect("a node path is under 4 GiB").to_le_bytes());
             material.extend_from_slice(p.as_bytes());
         }
         let full = blake3::derive_key("planet-builder node set v1", &material);

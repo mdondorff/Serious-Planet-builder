@@ -251,6 +251,12 @@ fn the_node_set_id_is_a_pinned_derive_key_hash_of_the_sorted_length_prefixed_pat
         material.extend_from_slice(&(p.len() as u32).to_le_bytes());
         material.extend_from_slice(p.as_bytes());
     }
+    // The spec's bytes written out literally: little-endian u32 byte lengths 15, 19 and 10, no count prefix.
+    assert_eq!(
+        material,
+        b"\x0f\x00\x00\x00body.0.radius_m\x13\x00\x00\x00derived.body.0.seed\x0a\x00\x00\x00world.seed".to_vec(),
+        "the material the hash covers"
+    );
     let by_hand = blake3::derive_key("planet-builder node set v1", &material);
     assert_eq!(w.node_set_id(), by_hand[..16], "paths {paths:?}");
     assert_eq!(hex16(w.node_set_id()), KNOWN_NODE_SET_ID, "paths {paths:?}: the pinned known answer");
