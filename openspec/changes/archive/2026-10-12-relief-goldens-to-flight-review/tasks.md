@@ -1,0 +1,3 @@
+- [x] 1.1 remove the golden entries
+- [x] 1.2 property test, mutation-checked
+- [x] 1.3 TEST-014 text, status line

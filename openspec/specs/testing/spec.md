@@ -245,7 +245,7 @@ Source: CON-13, ADR 0009, ADR 0014
 - **THEN** `contact_sheet.png` holds 12 thumbnails in 4 columns, and every index row has five fields with the finest level growing from the first frame to the last
 
 ### Requirement: TEST-014 Real-GPU flight review
-The owner SHALL review the TEST-013 flight rendered on the reference GPU once, in the default relief view, and confirm that it shows no jitter, vertex swimming, cracks or popping beyond the LOD transitions.
+The owner SHALL review the TEST-013 flight rendered on the reference GPU once, in the default relief view, and confirm that it shows no jitter, vertex swimming, cracks or popping beyond the LOD transitions. The 1280x720 flight review is the owner's review of the relief view at milestone gates (the relief view has no goldens: a 128x96 image is too small to show a relief defect and would change with nearly every terrain change); its automatic check is a tier-B property test of the relief view at the orbit and ground-1m cameras (no clear-colour pixel below the horizon, grid and contour lines present, REND-006).
 
 Verify: D
 Status: planned
