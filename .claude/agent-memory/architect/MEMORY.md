@@ -16,7 +16,7 @@ Confirm everything here against `main` and `docs/status.md` before acting on it.
 
 ## State of main (2026-10-11)
 - M2: GO recorded by the owner (#42), "go with changes"; the condition (LOD-008 first in M3) is met (#43).
-- All ADRs 0001-0020 and 0022-0025 accepted (0025 tile codec and cache-verify, #69); 0021 in part (1, 3, 4, 7) on 2026-10-12 under the owner's delegation
+- All ADRs 0001-0020 and 0022-0025 accepted (0025 tile codec and cache-verify, #69); 0026 global-coarse bake in part (#76: point 5, the bake reader, open for a new ADR before task 4); 0021 in part (1, 3, 4, 7) on 2026-10-12 under the owner's delegation
   (#67); 0023/0024 amend 0018/0019 in part. 0022 = option 1 (no same-stage reads). Recent: 0016 height-aware selection, 0017 golden review policy, 0018 persistent
   cache keys (BLAKE3-128, `pure`), 0019 tile pack store, 0020 perf readiness gate. 0013, 0014 accepted 2026-10-11
   (0014 partly superseded by 0016).
@@ -30,13 +30,11 @@ Confirm everything here against `main` and `docs/status.md` before acting on it.
 1. **Ragged band: DONE** (#65, 2026-10-12): both causes fixed (height now geomorphed, MESH_VERSION 4; the relief
    grid's f32 phase replaced by per-decade f64 phases). `terrain_aerial200km_height` was auto-blessed under ADR 0017
    (AUTO-E: 849 / 829 / 843 px). Open follow-up: normals are still not geomorphed (only if it shows in a view).
-2. **Relief goldens** `terrain_orbit_relief`, `terrain_ground1m_relief`: first goldens, classed lit, pending for the
+2. **Relief goldens** (owner, 2026-10-12: worried they flake, being 128x96. I recommended rejecting both and replacing them with the flight review plus a relief property test; awaiting his decision) `terrain_orbit_relief`, `terrain_ground1m_relief`: first goldens, classed lit, pending for the
    owner's `/bless`; candidates regenerated after #65, so the owner can review them now. Review sequence:
    `C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-explorer\target\review\flight-relief-nvidia\` (contact sheet).
    This is the TEST-014 owner review.
-3. **First perf-gate run** (ADR 0020): open a perf window (ask coders to pause builds and tests, wait for their idle
-   notices), run `cargo xtask perf`, record the result. Watch the laptop's software power-cap throttle bit (0x4): if it
-   invalidates every session, the measurement protocol needs an owner decision.
+3. **Perf gate: first run 2026-10-12 valid, all budgets pass** (status.md Log). Ground-1m GPU median up ~35 % vs the owner's 2026-10-11 run (likely #65 vertex size), still in budget: watch it. GEN-014 bake not in the harness yet (queued, M3 item 6 (m)).
 4. **M3 acceptance must show** realistic terrain plans at production parameters (cells 32, ratio 240); ADR 0016 rejects
    terrain too steep for a crack-free morph interval. The steep stress field only plans at cells 4 / ratio 77.
 5. **Process proposal for the owner:** per-change log lines in the archived OpenSpec change instead of appending to
@@ -46,6 +44,8 @@ Confirm everything here against `main` and `docs/status.md` before acting on it.
 8. Owner items carried into M3: TEST-008 split decision; editor window and egui per ADR 0015 (wgpu stays in render).
 
 ## Lessons from the owner
+- Coders edit proposed ADRs in their own PRs while you review them (#75 edited 0026 pt 6 during my review): merge main and combine texts before accepting.
+- sonnet-explorer's `gh pr merge` needs the owner's go-ahead in its session (classifier); stalls at merge mean a prompt is waiting there.
 - **Before accepting a proposed ADR, check open coder branches that touch it.** #68 edited ADR 0024's body after #67
   had accepted it; the fix was to restore 0024 and move the text into ADR 0025 (CON-23).
 - **ADR delegation (owner, 2026-10-12):** accept ADRs yourself when the reviewers' recommendations are strong or the ADR
