@@ -116,7 +116,8 @@ fn the_scope_kind_and_the_tile_are_part_of_the_key_and_the_wrong_scope_panics() 
     let a = stage_key(&g, "terrain", Scope::Tile(tile()), &c, &up);
     let b = stage_key(&g, "terrain", Scope::Tile(TileId::new(Face(2), 5, 3, 8).unwrap()), &c, &up);
     assert_ne!(a, b);
-    // A tile whose raw id is 0 does not alias the global scope.
+    // The scope kind byte keeps a tile with raw id 0 apart from the global scope (pinned in the layout test); a global field
+    // keyed for any tile, even that one, is refused:
     let root = TileId::new(Face(0), 0, 0, 0).unwrap();
     let wrong = std::panic::catch_unwind(|| {
         let g = graph(1, 1, 0.25);
@@ -190,6 +191,77 @@ fn the_encoding_layout_and_the_known_answers_are_pinned() {
     assert_eq!(k["coarse"].to_hex(), KNOWN_COARSE);
     assert_eq!(k["terrain"].to_hex(), KNOWN_TERRAIN);
     assert_eq!(k["detail"].to_hex(), KNOWN_DETAIL);
+}
+
+// spec: STRM-011
+#[test]
+fn the_tile_scope_query_entries_and_inputs_section_are_written_out_byte_by_byte() {
+    let g = graph(1, 1, 0.25);
+    let query = ReadEntry::Query { kind: 1, params: vec![7, 8, 9], result: [0x11; 16] };
+    let reads = vec![query];
+    let c = StageKeyContext { body: BodyId(2), body_params: [0xee; 16], face_mapping_id: "m", resolution: 4, reads: &reads };
+    let coarse = CacheKey([0x42; 16]);
+    let got = encode_stage_key(&g, "terrain", Scope::Tile(tile()), &c, &BTreeMap::from([("coarse", coarse)]));
+    let mut want: Vec<u8> = vec![1];
+    want.extend(1u32.to_le_bytes()); // hash version
+    want.extend(1u32.to_le_bytes()); // field version
+    want.push(1); // regional
+    want.extend(7u32.to_le_bytes());
+    want.extend(b"terrain");
+    want.extend(6u32.to_le_bytes());
+    want.extend(b"impl-a");
+    want.extend(0.25f64.to_bits().to_le_bytes());
+    want.push(1); // a tile scope, then its raw id
+    want.extend(tile().raw().to_le_bytes());
+    want.extend(2u32.to_le_bytes());
+    want.extend([0xee; 16]);
+    want.extend(1u32.to_le_bytes());
+    want.extend(b"m");
+    want.extend(4u32.to_le_bytes());
+    want.extend(1u32.to_le_bytes()); // one read: a query entry
+    want.push(2);
+    want.push(1);
+    want.extend(3u32.to_le_bytes());
+    want.extend([7, 8, 9]);
+    want.extend([0x11; 16]);
+    want.extend(1u32.to_le_bytes()); // one input: its id, then its key
+    want.extend(6u32.to_le_bytes());
+    want.extend(b"coarse");
+    want.extend([0x42; 16]);
+    assert_eq!(got, want);
+}
+
+// spec: STRM-011
+#[test]
+fn the_implementation_id_and_query_reads_are_covered_and_query_order_does_not_matter() {
+    let with_impl = |regional_impl: &'static str, coarse_impl: &'static str| {
+        FieldGraph::new(&[
+            FieldSpec { implementation_id: coarse_impl, ..spec("coarse", Stage::GlobalCoarse, &[], 1, 0.0) },
+            FieldSpec { implementation_id: regional_impl, ..spec("terrain", Stage::Regional, &["coarse"], 1, 0.25) },
+        ])
+        .unwrap()
+    };
+    let reads = seed_read();
+    let c = ctx(&reads);
+    let two = |g: &FieldGraph| {
+        let coarse = stage_key(g, "coarse", Scope::Global, &c, &BTreeMap::new());
+        let terrain = stage_key(g, "terrain", Scope::Tile(tile()), &c, &BTreeMap::from([("coarse", coarse)]));
+        (coarse, terrain)
+    };
+    let base = two(&with_impl("a", "a"));
+    let regional = two(&with_impl("b", "a"));
+    assert_eq!(regional.0, base.0);
+    assert_ne!(regional.1, base.1);
+    let coarse = two(&with_impl("a", "b"));
+    assert!(coarse.0 != base.0 && coarse.1 != base.1);
+
+    let q = |kind: u8, p: u8, r: u8| ReadEntry::Query { kind, params: vec![p], result: [r; 16] };
+    let one = vec![q(1, 1, 1), q(2, 2, 2), q(1, 3, 3)];
+    let other = vec![q(1, 3, 3), q(1, 1, 1), q(2, 2, 2), q(1, 1, 1)];
+    let g = graph(1, 1, 0.25);
+    assert_eq!(keys(&g, &ctx(&one)), keys(&g, &ctx(&other)), "order and duplicates of query reads do not matter");
+    let changed = vec![q(1, 1, 1), q(2, 2, 9), q(1, 3, 3)];
+    assert_ne!(keys(&g, &ctx(&one))["coarse"], keys(&g, &ctx(&changed))["coarse"], "a query result is part of the key");
 }
 
 const KNOWN_LAYOUT_KEY: &str = "3fa6ad5dff9f501ab224456cabd21384";

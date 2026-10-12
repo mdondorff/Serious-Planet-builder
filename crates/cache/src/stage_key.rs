@@ -44,7 +44,7 @@ pub fn encode_stage_key(graph: &FieldGraph, id: &str, scope: Scope, ctx: &StageK
     let mut out = vec![STAGE_KEY_FORMAT_TAG];
     out.extend_from_slice(&HASH_VERSION.to_le_bytes());
     out.extend_from_slice(&s.version.to_le_bytes());
-    out.push(s.stage.tag() as u8);
+    out.push(u8::try_from(s.stage.tag()).expect("a stage tag fits a byte"));
     put_str(&mut out, s.id);
     put_str(&mut out, s.implementation_id);
     // The graph reads `-0.0` as `0.0`; the key sees the same bits for both.
@@ -75,6 +75,7 @@ pub fn encode_stage_key(graph: &FieldGraph, id: &str, scope: Scope, ctx: &StageK
     }
     nodes.sort_unstable();
     nodes.dedup();
+    debug_assert!(nodes.windows(2).all(|w| w[0].0 != w[1].0), "one node path read with two different hashes");
     queries.sort_unstable();
     queries.dedup();
     out.extend_from_slice(&len32(nodes.len() + queries.len()));
