@@ -121,3 +121,8 @@ What happened: the reviews of m3-cache-verify found that regenerating a sample f
 Assumption it changes: "verify passes means the keys are complete": it means the stored tiles are what this definition and binary produce. The tests now include a generator with a leaky read and a store-level item-edit test, and compared-nothing fails.
 Proposed follow-up: ADR 0021 point 7 (a contract test that a generator's recorded reads stay within its declared ones) is the real defence; run cache-verify across a definition edit in CI when the field pipeline exists.
 
+## 2026-10-12 A threshold that decides a stored flag and a derived value must use the stored (rounded) number
+What happened: the global-coarse field decided land from the `f32` continentalness it stores but shaped the elevation from the `f64` it computed first. For `f64` values within 1e-9 below the sea level the two rounded to opposite sides: a "land" sample at -200 m. The numerics review found it by reading; at 4e8 samples per bake it would have shown a few times per bake (and in a random test seed), never in the small tests.
+Assumption it changes: "a tolerance-free comparison is safe because the test grids are small": rounding to the stored precision happens before any decision that two outputs must agree on. `sample` now rounds continentalness to `f32` first, and a 60 000-direction test checks land against the sign of the elevation.
+Proposed follow-up: none; apply to every multi-channel field (temperature bands, biome classes) when they gain thresholds.
+

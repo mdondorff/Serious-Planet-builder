@@ -171,8 +171,9 @@ impl std::fmt::Display for BakeError {
 
 impl std::error::Error for BakeError {}
 
-/// The largest in-memory bake: 1024 cells per face edge is about 10 km at Earth's radius. Finer global grids (1 km is 8192
-/// per face edge) are baked as tiles and never held whole.
+/// The largest in-memory bake: 2048 cells per face edge is about 5 km at Earth's radius (6 x 2049^2 samples of 16 bytes
+/// is about 400 MB). A global grid of about 1 km needs 16384 cells per face edge (8192 is 1.2 km) and is baked as tiles,
+/// never held whole (next change).
 pub const MAX_BAKE_RES: u32 = 2048;
 
 /// Sample position of vertex `(k, l)` of an `res`-cell face grid in face coordinates `[-1, 1]`.
@@ -221,8 +222,8 @@ pub fn bake(seed: u64, map: &(dyn FaceMapping + Sync), res: u32, threads: usize)
     Ok(GlobalGrid { seed, res, faces })
 }
 
-/// A 64-bit hash of every bit of every channel of a grid, in face and row-major order: the determinism manifest entry
-/// of the bake (GEN-003 style) and the quick equality check of tests.
+/// A 64-bit hash of every bit of every channel of a grid, in face and row-major order, with the resolution and
+/// [`GLOBAL_VERSION`]: the quick equality check of tests and the pinned known answer of a small bake.
 pub fn grid_hash(g: &GlobalGrid) -> u64 {
     let mut words = Vec::with_capacity(g.len() * 2 + 2);
     words.push(u64::from(g.res));

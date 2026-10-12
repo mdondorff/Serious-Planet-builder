@@ -6,7 +6,8 @@ use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::dump::NET_BACKGROUND;
 use planet_generators::global::{
-    bake, equirect_product, grid_hash, product, sample, BakeError, Channel, GlobalGrid, GlobalSample, MAX_BAKE_RES, SEA_LEVEL_C,
+    bake, equirect_product, grid_hash, product, sample, BakeError, Channel, GlobalGrid, GlobalSample, GLOBAL_VERSION, MAX_BAKE_RES,
+    SEA_LEVEL_C,
 };
 
 const SEED: u64 = 7;
@@ -228,7 +229,10 @@ fn known_answers_pin_the_field_on_every_platform() {
     assert_eq!(format!("{:016x}", grid_hash(&grid(16, 3))), KNOWN_GRID_HASH, "the hash of the 16-cell bake");
     // The sea level is part of the field's contract.
     assert_eq!(SEA_LEVEL_C, 0.10);
+    assert_eq!(GLOBAL_VERSION, RECORDED_VERSION, "the known answers belong to this version");
 }
 
+/// The version the known answers below were recorded against (ADR 0006): changing the output without a bump fails here.
+const RECORDED_VERSION: u32 = 1;
 const KNOWN_POINTS: &str = "[[3f3ef54b, 44cb75f7, 41a18f38, 45032416], [be83b213, c4c37fdb, c1cfa1d5, 442c4f54], [bed97260, c52f51c0, 41eb8eac, 451e5422], [3e25822e, 42c5afc0, 4192eb50, 430d7a6e], [beff7496, c54fe3c7, 40aa0957, 446de42a]]";
 const KNOWN_GRID_HASH: &str = "3ae54edffe001637";
