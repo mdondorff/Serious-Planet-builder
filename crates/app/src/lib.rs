@@ -275,7 +275,10 @@ fn parse_size(s: &str) -> Result<(u32, u32), String> {
 pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     let o = parse_args(args)?;
     if !matches!(o.mode, Mode::Generate) {
-        if let Some(f) = STORE_OPTIONS.iter().find(|f| o.given.contains(**f)) {
+        // The global-bake perf scene takes the definition, grid size and thread count of the global commands.
+        let bake_scene = matches!(o.mode, Mode::TestRender) && o.perf && o.scene == "global-bake";
+        let allowed: &[&str] = if bake_scene { &["--world", "--global-res", "--threads"] } else { &[] };
+        if let Some(f) = STORE_OPTIONS.iter().find(|f| o.given.contains(**f) && !allowed.contains(f)) {
             return Err(format!("{f} only applies to `generate` (the tile store commands)"));
         }
     }

@@ -85,6 +85,24 @@ pub fn perf_global_bake(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
 mod tests {
     use super::*;
 
+    fn run_str(args: &[&str]) -> Result<String, String> {
+        let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let mut buf = Vec::new();
+        crate::run(&args, &mut buf).map(|_| String::from_utf8(buf).unwrap())
+    }
+
+    // spec: GEN-014
+    #[test]
+    fn the_scene_takes_the_options_xtask_forwards_and_other_runs_still_refuse_them() {
+        let ok = run_str(&["test-render", "--perf", "--scene", "global-bake", "--global-res", "1024", "--threads", "2", "--smoke"]);
+        assert!(ok.is_ok(), "{ok:?}");
+        for args in [&["test-render", "--global-res", "8"][..], &["test-render", "--perf", "--threads", "2"], &["editor", "--threads", "2"]]
+        {
+            let e = run_str(args).unwrap_err();
+            assert!(e.contains("only applies to `generate`"), "{args:?}: {e}");
+        }
+    }
+
     // spec: GEN-014
     #[test]
     fn the_budgets_are_ten_minutes_and_eight_gigabytes() {
