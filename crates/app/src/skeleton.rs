@@ -287,11 +287,19 @@ fn generate_store(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         for u in &report.unreadable {
             writeln!(out, "UNREADABLE {u}").map_err(err)?;
         }
-        if report.passed_allowing_stale() && report.compared_nothing() && !o.allow_stale {
-            return Err(format!(
-                "cache-verify compared nothing: all {} entries are stale, so the store was built from another definition (or seed) than the one given; check --world/--seed, or pass --allow-stale if the definition changed on purpose",
-                report.stale + report.unexplained_stale
-            ));
+        let stale = report.stale + report.unexplained_stale;
+        if report.clean() && report.compared_nothing() {
+            if stale == 0 {
+                return Err(format!(
+                    "cache-verify compared nothing: {} entries looked at, none of them a height tile of this definition (an empty store, packs of another version, or only entries of another kind); --allow-stale does not help when nothing is stale",
+                    report.checked
+                ));
+            }
+            if !o.allow_stale {
+                return Err(format!(
+                    "cache-verify compared nothing: all {stale} entries are stale, so the store was built from another definition (or seed) than the one given; check --world/--seed, or pass --allow-stale if the definition changed on purpose"
+                ));
+            }
         }
         return if report.passed_allowing_stale() {
             Ok(())

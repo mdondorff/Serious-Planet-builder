@@ -6,8 +6,8 @@
 //! not, an input of the tile is missing from its key, and the report names the tile, the pack offset and the first
 //! differing sample. A stored tile whose key is no longer the definition's key is *stale*: *explained* when its versions or
 //! node set id differ from the current ones, *unexplained* when they are all equal (a node value changed, or the key
-//! function drifted: the report keeps the two apart). A run that compared nothing, because every entry is stale, is not a
-//! pass unless the caller says stale entries are expected.
+//! function drifted: the report keeps the two apart). A run that compared nothing (an empty store, only other kinds, every entry stale) is not a
+//! pass; with `--allow-stale` it passes only if at least one entry is stale (ADR 0025 point 4).
 //!
 //! What a same-definition verify can and cannot find: regenerating from the same definition and generator finds
 //! nondeterminism, damage and records that disagree with their key's metadata; it finds an input missing from a key only
@@ -59,7 +59,7 @@ impl World {
         paths.dedup();
         let mut material = Vec::new();
         for p in &paths {
-            material.extend_from_slice(&(p.len() as u32).to_le_bytes());
+            material.extend_from_slice(&u32::try_from(p.len()).expect("a node path is under 4 GiB").to_le_bytes());
             material.extend_from_slice(p.as_bytes());
         }
         let full = blake3::derive_key("planet-builder node set v1", &material);
@@ -73,6 +73,11 @@ impl World {
 
     pub fn radius_m(&self) -> f64 {
         self.radius_m
+    }
+
+    /// The node set id stored in every record of this world (STRM-010, ADR 0025 point 3).
+    pub fn node_set_id(&self) -> [u8; 16] {
+        self.node_set_id
     }
 
     /// The persistent key of the height tile `tile` at `res` cells per edge (the unit of the mesh's `cells`).
@@ -233,9 +238,10 @@ impl VerifyReport {
         self.mismatches.is_empty() && self.unreadable.is_empty()
     }
 
-    /// Whether entries were looked at but none could be compared with the definition, because all of them are stale.
+    /// Whether no entry could be compared with the definition: the store is empty, or every entry is stale, of another
+    /// kind or unreadable (ADR 0025 point 4).
     pub fn compared_nothing(&self) -> bool {
-        self.stale + self.unexplained_stale > 0 && self.matching + self.mismatches.len() == 0
+        self.matching + self.mismatches.len() == 0
     }
 
     /// Whether the store passes: clean, and something was actually compared.
@@ -243,9 +249,11 @@ impl VerifyReport {
         self.clean() && !self.compared_nothing()
     }
 
-    /// Whether the store passes when stale entries are expected (the definition changed on purpose).
+    /// Whether the store passes when stale entries are expected (the definition changed on purpose): clean, and either
+    /// something was compared or at least one entry is stale. An empty store, or one with only entries of another kind,
+    /// still fails (ADR 0025 point 4).
     pub fn passed_allowing_stale(&self) -> bool {
-        self.clean()
+        self.clean() && (!self.compared_nothing() || self.stale + self.unexplained_stale > 0)
     }
 }
 

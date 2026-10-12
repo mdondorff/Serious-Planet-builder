@@ -6,12 +6,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use planet_cache::codec::{decode_height_tile, encode_height_tile, payload_res, CodecError, CODEC_VERSION, MAX_RES};
 use planet_cache::key::{height_key, mesh_key, mesh_key_inputs, CacheKey};
-use planet_cache::pack::{pick, PackWriter, TileStore, DEFAULT_MAX_PACK_BYTES};
+use planet_cache::pack::{pick, PackWriter, Record, TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_cache::tiles::{build_tiles, region_tiles, verify_store, BuildError, World, KIND_HEIGHT, MAX_REGION_LEVEL};
 use planet_core::cube::TangentWarp;
 use planet_core::tile::TileId as Tile;
 use planet_core::{Face, FaceMapping, TileId, Vec3};
-use planet_generators::height::{generate_tile, generate_tile_field, HeightField, HeightGenerator, Reference, TileData};
+use planet_generators::height::{
+    generate_tile, generate_tile_field, HeightField, HeightGenerator, Reference, ReferenceGenerator, TileData,
+};
 use planet_world_def::cells::{cell_of, cells_covering, with_margin};
 use planet_world_def::{BodyId, GenContext, MissingNode, ReadRecord, WorldDefinition};
 
@@ -221,10 +223,107 @@ fn a_region_is_built_once_reused_afterwards_and_verifies_clean() {
     let some = verify_store(&store, &w, 4);
     assert_eq!((some.checked, some.matching), (4, 4), "an evenly spaced sample of four");
     assert_eq!(verify_store(&store, &w, 1000).checked, 16, "a sample larger than the store is the whole store");
-    assert!(
-        verify_store(&TileStore::open(&d.path().join("none"), w.params()).unwrap(), &w, 0).passed(),
-        "an empty store has nothing to fail"
+}
+
+fn hex16(b: [u8; 16]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// The node set id of `single_planet` worlds with the reference generator, pinned (STRM-010). Bump `"planet-builder node
+/// set v1"` and this together when the encoding changes.
+const KNOWN_NODE_SET_ID: &str = "5ac2ac486ee5e93dc41c36dcd7d889c1";
+
+// spec: STRM-010
+#[test]
+fn the_node_set_id_is_a_pinned_derive_key_hash_of_the_sorted_length_prefixed_paths() {
+    let w = world(7);
+    // Built by hand from the paths the reference generator reads and the body radius node, independently of `World`.
+    let def = WorldDefinition::single_planet(R, 7);
+    let reads = GenContext::new(&def);
+    let field = ReferenceGenerator.field(&reads, BodyId::PLANET).unwrap();
+    let mut paths: Vec<String> = field.read_records().iter().map(|r| r.path()).collect();
+    paths.push("body.0.radius_m".to_string());
+    paths.sort();
+    paths.dedup();
+    assert_eq!(paths, ["body.0.radius_m", "derived.body.0.seed", "world.seed"], "the paths the id covers");
+    let mut material = Vec::new();
+    for p in &paths {
+        material.extend_from_slice(&(p.len() as u32).to_le_bytes());
+        material.extend_from_slice(p.as_bytes());
+    }
+    // The spec's bytes written out literally: little-endian u32 byte lengths 15, 19 and 10, no count prefix.
+    assert_eq!(
+        material,
+        b"\x0f\x00\x00\x00body.0.radius_m\x13\x00\x00\x00derived.body.0.seed\x0a\x00\x00\x00world.seed".to_vec(),
+        "the material the hash covers"
     );
+    let by_hand = blake3::derive_key("planet-builder node set v1", &material);
+    assert_eq!(w.node_set_id(), by_hand[..16], "paths {paths:?}");
+    assert_eq!(hex16(w.node_set_id()), KNOWN_NODE_SET_ID, "paths {paths:?}: the pinned known answer");
+
+    // A value change of a node leaves the id alone (it is about which nodes are read); another seed reads the same nodes.
+    assert_eq!(world(8).node_set_id(), w.node_set_id());
+    // A generator whose field declares no field-wide reads covers other nodes: another id.
+    let fewer = World::from_generator(&WorldDefinition::single_planet(R, 7), &WorldSeedOnly).unwrap();
+    assert_ne!(fewer.node_set_id(), w.node_set_id(), "a different set of nodes read gives a different id");
+    // Every stored record carries it.
+    let d = Dir::new("node-set");
+    let tiles = region_tiles(Face(0), 1).unwrap();
+    build_tiles(d.path(), &w, &tiles, 4, DEFAULT_MAX_PACK_BYTES).unwrap();
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    for t in &tiles {
+        let rec = store.get(KIND_HEIGHT, *t, w.tile_key(*t, 4)).unwrap().unwrap();
+        assert_eq!(rec.node_set_id, w.node_set_id());
+    }
+}
+
+// spec: STRM-004
+#[test]
+fn an_empty_store_compares_nothing_and_fails_even_when_stale_entries_are_allowed() {
+    // ADR 0025 point 4: a run that compared nothing fails unless --allow-stale and at least one entry is stale.
+    let d = Dir::new("empty");
+    let w = world(7);
+    let missing = verify_store(&TileStore::open(&d.path().join("none"), w.params()).unwrap(), &w, 0);
+    assert_eq!(missing.checked, 0);
+    assert!(missing.clean() && missing.compared_nothing() && !missing.passed() && !missing.passed_allowing_stale(), "{missing:?}");
+
+    // An existing empty directory is the same.
+    std::fs::create_dir_all(d.path()).unwrap();
+    let empty = verify_store(&TileStore::open(d.path(), w.params()).unwrap(), &w, 0);
+    assert!(empty.compared_nothing() && !empty.passed() && !empty.passed_allowing_stale(), "{empty:?}");
+
+    // A store whose only records are of another kind: looked at, not compared.
+    let mut pack = PackWriter::open(d.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    let t = region_tiles(Face(1), 1).unwrap()[0];
+    pack.append(&Record {
+        key: CacheKey([9; 16]),
+        kind: 2,
+        tile: t,
+        generator_version: 1,
+        hash_version: 1,
+        node_set_id: [0; 16],
+        payload: vec![1, 2, 3],
+    })
+    .unwrap();
+    pack.finish().unwrap();
+    let other = verify_store(&TileStore::open(d.path(), w.params()).unwrap(), &w, 0);
+    assert_eq!((other.checked, other.unsupported, other.matching, other.stale), (1, 1, 0, 0));
+    assert!(other.compared_nothing() && !other.passed() && !other.passed_allowing_stale(), "{other:?}");
+
+    // A store whose only pack was made under another hash version is skipped by the reader: nothing to compare either.
+    let old = Dir::new("empty-old-hash");
+    let mut pack = PackWriter::open(
+        old.path(),
+        planet_cache::pack::StoreParams { hash_version: w.params().hash_version + 1, body: 0 },
+        DEFAULT_MAX_PACK_BYTES,
+    )
+    .unwrap();
+    pack.append(&w.tile_record(t, 4).unwrap()).unwrap();
+    pack.finish().unwrap();
+    let store = TileStore::open(old.path(), w.params()).unwrap();
+    assert_eq!(store.len(), 0, "the pack of another hash version is skipped");
+    let skipped = verify_store(&store, &w, 0);
+    assert!(skipped.compared_nothing() && !skipped.passed() && !skipped.passed_allowing_stale(), "{skipped:?}");
 }
 
 // spec: STRM-004
@@ -341,6 +440,45 @@ impl HeightGenerator for Versioned {
     fn field(&self, ctx: &GenContext, body: BodyId) -> Result<Box<dyn HeightField>, MissingNode> {
         ctx.body_seed(body)?;
         Ok(Box::new(VersionedField(self.0)))
+    }
+}
+
+/// `Reference` heights from a field that declares no field-wide reads: only the body radius node is left in its id.
+struct NoReadsField;
+
+impl HeightField for NoReadsField {
+    fn height(&self, d: Vec3) -> f64 {
+        Reference(7).height(d)
+    }
+    fn seed(&self) -> u64 {
+        7
+    }
+    fn implementation_id(&self) -> &'static str {
+        "reference"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        Reference(7).max_abs_height_m()
+    }
+    fn read_records(&self) -> Vec<ReadRecord> {
+        Vec::new()
+    }
+}
+
+/// A generator whose field reads nothing field-wide, where `Reference` reads the body seed and the world seed.
+struct WorldSeedOnly;
+
+impl HeightGenerator for WorldSeedOnly {
+    fn implementation_id(&self) -> &'static str {
+        "reference"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn field(&self, _ctx: &GenContext, _body: BodyId) -> Result<Box<dyn HeightField>, MissingNode> {
+        Ok(Box::new(NoReadsField))
     }
 }
 
