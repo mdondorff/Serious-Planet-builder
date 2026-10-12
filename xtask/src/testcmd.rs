@@ -286,6 +286,36 @@ fn perf_global_bake_args(args: &[String]) -> Result<Vec<String>, String> {
     Ok(v)
 }
 
+/// The `cargo` arguments of a `cache-compact` run: `planet generate --compact-cache <dir>` plus the definition and the cap.
+fn cache_compact_args(args: &[String]) -> Result<Vec<String>, String> {
+    let mut it = args.iter();
+    let dir = it
+        .next()
+        .filter(|a| !a.starts_with("--"))
+        .ok_or("usage: cargo xtask cache-compact <dir> [--world <file> | --seed N] [--cap-bytes N]")?;
+    let mut v: Vec<String> =
+        ["run", "-q", "--release", "-p", "planet", "--", "generate", "--compact-cache"].iter().map(|s| s.to_string()).collect();
+    v.push(dir.clone());
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--world" | "--seed" | "--cap-bytes" => {
+                let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
+                v.push(a.clone());
+                v.push(value.clone());
+            }
+            other => return Err(format!("unknown cache-compact option '{other}' (known: --world, --seed, --cap-bytes)")),
+        }
+    }
+    Ok(v)
+}
+
+/// `cargo xtask cache-compact`: compact a tile store (STRM-013). The output is byte-deterministic; the report prints its hash.
+pub fn cache_compact(root: &Path, args: &[String]) -> Res {
+    let cargo_args = cache_compact_args(args)?;
+    let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+    run(root, "cargo", &refs, &[])
+}
+
 pub fn perf(root: &Path, args: &[String]) -> Res {
     if args.first().map(String::as_str) == Some("global-bake") {
         let cargo_args = perf_global_bake_args(&args[1..])?;
@@ -354,6 +384,18 @@ mod tests {
         assert_eq!(over.last(), Some(&"--machine-ready"));
         let e = perf_cargo_args(&s(&["--force"])).unwrap_err();
         assert!(e.contains("--force") && e.contains("override"), "{e}");
+    }
+
+    // spec: STRM-013
+    #[test]
+    fn cache_compact_forwards_the_definition_and_the_cap_and_refuses_the_rest() {
+        let a = cache_compact_args(&s(&["d", "--seed", "3", "--cap-bytes", "1000"])).unwrap();
+        assert!(a.contains(&"--compact-cache".to_string()) && a.contains(&"d".to_string()), "{a:?}");
+        assert_eq!(a[a.iter().position(|x| x == "--cap-bytes").unwrap() + 1], "1000");
+        assert!(cache_compact_args(&[]).unwrap_err().contains("usage"));
+        assert!(cache_compact_args(&s(&["d", "--cap-bytes"])).unwrap_err().contains("needs a value"));
+        let e = cache_compact_args(&s(&["d", "--force"])).unwrap_err();
+        assert!(e.contains("--force") && e.contains("known"), "{e}");
     }
 
     // spec: GEN-014, BUILD-002

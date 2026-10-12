@@ -68,6 +68,10 @@ pub struct Options {
     pub region: Option<(u8, u8)>,
     /// `generate`: regenerate a sample of the tile store in this directory and compare (STRM-004).
     pub verify_cache: Option<PathBuf>,
+    /// `generate`: compact the store in this directory (STRM-013), dropping records the definition no longer produces.
+    pub compact_cache: Option<PathBuf>,
+    /// `--compact-cache`: keep at most this many bytes of records (the oldest packs are evicted first).
+    pub cap_bytes: Option<u64>,
     /// `--verify-cache`: how many evenly spaced entries to check; 0 is all.
     pub sample: usize,
     /// `--verify-cache`: entries that are all stale are expected (the definition changed on purpose), not a failure.
@@ -124,6 +128,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         cache_dir: None,
         region: None,
         verify_cache: None,
+        compact_cache: None,
+        cap_bytes: None,
         sample: 0,
         allow_stale: false,
         global_dir: None,
@@ -172,6 +178,10 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--world" => o.world = Some(PathBuf::from(it.next().ok_or("--world needs a path to a definition file")?)),
             "--cache-dir" => o.cache_dir = Some(PathBuf::from(it.next().ok_or("--cache-dir needs a directory")?)),
             "--verify-cache" => o.verify_cache = Some(PathBuf::from(it.next().ok_or("--verify-cache needs a directory")?)),
+            "--compact-cache" => o.compact_cache = Some(PathBuf::from(it.next().ok_or("--compact-cache needs a directory")?)),
+            "--cap-bytes" => {
+                o.cap_bytes = Some(it.next().ok_or("--cap-bytes needs a byte count")?.parse().map_err(|e| format!("--cap-bytes: {e}"))?)
+            }
             "--allow-stale" => o.allow_stale = true,
             "--global-dir" => o.global_dir = Some(PathBuf::from(it.next().ok_or("--global-dir needs a directory")?)),
             "--verify-global" => o.verify_global = Some(PathBuf::from(it.next().ok_or("--verify-global needs a directory")?)),
@@ -212,7 +222,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
 use planet_cache::tiles::MAX_REGION_LEVEL;
 
 /// Options that only the tile store commands of `generate` understand.
-pub(crate) const STORE_OPTIONS: [&str; 11] = [
+pub(crate) const STORE_OPTIONS: [&str; 13] = [
+    "--compact-cache",
+    "--cap-bytes",
     "--world",
     "--cache-dir",
     "--verify-cache",
@@ -506,6 +518,41 @@ mod tests {
         // Unless stale entries are expected (the definition changed on purpose).
         let stale = run_str(&["generate", "--verify-cache", &store, "--seed", "4", "--allow-stale"]).unwrap();
         assert!(stale.contains("4 stale without a known reason") && stale.contains("0 differ"), "{stale}");
+    }
+
+    // spec: STRM-013
+    #[test]
+    fn generate_compacts_a_store_dropping_dead_records_and_honouring_the_cap() {
+        use planet_cache::pack::{PackWriter, Record, TileStore};
+        let d = TempDir::new("compact");
+        let store = d.s("store");
+        run_str(&["generate", "--cache-dir", &store, "--region", "0,1", "--res", "8", "--seed", "3"]).unwrap();
+        // A record of an older generator version, as left behind by a version bump.
+        let dir = std::path::Path::new(&store);
+        let params = planet_cache::tiles::World::from_definition(&planet_world_def::WorldDefinition::single_planet(6_371_000.0, 3))
+            .unwrap()
+            .params();
+        let read = TileStore::open(dir, params).unwrap();
+        let (kind, key) = read.all_entries()[0];
+        let tile = planet_core::TileId::new(planet_core::Face(0), 1, 0, 0).unwrap();
+        let live = read.get(kind, tile, key).unwrap().expect("the first tile of the region");
+        drop(read);
+        let mut w = PackWriter::open(dir, params, planet_cache::pack::DEFAULT_MAX_PACK_BYTES).unwrap();
+        w.append(&Record { key: planet_cache::key::CacheKey([9; 16]), generator_version: live.generator_version + 1000, ..live.clone() })
+            .unwrap();
+        w.finish().unwrap();
+        let out = run_str(&["generate", "--compact-cache", &store, "--seed", "3"]).unwrap();
+        assert!(out.contains("kept 4 records") && out.contains("dropped 1 dead"), "{out}");
+        let again = run_str(&["generate", "--compact-cache", &store, "--seed", "3"]).unwrap();
+        assert!(again.contains("kept 4 records") && again.contains("dropped 0 dead"), "{again}");
+        assert!(run_str(&["generate", "--verify-cache", &store, "--seed", "3"]).unwrap().contains("4 match"));
+        let capped = run_str(&["generate", "--compact-cache", &store, "--seed", "3", "--cap-bytes", "1"]).unwrap();
+        assert!(capped.contains("kept 0 records") && capped.contains("4 evicted"), "{capped}");
+        let clash = run_str(&["generate", "--compact-cache", &store, "--region", "0,1"]).unwrap_err();
+        assert!(clash.contains("--compact-cache takes only"), "{clash}");
+        let lone = run_str(&["generate", "--cap-bytes", "5", "--seed", "3"]).unwrap_err();
+        assert!(lone.contains("belongs to --compact-cache"), "{lone}");
+        assert!(run_str(&["generate", "--compact-cache", &d.s("missing")]).unwrap_err().contains("no such cache directory"));
     }
 
     // spec: STRM-012

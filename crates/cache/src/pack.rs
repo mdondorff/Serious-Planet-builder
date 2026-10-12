@@ -20,6 +20,9 @@
 //! its metadata (cut under the scan) is a torn tail at that position. A reader that finds an indexed record unusable
 //! reports it once; the entry is then a miss for that store, and it hides an older pack's copy (ADR 0024 points 7, 8).
 
+mod compact;
+pub use compact::{compact, rank_by_pack_age, CompactPolicy, CompactReport};
+
 use std::fmt;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -800,25 +803,32 @@ fn holder_text(path: &Path) -> String {
     fs::read_to_string(path).map(|s| s.trim().to_string()).ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "holder unknown".into())
 }
 
+/// Take the directory's writer lock (creating the directory): a held lock is [`PackError::Locked`], naming the holder. Returns
+/// the locked file and the holder note's path (the caller removes the note and releases the lock when it is done).
+fn take_dir_lock(dir: &Path) -> Result<(File, PathBuf), PackError> {
+    io(fs::create_dir_all(dir), "creating", dir)?;
+    let lock_path = dir.join("writer.lock");
+    let holder = dir.join("writer.holder");
+    let lock = io(OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&lock_path), "opening", &lock_path)?;
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => {
+            return Err(PackError::Locked { path: lock_path.display().to_string(), holder: holder_text(&holder) });
+        }
+        Err(TryLockError::Error(e)) => return Err(PackError::Io(format!("locking {}: {e}", lock_path.display()))),
+    }
+    // The Windows lock is mandatory, so the locked file cannot be read by others: the note lives in a file of its own.
+    let taken = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    io(fs::write(&holder, format!("pid {} took the lock at unix time {taken}\n", std::process::id())), "writing", &holder)?;
+    Ok((lock, holder))
+}
+
 impl PackWriter {
     /// Take the directory's writer lock (a held lock is [`PackError::Locked`], naming the holder), then open the newest
     /// pack for appending, creating the first one if there is none. A torn tail is truncated; the index is loaded if it
     /// is current and rebuilt otherwise.
     pub fn open(dir: &Path, params: StoreParams, max_bytes: u64) -> Result<PackWriter, PackError> {
-        io(fs::create_dir_all(dir), "creating", dir)?;
-        let lock_path = dir.join("writer.lock");
-        let holder = dir.join("writer.holder");
-        let lock = io(OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&lock_path), "opening", &lock_path)?;
-        match lock.try_lock() {
-            Ok(()) => {}
-            Err(TryLockError::WouldBlock) => {
-                return Err(PackError::Locked { path: lock_path.display().to_string(), holder: holder_text(&holder) });
-            }
-            Err(TryLockError::Error(e)) => return Err(PackError::Io(format!("locking {}: {e}", lock_path.display()))),
-        }
-        // The Windows lock is mandatory, so the locked file cannot be read by others: the note lives in a file of its own.
-        let taken = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        io(fs::write(&holder, format!("pid {} took the lock at unix time {taken}\n", std::process::id())), "writing", &holder)?;
+        let (lock, holder) = take_dir_lock(dir)?;
         let seq = pack_sequences(dir)?.last().copied().unwrap_or(1);
         let cur = open_pack(dir, params, seq)?;
         Ok(PackWriter { dir: dir.to_path_buf(), params, max_bytes, cur, lock, holder })

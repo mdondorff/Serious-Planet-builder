@@ -184,8 +184,14 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         std::fs::write(path, &text).map_err(|e| format!("writing {}: {e}", path.display()))?;
         return writeln!(out, "wrote {} ({} lines)", path.display(), text.lines().count()).map_err(err);
     }
+    if o.compact_cache.is_some() {
+        return compact_cache(o, out);
+    }
     if o.global_dir.is_some() || o.verify_global.is_some() || o.global_products.is_some() {
         return generate_global(o, out);
+    }
+    if o.cap_bytes.is_some() {
+        return Err("--cap-bytes belongs to --compact-cache".into());
     }
     if o.cache_dir.is_some() || o.verify_cache.is_some() {
         return generate_store(o, out);
@@ -350,6 +356,74 @@ fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         secs,
         threads,
         if samples > 0.0 { secs * threads as f64 / samples * 1e6 } else { 0.0 }
+    )
+    .map_err(err)
+}
+
+/// `generate --compact-cache DIR [--cap-bytes N]`: rewrite the store keeping the records the definition still produces (a
+/// height tile or a global block of its current versions and node set), newest packs first when a cap applies (STRM-013).
+/// Records of a kind this build does not know are kept. Takes the writer lock: an editor or a generator writing to the
+/// directory makes it refuse.
+fn compact_cache(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    let dir = o.compact_cache.as_ref().expect("checked by the caller");
+    let clash: Vec<&str> = [
+        "--tile",
+        "--out",
+        "--face-net",
+        "--manifest",
+        "--smoke",
+        "--cache-dir",
+        "--verify-cache",
+        "--region",
+        "--res",
+        "--sample",
+        "--allow-stale",
+        "--global-dir",
+        "--verify-global",
+        "--global-products",
+        "--global-res",
+        "--threads",
+    ]
+    .into_iter()
+    .filter(|f| o.given.contains(*f))
+    .collect();
+    if !clash.is_empty() {
+        return Err(format!("--compact-cache takes only --world or --seed and --cap-bytes, not {}", clash.join(", ")));
+    }
+    if o.given.contains("--world") && o.given.contains("--seed") {
+        return Err("--world and --seed both name the definition: give one".into());
+    }
+    if !dir.is_dir() {
+        return Err(format!("{}: no such cache directory", dir.display()));
+    }
+    let world = world_of(o)?;
+    let global = global_world_of(o)?;
+    let live = |r: &planet_cache::pack::Record| world.is_live(r) && global.is_live(r);
+    let policy = planet_cache::pack::CompactPolicy {
+        live: &live,
+        cap_bytes: o.cap_bytes,
+        rank: &planet_cache::pack::rank_by_pack_age,
+        max_pack_bytes: planet_cache::pack::DEFAULT_MAX_PACK_BYTES,
+    };
+    let r = planet_cache::pack::compact(dir, world.params(), &policy).map_err(|e| e.to_string())?;
+    for p in &r.problems {
+        writeln!(out, "WARNING: {p}").map_err(err)?;
+    }
+    writeln!(
+        out,
+        "cache-compact {}: kept {} records in {} pack(s) ({} bytes, was {} in {} pack(s) and {} of another hash version); dropped {} dead, {} superseded, {} corrupt, {} evicted for the cap; output hash {}",
+        dir.display(),
+        r.kept,
+        r.packs_out,
+        r.bytes_after,
+        r.bytes_before,
+        r.packs_in,
+        r.dead_packs,
+        r.dead,
+        r.superseded,
+        r.corrupt,
+        r.evicted,
+        r.output_hash.iter().map(|b| format!("{b:02x}")).collect::<String>()
     )
     .map_err(err)
 }
