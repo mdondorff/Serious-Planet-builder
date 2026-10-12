@@ -1,37 +1,13 @@
 //! LOD-001..004: CPU node selection, snapshots over ten scripted views, coverage, balance, morph continuity.
 
 use planet_core::cube::TangentWarp;
-use planet_core::{Geo, PlanetFixed, ReferenceSurface, Sphere, TileId};
-use planet_frame::{select_nodes, LodParams, NodeSelection};
+use planet_core::TileId;
+use planet_frame::NodeSelection;
 use std::collections::BTreeSet;
 
-fn camera(lat: f64, lon: f64, height: f64) -> PlanetFixed {
-    Sphere::EARTH.geo_to_planet_fixed(Geo::new(lat, lon, height))
-}
-
-/// Ten scripted views: orbit down to 1 m, both poles, a cube corner and a face edge.
-fn views() -> Vec<(&'static str, PlanetFixed)> {
-    vec![
-        ("orbit-20000km", camera(20.0, 30.0, 2.0e7)),
-        ("high-2000km", camera(20.0, 30.0, 2.0e6)),
-        ("aerial-200km", camera(20.0, 30.0, 2.0e5)),
-        ("aerial-20km", camera(20.0, 30.0, 2.0e4)),
-        ("low-2km", camera(20.0, 30.0, 2.0e3)),
-        ("ground-200m", camera(20.0, 30.0, 200.0)),
-        ("ground-1m", camera(20.0, 30.0, 1.0)),
-        ("north-pole-1km", camera(90.0, 0.0, 1000.0)),
-        ("cube-corner-1km", camera(35.264_389_682_754_654, 45.0, 1000.0)),
-        ("face-edge-1km", camera(0.0, 45.0, 1000.0)),
-    ]
-}
-
-fn params() -> LodParams {
-    LodParams::earth_1080p()
-}
-
-fn select(c: PlanetFixed) -> NodeSelection {
-    select_nodes(&TangentWarp, c, &params())
-}
+#[path = "support/lod.rs"]
+mod support;
+use support::*;
 
 // spec: LOD-001
 #[test]
@@ -58,72 +34,6 @@ fn detail_follows_the_camera() {
     let nadir = camera(20.0, 30.0, 0.0).0.normalized();
     let under = s.nodes.iter().find(|n| n.tile.contains(&TangentWarp, nadir)).unwrap();
     assert_eq!(under.tile.level(), max_level(&s), "the node under the camera must be the deepest");
-}
-
-/// Overlap-free, and every direction up to 98 % of the padded horizon angle (reference horizon plus the horizon of the
-/// highest terrain) is held by exactly one leaf.
-fn assert_covers(name: &str, c: PlanetFixed) {
-    let s = select(c);
-    let set: BTreeSet<TileId> = s.nodes.iter().map(|n| n.tile).collect();
-    for n in &s.nodes {
-        let mut a = n.tile.parent();
-        while let Some(p) = a {
-            assert!(!set.contains(&p), "{name}: {p:?} is a leaf and an ancestor of {:?}", n.tile);
-            a = p.parent();
-        }
-    }
-    let r = 6_371_000.0;
-    let pr = params();
-    let (cam_dir, d) = (c.0.normalized(), c.0.length().max(r * (1.0 + 1e-12)));
-    let limit = libm::acos(r / d) + libm::acos(r / (r + pr.max_height_m));
-    let mut rng = planet_core::hash::SplitMix64(77);
-    let mut tested = 0;
-    for _ in 0..3000 {
-        let v = planet_core::Vec3::new(rng.range(-1.0, 1.0), rng.range(-1.0, 1.0), rng.range(-1.0, 1.0));
-        let u = v - cam_dir * v.dot(cam_dir);
-        if u.length() < 0.05 {
-            continue;
-        }
-        let a = rng.range(0.0, limit.min(3.1) * 0.98);
-        let dir = cam_dir * libm::cos(a) + u.normalized() * libm::sin(a);
-        let holders = s.nodes.iter().filter(|n| n.tile.contains(&TangentWarp, dir)).count();
-        assert_eq!(holders, 1, "{name}: direction {dir:?} at {a} rad from the camera is held by {holders} leaves");
-        tested += 1;
-    }
-    assert!(tested > 2000, "{name}: only {tested} directions tested");
-}
-
-// spec: LOD-003
-#[test]
-fn leaves_cover_the_visible_surface_exactly_once() {
-    for (name, c) in views() {
-        assert_covers(name, c);
-        let area: u128 = select(c).nodes.iter().map(|n| 1u128 << (2 * (28 - u32::from(n.tile.level())))).sum();
-        assert!(area < 6u128 << 56, "{name}: horizon culling must drop something");
-    }
-}
-
-// spec: LOD-003
-#[test]
-fn culling_stays_conservative_for_known_hard_cameras() {
-    // Regression cameras from review: a tile whose chord radius underestimated its angular radius was culled while still visible.
-    assert_covers("review-random", camera(-86.427, 127.912, 673.0));
-    for angle in [60.0f64, 70.0, 80.0, 89.0] {
-        // On the great circle from the +Z face centre through its (+X,+Y) corner, beyond the corner.
-        let a = angle.to_radians();
-        let corner = planet_core::Vec3::new(1.0, 1.0, 1.0).normalized();
-        let dir = planet_core::Vec3::new(0.0, 0.0, 1.0) * libm::cos(a)
-            + (corner - planet_core::Vec3::new(0.0, 0.0, corner.z)).normalized() * libm::sin(a);
-        for h in [5_000.0, 100_000.0, 1_000_000.0] {
-            assert_covers(&format!("beyond-corner {angle} deg {h} m"), PlanetFixed(dir * (6_371_000.0 + h)));
-        }
-    }
-    // A camera below the reference sphere is treated as sitting on it: still covered, and within the node budget.
-    for h in [-1.0, -400.0, -10_000.0] {
-        let c = camera(20.0, 30.0, h);
-        assert_covers("below-surface", c);
-        assert!(select(c).nodes.len() < 8000, "below-surface camera at {h} m selects {} nodes", select(c).nodes.len());
-    }
 }
 
 /// Neighbouring leaves differ by at most one level (ancestor walk, across faces).
