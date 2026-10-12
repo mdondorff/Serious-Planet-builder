@@ -38,5 +38,6 @@ fn the_standard_flight_plans_at_production_parameters_without_steepness_rejectio
         deepest = deepest.max(plan.nodes.iter().map(|n| n.level).max().unwrap());
     }
     assert!(field.error().is_none(), "{:?}", field.error());
-    eprintln!("deepest level planned: {deepest}");
+    // The ground views reach the deepest levels: an early stop in planning would show up here.
+    assert!(deepest >= 24, "deepest level planned: {deepest}");
 }

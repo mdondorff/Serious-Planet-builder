@@ -47,7 +47,7 @@ fn bounds_hold_every_height_of_random_caps_and_of_caps_at_edge_midpoints_and_cor
     // Caps centred near the middle of a face edge (s = 0, t near 1) and near corners: where face coordinates change fastest.
     for face in 0..6u8 {
         for &t in &[0.8, 0.9, 0.95, 0.999, 1.0] {
-            for &theta in &[0.02, 0.05, 0.1] {
+            for &theta in &[0.02, 0.04, 0.05] {
                 centres.push((face_to_direction(&TangentWarp, Face(face), 0.0, t), theta));
                 centres.push((face_to_direction(&TangentWarp, Face(face), 0.97, t), theta / 2.0));
             }
@@ -71,6 +71,8 @@ fn bounds_hold_every_height_of_random_caps_and_of_caps_at_edge_midpoints_and_cor
         }
     }
     assert!(f.error().is_none());
+    // A cap with L theta above 0.1 (theta above 0.05) takes the global range.
+    assert_eq!(f.height_bounds(Vec3::new(1.0, 0.0, 0.0), 0.06), (-MAX_ABS_HEIGHT_M, MAX_ABS_HEIGHT_M));
     // Bounds that are the whole range everywhere would pass: most caps must hug the terrain.
     assert!(tight * 4 >= total * 3, "{tight} of {total} caps have bounds tighter than 4 km");
     let _ = MAX_ABS_HEIGHT_M;
@@ -152,6 +154,32 @@ fn bounds_cover_f32_rounded_heights_where_adjacent_samples_are_one_ulp_apart() {
     }
 }
 
+struct Broken;
+
+impl planet_generators::global::LatticeSource for Broken {
+    fn res(&self) -> u32 {
+        4
+    }
+    fn at(&self, f: Face, i: u32, j: u32) -> Result<planet_generators::global::GlobalSample, planet_generators::global::ReadError> {
+        Err(planet_generators::global::ReadError::Source(format!("block of face {} at ({i}, {j}) is missing", f.0)))
+    }
+}
+
+// spec: GEN-016
+#[test]
+fn a_bake_that_cannot_be_read_gives_nan_and_the_global_range_and_names_the_problem() {
+    let src = Broken;
+    let f = field(&src, KEY);
+    assert!(f.error().is_none());
+    let c = Vec3::new(0.3, -0.5, 0.8).normalized();
+    assert!(f.height(c).is_nan());
+    let msg = f.error().expect("the failure is reported");
+    assert!(msg.contains("missing"), "{msg}");
+    let fresh = field(&src, KEY);
+    assert_eq!(fresh.height_bounds(c, 1e-4), (-MAX_ABS_HEIGHT_M, MAX_ABS_HEIGHT_M));
+    assert!(fresh.error().is_some());
+}
+
 // spec: GEN-016
 #[test]
 fn one_world_point_has_one_height_whichever_tile_asks() {
@@ -162,7 +190,8 @@ fn one_world_point_has_one_height_whichever_tile_asks() {
     let map = TangentWarp;
     let cells = 8u32;
     // Every sample of every level-1 and level-2 tile: equal direction bits must give equal height bits.
-    let mut by_dir: std::collections::HashMap<[u64; 3], u64> = std::collections::HashMap::new();
+    // Per direction: the height bits and the set of faces whose tiles asked.
+    let mut by_dir: std::collections::HashMap<[u64; 3], (u64, u8)> = std::collections::HashMap::new();
     let (mut checks, mut shared) = (0, 0);
     let mut visit = |t: TileId| {
         for l in 0..=cells {
@@ -170,10 +199,12 @@ fn one_world_point_has_one_height_whichever_tile_asks() {
                 let d = t.sample_direction(&map, cells, k, l);
                 let h = f.height(d).to_bits();
                 let key = [d.x.to_bits(), d.y.to_bits(), d.z.to_bits()];
-                if let Some(prev) = by_dir.insert(key, h) {
-                    assert_eq!(prev, h, "{t:?} ({k}, {l})");
+                let e = by_dir.entry(key).or_insert((h, 0));
+                assert_eq!(e.0, h, "{t:?} ({k}, {l})");
+                if e.1 != 0 {
                     shared += 1;
                 }
+                e.1 |= 1 << t.face().0;
                 checks += 1;
             }
         }
@@ -189,6 +220,12 @@ fn one_world_point_has_one_height_whichever_tile_asks() {
     }
     // Shared borders between tiles, between parents and children, across face edges and at the 8 cube corners.
     assert!(shared > 12 * 8 * 2, "{shared} of {checks} samples were shared");
+    // Directions asked by tiles of two faces (face edges: 12 * (8 * 4 - 1) + 8 corners... at least every edge point) and by
+    // three faces (the 8 cube corners).
+    let across = by_dir.values().filter(|v| v.1.count_ones() >= 2).count();
+    let corners = by_dir.values().filter(|v| v.1.count_ones() >= 3).count();
+    assert_eq!(corners, 8);
+    assert!(across >= 12 * 31 + 8, "{across} directions are shared across a face edge");
     assert!(f.error().is_none());
 }
 
