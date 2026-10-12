@@ -235,6 +235,57 @@ fn a_flipped_payload_byte_is_a_miss_for_that_record_only_in_big_and_small_packs(
 
 // spec: STRM-008
 #[test]
+fn a_long_lived_store_reports_a_bad_payload_once_then_it_is_a_miss_that_regenerates_once() {
+    let d = Dir::new("flip-twice");
+    write_all(d.path(), 300, DEFAULT_MAX_PACK_BYTES);
+    let data = pack_file(d.path(), 1);
+    let mut bytes = fs::read(&data).unwrap();
+    assert!(bytes.len() > 20_000, "the damage must be well before the CRC-checked tail, so the index stays trusted");
+    let at = offset_of(&bytes, 4);
+    bytes[at + HEAD + 3] ^= 0x40;
+    fs::write(&data, &bytes).unwrap();
+    let store = TileStore::open(d.path(), PARAMS).unwrap();
+    let (kind, t, k) = (record(4).kind, tile(4), key(4));
+    assert!(matches!(store.get(kind, t, k), Err(PackError::Corrupt { .. })), "the first lookup reports the damage");
+    assert_eq!(store.get(kind, t, k).unwrap(), None, "the second is a plain miss");
+    assert_eq!(store.get(kind, t, k).unwrap(), None);
+    assert_eq!(get(&store, 5).unwrap(), record(5), "its neighbours are untouched");
+
+    // The caller regenerates once: a writer appends the record to the directory, and a store opened afterwards serves it
+    // (the new record is later in the pack, so it wins over the damaged one).
+    let mut w = PackWriter::open(d.path(), PARAMS, DEFAULT_MAX_PACK_BYTES).unwrap();
+    w.append(&record(4)).unwrap();
+    w.finish().unwrap();
+    let fresh = TileStore::open(d.path(), PARAMS).unwrap();
+    assert_eq!(get(&fresh, 4).unwrap(), record(4));
+}
+
+// spec: STRM-008
+#[test]
+fn a_dropped_corrupt_newest_copy_stays_a_miss_even_if_an_older_pack_holds_an_intact_one() {
+    // ADR 0024 point 8. Pack 1 holds an intact record 4; the newer, big pack 2 holds a copy that fails its CRC.
+    let d = Dir::new("flip-older");
+    let mut w = PackWriter::open(d.path(), PARAMS, 120).unwrap();
+    w.append(&record(4)).unwrap();
+    w.append(&record(5)).unwrap();
+    assert_eq!(w.seq(), 2, "the second record rolled the pack over");
+    w.finish().unwrap();
+    write_all(d.path(), 300, DEFAULT_MAX_PACK_BYTES);
+    let data = pack_file(d.path(), 2);
+    let mut bytes = fs::read(&data).unwrap();
+    assert!(bytes.len() > 20_000, "the damage must be well before the CRC-checked tail, so the index stays trusted");
+    let at = offset_of(&bytes, 4);
+    bytes[at + HEAD + 3] ^= 0x40;
+    fs::write(&data, &bytes).unwrap();
+    let store = TileStore::open(d.path(), PARAMS).unwrap();
+    assert_eq!(store.pack_count(), 2);
+    let (kind, t, k) = (record(4).kind, tile(4), key(4));
+    assert!(matches!(store.get(kind, t, k), Err(PackError::Corrupt { .. })));
+    assert_eq!(store.get(kind, t, k).unwrap(), None, "after the drop the older copy still does not answer");
+}
+
+// spec: STRM-008
+#[test]
 fn a_damaged_record_header_stops_readers_and_leaves_the_pack_to_a_new_one() {
     let d = Dir::new("header-damage");
     write_all(d.path(), 40, DEFAULT_MAX_PACK_BYTES);
