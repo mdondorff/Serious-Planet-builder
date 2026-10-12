@@ -219,6 +219,11 @@ impl HeightField for ErosionField<'_> {
                 Ok(Some(wide)) => {
                     let lip = f64::from(self.src.res()) * (wide.max_du + wide.max_dv);
                     let g_centre = self.gradient(centre);
+                    if g_centre.is_nan() {
+                        return global;
+                    }
+                    // The 2.5 (the exact worst case of the sum is 2.45) also absorbs the gap between chord and arc at a very fine
+                    // bake: do not tighten it without redoing that argument.
                     // Sum over the three axes of |t| <= 2.5; |t(d) - t(c)| <= 2 |d - c|; one f32 rounding of the bake
                     // (2.4e-7 of the largest elevation) in each of the four values a difference of two stencils spans.
                     let round = 2.0 * 2.4e-7 * MAX_ELEVATION_M.max(-MIN_ELEVATION_M);
@@ -237,9 +242,6 @@ impl HeightField for ErosionField<'_> {
         } else {
             (carve(0.0), 1.0)
         };
-        if self.error().is_some() {
-            return global;
-        }
         let (a_lo, a_hi) = (amplitude_m(blo, carve_lo), amplitude_m(bhi, carve_hi));
         let (mut slo, mut shi, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, BASE_FREQUENCY);
         for o in 0..OCTAVES {

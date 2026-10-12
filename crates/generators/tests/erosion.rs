@@ -96,7 +96,7 @@ impl LatticeSource for Ramp {
     }
     fn at(&self, f: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
         let ramp = (f64::from(i) - 2000.0) / 6.0;
-        let e = 8000.0 * ramp.clamp(0.0, 1.0) + 400.0 * (f64::from(j) * 0.7 + f64::from(f.0)).sin();
+        let e = 8000.0 * ramp.clamp(0.0, 1.0) + 400.0 * libm::sin(f64::from(j) * 0.7 + f64::from(f.0));
         Ok(GlobalSample { continent: 1.0, elevation_m: e as f32, temperature_c: 0.0, precipitation_mm: 0.0 })
     }
 }
