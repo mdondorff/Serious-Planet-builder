@@ -6,8 +6,8 @@ use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::dump::NET_BACKGROUND;
 use planet_generators::global::{
-    bake, equirect_product, grid_hash, product, sample, BakeError, Channel, GlobalGrid, GlobalSample, GLOBAL_VERSION, MAX_BAKE_RES,
-    SEA_LEVEL_C,
+    bake, bake_block, bake_blocks, equirect_product, grid_hash, product, sample, BakeError, Channel, GlobalGrid, GlobalSample,
+    GLOBAL_VERSION, MAX_BAKE_RES, MAX_BLOCK_CELLS, SEA_LEVEL_C, SEA_LEVEL_F32,
 };
 
 const SEED: u64 = 7;
@@ -230,11 +230,123 @@ fn known_answers_pin_the_field_on_every_platform() {
     assert_eq!(format!("{got:08x?}"), KNOWN_POINTS, "pointwise known answers");
     assert_eq!(format!("{:016x}", grid_hash(&grid(16, 3))), KNOWN_GRID_HASH, "the hash of the 16-cell bake");
     // The sea level is part of the field's contract.
-    assert_eq!(SEA_LEVEL_C, 0.10);
+    assert_eq!(SEA_LEVEL_C, f64::from(0.1f32));
     assert_eq!(GLOBAL_VERSION, RECORDED_VERSION, "the known answers belong to this version");
 }
 
+// spec: GEN-013
+#[test]
+fn the_sea_level_is_exactly_an_f32_so_readers_in_f32_and_f64_agree() {
+    // ADR 0026 point 3: a stored 0.1f32 is sea for an f32 reader and for the bake alike.
+    assert_eq!(SEA_LEVEL_F32.to_bits(), 0x3dcc_cccd);
+    assert_eq!(f64::from(SEA_LEVEL_F32), SEA_LEVEL_C);
+    let at = |c: f32| GlobalSample { continent: c, elevation_m: 0.0, temperature_c: 0.0, precipitation_mm: 0.0 };
+    assert!(!at(f32::from_bits(0x3dcc_cccd)).is_land(), "exactly the sea level is sea");
+    assert!(at(f32::from_bits(0x3dcc_ccce)).is_land(), "the next f32 up is land");
+}
+
+// spec: GEN-013
+#[test]
+fn border_directions_are_unique_and_a_block_equals_the_level_zero_lattice_bit_for_bit() {
+    // At a production-like resolution the lattice has exactly 12 (res - 1) + 8 distinct directions on the cube's edges (each
+    // shared by two or three faces) and 6 (res - 1)^2 + 12 (res - 1) + 8 in all: no two lattice vertices are one direction
+    // unless they are the same vertex of the cube.
+    let res = 256u32;
+    let mut all: std::collections::HashSet<[u64; 3]> = std::collections::HashSet::new();
+    let mut border: std::collections::HashSet<[u64; 3]> = std::collections::HashSet::new();
+    for f in 0..6u8 {
+        let root = TileId::new(Face(f), 0, 0, 0).unwrap();
+        for l in 0..=res {
+            for k in 0..=res {
+                let d = root.sample_direction(&TangentWarp, res, k, l);
+                let key = [d.x.to_bits(), d.y.to_bits(), d.z.to_bits()];
+                all.insert(key);
+                if k == 0 || k == res || l == 0 || l == res {
+                    border.insert(key);
+                }
+            }
+        }
+    }
+    let r = res as usize;
+    assert_eq!(border.len(), 12 * (r - 1) + 8);
+    assert_eq!(all.len(), 6 * (r - 1) * (r - 1) + 12 * (r - 1) + 8);
+
+    // A block of a level-L tile is the corresponding window of the level-0 lattice of `cells << L` cells, bit for bit.
+    let (cells, level) = (8u32, 2u8);
+    let whole = grid(cells << level, 3);
+    for f in 0..6u8 {
+        for ty in 0..4u32 {
+            for tx in 0..4u32 {
+                let tile = TileId::new(Face(f), level, tx, ty).unwrap();
+                let block = bake_block(SEED, &TangentWarp, tile, cells);
+                for l in 0..=cells {
+                    for k in 0..=cells {
+                        let want = whole.at(Face(f), tx * cells + k, ty * cells + l);
+                        assert_eq!(
+                            bits(&block[(l * (cells + 1) + k) as usize]),
+                            bits(&want),
+                            "face {f} tile ({tx}, {ty}) sample ({k}, {l})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+// spec: GEN-013
+#[test]
+fn a_tiled_bake_is_thread_and_block_size_independent_in_order_and_holds_at_most_one_batch() {
+    let collect = |level: u8, cells: u32, threads: usize| {
+        let mut out: Vec<(TileId, Vec<GlobalSample>)> = Vec::new();
+        let stats = bake_blocks(SEED, &TangentWarp, level, cells, threads, &mut |t, b| out.push((t, b))).unwrap();
+        (stats, out)
+    };
+    let (stats1, one) = collect(2, 4, 1);
+    let (stats5, five) = collect(2, 4, 5);
+    assert_eq!(one, five, "the thread count changes nothing, not even the order");
+    assert_eq!(stats1.blocks, 6 * 16);
+    assert_eq!((stats1.peak_resident_blocks, stats5.peak_resident_blocks), (1, 5), "at most `threads` blocks are alive at once, counted");
+    // The documented order, built explicitly: face, then row, then column; each tile exactly once.
+    let expected: Vec<TileId> =
+        (0..6u8).flat_map(|f| (0..4u32).flat_map(move |y| (0..4u32).map(move |x| TileId::new(Face(f), 2, x, y).unwrap()))).collect();
+    assert_eq!(one.iter().map(|b| b.0).collect::<Vec<_>>(), expected);
+    // The same grid in other blocks: the samples at the same lattice vertices are equal (compare a face-0 window).
+    let (_, coarse_blocks) = collect(1, 8, 2);
+    let a = &coarse_blocks[0].1; // tile (0, 0) at level 1, 8 cells: lattice vertices (0..=8, 0..=8) of a 16-cell face
+    let b = &one[0].1; // tile (0, 0) at level 2, 4 cells: vertices (0..=4, 0..=4)
+    for l in 0..=4usize {
+        for k in 0..=4usize {
+            assert_eq!(bits(&a[l * 9 + k]), bits(&b[l * 5 + k]), "vertex ({k}, {l})");
+        }
+    }
+    // Refusals.
+    for cells in [0, 3, MAX_BLOCK_CELLS * 2] {
+        assert_eq!(bake_blocks(SEED, &TangentWarp, 0, cells, 1, &mut |_, _| {}).unwrap_err(), BakeError::BadBlock(cells));
+    }
+    assert!(
+        matches!(bake_blocks(SEED, &TangentWarp, 8, 1024, 1, &mut |_, _| {}), Err(BakeError::BadResolution(_))),
+        "a 262144-cell grid is too fine"
+    );
+    // Levels beyond the limit are refused before anything is allocated or shifted (also absurd ones, in debug builds).
+    for level in [13u8, 16, 64, 255] {
+        assert_eq!(bake_blocks(SEED, &TangentWarp, level, 1, 1, &mut |_, _| {}).unwrap_err(), BakeError::BadLevel(level));
+    }
+}
+
+// spec: GEN-013
+#[test]
+fn the_peak_of_live_blocks_is_counted_between_creation_and_delivery() {
+    // What the bake itself keeps alive is at most one batch, whatever `threads` is.
+    for threads in [1usize, 4, 16] {
+        let mut delivered = 0usize;
+        let stats = bake_blocks(SEED, &TangentWarp, 1, 2, threads, &mut |_, _| delivered += 1).unwrap();
+        assert_eq!(delivered, 24);
+        assert!(stats.peak_resident_blocks >= 1 && stats.peak_resident_blocks <= threads.min(24), "{threads} threads: {stats:?}");
+    }
+}
+
 /// The version the known answers below were recorded against (ADR 0006): changing the output without a bump fails here.
-const RECORDED_VERSION: u32 = 1;
-const KNOWN_POINTS: &str = "[[3f3ef54b, 44cb75f7, 41a18f38, 45032416], [be83b213, c4c37fdb, c1cfa1d5, 442c4f54], [bed97260, c52f51c0, 41eb8eac, 451e5422], [3e25822e, 42c5afc0, 4192eb50, 430d7a6e], [beff7496, c54fe3c7, 40aa0957, 446de42a]]";
-const KNOWN_GRID_HASH: &str = "3ae54edffe001637";
+const RECORDED_VERSION: u32 = 2;
+const KNOWN_POINTS: &str = "[[3f3ef54b, 44cb75f7, 41a18f38, 45032416], [be83b213, c4c37fdb, c1cfa1d5, 442c4f54], [bed97260, c52f51c0, 41eb8eac, 451e5422], [3e25822e, 42c5afbf, 4192eb50, 430d7a6e], [beff7496, c54fe3c7, 40aa0957, 446de42a]]";
+const KNOWN_GRID_HASH: &str = "4e56a28cf452a416";

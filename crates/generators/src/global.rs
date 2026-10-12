@@ -11,13 +11,15 @@
 //! snapshots and known answers do not move. Hydrology is not here (SPIKE-03).
 
 use planet_core::cube::{face_to_direction, FaceMapping};
-use planet_core::{Face, Vec3};
+use planet_core::{Face, TileId, Vec3};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use planet_world_def::{BodyId, GenContext, MissingNode, ReadRecord};
 
 use crate::height::layer_noise;
 
 /// Bump whenever any output of this module changes (ADR 0006).
-pub const GLOBAL_VERSION: u32 = 1;
+pub const GLOBAL_VERSION: u32 = 2;
 /// Names this implementation in cache keys (CON-07).
 pub const IMPLEMENTATION_ID: &str = "cpu-global-coarse-v1";
 
@@ -30,7 +32,10 @@ const LAYER_TEMPERATURE: u64 = 0x474c_0005;
 const LAYER_RAIN: u64 = 0x474c_0006;
 
 /// The continentalness value above which a point is land: tuned so about three tenths of a sphere is land.
-pub const SEA_LEVEL_C: f64 = 0.10;
+pub const SEA_LEVEL_F32: f32 = 0.1;
+/// [`SEA_LEVEL_F32`] as an `f64`: exactly representable in `f32`, so a reader that compares the stored `f32` continentalness
+/// against it in `f32` and one that compares in `f64` agree (ADR 0026 point 3).
+pub const SEA_LEVEL_C: f64 = SEA_LEVEL_F32 as f64;
 /// Lowest and highest elevation in metres (clamps).
 pub const MIN_ELEVATION_M: f64 = -9000.0;
 pub const MAX_ELEVATION_M: f64 = 9000.0;
@@ -108,7 +113,7 @@ impl GlobalCoarseGenerator {
 /// The four channels of the global-coarse field at one point.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GlobalSample {
-    /// Continentalness in about [-1, 1]; above [`SEA_LEVEL_C`] is land.
+    /// Continentalness in [-1.7, 1.7]; above [`SEA_LEVEL_C`] is land.
     pub continent: f32,
     /// Elevation above the reference surface in metres (negative below sea level).
     pub elevation_m: f32,
@@ -228,13 +233,23 @@ impl GlobalGrid {
 pub enum BakeError {
     /// `res` must be a power of two from 1 to [`MAX_BAKE_RES`].
     BadResolution(u32),
+    /// A block of a tiled bake needs a power-of-two number of cells from 1 to [`MAX_BLOCK_CELLS`].
+    BadBlock(u32),
+    /// A tiled bake goes down to [`MAX_TILED_LEVEL`].
+    BadLevel(u8),
 }
 
 impl std::fmt::Display for BakeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BakeError::BadResolution(r) => {
-                write!(f, "a global bake needs a power-of-two resolution from 1 to {MAX_BAKE_RES} cells per face edge, got {r}")
+                write!(f, "a global bake needs a power-of-two resolution from 1 to {MAX_BAKE_RES} cells per face edge (a tiled bake up to {MAX_TILED_RES}), got {r}")
+            }
+            BakeError::BadBlock(c) => {
+                write!(f, "a block of a tiled bake needs a power-of-two number of cells from 1 to {MAX_BLOCK_CELLS}, got {c}")
+            }
+            BakeError::BadLevel(l) => {
+                write!(f, "a tiled bake goes down to level {MAX_TILED_LEVEL} (6 x 4^{MAX_TILED_LEVEL} blocks), got {l}")
             }
         }
     }
@@ -244,7 +259,7 @@ impl std::error::Error for BakeError {}
 
 /// The largest in-memory bake: 2048 cells per face edge is about 5 km at Earth's radius (6 x 2049^2 samples of 16 bytes
 /// is about 400 MB). A global grid of about 1 km needs 16384 cells per face edge (8192 is 1.2 km) and is baked as tiles,
-/// never held whole (next change).
+/// never held whole ([`bake_blocks`]).
 pub const MAX_BAKE_RES: u32 = 2048;
 
 /// Sample position of vertex `(k, l)` of an `res`-cell face grid in face coordinates `[-1, 1]`.
@@ -291,6 +306,102 @@ pub fn bake(seed: u64, map: &(dyn FaceMapping + Sync), res: u32, threads: usize)
         out
     });
     Ok(GlobalGrid { seed, res, faces })
+}
+
+/// The largest block of a tiled bake: 1024 cells per tile edge is 1025^2 samples of 16 bytes, 16 MB.
+pub const MAX_BLOCK_CELLS: u32 = 1024;
+/// The finest global grid a tiled bake accepts: 65536 cells per face edge (about 150 m at Earth's radius).
+pub const MAX_TILED_RES: u64 = 1 << 16;
+/// The deepest level of a tiled bake: 6 * 4^12 = 100 million blocks at most.
+pub const MAX_TILED_LEVEL: u8 = 12;
+
+/// The samples of one block: tile `tile` on a grid of `cells` cells per edge, `(cells + 1)^2` row-major (`k`, the s
+/// direction, fastest). They are the samples of the level-0 lattice of `cells << level` cells per face edge at the tile's
+/// position, bit for bit: both come from `TileId::sample_direction`, whose lattice index is exact (GEN-013).
+pub fn bake_block(seed: u64, map: &dyn FaceMapping, tile: TileId, cells: u32) -> Vec<GlobalSample> {
+    let n = cells + 1;
+    let mut v = Vec::with_capacity((n * n) as usize);
+    for l in 0..n {
+        for k in 0..n {
+            v.push(sample(seed, tile.sample_direction(map, cells, k, l)));
+        }
+    }
+    v
+}
+
+/// What a tiled bake did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TiledBakeStats {
+    pub blocks: usize,
+    /// The most blocks alive at once between their creation and their delivery to the sink (counted, batches of at most `threads` blocks, delivered in order and
+    /// dropped before the next batch): the memory clause of GEN-014 is this number times the block size.
+    pub peak_resident_blocks: usize,
+}
+
+/// Bake the global grid of `cells << level` cells per face edge as tile-aligned blocks of `cells` cells (the tiles of
+/// `level`), handing each to `sink` in order (face, then row, then column) and never holding more than `threads` of them
+/// (ADR 0026 points 2 and 4). Every sample is the pointwise field at its lattice direction, so the result does not depend
+/// on the thread count or the block size (CON-14).
+pub fn bake_blocks(
+    seed: u64,
+    map: &(dyn FaceMapping + Sync),
+    level: u8,
+    cells: u32,
+    threads: usize,
+    sink: &mut dyn FnMut(TileId, Vec<GlobalSample>),
+) -> Result<TiledBakeStats, BakeError> {
+    if cells == 0 || !cells.is_power_of_two() || cells > MAX_BLOCK_CELLS {
+        return Err(BakeError::BadBlock(cells));
+    }
+    // The level is checked before any shift; a grid is at most 65536 cells per face edge and at most 6 * 4^12 blocks, so
+    // neither the tile numbering below nor the number of blocks can outgrow the bake's own bookkeeping.
+    if level > MAX_TILED_LEVEL {
+        return Err(BakeError::BadLevel(level));
+    }
+    let res = u64::from(cells) << level;
+    if res > MAX_TILED_RES {
+        return Err(BakeError::BadResolution(u32::try_from(res).unwrap_or(u32::MAX)));
+    }
+    let side = 1u64 << level;
+    let total = 6 * side * side;
+    let threads = threads.max(1);
+    // Blocks alive between their creation and their delivery to the sink: measured, not derived from the batch size.
+    let live = AtomicUsize::new(0);
+    let peak = AtomicUsize::new(0);
+    let mut stats = TiledBakeStats { blocks: 0, peak_resident_blocks: 0 };
+    let mut next = 0u64;
+    while next < total {
+        // The tiles of this batch come from a running index (face, row, column): no list of all tiles is ever built.
+        let end = (next + threads as u64).min(total);
+        let batch: Vec<TileId> = (next..end)
+            .map(|i| {
+                let (face, rest) = (i / (side * side), i % (side * side));
+                TileId::new(Face(face as u8), level, (rest % side) as u32, (rest / side) as u32).expect("in range")
+            })
+            .collect();
+        let blocks: Vec<Vec<GlobalSample>> = std::thread::scope(|scope| {
+            let (live, peak) = (&live, &peak);
+            let handles: Vec<_> = batch
+                .iter()
+                .map(|t| {
+                    scope.spawn(move || {
+                        let block = bake_block(seed, map, *t, cells);
+                        peak.fetch_max(live.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+                        block
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().expect("bake thread panicked")).collect()
+        });
+        for (t, b) in batch.iter().zip(blocks) {
+            sink(*t, b);
+            live.fetch_sub(1, Ordering::SeqCst);
+            stats.blocks += 1;
+        }
+        next = end;
+    }
+    stats.peak_resident_blocks = peak.load(Ordering::SeqCst);
+    Ok(stats)
 }
 
 /// A 64-bit hash of every bit of every channel of a grid, in face and row-major order, with the resolution and
