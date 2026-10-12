@@ -13,15 +13,17 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use planet_core::cube::TangentWarp;
 use planet_core::hash::HASH_VERSION;
 use planet_core::{FaceMapping, TileId};
 use planet_generators::global::{
-    bake_block, bake_blocks_where, BakeError, GlobalCoarseGenerator, GlobalSample, GLOBAL_VERSION, IMPLEMENTATION_ID, MAX_BLOCK_CELLS,
+    bake_block, bake_blocks_where, check_tiled, BakeError, GlobalCoarseGenerator, GlobalSample, GLOBAL_VERSION, IMPLEMENTATION_ID,
+    MAX_BLOCK_CELLS,
 };
 use planet_generators::stage::{FieldGraph, FieldSpec, Scope, Stage};
-use planet_world_def::{body_radius_path, BodyId, GenContext, MissingNode, NodeValue, ReadRecord, WorldDefinition, SPHERE_SURFACE_ID};
+use planet_world_def::{body_radius_path, body_seed_path, BodyId, GenContext, MissingNode, NodeValue, WorldDefinition, SPHERE_SURFACE_ID};
 
 use crate::codec::{shuffle, unshuffle};
 use crate::key::{body_params_hash128, cache_key, read_entry, CacheKey, KeyInputs, Kind, ReadEntry, PARAM_GRID_RES, PARAM_RESOLUTION};
@@ -52,6 +54,11 @@ pub enum BlockCodecError {
         expected: u64,
     },
     Lz4(String),
+    /// Keying or encoding: the level and cells make no grid the tiled bake accepts.
+    Grid {
+        level: u8,
+        cells: u32,
+    },
     /// Encoding: the number of samples does not match the block's cells.
     Samples {
         got: usize,
@@ -71,6 +78,7 @@ impl std::fmt::Display for BlockCodecError {
             BlockCodecError::Truncated { got, expected } => write!(f, "the LZ4 block gives {got} raw bytes, {expected} are needed"),
             BlockCodecError::Lz4(e) => write!(f, "the LZ4 block is damaged: {e}"),
             BlockCodecError::Samples { got, expected } => write!(f, "the block has {got} samples, {expected} are needed for its cells"),
+            BlockCodecError::Grid { level, cells } => write!(f, "{cells} cells per block at level {level} is not a grid this build bakes"),
         }
     }
 }
@@ -83,6 +91,13 @@ fn valid_cells(cells: u32) -> bool {
 
 fn raw_len(cells: u32) -> u64 {
     16 * (u64::from(cells) + 1) * (u64::from(cells) + 1)
+}
+
+/// Cells per face edge of the grid a block of `cells` cells at `tile`'s level belongs to (`cells << level`), if the tiled
+/// bake accepts that grid (cells a power of two up to the block limit, a level and a resolution within the limits). A record
+/// that says otherwise is forged or from another build; its `res` is never computed by a wrapping shift.
+pub fn grid_res(tile: TileId, cells: u32) -> Option<u32> {
+    check_tiled(tile.level(), cells).ok()
 }
 
 /// Encode a block of `cells` cells per edge. A block the decoder would refuse is an error here.
@@ -163,7 +178,12 @@ impl GlobalWorld {
     /// parameter hash of every key (ADR 0018) but is not an input of the field, so it is read from the definition directly
     /// and does not enter the read set.
     pub fn from_definition(def: &WorldDefinition) -> Result<GlobalWorld, MissingNode> {
-        let body = BodyId::PLANET;
+        GlobalWorld::from_definition_of_body(def, BodyId::PLANET)
+    }
+
+    /// The same for any body of the definition: its own derived seed, so its own world, keys and store (a store is per body,
+    /// `StoreParams::body`).
+    pub fn from_definition_of_body(def: &WorldDefinition, body: BodyId) -> Result<GlobalWorld, MissingNode> {
         let ctx = GenContext::new(def);
         let field = GlobalCoarseGenerator.field(&ctx, body)?;
         let radius_m = match def.get(&body_radius_path(body)) {
@@ -172,16 +192,13 @@ impl GlobalWorld {
         };
         let records = field.read_records();
         let reads: Vec<ReadEntry> = records.iter().map(read_entry).collect();
-        // ADR 0025 point 3 for the global field: the paths of its reads (the world seed and the body's derived seed), no
-        // radius node, deduplicated, sorted, length-prefixed.
-        let mut paths: Vec<String> = records.iter().map(ReadRecord::path).collect();
-        paths.sort();
-        paths.dedup();
+        // ADR 0026 (consequences): ADR 0025 point 3's construction over the body's seed node path only, `world.seed` for body 0
+        // and `derived.body.N.seed` otherwise, no radius node, length-prefixed. (The context also records the other seed
+        // path as a read, and both are in the read entries of the keys; the node set id is the liveness identity.)
+        let seed_path = if body == BodyId::PLANET { WorldDefinition::SEED_PATH.to_string() } else { body_seed_path(body) };
         let mut material = Vec::new();
-        for p in &paths {
-            material.extend_from_slice(&u32::try_from(p.len()).expect("a node path is under 4 GiB").to_le_bytes());
-            material.extend_from_slice(p.as_bytes());
-        }
+        material.extend_from_slice(&u32::try_from(seed_path.len()).expect("a node path is under 4 GiB").to_le_bytes());
+        material.extend_from_slice(seed_path.as_bytes());
         let node_set_id = blake3::derive_key("planet-builder node set v1", &material)[..16].try_into().expect("16 bytes");
         let graph = FieldGraph::new(&[FieldSpec {
             id: "global-coarse",
@@ -226,7 +243,8 @@ impl GlobalWorld {
     }
 
     /// The inputs of the content key of one block of the bake of `res` cells per face edge in blocks of `cells`.
-    pub fn block_key_inputs(&self, tile: TileId, cells: u32, res: u32) -> KeyInputs {
+    pub fn block_key_inputs(&self, tile: TileId, cells: u32) -> KeyInputs {
+        let res = grid_res(tile, cells).expect("a block of a bake the tiled bake accepts: see grid_res");
         let mut output_params = BTreeMap::new();
         output_params.insert(PARAM_RESOLUTION, cells.to_le_bytes().to_vec());
         output_params.insert(PARAM_GRID_RES, res.to_le_bytes().to_vec());
@@ -245,15 +263,15 @@ impl GlobalWorld {
         }
     }
 
-    pub fn block_key(&self, tile: TileId, cells: u32, res: u32) -> CacheKey {
-        cache_key(&self.block_key_inputs(tile, cells, res))
+    pub fn block_key(&self, tile: TileId, cells: u32) -> CacheKey {
+        cache_key(&self.block_key_inputs(tile, cells))
     }
 
     /// The record of a block of samples.
     pub fn block_record(&self, tile: TileId, cells: u32, samples: &[GlobalSample]) -> Result<Record, BlockCodecError> {
-        let res = cells << tile.level();
+        grid_res(tile, cells).ok_or(BlockCodecError::Grid { level: tile.level(), cells })?;
         Ok(Record {
-            key: self.block_key(tile, cells, res),
+            key: self.block_key(tile, cells),
             kind: KIND_GLOBAL_BLOCK,
             tile,
             generator_version: GLOBAL_VERSION,
@@ -319,21 +337,42 @@ pub fn build_global(
     threads: usize,
     max_pack_bytes: u64,
 ) -> Result<GlobalBuildReport, GlobalBuildError> {
-    let res = u32::try_from(u64::from(cells) << level.min(40)).map_err(|_| BakeError::BadLevel(level))?;
-    let existing = TileStore::open(dir, world.params())?;
-    let have = |tile: TileId| matches!(existing.get(KIND_GLOBAL_BLOCK, tile, world.block_key(tile, cells, res)), Ok(Some(r)) if decode_block(&r.payload).is_ok());
+    // Refuse a bad shape before anything is opened, created or written.
+    check_tiled(level, cells)?;
+    // The writer first (it takes the directory's lock), then a snapshot of what is stored: a run that waited for the lock
+    // sees the blocks the run before it wrote and does not compute them again.
     let mut writer = PackWriter::open(dir, world.params(), max_pack_bytes)?;
+    let existing = TileStore::open(dir, world.params())?;
+    // A block is kept only if it decodes with the cells the key says: a payload of another `B` under this key is a
+    // wrongly written record and is written again.
+    let have = |tile: TileId| matches!(existing.get(KIND_GLOBAL_BLOCK, tile, world.block_key(tile, cells)), Ok(Some(r)) if matches!(decode_block(&r.payload), Ok((c, _)) if c == cells));
     let (mut written, mut failed) = (0usize, None);
-    let stats = bake_blocks_where(world.seed(), &TangentWarp, level, cells, threads, &|t| !have(t), &mut |tile, samples| {
-        if failed.is_some() {
-            return;
-        }
-        match world.block_record(tile, cells, &samples).map_err(GlobalBuildError::from).and_then(|r| writer.append(&r).map_err(Into::into))
-        {
-            Ok(()) => written += 1,
-            Err(e) => failed = Some(e),
-        }
-    })?;
+    let stop = AtomicBool::new(false);
+    let stats = bake_blocks_where(
+        world.seed(),
+        &TangentWarp,
+        level,
+        cells,
+        threads,
+        &|t| !stop.load(Ordering::SeqCst) && !have(t),
+        &mut |tile, samples| {
+            if failed.is_some() {
+                return;
+            }
+            match world
+                .block_record(tile, cells, &samples)
+                .map_err(GlobalBuildError::from)
+                .and_then(|r| writer.append(&r).map_err(Into::into))
+            {
+                Ok(()) => written += 1,
+                Err(e) => {
+                    // The first failure ends the bake: no further block is accepted for computing.
+                    stop.store(true, Ordering::SeqCst);
+                    failed = Some(e);
+                }
+            }
+        },
+    )?;
     if let Some(e) = failed {
         return Err(e);
     }
@@ -371,10 +410,14 @@ pub fn verify_global(store: &TileStore, world: &GlobalWorld, sample: usize) -> V
                 continue;
             }
         };
-        let res = cells << r.tile.level();
+        // A forged record whose cells and level make no grid the tiled bake accepts is unreadable, never keyed.
+        if grid_res(r.tile, cells).is_none() {
+            report.unreadable.push(format!("{where_}: {cells} cells per block at level {} is not a grid this build bakes", r.tile.level()));
+            continue;
+        }
         let metadata_current =
             r.generator_version == GLOBAL_VERSION && r.hash_version == HASH_VERSION && r.node_set_id == world.node_set_id;
-        if world.block_key(r.tile, cells, res) != r.key {
+        if world.block_key(r.tile, cells) != r.key {
             if metadata_current {
                 report.unexplained_stale += 1;
             } else {

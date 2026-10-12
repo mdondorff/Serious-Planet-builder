@@ -538,6 +538,7 @@ mod tests {
         assert!(run_str(&["generate", "--verify-global", &missing]).unwrap_err().contains("no such cache directory"));
         // Bad blocks are refused naming the limit.
         let bad = run_str(&["generate", "--global-dir", &d.s("bad"), "--global-cells", "3"]).unwrap_err();
+        assert!(!std::path::Path::new(&d.s("bad")).exists(), "a refused bake creates nothing");
         assert!(bad.contains("power-of-two") && bad.contains("1024"), "{bad}");
     }
 
@@ -555,6 +556,8 @@ mod tests {
             (vec!["generate", "--global-products", s.as_str(), "--global-level", "2"], "--global-res"),
             (vec!["generate", "--cache-dir", s.as_str(), "--region", "0,1", "--global-level", "2"], "exclude"),
             (vec!["generate", "--tile", "0,1,0,0", "--global-level", "2"], "belongs to the tile store"),
+            (vec!["generate", "--cache-dir", s.as_str(), "--region", "0,1", "--threads", "2"], "exclude --threads"),
+            (vec!["generate", "--verify-global", s.as_str(), "--threads", "2"], "excludes --threads"),
         ] {
             let e = run_str(&args).unwrap_err();
             assert!(e.contains(needle), "{args:?}: {e}");

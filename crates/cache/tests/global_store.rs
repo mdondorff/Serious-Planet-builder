@@ -133,15 +133,15 @@ fn damaged_or_hostile_payloads_are_errors_and_the_encoder_refuses_what_the_decod
 fn a_block_key_covers_the_tile_the_cells_the_grid_and_the_stage_key_and_the_known_answers_are_pinned() {
     let w = world(7);
     let (res, cells) = (32u32, 8u32);
-    let base = w.block_key(tile(), cells, res);
-    assert_eq!(base, w.block_key(tile(), cells, res));
+    let base = w.block_key(tile(), cells);
+    assert_eq!(base, w.block_key(tile(), cells));
     let other_tile = TileId::new(Face(2), 2, 1, 2).unwrap();
-    assert_ne!(base, w.block_key(other_tile, cells, res), "two blocks of one bake have different keys");
-    assert_ne!(base, w.block_key(tile(), 4, res), "B is an output parameter");
-    assert_ne!(base, w.block_key(tile(), cells, 64), "res is an output parameter");
-    assert_ne!(base, world(8).block_key(tile(), cells, res), "another seed");
+    assert_ne!(base, w.block_key(other_tile, cells), "two blocks of one bake have different keys");
+    assert_ne!(base, w.block_key(tile(), 4), "B is an output parameter");
+    assert_ne!(base, w.block_key(TileId::new(Face(2), 3, 1, 3).unwrap(), cells), "the grid (cells << level) is an output parameter");
+    assert_ne!(base, world(8).block_key(tile(), cells), "another seed");
     // The key is the ADR 0018 encoding of kind 3: source key, B under tag 1, res under tag 4, empty read set.
-    let inputs = w.block_key_inputs(tile(), cells, res);
+    let inputs = w.block_key_inputs(tile(), cells);
     assert_eq!(inputs.kind, Kind::GlobalBlock);
     assert_eq!(inputs.source, Some(w.stage_key(res)), "the bake's one stage key is the source");
     assert_eq!(inputs.output_params.get(&PARAM_RESOLUTION), Some(&cells.to_le_bytes().to_vec()));
@@ -161,14 +161,17 @@ fn a_block_key_covers_the_tile_the_cells_the_grid_and_the_stage_key_and_the_know
 #[test]
 fn the_node_set_id_covers_the_seed_reads_only_and_is_pinned() {
     let w = world(7);
-    // Built by hand: the paths the field reads (no radius), sorted, each as its u32 byte length and its bytes.
-    let mut material = Vec::new();
-    for p in ["derived.body.0.seed", "world.seed"] {
-        material.extend((p.len() as u32).to_le_bytes());
-        material.extend(p.as_bytes());
-    }
-    assert_eq!(material, b"\x13\x00\x00\x00derived.body.0.seed\x0a\x00\x00\x00world.seed".to_vec());
+    // ADR 0026 (consequences), written out from the ADR's text: the body's seed node path only, `world.seed` for body 0,
+    // as its u32 little-endian byte length and its bytes; no radius node, no derived seed.
+    let material = b"\x0a\x00\x00\x00world.seed".to_vec();
     assert_eq!(w.node_set_id()[..], blake3::derive_key("planet-builder node set v1", &material)[..16]);
+    // Another body: `derived.body.N.seed` only.
+    let mut def = WorldDefinition::single_planet(R, 7);
+    def.set_body_radius(BodyId(1), R);
+    let moon = GlobalWorld::from_definition_of_body(&def, BodyId(1)).unwrap();
+    let material = b"\x13\x00\x00\x00derived.body.1.seed".to_vec();
+    assert_eq!(moon.node_set_id()[..], blake3::derive_key("planet-builder node set v1", &material)[..16]);
+    assert_ne!(moon.node_set_id(), w.node_set_id());
     assert_eq!(world(8).node_set_id(), w.node_set_id(), "a value change of a node leaves the id alone");
     let hex: String = w.node_set_id().iter().map(|b| format!("{b:02x}")).collect();
     assert_eq!(hex, KNOWN_NODE_SET_ID);
@@ -194,7 +197,7 @@ fn a_bake_is_built_once_reused_afterwards_and_verifies_clean() {
 
     // Every block is the pointwise bake of its tile, bit for bit.
     let t = TileId::new(Face(3), 1, 1, 0).unwrap();
-    let rec = store.get(KIND_GLOBAL_BLOCK, t, w.block_key(t, 4, 8)).unwrap().expect("stored under the world's key");
+    let rec = store.get(KIND_GLOBAL_BLOCK, t, w.block_key(t, 4)).unwrap().expect("stored under the world's key");
     let (_, kept) = decode_block(&rec.payload).unwrap();
     let fresh = bake_block(w.seed(), &TangentWarp, t, 4);
     assert_eq!(kept.iter().map(bits).collect::<Vec<_>>(), fresh.iter().map(bits).collect::<Vec<_>>());
@@ -248,6 +251,51 @@ fn a_block_made_with_an_input_that_is_not_in_its_key_or_damaged_is_reported() {
 
 // spec: STRM-012
 #[test]
+fn a_bad_shape_is_refused_before_anything_is_created_and_a_wrong_cells_record_is_written_again() {
+    let w = world(7);
+    let d = Dir::new("refuse");
+    let target = d.path().join("never");
+    for (level, cells) in [(0u8, 3u32), (13, 1), (0, 2048), (9, 1024)] {
+        assert!(build_global(&target, &w, level, cells, 2, DEFAULT_MAX_PACK_BYTES).is_err(), "level {level} cells {cells}");
+    }
+    assert!(!target.exists(), "a refused build leaves no directory, lock or pack behind");
+
+    // A record under the key of a 4-cell block whose payload has 8 cells is a wrongly written record: a rebuild does not
+    // keep it, it writes the block again.
+    let t = TileId::new(Face(0), 1, 0, 0).unwrap();
+    let mut wrong = w.block_record(t, 4, &bake_block(7, &TangentWarp, t, 4)).unwrap();
+    wrong.payload = encode_block(8, &bake_block(7, &TangentWarp, t, 8)).unwrap();
+    let dir = Dir::new("wrong-cells");
+    let mut writer = PackWriter::open(dir.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    writer.append(&wrong).unwrap();
+    writer.finish().unwrap();
+    let r = build_global(dir.path(), &w, 1, 4, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
+    assert_eq!((r.written, r.reused), (24, 0), "the wrong record was not reused");
+    let store = TileStore::open(dir.path(), w.params()).unwrap();
+    let rec = store.get(KIND_GLOBAL_BLOCK, t, w.block_key(t, 4)).unwrap().unwrap();
+    assert_eq!(block_cells(&rec.payload).unwrap(), 4, "the later, correct record wins");
+
+    // A forged record whose cells and level make no grid is unreadable for verify, never keyed with a wrapped shift.
+    let forged_tile = TileId::new(Face(0), 22, 5, 5).unwrap();
+    let mut forged = w.block_record(t, 4, &bake_block(7, &TangentWarp, t, 4)).unwrap();
+    forged.tile = forged_tile;
+    forged.payload = encode_block(
+        1024,
+        &vec![GlobalSample { continent: 0.0, elevation_m: 0.0, temperature_c: 0.0, precipitation_mm: 0.0 }; 1025 * 1025],
+    )
+    .unwrap();
+    let dir = Dir::new("forged");
+    let mut writer = PackWriter::open(dir.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    writer.append(&forged).unwrap();
+    writer.finish().unwrap();
+    let r = verify_global(&TileStore::open(dir.path(), w.params()).unwrap(), &w, 0);
+    assert_eq!((r.checked, r.unreadable.len()), (1, 1), "{r:?}");
+    assert!(r.unreadable[0].contains("is not a grid"), "{}", r.unreadable[0]);
+    assert!(matches!(w.block_record(forged_tile, 1024, &[]), Err(BlockCodecError::Grid { level: 22, cells: 1024 })));
+}
+
+// spec: STRM-012
+#[test]
 fn another_body_or_a_missing_node_is_refused_and_the_radius_is_in_the_key_but_not_the_node_set() {
     let mut def = WorldDefinition::single_planet(R, 7);
     let a = GlobalWorld::from_definition(&def).unwrap();
@@ -262,4 +310,4 @@ fn another_body_or_a_missing_node_is_refused_and_the_radius_is_in_the_key_but_no
 
 const KNOWN_STAGE_KEY: &str = "db3dbfc6e3118079df7dfedc53e81fec";
 const KNOWN_BLOCK_KEY: &str = "efbf6c92372e6d5a97492d5773fddce5";
-const KNOWN_NODE_SET_ID: &str = "3e8a10cba8aa1ba609eab98f67384c0f";
+const KNOWN_NODE_SET_ID: &str = "92572f1974620d913454c89a22aca7be";

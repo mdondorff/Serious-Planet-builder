@@ -336,6 +336,22 @@ fn a_tiled_bake_is_thread_and_block_size_independent_in_order_and_holds_at_most_
 
 // spec: GEN-013
 #[test]
+fn the_batch_is_bounded_by_a_memory_budget_not_by_the_thread_count() {
+    use planet_generators::global::{batch_blocks, check_tiled, MAX_BATCH_BYTES};
+    // 1024-cell blocks are 16.8 MB: a thousand threads would be 16 GB. The batch is capped by the budget (CON-21).
+    let big = batch_blocks(1024, 1000);
+    assert_eq!(big as u64, MAX_BATCH_BYTES / (16 * 1025 * 1025));
+    assert!(big >= 1 && (big as u64) * 16 * 1025 * 1025 <= MAX_BATCH_BYTES);
+    assert_eq!(batch_blocks(1024, 4), 4, "a small thread count is kept");
+    assert_eq!(batch_blocks(1024, 0), 1, "at least one block");
+    assert_eq!(batch_blocks(1, 10_000), 10_000, "tiny blocks are not limited by the budget");
+    // The shape check refuses before anything is allocated.
+    assert!(check_tiled(0, 3).is_err() && check_tiled(13, 1).is_err() && check_tiled(9, 1024).is_err());
+    assert_eq!(check_tiled(3, 256).unwrap(), 2048);
+}
+
+// spec: GEN-013
+#[test]
 fn the_peak_of_live_blocks_is_counted_between_creation_and_delivery() {
     // What the bake itself keeps alive is at most one batch, whatever `threads` is.
     for threads in [1usize, 4, 16] {

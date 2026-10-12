@@ -268,6 +268,9 @@ fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
                 "--verify-global reads the blocks' own cells and level: it excludes --global-level, --global-cells and --global-res".into(),
             );
         }
+        if o.given.contains("--threads") {
+            return Err("--verify-global regenerates blocks one by one: it excludes --threads".into());
+        }
         if !dir.is_dir() {
             return Err(format!("{}: no such cache directory (check the path; an empty store would verify nothing)", dir.display()));
         }
@@ -381,6 +384,7 @@ fn generate_store(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         "--global-level",
         "--global-cells",
         "--global-res",
+        "--threads",
     ]
     .into_iter()
     .filter(|f| o.given.contains(*f))
