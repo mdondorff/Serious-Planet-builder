@@ -266,7 +266,7 @@ fn the_implementation_id_and_query_reads_are_covered_and_query_order_does_not_ma
 
 // spec: STRM-011
 #[test]
-fn the_key_of_the_global_coarse_bake_follows_its_recorded_reads() {
+fn the_key_of_the_global_coarse_bake_is_sensitive_to_resolution_seed_and_body() {
     use planet_cache::key::read_entry;
     use planet_generators::global::{GlobalCoarseGenerator, GLOBAL_VERSION, IMPLEMENTATION_ID};
     use planet_world_def::{GenContext, WorldDefinition};

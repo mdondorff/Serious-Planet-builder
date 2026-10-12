@@ -99,6 +99,7 @@ impl GlobalCoarseGenerator {
     /// The field of `body`: reads the body's seed (and with it the world seed) through `ctx`. A missing node is an error
     /// naming it, not a default.
     pub fn field(&self, ctx: &GenContext, body: BodyId) -> Result<GlobalCoarseField, MissingNode> {
+        assert!(ctx.reads().is_empty(), "a field is built from a fresh context: its key covers the whole read set of the context");
         let seed = ctx.body_seed(body)?;
         Ok(GlobalCoarseField { seed, body, inputs: ctx.read_set_hash(), records: ctx.read_records() })
     }
