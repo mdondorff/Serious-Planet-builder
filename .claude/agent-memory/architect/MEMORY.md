@@ -30,10 +30,7 @@ Confirm everything here against `main` and `docs/status.md` before acting on it.
 1. **Ragged band: DONE** (#65, 2026-10-12): both causes fixed (height now geomorphed, MESH_VERSION 4; the relief
    grid's f32 phase replaced by per-decade f64 phases). `terrain_aerial200km_height` was auto-blessed under ADR 0017
    (AUTO-E: 849 / 829 / 843 px). Open follow-up: normals are still not geomorphed (only if it shows in a view).
-2. **Relief goldens** (owner, 2026-10-12: worried they flake, being 128x96. I recommended rejecting both and replacing them with the flight review plus a relief property test; awaiting his decision) `terrain_orbit_relief`, `terrain_ground1m_relief`: first goldens, classed lit, pending for the
-   owner's `/bless`; candidates regenerated after #65, so the owner can review them now. Review sequence:
-   `C:\DEV\Serious-Planet-Builder\.claude\worktrees\sonnet-explorer\target\review\flight-relief-nvidia\` (contact sheet).
-   This is the TEST-014 owner review.
+2. **Relief goldens: rejected (owner, 2026-10-12)**, replaced by the 1280x720 flight review (TEST-014) at gates plus a tier-B property test; queued as M3 item 5a for sonnet-explorer.
 3. **Perf gate: first run 2026-10-12 valid, all budgets pass** (status.md Log). Ground-1m GPU median up ~35 % vs the owner's 2026-10-11 run (likely #65 vertex size), still in budget: watch it. GEN-014 bake not in the harness yet (queued, M3 item 6 (m)).
 4. **M3 acceptance must show** realistic terrain plans at production parameters (cells 32, ratio 240); ADR 0016 rejects
    terrain too steep for a crack-free morph interval. The steep stress field only plans at cells 4 / ratio 77.
