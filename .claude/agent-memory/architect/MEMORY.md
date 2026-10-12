@@ -40,6 +40,13 @@ Confirm everything here against `main` and `docs/status.md` before acting on it.
 7. **Cache follow-ups** queued in status.md M3 item 5 (a)-(d) from the 0023/0024 reviews.
 8. Owner items carried into M3: TEST-008 split decision; editor window and egui per ADR 0015 (wgpu stays in render).
 
+## Owner decisions 2026-10-12 (late)
+- Workflow kept: one coordinator (this session, own worktree) + one long-lived worker (sonnet-explorer, own worktree) the owner talks to directly; coders use subagents for review. Reset the worker per milestone task with a briefing file.
+- Reviewer models: spec-guardian and verifier on Sonnet (trial); numerics-reviewer + architect on Opus. Token economy: review proportionate to risk; review small ADRs myself against the code.
+- status.md = forward state + last 10 lines; full log in docs/log.md (newest first). Refresh status "Recent" when I edit status.
+- SPIKE-03 before the erosion filter; erosion variant (SPIKE-04: I recommend B) picked after it. GPU perf guardrails = M3 item 6b.
+- Open with owner: full 16384 bake perf (disk: C: ~12 GB free; store option on another drive recommended).
+
 ## Lessons from the owner
 - Coders edit proposed ADRs in their own PRs while you review them (#75 edited 0026 pt 6 during my review): merge main and combine texts before accepting.
 - sonnet-explorer's `gh pr merge` needs the owner's go-ahead in its session (classifier); stalls at merge mean a prompt is waiting there.
