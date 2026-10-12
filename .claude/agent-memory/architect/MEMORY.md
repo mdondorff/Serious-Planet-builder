@@ -4,15 +4,19 @@ Refreshed 2026-10-11 (updated 2026-10-12 for #64, #65) at the hand-over from the
 Confirm everything here against `main` and `docs/status.md` before acting on it.
 
 ## Sessions
-- **sonnet-coder:** owns M3. Lands its own PRs (squash, CI green on Windows and Linux, verifier passed). Was idle for a
-  while because of a session limit; the owner says it is active again.
-- **sonnet-explorer:** owns the flight demo and relief view (#50 merged). Assigned the morph-height defect (below).
+- **sonnet-coder:** finishing `change/m3-cache-verify`, then STOPS for a full reset (owner, 2026-10-12: its context is
+  huge). It writes a hand-over in status.md or its PR. Do not give it new work.
+- **sonnet-explorer:** takes over the remaining M3 queue after cache-verify (owner, 2026-10-12). Morph-height done (#65).
+  It has none of sonnet-coder's M3 context: brief it fully (status.md M3 queue, ADRs 0018/0019/0021-0024, the hand-over).
 - **sonnet-worker:** deprecated. Do not message it.
 - This session's name is `opus-planner` (start with `claude --agent architect -n opus-planner`). Coders report to it.
+  On 2026-10-12 a new architect session (worktree `opus-planner`) took over; the owner was asked to stop the old
+  background `opus-planner` session. Two sessions with one name: check `ListAgents` refs.
 
 ## State of main (2026-10-11)
 - M2: GO recorded by the owner (#42), "go with changes"; the condition (LOD-008 first in M3) is met (#43).
-- All ADRs 0001-0020 accepted. Recent: 0016 height-aware selection, 0017 golden review policy, 0018 persistent
+- All ADRs 0001-0020 and 0022-0024 accepted; 0021 in part (1, 3, 4, 7) on 2026-10-12 under the owner's delegation
+  (#67); 0023/0024 amend 0018/0019 in part. 0022 = option 1 (no same-stage reads). Recent: 0016 height-aware selection, 0017 golden review policy, 0018 persistent
   cache keys (BLAKE3-128, `pure`), 0019 tile pack store, 0020 perf readiness gate. 0013, 0014 accepted 2026-10-11
   (0014 partly superseded by 0016).
 - Constitution v1.2 (CON-14 per-field CPU/GPU bounds; CON-18 golden approval by owner or ADR 0017 policy).
@@ -36,9 +40,15 @@ Confirm everything here against `main` and `docs/status.md` before acting on it.
    terrain too steep for a crack-free morph interval. The steep stress field only plans at cells 4 / ratio 77.
 5. **Process proposal for the owner:** per-change log lines in the archived OpenSpec change instead of appending to
    `docs/status.md`'s Log (it conflicts on nearly every merge).
-6. Owner items carried into M3: TEST-008 split decision; editor window and egui per ADR 0015 (wgpu stays in render).
+6. **CON-08 reading** (owner): needed before SPIKE-03 splits a regional chain (ADR 0022 option 2).
+7. **Cache follow-ups** queued in status.md M3 item 5 (a)-(d) from the 0023/0024 reviews.
+8. Owner items carried into M3: TEST-008 split decision; editor window and egui per ADR 0015 (wgpu stays in render).
 
 ## Lessons from the owner
+- **ADR delegation (owner, 2026-10-12):** accept ADRs yourself when the reviewers' recommendations are strong or the ADR
+  is sound and unambiguous; bring the owner only constitution readings/amendments and genuinely open trade-offs. Run
+  spec-guardian (+ numerics-reviewer for keys, formats, generators), apply text fixes, record "owner's delegation of
+  2026-10-12" in the status line. Clarification ADRs that go beyond an accepted ADR's text must say "amends in part".
 - One ADR at a time: explain plainly, highlight what matters most with its cost to reverse, recommend, then he
   decides. Small focused PRs per decision. Ask only questions that change the work; offer a recommended option.
 - He prefers autonomy: proceed on reversible decisions; bring owner-level choices only.

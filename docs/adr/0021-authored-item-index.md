@@ -1,5 +1,5 @@
 # 0021 Authored-item index: extent, layers, widths, staging
-Status: proposed
+Status: accepted in part, points 1, 3, 4 and 7 (owner's delegation of 2026-10-12; accepted by opus-planner after the spec-guardian review; points 2, 5, 6 and 8 stay open for new ADRs)
 Date: 2026-10-11
 Source: spec-guardian and numerics reviews of m3-cell-index (2026-10-11); ADR 0006, ADR 0007 (cell index "fixed in the M3 world-def change"), proposed ADR 0018; constitution CON-05, CON-06, CON-08, CON-23
 
@@ -8,7 +8,7 @@ The M3 cell index (WDEF-005) is in memory only: items are `(body, id) -> (conten
 
 ## Questions and leanings
 1. **Cell level.** ADR 0007 says one fixed level per body. The code derives it from the body's radius and re-files the items whenever the radius node changes (a test crosses the boundary), so items are never stranded. Alternative: a stored node `body.N.cell_level`, default from the formula, so a radius edit never moves cells. *Leaning:* keep the derived level; revisit if radius edits become frequent in the editor.
-2. **Extent.** An item is filed by its anchor point only, but a stamp or spline reaches further. *Leaning:* every item declares a `reach_m` (a per-layer maximum is enough to start); a reader queries a margin of `ceil(reach_m / cell_edge) + 1` cells, and the margin is an output parameter of the key (ADR 0006). The code has the margin parameter (`query_tile`, `with_margin`); the reach declaration is M6.
+2. **Extent.** An item is filed by its anchor point only, but a stamp or spline reaches further. *Leaning:* every item declares a `reach_m` (a per-layer maximum is enough to start); a reader queries a margin of `ceil(reach_m / cell_edge) + 1` cells. The query margin changes only which cells are read, so it is covered by the read set (another margin records other cells) and is not an output parameter; the output parameter is the extent of a regional output (its halo, ADR 0022). The code has the margin parameter (`query_tile`, `with_margin`); the reach declaration is M6.
 3. **Layers.** One item set per cell means a spline edit re-keys stamp-stage tiles. *Leaning:* the query is `(body, layer, cell)` with the layer in the recorded path (ADR 0018 already puts the layer id in the query parameters).
 4. **Widths.** Item ids are `u64` and content hashes `u64`; ADR 0007 wants ULIDs (128 bit) and ADR 0018 wants 128-bit query result hashes over item content hashes. *Leaning:* ids and content hashes become 128-bit when item files are defined; the in-memory 64-bit keys stay for hot paths (ADR 0018). Changing the width before files exist needs no migration.
 5. **Coarse tiles.** A tile that would touch more cells than a limit now reads the whole body (exact, never stale, but any item edit anywhere re-keys it). *Leaning:* region summary hashes (a Merkle quadtree over cell hashes with a fixed empty hash per level), so a coarse tile records one entry and is invalidated exactly by edits inside it.
@@ -17,11 +17,13 @@ The M3 cell index (WDEF-005) is in memory only: items are `(body, id) -> (conten
 8. **The LOD selection cache.** `SelectionCache` keys its per-tile bounds on the field-wide inputs hash, and the bounds come from `field.height_bounds`. A field that reads cells and whose heights (so bounds) depend on items would keep stale bounds after an item edit. Nothing ships such a field yet. *Leaning:* the first spatial generator either reports bounds that do not depend on items (a safe over-estimate) or the cache key gains the per-tile inputs hash.
 
 ## Decision
-None yet: this ADR records the open points and the leanings so M6 and the staged-pipeline change start from them. Points 2, 3 and 4 must be decided before item files exist; 5 and 6 before the first authored stage.
+Accepted in part.
+- **Decided:** point 1 (the cell level is derived from the body's radius, as WDEF-005 builds it), point 3 (the layer is part of the query, `(body, layer, cell)`, as ADR 0018 already lists a layer id), point 4 (item ids and content hashes become 128-bit when item files are defined, before any item file or remote cache ships; ADR 0006, ADR 0007, ADR 0023 point 2) and point 7 (a contract test that generation under a recording context reads only what was declared, required before the first spatial generator ships).
+- **Still open**, each to be decided by a new ADR: point 2 (per-item or per-layer reach) before item files exist; points 5 (region summaries) and 6 (authored stages, after ADR 0022's CON-08 question) before the first authored stage; point 8 before the first spatial generator whose bounds depend on items. The leanings above are the starting point, not decisions.
 
 ## Consequences
 - Nothing built so far is wasted: the cell index, the margin parameter, the whole-body fallback and the per-tile read sets are the base each leaning builds on.
-- The owner decides at the M6 start, or earlier if item files are wanted sooner.
+- The open points are decided at the M6 start, or earlier if item files are wanted sooner.
 
 ## Licences of adopted code or techniques
 None.
