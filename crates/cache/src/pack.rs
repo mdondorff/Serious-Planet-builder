@@ -11,12 +11,14 @@
 //! (u32) | node set id (16) | payload length (u32) | payload CRC-32C (u32) | header CRC-32C (u32) | payload`. The header
 //! CRC covers the 57 bytes before it, so a zero-filled or bit-flipped header is detected and never read as a record. The
 //! tile id is not in the ADR's list; the index must be rebuildable from the data alone and its sort key needs the tile
-//! (proposed ADR 0024).
+//! (ADR 0024).
 //!
 //! Damage rules: a record that is cut short, or a zero-filled remainder, is a torn tail: the writer truncates it,
 //! readers ignore it. A complete record whose payload fails its CRC is skipped, and the records after it stay readable.
 //! A header that fails its CRC in the middle of a pack cannot be skipped (its length is unknown): readers stop there and
-//! the writer leaves the pack untouched and continues in a new one.
+//! the writer leaves the pack untouched and continues in a new one. A file that ends before the length a scan took from
+//! its metadata (cut under the scan) is a torn tail at that position. A reader that finds an indexed record unusable
+//! reports it once; the entry is then a miss for that store, and it hides an older pack's copy (ADR 0024 points 7, 8).
 
 use std::fmt;
 use std::fs::{self, File, OpenOptions, TryLockError};
@@ -125,6 +127,17 @@ impl std::error::Error for PackError {}
 
 fn io<T>(r: std::io::Result<T>, what: &str, path: &Path) -> Result<T, PackError> {
     r.map_err(|e| PackError::Io(format!("{what} {}: {e}", path.display())))
+}
+
+/// Like [`io`], but an unexpected end of file is `Ok(None)`: the file is shorter than the length the caller took from its
+/// metadata, so something cut it while it was being read. For a scan that is a torn tail at that position (ADR 0024
+/// point 4), not a failure; every other I/O error stays an error.
+fn io_or_eof<T>(r: std::io::Result<T>, what: &str, path: &Path) -> Result<Option<T>, PackError> {
+    match r {
+        Ok(v) => Ok(Some(v)),
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(None),
+        Err(e) => Err(PackError::Io(format!("{what} {}: {e}", path.display()))),
+    }
 }
 
 /// An index entry: where a record is and the sort key that orders it.
@@ -311,37 +324,43 @@ struct Scan {
     damage: Vec<Damage>,
 }
 
-/// CRC-32C of `len` bytes at `pos`, streamed in fixed chunks.
-fn stream_crc(file: &mut File, pos: u64, len: u64, path: &Path) -> Result<u32, PackError> {
+/// CRC-32C of `len` bytes at `pos`, streamed in fixed chunks; `None` if the file ends before `len` bytes.
+fn stream_crc(file: &mut File, pos: u64, len: u64, path: &Path) -> Result<Option<u32>, PackError> {
     io(file.seek(SeekFrom::Start(pos)), "seeking in", path)?;
     let mut crc = 0u32;
     let mut left = len;
     let mut buf = vec![0u8; CHUNK.min(usize::try_from(len).unwrap_or(CHUNK)).max(1)];
     while left > 0 {
         let n = usize::try_from(left).unwrap_or(usize::MAX).min(buf.len());
-        io(file.read_exact(&mut buf[..n]), "reading", path)?;
+        if io_or_eof(file.read_exact(&mut buf[..n]), "reading", path)?.is_none() {
+            return Ok(None);
+        }
         crc = update(crc, &buf[..n]);
         left -= n as u64;
     }
-    Ok(crc)
+    Ok(Some(crc))
 }
 
-fn all_zero_from(file: &mut File, pos: u64, len: u64, path: &Path) -> Result<bool, PackError> {
+/// Whether every byte from `pos` to `len` is zero; `None` if the file ends before `len`.
+fn all_zero_from(file: &mut File, pos: u64, len: u64, path: &Path) -> Result<Option<bool>, PackError> {
     io(file.seek(SeekFrom::Start(pos)), "seeking in", path)?;
     let mut left = len - pos;
     let mut buf = vec![0u8; CHUNK];
     while left > 0 {
         let n = usize::try_from(left).unwrap_or(usize::MAX).min(CHUNK);
-        io(file.read_exact(&mut buf[..n]), "reading", path)?;
+        if io_or_eof(file.read_exact(&mut buf[..n]), "reading", path)?.is_none() {
+            return Ok(None);
+        }
         if buf[..n].iter().any(|b| *b != 0) {
-            return Ok(false);
+            return Ok(Some(false));
         }
         left -= n as u64;
     }
-    Ok(true)
+    Ok(Some(true))
 }
 
-/// Scan a pack's records. A read error is an error, never a torn tail: only the data itself decides what is torn.
+/// Scan a pack's records. A read error is an error, never a torn tail: only the data itself decides what is torn. A file
+/// that ends before the length it was given (cut under the scan) is data too: a torn tail at that position.
 fn scan(file: &mut File, len: u64, path: &Path) -> Result<Scan, PackError> {
     let mut entries = Vec::new();
     let mut damage = Vec::new();
@@ -356,9 +375,11 @@ fn scan(file: &mut File, len: u64, path: &Path) -> Result<Scan, PackError> {
             break Tail::Torn(pos);
         }
         io(file.seek(SeekFrom::Start(pos)), "seeking in", path)?;
-        io(file.read_exact(&mut head), "reading", path)?;
+        if io_or_eof(file.read_exact(&mut head), "reading", path)?.is_none() {
+            break Tail::Torn(pos);
+        }
         let Some(h) = decode_header(&head) else {
-            if all_zero_from(file, pos, len, path)? {
+            if all_zero_from(file, pos, len, path)?.unwrap_or(true) {
                 break Tail::Torn(pos);
             }
             damage.push(Damage {
@@ -372,7 +393,10 @@ fn scan(file: &mut File, len: u64, path: &Path) -> Result<Scan, PackError> {
         let Some(end) = pos.checked_add(RECORD_HEADER_LEN as u64 + u64::from(h.length)).filter(|end| *end <= len) else {
             break Tail::Torn(pos);
         };
-        if stream_crc(file, pos + RECORD_HEADER_LEN as u64, u64::from(h.length), path)? == h.crc {
+        let Some(crc) = stream_crc(file, pos + RECORD_HEADER_LEN as u64, u64::from(h.length), path)? else {
+            break Tail::Torn(pos);
+        };
+        if crc == h.crc {
             entries.push(IndexEntry { sort: sort_key(h.kind, h.tile), key: h.key, offset: pos, length: h.length });
         } else {
             damage.push(Damage { pack: pack.clone(), offset: pos, key: Some(h.key), why: "the payload fails its CRC and is skipped" });
@@ -396,7 +420,8 @@ fn normalise(mut entries: Vec<IndexEntry>) -> Vec<IndexEntry> {
     out
 }
 
-fn tail_crc(file: &mut File, data_len: u64, path: &Path) -> Result<u32, PackError> {
+/// CRC of the last bytes of the data; `None` if the file is shorter than `data_len` (cut under the caller).
+fn tail_crc(file: &mut File, data_len: u64, path: &Path) -> Result<Option<u32>, PackError> {
     let start = data_len.saturating_sub(TAIL_BYTES).max(PACK_HEADER_LEN.min(data_len));
     stream_crc(file, start, data_len - start, path)
 }
@@ -490,6 +515,9 @@ struct PackFile {
     entries: Vec<IndexEntry>,
     damage: Vec<Damage>,
     file: Mutex<File>,
+    /// Offsets of entries a read found unusable: `get` answers a miss for them from then on (ADR 0019 validation,
+    /// ADR 0024 point 7), so a long-lived store reports one `Corrupt` per entry and then a miss.
+    dropped: Mutex<Vec<u64>>,
 }
 
 impl PackFile {
@@ -509,9 +537,10 @@ impl PackFile {
             }
             Err(e) => return Err(e),
         }
+        // A file shorter than its metadata said (cut under us) has no usable index: the scan below finds the torn tail.
         let tail = tail_crc(&mut file, len, &data_path)?;
         let mut damage = Vec::new();
-        let entries = match read_index(&index_path, len, tail) {
+        let entries = match tail.and_then(|t| read_index(&index_path, len, t)) {
             Some(e) => e,
             // A missing or stale index is rebuilt by one scan, never trusted. A reader leaves the files alone.
             None => {
@@ -530,12 +559,21 @@ impl PackFile {
                 s.entries
             }
         };
-        Ok(Some(PackFile { path: data_path, entries, damage, file: Mutex::new(file) }))
+        Ok(Some(PackFile { path: data_path, entries, damage, file: Mutex::new(file), dropped: Mutex::new(Vec::new()) }))
     }
 
     fn find(&self, sort: &SortKey, key: CacheKey) -> Option<&IndexEntry> {
         let start = self.entries.partition_point(|e| e.sort < *sort);
         self.entries[start..].iter().take_while(|e| e.sort == *sort).find(|e| e.key == key)
+    }
+
+    fn is_dropped(&self, e: &IndexEntry) -> bool {
+        self.dropped.lock().expect("dropped entries mutex").contains(&e.offset)
+    }
+
+    /// Take an entry whose record failed its checks out of the in-RAM index. The pack file is not touched.
+    fn drop_entry(&self, e: &IndexEntry) {
+        self.dropped.lock().expect("dropped entries mutex").push(e.offset);
     }
 
     fn corrupt(&self, e: &IndexEntry) -> PackError {
@@ -593,12 +631,21 @@ impl TileStore {
 
     /// The record of `kind` for `tile` with content key `key`, if any pack holds it. If two packs hold the same key the
     /// newest pack wins (within a pack the later offset already won). A payload that fails its CRC, or an entry that points
-    /// outside its pack, is [`PackError::Corrupt`]: the caller treats it as a miss, regenerates and logs.
+    /// outside its pack, is [`PackError::Corrupt`] once: the caller treats it as a miss, regenerates and logs, and the entry leaves the
+    /// in-RAM index, so asking again is a plain miss (the file stays as it is until a compaction).
     pub fn get(&self, kind: u8, tile: TileId, key: CacheKey) -> Result<Option<Record>, PackError> {
         let sort = sort_key(kind, tile);
         for pack in self.packs.iter().rev() {
             if let Some(e) = pack.find(&sort, key) {
-                return pack.read(e).map(Some);
+                // A dropped copy stays a miss: a corrupt newest copy hides an older pack's intact one (ADR 0024 point 8).
+                if pack.is_dropped(e) {
+                    return Ok(None);
+                }
+                let read = pack.read(e);
+                if matches!(read, Err(PackError::Corrupt { .. })) {
+                    pack.drop_entry(e);
+                }
+                return read.map(Some);
             }
         }
         Ok(None)
@@ -719,7 +766,7 @@ fn open_pack(dir: &Path, params: StoreParams, mut seq: u32) -> Result<Current, P
                 }
                 HeaderCheck::Ours => {
                     let tail = tail_crc(&mut file, len, &data_path)?;
-                    if let Some(e) = read_index(&index_path, len, tail) {
+                    if let Some(e) = tail.and_then(|t| read_index(&index_path, len, t)) {
                         entries = e;
                         index_current = true;
                     } else {
@@ -728,6 +775,8 @@ fn open_pack(dir: &Path, params: StoreParams, mut seq: u32) -> Result<Current, P
                             Tail::Clean => {}
                             // The torn tail of a crashed writer: cut it off. Nothing before it is touched.
                             Tail::Torn(at) => {
+                                // A file cut under the scan is shorter than `at`: never grow it.
+                                let at = at.min(io(file.metadata(), "reading the size of", &data_path)?.len());
                                 io(file.set_len(at), "truncating", &data_path)?;
                                 len = at;
                             }
@@ -803,7 +852,9 @@ impl PackWriter {
         let c = &mut self.cur;
         c.entries = normalise(std::mem::take(&mut c.entries));
         io(c.file.flush(), "flushing", &c.data_path)?;
-        let tail = tail_crc(&mut c.file, c.len, &c.data_path)?;
+        // The writer holds the lock, so a pack shorter than the bytes it wrote is damage, not a race.
+        let tail = tail_crc(&mut c.file, c.len, &c.data_path)?
+            .ok_or_else(|| PackError::Io(format!("{} is shorter than the {} bytes written to it", c.data_path.display(), c.len)))?;
         write_index_atomic(&c.index_path, &c.entries, c.len, tail)?;
         io(c.file.seek(SeekFrom::End(0)), "seeking in", &c.data_path)?;
         c.index_current = true;
@@ -835,5 +886,71 @@ impl Drop for PackWriter {
         }
         let _ = fs::remove_file(&self.holder);
         let _ = self.lock.unlock();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use planet_core::Face;
+
+    fn record(i: u8) -> Record {
+        Record {
+            key: CacheKey([i; 16]),
+            kind: 1,
+            tile: TileId::new(Face(0), 3, u32::from(i) % 8, 0).unwrap(),
+            generator_version: 1,
+            hash_version: 1,
+            node_set_id: [0; 16],
+            payload: vec![i; 40],
+        }
+    }
+
+    /// A pack file of `n` records, returning its path and the offset of each record.
+    fn make_pack(name: &str, n: u8) -> (PathBuf, Vec<u64>) {
+        let path = std::env::temp_dir().join(format!("planet-pack-unit-{}-{name}.tpack", std::process::id()));
+        let mut bytes = pack_header(StoreParams { hash_version: 1, body: 0 }).to_vec();
+        let mut at = Vec::new();
+        for i in 0..n {
+            at.push(bytes.len() as u64);
+            bytes.extend(encode_record(&record(i)).unwrap());
+        }
+        fs::write(&path, bytes).unwrap();
+        (path, at)
+    }
+
+    // spec: STRM-008
+    #[test]
+    fn a_file_cut_under_a_scan_is_a_torn_tail_at_that_position() {
+        let (path, at) = make_pack("cut", 4);
+        let full = fs::metadata(&path).unwrap().len();
+        // The scan was told the file is `full` long. Cut it inside the header of record 3, inside its payload and at its
+        // start: each time the records before the cut stay and the tail is torn at the first incomplete record.
+        for cut in [at[3] + 10, at[3] + RECORD_HEADER_LEN as u64 + 5, at[3]] {
+            let mut f = OpenOptions::new().read(true).write(true).open(&path).unwrap();
+            f.set_len(cut).unwrap();
+            let s = scan(&mut f, full, &path).unwrap_or_else(|e| panic!("cut at {cut}: {e}"));
+            assert_eq!(s.tail, Tail::Torn(at[3]), "cut at {cut}");
+            assert_eq!(s.entries.len(), 3, "cut at {cut}");
+        }
+        let _ = fs::remove_file(&path);
+    }
+
+    // spec: STRM-008
+    #[test]
+    fn a_zero_run_cut_under_a_scan_is_a_torn_tail_and_an_unknown_tail_checksum_is_not_an_error() {
+        let (path, at) = make_pack("zero", 3);
+        let full = fs::metadata(&path).unwrap().len();
+        // Zero the last record, then cut the file inside the zero run: the zero check meets the end of the file.
+        let mut bytes = fs::read(&path).unwrap();
+        bytes[at[2] as usize..].fill(0);
+        bytes.truncate(at[2] as usize + 70);
+        fs::write(&path, &bytes).unwrap();
+        let mut f = File::open(&path).unwrap();
+        let s = scan(&mut f, full, &path).unwrap();
+        assert_eq!(s.tail, Tail::Torn(at[2]));
+        assert_eq!(s.entries.len(), 2);
+        assert_eq!(tail_crc(&mut f, full, &path).unwrap(), None);
+        let _ = fs::remove_file(&path);
     }
 }
