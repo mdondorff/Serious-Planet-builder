@@ -4,10 +4,11 @@ Refreshed 2026-10-11 (updated 2026-10-12 for #64, #65) at the hand-over from the
 Confirm everything here against `main` and `docs/status.md` before acting on it.
 
 ## Sessions
-- **sonnet-coder:** finishing `change/m3-cache-verify`, then STOPS for a full reset (owner, 2026-10-12: its context is
-  huge). It writes a hand-over in status.md or its PR. Do not give it new work.
-- **sonnet-explorer:** takes over the remaining M3 queue after cache-verify (owner, 2026-10-12). Morph-height done (#65).
-  It has none of sonnet-coder's M3 context: brief it fully (status.md M3 queue, ADRs 0018/0019/0021-0024, the hand-over).
+- **sonnet-coder:** merged cache-verify (#68), wrote the hand-over (top of status.md) and stopped for a full reset
+  (owner, 2026-10-12). No new work until the owner restarts it.
+- **sonnet-explorer:** owns the remaining M3 queue (owner, 2026-10-12). Briefed 2026-10-12 via a scratchpad briefing
+  file (8 tasks: cache hardening incl. follow-ups (c)-(g), test-fast budget, global-coarse bake, regional/local fields,
+  erosion filter, SPIKE-03, compaction, accept M3). It was idle when briefed; the owner may need to paste the pointer.
 - **sonnet-worker:** deprecated. Do not message it.
 - This session's name is `opus-planner` (start with `claude --agent architect -n opus-planner`). Coders report to it.
   On 2026-10-12 a new architect session (worktree `opus-planner`) took over; the owner was asked to stop the old
@@ -15,7 +16,7 @@ Confirm everything here against `main` and `docs/status.md` before acting on it.
 
 ## State of main (2026-10-11)
 - M2: GO recorded by the owner (#42), "go with changes"; the condition (LOD-008 first in M3) is met (#43).
-- All ADRs 0001-0020 and 0022-0024 accepted; 0021 in part (1, 3, 4, 7) on 2026-10-12 under the owner's delegation
+- All ADRs 0001-0020 and 0022-0025 accepted (0025 tile codec and cache-verify, #69); 0021 in part (1, 3, 4, 7) on 2026-10-12 under the owner's delegation
   (#67); 0023/0024 amend 0018/0019 in part. 0022 = option 1 (no same-stage reads). Recent: 0016 height-aware selection, 0017 golden review policy, 0018 persistent
   cache keys (BLAKE3-128, `pure`), 0019 tile pack store, 0020 perf readiness gate. 0013, 0014 accepted 2026-10-11
   (0014 partly superseded by 0016).
@@ -45,6 +46,8 @@ Confirm everything here against `main` and `docs/status.md` before acting on it.
 8. Owner items carried into M3: TEST-008 split decision; editor window and egui per ADR 0015 (wgpu stays in render).
 
 ## Lessons from the owner
+- **Before accepting a proposed ADR, check open coder branches that touch it.** #68 edited ADR 0024's body after #67
+  had accepted it; the fix was to restore 0024 and move the text into ADR 0025 (CON-23).
 - **ADR delegation (owner, 2026-10-12):** accept ADRs yourself when the reviewers' recommendations are strong or the ADR
   is sound and unambiguous; bring the owner only constitution readings/amendments and genuinely open trade-offs. Run
   spec-guardian (+ numerics-reviewer for keys, formats, generators), apply text fixes, record "owner's delegation of

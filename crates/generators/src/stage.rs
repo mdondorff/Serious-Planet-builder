@@ -1,4 +1,4 @@
-//! The staged generation model (GEN-007, CON-08, ADR 0006, ADR 0021 point 6, proposed ADR 0022).
+//! The staged generation model (GEN-007, CON-08, ADR 0006, ADR 0021 point 6, ADR 0022).
 //!
 //! Generation runs in three stages, and a stage reads only the outputs of earlier ones:
 //! 1. **global coarse**: once per definition, on the whole sphere at a coarse resolution (continents, climate), baked;
