@@ -1,5 +1,5 @@
 # 0022 Stage reads, scopes and halos
-Status: proposed
+Status: accepted (owner's delegation of 2026-10-12: the architect accepts ADRs that reviewers find sound and unambiguous; accepted by opus-planner after the spec-guardian and numerics reviews and their text fixes; the CON-08 reading for option 2 stays with the owner)
 Date: 2026-10-11
 Source: spec-guardian review of m3-stage-model (2026-10-11); constitution CON-08, CON-06, CON-23; ADR 0006, ADR 0021; background report §5 (global-coarse, regional with a halo, local)
 
@@ -12,12 +12,12 @@ GEN-007 (m3-stage-model) refuses a field graph in which a field reads a field of
 3. **Allow any read of a lower-or-equal stage without a rule.** Cycles and neighbour-tile reads become possible; tile independence (GEN-004..006) can no longer be argued from the graph.
 
 ## Decision
-None yet. *Leaning:* option 1 until SPIKE-03 shows which regional chains it needs, then option 2. If the owner reads CON-08 literally (no same-stage reads at all), option 2 is a constitution amendment and a stop point; if the owner reads it as "no later-stage reads and no cross-tile reads", option 2 is an ADR.
+**Option 1, reading CON-08 literally:** a field reads only fields of earlier stages (GEN-007, as built). A regional chain that needs several steps is one field that computes the chain internally; local layers that compose at one point are one field. This is an interim measure, not the architecture: it stays until SPIKE-03 shows which chains need splitting. Option 2 needs an owner ruling on CON-08 (a reading of the rule or an amendment of the constitution) before SPIKE-03 or the first regional chain is split; it is not decided here.
 
 ## Points that are decided in code now (and can be revised here)
 - **Scope** is typed: `Scope::Global` for the global bake, `Scope::Tile(tile)` for regional and local outputs; the kind is hashed into the key, a scope of the wrong kind for the stage panics, and tile `raw() == 0` never aliases the global scope.
-- **Halo** is an *output* parameter: how far beyond the tile edge the field computes, as a fraction of the tile edge (ADR 0006), canonical at `-0.0 == 0.0`. A halo in integer samples would be more canonical for non-power-of-two resolutions; with power-of-two resolutions and fractions of 1/4 or 1/2 both are equivalent. *Open:* whether the unit should become integer samples when a field needs another fraction.
-- **The key** covers the stage key version (`STAGE_KEY_VERSION`, separate from the height and mesh key format), field id, version, stage, implementation id, halo, scope kind and value, body id, reference-surface id, face-mapping id, resolution, the recorded read set and the keys of the inputs (looked up by name; their order does not matter). Known answers are pinned and compared on both CI operating systems.
+- **Halo** is an *output* parameter: how far beyond the tile edge the field computes, as a fraction of the tile edge (ADR 0006), canonical at `-0.0 == 0.0`, in the range [0, 1] and non-zero only for regional fields (GEN-007). A halo in integer samples would be more canonical for non-power-of-two resolutions; with power-of-two resolutions and fractions of 1/4 or 1/2 both are equivalent. *Open:* whether the unit should become integer samples when a field needs another fraction.
+- **The key** covers the stage key version (`STAGE_KEY_VERSION`, separate from the height and mesh key format), field id, version, stage, implementation id, halo, scope kind and value, body id, reference-surface id, face-mapping id, resolution, the recorded read set and the keys of the inputs (looked up by name; their order does not matter). Known answers are pinned and compared on both CI operating systems. These stage keys are 64-bit in-memory keys; before any staged output is persisted they get a 128-bit form under ADR 0018 (ADR 0006; ADR 0023 point 10).
 - **One key per input field.** A local tile at a regional tile's border, beyond that tile's halo, would need several upstream keys for one input field; the model has one. Revisit with the first regional field (the halo is meant to make this impossible: a regional tile's output covers every local point of the tile).
 - **Declared versus recorded reads** (ADR 0021 point 7): the graph checks declared reads only.
 
