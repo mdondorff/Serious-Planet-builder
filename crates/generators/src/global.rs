@@ -521,6 +521,13 @@ pub fn read_lattice(src: &dyn LatticeSource, face: Face, u: i64, v: i64, n_log2:
     }
     let res_log2 = res.trailing_zeros();
     let n = 1i64 << n_log2;
+    // A halo is at most one tile edge (ADR 0022), so at most one face edge of the lattice; a position farther out is a
+    // caller that used the wrong lattice (a level or cell count off by one), not a halo.
+    if !(-n..=2 * n).contains(&u) || !(-n..=2 * n).contains(&v) {
+        return Err(ReadError::Shape(format!(
+            "position ({u}, {v}) is more than one lattice edge outside a face lattice of 2^{n_log2} cells"
+        )));
+    }
     let (u, v) = (u.clamp(0, n), v.clamp(0, n));
     // Cell index and weight of one axis.
     let axis = |p: i64| -> (u32, f64) {
@@ -534,22 +541,34 @@ pub fn read_lattice(src: &dyn LatticeSource, face: Face, u: i64, v: i64, n_log2:
         }
     };
     let ((i, wu), (j, wv)) = (axis(u), axis(v));
-    let (i1, j1) = ((i + 1).min(res), (j + 1).min(res));
-    let (a, b) = (src.at(face, i, j)?, src.at(face, i1, j)?);
-    let (c, d) = (src.at(face, i, j1)?, src.at(face, i1, j1)?);
+    // The far neighbour is read only when its weight is not zero: a lattice point is its own sample (a stored -0.0 stays -0.0,
+    // an infinite or missing neighbour cannot change it) and reads touch no block they do not need.
+    let i1 = if wu == 0.0 { i } else { (i + 1).min(res) };
+    let j1 = if wv == 0.0 { j } else { (j + 1).min(res) };
+    let a = src.at(face, i, j)?;
+    let b = if i1 == i { a } else { src.at(face, i1, j)? };
+    let c = if j1 == j { a } else { src.at(face, i, j1)? };
+    let d = match (i1 == i, j1 == j) {
+        (true, true) => a,
+        (false, true) => b,
+        (true, false) => c,
+        (false, false) => src.at(face, i1, j1)?,
+    };
     let (r0, r1) = (blend_samples(&a, &b, wu), blend_samples(&c, &d, wu));
     let ch = |k: usize| blend(r0[k], r1[k], wv) as f32;
     Ok(GlobalSample { continent: ch(0), elevation_m: ch(1), temperature_c: ch(2), precipitation_mm: ch(3) })
 }
 
-/// Read the global field at sample `(k, l)` of tile `tile` on a grid of `cells` cells per tile edge (`-1..=cells + 1`, a halo of
-/// one sample), by [`read_lattice`]: the tile's lattice index is `x cells + k` on a face lattice of `cells << level` cells.
+/// Read the global field at sample `(k, l)` of tile `tile` on a grid of `cells` cells per tile edge (`-cells..=2 cells`, a halo of
+/// at most one tile edge, ADR 0022), by [`read_lattice`]: the tile's lattice index is `x cells + k` on a face lattice of `cells << level` cells.
 pub fn read_tile_sample(src: &dyn LatticeSource, tile: TileId, cells: u32, k: i64, l: i64) -> Result<GlobalSample, ReadError> {
     if cells == 0 || !cells.is_power_of_two() {
         return Err(ReadError::Shape(format!("a tile grid needs a power-of-two number of cells, got {cells}")));
     }
-    if !(-1..=i64::from(cells) + 1).contains(&k) || !(-1..=i64::from(cells) + 1).contains(&l) {
-        return Err(ReadError::Shape(format!("sample ({k}, {l}) is more than one sample outside a {cells}-cell tile")));
+    // The halo of a regional field is a fraction of the tile edge, at most one edge (ADR 0022): `-cells..=2 cells`.
+    let m = i64::from(cells);
+    if !(-m..=2 * m).contains(&k) || !(-m..=2 * m).contains(&l) {
+        return Err(ReadError::Shape(format!("sample ({k}, {l}) is more than one tile edge outside a {cells}-cell tile")));
     }
     let n_log2 = u32::from(tile.level()) + cells.trailing_zeros();
     let (x, y) = (i64::from(tile.x()) * i64::from(cells), i64::from(tile.y()) * i64::from(cells));

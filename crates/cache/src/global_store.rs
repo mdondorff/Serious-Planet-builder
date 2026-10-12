@@ -21,7 +21,7 @@ use planet_core::hash::HASH_VERSION;
 use planet_core::{Face, FaceMapping, TileId};
 use planet_generators::global::{
     bake_block, bake_blocks_where, check_tiled, BakeError, GlobalCoarseGenerator, GlobalSample, LatticeSource, ReadError, GLOBAL_VERSION,
-    IMPLEMENTATION_ID, MAX_BLOCK_CELLS,
+    IMPLEMENTATION_ID, MAX_BLOCK_CELLS, MAX_TILED_RES,
 };
 use planet_generators::stage::{FieldGraph, FieldSpec, Scope, Stage};
 use planet_world_def::{body_radius_path, body_seed_path, BodyId, GenContext, MissingNode, NodeValue, WorldDefinition, SPHERE_SURFACE_ID};
@@ -178,7 +178,9 @@ pub struct GlobalWorld {
 
 impl GlobalWorld {
     /// A smaller block limit (a power of two, at most [`MAX_BLOCK_CELLS`]): the store policy that decides `B = min(res, limit)`.
-    /// Tests use it to exercise levels above 0 with small grids; a store keeps one limit for good.
+    /// Test support: it exercises levels above 0 with small grids. A store keeps one limit for good (it is recorded nowhere, so a
+    /// store built with another limit is not found by a reader with the default, and verification reports its blocks as of another layout).
+    #[doc(hidden)]
     pub fn with_block_limit(mut self, limit: u32) -> GlobalWorld {
         assert!(
             limit.is_power_of_two() && limit <= MAX_BLOCK_CELLS,
@@ -192,7 +194,8 @@ impl GlobalWorld {
     /// block and the blocks are the tiles of level `log2(res / B)`. Returns `(level, cells)`. A `res` that is not a power of
     /// two, or a grid the tiled bake refuses, is an error.
     pub fn layout(&self, res: u32) -> Result<(u8, u32), BakeError> {
-        if res == 0 || !res.is_power_of_two() {
+        // A resolution the tiled bake cannot reach is a resolution error naming the limit, whatever level it would need.
+        if res == 0 || !res.is_power_of_two() || u64::from(res) > MAX_TILED_RES {
             return Err(BakeError::BadResolution(res));
         }
         let cells = res.min(self.block_limit);
@@ -313,7 +316,7 @@ impl GlobalWorld {
 }
 
 /// The stored bake of `res` cells per face edge as a [`LatticeSource`] for the reader (ADR 0027 point 7): it finds the block
-/// that holds a lattice vertex through the canonical layout, decodes it once and keeps the most recent few. A block that is
+/// that holds a lattice vertex through the canonical layout, decodes it once and keeps the 16 least recently used. A block that is
 /// missing, damaged or of another shape is an error naming the block and its key, never a default.
 pub struct StoreSource<'a> {
     store: &'a TileStore,
@@ -335,9 +338,16 @@ impl<'a> StoreSource<'a> {
     }
 
     fn block(&self, tile: TileId) -> Result<Arc<Vec<GlobalSample>>, ReadError> {
-        let mut cache = self.cache.lock().expect("block cache mutex");
-        if let Some((_, b)) = cache.iter().find(|(t, _)| *t == tile) {
-            return Ok(Arc::clone(b));
+        // Look up under the lock, release it while the block is read and decoded (another thread may decode the same block
+        // meanwhile: a duplicate decode is acceptable), then insert. A hit moves to the back, so eviction is least recently used.
+        {
+            let mut cache = self.cache.lock().expect("block cache mutex");
+            if let Some(at) = cache.iter().position(|(t, _)| *t == tile) {
+                let entry = cache.remove(at);
+                let block = Arc::clone(&entry.1);
+                cache.push(entry);
+                return Ok(block);
+            }
         }
         let key = self.world.block_key(tile, self.cells);
         let what = |why: String| {
@@ -360,10 +370,13 @@ impl<'a> StoreSource<'a> {
             return Err(what(format!("its payload has {cells} cells per edge, the layout says {}", self.cells)));
         }
         let block = Arc::new(samples);
-        if cache.len() >= SOURCE_CACHE_BLOCKS {
-            cache.remove(0);
+        let mut cache = self.cache.lock().expect("block cache mutex");
+        if !cache.iter().any(|(t, _)| *t == tile) {
+            if cache.len() >= SOURCE_CACHE_BLOCKS {
+                cache.remove(0);
+            }
+            cache.push((tile, Arc::clone(&block)));
         }
-        cache.push((tile, Arc::clone(&block)));
         Ok(block)
     }
 }
