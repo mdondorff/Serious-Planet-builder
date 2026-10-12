@@ -5,4 +5,5 @@ pub mod crc32c;
 pub mod hilbert;
 pub mod key;
 pub mod pack;
+pub mod stage_key;
 pub mod tiles;
