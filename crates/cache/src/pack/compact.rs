@@ -35,7 +35,7 @@ pub fn rank_by_pack_age(_: &Record, pack_seq: u32) -> u64 {
 pub struct CompactReport {
     /// Records written to the new packs.
     pub kept: usize,
-    /// Live-set records dropped because the predicate refused them.
+    /// Records the liveness predicate refused.
     pub dead: usize,
     /// Older copies of a key held again by a newer pack or later in the same pack.
     pub superseded: usize,
@@ -43,8 +43,9 @@ pub struct CompactReport {
     pub corrupt: usize,
     /// Live records dropped to fit the cap.
     pub evicted: usize,
-    /// Packs read and removed, and the packs of another hash version removed with them.
+    /// Packs read and removed.
     pub packs_in: usize,
+    /// Packs of another hash version removed with them.
     pub dead_packs: usize,
     /// Packs written.
     pub packs_out: usize,

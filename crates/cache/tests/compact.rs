@@ -179,6 +179,73 @@ fn the_cap_evicts_the_oldest_packs_first_and_never_exceeds_the_bytes_given() {
 
 // spec: STRM-013
 #[test]
+fn eviction_is_strict_priority_and_ties_go_to_the_later_index_order() {
+    let d = Dir::new("strict");
+    let big = |i: u32| Record { payload: vec![7; 500], ..record(i, 3) };
+    write(d.path(), &[record(1, 3), big(2), record(3, 3)], 3);
+    // Ranks 10, 9, 8 by key: the big record (rank 9) does not fit in 200 bytes, and the smaller one after it is not taken.
+    let rank = |r: &Record, _: u32| 20 - u64::from(r.key.0[0]);
+    let p = CompactPolicy { live: &current, cap_bytes: Some(200), rank: &rank, max_pack_bytes: DEFAULT_MAX_PACK_BYTES };
+    let r = compact(d.path(), PARAMS, &p).unwrap();
+    assert_eq!((r.kept, r.evicted), (1, 2), "{r:?}");
+    assert_eq!(keys_in(d.path()), vec![key(1)]);
+
+    // Equal ranks: the records of the earlier index order stay.
+    let e = Dir::new("ties");
+    let records: Vec<Record> = (0..6).map(|i| record(i, 3)).collect();
+    write(e.path(), &records, 6);
+    let before = {
+        let store = TileStore::open(e.path(), PARAMS).unwrap();
+        let mut sorted: Vec<(Vec<u8>, CacheKey)> = (0..6).map(|i| (planet_cache::hilbert::sort_key(1, tile(i)).to_vec(), key(i))).collect();
+        let _ = &store;
+        sorted.sort();
+        sorted
+    };
+    let tie = |_: &Record, _: u32| 5;
+    let p = CompactPolicy { live: &current, cap_bytes: Some(3 * (HEAD + 20)), rank: &tie, max_pack_bytes: DEFAULT_MAX_PACK_BYTES };
+    let r = compact(e.path(), PARAMS, &p).unwrap();
+    assert_eq!((r.kept, r.evicted), (3, 3));
+    let mut want: Vec<CacheKey> = before.iter().take(3).map(|(_, k)| *k).collect();
+    want.sort();
+    assert_eq!(keys_in(e.path()), want);
+}
+
+// spec: STRM-013
+#[test]
+fn a_crash_after_writing_the_outputs_and_before_removing_the_inputs_leaves_a_valid_store() {
+    let d = Dir::new("crash-in");
+    let records: Vec<Record> = (0..12).map(|i| record(i, 3)).collect();
+    write(d.path(), &records, 4);
+    // The inputs, as they were before the run.
+    let copy = Dir::new("crash-copy");
+    fs::create_dir_all(copy.path()).unwrap();
+    for e in fs::read_dir(d.path()).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "tpack" || x == "tidx") {
+            fs::copy(&p, copy.path().join(p.file_name().unwrap())).unwrap();
+        }
+    }
+    let first = compact(d.path(), PARAMS, &policy(&current, None, DEFAULT_MAX_PACK_BYTES)).unwrap();
+    // The state after a crash: the new packs and the old ones side by side.
+    for e in fs::read_dir(d.path()).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "tpack" || x == "tidx") {
+            fs::copy(&p, copy.path().join(p.file_name().unwrap())).unwrap();
+        }
+    }
+    let store = TileStore::open(copy.path(), PARAMS).unwrap();
+    for i in 0..12 {
+        assert_eq!(store.get(1, tile(i), key(i)).unwrap().unwrap(), record(i, 3), "record {i} reads right with duplicates around");
+    }
+    drop(store);
+    // Running again repairs it: the same content, and the old packs are gone.
+    let again = compact(copy.path(), PARAMS, &policy(&current, None, DEFAULT_MAX_PACK_BYTES)).unwrap();
+    assert_eq!((again.kept, again.output_hash), (first.kept, first.output_hash));
+    assert_eq!(TileStore::open(copy.path(), PARAMS).unwrap().pack_count(), first.packs_out);
+}
+
+// spec: STRM-013
+#[test]
 fn packs_of_another_hash_version_go_and_unusable_files_stay() {
     let d = Dir::new("versions");
     let old = StoreParams { hash_version: 0, body: 0 };

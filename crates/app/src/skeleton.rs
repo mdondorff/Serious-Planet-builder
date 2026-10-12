@@ -396,8 +396,17 @@ fn compact_cache(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if !dir.is_dir() {
         return Err(format!("{}: no such cache directory", dir.display()));
     }
+    // Liveness is judged against one definition: records of any other definition's read set are dropped, so name it.
+    if !o.given.contains("--world") && !o.given.contains("--seed") {
+        return Err(
+            "--compact-cache judges liveness against one definition and drops the records of any other: give --world <file> or --seed N"
+                .into(),
+        );
+    }
     let world = world_of(o)?;
     let global = global_world_of(o)?;
+    let which = o.world.as_ref().map_or_else(|| format!("seed {}", o.seed), |p| format!("definition {}", p.display()));
+    writeln!(out, "cache-compact: live records are those of {which}").map_err(err)?;
     let live = |r: &planet_cache::pack::Record| world.is_live(r) && global.is_live(r);
     let policy = planet_cache::pack::CompactPolicy {
         live: &live,

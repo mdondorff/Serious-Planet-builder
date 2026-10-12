@@ -70,7 +70,7 @@ pub struct Options {
     pub verify_cache: Option<PathBuf>,
     /// `generate`: compact the store in this directory (STRM-013), dropping records the definition no longer produces.
     pub compact_cache: Option<PathBuf>,
-    /// `--compact-cache`: keep at most this many bytes of records (the oldest packs are evicted first).
+    /// `--compact-cache`: keep at most this many bytes of records (the oldest-written packs are evicted first, ADR 0029).
     pub cap_bytes: Option<u64>,
     /// `--verify-cache`: how many evenly spaced entries to check; 0 is all.
     pub sample: usize,
@@ -540,14 +540,17 @@ mod tests {
         let mut w = PackWriter::open(dir, params, planet_cache::pack::DEFAULT_MAX_PACK_BYTES).unwrap();
         w.append(&Record { key: planet_cache::key::CacheKey([9; 16]), generator_version: live.generator_version + 1000, ..live.clone() })
             .unwrap();
+        // A record of a kind this build does not know is kept.
+        w.append(&Record { key: planet_cache::key::CacheKey([8; 16]), kind: 9, generator_version: 0, ..live.clone() }).unwrap();
         w.finish().unwrap();
         let out = run_str(&["generate", "--compact-cache", &store, "--seed", "3"]).unwrap();
-        assert!(out.contains("kept 4 records") && out.contains("dropped 1 dead"), "{out}");
+        assert!(out.contains("kept 5 records") && out.contains("dropped 1 dead") && out.contains("seed 3"), "{out}");
         let again = run_str(&["generate", "--compact-cache", &store, "--seed", "3"]).unwrap();
-        assert!(again.contains("kept 4 records") && again.contains("dropped 0 dead"), "{again}");
+        assert!(again.contains("kept 5 records") && again.contains("dropped 0 dead"), "{again}");
         assert!(run_str(&["generate", "--verify-cache", &store, "--seed", "3"]).unwrap().contains("4 match"));
         let capped = run_str(&["generate", "--compact-cache", &store, "--seed", "3", "--cap-bytes", "1"]).unwrap();
-        assert!(capped.contains("kept 0 records") && capped.contains("4 evicted"), "{capped}");
+        assert!(capped.contains("kept 0 records") && capped.contains("5 evicted"), "{capped}");
+        assert!(run_str(&["generate", "--compact-cache", &store]).unwrap_err().contains("give --world"));
         let clash = run_str(&["generate", "--compact-cache", &store, "--region", "0,1"]).unwrap_err();
         assert!(clash.contains("--compact-cache takes only"), "{clash}");
         let lone = run_str(&["generate", "--cap-bytes", "5", "--seed", "3"]).unwrap_err();
