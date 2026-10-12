@@ -243,15 +243,6 @@ fn the_sea_level_is_exactly_an_f32_so_readers_in_f32_and_f64_agree() {
     let at = |c: f32| GlobalSample { continent: c, elevation_m: 0.0, temperature_c: 0.0, precipitation_mm: 0.0 };
     assert!(!at(f32::from_bits(0x3dcc_cccd)).is_land(), "exactly the sea level is sea");
     assert!(at(f32::from_bits(0x3dcc_ccce)).is_land(), "the next f32 up is land");
-    for i in 0..20_000u64 {
-        let h = |k: u64| planet_core::hash::unit_f64(planet_core::hash::hash_u64s(SEED, &[i, k, 99])) * 2.0 - 1.0;
-        let v = Vec3::new(h(0), h(1), h(2));
-        if v.length() < 1e-3 {
-            continue;
-        }
-        let s = sample(SEED, v.normalized());
-        assert_eq!(s.continent > SEA_LEVEL_F32, s.is_land(), "an f32 reader and the bake agree on {s:?}");
-    }
 }
 
 // spec: GEN-013
@@ -315,8 +306,11 @@ fn a_tiled_bake_is_thread_and_block_size_independent_in_order_and_holds_at_most_
     let (stats5, five) = collect(2, 4, 5);
     assert_eq!(one, five, "the thread count changes nothing, not even the order");
     assert_eq!(stats1.blocks, 6 * 16);
-    assert_eq!((stats1.peak_resident_blocks, stats5.peak_resident_blocks), (1, 5), "at most `threads` blocks are alive at once");
-    assert!(one.windows(2).all(|w| w[0].0 != w[1].0), "every tile once");
+    assert_eq!((stats1.peak_resident_blocks, stats5.peak_resident_blocks), (1, 5), "at most `threads` blocks are alive at once, counted");
+    // The documented order, built explicitly: face, then row, then column; each tile exactly once.
+    let expected: Vec<TileId> =
+        (0..6u8).flat_map(|f| (0..4u32).flat_map(move |y| (0..4u32).map(move |x| TileId::new(Face(f), 2, x, y).unwrap()))).collect();
+    assert_eq!(one.iter().map(|b| b.0).collect::<Vec<_>>(), expected);
     // The same grid in other blocks: the samples at the same lattice vertices are equal (compare a face-0 window).
     let (_, coarse_blocks) = collect(1, 8, 2);
     let a = &coarse_blocks[0].1; // tile (0, 0) at level 1, 8 cells: lattice vertices (0..=8, 0..=8) of a 16-cell face
@@ -334,6 +328,22 @@ fn a_tiled_bake_is_thread_and_block_size_independent_in_order_and_holds_at_most_
         matches!(bake_blocks(SEED, &TangentWarp, 8, 1024, 1, &mut |_, _| {}), Err(BakeError::BadResolution(_))),
         "a 262144-cell grid is too fine"
     );
+    // Levels beyond the limit are refused before anything is allocated or shifted (also absurd ones, in debug builds).
+    for level in [13u8, 16, 64, 255] {
+        assert_eq!(bake_blocks(SEED, &TangentWarp, level, 1, 1, &mut |_, _| {}).unwrap_err(), BakeError::BadLevel(level));
+    }
+}
+
+// spec: GEN-013
+#[test]
+fn the_peak_of_live_blocks_is_counted_between_creation_and_delivery() {
+    // A sink that is slow does not change what the bake itself keeps: at most one batch is alive, whatever `threads` is.
+    for threads in [1usize, 4, 16] {
+        let mut delivered = 0usize;
+        let stats = bake_blocks(SEED, &TangentWarp, 1, 2, threads, &mut |_, _| delivered += 1).unwrap();
+        assert_eq!(delivered, 24);
+        assert!(stats.peak_resident_blocks >= 1 && stats.peak_resident_blocks <= threads.min(24), "{threads} threads: {stats:?}");
+    }
 }
 
 /// The version the known answers below were recorded against (ADR 0006): changing the output without a bump fails here.

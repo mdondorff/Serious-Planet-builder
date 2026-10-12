@@ -12,6 +12,8 @@
 
 use planet_core::cube::{face_to_direction, FaceMapping};
 use planet_core::{Face, TileId, Vec3};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use planet_world_def::{BodyId, GenContext, MissingNode, ReadRecord};
 
 use crate::height::layer_noise;
@@ -233,6 +235,8 @@ pub enum BakeError {
     BadResolution(u32),
     /// A block of a tiled bake needs a power-of-two number of cells from 1 to [`MAX_BLOCK_CELLS`].
     BadBlock(u32),
+    /// A tiled bake goes down to [`MAX_TILED_LEVEL`].
+    BadLevel(u8),
 }
 
 impl std::fmt::Display for BakeError {
@@ -244,6 +248,9 @@ impl std::fmt::Display for BakeError {
             BakeError::BadBlock(c) => {
                 write!(f, "a block of a tiled bake needs a power-of-two number of cells from 1 to {MAX_BLOCK_CELLS}, got {c}")
             }
+            BakeError::BadLevel(l) => {
+                write!(f, "a tiled bake goes down to level {MAX_TILED_LEVEL} (6 x 4^{MAX_TILED_LEVEL} blocks), got {l}")
+            }
         }
     }
 }
@@ -252,7 +259,7 @@ impl std::error::Error for BakeError {}
 
 /// The largest in-memory bake: 2048 cells per face edge is about 5 km at Earth's radius (6 x 2049^2 samples of 16 bytes
 /// is about 400 MB). A global grid of about 1 km needs 16384 cells per face edge (8192 is 1.2 km) and is baked as tiles,
-/// never held whole (next change).
+/// never held whole ([`bake_blocks`]).
 pub const MAX_BAKE_RES: u32 = 2048;
 
 /// Sample position of vertex `(k, l)` of an `res`-cell face grid in face coordinates `[-1, 1]`.
@@ -305,6 +312,8 @@ pub fn bake(seed: u64, map: &(dyn FaceMapping + Sync), res: u32, threads: usize)
 pub const MAX_BLOCK_CELLS: u32 = 1024;
 /// The finest global grid a tiled bake accepts: 65536 cells per face edge (about 150 m at Earth's radius).
 pub const MAX_TILED_RES: u64 = 1 << 16;
+/// The deepest level of a tiled bake: 6 * 4^12 = 100 million blocks at most.
+pub const MAX_TILED_LEVEL: u8 = 12;
 
 /// The samples of one block: tile `tile` on a grid of `cells` cells per edge, `(cells + 1)^2` row-major (`k`, the s
 /// direction, fastest). They are the samples of the level-0 lattice of `cells << level` cells per face edge at the tile's
@@ -324,7 +333,7 @@ pub fn bake_block(seed: u64, map: &dyn FaceMapping, tile: TileId, cells: u32) ->
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TiledBakeStats {
     pub blocks: usize,
-    /// The most blocks held in memory at once by the bake (batches of at most `threads` blocks, delivered in order and
+    /// The most blocks alive at once between their creation and their delivery to the sink (counted, batches of at most `threads` blocks, delivered in order and
     /// dropped before the next batch): the memory clause of GEN-014 is this number times the block size.
     pub peak_resident_blocks: usize,
 }
@@ -344,32 +353,54 @@ pub fn bake_blocks(
     if cells == 0 || !cells.is_power_of_two() || cells > MAX_BLOCK_CELLS {
         return Err(BakeError::BadBlock(cells));
     }
+    // The level is checked before any shift; a grid is at most 65536 cells per face edge and at most 6 * 4^12 blocks, so
+    // neither the tile numbering below nor the number of blocks can outgrow the bake's own bookkeeping.
+    if level > MAX_TILED_LEVEL {
+        return Err(BakeError::BadLevel(level));
+    }
     let res = u64::from(cells) << level;
-    if level > 30 || res > MAX_TILED_RES {
+    if res > MAX_TILED_RES {
         return Err(BakeError::BadResolution(u32::try_from(res).unwrap_or(u32::MAX)));
     }
-    let side = 1u32 << level;
-    let mut tiles = Vec::with_capacity(6 * (side as usize) * (side as usize));
-    for f in 0..6u8 {
-        for y in 0..side {
-            for x in 0..side {
-                tiles.push(TileId::new(Face(f), level, x, y).expect("in range"));
-            }
-        }
-    }
+    let side = 1u64 << level;
+    let total = 6 * side * side;
     let threads = threads.max(1);
+    // Blocks alive between their creation and their delivery to the sink: measured, not derived from the batch size.
+    let live = AtomicUsize::new(0);
+    let peak = AtomicUsize::new(0);
     let mut stats = TiledBakeStats { blocks: 0, peak_resident_blocks: 0 };
-    for batch in tiles.chunks(threads) {
+    let mut next = 0u64;
+    while next < total {
+        // The tiles of this batch come from a running index (face, row, column): no list of all tiles is ever built.
+        let end = (next + threads as u64).min(total);
+        let batch: Vec<TileId> = (next..end)
+            .map(|i| {
+                let (face, rest) = (i / (side * side), i % (side * side));
+                TileId::new(Face(face as u8), level, (rest % side) as u32, (rest / side) as u32).expect("in range")
+            })
+            .collect();
         let blocks: Vec<Vec<GlobalSample>> = std::thread::scope(|scope| {
-            let handles: Vec<_> = batch.iter().map(|t| scope.spawn(move || bake_block(seed, map, *t, cells))).collect();
+            let (live, peak) = (&live, &peak);
+            let handles: Vec<_> = batch
+                .iter()
+                .map(|t| {
+                    scope.spawn(move || {
+                        let block = bake_block(seed, map, *t, cells);
+                        peak.fetch_max(live.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+                        block
+                    })
+                })
+                .collect();
             handles.into_iter().map(|h| h.join().expect("bake thread panicked")).collect()
         });
-        stats.peak_resident_blocks = stats.peak_resident_blocks.max(blocks.len());
         for (t, b) in batch.iter().zip(blocks) {
             sink(*t, b);
+            live.fetch_sub(1, Ordering::SeqCst);
             stats.blocks += 1;
         }
+        next = end;
     }
+    stats.peak_resident_blocks = peak.load(Ordering::SeqCst);
     Ok(stats)
 }
 
