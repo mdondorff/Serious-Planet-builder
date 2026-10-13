@@ -1,0 +1,5 @@
+- [x] 1.1 `generate --plan-check` (plancheck.rs), refusals, tier B test, compact-cache clash
+- [x] 1.2 M3 criteria in `cargo xtask accept`
+- [x] 1.3 production bake, plan-check and verify-global output kept in docs/milestones/M3-plan-check-16384.txt
+- [x] 1.4 `cargo xtask accept M3` (one timing step failed once, see the report)
+- [x] 1.5 M3 report, stop report, learning, log line

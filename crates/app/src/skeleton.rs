@@ -384,6 +384,7 @@ fn compact_cache(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         "--global-dir",
         "--verify-global",
         "--global-products",
+        "--plan-check",
         "--global-res",
         "--threads",
     ]

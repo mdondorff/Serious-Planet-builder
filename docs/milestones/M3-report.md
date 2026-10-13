@@ -3,19 +3,19 @@
 Written for: the owner, reading this to decide whether M3 passes. Evidence below is from this session's runs and the merged log; `docs/log.md` has every change.
 
 ## Summary
-The generator pipeline now runs from a world definition to stored, verifiable tiles: a schema-versioned definition with read-recording contexts, a staged field model, a global-coarse bake of continents, elevation and climate stored as content-addressed blocks, a terrain field and an eroded terrain field that are pure functions of the direction, a persistent Hilbert-ordered tile store with keys, verification, compaction and a size cap, and height-aware level-of-detail selection that plans realistic terrain at production parameters. Everything is on main; CI is green on Windows (WARP) and Linux (lavapipe).
+The generator pipeline now runs from a world definition to stored, verifiable tiles: a schema-versioned definition with read-recording contexts, a staged field model, a global-coarse bake of continents, elevation and climate stored as content-addressed blocks, a terrain field and an eroded terrain field that are pure functions of the direction, a persistent Hilbert-ordered tile store with keys, verification, compaction and a size cap, and height-aware level-of-detail selection that plans realistic terrain at production parameters. The code is on main with CI green on Windows (WARP) and Linux (lavapipe), except this change (`generate --plan-check`, this report). Not yet on main: ADR 0030 and the 16384 perf-window line, both on the planner's PR #95 (open when this was written); GEN-014 stays `planned` in the spec until that merges.
 
 ## Criteria (report §15, M3)
 | Criterion | Result | Evidence |
 |---|---|---|
-| Bit-exact CPU tiles across runs, threads and OSes | pass | tier A known answers and thread tests (GEN-003, GEN-016, GEN-017), the CI `determinism (Windows vs Linux)` job green on the last PRs |
-| Global 1 km bake in at most 10 min (GEN-014) | pass | the architect's perf window: 370.3 s on 20 threads for 16384 cells per face edge, 0.34 GB peak blocks, 11.66 GB store (log, PR #95); a second bake during this acceptance: 355.8 s, 1,536 blocks, at most 20 in memory |
-| A definition edit invalidates only the affected tiles | pass | STRM-004 tests (tier A, and the tier B item-edit oracle `oracle_tiles_item_edit`) |
-| `cache-verify` passes | pass | tier A/B tests (STRM-004, STRM-009, STRM-010); `generate --verify-global` on the production bake: 24 of 1,536 blocks checked, 24 match, 0 stale, 0 unreadable |
-| Metamorphic tests (partition invariance, coarse/fine agreement) | pass | GEN-015 (the same position reads the same bits through any tile decomposition), GEN-016 (one point, one height from tiles of different levels, across face edges and the cube corner), `coarse_tile_agrees_with_children_at_coarse_positions`, `deep_level_cross_face_borders_agree_bit_for_bit` |
-| Realistic terrain plans at production parameters (cells 32, viewport / tau 240; ADR 0016) | **pass at production resolution** | see below |
+| Bit-exact CPU tiles across runs, threads and OSes | pass for the reference generator and, by known answers, for the new fields | the CI `determinism (Windows vs Linux)` job hashes only the reference generator's manifest; the bake, `cpu-terrain-v1` and `cpu-erosion-v1` are pinned by known-answer and thread tests that CI runs on both systems (GEN-013, GEN-016, GEN-017); persistent known answers are not in the manifest yet |
+| Global 1 km bake in at most 10 min (GEN-014) | pass | the architect's perf window: 370.3 s on 20 threads at 16384 cells per face edge, 11.66 GB store (recorded in PR #95, not yet merged); a second bake during this acceptance, outside the readiness gate and so not a measurement: 355.8 s, 1,536 blocks, at most 20 in memory (`docs/milestones/M3-plan-check-16384.txt`). The memory figure is derived from the block counter, not a process measurement |
+| A definition edit invalidates only the affected tiles | pass for the mechanism | STRM-004 tests (tier A, and the tier B item-edit oracle `oracle_tiles_item_edit`, on a stamp generator); for the real fields any definition edit changes the world's node set id and so every tile (ADR 0025 point 3), so it is not yet shown on them |
+| `cache-verify` passes | pass in tiers A and B; blocks verified on the production bake | STRM-004, STRM-009, STRM-010 tests; `generate --verify-global` on the production bake: 24 of 1,536 blocks checked, 24 match, 0 stale, 0 unreadable. A tile `cache-verify` on a real store is the owner's |
+| Metamorphic tests (partition invariance, coarse/fine agreement) | pass | GEN-015 (the same position reads the same bits through any tile decomposition) and GEN-016 / GEN-017 (one point, one height from tiles of different levels, across face edges and the cube corner); the reference generator's coarse/fine agreement is exact by construction (GEN-006) |
+| Realistic terrain plans at production parameters (cells 32, viewport / tau 240; ADR 0016) | **pass at production resolution** | see below and `docs/milestones/M3-plan-check-16384.txt` (the raw output) |
 | Global hydrology spike | done (SPIKE-03), decided by the owner (ADR 0030) | `docs/spikes.md`; the stream-power stage is after M3 |
-| GPU budgets and regressions | pass (architect's perf window, see Perf) | `docs/log.md` 2026-10-12 first perf window; guardrails in TEST-011 and TEST-012 |
+| GPU budgets and regressions | not re-measured | the one valid perf window (2026-10-12) passed every budget, but ran before the regression report existed; the comparison has never run and the ground-1m rise is unexplained (see Perf) |
 
 ## `cargo xtask accept M3` (2026-10-13, this branch)
 check (fmt, clippy, layering), spec-lint, tests A+B (31.9 s), tier C on the software adapter (51.0 s) and on the discrete GPU (35.5 s, `test gpu --real`), and the three run-mode smokes all pass. The last step, `test fast` timing, **failed once: 11.0 s against the 10 s budget**, when it ran straight after the GPU steps; two reruns on the quiet machine took 8.4 s elapsed (7.5 s of tests, 472 tests). The budget is not weakened; the margin is thin and the slowest tests are the older planet-frame LOD tests (4 to 5 s each).
@@ -36,7 +36,7 @@ check (fmt, clippy, layering), spec-lint, tests A+B (31.9 s), tier C on the soft
 | cube-corner-1km | 3,585 / 17 | 3,617 / 17 |
 | face-edge-1km | 3,542 / 17 | 3,572 / 17 |
 
-The eroded field's real, interval-arithmetic bounds cost about 0.3 % more nodes than the terrain field's. Planning takes under 0.3 s per view from aerial-20km down; the orbit, high and aerial-200km views took 0.7 to 6.5 s on cold block reads. The tier A tests plan the same flight on a 256-cell bake.
+The eroded field's real, interval-arithmetic bounds cost 0.6 % more nodes over the ten views (27,879 against 27,712; up to 1.0 % at aerial-20km and low-2km). Planning takes under 0.3 s per view from aerial-20km down; the orbit, high and aerial-200km views took 0.7 to 6.5 s on cold block reads. The tier A tests plan the same flight on a 256-cell bake.
 
 ## What M3 delivered
 - Field pipeline: `WorldDefinition` (TOML, schema version 1, cell index), `GenContext` read recording, the stage model, `cpu-global-coarse-v1` bake (tiled, thread independent), the global block store (kind 3), `read_direction` and the tile reader (ADR 0027), `cpu-terrain-v1` (GEN-016) and `cpu-erosion-v1` (GEN-017).
@@ -56,7 +56,7 @@ The eroded field's real, interval-arithmetic bounds cost about 0.3 % more nodes 
 - The global stream-power stage needs a routing without lattice hatching and an explanation of the 1.6x / 2.7x across-edge gradient ratios before it ships (ADR 0030 point 2).
 - The per-tile node set id, the last-hit sidecar (the cap's eviction is by write order, not LRU: ADR 0029) and the ADR 0021 point 7 contract test for cell-reading fields are open; none blocks M3, all must land before the first regional field is stored.
 - The GPU rise above is unexplained.
-- `cargo xtask test fast` has a thin margin: 8.4 s on a quiet machine, 11.0 s once inside `accept` (see above); the old planet-frame LOD tests are the slowest.
+- `cargo xtask test fast` has a thin margin: 8.4 s on a quiet machine, 11.0 s once inside `accept` (see above); the old planet-frame LOD tests are the slowest, and this change's own CLI test (4 s) was one of the slowest until review moved it to the tier B binary `oracle_plan_check`.
 - The relief-view flight (TEST-014) has not been reviewed by the owner on the real GPU at this gate.
 
 ## Needs the owner
@@ -64,7 +64,7 @@ The eroded field's real, interval-arithmetic bounds cost about 0.3 % more nodes 
 2. The go/no-go decision below.
 3. Which field a world uses (terrain or eroded) once something renders it.
 
-## Recommendation: **Go**
-Every M3 exit criterion has evidence, including the production-resolution steepness check that ADR 0016 required. The open items are known, tracked and none is a foundation risk.
+## Recommendation: **Go with conditions**
+Every M3 exit criterion in report §15 has evidence, including the production-resolution steepness check that ADR 0016 required. Conditions before M4 starts: PR #95 merges (ADR 0030, the 16384 perf-window line) and GEN-014 becomes `active`; the owner completes the TEST-014 flight review; the `test fast` margin is watched (the next slow test moves to tier B). None of the open items is a foundation risk.
 
 Stop here: M4 is not started until the owner decides.

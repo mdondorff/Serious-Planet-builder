@@ -16,7 +16,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
   editor        interactive editor/viewer (window arrives in M2); --smoke starts and exits; --offscreen runs the skeleton without a window
-  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) and prints the time per sample; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --plan-check <dir> --global-res N plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --smoke starts and exits
+  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) and prints the time per sample; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
@@ -559,32 +559,11 @@ mod tests {
         assert!(run_str(&["generate", "--compact-cache", &store]).unwrap_err().contains("give --world"));
         let clash = run_str(&["generate", "--compact-cache", &store, "--region", "0,1"]).unwrap_err();
         assert!(clash.contains("--compact-cache takes only"), "{clash}");
+        let both = run_str(&["generate", "--compact-cache", &store, "--seed", "3", "--plan-check", &store]).unwrap_err();
+        assert!(both.contains("--compact-cache takes only"), "{both}");
         let lone = run_str(&["generate", "--cap-bytes", "5", "--seed", "3"]).unwrap_err();
         assert!(lone.contains("belongs to --compact-cache"), "{lone}");
         assert!(run_str(&["generate", "--compact-cache", &d.s("missing")]).unwrap_err().contains("no such cache directory"));
-    }
-
-    // spec: GEN-017
-    #[test]
-    fn plan_check_plans_the_standard_flight_over_a_stored_bake_with_both_fields() {
-        let d = TempDir::new("plancheck");
-        let store = d.s("store");
-        run_str(&["generate", "--global-dir", &store, "--global-res", "256", "--seed", "3", "--threads", "2"]).unwrap();
-        let ok = run_str(&["generate", "--plan-check", &store, "--global-res", "256", "--seed", "3"]).unwrap();
-        for needle in ["terrain ground-1m:", "erosion ground-1m:", "erosion orbit-20000km:", "both fields plan every view"] {
-            assert!(ok.contains(needle), "missing {needle}: {ok}");
-        }
-        assert!(!ok.contains("REJECTED"), "{ok}");
-        // A bake of another resolution or seed is not found under the keys of this one: an error naming the block, not a default.
-        let wrong = run_str(&["generate", "--plan-check", &store, "--global-res", "512", "--seed", "3"]).unwrap_err();
-        assert!(wrong.contains("rejected or unreadable"), "{wrong}");
-        assert!(run_str(&["generate", "--plan-check", &d.s("nowhere"), "--global-res", "256"])
-            .unwrap_err()
-            .contains("no such store directory"));
-        let clash = run_str(&["generate", "--plan-check", &store, "--global-res", "256", "--threads", "2"]).unwrap_err();
-        assert!(clash.contains("takes only --global-res"), "{clash}");
-        let e = run_str(&["test-render", "--plan-check", &store]).unwrap_err();
-        assert!(e.contains("only applies to `generate`"), "{e}");
     }
 
     // spec: STRM-012

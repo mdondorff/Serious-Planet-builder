@@ -1,0 +1,24 @@
+plan-check: 16384 cells per face edge, cells 32, viewport / tau 240, standard flight, target/accept/global16384
+  terrain orbit-20000km: 52 nodes, deepest level 2, 1.9 s
+  terrain high-2000km: 429 nodes, deepest level 6, 4.9 s
+  terrain aerial-200km: 651 nodes, deepest level 9, 0.7 s
+  terrain aerial-20km: 1095 nodes, deepest level 12, 0.0 s
+  terrain low-2km: 2599 nodes, deepest level 16, 0.0 s
+  terrain ground-200m: 4468 nodes, deepest level 19, 0.0 s
+  terrain ground-1m: 8735 nodes, deepest level 26, 0.1 s
+  terrain north-pole-1km: 2556 nodes, deepest level 17, 0.2 s
+  terrain cube-corner-1km: 3585 nodes, deepest level 17, 0.1 s
+  terrain face-edge-1km: 3542 nodes, deepest level 17, 0.2 s
+  erosion orbit-20000km: 52 nodes, deepest level 2, 6.2 s
+  erosion high-2000km: 429 nodes, deepest level 6, 4.9 s
+  erosion aerial-200km: 655 nodes, deepest level 9, 0.7 s
+  erosion aerial-20km: 1106 nodes, deepest level 12, 0.1 s
+  erosion low-2km: 2625 nodes, deepest level 16, 0.1 s
+  erosion ground-200m: 4498 nodes, deepest level 19, 0.1 s
+  erosion ground-1m: 8763 nodes, deepest level 26, 0.2 s
+  erosion north-pole-1km: 2562 nodes, deepest level 17, 0.2 s
+  erosion cube-corner-1km: 3617 nodes, deepest level 17, 0.2 s
+  erosion face-edge-1km: 3572 nodes, deepest level 17, 0.2 s
+plan-check: both fields plan every view without steepness rejection
+verify-global target/accept/global16384: checked 24 of 1536 entries: 24 match, 0 stale (versions or node set changed), 0 stale without a known reason, 0 of another kind, 0 differ, 0 unreadable
+global bake target/accept/global16384: 16384 cells per face edge in blocks of 1024 (level 4): 1536 blocks written, 0 already stored, at most 20 blocks in memory; 355.8 s on 20 threads, 4.41 us per sample per core

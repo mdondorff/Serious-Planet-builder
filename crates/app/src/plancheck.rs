@@ -41,6 +41,9 @@ pub fn plan_check(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if !clash.is_empty() {
         return Err(format!("--plan-check takes only --global-res and --world or --seed, not {}", clash.join(", ")));
     }
+    if !o.given.contains("--global-res") {
+        return Err("--plan-check needs --global-res N, the resolution the bake was made at (a store holds one bake per resolution)".into());
+    }
     if o.given.contains("--world") && o.given.contains("--seed") {
         return Err("--world and --seed both name the definition: give one".into());
     }
