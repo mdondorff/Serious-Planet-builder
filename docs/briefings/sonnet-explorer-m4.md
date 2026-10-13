@@ -19,6 +19,19 @@ The owner gave M3 "go with conditions" on 2026-10-13. Your work is queued in `do
 - Goldens only through `cargo xtask golden-review` (ADR 0017); anything it escalates goes to the owner's `/bless`.
 - `cargo xtask test gpu --real` is yours to run (no confirmation needed). Never run `cargo xtask perf`: ask opus-planner for a perf window.
 - Never weaken, skip or re-parameterise a test or raise a budget to get green.
+- Spike images worth keeping (contact sheets the spike entry cites): downscaled copies under 1 MB each (e.g. 2048 px JPEG, `magick <in> -resize "2048x2048>" -strip -quality 88 <out>.jpg`) in `docs/spikes/`, linked from the spike entry; full sets stay in `target/review/`, which is not kept.
+
+## Known facts for M4 (opus-planner, 2026-10-13)
+- **A cold plan exceeds the frame budget on its own.** Node selection with a cold per-tile cache at ground-1m cost 28.6 ms (2026-10-11) and 25.6 ms (2026-10-12) in perf windows, against 6-7 ms warm and a 20 ms p99 budget. A teleport (ADR 0032 point 2) therefore drops at least one frame before any streaming happens. SPIKE-05 and the teleport scene must report plan time separately from streaming and upload time, so the cause of a missed frame is attributed correctly; whether the teleport frame is exempt or the cold plan must get faster is a decision for ADR 0032's completion (state it there, with the measurement).
+- Ground-1m GPU median rose from 3.0 to 4.2 ms after #65 (44-byte vertex, likely); the A/B is in the first M4 perf window (`docs/learnings.md`). SPIKE-06's compact format may change the answer.
+- Hand estimates in ADR 0033's context (about 50 KB per tile, 0.4 GB for the ground-1m draw set, 3-6x for the residency set) are not measured: SPIKE-05 replaces them.
+
+## Tool notes (Windows, worktree sessions)
+- `gh` is not on the Git Bash PATH: call it from PowerShell as `& "C:\Program Files\GitHub CLI\gh.exe"`.
+- Worktree guards may refuse compound or looped git commands: run git commands one at a time.
+- Commit messages with several lines: write the message to a file under `$CLAUDE_JOB_DIR/tmp` (or another scratch directory) and `git commit -F <file>`; piping a here-string into `git commit -F -` failed in PowerShell. Same for PR bodies (`gh pr create --body-file`).
+- New branch after a squash merge: `git fetch`, then `git switch --no-track -c change/<id> origin/main` (the local branch of a squash-merged PR cannot fast-forward).
+- If `gh pr merge` is refused by the permission system or waits for a prompt, do not work around it: report to opus-planner and continue with the next item that does not depend on the merge.
 
 ## Stop and report to opus-planner (SendMessage) when
 - an ADR draft (M4 items 4, 5, 6) is ready for review: keep working on the next item that does not depend on it;
