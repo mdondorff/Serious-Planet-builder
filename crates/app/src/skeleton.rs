@@ -11,7 +11,7 @@ use std::path::Path;
 use std::time::Instant;
 
 const FRAME_SIZE: (u32, u32) = (256, 128);
-const RADIUS_M: f64 = 6_371_000.0;
+pub(crate) const RADIUS_M: f64 = 6_371_000.0;
 
 /// `FACE,LEVEL,X,Y`
 pub fn parse_tile(s: &str) -> Result<TileId, String> {
@@ -186,6 +186,9 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     }
     if o.compact_cache.is_some() {
         return compact_cache(o, out);
+    }
+    if o.plan_check.is_some() {
+        return crate::plancheck::plan_check(o, out);
     }
     if o.global_dir.is_some() || o.verify_global.is_some() || o.global_products.is_some() {
         return generate_global(o, out);
@@ -381,6 +384,7 @@ fn compact_cache(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         "--global-dir",
         "--verify-global",
         "--global-products",
+        "--plan-check",
         "--global-res",
         "--threads",
     ]
@@ -982,7 +986,18 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(err)?;
     }
-    std::fs::write(&path, json).map_err(err)?;
+    // Compare with the last valid session of this scene (report only), then keep this one as the baseline if it is valid.
+    let baseline = planet_perf::compare::baseline_path(&path);
+    // Without a baseline file yet, the previous log of this scene stands in (it is used only if it was valid).
+    let last_valid = planet_perf::compare::choose_baseline(std::fs::read(&baseline).ok(), std::fs::read(&path).ok());
+    let lines = planet_perf::compare::comparison_lines(last_valid.as_deref(), json.as_bytes());
+    for line in &lines {
+        writeln!(out, "{line}").map_err(err)?;
+    }
+    std::fs::write(&path, &json).map_err(err)?;
+    if planet_perf::compare::replaces_baseline(json.as_bytes()) {
+        std::fs::write(&baseline, &json).map_err(err)?;
+    }
     writeln!(out, "wrote {}", path.display()).map_err(err)
 }
 

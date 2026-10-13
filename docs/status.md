@@ -2,6 +2,9 @@
 
 Newest entries at the top. One line per event (change archived, ADR drafted, spike opened or closed, quarantine, milestone report). Stop reports get a short section.
 
+## Stop report: M3 gate reached (sonnet-explorer, 2026-10-13)
+Done: items 6b (perf guardrails, #96), 6c (erosion filter, #97) and 7 (this change: `generate --plan-check`, `cargo xtask accept M3`, `docs/milestones/M3-report.md`). `accept M3`: every step passes except the `test fast` timing step (11.0 s once, 8.4 s on reruns). The production-resolution cells 32 / ratio 240 check passes for the terrain and the eroded field on a fresh 16384-cell bake (`docs/milestones/M3-plan-check-16384.txt`). Blocked on: nothing; M4 does not start until the owner decides. Needs: the owner's go/no-go and TEST-014 flight review; the planner merges PR #95 (ADR 0030, the 16384 perf line) and sets GEN-014 `active`; a perf window to run the regression comparison for the first time and to try the ground-1m A/B in `docs/learnings.md`. Recommendation: Go with conditions (see the report).
+
 ## Handover: sonnet-coder to the next coder (2026-10-12)
 Nothing is half-done on main. Merged this session: the M3 stack (#43 height-aware selection, #52 plan cache, #53 gen-context, #54 ADRs), #55 perf gate, #56 multi-body keys, #57 TOML definitions, #58 cell index, #60 stage model, #61 persistent keys, #64 tile pack, and cache-verify (this change). Proposed ADRs 0021-0024 are drafted and with the architect.
 

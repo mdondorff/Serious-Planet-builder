@@ -425,3 +425,56 @@ fn plan_counts_stay_within_the_budget_over_the_scripted_views() {
     let e = plan.counts().check(&tight).unwrap_err();
     assert!(e.contains("draw calls") && e.contains("> budget 10"), "{e}");
 }
+
+/// The node count of each standard view at the production-like parameters of the test above, pinned. The other counts
+/// follow from it (2,304 triangles and 1,221 x 44 vertex bytes per tile). Raising a pin is a decision: say why in the
+/// change that does it (CON-20); a view that drops well below its pin should have the pin lowered with it.
+const VIEW_NODE_PINS: [(&str, u32); 10] = [
+    ("orbit-20000km", 52),
+    ("high-2000km", 424),
+    ("aerial-200km", 645),
+    ("aerial-20km", 1071),
+    ("low-2km", 2561),
+    ("ground-200m", 4425),
+    ("ground-1m", 8687),
+    ("north-pole-1km", 2612),
+    ("cube-corner-1km", 3573),
+    ("face-edge-1km", 3546),
+];
+
+// spec: TEST-011
+#[test]
+fn every_standard_view_stays_within_its_own_pinned_counts() {
+    use planet_frame::CountBudget;
+    let size = (2560u32, 1440u32);
+    let lod = LodParams { cells: 32, viewport_h_px: f64::from(size.1), tau_px: 6.0, max_level: 26, ..LodParams::earth_1080p() };
+    let views = scripted_views(R, f64::from(size.0) / f64::from(size.1), 1);
+    assert_eq!(views.len(), VIEW_NODE_PINS.len(), "a standard view was added or removed: pin it");
+    let mut failures = Vec::new();
+    for ((name, camera), (pinned_name, pin)) in views.into_iter().zip(VIEW_NODE_PINS) {
+        assert_eq!(name, pinned_name, "the pins are in the order of the standard views");
+        let plan = plan_terrain(&TerrainRequest {
+            camera,
+            size,
+            view: TerrainView::Level,
+            lod: lod.clone(),
+            face_mapping: "tangent-v1".into(),
+            seed: 1,
+        })
+        .unwrap();
+        let budget = CountBudget {
+            max_draw_calls: pin,
+            max_triangles: u64::from(pin) * 2_304,
+            max_resident_tiles: pin,
+            max_upload_bytes: u64::from(pin) * 1_221 * 44,
+        };
+        if let Err(e) = plan.counts().check(&budget) {
+            failures.push(format!("{name}: {e} (nodes {} against pin {pin})", plan.nodes.len()));
+        }
+        // A pin stays tight: a view more than 10 % under its pin has its pin lowered with it.
+        if u64::from(pin) > plan.nodes.len() as u64 * 10 / 9 {
+            failures.push(format!("{name}: {} nodes is more than 10 % under its pin {pin}: lower the pin", plan.nodes.len()));
+        }
+    }
+    assert!(failures.is_empty(), "plan counts above their pins:\n{}", failures.join("\n"));
+}

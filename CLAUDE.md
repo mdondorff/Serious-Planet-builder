@@ -15,6 +15,7 @@ Working files: `docs/status.md` (forward state: waiting for the owner, queues, s
 - `cargo xtask test fast`: tier A for changed crates (< 10 s)
 - `cargo xtask test`: tiers A + B on the software adapter
 - `cargo xtask test gpu`: tier C goldens and debug views
+- `cargo xtask test gpu --real`: the same on the discrete GPU. Run it yourself whenever real-GPU evidence is useful; it needs no owner confirmation (owner, 2026-10-12), but never during an architect's perf window. Golden candidates it produces go through `golden-review` (ADR 0017) like any other.
 - `cargo xtask spec-lint`: trace IDs, tiers, requirement coverage
 - `cargo xtask accept <milestone>`: milestone acceptance
 - `cargo xtask repro <bundle>`: replay a repro bundle
@@ -49,7 +50,7 @@ Write a stop report in `docs/status.md` (what was done, what is blocked, what yo
 - a test can't be made deterministic;
 - a decision is needed that no ADR or spec covers **and** it is hard to reverse (draft the ADR as "proposed" first). Easy-to-reverse decisions: draft a "proposed" ADR and keep going on it. Proposed ADRs from the background report's "decide now" list may be built on before the owner accepts them;
 - golden images are waiting for blessing and further work depends on them;
-- a performance measurement is needed on Rasierklinge: ask the architect session to run it (it opens a perf window and the harness's gate decides); do not run `cargo xtask perf` yourself;
+- a performance measurement is needed on Rasierklinge: ask the architect session to run it (it opens a perf window and the harness's gate decides); do not run `cargo xtask perf` yourself (correctness runs with `test gpu --real` do not count as measurements);
 - a milestone go/no-go gate is reached (after M2 and after M5);
 - the constitution would have to change.
 Otherwise, keep going.

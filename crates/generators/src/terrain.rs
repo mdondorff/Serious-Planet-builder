@@ -154,92 +154,15 @@ impl HeightField for TerrainField<'_> {
     /// [`MAX_BOUNDS_CELLS`] cells, takes the global range.
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         let global = (-MAX_ABS_HEIGHT_M, MAX_ABS_HEIGHT_M);
-        let res = self.src.res();
-        if res == 0 || !angular_radius.is_finite() || angular_radius < 0.0 {
-            return global;
-        }
-        // Face coordinates are Lipschitz (FACE_LIPSCHITZ) in the angle while they stay within 1.14 (u within 1.2). With a
-        // reach `rw` of at most 0.1, every direction of the cap that lies in the cone of a face F is within `rw` of the
-        // centre in F's (extended) coordinates, so the faces to scan are those whose extended coordinates of the centre
-        // are within 1 + rw, and in each the rectangle centre +- rw clipped to the face holds every cap direction of F.
-        let rw = FACE_LIPSCHITZ * angular_radius;
-        if rw > 0.1 {
-            return global;
-        }
-        let half = f64::from(res) * 0.5;
-        let reach = rw * half + 1e-9;
-        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-        let mut cells = 0u64;
-        for f in 0..6u8 {
-            let face = Face(f);
-            let w = centre.dot(face.normal());
-            if w <= 0.0 {
-                continue;
-            }
-            // The extended coordinate (`plane_to_face` clamps beyond the face): `(4 / pi) atan(u)`.
-            let coord = |axis: Vec3| libm::atan(centre.dot(axis) / w) / core::f64::consts::FRAC_PI_4;
-            let (s, t) = (coord(face.u_axis()), coord(face.v_axis()));
-            if s.abs() > 1.0 + rw + 1e-9 || t.abs() > 1.0 + rw + 1e-9 {
-                continue;
-            }
-            let (pu, pv) = ((s + 1.0) * half, (t + 1.0) * half);
-            let clamp = |x: f64| x.clamp(0.0, f64::from(res));
-            let (u0, u1, v0, v1) = (clamp(pu - reach), clamp(pu + reach), clamp(pv - reach), clamp(pv + reach));
-            // Cells read: floor(u0) ..= floor(u1) and one more for the far neighbour of the blend, clamped to the lattice.
-            let (i0, i1) = (libm::floor(u0) as u32, (libm::floor(u1) as u32 + 1).min(res));
-            let (j0, j1) = (libm::floor(v0) as u32, (libm::floor(v1) as u32 + 1).min(res));
-            let (w, h) = ((i1 - i0 + 1) as usize, (j1 - j0 + 1) as usize);
-            cells += (w * h) as u64;
-            if cells > MAX_BOUNDS_CELLS {
+        let scan = match scan_base(self.src, centre, angular_radius) {
+            Ok(Some(scan)) => scan,
+            Ok(None) => return global,
+            Err(err) => {
+                self.fail(&err);
                 return global;
             }
-            let mut e = Vec::with_capacity(w * h);
-            for j in j0..=j1 {
-                for i in i0..=i1 {
-                    match self.src.at(face, i, j) {
-                        Ok(s) => e.push(f64::from(s.elevation_m)),
-                        Err(err) => {
-                            self.fail(&err);
-                            return global;
-                        }
-                    }
-                }
-            }
-            let (flo, fhi) = (e.iter().copied().fold(f64::INFINITY, f64::min), e.iter().copied().fold(f64::NEG_INFINITY, f64::max));
-            // The blend is bilinear in the lattice position, so its slope along an axis is at most the largest difference of
-            // adjacent samples along that axis. Every cap point of this face is within the rectangle's half-width (per
-            // axis, in lattice units) of the anchor, the centre clamped to the face; the base elevation there is the
-            // blend at the anchor (read from this face's own samples) plus or minus the slope times that half-width.
-            let (mut du, mut dv) = (0.0f64, 0.0f64);
-            for j in 0..h {
-                for i in 0..w {
-                    if i + 1 < w {
-                        du = du.max((e[j * w + i + 1] - e[j * w + i]).abs());
-                    }
-                    if j + 1 < h {
-                        dv = dv.max((e[(j + 1) * w + i] - e[j * w + i]).abs());
-                    }
-                }
-            }
-            let (au, av) = (clamp(pu), clamp(pv));
-            let (ci, cj) = (libm::floor(au).min(f64::from(res)) as u32, libm::floor(av).min(f64::from(res)) as u32);
-            let anchor = match blend_cell(self.src, face, ci, cj, au - f64::from(ci), av - f64::from(cj)) {
-                Ok(v) => f64::from(v.elevation_m),
-                Err(err) => {
-                    self.fail(&err);
-                    return global;
-                }
-            };
-            // The anchor and the base at a cap point are both rounded to f32 by the blend: one ulp (2^-23 relative) apart at most
-            // beyond the slope term.
-            let spread = (du + dv) * reach * (1.0 + 1e-9) + 1e-6 + anchor.abs() * 2.4e-7;
-            lo = lo.min(flo.max(anchor - spread));
-            hi = hi.max(fhi.min(anchor + spread));
-        }
-        if lo > hi {
-            return global;
-        }
-        let (blo, bhi) = (lo, hi);
+        };
+        let (blo, bhi) = (scan.lo, scan.hi);
         // Detail: the amplitude is a nondecreasing function of the base elevation; the normalised noise has the bounds of
         // its octaves, summed with their weights.
         let (mut nlo, mut nhi, mut amp, mut norm, mut freq) = (0.0, 0.0, 1.0, 0.0, DETAIL_BASE_FREQUENCY);
@@ -261,6 +184,97 @@ impl HeightField for TerrainField<'_> {
         let (l, h) = (blo + dlo, bhi + dhi);
         ((l - pad(l)).max(global.0), (h + pad(h)).min(global.1))
     }
+}
+
+/// The range of the bake's elevation over a cap and the steepest lattice step on the way (see [`scan_base`]).
+pub(crate) struct BaseScan {
+    pub lo: f64,
+    pub hi: f64,
+    /// Largest difference of adjacent lattice samples along the two lattice axes, over every cell scanned (metres per cell).
+    pub max_du: f64,
+    pub max_dv: f64,
+}
+
+/// Bounds of the bake's elevation over the cap of `angular_radius` about `centre`, and the largest lattice steps of the
+/// cells it reads (ADR 0028 point 3). `None`: the cap is too wide or leaves the scanned region, take the global range.
+pub(crate) fn scan_base(src: &dyn LatticeSource, centre: Vec3, angular_radius: f64) -> Result<Option<BaseScan>, crate::global::ReadError> {
+    let res = src.res();
+    if res == 0 || !angular_radius.is_finite() || angular_radius < 0.0 {
+        return Ok(None);
+    }
+    // Face coordinates are Lipschitz (FACE_LIPSCHITZ) in the angle while they stay within 1.14 (u within 1.2). With a
+    // reach `rw` of at most 0.1, every direction of the cap that lies in the cone of a face F is within `rw` of the
+    // centre in F's (extended) coordinates, so the faces to scan are those whose extended coordinates of the centre
+    // are within 1 + rw, and in each the rectangle centre +- rw clipped to the face holds every cap direction of F.
+    let rw = FACE_LIPSCHITZ * angular_radius;
+    if rw > 0.1 {
+        return Ok(None);
+    }
+    let half = f64::from(res) * 0.5;
+    let reach = rw * half + 1e-9;
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut max_du, mut max_dv) = (0.0f64, 0.0f64);
+    let mut cells = 0u64;
+    for f in 0..6u8 {
+        let face = Face(f);
+        let w = centre.dot(face.normal());
+        if w <= 0.0 {
+            continue;
+        }
+        // The extended coordinate (`plane_to_face` clamps beyond the face): `(4 / pi) atan(u)`.
+        let coord = |axis: Vec3| libm::atan(centre.dot(axis) / w) / core::f64::consts::FRAC_PI_4;
+        let (s, t) = (coord(face.u_axis()), coord(face.v_axis()));
+        if s.abs() > 1.0 + rw + 1e-9 || t.abs() > 1.0 + rw + 1e-9 {
+            continue;
+        }
+        let (pu, pv) = ((s + 1.0) * half, (t + 1.0) * half);
+        let clamp = |x: f64| x.clamp(0.0, f64::from(res));
+        let (u0, u1, v0, v1) = (clamp(pu - reach), clamp(pu + reach), clamp(pv - reach), clamp(pv + reach));
+        // Cells read: floor(u0) ..= floor(u1) and one more for the far neighbour of the blend, clamped to the lattice.
+        let (i0, i1) = (libm::floor(u0) as u32, (libm::floor(u1) as u32 + 1).min(res));
+        let (j0, j1) = (libm::floor(v0) as u32, (libm::floor(v1) as u32 + 1).min(res));
+        let (w, h) = ((i1 - i0 + 1) as usize, (j1 - j0 + 1) as usize);
+        cells += (w * h) as u64;
+        if cells > MAX_BOUNDS_CELLS {
+            return Ok(None);
+        }
+        let mut e = Vec::with_capacity(w * h);
+        for j in j0..=j1 {
+            for i in i0..=i1 {
+                e.push(f64::from(src.at(face, i, j)?.elevation_m));
+            }
+        }
+        let (flo, fhi) = (e.iter().copied().fold(f64::INFINITY, f64::min), e.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+        // The blend is bilinear in the lattice position, so its slope along an axis is at most the largest difference of
+        // adjacent samples along that axis. Every cap point of this face is within the rectangle's half-width (per
+        // axis, in lattice units) of the anchor, the centre clamped to the face; the base elevation there is the
+        // blend at the anchor (read from this face's own samples) plus or minus the slope times that half-width.
+        let (mut du, mut dv) = (0.0f64, 0.0f64);
+        for j in 0..h {
+            for i in 0..w {
+                if i + 1 < w {
+                    du = du.max((e[j * w + i + 1] - e[j * w + i]).abs());
+                }
+                if j + 1 < h {
+                    dv = dv.max((e[(j + 1) * w + i] - e[j * w + i]).abs());
+                }
+            }
+        }
+        let (au, av) = (clamp(pu), clamp(pv));
+        let (ci, cj) = (libm::floor(au).min(f64::from(res)) as u32, libm::floor(av).min(f64::from(res)) as u32);
+        let anchor = f64::from(blend_cell(src, face, ci, cj, au - f64::from(ci), av - f64::from(cj))?.elevation_m);
+        // The anchor and the base at a cap point are both rounded to f32 by the blend: one ulp (2^-23 relative) apart at most
+        // beyond the slope term.
+        let spread = (du + dv) * reach * (1.0 + 1e-9) + 1e-6 + anchor.abs() * 2.4e-7;
+        max_du = max_du.max(du);
+        max_dv = max_dv.max(dv);
+        lo = lo.min(flo.max(anchor - spread));
+        hi = hi.max(fhi.min(anchor + spread));
+    }
+    if lo > hi {
+        return Ok(None);
+    }
+    Ok(Some(BaseScan { lo, hi, max_du, max_dv }))
 }
 
 /// Builds the [`TerrainField`] of a body from a definition and a baked grid.
