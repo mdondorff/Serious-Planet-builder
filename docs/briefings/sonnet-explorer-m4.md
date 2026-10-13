@@ -27,7 +27,7 @@ The owner gave M3 "go with conditions" on 2026-10-13. Your work is queued in `do
 - Hand estimates in ADR 0033's context (about 50 KB per tile, 0.4 GB for the ground-1m draw set, 3-6x for the residency set) are not measured: SPIKE-05 replaces them.
 
 ## Tool notes (Windows, worktree sessions)
-- `gh` is not on the Git Bash PATH: call it from PowerShell as `& "C:\Program Files\GitHub CLI\gh.exe"`.
+- `gh` is on the PATH (owner, 2026-10-13): call it as plain `gh`, never by its full path, so permission rules such as `gh pr merge *` match. If a session cannot find it, the session started before the PATH change: report it rather than using the full path.
 - Worktree guards may refuse compound or looped git commands: run git commands one at a time.
 - Commit messages with several lines: write the message to a file under `$CLAUDE_JOB_DIR/tmp` (or another scratch directory) and `git commit -F <file>`; piping a here-string into `git commit -F -` failed in PowerShell. Same for PR bodies (`gh pr create --body-file`).
 - New branch after a squash merge: `git fetch`, then `git switch --no-track -c change/<id> origin/main` (the local branch of a squash-merged PR cannot fast-forward).

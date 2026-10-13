@@ -24,7 +24,6 @@ Nothing is half-done on main. Merged this session: the M3 stack (#43 height-awar
 - **CON-08 reading (needed before SPIKE-03 splits a regional chain, ADR 0022):** does "a stage reads only outputs of earlier stages" forbid a field reading another field of its own stage (literal; option 2 then needs an amendment) or only later-stage and cross-tile reads (option 2 is then an ADR)? Until then option 1 holds: one field per chain.
 - **Perf readiness gate (ADR 0020): first run done 2026-10-12, gate ok, session valid** (see the Log). The 1 km global bake (GEN-014) is not in `cargo xtask perf` yet: a bake scene under the same gate is queued under M3 item 6.
 - **Process proposal:** every PR appends to the Log below, so this file conflicts on nearly every merge. Option: one log line per change inside its archived OpenSpec change (`openspec/changes/archive/<id>/`), and this file keeps only "Waiting for the owner" and the queues. Owner decision.
-- Tool note: `gh` is installed at `C:\Program Files\GitHub CLI\gh.exe` but is not on the Git Bash PATH.
 
 - **Relief goldens: decided (owner, 2026-10-12): rejected.** The two first goldens `terrain_orbit_relief` and `terrain_ground1m_relief` (128x96, lit, exact per adapter) are dropped: too small to show a relief defect, and they would change on nearly every terrain change. The relief view is covered instead by the orbit-to-1 m flight review at 1280x720 (TEST-014, `target/review/flight-relief-nvidia/` plus contact sheet), reviewed by the owner at milestone gates, plus a tier-B property test. Queued below as M3 item 5a.
 

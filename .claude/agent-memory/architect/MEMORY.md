@@ -64,8 +64,9 @@ Refreshed 2026-10-13 at the M3 gate (session `opus-plannner`, worktree `opus-pla
 - Idle peers don't read their inbox: for a new briefing, ask the owner to paste it; to wake a coder, ask the owner.
 - Ask coders to confirm a diagnosis by ablation before fixing. Check reviewers' claims in the source before relaying.
 - Squash-merged stacked PRs conflict: cherry-pick onto a fresh branch. Keep both sides of log conflicts.
-- The worktree guard refuses compound git commands and `gh` via Bash: run plain git commands; gh via PowerShell
-  `& "C:\Program Files\GitHub CLI\gh.exe"` (jq quoting: avoid `\"` in -q). Multi-line commit messages and PR bodies:
+- The worktree guard refuses compound git commands: run plain git commands. `gh` is on the PATH (owner, 2026-10-13):
+  call plain `gh` (from Git Bash; a PowerShell started before the change may not see it), never the full path, so
+  allow rules match (jq quoting: avoid `\"` in -q). Multi-line commit messages and PR bodies:
   write a file in the job tmp dir and use `git commit -F <file>` / `--body-file` (piping a here-string failed).
 - In auto mode the permission classifier refused my `gh pr merge` (even with CI green) and remote branch deletion:
   don't work around it; hand the owner the exact `!` command. Merge permission for sonnet-explorer must be settled

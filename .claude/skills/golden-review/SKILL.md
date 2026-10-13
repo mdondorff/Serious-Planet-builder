@@ -10,7 +10,7 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`. Never bless outs
    (delete it first) so nothing from an earlier run is reviewed.
    - WARP: `cargo xtask test gpu` (writes `target/review/candidates/dx12-microsoft-basic-render-driver/`).
    - NVIDIA (Rasierklinge): `cargo xtask test gpu --real`.
-   - llvmpipe: push the branch, then `gh run download <run> -n review-Linux -D target/review/ci-linux` (gh lives at `C:\Program Files\GitHub CLI\gh.exe`).
+   - llvmpipe: push the branch, then `gh run download <run> -n review-Linux -D target/review/ci-linux`.
    Golden tests report every mismatch of a run (`GoldenChecks`), so one run per adapter is enough.
 3. **Review.** `cargo xtask golden-review --proposal openspec/changes/<id>/proposal.md [--extra target/review/ci-linux/candidates]`.
    It writes `target/review/golden-review/report.md` and a golden | candidate | diff triptych per candidate, and prints
