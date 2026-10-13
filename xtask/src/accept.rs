@@ -37,6 +37,15 @@ fn manual_criteria(milestone: &str) -> &'static [&'static str] {
             "Six terrain goldens blessed by the owner (/bless), and the Linux goldens",
             "GO/NO-GO gate: the owner decides after reading docs/milestones/M2-report.md",
         ],
+        "M3" => &[
+            "Tile hashes identical on Windows and Linux: needs the CI determinism job (determinism manifest)",
+            "Global bake of 16384 cells per face edge in at most 10 min within 8 GB (GEN-014): needs the architect's perf window (`cargo xtask perf global-bake`)",
+            "Production-resolution planning (cells 32, viewport / tau 240) of the standard flight with the terrain and the eroded field: `generate --global-dir D --global-res 16384` then `generate --plan-check D --global-res 16384` (about 12 GB of disk; recorded in docs/milestones/M3-report.md)",
+            "Terrain GPU budgets and regressions on Rasierklinge (TEST-012): needs the architect's perf window",
+            "Relief-view flight review at 1280x720 on the real GPU (TEST-014): the owner",
+            "`cache-verify` and a definition edit rebuilding only the affected tiles (STRM-004) pass in tiers A and B above; a run on a real store is the owner's",
+            "GO/NO-GO gate: the owner decides after reading docs/milestones/M3-report.md",
+        ],
         _ => &["No automated criteria are defined for this milestone yet"],
     }
 }

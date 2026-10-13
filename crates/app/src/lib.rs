@@ -2,6 +2,7 @@
 //! and `test-render` (headless harness). M0 only wires them up; real work arrives with M1+.
 
 pub mod globalperf;
+mod plancheck;
 pub mod sheet;
 pub mod skeleton;
 
@@ -15,7 +16,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
   editor        interactive editor/viewer (window arrives in M2); --smoke starts and exits; --offscreen runs the skeleton without a window
-  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) and prints the time per sample; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --smoke starts and exits
+  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) and prints the time per sample; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --plan-check <dir> --global-res N plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
@@ -80,6 +81,8 @@ pub struct Options {
     pub global_dir: Option<PathBuf>,
     /// `generate`: regenerate a sample of the global bake stored in this directory and compare.
     pub verify_global: Option<PathBuf>,
+    /// `generate`: plan the standard flight at production parameters over the stored global bake in this directory.
+    pub plan_check: Option<PathBuf>,
     /// `generate`: write the data products (cube nets and maps) of an in-memory bake into this directory.
     pub global_products: Option<PathBuf>,
     /// `--global-dir` and `--global-products`: cells per face edge of the bake (a power of two; blocks are stored in the canonical layout, ADR 0027).
@@ -134,6 +137,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         allow_stale: false,
         global_dir: None,
         verify_global: None,
+        plan_check: None,
         global_products: None,
         global_res: 256,
         threads: 0,
@@ -184,6 +188,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--allow-stale" => o.allow_stale = true,
             "--global-dir" => o.global_dir = Some(PathBuf::from(it.next().ok_or("--global-dir needs a directory")?)),
+            "--plan-check" => o.plan_check = Some(PathBuf::from(it.next().ok_or("--plan-check needs a directory")?)),
             "--verify-global" => o.verify_global = Some(PathBuf::from(it.next().ok_or("--verify-global needs a directory")?)),
             "--global-products" => o.global_products = Some(PathBuf::from(it.next().ok_or("--global-products needs a directory")?)),
             "--global-res" => {
@@ -222,7 +227,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
 use planet_cache::tiles::MAX_REGION_LEVEL;
 
 /// Options that only the tile store commands of `generate` understand.
-pub(crate) const STORE_OPTIONS: [&str; 13] = [
+pub(crate) const STORE_OPTIONS: [&str; 14] = [
+    "--plan-check",
     "--compact-cache",
     "--cap-bytes",
     "--world",
@@ -556,6 +562,29 @@ mod tests {
         let lone = run_str(&["generate", "--cap-bytes", "5", "--seed", "3"]).unwrap_err();
         assert!(lone.contains("belongs to --compact-cache"), "{lone}");
         assert!(run_str(&["generate", "--compact-cache", &d.s("missing")]).unwrap_err().contains("no such cache directory"));
+    }
+
+    // spec: GEN-017
+    #[test]
+    fn plan_check_plans_the_standard_flight_over_a_stored_bake_with_both_fields() {
+        let d = TempDir::new("plancheck");
+        let store = d.s("store");
+        run_str(&["generate", "--global-dir", &store, "--global-res", "256", "--seed", "3", "--threads", "2"]).unwrap();
+        let ok = run_str(&["generate", "--plan-check", &store, "--global-res", "256", "--seed", "3"]).unwrap();
+        for needle in ["terrain ground-1m:", "erosion ground-1m:", "erosion orbit-20000km:", "both fields plan every view"] {
+            assert!(ok.contains(needle), "missing {needle}: {ok}");
+        }
+        assert!(!ok.contains("REJECTED"), "{ok}");
+        // A bake of another resolution or seed is not found under the keys of this one: an error naming the block, not a default.
+        let wrong = run_str(&["generate", "--plan-check", &store, "--global-res", "512", "--seed", "3"]).unwrap_err();
+        assert!(wrong.contains("rejected or unreadable"), "{wrong}");
+        assert!(run_str(&["generate", "--plan-check", &d.s("nowhere"), "--global-res", "256"])
+            .unwrap_err()
+            .contains("no such store directory"));
+        let clash = run_str(&["generate", "--plan-check", &store, "--global-res", "256", "--threads", "2"]).unwrap_err();
+        assert!(clash.contains("takes only --global-res"), "{clash}");
+        let e = run_str(&["test-render", "--plan-check", &store]).unwrap_err();
+        assert!(e.contains("only applies to `generate`"), "{e}");
     }
 
     // spec: STRM-012
