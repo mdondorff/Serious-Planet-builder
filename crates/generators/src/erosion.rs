@@ -228,7 +228,7 @@ impl HeightField for ErosionField<'_> {
                     // (2.4e-7 of the largest elevation) in each of the four values a difference of two stencils spans.
                     let round = 2.0 * 2.4e-7 * MAX_ELEVATION_M.max(-MIN_ELEVATION_M);
                     let spread = (2.5 * lip * k * angular_radius * (1.0 / delta + 2.0) + 5.0 * round / delta) * (1.0 + 1e-9) + 1e-6;
-                    let steepest = 2.5 * lip * k;
+                    let steepest = 2.5 * lip * k + 5.0 * round / delta;
                     let lo = (g_centre - spread).max(0.0);
                     let hi = (g_centre + spread).min(steepest.max(g_centre));
                     (carve(lo / self.radius_m), carve(hi / self.radius_m))

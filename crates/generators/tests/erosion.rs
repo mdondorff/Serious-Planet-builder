@@ -82,7 +82,7 @@ fn bounds_hold_every_height_of_random_caps_and_of_caps_at_edge_midpoints_and_cor
         total += 1;
     }
     assert!(f.error().is_none());
-    // A cap whose slope stencil reaches past the scanned region takes the global range (2 (theta + delta) above 0.1).
+    // A cap too wide for the scan (2 theta above 0.1) takes the global range.
     assert_eq!(f.height_bounds(Vec3::new(1.0, 0.0, 0.0), 0.06), (-MAX_ABS_HEIGHT_M, MAX_ABS_HEIGHT_M));
     assert!(tight * 4 >= total * 3, "{tight} of {total} caps have bounds tighter than 4 km");
 }
@@ -137,6 +137,10 @@ fn the_field_is_pure_identifies_itself_and_is_keyed_by_seed_radius_and_bake() {
     assert_ne!(field_of(&src, R, [8; 16]).inputs_hash(), f.inputs_hash());
     // The slope is rise over run, so the radius is an input of the field.
     assert_ne!(field_of(&src, R * 2.0, KEY).inputs_hash(), f.inputs_hash());
+    // So is the world seed (through the body seed the context records).
+    let other = WorldDefinition::single_planet(R, SEED + 1);
+    let reseeded = ErosionGenerator.field(&GenContext::new(&other), BodyId::PLANET, &src, KEY).unwrap();
+    assert_ne!(reseeded.inputs_hash(), f.inputs_hash());
     // The terrain field has its own implementation id and so its own keys.
     assert_ne!(EROSION_IMPLEMENTATION_ID, planet_generators::terrain::TERRAIN_IMPLEMENTATION_ID);
 }
@@ -156,8 +160,8 @@ fn bounds_hug_the_terrain_on_small_caps_and_cover_f32_rounded_heights() {
     extents.sort_by(f64::total_cmp);
     // A 640 m cap holds tens of metres of relief; the median must show it (a global range would be 20 km).
     let median = extents[extents.len() / 2];
-    assert!(median < 120.0, "median extent {median} m");
-    assert!(*extents.last().unwrap() < 1500.0, "worst extent {} m", extents.last().unwrap());
+    assert!(median < 40.0, "median extent {median} m");
+    assert!(*extents.last().unwrap() < 400.0, "worst extent {} m", extents.last().unwrap());
 }
 
 /// A lattice that cannot be read.
@@ -241,7 +245,7 @@ fn creases_cut_deeper_on_steep_ground_than_on_flat_ground() {
         }
         v.iter().map(|x| x.abs()).sum::<f64>() / v.len() as f64
     };
-    // Lattice i = 102..106 is on the ramp (slope ~0.8); i = 20..40 is flat ground at sea level.
+    // Lattice i = 2002..2005 is on the ramp (slope about 0.5); i = 400..800 is flat ground at sea level.
     let steep = spread(2002.0 / 2048.0 - 1.0, 2005.0 / 2048.0 - 1.0);
     let flat = spread(400.0 / 2048.0 - 1.0, 800.0 / 2048.0 - 1.0);
     assert!(steep > 3.0 * flat, "mean incision on the ramp {steep} m, on flat ground {flat} m");
