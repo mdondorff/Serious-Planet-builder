@@ -1,0 +1,7 @@
+## Decisions
+
+- **The eroded field reads the bake directly and replaces the fBm detail** of `cpu-terrain-v1` (as SPIKE-04 variant B did). ADR 0030 says "over the terrain field (ADR 0028)", meaning the same pattern (a pure function over the bake with a new implementation id); building on the fBm as well would add a second detail source under the creases and widen the bounds. Easy to reverse (a new version of the field); the owner can ask for the fBm back.
+- **A basis-free gradient** instead of the spike's tangent basis: `sum_a t_a t_a^T` is the tangent projector, so the gradient is the sum over the coordinate axes of the central difference along `t_a` times `t_a`; no basis switch at `|x| = 0.9`, smooth in the direction, 6 bake reads instead of 4.
+- **The slope bound is derived, not measured** (the spike's measured constant x3 is not used): the stencil map `x -> normalise(x + delta t(x))` is `K = (1 + 2 delta) / (1 - delta)` Lipschitz, both stencil points lie within `r + delta` of the centre where the bake is `res (du + dv)` Lipschitz per radian (lattice step per cell, `res / 2` cells per face coordinate, at most 2 face coordinates per radian: ADR 0028 point 3). The numerics review re-derived each step and found no failure; tests: a steep ramp lattice whose slope factor changes within the cap (zeroing the spread fails it).
+- **The radius is an input** (the slope is rise over run), read through the context so it is in the key.
+- Production-resolution planning check (cells 32, viewport / tau 240, 16384 cells): M3 acceptance (ADR 0030 Consequences).

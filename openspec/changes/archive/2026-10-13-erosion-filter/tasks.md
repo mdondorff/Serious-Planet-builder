@@ -1,0 +1,5 @@
+- [x] 1.1 ErosionField and bounds (GEN-017)
+- [x] 1.2 scan_base extracted from the terrain field
+- [x] 1.3 tier A tests, planning check on the test bake
+- [x] 1.4 numerics review, spec-guardian, verifier
+- [x] 1.5 log line
