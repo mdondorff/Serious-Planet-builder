@@ -2,6 +2,7 @@
 
 One line per archived change, ADR decision, perf window or owner decision, newest first (split out of `docs/status.md` by the owner's decision of 2026-10-12). Add new lines at the top. `docs/status.md` shows the most recent ones.
 
+- 2026-10-13 ADRs 0031 (residency set and request priorities), 0032 (streaming test definitions), 0033 (memory budgets and terrain's VRAM share): proposed, sketches by opus-planner for sonnet-explorer to complete (M4 items 4-6).
 - 2026-10-13 M4 plan queued (opus-planner). Owner's decisions 2026-10-13: terrain gets an explicit VRAM share (starting 2 GB mid tier, 3 GB high tier, set by the M4 budget ADR); residency is position-based (rotation never fetches); the finest geometry level may be lifted with shader detail below it (SPIKE-07).
 - 2026-10-13 M3 gate: GO WITH CONDITIONS (owner, 2026-10-13; recorded by opus-planner). Conditions in `docs/status.md`. Owner's decision on the field: worlds name their height field, eroded (GEN-017) default, `cpu-terrain-v1` selectable; queued as the first M4 item.
 - 2026-10-13 M3 close-out queued (opus-planner, owner's request): det-manifest-fields, gen-014-active, test-fast-budget, spec-purposes for sonnet-explorer, not started. TEST-014 relief flight review passed (owner, 2026-10-13: `test-render --scene terrain --flight 240 --size 1280x720 --adapter hardware` at main's head, as expected, no artefacts).
