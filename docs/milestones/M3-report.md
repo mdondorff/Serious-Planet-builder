@@ -36,7 +36,7 @@ check (fmt, clippy, layering), spec-lint, tests A+B (31.9 s), tier C on the soft
 | cube-corner-1km | 3,585 / 17 | 3,617 / 17 |
 | face-edge-1km | 3,542 / 17 | 3,572 / 17 |
 
-The eroded field's real, interval-arithmetic bounds cost 0.6 % more nodes over the ten views (27,879 against 27,712; up to 1.0 % at aerial-20km and low-2km). Planning takes under 0.3 s per view from aerial-20km down; the orbit, high and aerial-200km views took 0.7 to 6.5 s on cold block reads. The tier A tests plan the same flight on a 256-cell bake.
+The eroded field's real, interval-arithmetic bounds cost 0.6 % more nodes over the ten views (27,879 against 27,712; up to 1.0 % at aerial-20km and low-2km). Planning takes under 0.3 s per view from aerial-20km down; the orbit, high and aerial-200km views took 0.7 to 6.2 s on cold block reads. The tier A tests plan the same flight on a 256-cell bake.
 
 ## What M3 delivered
 - Field pipeline: `WorldDefinition` (TOML, schema version 1, cell index), `GenContext` read recording, the stage model, `cpu-global-coarse-v1` bake (tiled, thread independent), the global block store (kind 3), `read_direction` and the tile reader (ADR 0027), `cpu-terrain-v1` (GEN-016) and `cpu-erosion-v1` (GEN-017).
