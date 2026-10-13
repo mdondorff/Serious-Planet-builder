@@ -1,78 +1,64 @@
 # Architect memory
 
-Refreshed 2026-10-11 (updated 2026-10-12 for #64, #65) at the hand-over from the long `opus-planner` session (the session that drafted this agent).
-Confirm everything here against `main` and `docs/status.md` before acting on it.
+Refreshed 2026-10-13 at the M3 gate (session `opus-plannner`, worktree `opus-planner`). Confirm everything here against
+`main` and `docs/status.md` before acting on it.
 
 ## Sessions
-- **sonnet-coder:** merged cache-verify (#68), wrote the hand-over (top of status.md) and stopped for a full reset
-  (owner, 2026-10-12). No new work until the owner restarts it.
-- **sonnet-explorer:** owns the remaining M3 queue (owner, 2026-10-12). Briefed 2026-10-12 via a scratchpad briefing
-  file (8 tasks: cache hardening incl. follow-ups (c)-(g), test-fast budget, global-coarse bake, regional/local fields,
-  erosion filter, SPIKE-03, compaction, accept M3). It was idle when briefed; the owner may need to paste the pointer.
-- **sonnet-worker:** deprecated. Do not message it.
-- This session's name is `opus-planner` (start with `claude --agent architect -n opus-planner`). Coders report to it.
-  On 2026-10-12 a new architect session (worktree `opus-planner`) took over; the owner was asked to stop the old
-  background `opus-planner` session. Two sessions with one name: check `ListAgents` refs.
+- **sonnet-explorer:** the one long-lived worker. Next: M3 close-out items 1-4, then M4 items 0-8 (status.md queues).
+  Briefing: `docs/briefings/sonnet-explorer-m4.md` (on PR #100's branch until merged); the owner pastes the pointer.
+- **sonnet-coder:** reset; its worktree was being removed by the owner. **sonnet-worker:** deprecated.
+- This session: architect, own worktree `.claude/worktrees/opus-planner`. Owner renamed it `opus-plannner` (typo,
+  2026-10-13): check `ListAgents` for the exact name coders must address.
 
-## State of main (2026-10-11)
-- M2: GO recorded by the owner (#42), "go with changes"; the condition (LOD-008 first in M3) is met (#43).
-- All ADRs 0001-0020 and 0022-0025 accepted (0025 tile codec and cache-verify, #69); 0026 global-coarse bake in part (#76: point 5, the bake reader, open for a new ADR before task 4); 0021 in part (1, 3, 4, 7) on 2026-10-12 under the owner's delegation
-  (#67); 0023/0024 amend 0018/0019 in part. 0022 = option 1 (no same-stage reads). Recent: 0016 height-aware selection, 0017 golden review policy, 0018 persistent
-  cache keys (BLAKE3-128, `pure`), 0019 tile pack store, 0020 perf readiness gate. 0013, 0014 accepted 2026-10-11
-  (0014 partly superseded by 0016).
-- Constitution v1.2 (CON-14 per-field CPU/GPU bounds; CON-18 golden approval by owner or ADR 0017 policy).
-- M3 done on main: perf gate (#55), LOD-008 (#43), plan cache (#52, the owner's run: 6.3 ms warm at ground-1m against
-  8 ms), world-def/GenContext (#53), TOML definitions (#57), cell index (#58), multi-body keys (#56), stage model (#60).
-- M3 next (sonnet-coder): item 5 tile storage (128-bit keys #61 and the Hilbert-ordered tile pack #64 done; next cache-verify, cache-compact, compaction/eviction), item 6 field
-  pipeline and hydrology (SPIKE-03), item 7 M3 acceptance and report (the gate: stop and report to the owner).
+## State of main (2026-10-13)
+- **M3: GO WITH CONDITIONS (owner, 2026-10-13).** Conditions: (1) TEST-014 flight review done by the owner; (2) before
+  the first regional field is stored: per-tile node set id, ADR 0021 pt 7 contract test, tile-level GEN-017 test;
+  (3) ground-1m GPU A/B (3.0 -> 4.2 ms) in the first M4 perf window (mine); (4) gen-014-active; (5) det-manifest-fields.
+- ADRs 0001-0020, 0022-0025, 0027-0030 accepted; 0021 and 0026 in part (0026 pt 5 decided by 0027).
+- Perf: M3 gate window 2026-10-13 valid, no regression; 16384 bake 370.3 s.
+- All ten specs still carry OpenSpec's "TBD" Purpose placeholder: queued (close-out item 4).
 
-## Open threads to follow up
-1. **Ragged band: DONE** (#65, 2026-10-12): both causes fixed (height now geomorphed, MESH_VERSION 4; the relief
-   grid's f32 phase replaced by per-decade f64 phases). `terrain_aerial200km_height` was auto-blessed under ADR 0017
-   (AUTO-E: 849 / 829 / 843 px). Open follow-up: normals are still not geomorphed (only if it shows in a view).
-2. **Relief goldens: rejected (owner, 2026-10-12)**, replaced by the 1280x720 flight review (TEST-014) at gates plus a tier-B property test; queued as M3 item 5a for sonnet-explorer.
-3. **Perf gate: first run 2026-10-12 valid, all budgets pass** (status.md Log). Ground-1m GPU median up ~35 % vs the owner's 2026-10-11 run (likely #65 vertex size), still in budget: watch it. GEN-014 bake not in the harness yet (queued, M3 item 6 (m)).
-4. **M3 acceptance must show** realistic terrain plans at production parameters (cells 32, ratio 240); ADR 0016 rejects
-   terrain too steep for a crack-free morph interval. The steep stress field only plans at cells 4 / ratio 77.
-5. **Process proposal for the owner:** per-change log lines in the archived OpenSpec change instead of appending to
-   `docs/status.md`'s Log (it conflicts on nearly every merge).
-6. **CON-08 reading** (owner): needed before SPIKE-03 splits a regional chain (ADR 0022 option 2).
-7. **Cache follow-ups** queued in status.md M3 item 5 (a)-(d) from the 0023/0024 reviews.
-8. Owner items carried into M3: TEST-008 split decision; editor window and egui per ADR 0015 (wgpu stays in render).
+## Owner decisions 2026-10-13 (M4 shape)
+- Worlds name their height field; eroded (GEN-017) default; `cpu-terrain-v1` selectable (M4 item 0).
+- **Terrain gets an explicit VRAM share** (start: 2 GB of 8 GB mid tier, 3 GB of 14 GB high tier; final in M4 budget
+  ADR) so future content (ground cover, objects, a game) has room. He thinks beyond renderer/editor: keep headroom.
+- Residency is position-based: rotation/mouse look never triggers fetching; view direction only orders requests;
+  teleport must be handled (no velocity prediction possible).
+- Finest geometry level may be lifted (today level 26 = 15 cm tile, ~5 mm vertices), detail below via shaders (SPIKE-07).
+- Today's mesh vertex is 44 B (11 f32); compact format (shared grid + height textures) is SPIKE-06.
+- Cross-OS determinism: he asked its cost; I said keep it (cheap marginal cost over run/thread determinism).
+- He is short on weekly quota: prefers M4 fully prepared so the worker can run for days without him.
 
-## Owner decisions 2026-10-12 (late)
-- Workflow kept: one coordinator (this session, own worktree) + one long-lived worker (sonnet-explorer, own worktree) the owner talks to directly; coders use subagents for review. Reset the worker per milestone task with a briefing file.
-- Reviewer models: spec-guardian and verifier on Sonnet (trial); numerics-reviewer + architect on Opus. Token economy: review proportionate to risk; review small ADRs myself against the code.
-- status.md = forward state + last 10 lines; full log in docs/log.md (newest first). Refresh status "Recent" when I edit status.
-- SPIKE-03 before the erosion filter; erosion variant (SPIKE-04: I recommend B) picked after it. GPU perf guardrails = M3 item 6b.
-- Open with owner: full 16384 bake perf (disk: C: ~12 GB free; store option on another drive recommended).
+## Owner decisions 2026-10-12
+- Workflow: one coordinator (this session) + one long-lived worker the owner talks to directly, separate worktrees.
+- Reviewer models: spec-guardian and verifier on Sonnet (trial); numerics-reviewer + architect on Opus. Token economy:
+  review proportionate to risk; review small ADRs myself against the code.
+- status.md = forward state + last 10 lines; full log in docs/log.md (newest first).
+- `cargo xtask test gpu --real` needs no owner confirmation (never during a perf window).
+
+## Open threads
+1. Normals are not geomorphed (only if it shows in a view).
+2. CON-08 reading (owner): only if a regional chain needs same-stage reads (ADR 0022 option 2).
+3. Process proposal (log lines in archived changes) is superseded by the status/log split.
+4. Owner items: TEST-008 split decision; editor window and egui per ADR 0015.
+5. Housekeeping for the owner: 11.7 GB bake in `.claude/worktrees/sonnet-explorer/target/accept`; `.git/config.lock`
+   from a hung `git branch -d` (use `--no-track` while it exists); old worktrees (smb-adr-review, scratchpad base,
+   allow-gpu-real) removable.
 
 ## Lessons from the owner
-- Coders edit proposed ADRs in their own PRs while you review them (#75 edited 0026 pt 6 during my review): merge main and combine texts before accepting.
-- sonnet-explorer's `gh pr merge` needs the owner's go-ahead in its session (classifier); stalls at merge mean a prompt is waiting there.
-- **Before accepting a proposed ADR, check open coder branches that touch it.** #68 edited ADR 0024's body after #67
-  had accepted it; the fix was to restore 0024 and move the text into ADR 0025 (CON-23).
-- **ADR delegation (owner, 2026-10-12):** accept ADRs yourself when the reviewers' recommendations are strong or the ADR
-  is sound and unambiguous; bring the owner only constitution readings/amendments and genuinely open trade-offs. Run
-  spec-guardian (+ numerics-reviewer for keys, formats, generators), apply text fixes, record "owner's delegation of
-  2026-10-12" in the status line. Clarification ADRs that go beyond an accepted ADR's text must say "amends in part".
-- One ADR at a time: explain plainly, highlight what matters most with its cost to reverse, recommend, then he
-  decides. Small focused PRs per decision. Ask only questions that change the work; offer a recommended option.
-- He prefers autonomy: proceed on reversible decisions; bring owner-level choices only.
-- **You execute owner decisions; coders never do.** A coder refusing a relayed decision is correct (sonnet-coder refused
-  to accept ADR 0016 on a relayed message). Commit decisions with "owner, <date>" on main or on the PR branch holding
-  the file; coders merge them.
-- An idle peer session does not read its inbox until it gets a turn (also when it hit a session limit). For a new
-  coder, write the briefing to a file and ask the owner to paste it; if a coder stays idle, ask the owner to nudge it.
-- Your own diagnoses can be incomplete too: the ragged band was blamed on the unmorphed height (real, but millimetres at
-  1 m); sonnet-explorer found the real cause by switching shader parts off one at a time. Ask coders to confirm a
-  diagnosis by ablation before fixing.
-- Check reviewers' claims in the source before relaying them: they were wrong once (a mapping id already in the key)
-  and right in ways that mattered (stale golden candidates, the missing driver gate, the morph-height defect).
-- Stacked PRs and squash merges conflict: after the base is squash-merged, cherry-pick the stacked commits onto a new
-  branch from main. `docs/status.md` conflicts on almost every merge: keep both sides of the Log.
-- The worktree guard in this repo refuses compound git commands: run git as plain, separate commands.
-- `cargo xtask perf` runs only via the architect's perf window (ADR 0020); coders never run it. Overriding a failed
-  gate (`--machine-ready`) is the owner's.
-- Goldens: agents bless only through `cargo xtask golden-review` (ADR 0017); first goldens, lit views, driver changes
-  and disagreements go to the owner's `/bless`. Golden tests report every mismatch of a run (`GoldenChecks`).
+- Coders edit proposed ADRs in their own PRs while you review them: merge main and combine texts before accepting.
+  Before accepting, check open coder branches that touch the ADR (#68 edited accepted 0024; fixed via 0025, CON-23).
+- sonnet-explorer's `gh pr merge` needs the owner's go-ahead in its session; a stall at merge means a prompt waits there.
+- **ADR delegation (owner, 2026-10-12):** accept ADRs yourself when reviewers' recommendations are strong or the ADR is
+  sound and unambiguous; bring the owner only constitution readings/amendments, open trade-offs, exit-criteria changes.
+  Status line: "owner's delegation of 2026-10-12". Clarifications beyond an accepted ADR say "amends in part".
+- Explain plainly, most important first with cost to reverse, recommend, then he decides. Ask only questions that
+  change the work. He prefers autonomy on reversible decisions.
+- **You execute owner decisions; coders never do.** Commit them with "owner, <date>".
+- Idle peers don't read their inbox: for a new briefing, ask the owner to paste it; to wake a coder, ask the owner.
+- Ask coders to confirm a diagnosis by ablation before fixing. Check reviewers' claims in the source before relaying.
+- Squash-merged stacked PRs conflict: cherry-pick onto a fresh branch. Keep both sides of log conflicts.
+- The worktree guard refuses compound git commands and `gh` via Bash: run plain git commands; gh via PowerShell
+  `& "C:\Program Files\GitHub CLI\gh.exe"` (jq quoting: avoid `\"` in -q).
+- `cargo xtask perf` only in my perf windows (ADR 0020); `--machine-ready` is the owner's.
+- Goldens only via `cargo xtask golden-review` (ADR 0017); escalations go to the owner's `/bless`.
