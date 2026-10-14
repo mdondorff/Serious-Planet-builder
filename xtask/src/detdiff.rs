@@ -59,7 +59,7 @@ pub fn diff(a: &str, b: &str) -> Vec<String> {
     for (k, va) in &pa {
         match find(&pb, k) {
             Some(vb) if &vb == va => {}
-            Some(vb) => out.push(format!("{k}: {va} vs {vb}")),
+            Some(vb) => out.push(format!("{k}: {va} vs {vb}{}", height_delta(k, va, &vb))),
             None => out.push(format!("{k}: {va} vs (missing)")),
         }
     }
@@ -70,6 +70,22 @@ pub fn diff(a: &str, b: &str) -> Vec<String> {
     }
     out.sort_by_key(|d| !d.starts_with("version"));
     out
+}
+
+/// For `terrain` and `erosion` entries (raw `f64` height bits): the heights, their difference in metres and the distance in
+/// ulps, so a drift report says how large the drift is.
+fn height_delta(key: &str, a: &str, b: &str) -> String {
+    if !(key.starts_with("terrain ") || key.starts_with("erosion ")) {
+        return String::new();
+    }
+    let (Ok(ba), Ok(bb)) = (u64::from_str_radix(a, 16), u64::from_str_radix(b, 16)) else {
+        return String::new();
+    };
+    let (ha, hb) = (f64::from_bits(ba), f64::from_bits(bb));
+    // Order-preserving map of the bits, so the distance counts representable steps across zero too.
+    let ord = |x: u64| if x >> 63 == 1 { !x } else { x | 1 << 63 };
+    let ulps = ord(ba).abs_diff(ord(bb));
+    format!(" ({ha} m vs {hb} m, delta {:e} m, {ulps} ulp)", hb - ha)
 }
 
 #[cfg(test)]
@@ -118,5 +134,23 @@ mod tests {
         let (text, ok) = super::report("w", "l", "version mesh 2\n", "version mesh 3\n");
         assert!(!ok && text.contains("different builds"), "{text}");
         assert!(super::report("w", "l", &a, &a).1);
+    }
+
+    // spec: GEN-003
+    #[test]
+    fn a_height_difference_reports_the_heights_the_delta_and_the_ulps() {
+        let one = 1.0f64.to_bits();
+        let a = format!(
+            "terrain 3/0.3/-0.7 {one:016x}
+"
+        );
+        let b = format!(
+            "terrain 3/0.3/-0.7 {:016x}
+",
+            one + 1
+        );
+        let d = diff(&a, &b);
+        assert_eq!(d.len(), 1);
+        assert!(d[0].contains("1 ulp") && d[0].contains("2.220446049250313e-16 m"), "{d:?}");
     }
 }
