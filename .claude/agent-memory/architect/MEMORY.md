@@ -5,7 +5,8 @@ Refreshed 2026-10-13 at the M3 gate (session `opus-plannner`, worktree `opus-pla
 
 ## Sessions
 - **sonnet-explorer:** the one long-lived worker. Next: M3 close-out items 1-4, then M4 items 0-8 (status.md queues).
-  Briefing: `docs/briefings/sonnet-explorer-m4.md` (on PR #100's branch until merged); the owner pastes the pointer.
+  Briefing: `docs/briefings/sonnet-explorer-m4.md` on main (known facts and tool notes added 2026-10-13); the owner
+  pastes the pointer.
 - **sonnet-coder:** reset; its worktree was being removed by the owner. **sonnet-worker:** deprecated.
 - This session: architect, own worktree `.claude/worktrees/opus-planner`. Owner renamed it `opus-plannner` (typo,
   2026-10-13): check `ListAgents` for the exact name coders must address.
@@ -43,7 +44,12 @@ Refreshed 2026-10-13 at the M3 gate (session `opus-plannner`, worktree `opus-pla
 4. Owner items: TEST-008 split decision; editor window and egui per ADR 0015.
 5. Housekeeping for the owner: 11.7 GB bake in `.claude/worktrees/sonnet-explorer/target/accept`; `.git/config.lock`
    from a hung `git branch -d` (use `--no-track` while it exists); old worktrees (smb-adr-review, scratchpad base,
-   allow-gpu-real) removable.
+   allow-gpu-real) removable. Done 2026-10-13 (#102): valid M2 perf rerun rescued from `change/m2-perf-result`, spike
+   contact sheets in `docs/spikes/`. Remote branch pruning: 92 branches verified safe (tip = merged PR head, or content
+   on main via a successor PR); the owner deletes them (my session may not); keep `spike/hydrology`,
+   `spike/erosion-variants`. GitHub auto-deletes head branches on merge since 2026-10-13.
+6. Hydrology (ADR 0030 pt 2, coarse stream-power stage) is not queued; the owner liked SPIKE-03's look. Ask where it
+   goes after M4 when M4's queue nears its end.
 
 ## Lessons from the owner
 - Coders edit proposed ADRs in their own PRs while you review them: merge main and combine texts before accepting.
@@ -58,7 +64,14 @@ Refreshed 2026-10-13 at the M3 gate (session `opus-plannner`, worktree `opus-pla
 - Idle peers don't read their inbox: for a new briefing, ask the owner to paste it; to wake a coder, ask the owner.
 - Ask coders to confirm a diagnosis by ablation before fixing. Check reviewers' claims in the source before relaying.
 - Squash-merged stacked PRs conflict: cherry-pick onto a fresh branch. Keep both sides of log conflicts.
-- The worktree guard refuses compound git commands and `gh` via Bash: run plain git commands; gh via PowerShell
-  `& "C:\Program Files\GitHub CLI\gh.exe"` (jq quoting: avoid `\"` in -q).
+- The worktree guard refuses compound git commands: run plain git commands. `gh` is on the PATH (owner, 2026-10-13):
+  call plain `gh` (from Git Bash; a PowerShell started before the change may not see it), never the full path, so
+  allow rules match (jq quoting: avoid `\"` in -q). Multi-line commit messages and PR bodies:
+  write a file in the job tmp dir and use `git commit -F <file>` / `--body-file` (piping a here-string failed).
+- In auto mode the permission classifier refused my `gh pr merge` (even with CI green) and remote branch deletion:
+  don't work around it; hand the owner the exact `!` command. Merge permission for sonnet-explorer must be settled
+  before the owner leaves it running unattended.
+- A cold plan at ground-1m (25-29 ms) exceeds the 20 ms p99 budget by itself: teleport results must separate plan time
+  from streaming (in the briefing's known facts).
 - `cargo xtask perf` only in my perf windows (ADR 0020); `--machine-ready` is the owner's.
 - Goldens only via `cargo xtask golden-review` (ADR 0017); escalations go to the owner's `/bless`.
