@@ -19,6 +19,7 @@ pub(crate) fn budget_failures(secs: f64, peak_resident_bytes: u64) -> Vec<String
     v
 }
 
+// spec: GEN-014
 /// Bake the global-coarse field into a scratch store under `target/perf/global-bake` (the real pipeline: bake, encode, pack)
 /// after the ADR 0020 readiness gate, and report wall time, the most blocks alive at once with the bytes they take, and the
 /// store size, against the GEN-014 budgets. The resident figure is derived from the block counter times the block size (the

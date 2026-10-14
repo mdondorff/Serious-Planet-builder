@@ -1,7 +1,8 @@
 //! CON-16: every requirement has a trace ID and a verification tier; every cited ID exists; every
 //! active tier A/B/C requirement is cited by a `#[test]` function of its own tier (a `// spec:` comment counts only when
 //! it sits directly above a `#[test]` fn; integration test files `tests/gpu_*.rs` are tier C, `tests/oracle_*.rs` tier B, everything else tier A);
-//! tier D names a review artefact.
+//! tier D names a review artefact. A `// spec:` comment directly above a perf-harness scene (`fn perf_*` in `crates/app/src`)
+//! counts as tier-C evidence (CON-17: a scene measures what no test may); there is no tier E.
 //!
 //! Requirement format (OpenSpec headings, metadata lines in the body):
 //! ```text
@@ -120,6 +121,53 @@ pub fn parse_test_citations(text: &str) -> Vec<String> {
     ids
 }
 
+/// Trace IDs cited by `// spec:` comments attached (comments and attributes only in between) to a perf-harness scene
+/// entry point, a function named `perf_*` (CON-17: a scene measures what no test may). Callers restrict this to
+/// [`is_perf_scene_file`]; it counts as tier C evidence only.
+pub fn parse_scene_citations(text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut ids = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let t = line.trim_start();
+        let Some(c) = t.strip_prefix("//") else { continue };
+        let Some(list) = c.trim_start_matches(['/', '!']).trim_start().strip_prefix("spec:") else { continue };
+        let (mut depth, mut next_item) = (0i32, None);
+        for next in &lines[i + 1..] {
+            let n = next.trim();
+            if depth > 0 {
+                depth += bracket_balance(n);
+            } else if n.starts_with("#[") {
+                depth = bracket_balance(n.split("//").next().unwrap_or("").trim());
+            } else if !n.starts_with("//") {
+                next_item = Some(n);
+                break;
+            }
+        }
+        if next_item.is_some_and(is_perf_scene_fn) {
+            ids.extend(list.split([',', ' ']).map(str::trim).filter(|s| is_trace_id(s)).map(String::from));
+        }
+    }
+    ids
+}
+
+/// A `fn perf_*` item line (`pub`, `pub(crate)` allowed).
+fn is_perf_scene_fn(line: &str) -> bool {
+    let mut rest = line.strip_prefix("pub").map_or(line, str::trim_start);
+    if rest.starts_with('(') {
+        match rest.find(')') {
+            Some(i) => rest = rest[i + 1..].trim_start(),
+            None => return false,
+        }
+    }
+    rest.strip_prefix("fn perf_").is_some()
+}
+
+/// Perf scenes live in the app crate's sources (`crates/app/src/*.rs`).
+fn is_perf_scene_file(path: &Path) -> bool {
+    let comps: Vec<_> = path.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    comps.windows(3).any(|w| w[0] == "app" && w[1] == "src") && comps.first().is_some_and(|c| c == "crates")
+}
+
 /// Unclosed `[` minus `]` in `line` (attribute continuation tracking; brackets inside string literals are rare enough
 /// in attributes that this is good enough, and a miscount only makes a citation detach loudly).
 fn bracket_balance(line: &str) -> i32 {
@@ -226,6 +274,11 @@ pub fn lint(specs: &BTreeMap<String, String>, sources: &BTreeMap<PathBuf, String
         }
         for id in parse_test_citations(text) {
             cited.entry(id).or_default().insert(test_tier(path));
+        }
+        if is_perf_scene_file(path) {
+            for id in parse_scene_citations(text) {
+                cited.entry(id).or_default().insert('C');
+            }
         }
     }
     for r in &reqs {
@@ -491,6 +544,49 @@ fn t() {}
         let sources =
             BTreeMap::from([(PathBuf::from("a/tests/x.rs"), test.to_string()), (PathBuf::from("a/tests/gpu_x.rs"), test.to_string())]);
         assert!(lint(&specs, &sources, "").errors.is_empty());
+    }
+
+    // spec: TEST-001
+    #[test]
+    fn a_perf_scene_citation_is_tier_c_evidence() {
+        let spec = ONE.replace("Verify: A", "Verify: C");
+        let scene = "// spec: COORD-003
+/// docs
+pub fn perf_thing() {}
+";
+        // Cited above a perf scene entry point under crates/app/src: tier C evidence, and no tier A/B.
+        assert!(lint_at(&spec, "crates/app/src/thingperf.rs", scene).errors.is_empty());
+        // Removing the citation fails the rule.
+        let r = lint_at(
+            &spec,
+            "crates/app/src/thingperf.rs",
+            "/// docs
+pub fn perf_thing() {}
+",
+        );
+        assert!(r.errors.iter().any(|e| e.contains("COORD-003") && e.contains("not cited by any test")), "{:?}", r.errors);
+        // Not a scene: another function name, another place, or a tier A requirement.
+        for (path, src) in [
+            (
+                "crates/app/src/thingperf.rs",
+                "// spec: COORD-003
+pub fn helper() {}
+",
+            ),
+            ("crates/core/src/thing.rs", scene),
+            ("crates/app/tests/thing.rs", scene),
+        ] {
+            assert!(!lint_at(&spec, path, src).errors.is_empty(), "{path}");
+        }
+        assert!(!lint_at(ONE, "crates/app/src/thingperf.rs", scene).errors.is_empty(), "a scene is not tier A evidence");
+        // Wrapped attributes between the citation and the scene are fine, as for tests.
+        let wrapped = "// spec: COORD-003
+#[allow(
+    dead_code
+)]
+pub(crate) fn perf_thing() {}
+";
+        assert!(lint_at(&spec, "crates/app/src/thingperf.rs", wrapped).errors.is_empty());
     }
 
     // spec: TEST-001
