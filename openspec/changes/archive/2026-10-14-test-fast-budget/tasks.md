@@ -1,0 +1,6 @@
+- [x] 1.1 measure: per-test timings of `cargo xtask test fast` (slowest: height_aware morph sweeps, lod morph sweeps)
+- [x] 1.2 `select_nodes_cached`, `select_nodes_field_cached`
+- [x] 1.3 sweeps use a warm cache with a cold cross-check every 16th step
+- [x] 1.4 three quiet runs at or under 9 s recorded in the PR
+- [x] 1.5 spec-guardian, verifier (findings fixed)
+- [x] 1.6 log line, CI green, merge

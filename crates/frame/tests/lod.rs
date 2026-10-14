@@ -132,6 +132,7 @@ fn neighbouring_leaves_differ_by_at_most_one_level() {
 // spec: LOD-004
 #[test]
 fn morph_is_bounded_and_continuous_as_the_camera_recedes() {
+    let mut sweep = WarmSweep::new();
     let m = TangentWarp;
     let nadir = camera(10.0, 20.0, 0.0).0.normalized();
     let mut h = 1.0f64;
@@ -139,7 +140,7 @@ fn morph_is_bounded_and_continuous_as_the_camera_recedes() {
     let mut merges = 0;
     while h < 2.0e7 {
         let c = camera(10.0, 20.0, h);
-        let s = select(c);
+        let s = sweep.select(c);
         let n = s.nodes.iter().find(|n| n.tile.contains(&m, nadir)).expect("a leaf contains the nadir");
         assert!((0.0..=1.0).contains(&n.morph), "morph {} at height {h}", n.morph);
         if let Some((pl, pm)) = prev {
@@ -163,12 +164,13 @@ fn morph_is_bounded_and_continuous_as_the_camera_recedes() {
 // spec: LOD-004
 #[test]
 fn morph_grows_monotonically_within_one_level() {
+    let mut sweep = WarmSweep::new();
     let m = TangentWarp;
     let nadir = camera(10.0, 20.0, 0.0).0.normalized();
     let mut by_level: std::collections::BTreeMap<u8, Vec<f32>> = Default::default();
     let mut h = 1.0f64;
     while h < 2.0e7 {
-        let s = select(camera(10.0, 20.0, h));
+        let s = sweep.select(camera(10.0, 20.0, h));
         let n = s.nodes.iter().find(|n| n.tile.contains(&m, nadir)).unwrap();
         by_level.entry(n.tile.level()).or_default().push(n.morph);
         h *= 1.03;

@@ -221,10 +221,16 @@ fn morph_sweep(field: &dyn HeightField, lo: f64, hi: f64) -> usize {
     let params = LodParams::earth_1080p();
     let nadir = above_terrain(field, 0.0).0.normalized();
     let mut prev: Option<(u8, f32)> = None;
-    let (mut h, mut merges) = (lo / 1.03, 0);
+    let (mut h, mut merges, mut step) = (lo / 1.03, 0, 0u32);
+    let mut cache = planet_frame::SelectionCache::new();
     while h < hi {
         let cam = above_terrain(field, h);
-        let sel = planet_frame::select_nodes_field(&TangentWarp, cam, field, &params);
+        // The sweep shares one warm cache, as a flight does; every 16th step is also selected cold and must be identical.
+        let sel = planet_frame::select_nodes_field_cached(&TangentWarp, cam, field, &params, &mut cache);
+        if step.is_multiple_of(16) {
+            assert_eq!(sel, planet_frame::select_nodes_field(&TangentWarp, cam, field, &params), "warm and cold differ at height {h}");
+        }
+        step += 1;
         let n = sel.nodes.iter().find(|n| n.tile.contains(&TangentWarp, nadir)).expect("a leaf contains the nadir");
         assert!((0.0..=1.0).contains(&n.morph), "morph {} at height {h}", n.morph);
         if let Some((pl, pm)) = prev {

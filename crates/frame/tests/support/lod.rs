@@ -33,6 +33,27 @@ pub fn params() -> LodParams {
 pub fn select(c: PlanetFixed) -> NodeSelection {
     select_nodes(&TangentWarp, c, &params())
 }
+
+/// A sweep's selections share one warm cache (the production path); every 16th step is also selected cold and must be identical.
+pub struct WarmSweep {
+    cache: planet_frame::SelectionCache,
+    step: u32,
+}
+
+impl WarmSweep {
+    pub fn new() -> WarmSweep {
+        WarmSweep { cache: planet_frame::SelectionCache::new(), step: 0 }
+    }
+
+    pub fn select(&mut self, c: PlanetFixed) -> NodeSelection {
+        let warm = planet_frame::select_nodes_cached(&TangentWarp, c, &params(), &mut self.cache);
+        if self.step.is_multiple_of(16) {
+            assert_eq!(warm, select(c), "a warm selection differs from a cold one at step {}", self.step);
+        }
+        self.step += 1;
+        warm
+    }
+}
 /// Overlap-free, and every direction up to 98 % of the padded horizon angle (reference horizon plus the horizon of the
 /// highest terrain) is held by exactly one leaf.
 pub fn assert_covers(name: &str, c: PlanetFixed) {
