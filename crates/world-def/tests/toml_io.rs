@@ -304,3 +304,60 @@ fn a_definition_with_authored_items_is_not_written_as_a_file_that_would_lose_the
     assert_eq!(to_toml(&d), Err(LoadError::ItemsNotSupported));
     assert!(LoadError::ItemsNotSupported.to_string().contains("authored items"));
 }
+
+// spec: WDEF-002
+// spec: WDEF-003
+#[test]
+fn the_height_field_id_loads_round_trips_and_enters_the_hash() {
+    let text = "schema_version = 1\n\n[body.0]\nradius_m = 6371000.0\n\n[world]\nheight_field = \"cpu-terrain-v1\"\nseed = 42\n";
+    let mut named = planet();
+    named.set_height_field("cpu-terrain-v1");
+    assert_eq!(parse_definition(text).unwrap(), named);
+    assert_eq!(parse_definition(text).unwrap().height_field(), Some("cpu-terrain-v1"));
+    assert_eq!(to_toml(&named).unwrap(), text, "canonical text: sorted inside the table, the id quoted");
+    // Comments, order and spacing change nothing, as for every other value.
+    let loose = "# a world\nschema_version = 1\n[world]\nseed=42\nheight_field   = 'cpu-terrain-v1'\n[body.0]\nradius_m = 6371000\n";
+    assert_eq!(parse_definition(loose).unwrap().hash(), named.hash());
+    // The id is part of the hash; naming none hashes as before the id existed (the pinned answer of the lib tests).
+    let mut other = planet();
+    other.set_height_field("cpu-erosion-v1");
+    assert_ne!(named.hash(), other.hash());
+    assert_ne!(named.hash(), planet().hash());
+    assert_ne!(named.base_hash(), planet().base_hash());
+    assert_eq!(
+        WorldDefinition::single_planet(6_371_000.0, 1).hash(),
+        6_345_583_285_605_900_286,
+        "a definition without an id keeps its hash"
+    );
+    assert_eq!(planet().height_field(), None);
+}
+
+// spec: WDEF-002
+#[test]
+fn the_height_field_id_is_the_one_string_and_must_be_a_name() {
+    let base = "schema_version = 1\n[world]\nseed = 1\n";
+    let err = |extra: &str| parse_definition(&format!("{base}{extra}")).unwrap_err();
+    // Another path as a string stays an error; the id path as a number is an error naming the path.
+    assert!(matches!(err("name = \"x\"\n"), LoadError::Unsupported { ref path, .. } if path == "world.name"));
+    assert!(matches!(err("height_field = 3\n"), LoadError::WrongType { ref path, .. } if path == "world.height_field"));
+    assert!(matches!(err("height_field = 3.5\n"), LoadError::WrongType { ref path, .. } if path == "world.height_field"));
+    // An id is letters, digits, `_` and `-`, and not empty.
+    assert!(matches!(err("height_field = \"\"\n"), LoadError::BadPath { ref path, .. } if path == "world.height_field"));
+    assert!(matches!(err("height_field = \"a b\"\n"), LoadError::BadPath { ref path, .. } if path == "world.height_field"));
+    // A table below the id path cannot coexist with it.
+    assert!(parse_definition("schema_version = 1\n[world.height_field]\nx = 1\n").is_err());
+}
+
+// spec: WDEF-003
+#[test]
+#[should_panic(expected = "height field id")]
+fn a_bad_height_field_id_cannot_be_set_in_code() {
+    planet().set_height_field("not a name");
+}
+
+// spec: WDEF-003
+#[test]
+#[should_panic(expected = "reserved")]
+fn the_height_field_path_cannot_be_a_node() {
+    planet().set("world.height_field", NodeValue::U64(1));
+}

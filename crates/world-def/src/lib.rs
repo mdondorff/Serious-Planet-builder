@@ -107,6 +107,22 @@ pub struct WorldDefinition {
     /// The index: item ids by `(body, cell)`, at the cell level of the body's current radius. Rebuilt for a body whenever
     /// its radius node changes, so a radius edit across a level boundary never strands items in old cells.
     cells: BTreeMap<(BodyId, u64), BTreeSet<u64>>,
+    /// The implementation id of the height field the world names (GEN-018), if it names one. Not a node (nodes are
+    /// numbers); it enters the base hash only when set, so a definition that names none hashes as it always did.
+    height_field: Option<String>,
+}
+
+/// Whether `id` can name an implementation: letters, digits, `_` and `-`, not empty (the TOML key alphabet).
+pub fn valid_implementation_id(id: &str) -> bool {
+    !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// The node path the height-field id is hashed and written under.
+pub const HEIGHT_FIELD_PATH: &str = "world.height_field";
+
+/// Whether `path` is the height-field id's or lies below it: those paths are not available to nodes.
+pub fn is_height_field_path(path: &str) -> bool {
+    path == HEIGHT_FIELD_PATH || path.strip_prefix(HEIGHT_FIELD_PATH).is_some_and(|rest| rest.starts_with('.'))
 }
 
 /// The body whose radius node `path` is (`body.<n>.radius_m`), if it is one.
@@ -120,7 +136,7 @@ impl WorldDefinition {
 
     /// No nodes at all (every read fails).
     pub fn empty() -> WorldDefinition {
-        WorldDefinition { nodes: BTreeMap::new(), items: BTreeMap::new(), cells: BTreeMap::new() }
+        WorldDefinition { nodes: BTreeMap::new(), items: BTreeMap::new(), cells: BTreeMap::new(), height_field: None }
     }
 
     pub fn new(world_seed: u64) -> WorldDefinition {
@@ -141,10 +157,23 @@ impl WorldDefinition {
     /// body's items under the cell level of the new radius.
     pub fn set(&mut self, path: &str, value: NodeValue) {
         assert!(!path.starts_with("derived."), "the path '{path}' is in the reserved derived namespace");
+        assert!(!is_height_field_path(path), "the path '{path}' is reserved for the height field id (set_height_field)");
         self.nodes.insert(path.to_string(), value);
         if let Some(body) = radius_path_body(path) {
             self.reindex(body);
         }
+    }
+
+    /// Name the height field of the world by implementation id (GEN-018). The id is only checked for being a name
+    /// ([`valid_implementation_id`]); whether a build knows it is decided where the implementations are (generators).
+    pub fn set_height_field(&mut self, id: &str) {
+        assert!(valid_implementation_id(id), "a height field id is letters, digits, `_` and `-`, got '{id}'");
+        self.height_field = Some(id.to_string());
+    }
+
+    /// The height field the world names, if any.
+    pub fn height_field(&self) -> Option<&str> {
+        self.height_field.as_deref()
     }
 
     pub fn set_body_radius(&mut self, body: BodyId, radius_m: f64) {
@@ -183,7 +212,13 @@ impl WorldDefinition {
     /// Hash of the procedural base: the nodes without the authored layers (ADR 0007). Authored items record the base
     /// hash they were made against, so adding an item never makes other items look stale.
     pub fn base_hash(&self) -> u64 {
-        set_hash(&self.nodes.iter().map(|(p, v)| (p.clone(), node_hash(p, *v))).collect())
+        let mut entries: BTreeMap<NodePath, u64> = self.nodes.iter().map(|(p, v)| (p.clone(), node_hash(p, *v))).collect();
+        if let Some(id) = &self.height_field {
+            // The path cannot be a node, so this entry never collides with one.
+            entries
+                .insert(HEIGHT_FIELD_PATH.to_string(), hash_u64s(0x0068_6669, &[u64::from(HASH_VERSION), hash_u64s(3, &path_words(id))]));
+        }
+        set_hash(&entries)
     }
 
     /// The radius of a body if it is a finite positive number.

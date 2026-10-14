@@ -1,0 +1,6 @@
+- [x] 1.1 failing tests: world-def (carry, hash, TOML), generators registry (default eroded, `cpu-terrain-v1`, unknown id lists known ids), app (`test-render --world` refuses an unknown id before the GPU; field resolution), tier C render of the world's field
+- [x] 1.2 world-def: `height_field`, hash, TOML
+- [x] 1.3 generators: `height_fields`
+- [x] 1.4 frame `flight_path_field`; app wiring of the terrain scene and flight
+- [x] 1.5 specs (WDEF-002, WDEF-003, GEN-018)
+- [x] 1.6 reviewers (numerics, spec-guardian, verifier), archive, log line, PR, CI green, merge

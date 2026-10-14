@@ -6,6 +6,7 @@ pub mod manifest;
 mod plancheck;
 pub mod sheet;
 pub mod skeleton;
+pub mod worldfield;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -296,7 +297,14 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     if !matches!(o.mode, Mode::Generate) {
         // The global-bake perf scene takes the definition, grid size and thread count of the global commands.
         let bake_scene = matches!(o.mode, Mode::TestRender) && o.perf && o.scene == "global-bake";
-        let allowed: &[&str] = if bake_scene { &["--world", "--global-res", "--threads"] } else { &[] };
+        let terrain_scene = matches!(o.mode, Mode::TestRender) && !o.perf && !o.perf_smoke && o.scene == "terrain";
+        let allowed: &[&str] = if bake_scene {
+            &["--world", "--global-res", "--threads"]
+        } else if terrain_scene {
+            &["--world", "--global-res"]
+        } else {
+            &[]
+        };
         if let Some(f) = STORE_OPTIONS.iter().find(|f| o.given.contains(**f) && !allowed.contains(f)) {
             return Err(format!("{f} only applies to `generate` (the tile store commands)"));
         }
@@ -382,6 +390,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         return writeln!(out, "planet test-render [smoke ok]").map_err(err);
     }
     check_flight_options(o)?;
+    worldfield::check_options(o)?;
     let policy = o.adapter.unwrap_or_else(AdapterPolicy::from_env);
     let ctx = GpuContext::new(policy).map_err(|e| e.to_string())?;
     // Hybrid-graphics rule (report §8): always log which adapter we got.
