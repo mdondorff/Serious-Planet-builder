@@ -180,7 +180,7 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
         }
-        let text = planet_generators::manifest::determinism_manifest();
+        let text = crate::manifest::full_manifest();
         std::fs::write(path, &text).map_err(|e| format!("writing {}: {e}", path.display()))?;
         return writeln!(out, "wrote {} ({} lines)", path.display(), text.lines().count()).map_err(err);
     }
