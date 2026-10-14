@@ -168,7 +168,7 @@ Each recommended change keeps the properties the project depends on:
 - Time effects are measured only in the architect's perf windows (ADR 0020). The perf scene should record plan, encode
   and GPU separately, as it already does, plus the frame time of a moving camera.
 
-## Proposed queue changes (owner's confirmation requested)
+## Queue changes (decided by the owner, 2026-10-14; in `docs/status.md`)
 
 Into the M4 queue in `docs/status.md`:
 
