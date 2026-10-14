@@ -19,3 +19,8 @@ planet-generators.workspace = true
 planet-generators = { workspace = true, features = ["stress"] }
 planet-testkit.workspace = true
 libm.workspace = true
+
+[features]
+# SPIKE-06 (docs/spikes.md): experimental compact tile format (shared grid, per-tile height and normal texels). Not part of
+# the product: off by default, never enabled by another crate's default features.
+spike06 = []
