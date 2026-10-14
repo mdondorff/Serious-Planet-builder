@@ -8,6 +8,85 @@ Planned spikes from the background report (open them when their milestone starts
 - Global hydrology on the sphere (stream-power on a 1–4 km grid + halo-based local carving). Milestone: M3. Fallback: local erosion filter + rivers on a coarse flow grid.
 - City HLOD with 10^5 buildings. Milestone: M7.
 
+## SPIKE-05 Residency counts
+Status: closed
+Opened: 2026-10-15
+Closed: 2026-10-15
+Question: How many nodes, tiles and bytes (today's 44-byte vertex) does each standard view need resident for (i) today's frustum-cut draw set and (ii) the position-based surroundings set (no frustum cut, horizon cut kept), at finest level 26, 23 and 22 and at cells 32 and 64; how much of what is drawn produces no visible pixel; what does a tile cost to generate; and how long does the plan take, apart from streaming and upload?
+Why it matters: ADR 0031 (residency set versus draw set, request order), ADR 0033 (terrain's VRAM share, pooled slots, finest level), ADR 0032 (teleport plan time). Replaces the hand estimates in ADR 0033's context (about 50 KB per tile, 0.4 GB for the ground-1m draw set, 3-6x for the residency set).
+Time box: half a day plus an hour.
+Success criteria: a table of nodes and MB per standard view and set, at the three finest levels and cells 32 and 64; the morph interval rechecked at 64 on the eroded field; the hidden-triangle share at ground-1m; tiles per second per thread for the eroded field and `cpu-terrain-v1`; plan time reported apart from streaming time.
+Fallback if it fails: n/a (counts).
+Code location: `crates/app/examples/residency_counts.rs`, a measurement helper and not production code: it calls the production planner (`plan_terrain_cached`), the production selection (`select_nodes_field_cached`) and the production mesh builder, and adds a small CPU depth pass. Re-run: `cargo run --release -p planet --example residency_counts -- --store DIR --global-res N [--mem-res M] --part counts|hidden|throughput` (needs a bake made by `generate --global-dir`).
+Result (2026-10-15, main at 5543a6f, one session; the 360-line count listing was `target/spike05/counts.txt`, not kept; the tables below are the result):
+- **Which field.** Every count, every plan time and the store-backed throughput figures use **the eroded field (`cpu-erosion-v1`, GEN-017, the world's default since #110) over the stored 16384-cell global bake** (the M3 acceptance bake, seed 1, read through `StoreSource`). `cpu-terrain-v1` over the same bake was counted as a second field: within 1 % of the eroded counts (ground-1m draw 8,735 against 8,763 nodes), so only the eroded one is tabled. The hidden-triangle pass and the "in-memory" throughput figures read a 1024-cell in-memory bake instead (the store's block cache is a mutex, see the throughput bullet); their draw sets differ from the tabled ones by under 0.1 % (ground-1m 8,757 nodes). The perf scene's reference field (`cpu-ref-height-v2`, what the perf windows plan) was not used. Camera and LOD as the perf scene: the ten scripted views, 2560x1440, vertical fov 60 degrees, tau 6 px (viewport / tau 240), horizon cut on, frustum cut padded by `max_height_m` as in production. Bytes = distinct tiles x vertices x 44 B: 1,221 vertices (53.7 KB) per tile at cells 32, 4,485 (197 KB) at cells 64; the shared index buffer is not counted. Nothing here is a perf-window measurement.
+- **Sets at cells 32, finest level 26, per standard view** (draw set = what `plan_terrain_cached` draws today; surroundings = `select_nodes_field_cached`, no frustum cut):
+
+| view | draw nodes | draw MB | surroundings nodes | surroundings MB | surroundings / draw |
+|---|---|---|---|---|---|
+| orbit-20000km | 52 | 2.8 | 52 | 2.8 | 1.0 |
+| high-2000km | 429 | 23.0 | 697 | 37.4 | 1.6 |
+| aerial-200km | 655 | 35.2 | 1,969 | 105.8 | 3.0 |
+| aerial-20km | 1,106 | 59.4 | 3,192 | 171.5 | 2.9 |
+| low-2km | 2,625 | 141.0 | 4,781 | 256.9 | 1.8 |
+| ground-200m | 4,498 | 241.7 | 6,514 | 350.0 | 1.45 |
+| **ground-1m** | **8,763** | **470.8** | **10,751** | **577.6** | **1.23** |
+| north-pole-1km | 2,562 | 137.6 | 4,188 | 225.0 | 1.6 |
+| cube-corner-1km | 3,617 | 194.3 | 5,949 | 319.6 | 1.65 |
+| face-edge-1km | 3,572 | 191.9 | 5,868 | 315.3 | 1.65 |
+
+- **Finest level 26 / 23 / 22, cells 32.** Only ground-1m is deep enough to change (every other view stops at level 19 or coarser). The spacings of levels 22 and 23 are about 7.5 cm and 3.7 cm (queued SPIKE-07).
+
+| ground-1m, cells 32 | L26 | L23 | L22 |
+|---|---|---|---|
+| draw nodes / MB | 8,763 / 470.8 | 7,212 / 387.5 | 6,639 / 356.7 |
+| surroundings nodes / MB | 10,751 / 577.6 | 9,200 / 494.3 | 8,627 / 463.5 |
+
+  Capping at 23 saves 18 % of the nodes and bytes at ground-1m, capping at 22 saves 24 %; the node count is much less sensitive to the finest level than to cells.
+- **Cells 64.** A tile edge twice as long: a quarter of the nodes at the same level, 3.7x the bytes per tile. The same level number means half the vertex spacing, so the fair comparison is equal spacing (cells 64 at L25 / L22 / L21 against cells 32 at L26 / L23 / L22):
+
+| ground-1m, equal vertex spacing | cells 32 draw nodes / MB | cells 64 draw nodes / MB | cells 32 surroundings | cells 64 surroundings |
+|---|---|---|---|---|
+| finest 26 (cells 32) = 25 (cells 64) | 8,763 / 470.8 | 2,693 / 531.4 | 10,751 / 577.6 | 3,294 / 650.0 |
+| finest 23 = 22 | 7,212 / 387.5 | 2,216 / 437.3 | 9,200 / 494.3 | 2,817 / 555.9 |
+| finest 22 = 21 | 6,639 / 356.7 | 2,039 / 402.4 | 8,627 / 463.5 | 2,640 / 521.0 |
+
+  Cells 64 cuts the nodes (draw calls, per-node CPU work) by 3.3x at equal spacing, with equal triangles (20.2 M at 32/L26, 23.4 M at 64/L25) and 13 % more bytes (coarser granularity: more tile area at the view's edge is resident). At the same level number (half the spacing) cells 64 L26: aerial-20km 359 draw nodes / 70.8 MB, ground-200m 1,395 / 275.3 MB, ground-1m 2,744 / 541.5 MB.
+- **Morph interval at cells 64 on the eroded field: holds.** `LodParams::validate` accepts cells 64 at viewport / tau 240 (the ratio must exceed about 2 x cells = 128), and all 360 plans (two fields, nine parameter sets, ten views, both sets) are accepted, none rejected for steepness; the largest `morph_start / morph_end` of any node is 0.700, the base value 1 - `morph_band`, so no height-extent extension of the interval was needed at 32 or 64. Caveat: the 16384 bake is about 1.2 km per cell, as in the M3 acceptance check.
+- **Plan time, apart from streaming and upload** (single thread, eroded field, 16384 store, ad hoc on the 20-thread laptop, not a perf window; cold = fresh `SelectionCache`, warm = the same request again; ms):
+
+| view | cells | draw plan cold / warm | surroundings selection cold / warm |
+|---|---|---|---|
+| ground-1m | 32 | 184 / 20.0 | 276 / 5.8 |
+| ground-1m | 64 | 68 / 5.9 | 90 / 1.65 |
+| ground-200m | 32 | 121 / 9.7 | 217 / 2.9 |
+| aerial-20km | 32 | 59 / 2.0 | 188 / 1.7 |
+| aerial-200km | 32 | 867 / 728 | 2.3 / 0.7 |
+| high-2000km | 32 | 5,337 / 5,708 | 1.8 / 0.3 |
+| orbit-20000km | 32 | 6,492 / 6,270 | 0.1 / 0.03 |
+
+  (`cpu-terrain-v1`, ground-1m draw plan: 81 cold / 11.0 warm at cells 32, 30.5 / 3.6 at 64.) Reading: (1) the selection is cheap (surroundings, warm, ground-1m: 5.8 ms, in line with the perf windows' 6.6 ms for the reference field). The **draw plan costs 20 ms warm** because `plan_terrain_cached` also evaluates, per node, the field height at the tile centre and the mesh key; by difference that is about 14 ms for 8,763 nodes (1.6 us each, which is the eroded field's cost per sample, measured below), over the 8 ms plan budget. A tile's origin and key are pure functions of the tile and belong in the resident tile, not in the per-frame plan. (2) At altitude the draw plan takes **seconds** (orbit 6.5 s for 52 nodes, high-2000km 5.3-5.7 s, aerial-200km 0.7-0.9 s) while the selection takes under 2.5 ms. With so few nodes the cost can only be the mesh key of the coarse tiles, which reads the bake cells of the tile's footprint (a level-2 tile covers about 16 M cells of this bake) and is not cached across plans. That is inference by elimination, not profiled. The perf windows never saw it because the reference field reads no bake. (3) Cold ground plans (60-280 ms) include first block decodes of the store's block cache; the 25-29 ms cold figure of the perf windows was the reference field. A teleport frame's plan alone is therefore several frames, before any tile is generated (ADR 0032).
+- **Generation (streaming) time, apart from plan time.** One tile at cells 32 as `tile_mesh_field` builds it (heights, normal stencil, morph targets, skirts): eroded 8.8 ms (113 tiles/s per thread) over the 16384 store and 5.7 ms (174/s) over a 1024-cell in-memory bake; `cpu-terrain-v1` 4.2 ms (241/s) and 3.7 ms (271/s). At cells 64: eroded 35.3 ms (28/s; 22.1 ms, 45/s in memory), terrain 16.6 ms (60/s; 14.6 ms, 69/s): four times the cost for four times the area, so samples per second stay constant (about 120k per thread for the eroded field over the store, 190k in memory, 255k for terrain). Bare height samples: eroded 1.0-1.7 us, terrain 0.66-0.79 us. On 20 threads over the in-memory bake: eroded 1,217 tiles/s at cells 32 (357/s at 64), terrain 1,530 (523/s); the by-hand 3,800 tiles/s (review item F) was 3x too optimistic for the eroded field. **Over the store-backed 16384 bake the same 20 threads manage only 22 tiles/s (eroded) and 100 (terrain), five times slower than one thread**: `StoreSource` takes one mutex for every lattice read (a 16-block LRU of up-to-16 MB blocks, `crates/cache/src/global_store.rs`). From empty, the ground-1m draw set (8,763 tiles) takes about 7.2 s on 20 threads with a lock-free source (surroundings, 10,751 tiles: 8.8 s), about 77 s on one thread, and about 400 s through `StoreSource` as it is. GPU upload time of the buffers needs the real adapter: **not measured, needs the architect's perf window** (the volume is the MB column).
+- **Hidden triangles** (a CPU depth pass over the drawn tiles at 2560x1440: pixel-centre sampling, exact depth equality, near-plane clipping, no backface culling, unmorphed vertex positions, self-checked on a toy scene; eroded field, 1024-cell in-memory bake; any adapter):
+
+| view, cells 32 L26 | drawn triangles | visible | hidden share | tiles with no visible triangle | tiles a tight frustum cut would keep |
+|---|---|---|---|---|---|
+| ground-1m | 20.18 M | 0.77 M | **96.2 %** | 7,631 of 8,757 (87 %) | 2,913 (33 %) |
+| ground-200m | 10.35 M | 0.78 M | 92.4 % | 3,391 of 4,492 (75 %) | 1,702 |
+| low-2km | 6.03 M | 0.87 M | 85.6 % | 1,654 of 2,619 (63 %) | 1,287 |
+| aerial-20km | 2.52 M | 0.91 M | 63.8 % | 343 of 1,094 (31 %) | 889 |
+| ground-1m, cells 64 L26 | 23.86 M | 0.90 M | 96.2 % | 2,362 of 2,741 (86 %) | 934 |
+
+  `cpu-terrain-v1` gives the same shares within 1.5 points (ground-1m 96.3 %). At ground-1m 63 % of the pixels are covered and 8.7 drawn triangles fall on each, but only 0.33 visible triangles per covered pixel: **the 5.4 triangles per pixel of the review are hidden terrain, not over-tessellation at grazing angles** (the visible triangles are about 3 pixels each, as tau 6 px intends). The last column tests each drawn tile's own bounding sphere (the exact radius of its vertices) against the camera's side planes: it loses no tile that has a visible triangle in any row and would drop 67 % of the ground-1m tiles. **Today's frustum cut removes almost nothing near the ground**: `select_impl` pads every node's sphere by the global `max_height_m` (9 km or more) before the plane test, so the draw set is already 81 % of the position-based set at ground-1m. A conservative per-tile bound (LOD-008's height bounds) needs less padding than 9 km, though more than the exact radius used here.
+Recommendation (for ADR 0031 and ADR 0033):
+1. **ADR 0031: adopt position-based residency; it is cheap.** The surroundings set is 1.23x the draw set at the worst view (ground-1m: 10,751 nodes, 578 MB at today's vertex, cells 32, finest 26; 463 MB with the finest level capped at 22) and at most 3x where totals are small (172 MB at aerial-20km); the by-hand 3-6x was too high. It needs no prediction margin for rotation. Size ADR 0033's share against the ground-1m surroundings, 0.58 GB, with the 2 GB and 3 GB starting shares leaving room. A flight also holds the tiles of earlier frames; that union is not counted here and belongs in the residency manager's tests.
+2. **Tighten the draw set's frustum cut** (a change to LOD-007, queue it separately): per-tile height bounds instead of the global `max_height_m` pad would cut about two thirds of the ground-1m draw calls with no visible tile lost, more per unit of work than cells 64, and it makes the draw set a true subset of the residency set. Occlusion would remove most of the rest (87 % of tiles have no visible triangle) but conflicts with CON-03; it stays the owner's decision.
+3. **ADR 0033: cells 64 is a real option for the CPU** (3.3x fewer nodes, warm plan 5.9 ms instead of 20) at +13 % bytes and a four times coarser tile (35 ms to build); the morph interval holds at 64 on the eroded field. Decide it together with the slot size of the pooled allocator (197 KB at cells 64, 54 KB at 32). A finest-level cap of 22 or 23 saves 18-24 % of the ground-1m tiles and bytes; whether it is worth the look is for SPIKE-07's frames.
+4. **ADR 0032: plan time is its own term.** The eroded field's draw plan is 20 ms warm at ground-1m, 180 ms cold, and seconds at altitude over the 16384 bake; none of it is streaming. Origin and mesh key are computed once per resident tile, not per frame, and the plan's cost has to be bounded before a detail-lag budget means anything.
+5. **Generation throughput sets the teleport lag, and `StoreSource` is the bottleneck for the production bake.** 1,217 tiles/s (eroded, 20 threads, lock-free source) fills the ground-1m draw set in about 7 s; through the mutex-guarded store source it takes minutes. Fix the source (per-thread block cache or a shared lock-free one; the regional-field stage with halos, ADR 0026 point 5, is the natural place) before the scheduler is measured. GPU evaluation of the local stage (review item 4b) is not yet justified for the draw set by these numbers; it matters for a world-scale teleport.
+Needs the architect (perf window): GPU upload time and per-frame upload cost of the draw and surroundings sets on the RTX; CPU encode time per draw at ground-1m (already queued); the plan times above under the readiness gate (these are ad hoc).
+Open points: the hidden-triangle pass uses unmorphed positions and the 1024 bake (the 16384 store would take about 40 minutes through the mutex); one bake seed (1); the union of resident tiles along a dive was not counted; the mesh-key explanation of the seconds-long altitude plans is an inference.
+
 ## SPIKE-03 Global hydrology on the sphere
 Status: open
 Opened: 2026-10-12
