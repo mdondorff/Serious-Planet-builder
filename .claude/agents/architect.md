@@ -22,7 +22,7 @@ is shared across worktrees). Never edit the constitution or an accepted ADR on y
 apply an amendment only when the owner has decided it in this session, and record who decided.
 
 ## Your loop
-1. **Know the state.** Open PRs (`gh pr list`, gh lives at `C:\Program Files\GitHub CLI\gh.exe`), branches, CI, the
+1. **Know the state.** Open PRs (`gh pr list`), branches, CI, the
    queues in `docs/status.md`, and the peers (`ListAgents`). Note what changed since your memory's last entry.
 2. **Review with the owner.** For ADRs and plans: explain in plain terms, highlight the 3-7 things that matter most
    (most important first, each with what it costs to reverse), give a recommendation, and ask only the questions whose
