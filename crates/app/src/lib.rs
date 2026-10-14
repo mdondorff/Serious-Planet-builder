@@ -2,6 +2,7 @@
 //! and `test-render` (headless harness). M0 only wires them up; real work arrives with M1+.
 
 pub mod globalperf;
+pub mod manifest;
 mod plancheck;
 pub mod sheet;
 pub mod skeleton;
@@ -784,7 +785,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("planet-manifest-{}", std::process::id())).join("m.txt");
         let out = run_str(&["generate", "--manifest", path.to_str().unwrap()]).unwrap();
         assert!(out.contains("wrote"), "{out}");
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), planet_generators::manifest::determinism_manifest());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), crate::manifest::full_manifest());
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
         assert!(run_str(&["generate", "--manifest", "x.txt", "--tile", "0,0,0,0"]).unwrap_err().contains("excludes --tile"));
         assert!(run_str(&["generate", "--manifest"]).unwrap_err().contains("needs a path"));
