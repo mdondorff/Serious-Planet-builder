@@ -1,7 +1,7 @@
 # coordinates Specification
 
 ## Purpose
-TBD - created by archiving change m0-foundations. Update Purpose after archive.
+Positions, frames and numeric foundations: float64 PlanetFixed positions with typed TileLocal and CameraRelative values (CON-11, CON-13, ADR 0001), the ReferenceSurface geo interface (CON-15, ADR 0011), the cube-sphere face mapping, tile identifiers and cross-face neighbours (ADR 0003), and the integer hashing and pure-Rust transcendentals that make generation deterministic (CON-14, ADR 0010).
 
 ## Requirements
 

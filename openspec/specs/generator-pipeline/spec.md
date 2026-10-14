@@ -1,7 +1,7 @@
 # generator-pipeline Specification
 
 ## Purpose
-TBD - created by archiving change m0-foundations. Update Purpose after archive.
+The generators that turn a WorldDefinition into fields: pure, thread-count-independent and bit-identical across operating systems (CON-06, CON-14, ADRs 0006, 0010, 0023), staged global-coarse, regional and local with border, partition and coarse/fine agreement (CON-08, ADRs 0021, 0022), one implementation per layer (CON-07), and the global bake and the terrain and eroded height fields built on it (ADRs 0026-0028, 0030).
 
 ## Requirements
 

@@ -1,0 +1,6 @@
+- [x] 1.1 failing tier-A test of the lint rule (`a_main_spec_needs_a_real_purpose`); `cargo xtask spec-lint` fails on the ten placeholders
+- [x] 1.2 spec-lint: `purpose_of`, `purpose_errors`
+- [x] 1.3 Purpose for each of the ten specs; TEST-001 text
+- [x] 1.4 learning entry (warm SelectionCache in tier-A sweeps)
+- [x] 1.5 spec-guardian, verifier (findings fixed)
+- [x] 1.6 log line, CI green, merge

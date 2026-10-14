@@ -1,7 +1,7 @@
 # authored-layers Specification
 
 ## Purpose
-TBD - created by archiving change m0-foundations. Update Purpose after archive.
+Hand-authored content (placed items and edits) kept apart from the procedural base: geo-anchored text files with content-addressed binary blobs, recorded versions, version pinning with freeze/bake, and commands with undo. Governed by CON-09 and ADR 0007 (authored-layer data model); the item index is ADR 0021. Planned for the editor milestones.
 
 ## Requirements
 

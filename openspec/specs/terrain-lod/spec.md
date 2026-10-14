@@ -1,7 +1,7 @@
 # terrain-lod Specification
 
 ## Purpose
-TBD - created by archiving change m0-foundations. Update Purpose after archive.
+Choosing what terrain to draw: CPU quadtree node selection as a pure, GPU-free function of camera, parameters and tree (CON-03, ADR 0009), complete coverage and crack-free morphing (ADRs 0014, 0016), height-aware selection with proven height bounds (LOD-008), frustum selection against the reversed-Z camera (CON-12, ADR 0002), and the plan builder that turns a selection into FramePlan draws (CON-11).
 
 ## Requirements
 

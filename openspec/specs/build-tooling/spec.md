@@ -1,7 +1,7 @@
 # build-tooling Specification
 
 ## Purpose
-TBD - created by archiving change m0-foundations. Update Purpose after archive.
+The workspace and its tooling: the layered crates with downward-only dependencies and the graphics API confined to `render` (CON-02, ADRs 0004, 0008, 0015), the single `cargo xtask` command surface and test tiers (CON-25, ADR 0009), the three run modes (CON-01), CI on Windows and Linux (CON-26) and the licence policy (CON-27).
 
 ## Requirements
 

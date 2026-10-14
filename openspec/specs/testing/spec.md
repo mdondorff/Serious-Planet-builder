@@ -1,16 +1,20 @@
 # testing Specification
 
 ## Purpose
-TBD - created by archiving change m0-foundations. Update Purpose after archive.
+How the project proves itself: spec traceability and the A/B/C/D verification tiers (CON-16, CON-17, ADR 0012), per-adapter goldens, image metrics and the golden review policy (CON-18, ADRs 0009, 0017), actionable failures and repro bundles (CON-19), count-based budgets and the performance protocol on the reference machine (CON-20, CON-21, ADR 0020), and the flight and stress scenes used for the real-GPU review.
 
 ## Requirements
 
 ### Requirement: TEST-001 Spec traceability
-Every requirement in the specs SHALL have a unique trace ID, a verification tier (A, B, C or D) and a status (active, planned or deprecated); every `// spec: ID` citation in the code SHALL name an existing requirement or constitution rule; every active tier A, B or C requirement SHALL be cited by at least one test of its own tier, where a citation counts only when the `// spec:` comment sits directly above a `#[test]` function (only comments and attributes, including wrapped multi-line ones, may sit between; only the `#[test]` attribute counts) and integration test files `tests/gpu_*.rs` are tier C, `tests/oracle_*.rs` tier B and all others (including unit tests under `src/`) tier A, matching the test runner, and a `// spec:` comment directly above a performance-harness scene entry point (a `fn perf_*` item under `crates/app/src/`, with the same comments-and-attributes rule between) counts as tier C evidence only (CON-17: the scene measures what no test may; there is no further tier); every tier D requirement SHALL name its review artefact.
+Every requirement in the specs SHALL have a unique trace ID, a verification tier (A, B, C or D) and a status (active, planned or deprecated); every `// spec: ID` citation in the code SHALL name an existing requirement or constitution rule; every active tier A, B or C requirement SHALL be cited by at least one test of its own tier, where a citation counts only when the `// spec:` comment sits directly above a `#[test]` function (only comments and attributes, including wrapped multi-line ones, may sit between; only the `#[test]` attribute counts) and integration test files `tests/gpu_*.rs` are tier C, `tests/oracle_*.rs` tier B and all others (including unit tests under `src/`) tier A, matching the test runner, and a `// spec:` comment directly above a performance-harness scene entry point (a `fn perf_*` item under `crates/app/src/`, with the same comments-and-attributes rule between) counts as tier C evidence only (CON-17: the scene measures what no test may; there is no further tier); every tier D requirement SHALL name its review artefact; and every main spec SHALL have a Purpose section that is not empty and does not contain the placeholder "TBD" (in any case).
 
 Verify: A
 Status: active
 Source: CON-16, ADR 0009, ADR 0012
+
+#### Scenario: Placeholder Purpose
+- **WHEN** a spec's Purpose is missing, empty or contains "TBD"
+- **THEN** `cargo xtask spec-lint` fails and names the spec
 
 #### Scenario: Uncited active requirement
 - **WHEN** an active tier A requirement has no citing test

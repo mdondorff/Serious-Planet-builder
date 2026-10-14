@@ -1,7 +1,7 @@
 # streaming-cache Specification
 
 ## Purpose
-TBD - created by archiving change m0-foundations. Update Purpose after archive.
+Getting generated data to the renderer without blocking a frame (CON-22): injected time, I/O and spawning (CON-04), content-addressed persistent keys, the tile pack store with verification and compaction (CON-05, ADRs 0018, 0019, 0024, 0025, 0029), the persisted global bake blocks and stage outputs (ADR 0026), and the scheduling, cancellation and memory budgets of the residency system (CON-20, CON-21).
 
 ## Requirements
 
