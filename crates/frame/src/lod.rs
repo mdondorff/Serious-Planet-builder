@@ -340,6 +340,22 @@ pub fn select_nodes_field(map: &dyn FaceMapping, camera: PlanetFixed, field: &dy
     select_impl(map, camera, None, field, p, &mut SelectionCache::new())
 }
 
+/// [`select_nodes`] reusing the per-tile work of earlier selections in `cache`: the result is identical.
+pub fn select_nodes_cached(map: &dyn FaceMapping, camera: PlanetFixed, p: &LodParams, cache: &mut SelectionCache) -> NodeSelection {
+    select_impl(map, camera, None, &Flat, p, cache)
+}
+
+/// [`select_nodes_field`] reusing the per-tile work of earlier selections in `cache`: the result is identical.
+pub fn select_nodes_field_cached(
+    map: &dyn FaceMapping,
+    camera: PlanetFixed,
+    field: &dyn HeightField,
+    p: &LodParams,
+    cache: &mut SelectionCache,
+) -> NodeSelection {
+    select_impl(map, camera, None, field, p, cache)
+}
+
 /// [`select_nodes_in_view`] over the terrain of `field`.
 pub fn select_nodes_in_view_field(map: &dyn FaceMapping, camera: &Camera, field: &dyn HeightField, p: &LodParams) -> NodeSelection {
     select_impl(map, camera.position, Some(camera.frustum()), field, p, &mut SelectionCache::new())

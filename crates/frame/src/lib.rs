@@ -14,8 +14,8 @@ pub use camera::{Camera, Frustum};
 pub use controller::{CameraController, CameraInput, CameraMode, ControllerParams};
 pub use instances::{camera_relative_positions, cull_instances, indirect_args, IndirectArgs, Instance};
 pub use lod::{
-    balance_leaves, select_nodes, select_nodes_field, select_nodes_in_view, select_nodes_in_view_cached, select_nodes_in_view_field,
-    LodParams, NodeSelection, SelectedNode, SelectionCache,
+    balance_leaves, select_nodes, select_nodes_cached, select_nodes_field, select_nodes_field_cached, select_nodes_in_view,
+    select_nodes_in_view_cached, select_nodes_in_view_field, LodParams, NodeSelection, SelectedNode, SelectionCache,
 };
 pub use plan::{plan_tiles, DebugView, FramePlan, PlanError, PlanRequest, TileDraw};
 pub use repro::ReproBundle;
