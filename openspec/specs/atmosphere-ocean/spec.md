@@ -1,7 +1,7 @@
 # atmosphere-ocean Specification
 
 ## Purpose
-TBD - created by archiving change m0-foundations. Update Purpose after archive.
+The atmosphere, aerial perspective, HDR exposure and ocean/shoreline rendering: look-up tables checked against a CPU reference, scattering applied to all geometry, and the sea surface. Planned for M5; it should follow the renderer's rules (CON-03, CON-11, CON-18: every visual feature has a debug view and a tier-C test) and has no ADR of its own yet.
 
 ## Requirements
 

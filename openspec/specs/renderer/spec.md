@@ -1,7 +1,7 @@
 # renderer Specification
 
 ## Purpose
-TBD - created by archiving change m0-foundations. Update Purpose after archive.
+The GPU side: it executes a FramePlan and decides nothing about what to draw (CON-03, ADR 0009), with reversed-Z depth (CON-12, ADR 0002), camera-relative tile-local precision with no planet-scale shader values (CON-11, CON-13, ADR 0001), the terrain mesh, vertex-shader morph and persistent terrain renderer (ADRs 0013, 0014, 0016), shader validation, deterministic debug views (CON-18) and adapter selection.
 
 ## Requirements
 

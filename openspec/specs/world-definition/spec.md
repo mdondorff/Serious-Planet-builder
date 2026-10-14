@@ -1,7 +1,7 @@
 # world-definition Specification
 
 ## Purpose
-TBD - created by archiving change m0-foundations. Update Purpose after archive.
+The WorldDefinition as the single source of truth for all world content (CON-05): a versioned file format with tested migrations (CON-10), canonical hashing, recorded reads so a generator's keys cover exactly what it read (CON-06, ADR 0006), and incremental invalidation when the definition changes (ADR 0007).
 
 ## Requirements
 

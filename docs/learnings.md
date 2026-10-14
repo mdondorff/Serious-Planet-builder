@@ -136,3 +136,8 @@ Proposed follow-up: one perf window (the architect starts it) with three throwaw
 What happened: `generate --plan-check` was first tested inside the app crate's unit tests (a 256-cell bake, both fields, ten views each): 4 s, one of the slowest tests in `test fast`, which then failed its 10 s budget once inside `cargo xtask accept M3` (11.0 s; 8.4 s on a quiet machine). The spec-guardian review found it; it moved to `crates/app/tests/oracle_plan_check.rs` (tier B).
 Assumption it changes: "a small bake makes a CLI test cheap": the planning of every view is the cost, not the bake. The frame test already plans the same flight on the same bake size; the CLI test only needs the refusal paths in tier A.
 Proposed follow-up: none; new app-level tests that plan frames start in a tier B binary.
+
+## 2026-10-14 Tier A sweep tests should share a warm SelectionCache
+What happened: the morph sweeps in `planet-frame` (many cameras over the same tree) built a cold per-tile selection cache for every camera, which was most of the time of `cargo xtask test fast`. Sharing one warm `SelectionCache` across a sweep (#108, test-fast-budget) brought the command from about 9 s to 6-7 s with no assertion changed.
+Assumption it changes: "a tier A sweep gets its cost from the number of cameras": it comes from cold per-tile work repeated for each, and the planner's own warm path (6-7 ms at ground-1m against a cold 25+ ms) is the one to test through (CLAUDE.md "< 10 s").
+Proposed follow-up: new tier A tests that plan many views over one tree take a shared warm cache by default; a test that needs the cold path says so in a comment.

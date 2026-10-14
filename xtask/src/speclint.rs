@@ -225,12 +225,34 @@ pub struct Report {
     pub summary: String,
 }
 
+/// The Purpose section of a main spec: the text between `## Purpose` and the next `## ` heading, trimmed.
+pub fn purpose_of(text: &str) -> Option<String> {
+    let mut lines = text.lines();
+    lines.find(|l| l.trim_end() == "## Purpose")?;
+    let body: Vec<&str> = lines.take_while(|l| !l.starts_with("## ")).collect();
+    Some(body.join("\n").trim().to_string())
+}
+
+/// A main spec needs a real Purpose: present, not empty, not OpenSpec's archive placeholder ("TBD ...").
+fn purpose_errors(name: &str, text: &str) -> Option<String> {
+    match purpose_of(text) {
+        None => Some(format!("{name}: spec has no '## Purpose' section (say what the subsystem owns and which ADRs and constitution rules govern it)")),
+        Some(p) if p.is_empty() => Some(format!("{name}: the Purpose section is empty")),
+        Some(p) if p.to_ascii_uppercase().contains("TBD") => {
+            Some(format!("{name}: the Purpose is a placeholder (contains 'TBD'): write what the subsystem owns and which ADRs and constitution rules govern it"))
+        }
+        Some(_) => None,
+    }
+}
+
 pub fn lint(specs: &BTreeMap<String, String>, sources: &BTreeMap<PathBuf, String>, constitution: &str) -> Report {
     let mut errors = Vec::new();
     let mut reqs: Vec<Requirement> = Vec::new();
     // Main specs first, then change deltas (names starting with "change:"). A delta requirement replaces a
     // main requirement of the same ID (MODIFIED) or is added (ADDED).
     let is_delta = |n: &str| n.starts_with("change:");
+    // Change deltas have no Purpose; main specs must.
+    errors.extend(specs.iter().filter(|(n, _)| !is_delta(n)).filter_map(|(n, t)| purpose_errors(n, t)));
     for (name, text) in specs.iter().filter(|(n, _)| !is_delta(n)).chain(specs.iter().filter(|(n, _)| is_delta(n))) {
         let (parsed, e) = parse_requirements(name, text);
         errors.extend(e);
@@ -374,8 +396,13 @@ Verify: D
 Status: active
 ";
 
+    /// A main spec file: a real Purpose section, then the fixture's requirements.
+    fn with_purpose(body: &str) -> String {
+        format!("# coordinates Specification\n\n## Purpose\nOwns the fixture coordinates.\n\n## Requirements\n\n{body}")
+    }
+
     fn lint_with(spec: &str, source: &str) -> Report {
-        let specs = BTreeMap::from([("coordinates".to_string(), spec.to_string())]);
+        let specs = BTreeMap::from([("coordinates".to_string(), with_purpose(spec))]);
         let sources = BTreeMap::from([(PathBuf::from("a.rs"), source.to_string())]);
         lint(&specs, &sources, "- **CON-15** x")
     }
@@ -423,7 +450,7 @@ Status: active
         let delta = "## MODIFIED Requirements\n### Requirement: COORD-003 Geo\nVerify: A\nStatus: active\n\n\
                      ## REMOVED Requirements\n### Requirement: COORD-009 Old\n**Reason**: gone\n";
         let specs =
-            BTreeMap::from([("coordinates".to_string(), main.to_string()), ("change:m1/coordinates".to_string(), delta.to_string())]);
+            BTreeMap::from([("coordinates".to_string(), with_purpose(main)), ("change:m1/coordinates".to_string(), delta.to_string())]);
         let sources = BTreeMap::new();
         let r = lint(&specs, &sources, "");
         // COORD-003 is active in the delta and uncited; COORD-009 is removed, so not reported, and no duplicate error.
@@ -441,7 +468,7 @@ Status: active
     }
 
     fn lint_at(spec: &str, path: &str, source: &str) -> Report {
-        let specs = BTreeMap::from([("coordinates".to_string(), spec.to_string())]);
+        let specs = BTreeMap::from([("coordinates".to_string(), with_purpose(spec))]);
         let sources = BTreeMap::from([(PathBuf::from(path), source.to_string())]);
         lint(&specs, &sources, "- **CON-15** x")
     }
@@ -540,7 +567,7 @@ fn t() {}
         }
         // One test of the right tier among several of others is enough.
         let spec = ONE.replace("Verify: A", "Verify: C");
-        let specs = BTreeMap::from([("coordinates".to_string(), spec)]);
+        let specs = BTreeMap::from([("coordinates".to_string(), with_purpose(&spec))]);
         let sources =
             BTreeMap::from([(PathBuf::from("a/tests/x.rs"), test.to_string()), (PathBuf::from("a/tests/gpu_x.rs"), test.to_string())]);
         assert!(lint(&specs, &sources, "").errors.is_empty());
@@ -662,5 +689,26 @@ struct S;
             );
             assert!(!lint_at(ONE, "a.rs", &src).errors.is_empty(), "{decl}");
         }
+    }
+
+    // spec: TEST-001
+    #[test]
+    fn a_main_spec_needs_a_real_purpose() {
+        let run = |text: &str| {
+            let specs = BTreeMap::from([("coordinates".to_string(), text.to_string())]);
+            lint(&specs, &BTreeMap::new(), "").errors.join("\n")
+        };
+        let reqs = "## Requirements\n\n";
+        let ok = format!("## Purpose\nOwns the frames (ADR 0001, CON-01).\n\n{reqs}");
+        assert!(run(&ok).is_empty(), "{}", run(&ok));
+        // The archive placeholder, in any case, an empty section and a missing section are all refused.
+        let placeholder = format!("## Purpose\nTBD - created by archiving change m0-foundations. Update Purpose after archive.\n\n{reqs}");
+        assert!(run(&placeholder).contains("placeholder"), "{}", run(&placeholder));
+        assert!(run(&format!("## Purpose\nowns frames, tbd later\n\n{reqs}")).contains("placeholder"));
+        assert!(run(&format!("## Purpose\n\n{reqs}")).contains("empty"));
+        assert!(run(reqs).contains("no '## Purpose'"));
+        // A change delta carries no Purpose and is not asked for one.
+        let specs = BTreeMap::from([("change:x/coordinates".to_string(), "## ADDED Requirements\n".to_string())]);
+        assert!(lint(&specs, &BTreeMap::new(), "").errors.is_empty());
     }
 }
