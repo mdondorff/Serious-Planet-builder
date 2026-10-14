@@ -15,7 +15,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use crate::{NodeValue, WorldDefinition};
+use crate::{is_height_field_path, valid_implementation_id, NodeValue, WorldDefinition, HEIGHT_FIELD_PATH};
 
 /// Schema version this build writes and reads without migration.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -149,6 +149,20 @@ fn flatten(prefix: &str, table: &toml::Table, def: &mut WorldDefinition) -> Resu
         if !valid_segment(key) {
             return Err(LoadError::BadPath { path, why: "keys may contain only letters, digits, `_` and `-`" });
         }
+        if is_height_field_path(&path) {
+            // The one string value: the implementation id of the world's height field.
+            match value {
+                toml::Value::String(s) if path == HEIGHT_FIELD_PATH && valid_implementation_id(s) => def.set_height_field(s),
+                toml::Value::String(_) if path == HEIGHT_FIELD_PATH => {
+                    return Err(LoadError::BadPath { path, why: "an implementation id is letters, digits, `_` and `-`, and not empty" })
+                }
+                toml::Value::Integer(_) | toml::Value::Float(_) | toml::Value::Boolean(_) if path == HEIGHT_FIELD_PATH => {
+                    return Err(LoadError::WrongType { path, expected: "a string (an implementation id)", found: "a number or boolean" })
+                }
+                _ => return Err(LoadError::BadPath { path, why: "`world.height_field` is the id of the height field and holds a string" }),
+            }
+            continue;
+        }
         match value {
             toml::Value::Table(t) => flatten(&path, t, def)?,
             toml::Value::Integer(i) => match expected_kind(&path) {
@@ -241,6 +255,12 @@ pub fn to_toml(def: &WorldDefinition) -> Result<String, LoadError> {
             None => root.push(format!("{path} = {text}")),
             Some((table, leaf)) => tables.entry(table).or_default().push(format!("{leaf} = {text}")),
         }
+    }
+    if let Some(id) = def.height_field() {
+        // `valid_implementation_id` holds by construction, so the id needs no escaping. Sorted by key, as the nodes are.
+        let lines = tables.entry("world").or_default();
+        lines.push(format!("height_field = \"{id}\""));
+        lines.sort_by(|a, b| a.split(" = ").next().cmp(&b.split(" = ").next()));
     }
     let mut out = format!("{VERSION_KEY} = {SCHEMA_VERSION}\n");
     for line in &root {

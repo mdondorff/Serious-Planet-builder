@@ -1,5 +1,6 @@
 //! The M1 walking skeleton: generator -> FramePlan -> GPU executor -> pixels, driven from all three run modes.
 
+use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
 use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::{Face, PlanetFixed, Side, TileId, Vec3};
@@ -104,7 +105,8 @@ pub fn render_offscreen(o: &Options, out: &mut dyn Write) -> Result<(), String> 
     render_tiles(&ctx, o, out)
 }
 
-/// Hash of the definition a seed and radius describe: the single planet (WDEF-003). Bundles record it; this build can
+/// Hash of the definition a seed and radius describe: the single planet (WDEF-003). Bundles of the seed-only runs mean the
+/// reference field (`cpu-ref-height-v2`) by this hash although the definition names no field: replay re-plans with it. Bundles record it; this build can
 /// rebuild only that definition, so replay checks the recorded hash against it.
 fn definition_hash(seed: u64, radius_m: f64) -> u64 {
     planet_world_def::WorldDefinition::single_planet(radius_m, seed).hash()
@@ -559,11 +561,18 @@ const TERRAIN_CELLS: u32 = 16;
 
 /// `--scene terrain`: node selection -> TerrainPlan -> meshes -> GPU, one of the ten scripted cameras.
 pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Result<(), String> {
-    use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainRequest, TerrainView};
+    use planet_frame::{plan_terrain_field, scripted_views_field, LodParams, TerrainRequest, TerrainView};
     let view = TerrainView::parse(&o.view).ok_or_else(|| {
         format!("--view must be one of face, tile-id, level, morph, height, normals, depth, relief, morph-height, got '{}'", o.view)
     })?;
-    let views = scripted_views(RADIUS_M, f64::from(TERRAIN_SIZE.0) / f64::from(TERRAIN_SIZE.1), o.seed);
+    // The world's field (GEN-018); without `--world` the seed-only world, which names the reference field.
+    let world = WorldTerrain::of_options(o, RADIUS_M)?;
+    let field = world.field()?;
+    let radius_m = world.radius_m();
+    if o.world.is_some() {
+        writeln!(out, "{}", world.describe()).map_err(err)?;
+    }
+    let views = scripted_views_field(radius_m, f64::from(TERRAIN_SIZE.0) / f64::from(TERRAIN_SIZE.1), field.as_ref());
     let index = match o.script.parse::<usize>() {
         Ok(i) => i,
         Err(_) => views
@@ -577,16 +586,20 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
         viewport_h_px: f64::from(TERRAIN_SIZE.1),
         tau_px: 4.0,
         max_level: 26,
+        radius_m,
+        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
         ..LodParams::earth_1080p()
     };
-    let request = TerrainRequest { camera, size: TERRAIN_SIZE, view, lod, face_mapping: TangentWarp.id().to_string(), seed: o.seed };
-    let plan = plan_terrain(&request).map_err(|e| e.to_string())?;
+    let request = TerrainRequest { camera, size: TERRAIN_SIZE, view, lod, face_mapping: TangentWarp.id().to_string(), seed: field.seed() };
+    let plan = plan_terrain_field(&request, field.as_ref()).map_err(|e| e.to_string())?;
     let meshes: Vec<std::sync::Arc<planet_generators::mesh::TileMesh>> = if o.stream {
         streamed_meshes(o, &plan)?
     } else {
         plan.nodes
             .iter()
-            .map(|n| std::sync::Arc::new(planet_generators::mesh::tile_mesh(o.seed, &TangentWarp, n.tile, TERRAIN_CELLS, RADIUS_M)))
+            .map(|n| {
+                std::sync::Arc::new(planet_generators::mesh::tile_mesh_field(field.as_ref(), &TangentWarp, n.tile, TERRAIN_CELLS, radius_m))
+            })
             .collect()
     };
     let refs: Vec<&planet_generators::mesh::TileMesh> = meshes.iter().map(|m| m.as_ref()).collect();
@@ -709,7 +722,8 @@ fn upload_missing_meshes(
     ctx: &GpuContext,
     renderer: &mut planet_render::TerrainRenderer,
     plan: &planet_frame::TerrainPlan,
-    seed: u64,
+    field: &dyn planet_generators::height::HeightField,
+    radius_m: f64,
     cells: u32,
 ) -> Result<usize, String> {
     let missing: Vec<TileId> = plan.nodes.iter().filter(|n| !renderer.has_mesh(n.tile, n.mesh_key)).map(|n| n.tile).collect();
@@ -720,7 +734,9 @@ fn upload_missing_meshes(
             .chunks(chunk)
             .map(|part| {
                 s.spawn(move || {
-                    part.iter().map(|&t| planet_generators::mesh::tile_mesh(seed, &TangentWarp, t, cells, RADIUS_M)).collect::<Vec<_>>()
+                    part.iter()
+                        .map(|&t| planet_generators::mesh::tile_mesh_field(field, &TangentWarp, t, cells, radius_m))
+                        .collect::<Vec<_>>()
                 })
             })
             .collect();
@@ -743,8 +759,14 @@ const SHEET_THUMB_W: u32 = 320;
 /// frame through the persistent terrain renderer with production LOD parameters, for the owner's real-GPU jitter review
 /// (tier D). Writes `frame_NNNN.png` and `flight.txt` (frame, altitude above terrain, nodes, plan hash).
 pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Result<(), String> {
-    use planet_frame::{flight_path, plan_terrain, LodParams, TerrainRequest, TerrainView};
+    use planet_frame::{flight_path_field, plan_terrain_field, LodParams, TerrainRequest, TerrainView};
     use planet_render::TerrainRenderer;
+    let world = WorldTerrain::of_options(o, RADIUS_M)?;
+    let field = world.field()?;
+    let radius_m = world.radius_m();
+    if o.world.is_some() {
+        writeln!(out, "{}", world.describe()).map_err(err)?;
+    }
     let frames = o.flight.unwrap_or(0);
     if frames < 10 {
         return Err(format!("--flight needs at least 10 frames, got {frames}"));
@@ -758,28 +780,36 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
         format!("--view must be one of face, tile-id, level, morph, height, normals, depth, relief, morph-height, got '{view_name}'")
     })?;
     let size = o.size.unwrap_or((1280, 720));
-    let lod = LodParams { cells: o.cells, viewport_h_px: f64::from(size.1), tau_px: o.tau, max_level: 26, ..LodParams::earth_1080p() };
+    let lod = LodParams {
+        cells: o.cells,
+        viewport_h_px: f64::from(size.1),
+        tau_px: o.tau,
+        max_level: 26,
+        radius_m,
+        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
+        ..LodParams::earth_1080p()
+    };
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, o.tau))?;
     std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
-    let cameras = flight_path(RADIUS_M, f64::from(size.0) / f64::from(size.1), o.seed, frames);
+    let cameras = flight_path_field(radius_m, f64::from(size.0) / f64::from(size.1), field.as_ref(), frames);
     let mut renderer = TerrainRenderer::new(ctx, size, o.cells);
     let mut index = String::from("# frame altitude_above_terrain_m nodes plan_hash finest_level\n");
     let on_sheet = crate::sheet::sheet_indices(frames, SHEET_FRAMES);
     let mut sheet = Vec::new();
     for (i, camera) in cameras.into_iter().enumerate() {
-        let req = TerrainRequest { camera, size, view, lod: lod.clone(), face_mapping: TangentWarp.id().to_string(), seed: o.seed };
-        let plan = plan_terrain(&req).map_err(|e| format!("frame {i}: {e}"))?;
+        let req = TerrainRequest { camera, size, view, lod: lod.clone(), face_mapping: TangentWarp.id().to_string(), seed: field.seed() };
+        let plan = plan_terrain_field(&req, field.as_ref()).map_err(|e| format!("frame {i}: {e}"))?;
         let missing = plan.nodes.iter().filter(|n| !renderer.has_mesh(n.tile, n.mesh_key)).count();
         if renderer.resident_tiles() > 0 && renderer.resident_tiles() + missing > FLIGHT_RESIDENT_CAP {
             renderer = TerrainRenderer::new(ctx, size, o.cells);
         }
-        upload_missing_meshes(ctx, &mut renderer, &plan, o.seed, o.cells)?;
+        upload_missing_meshes(ctx, &mut renderer, &plan, field.as_ref(), radius_m, o.cells)?;
         renderer.render(ctx, &plan, false).map_err(|e| format!("frame {i}: {e}"))?;
         let path = dir.join(format!("frame_{i:04}.png"));
         let image = renderer.read_color(ctx);
         image.write_png(&path).map_err(|e| format!("writing {}: {e}", path.display()))?;
         let p = camera.position.0;
-        let altitude = p.length() - RADIUS_M - planet_generators::height::height_at(o.seed, p.normalized());
+        let altitude = p.length() - radius_m - field.height(p.normalized());
         let finest = plan.nodes.iter().map(|n| n.level).max().unwrap_or(0);
         index.push_str(&format!("{i:04} {altitude:.3} {} {:016x} {finest}\n", plan.nodes.len(), plan.plan_hash()));
         if on_sheet.contains(&i) {
@@ -868,7 +898,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         }
         let plan = planet_frame::plan_terrain_cached(&req, &field, &mut cache).map_err(|e| e.to_string())?;
         let started = Instant::now();
-        let new_meshes = upload_missing_meshes(ctx, &mut renderer, &plan, o.seed, o.cells)?;
+        let new_meshes = upload_missing_meshes(ctx, &mut renderer, &plan, &field, RADIUS_M, o.cells)?;
         let plan_median = summarize(&plan_samples, 0).map_or(f64::NAN, |s| s.median);
         plan_lines.push((name, plan_median));
         writeln!(

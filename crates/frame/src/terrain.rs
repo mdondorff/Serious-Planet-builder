@@ -330,11 +330,15 @@ pub const FLIGHT_GLIDE_STEP_M: f64 = 0.05;
 /// heading north), the rest gliding north at [`FLIGHT_END_M`] by [`FLIGHT_GLIDE_STEP_M`] per frame. Pure and
 /// deterministic. `frames` must be at least 10.
 pub fn flight_path(radius_m: f64, aspect: f64, seed: u64, frames: usize) -> Vec<Camera> {
+    flight_path_field(radius_m, aspect, &planet_generators::height::Reference(seed), frames)
+}
+
+/// [`flight_path`] with the camera heights measured above `field`.
+pub fn flight_path_field(radius_m: f64, aspect: f64, field: &dyn HeightField, frames: usize) -> Vec<Camera> {
     assert!(frames >= 10, "a flight needs at least 10 frames, got {frames}");
     let fov = 60f64.to_radians();
     let north = Vec3::new(0.0, 0.0, 1.0);
-    let reference = planet_generators::height::Reference(seed);
-    let at = |lat: f64, lon: f64, h: f64| above_terrain(radius_m, &reference, lat, lon, h);
+    let at = |lat: f64, lon: f64, h: f64| above_terrain(radius_m, field, lat, lon, h);
     let dive = frames * 4 / 5;
     let ratio = FLIGHT_END_M / FLIGHT_START_M;
     (0..frames)

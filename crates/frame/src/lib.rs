@@ -20,7 +20,7 @@ pub use lod::{
 pub use plan::{plan_tiles, DebugView, FramePlan, PlanError, PlanRequest, TileDraw};
 pub use repro::ReproBundle;
 pub use terrain::{
-    flight_path, level_color, plan_terrain, plan_terrain_cached, plan_terrain_field, scripted_views, scripted_views_field, CountBudget,
-    PlanCounts, TerrainDraw, TerrainPlan, TerrainRequest, TerrainView,
+    flight_path, flight_path_field, level_color, plan_terrain, plan_terrain_cached, plan_terrain_field, scripted_views,
+    scripted_views_field, CountBudget, PlanCounts, TerrainDraw, TerrainPlan, TerrainRequest, TerrainView,
 };
 pub use terrain_text::TerrainBundle;
