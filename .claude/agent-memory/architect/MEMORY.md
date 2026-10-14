@@ -30,6 +30,15 @@ Refreshed 2026-10-13 at the M3 gate (session `opus-plannner`, worktree `opus-pla
 - Cross-OS determinism: he asked its cost; I said keep it (cheap marginal cost over run/thread determinism).
 - He is short on weekly quota: prefers M4 fully prepared so the worker can run for days without him.
 
+## Owner decisions 2026-10-14
+- Optimization review (`docs/background/optimization-brainstorm-review.md`, #106): CPU limits the frame at ground-1m
+  (plan 6.6 + encode 6.0 + GPU 4.1 ms in a row). M4 queue gained: SPIKE-05 cells-64/hidden-triangle/tiles-per-s
+  columns; ADR 0033 pooled slots + shader-detail visual-only question; item 7 order: scheduler, residency on slots,
+  frame pipelining, indirect multi-draw, then the rest; first M4 perf window records encode time per draw.
+- The 2026-10-13 log's ground-1m "p99 12-14 ms" is the frame p99; GPU p99 is 4.6-4.8 ms (corrected in log.md).
+- My `gh pr merge 106 --squash` worked when the owner asked for it in the session. Two `sonnet-explorer` sessions
+  exist (local [82e53a], remote): address the local one by ref.
+
 ## Owner decisions 2026-10-12
 - Workflow: one coordinator (this session) + one long-lived worker the owner talks to directly, separate worktrees.
 - Reviewer models: spec-guardian and verifier on Sonnet (trial); numerics-reviewer + architect on Opus. Token economy:
