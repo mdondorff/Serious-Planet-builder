@@ -105,7 +105,7 @@ fn editor_offscreen_replays_bundles_and_generate_rejects_frame_options() {
     assert!(e.contains("power of two"), "{e}");
 }
 
-// spec: STRM-002, BUILD-007
+// spec: STRM-002, BUILD-007, STRM-017
 #[test]
 fn streamed_terrain_equals_synchronous_terrain() {
     let (a, b) = (tmp("terrain-sync.png"), tmp("terrain-stream.png"));
@@ -116,7 +116,7 @@ fn streamed_terrain_equals_synchronous_terrain() {
     assert_eq!(read_png(&a).unwrap(), read_png(&b).unwrap(), "the streaming path must produce the same frame");
 }
 
-// spec: STRM-016, STRM-002
+// spec: STRM-016, STRM-002, STRM-017
 #[test]
 fn the_pipelined_loop_settles_on_the_synchronous_frame_from_a_cold_start_and_after_a_jump() {
     let sync = |script: &str, name: &str| {
@@ -146,9 +146,22 @@ fn the_pipelined_loop_settles_on_the_synchronous_frame_from_a_cold_start_and_aft
     assert_eq!(read_png(&sync("aerial-200km", "sync-a.png")).unwrap(), read_png(&p1).unwrap(), "cold start");
     let text = std::fs::read_to_string(dir.join("pipelined.txt")).unwrap();
     assert!(
-        text.starts_with("# iteration kind nodes substituted in_flight base_seq plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms"),
+        text.starts_with(
+            "# iteration kind nodes substituted in_flight base_seq plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms \
+             resident in_flight queued dispatched cancelled blocked evicted uploaded degraded"
+        ),
         "{text}"
     );
+    // The manager's per-frame counts: tiles went into slots, nothing was blocked or degraded (the share holds everything).
+    let last: Vec<&str> = text.lines().last().unwrap().split_whitespace().collect();
+    let col = |name: &str| -> u64 {
+        let names: Vec<&str> = text.lines().next().unwrap().trim_start_matches("# ").split_whitespace().collect();
+        let at = names.iter().rposition(|n| *n == name).unwrap();
+        last[at].parse().unwrap()
+    };
+    assert!(col("resident") > 6, "the loop places tiles in slots: {text}");
+    assert_eq!((col("blocked"), col("degraded")), (0, 0), "{text}");
+    assert!(log1.contains("slots") && log1.contains("resident of"), "{log1}");
     assert!(text.lines().nth(1).unwrap().contains(" cover "), "frame 1 is a cover plan: {text}");
     assert!(text.lines().last().unwrap().contains(" exact "), "{text}");
     // A jump: settle on one view, then another; the frame the loop ends on is the synchronous frame of the second.

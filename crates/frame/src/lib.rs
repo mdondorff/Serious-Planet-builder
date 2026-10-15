@@ -5,6 +5,7 @@ pub mod camera;
 pub mod controller;
 pub mod instances;
 pub mod lod;
+pub mod managed;
 pub mod pipeline;
 pub mod plan;
 pub mod pool;

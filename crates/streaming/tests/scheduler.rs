@@ -432,3 +432,45 @@ fn the_default_staged_load_stops_when_already_cancelled_and_loads_otherwise() {
     assert_eq!(src.load_staged(id(0, 1, 0, 0), &CancelToken::never()), Ok(Some(id(0, 1, 0, 0).raw())));
     assert_eq!(src.loads.load(Ordering::SeqCst), 1);
 }
+
+// spec: STRM-007, STRM-005
+#[test]
+fn resident_changes_are_recorded_in_order_only_when_asked_and_dispatches_are_counted() {
+    let wants = Wants { draw: vec![(id(2, 2, 1, 1), 1.0)], ..Wants::default() };
+    // Off by default: nothing is kept.
+    let (mut off, sp, _c, _src) = fixture(cfg(1000, 100));
+    settle(&mut off, &sp, &wants);
+    assert!(off.take_changes().is_empty() && !off.records_changes());
+    // On: the roots, then the draw tile with its ancestors in the order they completed, then an eviction in the order it happened.
+    let (mut s, sp, _c, _src) = fixture(StreamConfig { record_changes: true, ..cfg(1000, 100) });
+    assert!(s.records_changes());
+    settle(&mut s, &sp, &wants);
+    let changes = s.take_changes();
+    let added: Vec<TileId> = changes
+        .iter()
+        .filter_map(|c| match c {
+            planet_streaming::ResidentChange::Added(t) => Some(*t),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(added.len(), s.stats().resident, "every resident tile was reported added once: {changes:?}");
+    assert_eq!(added.iter().filter(|t| t.level() == 0).count(), 6);
+    assert_eq!(s.stats().dispatched, 2, "the draw tile and its level-1 ancestor were dispatched; the level-0 tile is a root");
+    assert!(s.take_changes().is_empty(), "taken once");
+    // A new place: the old tiles go (capacity 100 is large, so shrink demand: ask for many tiles in a small pool).
+    let (mut small, sp, _c, _src) = fixture(StreamConfig { record_changes: true, ..cfg(1000, 8) });
+    let first = Wants { draw: vec![(id(2, 2, 1, 1), 1.0)], ..Wants::default() };
+    settle(&mut small, &sp, &first);
+    small.take_changes();
+    let second = Wants { draw: vec![(id(3, 2, 2, 2), 1.0)], ..Wants::default() };
+    settle(&mut small, &sp, &second);
+    let changes = small.take_changes();
+    let evicted = changes.iter().filter(|c| matches!(c, planet_streaming::ResidentChange::Evicted(_))).count();
+    assert_eq!(evicted as u64, small.stats().evicted, "{changes:?}");
+    assert!(evicted > 0);
+    for c in &changes {
+        if let planet_streaming::ResidentChange::Evicted(t) = c {
+            assert!(!small.is_resident(*t));
+        }
+    }
+}

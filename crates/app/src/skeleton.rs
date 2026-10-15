@@ -561,7 +561,7 @@ const TERRAIN_CELLS: u32 = 16;
 
 /// `--scene terrain`: node selection -> TerrainPlan -> meshes -> GPU, one of the ten scripted cameras.
 pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Result<(), String> {
-    use planet_frame::{plan_terrain_field, scripted_views_field, LodParams, TerrainRequest, TerrainView};
+    use planet_frame::{scripted_views_field, LodParams, TerrainRequest, TerrainView};
     let view = TerrainView::parse(&o.view).ok_or_else(|| {
         format!("--view must be one of face, tile-id, level, morph, height, normals, depth, relief, morph-height, got '{}'", o.view)
     })?;
@@ -619,9 +619,12 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
         }
         return Ok(());
     }
-    let plan = plan_terrain_field(&request, field.as_ref()).map_err(|e| e.to_string())?;
+    let mut cache = planet_frame::SelectionCache::new();
+    let plan = planet_frame::plan_terrain_cached(&request, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
     let meshes: Vec<std::sync::Arc<planet_generators::mesh::TileMesh>> = if o.stream {
-        streamed_meshes(&world, &plan)?
+        // R is selected on the plan's cache (its tile geometry and height volumes are hits), from the position only.
+        let residency = planet_frame::pipeline::residency_of(&request, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
+        streamed_meshes(&world, &plan, &residency)?
     } else {
         plan.nodes
             .iter()
@@ -778,17 +781,23 @@ impl planet_streaming::TileSource<planet_generators::mesh::TileMesh> for MeshSou
     }
 }
 
-/// Generate the plan's tile meshes through the asynchronous streaming path (thread pool, parent-first requests) and
-/// wait, frame by frame, until every wanted tile is resident. The result equals the synchronous path.
+/// Generate the plan's tile meshes through the asynchronous streaming path and wait, frame by frame, until every wanted tile
+/// is resident. The result equals the synchronous path. The residency manager drives the requests as in the interactive
+/// loop (STRM-005, STRM-006): the plan's draw set D first (ancestors before descendants), then the rest of the residency set R
+/// of the camera position (selected on the plan's own cache), within the slots of the mid tier's share; the run ends when D is
+/// resident, whatever of R is still on its way is dropped with the streamer.
 fn streamed_meshes(
     world: &std::sync::Arc<WorldTerrain>,
     plan: &planet_frame::TerrainPlan,
+    residency: &planet_frame::ResidencySet,
 ) -> Result<Vec<std::sync::Arc<planet_generators::mesh::TileMesh>>, String> {
-    use planet_streaming::{StreamConfig, Streamer, SystemClock, ThreadPool};
+    use planet_streaming::{ResidencyManager, StreamConfig, Streamer, SystemClock, ThreadPool, Tier, Wants};
     let pool = std::sync::Arc::new(ThreadPool::new(4));
+    let share = planet_frame::pool::tier_pool(Tier::Mid, TERRAIN_CELLS, 1)?;
     let config = StreamConfig {
         max_in_flight: 8,
-        capacity: plan.nodes.len() * 2 + 64,
+        capacity: share.main_slots() as usize,
+        vertex_pool_slots: share.vertex_slots as usize,
         retry_after_ms: 1000,
         record_dispatches: false,
         ..Default::default()
@@ -800,15 +809,20 @@ fn streamed_meshes(
         config,
     );
     streamer.load_roots_blocking()?;
-    let wanted: Vec<(TileId, f64)> = plan.nodes.iter().enumerate().map(|(i, n)| (n.tile, i as f64)).collect();
+    let mut manager = ResidencyManager::new(streamer);
+    let wants = Wants {
+        draw: plan.nodes.iter().enumerate().map(|(i, n)| (n.tile, i as f64)).collect(),
+        residency: residency.wants(),
+        prefetch: Vec::new(),
+    };
     let started = Instant::now();
     loop {
-        let resolved = streamer.begin_frame(&wanted);
-        if resolved.iter().all(|r| r.exact()) {
-            return Ok(wanted.iter().map(|(t, _)| streamer.get(*t).expect("resident")).collect());
+        let frame = manager.begin_frame(&wants);
+        if frame.resolved.iter().all(|r| r.exact()) {
+            return Ok(wants.draw.iter().map(|(t, _)| manager.streamer().get(*t).expect("resident")).collect());
         }
         if started.elapsed().as_secs() > 120 {
-            return Err(format!("streaming did not finish within 120 s ({:?})", streamer.stats()));
+            return Err(format!("streaming did not finish within 120 s ({:?})", manager.streamer().stats()));
         }
         std::thread::sleep(std::time::Duration::from_millis(2));
     }

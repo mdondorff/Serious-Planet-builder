@@ -244,6 +244,8 @@ pub struct StreamStats {
     pub evicted: u64,
     /// Queued requests by class: draw, residency, prefetch.
     pub queued_by_class: [usize; 3],
+    /// Jobs handed to the spawner.
+    pub dispatched: u64,
     /// Dispatch attempts that found no slot (every slot in use or still retiring, nothing evictable for that class).
     pub blocked: u64,
     /// Slots of the main pool: in use (resident plus in flight), retiring, free.
@@ -268,11 +270,22 @@ pub struct StreamConfig {
     pub retry_after_ms: u64,
     /// Keep the order in which tiles were dispatched in `dispatch_log` (tests and diagnostics; grows without bound).
     pub record_dispatches: bool,
+    /// Record every tile that becomes resident or is evicted for [`Streamer::take_changes`] (a loop that mirrors the resident
+    /// set into the renderer's slots drains it every frame; off, nothing is kept).
+    pub record_changes: bool,
 }
 
 impl Default for StreamConfig {
     fn default() -> Self {
-        Self { max_in_flight: 4, capacity: 4096, vertex_pool_slots: 0, retire_frames: 0, retry_after_ms: 1000, record_dispatches: false }
+        Self {
+            max_in_flight: 4,
+            capacity: 4096,
+            vertex_pool_slots: 0,
+            retire_frames: 0,
+            retry_after_ms: 1000,
+            record_dispatches: false,
+            record_changes: false,
+        }
     }
 }
 
@@ -290,6 +303,17 @@ struct Resident<T> {
     data: Arc<T>,
     last_used: u64,
     slot: SlotRef,
+}
+
+/// A change of the resident set, in the order it happened (STRM-007): what a loop that places tiles in the renderer's slots
+/// must follow. A tile that became resident and was evicted before the loop looked is in the list twice; the loop acts on
+/// the state at the time it drains (`Streamer::get`, `slot_of`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResidentChange {
+    /// The tile became resident in its slot.
+    Added(TileId),
+    /// The tile was evicted and its slot given back (reusable after the frames in flight retire).
+    Evicted(TileId),
 }
 
 /// How a job ended.
@@ -319,6 +343,7 @@ pub struct Streamer<T: Send + Sync + 'static> {
     frame: u64,
     stats: StreamStats,
     pools: SlotPools,
+    changes: Vec<ResidentChange>,
     /// Order in which tiles were handed to the spawner; filled only with `StreamConfig::record_dispatches`.
     pub dispatch_log: Vec<TileId>,
 }
@@ -356,6 +381,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 u32::try_from(config.vertex_pool_slots).expect("vertex pool slots fit u32"),
                 config.retire_frames,
             ),
+            changes: Vec::new(),
             dispatch_log: Vec::new(),
         }
     }
@@ -378,6 +404,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 }
             };
             self.resident.insert(id, Resident { data: Arc::new(data), last_used: self.frame, slot });
+            self.note(ResidentChange::Added(id));
         }
         Ok(())
     }
@@ -473,6 +500,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                     self.failed_at.remove(&tile);
                     self.last_error.remove(&tile);
                     self.resident.insert(tile, Resident { data: Arc::new(data), last_used: self.frame, slot: flight.slot });
+                    self.note(ResidentChange::Added(tile));
                 }
                 Outcome::Cancelled => {
                     self.pools.release(flight.slot, self.frame);
@@ -594,6 +622,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 _ => RequestClass::Prefetch,
             };
             self.in_flight.insert(tile, InFlight { token: Arc::clone(&token), class, slot });
+            self.stats.dispatched += 1;
             if self.config.record_dispatches {
                 self.dispatch_log.push(tile);
             }
@@ -675,7 +704,24 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         if let Some(r) = self.resident.remove(&tile) {
             self.pools.release(r.slot, self.frame);
             self.stats.evicted += 1;
+            self.note(ResidentChange::Evicted(tile));
         }
+    }
+
+    fn note(&mut self, change: ResidentChange) {
+        if self.config.record_changes {
+            self.changes.push(change);
+        }
+    }
+
+    /// Whether resident-set changes are being recorded (`StreamConfig::record_changes`).
+    pub fn records_changes(&self) -> bool {
+        self.config.record_changes
+    }
+
+    /// The changes of the resident set since the last call, oldest first (empty unless `StreamConfig::record_changes`).
+    pub fn take_changes(&mut self) -> Vec<ResidentChange> {
+        std::mem::take(&mut self.changes)
     }
 
     /// The message of the last failure of `tile`, if any.
