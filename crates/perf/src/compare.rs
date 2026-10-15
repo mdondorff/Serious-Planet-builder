@@ -18,7 +18,7 @@ pub const REGRESSION_THRESHOLD: f64 = 0.15;
 pub const MIN_RISE_MS: f64 = 0.1;
 
 #[derive(Clone, Debug, PartialEq)]
-enum Json {
+pub(crate) enum Json {
     Null,
     Bool(bool),
     Num(f64),
@@ -28,13 +28,13 @@ enum Json {
 }
 
 impl Json {
-    fn get(&self, key: &str) -> Option<&Json> {
+    pub(crate) fn get(&self, key: &str) -> Option<&Json> {
         match self {
             Json::Obj(o) => o.iter().find(|(k, _)| k == key).map(|(_, v)| v),
             _ => None,
         }
     }
-    fn num(&self) -> Option<f64> {
+    pub(crate) fn num(&self) -> Option<f64> {
         match self {
             Json::Num(n) => Some(*n),
             _ => None,
@@ -165,7 +165,7 @@ impl Reader<'_> {
     }
 }
 
-fn parse(text: &[u8]) -> Result<Json, String> {
+pub(crate) fn parse(text: &[u8]) -> Result<Json, String> {
     let mut r = Reader { b: text, i: 0 };
     let v = r.value()?;
     r.ws();
@@ -515,7 +515,7 @@ pub fn comparison_lines_gpu(last_valid: Option<&[u8]>, last_gpu_valid: Option<&[
 
 /// Counts that are recorded in the log but never compared: they differ from run to run by nature (the CPU's effective clock at
 /// the start and end of a case, the most slots resident in any frame), so a change is not news.
-const RECORDED_ONLY_COUNTS: [&str; 3] = ["cpu_clock_before_mhz", "cpu_clock_after_mhz", "max_resident_slots"];
+const RECORDED_ONLY_COUNTS: [&str; 4] = ["cpu_clock_before_mhz", "cpu_clock_after_mhz", "max_resident_slots", "scene_alone"];
 
 #[cfg(test)]
 mod tests {
@@ -602,6 +602,16 @@ mod tests {
         // A real count still counts.
         let lines = comparison_lines(Some(a.as_bytes()), with(3100, 3000).replace("8687", "9000").as_bytes());
         assert!(lines.iter().any(|l| l.contains("nodes 8687 -> 9000")), "{lines:?}");
+    }
+
+    // spec: TEST-019
+    #[test]
+    fn scene_alone_is_recorded_but_never_reported_as_a_changed_count() {
+        let plain = log(true, (2560, 1440), [3.0; 3], [0.06; 3], 8687);
+        let with =
+            |alone: u32| plain.replace("\"counts\":{\"nodes\":8687}", &format!("\"counts\":{{\"nodes\":8687,\"scene_alone\":{alone}}}"));
+        let lines = comparison_lines(Some(with(1).as_bytes()), with(0).as_bytes());
+        assert!(lines.iter().all(|l| !l.contains("count changed")), "{lines:?}");
     }
 
     // spec: TEST-012

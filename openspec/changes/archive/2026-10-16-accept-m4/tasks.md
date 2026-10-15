@@ -1,0 +1,7 @@
+- [x] 1.1 failing tests: `planet_perf::accept` on fixtures from the real log writer (valid window, missing scene, in-memory source, other field, invalid session, old format, partial run, mixed runs, blank and uncovered nodes, p99, RAM, slots, driver VRAM, gated and tracked lag, `dive-fast`), xtask log reader and report path
+- [x] 1.2 `planet_perf::accept` (evaluate, read_scene, parse_frames, refusal_text, render_report)
+- [x] 1.3 app: `scene_alone` count; compare: recorded-only
+- [x] 1.4 xtask: `accept M4 [--logs DIR]`
+- [x] 1.5 spec: TEST-021 (new), TEST-019 (count)
+- [x] 1.6 ad hoc: `cargo xtask accept M4` without logs refuses with the commands, steps pass
+- [x] 1.7 reviewers (spec-guardian, verifier), archive, PR, CI green, merge

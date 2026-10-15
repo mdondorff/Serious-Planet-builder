@@ -513,6 +513,8 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         counts.push(("pool_slots".into(), mem.pool_slots));
         counts.push(("share_slots".into(), mem.share_slots));
         counts.push(("max_resident_slots".into(), max_resident));
+        // Whether the figure above is the scene's own peak (one scene in the process): `accept M4` refuses RAM from a shared process (TEST-021).
+        counts.push(("scene_alone".into(), u64::from(mem.scene_alone)));
         for (name, clock) in [("cpu_clock_before_mhz", run.cpu_before), ("cpu_clock_after_mhz", run.cpu_after)] {
             if let Some(c) = clock {
                 counts.push((name.into(), c.effective_mhz().round() as u64));
@@ -817,5 +819,18 @@ mod tests {
         let json = planet_perf::report_json(&a, None, &[], &planet_perf::gate::Validity::default(), &protocol, &[]);
         assert!(json.contains(&format!("\"source\":\"{label}\"")), "{json}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod accept_constants_tests {
+    use planet_streaming::budget::Tier;
+
+    // spec: TEST-021
+    #[test]
+    fn the_acceptance_judges_the_share_and_cap_the_scene_runs_with() {
+        assert_eq!(planet_perf::accept::MID_TIER_SHARE_BYTES, Tier::Mid.terrain_share_bytes());
+        assert_eq!(planet_perf::accept::MID_TIER_CAP_BYTES, Tier::Mid.vram_cap_bytes());
+        assert_eq!(planet_perf::accept::PRODUCTION_CELLS, u64::from(super::PRODUCTION_BAKE_RES));
     }
 }
