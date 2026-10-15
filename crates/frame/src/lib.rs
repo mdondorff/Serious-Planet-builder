@@ -3,6 +3,7 @@
 
 pub mod camera;
 pub mod controller;
+pub mod draw;
 pub mod instances;
 pub mod lod;
 pub mod managed;

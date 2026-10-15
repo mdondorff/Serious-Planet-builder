@@ -11,7 +11,7 @@ pub mod spike_compact;
 pub mod spike_detail;
 pub mod terrain;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
-pub use terrain::{execute_terrain, FrameTiming, TerrainRenderer, TerrainStats, TERRAIN_SHADERS};
+pub use terrain::{execute_terrain, DrawMode, FrameTiming, TerrainRenderer, TerrainStats, TERRAIN_SHADERS};
 
 /// Which adapter the process wants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +62,12 @@ pub struct GpuContext {
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
     pub(crate) info: wgpu::AdapterInfo,
+    /// Whether the adapter can run indirect draws that carry a first instance (REND-015): the `INDIRECT_FIRST_INSTANCE`
+    /// feature and the downlevel `INDIRECT_EXECUTION` flag (`multi_draw_indexed_indirect` itself is core in wgpu 30 and needs
+    /// only the latter).
+    pub(crate) indirect: bool,
+    /// The draw mode new terrain renderers start in: 0 = the default (indirect where supported), 1 = per-draw, 2 = indirect.
+    pub(crate) draw_preference: std::sync::atomic::AtomicU8,
 }
 
 impl GpuContext {
@@ -85,21 +91,50 @@ impl GpuContext {
             .await
             .map_err(|e| GpuError::NoAdapter(format!("{e} (policy {policy:?})")))?;
         let info = adapter.get_info();
+        let indirect = adapter.features().contains(wgpu::Features::INDIRECT_FIRST_INSTANCE)
+            && adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::INDIRECT_EXECUTION);
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("planet"),
                 // Timestamp queries time the GPU in the performance harness; request them only when the adapter has them.
-                required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
+                required_features: adapter.features() & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::INDIRECT_FIRST_INSTANCE),
                 ..Default::default()
             })
             .await
             .map_err(|e| GpuError::Device(e.to_string()))?;
-        Ok(Self { device, queue, info })
+        Ok(Self { device, queue, info, indirect, draw_preference: Default::default() })
     }
 
     /// Adapter name as the driver reports it.
     pub fn adapter_name(&self) -> &str {
         &self.info.name
+    }
+
+    /// Whether indirect multi-draw with a first instance is available (REND-015); the terrain renderer falls back to the
+    /// per-draw loop where it is not.
+    pub fn indirect_draw_supported(&self) -> bool {
+        self.indirect
+    }
+
+    /// Choose the draw mode terrain renderers created from now on start in (`--draw`); without a preference they start in
+    /// indirect mode where the adapter supports it. A renderer can still be switched with `TerrainRenderer::set_draw_mode`.
+    pub fn prefer_draw_mode(&self, mode: DrawMode) {
+        let v = match mode {
+            DrawMode::PerDraw => 1,
+            DrawMode::Indirect => 2,
+        };
+        self.draw_preference.store(v, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// The mode a new terrain renderer starts in: the preference, else indirect where supported; indirect needs the feature.
+    pub fn default_draw_mode(&self) -> DrawMode {
+        match self.draw_preference.load(std::sync::atomic::Ordering::SeqCst) {
+            1 => DrawMode::PerDraw,
+            2 if self.indirect => DrawMode::Indirect,
+            2 => DrawMode::PerDraw,
+            _ if self.indirect => DrawMode::Indirect,
+            _ => DrawMode::PerDraw,
+        }
     }
 
     /// Graphics backend, e.g. `Vulkan` or `Dx12`.

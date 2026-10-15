@@ -11,8 +11,8 @@ use planet_streaming::{PoolConfig, Tier};
 /// Largest number of planned nodes the per-node record buffer holds (a plan beyond it is refused, not allocated for).
 pub const MAX_PLAN_NODES: u64 = 32_768;
 
-/// The dynamic-offset stride of the node records the share accounts for (a device alignment of 256 rounds the 192 B record
-/// to 256; 512 leaves room for a device with a coarser alignment).
+/// The per-node bytes the share reserves for node records (the renderer needs 2 x (192 B record + 20 B argument record) plus
+/// 2 x 96 B of globals; 512 leaves room).
 pub const NODE_RECORD_STRIDE_MAX: u64 = 512;
 
 /// Largest bytes of one block (vertex buffer) of the main pool: well under wgpu's default buffer size limit of 256 MiB.

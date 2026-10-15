@@ -41,6 +41,7 @@ modes:
     --repro <file>           replay a repro bundle (see cargo xtask repro)
     --out <file.png>         write the image
     --adapter software|hardware   adapter policy (default: PLANET_ADAPTER or software)
+    --draw per-draw|indirect   how the terrain renderer submits draws (REND-015): per-draw is the reference loop, indirect one multi-draw per buffer run from a CPU-built argument buffer (default indirect where the adapter supports it, else per-draw)
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
     --machine-ready          owner override of a failed readiness gate (ADR 0020); recorded in the log
     --smoke                  start and exit";
@@ -59,6 +60,8 @@ pub struct Options {
     pub scene: String,
     pub out: Option<PathBuf>,
     pub adapter: Option<AdapterPolicy>,
+    /// `--draw per-draw|indirect`: how the terrain renderer submits draws (REND-015); default indirect where supported.
+    pub draw: Option<planet_render::DrawMode>,
     pub perf: bool,
     pub machine_ready: bool,
     pub view: String,
@@ -128,6 +131,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         scene: "hello-triangle".into(),
         out: None,
         adapter: None,
+        draw: None,
         perf: false,
         machine_ready: false,
         view: "face".into(),
@@ -226,6 +230,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--machine-ready" => o.machine_ready = true,
             "--scene" => o.scene = it.next().ok_or("--scene needs a value")?.clone(),
             "--out" => o.out = Some(PathBuf::from(it.next().ok_or("--out needs a value")?)),
+            "--draw" => o.draw = Some(planet_render::DrawMode::parse(it.next().ok_or("--draw needs per-draw or indirect")?)?),
             "--adapter" => {
                 o.adapter = Some(match it.next().ok_or("--adapter needs a value")?.as_str() {
                     "software" => AdapterPolicy::Software,
@@ -422,6 +427,10 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let ctx = GpuContext::new(policy).map_err(|e| e.to_string())?;
     // Hybrid-graphics rule (report §8): always log which adapter we got.
     writeln!(out, "{}", ctx.adapter_log_line()).map_err(err)?;
+    if let Some(mode) = o.draw {
+        ctx.prefer_draw_mode(mode);
+        writeln!(out, "draw: {} requested, {} in effect", mode.name(), ctx.default_draw_mode().name()).map_err(err)?;
+    }
     if o.perf && o.perf_smoke {
         return Err("--perf and --perf-smoke exclude each other: a smoke run is never a measurement".into());
     }

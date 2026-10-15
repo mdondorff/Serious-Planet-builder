@@ -237,3 +237,24 @@ fn a_terrain_bundle_replays_to_the_same_pixels_and_refuses_changed_inputs() {
     let e = run(&["test-render", "--adapter", "software", "--repro", other.to_str().unwrap()]).unwrap_err();
     assert!(e.contains("replayed terrain plan differs") && e.contains("mesh_key"), "{e}");
 }
+
+// spec: REND-015, STRM-016, STRM-017
+#[test]
+fn the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either() {
+    let base = ["test-render", "--scene", "terrain", "--script", "aerial-200km", "--view", "relief", "--adapter", "software"];
+    let render = |extra: &[&str], name: &str| {
+        let png = tmp(name);
+        let log = run(&[&base[..], extra, &["--out", png.to_str().unwrap()]].concat()).unwrap();
+        (read_png(&png).unwrap(), log)
+    };
+    let (reference, log) = render(&["--draw", "per-draw"], "draw-per.png");
+    assert!(log.contains("draw: per-draw requested, per-draw in effect"), "{log}");
+    let (indirect, log) = render(&["--draw", "indirect"], "draw-ind.png");
+    assert!(log.contains("draw: indirect requested,"), "{log}");
+    assert_eq!(reference, indirect, "the synchronous path");
+    // The streaming and the pipelined loops (frames in flight, managed slots) on the indirect path.
+    assert_eq!(reference, render(&["--draw", "indirect", "--stream"], "draw-stream.png").0, "streamed");
+    assert_eq!(reference, render(&["--draw", "indirect", "--pipelined"], "draw-pipe.png").0, "pipelined");
+    assert_eq!(reference, render(&["--draw", "per-draw", "--pipelined"], "draw-pipe-per.png").0, "pipelined, per-draw");
+    assert!(run(&[&base[..], &["--draw", "bogus"]].concat()).unwrap_err().contains("unknown draw mode"));
+}
