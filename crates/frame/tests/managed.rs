@@ -1236,14 +1236,17 @@ fn a_settled_still_view_has_lag_zero_in_every_frame_and_a_rotation_has_a_lag_in_
         assert_eq!((l.mean, l.worst, l.uncovered.len()), (0.0, 0, 0), "frame {k}: {l:?}");
     }
     // Rotation (10 degrees a frame, far outside the stale-plan rule, so the frames draw the cover; and 0.2 degrees a frame,
-    // inside it): every frame has a lag judged against its own camera's plan, and the post-pass reproduces each of them. What
-    // the numbers are is the scene's finding to report, not this test's: the cover is coarser than the selection (a finding in
-    // docs/learnings.md); the test pins that nothing is skipped or "not measured".
+    // inside it): every frame has a lag judged against its own camera's plan, nothing is skipped or "not measured", the post-pass
+    // reproduces each of them, and with R resident the lag is 0 and nothing is uncovered (the cover is the plan's own selection).
     for (step_deg, frames) in [(10.0f64, 24u32), (0.2, 24)] {
         let reqs = (0..frames).map(|k| request(here(), f64::from(k) * step_deg.to_radians(), [-1.0, -0.4, 0.2][k as usize % 3])).collect();
         let run = run_logged(&mut rig, reqs);
         assert_eq!(run.inline.len(), frames as usize);
-        assert!(run.inline.iter().all(|l| l.mean.is_finite() && l.mean >= 0.0));
+        assert!(
+            run.inline.iter().all(|l| l.mean == 0.0 && l.worst == 0 && l.uncovered.is_empty()),
+            "{step_deg} degrees a frame: {:?}",
+            run.inline
+        );
         for threads in [1, 3] {
             assert_eq!(post_pass(&run, threads), run.inline, "{step_deg} degrees a frame, {threads} threads");
         }
@@ -1259,12 +1262,15 @@ fn the_post_pass_equals_the_inline_lag_frame_for_frame_on_a_dive_and_a_teleport_
     rig.settle(&request(dive_position(0), 0.3, -0.4));
     let dive = run_logged(&mut rig, (0..60).map(|k| request(dive_position(k), 0.3, -0.4)).collect());
     assert!(dive.inline.iter().any(|l| l.mean > 0.0), "the script must lag for the comparison to say anything");
+    // A visible node always has a tile, root or ancestor, to show (ADR 0032's hard measure): nothing uncovered in any frame.
+    assert!(dive.inline.iter().all(|l| l.uncovered.is_empty()), "dive: {:?}", dive.inline.iter().find(|l| !l.uncovered.is_empty()));
     // Teleport: a cold plan and a long fill.
     let mut rig = Rig::new(1_000_000);
     rig.tile_jobs_per_frame = 16;
     rig.settle(&request(here(), 0.0, -0.4));
     let tp = run_logged(&mut rig, (0..40).map(|_| request(there(), 0.5, -0.3)).collect());
     assert!(tp.inline[0].mean > 0.0 && tp.inline.last().unwrap().mean == 0.0, "lag at the jump, none once the draw set is complete");
+    assert!(tp.inline.iter().all(|l| l.uncovered.is_empty()), "teleport: {:?}", tp.inline.iter().find(|l| !l.uncovered.is_empty()));
     for run in [&dive, &tp] {
         for threads in [1, 2, 8] {
             let got = post_pass(run, threads);
@@ -1289,4 +1295,34 @@ fn a_frame_without_a_recorded_pose_fails_the_post_pass_naming_the_frame() {
     // The pure function agrees with the plan-versus-plan one on a hand-built case (same code path).
     let fresh = plan_terrain_field(&run.reqs[0], &Reference(1)).unwrap();
     assert_eq!(detail_lag(&fresh, &DrawnSet::of_plan(&fresh), &run.reqs[0].lod).mean, 0.0);
+}
+
+// spec: STRM-002, STRM-016, TEST-018, TEST-020
+#[test]
+fn rotation_at_the_settled_state_has_lag_zero_and_nothing_uncovered_in_every_frame_at_any_turn_rate() {
+    // ADR 0031 point 3: rotation never fetches and never blurs. With R resident a camera that only turns draws what the plan of
+    // its own camera selects, whether the stale-plan rule lets the frame draw a plan (0.2 degrees a frame) or not (the rest:
+    // the frame draws the cover, which is the plan's own selection with "resident" as the condition for descending).
+    let mut rig = Rig::new(1_000_000);
+    rig.settle(&request(here(), 0.0, -0.4));
+    // (degrees a frame, frames): the last is a half turn in 0.2 s at 60 frames a second.
+    for (step_deg, frames) in [(0.2f64, 40u32), (0.7, 40), (3.0, 40), (10.0, 36), (15.0, 12)] {
+        let pitches = [-0.4, -0.4, -1.0, 0.2];
+        for pitch_script in [false, true] {
+            let reqs = (0..frames)
+                .map(|k| request(here(), f64::from(k) * step_deg.to_radians(), if pitch_script { pitches[k as usize % 4] } else { -0.4 }))
+                .collect();
+            let run = run_logged(&mut rig, reqs);
+            for (k, l) in run.inline.iter().enumerate() {
+                assert_eq!(
+                    (l.mean, l.worst, l.uncovered.len()),
+                    (0.0, 0, 0),
+                    "{step_deg} degrees a frame (pitch script {pitch_script}), frame {k}: {l:?}"
+                );
+            }
+        }
+    }
+    // The turn fetched nothing and cancelled nothing: R was resident and stays the wanted set.
+    let st = rig.lp.manager().streamer().stats();
+    assert_eq!((st.queued, st.in_flight), (0, 0));
 }

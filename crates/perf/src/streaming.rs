@@ -24,7 +24,7 @@ pub const LAG_ZERO: f64 = 1e-9;
 
 /// What the harness knows about one frame of a case (ADR 0032 point 6: the columns apart, so a frame over budget is
 /// attributed to its largest part). Times are milliseconds.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct FrameRecord {
     /// Plan time: the worker's time of the plan delivered in this frame (off the frame's critical path, STRM-016).
     pub plan_ms: f64,
@@ -41,8 +41,12 @@ pub struct FrameRecord {
     /// the post-pass over the recorded poses and drawn sets. Every frame has one: `None` is missing data (the case failed to
     /// record the frame), which every lag verdict reports as OVER, never as "not measured".
     pub lag: Option<f64>,
-    /// Nodes of that fresh selection with no drawn tile at, above or below them (counted in the lag as level + 1).
+    /// Nodes of that fresh selection with no drawn tile at, above or below them (counted in the lag as level + 1): ADR 0032's hard
+    /// measure is "a tile, root or ancestor, for every visible node", so they are blank tiles, gated like the draw's own blank count
+    /// (`CaseSpec::uncovered`).
     pub uncovered_nodes: usize,
+    /// The raw ids of those nodes (empty when `uncovered_nodes` is 0).
+    pub uncovered_tiles: Vec<u64>,
     /// Target nodes with no resident tile of their own or of an ancestor, and whether nothing at all was drawn.
     pub blank_nodes: usize,
     pub upload_bytes: u64,
@@ -90,6 +94,9 @@ pub struct CaseSpec {
     /// Script seconds per frame.
     pub step_s: f64,
     pub rules: Vec<LagRule>,
+    /// How nodes of the fresh selection with nothing drawn at, above or below them count (ADR 0032's hard measure: a tile for
+    /// every visible node): gated, zero in every frame, for every scene but `dive-fast`, whose criteria are report-only.
+    pub uncovered: Gate,
 }
 
 /// The rules of `scene` (ADR 0032 point 4). `descent_frames` is the dive's descent length in frames, `frames` the length of the
@@ -109,7 +116,8 @@ pub fn case_spec(scene: &str, frames: usize, step_s: f64, descent_frames: usize)
         "teleport-2km" => vec![LagRule::Recovery { under1_s: 1.0, complete_s: 4.0, gate: Gate::Tracked }],
         _ => vec![LagRule::Still { gate: Gate::Gated }],
     };
-    Some(CaseSpec { scene: name, frames, step_s, rules })
+    let uncovered = if name == "dive-fast" { Gate::ReportOnly } else { Gate::Gated };
+    Some(CaseSpec { scene: name, frames, step_s, rules, uncovered })
 }
 
 /// Memory facts of a run. `None` is "not measured" (the line says so; nothing is invented).
@@ -312,18 +320,25 @@ pub fn case_verdicts(spec: &CaseSpec, frames: &[FrameRecord], blank_frames: &[(u
     for rule in &spec.rules {
         v.push(lag_verdict(rule, &lags, frames, spec.step_s));
     }
-    // Coverage of the fresh selection, reported beside the lag: nodes with nothing drawn at, above or below them.
+    // Coverage of the fresh selection (ADR 0032's hard measure: a tile, root or ancestor, for every visible node): a node with
+    // nothing drawn at, above or below it is a blank tile. Also counted in the lag as level + 1.
     let uncovered = frames.iter().filter(|f| f.uncovered_nodes > 0).count();
-    if let Some(first) = frames.iter().position(|f| f.uncovered_nodes > 0) {
-        v.push(Verdict::new(
-            "uncovered nodes",
-            Status::Reported,
-            format!(
-                "{uncovered} of {} frames had nodes of their fresh selection with nothing drawn at, above or below them (first at frame {first}, {} nodes; counted in the lag as level + 1; the stale-plan rule allows edge slivers; no budget)",
-                frames.len(),
-                frames[first].uncovered_nodes
-            ),
-        ));
+    match frames.iter().position(|f| f.uncovered_nodes > 0) {
+        None => v.push(Verdict::new("uncovered nodes", Status::Ok, "none in any of the frames".into())),
+        Some(first) => {
+            let ids: Vec<String> = frames[first].uncovered_tiles.iter().take(8).map(|t| format!("{t:#018x}")).collect();
+            v.push(Verdict::new(
+                "uncovered nodes",
+                gated(spec.uncovered, false),
+                format!(
+                    "{uncovered} of {} frames had nodes of their fresh selection with nothing drawn at, above or below them (first at frame {first}, {} nodes, tiles {}; counted in the lag as level + 1; budget none{})",
+                    frames.len(),
+                    frames[first].uncovered_nodes,
+                    ids.join(" "),
+                    if spec.uncovered == Gate::ReportOnly { "; report-only in this scene" } else { "" }
+                ),
+            ));
+        }
     }
     v
 }
@@ -526,6 +541,7 @@ mod tests {
             wall_ms: wall,
             lag: Some(0.0),
             uncovered_nodes: 0,
+            uncovered_tiles: Vec::new(),
             blank_nodes: 0,
             upload_bytes: 0,
             resident: 10,
@@ -744,6 +760,7 @@ mod fresh_lag_tests {
                 wall_ms: 5.0,
                 lag,
                 uncovered_nodes: 0,
+                uncovered_tiles: Vec::new(),
                 blank_nodes: 0,
                 upload_bytes: 0,
                 resident: 0,
@@ -810,25 +827,42 @@ mod fresh_lag_tests {
         assert!(r.fails() && r.detail.contains("first at frame 1000") && r.line("dive").contains("OVER"), "{r:?}");
     }
 
-    // spec: TEST-020
+    // spec: TEST-018, TEST-020
     #[test]
-    fn nodes_of_the_fresh_selection_with_nothing_drawn_are_reported_beside_the_lag_without_a_budget() {
-        let mut f = frames(600, Some(0.0));
-        f[40].uncovered_nodes = 3;
-        f[41].uncovered_nodes = 1;
-        let spec = case_spec("look-1m", 600, 1.0 / 60.0, 0).unwrap();
-        let v = case_verdicts(&spec, &f, &[], &mem());
+    fn nodes_of_the_fresh_selection_with_nothing_drawn_are_blank_tiles_gated_in_every_scene_but_dive_fast() {
+        for scene in ["look-1m", "look-2km", "teleport-1m", "teleport-2km", "dive"] {
+            let n = if scene == "dive" { 2400 } else { 600 };
+            let mut f = frames(n, Some(0.0));
+            f[40].uncovered_nodes = 3;
+            f[40].uncovered_tiles = vec![0x1234, 0x5678, 0x9abc];
+            f[41].uncovered_nodes = 1;
+            f[41].uncovered_tiles = vec![0x1234];
+            let spec = case_spec(scene, n, 1.0 / 60.0, if scene == "dive" { 1800 } else { 0 }).unwrap();
+            let v = case_verdicts(&spec, &f, &[], &mem());
+            let u = v.iter().find(|x| x.name == "uncovered nodes").unwrap();
+            assert!(
+                u.fails()
+                    && u.detail.contains("2 of")
+                    && u.detail.contains("first at frame 40, 3 nodes, tiles 0x0000000000001234 0x0000000000005678 0x0000000000009abc")
+                    && u.line(scene).ends_with(" OVER"),
+                "{scene}: {u:?}"
+            );
+        }
+        // dive-fast is report-only: the same frames are reported, with the ids, and do not fail.
+        let mut fast = frames(2400, Some(0.0));
+        fast[40].uncovered_nodes = 3;
+        fast[40].uncovered_tiles = vec![0x1234, 0x5678, 0x9abc];
+        let spec = case_spec("dive-fast", 2400, 1.0 / 60.0, 1800).unwrap();
+        let v = case_verdicts(&spec, &fast, &[], &mem());
         let u = v.iter().find(|x| x.name == "uncovered nodes").unwrap();
-        assert!(
-            !u.fails()
-                && u.status == Status::Reported
-                && u.detail.contains("2 of 600 frames")
-                && u.detail.contains("first at frame 40, 3 nodes"),
-            "{u:?}"
-        );
+        assert!(!u.fails() && u.status == Status::Reported && u.detail.contains("tiles 0x0000000000001234"), "{u:?}");
+        // Nothing uncovered: an ok line, never absent.
+        let spec = case_spec("look-1m", 600, 1.0 / 60.0, 0).unwrap();
         let none = case_verdicts(&spec, &frames(600, Some(0.0)), &[], &mem());
-        assert!(none.iter().all(|x| x.name != "uncovered nodes"));
+        assert_eq!(none.iter().find(|x| x.name == "uncovered nodes").unwrap().status, Status::Ok);
+        let mut f = frames(600, Some(0.0));
+        f[41].uncovered_nodes = 3;
         let t = frames_text(&f);
-        assert!(t.lines().next().unwrap().contains("lag uncovered blank") && t.lines().nth(41).unwrap().contains(" 0.000 3 0 "), "{t}");
+        assert!(t.lines().next().unwrap().contains("lag uncovered blank") && t.lines().nth(42).unwrap().contains(" 0.000 3 0 "), "{t}");
     }
 }
