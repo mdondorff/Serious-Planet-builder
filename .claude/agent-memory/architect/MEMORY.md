@@ -30,6 +30,20 @@ Refreshed 2026-10-13 at the M3 gate (session `opus-plannner`, worktree `opus-pla
 - Cross-OS determinism: he asked its cost; I said keep it (cheap marginal cost over run/thread determinism).
 - He is short on weekly quota: prefers M4 fully prepared so the worker can run for days without him.
 
+## Owner decisions 2026-10-15
+- Finest level 22 (cells 32), detail term deferred; ADRs 0031, 0032 accepted, 0033 in part (8, 9 wait for perf);
+  M4 exit criteria gain teleport + mouse look (lag gated for dive descent and look, tracked for teleport).
+- ADR 0034 accepted WITH CHANGE: frame-time verdicts valid at any clock; only GPU figures need P0 (code fix = 6d).
+- Blesses approved: #122 low2km_morph (done), #137 cube_corner_normals (owner runs /bless in sonnet-m4).
+  The classifier refuses me copying goldens: owner runs /bless himself.
+- Coder works only in worktree `sonnet-m4` (one branch per change, no new worktrees).
+- Open with the owner: draft ADR "render-only attributes are not fields under CON-07/14"? M5 design constraints:
+  water-level field W(dir) + water-body kind, ocean connectivity in the bake, liquid kinds as data (emissive lava),
+  emissive-ready HDR; hydrology + surface materials (snow, sand, scree) as a milestone after the M5 gate; no runtime
+  simulation, no overhangs. Prepare M5 plan after the first M4 perf window.
+- First M4 perf window: after #137 and 6d merge and the coder goes idle; measure compact vs vertex at P0, encode/draw,
+  eroded plan times, ADR 0034 in practice (does cpu_ms wait for the GPU?). Compact was NOT faster ad hoc (1.05/1.19x).
+
 ## Owner decisions 2026-10-14
 - Optimization review (`docs/background/optimization-brainstorm-review.md`, #106): CPU limits the frame at ground-1m
   (plan 6.6 + encode 6.0 + GPU 4.1 ms in a row). M4 queue gained: SPIKE-05 cells-64/hidden-triangle/tiles-per-s
