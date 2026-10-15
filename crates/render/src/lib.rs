@@ -3,6 +3,7 @@
 
 use std::fmt;
 
+pub mod compact;
 pub mod exec;
 pub mod graph;
 #[cfg(feature = "spike06")]
@@ -10,8 +11,9 @@ pub mod spike_compact;
 #[cfg(feature = "spike07")]
 pub mod spike_detail;
 pub mod terrain;
+pub use compact::compact_terrain_shader;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
-pub use terrain::{execute_terrain, DrawMode, FrameTiming, TerrainRenderer, TerrainStats, TERRAIN_SHADERS};
+pub use terrain::{execute_terrain, DrawMode, FrameTiming, ResidentFormat, TerrainRenderer, TerrainStats, TERRAIN_SHADERS};
 
 /// Which adapter the process wants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

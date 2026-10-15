@@ -60,6 +60,15 @@ pub struct PoolConfig {
     pub node_record_bytes: u64,
     /// A freed slot is reusable this many frames after its release (frames in flight).
     pub frames_in_flight: u64,
+    /// Bytes one block really allocates when that is not `slot_bytes * block_slots` (a compact atlas is a whole texture whose
+    /// slots do not fill it); 0 means `slot_bytes * block_slots` (the vertex-format blocks).
+    pub block_alloc_bytes: u64,
+    /// Bytes of the per-slot record of the compact format (ADR 0033: 128), held for every slot of the main pool in one
+    /// buffer allocated with the renderer; 0 for the vertex format.
+    pub slot_record_bytes: u64,
+    /// Slots of the small vertex pool the renderer keeps for the CON-13 fallback tiles of the compact format (ADR 0033 points 3
+    /// and 5): the top `fallback_slots` of `vertex_slots`; the residency manager sees only the rest. 0 for the vertex format.
+    pub fallback_slots: u32,
 }
 
 impl PoolConfig {
@@ -74,6 +83,36 @@ impl PoolConfig {
         node_record_bytes: u64,
         frames_in_flight: u64,
     ) -> Result<PoolConfig, String> {
+        Self::fit_share_with(
+            share_bytes,
+            slot_bytes,
+            block_slots,
+            0,
+            0,
+            0,
+            vertex_slot_bytes,
+            index_bytes,
+            node_record_bytes,
+            frames_in_flight,
+        )
+    }
+
+    /// [`fit_share`](PoolConfig::fit_share) for a main pool whose block is a texture of `block_alloc_bytes` (0: `slot_bytes *
+    /// block_slots`) with a record of `slot_record_bytes` per slot, and `fallback_slots` of the vertex pool kept for fallback
+    /// tiles. The record buffer (`main_slots * slot_record_bytes`) counts with the fixed items.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fit_share_with(
+        share_bytes: u64,
+        slot_bytes: u64,
+        block_slots: u32,
+        block_alloc_bytes: u64,
+        slot_record_bytes: u64,
+        fallback_slots: u32,
+        vertex_slot_bytes: u64,
+        index_bytes: u64,
+        node_record_bytes: u64,
+        frames_in_flight: u64,
+    ) -> Result<PoolConfig, String> {
         let mut c = PoolConfig {
             slot_bytes,
             block_slots,
@@ -83,6 +122,9 @@ impl PoolConfig {
             index_bytes,
             node_record_bytes,
             frames_in_flight,
+            block_alloc_bytes,
+            slot_record_bytes,
+            fallback_slots,
         };
         // A big slot makes the vertex pool outgrow its reserve: halve it (never under 128 slots, the 126 tiles of levels 0-2)
         // and give up the small pool (one pool for every level) when even that does not fit.
@@ -92,6 +134,12 @@ impl PoolConfig {
         if c.fixed_bytes() > FIXED_RESERVE_BYTES {
             return Err(format!("the fixed items take {} B, more than their reserve of {FIXED_RESERVE_BYTES} B", c.fixed_bytes()));
         }
+        if c.fallback_slots > 0 && c.vertex_slots < c.fallback_slots + 128 {
+            return Err(format!(
+                "a vertex pool of {} slots cannot hold 128 coarse tiles and {} fallback tiles",
+                c.vertex_slots, c.fallback_slots
+            ));
+        }
         let block_bytes = c.block_bytes();
         if block_bytes == 0 || share_bytes < FIXED_RESERVE_BYTES {
             return Err(format!("a share of {share_bytes} B leaves nothing after the {FIXED_RESERVE_BYTES} B reserve"));
@@ -100,11 +148,35 @@ impl PoolConfig {
         if c.main_blocks == 0 {
             return Err(format!("a share of {share_bytes} B holds no block of {block_bytes} B"));
         }
+        // The slot records scale with the main pool: they belong to the fixed items and must fit their reserve with the rest.
+        if c.fixed_bytes() > FIXED_RESERVE_BYTES {
+            return Err(format!(
+                "the fixed items with {} slot records take {} B, more than their reserve of {FIXED_RESERVE_BYTES} B",
+                c.main_slots(),
+                c.fixed_bytes()
+            ));
+        }
         Ok(c)
     }
 
+    /// Bytes one block of the main pool allocates.
     pub fn block_bytes(&self) -> u64 {
-        self.slot_bytes * u64::from(self.block_slots)
+        if self.block_alloc_bytes > 0 {
+            self.block_alloc_bytes
+        } else {
+            self.slot_bytes * u64::from(self.block_slots)
+        }
+    }
+
+    /// Bytes of the slot-record buffer: one record per slot of the main pool at its ceiling.
+    pub fn slot_record_total_bytes(&self) -> u64 {
+        self.slot_record_bytes * u64::from(self.main_slots())
+    }
+
+    /// Slots of the small vertex pool the residency manager places tiles in (levels 0-2); the top `fallback_slots` are the
+    /// renderer's own, for fallback tiles.
+    pub fn managed_vertex_slots(&self) -> u32 {
+        self.vertex_slots.saturating_sub(self.fallback_slots)
     }
 
     /// Slots of the main pool at its ceiling: what the residency manager counts its capacity in.
@@ -112,16 +184,20 @@ impl PoolConfig {
         self.main_blocks * self.block_slots
     }
 
-    /// The fixed items: the small vertex pool, index buffers and node records.
+    /// The fixed items: the small vertex pool, index buffers, node records and the slot records.
     pub fn fixed_bytes(&self) -> u64 {
-        self.vertex_slot_bytes * u64::from(self.vertex_slots) + self.index_bytes + self.node_record_bytes
+        self.vertex_slot_bytes * u64::from(self.vertex_slots) + self.index_bytes + self.node_record_bytes + self.slot_record_total_bytes()
     }
 
     /// Bytes allocated with `main_blocks_live` blocks of the main pool in use and the vertex pool allocated or not
     /// (`vertex_pool_live`): what the renderer holds at that moment.
     pub fn allocated_bytes_with(&self, main_blocks_live: u32, vertex_pool_live: bool) -> u64 {
         let vertex = if vertex_pool_live { self.vertex_slot_bytes * u64::from(self.vertex_slots) } else { 0 };
-        u64::from(main_blocks_live) * self.block_bytes() + vertex + self.index_bytes + self.node_record_bytes
+        u64::from(main_blocks_live) * self.block_bytes()
+            + vertex
+            + self.index_bytes
+            + self.node_record_bytes
+            + self.slot_record_total_bytes()
     }
 
     /// The most the pools can ever allocate: all blocks, the vertex pool, index buffers and node records. This is the
@@ -137,7 +213,7 @@ impl PoolConfig {
 
     /// The streamer's pools for this configuration.
     pub fn slot_pools(&self) -> SlotPools {
-        SlotPools::new(self.main_slots(), self.vertex_slots, self.frames_in_flight)
+        SlotPools::new(self.main_slots(), self.managed_vertex_slots(), self.frames_in_flight)
     }
 }
 
