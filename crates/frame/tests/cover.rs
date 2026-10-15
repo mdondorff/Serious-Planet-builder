@@ -8,7 +8,7 @@ use planet_core::{Face, PlanetFixed, TileId, Vec3};
 use planet_frame::pipeline::{draw_plan_with, DrawKind, DrawPlan, ResidentRecords, ResidentTile};
 use planet_frame::{
     cover_selection_bounded, plan_covers_view, plan_terrain_field, residency_set_field, scripted_views_field, Camera, LodParams,
-    SelectionCache, TileBounds, TerrainRequest, TerrainView,
+    SelectionCache, TerrainRequest, TerrainView, TileBounds,
 };
 use planet_generators::height::{HeightField, Reference};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -51,7 +51,9 @@ fn cover_of(camera: &Camera, set: &HashMap<TileId, ResidentTile>, bounds: &TileB
 
 /// Fails naming the tiles only one side has (tile, level), not the whole sets.
 fn assert_same(label: &str, cover: &BTreeMap<TileId, u8>, plan: &BTreeMap<TileId, u8>) {
-    let only = |a: &BTreeMap<TileId, u8>, b: &BTreeMap<TileId, u8>| a.iter().filter(|(t, _)| !b.contains_key(t)).take(6).map(|(t, l)| format!("{t:?}@{l}")).collect::<Vec<_>>();
+    let only = |a: &BTreeMap<TileId, u8>, b: &BTreeMap<TileId, u8>| {
+        a.iter().filter(|(t, _)| !b.contains_key(t)).take(6).map(|(t, l)| format!("{t:?}@{l}")).collect::<Vec<_>>()
+    };
     assert!(
         cover == plan,
         "{label}: cover {} tiles, plan {} tiles; only in the cover {:?}; only in the plan {:?}",
@@ -94,7 +96,11 @@ fn under_a_rotation_script_the_cover_equals_the_plan_of_every_frame_whatever_the
                 let pitch = [-0.4, -1.0, 0.2][k as usize % 3];
                 let camera = turned(position, f64::from(k) * step_deg.to_radians(), pitch);
                 let cover = cover_of(&camera, &set, &bounds);
-                assert_same(&format!("{name}, {step_deg} degrees a frame, frame {k}"), &levels(cover.iter().copied()), &plan_levels(camera));
+                assert_same(
+                    &format!("{name}, {step_deg} degrees a frame, frame {k}"),
+                    &levels(cover.iter().copied()),
+                    &plan_levels(camera),
+                );
             }
         }
     }

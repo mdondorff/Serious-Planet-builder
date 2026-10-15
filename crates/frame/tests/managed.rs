@@ -1242,7 +1242,11 @@ fn a_settled_still_view_has_lag_zero_in_every_frame_and_a_rotation_has_a_lag_in_
         let reqs = (0..frames).map(|k| request(here(), f64::from(k) * step_deg.to_radians(), [-1.0, -0.4, 0.2][k as usize % 3])).collect();
         let run = run_logged(&mut rig, reqs);
         assert_eq!(run.inline.len(), frames as usize);
-        assert!(run.inline.iter().all(|l| l.mean == 0.0 && l.worst == 0 && l.uncovered.is_empty()), "{step_deg} degrees a frame: {:?}", run.inline);
+        assert!(
+            run.inline.iter().all(|l| l.mean == 0.0 && l.worst == 0 && l.uncovered.is_empty()),
+            "{step_deg} degrees a frame: {:?}",
+            run.inline
+        );
         for threads in [1, 3] {
             assert_eq!(post_pass(&run, threads), run.inline, "{step_deg} degrees a frame, {threads} threads");
         }

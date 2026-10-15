@@ -293,7 +293,12 @@ fn run_case(
 /// The `BLANK TILE` lines of a case, which fail the run after the logs are written (ADR 0032's hard measure: a tile, root or
 /// ancestor, for every visible node): the frames whose draw had a blank node, and, where the scene gates it (`spec.uncovered`),
 /// the frames with nodes of their fresh selection that nothing drawn covers, each with its tile ids.
-fn blank_failure_lines(scene: &str, spec: &planet_perf::streaming::CaseSpec, frames: &[FrameRecord], blanks: &[(usize, Vec<u64>)]) -> Vec<String> {
+fn blank_failure_lines(
+    scene: &str,
+    spec: &planet_perf::streaming::CaseSpec,
+    frames: &[FrameRecord],
+    blanks: &[(usize, Vec<u64>)],
+) -> Vec<String> {
     let mut lines: Vec<String> = blanks
         .iter()
         .map(|(k, ids)| {
@@ -560,7 +565,11 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         for f in &blank_failures {
             writeln!(out, "BLANK TILE: {f}").map_err(err)?;
         }
-        return Err(format!("{} frame(s) drew a blank tile or left a visible node without one (STRM-002): {}", blank_failures.len(), blank_failures[0]));
+        return Err(format!(
+            "{} frame(s) drew a blank tile or left a visible node without one (STRM-002): {}",
+            blank_failures.len(),
+            blank_failures[0]
+        ));
     }
     let over: Vec<String> = reports
         .iter()
@@ -683,7 +692,8 @@ mod tests {
             let lines = blank_failure_lines(scene, &spec, &frames, &[]);
             assert_eq!(lines.len(), 1, "{scene}: {lines:?}");
             assert!(
-                lines[0].starts_with(&format!("{scene}: frame 2 had 2 node(s)")) && lines[0].contains("0x0000000000001234 0x0000000000005678"),
+                lines[0].starts_with(&format!("{scene}: frame 2 had 2 node(s)"))
+                    && lines[0].contains("0x0000000000001234 0x0000000000005678"),
                 "{lines:?}"
             );
         }
