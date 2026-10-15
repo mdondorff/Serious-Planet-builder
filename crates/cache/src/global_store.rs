@@ -521,6 +521,11 @@ impl LatticeSource for StoreSource<'_> {
         self.res
     }
 
+    /// Cells per block edge: batch reads group their samples by block (GEN-020).
+    fn block_cells(&self) -> u32 {
+        self.cells
+    }
+
     fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
         if i > self.res || j > self.res {
             return Err(ReadError::Source(format!("vertex ({i}, {j}) of a {}-cell grid", self.res)));

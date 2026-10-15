@@ -2,7 +2,8 @@
 //! the cold draw plan (a fresh `StoreSource` and `SelectionCache`), the lattice reads it makes, the distinct blocks it touches
 //! and the second plan (blocks cached, fresh `SelectionCache`); then the 1, 4 and 20 thread tile rate with a bit-identity
 //! check of the tiles across thread counts. Not production code.
-//! `cargo run --release -p planet --example store_blocks -- --store DIR --global-res N [--part plans|rate|decode|roots] [--threads 1,6] [--skip-per-root] [--view NAME] [--memory-rate TILES_PER_S]`.
+//! `cargo run --release -p planet --example store_blocks -- --store DIR --global-res N [--part plans|rate|decode|roots|tiles|cells] [--order raster|block] [--threads 1,6] [--skip-per-root] [--view NAME] [--memory-rate TILES_PER_S]`.
+//! `--order raster` reads the lattice without a block-size hint (the sample order before change block-order-sampling, GEN-020); `block` (default) is the product.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
@@ -27,8 +28,33 @@ fn arg(name: &str) -> Option<String> {
     a.iter().position(|x| x == name).and_then(|i| a.get(i + 1).cloned())
 }
 
+/// The store as a lattice source, with or without the block-size hint (`--order raster|block`).
+struct Ordered<'a>(&'a StoreSource<'a>);
+
+fn raster() -> bool {
+    arg("--order").as_deref() == Some("raster")
+}
+
+impl LatticeSource for Ordered<'_> {
+    fn res(&self) -> u32 {
+        self.0.res()
+    }
+    fn block_cells(&self) -> u32 {
+        if raster() {
+            0
+        } else {
+            self.0.block_cells()
+        }
+    }
+    fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+        self.0.at(face, i, j)
+    }
+}
+
 struct Recording<'a> {
     inner: &'a StoreSource<'a>,
+    cells_seen: Mutex<std::collections::HashSet<(u8, u32, u32)>>,
+    record_cells: bool,
     cells: u32,
     blocks: Mutex<BTreeSet<(u8, u32, u32)>>,
     calls: AtomicU64,
@@ -39,8 +65,18 @@ impl LatticeSource for Recording<'_> {
     fn res(&self) -> u32 {
         self.inner.res()
     }
+    fn block_cells(&self) -> u32 {
+        if raster() {
+            0
+        } else {
+            self.inner.block_cells()
+        }
+    }
     fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
         self.calls.fetch_add(1, Relaxed);
+        if self.record_cells {
+            self.cells_seen.lock().unwrap().insert((face.0, i, j));
+        }
         self.align[((i | j | 1 << 14).trailing_zeros() as usize).min(14)].fetch_add(1, Relaxed);
         let side = self.inner.res() / self.cells;
         self.blocks.lock().unwrap().insert((face.0, (i / self.cells).min(side - 1), (j / self.cells).min(side - 1)));
@@ -110,6 +146,8 @@ fn main() -> Result<(), String> {
                 let (_, block_cells) = world.layout(res).map_err(|e| format!("{e:?}"))?;
                 let rec = Recording {
                     inner: &stored,
+                    cells_seen: Mutex::new(Default::default()),
+                    record_cells: false,
                     cells: block_cells,
                     blocks: Mutex::new(BTreeSet::new()),
                     calls: AtomicU64::new(0),
@@ -152,8 +190,8 @@ fn main() -> Result<(), String> {
                 let def = WorldDefinition::single_planet(RADIUS_M, 1);
                 let world = GlobalWorld::from_definition(&def).map_err(|e| format!("{e}"))?;
                 let key = world.stage_key(self.src.res()).0;
-                let eroded =
-                    ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &self.src, key).map_err(|e| format!("{e:?}"))?;
+                let ordered = Ordered(&self.src);
+                let eroded = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &ordered, key).map_err(|e| format!("{e:?}"))?;
                 Ok(tile_mesh_field(&eroded, &TangentWarp, tile, self.cells, RADIUS_M).vertices.len())
             }
         }
@@ -173,6 +211,87 @@ fn main() -> Result<(), String> {
         }
         return Ok(());
     }
+    if part == "tiles" || part == "cells" {
+        // Per level 0..4 (change block-order-sampling): one tile, cold cache, one thread: time, decodes against the distinct
+        // blocks and lattice cells it reads; then (tiles) up to 16 tiles of the level on `--threads` workers over one fresh
+        // source. `cells` also lists how the distinct lattice cells relate to the tile's own sample spacing.
+        use planet_core::TileId;
+        let per_level = |level: u8| -> Vec<TileId> {
+            let side = 1u32 << level;
+            let all: Vec<TileId> =
+                (0..side).flat_map(|y| (0..side).map(move |x| (x, y))).map(|(x, y)| TileId::new(Face(2), level, x, y).unwrap()).collect();
+            let n = all.len().min(16);
+            (0..n).map(|k| all[k * all.len() / n]).collect()
+        };
+        let order = if raster() { "raster" } else { "block" };
+        for level in 0..=4u8 {
+            let tile = per_level(level)[0];
+            let stored = StoreSource::new(&store, &world, res).map_err(|e| e.to_string())?;
+            let (_, block_cells) = world.layout(res).map_err(|e| format!("{e:?}"))?;
+            let rec = Recording {
+                inner: &stored,
+                cells_seen: Mutex::new(Default::default()),
+                record_cells: part == "cells",
+                cells: block_cells,
+                blocks: Mutex::new(BTreeSet::new()),
+                calls: AtomicU64::new(0),
+                align: Default::default(),
+            };
+            let eroded = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &rec, key).map_err(|e| format!("{e:?}"))?;
+            let t = Instant::now();
+            let m = tile_mesh_field(&eroded, &map, tile, cells, RADIUS_M);
+            let secs = t.elapsed().as_secs_f64();
+            println!(
+                "TILE level {level} {tile:?} [{order}]: {secs:.2} s, {} reads, {} distinct blocks, {} decodes, {} vertices",
+                rec.calls.load(Relaxed),
+                rec.blocks.lock().unwrap().len(),
+                stored.stats().decodes,
+                m.vertices.len()
+            );
+            if part == "cells" {
+                let seen = rec.cells_seen.lock().unwrap();
+                let spacing = (res / (cells << level)).max(1);
+                let on = seen.iter().filter(|(_, i, j)| i % spacing == 0 && j % spacing == 0).count();
+                let mut hist = [0usize; 16];
+                for (_, i, j) in seen.iter() {
+                    hist[((i | j | 1 << 15).trailing_zeros() as usize).min(15)] += 1;
+                }
+                println!(
+                    "CELLS level {level}: {} distinct lattice cells; sample spacing {spacing} cells; {on} on the spacing grid (i and j multiples of it); alignment histogram (trailing zeros of i|j) {hist:?}",
+                    seen.len()
+                );
+            }
+            if part == "tiles" {
+                let tiles = per_level(level);
+                for threads in arg("--threads").unwrap_or_else(|| "6".into()).split(',').map(|t| t.parse::<usize>().unwrap()) {
+                    let src = StoreSource::new(&store, &world, res).map_err(|e| e.to_string())?;
+                    let ordered = Ordered(&src);
+                    let field =
+                        ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &ordered, key).map_err(|e| format!("{e:?}"))?;
+                    let next = AtomicU64::new(0);
+                    let t = Instant::now();
+                    std::thread::scope(|s| {
+                        for _ in 0..threads {
+                            s.spawn(|| loop {
+                                let i = next.fetch_add(1, Relaxed) as usize;
+                                if i >= tiles.len() {
+                                    break;
+                                }
+                                std::hint::black_box(tile_mesh_field(&field, &map, tiles[i], cells, RADIUS_M));
+                            });
+                        }
+                    });
+                    println!(
+                        "TILES level {level} [{order}]: {} tiles on {threads} threads over one cold source: {:.2} s wall, {} decodes",
+                        tiles.len(),
+                        t.elapsed().as_secs_f64(),
+                        src.stats().decodes
+                    );
+                }
+            }
+        }
+        return Ok(());
+    }
     if part == "plans" {
         let only = arg("--view");
         for name in ["orbit-20000km", "high-2000km", "aerial-200km", "aerial-20km", "low-2km", "ground-200m", "ground-1m"] {
@@ -183,6 +302,8 @@ fn main() -> Result<(), String> {
             let (_, block_cells) = world.layout(res).map_err(|e| format!("{e:?}"))?;
             let rec = Recording {
                 inner: &stored,
+                cells_seen: Mutex::new(Default::default()),
+                record_cells: false,
                 cells: block_cells,
                 blocks: Mutex::new(BTreeSet::new()),
                 calls: AtomicU64::new(0),
@@ -241,7 +362,8 @@ fn main() -> Result<(), String> {
     let mut all = Vec::new();
     for threads in [1usize, 4, 20] {
         let src = StoreSource::new(&store, &world, res).map_err(|e| e.to_string())?;
-        let field = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, key).map_err(|e| format!("{e:?}"))?;
+        let ordered = Ordered(&src);
+        let field = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &ordered, key).map_err(|e| format!("{e:?}"))?;
         let out: Vec<AtomicU64> = pick.iter().map(|_| AtomicU64::new(0)).collect();
         let next = AtomicU64::new(0);
         let t = Instant::now();

@@ -18,7 +18,7 @@
 
 use crate::height::HeightField;
 use crate::mesh::{
-    finest_class_key, mesh_key_field, skirt_depth, surface_normal_field, tile_mesh_field, vertex_count, MeshVertex, TileMesh,
+    finest_class_key, mesh_key_field, normal_from_stencil, normal_stencil, skirt_depth, tile_mesh_field, vertex_count, MeshVertex, TileMesh,
 };
 use planet_core::cube::FaceMapping;
 use planet_core::hash::hash_u64s;
@@ -262,7 +262,22 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
     assert!(cells >= 2 && cells.is_power_of_two(), "cells must be a power of two >= 2");
     let w = (cells + 1) as usize;
     let centre = id.center_direction(map);
-    let h_origin = field.height(centre);
+    // One batch call for every height the tile needs (GEN-020): the origin, the lattice points and the normal stencils.
+    let eps = core::f64::consts::FRAC_PI_2 / f64::from(1u32 << id.level()) / f64::from(cells);
+    let count = w * w;
+    let mut dirs = Vec::with_capacity(1 + count * 5);
+    dirs.push(centre);
+    for j in 0..=cells {
+        for i in 0..=cells {
+            dirs.push(id.sample_direction(map, cells, i, j));
+        }
+    }
+    for k in 0..count {
+        let st = normal_stencil(dirs[1 + k], eps);
+        dirs.extend(st);
+    }
+    let all = field.heights(&dirs);
+    let h_origin = all[0];
     let origin = PlanetFixed(centre * (radius_m + h_origin));
     // The shell through the origin: control points are small tile-local numbers (CON-11), not heights from the sea level.
     let shell = radius_m + h_origin;
@@ -274,16 +289,13 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
             ctrl[3 * b as usize + a as usize] = [p.x as f32, p.y as f32, p.z as f32];
         }
     }
-    // The normal stencil of the mesh: one cell of this level.
-    let eps = core::f64::consts::FRAC_PI_2 / f64::from(1u32 << id.level()) / f64::from(cells);
-    let mut hr = vec![0f64; w * w];
-    let mut normals = vec![[0u16; 2]; w * w];
-    for j in 0..=cells {
-        for i in 0..=cells {
-            let dir = id.sample_direction(map, cells, i, j);
-            hr[j as usize * w + i as usize] = field.height(dir) - h_origin;
-            normals[j as usize * w + i as usize] = oct_encode(surface_normal_field(field, dir, eps, radius_m));
-        }
+    let mut hr = vec![0f64; count];
+    let mut normals = vec![[0u16; 2]; count];
+    for k in 0..count {
+        hr[k] = all[1 + k] - h_origin;
+        let s0 = 1 + count + 4 * k;
+        let st = [dirs[s0], dirs[s0 + 1], dirs[s0 + 2], dirs[s0 + 3]];
+        normals[k] = oct_encode(normal_from_stencil(&st, &[all[s0], all[s0 + 1], all[s0 + 2], all[s0 + 3]], radius_m));
     }
     let lo = hr.iter().copied().fold(f64::INFINITY, f64::min);
     let hi = hr.iter().copied().fold(f64::NEG_INFINITY, f64::max);
