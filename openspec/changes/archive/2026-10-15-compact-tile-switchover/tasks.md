@@ -2,5 +2,5 @@
 - [x] 1.2 MESH_VERSION 5; execute_terrain_tiles, TileFormat, for_context; managed loop and app on RenderTile; --tile-format
 - [x] 1.3 specs (STRM-006, STRM-007, GEN-010, REND-016)
 - [x] 1.4 ad hoc timings (example compact_vs_vertex), learnings
-- [ ] 1.5 test gpu, test gpu --real, golden-review with the CI candidates
-- [ ] 1.6 reviewers (numerics, spec-guardian, verifier), archive, log line, PR, CI green, merge
+- [x] 1.5 test gpu, test gpu --real, golden-review with the CI candidates
+- [x] 1.6 reviewers (numerics, spec-guardian, verifier), archive, log line, PR, CI green, merge

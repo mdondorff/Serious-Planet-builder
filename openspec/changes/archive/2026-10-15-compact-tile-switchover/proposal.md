@@ -14,7 +14,9 @@ Part 3 of 3 of the compact tile format (ADR 0033 points 3-5, 10): the product pa
 
 Pack payload: the tile pack stores height tiles (kind height, STRM-009), not meshes or compact tiles; they are unchanged and the pack needs no version bump. A persisted compact tile (ADR 0033's pack delta) does not exist because tiles are regenerated from the field; its codec is not built. Persistent mesh keys change with MESH_VERSION (no pack stores them); repro bundles of mesh version 4 are refused with both versions named.
 
-Expected golden changes (each may move at most within rounding or the declared model error; unchanged ones are listed because the product path now draws them from compact tiles where they have tiles of level 3 and finer):
+Each golden below may move at most within rounding or the declared model error; unchanged ones are listed because the product path now draws them from compact tiles wherever they have tiles of level 3 and finer.
+
+Expected golden changes:
 - terrain_orbit_tile_id: drawn from compact tiles, rounding at most
 - terrain_aerial20km_level: drawn from compact tiles, rounding at most
 - terrain_aerial200km_height: drawn from compact tiles (contour pixels move by a fraction of a pixel)
