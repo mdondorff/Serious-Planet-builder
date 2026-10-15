@@ -7,6 +7,8 @@ pub mod exec;
 pub mod graph;
 #[cfg(feature = "spike06")]
 pub mod spike_compact;
+#[cfg(feature = "spike07")]
+pub mod spike_detail;
 pub mod terrain;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
 pub use terrain::{execute_terrain, FrameTiming, TerrainRenderer, TerrainStats, TERRAIN_SHADERS};
