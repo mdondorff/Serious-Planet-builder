@@ -175,6 +175,8 @@ fn parse(text: &[u8]) -> Result<Json, String> {
 pub struct LogSummary {
     pub valid: bool,
     pub resolution: (u64, u64),
+    /// What the session measured (`protocol.field`); `None` for a log that names none.
+    pub field: Option<String>,
     pub medians: BTreeMap<String, BTreeMap<String, f64>>,
     pub counts: BTreeMap<String, BTreeMap<String, u64>>,
 }
@@ -222,7 +224,11 @@ pub fn summarize_log(text: &[u8]) -> Result<LogSummary, String> {
         }
     }
     let medians = samples.into_iter().map(|(p, m)| (p, m.into_iter().map(|(name, v)| (name, median_of(v))).collect())).collect();
-    Ok(LogSummary { valid, resolution: res, medians, counts })
+    let field = match root.get("protocol").and_then(|p| p.get("field")) {
+        Some(Json::Str(s)) => Some(s.clone()),
+        _ => None,
+    };
+    Ok(LogSummary { valid, resolution: res, field, medians, counts })
 }
 
 /// Where the last valid log of the scene whose log is `log` is kept: `terrain.json` -> `terrain.last-valid.json` beside it.
@@ -296,6 +302,14 @@ pub fn comparison_lines(last_valid: Option<&[u8]>, new: &[u8]) -> Vec<String> {
             )]
         }
     };
+    if old.field != new.field {
+        let name = |f: &Option<String>| f.clone().unwrap_or_else(|| "none recorded (before logs named it)".into());
+        return vec![format!(
+            "regression check skipped: the baseline measured field {}, this session {}; the figures are not comparable across a field change, so this session becomes the baseline",
+            name(&old.field),
+            name(&new.field)
+        )];
+    }
     if old.resolution != new.resolution {
         return vec![format!(
             "regression check skipped: the baseline was measured at {}x{}, this session at {}x{}",
@@ -476,5 +490,48 @@ mod tests {
         let at = raw.windows(3).position(|w| w == "\u{fffd}".as_bytes()).unwrap();
         raw.splice(at..at + 3, [0xe4u8]);
         assert!(summarize_log(&raw).unwrap().valid);
+    }
+}
+
+#[cfg(test)]
+mod field_tests {
+    use super::*;
+    use crate::{report_json, summarize, AdapterFacts, DeviceKind, Protocol, RunReport};
+
+    fn session(field: Option<&str>, gpu: f64, nodes: u64) -> String {
+        let a = AdapterFacts { name: "RTX 3080 Ti".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete };
+        let run = RunReport {
+            path_name: "terrain/ground-1m".into(),
+            vram_cap_gb: 8,
+            stats: summarize(&[5.0, 6.0, 7.0], 0).unwrap(),
+            clocks_before: None,
+            clocks_after: None,
+            metrics: vec![("gpu_ms".into(), summarize(&[gpu, gpu, gpu], 0).unwrap())],
+            counts: vec![("nodes".into(), nodes)],
+        };
+        let protocol = Protocol { field: field.map(str::to_string), ..Protocol::default() };
+        report_json(&a, Some("High performance"), &[], &crate::gate::Validity::default(), &protocol, &[run])
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn a_log_records_the_field_it_measured_and_is_not_compared_across_a_field_change() {
+        let eroded = "cpu-erosion-v1 over a 256-cell bake";
+        let new = session(Some(eroded), 4.0, 900);
+        assert_eq!(summarize_log(new.as_bytes()).unwrap().field.as_deref(), Some(eroded), "the log names the field");
+        // The baseline of the reference field (recorded, or from before logs named a field) is not compared: a 40 % rise and a
+        // changed count would otherwise be reported as a regression of the code.
+        for old in [session(Some("cpu-ref-height-v2"), 2.8, 8000), session(None, 2.8, 8000)] {
+            let lines = comparison_lines(Some(old.as_bytes()), new.as_bytes());
+            assert_eq!(lines.len(), 1, "{lines:?}");
+            assert!(lines[0].contains("field") && lines[0].contains(eroded) && !lines[0].contains("REGRESSION"), "{lines:?}");
+        }
+        // Another bake of the same field is another measurement, too.
+        let other_bake = session(Some("cpu-erosion-v1 over a 512-cell bake"), 2.8, 8000);
+        assert!(comparison_lines(Some(other_bake.as_bytes()), new.as_bytes())[0].contains("512-cell"));
+        // The same field compares as before.
+        let same = session(Some(eroded), 2.8, 800);
+        let lines = comparison_lines(Some(same.as_bytes()), new.as_bytes());
+        assert!(lines.iter().any(|l| l.contains("REGRESSION")) && lines.iter().any(|l| l.contains("nodes 800 -> 900")), "{lines:?}");
     }
 }

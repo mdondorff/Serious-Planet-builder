@@ -98,18 +98,55 @@ fn test_render_refuses_an_unknown_id_before_any_gpu_work() {
     let path = write_world("unknown", "height_field = \"cpu-erosion-v9\"\n");
     let e = run_str(&["test-render", "--scene", "terrain", "--world", path.to_str().unwrap()]).unwrap_err();
     assert!(e.contains("cpu-erosion-v9") && e.contains("cpu-erosion-v1") && e.contains("cpu-terrain-v1"), "{e}");
+    // The unknown id is refused on every path that takes the world, the perf scene included.
+    for extra in [vec!["--stream"], vec!["--bundle", "b.txt"], vec!["--perf-smoke"]] {
+        let mut args = vec!["test-render", "--scene", "terrain", "--world", path.to_str().unwrap()];
+        args.extend(extra.iter());
+        let e = run_str(&args).unwrap_err();
+        assert!(e.contains("cpu-erosion-v9"), "{args:?}: {e}");
+    }
     // What a world-selected run cannot do is refused up front too.
     let ok = write_world("named", "height_field = \"cpu-terrain-v1\"\n");
     let ok = ok.to_str().unwrap();
     for (args, needle) in [
-        (vec!["test-render", "--scene", "terrain", "--world", ok, "--stream"], "--stream"),
-        (vec!["test-render", "--scene", "terrain", "--world", ok, "--bundle", "b.txt"], "--bundle"),
         (vec!["test-render", "--scene", "tiles", "--world", ok], "only applies to `generate`"),
-        (vec!["test-render", "--scene", "terrain", "--global-res", "64"], "--global-res only applies with --world"),
+        (vec!["test-render", "--scene", "terrain", "--global-res", "64"], "--global-res only applies with --world, or to --perf"),
+        (vec!["test-render", "--scene", "terrain", "--world", ok, "--repro", "b.repro"], "takes the world from the bundle"),
     ] {
         let e = run_str(&args).unwrap_err();
         assert!(e.contains(needle), "{args:?}: {e}");
     }
+}
+
+// spec: GEN-018
+#[test]
+fn stream_bundle_and_perf_take_the_world_and_perf_without_one_is_the_default_world() {
+    let w = write_world("paths", "");
+    let w = w.to_str().unwrap();
+    let parse = |args: &[&str]| {
+        let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        planet::parse_args(&args).unwrap()
+    };
+    for args in [
+        vec!["test-render", "--scene", "terrain", "--world", w, "--stream"],
+        vec!["test-render", "--scene", "terrain", "--world", w, "--bundle", "b.repro"],
+        vec!["test-render", "--scene", "terrain", "--world", w, "--perf"],
+        vec!["test-render", "--scene", "terrain", "--world", w, "--perf-smoke", "--global-res", "64"],
+        // The perf scene without a world is the default world: --global-res sizes its bake.
+        vec!["test-render", "--scene", "terrain", "--perf-smoke", "--global-res", "64"],
+        vec!["test-render", "--scene", "terrain", "--perf", "--seed", "3"],
+    ] {
+        assert!(planet::worldfield::check_options(&parse(&args)).is_ok(), "{args:?}");
+    }
+    // The perf scene builds the eroded field without a world file; a view, stream or bundle without one stays the reference.
+    let o = parse(&["test-render", "--scene", "terrain", "--perf-smoke", "--seed", "3", "--global-res", "16"]);
+    let perf = WorldTerrain::of_perf_options(&o, R).unwrap();
+    assert_eq!(perf.id(), "cpu-erosion-v1");
+    assert!(perf.describe().contains("16-cell bake"), "{}", perf.describe());
+    let view = WorldTerrain::of_options(&o, R).unwrap();
+    assert_eq!(view.id(), REFERENCE_ID);
+    // Only the world differs: the same seed gives the same definition apart from the field.
+    assert_eq!(perf.definition().hash(), WorldDefinition::single_planet(R, 3).hash());
 }
 
 // spec: GEN-018

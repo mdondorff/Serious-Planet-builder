@@ -363,6 +363,7 @@ fn a_terrain_bundle_round_trips_and_detects_corruption() {
         mesh_version: planet_generators::mesh::MESH_VERSION,
         definition_hash: 0,
         adapter: "test-adapter".into(),
+        world: None,
         request: request.clone(),
         plan: plan.clone(),
     };
@@ -385,6 +386,46 @@ cells 17
     // An unparsable value is reported, too.
     assert!(TerrainBundle::from_text(&text.replacen("mesh_key ", "mesh_key 1", 1)).is_err());
     assert!(TerrainBundle::from_text("planet-terrain-repro 9\n---\n").unwrap_err().contains("unsupported"));
+}
+
+// spec: TEST-008
+#[test]
+fn a_world_bundle_records_the_definition_and_bake_and_a_version_one_bundle_still_reads() {
+    use planet_frame::{BundleWorld, TerrainBundle};
+    let (_, camera) = scripted_views(R, 4.0 / 3.0, 1)[4];
+    let request =
+        TerrainRequest { camera, size: (128, 96), view: TerrainView::Level, lod: lod(), face_mapping: "tangent-v1".into(), seed: 7 };
+    let plan = plan_terrain(&request).unwrap();
+    let world = BundleWorld {
+        height_field: "cpu-erosion-v1".into(),
+        global_res: 256,
+        definition_toml: "schema_version = 1\n[body.0]\nradius_m = 6371000.0\n[world]\nseed = 5\n".into(),
+    };
+    let bundle = TerrainBundle {
+        generator_version: 2,
+        implementation_id: "cpu-ref-height-v2".into(),
+        mesh_version: planet_generators::mesh::MESH_VERSION,
+        definition_hash: 0xabc,
+        adapter: "test-adapter".into(),
+        world: Some(world.clone()),
+        request,
+        plan,
+    };
+    let text = bundle.to_text();
+    assert!(text.starts_with("planet-terrain-repro 2\n"), "{}", text.lines().next().unwrap());
+    assert!(text.contains("height_field cpu-erosion-v1\nglobal_res 256\n"), "{text}");
+    let back = TerrainBundle::from_text(&text).unwrap();
+    assert_eq!(back.world.as_ref(), Some(&world), "the definition text survives with its newlines");
+    assert_eq!(back, bundle);
+    // A version-1 bundle (before worlds) is the seed-only reference field: it reads, with no world.
+    let seed_only = TerrainBundle { world: None, ..bundle.clone() };
+    let v1 = seed_only.to_text().replacen("planet-terrain-repro 2", "planet-terrain-repro 1", 1);
+    assert_eq!(TerrainBundle::from_text(&v1).unwrap(), seed_only);
+    // A version-1 bundle cannot carry a world, and a half-recorded world is refused.
+    let v1_world = text.replacen("planet-terrain-repro 2", "planet-terrain-repro 1", 1);
+    assert!(TerrainBundle::from_text(&v1_world).unwrap_err().contains("version 1"));
+    let half = text.replacen("global_res 256\n", "", 1);
+    assert!(TerrainBundle::from_text(&half).unwrap_err().contains("world"));
 }
 
 // spec: TEST-011
@@ -426,7 +467,9 @@ fn plan_counts_stay_within_the_budget_over_the_scripted_views() {
     assert!(e.contains("draw calls") && e.contains("> budget 10"), "{e}");
 }
 
-/// The node count of each standard view at the production-like parameters of the test above, pinned. The other counts
+/// The node count of each standard view over the seed-only reference field (the field the goldens keep, GEN-018) at the
+/// production-like parameters of the test above, pinned; the default world's (eroded field) pins are in
+/// `crates/app/tests/world_view_pins.rs`. The other counts
 /// follow from it (2,304 triangles and 1,221 x 44 vertex bytes per tile). Raising a pin is a decision: say why in the
 /// change that does it (CON-20); a view that drops well below its pin should have the pin lowered with it.
 /// Re-pinned 2026-10-15 by `tight-frustum-cut` (LOD-007): the frustum cut uses each tile's own height bounds, not the global

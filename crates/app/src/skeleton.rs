@@ -566,7 +566,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
         format!("--view must be one of face, tile-id, level, morph, height, normals, depth, relief, morph-height, got '{}'", o.view)
     })?;
     // The world's field (GEN-018); without `--world` the seed-only world, which names the reference field.
-    let world = WorldTerrain::of_options(o, RADIUS_M)?;
+    let world = std::sync::Arc::new(WorldTerrain::of_options(o, RADIUS_M)?);
     let field = world.field()?;
     let radius_m = world.radius_m();
     if o.world.is_some() {
@@ -593,7 +593,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
     let request = TerrainRequest { camera, size: TERRAIN_SIZE, view, lod, face_mapping: TangentWarp.id().to_string(), seed: field.seed() };
     let plan = plan_terrain_field(&request, field.as_ref()).map_err(|e| e.to_string())?;
     let meshes: Vec<std::sync::Arc<planet_generators::mesh::TileMesh>> = if o.stream {
-        streamed_meshes(o, &plan)?
+        streamed_meshes(&world, &plan)?
     } else {
         plan.nodes
             .iter()
@@ -618,12 +618,23 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
         write_frame(&frame, path, out)?;
     }
     if let Some(path) = &o.bundle_out {
+        // A run that named a world records it whole (definition text, field id, bake size): the replay rebuilds the field
+        // from the bundle alone. The seed-only run records none and means the reference field of its seed.
+        let (definition_hash, world_section) = if o.world.is_some() {
+            let toml = planet_world_def::toml_io::to_toml(world.definition()).map_err(|e| format!("recording the world: {e}"))?;
+            let section =
+                planet_frame::BundleWorld { height_field: world.id().to_string(), global_res: world.global_res(), definition_toml: toml };
+            (world.definition().hash(), Some(section))
+        } else {
+            (definition_hash(request.seed, request.lod.radius_m), None)
+        };
         let bundle = planet_frame::TerrainBundle {
             generator_version: GENERATOR_VERSION,
             implementation_id: IMPLEMENTATION_ID.to_string(),
             mesh_version: planet_generators::mesh::MESH_VERSION,
-            definition_hash: definition_hash(request.seed, request.lod.radius_m),
+            definition_hash,
             adapter: ctx.adapter_key(),
+            world: world_section,
             request,
             plan,
         };
@@ -645,8 +656,21 @@ fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>,
             b.generator_version, b.implementation_id, b.mesh_version, GENERATOR_VERSION, IMPLEMENTATION_ID, mesh_version
         ));
     }
-    check_definition(b.definition_hash, b.request.seed, b.request.lod.radius_m)?;
-    let rebuilt = plan_terrain(&b.request).map_err(|e| e.to_string())?;
+    // A bundle that recorded a world rebuilds its field from the recorded definition and bake size; one that recorded none is
+    // the seed-only reference field of its seed (version 1 bundles and runs without `--world`).
+    let world = match &b.world {
+        Some(w) => Some(world_of_bundle(w, &b)?),
+        None => {
+            check_definition(b.definition_hash, b.request.seed, b.request.lod.radius_m)?;
+            None
+        }
+    };
+    let field = world.as_ref().map(|w| w.field()).transpose()?;
+    let rebuilt = match &field {
+        Some(f) => planet_frame::plan_terrain_field(&b.request, f.as_ref()),
+        None => plan_terrain(&b.request),
+    }
+    .map_err(|e| e.to_string())?;
     let diff = rebuilt.diff(&b.plan);
     if !diff.is_empty() {
         return Err(format!(
@@ -669,8 +693,14 @@ fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>,
     let map = planet_frame::plan::face_mapping_by_id(&b.request.face_mapping)
         .ok_or_else(|| format!("unknown face mapping '{}'", b.request.face_mapping))?;
     let (seed, cells, radius) = (b.request.seed, b.request.lod.cells, b.request.lod.radius_m);
-    let meshes: Vec<planet_generators::mesh::TileMesh> =
-        rebuilt.nodes.iter().map(|n| planet_generators::mesh::tile_mesh(seed, map.as_ref(), n.tile, cells, radius)).collect();
+    let meshes: Vec<planet_generators::mesh::TileMesh> = match &field {
+        Some(f) => rebuilt
+            .nodes
+            .iter()
+            .map(|n| planet_generators::mesh::tile_mesh_field(f.as_ref(), map.as_ref(), n.tile, cells, radius))
+            .collect(),
+        None => rebuilt.nodes.iter().map(|n| planet_generators::mesh::tile_mesh(seed, map.as_ref(), n.tile, cells, radius)).collect(),
+    };
     let refs: Vec<&planet_generators::mesh::TileMesh> = meshes.iter().collect();
     let (frame, stats) = planet_render::execute_terrain(ctx, &rebuilt, &refs).map_err(|e| e.to_string())?;
     writeln!(out, "replay: {} draw calls, {} triangles", stats.draw_calls, stats.triangles).map_err(err)?;
@@ -680,27 +710,61 @@ fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>,
     Ok(())
 }
 
+/// Rebuild the terrain a bundle recorded: parse the recorded definition, check it against the recorded hash, field id and
+/// radius, and bake the field's input again at the recorded size. Everything is refused with the recorded and the rebuilt
+/// values, before any replanning (CON-19).
+fn world_of_bundle(w: &planet_frame::BundleWorld, b: &planet_frame::TerrainBundle) -> Result<WorldTerrain, String> {
+    let def = planet_world_def::toml_io::parse_definition(&w.definition_toml)
+        .map_err(|e| format!("the world recorded in the bundle cannot be read: {e}"))?;
+    if def.hash() != b.definition_hash {
+        return Err(format!(
+            "bundle records definition hash {:016x}, but its recorded world hashes to {:016x}: the bundle was edited or its world was written by another build",
+            b.definition_hash,
+            def.hash()
+        ));
+    }
+    let terrain = WorldTerrain::open(def, w.global_res)?;
+    if terrain.id() != w.height_field {
+        return Err(format!(
+            "bundle records height field {}, but its recorded world resolves to {} in this build",
+            w.height_field,
+            terrain.id()
+        ));
+    }
+    if terrain.radius_m() != b.request.lod.radius_m {
+        return Err(format!("bundle records radius {} m, its recorded world has {} m", b.request.lod.radius_m, terrain.radius_m()));
+    }
+    Ok(terrain)
+}
+
+/// Tile meshes of the run's world field. Each load builds the field afresh (cheap: it only reads the definition and holds the
+/// bake by reference), so the source owns the world and no borrowed field has to outlive the streamer's workers.
 struct MeshSource {
-    seed: u64,
+    world: std::sync::Arc<WorldTerrain>,
 }
 
 impl planet_streaming::TileSource<planet_generators::mesh::TileMesh> for MeshSource {
     fn load(&self, tile: TileId) -> Result<planet_generators::mesh::TileMesh, String> {
-        Ok(planet_generators::mesh::tile_mesh(self.seed, &TangentWarp, tile, TERRAIN_CELLS, RADIUS_M))
+        let field = self.world.field()?;
+        Ok(planet_generators::mesh::tile_mesh_field(field.as_ref(), &TangentWarp, tile, TERRAIN_CELLS, self.world.radius_m()))
     }
 }
 
 /// Generate the plan's tile meshes through the asynchronous streaming path (thread pool, parent-first requests) and
 /// wait, frame by frame, until every wanted tile is resident. The result equals the synchronous path.
 fn streamed_meshes(
-    o: &Options,
+    world: &std::sync::Arc<WorldTerrain>,
     plan: &planet_frame::TerrainPlan,
 ) -> Result<Vec<std::sync::Arc<planet_generators::mesh::TileMesh>>, String> {
     use planet_streaming::{StreamConfig, Streamer, SystemClock, ThreadPool};
     let pool = std::sync::Arc::new(ThreadPool::new(4));
     let config = StreamConfig { max_in_flight: 8, capacity: plan.nodes.len() * 2 + 64, retry_after_ms: 1000, record_dispatches: false };
-    let mut streamer =
-        Streamer::new(std::sync::Arc::new(MeshSource { seed: o.seed }), pool, std::sync::Arc::new(SystemClock::new()), config);
+    let mut streamer = Streamer::new(
+        std::sync::Arc::new(MeshSource { world: std::sync::Arc::clone(world) }),
+        pool,
+        std::sync::Arc::new(SystemClock::new()),
+        config,
+    );
     streamer.load_roots_blocking()?;
     let wanted: Vec<(TileId, f64)> = plan.nodes.iter().enumerate().map(|(i, n)| (n.tile, i as f64)).collect();
     let started = Instant::now();
@@ -839,23 +903,44 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
 /// queries), CPU record/submit time, wall time, CPU planning time and the deterministic counts, per run, and checks the
 /// terrain budget (median GPU <= 8 ms, p99 frame <= 20 ms).
 pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
-    use planet_frame::{scripted_views, LodParams, TerrainRequest, TerrainView};
+    use planet_frame::{scripted_views_field, LodParams, TerrainRequest, TerrainView};
     use planet_perf::{summarize, Protocol, RunReport, Stats};
     use planet_render::TerrainRenderer;
     // `--smoke` runs the same code path briefly on any adapter to prove it works; it is labelled and never a measurement.
     let smoke = o.perf_smoke;
+    // The world's field (GEN-018): the default world (eroded field over an in-memory bake of --global-res) unless --world
+    // names another. Baked before the readiness gate, so the bake's load is not measured as the machine's.
+    let world = WorldTerrain::of_perf_options(o, RADIUS_M)?;
+    let field = world.field()?;
+    let radius_m = world.radius_m();
+    let measured_field = world.describe();
     let mut owner_override: Vec<String> = Vec::new();
     if !smoke {
         planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
         owner_override = crate::readiness_gate(o, ctx, out)?;
     }
     let size = if smoke { (1280u32, 720u32) } else { (2560u32, 1440u32) };
-    let lod = LodParams { cells: o.cells, viewport_h_px: f64::from(size.1), tau_px: o.tau, max_level: 26, ..LodParams::earth_1080p() };
+    let lod = LodParams {
+        cells: o.cells,
+        viewport_h_px: f64::from(size.1),
+        tau_px: o.tau,
+        max_level: 26,
+        radius_m,
+        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
+        ..LodParams::earth_1080p()
+    };
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, o.tau))?;
     let (warmup, measured, runs) = if smoke { (2usize, 5usize, 1usize) } else { (60usize, o.frames.max(10), 3usize) };
-    let protocol =
-        Protocol { warmup_frames: warmup, measured_frames: measured, runs, internal_resolution: size, smoke, ..Protocol::default() };
-    let views = scripted_views(RADIUS_M, f64::from(size.0) / f64::from(size.1), o.seed);
+    let protocol = Protocol {
+        warmup_frames: warmup,
+        measured_frames: measured,
+        runs,
+        internal_resolution: size,
+        field: Some(measured_field.clone()),
+        smoke,
+        ..Protocol::default()
+    };
+    let views = scripted_views_field(radius_m, f64::from(size.0) / f64::from(size.1), field.as_ref());
     let mut renderer = TerrainRenderer::new(ctx, size, o.cells);
     let mut reports: Vec<RunReport> = Vec::new();
     let mut budget_lines = Vec::new();
@@ -864,8 +949,16 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     if smoke {
         writeln!(out, "SMOKE RUN: exercises the perf path only; the numbers are not a measurement").map_err(err)?;
     }
-    writeln!(out, "terrain perf: {}x{}, cells {}, tau {} px, timestamps {}", size.0, size.1, o.cells, o.tau, ctx.timestamps_supported())
-        .map_err(err)?;
+    writeln!(
+        out,
+        "terrain perf: {}x{}, cells {}, tau {} px, timestamps {}, {measured_field}",
+        size.0,
+        size.1,
+        o.cells,
+        o.tau,
+        ctx.timestamps_supported()
+    )
+    .map_err(err)?;
     // Heaviest first: the light orbit view never raises idle clocks by itself, so it runs after the GPU is busy.
     for index in [6usize, 5, 3, 0] {
         let (name, camera) = views[index];
@@ -875,15 +968,14 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
             view: TerrainView::Level,
             lod: lod.clone(),
             face_mapping: TangentWarp.id().to_string(),
-            seed: o.seed,
+            seed: field.seed(),
         };
         // CPU planning time (selection + plan), measured separately: the camera is static during frame measurements. A
         // renderer plans every frame with a warm per-tile cache, so the budget applies to steady state: the camera
         // steps 5 cm per plan (a slow walk), the cold first plan is reported beside it.
-        let field = planet_generators::height::Reference(o.seed);
         let mut cache = planet_frame::SelectionCache::new();
         let t_cold = Instant::now();
-        planet_frame::plan_terrain_cached(&req, &field, &mut cache).map_err(|e| e.to_string())?;
+        planet_frame::plan_terrain_cached(&req, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
         let cold_ms = t_cold.elapsed().as_secs_f64() * 1000.0;
         let mut plan_samples = Vec::new();
         let mut moving = req.clone();
@@ -893,12 +985,12 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         for _ in 0..20 {
             moving.camera.position = planet_core::PlanetFixed(moving.camera.position.0 + step);
             let t = Instant::now();
-            planet_frame::plan_terrain_cached(&moving, &field, &mut cache).map_err(|e| e.to_string())?;
+            planet_frame::plan_terrain_cached(&moving, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
             plan_samples.push(t.elapsed().as_secs_f64() * 1000.0);
         }
-        let plan = planet_frame::plan_terrain_cached(&req, &field, &mut cache).map_err(|e| e.to_string())?;
+        let plan = planet_frame::plan_terrain_cached(&req, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
         let started = Instant::now();
-        let new_meshes = upload_missing_meshes(ctx, &mut renderer, &plan, &field, RADIUS_M, o.cells)?;
+        let new_meshes = upload_missing_meshes(ctx, &mut renderer, &plan, field.as_ref(), radius_m, o.cells)?;
         let plan_median = summarize(&plan_samples, 0).map_or(f64::NAN, |s| s.median);
         plan_lines.push((name, plan_median));
         writeln!(
@@ -1045,5 +1137,37 @@ mod tests {
         let other = check_definition(right, 4, RADIUS_M).unwrap_err();
         assert!(other.contains("can only rebuild") && other.contains(&format!("{right:016x}")), "{other}");
         assert!(check_definition(right, 3, RADIUS_M + 1.0).is_err(), "the radius is part of the definition");
+    }
+
+    // spec: TEST-008
+    #[test]
+    fn a_recorded_world_is_refused_when_its_hash_field_or_radius_differs() {
+        use planet_frame::{plan_terrain, BundleWorld, TerrainBundle, TerrainRequest, TerrainView};
+        let def = planet_world_def::WorldDefinition::single_planet(RADIUS_M, 5);
+        let toml = planet_world_def::toml_io::to_toml(&def).unwrap();
+        let (_, camera) = planet_frame::scripted_views(RADIUS_M, 4.0 / 3.0, 5)[3];
+        let lod = planet_frame::LodParams { cells: 16, viewport_h_px: 192.0, tau_px: 4.0, ..planet_frame::LodParams::earth_1080p() };
+        let request =
+            TerrainRequest { camera, size: (256, 192), view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 5 };
+        let plan = plan_terrain(&request).unwrap();
+        let world = BundleWorld { height_field: "cpu-erosion-v1".into(), global_res: 8, definition_toml: toml };
+        let bundle = TerrainBundle {
+            generator_version: 2,
+            implementation_id: "x".into(),
+            mesh_version: 1,
+            definition_hash: def.hash(),
+            adapter: "a".into(),
+            world: Some(world.clone()),
+            request,
+            plan,
+        };
+        assert!(world_of_bundle(&world, &bundle).is_ok(), "the canonical text round-trips to the recorded hash");
+        let e = world_of_bundle(&world, &TerrainBundle { definition_hash: def.hash() ^ 1, ..bundle.clone() }).err().unwrap();
+        assert!(e.contains("its recorded world hashes to"), "{e}");
+        let wrong_field = BundleWorld { height_field: "cpu-terrain-v1".into(), ..world.clone() };
+        assert!(world_of_bundle(&wrong_field, &bundle).err().unwrap().contains("cpu-erosion-v1"));
+        let mut other_radius = bundle.clone();
+        other_radius.request.lod.radius_m += 1.0;
+        assert!(world_of_bundle(&world, &other_radius).err().unwrap().contains("radius"));
     }
 }

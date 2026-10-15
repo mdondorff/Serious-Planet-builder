@@ -62,7 +62,7 @@ impl LatticeSource for OwnedBake {
 pub struct WorldTerrain {
     def: WorldDefinition,
     kind: HeightFieldKind,
-    src: Box<dyn LatticeSource>,
+    src: Box<dyn LatticeSource + Send>,
     has_bake: bool,
     bake_key: [u8; 16],
     res: u32,
@@ -75,7 +75,7 @@ impl WorldTerrain {
         let kind = resolve(&def).map_err(|e| e.to_string())?;
         let radius_m =
             GenContext::new(&def).body_radius_m(BodyId::PLANET).map_err(|e| format!("the definition cannot be generated: {e}"))?;
-        let (src, bake_key): (Box<dyn LatticeSource>, [u8; 16]) = if kind.needs_bake() {
+        let (src, bake_key): (Box<dyn LatticeSource + Send>, [u8; 16]) = if kind.needs_bake() {
             if global_res > MAX_RUN_BAKE_RES {
                 return Err(format!("--global-res {global_res}: a run bakes in memory, at most {MAX_RUN_BAKE_RES} cells per face edge"));
             }
@@ -92,13 +92,34 @@ impl WorldTerrain {
         Ok(WorldTerrain { def, kind, src, has_bake: kind.needs_bake(), bake_key, res: global_res, radius_m })
     }
 
-    /// The terrain of a run: the world file's, or the seed-only world with the reference field.
+    /// The terrain of a run that views, streams or records: the world file's, or the seed-only world with the reference field
+    /// (every golden, plan snapshot and old repro bundle was made with it).
     pub fn of_options(o: &Options, radius_m: f64) -> Result<WorldTerrain, String> {
         let def = match &o.world {
             Some(path) => load_world(path)?,
             None => legacy_world(o.seed, radius_m),
         };
         WorldTerrain::open(def, o.global_res)
+    }
+
+    /// The terrain of the perf scene: the world file's, or the default world of `--seed` (its field is the eroded one,
+    /// GEN-018) over an in-memory bake of `--global-res` cells per face edge. The perf scene measures the world a user gets.
+    pub fn of_perf_options(o: &Options, radius_m: f64) -> Result<WorldTerrain, String> {
+        let def = match &o.world {
+            Some(path) => load_world(path)?,
+            None => WorldDefinition::single_planet(radius_m, o.seed),
+        };
+        WorldTerrain::open(def, o.global_res)
+    }
+
+    /// The definition this terrain was built from.
+    pub fn definition(&self) -> &WorldDefinition {
+        &self.def
+    }
+
+    /// Cells per face edge of the bake the field reads (the requested size even for a field that reads none).
+    pub fn global_res(&self) -> u32 {
+        self.res
     }
 
     /// The implementation id of the field.
@@ -127,17 +148,25 @@ impl WorldTerrain {
     }
 }
 
-/// Reject what a world-selected terrain run cannot do, before any GPU work: `--world` and `--global-res` belong to the plain
-/// terrain scene (single view or `--flight`), and an unknown height-field id is refused here with the known ids (GEN-018).
+/// Reject what a world-selected terrain run cannot do, before any GPU work (GEN-018). `--world` and `--global-res` belong to
+/// the terrain scene: a single view (with `--stream` or `--bundle`), `--flight`, `--perf` and `--perf-smoke`; `--repro` takes
+/// the world from the bundle. Without `--world` a view, stream, flight or bundle is the seed-only world (reference field, so
+/// `--global-res` has nothing to bake), while the perf scene is the default world (eroded field). An unknown height-field id
+/// is refused here with the known ids.
 pub fn check_options(o: &Options) -> Result<(), String> {
-    // The global-bake perf scene takes --world and --global-res of the global commands (its own checks).
+    // The global-bake perf scene takes the --world and --global-res of the global commands (its own checks).
     if o.perf && o.scene == "global-bake" {
         return Ok(());
     }
+    let perf_terrain = (o.perf || o.perf_smoke) && o.scene == "terrain";
     let given_res = o.given.contains("--global-res");
     if o.world.is_none() {
-        return if given_res {
-            Err("--global-res only applies with --world (the seed-only world's reference field reads no bake)".into())
+        return if given_res && !perf_terrain {
+            Err(if o.repro.is_some() {
+                "--global-res does not apply to --repro (the bundle records its bake size)".to_string()
+            } else {
+                "--global-res only applies with --world, or to --perf (the seed-only world's reference field reads no bake)".to_string()
+            })
         } else {
             Ok(())
         };
@@ -145,13 +174,13 @@ pub fn check_options(o: &Options) -> Result<(), String> {
     if o.given.contains("--seed") {
         return Err("--world and --seed both name the definition: give one".into());
     }
-    if o.scene != "terrain" || o.perf || o.perf_smoke {
-        return Err("--world applies to `test-render --scene terrain` (a single view or --flight), not to other scenes or --perf".into());
+    if o.scene != "terrain" {
+        return Err("--world applies to `test-render --scene terrain` (a view, --flight or --perf), not to other scenes".into());
     }
-    if let Some(f) = ["--stream", "--bundle", "--repro"].into_iter().find(|f| o.given.contains(*f)) {
-        return Err(format!(
-            "{f} does not support --world yet: streamed meshes and repro bundles are made from the seed-only reference field"
-        ));
+    if o.repro.is_some() {
+        return Err(
+            "--repro takes the world from the bundle (a bundle records its definition, height field and bake size): drop --world".into()
+        );
     }
     let def = load_world(o.world.as_ref().expect("checked above"))?;
     resolve(&def).map_err(|e| e.to_string())?;

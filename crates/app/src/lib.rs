@@ -31,6 +31,7 @@ modes:
     --view face|tile-id|level|morph|height|normals|depth|relief|morph-height   debug view (tiles scene: face, tile-id, height; a flight defaults to relief)
     --tile FACE,LEVEL,X,Y    tile to draw (repeatable; default: a tile and its east neighbour)
     --seed N --res N         generator seed and tile resolution (cells, power of two)
+    --world <definition.toml> [--global-res N]   terrain scene (a view, --stream, --bundle, --flight, --perf, --perf-smoke): the world's height field (world.height_field, default the eroded field) over an in-memory bake of N cells per face edge (default 256, at most 1024); without it a view, stream or bundle is the seed-only reference field and --perf is the default world of --seed; a bundle records the world, --repro reads it back
     --bundle <file>          write a repro bundle of the render
     --repro <file>           replay a repro bundle (see cargo xtask repro)
     --out <file.png>         write the image
@@ -297,7 +298,7 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     if !matches!(o.mode, Mode::Generate) {
         // The global-bake perf scene takes the definition, grid size and thread count of the global commands.
         let bake_scene = matches!(o.mode, Mode::TestRender) && o.perf && o.scene == "global-bake";
-        let terrain_scene = matches!(o.mode, Mode::TestRender) && !o.perf && !o.perf_smoke && o.scene == "terrain";
+        let terrain_scene = matches!(o.mode, Mode::TestRender) && o.scene == "terrain";
         let allowed: &[&str] = if bake_scene {
             &["--world", "--global-res", "--threads"]
         } else if terrain_scene {
