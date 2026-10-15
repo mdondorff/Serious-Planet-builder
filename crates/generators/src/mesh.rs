@@ -155,6 +155,13 @@ impl TileMesh {
     }
 }
 
+/// Depth by which the skirts of a tile of `level` hang below its surface, metres: `SKIRT_FRACTION` of the edge length on the
+/// sphere of `radius_m`, at least 1 mm. Shared with the frustum cut (LOD-007), which must keep the skirts' triangles in view.
+pub fn skirt_depth(level: u8, radius_m: f64) -> f64 {
+    let edge_len = radius_m * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << level);
+    (edge_len * SKIRT_FRACTION).max(1e-3)
+}
+
 /// Build the mesh. `cells` must be a power of two of at least 2.
 pub fn tile_mesh(seed: u64, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> TileMesh {
     tile_mesh_field(&Reference(seed), map, id, cells, radius_m)
@@ -219,8 +226,7 @@ pub fn tile_mesh_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
         }
     }
     // Skirts: duplicates of the border vertices, pushed towards the planet centre (south, north, west, east).
-    let edge_len = radius_m * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << id.level());
-    let depth = (edge_len * SKIRT_FRACTION).max(1e-3);
+    let depth = skirt_depth(id.level(), radius_m);
     let border: Vec<usize> = (0..=cells as usize)
         .chain((0..=cells as usize).map(|i| cells as usize * (cells as usize + 1) + i)) // north
         .chain((0..=cells as usize).map(|j| j * (cells as usize + 1))) // west

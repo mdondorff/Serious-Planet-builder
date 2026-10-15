@@ -1,0 +1,7 @@
+- [x] 1.1 depth-pass oracle helper (`tests/support/depth_oracle.rs`), tier-B test over the ten standard views, tier-A vertex-in-frustum tests (reference and steep), ground-1m count test (failing first)
+- [x] 1.2 per-tile volume frustum test in `select_impl` with skirt depth
+- [x] 1.3 spec LOD-007; re-pin TEST-011 per-view counts (declared change)
+- [x] 1.4 plan times before and after (ad hoc)
+- [x] 1.5 `test gpu` and golden-review (one WARP candidate escalated for the driver version)
+- [x] 1.6a reviewer findings: first-stage pad includes the skirts, skirt rule shared with the mesh builder, vertex tests per plane, plan morph in height_aware, heading test
+- [x] 1.6 reviewers (numerics, spec-guardian, verifier), archive, log line, PR, CI green, merge

@@ -5,7 +5,10 @@
 
 use planet_core::cube::TangentWarp;
 use planet_core::{PlanetFixed, TileId, Vec3};
-use planet_frame::{plan_terrain_field, scripted_views_field, LodParams, TerrainDraw, TerrainRequest, TerrainView};
+use planet_frame::{
+    plan_terrain_field, scripted_views_field, select_nodes_field_cached, LodParams, SelectedNode, SelectionCache, TerrainRequest,
+    TerrainView,
+};
 use planet_generators::height::{BodyId, HeightField, Reference};
 use planet_generators::mesh::{grid_indices, tile_mesh_field};
 use planet_generators::stress::Steep;
@@ -24,15 +27,17 @@ fn steep_params() -> LodParams {
 }
 
 /// The leaf's grid vertices as the shader draws them (morphed by their distance to the camera), camera-relative, f64.
-fn drawn_vertices(field: &dyn HeightField, d: &TerrainDraw, cam: PlanetFixed, cells: u32) -> Vec<Vec3> {
+fn drawn_vertices(field: &dyn HeightField, d: &SelectedNode, cam: PlanetFixed, cells: u32) -> Vec<Vec3> {
     let mesh = tile_mesh_field(field, &TangentWarp, d.tile, cells, R);
+    // The plan draws these distances as f32.
+    let (start, end) = (f64::from(d.morph_start_m as f32), f64::from(d.morph_end_m as f32));
     mesh.vertices
         .iter()
         .map(|v| {
             let at = |p: [f32; 3]| mesh.origin.0 + Vec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2]));
             let (fine, coarse) = (at(v.pos), at(v.coarse));
             let dist = (fine - cam.0).length();
-            let m = ((dist - f64::from(d.morph_start_m)) / f64::from((d.morph_end_m - d.morph_start_m).max(1e-6))).clamp(0.0, 1.0);
+            let m = ((dist - start) / (end - start).max(1e-6)).clamp(0.0, 1.0);
             fine * (1.0 - m) + coarse * m - cam.0
         })
         .collect()
@@ -122,16 +127,39 @@ fn check_field(field: &dyn HeightField, label: &str, params: LodParams) {
             seed: field.seed(),
         };
         let plan = plan_terrain_field(&req, field).unwrap();
+        // The invariants concern the surface the selection puts under and around the camera, whether or not the frustum
+        // keeps it in the draw set: the tight cut (LOD-007) drops a nadir leaf that looks away from the image, so the leaves
+        // come from the selection without the frustum, and a leaf the plan lacks must lie wholly outside the frustum.
+        let selection = select_nodes_field_cached(&map, cam.position, field, &params, &mut SelectionCache::new());
         let under = TileId::from_direction(&map, cam.position.0.normalized(), 26);
         let contains = |t: TileId| std::iter::successors(Some(under), |x| x.parent()).any(|x| x == t);
-        let Some(d) = plan.nodes.iter().find(|d| contains(d.tile)) else {
-            // Looking obliquely from high up, the frustum may leave the nadir out; near the ground it must not.
+        let Some(found) = selection.nodes.iter().find(|d| contains(d.tile)) else {
+            // Looking obliquely from high up, the horizon may leave the nadir out; near the ground it must not.
             let altitude = cam.position.0.length() - R;
             if altitude < 10_000.0 {
                 failures.push(format!("{label} {name}: no leaf under the camera"));
             }
             continue;
         };
+        // A leaf the plan draws is judged with the plan's own morph interval (equalised over the drawn leaves of its level).
+        let mut leaf = *found;
+        let in_plan = plan.nodes.iter().find(|n| n.tile == found.tile);
+        if let Some(n) = in_plan {
+            leaf.morph_start_m = f64::from(n.morph_start_m);
+            leaf.morph_end_m = f64::from(n.morph_end_m);
+        }
+        let d = &leaf;
+        if in_plan.is_none() {
+            let frustum = cam.frustum();
+            let mesh = tile_mesh_field(field, &TangentWarp, d.tile, params.cells, R);
+            let seen = mesh
+                .vertices
+                .iter()
+                .any(|v| frustum.contains_point(mesh.origin.0 + Vec3::new(f64::from(v.pos[0]), f64::from(v.pos[1]), f64::from(v.pos[2]))));
+            if seen {
+                failures.push(format!("{label} {name}: leaf {:?} under the camera is missing from the plan with a vertex in view", d.tile));
+            }
+        }
         let drawn = drawn_vertices(field, d, cam.position, params.cells);
         let Some(s) = drawn_surface_offset(&drawn, cam.position, params.cells) else {
             failures.push(format!("{label} {name}: the radial line through the camera misses leaf {:?}", d.tile));
@@ -140,38 +168,49 @@ fn check_field(field: &dyn HeightField, label: &str, params: LodParams) {
         // Height of the camera above the exact terrain, and the projected sample spacing of the leaf there.
         let dir = cam.position.0.normalized();
         let above_terrain = cam.position.0.length() - (R + field.height(dir));
-        let spacing = R * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << d.level) / f64::from(params.cells);
+        let spacing = R * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << d.tile.level()) / f64::from(params.cells);
         let px = spacing * params.viewport_h_px / (2.0 * libm::tan(60f64.to_radians() / 2.0) * above_terrain.max(NEAR));
         eprintln!(
             "{label} {name}: leaf level {}, drawn surface {:.3} m below the camera, {above_terrain:.1} m above terrain, {px:.2} px",
-            d.level, -s
+            d.tile.level(),
+            -s
         );
         if s > -NEAR {
             failures.push(format!(
                 "{label} {name}: camera is {:.3} m above the drawn surface of leaf {:?} (level {}); need at least the near plane {NEAR} m",
-                -s, d.tile, d.level
+                -s,
+                d.tile,
+                d.tile.level()
             ));
         }
         // The nearest drawn surface among the leaf and every node whose volume reaches the camera: a surface that rises
         // beside the camera is as bad as one under it.
         let mut nearest = distance_to_drawn_surface(&drawn, params.cells);
-        for other in plan.nodes.iter().filter(|o| o.tile != d.tile) {
-            let reach = 2.0 * params.node_radius_bound(other.level);
-            if (other.origin.0 - cam.position.0).length() < 1.5 * reach {
-                let v = drawn_vertices(field, other, cam.position, params.cells);
+        for other in selection.nodes.iter().filter(|o| o.tile != d.tile) {
+            let reach = 2.0 * params.node_radius_bound(other.tile.level());
+            let centre = other.tile.center_direction(&map);
+            let origin = centre * (R + field.height(centre));
+            if (origin - cam.position.0).length() < 1.5 * reach {
+                let mut o = *other;
+                if let Some(n) = plan.nodes.iter().find(|n| n.tile == other.tile) {
+                    o.morph_start_m = f64::from(n.morph_start_m);
+                    o.morph_end_m = f64::from(n.morph_end_m);
+                }
+                let v = drawn_vertices(field, &o, cam.position, params.cells);
                 nearest = nearest.min(distance_to_drawn_surface(&v, params.cells));
             }
         }
         if nearest < NEAR {
             failures.push(format!(
                 "{label} {name}: the drawn surface is {nearest:.3} m from the camera, inside the near plane {NEAR} m (leaf {:?}, level {})",
-                d.tile, d.level
+                d.tile,
+                d.tile.level()
             ));
         }
-        if d.level < params.max_level && px > params.tau_px * 1.0001 {
+        if d.tile.level() < params.max_level && px > params.tau_px * 1.0001 {
             failures.push(format!(
                 "{label} {name}: leaf {:?} (level {}) projects its sample spacing to {px:.2} px at the camera height {above_terrain:.1} m; tau_px is {}",
-                d.tile, d.level, params.tau_px
+                d.tile, d.tile.level(), params.tau_px
             ));
         }
     }
