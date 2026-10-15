@@ -4,6 +4,7 @@
 //! renderer. Everything here is integer hashing plus IEEE `+ - * /` and `libm::floor`, so results are
 //! bit-identical across platforms and thread counts.
 
+pub mod compact;
 pub mod dump;
 pub mod erosion;
 pub mod global;

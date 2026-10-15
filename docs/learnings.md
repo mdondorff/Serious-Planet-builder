@@ -225,3 +225,8 @@ Proposed follow-up: pack node records without per-node allocations (a separate s
 What happened: `cargo xtask test gpu --real` fails `selected_views_match_the_adapters_goldens` on `terrain_low2km_morph` (3 pixels, max channel delta 1, first at (69, 36)) with and without the indirect-multi-draw changes (checked by running the unchanged renderer sources): the RTX golden predates `tight-frustum-cut` (#122), which only blessed the WARP one. `golden-review` classifies it AUTO-R (rounding noise). Not blessed by this change (no golden change was declared).
 Assumption it changes: none; the real-GPU golden set needs a bless of that one candidate.
 Proposed follow-up: opus-planner runs `golden-review --apply` or the owner's `/bless` for the vulkan-nvidia candidate.
+
+## 2026-10-15 16-bit octahedral normals: 0.0037 degrees measured, not 0.002
+What happened: ADR 0033 point 4 gave "about 0.002 degrees by calculation" for two snorm16 octahedral components and asked a tier-B test to confirm it. The test (`crates/generators/tests/compact.rs`, 212,006 directions: random, axes, the fold at z = 0 and 1e-4) measures a worst of 0.0037 degrees (tiles of the reference, eroded and steep fields: 0.0035 to 0.0036). Still a factor 2.7 under CON-14's 0.01. A first run read 0.032 degrees: the angle came from `acos` of a dot product, which loses half the digits near 1 (f32 inputs give about 4e-4 rad); the tests now take `atan2(|a x b|, a . b)`. Any angle test in the repo that uses `acos(dot)` for tolerances under 0.05 degrees measures f32 rounding, not the quantity.
+Assumption it changes: ADR 0033's 0.002 figure (the format still meets CON-14 under any reading; the figure in the ADR is superseded by 0.0037).
+Proposed follow-up: none.
