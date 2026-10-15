@@ -2,6 +2,7 @@
 
 One line per archived change, ADR decision, perf window or owner decision, newest first (split out of `docs/status.md` by the owner's decision of 2026-10-12). Add new lines at the top. `docs/status.md` shows the most recent ones.
 
+- 2026-10-15 parallel-root-load archived (STRM-001 modified): the six level-0 roots load concurrently on the spawner (face-order insertion, one failure cancels the rest, `Spawner::help`); real store 237 s -> 103 s, the rest is block-cache thrash (7.5x re-decodes; learnings).
 - 2026-10-15 fresh-plan-lag archived (TEST-018 modified, TEST-020): detail lag judged against a fresh plan of each frame's camera, perf-scene post-pass off the timed path, no 'not measured' for gated lag; finding: cover is coarse while turning (docs/status.md, learnings).
 - 2026-10-15 ADR 0044 accepted (opus-planner, delegation): M4 implementation readings; the dive's pitch follows TEST-013's flight law (ADR 0032 point 1), and a cancelled in-flight tile is discarded unbuilt while completed tiles still go to the persistent cache (ADR 0031 point 3). Both were flagged by spec-guardian on #150.
 - 2026-10-15 M4 stop report written (sonnet-explorer): item 7 complete on main, M4 acceptance waits for a perf window; see docs/status.md.
