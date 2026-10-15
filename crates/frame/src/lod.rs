@@ -193,6 +193,11 @@ pub struct SelectionCache {
     misses: u64,
     tiles: IdMap<TileGeom>,
     volumes: IdMap<Volume>,
+    /// Field height at each tile's centre direction (the plan's tile origin), computed on first use by the plan builder.
+    origin_heights: IdMap<f64>,
+    /// Mesh key of each tile for the grid size `mesh_key_cells` (the key chains the cell count; a change starts it over).
+    mesh_keys: IdMap<u64>,
+    mesh_key_cells: u32,
 }
 
 impl SelectionCache {
@@ -206,6 +211,31 @@ impl SelectionCache {
     pub fn clear(&mut self) {
         self.tiles.clear();
         self.volumes.clear();
+        self.origin_heights.clear();
+        self.mesh_keys.clear();
+    }
+
+    /// Field height at the centre of `tile` (the plan's tile origin): `compute` runs only the first time a tile is asked
+    /// for since the cache last started over (LOD-009). Valid only after a selection with the same map, field and radius
+    /// has prepared the cache, which the plan builder guarantees.
+    pub(crate) fn origin_height(&mut self, tile: TileId, compute: impl FnOnce() -> f64) -> f64 {
+        if let Some(h) = self.origin_heights.get(&tile) {
+            return *h;
+        }
+        let h = compute();
+        if h.is_finite() {
+            self.origin_heights.insert(tile, h);
+        }
+        h
+    }
+
+    /// Mesh key of `tile` for a grid of `cells` cells per edge: `compute` runs once per tile and grid size (LOD-009).
+    pub(crate) fn mesh_key(&mut self, tile: TileId, cells: u32, compute: impl FnOnce() -> u64) -> u64 {
+        if self.mesh_key_cells != cells {
+            self.mesh_keys.clear();
+            self.mesh_key_cells = cells;
+        }
+        *self.mesh_keys.entry(tile).or_insert_with(compute)
     }
 
     /// Tiles whose geometry had to be computed (cache misses) since the cache was created.
@@ -234,9 +264,15 @@ impl SelectionCache {
                 field.inputs_hash(),
                 u64::from(field.body().0),
                 p.radius_m.to_bits(),
+                // The mesh key chains the reference surface (GEN-012): a field on another surface must not reuse keys.
+                planet_core::hash::hash_u64s(3, &text(field.surface_id())),
             ],
         );
-        if key != self.key || self.tiles.len() > Self::MAX_TILES {
+        if key != self.key
+            || self.tiles.len() > Self::MAX_TILES
+            || self.origin_heights.len() > Self::MAX_TILES
+            || self.mesh_keys.len() > Self::MAX_TILES
+        {
             self.clear();
             self.key = key;
         }
@@ -587,4 +623,26 @@ pub fn angular_radius(map: &dyn FaceMapping, tile: TileId) -> f64 {
     }
     // Margin for the sampled boundary: the maximum is attained at a corner for these tiles; keep a small relative safety.
     worst * 1.001
+}
+
+#[cfg(test)]
+mod reuse_tests {
+    use super::*;
+
+    // spec: LOD-009
+    #[test]
+    fn the_mesh_key_is_computed_once_per_tile_and_grid_size() {
+        let mut cache = SelectionCache::new();
+        let tile = TileId::new(Face::ALL[0], 3, 1, 1).expect("tile");
+        let mut calls = 0;
+        for cells in [16, 16, 16, 32, 32, 16] {
+            cache.mesh_key(tile, cells, || {
+                calls += 1;
+                u64::from(cells)
+            });
+        }
+        // 16 (miss), 16, 16 (hits), 32 (miss, restart), 32 (hit), 16 (miss, restart).
+        assert_eq!(calls, 3);
+        assert_eq!(cache.mesh_key(tile, 16, || unreachable!("served from the memo")), 16);
+    }
 }

@@ -161,7 +161,13 @@ pub fn plan_terrain_cached(req: &TerrainRequest, field: &dyn HeightField, cache:
         .iter()
         .map(|n| {
             let centre = n.tile.center_direction(map.as_ref());
-            let origin = PlanetFixed(centre * (req.lod.radius_m + field.height(centre)));
+            // Origin height and mesh key are pure functions of the tile: computed once, reused by every later plan (LOD-009).
+            // A field that reads authored cells declares reads per tile at plan time (WDEF-005): an edit changes heights and
+            // keys without changing the field's identity, so nothing is reused for it. A non-finite height (a failed bake
+            // read) is never kept.
+            let reuse = !field.reads_cells();
+            let height = if reuse { cache.origin_height(n.tile, || field.height(centre)) } else { field.height(centre) };
+            let origin = PlanetFixed(centre * (req.lod.radius_m + height));
             let rel = origin.0 - req.camera.position.0;
             let color = match req.view {
                 TerrainView::Face => FACE_COLORS[n.tile.face().0 as usize],
@@ -178,7 +184,7 @@ pub fn plan_terrain_cached(req: &TerrainRequest, field: &dyn HeightField, cache:
                 morph_start_m: n.morph_start_m as f32,
                 morph_end_m: n.morph_end_m as f32,
                 color,
-                mesh_key: keyer.key(n.tile),
+                mesh_key: if reuse { cache.mesh_key(n.tile, req.lod.cells, || keyer.key(n.tile)) } else { keyer.key(n.tile) },
             }
         })
         .collect();
