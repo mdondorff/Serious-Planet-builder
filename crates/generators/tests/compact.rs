@@ -11,7 +11,7 @@ use planet_generators::compact::{
 use planet_generators::global::{bake, GridSource};
 use planet_generators::height::{HeightField, Reference};
 use planet_generators::height_fields::{build_field, HeightFieldKind};
-use planet_generators::mesh::{mesh_key_field, tile_mesh_field, vertex_count};
+use planet_generators::mesh::{finest_class_key, mesh_key_field, tile_mesh_field, vertex_count};
 use planet_generators::stress::Steep;
 use planet_world_def::{BodyId, GenContext, WorldDefinition};
 
@@ -179,19 +179,31 @@ fn a_steep_finest_tile_falls_back_to_the_vertex_format_and_a_gentle_one_does_not
     let probe = compact_tile_field(&steep, &TangentWarp, t, 32, R);
     assert!(probe.relief_m > FALLBACK_RELIEF_M, "fixture: the steep tile has {} m of relief", probe.relief_m);
     match tile_data_field(&steep, &TangentWarp, t, 32, R, 9) {
-        RenderTile::Vertex(m) => assert_eq!(m, tile_mesh_field(&steep, &TangentWarp, t, 32, R), "the fallback is the product mesh"),
+        RenderTile::Vertex(m) => {
+            let product = tile_mesh_field(&steep, &TangentWarp, t, 32, R);
+            assert_eq!(m.vertices, product.vertices, "the fallback is the product mesh");
+            assert_eq!(m.key, finest_class_key(product.key, t, 9), "under the key of its finest-level class");
+        }
         RenderTile::Compact(_) => panic!("a finest tile with {} m of relief must fall back", probe.relief_m),
     }
     // The same tile one level above the finest is compact (CON-13 binds the finest level).
     assert!(tile_data_field(&steep, &TangentWarp, t, 32, R, 10).is_compact());
-    // The format depends on the view's finest level but the key does not: a consumer re-checks a reused tile.
+    // The format depends on the view's finest level, and the key says which class it was decided for (LOD-010): the fallback tile and
+    // the compact tile of the same tile have different keys, so one is never reused for the other.
+    assert_ne!(tile_data_field(&steep, &TangentWarp, t, 32, R, 9).key(), tile_data_field(&steep, &TangentWarp, t, 32, R, 10).key());
     let RenderTile::Compact(c10) = tile_data_field(&steep, &TangentWarp, t, 32, R, 10) else { unreachable!() };
     assert!(c10.allowed_at_finest_level(10) && !c10.allowed_at_finest_level(9));
     // A fine tile of the reference field has centimetres of relief: compact, with the same key as its mesh.
     let g = id(4, 22, 1000, 2000);
     let d = tile_data_field(&Reference(1), &TangentWarp, g, 32, R, 22);
     assert!(d.is_compact());
-    assert_eq!(d.key(), mesh_key_field(&Reference(1), &TangentWarp, g, 32, R));
+    assert_eq!(
+        d.key(),
+        finest_class_key(mesh_key_field(&Reference(1), &TangentWarp, g, 32, R), g, 22),
+        "the key of a finest tile carries its class"
+    );
+    let below = tile_data_field(&Reference(1), &TangentWarp, g, 32, R, 23);
+    assert_eq!(below.key(), mesh_key_field(&Reference(1), &TangentWarp, g, 32, R), "a tile below the cap has the base key");
     // Levels 0-2 are vertex format whatever the field.
     for l in 0..3u8 {
         assert!(!tile_data_field(&Reference(1), &TangentWarp, id(1, l, 0, 0), 32, R, 22).is_compact());
@@ -226,13 +238,13 @@ fn compact_tiles_are_bit_identical_across_thread_counts_and_match_the_known_answ
     let one = tile_hashes(1);
     assert_eq!(one, tile_hashes(4), "thread count changed a tile");
     assert_eq!(one, tile_hashes(2));
-    // Known answers (CI runs this test on Windows and Linux): recorded with MESH_VERSION 5,
+    // Known answers (CI runs this test on Windows and Linux): recorded with MESH_VERSION 6,
     // A change of the construction bumps MESH_VERSION and re-records these.
     let expected: [u64; 4] = KNOWN_ANSWERS;
     assert_eq!(one, expected, "compact tile content hashes changed: {one:016x?}");
 }
 
-const KNOWN_ANSWERS: [u64; 4] = [0xb841458cf0446591, 0x2f92866cf801bbb0, 0x92b8a9197accb576, 0xa7eb556caa77c84f];
+const KNOWN_ANSWERS: [u64; 4] = [0x1f2ecc81d236e647, 0x0f77d476bdb3971a, 0x72d663ca0e41ff7f, 0xabd7e7acaec74528];
 
 // spec: GEN-019
 #[test]

@@ -434,7 +434,13 @@ fn plan_counts_stay_within_the_budget_over_the_scripted_views() {
     use planet_frame::CountBudget;
     // Production-like parameters at 1440p: cells 32, tau 6 px, the ten scripted views from orbit to 1 m.
     let size = (2560u32, 1440u32);
-    let lod = LodParams { cells: 32, viewport_h_px: f64::from(size.1), tau_px: 6.0, max_level: 26, ..LodParams::earth_1080p() };
+    let lod = LodParams {
+        cells: 32,
+        viewport_h_px: f64::from(size.1),
+        tau_px: 6.0,
+        max_level: planet_frame::production_finest_level(32),
+        ..LodParams::earth_1080p()
+    };
     let mut worst = 0;
     for (name, camera) in scripted_views(R, f64::from(size.0) / f64::from(size.1), 1) {
         let plan = plan_terrain(&TerrainRequest {
@@ -475,6 +481,9 @@ fn plan_counts_stay_within_the_budget_over_the_scripted_views() {
 /// Re-pinned 2026-10-15 by `tight-frustum-cut` (LOD-007): the frustum cut uses each tile's own height bounds, not the global
 /// 9 km pad, so every view from aerial-200km down draws fewer nodes (ground-1m 8,687 to 2,897). high-2000km rises 424 to 428:
 /// the first test now also pads the skirts, which hang 12 km and more below the coarse tiles and exceeded the old 9 km pad.
+/// Re-pinned 2026-10-15 by `finest-level-cap` (LOD-010, declared: finest level 22): the standard views are planned at the production
+/// finest level (`production_finest_level(32)` = 22), which only ground-1m reaches: 2,897 to 2,378 nodes (-17.9 %); every other view is
+/// unchanged. The level-26 reference is pinned beside (`REFERENCE_L26_GROUND_1M`).
 const VIEW_NODE_PINS: [(&str, u32); 10] = [
     ("orbit-20000km", 52),
     ("high-2000km", 428),
@@ -482,7 +491,7 @@ const VIEW_NODE_PINS: [(&str, u32); 10] = [
     ("aerial-20km", 892),
     ("low-2km", 1279),
     ("ground-200m", 1694),
-    ("ground-1m", 2897),
+    ("ground-1m", 2378),
     ("north-pole-1km", 1180),
     ("cube-corner-1km", 1606),
     ("face-edge-1km", 1574),
@@ -493,7 +502,13 @@ const VIEW_NODE_PINS: [(&str, u32); 10] = [
 fn every_standard_view_stays_within_its_own_pinned_counts() {
     use planet_frame::CountBudget;
     let size = (2560u32, 1440u32);
-    let lod = LodParams { cells: 32, viewport_h_px: f64::from(size.1), tau_px: 6.0, max_level: 26, ..LodParams::earth_1080p() };
+    let lod = LodParams {
+        cells: 32,
+        viewport_h_px: f64::from(size.1),
+        tau_px: 6.0,
+        max_level: planet_frame::production_finest_level(32),
+        ..LodParams::earth_1080p()
+    };
     let views = scripted_views(R, f64::from(size.0) / f64::from(size.1), 1);
     assert_eq!(views.len(), VIEW_NODE_PINS.len(), "a standard view was added or removed: pin it");
     let mut failures = Vec::new();
@@ -523,4 +538,30 @@ fn every_standard_view_stays_within_its_own_pinned_counts() {
         }
     }
     assert!(failures.is_empty(), "plan counts above their pins:\n{}", failures.join("\n"));
+}
+
+/// The ground-1m node count at the reference finest level 26 (the cap before SPIKE-07 and ADR 0033 point 6): the old pin, kept so the
+/// SPIKE-07 comparisons stay reproducible with `--finest-level 26`.
+const REFERENCE_L26_GROUND_1M: u32 = 2897;
+
+// spec: TEST-011, LOD-010
+#[test]
+fn the_reference_finest_level_26_keeps_its_ground_1m_pin_and_only_that_view_differs() {
+    let size = (2560u32, 1440u32);
+    let at = |max_level| LodParams { cells: 32, viewport_h_px: f64::from(size.1), tau_px: 6.0, max_level, ..LodParams::earth_1080p() };
+    let views = scripted_views(R, f64::from(size.0) / f64::from(size.1), 1);
+    for ((name, camera), (_, pin)) in views.into_iter().zip(VIEW_NODE_PINS) {
+        let nodes = |lod: LodParams| {
+            plan_terrain(&TerrainRequest { camera, size, view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 1 })
+                .unwrap()
+                .nodes
+                .len() as u32
+        };
+        let (l22, l26) = (nodes(at(22)), nodes(at(26)));
+        if name == "ground-1m" {
+            assert_eq!((l22, l26), (pin, REFERENCE_L26_GROUND_1M), "ground-1m at the production cap 22 and at the reference 26");
+        } else {
+            assert_eq!(l22, l26, "{name}: no tile finer than 22 is drawn, so the cap changes nothing");
+        }
+    }
 }

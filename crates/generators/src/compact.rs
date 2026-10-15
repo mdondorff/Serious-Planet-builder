@@ -17,7 +17,9 @@
 //! a finest tile with more falls back to the vertex format ([`tile_data_field`]).
 
 use crate::height::HeightField;
-use crate::mesh::{mesh_key_field, skirt_depth, surface_normal_field, tile_mesh_field, vertex_count, MeshVertex, TileMesh};
+use crate::mesh::{
+    finest_class_key, mesh_key_field, skirt_depth, surface_normal_field, tile_mesh_field, vertex_count, MeshVertex, TileMesh,
+};
 use planet_core::cube::FaceMapping;
 use planet_core::hash::hash_u64s;
 use planet_core::{PlanetFixed, TileId, Vec3};
@@ -317,8 +319,25 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
     tile
 }
 
+/// The vertex-format mesh of a tile for a view whose finest level is `finest_level`: [`tile_mesh_field`] with the key of its
+/// class ([`finest_class_key`]), so a vertex tile and a compact tile of the same view carry the keys the plan expects.
+pub fn vertex_tile_field(
+    field: &dyn HeightField,
+    map: &dyn FaceMapping,
+    id: TileId,
+    cells: u32,
+    radius_m: f64,
+    finest_level: u8,
+) -> TileMesh {
+    let mut mesh = tile_mesh_field(field, map, id, cells, radius_m);
+    mesh.key = finest_class_key(mesh.key, id, finest_level);
+    mesh
+}
+
 /// The tile as the renderer will hold it: the vertex format for levels 0-2 and for a finest tile whose relief breaks CON-13's
-/// 1 mm (the fallback, ADR 0033 point 5), the compact format otherwise. `finest_level` is the LOD parameter `max_level`.
+/// 1 mm (the fallback, ADR 0033 point 5), the compact format otherwise. `finest_level` is the LOD parameter `max_level`. The
+/// tile carries the key of its tile and class ([`finest_class_key`]): the format decision is a function of that key (tile, field,
+/// "at or deeper than the cap") and the tile's own relief, so a resident tile reused by its key was decided for the same class.
 pub fn tile_data_field(
     field: &dyn HeightField,
     map: &dyn FaceMapping,
@@ -327,13 +346,17 @@ pub fn tile_data_field(
     radius_m: f64,
     finest_level: u8,
 ) -> RenderTile {
+    let vertex = || RenderTile::Vertex(vertex_tile_field(field, map, id, cells, radius_m, finest_level));
     if vertex_reason(id.level(), finest_level, 0.0).is_some() {
-        return RenderTile::Vertex(tile_mesh_field(field, map, id, cells, radius_m));
+        return vertex();
     }
-    let tile = compact_tile_field(field, map, id, cells, radius_m);
+    let mut tile = compact_tile_field(field, map, id, cells, radius_m);
     match vertex_reason(id.level(), finest_level, tile.relief_m) {
-        Some(_) => RenderTile::Vertex(tile_mesh_field(field, map, id, cells, radius_m)),
-        None => RenderTile::Compact(tile),
+        Some(_) => vertex(),
+        None => {
+            tile.key = finest_class_key(tile.key, id, finest_level);
+            RenderTile::Compact(tile)
+        }
     }
 }
 
@@ -458,7 +481,8 @@ impl CompactTile {
 
 impl CompactTile {
     /// Whether this tile may be drawn as a tile of a view whose finest level is `finest_level`: the format decision depends on that
-    /// LOD parameter but the key does not, so a consumer that reuses a tile across views with other `max_level` re-checks it here.
+    /// LOD parameter. Keys from [`tile_data_field`] carry the class ([`finest_class_key`]), so a resident tile is never reused across
+    /// classes; this check is for a tile built with [`compact_tile_field`] (class-free key) that a consumer holds across views.
     pub fn allowed_at_finest_level(&self, finest_level: u8) -> bool {
         vertex_reason(self.id.level(), finest_level, self.relief_m).is_none()
     }

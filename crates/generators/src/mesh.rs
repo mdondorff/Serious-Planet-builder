@@ -53,7 +53,10 @@ pub const SKIRT_FRACTION: f64 = 0.08;
 /// 3 = no `ref_pos` attribute: the morph distance is measured to the real vertex position (LOD-008); 4 = the 44-byte vertex (#65);
 /// 5 = the compact tile format (GEN-019, ADR 0033) exists beside the vertex format: a tile's key now stands for either, and the
 /// compact construction (control points, 16-bit height and snorm16 octahedral normals, record layout) is covered by this version.
-pub const MESH_VERSION: u32 = 5;
+/// 6 = the key names whether the tile is a finest-level tile of the view (level at or above the LOD cap, [`finest_class_key`]):
+/// the compact format's CON-13 guard decides the format of such a tile from its relief, so the key must identify that class
+/// (finest tiles get other keys; tiles below the cap keep the version-5 composition under the new version).
+pub const MESH_VERSION: u32 = 6;
 
 /// Key of a mesh: the height key of the tile (generator, seed, mapping, tile; resolution = `cells`), the grid size, the
 /// radius bits, the skirt fraction bits and [`MESH_VERSION`].
@@ -65,6 +68,18 @@ pub fn mesh_key(map: &dyn FaceMapping, seed: u64, id: TileId, cells: u32, radius
 pub fn mesh_key_with(map: &dyn FaceMapping, seed: u64, id: TileId, cells: u32, radius_m: f64, version: u32, skirt_fraction: f64) -> u64 {
     let field = Reference(seed);
     mesh_key_chain(cache_key_field(&field, map, id, cells), cells, body_params(&field, radius_m), version, skirt_fraction)
+}
+
+/// The key class of a tile for a view whose finest level (the LOD cap, `max_level`) is `finest_level`: a tile at or deeper than the cap
+/// is a finest tile, whose format depends on its relief (CON-13, ADR 0033 point 5), so its key is the base key rehashed with the
+/// class (not the cap's value: the decision only depends on the class, so equal classes share keys); a tile below the cap keeps its base key. A resident tile is reused by its key, so the key must identify what the
+/// format decision depends on: tile, field and "finest for this cap". Pure.
+pub fn finest_class_key(base_key: u64, id: TileId, finest_level: u8) -> u64 {
+    if id.level() >= finest_level {
+        hash_u64s(0x0066_696e, &[base_key])
+    } else {
+        base_key
+    }
 }
 
 /// The body parameter hash of a field (ADR 0001, 0007): body id, seed, radius and reference surface.
@@ -96,7 +111,7 @@ pub fn mesh_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId
 
 /// [`mesh_key_field`] for many tiles of one field, mapping, grid size and radius: the string hashes of the field's
 /// implementation id and the mapping id are computed once instead of per tile (planning a 5,000-node view calls
-/// this 5,000 times). `key(tile)` equals `mesh_key_field(field, map, tile, cells, radius_m)` exactly.
+/// this 5,000 times). `key(tile)` equals `mesh_key_field(field, map, tile, cells, radius_m)` exactly (without `at_finest_level`; with it, the finest-level class of the tile is applied).
 pub struct MeshKeyer<'a> {
     field: &'a dyn HeightField,
     map: &'a dyn FaceMapping,
@@ -108,6 +123,8 @@ pub struct MeshKeyer<'a> {
     body_words: [u64; 3],
     implementation_hash: u64,
     mapping_hash: u64,
+    /// The LOD cap whose class the keys carry ([`finest_class_key`]); none = the class-free base keys.
+    finest_level: Option<u8>,
 }
 
 impl<'a> MeshKeyer<'a> {
@@ -122,7 +139,14 @@ impl<'a> MeshKeyer<'a> {
             body_words: crate::height::body_key_words(field),
             implementation_hash: hash_u64s(1, &crate::height::fold_str(field.implementation_id())),
             mapping_hash: hash_u64s(2, &crate::height::fold_str(map.id())),
+            finest_level: None,
         }
+    }
+
+    /// Keys that carry the finest-level class of a view with this LOD cap: `key(tile)` equals [`finest_class_key`] of the base key.
+    pub fn at_finest_level(mut self, finest_level: u8) -> MeshKeyer<'a> {
+        self.finest_level = Some(finest_level);
+        self
     }
 
     pub fn key(&self, id: TileId) -> u64 {
@@ -141,7 +165,8 @@ impl<'a> MeshKeyer<'a> {
                 self.body_words[2],
             ],
         );
-        mesh_key_chain(height_key, self.cells, self.body_params, MESH_VERSION, SKIRT_FRACTION)
+        let base = mesh_key_chain(height_key, self.cells, self.body_params, MESH_VERSION, SKIRT_FRACTION);
+        self.finest_level.map_or(base, |l| finest_class_key(base, id, l))
     }
 }
 

@@ -11,7 +11,10 @@ use planet::worldfield::WorldTerrain;
 use planet_core::cube::TangentWarp;
 use planet_core::{PlanetFixed, TileId};
 use planet_frame::pool::{tier_compact_pool, tier_pool};
-use planet_frame::{residency_set_field, scripted_views_field, select_nodes_in_view_field, LodParams, SelectionCache};
+use planet_frame::{
+    production_finest_level, residency_set_field, scripted_views_field, select_nodes_in_view_field, LodParams, SelectionCache,
+    REFERENCE_FINEST_LEVEL,
+};
 use planet_streaming::budget::GIB;
 use planet_streaming::Tier;
 use planet_world_def::WorldDefinition;
@@ -69,24 +72,25 @@ fn measure(world: &WorldTerrain, max_level: u8) -> Vec<(String, usize, usize, us
 }
 
 /// `(view, |R|, |D with ancestors|)` per standard view, cells 32, tau 6 px, 1440p, the default world over a 256-cell bake, the
-/// finest level 26 (what the pinned node counts of `world_view_pins.rs` use). R is the position-based set with all its
-/// ancestors. Pinned 2026-10-15 by `residency-manager`; raising a pin is a decision: say why in the change that does it
-/// (CON-20).
-const PINS_L26: [(&str, usize, usize); 10] = [
+/// production finest level 22 (`production_finest_level(32)`; what the pinned node counts of `world_view_pins.rs` use). R is the
+/// position-based set with all its ancestors. Pinned 2026-10-15 by `residency-manager`; re-pinned 2026-10-15 by `finest-level-cap`
+/// (LOD-010, declared: finest level 22): only ground-1m reaches level 22, R 14,325 to 11,493 (-19.8 %) and D with ancestors 4,063 to
+/// 3,336 (-17.9 %). Raising a pin is a decision: say why in the change that does it (CON-20).
+const PINS: [(&str, usize, usize); 10] = [
     ("orbit-20000km", 73, 73),
     ("high-2000km", 945, 597),
     ("aerial-200km", 2650, 893),
     ("aerial-20km", 4252, 1252),
     ("low-2km", 6362, 1807),
     ("ground-200m", 8677, 2384),
-    ("ground-1m", 14325, 4063),
+    ("ground-1m", 11493, 3336),
     ("north-pole-1km", 5633, 1603),
     ("cube-corner-1km", 7899, 2185),
     ("face-edge-1km", 7822, 2133),
 ];
 
-/// The same at the finest level 22 (ADR 0033 point 6), where it differs: only ground-1m.
-const PINS_L22_GROUND_1M: (usize, usize) = (11493, 3336);
+/// The same at the reference finest level 26 (the cap before ADR 0033 point 6, `--finest-level 26`), where it differs: only ground-1m.
+const PINS_L26_GROUND_1M: (usize, usize) = (14325, 4063);
 
 fn check_pins(measured: &[(String, usize, usize, usize)], pins: &[(&str, usize, usize)]) -> Vec<String> {
     let mut failures = Vec::new();
@@ -111,20 +115,21 @@ fn the_slots_every_standard_view_needs_stay_within_their_pins_and_the_share() {
     // The two finest-level measurements are independent: run them side by side over one bake (opening it is most of the cost).
     let world = WorldTerrain::open(WorldDefinition::single_planet(R, 1), PIN_BAKE_RES).unwrap();
     let (l26, l22) = std::thread::scope(|s| {
-        let a = s.spawn(|| measure(&world, 26));
-        let b = s.spawn(|| measure(&world, 22));
+        let a = s.spawn(|| measure(&world, REFERENCE_FINEST_LEVEL));
+        let b = s.spawn(|| measure(&world, production_finest_level(CELLS)));
         (a.join().unwrap_or_else(|e| std::panic::resume_unwind(e)), b.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
     });
-    assert_eq!(l26.len(), PINS_L26.len(), "a standard view was added or removed: pin it");
-    let mut failures = check_pins(&l26, &PINS_L26);
+    assert_eq!(production_finest_level(CELLS), 22, "the production cap at cells 32 (LOD-010)");
+    assert_eq!(l22.len(), PINS.len(), "a standard view was added or removed: pin it");
+    let mut failures = check_pins(&l22, &PINS);
     for (a, b) in l26.iter().zip(&l22) {
         if a.0 != "ground-1m" && (a.1, a.2) != (b.1, b.2) {
             failures.push(format!("{}: the finest level 22 changed a view that has no tile finer than 22 ({} -> {})", a.0, a.1, b.1));
         }
     }
-    let g = l22.iter().find(|m| m.0 == "ground-1m").unwrap();
-    if (g.1, g.2) != PINS_L22_GROUND_1M {
-        failures.push(format!("ground-1m at level 22: R {} and D {} against pins {:?}", g.1, g.2, PINS_L22_GROUND_1M));
+    let g = l26.iter().find(|m| m.0 == "ground-1m").unwrap();
+    if (g.1, g.2) != PINS_L26_GROUND_1M {
+        failures.push(format!("ground-1m at the reference level 26: R {} and D {} against pins {:?}", g.1, g.2, PINS_L26_GROUND_1M));
     }
     assert!(
         failures.is_empty(),
@@ -143,10 +148,11 @@ fn the_slots_every_standard_view_needs_stay_within_their_pins_and_the_share() {
     assert!(cmid.allocated_bytes() <= 2 * GIB && chigh.allocated_bytes() <= 3 * GIB, "the compact pools exceed the terrain share");
     let (compact_mid, compact_high) = (u64::from(cmid.main_slots()), u64::from(chigh.main_slots()));
     assert_eq!((compact_mid, compact_high), (COMPACT_MID_SLOTS, COMPACT_HIGH_SLOTS), "the share in compact slots changed");
-    let r_max = l26.iter().map(|m| m.1).max().unwrap() as u64;
-    let g26 = l26.iter().find(|m| m.0 == "ground-1m").unwrap();
+    // The bounds hold at the production cap and at the reference cap 26 (`--finest-level 26` stays supported): the larger of the two.
+    let r_max = l22.iter().chain(&l26).map(|m| m.1).max().unwrap() as u64;
+    let g_d = l22.iter().chain(&l26).filter(|m| m.0 == "ground-1m").map(|m| m.2).max().unwrap() as u64;
     assert!(r_max * 10 <= compact_mid, "R {r_max} slots is over 10 % of the mid tier's {compact_mid} compact slots");
-    assert!(g26.2 as u64 * 100 <= compact_mid * 6, "ground-1m D {} is over 6 % of {compact_mid}", g26.2);
+    assert!(g_d * 100 <= compact_mid * 6, "ground-1m D {} is over 6 % of {compact_mid}", g_d);
     assert!(r_max * 100 <= compact_high * 10, "R {r_max} is over 10 % of the high tier's {compact_high}");
 
     // The reference format: the vertex format's slot (53,724 B at cells 32). The share is a byte ceiling, so the same demand takes a
@@ -157,6 +163,6 @@ fn the_slots_every_standard_view_needs_stay_within_their_pins_and_the_share() {
     let (mid_slots, high_slots) = (u64::from(mid.main_slots()), u64::from(high.main_slots()));
     assert_eq!((mid_slots, high_slots), (VERTEX_MID_SLOTS, VERTEX_HIGH_SLOTS), "the share in vertex-format slots changed");
     assert!(r_max * 100 <= mid_slots * 40, "R {r_max} is over 40 % of the mid tier's {mid_slots} vertex-format slots");
-    assert!(g26.2 as u64 * 100 <= mid_slots * 12, "ground-1m D {} is over 12 % of {mid_slots}", g26.2);
+    assert!(g_d * 100 <= mid_slots * 12, "ground-1m D {} is over 12 % of {mid_slots}", g_d);
     assert!(r_max * 100 <= high_slots * 26, "R {r_max} is over 26 % of the high tier's {high_slots}");
 }

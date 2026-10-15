@@ -44,10 +44,10 @@ fn differing(a: &RgbaFrame, b: &RgbaFrame, limit: u8) -> usize {
     a.rgba.chunks(4).zip(b.rgba.chunks(4)).filter(|(p, q)| (0..3).any(|c| p[c].abs_diff(q[c]) > limit)).count()
 }
 
-fn vertex_render(ctx: &GpuContext, field: &dyn HeightField, p: &TerrainPlan) -> RgbaFrame {
+fn vertex_render(ctx: &GpuContext, field: &dyn HeightField, p: &TerrainPlan, finest: u8) -> RgbaFrame {
     let mut r = TerrainRenderer::new(ctx, SIZE, p.cells);
     for n in &p.nodes {
-        r.upload(ctx, &tile_mesh_field(field, &TangentWarp, n.tile, p.cells, R)).unwrap();
+        r.upload(ctx, &planet_generators::compact::vertex_tile_field(field, &TangentWarp, n.tile, p.cells, R, finest)).unwrap();
     }
     r.render(ctx, p, false).unwrap();
     r.read_color(ctx)
@@ -86,7 +86,7 @@ fn compact_tiles_draw_the_images_of_the_vertex_format_within_the_model_tolerance
     for view in [TerrainView::Level, TerrainView::Relief, TerrainView::Normals] {
         for index in 0..10 {
             let p = plan_of(&field, cells, 26, index, view, false);
-            let reference = vertex_render(&ctx, &field, &p);
+            let reference = vertex_render(&ctx, &field, &p, 26);
             let mut r = compact_renderer(&ctx, &field, &p, 26, false);
             r.render(&ctx, &p, false).unwrap();
             let image = r.read_color(&ctx);
@@ -152,9 +152,9 @@ fn fallback_tiles_and_coarse_levels_draw_in_the_vertex_format_beside_compact_til
     let mut fallbacks = 0;
     let mut checked = 0;
     for index in [2usize, 3, 5, 7] {
-        // Declaring level 9 the finest makes the steep field's tiles of level 9 and finer exceed 65.535 m of relief: fallbacks.
-        let p = plan_of(&steep, cells, 12, index, TerrainView::Relief, true);
-        let reference = vertex_render(&ctx, &steep, &p);
+        // The LOD cap is 9 for this plan: the steep field's tiles of level 9 (the finest) exceed 65.535 m of relief: fallbacks.
+        let p = plan_of(&steep, cells, 9, index, TerrainView::Relief, true);
+        let reference = vertex_render(&ctx, &steep, &p, 9);
         for scattered in [false, true] {
             let mut r = compact_renderer(&ctx, &steep, &p, 9, scattered);
             r.render(&ctx, &p, false).unwrap();
@@ -224,7 +224,7 @@ fn production_tiles_of_32_cells_draw_the_vertex_images_including_the_ground_view
     for index in [3usize, 6, 9] {
         for view in [TerrainView::Relief, TerrainView::Level] {
             let p = plan_of(&field, cells, 26, index, view, false);
-            let reference = vertex_render(&ctx, &field, &p);
+            let reference = vertex_render(&ctx, &field, &p, 26);
             let mut r = compact_renderer(&ctx, &field, &p, 26, false);
             r.render(&ctx, &p, false).unwrap();
             assert!(r.format_counts().1 > 0);
@@ -255,8 +255,8 @@ fn a_morph_forced_to_the_parent_grid_agrees_so_the_shaders_morph_target_is_the_m
                 n.morph_start_m = 0.0;
                 n.morph_end_m = 1.0e-3;
             }
-            let reference = vertex_render(&ctx, &steep, &p);
-            let mut r = compact_renderer(&ctx, &steep, &p, 26, false);
+            let reference = vertex_render(&ctx, &steep, &p, 12);
+            let mut r = compact_renderer(&ctx, &steep, &p, 12, false);
             r.render(&ctx, &p, false).unwrap();
             let image = r.read_color(&ctx);
             if view == TerrainView::MorphHeight {
@@ -282,7 +282,7 @@ fn the_production_atlas_geometry_works_on_this_adapter() {
     let pool = compact_format_pool_with((128 << 20) + 4096 * 4096 * 8, cells, ATLAS_SIDE, 1).unwrap();
     assert_eq!((pool.main_blocks, pool.block_slots), (1, 15_376));
     let p = plan_of(&field, cells, 26, 6, TerrainView::Relief, false);
-    let reference = vertex_render(&ctx, &field, &p);
+    let reference = vertex_render(&ctx, &field, &p, 26);
     let mut r = TerrainRenderer::with_compact_pools(&ctx, SIZE, cells, pool);
     let mut next = 15_375u32;
     for n in &p.nodes {

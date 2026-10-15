@@ -219,7 +219,8 @@ pub(crate) fn plan_terrain_keyed(
     if threads > 1 && !field.reads_cells() {
         prefill_origin_heights(&selection, map.as_ref(), field, cache, threads);
     }
-    let keyer = planet_generators::mesh::MeshKeyer::new(field, map.as_ref(), req.lod.cells, req.lod.radius_m);
+    let keyer =
+        planet_generators::mesh::MeshKeyer::new(field, map.as_ref(), req.lod.cells, req.lod.radius_m).at_finest_level(req.lod.max_level);
     let derive_key = |tile: TileId| key_override.map_or_else(|| keyer.key(tile), |f| f(tile));
     let nodes = selection
         .nodes
@@ -244,7 +245,11 @@ pub(crate) fn plan_terrain_keyed(
                 morph_start_m: n.morph_start_m as f32,
                 morph_end_m: n.morph_end_m as f32,
                 color,
-                mesh_key: if reuse { cache.mesh_key(n.tile, req.lod.cells, || derive_key(n.tile)) } else { derive_key(n.tile) },
+                mesh_key: if reuse {
+                    cache.mesh_key(n.tile, req.lod.cells, req.lod.max_level, || derive_key(n.tile))
+                } else {
+                    derive_key(n.tile)
+                },
             }
         })
         .collect();

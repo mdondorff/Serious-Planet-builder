@@ -22,11 +22,29 @@ pub struct LodParams {
     pub tau_px: f64,
     /// Cells per tile edge (samples are `cells + 1` per edge).
     pub cells: u32,
+    /// The finest geometry level: the one source of truth for the cap (LOD-010). Selection, the residency set R, prefetch, the
+    /// cover plan, the draw set and the compact tile format's CON-13 guard all read it from here. The production value is
+    /// [`production_finest_level`]`(cells)`; `--finest-level` and tests set it explicitly.
     pub max_level: u8,
     /// Fraction of the split distance over which a node morphs (0.3 = last 30 % before it merges into its parent).
     pub morph_band: f64,
     /// Drop nodes that lie entirely below the horizon (padded by `max_height_m`).
     pub cull_horizon: bool,
+}
+
+/// log2 of the cells per face edge at the production finest level: a face edge is `2^level` tiles of `cells` cells, and the
+/// production cap fixes `2^level * cells = 2^27` (134 million cells; `radius * pi/2 / 2^27` = 7.46 cm of vertex spacing on an
+/// Earth-sized body), so level 22 at 32 cells and 21 at 64 (ADR 0033 point 6, owner 2026-10-15).
+pub const PRODUCTION_FACE_CELLS_LOG2: u32 = 27;
+
+/// The deepest level the production cap ever names (the level before SPIKE-07, kept as the reference cap).
+pub const REFERENCE_FINEST_LEVEL: u8 = 26;
+
+/// The production finest level for tiles of `cells` cells: `27 - ceil(log2(cells))`, so equal vertex spacing (about 7.5 cm at
+/// Earth's radius) whatever the tile size; at most [`REFERENCE_FINEST_LEVEL`]. 32 cells give 22, 64 give 21, 16 give 23.
+pub fn production_finest_level(cells: u32) -> u8 {
+    let log2 = cells.max(1).checked_next_power_of_two().map_or(32, u32::trailing_zeros);
+    (PRODUCTION_FACE_CELLS_LOG2.saturating_sub(log2) as u8).min(REFERENCE_FINEST_LEVEL)
 }
 
 impl LodParams {
@@ -38,7 +56,7 @@ impl LodParams {
             viewport_h_px: 1080.0,
             tau_px: 6.0,
             cells: 32,
-            max_level: 26,
+            max_level: production_finest_level(32),
             morph_band: 0.3,
             cull_horizon: true,
         }
@@ -201,9 +219,10 @@ pub struct SelectionCache {
     volumes: IdMap<Volume>,
     /// Field height at each tile's centre direction (the plan's tile origin), computed on first use by the plan builder.
     origin_heights: IdMap<f64>,
-    /// Mesh key of each tile for the grid size `mesh_key_cells` (the key chains the cell count; a change starts it over).
+    /// Mesh key of each tile for the grid size and finest level `mesh_key_params` (the key chains the cell count and the
+    /// finest-level class of the tile, `finest_class_key`; a change of either starts it over).
     mesh_keys: IdMap<u64>,
-    mesh_key_cells: u32,
+    mesh_key_params: (u32, u8),
 }
 
 impl SelectionCache {
@@ -240,11 +259,12 @@ impl SelectionCache {
         self.origin_heights.contains_key(&tile)
     }
 
-    /// Mesh key of `tile` for a grid of `cells` cells per edge: `compute` runs once per tile and grid size (LOD-009).
-    pub(crate) fn mesh_key(&mut self, tile: TileId, cells: u32, compute: impl FnOnce() -> u64) -> u64 {
-        if self.mesh_key_cells != cells {
+    /// Mesh key of `tile` for a grid of `cells` cells per edge and a view whose finest level is `finest_level`: `compute` runs once
+    /// per tile, grid size and finest level (LOD-009).
+    pub(crate) fn mesh_key(&mut self, tile: TileId, cells: u32, finest_level: u8, compute: impl FnOnce() -> u64) -> u64 {
+        if self.mesh_key_params != (cells, finest_level) {
             self.mesh_keys.clear();
-            self.mesh_key_cells = cells;
+            self.mesh_key_params = (cells, finest_level);
         }
         *self.mesh_keys.entry(tile).or_insert_with(compute)
     }
@@ -702,18 +722,21 @@ mod reuse_tests {
 
     // spec: LOD-009
     #[test]
-    fn the_mesh_key_is_computed_once_per_tile_and_grid_size() {
+    fn the_mesh_key_is_computed_once_per_tile_grid_size_and_finest_level() {
         let mut cache = SelectionCache::new();
         let tile = TileId::new(Face::ALL[0], 3, 1, 1).expect("tile");
         let mut calls = 0;
         for cells in [16, 16, 16, 32, 32, 16] {
-            cache.mesh_key(tile, cells, || {
+            cache.mesh_key(tile, cells, 22, || {
                 calls += 1;
                 u64::from(cells)
             });
         }
         // 16 (miss), 16, 16 (hits), 32 (miss, restart), 32 (hit), 16 (miss, restart).
         assert_eq!(calls, 3);
-        assert_eq!(cache.mesh_key(tile, 16, || unreachable!("served from the memo")), 16);
+        assert_eq!(cache.mesh_key(tile, 16, 22, || unreachable!("served from the memo")), 16);
+        // A new finest level starts the memo over too (the key carries the finest-level class of the tile).
+        assert_eq!(cache.mesh_key(tile, 16, 23, || 7), 7);
+        assert_eq!(cache.mesh_key(tile, 16, 23, || unreachable!("served from the memo")), 7);
     }
 }

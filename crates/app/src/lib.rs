@@ -24,6 +24,7 @@ modes:
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
     --cells N --tau PX --frames N   terrain perf workload parameters (defaults 32, 6, 300)
+    --finest-level N         the LOD cap, the finest geometry level of the single views, --stream, --pipelined, --flight and --perf (default 27 - ceil(log2(cells)): 22 at cells 32, 21 at 64, equal vertex spacing of about 7.5 cm; 26 reproduces the SPIKE-07 reference)
     --perf-smoke             run the terrain perf path briefly on any adapter (labelled, never a measurement)
     --flight N --out-dir DIR [--size WxH]   render the scripted orbit-to-1 m flight (TEST-013) as DIR/frame_0000.png... plus DIR/flight.txt and DIR/contact_sheet.png
                              with the production LOD defaults (override with --cells, --tau; --view applies; default size 1280x720,
@@ -110,6 +111,8 @@ pub struct Options {
     pub pipelined: bool,
     pub then: Option<String>,
     pub cells: u32,
+    /// `--finest-level N`: the LOD cap (`LodParams::max_level`); none = the production default for the tile size (LOD-010).
+    pub finest_level: Option<u8>,
     pub tau: f64,
     pub frames: usize,
     pub perf_smoke: bool,
@@ -118,6 +121,14 @@ pub struct Options {
     pub size: Option<(u32, u32)>,
     /// Every option given on the command line, so modes can reject options they would otherwise ignore.
     pub given: std::collections::BTreeSet<String>,
+}
+
+impl Options {
+    /// The finest geometry level of a run with tiles of `cells` cells: `--finest-level`, else the production default
+    /// (`planet_frame::production_finest_level`: 22 at cells 32, 21 at 64). The one place the apps take the LOD cap from (LOD-010).
+    pub fn finest_level_for(&self, cells: u32) -> u8 {
+        self.finest_level.unwrap_or_else(|| planet_frame::production_finest_level(cells))
+    }
 }
 
 pub fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -166,6 +177,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         pipelined: false,
         then: None,
         cells: 32,
+        finest_level: None,
         tau: 6.0,
         frames: 300,
         perf_smoke: false,
@@ -186,6 +198,13 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--perf-smoke" => o.perf_smoke = true,
             "--cells" => o.cells = it.next().ok_or("--cells needs a value")?.parse().map_err(|e| format!("--cells: {e}"))?,
             "--tau" => o.tau = it.next().ok_or("--tau needs a value")?.parse().map_err(|e| format!("--tau: {e}"))?,
+            "--finest-level" => {
+                let level: u8 = it.next().ok_or("--finest-level needs a level")?.parse().map_err(|e| format!("--finest-level: {e}"))?;
+                if level > planet_core::tile::MAX_LEVEL {
+                    return Err(format!("--finest-level must be at most {}, got {level}", planet_core::tile::MAX_LEVEL));
+                }
+                o.finest_level = Some(level);
+            }
             "--frames" => o.frames = it.next().ok_or("--frames needs a value")?.parse().map_err(|e| format!("--frames: {e}"))?,
             "--flight" => o.flight = Some(it.next().ok_or("--flight needs a frame count")?.parse().map_err(|e| format!("--flight: {e}"))?),
             "--out-dir" => o.out_dir = Some(PathBuf::from(it.next().ok_or("--out-dir needs a path")?)),
@@ -535,6 +554,18 @@ mod tests {
         let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         let mut buf = Vec::new();
         run(&args, &mut buf).map(|_| String::from_utf8(buf).unwrap())
+    }
+
+    // spec: LOD-010
+    #[test]
+    fn the_finest_level_defaults_to_the_production_cap_for_the_tile_size_and_is_overridable() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap();
+        let o = args(&["test-render", "--scene", "terrain"]);
+        assert_eq!((o.finest_level, o.finest_level_for(32), o.finest_level_for(64), o.finest_level_for(16)), (None, 22, 21, 23));
+        let o = args(&["test-render", "--finest-level", "26", "--cells", "64"]);
+        assert_eq!((o.finest_level, o.finest_level_for(64)), (Some(26), 26), "the explicit cap wins whatever the tile size");
+        assert!(parse_args(&["test-render".into(), "--finest-level".into(), "29".into()]).unwrap_err().contains("at most 28"));
+        assert!(parse_args(&["test-render".into(), "--finest-level".into()]).unwrap_err().contains("needs a level"));
     }
 
     struct TempDir(PathBuf);
