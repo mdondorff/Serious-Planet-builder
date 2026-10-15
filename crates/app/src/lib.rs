@@ -7,6 +7,7 @@ pub mod pipelined;
 mod plancheck;
 pub mod sheet;
 pub mod skeleton;
+pub mod streamperf;
 pub mod worldfield;
 
 use std::io::Write;
@@ -116,6 +117,9 @@ pub struct Options {
     pub tau: f64,
     pub frames: usize,
     pub perf_smoke: bool,
+    /// `--store DIR`: the stored bake the streaming perf scenes read (the production source, GEN-014); `--allow-memory-bake` runs them over the in-memory bake of `--global-res` cells instead, labelled and not valid for streaming budgets.
+    pub store: Option<PathBuf>,
+    pub allow_memory_bake: bool,
     pub flight: Option<usize>,
     pub out_dir: Option<PathBuf>,
     pub size: Option<(u32, u32)>,
@@ -181,6 +185,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         tau: 6.0,
         frames: 300,
         perf_smoke: false,
+        store: None,
+        allow_memory_bake: false,
         flight: None,
         out_dir: None,
         size: None,
@@ -196,6 +202,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--pipelined" => o.pipelined = true,
             "--then" => o.then = Some(it.next().ok_or("--then needs a script index or name")?.clone()),
             "--perf-smoke" => o.perf_smoke = true,
+            "--store" => o.store = Some(PathBuf::from(it.next().ok_or("--store needs the directory of a stored bake")?)),
+            "--allow-memory-bake" => o.allow_memory_bake = true,
             "--cells" => o.cells = it.next().ok_or("--cells needs a value")?.parse().map_err(|e| format!("--cells: {e}"))?,
             "--tau" => o.tau = it.next().ok_or("--tau needs a value")?.parse().map_err(|e| format!("--tau: {e}"))?,
             "--finest-level" => {
@@ -355,10 +363,11 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     if !matches!(o.mode, Mode::Generate) {
         // The global-bake perf scene takes the definition, grid size and thread count of the global commands.
         let bake_scene = matches!(o.mode, Mode::TestRender) && o.perf && o.scene == "global-bake";
+        let stream_scene = matches!(o.mode, Mode::TestRender) && (o.perf || o.perf_smoke) && streamperf::is_stream_scene(&o.scene);
         let terrain_scene = matches!(o.mode, Mode::TestRender) && o.scene == "terrain";
         let allowed: &[&str] = if bake_scene {
             &["--world", "--global-res", "--threads"]
-        } else if terrain_scene {
+        } else if terrain_scene || stream_scene {
             &["--world", "--global-res"]
         } else {
             &[]
@@ -464,9 +473,10 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.perf && o.perf_smoke {
         return Err("--perf and --perf-smoke exclude each other: a smoke run is never a measurement".into());
     }
-    if o.perf_smoke && o.scene != "terrain" {
-        return Err("--perf-smoke is only available for --scene terrain".into());
+    if o.perf_smoke && o.scene != "terrain" && !streamperf::is_stream_scene(&o.scene) {
+        return Err("--perf-smoke is only available for --scene terrain or a streaming scene (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, streaming)".into());
     }
+    streamperf::check_options(o)?;
     if o.flight.is_some() {
         return skeleton::render_flight(&ctx, o, out);
     }
@@ -474,6 +484,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         return match o.scene.as_str() {
             "terrain" => skeleton::perf_terrain(o, &ctx, out),
             "global-bake" => globalperf::perf_global_bake(o, &ctx, out),
+            s if streamperf::is_stream_scene(s) => streamperf::perf_streaming(o, &ctx, out),
             _ => perf_skeleton(o, &ctx, out),
         };
     }

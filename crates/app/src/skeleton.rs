@@ -778,12 +778,14 @@ pub(crate) struct MeshSource {
     pub(crate) world: std::sync::Arc<WorldTerrain>,
     pub(crate) format: planet_render::TileFormat,
     pub(crate) max_level: u8,
+    /// Cells per tile edge: the run's tile size (the product 32, LOD-010; the reference views 16).
+    pub(crate) cells: u32,
 }
 
 impl planet_streaming::TileSource<RenderTile> for MeshSource {
     fn load(&self, tile: TileId) -> Result<RenderTile, String> {
         let field = self.world.field()?;
-        Ok(tile_for(self.format, field.as_ref(), tile, TERRAIN_CELLS, self.world.radius_m(), self.max_level))
+        Ok(tile_for(self.format, field.as_ref(), tile, self.cells, self.world.radius_m(), self.max_level))
     }
 }
 
@@ -844,7 +846,7 @@ fn streamed_meshes(
         ..Default::default()
     };
     let mut streamer = Streamer::new(
-        std::sync::Arc::new(MeshSource { world: std::sync::Arc::clone(world), format, max_level }),
+        std::sync::Arc::new(MeshSource { world: std::sync::Arc::clone(world), format, max_level, cells: TERRAIN_CELLS }),
         pool,
         std::sync::Arc::new(SystemClock::new()),
         config,

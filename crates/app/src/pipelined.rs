@@ -54,9 +54,9 @@ pub struct FrameLog {
 const SETTLE_LIMIT_S: u64 = 300;
 
 /// The renderer as the managed loop's sink: it writes a tile into the slot the manager chose and decides nothing.
-struct RendererSink<'a> {
-    ctx: &'a GpuContext,
-    renderer: &'a mut TerrainRenderer,
+pub(crate) struct RendererSink<'a> {
+    pub(crate) ctx: &'a GpuContext,
+    pub(crate) renderer: &'a mut TerrainRenderer,
 }
 
 impl TileSink for RendererSink<'_> {
@@ -66,6 +66,57 @@ impl TileSink for RendererSink<'_> {
 
     fn forget(&mut self, tile: planet_core::TileId) {
         self.renderer.forget(tile);
+    }
+}
+
+/// The parts of the pipelined loop on the real renderer: the renderer, the managed loop (plan worker, residency manager over a
+/// streamer, prefetch), the frames in flight and the pool configuration. Built once per script or perf case; `run_script` and
+/// the streaming perf scenes (`streamperf.rs`) drive it.
+pub(crate) struct Rig {
+    pub renderer: TerrainRenderer,
+    pub managed: ManagedLoop,
+    pub fi: FramesInFlight,
+    pub pool: planet_streaming::PoolConfig,
+}
+
+impl Rig {
+    /// A rig for requests like `first`: one tile size (cells) and one finest level, the pools sized for the first request.
+    pub(crate) fn new(ctx: &GpuContext, world: &Arc<WorldTerrain>, first: &TerrainRequest) -> Result<Rig, String> {
+        let renderer = TerrainRenderer::for_context(ctx, first.size, first.lod.cells, u64::from(MAX_FRAMES_IN_FLIGHT));
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let plan_pool = Arc::new(ThreadPool::new(1));
+        let pipe = PlanPipeline::new(PlanWorker::new(plan_pool, Arc::new(WorldPlanner(Arc::clone(world))), threads));
+        // The streamer counts its slots in the renderer's pools: what it places, the renderer can hold.
+        let pool = *renderer.pool_config();
+        let clock: Arc<dyn planet_streaming::Clock> = Arc::new(SystemClock::new());
+        let mut streamer = Streamer::new(
+            Arc::new(MeshSource {
+                world: Arc::clone(world),
+                format: ctx.default_tile_format(),
+                max_level: first.lod.max_level,
+                cells: first.lod.cells,
+            }),
+            Arc::new(ThreadPool::new(threads.clamp(2, 8))),
+            Arc::clone(&clock),
+            StreamConfig {
+                max_in_flight: 8,
+                capacity: pool.main_slots() as usize,
+                vertex_pool_slots: pool.managed_vertex_slots() as usize,
+                retire_frames: u64::from(MAX_FRAMES_IN_FLIGHT),
+                retry_after_ms: 1000,
+                record_dispatches: false,
+                record_changes: true,
+            },
+        );
+        // The one wait of the loop (CON-22): the six roots exist before the first frame, so there is always something to draw.
+        streamer.load_roots_blocking()?;
+        // Prefetch along the camera's translation (STRM-018, ADR 0031): the same clock as the streamer's.
+        let managed = ManagedLoop::new(pipe, ResidencyManager::new(streamer)).with_prefetch(
+            planet_frame::prefetch::PrefetchConfig::default(),
+            first.lod.radius_m,
+            clock,
+        );
+        Ok(Rig { renderer, managed, fi: FramesInFlight::new(MAX_FRAMES_IN_FLIGHT), pool })
     }
 }
 
@@ -93,36 +144,7 @@ pub fn run_script(
             first.lod.cells, first.lod.max_level, r.lod.cells, r.lod.max_level
         ));
     }
-    let mut renderer = TerrainRenderer::for_context(ctx, first.size, first.lod.cells, u64::from(MAX_FRAMES_IN_FLIGHT));
-    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
-    let plan_pool = Arc::new(ThreadPool::new(1));
-    let pipe = PlanPipeline::new(PlanWorker::new(plan_pool, Arc::new(WorldPlanner(Arc::clone(world))), threads));
-    // The streamer counts its slots in the renderer's pools: what it places, the renderer can hold.
-    let pool = *renderer.pool_config();
-    let clock: Arc<dyn planet_streaming::Clock> = Arc::new(SystemClock::new());
-    let mut streamer = Streamer::new(
-        Arc::new(MeshSource { world: Arc::clone(world), format: ctx.default_tile_format(), max_level: first.lod.max_level }),
-        Arc::new(ThreadPool::new(threads.clamp(2, 8))),
-        Arc::clone(&clock),
-        StreamConfig {
-            max_in_flight: 8,
-            capacity: pool.main_slots() as usize,
-            vertex_pool_slots: pool.managed_vertex_slots() as usize,
-            retire_frames: u64::from(MAX_FRAMES_IN_FLIGHT),
-            retry_after_ms: 1000,
-            record_dispatches: false,
-            record_changes: true,
-        },
-    );
-    // The one wait of the loop (CON-22): the six roots exist before the first frame, so there is always something to draw.
-    streamer.load_roots_blocking()?;
-    // Prefetch along the camera's translation (STRM-018, ADR 0031): the same clock as the streamer's.
-    let mut managed = ManagedLoop::new(pipe, ResidencyManager::new(streamer)).with_prefetch(
-        planet_frame::prefetch::PrefetchConfig::default(),
-        first.lod.radius_m,
-        clock,
-    );
-    let mut fi = FramesInFlight::new(MAX_FRAMES_IN_FLIGHT);
+    let Rig { mut renderer, mut managed, mut fi, pool } = Rig::new(ctx, world, first)?;
     let mut log: Vec<FrameLog> = Vec::new();
     let mut last_drawn: Option<TerrainPlan> = None;
     let mut iteration = 0u64;

@@ -13,6 +13,7 @@ pub mod pool;
 pub mod prefetch;
 pub mod repro;
 pub mod residency;
+pub mod scenes;
 pub mod terrain;
 pub mod terrain_text;
 pub mod upload;

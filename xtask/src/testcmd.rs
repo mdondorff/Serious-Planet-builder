@@ -323,6 +323,56 @@ fn perf_global_bake_args(args: &[String]) -> Result<Vec<String>, String> {
     Ok(v)
 }
 
+/// The streaming scenes of `perf stream` (ADR 0032 point 8); `all` runs the six in one session.
+const STREAM_SCENES: [&str; 6] = ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km"];
+
+/// The `cargo` arguments of `perf stream [SCENE|all] [--store DIR | --allow-memory-bake] [--global-res N] [--out PATH]
+/// [--machine-ready] [--smoke]` (TEST-019): the streaming scenes under the readiness gate. `--smoke` is the software-adapter
+/// proof that the scenes run (a few frames, labelled, never a measurement); without it the scenes need the discrete GPU.
+fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
+    let mut scene = "streaming".to_string();
+    let mut rest = args;
+    if let Some(first) = args.first().filter(|a| !a.starts_with("--")) {
+        if first == "all" {
+            scene = "streaming".into();
+        } else if STREAM_SCENES.contains(&first.as_str()) {
+            scene = first.clone();
+        } else {
+            return Err(format!("unknown streaming scene '{first}' (known: {}, all)", STREAM_SCENES.join(", ")));
+        }
+        rest = &args[1..];
+    }
+    let mut smoke = false;
+    let mut tail: Vec<String> = Vec::new();
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--smoke" => smoke = true,
+            "--machine-ready" | "--allow-memory-bake" => tail.push(a.clone()),
+            "--store" | "--global-res" | "--out" => {
+                let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
+                tail.push(a.clone());
+                tail.push(value.clone());
+            }
+            other => {
+                return Err(format!(
+                    "unknown perf stream option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out, --smoke, --machine-ready, the owner's override of a failed readiness gate)"
+                ))
+            }
+        }
+    }
+    let mut v: Vec<String> = if smoke {
+        ["run", "-q", "-p", "planet", "--", "test-render", "--perf-smoke", "--scene", &scene, "--adapter", "software"]
+    } else {
+        ["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", &scene, "--adapter", "hardware"]
+    }
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    v.extend(tail);
+    Ok(v)
+}
+
 /// The `cargo` arguments of a `cache-compact` run: `planet generate --compact-cache <dir>` plus the definition and the cap.
 fn cache_compact_args(args: &[String]) -> Result<Vec<String>, String> {
     let mut it = args.iter();
@@ -354,6 +404,11 @@ pub fn cache_compact(root: &Path, args: &[String]) -> Res {
 }
 
 pub fn perf(root: &Path, args: &[String]) -> Res {
+    if args.first().map(String::as_str) == Some("stream") {
+        let cargo_args = perf_stream_args(&args[1..])?;
+        let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+        return run(root, "cargo", &refs, &[]);
+    }
     if args.first().map(String::as_str) == Some("global-bake") {
         let cargo_args = perf_global_bake_args(&args[1..])?;
         let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
@@ -436,6 +491,32 @@ mod tests {
         assert_eq!(over.last(), Some(&"--machine-ready"));
         let e = perf_cargo_args(&s(&["--force"])).unwrap_err();
         assert!(e.contains("--force") && e.contains("override"), "{e}");
+    }
+
+    // spec: TEST-019
+    #[test]
+    fn perf_stream_runs_the_scenes_under_the_gate_over_a_store_and_has_a_software_smoke() {
+        let a = perf_stream_args(&s(&["dive", "--store", "C:/bake", "--machine-ready"])).unwrap();
+        assert!(a.contains(&"--perf".to_string()) && a.contains(&"hardware".to_string()) && a.contains(&"--release".to_string()), "{a:?}");
+        assert_eq!(a[a.iter().position(|x| x == "--scene").unwrap() + 1], "dive");
+        assert_eq!(a[a.iter().position(|x| x == "--store").unwrap() + 1], "C:/bake");
+        assert!(a.contains(&"--machine-ready".to_string()));
+        let all = perf_stream_args(&s(&["--allow-memory-bake"])).unwrap();
+        assert_eq!(all[all.iter().position(|x| x == "--scene").unwrap() + 1], "streaming");
+        assert!(perf_stream_args(&s(&["all"])).unwrap().contains(&"streaming".to_string()));
+        let smoke = perf_stream_args(&s(&["look-1m", "--smoke"])).unwrap();
+        assert!(
+            smoke.contains(&"--perf-smoke".to_string())
+                && smoke.contains(&"software".to_string())
+                && !smoke.contains(&"--perf".to_string()),
+            "{smoke:?}"
+        );
+        for name in STREAM_SCENES {
+            assert!(perf_stream_args(&s(&[name])).is_ok(), "{name}");
+        }
+        assert!(perf_stream_args(&s(&["terrain"])).unwrap_err().contains("known: dive"));
+        assert!(perf_stream_args(&s(&["--store"])).unwrap_err().contains("needs a value"));
+        assert!(perf_stream_args(&s(&["--force"])).unwrap_err().contains("override"));
     }
 
     // spec: STRM-013

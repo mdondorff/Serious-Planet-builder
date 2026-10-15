@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use planet_cache::global_store::GlobalWorld;
+use planet_cache::global_store::{GlobalWorld, StoreSource};
 use planet_core::cube::TangentWarp;
 use planet_core::Face;
 use planet_generators::global::{GlobalCoarseGenerator, GlobalGrid, GlobalSample, GridSource, LatticeSource, ReadError};
@@ -67,6 +67,8 @@ pub struct WorldTerrain {
     bake_key: [u8; 16],
     res: u32,
     radius_m: f64,
+    /// Where the bake is read from, for the log (`protocol.source`).
+    source: String,
 }
 
 impl WorldTerrain {
@@ -89,7 +91,35 @@ impl WorldTerrain {
         } else {
             (Box::new(NoBake), [0; 16])
         };
-        Ok(WorldTerrain { def, kind, src, has_bake: kind.needs_bake(), bake_key, res: global_res, radius_m })
+        let source = if kind.needs_bake() { format!("in-memory {global_res} cells") } else { "no bake (the field reads none)".to_string() };
+        Ok(WorldTerrain { def, kind, src, has_bake: kind.needs_bake(), bake_key, res: global_res, radius_m, source })
+    }
+
+    /// The terrain over a stored bake (the production source: `generate --global-dir`, GEN-014) of `res` cells per face edge in
+    /// `dir`. The store and its world are leaked: the field borrows them for the life of the process, a CLI run. Refuses a field
+    /// that reads no bake, a directory that is not a store, and a store that does not hold the bake of this definition at `res`.
+    pub fn open_store(def: WorldDefinition, dir: &Path, res: u32) -> Result<WorldTerrain, String> {
+        let kind = resolve(&def).map_err(|e| e.to_string())?;
+        if !kind.needs_bake() {
+            return Err(format!("height field {} reads no bake: --store has nothing to read", kind.id()));
+        }
+        let radius_m =
+            GenContext::new(&def).body_radius_m(BodyId::PLANET).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+        if !dir.is_dir() {
+            return Err(format!("{}: no such store directory (a bake made by `generate --global-dir`)", dir.display()));
+        }
+        let world = GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+        let world: &'static GlobalWorld = Box::leak(Box::new(world));
+        let store = planet_cache::pack::TileStore::open(dir, world.params()).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let store: &'static planet_cache::pack::TileStore = Box::leak(Box::new(store));
+        let src = StoreSource::new(store, world, res).map_err(|e| format!("{}: a bake of {res} cells: {e}", dir.display()))?;
+        // A store of another definition or resolution reads as holes: say so now, not as NaN heights in the middle of a run.
+        src.at(Face(0), 0, 0).map_err(|e| {
+            format!("{}: the store holds no bake of {res} cells for this definition (--seed, --world, --global-res): {e}", dir.display())
+        })?;
+        let bake_key = world.stage_key(res).0;
+        let source = format!("store {}, {res} cells", dir.display());
+        Ok(WorldTerrain { def, kind, src: Box::new(src), has_bake: true, bake_key, res, radius_m, source })
     }
 
     /// The terrain of a run that views, streams or records: the world file's, or the seed-only world with the reference field
@@ -131,6 +161,11 @@ impl WorldTerrain {
         self.radius_m
     }
 
+    /// Where the bake was read from: `store DIR, N cells` or `in-memory N cells`.
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
     /// A line for the run's output: which field, over which bake.
     pub fn describe(&self) -> String {
         if self.has_bake {
@@ -158,7 +193,7 @@ pub fn check_options(o: &Options) -> Result<(), String> {
     if o.perf && o.scene == "global-bake" {
         return Ok(());
     }
-    let perf_terrain = (o.perf || o.perf_smoke) && o.scene == "terrain";
+    let perf_terrain = (o.perf || o.perf_smoke) && (o.scene == "terrain" || crate::streamperf::is_stream_scene(&o.scene));
     let given_res = o.given.contains("--global-res");
     if o.world.is_none() {
         return if given_res && !perf_terrain {
@@ -174,7 +209,7 @@ pub fn check_options(o: &Options) -> Result<(), String> {
     if o.given.contains("--seed") {
         return Err("--world and --seed both name the definition: give one".into());
     }
-    if o.scene != "terrain" {
+    if o.scene != "terrain" && !crate::streamperf::is_stream_scene(&o.scene) {
         return Err("--world applies to `test-render --scene terrain` (a view, --flight or --perf), not to other scenes".into());
     }
     if o.repro.is_some() {
