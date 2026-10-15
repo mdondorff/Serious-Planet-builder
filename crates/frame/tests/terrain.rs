@@ -429,17 +429,20 @@ fn plan_counts_stay_within_the_budget_over_the_scripted_views() {
 /// The node count of each standard view at the production-like parameters of the test above, pinned. The other counts
 /// follow from it (2,304 triangles and 1,221 x 44 vertex bytes per tile). Raising a pin is a decision: say why in the
 /// change that does it (CON-20); a view that drops well below its pin should have the pin lowered with it.
+/// Re-pinned 2026-10-15 by `tight-frustum-cut` (LOD-007): the frustum cut uses each tile's own height bounds, not the global
+/// 9 km pad, so every view from aerial-200km down draws fewer nodes (ground-1m 8,687 to 2,897). high-2000km rises 424 to 428:
+/// the first test now also pads the skirts, which hang 12 km and more below the coarse tiles and exceeded the old 9 km pad.
 const VIEW_NODE_PINS: [(&str, u32); 10] = [
     ("orbit-20000km", 52),
-    ("high-2000km", 424),
-    ("aerial-200km", 645),
-    ("aerial-20km", 1071),
-    ("low-2km", 2561),
-    ("ground-200m", 4425),
-    ("ground-1m", 8687),
-    ("north-pole-1km", 2612),
-    ("cube-corner-1km", 3573),
-    ("face-edge-1km", 3546),
+    ("high-2000km", 428),
+    ("aerial-200km", 630),
+    ("aerial-20km", 892),
+    ("low-2km", 1279),
+    ("ground-200m", 1694),
+    ("ground-1m", 2897),
+    ("north-pole-1km", 1180),
+    ("cube-corner-1km", 1606),
+    ("face-edge-1km", 1574),
 ];
 
 // spec: TEST-011

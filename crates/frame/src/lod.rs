@@ -108,7 +108,7 @@ pub struct NodeSelection {
 }
 
 /// Bounding sphere of a tile on the reference sphere: centre on the surface, radius covering corners and edge midpoints.
-/// Terrain height is not included: culling pads it by `max_height_m`, and selection uses the height-aware volume of the
+/// Terrain height is not included: the first frustum test pads it by `max_height_m`, and selection uses the height-aware volume of the
 /// node (`tile_volume`).
 pub fn bounding_sphere(map: &dyn FaceMapping, tile: TileId, p: &LodParams) -> (Vec3, f64) {
     let (s0, s1, t0, t1) = tile.bounds();
@@ -153,6 +153,12 @@ fn tile_volume(g: &TileGeom, field: &dyn HeightField, p: &LodParams) -> Volume {
     // Terrain points sit further from the planet axis than reference points by up to the factor 1 + hi/R.
     let horizontal = g.radius * (1.0 + hi.max(0.0) / p.radius_m);
     Volume { centre, radius: extent(horizontal, half_range), half_range, max_height: hi }
+}
+
+/// Skirt depth of a tile with 5 % to spare (the mesh builder's rule, shared): the skirts are drawn, so the frustum cut must
+/// keep their triangles in view.
+fn skirt_depth(tile: TileId, p: &LodParams) -> f64 {
+    1.05 * planet_generators::mesh::skirt_depth(tile.level(), p.radius_m)
 }
 
 /// Radius of a sphere covering a horizontal extent `a` and a vertical half range `b` (exactly `a` when `b` is zero).
@@ -364,8 +370,8 @@ pub fn select_nodes(map: &dyn FaceMapping, camera: PlanetFixed, p: &LodParams) -
     select_impl(map, camera, None, &Flat, p, &mut SelectionCache::new())
 }
 
-/// Select the nodes to draw for a camera over flat terrain, also dropping nodes outside its side frustum planes (padded
-/// by the terrain height).
+/// Select the nodes to draw for a camera over flat terrain, also dropping nodes outside its side frustum planes (the
+/// reference sphere plus the skirts: for real terrain use the `_field` variants, which cut with the tiles' height bounds).
 pub fn select_nodes_in_view(map: &dyn FaceMapping, camera: &Camera, p: &LodParams) -> NodeSelection {
     select_impl(map, camera.position, Some(camera.frustum()), &Flat, p, &mut SelectionCache::new())
 }
@@ -427,7 +433,13 @@ fn select_impl(
             continue;
         }
         if let Some(fr) = &frustum {
-            if fr.culls_sphere(g.centre, g.radius + p.max_height_m) {
+            // The padded reference sphere rules out most tiles without height bounds; the tile's own volume (LOD-007)
+            // then decides; both add the skirts' depth so that no drawn triangle of the tile can lie outside them.
+            if fr.culls_sphere(g.centre, g.radius + p.max_height_m + skirt_depth(t, p)) {
+                continue;
+            }
+            let v = geoms.volume(t);
+            if fr.culls_sphere(v.centre, v.radius + skirt_depth(t, p)) {
                 continue;
             }
         }
