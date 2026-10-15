@@ -2,6 +2,6 @@
 - [x] 1.2 `production_finest_level`, `LodParams` default, `finest_class_key`, `MeshKeyer::at_finest_level`, `vertex_tile_field`, `tile_data_field` keys, MESH_VERSION 6, `--finest-level` and its use in every terrain path
 - [x] 1.3 re-pins: node pins (reference and default world), headroom pins, plan and LOD snapshots, known answers, the persistent mesh key; gpu tests consistent with the cap
 - [x] 1.4 spec deltas LOD-010, LOD-009, GEN-010, GEN-019, TEST-011
-- [x] 1.5 `test gpu`, `test gpu --real`, golden-review (CI candidates for WARP and llvmpipe)
+- [ ] 1.5 `test gpu`, `test gpu --real`, golden-review (CI candidates for WARP and llvmpipe)
 - [x] 1.6 ad hoc: why compact's plan is slower than vertex's (learnings)
-- [x] 1.7 reviewers (numerics, spec-guardian, verifier), archive, log line, PR, CI green, merge
+- [ ] 1.7 reviewers (numerics, spec-guardian, verifier), archive, log line, PR, CI green, merge

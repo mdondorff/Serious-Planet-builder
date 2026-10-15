@@ -70,7 +70,7 @@ pub fn mesh_key_with(map: &dyn FaceMapping, seed: u64, id: TileId, cells: u32, r
     mesh_key_chain(cache_key_field(&field, map, id, cells), cells, body_params(&field, radius_m), version, skirt_fraction)
 }
 
-/// The key class of a tile for a view whose finest level (the LOD cap, `max_level`) is `finest_level`: a tile at or above the cap
+/// The key class of a tile for a view whose finest level (the LOD cap, `max_level`) is `finest_level`: a tile at or deeper than the cap
 /// is a finest tile, whose format depends on its relief (CON-13, ADR 0033 point 5), so its key is the base key rehashed with the
 /// class (not the cap's value: the decision only depends on the class, so equal classes share keys); a tile below the cap keeps its base key. A resident tile is reused by its key, so the key must identify what the
 /// format decision depends on: tile, field and "finest for this cap". Pure.
@@ -111,7 +111,7 @@ pub fn mesh_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId
 
 /// [`mesh_key_field`] for many tiles of one field, mapping, grid size and radius: the string hashes of the field's
 /// implementation id and the mapping id are computed once instead of per tile (planning a 5,000-node view calls
-/// this 5,000 times). `key(tile)` equals `mesh_key_field(field, map, tile, cells, radius_m)` exactly.
+/// this 5,000 times). `key(tile)` equals `mesh_key_field(field, map, tile, cells, radius_m)` exactly (without `at_finest_level`; with it, the finest-level class of the tile is applied).
 pub struct MeshKeyer<'a> {
     field: &'a dyn HeightField,
     map: &'a dyn FaceMapping,

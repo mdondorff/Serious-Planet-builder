@@ -38,6 +38,7 @@ fn the_production_finest_level_keeps_the_vertex_spacing_whatever_the_tile_size()
     assert_eq!(production_finest_level(16), 23);
     assert_eq!(production_finest_level(8), 24);
     assert_eq!(production_finest_level(1), 26, "never deeper than the reference cap 26");
+    assert_eq!(production_finest_level(u32::MAX), 0, "an absurd tile size does not overflow");
     assert_eq!(production_finest_level(48), 21, "a tile size that is not a power of two rounds the spacing up, never down");
     assert_eq!(LodParams::earth_1080p().cells, 32);
     assert_eq!(LodParams::earth_1080p().max_level, 22, "the default LOD parameters are the production ones");
@@ -85,7 +86,7 @@ fn draws_by_tile(plan: &planet_frame::TerrainPlan) -> std::collections::BTreeMap
     plan.nodes.iter().map(|d| (d.tile, *d)).collect()
 }
 
-// spec: LOD-010, GEN-010
+// spec: LOD-010, LOD-009, GEN-010
 #[test]
 fn a_tile_at_the_cap_has_the_key_of_its_class_and_other_tiles_keep_their_base_key() {
     let field = Reference(1);

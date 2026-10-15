@@ -24,7 +24,7 @@ modes:
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
     --cells N --tau PX --frames N   terrain perf workload parameters (defaults 32, 6, 300)
-    --finest-level N         the LOD cap, the finest geometry level of the single views, --stream, --pipelined, --flight and --perf (default 27 - log2(cells): 22 at cells 32, 21 at 64, equal vertex spacing of about 7.5 cm; 26 reproduces the SPIKE-07 reference)
+    --finest-level N         the LOD cap, the finest geometry level of the single views, --stream, --pipelined, --flight and --perf (default 27 - ceil(log2(cells)): 22 at cells 32, 21 at 64, equal vertex spacing of about 7.5 cm; 26 reproduces the SPIKE-07 reference)
     --perf-smoke             run the terrain perf path briefly on any adapter (labelled, never a measurement)
     --flight N --out-dir DIR [--size WxH]   render the scripted orbit-to-1 m flight (TEST-013) as DIR/frame_0000.png... plus DIR/flight.txt and DIR/contact_sheet.png
                              with the production LOD defaults (override with --cells, --tau; --view applies; default size 1280x720,

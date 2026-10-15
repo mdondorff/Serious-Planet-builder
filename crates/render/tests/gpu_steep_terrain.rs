@@ -66,7 +66,7 @@ fn ten_scripted_views_on_steep_terrain_have_no_holes() {
                 .map(|part| {
                     s.spawn(move || {
                         part.iter()
-                            .map(|n| planet_generators::compact::vertex_tile_field(&STEEP, &TangentWarp, n.tile, CELLS, R, 19))
+                            .map(|n| planet_generators::compact::vertex_tile_field(&STEEP, &TangentWarp, n.tile, CELLS, R, lod.max_level))
                             .collect::<Vec<_>>()
                     })
                 })

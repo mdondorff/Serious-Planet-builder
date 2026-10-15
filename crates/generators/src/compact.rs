@@ -337,7 +337,7 @@ pub fn vertex_tile_field(
 /// The tile as the renderer will hold it: the vertex format for levels 0-2 and for a finest tile whose relief breaks CON-13's
 /// 1 mm (the fallback, ADR 0033 point 5), the compact format otherwise. `finest_level` is the LOD parameter `max_level`. The
 /// tile carries the key of its tile and class ([`finest_class_key`]): the format decision is a function of that key (tile, field,
-/// "at or above the cap") and the tile's own relief, so a resident tile reused by its key was decided for the same class.
+/// "at or deeper than the cap") and the tile's own relief, so a resident tile reused by its key was decided for the same class.
 pub fn tile_data_field(
     field: &dyn HeightField,
     map: &dyn FaceMapping,

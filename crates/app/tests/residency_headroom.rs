@@ -148,10 +148,11 @@ fn the_slots_every_standard_view_needs_stay_within_their_pins_and_the_share() {
     assert!(cmid.allocated_bytes() <= 2 * GIB && chigh.allocated_bytes() <= 3 * GIB, "the compact pools exceed the terrain share");
     let (compact_mid, compact_high) = (u64::from(cmid.main_slots()), u64::from(chigh.main_slots()));
     assert_eq!((compact_mid, compact_high), (COMPACT_MID_SLOTS, COMPACT_HIGH_SLOTS), "the share in compact slots changed");
-    let r_max = l22.iter().map(|m| m.1).max().unwrap() as u64;
-    let g26 = l22.iter().find(|m| m.0 == "ground-1m").unwrap();
+    // The bounds hold at the production cap and at the reference cap 26 (`--finest-level 26` stays supported): the larger of the two.
+    let r_max = l22.iter().chain(&l26).map(|m| m.1).max().unwrap() as u64;
+    let g_d = l22.iter().chain(&l26).filter(|m| m.0 == "ground-1m").map(|m| m.2).max().unwrap() as u64;
     assert!(r_max * 10 <= compact_mid, "R {r_max} slots is over 10 % of the mid tier's {compact_mid} compact slots");
-    assert!(g26.2 as u64 * 100 <= compact_mid * 6, "ground-1m D {} is over 6 % of {compact_mid}", g26.2);
+    assert!(g_d * 100 <= compact_mid * 6, "ground-1m D {} is over 6 % of {compact_mid}", g_d);
     assert!(r_max * 100 <= compact_high * 10, "R {r_max} is over 10 % of the high tier's {compact_high}");
 
     // The reference format: the vertex format's slot (53,724 B at cells 32). The share is a byte ceiling, so the same demand takes a
@@ -162,6 +163,6 @@ fn the_slots_every_standard_view_needs_stay_within_their_pins_and_the_share() {
     let (mid_slots, high_slots) = (u64::from(mid.main_slots()), u64::from(high.main_slots()));
     assert_eq!((mid_slots, high_slots), (VERTEX_MID_SLOTS, VERTEX_HIGH_SLOTS), "the share in vertex-format slots changed");
     assert!(r_max * 100 <= mid_slots * 40, "R {r_max} is over 40 % of the mid tier's {mid_slots} vertex-format slots");
-    assert!(g26.2 as u64 * 100 <= mid_slots * 12, "ground-1m D {} is over 12 % of {mid_slots}", g26.2);
+    assert!(g_d * 100 <= mid_slots * 12, "ground-1m D {} is over 12 % of {mid_slots}", g_d);
     assert!(r_max * 100 <= high_slots * 26, "R {r_max} is over 26 % of the high tier's {high_slots}");
 }
