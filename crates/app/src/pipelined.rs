@@ -12,7 +12,7 @@ use planet_frame::pipeline::{
     residency_of, DrawKind, FrameColumns, FramesInFlight, PlanField, PlanPipeline, PlanWorker, MAX_FRAMES_IN_FLIGHT,
 };
 use planet_frame::{plan_terrain_threaded, PlanError, ResidencySet, SelectionCache, TerrainPlan, TerrainRequest};
-use planet_generators::mesh::TileMesh;
+use planet_generators::compact::RenderTile;
 use planet_render::{GpuContext, RgbaFrame, TerrainRenderer};
 use planet_streaming::{ResidencyManager, SlotRef, StreamConfig, Streamer, SystemClock, ThreadPool};
 use std::io::Write;
@@ -60,8 +60,8 @@ struct RendererSink<'a> {
 }
 
 impl TileSink for RendererSink<'_> {
-    fn upload_at(&mut self, mesh: &TileMesh, slot: SlotRef) -> Result<(), String> {
-        self.renderer.upload_at(self.ctx, mesh, slot).map_err(|e| e.to_string())
+    fn upload_at(&mut self, tile: &RenderTile, slot: SlotRef) -> Result<(), String> {
+        self.renderer.upload_tile_at(self.ctx, tile, slot).map_err(|e| e.to_string())
     }
 
     fn forget(&mut self, tile: planet_core::TileId) {
@@ -82,20 +82,20 @@ pub fn run_script(
     out: &mut dyn Write,
 ) -> Result<(RgbaFrame, Vec<FrameLog>), String> {
     let first = requests.first().ok_or("an empty script")?;
-    let mut renderer = TerrainRenderer::with_frames_in_flight(ctx, first.size, first.lod.cells, u64::from(MAX_FRAMES_IN_FLIGHT));
+    let mut renderer = TerrainRenderer::for_context(ctx, first.size, first.lod.cells, u64::from(MAX_FRAMES_IN_FLIGHT));
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let plan_pool = Arc::new(ThreadPool::new(1));
     let pipe = PlanPipeline::new(PlanWorker::new(plan_pool, Arc::new(WorldPlanner(Arc::clone(world))), threads));
     // The streamer counts its slots in the renderer's pools: what it places, the renderer can hold.
     let pool = *renderer.pool_config();
     let mut streamer = Streamer::new(
-        Arc::new(MeshSource { world: Arc::clone(world) }),
+        Arc::new(MeshSource { world: Arc::clone(world), format: ctx.default_tile_format(), max_level: first.lod.max_level }),
         Arc::new(ThreadPool::new(threads.clamp(2, 8))),
         Arc::new(SystemClock::new()),
         StreamConfig {
             max_in_flight: 8,
             capacity: pool.main_slots() as usize,
-            vertex_pool_slots: pool.vertex_slots as usize,
+            vertex_pool_slots: pool.managed_vertex_slots() as usize,
             retire_frames: u64::from(MAX_FRAMES_IN_FLIGHT),
             retry_after_ms: 1000,
             record_dispatches: false,

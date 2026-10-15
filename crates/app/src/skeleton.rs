@@ -556,6 +556,8 @@ fn generate_store(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     .map_err(err)
 }
 
+use planet_generators::compact::RenderTile;
+
 const TERRAIN_SIZE: (u32, u32) = (256, 192);
 const TERRAIN_CELLS: u32 = 16;
 
@@ -621,20 +623,19 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
     }
     let mut cache = planet_frame::SelectionCache::new();
     let plan = planet_frame::plan_terrain_cached(&request, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
-    let meshes: Vec<std::sync::Arc<planet_generators::mesh::TileMesh>> = if o.stream {
+    let format = ctx.default_tile_format();
+    let meshes: Vec<std::sync::Arc<RenderTile>> = if o.stream {
         // R is selected on the plan's cache (its tile geometry and height volumes are hits), from the position only.
         let residency = planet_frame::pipeline::residency_of(&request, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
-        streamed_meshes(&world, &plan, &residency)?
+        streamed_meshes(&world, &plan, &residency, format, request.lod.max_level)?
     } else {
         plan.nodes
             .iter()
-            .map(|n| {
-                std::sync::Arc::new(planet_generators::mesh::tile_mesh_field(field.as_ref(), &TangentWarp, n.tile, TERRAIN_CELLS, radius_m))
-            })
+            .map(|n| std::sync::Arc::new(tile_for(format, field.as_ref(), n.tile, TERRAIN_CELLS, radius_m, request.lod.max_level)))
             .collect()
     };
-    let refs: Vec<&planet_generators::mesh::TileMesh> = meshes.iter().map(|m| m.as_ref()).collect();
-    let (frame, stats) = planet_render::execute_terrain(ctx, &plan, &refs).map_err(|e| e.to_string())?;
+    let refs: Vec<&RenderTile> = meshes.iter().map(|m| m.as_ref()).collect();
+    let (frame, stats) = planet_render::execute_terrain_tiles(ctx, &plan, &refs).map_err(|e| e.to_string())?;
     writeln!(
         out,
         "terrain {name} ({}): {}; plan {:016x}; {} draw calls, {} triangles",
@@ -724,16 +725,19 @@ fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>,
     let map = planet_frame::plan::face_mapping_by_id(&b.request.face_mapping)
         .ok_or_else(|| format!("unknown face mapping '{}'", b.request.face_mapping))?;
     let (seed, cells, radius) = (b.request.seed, b.request.lod.cells, b.request.lod.radius_m);
-    let meshes: Vec<planet_generators::mesh::TileMesh> = match &field {
-        Some(f) => rebuilt
-            .nodes
-            .iter()
-            .map(|n| planet_generators::mesh::tile_mesh_field(f.as_ref(), map.as_ref(), n.tile, cells, radius))
-            .collect(),
-        None => rebuilt.nodes.iter().map(|n| planet_generators::mesh::tile_mesh(seed, map.as_ref(), n.tile, cells, radius)).collect(),
-    };
-    let refs: Vec<&planet_generators::mesh::TileMesh> = meshes.iter().collect();
-    let (frame, stats) = planet_render::execute_terrain(ctx, &rebuilt, &refs).map_err(|e| e.to_string())?;
+    let format = ctx.default_tile_format();
+    let max_level = b.request.lod.max_level;
+    let reference = planet_generators::height::Reference(seed);
+    let meshes: Vec<RenderTile> = rebuilt
+        .nodes
+        .iter()
+        .map(|n| match &field {
+            Some(f) => tile_with(format, f.as_ref(), map.as_ref(), n.tile, cells, radius, max_level),
+            None => tile_with(format, &reference, map.as_ref(), n.tile, cells, radius, max_level),
+        })
+        .collect();
+    let refs: Vec<&RenderTile> = meshes.iter().collect();
+    let (frame, stats) = planet_render::execute_terrain_tiles(ctx, &rebuilt, &refs).map_err(|e| e.to_string())?;
     writeln!(out, "replay: {} draw calls, {} triangles", stats.draw_calls, stats.triangles).map_err(err)?;
     if let Some(p) = png {
         write_frame(&frame, p, out)?;
@@ -772,12 +776,44 @@ fn world_of_bundle(w: &planet_frame::BundleWorld, b: &planet_frame::TerrainBundl
 /// bake by reference), so the source owns the world and no borrowed field has to outlive the streamer's workers.
 pub(crate) struct MeshSource {
     pub(crate) world: std::sync::Arc<WorldTerrain>,
+    pub(crate) format: planet_render::TileFormat,
+    pub(crate) max_level: u8,
 }
 
-impl planet_streaming::TileSource<planet_generators::mesh::TileMesh> for MeshSource {
-    fn load(&self, tile: TileId) -> Result<planet_generators::mesh::TileMesh, String> {
+impl planet_streaming::TileSource<RenderTile> for MeshSource {
+    fn load(&self, tile: TileId) -> Result<RenderTile, String> {
         let field = self.world.field()?;
-        Ok(planet_generators::mesh::tile_mesh_field(field.as_ref(), &TangentWarp, tile, TERRAIN_CELLS, self.world.radius_m()))
+        Ok(tile_for(self.format, field.as_ref(), tile, TERRAIN_CELLS, self.world.radius_m(), self.max_level))
+    }
+}
+
+/// The tile in the format the run uses: the compact format for levels 3 and finer with the vertex fallback (GEN-019), or the
+/// vertex format for every tile (`--tile-format vertex`, the reference).
+pub(crate) fn tile_for(
+    format: planet_render::TileFormat,
+    field: &dyn planet_generators::height::HeightField,
+    tile: TileId,
+    cells: u32,
+    radius_m: f64,
+    max_level: u8,
+) -> RenderTile {
+    tile_with(format, field, &TangentWarp, tile, cells, radius_m, max_level)
+}
+
+fn tile_with(
+    format: planet_render::TileFormat,
+    field: &dyn planet_generators::height::HeightField,
+    map: &dyn planet_core::cube::FaceMapping,
+    tile: TileId,
+    cells: u32,
+    radius_m: f64,
+    max_level: u8,
+) -> RenderTile {
+    match format {
+        planet_render::TileFormat::Compact => planet_generators::compact::tile_data_field(field, map, tile, cells, radius_m, max_level),
+        planet_render::TileFormat::Vertex => {
+            RenderTile::Vertex(planet_generators::mesh::tile_mesh_field(field, map, tile, cells, radius_m))
+        }
     }
 }
 
@@ -790,20 +826,25 @@ fn streamed_meshes(
     world: &std::sync::Arc<WorldTerrain>,
     plan: &planet_frame::TerrainPlan,
     residency: &planet_frame::ResidencySet,
-) -> Result<Vec<std::sync::Arc<planet_generators::mesh::TileMesh>>, String> {
+    format: planet_render::TileFormat,
+    max_level: u8,
+) -> Result<Vec<std::sync::Arc<RenderTile>>, String> {
     use planet_streaming::{ResidencyManager, StreamConfig, Streamer, SystemClock, ThreadPool, Tier, Wants};
     let pool = std::sync::Arc::new(ThreadPool::new(4));
-    let share = planet_frame::pool::tier_pool(Tier::Mid, TERRAIN_CELLS, 1)?;
+    let share = match format {
+        planet_render::TileFormat::Compact => planet_frame::pool::tier_compact_pool(Tier::Mid, TERRAIN_CELLS, 1)?,
+        planet_render::TileFormat::Vertex => planet_frame::pool::tier_pool(Tier::Mid, TERRAIN_CELLS, 1)?,
+    };
     let config = StreamConfig {
         max_in_flight: 8,
         capacity: share.main_slots() as usize,
-        vertex_pool_slots: share.vertex_slots as usize,
+        vertex_pool_slots: share.managed_vertex_slots() as usize,
         retry_after_ms: 1000,
         record_dispatches: false,
         ..Default::default()
     };
     let mut streamer = Streamer::new(
-        std::sync::Arc::new(MeshSource { world: std::sync::Arc::clone(world) }),
+        std::sync::Arc::new(MeshSource { world: std::sync::Arc::clone(world), format, max_level }),
         pool,
         std::sync::Arc::new(SystemClock::new()),
         config,
@@ -837,25 +878,21 @@ fn upload_missing_meshes(
     field: &dyn planet_generators::height::HeightField,
     radius_m: f64,
     cells: u32,
+    max_level: u8,
 ) -> Result<usize, String> {
+    let format = ctx.default_tile_format();
     let missing: Vec<TileId> = plan.nodes.iter().filter(|n| !renderer.has_mesh(n.tile, n.mesh_key)).map(|n| n.tile).collect();
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let chunk = missing.len().div_ceil(threads).max(1);
-    let meshes: Vec<planet_generators::mesh::TileMesh> = std::thread::scope(|s| {
+    let meshes: Vec<RenderTile> = std::thread::scope(|s| {
         let handles: Vec<_> = missing
             .chunks(chunk)
-            .map(|part| {
-                s.spawn(move || {
-                    part.iter()
-                        .map(|&t| planet_generators::mesh::tile_mesh_field(field, &TangentWarp, t, cells, radius_m))
-                        .collect::<Vec<_>>()
-                })
-            })
+            .map(|part| s.spawn(move || part.iter().map(|&t| tile_for(format, field, t, cells, radius_m, max_level)).collect::<Vec<_>>()))
             .collect();
         handles.into_iter().flat_map(|h| h.join().expect("mesh thread")).collect()
     });
     for m in &meshes {
-        renderer.upload(ctx, m).map_err(|e| e.to_string())?;
+        renderer.upload_tile(ctx, m).map_err(|e| e.to_string())?;
     }
     Ok(meshes.len())
 }
@@ -904,7 +941,7 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, o.tau))?;
     std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
     let cameras = flight_path_field(radius_m, f64::from(size.0) / f64::from(size.1), field.as_ref(), frames);
-    let mut renderer = TerrainRenderer::new(ctx, size, o.cells);
+    let mut renderer = TerrainRenderer::for_context(ctx, size, o.cells, 1);
     let mut index = String::from("# frame altitude_above_terrain_m nodes plan_hash finest_level\n");
     let on_sheet = crate::sheet::sheet_indices(frames, SHEET_FRAMES);
     let mut sheet = Vec::new();
@@ -913,9 +950,9 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
         let plan = plan_terrain_field(&req, field.as_ref()).map_err(|e| format!("frame {i}: {e}"))?;
         let missing = plan.nodes.iter().filter(|n| !renderer.has_mesh(n.tile, n.mesh_key)).count();
         if renderer.resident_tiles() > 0 && renderer.resident_tiles() + missing > FLIGHT_RESIDENT_CAP {
-            renderer = TerrainRenderer::new(ctx, size, o.cells);
+            renderer = TerrainRenderer::for_context(ctx, size, o.cells, 1);
         }
-        upload_missing_meshes(ctx, &mut renderer, &plan, field.as_ref(), radius_m, o.cells)?;
+        upload_missing_meshes(ctx, &mut renderer, &plan, field.as_ref(), radius_m, o.cells, lod.max_level)?;
         renderer.render(ctx, &plan, false).map_err(|e| format!("frame {i}: {e}"))?;
         let path = dir.join(format!("frame_{i:04}.png"));
         let image = renderer.read_color(ctx);
@@ -989,7 +1026,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         ..Protocol::default()
     };
     let views = scripted_views_field(radius_m, f64::from(size.0) / f64::from(size.1), field.as_ref());
-    let mut renderer = TerrainRenderer::new(ctx, size, o.cells);
+    let mut renderer = TerrainRenderer::for_context(ctx, size, o.cells, 1);
     let mut reports: Vec<RunReport> = Vec::new();
     let mut budget_lines = Vec::new();
     let mut plan_lines: Vec<(&str, f64)> = Vec::new();
@@ -1039,7 +1076,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         }
         let plan = planet_frame::plan_terrain_cached(&req, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
         let started = Instant::now();
-        let new_meshes = upload_missing_meshes(ctx, &mut renderer, &plan, field.as_ref(), radius_m, o.cells)?;
+        let new_meshes = upload_missing_meshes(ctx, &mut renderer, &plan, field.as_ref(), radius_m, o.cells, lod.max_level)?;
         let plan_median = summarize(&plan_samples, 0).map_or(f64::NAN, |s| s.median);
         plan_lines.push((name, plan_median));
         writeln!(

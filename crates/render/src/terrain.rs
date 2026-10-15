@@ -7,7 +7,7 @@ use crate::{read_rgba8, ExecError, GpuContext, RgbaFrame};
 use planet_frame::draw::{buffer_of, build_draw_list_placed, DrawBuffer, DRAW_RECORD_BYTES};
 use planet_frame::pool::tier_pool;
 use planet_frame::{TerrainPlan, TerrainView};
-use planet_generators::compact::{CompactTile, TileData, COMPACT_RECORD_BYTES};
+use planet_generators::compact::{CompactTile, RenderTile, COMPACT_RECORD_BYTES};
 use planet_generators::mesh::{grid_indices, MeshVertex, TileMesh};
 use planet_streaming::{PoolConfig, PoolKind, SlotPool, SlotPools, SlotRef, Tier};
 use std::collections::HashMap;
@@ -315,10 +315,10 @@ enum TileRef<'a> {
 }
 
 impl<'a> TileRef<'a> {
-    fn of(tile: &'a TileData) -> Self {
+    fn of(tile: &'a RenderTile) -> Self {
         match tile {
-            TileData::Vertex(m) => TileRef::Vertex(m),
-            TileData::Compact(c) => TileRef::Compact(c),
+            RenderTile::Vertex(m) => TileRef::Vertex(m),
+            RenderTile::Compact(c) => TileRef::Compact(c),
         }
     }
 
@@ -447,6 +447,15 @@ impl TerrainRenderer {
             "the compact renderer needs a fallback region in its vertex pool"
         );
         Self::build(ctx, size, cells, pool, true)
+    }
+
+    /// A renderer in the context's tile format (`GpuContext::default_tile_format`) with the mid tier's terrain share, for a loop
+    /// that keeps up to `frames_in_flight` frames in flight: what the product paths use.
+    pub fn for_context(ctx: &GpuContext, size: (u32, u32), cells: u32, frames_in_flight: u64) -> Self {
+        match ctx.default_tile_format() {
+            crate::TileFormat::Compact => Self::with_frames_in_flight_compact(ctx, size, cells, frames_in_flight),
+            crate::TileFormat::Vertex => Self::with_frames_in_flight(ctx, size, cells, frames_in_flight),
+        }
     }
 
     /// A compact-format renderer with the mid tier terrain share (15 atlases, 230,640 slots at cells 32).
@@ -752,7 +761,7 @@ impl TerrainRenderer {
 
     /// Upload a tile in whichever format the builder chose (`planet_generators::compact::tile_data_field`), placed by the
     /// renderer like [`upload`](TerrainRenderer::upload).
-    pub fn upload_tile(&mut self, ctx: &GpuContext, tile: &TileData) -> Result<(), ExecError> {
+    pub fn upload_tile(&mut self, ctx: &GpuContext, tile: &RenderTile) -> Result<(), ExecError> {
         self.place_tile(ctx, TileRef::of(tile), None)
     }
 
@@ -766,7 +775,7 @@ impl TerrainRenderer {
     /// [`upload_at`](TerrainRenderer::upload_at) for a tile in either format. A compact tile goes to a slot of the main pool; a
     /// vertex-format tile of level 3 or finer (a fallback) is given the main slot the manager reserved for it, which stays empty,
     /// and the renderer keeps it in its own fallback region of the vertex pool.
-    pub fn upload_tile_at(&mut self, ctx: &GpuContext, tile: &TileData, slot: SlotRef) -> Result<(), ExecError> {
+    pub fn upload_tile_at(&mut self, ctx: &GpuContext, tile: &RenderTile, slot: SlotRef) -> Result<(), ExecError> {
         self.place_tile(ctx, TileRef::of(tile), Some(slot))
     }
 
@@ -1356,6 +1365,31 @@ pub fn execute_terrain(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[&TileMesh
     for d in &plan.nodes {
         let m = lookup.get(&d.tile).ok_or(ExecError::MissingTile(d.tile))?;
         renderer.upload(ctx, m)?;
+    }
+    let (_, mut stats) = renderer.render(ctx, plan, false)?;
+    stats.vertex_bytes = renderer.uploaded_bytes;
+    Ok((renderer.read_color(ctx), stats))
+}
+
+/// [`execute_terrain`] for tiles in either format (`planet_generators::compact::tile_data_field`): the product's tile path. The
+/// renderer's pools are sized to the plan (one atlas just large enough for its tiles); a plan of only vertex-format tiles uses the
+/// vertex-format renderer, as before.
+pub fn execute_terrain_tiles(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[&RenderTile]) -> Result<(RgbaFrame, TerrainStats), ExecError> {
+    let lookup: HashMap<_, _> = tiles.iter().map(|t| (t.id(), *t)).collect();
+    let mut renderer = if tiles.iter().any(|t| t.is_compact()) {
+        let cells = plan.cells;
+        let cols = (plan.nodes.len().max(1) as f64).sqrt().ceil() as u32;
+        let side = cols * (cells + 1);
+        let block = u64::from(side) * u64::from(side) * planet_generators::compact::TEXEL_BYTES;
+        let share = planet_streaming::budget::FIXED_RESERVE_BYTES + block;
+        let pool = planet_frame::pool::compact_format_pool_with(share, cells, side, 1).map_err(ExecError::BadPool)?;
+        TerrainRenderer::with_compact_pools(ctx, plan.size, cells, pool)
+    } else {
+        TerrainRenderer::new(ctx, plan.size, plan.cells)
+    };
+    for d in &plan.nodes {
+        let t = lookup.get(&d.tile).ok_or(ExecError::MissingTile(d.tile))?;
+        renderer.upload_tile(ctx, t)?;
     }
     let (_, mut stats) = renderer.render(ctx, plan, false)?;
     stats.vertex_bytes = renderer.uploaded_bytes;

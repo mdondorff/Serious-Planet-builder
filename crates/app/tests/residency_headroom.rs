@@ -3,13 +3,14 @@
 //! terrain share's slots (ADR 0033 point 2). Counts only, no device.
 //!
 //! ADR 0033's fractions (R with ancestors at most 10 % of the mid tier's slots, the ground-1m draw set with ancestors at
-//! most 6 %) are for the compact tile's slot count (230,640 at the mid share). The vertex format is what is built, and its
-//! slot is 12 times larger, so the same tile counts take a larger fraction of fewer slots: both are pinned.
+//! most 6 %) are for the compact tile's slot count (230,640 at the mid share), which is what the product builds (the pools come
+//! from `tier_compact_pool`, so the pins follow the real configuration). The vertex format (the reference, `--tile-format vertex`)
+//! has slots 6 times larger, so the same tile counts take a larger fraction of fewer slots: both are pinned.
 
 use planet::worldfield::WorldTerrain;
 use planet_core::cube::TangentWarp;
 use planet_core::{PlanetFixed, TileId};
-use planet_frame::pool::tier_pool;
+use planet_frame::pool::{tier_compact_pool, tier_pool};
 use planet_frame::{residency_set_field, scripted_views_field, select_nodes_in_view_field, LodParams, SelectionCache};
 use planet_streaming::budget::GIB;
 use planet_streaming::Tier;
@@ -135,15 +136,20 @@ fn the_slots_every_standard_view_needs_stay_within_their_pins_and_the_share() {
         )
     );
 
-    // ADR 0033 point 2, for the compact tile's slot count (the format the ADR sizes): R with ancestors at most 10 % of the
-    // mid tier's slots at every view, the ground-1m draw set with ancestors at most 6 %.
+    // ADR 0033 point 2 for the compact tile's slot count, from the pools the renderer allocates: R with ancestors at most 10 % of the
+    // mid tier's slots at every view, the ground-1m draw set with ancestors at most 6 %; the allocation model stays inside both shares.
+    let cmid = tier_compact_pool(Tier::Mid, CELLS, 2).unwrap();
+    let chigh = tier_compact_pool(Tier::High, CELLS, 2).unwrap();
+    assert!(cmid.allocated_bytes() <= 2 * GIB && chigh.allocated_bytes() <= 3 * GIB, "the compact pools exceed the terrain share");
+    let (compact_mid, compact_high) = (u64::from(cmid.main_slots()), u64::from(chigh.main_slots()));
+    assert_eq!((compact_mid, compact_high), (COMPACT_MID_SLOTS, COMPACT_HIGH_SLOTS), "the share in compact slots changed");
     let r_max = l26.iter().map(|m| m.1).max().unwrap() as u64;
     let g26 = l26.iter().find(|m| m.0 == "ground-1m").unwrap();
-    assert!(r_max * 10 <= COMPACT_MID_SLOTS, "R {r_max} slots is over 10 % of the mid tier's {COMPACT_MID_SLOTS} compact slots");
-    assert!(g26.2 as u64 * 100 <= COMPACT_MID_SLOTS * 6, "ground-1m D {} is over 6 % of {COMPACT_MID_SLOTS}", g26.2);
-    assert!(r_max * 100 <= COMPACT_HIGH_SLOTS * 10, "and over 10 % of the high tier's {COMPACT_HIGH_SLOTS}");
+    assert!(r_max * 10 <= compact_mid, "R {r_max} slots is over 10 % of the mid tier's {compact_mid} compact slots");
+    assert!(g26.2 as u64 * 100 <= compact_mid * 6, "ground-1m D {} is over 6 % of {compact_mid}", g26.2);
+    assert!(r_max * 100 <= compact_high * 10, "R {r_max} is over 10 % of the high tier's {compact_high}");
 
-    // What is built: the vertex format's slot (53,724 B at cells 32). The share is a byte ceiling, so the same demand takes a
+    // The reference format: the vertex format's slot (53,724 B at cells 32). The share is a byte ceiling, so the same demand takes a
     // larger fraction of fewer slots; both tiers hold the worst R with room to spare (no degradation in normal use).
     let mid = tier_pool(Tier::Mid, CELLS, 2).unwrap();
     let high = tier_pool(Tier::High, CELLS, 2).unwrap();

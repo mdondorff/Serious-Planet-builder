@@ -64,6 +64,8 @@ pub enum ExecError {
     CompactUnsupported {
         tile: TileId,
     },
+    /// A pool configuration the renderer could not build (the message names the numbers).
+    BadPool(String),
     /// The plan has more nodes than the per-node record buffer the share accounts for.
     TooManyNodes {
         planned: usize,
@@ -94,6 +96,7 @@ impl fmt::Display for ExecError {
             ExecError::CompactUnsupported { tile } => {
                 write!(f, "tile {tile:?}: a compact tile needs a renderer built with compact pools, placed in the main pool")
             }
+            ExecError::BadPool(m) => write!(f, "terrain pools: {m}"),
             ExecError::TooManyNodes { planned, max } => {
                 write!(f, "the plan has {planned} nodes but the node record buffer holds {max}")
             }

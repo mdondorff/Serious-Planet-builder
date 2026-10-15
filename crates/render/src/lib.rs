@@ -13,7 +13,34 @@ pub mod spike_detail;
 pub mod terrain;
 pub use compact::compact_terrain_shader;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
-pub use terrain::{execute_terrain, DrawMode, FrameTiming, ResidentFormat, TerrainRenderer, TerrainStats, TERRAIN_SHADERS};
+pub use terrain::{
+    execute_terrain, execute_terrain_tiles, DrawMode, FrameTiming, ResidentFormat, TerrainRenderer, TerrainStats, TERRAIN_SHADERS,
+};
+
+/// How terrain tiles are held and drawn (ADR 0033): the compact format for levels 3 and finer (default) or the 44-byte vertex format
+/// for every tile (the reference).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TileFormat {
+    Vertex,
+    Compact,
+}
+
+impl TileFormat {
+    pub fn name(self) -> &'static str {
+        match self {
+            TileFormat::Vertex => "vertex",
+            TileFormat::Compact => "compact",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "vertex" => Ok(TileFormat::Vertex),
+            "compact" => Ok(TileFormat::Compact),
+            other => Err(format!("unknown tile format '{other}' (vertex or compact)")),
+        }
+    }
+}
 
 /// Which adapter the process wants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,6 +97,8 @@ pub struct GpuContext {
     pub(crate) indirect: bool,
     /// The draw mode new terrain renderers start in: 0 = the default (indirect where supported), 1 = per-draw, 2 = indirect.
     pub(crate) draw_preference: std::sync::atomic::AtomicU8,
+    /// The tile format new terrain paths use: 0 = the default (compact), 1 = vertex, 2 = compact.
+    pub(crate) format_preference: std::sync::atomic::AtomicU8,
 }
 
 impl GpuContext {
@@ -104,7 +133,7 @@ impl GpuContext {
             })
             .await
             .map_err(|e| GpuError::Device(e.to_string()))?;
-        Ok(Self { device, queue, info, indirect, draw_preference: Default::default() })
+        Ok(Self { device, queue, info, indirect, draw_preference: Default::default(), format_preference: Default::default() })
     }
 
     /// Adapter name as the driver reports it.
@@ -136,6 +165,24 @@ impl GpuContext {
             2 => DrawMode::PerDraw,
             _ if self.indirect => DrawMode::Indirect,
             _ => DrawMode::PerDraw,
+        }
+    }
+
+    /// Choose the tile format the product paths (`test-render`, the pipelined loop, `--stream`, `--flight`, `--perf`) build and draw
+    /// (`--tile-format`); the default is compact (ADR 0033). The vertex format is the reference and stays selectable.
+    pub fn prefer_tile_format(&self, format: TileFormat) {
+        let v = match format {
+            TileFormat::Vertex => 1,
+            TileFormat::Compact => 2,
+        };
+        self.format_preference.store(v, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// The tile format product paths use now.
+    pub fn default_tile_format(&self) -> TileFormat {
+        match self.format_preference.load(std::sync::atomic::Ordering::SeqCst) {
+            1 => TileFormat::Vertex,
+            _ => TileFormat::Compact,
         }
     }
 

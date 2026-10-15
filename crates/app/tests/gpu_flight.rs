@@ -190,3 +190,55 @@ fn a_flight_writes_a_labelled_contact_sheet_and_the_finest_level_per_frame() {
     assert!(level(29) > level(0), "the finest level must grow from orbit to the ground: {} -> {}", level(0), level(29));
     let _ = std::fs::remove_dir_all(d);
 }
+
+// spec: REND-016, TEST-013
+#[test]
+fn the_flight_from_compact_tiles_matches_the_vertex_reference_frame_by_frame() {
+    let (compact, vertex) = (dir("compact"), dir("vertex"));
+    for (out, format) in [(&compact, "compact"), (&vertex, "vertex")] {
+        let log = run(&[
+            "test-render",
+            "--scene",
+            "terrain",
+            "--flight",
+            "12",
+            "--out-dir",
+            out.to_str().unwrap(),
+            "--size",
+            "160x120",
+            "--cells",
+            "8",
+            "--view",
+            "relief",
+            "--tile-format",
+            format,
+        ])
+        .unwrap();
+        assert!(log.contains(&format!("tile format: {format}")), "{log}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(compact.join("flight.txt")).unwrap(),
+        std::fs::read_to_string(vertex.join("flight.txt")).unwrap(),
+        "the plans do not depend on the tile format"
+    );
+    let mut worst = 0f64;
+    for i in 0..12 {
+        let name = format!("frame_{i:04}.png");
+        let (a, b) = (read_png(&compact.join(&name)).unwrap(), read_png(&vertex.join(&name)).unwrap());
+        let mut wrong = 0usize;
+        for y in 0..a.height {
+            for x in 0..a.width {
+                let (p, q) = (a.pixel(x, y), b.pixel(x, y));
+                if (0..3).any(|c| p[c].abs_diff(q[c]) > 12) {
+                    wrong += 1;
+                }
+            }
+        }
+        worst = worst.max(wrong as f64 / f64::from(a.width * a.height));
+    }
+    println!("flight, compact against vertex: worst fraction of pixels over 12 levels {worst:.5}");
+    assert!(worst <= 0.001, "{worst} of a flight frame's pixels differ between the compact and the vertex format");
+    for d in [compact, vertex] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}

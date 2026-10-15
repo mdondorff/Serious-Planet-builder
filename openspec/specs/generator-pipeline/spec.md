@@ -125,7 +125,7 @@ Source: report §16
 - **THEN** the PNG contains six distinct face colours and no background pixels inside the net
 
 ### Requirement: GEN-010 Mesh keys and known answers
-A tile mesh SHALL carry a key covering everything its vertices depend on (tile height key, grid size, the body parameter hash with the radius, skirt fraction and a mesh version), and the mesh version SHALL be bumped whenever vertex output changes for the same inputs. Known-answer hashes of committed meshes SHALL be identical on every platform and SHALL be asserted next to the version they belong to.
+A tile mesh SHALL carry a key covering everything its vertices depend on (tile height key, grid size, the body parameter hash with the radius, skirt fraction and a mesh version), and the mesh version SHALL be bumped whenever vertex output changes for the same inputs or the compact construction (GEN-019) changes; version 5 introduced the compact tile, which carries the mesh key of its tile, so a tile has one key in either format. Persisted height tiles (STRM-009) are not meshes and are unchanged by it; persistent mesh keys (kind mesh) change with the version, and repro bundles of an older mesh version are refused with the versions named (TEST-008). Known-answer hashes of committed meshes SHALL be identical on every platform and SHALL be asserted next to the version they belong to.
 
 Verify: A
 Status: active

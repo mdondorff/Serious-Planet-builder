@@ -17,7 +17,7 @@ use crate::pipeline::{PipelineFrame, PlanPipeline, ResidentTile};
 use crate::residency::ResidencySet;
 use crate::terrain::TerrainRequest;
 use planet_core::TileId;
-use planet_generators::mesh::TileMesh;
+use planet_generators::compact::RenderTile;
 use planet_streaming::{ResidencyManager, ResidentChange, SlotRef, StreamStats, Wants};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,8 +25,8 @@ use std::time::Instant;
 
 /// Where the managed loop puts tiles: the renderer, or a counter in tests.
 pub trait TileSink {
-    /// Write `mesh` into `slot` (the slot the manager chose). Whatever tile the slot held before is gone.
-    fn upload_at(&mut self, mesh: &TileMesh, slot: SlotRef) -> Result<(), String>;
+    /// Write `tile` (either format) into `slot` (the slot the manager chose). Whatever tile the slot held before is gone.
+    fn upload_at(&mut self, tile: &RenderTile, slot: SlotRef) -> Result<(), String>;
     /// The tile was evicted; its slot is the manager's again (no pool is touched).
     fn forget(&mut self, tile: TileId);
 }
@@ -88,7 +88,7 @@ pub struct ManagedFrame {
 
 pub struct ManagedLoop {
     pipe: PlanPipeline,
-    manager: ResidencyManager<TileMesh>,
+    manager: ResidencyManager<RenderTile>,
     /// What the sink holds, with the slot of each tile.
     resident: HashMap<TileId, ResidentTile>,
     slots: HashMap<TileId, SlotRef>,
@@ -101,7 +101,7 @@ pub struct ManagedLoop {
 impl ManagedLoop {
     /// `manager`'s streamer must have been built with `StreamConfig::record_changes` and have its roots loaded
     /// ([`planet_streaming::Streamer::load_roots_blocking`], the only wait); they are put on the sink by the first frame.
-    pub fn new(pipe: PlanPipeline, manager: ResidencyManager<TileMesh>) -> Self {
+    pub fn new(pipe: PlanPipeline, manager: ResidencyManager<RenderTile>) -> Self {
         assert!(manager.streamer().records_changes(), "the managed loop follows the streamer through StreamConfig::record_changes");
         let last = manager.streamer().stats();
         Self {
@@ -120,7 +120,7 @@ impl ManagedLoop {
         &self.pipe
     }
 
-    pub fn manager(&self) -> &ResidencyManager<TileMesh> {
+    pub fn manager(&self) -> &ResidencyManager<RenderTile> {
         &self.manager
     }
 
@@ -159,11 +159,11 @@ impl ManagedLoop {
                 ResidentChange::Added(tile) => {
                     // Act on the state now: a tile added and evicted since the last frame is not resident any more.
                     let (Some(mesh), Some(slot)) = (streamer.get(tile), streamer.slot_of(tile)) else { continue };
-                    if self.slots.get(&tile) == Some(&slot) && self.resident.get(&tile).is_some_and(|r| r.mesh_key == mesh.key) {
+                    if self.slots.get(&tile) == Some(&slot) && self.resident.get(&tile).is_some_and(|r| r.mesh_key == mesh.key()) {
                         continue;
                     }
                     sink.upload_at(&mesh, slot).map_err(|e| format!("placing {tile:?} in {slot:?}: {e}"))?;
-                    self.resident.insert(tile, ResidentTile { mesh_key: mesh.key, origin: mesh.origin });
+                    self.resident.insert(tile, ResidentTile { mesh_key: mesh.key(), origin: mesh.origin() });
                     self.slots.insert(tile, slot);
                     uploaded += 1;
                 }
