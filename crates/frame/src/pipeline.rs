@@ -19,6 +19,7 @@
 
 use crate::lod::{cover_selection, LodParams, SelectionCache};
 use crate::plan::{face_mapping_by_id, PlanError, CLEAR_COLOR, HEIGHT_RANGE};
+use crate::prefetch::prefetch_set;
 use crate::residency::{residency_set_field, ResidencySet};
 use crate::terrain::{node_color, plan_terrain_threaded, TerrainDraw, TerrainPlan, TerrainRequest};
 use planet_core::{PlanetFixed, TileId};
@@ -313,6 +314,9 @@ pub struct ResidencyOutcome {
     pub ms: f64,
     /// The position and parameters equal the previous R's: nothing was selected (a rotation).
     pub reused: bool,
+    /// The prefetch set made with this R (STRM-018): R at the predicted position minus this R, coarse first, nearer first.
+    /// Empty when no position was predicted (a stationary or rotating camera, a teleport).
+    pub prefetch: Arc<Vec<(TileId, f64)>>,
 }
 
 /// A completed plan: the request it was made for (`seq` is the frame that asked), the plan and the time it took on its worker.
@@ -327,7 +331,7 @@ pub struct PlanOutcome {
 #[derive(Default)]
 struct WorkerState {
     running: bool,
-    pending: Option<(u64, TerrainRequest)>,
+    pending: Option<(u64, TerrainRequest, Option<PlanetFixed>)>,
     done: Option<Result<PlanOutcome, String>>,
     /// The newest R, delivered after the plan of the same job (or with it when the position did not change).
     residency_done: Option<Result<ResidencyOutcome, String>>,
@@ -370,6 +374,12 @@ impl PlanWorker {
 
     /// Ask for the plan of `req`. Never blocks and never plans on the calling thread.
     pub fn submit(&self, seq: u64, req: TerrainRequest) {
+        self.submit_predicted(seq, req, None);
+    }
+
+    /// As [`PlanWorker::submit`], and with `predicted` (the position the camera will reach, STRM-018) the worker also
+    /// computes the prefetch set after R: R at `predicted` minus R of the request's position. `None` yields an empty set.
+    pub fn submit_predicted(&self, seq: u64, req: TerrainRequest, predicted: Option<PlanetFixed>) {
         let start = {
             let mut s = self.state.lock().expect("worker state");
             s.submitted += 1;
@@ -377,19 +387,19 @@ impl PlanWorker {
                 if s.pending.is_some() {
                     s.superseded += 1;
                 }
-                s.pending = Some((seq, req));
+                s.pending = Some((seq, req, predicted));
                 None
             } else {
                 s.running = true;
-                Some((seq, req))
+                Some((seq, req, predicted))
             }
         };
-        if let Some((seq, req)) = start {
-            self.spawn_job(seq, req);
+        if let Some((seq, req, predicted)) = start {
+            self.spawn_job(seq, req, predicted);
         }
     }
 
-    fn spawn_job(&self, seq: u64, req: TerrainRequest) {
+    fn spawn_job(&self, seq: u64, req: TerrainRequest, predicted: Option<PlanetFixed>) {
         let (state, cache, field, threads, spawner) =
             (Arc::clone(&self.state), Arc::clone(&self.cache), Arc::clone(&self.field), self.threads, Arc::clone(&self.spawner));
         let spawner_again = Arc::clone(&spawner);
@@ -430,7 +440,25 @@ impl PlanWorker {
                     .map(|r| (Arc::new(r), false)),
                 };
                 let ms = if matches!(made, Ok((_, false))) { started.elapsed().as_secs_f64() * 1000.0 } else { 0.0 };
-                (key, made.map(|(residency, reused)| ResidencyOutcome { seq, position: req.camera.position, residency, ms, reused }))
+                // The prefetch set follows R in the same job, on the same cache: R at the predicted position (the same function
+                // of a position that R is), minus R. A tile the cache has seen costs nothing; the rest costs its volume once.
+                let made = made.and_then(|(residency, reused)| {
+                    let prefetch = match predicted {
+                        Some(p) => {
+                            let mut ahead_req = req.clone();
+                            ahead_req.camera.position = p;
+                            let ahead = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                let mut cache = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                                field.residency(&ahead_req, &mut cache)
+                            }))
+                            .unwrap_or_else(|_| Err(PlanError::HeightField("the prefetch job panicked".into())))?;
+                            prefetch_set(&residency, &ahead)
+                        }
+                        None => Vec::new(),
+                    };
+                    Ok(ResidencyOutcome { seq, position: req.camera.position, residency, ms, reused, prefetch: Arc::new(prefetch) })
+                });
+                (key, made)
             });
             let next = {
                 let mut s = state.lock().expect("worker state");
@@ -456,9 +484,9 @@ impl PlanWorker {
                 }
                 next
             };
-            if let Some((seq, req)) = next {
+            if let Some((seq, req, predicted)) = next {
                 let worker = PlanWorker { spawner: spawner_again, field, cache, threads, state };
-                worker.spawn_job(seq, req);
+                worker.spawn_job(seq, req, predicted);
             }
         }));
     }
@@ -514,12 +542,13 @@ pub struct PlanPipeline {
     current: Option<PlanOutcome>,
     residency: Option<ResidencyOutcome>,
     last_requested: Option<TerrainRequest>,
+    last_predicted: Option<PlanetFixed>,
     frame: u64,
 }
 
 impl PlanPipeline {
     pub fn new(worker: PlanWorker) -> Self {
-        Self { worker, current: None, residency: None, last_requested: None, frame: 0 }
+        Self { worker, current: None, residency: None, last_requested: None, last_predicted: None, frame: 0 }
     }
 
     pub fn worker(&self) -> &PlanWorker {
@@ -543,6 +572,17 @@ impl PlanPipeline {
 
     /// Begin frame `self.frame() + 1` for `req`. Never waits: the plan of this camera is only asked for.
     pub fn begin_frame(&mut self, req: &TerrainRequest, resident: &dyn ResidentSet) -> Result<PipelineFrame, String> {
+        self.begin_frame_predicted(req, None, resident)
+    }
+
+    /// As [`PlanPipeline::begin_frame`], with the position the camera is predicted to reach (STRM-018): the worker computes
+    /// the prefetch set for it after R. A changed prediction asks the worker again, as a changed request does.
+    pub fn begin_frame_predicted(
+        &mut self,
+        req: &TerrainRequest,
+        predicted: Option<PlanetFixed>,
+        resident: &dyn ResidentSet,
+    ) -> Result<PipelineFrame, String> {
         self.frame += 1;
         let mut delivered = None;
         match self.worker.take() {
@@ -566,10 +606,11 @@ impl PlanPipeline {
             Some(Err(e)) => return Err(format!("residency set for frame {}: {e}", self.frame)),
             None => {}
         }
-        let requested = self.last_requested.as_ref() != Some(req);
+        let requested = self.last_requested.as_ref() != Some(req) || self.last_predicted != predicted;
         if requested {
-            self.worker.submit(self.frame, req.clone());
+            self.worker.submit_predicted(self.frame, req.clone(), predicted);
             self.last_requested = Some(req.clone());
+            self.last_predicted = predicted;
         }
         let base = self.current.as_ref().filter(|c| c.request == *req || plan_usable(&c.plan, req));
         let draw = draw_plan(req, base.map(|c| (&c.request, c.plan.as_ref())), resident).map_err(|e| e.to_string())?;

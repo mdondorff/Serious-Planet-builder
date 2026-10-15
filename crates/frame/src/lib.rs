@@ -10,6 +10,7 @@ pub mod managed;
 pub mod pipeline;
 pub mod plan;
 pub mod pool;
+pub mod prefetch;
 pub mod repro;
 pub mod residency;
 pub mod terrain;
