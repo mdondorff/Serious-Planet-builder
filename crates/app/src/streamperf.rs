@@ -177,6 +177,8 @@ struct CaseRun {
     /// Seconds of the settling before frame 0 (`None`: the case starts from empty).
     settle_s: Option<f64>,
     clocks: Vec<planet_perf::ClockSample>,
+    /// Seconds the case's teardown took (the loop dropped: queued jobs cancelled, in-flight ones waited for; STRM-005).
+    teardown_s: f64,
 }
 
 fn run_case(
@@ -189,7 +191,9 @@ fn run_case(
     out: &mut dyn Write,
 ) -> Result<CaseRun, String> {
     let first = req(script.prelude.unwrap_or(script.cameras[0]));
+    let rig_started = Instant::now();
     let mut d = Driver { ctx, rig: Rig::new(ctx, world, &first)?, lod: lod.clone(), next_deadline: Instant::now() };
+    writeln!(out, "{}: rig built in {:.2} s", script.scene.name(), rig_started.elapsed().as_secs_f64()).map_err(err)?;
     // Settle at the prelude camera (unmeasured): R fully resident, nothing queued, in flight or waiting, for one second of script
     // time. A smoke run only runs a few frames.
     let mut settle_s = None;
@@ -255,7 +259,9 @@ fn run_case(
         clocks.extend(samples.lock().expect("clock samples").iter().cloned());
         clocks.extend(planet_perf::query_nvidia_smi());
     }
-    Ok(CaseRun { frames, blanks, settle_s, clocks })
+    let torn = Instant::now();
+    drop(d);
+    Ok(CaseRun { frames, blanks, settle_s, clocks, teardown_s: torn.elapsed().as_secs_f64() })
 }
 
 // spec: TEST-019, TEST-018, TEST-012
@@ -374,7 +380,8 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         writeln!(out, "{}: script built in {:.1} s", scene.name(), built.elapsed().as_secs_f64()).map_err(err)?;
         let case_started = Instant::now();
         let run = run_case(ctx, &scene_world, &script, &req_of, &lod, smoke, out)?;
-        writeln!(out, "{}: case ran in {:.1} s", scene.name(), case_started.elapsed().as_secs_f64()).map_err(err)?;
+        writeln!(out, "{}: case ran in {:.1} s (teardown {:.2} s)", scene.name(), case_started.elapsed().as_secs_f64(), run.teardown_s)
+            .map_err(err)?;
         let mem = MemoryFacts {
             driver_vram_bytes: if smoke { None } else { planet_perf::streaming::query_gpu_memory_used() },
             process_peak_bytes: planet_perf::streaming::query_process_peak_bytes(),

@@ -1028,3 +1028,165 @@ fn a_full_fill_at_the_cap_takes_the_frames_the_cap_allows_and_defers_only_full_f
     assert!(frames.iter().all(|f| f.written.len() <= per_frame));
     assert!(frames.iter().any(|f| f.deferred > 0));
 }
+
+// ---- teardown and teleport cancellation (STRM-005) ----
+type LockedGate = (std::sync::Mutex<std::sync::mpsc::Sender<()>>, std::sync::Mutex<std::sync::mpsc::Receiver<()>>);
+
+/// The reference field with counted plan and residency calls; the first plan call can be held at a gate.
+struct CountedField {
+    plans: Arc<AtomicUsize>,
+    residencies: Arc<AtomicUsize>,
+    gate: Option<LockedGate>,
+}
+
+impl PlanField for CountedField {
+    fn plan(
+        &self,
+        req: &TerrainRequest,
+        cache: &mut SelectionCache,
+        threads: usize,
+    ) -> Result<planet_frame::TerrainPlan, planet_frame::PlanError> {
+        if self.plans.fetch_add(1, Ordering::SeqCst) == 0 {
+            if let Some((entered, release)) = &self.gate {
+                entered.lock().unwrap().send(()).unwrap();
+                release.lock().unwrap().recv().unwrap();
+            }
+        }
+        PlanField::plan(&Reference(1), req, cache, threads)
+    }
+
+    fn residency(&self, req: &TerrainRequest, cache: &mut SelectionCache) -> Result<planet_frame::ResidencySet, planet_frame::PlanError> {
+        self.residencies.fetch_add(1, Ordering::SeqCst);
+        PlanField::residency(&Reference(1), req, cache)
+    }
+}
+
+struct CountedSource {
+    inner: Source,
+    loads: Arc<AtomicUsize>,
+}
+
+impl TileSource<RenderTile> for CountedSource {
+    fn load(&self, tile: TileId) -> Result<RenderTile, String> {
+        self.loads.fetch_add(1, Ordering::SeqCst);
+        self.inner.load(tile)
+    }
+}
+
+struct Torn {
+    lp: ManagedLoop,
+    plan_spawner: Arc<ManualSpawner>,
+    tile_spawner: Arc<ManualSpawner>,
+    plans: Arc<AtomicUsize>,
+    residencies: Arc<AtomicUsize>,
+    loads: Arc<AtomicUsize>,
+}
+
+type Gate = (std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
+
+fn torn_rig(gate: Option<Gate>) -> Torn {
+    let clock = Arc::new(FakeClock::default());
+    let (plan_spawner, tile_spawner) = (Arc::new(ManualSpawner::default()), Arc::new(ManualSpawner::default()));
+    let (plans, residencies, loads) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let field = CountedField {
+        plans: plans.clone(),
+        residencies: residencies.clone(),
+        gate: gate.map(|(a, b)| (std::sync::Mutex::new(a), std::sync::Mutex::new(b))),
+    };
+    let pipe = PlanPipeline::new(PlanWorker::new(plan_spawner.clone(), Arc::new(field), 2));
+    let config = StreamConfig { max_in_flight: 16, capacity: 1_000_000, retire_frames: 2, record_changes: true, ..Default::default() };
+    let mut streamer = Streamer::new(
+        Arc::new(CountedSource { inner: Source { lod: lod() }, loads: loads.clone() }),
+        tile_spawner.clone() as Arc<dyn Spawner>,
+        clock,
+        config,
+    );
+    streamer.load_roots_blocking().unwrap();
+    Torn { lp: ManagedLoop::new(pipe, ResidencyManager::new(streamer)), plan_spawner, tile_spawner, plans, residencies, loads }
+}
+
+// spec: STRM-005
+#[test]
+fn dropping_the_loop_cancels_every_queued_tile_job_and_every_plan_job_that_has_not_started() {
+    let mut t = torn_rig(None);
+    let mut sink = CountingSink::default();
+    let a = request(here(), 0.0, -0.4);
+    t.lp.begin_frame(&a, &mut sink).unwrap(); // the plan job is asked for
+    assert_eq!(t.plan_spawner.run(1), 1);
+    // The plan and R arrive; the tile requests go out: 16 dispatched to the spawner, the rest queued in the streamer.
+    for _ in 0..3 {
+        t.lp.begin_frame(&a, &mut sink).unwrap();
+    }
+    let stats = t.lp.manager().streamer().stats();
+    assert_eq!((stats.in_flight, t.tile_spawner.pending()), (16, 16));
+    assert!(stats.queued > 100, "many requests wait: {}", stats.queued);
+    // A plan job for another camera is waiting in the plan worker's spawner too.
+    t.lp.begin_frame(&request(there(), 1.0, -0.3), &mut sink).unwrap();
+    assert_eq!(t.plan_spawner.pending(), 1);
+    let (plans, loads) = (t.plans.load(Ordering::SeqCst), t.loads.load(Ordering::SeqCst));
+    assert_eq!(loads, 6, "only the six roots were loaded");
+    let Torn { lp, plan_spawner, tile_spawner, plans: plan_count, loads: load_count, .. } = t;
+    drop(lp);
+    // The machine now finds the dispatched tile jobs and the waiting plan job: none of them does any work.
+    assert_eq!(tile_spawner.run(1_000), 16, "the dispatched jobs are still found in the spawner...");
+    assert_eq!(plan_spawner.run(10), 1);
+    assert_eq!(load_count.load(Ordering::SeqCst), loads, "...and none of them loaded a tile");
+    assert_eq!(plan_count.load(Ordering::SeqCst), plans, "the waiting plan job planned nothing");
+}
+
+// spec: STRM-005
+#[test]
+fn a_plan_job_in_flight_at_teardown_finishes_its_plan_and_starts_nothing_after_it() {
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let t = torn_rig(Some((entered_tx, release_rx)));
+    let Torn { mut lp, plan_spawner, plans, residencies, .. } = t;
+    let mut sink = CountingSink::default();
+    lp.begin_frame(&request(here(), 0.0, -0.4), &mut sink).unwrap();
+    let sp = plan_spawner.clone();
+    let job = std::thread::spawn(move || sp.run_one());
+    entered_rx.recv().unwrap(); // the plan job is running
+    lp.begin_frame(&request(there(), 1.0, -0.3), &mut sink).unwrap(); // a newer request waits behind it
+    drop(lp);
+    release_tx.send(()).unwrap();
+    assert!(job.join().unwrap());
+    assert_eq!(plans.load(Ordering::SeqCst), 1, "the plan in flight ran; the pending request never did");
+    assert_eq!(residencies.load(Ordering::SeqCst), 0, "R is not selected after the teardown began");
+    assert_eq!(plan_spawner.pending(), 0, "no follow-up job was spawned");
+}
+
+// spec: STRM-005
+#[test]
+fn a_teleport_cancels_the_queued_requests_that_left_r_before_they_start() {
+    let mut rig = Rig::new(1_000_000);
+    let a = request(here(), 0.0, -0.4);
+    // At A the plan and R arrive but no tile job finishes: 64 are in flight, the rest of R waits in the streamer's queue.
+    for _ in 0..6 {
+        rig.begin(&a);
+        rig.plan_spawner.run(4);
+    }
+    let at_a = rig.lp.manager().streamer().stats();
+    assert_eq!(at_a.in_flight, 64);
+    assert!(at_a.queued > 100, "many requests wait: {}", at_a.queued);
+    let r_of_a: BTreeSet<TileId> = rig.lp.wants().residency.iter().map(|(t, _)| *t).collect();
+    let jump_at = rig.lp.manager().streamer().dispatch_log.len();
+    // The camera jumps to B: B's plan arrives while the 64 jobs still run, so the new wants replace the old ones before any
+    // queued request of A can start.
+    let b = request(there(), 1.0, -0.3);
+    for _ in 0..4 {
+        rig.begin(&b);
+        rig.plan_spawner.run(4);
+    }
+    assert_eq!(rig.lp.manager().streamer().dispatch_log.len(), jump_at, "nothing of A's queue started while the jobs ran");
+    rig.settle(&b);
+    let st = rig.lp.manager().streamer().stats();
+    assert!(st.cancelled > 50, "the requests of A's R that B does not need are cancelled: {}", st.cancelled);
+    let wanted_b = closure(rig.lp.wants().residency.iter().map(|(t, _)| *t).chain(rig.lp.wants().draw.iter().map(|(t, _)| *t)));
+    let started_after: Vec<TileId> = rig.lp.manager().streamer().dispatch_log[jump_at..].to_vec();
+    assert!(
+        started_after.iter().all(|t| wanted_b.contains(t)),
+        "a request that left R started after the jump: {:?}",
+        started_after.iter().filter(|t| !wanted_b.contains(t)).take(5).collect::<Vec<_>>()
+    );
+    assert!(r_of_a.iter().any(|t| !wanted_b.contains(t)), "the jump must leave part of A's R");
+}

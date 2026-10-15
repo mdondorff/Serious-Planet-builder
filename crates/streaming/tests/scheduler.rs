@@ -350,7 +350,7 @@ fn dispatch_order_on_pool(threads: usize) -> Vec<TileId> {
     }
     s.begin_frame_wants(&w);
     assert_eq!(s.stats().queued, 0);
-    s.dispatch_log
+    std::mem::take(&mut s.dispatch_log)
 }
 
 // spec: STRM-005
@@ -473,4 +473,63 @@ fn resident_changes_are_recorded_in_order_only_when_asked_and_dispatches_are_cou
             assert!(!small.is_resident(*t));
         }
     }
+}
+
+// spec: STRM-005
+#[test]
+fn dropping_the_streamer_runs_no_queued_job_and_stops_those_in_flight_at_their_next_stage_boundary() {
+    let (done_tx, done_rx) = channel();
+    let (go_tx, go_rx) = channel();
+    let source = Arc::new(Staged { stage_done: Mutex::new(done_tx), go: Mutex::new(go_rx), stages_run: AtomicUsize::new(0) });
+    let spawner = Arc::new(ManualSpawner::default());
+    // 4 jobs go out (2 will be running, 2 wait in the spawner); the other tiles wait in the streamer's queue.
+    let mut s = Streamer::new(source.clone(), spawner.clone() as Arc<dyn Spawner>, Arc::new(FakeClock::default()), cfg(4, 100));
+    for _ in 0..6 {
+        go_tx.send(()).unwrap(); // the roots pass both stages
+    }
+    s.load_roots_blocking().unwrap();
+    while done_rx.try_recv().is_ok() {}
+    let base = source.stages_run.load(Ordering::SeqCst);
+    let tiles: Vec<(TileId, f64)> = (0..6u8).flat_map(|f| (0..2u32).map(move |x| (id(f, 1, x, 0), f64::from(f) + f64::from(x)))).collect();
+    s.begin_frame_wants(&Wants { residency: tiles, ..Wants::default() });
+    let st = s.stats();
+    assert_eq!((st.in_flight, st.queued, spawner.pending()), (4, 8, 4));
+    let running: Vec<_> = (0..2)
+        .map(|_| {
+            let sp = spawner.clone();
+            std::thread::spawn(move || sp.run_one())
+        })
+        .collect();
+    done_rx.recv().unwrap();
+    done_rx.recv().unwrap(); // stage 1 of both running jobs is done: k = 2 are in flight
+    drop(s); // the teardown: the 8 queued requests are gone, the 4 dispatched ones are told to stop
+    go_tx.send(()).unwrap();
+    go_tx.send(()).unwrap();
+    for j in running {
+        assert!(j.join().unwrap());
+    }
+    // The two jobs that never started find the token set and end without touching the source.
+    assert_eq!(spawner.run(100), 2);
+    assert_eq!(spawner.pending(), 0, "the 8 queued requests never reached the spawner");
+    assert_eq!(source.stages_run.load(Ordering::SeqCst) - base, 2, "only stage 1 of the two jobs in flight ran: at most k jobs started");
+}
+
+// spec: STRM-005
+#[test]
+fn cancel_all_empties_the_queue_stops_the_dispatched_jobs_and_nothing_becomes_resident() {
+    let (mut s, sp, _c, src) = fixture(cfg(3, 100_000));
+    let tiles: Vec<(TileId, f64)> =
+        (0..5u8).flat_map(|f| (0..4u32).map(move |x| (id(f, 2, x, 0), f64::from(f) * 10.0 + f64::from(x)))).collect();
+    s.begin_frame_wants(&Wants { residency: tiles, ..Wants::default() });
+    let before = s.stats();
+    assert_eq!((before.in_flight, sp.pending()), (3, 3));
+    let queued_and_dispatched = before.queued + before.in_flight;
+    assert_eq!(s.cancel_all(), queued_and_dispatched);
+    assert_eq!(s.cancel_all(), 0, "a second call finds nothing left to cancel");
+    assert_eq!(sp.run(100), 3, "the dispatched jobs are found in the spawner and end at once");
+    s.begin_frame_wants(&Wants::default());
+    let st = s.stats();
+    assert_eq!((st.queued, st.in_flight, st.completed), (0, 0, 0));
+    assert_eq!(src.loads.load(Ordering::SeqCst), 6, "only the six roots were loaded");
+    assert_eq!(st.resident, 6, "no result was made resident");
 }

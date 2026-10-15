@@ -180,6 +180,11 @@ impl CancelToken {
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::SeqCst)
     }
+
+    /// A token that is already cancelled: for testing a source's stage boundaries.
+    pub fn cancelled() -> CancelToken {
+        CancelToken(Arc::new(AtomicBool::new(true)))
+    }
 }
 
 /// The request class of a tile, highest priority first (STRM-005).
@@ -358,6 +363,12 @@ pub(crate) fn priority_key(p: f64) -> u64 {
     }
 }
 
+impl<T: Send + Sync + 'static> Drop for Streamer<T> {
+    fn drop(&mut self) {
+        self.cancel_all();
+    }
+}
+
 impl<T: Send + Sync + 'static> Streamer<T> {
     pub fn new(source: Arc<dyn TileSource<T>>, spawner: Arc<dyn Spawner>, clock: Arc<dyn Clock>, config: StreamConfig) -> Self {
         let (tx, rx) = channel();
@@ -384,6 +395,23 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             changes: Vec::new(),
             dispatch_log: Vec::new(),
         }
+    }
+
+    /// Cancel everything that is not resident: the queued requests are dropped and never reach the spawner, the dispatched
+    /// ones are told to stop (a job still waiting in the spawner ends at once, a running one at its next stage boundary,
+    /// STRM-005) and none of them becomes resident. Returns how many requests were cancelled. Dropping the streamer does this.
+    pub fn cancel_all(&mut self) -> usize {
+        let mut n = self.queue.len();
+        self.queue.clear();
+        self.queued_key.clear();
+        for f in self.in_flight.values() {
+            if !f.token.swap(true, Ordering::SeqCst) {
+                n += 1;
+                self.stats.cancelled_prefetch += u64::from(f.class == RequestClass::Prefetch);
+            }
+        }
+        self.stats.cancelled += n as u64;
+        n
     }
 
     /// Load the six level-0 tiles synchronously, once at start-up, so that some level of detail always exists
@@ -485,7 +513,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
     pub fn begin_frame_wants(&mut self, wants: &Wants) -> Vec<Resolved> {
         self.frame += 1;
         let now = self.clock.now_ms();
-        // 1. Completions. The result of a job that was cancelled meanwhile is dropped: the persistent cache holds it,
+        // 1. Completions. The result of a job that was cancelled meanwhile is dropped: a source that finished anyway may have cached it,
         // nothing is made resident (and so nothing is uploaded).
         while let Ok((tile, result)) = self.rx.try_recv() {
             let Some(flight) = self.in_flight.remove(&tile) else { continue };
