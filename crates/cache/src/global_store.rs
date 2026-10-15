@@ -11,10 +11,11 @@
 //! little-endian `f32` in row-major order (`k` fastest), each plane byte-shuffled as in the height codec, one plane after
 //! the other. The decoder never allocates more than `B` allows.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use planet_core::cube::TangentWarp;
 use planet_core::hash::HASH_VERSION;
@@ -26,7 +27,7 @@ use planet_generators::global::{
 use planet_generators::stage::{FieldGraph, FieldSpec, Scope, Stage};
 use planet_world_def::{body_radius_path, body_seed_path, BodyId, GenContext, MissingNode, NodeValue, WorldDefinition, SPHERE_SURFACE_ID};
 
-use crate::codec::{shuffle, unshuffle};
+use crate::codec::shuffle;
 use crate::key::{body_params_hash128, cache_key, read_entry, CacheKey, KeyInputs, Kind, ReadEntry, PARAM_GRID_RES, PARAM_RESOLUTION};
 use crate::pack::{PackError, PackWriter, Record, StoreParams, TileStore};
 use crate::stage_key::{stage_key, StageKeyContext};
@@ -150,16 +151,23 @@ pub fn decode_block(bytes: &[u8]) -> Result<(u32, Vec<GlobalSample>), BlockCodec
     if raw.len() as u64 != expected {
         return Err(BlockCodecError::Truncated { got: raw.len(), expected });
     }
-    let plane_bytes = raw.len() / 4;
-    let planes: Vec<Vec<f32>> = (0..4).map(|p| unshuffle(&raw[p * plane_bytes..(p + 1) * plane_bytes])).collect();
-    let samples = (0..planes[0].len())
-        .map(|i| GlobalSample {
-            continent: planes[0][i],
-            elevation_m: planes[1][i],
-            temperature_c: planes[2][i],
-            precipitation_mm: planes[3][i],
-        })
-        .collect();
+    let n = raw.len() / 16;
+    // One pass: sample `i` takes byte `b` of channel `c` from `raw[(4 c + b) n + i]`. Every row is cut to `n` bytes first, so the
+    // loop has no bounds checks.
+    let row = |c: usize, b: usize| &raw[(4 * c + b) * n..(4 * c + b + 1) * n];
+    let [c0, c1, c2, c3] = [row(0, 0), row(0, 1), row(0, 2), row(0, 3)];
+    let [e0, e1, e2, e3] = [row(1, 0), row(1, 1), row(1, 2), row(1, 3)];
+    let [t0, t1, t2, t3] = [row(2, 0), row(2, 1), row(2, 2), row(2, 3)];
+    let [p0, p1, p2, p3] = [row(3, 0), row(3, 1), row(3, 2), row(3, 3)];
+    let mut samples = Vec::with_capacity(n);
+    for i in 0..n {
+        samples.push(GlobalSample {
+            continent: f32::from_le_bytes([c0[i], c1[i], c2[i], c3[i]]),
+            elevation_m: f32::from_le_bytes([e0[i], e1[i], e2[i], e3[i]]),
+            temperature_c: f32::from_le_bytes([t0[i], t1[i], t2[i], t3[i]]),
+            precipitation_mm: f32::from_le_bytes([p0[i], p1[i], p2[i], p3[i]]),
+        });
+    }
     Ok((cells, samples))
 }
 
@@ -322,40 +330,133 @@ impl GlobalWorld {
     }
 }
 
-/// The stored bake of `res` cells per face edge as a [`LatticeSource`] for the reader (ADR 0027 point 7): it finds the block
-/// that holds a lattice vertex through the canonical layout, decodes it once and keeps the 16 least recently used. A block that is
-/// missing, damaged or of another shape is an error naming the block and its key, never a default.
+/// The stored bake of `res` cells per face edge as a [`LatticeSource`] for the reader (ADR 0027 point 7, STRM-014): it finds the
+/// block that holds a lattice vertex through the canonical layout and decodes it once. A block that is missing, damaged or of
+/// another shape is an error naming the block and its key, never a default.
+///
+/// Reads by many threads do not meet on a lock. Each thread keeps the block it read last (one `Arc`, checked against the
+/// source's eviction epoch with one relaxed load), so a run of reads inside a block touches no shared memory but that load.
+/// Only a change of block goes to the shared cache: a least-recently-used list under a mutex, bounded by a byte budget, whose
+/// entries are shared decode slots, so threads that want the same absent block wait for one decode. A block that fails to read
+/// is not kept. Whatever served a read, it returns the stored bits.
+///
+/// Memory: blocks resident in the shared cache never exceed the budget (at least one block); a thread pins at most one block
+/// more (the one it read last) until its next read after an eviction, or for good if it never reads again, and a thread that
+/// read this source and then another source or none keeps its last block until its next read or until it exits.
 pub struct StoreSource<'a> {
     store: &'a TileStore,
     world: &'a GlobalWorld,
     res: u32,
     level: u8,
     cells: u32,
-    cache: Mutex<Vec<(TileId, Arc<Vec<GlobalSample>>)>>,
+    id: u64,
+    block_bytes: u64,
+    budget_blocks: usize,
+    /// Bumped (under the cache lock) when a block leaves the shared cache: a thread's pinned block is valid for one epoch.
+    epoch: AtomicU64,
+    decodes: AtomicU64,
+    shared: Mutex<Vec<(TileId, Arc<Slot>)>>,
 }
 
-/// Decoded blocks a [`StoreSource`] keeps: 16 blocks of at most 16 MB.
-const SOURCE_CACHE_BLOCKS: usize = 16;
+/// One block of the shared cache: filled once by the first thread that wants it.
+struct Slot {
+    block: OnceLock<Result<Arc<Vec<GlobalSample>>, ReadError>>,
+}
+
+/// What the shared block cache holds, for budgets and tests (CON-20).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SourceStats {
+    /// Blocks decoded so far (a block evicted and wanted again counts again).
+    pub decodes: u64,
+    /// Blocks in the shared cache, including blocks being decoded.
+    pub resident_blocks: usize,
+    pub resident_bytes: u64,
+    pub budget_bytes: u64,
+}
+
+/// Default budget of decoded blocks a [`StoreSource`] keeps: 512 MiB, ADR 0033 point 6's proposal for bake blocks (31 blocks of
+/// 1024 cells; it was 16 blocks).
+pub const SOURCE_CACHE_BYTES: u64 = 512 << 20;
+
+/// The block a thread read last.
+struct Pinned {
+    source: u64,
+    epoch: u64,
+    /// Face, block column and block row.
+    at: (u8, u32, u32),
+    block: Arc<Vec<GlobalSample>>,
+}
+
+thread_local! {
+    static PINNED: RefCell<Option<Pinned>> = const { RefCell::new(None) };
+}
+
+static NEXT_SOURCE_ID: AtomicU64 = AtomicU64::new(1);
 
 impl<'a> StoreSource<'a> {
-    /// The reader of the bake of `res` cells per face edge in `store` (the canonical layout of `world`).
+    /// The reader of the bake of `res` cells per face edge in `store` (the canonical layout of `world`), with the default budget.
     pub fn new(store: &'a TileStore, world: &'a GlobalWorld, res: u32) -> Result<StoreSource<'a>, BakeError> {
-        let (level, cells) = world.layout(res)?;
-        Ok(StoreSource { store, world, res, level, cells, cache: Mutex::new(Vec::new()) })
+        StoreSource::with_budget(store, world, res, SOURCE_CACHE_BYTES)
     }
 
-    fn block(&self, tile: TileId) -> Result<Arc<Vec<GlobalSample>>, ReadError> {
-        // Look up under the lock, release it while the block is read and decoded (another thread may decode the same block
-        // meanwhile: a duplicate decode is acceptable), then insert. A hit moves to the back, so eviction is least recently used.
-        {
-            let mut cache = self.cache.lock().expect("block cache mutex");
-            if let Some(at) = cache.iter().position(|(t, _)| *t == tile) {
-                let entry = cache.remove(at);
-                let block = Arc::clone(&entry.1);
-                cache.push(entry);
-                return Ok(block);
-            }
+    /// The same with a budget of `budget_bytes` for decoded blocks (rounded down to whole blocks, at least one).
+    pub fn with_budget(store: &'a TileStore, world: &'a GlobalWorld, res: u32, budget_bytes: u64) -> Result<StoreSource<'a>, BakeError> {
+        let (level, cells) = world.layout(res)?;
+        let block_bytes = raw_len(cells);
+        let budget_blocks = usize::try_from((budget_bytes / block_bytes).max(1)).unwrap_or(usize::MAX);
+        Ok(StoreSource {
+            store,
+            world,
+            res,
+            level,
+            cells,
+            id: NEXT_SOURCE_ID.fetch_add(1, Ordering::Relaxed),
+            block_bytes,
+            budget_blocks,
+            epoch: AtomicU64::new(0),
+            decodes: AtomicU64::new(0),
+            shared: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// What the shared cache holds now.
+    pub fn stats(&self) -> SourceStats {
+        let resident = self.shared.lock().expect("block cache mutex").len();
+        SourceStats {
+            decodes: self.decodes.load(Ordering::Relaxed),
+            resident_blocks: resident,
+            resident_bytes: resident as u64 * self.block_bytes,
+            budget_bytes: self.budget_blocks as u64 * self.block_bytes,
         }
+    }
+
+    /// The slot of `tile` and the epoch it is valid for, made if absent (least recently used blocks leave beyond the budget).
+    fn slot(&self, tile: TileId) -> (Arc<Slot>, u64) {
+        let mut shared = self.shared.lock().expect("block cache mutex");
+        if let Some(at) = shared.iter().position(|(t, _)| *t == tile) {
+            let entry = shared.remove(at);
+            let slot = Arc::clone(&entry.1);
+            shared.push(entry);
+            return (slot, self.epoch.load(Ordering::Relaxed));
+        }
+        let slot = Arc::new(Slot { block: OnceLock::new() });
+        shared.push((tile, Arc::clone(&slot)));
+        if shared.len() > self.budget_blocks {
+            shared.remove(0);
+            self.epoch.fetch_add(1, Ordering::Relaxed);
+        }
+        (slot, self.epoch.load(Ordering::Relaxed))
+    }
+
+    fn forget(&self, tile: TileId, slot: &Arc<Slot>) {
+        let mut shared = self.shared.lock().expect("block cache mutex");
+        if let Some(at) = shared.iter().position(|(t, s)| *t == tile && Arc::ptr_eq(s, slot)) {
+            shared.remove(at);
+            self.epoch.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    fn load(&self, tile: TileId) -> Result<Arc<Vec<GlobalSample>>, ReadError> {
         let key = self.world.block_key(tile, self.cells);
         let what = |why: String| {
             ReadError::Source(format!(
@@ -376,15 +477,35 @@ impl<'a> StoreSource<'a> {
         if cells != self.cells {
             return Err(what(format!("its payload has {cells} cells per edge, the layout says {}", self.cells)));
         }
-        let block = Arc::new(samples);
-        let mut cache = self.cache.lock().expect("block cache mutex");
-        if !cache.iter().any(|(t, _)| *t == tile) {
-            if cache.len() >= SOURCE_CACHE_BLOCKS {
-                cache.remove(0);
+        self.decodes.fetch_add(1, Ordering::Relaxed);
+        Ok(Arc::new(samples))
+    }
+
+    /// The block of `tile` from the shared cache (decoded by this thread or another), and the epoch to pin it for.
+    fn shared_block(&self, tile: TileId) -> Result<(Arc<Vec<GlobalSample>>, u64), ReadError> {
+        let (slot, epoch) = self.slot(tile);
+        match slot.block.get_or_init(|| self.load(tile)) {
+            Ok(block) => Ok((Arc::clone(block), epoch)),
+            Err(e) => {
+                // Not kept: the next reader reads again (the store may have gained the block).
+                self.forget(tile, &slot);
+                Err(e.clone())
             }
-            cache.push((tile, Arc::clone(&block)));
         }
-        Ok(block)
+    }
+
+    fn sample(&self, at: (u8, u32, u32), index: usize) -> Result<GlobalSample, ReadError> {
+        let epoch = self.epoch.load(Ordering::Relaxed);
+        let hit =
+            PINNED.with(|p| p.borrow().as_ref().filter(|p| p.source == self.id && p.epoch == epoch && p.at == at).map(|p| p.block[index]));
+        if let Some(s) = hit {
+            return Ok(s);
+        }
+        let tile = TileId::new(Face(at.0), self.level, at.1, at.2).expect("a tile of the grid");
+        let (block, epoch) = self.shared_block(tile)?;
+        let s = block[index];
+        PINNED.with(|p| *p.borrow_mut() = Some(Pinned { source: self.id, epoch, at, block }));
+        Ok(s)
     }
 }
 
@@ -399,11 +520,10 @@ impl LatticeSource for StoreSource<'_> {
         }
         // The block that holds a vertex: the last block of a row holds the far edge as its own last sample.
         let side = 1u32 << self.level;
-        let (bx, by) = ((i / self.cells).min(side - 1), (j / self.cells).min(side - 1));
-        let tile = TileId::new(face, self.level, bx, by).expect("a tile of the grid");
-        let block = self.block(tile)?;
+        let shift = self.cells.trailing_zeros();
+        let (bx, by) = ((i >> shift).min(side - 1), (j >> shift).min(side - 1));
         let (k, l) = (i - bx * self.cells, j - by * self.cells);
-        Ok(block[(l * (self.cells + 1) + k) as usize])
+        self.sample((face.0, bx, by), (l * (self.cells + 1) + k) as usize)
     }
 }
 

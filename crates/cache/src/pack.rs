@@ -517,7 +517,8 @@ struct PackFile {
     path: PathBuf,
     entries: Vec<IndexEntry>,
     damage: Vec<Damage>,
-    file: Mutex<File>,
+    /// Read-only after open, and read by position, so concurrent readers never queue on it.
+    file: File,
     /// Offsets of entries a read found unusable: `get` answers a miss for them from then on (ADR 0019 validation,
     /// ADR 0024 point 7), so a long-lived store reports one `Corrupt` per entry and then a miss.
     dropped: Mutex<Vec<u64>>,
@@ -562,7 +563,7 @@ impl PackFile {
                 s.entries
             }
         };
-        Ok(Some(PackFile { path: data_path, entries, damage, file: Mutex::new(file), dropped: Mutex::new(Vec::new()) }))
+        Ok(Some(PackFile { path: data_path, entries, damage, file, dropped: Mutex::new(Vec::new()) }))
     }
 
     fn find(&self, sort: &SortKey, key: CacheKey) -> Option<&IndexEntry> {
@@ -586,18 +587,37 @@ impl PackFile {
     fn read(&self, e: &IndexEntry) -> Result<Record, PackError> {
         let total = RECORD_HEADER_LEN + e.length as usize;
         let mut buf = vec![0u8; total];
-        {
-            let mut f = self.file.lock().expect("pack file mutex");
-            let r = f.seek(SeekFrom::Start(e.offset)).and_then(|_| f.read_exact(&mut buf));
-            match r {
-                Ok(()) => {}
-                // The file is shorter than the index says: the entry is bad, not the disk.
-                Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => return Err(self.corrupt(e)),
-                Err(err) => return Err(PackError::Io(format!("reading a record of {}: {err}", self.path.display()))),
-            }
+        match read_exact_at(&self.file, &mut buf, e.offset) {
+            Ok(()) => {}
+            // The file is shorter than the index says: the entry is bad, not the disk.
+            Err(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => return Err(self.corrupt(e)),
+            Err(err) => return Err(PackError::Io(format!("reading a record of {}: {err}", self.path.display()))),
         }
         decode_record(&buf).filter(|r| r.key == e.key).ok_or_else(|| self.corrupt(e))
     }
+}
+
+/// Fill `buf` from `file` at `offset` without moving or locking a shared cursor (`pread` / `ReadFile` with an offset).
+#[cfg(unix)]
+fn read_exact_at(file: &File, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+    std::os::unix::fs::FileExt::read_exact_at(file, buf, offset)
+}
+
+#[cfg(windows)]
+fn read_exact_at(file: &File, mut buf: &mut [u8], mut offset: u64) -> std::io::Result<()> {
+    use std::os::windows::fs::FileExt;
+    while !buf.is_empty() {
+        match file.seek_read(buf, offset) {
+            Ok(0) => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+            Ok(n) => {
+                buf = &mut buf[n..];
+                offset += n as u64;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
 }
 
 /// The read side of a store: every pack of a directory, newest first on lookup.
