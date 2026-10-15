@@ -49,6 +49,7 @@ Scope as in the architecture report (Hillaire atmosphere, aerial perspective, HD
 3. **Liquid kinds are data.** The kind of liquid (water, lava, other) is a parameter table in the world definition (colour, emission, viscosity, waves or none), not a code enum.
 4. **HDR and lighting accept emissive surfaces** (lava glow, lighting the atmosphere from below).
 5. **A retrofit test:** one synthetic lake (a basin with a fixed level) renders through the same water path, proving a second producer works before hydrology exists.
+First M5 item (owner, 2026-10-15): **the live viewer window** (ADR 0015): `planet editor` opens a window that runs the pipelined frame loop with the scripted orbit-to-1 m flight and shows the frame rate; every later M5 visual is reviewed in it.
 After the M5 gate (to be decided there): hydrology (lake levels, rivers, deltas, carving) together with surface materials (snow, sand, scree as climate- and slope-driven layers), sharing one material-transport engine written with a clean seam (what moves, what drives it). Not planned: runtime simulation of moving material; overhangs and caves (a heightfield cannot hold them).
 
 ## Queued for M4 Streaming (sonnet-explorer, after the M3 close-out; queued by opus-planner 2026-10-13; do not start until briefed)
