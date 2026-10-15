@@ -1030,12 +1030,13 @@ fn a_full_fill_at_the_cap_takes_the_frames_the_cap_allows_and_defers_only_full_f
 }
 
 // ---- teardown and teleport cancellation (STRM-005) ----
+type LockedGate = (std::sync::Mutex<std::sync::mpsc::Sender<()>>, std::sync::Mutex<std::sync::mpsc::Receiver<()>>);
 
 /// The reference field with counted plan and residency calls; the first plan call can be held at a gate.
 struct CountedField {
     plans: Arc<AtomicUsize>,
     residencies: Arc<AtomicUsize>,
-    gate: Option<(std::sync::Mutex<std::sync::mpsc::Sender<()>>, std::sync::Mutex<std::sync::mpsc::Receiver<()>>)>,
+    gate: Option<LockedGate>,
 }
 
 impl PlanField for CountedField {
