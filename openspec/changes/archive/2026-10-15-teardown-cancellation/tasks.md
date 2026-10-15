@@ -4,4 +4,4 @@
 - [x] 1.4 app: `MeshSource::load_staged` with `CancelGuarded`; teardown time in the perf scene output
 - [x] 1.5 spec STRM-005 delta; `docs/status.md` M4 decisions section; log lines
 - [x] 1.6 ad hoc measurement over the 16384 store (smoke, software adapter): teardown 9-14 s before, 0.07 s after
-- [ ] 1.7 reviewers (spec-guardian, verifier), archive, PR, CI green, merge
+- [x] 1.7 reviewers (spec-guardian, verifier), archive, PR, CI green, merge

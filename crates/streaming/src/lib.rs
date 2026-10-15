@@ -513,7 +513,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
     pub fn begin_frame_wants(&mut self, wants: &Wants) -> Vec<Resolved> {
         self.frame += 1;
         let now = self.clock.now_ms();
-        // 1. Completions. The result of a job that was cancelled meanwhile is dropped: the persistent cache holds it,
+        // 1. Completions. The result of a job that was cancelled meanwhile is dropped: a source that finished anyway may have cached it,
         // nothing is made resident (and so nothing is uploaded).
         while let Ok((tile, result)) = self.rx.try_recv() {
             let Some(flight) = self.in_flight.remove(&tile) else { continue };

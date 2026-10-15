@@ -809,6 +809,7 @@ pub(crate) struct CancelGuarded<'a> {
     pub(crate) cancel: &'a planet_streaming::CancelToken,
 }
 
+// Maintenance: a new `HeightField` method with a default body must be delegated here too, or a guarded tile would key differently.
 impl planet_generators::height::HeightField for CancelGuarded<'_> {
     fn height(&self, dir: Vec3) -> f64 {
         if self.cancel.is_cancelled() {
@@ -1324,6 +1325,19 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: STRM-005
+    #[test]
+    fn the_mesh_source_stops_a_cancelled_job_and_builds_the_same_tile_when_live() {
+        use planet_streaming::{CancelToken, TileSource};
+        let world =
+            std::sync::Arc::new(WorldTerrain::open(crate::worldfield::legacy_world(5, RADIUS_M), 8).expect("a small in-memory world"));
+        let source = MeshSource { world, format: planet_render::TileFormat::Compact, max_level: 22, cells: 16 };
+        let tile = TileId::new(Face(2), 5, 3, 4).unwrap();
+        assert!(source.load_staged(tile, &CancelToken::cancelled()).unwrap().is_none(), "cancelled before it starts: no tile");
+        let live = source.load_staged(tile, &CancelToken::never()).unwrap().expect("a live job returns its tile");
+        assert_eq!(live, source.load(tile).unwrap(), "the staged path builds the tile of the plain one");
+    }
 
     /// A height field that counts the samples it is asked for.
     struct Sampled<'a> {

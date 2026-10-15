@@ -38,3 +38,15 @@ Source: report §4, ADR 0031 points 2, 3 and 6, CON-04, CON-14
 #### Scenario: Teleport
 - **WHEN** the camera jumps while many requests of the old R are queued
 - **THEN** the requests the new R does not contain are cancelled before they start, and every request started after the jump is in the new wants
+
+#### Scenario: Stage boundary
+- **WHEN** an in-flight job is cancelled
+- **THEN** it stops before its next stage and its tile does not become resident
+
+#### Scenario: Rotation through the loop
+- **WHEN** the managed frame loop (STRM-017) runs a 360 degree turn at a fixed position with R resident, plans and R coming from the worker and tiles from fake I/O
+- **THEN** every frame of the turn dispatches, cancels, queues, uploads and evicts nothing, the worker reuses the previous R instead of selecting one, and each settled frame equals the synchronous plan of its view
+
+#### Scenario: Order through the loop
+- **WHEN** the camera jumps and the loop fills the new place
+- **THEN** every request of the new draw set with its ancestors precedes the first request of the rest of R, ancestors precede descendants, and every frame draws something with no blank node
