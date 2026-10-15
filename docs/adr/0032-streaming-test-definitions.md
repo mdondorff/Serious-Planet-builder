@@ -1,5 +1,5 @@
 # 0032 Streaming test definitions: dive, teleport, mouse look
-Status: proposed (sketch by opus-planner, 2026-10-13; completed by sonnet-explorer, 2026-10-15, M4 item 6. Adding the teleport and mouse-look cases to M4's exit criteria is the owner's decision: section "Owner decision needed")
+Status: accepted (owner, 2026-10-15: M4's exit criteria gain the teleport and mouse-look cases with the same hard measures as the dive (no blank tiles, p99 <= 20 ms, VRAM within the tier cap, RAM <= 8 GB); the detail lag is gated for the dive descent and mouse look and tracked, not gated, for the teleport. The rest accepted by opus-planner under the owner's delegation of 2026-10-12. Sketch by opus-planner 2026-10-13, completed by sonnet-explorer 2026-10-15)
 Date: 2026-10-13
 Source: architecture report M4 row ("Dive test: no blank tiles, p99 frame <= 20 ms, VRAM within tier budget, RAM <= 8 GB") and risk table ("orbit to ground in < 30 s", "p99 tile latency <= 200 ms"); owner's remarks 2026-10-13; SPIKE-05 (`docs/spikes.md`); briefing "Known facts for M4" (`docs/briefings/sonnet-explorer-m4.md`); `docs/learnings.md` 2026-10-15 (GPU clock); `docs/background/optimization-brainstorm-review.md` item A; STRM-002, TEST-011, TEST-012, TEST-013; constitution CON-04, CON-17, CON-20, CON-21, CON-22; ADRs 0020, 0031, 0033
 

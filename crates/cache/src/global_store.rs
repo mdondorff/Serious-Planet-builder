@@ -355,6 +355,8 @@ pub struct StoreSource<'a> {
     /// Bumped (under the cache lock) when a block leaves the shared cache: a thread's pinned block is valid for one epoch.
     epoch: AtomicU64,
     decodes: AtomicU64,
+    /// Acquisitions of the shared-cache lock by reads (a test observable of STRM-014: only a change of block takes it).
+    lookups: AtomicU64,
     shared: Mutex<Vec<(TileId, Arc<Slot>)>>,
 }
 
@@ -368,6 +370,8 @@ struct Slot {
 pub struct SourceStats {
     /// Blocks decoded so far (a block evicted and wanted again counts again).
     pub decodes: u64,
+    /// Times a read took the shared-cache lock: one per change of block that the thread's pinned block did not serve.
+    pub shared_lookups: u64,
     /// Blocks in the shared cache, including blocks being decoded.
     pub resident_blocks: usize,
     pub resident_bytes: u64,
@@ -415,6 +419,7 @@ impl<'a> StoreSource<'a> {
             budget_blocks,
             epoch: AtomicU64::new(0),
             decodes: AtomicU64::new(0),
+            lookups: AtomicU64::new(0),
             shared: Mutex::new(Vec::new()),
         })
     }
@@ -424,6 +429,7 @@ impl<'a> StoreSource<'a> {
         let resident = self.shared.lock().expect("block cache mutex").len();
         SourceStats {
             decodes: self.decodes.load(Ordering::Relaxed),
+            shared_lookups: self.lookups.load(Ordering::Relaxed),
             resident_blocks: resident,
             resident_bytes: resident as u64 * self.block_bytes,
             budget_bytes: self.budget_blocks as u64 * self.block_bytes,
@@ -432,6 +438,7 @@ impl<'a> StoreSource<'a> {
 
     /// The slot of `tile` and the epoch it is valid for, made if absent (least recently used blocks leave beyond the budget).
     fn slot(&self, tile: TileId) -> (Arc<Slot>, u64) {
+        self.lookups.fetch_add(1, Ordering::Relaxed);
         let mut shared = self.shared.lock().expect("block cache mutex");
         if let Some(at) = shared.iter().position(|(t, _)| *t == tile) {
             let entry = shared.remove(at);

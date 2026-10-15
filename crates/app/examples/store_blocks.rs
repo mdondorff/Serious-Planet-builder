@@ -2,7 +2,7 @@
 //! the cold draw plan (a fresh `StoreSource` and `SelectionCache`), the lattice reads it makes, the distinct blocks it touches
 //! and the second plan (blocks cached, fresh `SelectionCache`); then the 1, 4 and 20 thread tile rate with a bit-identity
 //! check of the tiles across thread counts. Not production code.
-//! `cargo run --release -p planet --example store_blocks -- --store DIR --global-res N [--part plans|rate|decode] [--view NAME]`.
+//! `cargo run --release -p planet --example store_blocks -- --store DIR --global-res N [--part plans|rate|decode] [--view NAME] [--memory-rate TILES_PER_S]`.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
@@ -192,6 +192,16 @@ fn main() -> Result<(), String> {
             pick.len(),
             pick.len() as f64 / secs
         );
+        if threads == 20 {
+            if let Some(memory) = arg("--memory-rate").map(|m| m.parse::<f64>().expect("--memory-rate is tiles/s")) {
+                let rate = pick.len() as f64 / secs;
+                println!(
+                    "STRM-014 rate vs in-memory {memory:.0} tiles/s: {:.0} % -> {}",
+                    100.0 * rate / memory,
+                    if rate >= 0.8 * memory { "PASS" } else { "FAIL" }
+                );
+            }
+        }
         all.push(out.iter().map(|a| a.load(Relaxed)).collect::<Vec<_>>());
     }
     println!("IDENTICAL across 1/4/20 threads: {}", all[0] == all[1] && all[1] == all[2]);
