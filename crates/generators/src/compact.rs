@@ -147,35 +147,43 @@ impl CompactTile {
 
 /// A tile as the renderer takes it: the vertex format (levels 0-2, and fallback tiles) or the compact format.
 #[derive(Clone, Debug, PartialEq)]
-pub enum TileData {
+pub enum RenderTile {
     Vertex(TileMesh),
     Compact(CompactTile),
 }
 
-impl TileData {
+impl RenderTile {
     pub fn id(&self) -> TileId {
         match self {
-            TileData::Vertex(m) => m.id,
-            TileData::Compact(c) => c.id,
+            RenderTile::Vertex(m) => m.id,
+            RenderTile::Compact(c) => c.id,
         }
     }
 
     pub fn key(&self) -> u64 {
         match self {
-            TileData::Vertex(m) => m.key,
-            TileData::Compact(c) => c.key,
+            RenderTile::Vertex(m) => m.key,
+            RenderTile::Compact(c) => c.key,
         }
     }
 
     pub fn cells(&self) -> u32 {
         match self {
-            TileData::Vertex(m) => m.cells,
-            TileData::Compact(c) => c.cells,
+            RenderTile::Vertex(m) => m.cells,
+            RenderTile::Compact(c) => c.cells,
+        }
+    }
+
+    /// Tile centre at its terrain height, planet-fixed f64 (the origin of the plan's camera-relative offsets).
+    pub fn origin(&self) -> PlanetFixed {
+        match self {
+            RenderTile::Vertex(m) => m.origin,
+            RenderTile::Compact(c) => c.origin,
         }
     }
 
     pub fn is_compact(&self) -> bool {
-        matches!(self, TileData::Compact(_))
+        matches!(self, RenderTile::Compact(_))
     }
 }
 
@@ -318,14 +326,14 @@ pub fn tile_data_field(
     cells: u32,
     radius_m: f64,
     finest_level: u8,
-) -> TileData {
+) -> RenderTile {
     if vertex_reason(id.level(), finest_level, 0.0).is_some() {
-        return TileData::Vertex(tile_mesh_field(field, map, id, cells, radius_m));
+        return RenderTile::Vertex(tile_mesh_field(field, map, id, cells, radius_m));
     }
     let tile = compact_tile_field(field, map, id, cells, radius_m);
     match vertex_reason(id.level(), finest_level, tile.relief_m) {
-        Some(_) => TileData::Vertex(tile_mesh_field(field, map, id, cells, radius_m)),
-        None => TileData::Compact(tile),
+        Some(_) => RenderTile::Vertex(tile_mesh_field(field, map, id, cells, radius_m)),
+        None => RenderTile::Compact(tile),
     }
 }
 

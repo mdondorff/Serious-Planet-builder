@@ -22,7 +22,8 @@ use crate::residency::ResidencySet;
 use crate::terrain::TerrainRequest;
 use crate::upload::{sort_waiting, upload_count, UploadBudget, UploadClass, Waiting};
 use planet_core::TileId;
-use planet_generators::mesh::{MeshVertex, TileMesh};
+use planet_generators::compact::RenderTile;
+use planet_generators::mesh::MeshVertex;
 use planet_streaming::{Clock, ResidencyManager, ResidentChange, SlotRef, StreamStats, Wants};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -30,12 +31,16 @@ use std::time::Instant;
 
 /// Where the managed loop puts tiles: the renderer, or a counter in tests.
 pub trait TileSink {
-    /// Write `mesh` into `slot` (the slot the manager chose). Whatever tile the slot held before is gone.
-    fn upload_at(&mut self, mesh: &TileMesh, slot: SlotRef) -> Result<(), String>;
-    /// Bytes `upload_at` writes for `mesh`: the tile's size in the sink's format (the per-frame upload budget counts in
-    /// them, STRM-006). The default is the vertex format; a sink that writes another format (the compact tile) says so.
-    fn upload_bytes(&self, mesh: &TileMesh) -> u64 {
-        mesh.vertices.len() as u64 * MeshVertex::STRIDE
+    /// Write `tile` (either format) into `slot` (the slot the manager chose). Whatever tile the slot held before is gone.
+    fn upload_at(&mut self, tile: &RenderTile, slot: SlotRef) -> Result<(), String>;
+    /// Bytes `upload_at` writes for `tile`: the tile's size in the sink's format (the per-frame upload budget counts in
+    /// them, STRM-006). The default is what the renderer writes: a vertex tile at its vertex size, a compact tile at its
+    /// texels plus its record (8,840 B at cells 32); a sink that writes something else says so.
+    fn upload_bytes(&self, tile: &RenderTile) -> u64 {
+        match tile {
+            RenderTile::Vertex(m) => m.vertices.len() as u64 * MeshVertex::STRIDE,
+            RenderTile::Compact(c) => c.resident_bytes(),
+        }
     }
     /// The tile was evicted; its slot is the manager's again (no pool is touched).
     fn forget(&mut self, tile: TileId);
@@ -123,7 +128,7 @@ pub struct ManagedFrame {
 
 pub struct ManagedLoop {
     pipe: PlanPipeline,
-    manager: ResidencyManager<TileMesh>,
+    manager: ResidencyManager<RenderTile>,
     /// What the sink holds, with the slot of each tile.
     resident: HashMap<TileId, ResidentTile>,
     slots: HashMap<TileId, SlotRef>,
@@ -181,7 +186,7 @@ impl Classes {
 impl ManagedLoop {
     /// `manager`'s streamer must have been built with `StreamConfig::record_changes` and have its roots loaded
     /// ([`planet_streaming::Streamer::load_roots_blocking`], the only wait); they are put on the sink by the first frame.
-    pub fn new(pipe: PlanPipeline, manager: ResidencyManager<TileMesh>) -> Self {
+    pub fn new(pipe: PlanPipeline, manager: ResidencyManager<RenderTile>) -> Self {
         assert!(manager.streamer().records_changes(), "the managed loop follows the streamer through StreamConfig::record_changes");
         let last = manager.streamer().stats();
         Self {
@@ -236,7 +241,7 @@ impl ManagedLoop {
         &self.pipe
     }
 
-    pub fn manager(&self) -> &ResidencyManager<TileMesh> {
+    pub fn manager(&self) -> &ResidencyManager<RenderTile> {
         &self.manager
     }
 
@@ -276,7 +281,7 @@ impl ManagedLoop {
                 ResidentChange::Added(tile) => {
                     // Act on the state now: a tile added and evicted since the last frame is not resident any more.
                     let (Some(mesh), Some(slot)) = (streamer.get(tile), streamer.slot_of(tile)) else { continue };
-                    if self.slots.get(&tile) == Some(&slot) && self.resident.get(&tile).is_some_and(|r| r.mesh_key == mesh.key) {
+                    if self.slots.get(&tile) == Some(&slot) && self.resident.get(&tile).is_some_and(|r| r.mesh_key == mesh.key()) {
                         continue;
                     }
                     self.pending.insert(tile);
@@ -323,7 +328,7 @@ impl ManagedLoop {
                 self.pending.remove(&w.tile);
                 let (Some(mesh), Some(slot)) = (streamer.get(w.tile), streamer.slot_of(w.tile)) else { continue };
                 sink.upload_at(&mesh, slot).map_err(|e| format!("placing {:?} in {slot:?}: {e}", w.tile))?;
-                self.resident.insert(w.tile, ResidentTile { mesh_key: mesh.key, origin: mesh.origin });
+                self.resident.insert(w.tile, ResidentTile { mesh_key: mesh.key(), origin: mesh.origin() });
                 self.slots.insert(w.tile, slot);
                 uploaded += 1;
                 upload_bytes += w.bytes;

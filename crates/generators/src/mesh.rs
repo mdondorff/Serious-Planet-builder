@@ -50,8 +50,10 @@ pub const SKIRT_FRACTION: f64 = 0.08;
 
 /// Version of the mesh construction (ADR 0006): bump it whenever vertex output changes for the same inputs (skirt
 /// depth, normal stencil, origin rule, vertex layout). History: 1 = first meshes; 2 = seam-consistent normals (#15);
-/// 3 = no `ref_pos` attribute: the morph distance is measured to the real vertex position (LOD-008).
-pub const MESH_VERSION: u32 = 4;
+/// 3 = no `ref_pos` attribute: the morph distance is measured to the real vertex position (LOD-008); 4 = the 44-byte vertex (#65);
+/// 5 = the compact tile format (GEN-019, ADR 0033) exists beside the vertex format: a tile's key now stands for either, and the
+/// compact construction (control points, 16-bit height and snorm16 octahedral normals, record layout) is covered by this version.
+pub const MESH_VERSION: u32 = 5;
 
 /// Key of a mesh: the height key of the tile (generator, seed, mapping, tile; resolution = `cells`), the grid size, the
 /// radius bits, the skirt fraction bits and [`MESH_VERSION`].

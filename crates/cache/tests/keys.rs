@@ -265,7 +265,7 @@ fn hex(b: [u8; 16]) -> String {
 
 const KNOWN_BASE: &str = "b00fa2b4b0f9accc87be74b4dd9d40ca";
 const KNOWN_HEIGHT: &str = "340480159ae2ca791db08d1cae1232ce";
-const KNOWN_MESH: &str = "2882ad3a00b9418fabe0cd72e655440c"; // mesh version 4 (coarse_height)
+const KNOWN_MESH: &str = "823fd96e43c8a1213fac74793a0e068a"; // mesh version 5 (compact tile format)
 const KNOWN_NODE: &str = "dd934e9e858a828bb73c45e8a4eb4d45";
 const KNOWN_BODY: &str = "91f0cebc78907779e2f87196650d468e";
 const KNOWN_EMPTY_QUERY: &str = "a97668a9d9614a3f4a73f2fceae97219";

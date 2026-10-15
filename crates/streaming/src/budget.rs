@@ -148,7 +148,12 @@ impl PoolConfig {
         if c.main_blocks == 0 {
             return Err(format!("a share of {share_bytes} B holds no block of {block_bytes} B"));
         }
-        // The slot records scale with the main pool: they belong to the fixed items and must fit their reserve with the rest.
+        // The slot records scale with the main pool: they belong to the fixed items and must fit their reserve with the rest. A tile
+        // size with many small slots per atlas (cells 16: 57,600) gives fewer atlases than the share's bytes would allow: the share
+        // is a ceiling, not a target.
+        while c.fixed_bytes() > FIXED_RESERVE_BYTES && c.main_blocks > 1 {
+            c.main_blocks -= 1;
+        }
         if c.fixed_bytes() > FIXED_RESERVE_BYTES {
             return Err(format!(
                 "the fixed items with {} slot records take {} B, more than their reserve of {FIXED_RESERVE_BYTES} B",

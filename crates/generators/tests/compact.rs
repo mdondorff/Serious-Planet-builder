@@ -5,7 +5,7 @@ use planet_core::cube::TangentWarp;
 use planet_core::hash::SplitMix64;
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::compact::{
-    compact_tile_field, oct_decode, oct_encode, slot_bytes, slot_texel_bytes, tile_data_field, vertex_reason, CompactTile, TileData,
+    compact_tile_field, oct_decode, oct_encode, slot_bytes, slot_texel_bytes, tile_data_field, vertex_reason, CompactTile, RenderTile,
     VertexReason, COMPACT_MIN_LEVEL, COMPACT_RECORD_BYTES, FALLBACK_RELIEF_M, TEXEL_BYTES,
 };
 use planet_generators::global::{bake, GridSource};
@@ -179,13 +179,13 @@ fn a_steep_finest_tile_falls_back_to_the_vertex_format_and_a_gentle_one_does_not
     let probe = compact_tile_field(&steep, &TangentWarp, t, 32, R);
     assert!(probe.relief_m > FALLBACK_RELIEF_M, "fixture: the steep tile has {} m of relief", probe.relief_m);
     match tile_data_field(&steep, &TangentWarp, t, 32, R, 9) {
-        TileData::Vertex(m) => assert_eq!(m, tile_mesh_field(&steep, &TangentWarp, t, 32, R), "the fallback is the product mesh"),
-        TileData::Compact(_) => panic!("a finest tile with {} m of relief must fall back", probe.relief_m),
+        RenderTile::Vertex(m) => assert_eq!(m, tile_mesh_field(&steep, &TangentWarp, t, 32, R), "the fallback is the product mesh"),
+        RenderTile::Compact(_) => panic!("a finest tile with {} m of relief must fall back", probe.relief_m),
     }
     // The same tile one level above the finest is compact (CON-13 binds the finest level).
     assert!(tile_data_field(&steep, &TangentWarp, t, 32, R, 10).is_compact());
     // The format depends on the view's finest level but the key does not: a consumer re-checks a reused tile.
-    let TileData::Compact(c10) = tile_data_field(&steep, &TangentWarp, t, 32, R, 10) else { unreachable!() };
+    let RenderTile::Compact(c10) = tile_data_field(&steep, &TangentWarp, t, 32, R, 10) else { unreachable!() };
     assert!(c10.allowed_at_finest_level(10) && !c10.allowed_at_finest_level(9));
     // A fine tile of the reference field has centimetres of relief: compact, with the same key as its mesh.
     let g = id(4, 22, 1000, 2000);
@@ -226,13 +226,13 @@ fn compact_tiles_are_bit_identical_across_thread_counts_and_match_the_known_answ
     let one = tile_hashes(1);
     assert_eq!(one, tile_hashes(4), "thread count changed a tile");
     assert_eq!(one, tile_hashes(2));
-    // Known answers (CI runs this test on Windows and Linux): recorded with MESH_VERSION 4,
+    // Known answers (CI runs this test on Windows and Linux): recorded with MESH_VERSION 5,
     // A change of the construction bumps MESH_VERSION and re-records these.
     let expected: [u64; 4] = KNOWN_ANSWERS;
     assert_eq!(one, expected, "compact tile content hashes changed: {one:016x?}");
 }
 
-const KNOWN_ANSWERS: [u64; 4] = [0xaf578f68fcac63ba, 0x2946f11cc774595c, 0xc6d42d2a55be3746, 0xee344da787718372];
+const KNOWN_ANSWERS: [u64; 4] = [0xb841458cf0446591, 0x2f92866cf801bbb0, 0x92b8a9197accb576, 0xa7eb556caa77c84f];
 
 // spec: GEN-019
 #[test]

@@ -80,3 +80,49 @@ fn every_standard_view_of_the_default_world_stays_within_its_own_pinned_counts()
     }
     assert!(failures.is_empty(), "plan counts against their pins:\n{}\nmeasured:\n{}", failures.join("\n"), report.join("\n"));
 }
+
+// spec: GEN-019, TEST-011
+#[test]
+fn the_finest_tiles_of_the_standard_views_never_fall_back_to_the_vertex_format() {
+    // ADR 0033 point 5: zero CON-13 fallbacks on the standard views. The finest level (the LOD cap, 26) is drawn at the ground views;
+    // every finest draw tile of each view is built in the compact format and must keep a
+    // height step of at most 1 mm.
+    use planet_generators::compact::{compact_tile_field, vertex_reason};
+    let world = WorldTerrain::open(WorldDefinition::single_planet(R, 1), PIN_BAKE_RES).unwrap();
+    let field = world.field().unwrap();
+    let size = (2560u32, 1440u32);
+    let lod = LodParams {
+        cells: 32,
+        viewport_h_px: f64::from(size.1),
+        tau_px: 6.0,
+        max_level: 26,
+        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
+        ..LodParams::earth_1080p()
+    };
+    let (mut finest, mut worst_relief) = (0usize, 0f64);
+    for (name, camera) in scripted_views_field(R, f64::from(size.0) / f64::from(size.1), field.as_ref()) {
+        let req = TerrainRequest {
+            camera,
+            size,
+            view: TerrainView::Level,
+            lod: lod.clone(),
+            face_mapping: TangentWarp.id().to_string(),
+            seed: field.seed(),
+        };
+        let plan = plan_terrain_field(&req, field.as_ref()).unwrap();
+        for n in plan.nodes.iter().filter(|n| n.level == lod.max_level) {
+            let t = compact_tile_field(field.as_ref(), &TangentWarp, n.tile, 32, R);
+            worst_relief = worst_relief.max(t.relief_m);
+            assert_eq!(
+                vertex_reason(n.level, lod.max_level, t.relief_m),
+                None,
+                "{name}: {:?} has {} m of relief at the finest level",
+                n.tile,
+                t.relief_m
+            );
+            finest += 1;
+        }
+    }
+    println!("{finest} finest tiles sampled, largest relief {worst_relief:.3} m (limit 65.535 m)");
+    assert!(finest >= 50, "the sample must reach the finest level: {finest} tiles");
+}

@@ -13,6 +13,9 @@ use crate::terrain::TERRAIN_SHADERS;
 use planet_generators::compact::COMPACT_RECORD_BYTES;
 use planet_streaming::SlotPool;
 
+/// Widest atlas a one-shot render builds: wgpu's default `max_texture_dimension_2d`.
+pub const MAX_ONE_SHOT_SIDE: u32 = 8192;
+
 /// Bytes of one tile reference: texel origin x, y, slot index, reserved.
 pub const REF_BYTES: u64 = 16;
 
