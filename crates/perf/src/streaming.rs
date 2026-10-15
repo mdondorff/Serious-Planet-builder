@@ -128,8 +128,16 @@ pub struct MemoryFacts {
     pub vram_cap_bytes: u64,
     /// Driver-reported VRAM in use after the case (`nvidia-smi memory.used`, the whole GPU including other processes).
     pub driver_vram_bytes: Option<u64>,
-    /// The process's peak working set over its life (includes the bake and the store's cache), bytes.
+    /// The peak working set of the process that ran the scene, bytes. With one scene per process (`perf stream all` spawns a child
+    /// per scene, CON-21) it is the scene's own peak, its world open included; `scene_alone` says so.
     pub process_peak_bytes: Option<u64>,
+    /// Whether the process ran this scene alone (a child of `perf stream all`, or a single named scene) and the figure is therefore
+    /// the scene's own; false when one process ran several scenes and the peak covers them all.
+    pub scene_alone: bool,
+    /// Slots of the terrain pool the renderer was built with (its ceiling), the slots the tier's share holds at the pool's slot
+    /// size, and the most slots resident in any frame: the allocator's side of the VRAM line (ADR 0033).
+    pub pool_slots: u64,
+    pub share_slots: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -295,11 +303,28 @@ pub fn case_verdicts(spec: &CaseSpec, frames: &[FrameRecord], blank_frames: &[(u
         word(alloc <= mem.vram_cap_bytes),
         format!("{:.3} GiB in the terrain pools (tier cap {:.0} GiB)", gib(alloc), gib(mem.vram_cap_bytes)),
     ));
+    let max_resident = frames.iter().map(|f| f.resident).max().unwrap_or(0);
+    v.push(Verdict::new(
+        "terrain slots",
+        word(mem.pool_slots <= mem.share_slots),
+        format!(
+            "{} slots allocated of {} share slots (pool ceiling against the share less its fixed items; at most {max_resident} resident; share {:.1} GiB)",
+            mem.pool_slots,
+            mem.share_slots,
+            gib(mem.share_bytes)
+        ),
+    ));
     v.push(match mem.driver_vram_bytes {
         Some(b) => Verdict::new(
             "driver VRAM",
             word(b <= mem.vram_cap_bytes),
-            format!("{:.2} GiB in use on the GPU after the case, all processes (tier cap {:.0} GiB)", gib(b), gib(mem.vram_cap_bytes)),
+            format!(
+                "{:.2} GiB in use on the whole GPU after the case, all processes: an upper bound for the scene, beside its {} of {} share slots (tier cap {:.0} GiB)",
+                gib(b),
+                mem.pool_slots,
+                mem.share_slots,
+                gib(mem.vram_cap_bytes)
+            ),
         ),
         None => Verdict::new("driver VRAM", Status::NotMeasured, "no nvidia-smi reading".into()),
     });
@@ -308,8 +333,13 @@ pub fn case_verdicts(spec: &CaseSpec, frames: &[FrameRecord], blank_frames: &[(u
             "RAM",
             word(b <= RAM_BUDGET_BYTES),
             format!(
-                "peak working set {:.2} GiB over the process life, bake and store included (budget {:.0} GiB)",
+                "{:.2} GiB {} (budget {:.0} GiB, CON-21)",
                 gib(b),
+                if mem.scene_alone {
+                    crate::session::RAM_LABEL
+                } else {
+                    "peak working set of the process over all its scenes, bake and store included, NOT the scene's own"
+                },
                 gib(RAM_BUDGET_BYTES)
             ),
         ),
@@ -556,7 +586,15 @@ mod tests {
     }
 
     fn mem() -> MemoryFacts {
-        MemoryFacts { share_bytes: 2 << 30, vram_cap_bytes: 8 << 30, driver_vram_bytes: Some(3 << 30), process_peak_bytes: Some(4 << 30) }
+        MemoryFacts {
+            share_bytes: 2 << 30,
+            vram_cap_bytes: 8 << 30,
+            driver_vram_bytes: Some(3 << 30),
+            process_peak_bytes: Some(4 << 30),
+            scene_alone: true,
+            pool_slots: 100,
+            share_slots: 120,
+        }
     }
 
     fn run(scene: &str, frames: &[FrameRecord]) -> Vec<Verdict> {
@@ -650,6 +688,30 @@ mod tests {
         let big = MemoryFacts { process_peak_bytes: Some(RAM_BUDGET_BYTES + 1), driver_vram_bytes: Some((8 << 30) + 1), ..mem() };
         let v = case_verdicts(&spec, &frames, &[], &big);
         assert!(find(&v, "RAM").fails() && find(&v, "driver VRAM").fails());
+    }
+
+    // spec: TEST-019
+    #[test]
+    fn the_ram_line_names_the_scenes_own_peak_and_the_vram_line_sits_beside_the_slots_against_the_share() {
+        let frames: Vec<FrameRecord> = (0..600).map(|_| frame(5.0)).collect();
+        let spec = case_spec("look-1m", 600, 1.0 / 60.0, 0).unwrap();
+        let v = case_verdicts(&spec, &frames, &[], &mem());
+        let ram = find(&v, "RAM").line("look-1m");
+        assert!(ram.contains("scene's own peak working set (child process)") && ram.contains("budget 8 GiB, CON-21"), "{ram}");
+        let slots = find(&v, "terrain slots");
+        assert_eq!(slots.status, Status::Ok);
+        assert!(
+            slots.detail.starts_with("100 slots allocated of 120 share slots (") && slots.detail.contains("at most 10 resident"),
+            "{}",
+            slots.detail
+        );
+        let vram = find(&v, "driver VRAM").line("look-1m");
+        assert!(vram.contains("whole GPU") && vram.contains("upper bound") && vram.contains("100 of 120 share slots"), "{vram}");
+        // A pool above the share's slots is OVER; a process that ran several scenes is not called the scene's own.
+        let over = MemoryFacts { pool_slots: 121, scene_alone: false, ..mem() };
+        let v = case_verdicts(&spec, &frames, &[], &over);
+        assert!(find(&v, "terrain slots").fails());
+        assert!(find(&v, "RAM").detail.contains("NOT the scene's own"), "{}", find(&v, "RAM").detail);
     }
 
     // spec: TEST-018
@@ -776,7 +838,15 @@ mod fresh_lag_tests {
     }
 
     fn mem() -> MemoryFacts {
-        MemoryFacts { share_bytes: 1 << 30, vram_cap_bytes: 8 << 30, driver_vram_bytes: None, process_peak_bytes: None }
+        MemoryFacts {
+            share_bytes: 1 << 30,
+            vram_cap_bytes: 8 << 30,
+            driver_vram_bytes: None,
+            process_peak_bytes: None,
+            scene_alone: true,
+            pool_slots: 0,
+            share_slots: 0,
+        }
     }
 
     fn lag_of(scene: &str, f: &[FrameRecord], descent: usize) -> Verdict {

@@ -188,6 +188,11 @@ struct CaseRun {
     clocks: Vec<planet_perf::ClockSample>,
     /// Seconds the case's teardown took (the loop dropped: queued jobs cancelled, in-flight ones waited for; STRM-005).
     teardown_s: f64,
+    /// The CPU's effective clock before and after the case (`None`: smoke run, or not readable on this host; recorded, never judged).
+    cpu_before: Option<planet_perf::host::CpuClock>,
+    cpu_after: Option<planet_perf::host::CpuClock>,
+    /// The main pool the renderer was built with: its slots (the ceiling) and the bytes of one.
+    pool: planet_streaming::PoolConfig,
 }
 
 fn run_case(
@@ -232,6 +237,7 @@ fn run_case(
     }
     // The clock, before, during (a sampler thread: a process spawn never on the frame path) and after the case.
     let mut clocks: Vec<planet_perf::ClockSample> = Vec::new();
+    let cpu_before = (!smoke).then(planet_perf::host::query_cpu_clock).flatten();
     let sampler = (!smoke).then(|| {
         clocks.extend(planet_perf::query_nvidia_smi());
         let stop = Arc::new(AtomicBool::new(false));
@@ -270,6 +276,8 @@ fn run_case(
         clocks.extend(samples.lock().expect("clock samples").iter().cloned());
         clocks.extend(planet_perf::query_nvidia_smi());
     }
+    let cpu_after = (!smoke).then(planet_perf::host::query_cpu_clock).flatten();
+    let pool = d.rig.pool;
     let torn = Instant::now();
     drop(d);
     let teardown_s = torn.elapsed().as_secs_f64();
@@ -287,7 +295,7 @@ fn run_case(
         post.elapsed().as_secs_f64()
     )
     .map_err(err)?;
-    Ok(CaseRun { frames, blanks, settle_s, clocks, teardown_s })
+    Ok(CaseRun { frames, blanks, settle_s, clocks, teardown_s, cpu_before, cpu_after, pool })
 }
 
 /// The `BLANK TILE` lines of a case, which fail the run after the logs are written (ADR 0032's hard measure: a tile, root or
@@ -408,8 +416,9 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     writeln!(
         out,
         "  frame time = the loop's work per frame (plan not waited for; waits for the GPU only at the frames-in-flight bound; the pacing \
-         sleep excluded); GPU time is not measured in the pipelined loop (no timestamp readback without a wait), RAM is the process's \
-         peak working set, driver VRAM is the whole GPU"
+         sleep excluded); GPU time is not measured in the pipelined loop (no timestamp readback without a wait), RAM is the peak \
+         working set of the process (the scene's own when one scene runs in the process, as in a child of `perf stream all`), driver \
+         VRAM is the whole GPU (an upper bound for the scene, shown beside the allocator's slots)"
     )
     .map_err(err)?;
     let mem_base = MemoryFacts {
@@ -417,7 +426,11 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         vram_cap_bytes: Tier::Mid.vram_cap_bytes(),
         driver_vram_bytes: None,
         process_peak_bytes: None,
+        scene_alone: scenes.len() == 1,
+        pool_slots: 0,
+        share_slots: 0,
     };
+    let power_plan = if smoke { None } else { planet_perf::host::query_power_plan() };
     let mut blank_failures: Vec<String> = Vec::new();
     let mut reports: Vec<(StreamScene, RunReport, Vec<String>, CaseRunSummary)> = Vec::new();
     for (index, scene) in scenes.into_iter().enumerate() {
@@ -446,8 +459,32 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         let mem = MemoryFacts {
             driver_vram_bytes: if smoke { None } else { planet_perf::streaming::query_gpu_memory_used() },
             process_peak_bytes: planet_perf::streaming::query_process_peak_bytes(),
+            pool_slots: u64::from(run.pool.main_slots()),
+            share_slots: share_slots_of(&run.pool, mem_base.share_bytes),
             ..mem_base.clone()
         };
+        let max_resident = run.frames.iter().map(|f| f.resident as u64).max().unwrap_or(0);
+        if !smoke {
+            writeln!(
+                out,
+                "{}: cpu_clock_before {}, cpu_clock_after {} (effective clock at an idle moment before and after the case, recorded not judged); power_plan {}",
+                scene.name(),
+                planet_perf::host::clock_text(run.cpu_before.as_ref()),
+                planet_perf::host::clock_text(run.cpu_after.as_ref()),
+                power_plan.as_ref().map_or("not measured".to_string(), ToString::to_string)
+            )
+            .map_err(err)?;
+        }
+        let memory_line = planet_perf::session::SceneMemory {
+            scene: scene.name().to_string(),
+            ram_peak_bytes: mem.process_peak_bytes,
+            vram_used_bytes: mem.driver_vram_bytes,
+            pool_slots: mem.pool_slots,
+            max_resident,
+            share_slots: mem.share_slots,
+        }
+        .line();
+        writeln!(out, "{memory_line}").map_err(err)?;
         let spec = case_spec(scene.name(), run.frames.len(), FRAME_STEP_S, script.descent_frames).expect("a streaming scene");
         let verdicts = case_verdicts(&spec, &run.frames, &run.blanks, &mem);
         let lines: Vec<String> = verdicts.iter().map(|v| v.line(scene.name())).collect();
@@ -472,6 +509,14 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         }
         if let Some(b) = mem.driver_vram_bytes {
             counts.push(("driver_vram_bytes".into(), b));
+        }
+        counts.push(("pool_slots".into(), mem.pool_slots));
+        counts.push(("share_slots".into(), mem.share_slots));
+        counts.push(("max_resident_slots".into(), max_resident));
+        for (name, clock) in [("cpu_clock_before_mhz", run.cpu_before), ("cpu_clock_after_mhz", run.cpu_after)] {
+            if let Some(c) = clock {
+                counts.push((name.into(), c.effective_mhz().round() as u64));
+            }
         }
         let report = RunReport {
             path_name: format!("stream/{}", scene.name()),
@@ -583,6 +628,13 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     )
     .map_err(err)?;
     Ok(())
+}
+
+/// Slots of the main pool the tier's share can hold: the share less the fixed items (small vertex pool, index buffers, node records,
+/// slot records), in whole blocks (a block is `block_alloc_bytes`, or `slot_bytes * block_slots`).
+fn share_slots_of(pool: &planet_streaming::PoolConfig, share_bytes: u64) -> u64 {
+    let block = if pool.block_alloc_bytes > 0 { pool.block_alloc_bytes } else { pool.slot_bytes * u64::from(pool.block_slots) };
+    share_bytes.saturating_sub(pool.fixed_bytes()).checked_div(block).unwrap_or(0) * u64::from(pool.block_slots)
 }
 
 struct CaseRunSummary {

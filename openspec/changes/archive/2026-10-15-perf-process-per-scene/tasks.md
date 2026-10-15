@@ -1,0 +1,5 @@
+- [x] 1.1 failing tests first: orchestration on fakes (`session.rs`), memory verdicts (slots, label), log fields and old-log readability (`compare.rs`), power-plan and clock parsing (`host.rs`), child arguments (`testcmd.rs`)
+- [x] 1.2 `planet_perf::session`, `planet_perf::host`, `MemoryFacts` and verdicts, `streamperf.rs` (clock, slots, `SCENE-MEMORY`), `xtask perf stream all`
+- [x] 1.3 spec deltas TEST-012, TEST-019
+- [x] 1.4 smoke: `cargo xtask perf stream all --smoke --allow-memory-bake --global-res 256` runs six children
+- [x] 1.5 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge
