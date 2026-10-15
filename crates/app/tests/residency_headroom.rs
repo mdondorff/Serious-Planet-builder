@@ -42,8 +42,7 @@ fn closure(tiles: impl IntoIterator<Item = TileId>) -> BTreeSet<TileId> {
     out
 }
 
-fn measure(max_level: u8) -> Vec<(String, usize, usize, usize)> {
-    let world = WorldTerrain::open(WorldDefinition::single_planet(R, 1), PIN_BAKE_RES).unwrap();
+fn measure(world: &WorldTerrain, max_level: u8) -> Vec<(String, usize, usize, usize)> {
     let field = world.field().unwrap();
     let size = (2560u32, 1440u32);
     let lod = LodParams {
@@ -108,10 +107,15 @@ fn check_pins(measured: &[(String, usize, usize, usize)], pins: &[(&str, usize, 
 // spec: STRM-006
 #[test]
 fn the_slots_every_standard_view_needs_stay_within_their_pins_and_the_share() {
-    let l26 = measure(26);
+    // The two finest-level measurements are independent: run them side by side over one bake (opening it is most of the cost).
+    let world = WorldTerrain::open(WorldDefinition::single_planet(R, 1), PIN_BAKE_RES).unwrap();
+    let (l26, l22) = std::thread::scope(|s| {
+        let a = s.spawn(|| measure(&world, 26));
+        let b = s.spawn(|| measure(&world, 22));
+        (a.join().unwrap_or_else(|e| std::panic::resume_unwind(e)), b.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+    });
     assert_eq!(l26.len(), PINS_L26.len(), "a standard view was added or removed: pin it");
     let mut failures = check_pins(&l26, &PINS_L26);
-    let l22 = measure(22);
     for (a, b) in l26.iter().zip(&l22) {
         if a.0 != "ground-1m" && (a.1, a.2) != (b.1, b.2) {
             failures.push(format!("{}: the finest level 22 changed a view that has no tile finer than 22 ({} -> {})", a.0, a.1, b.1));

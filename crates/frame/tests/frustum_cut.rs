@@ -1,8 +1,6 @@
 //! LOD-007, tier A: the frustum cut uses each tile's own height bounds, cheaply. The depth-pass oracle over the ten standard
 //! views at production parameters is tier B (`oracle_frustum_cut.rs`).
 
-use std::collections::BTreeSet;
-
 use planet_core::cube::TangentWarp;
 use planet_core::{TileId, Vec3};
 use planet_frame::{
@@ -13,106 +11,28 @@ use planet_generators::height::Reference;
 use planet_generators::mesh::tile_mesh_field;
 use planet_generators::stress::Steep;
 
-const R: f64 = 6_371_000.0;
-
-/// The tiles of `all` that the cut dropped for real: not in the cut selection, with no ancestor and no descendant in it (a
-/// leaf that balancing replaced by its children, or the reverse, is still drawn).
-fn dropped(all: &[TileId], kept: &[TileId]) -> Vec<TileId> {
-    let kept_set: BTreeSet<TileId> = kept.iter().copied().collect();
-    let mut related: BTreeSet<TileId> = BTreeSet::new();
-    for &k in kept {
-        let mut t = k;
-        while let Some(p) = t.parent() {
-            related.insert(p);
-            t = p;
-        }
-    }
-    all.iter()
-        .copied()
-        .filter(|&t| {
-            let mut a = t;
-            while let Some(p) = a.parent() {
-                if kept_set.contains(&p) {
-                    return false;
-                }
-                a = p;
-            }
-            !kept_set.contains(&t) && !related.contains(&t)
-        })
-        .collect()
-}
-
-/// Cameras: every standard view and its pitch and heading variants, so that tiles sit at the edges of the frustum.
-fn cameras(views: Vec<(&'static str, Camera)>) -> Vec<(String, Camera)> {
-    let mut out = Vec::new();
-    for (name, cam) in views {
-        out.push((name.to_string(), cam));
-        if name == "orbit-20000km" {
-            continue;
-        }
-        for (hint, pitch) in [(Vec3::new(0.0, 0.0, 1.0), 5.0f64), (Vec3::new(0.0, 1.0, 0.0), 35.0), (Vec3::new(1.0, 0.3, -0.5), 70.0)] {
-            let c = Camera::at_surface_point(cam.position, hint, pitch.to_radians(), cam.fov_y_rad, cam.aspect, cam.near_m);
-            out.push((format!("{name}/{hint:?}/{pitch}"), c));
-        }
-    }
-    out
-}
-
-fn check_field(
-    field: &dyn planet_generators::height::HeightField,
-    views: Vec<(&'static str, Camera)>,
-    cells: u32,
-    max_level: u8,
-    tau: f64,
-) {
-    let lod = LodParams { cells, viewport_h_px: 360.0, tau_px: tau, max_level, ..LodParams::earth_1080p() };
-    let mut checked = 0usize;
-    for (name, cam) in cameras(views) {
-        let lod = LodParams { max_height_m: lod.max_height_m.max(field.max_abs_height_m()), ..lod.clone() };
-        let all: Vec<TileId> = select_nodes_field_cached(&TangentWarp, cam.position, field, &lod, &mut SelectionCache::new())
-            .nodes
-            .iter()
-            .map(|n| n.tile)
-            .collect();
-        let kept: Vec<TileId> = select_nodes_in_view_field(&TangentWarp, &cam, field, &lod).nodes.iter().map(|n| n.tile).collect();
-        let frustum = cam.frustum();
-        for (i, t) in dropped(&all, &kept).into_iter().enumerate() {
-            if i % 2 != 0 {
-                continue;
-            }
-            // Every vertex of the cut tile, skirts and morph targets included, lies outside one and the same side plane (what
-            // a sphere test guarantees; "outside some plane each" would also pass for a tile straddling the frustum).
-            let mesh = tile_mesh_field(field, &TangentWarp, t, cells, R);
-            let points: Vec<Vec3> = mesh
-                .vertices
-                .iter()
-                .flat_map(|v| [v.pos, v.coarse])
-                .map(|p| mesh.origin.0 + Vec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2])))
-                .collect();
-            assert!(
-                frustum.normals.iter().any(|n| points.iter().all(|p| (*p - frustum.origin).dot(*n) < 0.0)),
-                "{name}: cut tile {t:?} has vertices on the inside of every side plane"
-            );
-            checked += 1;
-        }
-    }
-    assert!(checked > 100, "the cameras must cut enough tiles to mean something (checked {checked})");
-}
+#[path = "support/frustum_cut.rs"]
+mod support;
+use support::{cameras, check_field, dropped, R};
 
 // spec: LOD-007
 #[test]
 fn a_cut_tile_has_no_vertex_inside_the_frustum() {
-    check_field(&Reference(1), scripted_views(R, 16.0 / 9.0, 1), 8, 14, 6.0);
+    // Every eighth dropped tile of every camera here, every second one in the tier-B twin `oracle_frustum_cut_sweep.rs`.
+    check_field(&Reference(1), scripted_views(R, 16.0 / 9.0, 1), 8, 14, 6.0, 8, &|_| true);
 }
 
 // spec: LOD-007
 #[test]
 fn a_cut_tile_has_no_vertex_inside_the_frustum_on_the_steep_field() {
-    // Steep terrain (|h| up to 8 km) is the case where a global height pad and a tight per-tile bound differ most.
+    // Steep terrain (|h| up to 8 km) is the case where a global height pad and a tight per-tile bound differ most. The steep
+    // meshes cost most of this tier's time, so the tier-A slice is the ground-200m and cube-corner-1km views at their own
+    // heading and the 35 degree variant, every eighth dropped tile; the tier-B twin `oracle_frustum_cut_sweep.rs` runs all
+    // four headings of both views at every second tile.
     let field = Steep(1);
     let views =
         scripted_views_field(R, 16.0 / 9.0, &field).into_iter().filter(|(n, _)| ["ground-200m", "cube-corner-1km"].contains(n)).collect();
-    check_field(&field, views, 8, 11, 2.0);
+    check_field(&field, views, 8, 11, 2.0, 8, &|name| !name.ends_with("/5") && !name.ends_with("/70"));
 }
 
 // spec: LOD-007

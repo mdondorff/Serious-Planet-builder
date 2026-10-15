@@ -10,6 +10,31 @@ const TIER_AB: &str = "not binary(/^gpu_/)";
 const TIER_C: &str = "binary(/^gpu_/)";
 const TIER_BC_REAL: &str = "binary(/^gpu_/) or binary(/^oracle_/)";
 const FAST_BUDGET_SECS: f64 = 10.0;
+/// Where nextest writes the run's JUnit report (`.config/nextest.toml`, `[profile.default.junit]`).
+const JUNIT: &str = "target/nextest/default/junit.xml";
+/// How many of the slowest tests `test fast` names after a run.
+const SLOWEST: usize = 5;
+
+/// The `n` slowest tests of a nextest JUnit report, slowest first, as `(seconds, "binary test")`.
+pub fn slowest_tests(junit: &str, n: usize) -> Vec<(f64, String)> {
+    fn attr<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+        let at = line.find(&format!(" {key}=\""))? + key.len() + 3;
+        Some(&line[at..at + line[at..].find('"')?])
+    }
+    let mut all: Vec<(f64, String)> = junit
+        .lines()
+        .filter(|l| l.trim_start().starts_with("<testcase "))
+        .filter_map(|l| {
+            let secs: f64 = attr(l, "time")?.parse().ok()?;
+            let name =
+                format!("{} {}", attr(l, "classname")?, attr(l, "name")?).replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
+            Some((secs, name))
+        })
+        .collect();
+    all.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    all.truncate(n);
+    all
+}
 
 fn package(dir: &str) -> String {
     match dir {
@@ -99,6 +124,8 @@ pub fn test(root: &Path, args: &[String]) -> Res {
     let env_strict = std::env::var("PLANET_GOLDEN_STRICT").unwrap_or_default() == "1";
     let env = [("PLANET_ADAPTER", adapter), ("PLANET_GOLDEN_STRICT", if strict || env_strict { "1" } else { "0" })];
     let started = Instant::now();
+    // A report left by an earlier run must not be taken for this one's.
+    let _ = std::fs::remove_file(root.join(JUNIT));
 
     let mut cmd: Vec<String> = vec!["nextest".into(), "run".into(), "--no-tests=pass".into()];
     if sub == Some("fast") {
@@ -120,6 +147,16 @@ pub fn test(root: &Path, args: &[String]) -> Res {
     eprintln!("elapsed {secs:.1}s");
     if sub == Some("fast") && secs > FAST_BUDGET_SECS {
         eprintln!("warning: test fast took {secs:.1}s, over the {FAST_BUDGET_SECS}s budget (report §16); see docs/status.md");
+    }
+    if sub == Some("fast") {
+        // The budget is a warning, not a failure: a loaded machine makes any hard limit flaky. The names make a regression
+        // easy to find.
+        if let Ok(junit) = std::fs::read_to_string(root.join(JUNIT)) {
+            eprintln!("slowest {SLOWEST} tests (a machine running other work inflates them all):");
+            for (t, name) in slowest_tests(&junit, SLOWEST) {
+                eprintln!("  {t:6.2}s  {name}");
+            }
+        }
     }
     if sub == Some("gpu") {
         let pending = candidates(root);
@@ -332,6 +369,21 @@ mod tests {
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn the_slowest_tests_of_a_junit_report_are_named_slowest_first() {
+        let xml = r#"<testsuites name="nextest-run" tests="3" time="9.5">
+    <testsuite name="planet-frame" tests="3">
+        <testcase name="a::quick" classname="planet-frame" timestamp="t" time="0.010"/>
+        <testcase name="b::slow" classname="planet-frame::frustum_cut" timestamp="t" time="4.250"/>
+        <testcase name="c::slower &amp; odd" classname="planet" timestamp="t" time="7.125"/>
+    </testsuite>
+</testsuites>"#;
+        let top = slowest_tests(xml, 2);
+        assert_eq!(top, [(7.125, "planet c::slower & odd".to_string()), (4.25, "planet-frame::frustum_cut b::slow".to_string())]);
+        assert!(slowest_tests("not a report", 5).is_empty());
     }
 
     // spec: BUILD-003
