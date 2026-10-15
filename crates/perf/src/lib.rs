@@ -9,6 +9,7 @@ pub mod gate;
 pub mod host;
 pub mod session;
 pub mod streaming;
+pub mod validity;
 
 use std::process::Command;
 
@@ -244,33 +245,10 @@ pub fn is_performance_scheme(scheme: &str) -> bool {
     ["high performance", "höchstleistung", "hochleistung", "ultimate", "maximale leistung"].iter().any(|k| s.contains(k))
 }
 
-/// Reasons a session cannot be used for time budgets (CON-21): not a performance power scheme, or the GPU was idle
-/// (low performance state) when a run started, so the workload did not raise the clocks.
+/// Reasons a session cannot be used for time budgets (CON-21), every cause with its text. Which cause voids the frame verdicts and
+/// which only the GPU verdicts is decided in [`validity`].
 pub fn session_warnings(adapter: &AdapterFacts, power_scheme: Option<&str>, runs: &[RunReport], smoke: bool) -> Vec<String> {
-    let mut w = Vec::new();
-    if smoke {
-        w.push("this was a smoke run (reduced frame size and counts): it exercises the code path and is never a measurement".to_string());
-    }
-    if let Err(r) = check_reference_adapter(adapter) {
-        w.push(format!("not the reference adapter: {r}"));
-    }
-    match power_scheme {
-        Some(s) if is_performance_scheme(s) => {}
-        Some(s) => {
-            w.push(format!("power scheme is '{}', not a performance scheme; set the performance profile before measuring", s.trim()))
-        }
-        None => w.push("the active power scheme could not be read".to_string()),
-    }
-    for r in runs {
-        if let Some(c) = &r.clocks_before {
-            let low = c.pstate.trim_start_matches('P').parse::<u32>().is_ok_and(|n| n >= 5);
-            if low {
-                w.push(format!("run '{}' started with the GPU in {} at {} MHz: the workload is too light or the warm-up too short to reach steady clocks", r.path_name, c.pstate, c.graphics_mhz));
-                break;
-            }
-        }
-    }
-    w
+    crate::validity::session_causes(adapter, power_scheme, runs, smoke).into_iter().map(|c| c.text).collect()
 }
 
 /// `(gpu_valid, gpu_clock_state)` JSON values of a view: the state is the clock state when valid, else the reason.
@@ -337,11 +315,8 @@ pub fn report_json_with_warmups(
     runs: &[RunReport],
     warmups: &[(String, clock::WarmUpOutcome)],
 ) -> String {
-    let mut warnings = session_warnings(adapter, power_scheme, runs, protocol.smoke);
-    warnings.extend(validity.reasons.iter().cloned());
-    if !owner_override.is_empty() {
-        warnings.push(format!("the owner overrode the readiness gate (failed: {})", owner_override.join("; ")));
-    }
+    let verdict = crate::validity::SessionVerdict::assess(adapter, power_scheme, runs, protocol.smoke, validity, owner_override);
+    let warnings = verdict.warnings();
     let run_json: Vec<String> = runs
         .iter()
         .map(|r| {
@@ -367,12 +342,15 @@ pub fn report_json_with_warmups(
         })
         .collect();
     format!(
-        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"warnings\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{},\"source\":{}}},\"runs\":[{}]}}\n",
+        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"frame_valid\":{},\"gpu_session_valid\":{},\"gpu_only_causes\":[{}],\"warnings\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{},\"source\":{}}},\"runs\":[{}]}}\n",
         json_str(&adapter.name),
         json_str(&adapter.backend),
         power_scheme.map_or("null".to_string(), json_str),
         owner_override.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
         warnings.is_empty(),
+        verdict.frame_valid(),
+        verdict.gpu_session_valid(),
+        verdict.gpu_only().iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
         warnings.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
         warmups.iter().map(|(v, w)| warmup_json(v, w)).collect::<Vec<_>>().join(","),
         protocol.warmup_frames,

@@ -195,15 +195,17 @@ pub fn read_scene(f: &SceneFiles) -> Result<SceneRead, Vec<String>> {
         return Err(vec![format!("`{scene}` is not a streaming scene")]);
     };
     let root = parse(json_bytes).map_err(|e| vec![format!("the log is not readable JSON: {e}")])?;
-    // The session must count (ADR 0020 gate and throttling, ADR 0036; smoke, wrong adapter and power scheme are warnings too).
-    if !matches!(root.get("valid_for_budgets"), Some(Json::Bool(true))) {
-        let reasons = match root.get("warnings") {
-            Some(Json::Arr(a)) => a.iter().filter_map(|w| if let Json::Str(s) = w { Some(s.as_str()) } else { None }).collect::<Vec<_>>(),
-            _ => Vec::new(),
-        };
+    // The session's frame verdicts must count (ADR 0020 gate and throttling, ADR 0036; smoke, wrong adapter, power scheme and the
+    // owner's override too). An idle GPU start (ADR 0034 as accepted) voids only GPU verdicts, which no M4 criterion uses.
+    if !crate::validity::log_frame_valid(&root) {
+        let reasons = crate::validity::log_frame_void_reasons(&root);
         why.push(format!(
-            "the session is INVALID for budgets (ADR 0020, ADR 0036): {}{}",
-            if reasons.is_empty() { "no valid_for_budgets in the log (old-format log?)".to_string() } else { reasons.join("; ") },
+            "the session is INVALID for frame verdicts (ADR 0020, ADR 0036): {}{}",
+            if reasons.is_empty() {
+                "no frame_valid or valid_for_budgets in the log (old-format log?)".to_string()
+            } else {
+                reasons.join("; ")
+            },
             if f.last_valid_present {
                 "; an earlier `.last-valid.json` exists beside the log but is never used: a window's five scenes must come from one session"
             } else {
@@ -342,6 +344,15 @@ pub fn read_scene(f: &SceneFiles) -> Result<SceneRead, Vec<String>> {
         str_at(&root, "power_scheme").unwrap_or("not read")
     ));
     let gpu_valid = matches!(run.get("gpu_valid"), Some(Json::Bool(true)));
+    // One definition (validity.rs): frame verdicts count here, or this scene was refused above.
+    facts.push(if crate::validity::log_gpu_session_valid(&root) {
+        "session valid for frame verdicts: yes; GPU verdicts: eligible (not part of M4's criteria)".to_string()
+    } else {
+        format!(
+            "session valid for frame verdicts: yes; GPU verdicts: NOT VALID ({}); no M4 criterion is a GPU time",
+            crate::validity::log_gpu_only_reasons(&root).first().map_or("idle GPU start", String::as_str)
+        )
+    });
     facts.push(format!(
         "GPU clock state {}{} ({} samples, lowest {} MHz); frame verdicts stand at any clock state, GPU time is not measured in the pipelined scenes",
         str_at(run, "gpu_clock_state").unwrap_or("unknown"),
@@ -500,6 +511,10 @@ mod tests {
         omit_source: bool,
         omit_count: Option<&'static str>,
         blank_logged: u64,
+        p8_start: bool,
+        smoke: bool,
+        wrong_adapter: bool,
+        scheme: &'static str,
     }
 
     fn fx() -> Fx {
@@ -515,6 +530,10 @@ mod tests {
             omit_source: false,
             omit_count: None,
             blank_logged: 0,
+            p8_start: false,
+            smoke: false,
+            wrong_adapter: false,
+            scheme: GOOD_SCHEME,
         }
     }
 
@@ -572,23 +591,31 @@ mod tests {
             path_name: format!("stream/{scene}"),
             vram_cap_gb: 8,
             stats: summarize(&wall, 0).unwrap(),
-            clocks_before: Some(sample(1470)),
+            clocks_before: Some(if f.p8_start {
+                crate::parse_nvidia_smi("NVIDIA GeForce RTX 3080 Ti Laptop GPU, 210, 405, 15, 50, P8, 0x0000000000000001").unwrap()
+            } else {
+                sample(1470)
+            }),
             clocks_after: Some(sample(1470)),
             metrics: vec![],
             counts,
         };
-        let adapter =
-            AdapterFacts { name: "NVIDIA GeForce RTX 3080 Ti Laptop GPU".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete };
+        let adapter = if f.wrong_adapter {
+            AdapterFacts { name: "llvmpipe".into(), backend: "Vulkan".into(), kind: DeviceKind::Cpu }
+        } else {
+            AdapterFacts { name: "NVIDIA GeForce RTX 3080 Ti Laptop GPU".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete }
+        };
         let protocol = Protocol {
             warmup_frames: 0,
             measured_frames: 0,
             runs: 1,
+            smoke: f.smoke,
             field: Some(f.field.clone()),
             source: (!f.omit_source).then(|| f.source.clone()),
             ..Protocol::default()
         };
         let validity = gate::Validity { reasons: f.invalid.clone() };
-        let json = report_json_with_warmups(&adapter, Some(GOOD_SCHEME), &[], &validity, &protocol, &[run], &[]);
+        let json = report_json_with_warmups(&adapter, Some(f.scheme), &[], &validity, &protocol, &[run], &[]);
         SceneFiles { scene: scene.into(), json: Some(json.into_bytes()), frames: Some(frames_text(frames)), last_valid_present: false }
     }
 
@@ -616,6 +643,59 @@ mod tests {
 
     fn failing(j: &Judgement) -> Vec<String> {
         j.scenes.iter().flat_map(|s| s.verdicts.iter().filter(|v| v.fails()).map(move |v| v.line(&s.scene))).collect()
+    }
+
+    // spec: TEST-021
+    #[test]
+    fn a_window_whose_sessions_all_started_at_p8_is_judged_on_its_frame_verdicts() {
+        let w = window(&Fx { p8_start: true, ..fx() });
+        let text = String::from_utf8(w[0].json.clone().unwrap()).unwrap();
+        assert!(text.contains("\"valid_for_budgets\":false") && text.contains("\"frame_valid\":true"), "the fixture is the real shape");
+        let j = judged(evaluate(&w));
+        assert!(j.pass, "{:?}", failing(&j));
+        assert!(
+            j.scenes
+                .iter()
+                .all(|s| s.facts.iter().any(|f| f.starts_with("session valid for frame verdicts: yes; GPU verdicts: NOT VALID"))),
+            "{:?}",
+            j.scenes[0].facts
+        );
+        // The same window with failing frames still fails: the frame verdicts are judged, not waved through.
+        let mut bad = window(&Fx { p8_start: true, ..fx() });
+        let slow: Vec<FrameRecord> = good_frames("dive").into_iter().map(|f| FrameRecord { wall_ms: 30.0, ..f }).collect();
+        replace(&mut bad, "dive", files("dive", &slow, &Fx { p8_start: true, ..fx() }));
+        assert!(!judged(evaluate(&bad)).pass);
+    }
+
+    // spec: TEST-021
+    #[test]
+    fn a_log_written_before_frame_valid_with_only_the_p8_warning_is_re_judged() {
+        let mut w = window(&Fx { p8_start: true, ..fx() });
+        for f in &mut w {
+            let t = String::from_utf8(f.json.take().unwrap()).unwrap();
+            let t = t.replace("\"frame_valid\":true,", "").replace("\"gpu_session_valid\":false,", "");
+            assert!(!t.contains("frame_valid"));
+            f.json = Some(t.into_bytes());
+        }
+        assert!(judged(evaluate(&w)).pass, "valid_for_budgets false with only the idle-start warning keeps its frame verdicts");
+    }
+
+    // spec: TEST-021
+    #[test]
+    fn sessions_with_a_real_cause_are_still_refused_even_beside_a_p8_start() {
+        for (what, f) in [
+            ("smoke run", Fx { smoke: true, p8_start: true, ..fx() }),
+            ("not the reference adapter", Fx { wrong_adapter: true, p8_start: true, ..fx() }),
+            ("not a performance scheme", Fx { scheme: "Power Scheme GUID: 381b4222 (Balanced)", p8_start: true, ..fx() }),
+            (
+                "GPU throttling reported",
+                Fx { invalid: vec!["GPU throttling reported during 'stream/dive'".into()], p8_start: true, ..fx() },
+            ),
+        ] {
+            let r = refused(evaluate(&window(&f)));
+            assert!(r.contains("INVALID for frame verdicts") && r.contains(what.split(' ').next().unwrap()), "{what}: {r}");
+            assert!(!r.contains("started with the GPU in"), "the idle start is not named as a reason: {r}");
+        }
     }
 
     // spec: TEST-021
