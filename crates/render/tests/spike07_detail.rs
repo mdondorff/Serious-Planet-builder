@@ -68,7 +68,7 @@ fn normal_angle_deg(n: Vec3, a: [f64; 3], b: [f64; 3]) -> f64 {
 fn the_detail_gradient_on_the_gpu_matches_the_cpu_reference_within_the_normal_bound() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     eprintln!("{}", ctx.adapter_log_line());
-    // Three origins: ground level at 1 m altitude far from the planet's axes, near a face edge, and near an axis.
+    // Three origins: 1,250 m above the sea level far from the planet's axes, near a face edge, and near an axis.
     let origins = [
         Vec3::new(0.31, -0.62, 0.72).normalized() * (R + 1250.0),
         Vec3::new(1.0, 1.0, 0.003).normalized() * (R + 40.0),
@@ -79,9 +79,17 @@ fn the_detail_gradient_on_the_gpu_matches_the_cpu_reference_within_the_normal_bo
         assert_eq!(NodeDetail::new(origin, R, 0.0).base.len(), DETAIL_OCTAVES);
         // Tile-sized offsets (a finest tile is about 2.4 m, a coarser tile up to 600 m) at three pixel footprints: all octaves,
         // a few, none.
-        for (extent, foot, amp0) in [(2.4, 1.0e-4, 400.0), (2.4, 5.0e-3, 400.0), (600.0, 1.0e-2, 900.0), (600.0, 5.0, 900.0)] {
-            // The probes fill a cube of half-width `extent`: the node reaches 1.75 x that from its origin.
-            let node_extent = 1.75 * extent;
+        for (extent, foot, amp0) in [
+            (2.4, 1.0e-4, 980.0),
+            (4.77, 1.0e-4, 980.0),
+            (9.54, 1.0e-4, 980.0),
+            (2.4, 5.0e-3, 980.0),
+            (600.0, 1.0e-2, 980.0),
+            (600.0, 5.0, 980.0),
+        ] {
+            // The probes fill a cube of half-width `extent` (up to 1.73 x that from the origin); the node is declared with
+            // `extent` as the renderer does (a tile edge), so the probes go beyond what the rule allows for.
+            let node_extent = extent;
             let nd = NodeDetail::new(origin, R, node_extent);
             let ps = probes(2000, extent, foot, amp0);
             let gpu = gpu_gradients(

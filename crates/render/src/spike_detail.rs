@@ -33,10 +33,11 @@ const PERSISTENCE: f64 = 0.55;
 /// Field octaves summed in the field's normalisation.
 const FIELD_OCTAVES: u32 = 12;
 /// An octave is dropped for a node whose half-extent spans more than this many of its cells: the f32 position `fraction +
-/// local * cells_per_metre` then loses more than the 0.01 degree normal bound (CON-14; measured, see the test). A pixel
+/// local * cells_per_metre` loses the 0.01 degree normal bound (CON-14) at the field's largest amplitude (980 m): the error
+/// grows with the distance in cells and with the octave (emulated: 1.3e-2 degrees at 1,000 cells, under 6e-3 at 300). A pixel
 /// resolves an octave only while it covers under 0.4 of a cell, and a tile is drawn at about 192 pixel footprints, so the
 /// cut never removes an octave that is still visible.
-pub const MAX_CELLS_PER_NODE: f64 = 1000.0;
+pub const MAX_CELLS_PER_NODE: f64 = 300.0;
 
 /// Bytes of the detail block of a node uniform: `up` (16), integer cells (11 x 16), fractions and cells per metre (11 x 16),
 /// amplitudes (3 x 16, packed four to a vec4).
