@@ -1,5 +1,5 @@
 # 0031 Residency set and request priorities
-Status: proposed (sketch by opus-planner, 2026-10-13, from the owner's decisions of 2026-10-13; completed by sonnet-explorer, 2026-10-15, with SPIKE-05's counts, M4 item 4)
+Status: accepted (owner, 2026-10-15: open question 1 accepted, the rotation exception of point 4c on a budget failure only; question 3, occlusion, decided after the tight cut is measured; question 2 stays open until the first dive and teleport measurements. The rest accepted by opus-planner under the owner's delegation of 2026-10-12, after the requirement id was corrected and the occlusion wording clarified. Sketch by opus-planner 2026-10-13, completed by sonnet-explorer 2026-10-15)
 Date: 2026-10-13
 Source: owner's decisions 2026-10-13 (`docs/status.md`, M4 queue (c)); SPIKE-05 (`docs/spikes.md`); architecture report §4 and the M4 row; STRM-002, STRM-005, STRM-006, STRM-007, LOD-007, LOD-008; constitution CON-03, CON-04, CON-20, CON-22; ADRs 0032, 0033
 
@@ -44,12 +44,12 @@ What SPIKE-05 measured (cells 32, finest level 26, today's 44-byte vertex, 53.7 
 - **STRM-006** (ADR 0033 owns the share cap; this ADR owns only the order of loss): when demand exceeds the cap the order of loss is point 4 (outside R and prefetch first, then coarser surroundings, then D); scenario: *Small share* (D and roots stay at full detail while the surroundings coarsen, and the allocated total stays at or below the cap).
 - **STRM-007** (reworded): the tiles never evicted are the roots and the current draw set with its ancestors (not "tiles used in the current frame"); eviction takes prefetch and tiles outside R before LRU order among the rest; capacity is counted in pooled slots (ADR 0033).
 - **LOD-007**: the spec text already says "padded by the terrain height"; the code pads by the global `max_height_m`, so this is a code fix plus a scenario, not a rewrite: pad by the node's own height bound (LOD-008); D is a subset of R; scenario on the oracle of point 7.
-- **New requirement (streaming-cache, STRM-012)**: the residency set is a pure function of the camera position, the LOD parameters and the share; yaw and pitch do not change it; R_full contains the draw set and the ancestors of its leaves; R_effective after degradation contains the draw set unless point 4c applies.
+- **New requirement (streaming-cache, the next free STRM id, STRM-015 at acceptance**; STRM-012 to STRM-014 are taken**)**: the residency set is a pure function of the camera position, the LOD parameters and the share; yaw and pitch do not change it; R_full contains the draw set and the ancestors of its leaves; R_effective after degradation contains the draw set unless point 4c applies.
 
 ## Open questions for the owner
 1. **The one exception to "rotation never fetches"** (point 4c and the last sentence of point 4): with a share too small for the surroundings, a turn can need tiles the degraded surroundings do not hold. Accept that as the price of the share, or require that the share always fit R at full detail (then a smaller share is a configuration error that refuses to start)? Recommended: accept; by the standard-view counts it does not occur at either tier (ancestors, at most one third more, and the flight union are not yet included).
 2. **Prefetch look-ahead** (point 2.3): how far ahead along the travel (seconds of travel, in units of tiles of the target level)? Recommended: decide from the first teleport and dive measurements (ADR 0032); start at a few seconds at the current speed, capped by free share.
-3. **Occlusion culling** would remove most of the rest of D (87 % of the ground-1m tiles have no visible triangle) but conflicts with CON-03; unchanged, the owner's decision, not part of this ADR.
+3. **Occlusion culling** would remove most of the rest of D (87 % of the ground-1m tiles have no visible triangle). GPU occlusion of terrain nodes conflicts with CON-03 (an amendment); a CPU occlusion test inside `frame`'s selection does not (it is a CPU decision, CON-03). Not part of this ADR; the owner decides whether to pursue it after the tight cut (point 7) has been measured (review by opus-planner, 2026-10-15).
 
 ## Licences of adopted code or techniques
 None.
