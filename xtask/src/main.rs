@@ -18,7 +18,7 @@ const USAGE: &str = "cargo xtask <command>
   check                rustfmt --check, clippy -D warnings, layering
   layering             crate layering and GPU-free dependency check (CON-02)
   spec-lint            trace IDs, tiers, requirement coverage (CON-16)
-  accept <milestone>   run milestone acceptance, e.g. M0
+  accept <milestone>   run milestone acceptance, e.g. M0; M4 also judges the perf logs of a streaming window (--logs DIR, default perf/logs) and refuses without a valid one
   repro <bundle>       replay a repro bundle (format arrives in M1)
   perf [--machine-ready]   performance harness on Rasierklinge; the harness measures readiness and refuses (ADR 0020);
                            --machine-ready is the owner's override. Only the architect session runs it
