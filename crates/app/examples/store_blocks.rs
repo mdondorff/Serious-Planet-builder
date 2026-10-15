@@ -108,7 +108,13 @@ fn main() -> Result<(), String> {
             for &root in &roots {
                 let stored = StoreSource::with_budget(store, world, res, 64 << 30).map_err(|e| e.to_string())?;
                 let (_, block_cells) = world.layout(res).map_err(|e| format!("{e:?}"))?;
-                let rec = Recording { inner: &stored, cells: block_cells, blocks: Mutex::new(BTreeSet::new()), calls: AtomicU64::new(0), align: Default::default() };
+                let rec = Recording {
+                    inner: &stored,
+                    cells: block_cells,
+                    blocks: Mutex::new(BTreeSet::new()),
+                    calls: AtomicU64::new(0),
+                    align: Default::default(),
+                };
                 let eroded = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &rec, key).map_err(|e| format!("{e:?}"))?;
                 let t = Instant::now();
                 let m = tile_mesh_field(&eroded, &map, root, cells, RADIUS_M);
@@ -136,14 +142,18 @@ fn main() -> Result<(), String> {
             let src = StoreSource::new(store, world, res).map_err(|e| e.to_string())?;
             let r = Arc::new(Roots { src, cells });
             let pool: Arc<dyn Spawner> = Arc::new(ThreadPool::new(threads));
-            Ok((Streamer::new(Arc::clone(&r) as Arc<dyn TileSource<usize>>, pool, Arc::new(SystemClock::new()), StreamConfig::default()), r))
+            Ok((
+                Streamer::new(Arc::clone(&r) as Arc<dyn TileSource<usize>>, pool, Arc::new(SystemClock::new()), StreamConfig::default()),
+                r,
+            ))
         };
         impl TileSource<usize> for Roots {
             fn load(&self, tile: TileId) -> Result<usize, String> {
                 let def = WorldDefinition::single_planet(RADIUS_M, 1);
                 let world = GlobalWorld::from_definition(&def).map_err(|e| format!("{e}"))?;
                 let key = world.stage_key(self.src.res()).0;
-                let eroded = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &self.src, key).map_err(|e| format!("{e:?}"))?;
+                let eroded =
+                    ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &self.src, key).map_err(|e| format!("{e:?}"))?;
                 Ok(tile_mesh_field(&eroded, &TangentWarp, tile, self.cells, RADIUS_M).vertices.len())
             }
         }

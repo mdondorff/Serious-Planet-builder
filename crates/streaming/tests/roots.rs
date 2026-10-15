@@ -47,7 +47,11 @@ impl Spawner for CountingSpawner {
 // spec: STRM-001
 #[test]
 fn all_six_roots_are_dispatched_before_the_wait() {
-    let sp = Arc::new(CountingSpawner { inner: ManualSpawner::default(), spawned: AtomicUsize::new(0), spawned_at_first_help: Mutex::new(None) });
+    let sp = Arc::new(CountingSpawner {
+        inner: ManualSpawner::default(),
+        spawned: AtomicUsize::new(0),
+        spawned_at_first_help: Mutex::new(None),
+    });
     let mut s = streamer(sp.clone(), Arc::new(Plain));
     s.load_roots_blocking().unwrap();
     assert_eq!(*sp.spawned_at_first_help.lock().unwrap(), Some(6), "every root job is handed to the spawner before the caller waits");
@@ -104,7 +108,14 @@ fn the_resident_set_is_identical_for_any_spawner_and_thread_count() {
     for r in &results[1..] {
         assert_eq!(r, &results[0], "resident set, slots and change order do not depend on the spawner");
     }
-    let order: Vec<TileId> = results[0].1.iter().map(|c| match c { planet_streaming::ResidentChange::Added(t) => *t, other => panic!("{other:?}") }).collect();
+    let order: Vec<TileId> = results[0]
+        .1
+        .iter()
+        .map(|c| match c {
+            planet_streaming::ResidentChange::Added(t) => *t,
+            other => panic!("{other:?}"),
+        })
+        .collect();
     assert_eq!(order, Face::ALL.iter().map(|f| root(f.0)).collect::<Vec<_>>(), "inserted in tile-id order");
 }
 
@@ -117,7 +128,11 @@ struct OneFails {
 
 impl TileSource<u64> for OneFails {
     fn load(&self, tile: TileId) -> Result<u64, String> {
-        if tile == self.bad { Err("disk on fire".into()) } else { Ok(0) }
+        if tile == self.bad {
+            Err("disk on fire".into())
+        } else {
+            Ok(0)
+        }
     }
     fn load_staged(&self, tile: TileId, cancel: &planet_streaming::CancelToken) -> Result<Option<u64>, String> {
         self.started.fetch_add(1, Ordering::SeqCst);
