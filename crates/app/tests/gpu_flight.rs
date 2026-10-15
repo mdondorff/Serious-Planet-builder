@@ -221,23 +221,30 @@ fn the_flight_from_compact_tiles_matches_the_vertex_reference_frame_by_frame() {
         std::fs::read_to_string(vertex.join("flight.txt")).unwrap(),
         "the plans do not depend on the tile format"
     );
-    let mut worst = 0f64;
+    let (mut worst, mut worst_shaded) = (0f64, 0f64);
     for i in 0..12 {
         let name = format!("frame_{i:04}.png");
         let (a, b) = (read_png(&compact.join(&name)).unwrap(), read_png(&vertex.join(&name)).unwrap());
-        let mut wrong = 0usize;
+        let (mut wrong, mut shaded) = (0usize, 0usize);
         for y in 0..a.height {
             for x in 0..a.width {
                 let (p, q) = (a.pixel(x, y), b.pixel(x, y));
                 if (0..3).any(|c| p[c].abs_diff(q[c]) > 12) {
                     wrong += 1;
                 }
+                // A normal decode error of a degree shifts the shading by a few levels over whole slopes; 16-bit normals stay at about one.
+                if (0..3).any(|c| p[c].abs_diff(q[c]) > 3) {
+                    shaded += 1;
+                }
             }
         }
         worst = worst.max(wrong as f64 / f64::from(a.width * a.height));
+        worst_shaded = worst_shaded.max(shaded as f64 / f64::from(a.width * a.height));
     }
     println!("flight, compact against vertex: worst fraction of pixels over 12 levels {worst:.5}");
+    println!("flight, compact against vertex: worst fraction over 3 levels {worst_shaded:.5}");
     assert!(worst <= 0.001, "{worst} of a flight frame's pixels differ between the compact and the vertex format");
+    assert!(worst_shaded <= 0.002, "{worst_shaded} of a flight frame's pixels differ by more than 3 levels: a normal decode error?");
     for d in [compact, vertex] {
         let _ = std::fs::remove_dir_all(d);
     }

@@ -35,7 +35,7 @@ Source: CON-20, CON-21, ADR 0031 point 4, ADR 0033 points 1-3, 10
 
 #### Scenario: Compact pools
 - **WHEN** the tier pools are configured for the compact format at cells 32, 64 and 16
-- **THEN** the mid and high shares hold 15 and 23 atlases at cells 32, the fixed items (vertex pool, index buffers, node records, slot records) stay inside their reserve, and a tile size with many small slots per atlas gets fewer atlases
+- **THEN** at cells 32 the mid and high shares hold 15 and 23 atlases and one more atlas would not fit, the fixed items (vertex pool, index buffers, node records, slot records) stay inside their reserve, and a tile size with many small slots per atlas gets fewer atlases
 
 #### Scenario: Per frame through the loop
 - **WHEN** the managed frame loop (STRM-017) turns through eight directions with a share much smaller than R

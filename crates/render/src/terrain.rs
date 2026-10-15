@@ -1380,6 +1380,13 @@ pub fn execute_terrain_tiles(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[&Ren
         let cells = plan.cells;
         let cols = (plan.nodes.len().max(1) as f64).sqrt().ceil() as u32;
         let side = cols * (cells + 1);
+        if side > crate::compact::MAX_ONE_SHOT_SIDE {
+            return Err(ExecError::BadPool(format!(
+                "a one-shot atlas for {} nodes of {cells} cells is {side} texels wide, over the {} of the default texture limit; use a persistent renderer",
+                plan.nodes.len(),
+                crate::compact::MAX_ONE_SHOT_SIDE
+            )));
+        }
         let block = u64::from(side) * u64::from(side) * planet_generators::compact::TEXEL_BYTES;
         let share = planet_streaming::budget::FIXED_RESERVE_BYTES + block;
         let pool = planet_frame::pool::compact_format_pool_with(share, cells, side, 1).map_err(ExecError::BadPool)?;

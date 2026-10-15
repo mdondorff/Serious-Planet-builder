@@ -82,6 +82,14 @@ pub fn run_script(
     out: &mut dyn Write,
 ) -> Result<(RgbaFrame, Vec<FrameLog>), String> {
     let first = requests.first().ok_or("an empty script")?;
+    // One tile size and one finest level per script: a resident tile is reused by its mesh key, which does not say which finest
+    // level its format was decided for (the CON-13 guard), and the pools are sized for the first request's cells.
+    if let Some(r) = requests.iter().find(|r| r.lod.cells != first.lod.cells || r.lod.max_level != first.lod.max_level) {
+        return Err(format!(
+            "every request of a script must use the first one's cells ({}) and finest level ({}), got cells {} and level {}",
+            first.lod.cells, first.lod.max_level, r.lod.cells, r.lod.max_level
+        ));
+    }
     let mut renderer = TerrainRenderer::for_context(ctx, first.size, first.lod.cells, u64::from(MAX_FRAMES_IN_FLIGHT));
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let plan_pool = Arc::new(ThreadPool::new(1));
