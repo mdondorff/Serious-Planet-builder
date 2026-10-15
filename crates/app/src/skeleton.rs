@@ -966,6 +966,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     )
     .map_err(err)?;
     // Heaviest first: the light orbit view never raises idle clocks by itself, so it runs after the GPU is busy.
+    let mut warmups: Vec<(String, planet_perf::clock::WarmUpOutcome)> = Vec::new();
     for index in [6usize, 5, 3, 0] {
         let (name, camera) = views[index];
         let req = TerrainRequest {
@@ -1009,6 +1010,24 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         .map_err(err)?;
         for _ in 0..warmup {
             renderer.render(ctx, &plan, true).map_err(|e| e.to_string())?;
+        }
+        // Bring the GPU to its loaded state before measuring (ADR 0034): chunks of frames until the state reads P0, with a
+        // measured cap. Not in a smoke run (it is no measurement and may be on a software adapter without `nvidia-smi`).
+        if !smoke {
+            let started = Instant::now();
+            let outcome = planet_perf::clock::warm_up(
+                planet_perf::clock::WARMUP_CAP_S,
+                || {
+                    for _ in 0..planet_perf::clock::WARMUP_CHUNK_FRAMES {
+                        renderer.render(ctx, &plan, true).map_err(|e| e.to_string())?;
+                    }
+                    Ok(())
+                },
+                || planet_perf::query_nvidia_smi().as_ref().map(planet_perf::clock::ClockPoint::from),
+                || started.elapsed().as_secs_f64(),
+            )?;
+            writeln!(out, "{}", outcome.line(name)).map_err(err)?;
+            warmups.push((name.to_string(), outcome));
         }
         // Run-to-run noise above the limit gets one retry of this view's runs (ADR 0020); still noisy: the session is invalid.
         let mut attempt = 0;
@@ -1081,9 +1100,34 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     for w in planet_perf::session_warnings(&crate::facts(ctx), scheme.as_deref(), &reports, smoke) {
         writeln!(out, "WARNING (not valid for time budgets): {w}").map_err(err)?;
     }
+    if !smoke {
+        let off: Vec<String> = budget_lines
+            .iter()
+            .map(|(n, _, _)| *n)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .filter(|n| !planet_perf::view_gpu_validity(&reports, &format!("terrain/{n}")).is_valid())
+            .map(str::to_string)
+            .collect();
+        if !off.is_empty() {
+            writeln!(out, "NOT VALID for GPU budgets (clock state outside P0, ADR 0034): {}", off.join(", ")).map_err(err)?;
+        }
+    }
     for (name, total, gpu) in &budget_lines {
         let v = planet_perf::budget_verdict(gpu.as_ref().map(|g| g.median), total.p99);
         let word = |ok: bool| if ok { "ok" } else { "OVER" };
+        let clock_state = planet_perf::view_gpu_validity(&reports, &format!("terrain/{name}"));
+        // ADR 0034: outside P0 the GPU and frame figures are shown but carry no verdict.
+        if let (false, planet_perf::clock::GpuValidity::Invalid(reason)) = (smoke, &clock_state) {
+            let gpu_text = gpu.as_ref().map_or("no GPU timestamps".to_string(), |g| format!("GPU median {:.2} ms", g.median));
+            writeln!(out, "  {name}: NOT VALID for GPU budgets ({reason}): {gpu_text}; frame p99 {:.2} ms (no verdict)", total.p99)
+                .map_err(err)?;
+            continue;
+        }
+        let state_tag = match &clock_state {
+            planet_perf::clock::GpuValidity::Valid(s) if !smoke => format!(" [{s}]"),
+            _ => String::new(),
+        };
         let verdict = match gpu {
             Some(g) => format!(
                 "GPU median {:.2} ms (budget {}) {}; frame p99 {:.2} ms (budget {}) {}",
@@ -1096,7 +1140,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
             ),
             None => format!("no GPU timestamps; frame median {:.2} ms, p99 {:.2} ms (no GPU verdict)", total.median, total.p99),
         };
-        writeln!(out, "  {name}: {verdict}").map_err(err)?;
+        writeln!(out, "  {name}: {verdict}{state_tag}").map_err(err)?;
     }
     // Run-to-run noise within each view (its three runs), reported as the worst view.
     let mut worst_noise = 0.0f64;
@@ -1106,7 +1150,15 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         worst_noise = worst_noise.max(planet_perf::run_to_run_noise(&medians).unwrap_or(0.0));
     }
     writeln!(out, "worst run-to-run noise within a view (max-min)/median: {worst_noise:.3}").map_err(err)?;
-    let json = planet_perf::report_json(&crate::facts(ctx), scheme.as_deref(), &owner_override, &validity, &protocol, &reports);
+    let json = planet_perf::report_json_with_warmups(
+        &crate::facts(ctx),
+        scheme.as_deref(),
+        &owner_override,
+        &validity,
+        &protocol,
+        &reports,
+        &warmups,
+    );
     if smoke && o.out.is_none() {
         return writeln!(out, "smoke run: no log written (pass --out to keep it)").map_err(err);
     }
@@ -1118,13 +1170,18 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     let baseline = planet_perf::compare::baseline_path(&path);
     // Without a baseline file yet, the previous log of this scene stands in (it is used only if it was valid).
     let last_valid = planet_perf::compare::choose_baseline(std::fs::read(&baseline).ok(), std::fs::read(&path).ok());
-    let lines = planet_perf::compare::comparison_lines(last_valid.as_deref(), json.as_bytes());
+    let gpu_baseline = planet_perf::compare::gpu_baseline_path(&path);
+    let last_gpu_valid = planet_perf::compare::choose_baseline(std::fs::read(&gpu_baseline).ok(), std::fs::read(&path).ok());
+    let lines = planet_perf::compare::comparison_lines_gpu(last_valid.as_deref(), last_gpu_valid.as_deref(), json.as_bytes());
     for line in &lines {
         writeln!(out, "{line}").map_err(err)?;
     }
     std::fs::write(&path, &json).map_err(err)?;
     if planet_perf::compare::replaces_baseline(json.as_bytes()) {
         std::fs::write(&baseline, &json).map_err(err)?;
+    }
+    if planet_perf::compare::replaces_gpu_baseline(json.as_bytes()) {
+        std::fs::write(&gpu_baseline, &json).map_err(err)?;
     }
     writeln!(out, "wrote {}", path.display()).map_err(err)
 }

@@ -1,0 +1,6 @@
+- [x] 1.1 proposed ADR 0034 (spec-guardian findings folded in)
+- [x] 1.2 `planet_perf::clock` with tier A tests (validity, equal state, warm-up with fakes)
+- [x] 1.3 log fields, reader, `comparison_lines_gpu`, GPU baseline; tier A tests on recorded fixtures
+- [x] 1.4 terrain perf scene: warm-up, NOT VALID output, GPU baseline file
+- [x] 1.5 TEST-012 delta
+- [x] 1.6 verifier, archive, log line, PR, CI, merge

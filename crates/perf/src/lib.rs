@@ -2,6 +2,7 @@
 //! warm-up, medians and p99, JSON run logs. GPU-free: adapter facts arrive as plain structs and the
 //! frame loop itself is supplied by the renderer once it exists (M2).
 
+pub mod clock;
 pub mod compare;
 pub mod gate;
 
@@ -264,6 +265,25 @@ pub fn session_warnings(adapter: &AdapterFacts, power_scheme: Option<&str>, runs
     w
 }
 
+/// `(gpu_valid, gpu_clock_state)` JSON values of a view: the state is the clock state when valid, else the reason.
+fn gpu_valid_json(v: &clock::GpuValidity) -> (String, String) {
+    match v {
+        clock::GpuValidity::Valid(s) => ("true".into(), json_str(&s.to_string())),
+        clock::GpuValidity::Invalid(r) => ("false".into(), json_str(r)),
+    }
+}
+
+fn warmup_json(view: &str, w: &clock::WarmUpOutcome) -> String {
+    format!(
+        "{{\"view\":{},\"reached\":{},\"chunks\":{},\"seconds\":{},\"last\":{}}}",
+        json_str(view),
+        w.reached,
+        w.chunks,
+        json_f(w.seconds),
+        w.last.as_ref().map_or("null".to_string(), |p| json_str(&format!("{} {:.0} MHz", p.pstate, p.mhz)))
+    )
+}
+
 /// Serialise a whole harness session to JSON (hand-written to keep this crate dependency-free).
 pub fn report_json(
     adapter: &AdapterFacts,
@@ -273,6 +293,33 @@ pub fn report_json(
     protocol: &Protocol,
     runs: &[RunReport],
 ) -> String {
+    report_json_with_warmups(adapter, power_scheme, owner_override, validity, protocol, runs, &[])
+}
+
+/// The clock samples of every run of the view `path`, before and after (ADR 0034 point 2).
+pub fn view_clock_points(runs: &[RunReport], path: &str) -> Vec<Option<clock::ClockPoint>> {
+    runs.iter()
+        .filter(|r| r.path_name == path)
+        .flat_map(|r| [&r.clocks_before, &r.clocks_after])
+        .map(|c| c.as_ref().map(clock::ClockPoint::from))
+        .collect()
+}
+
+/// The GPU validity of the view `path` over the runs of its final batch.
+pub fn view_gpu_validity(runs: &[RunReport], path: &str) -> clock::GpuValidity {
+    clock::gpu_validity(&view_clock_points(runs, path))
+}
+
+/// [`report_json`] plus the warm-up outcome of each view (`warmups`: view name and what the warm-up did).
+pub fn report_json_with_warmups(
+    adapter: &AdapterFacts,
+    power_scheme: Option<&str>,
+    owner_override: &[String],
+    validity: &gate::Validity,
+    protocol: &Protocol,
+    runs: &[RunReport],
+    warmups: &[(String, clock::WarmUpOutcome)],
+) -> String {
     let mut warnings = session_warnings(adapter, power_scheme, runs, protocol.smoke);
     warnings.extend(validity.reasons.iter().cloned());
     if !owner_override.is_empty() {
@@ -281,8 +328,9 @@ pub fn report_json(
     let run_json: Vec<String> = runs
         .iter()
         .map(|r| {
+            let gv = gpu_valid_json(&view_gpu_validity(runs, &r.path_name));
             format!(
-                "{{\"path\":{},\"vram_cap_gb\":{},\"samples\":{},\"median_ms\":{},\"p99_ms\":{},\"min_ms\":{},\"max_ms\":{},\"mean_ms\":{},\"clocks_before\":{},\"clocks_after\":{},\"metrics\":{{{}}},\"counts\":{{{}}}}}",
+                "{{\"path\":{},\"vram_cap_gb\":{},\"samples\":{},\"median_ms\":{},\"p99_ms\":{},\"min_ms\":{},\"max_ms\":{},\"mean_ms\":{},\"clocks_before\":{},\"clocks_after\":{},\"gpu_valid\":{},\"gpu_clock_state\":{},\"metrics\":{{{}}},\"counts\":{{{}}}}}",
                 json_str(&r.path_name),
                 r.vram_cap_gb,
                 r.stats.samples,
@@ -293,19 +341,22 @@ pub fn report_json(
                 json_f(r.stats.mean),
                 clock_json(&r.clocks_before),
                 clock_json(&r.clocks_after),
+                gv.0,
+                gv.1,
                 r.metrics.iter().map(|(n, s)| format!("{}:{{\"median\":{},\"p99\":{},\"max\":{},\"mean\":{},\"samples\":{}}}", json_str(n), json_f(s.median), json_f(s.p99), json_f(s.max), json_f(s.mean), s.samples)).collect::<Vec<_>>().join(","),
                 r.counts.iter().map(|(n, v)| format!("{}:{v}", json_str(n))).collect::<Vec<_>>().join(",")
             )
         })
         .collect();
     format!(
-        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"warnings\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{}}},\"runs\":[{}]}}\n",
+        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"warnings\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{}}},\"runs\":[{}]}}\n",
         json_str(&adapter.name),
         json_str(&adapter.backend),
         power_scheme.map_or("null".to_string(), json_str),
         owner_override.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
         warnings.is_empty(),
         warnings.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
+        warmups.iter().map(|(v, w)| warmup_json(v, w)).collect::<Vec<_>>().join(","),
         protocol.warmup_frames,
         protocol.measured_frames,
         protocol.runs,
