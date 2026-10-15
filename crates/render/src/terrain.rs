@@ -3,6 +3,7 @@
 //! intervals and colours all come from the plan. Shaders see only tile-local and camera-relative quantities (CON-11).
 
 use crate::{read_rgba8, ExecError, GpuContext, RgbaFrame};
+use planet_frame::draw::{build_draw_list, DrawBuffer, DRAW_RECORD_BYTES};
 use planet_frame::pool::tier_pool;
 use planet_frame::{TerrainPlan, TerrainView};
 use planet_generators::mesh::{grid_indices, MeshVertex, TileMesh};
@@ -12,9 +13,10 @@ use std::collections::HashMap;
 /// Grid line spacings of the relief view (metres): 1 cm to 1,000 km, one decade apart.
 pub const GRID_SPACINGS_M: [f64; 9] = [0.01, 0.1, 1.0, 10.0, 100.0, 1.0e3, 1.0e4, 1.0e5, 1.0e6];
 
-/// Bytes of one node uniform (origin, colour, morph interval, one grid phase per decade); the dynamic offset stride
-/// rounds it up.
+/// Bytes of one node record (origin, colour, morph interval, one grid phase per decade) in the storage buffer the shader
+/// indexes with the instance index.
 const NODE_BYTES: u64 = 48 + 16 * GRID_SPACINGS_M.len() as u64;
+const _: () = assert!(NODE_BYTES == planet_frame::draw::NODE_RECORD_BYTES, "the frame crate counts the same record size");
 
 /// The relief grid's anchors for a tile origin (planet-fixed, f64): for each decade the fractional part of
 /// `origin / spacing`, per axis, in cells. The shader adds `local / spacing` to it, so the line coordinate stays a small
@@ -54,7 +56,8 @@ struct Node {
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
-@group(0) @binding(1) var<uniform> node: Node;
+// One record per planned node, read with the draw's instance index (`first_instance` = the node's index in the plan, REND-015).
+@group(0) @binding(1) var<storage, read> nodes: array<Node>;
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -64,12 +67,14 @@ struct VsOut {
     // Morphed position relative to the tile origin: small, tile-local, and what the relief grid is anchored to.
     @location(3) local: vec3<f32>,
     @location(4) height_fine: f32,
+    @location(5) @interpolate(flat) node_index: u32,
 };
 
 @vertex
-fn vs(@location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) normal: vec3<f32>, @location(3) height: f32, @location(4) coarse_height: f32) -> VsOut {
+fn vs(@builtin(instance_index) inst: u32, @location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) normal: vec3<f32>, @location(3) height: f32, @location(4) coarse_height: f32) -> VsOut {
     // The morph distance is measured to the vertex's real position: node selection and the morph interval use bounding
     // volumes that include the node's height range.
+    let node = nodes[inst];
     let m = clamp((length(node.origin_rel.xyz + pos) - node.morph.x) / max(node.morph.y - node.morph.x, 1e-6), 0.0, 1.0);
     let local = mix(pos, coarse, m);
     let p = node.origin_rel.xyz + local;
@@ -82,6 +87,7 @@ fn vs(@location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) 
     out.height_fine = height;
     out.morph = m;
     out.local = local;
+    out.node_index = inst;
     return out;
 }
 
@@ -112,13 +118,13 @@ fn decades(x: f32, wx: f32, base: f32, count: i32, res: f32) -> f32 {
 // to about 6e-8 cells, so a decade whose pixel is narrower than ~8e-7 cells (its line could be a fraction of a pixel off)
 // fades out, fully off below 4e-7: distant 10 km .. 1,000 km lines vanish near the ground, and a decade at full strength
 // keeps its place to under 0.15 px (up to ~0.3 px while it fades in).
-fn grid_axis(lx: f32, wx: f32, axis: i32) -> f32 {
+fn grid_axis(lx: f32, wx: f32, axis: i32, ni: u32) -> f32 {
     var acc = 0.0;
     var s = 0.01;
     for (var k = 0; k < 9; k = k + 1) {
         let w = wx / s;
         let fade = clamp((log2(1.0 / max(w, 1e-6)) - 2.5) / 2.5, 0.0, 1.0) * smoothstep(4.0e-7, 8.0e-7, w);
-        acc = max(acc, line(lx / s + node.phase[k][axis], w) * fade);
+        acc = max(acc, line(lx / s + nodes[ni].phase[k][axis], w) * fade);
         s = s * 10.0;
     }
     return acc;
@@ -139,8 +145,8 @@ fn relief(in: VsOut) -> vec4<f32> {
     let lx = in.local;
     let wgt = clamp(vec3<f32>(1.0) - abs(n) * 1.25, vec3<f32>(0.0), vec3<f32>(1.0));
     let grid = max(
-        max(grid_axis(lx.x, fwidth(lx.x), 0) * wgt.x, grid_axis(lx.y, fwidth(lx.y), 1) * wgt.y),
-        grid_axis(lx.z, fwidth(lx.z), 2) * wgt.z,
+        max(grid_axis(lx.x, fwidth(lx.x), 0, in.node_index) * wgt.x, grid_axis(lx.y, fwidth(lx.y), 1, in.node_index) * wgt.y),
+        grid_axis(lx.z, fwidth(lx.z), 2, in.node_index) * wgt.z,
     );
     // Contours start at 1 m, and fade out wherever the f32 height (spacing about 2.4e-7 of its size) changes by less than
     // a few steps between pixels, which would otherwise draw plateaus of one height as wide bands.
@@ -170,7 +176,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let band_z = log2(max(in.pos.z, 1e-30));
     let w_z = fwidth(band_z);
     if (mode <= 2u) {
-        return vec4<f32>(node.color.rgb, 1.0);
+        return vec4<f32>(nodes[in.node_index].color.rgb, 1.0);
     }
     if (mode == 3u) {
         // Blue = full detail, red = fully morphed onto the coarser grid; red stays the morph value.
@@ -210,9 +216,57 @@ fn view_index(v: TerrainView) -> u32 {
 /// Counts that are deterministic on every adapter (CON-20).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TerrainStats {
+    /// Draws of the frame: one per planned node on either path.
     pub draw_calls: u32,
     pub triangles: u64,
     pub vertex_bytes: u64,
+    /// Draw commands encoded: one per node on the per-draw path, one per run of consecutive nodes in one buffer on the indirect
+    /// path (REND-015).
+    pub encoded_draws: u32,
+    /// Bytes of node records written this frame (both paths).
+    pub node_record_bytes: u64,
+    /// Bytes of draw argument records written this frame (indirect path only).
+    pub argument_bytes: u64,
+}
+
+/// How the renderer submits the planned draws (REND-015). Both draw the same plan in the same order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DrawMode {
+    /// One `draw_indexed` per node with its own vertex-buffer binding: the reference path and the fallback.
+    PerDraw,
+    /// Argument records built on the CPU from the plan, one `multi_draw_indexed_indirect` per run of nodes in one buffer.
+    Indirect,
+}
+
+impl DrawMode {
+    pub fn name(self) -> &'static str {
+        match self {
+            DrawMode::PerDraw => "per-draw",
+            DrawMode::Indirect => "indirect",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "per-draw" => Ok(DrawMode::PerDraw),
+            "indirect" => Ok(DrawMode::Indirect),
+            other => Err(format!("unknown draw mode '{other}' (per-draw or indirect)")),
+        }
+    }
+}
+
+/// Per-frame buffers in a ring of `MAX_FRAMES_IN_FLIGHT` sets (the pipelining rule of STRM-016). `queue.write_buffer` is already
+/// ordered on the queue timeline, so the ring is a deliberate choice that makes the rule explicit, not a requirement.
+const RING: usize = 2;
+
+/// Bytes of the globals uniform (view-projection, height range, view mode).
+const GLOBALS_BYTES: u64 = 96;
+
+struct FrameSet {
+    globals: wgpu::Buffer,
+    nodes: wgpu::Buffer,
+    args: wgpu::Buffer,
+    bind: wgpu::BindGroup,
 }
 
 fn f32_bytes(values: &[f32]) -> Vec<u8> {
@@ -241,11 +295,10 @@ pub struct TerrainRenderer {
     cells: u32,
     pipeline: wgpu::RenderPipeline,
     bgl: wgpu::BindGroupLayout,
-    globals: wgpu::Buffer,
-    nodes: wgpu::Buffer,
+    /// The per-frame buffers, used round robin: `ring[frame % RING]`.
+    ring: Vec<FrameSet>,
     node_capacity: usize,
-    bind: wgpu::BindGroup,
-    stride: u64,
+    draw_mode: DrawMode,
     indices: wgpu::Buffer,
     index_count: u32,
     /// Terrain tiles live in pooled fixed-size slots (STRM-006, ADR 0033 point 3): a few large vertex buffers, one slot per
@@ -326,33 +379,23 @@ impl TerrainRenderer {
         let color = target("terrain-color", format, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
         let depth = target("terrain-depth", wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
         let (color_view, depth_view) = (color.create_view(&Default::default()), depth.create_view(&Default::default()));
-        let globals = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("globals"),
-            size: 96,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let stride = NODE_BYTES.next_multiple_of(u64::from(device.limits().min_uniform_buffer_offset_alignment));
-        let max_nodes = (pool.node_record_bytes / stride) as usize;
+        // The share's node-record bytes bound the ring: per node a record and an argument record in each of the RING sets.
+        let max_nodes = (pool.node_record_bytes.saturating_sub(RING as u64 * GLOBALS_BYTES)
+            / (RING as u64 * (NODE_BYTES + DRAW_RECORD_BYTES))) as usize;
         let node_capacity = 256.min(max_nodes.max(1));
-        let nodes = Self::node_buffer(device, stride, node_capacity);
         let module = device
             .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("terrain"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
-        let uniform = |binding, dynamic| wgpu::BindGroupLayoutEntry {
+        let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: dynamic,
-                min_binding_size: if dynamic { wgpu::BufferSize::new(NODE_BYTES) } else { None },
-            },
+            ty: wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None },
             count: None,
         };
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("terrain-bgl"),
-            entries: &[uniform(0, false), uniform(1, true)],
+            entries: &[entry(0, wgpu::BufferBindingType::Uniform), entry(1, wgpu::BufferBindingType::Storage { read_only: true })],
         });
-        let bind = Self::bind_group(device, &bgl, &globals, &nodes);
+        let ring = Self::make_ring(device, &bgl, node_capacity);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("terrain-layout"),
             bind_group_layouts: &[Some(&bgl)],
@@ -429,11 +472,9 @@ impl TerrainRenderer {
             cells,
             pipeline,
             bgl,
-            globals,
-            nodes,
+            ring,
             node_capacity,
-            bind,
-            stride,
+            draw_mode: ctx.default_draw_mode(),
             indices,
             index_count: index_data.len() as u32,
             pools: pool.slot_pools(),
@@ -455,31 +496,40 @@ impl TerrainRenderer {
         }
     }
 
-    fn node_buffer(device: &wgpu::Device, stride: u64, capacity: usize) -> wgpu::Buffer {
-        device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("nodes"),
-            size: stride * capacity as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        })
+    /// The ring of per-frame buffers for plans of up to `capacity` nodes.
+    fn make_ring(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, capacity: usize) -> Vec<FrameSet> {
+        (0..RING)
+            .map(|_| {
+                let buffer = |label, size, usage| {
+                    device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false })
+                };
+                let globals = buffer("globals", GLOBALS_BYTES, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST);
+                let nodes = buffer("nodes", NODE_BYTES * capacity as u64, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
+                let args =
+                    buffer("draw-args", DRAW_RECORD_BYTES * capacity as u64, wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST);
+                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("terrain-bind"),
+                    layout: bgl,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 1, resource: nodes.as_entire_binding() },
+                    ],
+                });
+                FrameSet { globals, nodes, args, bind }
+            })
+            .collect()
     }
 
-    fn bind_group(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, globals: &wgpu::Buffer, nodes: &wgpu::Buffer) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("terrain-bind"),
-            layout: bgl,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: nodes,
-                        offset: 0,
-                        size: wgpu::BufferSize::new(NODE_BYTES),
-                    }),
-                },
-            ],
-        })
+    /// Choose how draws are submitted. Indirect needs adapter support (`GpuContext::indirect_draw_supported`); where it is
+    /// missing the per-draw loop stays and the mode in effect is returned.
+    pub fn set_draw_mode(&mut self, ctx: &GpuContext, mode: DrawMode) -> DrawMode {
+        self.draw_mode = if mode == DrawMode::Indirect && !ctx.indirect { DrawMode::PerDraw } else { mode };
+        self.draw_mode
+    }
+
+    /// The draw mode in effect.
+    pub fn draw_mode(&self) -> DrawMode {
+        self.draw_mode
     }
 
     /// Upload a tile's vertices once; later calls for the same tile do nothing. The renderer places the tile itself: the
@@ -602,12 +652,12 @@ impl TerrainRenderer {
     /// terrain share (STRM-006).
     pub fn pool_allocated_bytes(&self) -> u64 {
         let blocks: u64 = self.blocks.iter().flatten().map(wgpu::Buffer::size).sum();
-        blocks + self.vertex_pool.as_ref().map_or(0, wgpu::Buffer::size) + self.indices.size() + self.nodes.size()
+        blocks + self.vertex_pool.as_ref().map_or(0, wgpu::Buffer::size) + self.indices.size() + self.node_buffer_bytes()
     }
 
-    /// Bytes of the node record buffer as allocated now (it grows with the largest plan, up to the configured maximum).
+    /// Bytes of the per-frame buffers (the ring of globals, node records and draw arguments) as allocated now (it grows with the largest plan, up to the configured maximum).
     pub fn node_buffer_bytes(&self) -> u64 {
-        self.nodes.size()
+        self.ring.iter().map(|s| s.globals.size() + s.nodes.size() + s.args.size()).sum()
     }
 
     /// Blocks of the main pool allocated so far, and whether the vertex pool is.
@@ -698,14 +748,16 @@ impl TerrainRenderer {
         let device = &ctx.device;
         if plan.nodes.len() > self.node_capacity {
             self.node_capacity = plan.nodes.len().next_power_of_two().min(self.max_nodes);
-            self.nodes = Self::node_buffer(device, self.stride, self.node_capacity);
-            self.bind = Self::bind_group(device, &self.bgl, &self.globals, &self.nodes);
+            // Frames in flight keep the buffers they use alive; the new ring serves the frames from here on.
+            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity);
         }
         let mut globals = f32_bytes(&plan.view_projection);
         globals.extend(f32_bytes(&[lo, hi, 0.0, 0.0]));
         globals.extend([view_index(plan.view), 0, 0, 0].iter().flat_map(|v: &u32| v.to_le_bytes()));
-        ctx.queue.write_buffer(&self.globals, 0, &globals);
-        let mut nodes = vec![0u8; self.stride as usize * plan.nodes.len().max(1)];
+        // Each frame writes its own set of the ring, so a frame still in flight keeps the records it reads.
+        let set = &self.ring[(self.frame % RING as u64) as usize];
+        ctx.queue.write_buffer(&set.globals, 0, &globals);
+        let mut nodes = vec![0u8; NODE_BYTES as usize * plan.nodes.len().max(1)];
         for (i, d) in plan.nodes.iter().enumerate() {
             let r = d.camera_relative_origin;
             let c = d.color.map(|v| f32::from(v) / 255.0);
@@ -714,13 +766,22 @@ impl TerrainRenderer {
                 floats.extend([p[0], p[1], p[2], 0.0]);
             }
             let b = f32_bytes(&floats);
-            nodes[i * self.stride as usize..i * self.stride as usize + NODE_BYTES as usize].copy_from_slice(&b);
+            nodes[i * NODE_BYTES as usize..(i + 1) * NODE_BYTES as usize].copy_from_slice(&b);
         }
-        ctx.queue.write_buffer(&self.nodes, 0, &nodes);
+        ctx.queue.write_buffer(&set.nodes, 0, &nodes);
+        let mut stats = TerrainStats { node_record_bytes: nodes.len() as u64, ..Default::default() };
+        // The argument records come from the plan and the slots alone (CON-03: the GPU culls and decides nothing).
+        let indirect = (self.draw_mode == DrawMode::Indirect).then(|| {
+            let slots = plan.nodes.iter().map(|d| self.tiles[&d.tile].1);
+            build_draw_list(slots, self.pool.block_slots, (self.slot_bytes / MeshVertex::STRIDE) as u32, self.index_count)
+        });
+        if let Some(list) = &indirect {
+            ctx.queue.write_buffer(&set.args, 0, &list.record_bytes());
+            stats.argument_bytes = list.argument_bytes();
+        }
 
         let timing = if timed { self.timing.as_ref() } else { None };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("terrain") });
-        let mut stats = TerrainStats::default();
         {
             let [r, g, b, a] = plan.clear_color.map(|v| f64::from(v) / 255.0);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -746,15 +807,32 @@ impl TerrainRenderer {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-            for (i, d) in plan.nodes.iter().enumerate() {
-                pass.set_bind_group(0, &self.bind, &[(i as u64 * self.stride) as u32]);
-                let slot = self.tiles[&d.tile].1;
-                let (buffer, offset) = self.slot_buffer(slot);
-                pass.set_vertex_buffer(0, buffer.slice(offset..offset + self.slot_bytes));
-                pass.draw_indexed(0..self.index_count, 0, 0..1);
-                stats.draw_calls += 1;
-                stats.triangles += u64::from(self.index_count) / 3;
+            pass.set_bind_group(0, &set.bind, &[]);
+            match &indirect {
+                Some(list) => {
+                    // One multi-draw per run of consecutive nodes in one buffer; the node index is the first instance.
+                    for run in &list.runs {
+                        let buffer = match run.buffer {
+                            DrawBuffer::VertexPool => self.vertex_pool.as_ref().expect("vertex pool of a resident tile"),
+                            DrawBuffer::Block(b) => self.blocks[b as usize].as_ref().expect("block of a resident tile"),
+                        };
+                        pass.set_vertex_buffer(0, buffer.slice(..));
+                        pass.multi_draw_indexed_indirect(&set.args, u64::from(run.first) * DRAW_RECORD_BYTES, run.count);
+                        stats.encoded_draws += 1;
+                    }
+                }
+                None => {
+                    for (i, d) in plan.nodes.iter().enumerate() {
+                        let slot = self.tiles[&d.tile].1;
+                        let (buffer, offset) = self.slot_buffer(slot);
+                        pass.set_vertex_buffer(0, buffer.slice(offset..offset + self.slot_bytes));
+                        pass.draw_indexed(0..self.index_count, 0, i as u32..i as u32 + 1);
+                        stats.encoded_draws += 1;
+                    }
+                }
             }
+            stats.draw_calls = plan.nodes.len() as u32;
+            stats.triangles = plan.nodes.len() as u64 * u64::from(self.index_count) / 3;
         }
         if let Some(t) = timing {
             encoder.resolve_query_set(&t.queries, 0..2, &t.resolve, 0);

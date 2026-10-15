@@ -1,0 +1,6 @@
+- [x] 1.1 tier A: `planet_frame::draw` unit tests and `draw_records.rs` (records = plan nodes, bytes per standard view); tier C `gpu_indirect.rs` (identical images, ring), app test for `--draw`
+- [x] 1.2 frame `draw` module; render: storage node records, ring, `DrawMode`, indirect submission, feature query; app `--draw`
+- [x] 1.3 spec REND-015
+- [x] 1.4 `test gpu`, `test gpu --real`, golden status
+- [x] 1.5 indicative CPU encode time per draw at ground-1m (ad hoc, not a measurement), docs/learnings.md
+- [x] 1.6 reviewers (numerics, spec-guardian, verifier), archive, log line, PR, CI green, merge
