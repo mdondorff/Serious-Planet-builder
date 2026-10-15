@@ -331,6 +331,9 @@ pub struct PlanOutcome {
 #[derive(Default)]
 struct WorkerState {
     running: bool,
+    /// Set when the pipeline is dropped: a job that has not started does not run, and a running one does not start its
+    /// residency set, its prefetch set or the next pending plan (STRM-005: teardown waits only for the job in flight).
+    closed: bool,
     pending: Option<(u64, TerrainRequest, Option<PlanetFixed>)>,
     done: Option<Result<PlanOutcome, String>>,
     /// The newest R, delivered after the plan of the same job (or with it when the position did not change).
@@ -404,6 +407,12 @@ impl PlanWorker {
             (Arc::clone(&self.state), Arc::clone(&self.cache), Arc::clone(&self.field), self.threads, Arc::clone(&self.spawner));
         let spawner_again = Arc::clone(&spawner);
         spawner.spawn(Box::new(move || {
+            if state.lock().expect("worker state").closed {
+                let mut s = state.lock().expect("worker state");
+                s.pending = None;
+                s.running = false;
+                return;
+            }
             let started = std::time::Instant::now();
             // A panicking field is an error outcome, not a worker that stays "running" for ever.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -425,7 +434,7 @@ impl PlanWorker {
             }
             // R follows the plan in the same job, after the plan is out (a frame never waits for it). It shares the plan's
             // cache, and when the position and parameters equal the previous R's (a rotation) nothing is selected at all.
-            let residency = planned.then(|| {
+            let residency = (planned && !state.lock().expect("worker state").closed).then(|| {
                 let key = ResidencyKey::of(&req);
                 let reuse =
                     state.lock().expect("worker state").last_residency.as_ref().filter(|(k, _)| *k == key).map(|(_, r)| Arc::clone(r));
@@ -445,6 +454,9 @@ impl PlanWorker {
                 let made = made.and_then(|(residency, reused)| {
                     let prefetch = match predicted {
                         Some(p) => {
+                            if state.lock().expect("worker state").closed {
+                                return Err(PlanError::HeightField("closed".into()));
+                            }
                             let mut ahead_req = req.clone();
                             ahead_req.camera.position = p;
                             let ahead = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -478,7 +490,7 @@ impl PlanWorker {
                         Err(e) => s.residency_done = Some(Err(e.to_string())),
                     }
                 }
-                let next = s.pending.take();
+                let next = if s.closed { None } else { s.pending.take() };
                 if next.is_none() {
                     s.running = false;
                 }
@@ -511,6 +523,11 @@ impl PlanWorker {
             residencies: s.residencies,
             residencies_reused: s.residencies_reused,
         }
+    }
+
+    /// Stop the worker: jobs that have not started do not run and a running job ends after its current computation.
+    pub fn close(&self) {
+        self.state.lock().expect("worker state").closed = true;
     }
 
     /// A plan is being computed or waits for its turn.
@@ -676,5 +693,12 @@ impl<'a> ResidentRecords<'a> {
     pub fn record(&self, tile: TileId) -> ResidentTile {
         let centre = tile.center_direction(self.map);
         ResidentTile { mesh_key: self.keyer.key(tile), origin: PlanetFixed(centre * (self.radius_m + self.field.height(centre))) }
+    }
+}
+
+impl Drop for PlanPipeline {
+    /// Dropping the pipeline closes its worker: the plan in flight finishes, nothing else starts (STRM-005 teardown).
+    fn drop(&mut self) {
+        self.worker.close();
     }
 }

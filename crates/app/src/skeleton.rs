@@ -787,6 +787,75 @@ impl planet_streaming::TileSource<RenderTile> for MeshSource {
         let field = self.world.field()?;
         Ok(tile_for(self.format, field.as_ref(), tile, self.cells, self.world.radius_m(), self.max_level))
     }
+
+    /// The stage boundary of a tile is every height sample: once the token is set the field answers 0 without reading the
+    /// store, so the generation runs out in microseconds and the garbage tile is dropped, never returned (STRM-005: a job
+    /// stops at its next stage boundary; a teardown or a teleport does not wait for a cold tile to read its blocks).
+    fn load_staged(&self, tile: TileId, cancel: &planet_streaming::CancelToken) -> Result<Option<RenderTile>, String> {
+        if cancel.is_cancelled() {
+            return Ok(None);
+        }
+        let field = self.world.field()?;
+        let guarded = CancelGuarded { inner: field.as_ref(), cancel };
+        let made = tile_for(self.format, &guarded, tile, self.cells, self.world.radius_m(), self.max_level);
+        Ok((!cancel.is_cancelled()).then_some(made))
+    }
+}
+
+/// A height field that stops reading once its job is cancelled: every sample polls the token and answers 0 afterwards. Every
+/// other method is the inner field's (so the keys of a tile built through it are the inner field's).
+pub(crate) struct CancelGuarded<'a> {
+    pub(crate) inner: &'a dyn planet_generators::height::HeightField,
+    pub(crate) cancel: &'a planet_streaming::CancelToken,
+}
+
+impl planet_generators::height::HeightField for CancelGuarded<'_> {
+    fn height(&self, dir: Vec3) -> f64 {
+        if self.cancel.is_cancelled() {
+            0.0
+        } else {
+            self.inner.height(dir)
+        }
+    }
+    fn seed(&self) -> u64 {
+        self.inner.seed()
+    }
+    fn implementation_id(&self) -> &'static str {
+        self.inner.implementation_id()
+    }
+    fn version(&self) -> u32 {
+        self.inner.version()
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        self.inner.max_abs_height_m()
+    }
+    fn inputs_hash(&self) -> u64 {
+        self.inner.inputs_hash()
+    }
+    fn read_records(&self) -> Vec<planet_world_def::ReadRecord> {
+        self.inner.read_records()
+    }
+    fn read_records_for(&self, tile: TileId, map: &dyn FaceMapping) -> Vec<planet_world_def::ReadRecord> {
+        self.inner.read_records_for(tile, map)
+    }
+    fn reads_cells(&self) -> bool {
+        self.inner.reads_cells()
+    }
+    fn inputs_hash_for(&self, tile: TileId, map: &dyn FaceMapping) -> u64 {
+        self.inner.inputs_hash_for(tile, map)
+    }
+    fn body(&self) -> planet_world_def::BodyId {
+        self.inner.body()
+    }
+    fn source_key(&self) -> Option<[u8; 16]> {
+        self.inner.source_key()
+    }
+    fn surface_id(&self) -> &'static str {
+        self.inner.surface_id()
+    }
+    fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
+        self.inner.height_bounds(centre, angular_radius)
+    }
 }
 
 /// The tile in the format the run uses: the compact format for levels 3 and finer with the vertex fallback (GEN-019), or the
@@ -1255,6 +1324,56 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A height field that counts the samples it is asked for.
+    struct Sampled<'a> {
+        inner: planet_generators::height::Reference,
+        calls: &'a std::sync::atomic::AtomicUsize,
+    }
+
+    impl planet_generators::height::HeightField for Sampled<'_> {
+        fn height(&self, dir: Vec3) -> f64 {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.height(dir)
+        }
+        fn seed(&self) -> u64 {
+            self.inner.seed()
+        }
+        fn implementation_id(&self) -> &'static str {
+            self.inner.implementation_id()
+        }
+        fn version(&self) -> u32 {
+            self.inner.version()
+        }
+        fn max_abs_height_m(&self) -> f64 {
+            self.inner.max_abs_height_m()
+        }
+    }
+
+    // spec: STRM-005
+    #[test]
+    fn a_cancelled_tile_job_stops_reading_at_its_next_sample_and_a_live_one_builds_the_same_tile() {
+        use planet_generators::height::HeightField;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let tile = TileId::new(Face(1), 6, 5, 9).unwrap();
+        for format in [planet_render::TileFormat::Compact, planet_render::TileFormat::Vertex] {
+            let (live_calls, cancelled_calls, direct_calls) = (AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0));
+            fn make(calls: &AtomicUsize) -> Sampled<'_> {
+                Sampled { inner: planet_generators::height::Reference(7), calls }
+            }
+            let direct = tile_for(format, &make(&direct_calls), tile, 16, RADIUS_M, 22);
+            let (inner, never) = (make(&live_calls), planet_streaming::CancelToken::never());
+            let guarded = CancelGuarded { inner: &inner, cancel: &never };
+            assert_eq!(tile_for(format, &guarded, tile, 16, RADIUS_M, 22), direct, "{format:?}: the guard changes nothing while live");
+            assert_eq!(live_calls.load(Ordering::SeqCst), direct_calls.load(Ordering::SeqCst));
+            assert_eq!(guarded.inputs_hash(), inner.inputs_hash(), "keys are the inner field's");
+            let (inner, cancelled) = (make(&cancelled_calls), planet_streaming::CancelToken::cancelled());
+            let guarded = CancelGuarded { inner: &inner, cancel: &cancelled };
+            let _ = tile_for(format, &guarded, tile, 16, RADIUS_M, 22);
+            assert_eq!(cancelled_calls.load(Ordering::SeqCst), 0, "{format:?}: a cancelled job reads nothing more");
+            assert!(direct_calls.load(Ordering::SeqCst) > 100, "the tile does read the field");
+        }
+    }
 
     // spec: TEST-008
     #[test]
