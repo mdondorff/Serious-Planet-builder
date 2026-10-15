@@ -8,6 +8,7 @@ use planet_core::{PlanetFixed, TileId, Vec3};
 use planet_frame::managed::{FrameCounts, ManagedFrame, ManagedLoop, TileSink};
 use planet_frame::pipeline::{DrawKind, PlanField, PlanPipeline, PlanWorker, ResidentRecords};
 use planet_frame::prefetch::PrefetchConfig;
+use planet_frame::upload::{UploadBudget, DEFAULT_TILE_BYTES_PER_FRAME};
 use planet_frame::{
     plan_terrain_field, plan_terrain_threaded, residency_set_field, Camera, LodParams, SelectionCache, TerrainRequest, TerrainView,
 };
@@ -75,6 +76,51 @@ impl TileSource<TileMesh> for Source {
     }
 }
 
+/// Tile jobs that wait until the machine finishes them, `threads` at a time (all done when `run` returns): the completion
+/// order differs with the thread count, the results must not.
+#[derive(Default)]
+struct BatchSpawner {
+    queue: std::sync::Mutex<std::collections::VecDeque<planet_streaming::Job>>,
+    threads: AtomicUsize,
+}
+
+impl BatchSpawner {
+    fn run(&self, n: usize) -> usize {
+        let jobs: Vec<planet_streaming::Job> = {
+            let mut q = self.queue.lock().unwrap();
+            let k = n.min(q.len());
+            q.drain(..k).collect()
+        };
+        let count = jobs.len();
+        let threads = self.threads.load(Ordering::SeqCst).max(1);
+        if threads == 1 {
+            jobs.into_iter().for_each(|j| j());
+        } else {
+            let jobs = std::sync::Mutex::new(jobs.into_iter().map(Some).collect::<Vec<_>>());
+            let next = AtomicUsize::new(0);
+            std::thread::scope(|s| {
+                for _ in 0..threads {
+                    s.spawn(|| loop {
+                        let i = next.fetch_add(1, Ordering::SeqCst);
+                        let job = jobs.lock().unwrap().get_mut(i).and_then(Option::take);
+                        match job {
+                            Some(j) => j(),
+                            None => break,
+                        }
+                    });
+                }
+            });
+        }
+        count
+    }
+}
+
+impl Spawner for BatchSpawner {
+    fn spawn(&self, job: planet_streaming::Job) {
+        self.queue.lock().unwrap().push_back(job);
+    }
+}
+
 /// The renderer's side as counts: which tile sits in which slot; a slot never holds two tiles.
 #[derive(Default)]
 struct CountingSink {
@@ -82,9 +128,17 @@ struct CountingSink {
     owner: HashMap<SlotRef, TileId>,
     uploads: u64,
     forgets: u64,
+    /// Bytes one tile occupies in this sink's format (0: the fake meshes have no vertices, nothing is ever deferred).
+    bytes: u64,
+    /// Every tile written, in order.
+    order: Vec<TileId>,
 }
 
 impl TileSink for CountingSink {
+    fn upload_bytes(&self, _mesh: &TileMesh) -> u64 {
+        self.bytes
+    }
+
     fn upload_at(&mut self, mesh: &TileMesh, slot: SlotRef) -> Result<(), String> {
         if let Some(other) = self.owner.get(&slot) {
             if *other != mesh.id {
@@ -96,6 +150,7 @@ impl TileSink for CountingSink {
         }
         self.owner.insert(slot, mesh.id);
         self.uploads += 1;
+        self.order.push(mesh.id);
         Ok(())
     }
 
@@ -110,7 +165,7 @@ impl TileSink for CountingSink {
 struct Rig {
     lp: ManagedLoop,
     plan_spawner: Arc<ManualSpawner>,
-    tile_spawner: Arc<ManualSpawner>,
+    tile_spawner: Arc<BatchSpawner>,
     sink: CountingSink,
     capacity: usize,
     clock: Arc<FakeClock>,
@@ -128,10 +183,19 @@ impl Rig {
         Rig::build(capacity, true)
     }
 
+    /// A rig whose tiles weigh `tile_bytes` in the sink and whose loop has the upload budget `budget` (STRM-006).
+    fn budgeted(capacity: usize, prefetch: bool, tile_bytes: u64, budget: UploadBudget) -> Rig {
+        Rig::build_with(capacity, prefetch, tile_bytes, budget)
+    }
+
     fn build(capacity: usize, prefetch: bool) -> Rig {
+        Rig::build_with(capacity, prefetch, 0, UploadBudget::default())
+    }
+
+    fn build_with(capacity: usize, prefetch: bool, tile_bytes: u64, budget: UploadBudget) -> Rig {
         let clock = Arc::new(FakeClock::default());
         let plan_spawner = Arc::new(ManualSpawner::default());
-        let tile_spawner = Arc::new(ManualSpawner::default());
+        let tile_spawner = Arc::new(BatchSpawner::default());
         let pipe = PlanPipeline::new(PlanWorker::new(plan_spawner.clone(), Arc::new(Reference(1)), 2));
         let config = StreamConfig {
             max_in_flight: 64,
@@ -144,11 +208,19 @@ impl Rig {
         };
         let mut streamer = Streamer::new(Arc::new(Source { lod: lod() }), tile_spawner.clone() as Arc<dyn Spawner>, clock.clone(), config);
         streamer.load_roots_blocking().unwrap();
-        let mut lp = ManagedLoop::new(pipe, ResidencyManager::new(streamer));
+        let mut lp = ManagedLoop::new(pipe, ResidencyManager::new(streamer)).with_upload_budget(budget);
         if prefetch {
             lp = lp.with_prefetch(PrefetchConfig::default(), R, clock.clone());
         }
-        Rig { lp, plan_spawner, tile_spawner, sink: CountingSink::default(), capacity, clock, tile_jobs_per_frame: 10_000 }
+        Rig {
+            lp,
+            plan_spawner,
+            tile_spawner,
+            sink: CountingSink { bytes: tile_bytes, ..Default::default() },
+            capacity,
+            clock,
+            tile_jobs_per_frame: 10_000,
+        }
     }
 
     /// One iteration, then the workers finish what they have (a plan, the tiles dispatched): the next frame sees the results.
@@ -176,7 +248,12 @@ impl Rig {
     fn check_mirror(&self) {
         let streamer = self.lp.manager().streamer();
         let st = streamer.stats();
-        assert_eq!(self.sink.by_tile.len(), st.resident, "the sink holds the streamer's resident tiles");
+        // The sink holds the streamer's resident tiles except those the upload budget defers (STRM-006): they wait, never dropped.
+        assert_eq!(
+            self.sink.by_tile.len() + self.lp.pending().len(),
+            st.resident,
+            "the sink holds the resident tiles but the deferred ones"
+        );
         assert_eq!(self.sink.owner.len(), self.sink.by_tile.len(), "no slot holds two tiles");
         for (tile, slot) in &self.sink.by_tile {
             assert!(streamer.is_resident(*tile), "{tile:?} left the streamer but not the sink");
@@ -758,4 +835,194 @@ fn the_prefetch_set_is_computed_on_the_worker_and_never_on_the_frame() {
     spawner.run(1);
     pipe.begin_frame_predicted(&req, None, &none).unwrap();
     assert!(pipe.residency().unwrap().prefetch.is_empty());
+}
+
+// ---- the per-frame upload budget (STRM-006 upload cap) ----
+
+/// Bytes of one vertex-format tile at cells 32 (what the renderer uploads today).
+const VERTEX_TILE_BYTES: u64 = 53_724;
+
+/// Rank of a tile in the upload order, by the wants the frame started with, worked out here from first principles: the draw
+/// set with its ancestors and the roots, then R with its ancestors, then the prefetch set, then the rest; coarse before fine.
+fn upload_ranker(wants: &planet_streaming::Wants) -> impl Fn(TileId) -> (u8, u8) {
+    let d = closure(wants.draw.iter().map(|(t, _)| *t));
+    let r = closure(wants.residency.iter().map(|(t, _)| *t));
+    let p = closure(wants.prefetch.iter().map(|(t, _)| *t));
+    move |tile: TileId| {
+        let class = if d.contains(&tile) || tile.level() == 0 {
+            0
+        } else if r.contains(&tile) {
+            1
+        } else if p.contains(&tile) {
+            2
+        } else {
+            3
+        };
+        (class, tile.level())
+    }
+}
+
+/// What the frame did, for comparing runs.
+#[derive(Debug, PartialEq)]
+struct UploadFrame {
+    written: Vec<TileId>,
+    bytes: u64,
+    deferred: usize,
+    resident: usize,
+}
+
+/// Run `frames` of `script` and check every frame against the budget's rules; return the frames.
+fn run_budgeted(rig: &mut Rig, frames: usize, script: &dyn Fn(usize) -> PlanetFixed, check_blank: bool) -> Vec<UploadFrame> {
+    let cap = rig.lp.upload_budget().tile_bytes_per_frame;
+    let bytes = rig.sink.bytes;
+    let mut out = Vec::new();
+    for k in 0..frames {
+        let wants = rig.lp.wants().clone();
+        let before = rig.sink.order.len();
+        let f = rig.begin(&request(script(k), 0.3, -0.4));
+        let c = f.counts;
+        let written: Vec<TileId> = rig.sink.order[before..].to_vec();
+        assert_eq!(c.uploaded as usize, written.len());
+        assert_eq!(c.upload_bytes, written.len() as u64 * bytes, "frame {k}: the counts report what was written");
+        // The cap is exceeded only by the one-tile rule; a frame that defers is full (nothing more fits).
+        assert!(c.upload_bytes <= cap || c.uploaded == 1, "frame {k}: {} bytes in {} tiles over the cap {cap}", c.upload_bytes, c.uploaded);
+        if c.deferred > 0 {
+            assert!(c.uploaded >= 1, "frame {k}: tiles wait but none was written (starvation)");
+            assert!(
+                c.upload_bytes + bytes > cap,
+                "frame {k}: deferred {} tiles though {} of {cap} bytes were used",
+                c.deferred,
+                c.upload_bytes
+            );
+        }
+        // Class order: the written tiles are in rank order, and nothing that waits ranks before the last one written.
+        let rank = upload_ranker(&wants);
+        let ranks: Vec<_> = written.iter().map(|t| rank(*t)).collect();
+        assert!(ranks.windows(2).all(|w| w[0] <= w[1]), "frame {k}: written out of order: {ranks:?}");
+        if let Some(last) = ranks.last() {
+            for p in rig.lp.pending() {
+                assert!(rank(p) >= *last, "frame {k}: {p:?} waits though a later tile ({last:?}) was written");
+            }
+        }
+        // Nothing is dropped: the streamer's resident tiles are the sink's plus the waiting ones.
+        let st = rig.lp.manager().streamer().stats();
+        assert_eq!(rig.sink.by_tile.len() + rig.lp.pending().len(), st.resident, "frame {k}");
+        assert_eq!(c.deferred, rig.lp.pending().len());
+        if check_blank {
+            assert_eq!(f.pipeline.draw.blank, 0, "frame {k}: blank while tiles wait");
+        }
+        out.push(UploadFrame { written, bytes: c.upload_bytes, deferred: c.deferred, resident: st.resident });
+        rig.finish();
+    }
+    out
+}
+
+// spec: STRM-006, STRM-017, STRM-002
+#[test]
+fn on_the_dive_and_a_teleport_the_upload_cap_holds_in_every_frame_in_class_order_and_no_frame_is_blank() {
+    let mut rig = Rig::budgeted(1_000_000, true, VERTEX_TILE_BYTES, UploadBudget::default());
+    let cap = DEFAULT_TILE_BYTES_PER_FRAME;
+    assert_eq!(cap, 1 << 20);
+    assert_eq!(VERTEX_TILE_BYTES, planet_generators::mesh::vertex_count(32) as u64 * planet_generators::mesh::MeshVertex::STRIDE);
+    let c = FrameCounts { upload_bytes: 7, deferred: 8, node_bytes: 9, uploaded: 3, ..Default::default() };
+    assert_eq!(FrameCounts::NAMES.len(), c.values().len());
+    assert_eq!(&c.values()[7..], &[3, 0, 7, 8, 9]);
+    assert_eq!(&FrameCounts::NAMES[9..], &["upload_bytes", "deferred", "node_bytes"]);
+    let dive = run_budgeted(&mut rig, 105, &dive_position, true);
+    // The teleport: the dive's last place to the other side of the planet, then hold.
+    let b = there();
+    let teleport = run_budgeted(&mut rig, 80, &|_| b, true);
+    let deferring = dive.iter().chain(&teleport).filter(|f| f.deferred > 0).count();
+    let peak = dive.iter().chain(&teleport).map(|f| f.bytes).max().unwrap();
+    eprintln!("dive+teleport: {deferring} frames deferred tiles, peak {peak} B of {cap} B");
+    assert!(deferring > 5, "the scripts must hit the cap, or the test proves nothing: {deferring}");
+    assert!(peak <= cap && peak > cap - VERTEX_TILE_BYTES, "full frames fill the cap to within one tile: {peak}");
+    // The teleport fill drains, and once it has the frame is the synchronous frame.
+    let mut last = None;
+    for _ in 0..200 {
+        let f = rig.step(&request(b, 0.3, -0.4));
+        if rig.lp.pending().is_empty() && f.pipeline.draw.kind == DrawKind::Exact && f.counts.queued == 0 && f.counts.in_flight == 0 {
+            last = Some(f);
+            break;
+        }
+    }
+    let f = last.expect("the fill did not drain");
+    assert_eq!(f.pipeline.draw.plan, plan_terrain_field(&request(b, 0.3, -0.4), &Reference(1)).unwrap());
+    assert_eq!(f.counts.node_bytes, planet_frame::draw::indirect_frame_bytes(f.pipeline.draw.plan.nodes.len()));
+}
+
+// spec: STRM-006, STRM-002
+#[test]
+fn a_tile_larger_than_the_cap_is_still_written_one_a_frame_and_nothing_starves() {
+    let mut rig =
+        Rig::budgeted(1_000_000, false, VERTEX_TILE_BYTES, UploadBudget { tile_bytes_per_frame: 10_000, node_records_in_cap: false });
+    // The six roots go first, one per frame; the view is blank only until they are in.
+    let frames = run_budgeted(&mut rig, 40, &|_| here(), false);
+    assert!(frames.iter().all(|f| f.written.len() <= 1), "one tile a frame at most, though every tile is over the cap");
+    assert!(frames.iter().take(30).all(|f| f.written.len() == 1), "and one a frame while any waits: {frames:?}");
+    let roots: Vec<_> = frames.iter().take(6).flat_map(|f| f.written.iter()).collect();
+    assert!(roots.iter().all(|t| t.level() == 0), "the roots first: {roots:?}");
+    let f = rig.step(&request(here(), 0.3, -0.4));
+    assert_eq!(f.pipeline.draw.blank, 0, "never blank once the roots are in");
+}
+
+// spec: STRM-006
+#[test]
+fn node_records_are_their_own_line_and_count_inside_the_cap_only_when_asked() {
+    let own = UploadBudget { tile_bytes_per_frame: 400_000, node_records_in_cap: false };
+    let inside = UploadBudget { node_records_in_cap: true, ..own };
+    let mut rigs = [Rig::budgeted(1_000_000, false, VERTEX_TILE_BYTES, own), Rig::budgeted(1_000_000, false, VERTEX_TILE_BYTES, inside)];
+    let mut prev = [0u64; 2];
+    let mut shrunk = false;
+    for k in 0..60 {
+        for (i, rig) in rigs.iter_mut().enumerate() {
+            let f = rig.begin(&request(dive_position(k), 0.3, -0.4));
+            let c = f.counts;
+            let allowance = rig.lp.upload_budget().allowance(prev[i]);
+            assert!(c.upload_bytes <= allowance || c.uploaded == 1, "run {i} frame {k}: {} over {allowance}", c.upload_bytes);
+            assert_eq!(c.node_bytes, planet_frame::draw::indirect_frame_bytes(f.pipeline.draw.plan.nodes.len()));
+            if i == 0 {
+                assert_eq!(allowance, 400_000, "the node records are not in this cap");
+            } else {
+                shrunk |= allowance < 400_000 && c.node_bytes > 0;
+            }
+            prev[i] = c.node_bytes;
+            rig.finish();
+        }
+    }
+    assert!(shrunk, "the node records must reduce the tile allowance when they are counted inside");
+}
+
+// spec: STRM-006, CON-14
+#[test]
+fn the_upload_order_and_what_is_written_each_frame_are_the_same_on_1_2_and_8_threads() {
+    let script = |k: usize| if k < 35 { dive_position(k) } else { there() };
+    let mut runs = Vec::new();
+    for threads in [1usize, 2, 8] {
+        let mut rig =
+            Rig::budgeted(1_000_000, true, VERTEX_TILE_BYTES, UploadBudget { tile_bytes_per_frame: 300_000, node_records_in_cap: false });
+        rig.tile_spawner.threads.store(threads, Ordering::SeqCst);
+        runs.push(run_budgeted(&mut rig, 60, &script, true));
+    }
+    assert!(runs[0].iter().any(|f| f.deferred > 0));
+    assert_eq!(runs[0], runs[1], "1 vs 2 threads");
+    assert_eq!(runs[0], runs[2], "1 vs 8 threads");
+}
+
+// spec: STRM-006, STRM-017
+#[test]
+fn a_full_fill_at_the_cap_takes_the_frames_the_cap_allows_and_defers_only_full_frames() {
+    // Ground view from a cold start, every tile finishing within the frame it is asked for: the cap alone paces the fill.
+    let mut rig = Rig::budgeted(1_000_000, false, VERTEX_TILE_BYTES, UploadBudget::default());
+    let ground = track(0.0, 2.0);
+    let frames = run_budgeted(&mut rig, 120, &|_| ground, true);
+    let total: u64 = frames.iter().map(|f| f.written.len() as u64).sum();
+    let per_frame = (DEFAULT_TILE_BYTES_PER_FRAME / VERTEX_TILE_BYTES) as usize;
+    let busy = frames.iter().filter(|f| f.bytes > 0).count();
+    eprintln!("ground fill: {total} tiles in {busy} upload frames at {per_frame} tiles of {VERTEX_TILE_BYTES} B a frame");
+    assert!(total > 400, "the fill must be large enough to span many frames: {total}");
+    assert!(rig.lp.pending().is_empty(), "the fill drained within the script");
+    assert!(busy >= total.div_ceil(per_frame as u64) as usize, "never faster than the cap allows");
+    assert!(frames.iter().all(|f| f.written.len() <= per_frame));
+    assert!(frames.iter().any(|f| f.deferred > 0));
 }

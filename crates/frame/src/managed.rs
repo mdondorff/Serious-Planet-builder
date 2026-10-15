@@ -4,7 +4,9 @@
 //! 1. the manager fits the wants (the newest plan's draw set D, the newest residency set R from the worker, and the prefetch
 //!    set of the camera's translation, empty without [`ManagedLoop::with_prefetch`], STRM-018) to the pool, evicts and requests by class ([`ResidencyManager::begin_frame`]);
 //! 2. the changes of the resident set are executed on the renderer through a [`TileSink`]: a tile that became resident is
-//!    placed in the slot the manager chose, an evicted tile is forgotten (the renderer decides nothing);
+//!    placed in the slot the manager chose, an evicted tile is forgotten (the renderer decides nothing). Placement is
+//!    capped per frame by the [`UploadBudget`] (STRM-006): finished tiles wait in class order and are written while their
+//!    bytes fit; the rest stay finished-but-not-placed for the next frame and the view is drawn from what the sink holds;
 //! 3. the pipeline decides what to draw from the tiles the sink holds ([`PlanPipeline::begin_frame`]) and delivers the
 //!    plan and R the worker finished since the last frame; they are the wants of the next call.
 //!
@@ -13,14 +15,16 @@
 //! A frame's wants are those of the plan and R delivered up to the frame before (the same one-iteration lag the bare
 //! streamer loop had).
 
+use crate::draw::indirect_frame_bytes;
 use crate::pipeline::{PipelineFrame, PlanPipeline, ResidentTile};
 use crate::prefetch::{cap_to_free, PrefetchConfig, TravelEstimator};
 use crate::residency::ResidencySet;
 use crate::terrain::TerrainRequest;
+use crate::upload::{sort_waiting, upload_count, UploadBudget, UploadClass, Waiting};
 use planet_core::TileId;
-use planet_generators::mesh::TileMesh;
+use planet_generators::mesh::{MeshVertex, TileMesh};
 use planet_streaming::{Clock, ResidencyManager, ResidentChange, SlotRef, StreamStats, Wants};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -28,6 +32,11 @@ use std::time::Instant;
 pub trait TileSink {
     /// Write `mesh` into `slot` (the slot the manager chose). Whatever tile the slot held before is gone.
     fn upload_at(&mut self, mesh: &TileMesh, slot: SlotRef) -> Result<(), String>;
+    /// Bytes `upload_at` writes for `mesh`: the tile's size in the sink's format (the per-frame upload budget counts in
+    /// them, STRM-006). The default is the vertex format; a sink that writes another format (the compact tile) says so.
+    fn upload_bytes(&self, mesh: &TileMesh) -> u64 {
+        mesh.vertices.len() as u64 * MeshVertex::STRIDE
+    }
     /// The tile was evicted; its slot is the manager's again (no pool is touched).
     fn forget(&mut self, tile: TileId);
 }
@@ -49,6 +58,12 @@ pub struct FrameCounts {
     pub blocked: u64,
     pub evicted: u64,
     pub uploaded: u64,
+    /// Tile bytes written to slots this frame, finished tiles that did not fit the budget and wait for the next frame, and
+    /// the node-record bytes of the frame's plan (an own line against CON-21's 2 ms, not part of the tile cap unless
+    /// [`UploadBudget::node_records_in_cap`]; the indirect path's figure).
+    pub upload_bytes: u64,
+    pub deferred: usize,
+    pub node_bytes: u64,
     /// Tiles of R replaced by their ancestors this frame (ADR 0031 point 4b), draw tiles asked for as ancestors (point 4c)
     /// and whether the draw set with its ancestors exceeds the share (a budget failure).
     pub degraded: usize,
@@ -62,10 +77,22 @@ pub struct FrameCounts {
 
 impl FrameCounts {
     /// Column names of the per-frame log (TEST-012), in [`FrameCounts::values`] order.
-    pub const NAMES: [&'static str; 9] =
-        ["resident", "in_flight", "queued", "dispatched", "cancelled", "blocked", "evicted", "uploaded", "degraded"];
+    pub const NAMES: [&'static str; 12] = [
+        "resident",
+        "in_flight",
+        "queued",
+        "dispatched",
+        "cancelled",
+        "blocked",
+        "evicted",
+        "uploaded",
+        "degraded",
+        "upload_bytes",
+        "deferred",
+        "node_bytes",
+    ];
 
-    pub fn values(&self) -> [u64; 9] {
+    pub fn values(&self) -> [u64; 12] {
         [
             self.resident as u64,
             self.in_flight as u64,
@@ -76,6 +103,9 @@ impl FrameCounts {
             self.evicted,
             self.uploaded,
             self.degraded as u64,
+            self.upload_bytes,
+            self.deferred as u64,
+            self.node_bytes,
         ]
     }
 }
@@ -103,6 +133,49 @@ pub struct ManagedLoop {
     /// The prefetch source (STRM-018): the camera path on the injected clock; `None` is the loop without prefetch.
     travel: Option<(TravelEstimator, Arc<dyn Clock>)>,
     last: StreamStats,
+    /// The per-frame upload budget (STRM-006) and what it waits on: tiles the streamer finished that the sink does not hold
+    /// yet, the class sets of the wants they are ranked by (rebuilt when the wants changed) and the node-record bytes of the
+    /// last drawn plan.
+    budget: UploadBudget,
+    pending: HashSet<TileId>,
+    classes: Option<Classes>,
+    classes_stale: bool,
+    last_node_bytes: u64,
+}
+
+/// The tiles of the draw set and of R with their ancestors (an ancestor is requested, and so placed, in its descendants'
+/// class), and the plan order of the draw tiles.
+struct Classes {
+    draw: HashMap<TileId, f64>,
+    residency: HashSet<TileId>,
+}
+
+impl Classes {
+    /// Built only after the wants changed and only when a tile waits.
+    fn of(wants: &Wants) -> Classes {
+        let mut draw: HashMap<TileId, f64> = HashMap::new();
+        for &(tile, priority) in &wants.draw {
+            let mut t = Some(tile);
+            while let Some(x) = t {
+                let e = draw.entry(x).or_insert(priority);
+                if *e > priority {
+                    *e = priority;
+                }
+                t = x.parent();
+            }
+        }
+        let mut residency: HashSet<TileId> = HashSet::new();
+        for &(tile, _) in &wants.residency {
+            let mut t = Some(tile);
+            while let Some(x) = t {
+                if !residency.insert(x) {
+                    break;
+                }
+                t = x.parent();
+            }
+        }
+        Classes { draw, residency }
+    }
 }
 
 impl ManagedLoop {
@@ -121,7 +194,29 @@ impl ManagedLoop {
             wants_residency: None,
             travel: None,
             last,
+            budget: UploadBudget::default(),
+            pending: HashSet::new(),
+            classes: None,
+            classes_stale: true,
+            last_node_bytes: 0,
         }
+    }
+
+    /// Use another per-frame upload budget than [`UploadBudget::default`] (the provisional 1 MiB of ADR 0033 point 9).
+    pub fn with_upload_budget(mut self, budget: UploadBudget) -> Self {
+        self.budget = budget;
+        self
+    }
+
+    pub fn upload_budget(&self) -> UploadBudget {
+        self.budget
+    }
+
+    /// Finished tiles the sink does not hold yet (deferred by the budget), in tile order.
+    pub fn pending(&self) -> Vec<TileId> {
+        let mut v: Vec<TileId> = self.pending.iter().copied().collect();
+        v.sort();
+        v
     }
 
     /// Turn the prefetch source on (STRM-018): the camera's translation on `clock` predicts a position `config.look_ahead_ms`
@@ -167,11 +262,12 @@ impl ManagedLoop {
         let scheduler_ms = t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        let mut uploaded = 0u64;
+        let (mut uploaded, mut upload_bytes) = (0u64, 0u64);
         let streamer = self.manager.streamer_mut();
         for change in streamer.take_changes() {
             match change {
                 ResidentChange::Evicted(tile) => {
+                    self.pending.remove(&tile);
                     if self.resident.remove(&tile).is_some() {
                         self.slots.remove(&tile);
                         sink.forget(tile);
@@ -183,13 +279,57 @@ impl ManagedLoop {
                     if self.slots.get(&tile) == Some(&slot) && self.resident.get(&tile).is_some_and(|r| r.mesh_key == mesh.key) {
                         continue;
                     }
-                    sink.upload_at(&mesh, slot).map_err(|e| format!("placing {tile:?} in {slot:?}: {e}"))?;
-                    self.resident.insert(tile, ResidentTile { mesh_key: mesh.key, origin: mesh.origin });
-                    self.slots.insert(tile, slot);
-                    uploaded += 1;
+                    self.pending.insert(tile);
                 }
             }
         }
+        // The budget (STRM-006): the finished tiles in class order while their bytes fit, at least one.
+        if !self.pending.is_empty() {
+            if self.classes_stale || self.classes.is_none() {
+                self.classes = Some(Classes::of(&self.wants));
+                self.classes_stale = false;
+            }
+            let classes = self.classes.as_ref().expect("classes");
+            let mut prefetch: HashSet<TileId> = HashSet::new();
+            for &(tile, _) in &self.wants.prefetch {
+                let mut t = Some(tile);
+                while let Some(x) = t {
+                    if !prefetch.insert(x) {
+                        break;
+                    }
+                    t = x.parent();
+                }
+            }
+            let mut waiting = Vec::with_capacity(self.pending.len());
+            self.pending.retain(|t| streamer.is_resident(*t));
+            for &tile in &self.pending {
+                let Some(mesh) = streamer.get(tile) else { continue };
+                let (class, priority) = if let Some(p) = classes.draw.get(&tile) {
+                    (UploadClass::Draw, *p)
+                } else if tile.level() == 0 {
+                    (UploadClass::Draw, 0.0)
+                } else if classes.residency.contains(&tile) {
+                    (UploadClass::Residency, 0.0)
+                } else if prefetch.contains(&tile) {
+                    (UploadClass::Prefetch, 0.0)
+                } else {
+                    (UploadClass::Other, 0.0)
+                };
+                waiting.push(Waiting { tile, class, priority, bytes: sink.upload_bytes(&mesh) });
+            }
+            sort_waiting(&mut waiting);
+            let take = upload_count(&waiting, self.budget.allowance(self.last_node_bytes));
+            for w in &waiting[..take] {
+                self.pending.remove(&w.tile);
+                let (Some(mesh), Some(slot)) = (streamer.get(w.tile), streamer.slot_of(w.tile)) else { continue };
+                sink.upload_at(&mesh, slot).map_err(|e| format!("placing {:?} in {slot:?}: {e}", w.tile))?;
+                self.resident.insert(w.tile, ResidentTile { mesh_key: mesh.key, origin: mesh.origin });
+                self.slots.insert(w.tile, slot);
+                uploaded += 1;
+                upload_bytes += w.bytes;
+            }
+        }
+        let deferred = self.pending.len();
         let upload_ms = t.elapsed().as_secs_f64() * 1000.0;
 
         // The camera path: a pure function of the positions on the clock (rotation never enters).
@@ -198,6 +338,8 @@ impl ManagedLoop {
             est.predict()
         });
         let pipeline = self.pipe.begin_frame_predicted(req, predicted, &self.resident)?;
+        let node_bytes = indirect_frame_bytes(pipeline.draw.plan.nodes.len());
+        self.last_node_bytes = node_bytes;
         let stats = self.manager.streamer().stats();
         self.refresh_wants(stats.main_free);
         // No predicted position now (a teleport, a stop, a rotation): the set of the old direction is dropped at once, not when
@@ -216,6 +358,9 @@ impl ManagedLoop {
             blocked: stats.blocked - self.last.blocked,
             evicted: stats.evicted - self.last.evicted,
             uploaded,
+            upload_bytes,
+            deferred,
+            node_bytes,
             degraded: managed.report.dropped,
             draw_replaced: managed.report.draw_replaced.len(),
             budget_failure: managed.report.budget_failure,
@@ -234,6 +379,7 @@ impl ManagedLoop {
             self.wants.draw =
                 self.pipe.current().map(|c| c.plan.nodes.iter().enumerate().map(|(i, n)| (n.tile, i as f64)).collect()).unwrap_or_default();
             self.wants_plan = plan_seq;
+            self.classes_stale = true;
         }
         let residency = self.pipe.residency().map(|r| Arc::clone(&r.residency));
         let same = match (&residency, &self.wants_residency) {
@@ -244,6 +390,7 @@ impl ManagedLoop {
         if !same {
             self.wants.residency = residency.as_ref().map(|r| r.wants()).unwrap_or_default();
             self.wants_residency = residency;
+            self.classes_stale = true;
         }
         let set = self.pipe.residency().map(|r| Arc::clone(&r.prefetch));
         self.wants.prefetch = match set {
