@@ -19,6 +19,7 @@
 
 use crate::lod::{cover_selection, LodParams, SelectionCache};
 use crate::plan::{face_mapping_by_id, PlanError, CLEAR_COLOR, HEIGHT_RANGE};
+use crate::residency::{residency_set_field, ResidencySet};
 use crate::terrain::{node_color, plan_terrain_threaded, TerrainDraw, TerrainPlan, TerrainRequest};
 use planet_core::{PlanetFixed, TileId};
 use planet_generators::height::HeightField;
@@ -262,12 +263,56 @@ pub fn draw_plan(
 /// (a world whose field borrows its bake). `plan` is [`plan_terrain_threaded`] of the request over that field.
 pub trait PlanField: Send + Sync + 'static {
     fn plan(&self, req: &TerrainRequest, cache: &mut SelectionCache, threads: usize) -> Result<TerrainPlan, PlanError>;
+
+    /// The residency set R of `req` (STRM-015): the position-only selection of the request's camera position, with the
+    /// request's LOD parameters, over the same field. `cache` is the one the plan used, so every tile geometry and height
+    /// volume the plan already computed is a hit and R needs no origin height or mesh key at all (a resident tile carries its
+    /// own origin and key); what R adds is the volumes of the tiles outside the frustum, once per tile.
+    fn residency(&self, req: &TerrainRequest, cache: &mut SelectionCache) -> Result<ResidencySet, PlanError>;
 }
 
 impl<T: HeightField + Send + Sync + 'static> PlanField for T {
     fn plan(&self, req: &TerrainRequest, cache: &mut SelectionCache, threads: usize) -> Result<TerrainPlan, PlanError> {
         plan_terrain_threaded(req, self, cache, threads)
     }
+
+    fn residency(&self, req: &TerrainRequest, cache: &mut SelectionCache) -> Result<ResidencySet, PlanError> {
+        residency_of(req, self, cache)
+    }
+}
+
+/// R of `req` over `field` (what [`PlanField::residency`] computes; for fields that build their `HeightField` inside the job).
+pub fn residency_of(req: &TerrainRequest, field: &dyn HeightField, cache: &mut SelectionCache) -> Result<ResidencySet, PlanError> {
+    let map = face_mapping_by_id(&req.face_mapping).ok_or_else(|| PlanError::UnknownFaceMapping(req.face_mapping.clone()))?;
+    Ok(residency_set_field(map.as_ref(), req.camera.position, field, &req.lod, cache))
+}
+
+/// What R depends on: the camera position, the LOD parameters, the face mapping and the seed. A request that differs from the
+/// last one only in its view direction (or frame setup, which R never reads) has the same key, and R is reused.
+#[derive(Clone, Debug, PartialEq)]
+struct ResidencyKey {
+    position: PlanetFixed,
+    lod: LodParams,
+    face_mapping: String,
+    seed: u64,
+}
+
+impl ResidencyKey {
+    fn of(req: &TerrainRequest) -> Self {
+        Self { position: req.camera.position, lod: req.lod.clone(), face_mapping: req.face_mapping.clone(), seed: req.seed }
+    }
+}
+
+/// R made for the request of frame `seq`.
+#[derive(Clone, Debug)]
+pub struct ResidencyOutcome {
+    pub seq: u64,
+    pub position: PlanetFixed,
+    pub residency: Arc<ResidencySet>,
+    /// Worker time spent on it (0 when reused).
+    pub ms: f64,
+    /// The position and parameters equal the previous R's: nothing was selected (a rotation).
+    pub reused: bool,
 }
 
 /// A completed plan: the request it was made for (`seq` is the frame that asked), the plan and the time it took on its worker.
@@ -284,9 +329,14 @@ struct WorkerState {
     running: bool,
     pending: Option<(u64, TerrainRequest)>,
     done: Option<Result<PlanOutcome, String>>,
+    /// The newest R, delivered after the plan of the same job (or with it when the position did not change).
+    residency_done: Option<Result<ResidencyOutcome, String>>,
+    last_residency: Option<(ResidencyKey, Arc<ResidencySet>)>,
     submitted: u64,
     completed: u64,
     superseded: u64,
+    residencies: u64,
+    residencies_reused: u64,
 }
 
 /// What the worker counted.
@@ -296,6 +346,9 @@ pub struct WorkerCounts {
     pub completed: u64,
     /// Requests replaced by a newer one before they started.
     pub superseded: u64,
+    /// R sets selected (a changed position or parameters) and R sets reused (the same position: a rotation).
+    pub residencies: u64,
+    pub residencies_reused: u64,
 }
 
 /// Computes plans off the frame path (STRM-016): one plan at a time on `spawner`; a request that arrives while one runs
@@ -349,14 +402,53 @@ impl PlanWorker {
             }))
             .unwrap_or_else(|_| Err(PlanError::HeightField("the plan job panicked".into())));
             let plan_ms = started.elapsed().as_secs_f64() * 1000.0;
-            let outcome = result.map(|p| PlanOutcome { seq, request: req, plan: Arc::new(p), plan_ms }).map_err(|e| e.to_string());
-            let next = {
+            let planned = result.is_ok();
+            let outcome = result.map(|p| PlanOutcome { seq, request: req.clone(), plan: Arc::new(p), plan_ms }).map_err(|e| e.to_string());
+            {
                 let mut s = state.lock().expect("worker state");
                 s.completed += 1;
                 // Keep the newest completed plan only: the loop wants the newest, and an older one is useless to it.
                 // Jobs run one after the other, so a later plan is the newer; an unread error is not overwritten.
                 if !matches!(s.done, Some(Err(_))) {
                     s.done = Some(outcome);
+                }
+            }
+            // R follows the plan in the same job, after the plan is out (a frame never waits for it). It shares the plan's
+            // cache, and when the position and parameters equal the previous R's (a rotation) nothing is selected at all.
+            let residency = planned.then(|| {
+                let key = ResidencyKey::of(&req);
+                let reuse =
+                    state.lock().expect("worker state").last_residency.as_ref().filter(|(k, _)| *k == key).map(|(_, r)| Arc::clone(r));
+                let started = std::time::Instant::now();
+                let made = match reuse {
+                    Some(r) => Ok((r, true)),
+                    None => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let mut cache = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                        field.residency(&req, &mut cache)
+                    }))
+                    .unwrap_or_else(|_| Err(PlanError::HeightField("the residency job panicked".into())))
+                    .map(|r| (Arc::new(r), false)),
+                };
+                let ms = if matches!(made, Ok((_, false))) { started.elapsed().as_secs_f64() * 1000.0 } else { 0.0 };
+                (key, made.map(|(residency, reused)| ResidencyOutcome { seq, position: req.camera.position, residency, ms, reused }))
+            });
+            let next = {
+                let mut s = state.lock().expect("worker state");
+                if let Some((key, made)) = residency {
+                    match made {
+                        Ok(o) => {
+                            if o.reused {
+                                s.residencies_reused += 1;
+                            } else {
+                                s.residencies += 1;
+                                s.last_residency = Some((key, Arc::clone(&o.residency)));
+                            }
+                            if !matches!(s.residency_done, Some(Err(_))) {
+                                s.residency_done = Some(Ok(o));
+                            }
+                        }
+                        Err(e) => s.residency_done = Some(Err(e.to_string())),
+                    }
                 }
                 let next = s.pending.take();
                 if next.is_none() {
@@ -376,9 +468,21 @@ impl PlanWorker {
         self.state.lock().expect("worker state").done.take()
     }
 
+    /// The newest residency set completed since the last call, if any. It follows the plan of its job (a reused one is
+    /// delivered in the same job).
+    pub fn take_residency(&self) -> Option<Result<ResidencyOutcome, String>> {
+        self.state.lock().expect("worker state").residency_done.take()
+    }
+
     pub fn counts(&self) -> WorkerCounts {
         let s = self.state.lock().expect("worker state");
-        WorkerCounts { submitted: s.submitted, completed: s.completed, superseded: s.superseded }
+        WorkerCounts {
+            submitted: s.submitted,
+            completed: s.completed,
+            superseded: s.superseded,
+            residencies: s.residencies,
+            residencies_reused: s.residencies_reused,
+        }
     }
 
     /// A plan is being computed or waits for its turn.
@@ -396,6 +500,8 @@ pub struct PipelineFrame {
     pub base_seq: Option<u64>,
     /// A plan was delivered by the worker this frame: its request frame and its worker time.
     pub delivered: Option<(u64, f64)>,
+    /// R was delivered this frame: its request frame, its worker time and whether it was the previous one reused.
+    pub residency_delivered: Option<(u64, f64, bool)>,
     /// A plan was requested for this frame's camera.
     pub requested: bool,
     /// The newest completed plan's nodes with priorities (what the streamer is asked for), usable or not.
@@ -406,13 +512,14 @@ pub struct PipelineFrame {
 pub struct PlanPipeline {
     worker: PlanWorker,
     current: Option<PlanOutcome>,
+    residency: Option<ResidencyOutcome>,
     last_requested: Option<TerrainRequest>,
     frame: u64,
 }
 
 impl PlanPipeline {
     pub fn new(worker: PlanWorker) -> Self {
-        Self { worker, current: None, last_requested: None, frame: 0 }
+        Self { worker, current: None, residency: None, last_requested: None, frame: 0 }
     }
 
     pub fn worker(&self) -> &PlanWorker {
@@ -429,6 +536,11 @@ impl PlanPipeline {
         self.current.as_ref()
     }
 
+    /// The newest residency set delivered so far (made for the camera position of an earlier or the current plan).
+    pub fn residency(&self) -> Option<&ResidencyOutcome> {
+        self.residency.as_ref()
+    }
+
     /// Begin frame `self.frame() + 1` for `req`. Never waits: the plan of this camera is only asked for.
     pub fn begin_frame(&mut self, req: &TerrainRequest, resident: &dyn ResidentSet) -> Result<PipelineFrame, String> {
         self.frame += 1;
@@ -443,6 +555,17 @@ impl PlanPipeline {
             Some(Err(e)) => return Err(format!("plan for frame {}: {e}", self.frame)),
             None => {}
         }
+        let mut residency_delivered = None;
+        match self.worker.take_residency() {
+            Some(Ok(o)) => {
+                residency_delivered = Some((o.seq, o.ms, o.reused));
+                if self.residency.as_ref().is_none_or(|c| c.seq < o.seq) {
+                    self.residency = Some(o);
+                }
+            }
+            Some(Err(e)) => return Err(format!("residency set for frame {}: {e}", self.frame)),
+            None => {}
+        }
         let requested = self.last_requested.as_ref() != Some(req);
         if requested {
             self.worker.submit(self.frame, req.clone());
@@ -452,7 +575,7 @@ impl PlanPipeline {
         let draw = draw_plan(req, base.map(|c| (&c.request, c.plan.as_ref())), resident).map_err(|e| e.to_string())?;
         let wanted =
             self.current.as_ref().map(|c| c.plan.nodes.iter().enumerate().map(|(i, n)| (n.tile, i as f64)).collect()).unwrap_or_default();
-        Ok(PipelineFrame { frame: self.frame, base_seq: base.map(|c| c.seq), draw, delivered, requested, wanted })
+        Ok(PipelineFrame { frame: self.frame, base_seq: base.map(|c| c.seq), draw, delivered, residency_delivered, requested, wanted })
     }
 }
 
