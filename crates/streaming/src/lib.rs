@@ -79,6 +79,13 @@ impl Clock for FakeClock {
 /// Runs jobs somewhere else (thread pool) or on demand (tests).
 pub trait Spawner: Send + Sync {
     fn spawn(&self, job: Job);
+
+    /// Run one waiting job on the calling thread; false when this spawner runs its jobs elsewhere (a pool) or none waits.
+    /// A caller that must wait for jobs it spawned ([`Streamer::load_roots_blocking`]) calls it so that a spawner which
+    /// holds jobs until asked (the deterministic one of tests) cannot deadlock it.
+    fn help(&self) -> bool {
+        false
+    }
 }
 
 /// Source of tile data: generation, disk or network. May be slow and may fail.
@@ -163,6 +170,10 @@ impl ManualSpawner {
 impl Spawner for ManualSpawner {
     fn spawn(&self, job: Job) {
         self.queue.lock().expect("queue").push_back(job);
+    }
+
+    fn help(&self) -> bool {
+        self.run_one()
     }
 }
 
@@ -414,23 +425,91 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         n
     }
 
-    /// Load the six level-0 tiles synchronously, once at start-up, so that some level of detail always exists
-    /// (CON-22). This is the only place that waits.
+    /// Load the six level-0 tiles once at start-up, so that some level of detail always exists (CON-22). This is the only
+    /// place that waits. The six jobs are handed to the spawner together and the caller waits for all of them, so a pool
+    /// loads them concurrently (STRM-001); the tiles are made resident in face order once all have arrived, so the
+    /// result does not depend on the spawner, the thread count or the order the jobs finish (CON-14). If one fails, the
+    /// others are told to stop, nothing becomes resident and the error names the failing tile (the lowest face if several).
     pub fn load_roots_blocking(&mut self) -> Result<(), String> {
-        for f in planet_core::Face::ALL {
-            let id = TileId::new(f, 0, 0, 0).expect("root");
+        let ids: Vec<TileId> = planet_core::Face::ALL.iter().map(|&f| TileId::new(f, 0, 0, 0).expect("root")).collect();
+        let mut slots = Vec::with_capacity(ids.len());
+        for &id in &ids {
             let kind = self.pools.kind_of(id);
-            let slot = self
-                .pools
-                .acquire(kind, self.frame)
-                .ok_or_else(|| format!("no slot for root {id:?}: capacity {} is below the six roots", self.config.capacity))?;
-            let data = match self.source.load(id) {
-                Ok(d) => d,
-                Err(e) => {
-                    self.pools.release(slot, self.frame);
-                    return Err(e);
+            match self.pools.acquire(kind, self.frame) {
+                Some(slot) => slots.push(slot),
+                None => {
+                    for slot in slots {
+                        self.pools.release(slot, self.frame);
+                    }
+                    return Err(format!("no slot for root {id:?}: capacity {} is below the six roots", self.config.capacity));
                 }
+            }
+        }
+        let tokens: Vec<Arc<AtomicBool>> = ids.iter().map(|_| Arc::new(AtomicBool::new(false))).collect();
+        let (tx, rx) = channel::<Completion<T>>();
+        for (&id, token) in ids.iter().zip(&tokens) {
+            let (source, tx, token) = (Arc::clone(&self.source), tx.clone(), Arc::clone(token));
+            self.spawner.spawn(Box::new(move || {
+                let cancel = CancelToken(token);
+                if cancel.is_cancelled() {
+                    let _ = tx.send((id, Outcome::Cancelled));
+                    return;
+                }
+                let outcome = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| source.load_staged(id, &cancel))) {
+                    Ok(Ok(Some(data))) => Outcome::Done(data),
+                    Ok(Ok(None)) => Outcome::Cancelled,
+                    Ok(Err(e)) => Outcome::Failed(e),
+                    Err(_) => Outcome::Failed(format!("source panicked while loading {id:?}")),
+                };
+                let _ = tx.send((id, outcome));
+            }));
+        }
+        drop(tx);
+        let mut results: Vec<Option<Outcome<T>>> = ids.iter().map(|_| None).collect();
+        let mut missing = ids.len();
+        while missing > 0 {
+            let (id, outcome) = match rx.try_recv() {
+                Ok(r) => r,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    if self.spawner.help() {
+                        continue;
+                    }
+                    match rx.recv() {
+                        Ok(r) => r,
+                        Err(_) => break, // the spawner dropped jobs unrun
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
             };
+            if matches!(outcome, Outcome::Failed(_)) {
+                tokens.iter().for_each(|t| t.store(true, Ordering::SeqCst));
+            }
+            let i = ids.iter().position(|&x| x == id).expect("a root id");
+            results[i] = Some(outcome);
+            missing -= 1;
+        }
+        // A real failure is reported before the cancellations it caused (lowest face first within each).
+        let mut error = results.iter().enumerate().find_map(|(i, r)| match r {
+            Some(Outcome::Failed(e)) => Some(format!("root {:?} failed to load: {e}", ids[i])),
+            _ => None,
+        });
+        let mut loaded = Vec::with_capacity(ids.len());
+        for (i, r) in results.into_iter().enumerate() {
+            match r {
+                Some(Outcome::Done(d)) => loaded.push(d),
+                Some(Outcome::Failed(_)) => {}
+                Some(Outcome::Cancelled) | None => {
+                    error.get_or_insert_with(|| format!("root {:?} was not loaded (cancelled or never run)", ids[i]));
+                }
+            }
+        }
+        if let Some(e) = error {
+            for slot in slots {
+                self.pools.release(slot, self.frame);
+            }
+            return Err(e);
+        }
+        for ((id, slot), data) in ids.into_iter().zip(slots).zip(loaded) {
             self.resident.insert(id, Resident { data: Arc::new(data), last_used: self.frame, slot });
             self.note(ResidentChange::Added(id));
         }

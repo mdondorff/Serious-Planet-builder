@@ -2,11 +2,11 @@
 //! the cold draw plan (a fresh `StoreSource` and `SelectionCache`), the lattice reads it makes, the distinct blocks it touches
 //! and the second plan (blocks cached, fresh `SelectionCache`); then the 1, 4 and 20 thread tile rate with a bit-identity
 //! check of the tiles across thread counts. Not production code.
-//! `cargo run --release -p planet --example store_blocks -- --store DIR --global-res N [--part plans|rate|decode] [--view NAME] [--memory-rate TILES_PER_S]`.
+//! `cargo run --release -p planet --example store_blocks -- --store DIR --global-res N [--part plans|rate|decode|roots] [--threads 1,6] [--skip-per-root] [--view NAME] [--memory-rate TILES_PER_S]`.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use planet_cache::global_store::{GlobalWorld, StoreSource};
@@ -90,6 +90,75 @@ fn main() -> Result<(), String> {
                 "DECODE block {k}: payload {:.1} MB, get {get:.1} ms, decode {dec:.1} ms, {} samples",
                 rec.payload.len() as f64 / 1e6,
                 s.len()
+            );
+        }
+        return Ok(());
+    }
+    if part == "roots" {
+        // Root-load measurement (change parallel-root-load): (1) per root, a fresh unbounded-budget source: distinct blocks,
+        // decoded bytes, time; (2) the six roots one after another over one fresh source (the old path); (3) the same
+        // through `Streamer::load_roots_blocking` on a pool of N threads over a fresh source.
+        use planet_core::TileId;
+        use planet_streaming::{Spawner, StreamConfig, Streamer, SystemClock, ThreadPool, TileSource};
+        let store: &'static planet_cache::pack::TileStore = Box::leak(Box::new(store));
+        let world: &'static GlobalWorld = Box::leak(Box::new(world));
+        let roots: Vec<TileId> = Face::ALL.iter().map(|&f| TileId::new(f, 0, 0, 0).unwrap()).collect();
+        if arg("--skip-per-root").is_none() {
+            let mut union = BTreeSet::new();
+            for &root in &roots {
+                let stored = StoreSource::with_budget(store, world, res, 64 << 30).map_err(|e| e.to_string())?;
+                let (_, block_cells) = world.layout(res).map_err(|e| format!("{e:?}"))?;
+                let rec = Recording { inner: &stored, cells: block_cells, blocks: Mutex::new(BTreeSet::new()), calls: AtomicU64::new(0), align: Default::default() };
+                let eroded = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &rec, key).map_err(|e| format!("{e:?}"))?;
+                let t = Instant::now();
+                let m = tile_mesh_field(&eroded, &map, root, cells, RADIUS_M);
+                let s = stored.stats();
+                let blocks = rec.blocks.lock().unwrap();
+                println!(
+                    "ROOT {root:?}: {:.1} s, {} reads, {} distinct blocks (face {}), {} decodes, {:.0} MB decoded, {} vertices",
+                    t.elapsed().as_secs_f64(),
+                    rec.calls.load(Relaxed),
+                    blocks.len(),
+                    root.face().0,
+                    s.decodes,
+                    s.resident_bytes as f64 / 1e6,
+                    m.vertices.len()
+                );
+                union.extend(blocks.iter().copied());
+            }
+            println!("ROOTS union: {} distinct blocks", union.len());
+        }
+        struct Roots {
+            src: StoreSource<'static>,
+            cells: u32,
+        }
+        let make = |threads: usize| -> Result<(Streamer<usize>, Arc<Roots>), String> {
+            let src = StoreSource::new(store, world, res).map_err(|e| e.to_string())?;
+            let r = Arc::new(Roots { src, cells });
+            let pool: Arc<dyn Spawner> = Arc::new(ThreadPool::new(threads));
+            Ok((Streamer::new(Arc::clone(&r) as Arc<dyn TileSource<usize>>, pool, Arc::new(SystemClock::new()), StreamConfig::default()), r))
+        };
+        impl TileSource<usize> for Roots {
+            fn load(&self, tile: TileId) -> Result<usize, String> {
+                let def = WorldDefinition::single_planet(RADIUS_M, 1);
+                let world = GlobalWorld::from_definition(&def).map_err(|e| format!("{e}"))?;
+                let key = world.stage_key(self.src.res()).0;
+                let eroded = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &self.src, key).map_err(|e| format!("{e:?}"))?;
+                Ok(tile_mesh_field(&eroded, &TangentWarp, tile, self.cells, RADIUS_M).vertices.len())
+            }
+        }
+        for threads in arg("--threads").unwrap_or_else(|| "1,6".into()).split(',').map(|t| t.parse::<usize>().unwrap()) {
+            let (mut streamer, r) = make(threads)?;
+            let t = Instant::now();
+            streamer.load_roots_blocking()?;
+            let s = r.src.stats();
+            println!(
+                "LOAD_ROOTS pool of {threads}: {:.1} s, {} decodes, {:.0} MB resident of {:.0} MB budget, vertices {:?}",
+                t.elapsed().as_secs_f64(),
+                s.decodes,
+                s.resident_bytes as f64 / 1e6,
+                s.budget_bytes as f64 / 1e6,
+                roots.iter().map(|id| *streamer.get(*id).unwrap()).collect::<Vec<_>>()
             );
         }
         return Ok(());

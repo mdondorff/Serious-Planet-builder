@@ -120,6 +120,10 @@ impl Spawner for BatchSpawner {
     fn spawn(&self, job: planet_streaming::Job) {
         self.queue.lock().unwrap().push_back(job);
     }
+
+    fn help(&self) -> bool {
+        self.run(1) > 0
+    }
 }
 
 /// The renderer's side as counts: which tile sits in which slot; a slot never holds two tiles.
