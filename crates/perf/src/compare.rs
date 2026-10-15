@@ -3,7 +3,11 @@
 //!
 //! Pure over the JSON text of two logs ([`crate::report_json`]); a small reader keeps this crate dependency-free.
 
+use crate::clock::{equal_clock_state, gpu_validity, ClockPoint, GpuValidity};
 use std::collections::BTreeMap;
+
+/// The metrics that depend on the GPU clock (ADR 0034): the GPU time and the frame wall time, which waits for the GPU.
+pub const GPU_METRICS: [&str; 2] = ["gpu_ms", "frame_ms"];
 
 /// A median that rose by more than this fraction of the last valid log's median is a regression.
 pub const REGRESSION_THRESHOLD: f64 = 0.15;
@@ -178,6 +182,8 @@ pub struct LogSummary {
     /// What the session measured (`protocol.field`); `None` for a log that names none.
     pub field: Option<String>,
     pub medians: BTreeMap<String, BTreeMap<String, f64>>,
+    /// Per path: whether its GPU figures are valid and the clock state, read from the recorded samples (ADR 0034).
+    pub gpu: BTreeMap<String, GpuValidity>,
     pub counts: BTreeMap<String, BTreeMap<String, u64>>,
 }
 
@@ -202,9 +208,17 @@ pub fn summarize_log(text: &[u8]) -> Result<LogSummary, String> {
     let Some(Json::Arr(runs)) = root.get("runs") else { return Err("no runs".into()) };
     let mut samples: BTreeMap<String, BTreeMap<String, Vec<f64>>> = BTreeMap::new();
     let mut counts: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
+    let mut points: BTreeMap<String, Vec<Option<ClockPoint>>> = BTreeMap::new();
     for run in runs {
         let Some(Json::Str(path)) = run.get("path") else { return Err("a run without a path".into()) };
         let entry = samples.entry(path.clone()).or_default();
+        for key in ["clocks_before", "clocks_after"] {
+            let point = run.get(key).and_then(|c| match (c.get("pstate"), c.get("graphics_mhz").and_then(Json::num)) {
+                (Some(Json::Str(p)), Some(mhz)) => Some(ClockPoint { pstate: p.clone(), mhz }),
+                _ => None,
+            });
+            points.entry(path.clone()).or_default().push(point);
+        }
         if let Some(m) = run.get("median_ms").and_then(Json::num) {
             entry.entry("frame_ms".into()).or_default().push(m);
         }
@@ -228,7 +242,8 @@ pub fn summarize_log(text: &[u8]) -> Result<LogSummary, String> {
         Some(Json::Str(s)) => Some(s.clone()),
         _ => None,
     };
-    Ok(LogSummary { valid, resolution: res, field, medians, counts })
+    let gpu = points.into_iter().map(|(p, v)| (p, gpu_validity(&v))).collect();
+    Ok(LogSummary { valid, resolution: res, field, medians, gpu, counts })
 }
 
 /// Where the last valid log of the scene whose log is `log` is kept: `terrain.json` -> `terrain.last-valid.json` beside it.
@@ -264,11 +279,19 @@ impl Rise {
 /// Every median of `new` that exceeds the one of `old` for the same path and metric by more than `threshold` of the old
 /// median and by at least [`MIN_RISE_MS`].
 pub fn rises(old: &LogSummary, new: &LogSummary, threshold: f64) -> Vec<Rise> {
+    rises_where(old, new, threshold, |_, _| true)
+}
+
+/// [`rises`] restricted to the (path, metric) pairs `include` accepts.
+pub fn rises_where(old: &LogSummary, new: &LogSummary, threshold: f64, include: impl Fn(&str, &str) -> bool) -> Vec<Rise> {
     let mut out = Vec::new();
     for (path, metrics) in &new.medians {
         let Some(old_metrics) = old.medians.get(path) else { continue };
         for (metric, &n) in metrics {
             let Some(&o) = old_metrics.get(metric) else { continue };
+            if !include(path, metric) {
+                continue;
+            }
             if o > 0.0 && n > o * (1.0 + threshold) && n - o >= MIN_RISE_MS {
                 out.push(Rise { path: path.clone(), metric: metric.clone(), old: o, new: n });
             }
@@ -277,8 +300,74 @@ pub fn rises(old: &LogSummary, new: &LogSummary, threshold: f64) -> Vec<Rise> {
     out
 }
 
+/// Where the baseline of the GPU figures is kept: `terrain.json` -> `terrain.last-gpu-valid.json` beside it (ADR 0034).
+pub fn gpu_baseline_path(log: &std::path::Path) -> std::path::PathBuf {
+    let stem = log.file_stem().map_or_else(|| "perf".into(), |s| s.to_string_lossy().into_owned());
+    log.with_file_name(format!("{stem}.last-gpu-valid.json"))
+}
+
+/// Whether a session's log replaces the GPU baseline: it is valid and at least one view is valid for GPU figures.
+pub fn replaces_gpu_baseline(new: &[u8]) -> bool {
+    summarize_log(new).is_ok_and(|s| s.valid && s.gpu.values().any(GpuValidity::is_valid))
+}
+
+/// The baseline as a summary if it can be compared with `new` (valid, same field, same frame size), else the console line.
+fn usable_baseline(old_text: &[u8], new: &LogSummary) -> Result<LogSummary, String> {
+    let old = match summarize_log(old_text) {
+        Ok(s) if s.valid => s,
+        Ok(_) => {
+            return Err("regression check skipped: the stored baseline is not valid for budgets; this session becomes the baseline".into())
+        }
+        Err(e) => {
+            return Err(format!("regression check skipped: the stored baseline could not be read ({e}); this session becomes the baseline"))
+        }
+    };
+    if old.field != new.field {
+        let name = |f: &Option<String>| f.clone().unwrap_or_else(|| "none recorded (before logs named it)".into());
+        return Err(format!(
+            "regression check skipped: the baseline measured field {}, this session {}; the figures are not comparable across a field change, so this session becomes the baseline",
+            name(&old.field),
+            name(&new.field)
+        ));
+    }
+    if old.resolution != new.resolution {
+        return Err(format!(
+            "regression check skipped: the baseline was measured at {}x{}, this session at {}x{}",
+            old.resolution.0, old.resolution.1, new.resolution.0, new.resolution.1
+        ));
+    }
+    Ok(old)
+}
+
+fn regression_line(r: &Rise) -> String {
+    format!(
+        "REGRESSION vs the last valid log: {} {} median {:.2} -> {:.2} ms ({:+.0} %, limit {:.0} %)",
+        r.path,
+        r.metric,
+        r.old,
+        r.new,
+        r.percent(),
+        REGRESSION_THRESHOLD * 100.0
+    )
+}
+
+fn count_compared(old: &LogSummary, new: &LogSummary, include: impl Fn(&str, &str) -> bool) -> usize {
+    new.medians
+        .iter()
+        .map(|(p, m)| m.keys().filter(|k| include(p, k) && old.medians.get(p).is_some_and(|o| o.contains_key(*k))).count())
+        .sum()
+}
+
 /// The console lines that compare the new log with the last valid one (`None`: there is none yet). Never fails a run.
+/// The GPU figures are compared against the same log; see [`comparison_lines_gpu`] for a separate GPU baseline.
 pub fn comparison_lines(last_valid: Option<&[u8]>, new: &[u8]) -> Vec<String> {
+    comparison_lines_gpu(last_valid, last_valid, new)
+}
+
+/// [`comparison_lines`] with the baseline of the GPU figures (`gpu_ms`, `frame_ms`) apart from that of the CPU figures and
+/// the counts (ADR 0034). A view's GPU figures are compared only if both views are valid for GPU figures at equal clock
+/// state; otherwise the line says why (`not comparable: clock state X vs Y`).
+pub fn comparison_lines_gpu(last_valid: Option<&[u8]>, last_gpu_valid: Option<&[u8]>, new: &[u8]) -> Vec<String> {
     let new = match summarize_log(new) {
         Ok(s) => s,
         Err(e) => return vec![format!("regression check skipped: this session's log could not be read ({e})")],
@@ -288,59 +377,73 @@ pub fn comparison_lines(last_valid: Option<&[u8]>, new: &[u8]) -> Vec<String> {
             "regression check skipped: this session is not valid for budgets, so it is neither compared nor kept as the baseline".into()
         ];
     }
-    let Some(old_text) = last_valid else {
-        return vec!["regression check: no earlier valid log for this scene; this session becomes the baseline".into()];
-    };
-    let old = match summarize_log(old_text) {
-        Ok(s) if s.valid => s,
-        Ok(_) => {
-            return vec!["regression check skipped: the stored baseline is not valid for budgets; this session becomes the baseline".into()]
-        }
-        Err(e) => {
-            return vec![format!(
-                "regression check skipped: the stored baseline could not be read ({e}); this session becomes the baseline"
-            )]
-        }
-    };
-    if old.field != new.field {
-        let name = |f: &Option<String>| f.clone().unwrap_or_else(|| "none recorded (before logs named it)".into());
-        return vec![format!(
-            "regression check skipped: the baseline measured field {}, this session {}; the figures are not comparable across a field change, so this session becomes the baseline",
-            name(&old.field),
-            name(&new.field)
-        )];
-    }
-    if old.resolution != new.resolution {
-        return vec![format!(
-            "regression check skipped: the baseline was measured at {}x{}, this session at {}x{}",
-            old.resolution.0, old.resolution.1, new.resolution.0, new.resolution.1
-        )];
-    }
     let mut lines = Vec::new();
-    let found = rises(&old, &new, REGRESSION_THRESHOLD);
-    for r in &found {
-        lines.push(format!(
-            "REGRESSION vs the last valid log: {} {} median {:.2} -> {:.2} ms ({:+.0} %, limit {:.0} %)",
-            r.path,
-            r.metric,
-            r.old,
-            r.new,
-            r.percent(),
-            REGRESSION_THRESHOLD * 100.0
-        ));
-    }
-    for (path, counts) in &new.counts {
-        for (name, &n) in counts {
-            if let Some(&o) = old.counts.get(path).and_then(|c| c.get(name)) {
-                if o != n {
-                    lines.push(format!("count changed vs the last valid log: {path} {name} {o} -> {n}"));
+    let mut compared = 0usize;
+    let mut found = 0usize;
+    match last_valid {
+        None => lines.push("regression check: no earlier valid log for this scene; this session becomes the baseline".into()),
+        Some(text) => match usable_baseline(text, &new) {
+            Err(line) => lines.push(line),
+            Ok(old) => {
+                let cpu = |_: &str, m: &str| !GPU_METRICS.contains(&m);
+                let rs = rises_where(&old, &new, REGRESSION_THRESHOLD, cpu);
+                found += rs.len();
+                lines.extend(rs.iter().map(regression_line));
+                compared += count_compared(&old, &new, cpu);
+                for (path, counts) in &new.counts {
+                    for (name, &n) in counts {
+                        if let Some(&o) = old.counts.get(path).and_then(|c| c.get(name)) {
+                            if o != n {
+                                lines.push(format!("count changed vs the last valid log: {path} {name} {o} -> {n}"));
+                            }
+                        }
+                    }
                 }
+            }
+        },
+    }
+    // The GPU figures, view by view.
+    let gpu_old = last_gpu_valid.map(|t| usable_baseline(t, &new));
+    for (path, validity) in &new.gpu {
+        let has_gpu = new.medians.get(path).is_some_and(|m| GPU_METRICS.iter().any(|g| m.contains_key(*g)));
+        if !has_gpu {
+            continue;
+        }
+        let new_state = match validity {
+            GpuValidity::Valid(s) => s,
+            GpuValidity::Invalid(r) => {
+                lines.push(format!("GPU medians of {path} not compared: NOT VALID for GPU budgets ({r})"));
+                continue;
+            }
+        };
+        let old = match &gpu_old {
+            None => continue,
+            Some(Err(line)) => {
+                if !lines.contains(line) {
+                    lines.push(line.clone());
+                }
+                continue;
+            }
+            Some(Ok(o)) => o,
+        };
+        match old.gpu.get(path) {
+            None => continue,
+            Some(GpuValidity::Invalid(r)) => {
+                lines.push(format!("GPU medians of {path} not compared: the baseline view was not valid for GPU budgets ({r})"))
+            }
+            Some(GpuValidity::Valid(old_state)) if !equal_clock_state(old_state, new_state) => {
+                lines.push(format!("GPU medians of {path} not comparable: clock state {old_state} vs {new_state}"))
+            }
+            Some(GpuValidity::Valid(_)) => {
+                let only = |p: &str, m: &str| p == path && GPU_METRICS.contains(&m);
+                let rs = rises_where(old, &new, REGRESSION_THRESHOLD, only);
+                found += rs.len();
+                lines.extend(rs.iter().map(regression_line));
+                compared += count_compared(old, &new, only);
             }
         }
     }
-    if found.is_empty() {
-        let compared: usize =
-            new.medians.iter().map(|(p, m)| m.keys().filter(|k| old.medians.get(p).is_some_and(|o| o.contains_key(*k))).count()).sum();
+    if found == 0 && compared > 0 {
         lines.push(format!(
             "regression check: {compared} medians compared with the last valid log, none up by more than {:.0} %",
             REGRESSION_THRESHOLD * 100.0
@@ -353,10 +456,12 @@ pub fn comparison_lines(last_valid: Option<&[u8]>, new: &[u8]) -> Vec<String> {
 mod tests {
     use super::*;
 
+    const P0: &str = "{\"pstate\":\"P0\",\"graphics_mhz\":1395}";
+
     fn log(valid: bool, res: (u32, u32), ground_gpu: [f64; 3], orbit_gpu: [f64; 3], nodes: u64) -> String {
         let run = |path: &str, frame: f64, gpu: f64, nodes: u64| {
             format!(
-                "{{\"path\":\"{path}\",\"median_ms\":{frame},\"metrics\":{{\"gpu_ms\":{{\"median\":{gpu},\"p99\":9}}}},\"counts\":{{\"nodes\":{nodes}}}}}"
+                "{{\"path\":\"{path}\",\"median_ms\":{frame},\"clocks_before\":{P0},\"clocks_after\":{P0},\"metrics\":{{\"gpu_ms\":{{\"median\":{gpu},\"p99\":9}}}},\"counts\":{{\"nodes\":{nodes}}}}}"
             )
         };
         let mut runs = Vec::new();
@@ -504,8 +609,8 @@ mod field_tests {
             path_name: "terrain/ground-1m".into(),
             vram_cap_gb: 8,
             stats: summarize(&[5.0, 6.0, 7.0], 0).unwrap(),
-            clocks_before: None,
-            clocks_after: None,
+            clocks_before: crate::parse_nvidia_smi("X, 1395, 810, 100, 60, P0, 0x0"),
+            clocks_after: crate::parse_nvidia_smi("X, 1395, 810, 100, 60, P0, 0x0"),
             metrics: vec![("gpu_ms".into(), summarize(&[gpu, gpu, gpu], 0).unwrap())],
             counts: vec![("nodes".into(), nodes)],
         };
@@ -533,5 +638,112 @@ mod field_tests {
         let same = session(Some(eroded), 2.8, 800);
         let lines = comparison_lines(Some(same.as_bytes()), new.as_bytes());
         assert!(lines.iter().any(|l| l.contains("REGRESSION")) && lines.iter().any(|l| l.contains("nodes 800 -> 900")), "{lines:?}");
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+    use crate::{report_json_with_warmups, summarize, AdapterFacts, DeviceKind, Protocol, RunReport};
+
+    /// A recorded session: one run each of ground-1m and orbit at the given states and GPU medians.
+    fn session(ground: (&str, u32, f64), orbit: (&str, u32, f64)) -> String {
+        let a = AdapterFacts { name: "RTX 3080 Ti".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete };
+        let run = |name: &str, (pstate, mhz, gpu): (&str, u32, f64), cpu: f64| {
+            let c = crate::parse_nvidia_smi(&format!("X, {mhz}, 810, 100, 60, {pstate}, 0x0"));
+            RunReport {
+                path_name: format!("terrain/{name}"),
+                vram_cap_gb: 8,
+                stats: summarize(&[gpu + 1.0; 3], 0).unwrap(),
+                clocks_before: c.clone(),
+                clocks_after: c,
+                metrics: vec![("gpu_ms".into(), summarize(&[gpu; 3], 0).unwrap()), ("cpu_ms".into(), summarize(&[cpu; 3], 0).unwrap())],
+                counts: vec![("nodes".into(), 100)],
+            }
+        };
+        let runs = [run("ground-1m", ground, 6.0), run("orbit-20000km", orbit, 0.5)];
+        report_json_with_warmups(&a, Some("High performance"), &[], &crate::gate::Validity::default(), &Protocol::default(), &runs, &[])
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn a_log_marks_each_view_valid_for_gpu_figures_only_in_p0_and_keeps_the_session_valid() {
+        let log = session(("P0", 1395, 3.0), ("P2", 1150, 0.5));
+        assert!(log.contains("\"valid_for_budgets\":true"), "the CPU side of the session stays valid");
+        let s = summarize_log(log.as_bytes()).unwrap();
+        assert!(s.valid && s.gpu["terrain/ground-1m"].is_valid() && !s.gpu["terrain/orbit-20000km"].is_valid());
+        assert!(log.contains("\"gpu_valid\":true") && log.contains("\"gpu_valid\":false"), "{log}");
+        assert!(log.contains("\"gpu_clock_state\":\"P2 1150 MHz\""), "{log}");
+        assert!(replaces_gpu_baseline(log.as_bytes()));
+        assert!(!replaces_gpu_baseline(session(("P2", 1150, 4.0), ("P3", 1100, 0.5)).as_bytes()), "no GPU-valid view: no GPU baseline");
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn gpu_medians_are_compared_only_between_views_at_equal_clock_state() {
+        let old = session(("P0", 1395, 3.0), ("P0", 1395, 0.5));
+        // Same state within the tolerance: a +40 % rise is reported.
+        let near = session(("P0", 1350, 4.2), ("P0", 1395, 0.5));
+        let lines = comparison_lines(Some(old.as_bytes()), near.as_bytes());
+        assert!(lines.iter().any(|l| l.contains("terrain/ground-1m gpu_ms median 3.00 -> 4.20")), "{lines:?}");
+        // Another boost clock beyond the tolerance: not comparable, and the line names both states.
+        let far = session(("P0", 1200, 4.2), ("P0", 1395, 0.5));
+        let lines = comparison_lines(Some(old.as_bytes()), far.as_bytes());
+        assert!(lines.iter().all(|l| !l.contains("REGRESSION")), "{lines:?}");
+        assert!(
+            lines.iter().any(|l| l.contains("not comparable: clock state P0 1395 MHz vs P0 1200 MHz") && l.contains("ground-1m")),
+            "{lines:?}"
+        );
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn the_p2_session_of_2026_10_13_against_the_p0_session_of_2026_10_11_is_not_a_regression() {
+        let p0 = session(("P0", 1395, 3.0), ("P0", 1395, 0.5));
+        let p2 = session(("P2", 1150, 4.2), ("P0", 1395, 0.5));
+        let lines = comparison_lines(Some(p0.as_bytes()), p2.as_bytes());
+        assert!(lines.iter().all(|l| !l.contains("REGRESSION")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("ground-1m") && l.contains("NOT VALID for GPU budgets (P2 1150 MHz)")), "{lines:?}");
+        // The other way round: the baseline view was not valid.
+        let lines = comparison_lines(Some(p2.as_bytes()), p0.as_bytes());
+        assert!(lines.iter().any(|l| l.contains("baseline view was not valid for GPU budgets (P2 1150 MHz)")), "{lines:?}");
+        // The untouched P0 orbit view is still compared.
+        assert!(lines.iter().any(|l| l.contains("regression check:") && l.contains("compared")), "{lines:?}");
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn cpu_figures_and_counts_are_compared_whatever_the_clock_state() {
+        let a = |cpu: f64, nodes: u64| {
+            let s = session(("P2", 1150, 4.0), ("P2", 1150, 0.5));
+            // Rewrite the recorded cpu median and node count of the fixture.
+            s.replace("\"cpu_ms\":{\"median\":6", &format!("\"cpu_ms\":{{\"median\":{cpu}"))
+                .replace("\"nodes\":100", &format!("\"nodes\":{nodes}"))
+        };
+        let (old, new) = (a(6.0, 100), a(9.0, 120));
+        let lines = comparison_lines(Some(old.as_bytes()), new.as_bytes());
+        assert!(lines.iter().any(|l| l.contains("terrain/ground-1m cpu_ms median 6.00 -> 9.00")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("nodes 100 -> 120")), "{lines:?}");
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn a_log_without_samples_is_read_as_not_valid_for_gpu_and_a_separate_gpu_baseline_is_used() {
+        // Old-format log: no clock samples at all.
+        let old_fmt = session(("P0", 1395, 3.0), ("P0", 1395, 0.5))
+            .replace("\"clocks_before\"", "\"x_before\"")
+            .replace("\"clocks_after\"", "\"x_after\"");
+        let s = summarize_log(old_fmt.as_bytes()).unwrap();
+        assert!(s.gpu.values().all(|g| *g == GpuValidity::Invalid("no clock sample".into())), "{:?}", s.gpu);
+        // The CPU baseline is the P2 session; the GPU baseline is the older P0 one: the GPU rise is still found.
+        let cpu_base = session(("P2", 1150, 4.0), ("P0", 1395, 0.5));
+        let gpu_base = session(("P0", 1395, 3.0), ("P0", 1395, 0.5));
+        let new = session(("P0", 1395, 4.5), ("P0", 1395, 0.5));
+        let lines = comparison_lines_gpu(Some(cpu_base.as_bytes()), Some(gpu_base.as_bytes()), new.as_bytes());
+        assert!(lines.iter().any(|l| l.contains("terrain/ground-1m gpu_ms median 3.00 -> 4.50")), "{lines:?}");
+        assert_eq!(
+            gpu_baseline_path(std::path::Path::new("perf/logs/terrain.json")),
+            std::path::Path::new("perf/logs/terrain.last-gpu-valid.json")
+        );
     }
 }
