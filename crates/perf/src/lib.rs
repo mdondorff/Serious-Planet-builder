@@ -5,6 +5,8 @@
 pub mod clock;
 pub mod compare;
 pub mod gate;
+pub mod host;
+pub mod session;
 pub mod streaming;
 
 use std::process::Command;

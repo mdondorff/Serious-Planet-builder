@@ -450,6 +450,9 @@ pub fn comparison_lines_gpu(last_valid: Option<&[u8]>, last_gpu_valid: Option<&[
                 compared += count_compared(&old, &new, cpu);
                 for (path, counts) in &new.counts {
                     for (name, &n) in counts {
+                        if RECORDED_ONLY_COUNTS.contains(&name.as_str()) {
+                            continue;
+                        }
                         if let Some(&o) = old.counts.get(path).and_then(|c| c.get(name)) {
                             if o != n {
                                 lines.push(format!("count changed vs the last valid log: {path} {name} {o} -> {n}"));
@@ -509,6 +512,10 @@ pub fn comparison_lines_gpu(last_valid: Option<&[u8]>, last_gpu_valid: Option<&[
     }
     lines
 }
+
+/// Counts that are recorded in the log but never compared: they differ from run to run by nature (the CPU's effective clock at
+/// the start and end of a case, the most slots resident in any frame), so a change is not news.
+const RECORDED_ONLY_COUNTS: [&str; 3] = ["cpu_clock_before_mhz", "cpu_clock_after_mhz", "max_resident_slots"];
 
 #[cfg(test)]
 mod tests {
@@ -574,6 +581,27 @@ mod tests {
         let new = log(true, (2560, 1440), [3.0, 9.0, 3.0], [0.06; 3], 8687);
         let lines = comparison_lines(Some(old.as_bytes()), new.as_bytes());
         assert!(lines.iter().all(|l| !l.contains("REGRESSION")), "{lines:?}");
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn the_cpu_clock_counts_are_recorded_but_never_compared_and_a_log_without_them_stays_readable() {
+        let plain = log(true, (2560, 1440), [3.0; 3], [0.06; 3], 8687);
+        let with = |before: u32, after: u32| {
+            plain.replace(
+                "\"counts\":{\"nodes\":8687}",
+                &format!("\"counts\":{{\"nodes\":8687,\"cpu_clock_before_mhz\":{before},\"cpu_clock_after_mhz\":{after},\"max_resident_slots\":{before}}}"),
+            )
+        };
+        let (a, b) = (with(3100, 3000), with(2200, 1800));
+        assert_ne!(a, plain);
+        for (old, new) in [(&plain, &a), (&a, &plain), (&a, &b)] {
+            let lines = comparison_lines(Some(old.as_bytes()), new.as_bytes());
+            assert!(lines.iter().all(|l| !l.contains("count changed") && !l.contains("could not be read")), "{lines:?}");
+        }
+        // A real count still counts.
+        let lines = comparison_lines(Some(a.as_bytes()), with(3100, 3000).replace("8687", "9000").as_bytes());
+        assert!(lines.iter().any(|l| l.contains("nodes 8687 -> 9000")), "{lines:?}");
     }
 
     // spec: TEST-012
