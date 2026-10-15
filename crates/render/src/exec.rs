@@ -59,6 +59,11 @@ pub enum ExecError {
         slot: planet_streaming::SlotRef,
         capacity: u32,
     },
+    /// A compact tile was given to a renderer whose pools are the vertex format (`TerrainRenderer::with_compact_pools` makes one that
+    /// takes them), or a compact tile was placed in the vertex pool.
+    CompactUnsupported {
+        tile: TileId,
+    },
     /// The plan has more nodes than the per-node record buffer the share accounts for.
     TooManyNodes {
         planned: usize,
@@ -85,6 +90,9 @@ impl fmt::Display for ExecError {
             }
             ExecError::BadSlot { tile, slot, capacity } => {
                 write!(f, "tile {tile:?}: slot {slot:?} is outside the pool of {capacity} slots")
+            }
+            ExecError::CompactUnsupported { tile } => {
+                write!(f, "tile {tile:?}: a compact tile needs a renderer built with compact pools, placed in the main pool")
             }
             ExecError::TooManyNodes { planned, max } => {
                 write!(f, "the plan has {planned} nodes but the node record buffer holds {max}")
