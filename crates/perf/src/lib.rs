@@ -310,6 +310,15 @@ pub fn view_gpu_validity(runs: &[RunReport], path: &str) -> clock::GpuValidity {
     clock::gpu_validity(&view_clock_points(runs, path))
 }
 
+/// Whether the software power cap (throttle reason 0x4) was read in any clock sample of the view `path`. Recorded in the log
+/// (`power_cap` per run) and printed; it does not invalidate the view or the session (ADR 0036 point 1).
+pub fn view_power_cap(runs: &[RunReport], path: &str) -> bool {
+    runs.iter()
+        .filter(|r| r.path_name == path)
+        .flat_map(|r| [&r.clocks_before, &r.clocks_after])
+        .any(|c| c.as_ref().is_some_and(|c| gate::has_power_cap(&c.throttle_reasons)))
+}
+
 /// [`report_json`] plus the warm-up outcome of each view (`warmups`: view name and what the warm-up did).
 pub fn report_json_with_warmups(
     adapter: &AdapterFacts,
@@ -330,7 +339,7 @@ pub fn report_json_with_warmups(
         .map(|r| {
             let gv = gpu_valid_json(&view_gpu_validity(runs, &r.path_name));
             format!(
-                "{{\"path\":{},\"vram_cap_gb\":{},\"samples\":{},\"median_ms\":{},\"p99_ms\":{},\"min_ms\":{},\"max_ms\":{},\"mean_ms\":{},\"clocks_before\":{},\"clocks_after\":{},\"gpu_valid\":{},\"gpu_clock_state\":{},\"metrics\":{{{}}},\"counts\":{{{}}}}}",
+                "{{\"path\":{},\"vram_cap_gb\":{},\"samples\":{},\"median_ms\":{},\"p99_ms\":{},\"min_ms\":{},\"max_ms\":{},\"mean_ms\":{},\"clocks_before\":{},\"clocks_after\":{},\"gpu_valid\":{},\"gpu_clock_state\":{},\"power_cap\":{},\"metrics\":{{{}}},\"counts\":{{{}}}}}",
                 json_str(&r.path_name),
                 r.vram_cap_gb,
                 r.stats.samples,
@@ -343,6 +352,7 @@ pub fn report_json_with_warmups(
                 clock_json(&r.clocks_after),
                 gv.0,
                 gv.1,
+                view_power_cap(runs, &r.path_name),
                 r.metrics.iter().map(|(n, s)| format!("{}:{{\"median\":{},\"p99\":{},\"max\":{},\"mean\":{},\"samples\":{}}}", json_str(n), json_f(s.median), json_f(s.p99), json_f(s.max), json_f(s.mean), s.samples)).collect::<Vec<_>>().join(","),
                 r.counts.iter().map(|(n, v)| format!("{}:{v}", json_str(n))).collect::<Vec<_>>().join(",")
             )
@@ -565,9 +575,16 @@ pub fn budget_verdict(gpu_median_ms: Option<f64>, frame_p99_ms: f64) -> BudgetVe
 }
 
 /// The console line of one terrain view (ADR 0034 as amended by the owner, 2026-10-15). The frame verdict (p99 against the
-/// budget) holds at any clock state and the state is printed beside it; the GPU median and its verdict need P0, else the line
-/// says `NOT VALID for GPU budgets (<state>)` and shows the GPU median without a verdict. `smoke` is no measurement: no state.
-pub fn terrain_view_line(name: &str, total: &Stats, gpu: Option<&Stats>, clock: &clock::GpuValidity, smoke: bool) -> String {
+/// budget) holds at any clock state and the state is printed beside it; the GPU median and its verdict need every clock sample
+/// at or above the floor (ADR 0036), else the line says `NOT VALID for GPU budgets (<state>)` and shows the GPU median without a verdict. `smoke` is no measurement: no state.
+pub fn terrain_view_line(
+    name: &str,
+    total: &Stats,
+    gpu: Option<&Stats>,
+    clock: &clock::GpuValidity,
+    power_cap: bool,
+    smoke: bool,
+) -> String {
     let v = budget_verdict(gpu.map(|g| g.median), total.p99);
     let word = |ok: bool| if ok { "ok" } else { "OVER" };
     let frame =
@@ -576,7 +593,8 @@ pub fn terrain_view_line(name: &str, total: &Stats, gpu: Option<&Stats>, clock: 
         clock::GpuValidity::Valid(s) => s.to_string(),
         clock::GpuValidity::Invalid(r) => r.clone(),
     };
-    let tag = if smoke { String::new() } else { format!(" [clock state {state}]") };
+    let cap = if power_cap && !smoke { " [power cap 0x4 recorded, not invalidating]" } else { "" };
+    let tag = if smoke { String::new() } else { format!(" [clock state {state}]{cap}") };
     let gpu_text = match (gpu, clock) {
         (None, _) => "no GPU timestamps (no GPU verdict)".to_string(),
         (Some(g), clock::GpuValidity::Invalid(r)) if !smoke => {
@@ -598,31 +616,74 @@ mod view_line_tests {
 
     // spec: TEST-012
     #[test]
-    fn a_view_outside_p0_keeps_its_frame_verdict_and_loses_its_gpu_verdict() {
-        let p2 = GpuValidity::Invalid("P2 1150 MHz".into());
-        let line = terrain_view_line("ground-1m", &stats(7.0, 25.0), Some(&stats(4.2, 5.0)), &p2, false);
-        assert!(line.contains("NOT VALID for GPU budgets (P2 1150 MHz): GPU median 4.20 ms (no verdict)"), "{line}");
+    fn a_view_below_the_floor_keeps_its_frame_verdict_and_loses_its_gpu_verdict() {
+        let p2 = GpuValidity::Invalid("P2 1150 MHz, below the 1400 MHz floor".into());
+        let line = terrain_view_line("ground-1m", &stats(7.0, 25.0), Some(&stats(4.2, 5.0)), &p2, false, false);
+        assert!(
+            line.contains("NOT VALID for GPU budgets (P2 1150 MHz, below the 1400 MHz floor): GPU median 4.20 ms (no verdict)"),
+            "{line}"
+        );
         assert!(line.contains("frame median 7.00 ms, p99 25.00 ms (budget 20) OVER"), "the frame verdict stays: {line}");
-        assert!(line.ends_with("[clock state P2 1150 MHz]"), "{line}");
-        let ok = terrain_view_line("orbit", &stats(1.0, 2.0), Some(&stats(9.0, 9.0)), &p2, false);
+        assert!(line.ends_with("[clock state P2 1150 MHz, below the 1400 MHz floor]"), "{line}");
+        let ok = terrain_view_line("orbit", &stats(1.0, 2.0), Some(&stats(9.0, 9.0)), &p2, false, false);
         assert!(ok.contains("frame median 1.00 ms, p99 2.00 ms (budget 20) ok") && !ok.contains("GPU median 9.00 ms (budget"), "{ok}");
     }
 
     // spec: TEST-012
     #[test]
-    fn a_p0_view_has_both_verdicts_and_the_state_and_smoke_has_no_state() {
-        let p0 = GpuValidity::Valid(ClockState { pstate: "P0".into(), mhz: 1395.0 });
-        let line = terrain_view_line("ground-1m", &stats(7.0, 9.0), Some(&stats(9.0, 9.5)), &p0, false);
+    fn a_view_at_the_floor_has_both_verdicts_and_the_state_and_smoke_has_no_state() {
+        let p0 = GpuValidity::Valid(ClockState { pstate: "P0".into(), mhz: 1470.0 });
+        let line = terrain_view_line("ground-1m", &stats(7.0, 9.0), Some(&stats(9.0, 9.5)), &p0, false, false);
         assert!(line.contains("GPU median 9.00 ms (budget 8) OVER") && line.contains("p99 9.00 ms (budget 20) ok"), "{line}");
-        assert!(line.ends_with("[clock state P0 1395 MHz]"), "{line}");
-        let smoke =
-            terrain_view_line("ground-1m", &stats(7.0, 9.0), Some(&stats(1.0, 1.0)), &GpuValidity::Invalid("no clock sample".into()), true);
+        assert!(line.ends_with("[clock state P0 1470 MHz]"), "{line}");
+        let smoke = terrain_view_line(
+            "ground-1m",
+            &stats(7.0, 9.0),
+            Some(&stats(1.0, 1.0)),
+            &GpuValidity::Invalid("no clock sample".into()),
+            true,
+            true,
+        );
         assert!(
             smoke.contains("GPU median 1.00 ms (budget 8) ok") && !smoke.contains("clock state") && !smoke.contains("NOT VALID"),
             "{smoke}"
         );
-        let none = terrain_view_line("x", &stats(7.0, 9.0), None, &p0, false);
+        let none = terrain_view_line("x", &stats(7.0, 9.0), None, &p0, false, false);
         assert!(none.contains("no GPU timestamps") && none.contains("frame median 7.00"), "{none}");
+    }
+}
+
+#[cfg(test)]
+mod power_cap_tests {
+    use super::*;
+
+    fn run(path: &str, smi: &str) -> RunReport {
+        RunReport {
+            path_name: path.into(),
+            vram_cap_gb: 8,
+            stats: summarize(&[5.0, 6.0, 7.0], 0).unwrap(),
+            clocks_before: parse_nvidia_smi(smi),
+            clocks_after: parse_nvidia_smi(smi),
+            metrics: vec![],
+            counts: vec![],
+        }
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn a_power_capped_view_is_recorded_in_the_log_and_the_session_stays_valid() {
+        let a = AdapterFacts { name: "RTX 3080 Ti".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete };
+        let runs = [
+            run("terrain/ground-1m", "X, 1500, 810, 88, 54, P0, 0x0000000000000004"),
+            run("terrain/orbit", "X, 1710, 810, 40, 50, P2, 0x0000000000000000"),
+        ];
+        assert!(view_power_cap(&runs, "terrain/ground-1m") && !view_power_cap(&runs, "terrain/orbit"));
+        // The throttling rule the harness applies to the samples lets both runs through.
+        assert!(runs.iter().all(|r| r.clocks_before.iter().all(|c| !gate::is_throttling(&c.throttle_reasons))));
+        let j = report_json(&a, Some("High performance"), &[], &gate::validity(&[], &[]), &Protocol::default(), &runs);
+        assert!(j.contains("\"valid_for_budgets\":true"), "{j}");
+        assert!(j.contains("\"power_cap\":true") && j.contains("\"power_cap\":false"), "{j}");
+        assert!(j.contains("\"throttle_reasons\":\"0x0000000000000004\""), "the raw reasons stay in the samples: {j}");
     }
 }
 
