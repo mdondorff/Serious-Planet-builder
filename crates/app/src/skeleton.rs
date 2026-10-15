@@ -1189,7 +1189,8 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
             .map(str::to_string)
             .collect();
         if !off.is_empty() {
-            writeln!(out, "NOT VALID for GPU budgets (clock state outside P0, ADR 0034; frame verdicts stand): {}", off.join(", ")).map_err(err)?;
+            writeln!(out, "NOT VALID for GPU budgets (clock state outside P0, ADR 0034; frame verdicts stand): {}", off.join(", "))
+                .map_err(err)?;
         }
     }
     for (name, total, gpu) in &budget_lines {

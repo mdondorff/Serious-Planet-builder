@@ -796,22 +796,36 @@ mod clock_tests {
         // Frame median 4.0 -> 5.2 ms (+30 %): reported although the states differ, with both states; the GPU figure is not.
         let lines = comparison_lines(Some(p0.as_bytes()), p2.as_bytes());
         let frame = lines.iter().find(|l| l.contains("REGRESSION") && l.contains("frame_ms")).unwrap_or_else(|| panic!("{lines:?}"));
-        assert!(frame.contains("ground-1m") && frame.contains("4.00 -> 5.20") && frame.contains("clock state P0 1395 MHz vs P2 1150 MHz"), "{frame}");
-        assert!(lines.iter().any(|l| l.starts_with("frame medians of terrain/ground-1m compared") && l.contains("clock state P0 1395 MHz vs P2 1150 MHz")), "{lines:?}");
+        assert!(
+            frame.contains("ground-1m") && frame.contains("4.00 -> 5.20") && frame.contains("clock state P0 1395 MHz vs P2 1150 MHz"),
+            "{frame}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("frame medians of terrain/ground-1m compared")
+                    && l.contains("clock state P0 1395 MHz vs P2 1150 MHz")),
+            "{lines:?}"
+        );
         assert!(lines.iter().all(|l| !l.contains("REGRESSION") || !l.contains("gpu_ms")), "{lines:?}");
         // The other way round, and P2 against P2 (equal states: no extra state line).
         let back = comparison_lines(Some(p2.as_bytes()), p0.as_bytes());
         assert!(back.iter().any(|l| l.contains("clock state P2 1150 MHz vs P0 1395 MHz")), "{back:?}");
         let (a, b) = (session(("P2", 1150, 4.0), ("P2", 1150, 0.5)), session(("P2", 1150, 5.5), ("P2", 1150, 0.5)));
         let same = comparison_lines(Some(a.as_bytes()), b.as_bytes());
-        assert!(same.iter().any(|l| l.contains("REGRESSION") && l.contains("frame_ms") && l.contains("P2 1150 MHz vs P2 1150 MHz")), "{same:?}");
+        assert!(
+            same.iter().any(|l| l.contains("REGRESSION") && l.contains("frame_ms") && l.contains("P2 1150 MHz vs P2 1150 MHz")),
+            "{same:?}"
+        );
         assert!(same.iter().all(|l| !l.starts_with("frame medians of")), "{same:?}");
     }
 
     // spec: TEST-012
     #[test]
     fn a_log_without_samples_still_compares_its_frame_medians() {
-        let old_fmt = session(("P0", 1395, 3.0), ("P0", 1395, 0.5)).replace("\"clocks_before\"", "\"x_before\"").replace("\"clocks_after\"", "\"x_after\"");
+        let old_fmt = session(("P0", 1395, 3.0), ("P0", 1395, 0.5))
+            .replace("\"clocks_before\"", "\"x_before\"")
+            .replace("\"clocks_after\"", "\"x_after\"");
         let new = session(("P0", 1395, 4.5), ("P0", 1395, 0.5));
         let lines = comparison_lines(Some(old_fmt.as_bytes()), new.as_bytes());
         assert!(lines.iter().any(|l| l.contains("frame_ms") && l.contains("no clock sample vs P0 1395 MHz")), "{lines:?}");

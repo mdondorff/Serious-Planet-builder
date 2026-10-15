@@ -570,7 +570,8 @@ pub fn budget_verdict(gpu_median_ms: Option<f64>, frame_p99_ms: f64) -> BudgetVe
 pub fn terrain_view_line(name: &str, total: &Stats, gpu: Option<&Stats>, clock: &clock::GpuValidity, smoke: bool) -> String {
     let v = budget_verdict(gpu.map(|g| g.median), total.p99);
     let word = |ok: bool| if ok { "ok" } else { "OVER" };
-    let frame = format!("frame median {:.2} ms, p99 {:.2} ms (budget {}) {}", total.median, total.p99, FRAME_P99_BUDGET_MS, word(v.frame_ok));
+    let frame =
+        format!("frame median {:.2} ms, p99 {:.2} ms (budget {}) {}", total.median, total.p99, FRAME_P99_BUDGET_MS, word(v.frame_ok));
     let state = match clock {
         clock::GpuValidity::Valid(s) => s.to_string(),
         clock::GpuValidity::Invalid(r) => r.clone(),
@@ -614,8 +615,12 @@ mod view_line_tests {
         let line = terrain_view_line("ground-1m", &stats(7.0, 9.0), Some(&stats(9.0, 9.5)), &p0, false);
         assert!(line.contains("GPU median 9.00 ms (budget 8) OVER") && line.contains("p99 9.00 ms (budget 20) ok"), "{line}");
         assert!(line.ends_with("[clock state P0 1395 MHz]"), "{line}");
-        let smoke = terrain_view_line("ground-1m", &stats(7.0, 9.0), Some(&stats(1.0, 1.0)), &GpuValidity::Invalid("no clock sample".into()), true);
-        assert!(smoke.contains("GPU median 1.00 ms (budget 8) ok") && !smoke.contains("clock state") && !smoke.contains("NOT VALID"), "{smoke}");
+        let smoke =
+            terrain_view_line("ground-1m", &stats(7.0, 9.0), Some(&stats(1.0, 1.0)), &GpuValidity::Invalid("no clock sample".into()), true);
+        assert!(
+            smoke.contains("GPU median 1.00 ms (budget 8) ok") && !smoke.contains("clock state") && !smoke.contains("NOT VALID"),
+            "{smoke}"
+        );
         let none = terrain_view_line("x", &stats(7.0, 9.0), None, &p0, false);
         assert!(none.contains("no GPU timestamps") && none.contains("frame median 7.00"), "{none}");
     }
