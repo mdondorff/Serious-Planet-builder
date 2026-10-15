@@ -1090,7 +1090,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         for _ in 0..warmup {
             renderer.render(ctx, &plan, true).map_err(|e| e.to_string())?;
         }
-        // Bring the GPU to its loaded state before measuring (ADR 0034): chunks of frames until the state reads P0, with a
+        // Bring the GPU to its loaded state before measuring (ADR 0034): chunks of frames until the graphics clock reads the floor (ADR 0036), with a
         // measured cap. Not in a smoke run (it is no measurement and may be on a software adapter without `nvidia-smi`).
         if !smoke {
             let started = Instant::now();
@@ -1189,14 +1189,20 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
             .map(str::to_string)
             .collect();
         if !off.is_empty() {
-            writeln!(out, "NOT VALID for GPU budgets (clock state outside P0, ADR 0034; frame verdicts stand): {}", off.join(", "))
-                .map_err(err)?;
+            writeln!(
+                out,
+                "NOT VALID for GPU budgets (a graphics clock sample below {} MHz, ADR 0036; frame verdicts stand): {}",
+                planet_perf::clock::GPU_CLOCK_FLOOR_MHZ,
+                off.join(", ")
+            )
+            .map_err(err)?;
         }
     }
     for (name, total, gpu) in &budget_lines {
         let clock_state = planet_perf::view_gpu_validity(&reports, &format!("terrain/{name}"));
-        // ADR 0034 as amended: the frame verdict holds at any clock state; only the GPU verdict needs P0.
-        writeln!(out, "{}", planet_perf::terrain_view_line(name, total, gpu.as_ref(), &clock_state, smoke)).map_err(err)?;
+        // ADR 0034 as amended: the frame verdict holds at any clock state; only the GPU verdict needs the clock floor (ADR 0036).
+        let power_cap = planet_perf::view_power_cap(&reports, &format!("terrain/{name}"));
+        writeln!(out, "{}", planet_perf::terrain_view_line(name, total, gpu.as_ref(), &clock_state, power_cap, smoke)).map_err(err)?;
     }
     // Run-to-run noise within each view (its three runs), reported as the worst view.
     let mut worst_noise = 0.0f64;

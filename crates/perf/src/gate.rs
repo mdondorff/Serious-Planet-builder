@@ -150,17 +150,28 @@ pub fn readiness(f: &MachineFacts) -> Vec<GateFailure> {
     out
 }
 
-/// Whether an `nvidia-smi` `clocks_throttle_reasons.active` value (hex bit mask) reports throttling that changes the
-/// measurement: software power cap (0x4), hardware slowdown (0x8), software thermal (0x20), hardware thermal (0x40),
-/// power brake (0x80). Idle (0x1), applications clocks (0x2) and sync boost (0x10) do not count. Unparseable values
-/// count as throttling.
-pub fn is_throttling(reasons: &str) -> bool {
+/// The software power cap bit of `clocks_throttle_reasons.active`: the laptop GPU's normal governor at full load. Recorded and
+/// printed, never invalidating (ADR 0036 point 1, owner 2026-10-15).
+pub const THROTTLE_SW_POWER_CAP: u64 = 0x4;
+
+fn throttle_mask(reasons: &str) -> Option<u64> {
     let t = reasons.trim();
     let digits = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
-    match u64::from_str_radix(digits, 16) {
-        Ok(mask) => mask & (0x4 | 0x8 | 0x20 | 0x40 | 0x80) != 0,
-        Err(_) => true,
-    }
+    u64::from_str_radix(digits, 16).ok()
+}
+
+/// Whether an `nvidia-smi` `clocks_throttle_reasons.active` value (hex bit mask) reports throttling that changes the
+/// measurement and so invalidates the session: hardware slowdown (0x8), software thermal (0x20), hardware thermal (0x40),
+/// power brake (0x80). The software power cap (0x4) is normal at full load and does not count (ADR 0036 point 1; see
+/// [`has_power_cap`]); idle (0x1), applications clocks (0x2) and sync boost (0x10) do not count either. A value that cannot
+/// be parsed is an unknown reason and counts as throttling.
+pub fn is_throttling(reasons: &str) -> bool {
+    throttle_mask(reasons).is_none_or(|mask| mask & (0x8 | 0x20 | 0x40 | 0x80) != 0)
+}
+
+/// Whether the software power cap (0x4) is active in the value; recorded per run and printed, not judged.
+pub fn has_power_cap(reasons: &str) -> bool {
+    throttle_mask(reasons).is_some_and(|mask| mask & THROTTLE_SW_POWER_CAP != 0)
 }
 
 /// Outcome of the after-the-run validity rules.
@@ -437,17 +448,27 @@ mod tests {
         for ok in ["0x0000000000000000", "0x0000000000000001", "0x0000000000000002", "0x0000000000000010", "0x0000000000000013"] {
             assert!(!is_throttling(ok), "{ok}");
         }
-        for bad in [
-            "0x0000000000000004",
-            "0x0000000000000008",
-            "0x0000000000000020",
-            "0x0000000000000040",
-            "0x0000000000000080",
-            "0x0000000000000025",
-        ] {
+        for bad in ["0x0000000000000008", "0x0000000000000020", "0x0000000000000040", "0x0000000000000080", "0x0000000000000025"] {
             assert!(is_throttling(bad), "{bad}");
         }
         assert!(is_throttling("[Not Supported]"));
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn the_software_power_cap_alone_is_recorded_and_does_not_invalidate() {
+        // The reading of every heavy view on 2026-10-15: 0x4 at 86-90 W, 52-55 C.
+        assert!(!is_throttling("0x0000000000000004") && has_power_cap("0x0000000000000004"));
+        assert!(!is_throttling("0x4") && has_power_cap("0x4"));
+        // With an idle or sync-boost bit beside it: still only the cap.
+        assert!(!is_throttling("0x0000000000000005") && has_power_cap("0x0000000000000005"));
+        // Thermal and hardware reasons beside the cap still invalidate, and the cap is still recorded.
+        for bad in ["0x000000000000000c", "0x0000000000000024", "0x0000000000000044", "0x0000000000000084"] {
+            assert!(is_throttling(bad) && has_power_cap(bad), "{bad}");
+        }
+        // No cap, no thermal reason; an unknown (unparseable) reading is not a cap but still invalidates.
+        assert!(!has_power_cap("0x0000000000000000") && !has_power_cap("0x0000000000000020"));
+        assert!(is_throttling("") && !has_power_cap("[Not Supported]"));
     }
 
     // spec: TEST-012
