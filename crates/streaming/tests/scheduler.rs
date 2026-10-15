@@ -490,8 +490,7 @@ fn dropping_the_streamer_runs_no_queued_job_and_stops_those_in_flight_at_their_n
     s.load_roots_blocking().unwrap();
     while done_rx.try_recv().is_ok() {}
     let base = source.stages_run.load(Ordering::SeqCst);
-    let tiles: Vec<(TileId, f64)> =
-        (0..6u8).flat_map(|f| (0..2u32).map(move |x| (id(f, 1, x, 0), f64::from(f) + f64::from(x)))).collect();
+    let tiles: Vec<(TileId, f64)> = (0..6u8).flat_map(|f| (0..2u32).map(move |x| (id(f, 1, x, 0), f64::from(f) + f64::from(x)))).collect();
     s.begin_frame_wants(&Wants { residency: tiles, ..Wants::default() });
     let st = s.stats();
     assert_eq!((st.in_flight, st.queued, spawner.pending()), (4, 8, 4));

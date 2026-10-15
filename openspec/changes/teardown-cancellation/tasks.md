@@ -1,0 +1,7 @@
+- [x] 1.1 failing tests: scheduler (drop with queued, spawner-waiting and running jobs; `cancel_all`), managed loop (drop with queued tile and plan jobs, plan job in flight, teleport cancels the queued requests that left R), app (cancelled tile job reads nothing, live job identical)
+- [x] 1.2 streaming: `cancel_all`, `Drop for Streamer`, `CancelToken::cancelled`
+- [x] 1.3 frame: `PlanWorker::close`, `Drop for PlanPipeline`
+- [x] 1.4 app: `MeshSource::load_staged` with `CancelGuarded`; teardown time in the perf scene output
+- [x] 1.5 spec STRM-005 delta; `docs/status.md` M4 decisions section; log lines
+- [x] 1.6 ad hoc measurement over the 16384 store (smoke, software adapter): teardown 9-14 s before, 0.07 s after
+- [ ] 1.7 reviewers (spec-guardian, verifier), archive, PR, CI green, merge

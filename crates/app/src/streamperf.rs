@@ -380,14 +380,8 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         writeln!(out, "{}: script built in {:.1} s", scene.name(), built.elapsed().as_secs_f64()).map_err(err)?;
         let case_started = Instant::now();
         let run = run_case(ctx, &scene_world, &script, &req_of, &lod, smoke, out)?;
-        writeln!(
-            out,
-            "{}: case ran in {:.1} s (teardown {:.2} s)",
-            scene.name(),
-            case_started.elapsed().as_secs_f64(),
-            run.teardown_s
-        )
-        .map_err(err)?;
+        writeln!(out, "{}: case ran in {:.1} s (teardown {:.2} s)", scene.name(), case_started.elapsed().as_secs_f64(), run.teardown_s)
+            .map_err(err)?;
         let mem = MemoryFacts {
             driver_vram_bytes: if smoke { None } else { planet_perf::streaming::query_gpu_memory_used() },
             process_peak_bytes: planet_perf::streaming::query_process_peak_bytes(),
