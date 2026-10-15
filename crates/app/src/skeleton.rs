@@ -1189,37 +1189,13 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
             .map(str::to_string)
             .collect();
         if !off.is_empty() {
-            writeln!(out, "NOT VALID for GPU budgets (clock state outside P0, ADR 0034): {}", off.join(", ")).map_err(err)?;
+            writeln!(out, "NOT VALID for GPU budgets (clock state outside P0, ADR 0034; frame verdicts stand): {}", off.join(", ")).map_err(err)?;
         }
     }
     for (name, total, gpu) in &budget_lines {
-        let v = planet_perf::budget_verdict(gpu.as_ref().map(|g| g.median), total.p99);
-        let word = |ok: bool| if ok { "ok" } else { "OVER" };
         let clock_state = planet_perf::view_gpu_validity(&reports, &format!("terrain/{name}"));
-        // ADR 0034: outside P0 the GPU and frame figures are shown but carry no verdict.
-        if let (false, planet_perf::clock::GpuValidity::Invalid(reason)) = (smoke, &clock_state) {
-            let gpu_text = gpu.as_ref().map_or("no GPU timestamps".to_string(), |g| format!("GPU median {:.2} ms", g.median));
-            writeln!(out, "  {name}: NOT VALID for GPU budgets ({reason}): {gpu_text}; frame p99 {:.2} ms (no verdict)", total.p99)
-                .map_err(err)?;
-            continue;
-        }
-        let state_tag = match &clock_state {
-            planet_perf::clock::GpuValidity::Valid(s) if !smoke => format!(" [{s}]"),
-            _ => String::new(),
-        };
-        let verdict = match gpu {
-            Some(g) => format!(
-                "GPU median {:.2} ms (budget {}) {}; frame p99 {:.2} ms (budget {}) {}",
-                g.median,
-                planet_perf::TERRAIN_GPU_BUDGET_MS,
-                word(v.gpu_ok == Some(true)),
-                total.p99,
-                planet_perf::FRAME_P99_BUDGET_MS,
-                word(v.frame_ok)
-            ),
-            None => format!("no GPU timestamps; frame median {:.2} ms, p99 {:.2} ms (no GPU verdict)", total.median, total.p99),
-        };
-        writeln!(out, "  {name}: {verdict}{state_tag}").map_err(err)?;
+        // ADR 0034 as amended: the frame verdict holds at any clock state; only the GPU verdict needs P0.
+        writeln!(out, "{}", planet_perf::terrain_view_line(name, total, gpu.as_ref(), &clock_state, smoke)).map_err(err)?;
     }
     // Run-to-run noise within each view (its three runs), reported as the worst view.
     let mut worst_noise = 0.0f64;

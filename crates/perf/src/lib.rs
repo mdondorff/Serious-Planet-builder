@@ -564,6 +564,63 @@ pub fn budget_verdict(gpu_median_ms: Option<f64>, frame_p99_ms: f64) -> BudgetVe
     BudgetVerdict { gpu_ok: gpu_median_ms.map(|g| g <= TERRAIN_GPU_BUDGET_MS), frame_ok: frame_p99_ms <= FRAME_P99_BUDGET_MS }
 }
 
+/// The console line of one terrain view (ADR 0034 as amended by the owner, 2026-10-15). The frame verdict (p99 against the
+/// budget) holds at any clock state and the state is printed beside it; the GPU median and its verdict need P0, else the line
+/// says `NOT VALID for GPU budgets (<state>)` and shows the GPU median without a verdict. `smoke` is no measurement: no state.
+pub fn terrain_view_line(name: &str, total: &Stats, gpu: Option<&Stats>, clock: &clock::GpuValidity, smoke: bool) -> String {
+    let v = budget_verdict(gpu.map(|g| g.median), total.p99);
+    let word = |ok: bool| if ok { "ok" } else { "OVER" };
+    let frame = format!("frame median {:.2} ms, p99 {:.2} ms (budget {}) {}", total.median, total.p99, FRAME_P99_BUDGET_MS, word(v.frame_ok));
+    let state = match clock {
+        clock::GpuValidity::Valid(s) => s.to_string(),
+        clock::GpuValidity::Invalid(r) => r.clone(),
+    };
+    let tag = if smoke { String::new() } else { format!(" [clock state {state}]") };
+    let gpu_text = match (gpu, clock) {
+        (None, _) => "no GPU timestamps (no GPU verdict)".to_string(),
+        (Some(g), clock::GpuValidity::Invalid(r)) if !smoke => {
+            format!("NOT VALID for GPU budgets ({r}): GPU median {:.2} ms (no verdict)", g.median)
+        }
+        (Some(g), _) => format!("GPU median {:.2} ms (budget {}) {}", g.median, TERRAIN_GPU_BUDGET_MS, word(v.gpu_ok == Some(true))),
+    };
+    format!("  {name}: {gpu_text}; {frame}{tag}")
+}
+
+#[cfg(test)]
+mod view_line_tests {
+    use super::*;
+    use clock::{ClockState, GpuValidity};
+
+    fn stats(median: f64, p99: f64) -> Stats {
+        Stats { samples: 3, median, p99, min: median, max: p99, mean: median }
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn a_view_outside_p0_keeps_its_frame_verdict_and_loses_its_gpu_verdict() {
+        let p2 = GpuValidity::Invalid("P2 1150 MHz".into());
+        let line = terrain_view_line("ground-1m", &stats(7.0, 25.0), Some(&stats(4.2, 5.0)), &p2, false);
+        assert!(line.contains("NOT VALID for GPU budgets (P2 1150 MHz): GPU median 4.20 ms (no verdict)"), "{line}");
+        assert!(line.contains("frame median 7.00 ms, p99 25.00 ms (budget 20) OVER"), "the frame verdict stays: {line}");
+        assert!(line.ends_with("[clock state P2 1150 MHz]"), "{line}");
+        let ok = terrain_view_line("orbit", &stats(1.0, 2.0), Some(&stats(9.0, 9.0)), &p2, false);
+        assert!(ok.contains("frame median 1.00 ms, p99 2.00 ms (budget 20) ok") && !ok.contains("GPU median 9.00 ms (budget"), "{ok}");
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn a_p0_view_has_both_verdicts_and_the_state_and_smoke_has_no_state() {
+        let p0 = GpuValidity::Valid(ClockState { pstate: "P0".into(), mhz: 1395.0 });
+        let line = terrain_view_line("ground-1m", &stats(7.0, 9.0), Some(&stats(9.0, 9.5)), &p0, false);
+        assert!(line.contains("GPU median 9.00 ms (budget 8) OVER") && line.contains("p99 9.00 ms (budget 20) ok"), "{line}");
+        assert!(line.ends_with("[clock state P0 1395 MHz]"), "{line}");
+        let smoke = terrain_view_line("ground-1m", &stats(7.0, 9.0), Some(&stats(1.0, 1.0)), &GpuValidity::Invalid("no clock sample".into()), true);
+        assert!(smoke.contains("GPU median 1.00 ms (budget 8) ok") && !smoke.contains("clock state") && !smoke.contains("NOT VALID"), "{smoke}");
+        let none = terrain_view_line("x", &stats(7.0, 9.0), None, &p0, false);
+        assert!(none.contains("no GPU timestamps") && none.contains("frame median 7.00"), "{none}");
+    }
+}
+
 #[cfg(test)]
 mod budget_tests {
     use super::*;
