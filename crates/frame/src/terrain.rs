@@ -354,7 +354,7 @@ impl TerrainPlan {
 
 /// Point `h` metres above the terrain of the generator with `seed` (not above the reference sphere) at a latitude and
 /// longitude in degrees. Shared by the scripted views and the flight.
-fn above_terrain(radius_m: f64, field: &dyn HeightField, lat_deg: f64, lon_deg: f64, h: f64) -> PlanetFixed {
+pub(crate) fn above_terrain(radius_m: f64, field: &dyn HeightField, lat_deg: f64, lon_deg: f64, h: f64) -> PlanetFixed {
     let (la, lo) = (lat_deg.to_radians(), lon_deg.to_radians());
     let dir = Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la));
     PlanetFixed(dir * (radius_m + field.height(dir) + h))

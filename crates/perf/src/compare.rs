@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 
 /// The metrics that need a GPU-valid view (ADR 0034 as amended by the owner, 2026-10-15; the clock floor per ADR 0036): `frame_ms` is judged and compared at any clock state.
 pub const GPU_METRICS: [&str; 1] = ["gpu_ms"];
+/// Metrics that are not times (levels of detail lag): kept in the log, never compared as a regression in milliseconds.
+pub const NON_TIME_METRICS: [&str; 1] = ["detail_lag"];
 
 /// A median that rose by more than this fraction of the last valid log's median is a regression.
 pub const REGRESSION_THRESHOLD: f64 = 0.15;
@@ -181,6 +183,8 @@ pub struct LogSummary {
     pub resolution: (u64, u64),
     /// What the session measured (`protocol.field`); `None` for a log that names none.
     pub field: Option<String>,
+    /// Where the bake was read from (`protocol.source`); `None` for a log that names none (the terrain scene).
+    pub source: Option<String>,
     pub medians: BTreeMap<String, BTreeMap<String, f64>>,
     /// Per path: whether its GPU figures are valid and the clock state, read from the recorded samples (ADR 0034).
     pub gpu: BTreeMap<String, GpuValidity>,
@@ -245,9 +249,13 @@ pub fn summarize_log(text: &[u8]) -> Result<LogSummary, String> {
         Some(Json::Str(s)) => Some(s.clone()),
         _ => None,
     };
+    let source = match root.get("protocol").and_then(|p| p.get("source")) {
+        Some(Json::Str(s)) => Some(s.clone()),
+        _ => None,
+    };
     let gpu = points.iter().map(|(p, v)| (p.clone(), gpu_validity(v))).collect();
     let clock = points.iter().map(|(p, v)| (p.clone(), view_clock_state(v))).collect();
-    Ok(LogSummary { valid, resolution: res, field, medians, gpu, clock, counts })
+    Ok(LogSummary { valid, resolution: res, field, source, medians, gpu, clock, counts })
 }
 
 /// Where the last valid log of the scene whose log is `log` is kept: `terrain.json` -> `terrain.last-valid.json` beside it.
@@ -332,6 +340,14 @@ fn usable_baseline(old_text: &[u8], new: &LogSummary) -> Result<LogSummary, Stri
             "regression check skipped: the baseline measured field {}, this session {}; the figures are not comparable across a field change, so this session becomes the baseline",
             name(&old.field),
             name(&new.field)
+        ));
+    }
+    if old.source != new.source {
+        let name = |f: &Option<String>| f.clone().unwrap_or_else(|| "none recorded".into());
+        return Err(format!(
+            "regression check skipped: the baseline read its bake from {}, this session from {}; streaming figures are not comparable across a source change, so this session becomes the baseline",
+            name(&old.source),
+            name(&new.source)
         ));
     }
     if old.resolution != new.resolution {
@@ -419,7 +435,7 @@ pub fn comparison_lines_gpu(last_valid: Option<&[u8]>, last_gpu_valid: Option<&[
         Some(text) => match usable_baseline(text, &new) {
             Err(line) => lines.push(line),
             Ok(old) => {
-                let cpu = |_: &str, m: &str| !GPU_METRICS.contains(&m);
+                let cpu = |_: &str, m: &str| !GPU_METRICS.contains(&m) && !NON_TIME_METRICS.contains(&m);
                 let rs = rises_where(&old, &new, REGRESSION_THRESHOLD, cpu);
                 found += rs.len();
                 lines.extend(rs.iter().map(|r| {
@@ -853,5 +869,53 @@ mod clock_tests {
         let lines = comparison_lines(Some(old_fmt.as_bytes()), new.as_bytes());
         assert!(lines.iter().any(|l| l.contains("frame_ms") && l.contains("no clock sample vs P0 1470 MHz")), "{lines:?}");
         assert!(lines.iter().any(|l| l.contains("GPU medians of terrain/ground-1m not compared")), "the GPU figure is withheld: {lines:?}");
+    }
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+    use crate::{report_json, summarize, AdapterFacts, DeviceKind, Protocol, RunReport};
+
+    fn session(scene: &str, source: Option<&str>, wall: f64, lag: f64) -> String {
+        let a = AdapterFacts { name: "RTX 3080 Ti".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete };
+        let run = RunReport {
+            path_name: format!("stream/{scene}"),
+            vram_cap_gb: 8,
+            stats: summarize(&[wall; 3], 0).unwrap(),
+            clocks_before: crate::parse_nvidia_smi("X, 1470, 810, 100, 60, P0, 0x0"),
+            clocks_after: crate::parse_nvidia_smi("X, 1470, 810, 100, 60, P0, 0x0"),
+            metrics: vec![("detail_lag".into(), summarize(&[lag; 3], 0).unwrap())],
+            counts: vec![("blank_frames".into(), 0)],
+        };
+        let protocol = Protocol {
+            field: Some("height field cpu-erosion-v1 over a 16384-cell bake".into()),
+            source: source.map(str::to_string),
+            ..Protocol::default()
+        };
+        report_json(&a, Some("High performance"), &[], &crate::gate::Validity::default(), &protocol, &[run])
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn a_streaming_log_records_its_source_and_is_compared_only_with_the_same_scene_and_source() {
+        let store = "store C:/bake, 16384 cells";
+        let new = session("dive", Some(store), 12.0, 0.4);
+        assert_eq!(summarize_log(new.as_bytes()).unwrap().source.as_deref(), Some(store), "the log names the source");
+        // Another source (an in-memory bake, a copy of the store elsewhere, or a log that names none) is not compared.
+        for other in [Some("in-memory 256 cells (NOT the production source)"), Some("store D:/copy, 16384 cells"), None] {
+            let old = session("dive", other, 6.0, 0.4);
+            let lines = comparison_lines(Some(old.as_bytes()), new.as_bytes());
+            assert_eq!(lines.len(), 1, "{lines:?}");
+            assert!(lines[0].contains("source") && !lines[0].contains("REGRESSION"), "{lines:?}");
+        }
+        // The same source compares: a frame median that rose by half is reported, a lag in levels is never a millisecond rise.
+        let lines = comparison_lines(Some(session("dive", Some(store), 6.0, 0.01).as_bytes()), new.as_bytes());
+        assert!(lines.iter().any(|l| l.contains("stream/dive frame_ms") && l.contains("REGRESSION")), "{lines:?}");
+        assert!(!lines.iter().any(|l| l.contains("detail_lag") && l.contains("REGRESSION")), "{lines:?}");
+        // Another scene's log shares no path with this one: nothing is compared, so no scene is held to another's figures.
+        let other_scene = session("teleport-1m", Some(store), 1.0, 0.0);
+        let lines = comparison_lines(Some(other_scene.as_bytes()), new.as_bytes());
+        assert!(!lines.iter().any(|l| l.contains("REGRESSION")), "{lines:?}");
     }
 }

@@ -5,6 +5,7 @@
 pub mod clock;
 pub mod compare;
 pub mod gate;
+pub mod streaming;
 
 use std::process::Command;
 
@@ -154,6 +155,9 @@ pub struct Protocol {
     /// What the workload measured when that is a choice (the terrain scene: the height field and its bake, e.g.
     /// `cpu-erosion-v1 over a 256-cell bake`). A log is compared only with one that measured the same thing.
     pub field: Option<String>,
+    /// Where the world's bake was read from when that is a choice (the streaming scenes: `store DIR, N cells` or
+    /// `in-memory N cells (NOT the production source)`). A log is compared only with one that read the same source.
+    pub source: Option<String>,
     /// A smoke run: never valid for budgets.
     pub smoke: bool,
 }
@@ -167,6 +171,7 @@ impl Default for Protocol {
             vram_caps_gb: vec![8, 14],
             internal_resolution: (2560, 1440),
             field: None,
+            source: None,
             smoke: false,
         }
     }
@@ -359,7 +364,7 @@ pub fn report_json_with_warmups(
         })
         .collect();
     format!(
-        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"warnings\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{}}},\"runs\":[{}]}}\n",
+        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"warnings\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{},\"source\":{}}},\"runs\":[{}]}}\n",
         json_str(&adapter.name),
         json_str(&adapter.backend),
         power_scheme.map_or("null".to_string(), json_str),
@@ -374,6 +379,7 @@ pub fn report_json_with_warmups(
         protocol.internal_resolution.0,
         protocol.internal_resolution.1,
         protocol.field.as_deref().map_or("null".to_string(), json_str),
+        protocol.source.as_deref().map_or("null".to_string(), json_str),
         run_json.join(",")
     )
 }

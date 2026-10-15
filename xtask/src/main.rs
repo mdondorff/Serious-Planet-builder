@@ -22,6 +22,8 @@ const USAGE: &str = "cargo xtask <command>
   repro <bundle>       replay a repro bundle (format arrives in M1)
   perf [--machine-ready]   performance harness on Rasierklinge; the harness measures readiness and refuses (ADR 0020);
                            --machine-ready is the owner's override. Only the architect session runs it
+  perf stream [SCENE|all] --store DIR   the streaming scenes dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km (ADR 0032) over a stored 16384-cell bake; --allow-memory-bake runs over an in-memory bake labelled NOT the production source;
+                           --smoke proves the scenes on the software adapter (never a measurement); also --global-res N, --out PATH, --machine-ready
   perf global-bake [--global-res N] [--threads N] [--machine-ready]   the GEN-014 global bake (default 16384 cells per face edge) under the same gate
   cache-verify <dir> [--world <file>|--seed N] [--sample N] [--allow-stale]   regenerate a sample of a tile store from the definition and compare (STRM-004)
   cache-compact <dir> [--world <file>|--seed N] [--cap-bytes N]   rewrite a tile store keeping the records the definition still produces, evicting the oldest packs first under a cap (STRM-013)
