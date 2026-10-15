@@ -1,0 +1,4 @@
+- [x] 1.1 failing tests first: pure `detail_lag` cases, managed-loop inline/post-pass equality on fakes, verdicts on fixtures
+- [x] 1.2 `detail_lag`, `fresh_detail_lag`, `lag_post_pass`; perf scene records poses and drawn ids, post-pass after teardown; verdict rules without the coverage guard
+- [x] 1.3 spec deltas TEST-018 (modified), TEST-020 (added); learning
+- [x] 1.4 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge

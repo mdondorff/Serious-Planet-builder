@@ -12,7 +12,7 @@ fn tmp(name: &str) -> std::path::PathBuf {
     d
 }
 
-// spec: TEST-019
+// spec: TEST-019, TEST-020
 #[test]
 fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_source() {
     let store = tmp("store");
@@ -48,8 +48,23 @@ fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_so
         }
         assert!(!json.contains("\"gpu_ms\""), "{scene}: no GPU time is claimed: {json}");
         let frames = std::fs::read_to_string(logs.join(format!("{scene}.frames.txt"))).unwrap();
-        assert!(frames.starts_with("# frame plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms lag blank"), "{frames}");
+        assert!(frames.starts_with("# frame plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms lag uncovered blank"), "{frames}");
         assert!(frames.lines().count() > 20, "{scene}: {frames}");
+        // Every frame has a lag from the post-pass (TEST-020): the lag column (index 7) is a number, never `-`.
+        for line in frames.lines().skip(1) {
+            let lag = line.split_whitespace().nth(7).unwrap_or("");
+            assert!(lag.parse::<f64>().is_ok(), "{scene}: a frame without a lag: {line}");
+        }
+        assert!(out.contains(&format!("{scene}: detail lag post-pass over 24 frames")), "{scene}: {out}");
+        // A gated lag rule is judged, never "not measured": the look scenes' rotation rule and the dive's descent rule have a verdict.
+        let gated = if scene.starts_with("look") { "rotation" } else { "detail lag: descent" };
+        if scene.starts_with("look") || scene.starts_with("dive") {
+            let line = out
+                .lines()
+                .find(|l| l.starts_with(&format!("  {scene}: {gated}")))
+                .unwrap_or_else(|| panic!("{scene}: no {gated} line: {out}"));
+            assert!(!line.ends_with("not measured"), "{line}");
+        }
     }
     assert!(out.contains("GPU time: not measured"), "{out}");
     let _ = std::fs::remove_dir_all(&store);
