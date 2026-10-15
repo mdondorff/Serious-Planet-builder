@@ -40,7 +40,7 @@ fn camera_at(height: f64) -> Camera {
 fn a_dive_from_orbit_never_leaves_a_selected_node_without_something_to_draw() {
     let map = TangentWarp;
     let spawner = Arc::new(ManualSpawner::default());
-    let config = StreamConfig { max_in_flight: 16, capacity: 3000, retry_after_ms: 100, record_dispatches: true };
+    let config = StreamConfig { max_in_flight: 16, capacity: 3000, retry_after_ms: 100, record_dispatches: true, ..Default::default() };
     let mut streamer = Streamer::new(Arc::new(Source), spawner.clone() as Arc<dyn Spawner>, Arc::new(FakeClock::default()), config);
     streamer.load_roots_blocking().unwrap();
     let params = lod();

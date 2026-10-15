@@ -1,0 +1,6 @@
+- [x] 1.1 failing tests: slot accounting, retirement and share (streaming `slots`), degradation and the Small share on fakes (streaming `manager`), on the real R and D (frame `manager_real`), headroom pins (app `residency_headroom`), pooled slots on WARP (render `gpu_pools`)
+- [x] 1.2 streaming: `slots`, `budget`, `manager`; hard slot capacity, reservation at dispatch, eviction order in `Streamer`
+- [x] 1.3 frame: `pool` (vertex-format slot and tier pools)
+- [x] 1.4 render: pooled slot storage behind `TerrainRenderer` (`upload`, `upload_at`, `evict`, allocation accessors), same images
+- [x] 1.5 spec deltas (STRM-006, STRM-007, REND-013)
+- [x] 1.6 reviewers (numerics-reviewer not needed: no core, generators or shader change; spec-guardian, verifier), archive, log line, PR, CI green, merge

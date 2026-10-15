@@ -3,8 +3,10 @@
 //! intervals and colours all come from the plan. Shaders see only tile-local and camera-relative quantities (CON-11).
 
 use crate::{read_rgba8, ExecError, GpuContext, RgbaFrame};
+use planet_frame::pool::tier_pool;
 use planet_frame::{TerrainPlan, TerrainView};
 use planet_generators::mesh::{grid_indices, MeshVertex, TileMesh};
+use planet_streaming::{PoolConfig, PoolKind, SlotPools, SlotRef, Tier};
 use std::collections::HashMap;
 
 /// Grid line spacings of the relief view (metres): 1 cm to 1,000 km, one decade apart.
@@ -246,7 +248,25 @@ pub struct TerrainRenderer {
     stride: u64,
     indices: wgpu::Buffer,
     index_count: u32,
-    vertex_buffers: HashMap<planet_core::TileId, (u64, wgpu::Buffer)>,
+    /// Terrain tiles live in pooled fixed-size slots (STRM-006, ADR 0033 point 3): a few large vertex buffers, one slot per
+    /// tile. `pool` is the configuration whose `allocated_bytes` bound what this renderer allocates.
+    pool: PoolConfig,
+    /// Placement of `upload`: slots handed out lowest first, reused after the frames in flight retire.
+    pools: SlotPools,
+    /// Blocks of the main pool, allocated on first use.
+    blocks: Vec<Option<wgpu::Buffer>>,
+    /// The small vertex pool (levels 0-2), allocated on first use.
+    vertex_pool: Option<wgpu::Buffer>,
+    /// Resident tiles: mesh key and slot.
+    tiles: HashMap<planet_core::TileId, (u64, SlotRef)>,
+    /// The tile each occupied slot holds.
+    owners: HashMap<SlotRef, planet_core::TileId>,
+    /// Bytes of one slot.
+    slot_bytes: u64,
+    /// Most nodes the node record buffer may hold.
+    max_nodes: usize,
+    /// Frames rendered; the clock of the slot retirement.
+    frame: u64,
     color: wgpu::Texture,
     color_view: wgpu::TextureView,
     depth_view: wgpu::TextureView,
@@ -262,8 +282,22 @@ struct TimingResources {
 }
 
 impl TerrainRenderer {
+    /// A renderer with the mid tier's terrain share (ADR 0033: 2 GiB, a ceiling counted in slots). Slots are reusable one
+    /// frame after their release (the renderer finishes a frame before it returns).
     pub fn new(ctx: &GpuContext, size: (u32, u32), cells: u32) -> Self {
+        let pool = tier_pool(Tier::Mid, cells, 1).unwrap_or_else(|e| panic!("terrain pools for cells {cells}: {e}"));
+        Self::with_pools(ctx, size, cells, pool)
+    }
+
+    /// A renderer whose pools follow `pool` (a tier's share, or a small one for tests). The slot size must be the
+    /// vertex-format tile of `cells`.
+    pub fn with_pools(ctx: &GpuContext, size: (u32, u32), cells: u32, pool: PoolConfig) -> Self {
         use wgpu::util::DeviceExt;
+        assert_eq!(
+            pool.slot_bytes,
+            planet_frame::pool::vertex_slot_bytes(cells),
+            "the pool's slot is not the vertex-format tile of {cells} cells"
+        );
         let device = &ctx.device;
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let target = |label, format, usage| {
@@ -288,7 +322,8 @@ impl TerrainRenderer {
             mapped_at_creation: false,
         });
         let stride = NODE_BYTES.next_multiple_of(u64::from(device.limits().min_uniform_buffer_offset_alignment));
-        let node_capacity = 256;
+        let max_nodes = (pool.node_record_bytes / stride) as usize;
+        let node_capacity = 256.min(max_nodes.max(1));
         let nodes = Self::node_buffer(device, stride, node_capacity);
         let module = device
             .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("terrain"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
@@ -390,7 +425,15 @@ impl TerrainRenderer {
             stride,
             indices,
             index_count: index_data.len() as u32,
-            vertex_buffers: HashMap::new(),
+            pools: pool.slot_pools(),
+            blocks: Vec::new(),
+            vertex_pool: None,
+            tiles: HashMap::new(),
+            owners: HashMap::new(),
+            slot_bytes: pool.slot_bytes,
+            max_nodes,
+            frame: 0,
+            pool,
             color,
             color_view,
             depth_view,
@@ -426,25 +469,137 @@ impl TerrainRenderer {
         })
     }
 
-    /// Upload a tile's vertices once; later calls for the same tile do nothing.
+    /// Upload a tile's vertices once; later calls for the same tile do nothing. The renderer places the tile itself: the
+    /// lowest free slot of the pool for its level (levels 0-2 in the small vertex pool). A tile that comes back with another
+    /// mesh key takes a new slot and its old one is released (reusable after the frames in flight retire).
     pub fn upload(&mut self, ctx: &GpuContext, mesh: &TileMesh) -> Result<(), ExecError> {
-        use wgpu::util::DeviceExt;
         if mesh.cells != self.cells {
             return Err(ExecError::BadResolution { id: mesh.id, res: mesh.cells });
         }
         // Resident with the same key: nothing to do. A different key (other seed, radius, mesh version) replaces it.
-        if self.vertex_buffers.get(&mesh.id).is_some_and(|(key, _)| *key == mesh.key) {
+        if self.tiles.get(&mesh.id).is_some_and(|(key, _)| *key == mesh.key) {
             return Ok(());
         }
-        let bytes = vertex_bytes(&mesh.vertices);
-        self.uploaded_bytes += bytes.len() as u64;
-        let buffer = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("terrain-vertices"),
-            contents: &bytes,
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        self.vertex_buffers.insert(mesh.id, (mesh.key, buffer));
+        let kind = self.pools.kind_of(mesh.id);
+        let slot = self.pools.acquire(kind, self.frame).ok_or(ExecError::PoolFull { tile: mesh.id, pool: kind })?;
+        if let Some((_, old)) = self.tiles.get(&mesh.id).copied() {
+            self.pools.release(old, self.frame);
+        }
+        self.write_slot(ctx, mesh, slot);
         Ok(())
+    }
+
+    /// Upload a tile's vertices into the slot the residency manager chose (`Streamer::slot_of`): the renderer executes the
+    /// placement and decides nothing. Whatever tile the slot held before is forgotten, and so is the old slot of this tile.
+    /// Do not mix with [`upload`](TerrainRenderer::upload) on one renderer: that one hands out slots itself.
+    pub fn upload_at(&mut self, ctx: &GpuContext, mesh: &TileMesh, slot: SlotRef) -> Result<(), ExecError> {
+        if mesh.cells != self.cells {
+            return Err(ExecError::BadResolution { id: mesh.id, res: mesh.cells });
+        }
+        let capacity = match slot.pool {
+            PoolKind::Main => self.pool.main_slots(),
+            PoolKind::Vertex => self.pool.vertex_slots,
+        };
+        if slot.index >= capacity {
+            return Err(ExecError::BadSlot { tile: mesh.id, slot, capacity });
+        }
+        self.write_slot(ctx, mesh, slot);
+        Ok(())
+    }
+
+    fn write_slot(&mut self, ctx: &GpuContext, mesh: &TileMesh, slot: SlotRef) {
+        let bytes = vertex_bytes(&mesh.vertices);
+        debug_assert_eq!(bytes.len() as u64, self.slot_bytes, "a vertex-format tile fills its slot exactly");
+        let (buffer, offset) = self.slot_buffer_for_write(ctx, slot);
+        ctx.queue.write_buffer(buffer, offset, &bytes);
+        self.uploaded_bytes += bytes.len() as u64;
+        if let Some(previous) = self.owners.insert(slot, mesh.id) {
+            if previous != mesh.id {
+                self.tiles.remove(&previous);
+            }
+        }
+        if let Some((_, old)) = self.tiles.insert(mesh.id, (mesh.key, slot)) {
+            if old != slot {
+                self.owners.remove(&old);
+            }
+        }
+    }
+
+    /// The buffer and byte offset of `slot`, allocating its block (or the vertex pool) on first use.
+    fn slot_buffer_for_write(&mut self, ctx: &GpuContext, slot: SlotRef) -> (&wgpu::Buffer, u64) {
+        let make = |label, bytes| {
+            ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: bytes,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+        match slot.pool {
+            PoolKind::Vertex => {
+                let bytes = self.pool.vertex_slot_bytes * u64::from(self.pool.vertex_slots);
+                let buffer = self.vertex_pool.get_or_insert_with(|| make("terrain-vertex-pool", bytes));
+                (buffer, u64::from(slot.index) * self.slot_bytes)
+            }
+            PoolKind::Main => {
+                let (block, within) = (slot.index / self.pool.block_slots, slot.index % self.pool.block_slots);
+                if self.blocks.len() <= block as usize {
+                    self.blocks.resize_with(block as usize + 1, || None);
+                }
+                let block_bytes = self.pool.block_bytes();
+                let buffer = self.blocks[block as usize].get_or_insert_with(|| make("terrain-block", block_bytes));
+                (buffer, u64::from(within) * self.slot_bytes)
+            }
+        }
+    }
+
+    /// Release the slot `upload` gave to `tile` (reusable after the frames in flight retire) and forget the tile.
+    pub fn evict(&mut self, tile: planet_core::TileId) -> bool {
+        let Some((_, slot)) = self.tiles.remove(&tile) else { return false };
+        self.owners.remove(&slot);
+        self.pools.release(slot, self.frame);
+        true
+    }
+
+    /// Forget `tile` without touching the pools: for a caller that places tiles with [`upload_at`](TerrainRenderer::upload_at).
+    pub fn forget(&mut self, tile: planet_core::TileId) -> bool {
+        let Some((_, slot)) = self.tiles.remove(&tile) else { return false };
+        self.owners.remove(&slot);
+        true
+    }
+
+    /// The slot a resident tile occupies.
+    pub fn slot_of(&self, tile: planet_core::TileId) -> Option<SlotRef> {
+        self.tiles.get(&tile).map(|(_, slot)| *slot)
+    }
+
+    /// The pool configuration whose `allocated_bytes` bound this renderer's allocations.
+    pub fn pool_config(&self) -> &PoolConfig {
+        &self.pool
+    }
+
+    /// Slots handed out by `upload`, retiring and free in the main pool: `(in use, retiring, free)`.
+    pub fn main_slot_counts(&self) -> (u32, u32, u32) {
+        (self.pools.main.in_use(), self.pools.main.retiring(), self.pools.main.free())
+    }
+
+    /// Bytes of the tile pools, the index buffer and the node record buffer as allocated now (summed from the buffers'
+    /// real sizes). The pools and the index buffer equal what `PoolConfig::allocated_bytes_with` says for the live blocks;
+    /// the node records are as large as the largest plan so far, at most the configured buffer; the whole stays under the
+    /// terrain share (STRM-006).
+    pub fn pool_allocated_bytes(&self) -> u64 {
+        let blocks: u64 = self.blocks.iter().flatten().map(wgpu::Buffer::size).sum();
+        blocks + self.vertex_pool.as_ref().map_or(0, wgpu::Buffer::size) + self.indices.size() + self.nodes.size()
+    }
+
+    /// Bytes of the node record buffer as allocated now (it grows with the largest plan, up to the configured maximum).
+    pub fn node_buffer_bytes(&self) -> u64 {
+        self.nodes.size()
+    }
+
+    /// Blocks of the main pool allocated so far, and whether the vertex pool is.
+    pub fn live_pools(&self) -> (u32, bool) {
+        (self.blocks.iter().flatten().count() as u32, self.vertex_pool.is_some())
     }
 
     /// Whether `tile` is resident with exactly the mesh `key` (what a plan draw expects): the test for "needs an upload".
@@ -454,11 +609,11 @@ impl TerrainRenderer {
 
     /// Key of the resident mesh of `tile`, if any.
     pub fn tile_key(&self, tile: planet_core::TileId) -> Option<u64> {
-        self.vertex_buffers.get(&tile).map(|(key, _)| *key)
+        self.tiles.get(&tile).map(|(key, _)| *key)
     }
 
     pub fn resident_tiles(&self) -> usize {
-        self.vertex_buffers.len()
+        self.tiles.len()
     }
 
     /// Draw the plan. Every planned tile must have been uploaded. With `timed`, GPU time is measured when supported.
@@ -470,8 +625,11 @@ impl TerrainRenderer {
         if plan.cells != self.cells {
             return Err(ExecError::BadResolution { id: planet_core::TileId::from_raw(0).expect("root"), res: plan.cells });
         }
+        if plan.nodes.len() > self.max_nodes {
+            return Err(ExecError::TooManyNodes { planned: plan.nodes.len(), max: self.max_nodes });
+        }
         for d in &plan.nodes {
-            match self.vertex_buffers.get(&d.tile) {
+            match self.tiles.get(&d.tile) {
                 None => return Err(ExecError::MissingTile(d.tile)),
                 Some((key, _)) if *key != d.mesh_key => {
                     return Err(ExecError::StaleMesh { tile: d.tile, resident: *key, planned: d.mesh_key })
@@ -483,9 +641,10 @@ impl TerrainRenderer {
         if !(lo.is_finite() && hi.is_finite() && lo < hi) {
             return Err(ExecError::BadHeightRange { lo, hi });
         }
+        self.frame += 1;
         let device = &ctx.device;
         if plan.nodes.len() > self.node_capacity {
-            self.node_capacity = plan.nodes.len().next_power_of_two();
+            self.node_capacity = plan.nodes.len().next_power_of_two().min(self.max_nodes);
             self.nodes = Self::node_buffer(device, self.stride, self.node_capacity);
             self.bind = Self::bind_group(device, &self.bgl, &self.globals, &self.nodes);
         }
@@ -536,7 +695,9 @@ impl TerrainRenderer {
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
             for (i, d) in plan.nodes.iter().enumerate() {
                 pass.set_bind_group(0, &self.bind, &[(i as u64 * self.stride) as u32]);
-                pass.set_vertex_buffer(0, self.vertex_buffers[&d.tile].1.slice(..));
+                let slot = self.tiles[&d.tile].1;
+                let (buffer, offset) = self.slot_buffer(slot);
+                pass.set_vertex_buffer(0, buffer.slice(offset..offset + self.slot_bytes));
                 pass.draw_indexed(0..self.index_count, 0, 0..1);
                 stats.draw_calls += 1;
                 stats.triangles += u64::from(self.index_count) / 3;
@@ -564,6 +725,19 @@ impl TerrainRenderer {
             (delta > 0).then(|| delta as f64 * f64::from(ctx.queue.get_timestamp_period()) / 1.0e6)
         });
         Ok((FrameTiming { cpu_ms, total_ms, gpu_ms }, stats))
+    }
+
+    /// The buffer and byte offset of an allocated slot.
+    fn slot_buffer(&self, slot: SlotRef) -> (&wgpu::Buffer, u64) {
+        match slot.pool {
+            PoolKind::Vertex => {
+                (self.vertex_pool.as_ref().expect("vertex pool of a resident tile"), u64::from(slot.index) * self.slot_bytes)
+            }
+            PoolKind::Main => (
+                self.blocks[(slot.index / self.pool.block_slots) as usize].as_ref().expect("block of a resident tile"),
+                u64::from(slot.index % self.pool.block_slots) * self.slot_bytes,
+            ),
+        }
     }
 
     /// Read the last rendered frame back.

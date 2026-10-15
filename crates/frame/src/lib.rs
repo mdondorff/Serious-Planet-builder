@@ -6,6 +6,7 @@ pub mod controller;
 pub mod instances;
 pub mod lod;
 pub mod plan;
+pub mod pool;
 pub mod repro;
 pub mod residency;
 pub mod terrain;

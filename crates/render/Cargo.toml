@@ -9,6 +9,7 @@ rust-version.workspace = true
 [dependencies]
 planet-core.workspace = true
 planet-frame.workspace = true
+planet-streaming.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
 png.workspace = true

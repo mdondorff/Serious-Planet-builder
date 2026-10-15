@@ -565,6 +565,7 @@ dependencies = [
  "planet-core",
  "planet-frame",
  "planet-generators",
+ "planet-streaming",
  "planet-testkit",
  "png",
  "pollster",
