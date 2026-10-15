@@ -125,6 +125,18 @@ pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Resu
 /// [`plan_terrain_field`] reusing the per-tile selection work of earlier plans in `cache` (a renderer plans every frame;
 /// the plan is identical to the uncached one).
 pub fn plan_terrain_cached(req: &TerrainRequest, field: &dyn HeightField, cache: &mut SelectionCache) -> Result<TerrainPlan, PlanError> {
+    plan_terrain_keyed(req, field, cache, None)
+}
+
+/// [`plan_terrain_cached`] with an optional replacement for the per-tile mesh key derivation (`None`: the production
+/// `MeshKeyer`). A test hook: the reference and eroded keyers hash constants per tile and touch no field, so a counting
+/// keyer is the only observable of the mesh-key memo (LOD-009).
+pub(crate) fn plan_terrain_keyed(
+    req: &TerrainRequest,
+    field: &dyn HeightField,
+    cache: &mut SelectionCache,
+    key_override: Option<&dyn Fn(TileId) -> u64>,
+) -> Result<TerrainPlan, PlanError> {
     if field.seed() != req.seed {
         return Err(PlanError::HeightField(format!("field seed {} differs from request seed {}", field.seed(), req.seed)));
     }
@@ -156,6 +168,7 @@ pub fn plan_terrain_cached(req: &TerrainRequest, field: &dyn HeightField, cache:
         )));
     }
     let keyer = planet_generators::mesh::MeshKeyer::new(field, map.as_ref(), req.lod.cells, req.lod.radius_m);
+    let derive_key = |tile: TileId| key_override.map_or_else(|| keyer.key(tile), |f| f(tile));
     let nodes = selection
         .nodes
         .iter()
@@ -184,7 +197,7 @@ pub fn plan_terrain_cached(req: &TerrainRequest, field: &dyn HeightField, cache:
                 morph_start_m: n.morph_start_m as f32,
                 morph_end_m: n.morph_end_m as f32,
                 color,
-                mesh_key: if reuse { cache.mesh_key(n.tile, req.lod.cells, || keyer.key(n.tile)) } else { keyer.key(n.tile) },
+                mesh_key: if reuse { cache.mesh_key(n.tile, req.lod.cells, || derive_key(n.tile)) } else { derive_key(n.tile) },
             }
         })
         .collect();
@@ -359,4 +372,71 @@ pub fn flight_path_field(radius_m: f64, aspect: f64, field: &dyn HeightField, fr
             Camera::at_surface_point(at(lat, 30.0, h), north, pitch_deg.to_radians(), fov, aspect, 0.1)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scripted_views_field;
+    use planet_generators::height::Reference;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    const R: f64 = 6_371_000.0;
+
+    fn request(view: usize, cells: u32) -> TerrainRequest {
+        let (_, camera) = scripted_views_field(R, 4.0 / 3.0, &Reference(1))[view];
+        TerrainRequest {
+            camera,
+            size: (128, 96),
+            view: TerrainView::Level,
+            lod: LodParams { cells, viewport_h_px: 192.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() },
+            face_mapping: "tangent-v1".into(),
+            seed: 1,
+        }
+    }
+
+    /// Plans with a counting keyer standing in for `MeshKeyer`: returns the plan and how often each tile's key was derived.
+    fn plan_counting(req: &TerrainRequest, cache: &mut SelectionCache) -> (TerrainPlan, HashMap<TileId, u32>) {
+        let derived = RefCell::new(HashMap::new());
+        let key = |t: TileId| {
+            *derived.borrow_mut().entry(t).or_insert(0u32) += 1;
+            hash_u64s(0x7465_7374, &[t.raw(), u64::from(req.lod.cells)])
+        };
+        let plan = plan_terrain_keyed(req, &Reference(1), cache, Some(&key)).unwrap();
+        (plan, derived.into_inner())
+    }
+
+    // spec: LOD-009
+    #[test]
+    fn a_warm_plan_derives_no_mesh_key_and_a_moved_camera_only_the_new_tiles() {
+        let a = request(6, 16);
+        let mut cache = SelectionCache::new();
+        let (cold, first) = plan_counting(&a, &mut cache);
+        assert_eq!(first.len(), cold.nodes.len(), "the cold plan derives the key of every tile");
+        assert!(first.values().all(|&n| n == 1), "each key once: {first:?}");
+        let (warm, none) = plan_counting(&a, &mut cache);
+        assert!(none.is_empty(), "a warm plan of unchanged tiles derives no mesh key, it derived {}", none.len());
+        assert_eq!(warm, cold);
+
+        let mut b = a.clone();
+        b.camera.position = PlanetFixed(b.camera.position.0 + b.camera.forward * 30.0);
+        let (moved, new) = plan_counting(&b, &mut cache);
+        let seen: std::collections::HashSet<TileId> = cold.nodes.iter().map(|n| n.tile).collect();
+        let fresh: Vec<TileId> = moved.nodes.iter().map(|n| n.tile).filter(|t| !seen.contains(t)).collect();
+        assert!(!fresh.is_empty() && fresh.len() < moved.nodes.len(), "the glide must keep some tiles and add some");
+        let mut derived: Vec<TileId> = new.keys().copied().collect();
+        let mut want = fresh;
+        derived.sort_by_key(|t| t.raw());
+        want.sort_by_key(|t| t.raw());
+        assert_eq!(derived, want, "only the new tiles derive a key");
+
+        // A changed cell count starts the keys over: every tile derives again, with the new count in its key.
+        let c = request(6, 32);
+        let (regrid, all) = plan_counting(&c, &mut cache);
+        assert_eq!(all.len(), regrid.nodes.len());
+        for n in &regrid.nodes {
+            assert_eq!(n.mesh_key, hash_u64s(0x7465_7374, &[n.tile.raw(), 32]), "the key of {:?} is the one of 32 cells", n.tile);
+        }
+    }
 }
