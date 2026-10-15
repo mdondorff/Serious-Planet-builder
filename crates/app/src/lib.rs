@@ -419,22 +419,11 @@ pub(crate) fn run_throttled(r: &planet_perf::RunReport) -> bool {
     [&r.clocks_before, &r.clocks_after].iter().any(|c| c.as_ref().is_none_or(|c| planet_perf::gate::is_throttling(&c.throttle_reasons)))
 }
 
-/// The session verdict, printed before any budget verdict so a bad session never shows "ok" first (ADR 0020). An invalid
-/// or overridden session's verdicts do not count.
-pub(crate) fn session_verdict_line(
-    out: &mut dyn Write,
-    validity: &planet_perf::gate::Validity,
-    owner_override: &[String],
-) -> Result<(), String> {
-    if validity.is_valid() && owner_override.is_empty() {
-        return writeln!(out, "SESSION VALID for budgets").map_err(err);
-    }
-    writeln!(out, "SESSION INVALID for budgets: the verdicts below do not count").map_err(err)?;
-    for r in &validity.reasons {
-        writeln!(out, "  INVALID SESSION: {r}").map_err(err)?;
-    }
-    for r in owner_override {
-        writeln!(out, "  INVALID SESSION: owner override of the readiness gate ({r})").map_err(err)?;
+/// The session verdict, printed once before any budget verdict so a bad session never shows "ok" first (ADR 0020). One definition
+/// of what voids frame verdicts and what only GPU verdicts (`planet_perf::validity`); the lines come from it.
+pub(crate) fn session_verdict_line(out: &mut dyn Write, verdict: &planet_perf::validity::SessionVerdict) -> Result<(), String> {
+    for l in verdict.lines() {
+        writeln!(out, "{l}").map_err(err)?;
     }
     Ok(())
 }
@@ -541,12 +530,10 @@ fn perf_skeleton(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(
         Vec::new()
     };
     let validity = planet_perf::gate::validity(&throttled, &noisy);
-    session_verdict_line(out, &validity, &owner_override)?;
-    writeln!(out, "run-to-run noise (max-min)/median: {:.3}", planet_perf::run_to_run_noise(&medians).unwrap_or(f64::NAN)).map_err(err)?;
     let scheme = planet_perf::query_power_scheme();
-    for w in planet_perf::session_warnings(&facts(ctx), scheme.as_deref(), &runs, false) {
-        writeln!(out, "WARNING (not valid for time budgets): {w}").map_err(err)?;
-    }
+    let verdict = planet_perf::validity::SessionVerdict::assess(&facts(ctx), scheme.as_deref(), &runs, false, &validity, &owner_override);
+    session_verdict_line(out, &verdict)?;
+    writeln!(out, "run-to-run noise (max-min)/median: {:.3}", planet_perf::run_to_run_noise(&medians).unwrap_or(f64::NAN)).map_err(err)?;
     let json =
         planet_perf::report_json(&facts(ctx), planet_perf::query_power_scheme().as_deref(), &owner_override, &validity, &protocol, &runs);
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("skeleton.json"));

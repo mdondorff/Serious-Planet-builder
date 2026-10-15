@@ -1247,15 +1247,20 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     let scheme = planet_perf::query_power_scheme();
     let throttled: Vec<String> = reports.iter().filter(|r| crate::run_throttled(r)).map(|r| r.path_name.clone()).collect();
     let validity = if smoke { planet_perf::gate::Validity::default() } else { planet_perf::gate::validity(&throttled, &noisy) };
+    let verdict =
+        planet_perf::validity::SessionVerdict::assess(&crate::facts(ctx), scheme.as_deref(), &reports, smoke, &validity, &owner_override);
     if !smoke {
-        crate::session_verdict_line(out, &validity, &owner_override)?;
+        crate::session_verdict_line(out, &verdict)?;
     }
     for (name, median) in &plan_lines {
         let word = if planet_perf::plan_budget_ok(*median) { "ok" } else { "OVER" };
         writeln!(out, "  {name}: CPU plan median {median:.2} ms (budget {}) {word}", planet_perf::PLAN_CPU_BUDGET_MS).map_err(err)?;
     }
-    for w in planet_perf::session_warnings(&crate::facts(ctx), scheme.as_deref(), &reports, smoke) {
-        writeln!(out, "WARNING (not valid for time budgets): {w}").map_err(err)?;
+    if smoke {
+        // A smoke run prints no session verdict above; its one cause is still named.
+        for w in verdict.warnings() {
+            writeln!(out, "WARNING (not valid for time budgets): {w}").map_err(err)?;
+        }
     }
     if !smoke {
         let off: Vec<String> = budget_lines

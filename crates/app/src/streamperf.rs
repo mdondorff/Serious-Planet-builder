@@ -542,11 +542,21 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
             "the bake is {source}: cold plans and tile generation differ over the production store, so the streaming budgets do not count"
         ));
     }
-    if !smoke {
-        crate::session_verdict_line(out, &validity, &owner_override)?;
-    }
-    for w in planet_perf::session_warnings(&crate::facts(ctx), scheme.as_deref(), &run_reports, smoke) {
-        writeln!(out, "WARNING (not valid for time budgets): {w}").map_err(err)?;
+    let verdict = planet_perf::validity::SessionVerdict::assess(
+        &crate::facts(ctx),
+        scheme.as_deref(),
+        &run_reports,
+        smoke,
+        &validity,
+        &owner_override,
+    );
+    if smoke {
+        // A smoke run prints no session verdict; its causes are still named.
+        for w in verdict.warnings() {
+            writeln!(out, "WARNING (not valid for time budgets): {w}").map_err(err)?;
+        }
+    } else {
+        crate::session_verdict_line(out, &verdict)?;
     }
     let protocol = Protocol {
         warmup_frames: 0,
@@ -626,7 +636,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         out,
         "{} gated measure(s) over budget{}",
         over.len(),
-        if smoke || !validity.is_valid() { " (the session does not count)" } else { "" }
+        if smoke || !verdict.frame_valid() { " (the session does not count)" } else { "" }
     )
     .map_err(err)?;
     Ok(())

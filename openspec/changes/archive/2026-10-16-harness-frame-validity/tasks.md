@@ -1,0 +1,5 @@
+- [x] 1.1 failing tests: `validity` (cause table, console lines, log fields, old-log reading), accept fixtures (P8 window passes; old-format P8 log passes; smoke, adapter, power scheme, throttling still refuse)
+- [x] 1.2 `planet_perf::validity`; `report_json` fields; compare and accept read it; the app prints the verdict from it
+- [x] 1.3 spec: TEST-012, TEST-021 (modified)
+- [x] 1.4 docs/status.md queue F1-F6, log line
+- [x] 1.5 reviewers (spec-guardian, verifier), archive, PR, CI green, merge

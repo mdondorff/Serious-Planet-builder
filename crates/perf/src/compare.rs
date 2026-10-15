@@ -207,7 +207,8 @@ fn median_of(mut v: Vec<f64>) -> f64 {
 /// Read the figures of a log written by [`crate::report_json`].
 pub fn summarize_log(text: &[u8]) -> Result<LogSummary, String> {
     let root = parse(text)?;
-    let valid = matches!(root.get("valid_for_budgets"), Some(Json::Bool(true)));
+    // Frame, CPU and count figures count when the frame verdicts do (an idle GPU start voids only the GPU figures, per view).
+    let valid = crate::validity::log_frame_valid(&root);
     let res = match root.get("protocol").and_then(|p| p.get("internal_resolution")) {
         Some(Json::Arr(a)) if a.len() == 2 => (a[0].num().unwrap_or(0.0) as u64, a[1].num().unwrap_or(0.0) as u64),
         _ => return Err("no protocol.internal_resolution".into()),
