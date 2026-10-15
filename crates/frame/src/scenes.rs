@@ -5,8 +5,9 @@
 //! except as the frame index times the step (CON-04); the real clock is used by the harness only to measure and to pace.
 
 use crate::camera::Camera;
-use crate::lod::LodParams;
-use crate::terrain::{above_terrain, TerrainDraw, TerrainPlan};
+use crate::lod::{LodParams, SelectionCache};
+use crate::plan::PlanError;
+use crate::terrain::{above_terrain, plan_terrain_cached, TerrainDraw, TerrainPlan, TerrainRequest};
 use planet_core::{TileId, Vec3};
 use planet_generators::height::HeightField;
 use std::collections::HashSet;
@@ -265,22 +266,64 @@ pub struct FrameLag {
     pub mean: f64,
     /// The largest single node's lag.
     pub worst: u8,
-    /// Target nodes with no drawn tile of their own or of an ancestor (STRM-002): must be empty.
-    pub blank: Vec<TileId>,
+    /// Target nodes with no drawn tile at, above or below them: counted as `level + 1` levels in the mean. A newly revealed edge
+    /// of the view under a stale plan, or a cover that is coarser than the selection, leaves some (the stale-plan rule allows it).
+    pub uncovered: Vec<TileId>,
 }
 
-/// Detail lag of a frame: per target node (the nodes the plan selects with every tile resident) the level of the target minus
-/// the level of the drawn tile that covers it (the tile itself or its deepest drawn ancestor); a node with none is blank and
-/// counts as `level + 1` levels. The mean is weighted by the nodes' projected pixels ([`node_weight`]).
-pub fn frame_lag(target: &TerrainPlan, drawn: &TerrainPlan, lod: &LodParams) -> FrameLag {
-    let shown: HashSet<TileId> = drawn.nodes.iter().map(|n| n.tile).collect();
+/// The tiles a frame draws, with their proper ancestors: what [`detail_lag`] looks a target node up in.
+#[derive(Clone, Debug, Default)]
+pub struct DrawnSet {
+    drawn: HashSet<TileId>,
+    /// Every proper ancestor of a drawn tile (a node whose descendants are drawn is covered by finer tiles, never uncovered).
+    above: HashSet<TileId>,
+}
+
+impl DrawnSet {
+    pub fn new(tiles: impl IntoIterator<Item = TileId>) -> Self {
+        let mut set = DrawnSet::default();
+        for t in tiles {
+            if set.drawn.insert(t) {
+                let mut up = t.parent();
+                while let Some(a) = up {
+                    if !set.above.insert(a) {
+                        break;
+                    }
+                    up = a.parent();
+                }
+            }
+        }
+        set
+    }
+
+    /// The tiles of a drawn plan.
+    pub fn of_plan(plan: &TerrainPlan) -> Self {
+        Self::new(plan.nodes.iter().map(|n| n.tile))
+    }
+
+    pub fn len(&self) -> usize {
+        self.drawn.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.drawn.is_empty()
+    }
+}
+
+/// Detail lag of a frame (ADR 0032 point 4, TEST-018/TEST-020): `fresh` is the plan the camera of the frame selects with every
+/// tile resident (the nodes' levels are the target); the drawn level of a node is the level of the deepest drawn tile that is
+/// the node or one of its ancestors, and the node's lag is the target level minus it. A node with a drawn tile below it but
+/// none at or above it is covered by finer tiles (finer than the target is clamped to lag 0, never negative); a node with
+/// nothing drawn at, above or below it is uncovered, counts as `level + 1` levels and is reported with its tile id. The mean is
+/// weighted by the nodes' projected pixels ([`node_weight`]). Pure: no field, no clock, no residency state.
+pub fn detail_lag(fresh: &TerrainPlan, drawn: &DrawnSet, lod: &LodParams) -> FrameLag {
     let (mut sum, mut total, mut worst) = (0.0f64, 0.0f64, 0u8);
-    let mut blank = Vec::new();
-    for n in &target.nodes {
+    let mut uncovered = Vec::new();
+    for n in &fresh.nodes {
         let mut up = Some(n.tile);
         let mut covered = None;
         while let Some(t) = up {
-            if shown.contains(&t) {
+            if drawn.drawn.contains(&t) {
                 covered = Some(t.level());
                 break;
             }
@@ -288,17 +331,83 @@ pub fn frame_lag(target: &TerrainPlan, drawn: &TerrainPlan, lod: &LodParams) -> 
         }
         let lag = match covered {
             Some(l) => n.level.saturating_sub(l),
+            None if drawn.above.contains(&n.tile) => 0,
             None => {
-                blank.push(n.tile);
+                uncovered.push(n.tile);
                 n.level + 1
             }
         };
         worst = worst.max(lag);
-        let w = node_weight(&target.camera, lod, n);
+        let w = node_weight(&fresh.camera, lod, n);
         sum += w * f64::from(lag);
         total += w;
     }
-    FrameLag { mean: if total > 0.0 { sum / total } else { 0.0 }, worst, blank }
+    FrameLag { mean: if total > 0.0 { sum / total } else { 0.0 }, worst, uncovered }
+}
+
+/// [`detail_lag`] of a target plan against a drawn plan (the tiles of its nodes).
+pub fn frame_lag(target: &TerrainPlan, drawn: &TerrainPlan, lod: &LodParams) -> FrameLag {
+    detail_lag(target, &DrawnSet::of_plan(drawn), lod)
+}
+
+/// The detail lag of the frame whose camera is in `req`: the selection with every tile resident is made afresh, over `field`
+/// (the plan the synchronous path makes for that camera, the stale-plan rule of the drawing not involved), and judged against
+/// `drawn`. The selection is deterministic, so this is exact whenever it is run, on any thread (CON-14).
+pub fn fresh_detail_lag(
+    req: &TerrainRequest,
+    field: &dyn HeightField,
+    cache: &mut SelectionCache,
+    drawn: &DrawnSet,
+) -> Result<FrameLag, PlanError> {
+    let fresh = plan_terrain_cached(req, field, cache)?;
+    Ok(detail_lag(&fresh, drawn, &req.lod))
+}
+
+/// What a case records of one frame for the lag post-pass: the f64 camera pose the frame was drawn for and the tiles of the plan
+/// actually drawn (resident and drawn that frame). A few kilobytes a frame; the post-pass needs nothing else.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FrameDraw {
+    /// `None` is missing data (a frame whose pose was not recorded): the post-pass fails naming the frame.
+    pub camera: Option<Camera>,
+    pub drawn: Vec<TileId>,
+}
+
+/// The detail lag of every frame of a recorded case, off the timed path: the fresh selection of each recorded camera against the
+/// tiles drawn in that frame ([`fresh_detail_lag`]). Frames are split into contiguous chunks over `threads` scoped threads, each
+/// with its own field (`make_field`) and selection cache; a selection is a pure function of the request, so the result is the
+/// same for every thread count (CON-14) and equal, frame for frame, to the inline computation. `req_of` builds the request of a
+/// camera (viewport, LOD parameters, seed of the case). A frame without a recorded pose is an error naming it.
+pub fn lag_post_pass<'f>(
+    frames: &[FrameDraw],
+    req_of: &(dyn Fn(Camera) -> TerrainRequest + Sync),
+    make_field: &(dyn Fn() -> Result<Box<dyn HeightField + 'f>, String> + Sync),
+    threads: usize,
+) -> Result<Vec<FrameLag>, String> {
+    if let Some(k) = frames.iter().position(|f| f.camera.is_none()) {
+        return Err(format!("detail lag: frame {k} has no recorded camera pose, so its fresh plan cannot be made (missing data)"));
+    }
+    let chunk = frames.len().div_ceil(threads.clamp(1, frames.len().max(1))).max(1);
+    let run = |base: usize, part: &[FrameDraw]| -> Result<Vec<FrameLag>, String> {
+        let field = make_field()?;
+        let mut cache = SelectionCache::new();
+        part.iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let camera = f.camera.expect("checked above");
+                fresh_detail_lag(&req_of(camera), field.as_ref(), &mut cache, &DrawnSet::new(f.drawn.iter().copied()))
+                    .map_err(|e| format!("detail lag: fresh plan of frame {}: {e}", base + i))
+            })
+            .collect()
+    };
+    let parts: Vec<Result<Vec<FrameLag>, String>> = std::thread::scope(|s| {
+        let handles: Vec<_> = frames.chunks(chunk).enumerate().map(|(c, part)| s.spawn(move || (c, run(c * chunk, part)))).collect();
+        handles.into_iter().map(|h| h.join().expect("lag post-pass thread").1).collect()
+    });
+    let mut out = Vec::with_capacity(frames.len());
+    for p in parts {
+        out.extend(p?);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -437,7 +546,7 @@ mod tests {
 
     // spec: TEST-018
     #[test]
-    fn detail_lag_is_the_area_weighted_level_gap_and_a_node_without_any_ancestor_is_blank() {
+    fn detail_lag_is_the_area_weighted_level_gap_and_a_node_without_any_ancestor_is_uncovered() {
         let cam = script(StreamScene::Dive).cameras[2399];
         let lod = LodParams { cells: 16, viewport_h_px: 90.0, tau_px: 6.0, max_level: 22, ..LodParams::earth_1080p() };
         let root = TileId::new(planet_core::Face(0), 0, 0, 0).unwrap();
@@ -446,20 +555,60 @@ mod tests {
         // Everything drawn at its own level: no lag.
         let target = plan(cam, &[kids[0], kids[1], grand]);
         let same = frame_lag(&target, &target, &lod);
-        assert_eq!((same.mean, same.worst, same.blank.len()), (0.0, 0, 0));
+        assert_eq!((same.mean, same.worst, same.uncovered.len()), (0.0, 0, 0));
         // A grandchild drawn by its grandparent root: two levels; the two level-1 nodes are drawn exactly.
         let drawn = plan(cam, &[root]);
         let l = frame_lag(&plan(cam, &[grand]), &drawn, &lod);
         assert_eq!((l.mean, l.worst), (2.0, 2));
         // Equal weights (same origin and level): mean of the gaps of the nodes.
         let l = frame_lag(&plan(cam, &[kids[0], kids[1]]), &drawn, &lod);
-        assert!((l.mean - 1.0).abs() < 1e-12 && l.blank.is_empty(), "{l:?}");
-        // Nothing covers a node: blank, the tile id is reported and the node counts as level + 1.
+        assert!((l.mean - 1.0).abs() < 1e-12 && l.uncovered.is_empty(), "{l:?}");
+        // Nothing covers a node: uncovered, the tile id is reported and the node counts as level + 1.
         let other = TileId::new(planet_core::Face(3), 1, 0, 0).unwrap();
         let l = frame_lag(&plan(cam, &[other]), &drawn, &lod);
-        assert_eq!((l.blank.clone(), l.mean), (vec![other], 2.0), "{l:?}");
+        assert_eq!((l.uncovered.clone(), l.mean), (vec![other], 2.0), "{l:?}");
         // A finer drawn tile is not a lag (never negative).
         assert_eq!(frame_lag(&plan(cam, &[root]), &plan(cam, &[root, kids[0]]), &lod).mean, 0.0);
+    }
+
+    // spec: TEST-020
+    #[test]
+    fn detail_lag_takes_the_deepest_drawn_ancestor_clamps_finer_tiles_and_a_missing_parent_falls_to_the_next_resident_one() {
+        let cam = script(StreamScene::Dive).cameras[2399];
+        let lod = LodParams { cells: 16, viewport_h_px: 90.0, tau_px: 6.0, max_level: 22, ..LodParams::earth_1080p() };
+        let f = planet_core::Face(0);
+        let root = TileId::new(f, 0, 0, 0).unwrap();
+        let kid = TileId::new(f, 1, 0, 0).unwrap();
+        let grand = TileId::new(f, 2, 0, 0).unwrap();
+        let great = TileId::new(f, 3, 0, 0).unwrap();
+        let fresh = |tiles: &[TileId]| plan(cam, tiles);
+        let set = |tiles: &[TileId]| DrawnSet::new(tiles.iter().copied());
+        // The deepest drawn ancestor counts: with the root and the level-1 tile both drawn, a level-3 node is 2 levels behind.
+        let l = detail_lag(&fresh(&[great]), &set(&[root, kid]), &lod);
+        assert_eq!((l.mean, l.worst, l.uncovered.len()), (2.0, 2, 0));
+        // A missing parent: nothing drawn at levels 2 and 1, so the resident root is the drawn level (3 levels behind).
+        let l = detail_lag(&fresh(&[great]), &set(&[root]), &lod);
+        assert_eq!((l.mean, l.worst), (3.0, 3));
+        // The node itself drawn is lag 0, whatever else is drawn.
+        assert_eq!(detail_lag(&fresh(&[great]), &set(&[root, great]), &lod).mean, 0.0);
+        // Finer than the target is clamped to 0, never negative: the drawn tiles lie below the node, none at or above it.
+        let l = detail_lag(&fresh(&[kid]), &set(&[grand]), &lod);
+        assert_eq!((l.mean, l.worst, l.uncovered.len()), (0.0, 0, 0), "{l:?}");
+        // Nothing at, above or below the node: uncovered, counted as level + 1 and reported with its tile id.
+        let other = TileId::new(planet_core::Face(2), 2, 1, 1).unwrap();
+        let l = detail_lag(&fresh(&[other]), &set(&[root, kid]), &lod);
+        assert_eq!((l.uncovered.clone(), l.mean, l.worst), (vec![other], 3.0, 3), "{l:?}");
+        // An empty drawn set: every node is uncovered. An empty selection has lag 0.
+        assert_eq!(detail_lag(&fresh(&[kid]), &DrawnSet::default(), &lod).uncovered, vec![kid]);
+        assert_eq!(detail_lag(&fresh(&[]), &set(&[root]), &lod).mean, 0.0);
+        // The mean is weighted by the projected pixel area ([`node_weight`]): a far node weighs less than a near one.
+        let mut two = fresh(&[kid, great]);
+        two.nodes[1].origin = planet_core::PlanetFixed(cam.position.0 + Vec3::new(0.0, 0.0, 1.0e9));
+        let (wk, wg) = (node_weight(&cam, &lod, &two.nodes[0]), node_weight(&cam, &lod, &two.nodes[1]));
+        assert!(wk > wg && wg > 0.0, "{wk} {wg}");
+        let both = detail_lag(&two, &set(&[root]), &lod);
+        let want = (wk * 1.0 + wg * 3.0) / (wk + wg);
+        assert!((both.mean - want).abs() < 1e-12, "{} against {want}", both.mean);
     }
 
     // spec: TEST-018

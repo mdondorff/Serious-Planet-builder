@@ -1190,3 +1190,99 @@ fn a_teleport_cancels_the_queued_requests_that_left_r_before_they_start() {
     );
     assert!(r_of_a.iter().any(|t| !wanted_b.contains(t)), "the jump must leave part of A's R");
 }
+
+// ---- detail lag against a fresh plan of each frame's camera (TEST-020) ----
+
+use planet_frame::scenes::{detail_lag, fresh_detail_lag, lag_post_pass, DrawnSet, FrameDraw, FrameLag};
+
+/// What a case logs of a frame for the post-pass, and the lag computed inline on the fake clock at the same moment.
+struct LoggedRun {
+    draws: Vec<FrameDraw>,
+    inline: Vec<FrameLag>,
+    reqs: Vec<TerrainRequest>,
+}
+
+fn run_logged(rig: &mut Rig, reqs: Vec<TerrainRequest>) -> LoggedRun {
+    let field = Reference(1);
+    let mut cache = SelectionCache::new();
+    let (mut draws, mut inline) = (Vec::new(), Vec::new());
+    for req in &reqs {
+        let f = rig.begin(req);
+        let drawn: Vec<TileId> = f.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+        inline.push(fresh_detail_lag(req, &field, &mut cache, &DrawnSet::new(drawn.iter().copied())).unwrap());
+        draws.push(FrameDraw { camera: Some(req.camera), drawn });
+        rig.finish();
+    }
+    LoggedRun { draws, inline, reqs }
+}
+
+fn post_pass(run: &LoggedRun, threads: usize) -> Vec<FrameLag> {
+    let req_of = |camera: Camera| TerrainRequest { camera, ..run.reqs[0].clone() };
+    lag_post_pass(&run.draws, &req_of, &|| Ok(Box::new(Reference(1)) as Box<dyn HeightField>), threads).unwrap()
+}
+
+// spec: TEST-020, TEST-018
+#[test]
+fn a_settled_still_view_has_lag_zero_in_every_frame_and_a_rotation_has_a_lag_in_every_frame_equal_to_the_post_pass() {
+    let mut rig = Rig::new(1_000_000);
+    rig.settle(&request(here(), 0.0, -0.4));
+    // Settled and still: the synchronous frame, lag 0 and nothing uncovered, every frame, against the frame's own plan.
+    let still = run_logged(&mut rig, (0..30).map(|_| request(here(), 0.0, -0.4)).collect());
+    for (k, l) in still.inline.iter().enumerate() {
+        assert_eq!((l.mean, l.worst, l.uncovered.len()), (0.0, 0, 0), "frame {k}: {l:?}");
+    }
+    // Rotation (10 degrees a frame, far outside the stale-plan rule, so the frames draw the cover; and 0.2 degrees a frame,
+    // inside it): every frame has a lag judged against its own camera's plan, and the post-pass reproduces each of them. What
+    // the numbers are is the scene's finding to report, not this test's: the cover is coarser than the selection (a finding in
+    // docs/learnings.md); the test pins that nothing is skipped or "not measured".
+    for (step_deg, frames) in [(10.0f64, 24u32), (0.2, 24)] {
+        let reqs = (0..frames).map(|k| request(here(), f64::from(k) * step_deg.to_radians(), [-1.0, -0.4, 0.2][k as usize % 3])).collect();
+        let run = run_logged(&mut rig, reqs);
+        assert_eq!(run.inline.len(), frames as usize);
+        assert!(run.inline.iter().all(|l| l.mean.is_finite() && l.mean >= 0.0));
+        for threads in [1, 3] {
+            assert_eq!(post_pass(&run, threads), run.inline, "{step_deg} degrees a frame, {threads} threads");
+        }
+    }
+}
+
+// spec: TEST-020, TEST-018, CON-14
+#[test]
+fn the_post_pass_equals_the_inline_lag_frame_for_frame_on_a_dive_and_a_teleport_and_on_any_thread_count() {
+    // Dive: a lagging descent, 24 tile jobs a frame.
+    let mut rig = Rig::new(1_000_000);
+    rig.tile_jobs_per_frame = 24;
+    rig.settle(&request(dive_position(0), 0.3, -0.4));
+    let dive = run_logged(&mut rig, (0..60).map(|k| request(dive_position(k), 0.3, -0.4)).collect());
+    assert!(dive.inline.iter().any(|l| l.mean > 0.0), "the script must lag for the comparison to say anything");
+    // Teleport: a cold plan and a long fill.
+    let mut rig = Rig::new(1_000_000);
+    rig.tile_jobs_per_frame = 16;
+    rig.settle(&request(here(), 0.0, -0.4));
+    let tp = run_logged(&mut rig, (0..40).map(|_| request(there(), 0.5, -0.3)).collect());
+    assert!(tp.inline[0].mean > 0.0 && tp.inline.last().unwrap().mean == 0.0, "lag at the jump, none once the draw set is complete");
+    for run in [&dive, &tp] {
+        for threads in [1, 2, 8] {
+            let got = post_pass(run, threads);
+            assert_eq!(got.len(), run.inline.len());
+            for (k, (a, b)) in got.iter().zip(&run.inline).enumerate() {
+                assert_eq!(a, b, "{threads} threads, frame {k}");
+            }
+        }
+    }
+}
+
+// spec: TEST-020
+#[test]
+fn a_frame_without_a_recorded_pose_fails_the_post_pass_naming_the_frame() {
+    let mut rig = Rig::new(1_000_000);
+    rig.settle(&request(here(), 0.0, -0.4));
+    let mut run = run_logged(&mut rig, (0..6).map(|k| request(here(), f64::from(k), -0.4)).collect());
+    run.draws[4].camera = None;
+    let req_of = |camera: Camera| TerrainRequest { camera, ..run.reqs[0].clone() };
+    let e = lag_post_pass(&run.draws, &req_of, &|| Ok(Box::new(Reference(1)) as Box<dyn HeightField>), 2).unwrap_err();
+    assert!(e.contains("frame 4") && e.contains("no recorded camera pose"), "{e}");
+    // The pure function agrees with the plan-versus-plan one on a hand-built case (same code path).
+    let fresh = plan_terrain_field(&run.reqs[0], &Reference(1)).unwrap();
+    assert_eq!(detail_lag(&fresh, &DrawnSet::of_plan(&fresh), &run.reqs[0].lod).mean, 0.0);
+}

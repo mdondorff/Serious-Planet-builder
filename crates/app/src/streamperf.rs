@@ -8,7 +8,8 @@ use crate::pipelined::{RendererSink, Rig};
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
 use planet_core::cube::{FaceMapping, TangentWarp};
-use planet_frame::scenes::{build_script, frame_lag, StreamScene, FRAME_STEP_S, LOOK_SEED, SETTLE_S};
+use planet_core::TileId;
+use planet_frame::scenes::{build_script, lag_post_pass, FrameDraw, FrameLag, StreamScene, FRAME_STEP_S, LOOK_SEED, SETTLE_S};
 use planet_frame::{pipeline::DrawKind, LodParams, TerrainRequest, TerrainView};
 use planet_perf::streaming::{case_spec, case_verdicts, column_metrics, FrameRecord, MemoryFacts};
 use planet_perf::{summarize, Protocol, RunReport};
@@ -77,15 +78,15 @@ pub fn check_options(o: &Options) -> Result<(), String> {
 /// What one frame of the loop produced, besides its [`FrameRecord`].
 struct Tick {
     record: FrameRecord,
-    blank_tiles: Vec<u64>,
     settled: bool,
+    /// The tiles of the plan this frame drew (resident and drawn): what the lag post-pass needs besides the camera.
+    drawn: Vec<TileId>,
 }
 
 /// The rig and the pacing of one case.
 struct Driver<'a> {
     ctx: &'a GpuContext,
     rig: Rig,
-    lod: LodParams,
     next_deadline: Instant,
 }
 
@@ -104,23 +105,15 @@ impl Driver<'_> {
         let (timing, _) = self.rig.renderer.submit(ctx, &frame.pipeline.draw.plan).map_err(|e| e.to_string())?;
         self.rig.fi.submit();
         let wall_ms = started.elapsed().as_secs_f64() * 1000.0;
-        // Bookkeeping, outside the frame's time: the lag against the plan made for this camera (when one is usable), the blank
-        // check and the counts.
+        // Bookkeeping, outside the frame's time: the drawn tile ids (the lag is judged after the case, against the fresh plan of
+        // this frame's camera: TEST-020), the blank check and the counts.
         let draw = &frame.pipeline.draw;
-        let (lag, mut blank_tiles) = match (draw.kind, frame.pipeline.base_seq, self.rig.managed.pipeline().current()) {
-            (DrawKind::Exact, Some(_), _) => (Some(0.0), Vec::new()),
-            (_, Some(_), Some(current)) => {
-                let l = frame_lag(&current.plan, &draw.plan, &self.lod);
-                (Some(l.mean), l.blank.iter().map(|t| t.raw()).collect())
-            }
-            _ => (None, Vec::new()),
-        };
-        let mut blank_nodes = draw.blank.max(blank_tiles.len());
+        let drawn: Vec<TileId> = draw.plan.nodes.iter().map(|n| n.tile).collect();
+        let mut blank_nodes = draw.blank;
         if draw.plan.nodes.is_empty() {
             // Nothing drawn at all is a blank frame (the roots always exist, STRM-002).
             blank_nodes = blank_nodes.max(1);
         }
-        blank_tiles.sort_unstable();
         let c = frame.counts;
         let settled = draw.kind == DrawKind::Exact
             && c.in_flight == 0
@@ -134,7 +127,8 @@ impl Driver<'_> {
             record_ms: timing.cpu_ms,
             gpu_ms: None,
             wall_ms,
-            lag,
+            lag: None,
+            uncovered_nodes: 0,
             blank_nodes,
             upload_bytes: c.upload_bytes,
             resident: c.resident,
@@ -147,7 +141,7 @@ impl Driver<'_> {
             allocated_bytes: self.rig.renderer.pool_allocated_bytes(),
         };
         self.pace();
-        Ok(Tick { record, blank_tiles, settled })
+        Ok(Tick { record, settled, drawn })
     }
 
     /// Hold the loop to the frame step of script time: the next iteration starts one step after this one was due (a late frame
@@ -169,10 +163,23 @@ impl Driver<'_> {
     }
 }
 
+/// Put the post-pass lags into the frame records: every frame gets exactly one (a length mismatch is a harness bug, not a pass).
+fn apply_lags(frames: &mut [FrameRecord], lags: &[FrameLag]) -> Result<(), String> {
+    if frames.len() != lags.len() {
+        return Err(format!("detail lag: {} frames recorded but {} lags computed", frames.len(), lags.len()));
+    }
+    for (f, l) in frames.iter_mut().zip(lags) {
+        f.lag = Some(l.mean);
+        f.uncovered_nodes = l.uncovered.len();
+    }
+    Ok(())
+}
+
 /// What a case produced.
 struct CaseRun {
     frames: Vec<FrameRecord>,
-    /// Frames (index in the measured part) that drew a blank node, with the raw ids of the tiles.
+    /// Frames (index in the measured part) that drew a blank node (nothing resident to show, not even a root: the draw knows a count,
+    /// not ids, so the id list is empty).
     blanks: Vec<(usize, Vec<u64>)>,
     /// Seconds of the settling before frame 0 (`None`: the case starts from empty).
     settle_s: Option<f64>,
@@ -185,14 +192,13 @@ fn run_case(
     ctx: &GpuContext,
     world: &Arc<WorldTerrain>,
     script: &planet_frame::scenes::SceneScript,
-    req: &dyn Fn(planet_frame::Camera) -> TerrainRequest,
-    lod: &LodParams,
+    req: &(dyn Fn(planet_frame::Camera) -> TerrainRequest + Sync),
     smoke: bool,
     out: &mut dyn Write,
 ) -> Result<CaseRun, String> {
     let first = req(script.prelude.unwrap_or(script.cameras[0]));
     let rig_started = Instant::now();
-    let mut d = Driver { ctx, rig: Rig::new(ctx, world, &first)?, lod: lod.clone(), next_deadline: Instant::now() };
+    let mut d = Driver { ctx, rig: Rig::new(ctx, world, &first)?, next_deadline: Instant::now() };
     writeln!(out, "{}: rig built in {:.2} s", script.scene.name(), rig_started.elapsed().as_secs_f64()).map_err(err)?;
     // Settle at the prelude camera (unmeasured): R fully resident, nothing queued, in flight or waiting, for one second of script
     // time. A smoke run only runs a few frames.
@@ -246,12 +252,15 @@ fn run_case(
     let n = if smoke { script.cameras.len().min(SMOKE_FRAMES) } else { script.cameras.len() };
     d.next_deadline = Instant::now();
     let (mut frames, mut blanks) = (Vec::with_capacity(n), Vec::new());
+    // What the post-pass needs of each frame, kept as small as the plan actually drawn: the f64 pose and the drawn tile ids.
+    let mut draws: Vec<FrameDraw> = Vec::with_capacity(n);
     for (k, cam) in script.cameras[..n].iter().enumerate() {
         let t = d.tick(&req(*cam))?;
         if t.record.blank_nodes > 0 {
-            blanks.push((k, t.blank_tiles));
+            blanks.push((k, Vec::new()));
         }
         frames.push(t.record);
+        draws.push(FrameDraw { camera: Some(*cam), drawn: t.drawn });
     }
     if let Some((stop, samples, handle)) = sampler {
         stop.store(true, Ordering::Relaxed);
@@ -261,7 +270,22 @@ fn run_case(
     }
     let torn = Instant::now();
     drop(d);
-    Ok(CaseRun { frames, blanks, settle_s, clocks, teardown_s: torn.elapsed().as_secs_f64() })
+    let teardown_s = torn.elapsed().as_secs_f64();
+    // The lag post-pass, off the timed path: the loop is gone (queued jobs cancelled, in-flight ones finished), the case is over,
+    // and every frame's lag is judged against the plan selected afresh for its own camera (TEST-020).
+    let post = Instant::now();
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let lags = lag_post_pass(&draws, req, &|| world.field(), threads)?;
+    apply_lags(&mut frames, &lags)?;
+    writeln!(
+        out,
+        "{}: detail lag post-pass over {} frames in {:.1} s ({threads} threads)",
+        script.scene.name(),
+        frames.len(),
+        post.elapsed().as_secs_f64()
+    )
+    .map_err(err)?;
+    Ok(CaseRun { frames, blanks, settle_s, clocks, teardown_s })
 }
 
 // spec: TEST-019, TEST-018, TEST-012
@@ -321,13 +345,14 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     };
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
     let aspect = f64::from(size.0) / f64::from(size.1);
+    let seed = field.seed();
     let req_of = |camera: planet_frame::Camera| TerrainRequest {
         camera,
         size,
         view: TerrainView::Level,
         lod: lod.clone(),
         face_mapping: TangentWarp.id().to_string(),
-        seed: field.seed(),
+        seed,
     };
     if smoke {
         writeln!(out, "SMOKE RUN: exercises the streaming path only (a few frames, 1280x720, no gate); the numbers are not a measurement")
@@ -379,7 +404,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         .map_err(err)?;
         writeln!(out, "{}: script built in {:.1} s", scene.name(), built.elapsed().as_secs_f64()).map_err(err)?;
         let case_started = Instant::now();
-        let run = run_case(ctx, &scene_world, &script, &req_of, &lod, smoke, out)?;
+        let run = run_case(ctx, &scene_world, &script, &req_of, smoke, out)?;
         writeln!(out, "{}: case ran in {:.1} s (teardown {:.2} s)", scene.name(), case_started.elapsed().as_secs_f64(), run.teardown_s)
             .map_err(err)?;
         let mem = MemoryFacts {
@@ -395,7 +420,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
                 "{}: frame {k} drew a blank node; tiles {}",
                 scene.name(),
                 if ids.is_empty() {
-                    "none drawn at all".to_string()
+                    "nothing resident to show (not even a root)".to_string()
                 } else {
                     ids.iter().map(|t| format!("{t:#018x}")).collect::<Vec<_>>().join(" ")
                 }
@@ -589,6 +614,40 @@ mod tests {
             let spec = case_spec(scene.name(), script.cameras.len(), FRAME_STEP_S, script.descent_frames).unwrap();
             assert_eq!(spec.frames, script.cameras.len());
         }
+    }
+
+    // spec: TEST-020
+    #[test]
+    fn the_post_pass_lags_fill_every_frame_and_a_count_mismatch_is_an_error_not_a_pass() {
+        let frame = || FrameRecord {
+            plan_ms: 0.0,
+            scheduler_ms: 0.0,
+            upload_ms: 0.0,
+            record_ms: 0.0,
+            gpu_ms: None,
+            wall_ms: 1.0,
+            lag: None,
+            uncovered_nodes: 0,
+            blank_nodes: 0,
+            upload_bytes: 0,
+            resident: 0,
+            in_flight: 0,
+            queued: 0,
+            dispatched: 0,
+            uploaded: 0,
+            cancelled: 0,
+            degraded: 0,
+            allocated_bytes: 0,
+        };
+        let mut frames = vec![frame(), frame()];
+        let lags = vec![
+            FrameLag { mean: 0.5, worst: 2, uncovered: vec![] },
+            FrameLag { mean: 0.0, worst: 0, uncovered: vec![TileId::new(planet_core::Face(0), 1, 0, 0).unwrap()] },
+        ];
+        apply_lags(&mut frames, &lags).unwrap();
+        assert_eq!((frames[0].lag, frames[1].lag, frames[0].uncovered_nodes, frames[1].uncovered_nodes), (Some(0.5), Some(0.0), 0, 1));
+        let e = apply_lags(&mut frames, &lags[..1]).unwrap_err();
+        assert!(e.contains("2 frames recorded but 1 lags"), "{e}");
     }
 
     // spec: TEST-019

@@ -37,8 +37,12 @@ pub struct FrameRecord {
     /// The frame's work time from the start of the iteration to the submit (waits for the GPU included, the pacing sleep
     /// excluded): the frame time of the verdicts.
     pub wall_ms: f64,
-    /// Detail lag (levels) against the plan of the frame's camera, or `None` while no plan usable for the camera exists.
+    /// Detail lag (levels) against the plan selected afresh for the frame's own camera with every tile resident (TEST-020), from
+    /// the post-pass over the recorded poses and drawn sets. Every frame has one: `None` is missing data (the case failed to
+    /// record the frame), which every lag verdict reports as OVER, never as "not measured".
     pub lag: Option<f64>,
+    /// Nodes of that fresh selection with no drawn tile at, above or below them (counted in the lag as level + 1).
+    pub uncovered_nodes: usize,
     /// Target nodes with no resident tile of their own or of an ancestor, and whether nothing at all was drawn.
     pub blank_nodes: usize,
     pub upload_bytes: u64,
@@ -208,12 +212,12 @@ pub fn holds_from(lags: &[Option<f64>], step_s: f64, ok: impl Fn(f64) -> bool) -
     (from < lags.len()).then_some(from as f64 * step_s)
 }
 
-fn mean_and_worst(lags: &[Option<f64>]) -> Option<(f64, f64, usize)> {
+fn mean_and_worst(lags: &[Option<f64>]) -> Option<(f64, f64)> {
     let known: Vec<f64> = lags.iter().flatten().copied().collect();
     if known.is_empty() {
         return None;
     }
-    Some((known.iter().sum::<f64>() / known.len() as f64, known.iter().copied().fold(0.0, f64::max), lags.len() - known.len()))
+    Some((known.iter().sum::<f64>() / known.len() as f64, known.iter().copied().fold(0.0, f64::max)))
 }
 
 /// Every verdict of a case. `blank_frames` lists the frames with a blank tile and their tile ids (raw `TileId` values; empty
@@ -308,20 +312,36 @@ pub fn case_verdicts(spec: &CaseSpec, frames: &[FrameRecord], blank_frames: &[(u
     for rule in &spec.rules {
         v.push(lag_verdict(rule, &lags, frames, spec.step_s));
     }
+    // Coverage of the fresh selection, reported beside the lag: nodes with nothing drawn at, above or below them.
+    let uncovered = frames.iter().filter(|f| f.uncovered_nodes > 0).count();
+    if let Some(first) = frames.iter().position(|f| f.uncovered_nodes > 0) {
+        v.push(Verdict::new(
+            "uncovered nodes",
+            Status::Reported,
+            format!(
+                "{uncovered} of {} frames had nodes of their fresh selection with nothing drawn at, above or below them (first at frame {first}, {} nodes; counted in the lag as level + 1; the stale-plan rule allows edge slivers; no budget)",
+                frames.len(),
+                frames[first].uncovered_nodes
+            ),
+        ));
+    }
     v
 }
 
-/// A gated lag judged on too few frames is not a pass: fewer than half the frames with a plan usable for their camera (a turning
-/// camera outruns the stale-plan rule, a cold plan takes seconds) is "not measured", said loudly.
-fn thin(name: &str, lags: &[Option<f64>]) -> Option<Verdict> {
-    let known = lags.iter().flatten().count();
-    (known * 2 < lags.len()).then(|| {
-        Verdict::new(
-            "detail lag",
-            Status::NotMeasured,
-            format!("{name}: only {known} of {} frames have a plan usable for their camera to judge against; no verdict", lags.len()),
-        )
-    })
+/// A lag rule judged on a slice with a frame that has no lag is a harness failure, said loudly: every frame has a lag (TEST-020), so
+/// a missing one means the pose or the drawn set of that frame was not recorded. Not "not measured", and never a pass.
+fn missing(name: &str, first_frame: usize, lags: &[Option<f64>]) -> Option<Verdict> {
+    let first = lags.iter().position(Option::is_none)?;
+    let n = lags.iter().filter(|l| l.is_none()).count();
+    Some(Verdict::new(
+        "detail lag",
+        Status::Over,
+        format!(
+            "{name}: {n} of {} frames have no lag (first at frame {}): missing data, the post-pass must give every frame one;",
+            lags.len(),
+            first_frame + first
+        ),
+    ))
 }
 
 /// The largest column of a frame (ADR 0032 point 6), for the line of the worst frame.
@@ -338,26 +358,35 @@ fn lag_verdict(rule: &LagRule, lags: &[Option<f64>], frames: &[FrameRecord], ste
     match rule {
         LagRule::Mean { name, frames: range, mean_max, frame_max, gate } => {
             let slice = &lags[range.start.min(lags.len())..range.end.min(lags.len())];
-            if let Some(v) = thin(name, slice) {
+            if let Some(v) = missing(name, range.start, slice) {
                 return v;
             }
             match mean_and_worst(slice) {
-                None => Verdict::new("detail lag", Status::NotMeasured, format!("{name}: no frame with a known lag")),
-                Some((mean, worst, unknown)) => Verdict::new(
+                None => Verdict::new("detail lag", Status::NotMeasured, format!("{name}: the rule covers no frame")),
+                Some((mean, worst)) => Verdict::new(
                     "detail lag",
                     gated(*gate, mean <= *mean_max && worst <= *frame_max),
-                    format!("{name}: mean {mean:.3} levels (budget {mean_max}), worst frame {worst:.2} (budget {frame_max}), {unknown} of {} frames without a plan to judge", slice.len()),
+                    format!(
+                        "{name}: mean {mean:.3} levels (budget {mean_max}), worst frame {worst:.2} (budget {frame_max}), over {} frames",
+                        slice.len()
+                    ),
                 ),
             }
         }
         LagRule::SettledBy { name, from, within_s, gate } => {
             let tail = &lags[(*from).min(lags.len())..];
+            if let Some(v) = missing(name, *from, tail) {
+                return v;
+            }
             let at = holds_from(tail, step_s, |l| l <= LAG_ZERO);
             let ok = at.is_some_and(|t| t <= *within_s);
             let shown = at.map_or("never".to_string(), |t| format!("{t:.2} s"));
             Verdict::new("detail lag", gated(*gate, ok), format!("{name}: zero for good after {shown} (budget {within_s} s)"))
         }
         LagRule::Recovery { under1_s, complete_s, gate } => {
+            if let Some(v) = missing("recovery", 0, lags) {
+                return v;
+            }
             let under = holds_from(lags, step_s, |l| l < 1.0);
             let zero = holds_from(lags, step_s, |l| l <= LAG_ZERO);
             let fmt = |t: Option<f64>| t.map_or("never".to_string(), |t| format!("{t:.2} s"));
@@ -370,26 +399,28 @@ fn lag_verdict(rule: &LagRule, lags: &[Option<f64>], frames: &[FrameRecord], ste
             )
         }
         LagRule::Still { gate } => {
-            if let Some(v) = thin("rotation", lags) {
-                return v;
+            if let Some(v) = missing("rotation", 0, lags) {
+                return Verdict { name: "rotation", ..v };
             }
             let worst = lags.iter().flatten().copied().fold(0.0, f64::max);
-            let unknown = lags.iter().filter(|l| l.is_none()).count();
             let fetched: u64 = frames.iter().map(|f| f.dispatched + f.cancelled + f.uploaded).sum();
             Verdict::new(
                 "rotation",
                 gated(*gate, worst <= LAG_ZERO && fetched == 0),
-                format!("worst lag {worst:.3} levels (budget 0), {fetched} requests, cancellations and uploads (budget 0), {unknown} frames without a plan to judge"),
+                format!("worst lag {worst:.3} levels (budget 0), {fetched} requests, cancellations and uploads (budget 0)"),
             )
         }
         LagRule::Report { name, frames: range } => {
             let slice = &lags[range.start.min(lags.len())..range.end.min(lags.len())];
+            if let Some(v) = missing(name, range.start, slice) {
+                return v;
+            }
             match mean_and_worst(slice) {
-                None => Verdict::new("detail lag", Status::NotMeasured, format!("{name}: no frame with a known lag")),
-                Some((mean, worst, unknown)) => Verdict::new(
+                None => Verdict::new("detail lag", Status::NotMeasured, format!("{name}: the rule covers no frame")),
+                Some((mean, worst)) => Verdict::new(
                     "detail lag",
                     Status::Reported,
-                    format!("{name}: mean {mean:.3} levels, worst frame {worst:.2}, {unknown} frames without a plan to judge (no budget)"),
+                    format!("{name}: mean {mean:.3} levels, worst frame {worst:.2}, over {} frames (no budget)", slice.len()),
                 ),
             }
         }
@@ -419,12 +450,12 @@ pub fn column_metrics(frames: &[FrameRecord]) -> Vec<(String, Stats)> {
 /// The per-frame log as text (one line per frame): the columns of TEST-012 and the counts of the frame.
 pub fn frames_text(frames: &[FrameRecord]) -> String {
     let mut s = String::from(
-        "# frame plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms lag blank upload_bytes resident in_flight queued dispatched uploaded cancelled degraded allocated_bytes\n",
+        "# frame plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms lag uncovered blank upload_bytes resident in_flight queued dispatched uploaded cancelled degraded allocated_bytes\n",
     );
     for (k, f) in frames.iter().enumerate() {
         let opt = |v: Option<f64>| v.map_or("-".to_string(), |v| format!("{v:.3}"));
         s.push_str(&format!(
-            "{k} {:.3} {:.3} {:.3} {:.3} {} {:.3} {} {} {} {} {} {} {} {} {} {} {}\n",
+            "{k} {:.3} {:.3} {:.3} {:.3} {} {:.3} {} {} {} {} {} {} {} {} {} {} {} {}\n",
             f.plan_ms,
             f.scheduler_ms,
             f.upload_ms,
@@ -432,6 +463,7 @@ pub fn frames_text(frames: &[FrameRecord]) -> String {
             opt(f.gpu_ms),
             f.wall_ms,
             opt(f.lag),
+            f.uncovered_nodes,
             f.blank_nodes,
             f.upload_bytes,
             f.resident,
@@ -493,6 +525,7 @@ mod tests {
             gpu_ms: None,
             wall_ms: wall,
             lag: Some(0.0),
+            uncovered_nodes: 0,
             blank_nodes: 0,
             upload_bytes: 0,
             resident: 10,
@@ -649,7 +682,7 @@ mod tests {
         let v = run("teleport-2km", &tp);
         assert_eq!(find(&v, "detail lag").status, Status::TrackedWithin, "1.0 s is at the 1 s budget, 3.33 s under 4 s");
         for f in tp.iter_mut().skip(300) {
-            f.lag = None; // a late stretch without a plan to judge is not recovery
+            f.lag = Some(0.5); // a late stretch that falls back under one level but not to zero is not recovery
         }
         let v = run("teleport-1m", &tp);
         assert_eq!(find(&v, "detail lag").status, Status::TrackedOver);
@@ -667,10 +700,8 @@ mod tests {
         frames[100].dispatched = 0;
         frames[200].lag = Some(0.4);
         assert!(find(&run("look-1m", &frames), "rotation").fails());
-        frames[200].lag = None;
-        let r = find(&run("look-1m", &frames), "rotation").clone();
-        assert_eq!(r.status, Status::Ok);
-        assert!(r.detail.contains("1 frames without a plan to judge"), "unknown frames are counted, not hidden: {r:?}");
+        frames[200].lag = Some(0.0);
+        assert_eq!(find(&run("look-1m", &frames), "rotation").status, Status::Ok);
     }
 
     // spec: TEST-018
@@ -699,13 +730,11 @@ mod tests {
 }
 
 #[cfg(test)]
-mod thin_tests {
+mod fresh_lag_tests {
     use super::*;
 
-    // spec: TEST-018
-    #[test]
-    fn a_gated_lag_judged_on_too_few_frames_is_not_measured_rather_than_a_pass() {
-        let mut frames: Vec<FrameRecord> = (0..600)
+    fn frames(n: usize, lag: Option<f64>) -> Vec<FrameRecord> {
+        (0..n)
             .map(|_| FrameRecord {
                 plan_ms: 0.0,
                 scheduler_ms: 0.0,
@@ -713,7 +742,8 @@ mod thin_tests {
                 record_ms: 0.0,
                 gpu_ms: None,
                 wall_ms: 5.0,
-                lag: None,
+                lag,
+                uncovered_nodes: 0,
                 blank_nodes: 0,
                 upload_bytes: 0,
                 resident: 0,
@@ -725,13 +755,80 @@ mod thin_tests {
                 degraded: 0,
                 allocated_bytes: 0,
             })
-            .collect();
-        frames[3].lag = Some(0.0);
+            .collect()
+    }
+
+    fn mem() -> MemoryFacts {
+        MemoryFacts { share_bytes: 1 << 30, vram_cap_bytes: 8 << 30, driver_vram_bytes: None, process_peak_bytes: None }
+    }
+
+    fn lag_of(scene: &str, f: &[FrameRecord], descent: usize) -> Verdict {
+        let spec = case_spec(scene, f.len(), 1.0 / 60.0, descent).unwrap();
+        let v = case_verdicts(&spec, f, &[], &mem());
+        v.into_iter().find(|x| x.name == "detail lag" || x.name == "rotation").unwrap()
+    }
+
+    // spec: TEST-020
+    #[test]
+    fn a_gated_lag_judges_every_frame_even_when_only_one_has_a_lag_over_budget() {
+        // The old coverage guard called a gated rule "not measured" on fewer than half the frames; now every frame has a lag and a
+        // single bad frame fails a gated rule, a tracked one only reports.
+        let mut f = frames(600, Some(0.0));
+        assert_eq!(lag_of("look-1m", &f, 0).status, Status::Ok);
+        f[599].lag = Some(0.25);
+        let r = lag_of("look-1m", &f, 0);
+        assert!(r.fails() && r.detail.contains("worst lag 0.250"), "{r:?}");
+        let mut dive = frames(2400, Some(0.2));
+        dive[1799].lag = Some(3.5);
+        assert!(lag_of("dive", &dive, 1800).fails(), "no frame of the descent over 3 levels, the last frame too");
+        let mut tp = frames(600, Some(0.0));
+        tp[599].lag = Some(2.0);
+        let r = lag_of("teleport-1m", &tp, 0);
+        assert_eq!(r.status, Status::TrackedOver, "a tracked rule never fails: {r:?}");
+    }
+
+    // spec: TEST-020
+    #[test]
+    fn a_frame_without_a_lag_is_missing_data_that_fails_every_lag_rule_and_is_never_not_measured() {
+        for (scene, descent) in [("look-2km", 0), ("dive", 1800), ("dive-fast", 1800), ("teleport-2km", 0)] {
+            let n = if scene.starts_with("dive") { 2400 } else { 600 };
+            let mut f = frames(n, Some(0.0));
+            f[7].lag = None;
+            let spec = case_spec(scene, n, 1.0 / 60.0, descent).unwrap();
+            let v = case_verdicts(&spec, &f, &[], &mem());
+            let lag: Vec<&Verdict> = v.iter().filter(|x| x.name == "detail lag" || x.name == "rotation").collect();
+            let hit =
+                lag.iter().find(|x| x.fails()).unwrap_or_else(|| panic!("{scene}: no lag rule failed on a frame without a lag: {lag:?}"));
+            assert!(hit.detail.contains("no lag (first at frame 7)"), "{scene}: {hit:?}");
+            assert!(lag.iter().all(|x| x.status != Status::NotMeasured), "{lag:?}");
+        }
+        // Every frame has a lag, none of them zero-filled: 600 frames at 0.0 pass, and a single missing one in the descent fails.
+        let mut dive = frames(2400, Some(0.1));
+        assert_eq!(lag_of("dive", &dive, 1800).status, Status::Ok);
+        dive[1000].lag = None;
+        let r = lag_of("dive", &dive, 1800);
+        assert!(r.fails() && r.detail.contains("first at frame 1000") && r.line("dive").contains("OVER"), "{r:?}");
+    }
+
+    // spec: TEST-020
+    #[test]
+    fn nodes_of_the_fresh_selection_with_nothing_drawn_are_reported_beside_the_lag_without_a_budget() {
+        let mut f = frames(600, Some(0.0));
+        f[40].uncovered_nodes = 3;
+        f[41].uncovered_nodes = 1;
         let spec = case_spec("look-1m", 600, 1.0 / 60.0, 0).unwrap();
-        let mem = MemoryFacts { share_bytes: 1, vram_cap_bytes: 1, driver_vram_bytes: None, process_peak_bytes: None };
-        let v = case_verdicts(&spec, &frames, &[], &mem);
-        let r = v.iter().find(|x| x.name == "detail lag").unwrap();
-        assert_eq!(r.status, Status::NotMeasured, "{r:?}");
-        assert!(r.detail.contains("only 1 of 600"), "{r:?}");
+        let v = case_verdicts(&spec, &f, &[], &mem());
+        let u = v.iter().find(|x| x.name == "uncovered nodes").unwrap();
+        assert!(
+            !u.fails()
+                && u.status == Status::Reported
+                && u.detail.contains("2 of 600 frames")
+                && u.detail.contains("first at frame 40, 3 nodes"),
+            "{u:?}"
+        );
+        let none = case_verdicts(&spec, &frames(600, Some(0.0)), &[], &mem());
+        assert!(none.iter().all(|x| x.name != "uncovered nodes"));
+        let t = frames_text(&f);
+        assert!(t.lines().next().unwrap().contains("lag uncovered blank") && t.lines().nth(41).unwrap().contains(" 0.000 3 0 "), "{t}");
     }
 }
