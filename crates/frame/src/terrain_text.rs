@@ -8,7 +8,8 @@ use planet_core::hash::hash_u64s;
 use planet_core::{PlanetFixed, TileId, Vec3};
 
 pub const TERRAIN_PLAN_FORMAT_VERSION: u32 = 1;
-pub const TERRAIN_BUNDLE_FORMAT_VERSION: u32 = 1;
+/// Version 2 adds the optional world section ([`BundleWorld`]); version 1 bundles (the seed-only reference field) still read.
+pub const TERRAIN_BUNDLE_FORMAT_VERSION: u32 = 2;
 
 fn h64(v: f64) -> String {
     format!("{:016x}", v.to_bits())
@@ -192,6 +193,39 @@ impl TerrainPlan {
     }
 }
 
+/// The world a bundle was recorded against when the run named one (`--world`): the definition as TOML text (canonical, so its
+/// hash is the bundle's `definition_hash`), the implementation id of its height field and the in-memory bake the field read
+/// (cells per face edge). A bundle without it is the seed-only world: the reference field of `seed` (GEN-018).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BundleWorld {
+    pub height_field: String,
+    pub global_res: u32,
+    pub definition_toml: String,
+}
+
+/// One line: backslash, newline and carriage return escaped.
+fn escape_line(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('\n', "\\n").replace('\r', "\\r")
+}
+
+fn unescape_line(s: &str) -> Result<String, String> {
+    let mut out = String::with_capacity(s.len());
+    let mut it = s.chars();
+    while let Some(c) = it.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match it.next() {
+            Some('\\') => out.push('\\'),
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            other => return Err(format!("bad escape '\\{}' in the recorded world", other.map_or(String::new(), |c| c.to_string()))),
+        }
+    }
+    Ok(out)
+}
+
 /// A terrain repro bundle: the request that produced a plan, the plan itself and the versions it needs to replay.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TerrainBundle {
@@ -202,6 +236,8 @@ pub struct TerrainBundle {
     pub definition_hash: u64,
     /// Adapter the bundle was recorded on (informational: views compare per adapter).
     pub adapter: String,
+    /// The world the field came from; `None`: the seed-only reference field of `request.seed`.
+    pub world: Option<BundleWorld>,
     pub request: TerrainRequest,
     pub plan: TerrainPlan,
 }
@@ -216,6 +252,9 @@ impl TerrainBundle {
             self.generator_version, self.implementation_id, self.mesh_version, r.seed
         );
         s += &format!("definition_hash {:016x}\nadapter {}\n", self.definition_hash, self.adapter);
+        if let Some(w) = &self.world {
+            s += &format!("height_field {}\nglobal_res {}\nworld_toml {}\n", w.height_field, w.global_res, escape_line(&w.definition_toml));
+        }
         s += &format!("face_mapping {}\nview {}\nsize {} {}\n", r.face_mapping, r.view.name(), r.size.0, r.size.1);
         let c = &r.camera;
         s += &format!(
@@ -248,11 +287,16 @@ impl TerrainBundle {
         let (head, plan_text) = text.split_once("\n---\n").ok_or("bundle has no '---' separator before the plan")?;
         let mut lines = head.lines();
         let first = lines.next().ok_or("empty bundle")?;
-        if first != format!("planet-terrain-repro {TERRAIN_BUNDLE_FORMAT_VERSION}") {
-            return Err(format!(
-                "unsupported bundle header '{first}' (this build reads planet-terrain-repro {TERRAIN_BUNDLE_FORMAT_VERSION})"
-            ));
-        }
+        let version = match first {
+            "planet-terrain-repro 1" => 1,
+            "planet-terrain-repro 2" => 2,
+            _ => {
+                return Err(format!(
+                    "unsupported bundle header '{first}' (this build reads planet-terrain-repro 1 and {TERRAIN_BUNDLE_FORMAT_VERSION})"
+                ))
+            }
+        };
+        let (mut field_id, mut global_res, mut world_toml) = (None, None, None);
         let plan = TerrainPlan::from_text(plan_text)?;
         let (mut gv, mut imp, mut mv, mut seed, mut dh, mut adapter) = (None, None, None, None, 0u64, String::new());
         let (mut mapping, mut view, mut size, mut camera, mut lod, mut recorded) = (None, None, None, None, None, None);
@@ -266,6 +310,9 @@ impl TerrainBundle {
                 ["seed", v] => seed = Some(v.parse::<u64>().map_err(bad)?),
                 ["definition_hash", v] => dh = u64::from_str_radix(v, 16).map_err(bad)?,
                 ["adapter", v] => adapter = v.to_string(),
+                ["height_field", v] => field_id = Some(v.to_string()),
+                ["global_res", v] => global_res = Some(v.parse::<u32>().map_err(bad)?),
+                ["world_toml", ..] => world_toml = Some(unescape_line(line.strip_prefix("world_toml ").unwrap_or(""))?),
                 ["face_mapping", v] => mapping = Some(v.to_string()),
                 ["view", v] => view = Some(TerrainView::parse(v).ok_or(format!("unknown view '{v}'"))?),
                 ["size", w, h] => size = Some((w.parse::<u32>().map_err(bad)?, h.parse::<u32>().map_err(bad)?)),
@@ -296,6 +343,16 @@ impl TerrainBundle {
                 _ => return Err(format!("cannot parse bundle line '{line}'")),
             }
         }
+        let world = match (field_id, global_res, world_toml) {
+            (None, None, None) => None,
+            (Some(height_field), Some(global_res), Some(definition_toml)) if version >= 2 => {
+                Some(BundleWorld { height_field, global_res, definition_toml })
+            }
+            (Some(_), Some(_), Some(_)) => {
+                return Err("a version 1 bundle cannot record a world (version 1 is the seed-only reference field)".into())
+            }
+            _ => return Err("bundle records a half of its world: height_field, global_res and world_toml come together".into()),
+        };
         let recorded = recorded.ok_or("bundle has no plan_hash")?;
         if recorded != plan.plan_hash() {
             return Err(format!(
@@ -309,6 +366,7 @@ impl TerrainBundle {
             mesh_version: mv.ok_or("bundle has no mesh_version")?,
             definition_hash: dh,
             adapter,
+            world,
             request: TerrainRequest {
                 camera: camera.ok_or("bundle has no camera")?,
                 size: size.ok_or("bundle has no size")?,

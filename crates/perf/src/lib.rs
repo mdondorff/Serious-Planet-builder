@@ -150,6 +150,9 @@ pub struct Protocol {
     /// Residency VRAM caps (GB) measured in turn: mid-range tier and high tier.
     pub vram_caps_gb: Vec<u32>,
     pub internal_resolution: (u32, u32),
+    /// What the workload measured when that is a choice (the terrain scene: the height field and its bake, e.g.
+    /// `cpu-erosion-v1 over a 256-cell bake`). A log is compared only with one that measured the same thing.
+    pub field: Option<String>,
     /// A smoke run: never valid for budgets.
     pub smoke: bool,
 }
@@ -162,6 +165,7 @@ impl Default for Protocol {
             runs: 5,
             vram_caps_gb: vec![8, 14],
             internal_resolution: (2560, 1440),
+            field: None,
             smoke: false,
         }
     }
@@ -295,7 +299,7 @@ pub fn report_json(
         })
         .collect();
     format!(
-        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"warnings\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}]}},\"runs\":[{}]}}\n",
+        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"warnings\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{}}},\"runs\":[{}]}}\n",
         json_str(&adapter.name),
         json_str(&adapter.backend),
         power_scheme.map_or("null".to_string(), json_str),
@@ -308,6 +312,7 @@ pub fn report_json(
         protocol.vram_caps_gb,
         protocol.internal_resolution.0,
         protocol.internal_resolution.1,
+        protocol.field.as_deref().map_or("null".to_string(), json_str),
         run_json.join(",")
     )
 }

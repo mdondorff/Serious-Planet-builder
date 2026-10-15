@@ -1,0 +1,8 @@
+- [x] 1.1 bundle format 2 with the optional world section (frame, tier A test: round trip, version 1 reads, half world and version 1 world refused)
+- [x] 1.2 perf log records `protocol.field`; comparison skipped across a field change (perf, tier A)
+- [x] 1.3 `check_options`: `--world`/`--global-res` for `--stream`, `--bundle`, `--perf`, `--perf-smoke`; `--repro` refuses `--world` (tier A)
+- [x] 1.4 streaming mesh source and bundle recording/replay through `WorldTerrain` (tier C on the software adapter: stream equals sync, world bundle replays from itself, edits refused, version 1 replays)
+- [x] 1.5 perf scene on the default world (smoke test names the field in the output and the log)
+- [x] 1.6 TEST-011 pins over the default world (declared change)
+- [x] 1.7 spec deltas (GEN-018, TEST-008, TEST-011, TEST-012), usage text
+- [x] 1.8 `test gpu`, golden-review (none expected), reviewers (numerics n/a unless core changes, spec-guardian, verifier), archive, log line, PR, CI green, merge

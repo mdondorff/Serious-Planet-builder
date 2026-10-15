@@ -142,6 +142,12 @@ fn a_terrain_bundle_replays_to_the_same_pixels_and_refuses_changed_inputs() {
     assert_eq!(read_png(&png).unwrap(), read_png(&again).unwrap(), "the replay must draw the recorded pixels");
 
     let text = std::fs::read_to_string(&bundle).unwrap();
+    // A version 1 bundle (written before bundles could record a world) is the seed-only reference field and still replays.
+    let v1 = tmp("tv1.repro");
+    assert!(text.starts_with("planet-terrain-repro 2\n") && !text.contains("world_toml"), "a seed-only run records no world");
+    std::fs::write(&v1, text.replacen("planet-terrain-repro 2", "planet-terrain-repro 1", 1)).unwrap();
+    let log = run(&["test-render", "--adapter", "software", "--repro", v1.to_str().unwrap()]).unwrap();
+    assert!(log.contains("terrain plan identical"), "{log}");
     // A version mismatch is refused before anything is replanned.
     let bad = tmp("told.repro");
     let (current, old) = (planet_generators::mesh::MESH_VERSION, planet_generators::mesh::MESH_VERSION - 1);

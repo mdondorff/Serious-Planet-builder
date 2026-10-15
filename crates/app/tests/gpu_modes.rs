@@ -49,6 +49,10 @@ fn the_terrain_perf_workload_refuses_unready_machines_and_the_smoke_run_is_label
         "{json}"
     );
     assert!(log.contains("worst run-to-run noise within a view"), "{log}");
+    // The perf scene without a world is the default world (eroded field, 256-cell bake in memory) and the log names it, so a
+    // later session is never compared with one that measured another field (TEST-012).
+    assert!(log.contains("cpu-erosion-v1 over a 256-cell bake"), "{log}");
+    assert!(json.contains("\"field\":\"height field cpu-erosion-v1 over a 256-cell bake\""), "{json}");
     assert!(log.contains("SMOKE RUN") && log.contains("not a measurement"), "{log}");
     assert!(log.contains("ground-1m") && log.contains("wrote"), "{log}");
     // Parameters the morph cannot support are rejected with advice before anything is measured.

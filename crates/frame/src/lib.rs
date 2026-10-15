@@ -23,4 +23,4 @@ pub use terrain::{
     flight_path, flight_path_field, level_color, plan_terrain, plan_terrain_cached, plan_terrain_field, scripted_views,
     scripted_views_field, CountBudget, PlanCounts, TerrainDraw, TerrainPlan, TerrainRequest, TerrainView,
 };
-pub use terrain_text::TerrainBundle;
+pub use terrain_text::{BundleWorld, TerrainBundle};
