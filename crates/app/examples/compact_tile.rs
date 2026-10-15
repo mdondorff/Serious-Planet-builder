@@ -269,7 +269,7 @@ fn main() -> Result<(), String> {
             a.render(&ctx, &p, true).map_err(|e| e.to_string())?;
             b.render(&ctx, &p, true).map_err(|e| e.to_string())?;
         }
-        // `--blocks`: all frames of A, then all of B (the product perf scene's pattern); default: frame by frame A, B, B, A, A, B ...
+        // `--blocks`: all frames of A, then all of B (the product perf scene's pattern); default: frame by frame AB, AB, BA, BA ...
         // (a slow drift of the GPU clock hits both formats alike).
         if has("--blocks") {
             for _ in 0..frames * 8 {

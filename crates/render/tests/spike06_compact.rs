@@ -42,7 +42,7 @@ fn the_compact_shader_contains_no_planet_scale_values() {
 
 /// Largest distance (metres) between the CPU mirror of the compact vertex shader and the product mesh, over every vertex,
 /// as a fraction of the tile's edge length, plus the largest height difference and normal angle.
-fn mirror_error(field: &dyn HeightField, cells: u32, tiles: &[planet_core::TileId]) -> (f64, f64, f64) {
+fn mirror_error(field: &dyn HeightField, cells: u32, tiles: &[planet_core::TileId], check_step: bool) -> (f64, f64, f64) {
     let (mut pos, mut height, mut normal) = (0f64, 0f64, 0f64);
     for id in tiles {
         let mesh = tile_mesh_field(field, &TangentWarp, *id, cells, R);
@@ -66,14 +66,18 @@ fn mirror_error(field: &dyn HeightField, cells: u32, tiles: &[planet_core::TileI
                 .sum::<f64>()
                 .sqrt();
             // The biquadratic base surface errs by about 0.018 theta^2 of the tile edge (theta: the tile's angular size).
+            // CON-13: where a tile is fine (level 16 and finer) the step stays under 1 mm for these fields.
+            if check_step && id.level() >= 16 {
+                assert!(ct.hr_step < 1e-3, "level {} step {}", id.level(), ct.hr_step);
+            }
             let theta = core::f64::consts::FRAC_PI_2 / f64::from(1u32 << id.level());
             // ... plus one height quantisation step and the f32 error of the base normal (about 2e-7 rad) times the tile's relief: a tile
             // whose relief is large against its edge (the steep stress field) moves a vertex by that much.
             pos = pos.max(
-                d.max(c) / (edge * (0.06 * theta * theta + 1e-6) + 1.01 * f64::from(ct.hr_step) + 5e-7 * 65535.0 * f64::from(ct.hr_step)),
+                d.max(c) / (edge * (0.03 * theta * theta + 1e-6) + 0.51 * f64::from(ct.hr_step) + 5e-7 * 65535.0 * f64::from(ct.hr_step)),
             );
             // The quantisation step bounds the height error, plus f32 rounding of the sum (relative 2.4e-7).
-            let slack = f64::from(ct.hr_step) + 2.4e-7 * f64::from(a.height.abs().max(1.0));
+            let slack = 0.51 * f64::from(ct.hr_step) + 2.4e-7 * f64::from(a.height.abs().max(1.0));
             height = height.max(f64::from((a.height - b.height).abs().max((a.coarse_height - b.coarse_height).abs())) - slack);
             let dot: f64 = (0..3).map(|k| f64::from(a.normal[k]) * f64::from(b.normal[k])).sum();
             normal = normal.max(libm::acos(dot.clamp(-1.0, 1.0)).to_degrees());
@@ -101,8 +105,8 @@ fn the_cpu_mirror_matches_the_product_mesh_on_the_scripted_views_and_the_steep_f
         .unwrap();
         tiles.extend(plan.nodes.iter().step_by(7).map(|n| n.tile));
     }
-    let (pos, height, normal) = mirror_error(&reference, 16, &tiles);
-    // Position within 1e-6 (f32 rounding) plus 0.06 theta^2 of the tile edge (the biquadratic base surface; 0.28 % at level 2, under 0.05 % from
+    let (pos, height, normal) = mirror_error(&reference, 16, &tiles, true);
+    // Position within 1e-6 (f32 rounding) plus 0.03 theta^2 (measured: 0.018) of the tile edge (the biquadratic base surface; 0.28 % at level 2, under 0.05 % from
     // level 4), height within the quantisation step, normal within the octahedral snorm8 bound (about 1 degree).
     assert!(pos < 1.0, "reference field: position error {pos} x the biquadratic bound");
     assert!(height < 1e-6, "reference field: height error beyond the quantisation step: {height}");
@@ -127,7 +131,7 @@ fn the_cpu_mirror_matches_the_product_mesh_on_the_scripted_views_and_the_steep_f
         }
     }
     assert!(!tiles.is_empty());
-    let (pos, height, normal) = mirror_error(&steep, 4, &tiles);
+    let (pos, height, normal) = mirror_error(&steep, 4, &tiles, false);
     assert!(pos < 1.0, "steep field: position error {pos} x the biquadratic bound");
     assert!(height < 1e-6, "steep field: height error beyond the quantisation step: {height}");
     assert!(normal < 1.2, "steep field: normal error {normal} degrees");

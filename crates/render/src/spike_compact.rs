@@ -155,7 +155,7 @@ pub fn compact_tile(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, 
     let lo = hr.iter().copied().fold(f64::INFINITY, f64::min);
     let hi = hr.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let hr_min = lo as f32;
-    let hr_step = if hi > lo { ((hi - lo) / 65535.0) as f32 } else { 1.0 };
+    let hr_step = if hi > lo { ((hi - lo) / 65535.0) as f32 } else { 1.0e-30 };
     let texels = hr
         .iter()
         .zip(&normals)
@@ -176,7 +176,7 @@ pub fn compact_tile(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, 
     tile
 }
 
-// ---- CPU mirror of the vertex shader (f32, same arithmetic and order) ----
+// ---- CPU mirror of the vertex shader (f32; same operations, but the shader sums rows first and may fuse multiply-adds, so it is not bit-exact with the GPU) ----
 #[allow(clippy::needless_range_loop)]
 impl CompactTile {
     fn base_point(&self, u: f32, v: f32) -> V {
@@ -336,8 +336,8 @@ pub fn compact_shader() -> String {
         }
     }
     if variant.contains("nonormal") {
-        vertex =
-            vertex.replace("return normalize(cross(pu, pv)) * select(1.0, -1.0, node.ti.w == 1u);", "return normalize(node.ctrl[4].xyz);");
+        vertex = vertex
+            .replace("return normalize(cross(pu, pv)) * select(1.0, -1.0, node.ti.w == 1u);", "return normalize(node.origin_rel.xyz);");
     }
     if variant.contains("nofetch") {
         vertex = vertex.replace("return textureLoad(atlas, vec2<i32>(i32(node.ti.x) + i, i32(node.ti.y) + j), 0).x;", "return 0u;");
