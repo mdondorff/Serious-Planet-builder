@@ -7,6 +7,7 @@ pub mod instances;
 pub mod lod;
 pub mod plan;
 pub mod repro;
+pub mod residency;
 pub mod terrain;
 pub mod terrain_text;
 
@@ -19,6 +20,7 @@ pub use lod::{
 };
 pub use plan::{plan_tiles, DebugView, FramePlan, PlanError, PlanRequest, TileDraw};
 pub use repro::ReproBundle;
+pub use residency::{residency_set, residency_set_field, ResidencyEntry, ResidencySet};
 pub use terrain::{
     flight_path, flight_path_field, level_color, plan_terrain, plan_terrain_cached, plan_terrain_field, scripted_views,
     scripted_views_field, CountBudget, PlanCounts, TerrainDraw, TerrainPlan, TerrainRequest, TerrainView,

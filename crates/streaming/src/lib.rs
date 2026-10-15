@@ -5,8 +5,13 @@
 //! which resident tile to show: the tile itself, or its nearest resident ancestor while the finer one is generated.
 //! Missing ancestors are requested before descendants (parent-first), requests for tiles that are no longer wanted are
 //! cancelled, and resident tiles beyond the capacity are evicted least-recently-used. Nothing here ever waits for a job.
+//!
+//! The scheduler (STRM-005, ADR 0031): requests come in three classes, highest first: the missing draw set, the rest
+//! of the residency set, prefetch. A request is cancelled only when its tile is in none of them (never for leaving the
+//! view frustum, which is not an input); prefetch dispatches only while nothing of the other classes waits and only
+//! into free capacity. [`Wants`] carries the three sets; [`Streamer::begin_frame`] is the draw-only special case.
 
-use planet_core::TileId;
+use planet_core::{TileId, Vec3};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -64,6 +69,15 @@ pub trait Spawner: Send + Sync {
 /// Source of tile data: generation, disk or network. May be slow and may fail.
 pub trait TileSource<T>: Send + Sync {
     fn load(&self, tile: TileId) -> Result<T, String>;
+
+    /// Like [`load`](TileSource::load) for a source that works in stages: it polls `cancel` at each stage boundary and
+    /// returns `Ok(None)` to stop (STRM-005). The default is one stage.
+    fn load_staged(&self, tile: TileId, cancel: &CancelToken) -> Result<Option<T>, String> {
+        if cancel.is_cancelled() {
+            return Ok(None);
+        }
+        self.load(tile).map(Some)
+    }
 }
 
 /// Fixed-size worker pool; jobs run in submission order.
@@ -137,6 +151,54 @@ impl Spawner for ManualSpawner {
     }
 }
 
+/// Set by the streamer when nothing needs a running job any more; a staged source polls it between stages
+/// ([`TileSource::load_staged`]) and stops at the next boundary.
+#[derive(Clone, Debug)]
+pub struct CancelToken(Arc<AtomicBool>);
+
+impl CancelToken {
+    /// A token nobody cancels: for calling a staged source outside a streamer.
+    pub fn never() -> CancelToken {
+        CancelToken(Arc::new(AtomicBool::new(false)))
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+/// The request class of a tile, highest priority first (STRM-005).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RequestClass {
+    /// Missing nodes of the draw set D.
+    Draw = 0,
+    /// The rest of the residency set R.
+    Residency = 1,
+    /// R at the predicted position; free capacity only.
+    Prefetch = 2,
+}
+
+/// What the caller wants this frame, as `(tile, priority)` pairs, lower priority numbers first within a class.
+/// The ancestors of every tile are implied.
+#[derive(Clone, Debug, Default)]
+pub struct Wants {
+    /// Draw set D: shown this frame (`begin_frame_wants` answers for each). Priority: screen-space error times visibility
+    /// (as a number that sorts ascending).
+    pub draw: Vec<(TileId, f64)>,
+    /// Residency set R: everything worth keeping for the camera position (a superset of D). Priority: distance; the
+    /// caller may order in-view tiles first. Level (coarse first) outranks priority.
+    pub residency: Vec<(TileId, f64)>,
+    /// Prefetch set: R at the predicted position (translation only). Empty until the prefetch source exists.
+    pub prefetch: Vec<(TileId, f64)>,
+}
+
+/// The camera position `look_ahead_ms` ahead along its translation velocity (metres per second), the look-ahead capped
+/// at `max_look_ahead_ms`. Translation only: yaw and pitch rates are never extrapolated (ADR 0031 point 2.3), so
+/// there is no parameter for them.
+pub fn predicted_position(position: Vec3, velocity: Vec3, look_ahead_ms: u64, max_look_ahead_ms: u64) -> Vec3 {
+    position + velocity * (look_ahead_ms.min(max_look_ahead_ms) as f64 / 1000.0)
+}
+
 /// What to show for one wanted tile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Resolved {
@@ -160,7 +222,13 @@ pub struct StreamStats {
     pub completed: u64,
     pub failed: u64,
     pub cancelled: u64,
+    /// Of `cancelled`, the requests of the prefetch class.
+    pub cancelled_prefetch: u64,
+    /// Jobs that finished after they were cancelled; their tiles were not made resident.
+    pub dropped: u64,
     pub evicted: u64,
+    /// Queued requests by class: draw, residency, prefetch.
+    pub queued_by_class: [usize; 3],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -181,6 +249,14 @@ impl Default for StreamConfig {
     }
 }
 
+struct InFlight {
+    token: Arc<AtomicBool>,
+    class: RequestClass,
+}
+
+/// Queue order: class, rank (draw: 0; residency and prefetch: level), priority key, tile.
+type QueueKey = (u8, u64, u64, TileId);
+
 struct Resident<T> {
     data: Arc<T>,
     last_used: u64,
@@ -190,7 +266,7 @@ struct Resident<T> {
 enum Outcome<T> {
     Done(T),
     Failed(String),
-    /// Skipped because it was cancelled before it started; not a failure.
+    /// Skipped because it was cancelled before it started or at a stage boundary; not a failure.
     Cancelled,
 }
 
@@ -203,9 +279,9 @@ pub struct Streamer<T: Send + Sync + 'static> {
     config: StreamConfig,
     resident: HashMap<TileId, Resident<T>>,
     /// Queued requests ordered by `(priority key, tile)`; lower runs first.
-    queue: BTreeMap<(u64, TileId), ()>,
-    queued_key: HashMap<TileId, u64>,
-    in_flight: HashMap<TileId, Arc<AtomicBool>>,
+    queue: BTreeMap<QueueKey, ()>,
+    queued_key: HashMap<TileId, QueueKey>,
+    in_flight: HashMap<TileId, InFlight>,
     failed_at: HashMap<TileId, u64>,
     last_error: HashMap<TileId, String>,
     tx: Sender<Completion<T>>,
@@ -268,7 +344,17 @@ impl<T: Send + Sync + 'static> Streamer<T> {
     }
 
     pub fn stats(&self) -> StreamStats {
-        StreamStats { resident: self.resident.len(), queued: self.queue.len(), in_flight: self.in_flight.len(), ..self.stats }
+        let mut queued_by_class = [0usize; 3];
+        for k in self.queue.keys() {
+            queued_by_class[usize::from(k.0)] += 1;
+        }
+        StreamStats {
+            resident: self.resident.len(),
+            queued: self.queue.len(),
+            in_flight: self.in_flight.len(),
+            queued_by_class,
+            ..self.stats
+        }
     }
 
     fn nearest_resident(&self, mut t: TileId) -> Option<TileId> {
@@ -280,15 +366,25 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         }
     }
 
-    /// One frame: collect finished jobs, request what is wanted (ancestors first), cancel what is not, dispatch within
-    /// the in-flight limit, evict beyond capacity, and say what to draw for each wanted tile. Never blocks.
+    /// One frame with only a draw class: [`begin_frame_wants`](Streamer::begin_frame_wants) with no residency set and
+    /// no prefetch, so a tile is wanted exactly when it is drawn or an ancestor of one.
     pub fn begin_frame(&mut self, wanted: &[(TileId, f64)]) -> Vec<Resolved> {
+        self.begin_frame_wants(&Wants { draw: wanted.to_vec(), ..Wants::default() })
+    }
+
+    /// One frame: collect finished jobs, request what is wanted by class (ancestors first), cancel what is in no class,
+    /// dispatch within the in-flight limit, evict beyond capacity, and say what to draw for each tile of `wants.draw`.
+    /// Never blocks. The order of requests is a pure function of `wants`, the resident set and the failure times: it
+    /// does not depend on the spawner or the thread count (CON-14).
+    pub fn begin_frame_wants(&mut self, wants: &Wants) -> Vec<Resolved> {
         self.frame += 1;
         let now = self.clock.now_ms();
-        // 1. Completions.
+        // 1. Completions. The result of a job that was cancelled meanwhile is dropped: the persistent cache holds it,
+        // nothing is made resident (and so nothing is uploaded).
         while let Ok((tile, result)) = self.rx.try_recv() {
-            self.in_flight.remove(&tile);
+            let was_cancelled = self.in_flight.remove(&tile).is_some_and(|f| f.token.load(Ordering::SeqCst));
             match result {
+                Outcome::Done(_) if was_cancelled => self.stats.dropped += 1,
                 Outcome::Done(data) => {
                     self.stats.completed += 1;
                     self.failed_at.remove(&tile);
@@ -303,71 +399,106 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 }
             }
         }
-        // 2. What is needed: wanted tiles and all their ancestors; the base priority is the wanted tile's.
-        let mut needed: HashMap<TileId, f64> = HashMap::new();
-        for &(tile, priority) in wanted {
-            let mut t = Some(tile);
-            let mut depth = 0.0;
+        // 2. What is needed, by class: a tile and all its ancestors take the best (class, rank, priority) of any
+        // member of the sets they belong to. Draw: ancestors sort before descendants through the priority (parent-first).
+        // Residency and prefetch: rank = level, so coarse comes before fine, then the caller's priority (distance).
+        let mut needed: HashMap<TileId, (u8, u64, u64)> = HashMap::new();
+        let mut want = |tile: TileId, class: RequestClass, rank: u64, priority: f64| {
+            let key = (class as u8, rank, priority_key(priority));
+            needed.entry(tile).and_modify(|e| *e = (*e).min(key)).or_insert(key);
+        };
+        for &(tile, priority) in &wants.draw {
+            let (mut t, mut depth) = (Some(tile), 0.0);
             while let Some(x) = t {
-                // Ancestors sort before descendants: parent-first.
-                let p = priority - depth * 1.0e12;
-                needed.entry(x).and_modify(|e| *e = e.min(p)).or_insert(p);
+                want(x, RequestClass::Draw, 0, priority - depth * 1.0e12);
                 depth += 1.0;
                 t = x.parent();
             }
         }
-        for t in needed.keys() {
-            if let Some(r) = self.resident.get_mut(t) {
-                r.last_used = self.frame;
+        for (set, class) in [(&wants.residency, RequestClass::Residency), (&wants.prefetch, RequestClass::Prefetch)] {
+            for &(tile, priority) in set {
+                let mut t = Some(tile);
+                while let Some(x) = t {
+                    want(x, class, u64::from(x.level()), priority);
+                    t = x.parent();
+                }
             }
         }
-        // 3. Cancel queued and in-flight requests that nobody needs any more.
+        // Tiles of D and R are in use (never evicted this frame); prefetch tiles are not, so eviction takes them first.
+        for (t, key) in &needed {
+            if key.0 < RequestClass::Prefetch as u8 {
+                if let Some(r) = self.resident.get_mut(t) {
+                    r.last_used = self.frame;
+                }
+            }
+        }
+        // 3. Cancel queued and in-flight requests that are in no class (prefetch requests count separately). A job
+        // already cancelled is not revived (see below).
         let stale_queued: Vec<TileId> = self.queued_key.keys().filter(|t| !needed.contains_key(t)).copied().collect();
         for t in stale_queued {
             if let Some(k) = self.queued_key.remove(&t) {
-                self.queue.remove(&(k, t));
+                self.queue.remove(&k);
                 self.stats.cancelled += 1;
+                self.stats.cancelled_prefetch += u64::from(k.0 == RequestClass::Prefetch as u8);
             }
         }
-        for (t, token) in &self.in_flight {
-            if !needed.contains_key(t) && !token.swap(true, Ordering::SeqCst) {
+        for (t, f) in &self.in_flight {
+            // A cancelled job is never revived (whether it had reached a stage boundary would make the resident set
+            // timing-dependent, CON-14): it ends, its result is dropped, and the tile is requested again if needed.
+            if !needed.contains_key(t) && !f.token.swap(true, Ordering::SeqCst) {
                 self.stats.cancelled += 1;
+                self.stats.cancelled_prefetch += u64::from(f.class == RequestClass::Prefetch);
             }
         }
-        // 4. Enqueue missing tiles (ancestors sort first) unless recently failed.
-        let mut missing: Vec<(TileId, f64)> = needed
-            .iter()
-            .filter(|(t, _)| !self.resident.contains_key(*t) && !self.in_flight.contains_key(*t))
-            .filter(|(t, _)| self.failed_at.get(*t).is_none_or(|at| now.saturating_sub(*at) >= self.config.retry_after_ms))
-            .map(|(t, p)| (*t, *p))
-            .collect();
-        missing.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
-        for (t, p) in missing {
-            let key = priority_key(p);
+        // 4. Enqueue missing tiles unless recently failed.
+        for (&t, &(class, rank, prio)) in &needed {
+            if self.resident.contains_key(&t) || self.in_flight.contains_key(&t) {
+                continue;
+            }
+            if self.failed_at.get(&t).is_some_and(|at| now.saturating_sub(*at) < self.config.retry_after_ms) {
+                continue;
+            }
+            let key = (class, rank, prio, t);
             if let Some(old) = self.queued_key.insert(t, key) {
-                self.queue.remove(&(old, t));
+                self.queue.remove(&old);
             }
-            self.queue.insert((key, t), ());
+            self.queue.insert(key, ());
         }
-        // 5. Dispatch.
+        // 5. Dispatch in queue order. Prefetch is first in the queue only when nothing of the other classes waits; it
+        // goes out only into free capacity.
         while self.in_flight.len() < self.config.max_in_flight {
-            let Some((&(key, tile), _)) = self.queue.iter().next() else { break };
-            self.queue.remove(&(key, tile));
+            let Some((&key, _)) = self.queue.iter().next() else { break };
+            if key.0 == RequestClass::Prefetch as u8 {
+                // Prefetch yields: it starts only while no draw or residency job is running either, and only into free capacity.
+                let busy = self.in_flight.values().any(|f| f.class != RequestClass::Prefetch);
+                if busy || self.resident.len() + self.in_flight.len() >= self.config.capacity {
+                    break;
+                }
+            }
+            let tile = key.3;
+            self.queue.remove(&key);
             self.queued_key.remove(&tile);
             let token = Arc::new(AtomicBool::new(false));
-            self.in_flight.insert(tile, Arc::clone(&token));
+            let class = match key.0 {
+                0 => RequestClass::Draw,
+                1 => RequestClass::Residency,
+                _ => RequestClass::Prefetch,
+            };
+            self.in_flight.insert(tile, InFlight { token: Arc::clone(&token), class });
             if self.config.record_dispatches {
                 self.dispatch_log.push(tile);
             }
             let (source, tx) = (Arc::clone(&self.source), self.tx.clone());
             self.spawner.spawn(Box::new(move || {
-                if token.load(Ordering::SeqCst) {
+                let cancel = CancelToken(token);
+                if cancel.is_cancelled() {
                     let _ = tx.send((tile, Outcome::Cancelled));
                     return;
                 }
                 // A panicking source must not wedge the tile: it becomes a failure with the usual retry delay.
-                let outcome = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| source.load(tile))) {
-                    Ok(Ok(data)) => Outcome::Done(data),
+                let outcome = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| source.load_staged(tile, &cancel))) {
+                    Ok(Ok(Some(data))) => Outcome::Done(data),
+                    Ok(Ok(None)) => Outcome::Cancelled,
                     Ok(Err(e)) => Outcome::Failed(e),
                     Err(_) => Outcome::Failed(format!("source panicked while loading {tile:?}")),
                 };
@@ -385,7 +516,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 self.stats.evicted += 1;
             }
         }
-        wanted.iter().map(|&(t, _)| Resolved { wanted: t, shown: self.nearest_resident(t) }).collect()
+        wants.draw.iter().map(|&(t, _)| Resolved { wanted: t, shown: self.nearest_resident(t) }).collect()
     }
 
     /// The message of the last failure of `tile`, if any.

@@ -1,0 +1,5 @@
+- [x] 1.1 failing tests: frame `residency` (STRM-015), streaming `scheduler` (STRM-001/002/005), frame integration (rotation requests nothing, D within R)
+- [x] 1.2 frame: `residency_set`
+- [x] 1.3 streaming: classes, cancellation, prefetch rules, staged loads, predicted position
+- [x] 1.4 spec delta (STRM-005, STRM-015)
+- [x] 1.5 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge
