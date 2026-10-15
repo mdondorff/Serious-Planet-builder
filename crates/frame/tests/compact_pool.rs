@@ -41,13 +41,23 @@ fn cells_64_compact_pools_fit_the_shares_too() {
 
 // spec: STRM-006
 #[test]
-fn a_tile_size_whose_slot_records_overflow_the_reserve_is_refused_with_the_numbers() {
-    // The record buffer (128 B per slot of the main pool) belongs to the fixed items: at cells 16 the mid share would need 110 MB of
-    // records beside the vertex pool and node records, over the 128 MiB reserve. Compact pools start at cells 32 (the production
-    // size); smaller tiles use the vertex format or a smaller share.
-    for cells in [8u32, 16] {
-        let e = tier_compact_pool(Tier::Mid, cells, 2).unwrap_err();
-        assert!(e.contains("slot records") && e.contains("reserve"), "{e}");
+fn small_tiles_get_fewer_atlases_so_the_slot_records_fit_their_reserve() {
+    // The record buffer (128 B per slot of the main pool) belongs to the fixed items. At cells 16 an atlas holds 57,600 slots (7.4 MB
+    // of records), so the mid share's bytes would give 15 atlases and 110 MB of records, over the 128 MiB reserve with the vertex pool
+    // and node records: the pool takes fewer atlases (the share is a ceiling), never breaches the reserve.
+    let c16 = tier_compact_pool(Tier::Mid, 16, 2).unwrap();
+    assert!(c16.main_blocks < 15 && c16.main_blocks >= 10, "{} atlases", c16.main_blocks);
+    for tier in [Tier::Mid, Tier::High] {
+        for cells in [8u32, 16, 32, 64] {
+            match tier_compact_pool(tier, cells, 2) {
+                Ok(c) => {
+                    assert!(c.fixed_bytes() <= GIB / 8, "cells {cells}: fixed items {} B over the reserve", c.fixed_bytes());
+                    assert!(c.allocated_bytes() <= tier.terrain_share_bytes());
+                    assert!(c.slot_record_total_bytes() < 128 << 20, "a record buffer binds as one storage buffer");
+                }
+                Err(e) => assert!(cells == 8 && e.contains("reserve"), "cells {cells}: {e}"),
+            }
+        }
     }
     // A vertex pool too small for 128 coarse tiles plus the fallback region is refused.
     let tiny = planet_streaming::PoolConfig::fit_share_with(2 * GIB, 8_712, 15_376, 134_217_728, 128, 256, 1_000_000, 25_000, 1 << 20, 1);

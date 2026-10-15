@@ -5,9 +5,11 @@ use planet_core::cube::TangentWarp;
 use planet_core::{PlanetFixed, Vec3};
 use planet_frame::Camera;
 use planet_frame::{level_color, plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
+use planet_generators::compact::{tile_data_field, RenderTile};
 use planet_generators::dump::FACE_COLORS;
+use planet_generators::height::Reference;
 use planet_generators::mesh::{grid_indices, tile_mesh, TileMesh};
-use planet_render::{execute_terrain, AdapterPolicy, GpuContext};
+use planet_render::{execute_terrain, execute_terrain_tiles, AdapterPolicy, GpuContext};
 use planet_testkit::{GoldenChecks, Image, Tolerance};
 
 const R: f64 = 6_371_000.0;
@@ -24,11 +26,32 @@ fn plan_for(name_index: usize, view: TerrainView) -> (&'static str, TerrainPlan)
     (name, plan_terrain(&TerrainRequest { camera, size: SIZE, view, lod: lod(), face_mapping: "tangent-v1".into(), seed: 1 }).unwrap())
 }
 
-fn meshes_for(plan: &TerrainPlan) -> Vec<TileMesh> {
+/// The tiles of the plan in the product's format: compact for levels 3 and finer, the vertex format below (REND-016).
+fn meshes_for(plan: &TerrainPlan) -> Vec<RenderTile> {
+    tiles_with(plan, CELLS)
+}
+
+fn tiles_with(plan: &TerrainPlan, cells: u32) -> Vec<RenderTile> {
+    plan.nodes.iter().map(|n| tile_data_field(&Reference(SEED), &TangentWarp, n.tile, cells, R, plan_finest(plan))).collect()
+}
+
+/// The finest level the test plans allow (`lod().max_level`).
+fn plan_finest(_plan: &TerrainPlan) -> u8 {
+    lod().max_level
+}
+
+fn render(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[RenderTile]) -> (Image, planet_render::TerrainStats) {
+    let refs: Vec<&RenderTile> = tiles.iter().collect();
+    let (frame, stats) = execute_terrain_tiles(ctx, plan, &refs).unwrap();
+    (Image::new(frame.width, frame.height, frame.rgba), stats)
+}
+
+/// The vertex-format meshes of the plan: the reference path, for the tests that read vertices on the CPU.
+fn vertex_meshes_for(plan: &TerrainPlan) -> Vec<TileMesh> {
     plan.nodes.iter().map(|n| tile_mesh(SEED, &TangentWarp, n.tile, CELLS, R)).collect()
 }
 
-fn render(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[TileMesh]) -> (Image, planet_render::TerrainStats) {
+fn render_vertex(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[TileMesh]) -> (Image, planet_render::TerrainStats) {
     let refs: Vec<&TileMesh> = meshes.iter().collect();
     let (frame, stats) = execute_terrain(ctx, plan, &refs).unwrap();
     (Image::new(frame.width, frame.height, frame.rgba), stats)
@@ -78,11 +101,22 @@ fn ten_scripted_views_have_no_holes_and_exact_draw_counts() {
         // The renderer matches the counts the plan implies (TEST-011): tier A asserts the budgets on the plan, tier C
         // checks that what the GPU path did equals them.
         let counts = plan.counts();
-        assert_eq!(
-            (stats.draw_calls, stats.triangles, stats.vertex_bytes),
-            (counts.draw_calls, counts.triangles, counts.upload_bytes),
-            "{name}"
-        );
+        assert_eq!((stats.draw_calls, stats.triangles), (counts.draw_calls, counts.triangles), "{name}");
+        // The plan's upload bytes are the vertex-format tiles (the reference count); the product uploads each tile in its own format:
+        // texels and record for a compact tile, vertices for levels 0-2 and fallbacks.
+        let expected: u64 = meshes
+            .iter()
+            .map(|t| match t {
+                RenderTile::Compact(c) => c.resident_bytes(),
+                RenderTile::Vertex(m) => m.vertices.len() as u64 * planet_generators::mesh::MeshVertex::STRIDE,
+            })
+            .sum();
+        assert_eq!(stats.vertex_bytes, expected, "{name}: bytes uploaded");
+        assert!(stats.vertex_bytes <= counts.upload_bytes, "{name}: the compact format never uploads more than the vertex format");
+        // The vertex format is the reference: the product's compact image equals it up to edge pixels.
+        let (reference, _) = render_vertex(&ctx, &plan, &vertex_meshes_for(&plan));
+        let wrong = img.pixels().zip(reference.pixels()).filter(|(p, q)| (0..3).any(|c| p[c].abs_diff(q[c]) > 12)).count();
+        assert!(wrong * 1000 <= (img.width * img.height) as usize, "{name}: {wrong} pixels differ from the vertex-format image");
         let h = holes(&plan, &img);
         assert!(
             h.is_empty(),
@@ -206,7 +240,7 @@ fn the_relief_grid_has_only_thin_lines_at_the_ground_cameras() {
             seed: 1,
         })
         .unwrap();
-        let meshes: Vec<TileMesh> = plan.nodes.iter().map(|n| tile_mesh(SEED, &TangentWarp, n.tile, 16, R)).collect();
+        let meshes = tiles_with(&plan, 16);
         let (img, _) = render(&ctx, &plan, &meshes);
         let share = wide_dark_share(&img, plan.clear_color, 6);
         assert!(share < 0.001, "{name}: {:.2} % of the terrain is a wide dark band, not thin grid lines (grid precision?)", share * 100.0);
@@ -386,8 +420,9 @@ fn nodes_appear_where_their_vertices_project() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     for index in [1usize, 2, 3, 4] {
         let (name, plan) = plan_for(index, TerrainView::TileId);
-        let meshes = meshes_for(&plan);
-        let (img, _) = render(&ctx, &plan, &meshes);
+        // The CPU oracle reads the canonical vertices; the image comes from the product's compact tiles.
+        let meshes = vertex_meshes_for(&plan);
+        let (img, _) = render(&ctx, &plan, &meshes_for(&plan));
         let (mut inside, mut matched) = (0, 0);
         for (d, m) in plan.nodes.iter().zip(&meshes) {
             let v = m.vertices[(CELLS as usize / 2) * (CELLS as usize + 1) + CELLS as usize / 2];
@@ -430,8 +465,9 @@ fn gpu_morph_values_match_the_cpu_formula_at_projected_vertices() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     for index in [2usize, 3, 4] {
         let (name, plan) = plan_for(index, TerrainView::Morph);
-        let meshes = meshes_for(&plan);
-        let (img, _) = render(&ctx, &plan, &meshes);
+        // The CPU oracle reads the canonical vertices; the image comes from the product's compact tiles.
+        let meshes = vertex_meshes_for(&plan);
+        let (img, _) = render(&ctx, &plan, &meshes_for(&plan));
         let (mut tested, mut close) = (0, 0);
         for (d, m) in plan.nodes.iter().zip(&meshes) {
             if d.level == 0 {

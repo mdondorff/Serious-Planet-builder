@@ -8,7 +8,7 @@ use planet_frame::pool::{atlas_columns, compact_format_pool_with};
 use planet_frame::{
     plan_terrain, plan_terrain_field, scripted_views, scripted_views_field, LodParams, TerrainPlan, TerrainRequest, TerrainView,
 };
-use planet_generators::compact::{tile_data_field, TileData};
+use planet_generators::compact::{tile_data_field, RenderTile};
 use planet_generators::height::{HeightField, Reference};
 use planet_generators::mesh::tile_mesh_field;
 use planet_generators::stress::Steep;
@@ -164,7 +164,7 @@ fn fallback_tiles_and_coarse_levels_draw_in_the_vertex_format_beside_compact_til
             for n in &p.nodes {
                 let expected = if n.tile.level() <= 2 {
                     ResidentFormat::Vertex
-                } else if matches!(tile_data_field(&steep, &TangentWarp, n.tile, cells, R, 9), TileData::Vertex(_)) {
+                } else if matches!(tile_data_field(&steep, &TangentWarp, n.tile, cells, R, 9), RenderTile::Vertex(_)) {
                     ResidentFormat::Fallback
                 } else {
                     ResidentFormat::Compact
@@ -315,17 +315,17 @@ fn a_tile_in_the_wrong_pool_is_refused_not_written() {
     let fine = planet_core::TileId::new(planet_core::Face(1), 6, 1, 1).unwrap();
     let c = planet_generators::compact::compact_tile_field(&field, &TangentWarp, coarse, cells, R);
     assert!(
-        matches!(r.upload_tile_at(&ctx, &TileData::Compact(c), main), Err(planet_render::ExecError::CompactUnsupported { .. })),
+        matches!(r.upload_tile_at(&ctx, &RenderTile::Compact(c), main), Err(planet_render::ExecError::CompactUnsupported { .. })),
         "a compact tile of level 2"
     );
     let c = planet_generators::compact::compact_tile_field(&field, &TangentWarp, fine, cells, R);
     let out = SlotRef { pool: PoolKind::Main, index: 40 * 64 };
-    assert!(matches!(r.upload_tile_at(&ctx, &TileData::Compact(c.clone()), out), Err(planet_render::ExecError::BadSlot { .. })));
+    assert!(matches!(r.upload_tile_at(&ctx, &RenderTile::Compact(c.clone()), out), Err(planet_render::ExecError::BadSlot { .. })));
     let vertex = SlotRef { pool: PoolKind::Vertex, index: 1 };
-    assert!(matches!(r.upload_tile_at(&ctx, &TileData::Compact(c), vertex), Err(planet_render::ExecError::CompactUnsupported { .. })));
+    assert!(matches!(r.upload_tile_at(&ctx, &RenderTile::Compact(c), vertex), Err(planet_render::ExecError::CompactUnsupported { .. })));
     assert_eq!(r.resident_tiles(), 0);
     // A vertex renderer refuses compact tiles.
     let mut v = TerrainRenderer::new(&ctx, SIZE, cells);
     let c = planet_generators::compact::compact_tile_field(&field, &TangentWarp, fine, cells, R);
-    assert!(matches!(v.upload_tile(&ctx, &TileData::Compact(c)), Err(planet_render::ExecError::CompactUnsupported { .. })));
+    assert!(matches!(v.upload_tile(&ctx, &RenderTile::Compact(c)), Err(planet_render::ExecError::CompactUnsupported { .. })));
 }

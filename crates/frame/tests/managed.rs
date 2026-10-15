@@ -12,6 +12,7 @@ use planet_frame::upload::{UploadBudget, DEFAULT_TILE_BYTES_PER_FRAME};
 use planet_frame::{
     plan_terrain_field, plan_terrain_threaded, residency_set_field, Camera, LodParams, SelectionCache, TerrainRequest, TerrainView,
 };
+use planet_generators::compact::RenderTile;
 use planet_generators::height::{HeightField, Reference};
 use planet_generators::mesh::TileMesh;
 use planet_streaming::{FakeClock, ManualSpawner, ResidencyManager, SlotRef, Spawner, StreamConfig, Streamer, ThreadPool, TileSource};
@@ -68,11 +69,11 @@ struct Source {
     lod: LodParams,
 }
 
-impl TileSource<TileMesh> for Source {
-    fn load(&self, tile: TileId) -> Result<TileMesh, String> {
+impl TileSource<RenderTile> for Source {
+    fn load(&self, tile: TileId) -> Result<RenderTile, String> {
         let field = Reference(1);
         let rec = ResidentRecords::new(&field, &TangentWarp, &self.lod).record(tile);
-        Ok(TileMesh { id: tile, cells: CELLS, key: rec.mesh_key, origin: rec.origin, vertices: Vec::new() })
+        Ok(RenderTile::Vertex(TileMesh { id: tile, cells: CELLS, key: rec.mesh_key, origin: rec.origin, vertices: Vec::new() }))
     }
 }
 
@@ -135,22 +136,23 @@ struct CountingSink {
 }
 
 impl TileSink for CountingSink {
-    fn upload_bytes(&self, _mesh: &TileMesh) -> u64 {
+    fn upload_bytes(&self, _tile: &RenderTile) -> u64 {
         self.bytes
     }
 
-    fn upload_at(&mut self, mesh: &TileMesh, slot: SlotRef) -> Result<(), String> {
+    fn upload_at(&mut self, tile: &RenderTile, slot: SlotRef) -> Result<(), String> {
+        let id = tile.id();
         if let Some(other) = self.owner.get(&slot) {
-            if *other != mesh.id {
-                return Err(format!("{slot:?} still holds {other:?} when {:?} is placed in it", mesh.id));
+            if *other != id {
+                return Err(format!("{slot:?} still holds {other:?} when {id:?} is placed in it"));
             }
         }
-        if let Some(old) = self.by_tile.insert(mesh.id, slot) {
+        if let Some(old) = self.by_tile.insert(id, slot) {
             self.owner.remove(&old);
         }
-        self.owner.insert(slot, mesh.id);
+        self.owner.insert(slot, id);
         self.uploads += 1;
-        self.order.push(mesh.id);
+        self.order.push(id);
         Ok(())
     }
 
