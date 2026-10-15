@@ -86,7 +86,8 @@ fn every_standard_view_of_the_default_world_stays_within_its_own_pinned_counts()
     }
     assert!(failures.is_empty(), "plan counts against their pins:\n{}\nmeasured:\n{}", failures.join("\n"), report.join("\n"));
 
-    // spec: LOD-010. The reference finest level 26 keeps its ground-1m pin, for the SPIKE-07 comparisons (`--finest-level 26`); the
+    // spec: LOD-010
+    // The reference finest level 26 keeps its ground-1m pin, for the spike comparisons (`--finest-level 26`); the
     // production cap 22 is the pin of the table above.
     let (name, camera) = scripted_views_field(R, f64::from(size.0) / f64::from(size.1), field.as_ref()).remove(6);
     assert_eq!(name, "ground-1m");
