@@ -13,6 +13,7 @@
 use planet_core::cube::{face_to_direction, FaceMapping};
 use planet_core::{Face, TileId, Vec3};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use planet_world_def::{BodyId, GenContext, MissingNode, ReadRecord};
 
@@ -473,6 +474,11 @@ impl std::error::Error for ReadError {}
 pub trait LatticeSource: Sync {
     fn res(&self) -> u32;
     fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError>;
+    /// Cells per block edge of the source's storage (the unit it fetches and decodes at once), or 0 when it has no block
+    /// structure (an in-memory grid). Only a hint for the order of batch reads (GEN-020); it never changes a value.
+    fn block_cells(&self) -> u32 {
+        0
+    }
 }
 
 /// A [`GlobalGrid`] as a lattice source.
@@ -605,6 +611,126 @@ pub fn read_direction(src: &dyn LatticeSource, map: &dyn FaceMapping, dir: Vec3)
     };
     let ((i, wu), (j, wv)) = (axis(pos(s)), axis(pos(t)));
     blend_cell(src, face, i, j, wu, wv)
+}
+
+/// Interleave the bits of two block indices (Z order): blocks that are neighbours on the face are close in this order, so a
+/// small cache holds the neighbours a border sample reads while a sweep moves on.
+fn morton(x: u32, y: u32) -> u64 {
+    let spread = |v: u32| {
+        let mut v = u64::from(v);
+        v = (v | v << 16) & 0x0000_ffff_0000_ffff;
+        v = (v | v << 8) & 0x00ff_00ff_00ff_00ff;
+        v = (v | v << 4) & 0x0f0f_0f0f_0f0f_0f0f;
+        v = (v | v << 2) & 0x3333_3333_3333_3333;
+        (v | v << 1) & 0x5555_5555_5555_5555
+    };
+    spread(x) | spread(y) << 1
+}
+
+fn cell_key(face: u8, i: u32, j: u32) -> u64 {
+    u64::from(face) << 40 | u64::from(i) << 20 | u64::from(j)
+}
+
+/// Records the cells a footprint pass asks for and answers a placeholder (a footprint depends on the direction, never on a value).
+struct Gather {
+    res: u32,
+    seen: Mutex<Vec<u64>>,
+}
+
+impl LatticeSource for Gather {
+    fn res(&self) -> u32 {
+        self.res
+    }
+    fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+        self.seen.lock().expect("gather mutex").push(cell_key(face.0, i, j));
+        Ok(GlobalSample { continent: 0.0, elevation_m: 0.0, temperature_c: 0.0, precipitation_mm: 0.0 })
+    }
+}
+
+/// The samples (or the errors) of the cells a batch needs, fetched once from the real source in block order.
+struct CellTable {
+    res: u32,
+    cells: Vec<(u64, Result<GlobalSample, ReadError>)>,
+}
+
+impl LatticeSource for CellTable {
+    fn res(&self) -> u32 {
+        self.res
+    }
+    fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+        let key = cell_key(face.0, i, j);
+        match self.cells.binary_search_by_key(&key, |c| c.0) {
+            Ok(at) => self.cells[at].1.clone(),
+            Err(_) => Err(ReadError::Source(format!("cell ({i}, {j}) of face {} was not in the batch's footprint", face.0))),
+        }
+    }
+}
+
+/// Evaluate `eval` on every direction of `dirs` and return the results in the caller's order (GEN-020). `eval(src, d)` is a
+/// pure function of `d` that reads the lattice only through `src`; `footprint(src, d)` makes the same lattice reads as
+/// `eval(src, d)` (it may skip the arithmetic that follows them).
+///
+/// When `src` has blocks (`block_cells() > 0`) the batch runs in two passes: the footprint of every direction is collected,
+/// the distinct cells are read from `src` grouped by block (each block is touched by one run of reads, so it is decoded once
+/// however small the source's cache), and `eval` then reads those cells from memory, in the caller's order. A cell is the
+/// source's own sample, so every result is bit for bit what `eval(src, d)` returns. Without blocks (an in-memory grid) it is
+/// the plain loop. `stop` is polled before each block, every 64 cells and every 64 samples; after it answers true nothing more
+/// is read and the unfinished results are 0.0.
+pub fn eval_gathered(
+    src: &dyn LatticeSource,
+    dirs: &[Vec3],
+    stop: &dyn Fn() -> bool,
+    footprint: &dyn Fn(&dyn LatticeSource, Vec3),
+    eval: &dyn Fn(&dyn LatticeSource, Vec3) -> f64,
+) -> Vec<f64> {
+    let mut out = vec![0.0; dirs.len()];
+    let (res, bc) = (src.res(), src.block_cells());
+    if bc == 0 || res == 0 || bc > res || !res.is_power_of_two() || res >= 1 << 20 || dirs.len() < 64 {
+        // (`cell_key` packs a cell index into 20 bits; a small batch is not worth a gather.)
+        for (k, &d) in dirs.iter().enumerate() {
+            if k % 64 == 0 && stop() {
+                break;
+            }
+            out[k] = eval(src, d);
+        }
+        return out;
+    }
+    let gather = Gather { res, seen: Mutex::new(Vec::new()) };
+    for (k, &d) in dirs.iter().enumerate() {
+        if k % 64 == 0 && stop() {
+            return out;
+        }
+        footprint(&gather, d);
+    }
+    let mut keys = gather.seen.into_inner().expect("gather mutex");
+    keys.sort_unstable();
+    keys.dedup();
+    // The block that holds a cell: the last block of a row holds the far edge as its own last sample.
+    let last = res / bc - 1;
+    let mut by_block: Vec<(u8, u64, u64)> = keys
+        .iter()
+        .map(|&k| {
+            let (face, i, j) = ((k >> 40) as u8, ((k >> 20) & 0xf_ffff) as u32, (k & 0xf_ffff) as u32);
+            (face, morton((i / bc).min(last), (j / bc).min(last)), k)
+        })
+        .collect();
+    by_block.sort_unstable();
+    let mut cells = Vec::with_capacity(by_block.len());
+    for (n, &(face, block, k)) in by_block.iter().enumerate() {
+        if (n == 0 || (by_block[n - 1].0, by_block[n - 1].1) != (face, block) || n % 64 == 0) && stop() {
+            return out;
+        }
+        cells.push((k, src.at(Face(face), ((k >> 20) & 0xf_ffff) as u32, (k & 0xf_ffff) as u32)));
+    }
+    cells.sort_unstable_by_key(|c| c.0);
+    let table = CellTable { res, cells };
+    for (k, &d) in dirs.iter().enumerate() {
+        if k % 64 == 0 && stop() {
+            break;
+        }
+        out[k] = eval(&table, d);
+    }
+    out
 }
 
 /// A 64-bit hash of every bit of every channel of a grid, in face and row-major order, with the resolution and

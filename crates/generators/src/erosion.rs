@@ -125,7 +125,11 @@ impl ErosionField<'_> {
 
     /// The ground elevation of the bake at a direction, without creases.
     pub fn base_elevation(&self, dir: Vec3) -> f64 {
-        match read_direction(self.src, &TangentWarp, dir) {
+        self.base_via(self.src, dir)
+    }
+
+    fn base_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
+        match read_direction(src, &TangentWarp, dir) {
             Ok(s) => f64::from(s.elevation_m),
             Err(e) => {
                 self.fail(&e);
@@ -143,22 +147,42 @@ impl ErosionField<'_> {
     /// coordinate axes `a` of the central difference of the elevation along the tangent part `t` of `a` times `t`
     /// (`sum t t^T` is the tangent projector), so it does not depend on a chosen tangent basis and is smooth in the direction.
     pub fn gradient(&self, d: Vec3) -> f64 {
+        self.gradient_via(self.src, d)
+    }
+
+    fn gradient_via(&self, src: &dyn LatticeSource, d: Vec3) -> f64 {
         let delta = self.delta();
         let mut g = Vec3::new(0.0, 0.0, 0.0);
         for a in [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)] {
             let t = a - d * a.dot(d);
-            let rise = self.base_elevation((d + t * delta).normalized()) - self.base_elevation((d - t * delta).normalized());
+            let rise = self.base_via(src, (d + t * delta).normalized()) - self.base_via(src, (d - t * delta).normalized());
             g = g + t * (rise / (2.0 * delta));
         }
         g.length()
     }
 }
 
+impl ErosionField<'_> {
+    /// [`HeightField::height`] reading the lattice through `src`.
+    fn height_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
+        let e = self.base_via(src, dir);
+        let slope = self.gradient_via(src, dir) / self.radius_m;
+        e + amplitude_m(e, carve(slope)) * crease_sum(self.seed, dir)
+    }
+}
+
 impl HeightField for ErosionField<'_> {
     fn height(&self, dir: Vec3) -> f64 {
-        let e = self.base_elevation(dir);
-        let slope = self.gradient(dir) / self.radius_m;
-        e + amplitude_m(e, carve(slope)) * crease_sum(self.seed, dir)
+        self.height_via(self.src, dir)
+    }
+
+    /// The lattice cells of the whole batch are read once, grouped by bake block (GEN-020): the same values, in the caller's order.
+    fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
+        let footprint = |g: &dyn LatticeSource, d: Vec3| {
+            self.base_via(g, d);
+            self.gradient_via(g, d);
+        };
+        crate::global::eval_gathered(self.src, dirs, stop, &footprint, &|s, d| self.height_via(s, d))
     }
 
     fn seed(&self) -> u64 {

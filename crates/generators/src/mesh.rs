@@ -202,24 +202,32 @@ pub fn tile_mesh_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
     // World position and height of lattice point (i, j), 0 <= i, j <= cells.
     let mut world = vec![Vec3::ZERO; width * width];
     let mut heights = vec![0.0f64; width * width];
-    let mut dirs = vec![Vec3::ZERO; width * width];
+    // Every direction the tile needs, evaluated by one batch call (GEN-020): the lattice points, the four normal-stencil
+    // points of each, and the tile centre. Each height is a pure function of its direction, so the order the field uses
+    // inside the call cannot change a bit.
+    let eps = core::f64::consts::FRAC_PI_2 / f64::from(1u32 << id.level()) / f64::from(cells);
+    let count = width * width;
+    let mut dirs = Vec::with_capacity(count * 5 + 1);
     for j in 0..=n {
         for i in 0..=n {
-            let dir = id.sample_direction(map, cells, i as u32, j as u32);
-            let h = field.height(dir);
-            let idx = j as usize * width + i as usize;
-            world[idx] = dir * (radius_m + h);
-            heights[idx] = h;
-            dirs[idx] = dir;
+            dirs.push(id.sample_direction(map, cells, i as u32, j as u32));
         }
     }
+    for k in 0..count {
+        let st = normal_stencil(dirs[k], eps);
+        dirs.extend(st);
+    }
+    let centre_dir = id.center_direction(map);
+    dirs.push(centre_dir);
+    let all = field.heights(&dirs);
+    for idx in 0..count {
+        world[idx] = dirs[idx] * (radius_m + all[idx]);
+        heights[idx] = all[idx];
+    }
     let at = |i: i64, j: i64| world[j as usize * width + i as usize];
-    // Angular step of the normal stencil: one cell of this level (identical for tiles of the same level).
-    let eps = core::f64::consts::FRAC_PI_2 / f64::from(1u32 << id.level()) / f64::from(cells);
     // The origin sits at the tile centre including its terrain height, so tile-local offsets and the camera-relative
     // origin stay small (a few tile sizes), never terrain-height sized.
-    let centre_dir = id.center_direction(map);
-    let origin = PlanetFixed(centre_dir * (radius_m + field.height(centre_dir)));
+    let origin = PlanetFixed(centre_dir * (radius_m + all[count * 5]));
     let local = |p: Vec3| {
         let d = p - origin.0;
         [d.x as f32, d.y as f32, d.z as f32]
@@ -228,7 +236,10 @@ pub fn tile_mesh_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
     let mut vertices = Vec::with_capacity(vertex_count(cells));
     for j in 0..=n {
         for i in 0..=n {
-            let normal = surface_normal_field(field, dirs[j as usize * width + i as usize], eps, radius_m);
+            let k = j as usize * width + i as usize;
+            let (s0, h0) = (count + 4 * k, count + 4 * k);
+            let st = [dirs[s0], dirs[s0 + 1], dirs[s0 + 2], dirs[s0 + 3]];
+            let normal = normal_from_stencil(&st, &[all[h0], all[h0 + 1], all[h0 + 2], all[h0 + 3]], radius_m);
             // Geomorph target on the parent grid (diagonal (i-1,j-1)-(i+1,j+1) matches the triangulation).
             let coarse = match (i % 2, j % 2) {
                 (0, 0) => at(i, j),
@@ -317,6 +328,13 @@ pub fn surface_normal(seed: u64, dir: Vec3, eps: f64, radius_m: f64) -> Vec3 {
 
 /// [`surface_normal`] over any height field.
 pub fn surface_normal_field(field: &dyn HeightField, dir: Vec3, eps: f64, radius_m: f64) -> Vec3 {
+    let st = normal_stencil(dir, eps);
+    let h = field.heights(&st);
+    normal_from_stencil(&st, &[h[0], h[1], h[2], h[3]], radius_m)
+}
+
+/// The tangent frame of [`surface_normal`] at `dir`.
+fn tangent_frame(dir: Vec3) -> (Vec3, Vec3) {
     // Tangent frame from `dir` alone: the world axis least aligned with it seeds t1; t2 = dir x t1, so t1 x t2 = dir.
     let (ax, ay, az) = (dir.x.abs(), dir.y.abs(), dir.z.abs());
     let axis = if ax <= ay && ax <= az {
@@ -327,10 +345,20 @@ pub fn surface_normal_field(field: &dyn HeightField, dir: Vec3, eps: f64, radius
         Vec3::new(0.0, 0.0, 1.0)
     };
     let t1 = (axis - dir * axis.dot(dir)).normalized();
-    let t2 = dir.cross(t1);
-    let p = |t: Vec3, sign: f64| {
-        let d = (dir + t * (sign * eps)).normalized();
-        d * (radius_m + field.height(d))
-    };
-    (p(t1, 1.0) - p(t1, -1.0)).cross(p(t2, 1.0) - p(t2, -1.0)).normalized()
+    (t1, dir.cross(t1))
+}
+
+/// The four directions whose heights give the normal at `dir`: `+t1`, `-t1`, `+t2`, `-t2` at the angular step `eps`. Batch
+/// builders evaluate them together with the other samples of a tile (GEN-020) and combine them with [`normal_from_stencil`].
+pub fn normal_stencil(dir: Vec3, eps: f64) -> [Vec3; 4] {
+    let (t1, t2) = tangent_frame(dir);
+    let p = |t: Vec3, sign: f64| (dir + t * (sign * eps)).normalized();
+    [p(t1, 1.0), p(t1, -1.0), p(t2, 1.0), p(t2, -1.0)]
+}
+
+/// The outward normal from the heights `h` at the stencil directions `st` ([`normal_stencil`]): the same arithmetic as
+/// [`surface_normal_field`].
+pub fn normal_from_stencil(st: &[Vec3; 4], h: &[f64; 4], radius_m: f64) -> Vec3 {
+    let q = |k: usize| st[k] * (radius_m + h[k]);
+    (q(0) - q(1)).cross(q(2) - q(3)).normalized()
 }

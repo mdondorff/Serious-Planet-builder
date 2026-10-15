@@ -818,6 +818,10 @@ impl planet_generators::height::HeightField for CancelGuarded<'_> {
             self.inner.height(dir)
         }
     }
+    /// The inner field's batch (it may order the samples by block, GEN-020), stopped by the token or the caller's flag.
+    fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
+        self.inner.heights_until(dirs, &|| stop() || self.cancel.is_cancelled())
+    }
     fn seed(&self) -> u64 {
         self.inner.seed()
     }

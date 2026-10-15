@@ -1,0 +1,6 @@
+- [x] 1.1 failing tier A test: decodes per tile against distinct blocks with a small cache (generators/tests/block_order.rs)
+- [x] 1.2 `heights`/`heights_until`, `LatticeSource::block_cells`, block-ordered override for the erosion and terrain fields, delegation in `Bound`/`CancelGuarded`
+- [x] 1.3 tile builders batch their samples; `surface_normal_field` split
+- [x] 1.4 tests: bit identity raster vs block order (several tiles, erosion field, in-memory and store), 1 and 20 threads, cancellation polled
+- [x] 1.5 measurement example, numbers in the PR and docs/learnings.md
+- [x] 1.6 spec delta (GEN-020), reviewers (numerics, spec-guardian, verifier), archive, log line, PR, CI, merge

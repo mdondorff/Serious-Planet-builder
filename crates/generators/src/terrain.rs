@@ -101,7 +101,11 @@ impl TerrainField<'_> {
 
     /// The ground elevation of the bake at a direction, without detail.
     pub fn base_elevation(&self, dir: Vec3) -> f64 {
-        match read_direction(self.src, &TangentWarp, dir) {
+        self.base_via(self.src, dir)
+    }
+
+    fn base_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
+        match read_direction(src, &TangentWarp, dir) {
             Ok(s) => f64::from(s.elevation_m),
             Err(e) => {
                 self.fail(&e);
@@ -111,10 +115,25 @@ impl TerrainField<'_> {
     }
 }
 
+impl TerrainField<'_> {
+    /// [`HeightField::height`] reading the lattice through `src`.
+    fn height_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
+        let base = self.base_via(src, dir);
+        base + detail_amplitude_m(base) * detail_noise(self.seed, dir)
+    }
+}
+
 impl HeightField for TerrainField<'_> {
     fn height(&self, dir: Vec3) -> f64 {
-        let base = self.base_elevation(dir);
-        base + detail_amplitude_m(base) * detail_noise(self.seed, dir)
+        self.height_via(self.src, dir)
+    }
+
+    /// The lattice cells of the whole batch are read once, grouped by bake block (GEN-020): the same values, in the caller's order.
+    fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
+        let footprint = |g: &dyn LatticeSource, d: Vec3| {
+            self.base_via(g, d);
+        };
+        crate::global::eval_gathered(self.src, dirs, stop, &footprint, &|s, d| self.height_via(s, d))
     }
 
     fn seed(&self) -> u64 {

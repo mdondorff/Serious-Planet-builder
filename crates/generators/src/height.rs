@@ -205,6 +205,17 @@ pub(crate) fn layer_noise_bounds(seed: u64, layer: u64, octave: u32, centre: Vec
 pub trait HeightField: Sync {
     /// Height in metres at a unit direction.
     fn height(&self, dir: Vec3) -> f64;
+    /// The heights of `dirs`, in the caller's order: element `k` is bit for bit `self.height(dirs[k])` (GEN-020). A field is free to
+    /// evaluate the directions in any other order internally (one that reads a block store groups them by block) because every
+    /// height is a pure function of its direction. `stop` is polled during the batch (at least every 64 samples); once it
+    /// answers true (the flag must be monotonic: once true, always true) no further sample is evaluated and the remaining elements are 0.0.
+    fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
+        dirs.iter().map(|&d| if stop() { 0.0 } else { self.height(d) }).collect()
+    }
+    /// [`HeightField::heights_until`] without a stop flag.
+    fn heights(&self, dirs: &[Vec3]) -> Vec<f64> {
+        self.heights_until(dirs, &|| false)
+    }
     /// The seed (part of every key).
     fn seed(&self) -> u64;
     /// Names the implementation in the height key ([`cache_key_field`]).
@@ -433,6 +444,9 @@ impl<F: HeightField> Bound<F> {
 impl<F: HeightField> HeightField for Bound<F> {
     fn height(&self, dir: Vec3) -> f64 {
         self.field.height(dir)
+    }
+    fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
+        self.field.heights_until(dirs, stop)
     }
     fn seed(&self) -> u64 {
         self.field.seed()

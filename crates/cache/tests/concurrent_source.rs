@@ -317,3 +317,30 @@ fn twenty_threads_take_the_shared_lock_only_on_a_change_of_block_and_decode_each
         st_many.shared_lookups
     );
 }
+
+// spec: GEN-020
+#[test]
+fn a_tile_decodes_each_block_it_touches_once_even_with_a_cache_of_one_block() {
+    let (d, w) = stored("block-order");
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    let def = WorldDefinition::single_planet(R, 7);
+    let key = w.stage_key(RES).0;
+    let decodes = |budget_blocks: u64, id: TileId, cells: u32| {
+        let src = StoreSource::with_budget(&store, &w, RES, budget_blocks * BLOCK_BYTES).unwrap();
+        assert_eq!(src.block_cells(), 4, "the store reports its block size");
+        let field = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, key).unwrap();
+        let mesh = tile_mesh_field(&field, &TangentWarp, id, cells, R);
+        assert!(field.error().is_none(), "{:?}", field.error());
+        (src.stats().decodes, mesh.content_hash())
+    };
+    for (id, cells) in [
+        (TileId::new(Face(1), 0, 0, 0).unwrap(), 16),
+        (TileId::new(Face(4), 2, 1, 3).unwrap(), 8),
+        (TileId::new(Face(0), 3, 0, 0).unwrap(), 8),
+    ] {
+        let (distinct, hash) = decodes(BLOCKS, id, cells);
+        let (one, hash_one) = decodes(1, id, cells);
+        assert_eq!(hash, hash_one, "{id:?}: the budget never changes a bit");
+        assert!(one <= distinct, "{id:?}: {one} decodes with a cache of one block for {distinct} distinct blocks");
+    }
+}
