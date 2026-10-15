@@ -10,10 +10,12 @@ pub mod managed;
 pub mod pipeline;
 pub mod plan;
 pub mod pool;
+pub mod prefetch;
 pub mod repro;
 pub mod residency;
 pub mod terrain;
 pub mod terrain_text;
+pub mod upload;
 
 pub use camera::{Camera, Frustum};
 pub use controller::{CameraController, CameraInput, CameraMode, ControllerParams};

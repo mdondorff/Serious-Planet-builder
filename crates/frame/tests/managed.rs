@@ -7,6 +7,8 @@ use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::{PlanetFixed, TileId, Vec3};
 use planet_frame::managed::{FrameCounts, ManagedFrame, ManagedLoop, TileSink};
 use planet_frame::pipeline::{DrawKind, PlanField, PlanPipeline, PlanWorker, ResidentRecords};
+use planet_frame::prefetch::PrefetchConfig;
+use planet_frame::upload::{UploadBudget, DEFAULT_TILE_BYTES_PER_FRAME};
 use planet_frame::{
     plan_terrain_field, plan_terrain_threaded, residency_set_field, Camera, LodParams, SelectionCache, TerrainRequest, TerrainView,
 };
@@ -21,6 +23,7 @@ use std::sync::Arc;
 const R: f64 = 6_371_000.0;
 const SIZE: (u32, u32) = (160, 90);
 const CELLS: u32 = 16;
+const FRAME_MS: u64 = 33;
 
 fn lod() -> LodParams {
     LodParams {
@@ -74,6 +77,51 @@ impl TileSource<RenderTile> for Source {
     }
 }
 
+/// Tile jobs that wait until the machine finishes them, `threads` at a time (all done when `run` returns): the completion
+/// order differs with the thread count, the results must not.
+#[derive(Default)]
+struct BatchSpawner {
+    queue: std::sync::Mutex<std::collections::VecDeque<planet_streaming::Job>>,
+    threads: AtomicUsize,
+}
+
+impl BatchSpawner {
+    fn run(&self, n: usize) -> usize {
+        let jobs: Vec<planet_streaming::Job> = {
+            let mut q = self.queue.lock().unwrap();
+            let k = n.min(q.len());
+            q.drain(..k).collect()
+        };
+        let count = jobs.len();
+        let threads = self.threads.load(Ordering::SeqCst).max(1);
+        if threads == 1 {
+            jobs.into_iter().for_each(|j| j());
+        } else {
+            let jobs = std::sync::Mutex::new(jobs.into_iter().map(Some).collect::<Vec<_>>());
+            let next = AtomicUsize::new(0);
+            std::thread::scope(|s| {
+                for _ in 0..threads {
+                    s.spawn(|| loop {
+                        let i = next.fetch_add(1, Ordering::SeqCst);
+                        let job = jobs.lock().unwrap().get_mut(i).and_then(Option::take);
+                        match job {
+                            Some(j) => j(),
+                            None => break,
+                        }
+                    });
+                }
+            });
+        }
+        count
+    }
+}
+
+impl Spawner for BatchSpawner {
+    fn spawn(&self, job: planet_streaming::Job) {
+        self.queue.lock().unwrap().push_back(job);
+    }
+}
+
 /// The renderer's side as counts: which tile sits in which slot; a slot never holds two tiles.
 #[derive(Default)]
 struct CountingSink {
@@ -81,9 +129,17 @@ struct CountingSink {
     owner: HashMap<SlotRef, TileId>,
     uploads: u64,
     forgets: u64,
+    /// Bytes one tile occupies in this sink's format (0: the fake meshes have no vertices, nothing is ever deferred).
+    bytes: u64,
+    /// Every tile written, in order.
+    order: Vec<TileId>,
 }
 
 impl TileSink for CountingSink {
+    fn upload_bytes(&self, _tile: &RenderTile) -> u64 {
+        self.bytes
+    }
+
     fn upload_at(&mut self, tile: &RenderTile, slot: SlotRef) -> Result<(), String> {
         let id = tile.id();
         if let Some(other) = self.owner.get(&slot) {
@@ -96,6 +152,7 @@ impl TileSink for CountingSink {
         }
         self.owner.insert(slot, id);
         self.uploads += 1;
+        self.order.push(id);
         Ok(())
     }
 
@@ -110,15 +167,37 @@ impl TileSink for CountingSink {
 struct Rig {
     lp: ManagedLoop,
     plan_spawner: Arc<ManualSpawner>,
-    tile_spawner: Arc<ManualSpawner>,
+    tile_spawner: Arc<BatchSpawner>,
     sink: CountingSink,
     capacity: usize,
+    clock: Arc<FakeClock>,
+    /// Tile jobs the machine finishes between two frames.
+    tile_jobs_per_frame: usize,
 }
 
 impl Rig {
     fn new(capacity: usize) -> Rig {
+        Rig::build(capacity, false)
+    }
+
+    /// With the prefetch source on (STRM-018), the camera path read on a fake clock that advances `FRAME_MS` a frame.
+    fn with_prefetch(capacity: usize) -> Rig {
+        Rig::build(capacity, true)
+    }
+
+    /// A rig whose tiles weigh `tile_bytes` in the sink and whose loop has the upload budget `budget` (STRM-006).
+    fn budgeted(capacity: usize, prefetch: bool, tile_bytes: u64, budget: UploadBudget) -> Rig {
+        Rig::build_with(capacity, prefetch, tile_bytes, budget)
+    }
+
+    fn build(capacity: usize, prefetch: bool) -> Rig {
+        Rig::build_with(capacity, prefetch, 0, UploadBudget::default())
+    }
+
+    fn build_with(capacity: usize, prefetch: bool, tile_bytes: u64, budget: UploadBudget) -> Rig {
+        let clock = Arc::new(FakeClock::default());
         let plan_spawner = Arc::new(ManualSpawner::default());
-        let tile_spawner = Arc::new(ManualSpawner::default());
+        let tile_spawner = Arc::new(BatchSpawner::default());
         let pipe = PlanPipeline::new(PlanWorker::new(plan_spawner.clone(), Arc::new(Reference(1)), 2));
         let config = StreamConfig {
             max_in_flight: 64,
@@ -129,29 +208,41 @@ impl Rig {
             record_changes: true,
             ..Default::default()
         };
-        let mut streamer = Streamer::new(
-            Arc::new(Source { lod: lod() }),
-            tile_spawner.clone() as Arc<dyn Spawner>,
-            Arc::new(FakeClock::default()),
-            config,
-        );
+        let mut streamer = Streamer::new(Arc::new(Source { lod: lod() }), tile_spawner.clone() as Arc<dyn Spawner>, clock.clone(), config);
         streamer.load_roots_blocking().unwrap();
+        let mut lp = ManagedLoop::new(pipe, ResidencyManager::new(streamer)).with_upload_budget(budget);
+        if prefetch {
+            lp = lp.with_prefetch(PrefetchConfig::default(), R, clock.clone());
+        }
         Rig {
-            lp: ManagedLoop::new(pipe, ResidencyManager::new(streamer)),
+            lp,
             plan_spawner,
             tile_spawner,
-            sink: CountingSink::default(),
+            sink: CountingSink { bytes: tile_bytes, ..Default::default() },
             capacity,
+            clock,
+            tile_jobs_per_frame: 10_000,
         }
     }
 
     /// One iteration, then the workers finish what they have (a plan, the tiles dispatched): the next frame sees the results.
     fn step(&mut self, req: &TerrainRequest) -> ManagedFrame {
+        let f = self.begin(req);
+        self.finish();
+        f
+    }
+
+    /// The frame itself; the machine's work between frames is [`Rig::finish`].
+    fn begin(&mut self, req: &TerrainRequest) -> ManagedFrame {
+        self.clock.advance(FRAME_MS);
         let f = self.lp.begin_frame(req, &mut self.sink).unwrap();
         self.check_mirror();
-        self.plan_spawner.run(4);
-        self.tile_spawner.run(10_000);
         f
+    }
+
+    fn finish(&mut self) {
+        self.plan_spawner.run(4);
+        self.tile_spawner.run(self.tile_jobs_per_frame);
     }
 
     /// The sink holds exactly the streamer's resident tiles, each in the slot the manager chose, no slot twice, and the
@@ -159,7 +250,12 @@ impl Rig {
     fn check_mirror(&self) {
         let streamer = self.lp.manager().streamer();
         let st = streamer.stats();
-        assert_eq!(self.sink.by_tile.len(), st.resident, "the sink holds the streamer's resident tiles");
+        // The sink holds the streamer's resident tiles except those the upload budget defers (STRM-006): they wait, never dropped.
+        assert_eq!(
+            self.sink.by_tile.len() + self.lp.pending().len(),
+            st.resident,
+            "the sink holds the resident tiles but the deferred ones"
+        );
         assert_eq!(self.sink.owner.len(), self.sink.by_tile.len(), "no slot holds two tiles");
         for (tile, slot) in &self.sink.by_tile {
             assert!(streamer.is_resident(*tile), "{tile:?} left the streamer but not the sink");
@@ -489,4 +585,446 @@ fn the_worker_runs_r_after_the_plan_on_the_plans_cache_and_a_rotation_evaluates_
     let o = w.take_residency().unwrap().unwrap();
     assert!(o.reused);
     assert_eq!(read().1, b, "the turned plan and its reused R found every volume in the cache");
+}
+
+// ---- prefetch along travel (STRM-018) ----
+
+/// A camera on a straight ground track: `metres` along the east-ish tangent from the start, `height` above the sphere.
+fn track(metres: f64, height: f64) -> PlanetFixed {
+    let start = Vec3::new(0.3, 0.5, 0.8).normalized();
+    let east = start.cross(Vec3::new(0.0, 0.0, 1.0)).normalized();
+    position((start + east * (metres / R)).normalized(), height)
+}
+
+/// The dive script of ADR 0032 on fakes, shortened: a geometric descent over one spot from 20 km to 200 m, then a ground
+/// segment at 600 m/s along a straight track (33 ms frames: 20 m a frame). The camera looks the same way throughout.
+fn dive_position(k: usize) -> PlanetFixed {
+    const DESCENT: usize = 45;
+    if k < DESCENT {
+        track(0.0, 20_000.0 * libm::pow(200.0 / 20_000.0, k as f64 / DESCENT as f64))
+    } else {
+        track((k - DESCENT) as f64 * 20.0, 200.0)
+    }
+}
+
+#[derive(Debug, Default)]
+struct Measure {
+    /// Distinct draw-set tiles that were not resident when they first appeared in the wants ("missing visible").
+    missing_visible: usize,
+    /// ... and those that were already resident then.
+    resident_on_first_sight: usize,
+    prefetch_frames: usize,
+    cancelled_prefetch: u64,
+    blank: usize,
+}
+
+/// Run `frames` of `script` from where the rig stands; the machine finishes `rig.tile_jobs_per_frame` tile jobs a frame.
+fn measure(rig: &mut Rig, frames: usize, script: &dyn Fn(usize) -> PlanetFixed) -> Measure {
+    let mut seen: BTreeSet<TileId> = BTreeSet::new();
+    let mut m = Measure::default();
+    for k in 0..frames {
+        for (t, _) in rig.lp.wants().draw.clone() {
+            if seen.insert(t) {
+                if rig.lp.resident().contains_key(&t) {
+                    m.resident_on_first_sight += 1;
+                } else {
+                    m.missing_visible += 1;
+                }
+            }
+        }
+        let f = rig.begin(&request(script(k), 0.3, -0.4));
+        m.prefetch_frames += usize::from(f.counts.prefetch > 0);
+        m.cancelled_prefetch += f.counts.cancelled_prefetch;
+        m.blank += f.pipeline.draw.blank;
+        rig.finish();
+    }
+    m
+}
+
+// spec: STRM-018, STRM-005
+#[test]
+fn a_camera_that_only_rotates_prefetches_nothing_and_requests_nothing() {
+    let mut rig = Rig::with_prefetch(1_000_000);
+    rig.settle(&request(here(), 0.0, -0.4));
+    // Still for longer than the estimator's window.
+    for _ in 0..20 {
+        rig.step(&request(here(), 0.0, -0.4));
+    }
+    for k in 0..36 {
+        let req = request(here(), f64::from(k) * 10f64.to_radians(), [-1.0, -0.4, 0.2][k as usize % 3]);
+        for i in 0..3 {
+            let f = rig.step(&req);
+            let c = f.counts;
+            assert_eq!(
+                (c.prefetch, c.cancelled_prefetch, c.dispatched, c.cancelled, c.queued),
+                (0, 0, 0, 0, 0),
+                "yaw {k} frame {i}: {c:?}"
+            );
+        }
+        assert!(rig.lp.wants().prefetch.is_empty());
+        assert_eq!(rig.lp.travel().unwrap().velocity().map(|v| v.length()), Some(0.0), "a rotation is no velocity");
+        assert!(rig.lp.travel().unwrap().predict().is_none());
+    }
+}
+
+// spec: STRM-018, STRM-005
+#[test]
+fn straight_travel_prefetches_ahead_and_fewer_draw_tiles_have_to_be_requested_as_missing() {
+    let mut on = Rig::with_prefetch(1_000_000);
+    let mut off = Rig::new(1_000_000);
+    let ground = |k: usize| track(k as f64 * 20.0, 200.0);
+    for rig in [&mut on, &mut off] {
+        rig.settle(&request(ground(0), 0.3, -0.4));
+        rig.tile_jobs_per_frame = 24;
+    }
+    let (a, b) = (measure(&mut on, 80, &ground), measure(&mut off, 80, &ground));
+    eprintln!("straight travel, 80 frames, 24 tile jobs a frame\n  prefetch on : {a:?}\n  prefetch off: {b:?}");
+    assert_eq!((a.blank, b.blank), (0, 0));
+    assert_eq!(b.prefetch_frames, 0, "no prefetch source: no prefetch wants");
+    assert!(a.prefetch_frames > 20, "travel prefetches on most frames: {a:?}");
+    assert!(b.missing_visible > 10, "the script must make tiles enter the draw set: {b:?}");
+    assert!(a.missing_visible * 2 <= b.missing_visible, "prefetch must at least halve the draw tiles requested as missing: {a:?} vs {b:?}");
+    assert!(a.resident_on_first_sight > b.resident_on_first_sight, "tiles are resident before they are drawn: {a:?} vs {b:?}");
+}
+
+// spec: STRM-018, STRM-017
+#[test]
+fn on_the_dive_script_prefetch_never_makes_the_lag_worse_and_no_frame_is_blank() {
+    let (mut on, mut off) = (Rig::with_prefetch(1_000_000), Rig::new(1_000_000));
+    for rig in [&mut on, &mut off] {
+        rig.settle(&request(dive_position(0), 0.3, -0.4));
+        rig.tile_jobs_per_frame = 24;
+    }
+    let (a, b) = (measure(&mut on, 105, &dive_position), measure(&mut off, 105, &dive_position));
+    eprintln!("dive script (45 descent + 60 ground frames), 24 tile jobs a frame\n  prefetch on : {a:?}\n  prefetch off: {b:?}");
+    assert_eq!((a.blank, b.blank), (0, 0));
+    assert!(a.prefetch_frames > 10, "{a:?}");
+    assert!(
+        a.missing_visible * 2 <= b.missing_visible,
+        "prefetch must at least halve the missing visible tiles on the dive script: {a:?} vs {b:?}"
+    );
+}
+
+// spec: STRM-018, STRM-005, STRM-006
+#[test]
+fn prefetch_takes_free_slots_only_and_a_full_share_makes_no_prefetch_request() {
+    let field = Reference(1);
+    let widest = closure(plan_terrain_field(&request(track(0.0, 200.0), 0.3, -0.4), &field).unwrap().nodes.iter().map(|n| n.tile)).len();
+    let capacity = widest * 2 + 10;
+    let mut rig = Rig::with_prefetch(capacity);
+    rig.tile_jobs_per_frame = 24;
+    let (mut full_frames, mut prefetch_frames) = (0, 0);
+    for k in 0..90 {
+        let f = rig.begin(&request(track(k as f64 * 20.0, 200.0), 0.3, -0.4));
+        let c = f.counts;
+        assert!(c.slots_in_use <= capacity && c.resident <= capacity, "over the share: {c:?}");
+        assert!(!c.budget_failure && f.pipeline.draw.blank == 0, "{c:?}");
+        let free = rig.lp.manager().streamer().stats().main_free;
+        let missing = rig.lp.wants().prefetch.iter().filter(|(t, _)| !rig.lp.resident().contains_key(t)).count();
+        assert!(missing <= free, "frame {k}: {missing} prefetch tiles wanted but only {free} slots are free");
+        full_frames += usize::from(free == 0);
+        prefetch_frames += usize::from(missing > 0);
+        if free == 0 {
+            assert_eq!(missing, 0, "frame {k}: a full share asks for no prefetch");
+        }
+        rig.finish();
+    }
+    assert!(prefetch_frames > 0, "the share must have room at times, or the test proves nothing");
+    assert!(full_frames > 0, "the share must be full at times, or the test proves nothing");
+}
+
+// spec: STRM-018, STRM-005
+#[test]
+fn a_change_of_direction_cancels_the_prefetch_requests_that_left_the_set() {
+    let mut rig = Rig::with_prefetch(1_000_000);
+    rig.settle(&request(track(0.0, 200.0), 0.3, -0.4));
+    // A slow machine keeps prefetch requests queued: 2 tile jobs a frame.
+    rig.tile_jobs_per_frame = 2;
+    let (mut queued_prefetch, mut cancelled_out, mut cancelled_back) = (0usize, 0u64, 0u64);
+    for k in 0..40 {
+        let f = rig.begin(&request(track(k as f64 * 20.0, 200.0), 0.3, -0.4));
+        queued_prefetch = queued_prefetch.max(rig.lp.manager().streamer().stats().queued_by_class[2]);
+        cancelled_out += f.counts.cancelled_prefetch;
+        rig.finish();
+    }
+    assert!(queued_prefetch > 0, "prefetch requests must have been waiting");
+    // Turn round and go back: the set ahead is now behind, and its queued requests are cancelled.
+    for k in 0..40 {
+        let f = rig.begin(&request(track((39 - k) as f64 * 20.0, 200.0), 0.3, -0.4));
+        cancelled_back += f.counts.cancelled_prefetch;
+        rig.finish();
+    }
+    eprintln!("prefetch requests cancelled: going out {cancelled_out}, after turning round {cancelled_back}");
+    assert!(cancelled_back > 0, "turning round must cancel prefetch requests that left the set");
+}
+
+// spec: STRM-018, STRM-002
+#[test]
+fn a_teleport_resets_the_velocity_and_prefetches_nothing_from_the_old_direction() {
+    let mut rig = Rig::with_prefetch(1_000_000);
+    rig.settle(&request(track(0.0, 200.0), 0.3, -0.4));
+    for k in 0..30 {
+        rig.step(&request(track(k as f64 * 20.0, 200.0), 0.3, -0.4));
+    }
+    assert!(rig.lp.travel().unwrap().predict().is_some(), "moving: a position is predicted");
+    assert!(!rig.lp.wants().prefetch.is_empty() || rig.lp.manager().streamer().stats().resident > 0);
+    let b = request(there(), 1.0, -0.3);
+    let f = rig.step(&b);
+    assert_eq!(rig.lp.travel().unwrap().teleports(), 1);
+    assert!(rig.lp.travel().unwrap().predict().is_none(), "the old velocity is gone");
+    assert_eq!(f.pipeline.draw.blank, 0);
+    // The prefetch of the old direction is replaced as soon as the new worker result is in (a plan and an R later).
+    for _ in 0..3 {
+        rig.step(&b);
+    }
+    assert!(rig.lp.wants().prefetch.is_empty(), "no prefetch from the old direction at the new place");
+    rig.settle(&b);
+    assert!(rig.lp.wants().prefetch.is_empty());
+}
+
+// spec: STRM-018, CON-14
+#[test]
+fn the_prefetch_set_is_the_same_on_any_thread_count_and_is_r_ahead_minus_r_here() {
+    use planet_frame::prefetch::prefetch_set;
+    let req = request(track(0.0, 200.0), 0.3, -0.4);
+    let ahead_pos = track(1500.0, 200.0);
+    let direct = {
+        let mut cache = SelectionCache::new();
+        let here_set = residency_set_field(&TangentWarp, req.camera.position, &Reference(1), &lod(), &mut cache);
+        let ahead = residency_set_field(&TangentWarp, ahead_pos, &Reference(1), &lod(), &mut cache);
+        prefetch_set(&here_set, &ahead)
+    };
+    assert!(direct.len() > 10, "the script must have something ahead: {}", direct.len());
+    let here_set = residency_set_field(&TangentWarp, req.camera.position, &Reference(1), &lod(), &mut SelectionCache::new());
+    for (t, _) in &direct {
+        assert!(!here_set.contains(*t), "{t:?} is already in R");
+    }
+    for w in direct.windows(2) {
+        assert!((w[0].0.level(), w[0].1) <= (w[1].0.level(), w[1].1), "coarse first, then nearer: {w:?}");
+    }
+    for threads in [1usize, 2, 8] {
+        let w = PlanWorker::new(Arc::new(ThreadPool::new(threads)), Arc::new(Reference(1)), threads);
+        w.submit_predicted(1, req.clone(), Some(ahead_pos));
+        let o = loop {
+            if let Some(r) = w.take_residency() {
+                break r.unwrap();
+            }
+            std::thread::yield_now();
+        };
+        assert_eq!(*o.prefetch, direct, "threads {threads}");
+    }
+}
+
+// spec: STRM-018, STRM-016, CON-22
+#[test]
+fn the_prefetch_set_is_computed_on_the_worker_and_never_on_the_frame() {
+    let counts = Counts::default();
+    let spawner = Arc::new(ManualSpawner::default());
+    let mut pipe = PlanPipeline::new(PlanWorker::new(spawner.clone(), Arc::new(CountingField(counts.clone())), 1));
+    let read = || (counts.heights.load(Ordering::SeqCst), counts.bounds.load(Ordering::SeqCst));
+    let req = request(track(0.0, 200.0), 0.3, -0.4);
+    let none = HashMap::new();
+    pipe.begin_frame_predicted(&req, Some(track(1500.0, 200.0)), &none).unwrap();
+    assert_eq!(read(), (0, 0), "the frame evaluated nothing: the set is the worker's");
+    assert!(pipe.residency().is_none());
+    spawner.run(1);
+    pipe.begin_frame_predicted(&req, Some(track(1500.0, 200.0)), &none).unwrap();
+    assert!(read().1 > 0, "the worker evaluated the volumes");
+    assert!(!pipe.residency().unwrap().prefetch.is_empty(), "the set arrived with R");
+    // An unchanged prediction asks for nothing again; a new one (the camera stopped) asks again and empties the set.
+    assert!(!pipe.begin_frame_predicted(&req, Some(track(1500.0, 200.0)), &none).unwrap().requested);
+    assert!(pipe.begin_frame_predicted(&req, None, &none).unwrap().requested);
+    spawner.run(1);
+    pipe.begin_frame_predicted(&req, None, &none).unwrap();
+    assert!(pipe.residency().unwrap().prefetch.is_empty());
+}
+
+// ---- the per-frame upload budget (STRM-006 upload cap) ----
+
+/// Bytes of one vertex-format tile at cells 32 (what the renderer uploads today).
+const VERTEX_TILE_BYTES: u64 = 53_724;
+
+/// Rank of a tile in the upload order, by the wants the frame started with, worked out here from first principles: the draw
+/// set with its ancestors and the roots, then R with its ancestors, then the prefetch set, then the rest; coarse before fine.
+fn upload_ranker(wants: &planet_streaming::Wants) -> impl Fn(TileId) -> (u8, u8) {
+    let d = closure(wants.draw.iter().map(|(t, _)| *t));
+    let r = closure(wants.residency.iter().map(|(t, _)| *t));
+    let p = closure(wants.prefetch.iter().map(|(t, _)| *t));
+    move |tile: TileId| {
+        let class = if d.contains(&tile) || tile.level() == 0 {
+            0
+        } else if r.contains(&tile) {
+            1
+        } else if p.contains(&tile) {
+            2
+        } else {
+            3
+        };
+        (class, tile.level())
+    }
+}
+
+/// What the frame did, for comparing runs.
+#[derive(Debug, PartialEq)]
+struct UploadFrame {
+    written: Vec<TileId>,
+    bytes: u64,
+    deferred: usize,
+    resident: usize,
+}
+
+/// Run `frames` of `script` and check every frame against the budget's rules; return the frames.
+fn run_budgeted(rig: &mut Rig, frames: usize, script: &dyn Fn(usize) -> PlanetFixed, check_blank: bool) -> Vec<UploadFrame> {
+    let cap = rig.lp.upload_budget().tile_bytes_per_frame;
+    let bytes = rig.sink.bytes;
+    let mut out = Vec::new();
+    for k in 0..frames {
+        let wants = rig.lp.wants().clone();
+        let before = rig.sink.order.len();
+        let f = rig.begin(&request(script(k), 0.3, -0.4));
+        let c = f.counts;
+        let written: Vec<TileId> = rig.sink.order[before..].to_vec();
+        assert_eq!(c.uploaded as usize, written.len());
+        assert_eq!(c.upload_bytes, written.len() as u64 * bytes, "frame {k}: the counts report what was written");
+        // The cap is exceeded only by the one-tile rule; a frame that defers is full (nothing more fits).
+        assert!(c.upload_bytes <= cap || c.uploaded == 1, "frame {k}: {} bytes in {} tiles over the cap {cap}", c.upload_bytes, c.uploaded);
+        if c.deferred > 0 {
+            assert!(c.uploaded >= 1, "frame {k}: tiles wait but none was written (starvation)");
+            assert!(
+                c.upload_bytes + bytes > cap,
+                "frame {k}: deferred {} tiles though {} of {cap} bytes were used",
+                c.deferred,
+                c.upload_bytes
+            );
+        }
+        // Class order: the written tiles are in rank order, and nothing that waits ranks before the last one written.
+        let rank = upload_ranker(&wants);
+        let ranks: Vec<_> = written.iter().map(|t| rank(*t)).collect();
+        assert!(ranks.windows(2).all(|w| w[0] <= w[1]), "frame {k}: written out of order: {ranks:?}");
+        if let Some(last) = ranks.last() {
+            for p in rig.lp.pending() {
+                assert!(rank(p) >= *last, "frame {k}: {p:?} waits though a later tile ({last:?}) was written");
+            }
+        }
+        // Nothing is dropped: the streamer's resident tiles are the sink's plus the waiting ones.
+        let st = rig.lp.manager().streamer().stats();
+        assert_eq!(rig.sink.by_tile.len() + rig.lp.pending().len(), st.resident, "frame {k}");
+        assert_eq!(c.deferred, rig.lp.pending().len());
+        if check_blank {
+            assert_eq!(f.pipeline.draw.blank, 0, "frame {k}: blank while tiles wait");
+        }
+        out.push(UploadFrame { written, bytes: c.upload_bytes, deferred: c.deferred, resident: st.resident });
+        rig.finish();
+    }
+    out
+}
+
+// spec: STRM-006, STRM-017, STRM-002
+#[test]
+fn on_the_dive_and_a_teleport_the_upload_cap_holds_in_every_frame_in_class_order_and_no_frame_is_blank() {
+    let mut rig = Rig::budgeted(1_000_000, true, VERTEX_TILE_BYTES, UploadBudget::default());
+    let cap = DEFAULT_TILE_BYTES_PER_FRAME;
+    assert_eq!(cap, 1 << 20);
+    assert_eq!(VERTEX_TILE_BYTES, planet_generators::mesh::vertex_count(32) as u64 * planet_generators::mesh::MeshVertex::STRIDE);
+    let c = FrameCounts { upload_bytes: 7, deferred: 8, node_bytes: 9, uploaded: 3, ..Default::default() };
+    assert_eq!(FrameCounts::NAMES.len(), c.values().len());
+    assert_eq!(&c.values()[7..], &[3, 0, 7, 8, 9]);
+    assert_eq!(&FrameCounts::NAMES[9..], &["upload_bytes", "deferred", "node_bytes"]);
+    let dive = run_budgeted(&mut rig, 105, &dive_position, true);
+    // The teleport: the dive's last place to the other side of the planet, then hold.
+    let b = there();
+    let teleport = run_budgeted(&mut rig, 80, &|_| b, true);
+    let deferring = dive.iter().chain(&teleport).filter(|f| f.deferred > 0).count();
+    let peak = dive.iter().chain(&teleport).map(|f| f.bytes).max().unwrap();
+    eprintln!("dive+teleport: {deferring} frames deferred tiles, peak {peak} B of {cap} B");
+    assert!(deferring > 5, "the scripts must hit the cap, or the test proves nothing: {deferring}");
+    assert!(peak <= cap && peak > cap - VERTEX_TILE_BYTES, "full frames fill the cap to within one tile: {peak}");
+    // The teleport fill drains, and once it has the frame is the synchronous frame.
+    let mut last = None;
+    for _ in 0..200 {
+        let f = rig.step(&request(b, 0.3, -0.4));
+        if rig.lp.pending().is_empty() && f.pipeline.draw.kind == DrawKind::Exact && f.counts.queued == 0 && f.counts.in_flight == 0 {
+            last = Some(f);
+            break;
+        }
+    }
+    let f = last.expect("the fill did not drain");
+    assert_eq!(f.pipeline.draw.plan, plan_terrain_field(&request(b, 0.3, -0.4), &Reference(1)).unwrap());
+    assert_eq!(f.counts.node_bytes, planet_frame::draw::indirect_frame_bytes(f.pipeline.draw.plan.nodes.len()));
+}
+
+// spec: STRM-006, STRM-002
+#[test]
+fn a_tile_larger_than_the_cap_is_still_written_one_a_frame_and_nothing_starves() {
+    let mut rig =
+        Rig::budgeted(1_000_000, false, VERTEX_TILE_BYTES, UploadBudget { tile_bytes_per_frame: 10_000, node_records_in_cap: false });
+    // The six roots go first, one per frame; the view is blank only until they are in.
+    let frames = run_budgeted(&mut rig, 40, &|_| here(), false);
+    assert!(frames.iter().all(|f| f.written.len() <= 1), "one tile a frame at most, though every tile is over the cap");
+    assert!(frames.iter().take(30).all(|f| f.written.len() == 1), "and one a frame while any waits: {frames:?}");
+    let roots: Vec<_> = frames.iter().take(6).flat_map(|f| f.written.iter()).collect();
+    assert!(roots.iter().all(|t| t.level() == 0), "the roots first: {roots:?}");
+    let f = rig.step(&request(here(), 0.3, -0.4));
+    assert_eq!(f.pipeline.draw.blank, 0, "never blank once the roots are in");
+}
+
+// spec: STRM-006
+#[test]
+fn node_records_are_their_own_line_and_count_inside_the_cap_only_when_asked() {
+    let own = UploadBudget { tile_bytes_per_frame: 400_000, node_records_in_cap: false };
+    let inside = UploadBudget { node_records_in_cap: true, ..own };
+    let mut rigs = [Rig::budgeted(1_000_000, false, VERTEX_TILE_BYTES, own), Rig::budgeted(1_000_000, false, VERTEX_TILE_BYTES, inside)];
+    let mut prev = [0u64; 2];
+    let mut shrunk = false;
+    for k in 0..60 {
+        for (i, rig) in rigs.iter_mut().enumerate() {
+            let f = rig.begin(&request(dive_position(k), 0.3, -0.4));
+            let c = f.counts;
+            let allowance = rig.lp.upload_budget().allowance(prev[i]);
+            assert!(c.upload_bytes <= allowance || c.uploaded == 1, "run {i} frame {k}: {} over {allowance}", c.upload_bytes);
+            assert_eq!(c.node_bytes, planet_frame::draw::indirect_frame_bytes(f.pipeline.draw.plan.nodes.len()));
+            if i == 0 {
+                assert_eq!(allowance, 400_000, "the node records are not in this cap");
+            } else {
+                shrunk |= allowance < 400_000 && c.node_bytes > 0;
+            }
+            prev[i] = c.node_bytes;
+            rig.finish();
+        }
+    }
+    assert!(shrunk, "the node records must reduce the tile allowance when they are counted inside");
+}
+
+// spec: STRM-006, CON-14
+#[test]
+fn the_upload_order_and_what_is_written_each_frame_are_the_same_on_1_2_and_8_threads() {
+    let script = |k: usize| if k < 35 { dive_position(k) } else { there() };
+    let mut runs = Vec::new();
+    for threads in [1usize, 2, 8] {
+        let mut rig =
+            Rig::budgeted(1_000_000, true, VERTEX_TILE_BYTES, UploadBudget { tile_bytes_per_frame: 300_000, node_records_in_cap: false });
+        rig.tile_spawner.threads.store(threads, Ordering::SeqCst);
+        runs.push(run_budgeted(&mut rig, 60, &script, true));
+    }
+    assert!(runs[0].iter().any(|f| f.deferred > 0));
+    assert_eq!(runs[0], runs[1], "1 vs 2 threads");
+    assert_eq!(runs[0], runs[2], "1 vs 8 threads");
+}
+
+// spec: STRM-006, STRM-017
+#[test]
+fn a_full_fill_at_the_cap_takes_the_frames_the_cap_allows_and_defers_only_full_frames() {
+    // Ground view from a cold start, every tile finishing within the frame it is asked for: the cap alone paces the fill.
+    let mut rig = Rig::budgeted(1_000_000, false, VERTEX_TILE_BYTES, UploadBudget::default());
+    let ground = track(0.0, 2.0);
+    let frames = run_budgeted(&mut rig, 120, &|_| ground, true);
+    let total: u64 = frames.iter().map(|f| f.written.len() as u64).sum();
+    let per_frame = (DEFAULT_TILE_BYTES_PER_FRAME / VERTEX_TILE_BYTES) as usize;
+    let busy = frames.iter().filter(|f| f.bytes > 0).count();
+    eprintln!("ground fill: {total} tiles in {busy} upload frames at {per_frame} tiles of {VERTEX_TILE_BYTES} B a frame");
+    assert!(total > 400, "the fill must be large enough to span many frames: {total}");
+    assert!(rig.lp.pending().is_empty(), "the fill drained within the script");
+    assert!(busy >= total.div_ceil(per_frame as u64) as usize, "never faster than the cap allows");
+    assert!(frames.iter().all(|f| f.written.len() <= per_frame));
+    assert!(frames.iter().any(|f| f.deferred > 0));
 }

@@ -148,7 +148,7 @@ fn the_pipelined_loop_settles_on_the_synchronous_frame_from_a_cold_start_and_aft
     assert!(
         text.starts_with(
             "# iteration kind nodes substituted in_flight base_seq plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms \
-             resident in_flight queued dispatched cancelled blocked evicted uploaded degraded"
+             resident in_flight queued dispatched cancelled blocked evicted uploaded degraded upload_bytes deferred node_bytes"
         ),
         "{text}"
     );
