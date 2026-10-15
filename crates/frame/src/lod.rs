@@ -235,6 +235,11 @@ impl SelectionCache {
         h
     }
 
+    /// Whether the origin height of `tile` is memoised (a worker fills the missing ones in parallel before the plan is built).
+    pub(crate) fn has_origin_height(&self, tile: TileId) -> bool {
+        self.origin_heights.contains_key(&tile)
+    }
+
     /// Mesh key of `tile` for a grid of `cells` cells per edge: `compute` runs once per tile and grid size (LOD-009).
     pub(crate) fn mesh_key(&mut self, tile: TileId, cells: u32, compute: impl FnOnce() -> u64) -> u64 {
         if self.mesh_key_cells != cells {
@@ -480,6 +485,60 @@ fn select_impl(
         n.morph_start_m = level_start[n.tile.level() as usize];
     }
     NodeSelection { nodes }
+}
+
+/// The cover of a view (STRM-016, ADR 0032 point 5): the deepest resident tiles that serve the view, a pure function of the
+/// camera, the LOD parameters and the resident set that evaluates no height field. Walk down from the resident roots; a
+/// tile is split only while the LOD criterion (distance from the camera to the tile's resident origin less its radius, below
+/// the level's split distance) says so and every child that is in view is resident; otherwise it is drawn itself. Tiles beyond the horizon and
+/// outside the frustum (padded by `p.max_height_m` and the skirt depth) are left out. The result is in ascending tile-id
+/// order and has no tile that is an ancestor of another. It is not balanced (no 2:1 rule): the skirts hide the seams.
+pub fn cover_selection(
+    map: &dyn FaceMapping,
+    camera: &Camera,
+    p: &LodParams,
+    resident: &dyn Fn(TileId) -> Option<PlanetFixed>,
+) -> Vec<TileId> {
+    let frustum = camera.frustum();
+    let mut geoms: IdMap<TileGeom> = IdMap::default();
+    let mut geom = |t: TileId| -> TileGeom { *geoms.entry(t).or_insert_with(|| tile_geom(map, t, p)) };
+    let mut out: BTreeSet<TileId> = BTreeSet::new();
+    let mut stack: Vec<TileId> = Vec::new();
+    for f in Face::ALL {
+        let root = TileId::new(f, 0, 0, 0).expect("root");
+        let g = geom(root);
+        if resident(root).is_some() && !cover_culled(root, &g, camera.position, &frustum, p) {
+            stack.push(root);
+        }
+    }
+    while let Some(t) = stack.pop() {
+        let g = geom(t);
+        let split = p.split_distance(t.level());
+        // The distance estimate needs no height field: the tile is resident, so its origin (the centre at its terrain height)
+        // is known; the relief within a tile is small against the tile's own radius.
+        let origin = resident(t).expect("the walk visits resident tiles only");
+        let distance = ((camera.position.0 - origin.0).length() - g.radius).max(0.0);
+        if t.level() < p.max_level && distance < split {
+            let seen: Vec<TileId> = children_of(t)
+                .into_iter()
+                .filter(|&c| {
+                    let gc = geom(c);
+                    !cover_culled(c, &gc, camera.position, &frustum, p)
+                })
+                .collect();
+            if !seen.is_empty() && seen.iter().all(|&c| resident(c).is_some()) {
+                stack.extend(seen);
+                continue;
+            }
+        }
+        out.insert(t);
+    }
+    out.into_iter().collect()
+}
+
+fn cover_culled(t: TileId, g: &TileGeom, camera: PlanetFixed, frustum: &Frustum, p: &LodParams) -> bool {
+    (p.cull_horizon && below_horizon_at(g.centre, g.angular_radius, camera, p))
+        || frustum.culls_sphere(g.centre, g.radius + p.max_height_m + skirt_depth(t, p))
 }
 
 /// The morph interval a leaf needs: [`LodParams::morph_interval`] with the margin for the extent of its four same-level

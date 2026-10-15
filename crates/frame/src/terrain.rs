@@ -108,6 +108,42 @@ pub fn level_color(level: u8) -> [u8; 4] {
     [(55 + (l * 53) % 200) as u8, (55 + (l * 97 + 30) % 200) as u8, (55 + (l * 31 + 10) % 200) as u8, 255]
 }
 
+/// Flat colour of a node in `view` (the debug views that colour per tile; the others are shaded).
+pub(crate) fn node_color(view: TerrainView, tile: TileId) -> [u8; 4] {
+    match view {
+        TerrainView::Face => FACE_COLORS[tile.face().0 as usize],
+        TerrainView::TileId => tile_id_color(tile),
+        TerrainView::Level => level_color(tile.level()),
+        _ => [0, 0, 0, 255],
+    }
+}
+
+/// Evaluate the origin heights `selection` needs and `cache` lacks on `threads` scoped threads and memoise them. Each is a
+/// pure function of its tile, so neither the split nor the order in which threads finish can change a result.
+fn prefill_origin_heights(
+    selection: &crate::lod::NodeSelection,
+    map: &(dyn planet_core::cube::FaceMapping + Sync),
+    field: &dyn HeightField,
+    cache: &mut SelectionCache,
+    threads: usize,
+) {
+    let missing: Vec<TileId> = selection.nodes.iter().map(|n| n.tile).filter(|t| !cache.has_origin_height(*t)).collect();
+    if missing.len() < 2 {
+        return;
+    }
+    let chunk = missing.len().div_ceil(threads);
+    let heights: Vec<(TileId, f64)> = std::thread::scope(|s| {
+        let handles: Vec<_> = missing
+            .chunks(chunk)
+            .map(|part| s.spawn(move || part.iter().map(|&t| (t, field.height(t.center_direction(map)))).collect::<Vec<_>>()))
+            .collect();
+        handles.into_iter().flat_map(|h| h.join().expect("origin height thread")).collect()
+    });
+    for (tile, h) in heights {
+        cache.origin_height(tile, || h);
+    }
+}
+
 fn tile_id_color(id: TileId) -> [u8; 4] {
     crate::plan::tile_id_color(id)
 }
@@ -125,7 +161,19 @@ pub fn plan_terrain_field(req: &TerrainRequest, field: &dyn HeightField) -> Resu
 /// [`plan_terrain_field`] reusing the per-tile selection work of earlier plans in `cache` (a renderer plans every frame;
 /// the plan is identical to the uncached one).
 pub fn plan_terrain_cached(req: &TerrainRequest, field: &dyn HeightField, cache: &mut SelectionCache) -> Result<TerrainPlan, PlanError> {
-    plan_terrain_keyed(req, field, cache, None)
+    plan_terrain_keyed(req, field, cache, None, 1)
+}
+
+/// [`plan_terrain_cached`] with the origin heights of the nodes the cache does not hold yet evaluated on `threads` threads (STRM-016,
+/// ADR 0032 point 5: a cold plan of an unseen place is dominated by them). A height is a pure function of the tile, so the
+/// plan is identical for every thread count (CON-14); `threads` of 0 or 1 evaluates on the calling thread.
+pub fn plan_terrain_threaded(
+    req: &TerrainRequest,
+    field: &dyn HeightField,
+    cache: &mut SelectionCache,
+    threads: usize,
+) -> Result<TerrainPlan, PlanError> {
+    plan_terrain_keyed(req, field, cache, None, threads)
 }
 
 /// [`plan_terrain_cached`] with an optional replacement for the per-tile mesh key derivation (`None`: the production
@@ -136,6 +184,7 @@ pub(crate) fn plan_terrain_keyed(
     field: &dyn HeightField,
     cache: &mut SelectionCache,
     key_override: Option<&dyn Fn(TileId) -> u64>,
+    threads: usize,
 ) -> Result<TerrainPlan, PlanError> {
     if field.seed() != req.seed {
         return Err(PlanError::HeightField(format!("field seed {} differs from request seed {}", field.seed(), req.seed)));
@@ -167,6 +216,9 @@ pub(crate) fn plan_terrain_keyed(
             req.lod.viewport_h_px / req.lod.tau_px
         )));
     }
+    if threads > 1 && !field.reads_cells() {
+        prefill_origin_heights(&selection, map.as_ref(), field, cache, threads);
+    }
     let keyer = planet_generators::mesh::MeshKeyer::new(field, map.as_ref(), req.lod.cells, req.lod.radius_m);
     let derive_key = |tile: TileId| key_override.map_or_else(|| keyer.key(tile), |f| f(tile));
     let nodes = selection
@@ -182,12 +234,7 @@ pub(crate) fn plan_terrain_keyed(
             let height = if reuse { cache.origin_height(n.tile, || field.height(centre)) } else { field.height(centre) };
             let origin = PlanetFixed(centre * (req.lod.radius_m + height));
             let rel = origin.0 - req.camera.position.0;
-            let color = match req.view {
-                TerrainView::Face => FACE_COLORS[n.tile.face().0 as usize],
-                TerrainView::TileId => tile_id_color(n.tile),
-                TerrainView::Level => level_color(n.tile.level()),
-                _ => [0, 0, 0, 255],
-            };
+            let color = node_color(req.view, n.tile);
             TerrainDraw {
                 tile: n.tile,
                 level: n.tile.level(),
@@ -403,7 +450,7 @@ mod tests {
             *derived.borrow_mut().entry(t).or_insert(0u32) += 1;
             hash_u64s(0x7465_7374, &[t.raw(), u64::from(req.lod.cells)])
         };
-        let plan = plan_terrain_keyed(req, &Reference(1), cache, Some(&key)).unwrap();
+        let plan = plan_terrain_keyed(req, &Reference(1), cache, Some(&key), 1).unwrap();
         (plan, derived.into_inner())
     }
 

@@ -591,6 +591,34 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
         ..LodParams::earth_1080p()
     };
     let request = TerrainRequest { camera, size: TERRAIN_SIZE, view, lod, face_mapping: TangentWarp.id().to_string(), seed: field.seed() };
+    if o.pipelined {
+        // The camera script: the view cold, then (with --then) a jump to another view. The loop settles on each in turn.
+        let mut requests = vec![request.clone()];
+        let mut shown = name;
+        if let Some(then) = &o.then {
+            let idx = match then.parse::<usize>() {
+                Ok(i) => i,
+                Err(_) => views
+                    .iter()
+                    .position(|(n, _)| n == then)
+                    .ok_or_else(|| format!("--then '{then}' is neither an index nor one of the scripted names"))?,
+            };
+            let (then_name, then_camera) = *views.get(idx).ok_or_else(|| format!("--then {idx} is out of range (0..{})", views.len()))?;
+            requests.push(TerrainRequest { camera: then_camera, ..request.clone() });
+            shown = then_name;
+        }
+        let (frame, log) = crate::pipelined::run_script(ctx, &world, &requests, out)?;
+        writeln!(out, "terrain {shown} ({}) pipelined: {} frames drawn", view.name(), log.len()).map_err(err)?;
+        if let Some(path) = &o.out {
+            write_frame(&frame, path, out)?;
+        }
+        if let Some(dir) = &o.out_dir {
+            std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+            let path = dir.join("pipelined.txt");
+            std::fs::write(&path, crate::pipelined::log_text(&log)).map_err(|e| format!("writing {}: {e}", path.display()))?;
+        }
+        return Ok(());
+    }
     let plan = plan_terrain_field(&request, field.as_ref()).map_err(|e| e.to_string())?;
     let meshes: Vec<std::sync::Arc<planet_generators::mesh::TileMesh>> = if o.stream {
         streamed_meshes(&world, &plan)?
@@ -739,8 +767,8 @@ fn world_of_bundle(w: &planet_frame::BundleWorld, b: &planet_frame::TerrainBundl
 
 /// Tile meshes of the run's world field. Each load builds the field afresh (cheap: it only reads the definition and holds the
 /// bake by reference), so the source owns the world and no borrowed field has to outlive the streamer's workers.
-struct MeshSource {
-    world: std::sync::Arc<WorldTerrain>,
+pub(crate) struct MeshSource {
+    pub(crate) world: std::sync::Arc<WorldTerrain>,
 }
 
 impl planet_streaming::TileSource<planet_generators::mesh::TileMesh> for MeshSource {

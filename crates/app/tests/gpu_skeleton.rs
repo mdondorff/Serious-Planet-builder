@@ -116,6 +116,52 @@ fn streamed_terrain_equals_synchronous_terrain() {
     assert_eq!(read_png(&a).unwrap(), read_png(&b).unwrap(), "the streaming path must produce the same frame");
 }
 
+// spec: STRM-016, STRM-002
+#[test]
+fn the_pipelined_loop_settles_on_the_synchronous_frame_from_a_cold_start_and_after_a_jump() {
+    let sync = |script: &str, name: &str| {
+        let png = tmp(name);
+        let args = ["test-render", "--scene", "terrain", "--script", script, "--view", "tile-id", "--adapter", "software", "--out"];
+        run(&[&args[..], &[png.to_str().unwrap()]].concat()).unwrap();
+        png
+    };
+    let piped = |script: &str, then: Option<&str>, name: &str, dir: Option<&PathBuf>| {
+        let png = tmp(name);
+        let args =
+            ["test-render", "--scene", "terrain", "--script", script, "--view", "tile-id", "--adapter", "software", "--pipelined", "--out"];
+        let mut all: Vec<&str> = [&args[..], &[png.to_str().unwrap()]].concat();
+        if let Some(t) = then {
+            all.extend(["--then", t]);
+        }
+        if let Some(d) = dir {
+            all.extend(["--out-dir", d.to_str().unwrap()]);
+        }
+        let log = run(&all).unwrap();
+        (png, log)
+    };
+    // Cold start: the first frame is a cover (never blank), the loop ends on the frame the synchronous path draws.
+    let dir = tmp("pipelined-log");
+    let (p1, log1) = piped("aerial-200km", None, "pipe-cold.png", Some(&dir));
+    assert!(log1.contains("cover") && log1.contains("exact 1") && log1.contains("pipelined"), "{log1}");
+    assert_eq!(read_png(&sync("aerial-200km", "sync-a.png")).unwrap(), read_png(&p1).unwrap(), "cold start");
+    let text = std::fs::read_to_string(dir.join("pipelined.txt")).unwrap();
+    assert!(
+        text.starts_with("# iteration kind nodes substituted in_flight base_seq plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms"),
+        "{text}"
+    );
+    assert!(text.lines().nth(1).unwrap().contains(" cover "), "frame 1 is a cover plan: {text}");
+    assert!(text.lines().last().unwrap().contains(" exact "), "{text}");
+    // A jump: settle on one view, then another; the frame the loop ends on is the synchronous frame of the second.
+    let (p2, log2) = piped("orbit-20000km", Some("aerial-20km"), "pipe-jump.png", None);
+    assert!(log2.contains("cover") && log2.contains("pipelined"), "{log2}");
+    assert_eq!(read_png(&sync("aerial-20km", "sync-b.png")).unwrap(), read_png(&p2).unwrap(), "after a jump");
+    // Options that do not combine are refused before any GPU work.
+    let e = run(&["test-render", "--scene", "terrain", "--pipelined", "--stream"]).unwrap_err();
+    assert!(e.contains("excludes --stream"), "{e}");
+    let e = run(&["test-render", "--scene", "terrain", "--then", "3"]).unwrap_err();
+    assert!(e.contains("--then only applies to --pipelined"), "{e}");
+}
+
 // spec: TEST-008
 #[test]
 fn a_terrain_bundle_replays_to_the_same_pixels_and_refuses_changed_inputs() {
