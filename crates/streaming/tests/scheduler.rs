@@ -39,7 +39,7 @@ fn fixture(config: StreamConfig) -> (Streamer<u64>, Arc<ManualSpawner>, Arc<Fake
 }
 
 fn cfg(max_in_flight: usize, capacity: usize) -> StreamConfig {
-    StreamConfig { max_in_flight, capacity, retry_after_ms: 1000, record_dispatches: true }
+    StreamConfig { max_in_flight, capacity, retry_after_ms: 1000, record_dispatches: true, ..Default::default() }
 }
 
 fn settle(s: &mut Streamer<u64>, sp: &ManualSpawner, w: &Wants) {

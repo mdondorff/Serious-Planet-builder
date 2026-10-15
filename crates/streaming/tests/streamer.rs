@@ -171,7 +171,7 @@ fn the_same_inputs_give_the_same_dispatch_order() {
 #[test]
 fn capacity_evicts_least_recently_used_tiles_but_never_roots_or_tiles_in_use() {
     let (mut s, sp, _) =
-        fixture(TestSource::default(), StreamConfig { max_in_flight: 8, capacity: 12, record_dispatches: true, ..Default::default() });
+        fixture(TestSource::default(), StreamConfig { max_in_flight: 8, capacity: 20, record_dispatches: true, ..Default::default() });
     let a: Vec<(TileId, f64)> = (0..4).map(|x| (id(0, 2, x, 0), 1.0)).collect();
     for _ in 0..6 {
         s.begin_frame(&a);
@@ -179,14 +179,16 @@ fn capacity_evicts_least_recently_used_tiles_but_never_roots_or_tiles_in_use() {
     }
     s.begin_frame(&a);
     assert!(a.iter().all(|(t, _)| s.is_resident(*t)));
-    // Move the interest elsewhere; the old tiles become evictable once the capacity is exceeded.
+    // Move the interest elsewhere. The new set with its ancestors and the roots (19 tiles) fits the 20 slots only if the old
+    // tiles go; capacity is counted in slots and never exceeded, not even by results arriving between frames (STRM-007).
     let b: Vec<(TileId, f64)> = (0..8).map(|x| (id(3, 3, x, 1), 1.0)).collect();
     for _ in 0..12 {
         s.begin_frame(&b);
         sp.run(8);
     }
     let st = s.stats();
-    assert!(st.resident <= 12 + 8, "resident {} stays near the capacity", st.resident);
+    assert!(st.resident <= 20, "resident {} never exceeds the capacity", st.resident);
+    assert!(st.resident + st.in_flight <= 20, "slots in use never exceed the capacity: {st:?}");
     assert!(st.evicted > 0, "something had to be evicted");
     for f in Face::ALL {
         assert!(s.is_resident(id(f.0, 0, 0, 0)), "roots are never evicted");

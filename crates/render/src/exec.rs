@@ -47,6 +47,23 @@ pub enum ExecError {
         plan: (u32, u32),
         renderer: (u32, u32),
     },
+    /// The tile pool has no free slot (STRM-006): the share is full, or the free slots are still in flight. The residency
+    /// manager keeps demand inside the share; a caller that places tiles itself evicts first.
+    PoolFull {
+        tile: TileId,
+        pool: planet_streaming::PoolKind,
+    },
+    /// A placement named a slot outside the pool.
+    BadSlot {
+        tile: TileId,
+        slot: planet_streaming::SlotRef,
+        capacity: u32,
+    },
+    /// The plan has more nodes than the per-node record buffer the share accounts for.
+    TooManyNodes {
+        planned: usize,
+        max: usize,
+    },
 }
 
 impl fmt::Display for ExecError {
@@ -62,6 +79,15 @@ impl fmt::Display for ExecError {
                     f,
                     "tile {tile:?}: the resident mesh has key {resident:#x} but the plan expects {planned:#x}; upload the current mesh"
                 )
+            }
+            ExecError::PoolFull { tile, pool } => {
+                write!(f, "tile {tile:?}: the {pool:?} pool has no free slot (every slot is in use or still in flight); evict a tile first")
+            }
+            ExecError::BadSlot { tile, slot, capacity } => {
+                write!(f, "tile {tile:?}: slot {slot:?} is outside the pool of {capacity} slots")
+            }
+            ExecError::TooManyNodes { planned, max } => {
+                write!(f, "the plan has {planned} nodes but the node record buffer holds {max}")
             }
             ExecError::MissingTile(id) => write!(f, "the plan draws tile {id:?} but no resource for it was supplied"),
             ExecError::BadResource { id, expected, got } => write!(f, "tile {id:?}: expected {expected} height samples, got {got}"),

@@ -47,7 +47,7 @@ fn wants_for(pos: PlanetFixed, yaw: f64, pitch: f64, field: &dyn HeightField, p:
 
 fn streamer(max_in_flight: usize) -> (Streamer<u64>, Arc<ManualSpawner>) {
     let spawner = Arc::new(ManualSpawner::default());
-    let config = StreamConfig { max_in_flight, capacity: 1_000_000, retry_after_ms: 100, record_dispatches: true };
+    let config = StreamConfig { max_in_flight, capacity: 1_000_000, retry_after_ms: 100, record_dispatches: true, ..Default::default() };
     let mut s = Streamer::new(Arc::new(Source), spawner.clone() as Arc<dyn Spawner>, Arc::new(FakeClock::default()), config);
     s.load_roots_blocking().unwrap();
     (s, spawner)
