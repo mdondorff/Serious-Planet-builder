@@ -1,0 +1,21 @@
+## Why
+
+ADR 0033 point 6, accepted in part by the owner (2026-10-15): the finest geometry level is capped at 22 for cells 32 (21 for cells 64) as a LOD parameter; the detail term below the finest level stays deferred (not built). SPIKE-07 measured the cap: 6,633 against 8,757 ground-1m draw tiles (-24 %), flight draw calls at 1 m 2,201 against 2,723, vertex spacing 7.46 cm, mesh within 1.8 mm of the field on the steepest tile, frames practically identical (at most 0.19 % of the pixels differ by more than 8/255 at 1 m). The cap has to be one value that planning, the residency set R, prefetch, the cover plan, the draw set and the compact format's CON-13 guard all read, and a resident tile's format decision has to be a function of what its key identifies.
+
+## What Changes
+
+- frame: `LodParams::max_level` is the one source of truth for the finest level (LOD-010). Production default `production_finest_level(cells) = 27 - ceil(log2(cells))` (`2^level * cells = 2^27`: 22 at cells 32, 21 at 64, 23 at 16; equal vertex spacing of 7.46 cm at Earth's radius), never deeper than the reference cap 26 (`REFERENCE_FINEST_LEVEL`). `LodParams::earth_1080p()` uses it (22). Selection, R, prefetch (the set R of a predicted position), the cover plan and the draw set already read `max_level` from the request's parameters, so they follow with no second constant.
+- generators: the mesh key carries the finest-level class of a tile (`finest_class_key`): a tile at or above the cap is a finest tile whose format depends on its relief (CON-13 guard, GEN-019), so its key is the base key rehashed with the class; tiles below the cap keep their base key composition under the new version. `MeshKeyer::at_finest_level`, `tile_data_field` and the new `vertex_tile_field` build the keys the plan expects; `MESH_VERSION` 6. Consequences: persistent mesh keys (kind mesh) change with the version (no pack stores them), repro bundles of mesh version 5 are refused with both versions named, the vertex output and its content hashes are unchanged, the compact known answers move (the key is part of the tile's hash). The reuse issue: a resident tile is reused by its mesh key, which did not say for which finest level its format was decided; now it does (a tile decided as a fallback under cap 9 has another key than the compact tile of the same tile under cap 10), so a mismatch shows as a stale mesh, never as a wrong format. The plan cache's mesh-key memo is keyed by cells and finest level (LOD-009).
+- app: `--finest-level N` (test-render single views, `--stream`, `--pipelined`, `--flight`, `--perf`; default `production_finest_level(cells)`; 26 reproduces SPIKE-07's reference); the run headers of `--flight` and `--perf` print the level. A `--pipelined` script still refuses requests that change cells or the cap: the pools and the streamer's tile source are built for the first request's values (the key now makes a mismatch detectable instead of silent).
+- tests: the standard-view pins (TEST-011) move for ground-1m only; the level-26 reference is pinned beside; plan and LOD snapshots re-pinned; headroom pins re-pinned; the gpu golden tests plan at the production cap of their tile size (cells 16: 23).
+- specs: LOD-010 (new), LOD-009 (finest level in the memo), GEN-010 (mesh version 6, the class in the key), GEN-019 (the guard reads the LOD cap), TEST-011 (pins).
+
+Declared pin changes (before to after; only ground-1m reaches level 22, every other view is unchanged):
+- reference field, nodes: ground-1m 2,897 to 2,378 (-17.9 %)
+- default world (eroded field, 256-cell bake), nodes: ground-1m 2,936 to 2,409 (-17.9 %)
+- headroom (default world): ground-1m R with ancestors 14,325 to 11,493 (-19.8 %), D with ancestors 4,063 to 3,336 (-17.9 %); worst R over the views 4.98 % of the mid tier's 230,640 compact slots (was 6.2 %), ground-1m D 1.45 % (was 1.76 %)
+
+Not in this change: the detail term below the finest level (deferred by the owner), cells 64 as a default (the cap follows the tile size), re-fetching resident tiles when a running session changes its cap.
+
+Expected golden changes:
+- terrain_ground1m_depth: declared: finest level 22 (the golden test plans at the production cap of its tile size, cells 16: level 23; the 1 m ground view draws facets of 7.5 cm; depth view, a few depth-band pixels move by at most 3 levels)

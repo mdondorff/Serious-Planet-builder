@@ -665,7 +665,12 @@ pub struct ResidentRecords<'a> {
 
 impl<'a> ResidentRecords<'a> {
     pub fn new(field: &'a dyn HeightField, map: &'a dyn planet_core::cube::FaceMapping, lod: &LodParams) -> Self {
-        Self { field, map, keyer: planet_generators::mesh::MeshKeyer::new(field, map, lod.cells, lod.radius_m), radius_m: lod.radius_m }
+        Self {
+            field,
+            map,
+            keyer: planet_generators::mesh::MeshKeyer::new(field, map, lod.cells, lod.radius_m).at_finest_level(lod.max_level),
+            radius_m: lod.radius_m,
+        }
     }
 
     pub fn record(&self, tile: TileId) -> ResidentTile {

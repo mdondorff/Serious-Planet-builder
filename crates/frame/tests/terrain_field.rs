@@ -39,7 +39,10 @@ fn the_standard_flight_plans_at_production_parameters_without_steepness_rejectio
     }
     assert!(field.error().is_none(), "{:?}", field.error());
     // The ground views reach the deepest levels: an early stop in planning would show up here.
-    assert!(deepest >= 24, "deepest level planned: {deepest}");
+    assert_eq!(
+        deepest, params.max_level,
+        "the ground views reach the production finest level (22 at cells 32, LOD-010): an early stop in planning would show up here"
+    );
 }
 
 // spec: GEN-017
@@ -68,5 +71,8 @@ fn the_eroded_field_plans_the_standard_flight_at_production_parameters_with_its_
         deepest = deepest.max(plan.nodes.iter().map(|n| n.level).max().unwrap());
     }
     assert!(field.error().is_none(), "{:?}", field.error());
-    assert!(deepest >= 24, "deepest level planned: {deepest}");
+    assert_eq!(
+        deepest, params.max_level,
+        "the ground views reach the production finest level (22 at cells 32, LOD-010): an early stop in planning would show up here"
+    );
 }

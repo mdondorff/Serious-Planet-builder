@@ -587,7 +587,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
         cells: TERRAIN_CELLS,
         viewport_h_px: f64::from(TERRAIN_SIZE.1),
         tau_px: 4.0,
-        max_level: 26,
+        max_level: o.finest_level_for(TERRAIN_CELLS),
         radius_m,
         max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
         ..LodParams::earth_1080p()
@@ -812,7 +812,7 @@ fn tile_with(
     match format {
         planet_render::TileFormat::Compact => planet_generators::compact::tile_data_field(field, map, tile, cells, radius_m, max_level),
         planet_render::TileFormat::Vertex => {
-            RenderTile::Vertex(planet_generators::mesh::tile_mesh_field(field, map, tile, cells, radius_m))
+            RenderTile::Vertex(planet_generators::compact::vertex_tile_field(field, map, tile, cells, radius_m, max_level))
         }
     }
 }
@@ -933,7 +933,7 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
         cells: o.cells,
         viewport_h_px: f64::from(size.1),
         tau_px: o.tau,
-        max_level: 26,
+        max_level: o.finest_level_for(o.cells),
         radius_m,
         max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
         ..LodParams::earth_1080p()
@@ -972,13 +972,14 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
     std::fs::write(dir.join("flight.txt"), &index).map_err(|e| format!("writing flight.txt: {e}"))?;
     writeln!(
         out,
-        "flight: wrote {frames} frames to {} ({}x{}, cells {}, tau {} px, view {})",
+        "flight: wrote {frames} frames to {} ({}x{}, cells {}, tau {} px, view {}, finest level {})",
         dir.display(),
         size.0,
         size.1,
         o.cells,
         o.tau,
-        view.name()
+        view.name(),
+        lod.max_level
     )
     .map_err(err)
 }
@@ -1009,7 +1010,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         cells: o.cells,
         viewport_h_px: f64::from(size.1),
         tau_px: o.tau,
-        max_level: 26,
+        max_level: o.finest_level_for(o.cells),
         radius_m,
         max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
         ..LodParams::earth_1080p()
@@ -1036,11 +1037,12 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     }
     writeln!(
         out,
-        "terrain perf: {}x{}, cells {}, tau {} px, timestamps {}, {measured_field}",
+        "terrain perf: {}x{}, cells {}, tau {} px, finest level {}, timestamps {}, {measured_field}",
         size.0,
         size.1,
         o.cells,
         o.tau,
+        lod.max_level,
         ctx.timestamps_supported()
     )
     .map_err(err)?;

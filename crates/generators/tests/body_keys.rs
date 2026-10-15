@@ -135,4 +135,4 @@ fn the_key_format_version_is_the_one_the_body_fields_belong_to() {
 }
 
 const KNOWN_HEIGHT_KEY: u64 = 16898139709241435207;
-const KNOWN_MESH_KEY: u64 = 14693943970859085171; // mesh version 5 (compact tile format)
+const KNOWN_MESH_KEY: u64 = 6637966400734710645; // mesh version 6 (finest-level class in the key; tiles below the cap keep the composition)

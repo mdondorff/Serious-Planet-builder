@@ -8,7 +8,7 @@ use planet_frame::{level_color, plan_terrain, scripted_views, LodParams, Terrain
 use planet_generators::compact::{tile_data_field, RenderTile};
 use planet_generators::dump::FACE_COLORS;
 use planet_generators::height::Reference;
-use planet_generators::mesh::{grid_indices, tile_mesh, TileMesh};
+use planet_generators::mesh::{grid_indices, TileMesh};
 use planet_render::{execute_terrain, execute_terrain_tiles, AdapterPolicy, GpuContext};
 use planet_testkit::{GoldenChecks, Image, Tolerance};
 
@@ -18,7 +18,13 @@ const CELLS: u32 = 16;
 const SEED: u64 = 1;
 
 fn lod() -> LodParams {
-    LodParams { cells: CELLS, viewport_h_px: f64::from(SIZE.1), tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() }
+    LodParams {
+        cells: CELLS,
+        viewport_h_px: f64::from(SIZE.1),
+        tau_px: 2.5,
+        max_level: planet_frame::production_finest_level(CELLS),
+        ..LodParams::earth_1080p()
+    }
 }
 
 fn plan_for(name_index: usize, view: TerrainView) -> (&'static str, TerrainPlan) {
@@ -48,7 +54,10 @@ fn render(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[RenderTile]) -> (Image,
 
 /// The vertex-format meshes of the plan: the reference path, for the tests that read vertices on the CPU.
 fn vertex_meshes_for(plan: &TerrainPlan) -> Vec<TileMesh> {
-    plan.nodes.iter().map(|n| tile_mesh(SEED, &TangentWarp, n.tile, CELLS, R)).collect()
+    plan.nodes
+        .iter()
+        .map(|n| planet_generators::compact::vertex_tile_field(&Reference(SEED), &TangentWarp, n.tile, CELLS, R, plan_finest(plan)))
+        .collect()
 }
 
 fn render_vertex(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[TileMesh]) -> (Image, planet_render::TerrainStats) {
@@ -230,7 +239,13 @@ fn the_relief_grid_has_only_thin_lines_at_the_ground_cameras() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     for index in [5usize, 6] {
         let (name, camera) = scripted_views(R, 256.0 / 192.0, SEED)[index];
-        let lod = LodParams { cells: 16, viewport_h_px: 192.0, tau_px: 4.0, max_level: 26, ..LodParams::earth_1080p() };
+        let lod = LodParams {
+            cells: 16,
+            viewport_h_px: 192.0,
+            tau_px: 4.0,
+            max_level: planet_frame::production_finest_level(16),
+            ..LodParams::earth_1080p()
+        };
         let plan = plan_terrain(&TerrainRequest {
             camera,
             size: (256, 192),

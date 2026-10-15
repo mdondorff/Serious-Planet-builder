@@ -5,7 +5,7 @@ use planet_core::cube::TangentWarp;
 use planet_core::Vec3;
 use planet_frame::{plan_terrain_field, scripted_views_field, LodParams, TerrainPlan, TerrainRequest, TerrainView};
 use planet_generators::height::HeightField;
-use planet_generators::mesh::{tile_mesh_field, TileMesh};
+use planet_generators::mesh::TileMesh;
 use planet_generators::stress::Steep;
 use planet_render::{execute_terrain, AdapterPolicy, GpuContext};
 use planet_testkit::Image;
@@ -64,7 +64,11 @@ fn ten_scripted_views_on_steep_terrain_have_no_holes() {
                 .nodes
                 .chunks(plan.nodes.len().div_ceil(threads).max(1))
                 .map(|part| {
-                    s.spawn(move || part.iter().map(|n| tile_mesh_field(&STEEP, &TangentWarp, n.tile, CELLS, R)).collect::<Vec<_>>())
+                    s.spawn(move || {
+                        part.iter()
+                            .map(|n| planet_generators::compact::vertex_tile_field(&STEEP, &TangentWarp, n.tile, CELLS, R, 19))
+                            .collect::<Vec<_>>()
+                    })
                 })
                 .collect();
             handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
