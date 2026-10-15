@@ -403,8 +403,77 @@ pub fn cache_compact(root: &Path, args: &[String]) -> Res {
     run(root, "cargo", &refs, &[])
 }
 
+/// Whether `perf stream ARGS` names every scene: `all`, or no scene at all.
+fn stream_runs_all(args: &[String]) -> bool {
+    args.first().is_none_or(|a| a.starts_with("--") || a == "all")
+}
+
+/// The arguments of the child that runs `scene` in a `perf stream all` session: the session's options passed through, with
+/// `--out DIR` becoming `--out DIR/<scene>.json` so each scene keeps its own log and baseline in the directory (TEST-019).
+fn perf_stream_child_args(scene: &str, rest: &[String]) -> Result<Vec<String>, String> {
+    let mut a = vec![scene.to_string()];
+    let mut it = rest.iter();
+    while let Some(x) = it.next() {
+        if x == "--out" {
+            let dir = it.next().ok_or("--out needs a value")?;
+            a.push(x.clone());
+            a.push(Path::new(dir).join(format!("{scene}.json")).to_string_lossy().into_owned());
+        } else {
+            a.push(x.clone());
+        }
+    }
+    perf_stream_args(&a)
+}
+
+/// The real [`ChildRunner`]: `cargo` with the child's arguments, stdout teed to the console and kept for the summary.
+struct CargoChildren<'a> {
+    root: &'a Path,
+}
+
+impl planet_perf::session::ChildRunner for CargoChildren<'_> {
+    fn run(&mut self, args: &[String]) -> Result<planet_perf::session::ChildResult, String> {
+        use std::io::BufRead;
+        eprintln!("$ cargo {}", args.join(" "));
+        let mut child = std::process::Command::new("cargo")
+            .args(args)
+            .current_dir(self.root)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("cannot start `cargo`: {e}"))?;
+        let mut output = String::new();
+        if let Some(stdout) = child.stdout.take() {
+            for line in std::io::BufReader::new(stdout).lines().map_while(Result::ok) {
+                println!("{line}");
+                output.push_str(&line);
+                output.push('\n');
+            }
+        }
+        let status = child.wait().map_err(|e| format!("cannot wait for `cargo`: {e}"))?;
+        Ok(planet_perf::session::ChildResult { code: status.code(), output })
+    }
+}
+
+/// `perf stream all`: one child process per scene, in order, so each scene's RAM is its own peak working set and each starts cold.
+/// The readiness gate (ADR 0020) runs in every child, before its measured case: each scene is gated on the machine as it is then.
+/// A failing scene does not stop the others; the exit is non-zero if any failed.
+fn perf_stream_all(root: &Path, rest: &[String]) -> Res {
+    let mut runner = CargoChildren { root };
+    let outcomes = planet_perf::session::run_scenes(&mut runner, &STREAM_SCENES, &|scene| perf_stream_child_args(scene, rest))?;
+    let (text, ok) = planet_perf::session::summary(&outcomes);
+    println!("{text}");
+    if ok {
+        Ok(())
+    } else {
+        Err(text.lines().last().unwrap_or("a scene failed").to_string())
+    }
+}
+
 pub fn perf(root: &Path, args: &[String]) -> Res {
     if args.first().map(String::as_str) == Some("stream") {
+        if stream_runs_all(&args[1..]) {
+            let rest = if args.get(1).is_some_and(|a| a == "all") { &args[2..] } else { &args[1..] };
+            return perf_stream_all(root, rest);
+        }
         let cargo_args = perf_stream_args(&args[1..])?;
         let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
         return run(root, "cargo", &refs, &[]);
@@ -424,6 +493,28 @@ mod tests {
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+
+    // spec: TEST-019
+    #[test]
+    fn perf_stream_all_runs_a_child_per_scene_with_the_options_passed_through_and_a_log_per_scene() {
+        assert!(stream_runs_all(&s(&[])) && stream_runs_all(&s(&["all"])) && stream_runs_all(&s(&["--store", "D"])));
+        assert!(!stream_runs_all(&s(&["dive"])));
+        for name in STREAM_SCENES {
+            let rest = s(&["--store", "D:/bake", "--global-res", "256", "--out", "target/perf", "--machine-ready", "--allow-memory-bake"]);
+            let a = perf_stream_child_args(name, &rest).unwrap();
+            let at = a.iter().position(|x| x == "--scene").unwrap();
+            assert_eq!(a[at + 1], name, "one named scene, never `streaming`");
+            assert!(!a.contains(&"streaming".to_string()));
+            let out = a.iter().position(|x| x == "--out").unwrap();
+            assert!(a[out + 1].ends_with(&format!("{name}.json")) && a[out + 1].starts_with("target/perf"), "{a:?}");
+            for keep in ["--store", "D:/bake", "--global-res", "256", "--machine-ready", "--allow-memory-bake"] {
+                assert!(a.contains(&keep.to_string()), "{keep} in {a:?}");
+            }
+        }
+        let smoke = perf_stream_child_args("dive", &s(&["--smoke", "--allow-memory-bake"])).unwrap();
+        assert!(smoke.contains(&"--perf-smoke".to_string()) && !smoke.contains(&"--out".to_string()));
+        assert!(perf_stream_child_args("dive", &s(&["--out"])).unwrap_err().contains("needs a value"));
     }
 
     // spec: BUILD-003
