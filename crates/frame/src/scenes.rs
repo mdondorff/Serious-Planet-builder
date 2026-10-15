@@ -266,8 +266,9 @@ pub struct FrameLag {
     pub mean: f64,
     /// The largest single node's lag.
     pub worst: u8,
-    /// Target nodes with no drawn tile at, above or below them: counted as `level + 1` levels in the mean. A newly revealed edge
-    /// of the view under a stale plan, or a cover that is coarser than the selection, leaves some (the stale-plan rule allows it).
+    /// Target nodes with no drawn tile at, above or below them: counted as `level + 1` levels in the mean. Each one is a blank
+    /// tile (ADR 0032's hard measure: a tile, root or ancestor, for every visible node); the frame's drawing rule (a plan of another
+    /// camera is drawn only where it covers the frame's view, else the cover) leaves none.
     pub uncovered: Vec<TileId>,
 }
 

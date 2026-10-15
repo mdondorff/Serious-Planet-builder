@@ -129,6 +129,7 @@ impl Driver<'_> {
             wall_ms,
             lag: None,
             uncovered_nodes: 0,
+            uncovered_tiles: Vec::new(),
             blank_nodes,
             upload_bytes: c.upload_bytes,
             resident: c.resident,
@@ -171,6 +172,7 @@ fn apply_lags(frames: &mut [FrameRecord], lags: &[FrameLag]) -> Result<(), Strin
     for (f, l) in frames.iter_mut().zip(lags) {
         f.lag = Some(l.mean);
         f.uncovered_nodes = l.uncovered.len();
+        f.uncovered_tiles = l.uncovered.iter().map(|t| t.raw()).collect();
     }
     Ok(())
 }
@@ -286,6 +288,35 @@ fn run_case(
     )
     .map_err(err)?;
     Ok(CaseRun { frames, blanks, settle_s, clocks, teardown_s })
+}
+
+/// The `BLANK TILE` lines of a case, which fail the run after the logs are written (ADR 0032's hard measure: a tile, root or
+/// ancestor, for every visible node): the frames whose draw had a blank node, and, where the scene gates it (`spec.uncovered`),
+/// the frames with nodes of their fresh selection that nothing drawn covers, each with its tile ids.
+fn blank_failure_lines(scene: &str, spec: &planet_perf::streaming::CaseSpec, frames: &[FrameRecord], blanks: &[(usize, Vec<u64>)]) -> Vec<String> {
+    let mut lines: Vec<String> = blanks
+        .iter()
+        .map(|(k, ids)| {
+            format!(
+                "{scene}: frame {k} drew a blank node; tiles {}",
+                if ids.is_empty() {
+                    "nothing resident to show (not even a root)".to_string()
+                } else {
+                    ids.iter().map(|t| format!("{t:#018x}")).collect::<Vec<_>>().join(" ")
+                }
+            )
+        })
+        .collect();
+    if spec.uncovered == planet_perf::streaming::Gate::Gated {
+        for (k, f) in frames.iter().enumerate().filter(|(_, f)| f.uncovered_nodes > 0) {
+            lines.push(format!(
+                "{scene}: frame {k} had {} node(s) of its fresh selection with nothing drawn at, above or below them; tiles {}",
+                f.uncovered_nodes,
+                f.uncovered_tiles.iter().map(|t| format!("{t:#018x}")).collect::<Vec<_>>().join(" ")
+            ));
+        }
+    }
+    lines
 }
 
 // spec: TEST-019, TEST-018, TEST-012
@@ -415,17 +446,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         let spec = case_spec(scene.name(), run.frames.len(), FRAME_STEP_S, script.descent_frames).expect("a streaming scene");
         let verdicts = case_verdicts(&spec, &run.frames, &run.blanks, &mem);
         let lines: Vec<String> = verdicts.iter().map(|v| v.line(scene.name())).collect();
-        for (k, ids) in &run.blanks {
-            blank_failures.push(format!(
-                "{}: frame {k} drew a blank node; tiles {}",
-                scene.name(),
-                if ids.is_empty() {
-                    "nothing resident to show (not even a root)".to_string()
-                } else {
-                    ids.iter().map(|t| format!("{t:#018x}")).collect::<Vec<_>>().join(" ")
-                }
-            ));
-        }
+        blank_failures.extend(blank_failure_lines(scene.name(), &spec, &run.frames, &run.blanks));
         let wall: Vec<f64> = run.frames.iter().map(|f| f.wall_ms).collect();
         let stats = summarize(&wall, 0).ok_or("no frames")?;
         // The clock: the first sample before the case, and the lowest-clocked sample of the case in the `after` slot, so a view is
@@ -539,7 +560,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         for f in &blank_failures {
             writeln!(out, "BLANK TILE: {f}").map_err(err)?;
         }
-        return Err(format!("{} frame(s) drew a blank tile (STRM-002): {}", blank_failures.len(), blank_failures[0]));
+        return Err(format!("{} frame(s) drew a blank tile or left a visible node without one (STRM-002): {}", blank_failures.len(), blank_failures[0]));
     }
     let over: Vec<String> = reports
         .iter()
@@ -628,6 +649,7 @@ mod tests {
             wall_ms: 1.0,
             lag: None,
             uncovered_nodes: 0,
+            uncovered_tiles: Vec::new(),
             blank_nodes: 0,
             upload_bytes: 0,
             resident: 0,
@@ -648,6 +670,27 @@ mod tests {
         assert_eq!((frames[0].lag, frames[1].lag, frames[0].uncovered_nodes, frames[1].uncovered_nodes), (Some(0.5), Some(0.0), 0, 1));
         let e = apply_lags(&mut frames, &lags[..1]).unwrap_err();
         assert!(e.contains("2 frames recorded but 1 lags"), "{e}");
+    }
+
+    // spec: TEST-018, TEST-019, TEST-020
+    #[test]
+    fn a_visible_node_without_a_drawn_tile_fails_the_run_like_a_blank_tile_naming_scene_frame_and_tiles_except_in_dive_fast() {
+        let mut frames: Vec<FrameRecord> = (0..4).map(|_| FrameRecord::default()).collect();
+        frames[2].uncovered_nodes = 2;
+        frames[2].uncovered_tiles = vec![0x1234, 0x5678];
+        for scene in ["dive", "teleport-1m", "teleport-2km", "look-1m", "look-2km"] {
+            let spec = case_spec(scene, 4, FRAME_STEP_S, 0).unwrap();
+            let lines = blank_failure_lines(scene, &spec, &frames, &[]);
+            assert_eq!(lines.len(), 1, "{scene}: {lines:?}");
+            assert!(
+                lines[0].starts_with(&format!("{scene}: frame 2 had 2 node(s)")) && lines[0].contains("0x0000000000001234 0x0000000000005678"),
+                "{lines:?}"
+            );
+        }
+        let spec = case_spec("dive-fast", 4, FRAME_STEP_S, 0).unwrap();
+        assert!(blank_failure_lines("dive-fast", &spec, &frames, &[]).is_empty(), "dive-fast is report-only");
+        // A blank node in the draw fails every scene, dive-fast included, as before.
+        assert_eq!(blank_failure_lines("dive-fast", &spec, &frames, &[(1, vec![0x42])]).len(), 1);
     }
 
     // spec: TEST-019

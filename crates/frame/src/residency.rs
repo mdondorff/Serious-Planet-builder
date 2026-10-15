@@ -6,7 +6,7 @@
 //! of any view from the same position is a subset (LOD-007); the scheduler uses R to decide what is wanted and
 //! what is cancelled (STRM-005), D only to order requests.
 
-use crate::lod::{select_nodes_cached, select_nodes_field_cached, NodeSelection, SelectionCache};
+use crate::lod::{select_nodes_cached, select_nodes_field_cached, NodeSelection, SelectionCache, TileBounds};
 use crate::LodParams;
 use planet_core::cube::FaceMapping;
 use planet_core::{PlanetFixed, TileId};
@@ -23,9 +23,12 @@ pub struct ResidencyEntry {
 }
 
 /// R: entries in ascending tile-id order, closed under parents.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ResidencySet {
     pub tiles: Vec<ResidencyEntry>,
+    /// The bounds the selection cached for the tiles of R (empty for R over flat terrain and for sets made by hand): what the
+    /// frame path's cover reads to cull and measure like the plan without evaluating a field (STRM-016).
+    pub bounds: TileBounds,
 }
 
 impl ResidencySet {
@@ -43,7 +46,10 @@ impl ResidencySet {
                 t = a.parent();
             }
         }
-        ResidencySet { tiles: all.into_iter().map(|(tile, (leaf, distance_m))| ResidencyEntry { tile, leaf, distance_m }).collect() }
+        ResidencySet {
+            tiles: all.into_iter().map(|(tile, (leaf, distance_m))| ResidencyEntry { tile, leaf, distance_m }).collect(),
+            bounds: TileBounds::default(),
+        }
     }
 
     pub fn contains(&self, tile: TileId) -> bool {
@@ -77,5 +83,8 @@ pub fn residency_set_field(
     p: &LodParams,
     cache: &mut SelectionCache,
 ) -> ResidencySet {
-    ResidencySet::from_selection(&select_nodes_field_cached(map, position, field, p, cache))
+    let mut r = ResidencySet::from_selection(&select_nodes_field_cached(map, position, field, p, cache));
+    // Every tile of R was visited by the selection, so its geometry and volume are in the cache: the bounds are lookups.
+    r.bounds = cache.bounds_of(r.tiles.iter().map(|e| e.tile), position, map, field, p);
+    r
 }

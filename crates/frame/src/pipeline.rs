@@ -7,21 +7,25 @@
 //!   the thread count (CON-14).
 //! - [`draw_plan`]: the plan a frame draws, a pure function of the frame's camera, the newest completed plan and the
 //!   resident set: the plan rebased to the camera, every node that is not resident replaced by its deepest resident
-//!   ancestor, or, when there is no usable plan (the first frame, after a jump), the cover of the view ([`cover_selection`]).
+//!   ancestor, or, when there is no usable plan that covers the frame's view (the first frame, after a jump, a turn that outruns
+//!   the plan), the cover of the view ([`cover_selection_bounded`]: the plan's own selection with "resident" as the condition
+//!   for descending, so with R resident it equals the plan of the camera).
 //! - [`PlanPipeline`]: the per-frame glue of the three.
 //!
 //! The stale-plan rule: frame N draws the newest completed plan if it is usable for frame N's camera ([`plan_usable`]:
 //! the camera moved at most [`STALE_MOVE_FRACTION`] of the finest node's split distance and turned at most
-//! [`STALE_ROTATION_RAD`] since the plan's camera, same frame size, view and grid), otherwise the cover. A plan that is
-//! usable but made for an earlier camera is drawn with its nodes and the camera of frame N (origins and matrix rebased).
+//! [`STALE_ROTATION_RAD`] since the plan's camera, same frame size, view and grid) and it covers the frame's view
+//! ([`plan_covers_view`]), otherwise the cover. A plan that is usable but made for an earlier camera is drawn with its nodes and
+//! the camera of frame N (origins and matrix rebased).
 //! Once the camera has been still for as long as a plan takes, the frame draws the synchronous frame's plan, node for
 //! node.
 
-use crate::lod::{cover_selection, LodParams, SelectionCache};
+use crate::lod::{cover_selection_bounded, plan_covers_view, LodParams, SelectionCache, TileBounds};
 use crate::plan::{face_mapping_by_id, PlanError, CLEAR_COLOR, HEIGHT_RANGE};
 use crate::prefetch::prefetch_set;
 use crate::residency::{residency_set_field, ResidencySet};
 use crate::terrain::{node_color, plan_terrain_threaded, TerrainDraw, TerrainPlan, TerrainRequest};
+use planet_core::cube::FaceMapping;
 use planet_core::{PlanetFixed, TileId};
 use planet_generators::height::HeightField;
 use planet_streaming::Spawner;
@@ -175,73 +179,92 @@ pub fn plan_usable(plan: &TerrainPlan, req: &TerrainRequest) -> bool {
         && a.up.normalized().dot(b.up.normalized()) >= cos_limit
 }
 
-/// The plan frame `req` draws (STRM-016). `base` is the newest completed plan with the request it was made for, if any is
-/// usable; `resident` is what the renderer holds. A pure function of its arguments, and no height field is evaluated:
-/// - with a `base` made for exactly `req` and all its nodes resident, the result is that plan unchanged;
-/// - with a `base`, each node whose tile (with its mesh key) is not resident is replaced by its deepest resident ancestor
-///   (the coarser tile wins over any resident descendant it covers, so no two drawn tiles overlap) and the camera of `req` is
-///   put in (origins and matrix), so the plan's nodes follow the camera;
-/// - without one, the nodes are [`cover_selection`] of the resident set.
+/// The plan frame `req` draws (STRM-016) with no cached tile bounds: [`draw_plan_with`] over empty bounds.
 pub fn draw_plan(
     req: &TerrainRequest,
     base: Option<(&TerrainRequest, &TerrainPlan)>,
     resident: &dyn ResidentSet,
 ) -> Result<DrawPlan, PlanError> {
+    draw_plan_with(req, base, resident, &TileBounds::default())
+}
+
+/// The plan frame `req` draws (STRM-016). `base` is the newest completed plan with the request it was made for, if any is
+/// usable; `resident` is what the renderer holds; `bounds` the tile bounds of the newest residency set (the cover reads them
+/// instead of evaluating a field). A pure function of its arguments, and no height field is evaluated:
+/// - with a `base` made for exactly `req` and all its nodes resident, the result is that plan unchanged;
+/// - with a `base`, each node whose tile (with its mesh key) is not resident is replaced by its deepest resident ancestor
+///   (the coarser tile wins over any resident descendant it covers, so no two drawn tiles overlap) and the camera of `req` is
+///   put in (origins and matrix), so the plan's nodes follow the camera; a `base` made for another camera is drawn only if it
+///   covers the frame's view ([`plan_covers_view`]: every tile of the frame's own cover is drawn by it, or filled by finer
+///   tiles, and no node is blank), otherwise the frame draws the cover;
+/// - without a `base`, the nodes are [`cover_selection_bounded`] of the resident set: the plan's own selection for the frame's
+///   camera with "resident" as the condition for descending.
+pub fn draw_plan_with(
+    req: &TerrainRequest,
+    base: Option<(&TerrainRequest, &TerrainPlan)>,
+    resident: &dyn ResidentSet,
+    bounds: &TileBounds,
+) -> Result<DrawPlan, PlanError> {
     let map = face_mapping_by_id(&req.face_mapping).ok_or_else(|| PlanError::UnknownFaceMapping(req.face_mapping.clone()))?;
     let mut shown: BTreeMap<TileId, TerrainDraw> = BTreeMap::new();
     let (mut substituted, mut blank) = (0usize, 0usize);
-    let kind = match base {
-        Some((base_req, plan)) => {
-            for d in &plan.nodes {
-                if resident.resident(d.tile).is_some_and(|r| r.mesh_key == d.mesh_key) {
-                    let rel = d.origin.0 - req.camera.position.0;
-                    shown.insert(d.tile, TerrainDraw { camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32], ..*d });
-                    continue;
-                }
-                let mut up = d.tile.parent();
-                let found = loop {
-                    match up {
-                        Some(a) => match resident.resident(a) {
-                            Some(r) => break Some((a, r)),
-                            None => up = a.parent(),
-                        },
-                        None => break None,
-                    }
-                };
-                match found {
-                    Some((a, r)) => {
-                        substituted += 1;
-                        shown.insert(a, draw_of(req, a, r));
-                    }
-                    None => blank += 1,
-                }
+    let mut kind = DrawKind::Cover;
+    let mut cover: Option<Vec<TileId>> = None;
+    if let Some((base_req, plan)) = base {
+        for d in &plan.nodes {
+            if resident.resident(d.tile).is_some_and(|r| r.mesh_key == d.mesh_key) {
+                let rel = d.origin.0 - req.camera.position.0;
+                shown.insert(d.tile, TerrainDraw { camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32], ..*d });
+                continue;
             }
-            // The coarser stand-in covers whatever finer tiles of the plan lie under it.
-            let tiles: Vec<TileId> = shown.keys().copied().collect();
-            for t in tiles {
-                let mut up = t.parent();
-                while let Some(a) = up {
-                    if shown.contains_key(&a) {
-                        shown.remove(&t);
-                        break;
-                    }
-                    up = a.parent();
+            let mut up = d.tile.parent();
+            let found = loop {
+                match up {
+                    Some(a) => match resident.resident(a) {
+                        Some(r) => break Some((a, r)),
+                        None => up = a.parent(),
+                    },
+                    None => break None,
                 }
-            }
-            if base_req == req && substituted == 0 && blank == 0 {
-                DrawKind::Exact
-            } else {
-                DrawKind::Stale
+            };
+            match found {
+                Some((a, r)) => {
+                    substituted += 1;
+                    shown.insert(a, draw_of(req, a, r));
+                }
+                None => blank += 1,
             }
         }
-        None => {
-            for t in cover_selection(map.as_ref(), &req.camera, &req.lod, &|t| resident.resident(t).map(|r| r.origin)) {
-                let r = resident.resident(t).expect("the cover holds resident tiles only");
-                shown.insert(t, draw_of(req, t, r));
+        // The coarser stand-in covers whatever finer tiles of the plan lie under it.
+        let tiles: Vec<TileId> = shown.keys().copied().collect();
+        for t in tiles {
+            let mut up = t.parent();
+            while let Some(a) = up {
+                if shown.contains_key(&a) {
+                    shown.remove(&t);
+                    break;
+                }
+                up = a.parent();
             }
-            DrawKind::Cover
         }
-    };
+        // The plan of exactly this camera serves it by construction; a plan of another camera must cover the frame's view.
+        let serves = base_req == req || {
+            let c = cover.insert(view_cover(req, map.as_ref(), resident, bounds));
+            blank == 0 && plan_covers_view(map.as_ref(), &req.camera, &req.lod, bounds, c, &shown.keys().copied().collect())
+        };
+        if serves {
+            kind = if base_req == req && substituted == 0 && blank == 0 { DrawKind::Exact } else { DrawKind::Stale };
+        } else {
+            shown.clear();
+            (substituted, blank) = (0, 0);
+        }
+    }
+    if kind == DrawKind::Cover {
+        for t in cover.unwrap_or_else(|| view_cover(req, map.as_ref(), resident, bounds)) {
+            let r = resident.resident(t).expect("the cover holds resident tiles only");
+            shown.insert(t, draw_of(req, t, r));
+        }
+    }
     let nodes: Vec<TerrainDraw> = shown.into_values().collect();
     let plan = match (kind, base) {
         // The synchronous frame's plan, untouched (and so equal to it bit for bit).
@@ -258,6 +281,11 @@ pub fn draw_plan(
         },
     };
     Ok(DrawPlan { plan, kind, substituted, blank })
+}
+
+/// The cover of the frame's view over the resident set (the tiles of [`cover_selection_bounded`]).
+fn view_cover(req: &TerrainRequest, map: &dyn FaceMapping, resident: &dyn ResidentSet, bounds: &TileBounds) -> Vec<TileId> {
+    cover_selection_bounded(map, &req.camera, &req.lod, &|t| resident.resident(t).map(|r| r.origin), bounds)
 }
 
 /// What a worker plans over: a height field that is `Send + Sync + 'static`, or anything that can build one inside the job
@@ -630,7 +658,9 @@ impl PlanPipeline {
             self.last_predicted = predicted;
         }
         let base = self.current.as_ref().filter(|c| c.request == *req || plan_usable(&c.plan, req));
-        let draw = draw_plan(req, base.map(|c| (&c.request, c.plan.as_ref())), resident).map_err(|e| e.to_string())?;
+        let empty = TileBounds::default();
+        let bounds = self.residency.as_ref().map_or(&empty, |r| &r.residency.bounds);
+        let draw = draw_plan_with(req, base.map(|c| (&c.request, c.plan.as_ref())), resident, bounds).map_err(|e| e.to_string())?;
         let wanted =
             self.current.as_ref().map(|c| c.plan.nodes.iter().enumerate().map(|(i, n)| (n.tile, i as f64)).collect()).unwrap_or_default();
         Ok(PipelineFrame { frame: self.frame, base_seq: base.map(|c| c.seq), draw, delivered, residency_delivered, requested, wanted })

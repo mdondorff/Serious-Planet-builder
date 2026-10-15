@@ -142,7 +142,7 @@ pub fn bounding_sphere(map: &dyn FaceMapping, tile: TileId, p: &LodParams) -> (V
 
 /// Per-tile geometry used by selection: computed once per visited tile (each evaluation needs nine face-to-direction
 /// transforms with transcendentals) and shared by the horizon test, the frustum test, the split distance and the morph.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct TileGeom {
     /// Unit direction of the tile centre.
     dir: Vec3,
@@ -154,7 +154,7 @@ struct TileGeom {
 
 /// Bounding volume of a tile including its height bounds (LOD-008): the sphere around the tile's column at mid-height
 /// that covers its horizontal extent (stretched to the highest point of the column) and half of its height range.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct Volume {
     centre: Vec3,
     radius: f64,
@@ -507,58 +507,238 @@ fn select_impl(
     NodeSelection { nodes }
 }
 
-/// The cover of a view (STRM-016, ADR 0032 point 5): the deepest resident tiles that serve the view, a pure function of the
-/// camera, the LOD parameters and the resident set that evaluates no height field. Walk down from the resident roots; a
-/// tile is split only while the LOD criterion (distance from the camera to the tile's resident origin less its radius, below
-/// the level's split distance) says so and every child that is in view is resident; otherwise it is drawn itself. Tiles beyond the horizon and
-/// outside the frustum (padded by `p.max_height_m` and the skirt depth) are left out. The result is in ascending tile-id
-/// order and has no tile that is an ancestor of another. It is not balanced (no 2:1 rule): the skirts hide the seams.
+/// The per-tile bounds the selection cached for a set of tiles, handed to the frame path (STRM-016): the tile's geometry
+/// (centre, chord radius, angular radius) and its height-aware volume (LOD-008), exactly the values the plan's own selection
+/// computed. The frame path evaluates no height field, so it cannot compute a volume; it reads them from here. A tile that is
+/// not in the set is judged by the geometry alone (looser, never tighter than the plan's cut).
+///
+/// The bounds are those of the residency set R of one camera position and one set of LOD parameters ([`TileBounds::complete_for`]).
+/// For that position R holds every tile the plan of any view direction can select or descend through, so a tile that is not in
+/// it is one the plan never needs: it has no tile of the selection under it (it lies beyond the horizon, or all its children do).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TileBounds {
+    /// The position and parameters R was selected for (`None`: bounds made by hand, complete for nothing).
+    for_view: Option<(PlanetFixed, LodParams)>,
+    tiles: IdMap<(TileGeom, Volume)>,
+}
+
+impl TileBounds {
+    pub fn len(&self) -> usize {
+        self.tiles.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tiles.is_empty()
+    }
+
+    /// Whether these are the bounds of R for exactly `position` and `p`: a tile they do not hold is then one the plan of any
+    /// view direction from `position` never selects (STRM-015, LOD-007: the draw set is a subset of R).
+    pub fn complete_for(&self, position: PlanetFixed, p: &LodParams) -> bool {
+        self.for_view.as_ref().is_some_and(|(pos, lod)| *pos == position && lod == p)
+    }
+}
+
+impl SelectionCache {
+    /// The bounds of `tiles` (a cache hit for every tile a selection has visited), for the frame path's cover (see
+    /// [`TileBounds`]).
+    pub fn bounds_of(
+        &mut self,
+        tiles: impl IntoIterator<Item = TileId>,
+        position: PlanetFixed,
+        map: &dyn FaceMapping,
+        field: &dyn HeightField,
+        p: &LodParams,
+    ) -> TileBounds {
+        self.prepare(map, field, p);
+        let SelectionCache { tiles: geom_memo, volumes, misses, .. } = self;
+        let mut geoms = GeomCache { map, field, p, tiles: geom_memo, volumes, misses };
+        let mut out = TileBounds { for_view: Some((position, p.clone())), tiles: IdMap::default() };
+        for t in tiles {
+            let v = geoms.volume(t);
+            out.tiles.insert(t, (geoms.get(t), v));
+        }
+        out
+    }
+}
+
+/// What the cover and the coverage test ask of a tile for one camera: the plan's own horizon and frustum culling (the padded
+/// reference sphere, then the tight cut with the tile's height-bounds volume when the bounds hold it, LOD-007/008).
+struct ViewTest<'a> {
+    map: &'a dyn FaceMapping,
+    camera: PlanetFixed,
+    frustum: Frustum,
+    p: &'a LodParams,
+    bounds: &'a TileBounds,
+    /// The bounds are R's for this camera position: a tile outside them is never needed.
+    complete: bool,
+    geoms: IdMap<TileGeom>,
+}
+
+impl<'a> ViewTest<'a> {
+    fn new(map: &'a dyn FaceMapping, camera: &Camera, p: &'a LodParams, bounds: &'a TileBounds) -> Self {
+        Self {
+            map,
+            camera: camera.position,
+            frustum: camera.frustum(),
+            p,
+            bounds,
+            complete: bounds.complete_for(camera.position, p),
+            geoms: IdMap::default(),
+        }
+    }
+
+    fn geom(&mut self, t: TileId) -> TileGeom {
+        if let Some((g, _)) = self.bounds.tiles.get(&t) {
+            return *g;
+        }
+        let (map, p) = (self.map, self.p);
+        *self.geoms.entry(t).or_insert_with(|| tile_geom(map, t, p))
+    }
+
+    /// The plan's cull of the tile: beyond the horizon, or outside the frustum (the padded sphere, then the tight volume); or, when
+    /// the bounds are complete for the camera, not in R at all (the plan has nothing under it).
+    fn culled(&mut self, t: TileId) -> bool {
+        if self.complete && !self.bounds.tiles.contains_key(&t) {
+            return true;
+        }
+        let g = self.geom(t);
+        let p = self.p;
+        if p.cull_horizon && below_horizon_at(g.centre, g.angular_radius, self.camera, p) {
+            return true;
+        }
+        let skirt = skirt_depth(t, p);
+        if self.frustum.culls_sphere(g.centre, g.radius + p.max_height_m + skirt) {
+            return true;
+        }
+        self.bounds.tiles.get(&t).is_some_and(|(_, v)| self.frustum.culls_sphere(v.centre, v.radius + skirt))
+    }
+
+    /// Distance from the camera to the tile: to its height-aware volume when the bounds hold it (what the plan measures),
+    /// otherwise to its resident origin less its radius (the relief within a tile is small against the tile's own radius).
+    fn distance(&mut self, t: TileId, origin: PlanetFixed) -> f64 {
+        match self.bounds.tiles.get(&t) {
+            Some((_, v)) => ((self.camera.0 - v.centre).length() - v.radius).max(0.0),
+            None => {
+                let g = self.geom(t);
+                ((self.camera.0 - origin.0).length() - g.radius).max(0.0)
+            }
+        }
+    }
+}
+
+/// The cover of a view (STRM-002, STRM-016, ADR 0032 point 5) with no cached bounds: [`cover_selection_bounded`] judging every
+/// tile by its geometry alone (the padded-sphere cull, the origin-based distance).
 pub fn cover_selection(
     map: &dyn FaceMapping,
     camera: &Camera,
     p: &LodParams,
     resident: &dyn Fn(TileId) -> Option<PlanetFixed>,
 ) -> Vec<TileId> {
-    let frustum = camera.frustum();
-    let mut geoms: IdMap<TileGeom> = IdMap::default();
-    let mut geom = |t: TileId| -> TileGeom { *geoms.entry(t).or_insert_with(|| tile_geom(map, t, p)) };
-    let mut out: BTreeSet<TileId> = BTreeSet::new();
+    cover_selection_bounded(map, camera, p, resident, &TileBounds::default())
+}
+
+/// The cover of a view: the plan's own selection with "resident" as the condition for descending, a pure function of the
+/// camera, the LOD parameters, the resident set and the cached tile bounds that evaluates no height field. Walk down from the
+/// resident roots; a tile is split while the plan's LOD test says so (the distance to its volume, below the level's split
+/// distance) and every child that is in view is resident, otherwise it is drawn itself. In view means what the plan means: not
+/// beyond the horizon, not outside the frustum (the padded sphere), not outside the tight cut (the tile's height-bounds
+/// volume, LOD-007/008). A child that the horizon, the frustum or the tight cut culls never stops its parent's descent. The
+/// leaves are then balanced as the plan balances them (the 2:1 rule), where the tiles of the split are resident; a split with a
+/// tile missing is undone. With every tile of the residency set resident the cover equals the plan of the camera, node for node
+/// (the bounds hold the tiles the plan visits). Always a subset of the resident tiles, in ascending tile-id order, with no tile
+/// an ancestor of another. Tiles that `bounds` does not hold are judged by their geometry alone (a looser cull, the
+/// origin-based distance).
+pub fn cover_selection_bounded(
+    map: &dyn FaceMapping,
+    camera: &Camera,
+    p: &LodParams,
+    resident: &dyn Fn(TileId) -> Option<PlanetFixed>,
+    bounds: &TileBounds,
+) -> Vec<TileId> {
+    let mut view = ViewTest::new(map, camera, p, bounds);
+    let mut leaves: BTreeSet<TileId> = BTreeSet::new();
     let mut stack: Vec<TileId> = Vec::new();
     for f in Face::ALL {
         let root = TileId::new(f, 0, 0, 0).expect("root");
-        let g = geom(root);
-        if resident(root).is_some() && !cover_culled(root, &g, camera.position, &frustum, p) {
+        if resident(root).is_some() && !view.culled(root) {
             stack.push(root);
         }
     }
     while let Some(t) = stack.pop() {
-        let g = geom(t);
-        let split = p.split_distance(t.level());
-        // The distance estimate needs no height field: the tile is resident, so its origin (the centre at its terrain height)
-        // is known; the relief within a tile is small against the tile's own radius.
         let origin = resident(t).expect("the walk visits resident tiles only");
-        let distance = ((camera.position.0 - origin.0).length() - g.radius).max(0.0);
-        if t.level() < p.max_level && distance < split {
-            let seen: Vec<TileId> = children_of(t)
-                .into_iter()
-                .filter(|&c| {
-                    let gc = geom(c);
-                    !cover_culled(c, &gc, camera.position, &frustum, p)
-                })
-                .collect();
-            if !seen.is_empty() && seen.iter().all(|&c| resident(c).is_some()) {
+        if t.level() < p.max_level && view.distance(t, origin) < p.split_distance(t.level()) {
+            let seen: Vec<TileId> = children_of(t).into_iter().filter(|&c| !view.culled(c)).collect();
+            if seen.iter().all(|&c| resident(c).is_some()) {
+                // With every child out of view nothing of the tile can be seen, and the plan draws nothing there either.
                 stack.extend(seen);
                 continue;
             }
         }
-        out.insert(t);
+        leaves.insert(t);
     }
-    out.into_iter().collect()
+    balance_leaves(map, &mut leaves);
+    // A balancing split whose tiles are not all resident is undone: the nearest resident ancestor stands in (it is a leaf of
+    // the walk or an ancestor of one), and a stand-in covers the finer tiles under it.
+    let mut stand_ins: BTreeSet<TileId> = BTreeSet::new();
+    for leaf in leaves {
+        let mut x = leaf;
+        while resident(x).is_none() {
+            x = x.parent().expect("a root of the walk is resident");
+        }
+        stand_ins.insert(x);
+    }
+    stand_ins
+        .iter()
+        .copied()
+        .filter(|t| {
+            let mut up = t.parent();
+            while let Some(a) = up {
+                if stand_ins.contains(&a) {
+                    return false;
+                }
+                up = a.parent();
+            }
+            true
+        })
+        .collect()
 }
 
-fn cover_culled(t: TileId, g: &TileGeom, camera: PlanetFixed, frustum: &Frustum, p: &LodParams) -> bool {
-    (p.cull_horizon && below_horizon_at(g.centre, g.angular_radius, camera, p))
-        || frustum.culls_sphere(g.centre, g.radius + p.max_height_m + skirt_depth(t, p))
+/// Whether a plan that draws `drawn` serves the view of `camera` (STRM-016): it draws every tile of the view's own cover
+/// (`view_cover`, [`cover_selection_bounded`] for `camera`) or, in its place, finer tiles that fill all of its children that
+/// are in view, recursively. A tile of the cover that the plan covers only with a coarser ancestor does not count (the plan is
+/// coarser than the view can be drawn, which would blur it), and nor does one the plan does not draw at all (a sliver that
+/// turned into view). A conservative test: the plan then has, for every node the camera sees, a tile at that node's level or a
+/// finer one; its cost is a walk over the cover with cached bounds. Pure.
+pub fn plan_covers_view(
+    map: &dyn FaceMapping,
+    camera: &Camera,
+    p: &LodParams,
+    bounds: &TileBounds,
+    view_cover: &[TileId],
+    drawn: &BTreeSet<TileId>,
+) -> bool {
+    let mut above: IdSet = IdSet::default();
+    for &d in drawn {
+        let mut up = d.parent();
+        while let Some(a) = up {
+            if !above.insert(a) {
+                break;
+            }
+            up = a.parent();
+        }
+    }
+    let mut view = ViewTest::new(map, camera, p, bounds);
+    let mut stack: Vec<TileId> = view_cover.to_vec();
+    while let Some(t) = stack.pop() {
+        if drawn.contains(&t) {
+            continue;
+        }
+        if !above.contains(&t) {
+            return false;
+        }
+        stack.extend(children_of(t).into_iter().filter(|&c| !view.culled(c)));
+    }
+    true
 }
 
 /// The morph interval a leaf needs: [`LodParams::morph_interval`] with the margin for the extent of its four same-level

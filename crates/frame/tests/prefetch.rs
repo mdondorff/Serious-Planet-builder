@@ -142,7 +142,7 @@ fn set(entries: &[(u32, u64, f64)]) -> ResidencySet {
     let mut tiles: Vec<ResidencyEntry> =
         entries.iter().map(|&(level, i, d)| ResidencyEntry { tile: tile(level, i), leaf: true, distance_m: d }).collect();
     tiles.sort_by_key(|e| e.tile);
-    ResidencySet { tiles }
+    ResidencySet { tiles, bounds: Default::default() }
 }
 
 fn tile(level: u32, i: u64) -> TileId {
