@@ -3,6 +3,7 @@
 
 pub mod globalperf;
 pub mod manifest;
+pub mod pipelined;
 mod plancheck;
 pub mod sheet;
 pub mod skeleton;
@@ -28,6 +29,10 @@ modes:
                              with the production LOD defaults (override with --cells, --tau; --view applies; default size 1280x720,
                              small sizes can fail LOD validation) for the real-GPU jitter review
     --stream                 generate terrain tiles asynchronously through the streaming path (same image as the default)
+    --pipelined [--then SCRIPT]   draw the terrain view through the pipelined loop (plans from a worker, a cover plan until the first one arrives,
+                             the GPU never waited for; STRM-016): from a cold start, then (with --then) after a jump to the other camera; the
+                             image is the one frame the loop settles on, equal to the default path's; --out-dir DIR also writes pipelined.txt
+                             (per-frame kind, counts and the time columns plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms)
     --view face|tile-id|level|morph|height|normals|depth|relief|morph-height   debug view (tiles scene: face, tile-id, height; a flight defaults to relief)
     --tile FACE,LEVEL,X,Y    tile to draw (repeatable; default: a tile and its east neighbour)
     --seed N --res N         generator seed and tile resolution (cells, power of two)
@@ -95,6 +100,9 @@ pub struct Options {
     pub offscreen: bool,
     pub script: String,
     pub stream: bool,
+    /// `--pipelined`: the terrain view through the pipelined loop (STRM-016); `--then SCRIPT` jumps to another camera afterwards.
+    pub pipelined: bool,
+    pub then: Option<String>,
     pub cells: u32,
     pub tau: f64,
     pub frames: usize,
@@ -147,6 +155,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         offscreen: false,
         script: "3".into(),
         stream: false,
+        pipelined: false,
+        then: None,
         cells: 32,
         tau: 6.0,
         frames: 300,
@@ -163,6 +173,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--perf" => o.perf = true,
             "--offscreen" => o.offscreen = true,
             "--stream" => o.stream = true,
+            "--pipelined" => o.pipelined = true,
+            "--then" => o.then = Some(it.next().ok_or("--then needs a script index or name")?.clone()),
             "--perf-smoke" => o.perf_smoke = true,
             "--cells" => o.cells = it.next().ok_or("--cells needs a value")?.parse().map_err(|e| format!("--cells: {e}"))?,
             "--tau" => o.tau = it.next().ok_or("--tau needs a value")?.parse().map_err(|e| format!("--tau: {e}"))?,
@@ -248,13 +260,14 @@ pub(crate) const STORE_OPTIONS: [&str; 14] = [
 ];
 
 /// Options a `--flight` run would ignore, and the flight-only options other runs would ignore (TEST-013).
-const FLIGHT_EXCLUDES: [&str; 12] = [
+const FLIGHT_EXCLUDES: [&str; 13] = [
     "--perf",
     "--perf-smoke",
     "--repro",
     "--out",
     "--bundle",
     "--stream",
+    "--pipelined",
     "--tile",
     "--script",
     "--frames",
@@ -277,8 +290,21 @@ fn check_flight_options(o: &Options) -> Result<(), String> {
         if o.out_dir.is_none() {
             return Err("--flight needs --out-dir".into());
         }
-    } else if let Some(f) = FLIGHT_ONLY.iter().find(|f| o.given.contains(**f)) {
+    } else if let Some(f) = FLIGHT_ONLY.iter().find(|f| o.given.contains(**f) && !(o.pipelined && **f == "--out-dir")) {
         return Err(format!("{f} only applies to --flight"));
+    }
+    if o.then.is_some() && !o.pipelined {
+        return Err("--then only applies to --pipelined".into());
+    }
+    if o.pipelined {
+        if o.scene != "terrain" {
+            return Err("--pipelined is only available for --scene terrain".into());
+        }
+        const CLASH: [&str; 8] = ["--stream", "--bundle", "--perf", "--perf-smoke", "--repro", "--flight", "--size", "--tile"];
+        let clash: Vec<&str> = CLASH.iter().copied().filter(|f| o.given.contains(*f)).collect();
+        if !clash.is_empty() {
+            return Err(format!("--pipelined draws one settled view and excludes {}", clash.join(", ")));
+        }
     }
     Ok(())
 }

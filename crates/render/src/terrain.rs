@@ -273,6 +273,10 @@ pub struct TerrainRenderer {
     timing: Option<TimingResources>,
     /// Bytes of vertex data uploaded so far.
     pub uploaded_bytes: u64,
+    /// Frames the GPU has finished, counted by the queue's completion callbacks (they run when the device is polled).
+    retired: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// Submissions of the frames not yet seen finished, oldest first.
+    in_flight: std::collections::VecDeque<wgpu::SubmissionIndex>,
 }
 
 struct TimingResources {
@@ -286,6 +290,13 @@ impl TerrainRenderer {
     /// frame after their release (the renderer finishes a frame before it returns).
     pub fn new(ctx: &GpuContext, size: (u32, u32), cells: u32) -> Self {
         let pool = tier_pool(Tier::Mid, cells, 1).unwrap_or_else(|e| panic!("terrain pools for cells {cells}: {e}"));
+        Self::with_pools(ctx, size, cells, pool)
+    }
+
+    /// [`new`](TerrainRenderer::new) for a loop that keeps up to `frames_in_flight` frames in flight (STRM-016): a released slot is
+    /// reusable that many frames later, so no frame that may still read it is running.
+    pub fn with_frames_in_flight(ctx: &GpuContext, size: (u32, u32), cells: u32, frames_in_flight: u64) -> Self {
+        let pool = tier_pool(Tier::Mid, cells, frames_in_flight).unwrap_or_else(|e| panic!("terrain pools for cells {cells}: {e}"));
         Self::with_pools(ctx, size, cells, pool)
     }
 
@@ -439,6 +450,8 @@ impl TerrainRenderer {
             depth_view,
             timing,
             uploaded_bytes: 0,
+            retired: Default::default(),
+            in_flight: Default::default(),
         }
     }
 
@@ -616,8 +629,48 @@ impl TerrainRenderer {
         self.tiles.len()
     }
 
-    /// Draw the plan. Every planned tile must have been uploaded. With `timed`, GPU time is measured when supported.
+    /// Draw the plan and wait until the GPU has finished it. Every planned tile must have been uploaded. With `timed`, GPU time is
+    /// measured when supported.
     pub fn render(&mut self, ctx: &GpuContext, plan: &TerrainPlan, timed: bool) -> Result<(FrameTiming, TerrainStats), ExecError> {
+        self.render_inner(ctx, plan, timed, true)
+    }
+
+    /// Draw the plan and return once it is submitted, without waiting for the GPU (STRM-016). The timing carries the CPU time of
+    /// the call (`total_ms` equals it, there is no GPU time). Count finished frames with [`retired_frames`](TerrainRenderer::retired_frames).
+    pub fn submit(&mut self, ctx: &GpuContext, plan: &TerrainPlan) -> Result<(FrameTiming, TerrainStats), ExecError> {
+        self.render_inner(ctx, plan, false, false)
+    }
+
+    /// Frames the GPU has finished so far (polls the device without blocking).
+    pub fn retired_frames(&mut self, ctx: &GpuContext) -> u64 {
+        let _ = ctx.device.poll(wgpu::PollType::Poll);
+        self.reap()
+    }
+
+    /// Block until the oldest submitted frame has finished; the one wait of a pipelined loop, taken only when the bound on frames
+    /// in flight is reached. Returns the frames finished in total.
+    pub fn wait_oldest(&mut self, ctx: &GpuContext) -> u64 {
+        if let Some(idx) = self.in_flight.front().cloned() {
+            ctx.device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: None }).expect("device poll failed");
+        }
+        self.reap()
+    }
+
+    fn reap(&mut self) -> u64 {
+        let retired = self.retired.load(std::sync::atomic::Ordering::SeqCst);
+        while self.in_flight.len() as u64 > self.frame.saturating_sub(retired) {
+            self.in_flight.pop_front();
+        }
+        retired
+    }
+
+    fn render_inner(
+        &mut self,
+        ctx: &GpuContext,
+        plan: &TerrainPlan,
+        timed: bool,
+        wait: bool,
+    ) -> Result<(FrameTiming, TerrainStats), ExecError> {
         let started = std::time::Instant::now();
         if plan.size != self.size {
             return Err(ExecError::SizeMismatch { plan: plan.size, renderer: self.size });
@@ -708,8 +761,16 @@ impl TerrainRenderer {
             encoder.copy_buffer_to_buffer(&t.resolve, 0, &t.readback, 0, 16);
         }
         let command_buffer = encoder.finish();
-        ctx.queue.submit([command_buffer]);
+        let index = ctx.queue.submit([command_buffer]);
+        let retired = std::sync::Arc::clone(&self.retired);
+        ctx.queue.on_submitted_work_done(move || {
+            retired.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        self.in_flight.push_back(index);
         let cpu_ms = started.elapsed().as_secs_f64() * 1000.0;
+        if !wait {
+            return Ok((FrameTiming { cpu_ms, total_ms: cpu_ms, gpu_ms: None }, stats));
+        }
         ctx.device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
         let total_ms = started.elapsed().as_secs_f64() * 1000.0;
         let gpu_ms = timing.and_then(|t| {
@@ -724,6 +785,7 @@ impl TerrainRenderer {
             // A zero or negative interval is a broken query, not a free frame: report nothing instead of 0 ms.
             (delta > 0).then(|| delta as f64 * f64::from(ctx.queue.get_timestamp_period()) / 1.0e6)
         });
+        self.reap();
         Ok((FrameTiming { cpu_ms, total_ms, gpu_ms }, stats))
     }
 
