@@ -40,7 +40,7 @@ impl fmt::Display for ClockState {
     }
 }
 
-/// Whether a view's GPU figures (`gpu_ms`, `frame_ms`) may be judged or compared.
+/// Whether a view's GPU figures (`gpu_ms`, the GPU budget) may be judged or compared; `frame_ms` is judged at any state.
 #[derive(Clone, Debug, PartialEq)]
 pub enum GpuValidity {
     Valid(ClockState),
