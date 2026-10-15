@@ -3,11 +3,11 @@
 //!
 //! Pure over the JSON text of two logs ([`crate::report_json`]); a small reader keeps this crate dependency-free.
 
-use crate::clock::{equal_clock_state, gpu_validity, ClockPoint, GpuValidity};
+use crate::clock::{equal_clock_state, gpu_validity, view_clock_state, ClockPoint, ClockState, GpuValidity};
 use std::collections::BTreeMap;
 
-/// The metrics that depend on the GPU clock (ADR 0034): the GPU time and the frame wall time, which waits for the GPU.
-pub const GPU_METRICS: [&str; 2] = ["gpu_ms", "frame_ms"];
+/// The metrics that need P0 (ADR 0034 as amended by the owner, 2026-10-15): `frame_ms` is judged and compared at any clock state.
+pub const GPU_METRICS: [&str; 1] = ["gpu_ms"];
 
 /// A median that rose by more than this fraction of the last valid log's median is a regression.
 pub const REGRESSION_THRESHOLD: f64 = 0.15;
@@ -184,6 +184,9 @@ pub struct LogSummary {
     pub medians: BTreeMap<String, BTreeMap<String, f64>>,
     /// Per path: whether its GPU figures are valid and the clock state, read from the recorded samples (ADR 0034).
     pub gpu: BTreeMap<String, GpuValidity>,
+    /// Per path: the clock state of the view, or why there is none (`mixed P0/P2`, `no clock sample`); printed beside frame
+    /// medians, which are compared at any state.
+    pub clock: BTreeMap<String, Result<ClockState, String>>,
     pub counts: BTreeMap<String, BTreeMap<String, u64>>,
 }
 
@@ -242,8 +245,9 @@ pub fn summarize_log(text: &[u8]) -> Result<LogSummary, String> {
         Some(Json::Str(s)) => Some(s.clone()),
         _ => None,
     };
-    let gpu = points.into_iter().map(|(p, v)| (p, gpu_validity(&v))).collect();
-    Ok(LogSummary { valid, resolution: res, field, medians, gpu, counts })
+    let gpu = points.iter().map(|(p, v)| (p.clone(), gpu_validity(v))).collect();
+    let clock = points.iter().map(|(p, v)| (p.clone(), view_clock_state(v))).collect();
+    Ok(LogSummary { valid, resolution: res, field, medians, gpu, clock, counts })
 }
 
 /// Where the last valid log of the scene whose log is `log` is kept: `terrain.json` -> `terrain.last-valid.json` beside it.
@@ -364,9 +368,38 @@ pub fn comparison_lines(last_valid: Option<&[u8]>, new: &[u8]) -> Vec<String> {
     comparison_lines_gpu(last_valid, last_valid, new)
 }
 
-/// [`comparison_lines`] with the baseline of the GPU figures (`gpu_ms`, `frame_ms`) apart from that of the CPU figures and
-/// the counts (ADR 0034). A view's GPU figures are compared only if both views are valid for GPU figures at equal clock
-/// state; otherwise the line says why (`not comparable: clock state X vs Y`).
+/// The label of a view's clock state in the report: the state, or the reason there is none.
+fn clock_label(s: &LogSummary, path: &str) -> String {
+    match s.clock.get(path) {
+        Some(Ok(c)) => c.to_string(),
+        Some(Err(e)) => e.clone(),
+        None => "no clock sample".into(),
+    }
+}
+
+/// Frame medians are compared at any clock state; the states of both views are printed beside them (ADR 0034 as amended).
+fn frame_state_lines(old: &LogSummary, new: &LogSummary) -> Vec<String> {
+    let mut out = Vec::new();
+    for (path, m) in &new.medians {
+        if !m.contains_key("frame_ms") || !old.medians.get(path).is_some_and(|o| o.contains_key("frame_ms")) {
+            continue;
+        }
+        let equal = matches!((old.clock.get(path), new.clock.get(path)), (Some(Ok(a)), Some(Ok(b))) if equal_clock_state(a, b));
+        if !equal {
+            out.push(format!(
+                "frame medians of {path} compared across unequal clock states (the frame time is what a user sees): clock state {} vs {}",
+                clock_label(old, path),
+                clock_label(new, path)
+            ));
+        }
+    }
+    out
+}
+
+/// [`comparison_lines`] with the baseline of the GPU figure (`gpu_ms`) apart from that of the frame medians,
+/// CPU figures and counts (ADR 0034). A view's `gpu_ms` is compared only if both views are valid for GPU
+/// figures at equal clock state; otherwise the line says why (`not comparable: clock state X vs Y`). Frame medians are
+/// compared whatever the states and print both.
 pub fn comparison_lines_gpu(last_valid: Option<&[u8]>, last_gpu_valid: Option<&[u8]>, new: &[u8]) -> Vec<String> {
     let new = match summarize_log(new) {
         Ok(s) => s,
@@ -388,7 +421,15 @@ pub fn comparison_lines_gpu(last_valid: Option<&[u8]>, last_gpu_valid: Option<&[
                 let cpu = |_: &str, m: &str| !GPU_METRICS.contains(&m);
                 let rs = rises_where(&old, &new, REGRESSION_THRESHOLD, cpu);
                 found += rs.len();
-                lines.extend(rs.iter().map(regression_line));
+                lines.extend(rs.iter().map(|r| {
+                    let l = regression_line(r);
+                    if r.metric == "frame_ms" {
+                        format!("{l} [clock state {} vs {}]", clock_label(&old, &r.path), clock_label(&new, &r.path))
+                    } else {
+                        l
+                    }
+                }));
+                lines.extend(frame_state_lines(&old, &new));
                 compared += count_compared(&old, &new, cpu);
                 for (path, counts) in &new.counts {
                     for (name, &n) in counts {
@@ -689,7 +730,7 @@ mod clock_tests {
         // Another boost clock beyond the tolerance: not comparable, and the line names both states.
         let far = session(("P0", 1200, 4.2), ("P0", 1395, 0.5));
         let lines = comparison_lines(Some(old.as_bytes()), far.as_bytes());
-        assert!(lines.iter().all(|l| !l.contains("REGRESSION")), "{lines:?}");
+        assert!(lines.iter().all(|l| !l.contains("gpu_ms")), "no GPU regression across unequal states: {lines:?}");
         assert!(
             lines.iter().any(|l| l.contains("not comparable: clock state P0 1395 MHz vs P0 1200 MHz") && l.contains("ground-1m")),
             "{lines:?}"
@@ -702,7 +743,7 @@ mod clock_tests {
         let p0 = session(("P0", 1395, 3.0), ("P0", 1395, 0.5));
         let p2 = session(("P2", 1150, 4.2), ("P0", 1395, 0.5));
         let lines = comparison_lines(Some(p0.as_bytes()), p2.as_bytes());
-        assert!(lines.iter().all(|l| !l.contains("REGRESSION")), "{lines:?}");
+        assert!(lines.iter().all(|l| !l.contains("gpu_ms")), "{lines:?}");
         assert!(lines.iter().any(|l| l.contains("ground-1m") && l.contains("NOT VALID for GPU budgets (P2 1150 MHz)")), "{lines:?}");
         // The other way round: the baseline view was not valid.
         let lines = comparison_lines(Some(p2.as_bytes()), p0.as_bytes());
@@ -745,5 +786,49 @@ mod clock_tests {
             gpu_baseline_path(std::path::Path::new("perf/logs/terrain.json")),
             std::path::Path::new("perf/logs/terrain.last-gpu-valid.json")
         );
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn frame_medians_are_compared_across_unequal_clock_states_with_both_states_printed() {
+        let p0 = session(("P0", 1395, 3.0), ("P0", 1395, 0.5));
+        let p2 = session(("P2", 1150, 4.2), ("P0", 1395, 0.5));
+        // Frame median 4.0 -> 5.2 ms (+30 %): reported although the states differ, with both states; the GPU figure is not.
+        let lines = comparison_lines(Some(p0.as_bytes()), p2.as_bytes());
+        let frame = lines.iter().find(|l| l.contains("REGRESSION") && l.contains("frame_ms")).unwrap_or_else(|| panic!("{lines:?}"));
+        assert!(
+            frame.contains("ground-1m") && frame.contains("4.00 -> 5.20") && frame.contains("clock state P0 1395 MHz vs P2 1150 MHz"),
+            "{frame}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("frame medians of terrain/ground-1m compared")
+                    && l.contains("clock state P0 1395 MHz vs P2 1150 MHz")),
+            "{lines:?}"
+        );
+        assert!(lines.iter().all(|l| !l.contains("REGRESSION") || !l.contains("gpu_ms")), "{lines:?}");
+        // The other way round, and P2 against P2 (equal states: no extra state line).
+        let back = comparison_lines(Some(p2.as_bytes()), p0.as_bytes());
+        assert!(back.iter().any(|l| l.contains("clock state P2 1150 MHz vs P0 1395 MHz")), "{back:?}");
+        let (a, b) = (session(("P2", 1150, 4.0), ("P2", 1150, 0.5)), session(("P2", 1150, 5.5), ("P2", 1150, 0.5)));
+        let same = comparison_lines(Some(a.as_bytes()), b.as_bytes());
+        assert!(
+            same.iter().any(|l| l.contains("REGRESSION") && l.contains("frame_ms") && l.contains("P2 1150 MHz vs P2 1150 MHz")),
+            "{same:?}"
+        );
+        assert!(same.iter().all(|l| !l.starts_with("frame medians of")), "{same:?}");
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn a_log_without_samples_still_compares_its_frame_medians() {
+        let old_fmt = session(("P0", 1395, 3.0), ("P0", 1395, 0.5))
+            .replace("\"clocks_before\"", "\"x_before\"")
+            .replace("\"clocks_after\"", "\"x_after\"");
+        let new = session(("P0", 1395, 4.5), ("P0", 1395, 0.5));
+        let lines = comparison_lines(Some(old_fmt.as_bytes()), new.as_bytes());
+        assert!(lines.iter().any(|l| l.contains("frame_ms") && l.contains("no clock sample vs P0 1395 MHz")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("GPU medians of terrain/ground-1m not compared")), "the GPU figure is withheld: {lines:?}");
     }
 }
