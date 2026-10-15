@@ -1,3 +1,21 @@
 # A test that blocks (for example a deadlocked pool) must fail, not stall CI.
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 3 }
+
+# The tier-A tests that take longest start first, so that they do not run last and alone (the tail of `cargo xtask test fast`,
+# TEST-001 budget). A start order only: no test is skipped, retried or changed. `cargo xtask test fast` prints the slowest five.
+[[profile.default.overrides]]
+filter = '''
+test(a_cut_tile_has_no_vertex_inside_the_frustum)
+or test(camera_is_above_the_drawn_surface_in_every_scripted_view_on_the_steep_field)
+or test(the_slots_every_standard_view_needs_stay_within_their_pins_and_the_share)
+or test(resident_bytes_never_exceed_the_budget_and_reads_stay_exact)
+or test(tiles_over_the_store_are_identical_at_1_4_and_20_threads_and_to_the_in_memory_bake)
+or test(a_share_smaller_than_r_keeps_the_view_exact_and_the_slots_inside_the_share)
+or test(every_standard_view_of_the_default_world_stays_within_its_own_pinned_counts)
+'''
+priority = 50
+
+# `cargo xtask test fast` reads this to print the slowest tests (TEST-001 budget guard).
+[profile.default.junit]
+path = "junit.xml"

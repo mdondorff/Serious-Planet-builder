@@ -158,6 +158,9 @@ fn resident_bytes_never_exceed_the_budget_and_reads_stay_exact() {
                 let mut worst = 0;
                 while !stop.load(Ordering::SeqCst) {
                     worst = worst.max(src.stats().resident_bytes);
+                    // Sample often, but give the core away: a spinning watcher took a whole core of `test fast` for the
+                    // length of the test.
+                    std::thread::yield_now();
                 }
                 worst
             });

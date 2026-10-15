@@ -48,7 +48,7 @@ Source: CON-25, CLAUDE.md
 - **THEN** `--machine-ready` is passed through only when given, and any other option is an error naming the override
 
 ### Requirement: BUILD-003 Tiered test commands
-`cargo xtask test fast` SHALL run tier A tests for the changed crates and every crate above them, `cargo xtask test` SHALL run tiers A and B, and `cargo xtask test gpu` SHALL run tier C; tiers SHALL be selected by test-binary name (`gpu_*` is tier C, `oracle_*` tier B, all others tier A) on the software adapter unless `--real` is given. `cargo xtask test gpu --real` SHALL also run the tier-B oracles, on the real adapter.
+`cargo xtask test fast` SHALL run tier A tests for the changed crates and every crate above them, `cargo xtask test` SHALL run tiers A and B, and `cargo xtask test gpu` SHALL run tier C; tiers SHALL be selected by test-binary name (`gpu_*` is tier C, `oracle_*` tier B, all others tier A) on the software adapter unless `--real` is given. `cargo xtask test gpu --real` SHALL also run the tier-B oracles, on the real adapter. After a `test fast` run the command SHALL print the five slowest tests of that run and, when the run took longer than the 10 s budget, a warning (a printed warning, not a failure: a hard limit on a loaded machine is flaky).
 
 Verify: A
 Status: active
@@ -61,6 +61,10 @@ Source: ADR 0009, report §16
 #### Scenario: Shared crate changed
 - **WHEN** `testkit`, `perf` or a root manifest changed, or nothing changed
 - **THEN** `test fast` selects every crate
+
+#### Scenario: Slowest tests named
+- **WHEN** a nextest JUnit report of a `test fast` run is read
+- **THEN** the five tests with the greatest times are listed, slowest first, each as its binary and test name
 
 ### Requirement: BUILD-004 Three run modes
 The single binary SHALL provide the modes `editor`, `generate` and `test-render`, each of which starts and exits cleanly with `--smoke`; headless PNG output of `test-render` is covered by TEST-004 and REND-007.

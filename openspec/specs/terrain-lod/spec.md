@@ -83,7 +83,7 @@ Source: CON-03, CON-12, ADR 0002, LOD-008, M4 item 7c
 - **THEN** the frustum selection has fewer nodes and still covers every ray through the image that reaches the sphere
 
 #### Scenario: Tight cut
-- **WHEN** the ten standard views are planned at the production parameters and rendered through a CPU depth pass (tier B, `oracle_frustum_cut.rs`; the vertex-per-plane and count checks are tier A, `frustum_cut.rs`)
+- **WHEN** the ten standard views are planned at the production parameters and rendered through a CPU depth pass (tier B, `oracle_frustum_cut.rs`; the vertex-per-plane and count checks are tier A, `frustum_cut.rs`, which checks every eighth dropped tile of every camera; `oracle_frustum_cut_sweep.rs` (tier B) checks every second one on the full set of cameras)
 - **THEN** every tile with a visible triangle is in the plan, no vertex of a dropped tile lies inside the frustum, and the ground-1m plan holds fewer than half the nodes the global pad kept
 
 ### Requirement: LOD-008 Height-aware selection
