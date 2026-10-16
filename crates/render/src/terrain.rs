@@ -528,6 +528,8 @@ pub struct TerrainRenderer {
     in_flight: std::collections::VecDeque<wgpu::SubmissionIndex>,
     /// Long-lived GPU objects created so far (REND-013).
     init: InitCounts,
+    /// Which parts of the renderer a submission has used so far (REND-017).
+    used: UseMasks,
 }
 
 fn make_pool_buffer(device: &wgpu::Device, label: &'static str, bytes: u64) -> wgpu::Buffer {
@@ -550,6 +552,37 @@ pub struct InitCounts {
     pub pool_allocations: u32,
     /// Builds of the per-frame ring (the first one counts).
     pub ring_builds: u32,
+}
+
+/// Sets in the per-frame ring: the number of distinct sets of buffers and bind groups the first frames use (REND-017).
+pub const RING_SETS: u32 = RING as u32;
+
+/// Which parts of the renderer a submission has already drawn with, as masks.
+#[derive(Clone, Copy, Debug, Default)]
+struct UseMasks {
+    ring: u8,
+    pipelines: u8,
+    timestamps: bool,
+    modes: u8,
+    waited: u32,
+}
+
+/// How many distinct parts of the renderer have been used by a submission so far (REND-017): the lazy work of the driver and of
+/// wgpu for each happens at its first use, so a part used for the first time inside a measured frame makes that frame wait on the
+/// GPU. [`warm_up`](TerrainRenderer::warm_up) uses every part a scene's first frames use, in one waited submission, and later
+/// frames add nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FirstUse {
+    /// Sets of the per-frame ring a frame has been recorded with (of [`RING_SETS`]).
+    pub ring_sets: u32,
+    /// Pipelines that have drawn (1 for the vertex format, 2 with the compact format once both drew).
+    pub pipelines: u32,
+    /// 1 once a pass with timestamp queries has run (adapters that support them), else 0.
+    pub timestamp_passes: u32,
+    /// Draw modes used: per-draw and indirect each count once.
+    pub draw_modes: u32,
+    /// Submissions the renderer waited for to completion by itself before returning (the warm-up's).
+    pub waited_submissions: u32,
 }
 
 /// Nodes the ring holds after [`warm_up`](TerrainRenderer::warm_up) (capped by the share's node-record bytes): above the node
@@ -771,6 +804,7 @@ impl TerrainRenderer {
             retired: Default::default(),
             in_flight: Default::default(),
             init: InitCounts { pipelines: if compact { 2 } else { 1 }, pool_allocations: 0, ring_builds: 1 },
+            used: UseMasks::default(),
         }
     }
 
@@ -911,8 +945,9 @@ impl TerrainRenderer {
 
     /// Do the one-time work of the first frames now, outside any measured frame (REND-013, TEST-018): allocate the vertex pool and
     /// the first block of the main pool (block 0, or atlas 0 with its bind group), grow the per-frame ring to [`WARM_NODES`]
-    /// (within the share's node-record bytes), and submit one throwaway frame that draws a zeroed tile through every pipeline
-    /// the format has in the active draw mode, polled to completion, so the driver's lazy work (first-use initialisation of the
+    /// (within the share's node-record bytes), and submit one throwaway frame (every ring set, the timed pass where supported, a
+    /// two-record multi-draw) that draws a zeroed tile through every pipeline
+    /// the format has in the active draw mode (call `set_draw_mode` first), polled to completion, so the driver's lazy work (first-use initialisation of the
     /// buffers and the atlas, pipeline state, shader JIT) is done before frame 0. No tile becomes resident and no counter of the
     /// frame clock moves. The bytes allocated are the pure model's for one block plus the vertex pool (STRM-006); the rest of the
     /// share stays on demand.
@@ -930,21 +965,25 @@ impl TerrainRenderer {
         } else {
             self.block_buffer(device, 0);
         }
-        let set = &self.ring[0];
-        ctx.queue.write_buffer(&set.globals, 0, &[0u8; GLOBALS_BYTES as usize]);
-        ctx.queue.write_buffer(&set.nodes, 0, &[0u8; NODE_BYTES as usize]);
-        ctx.queue.write_buffer(&set.args, 0, &[0u8; DRAW_RECORD_BYTES as usize]);
-        if let Some(refs) = &set.refs {
-            ctx.queue.write_buffer(refs, 0, &[0u8; REF_BYTES as usize]);
-        }
         let indirect = self.draw_mode == DrawMode::Indirect;
-        if indirect {
-            // One record: `index_count` indices, one instance, everything else zero.
-            let mut record = [0u8; DRAW_RECORD_BYTES as usize];
-            record[..4].copy_from_slice(&self.index_count.to_le_bytes());
-            record[4..8].copy_from_slice(&1u32.to_le_bytes());
-            ctx.queue.write_buffer(&set.args, 0, &record);
+        // Two records in the indirect path so the multi-draw takes its count above one; one instance each, the rest zero.
+        let records = if indirect { 2u32 } else { 1 };
+        let mut record = [0u8; 2 * DRAW_RECORD_BYTES as usize];
+        for k in 0..records as usize {
+            let at = k * DRAW_RECORD_BYTES as usize;
+            record[at..at + 4].copy_from_slice(&self.index_count.to_le_bytes());
+            record[at + 4..at + 8].copy_from_slice(&1u32.to_le_bytes());
         }
+        // Every set of the ring carries its own buffers and bind groups; each is written, bound and drawn from once.
+        for set in &self.ring {
+            ctx.queue.write_buffer(&set.globals, 0, &[0u8; GLOBALS_BYTES as usize]);
+            ctx.queue.write_buffer(&set.nodes, 0, &[0u8; 2 * NODE_BYTES as usize]);
+            ctx.queue.write_buffer(&set.args, 0, &record[..records as usize * DRAW_RECORD_BYTES as usize]);
+            if let Some(refs) = &set.refs {
+                ctx.queue.write_buffer(refs, 0, &[0u8; 2 * REF_BYTES as usize]);
+            }
+        }
+        let timing = self.timing.as_ref();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("terrain-warm-up") });
         // Mark the pools initialised on the GPU (wgpu zeroes a buffer lazily before its first use).
         if let Some(pool) = &self.vertex_pool {
@@ -953,7 +992,7 @@ impl TerrainRenderer {
         if let Some(Some(block)) = self.blocks.first() {
             encoder.clear_buffer(block, 0, None);
         }
-        {
+        for (k, set) in self.ring.iter().enumerate() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain-warm-up-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -967,13 +1006,18 @@ impl TerrainRenderer {
                     depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Discard }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: None,
+                // The timed pass of `render(.., true)` runs once here too.
+                timestamp_writes: timing.filter(|_| k == 0).map(|t| wgpu::RenderPassTimestampWrites {
+                    query_set: &t.queries,
+                    beginning_of_pass_write_index: Some(0),
+                    end_of_pass_write_index: Some(1),
+                }),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
             let draw = |pass: &mut wgpu::RenderPass| {
                 if indirect {
-                    pass.multi_draw_indexed_indirect(&set.args, 0, 1);
+                    pass.multi_draw_indexed_indirect(&set.args, 0, records);
                 } else {
                     pass.draw_indexed(0..self.index_count, 0, 0..1);
                 }
@@ -991,9 +1035,37 @@ impl TerrainRenderer {
                 pass.set_bind_group(2, &c.atlases[0].as_ref().expect("atlas 0").bind, &[]);
                 draw(&mut pass);
             }
+            self.used.ring |= 1 << k;
+        }
+        self.used.pipelines = if self.compact.is_some() { 0b11 } else { 0b01 };
+        self.used.modes |= if indirect { 0b10 } else { 0b01 };
+        if let Some(t) = timing {
+            encoder.resolve_query_set(&t.queries, 0..2, &t.resolve, 0);
+            encoder.copy_buffer_to_buffer(&t.resolve, 0, &t.readback, 0, 16);
         }
         ctx.queue.submit([encoder.finish()]);
         ctx.device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
+        if let Some(t) = timing {
+            // The readback buffer's first map, as a timed frame does it.
+            let slice = t.readback.slice(..);
+            slice.map_async(wgpu::MapMode::Read, |r| r.expect("timestamp map failed"));
+            ctx.device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
+            drop(slice.get_mapped_range().expect("timestamp range"));
+            t.readback.unmap();
+            self.used.timestamps = true;
+        }
+        self.used.waited += 1;
+    }
+
+    /// What the submissions so far have used (REND-017): the counters a test compares after the warm-up and after frames.
+    pub fn first_use(&self) -> FirstUse {
+        FirstUse {
+            ring_sets: self.used.ring.count_ones(),
+            pipelines: self.used.pipelines.count_ones(),
+            timestamp_passes: u32::from(self.used.timestamps),
+            draw_modes: self.used.modes.count_ones(),
+            waited_submissions: self.used.waited,
+        }
     }
 
     /// Choose how draws are submitted. Indirect needs adapter support (`GpuContext::indirect_draw_supported`); where it is
@@ -1630,12 +1702,19 @@ impl TerrainRenderer {
             // Frames in flight keep the buffers they use alive; the new ring serves the frames from here on.
             self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, self.compact.as_ref());
             self.init.ring_builds += 1;
+            self.used.ring = 0;
         }
         let mut globals = f32_bytes(&plan.view_projection);
         globals.extend(f32_bytes(&[lo, hi, 0.0, 0.0]));
         globals.extend([view_index(plan.view), 0, 0, 0].iter().flat_map(|v: &u32| v.to_le_bytes()));
         // Each frame writes its own set of the ring, so a frame still in flight keeps the records it reads.
-        let set = &self.ring[(self.frame % RING as u64) as usize];
+        let ring_index = (self.frame % RING as u64) as usize;
+        self.used.ring |= 1 << ring_index;
+        self.used.modes |= if self.draw_mode == DrawMode::Indirect { 0b10 } else { 0b01 };
+        for d in &plan.nodes {
+            self.used.pipelines |= if self.tiles[&d.tile].place == Place::Atlas { 0b10 } else { 0b01 };
+        }
+        let set = &self.ring[ring_index];
         ctx.queue.write_buffer(&set.globals, 0, &globals);
         let mut nodes = vec![0u8; NODE_BYTES as usize * plan.nodes.len().max(1)];
         for (i, d) in plan.nodes.iter().enumerate() {
@@ -1687,6 +1766,7 @@ impl TerrainRenderer {
         }
 
         let timing = if timed { self.timing.as_ref() } else { None };
+        self.used.timestamps |= timing.is_some() && wait;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("terrain") });
         {
             let [r, g, b, a] = plan.clear_color.map(|v| f64::from(v) / 255.0);

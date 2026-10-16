@@ -10,7 +10,7 @@ use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainPlan, Terrain
 use planet_generators::compact::{tile_data_field, vertex_tile_field};
 use planet_generators::height::Reference;
 use planet_generators::mesh::grid_indices;
-use planet_render::{AdapterPolicy, DrawMode, GpuContext, InitCounts, TerrainRenderer, WARM_NODES};
+use planet_render::{AdapterPolicy, DrawMode, FirstUse, GpuContext, InitCounts, TerrainRenderer, RING_SETS, WARM_NODES};
 use planet_streaming::PoolConfig;
 
 const R: f64 = 6_371_000.0;
@@ -177,4 +177,52 @@ fn growth_beyond_the_warmed_block_stays_on_demand() {
     let config = *r.pool_config();
     let modelled = config.allocated_bytes_with(blocks, true) - config.node_record_bytes + r.node_buffer_bytes();
     assert_eq!(r.pool_allocated_bytes(), modelled);
+}
+
+// spec: REND-017, REND-013, REND-016, STRM-016
+#[test]
+fn the_warm_up_frame_touches_everything_a_measured_frame_first_uses() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let p = plan(5);
+    for compact in [false, true] {
+        for mode in [DrawMode::PerDraw, DrawMode::Indirect] {
+            let what = format!("compact {compact}, {mode:?}");
+            let mut r = renderer(&ctx, compact);
+            let mode = r.set_draw_mode(&ctx, mode);
+            assert_eq!(r.first_use(), FirstUse::default(), "{what}: nothing is touched before the warm-up");
+            r.warm_up(&ctx);
+            let warm = r.first_use();
+            // Every set of the per-frame ring, every pipeline of the format, the timestamp pass where the adapter has one and the
+            // draw mode in effect: the lazy first-use work of each happens in the waited warm-up submission.
+            assert_eq!(warm.ring_sets, RING_SETS, "{what}: every ring set is used by the warm-up frame");
+            assert_eq!(warm.pipelines, if compact { 2 } else { 1 }, "{what}: every pipeline of the format draws");
+            assert_eq!(warm.timestamp_passes, u32::from(ctx.timestamps_supported()), "{what}: the timed pass runs where supported");
+            assert_eq!(warm.draw_modes, 1, "{what}: the active draw mode ({mode:?}) and no other");
+            assert_eq!(warm.waited_submissions, 1, "{what}: one submission, waited for before frame 0");
+            assert_eq!(r.resident_tiles(), 0, "{what}: no tile became resident");
+            // Frames 0..3, untimed and timed: nothing is touched for the first time.
+            upload(&ctx, &mut r, &p, compact);
+            for frame in 0..4 {
+                if frame % 2 == 0 {
+                    r.submit(&ctx, &p).unwrap();
+                } else {
+                    r.render(&ctx, &p, true).unwrap();
+                }
+                let now = r.first_use();
+                assert_eq!(
+                    FirstUse { waited_submissions: 0, ..now },
+                    FirstUse { waited_submissions: 0, ..warm },
+                    "{what}: frame {frame} first-used something"
+                );
+            }
+            // The counters see real first uses: a cold renderer touches ring sets and pipelines in its first two frames.
+            let mut cold = renderer(&ctx, compact);
+            cold.set_draw_mode(&ctx, mode);
+            upload(&ctx, &mut cold, &p, compact);
+            cold.submit(&ctx, &p).unwrap();
+            cold.submit(&ctx, &p).unwrap();
+            assert_eq!(cold.first_use().ring_sets, RING_SETS, "{what}: a cold renderer uses the sets in its first frames");
+            assert_eq!(cold.first_use().waited_submissions, 0, "{what}: and waited for nothing");
+        }
+    }
 }
