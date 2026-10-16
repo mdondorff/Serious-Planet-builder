@@ -203,7 +203,7 @@ fn a_plan_without_an_atmosphere_draws_what_it_drew_with_the_atmosphere_enabled()
 
 // spec: ATMO-011
 #[test]
-fn the_atmosphere_debug_views_show_the_tables_in_discrete_levels() {
+fn the_atmosphere_debug_views_are_discrete_levels_and_the_table_views_show_their_table() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let base = plan(0);
     let mut r = renderer_atmosphere(&ctx, true, &[&base]);
@@ -218,6 +218,10 @@ fn the_atmosphere_debug_views_show_the_tables_in_discrete_levels() {
         let hdr = r.lit_path().unwrap().read_hdr(&ctx);
         let levels: std::collections::BTreeSet<u32> = hdr.iter().flat_map(|p| p[..3].iter().map(|v| (v * 80.0).round() as u32)).collect();
         assert!(!levels.is_empty() && levels.len() <= 9, "{view:?}: {} distinct levels", levels.len());
+        // The two views of the static tables (the ones with goldens that every adapter must agree on) show structure: several levels.
+        if matches!(view, AtmosphereView::TransmittanceLut | AtmosphereView::MultiScatterLut) {
+            assert!(levels.len() >= 3, "{view:?}: only {} levels", levels.len());
+        }
     }
 }
 
@@ -258,4 +262,37 @@ fn sky_frames_match_the_adapters_goldens() {
         goldens.check(golden, &img, Tolerance::Exact);
     }
     goldens.finish();
+}
+
+// spec: ATMO-002
+#[test]
+fn the_atmosphere_lit_terrain_is_the_albedo_times_the_lighting_in_both_tile_formats() {
+    use planet_frame::look::shading::ShadeView;
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    for compact in [false, true] {
+        let base = plan(3);
+        let mut r = renderer_atmosphere(&ctx, compact, &[&base]);
+        let mut scene = |view: ShadeView| {
+            let mut l = atmosphere_plan(AtmosphereView::Composite);
+            l.view = view;
+            r.render(&ctx, &lit(base.clone(), l), false).unwrap();
+            r.lit_path().unwrap().atmosphere().unwrap().read_scene(&ctx)
+        };
+        let (lit_px, albedo, lighting) = (scene(ShadeView::Lit), scene(ShadeView::Albedo), scene(ShadeView::Lighting));
+        let mut checked = 0;
+        for i in 0..lit_px.len() {
+            if lit_px[i][3] == 0.0 {
+                continue;
+            }
+            for k in 0..3 {
+                // The albedo view holds albedo / pi, the lighting view the light; every value is written times the pre-exposure.
+                let factor = look::pre_exposure_factor(f64::from(EV));
+                let want = f64::from(albedo[i][k]) * std::f64::consts::PI * f64::from(lighting[i][k]) / factor;
+                let got = f64::from(lit_px[i][k]);
+                assert!((got - want).abs() <= 3e-3 * want.abs() + 2e-3, "compact {compact} pixel {i} channel {k}: {got} vs {want}");
+            }
+            checked += 1;
+        }
+        assert!(checked > 100, "compact {compact}: {checked} terrain pixels");
+    }
 }

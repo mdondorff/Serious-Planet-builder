@@ -14,6 +14,9 @@ ADR 0040 fixes the model (Hillaire 2020), the table sizes, the CPU reference and
 5. **The frame targets**: with an atmosphere the terrain draws into a second `Rgba16Float` scene target and the composite writes the lit path's HDR target (8 B per pixel more: 20 B per pixel in all, inside ADR 0048's 40 B + 32 MiB); the static tables (`Rgba32Float`, 0.28 MB) and the two products (`Rgba16Float`, 0.43 MB) are counted by the graph.
 6. **REND-005 is scoped to geometry shaders.** The atmosphere shaders hold the body radius as a value in their uniform block (decided in f64) as CON-11 v1.4 allows presentation shading; they are scanned for planet-scale literals but are exempt from the radius-uniform rule, and their bound is ATMO-001/ATMO-010.
 
+7. **Limb-stable discriminants in the orbit march.** At 20,000 km `(r mu)^2 - c` carries 1e8 m^2 of f32 error, which at 1e-6 rad from the tangent moves the ground distance by kilometres. The march forms `(r mu - q)(r mu + q)` and `(r mu - rho)(r mu + rho)` with `r`, `rho` and `q = sqrt(c_top)` sent as a high and a low f32 and `r mu` split with `fma`; `r mu + q` is then exact near the tangent. Measured against the f64 reference on f32-rounded inputs the worst orbit ray is 0.92 of the 1 % + 1e-4 bound on the software adapter (whose `fma` is not fused) and 0.02 on the RTX. The sun disc's angle comes from the chord between the view and sun vectors, and the planet's penumbra width is `w R / r`.
+8. **The scene target is 8 B per pixel** (`hdr-scene`, point 5): the composite cannot read and write one target, and a blend cannot apply a per-channel transmittance to the destination and add the in-scatter in one pass.
+
 ## Consequences
 - ADR 0040 stands; this ADR is the normative home of what its text leaves to the code.
 - Moving to Bruneton 2008 (the ADR's fallback) would replace points 1 and 3.

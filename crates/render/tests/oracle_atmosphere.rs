@@ -25,13 +25,20 @@ struct Rig {
     path: AtmospherePath,
 }
 
-fn rig() -> Rig {
-    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
-    let atm = Atmosphere::earth(R);
-    let luts = StaticLuts::generate(&atm);
-    let mut path = AtmospherePath::standalone(&ctx, (64, 48));
-    path.upload_tables(&ctx, &atm, &luts);
-    Rig { ctx, atm, luts, path }
+/// One device for all the tests of this binary, used one at a time: several WARP devices in one process crash it (the learning of
+/// 2026-10-16), and the path's uniform block is shared state. `cargo xtask test` runs one process per test anyway.
+fn rig() -> std::sync::MutexGuard<'static, Rig> {
+    static RIG: std::sync::OnceLock<std::sync::Mutex<Rig>> = std::sync::OnceLock::new();
+    RIG.get_or_init(|| {
+        let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+        let atm = Atmosphere::earth(R);
+        let luts = StaticLuts::generate(&atm);
+        let mut path = AtmospherePath::standalone(&ctx, (64, 48));
+        path.upload_tables(&ctx, &atm, &luts);
+        std::sync::Mutex::new(Rig { ctx, atm, luts, path })
+    })
+    .lock()
+    .unwrap_or_else(|e| e.into_inner())
 }
 
 fn camera(h: f64) -> Camera {
@@ -370,7 +377,7 @@ fn unit(v: [f64; 3]) -> ([f64; 3], f64) {
 // spec: ATMO-001, ATMO-002
 #[test]
 fn the_composite_applies_the_sky_and_the_aerial_perspective_as_the_reference_does() {
-    for (h, mu_sun) in [(2000.0, 0.3), (1.0, 0.3), (2000.0, -0.08)] {
+    for (h, mu_sun) in [(2000.0, 0.3), (1.0, 0.8), (20_000.0, 0.05), (2000.0, -0.08)] {
         composite_inside(h, mu_sun);
     }
 }

@@ -1265,7 +1265,10 @@ impl TerrainRenderer {
                 cache: None,
             })
         });
-        self.lit_objects += 1 + u32::from(compact_pipeline.is_some()) + 6;
+        // Counted by declaration: the atmosphere path's scene target, two tables, two products, the uniform buffer and three
+        // pipelines (sky view, aerial perspective, composite) beside the terrain pipelines made here.
+        const ATMOSPHERE_PATH_OBJECTS: u32 = 9;
+        self.lit_objects += 1 + u32::from(compact_pipeline.is_some()) + ATMOSPHERE_PATH_OBJECTS - 3;
         lit.atmosphere_pipeline = Some(pipeline);
         lit.atmosphere_compact_pipeline = compact_pipeline;
     }

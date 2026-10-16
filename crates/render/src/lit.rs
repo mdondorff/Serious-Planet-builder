@@ -582,6 +582,7 @@ impl LitPath {
         });
         let view = target.create_view(&Default::default());
         let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("lit-post") });
+        assert!(!self.frame_has_atmosphere(plan), "tone_map_to_image has no camera: it cannot draw an atmosphere");
         self.prepare(
             ctx,
             plan,
