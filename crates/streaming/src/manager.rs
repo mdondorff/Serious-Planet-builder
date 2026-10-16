@@ -12,6 +12,7 @@
 //!
 //! The result is a pure function of `(R, D, capacity)`: the same inputs in any order give the same sets.
 
+use crate::layer::{normalized, parents_listed};
 use crate::slots::VERTEX_POOL_MAX_LEVEL;
 use crate::{priority_key, Resolved, Streamer, Wants};
 use planet_core::{Face, TileId};
@@ -222,14 +223,41 @@ pub struct ManagerFrame {
 
 /// The residency manager: capacity in slots, degradation, eviction and requests in one place, on the injected clock, I/O and
 /// spawner. It owns the [`Streamer`] (and through it the slot pools); the renderer asks it for a tile's slot.
+///
+/// Two ways to drive it, one per manager: [`begin_frame`](ResidencyManager::begin_frame) takes all the wants every frame (tests,
+/// the skeleton); [`set_draw`](ResidencyManager::set_draw), [`set_residency`](ResidencyManager::set_residency),
+/// [`set_prefetch`](ResidencyManager::set_prefetch) and [`step`](ResidencyManager::step) take only the lists that changed
+/// (STRM-019). Both give the requests, cancellations and evictions of the same wants.
 pub struct ResidencyManager<T: Send + Sync + 'static> {
     streamer: Streamer<T>,
     last: DegradationReport,
+    /// The lists as handed to [`set_draw`](ResidencyManager::set_draw) and [`set_residency`](ResidencyManager::set_residency);
+    /// fitted again only when one of them changed.
+    raw_draw: Vec<(TileId, f64)>,
+    raw_residency: Vec<(TileId, f64)>,
+    draw_changed: bool,
+    residency_changed: bool,
+    /// Sum over the draw set of its tiles' level + 1 (at most the tiles of its closure) and whether R lists the parent of every
+    /// tile it lists: what the pool's bound needs.
+    draw_levels: usize,
+    residency_closed: bool,
+    /// The last fit went through [`degrade`]: the streamer then holds the fitted lists, not the raw ones.
+    fitted: bool,
 }
 
 impl<T: Send + Sync + 'static> ResidencyManager<T> {
     pub fn new(streamer: Streamer<T>) -> Self {
-        Self { streamer, last: DegradationReport::default() }
+        Self {
+            streamer,
+            last: DegradationReport::default(),
+            raw_draw: Vec::new(),
+            raw_residency: Vec::new(),
+            draw_changed: false,
+            residency_changed: false,
+            draw_levels: 0,
+            residency_closed: true,
+            fitted: false,
+        }
     }
 
     pub fn streamer(&self) -> &Streamer<T> {
@@ -253,5 +281,66 @@ impl<T: Send + Sync + 'static> ResidencyManager<T> {
         self.last = fitted.report.clone();
         let resolved = wants.draw.iter().map(|&(t, _)| self.streamer.resolve(t)).collect();
         ManagerFrame { resolved, report: fitted.report }
+    }
+
+    /// The draw set for the next [`step`](ResidencyManager::step) and after, until replaced.
+    pub fn set_draw(&mut self, draw: &[(TileId, f64)]) {
+        self.raw_draw = draw.to_vec();
+        self.draw_levels = draw.iter().map(|&(t, _)| usize::from(t.level()) + 1).sum();
+        self.draw_changed = true;
+    }
+
+    /// The residency set for the next [`step`](ResidencyManager::step) and after, until replaced.
+    pub fn set_residency(&mut self, residency: &[(TileId, f64)]) {
+        self.raw_residency = normalized(residency).into_owned();
+        self.residency_closed = parents_listed(&self.raw_residency, false);
+        self.residency_changed = true;
+    }
+
+    /// The prefetch set for the next [`step`](ResidencyManager::step) and after, until replaced. Prefetch is not fitted
+    /// (it takes free slots only).
+    pub fn set_prefetch(&mut self, prefetch: &[(TileId, f64)]) {
+        self.streamer.set_prefetch(prefetch);
+    }
+
+    /// One frame on the wants as last handed over. The wants are fitted again only if the draw or residency set changed since the
+    /// last step: when the tiles the sets can occupy (the listed tiles with their ancestors) cannot exceed the pool, they are
+    /// handed to the streamer as they are (nothing would be degraded) and only the list that changed is handed over; otherwise
+    /// [`degrade`] fits them. The work of a step that follows no change is that of a streamer frame with nothing to do (STRM-019).
+    pub fn step(&mut self) -> &DegradationReport {
+        let (draw_changed, residency_changed) = (std::mem::take(&mut self.draw_changed), std::mem::take(&mut self.residency_changed));
+        if draw_changed || residency_changed {
+            let capacity = self.streamer.main_capacity();
+            // The most the two sets can occupy: R and the closure of D (at most one tile per level above each) and the roots.
+            // R's own ancestors count only if R is not closed under parents.
+            let bound = if self.residency_closed { self.raw_residency.len() + self.draw_levels + 6 } else { usize::MAX };
+            if bound <= capacity {
+                if self.fitted {
+                    // The streamer holds the fitted lists: both are handed over.
+                    self.streamer.set_draw(&self.raw_draw);
+                    self.streamer.set_residency(&self.raw_residency);
+                } else {
+                    if draw_changed {
+                        self.streamer.set_draw(&self.raw_draw);
+                    }
+                    if residency_changed {
+                        self.streamer.set_residency(&self.raw_residency);
+                    }
+                }
+                self.fitted = false;
+            } else {
+                self.fitted = true;
+                let fitted = degrade(&self.raw_draw, &self.raw_residency, capacity, self.streamer.has_vertex_pool());
+                self.streamer.set_draw(&fitted.draw);
+                self.streamer.set_residency(&fitted.residency);
+                self.last = fitted.report;
+            }
+        }
+        self.streamer.step();
+        if !self.fitted {
+            let (r_full, pinned) = self.streamer.closure_numbers();
+            self.last = DegradationReport { capacity: self.streamer.main_capacity(), r_full, pinned, r_effective: r_full, ..Default::default() };
+        }
+        &self.last
     }
 }
