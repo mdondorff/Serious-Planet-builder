@@ -284,3 +284,10 @@ What happened: plain `cargo test -p planet-render --test gpu_warmup` (5 tests, e
 Assumption it changes: none in the specs; refines the F6 tracking line: tests that create devices are safe only per process (nextest, xtask and CI do that) and test-only crashes under plain `cargo test` are expected.
 Proposed follow-up: accepted as test-only; keep nextest isolation (no code fix possible on our side). For a developer who runs plain `cargo test`, run it with `--test-threads=2` or less, or take `cargo xtask test`. Optionally try the newer WARP package (Microsoft.Direct3D.WARP 1.0.20) if the crash ever shows in nextest or a product run (the product does not use WARP).
 Obsolete when: Windows ships a WARP that passes `spikes/warp-crash` level 7 with 6 threads in 100 runs, or the test binaries stop creating several software devices in one process.
+
+## 2026-10-16 Reviewing goldens needs CI's WARP, and nextest overwrites its JUnit report
+Scope: project
+What happened: the local WARP (10.0.26100.9711) differs from the recorded and CI one (.33438), so local WARP candidates escalate by the driver gate; the review must take WARP candidates from CI's `review-Windows` artifact. `golden-review --tests` (ADR 0037 bound tests) needs the JUnit reports of this run, and each `cargo xtask test*` run overwrites `target/nextest/default/junit.xml`, so they are copied aside after each run. A band-colour debug view differed by 1 px with max delta 95 between llvmpipe and WARP/RTX, which ADR 0017's rounding rule (delta 1) cannot absorb.
+Assumption it changes: that a new debug view agrees across adapters trivially; colour-band views flip whole pixels at band edges.
+Proposed follow-up: planner decides whether such a view may differ by a few pixels of any delta (status.md).
+Obsolete when: the CI WARP and the local WARP agree, or ADR 0017/0037 define agreement for new views.

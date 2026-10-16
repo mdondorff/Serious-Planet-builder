@@ -16,7 +16,17 @@ pub enum GoldenClass {
     Debug,
     Shaded,
     Lit,
+    /// M5 sky and atmosphere views (ADR 0037 names them as later M5 classes).
+    Sky,
+    /// M5 ocean and shoreline views (ADR 0037).
+    Water,
 }
+
+/// The M5 window of ADR 0037 (accepted 2026-10-15, owner policy): the first golden of one of these classes is blessed under
+/// policy when [`classify_m5_first`]'s conditions all hold. Every other class, and every golden that already exists, keeps
+/// ADR 0017 exactly. The owner revisits this window at the M5 gate ("after the M5 gate the owner decides whether this rule
+/// continues"); ending it means emptying this list through a superseding ADR.
+pub const ADR_0037_M5_CLASSES: [GoldenClass; 3] = [GoldenClass::Lit, GoldenClass::Sky, GoldenClass::Water];
 
 impl GoldenClass {
     pub fn parse(s: &str) -> Option<GoldenClass> {
@@ -24,8 +34,25 @@ impl GoldenClass {
             "debug" => Some(GoldenClass::Debug),
             "shaded" => Some(GoldenClass::Shaded),
             "lit" => Some(GoldenClass::Lit),
+            "sky" => Some(GoldenClass::Sky),
+            "water" => Some(GoldenClass::Water),
             _ => None,
         }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GoldenClass::Debug => "debug",
+            GoldenClass::Shaded => "shaded",
+            GoldenClass::Lit => "lit",
+            GoldenClass::Sky => "sky",
+            GoldenClass::Water => "water",
+        }
+    }
+
+    /// Is this a class of ADR 0037's M5 window?
+    pub fn is_m5(self) -> bool {
+        ADR_0037_M5_CLASSES.contains(&self)
     }
 }
 
@@ -48,6 +75,8 @@ pub enum Verdict {
     AutoRounding,
     /// A declared, cross-adapter-consistent change of a debug or shaded view.
     AutoExplained,
+    /// The first golden of an M5 class with every condition of ADR 0037 point 1 met; carries the evidence line.
+    AutoM5(String),
     Escalate(String),
 }
 
@@ -73,7 +102,7 @@ pub fn classify(adapter: &str, name: &str, seen: &BTreeMap<String, Observation>,
     };
     match class {
         None => return Verdict::Escalate(format!("{name} has no class in tests/goldens/classes.txt")),
-        Some(GoldenClass::Lit) => return Verdict::Escalate(format!("{name} is a lit view")),
+        Some(c) if c.is_m5() => return Verdict::Escalate(format!("{name} is a {} view", c.as_str())),
         Some(_) => {}
     }
     if here.pixels <= ROUNDING_MAX_PIXELS && here.max_delta <= ROUNDING_MAX_DELTA {
@@ -107,6 +136,202 @@ pub fn classify(adapter: &str, name: &str, seen: &BTreeMap<String, Observation>,
         return Verdict::Escalate(format!("{name}: only one adapter has a candidate yet; cross-adapter agreement is unchecked"));
     }
     Verdict::AutoExplained
+}
+
+/// One golden's entry under `ADR 0037 conditions:` in the change's proposal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct M5Declaration {
+    /// The golden that is the feature's debug view (CON-18); may be the golden itself.
+    pub debug_view: String,
+    /// The tests that prove the attribute's declared bound (ADR 0035), as `test_name` or `binary::test_name`.
+    pub bound_tests: Vec<String>,
+}
+
+/// The `ADR 0037 conditions:` section of a proposal: `- <golden>: debug-view=<golden>; bound-tests=<test>, <test>` per line,
+/// until a blank line or heading. An entry without both keys (and at least one test) does not count.
+pub fn m5_declarations(proposal: &str) -> BTreeMap<String, M5Declaration> {
+    let mut out = BTreeMap::new();
+    let mut inside = false;
+    for line in proposal.lines() {
+        let t = line.trim();
+        if t.trim_start_matches('#').trim().eq_ignore_ascii_case("adr 0037 conditions:") {
+            inside = true;
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        if t.is_empty() || t.starts_with('#') {
+            break;
+        }
+        let Some((name, rest)) = t.trim_start_matches(['-', '*']).trim().split_once(':') else { continue };
+        let (mut view, mut tests) = (None, Vec::new());
+        for part in rest.split(';') {
+            match part.trim().split_once('=') {
+                Some(("debug-view", v)) => view = Some(v.trim().trim_matches('`').to_string()),
+                Some(("bound-tests", v)) => {
+                    tests = v.split(',').map(|x| x.trim().trim_matches('`').to_string()).filter(|x| !x.is_empty()).collect()
+                }
+                _ => {}
+            }
+        }
+        if let Some(debug_view) = view.filter(|v| !v.is_empty()) {
+            if !tests.is_empty() {
+                out.insert(name.trim().trim_matches('`').to_string(), M5Declaration { debug_view, bound_tests: tests });
+            }
+        }
+    }
+    out
+}
+
+/// What the nextest JUnit reports of this run say: `(classname, test name, green)`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TestOutcomes(pub Vec<(String, String, bool)>);
+
+impl TestOutcomes {
+    /// Add the testcases of one JUnit report. A testcase is green only without a failure, error, skip or flaky-retry child.
+    pub fn add_junit(&mut self, junit: &str) {
+        fn attr<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+            let at = line.find(&format!(" {key}=\""))? + key.len() + 3;
+            Some(&line[at..at + line[at..].find('"')?])
+        }
+        let unescape = |s: &str| s.replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
+        let mut open: Option<usize> = None;
+        for line in junit.lines().map(str::trim_start) {
+            if line.starts_with("<testcase ") {
+                let (Some(class), Some(name)) = (attr(line, "classname"), attr(line, "name")) else { continue };
+                self.0.push((unescape(class), unescape(name), true));
+                open = (!line.trim_end().ends_with("/>")).then(|| self.0.len() - 1);
+            } else if line.starts_with("</testcase") {
+                open = None;
+            } else if let Some(i) = open {
+                let bad = ["<failure", "<error", "<skipped", "<flakyFailure", "<flakyError", "<rerunFailure", "<rerunError"];
+                if bad.iter().any(|p| line.starts_with(p)) {
+                    self.0[i].2 = false;
+                }
+            }
+        }
+    }
+
+    /// Did all the named tests run in this run, and is every test of that name green? `Err` names the first one that is
+    /// missing or not green.
+    pub fn all_green(&self, wanted: &[String]) -> Result<(), String> {
+        for w in wanted {
+            let hits: Vec<_> = self.0.iter().filter(|(c, n, _)| n == w || format!("{c}::{n}") == *w).collect();
+            if hits.is_empty() {
+                return Err(format!("bound test '{w}' did not run in this run (it is in no --tests report)"));
+            }
+            if let Some((c, n, _)) = hits.iter().find(|h| !h.2) {
+                return Err(format!("bound test '{w}' is not green in this run ({c} {n})"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// What a debug view shows on one adapter that took part in this run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewState {
+    /// A blessed golden exists and the run left no candidate (the frame still matches).
+    Matches,
+    /// A blessed golden exists and the candidate differs; `auto` is whether ADR 0017's own rules bless that change.
+    Differs { auto: bool },
+    /// No golden yet and a candidate (the view is new in this run).
+    New,
+    /// No golden and no candidate: the view does not exist on this adapter.
+    Missing,
+}
+
+/// ADR 0037 point 1(b): the feature's debug view exists and agrees across the adapters under ADR 0017's cross-adapter rule.
+/// `states` holds only the adapters that took part in this run; `not_run` those that have goldens but did not, which are
+/// reported and never counted as agreeing. A view with a blessed golden is checked by ADR 0017's own classification of its
+/// candidates (`Matches` or an auto `Differs`); a view that is new is checked candidate against candidate, where the
+/// debug-view rule is exactness, so `new_pairs` (adapter, adapter, difference of their candidates) may differ by no more
+/// than rounding noise ([`ROUNDING_MAX_PIXELS`], [`ROUNDING_MAX_DELTA`]). At least two adapters must take part.
+/// `Ok` carries the evidence line for the report.
+pub fn debug_view_agreement(
+    view: &str,
+    states: &BTreeMap<String, ViewState>,
+    new_pairs: &[(String, String, Change)],
+    not_run: &[String],
+) -> Result<String, String> {
+    let note = if not_run.is_empty() { String::new() } else { format!("; NOT RUN, not counted as agreeing: {}", not_run.join(", ")) };
+    if let Some((a, _)) = states.iter().find(|(_, s)| **s == ViewState::Missing) {
+        return Err(format!("debug view {view} does not exist on {a}{note}"));
+    }
+    if let Some((a, _)) = states.iter().find(|(_, s)| **s == ViewState::Differs { auto: false }) {
+        return Err(format!("debug view {view} has a candidate on {a} that ADR 0017 does not bless (changed without a blessable change, resized, or rendered by another driver){note}"));
+    }
+    if states.len() < 2 {
+        return Err(format!("debug view {view}: {} adapter(s) took part, ADR 0017's cross-adapter rule needs two{note}", states.len()));
+    }
+    let new = states.values().filter(|s| **s == ViewState::New).count();
+    if new != 0 && new != states.len() {
+        return Err(format!("debug view {view} is new on some adapters and blessed on others{note}"));
+    }
+    let apart: Vec<String> = new_pairs
+        .iter()
+        .filter(|(_, _, c)| c.pixels > ROUNDING_MAX_PIXELS || c.max_delta > ROUNDING_MAX_DELTA)
+        .map(|(a, b, c)| format!("{a} vs {b}: {} px differ, max delta {}", c.pixels, c.max_delta))
+        .collect();
+    if !apart.is_empty() {
+        return Err(format!(
+            "debug view {view}: the adapters disagree ({}; a debug view is exact up to {ROUNDING_MAX_PIXELS} px and delta {ROUNDING_MAX_DELTA}){note}",
+            apart.join("; ")
+        ));
+    }
+    let worst = new_pairs.iter().map(|(_, _, c)| (c.pixels, c.max_delta)).fold((0, 0), |w, c| (w.0.max(c.0), w.1.max(c.1)));
+    let kind = if new == 0 { "matches its blessed golden or an auto-blessed change" } else { "candidates agree pairwise" };
+    let adapters = states.keys().cloned().collect::<Vec<_>>().join(", ");
+    Ok(format!("debug view {view}: {kind} on {adapters} (worst pair {} px, delta {}){note}", worst.0, worst.1))
+}
+
+/// The evidence for ADR 0037 point 1, gathered by the caller for one golden.
+#[derive(Clone, Debug)]
+pub struct M5Evidence {
+    /// The golden's entry under `ADR 0037 conditions:`, if the proposal has one.
+    pub declaration: Option<M5Declaration>,
+    /// Point 1(a), second half: the declared bound tests ran green in this run ([`TestOutcomes::all_green`]).
+    pub bound_tests: Result<(), String>,
+    /// Point 1(b): [`debug_view_agreement`] for the declared debug view.
+    pub debug_view: Result<String, String>,
+}
+
+/// ADR 0037 point 1: classify the candidate of `name` on `adapter` when it is the first golden of an M5 class. `None` when
+/// this path does not apply (not an M5 class, or this adapter already has the golden): [`classify`] then decides exactly as
+/// under ADR 0017. Escalates unless (a) the class is an M5 class and the declared bound tests passed in this run, (b) the
+/// debug view agrees across the adapters and (c) the proposal declares the golden under `Expected golden changes:`. A golden
+/// that exists on another adapter is a new adapter family and escalates as before. The driver gate ([`driver_gate`]) is
+/// applied by the caller before this and is not relaxed.
+pub fn classify_m5_first(
+    adapter: &str,
+    name: &str,
+    seen: &BTreeMap<String, Observation>,
+    class: Option<GoldenClass>,
+    declared: bool,
+    evidence: &M5Evidence,
+) -> Option<Verdict> {
+    let class = class.filter(|c| c.is_m5())?;
+    if !matches!(seen.get(adapter), Some(Observation::NoGolden)) {
+        return None;
+    }
+    let esc = |why: String| Some(Verdict::Escalate(why));
+    if seen.values().any(|o| !matches!(o, Observation::NoGolden)) {
+        return esc(format!("{name} has a golden on another adapter: a new adapter family is the owner's"));
+    }
+    if !declared {
+        return esc(format!("{name} is not listed under 'Expected golden changes:' in the change's proposal (ADR 0037 (c))"));
+    }
+    if evidence.declaration.is_none() {
+        return esc(format!("{name} has no entry under 'ADR 0037 conditions:' naming its debug view and bound tests (ADR 0037 (a), (b))"));
+    }
+    if let Err(why) = &evidence.bound_tests {
+        return esc(format!("{name}: {why} (ADR 0037 (a))"));
+    }
+    match &evidence.debug_view {
+        Err(why) => esc(format!("{name}: {why} (ADR 0037 (b))")),
+        Ok(line) => Some(Verdict::AutoM5(format!("first {} golden under ADR 0037; bound tests green; {line}", class.as_str()))),
+    }
 }
 
 /// A candidate rendered with another driver than the one recorded beside the goldens escalates, whatever its pixels:
@@ -261,6 +486,167 @@ mod tests {
             }
         }
         assert_eq!((with, without), (15, 10), "15 auto with the declarations; every real change escalates without them");
+    }
+
+    fn first(adapters: &[&str]) -> BTreeMap<String, Observation> {
+        adapters.iter().map(|a| (a.to_string(), Observation::NoGolden)).collect()
+    }
+    fn good() -> M5Evidence {
+        M5Evidence {
+            declaration: Some(M5Declaration { debug_view: "v".into(), bound_tests: vec!["t".into()] }),
+            bound_tests: Ok(()),
+            debug_view: Ok("debug view v: ok".into()),
+        }
+    }
+    fn m5(class: Option<GoldenClass>, declared: bool, ev: &M5Evidence) -> Option<Verdict> {
+        classify_m5_first("warp", "lit_x", &first(&["warp", "nv"]), class, declared, ev)
+    }
+    fn why(v: Option<Verdict>) -> String {
+        match v {
+            Some(Verdict::Escalate(r)) => r,
+            other => panic!("expected an escalation, got {other:?}"),
+        }
+    }
+
+    // spec: TEST-022
+    #[test]
+    fn a_first_m5_golden_with_all_three_conditions_is_blessed_under_policy() {
+        for class in ADR_0037_M5_CLASSES {
+            assert!(matches!(m5(Some(class), true, &good()), Some(Verdict::AutoM5(_))), "{class:?}");
+        }
+    }
+
+    // spec: TEST-022
+    #[test]
+    fn each_missing_condition_escalates_with_its_reason() {
+        let lit = Some(GoldenClass::Lit);
+        // (c) no declaration, in the proposal's golden list or in the conditions section.
+        assert!(why(m5(lit, false, &good())).contains("Expected golden changes"));
+        let no_entry = M5Evidence { declaration: None, ..good() };
+        assert!(why(m5(lit, true, &no_entry)).contains("ADR 0037 conditions"));
+        // (a) bound tests missing or red.
+        let red = M5Evidence { bound_tests: Err("bound test 't' is not green in this run".into()), ..good() };
+        assert!(why(m5(lit, true, &red)).contains("not green"));
+        let gone = M5Evidence { bound_tests: Err("bound test 't' did not run".into()), ..good() };
+        assert!(why(m5(lit, true, &gone)).contains("did not run"));
+        // (b) the debug view is missing or the adapters disagree.
+        let view = M5Evidence { debug_view: Err("debug view v does not exist on nv".into()), ..good() };
+        assert!(why(m5(lit, true, &view)).contains("(ADR 0037 (b))"));
+    }
+
+    // spec: TEST-022
+    #[test]
+    fn the_m5_path_leaves_every_other_golden_to_adr_0017() {
+        // A class outside the M5 window: the path does not apply, classify() escalates the first golden as before.
+        for class in [GoldenClass::Debug, GoldenClass::Shaded] {
+            assert_eq!(m5(Some(class), true, &good()), None, "{class:?}");
+            assert!(why(Some(classify("warp", "lit_x", &first(&["warp"]), Some(class), true))).contains("first golden"));
+        }
+        assert_eq!(m5(None, true, &good()), None);
+        // An existing M5 golden that changes keeps escalating (ADR 0017: no lit view is auto-blessed).
+        let changed = seen(&[("warp", ch(500, 40)), ("nv", ch(500, 40))]);
+        assert_eq!(classify_m5_first("warp", "lit_x", &changed, Some(GoldenClass::Lit), true, &good()), None);
+        assert!(why(Some(classify("warp", "lit_x", &changed, Some(GoldenClass::Lit), true))).contains("lit"));
+        // A new adapter family of an M5 golden that exists elsewhere is still the owner's.
+        let family = seen(&[("warp", Observation::NoGolden), ("nv", Observation::Unchanged)]);
+        assert!(why(classify_m5_first("warp", "lit_x", &family, Some(GoldenClass::Lit), true, &good())).contains("new adapter family"));
+        // Existing classes still parse; the window names exactly the M5 classes.
+        assert!(GoldenClass::Lit.is_m5() && GoldenClass::Sky.is_m5() && GoldenClass::Water.is_m5());
+        assert!(!GoldenClass::Debug.is_m5() && !GoldenClass::Shaded.is_m5());
+    }
+
+    fn states(v: &[(&str, ViewState)]) -> BTreeMap<String, ViewState> {
+        v.iter().map(|(a, s)| (a.to_string(), *s)).collect()
+    }
+    fn pair(a: &str, b: &str, pixels: usize, max_delta: u8) -> (String, String, Change) {
+        (a.into(), b.into(), Change { pixels, max_delta })
+    }
+
+    // spec: TEST-022
+    #[test]
+    fn a_missing_adapter_is_reported_and_never_counted_as_agreeing() {
+        let none: Vec<String> = vec![];
+        // Three adapters took part, one did not: the pass names the one that did not.
+        let ok = debug_view_agreement(
+            "v",
+            &states(&[("warp", ViewState::New), ("nv", ViewState::New)]),
+            &[pair("warp", "nv", 0, 0)],
+            &["vulkan-llvmpipe".to_string()],
+        )
+        .unwrap();
+        assert!(ok.contains("NOT RUN") && ok.contains("vulkan-llvmpipe"), "{ok}");
+        // One adapter alone is not agreement, and the missing ones are named in the reason.
+        let alone = debug_view_agreement("v", &states(&[("warp", ViewState::New)]), &[], &["nv".to_string(), "llvmpipe".to_string()]);
+        let e = alone.unwrap_err();
+        assert!(e.contains("needs two") && e.contains("nv, llvmpipe"), "{e}");
+        assert!(debug_view_agreement("v", &states(&[]), &[], &none).is_err());
+    }
+
+    // spec: TEST-022
+    #[test]
+    fn the_debug_view_must_exist_and_agree_across_the_adapters() {
+        let none: Vec<String> = vec![];
+        // A blessed view that still matches, or whose change ADR 0017 blesses, agrees.
+        let blessed = states(&[("warp", ViewState::Matches), ("nv", ViewState::Differs { auto: true })]);
+        assert!(debug_view_agreement("v", &blessed, &[], &none).is_ok());
+        // A view that does not exist on a participating adapter, or whose change is not blessed, does not.
+        let gone = states(&[("warp", ViewState::New), ("nv", ViewState::Missing)]);
+        assert!(debug_view_agreement("v", &gone, &[], &none).unwrap_err().contains("does not exist on nv"));
+        let bad = states(&[("warp", ViewState::Matches), ("nv", ViewState::Differs { auto: false })]);
+        assert!(debug_view_agreement("v", &bad, &[], &none).unwrap_err().contains("does not bless"));
+        // New candidates must agree to rounding noise; a real difference is disagreement.
+        let new = states(&[("warp", ViewState::New), ("nv", ViewState::New), ("llvm", ViewState::New)]);
+        let near = [pair("warp", "nv", 32, 1), pair("warp", "llvm", 0, 0), pair("nv", "llvm", 5, 1)];
+        assert!(debug_view_agreement("v", &new, &near, &none).is_ok());
+        for far in [pair("nv", "llvm", 33, 1), pair("nv", "llvm", 2, 2)] {
+            let e = debug_view_agreement("v", &new, &[pair("warp", "nv", 0, 0), far], &none).unwrap_err();
+            assert!(e.contains("disagree"), "{e}");
+        }
+        // New on one adapter and blessed on another is not one view.
+        let mixed = states(&[("warp", ViewState::New), ("nv", ViewState::Matches)]);
+        assert!(debug_view_agreement("v", &mixed, &[], &none).unwrap_err().contains("new on some"));
+    }
+
+    // spec: TEST-022
+    #[test]
+    fn bound_tests_count_only_when_this_runs_reports_show_them_green() {
+        let mut out = TestOutcomes::default();
+        out.add_junit(
+            r#"<testsuites><testsuite name="planet-render">
+    <testcase name="tone_ok" classname="planet-render::oracle_lit" timestamp="t" time="0.1"/>
+    <testcase name="tone_red" classname="planet-render::oracle_lit" timestamp="t" time="0.1">
+        <failure message="boom"/>
+    </testcase>
+    <testcase name="tone_skipped" classname="planet-render::oracle_lit" timestamp="t" time="0.0">
+        <skipped/>
+    </testcase>
+    <testcase name="tone_ok_after_retry" classname="planet-render::oracle_lit" timestamp="t" time="0.1">
+        <flakyFailure message="x"/>
+    </testcase>
+    <testcase name="last" classname="planet-frame::look" timestamp="t" time="0.1"/>
+</testsuite></testsuites>"#,
+        );
+        let w = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(out.all_green(&w(&["tone_ok", "planet-frame::look::last", "last"])).is_ok());
+        assert!(out.all_green(&w(&["planet-render::oracle_lit::tone_ok"])).is_ok());
+        assert!(out.all_green(&w(&["tone_ok", "tone_red"])).unwrap_err().contains("not green"));
+        assert!(out.all_green(&w(&["tone_skipped"])).unwrap_err().contains("not green"));
+        assert!(out.all_green(&w(&["tone_ok_after_retry"])).unwrap_err().contains("not green"));
+        assert!(out.all_green(&w(&["never_ran"])).unwrap_err().contains("did not run"));
+        assert!(TestOutcomes::default().all_green(&w(&["tone_ok"])).is_err(), "no report is no evidence");
+    }
+
+    // spec: TEST-022
+    #[test]
+    fn the_m5_conditions_section_parses_strictly() {
+        let p = "## What\n- x\n\nADR 0037 conditions:\n- lit_a: debug-view=lit_bands; bound-tests=t1, `planet-render::b::t2`\n- lit_b: debug-view=lit_bands\n- lit_c: bound-tests=t1\n\n## After\n- lit_d: debug-view=x; bound-tests=t\n";
+        let d = m5_declarations(p);
+        assert_eq!(d.len(), 1, "an entry needs both keys");
+        assert_eq!(
+            d["lit_a"],
+            M5Declaration { debug_view: "lit_bands".into(), bound_tests: vec!["t1".into(), "planet-render::b::t2".into()] }
+        );
+        assert!(m5_declarations("no section").is_empty());
     }
 
     // spec: TEST-016

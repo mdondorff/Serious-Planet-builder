@@ -28,7 +28,7 @@ const USAGE: &str = "cargo xtask <command>
   cache-verify <dir> [--world <file>|--seed N] [--sample N] [--allow-stale]   regenerate a sample of a tile store from the definition and compare (STRM-004)
   cache-compact <dir> [--world <file>|--seed N] [--cap-bytes N]   rewrite a tile store keeping the records the definition still produces, evicting the oldest packs first under a cap (STRM-013)
   det-diff <a> <b>    compare two determinism manifests (GEN-003; CI diffs Windows against Linux)
-  golden-review [--proposal <file>] [--extra <dir>]... [--apply]   classify golden candidates under ADR 0017 (auto-bless or escalate)
+  golden-review [--proposal <file>] [--extra <dir>]... [--tests <junit.xml>]... [--apply]   classify golden candidates under ADR 0017, and ADR 0037 for first goldens of M5 classes (auto-bless or escalate)
   bless                list candidate goldens (agents promote under ADR 0017 via golden-review; the rest is the owner's /bless)
 
 options for test: --strict (a missing golden fails), --real (use the discrete GPU), extra args after `--` go to nextest";

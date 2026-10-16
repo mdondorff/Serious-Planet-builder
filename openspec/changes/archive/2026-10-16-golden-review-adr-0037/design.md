@@ -1,0 +1,18 @@
+## Decision logic
+
+`classify_m5_first(adapter, name, seen, class, declared, evidence)` runs before `classify`, after the driver gate, and returns `None` (ADR 0017 decides) unless the class is in `ADR_0037_M5_CLASSES` and this adapter has no golden of the name. Then, in order, it escalates when: another adapter already has the golden (a new adapter family stays the owner's); the golden is not under `Expected golden changes:` (c); the proposal has no `ADR 0037 conditions:` entry for it; a declared bound test is missing from, or not green in, the `--tests` reports (a); the declared debug view does not agree (b). Otherwise `AUTO-M5`.
+
+Class and bound (a, first half): the spec of the change that adds the golden names each attribute's class and bound (ADR 0035), and reviewers check it; the tool checks what a tool can: that the tests the proposal names as proving the bound ran green in this run.
+
+Debug-view agreement (b) uses ADR 0017's own machinery. Over the adapters that took part (delivered candidates in this review): a view with a blessed golden must match it (no candidate) or change in a way `classify` blesses (declared, counts agree across adapters); a view that is new in this run is compared candidate against candidate, where "exact on every adapter" is read with the rounding constants of ADR 0017 (at most 32 pixels, delta 1). At least two adapters must take part. An adapter with goldens that delivered no candidate is printed as NOT RUN and is never counted: a missing adapter is not a pass. A view whose candidate fails the driver gate does not agree.
+
+Driver record: ADR 0017 escalates "a candidate rendered with another driver than the one recorded in `driver.txt`" with no exemption for first goldens, and `--apply` leaves `driver.txt` untouched, so a first golden from a different driver would sit under a record that does not describe it. ADR 0037 amends only the first-golden and lit rules ("anything else escalates as before"). The text is not ambiguous, so the gate stays, and a first-golden candidate from another WARP version escalates.
+
+Junit: nextest overwrites `target/nextest/default/junit.xml` on each run, so the reports of the runs are copied aside and each passed with `--tests`.
+
+## Readings the reviewer asked to make explicit
+- "First golden" is a new golden name (no golden on any adapter), the case ADR 0037 calls "new M5 goldens". The window is by class, not by date: it ends when the owner decides at the M5 gate and the constant is emptied (tracked in `docs/status.md`).
+- At least two adapters must take part (ADR 0017's cross-adapter rule); a missing adapter is reported, as the planner asked ("use the available ones"). A partial `--apply` would leave the missing adapter's candidate to escalate later as a new adapter family, so the skill says to apply only when the missing adapter's candidates are part of the same commit's CI or when that outcome is accepted.
+- The "rounding noise" reading (32 px, delta 1) of agreement between candidates of a new view reuses ADR 0017's constants; 8 px (the agreement floor) would be stricter and is the planner's call.
+- `lit_orbit_ev_bands` is the debug view of the lit path but is classed `lit`; the proposal names it as the debug view of all four.
+- The junit reports are given by the caller and not tied to a commit; the skill requires copying them from this run, and verifier and spec-guardian check that the named tests prove the bound.
