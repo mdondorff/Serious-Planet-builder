@@ -82,7 +82,10 @@ pub(crate) struct Rig {
 impl Rig {
     /// A rig for requests like `first`: one tile size (cells) and one finest level, the pools sized for the first request.
     pub(crate) fn new(ctx: &GpuContext, world: &Arc<WorldTerrain>, first: &TerrainRequest) -> Result<Rig, String> {
-        let renderer = TerrainRenderer::for_context(ctx, first.size, first.lod.cells, u64::from(MAX_FRAMES_IN_FLIGHT));
+        let mut renderer = TerrainRenderer::for_context(ctx, first.size, first.lod.cells, u64::from(MAX_FRAMES_IN_FLIGHT));
+        // REND-013: the pools' first block, the ring and every pipeline's first draw happen here, before frame 0 (frame 0 stays
+        // a measured frame, ADR 0032).
+        renderer.warm_up(ctx);
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
         let plan_pool = Arc::new(ThreadPool::new(1));
         let pipe = PlanPipeline::new(PlanWorker::new(plan_pool, Arc::new(WorldPlanner(Arc::clone(world))), threads));

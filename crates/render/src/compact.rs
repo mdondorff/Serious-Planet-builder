@@ -234,3 +234,33 @@ pub(crate) struct CompactGpu {
     /// First vertex-pool slot of the fallback region.
     pub(crate) fallback_base: u32,
 }
+
+impl CompactGpu {
+    /// Atlas `block`, created (texture and bind group) on first use.
+    pub(crate) fn atlas(&mut self, device: &wgpu::Device, block: usize, init: &mut crate::terrain::InitCounts) -> &Atlas {
+        if self.atlases.len() <= block {
+            self.atlases.resize_with(block + 1, || None);
+        }
+        let (side, bgl) = (self.side, &self.bgl_atlas);
+        self.atlases[block].get_or_insert_with(|| {
+            init.pool_allocations += 1;
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("compact-atlas"),
+                size: wgpu::Extent3d { width: side, height: side, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Uint,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&Default::default());
+            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("compact-atlas-bind"),
+                layout: bgl,
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
+            });
+            Atlas { texture, bind }
+        })
+    }
+}

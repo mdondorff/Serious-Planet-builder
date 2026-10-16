@@ -144,6 +144,9 @@ fn origin_heights(
         return heights;
     }
     let dirs: Vec<planet_core::Vec3> = missing.iter().map(|&i| selection.nodes[i].tile.center_direction(map)).collect();
+    // Invariant: a batch that was stopped (`heights_until`, `heights_threaded_until`) returns 0.0 for the directions it did not
+    // finish, so a caller that can cancel MUST discard the results of a stopped batch (never memoise them). This call has no stop
+    // flag, so its batch is complete; a field whose wrapper cancels is checked by the plan worker before it uses the plan.
     for (&i, h) in missing.iter().zip(field.heights_threaded(&dirs, threads.max(1))) {
         heights[i] = if reuse { cache.origin_height(selection.nodes[i].tile, || h) } else { h };
     }

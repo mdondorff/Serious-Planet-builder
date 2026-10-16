@@ -1,0 +1,9 @@
+## Decisions
+
+- Explicit `warm_up`, not constructor work: tier-B tests build many renderers on the software adapter and assert "nothing allocated before the first tile" (STRM-006); a constructor that allocated 128 MB atlases would slow them and change that statement. The product paths (`Rig::new`) call it.
+- Allocate eagerly only what the first frames need: the vertex pool (it is allocated whole on first use anyway), block 0 / atlas 0 and a ring of 2048 nodes (about 1 MiB). The 2 GiB share stays a ceiling and the other blocks stay on demand; the allocated model is unchanged (`allocated_bytes_with(1, true)`).
+- The throwaway frame binds the same pipelines, bind groups, ring set, vertex pool and atlas 0 that real frames use, in the active draw mode (per-draw or indirect), so the driver's first-use work (pipeline state, resource initialisation) is done before frame 0. It draws zeroed data (degenerate triangles), clears the colour and depth targets like a real frame, and is polled to completion. It is not counted as a frame (`frame`, `in_flight` and the retire counters do not move).
+- The guarantee is count-based (`InitCounts` and `live_pools` equal before and after frames 0..2 of a script that fits the warmed block); a loose wall-clock probe reports frame 0 against the next ten and asserts only `3 x median + 3 ms`.
+- What the software adapter cannot show: driver-side shader JIT on the RTX. The warm-up draw is the fix for it; perf window 2 verifies.
+- No wall-clock assertion (CON-17, CON-20): the timing test only prints. TEST-021's pool-slot figures count the warmed vertex pool and block 0 from the start (the share stays a ceiling).
+- `skeleton.rs` terrain perf and flight paths do not warm: their protocol has its own warm-up frames (ADR 0034); REND-017 names the pipelined loop and the streaming scenes.
