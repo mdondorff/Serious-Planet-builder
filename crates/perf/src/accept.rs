@@ -142,8 +142,8 @@ pub fn parse_frames(text: &str) -> Result<Vec<FrameRecord>, String> {
             continue;
         }
         let t: Vec<&str> = line.split_whitespace().collect();
-        if t.len() != 19 {
-            return Err(format!("frames.txt line {}: {} columns, expected 19", n + 2, t.len()));
+        if t.len() != 20 {
+            return Err(format!("frames.txt line {}: {} columns, expected 20", n + 2, t.len()));
         }
         let bad = |what: &str| format!("frames.txt line {}: `{}` is not a {what}", n + 2, line);
         let f = |i: usize| t[i].parse::<f64>().map_err(|_| bad("number"));
@@ -171,6 +171,7 @@ pub fn parse_frames(text: &str) -> Result<Vec<FrameRecord>, String> {
             cancelled: u(16)?,
             degraded: u(17)? as usize,
             allocated_bytes: u(18)?,
+            upload_calls: u(19)?,
             ..FrameRecord::default()
         });
     }
@@ -995,9 +996,20 @@ mod tests {
         fr[0].gpu_ms = Some(1.25);
         fr[1].lag = None;
         fr[2].uncovered_nodes = 4;
+        fr[3].upload_calls = 17;
         let back = parse_frames(&frames_text(&fr)).unwrap();
         assert_eq!(back.len(), fr.len());
         assert_eq!((back[0].gpu_ms, back[1].lag, back[2].uncovered_nodes, back[5].allocated_bytes), (Some(1.25), None, 4, 1 << 30));
+        assert_eq!(back[3].upload_calls, 17, "the call count is the last column");
+        assert!(frames_text(&[]).trim_end().ends_with("allocated_bytes upload_calls"), "the header names it (TEST-012)");
+        // A log from before the column (19 columns, the old header) is refused as old-format, never read with a zero.
+        let old = frames_text(&fr).replace(
+            " upload_calls
+",
+            "
+",
+        );
+        assert!(parse_frames(&old).unwrap_err().contains("old-format"));
         assert!(parse_frames("").unwrap_err().contains("old-format"));
         assert!(parse_frames(&format!("{}1 2 3\n", frames_text(&[]))).unwrap_err().contains("columns"));
     }

@@ -165,8 +165,9 @@ impl LoopRig {
         self.clock.advance(FRAME_MS);
         let log_before = self.lp.manager().streamer().dispatch_log.len();
         let f = self.lp.begin_frame(req, &mut self.sink).unwrap();
-        for v in f.counts.values() {
-            d.word(v);
+        // The twelve columns the digests were taken with; `upload_calls` (REND-018) is a figure of the sink, pinned by its own tests.
+        for v in &f.counts.values()[..planet_frame::managed::FrameCounts::DIGESTED_COLUMNS] {
+            d.word(*v);
         }
         d.word(f.counts.prefetch as u64);
         d.word(f.counts.cancelled_prefetch);

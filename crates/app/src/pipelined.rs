@@ -7,7 +7,7 @@
 use crate::err;
 use crate::skeleton::MeshSource;
 use crate::worldfield::WorldTerrain;
-use planet_frame::managed::{FrameCounts, ManagedLoop, TileSink};
+use planet_frame::managed::{FrameCounts, ManagedLoop, TileSink, UploadStats};
 use planet_frame::pipeline::{
     residency_of, DrawKind, FrameColumns, FramesInFlight, PlanField, PlanPipeline, PlanWorker, MAX_FRAMES_IN_FLIGHT,
 };
@@ -62,6 +62,13 @@ pub(crate) struct RendererSink<'a> {
 impl TileSink for RendererSink<'_> {
     fn upload_at(&mut self, tile: &RenderTile, slot: SlotRef) -> Result<(), String> {
         self.renderer.upload_tile_at(self.ctx, tile, slot).map_err(|e| e.to_string())
+    }
+
+    fn upload_batch(&mut self, tiles: &[(&RenderTile, SlotRef)]) -> Result<UploadStats, String> {
+        let before = self.renderer.upload_counters();
+        self.renderer.upload_tiles_at(self.ctx, tiles).map_err(|e| format!("placing a batch of {} tiles: {e}", tiles.len()))?;
+        let after = self.renderer.upload_counters();
+        Ok(UploadStats { calls: after.write_calls - before.write_calls, staging_bytes: after.staging_bytes - before.staging_bytes })
     }
 
     fn forget(&mut self, tile: planet_core::TileId) {
