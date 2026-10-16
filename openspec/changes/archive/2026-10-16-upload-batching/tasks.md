@@ -1,0 +1,7 @@
+- [x] 1.1 measure first (counters, smoke dive/teleport, micro-benchmark on software and RTX), record in docs/learnings.md
+- [x] 1.2 failing tests first (tier A on the fakes, tier C on the renderer and the pipelined loop)
+- [x] 1.3 render: batch, modes, counters, read-back, conversion
+- [x] 1.4 frame: `upload_batch`, `UploadStats`, `upload_calls`; app: sink override, `--upload`; perf: column
+- [x] 1.5 measure after, learnings, log line
+- [x] 1.6 spec: REND-018 (new), TEST-012 (column)
+- [x] 1.7 reviewers (spec-guardian, verifier), archive, PR, CI green, merge

@@ -42,8 +42,28 @@ pub trait TileSink {
             RenderTile::Compact(c) => c.resident_bytes(),
         }
     }
+    /// Write a frame's tiles, in this order, each into its slot: the same result as `upload_at` for each (STRM-006). A sink that
+    /// can write runs of adjacent slots in one go overrides this and says what it cost; the default is the loop over
+    /// `upload_at` and counts one call and `upload_bytes` per tile. An error names the tile it failed on.
+    fn upload_batch(&mut self, tiles: &[(&RenderTile, SlotRef)]) -> Result<UploadStats, String> {
+        let mut stats = UploadStats::default();
+        for (tile, slot) in tiles {
+            self.upload_at(tile, *slot).map_err(|e| format!("placing {:?} in {slot:?}: {e}", tile.id()))?;
+            stats.calls += 1;
+            stats.staging_bytes += self.upload_bytes(tile);
+        }
+        Ok(stats)
+    }
     /// The tile was evicted; its slot is the manager's again (no pool is touched).
     fn forget(&mut self, tile: TileId);
+}
+
+/// What writing a frame's tiles cost the queue (CON-20, count-based): calls (each a staging allocation and a copy command) and
+/// the bytes they carried.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UploadStats {
+    pub calls: u64,
+    pub staging_bytes: u64,
 }
 
 /// What the scheduler and the manager did in one frame (counts only, CON-20). The `*_total` fields of the streamer's
@@ -69,6 +89,9 @@ pub struct FrameCounts {
     pub upload_bytes: u64,
     pub deferred: usize,
     pub node_bytes: u64,
+    /// Queue calls (`write_buffer`, `write_texture`) the frame's tile writes made (REND-016): at most one per run of adjacent
+    /// slots when batched, one or two per tile when written one by one.
+    pub upload_calls: u64,
     /// Tiles of R replaced by their ancestors this frame (ADR 0031 point 4b), draw tiles asked for as ancestors (point 4c)
     /// and whether the draw set with its ancestors exceeds the share (a budget failure).
     pub degraded: usize,
@@ -82,7 +105,7 @@ pub struct FrameCounts {
 
 impl FrameCounts {
     /// Column names of the per-frame log (TEST-012), in [`FrameCounts::values`] order.
-    pub const NAMES: [&'static str; 12] = [
+    pub const NAMES: [&'static str; 13] = [
         "resident",
         "in_flight",
         "queued",
@@ -95,9 +118,14 @@ impl FrameCounts {
         "upload_bytes",
         "deferred",
         "node_bytes",
+        "upload_calls",
     ];
 
-    pub fn values(&self) -> [u64; 12] {
+    /// The columns before `upload_calls`: the width the scheduler-equivalence digests were taken with (a figure of the sink is
+    /// not a scheduler decision, REND-018).
+    pub const DIGESTED_COLUMNS: usize = 12;
+
+    pub fn values(&self) -> [u64; 13] {
         [
             self.resident as u64,
             self.in_flight as u64,
@@ -111,6 +139,7 @@ impl FrameCounts {
             self.upload_bytes,
             self.deferred as u64,
             self.node_bytes,
+            self.upload_calls,
         ]
     }
 }
@@ -303,7 +332,7 @@ impl ManagedLoop {
         let scheduler_ms = t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        let (mut uploaded, mut upload_bytes) = (0u64, 0u64);
+        let (mut uploaded, mut upload_bytes, mut upload_calls) = (0u64, 0u64, 0u64);
         let streamer = self.manager.streamer_mut();
         for change in streamer.take_changes() {
             match change {
@@ -360,14 +389,21 @@ impl ManagedLoop {
             }
             sort_waiting(&mut waiting);
             let take = upload_count(&waiting, self.budget.allowance(self.last_node_bytes));
+            // The frame's tiles in upload order, written as one batch (a sink that coalesces adjacent slots makes one call per run).
+            let mut batch: Vec<(TileId, Arc<RenderTile>, SlotRef, u64)> = Vec::with_capacity(take);
             for w in &waiting[..take] {
                 self.pending.remove(&w.tile);
                 let (Some(mesh), Some(slot)) = (streamer.get(w.tile), streamer.slot_of(w.tile)) else { continue };
-                sink.upload_at(&mesh, slot).map_err(|e| format!("placing {:?} in {slot:?}: {e}", w.tile))?;
-                self.resident.insert(w.tile, ResidentTile { mesh_key: mesh.key(), origin: mesh.origin() });
-                self.slots.insert(w.tile, slot);
+                batch.push((w.tile, mesh, slot, w.bytes));
+            }
+            let refs: Vec<(&RenderTile, SlotRef)> = batch.iter().map(|(_, mesh, slot, _)| (&**mesh, *slot)).collect();
+            let stats = sink.upload_batch(&refs)?;
+            upload_calls += stats.calls;
+            for (tile, mesh, slot, bytes) in &batch {
+                self.resident.insert(*tile, ResidentTile { mesh_key: mesh.key(), origin: mesh.origin() });
+                self.slots.insert(*tile, *slot);
                 uploaded += 1;
-                upload_bytes += w.bytes;
+                upload_bytes += bytes;
             }
         }
         let deferred = self.pending.len();
@@ -397,6 +433,7 @@ impl ManagedLoop {
             upload_bytes,
             deferred,
             node_bytes,
+            upload_calls,
             degraded,
             draw_replaced,
             budget_failure,

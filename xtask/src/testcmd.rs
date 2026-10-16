@@ -349,14 +349,14 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
         match a.as_str() {
             "--smoke" => smoke = true,
             "--machine-ready" | "--allow-memory-bake" => tail.push(a.clone()),
-            "--store" | "--global-res" | "--out" => {
+            "--store" | "--global-res" | "--out" | "--upload" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());
             }
             other => {
                 return Err(format!(
-                    "unknown perf stream option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out, --smoke, --machine-ready, the owner's override of a failed readiness gate)"
+                    "unknown perf stream option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out, --upload per-slot|batched, --smoke, --machine-ready, the owner's override of a failed readiness gate)"
                 ))
             }
         }

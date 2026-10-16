@@ -44,6 +44,7 @@ modes:
     --out <file.png>         write the image
     --adapter software|hardware   adapter policy (default: PLANET_ADAPTER or software)
     --draw per-draw|indirect   how the terrain renderer submits draws (REND-015): per-draw is the reference loop, indirect one multi-draw per buffer run from a CPU-built argument buffer (default indirect where the adapter supports it, else per-draw)
+    --upload per-slot|batched   how a frame's tile writes reach the queue (REND-016): batched (default) writes each run of adjacent slots with one call, per-slot is the reference (one or two calls per tile); the pool contents are identical
     --tile-format vertex|compact   how terrain tiles are built and held (ADR 0033): compact (default) for levels 3 and finer, vertex the 44-byte reference format for all
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
     --machine-ready          owner override of a failed readiness gate (ADR 0020); recorded in the log
@@ -67,6 +68,8 @@ pub struct Options {
     pub draw: Option<planet_render::DrawMode>,
     /// `--tile-format vertex|compact`: how terrain tiles are built and held (ADR 0033); default compact, the vertex format is the reference.
     pub tile_format: Option<planet_render::TileFormat>,
+    /// `--upload per-slot|batched`: how a frame's tile writes reach the queue (REND-016); default batched, per-slot the reference.
+    pub upload: Option<planet_render::UploadMode>,
     pub perf: bool,
     pub machine_ready: bool,
     pub view: String,
@@ -151,6 +154,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         adapter: None,
         draw: None,
         tile_format: None,
+        upload: None,
         perf: false,
         machine_ready: false,
         view: "face".into(),
@@ -263,6 +267,11 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--out" => o.out = Some(PathBuf::from(it.next().ok_or("--out needs a value")?)),
             "--tile-format" => {
                 o.tile_format = Some(planet_render::TileFormat::parse(it.next().ok_or("--tile-format needs vertex or compact")?)?)
+            }
+            "--upload" => {
+                let v = it.next().ok_or("--upload needs per-slot or batched")?;
+                o.upload =
+                    Some(planet_render::UploadMode::parse(v).ok_or_else(|| format!("--upload must be per-slot or batched, got '{v}'"))?)
             }
             "--draw" => o.draw = Some(planet_render::DrawMode::parse(it.next().ok_or("--draw needs per-draw or indirect")?)?),
             "--adapter" => {
@@ -454,6 +463,9 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if let Some(mode) = o.draw {
         ctx.prefer_draw_mode(mode);
         writeln!(out, "draw: {} requested, {} in effect", mode.name(), ctx.default_draw_mode().name()).map_err(err)?;
+    }
+    if let Some(mode) = o.upload {
+        ctx.prefer_upload_mode(mode);
     }
     if let Some(format) = o.tile_format {
         ctx.prefer_tile_format(format);

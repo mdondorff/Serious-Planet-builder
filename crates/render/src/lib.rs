@@ -15,7 +15,7 @@ pub use compact::compact_terrain_shader;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
 pub use terrain::{
     execute_terrain, execute_terrain_tiles, DrawMode, FrameTiming, InitCounts, ResidentFormat, TerrainRenderer, TerrainStats,
-    TERRAIN_SHADERS, WARM_NODES,
+    UploadCounters, UploadMode, TERRAIN_SHADERS, WARM_NODES,
 };
 
 /// How terrain tiles are held and drawn (ADR 0033): the compact format for levels 3 and finer (default) or the 44-byte vertex format
@@ -100,6 +100,8 @@ pub struct GpuContext {
     pub(crate) draw_preference: std::sync::atomic::AtomicU8,
     /// The tile format new terrain paths use: 0 = the default (compact), 1 = vertex, 2 = compact.
     pub(crate) format_preference: std::sync::atomic::AtomicU8,
+    /// How terrain renderers write tiles: 0 = the default (batched), 1 = per slot, 2 = batched.
+    pub(crate) upload_preference: std::sync::atomic::AtomicU8,
 }
 
 impl GpuContext {
@@ -134,7 +136,15 @@ impl GpuContext {
             })
             .await
             .map_err(|e| GpuError::Device(e.to_string()))?;
-        Ok(Self { device, queue, info, indirect, draw_preference: Default::default(), format_preference: Default::default() })
+        Ok(Self {
+            device,
+            queue,
+            info,
+            indirect,
+            draw_preference: Default::default(),
+            format_preference: Default::default(),
+            upload_preference: Default::default(),
+        })
     }
 
     /// Adapter name as the driver reports it.
@@ -184,6 +194,24 @@ impl GpuContext {
         match self.format_preference.load(std::sync::atomic::Ordering::SeqCst) {
             1 => TileFormat::Vertex,
             _ => TileFormat::Compact,
+        }
+    }
+
+    /// Choose how terrain renderers created from now on write tiles (`--upload`): batched (default, REND-016) or per slot (the
+    /// reference; identical pool contents).
+    pub fn prefer_upload_mode(&self, mode: UploadMode) {
+        let v = match mode {
+            UploadMode::PerSlot => 1,
+            UploadMode::Batched => 2,
+        };
+        self.upload_preference.store(v, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// The upload mode a new terrain renderer starts in.
+    pub fn default_upload_mode(&self) -> UploadMode {
+        match self.upload_preference.load(std::sync::atomic::Ordering::SeqCst) {
+            1 => UploadMode::PerSlot,
+            _ => UploadMode::Batched,
         }
     }
 

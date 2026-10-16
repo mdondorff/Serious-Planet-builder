@@ -148,7 +148,7 @@ fn the_pipelined_loop_settles_on_the_synchronous_frame_from_a_cold_start_and_aft
     assert!(
         text.starts_with(
             "# iteration kind nodes substituted in_flight base_seq plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms \
-             resident in_flight queued dispatched cancelled blocked evicted uploaded degraded upload_bytes deferred node_bytes"
+             resident in_flight queued dispatched cancelled blocked evicted uploaded degraded upload_bytes deferred node_bytes upload_calls"
         ),
         "{text}"
     );
@@ -257,4 +257,66 @@ fn the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either(
     assert_eq!(reference, render(&["--draw", "indirect", "--pipelined"], "draw-pipe.png").0, "pipelined");
     assert_eq!(reference, render(&["--draw", "per-draw", "--pipelined"], "draw-pipe-per.png").0, "pipelined, per-draw");
     assert!(run(&[&base[..], &["--draw", "bogus"]].concat()).unwrap_err().contains("unknown draw mode"));
+}
+
+// spec: REND-018, REND-016, STRM-006, TEST-012
+#[test]
+fn the_upload_flag_selects_the_write_path_and_the_batched_loop_draws_the_same_frames_in_fewer_calls() {
+    // The cold start, then a jump (a dive's and a teleport's uploads): the frame the loop settles on is the same in both modes,
+    // and the log's `upload_calls` column shows the calls per frame.
+    let runs = |upload: &str, script: &str, then: Option<&str>, name: &str| {
+        let (png, dir) = (tmp(&format!("{name}.png")), tmp(&format!("{name}-log")));
+        let mut args = vec![
+            "test-render",
+            "--scene",
+            "terrain",
+            "--script",
+            script,
+            "--view",
+            "relief",
+            "--adapter",
+            "software",
+            "--pipelined",
+            "--upload",
+            upload,
+            "--out",
+            png.to_str().unwrap(),
+            "--out-dir",
+            dir.to_str().unwrap(),
+        ];
+        if let Some(t) = then {
+            args.extend(["--then", t]);
+        }
+        run(&args).unwrap();
+        let text = std::fs::read_to_string(dir.join("pipelined.txt")).unwrap();
+        let names: Vec<&str> = text.lines().next().unwrap().trim_start_matches("# ").split_whitespace().collect();
+        let col = |n: &str| names.iter().rposition(|x| *x == n).unwrap();
+        let (calls, uploaded) = (col("upload_calls"), col("uploaded"));
+        let (mut c, mut u) = (0u64, 0u64);
+        for line in text.lines().skip(1) {
+            let v: Vec<&str> = line.split_whitespace().collect();
+            let (frame_calls, frame_tiles): (u64, u64) = (v[calls].parse().unwrap(), v[uploaded].parse().unwrap());
+            assert!(frame_calls == 0 || frame_tiles > 0, "calls without tiles: {line}");
+            c += frame_calls;
+            u += frame_tiles;
+        }
+        (read_png(&png).unwrap(), c, u)
+    };
+    for (script, then) in [("aerial-200km", None), ("orbit-20000km", Some("aerial-20km"))] {
+        let (per_slot, batched) = (runs("per-slot", script, then, "up-per"), runs("batched", script, then, "up-bat"));
+        assert_eq!(per_slot.0, batched.0, "{script}: the batched path draws another image");
+        assert!(per_slot.2 > 6 && batched.2 > 6, "{script}: tiles must be uploaded");
+        // Per slot a tile costs at least one call (two for a compact tile); batched, runs of adjacent slots share one.
+        assert!(per_slot.1 >= per_slot.2, "{script}: {} calls for {} tiles per slot", per_slot.1, per_slot.2);
+        assert!(
+            (batched.1 as f64) < 0.95 * per_slot.1 as f64 * batched.2 as f64 / per_slot.2 as f64,
+            "{script}: {} calls for {} tiles batched against {} for {} per slot",
+            batched.1,
+            batched.2,
+            per_slot.1,
+            per_slot.2
+        );
+    }
+    let e = run(&["test-render", "--scene", "terrain", "--pipelined", "--upload", "bogus"]).unwrap_err();
+    assert!(e.contains("--upload must be per-slot or batched"), "{e}");
 }

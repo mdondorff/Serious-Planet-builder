@@ -5,7 +5,7 @@
 
 use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::{PlanetFixed, TileId, Vec3};
-use planet_frame::managed::{FrameCounts, ManagedFrame, ManagedLoop, TileSink};
+use planet_frame::managed::{FrameCounts, ManagedFrame, ManagedLoop, TileSink, UploadStats};
 use planet_frame::pipeline::{DrawKind, PlanField, PlanPipeline, PlanWorker, ResidentRecords};
 use planet_frame::prefetch::PrefetchConfig;
 use planet_frame::upload::{UploadBudget, DEFAULT_TILE_BYTES_PER_FRAME};
@@ -137,6 +137,12 @@ struct CountingSink {
     bytes: u64,
     /// Every tile written, in order.
     order: Vec<TileId>,
+    /// A sink that writes runs of adjacent slots in one call (the renderer's way, REND-016): `upload_batch` reports one call per
+    /// run. Off, the batch is the default loop over `upload_at`, one call per tile.
+    coalesce: bool,
+    /// The size of every batch the loop handed over, and the slot of every tile written, in order.
+    batches: Vec<usize>,
+    slots_written: Vec<SlotRef>,
 }
 
 impl TileSink for CountingSink {
@@ -157,7 +163,19 @@ impl TileSink for CountingSink {
         self.owner.insert(slot, id);
         self.uploads += 1;
         self.order.push(id);
+        self.slots_written.push(slot);
         Ok(())
+    }
+
+    fn upload_batch(&mut self, tiles: &[(&RenderTile, SlotRef)]) -> Result<UploadStats, String> {
+        self.batches.push(tiles.len());
+        let mut stats = UploadStats::default();
+        for (tile, slot) in tiles {
+            self.upload_at(tile, *slot)?;
+            stats.staging_bytes += self.bytes;
+        }
+        stats.calls = if self.coalesce { runs_of(&tiles.iter().map(|(_, s)| *s).collect::<Vec<_>>()) } else { tiles.len() as u64 };
+        Ok(stats)
     }
 
     fn forget(&mut self, tile: TileId) {
@@ -166,6 +184,14 @@ impl TileSink for CountingSink {
         }
         self.forgets += 1;
     }
+}
+
+/// Runs of adjacent slots (same pool, consecutive indices) once sorted: the calls a coalescing sink needs.
+fn runs_of(slots: &[SlotRef]) -> u64 {
+    let mut v: Vec<(bool, u32)> = slots.iter().map(|s| (s.pool == planet_streaming::PoolKind::Main, s.index)).collect();
+    v.sort_unstable();
+    v.dedup();
+    (usize::from(!v.is_empty()) + v.windows(2).filter(|w| w[0].0 != w[1].0 || w[1].1 != w[0].1 + 1).count()) as u64
 }
 
 struct Rig {
@@ -199,12 +225,16 @@ impl Rig {
     }
 
     fn build_with(capacity: usize, prefetch: bool, tile_bytes: u64, budget: UploadBudget) -> Rig {
+        Rig::build_full(capacity, prefetch, tile_bytes, budget, 64)
+    }
+
+    fn build_full(capacity: usize, prefetch: bool, tile_bytes: u64, budget: UploadBudget, max_in_flight: usize) -> Rig {
         let clock = Arc::new(FakeClock::default());
         let plan_spawner = Arc::new(ManualSpawner::default());
         let tile_spawner = Arc::new(BatchSpawner::default());
         let pipe = PlanPipeline::new(PlanWorker::new(plan_spawner.clone(), Arc::new(Reference(1)), 2));
         let config = StreamConfig {
-            max_in_flight: 64,
+            max_in_flight,
             capacity,
             retire_frames: 2,
             retry_after_ms: 100,
@@ -932,8 +962,11 @@ fn on_the_dive_and_a_teleport_the_upload_cap_holds_in_every_frame_in_class_order
     assert_eq!(VERTEX_TILE_BYTES, planet_generators::mesh::vertex_count(32) as u64 * planet_generators::mesh::MeshVertex::STRIDE);
     let c = FrameCounts { upload_bytes: 7, deferred: 8, node_bytes: 9, uploaded: 3, ..Default::default() };
     assert_eq!(FrameCounts::NAMES.len(), c.values().len());
-    assert_eq!(&c.values()[7..], &[3, 0, 7, 8, 9]);
-    assert_eq!(&FrameCounts::NAMES[9..], &["upload_bytes", "deferred", "node_bytes"]);
+    assert_eq!(&c.values()[7..12], &[3, 0, 7, 8, 9]);
+    assert_eq!(&FrameCounts::NAMES[9..12], &["upload_bytes", "deferred", "node_bytes"]);
+    // spec: TEST-012 (the call count is the last column, after the bytes: names consistent with the existing upload columns)
+    assert_eq!(FrameCounts::NAMES[12], "upload_calls");
+    assert_eq!(FrameCounts { upload_calls: 5, ..Default::default() }.values()[12], 5);
     let dive = run_budgeted(&mut rig, 105, &dive_position, true);
     // The teleport: the dive's last place to the other side of the planet, then hold.
     let b = there();
@@ -1325,4 +1358,77 @@ fn rotation_at_the_settled_state_has_lag_zero_and_nothing_uncovered_in_every_fra
     // The turn fetched nothing and cancelled nothing: R was resident and stays the wanted set.
     let st = rig.lp.manager().streamer().stats();
     assert_eq!((st.queued, st.in_flight), (0, 0));
+}
+
+// ---- batched tile writes (STRM-006, REND-016) ----
+
+/// Bytes of one compact tile at cells 32: 33 x 33 texels of 8 bytes and the 128-byte record (what the renderer uploads).
+const COMPACT_TILE_BYTES: u64 = 8_840;
+
+/// Run the ground fill with the budget `budget` and return, per frame that wrote tiles, `(counts, slots written)`.
+fn ground_fill(budget: UploadBudget, coalesce: bool, frames: usize) -> (Rig, Vec<(FrameCounts, Vec<SlotRef>)>) {
+    // Up to 256 jobs finish a frame, so a frame can have the 118 tiles of the 1 MiB cap to write.
+    let mut rig = Rig::build_full(1_000_000, false, COMPACT_TILE_BYTES, budget, 256);
+    rig.sink.coalesce = coalesce;
+    let ground = track(0.0, 2.0);
+    let mut out = Vec::new();
+    for _ in 0..frames {
+        let before = rig.sink.slots_written.len();
+        let f = rig.begin(&request(ground, 0.3, -0.4));
+        rig.finish();
+        let c = f.counts;
+        let slots = rig.sink.slots_written[before..].to_vec();
+        assert_eq!(c.uploaded as usize, slots.len());
+        out.push((c, slots));
+    }
+    (rig, out)
+}
+
+// spec: REND-018, STRM-006, REND-016
+#[test]
+fn a_frames_tiles_reach_the_sink_as_one_batch_in_upload_order_and_the_calls_are_counted() {
+    for n in [1u64, 10, 118] {
+        let budget = UploadBudget { tile_bytes_per_frame: n * COMPACT_TILE_BYTES, node_records_in_cap: false };
+        for coalesce in [false, true] {
+            let (rig, frames) = ground_fill(budget, coalesce, 60);
+            let full: Vec<_> = frames.iter().filter(|(c, _)| c.uploaded == n).collect();
+            assert!(!full.is_empty(), "N={n}: a frame must reach the cap, or the test proves nothing");
+            // One batch per frame that wrote, holding exactly the frame's tiles, in the order they were written.
+            let written: Vec<usize> = frames.iter().map(|(c, _)| c.uploaded as usize).filter(|u| *u > 0).collect();
+            assert_eq!(rig.sink.batches, written, "N={n}: one batch of the frame's tiles per frame");
+            let mut total = 0u64;
+            for (c, slots) in &frames {
+                total += c.upload_calls;
+                if slots.is_empty() {
+                    assert_eq!(c.upload_calls, 0, "N={n}: a frame that writes nothing makes no call");
+                } else if coalesce {
+                    // The bound: calls per frame are the runs of adjacent slots, never more than the tiles.
+                    assert_eq!(c.upload_calls, runs_of(slots), "N={n}");
+                    assert!(c.upload_calls <= c.uploaded, "N={n}");
+                } else {
+                    assert_eq!(c.upload_calls, c.uploaded, "N={n}: the default sink makes one call per tile");
+                }
+            }
+            if coalesce {
+                let tiles: u64 = frames.iter().map(|(c, _)| c.uploaded).sum();
+                eprintln!("N={n}: {} calls for {tiles} tiles in {} upload frames", total, written.len());
+                assert!(
+                    n == 1 || total < tiles,
+                    "N={n}: adjacent slots must coalesce (the lowest-free-slot placement fills slots in order)"
+                );
+            }
+        }
+    }
+}
+
+// spec: REND-018, STRM-006, REND-016
+#[test]
+fn batching_changes_neither_the_order_nor_the_placement_nor_the_bytes_of_the_upload() {
+    let budget = UploadBudget { tile_bytes_per_frame: 20 * COMPACT_TILE_BYTES, node_records_in_cap: false };
+    let (a, fa) = ground_fill(budget, false, 40);
+    let (b, fb) = ground_fill(budget, true, 40);
+    assert_eq!(a.sink.order, b.sink.order, "the same tiles in the same order");
+    assert_eq!(a.sink.slots_written, b.sink.slots_written, "in the same slots");
+    let key = |f: &[(FrameCounts, Vec<SlotRef>)]| f.iter().map(|(c, _)| (c.uploaded, c.upload_bytes, c.deferred)).collect::<Vec<_>>();
+    assert_eq!(key(&fa), key(&fb), "the same counts per frame, bytes and the cap unchanged");
 }
