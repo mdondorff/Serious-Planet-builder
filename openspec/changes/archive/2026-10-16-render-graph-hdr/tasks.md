@@ -5,4 +5,4 @@
 - [x] 3.2 `TerrainRenderer::enable_lit`, `fs_lit`, lit pipelines for both tile formats; the probe oracle of the lit radiance (REND-025)
 - [x] 3.3 Tier C: coverage and values of the lit frame, tone map through the renderer, adaptive exposure on a terrain frame, frame targets equal the graph, no creation after enable, goldens (REND-026, REND-020, REND-017)
 - [x] 4.1 ADR 0048 proposed; spec deltas with classes and bounds
-- [ ] 4.2 numerics-reviewer, spec-guardian, verifier; `test`, `test gpu`, `test gpu --real`, spec-lint, fmt, clippy, deny; golden-review (escalations listed); archive; log line; delete queue item 2; PR; CI; merge
+- [x] 4.2 numerics-reviewer, spec-guardian, verifier; `test`, `test gpu`, `test gpu --real`, spec-lint, fmt, clippy, deny; golden-review (escalations listed); archive; log line; delete queue item 2; PR; CI; merge
