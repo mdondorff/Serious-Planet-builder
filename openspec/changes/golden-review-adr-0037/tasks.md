@@ -1,0 +1,5 @@
+- [x] 1.1 `testkit::review`: M5 window constant, classes, `AUTO-M5`, `classify_m5_first`, conditions parser, JUnit outcomes, debug-view agreement; tier A tests (TEST-022)
+- [x] 1.2 `golden-review` binary and xtask usage: `--tests`, adapters that took part, conditions in the report
+- [x] 2.1 `golden-review` skill, testing spec (TEST-022, TEST-016), `docs/status.md`
+- [x] 3.1 Review the four lit goldens with the tool: all escalate on (b) (llvmpipe differs by 1 px, delta 95, on the EV-band view); nothing applied, `pending.txt` unchanged
+- [ ] 4.1 numerics-reviewer not needed (no core, generator or shader change); spec-guardian, verifier; `test`, `test gpu`, spec-lint, fmt, clippy; archive; log line; PR; CI (no merge)

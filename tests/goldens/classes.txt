@@ -1,6 +1,7 @@
 # Golden classes (ADR 0009, ADR 0017): <golden name> <debug|shaded|lit>
 # debug: exact on every adapter, changes must agree across adapters. shaded: exact per adapter (adapter-specific
-# rasterisation, e.g. derivative-drawn contour lines). lit: tolerances approved by the owner; never auto-blessed.
+# rasterisation, e.g. derivative-drawn contour lines). lit (and later sky, water): the M5 classes of ADR 0037. A changed lit
+# golden is the owner's; only the FIRST golden of an M5 class is blessed under policy, with its conditions (golden-review skill).
 hello_triangle debug
 debug_view_face debug
 debug_view_tile_id debug
