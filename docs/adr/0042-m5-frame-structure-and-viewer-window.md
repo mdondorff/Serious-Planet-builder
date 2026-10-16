@@ -1,5 +1,5 @@
 # 0042 M5 frame structure, look data and the viewer window
-Status: proposed (sketch by opus-planner, 2026-10-15, for M5, revised after the spec-guardian review; decided under the owner's delegation of 2026-10-12 once the M5 queue starts; the viewer window is the owner's first M5 item of 2026-10-15)
+Status: accepted (opus-planner, 2026-10-16, under the owner's delegation of 2026-10-12, as the M5 queue starts; sketch by opus-planner, 2026-10-15, for M5, revised after the spec-guardian review; decided under the owner's delegation of 2026-10-12 once the M5 queue starts; the viewer window is the owner's first M5 item of 2026-10-15)
 Date: 2026-10-15
 Source: ADR 0013 (render graph: one monolithic terrain pass "until a second pass exists"; no product code declares a graph yet); ADR 0015 (window surface in render); ADR 0033 (VRAM shares); ADR 0037 to ADR 0041; frame pipelining (STRM-016); owner's M5 decisions 2026-10-15 (budgets, no egui in M5); constitution CON-02, CON-03, CON-04, CON-05, CON-09, CON-10, CON-12, CON-20, CON-21
 

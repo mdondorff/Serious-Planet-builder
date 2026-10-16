@@ -224,4 +224,6 @@ ADR 0033 points 8 (RAM split) and 9 (upload cap 1 MiB) accepted; ADR 0031 questi
 ADR 0045 (bodies, bake resolution and the storage budget; point 3 decided) stays proposed until multi-body work. ADR 0036 point 3 (GPU noise floor) stays proposed.
 
 ### Recommendation
-M4's exit criteria are met. The one failing automated step, `test fast` at 15.9-16.1 s against 15 s, is a project rule, not an exit criterion; a trim of the three slowest tests is queued. M4 is not a go/no-go gate. Start M5 per the queue in `docs/status.md` (the owner rules on whether the timing miss blocks the start), and run the `housekeeping` skill first.
+M4's exit criteria are met. The one failing automated step, `test fast` at 15.9-16.1 s against 15 s, is a project rule, not an exit criterion; a trim of the three slowest tests is queued. M4 is not a go/no-go gate. Start M5 per the queue in `docs/status.md`, and run the `housekeeping` skill first.
+
+**Owner's decision (2026-10-16): M4 accepted.** The `test fast` budget is raised to 20 s, so the timing step's 15.9-16.1 s passes; M5 starts.

@@ -3,7 +3,7 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to `docs/log.md`. When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. The `housekeeping` skill cleans the rest at milestone boundaries. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`.
 
 ## Waiting for the owner
-- **M5 start (opus-planner, 2026-10-16):** M4's exit criteria are met (`docs/milestones/M4-report.md`, verifier confirmed); `accept M4`'s `test fast` timing step missed the 15 s budget at 15.9-16.1 s. Recommended: start M5 now with item 0 (the trim) first; alternative: trim, re-run `accept M4`, then start.
+- Nothing open. (M4 accepted by the owner 2026-10-16 with the `test fast` budget raised to 20 s; M5 started.)
 
 Dormant (no near trigger; not asked now):
 - **CON-08 reading** (ADR 0022): may a field read another field of its own stage? Trigger: a regional chain that needs same-stage reads. Until then one field per chain.
@@ -28,8 +28,8 @@ Owner's decisions for an autonomous M5 (2026-10-15): new M5 goldens are blessed 
 
 After the M5 gate (to be decided there): hydrology (lake levels, rivers, deltas, carving) together with surface materials (snow, sand, scree as climate- and slope-driven layers), sharing one material-transport engine written with a clean seam (what moves, what drives it). Not planned: runtime simulation of moving material; overhangs and caves (a heightfield cannot hold them).
 
-## Queued for M5 (sonnet-explorer; queued by opus-planner; starts on the owner's ruling above)
-At the start opus-planner accepts ADRs 0038, 0039 and 0042 under the delegation (0040 and 0041 are accepted). Every change opens its spec deltas with each attribute's class and bound (ADR 0035), and new goldens are blessed under policy (ADR 0037). Budgets: atmosphere <= 1 ms, water <= 2 ms, frame median <= 16.6 ms and p99 <= 20 ms at 1440p in a valid window. Time boxes and fallbacks as in the ADRs, taken without asking and reported. Perf windows: ask the planner, who authorizes them.
+## Queued for M5 (sonnet-explorer; started 2026-10-16, owner)
+ADRs 0038-0042 are accepted. Briefing: `docs/briefings/sonnet-explorer-m5.md`. Every change opens its spec deltas with each attribute's class and bound (ADR 0035), and new goldens are blessed under policy (ADR 0037). Budgets: atmosphere <= 1 ms, water <= 2 ms, frame median <= 16.6 ms and p99 <= 20 ms at 1440p in a valid window. Time boxes and fallbacks as in the ADRs, taken without asking and reported. Perf windows: ask the planner, who authorizes them.
 0. **housekeeping-mechanical** (the `housekeeping` skill, coder part). The planner's list:
    - (a) references to SPIKE-01 to 07 entries, to learnings entries and to log lines that moved to `docs/archive/` (in specs, ADRs, code comments, skills): point them at the archive file;
    - (b) "proposed ADR NNNN" where the ADR is now accepted, and "not yet built" or similar phrases for things that exist;
@@ -37,7 +37,7 @@ At the start opus-planner accepts ADRs 0038, 0039 and 0042 under the delegation 
    - (d) a check that `openspec/changes/` holds no finished, unarchived change;
    - (e) add `spikes/**/results/**` to the docs-only paths of both CI workflows.
 
-   Then **test-fast-trim**: bring `cargo xtask test fast` under 15 s with margin. The slowest are `concurrent_source resident_bytes_never_exceed_the_budget_and_reads_stay_exact` (8.8 s), `manager_real a_share_smaller_than_r_keeps_the_view_exact_and_the_slots_inside_the_share` (6.5 s) and `concurrent_source tiles_over_the_store_are_identical_at_1_4_and_20_threads` (5.5 s). Rules as before: weaken nothing; move a test to tier B only where its requirement's tier allows it.
+   Then **test-fast-budget-20** (owner, 2026-10-16): `FAST_BUDGET_SECS` = 20 in xtask (also used by `accept`), BUILD-003 says 20 s, naming the owner's decision; no test changes.
 1. **viewer-window** (owner's first M5 item; ADR 0042 point 4, ADR 0015): `planet editor` opens a `winit` window. `render` owns the surface. The window runs the pipelined loop with the scripted orbit-to-1 m flight on the injected clock, on today's debug path. Keys: pause, restart, debug view, vsync on/off. The title shows fps, CPU frame time, GPU time and the readiness report (ADR 0045 point 5). No egui. The `--smoke` test opens and closes the window path, runs on Rasierklinge with `test gpu --real`, and is skipped with a reason where CI has no display. Remote desktop works. Time box two days. **Adapter gate (owner, 2026-10-16):** the app picks a discrete GPU and refuses an integrated one, or any adapter missing a required feature or limit, before creating a device, with a message naming the reason, never a crash. The test adapters (WARP, lavapipe) stay allowed in test and CI modes only. A tier-A test covers the selection logic on adapter descriptions.
 2. **render-graph-hdr** (ADR 0042 points 1-3 and 5, ADR 0038): `render::graph` as product code with compile tests; the lit path with terrain into `Rgba16Float` with pre-exposure; the histogram exposure (dt from the `FramePlan`; fixed exposure for goldens); the ACES fit and the sRGB encode; the frame-target share asserted from the compiled graph (an amendment to ADR 0033's remainder). The debug path and its goldens are unchanged.
 3. **look-file** (ADR 0042 point 6): a schema-versioned look file beside the world definition, outside its hash and every cache key, with tested migrations (CON-10), Earth defaults, and loading per body.

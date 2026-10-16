@@ -1,5 +1,5 @@
 # 0038 HDR target, exposure and tone mapping
-Status: proposed (sketch by opus-planner, 2026-10-15, for M5, revised after the spec-guardian and numerics reviews; decided under the owner's delegation of 2026-10-12 once the M5 queue starts; owner's M5 decisions of 2026-10-15 apply: physical defaults as data, look reviewed at the gate, ADR 0037)
+Status: accepted (opus-planner, 2026-10-16, under the owner's delegation of 2026-10-12, as the M5 queue starts; sketch by opus-planner, 2026-10-15, for M5, revised after the spec-guardian and numerics reviews; decided under the owner's delegation of 2026-10-12 once the M5 queue starts; owner's M5 decisions of 2026-10-15 apply: physical defaults as data, look reviewed at the gate, ADR 0037)
 Date: 2026-10-15
 Source: architecture report M5 row (HDR and exposure); `docs/status.md` M5 section; ADR 0013, ADR 0035, ADR 0037, ADR 0042; constitution CON-02, CON-03, CON-04, CON-12, CON-18, CON-19, CON-20
 
