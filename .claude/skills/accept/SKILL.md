@@ -8,5 +8,6 @@ description: Run milestone acceptance and write a milestone report. Use when all
 4. Write `docs/milestones/<milestone>-report.md` with: summary, criteria table, open risks, learnings from this milestone, proposed ADRs awaiting the owner, and the recommendation for the next milestone.
 5. If this is a go/no-go gate (M2, M5), end the report with an explicit "Go / No-go / Go with changes" recommendation and stop for the owner.
 6. Add one line at the top of `docs/log.md`, and write the stop report in `docs/status.md`.
+7. After the report (and, at a gate, the owner's decision), the architect runs the `housekeeping` skill before the next milestone's queue starts.
 
 Milestone: $ARGUMENTS

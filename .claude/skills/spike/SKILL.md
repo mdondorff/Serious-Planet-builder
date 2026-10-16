@@ -20,4 +20,11 @@ Code location: spikes/<name>/ (throwaway; not part of the main crates)
 
 Spike code is never merged into the main crates as-is; the real implementation goes through an OpenSpec change.
 
+**Spikes in a parallel session** (owner, 2026-10-16). A spike may run in its own session beside the main coder when it does not depend on the main queue. Rules:
+- Its own worktree (`.claude/worktrees/spike-<milestone>`) and its own branch per spike (`spike/<id>`); spike code stays on that branch.
+- It writes only its own files: its `docs/spikes.md` entry and, if needed, its `docs/learnings.md` entries, plus results under `spikes/<name>/results/`. One docs-only PR per spike. It never edits `docs/status.md`, `docs/log.md`, specs, ADRs or the main crates; the architect writes the log and status lines and coordinates the merge order.
+- Shared data (bakes, stores, goldens) is read-only for it; it copies what it must modify into its own `target/`.
+- It stops for the architect's perf windows like every coder (no builds, tests or runs during a window) and avoids long CPU or GPU runs while the main coder measures ad hoc.
+- A result worth keeping is rebuilt by the main coder through an OpenSpec change, never merged from the spike branch.
+
 Arguments: $ARGUMENTS
