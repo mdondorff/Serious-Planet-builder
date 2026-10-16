@@ -89,6 +89,9 @@ pub struct JobSample {
     pub level: u8,
 }
 
+/// Most samples a log keeps (about 25 MB); later jobs run unlogged.
+const MAX_JOB_SAMPLES: usize = 1 << 20;
+
 /// The jobs that ran, in the order they ended, and how many run now (STRM-022): recorded only.
 #[derive(Default)]
 pub struct JobLog {
@@ -120,7 +123,10 @@ impl JobLog {
         self.running.fetch_sub(1, Ordering::SeqCst);
         let wait_us = u64::try_from(started.saturating_duration_since(queued).as_micros()).unwrap_or(u64::MAX);
         let sample = JobSample { wait_us, run_us, running, done: done(&out), level };
-        self.samples.lock().expect("job log").push(sample);
+        let mut samples = self.samples.lock().expect("job log");
+        if samples.len() < MAX_JOB_SAMPLES {
+            samples.push(sample);
+        }
         out
     }
 }

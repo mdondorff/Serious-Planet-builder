@@ -4,4 +4,4 @@
 - [x] 1.4 cache: `SourceStats` fields, `thread_block_wait_ns`, `thread_block_decodes`, `StoreReadStats`
 - [x] 1.5 app/perf: `WorldTerrain::counters`, `timed_load`, `load_counts`, `LoadCounters`, `calibrate_cpu`, the `load_` prefix in the comparison
 - [x] 1.6 spec delta: STRM-022 added
-- [x] 1.7 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge
+- [ ] 1.7 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge

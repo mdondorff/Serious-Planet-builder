@@ -320,7 +320,7 @@ impl WorldTerrain {
         out
     }
 
-    /// What the tile source did so far (recorded only, STRM-022); `None` for the stored bake and the pack of an in-memory run.
+    /// What the tile source did so far (recorded only, STRM-022); the stored-bake and pack figures are zero for an in-memory run.
     pub fn counters(&self) -> SourceCounters {
         use std::sync::atomic::Ordering::Relaxed;
         SourceCounters {

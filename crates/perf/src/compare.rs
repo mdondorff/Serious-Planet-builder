@@ -630,8 +630,6 @@ mod tests {
         assert!(lines.iter().any(|l| l.contains("nodes 8687 -> 9000")), "{lines:?}");
     }
 
-    // spec: TEST-019
-
     // spec: STRM-022
     #[test]
     fn the_tile_load_counts_are_recorded_but_never_reported_as_changed_counts() {
@@ -648,6 +646,8 @@ mod tests {
             assert!(lines.iter().all(|l| !l.contains("count changed") && !l.contains("could not be read")), "{lines:?}");
         }
     }
+
+    // spec: TEST-019
     #[test]
     fn scene_alone_is_recorded_but_never_reported_as_a_changed_count() {
         let plain = log(true, (2560, 1440), [3.0; 3], [0.06; 3], 8687);
