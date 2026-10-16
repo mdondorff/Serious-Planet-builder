@@ -57,3 +57,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0045 | [Bodies, bake resolution and the storage budget](0045-bodies-bake-resolution-and-storage-budget.md) | proposed | all but point 3: multi-body work (point 7 before the editor ships) |
 | 0046 | [Generation workers run below normal priority](0046-generation-workers-run-below-normal-priority.md) | accepted |  |
 | 0047 | [Adapter gate: a discrete GPU, chosen before the device exists](0047-adapter-gate.md) | accepted |  |
+| 0048 | [Frame-target share (amends ADR 0033's remainder) and the lit path's readings of ADR 0038 and ADR 0042](0048-frame-target-share-and-lit-path-readings.md) | proposed | build on it; accept with the next planner pass (reversible: a constant, a formula, a unit table) |

@@ -1,6 +1,8 @@
 //! Tier B: every shipped WGSL module passes the backend's validation on the software adapter.
 
-use planet_render::{compact_terrain_shader, AdapterPolicy, GpuContext, EXEC_SHADERS, SHADERS, TERRAIN_SHADERS, WINDOW_SHADERS};
+use planet_render::{
+    compact_terrain_shader, lit_post_shaders, AdapterPolicy, GpuContext, EXEC_SHADERS, SHADERS, TERRAIN_SHADERS, WINDOW_SHADERS,
+};
 
 // spec: REND-002
 #[test]
@@ -10,6 +12,12 @@ fn every_shader_module_validates() {
     assert!(!SHADERS.is_empty());
     for (name, source) in SHADERS.iter().chain(EXEC_SHADERS).chain(TERRAIN_SHADERS).chain(WINDOW_SHADERS) {
         if let Err(e) = ctx.validate_wgsl(name, source) {
+            panic!("{e}");
+        }
+    }
+    // The lit path's post chain: the exposure histogram and adaptation (compute) and the tone map (REND-022, REND-023).
+    for (name, source) in lit_post_shaders() {
+        if let Err(e) = ctx.validate_wgsl(name, &source) {
             panic!("{e}");
         }
     }

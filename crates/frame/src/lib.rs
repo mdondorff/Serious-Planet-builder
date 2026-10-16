@@ -8,6 +8,7 @@ pub mod draw;
 pub mod freecam;
 pub mod instances;
 pub mod lod;
+pub mod look;
 pub mod managed;
 pub mod pipeline;
 pub mod plan;

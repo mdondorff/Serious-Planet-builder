@@ -3,6 +3,7 @@
 //! intervals and colours all come from the plan. Shaders see only tile-local and camera-relative quantities (CON-11).
 
 use crate::compact::{compact_terrain_shader, CompactGpu, REF_BYTES};
+use crate::lit::LitPath;
 use crate::{read_rgba8, ExecError, GpuContext, RgbaFrame};
 use planet_frame::draw::{buffer_of, build_draw_list_placed, DrawBuffer, DRAW_RECORD_BYTES};
 use planet_frame::pool::tier_pool;
@@ -207,9 +208,37 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let k = 1.0 - 0.8 * line(band_z, w_z);
     return vec4<f32>(v * k, v * k, v * k, 1.0);
 }
+
+// The tint of the relief view, as a function of the normalised height.
+fn lit_tint(t: f32) -> vec3<f32> {
+    let low = mix(vec3<f32>(0.18, 0.36, 0.56), vec3<f32>(0.36, 0.56, 0.26), smoothstep(0.0, 0.35, t));
+    return mix(low, mix(vec3<f32>(0.66, 0.56, 0.38), vec3<f32>(0.95, 0.95, 0.95), smoothstep(0.7, 1.0, t)), smoothstep(0.35, 0.7, t));
+}
+
+// The lit path's base radiance (ADR 0038 point 1, REND-025): Lambert of the vertex normal under the plan's sun on the height tint,
+// in units of the sun's illuminance, times the pre-exposure factor of the plan, clamped to 60,000 so the scene target does not
+// hold inf in f16 (the plan validates the sun and the factor, so NaN needs a zero normal, which a mesh never has). Only unit normals, tile-local heights and the plan's numbers are used (CON-11).
+fn lit_radiance(normal: vec3<f32>, height: f32, range: vec2<f32>, sun: vec3<f32>, scale: f32) -> vec3<f32> {
+    let n = normalize(normal);
+    let t = clamp((height - range.x) / max(range.y - range.x, 1e-6), 0.0, 1.0);
+    let ndl = max(dot(n, sun), 0.0);
+    let radiance = lit_tint(t) * 0.4 * ndl / 3.14159265;
+    return clamp(radiance * scale, vec3<f32>(0.0), vec3<f32>(60000.0));
+}
+
+// The sun direction and the pre-exposure factor travel in the otherwise unused words of the globals (mode.yzw as bits, range.z).
+@fragment
+fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
+    let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
+    return vec4<f32>(lit_radiance(in.normal, in.height, g.range.xy, sun, g.range.z), 1.0);
+}
 "#;
 
 pub const TERRAIN_SHADERS: &[(&str, &str)] = &[("terrain", SHADER)];
+
+/// Depth target format and test: reversed-Z `Depth32Float` with the clear value 0 (CON-12, ADR 0002), for the debug and lit paths alike.
+pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+pub(crate) const DEPTH_COMPARE: wgpu::CompareFunction = wgpu::CompareFunction::Greater;
 
 fn view_index(v: TerrainView) -> u32 {
     TerrainView::ALL.iter().position(|x| *x == v).expect("known view") as u32
@@ -530,6 +559,17 @@ pub struct TerrainRenderer {
     init: InitCounts,
     /// Which parts of the renderer a submission has used so far (REND-017).
     used: UseMasks,
+    /// The lit path (ADR 0042): None until [`enable_lit`](TerrainRenderer::enable_lit).
+    lit: Option<LitGpu>,
+    /// Pipelines and targets made by `enable_lit` (zero before it): fixed once enabled, so no lit frame creates one (REND-017).
+    lit_objects: u32,
+}
+
+/// The lit path's terrain pipelines (HDR target, `fs_lit`) and its post chain.
+struct LitGpu {
+    path: LitPath,
+    pipeline: wgpu::RenderPipeline,
+    compact_pipeline: Option<wgpu::RenderPipeline>,
 }
 
 fn make_pool_buffer(device: &wgpu::Device, label: &'static str, bytes: u64) -> wgpu::Buffer {
@@ -685,7 +725,7 @@ impl TerrainRenderer {
             format,
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
         );
-        let depth = target("terrain-depth", wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
+        let depth = target("terrain-depth", DEPTH_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT);
         let (color_view, depth_view) = (color.create_view(&Default::default()), depth.create_view(&Default::default()));
         // The share's node-record bytes bound the ring: per node a record and an argument record in each of the RING sets.
         let per_node = NODE_BYTES + DRAW_RECORD_BYTES + if compact { REF_BYTES } else { 0 };
@@ -741,9 +781,9 @@ impl TerrainRenderer {
             primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
             // Reversed-Z (ADR 0002): near = 1, far = 0, so the test is Greater and the clear value 0.
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
+                format: DEPTH_FORMAT,
                 depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Greater),
+                depth_compare: Some(DEPTH_COMPARE),
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -809,6 +849,8 @@ impl TerrainRenderer {
             in_flight: Default::default(),
             init: InitCounts { pipelines: if compact { 2 } else { 1 }, pool_allocations: 0, ring_builds: 1 },
             used: UseMasks::default(),
+            lit: None,
+            lit_objects: 0,
         }
     }
 
@@ -877,9 +919,9 @@ impl TerrainRenderer {
             }),
             primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
+                format: DEPTH_FORMAT,
                 depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Greater),
+                depth_compare: Some(DEPTH_COMPARE),
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -940,6 +982,127 @@ impl TerrainRenderer {
                 FrameSet { globals, nodes, args, bind, refs, frame_bind }
             })
             .collect()
+    }
+
+    /// Enable the lit path (ADR 0042 point 1): create the `Rgba16Float` scene target, the exposure buffers and compute pipelines,
+    /// the tone-map pipeline and the terrain pipelines that write the scene target. Call it before the frames that are measured
+    /// (REND-017); a plan with a [`LitPlan`](planet_frame::look::LitPlan) then draws through it, and the debug path is untouched.
+    pub fn enable_lit(&mut self, ctx: &GpuContext) {
+        if self.lit.is_some() {
+            return;
+        }
+        let device = &ctx.device;
+        let hdr = crate::lit::HDR_FORMAT;
+        let depth = wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(DEPTH_COMPARE),
+            stencil: Default::default(),
+            bias: Default::default(),
+        };
+        let targets = [Some(wgpu::ColorTargetState { format: hdr, blend: None, write_mask: wgpu::ColorWrites::ALL })];
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("terrain-lit"),
+            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain-lit-layout"),
+            bind_group_layouts: &[Some(&self.bgl)],
+            immediate_size: 0,
+        });
+        let attr =
+            |format, k: usize, loc| wgpu::VertexAttribute { format, offset: 4 * MeshVertex::OFFSETS[k] as u64, shader_location: loc };
+        let attrs = [
+            attr(wgpu::VertexFormat::Float32x3, 0, 0),
+            attr(wgpu::VertexFormat::Float32x3, 1, 1),
+            attr(wgpu::VertexFormat::Float32x3, 2, 2),
+            attr(wgpu::VertexFormat::Float32, 3, 3),
+            attr(wgpu::VertexFormat::Float32, 4, 4),
+        ];
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("terrain-lit-pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: MeshVertex::STRIDE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &attrs,
+                })],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_lit"),
+                compilation_options: Default::default(),
+                targets: &targets,
+            }),
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: Some(depth.clone()),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let compact_pipeline = self.compact.as_ref().map(|c| {
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("terrain-compact-lit"),
+                source: wgpu::ShaderSource::Wgsl(compact_terrain_shader(self.cells).into()),
+            });
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("compact-lit-layout"),
+                bind_group_layouts: &[Some(&self.bgl), Some(&c.bgl_frame), Some(&c.bgl_atlas)],
+                immediate_size: 0,
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("compact-lit-pipeline"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_lit"),
+                    compilation_options: Default::default(),
+                    targets: &targets,
+                }),
+                primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+                depth_stencil: Some(depth.clone()),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        });
+        let path = LitPath::new(ctx, self.size);
+        // The scene target, the exposure buffers, three post pipelines and the terrain pipelines.
+        self.lit_objects = 1 + 3 + 1 + u32::from(compact_pipeline.is_some());
+        self.lit = Some(LitGpu { path, pipeline, compact_pipeline });
+    }
+
+    /// Long-lived GPU objects the lit path made (scene target, exposure buffers, the post pipelines and the terrain pipelines).
+    pub fn lit_objects(&self) -> u32 {
+        self.lit_objects
+    }
+
+    /// Whether the lit path is enabled.
+    pub fn lit_enabled(&self) -> bool {
+        self.lit.is_some()
+    }
+
+    /// The lit path's post chain (scene target, exposure state), for tests and tools.
+    pub fn lit_path(&self) -> Option<&LitPath> {
+        self.lit.as_ref().map(|l| &l.path)
+    }
+
+    /// Bytes of all frame targets the renderer holds for the lit path: the scene target, the depth target, the histogram and the
+    /// exposure history. The frame-target share counts exactly these (REND-020).
+    pub fn lit_frame_target_bytes(&self) -> Option<u64> {
+        self.lit
+            .as_ref()
+            .map(|l| l.path.allocated_bytes() + u64::from(self.size.0) * u64::from(self.size.1) * crate::graph::DEPTH_BYTES_PER_PIXEL)
     }
 
     /// Long-lived GPU objects created so far (REND-013): the counters a test compares before and after a frame.
@@ -1699,6 +1862,12 @@ impl TerrainRenderer {
         if !(lo.is_finite() && hi.is_finite() && lo < hi) {
             return Err(ExecError::BadHeightRange { lo, hi });
         }
+        if let Some(l) = &plan.lit {
+            l.validate().map_err(ExecError::BadLitPlan)?;
+        }
+        if plan.lit.is_some() && self.lit.is_none() {
+            return Err(ExecError::LitNotEnabled);
+        }
         self.frame += 1;
         let device = &ctx.device;
         if plan.nodes.len() > self.node_capacity {
@@ -1709,8 +1878,22 @@ impl TerrainRenderer {
             self.used.ring = 0;
         }
         let mut globals = f32_bytes(&plan.view_projection);
-        globals.extend(f32_bytes(&[lo, hi, 0.0, 0.0]));
-        globals.extend([view_index(plan.view), 0, 0, 0].iter().flat_map(|v: &u32| v.to_le_bytes()));
+        match &plan.lit {
+            // The lit path: the pre-exposure factor in range.z and the sun direction in mode.yzw (as bits), decided by the plan.
+            Some(lit) => {
+                let factor = planet_frame::look::pre_exposure_factor(f64::from(lit.exposure.pre_ev100())) as f32;
+                globals.extend(f32_bytes(&[lo, hi, factor, 0.0]));
+                globals.extend(
+                    [0, lit.sun_dir[0].to_bits(), lit.sun_dir[1].to_bits(), lit.sun_dir[2].to_bits()]
+                        .iter()
+                        .flat_map(|v: &u32| v.to_le_bytes()),
+                );
+            }
+            None => {
+                globals.extend(f32_bytes(&[lo, hi, 0.0, 0.0]));
+                globals.extend([view_index(plan.view), 0, 0, 0].iter().flat_map(|v: &u32| v.to_le_bytes()));
+            }
+        }
         // Each frame writes its own set of the ring, so a frame still in flight keeps the records it reads.
         let ring_index = (self.frame % RING as u64) as usize;
         self.used.ring |= 1 << ring_index;
@@ -1772,12 +1955,19 @@ impl TerrainRenderer {
         let timing = if timed { self.timing.as_ref() } else { None };
         self.used.timestamps |= timing.is_some() && wait;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("terrain") });
+        // The lit path draws into its scene target with its own pipelines and clears to black without coverage; the debug path
+        // is the plan's colour target as before.
+        let lit_gpu = plan.lit.as_ref().and(self.lit.as_ref());
+        let (color_target, vertex_pipeline, compact_pipeline) = match lit_gpu {
+            Some(l) => (l.path.hdr_view(), &l.pipeline, l.compact_pipeline.as_ref()),
+            None => (&self.color_view, &self.pipeline, self.compact.as_ref().map(|c| &c.pipeline)),
+        };
         {
-            let [r, g, b, a] = plan.clear_color.map(|v| f64::from(v) / 255.0);
+            let [r, g, b, a] = if lit_gpu.is_some() { [0.0; 4] } else { plan.clear_color.map(|v| f64::from(v) / 255.0) };
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.color_view,
+                    view: color_target,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r, g, b, a }), store: wgpu::StoreOp::Store },
@@ -1795,7 +1985,7 @@ impl TerrainRenderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.pipeline);
+            pass.set_pipeline(vertex_pipeline);
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.set_bind_group(0, &set.bind, &[]);
             // Which pipeline is bound: a run of an atlas needs the compact one with its two bind groups.
@@ -1810,7 +2000,7 @@ impl TerrainRenderer {
                                 if compact_bound != Some(b) {
                                     let c = self.compact.as_ref().expect("compact renderer");
                                     if vertex_bound || compact_bound.is_none() {
-                                        pass.set_pipeline(&c.pipeline);
+                                        pass.set_pipeline(compact_pipeline.expect("compact renderer"));
                                         pass.set_bind_group(0, &set.bind, &[]);
                                         pass.set_bind_group(1, set.frame_bind.as_ref(), &[]);
                                     }
@@ -1821,7 +2011,7 @@ impl TerrainRenderer {
                             }
                             other => {
                                 if !vertex_bound {
-                                    pass.set_pipeline(&self.pipeline);
+                                    pass.set_pipeline(vertex_pipeline);
                                     pass.set_bind_group(0, &set.bind, &[]);
                                     vertex_bound = true;
                                     compact_bound = None;
@@ -1846,7 +2036,7 @@ impl TerrainRenderer {
                             let b = r.slot.index / self.pool.block_slots;
                             if compact_bound != Some(b) {
                                 if vertex_bound || compact_bound.is_none() {
-                                    pass.set_pipeline(&c.pipeline);
+                                    pass.set_pipeline(compact_pipeline.expect("compact renderer"));
                                     pass.set_bind_group(0, &set.bind, &[]);
                                     pass.set_bind_group(1, set.frame_bind.as_ref(), &[]);
                                 }
@@ -1856,7 +2046,7 @@ impl TerrainRenderer {
                             }
                         } else {
                             if !vertex_bound {
-                                pass.set_pipeline(&self.pipeline);
+                                pass.set_pipeline(vertex_pipeline);
                                 pass.set_bind_group(0, &set.bind, &[]);
                                 vertex_bound = true;
                                 compact_bound = None;
@@ -1871,6 +2061,9 @@ impl TerrainRenderer {
             }
             stats.draw_calls = plan.nodes.len() as u32;
             stats.triangles = plan.nodes.len() as u64 * u64::from(self.index_count) / 3;
+        }
+        if let (Some(l), Some(lit)) = (self.lit.as_mut(), plan.lit.as_ref()) {
+            l.path.record_post(ctx, &mut encoder, &self.color_view, lit);
         }
         if let Some(t) = timing {
             encoder.resolve_query_set(&t.queries, 0..2, &t.resolve, 0);

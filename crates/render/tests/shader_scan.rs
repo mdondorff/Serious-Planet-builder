@@ -1,6 +1,6 @@
 //! REND-005: shaders see only tile-local and camera-relative quantities: no planet-radius constants or uniforms.
 
-use planet_render::{compact_terrain_shader, EXEC_SHADERS, SHADERS, TERRAIN_SHADERS};
+use planet_render::{compact_terrain_shader, lit_post_shaders, EXEC_SHADERS, SHADERS, TERRAIN_SHADERS};
 
 /// Violations in one WGSL source: numeric literals of planet-radius magnitude (>= 1e6) and radius-like identifiers.
 fn scan(source: &str) -> Vec<String> {
@@ -42,6 +42,11 @@ fn shipped_shaders_contain_no_planet_scale_values() {
     let mut all = Vec::new();
     for (name, src) in SHADERS.iter().chain(EXEC_SHADERS).chain(TERRAIN_SHADERS) {
         for h in scan(src) {
+            all.push(format!("{name}: {h}"));
+        }
+    }
+    for (name, src) in lit_post_shaders() {
+        for h in scan(&src) {
             all.push(format!("{name}: {h}"));
         }
     }

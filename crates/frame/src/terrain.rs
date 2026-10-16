@@ -90,6 +90,8 @@ pub struct TerrainPlan {
     pub height_range: [f32; 2],
     pub cells: u32,
     pub nodes: Vec<TerrainDraw>,
+    /// The lit path of this frame (ADR 0042 points 1 and 3): `None` keeps the debug path, whose goldens do not change.
+    pub lit: Option<crate::look::LitPlan>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -269,6 +271,7 @@ pub(crate) fn plan_terrain_keyed(
         height_range: HEIGHT_RANGE,
         cells: req.lod.cells,
         nodes,
+        lit: None,
     })
 }
 

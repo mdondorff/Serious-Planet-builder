@@ -567,6 +567,7 @@ mod tests {
             height_range: [0.0, 1.0],
             cells: 16,
             nodes: tiles.iter().map(|t| draw(*t, &camera)).collect(),
+            lit: None,
         }
     }
 

@@ -7,6 +7,7 @@ pub mod compact;
 pub mod exec;
 pub mod gate;
 pub mod graph;
+pub mod lit;
 #[cfg(feature = "spike06")]
 pub mod spike_compact;
 #[cfg(feature = "spike07")]
@@ -16,6 +17,7 @@ pub mod window;
 pub use compact::compact_terrain_shader;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
 pub use gate::requirements as adapter_requirements;
+pub use lit::{lit_post_shaders, ExposureState, LitPath};
 pub use terrain::{
     execute_terrain, execute_terrain_tiles, DrawMode, FirstUse, FrameTiming, InitCounts, ResidentFormat, TerrainRenderer, TerrainStats,
     UploadCounters, UploadMode, UploadTimes, RING_SETS, TERRAIN_SHADERS, WARM_NODES,

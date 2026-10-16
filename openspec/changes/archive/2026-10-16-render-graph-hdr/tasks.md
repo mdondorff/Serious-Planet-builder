@@ -1,0 +1,8 @@
+- [x] 1.1 `frame::look`: units, histogram, band mean, target, adaptation, ACES, sRGB, tone-map pixel, EV bands, lit radiance, `LitPlan` and its text (tests first, REND-021, REND-024, REND-025)
+- [x] 1.2 `TerrainPlan.lit` and the plan text (debug-path text unchanged)
+- [x] 2.1 `render::graph`: sized and persistent resources, `lit_frame_graph`, the frame-target share, compile tests (REND-019, REND-020)
+- [x] 3.1 `render::lit`: `LitPath`, the three shaders, the executor over the compiled graph; oracles against the CPU references (REND-019, REND-022, REND-023)
+- [x] 3.2 `TerrainRenderer::enable_lit`, `fs_lit`, lit pipelines for both tile formats; the probe oracle of the lit radiance (REND-025)
+- [x] 3.3 Tier C: coverage and values of the lit frame, tone map through the renderer, adaptive exposure on a terrain frame, frame targets equal the graph, no creation after enable, goldens (REND-026, REND-020, REND-017)
+- [x] 4.1 ADR 0048 proposed; spec deltas with classes and bounds
+- [x] 4.2 numerics-reviewer, spec-guardian, verifier; `test`, `test gpu`, `test gpu --real`, spec-lint, fmt, clippy, deny; golden-review (escalations listed); archive; log line; delete queue item 2; PR; CI; merge
