@@ -98,3 +98,22 @@ Refreshed 2026-10-13 at the M3 gate (session `opus-plannner`, worktree `opus-pla
   from streaming (in the briefing's known facts).
 - `cargo xtask perf` only in my perf windows (ADR 0020); `--machine-ready` is the owner's.
 - Goldens only via `cargo xtask golden-review` (ADR 0017); escalations go to the owner's `/bless`.
+
+## 2026-10-15/16 decisions and practice
+- Constitution v1.3 (ADR 0035): CPU/GPU equality binds fields only; presentation data declares its own bound. v1.4
+  (ADR 0043): CON-11 keeps geometry strict; shading may use planet-sized values if its bound (incl. temporal stability
+  at 1 m) is tested.
+- M5 autonomy (owner): goldens under policy, one look review at the gate (ADR 0037); physical Earth defaults;
+  Gerstner only; atmosphere <= 1 ms, water <= 2 ms. M5 starts only after a clean `accept M4`; surprises wait for the
+  owner. ADRs 0040/0041 accepted after SPIKE-09/08; accept 0038, 0039, 0042 when the M5 queue starts.
+- M4 windows: 1 found the harness clock bug and the scheduler cost; 2 found the dispatch cap (8 in flight) and the
+  upload ranking cost. Lesson: tier-A fakes missed a real configuration cap, hence the tier-B perf smoke (owner).
+- Dive cold start (owner): the gated dive starts with levels 0-4 pre-filled on disk (ADR 0045 pt 3); the cold dive is
+  tracked. ADR 0045 (bodies, bake resolution, storage budget) stays proposed until multi-body.
+- Velocity (owner, 2026-10-16): `test fast` budget 15 s; docs-only PRs run the light `docs` workflow; a second
+  session `sonnet-spikes` runs independent spikes in its own worktree and writes only its own files; I write log and
+  status and coordinate merges (spike skill).
+- Housekeeping (owner, 2026-10-16): the `housekeeping` skill runs after each milestone acceptance; I curate, the coder
+  does the mechanical pass; fix dust at the root (the skills carry the rules).
+- Worktree guard: no `$(...)`, `$VAR` operands or complex jq filters in one command; one plain command per call.
+  `gh pr checks N --watch` then `gh pr merge` in a background task works.
