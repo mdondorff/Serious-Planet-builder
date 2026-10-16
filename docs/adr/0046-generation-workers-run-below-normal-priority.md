@@ -25,7 +25,7 @@ Option 3. What is measured is a smaller tail on an otherwise idle machine; that 
 ## Consequences
 - Easier: the frame thread keeps its core under a loaded machine without giving up generation throughput on an idle one.
 - Harder: perf logs taken before this change (normal priority) differ from new ones in `protocol.gen`; the comparison names them as different pools. Debuggers and profilers show the workers at lower priority.
-- Tests (A): the workers read back the priority they were built with, the caller is unchanged, a thread restores its own priority, size and job limit are equal at both priorities, the option parses. Not tested: a timing effect (no test asserts wall-clock).
+- Tests (A): the workers read back the priority they were built with, the caller is unchanged, a thread reads back its lowered priority (restoring normal is checked on Windows only: on Linux an unprivileged thread cannot raise its nice value again, and nothing in the pool relies on it, because workers are never reused for other work), size and job limit are equal at both priorities, the option parses. Not tested: a timing effect (no test asserts wall-clock).
 - Window 4 must check: the dive and dive-fast p99, upload p99 and descent lag against window 3 with `protocol.gen.priority` recorded; if window 3's slow generation (6 dispatched a frame against 11 in the ablation) recurs, record the CPU clocks, the process list and the page-cache state, since the ablation could not reproduce it.
 
 ## Licences of adopted code or techniques
