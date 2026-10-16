@@ -609,7 +609,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
             requests.push(TerrainRequest { camera: then_camera, ..request.clone() });
             shown = then_name;
         }
-        let (frame, log) = crate::pipelined::run_script(ctx, &world, &requests, out)?;
+        let (frame, log) = crate::pipelined::run_script(ctx, &world, &requests, o.gen_workers(), out)?;
         writeln!(out, "terrain {shown} ({}) pipelined: {} frames drawn", view.name(), log.len()).map_err(err)?;
         if let Some(path) = &o.out {
             write_frame(&frame, path, out)?;
@@ -910,20 +910,21 @@ fn streamed_meshes(
     format: planet_render::TileFormat,
     max_level: u8,
 ) -> Result<Vec<std::sync::Arc<RenderTile>>, String> {
-    use planet_streaming::{ResidencyManager, StreamConfig, Streamer, SystemClock, ThreadPool, Tier, Wants};
-    let pool = std::sync::Arc::new(ThreadPool::new(4));
+    use planet_streaming::{ResidencyManager, StreamConfig, Streamer, SystemClock, Tier, Wants};
+    // Four tile threads and four queued behind them (STRM-020): the pool size and the limit are one number.
+    let gen = planet_streaming::GenWorkers::new(4);
+    let pool = gen.pool();
     let share = match format {
         planet_render::TileFormat::Compact => planet_frame::pool::tier_compact_pool(Tier::Mid, TERRAIN_CELLS, 1)?,
         planet_render::TileFormat::Vertex => planet_frame::pool::tier_pool(Tier::Mid, TERRAIN_CELLS, 1)?,
     };
-    let config = StreamConfig {
-        max_in_flight: 8,
+    let config = gen.apply(StreamConfig {
         capacity: share.main_slots() as usize,
         vertex_pool_slots: share.managed_vertex_slots() as usize,
         retry_after_ms: 1000,
         record_dispatches: false,
         ..Default::default()
-    };
+    });
     let mut streamer = Streamer::new(
         std::sync::Arc::new(MeshSource { world: std::sync::Arc::clone(world), format, max_level, cells: TERRAIN_CELLS }),
         pool,

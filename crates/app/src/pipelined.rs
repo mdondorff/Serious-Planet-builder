@@ -88,7 +88,12 @@ pub(crate) struct Rig {
 
 impl Rig {
     /// A rig for requests like `first`: one tile size (cells) and one finest level, the pools sized for the first request.
-    pub(crate) fn new(ctx: &GpuContext, world: &Arc<WorldTerrain>, first: &TerrainRequest) -> Result<Rig, String> {
+    pub(crate) fn new(
+        ctx: &GpuContext,
+        world: &Arc<WorldTerrain>,
+        first: &TerrainRequest,
+        gen: planet_streaming::GenWorkers,
+    ) -> Result<Rig, String> {
         let mut renderer = TerrainRenderer::for_context(ctx, first.size, first.lod.cells, u64::from(MAX_FRAMES_IN_FLIGHT));
         // REND-013: the pools' first block, the ring and every pipeline's first draw happen here, before frame 0 (frame 0 stays
         // a measured frame, ADR 0032).
@@ -106,17 +111,18 @@ impl Rig {
                 max_level: first.lod.max_level,
                 cells: first.lod.cells,
             }),
-            Arc::new(ThreadPool::new(threads.clamp(2, 8))),
+            // The tile threads and the jobs running at once are one number (STRM-020).
+            gen.pool(),
             Arc::clone(&clock),
-            StreamConfig {
-                max_in_flight: 8,
+            gen.apply(StreamConfig {
                 capacity: pool.main_slots() as usize,
                 vertex_pool_slots: pool.managed_vertex_slots() as usize,
                 retire_frames: u64::from(MAX_FRAMES_IN_FLIGHT),
                 retry_after_ms: 1000,
                 record_dispatches: false,
                 record_changes: true,
-            },
+                ..Default::default()
+            }),
         );
         // The one wait of the loop (CON-22): the six roots exist before the first frame, so there is always something to draw.
         streamer.load_roots_blocking()?;
@@ -140,6 +146,7 @@ pub fn run_script(
     ctx: &GpuContext,
     world: &Arc<WorldTerrain>,
     requests: &[TerrainRequest],
+    gen: planet_streaming::GenWorkers,
     out: &mut dyn Write,
 ) -> Result<(RgbaFrame, Vec<FrameLog>), String> {
     let first = requests.first().ok_or("an empty script")?;
@@ -154,7 +161,7 @@ pub fn run_script(
             first.lod.cells, first.lod.max_level, r.lod.cells, r.lod.max_level
         ));
     }
-    let Rig { mut renderer, mut managed, mut fi, pool } = Rig::new(ctx, world, first)?;
+    let Rig { mut renderer, mut managed, mut fi, pool } = Rig::new(ctx, world, first, gen)?;
     let mut log: Vec<FrameLog> = Vec::new();
     let mut last_drawn: Option<TerrainPlan> = None;
     let mut iteration = 0u64;

@@ -213,6 +213,128 @@ impl Spawner for ManualSpawner {
     }
 }
 
+/// Deterministic spawner with a generation-rate model (TEST-018, STRM-020): `workers` machines, each running one job at a time
+/// for `duration_us(n)` microseconds of model time (`n` counts jobs from 0), jobs waiting in submission order for a free worker,
+/// like a thread pool. Time moves only by [`advance`](TimedSpawner::advance), which runs the jobs that finish on the way, in
+/// finish order (ties in submission order), and starts a waiting job on the worker that freed up at that moment, so a worker is
+/// never idle while a job waits (the pool's behaviour), while the streamer, which sees completions only at a frame boundary,
+/// refills only then. A job runs when it finishes; the model has no threads.
+pub struct TimedSpawner {
+    state: Mutex<TimedState>,
+}
+
+struct TimedState {
+    workers: usize,
+    duration_us: Box<dyn Fn(u64) -> u64 + Send>,
+    now_us: u64,
+    started: u64,
+    waiting: VecDeque<Job>,
+    /// `(finish_us, submission number, job)` of the jobs on a worker.
+    running: Vec<(u64, u64, Job)>,
+    finished: u64,
+}
+
+impl TimedSpawner {
+    /// `workers` machines, every job taking `duration_us` microseconds.
+    pub fn new(workers: usize, duration_us: u64) -> Self {
+        Self::with_durations(workers, move |_| duration_us)
+    }
+
+    /// As [`new`](TimedSpawner::new) with the duration of job number `n` a pure function of `n`.
+    pub fn with_durations(workers: usize, duration_us: impl Fn(u64) -> u64 + Send + 'static) -> Self {
+        Self {
+            state: Mutex::new(TimedState {
+                workers: workers.max(1),
+                duration_us: Box::new(duration_us),
+                now_us: 0,
+                started: 0,
+                waiting: VecDeque::new(),
+                running: Vec::new(),
+                finished: 0,
+            }),
+        }
+    }
+
+    /// Jobs on a worker now.
+    pub fn busy(&self) -> usize {
+        self.state.lock().expect("timed").running.len()
+    }
+
+    /// Jobs waiting for a worker.
+    pub fn waiting(&self) -> usize {
+        self.state.lock().expect("timed").waiting.len()
+    }
+
+    /// Jobs finished (run) so far.
+    pub fn finished(&self) -> u64 {
+        self.state.lock().expect("timed").finished
+    }
+
+    /// Move model time forward by `dt_us` and run what finishes on the way.
+    pub fn advance(&self, dt_us: u64) {
+        let target = self.state.lock().expect("timed").now_us + dt_us;
+        self.run_until(target);
+    }
+
+    fn run_until(&self, target: u64) {
+        loop {
+            let job = {
+                let mut st = self.state.lock().expect("timed");
+                let next = st.running.iter().enumerate().min_by_key(|(_, (f, n, _))| (*f, *n)).map(|(i, (f, _, _))| (i, *f));
+                match next {
+                    Some((i, f)) if f <= target => {
+                        let (_, _, job) = st.running.swap_remove(i);
+                        st.now_us = st.now_us.max(f);
+                        st.finished += 1;
+                        // The worker that freed up takes the next waiting job at once.
+                        if let Some(next) = st.waiting.pop_front() {
+                            st.start(next);
+                        }
+                        job
+                    }
+                    _ => {
+                        st.now_us = st.now_us.max(target);
+                        return;
+                    }
+                }
+            };
+            job();
+        }
+    }
+}
+
+impl TimedState {
+    fn start(&mut self, job: Job) {
+        let n = self.started;
+        self.started += 1;
+        let finish = self.now_us + (self.duration_us)(n);
+        self.running.push((finish, n, job));
+    }
+}
+
+impl Spawner for TimedSpawner {
+    fn spawn(&self, job: Job) {
+        let mut st = self.state.lock().expect("timed");
+        if st.running.len() < st.workers {
+            st.start(job);
+        } else {
+            st.waiting.push_back(job);
+        }
+    }
+
+    /// Let model time pass until the next job finishes (a blocking caller such as `load_roots_blocking`).
+    fn help(&self) -> bool {
+        let next = self.state.lock().expect("timed").running.iter().map(|(f, _, _)| *f).min();
+        match next {
+            Some(f) => {
+                self.run_until(f);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
 /// Set by the streamer when nothing needs a running job any more; a staged source polls it between stages
 /// ([`TileSource::load_staged`]) and stops at the next boundary.
 #[derive(Clone, Debug)]
@@ -308,8 +430,13 @@ pub struct StreamStats {
 
 #[derive(Clone, Copy, Debug)]
 pub struct StreamConfig {
-    /// Jobs running at once.
+    /// Jobs running at once: the generation pool's worker count (STRM-020; [`GenWorkers`] derives it from the pool).
     pub max_in_flight: usize,
+    /// Jobs handed to the spawner beyond `max_in_flight`, waiting in its queue for the worker that frees up between two frames
+    /// (STRM-020): the scheduler sees completions at a frame boundary only, so without them a worker that finishes mid-frame idles
+    /// until the next. They are dispatched in queue order like any job and cancelled like one (a queued job stops at its start);
+    /// 0: none.
+    pub queue_ahead: usize,
     /// Slots of the main pool (resident tiles plus jobs in flight never exceed it; roots and the draw set with its ancestors
     /// are never evicted, so a draw set that does not fit is a budget failure the manager reports).
     pub capacity: usize,
@@ -331,6 +458,7 @@ impl Default for StreamConfig {
     fn default() -> Self {
         Self {
             max_in_flight: 4,
+            queue_ahead: 0,
             capacity: 4096,
             vertex_pool_slots: 0,
             retire_frames: 0,
@@ -338,6 +466,49 @@ impl Default for StreamConfig {
             record_dispatches: false,
             record_changes: false,
         }
+    }
+}
+
+impl StreamConfig {
+    /// Jobs handed to the spawner at once: the running ones and those queued behind them.
+    pub fn job_limit(&self) -> usize {
+        self.max_in_flight + self.queue_ahead
+    }
+}
+
+/// The size of the tile generation pool and how far the scheduler queues ahead of it (STRM-020): one place that builds the pool
+/// and sets the streamer's limits from it, so the number of jobs running at once is the number of threads that can run them.
+/// The plan worker's threads are separate (its own pool and scoped threads), not part of this count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GenWorkers {
+    pub workers: usize,
+    pub ahead: usize,
+}
+
+impl GenWorkers {
+    /// `workers` threads and as many jobs queued behind them.
+    pub fn new(workers: usize) -> Self {
+        let workers = workers.max(1);
+        Self { workers, ahead: workers }
+    }
+
+    /// The default: one worker per hardware thread of the machine.
+    pub fn machine() -> Self {
+        Self::new(std::thread::available_parallelism().map_or(4, |n| n.get()))
+    }
+
+    pub fn with_ahead(self, ahead: usize) -> Self {
+        Self { ahead, ..self }
+    }
+
+    /// The pool: exactly `workers` threads.
+    pub fn pool(&self) -> Arc<ThreadPool> {
+        Arc::new(ThreadPool::new(self.workers))
+    }
+
+    /// `config` with the in-flight limits of this pool.
+    pub fn apply(&self, config: StreamConfig) -> StreamConfig {
+        StreamConfig { max_in_flight: self.workers, queue_ahead: self.ahead, ..config }
     }
 }
 
@@ -902,7 +1073,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         // Entries of each pool passed over: when every pool is blocked or has nothing left behind the cursor, nothing can start.
         let mut passed = [0usize; 2];
         let mut cursor: Option<QueueKey> = None;
-        while self.in_flight.len() < self.config.max_in_flight {
+        while self.in_flight.len() < self.config.job_limit() {
             let queued = self.queue.by_kind();
             if (0..2).all(|k| blocked[k] || passed[k] >= queued[k]) {
                 break;
@@ -984,7 +1155,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         // Look ahead as far as the slots take to come back: a slot given back now is usable `retire_frames` frames later, so
         // the requests of the next frames need their room made now or the pool runs dry in a stop-and-go rhythm.
         let room =
-            self.config.max_in_flight.saturating_sub(self.in_flight.len()) + self.config.max_in_flight * self.config.retire_frames as usize;
+            self.config.job_limit().saturating_sub(self.in_flight.len()) + self.config.job_limit() * self.config.retire_frames as usize;
         // [pool][0 = draw requests, 1 = residency requests]
         let mut demand = [[0usize; 2]; 2];
         let mut cursor = None;

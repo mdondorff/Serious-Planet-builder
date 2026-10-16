@@ -108,6 +108,7 @@ fn main() -> Result<(), String> {
         Arc::clone(&clock),
         StreamConfig {
             max_in_flight: 8,
+            queue_ahead: 0,
             capacity: 230_640,
             vertex_pool_slots: 256,
             retire_frames: 2,

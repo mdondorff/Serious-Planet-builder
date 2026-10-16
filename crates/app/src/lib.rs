@@ -45,6 +45,8 @@ modes:
     --adapter software|hardware   adapter policy (default: PLANET_ADAPTER or software)
     --draw per-draw|indirect   how the terrain renderer submits draws (REND-015): per-draw is the reference loop, indirect one multi-draw per buffer run from a CPU-built argument buffer (default indirect where the adapter supports it, else per-draw)
     --upload per-slot|batched   how a frame's tile writes reach the queue (REND-016): batched (default) writes each run of adjacent slots with one call, per-slot is the reference (one or two calls per tile); the pool contents are identical
+    --gen-workers N          threads of the tile generation pool and so jobs running at once in the pipelined loop and the streaming perf scenes (STRM-020; default: the machine's hardware threads; the plan worker's threads are separate)
+    --gen-ahead N            jobs queued behind the running ones so a worker that finishes between two frames takes the next at once (STRM-020; default: the worker count; 0: refill at frame boundaries only)
     --tile-format vertex|compact   how terrain tiles are built and held (ADR 0033): compact (default) for levels 3 and finer, vertex the 44-byte reference format for all
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
     --machine-ready          owner override of a failed readiness gate (ADR 0020); recorded in the log
@@ -70,6 +72,9 @@ pub struct Options {
     pub tile_format: Option<planet_render::TileFormat>,
     /// `--upload per-slot|batched`: how a frame's tile writes reach the queue (REND-016); default batched, per-slot the reference.
     pub upload: Option<planet_render::UploadMode>,
+    /// `--gen-workers N` and `--gen-ahead N`: the tile generation pool (STRM-020); default the machine's threads and as many queued.
+    pub gen_workers: Option<usize>,
+    pub gen_ahead: Option<usize>,
     pub perf: bool,
     pub machine_ready: bool,
     pub view: String,
@@ -131,6 +136,13 @@ pub struct Options {
 }
 
 impl Options {
+    /// The tile generation pool of the pipelined loop and the streaming scenes (STRM-020): `--gen-workers` threads (default the
+    /// machine's) with `--gen-ahead` jobs queued behind them (default as many).
+    pub fn gen_workers(&self) -> planet_streaming::GenWorkers {
+        let g = self.gen_workers.map_or_else(planet_streaming::GenWorkers::machine, planet_streaming::GenWorkers::new);
+        self.gen_ahead.map_or(g, |a| g.with_ahead(a))
+    }
+
     /// The finest geometry level of a run with tiles of `cells` cells: `--finest-level`, else the production default
     /// (`planet_frame::production_finest_level`: 22 at cells 32, 21 at 64). The one place the apps take the LOD cap from (LOD-010).
     pub fn finest_level_for(&self, cells: u32) -> u8 {
@@ -155,6 +167,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         draw: None,
         tile_format: None,
         upload: None,
+        gen_workers: None,
+        gen_ahead: None,
         perf: false,
         machine_ready: false,
         view: "face".into(),
@@ -272,6 +286,19 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
                 let v = it.next().ok_or("--upload needs per-slot or batched")?;
                 o.upload =
                     Some(planet_render::UploadMode::parse(v).ok_or_else(|| format!("--upload must be per-slot or batched, got '{v}'"))?)
+            }
+            "--gen-workers" => {
+                let v = it.next().ok_or("--gen-workers needs a thread count")?;
+                o.gen_workers = Some(
+                    v.parse::<usize>()
+                        .ok()
+                        .filter(|n| *n >= 1)
+                        .ok_or_else(|| format!("--gen-workers must be a positive integer, got '{v}'"))?,
+                )
+            }
+            "--gen-ahead" => {
+                let v = it.next().ok_or("--gen-ahead needs a count")?;
+                o.gen_ahead = Some(v.parse::<usize>().map_err(|_| format!("--gen-ahead must be a non-negative integer, got '{v}'"))?)
             }
             "--draw" => o.draw = Some(planet_render::DrawMode::parse(it.next().ok_or("--draw needs per-draw or indirect")?)?),
             "--adapter" => {
