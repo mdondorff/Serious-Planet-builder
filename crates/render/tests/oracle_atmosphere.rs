@@ -218,7 +218,6 @@ fn the_sky_view_coordinates_and_the_lighting_functions_match_the_reference() {
             q.push([h as f32, mu as f32, 0.0, 0.0]);
         }
     }
-    let shadow_start = q.len();
     // Inside the penumbra at altitude (where the width w R / r matters).
     for h in [30_000.0f64, 99_000.0] {
         let mu_h = -libm::sqrt(h * (2.0 * R + h)) / (R + h);
