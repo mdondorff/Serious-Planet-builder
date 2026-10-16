@@ -359,6 +359,18 @@ impl WorldTerrain {
         Ok((total - missing, total))
     }
 
+    /// Bake blocks `(done, total)` for the readiness report (ADR 0045 point 5). A run opens a complete bake (an in-memory one is
+    /// built, a stored one is checked), so the two are equal; a field that reads no bake has none. The incremental first-visit
+    /// bake of ADR 0045 point 5 reports its progress here when it exists.
+    pub fn bake_blocks(&self) -> (u64, u64) {
+        if !self.has_bake {
+            return (0, 0);
+        }
+        let per_edge = u64::from(self.res.div_ceil(self.res.min(1024)));
+        let total = 6 * per_edge * per_edge;
+        (total, total)
+    }
+
     /// The definition this terrain was built from.
     pub fn definition(&self) -> &WorldDefinition {
         &self.def

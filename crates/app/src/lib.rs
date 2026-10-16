@@ -9,6 +9,7 @@ pub mod prefill;
 pub mod sheet;
 pub mod skeleton;
 pub mod streamperf;
+pub mod window;
 pub mod worldfield;
 
 use std::io::Write;
@@ -20,7 +21,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
-  editor        interactive editor/viewer (window arrives in M2); --smoke starts and exits; --offscreen runs the skeleton without a window
+  editor        the viewer window (VIEW-001..VIEW-006): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the title shows frame rate, CPU and GPU time and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync]; --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
   generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) and prints the time per sample; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] writes the coarse tiles of levels 0..=L (default 4; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
@@ -142,6 +143,10 @@ pub struct Options {
     pub flight: Option<usize>,
     pub out_dir: Option<PathBuf>,
     pub size: Option<(u32, u32)>,
+    /// `editor --no-vsync`: start with vsync off (the `T` key toggles it).
+    pub no_vsync: bool,
+    /// `editor --no-window`: do not open the window (the start check of CON-01 on a machine without a display).
+    pub no_window: bool,
     /// Every option given on the command line, so modes can reject options they would otherwise ignore.
     pub given: std::collections::BTreeSet<String>,
 }
@@ -233,12 +238,16 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         flight: None,
         out_dir: None,
         size: None,
+        no_vsync: false,
+        no_window: false,
         given: Default::default(),
     };
     while let Some(a) = it.next() {
         o.given.insert(a.clone());
         match a.as_str() {
             "--smoke" => o.smoke = true,
+            "--no-vsync" => o.no_vsync = true,
+            "--no-window" => o.no_window = true,
             "--perf" => o.perf = true,
             "--offscreen" => o.offscreen = true,
             "--stream" => o.stream = true,
@@ -447,10 +456,13 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         let bake_scene = matches!(o.mode, Mode::TestRender) && o.perf && o.scene == "global-bake";
         let stream_scene = matches!(o.mode, Mode::TestRender) && (o.perf || o.perf_smoke) && streamperf::is_stream_scene(&o.scene);
         let terrain_scene = matches!(o.mode, Mode::TestRender) && o.scene == "terrain";
+        let window = matches!(o.mode, Mode::Editor) && !o.offscreen && !o.no_window;
         let allowed: &[&str] = if bake_scene {
             &["--world", "--global-res", "--threads"]
         } else if stream_scene {
             // `--prefill-levels`: the levels of the tile pack the gated dives require pre-filled at their start (default 4).
+            &["--world", "--global-res", "--prefill-levels"]
+        } else if window {
             &["--world", "--global-res", "--prefill-levels"]
         } else if terrain_scene {
             &["--world", "--global-res"]
@@ -464,7 +476,8 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     let smoke = if o.smoke { " [smoke ok]" } else { "" };
     match o.mode {
         Mode::Editor if o.offscreen => skeleton::render_offscreen(&o, out),
-        Mode::Editor => writeln!(out, "planet editor: no window yet (arrives in M2; use --offscreen for the skeleton){smoke}").map_err(err),
+        Mode::Editor if o.no_window => writeln!(out, "planet editor: window not opened (--no-window){smoke}").map_err(err),
+        Mode::Editor => window::run_window(&o, out),
         Mode::Generate if !o.smoke => skeleton::generate(&o, out),
         Mode::Generate => writeln!(out, "planet generate: ready{smoke}").map_err(err),
         Mode::TestRender => test_render(&o, out),
@@ -1069,7 +1082,7 @@ mod tests {
             (vec!["generate", "--cache-dir", store.as_str(), "--region", "0,1", "--allow-stale"], "only apply to --verify-cache"),
             (vec!["generate", "--manifest", "m.txt", "--world", world.as_str()], "--world"),
             (vec!["generate", "--manifest", "m.txt", "--cache-dir", store.as_str()], "--cache-dir"),
-            (vec!["editor", "--world", world.as_str()], "only applies to `generate`"),
+            (vec!["editor", "--no-window", "--world", world.as_str()], "only applies to `generate`"),
             (vec!["editor", "--smoke", "--sample", "3"], "only applies to `generate`"),
             (vec!["test-render", "--cache-dir", store.as_str()], "only applies to `generate`"),
             (vec!["generate", "--cache-dir", store.as_str(), "--region", "0,7"], "--region must be"),
@@ -1103,10 +1116,36 @@ mod tests {
     // spec: BUILD-004
     #[test]
     fn all_three_run_modes_start() {
-        for mode in ["editor", "generate", "test-render"] {
-            let out = run_str(&[mode, "--smoke"]).unwrap_or_else(|e| panic!("{mode}: {e}"));
+        // The editor's `--smoke` opens the window (tier C, `tests/gpu_window.rs`, VIEW-005); `--no-window` is the start check that
+        // needs no display.
+        for (mode, args) in [
+            ("editor", vec!["editor", "--smoke", "--no-window"]),
+            ("generate", vec!["generate", "--smoke"]),
+            ("test-render", vec!["test-render", "--smoke"]),
+        ] {
+            let out = run_str(&args).unwrap_or_else(|e| panic!("{mode}: {e}"));
             assert!(out.contains("smoke ok"), "{mode}: {out}");
         }
+    }
+
+    // spec: VIEW-001
+    #[test]
+    fn the_window_refuses_a_software_adapter_outside_test_mode_before_anything_starts() {
+        // No window, no display and no GPU is touched: the policy is checked first.
+        let e = run_str(&["editor", "--adapter", "software"]).unwrap_err();
+        assert!(e.contains("test and CI mode") && e.contains("discrete GPU"), "{e}");
+        // The smoke is the test mode, and the viewer's options parse.
+        let o = parse_args(&[
+            "editor".into(),
+            "--smoke".into(),
+            "--no-vsync".into(),
+            "--size".into(),
+            "800x450".into(),
+            "--view".into(),
+            "level".into(),
+        ])
+        .unwrap();
+        assert!(o.smoke && o.no_vsync && o.size == Some((800, 450)) && o.view == "level");
     }
 
     // spec: BUILD-004

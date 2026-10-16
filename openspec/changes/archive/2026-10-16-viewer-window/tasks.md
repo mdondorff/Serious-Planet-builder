@@ -1,0 +1,9 @@
+- [x] 1.1 `frame::adapter`: descriptions, requirements, modes, deterministic `select`, refusal text (tests first, VIEW-001)
+- [x] 1.2 `render::gate`: enumerate and describe wgpu adapters; `GpuContext::new(HighPerformance)` through the gate
+- [x] 2.1 `frame::freecam`: pose, `free_step`, clearance (VIEW-004)
+- [x] 2.2 `frame::viewer`: flight clock, `camera_at`, commands, free-camera mode, statistics, readiness, title (VIEW-002, VIEW-003, VIEW-004)
+- [x] 3.1 `render::window`: surface, blit, present modes, outcomes; blit test (VIEW-006)
+- [x] 3.2 `app::window`: the winit loop, key tables, smoke driver, `--no-window`, `--no-vsync`, options (VIEW-003, VIEW-005)
+- [x] 3.3 `tests/gpu_window.rs`: smoke with a declared skip; CI declaration and summary note
+- [x] 4.1 ADR 0047 (adapter gate) proposed
+- [x] 4.2 spec-guardian, verifier, test, test gpu, test gpu --real, spec-lint, fmt, clippy, deny; archive; log line; delete queue item 1; PR; CI; merge
