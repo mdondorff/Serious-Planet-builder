@@ -6,11 +6,11 @@
 //! GPU-free (CON-03): schema, parse, validate, migrate, canonical write and the Earth defaults. The renderer never sees the file;
 //! it sees the numbers the plan carries ([`LitPlan`](super::LitPlan)).
 //!
-//! Layout, schema version 2 (every table and key is optional; a missing one is the Earth default, so a body without an entry is
+//! Layout, schema version 3 (every table and key is optional; a missing one is the Earth default, so a body without an entry is
 //! the Earth default as a whole):
 //!
 //! ```toml
-//! schema_version = 2
+//! schema_version = 3
 //! kind = "look"
 //!
 //! [body.0.units]
@@ -38,16 +38,22 @@
 //! rock = [0.3, 0.27, 0.24]     # snow, grass, forest, desert, tundra, beach, seabed likewise
 //! dry_mm = 250.0               # wet_mm, forest_mm_lo/hi, tundra_c_lo/hi, rock_cos_full/none, snow_c_full/none,
 //! shore_blend_m = 1.0          # snow_cos_none/full, beach_height_m, beach_fade_m, shore_blend_m
+//!
+//! [body.0.atmosphere]          # schema version 3 (ADR 0040): Hillaire 2020 coefficients per metre, Earth defaults
+//! rayleigh_scattering = [5.802e-6, 13.558e-6, 33.1e-6]   # mie_scattering, mie_absorption, ozone_absorption likewise
+//! rayleigh_scale_height_m = 8000.0   # mie_scale_height_m, mie_g, ozone_center_m, ozone_half_width_m, top_height_m,
+//! ground_albedo = [0.3, 0.3, 0.3]    # sun_angular_radius_rad
 //! ```
 //!
 //! Bodies are addressed by id as in the world definition (`body.<n>`). Unknown tables and keys are errors that name them (a typo
 //! must not silently fall back to a default). Extension points for the coming M5 items are new optional tables under `body.<n>`
-//! (`albedo` and `sun` for ADR 0039 since schema version 2, `atmosphere` for ADR 0040, `liquid_appearance` for ADR 0041). **Every
+//! (`albedo` and `sun` for ADR 0039 since schema version 2, `atmosphere` for ADR 0040 since schema version 3, `liquid_appearance` for ADR 0041). **Every
 //! change that adds a table or a key raises `schema_version` and adds an identity migration step** (the planner's rule after the
 //! review of the look file change): an older build then says "newer schema version N" instead of "unknown key", the clearer failure
 //! under CON-10. Moving or renaming a key needs a real migration step as well. Version 1 files load unchanged through the identity
 //! step. What a generator reads (kind ids, liquid kinds, thresholds that shape the world) stays in the world definition, never here.
 
+use super::atmosphere::AtmosphereParams;
 use super::shading::AlbedoParams;
 use super::{ExposureParams, HistogramParams, SceneUnits, ToneMapMode, DEFAULT_SUN};
 use planet_world_def::BodyId;
@@ -55,7 +61,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 /// Schema version this build writes and reads without migration.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 const VERSION_KEY: &str = "schema_version";
 const KIND_KEY: &str = "kind";
@@ -118,6 +124,8 @@ pub struct LookParams {
     pub albedo: AlbedoParams,
     /// The sun (schema version 2, ADR 0039 point 1).
     pub sun: SunLook,
+    /// The atmosphere's coefficients (schema version 3, ADR 0040 point 1); the body radius is world data, not here.
+    pub atmosphere: AtmosphereParams,
 }
 
 /// The sun of a body as the file holds it: the unit direction in the planet-fixed axes (`f64`, so the text round-trips; the plan
@@ -166,6 +174,7 @@ impl Default for LookParams {
             tone_curve: ToneCurve::Aces,
             albedo: AlbedoParams::EARTH,
             sun: SunLook::default(),
+            atmosphere: AtmosphereParams::EARTH,
         }
     }
 }
@@ -190,6 +199,7 @@ impl LookParams {
         validate_histogram(&self.histogram)?;
         validate_sun(&self.sun)?;
         self.albedo.validate().map_err(|(key, value, why)| ParamError { key: leak_key(&key), value, why })?;
+        self.atmosphere.validate().map_err(|(key, value, why)| ParamError { key, value, why })?;
         // One unit of radiance written at the highest exposure must stay a normal f16, or the scene target loses it and the
         // adaptation can no longer see light (the histogram counts only pixels above zero).
         let written = self.units.solar_illuminance_lux / (1.2 * libm::exp2(self.exposure.max_ev100));
@@ -365,8 +375,13 @@ fn v1_to_v2(_: &mut toml::Table) -> Result<(), String> {
     Ok(())
 }
 
+/// Version 2 to 3 adds the optional `atmosphere` table (ADR 0040); again no existing key moves.
+fn v2_to_v3(_: &mut toml::Table) -> Result<(), String> {
+    Ok(())
+}
+
 /// Migrations from every older version to the current one.
-pub const MIGRATIONS: &[Migration] = &[Migration { from: 1, apply: v1_to_v2 }];
+pub const MIGRATIONS: &[Migration] = &[Migration { from: 1, apply: v1_to_v2 }, Migration { from: 2, apply: v2_to_v3 }];
 
 /// The look of every body that has an entry. A body without an entry has the Earth default.
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -482,6 +497,7 @@ fn read_body(path: &str, mut t: toml::Table) -> Result<LookParams, LookError> {
     let tone_map = section("tone_map")?;
     let sun = section("sun")?;
     let albedo = section("albedo")?;
+    let atmosphere = section("atmosphere")?;
     if let Some(key) = t.keys().next() {
         return Err(LookError::UnknownKey { key: format!("{path}.{key}") });
     }
@@ -546,8 +562,49 @@ fn read_body(path: &str, mut t: toml::Table) -> Result<LookParams, LookError> {
         }
         no_more(&k, &s)?;
     }
+    if let Some(mut s) = atmosphere {
+        let k = format!("{path}.atmosphere");
+        let a = &mut p.atmosphere;
+        for (name, slot) in ATMOSPHERE_VEC3_KEYS.iter().zip(atmosphere_vec3_mut(a)) {
+            take_vec3(&k, &mut s, name, slot)?;
+        }
+        for (name, slot) in ATMOSPHERE_SCALAR_KEYS.iter().zip(atmosphere_scalars_mut(a)) {
+            take_f64(&k, &mut s, name, slot)?;
+        }
+        no_more(&k, &s)?;
+    }
     p.validate().map_err(|e| LookError::BadValue { key: format!("{path}.{}", e.key), value: e.value, why: e.why })?;
     Ok(p)
+}
+
+/// The colour-valued keys of the atmosphere table in the order of [`atmosphere_vec3_mut`].
+const ATMOSPHERE_VEC3_KEYS: [&str; 5] = ["rayleigh_scattering", "mie_scattering", "mie_absorption", "ozone_absorption", "ground_albedo"];
+
+/// The scalar keys of the atmosphere table in the order of [`atmosphere_scalars_mut`].
+const ATMOSPHERE_SCALAR_KEYS: [&str; 7] = [
+    "rayleigh_scale_height_m",
+    "mie_scale_height_m",
+    "mie_g",
+    "ozone_center_m",
+    "ozone_half_width_m",
+    "top_height_m",
+    "sun_angular_radius_rad",
+];
+
+fn atmosphere_vec3_mut(a: &mut AtmosphereParams) -> [&mut [f64; 3]; 5] {
+    [&mut a.rayleigh_scattering, &mut a.mie_scattering, &mut a.mie_absorption, &mut a.ozone_absorption, &mut a.ground_albedo]
+}
+
+fn atmosphere_scalars_mut(a: &mut AtmosphereParams) -> [&mut f64; 7] {
+    [
+        &mut a.rayleigh_scale_height_m,
+        &mut a.mie_scale_height_m,
+        &mut a.mie_g,
+        &mut a.ozone_center_m,
+        &mut a.ozone_half_width_m,
+        &mut a.top_height_m,
+        &mut a.sun_angular_radius_rad,
+    ]
 }
 
 /// The scalar keys of the albedo table in the order of [`albedo_scalars_mut`].
@@ -688,6 +745,14 @@ pub fn to_toml(file: &LookFile) -> String {
         }
         let mut a = a;
         for (name, v) in ALBEDO_SCALAR_KEYS.iter().zip(albedo_scalars_mut(&mut a)) {
+            out.push_str(&line(name, *v));
+        }
+        let mut at = p.atmosphere;
+        out.push_str(&format!("\n[body.{b}.atmosphere]\n"));
+        for (name, v) in ATMOSPHERE_VEC3_KEYS.iter().zip(atmosphere_vec3_mut(&mut at)) {
+            out.push_str(&vec3(name, *v));
+        }
+        for (name, v) in ATMOSPHERE_SCALAR_KEYS.iter().zip(atmosphere_scalars_mut(&mut at)) {
             out.push_str(&line(name, *v));
         }
     }
