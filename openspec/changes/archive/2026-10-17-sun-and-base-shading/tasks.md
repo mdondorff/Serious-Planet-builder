@@ -5,4 +5,4 @@
 - [x] 3.1 Renderer: node record up vector, globals albedo table, 48-byte vertex, compact fragment lookup, probes and oracles (REND-025, REND-027)
 - [x] 3.2 Tier C: climate views, formats, albedo table, water level, lighting, goldens (REND-027, LOOK-007, REND-026)
 - [x] 4.1 Pins re-recorded: headroom, upload cap, node bytes, plan counts and snapshots (STRM-006)
-- [ ] 5.1 numerics-reviewer, spec-guardian, verifier; test, test gpu, test gpu --real, spec-lint, fmt, clippy; golden-review; archive; log line; delete queue item 4
+- [x] 5.1 numerics-reviewer, spec-guardian, verifier; test, test gpu, test gpu --real, spec-lint, fmt, clippy; golden-review; archive; log line; delete queue item 4
