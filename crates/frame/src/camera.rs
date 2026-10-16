@@ -77,6 +77,15 @@ impl Camera {
         m
     }
 
+    /// The ray frame of the pixels: `(right, up, forward)` with `right` and `up` scaled by the tangent of half the field of view, so the
+    /// (unnormalised) ray through the pixel at `(a, b)` in `[-1, 1]^2` (x right, y up) is `forward + right a + up b`; its forward
+    /// component is 1, so a depth `d` along the forward axis is a distance `d |ray|` along it.
+    pub fn ray_frame(&self) -> (Vec3, Vec3, Vec3) {
+        let (r, u, f) = basis(self);
+        let ty = libm::tan(self.fov_y_rad / 2.0);
+        (r * (ty * self.aspect), u * ty, f)
+    }
+
     /// Clip-space `(x, y, z, w)` of a camera-relative point evaluated in f64 (reference for the GPU's f32 evaluation).
     pub fn project(&self, rel: Vec3) -> [f64; 4] {
         let (r, u, f) = basis(self);

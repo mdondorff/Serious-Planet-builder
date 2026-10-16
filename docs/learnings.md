@@ -298,3 +298,5 @@ What happened: the climate field (GEN-021) added `climate`, `climate_version_wor
 Assumption it changes: that defaults on a trait are safe; a default is a second implementation for every type that forgets it.
 Proposed follow-up: a test per new trait method that every field over a bake (terrain, eroded) and every wrapper answers it as the inner field does (done for the climate in `climate.rs` and `skeleton.rs`).
 Obsolete when: `HeightField` has no default-bodied methods that depend on the field's inputs.
+
+- 2026-10-17 (atmosphere-reference): store the transmittance table as optical depth and interpolate that: the worst error against the converged integral is 2.2 % of T; the 32 x 32 multiple-scattering table is coarse across the terminator (absolute error up to 6e-4 where the value is 1e-3), so its bound has a larger absolute term. `cos(azimuth)` near the sun cannot be resolved in f32 (1 - phi^2/2): take the azimuth with atan2 from two plain dot products, and the sun disc's angle from the chord, not from `1 - cos`.

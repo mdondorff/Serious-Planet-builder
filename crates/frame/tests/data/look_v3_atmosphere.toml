@@ -1,0 +1,15 @@
+# A hand-written look file, schema version 3 (the version that added the `atmosphere` table, ADR 0040): comments, key order and
+# spacing never matter. Body 2 is a thin, dusty world with a red sky; every key it leaves out is the Earth default.
+schema_version = 3
+kind = "look"
+
+[body.2.atmosphere]
+rayleigh_scattering = [20.0e-6, 8.0e-6, 3.0e-6]
+mie_scattering = [2.0e-5, 2.0e-5, 2.0e-5]
+mie_scale_height_m = 15000
+mie_g = 0.6
+top_height_m = 60000.0
+ground_albedo = [0.45, 0.25, 0.15]
+
+[body.2.units]
+solar_illuminance_lux = 55000.0

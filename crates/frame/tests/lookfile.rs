@@ -1,6 +1,7 @@
 //! Tier A: the look file (ADR 0042 point 6, ADR 0048 point 2): schema, parse, validation, canonical text, migrations (CON-10), the
 //! Earth defaults and the plan they feed. GPU-free (CON-03).
 
+use planet_frame::look::atmosphere::AtmosphereParams;
 use planet_frame::look::file::*;
 use planet_frame::look::shading::AlbedoParams;
 use planet_frame::look::{self, ExposureMode, HistogramParams, LitPlan, SceneUnits, ToneMapMode};
@@ -8,6 +9,7 @@ use planet_world_def::BodyId;
 
 const FIXTURE_V1: &str = include_str!("data/look_v1_moon_and_earth.toml");
 const FIXTURE_V2: &str = include_str!("data/look_v2_albedo_and_sun.toml");
+const FIXTURE_V3: &str = include_str!("data/look_v3_atmosphere.toml");
 
 fn err(text: &str) -> String {
     parse_look(text).unwrap_err().to_string()
@@ -21,6 +23,7 @@ fn custom() -> LookParams {
         tone_curve: ToneCurve::Aces,
         albedo: AlbedoParams { snow: [0.7, 0.72, 0.75], wet_mm: 1200.0, beach_height_m: 2.0, ..AlbedoParams::EARTH },
         sun: SunLook { direction: [0.0, 1.0, 0.0] },
+        atmosphere: AtmosphereParams { mie_g: 0.55, top_height_m: 80_000.0, ..AtmosphereParams::EARTH },
     }
 }
 
@@ -55,7 +58,7 @@ fn canonical_text_is_deterministic_and_round_trips_bit_for_bit() {
     let text = to_toml(&f);
     assert_eq!(parse_look(&text).unwrap(), f);
     assert_eq!(to_toml(&parse_look(&text).unwrap()), text, "writing what was read gives the same text");
-    assert!(text.starts_with("schema_version = 2\nkind = \"look\"\n"));
+    assert!(text.starts_with("schema_version = 3\nkind = \"look\"\n"));
     let order: Vec<usize> = ["[body.0.units]", "[body.7.units]", "[body.12.units]"].iter().map(|k| text.find(k).unwrap()).collect();
     assert!(order[0] < order[1] && order[1] < order[2], "bodies are written in id order");
     // The same content from a differently formatted file writes the same text.
@@ -234,21 +237,22 @@ fn migration_failures_name_the_step_and_the_gap() {
 #[test]
 fn the_production_chain_reads_the_version_1_fixture_and_writes_the_current_layout() {
     assert_eq!(
-        SCHEMA_VERSION, 2,
+        SCHEMA_VERSION, 3,
         "a new table or key needs a new version, an identity step in MIGRATIONS and a fixture of this version kept"
     );
     assert_eq!(MIGRATIONS.len() as u32, SCHEMA_VERSION - 1, "one step per older version");
-    assert_eq!(MIGRATIONS.iter().map(|m| m.from).collect::<Vec<_>>(), [1], "the steps run from version 1 up without a gap");
+    assert_eq!(MIGRATIONS.iter().map(|m| m.from).collect::<Vec<_>>(), [1, 2], "the steps run from version 1 up without a gap");
     // The version 1 fixture goes through the real chain (the identity step 1 to 2) and reads as written.
     let f = parse_look(FIXTURE_V1).unwrap();
     assert_eq!(f.body(BodyId(3)).units.solar_illuminance_lux, 25_000.0);
     assert_eq!(f.body(BodyId(3)).albedo, AlbedoParams::EARTH, "the tables version 2 added are the Earth default in a version 1 file");
     assert_eq!(f.body(BodyId(3)).sun, SunLook::default());
     assert_eq!(parse_look(&to_toml(&f)).unwrap(), f);
-    // The same content written as a version 2 file (the current layout) reads equal and writes the same text.
-    let v2 = FIXTURE_V1.replacen("schema_version = 1", "schema_version = 2", 1);
-    assert_eq!(parse_look(&v2).unwrap(), f);
-    assert_eq!(to_toml(&parse_look(&v2).unwrap()), to_toml(&f));
+    assert_eq!(f.body(BodyId(3)).atmosphere, AtmosphereParams::EARTH, "the table version 3 added is the Earth default in a version 1 file");
+    // The same content written as a version 3 file (the current layout) reads equal and writes the same text.
+    let v3 = FIXTURE_V1.replacen("schema_version = 1", "schema_version = 3", 1);
+    assert_eq!(parse_look(&v3).unwrap(), f);
+    assert_eq!(to_toml(&parse_look(&v3).unwrap()), to_toml(&f));
     // The fixture of version 2 carries the tables version 2 added.
     let g = parse_look(FIXTURE_V2).unwrap();
     assert_eq!(g.body(BodyId(1)).sun.direction, [0.0, 0.0, 1.0]);
@@ -256,6 +260,61 @@ fn the_production_chain_reads_the_version_1_fixture_and_writes_the_current_layou
     assert_eq!(g.body(BodyId(1)).albedo.dry_mm, 100.0);
     assert_eq!(g.body(BodyId(1)).albedo.wet_mm, AlbedoParams::EARTH.wet_mm, "a key left out is the default");
     assert_eq!(parse_look(&to_toml(&g)).unwrap(), g);
+    assert_eq!(g.body(BodyId(1)).atmosphere, AtmosphereParams::EARTH, "a version 2 file has no atmosphere table: the Earth default");
+    // The same content as a version 3 file reads equal (the identity step 2 to 3).
+    let g3 = FIXTURE_V2.replacen("schema_version = 2", "schema_version = 3", 1);
+    assert_eq!(parse_look(&g3).unwrap(), g);
+    // The fixture of version 3 carries the atmosphere table; keys it leaves out are the Earth default.
+    let h = parse_look(FIXTURE_V3).unwrap();
+    let a = h.body(BodyId(2)).atmosphere;
+    assert_eq!(a.rayleigh_scattering, [20.0e-6, 8.0e-6, 3.0e-6]);
+    assert_eq!(
+        (a.mie_scale_height_m, a.mie_g, a.top_height_m),
+        (15_000.0, 0.6, 60_000.0),
+        "an integer literal exact as a float is accepted"
+    );
+    assert_eq!(a.ground_albedo, [0.45, 0.25, 0.15]);
+    assert_eq!(a.rayleigh_scale_height_m, AtmosphereParams::EARTH.rayleigh_scale_height_m, "a key left out is the default");
+    assert_eq!(a.ozone_absorption, AtmosphereParams::EARTH.ozone_absorption);
+    assert_eq!(h.body(BodyId(2)).units.solar_illuminance_lux, 55_000.0);
+    assert_eq!(parse_look(&to_toml(&h)).unwrap(), h);
+    assert_eq!(to_toml(&parse_look(&to_toml(&h)).unwrap()), to_toml(&h));
+}
+
+// spec: LOOK-001, LOOK-002
+#[test]
+fn an_older_build_refuses_the_atmosphere_table_as_a_newer_schema_and_this_build_names_a_typo() {
+    // A build that knows versions up to 2 refuses a version 3 file (which may carry the table) with "newer", not "unknown key".
+    let e = parse_with(FIXTURE_V3, 2, &MIGRATIONS[..1]).unwrap_err();
+    assert_eq!(e, LookError::NewerSchema { found: 3, known: 2 });
+    assert!(e.to_string().contains("update the program"), "{e}");
+    // In a file of this version the same table with a typo is an unknown key naming it.
+    let bad = FIXTURE_V3.replace("[body.2.atmosphere]", "[body.2.atmospher]");
+    assert!(err(&bad).contains("body.2.atmospher"), "{}", err(&bad));
+    let bad = FIXTURE_V3.replace("mie_g", "mie_gee");
+    assert!(err(&bad).contains("body.2.atmosphere.mie_gee"), "{}", err(&bad));
+}
+
+// spec: LOOK-001
+#[test]
+fn atmosphere_values_outside_their_range_are_refused_naming_the_key_and_the_value() {
+    let with = |line: &str| format!("schema_version = 3\nkind = \"look\"\n[body.4.atmosphere]\n{line}\n");
+    for (line, key, value) in [
+        ("rayleigh_scattering = [1e-5, -1e-6, 1e-5]", "body.4.atmosphere.rayleigh_scattering", "-1e-6"),
+        ("rayleigh_scattering = [1e-5, 1e-5, 0.5]", "body.4.atmosphere.rayleigh_scattering", "0.5"),
+        ("mie_g = 1.0", "body.4.atmosphere.mie_g", "1.0"),
+        ("mie_scale_height_m = 0.0", "body.4.atmosphere.mie_scale_height_m", "0.0"),
+        ("top_height_m = 10.0", "body.4.atmosphere.top_height_m", "10.0"),
+        ("ground_albedo = [0.3, 1.5, 0.3]", "body.4.atmosphere.ground_albedo", "1.5"),
+        ("sun_angular_radius_rad = 0.0", "body.4.atmosphere.sun_angular_radius_rad", "0.0"),
+        ("ozone_half_width_m = 0.0", "body.4.atmosphere.ozone_half_width_m", "0.0"),
+        ("mie_absorption = [1e-6, 1e-6]", "body.4.atmosphere.mie_absorption", "2 values"),
+        ("mie_g = \"high\"", "body.4.atmosphere.mie_g", "string"),
+    ] {
+        let e = err(&with(line));
+        assert!(e.contains(key) && e.contains(value), "{line}: {e}");
+    }
+    assert!(parse_look(&with("mie_g = -0.9\ntop_height_m = 1000.0")).is_ok(), "the ends of the ranges are valid");
 }
 
 // spec: LOOK-003

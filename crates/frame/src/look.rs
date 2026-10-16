@@ -10,9 +10,11 @@
 //! convention: `exposure = 1 / (1.2 * 2^EV100)` applied to luminance in cd/m2, and the EV100 that suits a luminance `L` is
 //! `log2(L * 100 / 12.5) = log2(8 L)`, the same function the histogram bins by.
 
+pub mod atmosphere;
 pub mod file;
 pub mod shading;
 
+use atmosphere::AtmospherePlan;
 use planet_core::hash::hash_u64s;
 use shading::{AlbedoParams, ShadeView};
 
@@ -207,6 +209,9 @@ pub struct LitPlan {
     pub water_level_m: f32,
     /// Which image the terrain shows (debug views, CON-18).
     pub view: ShadeView,
+    /// The atmosphere of this frame (ADR 0040): `None` draws none, and the plan's text and hash are what they were before the
+    /// atmosphere existed. The body's radius comes from the world definition, the coefficients from the look.
+    pub atmosphere: Option<AtmospherePlan>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -253,7 +258,14 @@ impl LitPlan {
             albedo: look.albedo,
             water_level_m: 0.0,
             view: ShadeView::Lit,
+            atmosphere: None,
         }
+    }
+
+    /// This plan with the atmosphere of a body: the look's coefficients on a body of `radius_m` (the world definition's radius).
+    pub fn with_atmosphere(mut self, look: &file::LookParams, radius_m: f64) -> Result<LitPlan, String> {
+        self.atmosphere = Some(AtmospherePlan::new(look.atmosphere, radius_m)?);
+        Ok(self)
     }
 
     /// An adaptive-exposure lit plan whose range, speeds, units and histogram come from a body's look parameters.
@@ -298,6 +310,13 @@ impl LitPlan {
         if self.view != ShadeView::Lit {
             look.push_str(&format!(" view {}", self.view.name()));
         }
+        if let Some(a) = &self.atmosphere {
+            look.push_str(" atmosphere");
+            for t in a.tokens() {
+                look.push(' ');
+                look.push_str(&t);
+            }
+        }
         format!(
             "lit {mode} dt {} sun {} {} {} reset {} tonemap {}{look}",
             h(self.dt_s),
@@ -329,7 +348,7 @@ impl LitPlan {
             }
             u64::from_str_radix(s, 16).map(f64::from_bits).map_err(|e| format!("bad f64 bits '{s}': {e}"))
         };
-        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..' and 'view ..' in this order)";
+        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..' and 'atmosphere ..' in this order)";
         let ["dt", dt, "sun", sx, sy, sz, "reset", reset, "tonemap", tm, tail @ ..] = rest else {
             return Err(usage.into());
         };
@@ -348,6 +367,7 @@ impl LitPlan {
             albedo: AlbedoParams::EARTH,
             water_level_m: 0.0,
             view: ShadeView::Lit,
+            atmosphere: None,
         };
         // The optional tokens, each at most once and in the order the text writes them.
         let mut rest = tail;
@@ -358,6 +378,7 @@ impl LitPlan {
                 "albedo" => (2, 39),
                 "water" => (3, 1),
                 "view" => (4, 1),
+                "atmosphere" => (5, 24),
                 _ => return Err(usage.into()),
             };
             if rank <= stage || more.len() < arity {
@@ -384,7 +405,8 @@ impl LitPlan {
                     plan.albedo = AlbedoParams::from_bits(&bits);
                 }
                 3 => plan.water_level_m = f(args[0])?,
-                _ => plan.view = ShadeView::parse(args[0]).ok_or_else(|| format!("unknown lit view '{}'", args[0]))?,
+                4 => plan.view = ShadeView::parse(args[0]).ok_or_else(|| format!("unknown lit view '{}'", args[0]))?,
+                _ => plan.atmosphere = Some(AtmospherePlan::from_tokens(args)?),
             }
             rest = after;
         }
@@ -421,6 +443,9 @@ impl LitPlan {
         self.albedo.validate().map_err(|(k, v, why)| format!("lit plan: `{k}` = {v}: {why}"))?;
         if !self.water_level_m.is_finite() {
             return Err(format!("lit plan: water level is {}, not finite", self.water_level_m));
+        }
+        if let Some(a) = &self.atmosphere {
+            atmosphere::Atmosphere::new(a.atmosphere.params, a.atmosphere.radius_m).map_err(|e| format!("lit plan: {e}"))?;
         }
         file::validate_units(&self.units).map_err(|e| format!("lit plan: {e}"))?;
         file::validate_histogram(&self.histogram).map_err(|e| format!("lit plan: {e}"))?;
