@@ -2,7 +2,7 @@
 //! `Depth32Float` with an infinite far plane (ADR 0002). The renderer makes no decisions: nodes, matrices, morph
 //! intervals and colours all come from the plan. Shaders see only tile-local and camera-relative quantities (CON-11).
 
-use crate::compact::{compact_terrain_shader, Atlas, CompactGpu, REF_BYTES};
+use crate::compact::{compact_terrain_shader, CompactGpu, REF_BYTES};
 use crate::{read_rgba8, ExecError, GpuContext, RgbaFrame};
 use planet_frame::draw::{buffer_of, build_draw_list_placed, DrawBuffer, DRAW_RECORD_BYTES};
 use planet_frame::pool::tier_pool;
@@ -393,7 +393,35 @@ pub struct TerrainRenderer {
     retired: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// Submissions of the frames not yet seen finished, oldest first.
     in_flight: std::collections::VecDeque<wgpu::SubmissionIndex>,
+    /// Long-lived GPU objects created so far (REND-013).
+    init: InitCounts,
 }
+
+fn make_pool_buffer(device: &wgpu::Device, label: &'static str, bytes: u64) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: bytes,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+/// How often the renderer created its long-lived GPU objects (REND-013, REND-016): after construction and
+/// [`warm_up`](TerrainRenderer::warm_up) a script whose first frames fit the warmed blocks and ring leaves every counter where it
+/// was, so no frame pays for a one-time initialisation. Demand growth (a second block, a plan beyond the ring) counts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct InitCounts {
+    /// Render pipelines created (1 for the vertex format, 2 with the compact format).
+    pub pipelines: u32,
+    /// Pool allocations: the vertex pool, blocks of the vertex-format main pool, atlases.
+    pub pool_allocations: u32,
+    /// Builds of the per-frame ring (the first one counts).
+    pub ring_builds: u32,
+}
+
+/// Nodes the ring holds after [`warm_up`](TerrainRenderer::warm_up) (capped by the share's node-record bytes): above the node
+/// count of the dive's plans, about 1 MiB of buffers.
+pub const WARM_NODES: usize = 2048;
 
 struct TimingResources {
     queries: wgpu::QuerySet,
@@ -605,6 +633,7 @@ impl TerrainRenderer {
             uploaded_bytes: 0,
             retired: Default::default(),
             in_flight: Default::default(),
+            init: InitCounts { pipelines: if compact { 2 } else { 1 }, pool_allocations: 0, ring_builds: 1 },
         }
     }
 
@@ -736,6 +765,98 @@ impl TerrainRenderer {
                 FrameSet { globals, nodes, args, bind, refs, frame_bind }
             })
             .collect()
+    }
+
+    /// Long-lived GPU objects created so far (REND-013): the counters a test compares before and after a frame.
+    pub fn init_counts(&self) -> InitCounts {
+        self.init
+    }
+
+    /// Do the one-time work of the first frames now, outside any measured frame (REND-013, TEST-018): allocate the vertex pool and
+    /// the first block of the main pool (block 0, or atlas 0 with its bind group), grow the per-frame ring to [`WARM_NODES`]
+    /// (within the share's node-record bytes), and submit one throwaway frame that draws a zeroed tile through every pipeline
+    /// the format has in the active draw mode, polled to completion, so the driver's lazy work (first-use initialisation of the
+    /// buffers and the atlas, pipeline state, shader JIT) is done before frame 0. No tile becomes resident and no counter of the
+    /// frame clock moves. The bytes allocated are the pure model's for one block plus the vertex pool (STRM-006); the rest of the
+    /// share stays on demand.
+    pub fn warm_up(&mut self, ctx: &GpuContext) {
+        let device = &ctx.device;
+        let warm_nodes = WARM_NODES.min(self.max_nodes);
+        if warm_nodes > self.node_capacity {
+            self.node_capacity = warm_nodes;
+            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, self.compact.as_ref());
+            self.init.ring_builds += 1;
+        }
+        self.vertex_pool_buffer(device);
+        if let Some(c) = self.compact.as_mut() {
+            c.atlas(device, 0, &mut self.init);
+        } else {
+            self.block_buffer(device, 0);
+        }
+        let set = &self.ring[0];
+        ctx.queue.write_buffer(&set.globals, 0, &[0u8; GLOBALS_BYTES as usize]);
+        ctx.queue.write_buffer(&set.nodes, 0, &[0u8; NODE_BYTES as usize]);
+        ctx.queue.write_buffer(&set.args, 0, &[0u8; DRAW_RECORD_BYTES as usize]);
+        if let Some(refs) = &set.refs {
+            ctx.queue.write_buffer(refs, 0, &[0u8; REF_BYTES as usize]);
+        }
+        let indirect = self.draw_mode == DrawMode::Indirect;
+        if indirect {
+            // One record: `index_count` indices, one instance, everything else zero.
+            let mut record = [0u8; DRAW_RECORD_BYTES as usize];
+            record[..4].copy_from_slice(&self.index_count.to_le_bytes());
+            record[4..8].copy_from_slice(&1u32.to_le_bytes());
+            ctx.queue.write_buffer(&set.args, 0, &record);
+        }
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("terrain-warm-up") });
+        // Mark the pools initialised on the GPU (wgpu zeroes a buffer lazily before its first use).
+        if let Some(pool) = &self.vertex_pool {
+            encoder.clear_buffer(pool, 0, None);
+        }
+        if let Some(Some(block)) = self.blocks.first() {
+            encoder.clear_buffer(block, 0, None);
+        }
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("terrain-warm-up-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.color_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Discard }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            let draw = |pass: &mut wgpu::RenderPass| {
+                if indirect {
+                    pass.multi_draw_indexed_indirect(&set.args, 0, 1);
+                } else {
+                    pass.draw_indexed(0..self.index_count, 0, 0..1);
+                }
+            };
+            pass.set_pipeline(&self.pipeline);
+            pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.set_bind_group(0, &set.bind, &[]);
+            let pool = self.vertex_pool.as_ref().expect("vertex pool");
+            pass.set_vertex_buffer(0, pool.slice(..self.pool.vertex_slot_bytes));
+            draw(&mut pass);
+            if let (Some(c), Some(frame_bind)) = (&self.compact, &set.frame_bind) {
+                pass.set_pipeline(&c.pipeline);
+                pass.set_bind_group(0, &set.bind, &[]);
+                pass.set_bind_group(1, frame_bind, &[]);
+                pass.set_bind_group(2, &c.atlases[0].as_ref().expect("atlas 0").bind, &[]);
+                draw(&mut pass);
+            }
+        }
+        ctx.queue.submit([encoder.finish()]);
+        ctx.device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
     }
 
     /// Choose how draws are submitted. Indirect needs adapter support (`GpuContext::indirect_draw_supported`); where it is
@@ -903,32 +1024,10 @@ impl TerrainRenderer {
         let block_slots = self.pool.block_slots;
         let c = self.compact.as_mut().expect("compact mode");
         let (block, local) = ((slot.index / block_slots) as usize, slot.index % block_slots);
-        if c.atlases.len() <= block {
-            c.atlases.resize_with(block + 1, || None);
-        }
-        let device = &ctx.device;
-        let (side, bgl) = (c.side, &c.bgl_atlas);
-        let atlas = c.atlases[block].get_or_insert_with(|| {
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("compact-atlas"),
-                size: wgpu::Extent3d { width: side, height: side, depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba16Uint,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            let view = texture.create_view(&Default::default());
-            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("compact-atlas-bind"),
-                layout: bgl,
-                entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
-            });
-            Atlas { texture, bind }
-        });
+        let cols = c.cols;
+        let atlas = c.atlas(&ctx.device, block, &mut self.init);
         let w = self.cells + 1;
-        let (x, y) = ((local % c.cols) * w, (local / c.cols) * w);
+        let (x, y) = ((local % cols) * w, (local / cols) * w);
         let bytes = tile.texel_data();
         ctx.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -941,36 +1040,47 @@ impl TerrainRenderer {
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(8 * w), rows_per_image: Some(w) },
             wgpu::Extent3d { width: w, height: w, depth_or_array_layers: 1 },
         );
-        ctx.queue.write_buffer(&c.records, u64::from(slot.index) * COMPACT_RECORD_BYTES, &tile.record_bytes());
+        let records = &self.compact.as_ref().expect("compact mode").records;
+        ctx.queue.write_buffer(records, u64::from(slot.index) * COMPACT_RECORD_BYTES, &tile.record_bytes());
         self.uploaded_bytes += bytes.len() as u64 + COMPACT_RECORD_BYTES;
     }
 
     /// The buffer and byte offset of `slot`, allocating its block (or the vertex pool) on first use.
     fn slot_buffer_for_write(&mut self, ctx: &GpuContext, slot: SlotRef) -> (&wgpu::Buffer, u64) {
-        let make = |label, bytes| {
-            ctx.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(label),
-                size: bytes,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            })
-        };
         match slot.pool {
             PoolKind::Vertex => {
-                let bytes = self.pool.vertex_slot_bytes * u64::from(self.pool.vertex_slots);
-                let buffer = self.vertex_pool.get_or_insert_with(|| make("terrain-vertex-pool", bytes));
-                (buffer, u64::from(slot.index) * self.pool.vertex_slot_bytes)
+                let offset = u64::from(slot.index) * self.pool.vertex_slot_bytes;
+                (self.vertex_pool_buffer(&ctx.device), offset)
             }
             PoolKind::Main => {
                 let (block, within) = (slot.index / self.pool.block_slots, slot.index % self.pool.block_slots);
-                if self.blocks.len() <= block as usize {
-                    self.blocks.resize_with(block as usize + 1, || None);
-                }
-                let block_bytes = self.pool.block_bytes();
-                let buffer = self.blocks[block as usize].get_or_insert_with(|| make("terrain-block", block_bytes));
-                (buffer, u64::from(within) * self.slot_bytes)
+                let offset = u64::from(within) * self.slot_bytes;
+                (self.block_buffer(&ctx.device, block as usize), offset)
             }
         }
+    }
+
+    /// The small vertex pool, allocated whole on first use.
+    fn vertex_pool_buffer(&mut self, device: &wgpu::Device) -> &wgpu::Buffer {
+        let bytes = self.pool.vertex_slot_bytes * u64::from(self.pool.vertex_slots);
+        let init = &mut self.init;
+        self.vertex_pool.get_or_insert_with(|| {
+            init.pool_allocations += 1;
+            make_pool_buffer(device, "terrain-vertex-pool", bytes)
+        })
+    }
+
+    /// Block `block` of the vertex-format main pool, allocated on first use.
+    fn block_buffer(&mut self, device: &wgpu::Device, block: usize) -> &wgpu::Buffer {
+        if self.blocks.len() <= block {
+            self.blocks.resize_with(block + 1, || None);
+        }
+        let bytes = self.pool.block_bytes();
+        let init = &mut self.init;
+        self.blocks[block].get_or_insert_with(|| {
+            init.pool_allocations += 1;
+            make_pool_buffer(device, "terrain-block", bytes)
+        })
     }
 
     /// Release the slot `upload` gave to `tile` (reusable after the frames in flight retire) and forget the tile.
@@ -1144,6 +1254,7 @@ impl TerrainRenderer {
             self.node_capacity = plan.nodes.len().next_power_of_two().min(self.max_nodes);
             // Frames in flight keep the buffers they use alive; the new ring serves the frames from here on.
             self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, self.compact.as_ref());
+            self.init.ring_builds += 1;
         }
         let mut globals = f32_bytes(&plan.view_projection);
         globals.extend(f32_bytes(&[lo, hi, 0.0, 0.0]));
