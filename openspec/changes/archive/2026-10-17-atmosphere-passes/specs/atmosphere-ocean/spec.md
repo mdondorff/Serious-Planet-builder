@@ -7,6 +7,10 @@ Verify: B
 Status: active
 Source: report §15 (M5), Key Finding 7, ADR 0040 points 3-5, ADR 0043
 
+#### Scenario: Differential
+- **WHEN** the GPU's products and the CPU reference are computed for the same parameters
+- **THEN** the maximum difference is within the bound (the scenarios below give the cases)
+
 #### Scenario: Sky view and aerial perspective
 - **WHEN** the GPU's tables are read back at 1 m, 2 km and 20 km with three suns and compared with the reference
 - **THEN** every compared texel is within the bound (measured worst 0.09 of the bound for the sky view, 0.08 for aerial perspective on the software adapter)
