@@ -206,6 +206,34 @@ fn apply_lags(frames: &mut [FrameRecord], lags: &[FrameLag]) -> Result<(), Strin
     Ok(())
 }
 
+/// The source counters of a stretch of a run in the perf crate's words (microseconds, blocks).
+fn load_counters(d: &crate::worldfield::SourceCounters) -> planet_perf::streaming::LoadCounters {
+    let us = |ns: u64| ns / 1000;
+    planet_perf::streaming::LoadCounters {
+        block_decodes: d.blocks.decodes,
+        block_lookups: d.blocks.shared_lookups,
+        block_hits: d.blocks.shared_hits,
+        block_evictions: d.blocks.evictions,
+        block_decode_waits: d.blocks.decode_waits,
+        block_lock_wait_us: us(d.blocks.lock_wait_ns),
+        block_fetch_us: us(d.blocks.fetch_ns),
+        block_decode_us: us(d.blocks.decode_ns),
+        block_resident: d.blocks.resident_blocks as u64,
+        block_budget: d.blocks.budget_blocks as u64,
+        pack_gets: d.pack.gets,
+        pack_found: d.pack.found,
+        pack_get_us: us(d.pack.get_ns),
+        prefill_lookups: d.prefill_lookups,
+        prefill_found: d.prefill_found,
+        prefill_skipped: d.prefill_skipped,
+        prefill_us: us(d.prefill_ns),
+        job_block_wait_us: us(d.job_block_wait_ns),
+        job_block_decodes: d.job_block_decodes,
+        field_builds: d.field_builds,
+        field_us: us(d.field_ns),
+    }
+}
+
 /// What a case produced.
 struct CaseRun {
     frames: Vec<FrameRecord>,
@@ -222,6 +250,8 @@ struct CaseRun {
     cpu_after: Option<planet_perf::host::CpuClock>,
     /// The main pool the renderer was built with: its slots (the ceiling) and the bytes of one.
     pool: planet_streaming::PoolConfig,
+    /// The log counts of the case's tile loads (STRM-022; every name starts with `load_`).
+    load_counts: Vec<(String, u64)>,
 }
 
 fn run_case(
@@ -236,6 +266,10 @@ fn run_case(
     let first = req(script.prelude.unwrap_or(script.cameras[0]));
     let rig_started = Instant::now();
     let mut d = Driver { ctx, rig: Rig::new(ctx, world, &first, gen)?, next_deadline: Instant::now() };
+    // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022:
+    // recorded only, never judged; the per-tile times of the log read against it). Nothing of the case runs yet.
+    let calib_threads = gen.workers;
+    let calib_before = (!smoke).then(|| planet_perf::streaming::calibrate_cpu(calib_threads));
     writeln!(out, "{}: rig built in {:.2} s", script.scene.name(), rig_started.elapsed().as_secs_f64()).map_err(err)?;
     // Settle at the prelude camera (unmeasured): R fully resident, nothing queued, in flight or waiting, for one second of script
     // time. A smoke run only runs a few frames.
@@ -287,6 +321,8 @@ fn run_case(
         });
         (stop, samples, handle)
     });
+    let (counters_before, job_log) = (world.counters(), d.rig.managed.manager().streamer().job_log());
+    let jobs_before = job_log.len();
     let n = if smoke { script.cameras.len().min(SMOKE_FRAMES) } else { script.cameras.len() };
     d.next_deadline = Instant::now();
     let (mut frames, mut blanks) = (Vec::with_capacity(n), Vec::new());
@@ -300,6 +336,21 @@ fn run_case(
         frames.push(t.record);
         draws.push(FrameDraw { camera: Some(*cam), drawn: t.drawn });
     }
+    // The tile loads of the measured part: the jobs that ran and what the source and the pack did (STRM-022, recorded only).
+    let mut load_counts = {
+        let jobs: Vec<planet_perf::streaming::LoadJob> = job_log
+            .since(jobs_before)
+            .iter()
+            .map(|j| planet_perf::streaming::LoadJob {
+                wait_us: j.wait_us,
+                run_us: j.run_us,
+                running: j.running,
+                done: j.done,
+                level: j.level,
+            })
+            .collect();
+        planet_perf::streaming::load_counts(&jobs, &load_counters(&world.counters().since(&counters_before)))
+    };
     if let Some((stop, samples, handle)) = sampler {
         stop.store(true, Ordering::Relaxed);
         let _ = handle.join();
@@ -311,6 +362,10 @@ fn run_case(
     let torn = Instant::now();
     drop(d);
     let teardown_s = torn.elapsed().as_secs_f64();
+    if let Some(c) = &calib_before {
+        load_counts.extend(planet_perf::streaming::calibration_counts("before", c));
+        load_counts.extend(planet_perf::streaming::calibration_counts("after", &planet_perf::streaming::calibrate_cpu(calib_threads)));
+    }
     // The lag post-pass, off the timed path: the loop is gone (queued jobs cancelled, in-flight ones finished), the case is over,
     // and every frame's lag is judged against the plan selected afresh for its own camera (TEST-020).
     let post = Instant::now();
@@ -325,7 +380,7 @@ fn run_case(
         post.elapsed().as_secs_f64()
     )
     .map_err(err)?;
-    Ok(CaseRun { frames, blanks, settle_s, clocks, teardown_s, cpu_before, cpu_after, pool })
+    Ok(CaseRun { frames, blanks, settle_s, clocks, teardown_s, cpu_before, cpu_after, pool, load_counts })
 }
 
 /// The `BLANK TILE` lines of a case, which fail the run after the logs are written (ADR 0032's hard measure: a tile, root or
@@ -582,6 +637,8 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         counts.push(("prefill_tiles_used".into(), scene_world.prefill_hits()));
         // Whether the figure above is the scene's own peak (one scene in the process): `accept M4` refuses RAM from a shared process (TEST-021).
         counts.push(("scene_alone".into(), u64::from(mem.scene_alone)));
+        // The tile source's load during the measured part (recorded only, never compared: STRM-022).
+        counts.extend(run.load_counts.iter().cloned());
         for (name, clock) in [("cpu_clock_before_mhz", run.cpu_before), ("cpu_clock_after_mhz", run.cpu_after)] {
             if let Some(c) = clock {
                 counts.push((name.into(), c.effective_mhz().round() as u64));

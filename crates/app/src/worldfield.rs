@@ -59,6 +59,79 @@ impl LatticeSource for OwnedBake {
     }
 }
 
+/// The leaked stored bake as the field's lattice: it keeps the handle for the counters (`WorldTerrain::counters`).
+struct SharedStore(&'static StoreSource<'static>);
+
+impl LatticeSource for SharedStore {
+    fn res(&self) -> u32 {
+        self.0.res()
+    }
+
+    fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+        self.0.at(face, i, j)
+    }
+
+    fn block_cells(&self) -> u32 {
+        self.0.block_cells()
+    }
+}
+
+/// What the world's tile source did so far, recorded only (STRM-022): the block cache of the stored bake, the pack's lookups and the
+/// pre-filled coarse tile lookups. The difference of two readings is a stretch of a run. Never an input of a decision.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SourceCounters {
+    pub blocks: planet_cache::global_store::SourceStats,
+    pub pack: planet_cache::pack::StoreReadStats,
+    /// Calls of the pre-filled tile lookup that reached the pack (a tile shallow enough to be stored), those that found the
+    /// tile, and the nanoseconds all threads together spent in the lookup (key, pack read, decode).
+    pub prefill_lookups: u64,
+    pub prefill_found: u64,
+    pub prefill_ns: u64,
+    /// Calls of the lookup for a tile too deep to be stored (answered `None` at once).
+    pub prefill_skipped: u64,
+    /// Nanoseconds the tile jobs together spent getting blocks from the shared cache (lock, waiting for another thread's decode,
+    /// decoding), a part of their load time.
+    pub job_block_wait_ns: u64,
+    /// Blocks decoded by the tile jobs themselves (the rest, `blocks.decodes` less this, were decoded for the plan worker).
+    pub job_block_decodes: u64,
+    /// Fields built (every tile load and every plan builds one) and the nanoseconds that took, all threads together.
+    pub field_builds: u64,
+    pub field_ns: u64,
+}
+
+impl SourceCounters {
+    /// What happened between `earlier` and `self`; the block cache's residency figures are those of `self`.
+    pub fn since(&self, earlier: &SourceCounters) -> SourceCounters {
+        let b = |now: u64, then: u64| now.saturating_sub(then);
+        SourceCounters {
+            blocks: planet_cache::global_store::SourceStats {
+                decodes: b(self.blocks.decodes, earlier.blocks.decodes),
+                shared_lookups: b(self.blocks.shared_lookups, earlier.blocks.shared_lookups),
+                shared_hits: b(self.blocks.shared_hits, earlier.blocks.shared_hits),
+                evictions: b(self.blocks.evictions, earlier.blocks.evictions),
+                decode_waits: b(self.blocks.decode_waits, earlier.blocks.decode_waits),
+                lock_wait_ns: b(self.blocks.lock_wait_ns, earlier.blocks.lock_wait_ns),
+                fetch_ns: b(self.blocks.fetch_ns, earlier.blocks.fetch_ns),
+                decode_ns: b(self.blocks.decode_ns, earlier.blocks.decode_ns),
+                ..self.blocks
+            },
+            pack: planet_cache::pack::StoreReadStats {
+                gets: b(self.pack.gets, earlier.pack.gets),
+                found: b(self.pack.found, earlier.pack.found),
+                get_ns: b(self.pack.get_ns, earlier.pack.get_ns),
+            },
+            prefill_lookups: b(self.prefill_lookups, earlier.prefill_lookups),
+            prefill_found: b(self.prefill_found, earlier.prefill_found),
+            prefill_ns: b(self.prefill_ns, earlier.prefill_ns),
+            prefill_skipped: b(self.prefill_skipped, earlier.prefill_skipped),
+            job_block_wait_ns: b(self.job_block_wait_ns, earlier.job_block_wait_ns),
+            job_block_decodes: b(self.job_block_decodes, earlier.job_block_decodes),
+            field_builds: b(self.field_builds, earlier.field_builds),
+            field_ns: b(self.field_ns, earlier.field_ns),
+        }
+    }
+}
+
 /// A world's terrain: the definition, the field it selects and the bake the field reads.
 pub struct WorldTerrain {
     def: WorldDefinition,
@@ -75,6 +148,15 @@ pub struct WorldTerrain {
     /// Whether tiles are read from the pack at all (`false`: the cold reader of the `dive-cold` scene).
     use_prefilled: bool,
     prefill_hits: std::sync::atomic::AtomicU64,
+    prefill_lookups: std::sync::atomic::AtomicU64,
+    prefill_skipped: std::sync::atomic::AtomicU64,
+    prefill_ns: std::sync::atomic::AtomicU64,
+    job_block_wait_ns: std::sync::atomic::AtomicU64,
+    job_block_decodes: std::sync::atomic::AtomicU64,
+    field_builds: std::sync::atomic::AtomicU64,
+    field_ns: std::sync::atomic::AtomicU64,
+    /// The stored bake behind `src`, for the counters (`None`: an in-memory bake or no bake).
+    store_source: Option<&'static StoreSource<'static>>,
 }
 
 impl WorldTerrain {
@@ -110,6 +192,14 @@ impl WorldTerrain {
             pack: None,
             use_prefilled: true,
             prefill_hits: Default::default(),
+            prefill_lookups: Default::default(),
+            prefill_skipped: Default::default(),
+            prefill_ns: Default::default(),
+            job_block_wait_ns: Default::default(),
+            job_block_decodes: Default::default(),
+            field_builds: Default::default(),
+            field_ns: Default::default(),
+            store_source: None,
         })
     }
 
@@ -130,7 +220,8 @@ impl WorldTerrain {
         let world: &'static GlobalWorld = Box::leak(Box::new(world));
         let store = planet_cache::pack::TileStore::open(dir, world.params()).map_err(|e| format!("{}: {e}", dir.display()))?;
         let store: &'static planet_cache::pack::TileStore = Box::leak(Box::new(store));
-        let src = StoreSource::new(store, world, res).map_err(|e| format!("{}: a bake of {res} cells: {e}", dir.display()))?;
+        let src: &'static StoreSource<'static> =
+            Box::leak(Box::new(StoreSource::new(store, world, res).map_err(|e| format!("{}: a bake of {res} cells: {e}", dir.display()))?));
         // A store of another definition or resolution reads as holes: say so now, not as NaN heights in the middle of a run.
         src.at(Face(0), 0, 0).map_err(|e| {
             format!("{}: the store holds no bake of {res} cells for this definition (--seed, --world, --global-res): {e}", dir.display())
@@ -140,7 +231,7 @@ impl WorldTerrain {
         Ok(WorldTerrain {
             def,
             kind,
-            src: Box::new(src),
+            src: Box::new(SharedStore(src)),
             has_bake: true,
             bake_key,
             res,
@@ -149,6 +240,14 @@ impl WorldTerrain {
             pack: Some(store),
             use_prefilled: true,
             prefill_hits: Default::default(),
+            prefill_lookups: Default::default(),
+            prefill_skipped: Default::default(),
+            prefill_ns: Default::default(),
+            job_block_wait_ns: Default::default(),
+            job_block_decodes: Default::default(),
+            field_builds: Default::default(),
+            field_ns: Default::default(),
+            store_source: Some(src),
         })
     }
 
@@ -193,13 +292,49 @@ impl WorldTerrain {
         max_level: u8,
         format: planet_render::TileFormat,
     ) -> Option<planet_generators::compact::RenderTile> {
+        use std::sync::atomic::Ordering::Relaxed;
         let pack = self.pack.filter(|_| self.use_prefilled)?;
         let spec = TileSpec::new(field, self.radius_m, cells, max_level, form_of_format(format));
+        if !spec.storable(tile) {
+            // Too deep to be stored: no key, no pack read (the counter says how often a lookup was not needed).
+            self.prefill_skipped.fetch_add(1, Relaxed);
+            return None;
+        }
+        let started = std::time::Instant::now();
         let found = spec.lookup(pack, tile);
+        self.prefill_ns.fetch_add(u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX), Relaxed);
+        self.prefill_lookups.fetch_add(1, Relaxed);
         if found.is_some() {
-            self.prefill_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.prefill_hits.fetch_add(1, Relaxed);
         }
         found
+    }
+
+    /// Run one tile job's load and record how much of it the calling thread spent getting blocks (recorded only, STRM-022).
+    pub fn timed_load<R>(&self, load: impl FnOnce() -> R) -> R {
+        use planet_cache::global_store::{thread_block_decodes, thread_block_wait_ns};
+        let (waited, decoded) = (thread_block_wait_ns(), thread_block_decodes());
+        let out = load();
+        self.job_block_wait_ns.fetch_add(thread_block_wait_ns().saturating_sub(waited), std::sync::atomic::Ordering::Relaxed);
+        self.job_block_decodes.fetch_add(thread_block_decodes().saturating_sub(decoded), std::sync::atomic::Ordering::Relaxed);
+        out
+    }
+
+    /// What the tile source did so far (recorded only, STRM-022); the stored-bake and pack figures are zero for an in-memory run.
+    pub fn counters(&self) -> SourceCounters {
+        use std::sync::atomic::Ordering::Relaxed;
+        SourceCounters {
+            blocks: self.store_source.map(StoreSource::stats).unwrap_or_default(),
+            pack: self.pack.map(planet_cache::pack::TileStore::read_stats).unwrap_or_default(),
+            prefill_lookups: self.prefill_lookups.load(Relaxed),
+            prefill_found: self.prefill_hits.load(Relaxed),
+            prefill_ns: self.prefill_ns.load(Relaxed),
+            prefill_skipped: self.prefill_skipped.load(Relaxed),
+            job_block_wait_ns: self.job_block_wait_ns.load(Relaxed),
+            job_block_decodes: self.job_block_decodes.load(Relaxed),
+            field_builds: self.field_builds.load(Relaxed),
+            field_ns: self.field_ns.load(Relaxed),
+        }
     }
 
     /// Tiles served from the pack so far.
@@ -259,9 +394,14 @@ impl WorldTerrain {
 
     /// Build the field (a fresh context per field: its key covers what it read).
     pub fn field(&self) -> Result<Box<dyn HeightField + '_>, String> {
+        let started = std::time::Instant::now();
         let ctx = GenContext::new(&self.def);
-        build_field(self.kind, &ctx, BodyId::PLANET, self.src.as_ref(), self.bake_key)
-            .map_err(|e| format!("the definition cannot be generated: {e}"))
+        let built = build_field(self.kind, &ctx, BodyId::PLANET, self.src.as_ref(), self.bake_key)
+            .map_err(|e| format!("the definition cannot be generated: {e}"));
+        self.field_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let spent = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        self.field_ns.fetch_add(spent, std::sync::atomic::Ordering::Relaxed);
+        built
     }
 }
 

@@ -27,7 +27,9 @@ use std::fmt;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use planet_core::TileId;
 
@@ -624,6 +626,18 @@ fn read_exact_at(file: &File, mut buf: &mut [u8], mut offset: u64) -> std::io::R
 pub struct TileStore {
     packs: Vec<PackFile>,
     problems: Vec<String>,
+    gets: AtomicU64,
+    found: AtomicU64,
+    get_ns: AtomicU64,
+}
+
+/// What the read side of a store did so far (recorded only, STRM-022): lookups, those that found a record, and the time they took
+/// in all threads together (index search, the positional read and the record's checks). Never an input of a decision.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StoreReadStats {
+    pub gets: u64,
+    pub found: u64,
+    pub get_ns: u64,
 }
 
 impl TileStore {
@@ -638,7 +652,7 @@ impl TileStore {
                 packs.push(p);
             }
         }
-        Ok(TileStore { packs, problems })
+        Ok(TileStore { packs, problems, gets: AtomicU64::new(0), found: AtomicU64::new(0), get_ns: AtomicU64::new(0) })
     }
 
     /// What a person should know about packs that were skipped or damaged; empty for a healthy store.
@@ -657,6 +671,24 @@ impl TileStore {
     /// outside its pack, is [`PackError::Corrupt`] once: the caller treats it as a miss, regenerates and logs, and the entry leaves the
     /// in-RAM index, so asking again is a plain miss (the file stays as it is until a compaction).
     pub fn get(&self, kind: u8, tile: TileId, key: CacheKey) -> Result<Option<Record>, PackError> {
+        let started = Instant::now();
+        let out = self.get_unmeasured(kind, tile, key);
+        self.gets.fetch_add(1, Ordering::Relaxed);
+        self.found.fetch_add(u64::from(matches!(out, Ok(Some(_)))), Ordering::Relaxed);
+        self.get_ns.fetch_add(u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX), Ordering::Relaxed);
+        out
+    }
+
+    /// The lookups made so far and the time they took (recorded only).
+    pub fn read_stats(&self) -> StoreReadStats {
+        StoreReadStats {
+            gets: self.gets.load(Ordering::Relaxed),
+            found: self.found.load(Ordering::Relaxed),
+            get_ns: self.get_ns.load(Ordering::Relaxed),
+        }
+    }
+
+    fn get_unmeasured(&self, kind: u8, tile: TileId, key: CacheKey) -> Result<Option<Record>, PackError> {
         let sort = sort_key(kind, tile);
         for pack in self.packs.iter().rev() {
             if let Some(e) = pack.find(&sort, key) {

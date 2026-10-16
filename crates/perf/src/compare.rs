@@ -476,7 +476,7 @@ pub fn comparison_lines_gpu(last_valid: Option<&[u8]>, last_gpu_valid: Option<&[
                 compared += count_compared(&old, &new, cpu);
                 for (path, counts) in &new.counts {
                     for (name, &n) in counts {
-                        if RECORDED_ONLY_COUNTS.contains(&name.as_str()) {
+                        if RECORDED_ONLY_COUNTS.contains(&name.as_str()) || name.starts_with(crate::streaming::LOAD_COUNT_PREFIX) {
                             continue;
                         }
                         if let Some(&o) = old.counts.get(path).and_then(|c| c.get(name)) {
@@ -628,6 +628,23 @@ mod tests {
         // A real count still counts.
         let lines = comparison_lines(Some(a.as_bytes()), with(3100, 3000).replace("8687", "9000").as_bytes());
         assert!(lines.iter().any(|l| l.contains("nodes 8687 -> 9000")), "{lines:?}");
+    }
+
+    // spec: STRM-022
+    #[test]
+    fn the_tile_load_counts_are_recorded_but_never_reported_as_changed_counts() {
+        let plain = log(true, (2560, 1440), [3.0; 3], [0.06; 3], 8687);
+        let with = |median: u64, jobs: u64| {
+            plain.replace(
+                "\"counts\":{\"nodes\":8687}",
+                &format!("\"counts\":{{\"nodes\":8687,\"load_run_us_median\":{median},\"load_jobs\":{jobs}}}"),
+            )
+        };
+        assert_ne!(with(1, 1), plain);
+        for (old, new) in [(with(26_000, 14_000), with(52_000, 7_000)), (plain.clone(), with(1, 1)), (with(1, 1), plain.clone())] {
+            let lines = comparison_lines(Some(old.as_bytes()), new.as_bytes());
+            assert!(lines.iter().all(|l| !l.contains("count changed") && !l.contains("could not be read")), "{lines:?}");
+        }
     }
 
     // spec: TEST-019

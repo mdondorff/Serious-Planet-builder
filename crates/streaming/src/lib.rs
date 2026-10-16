@@ -73,6 +73,64 @@ pub(crate) type FxSet<K> = HashSet<K, BuildHasherDefault<FxHasher>>;
 /// A unit of work handed to a [`Spawner`].
 pub type Job = Box<dyn FnOnce() + Send + 'static>;
 
+/// One tile job that ran to its end, as the worker saw it (STRM-022). Wall-clock readings of the worker threads, kept for the
+/// perf log: no decision of the streamer reads them, so no order or result depends on them (CON-14).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JobSample {
+    /// Microseconds from the dispatch to the job's start: the time it waited in the spawner's queue.
+    pub wait_us: u64,
+    /// Microseconds the source took to load the tile (a cancelled or failed load included).
+    pub run_us: u64,
+    /// Jobs inside their load when this one started, itself included: the concurrency the load ran under.
+    pub running: u32,
+    /// The load produced a tile (not cancelled, not failed).
+    pub done: bool,
+    /// The level of the tile.
+    pub level: u8,
+}
+
+/// Most samples a log keeps (about 25 MB); later jobs run unlogged.
+const MAX_JOB_SAMPLES: usize = 1 << 20;
+
+/// The jobs that ran, in the order they ended, and how many run now (STRM-022): recorded only.
+#[derive(Default)]
+pub struct JobLog {
+    running: std::sync::atomic::AtomicU32,
+    samples: Mutex<Vec<JobSample>>,
+}
+
+impl JobLog {
+    /// Jobs recorded so far.
+    pub fn len(&self) -> usize {
+        self.samples.lock().expect("job log").len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The samples from index `from` on (a case reads the part after its settling).
+    pub fn since(&self, from: usize) -> Vec<JobSample> {
+        self.samples.lock().expect("job log").get(from..).unwrap_or_default().to_vec()
+    }
+
+    /// Run `load`, recording its duration, how long the job waited since `queued` and how many loads ran beside it.
+    fn timed<R>(&self, level: u8, queued: std::time::Instant, load: impl FnOnce() -> R, done: impl Fn(&R) -> bool) -> R {
+        let started = std::time::Instant::now();
+        let running = self.running.fetch_add(1, Ordering::SeqCst) + 1;
+        let out = load();
+        let run_us = u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX);
+        self.running.fetch_sub(1, Ordering::SeqCst);
+        let wait_us = u64::try_from(started.saturating_duration_since(queued).as_micros()).unwrap_or(u64::MAX);
+        let sample = JobSample { wait_us, run_us, running, done: done(&out), level };
+        let mut samples = self.samples.lock().expect("job log");
+        if samples.len() < MAX_JOB_SAMPLES {
+            samples.push(sample);
+        }
+        out
+    }
+}
+
 /// Monotonic milliseconds. Injected so retry back-off is testable.
 pub trait Clock: Send + Sync {
     fn now_ms(&self) -> u64;
@@ -627,6 +685,8 @@ pub struct Streamer<T: Send + Sync + 'static> {
     draw_counted: usize,
     /// Order in which tiles were handed to the spawner; filled only with `StreamConfig::record_dispatches`.
     pub dispatch_log: Vec<TileId>,
+    /// The jobs that ran, as their workers saw them (STRM-022; recorded only).
+    job_log: Arc<JobLog>,
 }
 
 /// The best class among the layers a tile is in: draw, residency, prefetch.
@@ -691,6 +751,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             active_counted: 0,
             draw_counted: 0,
             dispatch_log: Vec::new(),
+            job_log: Arc::default(),
         }
     }
 
@@ -821,6 +882,11 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             main_free: self.pools.main.free() as usize,
             ..self.stats
         }
+    }
+
+    /// The log of the jobs that ran (STRM-022): recorded only, shared with the workers.
+    pub fn job_log(&self) -> Arc<JobLog> {
+        Arc::clone(&self.job_log)
     }
 
     /// What the scheduler's frames touched so far (STRM-019, CON-20): the difference of two readings is a frame's work.
@@ -1156,7 +1222,8 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             if self.config.record_dispatches {
                 self.dispatch_log.push(tile);
             }
-            let (source, tx) = (Arc::clone(&self.source), self.tx.clone());
+            let (source, tx, log) = (Arc::clone(&self.source), self.tx.clone(), Arc::clone(&self.job_log));
+            let queued = std::time::Instant::now();
             self.spawner.spawn(Box::new(move || {
                 let cancel = CancelToken(token);
                 if cancel.is_cancelled() {
@@ -1164,7 +1231,13 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                     return;
                 }
                 // A panicking source must not wedge the tile: it becomes a failure with the usual retry delay.
-                let outcome = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| source.load_staged(tile, &cancel))) {
+                let loaded = log.timed(
+                    tile.level(),
+                    queued,
+                    || std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| source.load_staged(tile, &cancel))),
+                    |r| matches!(r, Ok(Ok(Some(_)))),
+                );
+                let outcome = match loaded {
                     Ok(Ok(Some(data))) => Outcome::Done(data),
                     Ok(Ok(None)) => Outcome::Cancelled,
                     Ok(Err(e)) => Outcome::Failed(e),

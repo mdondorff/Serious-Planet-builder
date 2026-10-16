@@ -810,6 +810,12 @@ impl planet_streaming::TileSource<RenderTile> for MeshSource {
         if cancel.is_cancelled() {
             return Ok(None);
         }
+        self.world.timed_load(|| self.load_staged_timed(tile, cancel))
+    }
+}
+
+impl MeshSource {
+    fn load_staged_timed(&self, tile: TileId, cancel: &planet_streaming::CancelToken) -> Result<Option<RenderTile>, String> {
         let field = self.world.field()?;
         if let Some(t) = self.world.prefilled_tile(field.as_ref(), tile, self.cells, self.max_level, self.format) {
             return Ok(Some(t));

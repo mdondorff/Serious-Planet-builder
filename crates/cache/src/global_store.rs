@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
 use planet_core::cube::TangentWarp;
 use planet_core::hash::HASH_VERSION;
@@ -356,6 +357,14 @@ pub struct StoreSource<'a> {
     decodes: AtomicU64,
     /// Acquisitions of the shared-cache lock by reads (a test observable of STRM-014: only a change of block takes it).
     lookups: AtomicU64,
+    /// Recorded only (STRM-022): shared-cache hits, blocks pushed out for the budget, reads that found a block another thread was
+    /// still decoding, and the time spent waiting for the cache lock, fetching the record, and decoding it (all threads together).
+    shared_hits: AtomicU64,
+    evictions: AtomicU64,
+    decode_waits: AtomicU64,
+    lock_wait_ns: AtomicU64,
+    fetch_ns: AtomicU64,
+    decode_ns: AtomicU64,
     shared: Mutex<Vec<(TileId, Arc<Slot>)>>,
 }
 
@@ -365,7 +374,7 @@ struct Slot {
 }
 
 /// What the shared block cache holds, for budgets and tests (CON-20).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SourceStats {
     /// Blocks decoded so far (a block evicted and wanted again counts again).
     pub decodes: u64,
@@ -375,6 +384,18 @@ pub struct SourceStats {
     pub resident_blocks: usize,
     pub resident_bytes: u64,
     pub budget_bytes: u64,
+    /// The budget in whole blocks (at least one).
+    pub budget_blocks: usize,
+    /// Shared-cache lookups that found the block's slot (`shared_lookups - shared_hits` made one: a miss that decodes).
+    pub shared_hits: u64,
+    /// Blocks pushed out of the shared cache for the budget (each decodes again if it is wanted again).
+    pub evictions: u64,
+    /// Lookups that found a block still being decoded by another thread and waited for it.
+    pub decode_waits: u64,
+    /// Nanoseconds all threads together spent acquiring the cache lock, fetching block records, and decoding them.
+    pub lock_wait_ns: u64,
+    pub fetch_ns: u64,
+    pub decode_ns: u64,
 }
 
 /// Default budget of decoded blocks a [`StoreSource`] keeps: 512 MiB, ADR 0033 point 6's proposal for bake blocks (31 blocks of
@@ -391,6 +412,22 @@ struct Pinned {
 
 thread_local! {
     static PINNED: RefCell<Option<Pinned>> = const { RefCell::new(None) };
+    /// Nanoseconds this thread spent in the shared cache (lock, waiting for another thread's decode, decoding): recorded only.
+    static BLOCK_WAIT_NS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Blocks this thread decoded itself (recorded only).
+    static THREAD_DECODES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Blocks the calling thread has decoded itself so far, for any [`StoreSource`] (recorded only, STRM-022): a job reads it before and
+/// after its load to learn how many of the decodes were its own.
+pub fn thread_block_decodes() -> u64 {
+    THREAD_DECODES.with(std::cell::Cell::get)
+}
+
+/// Nanoseconds the calling thread has spent so far getting blocks from the shared cache of any [`StoreSource`] (lock, waiting for
+/// another thread's decode, decoding; recorded only): a job reads it before and after its load to learn how much of its time went to blocks.
+pub fn thread_block_wait_ns() -> u64 {
+    BLOCK_WAIT_NS.with(std::cell::Cell::get)
 }
 
 static NEXT_SOURCE_ID: AtomicU64 = AtomicU64::new(1);
@@ -417,6 +454,12 @@ impl<'a> StoreSource<'a> {
             budget_blocks,
             decodes: AtomicU64::new(0),
             lookups: AtomicU64::new(0),
+            shared_hits: AtomicU64::new(0),
+            evictions: AtomicU64::new(0),
+            decode_waits: AtomicU64::new(0),
+            lock_wait_ns: AtomicU64::new(0),
+            fetch_ns: AtomicU64::new(0),
+            decode_ns: AtomicU64::new(0),
             shared: Mutex::new(Vec::new()),
         })
     }
@@ -430,25 +473,36 @@ impl<'a> StoreSource<'a> {
             resident_blocks: resident,
             resident_bytes: resident as u64 * self.block_bytes,
             budget_bytes: self.budget_blocks as u64 * self.block_bytes,
+            budget_blocks: self.budget_blocks,
+            shared_hits: self.shared_hits.load(Ordering::Relaxed),
+            evictions: self.evictions.load(Ordering::Relaxed),
+            decode_waits: self.decode_waits.load(Ordering::Relaxed),
+            lock_wait_ns: self.lock_wait_ns.load(Ordering::Relaxed),
+            fetch_ns: self.fetch_ns.load(Ordering::Relaxed),
+            decode_ns: self.decode_ns.load(Ordering::Relaxed),
         }
     }
 
     /// The slot of `tile`, made if absent (least recently used blocks leave beyond the budget).
-    fn slot(&self, tile: TileId) -> Arc<Slot> {
+    fn slot(&self, tile: TileId) -> (Arc<Slot>, bool) {
         self.lookups.fetch_add(1, Ordering::Relaxed);
+        let waiting = Instant::now();
         let mut shared = self.shared.lock().expect("block cache mutex");
+        self.lock_wait_ns.fetch_add(u64::try_from(waiting.elapsed().as_nanos()).unwrap_or(u64::MAX), Ordering::Relaxed);
         if let Some(at) = shared.iter().position(|(t, _)| *t == tile) {
+            self.shared_hits.fetch_add(1, Ordering::Relaxed);
             let entry = shared.remove(at);
             let slot = Arc::clone(&entry.1);
             shared.push(entry);
-            return slot;
+            return (slot, true);
         }
         let slot = Arc::new(Slot { block: OnceLock::new() });
         shared.push((tile, Arc::clone(&slot)));
         if shared.len() > self.budget_blocks {
             shared.remove(0);
+            self.evictions.fetch_add(1, Ordering::Relaxed);
         }
-        slot
+        (slot, false)
     }
 
     fn forget(&self, tile: TileId, slot: &Arc<Slot>) {
@@ -470,22 +524,31 @@ impl<'a> StoreSource<'a> {
                 tile.y()
             ))
         };
+        let fetching = Instant::now();
         let rec = self
             .store
             .get(KIND_GLOBAL_BLOCK, tile, key)
             .map_err(|e| what(e.to_string()))?
             .ok_or_else(|| what("not stored under the current key".into()))?;
+        let decoding = Instant::now();
+        self.fetch_ns.fetch_add(u64::try_from((decoding - fetching).as_nanos()).unwrap_or(u64::MAX), Ordering::Relaxed);
         let (cells, samples) = decode_block(&rec.payload).map_err(|e| what(e.to_string()))?;
+        self.decode_ns.fetch_add(u64::try_from(decoding.elapsed().as_nanos()).unwrap_or(u64::MAX), Ordering::Relaxed);
         if cells != self.cells {
             return Err(what(format!("its payload has {cells} cells per edge, the layout says {}", self.cells)));
         }
         self.decodes.fetch_add(1, Ordering::Relaxed);
+        THREAD_DECODES.with(|c| c.set(c.get() + 1));
         Ok(Arc::new(samples))
     }
 
     /// The block of `tile` from the shared cache (decoded by this thread or another).
     fn shared_block(&self, tile: TileId) -> Result<Arc<Vec<GlobalSample>>, ReadError> {
-        let slot = self.slot(tile);
+        let (slot, hit) = self.slot(tile);
+        if hit && slot.block.get().is_none() {
+            // Found in the cache but not decoded yet: another thread is decoding it, and this one waits for it below.
+            self.decode_waits.fetch_add(1, Ordering::Relaxed);
+        }
         match slot.block.get_or_init(|| self.load(tile)) {
             Ok(block) => Ok(Arc::clone(block)),
             Err(e) => {
@@ -502,7 +565,10 @@ impl<'a> StoreSource<'a> {
             return Ok(s);
         }
         let tile = TileId::new(Face(at.0), self.level, at.1, at.2).expect("a tile of the grid");
-        let block = self.shared_block(tile)?;
+        let waiting = Instant::now();
+        let block = self.shared_block(tile);
+        BLOCK_WAIT_NS.with(|c| c.set(c.get().saturating_add(u64::try_from(waiting.elapsed().as_nanos()).unwrap_or(u64::MAX))));
+        let block = block?;
         let s = block[index];
         PINNED.with(|p| *p.borrow_mut() = Some(Pinned { source: self.id, at, block }));
         Ok(s)
