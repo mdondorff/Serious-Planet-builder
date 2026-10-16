@@ -1,0 +1,12 @@
+[package]
+name = "warp-crash"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Throwaway exploration harness (WARP parallel-device crash); not part of the planet workspace.
+[workspace]
+
+[dependencies]
+wgpu = { version = "=30.0.1", default-features = false, features = ["wgsl", "dx12", "vulkan"] }
+pollster = "1.0.1"
