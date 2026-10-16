@@ -46,6 +46,7 @@ modes:
     --draw per-draw|indirect   how the terrain renderer submits draws (REND-015): per-draw is the reference loop, indirect one multi-draw per buffer run from a CPU-built argument buffer (default indirect where the adapter supports it, else per-draw)
     --upload per-slot|batched   how a frame's tile writes reach the queue (REND-016): batched (default) writes each run of adjacent slots with one call, per-slot is the reference (one or two calls per tile); the pool contents are identical
     --gen-workers N          threads of the tile generation pool and so jobs running at once in the pipelined loop and the streaming perf scenes (STRM-020; default: the machine's hardware threads; the plan worker's threads are separate)
+    --gen-reserve N          hardware threads the default generation pool leaves free for the frame thread, the plan worker and the driver (STRM-020; default 2; ignored when --gen-workers is given)
     --gen-ahead N            jobs queued behind the running ones so a worker that finishes between two frames takes the next at once (STRM-020; default: the worker count; 0: refill at frame boundaries only)
     --tile-format vertex|compact   how terrain tiles are built and held (ADR 0033): compact (default) for levels 3 and finer, vertex the 44-byte reference format for all
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
@@ -75,6 +76,8 @@ pub struct Options {
     /// `--gen-workers N` and `--gen-ahead N`: the tile generation pool (STRM-020); default the machine's threads and as many queued.
     pub gen_workers: Option<usize>,
     pub gen_ahead: Option<usize>,
+    /// `--gen-reserve N`: cores the default pool size leaves free (`planet_streaming::GEN_RESERVE` when absent).
+    pub gen_reserve: Option<usize>,
     pub perf: bool,
     pub machine_ready: bool,
     pub view: String,
@@ -137,10 +140,19 @@ pub struct Options {
 
 impl Options {
     /// The tile generation pool of the pipelined loop and the streaming scenes (STRM-020): `--gen-workers` threads (default the
-    /// machine's) with `--gen-ahead` jobs queued behind them (default as many).
+    /// machine's hardware threads less `--gen-reserve`, 2 unless given) with `--gen-ahead` jobs queued behind them (default as
+    /// many).
     pub fn gen_workers(&self) -> planet_streaming::GenWorkers {
-        let g = self.gen_workers.map_or_else(planet_streaming::GenWorkers::machine, planet_streaming::GenWorkers::new);
+        let reserve = self.gen_reserve.unwrap_or(planet_streaming::GEN_RESERVE);
+        let g =
+            self.gen_workers.map_or_else(|| planet_streaming::GenWorkers::machine_reserving(reserve), planet_streaming::GenWorkers::new);
         self.gen_ahead.map_or(g, |a| g.with_ahead(a))
+    }
+
+    /// The reserve behind the pool size, for the perf log: `None` when `--gen-workers` fixed the size and the reserve decided
+    /// nothing.
+    pub fn gen_reserve_used(&self) -> Option<usize> {
+        self.gen_workers.is_none().then(|| self.gen_reserve.unwrap_or(planet_streaming::GEN_RESERVE))
     }
 
     /// The finest geometry level of a run with tiles of `cells` cells: `--finest-level`, else the production default
@@ -169,6 +181,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         upload: None,
         gen_workers: None,
         gen_ahead: None,
+        gen_reserve: None,
         perf: false,
         machine_ready: false,
         view: "face".into(),
@@ -295,6 +308,10 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
                         .filter(|n| *n >= 1)
                         .ok_or_else(|| format!("--gen-workers must be a positive integer, got '{v}'"))?,
                 )
+            }
+            "--gen-reserve" => {
+                let v = it.next().ok_or("--gen-reserve needs a count")?;
+                o.gen_reserve = Some(v.parse::<usize>().map_err(|_| format!("--gen-reserve must be a non-negative integer, got '{v}'"))?)
             }
             "--gen-ahead" => {
                 let v = it.next().ok_or("--gen-ahead needs a count")?;
@@ -603,6 +620,26 @@ mod tests {
         assert_eq!((o.finest_level, o.finest_level_for(64)), (Some(26), 26), "the explicit cap wins whatever the tile size");
         assert!(parse_args(&["test-render".into(), "--finest-level".into(), "29".into()]).unwrap_err().contains("at most 28"));
         assert!(parse_args(&["test-render".into(), "--finest-level".into()]).unwrap_err().contains("needs a level"));
+    }
+
+    // spec: STRM-020, TEST-012
+    #[test]
+    fn the_generation_pool_defaults_to_the_machine_less_the_reserve_and_the_options_override_it() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap();
+        let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let o = args(&["test-render", "--scene", "terrain"]);
+        let g = o.gen_workers();
+        assert_eq!(g.workers, planet_streaming::GenWorkers::workers_for(cores, planet_streaming::GEN_RESERVE));
+        assert_eq!((g.ahead, o.gen_reserve_used()), (g.workers, Some(planet_streaming::GEN_RESERVE)));
+        let o = args(&["test-render", "--gen-reserve", "5"]);
+        assert_eq!(o.gen_workers().workers, planet_streaming::GenWorkers::workers_for(cores, 5));
+        assert_eq!(o.gen_reserve_used(), Some(5));
+        // An explicit size wins and the reserve decided nothing, so the log records none.
+        let o = args(&["test-render", "--gen-workers", "7", "--gen-reserve", "5", "--gen-ahead", "3"]);
+        assert_eq!((o.gen_workers().workers, o.gen_workers().ahead, o.gen_reserve_used()), (7, 3, None));
+        assert_eq!(args(&["test-render", "--gen-reserve", "0"]).gen_workers().workers, cores);
+        assert!(parse_args(&["test-render".into(), "--gen-reserve".into(), "x".into()]).unwrap_err().contains("non-negative"));
+        assert!(parse_args(&["test-render".into(), "--gen-reserve".into()]).unwrap_err().contains("needs a count"));
     }
 
     struct TempDir(PathBuf);

@@ -1066,6 +1066,47 @@ fn a_full_fill_at_the_cap_takes_the_frames_the_cap_allows_and_defers_only_full_f
     assert!(frames.iter().any(|f| f.deferred > 0));
 }
 
+// spec: REND-018, STRM-006, STRM-019
+#[test]
+fn a_frame_that_uploads_under_unchanged_wants_builds_no_set_over_the_wants() {
+    // Two tiles a frame against a fill of hundreds: tiles wait for many frames, the camera stays, the wants settle.
+    let cap = 2 * VERTEX_TILE_BYTES;
+    let mut rig = Rig::budgeted(1_000_000, true, VERTEX_TILE_BYTES, UploadBudget { tile_bytes_per_frame: cap, node_records_in_cap: false });
+    let ground = track(0.0, 2.0);
+    let (mut uploading, mut draw_changes, mut prefetch_changes) = (0u64, 0u64, 0u64);
+    let mut draw_after_last_change = 0u64;
+    for k in 0..300 {
+        let before = rig.lp.wants().clone();
+        let f = rig.step(&request(ground, 0.3, -0.4));
+        let after = rig.lp.wants();
+        if after.draw != before.draw {
+            draw_changes += 1;
+            draw_after_last_change = 0;
+        }
+        if after.prefetch != before.prefetch {
+            prefetch_changes += 1;
+        }
+        if f.counts.uploaded > 0 {
+            uploading += 1;
+            draw_after_last_change += 1;
+        }
+        if rig.lp.pending().is_empty() && k > 20 {
+            break;
+        }
+    }
+    let (class, prefetch) = rig.lp.ranking_rebuilds();
+    eprintln!("{uploading} uploading frames, {draw_changes} draw changes, {prefetch_changes} prefetch changes, {class} class and {prefetch} prefetch rebuilds");
+    assert!(uploading > 30, "the fill must span many uploading frames: {uploading}");
+    // A set is built when the wants it is over changed and a tile waits, never because a frame uploads.
+    assert!(
+        class >= 1 && class <= draw_changes + 1,
+        "{class} draw-class builds for {draw_changes} changes of the draw wants (and the first, before any)"
+    );
+    assert!(prefetch <= prefetch_changes + 1, "{prefetch} prefetch builds for {prefetch_changes} changes of the prefetch wants");
+    assert!(class < uploading, "builds ({class}) must be fewer than uploading frames ({uploading})");
+    assert!(draw_after_last_change > 10, "frames that upload after the wants settled: {draw_after_last_change}");
+}
+
 // ---- teardown and teleport cancellation (STRM-005) ----
 type LockedGate = (std::sync::Mutex<std::sync::mpsc::Sender<()>>, std::sync::Mutex<std::sync::mpsc::Receiver<()>>);
 

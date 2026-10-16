@@ -162,8 +162,43 @@ pub struct Protocol {
     /// Where the world's bake was read from when that is a choice (the streaming scenes: `store DIR, N cells` or
     /// `in-memory N cells (NOT the production source)`). A log is compared only with one that read the same source.
     pub source: Option<String>,
+    /// The tile generation pool of a streaming scene (STRM-020): recorded so that logs taken with another pool are not mistaken for
+    /// comparable ones (TEST-012). `None` for the scenes without one.
+    pub gen: Option<GenSettings>,
     /// A smoke run: never valid for budgets.
     pub smoke: bool,
+}
+
+/// The tile generation settings a streaming session ran with (`protocol.gen`): the pool size, the jobs queued behind it and, when
+/// the size came from the default rule, the cores that rule left free. Recorded only: a log without them reads and is accepted
+/// as before.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GenSettings {
+    pub workers: usize,
+    pub ahead: usize,
+    pub reserve: Option<usize>,
+}
+
+impl GenSettings {
+    /// The settings as one line (`workers 18, ahead 18, reserve 2`), what the comparison prints and compares.
+    pub fn describe(&self) -> String {
+        match self.reserve {
+            Some(r) => format!("workers {}, ahead {}, reserve {r}", self.workers, self.ahead),
+            None => format!("workers {}, ahead {}", self.workers, self.ahead),
+        }
+    }
+
+    fn json(g: &Option<GenSettings>) -> String {
+        match g {
+            None => "null".into(),
+            Some(g) => format!(
+                "{{\"workers\":{},\"ahead\":{},\"reserve\":{}}}",
+                g.workers,
+                g.ahead,
+                g.reserve.map_or("null".to_string(), |r| r.to_string())
+            ),
+        }
+    }
 }
 
 impl Default for Protocol {
@@ -176,6 +211,7 @@ impl Default for Protocol {
             internal_resolution: (2560, 1440),
             field: None,
             source: None,
+            gen: None,
             smoke: false,
         }
     }
@@ -342,7 +378,7 @@ pub fn report_json_with_warmups(
         })
         .collect();
     format!(
-        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"frame_valid\":{},\"gpu_session_valid\":{},\"gpu_only_causes\":[{}],\"warnings\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{},\"source\":{}}},\"runs\":[{}]}}\n",
+        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"frame_valid\":{},\"gpu_session_valid\":{},\"gpu_only_causes\":[{}],\"warnings\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{},\"source\":{},\"gen\":{}}},\"runs\":[{}]}}\n",
         json_str(&adapter.name),
         json_str(&adapter.backend),
         power_scheme.map_or("null".to_string(), json_str),
@@ -361,6 +397,7 @@ pub fn report_json_with_warmups(
         protocol.internal_resolution.1,
         protocol.field.as_deref().map_or("null".to_string(), json_str),
         protocol.source.as_deref().map_or("null".to_string(), json_str),
+        GenSettings::json(&protocol.gen),
         run_json.join(",")
     )
 }

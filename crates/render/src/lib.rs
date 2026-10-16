@@ -15,7 +15,7 @@ pub use compact::compact_terrain_shader;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
 pub use terrain::{
     execute_terrain, execute_terrain_tiles, DrawMode, FrameTiming, InitCounts, ResidentFormat, TerrainRenderer, TerrainStats,
-    UploadCounters, UploadMode, TERRAIN_SHADERS, WARM_NODES,
+    UploadCounters, UploadMode, UploadTimes, TERRAIN_SHADERS, WARM_NODES,
 };
 
 /// How terrain tiles are held and drawn (ADR 0033): the compact format for levels 3 and finer (default) or the 44-byte vertex format

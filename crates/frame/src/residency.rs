@@ -56,6 +56,12 @@ impl ResidencySet {
         self.tiles.binary_search_by_key(&tile, |e| e.tile).is_ok()
     }
 
+    /// Whether the tiles are in ascending order and every tile's parent is in the set: what [`ResidencySet::contains`] and the
+    /// managed loop's ranking of the residency class (a lookup in R instead of a closure over it) rely on.
+    pub fn is_sorted_and_closed(&self) -> bool {
+        self.tiles.windows(2).all(|w| w[0].tile < w[1].tile) && self.tiles.iter().all(|e| e.tile.parent().is_none_or(|p| self.contains(p)))
+    }
+
     pub fn len(&self) -> usize {
         self.tiles.len()
     }

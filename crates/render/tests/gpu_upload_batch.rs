@@ -108,6 +108,45 @@ fn a_frames_compact_tiles_make_one_call_per_run_and_leave_the_pools_of_the_per_s
 
 // spec: REND-018, REND-016
 #[test]
+fn the_batched_path_reuses_its_staging_buffers_and_grows_none_per_frame_after_warm_up() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let t = tiles(118);
+    let mut batched = renderer(&ctx, UploadMode::Batched);
+    let mut reference = renderer(&ctx, UploadMode::PerSlot);
+    assert_eq!(batched.batch_scratch_capacity(), 0, "nothing is staged before the first batch");
+    // Frames of the cap's size over slots that move, shuffled and shorter ones between them: after the first the staging buffers
+    // are as large as they will get, and no frame grows (that is, allocates) them again.
+    let frames: Vec<Vec<u32>> = vec![
+        (0..118).collect(),
+        (130..248).collect(),
+        (3..121).collect(),
+        (0..10).collect(),
+        (0..118).rev().collect(),
+        (200..210).chain(20..30).collect(),
+        (0..118).map(|k| (k * 3) % 250).collect::<std::collections::BTreeSet<u32>>().into_iter().take(100).collect(),
+        (5..123).collect(),
+        (0..118).collect(),
+    ];
+    let mut capacities = Vec::new();
+    for slots in &frames {
+        let batch: Vec<(&RenderTile, SlotRef)> = t.iter().zip(slots).map(|(tile, s)| (tile, main_slot(*s))).collect();
+        batched.upload_tiles_at(&ctx, &batch).unwrap();
+        reference.upload_tiles_at(&ctx, &batch).unwrap();
+        capacities.push(batched.batch_scratch_capacity());
+    }
+    assert!(capacities[0] > 0);
+    assert!(
+        capacities.windows(2).all(|w| w[0] <= w[1]) && capacities[1..].iter().all(|c| *c == capacities[1]),
+        "the staging buffers grew after the second frame: {capacities:?}"
+    );
+    // Reuse leaves nothing of an earlier frame behind: the pools equal those of the per-slot path that wrote the same frames.
+    let (a_ref, rec_ref) = reference.read_compact_pools(&ctx);
+    let (a_new, rec_new) = batched.read_compact_pools(&ctx);
+    assert!(a_ref == a_new && rec_ref == rec_new, "the pools differ after frames that reused the staging buffers");
+}
+
+// spec: REND-018, REND-016
+#[test]
 fn a_slot_written_twice_in_one_batch_holds_the_last_tile_as_in_the_per_slot_path() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let t = tiles(3);

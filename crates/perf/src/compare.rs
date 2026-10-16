@@ -185,6 +185,9 @@ pub struct LogSummary {
     pub field: Option<String>,
     /// Where the bake was read from (`protocol.source`); `None` for a log that names none (the terrain scene).
     pub source: Option<String>,
+    /// The tile generation pool of the session (`protocol.gen`, `GenSettings::describe`); `None` for a log that records none
+    /// (logs from before it, the scenes without a pool). Informational unless both logs have it (TEST-012).
+    pub gen: Option<String>,
     pub medians: BTreeMap<String, BTreeMap<String, f64>>,
     /// Per path: whether its GPU figures are valid and the clock state, read from the recorded samples (ADR 0034).
     pub gpu: BTreeMap<String, GpuValidity>,
@@ -254,9 +257,13 @@ pub fn summarize_log(text: &[u8]) -> Result<LogSummary, String> {
         Some(Json::Str(s)) => Some(s.clone()),
         _ => None,
     };
+    let gen = root.get("protocol").and_then(|p| p.get("gen")).and_then(|g| {
+        let n = |k: &str| g.get(k).and_then(Json::num).map(|v| v as usize);
+        Some(crate::GenSettings { workers: n("workers")?, ahead: n("ahead")?, reserve: n("reserve") }.describe())
+    });
     let gpu = points.iter().map(|(p, v)| (p.clone(), gpu_validity(v))).collect();
     let clock = points.iter().map(|(p, v)| (p.clone(), view_clock_state(v))).collect();
-    Ok(LogSummary { valid, resolution: res, field, source, medians, gpu, clock, counts })
+    Ok(LogSummary { valid, resolution: res, field, source, gen, medians, gpu, clock, counts })
 }
 
 /// Where the last valid log of the scene whose log is `log` is kept: `terrain.json` -> `terrain.last-valid.json` beside it.
@@ -350,6 +357,15 @@ fn usable_baseline(old_text: &[u8], new: &LogSummary) -> Result<LogSummary, Stri
             name(&old.source),
             name(&new.source)
         ));
+    }
+    // Frame and upload medians depend on how many threads generate tiles next to the frame thread (perf window 2): sessions that
+    // recorded different pools are not compared. A log that records none (before the field) is compared and the pools are named.
+    if let (Some(a), Some(b)) = (&old.gen, &new.gen) {
+        if a != b {
+            return Err(format!(
+                "regression check skipped: gen settings differ: {a} vs {b}; frame and upload figures are not comparable across a change of the generation pool, so this session becomes the baseline"
+            ));
+        }
     }
     if old.resolution != new.resolution {
         return Err(format!(
@@ -448,6 +464,14 @@ pub fn comparison_lines_gpu(last_valid: Option<&[u8]>, last_gpu_valid: Option<&[
                     }
                 }));
                 lines.extend(frame_state_lines(&old, &new));
+                if old.gen.is_some() != new.gen.is_some() {
+                    let name = |g: &Option<String>| g.clone().unwrap_or_else(|| "none recorded".into());
+                    lines.push(format!(
+                        "gen settings: baseline {}, this session {} (recorded only; the figures were compared)",
+                        name(&old.gen),
+                        name(&new.gen)
+                    ));
+                }
                 compared += count_compared(&old, &new, cpu);
                 for (path, counts) in &new.counts {
                     for (name, &n) in counts {
@@ -917,6 +941,10 @@ mod source_tests {
     use crate::{report_json, summarize, AdapterFacts, DeviceKind, Protocol, RunReport};
 
     fn session(scene: &str, source: Option<&str>, wall: f64, lag: f64) -> String {
+        session_gen(scene, source, wall, lag, None)
+    }
+
+    fn session_gen(scene: &str, source: Option<&str>, wall: f64, lag: f64, gen: Option<crate::GenSettings>) -> String {
         let a = AdapterFacts { name: "RTX 3080 Ti".into(), backend: "Vulkan".into(), kind: DeviceKind::Discrete };
         let run = RunReport {
             path_name: format!("stream/{scene}"),
@@ -930,9 +958,40 @@ mod source_tests {
         let protocol = Protocol {
             field: Some("height field cpu-erosion-v1 over a 16384-cell bake".into()),
             source: source.map(str::to_string),
+            gen,
             ..Protocol::default()
         };
         report_json(&a, Some("High performance"), &[], &crate::gate::Validity::default(), &protocol, &[run])
+    }
+
+    // spec: TEST-012, STRM-020
+    #[test]
+    fn a_log_records_its_generation_settings_and_logs_with_other_settings_are_not_compared_as_equal() {
+        let store = "store C:/bake, 16384 cells";
+        let g18 = crate::GenSettings { workers: 18, ahead: 18, reserve: Some(2) };
+        let g20 = crate::GenSettings { workers: 20, ahead: 20, reserve: Some(0) };
+        let new = session_gen("dive", Some(store), 12.0, 0.4, Some(g18));
+        let text = String::from_utf8(new.clone().into_bytes()).unwrap();
+        assert!(text.contains("\"gen\":{\"workers\":18,\"ahead\":18,\"reserve\":2}"), "{text}");
+        assert_eq!(summarize_log(new.as_bytes()).unwrap().gen.as_deref(), Some("workers 18, ahead 18, reserve 2"));
+        // A size fixed outright has no reserve to record.
+        let fixed = session_gen("dive", Some(store), 12.0, 0.4, Some(crate::GenSettings { workers: 8, ahead: 0, reserve: None }));
+        assert_eq!(summarize_log(fixed.as_bytes()).unwrap().gen.as_deref(), Some("workers 8, ahead 0"));
+        // Another pool: not compared, the line names both, the session becomes the baseline.
+        let lines = comparison_lines(Some(session_gen("dive", Some(store), 6.0, 0.4, Some(g20)).as_bytes()), new.as_bytes());
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("gen settings differ: workers 20, ahead 20, reserve 0 vs workers 18, ahead 18, reserve 2"), "{lines:?}");
+        assert!(!lines[0].contains("REGRESSION"), "{lines:?}");
+        // The same pool compares, silently as to the pool.
+        let lines = comparison_lines(Some(session_gen("dive", Some(store), 6.0, 0.4, Some(g18)).as_bytes()), new.as_bytes());
+        assert!(lines.iter().any(|l| l.contains("stream/dive frame_ms") && l.contains("REGRESSION")), "{lines:?}");
+        assert!(!lines.iter().any(|l| l.contains("gen settings")), "{lines:?}");
+        // A log from before the field still reads and compares; the pools are named beside the figures, never refused.
+        let old = session_gen("dive", Some(store), 6.0, 0.4, None);
+        assert_eq!(summarize_log(old.as_bytes()).unwrap().gen, None);
+        let lines = comparison_lines(Some(old.as_bytes()), new.as_bytes());
+        assert!(lines.iter().any(|l| l.contains("stream/dive frame_ms") && l.contains("REGRESSION")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("gen settings: baseline none recorded, this session workers 18")), "{lines:?}");
     }
 
     // spec: TEST-012
