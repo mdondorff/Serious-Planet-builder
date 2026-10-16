@@ -2,6 +2,7 @@
 //! and `test-render` (headless harness). M0 only wires them up; real work arrives with M1+.
 
 pub mod globalperf;
+pub mod lookload;
 pub mod manifest;
 pub mod pipelined;
 mod plancheck;
@@ -21,7 +22,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
-  editor        the viewer window (VIEW-001..VIEW-006): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the title shows frame rate, CPU and GPU time and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync]; --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
+  editor        the viewer window (VIEW-001..VIEW-006): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the title shows frame rate, CPU and GPU time and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync]; --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
   generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) and prints the time per sample; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] writes the coarse tiles of levels 0..=L (default 4; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
@@ -40,6 +41,7 @@ modes:
     --view face|tile-id|level|morph|height|normals|depth|relief|morph-height   debug view (tiles scene: face, tile-id, height; a flight defaults to relief)
     --tile FACE,LEVEL,X,Y    tile to draw (repeatable; default: a tile and its east neighbour)
     --seed N --res N         generator seed and tile resolution (cells, power of two)
+    --look <look.toml>       the presentation parameters per body (LOOK-001..005; exposure, scene units, histogram, tone curve; the file is outside the world definition and every cache key, so it never changes a tile): default the `<world stem>.look.toml` beside --world when it exists, else the Earth defaults; a bad file is refused naming the key and the value
     --world <definition.toml> [--global-res N]   terrain scene (a view, --stream, --bundle, --flight, --perf, --perf-smoke): the world's height field (world.height_field, default the eroded field) over an in-memory bake of N cells per face edge (default 256, at most 1024); without it a view, stream or bundle is the seed-only reference field and --perf is the default world of --seed; a bundle records the world, --repro reads it back
     --bundle <file>          write a repro bundle of the render
     --repro <file>           replay a repro bundle (see cargo xtask repro)
@@ -95,6 +97,8 @@ pub struct Options {
     pub manifest: Option<PathBuf>,
     /// A definition file (TOML, WDEF-002) instead of the default single planet with `--seed`.
     pub world: Option<PathBuf>,
+    /// `--look F`: the look file (LOOK-001); without it the file beside `--world`, else the Earth defaults (LOOK-005).
+    pub look: Option<PathBuf>,
     /// `generate`: write the tiles of `--region` into the tile store in this directory (ADR 0019).
     pub cache_dir: Option<PathBuf>,
     /// `generate --cache-dir`: all tiles of one face at one level, `FACE,LEVEL`.
@@ -208,6 +212,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         face_net: None,
         manifest: None,
         world: None,
+        look: None,
         cache_dir: None,
         region: None,
         verify_cache: None,
@@ -282,6 +287,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--bundle" => o.bundle_out = Some(PathBuf::from(it.next().ok_or("--bundle needs a path")?)),
             "--repro" => o.repro = Some(PathBuf::from(it.next().ok_or("--repro needs a path")?)),
             "--world" => o.world = Some(PathBuf::from(it.next().ok_or("--world needs a path to a definition file")?)),
+            "--look" => o.look = Some(PathBuf::from(it.next().ok_or("--look needs a path to a look file")?)),
             "--cache-dir" => o.cache_dir = Some(PathBuf::from(it.next().ok_or("--cache-dir needs a directory")?)),
             "--verify-cache" => o.verify_cache = Some(PathBuf::from(it.next().ok_or("--verify-cache needs a directory")?)),
             "--compact-cache" => o.compact_cache = Some(PathBuf::from(it.next().ok_or("--compact-cache needs a directory")?)),
@@ -471,6 +477,19 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         };
         if let Some(f) = STORE_OPTIONS.iter().find(|f| o.given.contains(**f) && !allowed.contains(f)) {
             return Err(format!("{f} only applies to `generate` (the tile store commands)"));
+        }
+    }
+    if matches!(o.mode, Mode::Generate) && o.given.contains("--look") {
+        return Err(
+            "--look only applies to `editor` and `test-render`: the look is presentation data and never changes a generated tile".into()
+        );
+    }
+    // A replayed bundle is self-contained (CON-19): it carries its plans' look, so no sibling file is looked for beside it.
+    if !matches!(o.mode, Mode::Generate) && !(o.repro.is_some() && o.look.is_none()) {
+        // The look file is loaded (and so validated) before any world is built or device opened: a bad file stops the run with
+        // the key and the value (LOOK-005).
+        if let Some(line) = lookload::load(&o)?.describe() {
+            writeln!(out, "{line}").map_err(err)?;
         }
     }
     let smoke = if o.smoke { " [smoke ok]" } else { "" };

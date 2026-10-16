@@ -20,6 +20,10 @@ struct Params {
     b: vec4<f32>,
     // x: adaptive (1) or fixed (0), y: reset, z: tone map mode (0 ACES, 1 EV bands), w: unused
     c: vec4<u32>,
+    // The histogram axis from the look data: x: lowest EV, y: bins per stop (64 / span), z: stops per bin (span / 64), w: unused
+    d: vec4<f32>,
+    // The histogram band from the look data: x: lower fraction, y: upper fraction, zw: unused
+    e: vec4<f32>,
 };
 "#;
 
@@ -29,7 +33,7 @@ const HISTOGRAM: &str = r#"
 @group(0) @binding(2) var<storage, read_write> hist: array<atomic<u32>, 64>;
 var<workgroup> local_bins: array<atomic<u32>, 64>;
 
-// 64 bins of EV100 = log2(8 L) from -10 to +20 (ADR 0038 point 2). Pixels without light are not counted.
+// 64 bins of EV100 = log2(8 L) over the look data's axis (Earth: -10 to +20, ADR 0038 point 2). Pixels without light are not counted.
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation_index) li: u32) {
     if (li < 64u) {
@@ -42,7 +46,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
         let y = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
         if (y > 0.0) {
             let ev = log2(8.0 * y) + p.b.w;
-            let b = clamp(floor((ev + 10.0) * (64.0 / 30.0)), 0.0, 63.0);
+            let b = clamp(floor((ev - p.d.x) * p.d.y), 0.0, 63.0);
             atomicAdd(&local_bins[u32(b)], 1u);
         }
     }
@@ -73,8 +77,8 @@ fn main() {
         for (var i = 0u; i < 64u; i = i + 1u) {
             total = total + f32(hist[i]);
         }
-        let lo = 0.4 * total;
-        let hi = 0.9 * total;
+        let lo = p.e.x * total;
+        let hi = p.e.y * total;
         var below = 0.0;
         var weight = 0.0;
         var sum = 0.0;
@@ -84,7 +88,7 @@ fn main() {
             let b = below + c;
             let overlap = max(min(b, hi) - max(a, lo), 0.0);
             weight = weight + overlap;
-            sum = sum + overlap * (-10.0 + (f32(i) + 0.5) * (30.0 / 64.0));
+            sum = sum + overlap * (p.d.x + (f32(i) + 0.5) * p.d.z);
             below = b;
         }
         tgt = cur;
@@ -164,8 +168,8 @@ pub fn adapt_shader() -> String {
     format!("{COMMON}{ADAPT}")
 }
 
-/// Bytes of the parameter block (three `vec4`).
-const PARAMS_BYTES: u64 = 48;
+/// Bytes of the parameter block (five `vec4`).
+const PARAMS_BYTES: u64 = 80;
 
 /// What the exposure adaptation holds between frames, read back by tests.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -393,7 +397,7 @@ impl LitPath {
         self.compiled.as_ref().map(|(_, g, c)| c.order.iter().map(|&i| g.passes()[i].name).collect()).unwrap_or_default()
     }
 
-    fn params_bytes(&self, plan: &LitPlan, reset: bool) -> [u8; PARAMS_BYTES as usize] {
+    fn params_bytes(plan: &LitPlan, reset: bool) -> [u8; PARAMS_BYTES as usize] {
         let (adaptive, params, fixed_ev) = match plan.exposure {
             ExposureMode::Fixed { ev100 } => (0u32, ExposureParams::default(), ev100),
             ExposureMode::Adaptive { params, .. } => (1u32, params, 0.0),
@@ -402,12 +406,20 @@ impl LitPath {
         let offset = look::histogram_ev_offset(f64::from(pre)) as f32;
         let f = [pre, params.min_ev100, params.max_ev100, plan.dt_s, params.speed_up, params.speed_down, fixed_ev, offset];
         let u = [adaptive, u32::from(reset), if plan.tonemap == ToneMapMode::EvBands { 1 } else { 0 }, 0];
+        // The histogram axis and band of the look data, rounded once from f64 (the CPU decides them, CON-03).
+        let g = plan.histogram;
+        let span = g.ev_max - g.ev_min;
+        let d = [g.ev_min as f32, (look::HIST_BINS as f64 / span) as f32, (span / look::HIST_BINS as f64) as f32, 0.0];
+        let e = [g.band_low as f32, g.band_high as f32, 0.0, 0.0];
         let mut bytes = [0u8; PARAMS_BYTES as usize];
         for (i, v) in f.iter().enumerate() {
             bytes[4 * i..4 * i + 4].copy_from_slice(&v.to_le_bytes());
         }
         for (i, v) in u.iter().enumerate() {
             bytes[32 + 4 * i..32 + 4 * i + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        for (i, v) in d.iter().chain(e.iter()).enumerate() {
+            bytes[48 + 4 * i..48 + 4 * i + 4].copy_from_slice(&v.to_le_bytes());
         }
         bytes
     }
@@ -433,7 +445,7 @@ impl LitPath {
         }
         // The queue orders this write before the submission that holds the passes below, and after every earlier submission, so
         // frames in flight read their own parameters.
-        ctx.queue.write_buffer(&self.params, 0, &self.params_bytes(plan, reset));
+        ctx.queue.write_buffer(&self.params, 0, &Self::params_bytes(plan, reset));
         let (_, graph, compiled) = self.compiled.as_ref().expect("compiled above");
         for &i in &compiled.order {
             match graph.passes()[i].name {
@@ -790,6 +802,15 @@ pub fn lit_post_shaders() -> Vec<(&'static str, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: LOOK-006
+    #[test]
+    fn at_the_earth_defaults_the_histogram_block_holds_the_numbers_of_the_old_literals() {
+        let bytes = LitPath::params_bytes(&LitPlan::adaptive(11.0, 0.016), false);
+        let words: Vec<u32> = bytes[48..80].chunks(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
+        let want = [-10.0f32, (64.0f64 / 30.0) as f32, 30.0 / 64.0, 0.0, 0.4f32, 0.9f32, 0.0, 0.0].map(f32::to_bits);
+        assert_eq!(words, want, "the shader's axis and band are the constants it was written with");
+    }
 
     // spec: REND-022
     #[test]

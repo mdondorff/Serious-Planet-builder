@@ -1,0 +1,29 @@
+# A hand-written look file, schema version 1 (the first): comments, key order and spacing never matter. Body 0 is the Earth
+# written out in full; body 3 is a dim, far moon that overrides two tables and leaves the rest at the Earth default.
+schema_version = 1
+kind = "look"
+
+[body.3.exposure]
+max_ev100   = 10.5
+speed_down  = 0.5
+
+[body.3.units]
+solar_illuminance_lux = 2.5e4
+
+[body.0.tone_map]
+curve = "aces"
+
+[body.0.histogram]
+ev_min = -10.0
+ev_max = 20.0
+band_low = 0.4
+band_high = 0.9
+
+[body.0.exposure]
+min_ev100 = -2
+max_ev100 = 16.0
+speed_up = 3.0
+speed_down = 1.0
+
+[body.0.units]
+solar_illuminance_lux = 126600.0

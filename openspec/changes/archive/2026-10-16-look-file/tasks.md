@@ -1,0 +1,7 @@
+- [x] 1.1 `look::file`: tests first for schema, validation, canonical text (LOOK-001), migrations (LOOK-002), defaults and the plan (LOOK-003)
+- [x] 1.2 `look` generalised: `SceneUnits`, `HistogramParams`, `pre_exposure_factor_with`, `written_value_with`, `LitPlan` fields and text, plan validation
+- [x] 2.1 Independence test: definition hash, keys and read set unchanged by any look (LOOK-004)
+- [x] 3.1 Renderer: pre-exposure from the plan's unit; histogram and adaptation shaders from the parameter block; oracle and frame tests with a non-default look (LOOK-006)
+- [x] 4.1 `app::lookload`, `--look`, sibling discovery, `generate` refusal, usage text (LOOK-005)
+- [x] 5.1 numerics-reviewer on the moved constants and shader changes
+- [x] 5.2 spec-guardian, verifier, test, test gpu, spec-lint, fmt, clippy, deny; archive; log line; delete queue item 3

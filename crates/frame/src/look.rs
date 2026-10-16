@@ -10,24 +10,134 @@
 //! convention: `exposure = 1 / (1.2 * 2^EV100)` applied to luminance in cd/m2, and the EV100 that suits a luminance `L` is
 //! `log2(L * 100 / 12.5) = log2(8 L)`, the same function the histogram bins by.
 
+pub mod file;
+
 use planet_core::hash::hash_u64s;
 
-/// Illuminance of the sun above the atmosphere in lux (1361 W/m2 at 93 lm/W): the value of "1" in scene units.
+/// The Earth default of the scene-unit scale: illuminance of the sun above the atmosphere in lux (1361 W/m2 at 93 lm/W), the value
+/// of "1" in scene units. The value in use comes from the look data ([`SceneUnits`], `file`); this constant is only the default.
 pub const SOLAR_ILLUMINANCE_LUX: f64 = 126_600.0;
-/// Luminance in cd/m2 of one scene unit of (diffuse) radiance.
+/// Luminance in cd/m2 of one scene unit of (diffuse) radiance at the Earth default.
 pub const LUMINANCE_PER_UNIT: f64 = SOLAR_ILLUMINANCE_LUX;
 /// Every write into the scene target is clamped to this, so the sun disk cannot make `inf` or `NaN` in f16 (ADR 0038 point 1).
 pub const HDR_CLAMP: f32 = 60_000.0;
 /// Bins of the luminance histogram.
 pub const HIST_BINS: usize = 64;
-/// The histogram covers EV -10 to +20 of pixel luminance (`log2(8 L)`), 30 stops in 64 bins.
+/// The Earth default of the histogram axis: EV -10 to +20 of pixel luminance (`log2(8 L)`), 30 stops in 64 bins.
 pub const HIST_EV_MIN: f64 = -10.0;
 pub const HIST_EV_MAX: f64 = 20.0;
-/// The mean is taken over the pixels between these fractions of the counted pixels (ADR 0038 point 2).
+/// The Earth default of the band: the mean is taken over the pixels between these fractions of the counted pixels (ADR 0038 point 2).
 pub const BAND_LOW: f64 = 0.4;
 pub const BAND_HIGH: f64 = 0.9;
 /// Luminance weights of linear Rec. 709 / sRGB primaries.
 pub const LUMA: [f64; 3] = [0.2126, 0.7152, 0.0722];
+
+/// The scene-unit scale (look data, ADR 0048 point 2): one unit of scene radiance is the sun's illuminance above the atmosphere,
+/// `solar_illuminance_lux` lux, so a unit of diffuse radiance is that many cd/m2. A body far from the sun has a smaller value.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SceneUnits {
+    pub solar_illuminance_lux: f64,
+}
+
+impl SceneUnits {
+    /// The Earth default (1361 W/m2 at 93 lm/W).
+    pub const EARTH: SceneUnits = SceneUnits { solar_illuminance_lux: SOLAR_ILLUMINANCE_LUX };
+
+    /// Luminance in cd/m2 of one scene unit of (diffuse) radiance.
+    pub fn luminance_per_unit(&self) -> f64 {
+        self.solar_illuminance_lux
+    }
+}
+
+impl Default for SceneUnits {
+    fn default() -> Self {
+        Self::EARTH
+    }
+}
+
+/// The exposure histogram's axis and the percentile band of the mean (look data, ADR 0038 point 2; the bin count 64 is part of
+/// the shaders' structure and not data). Bin `i` covers `ev_min + i w` to `ev_min + (i + 1) w` with `w = (ev_max - ev_min) / 64`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HistogramParams {
+    pub ev_min: f64,
+    pub ev_max: f64,
+    /// The mean is taken over the pixels between these fractions of the counted pixels.
+    pub band_low: f64,
+    pub band_high: f64,
+}
+
+impl HistogramParams {
+    /// The Earth default: EV -10 to +20, the band between 40 % and 90 %.
+    pub const EARTH: HistogramParams =
+        HistogramParams { ev_min: HIST_EV_MIN, ev_max: HIST_EV_MAX, band_low: BAND_LOW, band_high: BAND_HIGH };
+
+    /// Width of one histogram bin in stops.
+    pub fn bin_width(&self) -> f64 {
+        (self.ev_max - self.ev_min) / HIST_BINS as f64
+    }
+
+    /// Centre of bin `i` in EV.
+    pub fn bin_center_ev(&self, i: usize) -> f64 {
+        self.ev_min + (i as f64 + 0.5) * self.bin_width()
+    }
+
+    /// The bin of a pixel EV, or `None` for a pixel that is not counted (no light: NaN or minus infinity; plus infinity is the last
+    /// bin). EVs outside the range land in the first or last bin.
+    pub fn bin_of_ev(&self, ev: f64) -> Option<usize> {
+        if ev.is_nan() || ev == f64::NEG_INFINITY {
+            return None;
+        }
+        let b = libm::floor((ev - self.ev_min) / self.bin_width());
+        Some(b.clamp(0.0, (HIST_BINS - 1) as f64) as usize)
+    }
+
+    /// The mean EV of the pixels between the band's fractions of the counted ones (bins weighted by how much of their count lies in
+    /// the band, bin centres as values); `None` when nothing was counted.
+    pub fn band_mean_ev(&self, hist: &[u32; HIST_BINS]) -> Option<f64> {
+        let total: u64 = hist.iter().map(|&c| u64::from(c)).sum();
+        if total == 0 {
+            return None;
+        }
+        let (lo, hi) = (self.band_low * total as f64, self.band_high * total as f64);
+        let (mut below, mut weight, mut sum) = (0.0f64, 0.0f64, 0.0f64);
+        for (i, &c) in hist.iter().enumerate() {
+            let (a, b) = (below, below + f64::from(c));
+            let overlap = (b.min(hi) - a.max(lo)).max(0.0);
+            weight += overlap;
+            sum += overlap * self.bin_center_ev(i);
+            below = b;
+        }
+        (weight > 0.0).then(|| sum / weight)
+    }
+
+    /// The histogram of a scene target image under these bins, the CPU reference of the GPU pass (see [`histogram_of`]).
+    pub fn histogram_of(&self, pixels: &[[f64; 3]], pre_ev100: f64) -> [u32; HIST_BINS] {
+        let mut h = [0u32; HIST_BINS];
+        for p in pixels {
+            let y = luminance(*p);
+            if y > 0.0 {
+                if let Some(b) = self.bin_of_ev(luminance_ev(y / exposure_scale(pre_ev100))) {
+                    h[b] += 1;
+                }
+            }
+        }
+        h
+    }
+
+    /// The EV100 the exposure moves towards: the band mean clamped to the range, or `current` when nothing was counted.
+    pub fn target_ev(&self, hist: &[u32; HIST_BINS], params: &ExposureParams, current: f64) -> f64 {
+        match self.band_mean_ev(hist) {
+            Some(m) => m.clamp(f64::from(params.min_ev100), f64::from(params.max_ev100)),
+            None => current,
+        }
+    }
+}
+
+impl Default for HistogramParams {
+    fn default() -> Self {
+        Self::EARTH
+    }
+}
 
 /// Exposure range and adaptation speeds (look data, ADR 0042 point 6; the defaults of ADR 0038 point 2).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -84,6 +194,10 @@ pub struct LitPlan {
     pub reset_exposure: bool,
     /// Tone-map output: normal, or the false-colour luminance debug view (CON-18).
     pub tonemap: ToneMapMode,
+    /// The scene-unit scale (look data): the pre-exposure factor is computed from it on the CPU.
+    pub units: SceneUnits,
+    /// The histogram axis and band the exposure passes use (look data).
+    pub histogram: HistogramParams,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,20 +221,32 @@ impl ToneMapMode {
 pub const DEFAULT_SUN: [f32; 3] = [0.501_405_9, 0.601_687_1, 0.621_743_3];
 
 impl LitPlan {
-    /// A fixed-exposure lit plan, the golden and perf form (CON-19).
+    /// A fixed-exposure lit plan, the golden and perf form (CON-19), with the Earth look defaults.
     pub fn fixed(ev100: f32) -> Self {
-        Self { exposure: ExposureMode::Fixed { ev100 }, dt_s: 0.0, sun_dir: DEFAULT_SUN, reset_exposure: false, tonemap: ToneMapMode::Aces }
+        Self::fixed_with(&file::LookParams::default(), ev100)
     }
 
-    /// An adaptive-exposure lit plan with the default range and speeds.
+    /// An adaptive-exposure lit plan with the Earth look defaults (the default range and speeds).
     pub fn adaptive(pre_ev100: f32, dt_s: f32) -> Self {
+        Self::adaptive_with(&file::LookParams::default(), pre_ev100, dt_s)
+    }
+
+    /// A fixed-exposure lit plan whose units and histogram come from a body's look parameters.
+    pub fn fixed_with(look: &file::LookParams, ev100: f32) -> Self {
         Self {
-            exposure: ExposureMode::Adaptive { params: ExposureParams::default(), pre_ev100 },
-            dt_s,
+            exposure: ExposureMode::Fixed { ev100 },
+            dt_s: 0.0,
             sun_dir: DEFAULT_SUN,
             reset_exposure: false,
-            tonemap: ToneMapMode::Aces,
+            tonemap: look.tone_curve.mode(),
+            units: look.units,
+            histogram: look.histogram,
         }
+    }
+
+    /// An adaptive-exposure lit plan whose range, speeds, units and histogram come from a body's look parameters.
+    pub fn adaptive_with(look: &file::LookParams, pre_ev100: f32, dt_s: f32) -> Self {
+        Self { exposure: ExposureMode::Adaptive { params: look.exposure_params(), pre_ev100 }, dt_s, ..Self::fixed_with(look, pre_ev100) }
     }
 
     /// Stable text for plan snapshots and repro bundles (floats as bit patterns).
@@ -132,8 +258,24 @@ impl LitPlan {
                 format!("adaptive {} {} {} {} {}", h(pre_ev100), h(p.min_ev100), h(p.max_ev100), h(p.speed_up), h(p.speed_down))
             }
         };
+        // The look data enter the text only when they differ from the Earth defaults, so a plan made with the defaults keeps the
+        // text (and the hash) it had before the look file existed.
+        let h64 = |v: f64| format!("{:016x}", v.to_bits());
+        let look = if self.units == SceneUnits::EARTH && self.histogram == HistogramParams::EARTH {
+            String::new()
+        } else {
+            let g = self.histogram;
+            format!(
+                " units {} hist {} {} {} {}",
+                h64(self.units.solar_illuminance_lux),
+                h64(g.ev_min),
+                h64(g.ev_max),
+                h64(g.band_low),
+                h64(g.band_high)
+            )
+        };
         format!(
-            "lit {mode} dt {} sun {} {} {} reset {} tonemap {}",
+            "lit {mode} dt {} sun {} {} {} reset {} tonemap {}{look}",
             h(self.dt_s),
             h(self.sun_dir[0]),
             h(self.sun_dir[1]),
@@ -157,7 +299,23 @@ impl LitPlan {
             ),
             _ => return Err("lit line needs 'fixed' or 'adaptive'".into()),
         };
-        match rest {
+        let f64_of = |s: &str| {
+            if s.len() != 16 || !s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+                return Err(format!("bad f64 bits '{s}': 16 lower-case hex digits expected"));
+            }
+            u64::from_str_radix(s, 16).map(f64::from_bits).map_err(|e| format!("bad f64 bits '{s}': {e}"))
+        };
+        let (head, look): (&[&str], (SceneUnits, HistogramParams)) = match rest {
+            [head @ .., "units", u, "hist", a, b, c, d] => (
+                head,
+                (
+                    SceneUnits { solar_illuminance_lux: f64_of(u)? },
+                    HistogramParams { ev_min: f64_of(a)?, ev_max: f64_of(b)?, band_low: f64_of(c)?, band_high: f64_of(d)? },
+                ),
+            ),
+            head => (head, (SceneUnits::EARTH, HistogramParams::EARTH)),
+        };
+        match head {
             ["dt", dt, "sun", sx, sy, sz, "reset", reset, "tonemap", tm] => Ok(LitPlan {
                 exposure,
                 dt_s: f(dt)?,
@@ -168,8 +326,10 @@ impl LitPlan {
                     "ev-bands" => ToneMapMode::EvBands,
                     other => return Err(format!("unknown tone map '{other}'")),
                 },
+                units: look.0,
+                histogram: look.1,
             }),
-            _ => Err("lit line is not 'dt .. sun .. reset .. tonemap ..'".into()),
+            _ => Err("lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ....')".into()),
         }
     }
 
@@ -192,6 +352,23 @@ impl LitPlan {
             if p.speed_up < 0.0 || p.speed_down < 0.0 {
                 return Err(format!("lit plan: adaptation speeds {} and {} must not be negative", p.speed_up, p.speed_down));
             }
+            file::validate_exposure(&file::ExposureLook {
+                min_ev100: f64::from(p.min_ev100),
+                max_ev100: f64::from(p.max_ev100),
+                speed_up: f64::from(p.speed_up),
+                speed_down: f64::from(p.speed_down),
+            })
+            .map_err(|e| format!("lit plan: {e}"))?;
+        }
+        file::validate_units(&self.units).map_err(|e| format!("lit plan: {e}"))?;
+        file::validate_histogram(&self.histogram).map_err(|e| format!("lit plan: {e}"))?;
+        let factor = pre_exposure_factor_with(&self.units, f64::from(self.exposure.pre_ev100())) as f32;
+        if !factor.is_finite() || factor < f32::MIN_POSITIVE {
+            return Err(format!(
+                "lit plan: the pre-exposure factor {factor} (EV100 {} with {} lux) does not fit an f32",
+                self.exposure.pre_ev100(),
+                self.units.solar_illuminance_lux
+            ));
         }
         let n = self.sun_dir.map(f64::from);
         let len = libm::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
@@ -216,7 +393,12 @@ pub fn exposure_scale(ev100: f64) -> f64 {
 /// The factor the scene target is written with: scene units to the pre-exposed value, `LUMINANCE_PER_UNIT * exposure_scale`.
 /// Computed in f64 here and rounded once to f32 for the shader (CON-03: the CPU decides it).
 pub fn pre_exposure_factor(pre_ev100: f64) -> f64 {
-    LUMINANCE_PER_UNIT * exposure_scale(pre_ev100)
+    pre_exposure_factor_with(&SceneUnits::EARTH, pre_ev100)
+}
+
+/// [`pre_exposure_factor`] under a body's scene-unit scale.
+pub fn pre_exposure_factor_with(units: &SceneUnits, pre_ev100: f64) -> f64 {
+    units.luminance_per_unit() * exposure_scale(pre_ev100)
 }
 
 /// The EV100 that suits a luminance in cd/m2 (and the axis of the histogram): `log2(8 L)`.
@@ -231,66 +413,37 @@ pub fn luminance(rgb: [f64; 3]) -> f64 {
 
 /// Width of one histogram bin in stops.
 pub fn bin_width() -> f64 {
-    (HIST_EV_MAX - HIST_EV_MIN) / HIST_BINS as f64
+    HistogramParams::EARTH.bin_width()
 }
 
 /// Centre of bin `i` in EV.
 pub fn bin_center_ev(i: usize) -> f64 {
-    HIST_EV_MIN + (i as f64 + 0.5) * bin_width()
+    HistogramParams::EARTH.bin_center_ev(i)
 }
 
 /// The bin of a pixel EV, or `None` for a pixel that is not counted (no light: NaN or minus infinity; plus infinity is the last bin). EVs outside the range land in the
 /// first or last bin.
 pub fn bin_of_ev(ev: f64) -> Option<usize> {
-    if ev.is_nan() || ev == f64::NEG_INFINITY {
-        return None;
-    }
-    let b = libm::floor((ev - HIST_EV_MIN) / bin_width());
-    Some(b.clamp(0.0, (HIST_BINS - 1) as f64) as usize)
+    HistogramParams::EARTH.bin_of_ev(ev)
 }
 
 /// The histogram of a scene target image, the CPU reference of the GPU pass. `pixels` are the values as written (pre-exposed,
 /// linear RGB per pixel); `pre_ev100` undoes the pre-exposure so the bins are in scene EV. A pixel with no luminance is not
 /// counted.
 pub fn histogram_of(pixels: &[[f64; 3]], pre_ev100: f64) -> [u32; HIST_BINS] {
-    let mut h = [0u32; HIST_BINS];
-    for p in pixels {
-        let y = luminance(*p);
-        if y > 0.0 {
-            // L_cd = y / exposure_scale(pre); EV = log2(8 L_cd).
-            if let Some(b) = bin_of_ev(luminance_ev(y / exposure_scale(pre_ev100))) {
-                h[b] += 1;
-            }
-        }
-    }
-    h
+    // L_cd = y / exposure_scale(pre); EV = log2(8 L_cd).
+    HistogramParams::EARTH.histogram_of(pixels, pre_ev100)
 }
 
 /// The mean EV of the pixels between the [`BAND_LOW`] and [`BAND_HIGH`] fractions of the counted ones (bins weighted by how much
 /// of their count lies in the band, bin centres as values); `None` when nothing was counted.
 pub fn band_mean_ev(hist: &[u32; HIST_BINS]) -> Option<f64> {
-    let total: u64 = hist.iter().map(|&c| u64::from(c)).sum();
-    if total == 0 {
-        return None;
-    }
-    let (lo, hi) = (BAND_LOW * total as f64, BAND_HIGH * total as f64);
-    let (mut below, mut weight, mut sum) = (0.0f64, 0.0f64, 0.0f64);
-    for (i, &c) in hist.iter().enumerate() {
-        let (a, b) = (below, below + f64::from(c));
-        let overlap = (b.min(hi) - a.max(lo)).max(0.0);
-        weight += overlap;
-        sum += overlap * bin_center_ev(i);
-        below = b;
-    }
-    (weight > 0.0).then(|| sum / weight)
+    HistogramParams::EARTH.band_mean_ev(hist)
 }
 
 /// The EV100 the exposure moves towards: the band mean clamped to the range, or `current` when nothing was counted.
 pub fn target_ev(hist: &[u32; HIST_BINS], params: &ExposureParams, current: f64) -> f64 {
-    match band_mean_ev(hist) {
-        Some(m) => m.clamp(f64::from(params.min_ev100), f64::from(params.max_ev100)),
-        None => current,
-    }
+    HistogramParams::EARTH.target_ev(hist, params, current)
 }
 
 /// One adaptation step in stops: `current` moves towards `target` by at most `speed_up * dt` up or `speed_down * dt` down;
@@ -402,6 +555,11 @@ pub fn tint(t: f64) -> [f64; 3] {
 
 /// What the scene target holds for a radiance: pre-exposed and clamped to [`HDR_CLAMP`] (the CPU reference of every lit write).
 pub fn written_value(radiance: [f64; 3], pre_ev100: f64) -> [f64; 3] {
-    let f = pre_exposure_factor(pre_ev100);
+    written_value_with(&SceneUnits::EARTH, radiance, pre_ev100)
+}
+
+/// [`written_value`] under a body's scene-unit scale.
+pub fn written_value_with(units: &SceneUnits, radiance: [f64; 3], pre_ev100: f64) -> [f64; 3] {
+    let f = pre_exposure_factor_with(units, pre_ev100);
     radiance.map(|v| (v * f).clamp(0.0, f64::from(HDR_CLAMP)))
 }

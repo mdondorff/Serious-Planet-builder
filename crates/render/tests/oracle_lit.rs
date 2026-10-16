@@ -147,6 +147,47 @@ fn the_gpu_histogram_counts_what_the_cpu_reference_counts() {
     assert_eq!(path.read_histogram(&ctx), gpu, "the histogram is cleared every frame");
 }
 
+// spec: LOOK-006
+#[test]
+fn the_histogram_axis_band_and_exposure_range_come_from_the_plan() {
+    use planet_frame::look::file::{ExposureLook, LookParams};
+    use planet_frame::look::{HistogramParams, SceneUnits};
+    let ctx = ctx();
+    // A look unlike the Earth default in every histogram and exposure value.
+    let look_data = LookParams {
+        units: SceneUnits { solar_illuminance_lux: 55_000.0 },
+        exposure: ExposureLook { min_ev100: -6.0, max_ev100: 20.0, speed_up: 3.0, speed_down: 1.0 },
+        histogram: HistogramParams { ev_min: -8.0, ev_max: 24.0, band_low: 0.25, band_high: 0.75 },
+        ..LookParams::default()
+    };
+    let g = look_data.histogram;
+    let pre = 6.0;
+    let mut evs: Vec<f64> = Vec::new();
+    for b in 0..look::HIST_BINS {
+        for _ in 0..(b % 5 + 1) {
+            evs.push(g.bin_center_ev(b));
+        }
+    }
+    let n = W * W;
+    let img = scene_at(&evs, pre, n);
+    let mut path = LitPath::new(&ctx, (W, W));
+    path.upload_hdr(&ctx, &img);
+    let plan = LitPlan { reset_exposure: true, ..LitPlan::adaptive_with(&look_data, pre as f32, 0.016) };
+    let _ = path.tone_map_to_image(&ctx, &plan);
+    let gpu = path.read_histogram(&ctx);
+    let reference: Vec<[f64; 3]> = img.iter().map(rgb64).collect();
+    let cpu = g.histogram_of(&reference, pre);
+    for b in 0..look::HIST_BINS {
+        assert_eq!(gpu[b], cpu[b], "bin {b} on the look's axis: GPU {} CPU {}", gpu[b], cpu[b]);
+    }
+    // The target uses the look's band and range: it equals the CPU's under them and is not what the Earth defaults would give.
+    let exposure = path.read_exposure(&ctx);
+    let want = g.target_ev(&gpu, &look_data.exposure_params(), pre);
+    let earth = look::target_ev(&gpu, &ExposureParams::default(), pre);
+    assert!((f64::from(exposure.target_ev100) - want).abs() < 1e-4, "target {} vs {want}", exposure.target_ev100);
+    assert!((want - earth).abs() > 0.05, "the look must matter for this test to prove anything: {want} vs {earth}");
+}
+
 // spec: REND-022
 #[test]
 fn the_adaptation_follows_the_cpu_step_frame_by_frame() {
