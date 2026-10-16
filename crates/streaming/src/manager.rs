@@ -339,7 +339,8 @@ impl<T: Send + Sync + 'static> ResidencyManager<T> {
         self.streamer.step();
         if !self.fitted {
             let (r_full, pinned) = self.streamer.closure_numbers();
-            self.last = DegradationReport { capacity: self.streamer.main_capacity(), r_full, pinned, r_effective: r_full, ..Default::default() };
+            self.last =
+                DegradationReport { capacity: self.streamer.main_capacity(), r_full, pinned, r_effective: r_full, ..Default::default() };
         }
         &self.last
     }

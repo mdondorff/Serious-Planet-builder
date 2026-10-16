@@ -136,7 +136,13 @@ fn main() -> Result<(), String> {
             }
             std::thread::sleep(Duration::from_millis(2));
         }
-        println!("prelude settled in {:.1} s: D {} R {} resident {}", started.elapsed().as_secs_f64(), lp.wants().draw.len(), lp.wants().residency.len(), lp.manager().streamer().stats().resident);
+        println!(
+            "prelude settled in {:.1} s: D {} R {} resident {}",
+            started.elapsed().as_secs_f64(),
+            lp.wants().draw.len(),
+            lp.wants().residency.len(),
+            lp.manager().streamer().stats().resident
+        );
     }
     let (mut sched, mut upload, mut requests) = (Vec::new(), Vec::new(), 0u64);
     let slow_ms: f64 = arg("--trace-slow-ms").map_or(f64::INFINITY, |v| v.parse().expect("ms"));

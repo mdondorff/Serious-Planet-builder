@@ -151,11 +151,14 @@ pub struct ManagedLoop {
     residency_changed: bool,
     prefetch_changed: bool,
     /// The prefetch set the wants were capped from, and whether the whole set fitted the free share.
-    prefetch_basis: Option<(Arc<Vec<(TileId, f64)>>, bool)>,
+    prefetch_basis: Option<(Arc<Vec<TileWant>>, bool)>,
     /// The loop's own passes over its wants (rebuilding D and R from a delivery, comparing a delivered R with the held one, capping
     /// the prefetch set), counted like the scheduler's (STRM-019).
     extra: SchedWork,
 }
+
+/// A tile with its priority, as in the wants.
+type TileWant = (TileId, f64);
 
 /// The tiles of the draw set and of R with their ancestors (an ancestor is requested, and so placed, in its descendants'
 /// class), and the plan order of the draw tiles.
@@ -420,10 +423,12 @@ impl ManagedLoop {
         // The worker hands a new set for every request, a turn included; its tiles and distances are the old ones then, and the
         // wants (and the manager's) stay as they are.
         let same = match (&residency, &self.wants_residency) {
-            (Some(a), Some(b)) => Arc::ptr_eq(a, b) || {
-                self.extra.scanned += a.tiles.len() as u64;
-                a.tiles == b.tiles
-            },
+            (Some(a), Some(b)) => {
+                Arc::ptr_eq(a, b) || {
+                    self.extra.scanned += a.tiles.len() as u64;
+                    a.tiles == b.tiles
+                }
+            }
             (None, None) => true,
             _ => false,
         };

@@ -24,13 +24,13 @@ mod queue;
 pub mod slots;
 
 pub use budget::{PoolConfig, Tier};
-pub use manager::{degrade, DegradationReport, Degraded, ManagerFrame, ResidencyManager};
 pub use layer::SchedWork;
+pub use manager::{degrade, DegradationReport, Degraded, ManagerFrame, ResidencyManager};
 pub use slots::{PoolKind, SlotPool, SlotPools, SlotRef, VERTEX_POOL_MAX_LEVEL};
 
 use layer::{normalized, Layer};
-use queue::RequestQueue;
 use planet_core::{TileId, Vec3};
+use queue::RequestQueue;
 use std::cmp::Reverse;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasherDefault, Hasher};
@@ -729,7 +729,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         self.dispatch();
     }
 
-    /// 1. Completions. The result of a job that was cancelled meanwhile is dropped: a source that finished anyway may have
+    /// Step 1, completions. The result of a job that was cancelled meanwhile is dropped: a source that finished anyway may have
     /// cached it, nothing is made resident (and so nothing is uploaded).
     fn collect(&mut self, now: u64) {
         while let Ok((tile, result)) = self.rx.try_recv() {
@@ -748,7 +748,8 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                         self.retry_due.remove(&(at, tile));
                     }
                     self.last_error.remove(&tile);
-                    self.resident.insert(tile, Resident { data: Arc::new(data), inserted: self.frame, last_used: self.frame, slot: flight.slot });
+                    self.resident
+                        .insert(tile, Resident { data: Arc::new(data), inserted: self.frame, last_used: self.frame, slot: flight.slot });
                     if tile.level() > 0 && !self.is_active(tile) {
                         self.victims[self.pools.kind_of(tile) as usize].insert((self.frame, tile));
                         self.work.updated += 1;
@@ -774,7 +775,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         }
     }
 
-    /// 2. The lists handed over since the last frame replace the layers; what changed class is handled once per tile, after all
+    /// Step 2, the wants. The lists handed over since the last frame replace the layers; what changed class is handled once per tile, after all
     /// three layers changed (a tile that moves from one class to another is not cancelled on the way).
     fn apply_wants(&mut self) {
         let mut touched: FxMap<TileId, [Option<bool>; 3]> = FxMap::default();
@@ -861,7 +862,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         }
     }
 
-    /// 3. Enqueue the tiles that may need a request: retry failures that waited long enough, and look at each tile that became
+    /// Step 3, requests. Enqueue the tiles that may need a request: retry failures that waited long enough, and look at each tile that became
     /// missing or changed class since the last frame.
     fn request_missing(&mut self, now: u64) {
         if self.rescan {
@@ -894,7 +895,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         }
     }
 
-    /// 5. Dispatch in queue order. Prefetch is first in the queue only when nothing of the other classes waits; it goes
+    /// Step 5, dispatch in queue order. Prefetch is first in the queue only when nothing of the other classes waits; it goes
     /// out only into free slots and never evicts. A request without a slot blocks its pool for this frame.
     fn dispatch(&mut self) {
         let mut blocked = [false; 2];
@@ -974,7 +975,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         next
     }
 
-    /// 4. Evict so that the requests about to be dispatched find slots (STRM-007): for each pool, as many slots as the first
+    /// Step 4, make room. Evict so that the requests about to be dispatched find slots (STRM-007): for each pool, as many slots as the first
     /// requests of the queue need (within the in-flight limit) minus those free or already retiring. Prefetch needs none
     /// (it only takes free slots). Victims: tiles in no class or prefetch only, least recently used first (kept in order as
     /// the classes change); then, for draw requests only, R tiles farthest first and finest first. The draw set with its

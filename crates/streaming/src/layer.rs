@@ -179,8 +179,7 @@ impl Layer {
 
     fn remove(&mut self, t: TileId, was: &mut FxMap<TileId, bool>, work: &mut SchedWork, class: usize) {
         let mut cur = t;
-        loop {
-            let Some(c) = self.count.get_mut(&cur) else { break };
+        while let Some(c) = self.count.get_mut(&cur) {
             *c -= 1;
             work.updated += 1;
             work.layer_updates[class] += 1;
@@ -443,7 +442,8 @@ mod tests {
             }
             let items: Vec<(TileId, f64)> = set.iter().map(|(&t, &p)| (t, p)).collect();
             let closed = items.iter().all(|(t, _)| t.parent().is_none_or(|p| set.contains_key(&p)));
-            let monotone = items.iter().all(|(t, p)| t.parent().is_none_or(|a| set.get(&a).is_none_or(|ap| priority_key(*ap) <= priority_key(*p))));
+            let monotone =
+                items.iter().all(|(t, p)| t.parent().is_none_or(|a| set.get(&a).is_none_or(|ap| priority_key(*ap) <= priority_key(*p))));
             assert_eq!(parents_listed(&items, false), closed);
             assert_eq!(parents_listed(&items, true), closed && monotone);
         }
