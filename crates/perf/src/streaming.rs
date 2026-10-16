@@ -6,8 +6,8 @@
 
 use crate::{summarize, Stats, FRAME_P99_BUDGET_MS};
 
-/// The scene names, in the order of ADR 0032 point 8.
-pub const SCENES: [&str; 6] = ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km"];
+/// The scene names, in the order of ADR 0032 point 8, then `dive-cold` (the dive over a reader that ignores the pack's pre-filled coarse tiles: tracked, report-only, ADR 0045 point 3).
+pub const SCENES: [&str; 7] = ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km", "dive-cold"];
 
 /// CON-21: the median frame is at most one 60 Hz frame (16.6 ms).
 pub const FRAME_MEDIAN_BUDGET_MS: f64 = 16.6;
@@ -114,11 +114,16 @@ pub fn case_spec(scene: &str, frames: usize, step_s: f64, descent_frames: usize)
             LagRule::Mean { name: "descent", frames: 0..descent_frames.min(frames), mean_max: 1.0, frame_max: 3.0, gate: Gate::Gated },
             LagRule::Report { name: "ground segment", frames: descent_frames.min(frames)..frames },
         ],
+        // The cold dive is the case the pre-fill removes from the gates: its lag is reported with no budget (ADR 0045 point 3).
+        "dive-cold" => vec![
+            LagRule::Report { name: "descent", frames: 0..descent_frames.min(frames) },
+            LagRule::Report { name: "ground segment", frames: descent_frames.min(frames)..frames },
+        ],
         "teleport-1m" => vec![LagRule::Recovery { under1_s: 2.0, complete_s: 9.0, gate: Gate::Tracked }],
         "teleport-2km" => vec![LagRule::Recovery { under1_s: 1.0, complete_s: 4.0, gate: Gate::Tracked }],
         _ => vec![LagRule::Still { gate: Gate::Gated }],
     };
-    let uncovered = if name == "dive-fast" { Gate::ReportOnly } else { Gate::Gated };
+    let uncovered = if name == "dive-fast" || name == "dive-cold" { Gate::ReportOnly } else { Gate::Gated };
     Some(CaseSpec { scene: name, frames, step_s, rules, uncovered })
 }
 
@@ -612,8 +617,8 @@ mod tests {
 
     // spec: TEST-018
     #[test]
-    fn the_registry_lists_the_six_scenes_and_refuses_other_names() {
-        assert_eq!(SCENES, ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km"]);
+    fn the_registry_lists_the_six_scenes_and_the_cold_dive_and_refuses_other_names() {
+        assert_eq!(SCENES, ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km", "dive-cold"]);
         for s in SCENES {
             assert_eq!(case_spec(s, 600, 1.0 / 60.0, 0).unwrap().scene, s);
         }
@@ -877,6 +882,24 @@ mod fresh_lag_tests {
         tp[599].lag = Some(2.0);
         let r = lag_of("teleport-1m", &tp, 0);
         assert_eq!(r.status, Status::TrackedOver, "a tracked rule never fails: {r:?}");
+    }
+
+    // spec: TEST-018, TEST-021
+    #[test]
+    fn the_cold_dive_reports_its_lag_with_no_budget_and_never_fails_on_it() {
+        // A cold start cannot meet the gated descent (ADR 0045 point 3): `dive-cold` is the case that keeps the number visible.
+        let mut cold = frames(2400, Some(0.0));
+        for f in &mut cold[..1800] {
+            f.lag = Some(7.5);
+        }
+        let v = case_verdicts(&case_spec("dive-cold", 2400, 1.0 / 60.0, 1800).unwrap(), &cold, &[], &mem());
+        let descent = v.iter().find(|x| x.detail.starts_with("descent")).unwrap_or_else(|| panic!("{v:?}"));
+        assert_eq!(descent.status, Status::Reported);
+        assert!(descent.detail.contains("7.5"), "{descent:?}");
+        assert!(!v.iter().any(Verdict::fails), "{v:?}");
+        // The gated dive with the same frames fails.
+        let v = case_verdicts(&case_spec("dive", 2400, 1.0 / 60.0, 1800).unwrap(), &cold, &[], &mem());
+        assert!(v.iter().any(Verdict::fails), "{v:?}");
     }
 
     // spec: TEST-020

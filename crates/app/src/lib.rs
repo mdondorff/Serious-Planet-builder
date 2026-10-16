@@ -5,6 +5,7 @@ pub mod globalperf;
 pub mod manifest;
 pub mod pipelined;
 mod plancheck;
+pub mod prefill;
 pub mod sheet;
 pub mod skeleton;
 pub mod streamperf;
@@ -20,7 +21,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
   editor        interactive editor/viewer (window arrives in M2); --smoke starts and exits; --offscreen runs the skeleton without a window
-  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) and prints the time per sample; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --smoke starts and exits
+  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) and prints the time per sample; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] writes the coarse tiles of levels 0..=L (default 4; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
@@ -110,6 +111,10 @@ pub struct Options {
     pub verify_global: Option<PathBuf>,
     /// `generate`: plan the standard flight at production parameters over the stored global bake in this directory.
     pub plan_check: Option<PathBuf>,
+    /// `generate`: write the coarse tiles (levels `0..=--prefill-levels`) into the pack of the stored bake in this directory (STRM-021).
+    pub prefill_dir: Option<PathBuf>,
+    /// `--global-dir` and `--prefill-dir`: how many levels of coarse tiles the pre-fill writes, 0 for none (default 4, ADR 0045 point 3).
+    pub prefill_levels: Option<u8>,
     /// `generate`: write the data products (cube nets and maps) of an in-memory bake into this directory.
     pub global_products: Option<PathBuf>,
     /// `--global-dir` and `--global-products`: cells per face edge of the bake (a power of two; blocks are stored in the canonical layout, ADR 0027).
@@ -203,6 +208,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         global_dir: None,
         verify_global: None,
         plan_check: None,
+        prefill_dir: None,
+        prefill_levels: None,
         global_products: None,
         global_res: 256,
         threads: 0,
@@ -270,6 +277,14 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--allow-stale" => o.allow_stale = true,
             "--global-dir" => o.global_dir = Some(PathBuf::from(it.next().ok_or("--global-dir needs a directory")?)),
             "--plan-check" => o.plan_check = Some(PathBuf::from(it.next().ok_or("--plan-check needs a directory")?)),
+            "--prefill-dir" => o.prefill_dir = Some(PathBuf::from(it.next().ok_or("--prefill-dir needs a directory")?)),
+            "--prefill-levels" => {
+                let v: u8 = it.next().ok_or("--prefill-levels needs a count")?.parse().map_err(|e| format!("--prefill-levels: {e}"))?;
+                if v > planet_cache::meshpack::MAX_PREFILL_LEVELS {
+                    return Err(format!("--prefill-levels {v}: at most {} (0 disables)", planet_cache::meshpack::MAX_PREFILL_LEVELS));
+                }
+                o.prefill_levels = Some(v);
+            }
             "--verify-global" => o.verify_global = Some(PathBuf::from(it.next().ok_or("--verify-global needs a directory")?)),
             "--global-products" => o.global_products = Some(PathBuf::from(it.next().ok_or("--global-products needs a directory")?)),
             "--global-res" => {
@@ -334,7 +349,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
 use planet_cache::tiles::MAX_REGION_LEVEL;
 
 /// Options that only the tile store commands of `generate` understand.
-pub(crate) const STORE_OPTIONS: [&str; 14] = [
+pub(crate) const STORE_OPTIONS: [&str; 16] = [
+    "--prefill-dir",
+    "--prefill-levels",
     "--plan-check",
     "--compact-cache",
     "--cap-bytes",
@@ -420,7 +437,10 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         let terrain_scene = matches!(o.mode, Mode::TestRender) && o.scene == "terrain";
         let allowed: &[&str] = if bake_scene {
             &["--world", "--global-res", "--threads"]
-        } else if terrain_scene || stream_scene {
+        } else if stream_scene {
+            // `--prefill-levels`: the levels of the tile pack the gated dives require pre-filled at their start (default 4).
+            &["--world", "--global-res", "--prefill-levels"]
+        } else if terrain_scene {
             &["--world", "--global-res"]
         } else {
             &[]
@@ -733,12 +753,14 @@ mod tests {
     fn generate_bakes_the_global_field_into_blocks_and_verify_global_checks_them() {
         let d = TempDir::new("global");
         let store = d.s("store");
-        let built = run_str(&["generate", "--global-dir", &store, "--global-res", "8", "--seed", "3", "--threads", "2"]).unwrap();
+        let built =
+            run_str(&["generate", "--global-dir", &store, "--global-res", "8", "--seed", "3", "--threads", "2", "--prefill-levels", "0"])
+                .unwrap();
         assert!(
             built.contains("8 cells per face edge in blocks of 8 (level 0)") && built.contains("6 blocks written, 0 already stored"),
             "{built}"
         );
-        let again = run_str(&["generate", "--global-dir", &store, "--global-res", "8", "--seed", "3"]).unwrap();
+        let again = run_str(&["generate", "--global-dir", &store, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();
         assert!(again.contains("0 blocks written, 6 already stored"), "{again}");
         let ok = run_str(&["generate", "--verify-global", &store, "--seed", "3"]).unwrap();
         assert!(ok.contains("checked 6 of 6 entries: 6 match"), "{ok}");
@@ -757,6 +779,147 @@ mod tests {
         assert!(bad.contains("power-of-two"), "{bad}");
         let huge = run_str(&["generate", "--global-dir", &d.s("huge"), "--global-res", "8388608"]).unwrap_err();
         assert!(huge.contains("65536") && !huge.contains("level"), "a resolution error naming the finest grid: {huge}");
+    }
+
+    // spec: STRM-021
+    #[test]
+    fn generate_prefills_the_coarse_tiles_after_the_bake_or_into_an_existing_bake_and_a_second_run_writes_nothing() {
+        let d = TempDir::new("prefill");
+        let (a, b) = (d.s("a"), d.s("b"));
+        // After the bake: levels 0..=1 are 6 + 24 tiles; the bake's own blocks are still there.
+        let built =
+            run_str(&["generate", "--global-dir", &a, "--global-res", "8", "--seed", "3", "--threads", "2", "--prefill-levels", "1"])
+                .unwrap();
+        assert!(
+            built.contains("6 blocks written")
+                && built.contains("levels 0..=1")
+                && built.contains("30 tiles, 30 written, 0 already stored"),
+            "{built}"
+        );
+        let again = run_str(&["generate", "--global-dir", &a, "--global-res", "8", "--seed", "3", "--prefill-levels", "1"]).unwrap();
+        assert!(
+            again.contains("0 blocks written, 6 already stored") && again.contains("30 tiles, 0 written, 30 already stored"),
+            "{again}"
+        );
+        // The bake still verifies; the tiles are another kind to it.
+        let ok = run_str(&["generate", "--verify-global", &a, "--seed", "3"]).unwrap();
+        assert!(ok.contains("6 match") && ok.contains("30 of another kind"), "{ok}");
+        // Into an existing bake, a deeper pre-fill adds the new level only; levels 0 disables.
+        run_str(&["generate", "--global-dir", &b, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();
+        let off = run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();
+        assert!(off.contains("disabled"), "{off}");
+        let one =
+            run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--prefill-levels", "1", "--threads", "3"])
+                .unwrap();
+        assert!(one.contains("30 tiles, 30 written, 0 already stored") && one.contains("on 3 threads"), "{one}");
+        let two = run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--prefill-levels", "2"]).unwrap();
+        assert!(two.contains("126 tiles, 96 written, 30 already stored"), "{two}");
+        let none = run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--prefill-levels", "2"]).unwrap();
+        assert!(none.contains("126 tiles, 0 written, 126 already stored") && none.contains("packs grew by 0 bytes"), "{none}");
+        // Refusals: the bake's size is required, another store and combinations of commands are refused, the depth is bounded.
+        for (args, needle) in [
+            (vec!["generate", "--prefill-dir", b.as_str(), "--seed", "3"], "needs --global-res"),
+            (vec!["generate", "--prefill-dir", b.as_str(), "--global-res", "8", "--global-dir", b.as_str()], "separate commands"),
+            (vec!["generate", "--prefill-dir", b.as_str(), "--global-res", "8", "--verify-global", b.as_str()], "excludes --verify-global"),
+            (vec!["generate", "--prefill-levels", "2", "--seed", "3"], "applies to --global-dir"),
+            (vec!["generate", "--prefill-dir", b.as_str(), "--global-res", "8", "--prefill-levels", "9"], "at most 8"),
+            (vec!["generate", "--prefill-dir", b.as_str(), "--global-res", "8", "--prefill-levels", "22"], "at most 8"),
+            (vec!["generate", "--prefill-dir", d.s("nowhere").as_str(), "--global-res", "8"], "no such store directory"),
+            (vec!["generate", "--prefill-dir", b.as_str(), "--global-res", "16", "--seed", "3"], "holds no bake of 16 cells"),
+            (
+                vec![
+                    "generate",
+                    "--prefill-dir",
+                    b.as_str(),
+                    "--global-res",
+                    "8",
+                    "--seed",
+                    "3",
+                    "--finest-level",
+                    "2",
+                    "--prefill-levels",
+                    "2",
+                ],
+                "finest level 2",
+            ),
+            (vec!["test-render", "--prefill-dir", b.as_str()], "only applies to `generate`"),
+        ] {
+            let e = run_str(&args).unwrap_err();
+            assert!(e.contains(needle), "{args:?}: {e}");
+        }
+    }
+
+    // spec: STRM-021
+    #[test]
+    fn a_pre_filled_tile_read_by_the_streamer_equals_the_generated_one_bit_for_bit_and_a_cold_reader_ignores_the_pack() {
+        use planet_streaming::TileSource;
+        let d = TempDir::new("prefill-read");
+        let store = d.s("store");
+        run_str(&[
+            "generate",
+            "--global-dir",
+            &store,
+            "--global-res",
+            "8",
+            "--seed",
+            "3",
+            "--prefill-levels",
+            "3",
+            "--threads",
+            "4",
+            "--cells",
+            "8",
+        ])
+        .unwrap();
+        let def = || planet_world_def::WorldDefinition::single_planet(skeleton::RADIUS_M, 3);
+        let world = std::sync::Arc::new(worldfield::WorldTerrain::open_store(def(), std::path::Path::new(&store), 8).unwrap());
+        // Levels 0..=3 are all present for the run's cells and finest level in the compact form; the vertex form finds only levels 0-2
+        // (those records are shared by both forms, the pack holds the compact form of level 3).
+        assert_eq!(world.prefill_present(3, 8, 22, planet_render::TileFormat::Compact).unwrap(), (510, 510));
+        assert_eq!(world.prefill_present(3, 8, 22, planet_render::TileFormat::Vertex).unwrap(), (126, 510));
+        assert_eq!(world.prefill_present(4, 8, 22, planet_render::TileFormat::Compact).unwrap(), (510, 2046));
+        assert_eq!(world.prefill_present(3, 16, 22, planet_render::TileFormat::Compact).unwrap(), (0, 510), "other cells");
+        let src = |w: &std::sync::Arc<worldfield::WorldTerrain>, format| skeleton::MeshSource {
+            world: std::sync::Arc::clone(w),
+            format,
+            max_level: 22,
+            cells: 8,
+        };
+        let cold = std::sync::Arc::new(worldfield::WorldTerrain::open_store(def(), std::path::Path::new(&store), 8).unwrap().cold());
+        let field = world.field().unwrap();
+        let mut sampled = 0;
+        for tile in planet_cache::meshpack::prefill_tiles(3)
+            .into_iter()
+            .step_by(11)
+            .chain(planet_cache::meshpack::prefill_tiles(3).into_iter().take(8))
+        {
+            let on_demand = skeleton::tile_for(planet_render::TileFormat::Compact, field.as_ref(), tile, 8, world.radius_m(), 22);
+            let before = world.prefill_hits();
+            assert_eq!(
+                src(&world, planet_render::TileFormat::Compact).load(tile).unwrap(),
+                on_demand,
+                "level {} tile {:#x} from the pack",
+                tile.level(),
+                tile.raw()
+            );
+            assert_eq!(world.prefill_hits(), before + 1, "served from the pack");
+            let staged =
+                src(&world, planet_render::TileFormat::Compact).load_staged(tile, &planet_streaming::CancelToken::never()).unwrap();
+            assert_eq!(staged, Some(on_demand.clone()));
+            assert_eq!(
+                src(&cold, planet_render::TileFormat::Compact).load(tile).unwrap(),
+                on_demand,
+                "the cold reader generates the same tile"
+            );
+            sampled += 1;
+        }
+        assert_eq!(cold.prefill_hits(), 0, "the cold reader never reads the pack");
+        assert!(!cold.reads_prefilled() && world.reads_prefilled() && sampled > 50);
+        // A tile deeper than the pre-fill is generated, not found.
+        let deep = planet_core::TileId::new(planet_core::Face(0), 5, 1, 1).unwrap();
+        let before = world.prefill_hits();
+        src(&world, planet_render::TileFormat::Compact).load(deep).unwrap();
+        assert_eq!(world.prefill_hits(), before);
     }
 
     // spec: STRM-012

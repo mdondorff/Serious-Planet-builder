@@ -221,7 +221,7 @@ mod tests {
 
     // spec: TEST-021
     #[test]
-    fn the_log_reader_takes_the_six_scenes_files_and_notes_a_last_valid_log() {
+    fn the_log_reader_takes_the_seven_scenes_files_and_notes_a_last_valid_log() {
         let dir = std::env::temp_dir().join(format!("xtask-m4-logs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -229,7 +229,7 @@ mod tests {
         std::fs::write(dir.join("dive.frames.txt"), "x").unwrap();
         std::fs::write(dir.join("look-1m.last-valid.json"), b"{}").unwrap();
         let files = read_m4_logs(&dir);
-        assert_eq!(files.len(), 6);
+        assert_eq!(files.len(), 7, "the six scenes and dive-cold");
         let dive = &files[0];
         assert_eq!((dive.scene.as_str(), dive.json.is_some(), dive.frames.as_deref()), ("dive", true, Some("x")));
         let look = files.iter().find(|f| f.scene == "look-1m").unwrap();
