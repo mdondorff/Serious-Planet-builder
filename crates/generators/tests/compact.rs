@@ -245,7 +245,7 @@ fn compact_tiles_are_bit_identical_across_thread_counts_and_match_the_known_answ
     assert_eq!(one, KNOWN_ANSWERS, "compact tile content hashes changed: {one:016x?}");
 }
 
-const KNOWN_ANSWERS: [u64; 4] = [0x55ad53d8866758a2, 0xeb1af5a89126a682, 0xc722f8a9616a47d4, 0xd6cb1f0482941dbe];
+const KNOWN_ANSWERS: [u64; 4] = [10560744902112091353, 17839287420590151220, 3945263185522237226, 13228263097272261512];
 
 // spec: GEN-019
 #[test]

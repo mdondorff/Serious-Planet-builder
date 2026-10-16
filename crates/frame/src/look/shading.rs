@@ -328,6 +328,15 @@ impl AlbedoParams {
         in_range("beach_fade_m", self.beach_fade_m, 1.0e-3, 1000.0)?;
         // A zero width would divide by zero in the smoothstep of the shore; the blend needs an interval.
         in_range("shore_blend_m", self.shore_blend_m, 1.0e-3, 1000.0)?;
+        // The shader sees the thresholds rounded to f32: a pair that is ordered in f64 but collapses when rounded would make an
+        // undefined smoothstep, so the order is checked on the rounded values too.
+        let f = self.as_f32();
+        order("dry_mm", f.dry_mm, "wet_mm", f.wet_mm)?;
+        order("forest_mm_lo", f.forest_mm_lo, "forest_mm_hi", f.forest_mm_hi)?;
+        order("tundra_c_lo", f.tundra_c_lo, "tundra_c_hi", f.tundra_c_hi)?;
+        order("rock_cos_full", f.rock_cos_full, "rock_cos_none", f.rock_cos_none)?;
+        order("snow_c_full", f.snow_c_full, "snow_c_none", f.snow_c_none)?;
+        order("snow_cos_none", f.snow_cos_none, "snow_cos_full", f.snow_cos_full)?;
         Ok(())
     }
 }
@@ -451,14 +460,15 @@ fn normalize(v: [f64; 3]) -> [f64; 3] {
 }
 
 /// The unit direction towards the sun in the planet-fixed axes for a time of day and a declination (ADR 0039 point 1: the plan's
-/// sun comes from a time-of-day value the view sets). The polar axis is +y (as the climate's latitude), longitude runs from +x
-/// towards +z, and the sub-solar point is at longitude 0 at 12:00 and moves westward by 15 degrees per hour:
-/// `(cos d cos l, sin d, cos d sin l)` with `l = -15 degrees (hours - 12)`. Computed in f64 with `libm` and rounded once to f32 (the
-/// view decides, the renderer executes).
+/// sun comes from a time-of-day value the view sets). The axes are COORD's: +z is the north pole, +x is latitude 0 and longitude 0,
+/// +y is longitude 90 degrees east. The sub-solar point is at latitude `declination` and at longitude 0 at 12:00, moving westward by
+/// 15 degrees per hour: `(cos d cos l, cos d sin l, sin d)` with `l = -15 degrees (hours - 12)`. Computed in f64 with `libm` and
+/// rounded once to f32 (the view decides, the renderer executes). (The analytic climate takes its latitude from `d.y`, an older
+/// convention that disagrees with COORD; it is a function of the direction only and does not depend on this one.)
 pub fn sun_direction(time_of_day_hours: f64, declination_deg: f64) -> [f32; 3] {
     let rad = core::f64::consts::PI / 180.0;
     let lon = -15.0 * (time_of_day_hours - 12.0) * rad;
     let dec = declination_deg * rad;
     let c = libm::cos(dec);
-    [(c * libm::cos(lon)) as f32, libm::sin(dec) as f32, (c * libm::sin(lon)) as f32]
+    [(c * libm::cos(lon)) as f32, (c * libm::sin(lon)) as f32, libm::sin(dec) as f32]
 }

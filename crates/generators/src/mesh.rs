@@ -267,7 +267,7 @@ pub fn tile_mesh_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
     }
     let centre_dir = id.center_direction(map);
     dirs.push(centre_dir);
-    let all = field.heights(&dirs);
+    let (all, climate) = field.heights_and_climate(map, id, &dirs, &|| false);
     for idx in 0..count {
         world[idx] = dirs[idx] * (radius_m + all[idx]);
         heights[idx] = all[idx];
@@ -325,7 +325,7 @@ pub fn tile_mesh_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
             |p: [f32; 3]| [(f64::from(p[0]) - radial.x) as f32, (f64::from(p[1]) - radial.y) as f32, (f64::from(p[2]) - radial.z) as f32];
         vertices.push(MeshVertex { pos: down(v.pos), coarse: down(v.coarse), ..v });
     }
-    TileMesh { id, cells, key: mesh_key_field(field, map, id, cells, radius_m), origin, vertices, climate: field.climate(map, id) }
+    TileMesh { id, cells, key: mesh_key_field(field, map, id, cells, radius_m), origin, vertices, climate }
 }
 
 /// Triangle indices for the grid and its skirts; identical for every tile of a given `cells`.

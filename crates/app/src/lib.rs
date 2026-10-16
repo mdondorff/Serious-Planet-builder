@@ -914,6 +914,13 @@ mod tests {
         }
     }
 
+    // spec: GEN-019
+    #[test]
+    fn the_compact_format_with_fewer_than_16_cells_is_refused_naming_the_minimum() {
+        let e = run_str(&["test-render", "--scene", "terrain", "--cells", "8", "--tile-format", "compact"]).unwrap_err();
+        assert!(e.contains("--cells 8") && e.contains("at least 16") && e.contains("--tile-format vertex"), "{e}");
+    }
+
     // spec: STRM-021, STRM-022
     #[test]
     fn a_pre_filled_tile_read_by_the_streamer_equals_the_generated_one_bit_for_bit_and_a_cold_reader_ignores_the_pack() {

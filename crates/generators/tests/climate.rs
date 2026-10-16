@@ -154,7 +154,7 @@ fn the_climate_is_bit_identical_across_thread_counts_and_matches_the_known_answe
 }
 
 const KNOWN_CLIMATE: [u64; 4] = [0x904c3f688483190d, 0x1bf63c7a0fdc70e3, 0x693167f9e0b60749, 0x02834c6ed1b1beb3];
-const KNOWN_VERSION_WORD: u64 = 0xd96f1a128a9b7a15;
+const KNOWN_VERSION_WORD: u64 = 0x4ab35e66f8b5d020;
 
 // spec: GEN-021
 #[test]
@@ -236,4 +236,27 @@ fn the_mesh_key_names_the_climate_version_and_the_bilinear_lookup_is_exact_at_te
     assert!((mid.0 - 0.5 * (m0.0 + m1.0)).abs() < 1e-5 && (mid.1 - 0.5 * (m0.1 + m1.1)).abs() < 1e-3);
     // A vertex at a texel position takes the texel's value.
     assert_eq!(c.vertex_value(8, 12, 32), [c.temperature[3 * 9 + 2], c.precipitation[3 * 9 + 2]]);
+}
+
+// spec: GEN-021, GEN-010
+#[test]
+fn fields_over_a_bake_take_their_climate_from_the_integer_reader_and_key_with_the_bake_version_word() {
+    use planet_generators::erosion::ErosionGenerator;
+    use planet_generators::terrain::TerrainGenerator;
+    use planet_world_def::{BodyId, GenContext, WorldDefinition};
+    let g = bake(SEED, &TangentWarp, 64, 2).unwrap();
+    let src = GridSource(&g);
+    let def = WorldDefinition::single_planet(R, SEED);
+    let t = id(3, 6, 20, 41);
+    let want = climate_tile(&src, t).unwrap();
+    let key = [7u8; 16];
+    let terrain = TerrainGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, key).unwrap();
+    let eroded = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, key).unwrap();
+    for (name, f) in [("terrain", &terrain as &dyn HeightField), ("eroded", &eroded as &dyn HeightField)] {
+        assert_eq!(f.climate(&TangentWarp, t), want, "{name}: the climate is the reader's, not the analytic function's");
+        assert_eq!(f.climate_version_word(), climate_version_word(), "{name}");
+        assert_ne!(f.climate(&TangentWarp, t), analytic_climate(SEED, &TangentWarp, t), "{name}: the bake and the analytic climate differ");
+    }
+    assert_eq!(climate_tile(&src, t).unwrap(), want);
+    assert_ne!(climate_version_word(), planet_generators::climate::analytic_version_word());
 }

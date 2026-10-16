@@ -324,6 +324,17 @@ pub trait HeightField: Sync {
     fn climate(&self, map: &dyn FaceMapping, id: TileId) -> crate::climate::ClimateTexture {
         crate::climate::analytic_climate(self.seed(), map, id)
     }
+    /// The heights of `dirs` (as [`heights`](HeightField::heights)) and the climate of tile `id`, together: a field over a block store
+    /// gathers the cells of both in one pass so a tile decodes each block once (GEN-020). The default is the two calls.
+    fn heights_and_climate(
+        &self,
+        map: &dyn FaceMapping,
+        id: TileId,
+        dirs: &[Vec3],
+        stop: &dyn Fn() -> bool,
+    ) -> (Vec<f64>, crate::climate::ClimateTexture) {
+        (self.heights_until(dirs, stop), self.climate(map, id))
+    }
     /// The word of everything the climate depends on besides the tile and the field's inputs, folded into every mesh key
     /// (the climate version, the reader version and the bake format version for a field over a bake).
     fn climate_version_word(&self) -> u64 {
@@ -532,6 +543,15 @@ impl<F: HeightField> HeightField for Bound<F> {
     }
     fn climate_version_word(&self) -> u64 {
         self.field.climate_version_word()
+    }
+    fn heights_and_climate(
+        &self,
+        map: &dyn FaceMapping,
+        id: TileId,
+        dirs: &[Vec3],
+        stop: &dyn Fn() -> bool,
+    ) -> (Vec<f64>, crate::climate::ClimateTexture) {
+        self.field.heights_and_climate(map, id, dirs, stop)
     }
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         self.field.height_bounds(centre, angular_radius)

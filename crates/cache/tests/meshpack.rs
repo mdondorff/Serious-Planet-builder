@@ -244,3 +244,16 @@ fn a_pack_pre_filled_under_mesh_version_6_is_all_misses_and_the_prefill_writes_i
     let store = TileStore::open(d.path(), store_params()).unwrap();
     assert!(tiles.iter().all(|t| spec.lookup(&store, *t).unwrap() == spec.generate(*t)));
 }
+
+// spec: GEN-019, STRM-021
+#[test]
+fn a_compact_prefill_below_16_cells_is_refused_naming_the_minimum_before_anything_is_written() {
+    let field = Reference(5);
+    let d = Dir::new("small-cells");
+    let spec = TileSpec::new(&field, R, 8, MAX_LEVEL, RenderForm::Compact);
+    let e = prefill(d.path(), &spec, 3, 1, DEFAULT_MAX_PACK_BYTES, &progress).unwrap_err();
+    assert!(matches!(&e, PrefillError::Levels(s) if s.contains("at least 16 cells") && s.contains("got 8")), "{e}");
+    assert!(!d.path().exists() || data_files(d.path()).is_empty(), "nothing was written");
+    // Levels 0-2 are the vertex form whatever is asked, so a shallow pre-fill needs no compact tile and is accepted.
+    assert!(prefill(d.path(), &spec, 2, 1, DEFAULT_MAX_PACK_BYTES, &progress).is_ok());
+}

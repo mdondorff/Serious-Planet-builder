@@ -219,7 +219,9 @@ fn the_up_vector_is_the_radial_direction_within_its_bound_at_the_worst_case() {
     for up0 in origins {
         for r in radii {
             for k in 0..12 {
-                let local = if k == 0 { [0.0; 3] } else { [(next() - 0.5) * 2000.0, (next() - 0.5) * 2000.0, (next() - 0.5) * 2000.0] };
+                // Offsets up to 1 km on fine tiles, and up to thousands of km on the coarse ones (level 0 to 3 tiles, whose local positions are that large).
+                let reach = [2000.0, 2000.0, 2000.0, 2.0e5, 2.0e6, 8.0e6][k % 6];
+                let local = if k == 0 { [0.0; 3] } else { [(next() - 0.5) * reach, (next() - 0.5) * reach, (next() - 0.5) * reach] };
                 probes.push(([up0[0] as f32, up0[1] as f32, up0[2] as f32, (1.0 / r) as f32], local.map(|v| v as f32)));
                 // The exact direction of the point the shader sees: the f32 local position as given.
                 want.push(exact_up(up0, r, local.map(|v| f64::from(v as f32))));

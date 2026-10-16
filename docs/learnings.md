@@ -291,3 +291,10 @@ What happened: the local WARP (10.0.26100.9711) differs from the recorded and CI
 Assumption it changes: that a new debug view agrees across adapters trivially; colour-band views flip whole pixels at band edges.
 Proposed follow-up: planner decides whether such a view may differ by a few pixels of any delta (status.md).
 Obsolete when: the CI WARP and the local WARP agree, or ADR 0017/0037 define agreement for new views.
+
+## 2026-10-16 A new HeightField trait method with a default body is silently wrong in every wrapper and every second implementation
+Scope: project
+What happened: the climate field (GEN-021) added `climate`, `climate_version_word` and `heights_and_climate` with analytic defaults. `ErosionField` (the default world) and the streamer's `CancelGuarded` did not override or delegate them, so the product would have stored the analytic climate and keyed streamed tiles differently from pre-filled ones; no test noticed because the tests used `Reference`, whose default is right. The numerics and spec reviews found it. A second trap: a separate gather for the climate reads decoded every block of a coarse tile twice with a small cache (GEN-020 caught it); the climate joins the heights' gather now. f16 cannot meet an absolute 0.01 degrees or 0.1 mm bound; CON-14 compares two implementations of one field (ADR 0049).
+Assumption it changes: that defaults on a trait are safe; a default is a second implementation for every type that forgets it.
+Proposed follow-up: a test per new trait method that every field over a bake (terrain, eroded) and every wrapper answers it as the inner field does (done for the climate in `climate.rs` and `skeleton.rs`).
+Obsolete when: `HeightField` has no default-bodied methods that depend on the field's inputs.

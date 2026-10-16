@@ -494,6 +494,14 @@ pub fn prefill(
     if levels > MAX_PREFILL_LEVELS {
         return Err(PrefillError::Levels(format!("a pre-fill of levels 0..={levels} is too deep (at most {MAX_PREFILL_LEVELS})")));
     }
+    if spec.form == RenderForm::Compact && spec.cells < planet_generators::climate::CLIMATE_MIN_COMPACT_CELLS && levels >= COMPACT_MIN_LEVEL
+    {
+        return Err(PrefillError::Levels(format!(
+            "the compact tile format needs at least {} cells per tile edge (the climate of a tile rides in the spare channel of its first 162 texels, GEN-021), got {}: use more cells or the vertex tile format",
+            planet_generators::climate::CLIMATE_MIN_COMPACT_CELLS,
+            spec.cells
+        )));
+    }
     if levels >= spec.max_level {
         return Err(PrefillError::Levels(format!(
             "a pre-fill of levels 0..={levels} reaches the finest level {} of the view: such tiles are decided by their relief and are never stored",

@@ -5,7 +5,7 @@
 //! for display (presentation data).
 //!
 //! Where the values come from: the global bake, read with the integer reader of ADR 0027 ([`read_tile_sample`], a tile-array
-//! consumer): texel `(a, b)` of the tile is the bake's value at tile sample `(4 a, 4 b)` of a tile grid of 8 cells per edge, so
+//! consumer): texel `(a, b)` of the tile is the bake's value at tile sample `(a, b)` of a tile grid of 8 cells per edge, so
 //! the 9 x 9 points sit on the tile square including its border and two neighbouring tiles agree on their shared border texels
 //! (the reader is face-edge symmetric; its halo rule is never needed because every position is inside the tile). The reader's
 //! [`READER_VERSION`] and [`GLOBAL_VERSION`] enter the field's version word ([`climate_version_word`]) and so every mesh key.
@@ -17,7 +17,7 @@
 //! rounding costs at most `2^-11` of the value (0.016 degrees below 32 degrees C, 0.03 above; 2 mm per 1,000 mm of rain, 4 mm above
 //! 2,048 mm), the declared quantisation of the field (GEN-021).
 
-use crate::global::{read_tile_sample, sample, LatticeSource, ReadError, GLOBAL_VERSION, READER_VERSION};
+use crate::global::{gather_cells, read_tile_sample, sample, LatticeSource, ReadError, GLOBAL_VERSION, READER_VERSION};
 use planet_core::cube::FaceMapping;
 use planet_core::hash::hash_u64s;
 use planet_core::TileId;
@@ -199,17 +199,33 @@ impl ClimateTexture {
 /// The version word folded into the keys of a field that reads the bake: the climate version, the reader version and the bake
 /// format version (ADR 0039 point 2: `READER_VERSION` folds into this field's version).
 pub fn climate_version_word() -> u64 {
-    hash_u64s(0x636c_7672, &[u64::from(CLIMATE_VERSION), u64::from(READER_VERSION), u64::from(GLOBAL_VERSION)])
+    let mut v = vec![u64::from(CLIMATE_VERSION), u64::from(READER_VERSION), u64::from(GLOBAL_VERSION)];
+    v.extend(crate::height::fold_str(CLIMATE_IMPLEMENTATION_ID));
+    hash_u64s(0x636c_7672, &v)
 }
 
 /// The version word of the analytic climate (fields without a bake): the climate version and the analytic function's version.
 pub fn analytic_version_word() -> u64 {
-    hash_u64s(0x636c_7673, &[u64::from(CLIMATE_VERSION), u64::from(GLOBAL_VERSION)])
+    let mut v = vec![u64::from(CLIMATE_VERSION), u64::from(GLOBAL_VERSION)];
+    v.extend(crate::height::fold_str(CLIMATE_IMPLEMENTATION_ID));
+    hash_u64s(0x636c_7673, &v)
 }
 
 /// The climate of tile `id` read from the bake `src` (ADR 0027 integer reader). An unreadable block is an error naming it, never a
 /// default.
 pub fn climate_tile(src: &dyn LatticeSource, id: TileId) -> Result<ClimateTexture, ReadError> {
+    // The 81 reads are gathered by block like the heights of a tile (GEN-020): a block is decoded once however small the cache.
+    match gather_cells(src, &|g| {
+        let _ = climate_tile_direct(g, id);
+    }) {
+        Some(table) => climate_tile_direct(&table, id),
+        None => climate_tile_direct(src, id),
+    }
+}
+
+/// [`climate_tile`] reading `src` cell by cell as the reader asks: what a caller that has already gathered the cells (a tile
+/// builder that gathers its heights and its climate together, `HeightField::heights_and_climate`) runs against its table.
+pub fn climate_tile_direct(src: &dyn LatticeSource, id: TileId) -> Result<ClimateTexture, ReadError> {
     let (mut t, mut p) = ([0f32; CLIMATE_TEXELS], [0f32; CLIMATE_TEXELS]);
     for b in 0..CLIMATE_EDGE {
         for a in 0..CLIMATE_EDGE {

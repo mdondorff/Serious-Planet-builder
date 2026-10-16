@@ -288,7 +288,7 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
         let st = normal_stencil(dirs[1 + k], eps);
         dirs.extend(st);
     }
-    let all = field.heights(&dirs);
+    let (all, climate) = field.heights_and_climate(map, id, &dirs, &|| false);
     let h_origin = all[0];
     let origin = PlanetFixed(centre * (radius_m + h_origin));
     // The shell through the origin: control points are small tile-local numbers (CON-11), not heights from the sea level.
@@ -322,7 +322,7 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
             [q, n[0], n[1], 0]
         })
         .collect();
-    field.climate(map, id).write_texels(&mut texels);
+    climate.write_texels(&mut texels);
     let mut tile = CompactTile {
         id,
         cells,

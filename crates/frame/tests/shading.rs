@@ -131,16 +131,18 @@ fn up_is_the_radial_direction_formed_from_tile_local_numbers() {
     }
 }
 
-// spec: REND-025
+// spec: REND-024
 #[test]
 fn the_sun_comes_from_a_time_of_day() {
     let near = |a: [f32; 3], b: [f32; 3]| (0..3).all(|c| (a[c] - b[c]).abs() < 1e-6);
-    // Noon at declination 0: over longitude 0, towards +x. Six hours later the sun is over longitude -90 degrees (west): -z.
+    // COORD's axes (+z north pole, +x at longitude 0, +y at 90 degrees east). Noon at declination 0: over longitude 0, towards +x.
+    // Six hours later the sun is over longitude 90 degrees west: -y; at midnight over the antimeridian.
     assert!(near(sun_direction(12.0, 0.0), [1.0, 0.0, 0.0]), "{:?}", sun_direction(12.0, 0.0));
-    assert!(near(sun_direction(18.0, 0.0), [0.0, 0.0, -1.0]), "{:?}", sun_direction(18.0, 0.0));
+    assert!(near(sun_direction(18.0, 0.0), [0.0, -1.0, 0.0]), "{:?}", sun_direction(18.0, 0.0));
+    assert!(near(sun_direction(6.0, 0.0), [0.0, 1.0, 0.0]));
     assert!(near(sun_direction(0.0, 0.0), [-1.0, 0.0, 0.0]));
-    // The declination tilts it towards the pole axis (+y), and the result is a unit vector.
-    assert!(near(sun_direction(12.0, 90.0), [0.0, 1.0, 0.0]));
+    // The declination tilts it towards the north pole (+z), and the result is a unit vector.
+    assert!(near(sun_direction(12.0, 90.0), [0.0, 0.0, 1.0]));
     for (h, d) in [(3.3, 23.44), (21.0, -23.44), (12.0, 45.0), (7.77, -80.0)] {
         let s = sun_direction(h, d).map(f64::from);
         assert!((libm::sqrt(s[0] * s[0] + s[1] * s[1] + s[2] * s[2]) - 1.0).abs() < 1e-6);
@@ -225,7 +227,7 @@ fn the_shading_tokens_enter_the_plan_text_only_when_they_differ_from_the_default
     }
 }
 
-// spec: REND-025
+// spec: LOOK-003
 #[test]
 fn a_plan_with_an_unusable_shading_is_refused_naming_the_value() {
     let mut p = LitPlan::fixed(14.0);
@@ -235,6 +237,10 @@ fn a_plan_with_an_unusable_shading_is_refused_naming_the_value() {
     let mut p = LitPlan::fixed(14.0);
     p.albedo.wet_mm = p.albedo.dry_mm;
     assert!(p.validate().unwrap_err().contains("albedo.dry_mm"));
+    // A pair ordered in f64 that collapses in f32 is refused (the shader's smoothstep would be undefined).
+    let mut p = LitPlan::fixed(14.0);
+    p.albedo.rock_cos_none = p.albedo.rock_cos_full + 1.0e-12;
+    assert!(p.validate().unwrap_err().contains("albedo.rock_cos_full"));
     let mut p = LitPlan::fixed(14.0);
     p.water_level_m = f32::NAN;
     assert!(p.validate().unwrap_err().contains("water level"));

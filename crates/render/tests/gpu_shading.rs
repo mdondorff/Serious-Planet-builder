@@ -147,8 +147,10 @@ fn the_climate_views_show_the_climate_field_of_the_world_in_both_tile_formats() 
             assert!(n > 300, "view {index} compact {compact} {view:?}: the planet covers {n} pixels");
             // The 9 x 9 texture is a coarse picture of the field: a few hundredths of the colour range on average.
             println!("view {index} {view:?} compact {compact}: {n} pixels, mean error {:.4}, worst {worst:.3}", sum / n as f64);
+            // Declared bounds (REND-027): 0.02 on the coarse orbit view, 0.005 on the 20 km view where tiles are fine.
+            let bound = if index == 0 { 0.02 } else { 0.005 };
             assert!(
-                sum / (n as f64) < 0.02,
+                sum / (n as f64) < bound,
                 "compact {compact} {view:?}: mean colour error {} against the world's climate",
                 sum / n as f64
             );

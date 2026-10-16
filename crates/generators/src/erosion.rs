@@ -194,6 +194,45 @@ impl HeightField for ErosionField<'_> {
         crate::global::eval_gathered_threads(self.src, dirs, stop, threads, &footprint, &|s, d| self.height_via(s, d))
     }
 
+    /// The climate of the tile from the bake with the integer reader, as the terrain field (GEN-021); a failed read is recorded like a
+    /// height's and gives the zero texture.
+    fn climate(&self, _map: &dyn planet_core::cube::FaceMapping, id: planet_core::TileId) -> crate::climate::ClimateTexture {
+        match crate::climate::climate_tile(self.src, id) {
+            Ok(c) => c,
+            Err(e) => {
+                self.fail(&e);
+                crate::climate::ClimateTexture::default()
+            }
+        }
+    }
+
+    fn climate_version_word(&self) -> u64 {
+        crate::climate::climate_version_word()
+    }
+
+    /// The heights and the climate of a tile in one gather: the cells of both are read once, grouped by bake block (GEN-020), so a
+    /// tile decodes each block it touches once however small the cache.
+    fn heights_and_climate(
+        &self,
+        _map: &dyn planet_core::cube::FaceMapping,
+        id: planet_core::TileId,
+        dirs: &[Vec3],
+        stop: &dyn Fn() -> bool,
+    ) -> (Vec<f64>, crate::climate::ClimateTexture) {
+        let footprint = |g: &dyn LatticeSource, d: Vec3| {
+            self.base_via(g, d);
+            self.gradient_via(g, d);
+        };
+        let climate = |s: &dyn LatticeSource| match crate::climate::climate_tile_direct(s, id) {
+            Ok(c) => c,
+            Err(e) => {
+                self.fail(&e);
+                crate::climate::ClimateTexture::default()
+            }
+        };
+        crate::global::eval_gathered_with(self.src, dirs, stop, &footprint, &|s, d| self.height_via(s, d), &climate)
+    }
+
     fn seed(&self) -> u64 {
         self.seed
     }
