@@ -1881,7 +1881,7 @@ impl TerrainRenderer {
         match &plan.lit {
             // The lit path: the pre-exposure factor in range.z and the sun direction in mode.yzw (as bits), decided by the plan.
             Some(lit) => {
-                let factor = planet_frame::look::pre_exposure_factor(f64::from(lit.exposure.pre_ev100())) as f32;
+                let factor = planet_frame::look::pre_exposure_factor_with(&lit.units, f64::from(lit.exposure.pre_ev100())) as f32;
                 globals.extend(f32_bytes(&[lo, hi, factor, 0.0]));
                 globals.extend(
                     [0, lit.sun_dir[0].to_bits(), lit.sun_dir[1].to_bits(), lit.sun_dir[2].to_bits()]

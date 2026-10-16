@@ -144,6 +144,38 @@ fn the_lit_frame_covers_the_same_pixels_as_the_debug_frame_in_both_tile_formats(
     }
 }
 
+// spec: LOOK-006
+#[test]
+fn the_scene_unit_scale_of_the_look_scales_the_scene_target() {
+    use planet_frame::look::SceneUnits;
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let base = plan(3);
+    let mut r = renderer(&ctx, false, &[&base], true);
+    r.render(&ctx, &lit(base.clone(), LitPlan::fixed(EV)), false).unwrap();
+    let earth = r.lit_path().unwrap().read_hdr(&ctx);
+    // A sun a quarter as bright (a body four times as far away): every written value is a quarter of the Earth's.
+    let mut dim = LitPlan::fixed(EV);
+    dim.units = SceneUnits { solar_illuminance_lux: look::SOLAR_ILLUMINANCE_LUX / 4.0 };
+    r.render(&ctx, &lit(base.clone(), dim), false).unwrap();
+    let quarter = r.lit_path().unwrap().read_hdr(&ctx);
+    let mut compared = 0;
+    for (i, (a, b)) in earth.iter().zip(&quarter).enumerate() {
+        assert_eq!(a[3] > 0.0, b[3] > 0.0, "pixel {i}: the same pixels are covered");
+        for c in 0..3 {
+            let want = f64::from(a[c]) / 4.0;
+            // A power-of-two scale commutes exactly with the f64 factor, its f32 rounding, the multiply and the f16 store, except
+            // where the quarter is an f16 subnormal (below 2^-14).
+            let tol = if want >= 6.103_515_625e-5 { 0.0 } else { 6.0e-8 };
+            assert!((f64::from(b[c]) - want).abs() <= tol, "pixel {i} channel {c}: {} vs a quarter of {}", b[c], a[c]);
+            compared += usize::from(a[c] > 0.0);
+        }
+    }
+    assert!(compared > 100, "the planet is lit in {compared} channels");
+    // The defaults are untouched by the look machinery: the plan made with the default look gives the default frame again.
+    r.render(&ctx, &lit(base, LitPlan::fixed_with(&planet_frame::look::file::LookParams::default(), EV)), false).unwrap();
+    assert_eq!(r.lit_path().unwrap().read_hdr(&ctx), earth, "the default look writes exactly what it always wrote");
+}
+
 // spec: REND-023
 #[test]
 fn the_lit_frame_is_tone_mapped_from_its_scene_target_within_one_step() {

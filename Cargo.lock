@@ -1209,10 +1209,12 @@ name = "planet-frame"
 version = "0.0.0"
 dependencies = [
  "libm",
+ "planet-cache",
  "planet-core",
  "planet-generators",
  "planet-streaming",
  "planet-world-def",
+ "toml",
 ]
 
 [[package]]
