@@ -48,7 +48,7 @@ fn the_window_path_opens_runs_the_flight_and_closes() {
         .and_then(|n| n.trim().parse().ok())
         .unwrap_or_else(|| panic!("no presented count in: {stdout}"));
     assert!(presented > 0, "{stdout}");
-    if adapter == "hardware" {
+    if adapter != "software" {
         assert!(stdout.contains("DiscreteGpu"), "the real-GPU smoke runs on a discrete GPU: {stdout}");
     }
 }
