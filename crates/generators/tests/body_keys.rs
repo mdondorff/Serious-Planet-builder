@@ -135,4 +135,4 @@ fn the_key_format_version_is_the_one_the_body_fields_belong_to() {
 }
 
 const KNOWN_HEIGHT_KEY: u64 = 16898139709241435207;
-const KNOWN_MESH_KEY: u64 = 6637966400734710645; // mesh version 6 (finest-level class in the key; tiles below the cap keep the composition)
+const KNOWN_MESH_KEY: u64 = 4322286077338424400; // mesh version 7 (the climate version word is in the key)

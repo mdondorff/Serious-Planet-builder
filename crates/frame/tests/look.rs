@@ -149,27 +149,7 @@ fn the_false_colour_bands_are_whole_stops_below_saturation() {
 
 // spec: REND-025
 #[test]
-fn lit_terrain_radiance_has_known_answers() {
-    let range = [-100.0, 100.0];
-    let sun = [0.0, 0.0, 1.0];
-    // Facing the sun at the middle of the range: t = 0.5, albedo = tint(0.5) * 0.4, radiance = albedo / pi.
-    let r = lit_terrain_radiance([0.0, 0.0, 1.0], 0.0, range, sun);
-    let a = tint(0.5);
-    for c in 0..3 {
-        close(r[c], a[c] * ALBEDO_SCALE / core::f64::consts::PI, 1e-15, "facing the sun");
-    }
-    // Facing away: no light (there is no ambient in this placeholder; the atmosphere adds it, ADR 0039).
-    assert_eq!(lit_terrain_radiance([0.0, 0.0, -1.0], 0.0, range, sun), [0.0; 3]);
-    // The normal is normalised first, and a 60 degree incidence halves the light.
-    let tilted = lit_terrain_radiance(
-        [libm::sin(core::f64::consts::FRAC_PI_3) * 7.0, 0.0, libm::cos(core::f64::consts::FRAC_PI_3) * 7.0],
-        0.0,
-        range,
-        sun,
-    );
-    close(tilted[1], r[1] * 0.5, 1e-12, "cos 60 degrees");
-    // The tint stops at both ends of the range.
-    assert_eq!(lit_terrain_radiance([0.0, 0.0, 1.0], 1.0e9, range, sun), lit_terrain_radiance([0.0, 0.0, 1.0], 100.0, range, sun));
+fn written_values_are_pre_exposed_and_clamped() {
     // Written value: pre-exposed and clamped to 60,000, never negative.
     let w = written_value([1.0e9, 0.0, -1.0], 0.0);
     assert_eq!(w, [60_000.0, 0.0, 0.0]);

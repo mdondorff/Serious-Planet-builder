@@ -40,7 +40,9 @@ fn a_tile_is_8_byte_texels_and_a_128_byte_record() {
     assert_eq!(t.texel_data().len() as u64, slot_texel_bytes(32));
     assert_eq!(t.resident_bytes(), slot_bytes(32));
     assert_eq!(t.record_bytes().len(), 128);
-    assert!(t.texels.iter().all(|x| x[3] == 0), "the spare 16 bits are reserved and zero");
+    // The spare channel carries the climate of the tile in its first 162 texels (GEN-021) and is zero elsewhere.
+    assert!(t.texels[162..].iter().all(|x| x[3] == 0), "the spare 16 bits past the climate are reserved and zero");
+    assert!(t.texels[..162].iter().any(|x| x[3] != 0), "the climate is stored in the spare channel");
     // The record carries the control points and parameters verbatim.
     let r = t.record_bytes();
     let word = |k: usize| f32::from_le_bytes(r[k * 4..k * 4 + 4].try_into().unwrap());
@@ -238,13 +240,12 @@ fn compact_tiles_are_bit_identical_across_thread_counts_and_match_the_known_answ
     let one = tile_hashes(1);
     assert_eq!(one, tile_hashes(4), "thread count changed a tile");
     assert_eq!(one, tile_hashes(2));
-    // Known answers (CI runs this test on Windows and Linux): recorded with MESH_VERSION 6,
+    // Known answers (CI runs this test on Windows and Linux): recorded with MESH_VERSION 7 (the climate in the fourth channel).
     // A change of the construction bumps MESH_VERSION and re-records these.
-    let expected: [u64; 4] = KNOWN_ANSWERS;
-    assert_eq!(one, expected, "compact tile content hashes changed: {one:016x?}");
+    assert_eq!(one, KNOWN_ANSWERS, "compact tile content hashes changed: {one:016x?}");
 }
 
-const KNOWN_ANSWERS: [u64; 4] = [0x1f2ecc81d236e647, 0x0f77d476bdb3971a, 0x72d663ca0e41ff7f, 0xabd7e7acaec74528];
+const KNOWN_ANSWERS: [u64; 4] = [10560744902112091353, 17839287420590151220, 3945263185522237226, 13228263097272261512];
 
 // spec: GEN-019
 #[test]
@@ -268,9 +269,9 @@ fn a_flat_tile_quantises_without_dividing_by_zero() {
             12.5
         }
     }
-    let c: CompactTile = compact_tile_field(&Flat, &TangentWarp, id(1, 10, 3, 4), 8, R);
+    let c: CompactTile = compact_tile_field(&Flat, &TangentWarp, id(1, 10, 3, 4), 16, R);
     assert!(c.hr_step.is_finite() && c.hr_step > 0.0);
     assert!(c.texels.iter().all(|t| t[0] == c.texels[0][0]));
     assert_eq!(c.relief_m, 0.0);
-    assert_eq!(c.shade_all().len(), vertex_count(8));
+    assert_eq!(c.shade_all().len(), vertex_count(16));
 }

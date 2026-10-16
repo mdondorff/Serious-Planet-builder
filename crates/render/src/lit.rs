@@ -622,75 +622,67 @@ fn read_buffer(ctx: &GpuContext, buffer: &wgpu::Buffer, bytes: u64) -> Vec<u8> {
     data
 }
 
-/// One input of [`probe_lit_radiance`]: the arguments of the terrain shader's `lit_radiance`.
+/// One input of [`probe_lit_radiance`]: the arguments of the terrain shader's lit pixel (`shade_lit`).
 #[derive(Clone, Copy, Debug)]
 pub struct LitProbe {
+    /// 0 lit, 1 albedo, 2 lighting, 3 temperature, 4 precipitation (`ShadeView::index`).
+    pub view: u32,
     pub normal: [f32; 3],
-    pub height: f32,
-    pub range: [f32; 2],
+    pub up: [f32; 3],
+    pub temperature_c: f32,
+    pub precipitation_mm: f32,
+    pub height_above_water_m: f32,
     pub sun: [f32; 3],
     pub factor: f32,
+    /// `AlbedoParams::to_words`.
+    pub table: [f32; 40],
 }
 
-/// Evaluate the terrain shader's `lit_radiance` at `probes` on the GPU and return the pre-exposed, clamped radiance of each: the
-/// tier B oracle of the lit shading bound (REND-025). The terrain module is compiled with one extra compute entry that calls the
-/// function, so the test runs the shader's own code.
-pub fn probe_lit_radiance(ctx: &GpuContext, probes: &[LitProbe]) -> Vec<[f32; 3]> {
-    use wgpu::util::DeviceExt;
-    const PROBE: &str = r#"
-struct Probe { n: vec4<f32>, hr: vec4<f32>, sun: vec4<f32>, scale: vec4<f32> };
+/// The WGSL entries of the probes. They call the shader's own functions: `shade_lit` (what `fs_lit` writes) and `up_at` (what it
+/// forms the slope's up vector with).
+const PROBE_SOURCE: &str = r#"
+struct Probe { n: vec4<f32>, up: vec4<f32>, cl: vec4<f32>, sun: vec4<f32>, scale: vec4<f32>, tab: array<vec4<f32>, 10> };
 @group(0) @binding(8) var<storage, read> probes: array<Probe>;
 @group(0) @binding(9) var<storage, read_write> results: array<vec4<f32>>;
 
 @compute @workgroup_size(1)
 fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
     let p = probes[id.x];
-    results[id.x] = vec4<f32>(lit_radiance(p.n.xyz, p.n.w, p.hr.xy, p.sun.xyz, p.scale.x), 1.0);
+    results[id.x] = vec4<f32>(shade_lit(u32(p.up.w), p.tab, p.n.xyz, p.up.xyz, p.cl.x, p.cl.y, p.n.w, p.sun.xyz, p.scale.x), 1.0);
+}
+
+struct UpProbe { node_up: vec4<f32>, local: vec4<f32> };
+@group(0) @binding(8) var<storage, read> up_probes: array<UpProbe>;
+
+@compute @workgroup_size(1)
+fn probe_up(@builtin(global_invocation_id) id: vec3<u32>) {
+    let p = up_probes[id.x];
+    results[id.x] = vec4<f32>(up_at(p.node_up, p.local.xyz), 1.0);
 }
 "#;
+
+/// Run the probe entry `entry` of the terrain module over `input` (one record of `words` f32 per probe) and read back the `vec4`
+/// result of each.
+fn run_probe(ctx: &GpuContext, entry: &str, input: &[f32], count: usize) -> Vec<[f32; 4]> {
+    use wgpu::util::DeviceExt;
     let device = &ctx.device;
-    let mut input: Vec<u8> = Vec::new();
-    for p in probes {
-        let words = [
-            p.normal[0],
-            p.normal[1],
-            p.normal[2],
-            p.height,
-            p.range[0],
-            p.range[1],
-            0.0,
-            0.0,
-            p.sun[0],
-            p.sun[1],
-            p.sun[2],
-            0.0,
-            p.factor,
-            0.0,
-            0.0,
-            0.0,
-        ];
-        input.extend(words.iter().flat_map(|v| v.to_le_bytes()));
-    }
+    let bytes: Vec<u8> = input.iter().flat_map(|v| v.to_le_bytes()).collect();
     let probe_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("lit-probes"),
-        contents: &input,
+        contents: &bytes,
         usage: wgpu::BufferUsages::STORAGE,
     });
-    let out_bytes = (probes.len() * 16) as u64;
+    let out_bytes = (count * 16) as u64;
     let results = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("lit-probe-results"),
         size: out_bytes,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
-    let source = format!(
-        "{}
-{PROBE}",
-        crate::terrain::TERRAIN_SHADERS[0].1
-    );
+    let source = format!("{}\n{PROBE_SOURCE}", crate::terrain::TERRAIN_SHADERS[0].1);
     let module = device
         .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("lit-probe"), source: wgpu::ShaderSource::Wgsl(source.into()) });
-    let entry = |binding, read_only| wgpu::BindGroupLayoutEntry {
+    let entry_layout = |binding, read_only| wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::COMPUTE,
         ty: wgpu::BindingType::Buffer {
@@ -702,7 +694,7 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
     };
     let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("lit-probe"),
-        entries: &[entry(8, true), entry(9, false)],
+        entries: &[entry_layout(8, true), entry_layout(9, false)],
     });
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("lit-probe"),
@@ -713,7 +705,7 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
         label: Some("lit-probe"),
         layout: Some(&layout),
         module: &module,
-        entry_point: Some("probe"),
+        entry_point: Some(entry),
         compilation_options: Default::default(),
         cache: None,
     });
@@ -730,7 +722,7 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("lit-probe"), timestamp_writes: None });
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind, &[]);
-        pass.dispatch_workgroups(probes.len() as u32, 1, 1);
+        pass.dispatch_workgroups(count as u32, 1, 1);
     }
     ctx.queue.submit([encoder.finish()]);
     let data = read_buffer(ctx, &results, out_bytes);
@@ -739,9 +731,36 @@ fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
         .iter()
         .map(|c| {
             let f = |i: usize| f32::from_le_bytes([c[4 * i], c[4 * i + 1], c[4 * i + 2], c[4 * i + 3]]);
-            [f(0), f(1), f(2)]
+            [f(0), f(1), f(2), f(3)]
         })
         .collect()
+}
+
+/// Evaluate the terrain shader's lit pixel (`shade_lit`: `terrain_radiance` times the pre-exposure factor, clamped to 60,000) at
+/// `probes` on the GPU and return the value of each: the tier B oracle of the base shading bound (REND-025, REND-026). The terrain
+/// module is compiled with extra compute entries that call the functions, so the test runs the shader's own code.
+pub fn probe_lit_radiance(ctx: &GpuContext, probes: &[LitProbe]) -> Vec<[f32; 3]> {
+    let mut input: Vec<f32> = Vec::with_capacity(probes.len() * 60);
+    for p in probes {
+        input.extend([p.normal[0], p.normal[1], p.normal[2], p.height_above_water_m]);
+        input.extend([p.up[0], p.up[1], p.up[2], p.view as f32]);
+        input.extend([p.temperature_c, p.precipitation_mm, 0.0, 0.0]);
+        input.extend([p.sun[0], p.sun[1], p.sun[2], 0.0]);
+        input.extend([p.factor, 0.0, 0.0, 0.0]);
+        input.extend(p.table);
+    }
+    run_probe(ctx, "probe", &input, probes.len()).into_iter().map(|r| [r[0], r[1], r[2]]).collect()
+}
+
+/// Evaluate the terrain shader's `up_at(node_up, local)` (the unit up vector at `local` metres from a tile origin whose record holds
+/// `node_up` = unit up and the inverse radius) for each pair: the oracle of the slope input's precision and stability (REND-026, CON-11).
+pub fn probe_up_at(ctx: &GpuContext, probes: &[([f32; 4], [f32; 3])]) -> Vec<[f32; 3]> {
+    let mut input: Vec<f32> = Vec::with_capacity(probes.len() * 8);
+    for (node_up, local) in probes {
+        input.extend(*node_up);
+        input.extend([local[0], local[1], local[2], 0.0]);
+    }
+    run_probe(ctx, "probe_up", &input, probes.len()).into_iter().map(|r| [r[0], r[1], r[2]]).collect()
 }
 
 /// IEEE half precision from f32, round to nearest even (values past the half range become infinity).

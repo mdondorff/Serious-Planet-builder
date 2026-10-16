@@ -729,6 +729,55 @@ pub fn eval_gathered(
     eval_gathered_from(src, dirs, stop, footprint, eval, 64)
 }
 
+/// [`eval_gathered`] together with `extra`, a computation that reads further lattice cells (a tile's climate, GEN-021): the cells
+/// of `extra` join the footprint of the batch, so one gather reads the union grouped by block and every block of a tile is decoded
+/// once however small the source's cache (GEN-020). `extra` is run once against a recording source and once against the table (or
+/// against `src` when the batch is not gathered); its result is the one from the table. `stop` as in [`eval_gathered`]; when it
+/// answers true the results are as there (0.0) and `extra` is run against what was read, so its result is then meaningless.
+pub fn eval_gathered_with<R>(
+    src: &dyn LatticeSource,
+    dirs: &[Vec3],
+    stop: &dyn Fn() -> bool,
+    footprint: &dyn Fn(&dyn LatticeSource, Vec3),
+    eval: &dyn Fn(&dyn LatticeSource, Vec3) -> f64,
+    extra: &dyn Fn(&dyn LatticeSource) -> R,
+) -> (Vec<f64>, R) {
+    let mut out = vec![0.0; dirs.len()];
+    if !gatherable(src, dirs.len(), 64) {
+        for (k, &d) in dirs.iter().enumerate() {
+            if k % 64 == 0 && stop() {
+                break;
+            }
+            out[k] = eval(src, d);
+        }
+        return (out, extra(src));
+    }
+    let first = std::cell::Cell::new(true);
+    let both = |g: &dyn LatticeSource, d: Vec3| {
+        if first.replace(false) {
+            let _ = extra(g);
+        }
+        footprint(g, d);
+    };
+    let Some(by_block) = footprint_by_block(src, dirs, stop, &both) else { return (out, extra(src)) };
+    let mut cells = Vec::with_capacity(by_block.len());
+    for (n, &(face, block, k)) in by_block.iter().enumerate() {
+        if (n == 0 || (by_block[n - 1].0, by_block[n - 1].1) != (face, block) || n % 64 == 0) && stop() {
+            return (out, extra(src));
+        }
+        cells.push(read_cell(src, face, k));
+    }
+    cells.sort_unstable_by_key(|c| c.0);
+    let table = CellTable { res: src.res(), cells };
+    for (k, &d) in dirs.iter().enumerate() {
+        if k % 64 == 0 && stop() {
+            break;
+        }
+        out[k] = eval(&table, d);
+    }
+    (out, extra(&table))
+}
+
 /// [`eval_gathered`] gathering a batch of `min_dirs` directions or more (a smaller one is the plain loop).
 fn eval_gathered_from(
     src: &dyn LatticeSource,
@@ -833,6 +882,33 @@ pub fn eval_gathered_threads(
     cells.sort_unstable_by_key(|c| c.0);
     let table = CellTable { res: src.res(), cells };
     crate::height::eval_chunked(dirs, stop, threads, &|d| eval(&table, d))
+}
+
+/// The cells a set of reads needs, fetched once from a block-structured source in block order (GEN-020): a source of its own that
+/// answers exactly those cells from memory.
+pub struct GatheredCells(CellTable);
+
+impl LatticeSource for GatheredCells {
+    fn res(&self) -> u32 {
+        self.0.res
+    }
+    fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+        self.0.at(face, i, j)
+    }
+}
+
+/// Gather the cells `reads` takes from `src`: `reads(g)` is run once against a recording source (its results are ignored), the
+/// distinct cells it touched are read from `src` grouped by block, so each block is decoded once however small the source's cache, and
+/// the returned source answers them. `None` when `src` has no block structure (an in-memory grid): read it directly. Every cell is
+/// the source's own sample, so a read through the table is bit for bit the read from `src`.
+pub fn gather_cells(src: &dyn LatticeSource, reads: &dyn Fn(&dyn LatticeSource)) -> Option<GatheredCells> {
+    if !gatherable(src, 1, 1) {
+        return None;
+    }
+    let by_block = footprint_by_block(src, &[Vec3::new(0.0, 0.0, 0.0)], &|| false, &|g, _| reads(g))?;
+    let mut cells: Vec<_> = by_block.iter().map(|&(face, _, k)| read_cell(src, face, k)).collect();
+    cells.sort_unstable_by_key(|c| c.0);
+    Some(GatheredCells(CellTable { res: src.res(), cells }))
 }
 
 /// A 64-bit hash of every bit of every channel of a grid, in face and row-major order, with the resolution and

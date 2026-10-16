@@ -24,7 +24,7 @@ pub const BLOCK_SLOTS: u32 = 256;
 
 /// Bytes of one vertex-format tile of `cells`.
 pub fn vertex_slot_bytes(cells: u32) -> u64 {
-    vertex_count(cells) as u64 * MeshVertex::STRIDE
+    vertex_count(cells) as u64 * MeshVertex::GPU_STRIDE
 }
 
 /// The pools of a terrain share (in bytes) for the vertex format at `cells`.

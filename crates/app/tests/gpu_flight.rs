@@ -19,7 +19,7 @@ fn dir(name: &str) -> PathBuf {
 
 fn flight(out: &Path) -> String {
     let o = out.to_str().unwrap();
-    run(&["test-render", "--scene", "terrain", "--flight", "12", "--out-dir", o, "--size", "160x120", "--cells", "8", "--view", "level"])
+    run(&["test-render", "--scene", "terrain", "--flight", "12", "--out-dir", o, "--size", "320x240", "--cells", "16", "--view", "level"])
         .unwrap()
 }
 
@@ -44,7 +44,7 @@ fn delta(a: &Image, b: &Image) -> (usize, Option<(u32, u32)>, u8) {
 fn the_flight_writes_a_deterministic_frame_sequence_and_an_index() {
     let (a, b) = (dir("a"), dir("b"));
     let log = flight(&a);
-    assert!(log.contains("flight: wrote 12 frames") && log.contains("160x120, cells 8, tau 6 px, view level"), "{log}");
+    assert!(log.contains("flight: wrote 12 frames") && log.contains("320x240, cells 16, tau 6 px, view level"), "{log}");
     flight(&b);
     let index = std::fs::read_to_string(a.join("flight.txt")).unwrap();
     let rows: Vec<&str> = index.lines().filter(|l| !l.starts_with('#')).collect();
@@ -56,7 +56,7 @@ fn the_flight_writes_a_deterministic_frame_sequence_and_an_index() {
     for i in 0..12 {
         let name = format!("frame_{i:04}.png");
         let (img, again) = (read_png(&a.join(&name)).unwrap(), read_png(&b.join(&name)).unwrap());
-        assert_eq!((img.width, img.height), (160, 120), "{name}");
+        assert_eq!((img.width, img.height), (320, 240), "{name}");
         let (n, first, worst) = delta(&img, &again);
         assert_eq!(
             n,
@@ -134,9 +134,9 @@ fn the_default_relief_flight_is_deterministic_including_the_contact_sheet() {
             "--out-dir",
             d.to_str().unwrap(),
             "--size",
-            "160x120",
+            "320x240",
             "--cells",
-            "8",
+            "16",
         ])
         .unwrap();
     }
@@ -177,11 +177,11 @@ fn the_check_has_teeth_the_tile_id_view_is_solid_at_one_metre() {
 #[test]
 fn a_flight_writes_a_labelled_contact_sheet_and_the_finest_level_per_frame() {
     let d = dir("sheet");
-    run(&["test-render", "--scene", "terrain", "--flight", "30", "--out-dir", d.to_str().unwrap(), "--size", "160x120", "--cells", "8"])
+    run(&["test-render", "--scene", "terrain", "--flight", "30", "--out-dir", d.to_str().unwrap(), "--size", "320x240", "--cells", "16"])
         .unwrap();
     let sheet = read_png(&d.join("contact_sheet.png")).unwrap();
-    // 12 thumbnails in 4 columns, 160 px wide (factor 1), 4 px gutters.
-    assert_eq!((sheet.width, sheet.height), (4 * 160 + 5 * 4, 3 * 120 + 4 * 4));
+    // 12 thumbnails in 4 columns, 320 px wide (factor 1), 4 px gutters.
+    assert_eq!((sheet.width, sheet.height), (4 * 320 + 5 * 4, 3 * 240 + 4 * 4));
     let index = std::fs::read_to_string(d.join("flight.txt")).unwrap();
     assert!(index.starts_with("# frame altitude_above_terrain_m nodes plan_hash finest_level"), "{index}");
     let rows: Vec<Vec<&str>> = index.lines().filter(|l| !l.starts_with('#')).map(|l| l.split(' ').collect()).collect();
@@ -205,9 +205,9 @@ fn the_flight_from_compact_tiles_matches_the_vertex_reference_frame_by_frame() {
             "--out-dir",
             out.to_str().unwrap(),
             "--size",
-            "160x120",
+            "320x240",
             "--cells",
-            "8",
+            "16",
             "--view",
             "relief",
             "--tile-format",

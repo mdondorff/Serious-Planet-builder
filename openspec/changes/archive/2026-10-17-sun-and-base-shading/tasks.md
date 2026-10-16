@@ -1,0 +1,8 @@
+- [x] 1.1 `generators::climate`: f16, texture, reader values, analytic fallback, version words, known answers, thread independence, borders (GEN-021)
+- [x] 1.2 Tile formats: `TileMesh::climate`, compact fourth channel, mesh key chain and persistent key, MESH_VERSION 7, payload version 2, pre-filled pack stale test (GEN-019, GEN-010, STRM-021)
+- [x] 2.1 Look file schema 2: `sun` and `albedo`, identity step, fixtures, rule in LOOK-002 (LOOK-001, LOOK-002, LOOK-003)
+- [x] 2.2 `frame::look::shading`: albedo, radiance, up, sun from time of day, debug views; the plan's tokens (REND-024, REND-025)
+- [x] 3.1 Renderer: node record up vector, globals albedo table, 48-byte vertex, compact fragment lookup, probes and oracles (REND-025, REND-027)
+- [x] 3.2 Tier C: climate views, formats, albedo table, water level, lighting, goldens (REND-027, LOOK-007, REND-026)
+- [x] 4.1 Pins re-recorded: headroom, upload cap, node bytes, plan counts and snapshots (STRM-006)
+- [x] 5.1 numerics-reviewer, spec-guardian, verifier; test, test gpu, test gpu --real, spec-lint, fmt, clippy; golden-review; archive; log line; delete queue item 4

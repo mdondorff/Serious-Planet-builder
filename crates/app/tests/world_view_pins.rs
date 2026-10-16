@@ -12,7 +12,7 @@ const R: f64 = 6_371_000.0;
 const PIN_BAKE_RES: u32 = 256;
 
 /// Nodes per standard view, the default world (eroded field over a 256-cell bake), cells 32, tau 6 px, 1440p. The other counts
-/// follow from it (2,304 triangles and 1,221 x 44 vertex bytes per tile). Pinned 2026-10-15 by `world-field-everywhere` (the
+/// follow from it (2,304 triangles and 1,221 x 48 GPU vertex bytes per tile). Pinned 2026-10-15 by `world-field-everywhere` (the
 /// default world is the eroded field); raising a pin is a decision: say why in the change that does it (CON-20).
 /// Re-pinned 2026-10-15 by `finest-level-cap` (LOD-010, declared: finest level 22): the views are planned at the production finest
 /// level 22 (cells 32); only ground-1m reaches it: 2,936 to 2,409 nodes (-17.9 %), every other view is unchanged. The level-26
@@ -66,7 +66,7 @@ fn every_standard_view_of_the_default_world_stays_within_its_own_pinned_counts()
         let c = plan.counts();
         assert_eq!(c.draw_calls as usize, plan.nodes.len(), "{name}");
         assert_eq!(c.triangles, plan.nodes.len() as u64 * 2_304, "{name}");
-        assert_eq!(c.upload_bytes, u64::from(c.resident_tiles) * 1_221 * 44, "{name}");
+        assert_eq!(c.upload_bytes, u64::from(c.resident_tiles) * 1_221 * 48, "{name}");
         assert_eq!(c.resident_tiles as usize, plan.nodes.len(), "{name}: every node of a plan is a distinct tile");
         c.check(&CountBudget::REFERENCE_1440P).unwrap_or_else(|e| panic!("{name}: {e}"));
         report.push(format!("(\"{name}\", {}),", plan.nodes.len()));
@@ -74,7 +74,7 @@ fn every_standard_view_of_the_default_world_stays_within_its_own_pinned_counts()
             max_draw_calls: pin,
             max_triangles: u64::from(pin) * 2_304,
             max_resident_tiles: pin,
-            max_upload_bytes: u64::from(pin) * 1_221 * 44,
+            max_upload_bytes: u64::from(pin) * 1_221 * 48,
         };
         if let Err(e) = c.check(&budget) {
             failures.push(format!("{name}: {e} (nodes {} against pin {pin})", plan.nodes.len()));

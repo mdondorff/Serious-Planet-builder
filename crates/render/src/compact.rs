@@ -200,7 +200,37 @@ fn vs(@builtin(instance_index) inst: u32, @builtin(vertex_index) vi: u32) -> VsO
     out.morph = m;
     out.local = local;
     out.node_index = inst;
+    out.aux = vec2<f32>(f32(i), f32(j)) / f32(CELLS);
     return out;
+}
+
+// The climate texel `idx` (row-major over the 9 x 9 texture) of the tile at texel origin `base`: the fourth channel of the slot's
+// texel `idx` holds the temperature and of texel `81 + idx` the precipitation, as f16 bits (GEN-021).
+fn climate_bits(base: vec2<i32>, idx: i32) -> u32 {
+    return textureLoad(atlas, base + vec2<i32>(idx % (CELLS + 1), idx / (CELLS + 1)), 0).w;
+}
+
+fn climate_texel(base: vec2<i32>, idx: i32) -> vec2<f32> {
+    return unpack2x16float(climate_bits(base, idx) | (climate_bits(base, 81 + idx) << 16u));
+}
+
+// The climate at a fragment of a compact tile (presentation data): the bilinear interpolation of the tile's 9 x 9 texture at the
+// fragment's tile coordinates (`aux`, interpolated from the vertices). The f16 decode is exact.
+fn tile_climate(in: VsOut) -> vec2<f32> {
+    let tref = tile_refs[in.node_index];
+    let base = vec2<i32>(i32(tref.x), i32(tref.y));
+    let x = clamp(in.aux.x, 0.0, 1.0) * 8.0;
+    let y = clamp(in.aux.y, 0.0, 1.0) * 8.0;
+    let a = min(i32(x), 7);
+    let b = min(i32(y), 7);
+    let wx = x - f32(a);
+    let wy = y - f32(b);
+    let i00 = b * 9 + a;
+    let c00 = climate_texel(base, i00);
+    let c10 = climate_texel(base, i00 + 1);
+    let c01 = climate_texel(base, i00 + 9);
+    let c11 = climate_texel(base, i00 + 10);
+    return mix(mix(c00, c10, wx), mix(c01, c11, wx), wy);
 }
 
 "#;

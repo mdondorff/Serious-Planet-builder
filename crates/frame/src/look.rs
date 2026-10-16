@@ -11,8 +11,10 @@
 //! `log2(L * 100 / 12.5) = log2(8 L)`, the same function the histogram bins by.
 
 pub mod file;
+pub mod shading;
 
 use planet_core::hash::hash_u64s;
+use shading::{AlbedoParams, ShadeView};
 
 /// The Earth default of the scene-unit scale: illuminance of the sun above the atmosphere in lux (1361 W/m2 at 93 lm/W), the value
 /// of "1" in scene units. The value in use comes from the look data ([`SceneUnits`], `file`); this constant is only the default.
@@ -198,6 +200,13 @@ pub struct LitPlan {
     pub units: SceneUnits,
     /// The histogram axis and band the exposure passes use (look data).
     pub histogram: HistogramParams,
+    /// The albedo table of the base shading (look data, ADR 0039 point 3).
+    pub albedo: AlbedoParams,
+    /// The water level W in metres above the reference surface (ADR 0041; until the water-level field exists the sea's constant
+    /// level, 0): the beach band and the seabed are measured from it, never from a hard-coded sea level.
+    pub water_level_m: f32,
+    /// Which image the terrain shows (debug views, CON-18).
+    pub view: ShadeView,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -217,7 +226,7 @@ impl ToneMapMode {
     }
 }
 
-/// The fixed sun of the first lit views (the relief view's sun): towards +x, +y and +z, normalised.
+/// The Earth default sun direction of the look (the relief view's sun, the sun of the first lit views): towards +x, +y and +z, normalised.
 pub const DEFAULT_SUN: [f32; 3] = [0.501_405_9, 0.601_687_1, 0.621_743_3];
 
 impl LitPlan {
@@ -236,11 +245,14 @@ impl LitPlan {
         Self {
             exposure: ExposureMode::Fixed { ev100 },
             dt_s: 0.0,
-            sun_dir: DEFAULT_SUN,
+            sun_dir: look.sun.direction.map(|v| v as f32),
             reset_exposure: false,
             tonemap: look.tone_curve.mode(),
             units: look.units,
             histogram: look.histogram,
+            albedo: look.albedo,
+            water_level_m: 0.0,
+            view: ShadeView::Lit,
         }
     }
 
@@ -259,21 +271,33 @@ impl LitPlan {
             }
         };
         // The look data enter the text only when they differ from the Earth defaults, so a plan made with the defaults keeps the
-        // text (and the hash) it had before the look file existed.
+        // text (and the hash) it had before the look file existed. The base shading's tokens (ADR 0039) follow the same rule: the
+        // albedo table, the water level and the debug view are written only when they are not the default.
         let h64 = |v: f64| format!("{:016x}", v.to_bits());
-        let look = if self.units == SceneUnits::EARTH && self.histogram == HistogramParams::EARTH {
-            String::new()
-        } else {
+        let mut look = String::new();
+        if !(self.units == SceneUnits::EARTH && self.histogram == HistogramParams::EARTH) {
             let g = self.histogram;
-            format!(
+            look.push_str(&format!(
                 " units {} hist {} {} {} {}",
                 h64(self.units.solar_illuminance_lux),
                 h64(g.ev_min),
                 h64(g.ev_max),
                 h64(g.band_low),
                 h64(g.band_high)
-            )
-        };
+            ));
+        }
+        if self.albedo != AlbedoParams::EARTH {
+            look.push_str(" albedo");
+            for b in self.albedo.bits() {
+                look.push_str(&format!(" {b:016x}"));
+            }
+        }
+        if self.water_level_m.to_bits() != 0 {
+            look.push_str(&format!(" water {}", h(self.water_level_m)));
+        }
+        if self.view != ShadeView::Lit {
+            look.push_str(&format!(" view {}", self.view.name()));
+        }
         format!(
             "lit {mode} dt {} sun {} {} {} reset {} tonemap {}{look}",
             h(self.dt_s),
@@ -305,32 +329,66 @@ impl LitPlan {
             }
             u64::from_str_radix(s, 16).map(f64::from_bits).map_err(|e| format!("bad f64 bits '{s}': {e}"))
         };
-        let (head, look): (&[&str], (SceneUnits, HistogramParams)) = match rest {
-            [head @ .., "units", u, "hist", a, b, c, d] => (
-                head,
-                (
-                    SceneUnits { solar_illuminance_lux: f64_of(u)? },
-                    HistogramParams { ev_min: f64_of(a)?, ev_max: f64_of(b)?, band_low: f64_of(c)?, band_high: f64_of(d)? },
-                ),
-            ),
-            head => (head, (SceneUnits::EARTH, HistogramParams::EARTH)),
+        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..' and 'view ..' in this order)";
+        let ["dt", dt, "sun", sx, sy, sz, "reset", reset, "tonemap", tm, tail @ ..] = rest else {
+            return Err(usage.into());
         };
-        match head {
-            ["dt", dt, "sun", sx, sy, sz, "reset", reset, "tonemap", tm] => Ok(LitPlan {
-                exposure,
-                dt_s: f(dt)?,
-                sun_dir: [f(sx)?, f(sy)?, f(sz)?],
-                reset_exposure: *reset == "1",
-                tonemap: match *tm {
-                    "aces" => ToneMapMode::Aces,
-                    "ev-bands" => ToneMapMode::EvBands,
-                    other => return Err(format!("unknown tone map '{other}'")),
-                },
-                units: look.0,
-                histogram: look.1,
-            }),
-            _ => Err("lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ....')".into()),
+        let mut plan = LitPlan {
+            exposure,
+            dt_s: f(dt)?,
+            sun_dir: [f(sx)?, f(sy)?, f(sz)?],
+            reset_exposure: *reset == "1",
+            tonemap: match *tm {
+                "aces" => ToneMapMode::Aces,
+                "ev-bands" => ToneMapMode::EvBands,
+                other => return Err(format!("unknown tone map '{other}'")),
+            },
+            units: SceneUnits::EARTH,
+            histogram: HistogramParams::EARTH,
+            albedo: AlbedoParams::EARTH,
+            water_level_m: 0.0,
+            view: ShadeView::Lit,
+        };
+        // The optional tokens, each at most once and in the order the text writes them.
+        let mut rest = tail;
+        let mut stage = 0;
+        while let [key, more @ ..] = rest {
+            let (rank, arity) = match *key {
+                "units" => (1, 6),
+                "albedo" => (2, 39),
+                "water" => (3, 1),
+                "view" => (4, 1),
+                _ => return Err(usage.into()),
+            };
+            if rank <= stage || more.len() < arity {
+                return Err(usage.into());
+            }
+            stage = rank;
+            let (args, after) = more.split_at(arity);
+            match rank {
+                1 => {
+                    let ["hist"] = [args[1]] else { return Err(usage.into()) };
+                    plan.units = SceneUnits { solar_illuminance_lux: f64_of(args[0])? };
+                    plan.histogram = HistogramParams {
+                        ev_min: f64_of(args[2])?,
+                        ev_max: f64_of(args[3])?,
+                        band_low: f64_of(args[4])?,
+                        band_high: f64_of(args[5])?,
+                    };
+                }
+                2 => {
+                    let mut bits = [0u64; 39];
+                    for (b, a) in bits.iter_mut().zip(args) {
+                        *b = f64_of(a)?.to_bits();
+                    }
+                    plan.albedo = AlbedoParams::from_bits(&bits);
+                }
+                3 => plan.water_level_m = f(args[0])?,
+                _ => plan.view = ShadeView::parse(args[0]).ok_or_else(|| format!("unknown lit view '{}'", args[0]))?,
+            }
+            rest = after;
         }
+        Ok(plan)
     }
 
     /// Refuse values a renderer cannot use: non-finite or negative time, non-finite EVs, a reversed or non-finite range, negative
@@ -359,6 +417,10 @@ impl LitPlan {
                 speed_down: f64::from(p.speed_down),
             })
             .map_err(|e| format!("lit plan: {e}"))?;
+        }
+        self.albedo.validate().map_err(|(k, v, why)| format!("lit plan: `{k}` = {v}: {why}"))?;
+        if !self.water_level_m.is_finite() {
+            return Err(format!("lit plan: water level is {}, not finite", self.water_level_m));
         }
         file::validate_units(&self.units).map_err(|e| format!("lit plan: {e}"))?;
         file::validate_histogram(&self.histogram).map_err(|e| format!("lit plan: {e}"))?;
@@ -516,41 +578,6 @@ pub fn ev_band(exposed_luminance: f64) -> Option<usize> {
     }
     let stops_below = -libm::log2(exposed_luminance) / EV_BAND_STOPS;
     Some((libm::floor(stops_below).max(0.0) as usize).min(EV_BAND_COUNT - 1))
-}
-
-/// Base radiance of the lit terrain before the pre-exposure: Lambert of the vertex normal under the sun with a height tint as
-/// albedo (a placeholder until the albedo comes from the climate field, ADR 0039), in scene units. `height` and `range` are metres.
-/// The tint is the relief view's.
-pub fn lit_terrain_radiance(normal: [f64; 3], height: f64, range: [f64; 2], sun: [f64; 3]) -> [f64; 3] {
-    let n = normalize(normal);
-    let t = ((height - range[0]) / (range[1] - range[0]).max(1e-6)).clamp(0.0, 1.0);
-    let albedo = tint(t).map(|c| c * ALBEDO_SCALE);
-    let ndl = (n[0] * sun[0] + n[1] * sun[1] + n[2] * sun[2]).max(0.0);
-    albedo.map(|a| a * ndl / core::f64::consts::PI)
-}
-
-/// Scale from the relief view's display tint to a linear albedo.
-pub const ALBEDO_SCALE: f64 = 0.4;
-
-fn normalize(v: [f64; 3]) -> [f64; 3] {
-    let l = libm::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-    v.map(|c| c / l)
-}
-
-fn smoothstep(a: f64, b: f64, x: f64) -> f64 {
-    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
-fn mix3(a: [f64; 3], b: [f64; 3], t: f64) -> [f64; 3] {
-    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
-}
-
-/// The height tint of the relief view (water blue, green, brown, white by normalised height).
-pub fn tint(t: f64) -> [f64; 3] {
-    let low = mix3([0.18, 0.36, 0.56], [0.36, 0.56, 0.26], smoothstep(0.0, 0.35, t));
-    let high = mix3([0.66, 0.56, 0.38], [0.95, 0.95, 0.95], smoothstep(0.7, 1.0, t));
-    mix3(low, high, smoothstep(0.35, 0.7, t))
 }
 
 /// What the scene target holds for a radiance: pre-exposed and clamped to [`HDR_CLAMP`] (the CPU reference of every lit write).

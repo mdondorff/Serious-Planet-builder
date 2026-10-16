@@ -90,7 +90,11 @@ fn the_indirect_path_draws_the_image_of_the_per_draw_loop() {
                 assert_eq!(indirect.draw_calls, per_draw.draw_calls);
                 assert_eq!(indirect.triangles, per_draw.triangles);
                 assert_eq!(indirect.node_record_bytes, per_draw.node_record_bytes);
-                assert_eq!(indirect.node_record_bytes, p.nodes.len() as u64 * 192, "one 192 B node record per node");
+                assert_eq!(
+                    indirect.node_record_bytes,
+                    p.nodes.len() as u64 * planet_frame::draw::NODE_RECORD_BYTES,
+                    "one 208 B node record per node (192 B and the up vector)"
+                );
                 assert_eq!(indirect.argument_bytes, p.nodes.len() as u64 * 20, "one 20 B record per node");
                 assert!(indirect.encoded_draws >= 1 && indirect.encoded_draws <= indirect.draw_calls, "{indirect:?}");
                 if scattered && p.nodes.iter().filter(|n| n.tile.level() > 2).count() > 3 {

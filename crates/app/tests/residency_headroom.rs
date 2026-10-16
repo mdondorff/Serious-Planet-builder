@@ -28,9 +28,11 @@ const CELLS: u32 = 32;
 const COMPACT_MID_SLOTS: u64 = 15 * 15_376;
 const COMPACT_HIGH_SLOTS: u64 = 23 * 15_376;
 
-/// The same shares in vertex-format slots (cells 32, 53,724 B, blocks of 256): `tier_pool(tier, 32, 2).main_slots()`.
-const VERTEX_MID_SLOTS: u64 = 37_376;
-const VERTEX_HIGH_SLOTS: u64 = 57_344;
+/// The same shares in vertex-format slots (cells 32, 58,608 B since MESH_VERSION 7: the 44-byte vertex and the 4-byte climate of each of
+/// the 1,221 vertices, ADR 0039 point 2; blocks of 256): `tier_pool(tier, 32, 2).main_slots()`. Under MESH_VERSION 6 these were 37,376 and
+/// 57,344 slots of 53,724 B.
+const VERTEX_MID_SLOTS: u64 = 34_304;
+const VERTEX_HIGH_SLOTS: u64 = 52_480;
 
 fn closure(tiles: impl IntoIterator<Item = TileId>) -> BTreeSet<TileId> {
     let mut out = BTreeSet::new();
@@ -155,14 +157,17 @@ fn the_slots_every_standard_view_needs_stay_within_their_pins_and_the_share() {
     assert!(g_d * 100 <= compact_mid * 6, "ground-1m D {} is over 6 % of {compact_mid}", g_d);
     assert!(r_max * 100 <= compact_high * 10, "R {r_max} is over 10 % of the high tier's {compact_high}");
 
-    // The reference format: the vertex format's slot (53,724 B at cells 32). The share is a byte ceiling, so the same demand takes a
+    // The reference format: the vertex format's slot (58,608 B at cells 32). The share is a byte ceiling, so the same demand takes a
     // larger fraction of fewer slots; both tiers hold the worst R with room to spare (no degradation in normal use).
     let mid = tier_pool(Tier::Mid, CELLS, 2).unwrap();
     let high = tier_pool(Tier::High, CELLS, 2).unwrap();
     assert!(mid.allocated_bytes() <= 2 * GIB && high.allocated_bytes() <= 3 * GIB);
     let (mid_slots, high_slots) = (u64::from(mid.main_slots()), u64::from(high.main_slots()));
     assert_eq!((mid_slots, high_slots), (VERTEX_MID_SLOTS, VERTEX_HIGH_SLOTS), "the share in vertex-format slots changed");
-    assert!(r_max * 100 <= mid_slots * 40, "R {r_max} is over 40 % of the mid tier's {mid_slots} vertex-format slots");
+    // Re-pinned with the climate (MESH_VERSION 7, ADR 0039 point 2): the vertex slot grew 9.1 % (4 B of climate per vertex), so the same R
+    // is 41.8 % of the mid tier's slots (it was 38.3 %); the bounds move from 40 % / 26 % to 45 % / 30 %. The compact tile, the
+    // production format, did not grow: the climate rides in the spare channel of its texels, and its pins above are unchanged.
+    assert!(r_max * 100 <= mid_slots * 45, "R {r_max} is over 45 % of the mid tier's {mid_slots} vertex-format slots");
     assert!(g_d * 100 <= mid_slots * 12, "ground-1m D {} is over 12 % of {mid_slots}", g_d);
-    assert!(r_max * 100 <= high_slots * 26, "R {r_max} is over 26 % of the high tier's {high_slots}");
+    assert!(r_max * 100 <= high_slots * 30, "R {r_max} is over 30 % of the high tier's {high_slots}");
 }

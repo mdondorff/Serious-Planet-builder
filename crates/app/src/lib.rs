@@ -579,6 +579,14 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         ctx.prefer_tile_format(format);
     }
     writeln!(out, "tile format: {}", ctx.default_tile_format().name()).map_err(err)?;
+    if ctx.default_tile_format() == planet_render::TileFormat::Compact && o.cells < planet_generators::climate::CLIMATE_MIN_COMPACT_CELLS {
+        return Err(format!(
+            "--cells {}: the compact tile format needs at least {} cells per tile edge (the climate of a tile rides in the spare channel of its first 162 texels, GEN-021): use --cells {} or more, or --tile-format vertex",
+            o.cells,
+            planet_generators::climate::CLIMATE_MIN_COMPACT_CELLS,
+            planet_generators::climate::CLIMATE_MIN_COMPACT_CELLS
+        ));
+    }
     if o.perf && o.perf_smoke {
         return Err("--perf and --perf-smoke exclude each other: a smoke run is never a measurement".into());
     }
@@ -906,6 +914,13 @@ mod tests {
         }
     }
 
+    // spec: GEN-019
+    #[test]
+    fn the_compact_format_with_fewer_than_16_cells_is_refused_naming_the_minimum() {
+        let e = run_str(&["test-render", "--scene", "terrain", "--cells", "8", "--tile-format", "compact"]).unwrap_err();
+        assert!(e.contains("--cells 8") && e.contains("at least 16") && e.contains("--tile-format vertex"), "{e}");
+    }
+
     // spec: STRM-021, STRM-022
     #[test]
     fn a_pre_filled_tile_read_by_the_streamer_equals_the_generated_one_bit_for_bit_and_a_cold_reader_ignores_the_pack() {
@@ -925,22 +940,22 @@ mod tests {
             "--threads",
             "4",
             "--cells",
-            "8",
+            "16",
         ])
         .unwrap();
         let def = || planet_world_def::WorldDefinition::single_planet(skeleton::RADIUS_M, 3);
         let world = std::sync::Arc::new(worldfield::WorldTerrain::open_store(def(), std::path::Path::new(&store), 8).unwrap());
         // Levels 0..=3 are all present for the run's cells and finest level in the compact form; the vertex form finds only levels 0-2
         // (those records are shared by both forms, the pack holds the compact form of level 3).
-        assert_eq!(world.prefill_present(3, 8, 22, planet_render::TileFormat::Compact).unwrap(), (510, 510));
-        assert_eq!(world.prefill_present(3, 8, 22, planet_render::TileFormat::Vertex).unwrap(), (126, 510));
-        assert_eq!(world.prefill_present(4, 8, 22, planet_render::TileFormat::Compact).unwrap(), (510, 2046));
-        assert_eq!(world.prefill_present(3, 16, 22, planet_render::TileFormat::Compact).unwrap(), (0, 510), "other cells");
+        assert_eq!(world.prefill_present(3, 16, 22, planet_render::TileFormat::Compact).unwrap(), (510, 510));
+        assert_eq!(world.prefill_present(3, 16, 22, planet_render::TileFormat::Vertex).unwrap(), (126, 510));
+        assert_eq!(world.prefill_present(4, 16, 22, planet_render::TileFormat::Compact).unwrap(), (510, 2046));
+        assert_eq!(world.prefill_present(3, 32, 22, planet_render::TileFormat::Compact).unwrap(), (0, 510), "other cells");
         let src = |w: &std::sync::Arc<worldfield::WorldTerrain>, format| skeleton::MeshSource {
             world: std::sync::Arc::clone(w),
             format,
             max_level: 22,
-            cells: 8,
+            cells: 16,
         };
         let cold = std::sync::Arc::new(worldfield::WorldTerrain::open_store(def(), std::path::Path::new(&store), 8).unwrap().cold());
         let field = world.field().unwrap();
@@ -950,7 +965,7 @@ mod tests {
             .step_by(11)
             .chain(planet_cache::meshpack::prefill_tiles(3).into_iter().take(8))
         {
-            let on_demand = skeleton::tile_for(planet_render::TileFormat::Compact, field.as_ref(), tile, 8, world.radius_m(), 22);
+            let on_demand = skeleton::tile_for(planet_render::TileFormat::Compact, field.as_ref(), tile, 16, world.radius_m(), 22);
             let before = world.prefill_hits();
             assert_eq!(
                 src(&world, planet_render::TileFormat::Compact).load(tile).unwrap(),

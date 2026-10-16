@@ -73,7 +73,14 @@ impl TileSource<RenderTile> for Source {
     fn load(&self, tile: TileId) -> Result<RenderTile, String> {
         let field = Reference(1);
         let rec = ResidentRecords::new(&field, &TangentWarp, &self.lod).record(tile);
-        Ok(RenderTile::Vertex(TileMesh { id: tile, cells: CELLS, key: rec.mesh_key, origin: rec.origin, vertices: Vec::new() }))
+        Ok(RenderTile::Vertex(TileMesh {
+            id: tile,
+            cells: CELLS,
+            key: rec.mesh_key,
+            origin: rec.origin,
+            vertices: Vec::new(),
+            climate: Default::default(),
+        }))
     }
 }
 
@@ -876,7 +883,7 @@ fn the_prefetch_set_is_computed_on_the_worker_and_never_on_the_frame() {
 // ---- the per-frame upload budget (STRM-006 upload cap) ----
 
 /// Bytes of one vertex-format tile at cells 32 (what the renderer uploads today).
-const VERTEX_TILE_BYTES: u64 = 53_724;
+const VERTEX_TILE_BYTES: u64 = 58_608;
 
 /// Rank of a tile in the upload order, by the wants the frame started with, worked out here from first principles: the draw
 /// set with its ancestors and the roots, then R with its ancestors, then the prefetch set, then the rest; coarse before fine.
@@ -959,7 +966,7 @@ fn on_the_dive_and_a_teleport_the_upload_cap_holds_in_every_frame_in_class_order
     let mut rig = Rig::budgeted(1_000_000, true, VERTEX_TILE_BYTES, UploadBudget::default());
     let cap = DEFAULT_TILE_BYTES_PER_FRAME;
     assert_eq!(cap, 1 << 20);
-    assert_eq!(VERTEX_TILE_BYTES, planet_generators::mesh::vertex_count(32) as u64 * planet_generators::mesh::MeshVertex::STRIDE);
+    assert_eq!(VERTEX_TILE_BYTES, planet_generators::mesh::vertex_count(32) as u64 * planet_generators::mesh::MeshVertex::GPU_STRIDE);
     let c = FrameCounts { upload_bytes: 7, deferred: 8, node_bytes: 9, uploaded: 3, ..Default::default() };
     assert_eq!(FrameCounts::NAMES.len(), c.values().len());
     assert_eq!(&c.values()[7..12], &[3, 0, 7, 8, 9]);

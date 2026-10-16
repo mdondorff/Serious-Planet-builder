@@ -2,10 +2,12 @@
 //! Earth defaults and the plan they feed. GPU-free (CON-03).
 
 use planet_frame::look::file::*;
+use planet_frame::look::shading::AlbedoParams;
 use planet_frame::look::{self, ExposureMode, HistogramParams, LitPlan, SceneUnits, ToneMapMode};
 use planet_world_def::BodyId;
 
 const FIXTURE_V1: &str = include_str!("data/look_v1_moon_and_earth.toml");
+const FIXTURE_V2: &str = include_str!("data/look_v2_albedo_and_sun.toml");
 
 fn err(text: &str) -> String {
     parse_look(text).unwrap_err().to_string()
@@ -17,6 +19,8 @@ fn custom() -> LookParams {
         exposure: ExposureLook { min_ev100: -4.5, max_ev100: 12.25, speed_up: 2.0, speed_down: 0.25 },
         histogram: HistogramParams { ev_min: -8.0, ev_max: 24.0, band_low: 0.25, band_high: 0.75 },
         tone_curve: ToneCurve::Aces,
+        albedo: AlbedoParams { snow: [0.7, 0.72, 0.75], wet_mm: 1200.0, beach_height_m: 2.0, ..AlbedoParams::EARTH },
+        sun: SunLook { direction: [0.0, 1.0, 0.0] },
     }
 }
 
@@ -51,7 +55,7 @@ fn canonical_text_is_deterministic_and_round_trips_bit_for_bit() {
     let text = to_toml(&f);
     assert_eq!(parse_look(&text).unwrap(), f);
     assert_eq!(to_toml(&parse_look(&text).unwrap()), text, "writing what was read gives the same text");
-    assert!(text.starts_with("schema_version = 1\nkind = \"look\"\n"));
+    assert!(text.starts_with("schema_version = 2\nkind = \"look\"\n"));
     let order: Vec<usize> = ["[body.0.units]", "[body.7.units]", "[body.12.units]"].iter().map(|k| text.find(k).unwrap()).collect();
     assert!(order[0] < order[1] && order[1] < order[2], "bodies are written in id order");
     // The same content from a differently formatted file writes the same text.
@@ -140,7 +144,7 @@ solar_illuminance_lux = 126600.0
 #[test]
 fn version_checks_refuse_with_actionable_messages() {
     assert_eq!(parse_look("kind = \"look\"\n").unwrap_err(), LookError::MissingSchemaVersion);
-    assert!(err("kind = \"look\"\n").contains("schema_version = 1"));
+    assert!(err("kind = \"look\"\n").contains(&format!("schema_version = {SCHEMA_VERSION}")));
     let future = format!("schema_version = {}\nkind = \"look\"\n[body.0.units]\nsolar_illuminance_lux = 126600.0\n", SCHEMA_VERSION + 1);
     assert_eq!(parse_look(&future).unwrap_err(), LookError::NewerSchema { found: SCHEMA_VERSION + 1, known: SCHEMA_VERSION });
     let e = err(&future);
@@ -229,10 +233,29 @@ fn migration_failures_name_the_step_and_the_gap() {
 // spec: LOOK-002
 #[test]
 fn the_production_chain_reads_the_version_1_fixture_and_writes_the_current_layout() {
-    assert_eq!(SCHEMA_VERSION, 1, "a second layout needs a migration step in MIGRATIONS and a fixture of this version kept");
+    assert_eq!(
+        SCHEMA_VERSION, 2,
+        "a new table or key needs a new version, an identity step in MIGRATIONS and a fixture of this version kept"
+    );
     assert_eq!(MIGRATIONS.len() as u32, SCHEMA_VERSION - 1, "one step per older version");
+    assert_eq!(MIGRATIONS.iter().map(|m| m.from).collect::<Vec<_>>(), [1], "the steps run from version 1 up without a gap");
+    // The version 1 fixture goes through the real chain (the identity step 1 to 2) and reads as written.
     let f = parse_look(FIXTURE_V1).unwrap();
+    assert_eq!(f.body(BodyId(3)).units.solar_illuminance_lux, 25_000.0);
+    assert_eq!(f.body(BodyId(3)).albedo, AlbedoParams::EARTH, "the tables version 2 added are the Earth default in a version 1 file");
+    assert_eq!(f.body(BodyId(3)).sun, SunLook::default());
     assert_eq!(parse_look(&to_toml(&f)).unwrap(), f);
+    // The same content written as a version 2 file (the current layout) reads equal and writes the same text.
+    let v2 = FIXTURE_V1.replacen("schema_version = 1", "schema_version = 2", 1);
+    assert_eq!(parse_look(&v2).unwrap(), f);
+    assert_eq!(to_toml(&parse_look(&v2).unwrap()), to_toml(&f));
+    // The fixture of version 2 carries the tables version 2 added.
+    let g = parse_look(FIXTURE_V2).unwrap();
+    assert_eq!(g.body(BodyId(1)).sun.direction, [0.0, 0.0, 1.0]);
+    assert_eq!(g.body(BodyId(1)).albedo.snow, [0.9, 0.9, 0.95]);
+    assert_eq!(g.body(BodyId(1)).albedo.dry_mm, 100.0);
+    assert_eq!(g.body(BodyId(1)).albedo.wet_mm, AlbedoParams::EARTH.wet_mm, "a key left out is the default");
+    assert_eq!(parse_look(&to_toml(&g)).unwrap(), g);
 }
 
 // spec: LOOK-003

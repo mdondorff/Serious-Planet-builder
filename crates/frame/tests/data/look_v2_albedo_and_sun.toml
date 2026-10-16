@@ -1,0 +1,15 @@
+# A hand-written look file, schema version 2 (the version that added the `sun` and `albedo` tables, ADR 0039): comments, key order
+# and spacing never matter. Body 1 is a pale, dry world lit from +z; every key it leaves out is the Earth default.
+schema_version = 2
+kind = "look"
+
+[body.1.albedo]
+snow = [0.9, 0.9, 0.95]
+dry_mm = 100.0
+rock = [0.25, 0.2, 0.15]
+
+[body.1.sun]
+direction = [0.0, 0.0, 1.0]
+
+[body.1.units]
+solar_illuminance_lux = 90000.0

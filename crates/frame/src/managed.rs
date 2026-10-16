@@ -38,7 +38,7 @@ pub trait TileSink {
     /// texels plus its record (8,840 B at cells 32); a sink that writes something else says so.
     fn upload_bytes(&self, tile: &RenderTile) -> u64 {
         match tile {
-            RenderTile::Vertex(m) => m.vertices.len() as u64 * MeshVertex::STRIDE,
+            RenderTile::Vertex(m) => m.vertices.len() as u64 * MeshVertex::GPU_STRIDE,
             RenderTile::Compact(c) => c.resident_bytes(),
         }
     }

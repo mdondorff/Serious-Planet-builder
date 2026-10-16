@@ -32,7 +32,7 @@ fn a_compact_tile_counts_at_its_atlas_size_and_a_vertex_fallback_tile_at_its_ver
     let field = Reference(1);
     let compact = RenderTile::Compact(compact_tile_field(&field, &TangentWarp, tile_id(), CELLS, RADIUS_M));
     let mesh = tile_mesh_field(&field, &TangentWarp, tile_id(), CELLS, RADIUS_M);
-    let vertex_bytes = mesh.vertices.len() as u64 * MeshVertex::STRIDE;
+    let vertex_bytes = mesh.vertices.len() as u64 * MeshVertex::GPU_STRIDE;
     let vertex = RenderTile::Vertex(mesh);
     let sink = DefaultSink;
 

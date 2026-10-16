@@ -458,7 +458,7 @@ fn plan_counts_stay_within_the_budget_over_the_scripted_views() {
         // Per-tile constants at cells = 32 (the budget below is derived from them): 2 x 32^2 grid triangles plus 4 skirt strips of
         // 32 quads; 33^2 grid vertices plus 4 x 33 skirt vertices at 11 f32 each.
         assert_eq!(c.triangles, plan.nodes.len() as u64 * 2_304, "{name}");
-        assert_eq!(c.upload_bytes, u64::from(c.resident_tiles) * 1_221 * 44, "{name}");
+        assert_eq!(c.upload_bytes, u64::from(c.resident_tiles) * 1_221 * 48, "{name}");
         assert_eq!(c.resident_tiles as usize, plan.nodes.len(), "{name}: every node of a plan is a distinct tile");
         c.check(&CountBudget::REFERENCE_1440P).unwrap_or_else(|e| panic!("{name}: {e}"));
         worst = worst.max(c.draw_calls);
@@ -476,7 +476,7 @@ fn plan_counts_stay_within_the_budget_over_the_scripted_views() {
 /// The node count of each standard view over the seed-only reference field (the field the goldens keep, GEN-018) at the
 /// production-like parameters of the test above, pinned; the default world's (eroded field) pins are in
 /// `crates/app/tests/world_view_pins.rs`. The other counts
-/// follow from it (2,304 triangles and 1,221 x 44 vertex bytes per tile). Raising a pin is a decision: say why in the
+/// follow from it (2,304 triangles and 1,221 x 48 GPU vertex bytes per tile). Raising a pin is a decision: say why in the
 /// change that does it (CON-20); a view that drops well below its pin should have the pin lowered with it.
 /// Re-pinned 2026-10-15 by `tight-frustum-cut` (LOD-007): the frustum cut uses each tile's own height bounds, not the global
 /// 9 km pad, so every view from aerial-200km down draws fewer nodes (ground-1m 8,687 to 2,897). high-2000km rises 424 to 428:
@@ -527,7 +527,7 @@ fn every_standard_view_stays_within_its_own_pinned_counts() {
             max_draw_calls: pin,
             max_triangles: u64::from(pin) * 2_304,
             max_resident_tiles: pin,
-            max_upload_bytes: u64::from(pin) * 1_221 * 44,
+            max_upload_bytes: u64::from(pin) * 1_221 * 48,
         };
         if let Err(e) = plan.counts().check(&budget) {
             failures.push(format!("{name}: {e} (nodes {} against pin {pin})", plan.nodes.len()));

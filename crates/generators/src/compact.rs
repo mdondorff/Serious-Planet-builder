@@ -6,9 +6,12 @@
 //! surface through nine tile-local control points plus the tile-relative height along the base normal. This module is the
 //! GPU-free builder (CON-02/CON-03: decisions live here, the renderer executes them) and the CPU mirror of the shader.
 //!
-//! A texel is `Rgba16Uint`, 8 bytes: `[height, normal_x, normal_y, reserved]`. The height is 16 bits between the tile's own
+//! A texel is `Rgba16Uint`, 8 bytes: `[height, normal_x, normal_y, climate]`. The height is 16 bits between the tile's own
 //! minimum and maximum (`hr_min + q * hr_step`, relative to the tile origin's height); the normal is two snorm16 octahedral
-//! components (`i16` bits in a `u16`), 0.0037 degrees at worst, measured (CON-14: 0.01 degrees). The spare 16 bits are zero and reserved.
+//! components (`i16` bits in a `u16`), 0.0037 degrees at worst, measured (CON-14: 0.01 degrees). The fourth channel carries the
+//! tile's climate field (ADR 0039 point 2, GEN-021): texel `k < 81` holds the temperature at climate texel `k` and texel `81 + k`
+//! the precipitation (`f16` bits, [`ClimateTexture::write_texels`]), the rest is zero. The 324 bytes ride in bits that were reserved,
+//! so a compact tile stays 8,712 B of texels plus its 128 B record and a tile needs at least 16 cells.
 //!
 //! CON-11: everything the shader sees is tile-local (control points, heights relative to the tile origin) or a unit vector; the
 //! control points are `shell * dir - origin` rounded once from f64.
@@ -16,6 +19,7 @@
 //! CON-13: the height step is `relief / 65,535`, so 1 mm holds while a finest tile has at most [`FALLBACK_RELIEF_M`] of relief;
 //! a finest tile with more falls back to the vertex format ([`tile_data_field`]).
 
+use crate::climate::{ClimateTexture, CLIMATE_MIN_COMPACT_CELLS};
 use crate::height::HeightField;
 use crate::mesh::{
     finest_class_key, mesh_key_field, normal_from_stencil, normal_stencil, skirt_depth, tile_mesh_field, vertex_count, MeshVertex, TileMesh,
@@ -114,6 +118,11 @@ impl CompactTile {
         }
         out[124..128].copy_from_slice(&u32::from(self.flip).to_le_bytes());
         out
+    }
+
+    /// The tile's climate field (ADR 0039 point 2), read back from the spare channel of the texels.
+    pub fn climate(&self) -> ClimateTexture {
+        ClimateTexture::read_texels(&self.texels)
     }
 
     /// Height of a texel relative to the origin height, as the shader computes it.
@@ -259,7 +268,10 @@ fn f32_up(x: f64) -> f32 {
 
 /// Build the compact tile from a height field (all geometry in f64, rounded once).
 pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> CompactTile {
-    assert!(cells >= 2 && cells.is_power_of_two(), "cells must be a power of two >= 2");
+    assert!(
+        cells >= CLIMATE_MIN_COMPACT_CELLS && cells.is_power_of_two(),
+        "a compact tile needs a power-of-two number of cells of at least {CLIMATE_MIN_COMPACT_CELLS} (its climate rides in 162 texels)"
+    );
     let w = (cells + 1) as usize;
     let centre = id.center_direction(map);
     // One batch call for every height the tile needs (GEN-020): the origin, the lattice points and the normal stencils.
@@ -276,7 +288,7 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
         let st = normal_stencil(dirs[1 + k], eps);
         dirs.extend(st);
     }
-    let all = field.heights(&dirs);
+    let (all, climate) = field.heights_and_climate(map, id, &dirs, &|| false);
     let h_origin = all[0];
     let origin = PlanetFixed(centre * (radius_m + h_origin));
     // The shell through the origin: control points are small tile-local numbers (CON-11), not heights from the sea level.
@@ -302,7 +314,7 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
     // Rounded so that level 0 is not above the lowest height and level 65,535 not below the highest: no clamping error.
     let hr_min = f32_down(lo);
     let hr_step = if hi > lo { f32_up((hi - f64::from(hr_min)) / HEIGHT_STEPS) } else { 1.0e-30 };
-    let texels = hr
+    let mut texels: Vec<[u16; 4]> = hr
         .iter()
         .zip(&normals)
         .map(|(h, n)| {
@@ -310,6 +322,7 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
             [q, n[0], n[1], 0]
         })
         .collect();
+    climate.write_texels(&mut texels);
     let mut tile = CompactTile {
         id,
         cells,

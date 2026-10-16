@@ -890,6 +890,21 @@ impl planet_generators::height::HeightField for CancelGuarded<'_> {
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         self.inner.height_bounds(centre, angular_radius)
     }
+    fn climate(&self, map: &dyn FaceMapping, id: TileId) -> planet_generators::climate::ClimateTexture {
+        self.inner.climate(map, id)
+    }
+    fn climate_version_word(&self) -> u64 {
+        self.inner.climate_version_word()
+    }
+    fn heights_and_climate(
+        &self,
+        map: &dyn FaceMapping,
+        id: TileId,
+        dirs: &[Vec3],
+        stop: &dyn Fn() -> bool,
+    ) -> (Vec<f64>, planet_generators::climate::ClimateTexture) {
+        self.inner.heights_and_climate(map, id, dirs, &|| stop() || self.cancel.is_cancelled())
+    }
 }
 
 /// The tile in the format the run uses: the compact format for levels 3 and finer with the vertex fallback (GEN-019), or the
@@ -1425,6 +1440,37 @@ mod tests {
             let _ = tile_for(format, &guarded, tile, 16, RADIUS_M, 22);
             assert_eq!(cancelled_calls.load(Ordering::SeqCst), 0, "{format:?}: a cancelled job reads nothing more");
             assert!(direct_calls.load(Ordering::SeqCst) > 100, "the tile does read the field");
+        }
+    }
+
+    // spec: GEN-021, STRM-021
+    #[test]
+    fn a_guarded_field_over_a_bake_builds_the_tile_and_key_of_the_unguarded_field_with_the_bakes_climate() {
+        use planet_core::cube::TangentWarp;
+        use planet_generators::climate::analytic_climate;
+        use planet_generators::erosion::ErosionGenerator;
+        use planet_generators::global::{bake, GridSource};
+        use planet_generators::height::HeightField;
+        use planet_generators::terrain::TerrainGenerator;
+        use planet_world_def::{BodyId, GenContext, WorldDefinition};
+        let g = bake(7, &TangentWarp, 64, 2).unwrap();
+        let src = GridSource(&g);
+        let def = WorldDefinition::single_planet(RADIUS_M, 7);
+        let (terrain, eroded) = (
+            TerrainGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, [3; 16]).unwrap(),
+            ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, [3; 16]).unwrap(),
+        );
+        let tile = TileId::new(Face(2), 5, 9, 14).unwrap();
+        let never = planet_streaming::CancelToken::never();
+        for (name, inner) in [("terrain", &terrain as &dyn HeightField), ("eroded", &eroded as &dyn HeightField)] {
+            let guarded = CancelGuarded { inner, cancel: &never };
+            assert_eq!(guarded.climate_version_word(), inner.climate_version_word(), "{name}");
+            assert_eq!(guarded.climate(&TangentWarp, tile), inner.climate(&TangentWarp, tile), "{name}");
+            for format in [planet_render::TileFormat::Compact, planet_render::TileFormat::Vertex] {
+                let (a, b) = (tile_for(format, &guarded, tile, 16, RADIUS_M, 22), tile_for(format, inner, tile, 16, RADIUS_M, 22));
+                assert_eq!(a, b, "{name} {format:?}: the guard changes nothing, the key and the climate included");
+            }
+            assert_ne!(inner.climate(&TangentWarp, tile), analytic_climate(7, &TangentWarp, tile), "{name}: it is the bake's climate");
         }
     }
 
