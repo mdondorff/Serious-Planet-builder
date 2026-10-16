@@ -1,0 +1,13 @@
+[package]
+name = "mouse-look"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Throwaway SPIKE-11 harness; not part of the planet workspace.
+[workspace]
+
+[dependencies]
+winit = "=0.30.13"
+wgpu = { version = "=30.0.1", default-features = false, features = ["wgsl", "dx12", "vulkan"] }
+pollster = "1.0.1"
