@@ -35,7 +35,8 @@ impl Drop for TempDir {
 fn plan_check_plans_the_standard_flight_over_a_stored_bake_with_both_fields() {
     let d = TempDir::new("flight");
     let store = d.s("store");
-    run_str(&["generate", "--global-dir", &store, "--global-res", "256", "--seed", "3", "--threads", "2"]).unwrap();
+    run_str(&["generate", "--global-dir", &store, "--global-res", "256", "--seed", "3", "--threads", "2", "--prefill-levels", "0"])
+        .unwrap();
     let ok = run_str(&["generate", "--plan-check", &store, "--global-res", "256", "--seed", "3"]).unwrap();
     for needle in ["terrain ground-1m:", "erosion ground-1m:", "erosion orbit-20000km:", "both fields plan every view"] {
         assert!(ok.contains(needle), "missing {needle}: {ok}");

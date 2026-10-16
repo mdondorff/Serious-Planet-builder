@@ -54,6 +54,34 @@ pub fn source_label(world: &WorldTerrain, from_store: bool) -> String {
     }
 }
 
+/// Whether `scene` starts with the coarse levels pre-filled in the tile pack: the gated dive and `dive-fast`, which is judged like it
+/// (owner, 2026-10-16, ADR 0045 point 3). The other scenes use the pack when it holds the tiles and say what it held.
+pub fn needs_prefilled_pack(scene: StreamScene) -> bool {
+    matches!(scene, StreamScene::Dive | StreamScene::DiveFast)
+}
+
+/// The marker of the log's `protocol.source` for a scene that reads the pack: `present` of the `total` tiles of levels `0..=levels`.
+pub fn coarse_marker(present: usize, total: usize, levels: u8) -> String {
+    if present == total {
+        planet_perf::prefill::prefilled_marker(levels)
+    } else {
+        planet_perf::prefill::absent_marker(present, total, levels)
+    }
+}
+
+/// Refuse a gated dive over a pack that lacks tiles of levels `0..=levels`, naming the count and the command that fixes it
+/// (TEST-019: a cold start is the scene `dive-cold`, never the gated dive).
+pub fn require_prefilled(scene: &str, present: usize, total: usize, levels: u8, store: &str) -> Result<(), String> {
+    if present == total {
+        return Ok(());
+    }
+    Err(format!(
+        "{scene} starts with levels 0-{levels} pre-filled in the tile pack (owner, 2026-10-16, ADR 0045 point 3), but {store} holds {present} of the {total} tiles \
+         (compact form, cells and finest level of this run): pre-fill it once with `cargo run -p planet --release -- generate --prefill-dir <store> --global-res {PRODUCTION_BAKE_RES}` \
+         (idempotent; the bake step of `generate --global-dir` does it for a new bake). The cold start is the separate scene `dive-cold`, which ignores the pack's coarse tiles and is never gated"
+    ))
+}
+
 /// Reject option combinations the streaming scenes would ignore, and refuse the dive/teleport/look scenes without a store.
 pub fn check_options(o: &Options) -> Result<(), String> {
     let stream = (o.perf || o.perf_smoke) && is_stream_scene(&o.scene);
@@ -351,7 +379,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     check_options(o)?;
     // The world and its source, before the gate so the bake's load is not measured as the machine's.
     let from_store = o.store.is_some();
-    let open = || -> Result<WorldTerrain, String> {
+    let open = |cold: bool| -> Result<WorldTerrain, String> {
         match &o.store {
             Some(dir) => {
                 let res = if o.given.contains("--global-res") { o.global_res } else { PRODUCTION_BAKE_RES };
@@ -359,13 +387,14 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
                     Some(p) => crate::worldfield::load_world(p)?,
                     None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
                 };
-                WorldTerrain::open_store(def, dir, res)
+                WorldTerrain::open_store(def, dir, res).map(|w| if cold { w.cold() } else { w })
             }
             None => WorldTerrain::of_perf_options(o, crate::skeleton::RADIUS_M),
         }
     };
     let opened = Instant::now();
-    let world = Arc::new(open()?);
+    // `dive-cold` reads the bake as the others do and ignores the pack's pre-filled coarse tiles (ADR 0045 point 3).
+    let world = Arc::new(open(scenes[0] == StreamScene::DiveCold)?);
     let field = world.field()?;
     writeln!(out, "world opened in {:.1} s", opened.elapsed().as_secs_f64()).map_err(err)?;
     let radius_m = world.radius_m();
@@ -373,6 +402,16 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     let source = source_label(&world, from_store);
     let production = from_store;
     let mut owner_override: Vec<String> = Vec::new();
+    // The tile pack at the start (STRM-021, ADR 0045 point 3): the gated dives start with levels 0-N pre-filled, checked before the
+    // gate so a store without them is refused at once; every other scene records what the pack held.
+    let pack_levels = o.prefill_levels.unwrap_or(planet_perf::prefill::GATED_PREFILL_LEVELS);
+    let tile_format = ctx.default_tile_format();
+    if from_store && !smoke {
+        for scene in scenes.iter().filter(|s| needs_prefilled_pack(**s)) {
+            let (present, total) = world.prefill_present(pack_levels, o.cells, o.finest_level_for(o.cells), tile_format)?;
+            require_prefilled(scene.name(), present, total, pack_levels, world.source())?;
+        }
+    }
     if !smoke {
         planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
         owner_override = crate::readiness_gate(o, ctx, out)?;
@@ -438,7 +477,23 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     for (index, scene) in scenes.into_iter().enumerate() {
         // Each scene reads the store through a fresh reader: the decoded-block cache of an earlier scene would make this one's
         // cold plans and tile generation warmer than a run of this scene alone (SPIKE-05; the OS file cache stays warm).
-        let scene_world = if from_store && index > 0 { Arc::new(open()?) } else { Arc::clone(&world) };
+        let scene_world = if index == 0 || !from_store { Arc::clone(&world) } else { Arc::new(open(scene == StreamScene::DiveCold)?) };
+        // What the tile pack held at the start of this scene, in the words the log records (STRM-021, TEST-021).
+        let marker = if scene == StreamScene::DiveCold {
+            Some(planet_perf::prefill::COLD_MARKER.to_string())
+        } else if from_store {
+            let (present, total) = scene_world.prefill_present(pack_levels, o.cells, lod.max_level, tile_format)?;
+            if needs_prefilled_pack(scene) && !smoke {
+                require_prefilled(scene.name(), present, total, pack_levels, &source)?;
+            }
+            Some(coarse_marker(present, total, pack_levels))
+        } else {
+            None
+        };
+        let scene_source = marker.as_ref().map_or_else(|| source.clone(), |m| planet_perf::prefill::labelled(&source, m));
+        if let Some(m) = &marker {
+            writeln!(out, "{}: tile pack at the start: {m}", scene.name()).map_err(err)?;
+        }
         let built = Instant::now();
         let scene_field = scene_world.field()?;
         let script = build_script(scene, radius_m, aspect, scene_field.as_ref(), LOOK_SEED);
@@ -489,7 +544,15 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         writeln!(out, "{memory_line}").map_err(err)?;
         let spec = case_spec(scene.name(), run.frames.len(), FRAME_STEP_S, script.descent_frames).expect("a streaming scene");
         let verdicts = case_verdicts(&spec, &run.frames, &run.blanks, &mem);
-        let lines: Vec<String> = verdicts.iter().map(|v| v.line(scene.name())).collect();
+        // The cold dive is never gated (ADR 0045 point 3): a measure over its budget reads "over (not gated)", not "OVER".
+        let lines: Vec<String> = verdicts
+            .iter()
+            .map(|v| v.line(scene.name()))
+            .map(|l| match (scene, l.strip_suffix(" OVER")) {
+                (StreamScene::DiveCold, Some(rest)) => format!("{rest} over (not gated)"),
+                _ => l,
+            })
+            .collect();
         blank_failures.extend(blank_failure_lines(scene.name(), &spec, &run.frames, &run.blanks));
         let wall: Vec<f64> = run.frames.iter().map(|f| f.wall_ms).collect();
         let stats = summarize(&wall, 0).ok_or("no frames")?;
@@ -515,6 +578,8 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         counts.push(("pool_slots".into(), mem.pool_slots));
         counts.push(("share_slots".into(), mem.share_slots));
         counts.push(("max_resident_slots".into(), max_resident));
+        // Tiles the scene took from the pack instead of generating (0 for the cold reader).
+        counts.push(("prefill_tiles_used".into(), scene_world.prefill_hits()));
         // Whether the figure above is the scene's own peak (one scene in the process): `accept M4` refuses RAM from a shared process (TEST-021).
         counts.push(("scene_alone".into(), u64::from(mem.scene_alone)));
         for (name, clock) in [("cpu_clock_before_mhz", run.cpu_before), ("cpu_clock_after_mhz", run.cpu_after)] {
@@ -531,7 +596,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
             metrics: column_metrics(&run.frames),
             counts,
         };
-        let summary = CaseRunSummary { frames: run.frames, settle_s: run.settle_s, clocks: run.clocks.len() };
+        let summary = CaseRunSummary { frames: run.frames, settle_s: run.settle_s, clocks: run.clocks.len(), source: scene_source };
         reports.push((scene, report, lines, summary));
     }
     // The session: valid only on the production source, and per ADR 0020 and 0036 for throttling.
@@ -595,8 +660,17 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         }
         // The log, the per-frame columns and the comparison with the last valid log of this scene and source.
         let one = std::slice::from_ref(report);
-        let json =
-            planet_perf::report_json_with_warmups(&crate::facts(ctx), scheme.as_deref(), &owner_override, &validity, &protocol, one, &[]);
+        // The scene's own source: the place the bake was read from and what the tile pack held at its start.
+        let scene_protocol = Protocol { source: Some(summary.source.clone()), ..protocol.clone() };
+        let json = planet_perf::report_json_with_warmups(
+            &crate::facts(ctx),
+            scheme.as_deref(),
+            &owner_override,
+            &validity,
+            &scene_protocol,
+            one,
+            &[],
+        );
         let path = match (&o.out, single) {
             (Some(p), true) => p.clone(),
             (Some(dir), false) => dir.join(format!("{}.json", scene.name())),
@@ -662,6 +736,8 @@ struct CaseRunSummary {
     frames: Vec<FrameRecord>,
     settle_s: Option<f64>,
     clocks: usize,
+    /// The log's `protocol.source` for this scene: the bake's place and what the tile pack held at the start (STRM-021).
+    source: String,
 }
 
 /// `plan scheduler upload record wall` as median / p99 / max, for the console.
@@ -700,14 +776,14 @@ mod tests {
 
     // spec: TEST-019
     #[test]
-    fn the_registry_of_scenes_is_the_same_in_the_scripts_and_the_verdicts_and_names_the_six() {
+    fn the_registry_of_scenes_is_the_same_in_the_scripts_and_the_verdicts_and_names_the_six_and_the_cold_dive() {
         let scripts: Vec<&str> = StreamScene::ALL.iter().map(|s| s.name()).collect();
         assert_eq!(scripts, planet_perf::streaming::SCENES);
-        assert_eq!(scripts, ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km"]);
+        assert_eq!(scripts, ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km", "dive-cold"]);
         for s in &scripts {
             assert!(is_stream_scene(s) && scenes_of(s).len() == 1, "{s}");
         }
-        assert_eq!(scenes_of("streaming").len(), 6);
+        assert_eq!(scenes_of("streaming").len(), 7);
         assert!(!is_stream_scene("terrain") && !is_stream_scene("global-bake") && scenes_of("terrain").is_empty());
         // The verdicts' upload cap is the loop's default budget (ADR 0033 point 9).
         assert_eq!(planet_perf::streaming::UPLOAD_BYTES_BUDGET, planet_frame::upload::DEFAULT_TILE_BYTES_PER_FRAME);
@@ -808,7 +884,20 @@ mod tests {
         let dir = tmp("store");
         let mut sink = Vec::new();
         crate::run(
-            &["generate", "--global-dir", dir.to_str().unwrap(), "--global-res", "8", "--seed", "3", "--threads", "2"].map(String::from),
+            &[
+                "generate",
+                "--global-dir",
+                dir.to_str().unwrap(),
+                "--global-res",
+                "8",
+                "--seed",
+                "3",
+                "--threads",
+                "2",
+                "--prefill-levels",
+                "0",
+            ]
+            .map(String::from),
             &mut sink,
         )
         .unwrap();
@@ -852,5 +941,35 @@ mod accept_constants_tests {
         assert_eq!(planet_perf::accept::MID_TIER_SHARE_BYTES, Tier::Mid.terrain_share_bytes());
         assert_eq!(planet_perf::accept::MID_TIER_CAP_BYTES, Tier::Mid.vram_cap_bytes());
         assert_eq!(planet_perf::accept::PRODUCTION_CELLS, u64::from(super::PRODUCTION_BAKE_RES));
+    }
+}
+
+#[cfg(test)]
+mod prefill_pack_tests {
+    use super::*;
+
+    // spec: TEST-019, STRM-021
+    #[test]
+    fn only_the_dives_that_are_judged_need_the_pre_filled_pack_and_a_pack_that_lacks_tiles_is_refused_with_the_remedy() {
+        let needs: Vec<&str> = StreamScene::ALL.into_iter().filter(|s| needs_prefilled_pack(*s)).map(StreamScene::name).collect();
+        assert_eq!(needs, ["dive", "dive-fast"], "dive-cold ignores the pack, the others use what is there");
+        assert!(require_prefilled("dive", 2046, 2046, 4, "store S").is_ok());
+        let e = require_prefilled("dive", 126, 2046, 4, "store D:/s, 16384 cells").unwrap_err();
+        for needle in [
+            "dive starts with levels 0-4 pre-filled",
+            "holds 126 of the 2046 tiles",
+            "store D:/s, 16384 cells",
+            "generate --prefill-dir <store> --global-res 16384",
+            "dive-cold",
+        ] {
+            assert!(e.contains(needle), "{needle}: {e}");
+        }
+        // The marker the log records: pre-filled only when every tile of the checked levels was there.
+        assert_eq!(coarse_marker(2046, 2046, 4), "prefilled coarse pack (levels 0-4 present at start)");
+        assert!(coarse_marker(2045, 2046, 4).starts_with("no pre-filled coarse pack (2045 of 2046"));
+        assert_eq!(
+            planet_perf::prefill::parse(&planet_perf::prefill::labelled("store S, 16384 cells", &coarse_marker(2046, 2046, 4))).1,
+            planet_perf::prefill::PrefillState::Prefilled(4)
+        );
     }
 }

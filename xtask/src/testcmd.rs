@@ -324,8 +324,8 @@ fn perf_global_bake_args(args: &[String]) -> Result<Vec<String>, String> {
     Ok(v)
 }
 
-/// The streaming scenes of `perf stream` (ADR 0032 point 8); `all` runs the six in one session.
-const STREAM_SCENES: [&str; 6] = ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km"];
+/// The streaming scenes of `perf stream` (ADR 0032 point 8 and `dive-cold`, ADR 0045 point 3); `all` runs the seven, one child process each.
+const STREAM_SCENES: [&str; 7] = ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km", "dive-cold"];
 
 /// The `cargo` arguments of `perf stream [SCENE|all] [--store DIR | --allow-memory-bake] [--global-res N] [--out PATH]
 /// [--machine-ready] [--smoke]` (TEST-019): the streaming scenes under the readiness gate. `--smoke` is the software-adapter

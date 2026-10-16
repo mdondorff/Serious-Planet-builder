@@ -192,6 +192,15 @@ pub fn generate(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.plan_check.is_some() {
         return crate::plancheck::plan_check(o, out);
     }
+    if o.prefill_dir.is_some() {
+        if o.global_dir.is_some() {
+            return Err("--prefill-dir and --global-dir are separate commands: --global-dir pre-fills after the bake by itself".into());
+        }
+        return crate::prefill::prefill_dir(o, out);
+    }
+    if o.prefill_levels.is_some() && o.global_dir.is_none() {
+        return Err("--prefill-levels applies to --global-dir (the pre-fill after the bake) and to --prefill-dir".into());
+    }
     if o.global_dir.is_some() || o.verify_global.is_some() || o.global_products.is_some() {
         return generate_global(o, out);
     }
@@ -362,7 +371,9 @@ fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         threads,
         if samples > 0.0 { secs * threads as f64 / samples * 1e6 } else { 0.0 }
     )
-    .map_err(err)
+    .map_err(err)?;
+    // The coarse tiles go into the same pack (STRM-021, ADR 0045 point 3): levels 0..=4 unless `--prefill-levels` says otherwise.
+    crate::prefill::prefill_store(o, dir, out)
 }
 
 /// `generate --compact-cache DIR [--cap-bytes N]`: rewrite the store keeping the records the definition still produces (a
@@ -785,6 +796,10 @@ pub(crate) struct MeshSource {
 impl planet_streaming::TileSource<RenderTile> for MeshSource {
     fn load(&self, tile: TileId) -> Result<RenderTile, String> {
         let field = self.world.field()?;
+        // A pre-filled coarse tile is read from the pack instead of generated (STRM-021): the same tile, bit for bit.
+        if let Some(t) = self.world.prefilled_tile(field.as_ref(), tile, self.cells, self.max_level, self.format) {
+            return Ok(t);
+        }
         Ok(tile_for(self.format, field.as_ref(), tile, self.cells, self.world.radius_m(), self.max_level))
     }
 
@@ -796,6 +811,9 @@ impl planet_streaming::TileSource<RenderTile> for MeshSource {
             return Ok(None);
         }
         let field = self.world.field()?;
+        if let Some(t) = self.world.prefilled_tile(field.as_ref(), tile, self.cells, self.max_level, self.format) {
+            return Ok(Some(t));
+        }
         let guarded = CancelGuarded { inner: field.as_ref(), cancel };
         let made = tile_for(self.format, &guarded, tile, self.cells, self.world.radius_m(), self.max_level);
         Ok((!cancel.is_cancelled()).then_some(made))

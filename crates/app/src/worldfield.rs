@@ -7,6 +7,7 @@
 use std::path::Path;
 
 use planet_cache::global_store::{GlobalWorld, StoreSource};
+use planet_cache::meshpack::{RenderForm, TileSpec};
 use planet_core::cube::TangentWarp;
 use planet_core::Face;
 use planet_generators::global::{GlobalCoarseGenerator, GlobalGrid, GlobalSample, GridSource, LatticeSource, ReadError};
@@ -69,6 +70,11 @@ pub struct WorldTerrain {
     radius_m: f64,
     /// Where the bake is read from, for the log (`protocol.source`).
     source: String,
+    /// The tile pack of a stored bake, where the pre-filled coarse tiles are (STRM-021); none for an in-memory bake.
+    pack: Option<&'static planet_cache::pack::TileStore>,
+    /// Whether tiles are read from the pack at all (`false`: the cold reader of the `dive-cold` scene).
+    use_prefilled: bool,
+    prefill_hits: std::sync::atomic::AtomicU64,
 }
 
 impl WorldTerrain {
@@ -92,7 +98,19 @@ impl WorldTerrain {
             (Box::new(NoBake), [0; 16])
         };
         let source = if kind.needs_bake() { format!("in-memory {global_res} cells") } else { "no bake (the field reads none)".to_string() };
-        Ok(WorldTerrain { def, kind, src, has_bake: kind.needs_bake(), bake_key, res: global_res, radius_m, source })
+        Ok(WorldTerrain {
+            def,
+            kind,
+            src,
+            has_bake: kind.needs_bake(),
+            bake_key,
+            res: global_res,
+            radius_m,
+            source,
+            pack: None,
+            use_prefilled: true,
+            prefill_hits: Default::default(),
+        })
     }
 
     /// The terrain over a stored bake (the production source: `generate --global-dir`, GEN-014) of `res` cells per face edge in
@@ -119,7 +137,19 @@ impl WorldTerrain {
         })?;
         let bake_key = world.stage_key(res).0;
         let source = format!("store {}, {res} cells", dir.display());
-        Ok(WorldTerrain { def, kind, src: Box::new(src), has_bake: true, bake_key, res, radius_m, source })
+        Ok(WorldTerrain {
+            def,
+            kind,
+            src: Box::new(src),
+            has_bake: true,
+            bake_key,
+            res,
+            radius_m,
+            source,
+            pack: Some(store),
+            use_prefilled: true,
+            prefill_hits: Default::default(),
+        })
     }
 
     /// The terrain of a run that views, streams or records: the world file's, or the seed-only world with the reference field
@@ -140,6 +170,58 @@ impl WorldTerrain {
             None => WorldDefinition::single_planet(radius_m, o.seed),
         };
         WorldTerrain::open(def, o.global_res)
+    }
+
+    /// The same terrain with the pack's pre-filled coarse tiles ignored: every tile is generated on demand, as from an empty tile
+    /// cache (the `dive-cold` scene, ADR 0045 point 3). The bake is read as before.
+    pub fn cold(mut self) -> WorldTerrain {
+        self.use_prefilled = false;
+        self
+    }
+
+    /// Whether this terrain reads pre-filled tiles from the pack.
+    pub fn reads_prefilled(&self) -> bool {
+        self.use_prefilled && self.pack.is_some()
+    }
+
+    /// The pre-filled tile from the pack, if this terrain reads them and the pack holds it (STRM-021); `None` is "generate it".
+    pub fn prefilled_tile(
+        &self,
+        field: &dyn HeightField,
+        tile: planet_core::TileId,
+        cells: u32,
+        max_level: u8,
+        format: planet_render::TileFormat,
+    ) -> Option<planet_generators::compact::RenderTile> {
+        let pack = self.pack.filter(|_| self.use_prefilled)?;
+        let spec = TileSpec::new(field, self.radius_m, cells, max_level, form_of_format(format));
+        let found = spec.lookup(pack, tile);
+        if found.is_some() {
+            self.prefill_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        found
+    }
+
+    /// Tiles served from the pack so far.
+    pub fn prefill_hits(&self) -> u64 {
+        self.prefill_hits.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// How many of the tiles of levels `0..=levels` the pack holds for a run with `cells`, `max_level` and `format`, and how many
+    /// there are: `(present, total)`. Reads every present tile (the pack's CRC and the codec decide), whatever `cold` says.
+    pub fn prefill_present(
+        &self,
+        levels: u8,
+        cells: u32,
+        max_level: u8,
+        format: planet_render::TileFormat,
+    ) -> Result<(usize, usize), String> {
+        let pack = self.pack.ok_or("this terrain has no tile pack (an in-memory bake)")?;
+        let field = self.field()?;
+        let spec = TileSpec::new(field.as_ref(), self.radius_m, cells, max_level, form_of_format(format));
+        let total = planet_cache::meshpack::prefill_tile_count(levels);
+        let missing = planet_cache::meshpack::missing_tiles(pack, &spec, levels).len();
+        Ok((total - missing, total))
     }
 
     /// The definition this terrain was built from.
@@ -220,4 +302,12 @@ pub fn check_options(o: &Options) -> Result<(), String> {
     let def = load_world(o.world.as_ref().expect("checked above"))?;
     resolve(&def).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// The stored form a run's tile format asks for (STRM-021).
+pub fn form_of_format(format: planet_render::TileFormat) -> RenderForm {
+    match format {
+        planet_render::TileFormat::Compact => RenderForm::Compact,
+        planet_render::TileFormat::Vertex => RenderForm::Vertex,
+    }
 }

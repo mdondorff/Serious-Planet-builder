@@ -44,11 +44,13 @@ const NEAR_M: f64 = 0.1;
 const PITCH_MIN_DEG: f64 = -15.0;
 const PITCH_MAX_DEG: f64 = 60.0;
 
-/// The six scenes of ADR 0032 point 8.
+/// The seven scenes: the six of ADR 0032 point 8 and `dive-cold`, the dive from a tile pack whose coarse tiles are ignored (ADR 0045 point 3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StreamScene {
     Dive,
     DiveFast,
+    /// The dive script, read through a reader that ignores the pack's pre-filled coarse tiles (tracked, report-only).
+    DiveCold,
     Teleport1m,
     Teleport2km,
     Look1m,
@@ -56,13 +58,14 @@ pub enum StreamScene {
 }
 
 impl StreamScene {
-    pub const ALL: [StreamScene; 6] = [
+    pub const ALL: [StreamScene; 7] = [
         StreamScene::Dive,
         StreamScene::DiveFast,
         StreamScene::Teleport1m,
         StreamScene::Teleport2km,
         StreamScene::Look1m,
         StreamScene::Look2km,
+        StreamScene::DiveCold,
     ];
 
     /// The perf scene name (`cargo xtask perf`, the log file and the baseline are named after it).
@@ -74,6 +77,7 @@ impl StreamScene {
             StreamScene::Teleport2km => "teleport-2km",
             StreamScene::Look1m => "look-1m",
             StreamScene::Look2km => "look-2km",
+            StreamScene::DiveCold => "dive-cold",
         }
     }
 
@@ -86,7 +90,7 @@ impl StreamScene {
         match self {
             StreamScene::Teleport1m | StreamScene::Look1m => GROUND_M,
             StreamScene::Teleport2km | StreamScene::Look2km => LOW_M,
-            StreamScene::Dive | StreamScene::DiveFast => DIVE_END_M,
+            StreamScene::Dive | StreamScene::DiveFast | StreamScene::DiveCold => DIVE_END_M,
         }
     }
 
@@ -141,7 +145,7 @@ pub fn build_script(scene: StreamScene, radius_m: f64, aspect: f64, field: &dyn 
         Camera::at_surface_point(above_terrain(radius_m, field, lat, lon, h), north, pitch_deg.to_radians(), fov, aspect, NEAR_M)
     };
     match scene {
-        StreamScene::Dive | StreamScene::DiveFast => {
+        StreamScene::Dive | StreamScene::DiveFast | StreamScene::DiveCold => {
             let frames = ((DIVE_DESCENT_S + DIVE_GROUND_S) / FRAME_STEP_S).round() as usize;
             let descent_frames = (DIVE_DESCENT_S / FRAME_STEP_S).round() as usize;
             let speed = scene.ground_speed_mps();
@@ -448,7 +452,7 @@ mod tests {
     // spec: TEST-018
     #[test]
     fn the_dive_scripts_are_40_seconds_of_monotone_descent_then_ground_travel_at_the_scene_speed() {
-        for scene in [StreamScene::Dive, StreamScene::DiveFast] {
+        for scene in [StreamScene::Dive, StreamScene::DiveFast, StreamScene::DiveCold] {
             let s = script(scene);
             assert_eq!((s.cameras.len(), s.descent_frames), (2400, 1800), "{scene:?}: 40 s in all");
             assert!(s.prelude.is_none(), "a dive starts from an empty cache");
@@ -469,6 +473,9 @@ mod tests {
         assert_eq!(script(StreamScene::Dive), script(StreamScene::Dive), "pure and deterministic");
         // The two dives share the descent exactly.
         assert_eq!(script(StreamScene::Dive).cameras[..1800], script(StreamScene::DiveFast).cameras[..1800]);
+        // `dive-cold` is the dive script itself (ADR 0045 point 3): only the reader of the tile pack differs.
+        assert_eq!(script(StreamScene::Dive).cameras, script(StreamScene::DiveCold).cameras);
+        assert_eq!(script(StreamScene::Dive).descent_frames, script(StreamScene::DiveCold).descent_frames);
     }
 
     // spec: TEST-018

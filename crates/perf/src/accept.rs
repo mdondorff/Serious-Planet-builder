@@ -6,17 +6,25 @@
 //! `teleport-1m`, `teleport-2km`, `look-1m` and `look-2km`: no blank tile (the draw's own count and the uncovered nodes of the
 //! fresh selection, TEST-020), p99 frame at most 20 ms, VRAM within the terrain share and the tier, RAM at most 8 GiB (the scene's
 //! own peak); the detail lag is gated for the dive descent and the still look, tracked for the teleport and the dive's ground
-//! segment; `dive-fast` is report-only. The verdicts are the harness's own (`streaming::case_verdicts`), recomputed here from the
+//! segment; `dive-fast` is report-only. The gated dive is judged only from a log whose `protocol.source` says the tile pack held
+//! levels 0-4 pre-filled at the start of the scene (owner, 2026-10-16, ADR 0045 point 3); a cold or unmarked log is refused for
+//! it, and `dive-cold` (the same dive over a reader that ignores the pack's coarse tiles, whose log must say cold) is reported and
+//! never gated. Logs from before the pre-fill carry no marker: they read, are treated as cold, and so cannot judge the gated dive;
+//! the other four scenes accept them. The verdicts are the harness's own (`streaming::case_verdicts`), recomputed here from the
 //! per-frame log, so the command and the perf scene cannot disagree; nothing is trusted that the log does not carry.
 
 use crate::compare::{parse, Json};
+use crate::prefill::{self, PrefillState};
 use crate::streaming::{case_spec, case_verdicts, frames_text, FrameRecord, MemoryFacts, Status, Verdict, RAM_BUDGET_BYTES};
 use crate::summarize;
 
 /// The scenes that gate M4, in the order of ADR 0032 point 8.
 pub const GATED_SCENES: [&str; 5] = ["dive", "teleport-1m", "teleport-2km", "look-1m", "look-2km"];
-/// Run and reported, not part of the verdict (owner, 2026-10-15; ADR 0032 point 1).
+/// Run and reported, not part of the verdict (owner, 2026-10-15; ADR 0032 point 1). Like the gated dive it is judged only from a pre-filled run.
 pub const REPORT_ONLY_SCENE: &str = "dive-fast";
+/// The dive over a reader that ignores the pack's pre-filled coarse tiles: tracked and reported, never gated, and its log must say
+/// `cold` (owner, 2026-10-16, ADR 0045 point 3). The gated `dive` is judged only from a log that says pre-filled.
+pub const COLD_SCENE: &str = "dive-cold";
 /// The production source: a stored bake of this many cells per face edge (GEN-014, TEST-019).
 pub const PRODUCTION_CELLS: u64 = 16384;
 /// What `protocol.field` must say: the world's default, eroded field over the production bake (GEN-018, GEN-017).
@@ -52,7 +60,12 @@ pub struct SceneRead {
     pub verdicts: Vec<Verdict>,
     /// Facts of the run that are reported and never judged (clock state, CPU clock, adapter, power plan, columns).
     pub facts: Vec<String>,
+    /// Where the bake was read from (`protocol.source` without its pack marker).
     pub source: String,
+    /// The whole `protocol.source` as the log wrote it.
+    pub source_text: String,
+    /// What the log says about the pack's coarse tiles at the start of the scene (`protocol.source`'s marker).
+    pub prefill: PrefillState,
     pub field: String,
 }
 
@@ -68,6 +81,8 @@ pub struct Judgement {
     pub scenes: Vec<SceneRead>,
     /// `dive-fast`: what its log said, or why it is unusable (never a reason to refuse).
     pub report_only: Result<SceneRead, Vec<String>>,
+    /// `dive-cold`: what its log said, or why it is unusable (never a reason to refuse, never part of the verdict).
+    pub cold: Result<SceneRead, Vec<String>>,
     pub pass: bool,
     pub source: String,
     pub field: String,
@@ -75,12 +90,23 @@ pub struct Judgement {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Evaluation {
-    /// The logs cannot be judged (missing, invalid, not the production source, old format): no verdict, nothing to write.
+    /// The logs cannot be judged (missing, invalid, not the production source, old format, a cold dive): no verdict, nothing to write.
     Refused(Vec<String>),
-    Judged(Judgement),
+    Judged(Box<Judgement>),
 }
 
-/// Judge a window. `files` holds the logs of the gated scenes and, optionally, of `dive-fast`.
+/// Why a log that does not say pre-filled cannot stand for the pre-filled dive, with the way to get one.
+fn not_prefilled(scene: &str, state: PrefillState, source: &str) -> String {
+    format!(
+        "the log's source is `{source}`, which says {}: {scene} is judged only from a run that started with levels 0-{} pre-filled in the tile pack (owner, 2026-10-16, ADR 0045 point 3). \
+         Pre-fill the store once, `cargo run -p planet --release -- generate --prefill-dir <store> --global-res {PRODUCTION_CELLS}` (the bake step of `generate --global-dir` does it for a new bake), \
+         and re-run `cargo xtask perf stream all --store <store>`; the cold start is the separate scene `dive-cold`, which is reported and never gated",
+        state.describe(),
+        crate::prefill::GATED_PREFILL_LEVELS
+    )
+}
+
+/// Judge a window. `files` holds the logs of the gated scenes and, optionally, of `dive-fast` and `dive-cold`.
 pub fn evaluate(files: &[SceneFiles]) -> Evaluation {
     let mut refusals: Vec<String> = Vec::new();
     let mut scenes = Vec::new();
@@ -88,6 +114,9 @@ pub fn evaluate(files: &[SceneFiles]) -> Evaluation {
         match files.iter().find(|f| f.scene == scene) {
             None => refusals.push(format!("{scene}: no log was given")),
             Some(f) => match read_scene(f) {
+                Ok(r) if scene == "dive" && !r.prefill.counts_for_the_gated_dive() => {
+                    refusals.push(format!("{scene}: {}", not_prefilled(scene, r.prefill, &r.source_text)))
+                }
                 Ok(r) => scenes.push(r),
                 Err(why) => refusals.extend(why.into_iter().map(|w| format!("{scene}: {w}"))),
             },
@@ -107,12 +136,46 @@ pub fn evaluate(files: &[SceneFiles]) -> Evaluation {
     if !refusals.is_empty() {
         return Evaluation::Refused(refusals);
     }
+    // `dive-fast` is judged like the gated dive: from a pre-filled run only. A cold or unstated log is shown as unusable.
     let report_only = match files.iter().find(|f| f.scene == REPORT_ONLY_SCENE) {
-        Some(f) => read_scene(f),
+        Some(f) => read_scene(f).and_then(|r| {
+            if r.prefill.counts_for_the_gated_dive() {
+                Ok(r)
+            } else {
+                Err(vec![format!(
+                    "{REPORT_ONLY_SCENE}: not shown, the log's source `{}` says {}: like the gated dive it is shown only from a run that started with levels 0-{} pre-filled (its cold start is `dive-cold`)",
+                    r.source_text,
+                    r.prefill.describe(),
+                    crate::prefill::GATED_PREFILL_LEVELS
+                )])
+            }
+        }),
         None => Err(vec![format!("{REPORT_ONLY_SCENE} was not run (report-only; no log was given)")]),
     };
+    // `dive-cold` must say cold: a log that does not is not the cold start, whatever its numbers are.
+    let cold = match files.iter().find(|f| f.scene == COLD_SCENE) {
+        Some(f) => read_scene(f).and_then(|r| {
+            if r.prefill == PrefillState::Cold {
+                Ok(r)
+            } else {
+                Err(vec![format!(
+                    "{COLD_SCENE}: not shown, the log's source `{}` says {} where the cold start must say cold (the reader ignores the pack's coarse tiles)",
+                    r.source_text.clone(),
+                    r.prefill.describe()
+                )])
+            }
+        }),
+        None => Err(vec![format!("{COLD_SCENE} was not run (tracked and report-only; no log was given)")]),
+    };
     let pass = scenes.iter().all(|s| !s.fails());
-    Evaluation::Judged(Judgement { source: scenes[0].source.clone(), field: scenes[0].field.clone(), scenes, report_only, pass })
+    Evaluation::Judged(Box::new(Judgement {
+        source: scenes[0].source.clone(),
+        field: scenes[0].field.clone(),
+        scenes,
+        report_only,
+        cold,
+        pass,
+    }))
 }
 
 fn str_at<'a>(j: &'a Json, key: &str) -> Option<&'a str> {
@@ -189,7 +252,7 @@ pub fn read_scene(f: &SceneFiles) -> Result<SceneRead, Vec<String>> {
         return Err(vec![format!("no per-frame log `{scene}.frames.txt` (a log from before the streaming scenes wrote it is old-format)")]);
     };
     let Some(spec_frames) = (match scene {
-        "dive" | "dive-fast" => Some(DIVE_FRAMES),
+        "dive" | "dive-fast" | "dive-cold" => Some(DIVE_FRAMES),
         "teleport-1m" | "teleport-2km" | "look-1m" | "look-2km" => Some(HOLD_FRAMES),
         _ => None,
     }) else {
@@ -215,7 +278,12 @@ pub fn read_scene(f: &SceneFiles) -> Result<SceneRead, Vec<String>> {
         ));
     }
     let protocol = root.get("protocol");
-    let source = protocol.and_then(|p| str_at(p, "source")).map(str::to_string);
+    let source_text = protocol.and_then(|p| str_at(p, "source")).map(str::to_string);
+    // The place the bake was read from, and what the log says about the pack's coarse tiles (a log from before the pre-fill says nothing).
+    let (source, prefill_state) = match source_text.as_deref().map(prefill::parse) {
+        Some((base, state)) => (Some(base.to_string()), state),
+        None => (None, PrefillState::Unstated),
+    };
     let field = protocol.and_then(|p| str_at(p, "field")).map(str::to_string);
     match &source {
         None => why.push("old-format log: no protocol.source (written before the streaming scenes recorded where the bake was read from)".into()),
@@ -373,7 +441,16 @@ pub fn read_scene(f: &SceneFiles) -> Result<SceneRead, Vec<String>> {
         ram as f64 / (1u64 << 30) as f64,
         RAM_BUDGET_BYTES as f64 / (1u64 << 30) as f64
     ));
-    Ok(SceneRead { scene: scene.to_string(), verdicts, facts, source: source.unwrap_or_default(), field: field.unwrap_or_default() })
+    facts.push(format!("tile pack at the start of the scene: {}", prefill_state.describe()));
+    Ok(SceneRead {
+        scene: scene.to_string(),
+        verdicts,
+        facts,
+        source: source.unwrap_or_default(),
+        source_text: source_text.unwrap_or_default(),
+        prefill: prefill_state,
+        field: field.unwrap_or_default(),
+    })
 }
 
 /// The refusal printed (and the exit status) when the logs cannot be judged: what is missing and the exact commands.
@@ -390,10 +467,13 @@ pub fn refusal_text(reasons: &[String], logs_dir: &str) -> String {
 /// The commands for the architect's window and for the acceptance after it.
 pub fn window_commands(logs_dir: &str) -> String {
     format!(
-        "Architect, in a perf window on Rasierklinge (coders never run these; the readiness gate of ADR 0020 decides):\n  \
+        "Once per store (anyone; the bake step of `generate --global-dir` does it for a new bake; idempotent, a second run writes nothing):\n  \
+         cargo run -p planet --release -- generate --prefill-dir <the 16384-cell store> --global-res 16384\n\
+         Architect, in a perf window on Rasierklinge (coders never run these; the readiness gate of ADR 0020 decides):\n  \
          cargo xtask perf stream all --store <the 16384-cell store, e.g. target/accept/global16384>\n  \
-         (one child per scene, a log per scene in {logs_dir}/: <scene>.json and <scene>.frames.txt for dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km;\n  \
-         a scene whose session is INVALID is re-run the same way; do not pass --allow-memory-bake or --smoke: those logs are refused)\n\
+         (one child per scene, a log per scene in {logs_dir}/: <scene>.json and <scene>.frames.txt for dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, dive-cold;\n  \
+         the dive scenes refuse to start unless levels 0-4 are present in the pack, `dive-cold` ignores them; a scene whose session is INVALID is re-run the same way;\n  \
+         do not pass --allow-memory-bake or --smoke: those logs are refused)\n\
          Then:\n  cargo xtask accept M4\n  (reads {logs_dir}/, writes docs/milestones/M4-report.md from the logs when they are valid)\n"
     )
 }
@@ -415,6 +495,17 @@ fn rows(r: &SceneRead, only: impl Fn(&Verdict) -> bool) -> String {
         .iter()
         .filter(|v| only(v))
         .map(|v| format!("| {} | {} | {} | {} |\n", r.scene, v.name, word(v.status), v.detail.replace('|', "/")))
+        .collect()
+}
+
+/// The rows of a scene that is never gated: a measure over its budget reads "over (not gated)", not "FAIL".
+fn rows_reported(r: &SceneRead) -> String {
+    r.verdicts
+        .iter()
+        .map(|v| {
+            let result = if matches!(v.status, Status::Over) { "over (not gated)" } else { word(v.status) };
+            format!("| {} | {} | {} | {} |\n", r.scene, v.name, result, v.detail.replace('|', "/"))
+        })
         .collect()
 }
 
@@ -448,9 +539,14 @@ pub const FINDING_SLOTS: [(&str, &str); 9] = [
 pub fn render_report(j: &Judgement, steps_md: &str, date: &str) -> String {
     let mut s = format!("# M4 Streaming: report ({date})\n\n");
     s += "Generated by `cargo xtask accept M4` from the perf logs of one valid window; the criteria rows are recomputed from the per-frame logs, nothing is estimated. The architect completes the sections marked TO FILL and adds the owner's recommendation.\n\n";
-    s += &format!("Source: `{}`; field: `{}`.\n\n", j.source, j.field);
     s += &format!(
-        "## Verdict on the hardware criteria: {}\n\nExit criteria (architecture report M4 row as amended by the owner 2026-10-15, ADR 0032): on `dive`, `teleport-1m`, `teleport-2km`, `look-1m`, `look-2km`: no blank tiles (draw count and uncovered nodes), p99 frame <= 20 ms, VRAM within the terrain share and tier, RAM <= 8 GiB (the scene's own peak); detail lag gated for the dive descent and the still look, tracked for the teleports and the dive's ground segment; `dive-fast` report-only.\n\n",
+        "Source: `{}`; field: `{}`; the tile pack at the start of the gated dive: {}.\n\n",
+        j.source,
+        j.field,
+        j.scenes[0].prefill.describe()
+    );
+    s += &format!(
+        "## Verdict on the hardware criteria: {}\n\nExit criteria (architecture report M4 row as amended by the owner 2026-10-15, ADR 0032): on `dive`, `teleport-1m`, `teleport-2km`, `look-1m`, `look-2km`: no blank tiles (draw count and uncovered nodes), p99 frame <= 20 ms, VRAM within the terrain share and tier, RAM <= 8 GiB (the scene's own peak); detail lag gated for the dive descent and the still look, tracked for the teleports and the dive's ground segment; `dive-fast` report-only. The gated dive starts with levels 0-4 pre-filled in the tile pack (owner, 2026-10-16, ADR 0045 point 3) and is judged only from a log that says so; the cold start is `dive-cold`, tracked and report-only.\n\n",
         if j.pass { "PASS" } else { "FAIL" }
     );
     s += "## Criteria (gated)\n\n| Scene | Measure | Result | Evidence |\n|---|---|---|---|\n";
@@ -480,6 +576,19 @@ pub fn render_report(j: &Judgement, steps_md: &str, date: &str) -> String {
             }
         }
     }
+    s += "\n## dive-cold (the cold start: tracked, report-only, not part of the verdict)\n\n";
+    s += "The same dive over a reader that ignores the pack's pre-filled coarse tiles, so every tile is generated on demand (owner, 2026-10-16, ADR 0045 point 3). Its numbers are never judged; the gated dive above started with levels 0-4 pre-filled.\n\n";
+    match &j.cold {
+        Ok(r) => {
+            s += "| Scene | Measure | Result | Evidence |\n|---|---|---|---|\n";
+            s += &rows_reported(r);
+        }
+        Err(why) => {
+            for w in why {
+                s += &format!("- {w}\n");
+            }
+        }
+    }
     s += "\n## Findings to list (TO FILL by the architect)\n\n| Finding | What to record | Value / decision |\n|---|---|---|\n";
     for (name, what) in FINDING_SLOTS {
         s += &format!("| {name} | {what} | TO FILL |\n");
@@ -497,6 +606,13 @@ mod tests {
 
     const GOOD_SCHEME: &str = "Power Scheme GUID: 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c  (High performance)";
     const STORE: &str = "store D:/bake, 16384 cells";
+    /// The source of a run that started with levels 0-4 pre-filled (what the gated dive needs).
+    fn prefilled() -> String {
+        prefill::labelled(STORE, &prefill::prefilled_marker(4))
+    }
+    fn cold() -> String {
+        prefill::labelled(STORE, prefill::COLD_MARKER)
+    }
 
     /// A recorded window's knobs: each fixture starts valid and a test breaks one thing.
     #[derive(Clone)]
@@ -520,7 +636,7 @@ mod tests {
 
     fn fx() -> Fx {
         Fx {
-            source: STORE.into(),
+            source: prefilled(),
             field: PRODUCTION_FIELD.into(),
             invalid: vec![],
             ram: Some(5 << 30),
@@ -620,8 +736,14 @@ mod tests {
         SceneFiles { scene: scene.into(), json: Some(json.into_bytes()), frames: Some(frames_text(frames)), last_valid_present: false }
     }
 
+    /// The window of the fixture: the six scenes of ADR 0032 over the pre-filled pack, and `dive-cold` over a reader that ignores it.
     fn window(f: &Fx) -> Vec<SceneFiles> {
-        ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km"].iter().map(|s| files(s, &good_frames(s), f)).collect()
+        let mut w: Vec<SceneFiles> = ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km"]
+            .iter()
+            .map(|s| files(s, &good_frames(s), f))
+            .collect();
+        w.push(files("dive-cold", &good_frames("dive-cold"), &Fx { source: cold(), ..f.clone() }));
+        w
     }
 
     fn replace(w: &mut [SceneFiles], scene: &str, new: SceneFiles) {
@@ -637,7 +759,7 @@ mod tests {
 
     fn judged(e: Evaluation) -> Judgement {
         match e {
-            Evaluation::Judged(j) => j,
+            Evaluation::Judged(j) => *j,
             Evaluation::Refused(r) => panic!("expected a verdict, got a refusal: {r:?}"),
         }
     }
@@ -1012,5 +1134,128 @@ mod tests {
         assert!(parse_frames(&old).unwrap_err().contains("old-format"));
         assert!(parse_frames("").unwrap_err().contains("old-format"));
         assert!(parse_frames(&format!("{}1 2 3\n", frames_text(&[]))).unwrap_err().contains("columns"));
+    }
+
+    // spec: TEST-021
+    #[test]
+    fn the_gated_dive_is_refused_from_a_log_that_does_not_say_pre_filled_and_the_refusal_says_how_to_get_one() {
+        let (levels3, absent) =
+            (prefill::labelled(STORE, &prefill::prefilled_marker(3)), prefill::labelled(STORE, &prefill::absent_marker(126, 2046, 4)));
+        // A cold run, one that found some of the pack missing, one pre-filled too shallowly and a log from before the pre-fill
+        // (no marker: it started from an empty tile cache, which is cold, and it does not say so).
+        for (source, says) in [
+            (cold(), "cold"),
+            (absent, "no pre-filled coarse pack"),
+            (levels3, "levels 0-4"),
+            (STORE.to_string(), "not stated (a log from before the pre-fill"),
+        ] {
+            let mut w = window(&fx());
+            replace(&mut w, "dive", files("dive", &good_frames("dive"), &Fx { source: source.clone(), ..fx() }));
+            let r = refused(evaluate(&w));
+            assert!(r.contains("dive:") && r.contains(&source) && r.contains(says), "{source}: {r}");
+            assert!(
+                r.contains("pre-filled in the tile pack") && r.contains("--prefill-dir") && r.contains("dive-cold"),
+                "{source}: the way out: {r}"
+            );
+            let text = refusal_text(std::slice::from_ref(&r), "perf/logs");
+            assert!(text.contains("generate --prefill-dir") && text.contains("perf stream all --store"), "{text}");
+        }
+        // Pre-filled to the gated levels or deeper: judged.
+        for levels in [4, 5] {
+            let mut w = window(&fx());
+            let source = prefill::labelled(STORE, &prefill::prefilled_marker(levels));
+            replace(&mut w, "dive", files("dive", &good_frames("dive"), &Fx { source, ..fx() }));
+            let j = judged(evaluate(&w));
+            assert!(j.pass && j.scenes[0].prefill == PrefillState::Prefilled(levels), "levels {levels}: {:?}", failing(&j));
+        }
+    }
+
+    // spec: TEST-021
+    #[test]
+    fn the_other_gated_scenes_read_logs_from_before_the_pre_fill_and_say_how_they_were_treated() {
+        // Teleports and looks never gated on a cold start: their old logs (no marker, same place) are read beside a pre-filled dive.
+        let mut w = window(&fx());
+        for scene in ["teleport-1m", "teleport-2km", "look-1m", "look-2km"] {
+            replace(&mut w, scene, files(scene, &good_frames(scene), &Fx { source: STORE.into(), ..fx() }));
+        }
+        let j = judged(evaluate(&w));
+        assert!(j.pass && j.scenes[1].prefill == PrefillState::Unstated, "{:?}", failing(&j));
+        let md = render_report(&j, "", "d");
+        assert!(md.contains("the tile pack at the start of the gated dive: pre-filled coarse pack (levels 0-4 present at start)"), "{md}");
+        assert!(
+            j.scenes[1].facts.iter().any(|f| f.contains("tile pack at the start of the scene: not stated (a log from before the pre-fill")),
+            "{:?}",
+            j.scenes[1].facts
+        );
+        // Another place is still another window.
+        replace(&mut w, "look-1m", files("look-1m", &good_frames("look-1m"), &Fx { source: "store E:/other, 16384 cells".into(), ..fx() }));
+        assert!(refused(evaluate(&w)).contains("one window over one source"));
+    }
+
+    // spec: TEST-021
+    #[test]
+    fn dive_fast_is_shown_only_from_a_pre_filled_run_and_a_cold_one_is_unusable_not_a_refusal() {
+        let mut w = window(&fx());
+        replace(&mut w, "dive-fast", files("dive-fast", &good_frames("dive-fast"), &Fx { source: cold(), ..fx() }));
+        let j = judged(evaluate(&w));
+        assert!(j.pass);
+        let why = j.report_only.clone().unwrap_err().join(" ");
+        assert!(why.contains("dive-fast: not shown") && why.contains("cold") && why.contains("dive-cold"), "{why}");
+        replace(&mut w, "dive-fast", files("dive-fast", &good_frames("dive-fast"), &Fx { source: STORE.into(), ..fx() }));
+        assert!(judged(evaluate(&w)).report_only.is_err(), "an unmarked log is cold too");
+        replace(&mut w, "dive-fast", files("dive-fast", &good_frames("dive-fast"), &fx()));
+        assert!(judged(evaluate(&w)).report_only.is_ok());
+    }
+
+    // spec: TEST-021
+    #[test]
+    fn dive_cold_is_reported_never_gated_and_must_say_cold() {
+        // Terrible frames and a lag of 9 levels: reported, the window passes.
+        let mut w = window(&fx());
+        let bad: Vec<FrameRecord> = good_frames("dive-cold")
+            .into_iter()
+            .enumerate()
+            .map(|(k, f)| FrameRecord { wall_ms: 45.0, lag: Some(if k < DIVE_DESCENT_FRAMES { 9.0 } else { 0.0 }), ..f })
+            .collect();
+        replace(&mut w, "dive-cold", files("dive-cold", &bad, &Fx { source: cold(), ..fx() }));
+        let j = judged(evaluate(&w));
+        assert!(j.pass, "the cold dive never fails the window: {:?}", failing(&j));
+        let r = j.cold.as_ref().expect("a cold log is shown");
+        assert!(r.fails() && r.prefill == PrefillState::Cold, "its own verdicts are over budget: {:?}", r.verdicts);
+        let md = render_report(&j, "", "d");
+        let section = md.split("## dive-cold").nth(1).unwrap().split("## Findings").next().unwrap();
+        assert!(
+            section.contains("not part of the verdict") && section.contains("over (not gated)") && !section.contains("FAIL"),
+            "{section}"
+        );
+        assert!(section.contains("9.00") || section.contains("9.0"), "the lag is shown: {section}");
+        // A log that does not say cold is not the cold start, whatever it measured: shown as unusable, the window unaffected.
+        for source in [prefilled(), STORE.to_string(), prefill::labelled(STORE, &prefill::absent_marker(0, 2046, 4))] {
+            replace(&mut w, "dive-cold", files("dive-cold", &good_frames("dive-cold"), &Fx { source: source.clone(), ..fx() }));
+            let j = judged(evaluate(&w));
+            let why = j.cold.clone().unwrap_err().join(" ");
+            assert!(
+                j.pass && why.contains("dive-cold: not shown") && why.contains(&source) && why.contains("must say cold"),
+                "{source}: {why}"
+            );
+        }
+        // Absent: not run, never a refusal.
+        w.retain(|f| f.scene != "dive-cold");
+        let j = judged(evaluate(&w));
+        assert!(j.pass && j.cold.clone().unwrap_err()[0].contains("dive-cold was not run"));
+        assert!(render_report(&j, "", "d").contains("dive-cold was not run"));
+        // Its log is read like any other: an invalid session still makes it unusable, not the window.
+        let mut w = window(&fx());
+        replace(
+            &mut w,
+            "dive-cold",
+            files(
+                "dive-cold",
+                &good_frames("dive-cold"),
+                &Fx { source: cold(), invalid: vec!["GPU throttling reported during 'stream/dive-cold'".into()], ..fx() },
+            ),
+        );
+        let j = judged(evaluate(&w));
+        assert!(j.pass && j.cold.unwrap_err().join(" ").contains("INVALID"));
     }
 }

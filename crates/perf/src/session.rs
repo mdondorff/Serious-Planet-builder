@@ -208,7 +208,8 @@ mod tests {
     fn one_child_per_scene_in_order_with_the_arguments_passed_through() {
         let mut f = Fake { calls: vec![], fail: vec![] };
         let out = run_scenes(&mut f, &SCENES, &args_of).unwrap();
-        assert_eq!(f.calls.len(), 6);
+        assert_eq!(f.calls.len(), SCENES.len());
+        assert_eq!(SCENES.len(), 7, "the six scenes of ADR 0032 and dive-cold");
         for (call, scene) in f.calls.iter().zip(SCENES) {
             assert_eq!(call, &args_of(scene).unwrap());
         }
@@ -222,11 +223,11 @@ mod tests {
     fn a_failing_child_does_not_stop_the_others_and_fails_the_combined_result() {
         let mut f = Fake { calls: vec![], fail: vec!["teleport-1m", "look-1m"] };
         let out = run_scenes(&mut f, &SCENES, &args_of).unwrap();
-        assert_eq!(f.calls.len(), 6, "every scene runs");
+        assert_eq!(f.calls.len(), SCENES.len(), "every scene runs");
         assert_eq!(out.iter().filter(|o| !o.success()).map(|o| o.scene.as_str()).collect::<Vec<_>>(), ["teleport-1m", "look-1m"]);
         let (text, ok) = summary(&out);
         assert!(!ok);
-        assert!(text.contains("2 of 6 scene(s) failed: teleport-1m, look-1m") && text.contains("FAILED (exit 1)"), "{text}");
+        assert!(text.contains("2 of 7 scene(s) failed: teleport-1m, look-1m") && text.contains("FAILED (exit 1)"), "{text}");
     }
 
     // spec: TEST-019
@@ -245,14 +246,14 @@ mod tests {
         }
         let mut b = Broken(0);
         let out = run_scenes(&mut b, &SCENES, &args_of).unwrap();
-        assert_eq!(b.0, 6);
+        assert_eq!(b.0, SCENES.len());
         let (text, ok) = summary(&out);
         assert!(!ok && text.contains("FAILED to start (no cargo)") && text.contains("no memory line from the child"), "{text}");
     }
 
     // spec: TEST-019
     #[test]
-    fn the_summary_lists_all_six_scenes_with_each_childs_own_ram_and_the_slots_against_the_share() {
+    fn the_summary_lists_every_scene_with_each_childs_own_ram_and_the_slots_against_the_share() {
         let mut f = Fake { calls: vec![], fail: vec![] };
         let out = run_scenes(&mut f, &SCENES, &args_of).unwrap();
         let (text, _) = summary(&out);

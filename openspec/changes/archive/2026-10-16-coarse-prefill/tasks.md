@@ -1,0 +1,8 @@
+- [x] 1.1 cache: `meshpack` codec, key, `TileSpec`, `prefill`, tier A tests (round trip, hostile payloads, keys, thread independence, idempotence, limits, damaged record)
+- [x] 1.2 app: `--prefill-levels`, `--prefill-dir`, pre-fill after `--global-dir`, `WorldTerrain` pack handle and `cold()`, `MeshSource` reads the pack; tests (commands, bit-identical streamer reads, cold reader)
+- [x] 1.3 frame/perf: scene `dive-cold` (script, verdict rules: report-only), `perf::prefill` markers and parser, scene registry, `perf stream all` seven children
+- [x] 1.4 streamperf: per-scene `protocol.source` marker, `prefill_tiles_used`, the gated dives refuse before the gate, tier C smoke and refusal tests
+- [x] 1.5 `accept M4`: the gated dive and `dive-fast` only from pre-filled logs, `dive-cold` section and rule, old logs read and described; tier A tests with synthetic logs
+- [x] 1.6 spec deltas: STRM-021 (new), TEST-018, TEST-019, TEST-021 (modified)
+- [ ] 1.7 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge
+- [ ] 1.8 after the merge: pre-fill the 16384 store once (`generate --prefill-dir`), record time, bytes, tiles, idempotence and machine load in the PR, docs/log.md and docs/learnings.md

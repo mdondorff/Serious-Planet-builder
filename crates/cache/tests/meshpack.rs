@@ -1,0 +1,209 @@
+//! STRM-021 (pre-filled coarse tiles in the tile pack, ADR 0045 point 3): the payload codec, the keys, the pre-fill and its
+//! idempotence, thread-count independence and equality with the on-demand tile.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use planet_cache::meshpack::{
+    decode_render_tile, encode_render_tile, missing_tiles, payload_form, prefill, prefill_tile_count, prefill_tiles, render_key,
+    MeshCodecError, PrefillError, RenderForm, TileSpec, KIND_MESH, MAX_PREFILL_LEVELS,
+};
+use planet_cache::pack::{PackWriter, Record, TileStore, DEFAULT_MAX_PACK_BYTES};
+use planet_core::cube::TangentWarp;
+use planet_core::{Face, TileId};
+use planet_generators::height::Reference;
+
+const R: f64 = 6_371_000.0;
+const CELLS: u32 = 8;
+const MAX_LEVEL: u8 = 22;
+
+struct Dir(PathBuf);
+
+impl Dir {
+    fn new(name: &str) -> Dir {
+        static N: AtomicUsize = AtomicUsize::new(0);
+        let p =
+            std::env::temp_dir().join(format!("planet-meshpack-tests-{}-{}-{name}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        let _ = fs::remove_dir_all(&p);
+        Dir(p)
+    }
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Dir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Every pack and index file of a directory with its bytes, in name order (the lock files are not data).
+fn data_files(dir: &Path) -> Vec<(String, Vec<u8>)> {
+    let mut v: Vec<(String, Vec<u8>)> = fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| matches!(p.extension().and_then(|e| e.to_str()), Some("tpack" | "tidx")))
+        .map(|p| (p.file_name().unwrap().to_string_lossy().into_owned(), fs::read(&p).unwrap()))
+        .collect();
+    v.sort();
+    v
+}
+
+fn progress(_: u8, _: usize) {}
+
+// spec: STRM-021
+#[test]
+fn a_render_tile_round_trips_bit_for_bit_in_both_forms_and_a_hostile_payload_is_refused() {
+    let field = Reference(7);
+    for (form, level) in [(RenderForm::Vertex, 2u8), (RenderForm::Compact, 4)] {
+        let spec = TileSpec::new(&field, R, CELLS, MAX_LEVEL, form);
+        let id = TileId::new(Face(3), level, 1, 2).unwrap();
+        let tile = spec.generate(id);
+        assert_eq!(tile.is_compact(), form == RenderForm::Compact);
+        let bytes = encode_render_tile(&tile).unwrap();
+        assert_eq!(payload_form(&bytes).unwrap(), (form, CELLS));
+        assert_eq!(decode_render_tile(id, &bytes).unwrap(), tile, "{form:?}: every bit of the tile comes back");
+        // Hostile: short, other version, other form, bad cells, wrong raw length, damaged block.
+        assert_eq!(decode_render_tile(id, &bytes[..5]).unwrap_err(), MeshCodecError::Short);
+        let mut b = bytes.clone();
+        b[0] = 9;
+        assert_eq!(decode_render_tile(id, &b).unwrap_err(), MeshCodecError::Version(9));
+        let mut b = bytes.clone();
+        b[1] = 7;
+        assert_eq!(decode_render_tile(id, &b).unwrap_err(), MeshCodecError::Form(7));
+        let mut b = bytes.clone();
+        b[2..6].copy_from_slice(&3u32.to_le_bytes());
+        assert_eq!(decode_render_tile(id, &b).unwrap_err(), MeshCodecError::Cells(3));
+        let mut b = bytes.clone();
+        b[2..6].copy_from_slice(&(1u32 << 30).to_le_bytes());
+        assert!(matches!(decode_render_tile(id, &b).unwrap_err(), MeshCodecError::Cells(_)), "a hostile cell count allocates nothing");
+        let mut b = bytes.clone();
+        b[6..10].copy_from_slice(&5u32.to_le_bytes());
+        assert!(matches!(decode_render_tile(id, &b).unwrap_err(), MeshCodecError::RawLength { claimed: 5, .. }));
+        let mut b = bytes.clone();
+        let n = b.len();
+        b.truncate(n - n / 2);
+        assert!(matches!(decode_render_tile(id, &b).unwrap_err(), MeshCodecError::Lz4(_)));
+    }
+}
+
+// spec: STRM-021
+#[test]
+fn the_key_names_the_field_the_form_and_the_cells_and_levels_0_to_2_share_both_forms() {
+    let (a, b) = (Reference(7), Reference(8));
+    let tile = |level| TileId::new(Face(1), level, 0, 1).unwrap();
+    let key = |f: &Reference, level, cells, form| render_key(f, &TangentWarp, tile(level), cells, R, form);
+    assert_ne!(key(&a, 4, 8, RenderForm::Compact), key(&b, 4, 8, RenderForm::Compact), "another field");
+    assert_ne!(key(&a, 4, 8, RenderForm::Compact), key(&a, 4, 16, RenderForm::Compact), "other cells");
+    assert_ne!(key(&a, 4, 8, RenderForm::Compact), key(&a, 4, 8, RenderForm::Vertex), "the form is part of the key");
+    assert_ne!(key(&a, 4, 8, RenderForm::Compact), key(&a, 3, 8, RenderForm::Compact), "another tile");
+    // Levels 0-2 are in the vertex form whichever form the run draws: one record serves both runs.
+    for level in 0..3 {
+        assert_eq!(RenderForm::of_level(level, RenderForm::Compact), RenderForm::Vertex);
+        assert_eq!(RenderForm::of_level(level, RenderForm::Vertex), RenderForm::Vertex);
+    }
+    assert_eq!(RenderForm::of_level(3, RenderForm::Compact), RenderForm::Compact);
+    let (ca, cb) =
+        (TileSpec::new(&a, R, CELLS, MAX_LEVEL, RenderForm::Compact), TileSpec::new(&a, R, CELLS, MAX_LEVEL, RenderForm::Vertex));
+    assert_eq!(ca.generate(tile(1)), cb.generate(tile(1)), "a level-1 tile is the same tile in both forms");
+}
+
+// spec: STRM-021
+#[test]
+fn the_tiles_of_levels_0_to_n_are_counted_and_ordered() {
+    assert_eq!(prefill_tile_count(0), 6);
+    assert_eq!(prefill_tile_count(4), 2046, "6 x (1 + 4 + 16 + 64 + 256)");
+    for n in 0..=3 {
+        let t = prefill_tiles(n);
+        assert_eq!(t.len(), prefill_tile_count(n));
+        assert!(t.windows(2).all(|w| w[0].level() <= w[1].level()), "coarsest first");
+        let mut raw: Vec<u64> = t.iter().map(|x| x.raw()).collect();
+        raw.sort_unstable();
+        raw.dedup();
+        assert_eq!(raw.len(), t.len(), "no tile twice");
+    }
+}
+
+// spec: STRM-021
+#[test]
+fn a_prefill_writes_the_on_demand_tiles_adds_nothing_when_repeated_and_does_not_depend_on_the_thread_count() {
+    let field = Reference(5);
+    let spec = TileSpec::new(&field, R, CELLS, MAX_LEVEL, RenderForm::Compact);
+    let (one, many) = (Dir::new("one"), Dir::new("many"));
+    let r1 = prefill(one.path(), &spec, 3, 1, DEFAULT_MAX_PACK_BYTES, &progress).unwrap();
+    let r5 = prefill(many.path(), &spec, 3, 5, DEFAULT_MAX_PACK_BYTES, &progress).unwrap();
+    let total = prefill_tile_count(3);
+    assert_eq!((r1.total, r1.present, r1.written), (total, 0, total));
+    assert_eq!(r1, r5, "the report does not depend on the threads");
+    assert_eq!(data_files(one.path()), data_files(many.path()), "the bytes of the pack do not depend on the thread count (CON-14)");
+    // Every stored tile is the on-demand tile, bit for bit.
+    let store = TileStore::open(one.path(), planet_cache::meshpack::store_params()).unwrap();
+    for t in prefill_tiles(3) {
+        let stored = spec.lookup(&store, t).unwrap_or_else(|| panic!("tile {:#x} is stored", t.raw()));
+        assert_eq!(stored, spec.generate(t), "level {} tile {:#x}", t.level(), t.raw());
+    }
+    assert!(missing_tiles(&store, &spec, 3).is_empty());
+    drop(store);
+    // Repeated: nothing generated, nothing written, no byte (and no file time) changed.
+    let before = data_files(one.path());
+    let times: Vec<_> = fs::read_dir(one.path()).unwrap().map(|e| e.unwrap().metadata().unwrap().modified().unwrap()).collect();
+    let again = prefill(one.path(), &spec, 3, 4, DEFAULT_MAX_PACK_BYTES, &progress).unwrap();
+    assert_eq!((again.written, again.present, again.payload_bytes), (0, total, 0));
+    assert_eq!(data_files(one.path()), before);
+    let after: Vec<_> = fs::read_dir(one.path()).unwrap().map(|e| e.unwrap().metadata().unwrap().modified().unwrap()).collect();
+    assert_eq!(times, after, "a second run touches no file");
+}
+
+// spec: STRM-021
+#[test]
+fn a_deeper_prefill_adds_only_the_new_levels_and_a_damaged_record_is_written_again() {
+    let field = Reference(5);
+    let spec = TileSpec::new(&field, R, CELLS, MAX_LEVEL, RenderForm::Compact);
+    let d = Dir::new("deeper");
+    prefill(d.path(), &spec, 1, 2, DEFAULT_MAX_PACK_BYTES, &progress).unwrap();
+    let deeper = prefill(d.path(), &spec, 2, 2, DEFAULT_MAX_PACK_BYTES, &progress).unwrap();
+    assert_eq!((deeper.present, deeper.written), (prefill_tile_count(1), 6 * 16));
+    // A record under the right key whose payload does not decode counts as missing, and is replaced by the newer record.
+    let t = TileId::new(Face(0), 2, 1, 1).unwrap();
+    let key = render_key(&field, &TangentWarp, t, CELLS, R, RenderForm::Vertex);
+    let good = TileStore::open(d.path(), planet_cache::meshpack::store_params()).unwrap().get(KIND_MESH, t, key).unwrap().unwrap();
+    let mut w = PackWriter::open(d.path(), planet_cache::meshpack::store_params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    w.append(&Record { payload: vec![1, 2, 3], ..good.clone() }).unwrap();
+    w.finish().unwrap();
+    let store = TileStore::open(d.path(), planet_cache::meshpack::store_params()).unwrap();
+    assert_eq!(missing_tiles(&store, &spec, 2), vec![t], "the undecodable record is a miss");
+    assert!(spec.lookup(&store, t).is_none());
+    drop(store);
+    let fixed = prefill(d.path(), &spec, 2, 2, DEFAULT_MAX_PACK_BYTES, &progress).unwrap();
+    assert_eq!(fixed.written, 1);
+    let store = TileStore::open(d.path(), planet_cache::meshpack::store_params()).unwrap();
+    assert_eq!(spec.lookup(&store, t).unwrap(), spec.generate(t));
+}
+
+// spec: STRM-021
+#[test]
+fn a_prefill_never_stores_a_finest_level_tile_or_a_depth_beyond_the_limit_and_another_field_misses() {
+    let field = Reference(5);
+    let d = Dir::new("limits");
+    let spec = TileSpec::new(&field, R, CELLS, 3, RenderForm::Compact);
+    let e = prefill(d.path(), &spec, 3, 1, DEFAULT_MAX_PACK_BYTES, &progress).unwrap_err();
+    assert!(matches!(&e, PrefillError::Levels(s) if s.contains("finest level 3")), "{e}");
+    let spec = TileSpec::new(&field, R, CELLS, MAX_LEVEL, RenderForm::Compact);
+    let e = prefill(d.path(), &spec, MAX_PREFILL_LEVELS + 1, 1, DEFAULT_MAX_PACK_BYTES, &progress).unwrap_err();
+    assert!(matches!(&e, PrefillError::Levels(s) if s.contains("too deep")), "{e}");
+    assert!(!d.path().exists() || data_files(d.path()).is_empty(), "a refused pre-fill writes nothing");
+    // A store pre-filled for one field is a miss for another, and for a run whose finest level is the tile's own.
+    prefill(d.path(), &spec, 1, 1, DEFAULT_MAX_PACK_BYTES, &progress).unwrap();
+    let store = TileStore::open(d.path(), planet_cache::meshpack::store_params()).unwrap();
+    let t = TileId::new(Face(2), 1, 0, 0).unwrap();
+    assert!(spec.lookup(&store, t).is_some());
+    let other = Reference(6);
+    assert!(TileSpec::new(&other, R, CELLS, MAX_LEVEL, RenderForm::Compact).lookup(&store, t).is_none(), "another seed");
+    assert!(
+        TileSpec::new(&field, R, CELLS, 1, RenderForm::Compact).lookup(&store, t).is_none(),
+        "a finest tile is generated by its relief"
+    );
+    assert!(TileSpec::new(&field, R, 16, MAX_LEVEL, RenderForm::Compact).lookup(&store, t).is_none(), "other cells");
+}
