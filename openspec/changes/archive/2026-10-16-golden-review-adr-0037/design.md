@@ -9,3 +9,10 @@ Debug-view agreement (b) uses ADR 0017's own machinery. Over the adapters that t
 Driver record: ADR 0017 escalates "a candidate rendered with another driver than the one recorded in `driver.txt`" with no exemption for first goldens, and `--apply` leaves `driver.txt` untouched, so a first golden from a different driver would sit under a record that does not describe it. ADR 0037 amends only the first-golden and lit rules ("anything else escalates as before"). The text is not ambiguous, so the gate stays, and a first-golden candidate from another WARP version escalates.
 
 Junit: nextest overwrites `target/nextest/default/junit.xml` on each run, so the reports of the runs are copied aside and each passed with `--tests`.
+
+## Readings the reviewer asked to make explicit
+- "First golden" is a new golden name (no golden on any adapter), the case ADR 0037 calls "new M5 goldens". The window is by class, not by date: it ends when the owner decides at the M5 gate and the constant is emptied (tracked in `docs/status.md`).
+- At least two adapters must take part (ADR 0017's cross-adapter rule); a missing adapter is reported, as the planner asked ("use the available ones"). A partial `--apply` would leave the missing adapter's candidate to escalate later as a new adapter family, so the skill says to apply only when the missing adapter's candidates are part of the same commit's CI or when that outcome is accepted.
+- The "rounding noise" reading (32 px, delta 1) of agreement between candidates of a new view reuses ADR 0017's constants; 8 px (the agreement floor) would be stricter and is the planner's call.
+- `lit_orbit_ev_bands` is the debug view of the lit path but is classed `lit`; the proposal names it as the debug view of all four.
+- The junit reports are given by the caller and not tied to a commit; the skill requires copying them from this run, and verifier and spec-guardian check that the named tests prove the bound.

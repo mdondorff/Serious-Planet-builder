@@ -35,7 +35,7 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; the M5 window: `
 4. **Bless the auto verdicts.** `cargo xtask golden-review ... --apply` copies only `AUTO-R`/`AUTO-E`/`AUTO-M5` candidates
    (never `driver.txt`) into `tests/goldens/<adapter>/`. Commit them on the change's branch as
    `bless(auto): <tests> [R|E|M5]`, with the per-candidate numbers from the report in the message body, and add one line to
-   `docs/status.md`. Remove a golden's line from `tests/goldens/pending.txt` once every adapter has it.
+   `docs/status.md`. Apply a first M5 golden only when every adapter with goldens took part (the report says NOT RUN otherwise), or accept that the missing adapter later escalates as a new family. Remove a golden's line from `tests/goldens/pending.txt` once every adapter has it.
 5. **Escalate the rest.** Leave escalated candidates in place, list them with their reasons and the report path under
    "Waiting for the owner" in `docs/status.md`, and stop work that depends on them. The owner decides with `/bless`.
 
