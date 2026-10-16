@@ -567,6 +567,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         internal_resolution: size,
         field: Some(measured_field.clone()),
         source: Some(source.clone()),
+        gen: Some(gen_settings(o)),
         smoke,
         ..Protocol::default()
     };
@@ -642,6 +643,12 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     )
     .map_err(err)?;
     Ok(())
+}
+
+/// The generation pool the session ran with, as the log records it (`protocol.gen`, TEST-012).
+fn gen_settings(o: &Options) -> planet_perf::GenSettings {
+    let g = o.gen_workers();
+    planet_perf::GenSettings { workers: g.workers, ahead: g.ahead, reserve: o.gen_reserve_used() }
 }
 
 /// Slots of the main pool the tier's share can hold: the share less the fixed items (small vertex pool, index buffers, node records,

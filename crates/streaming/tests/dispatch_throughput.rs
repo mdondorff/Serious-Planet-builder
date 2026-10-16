@@ -4,7 +4,7 @@
 //! on jobs of 18 ms did 8 jobs per 2 frames (240 tiles/s, not 444) and the queue of a dive grew.
 
 use planet_core::{Face, TileId};
-use planet_streaming::{FakeClock, GenWorkers, ManualSpawner, Spawner, StreamConfig, Streamer, TileSource, TimedSpawner};
+use planet_streaming::{FakeClock, GenWorkers, ManualSpawner, Spawner, StreamConfig, Streamer, TileSource, TimedSpawner, GEN_RESERVE};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -157,6 +157,32 @@ fn the_config_is_derived_from_the_pool_size() {
     assert_eq!((c.max_in_flight, c.queue_ahead, c.job_limit()), (12, 12, 24));
     assert_eq!(g.with_ahead(0).apply(StreamConfig::default()).job_limit(), 12);
     assert_eq!(GenWorkers::new(0).workers, 1);
+}
+
+// spec: STRM-020
+#[test]
+fn the_default_pool_leaves_the_reserve_free_never_below_one_and_never_above_the_cores() {
+    for cores in 1..=64usize {
+        for reserve in 0..=70usize {
+            let w = GenWorkers::workers_for(cores, reserve);
+            assert!((1..=cores).contains(&w), "{cores} cores, reserve {reserve}: {w}");
+            if reserve < cores {
+                assert_eq!(w, cores - reserve, "{cores} cores, reserve {reserve}");
+            } else {
+                assert_eq!(w, 1, "a reserve of every core still leaves one worker");
+            }
+        }
+    }
+    // The named default: Rasierklinge's 20 hardware threads give 18 workers, a 4-thread machine 2, one thread 1.
+    assert_eq!(GEN_RESERVE, 2);
+    assert_eq!([20, 8, 4, 2, 1].map(|c| GenWorkers::workers_for(c, GEN_RESERVE)), [18, 6, 2, 1, 1]);
+    // The machine's default is that rule on the machine's threads, with as many jobs queued as workers.
+    let m = GenWorkers::machine();
+    assert_eq!(m, GenWorkers::machine_reserving(GEN_RESERVE));
+    assert_eq!(m.ahead, m.workers);
+    let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+    assert_eq!(m.workers, GenWorkers::workers_for(cores, GEN_RESERVE));
+    assert_eq!(GenWorkers::machine_reserving(0).workers, cores, "no reserve: one worker per hardware thread, as before");
 }
 
 // spec: STRM-020, STRM-005

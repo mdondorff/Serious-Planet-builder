@@ -336,25 +336,45 @@ fn f32_bytes(values: &[f32]) -> Vec<u8> {
 
 /// A vertex tile's bytes as the pool holds them: the floats of each vertex, little-endian. (Written with `extend_from_slice`: the
 /// byte-wise `flat_map` it replaces cost about 8x as much CPU per tile, REND-016; the bytes are the same.)
-fn vertex_bytes(vertices: &[MeshVertex]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(vertices.len() * MeshVertex::STRIDE as usize);
+fn vertex_bytes_into(out: &mut Vec<u8>, vertices: &[MeshVertex]) {
+    out.reserve(vertices.len() * MeshVertex::STRIDE as usize);
     for v in vertices {
         for x in v.to_floats() {
             out.extend_from_slice(&x.to_le_bytes());
         }
     }
-    out
+}
+
+/// Keep the last of each run of entries with equal `key` in the sorted `v` (the greatest write index of a place, which sorts
+/// last) and return how many are kept; `v` is truncated to them.
+fn dedup_places<T: Copy, K: PartialEq>(v: &mut Vec<T>, key: impl Fn(&T) -> K) -> usize {
+    let mut kept = 0;
+    for k in 0..v.len() {
+        if k + 1 < v.len() && key(&v[k + 1]) == key(&v[k]) {
+            continue;
+        }
+        v[kept] = v[k];
+        kept += 1;
+    }
+    v.truncate(kept);
+    kept
 }
 
 /// A compact tile's texels as the atlas holds them (`CompactTile::texel_data`'s bytes, converted without the byte-wise iterator).
 fn texel_bytes(texels: &[[u16; 4]]) -> Vec<u8> {
     let mut out = Vec::with_capacity(texels.len() * 8);
+    texel_bytes_into(&mut out, texels);
+    out
+}
+
+/// [`texel_bytes`] appended to `out`.
+fn texel_bytes_into(out: &mut Vec<u8>, texels: &[[u16; 4]]) {
+    out.reserve(texels.len() * 8);
     for t in texels {
         for c in t {
             out.extend_from_slice(&c.to_le_bytes());
         }
     }
-    out
 }
 
 /// How a frame's tile writes reach the queue (REND-016, STRM-006): `PerSlot` is the reference (one `write_buffer` or
@@ -392,6 +412,15 @@ pub struct UploadCounters {
     pub staging_bytes: u64,
 }
 
+/// The frame thread's time in the tile writes so far (cumulative, recorded only: no decision reads it): `total` in
+/// [`TerrainRenderer::upload_tiles_at`], of which `queue` in the queue calls (`write_buffer`, `write_texture`) and the rest staging
+/// (conversion, sorting, packing). Where a frame's upload time goes, once the bytes are known not to be it (REND-018).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UploadTimes {
+    pub total: std::time::Duration,
+    pub queue: std::time::Duration,
+}
+
 /// A buffer the tile data lives in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum BufTarget {
@@ -399,10 +428,42 @@ enum BufTarget {
     Block(usize),
 }
 
-/// A compact tile's writes, held back until the batch is flushed (small writes: the call is most of their cost).
-enum PendingWrite {
-    Texels { block: usize, local: u32, bytes: Vec<u8> },
-    Record { index: u32, bytes: [u8; COMPACT_RECORD_BYTES as usize] },
+/// The buffers a frame's tile writes are staged in (REND-018): kept by the renderer and reused, so that after the first frames
+/// of a size a batch allocates nothing on the frame thread (a heap shared with the generation threads is where a frame's time
+/// would vary with their load). Every vector is cleared, never freed, between batches; [`TerrainRenderer::batch_scratch_capacity`]
+/// is what tests watch.
+#[derive(Default)]
+struct BatchScratch {
+    /// Whether a batch is being collected (`upload_tiles_at`).
+    open: bool,
+    /// The converted texels of the batch's compact tiles, one after the other, `tile_bytes` each.
+    texels: Vec<u8>,
+    /// Per compact tile in collection order: its atlas block, its slot within the block and the offset of its texels in `texels`.
+    tiles: Vec<(usize, u32, usize)>,
+    /// Per compact tile in collection order: its slot index and its record.
+    records: Vec<(u32, [u8; COMPACT_RECORD_BYTES as usize])>,
+    /// The texel writes sorted by place (the index of the write in `tiles` last, so that the last write of a place is the last
+    /// of its equals), and the record writes likewise.
+    texel_order: Vec<(usize, u32, u32)>,
+    record_order: Vec<(u32, u32)>,
+    /// The rectangle of one run of texels, and the bytes of one run of records.
+    run: Vec<u8>,
+    run_records: Vec<u8>,
+    /// The bytes of a vertex-format tile (converted, then written at once).
+    vertex: Vec<u8>,
+}
+
+impl BatchScratch {
+    fn capacity(&self) -> usize {
+        self.texels.capacity()
+            + self.tiles.capacity()
+            + self.records.capacity()
+            + self.texel_order.capacity()
+            + self.record_order.capacity()
+            + self.run.capacity()
+            + self.run_records.capacity()
+            + self.vertex.capacity()
+    }
 }
 
 /// Per-frame timings of [`TerrainRenderer::render`].
@@ -458,8 +519,9 @@ pub struct TerrainRenderer {
     pub uploaded_bytes: u64,
     upload_mode: UploadMode,
     upload_counters: UploadCounters,
-    /// The tile writes of the batch being collected (`upload_tiles_at`).
-    batch: Option<Vec<PendingWrite>>,
+    upload_times: UploadTimes,
+    /// The staging buffers of the tile writes, reused from frame to frame (REND-018).
+    scratch: BatchScratch,
     /// Frames the GPU has finished, counted by the queue's completion callbacks (they run when the device is polled).
     retired: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// Submissions of the frames not yet seen finished, oldest first.
@@ -704,7 +766,8 @@ impl TerrainRenderer {
             uploaded_bytes: 0,
             upload_mode: ctx.default_upload_mode(),
             upload_counters: UploadCounters::default(),
-            batch: None,
+            upload_times: UploadTimes::default(),
+            scratch: BatchScratch::default(),
             retired: Default::default(),
             in_flight: Default::default(),
             init: InitCounts { pipelines: if compact { 2 } else { 1 }, pool_allocations: 0, ring_builds: 1 },
@@ -1083,7 +1146,9 @@ impl TerrainRenderer {
     }
 
     fn write_vertex_tile(&mut self, ctx: &GpuContext, mesh: &TileMesh, slot: SlotRef, place: Place) {
-        let bytes = vertex_bytes(&mesh.vertices);
+        let mut bytes = std::mem::take(&mut self.scratch.vertex);
+        bytes.clear();
+        vertex_bytes_into(&mut bytes, &mesh.vertices);
         debug_assert_eq!(bytes.len() as u64, self.pool.vertex_slot_bytes, "a vertex-format tile fills its slot exactly");
         let slot = match place {
             Place::Fallback(v) => SlotRef { pool: PoolKind::Vertex, index: v },
@@ -1094,6 +1159,7 @@ impl TerrainRenderer {
         // Vertex tiles are written at once even in a batch: a call carries 53,724 bytes, so the call is not the cost and
         // concatenating a run would add a copy of the megabyte (measured, `examples/upload_bench.rs`).
         self.write_buf_now(ctx, target, offset, &bytes);
+        self.scratch.vertex = bytes;
     }
 
     fn write_compact_tile(&mut self, ctx: &GpuContext, tile: &CompactTile, slot: SlotRef) {
@@ -1104,14 +1170,19 @@ impl TerrainRenderer {
         let atlas = c.atlas(&ctx.device, block, &mut self.init);
         let w = self.cells + 1;
         let (x, y) = ((local % cols) * w, (local / cols) * w);
-        let bytes = texel_bytes(&tile.texels);
-        debug_assert_eq!(bytes, tile.texel_data());
-        self.uploaded_bytes += bytes.len() as u64 + COMPACT_RECORD_BYTES;
-        if let Some(batch) = &mut self.batch {
-            batch.push(PendingWrite::Texels { block, local, bytes });
-            batch.push(PendingWrite::Record { index: slot.index, bytes: tile.record_bytes() });
+        let n = tile.texels.len() as u64 * 8;
+        self.uploaded_bytes += n + COMPACT_RECORD_BYTES;
+        if self.scratch.open {
+            // Held back: converted straight into the batch's texel buffer, written by the flush.
+            let at = self.scratch.texels.len();
+            texel_bytes_into(&mut self.scratch.texels, &tile.texels);
+            debug_assert_eq!(&self.scratch.texels[at..], &tile.texel_data()[..]);
+            self.scratch.tiles.push((block, local, at));
+            self.scratch.records.push((slot.index, tile.record_bytes()));
             return;
         }
+        let bytes = texel_bytes(&tile.texels);
+        debug_assert_eq!(bytes, tile.texel_data());
         self.upload_counters.write_calls += 2;
         self.upload_counters.staging_bytes += bytes.len() as u64 + COMPACT_RECORD_BYTES;
         ctx.queue.write_texture(
@@ -1134,7 +1205,9 @@ impl TerrainRenderer {
             BufTarget::VertexPool => self.vertex_pool.as_ref().expect("vertex pool allocated"),
             BufTarget::Block(b) => self.blocks[b].as_ref().expect("block allocated"),
         };
+        let trw = std::time::Instant::now();
         ctx.queue.write_buffer(buffer, offset, bytes);
+        self.upload_times.queue += trw.elapsed();
         self.upload_counters.write_calls += 1;
         self.upload_counters.staging_bytes += bytes.len() as u64;
     }
@@ -1220,6 +1293,11 @@ impl TerrainRenderer {
         self.upload_counters
     }
 
+    /// The time of the tile writes so far, whole and in the queue calls.
+    pub fn upload_times(&self) -> UploadTimes {
+        self.upload_times
+    }
+
     /// Place a frame's tiles, in order, each in the slot the manager chose ([`upload_tile_at`](TerrainRenderer::upload_tile_at) for
     /// each). In [`UploadMode::Batched`] the writes of compact tiles are held back and issued after the last tile: a slot written
     /// twice keeps the last tile, and each run of adjacent slots is one call (a run in one row of an atlas for texels, a run of
@@ -1227,13 +1305,15 @@ impl TerrainRenderer {
     /// once, one call each (their 53,724 bytes dominate the call). The bookkeeping of every tile is as with single uploads. On an
     /// error the tiles placed before it are written and the error returned.
     pub fn upload_tiles_at(&mut self, ctx: &GpuContext, tiles: &[(&RenderTile, SlotRef)]) -> Result<(), ExecError> {
+        let started = std::time::Instant::now();
         if self.upload_mode == UploadMode::PerSlot {
             for (tile, slot) in tiles {
                 self.upload_tile_at(ctx, tile, *slot)?;
             }
+            self.upload_times.total += started.elapsed();
             return Ok(());
         }
-        self.batch = Some(Vec::with_capacity(tiles.len() * 2));
+        self.scratch.open = true;
         let mut result = Ok(());
         for (tile, slot) in tiles {
             result = self.upload_tile_at(ctx, tile, *slot);
@@ -1242,48 +1322,60 @@ impl TerrainRenderer {
             }
         }
         self.flush_batch(ctx);
+        self.upload_times.total += started.elapsed();
         result
     }
 
+    /// The capacity, in elements, of the staging buffers of the batched tile writes: constant once the buffers have grown to the
+    /// largest batch, which is what "no allocation per frame in the batched path" means to a test (REND-018).
+    pub fn batch_scratch_capacity(&self) -> usize {
+        self.scratch.capacity()
+    }
+
     /// Issue the held-back writes: sorted by target and offset, a later write to the same place replacing an earlier one, each
-    /// run of adjacent places one call.
+    /// run of adjacent places one call. Everything is staged in the renderer's scratch buffers (cleared here, kept).
     fn flush_batch(&mut self, ctx: &GpuContext) {
-        use std::collections::BTreeMap;
-        let Some(pending) = self.batch.take() else { return };
-        let mut texels: BTreeMap<(usize, u32), Vec<u8>> = BTreeMap::new();
-        let mut records: BTreeMap<u32, [u8; COMPACT_RECORD_BYTES as usize]> = BTreeMap::new();
-        for w in pending {
-            match w {
-                PendingWrite::Texels { block, local, bytes } => {
-                    texels.insert((block, local), bytes);
-                }
-                PendingWrite::Record { index, bytes } => {
-                    records.insert(index, bytes);
-                }
-            }
+        if !self.scratch.open {
+            return;
         }
+        let sc = &mut self.scratch;
+        sc.open = false;
+        let w = self.cells + 1;
+        let row_bytes = 8 * w as usize;
+        let tile_bytes = row_bytes * w as usize;
+        sc.texel_order.clear();
+        sc.texel_order.extend(sc.tiles.iter().enumerate().map(|(i, &(block, local, _))| (block, local, i as u32)));
+        sc.texel_order.sort_unstable();
+        sc.record_order.clear();
+        sc.record_order.extend(sc.records.iter().enumerate().map(|(i, &(index, _))| (index, i as u32)));
+        sc.record_order.sort_unstable();
+        // Of several writes to one place the last (the greatest index, sorted last) is kept.
+        let places = dedup_places(&mut sc.texel_order, |o| (o.0, o.1));
         // Compact texels: runs of adjacent slots in one row of one atlas, interleaved row by row into one rectangle.
-        if !texels.is_empty() {
-            let w = self.cells + 1;
-            let row_bytes = 8 * w as usize;
+        if places > 0 {
             let cols = self.compact.as_ref().expect("compact mode").cols;
-            let keys: Vec<(usize, u32)> = texels.keys().copied().collect();
             let mut k = 0;
-            while k < keys.len() {
-                let (block, first) = keys[k];
+            while k < places {
+                let (block, first, _) = sc.texel_order[k];
                 let mut n = 1;
-                while k + n < keys.len() && keys[k + n] == (block, first + n as u32) && !(first + n as u32).is_multiple_of(cols) {
+                while k + n < places
+                    && (sc.texel_order[k + n].0, sc.texel_order[k + n].1) == (block, first + n as u32)
+                    && !(first + n as u32).is_multiple_of(cols)
+                {
                     n += 1;
                 }
-                let mut data = vec![0u8; n * row_bytes * w as usize];
-                for (t, key) in keys[k..k + n].iter().enumerate() {
-                    let src = &texels[key];
+                sc.run.clear();
+                sc.run.resize(n * tile_bytes, 0);
+                for t in 0..n {
+                    let at = sc.tiles[sc.texel_order[k + t].2 as usize].2;
+                    let src = &sc.texels[at..at + tile_bytes];
                     for row in 0..w as usize {
                         let dst = (row * n + t) * row_bytes;
-                        data[dst..dst + row_bytes].copy_from_slice(&src[row * row_bytes..(row + 1) * row_bytes]);
+                        sc.run[dst..dst + row_bytes].copy_from_slice(&src[row * row_bytes..(row + 1) * row_bytes]);
                     }
                 }
                 let atlas = self.compact.as_ref().expect("compact mode").atlases[block].as_ref().expect("atlas allocated");
+                let trw = std::time::Instant::now();
                 ctx.queue.write_texture(
                     wgpu::TexelCopyTextureInfo {
                         texture: &atlas.texture,
@@ -1291,30 +1383,39 @@ impl TerrainRenderer {
                         origin: wgpu::Origin3d { x: (first % cols) * w, y: (first / cols) * w, z: 0 },
                         aspect: wgpu::TextureAspect::All,
                     },
-                    &data,
+                    &sc.run,
                     wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some((n * row_bytes) as u32), rows_per_image: Some(w) },
                     wgpu::Extent3d { width: n as u32 * w, height: w, depth_or_array_layers: 1 },
                 );
+                self.upload_times.queue += trw.elapsed();
                 self.upload_counters.write_calls += 1;
-                self.upload_counters.staging_bytes += data.len() as u64;
+                self.upload_counters.staging_bytes += sc.run.len() as u64;
                 k += n;
             }
         }
         // Slot records: runs of adjacent slot indices (across blocks: one buffer).
-        let idx: Vec<u32> = records.keys().copied().collect();
+        let places = dedup_places(&mut sc.record_order, |o| o.0);
         let mut k = 0;
-        while k < idx.len() {
+        while k < places {
             let mut n = 1;
-            while k + n < idx.len() && idx[k + n] == idx[k] + n as u32 {
+            while k + n < places && sc.record_order[k + n].0 == sc.record_order[k].0 + n as u32 {
                 n += 1;
             }
-            let data: Vec<u8> = idx[k..k + n].iter().flat_map(|i| records[i]).collect();
+            sc.run_records.clear();
+            for t in 0..n {
+                sc.run_records.extend_from_slice(&sc.records[sc.record_order[k + t].1 as usize].1);
+            }
             let buffer = &self.compact.as_ref().expect("compact mode").records;
-            ctx.queue.write_buffer(buffer, u64::from(idx[k]) * COMPACT_RECORD_BYTES, &data);
+            let trw = std::time::Instant::now();
+            ctx.queue.write_buffer(buffer, u64::from(sc.record_order[k].0) * COMPACT_RECORD_BYTES, &sc.run_records);
+            self.upload_times.queue += trw.elapsed();
             self.upload_counters.write_calls += 1;
-            self.upload_counters.staging_bytes += data.len() as u64;
+            self.upload_counters.staging_bytes += sc.run_records.len() as u64;
             k += n;
         }
+        sc.texels.clear();
+        sc.tiles.clear();
+        sc.records.clear();
     }
 
     /// The buffer and byte offset of `slot`, allocating its block (or the vertex pool) on first use.

@@ -174,6 +174,17 @@ pub struct ManagedLoop {
     pending: HashSet<TileId>,
     classes: Option<Classes>,
     classes_stale: bool,
+    /// The prefetch wants with their ancestors (an ancestor is requested in its descendants' class), rebuilt only when the
+    /// prefetch wants changed.
+    prefetch_closure: HashSet<TileId>,
+    prefetch_closure_stale: bool,
+    /// The waiting tiles and the frame's batch, kept between frames so that a frame that uploads allocates no list for them.
+    waiting_scratch: Vec<Waiting>,
+    batch_scratch: Vec<(TileId, Arc<RenderTile>, SlotRef, u64)>,
+    /// How often the class sets and the prefetch closure were rebuilt (O(wants) each): a frame whose wants did not change
+    /// rebuilds neither (REND-018, STRM-019).
+    class_rebuilds: u64,
+    prefetch_rebuilds: u64,
     last_node_bytes: u64,
     /// The lists of `wants` that changed since the manager was last given them.
     draw_changed: bool,
@@ -189,38 +200,48 @@ pub struct ManagedLoop {
 /// A tile with its priority, as in the wants.
 type TileWant = (TileId, f64);
 
-/// The tiles of the draw set and of R with their ancestors (an ancestor is requested, and so placed, in its descendants'
-/// class), and the plan order of the draw tiles.
+/// The tiles of the draw set with their ancestors (an ancestor is requested, and so placed, in its descendants' class) and the
+/// plan order of the draw tiles. The residency class needs no set of its own: R is closed under parents
+/// ([`ResidencySet`]), so its closure is the set, and a tile is looked up in it.
+#[derive(Default)]
 struct Classes {
     draw: HashMap<TileId, f64>,
-    residency: HashSet<TileId>,
 }
 
 impl Classes {
-    /// Built only after the wants changed and only when a tile waits.
+    #[cfg(test)]
     fn of(wants: &Wants) -> Classes {
-        let mut draw: HashMap<TileId, f64> = HashMap::new();
+        let mut c = Classes::default();
+        c.fill(wants);
+        c
+    }
+
+    /// Rebuilt after the draw wants changed and only when a tile waits, in the map the last build left (its memory is kept: a
+    /// fresh map of a few thousand entries is a megabyte the OS must hand out and zero every time, which is where a frame shared
+    /// with the generation threads loses milliseconds).
+    fn fill(&mut self, wants: &Wants) {
+        // An entry's ancestors always hold a priority at most its own (every walk lowers them all), so a walk that meets a tile
+        // already at or below its priority has nothing left to change above it: the draw set's tiles share their ancestors, and
+        // the walks stop there instead of running to the root (the priorities are plan indices, never NaN).
+        let draw = &mut self.draw;
+        draw.clear();
         for &(tile, priority) in &wants.draw {
             let mut t = Some(tile);
             while let Some(x) = t {
-                let e = draw.entry(x).or_insert(priority);
-                if *e > priority {
-                    *e = priority;
+                match draw.entry(x) {
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        if *e.get() <= priority {
+                            break;
+                        }
+                        e.insert(priority);
+                    }
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(priority);
+                    }
                 }
                 t = x.parent();
             }
         }
-        let mut residency: HashSet<TileId> = HashSet::new();
-        for &(tile, _) in &wants.residency {
-            let mut t = Some(tile);
-            while let Some(x) = t {
-                if !residency.insert(x) {
-                    break;
-                }
-                t = x.parent();
-            }
-        }
-        Classes { draw, residency }
     }
 }
 
@@ -244,6 +265,12 @@ impl ManagedLoop {
             pending: HashSet::new(),
             classes: None,
             classes_stale: true,
+            prefetch_closure: HashSet::new(),
+            prefetch_closure_stale: true,
+            waiting_scratch: Vec::new(),
+            batch_scratch: Vec::new(),
+            class_rebuilds: 0,
+            prefetch_rebuilds: 0,
             last_node_bytes: 0,
             draw_changed: false,
             residency_changed: false,
@@ -276,6 +303,12 @@ impl ManagedLoop {
     pub fn with_prefetch(mut self, config: PrefetchConfig, radius_m: f64, clock: Arc<dyn Clock>) -> Self {
         self.travel = Some((TravelEstimator::new(config, radius_m), clock));
         self
+    }
+
+    /// How often the loop rebuilt the class sets of the upload ranking and the prefetch closure so far: each is O(wants) and
+    /// happens when the wants changed and a tile waits, never in a frame whose wants stayed (REND-018).
+    pub fn ranking_rebuilds(&self) -> (u64, u64) {
+        (self.class_rebuilds, self.prefetch_rebuilds)
     }
 
     /// The prefetch source's estimator, if prefetch is on.
@@ -334,7 +367,8 @@ impl ManagedLoop {
         let t = Instant::now();
         let (mut uploaded, mut upload_bytes, mut upload_calls) = (0u64, 0u64, 0u64);
         let streamer = self.manager.streamer_mut();
-        for change in streamer.take_changes() {
+        let changes = streamer.take_changes();
+        for change in changes {
             match change {
                 ResidentChange::Evicted(tile) => {
                     self.pending.remove(&tile);
@@ -356,21 +390,29 @@ impl ManagedLoop {
         // The budget (STRM-006): the finished tiles in class order while their bytes fit, at least one.
         if !self.pending.is_empty() {
             if self.classes_stale || self.classes.is_none() {
-                self.classes = Some(Classes::of(&self.wants));
+                self.classes.get_or_insert_with(Classes::default).fill(&self.wants);
                 self.classes_stale = false;
+                self.class_rebuilds += 1;
+            }
+            if self.prefetch_closure_stale {
+                self.prefetch_closure.clear();
+                for &(tile, _) in &self.wants.prefetch {
+                    let mut t = Some(tile);
+                    while let Some(x) = t {
+                        if !self.prefetch_closure.insert(x) {
+                            break;
+                        }
+                        t = x.parent();
+                    }
+                }
+                self.prefetch_closure_stale = false;
+                self.prefetch_rebuilds += 1;
             }
             let classes = self.classes.as_ref().expect("classes");
-            let mut prefetch: HashSet<TileId> = HashSet::new();
-            for &(tile, _) in &self.wants.prefetch {
-                let mut t = Some(tile);
-                while let Some(x) = t {
-                    if !prefetch.insert(x) {
-                        break;
-                    }
-                    t = x.parent();
-                }
-            }
-            let mut waiting = Vec::with_capacity(self.pending.len());
+            let residency = self.wants_residency.as_deref();
+            let prefetch = &self.prefetch_closure;
+            let mut waiting = std::mem::take(&mut self.waiting_scratch);
+            waiting.clear();
             self.pending.retain(|t| streamer.is_resident(*t));
             for &tile in &self.pending {
                 let Some(mesh) = streamer.get(tile) else { continue };
@@ -378,7 +420,7 @@ impl ManagedLoop {
                     (UploadClass::Draw, *p)
                 } else if tile.level() == 0 {
                     (UploadClass::Draw, 0.0)
-                } else if classes.residency.contains(&tile) {
+                } else if residency.is_some_and(|r| r.contains(tile)) {
                     (UploadClass::Residency, 0.0)
                 } else if prefetch.contains(&tile) {
                     (UploadClass::Prefetch, 0.0)
@@ -390,7 +432,8 @@ impl ManagedLoop {
             sort_waiting(&mut waiting);
             let take = upload_count(&waiting, self.budget.allowance(self.last_node_bytes));
             // The frame's tiles in upload order, written as one batch (a sink that coalesces adjacent slots makes one call per run).
-            let mut batch: Vec<(TileId, Arc<RenderTile>, SlotRef, u64)> = Vec::with_capacity(take);
+            let mut batch = std::mem::take(&mut self.batch_scratch);
+            batch.clear();
             for w in &waiting[..take] {
                 self.pending.remove(&w.tile);
                 let (Some(mesh), Some(slot)) = (streamer.get(w.tile), streamer.slot_of(w.tile)) else { continue };
@@ -405,6 +448,9 @@ impl ManagedLoop {
                 uploaded += 1;
                 upload_bytes += bytes;
             }
+            batch.clear();
+            self.batch_scratch = batch;
+            self.waiting_scratch = waiting;
         }
         let deferred = self.pending.len();
         let upload_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -449,8 +495,11 @@ impl ManagedLoop {
     fn refresh_wants(&mut self, free_slots: usize, predicted: bool) {
         let plan_seq = self.pipe.current().map(|c| c.seq);
         if plan_seq != self.wants_plan {
-            self.wants.draw =
-                self.pipe.current().map(|c| c.plan.nodes.iter().enumerate().map(|(i, n)| (n.tile, i as f64)).collect()).unwrap_or_default();
+            // In the list the last delivery left: no allocation of a draw set's size per delivered plan.
+            self.wants.draw.clear();
+            if let Some(c) = self.pipe.current() {
+                self.wants.draw.extend(c.plan.nodes.iter().enumerate().map(|(i, n)| (n.tile, i as f64)));
+            }
             self.extra.scanned += self.wants.draw.len() as u64;
             self.wants_plan = plan_seq;
             self.classes_stale = true;
@@ -476,8 +525,11 @@ impl ManagedLoop {
         if !same {
             self.wants.residency = residency.as_ref().map(|r| r.wants()).unwrap_or_default();
             self.extra.scanned += self.wants.residency.len() as u64;
+            debug_assert!(
+                residency.as_ref().is_none_or(|r| r.is_sorted_and_closed()),
+                "the residency class is ranked by lookup in R, which must be sorted and closed under parents"
+            );
             self.wants_residency = residency;
-            self.classes_stale = true;
             self.residency_changed = true;
         }
         // No predicted position now (a teleport, a stop, a rotation): the set of the old direction is dropped at once, not when
@@ -488,6 +540,7 @@ impl ManagedLoop {
             if !self.wants.prefetch.is_empty() {
                 self.wants.prefetch.clear();
                 self.prefetch_changed = true;
+                self.prefetch_closure_stale = true;
             }
             return;
         };
@@ -502,6 +555,63 @@ impl ManagedLoop {
         if prefetch != self.wants.prefetch {
             self.wants.prefetch = prefetch;
             self.prefetch_changed = true;
+            self.prefetch_closure_stale = true;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use planet_core::Face;
+
+    /// The draw class as the definition says: every draw tile with all its ancestors, a tile with the lowest priority of the draw
+    /// tiles at or below it.
+    fn reference(wants: &Wants) -> HashMap<TileId, f64> {
+        let mut draw: HashMap<TileId, f64> = HashMap::new();
+        for &(tile, priority) in &wants.draw {
+            let mut t = Some(tile);
+            while let Some(x) = t {
+                let e = draw.entry(x).or_insert(priority);
+                if *e > priority {
+                    *e = priority;
+                }
+                t = x.parent();
+            }
+        }
+        draw
+    }
+
+    // spec: REND-018, STRM-006
+    #[test]
+    fn the_draw_class_with_early_stopping_walks_equals_the_definition_for_any_order_of_priorities() {
+        struct Rng(u64);
+        impl Rng {
+            fn next(&mut self, n: u64) -> u64 {
+                self.0 ^= self.0 << 13;
+                self.0 ^= self.0 >> 7;
+                self.0 ^= self.0 << 17;
+                self.0 % n
+            }
+            fn tile(&mut self, level: u8) -> TileId {
+                let side = 1u64 << level;
+                TileId::new(Face::ALL[self.next(6) as usize], level, self.next(side) as u32, self.next(side) as u32).unwrap()
+            }
+        }
+        let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+        for round in 0..40 {
+            let level = 3 + (round % 6) as u8;
+            let mut wants = Wants::default();
+            for k in 0..200 {
+                // Ascending priorities (the plan order), shuffled ones, and ties.
+                let p = match round % 3 {
+                    0 => k as f64,
+                    1 => rng.next(1000) as f64,
+                    _ => rng.next(5) as f64,
+                };
+                wants.draw.push((rng.tile(level), p));
+            }
+            assert_eq!(Classes::of(&wants).draw, reference(&wants), "round {round}");
         }
     }
 }

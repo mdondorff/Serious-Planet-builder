@@ -476,6 +476,12 @@ impl StreamConfig {
     }
 }
 
+/// Hardware threads the default tile generation pool leaves free (STRM-020, perf window 2): the frame thread, the plan worker and
+/// the driver's threads need cores of their own, or a frame's upload and scheduler steps wait for the OS to schedule them behind
+/// the generation threads (their time then varies by milliseconds with the load, not with the bytes). A named default, not a
+/// measured optimum: `--gen-reserve N` changes it, `--gen-workers N` sets the pool size outright.
+pub const GEN_RESERVE: usize = 2;
+
 /// The size of the tile generation pool and how far the scheduler queues ahead of it (STRM-020): one place that builds the pool
 /// and sets the streamer's limits from it, so the number of jobs running at once is the number of threads that can run them.
 /// The plan worker's threads are separate (its own pool and scoped threads), not part of this count.
@@ -492,9 +498,21 @@ impl GenWorkers {
         Self { workers, ahead: workers }
     }
 
-    /// The default: one worker per hardware thread of the machine.
+    /// The default: one worker per hardware thread of the machine less [`GEN_RESERVE`] cores kept for the frame thread, the plan
+    /// worker and the driver's threads.
     pub fn machine() -> Self {
-        Self::new(std::thread::available_parallelism().map_or(4, |n| n.get()))
+        Self::machine_reserving(GEN_RESERVE)
+    }
+
+    /// One worker per hardware thread of the machine less `reserve` cores (`--gen-reserve N`).
+    pub fn machine_reserving(reserve: usize) -> Self {
+        Self::new(Self::workers_for(std::thread::available_parallelism().map_or(4, |n| n.get()), reserve))
+    }
+
+    /// The pool size for a machine with `cores` hardware threads of which `reserve` stay free: `cores - reserve`, never below one
+    /// and never above `cores` (a pure function, so the default is the same wherever the arithmetic is read).
+    pub fn workers_for(cores: usize, reserve: usize) -> usize {
+        cores.saturating_sub(reserve).max(1).min(cores.max(1))
     }
 
     pub fn with_ahead(self, ahead: usize) -> Self {
