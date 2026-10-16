@@ -4,9 +4,7 @@
 //! on jobs of 18 ms did 8 jobs per 2 frames (240 tiles/s, not 444) and the queue of a dive grew.
 
 use planet_core::{Face, TileId};
-use planet_streaming::{
-    FakeClock, GenWorkers, ManualSpawner, Spawner, StreamConfig, Streamer, TileSource, TimedSpawner,
-};
+use planet_streaming::{FakeClock, GenWorkers, ManualSpawner, Spawner, StreamConfig, Streamer, TileSource, TimedSpawner};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -53,7 +51,8 @@ fn config(gen: GenWorkers) -> StreamConfig {
 /// `frames` frames of a held draw set bigger than the pool can ever finish, on `workers` model workers.
 fn run(gen: GenWorkers, frames: usize) -> Vec<Frame> {
     let spawner = Arc::new(TimedSpawner::new(gen.workers, JOB_US));
-    let mut s = Streamer::new(Arc::new(Source::default()), spawner.clone() as Arc<dyn Spawner>, Arc::new(FakeClock::default()), config(gen));
+    let mut s =
+        Streamer::new(Arc::new(Source::default()), spawner.clone() as Arc<dyn Spawner>, Arc::new(FakeClock::default()), config(gen));
     s.load_roots_blocking().unwrap();
     let wants = face(6);
     s.set_draw(&wants);
@@ -128,13 +127,7 @@ fn throughput_follows_the_generation_model_and_the_old_frame_quantised_refill_do
 fn the_request_order_depends_on_the_job_limit_not_on_how_it_is_split_between_running_and_queued() {
     let order = |max_in_flight: usize, queue_ahead: usize| {
         let spawner = Arc::new(ManualSpawner::default());
-        let config = StreamConfig {
-            max_in_flight,
-            queue_ahead,
-            capacity: 100_000,
-            record_dispatches: true,
-            ..Default::default()
-        };
+        let config = StreamConfig { max_in_flight, queue_ahead, capacity: 100_000, record_dispatches: true, ..Default::default() };
         let mut s = Streamer::new(Arc::new(Source::default()), spawner.clone() as Arc<dyn Spawner>, Arc::new(FakeClock::default()), config);
         s.load_roots_blocking().unwrap();
         let wants = face(5);
@@ -154,6 +147,16 @@ fn the_request_order_depends_on_the_job_limit_not_on_how_it_is_split_between_run
     assert!(a.len() > 100);
     assert_eq!(a, b);
     assert_eq!(a, c);
+}
+
+// spec: STRM-020
+#[test]
+fn the_config_is_derived_from_the_pool_size() {
+    let g = GenWorkers::new(12);
+    let c = g.apply(StreamConfig::default());
+    assert_eq!((c.max_in_flight, c.queue_ahead, c.job_limit()), (12, 12, 24));
+    assert_eq!(g.with_ahead(0).apply(StreamConfig::default()).job_limit(), 12);
+    assert_eq!(GenWorkers::new(0).workers, 1);
 }
 
 // spec: STRM-020, STRM-005

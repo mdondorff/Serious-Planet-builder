@@ -289,7 +289,12 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--gen-workers" => {
                 let v = it.next().ok_or("--gen-workers needs a thread count")?;
-                o.gen_workers = Some(v.parse::<usize>().ok().filter(|n| *n >= 1).ok_or_else(|| format!("--gen-workers must be a positive integer, got '{v}'"))?)
+                o.gen_workers = Some(
+                    v.parse::<usize>()
+                        .ok()
+                        .filter(|n| *n >= 1)
+                        .ok_or_else(|| format!("--gen-workers must be a positive integer, got '{v}'"))?,
+                )
             }
             "--gen-ahead" => {
                 let v = it.next().ok_or("--gen-ahead needs a count")?;

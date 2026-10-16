@@ -1,0 +1,8 @@
+- [x] 1.1 find where the 8 and the 4 come from; reproduce on a model; learnings entry before the fix
+- [x] 1.2 failing tests first: `TimedSpawner` model tests in `crates/streaming/tests/dispatch_throughput.rs` and the dive case in `crates/frame/tests/dive.rs`, with the old refill as control
+- [x] 1.3 streaming: `GenWorkers`, `StreamConfig::queue_ahead`, `job_limit`, `TimedSpawner`
+- [x] 1.4 app: pool and limit from `GenWorkers` in the pipelined rig and `streamed_meshes`; `--gen-workers`, `--gen-ahead`; xtask pass-through
+- [x] 1.5 equivalence scripts pin `queue_ahead: 0`; digests unchanged
+- [x] 1.6 ad hoc before/after on the software adapter (indicative)
+- [x] 1.7 spec: STRM-020 (new), TEST-018 (modified)
+- [x] 1.8 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge

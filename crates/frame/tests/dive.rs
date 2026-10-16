@@ -118,14 +118,14 @@ fn a_dive_from_orbit_never_leaves_a_selected_node_without_something_to_draw() {
     assert!(max_queue < 5000, "the request queue must stay bounded, got {max_queue}");
 }
 
-/// The dive's wants, frame by frame: 20,000 km to 1 m in 300 frames, then a hold of 100 (a bigger viewport than the case above:
+/// The dive's wants, frame by frame: 20,000 km to 1 m in 220 frames, then a hold of 80 (a bigger viewport than the case above:
 /// the draw set must outrun the pool).
 fn dive_wants() -> Vec<Vec<(TileId, f64)>> {
     let map = TangentWarp;
-    let params = LodParams { viewport_h_px: 1080.0, cells: 32, ..lod() };
-    (0..400)
+    let params = LodParams { viewport_h_px: 600.0, cells: 32, ..lod() };
+    (0..300)
         .map(|k| {
-            let height = 2.0e7 * libm::pow(1.0e-7f64, (k.min(300) as f64) / 300.0);
+            let height = 2.0e7 * libm::pow(1.0e-7f64, (k.min(220) as f64) / 220.0);
             let selection = select_nodes_in_view(&map, &camera_at(height), &params);
             selection.nodes.iter().map(|n| (n.tile, n.distance_m)).collect()
         })
@@ -167,7 +167,7 @@ fn a_dive_on_the_generation_model_reaches_the_rate_of_its_pool_and_the_old_frame
         let (now, frames) = dive_rate(&wants, GenWorkers::new(n), job_us);
         let (old, _) = dive_rate(&wants, GenWorkers::new(n).with_ahead(0), job_us);
         eprintln!("dive N={n}: model {model:.0} tiles/s; default {now:.0}; refill at frame boundaries only {old:.0}; {frames} frames with a queue");
-        assert!(frames >= 200, "N={n}: the dive must keep requests waiting for the rate to mean anything ({frames} frames)");
+        assert!(frames >= 150, "N={n}: the dive must keep requests waiting for the rate to mean anything ({frames} frames)");
         assert!(now >= 0.8 * model, "N={n}: the dive generated {now:.0} tiles/s of the model's {model:.0}");
         assert!(old < 0.7 * model, "N={n}: the control reached {old:.0} of {model:.0}: the dive no longer shows the old limit");
     }

@@ -501,14 +501,38 @@ mod tests {
         assert!(stream_runs_all(&s(&[])) && stream_runs_all(&s(&["all"])) && stream_runs_all(&s(&["--store", "D"])));
         assert!(!stream_runs_all(&s(&["dive"])));
         for name in STREAM_SCENES {
-            let rest = s(&["--store", "D:/bake", "--global-res", "256", "--out", "target/perf", "--machine-ready", "--allow-memory-bake", "--gen-workers", "12", "--gen-ahead", "0"]);
+            let rest = s(&[
+                "--store",
+                "D:/bake",
+                "--global-res",
+                "256",
+                "--out",
+                "target/perf",
+                "--machine-ready",
+                "--allow-memory-bake",
+                "--gen-workers",
+                "12",
+                "--gen-ahead",
+                "0",
+            ]);
             let a = perf_stream_child_args(name, &rest).unwrap();
             let at = a.iter().position(|x| x == "--scene").unwrap();
             assert_eq!(a[at + 1], name, "one named scene, never `streaming`");
             assert!(!a.contains(&"streaming".to_string()));
             let out = a.iter().position(|x| x == "--out").unwrap();
             assert!(a[out + 1].ends_with(&format!("{name}.json")) && a[out + 1].starts_with("target/perf"), "{a:?}");
-            for keep in ["--store", "D:/bake", "--global-res", "256", "--machine-ready", "--allow-memory-bake", "--gen-workers", "12", "--gen-ahead", "0"] {
+            for keep in [
+                "--store",
+                "D:/bake",
+                "--global-res",
+                "256",
+                "--machine-ready",
+                "--allow-memory-bake",
+                "--gen-workers",
+                "12",
+                "--gen-ahead",
+                "0",
+            ] {
                 assert!(a.contains(&keep.to_string()), "{keep} in {a:?}");
             }
         }
