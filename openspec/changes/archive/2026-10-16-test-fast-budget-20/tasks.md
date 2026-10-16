@@ -1,0 +1,3 @@
+- [x] 1.1 FAST_BUDGET_SECS 20 and comments
+- [x] 1.2 BUILD-003 text (delta)
+- [x] 1.3 reviewers, test, spec-lint, fmt, clippy, archive, log line, delete queue item 0 from docs/status.md, PR, CI, merge
