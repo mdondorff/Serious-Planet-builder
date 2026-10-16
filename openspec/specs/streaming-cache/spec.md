@@ -316,7 +316,7 @@ The per-frame upload cap (ADR 0033 point 9) is a byte count of **tile data** wri
 
 Verify: A, C
 Status: active
-Source: CON-14, CON-20, CON-21, ADR 0031 point 4, ADR 0033 points 1-3, 9 (proposed, value provisional) and 10, ADR 0032, STRM-002, STRM-016, STRM-017
+Source: CON-14, CON-20, CON-21, ADR 0031 point 4, ADR 0033 points 1-3, 9 (accepted 2026-10-16) and 10, ADR 0032, STRM-002, STRM-016, STRM-017
 
 #### Scenario: Terrain share
 - **WHEN** the pools are configured for a tier

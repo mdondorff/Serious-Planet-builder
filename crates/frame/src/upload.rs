@@ -8,8 +8,8 @@
 //! frame needs them. They count against CON-21's 2 ms (the owner's decision, ADR 0033's status line) as a separate
 //! accounting line, reported every frame as `node_bytes`; the cap value follows from the 2 ms in a perf window, so
 //! [`UploadBudget::node_records_in_cap`] lets the cap cover both (the tile allowance shrinks by the node bytes of the
-//! previous frame's plan) without a code change. **The value is provisional**: ADR 0033 point 9 is proposed until a perf
-//! window measures what 1 MiB costs.
+//! previous frame's plan) without a code change. **The value is ADR 0033 point 9** (accepted 2026-10-16 after M4 perf window 5: the dive
+//! reaches 0.973 MiB per frame at an upload p99 of 0.79 ms).
 //!
 //! **Order.** Finished tiles wait in class order: the draw set D and its ancestors (and the six roots) first, ancestors
 //! before children, then in plan order; then the residency set R (and its ancestors); then the prefetch set; then
@@ -21,7 +21,7 @@
 
 use planet_core::TileId;
 
-/// Starting value of the cap: 1 MiB of tile data per frame (ADR 0033 point 9, proposed; about 118 compact slots of 8,840 B,
+/// Starting value of the cap: 1 MiB of tile data per frame (ADR 0033 point 9, accepted; about 118 compact slots of 8,840 B,
 /// 19 vertex-format slots of 53,724 B at cells 32).
 pub const DEFAULT_TILE_BYTES_PER_FRAME: u64 = 1 << 20;
 

@@ -1,4 +1,4 @@
-//! SPIKE-05 measurement helper (docs/spikes.md): residency counts per standard view. Plans the ten scripted views over a
+//! SPIKE-05 measurement helper (docs/archive/M4/spikes.md): residency counts per standard view. Plans the ten scripted views over a
 //! stored global bake with the production planner and counts, for two sets: the draw set (`plan_terrain_cached`, frustum cut,
 //! horizon cut) and the position-based surroundings set (`select_nodes_field_cached`: no frustum, horizon cut kept), the nodes,
 //! distinct tiles, triangles and vertex bytes (today's 44-byte vertex), and the plan time cold and warm. Also: the share of

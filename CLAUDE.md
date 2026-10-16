@@ -42,7 +42,7 @@ Until an xtask command exists, create it in `xtask/` rather than writing a scrip
 
 ## Git
 - One branch per OpenSpec change (`change/<id>`). Small commits with clear messages.
-- Push the branch and open a PR with `gh pr create`. Merge it yourself (squash) only when CI is green on Windows and Linux and the verifier passed. A docs-only PR (only `docs/`, `openspec/`, `.claude/`, root `*.md`) runs the light `docs` check (spec-lint) instead and needs only that to be green (owner, 2026-10-16).
+- Push the branch and open a PR with `gh pr create`. Merge it yourself (squash) only when CI is green on Windows and Linux and the verifier passed. A docs-only PR (only `docs/`, `openspec/`, `.claude/`, root `*.md`, `spikes/**/results/**`) runs the light `docs` check (spec-lint) instead and needs only that to be green (owner, 2026-10-16).
 - Never force-push, never rewrite `main`'s history, never commit secrets or large binaries (goldens are small PNGs; anything over 1 MB needs an ADR).
 
 ## When to stop and report

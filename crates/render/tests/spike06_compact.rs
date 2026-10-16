@@ -1,4 +1,4 @@
-//! SPIKE-06 (docs/spikes.md): checks of the experimental compact tile format. Compiled only with `--features spike06`:
+//! SPIKE-06 (docs/archive/M4/spikes.md): checks of the experimental compact tile format. Compiled only with `--features spike06`:
 //! `cargo test -p planet-render --features spike06 --test spike06_compact` (PLANET_ADAPTER=hardware for the real GPU).
 #![cfg(feature = "spike06")]
 

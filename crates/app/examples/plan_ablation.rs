@@ -1,4 +1,4 @@
-//! M4 item 7a ablation (docs/learnings.md): where the draw plan's time goes over a stored global bake. For each standard
+//! M4 item 7a ablation (docs/archive/M4/learnings.md): where the draw plan's time goes over a stored global bake. For each standard
 //! view, cold and warm: the selection alone, the per-node origin height, the mesh keys, the whole plan, and the counts of
 //! field calls (`height`, `height_bounds`, `inputs_hash`, `read_records*`) per plan. Not production code.
 //! `cargo run --release -p planet --example plan_ablation -- --store DIR --global-res N [--mem-res N] [--cells 32]`.

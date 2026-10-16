@@ -1,4 +1,4 @@
-//! M4 fix F2 ablation (docs/learnings.md): where the frame thread's scheduler time goes. Drives the managed loop (plan worker over
+//! M4 fix F2 ablation (docs/archive/M4/learnings.md): where the frame thread's scheduler time goes. Drives the managed loop (plan worker over
 //! the default world's eroded field on an in-memory bake, residency manager, upload budget, prefetch) with the perf scenes'
 //! camera scripts, a source that makes empty compact-format tiles of the right key and a counting sink, no GPU. Prints the
 //! scheduler and upload columns (median/p99) and the sizes of D and R. Not production code.

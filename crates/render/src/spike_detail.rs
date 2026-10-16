@@ -1,4 +1,4 @@
-//! SPIKE-07 (docs/spikes.md): a shader detail term below the finest geometry level. NOT production code, behind the `spike07`
+//! SPIKE-07 (docs/archive/M4/spikes.md): a shader detail term below the finest geometry level. NOT production code, behind the `spike07`
 //! feature, never used by the product renderer.
 //!
 //! The term is VISUAL ONLY: it perturbs the shading normal of the relief view and never moves a vertex, a depth value or a
