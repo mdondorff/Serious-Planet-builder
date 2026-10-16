@@ -304,7 +304,7 @@ impl CountBudget {
         max_draw_calls: 10_000,
         max_triangles: 10_000 * 2_304,
         max_resident_tiles: 10_000,
-        max_upload_bytes: 10_000 * 1_221 * 44,
+        max_upload_bytes: 10_000 * 1_221 * 48,
     };
 }
 
@@ -338,7 +338,7 @@ impl TerrainPlan {
     pub fn counts(&self) -> PlanCounts {
         let per_tile_triangles = (planet_generators::mesh::grid_indices(self.cells).len() / 3) as u64;
         let tiles: std::collections::BTreeSet<_> = self.nodes.iter().map(|n| n.tile).collect();
-        let vertex_bytes = planet_generators::mesh::vertex_count(self.cells) as u64 * planet_generators::mesh::MeshVertex::STRIDE;
+        let vertex_bytes = planet_generators::mesh::vertex_count(self.cells) as u64 * planet_generators::mesh::MeshVertex::GPU_STRIDE;
         PlanCounts {
             draw_calls: self.nodes.len() as u32,
             triangles: self.nodes.len() as u64 * per_tile_triangles,

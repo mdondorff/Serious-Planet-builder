@@ -148,6 +148,22 @@ impl HeightField for TerrainField<'_> {
         self.seed
     }
 
+    /// The climate of the tile from the bake with the integer reader (ADR 0027, ADR 0039 point 2); a failed read is recorded like a
+    /// height's (see [`TerrainField::error`]) and gives the zero texture.
+    fn climate(&self, _map: &dyn planet_core::cube::FaceMapping, id: planet_core::TileId) -> crate::climate::ClimateTexture {
+        match crate::climate::climate_tile(self.src, id) {
+            Ok(c) => c,
+            Err(e) => {
+                self.fail(&e);
+                crate::climate::ClimateTexture::default()
+            }
+        }
+    }
+
+    fn climate_version_word(&self) -> u64 {
+        crate::climate::climate_version_word()
+    }
+
     fn implementation_id(&self) -> &'static str {
         TERRAIN_IMPLEMENTATION_ID
     }

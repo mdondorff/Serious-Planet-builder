@@ -9,9 +9,13 @@
 //!
 //! Payload: `codec version (u8) | form (u8: 0 vertex, 1 compact) | cells (u32 LE) | raw length (u32 LE) | LZ4 block`. The raw
 //! bytes are the tile's mesh key (u64), its origin (3 x f64), then for the vertex form the `vertex_count(cells)` vertices as 11
-//! `f32` each (byte-shuffled as in the height codec), for the compact form the 9 control points, `h_origin`, `hr_min`,
-//! `hr_step`, `skirt_depth` (f32), the flip flag (u8), the relief (f64) and the `(cells + 1)^2` texels of 4 `u16`. Everything is
-//! little endian. The decoder never allocates more than `cells` allows.
+//! `f32` each (byte-shuffled as in the height codec) and the 324 bytes of the climate field ([`ClimateTexture::to_bytes`]), for the compact form the 9 control points, `h_origin`, `hr_min`,
+//! `hr_step`, `skirt_depth` (f32), the flip flag (u8), the relief (f64) and the `(cells + 1)^2` texels of 4 `u16` (the fourth channel
+//! carries the climate field). Everything is little endian. The decoder never allocates more than `cells` allows.
+//!
+//! Version 2 (MESH_VERSION 7, ADR 0039 point 2): the vertex form gained the climate block. A version-1 payload (and every record
+//! under a version-6 key, which the new keys never name) is a miss: [`decode_render_tile`] refuses the version, [`TileSpec::lookup`]
+//! turns that into `None`, and the pre-fill writes the tile again.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -20,6 +24,7 @@ use std::sync::Mutex;
 use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::hash::HASH_VERSION;
 use planet_core::{Face, PlanetFixed, TileId, Vec3};
+use planet_generators::climate::{ClimateTexture, CLIMATE_BYTES};
 use planet_generators::compact::{tile_data_field, vertex_tile_field, CompactTile, RenderTile, COMPACT_MIN_LEVEL};
 use planet_generators::height::HeightField;
 use planet_generators::mesh::{vertex_count, MeshVertex, TileMesh};
@@ -35,8 +40,8 @@ pub const KIND_MESH: u8 = Kind::Mesh as u8;
 /// Output parameter tag: the form of the stored tile (0 vertex, 1 compact).
 pub const PARAM_RENDER_FORM: u8 = 5;
 
-/// Version of the payload layout. History: 1 = LZ4 block of the exact tile.
-pub const PAYLOAD_VERSION: u8 = 1;
+/// Version of the payload layout. History: 1 = LZ4 block of the exact tile; 2 = the vertex form carries the climate block.
+pub const PAYLOAD_VERSION: u8 = 2;
 
 /// The default depth of the pre-fill: levels 0 to this one (2,046 tiles).
 pub const DEFAULT_PREFILL_LEVELS: u8 = 4;
@@ -150,7 +155,7 @@ const COMPACT_FIXED: usize = FIXED + 27 * 4 + 4 * 4 + 1 + 8;
 
 fn raw_len(form: RenderForm, cells: u32) -> u64 {
     match form {
-        RenderForm::Vertex => FIXED as u64 + vertex_count(cells) as u64 * MeshVertex::STRIDE,
+        RenderForm::Vertex => FIXED as u64 + vertex_count(cells) as u64 * MeshVertex::STRIDE + CLIMATE_BYTES as u64,
         RenderForm::Compact => COMPACT_FIXED as u64 + (u64::from(cells) + 1) * (u64::from(cells) + 1) * 8,
     }
 }
@@ -188,6 +193,7 @@ pub fn encode_render_tile(tile: &RenderTile) -> Result<Vec<u8>, MeshCodecError> 
             }
             let floats: Vec<f32> = m.vertices.iter().flat_map(|v| v.to_floats()).collect();
             raw.extend_from_slice(&shuffle(&floats));
+            raw.extend_from_slice(&m.climate.to_bytes());
         }
         RenderTile::Compact(c) => {
             let texels = (cells as usize + 1) * (cells as usize + 1);
@@ -260,7 +266,9 @@ pub fn decode_render_tile(id: TileId, bytes: &[u8]) -> Result<RenderTile, MeshCo
     Ok(match form {
         RenderForm::Vertex => {
             let n = vertex_count(cells);
-            let floats = unshuffle(&raw[FIXED..]);
+            let split = raw.len() - CLIMATE_BYTES;
+            let floats = unshuffle(&raw[FIXED..split]);
+            let climate = ClimateTexture::from_bytes(raw[split..].try_into().expect("the climate block is the last 324 bytes"));
             debug_assert_eq!(floats.len(), n * MeshVertex::FLOATS);
             let vertices = floats
                 .as_chunks::<{ MeshVertex::FLOATS }>()
@@ -274,7 +282,7 @@ pub fn decode_render_tile(id: TileId, bytes: &[u8]) -> Result<RenderTile, MeshCo
                     coarse_height: f[10],
                 })
                 .collect();
-            RenderTile::Vertex(TileMesh { id, cells, key, origin, vertices })
+            RenderTile::Vertex(TileMesh { id, cells, key, origin, vertices, climate })
         }
         RenderForm::Compact => {
             let mut ctrl = [[0f32; 3]; 9];

@@ -241,6 +241,8 @@ pub const PARAM_SKIRT_FRACTION: u8 = 2;
 pub const PARAM_MESH_VERSION: u8 = 3;
 /// Cells per face edge of a stored global bake (a block's own `PARAM_RESOLUTION` is its cells per block edge, ADR 0026 point 6).
 pub const PARAM_GRID_RES: u8 = 4;
+/// The climate version word of a mesh key ([`HeightField::climate_version_word`]); tag 5 is the form of a pre-filled tile.
+pub const PARAM_CLIMATE_VERSION: u8 = 6;
 
 fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> KeyInputs {
     assert!(
@@ -287,6 +289,7 @@ pub fn mesh_key_inputs(field: &dyn HeightField, map: &dyn FaceMapping, tile: Til
     inputs.output_params.insert(PARAM_RESOLUTION, cells.to_le_bytes().to_vec());
     inputs.output_params.insert(PARAM_SKIRT_FRACTION, SKIRT_FRACTION.to_bits().to_le_bytes().to_vec());
     inputs.output_params.insert(PARAM_MESH_VERSION, MESH_VERSION.to_le_bytes().to_vec());
+    inputs.output_params.insert(PARAM_CLIMATE_VERSION, field.climate_version_word().to_le_bytes().to_vec());
     inputs
 }
 

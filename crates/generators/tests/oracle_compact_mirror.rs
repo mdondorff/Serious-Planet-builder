@@ -84,7 +84,7 @@ fn the_cpu_mirror_matches_the_product_mesh_at_every_level_from_3_to_26() {
     // The steep stress field: kilometres of relief, fine-scale slopes.
     let steep = Steep(1);
     let tiles: Vec<TileId> = (COMPACT_MIN_LEVEL..=22).flat_map(|l| [random_tile(&mut rng, l)]).collect();
-    let (pos, height, normal) = mirror_error(&steep, 4, &tiles);
+    let (pos, height, normal) = mirror_error(&steep, 16, &tiles);
     eprintln!("steep: position {pos:.3} x bound, height beyond step {height:.3e} m, normal {normal:.5} degrees");
     assert!(pos < 1.0 && height < 1e-6, "steep field: position {pos} x bound, height {height}");
     assert!(normal <= 0.01, "steep field: normal error {normal} degrees");
@@ -161,10 +161,10 @@ fn neighbouring_compact_tiles_meet_within_millimetres_where_the_tiles_are_small_
 #[test]
 fn the_exact_morph_target_equals_the_product_mesh_at_every_vertex_of_a_steep_tile() {
     // The approximate target (neighbour offsets along the vertex's own normal) fails here by metres; the exact one agrees to the bound
-    // `mirror_error` states. This pins the morph target on the field where the difference shows (cells 4, level 6-8).
+    // `mirror_error` states. This pins the morph target on the field where the difference shows (cells 16, level 6-8).
     let steep = Steep(1);
     let mut rng = SplitMix64(3);
     let tiles: Vec<TileId> = (6..=8u8).flat_map(|l| [random_tile(&mut rng, l), random_tile(&mut rng, l)]).collect();
-    let (pos, height, _) = mirror_error(&steep, 4, &tiles);
+    let (pos, height, _) = mirror_error(&steep, 16, &tiles);
     assert!(pos < 1.0 && height < 1e-6, "exact morph target off the product by {pos} x bound, height {height}");
 }

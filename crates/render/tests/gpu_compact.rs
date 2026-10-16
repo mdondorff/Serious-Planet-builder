@@ -148,7 +148,7 @@ fn the_compact_path_is_identical_per_draw_and_indirect_wherever_the_tiles_sit() 
 fn fallback_tiles_and_coarse_levels_draw_in_the_vertex_format_beside_compact_tiles() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let steep = Steep(1);
-    let cells = 4;
+    let cells = 16;
     let mut fallbacks = 0;
     let mut checked = 0;
     for index in [2usize, 3, 5, 7] {
@@ -243,7 +243,7 @@ fn a_morph_forced_to_the_parent_grid_agrees_so_the_shaders_morph_target_is_the_m
     // from the vertex, and read the height target through the morph-height view (the morphed minus the own height over a window).
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let steep = Steep(1);
-    let cells = 4;
+    let cells = 16;
     let mut worst = 0f64;
     for index in [3usize, 5, 7] {
         for view in [TerrainView::Relief, TerrainView::MorphHeight] {

@@ -248,4 +248,5 @@ fn the_managed_loop_requests_cancels_evicts_and_uploads_exactly_as_before() {
 }
 
 const STREAMER_DIGESTS: [u64; 3] = [15300534013828900970, 689671829587726302, 5616887668897300662];
-const LOOP_DIGESTS: [u64; 3] = [210182232526776486, 1769320474311536167, 11894629634072874866];
+// Re-recorded with MESH_VERSION 7: the vertex tiles the loop uploads are 58,608 B (the climate of each vertex, ADR 0039 point 2) and the keys name the climate version. The streamer digests above did not move.
+const LOOP_DIGESTS: [u64; 3] = [8683852565277776977, 7816254472082388215, 2721754417281521069];

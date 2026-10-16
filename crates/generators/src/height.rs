@@ -318,6 +318,17 @@ pub trait HeightField: Sync {
     fn surface_id(&self) -> &'static str {
         SPHERE_SURFACE_ID
     }
+    /// The climate field of tile `id` (ADR 0039 point 2, GEN-021): temperature and precipitation at 9 x 9 points, stored with the
+    /// tile. The default is the analytic global-coarse function of the field's seed at those directions (a pure function of
+    /// `(seed, mapping, tile)`), for fields without a bake; a field over a bake reads it with the integer reader (ADR 0027).
+    fn climate(&self, map: &dyn FaceMapping, id: TileId) -> crate::climate::ClimateTexture {
+        crate::climate::analytic_climate(self.seed(), map, id)
+    }
+    /// The word of everything the climate depends on besides the tile and the field's inputs, folded into every mesh key
+    /// (the climate version, the reader version and the bake format version for a field over a bake).
+    fn climate_version_word(&self) -> u64 {
+        crate::climate::analytic_version_word()
+    }
     /// `(min, max)` of the height in metres over all directions within the angle `angular_radius` (radians) of the unit
     /// direction `centre`. The bounds are sound (never excluded a real height) but need not be tight; the default is the
     /// global `+-max_abs_height_m`. Node selection uses them for the bounding volume of a tile (LOD-008).
@@ -515,6 +526,12 @@ impl<F: HeightField> HeightField for Bound<F> {
     }
     fn surface_id(&self) -> &'static str {
         self.field.surface_id()
+    }
+    fn climate(&self, map: &dyn FaceMapping, id: TileId) -> crate::climate::ClimateTexture {
+        self.field.climate(map, id)
+    }
+    fn climate_version_word(&self) -> u64 {
+        self.field.climate_version_word()
     }
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         self.field.height_bounds(centre, angular_radius)

@@ -98,7 +98,14 @@ impl TileSource<RenderTile> for Source {
     fn load(&self, tile: TileId) -> Result<RenderTile, String> {
         let field = Reference(1);
         let rec = ResidentRecords::new(&field, &TangentWarp, &self.lod).record(tile);
-        Ok(RenderTile::Vertex(TileMesh { id: tile, cells: CELLS, key: rec.mesh_key, origin: rec.origin, vertices: Vec::new() }))
+        Ok(RenderTile::Vertex(TileMesh {
+            id: tile,
+            cells: CELLS,
+            key: rec.mesh_key,
+            origin: rec.origin,
+            vertices: Vec::new(),
+            climate: Default::default(),
+        }))
     }
 }
 

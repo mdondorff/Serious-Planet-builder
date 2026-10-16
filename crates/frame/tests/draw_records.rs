@@ -54,7 +54,7 @@ fn draw_records_equal_the_plan_nodes_and_their_bytes_are_counted_per_standard_vi
         let bytes = indirect_frame_bytes(plan.nodes.len());
         assert_eq!(bytes, plan.nodes.len() as u64 * (NODE_RECORD_BYTES + DRAW_RECORD_BYTES), "{name}");
         assert_eq!(list.argument_bytes() + plan.nodes.len() as u64 * NODE_RECORD_BYTES, bytes, "{name}");
-        assert!(bytes <= nodes as u64 * 212, "{name}: {bytes} B per frame against the pin of {nodes} nodes x 212 B");
+        assert!(bytes <= nodes as u64 * 228, "{name}: {bytes} B per frame against the pin of {nodes} nodes x 228 B");
         report.push(format!("{name}: {} nodes, {bytes} B per frame", plan.nodes.len()));
     }
     println!("record bytes per frame (indirect path):\n{}", report.join("\n"));

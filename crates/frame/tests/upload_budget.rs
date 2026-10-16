@@ -107,7 +107,7 @@ fn a_full_ground_1m_fill_takes_the_frames_the_cap_allows_in_both_formats() {
     assert_eq!(per_frame(compact), 118);
     assert_eq!(frames(compact), slots.div_ceil(118) as usize);
     assert_eq!(frames(compact), 75, "ADR 0033 says 74 by bytes (77 MB / 1 MiB); whole tiles make it 75");
-    let vertex = 53_724;
-    assert_eq!(per_frame(vertex), 19);
-    assert_eq!(frames(vertex), 462, "the vertex format needs six times the frames");
+    let vertex = 58_608;
+    assert_eq!(per_frame(vertex), 17);
+    assert_eq!(frames(vertex), 516, "the vertex format needs almost seven times the frames");
 }

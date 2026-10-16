@@ -18,7 +18,7 @@ pub const GRID_SPACINGS_M: [f64; 9] = [0.01, 0.1, 1.0, 10.0, 100.0, 1.0e3, 1.0e4
 
 /// Bytes of one node record (origin, colour, morph interval, one grid phase per decade) in the storage buffer the shader
 /// indexes with the instance index.
-const NODE_BYTES: u64 = 48 + 16 * GRID_SPACINGS_M.len() as u64;
+const NODE_BYTES: u64 = 48 + 16 * GRID_SPACINGS_M.len() as u64 + 16;
 const _: () = assert!(NODE_BYTES == planet_frame::draw::NODE_RECORD_BYTES, "the frame crate counts the same record size");
 
 /// The relief grid's anchors for a tile origin (planet-fixed, f64): for each decade the fractional part of
@@ -45,6 +45,11 @@ struct Globals {
     view_proj: mat4x4<f32>,
     range: vec4<f32>,
     mode: vec4<u32>,
+    // Lit path only: x = the water level W in metres (ADR 0041); the other lanes are reserved.
+    extra: vec4<f32>,
+    // Lit path only: the albedo table of the look (ADR 0039 point 3): eight colours with a threshold in the fourth lane, then
+    // (snow_c_full, snow_c_none, snow_cos_none, snow_cos_full) and (beach_height, beach_fade, shore_blend, 0).
+    albedo: array<vec4<f32>, 10>,
 };
 struct Node {
     origin_rel: vec4<f32>,
@@ -56,6 +61,9 @@ struct Node {
     // the CPU: they anchor the relief grid to the world instead of to this tile, so neighbouring tiles and LOD splits draw
     // the same lines, and keep the line coordinates small.
     phase: array<vec4<f32>, 9>,
+    // The unit up vector of the tile origin (planet-fixed axes) and the inverse of the origin's distance from the planet centre:
+    // up at a point `local` metres from the origin is normalize(xyz + local * w), formed from tile-local numbers only (CON-11).
+    up: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -71,10 +79,13 @@ struct VsOut {
     @location(3) local: vec3<f32>,
     @location(4) height_fine: f32,
     @location(5) @interpolate(flat) node_index: u32,
+    // The vertex format: the climate (temperature, precipitation) of the vertex. The compact format: the tile coordinates (u, v) of
+    // the vertex, from which the fragment stage reads the tile's climate texture.
+    @location(6) aux: vec2<f32>,
 };
 
 @vertex
-fn vs(@builtin(instance_index) inst: u32, @location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) normal: vec3<f32>, @location(3) height: f32, @location(4) coarse_height: f32) -> VsOut {
+fn vs(@builtin(instance_index) inst: u32, @location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) normal: vec3<f32>, @location(3) height: f32, @location(4) coarse_height: f32, @location(5) climate: vec2<f32>) -> VsOut {
     // The morph distance is measured to the vertex's real position: node selection and the morph interval use bounding
     // volumes that include the node's height range.
     let node = nodes[inst];
@@ -91,7 +102,13 @@ fn vs(@builtin(instance_index) inst: u32, @location(0) pos: vec3<f32>, @location
     out.morph = m;
     out.local = local;
     out.node_index = inst;
+    out.aux = climate;
     return out;
+}
+
+// The climate at a fragment of a vertex-format tile: the value interpolated from the vertices (the compact format reads its texture).
+fn tile_climate(in: VsOut) -> vec2<f32> {
+    return in.aux;
 }
 
 // Distance in pixels to the nearest integer of `x`, so lines stay about one pixel wide at any scale.
@@ -209,28 +226,82 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(v * k, v * k, v * k, 1.0);
 }
 
-// The tint of the relief view, as a function of the normalised height.
-fn lit_tint(t: f32) -> vec3<f32> {
-    let low = mix(vec3<f32>(0.18, 0.36, 0.56), vec3<f32>(0.36, 0.56, 0.26), smoothstep(0.0, 0.35, t));
-    return mix(low, mix(vec3<f32>(0.66, 0.56, 0.38), vec3<f32>(0.95, 0.95, 0.95), smoothstep(0.7, 1.0, t)), smoothstep(0.35, 0.7, t));
+// The albedo of the surface (ADR 0039 point 3, REND-026): ground from the climate (desert, grass, forest, tundra), bare rock on
+// steep ground, snow by temperature and slope, a beach band above the water and the seabed below it. `t` is the temperature in
+// degrees C, `p` the precipitation in mm, `cs` the cosine of the slope and `h` the height above the water level. The same function
+// as `AlbedoParams::albedo` (the f64 reference in `planet_frame::look::shading`).
+fn albedo_of(tab: array<vec4<f32>, 10>, t: f32, p: f32, cs: f32, h: f32) -> vec3<f32> {
+    let wet = smoothstep(tab[0].w, tab[1].w, p);
+    let forest = smoothstep(tab[2].w, tab[3].w, p);
+    let vegetation = mix(tab[2].xyz, tab[3].xyz, forest);
+    var ground = mix(tab[4].xyz, vegetation, wet);
+    let warm = smoothstep(tab[4].w, tab[5].w, t);
+    ground = mix(tab[5].xyz, ground, warm);
+    let rock_w = 1.0 - smoothstep(tab[6].w, tab[7].w, cs);
+    let base = mix(ground, tab[0].xyz, rock_w);
+    let cold = 1.0 - smoothstep(tab[8].x, tab[8].y, t);
+    let sticks = smoothstep(tab[8].z, tab[8].w, cs);
+    let snow_w = cold * sticks;
+    let land = mix(base, tab[1].xyz, snow_w);
+    let beach_w = (1.0 - smoothstep(tab[9].x, tab[9].x + tab[9].y, h)) * (1.0 - snow_w);
+    let shore = mix(land, tab[6].xyz, beach_w);
+    let land_w = smoothstep(-tab[9].z, 0.0, h);
+    return mix(tab[7].xyz, shore, land_w);
 }
 
-// The lit path's base radiance (ADR 0038 point 1, REND-025): Lambert of the vertex normal under the plan's sun on the height tint,
-// in units of the sun's illuminance, times the pre-exposure factor of the plan, clamped to 60,000 so the scene target does not
-// hold inf in f16 (the plan validates the sun and the factor, so NaN needs a zero normal, which a mesh never has). Only unit normals, tile-local heights and the plan's numbers are used (CON-11).
-fn lit_radiance(normal: vec3<f32>, height: f32, range: vec2<f32>, sun: vec3<f32>, scale: f32) -> vec3<f32> {
+// The false colour of a climate channel (the debug views): temperature blue to red over -30..40 C, precipitation sand to blue over
+// 0..3000 mm.
+fn climate_colour(view: u32, t: f32, p: f32) -> vec3<f32> {
+    if (view == 3u) {
+        let x = clamp((t + 30.0) / 70.0, 0.0, 1.0);
+        return mix(mix(vec3<f32>(0.05, 0.15, 0.85), vec3<f32>(0.95, 0.95, 0.85), smoothstep(0.0, 0.5, x)), vec3<f32>(0.90, 0.10, 0.05), smoothstep(0.5, 1.0, x));
+    }
+    let y = clamp(p / 3000.0, 0.0, 1.0);
+    return mix(vec3<f32>(0.95, 0.92, 0.80), vec3<f32>(0.05, 0.15, 0.55), y);
+}
+
+// The lit terrain's radiance before the pre-exposure (ADR 0039 point 4, REND-026): Lambert diffuse `albedo * max(n . sun, 0) / pi`
+// for the sun's illuminance of one unit, in the view `view` (0 lit, 1 albedo, 2 lighting, 3 temperature, 4 precipitation). `up` is
+// the unit up vector at the point; the climate comes from the tile's field. No ambient, no shadows, no specular.
+fn terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, sun: vec3<f32>) -> vec3<f32> {
     let n = normalize(normal);
-    let t = clamp((height - range.x) / max(range.y - range.x, 1e-6), 0.0, 1.0);
+    let cs = clamp(dot(n, up), 0.0, 1.0);
     let ndl = max(dot(n, sun), 0.0);
-    let radiance = lit_tint(t) * 0.4 * ndl / 3.14159265;
-    return clamp(radiance * scale, vec3<f32>(0.0), vec3<f32>(60000.0));
+    let inv_pi = 0.31830988618;
+    if (view >= 3u) {
+        return climate_colour(view, t, p) * inv_pi;
+    }
+    if (view == 2u) {
+        return vec3<f32>(ndl * inv_pi);
+    }
+    let a = albedo_of(tab, t, p, cs, h);
+    if (view == 1u) {
+        return a * inv_pi;
+    }
+    return a * (ndl * inv_pi);
 }
 
-// The sun direction and the pre-exposure factor travel in the otherwise unused words of the globals (mode.yzw as bits, range.z).
+// Up at a fragment: the unit up vector of the tile origin plus the fragment's tile-local position times the inverse of the origin's
+// distance from the planet centre, normalised (`node_up` is the node record's `up`). Tile-local arithmetic only (CON-11).
+fn up_at(node_up: vec4<f32>, local: vec3<f32>) -> vec3<f32> {
+    return normalize(node_up.xyz + local * node_up.w);
+}
+
+// What the lit path writes for a fragment (ADR 0038 point 1, REND-025/026): the radiance times the pre-exposure factor of the plan,
+// clamped to 60,000 so the scene target does not hold inf in f16.
+fn shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, sun: vec3<f32>, factor: f32) -> vec3<f32> {
+    return clamp(terrain_radiance(view, tab, normal, up, t, p, h, sun) * factor, vec3<f32>(0.0), vec3<f32>(60000.0));
+}
+
+// The sun direction and the pre-exposure factor travel in the otherwise unused words of the globals (mode.yzw as bits, range.z), the
+// view in mode.x and the water level in extra.x. The up vector is formed from the node's tile-local numbers and the fragment's
+// tile-local position: no planet-radius value reaches this stage.
 @fragment
 fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
-    return vec4<f32>(lit_radiance(in.normal, in.height, g.range.xy, sun, g.range.z), 1.0);
+    let up = up_at(nodes[in.node_index].up, in.local);
+    let climate = tile_climate(in);
+    return vec4<f32>(shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, sun, g.range.z), 1.0);
 }
 "#;
 
@@ -292,8 +363,8 @@ impl DrawMode {
 /// ordered on the queue timeline, so the ring is a deliberate choice that makes the rule explicit, not a requirement.
 const RING: usize = 2;
 
-/// Bytes of the globals uniform (view-projection, height range, view mode).
-const GLOBALS_BYTES: u64 = 96;
+/// Bytes of the globals uniform (view-projection, height range, view mode, the shading extras and the albedo table).
+const GLOBALS_BYTES: u64 = 96 + 16 + 16 * planet_frame::look::shading::ALBEDO_VEC4S as u64;
 
 struct FrameSet {
     globals: wgpu::Buffer,
@@ -365,11 +436,14 @@ fn f32_bytes(values: &[f32]) -> Vec<u8> {
 
 /// A vertex tile's bytes as the pool holds them: the floats of each vertex, little-endian. (Written with `extend_from_slice`: the
 /// byte-wise `flat_map` it replaces cost about 8x as much CPU per tile, REND-016; the bytes are the same.)
-fn vertex_bytes_into(out: &mut Vec<u8>, vertices: &[MeshVertex]) {
-    out.reserve(vertices.len() * MeshVertex::STRIDE as usize);
-    for v in vertices {
+fn vertex_bytes_into(out: &mut Vec<u8>, mesh: &TileMesh) {
+    out.reserve(mesh.vertices.len() * MeshVertex::GPU_STRIDE as usize);
+    for (vi, v) in mesh.vertices.iter().enumerate() {
         for x in v.to_floats() {
             out.extend_from_slice(&x.to_le_bytes());
+        }
+        for c in mesh.gpu_climate(vi) {
+            out.extend_from_slice(&c.to_le_bytes());
         }
     }
 }
@@ -758,6 +832,8 @@ impl TerrainRenderer {
             attr(wgpu::VertexFormat::Float32x3, 2, 2),
             attr(wgpu::VertexFormat::Float32, 3, 3),
             attr(wgpu::VertexFormat::Float32, 4, 4),
+            // The climate of the vertex after the 11 floats: two f16 (temperature, precipitation), see `MeshVertex::GPU_STRIDE`.
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float16x2, offset: MeshVertex::STRIDE, shader_location: 5 },
         ];
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("terrain-pipeline"),
@@ -767,7 +843,7 @@ impl TerrainRenderer {
                 entry_point: Some("vs"),
                 compilation_options: Default::default(),
                 buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: MeshVertex::STRIDE,
+                    array_stride: MeshVertex::GPU_STRIDE,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &attrs,
                 })],
@@ -875,9 +951,10 @@ impl TerrainRenderer {
             label: Some("terrain-compact"),
             source: wgpu::ShaderSource::Wgsl(compact_terrain_shader(cells).into()),
         });
+        // The tile references (binding 1) and the atlas are read by the fragment stage too (the climate of the tile, ADR 0039).
         let storage = |binding| wgpu::BindGroupLayoutEntry {
             binding,
-            visibility: wgpu::ShaderStages::VERTEX,
+            visibility: if binding == 1 { wgpu::ShaderStages::VERTEX_FRAGMENT } else { wgpu::ShaderStages::VERTEX },
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Storage { read_only: true },
                 has_dynamic_offset: false,
@@ -893,7 +970,7 @@ impl TerrainRenderer {
             label: Some("compact-atlas-bgl"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Uint,
                     view_dimension: wgpu::TextureViewDimension::D2,
@@ -1018,6 +1095,8 @@ impl TerrainRenderer {
             attr(wgpu::VertexFormat::Float32x3, 2, 2),
             attr(wgpu::VertexFormat::Float32, 3, 3),
             attr(wgpu::VertexFormat::Float32, 4, 4),
+            // The climate of the vertex after the 11 floats: two f16 (temperature, precipitation), see `MeshVertex::GPU_STRIDE`.
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float16x2, offset: MeshVertex::STRIDE, shader_location: 5 },
         ];
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("terrain-lit-pipeline"),
@@ -1027,7 +1106,7 @@ impl TerrainRenderer {
                 entry_point: Some("vs"),
                 compilation_options: Default::default(),
                 buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: MeshVertex::STRIDE,
+                    array_stride: MeshVertex::GPU_STRIDE,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &attrs,
                 })],
@@ -1387,7 +1466,7 @@ impl TerrainRenderer {
     fn write_vertex_tile(&mut self, ctx: &GpuContext, mesh: &TileMesh, slot: SlotRef, place: Place) {
         let mut bytes = std::mem::take(&mut self.scratch.vertex);
         bytes.clear();
-        vertex_bytes_into(&mut bytes, &mesh.vertices);
+        vertex_bytes_into(&mut bytes, mesh);
         debug_assert_eq!(bytes.len() as u64, self.pool.vertex_slot_bytes, "a vertex-format tile fills its slot exactly");
         let slot = match place {
             Place::Fallback(v) => SlotRef { pool: PoolKind::Vertex, index: v },
@@ -1879,21 +1958,26 @@ impl TerrainRenderer {
         }
         let mut globals = f32_bytes(&plan.view_projection);
         match &plan.lit {
-            // The lit path: the pre-exposure factor in range.z and the sun direction in mode.yzw (as bits), decided by the plan.
+            // The lit path: the pre-exposure factor in range.z, the view in mode.x and the sun direction in mode.yzw (as bits), the
+            // water level in extra.x and the albedo table of the look, all decided by the plan.
             Some(lit) => {
                 let factor = planet_frame::look::pre_exposure_factor_with(&lit.units, f64::from(lit.exposure.pre_ev100())) as f32;
                 globals.extend(f32_bytes(&[lo, hi, factor, 0.0]));
                 globals.extend(
-                    [0, lit.sun_dir[0].to_bits(), lit.sun_dir[1].to_bits(), lit.sun_dir[2].to_bits()]
+                    [lit.view.index(), lit.sun_dir[0].to_bits(), lit.sun_dir[1].to_bits(), lit.sun_dir[2].to_bits()]
                         .iter()
                         .flat_map(|v: &u32| v.to_le_bytes()),
                 );
+                globals.extend(f32_bytes(&[lit.water_level_m, 0.0, 0.0, 0.0]));
+                globals.extend(f32_bytes(&lit.albedo.to_words()));
             }
             None => {
                 globals.extend(f32_bytes(&[lo, hi, 0.0, 0.0]));
                 globals.extend([view_index(plan.view), 0, 0, 0].iter().flat_map(|v: &u32| v.to_le_bytes()));
+                globals.extend(vec![0u8; GLOBALS_BYTES as usize - globals.len()]);
             }
         }
+        debug_assert_eq!(globals.len() as u64, GLOBALS_BYTES);
         // Each frame writes its own set of the ring, so a frame still in flight keeps the records it reads.
         let ring_index = (self.frame % RING as u64) as usize;
         self.used.ring |= 1 << ring_index;
@@ -1911,13 +1995,18 @@ impl TerrainRenderer {
             for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
                 floats.extend([p[0], p[1], p[2], 0.0]);
             }
+            // The unit up vector of the tile origin and the inverse of its distance from the planet centre (decided in f64, rounded
+            // once): the shader forms up at a fragment as normalize(up + local * inv_r), which is tile-local arithmetic (CON-11).
+            let o = d.origin.0;
+            let len = (o.x * o.x + o.y * o.y + o.z * o.z).sqrt();
+            floats.extend([(o.x / len) as f32, (o.y / len) as f32, (o.z / len) as f32, (1.0 / len) as f32]);
             let b = f32_bytes(&floats);
             nodes[i * NODE_BYTES as usize..(i + 1) * NODE_BYTES as usize].copy_from_slice(&b);
         }
         ctx.queue.write_buffer(&set.nodes, 0, &nodes);
         let mut stats = TerrainStats { node_record_bytes: nodes.len() as u64, ..Default::default() };
         // The argument records come from the plan and the slots alone (CON-03: the GPU culls and decides nothing).
-        let vertices_per_slot = self.pool.vertex_slot_bytes / MeshVertex::STRIDE;
+        let vertices_per_slot = self.pool.vertex_slot_bytes / MeshVertex::GPU_STRIDE;
         let placed = |r: &Resident| -> (DrawBuffer, u64) {
             match r.place {
                 Place::Vertex => {

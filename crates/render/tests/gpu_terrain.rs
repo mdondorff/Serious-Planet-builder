@@ -117,7 +117,7 @@ fn ten_scripted_views_have_no_holes_and_exact_draw_counts() {
             .iter()
             .map(|t| match t {
                 RenderTile::Compact(c) => c.resident_bytes(),
-                RenderTile::Vertex(m) => m.vertices.len() as u64 * planet_generators::mesh::MeshVertex::STRIDE,
+                RenderTile::Vertex(m) => m.vertices.len() as u64 * planet_generators::mesh::MeshVertex::GPU_STRIDE,
             })
             .sum();
         assert_eq!(stats.vertex_bytes, expected, "{name}: bytes uploaded");
