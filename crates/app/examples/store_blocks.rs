@@ -1,4 +1,4 @@
-//! M4 item 7b measurement (docs/learnings.md, change store-source-concurrency): over a stored global bake, per standard view
+//! M4 item 7b measurement (docs/archive/M4/learnings.md, change store-source-concurrency): over a stored global bake, per standard view
 //! the cold draw plan (a fresh `StoreSource` and `SelectionCache`), the lattice reads it makes, the distinct blocks it touches
 //! and the second plan (blocks cached, fresh `SelectionCache`); then the 1, 4 and 20 thread tile rate with a bit-identity
 //! check of the tiles across thread counts. Not production code.

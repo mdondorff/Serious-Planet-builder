@@ -57,7 +57,7 @@ Refreshed 2026-10-13 at the M3 gate (session `opus-plannner`, worktree `opus-pla
 - Workflow: one coordinator (this session) + one long-lived worker the owner talks to directly, separate worktrees.
 - Reviewer models: spec-guardian and verifier on Sonnet (trial); numerics-reviewer + architect on Opus. Token economy:
   review proportionate to risk; review small ADRs myself against the code.
-- status.md = forward state + last 10 lines; full log in docs/log.md (newest first).
+- status.md = forward state only; the log is docs/log.md (current milestone, newest first), earlier ones in docs/archive/<M>/log.md.
 - `cargo xtask test gpu --real` needs no owner confirmation (never during a perf window).
 
 ## Open threads

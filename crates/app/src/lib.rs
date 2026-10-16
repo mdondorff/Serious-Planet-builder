@@ -584,7 +584,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
 }
 
 /// Performance-harness skeleton: adapter check, power/clock logging, warm-up, medians, JSON log.
-/// It times the hello-triangle round trip as a stand-in for a frame until the renderer exists (M2).
+/// It times the hello-triangle round trip as a stand-in for a frame (the terrain scenes time real frames).
 fn perf_skeleton(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
     planet_perf::check_reference_adapter(&facts(ctx)).map_err(|r| r.to_string())?;
     let owner_override = readiness_gate(o, ctx, out)?;

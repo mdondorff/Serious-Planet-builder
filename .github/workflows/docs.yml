@@ -5,9 +5,9 @@ name: docs
 on:
   push:
     branches: ["**"]
-    paths: ["docs/**", "openspec/**", ".claude/**", "*.md"]
+    paths: ["docs/**", "openspec/**", ".claude/**", "*.md", "spikes/**/results/**"]
   pull_request:
-    paths: ["docs/**", "openspec/**", ".claude/**", "*.md"]
+    paths: ["docs/**", "openspec/**", ".claude/**", "*.md", "spikes/**/results/**"]
   workflow_dispatch:
 
 env:

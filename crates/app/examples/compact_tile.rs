@@ -1,4 +1,4 @@
-//! SPIKE-06 measurement helper (docs/spikes.md): the compact tile format against today's 44-byte vertices. Plans a standard view
+//! SPIKE-06 measurement helper (docs/archive/M4/spikes.md): the compact tile format against today's 44-byte vertices. Plans a standard view
 //! with the production planner, builds both formats for every tile of the draw set, and reports (1) bytes, (2) the CPU mirror of
 //! the compact vertex shader against the product mesh (position, coarse position, normal, heights, per level) and the seam
 //! mismatch of shared border vertices in both formats, (3) the images of both renderers per debug view, and (4) GPU time

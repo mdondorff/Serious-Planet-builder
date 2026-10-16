@@ -448,7 +448,7 @@ pub struct Wants {
     /// Residency set R: everything worth keeping for the camera position (a superset of D). Priority: distance; the
     /// caller may order in-view tiles first. Level (coarse first) outranks priority.
     pub residency: Vec<(TileId, f64)>,
-    /// Prefetch set: R at the predicted position (translation only). Empty until the prefetch source exists.
+    /// Prefetch set: R at the predicted position (translation only). Empty while the prefetch source is off (STRM-018).
     pub prefetch: Vec<(TileId, f64)>,
 }
 

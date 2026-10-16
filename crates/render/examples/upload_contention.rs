@@ -1,4 +1,4 @@
-//! M4 fix F8 micro-benchmark (docs/learnings.md): what a frame's tile upload costs on the frame thread while N worker threads run a
+//! M4 fix F8 micro-benchmark (docs/archive/M4/learnings.md): what a frame's tile upload costs on the frame thread while N worker threads run a
 //! CPU-bound tile build loop beside it. The real path (`TerrainRenderer::upload_tiles_at` with compact tiles in adjacent slots that
 //! move every frame, then a frame submit as the loop does) is timed whole and, with the renderer's own timers, split into the queue
 //! calls and the staging (conversion, sorting, packing); beside it a heap allocation of the staging size, which is what the batched

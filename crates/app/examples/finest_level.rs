@@ -1,4 +1,4 @@
-//! SPIKE-07 measurement helper (docs/spikes.md): the TEST-013 flight with the finest geometry level capped at 22, 23 and 26, each
+//! SPIKE-07 measurement helper (docs/archive/M4/spikes.md): the TEST-013 flight with the finest geometry level capped at 22, 23 and 26, each
 //! with and without the shader detail term (`planet_render::spike_detail`, visual only). Per frame it plans every cap with the
 //! production planner, renders both variants, and writes PNGs, a CSV of node counts and image differences, and (once, at the
 //! end) the mesh's deviation from the pure field at the finest tiles of the last frames.

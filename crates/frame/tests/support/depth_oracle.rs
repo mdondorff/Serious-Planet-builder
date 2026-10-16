@@ -1,5 +1,5 @@
 //! Test helper (LOD-007): a CPU depth pass over a set of tiles, the oracle for "does this tile contribute a visible pixel".
-//! Ported from SPIKE-05's `residency_counts` example (docs/spikes.md): every tile's grid and skirt triangles are projected
+//! Ported from SPIKE-05's `residency_counts` example (docs/archive/M4/spikes.md): every tile's grid and skirt triangles are projected
 //! in f64 (`Camera::project`), rasterized at pixel centres into one depth buffer (larger `1/w` is nearer, near plane
 //! clipping), and a tile is visible when one of its triangles owns the nearest depth of a covered pixel.
 

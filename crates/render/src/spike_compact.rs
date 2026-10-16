@@ -1,4 +1,4 @@
-//! SPIKE-06 (docs/spikes.md): an experimental compact tile format. NOT production code, behind the `spike06` feature, never
+//! SPIKE-06 (docs/archive/M4/spikes.md): an experimental compact tile format. NOT production code, behind the `spike06` feature, never
 //! used by the product renderer.
 //!
 //! One shared grid (no vertex buffer at all: the vertex shader derives `(i, j)` or the skirt vertex from `vertex_index`, the

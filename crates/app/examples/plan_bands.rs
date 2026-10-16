@@ -1,4 +1,4 @@
-//! M4 fix F3 measurement (docs/learnings.md, change cold-plan-origin-heights): where a cold plan at altitude goes, over the stored
+//! M4 fix F3 measurement (docs/archive/M4/learnings.md, change cold-plan-origin-heights): where a cold plan at altitude goes, over the stored
 //! global bake, per altitude band of the dive, and the dive's plan column replayed the way the plan worker runs it. Not production code.
 //! `cargo run --release -p planet --example plan_bands -- --store DIR --global-res N [--part bands|dive|tilegen] [--threads 20] [--bands 20000000,5000000,...]`.
 //!

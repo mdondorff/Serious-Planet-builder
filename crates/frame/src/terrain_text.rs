@@ -232,7 +232,7 @@ pub struct TerrainBundle {
     pub generator_version: u32,
     pub implementation_id: String,
     pub mesh_version: u32,
-    /// Hash of the WorldDefinition read set; 0 until `world-def` exists (M3).
+    /// Hash of the WorldDefinition read set; the world's `WorldDefinition::hash` (WDEF-003), or the single planet of the seed and radius for a seed-only bundle.
     pub definition_hash: u64,
     /// Adapter the bundle was recorded on (informational: views compare per adapter).
     pub adapter: String,

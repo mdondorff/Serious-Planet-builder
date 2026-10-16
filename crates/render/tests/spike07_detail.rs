@@ -1,4 +1,4 @@
-//! SPIKE-07 (docs/spikes.md): checks of the experimental shader detail term. Compiled only with `--features spike07`:
+//! SPIKE-07 (docs/archive/M4/spikes.md): checks of the experimental shader detail term. Compiled only with `--features spike07`:
 //! `cargo test -p planet-render --features spike07 --test spike07_detail` (PLANET_ADAPTER=hardware for the real GPU).
 #![cfg(feature = "spike07")]
 
