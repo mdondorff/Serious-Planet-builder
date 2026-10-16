@@ -9,7 +9,7 @@ A planet-scale generator, editor and real-time renderer: Rust + wgpu, one binary
 3. `openspec/specs/`: current subsystem specs. Read only the 2–3 specs your task touches.
 4. `docs/background/`: frozen research and setup docs. **Read only when an ADR, spec or task points at a specific section** (e.g. "background report §5"). Never treat them as requirements, never update them.
 
-Working files: `docs/status.md` (forward state: waiting for the owner, queues, stop reports, the most recent log lines), `docs/log.md` (the full log, newest first), `docs/spikes.md` (spike register), `docs/learnings.md` (append-only findings).
+Working files: `docs/status.md` (forward state only: waiting for the owner, the current queue, the current stop report, tracked items), `docs/log.md` (the current milestone's log, newest first), `docs/spikes.md` (spike register), `docs/learnings.md` (findings, each with a scope). Finished milestones are archived in `docs/archive/<M>/` by the `housekeeping` skill.
 
 ## Commands (always via xtask)
 - `cargo xtask test fast`: tier A for changed crates (<= 15 s quiet; owner, 2026-10-16)
