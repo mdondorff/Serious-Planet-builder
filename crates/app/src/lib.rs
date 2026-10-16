@@ -49,6 +49,7 @@ modes:
     --gen-workers N          threads of the tile generation pool and so jobs running at once in the pipelined loop and the streaming perf scenes (STRM-020; default: the machine's hardware threads; the plan worker's threads are separate)
     --gen-reserve N          hardware threads the default generation pool leaves free for the frame thread, the plan worker and the driver (STRM-020; default 2; ignored when --gen-workers is given)
     --gen-ahead N            jobs queued behind the running ones so a worker that finishes between two frames takes the next at once (STRM-020; default: the worker count; 0: refill at frame boundaries only)
+    --gen-priority below-normal|normal   OS priority of the generation workers (STRM-020, ADR 0046; default below-normal: the frame thread wins a core both want; no result depends on it)
     --tile-format vertex|compact   how terrain tiles are built and held (ADR 0033): compact (default) for levels 3 and finer, vertex the 44-byte reference format for all
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
     --machine-ready          owner override of a failed readiness gate (ADR 0020); recorded in the log
@@ -79,6 +80,8 @@ pub struct Options {
     pub gen_ahead: Option<usize>,
     /// `--gen-reserve N`: cores the default pool size leaves free (`planet_streaming::GEN_RESERVE` when absent).
     pub gen_reserve: Option<usize>,
+    /// `--gen-priority below-normal|normal`: the priority of the generation workers (STRM-020, ADR 0046); below-normal when absent.
+    pub gen_priority: Option<planet_streaming::Priority>,
     pub perf: bool,
     pub machine_ready: bool,
     pub view: String,
@@ -151,6 +154,7 @@ impl Options {
         let reserve = self.gen_reserve.unwrap_or(planet_streaming::GEN_RESERVE);
         let g =
             self.gen_workers.map_or_else(|| planet_streaming::GenWorkers::machine_reserving(reserve), planet_streaming::GenWorkers::new);
+        let g = self.gen_priority.map_or(g, |p| g.with_priority(p));
         self.gen_ahead.map_or(g, |a| g.with_ahead(a))
     }
 
@@ -185,6 +189,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         tile_format: None,
         upload: None,
         gen_workers: None,
+        gen_priority: None,
         gen_ahead: None,
         gen_reserve: None,
         perf: false,
@@ -327,6 +332,13 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--gen-reserve" => {
                 let v = it.next().ok_or("--gen-reserve needs a count")?;
                 o.gen_reserve = Some(v.parse::<usize>().map_err(|_| format!("--gen-reserve must be a non-negative integer, got '{v}'"))?)
+            }
+            "--gen-priority" => {
+                let v = it.next().ok_or("--gen-priority needs a value")?;
+                o.gen_priority = Some(
+                    planet_streaming::Priority::parse(v)
+                        .ok_or_else(|| format!("--gen-priority must be below-normal or normal, got '{v}'"))?,
+                )
             }
             "--gen-ahead" => {
                 let v = it.next().ok_or("--gen-ahead needs a count")?;
@@ -660,6 +672,19 @@ mod tests {
         assert_eq!(args(&["test-render", "--gen-reserve", "0"]).gen_workers().workers, cores);
         assert!(parse_args(&["test-render".into(), "--gen-reserve".into(), "x".into()]).unwrap_err().contains("non-negative"));
         assert!(parse_args(&["test-render".into(), "--gen-reserve".into()]).unwrap_err().contains("needs a count"));
+    }
+
+    // spec: STRM-020, TEST-012
+    #[test]
+    fn the_generation_workers_run_below_normal_priority_unless_the_option_says_normal() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let low = planet_streaming::Priority::BelowNormal;
+        assert_eq!(args(&["test-render"]).unwrap().gen_workers().priority, low);
+        assert_eq!(args(&["test-render", "--gen-priority", "below-normal"]).unwrap().gen_workers().priority, low);
+        let o = args(&["test-render", "--gen-priority", "normal", "--gen-workers", "3"]).unwrap();
+        assert_eq!((o.gen_workers().priority, o.gen_workers().workers), (planet_streaming::Priority::Normal, 3));
+        assert!(args(&["test-render", "--gen-priority", "high"]).unwrap_err().contains("below-normal or normal"));
+        assert!(args(&["test-render", "--gen-priority"]).unwrap_err().contains("needs a value"));
     }
 
     struct TempDir(PathBuf);

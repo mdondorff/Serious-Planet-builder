@@ -1,0 +1,6 @@
+- [x] 1.1 ablation: baseline x5, reserve 6 and 10, workers below normal x3, frame above normal, both x2, dive-fast baseline x2 / below x2 / both (learnings table)
+- [x] 1.2 failing tests first: priority read-back (streaming), option and default (app), `protocol.gen` priority and comparison (perf), xtask pass-through
+- [x] 1.3 streaming: `priority` module, `ThreadPool::with_priority`, `GenWorkers::priority`
+- [x] 1.4 app/xtask/perf: `--gen-priority`, `GenSettings::below_normal`
+- [x] 1.5 spec deltas: STRM-020, TEST-012 (modified); ADR 0046 proposed
+- [x] 1.6 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge

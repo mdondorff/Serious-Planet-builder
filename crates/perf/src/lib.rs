@@ -178,14 +178,17 @@ pub struct GenSettings {
     pub workers: usize,
     pub ahead: usize,
     pub reserve: Option<usize>,
+    /// The workers ran at below normal OS priority (ADR 0046); a log that records no priority ran at normal.
+    pub below_normal: bool,
 }
 
 impl GenSettings {
     /// The settings as one line (`workers 18, ahead 18, reserve 2`), what the comparison prints and compares.
     pub fn describe(&self) -> String {
+        let priority = if self.below_normal { ", below-normal priority" } else { "" };
         match self.reserve {
-            Some(r) => format!("workers {}, ahead {}, reserve {r}", self.workers, self.ahead),
-            None => format!("workers {}, ahead {}", self.workers, self.ahead),
+            Some(r) => format!("workers {}, ahead {}, reserve {r}{priority}", self.workers, self.ahead),
+            None => format!("workers {}, ahead {}{priority}", self.workers, self.ahead),
         }
     }
 
@@ -193,10 +196,11 @@ impl GenSettings {
         match g {
             None => "null".into(),
             Some(g) => format!(
-                "{{\"workers\":{},\"ahead\":{},\"reserve\":{}}}",
+                "{{\"workers\":{},\"ahead\":{},\"reserve\":{},\"priority\":\"{}\"}}",
                 g.workers,
                 g.ahead,
-                g.reserve.map_or("null".to_string(), |r| r.to_string())
+                g.reserve.map_or("null".to_string(), |r| r.to_string()),
+                if g.below_normal { "below-normal" } else { "normal" }
             ),
         }
     }
