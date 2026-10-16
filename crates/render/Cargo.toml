@@ -12,6 +12,7 @@ planet-frame.workspace = true
 planet-streaming.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
+raw-window-handle.workspace = true
 png.workspace = true
 
 planet-generators.workspace = true

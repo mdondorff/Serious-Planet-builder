@@ -1,9 +1,11 @@
 //! `frame`: GPU-free construction of the `FramePlan` (CON-03, ADR 0009). Everything that decides *what* is
 //! drawn lives here; `render` only executes the plan. M1 plans a row of tiles shown through a debug view.
 
+pub mod adapter;
 pub mod camera;
 pub mod controller;
 pub mod draw;
+pub mod freecam;
 pub mod instances;
 pub mod lod;
 pub mod managed;
@@ -17,6 +19,7 @@ pub mod scenes;
 pub mod terrain;
 pub mod terrain_text;
 pub mod upload;
+pub mod viewer;
 
 pub use camera::{Camera, Frustum};
 pub use controller::{CameraController, CameraInput, CameraMode, ControllerParams};

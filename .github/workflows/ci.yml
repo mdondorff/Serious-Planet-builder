@@ -63,9 +63,16 @@ jobs:
         run: cargo xtask test
       - name: test gpu (tier C, software adapter)
         run: cargo xtask test gpu
+        env:
+          # The viewer window smoke (VIEW-005) needs a display. The Linux runner has none: the skip is declared here with its
+          # reason (the test fails without the declaration) and noted in the job summary below.
+          PLANET_NO_DISPLAY: ${{ runner.os == 'Linux' && 'the ubuntu runner has no display' || '' }}
+      - name: viewer window smoke (VIEW-005)
+        if: runner.os == 'Linux'
+        run: echo "viewer window smoke (VIEW-005) SKIPPED on this runner - no display; it runs on Windows CI and on Rasierklinge with test gpu --real" >> "$GITHUB_STEP_SUMMARY"
       - name: run modes start (CON-01)
         run: |
-          cargo run -q -p planet -- editor --smoke
+          cargo run -q -p planet -- editor --smoke --no-window
           cargo run -q -p planet -- generate --smoke
           cargo run -q -p planet -- test-render --smoke
       - name: review images

@@ -306,6 +306,24 @@ impl DrawnSet {
         Self::new(plan.nodes.iter().map(|n| n.tile))
     }
 
+    /// The level of the deepest drawn tile that is `tile` or one of its ancestors; `None` when none is (a tile with only
+    /// descendants drawn is covered by finer tiles: see [`DrawnSet::covered_below`]).
+    pub fn drawn_level_of(&self, tile: TileId) -> Option<u8> {
+        let mut up = Some(tile);
+        while let Some(t) = up {
+            if self.drawn.contains(&t) {
+                return Some(t.level());
+            }
+            up = t.parent();
+        }
+        None
+    }
+
+    /// Whether finer tiles than `tile` are drawn below it (it is a proper ancestor of a drawn tile).
+    pub fn covered_below(&self, tile: TileId) -> bool {
+        self.above.contains(&tile)
+    }
+
     pub fn len(&self) -> usize {
         self.drawn.len()
     }

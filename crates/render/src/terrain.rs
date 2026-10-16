@@ -680,7 +680,11 @@ impl TerrainRenderer {
                 view_formats: &[],
             })
         };
-        let color = target("terrain-color", format, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
+        let color = target(
+            "terrain-color",
+            format,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
+        );
         let depth = target("terrain-depth", wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
         let (color_view, depth_view) = (color.create_view(&Default::default()), depth.create_view(&Default::default()));
         // The share's node-record bytes bound the ring: per node a record and an argument record in each of the RING sets.
@@ -1916,6 +1920,16 @@ impl TerrainRenderer {
                 u64::from(slot.index % self.pool.block_slots) * self.slot_bytes,
             ),
         }
+    }
+
+    /// The colour target the terrain pass draws into, for the window's blit (`window.rs`).
+    pub(crate) fn color_view(&self) -> &wgpu::TextureView {
+        &self.color_view
+    }
+
+    /// The size of the colour target in pixels.
+    pub fn target_size(&self) -> (u32, u32) {
+        self.size
     }
 
     /// Read the last rendered frame back.

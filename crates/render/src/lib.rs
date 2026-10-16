@@ -5,18 +5,22 @@ use std::fmt;
 
 pub mod compact;
 pub mod exec;
+pub mod gate;
 pub mod graph;
 #[cfg(feature = "spike06")]
 pub mod spike_compact;
 #[cfg(feature = "spike07")]
 pub mod spike_detail;
 pub mod terrain;
+pub mod window;
 pub use compact::compact_terrain_shader;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
+pub use gate::requirements as adapter_requirements;
 pub use terrain::{
     execute_terrain, execute_terrain_tiles, DrawMode, FirstUse, FrameTiming, InitCounts, ResidentFormat, TerrainRenderer, TerrainStats,
     UploadCounters, UploadMode, UploadTimes, RING_SETS, TERRAIN_SHADERS, WARM_NODES,
 };
+pub use window::{Presented, WindowHandles, WindowSurface, WINDOW_SHADERS};
 
 /// How terrain tiles are held and drawn (ADR 0033): the compact format for levels 3 and finer (default) or the 44-byte vertex format
 /// for every tile (the reference).
@@ -112,18 +116,25 @@ impl GpuContext {
 
     async fn new_async(policy: AdapterPolicy) -> Result<Self, GpuError> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: match policy {
-                    AdapterPolicy::Software => wgpu::PowerPreference::None,
-                    AdapterPolicy::HighPerformance => wgpu::PowerPreference::HighPerformance,
-                },
-                force_fallback_adapter: policy == AdapterPolicy::Software,
-                compatible_surface: None,
-                apply_limit_buckets: false,
-            })
-            .await
-            .map_err(|e| GpuError::NoAdapter(format!("{e} (policy {policy:?})")))?;
+        let adapter = match policy {
+            // The test adapters: WARP or lavapipe, the fallback adapter of the platform (test and CI mode, VIEW-001).
+            AdapterPolicy::Software => instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::None,
+                    force_fallback_adapter: true,
+                    compatible_surface: None,
+                    apply_limit_buckets: false,
+                })
+                .await
+                .map_err(|e| GpuError::NoAdapter(format!("{e} (policy {policy:?})")))?,
+            // The discrete GPU, chosen by the adapter gate before any device exists (VIEW-001).
+            AdapterPolicy::HighPerformance => gate::pick(&instance, None, planet_frame::adapter::SelectionMode::Interactive).await?.0,
+        };
+        Self::from_adapter(adapter).await
+    }
+
+    /// The context on `adapter`, which the caller has already accepted.
+    pub(crate) async fn from_adapter(adapter: wgpu::Adapter) -> Result<Self, GpuError> {
         let info = adapter.get_info();
         let indirect = adapter.features().contains(wgpu::Features::INDIRECT_FIRST_INSTANCE)
             && adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::INDIRECT_EXECUTION);

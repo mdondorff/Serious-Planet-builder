@@ -39,6 +39,8 @@ rust-version = "1.89"
 libm = "=0.2.16"
 wgpu = { version = "=30.0.1", default-features = false, features = ["wgsl", "dx12", "vulkan"] }
 pollster = "1.0.1"
+winit = { version = "=0.30.13", default-features = false, features = ["rwh_06", "x11"] }
+raw-window-handle = { version = "=0.6.2", features = ["std"] }
 png = "0.18.1"
 lz4_flex = { version = "=0.14.0", default-features = false, features = ["std", "safe-encode", "safe-decode"] }
 blake3 = { version = "=1.8.7", default-features = false, features = ["std", "pure"] }
