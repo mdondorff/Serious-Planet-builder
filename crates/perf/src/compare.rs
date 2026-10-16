@@ -259,7 +259,8 @@ pub fn summarize_log(text: &[u8]) -> Result<LogSummary, String> {
     };
     let gen = root.get("protocol").and_then(|p| p.get("gen")).and_then(|g| {
         let n = |k: &str| g.get(k).and_then(Json::num).map(|v| v as usize);
-        Some(crate::GenSettings { workers: n("workers")?, ahead: n("ahead")?, reserve: n("reserve") }.describe())
+        let below_normal = matches!(g.get("priority"), Some(Json::Str(s)) if s == "below-normal");
+        Some(crate::GenSettings { workers: n("workers")?, ahead: n("ahead")?, reserve: n("reserve"), below_normal }.describe())
     });
     let gpu = points.iter().map(|(p, v)| (p.clone(), gpu_validity(v))).collect();
     let clock = points.iter().map(|(p, v)| (p.clone(), view_clock_state(v))).collect();
@@ -968,14 +969,26 @@ mod source_tests {
     #[test]
     fn a_log_records_its_generation_settings_and_logs_with_other_settings_are_not_compared_as_equal() {
         let store = "store C:/bake, 16384 cells";
-        let g18 = crate::GenSettings { workers: 18, ahead: 18, reserve: Some(2) };
-        let g20 = crate::GenSettings { workers: 20, ahead: 20, reserve: Some(0) };
+        let g18 = crate::GenSettings { workers: 18, ahead: 18, reserve: Some(2), below_normal: false };
+        let g20 = crate::GenSettings { workers: 20, ahead: 20, reserve: Some(0), below_normal: false };
         let new = session_gen("dive", Some(store), 12.0, 0.4, Some(g18));
         let text = String::from_utf8(new.clone().into_bytes()).unwrap();
-        assert!(text.contains("\"gen\":{\"workers\":18,\"ahead\":18,\"reserve\":2}"), "{text}");
+        assert!(text.contains("\"gen\":{\"workers\":18,\"ahead\":18,\"reserve\":2,\"priority\":\"normal\"}"), "{text}");
         assert_eq!(summarize_log(new.as_bytes()).unwrap().gen.as_deref(), Some("workers 18, ahead 18, reserve 2"));
+        // The workers' priority is part of the settings (ADR 0046): a log taken below normal is not the same pool as one at normal.
+        let low = session_gen("dive", Some(store), 12.0, 0.4, Some(crate::GenSettings { below_normal: true, ..g18 }));
+        assert!(low.contains("\"priority\":\"below-normal\""), "{low}");
+        assert_eq!(summarize_log(low.as_bytes()).unwrap().gen.as_deref(), Some("workers 18, ahead 18, reserve 2, below-normal priority"));
+        let lines = comparison_lines(Some(new.as_bytes()), low.as_bytes());
+        assert!(lines[0].contains("gen settings differ") && lines[0].contains("below-normal priority"), "{lines:?}");
         // A size fixed outright has no reserve to record.
-        let fixed = session_gen("dive", Some(store), 12.0, 0.4, Some(crate::GenSettings { workers: 8, ahead: 0, reserve: None }));
+        let fixed = session_gen(
+            "dive",
+            Some(store),
+            12.0,
+            0.4,
+            Some(crate::GenSettings { workers: 8, ahead: 0, reserve: None, below_normal: false }),
+        );
         assert_eq!(summarize_log(fixed.as_bytes()).unwrap().gen.as_deref(), Some("workers 8, ahead 0"));
         // Another pool: not compared, the line names both, the session becomes the baseline.
         let lines = comparison_lines(Some(session_gen("dive", Some(store), 6.0, 0.4, Some(g20)).as_bytes()), new.as_bytes());

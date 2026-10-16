@@ -20,12 +20,14 @@
 pub mod budget;
 mod layer;
 pub mod manager;
+pub mod priority;
 mod queue;
 pub mod slots;
 
 pub use budget::{PoolConfig, Tier};
 pub use layer::SchedWork;
 pub use manager::{degrade, DegradationReport, Degraded, ManagerFrame, ResidencyManager};
+pub use priority::Priority;
 pub use slots::{PoolKind, SlotPool, SlotPools, SlotRef, VERTEX_POOL_MAX_LEVEL};
 
 use layer::{normalized, Layer};
@@ -146,16 +148,27 @@ pub struct ThreadPool {
 
 impl ThreadPool {
     pub fn new(threads: usize) -> Self {
+        Self::with_priority(threads, Priority::Normal)
+    }
+
+    /// `threads` workers, each setting its own thread's `priority` before it takes its first job (STRM-020). A platform that
+    /// refuses the request leaves the worker at normal priority; the pool still works.
+    pub fn with_priority(threads: usize, priority: Priority) -> Self {
         let (tx, rx) = channel::<Job>();
         let rx = Arc::new(Mutex::new(rx));
         let workers = (0..threads.max(1))
             .map(|_| {
                 let rx = Arc::clone(&rx);
-                std::thread::spawn(move || loop {
-                    let job = rx.lock().expect("pool receiver").recv();
-                    match job {
-                        Ok(j) => j(),
-                        Err(_) => break,
+                std::thread::spawn(move || {
+                    if priority != Priority::Normal {
+                        priority::set_current(priority);
+                    }
+                    loop {
+                        let job = rx.lock().expect("pool receiver").recv();
+                        match job {
+                            Ok(j) => j(),
+                            Err(_) => break,
+                        }
                     }
                 })
             })
@@ -489,13 +502,16 @@ pub const GEN_RESERVE: usize = 2;
 pub struct GenWorkers {
     pub workers: usize,
     pub ahead: usize,
+    /// The priority the workers run at (ADR 0046; below normal unless `--gen-priority normal`): changes when they run, never what
+    /// they compute.
+    pub priority: Priority,
 }
 
 impl GenWorkers {
     /// `workers` threads and as many jobs queued behind them.
     pub fn new(workers: usize) -> Self {
         let workers = workers.max(1);
-        Self { workers, ahead: workers }
+        Self { workers, ahead: workers, priority: Priority::BelowNormal }
     }
 
     /// The default: one worker per hardware thread of the machine less [`GEN_RESERVE`] cores kept for the frame thread, the plan
@@ -519,9 +535,13 @@ impl GenWorkers {
         Self { ahead, ..self }
     }
 
+    pub fn with_priority(self, priority: Priority) -> Self {
+        Self { priority, ..self }
+    }
+
     /// The pool: exactly `workers` threads.
     pub fn pool(&self) -> Arc<ThreadPool> {
-        Arc::new(ThreadPool::new(self.workers))
+        Arc::new(ThreadPool::with_priority(self.workers, self.priority))
     }
 
     /// `config` with the in-flight limits of this pool.

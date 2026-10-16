@@ -722,7 +722,12 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
 /// The generation pool the session ran with, as the log records it (`protocol.gen`, TEST-012).
 fn gen_settings(o: &Options) -> planet_perf::GenSettings {
     let g = o.gen_workers();
-    planet_perf::GenSettings { workers: g.workers, ahead: g.ahead, reserve: o.gen_reserve_used() }
+    planet_perf::GenSettings {
+        workers: g.workers,
+        ahead: g.ahead,
+        reserve: o.gen_reserve_used(),
+        below_normal: g.priority == planet_streaming::Priority::BelowNormal,
+    }
 }
 
 /// Slots of the main pool the tier's share can hold: the share less the fixed items (small vertex pool, index buffers, node records,
