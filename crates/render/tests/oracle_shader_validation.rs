@@ -21,6 +21,12 @@ fn every_shader_module_validates() {
             panic!("{e}");
         }
     }
+    // The atmosphere's passes and the terrain's atmosphere lighting (ATMO-010).
+    for (name, source) in planet_render::atmosphere_shaders() {
+        if let Err(e) = ctx.validate_wgsl(name, &source) {
+            panic!("{e}");
+        }
+    }
     // The compact tile shader (REND-016) is built from the product shader at run time, for the tile size of the renderer.
     for cells in [4, 16, 32, 64] {
         if let Err(e) = ctx.validate_wgsl("terrain-compact", &compact_terrain_shader(cells)) {

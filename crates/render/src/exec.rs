@@ -75,6 +75,8 @@ pub enum ExecError {
     LitNotEnabled,
     /// The plan's lit part has values the renderer cannot use (the message names them).
     BadLitPlan(String),
+    /// The plan carries an atmosphere but `TerrainRenderer::enable_atmosphere` was not called.
+    AtmosphereNotEnabled,
 }
 
 impl fmt::Display for ExecError {
@@ -105,6 +107,12 @@ impl fmt::Display for ExecError {
                 write!(f, "the plan has {planned} nodes but the node record buffer holds {max}")
             }
             ExecError::BadLitPlan(m) => write!(f, "{m}"),
+            ExecError::AtmosphereNotEnabled => {
+                write!(
+                    f,
+                    "the plan carries an atmosphere but the renderer was not given one; call TerrainRenderer::enable_atmosphere first"
+                )
+            }
             ExecError::LitNotEnabled => {
                 write!(f, "the plan carries a lit path but the renderer was not given one; call TerrainRenderer::enable_lit first")
             }

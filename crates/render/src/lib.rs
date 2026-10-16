@@ -3,6 +3,7 @@
 
 use std::fmt;
 
+pub mod atmosphere;
 pub mod compact;
 pub mod exec;
 pub mod gate;
@@ -14,6 +15,7 @@ pub mod spike_compact;
 pub mod spike_detail;
 pub mod terrain;
 pub mod window;
+pub use atmosphere::{atmosphere_shaders, AtmospherePath, ProbeKind};
 pub use compact::compact_terrain_shader;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
 pub use gate::requirements as adapter_requirements;
@@ -450,6 +452,11 @@ pub(crate) fn read_rgba8(ctx: &GpuContext, texture: &wgpu::Texture, width: u32, 
 }
 
 impl GpuContext {
+    /// Wait for every submitted work to finish (tools and ad hoc timing).
+    pub fn wait_idle(&self) {
+        self.device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
+    }
+
     /// Whether GPU timestamp queries are available on this device.
     pub fn timestamps_supported(&self) -> bool {
         self.device.features().contains(wgpu::Features::TIMESTAMP_QUERY)

@@ -50,6 +50,14 @@ fn shipped_shaders_contain_no_planet_scale_values() {
             all.push(format!("{name}: {h}"));
         }
     }
+    // The atmosphere's shaders are presentation shading (CON-11 v1.4, ADR 0043): they hold the body's radius as a value of their
+    // uniform block, decided in f64 on the CPU, so the radius-uniform rule does not apply; they carry no planet-scale literal and
+    // no radius-like name either.
+    for (name, src) in planet_render::atmosphere_shaders() {
+        for h in scan(&src) {
+            all.push(format!("{name}: {h}"));
+        }
+    }
     for cells in [4, 32, 64] {
         for h in scan(&compact_terrain_shader(cells)) {
             all.push(format!("terrain-compact ({cells} cells): {h}"));

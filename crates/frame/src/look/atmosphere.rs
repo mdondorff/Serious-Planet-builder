@@ -749,6 +749,22 @@ impl Atmosphere {
         [a[0] * (t[0] * direct + ms[0]), a[1] * (t[1] * direct + ms[1]), a[2] * (t[2] * direct + ms[2])]
     }
 
+    /// The sun's light on a surface with `normal` at altitude `h_alt` where the local `up` and the `sun` are planet-fixed unit vectors:
+    /// the transmitted, shadowed Lambert term plus the multiple-scattering ambient on the sky hemisphere (RGB, a unit of illuminance
+    /// 1). The lit terrain is the surface's albedo times this; the terrain shader's `atm_terrain_lighting` is this expression.
+    pub fn terrain_lighting(&self, luts: &StaticLuts, normal: [f64; 3], up: [f64; 3], h_alt: f64, sun: [f64; 3]) -> [f64; 3] {
+        let n = normalize3(normal);
+        let ndl = dot3(n, sun).max(0.0);
+        let mu_s = dot3(up, sun).clamp(-1.0, 1.0);
+        let h = h_alt.clamp(0.0, self.top_m());
+        let t = self.transmittance(luts, h, mu_s);
+        let shadow = self.earth_shadow(h, mu_s);
+        let ms = self.multiscatter(luts, h, mu_s);
+        let hemi = 0.5 + 0.5 * dot3(n, up).clamp(-1.0, 1.0);
+        let direct = shadow * ndl / PI;
+        [t[0] * direct + ms[0] * hemi, t[1] * direct + ms[1] * hemi, t[2] * direct + ms[2] * hemi]
+    }
+
     /// `psi_ms` at one texel: Hillaire's isotropic second-order radiance over `1 - f_ms`, by `MS_DIRECTIONS` uniform directions and
     /// `MS_STEPS` steps (the ground bounce included).
     pub fn multiscatter_texel(&self, luts: &StaticLuts, h: f64, mu_sun: f64) -> [f64; 3] {
@@ -831,6 +847,20 @@ pub struct FrameGeometry {
     pub near: f64,
     /// Whether the camera is inside the atmosphere (sky view and aerial perspective) or outside (the orbit march).
     pub inside: bool,
+    /// `sqrt(c_top)` outside the atmosphere (0 inside): with `rho` and `r` it gives the orbit march's discriminants in the factored,
+    /// limb-stable forms `(r mu - q)(r mu + q)` and `(r mu - rho)(r mu + rho)`. The GPU receives each of `r`, `rho` and `q_top` as a
+    /// high and a low `f32` (a double-single value) so the factor `r mu + q` near the tangent keeps its digits.
+    pub q_top: f64,
+}
+
+/// A value as the GPU holds it when sent as a high and a low `f32`: their sum.
+fn double_single(v: f64) -> f64 {
+    let hi = v as f32;
+    f64::from(hi) + f64::from((v - f64::from(hi)) as f32)
+}
+
+fn low_part(v: f64) -> f32 {
+    (v - f64::from(v as f32)) as f32
 }
 
 fn dot3(a: [f64; 3], b: [f64; 3]) -> f64 {
@@ -915,6 +945,7 @@ impl FrameGeometry {
             fwd,
             near,
             inside: h < top,
+            q_top: libm::sqrt(c_top_of(big_r, top, h).max(0.0)),
         }
     }
 
@@ -923,10 +954,11 @@ impl FrameGeometry {
         let v3 = |a: [f64; 3]| a.map(r32);
         FrameGeometry {
             h: r32(self.h),
-            r: r32(self.r),
+            r: double_single(self.r),
             c: r32(self.c),
             c_top: r32(self.c_top),
-            rho: r32(self.rho),
+            rho: double_single(self.rho),
+            q_top: double_single(self.q_top),
             mu_h: r32(self.mu_h),
             theta_h: r32(self.theta_h),
             beta: r32(self.beta),
@@ -969,19 +1001,19 @@ impl FrameGeometry {
             f(self.sun_e1[0]),
             f(self.sun_e1[1]),
             f(self.sun_e1[2]),
-            0.0,
+            low_part(self.r),
             f(self.sun_e2[0]),
             f(self.sun_e2[1]),
             f(self.sun_e2[2]),
-            0.0,
+            low_part(self.rho),
             f(self.right[0]),
             f(self.right[1]),
             f(self.right[2]),
-            0.0,
+            f(self.q_top),
             f(self.upv[0]),
             f(self.upv[1]),
             f(self.upv[2]),
-            0.0,
+            low_part(self.q_top),
             f(self.fwd[0]),
             f(self.fwd[1]),
             f(self.fwd[2]),
@@ -1197,25 +1229,32 @@ impl FrameGeometry {
     /// adds it with [`Atmosphere::ground_radiance`], a terrain pixel is drawn by the terrain).
     pub fn orbit_ray(&self, atm: &Atmosphere, luts: &StaticLuts, dir: [f64; 3], t_geo: Option<f64>) -> OrbitRay {
         let (mu, cos_vs) = self.view_cosines(dir);
+        self.orbit_ray_cosines(atm, luts, mu, cos_vs, t_geo)
+    }
+
+    /// [`orbit_ray`](FrameGeometry::orbit_ray) from the ray's cosines to the up and to the sun (the arithmetic the GPU bound measures:
+    /// the cosines are dot products the GPU rounds).
+    pub fn orbit_ray_cosines(&self, atm: &Atmosphere, luts: &StaticLuts, mu: f64, cos_vs: f64, t_geo: Option<f64>) -> OrbitRay {
         let rmu = self.r * mu;
         let miss = OrbitRay { radiance: [0.0; 3], transmittance: [1.0; 3], reaches_ground: false, ground_mu_sun: 1.0, enters: false };
         if mu >= 0.0 {
             return miss;
         }
-        let d_top = rmu * rmu - self.c_top;
+        // The discriminants in their factored, limb-stable forms (the GPU's arithmetic: `r mu + q` is exact near the tangent).
+        let d_top = (rmu - self.q_top) * (rmu + self.q_top);
         if d_top < 0.0 {
             return miss;
         }
         let sq = libm::sqrt(d_top);
         let t0 = self.c_top / (-rmu + sq);
         let (big_r, top) = (atm.radius_m, atm.top_m());
-        // The march is measured from the entry point, whose altitude, c and r mu are exact: the ground distance from there is the
-        // altitude-relative form too (no difference of two 2e7 m distances).
+        // The march is measured from the entry point, whose altitude, c and r mu are exact.
         let o = RayOrigin { h: top, r: big_r + top, c: atm.rho_top * atm.rho_top, rmu: -sq, r_musun: self.r * self.mu_sun + t0 * cos_vs };
         let mut s_end = 2.0 * sq;
         let mut reaches_ground = false;
-        if let Some(s_g) = distance_to_ground(o.rmu, o.c) {
-            s_end = s_g;
+        let d_ground = (rmu - self.rho) * (rmu + self.rho);
+        if d_ground >= 0.0 {
+            s_end = self.c / (-rmu + libm::sqrt(d_ground)) - t0;
             reaches_ground = true;
         }
         if let Some(t) = t_geo {

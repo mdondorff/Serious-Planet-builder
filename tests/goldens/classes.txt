@@ -20,3 +20,9 @@ lit_orbit_temperature_ev15 lit
 lit_orbit_precipitation_ev15 lit
 lit_aerial20km_albedo_ev15 lit
 lit_orbit_lighting_ev15 lit
+sky_orbit_ev15 sky
+sky_aerial20km_ev15 sky
+sky_ground1m_ev15 sky
+sky_ground1m_sunset_ev11 sky
+sky_orbit_transmittance_lut sky
+sky_orbit_multiscatter_lut sky
