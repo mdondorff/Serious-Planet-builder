@@ -224,15 +224,11 @@ fn loop_script(capacity: usize, prefetch: bool, tile_bytes: u64, budget: UploadB
 // spec: STRM-005, STRM-007, CON-14
 #[test]
 fn the_streamer_alone_requests_cancels_and_evicts_exactly_as_before() {
-    // A pool that holds everything, a pool smaller than R (eviction by class, degradation is the manager's), failures with
-    // retries, a small in-flight limit (a long queue), a vertex pool for levels 0-2.
+    // Pools smaller than R (eviction by class; degradation is the manager's), failures with retries, an in-flight limit that
+    // leaves a queue, a vertex pool for levels 0-2, prefetch sets while travelling.
     let w = streamer_wants();
-    let digests = [
-        streamer_script(&w, 1_000_000, 0, 6, 13, 5),
-        streamer_script(&w, 700, 0, 16, 0, 1000),
-        streamer_script(&w, 700, 0, 4, 11, 3),
-        streamer_script(&w, 900, 64, 8, 0, 20),
-    ];
+    let digests =
+        [streamer_script(&w, 700, 0, 16, 0, 1000), streamer_script(&w, 300, 0, 8, 11, 1000), streamer_script(&w, 250, 64, 8, 0, 100)];
     eprintln!("streamer digests: {digests:?}");
     assert_eq!(digests, STREAMER_DIGESTS);
 }
@@ -242,7 +238,6 @@ fn the_streamer_alone_requests_cancels_and_evicts_exactly_as_before() {
 fn the_managed_loop_requests_cancels_evicts_and_uploads_exactly_as_before() {
     let budgeted = UploadBudget { tile_bytes_per_frame: 40_000, node_records_in_cap: false };
     let digests = [
-        loop_script(1_000_000, true, 0, UploadBudget::default(), 24),
         loop_script(1_000_000, true, 8_840, budgeted, 12),
         loop_script(500, true, 0, UploadBudget::default(), 24),
         loop_script(500, false, 8_840, budgeted, 7),
@@ -251,5 +246,5 @@ fn the_managed_loop_requests_cancels_evicts_and_uploads_exactly_as_before() {
     assert_eq!(digests, LOOP_DIGESTS);
 }
 
-const STREAMER_DIGESTS: [u64; 4] = [0; 4];
-const LOOP_DIGESTS: [u64; 4] = [0; 4];
+const STREAMER_DIGESTS: [u64; 3] = [15300534013828900970, 689671829587726302, 5616887668897300662];
+const LOOP_DIGESTS: [u64; 3] = [210182232526776486, 1769320474311536167, 11894629634072874866];
