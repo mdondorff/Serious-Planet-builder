@@ -66,8 +66,14 @@ fn a_thread_can_set_and_read_back_its_own_priority_and_the_names_parse() {
     });
     let (low, read_low, back, read_back) = handle.join().expect("thread");
     if HAS_PRIORITY {
-        assert!(low && back, "lowering and restoring a thread's own priority is always allowed");
-        assert_eq!((read_low, read_back), (Some(Priority::BelowNormal), Some(Priority::Normal)));
+        assert!(low, "lowering a thread's own priority is always allowed");
+        assert_eq!(read_low, Some(Priority::BelowNormal));
+        // Raising back is allowed on Windows; on Linux it needs RLIMIT_NICE, so only a success is checked.
+        if back {
+            assert_eq!(read_back, Some(Priority::Normal));
+        } else if cfg!(windows) {
+            panic!("Windows refused to restore normal priority");
+        }
     } else {
         assert!(!low && !back && read_low.is_none(), "a platform without the call reports that it did not apply");
     }

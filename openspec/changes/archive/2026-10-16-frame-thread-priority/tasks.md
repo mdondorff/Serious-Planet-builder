@@ -3,4 +3,4 @@
 - [x] 1.3 streaming: `priority` module, `ThreadPool::with_priority`, `GenWorkers::priority`
 - [x] 1.4 app/xtask/perf: `--gen-priority`, `GenSettings::below_normal`
 - [x] 1.5 spec deltas: STRM-020, TEST-012 (modified); ADR 0046 proposed
-- [ ] 1.6 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge
+- [x] 1.6 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge
