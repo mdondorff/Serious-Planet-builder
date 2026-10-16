@@ -1,5 +1,5 @@
 # 0048 Frame-target share (amends ADR 0033's remainder) and the lit path's readings of ADR 0038 and ADR 0042
-Status: proposed (sonnet-explorer, 2026-10-16, M5 item 2 `render-graph-hdr`; reversible: a constant, a formula and the unit table; build on it, accept with the next planner pass)
+Status: accepted (opus-planner, 2026-10-16, under the owner's delegation; points 2 and 3 accepted as decisions, the units move to the look file with item 3; point 6 decided: `golden-review` implements ADR 0037's conditions, change `golden-review-adr-0037`, so M5's first goldens do not go to `/bless`)
 Date: 2026-10-16
 Source: ADR 0033 (terrain share 2 / 3 GiB, "later shares come from that remainder, a later ADR"); ADR 0038 points 1-4; ADR 0042 points 1-3 and 5; ADR 0035; ADR 0037; constitution CON-03, CON-04, CON-11, CON-12, CON-14, CON-20
 
