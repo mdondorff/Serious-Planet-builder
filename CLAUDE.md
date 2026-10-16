@@ -12,7 +12,7 @@ A planet-scale generator, editor and real-time renderer: Rust + wgpu, one binary
 Working files: `docs/status.md` (forward state: waiting for the owner, queues, stop reports, the most recent log lines), `docs/log.md` (the full log, newest first), `docs/spikes.md` (spike register), `docs/learnings.md` (append-only findings).
 
 ## Commands (always via xtask)
-- `cargo xtask test fast`: tier A for changed crates (< 10 s)
+- `cargo xtask test fast`: tier A for changed crates (<= 15 s quiet; owner, 2026-10-16)
 - `cargo xtask test`: tiers A + B on the software adapter
 - `cargo xtask test gpu`: tier C goldens and debug views
 - `cargo xtask test gpu --real`: the same on the discrete GPU. Run it yourself whenever real-GPU evidence is useful; it needs no owner confirmation (owner, 2026-10-12), but never during an architect's perf window. Golden candidates it produces go through `golden-review` (ADR 0017) like any other.
