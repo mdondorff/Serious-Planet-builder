@@ -9,7 +9,7 @@ const TIER_A: &str = "not binary(/^gpu_/) and not binary(/^oracle_/)";
 const TIER_AB: &str = "not binary(/^gpu_/)";
 const TIER_C: &str = "binary(/^gpu_/)";
 const TIER_BC_REAL: &str = "binary(/^gpu_/) or binary(/^oracle_/)";
-/// The `test fast` budget: 15 s (owner's decision, 2026-10-16; it was 10 s, TEST-001/report §16).
+/// The `test fast` budget: 15 s (owner's decision, 2026-10-16; it was 10 s; BUILD-003).
 pub const FAST_BUDGET_SECS: f64 = 15.0;
 /// Where nextest writes the run's JUnit report (`.config/nextest.toml`, `[profile.default.junit]`).
 const JUNIT: &str = "target/nextest/default/junit.xml";
@@ -147,7 +147,7 @@ pub fn test(root: &Path, args: &[String]) -> Res {
     let secs = started.elapsed().as_secs_f64();
     eprintln!("elapsed {secs:.1}s");
     if sub == Some("fast") && secs > FAST_BUDGET_SECS {
-        eprintln!("warning: test fast took {secs:.1}s, over the {FAST_BUDGET_SECS}s budget (report §16); see docs/status.md");
+        eprintln!("warning: test fast took {secs:.1}s, over the {FAST_BUDGET_SECS}s budget (BUILD-003); see docs/status.md");
     }
     if sub == Some("fast") {
         // The budget is a warning, not a failure: a loaded machine makes any hard limit flaky. The names make a regression
