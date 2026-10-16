@@ -1,0 +1,60 @@
+mask: res 16384, 196604 shared-node groups (8 corner triples), mask 201 MB, built in 0.06 s
+shared nodes whose copies disagree on sea: 0
+area check: 6 faces = 5.100645e8 km^2 vs 4 pi R^2 = 5.100645e8
+SERIAL explicit-queue fill: 5 components, 39.6 s, extra peak heap 202 MB, table hash a94f3bddfce28693
+TILED T=1024 threads=20: 5 components, tile pass 4.1 s + merge 0.0 s, extra peak heap 195 MB, table hash a94f3bddfce28693 IDENTICAL to serial; shared-node sea violations 0
+TILED T=1024 threads=7: 5 components, tile pass 7.1 s + merge 0.0 s, extra peak heap 86 MB, table hash a94f3bddfce28693 IDENTICAL to serial; shared-node sea violations 0
+TILED T=1024 threads=1: 5 components, tile pass 31.9 s + merge 0.0 s, extra peak heap 36 MB, table hash a94f3bddfce28693 IDENTICAL to serial; shared-node sea violations 0
+TILED T=256 threads=20: 5 components, tile pass 6.1 s + merge 0.1 s, extra peak heap 119 MB, table hash a94f3bddfce28693 IDENTICAL to serial; shared-node sea violations 0
+TILED T=4096 threads=20: 5 components, tile pass 5.7 s + merge 0.0 s, extra peak heap 2691 MB, table hash a94f3bddfce28693 IDENTICAL to serial; shared-node sea violations 0
+TILED T=1000 threads=3: 5 components, tile pass 35.4 s + merge 0.1 s, extra peak heap 51 MB, table hash a94f3bddfce28693 IDENTICAL to serial; shared-node sea violations 0
+
+sea: 1138785742 nodes, 3.5749e8 km^2 (70.1 % of the sphere), 5 components
+
+largest components (label = smallest vertex id):
+| rank | label | face (i, j) | nodes | area km^2 |
+|---|---|---|---|---|
+| 1 | 0 | 0 (0, 0) | 1137983017 | 357248018 |
+| 2 | 11243 | 0 (11243, 0) | 527042 | 144702 |
+| 3 | 1490126660 | 5 (9220, 9019) | 164653 | 60841 |
+| 4 | 1482240544 | 5 (4289, 8538) | 78190 | 27065 |
+| 5 | 387166641 | 1 (5476, 7244) | 32840 | 11816 |
+
+threshold table (components by area):
+| threshold km^2 | components at or above | their area km^2 | components below | area below km^2 | largest below km^2 |
+|---|---|---|---|---|---|
+| 0.5 | 5 | 3.5749e8 | 0 | -0.0000e0 | 0 |
+| 1 | 5 | 3.5749e8 | 0 | -0.0000e0 | 0 |
+| 3 | 5 | 3.5749e8 | 0 | -0.0000e0 | 0 |
+| 10 | 5 | 3.5749e8 | 0 | -0.0000e0 | 0 |
+| 30 | 5 | 3.5749e8 | 0 | -0.0000e0 | 0 |
+| 100 | 5 | 3.5749e8 | 0 | -0.0000e0 | 0 |
+| 300 | 5 | 3.5749e8 | 0 | -0.0000e0 | 0 |
+| 1000 | 5 | 3.5749e8 | 0 | -0.0000e0 | 0 |
+| 3000 | 5 | 3.5749e8 | 0 | -0.0000e0 | 0 |
+| 10000 | 5 | 3.5749e8 | 0 | -0.0000e0 | 0 |
+| 30000 | 3 | 3.5745e8 | 2 | 3.8881e4 | 27065 |
+| 100000 | 2 | 3.5739e8 | 3 | 9.9721e4 | 60841 |
+| 1000000 | 1 | 3.5725e8 | 4 | 2.4442e5 | 144702 |
+| 10000000 | 1 | 3.5725e8 | 4 | 2.4442e5 | 144702 |
+
+log10 area histogram (km^2): bin = [10^k, 10^(k+1)), components:
+  1e4: 3
+  1e5: 1
+  1e8: 1
+
+PASS 2 (threshold 1000000 km^2, 20 threads): ocean bitmap + dry-basin scan in 10.8 s, extra peak heap 369 MB
+ocean: 1 components, 1137983017 nodes, bitmap hash af4fddc92724bd3f
+serial ocean bitmap: hash af4fddc92724bd3f IDENTICAL to tiled (18.7 s, extra peak heap 2349 MB)
+
+dry basins one land vertex from an ocean vertex (axis pairs inside tiles): 0 pairs, 0 distinct basin components
+
+components below the threshold (dry basins) and the fewest land vertices between one and the ocean (axis walks inside a tile, max 256):
+| label | face (i, j) | nodes | km^2 | min land gap (vertices) |
+|---|---|---|---|---|
+| 11243 | 0 (11243, 0) | 527042 | 144702 | none within 256 |
+| 387166641 | 1 (5476, 7244) | 32840 | 11816 | none within 256 |
+| 1482240544 | 5 (4289, 8538) | 78190 | 27065 | 176 |
+| 1490126660 | 5 (9220, 9019) | 164653 | 60841 | 55 |
+| face (i, j) | dir | basin label | basin nodes | basin km^2 |
+|---|---|---|---|---|

@@ -1,0 +1,8 @@
+selftest res 64 p 0.6: 572 components (largest 7966 nodes), serial == tiled for 5 tile/thread configs: true
+selftest res 64 p 0.55: 996 components (largest 1255 nodes), serial == tiled for 5 tile/thread configs: true
+selftest res 100 p 0.62: 1174 components (largest 33212 nodes), serial == tiled for 5 tile/thread configs: true
+selftest res 128 p 0.5: 6384 components (largest 323 nodes), serial == tiled for 5 tile/thread configs: true
+selftest res 37 p 0.7: 61 components (largest 5722 nodes), serial == tiled for 5 tile/thread configs: true
+fixture T 8 threads 1: basin dry (ocean at x=9, not at x=11), min gap 1, one-cell pairs in x: 11: true
+fixture T 11 threads 3: basin dry (ocean at x=9, not at x=11), min gap 4294967295, one-cell pairs in x: 0: true
+fixture T 33 threads 2: basin dry (ocean at x=9, not at x=11), min gap 1, one-cell pairs in x: 11: true
