@@ -46,6 +46,7 @@ fn pool_workers_read_back_the_priority_the_pool_was_built_with_and_the_caller_ke
 fn generation_workers_carry_their_priority_into_the_pool_and_it_changes_no_size_or_limit() {
     let plain = GenWorkers::new(4);
     let low = plain.with_priority(Priority::BelowNormal);
+    assert_eq!(plain.priority, Priority::BelowNormal, "the default of the generation workers");
     assert_eq!((low.workers, low.ahead), (plain.workers, plain.ahead));
     assert_eq!(plain.apply(Default::default()).job_limit(), low.apply(Default::default()).job_limit());
     let pool: Arc<ThreadPool> = low.pool();
