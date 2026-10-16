@@ -173,6 +173,34 @@ impl LitPlan {
         }
     }
 
+    /// Refuse values a renderer cannot use: non-finite or negative time, non-finite EVs, a reversed or non-finite range, negative
+    /// speeds, a sun that is not a unit vector. The message names the value (repro bundles can carry any text).
+    pub fn validate(&self) -> Result<(), String> {
+        let finite = |name: &str, v: f32| if v.is_finite() { Ok(()) } else { Err(format!("lit plan: {name} is {v}, not finite")) };
+        finite("dt", self.dt_s)?;
+        if self.dt_s < 0.0 {
+            return Err(format!("lit plan: dt is {} s, negative", self.dt_s));
+        }
+        finite("pre-exposure EV100", self.exposure.pre_ev100())?;
+        if let ExposureMode::Adaptive { params: p, .. } = self.exposure {
+            for (n, v) in [("min EV100", p.min_ev100), ("max EV100", p.max_ev100), ("speed up", p.speed_up), ("speed down", p.speed_down)] {
+                finite(n, v)?;
+            }
+            if p.min_ev100 > p.max_ev100 {
+                return Err(format!("lit plan: EV100 range [{}, {}] is reversed", p.min_ev100, p.max_ev100));
+            }
+            if p.speed_up < 0.0 || p.speed_down < 0.0 {
+                return Err(format!("lit plan: adaptation speeds {} and {} must not be negative", p.speed_up, p.speed_down));
+            }
+        }
+        let n = self.sun_dir.map(f64::from);
+        let len = libm::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        if !len.is_finite() || (len - 1.0).abs() > 1.0e-3 {
+            return Err(format!("lit plan: sun direction {:?} has length {len}, not 1", self.sun_dir));
+        }
+        Ok(())
+    }
+
     /// Hash of the text form (for the plan hash).
     pub fn hash(&self) -> u64 {
         let bytes: Vec<u64> = self.to_text().bytes().map(u64::from).collect();
@@ -211,10 +239,10 @@ pub fn bin_center_ev(i: usize) -> f64 {
     HIST_EV_MIN + (i as f64 + 0.5) * bin_width()
 }
 
-/// The bin of a pixel EV, or `None` for a pixel that is not counted (no light: non-finite EV). EVs outside the range land in the
+/// The bin of a pixel EV, or `None` for a pixel that is not counted (no light: NaN or minus infinity; plus infinity is the last bin). EVs outside the range land in the
 /// first or last bin.
 pub fn bin_of_ev(ev: f64) -> Option<usize> {
-    if !ev.is_finite() {
+    if ev.is_nan() || ev == f64::NEG_INFINITY {
         return None;
     }
     let b = libm::floor((ev - HIST_EV_MIN) / bin_width());

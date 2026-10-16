@@ -20,7 +20,7 @@ pub use gate::requirements as adapter_requirements;
 pub use lit::{lit_post_shaders, ExposureState, LitPath};
 pub use terrain::{
     execute_terrain, execute_terrain_tiles, DrawMode, FirstUse, FrameTiming, InitCounts, ResidentFormat, TerrainRenderer, TerrainStats,
-    UploadCounters, UploadMode, UploadTimes, DEPTH_COMPARE, DEPTH_FORMAT, RING_SETS, TERRAIN_SHADERS, WARM_NODES,
+    UploadCounters, UploadMode, UploadTimes, RING_SETS, TERRAIN_SHADERS, WARM_NODES,
 };
 pub use window::{Presented, WindowHandles, WindowSurface, WINDOW_SHADERS};
 

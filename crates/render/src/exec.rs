@@ -73,6 +73,8 @@ pub enum ExecError {
     },
     /// The plan asks for the lit path but `TerrainRenderer::enable_lit` was not called.
     LitNotEnabled,
+    /// The plan's lit part has values the renderer cannot use (the message names them).
+    BadLitPlan(String),
 }
 
 impl fmt::Display for ExecError {
@@ -102,6 +104,7 @@ impl fmt::Display for ExecError {
             ExecError::TooManyNodes { planned, max } => {
                 write!(f, "the plan has {planned} nodes but the node record buffer holds {max}")
             }
+            ExecError::BadLitPlan(m) => write!(f, "{m}"),
             ExecError::LitNotEnabled => {
                 write!(f, "the plan carries a lit path but the renderer was not given one; call TerrainRenderer::enable_lit first")
             }

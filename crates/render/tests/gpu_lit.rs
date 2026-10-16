@@ -10,8 +10,7 @@ use planet_generators::compact::{tile_data_field, vertex_tile_field};
 use planet_generators::height::Reference;
 use planet_generators::mesh::grid_indices;
 use planet_render::graph::{frame_target_share_bytes, lit_frame_graph, LitShape};
-use planet_render::lit::{HDR_FORMAT, LDR_FORMAT};
-use planet_render::{AdapterPolicy, ExecError, GpuContext, TerrainRenderer, DEPTH_COMPARE, DEPTH_FORMAT};
+use planet_render::{AdapterPolicy, ExecError, GpuContext, TerrainRenderer};
 use planet_streaming::PoolConfig;
 use planet_testkit::{GoldenChecks, Image, Tolerance};
 
@@ -94,10 +93,11 @@ fn rgb64(p: &[f32; 4]) -> [f64; 3] {
 // spec: REND-026
 #[test]
 fn the_lit_path_formats_are_rgba16_float_and_reversed_z_depth32() {
-    assert_eq!(HDR_FORMAT, wgpu::TextureFormat::Rgba16Float);
-    assert_eq!(LDR_FORMAT, wgpu::TextureFormat::Rgba8Unorm, "the sRGB encode is in the shader, so the target is not an sRGB format");
-    assert_eq!(DEPTH_FORMAT, wgpu::TextureFormat::Depth32Float);
-    assert_eq!(DEPTH_COMPARE, wgpu::CompareFunction::Greater, "reversed-Z (CON-12)");
+    let f = planet_render::lit::target_formats();
+    assert_eq!(f.scene, "Rgba16Float");
+    assert_eq!(f.presentable, "Rgba8Unorm", "the sRGB encode is in the shader, so the target is not an sRGB format");
+    assert_eq!(f.depth, "Depth32Float");
+    assert_eq!(f.depth_test, "Greater", "reversed-Z (CON-12)");
 }
 
 // spec: REND-024
@@ -193,11 +193,13 @@ fn the_adaptive_exposure_of_a_terrain_frame_follows_the_cpu_reference_from_its_s
             "frame {frame}: {off} of {a} counts sit in another bin than the f64 reference puts them\nGPU {gpu:?}\nCPU {hist:?}"
         );
         let current = ev.unwrap_or(11.0);
-        let target = look::target_ev(&hist, &params, current);
+        // The reference reads the GPU's own histogram, so this checks the adaptation pass on terrain data (1e-4 EV) apart from where
+        // pixels fall at bin edges (checked above).
+        let target = look::target_ev(&gpu, &params, current);
         let next = look::adapt_ev(current, target, f64::from(dt), &params, frame == 0);
         ev = Some(next);
         let state = r.lit_path().unwrap().read_exposure(&ctx);
-        assert!((f64::from(state.ev100) - next).abs() < 0.05, "frame {frame}: GPU EV {} vs CPU {next} (target {target})", state.ev100);
+        assert!((f64::from(state.ev100) - next).abs() < 1.0e-3, "frame {frame}: GPU EV {} vs CPU {next} (target {target})", state.ev100);
         assert!(state.ev100 >= params.min_ev100 && state.ev100 <= params.max_ev100);
     }
 }

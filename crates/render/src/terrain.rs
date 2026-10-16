@@ -216,8 +216,8 @@ fn lit_tint(t: f32) -> vec3<f32> {
 }
 
 // The lit path's base radiance (ADR 0038 point 1, REND-025): Lambert of the vertex normal under the plan's sun on the height tint,
-// in units of the sun's illuminance, times the pre-exposure factor of the plan, clamped to 60,000 so the scene target never holds
-// inf or NaN in f16. Only unit normals, tile-local heights and the plan's numbers are used (CON-11).
+// in units of the sun's illuminance, times the pre-exposure factor of the plan, clamped to 60,000 so the scene target does not
+// hold inf in f16 (the plan validates the sun and the factor, so NaN needs a zero normal, which a mesh never has). Only unit normals, tile-local heights and the plan's numbers are used (CON-11).
 fn lit_radiance(normal: vec3<f32>, height: f32, range: vec2<f32>, sun: vec3<f32>, scale: f32) -> vec3<f32> {
     let n = normalize(normal);
     let t = clamp((height - range.x) / max(range.y - range.x, 1e-6), 0.0, 1.0);
@@ -237,8 +237,8 @@ fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
 pub const TERRAIN_SHADERS: &[(&str, &str)] = &[("terrain", SHADER)];
 
 /// Depth target format and test: reversed-Z `Depth32Float` with the clear value 0 (CON-12, ADR 0002), for the debug and lit paths alike.
-pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-pub const DEPTH_COMPARE: wgpu::CompareFunction = wgpu::CompareFunction::Greater;
+pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+pub(crate) const DEPTH_COMPARE: wgpu::CompareFunction = wgpu::CompareFunction::Greater;
 
 fn view_index(v: TerrainView) -> u32 {
     TerrainView::ALL.iter().position(|x| *x == v).expect("known view") as u32
@@ -1861,6 +1861,9 @@ impl TerrainRenderer {
         let [lo, hi] = plan.height_range;
         if !(lo.is_finite() && hi.is_finite() && lo < hi) {
             return Err(ExecError::BadHeightRange { lo, hi });
+        }
+        if let Some(l) = &plan.lit {
+            l.validate().map_err(ExecError::BadLitPlan)?;
         }
         if plan.lit.is_some() && self.lit.is_none() {
             return Err(ExecError::LitNotEnabled);

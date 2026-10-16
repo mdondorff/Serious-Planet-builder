@@ -564,10 +564,33 @@ impl LitPath {
     }
 }
 
+/// The names of the formats and the depth test the lit path draws with (wgpu types stay behind the seam, ADR 0004), for the test
+/// that pins them (CON-12, ADR 0038 points 1 and 3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TargetFormats {
+    /// The scene target.
+    pub scene: String,
+    /// The tone map's output (the presentable target): not an sRGB format, the encode is in the shader.
+    pub presentable: String,
+    /// The depth target of both paths.
+    pub depth: String,
+    /// The depth comparison (reversed-Z: Greater).
+    pub depth_test: String,
+}
+
+pub fn target_formats() -> TargetFormats {
+    TargetFormats {
+        scene: format!("{HDR_FORMAT:?}"),
+        presentable: format!("{LDR_FORMAT:?}"),
+        depth: format!("{:?}", crate::terrain::DEPTH_FORMAT),
+        depth_test: format!("{:?}", crate::terrain::DEPTH_COMPARE),
+    }
+}
+
 /// Format of the scene target (ADR 0038 point 1).
-pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+pub(crate) const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// Format of the tone-map output: the encode is in the shader, so the target is not an sRGB format (ADR 0038 point 3).
-pub const LDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+pub(crate) const LDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 fn read_buffer(ctx: &GpuContext, buffer: &wgpu::Buffer, bytes: u64) -> Vec<u8> {
     let readback = ctx.device.create_buffer(&wgpu::BufferDescriptor {

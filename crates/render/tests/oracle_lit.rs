@@ -105,7 +105,8 @@ fn the_gpu_histogram_counts_what_the_cpu_reference_counts() {
     let ctx = ctx();
     let size = (W, W);
     let mut path = LitPath::new(&ctx, size);
-    let pre = 12.0;
+    // A pre-exposure at which every bin's pixels fit in f16, the first bin's too.
+    let pre = 6.0;
     // Bin centres of every bin, uneven counts (bin b gets b % 5 + 1 pixel slots), black pixels and out-of-range ones.
     let mut evs: Vec<f64> = Vec::new();
     for b in 0..look::HIST_BINS {
@@ -121,7 +122,7 @@ fn the_gpu_histogram_counts_what_the_cpu_reference_counts() {
             0 => *p = [0.0, 0.0, 0.0, 1.0],
             // Far above the last bin and far below the first: counted in the end bins.
             1 => *p = [half(60_000.0), half(60_000.0), half(60_000.0), 1.0],
-            2 => *p = [1.0e-7, 1.0e-7, 1.0e-7, 1.0],
+            2 => *p = [half(1.0e-7), half(1.0e-7), half(1.0e-7), 1.0],
             _ => {}
         }
     }
@@ -129,10 +130,15 @@ fn the_gpu_histogram_counts_what_the_cpu_reference_counts() {
     let plan = LitPlan { reset_exposure: true, ..LitPlan::adaptive(pre as f32, 0.016) };
     let _ = path.tone_map_to_image(&ctx, &plan);
     let gpu = path.read_histogram(&ctx);
+    // The band mean of this many-bin histogram, through the shader's 40-90 % weighting: the exposure target equals the CPU's.
+    let exposure = path.read_exposure(&ctx);
+    let want = look::target_ev(&gpu, &ExposureParams::default(), pre);
+    assert!((f64::from(exposure.target_ev100) - want).abs() < 1e-4, "target {} vs {want}", exposure.target_ev100);
     let reference: Vec<[f64; 3]> = img.iter().map(rgb64).collect();
     let cpu = look::histogram_of(&reference, pre);
     let total: u32 = gpu.iter().sum();
     assert!(total > n / 2, "a histogram of {total} counts");
+    assert!(gpu[0] > cpu_first_bin_of_centres(), "the far-below pixels reach the first bin: {}", gpu[0]);
     for b in 0..look::HIST_BINS {
         assert_eq!(gpu[b], cpu[b], "bin {b}: GPU {} CPU {} (GPU {gpu:?} CPU {cpu:?})", gpu[b], cpu[b]);
     }
@@ -248,4 +254,9 @@ fn the_false_colour_view_shows_the_ev_band_of_the_exposed_luminance() {
     }
     assert_eq!(px(look::EV_BAND_COUNT), look::EV_BAND_COLORS[0], "clipped light is in band 0");
     assert_eq!(px(look::EV_BAND_COUNT + 1), [0, 0, 0], "black stays black");
+}
+
+/// Pixels at the centre of bin 0 in the histogram test's scene (it has one slot per `b % 5 + 1` of bin 0, so one per 97 more).
+fn cpu_first_bin_of_centres() -> u32 {
+    1
 }

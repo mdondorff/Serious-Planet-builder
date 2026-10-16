@@ -42,6 +42,7 @@ fn bins_cover_ev_minus_10_to_20_in_64_equal_steps() {
     close(bin_center_ev(21), -10.0 + 21.5 * 0.468_75, 1e-12, "centre of bin 21");
     // No light is not counted at all.
     assert_eq!(bin_of_ev(f64::NEG_INFINITY), None);
+    assert_eq!(bin_of_ev(f64::INFINITY), Some(63), "too bright is the last bin");
     assert_eq!(bin_of_ev(f64::NAN), None);
     // The histogram of pixels: black pixels are skipped; pixels at the centre of bins land in them.
     let at = |ev: f64| {
@@ -238,4 +239,32 @@ fn a_debug_path_plan_keeps_its_text_and_a_lit_plan_adds_one_line() {
     assert_eq!(planet_frame::TerrainPlan::from_text(&text).unwrap(), lit);
     assert_eq!(planet_frame::TerrainPlan::from_text(&base).unwrap(), plan);
     assert_ne!(lit.plan_hash(), plan.plan_hash());
+}
+
+// spec: REND-024
+#[test]
+fn a_lit_plan_with_unusable_values_is_refused_naming_the_value() {
+    assert!(LitPlan::fixed(10.0).validate().is_ok());
+    assert!(LitPlan::adaptive(10.0, 0.016).validate().is_ok());
+    let bad = |f: &dyn Fn(&mut LitPlan)| {
+        let mut p = LitPlan::adaptive(10.0, 0.016);
+        f(&mut p);
+        p.validate().unwrap_err()
+    };
+    assert!(bad(&|p| p.dt_s = f32::NAN).contains("dt"));
+    assert!(bad(&|p| p.dt_s = -1.0).contains("negative"));
+    assert!(bad(&|p| p.sun_dir = [0.0, 0.0, 0.0]).contains("sun"));
+    assert!(bad(&|p| p.sun_dir = [2.0, 0.0, 0.0]).contains("length 2"));
+    assert!(bad(&|p| if let ExposureMode::Adaptive { params, .. } = &mut p.exposure {
+        params.min_ev100 = 20.0
+    })
+    .contains("reversed"));
+    assert!(bad(&|p| if let ExposureMode::Adaptive { params, .. } = &mut p.exposure {
+        params.speed_up = -1.0
+    })
+    .contains("speeds"));
+    assert!(bad(&|p| if let ExposureMode::Adaptive { pre_ev100, .. } = &mut p.exposure {
+        *pre_ev100 = f32::INFINITY
+    })
+    .contains("pre-exposure"));
 }
