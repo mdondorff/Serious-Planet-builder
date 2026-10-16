@@ -1,5 +1,5 @@
 # 0046 Generation workers run below normal priority
-Status: proposed
+Status: accepted (opus-planner, 2026-10-16, under the owner's delegation of 2026-10-12; drafted by sonnet-explorer, F10; the benefit under real contention is confirmed or refuted by M4 perf window 4)
 Date: 2026-10-16
 Source: perf window 3 (docs/log.md, 2026-10-16), M4 fix F10 (change `frame-thread-priority`), docs/learnings.md "Generation workers at below-normal priority", docs/learnings.md "Upload time varies with the wants and the load" (F8, which left this open); STRM-020; constitution CON-14, CON-04
 
