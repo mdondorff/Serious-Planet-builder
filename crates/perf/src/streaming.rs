@@ -565,6 +565,197 @@ pub fn query_process_peak_bytes() -> Option<u64> {
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().parse().ok()).flatten()
 }
 
+/// Prefix of the log counts that describe the tile source's load (STRM-022): recorded for the reader of the log, never compared
+/// with an earlier log (they are wall-clock readings and cache behaviour, which differ run to run by nature).
+pub const LOAD_COUNT_PREFIX: &str = "load_";
+
+/// One tile job as its worker saw it (the streamer's `JobSample`, restated here so this crate stays free of the streamer).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LoadJob {
+    pub wait_us: u64,
+    pub run_us: u64,
+    /// Jobs inside their load when this one started, itself included.
+    pub running: u32,
+    pub done: bool,
+    /// The level of the tile.
+    pub level: u8,
+}
+
+/// What the tile source's caches and the pack did during the measured part of a case (differences of two readings).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LoadCounters {
+    pub block_decodes: u64,
+    pub block_lookups: u64,
+    pub block_hits: u64,
+    pub block_evictions: u64,
+    pub block_decode_waits: u64,
+    pub block_lock_wait_us: u64,
+    pub block_fetch_us: u64,
+    pub block_decode_us: u64,
+    /// Blocks in the shared cache at the end, and its budget in blocks.
+    pub block_resident: u64,
+    pub block_budget: u64,
+    pub pack_gets: u64,
+    pub pack_found: u64,
+    pub pack_get_us: u64,
+    pub prefill_lookups: u64,
+    pub prefill_found: u64,
+    pub prefill_skipped: u64,
+    pub prefill_us: u64,
+    /// Microseconds the tile jobs together spent getting blocks from the shared cache (a part of their load time).
+    pub job_block_wait_us: u64,
+    /// Blocks the tile jobs decoded themselves (the others were decoded for the plan worker).
+    pub job_block_decodes: u64,
+    pub field_builds: u64,
+    pub field_us: u64,
+}
+
+/// The concurrency bands the job time is split by: jobs that started with at most 4, 5-9, 10-14 and 15 or more loads running.
+const LOAD_BANDS: [(&str, u32, u32); 4] = [("1_4", 1, 4), ("5_9", 5, 9), ("10_14", 10, 14), ("15_up", 15, u32::MAX)];
+
+/// The level bands the job time is split by.
+const LEVEL_BANDS: [(&str, u8, u8); 4] = [("0_8", 0, 8), ("9_14", 9, 14), ("15_18", 15, 18), ("19_up", 19, u8::MAX)];
+
+/// A fixed amount of integer and floating-point work that touches no memory beyond registers (STRM-022): the same value on every
+/// call and machine, so only its duration varies. `rounds` of 1,000 steps; 20,000 rounds take about 34 ms on the reference machine.
+pub fn calibration_kernel(rounds: u32) -> u64 {
+    let (mut x, mut f) = (0x9E37_79B9_7F4A_7C15u64, 1.000_001f64);
+    for _ in 0..rounds {
+        for _ in 0..1000 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            f = (f * 1.000_000_1 + 1e-9) * 0.999_999_9;
+        }
+    }
+    x ^ f.to_bits()
+}
+
+/// Rounds of [`calibration_kernel`] one calibration measurement runs.
+pub const CALIBRATION_ROUNDS: u32 = 20_000;
+
+/// How fast the CPU runs a fixed job alone and with `threads` copies at once (STRM-022): the kernel's time on one thread, and the
+/// median and the slowest of `threads` threads running it together. The ratio of the median to the single time is what the
+/// threads cost each other (hyperthreads, efficiency cores, clocks), measured outside the code under test, so a log's per-tile
+/// times can be read against the machine's state of the moment. Wall-clock readings, recorded only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CpuCalibration {
+    pub threads: usize,
+    pub single_us: u64,
+    pub parallel_median_us: u64,
+    pub parallel_max_us: u64,
+}
+
+/// Measure [`CpuCalibration`] now. Takes about `2 x` the kernel's time; call it when the case is not running.
+pub fn calibrate_cpu(threads: usize) -> CpuCalibration {
+    let threads = threads.max(1);
+    let time = || {
+        let started = std::time::Instant::now();
+        std::hint::black_box(calibration_kernel(std::hint::black_box(CALIBRATION_ROUNDS)));
+        u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX)
+    };
+    let single_us = time();
+    let start = std::sync::Barrier::new(threads);
+    let mut each: Vec<u64> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..threads)
+            .map(|_| {
+                s.spawn(|| {
+                    start.wait();
+                    time()
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().expect("a calibration thread")).collect()
+    });
+    each.sort_unstable();
+    CpuCalibration { threads, single_us, parallel_median_us: quantile_u64(&each, 0.5), parallel_max_us: each.last().copied().unwrap_or(0) }
+}
+
+/// The calibration as log counts: `load_calib_<when>_single_us`, `..._parallel_median_us`, `..._parallel_max_us`, `..._threads`.
+pub fn calibration_counts(when: &str, c: &CpuCalibration) -> Vec<(String, u64)> {
+    vec![
+        (format!("load_calib_{when}_threads"), c.threads as u64),
+        (format!("load_calib_{when}_single_us"), c.single_us),
+        (format!("load_calib_{when}_parallel_median_us"), c.parallel_median_us),
+        (format!("load_calib_{when}_parallel_max_us"), c.parallel_max_us),
+    ]
+}
+
+fn quantile_u64(sorted: &[u64], q: f64) -> u64 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let at = ((sorted.len() - 1) as f64 * q).round() as usize;
+    sorted[at.min(sorted.len() - 1)]
+}
+
+/// The log counts of a case's tile loads (STRM-022), all prefixed [`LOAD_COUNT_PREFIX`]: jobs that produced a tile; the load
+/// time of a tile (median, p99, max, microseconds) and the time it waited in the pool's queue; the same median by the number of
+/// loads running beside it; the block cache (decodes, lookups, hits, evictions, waits for another thread's decode, the lock wait,
+/// fetch and decode time, residency at the end) and decodes per 1000 tiles; the pack's lookups and the pre-filled tile lookups with
+/// their time. Pure: the same inputs give the same counts.
+pub fn load_counts(jobs: &[LoadJob], c: &LoadCounters) -> Vec<(String, u64)> {
+    let done: Vec<&LoadJob> = jobs.iter().filter(|j| j.done).collect();
+    let sorted = |f: &dyn Fn(&LoadJob) -> u64| -> Vec<u64> {
+        let mut v: Vec<u64> = done.iter().map(|j| f(j)).collect();
+        v.sort_unstable();
+        v
+    };
+    let (run, wait, running) = (sorted(&|j| j.run_us), sorted(&|j| j.wait_us), sorted(&|j| u64::from(j.running)));
+    let mut out: Vec<(String, u64)> = vec![
+        ("load_jobs".into(), done.len() as u64),
+        ("load_jobs_not_done".into(), (jobs.len() - done.len()) as u64),
+        ("load_run_us_median".into(), quantile_u64(&run, 0.5)),
+        ("load_run_us_p99".into(), quantile_u64(&run, 0.99)),
+        ("load_run_us_max".into(), run.last().copied().unwrap_or(0)),
+        ("load_wait_us_median".into(), quantile_u64(&wait, 0.5)),
+        ("load_wait_us_p99".into(), quantile_u64(&wait, 0.99)),
+        ("load_running_median".into(), quantile_u64(&running, 0.5)),
+        ("load_running_max".into(), running.last().copied().unwrap_or(0)),
+    ];
+    for (name, lo, hi) in LOAD_BANDS {
+        let mut v: Vec<u64> = done.iter().filter(|j| (lo..=hi).contains(&j.running)).map(|j| j.run_us).collect();
+        v.sort_unstable();
+        out.push((format!("load_jobs_running_{name}"), v.len() as u64));
+        out.push((format!("load_run_us_median_running_{name}"), quantile_u64(&v, 0.5)));
+    }
+    for (name, lo, hi) in LEVEL_BANDS {
+        let mut v: Vec<u64> = done.iter().filter(|j| (lo..=hi).contains(&j.level)).map(|j| j.run_us).collect();
+        v.sort_unstable();
+        out.push((format!("load_jobs_level_{name}"), v.len() as u64));
+        out.push((format!("load_run_us_median_level_{name}"), quantile_u64(&v, 0.5)));
+    }
+    out.push(("load_run_us_sum".into(), run.iter().sum()));
+    out.push(("load_wait_us_sum".into(), wait.iter().sum()));
+    out.push(("load_job_block_wait_us".into(), c.job_block_wait_us));
+    out.push(("load_job_block_decodes".into(), c.job_block_decodes));
+    out.push(("load_field_builds".into(), c.field_builds));
+    out.push(("load_field_us".into(), c.field_us));
+    let per_1000 = |n: u64| if done.is_empty() { 0 } else { n * 1000 / done.len() as u64 };
+    out.extend([
+        ("load_block_decodes".into(), c.block_decodes),
+        ("load_block_decodes_per_1000_tiles".into(), per_1000(c.block_decodes)),
+        ("load_block_lookups".into(), c.block_lookups),
+        ("load_block_lookups_per_1000_tiles".into(), per_1000(c.block_lookups)),
+        ("load_block_hits".into(), c.block_hits),
+        ("load_block_evictions".into(), c.block_evictions),
+        ("load_block_decode_waits".into(), c.block_decode_waits),
+        ("load_block_lock_wait_us".into(), c.block_lock_wait_us),
+        ("load_block_fetch_us".into(), c.block_fetch_us),
+        ("load_block_decode_us".into(), c.block_decode_us),
+        ("load_block_resident".into(), c.block_resident),
+        ("load_block_budget".into(), c.block_budget),
+        ("load_pack_gets".into(), c.pack_gets),
+        ("load_pack_found".into(), c.pack_found),
+        ("load_pack_get_us".into(), c.pack_get_us),
+        ("load_prefill_lookups".into(), c.prefill_lookups),
+        ("load_prefill_found".into(), c.prefill_found),
+        ("load_prefill_skipped".into(), c.prefill_skipped),
+        ("load_prefill_us".into(), c.prefill_us),
+    ]);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -962,5 +1153,116 @@ mod fresh_lag_tests {
         f[41].uncovered_nodes = 3;
         let t = frames_text(&f);
         assert!(t.lines().next().unwrap().contains("lag uncovered blank") && t.lines().nth(42).unwrap().contains(" 0.000 3 0 "), "{t}");
+    }
+}
+
+#[cfg(test)]
+mod load_tests {
+    use super::*;
+
+    fn job(run_us: u64, running: u32, level: u8) -> LoadJob {
+        LoadJob { wait_us: run_us / 10, run_us, running, done: true, level }
+    }
+
+    fn get(counts: &[(String, u64)], name: &str) -> u64 {
+        counts.iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("no count {name}: {counts:?}")).1
+    }
+
+    // spec: STRM-022
+    #[test]
+    fn the_load_counts_are_the_medians_tails_bands_and_cache_figures_of_fixed_jobs() {
+        // 100 jobs: run time 1..=100 ms at 18 running, levels 5 (first 50) and 20 (last 50), and two that did not finish.
+        let mut jobs: Vec<LoadJob> = (1..=100u64).map(|i| job(i * 1000, 18, if i <= 50 { 5 } else { 20 })).collect();
+        jobs.push(LoadJob { done: false, ..job(999_999, 3, 5) });
+        jobs.push(LoadJob { done: false, ..job(999_999, 3, 5) });
+        let c = LoadCounters {
+            block_decodes: 25,
+            block_lookups: 400,
+            block_hits: 300,
+            block_evictions: 20,
+            block_decode_waits: 7,
+            block_lock_wait_us: 11,
+            block_fetch_us: 22,
+            block_decode_us: 33,
+            block_resident: 31,
+            block_budget: 31,
+            pack_gets: 130,
+            pack_found: 100,
+            pack_get_us: 44,
+            prefill_lookups: 105,
+            prefill_found: 75,
+            prefill_skipped: 9,
+            prefill_us: 55,
+            job_block_wait_us: 66,
+            job_block_decodes: 20,
+            field_builds: 1234,
+            field_us: 77,
+        };
+        let counts = load_counts(&jobs, &c);
+        assert!(counts.iter().all(|(n, _)| n.starts_with(LOAD_COUNT_PREFIX)), "{counts:?}");
+        let names: std::collections::BTreeSet<&str> = counts.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names.len(), counts.len(), "no name twice");
+        assert_eq!((get(&counts, "load_jobs"), get(&counts, "load_jobs_not_done")), (100, 2));
+        // Sorted 1000..=100000: index round(99 q).
+        assert_eq!(get(&counts, "load_run_us_median"), 51_000);
+        assert_eq!(get(&counts, "load_run_us_p99"), 99_000);
+        assert_eq!(get(&counts, "load_run_us_max"), 100_000);
+        assert_eq!(get(&counts, "load_run_us_sum"), 5_050_000);
+        assert_eq!(get(&counts, "load_wait_us_sum"), 505_000);
+        assert_eq!((get(&counts, "load_running_median"), get(&counts, "load_running_max")), (18, 18));
+        assert_eq!((get(&counts, "load_jobs_running_15_up"), get(&counts, "load_jobs_running_1_4")), (100, 0));
+        assert_eq!(get(&counts, "load_run_us_median_running_15_up"), 51_000);
+        assert_eq!((get(&counts, "load_jobs_level_0_8"), get(&counts, "load_jobs_level_19_up")), (50, 50));
+        assert_eq!(get(&counts, "load_run_us_median_level_0_8"), 26_000);
+        assert_eq!(get(&counts, "load_run_us_median_level_19_up"), 76_000);
+        assert_eq!(get(&counts, "load_block_decodes_per_1000_tiles"), 250);
+        assert_eq!(get(&counts, "load_block_lookups_per_1000_tiles"), 4000);
+        for (name, want) in [
+            ("load_block_hits", 300),
+            ("load_block_evictions", 20),
+            ("load_block_decode_waits", 7),
+            ("load_block_resident", 31),
+            ("load_block_budget", 31),
+            ("load_pack_gets", 130),
+            ("load_pack_found", 100),
+            ("load_prefill_lookups", 105),
+            ("load_prefill_found", 75),
+            ("load_prefill_skipped", 9),
+            ("load_job_block_wait_us", 66),
+            ("load_job_block_decodes", 20),
+            ("load_field_builds", 1234),
+        ] {
+            assert_eq!(get(&counts, name), want, "{name}");
+        }
+        // The same inputs give the same counts.
+        assert_eq!(load_counts(&jobs, &c), counts);
+    }
+
+    // spec: STRM-022
+    #[test]
+    fn no_jobs_give_zeros_and_never_divide_by_zero() {
+        let counts = load_counts(&[], &LoadCounters { block_decodes: 5, ..Default::default() });
+        assert_eq!(
+            (get(&counts, "load_jobs"), get(&counts, "load_run_us_median"), get(&counts, "load_block_decodes_per_1000_tiles")),
+            (0, 0, 0)
+        );
+        assert_eq!(get(&counts, "load_block_decodes"), 5);
+    }
+
+    // spec: STRM-022
+    #[test]
+    fn the_calibration_kernel_does_fixed_work_and_the_calibration_reports_its_threads() {
+        // Fixed work: the same value on every call and thread count, different for different amounts of work.
+        assert_eq!(calibration_kernel(3), calibration_kernel(3));
+        assert_ne!(calibration_kernel(3), calibration_kernel(4));
+        assert_eq!(calibration_kernel(0), calibration_kernel(0));
+        let c = calibrate_cpu(3);
+        assert_eq!(c.threads, 3);
+        assert!(c.parallel_median_us <= c.parallel_max_us, "{c:?}");
+        let counts = calibration_counts("before", &c);
+        assert_eq!(get(&counts, "load_calib_before_threads"), 3);
+        assert_eq!(get(&counts, "load_calib_before_single_us"), c.single_us);
+        assert_eq!(get(&counts, "load_calib_before_parallel_max_us"), c.parallel_max_us);
+        assert_eq!(calibrate_cpu(0).threads, 1, "at least one thread");
     }
 }

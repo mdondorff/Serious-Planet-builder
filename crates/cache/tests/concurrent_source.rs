@@ -384,3 +384,61 @@ fn a_threaded_batch_over_the_store_decodes_each_block_once_whatever_the_budget_a
         }
     }
 }
+
+// spec: STRM-022
+#[test]
+fn the_source_counts_its_cache_behaviour_exactly_and_the_reads_stay_the_stored_bits() {
+    let (d, w) = stored("counters");
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    let grid = bake(7, &TangentWarp, RES, 2).unwrap();
+    // One thread, a budget of five blocks: every miss decodes and inserts one block, so the evictions are the decodes beyond the
+    // budget, nothing waits for another thread's decode, and the lookups are the hits plus the misses.
+    let (before, decoded_before) = (planet_cache::global_store::thread_block_wait_ns(), planet_cache::global_store::thread_block_decodes());
+    let tight = StoreSource::with_budget(&store, &w, RES, 5 * BLOCK_BYTES).unwrap();
+    read_all(&tight, &GridSource(&grid), 0);
+    let st = tight.stats();
+    let misses = st.shared_lookups - st.shared_hits;
+    assert_eq!(misses, st.decodes, "{st:?}");
+    assert_eq!(st.evictions, st.decodes - 5, "{st:?}");
+    assert_eq!((st.decode_waits, st.budget_blocks, st.resident_blocks), (0, 5, 5), "{st:?}");
+    assert!(st.decodes > 5, "{st:?}");
+    assert!(planet_cache::global_store::thread_block_wait_ns() >= before, "the thread's block wait only grows");
+    assert_eq!(
+        planet_cache::global_store::thread_block_decodes() - decoded_before,
+        st.decodes,
+        "the one thread decoded every block itself"
+    );
+    // Eight threads over a roomy budget: one decode per block, no eviction, a thread that finds a block another is decoding
+    // counts a wait, and no more waits than hits.
+    let roomy = StoreSource::with_budget(&store, &w, RES, BLOCKS * BLOCK_BYTES).unwrap();
+    std::thread::scope(|s| {
+        for t in 0..8 {
+            let (src, grid) = (&roomy, &grid);
+            s.spawn(move || read_all(src, &GridSource(grid), t));
+        }
+    });
+    let st = roomy.stats();
+    assert_eq!((st.decodes, st.evictions), (BLOCKS, 0), "{st:?}");
+    assert_eq!(st.shared_lookups - st.shared_hits, BLOCKS, "{st:?}");
+    assert!(st.decode_waits <= st.shared_hits, "{st:?}");
+}
+
+// spec: STRM-022
+#[test]
+fn the_pack_counts_its_lookups_and_the_ones_that_found_a_record() {
+    let (d, w) = stored("pack-counts");
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    assert_eq!(store.read_stats(), planet_cache::pack::StoreReadStats::default());
+    let src = StoreSource::with_budget(&store, &w, RES, BLOCKS * BLOCK_BYTES).unwrap();
+    read_all(&src, &GridSource(&bake(7, &TangentWarp, RES, 2).unwrap()), 3);
+    let st = src.stats();
+    let reads = store.read_stats();
+    // Every decode asked the pack once and found its block.
+    assert_eq!((reads.gets, reads.found), (st.decodes, st.decodes), "{reads:?} {st:?}");
+    // A key the pack does not hold is a lookup that found nothing.
+    let tile = TileId::new(Face(0), 4, 0, 0).unwrap();
+    let missing = planet_cache::key::CacheKey([0xAB; 16]);
+    assert!(store.get(planet_cache::global_store::KIND_GLOBAL_BLOCK, tile, missing).unwrap().is_none());
+    let after = store.read_stats();
+    assert_eq!((after.gets, after.found), (reads.gets + 1, reads.found));
+}

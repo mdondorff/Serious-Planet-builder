@@ -874,7 +874,7 @@ mod tests {
         }
     }
 
-    // spec: STRM-021
+    // spec: STRM-021, STRM-022
     #[test]
     fn a_pre_filled_tile_read_by_the_streamer_equals_the_generated_one_bit_for_bit_and_a_cold_reader_ignores_the_pack() {
         use planet_streaming::TileSource;
@@ -939,12 +939,26 @@ mod tests {
             sampled += 1;
         }
         assert_eq!(cold.prefill_hits(), 0, "the cold reader never reads the pack");
+        // The recorded-only counters (STRM-022): each sampled tile was looked up twice (load and load_staged) and found; the cold
+        // reader counted nothing; the pack saw those lookups (and the blocks the on-demand tiles read).
+        let c = world.counters();
+        assert_eq!((c.prefill_lookups, c.prefill_found, c.prefill_skipped), (2 * sampled, 2 * sampled, 0), "{c:?}");
+        assert_eq!(cold.counters().prefill_lookups, 0);
+        assert!(c.pack.gets >= c.prefill_lookups && c.pack.found >= c.prefill_found, "{c:?}");
+        assert!(c.field_builds >= 2 * sampled, "every load builds its field: {c:?}");
         assert!(!cold.reads_prefilled() && world.reads_prefilled() && sampled > 50);
         // A tile deeper than the pre-fill is generated, not found.
         let deep = planet_core::TileId::new(planet_core::Face(0), 5, 1, 1).unwrap();
         let before = world.prefill_hits();
         src(&world, planet_render::TileFormat::Compact).load(deep).unwrap();
         assert_eq!(world.prefill_hits(), before);
+        // A tile deeper than the pre-fill but within the readable levels is looked up and missed; one beyond them is skipped at once.
+        let after = world.counters().since(&c);
+        assert_eq!((after.prefill_lookups, after.prefill_found, after.prefill_skipped), (1, 0, 0), "{after:?}");
+        let beyond = planet_core::TileId::new(planet_core::Face(0), 9, 1, 1).unwrap();
+        src(&world, planet_render::TileFormat::Compact).load(beyond).unwrap();
+        let after = world.counters().since(&c);
+        assert_eq!((after.prefill_lookups, after.prefill_skipped), (1, 1), "{after:?}");
     }
 
     // spec: STRM-012

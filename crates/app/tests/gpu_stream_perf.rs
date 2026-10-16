@@ -12,7 +12,7 @@ fn tmp(name: &str) -> std::path::PathBuf {
     d
 }
 
-// spec: TEST-019, TEST-020
+// spec: TEST-019, TEST-020, STRM-022
 #[test]
 fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_source() {
     let store = tmp("store");
@@ -61,6 +61,24 @@ fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_so
             if scene == "dive-cold" { used == Some(0) } else { used.is_some_and(|n| n >= 6) },
             "{scene}: the pack is read except by the cold reader: {used:?}"
         );
+        // The tile loads of the measured part are recorded (STRM-022), under the `load_` prefix; a smoke run takes no calibration.
+        let count = |name: &str| {
+            json.split(&format!("\"{name}\":")).nth(1).and_then(|t| t.split([',', '}']).next()).and_then(|n| n.parse::<u64>().ok())
+        };
+        for name in [
+            "load_jobs",
+            "load_run_us_median",
+            "load_wait_us_p99",
+            "load_block_decodes",
+            "load_block_evictions",
+            "load_pack_gets",
+            "load_prefill_lookups",
+            "load_field_builds",
+        ] {
+            assert!(count(name).is_some(), "{scene}: no count {name}: {json}");
+        }
+        assert!(count("load_pack_gets") >= count("load_block_decodes"), "{scene}: every block decode asked the pack: {json}");
+        assert!(!json.contains("load_calib_"), "{scene}: a smoke run measures no calibration: {json}");
         assert!(json.contains("\"field\":\"height field cpu-erosion-v1 over a 256-cell bake\""), "{json}");
         for column in ["plan_ms", "scheduler_ms", "upload_ms", "record_ms"] {
             assert!(json.contains(&format!("\"{column}\"")), "{scene} {column}: {json}");
