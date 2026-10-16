@@ -1,5 +1,5 @@
 # 0047 Adapter gate: a discrete GPU, chosen before the device exists
-Status: proposed (sonnet-explorer, 2026-10-16, drafting the owner's decision of 2026-10-16; accepted by the planner or the owner)
+Status: accepted (opus-planner, 2026-10-16, under the owner's delegation; it writes down the owner's adapter decision of 2026-10-16)
 Date: 2026-10-16
 Source: owner 2026-10-16 (M5 queue item 1); ADR 0004 (render's API is the seam), ADR 0015 (window surface in render), ADR 0020 (readiness gate), ADR 0042 point 4; constitution CON-03, CON-21; change `viewer-window` (VIEW-001)
 
