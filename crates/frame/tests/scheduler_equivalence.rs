@@ -54,6 +54,7 @@ fn stream_rig(capacity: usize, vertex_pool: usize, max_in_flight: usize, flaky_m
     let clock = Arc::new(FakeClock::default());
     let config = StreamConfig {
         max_in_flight,
+        queue_ahead: 0,
         capacity,
         vertex_pool_slots: vertex_pool,
         retire_frames: 2,

@@ -202,11 +202,12 @@ fn run_case(
     script: &planet_frame::scenes::SceneScript,
     req: &(dyn Fn(planet_frame::Camera) -> TerrainRequest + Sync),
     smoke: bool,
+    gen: planet_streaming::GenWorkers,
     out: &mut dyn Write,
 ) -> Result<CaseRun, String> {
     let first = req(script.prelude.unwrap_or(script.cameras[0]));
     let rig_started = Instant::now();
-    let mut d = Driver { ctx, rig: Rig::new(ctx, world, &first)?, next_deadline: Instant::now() };
+    let mut d = Driver { ctx, rig: Rig::new(ctx, world, &first, gen)?, next_deadline: Instant::now() };
     writeln!(out, "{}: rig built in {:.2} s", script.scene.name(), rig_started.elapsed().as_secs_f64()).map_err(err)?;
     // Settle at the prelude camera (unmeasured): R fully resident, nothing queued, in flight or waiting, for one second of script
     // time. A smoke run only runs a few frames.
@@ -454,7 +455,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         .map_err(err)?;
         writeln!(out, "{}: script built in {:.1} s", scene.name(), built.elapsed().as_secs_f64()).map_err(err)?;
         let case_started = Instant::now();
-        let run = run_case(ctx, &scene_world, &script, &req_of, smoke, out)?;
+        let run = run_case(ctx, &scene_world, &script, &req_of, smoke, o.gen_workers(), out)?;
         writeln!(out, "{}: case ran in {:.1} s (teardown {:.2} s)", scene.name(), case_started.elapsed().as_secs_f64(), run.teardown_s)
             .map_err(err)?;
         let mem = MemoryFacts {

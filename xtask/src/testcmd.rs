@@ -349,14 +349,14 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
         match a.as_str() {
             "--smoke" => smoke = true,
             "--machine-ready" | "--allow-memory-bake" => tail.push(a.clone()),
-            "--store" | "--global-res" | "--out" | "--upload" => {
+            "--store" | "--global-res" | "--out" | "--upload" | "--gen-workers" | "--gen-ahead" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());
             }
             other => {
                 return Err(format!(
-                    "unknown perf stream option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out, --upload per-slot|batched, --smoke, --machine-ready, the owner's override of a failed readiness gate)"
+                    "unknown perf stream option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out, --upload per-slot|batched, --gen-workers N, --gen-ahead N, --smoke, --machine-ready, the owner's override of a failed readiness gate)"
                 ))
             }
         }
@@ -501,14 +501,14 @@ mod tests {
         assert!(stream_runs_all(&s(&[])) && stream_runs_all(&s(&["all"])) && stream_runs_all(&s(&["--store", "D"])));
         assert!(!stream_runs_all(&s(&["dive"])));
         for name in STREAM_SCENES {
-            let rest = s(&["--store", "D:/bake", "--global-res", "256", "--out", "target/perf", "--machine-ready", "--allow-memory-bake"]);
+            let rest = s(&["--store", "D:/bake", "--global-res", "256", "--out", "target/perf", "--machine-ready", "--allow-memory-bake", "--gen-workers", "12", "--gen-ahead", "0"]);
             let a = perf_stream_child_args(name, &rest).unwrap();
             let at = a.iter().position(|x| x == "--scene").unwrap();
             assert_eq!(a[at + 1], name, "one named scene, never `streaming`");
             assert!(!a.contains(&"streaming".to_string()));
             let out = a.iter().position(|x| x == "--out").unwrap();
             assert!(a[out + 1].ends_with(&format!("{name}.json")) && a[out + 1].starts_with("target/perf"), "{a:?}");
-            for keep in ["--store", "D:/bake", "--global-res", "256", "--machine-ready", "--allow-memory-bake"] {
+            for keep in ["--store", "D:/bake", "--global-res", "256", "--machine-ready", "--allow-memory-bake", "--gen-workers", "12", "--gen-ahead", "0"] {
                 assert!(a.contains(&keep.to_string()), "{keep} in {a:?}");
             }
         }
