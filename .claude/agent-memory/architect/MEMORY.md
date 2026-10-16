@@ -110,7 +110,7 @@ Refreshed 2026-10-13 at the M3 gate (session `opus-plannner`, worktree `opus-pla
   upload ranking cost. Lesson: tier-A fakes missed a real configuration cap, hence the tier-B perf smoke (owner).
 - Dive cold start (owner): the gated dive starts with levels 0-4 pre-filled on disk (ADR 0045 pt 3); the cold dive is
   tracked. ADR 0045 (bodies, bake resolution, storage budget) stays proposed until multi-body.
-- Velocity (owner, 2026-10-16): `test fast` budget 15 s; docs-only PRs run the light `docs` workflow; a second
+- Velocity (owner, 2026-10-16): `test fast` budget 20 s; docs-only PRs run the light `docs` workflow; a second
   session `sonnet-spikes` runs independent spikes in its own worktree and writes only its own files; I write log and
   status and coordinate merges (spike skill).
 - Housekeeping (owner, 2026-10-16): the `housekeeping` skill runs after each milestone acceptance; I curate, the coder

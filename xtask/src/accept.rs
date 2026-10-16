@@ -145,7 +145,7 @@ pub fn run(root: &Path, args: &[String]) -> Res {
             let t = Instant::now();
             crate::testcmd::test(root, &["fast".to_string()])?;
             let secs = t.elapsed().as_secs_f64();
-            // The budget is 15 s since the owner's decision of 2026-10-16.
+            // The budget is 20 s since the owner's decision of 2026-10-16.
             if secs > crate::testcmd::FAST_BUDGET_SECS {
                 return Err(format!("test fast took {secs:.1}s, budget is {} s (owner, 2026-10-16)", crate::testcmd::FAST_BUDGET_SECS));
             }

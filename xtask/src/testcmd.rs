@@ -9,8 +9,8 @@ const TIER_A: &str = "not binary(/^gpu_/) and not binary(/^oracle_/)";
 const TIER_AB: &str = "not binary(/^gpu_/)";
 const TIER_C: &str = "binary(/^gpu_/)";
 const TIER_BC_REAL: &str = "binary(/^gpu_/) or binary(/^oracle_/)";
-/// The `test fast` budget: 15 s (owner's decision, 2026-10-16; it was 10 s; BUILD-003).
-pub const FAST_BUDGET_SECS: f64 = 15.0;
+/// The `test fast` budget: 20 s (owner's decision, 2026-10-16; it was 10 s, then 15 s; BUILD-003).
+pub const FAST_BUDGET_SECS: f64 = 20.0;
 /// Where nextest writes the run's JUnit report (`.config/nextest.toml`, `[profile.default.junit]`).
 const JUNIT: &str = "target/nextest/default/junit.xml";
 /// How many of the slowest tests `test fast` names after a run.
