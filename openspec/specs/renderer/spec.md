@@ -382,11 +382,11 @@ Source: ADR 0042 point 5, ADR 0033, ADR 0048, CON-20
 - **THEN** the bytes it holds for the scene target, depth, histogram and exposure history equal the compiled graph's frame-target bytes
 
 ### Requirement: REND-021 Exposure and tone-mapping maths
-`frame::look` SHALL hold, in f64 with `libm`, the formulas the lit path's shaders implement: the exposure scale `1 / (1.2 x 2^EV100)`, the pixel EV `log2(8 L)`, the pre-exposure factor from scene units (one unit is 126,600 cd/m2), the 64-bin histogram over EV -10 to +20 (pixels without light not counted, out-of-range pixels in the end bins), the mean EV of the band between 40 % and 90 % of the counted pixels, the target clamped to the EV100 range (held when nothing is counted), the adaptation step (linear in EV, at most `speed_up x dt` up and `speed_down x dt` down, snapping on a reset), the ACES filmic fit (Narkowicz 2015), the sRGB transfer function and the 8-bit tone-mapped pixel. Class: presentation data (ADR 0035); the pre-exposure factor is decided in f64 and rounded once to f32 for the shader.
+`frame::look` SHALL hold, in f64 with `libm`, the formulas the lit path's shaders implement: the exposure scale `1 / (1.2 x 2^EV100)`, the pixel EV `log2(8 L)`, the pre-exposure factor from scene units (one unit is the look's `units.solar_illuminance_lux`, 126,600 cd/m2 at the Earth default, LOOK-003), the 64-bin histogram over the look's axis (EV -10 to +20 at the default; pixels without light not counted, out-of-range pixels in the end bins), the mean EV of the band between the look's fractions (40 % and 90 % at the default) of the counted pixels, the target clamped to the EV100 range (held when nothing is counted), the adaptation step (linear in EV, at most `speed_up x dt` up and `speed_down x dt` down, snapping on a reset), the ACES filmic fit (Narkowicz 2015), the sRGB transfer function and the 8-bit tone-mapped pixel. The look's values come from the look file (LOOK-001) and the functions that take none are the Earth default. Class: presentation data (ADR 0035); the pre-exposure factor is decided in f64 and rounded once to f32 for the shader.
 
 Verify: A
 Status: active
-Source: ADR 0038 points 1-4, ADR 0048 points 2-4, ADR 0035, CON-03, CON-14
+Source: ADR 0038 points 1-4, ADR 0048 points 2-4, ADR 0042 point 6, ADR 0035, CON-03, CON-14
 
 #### Scenario: Known answers
 - **WHEN** the units, bins, band means, clamps, adaptation steps, ACES and sRGB are evaluated on hand-worked inputs
@@ -397,11 +397,11 @@ Source: ADR 0038 points 1-4, ADR 0048 points 2-4, ADR 0035, CON-03, CON-14
 - **THEN** the EV becomes 11.5 and 9.5, a close target is reached without overshoot, no time means no change and a reset snaps
 
 ### Requirement: REND-022 Exposure histogram and adaptation on the GPU
-The exposure histogram pass SHALL count the scene target's pixels into the 64 bins of REND-021 and the adaptation pass SHALL compute the band mean, the clamped target and the adapted EV from the histogram, with `dt`, the speeds, the clamps, the mode and the pre-exposure taken from the plan (no wall clock, no readback). Class: presentation data. Bound: the GPU histogram equals `look::histogram_of` bin for bin on pixels away from bin edges (on a terrain frame at most 0.5 % of the counts may sit in a neighbouring bin, the total is exact); the adapted and target EV equal the CPU step within 1e-4 EV; the same plan sequence gives the same exposure bit for bit; fixed exposure ignores the scene and the history. The adaptation sums bin counts in f32, exact below 2^24 counted pixels (4K is 8.3 million); larger internal resolutions need an integer running sum first. A plan with non-finite or negative time, a reversed range, negative speeds or a non-unit sun is refused with the value named (REND-024).
+The exposure histogram pass SHALL count the scene target's pixels into the 64 bins of REND-021 and the adaptation pass SHALL compute the band mean, the clamped target and the adapted EV from the histogram, with `dt`, the speeds, the clamps, the histogram axis and band, the mode and the pre-exposure taken from the plan (no wall clock, no readback; the axis and band are the look's, LOOK-006). Class: presentation data. Bound: the GPU histogram equals `look::histogram_of` bin for bin on pixels away from bin edges (on a terrain frame at most 0.5 % of the counts may sit in a neighbouring bin, the total is exact); the adapted and target EV equal the CPU step within 1e-4 EV; the same plan sequence gives the same exposure bit for bit; fixed exposure ignores the scene and the history. The adaptation sums bin counts in f32, exact below 2^24 counted pixels (4K is 8.3 million); larger internal resolutions need an integer running sum first. A plan with non-finite or negative time, a reversed range, negative speeds or a non-unit sun is refused with the value named (REND-024).
 
 Verify: B
 Status: active
-Source: ADR 0038 points 2 and 4, ADR 0048 point 4, CON-04
+Source: ADR 0038 points 2 and 4, ADR 0048 point 4, ADR 0042 point 6, CON-04
 
 #### Scenario: Histogram against the reference
 - **WHEN** an image of pixels at bin centres, black pixels and out-of-range pixels is written to the scene target and the adaptive frame runs
@@ -435,7 +435,7 @@ Source: ADR 0038 points 3-5, CON-18
 - **THEN** each shows its band colour, the clipped value band 0 and black stays black
 
 ### Requirement: REND-024 Lit plan
-The `FramePlan` (`TerrainPlan`) SHALL carry the lit path's decisions in an optional `LitPlan`: the exposure mode (fixed with its EV100, or adaptive with its range, speeds and the CPU-chosen pre-exposure EV100), `dt` in seconds from the injected clock, the sun direction, a reset flag and the tone-map mode. Its text form SHALL be exact (floats as bit patterns) and round-trip, and a plan without it SHALL keep its text and hash. A plan with it SHALL be refused by a renderer that has not enabled the lit path, with an error naming `enable_lit`.
+The `FramePlan` (`TerrainPlan`) SHALL carry the lit path's decisions in an optional `LitPlan`: the exposure mode (fixed with its EV100, or adaptive with its range, speeds and the CPU-chosen pre-exposure EV100), `dt` in seconds from the injected clock, the sun direction, a reset flag, the tone-map mode, and the look's scene-unit scale and histogram axis and band (LOOK-003). Its text form SHALL be exact (floats as bit patterns) and round-trip, a plan without it SHALL keep its text and hash, and a lit plan made with the Earth-default look SHALL keep the text it had before the look file existed (the look's tokens are written only when they differ). A plan with it SHALL be refused by a renderer that has not enabled the lit path, with an error naming `enable_lit`.
 
 Verify: A
 Status: active

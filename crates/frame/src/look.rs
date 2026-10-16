@@ -352,6 +352,13 @@ impl LitPlan {
             if p.speed_up < 0.0 || p.speed_down < 0.0 {
                 return Err(format!("lit plan: adaptation speeds {} and {} must not be negative", p.speed_up, p.speed_down));
             }
+            file::validate_exposure(&file::ExposureLook {
+                min_ev100: f64::from(p.min_ev100),
+                max_ev100: f64::from(p.max_ev100),
+                speed_up: f64::from(p.speed_up),
+                speed_down: f64::from(p.speed_down),
+            })
+            .map_err(|e| format!("lit plan: {e}"))?;
         }
         file::validate_units(&self.units).map_err(|e| format!("lit plan: {e}"))?;
         file::validate_histogram(&self.histogram).map_err(|e| format!("lit plan: {e}"))?;

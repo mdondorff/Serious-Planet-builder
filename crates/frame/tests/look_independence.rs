@@ -40,10 +40,10 @@ fn fingerprint(def: &WorldDefinition) -> Fingerprint {
 
 fn wild_look() -> LookFile {
     let mut f = LookFile::empty();
-    for (body, lux) in [(0u32, 3.0e5), (1, 9.0e3), (7, 12.5)] {
+    for (body, lux) in [(0u32, 3.0e5), (1, 9.0e3), (7, 100.0)] {
         let p = LookParams {
             units: SceneUnits { solar_illuminance_lux: lux },
-            exposure: ExposureLook { min_ev100: -9.0, max_ev100: 33.0, speed_up: 50.0, speed_down: 7.5 },
+            exposure: ExposureLook { min_ev100: -9.0, max_ev100: 20.0, speed_up: 50.0, speed_down: 7.5 },
             histogram: HistogramParams { ev_min: -30.0, ev_max: 40.0, band_low: 0.05, band_high: 0.95 },
             ..LookParams::default()
         };

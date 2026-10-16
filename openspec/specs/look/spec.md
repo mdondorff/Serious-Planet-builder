@@ -1,12 +1,17 @@
-## ADDED Requirements
+# look Specification
+
+## Purpose
+The look file (ADR 0042 point 6, ADR 0048 point 2): presentation parameters per body in a schema-versioned TOML file beside the world definition and outside its hash and every cache key, with tested migrations (CON-10), physically based Earth defaults, validation that names the key and the value, and loading by the viewer and the test harness. GPU-free (CON-03); the class and bound of each attribute are stated in LOOK-001.
+
+## Requirements
 
 ### Requirement: LOOK-001 Look file schema, validation and canonical text
-The look of a body SHALL be presentation data (ADR 0035) held in a TOML look file with a top-level `schema_version`, the marker `kind = "look"`, and tables `[body.<id>.units]`, `[body.<id>.exposure]`, `[body.<id>.histogram]` and `[body.<id>.tone_map]`, addressed by body id as the world definition is (`body.<n>`, a non-negative integer without leading zeros). Schema, parsing, validation and the canonical writer SHALL live in a GPU-free crate (`planet_frame::look::file`, CON-03). Every table and key SHALL be optional and a missing one SHALL be the Earth default. Values SHALL be finite floats (an integer literal exact as a float is accepted); an unknown table or key, a value of the wrong type, a body id that is not canonical, an unknown tone curve and a value outside its range SHALL be errors that name the full key (`body.2.exposure.min_ev100`) and the value. Writing SHALL be canonical (version and kind first, bodies in id order, every key written, floats in the shortest round-trip form) and reading it back SHALL give an equal file bit for bit. Each attribute is presentation data, never read back by a CPU system, never stored or keyed as world data and never an input to a field; its declared bound is the valid range below (a value outside it is refused, so a shader never sees it) and the precision with which the value reaches the GPU:
+The look of a body SHALL be presentation data (ADR 0035) held in a TOML look file with a top-level `schema_version`, the marker `kind = "look"`, and tables `[body.<id>.units]`, `[body.<id>.exposure]`, `[body.<id>.histogram]` and `[body.<id>.tone_map]`, addressed by body id as the world definition is (`body.<n>`, a non-negative integer without leading zeros). Schema, parsing, validation and the canonical writer SHALL live in a GPU-free crate (`planet_frame::look::file`, CON-03). Every table and key SHALL be optional and a missing one SHALL be the Earth default. Values SHALL be finite floats (an integer literal exact as a float is accepted); an unknown table or key, a value of the wrong type, a body id that is not canonical, an unknown tone curve and a value outside its range SHALL be errors that name the full key (`body.2.exposure.min_ev100`) and the value. Writing SHALL be canonical (version and kind first, bodies in id order, every key written, floats in the shortest round-trip form) and reading it back SHALL give an equal file bit for bit. Each attribute is presentation data, never read back by a CPU system (other than the CPU reference and the plan builders), never stored or keyed as world data and never an input to a field; its declared bound is the valid range below (a value outside it is refused, so a shader never sees it) and the precision with which the value reaches the GPU:
 
 | Attribute (key under `body.<id>`) | Class | Earth default | Valid range | Precision bound |
 |---|---|---|---|---|
 | `units.solar_illuminance_lux` (the lux of one scene unit) | presentation | 126600.0 | 1 to 1e7 | decided in f64, the pre-exposure factor rounded once to f32 (relative 6e-8) |
-| `exposure.min_ev100`, `exposure.max_ev100` | presentation | -2.0, 16.0 | -20 to 40, min <= max, and one unit written at max_ev100 stays a normal f16 (lux / (1.2 x 2^max) >= 2^-14) | rounded once to f32; the adapted EV matches the CPU step within 1e-4 EV (REND-022) |
+| `exposure.min_ev100`, `exposure.max_ev100` | presentation | -2.0, 16.0 | -20 to 40, min <= max, and, as a conservative proxy for the pre-exposure the view chooses, one unit written at max_ev100 stays a normal f16 (lux / (1.2 x 2^max) >= 2^-14) | rounded once to f32; the adapted EV matches the CPU step within 1e-4 EV (REND-022) |
 | `exposure.speed_up`, `exposure.speed_down` (stops per second) | presentation | 3.0, 1.0 | 0 to 100 | rounded once to f32 |
 | `histogram.ev_min`, `histogram.ev_max` | presentation | -10.0, 20.0 | -50 to 50, at least 1 stop apart | 64 bins over the axis; bin counts equal the CPU reference away from bin edges (REND-022) |
 | `histogram.band_low`, `histogram.band_high` | presentation | 0.4, 0.9 | 0 to 1, high - low >= 0.01 | rounded once to f32; target within 1e-4 EV of the CPU (REND-022) |
@@ -38,6 +43,10 @@ Source: CON-10, ADR 0042 point 6, WDEF-002
 #### Scenario: Older layouts
 - **WHEN** files of an older synthetic layout (versions 1 and 2 of a three-version chain, until a second real layout exists) and the current layout of the same content are loaded
 - **THEN** all three equal each other and write the same canonical text
+
+#### Scenario: Future tables
+- **WHEN** a build adds an optional table (items 4, 5, 7) and an older build reads a file that has it
+- **THEN** the older build refuses it as an unknown key naming the table; the schema version is raised, with an identity step, for a release that must be recognised as newer, a decision taken by the item that adds the table
 
 #### Scenario: Version 1 fixture
 - **WHEN** the version 1 fixture is loaded by the production chain and written back

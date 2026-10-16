@@ -484,7 +484,8 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
             "--look only applies to `editor` and `test-render`: the look is presentation data and never changes a generated tile".into()
         );
     }
-    if !matches!(o.mode, Mode::Generate) {
+    // A replayed bundle is self-contained (CON-19): it carries its plans' look, so no sibling file is looked for beside it.
+    if !matches!(o.mode, Mode::Generate) && !(o.repro.is_some() && o.look.is_none()) {
         // The look file is loaded (and so validated) before any world is built or device opened: a bad file stops the run with
         // the key and the value (LOOK-005).
         if let Some(line) = lookload::load(&o)?.describe() {
