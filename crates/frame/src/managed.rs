@@ -24,7 +24,7 @@ use crate::upload::{sort_waiting, upload_count, UploadBudget, UploadClass, Waiti
 use planet_core::TileId;
 use planet_generators::compact::RenderTile;
 use planet_generators::mesh::MeshVertex;
-use planet_streaming::{Clock, ResidencyManager, ResidentChange, SlotRef, StreamStats, Wants};
+use planet_streaming::{Clock, ResidencyManager, ResidentChange, SchedWork, SlotRef, StreamStats, Wants};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
@@ -146,7 +146,19 @@ pub struct ManagedLoop {
     classes: Option<Classes>,
     classes_stale: bool,
     last_node_bytes: u64,
+    /// The lists of `wants` that changed since the manager was last given them.
+    draw_changed: bool,
+    residency_changed: bool,
+    prefetch_changed: bool,
+    /// The prefetch set the wants were capped from, and whether the whole set fitted the free share.
+    prefetch_basis: Option<(Arc<Vec<TileWant>>, bool)>,
+    /// The loop's own passes over its wants (rebuilding D and R from a delivery, comparing a delivered R with the held one, capping
+    /// the prefetch set), counted like the scheduler's (STRM-019).
+    extra: SchedWork,
 }
+
+/// A tile with its priority, as in the wants.
+type TileWant = (TileId, f64);
 
 /// The tiles of the draw set and of R with their ancestors (an ancestor is requested, and so placed, in its descendants'
 /// class), and the plan order of the draw tiles.
@@ -204,6 +216,11 @@ impl ManagedLoop {
             classes: None,
             classes_stale: true,
             last_node_bytes: 0,
+            draw_changed: false,
+            residency_changed: false,
+            prefetch_changed: false,
+            prefetch_basis: None,
+            extra: SchedWork::default(),
         }
     }
 
@@ -260,10 +277,29 @@ impl ManagedLoop {
         &self.wants
     }
 
+    /// What the loop's scheduling touched so far, the streamer's work and the loop's own passes over its wants (STRM-019,
+    /// CON-20): the difference of two readings is a frame's work. The upload ranking of waiting tiles is not part of it (it
+    /// is the upload column's).
+    pub fn work(&self) -> SchedWork {
+        let w = self.manager.streamer().work();
+        SchedWork { scanned: w.scanned + self.extra.scanned, updated: w.updated + self.extra.updated, layer_updates: w.layer_updates }
+    }
+
     /// Begin the next frame for `req`; never waits. See the module documentation for the order of the three steps.
     pub fn begin_frame(&mut self, req: &TerrainRequest, sink: &mut dyn TileSink) -> Result<ManagedFrame, String> {
         let t = Instant::now();
-        let managed = self.manager.begin_frame(&self.wants);
+        // Only the lists that changed are handed over (STRM-019); a frame after which nothing changed does no work per tile.
+        if std::mem::take(&mut self.draw_changed) {
+            self.manager.set_draw(&self.wants.draw);
+        }
+        if std::mem::take(&mut self.residency_changed) {
+            self.manager.set_residency(&self.wants.residency);
+        }
+        if std::mem::take(&mut self.prefetch_changed) {
+            self.manager.set_prefetch(&self.wants.prefetch);
+        }
+        let report = self.manager.step();
+        let (degraded, draw_replaced, budget_failure) = (report.dropped, report.draw_replaced.len(), report.budget_failure);
         let scheduler_ms = t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
@@ -346,12 +382,7 @@ impl ManagedLoop {
         let node_bytes = indirect_frame_bytes(pipeline.draw.plan.nodes.len());
         self.last_node_bytes = node_bytes;
         let stats = self.manager.streamer().stats();
-        self.refresh_wants(stats.main_free);
-        // No predicted position now (a teleport, a stop, a rotation): the set of the old direction is dropped at once, not when
-        // the worker's next result arrives, so its queued requests are cancelled this frame.
-        if predicted.is_none() {
-            self.wants.prefetch.clear();
-        }
+        self.refresh_wants(stats.main_free, predicted.is_some());
 
         let counts = FrameCounts {
             resident: stats.resident,
@@ -366,9 +397,9 @@ impl ManagedLoop {
             upload_bytes,
             deferred,
             node_bytes,
-            degraded: managed.report.dropped,
-            draw_replaced: managed.report.draw_replaced.len(),
-            budget_failure: managed.report.budget_failure,
+            degraded,
+            draw_replaced,
+            budget_failure,
             prefetch: self.wants.prefetch.len(),
             cancelled_prefetch: stats.cancelled_prefetch - self.last.cancelled_prefetch,
         };
@@ -378,29 +409,62 @@ impl ManagedLoop {
 
     /// The wants follow the newest delivered plan (D, in plan order) and R (distance); rebuilt only when either changed.
     /// The prefetch wants are the worker's set for the newest R, capped by the free share (`free_slots` of the main pool).
-    fn refresh_wants(&mut self, free_slots: usize) {
+    fn refresh_wants(&mut self, free_slots: usize, predicted: bool) {
         let plan_seq = self.pipe.current().map(|c| c.seq);
         if plan_seq != self.wants_plan {
             self.wants.draw =
                 self.pipe.current().map(|c| c.plan.nodes.iter().enumerate().map(|(i, n)| (n.tile, i as f64)).collect()).unwrap_or_default();
+            self.extra.scanned += self.wants.draw.len() as u64;
             self.wants_plan = plan_seq;
             self.classes_stale = true;
+            self.draw_changed = true;
         }
         let residency = self.pipe.residency().map(|r| Arc::clone(&r.residency));
+        // The worker hands a new set for every request, a turn included; its tiles and distances are the old ones then, and the
+        // wants (and the manager's) stay as they are.
         let same = match (&residency, &self.wants_residency) {
-            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (Some(a), Some(b)) => {
+                Arc::ptr_eq(a, b) || {
+                    self.extra.scanned += a.tiles.len() as u64;
+                    a.tiles.len() == b.tiles.len()
+                        && a.tiles
+                            .iter()
+                            .zip(&b.tiles)
+                            .all(|(x, y)| x.tile == y.tile && x.leaf == y.leaf && x.distance_m.to_bits() == y.distance_m.to_bits())
+                }
+            }
             (None, None) => true,
             _ => false,
         };
         if !same {
             self.wants.residency = residency.as_ref().map(|r| r.wants()).unwrap_or_default();
+            self.extra.scanned += self.wants.residency.len() as u64;
             self.wants_residency = residency;
             self.classes_stale = true;
+            self.residency_changed = true;
         }
-        let set = self.pipe.residency().map(|r| Arc::clone(&r.prefetch));
-        self.wants.prefetch = match set {
-            Some(set) if !set.is_empty() => cap_to_free(&set, free_slots, |t| self.resident.contains_key(&t)),
-            _ => Vec::new(),
+        // No predicted position now (a teleport, a stop, a rotation): the set of the old direction is dropped at once, not when
+        // the worker's next result arrives, so its queued requests are cancelled this frame.
+        let set = if predicted { self.pipe.residency().map(|r| Arc::clone(&r.prefetch)) } else { None };
+        let Some(set) = set.filter(|s| !s.is_empty()) else {
+            self.prefetch_basis = None;
+            if !self.wants.prefetch.is_empty() {
+                self.wants.prefetch.clear();
+                self.prefetch_changed = true;
+            }
+            return;
         };
+        // The same set with room for all of it is the same wants: nothing to look at (the cap only binds when the share is nearly
+        // full, then the set is capped again every frame).
+        if matches!(&self.prefetch_basis, Some((basis, true)) if Arc::ptr_eq(basis, &set)) && free_slots >= set.len() {
+            return;
+        }
+        let prefetch = cap_to_free(&set, free_slots, |t| self.resident.contains_key(&t));
+        self.extra.scanned += set.len() as u64;
+        self.prefetch_basis = Some((Arc::clone(&set), free_slots >= set.len()));
+        if prefetch != self.wants.prefetch {
+            self.wants.prefetch = prefetch;
+            self.prefetch_changed = true;
+        }
     }
 }
