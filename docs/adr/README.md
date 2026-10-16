@@ -58,4 +58,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0046 | [Generation workers run below normal priority](0046-generation-workers-run-below-normal-priority.md) | accepted |  |
 | 0047 | [Adapter gate: a discrete GPU, chosen before the device exists](0047-adapter-gate.md) | accepted |  |
 | 0048 | [Frame-target share (amends ADR 0033's remainder) and the lit path's readings of ADR 0038 and ADR 0042](0048-frame-target-share-and-lit-path-readings.md) | accepted |  |
-| 0049 | [The climate field's bound and storage (amends ADR 0039 point 2), and the look file's version rule](0049-climate-field-bound-and-storage.md) | proposed | accept with the M5 gate review of item 4 |
+| 0049 | [The climate field's bound and storage (amends ADR 0039 point 2), and the look file's version rule](0049-climate-field-bound-and-storage.md) | accepted |  |
