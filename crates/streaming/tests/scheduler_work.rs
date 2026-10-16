@@ -201,3 +201,34 @@ fn the_manager_reports_the_degradation_numbers_of_the_pure_function_without_fitt
     assert!(report.dropped > 0, "the pool is smaller than R: {report:?}");
     let _ = Wants::default();
 }
+
+// spec: STRM-019, STRM-005, STRM-007, CON-14
+#[test]
+fn a_manager_that_crosses_the_pools_bound_both_ways_decides_as_the_one_that_fits_every_frame() {
+    let draw: Vec<(TileId, f64)> = some_leaves(5, 4).into_iter().map(|t| (t, 1.0)).collect();
+    let capacity = face(5).len() / 2;
+    let rig = || {
+        let spawner = Arc::new(ManualSpawner::default());
+        let config = StreamConfig { max_in_flight: 8, capacity, retire_frames: 2, record_dispatches: true, ..Default::default() };
+        let mut s = Streamer::new(Arc::new(Source), spawner.clone() as Arc<dyn Spawner>, Arc::new(FakeClock::default()), config);
+        s.load_roots_blocking().unwrap();
+        (ResidencyManager::new(s), spawner)
+    };
+    let (mut full, sp_full) = rig();
+    let (mut inc, sp_inc) = rig();
+    // Small R (fits), R larger than the pool (fitted), small R again.
+    let sizes = [3u8, 5, 3, 4, 5, 2];
+    for (k, level) in sizes.iter().cycle().take(18).enumerate() {
+        let r = face(*level);
+        full.begin_frame(&Wants { draw: draw.clone(), residency: r.clone(), prefetch: vec![] });
+        if k == 0 || sizes[(k) % sizes.len()] != sizes[(k + sizes.len() - 1) % sizes.len()] {
+            inc.set_draw(&draw);
+            inc.set_residency(&r);
+        }
+        inc.step();
+        sp_full.run(20);
+        sp_inc.run(20);
+        assert_eq!(full.streamer().dispatch_log, inc.streamer().dispatch_log, "frame {k}");
+        assert_eq!(full.streamer().stats(), inc.streamer().stats(), "frame {k}");
+    }
+}

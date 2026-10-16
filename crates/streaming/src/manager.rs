@@ -306,7 +306,8 @@ impl<T: Send + Sync + 'static> ResidencyManager<T> {
     /// One frame on the wants as last handed over. The wants are fitted again only if the draw or residency set changed since the
     /// last step: when the tiles the sets can occupy (the listed tiles with their ancestors) cannot exceed the pool, they are
     /// handed to the streamer as they are (nothing would be degraded) and only the list that changed is handed over; otherwise
-    /// [`degrade`] fits them. The work of a step that follows no change is that of a streamer frame with nothing to do (STRM-019).
+    /// [`degrade`] fits them. The six roots are not requested here when no list names them: they are resident from
+    /// [`Streamer::load_roots_blocking`] and never evicted. The work of a step that follows no change is that of a streamer frame with nothing to do (STRM-019).
     pub fn step(&mut self) -> &DegradationReport {
         let (draw_changed, residency_changed) = (std::mem::take(&mut self.draw_changed), std::mem::take(&mut self.residency_changed));
         if draw_changed || residency_changed {

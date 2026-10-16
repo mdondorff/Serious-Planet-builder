@@ -1,5 +1,5 @@
 - [x] 1.1 ablation before any fix (`examples/scheduler_ablation.rs`, release, settled look-1m: `needed` 56%, `degrade` 36%, touch 5%) recorded in docs/learnings.md
-- [x] 1.2 failing tests first: digests of the previous implementation (`scheduler_incremental.rs`: streamer alone x5, managed loop x5), count tests (`scheduler_work.rs`, `scheduler_incremental.rs`)
+- [x] 1.2 failing tests first: digests of the previous implementation (`scheduler_equivalence.rs`: streamer alone x3, managed loop x3), count tests (`scheduler_work.rs`, `scheduler_incremental.rs`)
 - [x] 1.3 streaming: persistent layers with closure counts, class-change events, lazy bucketed request queue, ordered eviction candidates, retry-due set, `SchedWork` counters
 - [x] 1.4 streaming: `set_draw / set_residency / set_prefetch / step` on the streamer and the manager; `degrade` only over the bound
 - [x] 1.5 frame: the managed loop hands over only changed lists; R compared on delivery; prefetch capped only when its inputs changed

@@ -426,7 +426,11 @@ impl ManagedLoop {
             (Some(a), Some(b)) => {
                 Arc::ptr_eq(a, b) || {
                     self.extra.scanned += a.tiles.len() as u64;
-                    a.tiles == b.tiles
+                    a.tiles.len() == b.tiles.len()
+                        && a.tiles
+                            .iter()
+                            .zip(&b.tiles)
+                            .all(|(x, y)| x.tile == y.tile && x.leaf == y.leaf && x.distance_m.to_bits() == y.distance_m.to_bits())
                 }
             }
             (None, None) => true,
