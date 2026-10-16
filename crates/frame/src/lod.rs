@@ -254,9 +254,9 @@ impl SelectionCache {
         h
     }
 
-    /// Whether the origin height of `tile` is memoised (a worker fills the missing ones in parallel before the plan is built).
-    pub(crate) fn has_origin_height(&self, tile: TileId) -> bool {
-        self.origin_heights.contains_key(&tile)
+    /// The memoised origin height of `tile`, if any (the plan evaluates the missing ones of a selection as one batch).
+    pub(crate) fn origin_height_if_known(&self, tile: TileId) -> Option<f64> {
+        self.origin_heights.get(&tile).copied()
     }
 
     /// Mesh key of `tile` for a grid of `cells` cells per edge and a view whose finest level is `finest_level`: `compute` runs once

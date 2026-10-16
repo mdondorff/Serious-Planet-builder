@@ -136,6 +136,14 @@ impl HeightField for TerrainField<'_> {
         crate::global::eval_gathered(self.src, dirs, stop, &footprint, &|s, d| self.height_via(s, d))
     }
 
+    /// [`HeightField::heights_until`] with the distinct blocks of the batch read on `threads` threads (GEN-020, LOD-009).
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
+        let footprint = |g: &dyn LatticeSource, d: Vec3| {
+            self.base_via(g, d);
+        };
+        crate::global::eval_gathered_threads(self.src, dirs, stop, threads, &footprint, &|s, d| self.height_via(s, d))
+    }
+
     fn seed(&self) -> u64 {
         self.seed
     }
