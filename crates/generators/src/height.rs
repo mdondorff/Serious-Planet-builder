@@ -197,6 +197,33 @@ pub(crate) fn layer_noise_bounds(seed: u64, layer: u64, octave: u32, centre: Vec
     (lo.max(hlo), hi.min(hhi))
 }
 
+/// `eval` on every direction of `dirs`, in the caller's order, split over up to `threads` scoped threads in contiguous chunks
+/// (a batch of fewer than 8 directions per thread uses fewer threads; a single chunk runs on the calling thread, several on scoped threads). `stop` is polled
+/// every 64 samples of each chunk; once it answers true the unfinished results are 0.0. The values do not depend on `threads`.
+pub fn eval_chunked(dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize, eval: &(dyn Fn(Vec3) -> f64 + Sync)) -> Vec<f64> {
+    let mut out = vec![0.0; dirs.len()];
+    let workers = threads.clamp(1, (dirs.len() / 8).max(1));
+    let chunk = dirs.len().div_ceil(workers).max(1);
+    let run = |dirs: &[Vec3], out: &mut [f64]| {
+        for (k, (&d, o)) in dirs.iter().zip(out.iter_mut()).enumerate() {
+            if k % 64 == 0 && stop() {
+                break;
+            }
+            *o = eval(d);
+        }
+    };
+    if workers == 1 {
+        run(dirs, &mut out);
+    } else {
+        std::thread::scope(|s| {
+            for (d, o) in dirs.chunks(chunk).zip(out.chunks_mut(chunk)) {
+                s.spawn(move || run(d, o));
+            }
+        });
+    }
+    out
+}
+
 /// A height field over unit directions. The reference generator is [`Reference`]; the test-only stress field
 /// `stress::Steep` exists behind the `stress` feature. Mesh and plan code take a field so stress tests can swap it
 /// without touching production paths. Generators (`HeightGenerator`) build a field through a `GenContext`; production paths still
@@ -215,6 +242,17 @@ pub trait HeightField: Sync {
     /// [`HeightField::heights_until`] without a stop flag.
     fn heights(&self, dirs: &[Vec3]) -> Vec<f64> {
         self.heights_until(dirs, &|| false)
+    }
+    /// [`HeightField::heights_until`] on up to `threads` scoped threads (the plan builder's origin heights, LOD-009): the same
+    /// values in the same order for every `threads` (CON-14), because each height is a pure function of its direction and the
+    /// threads only split the work. The default splits the directions into chunks and evaluates each with `height`; a field
+    /// that reads a block store overrides it to read the distinct blocks of the whole batch on the threads (GEN-020).
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
+        eval_chunked(dirs, stop, threads, &|d| self.height(d))
+    }
+    /// [`HeightField::heights_threaded_until`] without a stop flag.
+    fn heights_threaded(&self, dirs: &[Vec3], threads: usize) -> Vec<f64> {
+        self.heights_threaded_until(dirs, &|| false, threads)
     }
     /// The seed (part of every key).
     fn seed(&self) -> u64;
@@ -447,6 +485,9 @@ impl<F: HeightField> HeightField for Bound<F> {
     }
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         self.field.heights_until(dirs, stop)
+    }
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
+        self.field.heights_threaded_until(dirs, stop, threads)
     }
     fn seed(&self) -> u64 {
         self.field.seed()

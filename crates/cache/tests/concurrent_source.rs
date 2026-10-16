@@ -344,3 +344,43 @@ fn a_tile_decodes_each_block_it_touches_once_even_with_a_cache_of_one_block() {
         assert!(one <= distinct, "{id:?}: {one} decodes with a cache of one block for {distinct} distinct blocks");
     }
 }
+
+// spec: STRM-014
+// spec: GEN-020
+#[test]
+fn a_threaded_batch_over_the_store_decodes_each_block_once_whatever_the_budget_and_the_thread_count() {
+    use planet_core::hash::SplitMix64;
+    use planet_core::Vec3;
+    use planet_generators::height::HeightField;
+    let (d, w) = stored("threaded-batch");
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    let def = WorldDefinition::single_planet(R, 7);
+    let key = w.stage_key(RES).0;
+    let mut rng = SplitMix64(21);
+    let mut axis = || rng.next_f64() * 2.0 - 1.0;
+    let dirs: Vec<Vec3> = (0..120).map(|_| Vec3::new(axis(), axis(), axis()).normalized()).collect();
+    let make = |src: &dyn LatticeSource| ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, src, key).unwrap().heights(&dirs);
+    let reference: Vec<u64> = {
+        let roomy = StoreSource::new(&store, &w, RES).unwrap();
+        make(&roomy).iter().map(|h| h.to_bits()).collect()
+    };
+    let distinct = {
+        let roomy = StoreSource::new(&store, &w, RES).unwrap();
+        make(&roomy);
+        roomy.stats().decodes
+    };
+    assert!(distinct > 8, "{distinct} distinct blocks");
+    for blocks in [1u64, 3, 31] {
+        for threads in [1usize, 2, 20] {
+            let src = StoreSource::with_budget(&store, &w, RES, blocks * BLOCK_BYTES).unwrap();
+            let field = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, key).unwrap();
+            let got: Vec<u64> = field.heights_threaded(&dirs, threads).iter().map(|h| h.to_bits()).collect();
+            assert!(got == reference, "budget {blocks} blocks, {threads} threads: heights differ");
+            assert!(
+                src.stats().decodes <= distinct,
+                "budget {blocks} blocks, {threads} threads: {} decodes for {distinct} distinct blocks",
+                src.stats().decodes
+            );
+        }
+    }
+}

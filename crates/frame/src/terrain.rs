@@ -118,30 +118,36 @@ pub(crate) fn node_color(view: TerrainView, tile: TileId) -> [u8; 4] {
     }
 }
 
-/// Evaluate the origin heights `selection` needs and `cache` lacks on `threads` scoped threads and memoise them. Each is a
-/// pure function of its tile, so neither the split nor the order in which threads finish can change a result.
-fn prefill_origin_heights(
+/// The origin heights of the nodes of `selection`, in node order (LOD-009, GEN-020). A tile's height at its centre is a pure
+/// function of the tile; the ones `cache` lacks (all of them for a field that reads authored cells, which nothing is reused
+/// for) are evaluated as ONE batch, `HeightField::heights_threaded` on `threads` threads, so a field over a block store reads
+/// the distinct blocks of the whole selection once each instead of once per node in tree order (a cold plan at altitude: tens
+/// of nodes over hundreds of blocks). The batch returns exactly what `height` returns per direction, so the plan equals the
+/// per-node evaluation for every thread count (CON-14). A finite height is memoised; a non-finite one never is.
+fn origin_heights(
     selection: &crate::lod::NodeSelection,
     map: &(dyn planet_core::cube::FaceMapping + Sync),
     field: &dyn HeightField,
     cache: &mut SelectionCache,
     threads: usize,
-) {
-    let missing: Vec<TileId> = selection.nodes.iter().map(|n| n.tile).filter(|t| !cache.has_origin_height(*t)).collect();
-    if missing.len() < 2 {
-        return;
+) -> Vec<f64> {
+    let reuse = !field.reads_cells();
+    let mut heights = vec![f64::NAN; selection.nodes.len()];
+    let mut missing: Vec<usize> = Vec::new();
+    for (i, n) in selection.nodes.iter().enumerate() {
+        match reuse.then(|| cache.origin_height_if_known(n.tile)).flatten() {
+            Some(h) => heights[i] = h,
+            None => missing.push(i),
+        }
     }
-    let chunk = missing.len().div_ceil(threads);
-    let heights: Vec<(TileId, f64)> = std::thread::scope(|s| {
-        let handles: Vec<_> = missing
-            .chunks(chunk)
-            .map(|part| s.spawn(move || part.iter().map(|&t| (t, field.height(t.center_direction(map)))).collect::<Vec<_>>()))
-            .collect();
-        handles.into_iter().flat_map(|h| h.join().expect("origin height thread")).collect()
-    });
-    for (tile, h) in heights {
-        cache.origin_height(tile, || h);
+    if missing.is_empty() {
+        return heights;
     }
+    let dirs: Vec<planet_core::Vec3> = missing.iter().map(|&i| selection.nodes[i].tile.center_direction(map)).collect();
+    for (&i, h) in missing.iter().zip(field.heights_threaded(&dirs, threads.max(1))) {
+        heights[i] = if reuse { cache.origin_height(selection.nodes[i].tile, || h) } else { h };
+    }
+    heights
 }
 
 fn tile_id_color(id: TileId) -> [u8; 4] {
@@ -164,7 +170,7 @@ pub fn plan_terrain_cached(req: &TerrainRequest, field: &dyn HeightField, cache:
     plan_terrain_keyed(req, field, cache, None, 1)
 }
 
-/// [`plan_terrain_cached`] with the origin heights of the nodes the cache does not hold yet evaluated on `threads` threads (STRM-016,
+/// [`plan_terrain_cached`] with the origin heights of the nodes the cache does not hold yet evaluated as ONE batch on `threads` threads, each block read once (LOD-009, GEN-020; STRM-016,
 /// ADR 0032 point 5: a cold plan of an unseen place is dominated by them). A height is a pure function of the tile, so the
 /// plan is identical for every thread count (CON-14); `threads` of 0 or 1 evaluates on the calling thread.
 pub fn plan_terrain_threaded(
@@ -216,23 +222,21 @@ pub(crate) fn plan_terrain_keyed(
             req.lod.viewport_h_px / req.lod.tau_px
         )));
     }
-    if threads > 1 && !field.reads_cells() {
-        prefill_origin_heights(&selection, map.as_ref(), field, cache, threads);
-    }
+    let heights = origin_heights(&selection, map.as_ref(), field, cache, threads);
     let keyer =
         planet_generators::mesh::MeshKeyer::new(field, map.as_ref(), req.lod.cells, req.lod.radius_m).at_finest_level(req.lod.max_level);
     let derive_key = |tile: TileId| key_override.map_or_else(|| keyer.key(tile), |f| f(tile));
     let nodes = selection
         .nodes
         .iter()
-        .map(|n| {
+        .zip(heights)
+        .map(|(n, height)| {
             let centre = n.tile.center_direction(map.as_ref());
             // Origin height and mesh key are pure functions of the tile: computed once, reused by every later plan (LOD-009).
             // A field that reads authored cells declares reads per tile at plan time (WDEF-005): an edit changes heights and
             // keys without changing the field's identity, so nothing is reused for it. A non-finite height (a failed bake
             // read) is never kept.
             let reuse = !field.reads_cells();
-            let height = if reuse { cache.origin_height(n.tile, || field.height(centre)) } else { field.height(centre) };
             let origin = PlanetFixed(centre * (req.lod.radius_m + height));
             let rel = origin.0 - req.camera.position.0;
             let color = node_color(req.view, n.tile);

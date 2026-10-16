@@ -1,0 +1,8 @@
+- [x] 1.1 ablation before any fix (`examples/plan_bands.rs`: selection, origin heights singly and as a batch, whole plan at 1 and 20 threads, per altitude band; the dive's plan column) recorded in docs/learnings.md
+- [x] 1.2 failing tests first (`crates/frame/tests/plan_origin_batch.rs`: batches and decodes per plan with a one-block cache, plan == per-node evaluation at 1 and 20 threads, warm and moved plans; `crates/generators/tests/block_order.rs`: threaded batch)
+- [x] 1.3 generators: `heights_threaded_until`, `eval_gathered_threads`, `eval_chunked`, overrides for the erosion and terrain fields, delegation in `Bound` and `CancelGuarded`
+- [x] 1.4 frame: `origin_heights` batch in the plan builder (replaces the threaded prefill and the per-node evaluation)
+- [x] 1.5 cache: `StoreSource`'s per-thread pin no longer expires with the eviction epoch (real-source test at budgets 1, 3, 31 blocks and 1, 2, 20 threads)
+- [x] 1.6 measure after (same harness, same table), learnings, PR numbers
+- [x] 1.7 spec deltas (LOD-009, GEN-020), numerics-reviewer, spec-guardian
+- [x] 1.8 verifier, archive, log line, PR, CI, merge

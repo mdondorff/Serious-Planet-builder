@@ -334,14 +334,15 @@ impl GlobalWorld {
 /// block that holds a lattice vertex through the canonical layout and decodes it once. A block that is missing, damaged or of
 /// another shape is an error naming the block and its key, never a default.
 ///
-/// Reads by many threads do not meet on a lock. Each thread keeps the block it read last (one `Arc`, checked against the
-/// source's eviction epoch with one relaxed load), so a run of reads inside a block touches no shared memory but that load.
+/// Reads by many threads do not meet on a lock. Each thread keeps the block it read last (one `Arc`, matched by source and
+/// block), so a run of reads inside a block touches no shared memory at all, however many threads evict meanwhile (a batch that
+/// reads a block on one thread decodes it once whatever the budget: GEN-020, LOD-009).
 /// Only a change of block goes to the shared cache: a least-recently-used list under a mutex, bounded by a byte budget, whose
 /// entries are shared decode slots, so threads that want the same absent block wait for one decode. A block that fails to read
 /// is not kept. Whatever served a read, it returns the stored bits.
 ///
 /// Memory: blocks resident in the shared cache never exceed the budget (at least one block); a thread pins at most one block
-/// more (the one it read last) until its next read after an eviction, or for good if it never reads again, and a thread that
+/// more (the one it read last) until its next read of another block, or for good if it never reads again, and a thread that
 /// read this source and then another source or none keeps its last block until its next read or until it exits.
 pub struct StoreSource<'a> {
     store: &'a TileStore,
@@ -352,8 +353,6 @@ pub struct StoreSource<'a> {
     id: u64,
     block_bytes: u64,
     budget_blocks: usize,
-    /// Bumped (under the cache lock) when a block leaves the shared cache: a thread's pinned block is valid for one epoch.
-    epoch: AtomicU64,
     decodes: AtomicU64,
     /// Acquisitions of the shared-cache lock by reads (a test observable of STRM-014: only a change of block takes it).
     lookups: AtomicU64,
@@ -385,7 +384,6 @@ pub const SOURCE_CACHE_BYTES: u64 = 512 << 20;
 /// The block a thread read last.
 struct Pinned {
     source: u64,
-    epoch: u64,
     /// Face, block column and block row.
     at: (u8, u32, u32),
     block: Arc<Vec<GlobalSample>>,
@@ -417,7 +415,6 @@ impl<'a> StoreSource<'a> {
             id: NEXT_SOURCE_ID.fetch_add(1, Ordering::Relaxed),
             block_bytes,
             budget_blocks,
-            epoch: AtomicU64::new(0),
             decodes: AtomicU64::new(0),
             lookups: AtomicU64::new(0),
             shared: Mutex::new(Vec::new()),
@@ -436,30 +433,28 @@ impl<'a> StoreSource<'a> {
         }
     }
 
-    /// The slot of `tile` and the epoch it is valid for, made if absent (least recently used blocks leave beyond the budget).
-    fn slot(&self, tile: TileId) -> (Arc<Slot>, u64) {
+    /// The slot of `tile`, made if absent (least recently used blocks leave beyond the budget).
+    fn slot(&self, tile: TileId) -> Arc<Slot> {
         self.lookups.fetch_add(1, Ordering::Relaxed);
         let mut shared = self.shared.lock().expect("block cache mutex");
         if let Some(at) = shared.iter().position(|(t, _)| *t == tile) {
             let entry = shared.remove(at);
             let slot = Arc::clone(&entry.1);
             shared.push(entry);
-            return (slot, self.epoch.load(Ordering::Relaxed));
+            return slot;
         }
         let slot = Arc::new(Slot { block: OnceLock::new() });
         shared.push((tile, Arc::clone(&slot)));
         if shared.len() > self.budget_blocks {
             shared.remove(0);
-            self.epoch.fetch_add(1, Ordering::Relaxed);
         }
-        (slot, self.epoch.load(Ordering::Relaxed))
+        slot
     }
 
     fn forget(&self, tile: TileId, slot: &Arc<Slot>) {
         let mut shared = self.shared.lock().expect("block cache mutex");
         if let Some(at) = shared.iter().position(|(t, s)| *t == tile && Arc::ptr_eq(s, slot)) {
             shared.remove(at);
-            self.epoch.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -488,11 +483,11 @@ impl<'a> StoreSource<'a> {
         Ok(Arc::new(samples))
     }
 
-    /// The block of `tile` from the shared cache (decoded by this thread or another), and the epoch to pin it for.
-    fn shared_block(&self, tile: TileId) -> Result<(Arc<Vec<GlobalSample>>, u64), ReadError> {
-        let (slot, epoch) = self.slot(tile);
+    /// The block of `tile` from the shared cache (decoded by this thread or another).
+    fn shared_block(&self, tile: TileId) -> Result<Arc<Vec<GlobalSample>>, ReadError> {
+        let slot = self.slot(tile);
         match slot.block.get_or_init(|| self.load(tile)) {
-            Ok(block) => Ok((Arc::clone(block), epoch)),
+            Ok(block) => Ok(Arc::clone(block)),
             Err(e) => {
                 // Not kept: the next reader reads again (the store may have gained the block).
                 self.forget(tile, &slot);
@@ -502,16 +497,14 @@ impl<'a> StoreSource<'a> {
     }
 
     fn sample(&self, at: (u8, u32, u32), index: usize) -> Result<GlobalSample, ReadError> {
-        let epoch = self.epoch.load(Ordering::Relaxed);
-        let hit =
-            PINNED.with(|p| p.borrow().as_ref().filter(|p| p.source == self.id && p.epoch == epoch && p.at == at).map(|p| p.block[index]));
+        let hit = PINNED.with(|p| p.borrow().as_ref().filter(|p| p.source == self.id && p.at == at).map(|p| p.block[index]));
         if let Some(s) = hit {
             return Ok(s);
         }
         let tile = TileId::new(Face(at.0), self.level, at.1, at.2).expect("a tile of the grid");
-        let (block, epoch) = self.shared_block(tile)?;
+        let block = self.shared_block(tile)?;
         let s = block[index];
-        PINNED.with(|p| *p.borrow_mut() = Some(Pinned { source: self.id, epoch, at, block }));
+        PINNED.with(|p| *p.borrow_mut() = Some(Pinned { source: self.id, at, block }));
         Ok(s)
     }
 }

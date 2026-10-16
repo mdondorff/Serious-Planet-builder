@@ -240,3 +240,50 @@ fn the_batch_stops_within_a_bounded_number_of_samples_once_the_flag_is_set() {
     let none = f.heights_until(&dirs, &|| true);
     assert!(none.iter().all(|x| *x == 0.0) && src.reads.load(Ordering::Relaxed) == before, "a set flag reads nothing");
 }
+
+// spec: GEN-020
+// spec: CON-14
+#[test]
+fn a_threaded_batch_equals_the_single_heights_at_every_thread_count_and_reads_each_block_once() {
+    let mut rng = SplitMix64(11);
+    let mut axis = || rng.next_f64() * 2.0 - 1.0;
+    // Few directions over many blocks (a cold plan at altitude), and a larger batch.
+    for n in [3usize, 52, 300] {
+        let dirs: Vec<Vec3> = (0..n).map(|_| Vec3::new(axis(), axis(), axis()).normalized()).collect();
+        let single: Vec<u64> = {
+            let src = Simulated::new(usize::MAX, false);
+            let f = field(&src);
+            dirs.iter().map(|&d| f.height(d).to_bits()).collect()
+        };
+        let distinct = {
+            let src = Simulated::new(usize::MAX, true);
+            field(&src).heights(&dirs);
+            src.decodes()
+        };
+        for threads in [0usize, 1, 2, 5, 20] {
+            // A cache of every block: the decodes are those of a source that never forgets, per block read.
+            let src = Simulated::new(usize::MAX, true);
+            let got: Vec<u64> = field(&src).heights_threaded(&dirs, threads).iter().map(|h| h.to_bits()).collect();
+            assert!(got == single, "{n} directions on {threads} threads");
+            assert_eq!(src.decodes(), distinct, "{n} directions on {threads} threads: every distinct block once");
+        }
+    }
+}
+
+// spec: GEN-020
+#[test]
+fn a_threaded_batch_reads_nothing_once_the_flag_is_set() {
+    let src = Simulated::new(usize::MAX, true);
+    let f = field(&src);
+    let mut rng = SplitMix64(3);
+    let mut axis = || rng.next_f64() * 2.0 - 1.0;
+    let dirs: Vec<Vec3> = (0..200).map(|_| Vec3::new(axis(), axis(), axis()).normalized()).collect();
+    let none = f.heights_threaded_until(&dirs, &|| true, 8);
+    assert!(none.iter().all(|x| *x == 0.0) && src.reads.load(Ordering::Relaxed) == 0, "a set flag reads nothing");
+    // Set while the blocks are being read: the threads stop within a bounded number of reads.
+    let limit = 300u64;
+    let cut = f.heights_threaded_until(&dirs, &|| src.reads.load(Ordering::Relaxed) >= limit, 8);
+    let reads = src.reads.load(Ordering::Relaxed);
+    assert!(reads <= limit + 8 * 64, "{reads} reads after the flag was set at {limit}");
+    assert!(cut.iter().all(|x| *x == 0.0), "an unfinished batch leaves 0.0");
+}

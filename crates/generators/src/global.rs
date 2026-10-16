@@ -666,6 +666,49 @@ impl LatticeSource for CellTable {
     }
 }
 
+/// Whether `src` has the block structure a gathered batch uses and a batch is worth gathering (`min_dirs` directions at least).
+fn gatherable(src: &dyn LatticeSource, n: usize, min_dirs: usize) -> bool {
+    let (res, bc) = (src.res(), src.block_cells());
+    // (`cell_key` packs a cell index into 20 bits; a small batch is not worth a gather.)
+    !(bc == 0 || res == 0 || bc > res || !res.is_power_of_two() || res >= 1 << 20 || n < min_dirs)
+}
+
+/// The footprint pass: the distinct cells `footprint` reads for `dirs`, as (face, Z-order block, cell key) sorted by block;
+/// `None` when `stop` was set meanwhile.
+fn footprint_by_block(
+    src: &dyn LatticeSource,
+    dirs: &[Vec3],
+    stop: &dyn Fn() -> bool,
+    footprint: &dyn Fn(&dyn LatticeSource, Vec3),
+) -> Option<Vec<(u8, u64, u64)>> {
+    let (res, bc) = (src.res(), src.block_cells());
+    let gather = Gather { res, seen: Mutex::new(Vec::new()) };
+    for (k, &d) in dirs.iter().enumerate() {
+        if k % 64 == 0 && stop() {
+            return None;
+        }
+        footprint(&gather, d);
+    }
+    let mut keys = gather.seen.into_inner().expect("gather mutex");
+    keys.sort_unstable();
+    keys.dedup();
+    // The block that holds a cell: the last block of a row holds the far edge as its own last sample.
+    let last = res / bc - 1;
+    let mut by_block: Vec<(u8, u64, u64)> = keys
+        .iter()
+        .map(|&k| {
+            let (face, i, j) = ((k >> 40) as u8, ((k >> 20) & 0xf_ffff) as u32, (k & 0xf_ffff) as u32);
+            (face, morton((i / bc).min(last), (j / bc).min(last)), k)
+        })
+        .collect();
+    by_block.sort_unstable();
+    Some(by_block)
+}
+
+fn read_cell(src: &dyn LatticeSource, face: u8, k: u64) -> (u64, Result<GlobalSample, ReadError>) {
+    (k, src.at(Face(face), ((k >> 20) & 0xf_ffff) as u32, (k & 0xf_ffff) as u32))
+}
+
 /// Evaluate `eval` on every direction of `dirs` and return the results in the caller's order (GEN-020). `eval(src, d)` is a
 /// pure function of `d` that reads the lattice only through `src`; `footprint(src, d)` makes the same lattice reads as
 /// `eval(src, d)` (it may skip the arithmetic that follows them).
@@ -683,10 +726,20 @@ pub fn eval_gathered(
     footprint: &dyn Fn(&dyn LatticeSource, Vec3),
     eval: &dyn Fn(&dyn LatticeSource, Vec3) -> f64,
 ) -> Vec<f64> {
+    eval_gathered_from(src, dirs, stop, footprint, eval, 64)
+}
+
+/// [`eval_gathered`] gathering a batch of `min_dirs` directions or more (a smaller one is the plain loop).
+fn eval_gathered_from(
+    src: &dyn LatticeSource,
+    dirs: &[Vec3],
+    stop: &dyn Fn() -> bool,
+    footprint: &dyn Fn(&dyn LatticeSource, Vec3),
+    eval: &dyn Fn(&dyn LatticeSource, Vec3) -> f64,
+    min_dirs: usize,
+) -> Vec<f64> {
     let mut out = vec![0.0; dirs.len()];
-    let (res, bc) = (src.res(), src.block_cells());
-    if bc == 0 || res == 0 || bc > res || !res.is_power_of_two() || res >= 1 << 20 || dirs.len() < 64 {
-        // (`cell_key` packs a cell index into 20 bits; a small batch is not worth a gather.)
+    if !gatherable(src, dirs.len(), min_dirs) {
         for (k, &d) in dirs.iter().enumerate() {
             if k % 64 == 0 && stop() {
                 break;
@@ -695,35 +748,16 @@ pub fn eval_gathered(
         }
         return out;
     }
-    let gather = Gather { res, seen: Mutex::new(Vec::new()) };
-    for (k, &d) in dirs.iter().enumerate() {
-        if k % 64 == 0 && stop() {
-            return out;
-        }
-        footprint(&gather, d);
-    }
-    let mut keys = gather.seen.into_inner().expect("gather mutex");
-    keys.sort_unstable();
-    keys.dedup();
-    // The block that holds a cell: the last block of a row holds the far edge as its own last sample.
-    let last = res / bc - 1;
-    let mut by_block: Vec<(u8, u64, u64)> = keys
-        .iter()
-        .map(|&k| {
-            let (face, i, j) = ((k >> 40) as u8, ((k >> 20) & 0xf_ffff) as u32, (k & 0xf_ffff) as u32);
-            (face, morton((i / bc).min(last), (j / bc).min(last)), k)
-        })
-        .collect();
-    by_block.sort_unstable();
+    let Some(by_block) = footprint_by_block(src, dirs, stop, footprint) else { return out };
     let mut cells = Vec::with_capacity(by_block.len());
     for (n, &(face, block, k)) in by_block.iter().enumerate() {
         if (n == 0 || (by_block[n - 1].0, by_block[n - 1].1) != (face, block) || n % 64 == 0) && stop() {
             return out;
         }
-        cells.push((k, src.at(Face(face), ((k >> 20) & 0xf_ffff) as u32, (k & 0xf_ffff) as u32)));
+        cells.push(read_cell(src, face, k));
     }
     cells.sort_unstable_by_key(|c| c.0);
-    let table = CellTable { res, cells };
+    let table = CellTable { res: src.res(), cells };
     for (k, &d) in dirs.iter().enumerate() {
         if k % 64 == 0 && stop() {
             break;
@@ -731,6 +765,74 @@ pub fn eval_gathered(
         out[k] = eval(&table, d);
     }
     out
+}
+
+/// [`eval_gathered`] on up to `threads` scoped threads (the plan builder's origin heights): the same results for every `threads`
+/// (CON-14). The distinct blocks of the batch are dealt to the threads, each of which reads the cells of one block at a time
+/// (so a block is still decoded once, however small the source's cache, and `threads` blocks are in flight at once); the
+/// evaluation from the table is split over the threads in contiguous chunks. A batch of a few directions is gathered too (a
+/// cold plan at altitude has tens of nodes whose footprints are hundreds of blocks). `threads` of 0 or 1 gathers on the calling thread.
+pub fn eval_gathered_threads(
+    src: &dyn LatticeSource,
+    dirs: &[Vec3],
+    stop: &(dyn Fn() -> bool + Sync),
+    threads: usize,
+    footprint: &(dyn Fn(&dyn LatticeSource, Vec3) + Sync),
+    eval: &(dyn Fn(&dyn LatticeSource, Vec3) -> f64 + Sync),
+) -> Vec<f64> {
+    if threads <= 1 {
+        return eval_gathered_from(src, dirs, stop, footprint, eval, 2);
+    }
+    if !gatherable(src, dirs.len(), 2) {
+        return crate::height::eval_chunked(dirs, stop, threads, &|d| eval(src, d));
+    }
+    let out = vec![0.0; dirs.len()];
+    let Some(by_block) = footprint_by_block(src, dirs, stop, footprint) else { return out };
+    // Contiguous runs of one (face, block).
+    let mut groups: Vec<std::ops::Range<usize>> = Vec::new();
+    for (n, b) in by_block.iter().enumerate() {
+        match groups.last_mut() {
+            Some(g) if (by_block[g.start].0, by_block[g.start].1) == (b.0, b.1) => g.end = n + 1,
+            _ => groups.push(n..n + 1),
+        }
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let stopped = std::sync::atomic::AtomicBool::new(false);
+    let parts: Vec<Vec<(u64, Result<GlobalSample, ReadError>)>> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..threads.min(groups.len()))
+            .map(|_| {
+                s.spawn(|| {
+                    let mut mine = Vec::new();
+                    loop {
+                        let g = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if g >= groups.len() {
+                            return mine;
+                        }
+                        if stop() {
+                            stopped.store(true, std::sync::atomic::Ordering::Relaxed);
+                            return mine;
+                        }
+                        for (n, &(face, _, k)) in by_block[groups[g].clone()].iter().enumerate() {
+                            if n % 64 == 63 && stop() {
+                                stopped.store(true, std::sync::atomic::Ordering::Relaxed);
+                                return mine;
+                            }
+                            mine.push(read_cell(src, face, k));
+                        }
+                    }
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().expect("block read thread")).collect()
+    });
+    // (A thread that saw the flag recorded it: the table may be partial, whatever the flag says now.)
+    if stopped.load(std::sync::atomic::Ordering::Relaxed) || stop() {
+        return out;
+    }
+    let mut cells: Vec<_> = parts.into_iter().flatten().collect();
+    cells.sort_unstable_by_key(|c| c.0);
+    let table = CellTable { res: src.res(), cells };
+    crate::height::eval_chunked(dirs, stop, threads, &|d| eval(&table, d))
 }
 
 /// A 64-bit hash of every bit of every channel of a grid, in face and row-major order, with the resolution and
