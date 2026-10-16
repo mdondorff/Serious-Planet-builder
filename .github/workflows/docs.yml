@@ -1,0 +1,25 @@
+name: docs
+
+# Light check for docs-only changes (owner, 2026-10-16): spec-lint only, on Linux. A change that also touches any
+# other file runs the full `ci` workflow as well.
+on:
+  push:
+    branches: ["**"]
+    paths: ["docs/**", "openspec/**", ".claude/**", "*.md"]
+  pull_request:
+    paths: ["docs/**", "openspec/**", ".claude/**", "*.md"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  spec-lint:
+    name: docs (spec-lint)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: spec-lint
+        run: cargo xtask spec-lint

@@ -1,9 +1,12 @@
 name: ci
 
+# Docs-only changes (owner, 2026-10-16) run the light `docs` workflow instead; any other file in a change runs this one.
 on:
   push:
     branches: ["**"]
+    paths-ignore: ["docs/**", "openspec/**", ".claude/**", "*.md"]
   pull_request:
+    paths-ignore: ["docs/**", "openspec/**", ".claude/**", "*.md"]
   workflow_dispatch:
 
 env:
