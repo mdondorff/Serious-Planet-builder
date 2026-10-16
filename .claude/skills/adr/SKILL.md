@@ -21,6 +21,8 @@ Rules:
 - New ADRs written by Claude always start as `proposed`. Only the owner sets `accepted`.
 - Link the ADR from the affected spec(s) in `openspec/specs/`.
 - If it supersedes an ADR, change only the old ADR's status line to `superseded by NNNN`.
+- If it decides an open point of an earlier ADR ("accepted in part", "point N open"), update that earlier ADR's status line in the same PR (for example "point 5 decided by NNNN").
+- Update the status index table in `docs/adr/README.md` (number, title, status, open points) in the same PR.
 - If the decision would change a constitution rule, say so in Context and name the rule ID; do not edit the constitution.
 - Add one line at the top of `docs/log.md`: date, ADR number, title, status.
 

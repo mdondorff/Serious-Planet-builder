@@ -1,6 +1,6 @@
-# Status log
+# Status
 
-Newest entries at the top. One line per event (change archived, ADR drafted, spike opened or closed, quarantine, milestone report). Stop reports get a short section.
+Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to `docs/log.md`. When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. The `housekeeping` skill cleans the rest at milestone boundaries.
 
 ## M4 decisions (opus-planner, 2026-10-15)
 Owner's delegation; they answer the open points (2)-(4) of the stop report above, which is no longer waiting on them.
