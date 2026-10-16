@@ -1,0 +1,15 @@
+[package]
+name = "ocean-connectivity"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Throwaway SPIKE-08 harness; not part of the planet workspace.
+[workspace]
+
+[dependencies]
+planet-core = { path = "../../crates/core" }
+planet-world-def = { path = "../../crates/world-def" }
+planet-generators = { path = "../../crates/generators" }
+planet-cache = { path = "../../crates/cache" }
+png = "0.18.1"
