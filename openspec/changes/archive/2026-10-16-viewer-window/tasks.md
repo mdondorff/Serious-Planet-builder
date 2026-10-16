@@ -6,4 +6,4 @@
 - [x] 3.2 `app::window`: the winit loop, key tables, smoke driver, `--no-window`, `--no-vsync`, options (VIEW-003, VIEW-005)
 - [x] 3.3 `tests/gpu_window.rs`: smoke with a declared skip; CI declaration and summary note
 - [x] 4.1 ADR 0047 (adapter gate) proposed
-- [ ] 4.2 spec-guardian, verifier, test, test gpu, test gpu --real, spec-lint, fmt, clippy, deny; archive; log line; delete queue item 1; PR; CI; merge
+- [x] 4.2 spec-guardian, verifier, test, test gpu, test gpu --real, spec-lint, fmt, clippy, deny; archive; log line; delete queue item 1; PR; CI; merge
