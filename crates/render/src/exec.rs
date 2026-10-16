@@ -71,6 +71,8 @@ pub enum ExecError {
         planned: usize,
         max: usize,
     },
+    /// The plan asks for the lit path but `TerrainRenderer::enable_lit` was not called.
+    LitNotEnabled,
 }
 
 impl fmt::Display for ExecError {
@@ -99,6 +101,9 @@ impl fmt::Display for ExecError {
             ExecError::BadPool(m) => write!(f, "terrain pools: {m}"),
             ExecError::TooManyNodes { planned, max } => {
                 write!(f, "the plan has {planned} nodes but the node record buffer holds {max}")
+            }
+            ExecError::LitNotEnabled => {
+                write!(f, "the plan carries a lit path but the renderer was not given one; call TerrainRenderer::enable_lit first")
             }
             ExecError::MissingTile(id) => write!(f, "the plan draws tile {id:?} but no resource for it was supplied"),
             ExecError::BadResource { id, expected, got } => write!(f, "tile {id:?}: expected {expected} height samples, got {got}"),

@@ -11,3 +11,7 @@ terrain_low2km_morph debug
 terrain_cube_corner_normals debug
 terrain_aerial200km_height shaded
 terrain_ground1m_depth shaded
+lit_orbit_ev15 lit
+lit_aerial20km_ev15 lit
+lit_ground1m_ev15 lit
+lit_orbit_ev_bands lit

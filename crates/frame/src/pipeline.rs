@@ -278,6 +278,7 @@ pub fn draw_plan_with(
             height_range: HEIGHT_RANGE,
             cells: req.lod.cells,
             nodes,
+            lit: None,
         },
     };
     Ok(DrawPlan { plan, kind, substituted, blank })
