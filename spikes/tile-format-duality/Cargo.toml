@@ -1,0 +1,13 @@
+[package]
+name = "tile-format-duality"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Throwaway CPU-only measurement for the tile-format duality exploration; not part of the planet workspace.
+[workspace]
+
+[dependencies]
+planet-core = { path = "../../crates/core" }
+planet-generators = { path = "../../crates/generators" }
+planet-frame = { path = "../../crates/frame" }
