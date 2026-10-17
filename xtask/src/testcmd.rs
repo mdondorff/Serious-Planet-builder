@@ -350,14 +350,14 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
         match a.as_str() {
             "--smoke" => smoke = true,
             "--machine-ready" | "--allow-memory-bake" => tail.push(a.clone()),
-            "--store" | "--global-res" | "--out" | "--upload" | "--gen-workers" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" => {
+            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());
             }
             other => {
                 return Err(format!(
-                    "unknown perf stream option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out, --upload per-slot|batched, --gen-workers N, --gen-ahead N, --gen-reserve N, --gen-priority below-normal|normal, --smoke, --machine-ready, the owner's override of a failed readiness gate)"
+                    "unknown perf stream option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out, --upload per-slot|batched, --prefill-levels N, --gen-workers N, --gen-ahead N, --gen-reserve N, --gen-priority below-normal|normal, --smoke, --machine-ready, the owner's override of a failed readiness gate)"
                 ))
             }
         }
@@ -635,6 +635,9 @@ mod tests {
                 && !smoke.contains(&"--perf".to_string()),
             "{smoke:?}"
         );
+        // The store check of the smoke run (TEST-024) takes the pre-fill depth through.
+        let check = perf_stream_args(&s(&["dive", "--smoke", "--store", "C:/bake", "--prefill-levels", "4"])).unwrap();
+        assert_eq!(check[check.iter().position(|x| x == "--prefill-levels").unwrap() + 1], "4", "{check:?}");
         for name in STREAM_SCENES {
             assert!(perf_stream_args(&s(&[name])).is_ok(), "{name}");
         }

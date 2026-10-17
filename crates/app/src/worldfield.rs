@@ -407,6 +407,40 @@ impl WorldTerrain {
         Ok((total - missing, total))
     }
 
+    /// Read the ocean channel at a fixed grid of directions (12 latitudes by 24 longitudes, the poles excluded): `(directions read,
+    /// of them sea)`, or `None` when the world has no water. A read error is returned, never counted as land.
+    pub fn ocean_probe(&self) -> Result<Option<(usize, usize)>, String> {
+        let r = self.with_water(|field| {
+            let (mut read, mut sea) = (0usize, 0usize);
+            for i in 0..12 {
+                let lat = (-82.5 + 15.0 * f64::from(i)).to_radians();
+                for j in 0..24 {
+                    let lon = (7.5 + 15.0 * f64::from(j)).to_radians();
+                    let d = planet_core::Vec3::new(libm::cos(lat) * libm::cos(lon), libm::cos(lat) * libm::sin(lon), libm::sin(lat));
+                    let w = planet_frame::water::WaterSource::water_at(field, d)
+                        .map_err(|e| format!("ocean channel read at lat {:.1} lon {:.1}: {e}", lat.to_degrees(), lon.to_degrees()))?;
+                    read += 1;
+                    sea += usize::from(w.is_some());
+                }
+            }
+            Ok::<_, String>((read, sea))
+        })?;
+        r.transpose()
+    }
+
+    /// The read-only check of a stored production world before a window (TEST-024): the bake answers, the ocean channel reads, and the
+    /// tile pack holds levels `0..=levels` in the compact form (the form the production run draws) and, for information, the vertex
+    /// form. Writes nothing: the store is opened for reading only. Every present pack tile is read and decoded by `prefill_present`.
+    pub fn store_check(&self, levels: u8, cells: u32, max_level: u8) -> Result<StoreCheck, String> {
+        if self.pack.is_none() {
+            return Err("this terrain has no tile pack (an in-memory bake): there is no store to check".into());
+        }
+        let ocean = self.ocean_probe()?;
+        let compact = self.prefill_present(levels, cells, max_level, planet_render::TileFormat::Compact)?;
+        let vertex = self.prefill_present(levels, cells, max_level, planet_render::TileFormat::Vertex)?;
+        Ok(StoreCheck { source: self.source.clone(), res: self.res, levels, ocean, compact, vertex })
+    }
+
     /// Bake blocks `(done, total)` for the readiness report (ADR 0045 point 5). A run opens a complete bake (an in-memory one is
     /// built, a stored one is checked), so the two are equal; a field that reads no bake has none. The incremental first-visit
     /// bake of ADR 0045 point 5 reports its progress here when it exists.
@@ -537,5 +571,70 @@ pub fn form_of_format(format: planet_render::TileFormat) -> RenderForm {
     match format {
         planet_render::TileFormat::Compact => RenderForm::Compact,
         planet_render::TileFormat::Vertex => RenderForm::Vertex,
+    }
+}
+
+/// What [`WorldTerrain::store_check`] found (TEST-024).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoreCheck {
+    pub source: String,
+    pub res: u32,
+    pub levels: u8,
+    /// Directions read of the ocean channel and how many were sea; `None`: the store has no ocean channel.
+    pub ocean: Option<(usize, usize)>,
+    /// `(present, total)` tiles of levels `0..=levels` in the compact form, and in the vertex form.
+    pub compact: (usize, usize),
+    pub vertex: (usize, usize),
+}
+
+impl StoreCheck {
+    /// What is wrong with the store for a production window, one text each; empty means it can be used. The ocean must exist and be
+    /// neither all land nor all sea on the probe grid (a broken channel reads as one of them), and the compact pack must be complete.
+    pub fn problems(&self) -> Vec<String> {
+        let mut p = Vec::new();
+        match self.ocean {
+            None => p.push(format!(
+                "{}: no ocean channel (GLOBAL_VERSION {}): regenerate the store with `generate --global-dir`",
+                self.source,
+                planet_generators::global::GLOBAL_VERSION
+            )),
+            Some((read, sea)) if sea == 0 || sea == read => p.push(format!(
+                "the ocean channel reads {} on all {read} probe directions: a bad channel",
+                if sea == 0 { "land" } else { "sea" }
+            )),
+            Some(_) => {}
+        }
+        if self.compact.0 != self.compact.1 {
+            p.push(format!(
+                "the tile pack holds {} of {} compact tiles of levels 0-{} at MESH_VERSION {}: pre-fill it with `generate --prefill-dir <store> --global-res {}`",
+                self.compact.0,
+                self.compact.1,
+                self.levels,
+                planet_generators::mesh::MESH_VERSION,
+                self.res
+            ));
+        }
+        p
+    }
+
+    /// The report lines of the check.
+    pub fn lines(&self) -> Vec<String> {
+        let ocean = match self.ocean {
+            Some((read, sea)) => format!("present, {read} directions read, {sea} sea and {} land", read - sea),
+            None => "MISSING".to_string(),
+        };
+        vec![
+            format!(
+                "store check (smoke, read-only, NOT a measurement): {}; GLOBAL_VERSION {}, MESH_VERSION {}",
+                self.source,
+                planet_generators::global::GLOBAL_VERSION,
+                planet_generators::mesh::MESH_VERSION
+            ),
+            format!("  ocean channel: {ocean}"),
+            format!(
+                "  tile pack, levels 0-{}: compact form {} of {} present (each read and decoded), vertex form {} of {}",
+                self.levels, self.compact.0, self.compact.1, self.vertex.0, self.vertex.1
+            ),
+        ]
     }
 }

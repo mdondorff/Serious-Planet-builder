@@ -1188,6 +1188,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     .map_err(err)?;
     // Heaviest first: the light orbit view never raises idle clocks by itself, so it runs after the GPU is busy.
     let mut warmups: Vec<(String, planet_perf::clock::WarmUpOutcome)> = Vec::new();
+    let mut loads: Vec<(String, planet_perf::load::CaseLoad)> = Vec::new();
     for index in [6usize, 5, 3, 0] {
         let (name, camera) = views[index];
         let req = TerrainRequest {
@@ -1254,6 +1255,8 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         let mut attempt = 0;
         let batch_start = reports.len();
         let budget_start = budget_lines.len();
+        // The host's load beside this view's runs (TEST-023): recorded, never judged.
+        let load_sampler = (!smoke).then(|| planet_perf::load::LoadSampler::start(planet_perf::load::SAMPLE_PERIOD_S));
         loop {
             for _ in 0..runs {
                 let before = planet_perf::query_nvidia_smi();
@@ -1307,6 +1310,12 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
             budget_lines.truncate(budget_start);
             attempt += 1;
         }
+        let view_load = load_sampler.map_or_else(planet_perf::load::CaseLoad::not_measured, planet_perf::load::LoadSampler::stop);
+        writeln!(out, "{name}: {}", view_load.line()).map_err(err)?;
+        for n in view_load.notes() {
+            writeln!(out, "  {name}: LOAD NOTE (recorded, the session's validity is unchanged): {n}").map_err(err)?;
+        }
+        loads.push((format!("terrain/{name}"), view_load));
     }
     let scheme = planet_perf::query_power_scheme();
     let throttled: Vec<String> = reports.iter().filter(|r| crate::run_throttled(r)).map(|r| r.path_name.clone()).collect();
@@ -1359,7 +1368,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         worst_noise = worst_noise.max(planet_perf::run_to_run_noise(&medians).unwrap_or(0.0));
     }
     writeln!(out, "worst run-to-run noise within a view (max-min)/median: {worst_noise:.3}").map_err(err)?;
-    let json = planet_perf::report_json_with_warmups(
+    let json = planet_perf::report_json_full(
         &crate::facts(ctx),
         scheme.as_deref(),
         &owner_override,
@@ -1367,6 +1376,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         &protocol,
         &reports,
         &warmups,
+        &loads,
     );
     if smoke && o.out.is_none() {
         return writeln!(out, "smoke run: no log written (pass --out to keep it)").map_err(err);

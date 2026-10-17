@@ -97,3 +97,51 @@ fn the_cost_of_the_per_tile_water_query() {
         println!("  warm: {:.3} ms for {} tiles", again.elapsed().as_secs_f64() * 1e3, tiles.len());
     }
 }
+
+// spec: TEST-024
+#[test]
+fn the_ocean_probe_reads_a_fixed_grid_and_a_world_without_a_store_has_nothing_to_check() {
+    let w = world(128);
+    let (read, sea) = w.ocean_probe().unwrap().expect("the bake has an ocean channel");
+    assert_eq!(read, 288, "12 latitudes by 24 longitudes");
+    assert!(sea > 20 && sea < 268, "an ocean world, neither all land nor all sea: {sea} of {read}");
+    assert_eq!(w.ocean_probe().unwrap(), Some((read, sea)), "a fixed grid gives the same answer every time");
+    let e = w.store_check(1, 32, 22).unwrap_err();
+    assert!(e.contains("no tile pack"), "{e}");
+}
+
+// spec: TEST-024
+#[test]
+fn a_store_check_names_every_problem_of_a_store_and_passes_a_complete_one() {
+    use planet::worldfield::StoreCheck;
+    let good = StoreCheck {
+        source: "store S, 16384 cells".into(),
+        res: 16384,
+        levels: 4,
+        ocean: Some((288, 140)),
+        compact: (2046, 2046),
+        vertex: (0, 2046),
+    };
+    assert!(good.problems().is_empty(), "the vertex form is information only: {:?}", good.problems());
+    let text = good.lines().join("\n");
+    assert!(text.contains("ocean channel: present, 288 directions read, 140 sea and 148 land"), "{text}");
+    assert!(text.contains("levels 0-4: compact form 2046 of 2046 present") && text.contains("vertex form 0 of 2046"), "{text}");
+    assert!(
+        text.contains(&format!("GLOBAL_VERSION {}", planet_generators::global::GLOBAL_VERSION))
+            && text.contains(&format!("MESH_VERSION {}", planet_generators::mesh::MESH_VERSION)),
+        "{text}"
+    );
+    let no_ocean = StoreCheck { ocean: None, ..good.clone() };
+    assert!(no_ocean.problems()[0].contains("no ocean channel") && no_ocean.problems()[0].contains("generate --global-dir"));
+    for (sea, word) in [(0usize, "land"), (288, "sea")] {
+        let p = StoreCheck { ocean: Some((288, sea)), ..good.clone() }.problems();
+        assert!(p.len() == 1 && p[0].contains(&format!("reads {word} on all 288")), "{p:?}");
+    }
+    let short = StoreCheck { compact: (2000, 2046), ..good.clone() }.problems();
+    assert!(
+        short.len() == 1 && short[0].contains("2000 of 2046") && short[0].contains("MESH_VERSION") && short[0].contains("--prefill-dir"),
+        "{short:?}"
+    );
+    let both = StoreCheck { ocean: None, compact: (0, 2046), ..good }.problems();
+    assert_eq!(both.len(), 2);
+}
