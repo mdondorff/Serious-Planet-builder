@@ -21,7 +21,7 @@ Housekeeping is split (owner, 2026-10-16): the **architect** curates, deciding w
    - the "Recent" section is deleted if it duplicates the log.
 
    Target: under 10 KB.
-2. **Archives per milestone.** Move the finished milestone's lines of `docs/log.md` to `docs/archive/<M>/log.md`, and its closed spikes from `docs/spikes.md` to `docs/archive/<M>/spikes.md`. Leave a one-line pointer per archive in the current file's header.
+2. **Archives per milestone.** Move the finished milestone's lines of `docs/log.md` and its fragments of `docs/log.d/` (delete the files; merge them with `cargo xtask log`) to `docs/archive/<M>/log.md`, and its closed spikes from `docs/spikes.md` to `docs/archive/<M>/spikes.md`. Leave a one-line pointer per archive in the current file's header.
 3. **Learnings by scope.** For each entry of `docs/learnings.md`, decide:
    - **project** learning (still true and useful beyond the milestone): it stays;
    - **milestone** learning (useful as history): it moves to `docs/archive/<M>/learnings.md`;
@@ -43,7 +43,7 @@ Housekeeping is split (owner, 2026-10-16): the **architect** curates, deciding w
 
 ## Root causes (prevent the dust)
 - **Status grows** because finished items stay: the coder deletes a queue item's text when its change is archived (the log line is the record), and the architect deletes answered stop reports when answering them. The header of `docs/status.md` states this rule.
-- **The log conflicts on every PR** because every PR prepends to one file: the target is one log fragment per change (`docs/log.d/<date>-<id>.md`), assembled by an xtask command. Until that exists, keep both sides of a log conflict.
+- **The log conflicted on every PR** because every PR prepended to one file. Fixed (BUILD-010): one log fragment per change (`docs/log.d/<date>-<id>.md`), read with `cargo xtask log`; spec-lint rejects a malformed one. A fragment is never edited after merge; a conflict in `docs/log.md` means someone wrote there, so keep both sides and move the new line to a fragment.
 - **Learnings rot** because entries have no scope or end: the `learning` skill asks for `Scope:` (project or milestone) and `Obsolete when:`.
 - **ADR statuses drift** because a later ADR decides an earlier one's open point: the `adr` skill updates the earlier status line and the README table in the same PR.
 - **Spikes collide** with the main coder: the `spike` skill's parallel-session practice.

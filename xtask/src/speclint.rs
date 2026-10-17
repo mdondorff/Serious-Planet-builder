@@ -418,6 +418,8 @@ pub fn run(root: &Path) -> Res {
     let files: Vec<(String, Vec<u8>)> =
         tracked.split('\0').filter(|p| !p.is_empty()).filter_map(|p| Some((p.to_string(), std::fs::read(root.join(p)).ok()?))).collect();
     report.errors.extend(conflict_marker_errors(&files));
+    // BUILD-010: every log fragment is one well-formed entry.
+    report.errors.extend(crate::logcmd::fragment_errors(&crate::logcmd::read_fragments(root)?));
     eprint!("{}", report.summary);
     if report.errors.is_empty() {
         eprintln!("spec-lint ok");

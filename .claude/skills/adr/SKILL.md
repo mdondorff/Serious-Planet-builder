@@ -26,6 +26,6 @@ Rules:
 - If it decides an open point of an earlier ADR ("accepted in part", "point N open"), update that earlier ADR's status line in the same PR (for example "point 5 decided by NNNN").
 - Update the status index table in `docs/adr/README.md` (number, title, status, open points) in the same PR.
 - If the decision would change a constitution rule, say so in Context and name the rule ID; do not edit the constitution.
-- Add one line at the top of `docs/log.md`: date, ADR number, title, status.
+- Add a fragment `docs/log.d/<YYYY-MM-DD>-adr-NNNN.md` with one line: date, ADR number, title, status.
 
 Topic: $ARGUMENTS
