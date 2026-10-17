@@ -7,6 +7,7 @@ pub mod clock;
 pub mod compare;
 pub mod gate;
 pub mod host;
+pub mod load;
 pub mod prefill;
 pub mod session;
 pub mod streaming;
@@ -235,7 +236,7 @@ pub struct RunReport {
     pub counts: Vec<(String, u64)>,
 }
 
-fn json_str(s: &str) -> String {
+pub(crate) fn json_str(s: &str) -> String {
     let mut o = String::from("\"");
     for c in s.chars() {
         match c {
@@ -250,7 +251,7 @@ fn json_str(s: &str) -> String {
     o
 }
 
-fn json_f(v: f64) -> String {
+pub(crate) fn json_f(v: f64) -> String {
     if v.is_finite() {
         format!("{v}")
     } else {
@@ -356,6 +357,28 @@ pub fn report_json_with_warmups(
     runs: &[RunReport],
     warmups: &[(String, clock::WarmUpOutcome)],
 ) -> String {
+    report_json_full(adapter, power_scheme, owner_override, validity, protocol, runs, warmups, &[])
+}
+
+/// [`report_json_with_warmups`] plus the host load of each view or scene (`load` in the run's object, `load_notes` at the top;
+/// TEST-023): `loads` are keyed by the run's path name, a run without an entry carries none. Recorded only: nothing here changes a
+/// validity answer.
+#[allow(clippy::too_many_arguments)]
+pub fn report_json_full(
+    adapter: &AdapterFacts,
+    power_scheme: Option<&str>,
+    owner_override: &[String],
+    validity: &gate::Validity,
+    protocol: &Protocol,
+    runs: &[RunReport],
+    warmups: &[(String, clock::WarmUpOutcome)],
+    loads: &[(String, load::CaseLoad)],
+) -> String {
+    let load_of = |path: &str| loads.iter().find(|(p, _)| p == path).map(|(_, l)| l);
+    let mut load_notes: Vec<String> = Vec::new();
+    for (path, l) in loads {
+        load_notes.extend(l.notes().into_iter().map(|n| format!("{path}: {n}")));
+    }
     let verdict = crate::validity::SessionVerdict::assess(adapter, power_scheme, runs, protocol.smoke, validity, owner_override);
     let warnings = verdict.warnings();
     let run_json: Vec<String> = runs
@@ -363,7 +386,7 @@ pub fn report_json_with_warmups(
         .map(|r| {
             let gv = gpu_valid_json(&view_gpu_validity(runs, &r.path_name));
             format!(
-                "{{\"path\":{},\"vram_cap_gb\":{},\"samples\":{},\"median_ms\":{},\"p99_ms\":{},\"min_ms\":{},\"max_ms\":{},\"mean_ms\":{},\"clocks_before\":{},\"clocks_after\":{},\"gpu_valid\":{},\"gpu_clock_state\":{},\"power_cap\":{},\"metrics\":{{{}}},\"counts\":{{{}}}}}",
+                "{{\"path\":{},\"vram_cap_gb\":{},\"samples\":{},\"median_ms\":{},\"p99_ms\":{},\"min_ms\":{},\"max_ms\":{},\"mean_ms\":{},\"clocks_before\":{},\"clocks_after\":{},\"gpu_valid\":{},\"gpu_clock_state\":{},\"power_cap\":{},\"metrics\":{{{}}},\"counts\":{{{}}}{}}}",
                 json_str(&r.path_name),
                 r.vram_cap_gb,
                 r.stats.samples,
@@ -378,12 +401,13 @@ pub fn report_json_with_warmups(
                 gv.1,
                 view_power_cap(runs, &r.path_name),
                 r.metrics.iter().map(|(n, s)| format!("{}:{{\"median\":{},\"p99\":{},\"max\":{},\"mean\":{},\"samples\":{}}}", json_str(n), json_f(s.median), json_f(s.p99), json_f(s.max), json_f(s.mean), s.samples)).collect::<Vec<_>>().join(","),
-                r.counts.iter().map(|(n, v)| format!("{}:{v}", json_str(n))).collect::<Vec<_>>().join(",")
+                r.counts.iter().map(|(n, v)| format!("{}:{v}", json_str(n))).collect::<Vec<_>>().join(","),
+                load_of(&r.path_name).map_or(String::new(), |l| format!(",\"load\":{}", load::load_json(l)))
             )
         })
         .collect();
     format!(
-        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"frame_valid\":{},\"gpu_session_valid\":{},\"gpu_only_causes\":[{}],\"warnings\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{},\"source\":{},\"gen\":{}}},\"runs\":[{}]}}\n",
+        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"frame_valid\":{},\"gpu_session_valid\":{},\"gpu_only_causes\":[{}],\"warnings\":[{}],\"load_notes\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{},\"source\":{},\"gen\":{}}},\"runs\":[{}]}}\n",
         json_str(&adapter.name),
         json_str(&adapter.backend),
         power_scheme.map_or("null".to_string(), json_str),
@@ -393,6 +417,7 @@ pub fn report_json_with_warmups(
         verdict.gpu_session_valid(),
         verdict.gpu_only().iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
         warnings.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
+        load_notes.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
         warmups.iter().map(|(v, w)| warmup_json(v, w)).collect::<Vec<_>>().join(","),
         protocol.warmup_frames,
         protocol.measured_frames,

@@ -12,7 +12,25 @@ fn tmp(name: &str) -> std::path::PathBuf {
     d
 }
 
-// spec: TEST-019, TEST-020, STRM-022
+/// Every file of a directory tree with its size and modification time: what a read-only run must leave unchanged.
+fn listing(dir: &std::path::Path) -> Vec<(String, u64, std::time::SystemTime)> {
+    let mut v = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            let m = e.metadata().unwrap();
+            if m.is_dir() {
+                stack.push(e.path());
+            } else {
+                v.push((e.path().to_string_lossy().into_owned(), m.len(), m.modified().unwrap()));
+            }
+        }
+    }
+    v.sort();
+    v
+}
+
+// spec: TEST-019, TEST-020, STRM-022, TEST-023, TEST-024
 #[test]
 fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_source() {
     let store = tmp("store");
@@ -22,6 +40,7 @@ fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_so
             .unwrap();
     assert!(built.contains("30 tiles, 30 written"), "{built}");
     let logs = tmp("logs");
+    let before = listing(&store);
     let out = run(&[
         "test-render",
         "--perf-smoke",
@@ -40,6 +59,14 @@ fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_so
     ])
     .unwrap();
     assert!(out.contains("SMOKE RUN") && out.contains("not a measurement"), "{out}");
+    // The store check (TEST-024): the ocean channel and the compact pack were read, and nothing was written.
+    assert!(
+        out.contains("store check (smoke, read-only, NOT a measurement)") && out.contains("ocean channel: present, 288 directions read"),
+        "{out}"
+    );
+    assert!(out.contains("tile pack, levels 0-1: compact form 30 of 30 present") && out.contains("store check ok"), "{out}");
+    assert_eq!(before, listing(&store), "the smoke run wrote into the store");
+    assert!(out.contains("host load: not measured"), "a smoke run takes no host load: {out}");
     assert!(out.contains(&format!("source: store {}, 256 cells", store.display())), "the source is printed: {out}");
     for scene in ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km", "dive-cold"] {
         assert!(out.contains(&format!("{scene}: blank tiles: none in any of the frames ok")), "{scene}: {out}");
@@ -104,6 +131,27 @@ fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_so
         }
     }
     assert!(out.contains("GPU time: not measured"), "{out}");
+    // A store whose pack lacks the levels asked for fails the smoke before any scene runs, naming the count and the command.
+    let e = run(&[
+        "test-render",
+        "--perf-smoke",
+        "--scene",
+        "look-1m",
+        "--adapter",
+        "software",
+        "--store",
+        store.to_str().unwrap(),
+        "--global-res",
+        "256",
+        "--prefill-levels",
+        "2",
+    ])
+    .unwrap_err();
+    assert!(
+        e.contains("store check FAILED") && e.contains("of 126 compact tiles of levels 0-2") && e.contains("generate --prefill-dir"),
+        "{e}"
+    );
+    assert_eq!(before, listing(&store), "the failed check wrote nothing either");
     let _ = std::fs::remove_dir_all(&store);
     let _ = std::fs::remove_dir_all(&logs);
 }

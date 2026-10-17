@@ -252,6 +252,8 @@ struct CaseRun {
     pool: planet_streaming::PoolConfig,
     /// The log counts of the case's tile loads (STRM-022; every name starts with `load_`).
     load_counts: Vec<(String, u64)>,
+    /// The host's CPU load and the competing processes during the measured part (TEST-023; `not measured` in a smoke run).
+    host_load: planet_perf::load::CaseLoad,
 }
 
 fn run_case(
@@ -321,6 +323,8 @@ fn run_case(
         });
         (stop, samples, handle)
     });
+    // The host's load beside the measured part, on its own thread like the clock sampler (TEST-023).
+    let load_sampler = (!smoke).then(|| planet_perf::load::LoadSampler::start(planet_perf::load::SAMPLE_PERIOD_S));
     let (counters_before, job_log) = (world.counters(), d.rig.managed.manager().streamer().job_log());
     let jobs_before = job_log.len();
     let n = if smoke { script.cameras.len().min(SMOKE_FRAMES) } else { script.cameras.len() };
@@ -357,6 +361,7 @@ fn run_case(
         clocks.extend(samples.lock().expect("clock samples").iter().cloned());
         clocks.extend(planet_perf::query_nvidia_smi());
     }
+    let host_load = load_sampler.map_or_else(planet_perf::load::CaseLoad::not_measured, planet_perf::load::LoadSampler::stop);
     let cpu_after = (!smoke).then(planet_perf::host::query_cpu_clock).flatten();
     let pool = d.rig.pool;
     let torn = Instant::now();
@@ -380,7 +385,7 @@ fn run_case(
         post.elapsed().as_secs_f64()
     )
     .map_err(err)?;
-    Ok(CaseRun { frames, blanks, settle_s, clocks, teardown_s, cpu_before, cpu_after, pool, load_counts })
+    Ok(CaseRun { frames, blanks, settle_s, clocks, teardown_s, cpu_before, cpu_after, pool, load_counts, host_load })
 }
 
 /// The `BLANK TILE` lines of a case, which fail the run after the logs are written (ADR 0032's hard measure: a tile, root or
@@ -466,6 +471,19 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
             let (present, total) = world.prefill_present(pack_levels, o.cells, o.finest_level_for(o.cells), tile_format)?;
             require_prefilled(scene.name(), present, total, pack_levels, world.source())?;
         }
+    }
+    // A smoke run over a store is also the check of the store before a window (TEST-024): it reads the ocean channel and every pre-filled
+    // tile of the compact form, writes nothing, and fails here when the store would fail the window.
+    if smoke && from_store {
+        let check = world.store_check(pack_levels, o.cells, o.finest_level_for(o.cells))?;
+        for l in check.lines() {
+            writeln!(out, "{l}").map_err(err)?;
+        }
+        let problems = check.problems();
+        if !problems.is_empty() {
+            return Err(format!("store check FAILED: {}", problems.join("; ")));
+        }
+        writeln!(out, "  store check ok").map_err(err)?;
     }
     if !smoke {
         planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
@@ -653,7 +671,13 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
             metrics: column_metrics(&run.frames),
             counts,
         };
-        let summary = CaseRunSummary { frames: run.frames, settle_s: run.settle_s, clocks: run.clocks.len(), source: scene_source };
+        let summary = CaseRunSummary {
+            host_load: run.host_load,
+            frames: run.frames,
+            settle_s: run.settle_s,
+            clocks: run.clocks.len(),
+            source: scene_source,
+        };
         reports.push((scene, report, lines, summary));
     }
     // The session: valid only on the production source, and per ADR 0020 and 0036 for throttling.
@@ -719,7 +743,11 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         let one = std::slice::from_ref(report);
         // The scene's own source: the place the bake was read from and what the tile pack held at its start.
         let scene_protocol = Protocol { source: Some(summary.source.clone()), ..protocol.clone() };
-        let json = planet_perf::report_json_with_warmups(
+        writeln!(out, "{}: {}", scene.name(), summary.host_load.line()).map_err(err)?;
+        for n in summary.host_load.notes() {
+            writeln!(out, "  {}: LOAD NOTE (recorded, the session's validity is unchanged): {n}", scene.name()).map_err(err)?;
+        }
+        let json = planet_perf::report_json_full(
             &crate::facts(ctx),
             scheme.as_deref(),
             &owner_override,
@@ -727,6 +755,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
             &scene_protocol,
             one,
             &[],
+            &[(report.path_name.clone(), summary.host_load.clone())],
         );
         let path = match (&o.out, single) {
             (Some(p), true) => p.clone(),
@@ -795,6 +824,7 @@ fn share_slots_of(pool: &planet_streaming::PoolConfig, share_bytes: u64) -> u64 
 }
 
 struct CaseRunSummary {
+    host_load: planet_perf::load::CaseLoad,
     frames: Vec<FrameRecord>,
     settle_s: Option<f64>,
     clocks: usize,
