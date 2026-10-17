@@ -4,7 +4,7 @@ description: Reviews a diff or a plan against the constitution, ADRs and OpenSpe
 tools: Read, Glob, Grep, Bash
 model: sonnet
 ---
-Review the current diff (`git diff main...HEAD` plus uncommitted changes) or the plan you were given against:
+Review the current diff (`git diff origin/main...HEAD` plus uncommitted changes) or the plan you were given against:
 
 - `docs/constitution.md`: layering (CON-02), the FramePlan boundary (CON-03), injected time and I/O (CON-04), generator purity and cache keys (CON-05 to CON-08), precision and determinism (CON-11 to CON-15), verification rules (CON-16 to CON-20), process rules (CON-23 to CON-27).
 - accepted and proposed ADRs in `docs/adr/`.
