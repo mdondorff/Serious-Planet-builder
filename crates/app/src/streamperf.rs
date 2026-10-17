@@ -84,7 +84,7 @@ pub fn require_prefilled(scene: &str, present: usize, total: usize, levels: u8, 
 
 /// Reject option combinations the streaming scenes would ignore, and refuse the dive/teleport/look scenes without a store.
 pub fn check_options(o: &Options) -> Result<(), String> {
-    let stream = (o.perf || o.perf_smoke) && is_stream_scene(&o.scene);
+    let stream = (o.perf || o.perf_smoke) && (is_stream_scene(&o.scene) || crate::litperf::is_lit_scene(&o.scene));
     if !stream && (o.store.is_some() || o.allow_memory_bake) {
         return Err("--store and --allow-memory-bake only apply to the streaming perf scenes (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, streaming)".into());
     }
@@ -103,6 +103,36 @@ pub fn check_options(o: &Options) -> Result<(), String> {
     Ok(())
 }
 
+/// The world a perf scene reads: the stored production bake (`--store`) or the in-memory bake of `--global-res` cells; `cold` ignores
+/// the tile pack's pre-filled tiles (`dive-cold`).
+pub(crate) fn open_world(o: &Options, cold: bool) -> Result<WorldTerrain, String> {
+    match &o.store {
+        Some(dir) => {
+            let res = if o.given.contains("--global-res") { o.global_res } else { PRODUCTION_BAKE_RES };
+            let def = match &o.world {
+                Some(p) => crate::worldfield::load_world(p)?,
+                None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
+            };
+            WorldTerrain::open_store(def, dir, res).map(|w| if cold { w.cold() } else { w })
+        }
+        None => WorldTerrain::of_perf_options(o, crate::skeleton::RADIUS_M),
+    }
+}
+
+/// The read-only check of a stored world that a smoke run starts with (TEST-024): prints it and fails on a problem.
+pub(crate) fn print_store_check(world: &WorldTerrain, o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    let levels = o.prefill_levels.unwrap_or(planet_perf::prefill::GATED_PREFILL_LEVELS);
+    let check = world.store_check(levels, o.cells, o.finest_level_for(o.cells))?;
+    for l in check.lines() {
+        writeln!(out, "{l}").map_err(err)?;
+    }
+    let problems = check.problems();
+    if !problems.is_empty() {
+        return Err(format!("store check FAILED: {}", problems.join("; ")));
+    }
+    writeln!(out, "  store check ok").map_err(err)
+}
+
 /// What one frame of the loop produced, besides its [`FrameRecord`].
 struct Tick {
     record: FrameRecord,
@@ -116,6 +146,10 @@ struct Driver<'a> {
     ctx: &'a GpuContext,
     rig: Rig,
     next_deadline: Instant,
+    /// The lit path (`--lit`, TEST-025): the look, the sea and the water plan cache, with the world they plan against.
+    lit: Option<(crate::litperf::LitSetup, Arc<WorldTerrain>)>,
+    /// Frames ticked, for the clock of the waves and the exposure's first frame.
+    ticks: u64,
 }
 
 impl Driver<'_> {
@@ -130,7 +164,21 @@ impl Driver<'_> {
             self.rig.fi.note_wait();
             self.rig.fi.retire_to(self.rig.renderer.wait_oldest(ctx));
         }
-        let (timing, _) = self.rig.renderer.submit(ctx, &frame.pipeline.draw.plan).map_err(|e| e.to_string())?;
+        // The lit path puts the look's lit plan (adaptive exposure on the frame step, the atmosphere) and the water of the frame on the
+        // plan the loop decided, inside the timed frame as in the viewer (VIEW-007, VIEW-009).
+        let lit_plan = match self.lit.as_mut() {
+            Some((setup, world)) => Some(setup.plan(
+                world,
+                &frame.pipeline.draw.plan,
+                100.0 + self.ticks as f64 * FRAME_STEP_S,
+                FRAME_STEP_S as f32,
+                self.ticks == 0,
+            )?),
+            None => None,
+        };
+        self.ticks += 1;
+        let (timing, _) =
+            self.rig.renderer.submit(ctx, lit_plan.as_ref().unwrap_or(&frame.pipeline.draw.plan)).map_err(|e| e.to_string())?;
         self.rig.fi.submit();
         let wall_ms = started.elapsed().as_secs_f64() * 1000.0;
         // Bookkeeping, outside the frame's time: the drawn tile ids (the lag is judged after the case, against the fresh plan of
@@ -256,6 +304,7 @@ struct CaseRun {
     host_load: planet_perf::load::CaseLoad,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_case(
     ctx: &GpuContext,
     world: &Arc<WorldTerrain>,
@@ -263,11 +312,20 @@ fn run_case(
     req: &(dyn Fn(planet_frame::Camera) -> TerrainRequest + Sync),
     smoke: bool,
     gen: planet_streaming::GenWorkers,
+    lit: Option<crate::litperf::LitSetup>,
     out: &mut dyn Write,
 ) -> Result<CaseRun, String> {
     let first = req(script.prelude.unwrap_or(script.cameras[0]));
     let rig_started = Instant::now();
-    let mut d = Driver { ctx, rig: Rig::new(ctx, world, &first, gen)?, next_deadline: Instant::now() };
+    let mut rig = Rig::new(ctx, world, &first, gen)?;
+    // `enable_lit` is not part of `warm_up`: the lit and atmosphere passes (and the water pass) are enabled and used once per ring set
+    // here, before any frame, so no measured frame pays for them (REND-017).
+    if let Some(setup) = &lit {
+        rig.renderer
+            .warm_up_lit(ctx, &setup.warm_plan(first.camera, first.size, first.lod.cells)?)
+            .map_err(|e| format!("warming the lit path: {e}"))?;
+    }
+    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), ticks: 0 };
     // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022:
     // recorded only, never judged; the per-tile times of the log read against it). Nothing of the case runs yet.
     let calib_threads = gen.workers;
@@ -439,26 +497,15 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     check_options(o)?;
     // The world and its source, before the gate so the bake's load is not measured as the machine's.
     let from_store = o.store.is_some();
-    let open = |cold: bool| -> Result<WorldTerrain, String> {
-        match &o.store {
-            Some(dir) => {
-                let res = if o.given.contains("--global-res") { o.global_res } else { PRODUCTION_BAKE_RES };
-                let def = match &o.world {
-                    Some(p) => crate::worldfield::load_world(p)?,
-                    None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
-                };
-                WorldTerrain::open_store(def, dir, res).map(|w| if cold { w.cold() } else { w })
-            }
-            None => WorldTerrain::of_perf_options(o, crate::skeleton::RADIUS_M),
-        }
-    };
+    // The lit variant plans with the viewer's fields (the water of a tile whose seabed the view culls is kept: ADR 0053).
+    let open = |cold: bool| -> Result<WorldTerrain, String> { open_world(o, cold).map(|w| if o.lit { w.bounding_water() } else { w }) };
     let opened = Instant::now();
     // `dive-cold` reads the bake as the others do and ignores the pack's pre-filled coarse tiles (ADR 0045 point 3).
     let world = Arc::new(open(scenes[0] == StreamScene::DiveCold)?);
     let field = world.field()?;
     writeln!(out, "world opened in {:.1} s", opened.elapsed().as_secs_f64()).map_err(err)?;
     let radius_m = world.radius_m();
-    let measured_field = world.describe();
+    let measured_field = if o.lit { format!("{}; lit path (atmosphere, water)", world.describe()) } else { world.describe() };
     let source = source_label(&world, from_store);
     let production = from_store;
     let mut owner_override: Vec<String> = Vec::new();
@@ -475,15 +522,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     // A smoke run over a store is also the check of the store before a window (TEST-024): it reads the ocean channel and every pre-filled
     // tile of the compact form, writes nothing, and fails here when the store would fail the window.
     if smoke && from_store {
-        let check = world.store_check(pack_levels, o.cells, o.finest_level_for(o.cells))?;
-        for l in check.lines() {
-            writeln!(out, "{l}").map_err(err)?;
-        }
-        let problems = check.problems();
-        if !problems.is_empty() {
-            return Err(format!("store check FAILED: {}", problems.join("; ")));
-        }
-        writeln!(out, "  store check ok").map_err(err)?;
+        print_store_check(&world, o, out)?;
     }
     if !smoke {
         planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
@@ -583,7 +622,8 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         .map_err(err)?;
         writeln!(out, "{}: script built in {:.1} s", scene.name(), built.elapsed().as_secs_f64()).map_err(err)?;
         let case_started = Instant::now();
-        let run = run_case(ctx, &scene_world, &script, &req_of, smoke, o.gen_workers(), out)?;
+        let lit_setup = if o.lit { Some(crate::litperf::LitSetup::new(o, &scene_world, &lod)?) } else { None };
+        let run = run_case(ctx, &scene_world, &script, &req_of, smoke, o.gen_workers(), lit_setup, out)?;
         writeln!(out, "{}: case ran in {:.1} s (teardown {:.2} s)", scene.name(), case_started.elapsed().as_secs_f64(), run.teardown_s)
             .map_err(err)?;
         let mem = MemoryFacts {
@@ -663,7 +703,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
             }
         }
         let report = RunReport {
-            path_name: format!("stream/{}", scene.name()),
+            path_name: format!("{}/{}", if o.lit { "stream-lit" } else { "stream" }, scene.name()),
             vram_cap_gb: 8,
             stats,
             clocks_before: run.clocks.first().cloned(),
@@ -718,6 +758,8 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         ..Protocol::default()
     };
     let single = reports.len() == 1;
+    // The lit variant keeps its own logs and baselines beside the debug path's (`<scene>-lit.json`).
+    let lit_suffix = if o.lit { "-lit" } else { "" };
     for (scene, report, lines, summary) in &reports {
         let clock_state = planet_perf::view_gpu_validity(std::slice::from_ref(report), &report.path_name);
         let state = match &clock_state {
@@ -759,8 +801,8 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         );
         let path = match (&o.out, single) {
             (Some(p), true) => p.clone(),
-            (Some(dir), false) => dir.join(format!("{}.json", scene.name())),
-            (None, _) => std::path::Path::new("perf").join("logs").join(format!("{}.json", scene.name())),
+            (Some(dir), false) => dir.join(format!("{}{lit_suffix}.json", scene.name())),
+            (None, _) => std::path::Path::new("perf").join("logs").join(format!("{}{lit_suffix}.json", scene.name())),
         };
         if smoke && o.out.is_none() {
             writeln!(out, "smoke run: no log written (pass --out to keep it)").map_err(err)?;

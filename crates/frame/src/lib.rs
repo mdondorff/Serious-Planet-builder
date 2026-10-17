@@ -7,6 +7,7 @@ pub mod controller;
 pub mod draw;
 pub mod freecam;
 pub mod instances;
+pub mod litscenes;
 pub mod lod;
 pub mod look;
 pub mod managed;

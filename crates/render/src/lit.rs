@@ -503,15 +503,15 @@ impl LitPath {
 
     /// Record the passes that come before the terrain pass in the compiled graph (the atmosphere's sky-view table and
     /// aerial-perspective volume).
-    pub(crate) fn record_pre(&self, encoder: &mut wgpu::CommandEncoder) {
+    pub(crate) fn record_pre(&self, encoder: &mut wgpu::CommandEncoder, stamps: Option<&crate::gpu_timing::Stamps<'_>>) {
         let (_, graph, compiled) = self.compiled.as_ref().expect("prepared");
         for &i in &compiled.order {
             match graph.passes()[i].name {
                 "terrain" => break,
                 // The tables were uploaded in `prepare` when they changed; the pass is the graph's marker for it.
                 "atmosphere-luts" => {}
-                "sky-view" => self.atmosphere.as_ref().expect("atmosphere enabled").record_sky_view(encoder),
-                "aerial-perspective" => self.atmosphere.as_ref().expect("atmosphere enabled").record_aerial_perspective(encoder),
+                "sky-view" => self.atmosphere.as_ref().expect("atmosphere enabled").record_sky_view(encoder, stamps),
+                "aerial-perspective" => self.atmosphere.as_ref().expect("atmosphere enabled").record_aerial_perspective(encoder, stamps),
                 other => panic!("the lit executor has no pre-terrain pass '{other}'"),
             }
         }
@@ -519,25 +519,34 @@ impl LitPath {
 
     /// Record the passes after the terrain pass into `encoder`, in the order of the compiled graph, ending with the tone map into
     /// `target` (an `Rgba8Unorm` view of this path's size).
-    pub(crate) fn record_post(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
+    pub(crate) fn record_post(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        stamps: Option<&crate::gpu_timing::Stamps<'_>>,
+    ) {
         let (_, graph, compiled) = self.compiled.as_ref().expect("prepared");
         let after_terrain = compiled.order.iter().position(|&i| graph.passes()[i].name == "terrain").map_or(0, |p| p + 1);
         for &i in &compiled.order[after_terrain..] {
             match graph.passes()[i].name {
                 // Recorded by the terrain renderer between the terrain pass and these (they need its vertex buffers).
                 "scene-copy" | "water" => {}
-                "sky-composite" => self.atmosphere.as_ref().expect("atmosphere enabled").record_composite(encoder, &self.hdr_view),
+                "sky-composite" => self.atmosphere.as_ref().expect("atmosphere enabled").record_composite(encoder, &self.hdr_view, stamps),
                 "exposure-histogram" => {
                     encoder.clear_buffer(&self.histogram, 0, None);
-                    let mut pass = encoder
-                        .begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("exposure-histogram"), timestamp_writes: None });
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("exposure-histogram"),
+                        timestamp_writes: crate::gpu_timing::compute_writes(stamps, crate::gpu_timing::GpuPass::ExposureHistogram),
+                    });
                     pass.set_pipeline(&self.hist_pipeline);
                     pass.set_bind_group(0, &self.hist_bind, &[]);
                     pass.dispatch_workgroups(self.size.0.div_ceil(16), self.size.1.div_ceil(16), 1);
                 }
                 "exposure-adapt" => {
-                    let mut pass =
-                        encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("exposure-adapt"), timestamp_writes: None });
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("exposure-adapt"),
+                        timestamp_writes: crate::gpu_timing::compute_writes(stamps, crate::gpu_timing::GpuPass::ExposureAdapt),
+                    });
                     pass.set_pipeline(&self.adapt_pipeline);
                     pass.set_bind_group(0, &self.adapt_bind, &[]);
                     pass.dispatch_workgroups(1, 1, 1);
@@ -552,7 +561,7 @@ impl LitPath {
                             ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
                         })],
                         depth_stencil_attachment: None,
-                        timestamp_writes: None,
+                        timestamp_writes: crate::gpu_timing::render_writes(stamps, crate::gpu_timing::GpuPass::Tonemap),
                         occlusion_query_set: None,
                         multiview_mask: None,
                     });
@@ -605,7 +614,7 @@ impl LitPath {
             ),
             false,
         );
-        self.record_post(&mut encoder, &view);
+        self.record_post(&mut encoder, &view, None);
         ctx.queue.submit([encoder.finish()]);
         crate::read_rgba8(ctx, &target, self.size.0, self.size.1)
     }

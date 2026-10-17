@@ -590,6 +590,9 @@ pub struct FrameTiming {
     pub gpu_ms: Option<f64>,
     /// GPU time of the water pass (the scene copy is outside it), when the frame drew water and timestamps are supported.
     pub water_gpu_ms: Option<f64>,
+    /// The GPU time of every pass the frame ran (REND-028): terrain, water, the atmosphere's products and composite, the exposure
+    /// passes and the tone map, the scene copy, and the frame's GPU span.
+    pub passes: crate::gpu_timing::PassTimes,
 }
 
 /// Terrain renderer with persistent resources: pipeline, uniform buffers, per-tile vertex buffers and render targets are
@@ -904,17 +907,17 @@ impl TerrainRenderer {
             queries: device.create_query_set(&wgpu::QuerySetDescriptor {
                 label: Some("terrain-timestamps"),
                 ty: wgpu::QueryType::Timestamp,
-                count: 4,
+                count: crate::gpu_timing::PASS_QUERIES,
             }),
             resolve: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("timestamp-resolve"),
-                size: 32,
+                size: crate::gpu_timing::PASS_QUERY_BYTES,
                 usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             }),
             readback: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("timestamp-readback"),
-                size: 32,
+                size: crate::gpu_timing::PASS_QUERY_BYTES,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
             }),
@@ -2205,6 +2208,7 @@ impl TerrainRenderer {
         }
 
         let timing = if timed { self.timing.as_ref() } else { None };
+        let stamps = timing.map(|t| crate::gpu_timing::Stamps::new(&t.queries));
         self.used.timestamps |= timing.is_some() && wait;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("terrain") });
         // The lit path draws into its scene target with its own pipelines and clears to black without coverage; the debug path
@@ -2213,7 +2217,7 @@ impl TerrainRenderer {
             // The compiled graph, the parameters and, with an atmosphere, the tables and the frame's block; then the passes that come
             // before the terrain (the sky-view table and the aerial-perspective volume).
             l.path.prepare(ctx, lit, &plan.camera, water_frame);
-            l.path.record_pre(&mut encoder);
+            l.path.record_pre(&mut encoder, stamps.as_ref());
         }
         let lit_gpu = plan.lit.as_ref().and(self.lit.as_ref());
         let atmosphere_frame = plan.lit.as_ref().is_some_and(|l| l.atmosphere.is_some());
@@ -2245,11 +2249,7 @@ impl TerrainRenderer {
                     }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: timing.map(|t| wgpu::RenderPassTimestampWrites {
-                    query_set: &t.queries,
-                    beginning_of_pass_write_index: Some(0),
-                    end_of_pass_write_index: Some(1),
-                }),
+                timestamp_writes: crate::gpu_timing::render_writes(stamps.as_ref(), crate::gpu_timing::GpuPass::Terrain),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -2333,7 +2333,6 @@ impl TerrainRenderer {
             stats.draw_calls = plan.nodes.len() as u32;
             stats.triangles = plan.nodes.len() as u64 * u64::from(self.index_count) / 3;
         }
-        let mut water_timed = false;
         if let (true, Some(w), Some(wp), Some(l), Some(lit)) =
             (water_frame, self.water.as_ref(), plan.water.as_ref(), lit_gpu, plan.lit.as_ref())
         {
@@ -2355,7 +2354,6 @@ impl TerrainRenderer {
                 wgpu::Extent3d { width: self.size.0, height: self.size.1, depth_or_array_layers: 1 },
             );
             let flavour = if atmosphere_frame { w.atmosphere.as_ref().expect("atmosphere water enabled") } else { &w.plain };
-            water_timed = timing.is_some();
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("water-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -2372,11 +2370,7 @@ impl TerrainRenderer {
                     }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: timing.map(|t| wgpu::RenderPassTimestampWrites {
-                    query_set: &t.queries,
-                    beginning_of_pass_write_index: Some(2),
-                    end_of_pass_write_index: Some(3),
-                }),
+                timestamp_writes: crate::gpu_timing::render_writes(stamps.as_ref(), crate::gpu_timing::GpuPass::Water),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -2416,12 +2410,21 @@ impl TerrainRenderer {
             }
         }
         if let Some(l) = self.lit.as_ref().filter(|_| plan.lit.is_some()) {
-            l.path.record_post(&mut encoder, &self.color_view);
+            l.path.record_post(&mut encoder, &self.color_view, stamps.as_ref());
         }
+        // Every pass that took timestamps resolves its own pair (an unwritten query is never resolved), then the used range is copied.
+        let written = stamps.as_ref().map_or(0, |s| s.written());
         if let Some(t) = timing {
-            let (queries, bytes) = if water_timed { (0..4, 32) } else { (0..2, 16) };
-            encoder.resolve_query_set(&t.queries, queries, &t.resolve, 0);
-            encoder.copy_buffer_to_buffer(&t.resolve, 0, &t.readback, 0, bytes);
+            let mut top = 0u64;
+            for p in crate::gpu_timing::GpuPass::ALL.into_iter().filter(|p| written & (1 << *p as u16) != 0) {
+                let q = p.first_query();
+                let at = (p as u64) * crate::gpu_timing::RESOLVE_STRIDE;
+                encoder.resolve_query_set(&t.queries, q..q + 2, &t.resolve, at);
+                top = top.max(at + 16);
+            }
+            if top > 0 {
+                encoder.copy_buffer_to_buffer(&t.resolve, 0, &t.readback, 0, top);
+            }
         }
         let command_buffer = encoder.finish();
         let index = ctx.queue.submit([command_buffer]);
@@ -2432,30 +2435,30 @@ impl TerrainRenderer {
         self.in_flight.push_back(index);
         let cpu_ms = started.elapsed().as_secs_f64() * 1000.0;
         if !wait {
-            return Ok((FrameTiming { cpu_ms, total_ms: cpu_ms, gpu_ms: None, water_gpu_ms: None }, stats));
+            return Ok((FrameTiming { cpu_ms, total_ms: cpu_ms, ..Default::default() }, stats));
         }
         ctx.device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
         let total_ms = started.elapsed().as_secs_f64() * 1000.0;
-        let (gpu_ms, water_gpu_ms) = timing
+        let passes = timing
+            .filter(|_| written != 0)
             .map(|t| {
                 let slice = t.readback.slice(..);
                 slice.map_async(wgpu::MapMode::Read, |r| r.expect("timestamp map failed"));
                 ctx.device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
                 let data = slice.get_mapped_range().expect("timestamp range");
-                let ticks = |k: usize| u64::from_le_bytes(data[k * 8..k * 8 + 8].try_into().expect("8 bytes"));
-                let ms = |a: usize, b: usize| {
-                    let delta = ticks(b).saturating_sub(ticks(a));
-                    // A zero or negative interval is a broken query, not a free frame: report nothing instead of 0 ms.
-                    (delta > 0).then(|| delta as f64 * f64::from(ctx.queue.get_timestamp_period()) / 1.0e6)
-                };
-                let out = (ms(0, 1), if water_timed { ms(2, 3) } else { None });
+                let tick = |k: usize| u64::from_le_bytes(data[k * 8..k * 8 + 8].try_into().expect("8 bytes"));
+                let stride = (crate::gpu_timing::RESOLVE_STRIDE / 8) as usize;
+                let ticks: Vec<u64> = (0..crate::gpu_timing::PASS_QUERIES as usize).map(|q| tick((q / 2) * stride + q % 2)).collect();
+                // A zero or negative interval is a broken query, not a free frame: `from_ticks` reports nothing instead of 0 ms.
+                let out = crate::gpu_timing::PassTimes::from_ticks(&ticks, written, f64::from(ctx.queue.get_timestamp_period()));
                 drop(data);
                 t.readback.unmap();
                 out
             })
-            .unwrap_or((None, None));
+            .unwrap_or_default();
+        let (gpu_ms, water_gpu_ms) = (passes.get(crate::gpu_timing::GpuPass::Terrain), passes.get(crate::gpu_timing::GpuPass::Water));
         self.reap();
-        Ok((FrameTiming { cpu_ms, total_ms, gpu_ms, water_gpu_ms }, stats))
+        Ok((FrameTiming { cpu_ms, total_ms, gpu_ms, water_gpu_ms, passes }, stats))
     }
 
     /// The vertex buffer and byte offset of a resident tile held in the vertex format.

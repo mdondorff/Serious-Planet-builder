@@ -1063,23 +1063,33 @@ impl AtmospherePath {
     }
 
     /// Record the sky-view table and the aerial-perspective volume (compute).
-    pub(crate) fn record_sky_view(&self, encoder: &mut wgpu::CommandEncoder) {
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("sky-view"), timestamp_writes: None });
+    pub(crate) fn record_sky_view(&self, encoder: &mut wgpu::CommandEncoder, stamps: Option<&crate::gpu_timing::Stamps<'_>>) {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("sky-view"),
+            timestamp_writes: crate::gpu_timing::compute_writes(stamps, crate::gpu_timing::GpuPass::SkyView),
+        });
         pass.set_pipeline(&self.sky_pipeline);
         pass.set_bind_group(0, &self.sky_bind, &[]);
         pass.dispatch_workgroups((SKY_W as u32).div_ceil(8), (SKY_H as u32).div_ceil(8), 1);
     }
 
-    pub(crate) fn record_aerial_perspective(&self, encoder: &mut wgpu::CommandEncoder) {
-        let mut pass =
-            encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("aerial-perspective"), timestamp_writes: None });
+    pub(crate) fn record_aerial_perspective(&self, encoder: &mut wgpu::CommandEncoder, stamps: Option<&crate::gpu_timing::Stamps<'_>>) {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("aerial-perspective"),
+            timestamp_writes: crate::gpu_timing::compute_writes(stamps, crate::gpu_timing::GpuPass::AerialPerspective),
+        });
         pass.set_pipeline(&self.ap_pipeline);
         pass.set_bind_group(0, &self.ap_bind, &[]);
         pass.dispatch_workgroups((AP_W as u32).div_ceil(8), (AP_H as u32).div_ceil(8), AP_D as u32);
     }
 
     /// Record the composite into `target` (the final scene target of the lit path).
-    pub(crate) fn record_composite(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
+    pub(crate) fn record_composite(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        stamps: Option<&crate::gpu_timing::Stamps<'_>>,
+    ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sky-composite"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1089,7 +1099,7 @@ impl AtmospherePath {
                 ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
             })],
             depth_stencil_attachment: None,
-            timestamp_writes: None,
+            timestamp_writes: crate::gpu_timing::render_writes(stamps, crate::gpu_timing::GpuPass::SkyComposite),
             occlusion_query_set: None,
             multiview_mask: None,
         });
@@ -1131,8 +1141,8 @@ impl AtmospherePath {
     /// Run the sky-view and aerial-perspective passes alone (tests and tools).
     pub fn run_products(&self, ctx: &GpuContext) {
         let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("atmosphere-products") });
-        self.record_sky_view(&mut encoder);
-        self.record_aerial_perspective(&mut encoder);
+        self.record_sky_view(&mut encoder, None);
+        self.record_aerial_perspective(&mut encoder, None);
         ctx.queue.submit([encoder.finish()]);
     }
 
@@ -1147,7 +1157,7 @@ impl AtmospherePath {
         );
         let view = target.create_view(&Default::default());
         let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("atmosphere-composite") });
-        self.record_composite(&mut encoder, &view);
+        self.record_composite(&mut encoder, &view, None);
         ctx.queue.submit([encoder.finish()]);
     }
 
@@ -1163,7 +1173,7 @@ impl AtmospherePath {
         );
         let view = target.create_view(&Default::default());
         let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("atmosphere-composite") });
-        self.record_composite(&mut encoder, &view);
+        self.record_composite(&mut encoder, &view, None);
         ctx.queue.submit([encoder.finish()]);
         read_f16_texture(ctx, &target, (self.size.0, self.size.1, 1), 4)
     }
