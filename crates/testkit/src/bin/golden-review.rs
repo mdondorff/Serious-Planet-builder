@@ -135,7 +135,7 @@ impl Run<'_> {
             };
             states.insert(adapter.clone(), state);
         }
-        // New candidates are compared with one another: compared pairwise under ADR 0052 (delta 1 plus at most 64 edge pixels).
+        // New candidates are compared with one another: compared pairwise under ADR 0052 (at most 64 px beyond delta 1 plus at most 32 px at delta 1).
         let news: Vec<&String> = states.iter().filter(|(_, s)| **s == ViewState::New).map(|(a, _)| a).collect();
         let mut pairs = vec![];
         for (i, a) in news.iter().enumerate() {
@@ -147,7 +147,7 @@ impl Run<'_> {
                 let c = if (ia.width, ia.height) == (ib.width, ib.height) {
                     view_diff(&ia, &ib)
                 } else {
-                    ViewDiff { pixels: usize::MAX, beyond_rounding: usize::MAX, max_delta: u8::MAX }
+                    ViewDiff { at_rounding: usize::MAX, beyond_rounding: usize::MAX, max_delta: u8::MAX }
                 };
                 pairs.push(((*a).clone(), (*b).clone(), c));
             }

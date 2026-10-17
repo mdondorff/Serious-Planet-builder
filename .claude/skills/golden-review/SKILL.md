@@ -31,7 +31,8 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; the M5 window: `
    have no open finding about pixels. An `AUTO-M5` needs the same. If either fails, or any reviewer objects, treat the
    candidate as `ESCALATE`.
    For the debug view of a first M5 golden, candidates that are new in this run agree pairwise when every pixel is within
-   delta 1 except at most 64 pixels of any delta (ADR 0052, which amends ADR 0037 point 1(b); `ADR_0052_EDGE_PIXELS`); a
+   delta 1 except at most 64 pixels of any delta, plus at most 32 pixels at exactly delta 1 (ADR 0017 rounding noise stays;
+   a whole-image one-level shift is not agreement; ADR 0052, which amends ADR 0037 point 1(b); `ADR_0052_EDGE_PIXELS`); a
    debug view that already has a blessed golden is still checked by ADR 0017. The report prints the worst pair.
    The driver gate is never relaxed, for first goldens too: a candidate rendered by another driver than the one in
    `driver.txt` escalates.

@@ -84,30 +84,32 @@ pub enum Verdict {
 pub const ROUNDING_MAX_PIXELS: usize = 32;
 pub const ROUNDING_MAX_DELTA: u8 = 1;
 
-/// ADR 0052 point 1 (amends ADR 0037 point 1(b)): the candidates of a new debug view of a first M5 golden agree pairwise
-/// when every pixel is within [`ROUNDING_MAX_DELTA`] except at most this many pixels, which may differ by any amount
-/// (adapters rasterise silhouettes and band edges differently). Part of the ADR 0037 window: it ends with it.
+/// ADR 0052 point 1 (amends ADR 0037 point 1(b), read by opus-planner 2026-10-17): the candidates of a new debug view of a
+/// first M5 golden agree pairwise when at most this many pixels differ by more than [`ROUNDING_MAX_DELTA`] (by any amount:
+/// adapters rasterise silhouettes and band edges differently) and, besides those, at most [`ROUNDING_MAX_PIXELS`] pixels
+/// differ at exactly delta 1 (ADR 0017 rounding noise, unchanged by ADR 0052 point 2); no other pixel differs. A
+/// whole-image one-level shift is therefore not agreement. Part of the ADR 0037 window: it ends with it.
 pub const ADR_0052_EDGE_PIXELS: usize = 64;
 
 /// How two candidates of the same view differ, for the cross-adapter check of a new debug view (ADR 0052).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ViewDiff {
-    /// Pixels that differ at all.
-    pub pixels: usize,
-    /// Pixels whose largest channel delta exceeds [`ROUNDING_MAX_DELTA`]; only these count against [`ADR_0052_EDGE_PIXELS`].
+    /// Pixels whose largest channel delta is exactly [`ROUNDING_MAX_DELTA`]; capped by [`ROUNDING_MAX_PIXELS`].
+    pub at_rounding: usize,
+    /// Pixels whose largest channel delta exceeds [`ROUNDING_MAX_DELTA`]; capped by [`ADR_0052_EDGE_PIXELS`].
     pub beyond_rounding: usize,
     pub max_delta: u8,
 }
 
-/// How two same-sized candidates of a new debug view differ (ADR 0052): all differing pixels, those whose largest channel
-/// delta (alpha included) exceeds delta 1, and the largest delta. (`Change` is the same count without the split, used for
+/// How two same-sized candidates of a new debug view differ (ADR 0052): the pixels at delta 1, those beyond delta 1 (largest
+/// channel delta, alpha included) and the largest delta. (`Change` is the same count without the split, used for
 /// candidates against their goldens.)
 pub fn view_diff(a: &crate::Image, b: &crate::Image) -> ViewDiff {
-    let mut d = ViewDiff { pixels: 0, beyond_rounding: 0, max_delta: 0 };
+    let mut d = ViewDiff { at_rounding: 0, beyond_rounding: 0, max_delta: 0 };
     for (p, q) in a.pixels().zip(b.pixels()) {
         if p != q {
             let delta = (0..4).map(|c| p[c].abs_diff(q[c])).max().unwrap_or(0);
-            d.pixels += 1;
+            d.at_rounding += usize::from(delta <= ROUNDING_MAX_DELTA);
             d.beyond_rounding += usize::from(delta > ROUNDING_MAX_DELTA);
             d.max_delta = d.max_delta.max(delta);
         }
@@ -279,7 +281,8 @@ pub enum ViewState {
 /// reported and never counted as agreeing. A view with a blessed golden is checked by ADR 0017's own classification of its
 /// candidates (`Matches` or an auto `Differs`); a view that is new is checked candidate against candidate (ADR 0052):
 /// in every pair of `new_pairs` (adapter, adapter, difference of their candidates) all pixels are within
-/// [`ROUNDING_MAX_DELTA`] except at most [`ADR_0052_EDGE_PIXELS`] of any delta. At least two adapters must take part.
+/// at most [`ADR_0052_EDGE_PIXELS`] pixels differ beyond [`ROUNDING_MAX_DELTA`] and at most [`ROUNDING_MAX_PIXELS`] at
+/// exactly that delta. At least two adapters must take part.
 /// `Ok` carries the evidence line for the report.
 pub fn debug_view_agreement(
     view: &str,
@@ -303,26 +306,37 @@ pub fn debug_view_agreement(
     }
     let apart: Vec<String> = new_pairs
         .iter()
-        .filter(|(_, _, c)| c.beyond_rounding > ADR_0052_EDGE_PIXELS)
-        .map(|(a, b, c)| {
-            format!(
-                "{a} vs {b}: {} px beyond delta {ROUNDING_MAX_DELTA} ({} px differ), max delta {}",
-                c.beyond_rounding, c.pixels, c.max_delta
-            )
+        .filter_map(|(a, b, c)| {
+            let mut over = vec![];
+            if c.beyond_rounding > ADR_0052_EDGE_PIXELS {
+                over.push(format!("{} px beyond delta {ROUNDING_MAX_DELTA} exceed the cap of {ADR_0052_EDGE_PIXELS}", c.beyond_rounding));
+            }
+            if c.at_rounding > ROUNDING_MAX_PIXELS {
+                over.push(format!("{} px at delta {ROUNDING_MAX_DELTA} exceed the cap of {ROUNDING_MAX_PIXELS}", c.at_rounding));
+            }
+            (!over.is_empty()).then(|| {
+                format!(
+                    "{a} vs {b}: {} (counts: {} beyond, {} at delta {ROUNDING_MAX_DELTA}; max delta {})",
+                    over.join(" and "),
+                    c.beyond_rounding,
+                    c.at_rounding,
+                    c.max_delta
+                )
+            })
         })
         .collect();
     if !apart.is_empty() {
         return Err(format!(
-            "debug view {view}: the adapters disagree ({}; all pixels within delta {ROUNDING_MAX_DELTA} except at most {ADR_0052_EDGE_PIXELS} px of any delta, ADR 0052){note}",
+            "debug view {view}: the adapters disagree ({}; allowed per pair: {ADR_0052_EDGE_PIXELS} px beyond delta {ROUNDING_MAX_DELTA} plus {ROUNDING_MAX_PIXELS} px at delta {ROUNDING_MAX_DELTA}, ADR 0052){note}",
             apart.join("; ")
         ));
     }
-    let worst = new_pairs.iter().map(|(_, _, c)| (c.beyond_rounding, c.max_delta)).fold((0, 0), |w, c| (w.0.max(c.0), w.1.max(c.1)));
+    let worst = new_pairs.iter().fold((0, 0, 0), |w, (_, _, c)| (w.0.max(c.beyond_rounding), w.1.max(c.at_rounding), w.2.max(c.max_delta)));
     let kind = if new == 0 { "matches its blessed golden or an auto-blessed change" } else { "candidates agree pairwise" };
     let adapters = states.keys().cloned().collect::<Vec<_>>().join(", ");
     Ok(format!(
-        "debug view {view}: {kind} on {adapters} (worst pair {} px beyond delta {ROUNDING_MAX_DELTA}, max delta {}){note}",
-        worst.0, worst.1
+        "debug view {view}: {kind} on {adapters} (worst pair {} px beyond delta {ROUNDING_MAX_DELTA} of {ADR_0052_EDGE_PIXELS}, {} px at delta {ROUNDING_MAX_DELTA} of {ROUNDING_MAX_PIXELS}, max delta {}){note}",
+        worst.0, worst.1, worst.2
     ))
 }
 
@@ -600,7 +614,7 @@ mod tests {
     }
     /// A pair differing in `beyond` pixels of delta `max_delta` (> 1, or 0 with none) plus `ones` pixels of delta 1.
     fn pair(a: &str, b: &str, beyond: usize, ones: usize, max_delta: u8) -> (String, String, ViewDiff) {
-        (a.into(), b.into(), ViewDiff { pixels: beyond + ones, beyond_rounding: beyond, max_delta })
+        (a.into(), b.into(), ViewDiff { at_rounding: ones, beyond_rounding: beyond, max_delta })
     }
 
     // spec: TEST-022
@@ -635,7 +649,7 @@ mod tests {
         assert!(debug_view_agreement("v", &gone, &[], &none).unwrap_err().contains("does not exist on nv"));
         let bad = states(&[("warp", ViewState::Matches), ("nv", ViewState::Differs { auto: false })]);
         assert!(debug_view_agreement("v", &bad, &[], &none).unwrap_err().contains("does not bless"));
-        // New candidates (ADR 0052): every pixel within delta 1 except at most 64 of any delta.
+        // New candidates (ADR 0052): at most 64 px beyond delta 1 (any delta) plus at most 32 px at delta 1, nothing else.
         let new = states(&[("warp", ViewState::New), ("nv", ViewState::New), ("llvm", ViewState::New)]);
         let zero = pair("warp", "nv", 0, 0, 0);
         let agree = |p: (String, String, ViewDiff)| debug_view_agreement("v", &new, &[zero.clone(), p], &none);
@@ -644,16 +658,26 @@ mod tests {
         assert!(agree(pair("nv", "llvm", 64, 0, 95)).is_ok());
         let e = agree(pair("nv", "llvm", 65, 0, 95)).unwrap_err();
         assert!(e.contains("disagree") && e.contains("65 px beyond delta 1"), "{e}");
-        // Delta-1 pixels are free and do not count against the 64; one delta-2 pixel outside the 64 does.
-        assert!(agree(pair("nv", "llvm", 64, 5000, 95)).is_ok());
-        assert!(agree(pair("nv", "llvm", 0, 5000, 1)).is_ok());
+        // Delta-1 pixels are capped at 32 (ADR 0017 rounding noise), separately from the 64.
+        assert!(agree(pair("nv", "llvm", 64, 32, 95)).is_ok());
+        assert!(agree(pair("nv", "llvm", 0, 32, 1)).is_ok());
+        let e = agree(pair("nv", "llvm", 0, 33, 1)).unwrap_err();
+        assert!(e.contains("33 px at delta 1 exceed the cap of 32") && !e.contains("beyond delta 1 exceed"), "{e}");
+        let e = agree(pair("nv", "llvm", 65, 32, 95)).unwrap_err();
+        assert!(e.contains("65 px beyond delta 1 exceed the cap of 64") && e.contains("65 beyond, 32 at delta 1"), "{e}");
+        // A whole-image one-level shift is not agreement.
+        assert!(agree(pair("nv", "llvm", 0, 5000, 1)).is_err());
+        // Both caps exceeded: both are named.
+        let e = agree(pair("nv", "llvm", 70, 40, 9)).unwrap_err();
+        assert!(e.contains("70 px beyond") && e.contains("40 px at delta 1"), "{e}");
+        // One delta-2 pixel outside the 64 escalates.
         let e = agree(pair("nv", "llvm", 65, 0, 2)).unwrap_err();
         assert!(e.contains("disagree"), "{e}");
         // Any one pair beyond the limit fails the view, not only the worst-looking one.
         let near = [pair("warp", "nv", 64, 3, 11), pair("warp", "llvm", 0, 0, 0), pair("nv", "llvm", 65, 0, 2)];
         assert!(debug_view_agreement("v", &new, &near, &none).is_err());
         let ok = debug_view_agreement("v", &new, &near[..2], &none).unwrap();
-        assert!(ok.contains("worst pair 64 px beyond delta 1, max delta 11"), "{ok}");
+        assert!(ok.contains("worst pair 64 px beyond delta 1 of 64, 3 px at delta 1 of 32, max delta 11"), "{ok}");
         // New on one adapter and blessed on another is not one view.
         let mixed = states(&[("warp", ViewState::New), ("nv", ViewState::Matches)]);
         assert!(debug_view_agreement("v", &mixed, &[], &none).unwrap_err().contains("new on some"));
@@ -668,23 +692,24 @@ mod tests {
         for i in 0..64 {
             set(&mut other, i, 0, 195); // delta 95
         }
-        for i in 64..5000 {
+        for i in 64..96 {
             set(&mut other, i, 1, 101); // delta 1 in a single channel
         }
         let d = view_diff(&base, &other);
-        assert_eq!((d.pixels, d.beyond_rounding, d.max_delta), (5000, 64, 95));
+        assert_eq!((d.at_rounding, d.beyond_rounding, d.max_delta), (32, 64, 95));
         // Two small deltas in different channels are still delta 1 per pixel (the max, not the sum).
         set(&mut other, 6000, 0, 101);
         set(&mut other, 6000, 2, 99);
-        assert_eq!(view_diff(&base, &other).beyond_rounding, 64);
+        let d = view_diff(&base, &other);
+        assert_eq!((d.at_rounding, d.beyond_rounding), (33, 64));
         // A delta-2 alpha difference is the 65th pixel beyond delta 1.
         set(&mut other, 7000, 3, 102);
         let d = view_diff(&base, &other);
-        assert_eq!((d.beyond_rounding, d.max_delta), (65, 95));
+        assert_eq!((d.at_rounding, d.beyond_rounding, d.max_delta), (33, 65, 95));
         let none: Vec<String> = vec![];
         let new = states(&[("warp", ViewState::New), ("nv", ViewState::New)]);
         assert!(debug_view_agreement("v", &new, &[("warp".into(), "nv".into(), d)], &none).is_err());
-        assert_eq!(view_diff(&base, &base), ViewDiff { pixels: 0, beyond_rounding: 0, max_delta: 0 });
+        assert_eq!(view_diff(&base, &base), ViewDiff { at_rounding: 0, beyond_rounding: 0, max_delta: 0 });
     }
 
     // spec: TEST-022
