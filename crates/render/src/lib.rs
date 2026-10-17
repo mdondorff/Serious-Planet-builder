@@ -2,6 +2,7 @@
 //! context and the "hello triangle" used to prove the golden harness on software adapters.
 
 use std::fmt;
+use std::sync::{Arc, Mutex};
 
 pub mod atmosphere;
 pub mod compact;
@@ -116,6 +117,8 @@ pub struct GpuContext {
     pub(crate) format_preference: std::sync::atomic::AtomicU8,
     /// How terrain renderers write tiles: 0 = the default (batched), 1 = per slot, 2 = batched.
     pub(crate) upload_preference: std::sync::atomic::AtomicU8,
+    /// What the device reported about itself (REND-029).
+    diagnostics: Arc<Diagnostics>,
 }
 
 impl GpuContext {
@@ -157,6 +160,8 @@ impl GpuContext {
             })
             .await
             .map_err(|e| GpuError::Device(e.to_string()))?;
+        let diagnostics = Arc::new(Diagnostics::default());
+        install_diagnostics(&device, &diagnostics);
         Ok(Self {
             device,
             queue,
@@ -165,7 +170,29 @@ impl GpuContext {
             draw_preference: Default::default(),
             format_preference: Default::default(),
             upload_preference: Default::default(),
+            diagnostics,
         })
+    }
+
+    /// The first wgpu error the device reported outside any error scope, with its description (REND-029).
+    pub fn first_error(&self) -> Option<String> {
+        self.diagnostics.first_error.lock().ok()?.clone()
+    }
+
+    /// A buffer with no usage flags, which wgpu refuses: the test of the error handler (REND-029).
+    #[doc(hidden)]
+    pub fn test_create_invalid_buffer(&self, label: &str) {
+        let _ = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: 16,
+            usage: wgpu::BufferUsages::empty(),
+            mapped_at_creation: false,
+        });
+    }
+
+    /// Why the device was lost (a driver reset, a GPU timeout), if it was; a deliberate destroy is not a loss (REND-029).
+    pub fn device_lost(&self) -> Option<String> {
+        self.diagnostics.lost.lock().ok()?.clone()
     }
 
     /// Adapter name as the driver reports it.
@@ -466,5 +493,55 @@ impl GpuContext {
     /// Whether GPU timestamp queries are available on this device.
     pub fn timestamps_supported(&self) -> bool {
         self.device.features().contains(wgpu::Features::TIMESTAMP_QUERY)
+    }
+}
+
+/// What a device reports about itself, kept for the context's readers (REND-029).
+#[derive(Default)]
+struct Diagnostics {
+    first_error: Mutex<Option<String>>,
+    lost: Mutex<Option<String>>,
+}
+
+/// The line for a lost device; `None` for a deliberate destroy, which is not a loss.
+fn lost_line(reason: wgpu::DeviceLostReason, message: &str) -> Option<String> {
+    (reason != wgpu::DeviceLostReason::Destroyed).then(|| format!("wgpu device lost ({reason:?}): {message}"))
+}
+
+/// Say what wgpu would otherwise hide. A lost device surfaces only through a callback and makes every later buffer invalid with no
+/// error of its own; an uncaptured error is fatal by default and a later one is easier to see than the first. Both are printed to
+/// stderr and kept; the uncaptured error still panics, with wgpu's own message (REND-029).
+fn install_diagnostics(device: &wgpu::Device, diagnostics: &Arc<Diagnostics>) {
+    let d = Arc::clone(diagnostics);
+    device.set_device_lost_callback(move |reason, message| {
+        if let Some(line) = lost_line(reason, &message) {
+            eprintln!("{line}");
+            if let Ok(mut lost) = d.lost.lock() {
+                lost.get_or_insert(line);
+            }
+        }
+    });
+    let d = Arc::clone(diagnostics);
+    device.on_uncaptured_error(Arc::new(move |error: wgpu::Error| {
+        let text = error.to_string();
+        if let Ok(mut first) = d.first_error.lock() {
+            if first.is_none() {
+                eprintln!("first wgpu error: {text}");
+                *first = Some(text.clone());
+            }
+        }
+        panic!("wgpu error: {text}\n");
+    }));
+}
+
+#[cfg(test)]
+mod diagnostics_tests {
+    use super::*;
+
+    // spec: REND-029
+    #[test]
+    fn a_destroy_is_no_loss_and_anything_else_is() {
+        assert_eq!(lost_line(wgpu::DeviceLostReason::Destroyed, "x"), None);
+        assert!(lost_line(wgpu::DeviceLostReason::Unknown, "TDR").unwrap().contains("TDR"));
     }
 }
