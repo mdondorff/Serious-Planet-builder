@@ -125,7 +125,7 @@ Source: LOD-006, LOD-008, M4 item 7a, ADR 0018, LOD-010, M4 fix F3 (perf window 
 - **THEN** no origin height is evaluated by a single `height` call, the origins are one batch of one direction per node, and the batch decodes at most the distinct blocks its directions touch
 
 #### Scenario: Batch equals per-node evaluation
-- **WHEN** the ten standard views and the dive's cameras at five altitudes from 20,000 km to 200 km are planned at 1 and 20 threads
+- **WHEN** the ten standard views and the dive's cameras at five altitudes from 20,000 km to 200 km are planned at 1 and 20 threads (tier A: every third camera at 1 and 3 threads; the full sweep is tier B, `oracle_plan_origin_batch`)
 - **THEN** every plan is equal and the origin of every node is bit for bit `height` of its tile's centre
 
 #### Scenario: Grid size changes
