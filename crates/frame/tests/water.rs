@@ -191,9 +191,13 @@ fn the_argument_the_shader_adds_stays_small_wherever_a_wave_has_weight_on_real_p
     let lod = LodParams { cells, viewport_h_px: 1080.0, tau_px: 6.0, max_level: 22, ..LodParams::earth_1080p() };
     let src = HeightSea { field: &field, level: 0.0 };
     let l = LiquidAppearance::new(0, table.get(LiquidKindId::WATER).unwrap(), &look);
-    let mut worst: f64 = 0.0;
-    let mut weighted_vertices = 0u64;
-    for (name, camera) in scripted_views(R, 16.0 / 9.0, 1) {
+    // The views are independent, so four workers take them in turn; each view yields (largest argument, weighted vertices) and the
+    // reduction (max, sum) does not depend on the order the views finish in.
+    let views = scripted_views(R, 16.0 / 9.0, 1);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let per_view = |camera| -> (f64, u64) {
+        let mut worst: f64 = 0.0;
+        let mut weighted_vertices = 0u64;
         let plan = plan_terrain(&TerrainRequest {
             camera,
             size: (1920, 1080),
@@ -234,8 +238,26 @@ fn the_argument_the_shader_adds_stays_small_wherever_a_wave_has_weight_on_real_p
                 }
             }
         }
-        let _ = name;
-    }
+        (worst, weighted_vertices)
+    };
+    let (worst, weighted_vertices) = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..4)
+            .map(|_| {
+                s.spawn(|| {
+                    let (mut worst, mut count) = (0.0f64, 0u64);
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        let Some((_, camera)) = views.get(i) else { break };
+                        let (w, c) = per_view(*camera);
+                        worst = worst.max(w);
+                        count += c;
+                    }
+                    (worst, count)
+                })
+            })
+            .collect();
+        workers.into_iter().map(|w| w.join().unwrap()).fold((0.0f64, 0u64), |a, b| (a.0.max(b.0), a.1 + b.1))
+    });
     assert!(weighted_vertices > 1000, "the views see waves: {weighted_vertices}");
     assert!(worst < WAVE_ARGUMENT_BOUND / 4.0, "the largest |k . local| of a weighted wave is {worst} rad, bound {WAVE_ARGUMENT_BOUND}");
     println!("largest |k . local| of a weighted wave over the scripted views: {worst:.1} rad ({weighted_vertices} weighted wave vertices)");

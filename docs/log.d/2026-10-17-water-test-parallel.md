@@ -1,0 +1,1 @@
+- 2026-10-17 **water-test-parallel** (sonnet-crusader, ATMO-013): `the_argument_the_shader_adds_stays_small_wherever_a_wave_has_weight_on_real_plans` plans the scripted views on four workers (same views, same assertions; the reduction is a max and a sum, so the thread order changes nothing); 10 s to about 4 s of wall time when quiet.
