@@ -7,7 +7,7 @@ use planet_core::cube::TangentWarp;
 use planet_core::TileId;
 use planet_frame::Camera;
 use planet_generators::height::HeightField;
-use planet_generators::mesh::{grid_indices, tile_mesh_field};
+use planet_generators::mesh::{grid_indices, skirt_depth, tile_mesh_field};
 use std::collections::BTreeSet;
 
 type Clip = Vec<[f64; 3]>;
@@ -72,20 +72,71 @@ fn raster_screen(size: (usize, usize), t: [[f64; 3]; 3], f: &mut dyn FnMut(usize
     false
 }
 
+/// The positions of `tile_mesh_field`'s vertices (grid, then the four skirt borders), without its normals, geomorph targets,
+/// climate and key. The oracle only needs positions, and the five-point normal stencil makes the full mesh about five times
+/// dearer. The arithmetic repeats the mesh's own, so every position is bit for bit the mesh's (`positions_match_the_mesh` checks).
+fn tile_positions(field: &dyn HeightField, tile: TileId, cells: u32, radius_m: f64) -> (planet_core::Vec3, Vec<[f32; 3]>) {
+    let map = &TangentWarp;
+    let n = i64::from(cells);
+    let width = (cells + 1) as usize;
+    let mut dirs = Vec::with_capacity(width * width + 1);
+    for j in 0..=n {
+        for i in 0..=n {
+            dirs.push(tile.sample_direction(map, cells, i as u32, j as u32));
+        }
+    }
+    let centre_dir = tile.center_direction(map);
+    dirs.push(centre_dir);
+    let all = field.heights(&dirs);
+    let count = width * width;
+    let origin = centre_dir * (radius_m + all[count]);
+    let mut pos: Vec<[f32; 3]> = (0..count)
+        .map(|k| {
+            let d = dirs[k] * (radius_m + all[k]) - origin;
+            [d.x as f32, d.y as f32, d.z as f32]
+        })
+        .collect();
+    let depth = skirt_depth(tile.level(), radius_m);
+    let c = cells as usize;
+    let border: Vec<usize> = (0..=c)
+        .chain((0..=c).map(|i| c * (c + 1) + i))
+        .chain((0..=c).map(|j| j * (c + 1)))
+        .chain((0..=c).map(|j| j * (c + 1) + c))
+        .collect();
+    for &b in &border {
+        let v = pos[b];
+        let radial = (origin + planet_core::Vec3::new(f64::from(v[0]), f64::from(v[1]), f64::from(v[2]))).normalized() * depth;
+        pos.push([(f64::from(v[0]) - radial.x) as f32, (f64::from(v[1]) - radial.y) as f32, (f64::from(v[2]) - radial.z) as f32]);
+    }
+    (origin, pos)
+}
+
 fn project_tile(cam: &Camera, tile: TileId, cells: u32, radius_m: f64, field: &dyn HeightField) -> Clip {
-    let mesh = tile_mesh_field(field, &TangentWarp, tile, cells, radius_m);
-    let o = mesh.origin.0 - cam.position.0;
-    mesh.vertices
-        .iter()
+    let (origin, pos) = tile_positions(field, tile, cells, radius_m);
+    let o = origin - cam.position.0;
+    pos.iter()
         .map(|v| {
-            let rel = o + planet_core::Vec3::new(f64::from(v.pos[0]), f64::from(v.pos[1]), f64::from(v.pos[2]));
+            let rel = o + planet_core::Vec3::new(f64::from(v[0]), f64::from(v[1]), f64::from(v[2]));
             let c = cam.project(rel);
             [c[0], c[1], c[3]]
         })
         .collect()
 }
 
+/// `tile_positions` equals the mesh's origin and vertex positions bit for bit, for the given tiles.
+pub fn positions_match_the_mesh(tiles: &[TileId], cells: u32, radius_m: f64, field: &dyn HeightField) {
+    for &t in tiles {
+        let mesh = tile_mesh_field(field, &TangentWarp, t, cells, radius_m);
+        let (origin, pos) = tile_positions(field, t, cells, radius_m);
+        assert_eq!(origin, mesh.origin.0, "origin of {t:?}");
+        let mp: Vec<[f32; 3]> = mesh.vertices.iter().map(|v| v.pos).collect();
+        assert_eq!(pos, mp, "positions of {t:?}");
+    }
+}
+
 /// The tiles of `tiles` that own the nearest depth of at least one pixel of a `size` image (grid and skirt triangles).
+/// Projection, the depth pass and the ownership pass each run on all cores; the depth buffer is the per-pixel maximum, so the
+/// result does not depend on the thread count or the order of the triangles.
 pub fn visible_tiles(
     cam: &Camera,
     size: (usize, usize),
@@ -107,34 +158,68 @@ pub fn visible_tiles(
     let tri = |v: &Clip, k: usize| [v[idx[3 * k] as usize], v[idx[3 * k + 1] as usize], v[idx[3 * k + 2] as usize]];
     let ntri = idx.len() / 3;
     let near = cam.near_m;
+    // Depth pass: each thread fills its own buffer from its share of the tiles; the buffers merge by per-pixel maximum.
+    let bufs: Vec<Vec<f64>> = std::thread::scope(|s| {
+        let hs: Vec<_> = proj
+            .chunks(chunk)
+            .map(|part| {
+                let tri = &tri;
+                s.spawn(move || {
+                    let mut z = vec![0.0f64; size.0 * size.1];
+                    for v in part {
+                        for k in 0..ntri {
+                            raster(size, tri(v, k), near, &mut |i, d| {
+                                if d > z[i] {
+                                    z[i] = d;
+                                }
+                                false
+                            });
+                        }
+                    }
+                    z
+                })
+            })
+            .collect();
+        hs.into_iter().map(|h| h.join().expect("depth thread")).collect()
+    });
     let mut z = vec![0.0f64; size.0 * size.1];
-    for v in &proj {
-        for k in 0..ntri {
-            raster(size, tri(v, k), near, &mut |i, d| {
-                if d > z[i] {
-                    z[i] = d;
-                }
-                false
-            });
-        }
-    }
-    let mut visible = BTreeSet::new();
-    for (&tile, v) in tiles.iter().zip(&proj) {
-        let mut any = false;
-        for k in 0..ntri {
-            raster(size, tri(v, k), near, &mut |i, d| {
-                any = d == z[i];
-                any
-            });
-            if any {
-                break;
+    for b in &bufs {
+        for (a, &d) in z.iter_mut().zip(b) {
+            if d > *a {
+                *a = d;
             }
         }
-        if any {
-            visible.insert(tile);
-        }
     }
-    visible
+    drop(bufs);
+    // Ownership pass: a tile is visible when one of its triangles owns the nearest depth of a pixel (z is read only).
+    let z = &z;
+    let owners: Vec<bool> = std::thread::scope(|s| {
+        let hs: Vec<_> = proj
+            .chunks(chunk)
+            .map(|part| {
+                let tri = &tri;
+                s.spawn(move || {
+                    part.iter()
+                        .map(|v| {
+                            let mut any = false;
+                            for k in 0..ntri {
+                                raster(size, tri(v, k), near, &mut |i, d| {
+                                    any = d == z[i];
+                                    any
+                                });
+                                if any {
+                                    break;
+                                }
+                            }
+                            any
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        hs.into_iter().flat_map(|h| h.join().expect("ownership thread")).collect()
+    });
+    tiles.iter().zip(owners).filter_map(|(&t, any)| any.then_some(t)).collect()
 }
 
 /// Self-check of the rasterizer on a toy scene: of a far and a near triangle covering the same pixels only the near one is

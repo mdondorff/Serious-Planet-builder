@@ -1,0 +1,4 @@
+- [x] 1.1 Measure where the time goes in both tests
+- [x] 1.2 Oracle: positions only, parallel depth and ownership passes, positions-match-the-mesh self-check (LOD-007)
+- [x] 1.3 gpu_window: the two smokes run at the same time (VIEW-005, VIEW-007, LOOK-005)
+- [x] 2.1 spec-guardian, verifier; test, test gpu, spec-lint, fmt, clippy; archive; log line; remove the Tracked line
