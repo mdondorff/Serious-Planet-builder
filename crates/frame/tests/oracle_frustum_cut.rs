@@ -28,6 +28,7 @@ fn no_tile_with_a_visible_triangle_is_cut_in_the_standard_views() {
             .iter()
             .map(|n| n.tile)
             .collect();
+        depth_oracle::positions_match_the_mesh(&[all[0], all[all.len() / 2], all[all.len() - 1]], lod.cells, R, &field);
         let visible = depth_oracle::visible_tiles(&camera, (1280, 720), &all, lod.cells, R, &field);
         let req = TerrainRequest { camera, size, view: TerrainView::Level, lod: lod.clone(), face_mapping: "tangent-v1".into(), seed: 1 };
         let plan: std::collections::BTreeSet<TileId> = plan_terrain(&req).unwrap().nodes.iter().map(|n| n.tile).collect();

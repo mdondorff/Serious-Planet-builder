@@ -60,38 +60,59 @@ fn count_before(stdout: &str, after: &str) -> u64 {
 // spec: VIEW-005, VIEW-007, LOOK-005
 #[test]
 fn the_window_path_opens_runs_the_flight_lit_with_the_atmosphere_and_closes() {
-    let Some(stdout) = smoke(&[]) else { return };
-    assert!(stdout.contains("[smoke ok]"), "{stdout}");
-    // The adapter line names what ran, and the run presented frames to the window.
-    assert!(stdout.contains("adapter: "), "{stdout}");
-    assert!(count_before(&stdout, " presented") > 0, "{stdout}");
-    // The lit path was the active one: the run itself judged these counts (`smoke_verdict`), and the summary shows them.
-    assert!(count_before(&stdout, " lit,") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
-    assert!(count_before(&stdout, " with the atmosphere") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
-    assert!(count_before(&stdout, " debug)") > 0, "the L key must have drawn the debug path too: {stdout}");
-    assert!(count_before(&stdout, " exposure reading") > 0, "{stdout}");
-    assert!(stdout.contains("view: the lit path with the atmosphere"), "{stdout}");
-    if adapter() != "software" {
-        assert!(stdout.contains("DiscreteGpu"), "the real-GPU smoke runs on a discrete GPU: {stdout}");
-    }
-    the_look_file_is_drawn_by_the_window();
-}
-
-// The look run follows the first in the same test: two windows on the software adapter at once would starve each other.
-fn the_look_file_is_drawn_by_the_window() {
+    // The two runs are separate processes (two WARP devices in one process crash it, docs/status.md) and judge frame counts, never
+    // wall-clock, so they run at the same time: on the software adapter each run is dominated by the adapter's own frame time and
+    // together they take little more than one (measured on a 20-core machine only: 2 x 30 s alone, 32 s together; 110 s to 90 s inside the whole `test gpu` run).
     let dir = std::env::temp_dir().join(format!("planet-viewer-look-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let look = dir.join("moonlit.look.toml");
     // A sun from +z, a dimmer sun and a narrower exposure range: all of it reaches the lit plan (tier A pins the plan; this runs it).
     std::fs::write(
         &look,
-        "schema_version = 3\nkind = \"look\"\n[body.0.sun]\ndirection = [0.0, 0.0, 1.0]\n[body.0.units]\nsolar_illuminance_lux = 90000.0\n\
-         [body.0.exposure]\nmin_ev100 = 4.0\nmax_ev100 = 16.0\n",
+        "schema_version = 3
+kind = \"look\"
+[body.0.sun]
+direction = [0.0, 0.0, 1.0]
+[body.0.units]
+solar_illuminance_lux = 90000.0
+         [body.0.exposure]
+min_ev100 = 4.0
+max_ev100 = 16.0
+",
     )
     .unwrap();
-    let Some(stdout) = smoke(&["--look", look.to_str().unwrap()]) else { return };
+    let (first, second) = std::thread::scope(|s| {
+        let first = s.spawn(|| smoke(&[]));
+        let second = s.spawn(|| smoke(&["--look", look.to_str().unwrap()]));
+        (first.join(), second.join())
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+    // A panic in either run (a failed smoke) fails the test with its own message.
+    let first = first.unwrap_or_else(|e| std::panic::resume_unwind(e));
+    let second = second.unwrap_or_else(|e| std::panic::resume_unwind(e));
+    let (Some(first), Some(second)) = (first, second) else { return };
+    the_window_runs_lit_with_the_atmosphere(&first);
+    the_look_file_is_drawn_by_the_window(&second);
+}
+
+fn the_window_runs_lit_with_the_atmosphere(stdout: &str) {
+    assert!(stdout.contains("[smoke ok]"), "{stdout}");
+    // The adapter line names what ran, and the run presented frames to the window.
+    assert!(stdout.contains("adapter: "), "{stdout}");
+    assert!(count_before(stdout, " presented") > 0, "{stdout}");
+    // The lit path was the active one: the run itself judged these counts (`smoke_verdict`), and the summary shows them.
+    assert!(count_before(stdout, " lit,") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
+    assert!(count_before(stdout, " with the atmosphere") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
+    assert!(count_before(stdout, " debug)") > 0, "the L key must have drawn the debug path too: {stdout}");
+    assert!(count_before(stdout, " exposure reading") > 0, "{stdout}");
+    assert!(stdout.contains("view: the lit path with the atmosphere"), "{stdout}");
+    if adapter() != "software" {
+        assert!(stdout.contains("DiscreteGpu"), "the real-GPU smoke runs on a discrete GPU: {stdout}");
+    }
+}
+
+fn the_look_file_is_drawn_by_the_window(stdout: &str) {
     assert!(stdout.contains("look: ") && stdout.contains("moonlit.look.toml"), "{stdout}");
     assert!(stdout.contains("[smoke ok]"), "{stdout}");
-    assert!(count_before(&stdout, " with the atmosphere") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
-    let _ = std::fs::remove_dir_all(&dir);
+    assert!(count_before(stdout, " with the atmosphere") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
 }
