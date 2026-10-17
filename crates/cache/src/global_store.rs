@@ -30,6 +30,7 @@ use planet_generators::ocean::{
     OCEAN_IMPLEMENTATION_ID,
 };
 use planet_generators::stage::{FieldGraph, FieldSpec, Scope, Stage};
+use planet_generators::water_summary::{summarize_block, SummaryCell, SummaryError, WaterSummary, SUMMARY_IMPLEMENTATION_ID};
 use planet_world_def::{
     body_radius_path, body_seed_path, BodyId, GenContext, MissingNode, NodeValue, SeaParams, WorldDefinition, SPHERE_SURFACE_ID,
 };
@@ -55,7 +56,16 @@ pub const KIND_GLOBAL_OCEAN: u8 = Kind::GlobalOcean as u8;
 /// Version of the ocean block payload layout. History: 1 = `(B + 1)^2` bits, LSB first, as an LZ4 block.
 pub const OCEAN_CODEC_VERSION: u8 = 1;
 
+/// The kind byte of the water summary of the global bake (ADR 0058): the coarse level of the water field.
+pub const KIND_GLOBAL_WATER_SUMMARY: u8 = Kind::GlobalWaterSummary as u8;
+
+/// Version of the summary payload layout. History: 1 = one flag byte per cell, then the band elevations as a byte-shuffled `f32`
+/// plane, LZ4 block.
+pub const SUMMARY_CODEC_VERSION: u8 = 1;
+
 const HEADER_LEN: usize = 9;
+/// `codec version (u8) | resolution (u32 LE) | cells per block edge (u32 LE) | raw length (u32 LE)`.
+const SUMMARY_HEADER_LEN: usize = 13;
 
 /// Why a block payload could not be encoded or decoded.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,6 +96,10 @@ pub enum BlockCodecError {
     OceanBits,
     /// An ocean block of another codec version.
     OceanVersion(u8),
+    /// A water summary of another codec version.
+    SummaryVersion(u8),
+    /// A water summary that makes no grid, or whose cells are not what this version writes.
+    Summary(String),
 }
 
 impl std::fmt::Display for BlockCodecError {
@@ -103,6 +117,8 @@ impl std::fmt::Display for BlockCodecError {
             BlockCodecError::Grid { level, cells } => write!(f, "{cells} cells per block at level {level} is not a grid this build bakes"),
             BlockCodecError::OceanBits => write!(f, "the ocean block has a bit set beyond its last vertex"),
             BlockCodecError::OceanVersion(v) => write!(f, "ocean block codec version {v}, this build reads {OCEAN_CODEC_VERSION}"),
+            BlockCodecError::SummaryVersion(v) => write!(f, "water summary codec version {v}, this build reads {SUMMARY_CODEC_VERSION}"),
+            BlockCodecError::Summary(why) => write!(f, "the water summary is not valid: {why}"),
         }
     }
 }
@@ -237,6 +253,72 @@ pub fn decode_ocean_block(bytes: &[u8]) -> Result<OceanBits, BlockCodecError> {
         return Err(BlockCodecError::Truncated { got: raw.len(), expected });
     }
     OceanBits::from_bytes(cells, &raw).ok_or(BlockCodecError::OceanBits)
+}
+
+/// Encode the water summary: `codec version (u8) | res (u32 LE) | B (u32 LE) | raw length (u32 LE) | LZ4 block` of the `6 g^2` flag
+/// bytes followed by the `6 g^2` band elevations as a byte-shuffled little-endian `f32` plane (`g = res / min(B, 64)`; faces, rows,
+/// columns in that order, `x` fastest).
+pub fn encode_summary(summary: &WaterSummary) -> Result<Vec<u8>, BlockCodecError> {
+    let cells = summary.cells();
+    let n = cells.len();
+    let mut raw = Vec::with_capacity(5 * n);
+    raw.extend(cells.iter().map(|c| c.flags));
+    for b in 0..4 {
+        raw.extend(cells.iter().map(|c| c.band_elevation_m.to_le_bytes()[b]));
+    }
+    let mut out = Vec::with_capacity(SUMMARY_HEADER_LEN + raw.len() / 4);
+    out.push(SUMMARY_CODEC_VERSION);
+    out.extend_from_slice(&summary.res().to_le_bytes());
+    out.extend_from_slice(&summary.block_cells().to_le_bytes());
+    out.extend_from_slice(&u32::try_from(raw.len()).map_err(|_| BlockCodecError::Summary("too many cells".into()))?.to_le_bytes());
+    out.extend_from_slice(&lz4_flex::compress(&raw));
+    Ok(out)
+}
+
+/// Decode a water summary payload; it refuses what [`encode_summary`] would not write (another version, a resolution or block size
+/// that makes no summary, a wrong raw length, a damaged block, a flag bit this version does not know) without allocating more than the
+/// resolution allows.
+pub fn decode_summary(bytes: &[u8]) -> Result<WaterSummary, BlockCodecError> {
+    if bytes.len() < SUMMARY_HEADER_LEN {
+        return Err(BlockCodecError::Short);
+    }
+    if bytes[0] != SUMMARY_CODEC_VERSION {
+        return Err(BlockCodecError::SummaryVersion(bytes[0]));
+    }
+    let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().expect("4 bytes"));
+    let (res, cells, claimed) = (word(1), word(5), word(9));
+    if u64::from(res) > MAX_TILED_RES || !valid_cells(cells) || cells > res {
+        return Err(BlockCodecError::Summary(format!("a bake of {res} cells in blocks of {cells} makes no summary")));
+    }
+    // The size the header implies is checked against the claim before any cell is allocated.
+    let n = planet_generators::water_summary::summary_cell_count(res, cells).ok_or_else(|| {
+        BlockCodecError::Summary(format!("a bake of {res} cells in blocks of {cells} makes no summary (or too many cells)"))
+    })? as usize;
+    let expected = 5 * n as u64;
+    if u64::from(claimed) != expected {
+        return Err(BlockCodecError::RawLength { claimed, expected });
+    }
+    let raw = lz4_flex::decompress(&bytes[SUMMARY_HEADER_LEN..], claimed as usize).map_err(|e| BlockCodecError::Lz4(e.to_string()))?;
+    if raw.len() as u64 != expected {
+        return Err(BlockCodecError::Truncated { got: raw.len(), expected });
+    }
+    let decoded: Vec<SummaryCell> = (0..n)
+        .map(|i| SummaryCell {
+            flags: raw[i],
+            band_elevation_m: f32::from_le_bytes([raw[n + i], raw[2 * n + i], raw[3 * n + i], raw[4 * n + i]]),
+        })
+        .collect();
+    let out = WaterSummary::from_cells(res, cells, decoded)?;
+    if !out.flags_known() {
+        return Err(BlockCodecError::Summary("a cell has a flag bit this version does not know".into()));
+    }
+    Ok(out)
+}
+
+impl From<SummaryError> for BlockCodecError {
+    fn from(e: SummaryError) -> Self {
+        BlockCodecError::Summary(e.to_string())
+    }
 }
 
 /// The global-coarse bake of one body of a definition as the store sees it: its seed (through the recording context), radius,
@@ -429,6 +511,58 @@ impl GlobalWorld {
         cache_key(&self.ocean_key_inputs(tile, cells))
     }
 
+    /// The tile the summary record is filed under (the record covers the whole bake): face 0 at level 0.
+    pub fn summary_tile() -> TileId {
+        TileId::new(Face(0), 0, 0, 0).expect("the root tile of a face")
+    }
+
+    /// The inputs of the content key of the water summary of the bake of `res` cells per face edge in blocks of `cells`: kind 5, the
+    /// root tile of face 0, the bake's stage key as its source (so a new bake is a new summary), `B` under tag 1, `res` under tag 4,
+    /// the area threshold of the ocean channel it summarises under tag 7, an empty read set. The sea level of the definition is no input
+    /// (it is applied when a tile is asked, ADR 0058).
+    pub fn summary_key_inputs(&self, res: u32, cells: u32) -> KeyInputs {
+        let tile = GlobalWorld::summary_tile();
+        let mut output_params = BTreeMap::new();
+        output_params.insert(PARAM_RESOLUTION, cells.to_le_bytes().to_vec());
+        output_params.insert(PARAM_GRID_RES, res.to_le_bytes().to_vec());
+        output_params.insert(PARAM_OCEAN_AREA_FRACTION, self.sea.min_area_fraction.to_bits().to_le_bytes().to_vec());
+        KeyInputs {
+            kind: Kind::GlobalWaterSummary,
+            hash_version: HASH_VERSION,
+            generator_version: GLOBAL_VERSION,
+            // A function of the ocean bits too: renaming the ocean channel's implementation renames the summary.
+            implementation_id: format!("{SUMMARY_IMPLEMENTATION_ID}+{OCEAN_IMPLEMENTATION_ID}"),
+            face_mapping_id: TangentWarp.id().to_string(),
+            body: self.body,
+            body_params: self.body_params(),
+            tile,
+            source: Some(self.stage_key(res)),
+            output_params,
+            reads: Vec::new(),
+        }
+    }
+
+    pub fn summary_key(&self, res: u32, cells: u32) -> CacheKey {
+        cache_key(&self.summary_key_inputs(res, cells))
+    }
+
+    /// The record of the water summary.
+    pub fn summary_record(&self, summary: &WaterSummary) -> Result<Record, BlockCodecError> {
+        let (res, cells) = (summary.res(), summary.block_cells());
+        if self.layout(res).ok().map(|(_, c)| c) != Some(cells) {
+            return Err(BlockCodecError::Summary(format!("{cells} cells per block is not the canonical layout of a {res}-cell grid")));
+        }
+        Ok(Record {
+            key: self.summary_key(res, cells),
+            kind: KIND_GLOBAL_WATER_SUMMARY,
+            tile: GlobalWorld::summary_tile(),
+            generator_version: GLOBAL_VERSION,
+            hash_version: HASH_VERSION,
+            node_set_id: self.node_set_id,
+            payload: encode_summary(summary)?,
+        })
+    }
+
     /// The record of a block of ocean bits.
     pub fn ocean_record(&self, tile: TileId, bits: &OceanBits) -> Result<Record, BlockCodecError> {
         let cells = bits.cells;
@@ -450,7 +584,7 @@ impl GlobalWorld {
     /// Whether a stored global block (of the bake or of its ocean channel) is still current for this world: its generator version,
     /// hash version and node set id equal the world's (STRM-013). Other kinds are not this world's to judge: `true`.
     pub fn is_live(&self, record: &Record) -> bool {
-        (record.kind != KIND_GLOBAL_BLOCK && record.kind != KIND_GLOBAL_OCEAN)
+        (record.kind != KIND_GLOBAL_BLOCK && record.kind != KIND_GLOBAL_OCEAN && record.kind != KIND_GLOBAL_WATER_SUMMARY)
             || (record.generator_version == GLOBAL_VERSION && record.hash_version == HASH_VERSION && record.node_set_id == self.node_set_id)
     }
 
@@ -787,6 +921,11 @@ impl From<PackError> for GlobalBuildError {
         GlobalBuildError::Pack(e)
     }
 }
+impl From<SummaryError> for GlobalBuildError {
+    fn from(e: SummaryError) -> Self {
+        GlobalBuildError::Codec(BlockCodecError::Summary(e.to_string()))
+    }
+}
 impl From<OceanError> for GlobalBuildError {
     fn from(e: OceanError) -> Self {
         GlobalBuildError::Ocean(e)
@@ -813,6 +952,11 @@ pub struct GlobalBuildReport {
     /// bits), and of the analysis that ran inside the bake's worker threads (thread time, summed over blocks).
     pub ocean_seconds: f64,
     pub ocean_in_bake_thread_seconds: f64,
+    /// Whether this run wrote the water summary (ADR 0058; `false`: it was already stored under its current key), the seconds that
+    /// took and the payload's bytes (0 when not written).
+    pub summary_written: bool,
+    pub summary_seconds: f64,
+    pub summary_bytes: usize,
 }
 
 /// Bytes per vertex of a block alive in the ocean passes beyond the bake's own 16: a block read back from the store holds its payload,
@@ -984,8 +1128,12 @@ pub fn build_global(
         ocean_merger_bytes: 0,
         ocean_seconds: 0.0,
         ocean_in_bake_thread_seconds: in_bake_ns.load(Ordering::Relaxed) as f64 * 1e-9,
+        summary_written: false,
+        summary_seconds: 0.0,
+        summary_bytes: 0,
     };
     let Some(mut merger) = merger else {
+        write_summary_if_missing(dir, world, res, threads, &mut writer, &mut report)?;
         writer.finish()?;
         return Ok(report);
     };
@@ -1019,8 +1167,86 @@ pub fn build_global(
         }
     }
     report.ocean_seconds = started.elapsed().as_secs_f64();
+    write_summary_if_missing(dir, world, res, threads, &mut writer, &mut report)?;
     writer.finish()?;
     Ok(report)
+}
+
+/// The water summary of a stored bake, computed from its stored sample blocks and ocean blocks (ADR 0058): the known answer of a
+/// bake and the reference of [`verify_global`] for the summary record. A pure function of the stored blocks, so the thread count
+/// changes nothing.
+pub fn water_summary_of_store(store: &TileStore, world: &GlobalWorld, res: u32, threads: usize) -> Result<WaterSummary, GlobalBuildError> {
+    let (level, cells) = world.layout(res)?;
+    let total = 6usize << (2 * u32::from(level));
+    let mut summary = WaterSummary::new(res, cells)?;
+    let batch_n = batch_blocks_of(cells, threads, OCEAN_READ_BYTES_PER_VERTEX);
+    let mut tiles = (0..total).map(|i| tile_at(level, i));
+    loop {
+        let batch: Vec<TileId> = tiles.by_ref().take(batch_n).collect();
+        if batch.is_empty() {
+            return Ok(summary);
+        }
+        let results = parallel_map(&batch, threads.min(batch_n), &|t| -> Result<Vec<SummaryCell>, GlobalBuildError> {
+            let samples = stored_block(store, world, *t, cells)?;
+            let key = world.ocean_key(*t, cells);
+            let what = |why: String| GlobalBuildError::MissingBlock(format!("ocean block {:#018x} key {key}: {why}", t.raw()));
+            let rec = store
+                .get(KIND_GLOBAL_OCEAN, *t, key)
+                .map_err(|e| what(e.to_string()))?
+                .ok_or_else(|| what("not stored under the current key".into()))?;
+            let bits = decode_ocean_block(&rec.payload).map_err(|e| what(e.to_string()))?;
+            Ok(summarize_block(cells, &samples, &bits)?)
+        });
+        for (t, r) in batch.iter().zip(results) {
+            summary.set_block(*t, &r?)?;
+        }
+    }
+}
+
+/// The stored water summary of the bake of `res` cells in `store`, decoded: an error naming the record and the command that adds it
+/// when it is missing, damaged or of another shape (ADR 0058).
+pub fn load_water_summary(store: &TileStore, world: &GlobalWorld, res: u32) -> Result<WaterSummary, ReadError> {
+    let (_, cells) = world.layout(res).map_err(|e| ReadError::Source(e.to_string()))?;
+    let key = world.summary_key(res, cells);
+    let what = |why: String| ReadError::Source(format!("water summary (record kind {KIND_GLOBAL_WATER_SUMMARY}) key {key}: {why}"));
+    let rec =
+        store.get(KIND_GLOBAL_WATER_SUMMARY, GlobalWorld::summary_tile(), key).map_err(|e| what(e.to_string()))?.ok_or_else(|| {
+            what("not stored under the current key (add it with `generate --global-dir DIR`, which writes only what is missing)".into())
+        })?;
+    let summary = decode_summary(&rec.payload).map_err(|e| what(e.to_string()))?;
+    if summary.res() != res || summary.block_cells() != cells {
+        return Err(what(format!(
+            "it is of a {}-cell bake in blocks of {}, the layout says {res} cells in blocks of {cells}",
+            summary.res(),
+            summary.block_cells()
+        )));
+    }
+    Ok(summary)
+}
+
+/// Write the water summary if the store does not hold it under its current key: from the stored blocks, after putting the blocks this
+/// run wrote on disk. A bake whose summary is stored recomputes nothing.
+fn write_summary_if_missing(
+    dir: &Path,
+    world: &GlobalWorld,
+    res: u32,
+    threads: usize,
+    writer: &mut PackWriter,
+    report: &mut GlobalBuildReport,
+) -> Result<(), GlobalBuildError> {
+    writer.write_index()?;
+    let store = TileStore::open(dir, world.params())?;
+    if load_water_summary(&store, world, res).is_ok() {
+        return Ok(());
+    }
+    let started = Instant::now();
+    let summary = water_summary_of_store(&store, world, res, threads)?;
+    let record = world.summary_record(&summary)?;
+    report.summary_bytes = record.payload.len();
+    writer.append(&record)?;
+    report.summary_seconds = started.elapsed().as_secs_f64();
+    report.summary_written = true;
+    Ok(())
 }
 
 /// The ocean channel of a stored bake as a [`OceanLattice`] for the water-level field (ADR 0041 point 1): it finds the block that
@@ -1238,6 +1464,63 @@ fn verify_ocean_record(
     }
 }
 
+/// The water summary record of the store against the summary recomputed from the stored sample and ocean blocks: decode first, a
+/// record under another key stale, a record under the world's key equal cell for cell.
+fn verify_summary_record(store: &TileStore, world: &GlobalWorld, stored: &crate::pack::Stored, report: &mut VerifyReport) {
+    let r = &stored.record;
+    let where_ = format!("{}: water summary {:#018x} key {} at offset {}", stored.pack, r.tile.raw(), r.key, stored.offset);
+    let kept = match decode_summary(&r.payload) {
+        Ok(s) => s,
+        Err(e) => {
+            report.unreadable.push(format!("{where_}: {e}"));
+            return;
+        }
+    };
+    let (res, cells) = (kept.res(), kept.block_cells());
+    if world.layout(res).ok().map(|(_, c)| c) != Some(cells) {
+        report.unreadable.push(format!("{where_}: {cells} cells per block is not the canonical layout of a {res}-cell grid"));
+        return;
+    }
+    let metadata_current = r.generator_version == GLOBAL_VERSION && r.hash_version == HASH_VERSION && r.node_set_id == world.node_set_id;
+    if world.summary_key(res, cells) != r.key || r.tile != GlobalWorld::summary_tile() {
+        if metadata_current {
+            report.unexplained_stale += 1;
+        } else {
+            report.stale += 1;
+        }
+        return;
+    }
+    let mismatch = |detail: String| Mismatch { tile: r.tile, key: r.key, pack: stored.pack.clone(), offset: stored.offset, detail };
+    if !metadata_current {
+        report.mismatches.push(mismatch(
+            "the key is the world's but the record disagrees with it in its versions or node set id: the record was written wrongly".into(),
+        ));
+        return;
+    }
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    match water_summary_of_store(store, world, res, threads) {
+        Err(e) => report.unreadable.push(format!("{where_}: the summary cannot be recomputed from the stored blocks: {e}")),
+        Ok(fresh) => {
+            let differ = |i: &usize| {
+                let (a, b) = (fresh.cells()[*i], kept.cells()[*i]);
+                a.flags != b.flags || a.band_elevation_m.to_bits() != b.band_elevation_m.to_bits()
+            };
+            match (0..fresh.cells().len()).find(differ) {
+                None => report.matching += 1,
+                Some(first) => {
+                    let count = (0..fresh.cells().len()).filter(differ).count();
+                    report.mismatches.push(mismatch(format!(
+                        "cell {first}: stored {:?}, recomputed {:?}; {count} of {} cells differ: an input of the summary is missing from its key",
+                        kept.cells()[first],
+                        fresh.cells()[first],
+                        fresh.cells().len()
+                    )));
+                }
+            }
+        }
+    }
+}
+
 /// Verify `sample` evenly spaced block records of the store (all of them when `sample` is 0) against regeneration: the
 /// same rules as for height tiles (STRM-004): every record is decoded first; a record under the key the world gives must carry
 /// the world's metadata and equal its regeneration bit for bit; a record under another key is stale (explained when its
@@ -1259,6 +1542,10 @@ pub fn verify_global(store: &TileStore, world: &GlobalWorld, sample: usize) -> V
         let r = &stored.record;
         if r.kind == KIND_GLOBAL_OCEAN {
             verify_ocean_record(store, world, &stored, &mut ocean_reference, &mut report);
+            continue;
+        }
+        if r.kind == KIND_GLOBAL_WATER_SUMMARY {
+            verify_summary_record(store, world, &stored, &mut report);
             continue;
         }
         if r.kind != KIND_GLOBAL_BLOCK {

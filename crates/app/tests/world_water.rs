@@ -147,3 +147,26 @@ fn a_store_check_names_every_problem_of_a_store_and_passes_a_complete_one() {
     let both = StoreCheck { ocean: None, compact: (0, 2046), ..good }.problems();
     assert_eq!(both.len(), 2);
 }
+
+// spec: GEN-024
+#[test]
+fn an_in_memory_world_answers_the_tiles_at_the_block_level_from_a_summary_like_a_stored_one() {
+    let w = world(128);
+    let radius = 6_371_000.0;
+    let (mut coarse, mut wet) = (0, 0);
+    w.with_water(|f| {
+        for face in 0..6u8 {
+            let t = TileId::new(planet_core::Face(face), 0, 0, 0).unwrap();
+            if let Some(a) = f.coarse_tile_water(&TangentWarp, t, radius).unwrap() {
+                coarse += 1;
+                wet += usize::from(a.is_some());
+            }
+            // A finer tile is not answered by the summary: the block of a 128-cell bake is the face.
+            let child = t.children().unwrap()[0];
+            assert!(f.coarse_tile_water(&TangentWarp, child, radius).unwrap().is_none());
+        }
+    })
+    .unwrap();
+    assert_eq!(coarse, 6);
+    assert!(wet >= 1, "some face of the ocean world carries sea");
+}

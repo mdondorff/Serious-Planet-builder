@@ -67,3 +67,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0055 | [Documentation model: specs hold current rules, ADRs record why](0055-documentation-model.md) | accepted | point 6: consolidation in the M5 housekeeping (queue item 10b) |
 | 0056 | [Water selection: the coastal band, tile water in the tile job, a pixel-footprint wave fade](0056-coastal-band-water-selection.md) | accepted | amends 0053 points 4 and 5 |
 | 0057 | [GPU figures below the clock floor: a cool start, and a pass is a pass](0057-gpu-clock-below-the-floor.md) | accepted | amends 0036 point 2 |
+| 0058 | [A coarse level of the water field: a summary the bake writes once](0058-coarse-level-of-the-water-field.md) | accepted | amends 0053 points 4, 5 and 0056 points 1, 4 for coarse tiles; for the owner at the M5 gate |
