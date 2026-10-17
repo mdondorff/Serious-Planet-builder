@@ -71,11 +71,11 @@ Source: ADR 0042 point 4, ADR 0045 point 5, ADR 0032 point 4, owner 2026-10-17 (
 - **THEN** it contains each of them in a fixed format, `gpu n/a` when no GPU time exists, and `loading` or `ready` for the readiness; on the lit path it names `lit + atmosphere` (or `lit`) and the exposure after the vsync state, on the debug path the debug view and no exposure
 
 ### Requirement: VIEW-004 Free camera
-The viewer SHALL offer a free camera on the key C, moved by W, A, S, D (along the view and to the side), Q and E (down and up), the arrow keys (look) and Shift (boost), with a speed proportional to the height above the terrain within limits. The pose update SHALL be one pure function in a GPU-free crate, `free_step(pose, input, dt, height, params) -> pose`, with the input carrying key axes, key look rates and a look delta in radians (so that a mouse delta can feed it later). Yaw and pitch SHALL be relative to the local vertical and the camera rebuilt from them every frame, never accumulated into a rotation; the heading SHALL be carried by parallel transport along a great circle, so the poles are not singular; pitch SHALL be clamped short of +-90 degrees (89 degrees). Tests, goldens and perf scenes SHALL keep the scripted flight.
+The viewer SHALL offer a free camera on the key C, moved by W, A, S, D (along the view and to the side), Q and E (down and up), the arrow keys (look) and Shift (boost), with a speed proportional to the height above the terrain within limits. The pose update SHALL be one pure function in a GPU-free crate, `free_step(pose, input, dt, height, params) -> pose`, with the input carrying key axes, key look rates and a look delta in radians (so that a mouse delta can feed it later). Yaw and pitch SHALL be relative to the local vertical and the camera rebuilt from them every frame, never accumulated into a rotation; the heading SHALL be carried by parallel transport along a great circle, so the poles are not singular; pitch SHALL be clamped short of +-90 degrees (89 degrees). The keyboard feel is kept: W and S move along the view's horizontal heading and the pitch, and the orbit behaviour is unchanged. The speed limits (least and greatest, metres per second) SHALL scale with the body's radius over the Earth's mean radius (6,371,000 m), so that an Earth-sized body moves bit for bit as before and a body of half the radius has half the limits; between the limits the speed is proportional to the height above the terrain. The eye SHALL never end a frame below the terrain at its direction plus the clearance (1 m): the viewer lifts the pose after each move to the CPU f64 height field of the opened world plus the body's radius (the field the tiles are generated from, exact at every position and at every level of detail; the resident tile heights are f32 and coarser at a distance). Tests, goldens and perf scenes SHALL keep the scripted flight.
 
 Verify: A
 Status: active
-Source: owner 2026-10-16 (status item 1 addition), ADR 0042 point 4, CON-04, CON-14
+Source: owner 2026-10-16 (status item 1 addition), owner 2026-10-17 (item 1b, keyboard), ADR 0042 point 4, CON-04, CON-14
 
 #### Scenario: No roll
 - **WHEN** a long pseudo-random sequence of key and look input is applied at 1 m, 3 km and in orbit, from the equator, a pole and a diagonal
@@ -92,6 +92,18 @@ Source: owner 2026-10-16 (status item 1 addition), ADR 0042 point 4, CON-04, CON
 #### Scenario: Frame splitting
 - **WHEN** one second of the same input is applied as 1, 3 or 60 frames
 - **THEN** the pose is the same to rounding for motion, and the heading and pitch are the same for look
+
+#### Scenario: Earth speeds unchanged
+- **WHEN** an Earth-sized body is flown at heights from below zero to infinity with boost 0, 1, 2.5 and 8
+- **THEN** every speed is bit-identical to the speed before the limits scaled, and a second of forward flight gives the same pose
+
+#### Scenario: Half the radius
+- **WHEN** a body of half the Earth's radius is flown
+- **THEN** its limits are 0.25 and 1.5e6 m/s, its speed between them equals the Earth's at the same height, and the boost multiplies the scaled limit
+
+#### Scenario: Ground clamp
+- **WHEN** the camera flies down and forward into a 300 m hill for 20 s
+- **THEN** at every step its distance from the centre is at least the terrain there plus 1 m, and it ends within a metre of that
 
 #### Scenario: Poles, 1 m and orbit
 - **WHEN** the camera flies over the pole at 1 m, and moves and looks exactly at the pole
