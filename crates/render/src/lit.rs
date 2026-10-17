@@ -202,6 +202,8 @@ pub struct LitPath {
     has_state: bool,
     /// Bytes this path allocated (targets and buffers).
     allocated: u64,
+    /// The atmosphere's tables, products and passes (ADR 0040), after [`enable_atmosphere`](LitPath::enable_atmosphere).
+    atmosphere: Option<crate::atmosphere::AtmospherePath>,
 }
 
 impl LitPath {
@@ -364,7 +366,29 @@ impl LitPath {
             compiles: 0,
             has_state: false,
             allocated,
+            atmosphere: None,
         }
+    }
+
+    /// Make the atmosphere's tables, products, scene target and pipelines (once; the terrain then draws into the scene target when a
+    /// plan carries an atmosphere). `depth` is the depth view the terrain writes and the composite reads.
+    pub(crate) fn enable_atmosphere(
+        &mut self,
+        ctx: &GpuContext,
+        depth: &wgpu::TextureView,
+        atmosphere: &planet_frame::look::atmosphere::Atmosphere,
+    ) {
+        if self.atmosphere.is_some() {
+            return;
+        }
+        let mut path = crate::atmosphere::AtmospherePath::new(ctx, self.size, Some(depth), HDR_FORMAT);
+        path.ensure_tables(ctx, atmosphere);
+        self.allocated += path.allocated_bytes();
+        self.atmosphere = Some(path);
+    }
+
+    pub fn atmosphere(&self) -> Option<&crate::atmosphere::AtmospherePath> {
+        self.atmosphere.as_ref()
     }
 
     pub fn size(&self) -> (u32, u32) {
@@ -424,11 +448,25 @@ impl LitPath {
         bytes
     }
 
-    /// Record the passes after the terrain pass into `encoder`, in the order of the compiled graph, ending with the tone map into
-    /// `target` (an `Rgba8Unorm` view of this path's size). Compiles the frame graph when the shape (size, exposure mode) differs
-    /// from the last frame's.
-    pub(crate) fn record_post(&mut self, ctx: &GpuContext, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, plan: &LitPlan) {
-        let shape = LitShape { size: self.size, adaptive: plan.exposure.is_adaptive() };
+    /// Whether this frame draws the atmosphere: the plan carries one and the path has it enabled.
+    pub(crate) fn frame_has_atmosphere(&self, plan: &LitPlan) -> bool {
+        plan.atmosphere.is_some() && self.atmosphere.is_some()
+    }
+
+    /// The scene target the terrain draws into this frame: the atmosphere's when it composites, else the final HDR target.
+    pub(crate) fn terrain_target(&self, plan: &LitPlan) -> &wgpu::TextureView {
+        match (&self.atmosphere, plan.atmosphere.is_some()) {
+            (Some(a), true) => a.scene_view(),
+            _ => &self.hdr_view,
+        }
+    }
+
+    /// Everything the frame needs before its passes are recorded: compile the graph when the shape (size, exposure mode,
+    /// atmosphere) differs from the last frame's, seed the exposure history, write the parameters and, with an atmosphere, upload the
+    /// body's tables if they changed and write the frame's block (the geometry decided in f64 from the camera and the plan's sun).
+    pub(crate) fn prepare(&mut self, ctx: &GpuContext, plan: &LitPlan, camera: &planet_frame::Camera) {
+        let atmosphere = self.frame_has_atmosphere(plan);
+        let shape = LitShape { size: self.size, adaptive: plan.exposure.is_adaptive(), atmosphere };
         if self.compiled.as_ref().map(|(s, _, _)| *s) != Some(shape) {
             let graph = lit_frame_graph(&shape);
             let compiled = graph.compile().unwrap_or_else(|e| panic!("the lit frame graph does not compile: {e}"));
@@ -446,11 +484,39 @@ impl LitPath {
         // The queue orders this write before the submission that holds the passes below, and after every earlier submission, so
         // frames in flight read their own parameters.
         ctx.queue.write_buffer(&self.params, 0, &Self::params_bytes(plan, reset));
-        let (_, graph, compiled) = self.compiled.as_ref().expect("compiled above");
+        if let (Some(path), Some(ap)) = (self.atmosphere.as_mut(), plan.atmosphere.as_ref()) {
+            path.ensure_tables(ctx, &ap.atmosphere);
+            let sun = plan.sun_dir.map(f64::from);
+            let geometry = planet_frame::look::atmosphere::FrameGeometry::new(&ap.atmosphere, camera, sun);
+            let factor = look::pre_exposure_factor_with(&plan.units, f64::from(plan.exposure.pre_ev100())) as f32;
+            path.write_frame(ctx, &ap.atmosphere, &geometry, factor, ap.view);
+        }
+    }
+
+    /// Record the passes that come before the terrain pass in the compiled graph (the atmosphere's sky-view table and
+    /// aerial-perspective volume).
+    pub(crate) fn record_pre(&self, encoder: &mut wgpu::CommandEncoder) {
+        let (_, graph, compiled) = self.compiled.as_ref().expect("prepared");
         for &i in &compiled.order {
             match graph.passes()[i].name {
-                // Recorded by the terrain renderer into `hdr_view`.
-                "terrain" => {}
+                "terrain" => break,
+                // The tables were uploaded in `prepare` when they changed; the pass is the graph's marker for it.
+                "atmosphere-luts" => {}
+                "sky-view" => self.atmosphere.as_ref().expect("atmosphere enabled").record_sky_view(encoder),
+                "aerial-perspective" => self.atmosphere.as_ref().expect("atmosphere enabled").record_aerial_perspective(encoder),
+                other => panic!("the lit executor has no pre-terrain pass '{other}'"),
+            }
+        }
+    }
+
+    /// Record the passes after the terrain pass into `encoder`, in the order of the compiled graph, ending with the tone map into
+    /// `target` (an `Rgba8Unorm` view of this path's size).
+    pub(crate) fn record_post(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
+        let (_, graph, compiled) = self.compiled.as_ref().expect("prepared");
+        let after_terrain = compiled.order.iter().position(|&i| graph.passes()[i].name == "terrain").map_or(0, |p| p + 1);
+        for &i in &compiled.order[after_terrain..] {
+            match graph.passes()[i].name {
+                "sky-composite" => self.atmosphere.as_ref().expect("atmosphere enabled").record_composite(encoder, &self.hdr_view),
                 "exposure-histogram" => {
                     encoder.clear_buffer(&self.histogram, 0, None);
                     let mut pass = encoder
@@ -516,7 +582,19 @@ impl LitPath {
         });
         let view = target.create_view(&Default::default());
         let mut encoder = ctx.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("lit-post") });
-        self.record_post(ctx, &mut encoder, &view, plan);
+        assert!(!self.frame_has_atmosphere(plan), "tone_map_to_image has no camera: it cannot draw an atmosphere");
+        self.prepare(
+            ctx,
+            plan,
+            &planet_frame::Camera::looking_at_centre(
+                planet_core::PlanetFixed(planet_core::Vec3::new(1.0e7, 0.0, 0.0)),
+                planet_core::Vec3::new(0.0, 0.0, 1.0),
+                1.0,
+                1.0,
+                0.1,
+            ),
+        );
+        self.record_post(&mut encoder, &view);
         ctx.queue.submit([encoder.finish()]);
         crate::read_rgba8(ctx, &target, self.size.0, self.size.1)
     }
@@ -603,6 +681,10 @@ pub fn target_formats() -> TargetFormats {
 pub(crate) const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// Format of the tone-map output: the encode is in the shader, so the target is not an sRGB format (ADR 0038 point 3).
 pub(crate) const LDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+pub(crate) fn read_buffer_bytes(ctx: &GpuContext, buffer: &wgpu::Buffer, bytes: u64) -> Vec<u8> {
+    read_buffer(ctx, buffer, bytes)
+}
 
 fn read_buffer(ctx: &GpuContext, buffer: &wgpu::Buffer, bytes: u64) -> Vec<u8> {
     let readback = ctx.device.create_buffer(&wgpu::BufferDescriptor {

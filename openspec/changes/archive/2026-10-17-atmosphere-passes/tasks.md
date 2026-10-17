@@ -1,0 +1,4 @@
+- [x] 1.1 Render graph: atmosphere shape, passes, persistent tables, share (ATMO-011)
+- [x] 2.1 render::atmosphere: WGSL, AtmospherePath, probes, enable_atmosphere, terrain pipelines (ATMO-001, ATMO-002)
+- [x] 3.1 Tier B oracles and the 1 m walk (ATMO-001, ATMO-010); tier C frames and goldens (ATMO-002, ATMO-011); REND-005 scope
+- [x] 4.1 numerics-reviewer, spec-guardian, verifier; test, test gpu, test gpu --real, spec-lint, fmt, clippy; golden-review; archive; log; status

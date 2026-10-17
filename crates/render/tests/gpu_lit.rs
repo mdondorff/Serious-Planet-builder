@@ -244,13 +244,13 @@ fn the_renderers_frame_targets_equal_the_compiled_graphs_count_and_fit_the_share
     let mut r = renderer(&ctx, false, &[&p], false);
     assert_eq!(r.lit_frame_target_bytes(), None, "no lit targets before enable_lit");
     r.enable_lit(&ctx);
-    let compiled = lit_frame_graph(&LitShape { size: SIZE, adaptive: true }).compile().unwrap();
+    let compiled = lit_frame_graph(&LitShape { size: SIZE, adaptive: true, atmosphere: false }).compile().unwrap();
     let held = r.lit_frame_target_bytes().unwrap();
     assert_eq!(held, compiled.frame_target_bytes(), "what the renderer allocates is what the compiled graph counts");
     assert_eq!(held, 128 * 96 * (8 + 4) + 256 + 16);
     assert!(held <= frame_target_share_bytes(SIZE), "{held} B over the share of {} B", frame_target_share_bytes(SIZE));
     // The same count at 1440p from the same formula: HDR 29.5 MB, depth 14.7 MB.
-    let big = lit_frame_graph(&LitShape { size: (2560, 1440), adaptive: true }).compile().unwrap();
+    let big = lit_frame_graph(&LitShape { size: (2560, 1440), adaptive: true, atmosphere: false }).compile().unwrap();
     assert_eq!(big.frame_target_bytes(), 44_237_072);
 }
 

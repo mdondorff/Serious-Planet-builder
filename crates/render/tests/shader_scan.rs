@@ -1,4 +1,6 @@
-//! REND-005: shaders see only tile-local and camera-relative quantities: no planet-radius constants or uniforms.
+//! REND-005: geometry shaders see only tile-local and camera-relative quantities: no planet-radius constants or uniforms. The
+//! atmosphere's shaders (presentation shading, CON-11 v1.4) may hold the radius in their uniform block but carry no planet-scale
+//! literal or radius-like name, and no vertex stage may touch that block.
 
 use planet_render::{compact_terrain_shader, lit_post_shaders, EXEC_SHADERS, SHADERS, TERRAIN_SHADERS};
 
@@ -48,6 +50,22 @@ fn shipped_shaders_contain_no_planet_scale_values() {
     for (name, src) in lit_post_shaders() {
         for h in scan(&src) {
             all.push(format!("{name}: {h}"));
+        }
+    }
+    // The atmosphere's shaders are presentation shading (CON-11 v1.4, ADR 0043): they hold the body's radius as a value of their
+    // uniform block, decided in f64 on the CPU, so the radius-uniform rule does not apply; they carry no planet-scale literal and
+    // no radius-like name either.
+    for (name, src) in planet_render::atmosphere_shaders() {
+        for h in scan(&src) {
+            all.push(format!("{name}: {h}"));
+        }
+        // A vertex stage places geometry: it must not read the atmosphere's block (which holds the body's radius).
+        for (at, _) in src.match_indices("@vertex") {
+            let body = &src[at..];
+            let end = body.find("\n}\n").unwrap_or(body.len());
+            if body[..end].contains("A.") {
+                all.push(format!("{name}: a vertex stage reads the atmosphere's uniform block"));
+            }
         }
     }
     for cells in [4, 32, 64] {

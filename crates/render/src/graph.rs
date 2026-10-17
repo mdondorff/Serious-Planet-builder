@@ -231,17 +231,30 @@ pub fn frame_target_share_bytes(size: (u32, u32)) -> u64 {
     u64::from(size.0) * u64::from(size.1) * FRAME_TARGET_BYTES_PER_PIXEL + FRAME_TARGET_FIXED_BYTES
 }
 
-/// What the lit frame's passes depend on. The graph is compiled when the shape changes (a new size or exposure mode), not
-/// every frame.
+/// Bytes of the atmosphere's static tables (`Rgba32Float`: the transmittance table 256 x 64 and the multiple-scattering table
+/// 32 x 32, ADR 0040 point 2) and of its per-frame products (`Rgba16Float`: the sky-view table 192 x 108 and the aerial-perspective
+/// volume 32 x 32 x 32). Counted in the frame-target share like every other target the lit frame allocates (ADR 0048 point 1).
+pub const TRANSMITTANCE_LUT_BYTES: u64 = 256 * 64 * 16;
+pub const MULTISCATTER_LUT_BYTES: u64 = 32 * 32 * 16;
+pub const SKY_VIEW_BYTES: u64 = 192 * 108 * 8;
+pub const AERIAL_PERSPECTIVE_BYTES: u64 = 32 * 32 * 32 * 8;
+
+/// What the lit frame's passes depend on. The graph is compiled when the shape changes (a new size, the exposure mode or the
+/// atmosphere), not every frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LitShape {
     pub size: (u32, u32),
     /// Adaptive exposure runs the histogram; fixed exposure culls it.
     pub adaptive: bool,
+    /// The frame has an atmosphere (ADR 0040, ADR 0042 point 2): the static tables, the sky-view table and the aerial-perspective
+    /// volume are made before the terrain, which draws into a scene target the sky and aerial-perspective composite reads.
+    pub atmosphere: bool,
 }
 
-/// The lit path as a graph: terrain into HDR colour and depth, the exposure histogram and adaptation, the tone map into the
-/// presentable target. The atmosphere, water and sky passes of ADR 0042 point 2 join here as their changes land.
+/// The lit path as a graph: with an atmosphere the static tables' upload, the sky-view table and the aerial-perspective volume
+/// (compute); terrain into HDR colour and depth; the sky and aerial-perspective composite (reading the one depth buffer); then the
+/// exposure histogram and adaptation and the tone map into the presentable target. The water pass of ADR 0042 point 2 joins as its
+/// change lands.
 pub fn lit_frame_graph(shape: &LitShape) -> RenderGraph {
     let pixels = u64::from(shape.size.0) * u64::from(shape.size.1);
     let mut g = RenderGraph::new(&["presentable"]);
@@ -249,7 +262,26 @@ pub fn lit_frame_graph(shape: &LitShape) -> RenderGraph {
         .describe_sized("depth", "depth32-frame", pixels * DEPTH_BYTES_PER_PIXEL)
         .describe_sized("histogram", "histogram-64", HISTOGRAM_BYTES)
         .persistent("exposure-state", EXPOSURE_STATE_BYTES);
-    g.add_pass("terrain", &[], &["hdr", "depth"], false);
+    if shape.atmosphere {
+        g.describe_sized("hdr-scene", "rgba16float-frame", pixels * HDR_BYTES_PER_PIXEL)
+            .describe_sized("sky-view-lut", "rgba16float-sky-view", SKY_VIEW_BYTES)
+            .describe_sized("aerial-perspective-volume", "rgba16float-aerial-perspective", AERIAL_PERSPECTIVE_BYTES)
+            .persistent("transmittance-lut", TRANSMITTANCE_LUT_BYTES)
+            .persistent("multiscatter-lut", MULTISCATTER_LUT_BYTES);
+        // Uploaded when the body's tables change (body load, a look change), a no-op marker on the frames between.
+        g.add_pass("atmosphere-luts", &[], &["transmittance-lut", "multiscatter-lut"], false);
+        g.add_pass("sky-view", &["transmittance-lut", "multiscatter-lut"], &["sky-view-lut"], false);
+        g.add_pass("aerial-perspective", &["transmittance-lut", "multiscatter-lut"], &["aerial-perspective-volume"], false);
+        g.add_pass("terrain", &["transmittance-lut", "multiscatter-lut"], &["hdr-scene", "depth"], false);
+        g.add_pass(
+            "sky-composite",
+            &["hdr-scene", "depth", "sky-view-lut", "aerial-perspective-volume", "transmittance-lut", "multiscatter-lut"],
+            &["hdr"],
+            false,
+        );
+    } else {
+        g.add_pass("terrain", &[], &["hdr", "depth"], false);
+    }
     g.add_pass("exposure-histogram", &["hdr"], &["histogram"], false);
     // Fixed exposure reads no histogram, so the histogram pass above is culled by the compile, not by a branch in the executor.
     let adapt_reads: &[&'static str] = if shape.adaptive { &["histogram"] } else { &[] };

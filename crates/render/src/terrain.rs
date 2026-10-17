@@ -644,6 +644,9 @@ struct LitGpu {
     path: LitPath,
     pipeline: wgpu::RenderPipeline,
     compact_pipeline: Option<wgpu::RenderPipeline>,
+    /// The terrain pipelines of the frames that have an atmosphere (`fs_lit_atmo`, the tables in group 3).
+    atmosphere_pipeline: Option<wgpu::RenderPipeline>,
+    atmosphere_compact_pipeline: Option<wgpu::RenderPipeline>,
 }
 
 fn make_pool_buffer(device: &wgpu::Device, label: &'static str, bytes: u64) -> wgpu::Buffer {
@@ -799,7 +802,8 @@ impl TerrainRenderer {
             format,
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
         );
-        let depth = target("terrain-depth", DEPTH_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT);
+        // The atmosphere's composite reads the depth (TEXTURE_BINDING); the debug path still discards it.
+        let depth = target("terrain-depth", DEPTH_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
         let (color_view, depth_view) = (color.create_view(&Default::default()), depth.create_view(&Default::default()));
         // The share's node-record bytes bound the ring: per node a record and an argument record in each of the RING sets.
         let per_node = NODE_BYTES + DRAW_RECORD_BYTES + if compact { REF_BYTES } else { 0 };
@@ -1158,7 +1162,115 @@ impl TerrainRenderer {
         let path = LitPath::new(ctx, self.size);
         // The scene target, the exposure buffers, three post pipelines and the terrain pipelines.
         self.lit_objects = 1 + 3 + 1 + u32::from(compact_pipeline.is_some());
-        self.lit = Some(LitGpu { path, pipeline, compact_pipeline });
+        self.lit = Some(LitGpu { path, pipeline, compact_pipeline, atmosphere_pipeline: None, atmosphere_compact_pipeline: None });
+    }
+
+    /// Enable the atmosphere (ADR 0040, ADR 0042 point 2) for the body `atmosphere`: its static tables are computed on the CPU in f64
+    /// and uploaded, the products, the scene target, the composite and the terrain's atmosphere pipelines are created. Needs
+    /// [`enable_lit`](TerrainRenderer::enable_lit); call it before the measured frames (REND-017). A plan whose atmosphere differs
+    /// from this body's uploads the new body's tables on its first frame.
+    pub fn enable_atmosphere(&mut self, ctx: &GpuContext, atmosphere: &planet_frame::look::atmosphere::Atmosphere) {
+        let lit = self.lit.as_mut().expect("enable_lit before enable_atmosphere");
+        if lit.path.atmosphere().is_some() {
+            return;
+        }
+        lit.path.enable_atmosphere(ctx, &self.depth_view, atmosphere);
+        let device = &ctx.device;
+        let atmo_bgl = lit.path.atmosphere().expect("just enabled").terrain_layout();
+        let depth = wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(DEPTH_COMPARE),
+            stencil: Default::default(),
+            bias: Default::default(),
+        };
+        let targets = [Some(wgpu::ColorTargetState { format: crate::lit::HDR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })];
+        let attr =
+            |format, k: usize, loc| wgpu::VertexAttribute { format, offset: 4 * MeshVertex::OFFSETS[k] as u64, shader_location: loc };
+        let attrs = [
+            attr(wgpu::VertexFormat::Float32x3, 0, 0),
+            attr(wgpu::VertexFormat::Float32x3, 1, 1),
+            attr(wgpu::VertexFormat::Float32x3, 2, 2),
+            attr(wgpu::VertexFormat::Float32, 3, 3),
+            attr(wgpu::VertexFormat::Float32, 4, 4),
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float16x2, offset: MeshVertex::STRIDE, shader_location: 5 },
+        ];
+        // The atmosphere's group is 3 in both pipelines (groups 1 and 2 are the compact format's), so one bind group set once per pass
+        // stays bound across pipeline switches.
+        let vertex_source = format!("{SHADER}{}", crate::atmosphere::terrain_atmosphere_source());
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("terrain-lit-atmosphere"),
+            source: wgpu::ShaderSource::Wgsl(vertex_source.into()),
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("terrain-lit-atmosphere-layout"),
+            bind_group_layouts: &[Some(&self.bgl), None, None, Some(atmo_bgl)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("terrain-lit-atmosphere-pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: MeshVertex::GPU_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &attrs,
+                })],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_lit_atmo"),
+                compilation_options: Default::default(),
+                targets: &targets,
+            }),
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: Some(depth.clone()),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let compact_pipeline = self.compact.as_ref().map(|c| {
+            let source = format!("{}{}", compact_terrain_shader(self.cells), crate::atmosphere::terrain_atmosphere_source());
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("terrain-compact-lit-atmosphere"),
+                source: wgpu::ShaderSource::Wgsl(source.into()),
+            });
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("compact-lit-atmosphere-layout"),
+                bind_group_layouts: &[Some(&self.bgl), Some(&c.bgl_frame), Some(&c.bgl_atlas), Some(atmo_bgl)],
+                immediate_size: 0,
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("compact-lit-atmosphere-pipeline"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_lit_atmo"),
+                    compilation_options: Default::default(),
+                    targets: &targets,
+                }),
+                primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+                depth_stencil: Some(depth.clone()),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        });
+        // Counted by declaration: the atmosphere path's scene target, two tables, two products, the uniform buffer and three
+        // pipelines (sky view, aerial perspective, composite) beside the terrain pipelines made here.
+        const ATMOSPHERE_PATH_OBJECTS: u32 = 9;
+        self.lit_objects += 1 + u32::from(compact_pipeline.is_some()) + ATMOSPHERE_PATH_OBJECTS - 3;
+        lit.atmosphere_pipeline = Some(pipeline);
+        lit.atmosphere_compact_pipeline = compact_pipeline;
     }
 
     /// Long-lived GPU objects the lit path made (scene target, exposure buffers, the post pipelines and the terrain pipelines).
@@ -1947,6 +2059,9 @@ impl TerrainRenderer {
         if plan.lit.is_some() && self.lit.is_none() {
             return Err(ExecError::LitNotEnabled);
         }
+        if plan.lit.as_ref().is_some_and(|l| l.atmosphere.is_some()) && self.lit.as_ref().is_some_and(|l| l.path.atmosphere().is_none()) {
+            return Err(ExecError::AtmosphereNotEnabled);
+        }
         self.frame += 1;
         let device = &ctx.device;
         if plan.nodes.len() > self.node_capacity {
@@ -2046,10 +2161,22 @@ impl TerrainRenderer {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("terrain") });
         // The lit path draws into its scene target with its own pipelines and clears to black without coverage; the debug path
         // is the plan's colour target as before.
+        if let (Some(l), Some(lit)) = (self.lit.as_mut(), plan.lit.as_ref()) {
+            // The compiled graph, the parameters and, with an atmosphere, the tables and the frame's block; then the passes that come
+            // before the terrain (the sky-view table and the aerial-perspective volume).
+            l.path.prepare(ctx, lit, &plan.camera);
+            l.path.record_pre(&mut encoder);
+        }
         let lit_gpu = plan.lit.as_ref().and(self.lit.as_ref());
-        let (color_target, vertex_pipeline, compact_pipeline) = match lit_gpu {
-            Some(l) => (l.path.hdr_view(), &l.pipeline, l.compact_pipeline.as_ref()),
-            None => (&self.color_view, &self.pipeline, self.compact.as_ref().map(|c| &c.pipeline)),
+        let atmosphere_frame = plan.lit.as_ref().is_some_and(|l| l.atmosphere.is_some());
+        let (color_target, vertex_pipeline, compact_pipeline) = match (lit_gpu, plan.lit.as_ref()) {
+            (Some(l), Some(lit)) if atmosphere_frame => (
+                l.path.terrain_target(lit),
+                l.atmosphere_pipeline.as_ref().expect("atmosphere enabled"),
+                l.atmosphere_compact_pipeline.as_ref(),
+            ),
+            (Some(l), _) => (l.path.hdr_view(), &l.pipeline, l.compact_pipeline.as_ref()),
+            _ => (&self.color_view, &self.pipeline, self.compact.as_ref().map(|c| &c.pipeline)),
         };
         {
             let [r, g, b, a] = if lit_gpu.is_some() { [0.0; 4] } else { plan.clear_color.map(|v| f64::from(v) / 255.0) };
@@ -2063,7 +2190,11 @@ impl TerrainRenderer {
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth_view,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Discard }),
+                    // The composite reads the depth, so an atmosphere frame keeps it.
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0.0),
+                        store: if atmosphere_frame { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
+                    }),
                     stencil_ops: None,
                 }),
                 timestamp_writes: timing.map(|t| wgpu::RenderPassTimestampWrites {
@@ -2077,6 +2208,9 @@ impl TerrainRenderer {
             pass.set_pipeline(vertex_pipeline);
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.set_bind_group(0, &set.bind, &[]);
+            if let Some(a) = lit_gpu.filter(|_| atmosphere_frame).and_then(|l| l.path.atmosphere()) {
+                pass.set_bind_group(3, a.terrain_bind(), &[]);
+            }
             // Which pipeline is bound: a run of an atlas needs the compact one with its two bind groups.
             let mut compact_bound: Option<u32> = None;
             let mut vertex_bound = true;
@@ -2151,8 +2285,8 @@ impl TerrainRenderer {
             stats.draw_calls = plan.nodes.len() as u32;
             stats.triangles = plan.nodes.len() as u64 * u64::from(self.index_count) / 3;
         }
-        if let (Some(l), Some(lit)) = (self.lit.as_mut(), plan.lit.as_ref()) {
-            l.path.record_post(ctx, &mut encoder, &self.color_view, lit);
+        if let Some(l) = self.lit.as_ref().filter(|_| plan.lit.is_some()) {
+            l.path.record_post(&mut encoder, &self.color_view);
         }
         if let Some(t) = timing {
             encoder.resolve_query_set(&t.queries, 0..2, &t.resolve, 0);
