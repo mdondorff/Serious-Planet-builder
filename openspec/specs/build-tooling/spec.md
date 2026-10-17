@@ -62,6 +62,10 @@ Source: ADR 0009, report §16
 - **WHEN** `test fast` selects some crates and the tests take longer than 20 s
 - **THEN** it prints the warning and the five slowest tests; when it selects every crate it prints a note and no warning; the compile time is never counted
 
+#### Scenario: Acceptance reads the same budget
+- **WHEN** `cargo xtask accept <milestone>` runs its `test fast` timing step
+- **THEN** the step judges the test time (not the compile) of a selection of changed crates against 20 s and fails over it; a run of every crate passes the step with its number in the row, marked `whole workspace: reported (BUILD-003)`
+
 #### Scenario: Stale local main
 - **WHEN** a branch is checked out in a worktree whose local `main` is behind `origin/main`
 - **THEN** the changed files are those of `origin/main...HEAD` (and the working tree), not of `main...HEAD`; `main` is used only when there is no `origin/main`
