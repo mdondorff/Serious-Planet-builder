@@ -20,5 +20,6 @@ pub mod stage;
 pub mod stress;
 pub mod terrain;
 pub mod water;
+pub mod water_summary;
 
 pub use height::{cache_key, generate_region, generate_tile, TileData, GENERATOR_VERSION, IMPLEMENTATION_ID};

@@ -171,6 +171,9 @@ pub struct WorldTerrain {
     /// The ocean channel of the bake (ADR 0041 point 2): the sea of the water field W. `None` for a field that reads no bake (no
     /// bake, no ocean, no water) and for a store without the channel.
     ocean: Option<Box<dyn OceanLattice + Send + Sync>>,
+    /// The coarse level of W (ADR 0058): the summary of the stored bake, which answers the tiles that span more than one block.
+    /// Made from the bake's own fields for an in-memory bake; `None` for a world without water.
+    summary: Option<&'static planet_generators::water_summary::WaterSummary>,
     /// Whether the fields this world builds bound their tiles up to the sea level (the viewer's lit path: the water of a tile whose
     /// terrain the view culls must not be culled with it, `WaterBounded`). Off for every other run: plans and keys are unchanged.
     bound_water: bool,
@@ -211,6 +214,7 @@ impl WorldTerrain {
         let radius_m =
             GenContext::new(&def).body_radius_m(BodyId::PLANET).map_err(|e| format!("the definition cannot be generated: {e}"))?;
         let mut ocean: Option<Box<dyn OceanLattice + Send + Sync>> = None;
+        let mut summary_owned: Option<&'static planet_generators::water_summary::WaterSummary> = None;
         let (src, bake_key): (Box<dyn LatticeSource + Send>, [u8; 16]) = if kind.needs_bake() {
             if global_res > MAX_RUN_BAKE_RES {
                 return Err(format!("--global-res {global_res}: a run bakes in memory, at most {MAX_RUN_BAKE_RES} cells per face edge"));
@@ -225,6 +229,11 @@ impl WorldTerrain {
             let block = global_res.min(256);
             let (_, grid_ocean) = tiled_ocean(&grid, &TangentWarp, block, threads, sea.min_area_fraction)
                 .map_err(|e| format!("the ocean channel of the in-memory bake: {e:?}"))?;
+            // The coarse level of W from the same fields, in the store's block layout (blocks of at most 1024 cells), so a run over an
+            // in-memory bake selects water by the rule of the stored one (ADR 0058).
+            let summary = planet_generators::water_summary::summary_of_grid(&grid, &grid_ocean, global_res.min(1024), threads)
+                .map_err(|e| format!("the water summary of the in-memory bake: {e}"))?;
+            summary_owned = Some(Box::leak(Box::new(summary)) as &'static planet_generators::water_summary::WaterSummary);
             ocean = Some(Box::new(OwnedOcean(grid_ocean)));
             (Box::new(OwnedBake(grid)), world.stage_key(global_res).0)
         } else {
@@ -252,6 +261,7 @@ impl WorldTerrain {
             field_ns: Default::default(),
             store_source: None,
             ocean,
+            summary: summary_owned,
             bound_water: false,
             water_book: Default::default(),
         })
@@ -285,6 +295,14 @@ impl WorldTerrain {
         let ocean: Option<Box<dyn OceanLattice + Send + Sync>> = planet_cache::global_store::StoreOceanSource::new(store, world, res)
             .ok()
             .map(|o| Box::new(SharedOcean(Box::leak(Box::new(o)))) as Box<dyn OceanLattice + Send + Sync>);
+        // The coarse level of W (ADR 0058): a store with the ocean channel and without the summary is refused, because every coarse tile
+        // would then read up to 25 blocks and the dive would lag; the message names the command that adds it.
+        let summary = match &ocean {
+            Some(_) => Some(&*Box::leak(Box::new(
+                planet_cache::global_store::load_water_summary(store, world, res).map_err(|e| format!("{}: {e}", dir.display()))?,
+            ))),
+            None => None,
+        };
         let source = format!("store {}, {res} cells", dir.display());
         Ok(WorldTerrain {
             def,
@@ -307,6 +325,7 @@ impl WorldTerrain {
             field_ns: Default::default(),
             store_source: Some(src),
             ocean,
+            summary,
             bound_water: false,
             water_book: Default::default(),
         })
@@ -548,7 +567,10 @@ impl WorldTerrain {
     pub fn with_water<R>(&self, f: impl FnOnce(&WaterField<'_>) -> R) -> Result<Option<R>, String> {
         let Some(ocean) = self.ocean.as_deref() else { return Ok(None) };
         let sea = self.def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?;
-        let producer = SeaProducer::new(ocean, sea);
+        let producer = match self.summary {
+            Some(summary) => SeaProducer::new(ocean, sea).with_summary(summary),
+            None => SeaProducer::new(ocean, sea),
+        };
         let field = WaterField::new(&TangentWarp, self.src.as_ref(), vec![&producer]);
         Ok(Some(f(&field)))
     }

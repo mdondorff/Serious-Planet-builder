@@ -391,6 +391,17 @@ fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         writeln!(out, "global ocean channel: {} blocks already stored under their current key, nothing recomputed", report.ocean_reused)
             .map_err(err)?;
     }
+    // The coarse level of the water field (ADR 0058, STRM-025) is part of the bake.
+    if report.summary_written {
+        writeln!(
+            out,
+            "global water summary: written, {} bytes, {:.1} s from the stored blocks",
+            report.summary_bytes, report.summary_seconds
+        )
+        .map_err(err)?;
+    } else {
+        writeln!(out, "global water summary: already stored under its current key, nothing recomputed").map_err(err)?;
+    }
     // The coarse tiles go into the same pack (STRM-021, ADR 0045 point 3): levels 0..=4 unless `--prefill-levels` says otherwise.
     crate::prefill::prefill_store(o, dir, out)
 }

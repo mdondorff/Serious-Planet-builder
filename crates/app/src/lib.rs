@@ -890,10 +890,13 @@ mod tests {
         // spec: STRM-023
         assert!(built.contains("global ocean channel: 6 blocks written, 0 already stored; "), "{built}");
         assert!(again.contains("global ocean channel: 6 blocks already stored under their current key, nothing recomputed"), "{again}");
+        // spec: STRM-025
+        assert!(built.contains("global water summary: written, "), "{built}");
+        assert!(again.contains("global water summary: already stored under its current key, nothing recomputed"), "{again}");
         let ok = run_str(&["generate", "--verify-global", &store, "--seed", "3"]).unwrap();
-        assert!(ok.contains("checked 12 of 12 entries: 12 match"), "6 blocks and 6 ocean blocks: {ok}");
+        assert!(ok.contains("checked 13 of 13 entries: 13 match"), "6 blocks, 6 ocean blocks and the water summary: {ok}");
         let sampled = run_str(&["generate", "--verify-global", &store, "--seed", "3", "--sample", "5"]).unwrap();
-        assert!(sampled.contains("checked 5 of 12 entries: 5 match"), "{sampled}");
+        assert!(sampled.contains("checked 5 of 13 entries: 5 match"), "{sampled}");
         // Another seed: all stale, nothing compared.
         let e = run_str(&["generate", "--verify-global", &store, "--seed", "4"]).unwrap_err();
         assert!(e.contains("compared nothing") && e.contains("--allow-stale"), "{e}");
@@ -931,7 +934,7 @@ mod tests {
         );
         // The bake still verifies; the tiles are another kind to it.
         let ok = run_str(&["generate", "--verify-global", &a, "--seed", "3"]).unwrap();
-        assert!(ok.contains("12 match") && ok.contains("30 of another kind"), "6 blocks and 6 ocean blocks match: {ok}");
+        assert!(ok.contains("13 match") && ok.contains("30 of another kind"), "6 blocks, 6 ocean blocks and the summary match: {ok}");
         // Into an existing bake, a deeper pre-fill adds the new level only; levels 0 disables.
         run_str(&["generate", "--global-dir", &b, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();
         let off = run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();

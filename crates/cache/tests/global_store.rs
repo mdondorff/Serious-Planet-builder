@@ -195,9 +195,9 @@ fn a_bake_is_built_once_reused_afterwards_and_verifies_clean() {
     assert_eq!((again.written, again.reused), (0, 24), "a second run computes and writes nothing");
 
     let store = TileStore::open(d.path(), w.params()).unwrap();
-    assert_eq!(store.len(), 48, "24 blocks and the 24 blocks of their ocean channel (STRM-023)");
+    assert_eq!(store.len(), 49, "24 blocks, the 24 blocks of their ocean channel (STRM-023) and the water summary (STRM-025)");
     let all = verify_global(&store, &w, 0);
-    assert_eq!((all.checked, all.matching, all.stale, all.unexplained_stale, all.unsupported), (48, 48, 0, 0, 0));
+    assert_eq!((all.checked, all.matching, all.stale, all.unexplained_stale, all.unsupported), (49, 49, 0, 0, 0));
     assert!(all.passed());
     assert_eq!(verify_global(&store, &w, 5).checked, 5);
 
@@ -213,7 +213,7 @@ fn a_bake_is_built_once_reused_afterwards_and_verifies_clean() {
     let other = world(8);
     let store = TileStore::open(d.path(), other.params()).unwrap();
     let r = verify_global(&store, &other, 0);
-    assert_eq!((r.checked, r.matching, r.unexplained_stale), (48, 0, 48));
+    assert_eq!((r.checked, r.matching, r.unexplained_stale), (49, 0, 49));
     assert!(r.compared_nothing() && !r.passed());
 }
 
@@ -506,7 +506,7 @@ fn the_build_stores_the_ocean_channel_once_and_the_store_reads_it_like_the_in_me
     }
     assert!(src.is_ocean(Face(0), 17, 0).is_err());
     assert!(src.decodes() >= 1 && src.resident_blocks() <= 64);
-    assert_eq!(verify_global(&store, &w, 0).matching, 192);
+    assert_eq!(verify_global(&store, &w, 0).matching, 193, "192 blocks and ocean blocks and the summary");
     // Thread count and batch size do not change a bit of the stored channel.
     let d2 = Dir::new("ocean-build-1");
     build_global(d2.path(), &w, 16, 1, DEFAULT_MAX_PACK_BYTES).unwrap();
@@ -591,7 +591,13 @@ fn a_wrong_or_damaged_ocean_block_is_reported_by_verify_with_its_vertex() {
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let r = verify_global(&store, &w, 0);
     assert_eq!(r.mismatches.len(), 1, "{r:?}");
-    assert_eq!(r.unreadable.len(), 1, "{r:?}");
+    // The damaged ocean block also keeps the water summary from being recomputed: unreadable, naming the ocean block.
+    assert_eq!(r.unreadable.len(), 2, "{r:?}");
+    assert!(
+        r.unreadable[1].contains("water summary") && r.unreadable[1].contains("ocean block") && r.unreadable[1].contains("version 9"),
+        "{}",
+        r.unreadable[1]
+    );
     assert!(
         r.mismatches[0].detail.contains("vertex (2, 3)") && r.mismatches[0].detail.contains("missing from its key"),
         "{}",

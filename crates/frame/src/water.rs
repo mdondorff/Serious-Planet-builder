@@ -12,6 +12,11 @@
 //! water is measured from). Known limit of option 1: a dry basin below the level inside a tile that also holds sea is drawn
 //! flooded, and a lake smaller than a tile's sample spacing can be missed at the tile's coarse levels; the per-vertex mask
 //! (ADR 0051 point 6, option 3) is the fix if either shows.
+//!
+//! **Coarse tiles (ADR 0058, GEN-024).** A tile whose area is at least one block of the stored bake is not asked point by point (that
+//! reads up to 25 blocks): the source answers it from the coarse level of W, a summary the bake wrote once, as the union over the cells
+//! the tile touches (a superset of the point query's answer, and a parent is wet wherever its children are). The query is
+//! [`WaterSource::coarse_tile_water`]; a source without a summary answers `None` and the tile is asked point by point.
 
 use crate::lod::LodParams;
 use crate::look::water::{tile_phases, LiquidAppearance, WaterLook, MAX_LIQUIDS, WAVES};
@@ -144,6 +149,12 @@ pub trait WaterSource: Sync {
     fn ocean_bit_at(&self, _dir: Vec3) -> Result<bool, ReadError> {
         Ok(false)
     }
+
+    /// The water of a tile that spans more than one block of the bake, from the coarse level of W (ADR 0058): `None` when the source
+    /// has none for the tile (the tile is asked point by point), else the answer for the whole tile.
+    fn coarse_tile_water(&self, _map: &dyn FaceMapping, _tile: TileId, _radius_m: f64) -> Result<Option<Option<WaterSample>>, ReadError> {
+        Ok(None)
+    }
 }
 
 impl WaterSource for WaterField<'_> {
@@ -157,6 +168,10 @@ impl WaterSource for WaterField<'_> {
 
     fn ocean_bit_at(&self, dir: Vec3) -> Result<bool, ReadError> {
         WaterField::ocean_bit_at(self, dir)
+    }
+
+    fn coarse_tile_water(&self, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> Result<Option<Option<WaterSample>>, ReadError> {
+        WaterField::coarse_tile_water(self, map, tile, radius_m)
     }
 }
 
@@ -178,8 +193,14 @@ impl WaterBook {
         if self.tiles.lock().expect("water book").contains_key(&tile) {
             return Ok(());
         }
-        // The store blocks the samples touch load in parallel first (a tile of level 0 to 3 spans up to 25 blocks): the job then waits
-        // for the slowest block, not for the sum.
+        // A tile that spans more than one block is answered by the coarse level of W and reads none (ADR 0058).
+        if let Some(answer) = src.coarse_tile_water(map, tile, radius_m)? {
+            if self.tiles.lock().expect("water book").insert(tile, answer).is_none() {
+                self.filled.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            return Ok(());
+        }
+        // The store blocks the samples touch load in parallel first: the job then waits for the slowest block, not for the sum.
         let n = TILE_SAMPLES;
         let dirs: Vec<Vec3> = (0..=n).flat_map(|l| (0..=n).map(move |k| tile.sample_direction(map, n, k, l))).collect();
         // The helper threads run at the job's priority (a new thread starts at normal): the workers run below normal so that the frame
@@ -293,6 +314,10 @@ impl WaterTileCache {
             return Ok(w);
         }
         let started = std::time::Instant::now();
+        if let Some(coarse) = src.coarse_tile_water(map, tile, radius_m)? {
+            self.tiles.insert(tile, coarse);
+            return Ok(coarse);
+        }
         let n = TILE_SAMPLES;
         let mut found: Vec<(WaterSample, u32)> = Vec::new();
         for l in 0..=n {
