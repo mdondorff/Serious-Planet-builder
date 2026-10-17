@@ -788,9 +788,9 @@ fn gen_settings(o: &Options) -> planet_perf::GenSettings {
 }
 
 /// Slots of the main pool the tier's share can hold: the share less the fixed items (small vertex pool, index buffers, node records,
-/// slot records), in whole blocks (a block is `block_alloc_bytes`, or `slot_bytes * block_slots`).
+/// slot records), in whole blocks (a block is `slot_bytes * block_slots`).
 fn share_slots_of(pool: &planet_streaming::PoolConfig, share_bytes: u64) -> u64 {
-    let block = if pool.block_alloc_bytes > 0 { pool.block_alloc_bytes } else { pool.slot_bytes * u64::from(pool.block_slots) };
+    let block = pool.slot_bytes * u64::from(pool.block_slots);
     share_bytes.saturating_sub(pool.fixed_bytes()).checked_div(block).unwrap_or(0) * u64::from(pool.block_slots)
 }
 

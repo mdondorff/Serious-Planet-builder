@@ -1,74 +1,44 @@
-//! The compact tile format on the GPU (REND-016, ADR 0033 points 3 and 4): atlas textures of `Rgba16Uint` texels, one slot per tile,
-//! a persistent record buffer indexed by slot, and the vertex stage that places a vertex from the texels of the tile and of its
-//! neighbours (the exact morph target). The renderer executes the placement; it decides nothing (CON-03).
+//! The compact tile format on the GPU (REND-016, ADR 0033 points 3 and 4 as amended by ADR 0054): storage-buffer blocks of 8-byte
+//! texels (16-bit height, two 16-bit octahedral normal components, 16 spare bits), one slot per tile, a persistent record buffer
+//! indexed by slot, and the vertex stage that places a vertex from the texels of the tile and of its neighbours (the exact morph
+//! target). The renderer executes the placement; it decides nothing (CON-03).
 //!
-//! How a draw names its slot (the open decision of ADR 0033 point 3, decided here): the draw list groups consecutive nodes of one
-//! atlas into a run (`DrawBuffer::Atlas`), the run's bind group (group 2) holds that atlas, and the node's *tile reference* (a
-//! 16-byte entry of a per-frame storage buffer indexed by the instance index, which is `first_instance` = the node index) holds the
-//! slot's texel origin and slot index, which selects the 128-byte record in the persistent record buffer (group 1). No binding
-//! arrays or texture-index-per-draw features are needed, so the same path runs on WARP, lavapipe and the discrete GPU. Fifteen atlases
-//! (mid share) cost at most fifteen bind-group changes along a plan; the lowest-slot-first free list keeps a settled view in one or two.
+//! How a draw names its slot: the draw list groups consecutive nodes of one block into a run (`DrawBuffer::Compact`), the run's bind
+//! group (group 2) holds that block, and the node's *tile reference* (a 16-byte entry of a per-frame storage buffer indexed by the
+//! instance index, which is `first_instance` = the node index) holds the index of the slot's first texel in the block and the slot
+//! index, which selects the 128-byte record in the persistent record buffer (group 1). No binding arrays or texture-index-per-draw
+//! features are needed, so the same path runs on WARP, lavapipe and the discrete GPU. Fifteen blocks (mid share) cost at most
+//! fifteen bind-group changes along a plan; the lowest-slot-first free list keeps a settled view in one or two. A block is at most
+//! 128 MiB, the `max_storage_buffer_binding_size` every adapter offers (VIEW-001 requires it by name).
 
 use crate::terrain::TERRAIN_SHADERS;
 use planet_generators::compact::COMPACT_RECORD_BYTES;
 use planet_streaming::SlotPool;
 
-/// Widest atlas a one-shot render builds: wgpu's default `max_texture_dimension_2d`.
-pub const MAX_ONE_SHOT_SIDE: u32 = 8192;
-
-/// Bytes of one tile reference: texel origin x, y, slot index, reserved.
+/// Bytes of one tile reference: the slot's first texel in its block, reserved, slot index, reserved.
 pub const REF_BYTES: u64 = 16;
 
-/// TRANSITIONAL (REND-016 differential, removed with the atlas path in the same change): compact renderers made while this is set
-/// keep their blocks in storage buffers read by slot index instead of atlas textures.
-static BUFFER_BLOCKS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-pub fn set_buffer_blocks(on: bool) {
-    BUFFER_BLOCKS.store(on, std::sync::atomic::Ordering::SeqCst);
-}
-
-pub fn buffer_blocks() -> bool {
-    BUFFER_BLOCKS.load(std::sync::atomic::Ordering::SeqCst)
-}
-
 /// The compact pipeline's shader for tiles of `cells`: the product shader's header, fragment stage and helpers unchanged (spliced
-/// at build time so the two pipelines cannot drift apart there), the vertex stage replaced by vertex pulling from the atlas.
+/// at build time so the two pipelines cannot drift apart there), the vertex stage replaced by vertex pulling from the block.
 pub fn compact_terrain_shader(cells: u32) -> String {
     let src = TERRAIN_SHADERS[0].1;
     let vs_at = src.find("fn terrain_vertex(").expect("product shader has a vertex stage");
     let tail_at = src.find("// Distance in pixels to the nearest integer").expect("product shader helper marker");
     let head = &src[..vs_at];
     assert!(head.contains("@group(0) @binding(1) var<storage, read> nodes: array<Node>;"), "product node binding changed");
-    let mut vertex = COMPACT_VERTEX.replace("{CELLS}", &cells.to_string());
-    if buffer_blocks() {
-        let swaps = [
-            ("@group(2) @binding(0) var atlas: texture_2d<u32>;", "@group(2) @binding(0) var<storage, read> block: array<vec2<u32>>;"),
-            (
-                "    return textureLoad(atlas, origin + vec2<i32>(i, j), 0);",
-                "    let t = block[u32(origin.x + j * (CELLS + 1) + i)];\n    return vec4<u32>(t.x & 0xffffu, t.x >> 16u, t.y & 0xffffu, t.y >> 16u);",
-            ),
-            (
-                "    return textureLoad(atlas, base + vec2<i32>(idx % (CELLS + 1), idx / (CELLS + 1)), 0).w;",
-                "    return block[u32(base.x + idx)].y >> 16u;",
-            ),
-        ];
-        for (from, to) in swaps {
-            assert!(vertex.contains(from), "compact shader source changed: {from}");
-            vertex = vertex.replace(from, to);
-        }
-    }
+    let vertex = COMPACT_VERTEX.replace("{CELLS}", &cells.to_string());
     format!("{head}{vertex}{}", &src[tail_at..])
 }
 
 const COMPACT_VERTEX: &str = r#"
 // Compact tiles (REND-016). Group 1: the persistent record per slot (words: nine control points as 27 f32, hr_min, hr_step,
-// h_origin, skirt depth, then the flip flag) and the per-frame tile reference of each node (texel origin x, y, slot). Group 2: the atlas.
+// h_origin, skirt depth, then the flip flag) and the per-frame tile reference of each node (first texel, slot). Group 2: the block.
 struct TileRec {
     w: array<u32, 32>,
 };
 @group(1) @binding(0) var<storage, read> tile_records: array<TileRec>;
 @group(1) @binding(1) var<storage, read> tile_refs: array<vec4<u32>>;
-@group(2) @binding(0) var atlas: texture_2d<u32>;
+@group(2) @binding(0) var<storage, read> block: array<vec2<u32>>;
 
 const CELLS: i32 = {CELLS};
 
@@ -86,13 +56,14 @@ var<private> hr_step: f32;
 var<private> h_origin: f32;
 var<private> skirt_depth: f32;
 var<private> flip: bool;
-var<private> origin: vec2<i32>;
+// Index of the slot's first texel in the block (texels of 8 bytes, slot after slot, row-major).
+var<private> origin: i32;
 
 fn rf(r: ptr<function, TileRec>, k: i32) -> f32 {
     return bitcast<f32>((*r).w[k]);
 }
 
-fn load_tile(slot: u32, o: vec2<u32>) {
+fn load_tile(slot: u32, first_texel: u32) {
     var r = tile_records[slot];
     c0 = vec3<f32>(rf(&r, 0), rf(&r, 1), rf(&r, 2));
     c1 = vec3<f32>(rf(&r, 3), rf(&r, 4), rf(&r, 5));
@@ -108,7 +79,7 @@ fn load_tile(slot: u32, o: vec2<u32>) {
     h_origin = rf(&r, 29);
     skirt_depth = rf(&r, 30);
     flip = r.w[31] != 0u;
-    origin = vec2<i32>(i32(o.x), i32(o.y));
+    origin = i32(first_texel);
 }
 
 fn basis(t: f32) -> vec3<f32> {
@@ -143,7 +114,8 @@ fn base_normal(u: f32, v: f32) -> vec3<f32> {
 }
 
 fn texel(i: i32, j: i32) -> vec4<u32> {
-    return textureLoad(atlas, origin + vec2<i32>(i, j), 0);
+    let t = block[u32(origin + j * (CELLS + 1) + i)];
+    return vec4<u32>(t.x & 0xffffu, t.x >> 16u, t.y & 0xffffu, t.y >> 16u);
 }
 
 fn rel_height(t: vec4<u32>) -> f32 {
@@ -169,7 +141,7 @@ fn oct_decode(e: vec2<f32>) -> vec3<f32> {
 fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
     let node = nodes[inst];
     let tref = tile_refs[inst];
-    load_tile(tref.z, tref.xy);
+    load_tile(tref.z, tref.x);
     let w = CELLS + 1;
     let idx = i32(vi);
     var i = 0;
@@ -237,13 +209,13 @@ fn vs(@builtin(instance_index) inst: u32, @builtin(vertex_index) vi: u32) -> VsO
     return terrain_vertex(inst, vi);
 }
 
-// The climate texel `idx` (row-major over the 9 x 9 texture) of the tile at texel origin `base`: the fourth channel of the slot's
+// The climate texel `idx` (row-major over the 9 x 9 texture) of the tile whose first texel is `base`: the fourth channel of the slot's
 // texel `idx` holds the temperature and of texel `81 + idx` the precipitation, as f16 bits (GEN-021).
-fn climate_bits(base: vec2<i32>, idx: i32) -> u32 {
-    return textureLoad(atlas, base + vec2<i32>(idx % (CELLS + 1), idx / (CELLS + 1)), 0).w;
+fn climate_bits(base: i32, idx: i32) -> u32 {
+    return block[u32(base + idx)].y >> 16u;
 }
 
-fn climate_texel(base: vec2<i32>, idx: i32) -> vec2<f32> {
+fn climate_texel(base: i32, idx: i32) -> vec2<f32> {
     return unpack2x16float(climate_bits(base, idx) | (climate_bits(base, 81 + idx) << 16u));
 }
 
@@ -251,7 +223,7 @@ fn climate_texel(base: vec2<i32>, idx: i32) -> vec2<f32> {
 // fragment's tile coordinates (`aux`, interpolated from the vertices). The f16 decode is exact.
 fn tile_climate(in: VsOut) -> vec2<f32> {
     let tref = tile_refs[in.node_index];
-    let base = vec2<i32>(i32(tref.x), i32(tref.y));
+    let base = i32(tref.x);
     let x = clamp(in.aux.x, 0.0, 1.0) * 8.0;
     let y = clamp(in.aux.y, 0.0, 1.0) * 8.0;
     let a = min(i32(x), 7);
@@ -271,10 +243,10 @@ fn tile_climate(in: VsOut) -> vec2<f32> {
 /// The record buffer holds one [`COMPACT_RECORD_BYTES`] record per slot of the main pool.
 const _: () = assert!(COMPACT_RECORD_BYTES == 128);
 
-/// One atlas texture and the bind group that names it for a run (group 2).
-pub(crate) struct Atlas {
-    pub(crate) texture: Option<wgpu::Texture>,
-    pub(crate) buffer: Option<wgpu::Buffer>,
+/// One block of the compact main pool: a storage buffer of `block_slots` slots of texels (8 bytes each, slot after slot) and the bind
+/// group that names it for a run (group 2).
+pub(crate) struct Block {
+    pub(crate) buffer: wgpu::Buffer,
     pub(crate) bind: wgpu::BindGroup,
 }
 
@@ -283,66 +255,41 @@ pub(crate) struct CompactGpu {
     pub(crate) pipeline: wgpu::RenderPipeline,
     /// Group 1: slot records and the frame's tile references.
     pub(crate) bgl_frame: wgpu::BindGroupLayout,
-    /// Group 2: one atlas.
-    pub(crate) bgl_atlas: wgpu::BindGroupLayout,
+    /// Group 2: one block.
+    pub(crate) bgl_block: wgpu::BindGroupLayout,
     /// One record per slot of the main pool, allocated with the renderer (a fixed item of the share).
     pub(crate) records: wgpu::Buffer,
-    /// The atlases, allocated on first use.
-    pub(crate) atlases: Vec<Option<Atlas>>,
-    /// Slots along one side of an atlas.
-    pub(crate) cols: u32,
-    /// Side of an atlas texture in texels.
-    pub(crate) side: u32,
+    /// The blocks, allocated on first use.
+    pub(crate) blocks: Vec<Option<Block>>,
+    /// Bytes of one block: `block_slots * slot_bytes`.
+    pub(crate) block_bytes: u64,
     /// Placement of the tiles that fell back to the vertex format (the top of the small vertex pool).
     pub(crate) fallback: SlotPool,
     /// First vertex-pool slot of the fallback region.
     pub(crate) fallback_base: u32,
-    /// Blocks are storage buffers (transitional switch).
-    pub(crate) buffer_mode: bool,
-    /// Bytes of one block when it is a buffer.
-    pub(crate) block_bytes: u64,
 }
 
 impl CompactGpu {
-    /// Atlas `block`, created (texture and bind group) on first use.
-    pub(crate) fn atlas(&mut self, device: &wgpu::Device, block: usize, init: &mut crate::terrain::InitCounts) -> &Atlas {
-        if self.atlases.len() <= block {
-            self.atlases.resize_with(block + 1, || None);
+    /// Block `block`, created (buffer and bind group) on first use.
+    pub(crate) fn block(&mut self, device: &wgpu::Device, block: usize, init: &mut crate::terrain::InitCounts) -> &Block {
+        if self.blocks.len() <= block {
+            self.blocks.resize_with(block + 1, || None);
         }
-        let (side, bgl, buffer_mode, block_bytes) = (self.side, &self.bgl_atlas, self.buffer_mode, self.block_bytes);
-        self.atlases[block].get_or_insert_with(|| {
+        let (bgl, size) = (&self.bgl_block, self.block_bytes);
+        self.blocks[block].get_or_insert_with(|| {
             init.pool_allocations += 1;
-            if buffer_mode {
-                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("compact-block"),
-                    size: block_bytes,
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
-                    mapped_at_creation: false,
-                });
-                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("compact-block-bind"),
-                    layout: bgl,
-                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
-                });
-                return Atlas { texture: None, buffer: Some(buffer), bind };
-            }
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("compact-atlas"),
-                size: wgpu::Extent3d { width: side, height: side, depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba16Uint,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("compact-block"),
+                size,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
             });
-            let view = texture.create_view(&Default::default());
             let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("compact-atlas-bind"),
+                label: Some("compact-block-bind"),
                 layout: bgl,
-                entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
             });
-            Atlas { texture: Some(texture), buffer: None, bind }
+            Block { buffer, bind }
         })
     }
 }

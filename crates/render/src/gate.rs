@@ -5,7 +5,7 @@
 use crate::GpuError;
 use planet_frame::adapter::{select, AdapterDesc, DeviceClass, Requirements, SelectionMode};
 
-/// The limits the renderer needs, by name: the pools, the atlases and the bind groups of the terrain path (wgpu's default limits,
+/// The limits the renderer needs, by name: the pools, the compact blocks (storage-buffer bindings of up to 128 MiB, ADR 0054) and the bind groups of the terrain path (wgpu's default limits,
 /// which is what the device asks for). An adapter below any of them is refused by name.
 fn limit_table(l: &wgpu::Limits) -> [(&'static str, u64); 6] {
     [
@@ -92,5 +92,19 @@ mod tests {
         }
         assert!(r.limits.iter().any(|(n, _)| n == "max_texture_dimension_2d"));
         assert!(r.features.is_empty(), "no feature is required today: TIMESTAMP_QUERY and INDIRECT_FIRST_INSTANCE have fallbacks");
+    }
+
+    // spec: VIEW-001, REND-016
+    #[test]
+    fn the_gate_requires_the_binding_size_of_a_compact_block_and_the_storage_buffers_of_a_stage_by_name() {
+        let r = requirements();
+        let min = |name: &str| r.limits.iter().find(|(n, _)| n == name).unwrap_or_else(|| panic!("{name} is required")).1;
+        // A block of the compact pool is bound whole (ADR 0054): the adapter must offer a binding of that size.
+        assert!(min("max_storage_buffer_binding_size") >= planet_frame::pool::COMPACT_BLOCK_BYTES);
+        assert!(min("max_buffer_size") >= planet_frame::pool::COMPACT_BLOCK_BYTES);
+        // The compact vertex stage reads four storage buffers (nodes, records, tile references, one block); the water and lit
+        // fragment stages fewer.
+        assert!(min("max_storage_buffers_per_shader_stage") >= 4);
+        assert!(min("max_bind_groups") >= 4, "frame, records and references, block, atmosphere");
     }
 }

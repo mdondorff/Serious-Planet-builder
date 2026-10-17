@@ -56,15 +56,20 @@ fn vertex_pool() -> PoolConfig {
         index_bytes: grid_indices(CELLS).len() as u64 * 4,
         node_record_bytes: 4096 * 512,
         frames_in_flight: 1,
-        block_alloc_bytes: 0,
         slot_record_bytes: 0,
         fallback_slots: 0,
     }
 }
 
 fn compact_pool() -> PoolConfig {
-    let side = 40 * (CELLS + 1);
-    let one = compact_format_pool_with((128 << 20) + 4 * u64::from(side) * u64::from(side) * 8, CELLS, side, 1).unwrap();
+    let block_slots = 40 * 40;
+    let one = compact_format_pool_with(
+        (128 << 20) + 4 * u64::from(block_slots) * planet_generators::compact::slot_texel_bytes(CELLS),
+        CELLS,
+        block_slots,
+        1,
+    )
+    .unwrap();
     PoolConfig { vertex_slots: 768, fallback_slots: 512, ..one }
 }
 
@@ -253,6 +258,52 @@ fn cpu_depth(cam: &Camera, size: (u32, u32), x: u32, y: u32, field: &dyn HeightF
     }
     let p = from + dir * t;
     Some(level - field.height(p.normalized()))
+}
+
+fn fnv(h: u64, bytes: &[u8]) -> u64 {
+    bytes.iter().fold(h, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3))
+}
+
+// spec: REND-016, ATMO-004
+#[test]
+fn the_lit_water_and_atmosphere_frames_over_compact_blocks_are_the_recorded_pixels() {
+    // The hash of the HDR and colour targets of five frames of the aerial coast (no water, the atmosphere, the class view, the lit
+    // water without and with the atmosphere), as the atlas textures drew them (recorded by the differential of ADR 0054's change,
+    // byte-identical to the buffer blocks on WARP and on the RTX). A driver not in the table prints its hash and records nothing.
+    const KNOWN: [(&str, u64); 2] = [
+        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0x8803_a586_d854_b57d),
+        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '591.86'", 0xcb25_56c7_d53d_1825),
+    ];
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let field = Reference(1);
+    let size = (256, 160);
+    let (c, heading) = coast(&field, 0.0);
+    let table = LiquidTable::earth();
+    let src = HeightSea { field: &field, level: 0.0 };
+    let camera = coast_camera(c, heading, 0.0, 120.0, 800.0, 0.0, 12.0, 1.6);
+    let plan = Scene { camera, size, field: &field }.terrain();
+    let lit_water = water_plan(&plan, &src, &table, size, 2.0, WaterView::Lit);
+    let class_water = water_plan(&plan, &src, &table, size, 2.0, WaterView::Class);
+    let mut r = new_renderer(&ctx, true, size);
+    upload_all(&ctx, &mut r, &plan, &field, true);
+    r.enable_atmosphere(&ctx, &Atmosphere::earth(R));
+    r.enable_water(&ctx);
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for (water, atmosphere) in
+        [(None, false), (None, true), (Some(&class_water), false), (Some(&lit_water), false), (Some(&lit_water), true)]
+    {
+        for p in frame(&ctx, &mut r, &plan, water, atmosphere) {
+            for v in p {
+                hash = fnv(hash, &v.to_bits().to_le_bytes());
+            }
+        }
+        hash = fnv(hash, &r.read_color(&ctx).rgba);
+    }
+    let driver = ctx.driver_string();
+    match KNOWN.iter().find(|(d, _)| *d == driver) {
+        Some((_, want)) => assert_eq!(hash, *want, "the lit water frames of the buffer path changed on {driver}"),
+        None => println!("KNOWN-ANSWER water: no hash recorded for '{driver}'; got {hash:016x}"),
+    }
 }
 
 // spec: ATMO-016

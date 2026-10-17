@@ -3,7 +3,7 @@
 //! terrain share's slots (ADR 0033 point 2). Counts only, no device.
 //!
 //! ADR 0033's fractions (R with ancestors at most 10 % of the mid tier's slots, the ground-1m draw set with ancestors at
-//! most 6 %) are for the compact tile's slot count (230,640 at the mid share), which is what the product builds (the pools come
+//! most 6 %) are for the compact tile's slot count (231,090 at the mid share), which is what the product builds (the pools come
 //! from `tier_compact_pool`, so the pins follow the real configuration). The vertex format (the reference, `--tile-format vertex`)
 //! has slots 6 times larger, so the same tile counts take a larger fraction of fewer slots: both are pinned.
 
@@ -24,9 +24,9 @@ const R: f64 = 6_371_000.0;
 const PIN_BAKE_RES: u32 = 256;
 const CELLS: u32 = 32;
 
-/// Slots of ADR 0033's compact tile at the mid / high share: 15 / 23 atlases of 124 x 124 (cells 32).
-const COMPACT_MID_SLOTS: u64 = 15 * 15_376;
-const COMPACT_HIGH_SLOTS: u64 = 23 * 15_376;
+/// Slots of ADR 0033's compact tile at the mid / high share: 15 / 23 blocks of 15,406 slots (cells 32, 128 MiB, ADR 0054).
+const COMPACT_MID_SLOTS: u64 = 15 * 15_406;
+const COMPACT_HIGH_SLOTS: u64 = 23 * 15_406;
 
 /// The same shares in vertex-format slots (cells 32, 58,608 B since MESH_VERSION 7: the 44-byte vertex and the 4-byte climate of each of
 /// the 1,221 vertices, ADR 0039 point 2; blocks of 256): `tier_pool(tier, 32, 2).main_slots()`. Under MESH_VERSION 6 these were 37,376 and

@@ -14,14 +14,19 @@ use planet_streaming::{PoolConfig, PoolKind, SlotRef};
 const R: f64 = 6_371_000.0;
 const SIZE: (u32, u32) = (128, 96);
 const CELLS: u32 = 16;
-/// Slots along one side of an atlas, and slots of a block (see `small_pool`).
-const COLS: u32 = 8;
+/// Slots of a block (see `small_pool`).
 const BLOCK: u32 = 64;
 
-/// Atlases of 8 x 8 slots; a roomy vertex pool.
+/// Blocks of 64 slots; a roomy vertex pool.
 fn small_pool() -> PoolConfig {
-    let side = COLS * (CELLS + 1);
-    let one = compact_format_pool_with((128 << 20) + 40 * u64::from(side) * u64::from(side) * 8, CELLS, side, 1).unwrap();
+    let block_slots = BLOCK;
+    let one = compact_format_pool_with(
+        (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_texel_bytes(CELLS),
+        CELLS,
+        block_slots,
+        1,
+    )
+    .unwrap();
     PoolConfig { vertex_slots: 4096, fallback_slots: 3968, ..one }
 }
 
@@ -48,14 +53,13 @@ fn tiles(n: usize) -> Vec<RenderTile> {
         .collect()
 }
 
-/// The calls a batch of compact tiles in `slots` needs, by the model of the batch: one per run of adjacent slots in one row of one
-/// atlas for the texels, one per run of adjacent slot indices for the records.
+/// The calls a batch of compact tiles in `slots` needs, by the model of the batch: one per run of adjacent slots of one block
+/// for the texels, one per run of adjacent slot indices for the records.
 fn model_calls(slots: &[u32]) -> u64 {
     let mut s: Vec<u32> = slots.to_vec();
     s.sort_unstable();
     s.dedup();
-    let texel_runs =
-        1 + s.windows(2).filter(|w| !(w[1] == w[0] + 1 && w[1] / BLOCK == w[0] / BLOCK && !(w[1] % BLOCK).is_multiple_of(COLS))).count();
+    let texel_runs = 1 + s.windows(2).filter(|w| !(w[1] == w[0] + 1 && w[1] / BLOCK == w[0] / BLOCK)).count();
     let record_runs = 1 + s.windows(2).filter(|w| w[1] != w[0] + 1).count();
     (texel_runs + record_runs) as u64
 }
@@ -97,9 +101,9 @@ fn a_frames_compact_tiles_make_one_call_per_run_and_leave_the_pools_of_the_per_s
         }
         let (a_ref, rec_ref) = reference.read_compact_pools(&ctx);
         let (a_new, rec_new) = batched.read_compact_pools(&ctx);
-        assert_eq!(a_ref.len(), a_new.len(), "{name}: the same atlases are allocated");
+        assert_eq!(a_ref.len(), a_new.len(), "{name}: the same blocks are allocated");
         for (b, (x, y)) in a_ref.iter().zip(&a_new).enumerate() {
-            assert!(x == y, "{name}: atlas {b} differs between the per-slot and the batched path");
+            assert!(x == y, "{name}: block {b} differs between the per-slot and the batched path");
         }
         assert!(rec_ref == rec_new, "{name}: the slot records differ");
         println!("{name}: {} calls batched against {} per slot, {} bytes", calls.write_calls, ref_calls.write_calls, calls.staging_bytes);
@@ -171,7 +175,7 @@ fn a_batch_draws_the_image_of_the_per_slot_path_for_the_standard_views() {
         let camera = scripted_views(R, 4.0 / 3.0, 1)[index].1;
         let req = TerrainRequest { camera, size: SIZE, view: TerrainView::Relief, lod, face_mapping: "tangent-v1".into(), seed: 1 };
         let plan = plan_terrain(&req).unwrap();
-        // Manager-style placement as in `gpu_compact`: levels 0-2 in the managed vertex pool, the rest spread over the atlases.
+        // Manager-style placement as in `gpu_compact`: levels 0-2 in the managed vertex pool, the rest spread over the blocks.
         let (mut main, mut vertex) = (0u32, 0u32);
         let placed: Vec<(RenderTile, SlotRef)> = plan
             .nodes
