@@ -12,8 +12,9 @@
 //! nothing escalates and 3 otherwise (`cargo xtask golden-review` then reports a failure); 2 on bad arguments.
 
 use planet_testkit::review::{
-    classify, classify_m5_first, debug_view_agreement, declared_goldens, driver_gate, m5_declarations, parse_classes, view_diff, Change,
-    GoldenClass, M5Evidence, Observation, TestOutcomes, Verdict, ViewDiff, ViewState,
+    classify, classify_look_change, classify_m5_first, debug_view_agreement, debug_views_unchanged, declared_goldens, driver_gate,
+    look_declarations, look_diff_ok, m5_declarations, parse_classes, view_diff, Change, GoldenClass, LookEvidence, M5Evidence, Observation,
+    TestOutcomes, Verdict, ViewDiff, ViewState,
 };
 use planet_testkit::{read_png, repo_root, write_png, Image};
 use std::collections::{BTreeMap, BTreeSet};
@@ -93,6 +94,69 @@ fn observe(
         seen.insert(adapter.clone(), obs);
     }
     (seen, images)
+}
+
+/// The ref a branch is compared with: `origin/main` when it exists (a worktree's local `main` can be far behind), else `main`.
+fn diff_base(root: &Path) -> &'static str {
+    let ok = |r: &str| {
+        std::process::Command::new("git")
+            .args(["rev-parse", "--verify", "--quiet", r])
+            .current_dir(root)
+            .output()
+            .is_ok_and(|o| o.status.success())
+    };
+    if ok("origin/main") {
+        "origin/main"
+    } else {
+        "main"
+    }
+}
+
+fn git(root: &Path, args: &[&str]) -> String {
+    std::process::Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+/// ADR 0037 point 2: the evidence for a change that declares look parameter changes under `Look changes:`. The files the change
+/// touches (against the base branch, plus the working tree), the zero-context diff of each look data file
+/// (`tests/goldens/look_data.txt`), and whether any debug or shaded golden moved beyond rounding on any adapter.
+fn look_evidence(root: &Path, run: &Run<'_>, proposal: &str) -> LookEvidence {
+    let declarations = look_declarations(proposal);
+    // The list of look data files comes from the base branch, never from the change under review: a change could add `*.rs` to its
+    // own list (an edit of the list in the change takes effect only after it is merged).
+    let base = diff_base(root);
+    let patterns: Vec<String> = git(root, &["show", &format!("{base}:tests/goldens/look_data.txt")])
+        .as_str()
+        .lines()
+        .map(|l| l.split('#').next().unwrap_or("").trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let mut changed: BTreeSet<String> = git(root, &["diff", "--name-only", base]).lines().map(str::to_string).collect();
+    changed.extend(git(root, &["ls-files", "--others", "--exclude-standard"]).lines().map(str::to_string));
+    let changed: Vec<String> = changed.into_iter().filter(|f| !f.is_empty()).collect();
+    let mut diffs = BTreeMap::new();
+    for f in changed.iter().filter(|f| planet_testkit::review::is_look_data(f, &patterns)) {
+        diffs.insert(f.clone(), git(root, &["diff", "-U0", base, "--", f]));
+    }
+    let views: Vec<(String, BTreeMap<String, Observation>)> = run
+        .classes
+        .iter()
+        .filter(|(_, c)| matches!(c, GoldenClass::Debug | GoldenClass::Shaded))
+        .map(|(n, _)| (n.clone(), observe(run.goldens, run.adapters, run.candidates, n).0))
+        .collect();
+    // The debug views are judged only on the candidates a run delivered: an adapter that delivered none (NOT RUN) proves nothing about
+    // them, so the look path needs every adapter with goldens to take part.
+    let not_run = run.not_run();
+    let debug_views = if not_run.is_empty() {
+        debug_views_unchanged(&views)
+    } else {
+        Err(format!("the adapters {} delivered no candidates (NOT RUN), so their debug views are unchecked", not_run.join(", ")))
+    };
+    LookEvidence { diff: look_diff_ok(&changed, &diffs, &patterns, &declarations), debug_views, declarations }
 }
 
 /// Everything the verdicts of one run need.
@@ -284,6 +348,8 @@ fn main() {
         tests.len()
     ));
     report.push_str("| Adapter | Golden | Changed px | Max delta | Class | Declared | Verdict |\n|---|---|---|---|---|---|---|\n");
+    // ADR 0037 point 2: the look path is computed once, and only when the proposal declares look changes.
+    let look = (!look_declarations(&proposal_text).is_empty()).then(|| look_evidence(&root, &run, &proposal_text));
     let mut escalated = 0;
     let mut applied = vec![];
     let mut conditions = String::new();
@@ -313,6 +379,7 @@ fn main() {
                 None => m5_evidence
                     .as_ref()
                     .and_then(|e| classify_m5_first(adapter, name, &seen, class, is_declared, e))
+                    .or_else(|| look.as_ref().and_then(|l| classify_look_change(adapter, name, &seen, class, is_declared, l)))
                     .unwrap_or_else(|| classify(adapter, name, &seen, class, is_declared)),
             };
             let (px, delta) = match seen.get(adapter) {
@@ -327,6 +394,7 @@ fn main() {
                 Verdict::AutoRounding => "AUTO-R".to_string(),
                 Verdict::AutoExplained => "AUTO-E".to_string(),
                 Verdict::AutoM5(e) => format!("AUTO-M5 {e}"),
+                Verdict::AutoLook(e) => format!("AUTO-L {e}"),
                 Verdict::Escalate(r) => format!("ESCALATE {r}"),
             };
             println!("{adapter} {name}: {px} px, max delta {delta}: {v}");

@@ -1,0 +1,4 @@
+# Look data files (ADR 0037 point 2): the files whose declared parameters a look change may edit and still be blessed under policy by
+# golden-review. One path per line, or *suffix for a file name ending so. Every changed line of such a file must be a declared
+# parameter change (`Look changes:` in the proposal). Changing this list is a reviewed PR like any other.
+*.look.toml

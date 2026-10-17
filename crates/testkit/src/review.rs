@@ -78,6 +78,8 @@ pub enum Verdict {
     AutoExplained,
     /// The first golden of an M5 class with every condition of ADR 0037 point 1 met; carries the evidence line.
     AutoM5(String),
+    /// A declared look change after the M5 review (ADR 0037 point 2) with every condition met; carries the evidence line.
+    AutoLook(String),
     Escalate(String),
 }
 
@@ -384,6 +386,206 @@ pub fn classify_m5_first(
         Err(why) => esc(format!("{name}: {why} (ADR 0037 (b))")),
         Ok(line) => Some(Verdict::AutoM5(format!("first {} golden under ADR 0037; bound tests green; {line}", class.as_str()))),
     }
+}
+
+/// One entry under `Look changes:` in a proposal (ADR 0037 point 2): a look parameter that changes on purpose.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LookDeclaration {
+    /// The look data file the parameter lives in (a `*.look.toml`, or a file of `tests/goldens/look_data.txt`).
+    pub path: String,
+    /// The parameter's key, as the file spells it (`shore_filter`, `fresnel_f0`, `max_ev100`).
+    pub key: String,
+    pub old: String,
+    pub new: String,
+    /// The golden classes the parameter can change: `lit`, `sky`, `water`.
+    pub affects: Vec<GoldenClass>,
+}
+
+/// The `Look changes:` section of a proposal: `- <path>: <key> = <old> -> <new>; affects=<class>[, <class>]` per line, until a
+/// blank line or heading. A line missing a part, an unknown class, or an `affects=` naming a class that is not an M5 class does
+/// not count.
+pub fn look_declarations(proposal: &str) -> Vec<LookDeclaration> {
+    let mut out = Vec::new();
+    let mut inside = false;
+    for line in proposal.lines() {
+        let t = line.trim();
+        if t.trim_start_matches('#').trim().eq_ignore_ascii_case("look changes:") {
+            inside = true;
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        if t.is_empty() || t.starts_with('#') {
+            break;
+        }
+        let Some((path, rest)) = t.trim_start_matches(['-', '*']).trim().split_once(": ") else { continue };
+        let Some((change, affects)) = rest.split_once(';') else { continue };
+        let Some(("affects", classes)) = affects.trim().split_once('=') else { continue };
+        let classes: Vec<Option<GoldenClass>> = classes.split(',').map(|c| GoldenClass::parse(c.trim()).filter(|c| c.is_m5())).collect();
+        if classes.is_empty() || classes.iter().any(Option::is_none) {
+            continue;
+        }
+        let Some((key, values)) = change.split_once('=') else { continue };
+        let Some((old, new)) = values.split_once("->") else { continue };
+        let strip = |v: &str| v.trim().trim_matches('`').to_string();
+        let (key, old, new) = (strip(key), strip(old), strip(new));
+        if key.is_empty() || old.is_empty() || new.is_empty() || old == new {
+            continue;
+        }
+        out.push(LookDeclaration { path: strip(path), key, old, new, affects: classes.into_iter().flatten().collect() });
+    }
+    out
+}
+
+/// Does `path` match one pattern of `tests/goldens/look_data.txt`: an exact path, or `*suffix` for a file whose name ends so?
+pub fn is_look_data(path: &str, patterns: &[String]) -> bool {
+    let path = path.replace('\\', "/");
+    patterns.iter().any(|p| match p.strip_prefix('*') {
+        Some(suffix) => path.ends_with(suffix),
+        None => path == *p,
+    })
+}
+
+/// Paths that cannot change a pixel: the docs, the specs and changes, the goldens themselves and the review output.
+fn is_inert(path: &str) -> bool {
+    ["docs/", "openspec/", "tests/goldens/", "target/"].iter().any(|p| path.starts_with(p))
+}
+
+/// ADR 0037 point 2, condition 1: the PR changes look data and nothing that can move a pixel by itself. `changed` is the PR's
+/// file list, `diffs` the zero-context unified diff of each look data file (`git diff -U0`), `patterns` the look data files.
+/// Every changed file must be inert or look data; in a look data file every added line must carry a declared key and its new value
+/// and every removed line a declared key and its old value; every declaration must be found in the diff of its file.
+pub fn look_diff_ok(
+    changed: &[String],
+    diffs: &BTreeMap<String, String>,
+    patterns: &[String],
+    decls: &[LookDeclaration],
+) -> Result<(), String> {
+    if decls.is_empty() {
+        return Err("no `Look changes:` declaration in the proposal".into());
+    }
+    for f in changed {
+        let f = f.replace('\\', "/");
+        if !is_inert(&f) && !is_look_data(&f, patterns) {
+            return Err(format!(
+                "{f} is not look data (shader and Rust code, or any file that can move a pixel by itself, is the owner's)"
+            ));
+        }
+    }
+    // (a removed line with the old value, an added line with the new value) found per declaration
+    let mut found = vec![(false, false); decls.len()];
+    for (file, diff) in diffs {
+        let mine: Vec<(usize, &LookDeclaration)> = decls.iter().enumerate().filter(|(_, d)| d.path == *file).collect();
+        for line in diff.lines() {
+            let (sign, text) = match line.chars().next() {
+                Some(c @ ('+' | '-')) if !line.starts_with("+++") && !line.starts_with("---") => (c, &line[1..]),
+                _ => continue,
+            };
+            // Exactly `key = value` (a trailing comment and comma aside): a longer key, a longer value or a second change on the
+            // line is not the declared change.
+            let (k, v) = text.split('#').next().unwrap_or("").split_once('=').map_or(("", ""), |(k, v)| (k.trim(), v.trim()));
+            let unquote = |x: &str| x.trim().trim_end_matches(',').trim().trim_matches('"').to_string();
+            let v = unquote(v);
+            let hit = mine.iter().find(|(_, d)| k == d.key && v == unquote(if sign == '-' { &d.old } else { &d.new }));
+            match hit {
+                Some((i, _)) => {
+                    if sign == '-' {
+                        found[*i].0 = true;
+                    } else {
+                        found[*i].1 = true;
+                    }
+                }
+                None => return Err(format!("{file}: the changed line `{}` is not a declared parameter change", line.trim())),
+            }
+        }
+    }
+    if let Some(i) = found.iter().position(|f| !(f.0 && f.1)) {
+        let d = &decls[i];
+        return Err(format!("the declared change {}: {} {} -> {} is not in the diff", d.path, d.key, d.old, d.new));
+    }
+    Ok(())
+}
+
+/// ADR 0037 point 2, condition 2: no debug view changed beyond ADR 0017's rounding on any adapter (`views` holds, per golden of
+/// the debug or shaded classes, what each adapter shows). A look parameter changes lit pictures, never the debug views of the
+/// features (CON-18); a debug view that moved means the change was not only a look change.
+pub fn debug_views_unchanged(views: &[(String, BTreeMap<String, Observation>)]) -> Result<(), String> {
+    for (name, seen) in views {
+        for (adapter, obs) in seen {
+            let moved = match obs {
+                Observation::Changed(c) => c.pixels > ROUNDING_MAX_PIXELS || c.max_delta > ROUNDING_MAX_DELTA,
+                Observation::SizeChanged => true,
+                Observation::Unchanged | Observation::NoGolden => false,
+            };
+            if moved {
+                return Err(format!("the debug view {name} changed on {adapter} beyond rounding"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The evidence for ADR 0037 point 2, gathered once per run.
+#[derive(Clone, Debug)]
+pub struct LookEvidence {
+    pub declarations: Vec<LookDeclaration>,
+    /// Condition 1: [`look_diff_ok`].
+    pub diff: Result<(), String>,
+    /// Condition 2: [`debug_views_unchanged`].
+    pub debug_views: Result<(), String>,
+}
+
+/// ADR 0037 point 2: classify the candidate of an existing M5-class golden when the change declares look parameter changes.
+/// `None` when the path does not apply (nothing declared, not an M5 class, or the adapter has no changed candidate): then
+/// [`classify`] decides as before. Otherwise blesses only when all hold: the PR changes only look data (condition 1), the
+/// debug views are unchanged (2), the golden is declared under `Expected golden changes:` and in a class the declared
+/// parameters affect (3), and every adapter that has the golden shows a change (a look change moves the picture everywhere), at
+/// least two. Anything else escalates with the condition that failed. The driver gate is applied by the caller before this.
+pub fn classify_look_change(
+    adapter: &str,
+    name: &str,
+    seen: &BTreeMap<String, Observation>,
+    class: Option<GoldenClass>,
+    declared: bool,
+    look: &LookEvidence,
+) -> Option<Verdict> {
+    let class = class.filter(|c| c.is_m5())?;
+    if look.declarations.is_empty() || !matches!(seen.get(adapter), Some(Observation::Changed(_))) {
+        return None;
+    }
+    let esc = |why: String| Some(Verdict::Escalate(format!("{name}: {why} (ADR 0037 point 2)")));
+    if let Err(why) = &look.diff {
+        return esc(format!("the change is not only look data: {why}"));
+    }
+    if let Err(why) = &look.debug_views {
+        return esc(format!("a debug view moved: {why}"));
+    }
+    if !declared {
+        return esc("not listed under 'Expected golden changes:' in the change's proposal".into());
+    }
+    if !look.declarations.iter().any(|d| d.affects.contains(&class)) {
+        let named: Vec<&str> = look.declarations.iter().flat_map(|d| d.affects.iter().map(|c| c.as_str())).collect();
+        return esc(format!("a {} golden is in no class the declared parameters affect ({})", class.as_str(), named.join(", ")));
+    }
+    if let Some((other, obs)) = seen.iter().find(|(_, o)| !matches!(o, Observation::Changed(_))) {
+        let what = match obs {
+            Observation::Unchanged => "does not change",
+            Observation::NoGolden => "has no golden",
+            _ => "changed size",
+        };
+        return esc(format!("{other} {what}: a look change moves the picture on every adapter"));
+    }
+    if seen.len() < 2 {
+        return esc("only one adapter has a candidate; cross-adapter agreement is unchecked".into());
+    }
+    let params: Vec<String> = look.declarations.iter().map(|d| format!("{} {} -> {}", d.key, d.old, d.new)).collect();
+    Some(Verdict::AutoLook(format!(
+        "declared look change ({}); only look data changed; debug views unchanged; {} golden in an affected class; changed on {} adapters",
+        params.join(", "),
+        class.as_str(),
+        seen.len()
+    )))
 }
 
 /// A candidate rendered with another driver than the one recorded beside the goldens escalates, whatever its pixels:
@@ -781,5 +983,158 @@ mod tests {
         assert_eq!(c.get("terrain_a"), Some(&GoldenClass::Debug));
         assert_eq!(c.get("terrain_b"), Some(&GoldenClass::Lit));
         assert_eq!(c.len(), 2);
+    }
+    fn decl(key: &str, old: &str, new: &str, classes: &[GoldenClass]) -> LookDeclaration {
+        LookDeclaration {
+            path: "worlds/earth.look.toml".into(),
+            key: key.into(),
+            old: old.into(),
+            new: new.into(),
+            affects: classes.to_vec(),
+        }
+    }
+    fn look(diff: Result<(), String>, debug_views: Result<(), String>, classes: &[GoldenClass]) -> LookEvidence {
+        LookEvidence { declarations: vec![decl("shore_filter", "1", "0", classes)], diff, debug_views }
+    }
+    fn all_changed() -> BTreeMap<String, Observation> {
+        seen(&[("warp", ch(5000, 40)), ("lavapipe", ch(5100, 40)), ("nv", ch(4900, 41))])
+    }
+
+    // spec: TEST-036
+    #[test]
+    fn a_pure_look_change_blesses_the_changed_lit_golden_on_every_adapter() {
+        let ev = look(Ok(()), Ok(()), &[GoldenClass::Lit, GoldenClass::Water]);
+        for a in ["warp", "lavapipe", "nv"] {
+            let v = classify_look_change(a, "lit_orbit_ev15", &all_changed(), Some(GoldenClass::Lit), true, &ev);
+            match v {
+                Some(Verdict::AutoLook(e)) => assert!(e.contains("shore_filter 1 -> 0") && e.contains("3 adapters"), "{e}"),
+                other => panic!("{a}: {other:?}"),
+            }
+        }
+        assert!(matches!(
+            classify_look_change("warp", "water_class_orbit", &all_changed(), Some(GoldenClass::Water), true, &ev),
+            Some(Verdict::AutoLook(_))
+        ));
+    }
+
+    // spec: TEST-036
+    #[test]
+    fn each_failed_condition_escalates_with_its_reason() {
+        let why = |v: Option<Verdict>| match v {
+            Some(Verdict::Escalate(r)) => r,
+            other => panic!("expected an escalation, got {other:?}"),
+        };
+        let seen3 = all_changed();
+        let lit = Some(GoldenClass::Lit);
+        // A look change plus a code change.
+        let ev = look(Err("crates/render/src/lit.rs is not look data".into()), Ok(()), &[GoldenClass::Lit]);
+        assert!(why(classify_look_change("warp", "g", &seen3, lit, true, &ev)).contains("not only look data"));
+        // A debug view moved.
+        let ev = look(Ok(()), Err("the debug view terrain_orbit_tile_id changed on warp beyond rounding".into()), &[GoldenClass::Lit]);
+        assert!(why(classify_look_change("warp", "g", &seen3, lit, true, &ev)).contains("a debug view moved"));
+        // A golden outside the classes the parameters affect.
+        let ev = look(Ok(()), Ok(()), &[GoldenClass::Water]);
+        assert!(
+            why(classify_look_change("warp", "lit_orbit_ev15", &seen3, lit, true, &ev)).contains("no class the declared parameters affect")
+        );
+        // Not declared as an expected golden change.
+        let ev = look(Ok(()), Ok(()), &[GoldenClass::Lit]);
+        assert!(why(classify_look_change("warp", "g", &seen3, lit, false, &ev)).contains("Expected golden changes"));
+        // An adapter that does not change, or a single adapter.
+        let half = seen(&[("warp", ch(5000, 40)), ("nv", Observation::Unchanged)]);
+        assert!(why(classify_look_change("warp", "g", &half, lit, true, &ev)).contains("nv does not change"));
+        let alone = seen(&[("warp", ch(5000, 40))]);
+        assert!(why(classify_look_change("warp", "g", &alone, lit, true, &ev)).contains("only one adapter"));
+        // The path does not apply without a declaration, for a non-M5 class, or for a first golden.
+        let none = LookEvidence { declarations: vec![], diff: Ok(()), debug_views: Ok(()) };
+        assert!(classify_look_change("warp", "g", &seen3, lit, true, &none).is_none());
+        assert!(classify_look_change("warp", "g", &seen3, Some(GoldenClass::Debug), true, &ev).is_none());
+        let first = seen(&[("warp", Observation::NoGolden)]);
+        assert!(classify_look_change("warp", "g", &first, lit, true, &ev).is_none());
+        // Without the look path an existing lit golden still escalates (ADR 0017).
+        assert!(matches!(classify("warp", "g", &seen3, lit, true), Verdict::Escalate(_)));
+    }
+
+    // spec: TEST-036
+    #[test]
+    fn the_look_diff_must_touch_only_look_data_and_exactly_the_declared_lines() {
+        let patterns = vec!["*.look.toml".to_string(), "crates/frame/src/look/water.rs".to_string()];
+        let d = [decl("shore_filter", "1", "0", &[GoldenClass::Water])];
+        let diffs = |text: &str| BTreeMap::from([("worlds/earth.look.toml".to_string(), text.to_string())]);
+        let good = diffs("--- a/worlds/earth.look.toml\n+++ b/worlds/earth.look.toml\n@@ -3 +3 @@\n-shore_filter = 1\n+shore_filter = 0\n");
+        let files = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let ok = look_diff_ok(
+            &files(&[
+                "worlds/earth.look.toml",
+                "tests/goldens/warp/lit_orbit_ev15.png",
+                "docs/log.d/x.md",
+                "openspec/changes/c/proposal.md",
+            ]),
+            &good,
+            &patterns,
+            &d,
+        );
+        assert_eq!(ok, Ok(()));
+        // A Rust or shader file in the diff.
+        let e = look_diff_ok(&files(&["worlds/earth.look.toml", "crates/render/src/shaders/lit.wgsl"]), &good, &patterns, &d).unwrap_err();
+        assert!(e.contains("lit.wgsl") && e.contains("not look data"), "{e}");
+        // An extra line in the look file that no declaration names.
+        let extra = diffs("-shore_filter = 1\n+shore_filter = 0\n-sun_lux = 1\n+sun_lux = 2\n");
+        assert!(look_diff_ok(&files(&["worlds/earth.look.toml"]), &extra, &patterns, &d).unwrap_err().contains("sun_lux"));
+        // A longer key, a longer value, a second change hidden in a comment: none of them is the declared line.
+        for sneaky in [
+            "-shore_filter = 1
++shore_filter = 10
+",
+            "-shore_filter = 1
++max_shore_filter = 0
+",
+            "-shore_filter = 1
++sun_lux = 9 # shore_filter = 0
+",
+        ] {
+            assert!(look_diff_ok(&files(&["worlds/earth.look.toml"]), &diffs(sneaky), &patterns, &d).is_err(), "{sneaky}");
+        }
+        // A trailing comment and comma and quotes do not matter.
+        let spaced = diffs(
+            "-shore_filter=1 # was
++  shore_filter = 0,
+",
+        );
+        assert_eq!(look_diff_ok(&files(&["worlds/earth.look.toml"]), &spaced, &patterns, &d), Ok(()));
+        // The wrong value, and a declaration that is not in the diff.
+        let wrong = diffs("-shore_filter = 1\n+shore_filter = 2\n");
+        assert!(look_diff_ok(&files(&["worlds/earth.look.toml"]), &wrong, &patterns, &d).is_err());
+        let missing = diffs("-shore_filter = 1\n");
+        assert!(look_diff_ok(&files(&["worlds/earth.look.toml"]), &missing, &patterns, &d).unwrap_err().contains("not in the diff"));
+        assert!(look_diff_ok(&files(&["worlds/earth.look.toml"]), &good, &patterns, &[]).unwrap_err().contains("no `Look changes:`"));
+        assert!(is_look_data("a\\b.look.toml", &patterns) && !is_look_data("a/b.toml", &patterns));
+    }
+
+    // spec: TEST-036
+    #[test]
+    fn a_debug_view_that_moved_beyond_rounding_voids_the_look_path() {
+        let view = |obs: Observation| vec![("terrain_orbit_tile_id".to_string(), seen(&[("warp", obs)]))];
+        assert_eq!(debug_views_unchanged(&view(Observation::Unchanged)), Ok(()));
+        assert_eq!(debug_views_unchanged(&view(ch(32, 1))), Ok(()), "ADR 0017 rounding is not a move");
+        assert!(debug_views_unchanged(&view(ch(33, 1))).unwrap_err().contains("terrain_orbit_tile_id changed on warp"));
+        assert!(debug_views_unchanged(&view(ch(3, 2))).is_err());
+        assert!(debug_views_unchanged(&view(Observation::SizeChanged)).is_err());
+        assert_eq!(debug_views_unchanged(&[]), Ok(()));
+    }
+
+    // spec: TEST-036
+    #[test]
+    fn the_look_changes_section_parses_strictly() {
+        let p = "Why\n\nLook changes:\n- worlds/earth.look.toml: shore_filter = 1 -> 0; affects=water, lit\n- `a.look.toml`: `max_ev100` = 16.0 -> 15.0; affects=sky\n- bad.toml: k = 1 -> 1; affects=lit\n- bad.toml: k = 1 -> 2; affects=debug\n- bad.toml: k = 1 -> 2\n- bad.toml: k 1 -> 2; affects=lit\n\nExpected golden changes:\n- g: x\n";
+        let d = look_declarations(p);
+        assert_eq!(d.len(), 2, "{d:?}");
+        assert_eq!(
+            (d[0].path.as_str(), d[0].key.as_str(), d[0].old.as_str(), d[0].new.as_str()),
+            ("worlds/earth.look.toml", "shore_filter", "1", "0")
+        );
+        assert_eq!(d[0].affects, [GoldenClass::Water, GoldenClass::Lit]);
+        assert_eq!((d[1].path.as_str(), d[1].key.as_str(), d[1].affects.clone()), ("a.look.toml", "max_ev100", vec![GoldenClass::Sky]));
+        assert!(look_declarations("no section here").is_empty());
     }
 }

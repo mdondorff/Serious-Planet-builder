@@ -734,6 +734,33 @@ Source: M5 item 9 (owner, 2026-10-16), the M4 configuration cap, TEST-019
 - **WHEN** a log carries a pool of 20,000 slots, 1 job, 1 resident slot, a scheduler median of 0.6 ms and an upload median of 2 ms
 - **THEN** one finding names each of them, and values exactly at the limits pass
 
+### Requirement: TEST-036 Look changes after the M5 review
+`golden-review` SHALL bless the changed candidates of existing goldens of the M5 classes (`lit`, `sky`, `water`) as `AUTO-L` (ADR 0037 point 2) when the change's proposal declares look parameter changes under `Look changes:` (`- <look data file>: <key> = <old> -> <new>; affects=<class>[, <class>]` per line) and all of these hold: (1) the change touches only look data (a file of `tests/goldens/look_data.txt` as the base branch has it) and inert paths (`docs/`, `openspec/`, `tests/goldens/`), every added line of a look data file is exactly `key = value` of a declaration's new value and every removed line exactly `key = value` of its old value (a longer key or value, or a second change in a comment, is not), and each declaration is found in the diff; (2) no debug or shaded golden changed beyond ADR 0017's rounding on any adapter, and every adapter with goldens took part in the run (an adapter that is NOT RUN leaves its debug views unchecked); (3) the golden is listed under `Expected golden changes:`, is in a class a declaration affects, and has a changed candidate on every adapter that has it, at least two. Any other candidate escalates with the failed condition named. The driver gate, ADR 0017's own rules, ADR 0052's thresholds and the first-golden path of ADR 0037 point 1 are unchanged.
+
+Verify: A
+Status: active
+Source: ADR 0037 point 2, ADR 0017, ADR 0035, M5 queue item 10
+
+#### Scenario: A pure look change
+- **WHEN** the proposal declares `shore_filter = 1 -> 0; affects=water, lit`, only the look file changed by that line, no debug view moved, and a declared lit golden changed on three adapters
+- **THEN** every adapter's candidate is `AUTO-L`
+
+#### Scenario: A look change plus code
+- **WHEN** the same change also edits a Rust or shader file, or a look data line that no declaration names
+- **THEN** the candidates escalate and the reason names the file or the line
+
+#### Scenario: A line that only looks declared
+- **WHEN** the changed line is `shore_filter = 10`, `max_shore_filter = 0` or `sun_lux = 9 # shore_filter = 0` for a declared `shore_filter = 1 -> 0`
+- **THEN** the candidates escalate
+
+#### Scenario: A debug view moved
+- **WHEN** a debug golden changed by 33 pixels, or by delta 2, on one adapter
+- **THEN** the candidates escalate; 32 pixels at delta 1 do not
+
+#### Scenario: A golden outside the affected classes
+- **WHEN** a water golden changes but the declarations affect only `sky`
+- **THEN** it escalates
+
 ### Requirement: TEST-033 Cool start of a view
 Before the warm-up of every view (the terrain scene's and the lit scenes', not in a smoke run) the harness SHALL wait, idle, until the GPU temperature reads 60 C or less, polling every 5 s for at most 120 s, and SHALL print one line per view: the temperatures at the start and the end and the seconds, or `NOT cooled` with the cap. An unreadable sensor ends the wait at once. The wait adds nothing to a measured frame.
 
