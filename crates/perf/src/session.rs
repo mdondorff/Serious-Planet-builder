@@ -77,6 +77,53 @@ pub struct ChildResult {
 /// Runs one child with the given arguments (the real one spawns `cargo`; tests use a fake).
 pub trait ChildRunner {
     fn run(&mut self, args: &[String]) -> Result<ChildResult, String>;
+
+    /// Called after `scene` ended and before the next child starts (not after the last): the real runner waits for the system CPU to
+    /// settle so the next readiness gate does not measure the previous child's tail (TEST-019). The default does nothing.
+    fn settle_after(&mut self, _scene: &str) {}
+}
+
+/// Most polls of the system CPU load a settle makes (each poll is one readiness-gate window, `gate::LOAD_WINDOW_S`).
+pub const SETTLE_MAX_POLLS: u32 = 30;
+
+/// How a wait for the CPU load to settle ended.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Settled {
+    pub polls: u32,
+    /// The last reading (percent), `None` when the load could not be read.
+    pub last_pct: Option<f64>,
+    /// Whether a reading was below the limit.
+    pub below: bool,
+}
+
+/// Poll `read` (the mean system CPU load over one gate window, percent; it blocks for the window) until a reading is below `limit_pct`
+/// or `max_polls` readings were taken. An unreadable load ends the wait at once (nothing to wait on).
+pub fn settle_cpu(read: &mut dyn FnMut() -> Option<f64>, limit_pct: f64, max_polls: u32) -> Settled {
+    let mut polls = 0;
+    let mut last = None;
+    while polls < max_polls {
+        polls += 1;
+        last = read();
+        match last {
+            Some(v) if v >= limit_pct => {}
+            Some(_) => return Settled { polls, last_pct: last, below: true },
+            None => return Settled { polls, last_pct: None, below: false },
+        }
+    }
+    Settled { polls, last_pct: last, below: false }
+}
+
+/// The console line of a settle wait after `scene`.
+pub fn settle_line(scene: &str, s: &Settled, limit_pct: f64) -> String {
+    let load = s.last_pct.map_or("unreadable".to_string(), |v| format!("{v:.1} %"));
+    if s.below {
+        format!("after {scene}: system CPU load settled to {load} (limit {limit_pct:.0} %) after {} poll(s)", s.polls)
+    } else {
+        format!(
+            "after {scene}: system CPU load NOT settled, last {load} (limit {limit_pct:.0} %) after {} poll(s), the next gate decides",
+            s.polls
+        )
+    }
 }
 
 /// One scene's outcome.
@@ -104,7 +151,10 @@ pub fn run_scenes(
     args_of: &dyn Fn(&str) -> Result<Vec<String>, String>,
 ) -> Result<Vec<SceneOutcome>, String> {
     let mut outcomes = Vec::new();
-    for scene in scenes {
+    for (k, scene) in scenes.iter().enumerate() {
+        if k > 0 {
+            runner.settle_after(scenes[k - 1]);
+        }
         let args = args_of(scene)?;
         match runner.run(&args) {
             Ok(r) => outcomes.push(SceneOutcome {
@@ -216,6 +266,50 @@ mod tests {
         assert!(out.iter().all(SceneOutcome::success));
         let (text, ok) = summary(&out);
         assert!(ok && text.contains("all scenes ran to the end"), "{text}");
+    }
+
+    // spec: TEST-028
+    #[test]
+    fn the_runner_settles_between_children_but_not_after_the_last() {
+        struct Counting(Vec<String>);
+        impl ChildRunner for Counting {
+            fn run(&mut self, args: &[String]) -> Result<ChildResult, String> {
+                self.0.push(format!("run {}", args[1]));
+                Ok(ChildResult { code: Some(0), output: String::new() })
+            }
+            fn settle_after(&mut self, scene: &str) {
+                self.0.push(format!("settle {scene}"));
+            }
+        }
+        let mut c = Counting(vec![]);
+        run_scenes(&mut c, &["a", "b", "c"], &args_of).unwrap();
+        assert_eq!(c.0, ["run a", "settle a", "run b", "settle b", "run c"]);
+    }
+
+    // spec: TEST-028
+    #[test]
+    fn the_cpu_settle_polls_until_below_the_limit_and_is_capped() {
+        let mut seq = vec![42.0, 30.0, 9.0].into_iter();
+        let s = settle_cpu(&mut || seq.next(), 15.0, 30);
+        assert_eq!(s, Settled { polls: 3, last_pct: Some(9.0), below: true });
+        assert!(settle_line("dive", &s, 15.0).contains("settled to 9.0 %") && settle_line("dive", &s, 15.0).contains("3 poll(s)"));
+        let mut n = 0;
+        let s = settle_cpu(
+            &mut || {
+                n += 1;
+                Some(50.0)
+            },
+            15.0,
+            4,
+        );
+        assert_eq!((s.polls, n, s.below), (4, 4, false));
+        assert!(settle_line("dive", &s, 15.0).contains("NOT settled"));
+        let s = settle_cpu(&mut || None, 15.0, 30);
+        assert_eq!((s.polls, s.below, s.last_pct), (1, false, None), "an unreadable load ends the wait");
+        // The limit is the readiness gate's (ADR 0020).
+        assert_eq!(crate::gate::MAX_CPU_LOAD_PCT, 15.0);
+        let mut at_limit = vec![15.0].into_iter();
+        assert!(!settle_cpu(&mut || at_limit.next(), crate::gate::MAX_CPU_LOAD_PCT, 1).below, "the gate refuses at the limit");
     }
 
     // spec: TEST-019

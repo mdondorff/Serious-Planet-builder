@@ -16,6 +16,11 @@ pub const CLOCK_TOLERANCE: f64 = 0.05;
 pub const WARMUP_CAP_S: f64 = 30.0;
 /// Frames rendered between two readings of the state during the warm-up.
 pub const WARMUP_CHUNK_FRAMES: usize = 60;
+/// Consecutive readings at or above the floor that end the warm-up of the lit views (a clock that reads the floor once and falls
+/// below it in the first run is not lifted: window 6, coast-2km, coast-3m and the flights).
+pub const WARMUP_HOLD_READINGS: usize = 3;
+/// A warm-up chunk of the lit views renders at least this long (seconds), so the readings see a sustained load, not a burst.
+pub const WARMUP_MIN_CHUNK_S: f64 = 1.0;
 
 /// The part of a [`ClockSample`] the clock rules look at.
 #[derive(Clone, Debug, PartialEq)]
@@ -100,6 +105,8 @@ pub fn equal_clock_state(a: &ClockState, b: &ClockState) -> bool {
 #[derive(Clone, Debug, PartialEq)]
 pub struct WarmUpOutcome {
     pub reached: bool,
+    /// Consecutive readings at the floor that were required (1 for the terrain scene's warm-up).
+    pub hold: usize,
     pub chunks: usize,
     pub seconds: f64,
     /// The last reading (`None`: the sampler gave nothing).
@@ -111,7 +118,11 @@ impl WarmUpOutcome {
     pub fn line(&self, view: &str) -> String {
         let last = self.last.as_ref().map_or("no reading".to_string(), |p| format!("{} {:.0} MHz", p.pstate, p.mhz));
         if self.reached {
-            format!("warm-up {view}: {last} (floor {GPU_CLOCK_FLOOR_MHZ:.0} MHz) after {:.1} s ({} chunks)", self.seconds, self.chunks)
+            let held = if self.hold > 1 { format!(", held {} readings", self.hold) } else { String::new() };
+            format!(
+                "warm-up {view}: {last} (floor {GPU_CLOCK_FLOOR_MHZ:.0} MHz{held}) after {:.1} s ({} chunks)",
+                self.seconds, self.chunks
+            )
         } else {
             format!("warm-up {view}: still {last}, below the {GPU_CLOCK_FLOOR_MHZ:.0} MHz floor, after {:.1} s ({} chunks, cap {WARMUP_CAP_S} s)", self.seconds, self.chunks)
         }
@@ -122,20 +133,39 @@ impl WarmUpOutcome {
 /// after the reading, so a reading at the floor at exactly the cap counts). `now` returns seconds. At least one chunk is rendered.
 pub fn warm_up(
     cap_s: f64,
+    render_chunk: impl FnMut() -> Result<(), String>,
+    sample: impl FnMut() -> Option<ClockPoint>,
+    now: impl FnMut() -> f64,
+) -> Result<WarmUpOutcome, String> {
+    warm_up_held(cap_s, 1, render_chunk, sample, now)
+}
+
+/// [`warm_up`] that ends only after `hold` consecutive readings at the floor (a reading below the floor restarts the count), or at
+/// the cap.
+pub fn warm_up_held(
+    cap_s: f64,
+    hold: usize,
     mut render_chunk: impl FnMut() -> Result<(), String>,
     mut sample: impl FnMut() -> Option<ClockPoint>,
     mut now: impl FnMut() -> f64,
 ) -> Result<WarmUpOutcome, String> {
+    let hold = hold.max(1);
     let start = now();
     let mut chunks = 0;
+    let mut run = 0;
     loop {
         render_chunk()?;
         chunks += 1;
         let last = sample();
         let seconds = now() - start;
-        let reached = last.as_ref().is_some_and(|p| p.mhz >= GPU_CLOCK_FLOOR_MHZ);
+        if last.as_ref().is_some_and(|p| p.mhz >= GPU_CLOCK_FLOOR_MHZ) {
+            run += 1;
+        } else {
+            run = 0;
+        }
+        let reached = run >= hold;
         if reached || seconds >= cap_s {
-            return Ok(WarmUpOutcome { reached, chunks, seconds, last });
+            return Ok(WarmUpOutcome { reached, hold, chunks, seconds, last });
         }
     }
 }
@@ -210,6 +240,52 @@ mod tests {
         assert!(out.reached && out.chunks == 3 && rendered == 3, "{out:?}");
         assert_eq!(out.last, p("P2", 1710.0));
         assert!(out.line("ground-1m").starts_with("warm-up ground-1m: P2 1710 MHz (floor 1400 MHz) after"), "{}", out.line("ground-1m"));
+    }
+
+    // spec: TEST-029
+    #[test]
+    fn a_held_warm_up_needs_consecutive_readings_at_the_floor_and_a_dip_restarts_the_count() {
+        // The window-6 pattern: the floor is read once, the clock falls below it under the sustained load, then holds.
+        let mut readings =
+            vec![p("P0", 1702.0), p("P0", 1327.0), p("P0", 1450.0), p("P0", 1420.0), p("P0", 1410.0), p("P0", 1500.0)].into_iter();
+        let mut t = 0.0;
+        let out = warm_up_held(
+            30.0,
+            3,
+            || Ok(()),
+            || readings.next().unwrap(),
+            || {
+                t += 1.0;
+                t
+            },
+        )
+        .unwrap();
+        assert!(out.reached && out.hold == 3 && out.chunks == 5, "the dip at reading 2 restarts the count: {out:?}");
+        assert!(out.line("coast-3m").contains("held 3 readings"), "{}", out.line("coast-3m"));
+        // At the cap with the clock never holding, the outcome says not reached.
+        let mut t = 0.0;
+        let mut flip = 0;
+        let out = warm_up_held(
+            10.0,
+            3,
+            || Ok(()),
+            || {
+                flip += 1;
+                if flip % 2 == 0 {
+                    p("P0", 1300.0)
+                } else {
+                    p("P0", 1500.0)
+                }
+            },
+            || {
+                t += 1.0;
+                t
+            },
+        )
+        .unwrap();
+        assert!(!out.reached && out.seconds >= 10.0, "{out:?}");
+        // The one-reading warm-up is the held warm-up with hold 1.
+        assert_eq!(WARMUP_HOLD_READINGS, 3);
     }
 
     // spec: TEST-012
