@@ -105,6 +105,8 @@ pub enum Command {
     NextView,
     ToggleVsync,
     ToggleCamera,
+    /// L: the lit path with the atmosphere, or the debug path (VIEW-007).
+    ToggleLit,
     Quit,
 }
 
@@ -151,7 +153,7 @@ impl Held {
 }
 
 /// The key bindings, as text for the usage message and the log.
-pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, V next debug view, T vsync on/off, C flight or free camera, \
+pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, V next debug view (debug path), T vsync on/off, C flight or free camera, \
      free camera: WASD move, Q/E down/up, arrows look, Shift boost; Esc quits";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -172,6 +174,10 @@ pub struct ViewerState {
     pub vsync: bool,
     pub mode: CameraMode,
     pub held: Held,
+    /// The lit path is shown (VIEW-007); the debug path otherwise.
+    pub lit: bool,
+    /// The next lit frame snaps the exposure (a first lit frame, a return to the lit path, a restart of the flight).
+    exposure_reset: bool,
     /// The user paused the flight (as against the free camera holding the clock).
     user_paused: bool,
 }
@@ -186,8 +192,22 @@ impl ViewerState {
             vsync,
             mode: CameraMode::Flight,
             held: Held::default(),
+            lit: false,
+            exposure_reset: true,
             user_paused: false,
         }
+    }
+
+    /// A viewer that starts on the lit path (the editor window) or on the debug path.
+    pub fn with_lit(mut self, lit: bool) -> Self {
+        self.lit = lit;
+        self
+    }
+
+    /// Whether the next lit frame snaps the exposure to its target, once: true for the first lit frame, after the lit path was
+    /// switched back on and after a restart of the flight (a cut).
+    pub fn take_exposure_reset(&mut self) -> bool {
+        std::mem::take(&mut self.exposure_reset)
     }
 
     pub fn is_free(&self) -> bool {
@@ -206,11 +226,21 @@ impl ViewerState {
                 }
             }
             Command::Restart => {
+                self.exposure_reset = true;
                 self.user_paused = false;
                 self.mode = CameraMode::Flight;
                 self.clock.restart(now_ms);
             }
-            Command::NextView => self.view_index = (self.view_index + 1) % self.views,
+            // The debug views belong to the debug path; on the lit path V does nothing.
+            Command::NextView => {
+                if !self.lit {
+                    self.view_index = (self.view_index + 1) % self.views;
+                }
+            }
+            Command::ToggleLit => {
+                self.lit = !self.lit;
+                self.exposure_reset |= self.lit;
+            }
             Command::ToggleVsync => self.vsync = !self.vsync,
             Command::ToggleCamera => match self.mode {
                 CameraMode::Flight => {
@@ -374,6 +404,8 @@ pub struct TitleInfo {
     pub paused: bool,
     pub flight_s: f64,
     pub altitude_m: f64,
+    /// The exposure the last sampled lit frame was shown at; `None` on the debug path (VIEW-007).
+    pub exposure: Option<ExposureReading>,
     pub readiness: Readiness,
 }
 
@@ -386,9 +418,10 @@ pub fn title(i: &TitleInfo) -> String {
     } else {
         format!("flight {:.1} s", i.flight_s)
     };
+    let exposure = i.exposure.map_or(String::new(), |e| format!(" | {}", exposure_text(&e)));
     let alt = if i.altitude_m >= 10_000.0 { format!("{:.0} km", i.altitude_m / 1000.0) } else { format!("{:.1} m", i.altitude_m) };
     format!(
-        "planet | {:.0} fps | cpu {:.2} ms | {gpu} | vsync {} ({}) | {} | {camera} | alt {alt} | {}",
+        "planet | {:.0} fps | cpu {:.2} ms | {gpu} | vsync {} ({}) | {}{exposure} | {camera} | alt {alt} | {}",
         i.fps,
         i.cpu_ms,
         if i.vsync { "on" } else { "off" },
@@ -396,6 +429,140 @@ pub fn title(i: &TitleInfo) -> String {
         i.view,
         i.readiness.summary()
     )
+}
+
+// -------------------------------------------------------------------------------------------------------------------------
+// The lit path in the window (VIEW-007)
+
+use crate::look::file::LookParams;
+use crate::look::{LitPlan, SOLAR_ILLUMINANCE_LUX};
+use crate::terrain::{TerrainPlan, TerrainView};
+
+/// The pre-exposure EV100 the viewer writes the scene target at on Earth (ADR 0048 point 3: chosen by the view, never read back):
+/// f16 then holds about +-12 stops around it, so a sunlit surface (EV 14 to 15) and a moonless night's scene alike stay inside it.
+pub const VIEWER_PRE_EV100: f32 = 12.0;
+
+/// The pre-exposure of a body: the Earth's, moved by the stops its sun differs by (the scene unit is the sun's illuminance, so a
+/// dimmer sun lowers every scene value by the same factor).
+pub fn viewer_pre_ev100(look: &LookParams) -> f32 {
+    let lux = look.units.solar_illuminance_lux;
+    if !(lux.is_finite() && lux > 0.0) {
+        return VIEWER_PRE_EV100;
+    }
+    VIEWER_PRE_EV100 + libm::log2(lux / SOLAR_ILLUMINANCE_LUX) as f32
+}
+
+/// The lit plan of one viewer frame: the body's look (sun, tone curve, units, histogram, albedo), the adaptive exposure with `dt_s`
+/// seconds of the frame clock and, when `atmosphere` is set, the atmosphere of a body of `radius_m`. A pure function of its
+/// arguments, so the exposure a run reaches is decided by the plans alone (CON-04). `reset` snaps the exposure (see
+/// [`ViewerState::take_exposure_reset`]).
+pub fn viewer_lit_plan(look: &LookParams, radius_m: f64, dt_s: f32, reset: bool, atmosphere: bool) -> Result<LitPlan, String> {
+    let mut plan = LitPlan::adaptive_with(look, viewer_pre_ev100(look), dt_s);
+    if atmosphere {
+        plan = plan.with_atmosphere(look, radius_m)?;
+    }
+    plan.reset_exposure = reset;
+    Ok(plan)
+}
+
+/// The plan of the throwaway lit frames that warm the lit and atmosphere passes before the first measured frame (REND-017): the
+/// first camera of the flight, no node, the same lit plan the first frame will carry.
+pub fn lit_warm_plan(camera: crate::camera::Camera, size: (u32, u32), cells: u32, lit: LitPlan) -> TerrainPlan {
+    TerrainPlan {
+        size,
+        view: TerrainView::Relief,
+        camera,
+        view_projection: camera.view_projection(),
+        clear_color: [0, 0, 0, 255],
+        height_range: [0.0, 1.0],
+        cells,
+        nodes: Vec::new(),
+        lit: Some(lit),
+    }
+}
+
+/// The exposure of a lit frame as the GPU holds it: the EV100 shown, and the EV100 the histogram asks for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExposureReading {
+    pub ev100: f32,
+    pub target_ev100: f32,
+}
+
+/// Stops within which the exposure counts as adapted to its target.
+pub const ADAPTED_WITHIN_STOPS: f32 = 0.05;
+
+/// The exposure as the title shows it: `EV 12.3 (adapted)`, or `EV 12.3 (adapting to 14.0)` while it moves.
+pub fn exposure_text(e: &ExposureReading) -> String {
+    if (e.ev100 - e.target_ev100).abs() <= ADAPTED_WITHIN_STOPS {
+        format!("EV {:.1} (adapted)", e.ev100)
+    } else {
+        format!("EV {:.1} (adapting to {:.1})", e.ev100, e.target_ev100)
+    }
+}
+
+/// What the title names where it names the debug view: the lit path (with the atmosphere where it runs) or the debug view.
+pub fn mode_label(lit: bool, atmosphere: bool, debug_view: &str) -> String {
+    match (lit, atmosphere) {
+        (true, true) => "lit + atmosphere".to_string(),
+        (true, false) => "lit".to_string(),
+        (false, _) => debug_view.to_string(),
+    }
+}
+
+/// What a smoke run counted, frame by frame (no clock): the verdict reads only these.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SmokeCounts {
+    /// Frames drawn with a lit plan, and of them those whose plan carried the atmosphere.
+    pub lit_frames: u64,
+    pub atmosphere_frames: u64,
+    /// Frames drawn on the debug path.
+    pub debug_frames: u64,
+    /// Frames presented to the window, by path.
+    pub lit_presented: u64,
+    pub debug_presented: u64,
+    /// Exposure readings taken, and whether the renderer itself reports having run the lit and atmosphere passes.
+    pub exposure_readings: u64,
+    pub renderer_ran_lit: bool,
+    pub renderer_ran_atmosphere: bool,
+}
+
+/// Frames a smoke run must have drawn lit.
+pub const SMOKE_MIN_LIT_FRAMES: u64 = 16;
+
+/// The smoke run's verdict (VIEW-005, VIEW-007): at least [`SMOKE_MIN_LIT_FRAMES`] lit frames drawn and one presented, the
+/// atmosphere on every lit frame when it was wanted, the debug path drawn and presented too (the key switch worked), an exposure
+/// reading taken, and the renderer's own counters agreeing that the lit passes ran. An error names the count that fell short.
+pub fn smoke_verdict(c: &SmokeCounts, atmosphere_wanted: bool) -> Result<(), String> {
+    let short = |what: &str, got: String, want: &str| Err(format!("smoke: {what}: {got}, wanted {want}"));
+    if c.lit_frames < SMOKE_MIN_LIT_FRAMES {
+        return short("lit frames drawn", c.lit_frames.to_string(), &format!("at least {SMOKE_MIN_LIT_FRAMES}"));
+    }
+    if c.lit_presented == 0 {
+        return short("lit frames presented", "0".into(), "at least 1");
+    }
+    if atmosphere_wanted && c.atmosphere_frames != c.lit_frames {
+        return short("lit frames with the atmosphere", c.atmosphere_frames.to_string(), &format!("all {}", c.lit_frames));
+    }
+    if !atmosphere_wanted && c.atmosphere_frames != 0 {
+        return short("lit frames with the atmosphere", c.atmosphere_frames.to_string(), "none");
+    }
+    if c.debug_frames == 0 || c.debug_presented == 0 {
+        return short(
+            "debug-path frames drawn and presented",
+            format!("{} and {}", c.debug_frames, c.debug_presented),
+            "at least 1 each (the L key must switch the path)",
+        );
+    }
+    if c.exposure_readings == 0 {
+        return short("exposure readings", "0".into(), "at least 1");
+    }
+    if !c.renderer_ran_lit || (atmosphere_wanted && !c.renderer_ran_atmosphere) {
+        return Err(format!(
+            "smoke: the renderer reports lit passes run: {}, atmosphere passes run: {} (wanted lit, and the atmosphere when asked)",
+            c.renderer_ran_lit, c.renderer_ran_atmosphere
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -659,6 +826,7 @@ mod tests {
             paused: false,
             flight_s: 12.34,
             altitude_m: 1.0,
+            exposure: None,
             readiness: Readiness {
                 bake_done: 6,
                 bake_total: 6,
@@ -683,5 +851,149 @@ mod tests {
         );
         i.free = true;
         assert!(title(&i).contains("free camera"));
+    }
+
+    fn reading(ev: f32, target: f32) -> ExposureReading {
+        ExposureReading { ev100: ev, target_ev100: target }
+    }
+
+    // spec: VIEW-007
+    #[test]
+    fn the_light_key_switches_the_path_and_the_debug_views_belong_to_the_debug_path() {
+        let c = cam(0.0);
+        let mut v = ViewerState::new(0, 9, 7, true).with_lit(true);
+        assert!(v.lit);
+        // V does nothing on the lit path.
+        v.command(Command::NextView, 10, &c);
+        assert_eq!(v.view_index, 7);
+        assert!(!v.command(Command::ToggleLit, 20, &c) && !v.lit, "L leaves the lit path");
+        v.command(Command::NextView, 30, &c);
+        assert_eq!(v.view_index, 8, "V cycles the debug views on the debug path");
+        v.command(Command::ToggleLit, 40, &c);
+        assert!(v.lit);
+        v.command(Command::NextView, 50, &c);
+        assert_eq!(v.view_index, 8, "and again does nothing on the lit path");
+        // The debug path is where tests and the editor's older behaviour start.
+        assert!(!ViewerState::new(0, 9, 0, true).lit);
+    }
+
+    // spec: VIEW-007
+    #[test]
+    fn the_exposure_snaps_on_the_first_lit_frame_a_return_and_a_restart_and_adapts_between() {
+        let c = cam(0.0);
+        let mut v = ViewerState::new(0, 9, 0, true).with_lit(true);
+        assert!(v.take_exposure_reset(), "the first lit frame snaps");
+        assert!(!v.take_exposure_reset(), "once");
+        v.command(Command::ToggleLit, 10, &c);
+        assert!(!v.take_exposure_reset(), "leaving the lit path asks for nothing");
+        v.command(Command::ToggleLit, 20, &c);
+        assert!(v.take_exposure_reset(), "returning to it snaps");
+        v.command(Command::TogglePause, 30, &c);
+        v.command(Command::ToggleCamera, 40, &c);
+        assert!(!v.take_exposure_reset(), "pause and the free camera do not");
+        v.command(Command::Restart, 50, &c);
+        assert!(v.take_exposure_reset(), "a restart is a cut");
+    }
+
+    // spec: VIEW-007
+    #[test]
+    fn the_viewer_lit_plan_is_the_looks_sun_with_adaptive_exposure_and_the_atmosphere_and_is_deterministic() {
+        let look = LookParams::default();
+        let plan = viewer_lit_plan(&look, 6_371_000.0, 0.016, false, true).unwrap();
+        assert_eq!(plan, viewer_lit_plan(&look, 6_371_000.0, 0.016, false, true).unwrap(), "a pure function of its arguments");
+        assert_eq!(plan.to_text(), viewer_lit_plan(&look, 6_371_000.0, 0.016, false, true).unwrap().to_text());
+        assert!(plan.exposure.is_adaptive() && plan.dt_s == 0.016 && !plan.reset_exposure);
+        assert_eq!(plan.exposure.pre_ev100(), VIEWER_PRE_EV100);
+        assert_eq!(plan.sun_dir, look.sun.direction.map(|v| v as f32), "the sun is the look's");
+        assert!(plan.atmosphere.is_some());
+        plan.validate().unwrap();
+        // The look's sun and the frame clock's dt reach the plan.
+        let mut moon = LookParams::default();
+        moon.sun.direction = [0.0, 0.0, 1.0];
+        moon.units.solar_illuminance_lux = SOLAR_ILLUMINANCE_LUX / 4.0;
+        let p = viewer_lit_plan(&moon, 6_371_000.0, 0.25, true, false).unwrap();
+        assert_eq!(p.sun_dir, [0.0, 0.0, 1.0]);
+        assert!(p.reset_exposure && p.atmosphere.is_none() && p.dt_s == 0.25);
+        assert_eq!(p.exposure.pre_ev100(), VIEWER_PRE_EV100 - 2.0, "a sun a quarter as bright is two stops lower");
+        // A body whose radius the atmosphere cannot sit on is an error naming it, not a panic.
+        assert!(viewer_lit_plan(&look, 500.0, 0.016, false, true).is_err());
+    }
+
+    // spec: VIEW-007
+    #[test]
+    fn the_warm_plan_is_an_empty_valid_lit_plan_at_the_first_camera() {
+        let lit = viewer_lit_plan(&LookParams::default(), 6_371_000.0, 0.0, true, true).unwrap();
+        let plan = lit_warm_plan(cam(0.0), (1280, 720), 32, lit);
+        assert!(plan.nodes.is_empty() && plan.lit == Some(lit) && plan.camera == cam(0.0));
+        assert_eq!(plan.view_projection, cam(0.0).view_projection());
+    }
+
+    // spec: VIEW-003
+    #[test]
+    fn the_title_shows_the_path_and_the_exposure_on_the_lit_path_only() {
+        let mut i = TitleInfo {
+            fps: 60.0,
+            cpu_ms: 1.0,
+            gpu_ms: None,
+            vsync: true,
+            present_mode: "Fifo".into(),
+            view: mode_label(true, true, "relief"),
+            free: false,
+            paused: false,
+            flight_s: 1.0,
+            altitude_m: 100.0,
+            exposure: Some(reading(12.34, 12.34)),
+            readiness: Readiness::default(),
+        };
+        let t = title(&i);
+        assert!(t.contains("| lit + atmosphere | EV 12.3 (adapted) | flight 1.0 s |"), "{t}");
+        i.exposure = Some(reading(12.0, 14.04));
+        assert!(title(&i).contains("EV 12.0 (adapting to 14.0)"), "{}", title(&i));
+        i.exposure = None;
+        i.view = mode_label(false, true, "relief");
+        let t = title(&i);
+        assert!(t.contains("| relief | flight") && !t.contains("EV"), "{t}");
+        assert_eq!(mode_label(true, false, "relief"), "lit");
+        assert_eq!(exposure_text(&reading(5.0, 5.04)), "EV 5.0 (adapted)");
+        assert_eq!(exposure_text(&reading(5.0, 5.2)), "EV 5.0 (adapting to 5.2)");
+    }
+
+    fn good_counts() -> SmokeCounts {
+        SmokeCounts {
+            lit_frames: 40,
+            atmosphere_frames: 40,
+            debug_frames: 6,
+            lit_presented: 40,
+            debug_presented: 6,
+            exposure_readings: 3,
+            renderer_ran_lit: true,
+            renderer_ran_atmosphere: true,
+        }
+    }
+
+    // spec: VIEW-005
+    #[test]
+    fn the_smoke_verdict_needs_lit_frames_with_the_atmosphere_a_presented_frame_and_both_paths() {
+        smoke_verdict(&good_counts(), true).unwrap();
+        let bad = |f: &dyn Fn(&mut SmokeCounts), want: bool, needle: &str| {
+            let mut c = good_counts();
+            f(&mut c);
+            let e = smoke_verdict(&c, want).unwrap_err();
+            assert!(e.contains(needle), "{e}");
+        };
+        bad(&|c| c.lit_frames = SMOKE_MIN_LIT_FRAMES - 1, true, "lit frames drawn");
+        bad(&|c| c.lit_presented = 0, true, "lit frames presented");
+        bad(&|c| c.atmosphere_frames = 39, true, "with the atmosphere");
+        bad(&|c| c.debug_presented = 0, true, "debug-path");
+        bad(&|c| c.debug_frames = 0, true, "debug-path");
+        bad(&|c| c.exposure_readings = 0, true, "exposure readings");
+        bad(&|c| c.renderer_ran_lit = false, true, "renderer reports");
+        bad(&|c| c.renderer_ran_atmosphere = false, true, "renderer reports");
+        // Without the atmosphere asked for, none may be drawn and the renderer need not report it.
+        let mut c = good_counts();
+        c.atmosphere_frames = 0;
+        c.renderer_ran_atmosphere = false;
+        smoke_verdict(&c, false).unwrap();
+        assert!(smoke_verdict(&good_counts(), false).is_err());
     }
 }

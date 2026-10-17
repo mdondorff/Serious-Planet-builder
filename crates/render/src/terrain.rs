@@ -681,6 +681,8 @@ struct UseMasks {
     pipelines: u8,
     timestamps: bool,
     modes: u8,
+    /// Bit 0: a lit frame was recorded; bit 1: a lit frame with the atmosphere was.
+    lit: u8,
     waited: u32,
 }
 
@@ -698,6 +700,8 @@ pub struct FirstUse {
     pub timestamp_passes: u32,
     /// Draw modes used: per-draw and indirect each count once.
     pub draw_modes: u32,
+    /// Lit variants recorded: a lit frame and a lit frame with the atmosphere each count once ([`warm_up_lit`](TerrainRenderer::warm_up_lit)).
+    pub lit_variants: u32,
     /// Submissions the renderer waited for to completion by itself before returning (the warm-up's).
     pub waited_submissions: u32,
 }
@@ -1415,6 +1419,31 @@ impl TerrainRenderer {
         self.used.waited += 1;
     }
 
+    /// Do the one-time work of the first lit frames now, outside any measured frame (REND-017): enable the lit path and, when the
+    /// plan carries an atmosphere, the atmosphere (`enable_lit` is not part of [`warm_up`](TerrainRenderer::warm_up)), then draw
+    /// `plan` (the lit frame the caller will draw first, with no node) once for every set of the per-frame ring, each waited to
+    /// completion, so the compute and post pipelines, the graph compile, the table upload and the bind groups have been used
+    /// before frame 0. No tile becomes resident. Call [`warm_up`](TerrainRenderer::warm_up) first.
+    pub fn warm_up_lit(&mut self, ctx: &GpuContext, plan: &TerrainPlan) -> Result<(), ExecError> {
+        let lit = plan.lit.as_ref().ok_or(ExecError::LitNotEnabled)?;
+        self.enable_lit(ctx);
+        if let Some(a) = &lit.atmosphere {
+            self.enable_atmosphere(ctx, &a.atmosphere);
+        }
+        // Like the debug warm-up, these frames do not count: the frame clock of the slot retirement and the retired total (which a
+        // pipelined loop compares with its own submissions) are put back.
+        let (frame, retired) = (self.frame, self.retired.load(std::sync::atomic::Ordering::SeqCst));
+        for _ in 0..RING_SETS {
+            self.render(ctx, plan, false)?;
+            self.used.waited += 1;
+        }
+        let _ = ctx.device.poll(wgpu::PollType::wait_indefinitely());
+        self.frame = frame;
+        self.retired.store(retired, std::sync::atomic::Ordering::SeqCst);
+        self.in_flight.clear();
+        Ok(())
+    }
+
     /// What the submissions so far have used (REND-017): the counters a test compares after the warm-up and after frames.
     pub fn first_use(&self) -> FirstUse {
         FirstUse {
@@ -1422,6 +1451,7 @@ impl TerrainRenderer {
             pipelines: self.used.pipelines.count_ones(),
             timestamp_passes: u32::from(self.used.timestamps),
             draw_modes: self.used.modes.count_ones(),
+            lit_variants: self.used.lit.count_ones(),
             waited_submissions: self.used.waited,
         }
     }
@@ -2097,6 +2127,9 @@ impl TerrainRenderer {
         let ring_index = (self.frame % RING as u64) as usize;
         self.used.ring |= 1 << ring_index;
         self.used.modes |= if self.draw_mode == DrawMode::Indirect { 0b10 } else { 0b01 };
+        if let Some(l) = &plan.lit {
+            self.used.lit |= if l.atmosphere.is_some() { 0b11 } else { 0b01 };
+        }
         for d in &plan.nodes {
             self.used.pipelines |= if self.tiles[&d.tile].place == Place::Atlas { 0b10 } else { 0b01 };
         }
