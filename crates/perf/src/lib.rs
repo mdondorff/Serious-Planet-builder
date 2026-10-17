@@ -12,6 +12,7 @@ pub mod lit;
 pub mod load;
 pub mod prefill;
 pub mod session;
+pub mod smoke;
 pub mod streaming;
 pub mod validity;
 
