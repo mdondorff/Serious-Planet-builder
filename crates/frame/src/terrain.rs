@@ -92,6 +92,9 @@ pub struct TerrainPlan {
     pub nodes: Vec<TerrainDraw>,
     /// The lit path of this frame (ADR 0042 points 1 and 3): `None` keeps the debug path, whose goldens do not change.
     pub lit: Option<crate::look::LitPlan>,
+    /// The water of this frame (ADR 0041 points 4 to 6, lit path only): `None` draws none, and the plan's text and hash are what they were
+    /// before the water pass existed.
+    pub water: Option<crate::water::WaterPlan>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -272,6 +275,7 @@ pub(crate) fn plan_terrain_keyed(
         cells: req.lod.cells,
         nodes,
         lit: None,
+        water: None,
     })
 }
 

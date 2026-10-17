@@ -454,6 +454,14 @@ impl LitPath {
     }
 
     /// The scene target the terrain draws into this frame: the atmosphere's when it composites, else the final HDR target.
+    /// The texture of [`terrain_target`](LitPath::terrain_target): the copy source of the water pass.
+    pub(crate) fn terrain_texture(&self, plan: &LitPlan) -> &wgpu::Texture {
+        match (&self.atmosphere, plan.atmosphere.is_some()) {
+            (Some(a), true) => a.scene_texture(),
+            _ => &self.hdr,
+        }
+    }
+
     pub(crate) fn terrain_target(&self, plan: &LitPlan) -> &wgpu::TextureView {
         match (&self.atmosphere, plan.atmosphere.is_some()) {
             (Some(a), true) => a.scene_view(),
@@ -464,9 +472,9 @@ impl LitPath {
     /// Everything the frame needs before its passes are recorded: compile the graph when the shape (size, exposure mode,
     /// atmosphere) differs from the last frame's, seed the exposure history, write the parameters and, with an atmosphere, upload the
     /// body's tables if they changed and write the frame's block (the geometry decided in f64 from the camera and the plan's sun).
-    pub(crate) fn prepare(&mut self, ctx: &GpuContext, plan: &LitPlan, camera: &planet_frame::Camera) {
+    pub(crate) fn prepare(&mut self, ctx: &GpuContext, plan: &LitPlan, camera: &planet_frame::Camera, water: bool) {
         let atmosphere = self.frame_has_atmosphere(plan);
-        let shape = LitShape { size: self.size, adaptive: plan.exposure.is_adaptive(), atmosphere };
+        let shape = LitShape { size: self.size, adaptive: plan.exposure.is_adaptive(), atmosphere, water };
         if self.compiled.as_ref().map(|(s, _, _)| *s) != Some(shape) {
             let graph = lit_frame_graph(&shape);
             let compiled = graph.compile().unwrap_or_else(|e| panic!("the lit frame graph does not compile: {e}"));
@@ -516,6 +524,8 @@ impl LitPath {
         let after_terrain = compiled.order.iter().position(|&i| graph.passes()[i].name == "terrain").map_or(0, |p| p + 1);
         for &i in &compiled.order[after_terrain..] {
             match graph.passes()[i].name {
+                // Recorded by the terrain renderer between the terrain pass and these (they need its vertex buffers).
+                "scene-copy" | "water" => {}
                 "sky-composite" => self.atmosphere.as_ref().expect("atmosphere enabled").record_composite(encoder, &self.hdr_view),
                 "exposure-histogram" => {
                     encoder.clear_buffer(&self.histogram, 0, None);
@@ -593,6 +603,7 @@ impl LitPath {
                 1.0,
                 0.1,
             ),
+            false,
         );
         self.record_post(&mut encoder, &view);
         ctx.queue.submit([encoder.finish()]);

@@ -347,6 +347,12 @@ pub trait HeightField: Sync {
         let m = self.max_abs_height_m();
         (-m, m)
     }
+    /// The water level the frustum cut of the node selection must keep in view, if any (ADR 0053): a tile whose terrain lies below it
+    /// is culled by a volume that reaches up to the level, so the water above a seabed the view does not see is not culled with the
+    /// seabed. Only the frustum cut reads it; heights, bounds, distances and morph intervals are unchanged.
+    fn water_cull_level(&self) -> Option<f64> {
+        None
+    }
 }
 
 /// The reference generator ([`height_at`]) with a seed.

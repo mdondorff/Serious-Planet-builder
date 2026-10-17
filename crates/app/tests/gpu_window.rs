@@ -116,3 +116,43 @@ fn the_look_file_is_drawn_by_the_window(stdout: &str) {
     assert!(stdout.contains("[smoke ok]"), "{stdout}");
     assert!(count_before(stdout, " with the atmosphere") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
 }
+
+// spec: VIEW-008
+#[test]
+fn a_look_whose_atmosphere_does_not_fit_the_world_gives_the_lit_path_without_the_atmosphere_and_says_why() {
+    // A body of 60 km radius under the default look: the atmosphere's top (100 km) is above the surface it should wrap, so the plan
+    // builder refuses it. The window falls back to the lit path without the atmosphere and prints the reason; the smoke verdict then
+    // wants no atmosphere frames at all and the run succeeds.
+    let dir = std::env::temp_dir().join(format!("planet-viewer-fit-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let world = dir.join("small.toml");
+    std::fs::write(&world, "schema_version = 2\n[body.0]\nradius_m = 60000.0\n[world]\nheight_field = \"cpu-ref-height-v2\"\nseed = 5\n")
+        .unwrap();
+    let out = smoke(&["--scene", "terrain", "--world", world.to_str().unwrap(), "--global-res", "64"]);
+    let _ = std::fs::remove_dir_all(&dir);
+    let Some(stdout) = out else { return };
+    assert!(stdout.contains("atmosphere off: "), "the run says why the atmosphere is off: {stdout}");
+    assert!(stdout.contains("view: the lit path with no atmosphere"), "{stdout}");
+    assert!(stdout.contains("[smoke ok]"), "{stdout}");
+    assert_eq!(count_before(&stdout, " with the atmosphere"), 0, "no frame has the atmosphere: {stdout}");
+    assert!(count_before(&stdout, " lit,") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
+}
+
+// spec: VIEW-009, ATMO-016
+#[test]
+fn a_world_with_a_bake_has_an_ocean_and_the_window_draws_its_water_through_the_water_pass() {
+    // A world with the default (eroded) field over an in-memory bake has the sea of its definition (the ocean channel is computed with
+    // the bake; the viewer's default world is such a world). The flight starts in orbit over the planet: the water pass runs on the
+    // lit frames, and the summary's count of frames with water is the plans' own.
+    let dir = std::env::temp_dir().join(format!("planet-viewer-sea-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let world = dir.join("earth.toml");
+    std::fs::write(&world, "schema_version = 2\n[body.0]\nradius_m = 6371000.0\n[world]\nseed = 5\n").unwrap();
+    let out = smoke(&["--scene", "terrain", "--world", world.to_str().unwrap(), "--global-res", "128", "--size", "320x200"]);
+    let _ = std::fs::remove_dir_all(&dir);
+    let Some(stdout) = out else { return };
+    assert!(stdout.contains("[smoke ok]"), "{stdout}");
+    // How many of the flight's frames see the sea depends on the flight clock (frames per second of the adapter): some do.
+    assert!(count_before(&stdout, " with water") > 0, "the lit frames carry water: {stdout}");
+    assert!(count_before(&stdout, " with the atmosphere") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
+}

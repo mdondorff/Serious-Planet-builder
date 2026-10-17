@@ -13,6 +13,8 @@ use planet_core::Face;
 use planet_generators::global::{GlobalCoarseGenerator, GlobalGrid, GlobalSample, GridSource, LatticeSource, ReadError};
 use planet_generators::height::{HeightField, IMPLEMENTATION_ID as REFERENCE_ID};
 use planet_generators::height_fields::{build_field, resolve, HeightFieldKind};
+use planet_generators::ocean::{tiled_ocean, OceanLattice};
+use planet_generators::water::{SeaProducer, WaterField};
 use planet_world_def::{BodyId, GenContext, WorldDefinition};
 
 use crate::Options;
@@ -157,6 +159,38 @@ pub struct WorldTerrain {
     field_ns: std::sync::atomic::AtomicU64,
     /// The stored bake behind `src`, for the counters (`None`: an in-memory bake or no bake).
     store_source: Option<&'static StoreSource<'static>>,
+    /// The ocean channel of the bake (ADR 0041 point 2): the sea of the water field W. `None` for a field that reads no bake (no
+    /// bake, no ocean, no water) and for a store without the channel.
+    ocean: Option<Box<dyn OceanLattice + Send + Sync>>,
+    /// Whether the fields this world builds bound their tiles up to the sea level (the viewer's lit path: the water of a tile whose
+    /// terrain the view culls must not be culled with it, `WaterBounded`). Off for every other run: plans and keys are unchanged.
+    bound_water: bool,
+}
+
+/// The ocean channel of a stored bake as the water field's lattice.
+struct SharedOcean(&'static planet_cache::global_store::StoreOceanSource<'static>);
+
+impl OceanLattice for SharedOcean {
+    fn res(&self) -> u32 {
+        self.0.res()
+    }
+
+    fn is_ocean(&self, face: Face, i: u32, j: u32) -> Result<bool, ReadError> {
+        self.0.is_ocean(face, i, j)
+    }
+}
+
+/// The in-memory ocean channel.
+struct OwnedOcean(planet_generators::ocean::OceanGrid);
+
+impl OceanLattice for OwnedOcean {
+    fn res(&self) -> u32 {
+        self.0.res
+    }
+
+    fn is_ocean(&self, face: Face, i: u32, j: u32) -> Result<bool, ReadError> {
+        self.0.is_ocean(face, i, j)
+    }
 }
 
 impl WorldTerrain {
@@ -165,6 +199,7 @@ impl WorldTerrain {
         let kind = resolve(&def).map_err(|e| e.to_string())?;
         let radius_m =
             GenContext::new(&def).body_radius_m(BodyId::PLANET).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+        let mut ocean: Option<Box<dyn OceanLattice + Send + Sync>> = None;
         let (src, bake_key): (Box<dyn LatticeSource + Send>, [u8; 16]) = if kind.needs_bake() {
             if global_res > MAX_RUN_BAKE_RES {
                 return Err(format!("--global-res {global_res}: a run bakes in memory, at most {MAX_RUN_BAKE_RES} cells per face edge"));
@@ -175,6 +210,11 @@ impl WorldTerrain {
             let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
             let grid = field.bake(&TangentWarp, global_res, threads).map_err(|e| format!("--global-res {global_res}: {e:?}"))?;
             let world = GlobalWorld::from_definition(&def).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+            let sea = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?;
+            let block = global_res.min(256);
+            let (_, grid_ocean) = tiled_ocean(&grid, &TangentWarp, block, threads, sea.min_area_fraction)
+                .map_err(|e| format!("the ocean channel of the in-memory bake: {e:?}"))?;
+            ocean = Some(Box::new(OwnedOcean(grid_ocean)));
             (Box::new(OwnedBake(grid)), world.stage_key(global_res).0)
         } else {
             (Box::new(NoBake), [0; 16])
@@ -200,6 +240,8 @@ impl WorldTerrain {
             field_builds: Default::default(),
             field_ns: Default::default(),
             store_source: None,
+            ocean,
+            bound_water: false,
         })
     }
 
@@ -227,6 +269,10 @@ impl WorldTerrain {
             format!("{}: the store holds no bake of {res} cells for this definition (--seed, --world, --global-res): {e}", dir.display())
         })?;
         let bake_key = world.stage_key(res).0;
+        // The ocean channel of the store (GLOBAL_VERSION 4): without it the world has no water, and the run says so.
+        let ocean: Option<Box<dyn OceanLattice + Send + Sync>> = planet_cache::global_store::StoreOceanSource::new(store, world, res)
+            .ok()
+            .map(|o| Box::new(SharedOcean(Box::leak(Box::new(o)))) as Box<dyn OceanLattice + Send + Sync>);
         let source = format!("store {}, {res} cells", dir.display());
         Ok(WorldTerrain {
             def,
@@ -248,6 +294,8 @@ impl WorldTerrain {
             field_builds: Default::default(),
             field_ns: Default::default(),
             store_source: Some(src),
+            ocean,
+            bound_water: false,
         })
     }
 
@@ -404,6 +452,28 @@ impl WorldTerrain {
         }
     }
 
+    /// This world with the fields it builds bounded up to the sea level (see the field `bound_water`); a world without water is
+    /// unchanged.
+    pub fn bounding_water(mut self) -> WorldTerrain {
+        self.bound_water = self.ocean.is_some();
+        self
+    }
+
+    /// Whether this world has water: a bake with its ocean channel (the sea of the definition, ADR 0041).
+    pub fn has_water(&self) -> bool {
+        self.ocean.is_some()
+    }
+
+    /// Run `f` with the water field W of this world (the sea of the definition over the bake's ocean channel), `None` when the world
+    /// has no water. The field is cheap to assemble, so it is built per call and borrows the bake.
+    pub fn with_water<R>(&self, f: impl FnOnce(&WaterField<'_>) -> R) -> Result<Option<R>, String> {
+        let Some(ocean) = self.ocean.as_deref() else { return Ok(None) };
+        let sea = self.def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?;
+        let producer = SeaProducer::new(ocean, sea);
+        let field = WaterField::new(&TangentWarp, self.src.as_ref(), vec![&producer]);
+        Ok(Some(f(&field)))
+    }
+
     /// Build the field (a fresh context per field: its key covers what it read).
     pub fn field(&self) -> Result<Box<dyn HeightField + '_>, String> {
         let started = std::time::Instant::now();
@@ -413,7 +483,13 @@ impl WorldTerrain {
         self.field_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let spent = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
         self.field_ns.fetch_add(spent, std::sync::atomic::Ordering::Relaxed);
-        built
+        match (built, self.bound_water) {
+            (Ok(f), true) => {
+                let level = self.def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+                Ok(Box::new(planet_generators::water::WaterBounded::new(f, level)))
+            }
+            (built, _) => built,
+        }
     }
 }
 

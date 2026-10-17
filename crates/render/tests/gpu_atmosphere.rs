@@ -161,11 +161,11 @@ fn the_frame_targets_with_an_atmosphere_equal_the_compiled_graphs_count_and_noth
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan(3);
     let mut r = renderer_atmosphere(&ctx, true, &[&p]);
-    let compiled = lit_frame_graph(&LitShape { size: SIZE, adaptive: true, atmosphere: true }).compile().unwrap();
+    let compiled = lit_frame_graph(&LitShape { size: SIZE, adaptive: true, atmosphere: true, water: false }).compile().unwrap();
     let held = r.lit_frame_target_bytes().unwrap();
     assert_eq!(held, compiled.frame_target_bytes(), "what the renderer allocates is what the compiled graph counts");
     assert!(held <= frame_target_share_bytes(SIZE), "{held} B over the share of {} B", frame_target_share_bytes(SIZE));
-    let big = lit_frame_graph(&LitShape { size: (2560, 1440), adaptive: true, atmosphere: true }).compile().unwrap();
+    let big = lit_frame_graph(&LitShape { size: (2560, 1440), adaptive: true, atmosphere: true, water: false }).compile().unwrap();
     assert!(big.frame_target_bytes() <= frame_target_share_bytes((2560, 1440)), "{} B at 1440p", big.frame_target_bytes());
     let (built, objects) = (r.init_counts(), r.lit_objects());
     for plan in [

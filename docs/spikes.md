@@ -1,14 +1,35 @@
 # Spike register
 
-Time-boxed experiments that answer a question before a decision. Opened and closed with `/spike`. Spike code lives in `spikes/<name>/` and is never merged into the main crates as-is.
+Time-boxed experiments that answer a question before a decision. Opened and closed with `/spike`. Spike code lives on its spike branch and is never merged into the main crates as-is. **Each spike's report, numbers and renders live in `spikes/<name>/results/`** (`results.md` with a Visuals section; the `spike` skill has the rule). `docs/spikes/` holds only the frozen images of SPIKE-03 to 07.
 
-Planned spikes from the background report (open them when their milestone starts):
-- GPU-driven indirect terrain/instance path in wgpu. Milestone: M2. (SPIKE-01, closed 2026-10-10.)
-- CDLOD morph quality on steep terrain. Milestone: M2. (SPIKE-02, closed 2026-10-10 for smooth terrain; steep terrain remains open for M3.)
-- Global hydrology on the sphere (stream-power on a 1–4 km grid + halo-based local carving). Milestone: M3. Fallback: local erosion filter + rivers on a coarse flow grid.
-- City HLOD with 10^5 buildings. Milestone: M7.
+Planned spikes from the background report still to open: city HLOD with 10^5 buildings (M7).
 
-Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to 04), `docs/archive/M4/spikes.md` (SPIKE-05 to 07).
+Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to 04), `docs/archive/M4/spikes.md` (SPIKE-05 to 07). SPIKE-10 was never used.
+
+## Index of M5 spikes and explorations
+| Id | Title | Status | Results |
+|---|---|---|---|
+| SPIKE-08 | Ocean connectivity at 16384 | closed 2026-10-16 | `spikes/ocean-connectivity/results/` |
+| SPIKE-09 | Atmosphere f32 forms | closed | `spikes/atmosphere-f32/results/` |
+| SPIKE-11 | Mouse look plumbing | open (owner's local check) | `spikes/mouse-look/results/` |
+| SPIKE-12 | Retiring the vertex tile format | open (2026-10-17) | `spikes/vertex-retirement/results/` |
+| exploration | WARP parallel-device crash: inside WARP, test-only (PRs #195, #196) | closed | `spikes/warp-crash/results/` |
+| exploration | WARP device removal with compact tiles and the atmosphere: test-only (PRs #212, #213) | closed | `spikes/warp-compact-atmosphere/results/` |
+| exploration | Tile-format duality: cost of retiring the vertex format (PR #218) | closed; SPIKE-12 follows | `spikes/tile-format-duality/results/` |
+| exploration | Compact tiles in storage buffers (PR #225; ADR 0054) | closed | `spikes/compact-storage-buffer/results/` |
+
+The explorations before 2026-10-17 had no register entry; from now on every exploration gets a `SPIKE-NN` entry.
+
+## SPIKE-11 Mouse look plumbing
+Status: open (waiting for the owner's local check; the remote part is dropped, owner, 2026-10-17)
+Opened: 2026-10-16
+Question: Which mouse input path gives usable mouse look on Windows with `winit` (raw `DeviceEvent::MouseMotion` against `CursorMoved` with recentring), which cursor grab works (`Confined` plus hidden cursor plus recentring, since `Locked` is unsupported there), what happens at focus loss and alt-tab, with DPI scaling and high-poll-rate mice, and can sensitivity be independent of the frame rate?
+Why it matters: M5 item 1b (free-camera-mouse) builds mouse look on the pose function as this spike recommends; an earlier prototype in another app failed at mouse look (owner).
+Time box: one day of agent work, plus about ten minutes of the owner's manual check.
+Success criteria: a recommendation (event source, grab mode, fallback) from the owner's local check; a recorded input-trace format with traces that replay to known final poses.
+Fallback if it fails: keyboard look only (item 1b's fallback), reported.
+Code location: spikes/mouse-look/ (throwaway; branch `spike/spike-11-mouse-look`, never merged). Run from that folder: `target/release/mouse-look.exe`; checklist `CHECKLIST.md`; traces land in `target/traces/`; `mouse-look replay FILE` replays a trace.
+Interim result (2026-10-17): built and unit-tested (13 tests): the draft pose function (yaw and pitch relative to the local vertical, heading by parallel transport along the great circle, pitch clamped at 89 degrees; no roll after 20,000 random inputs, reversible, split-invariant, continuous across the pole), the input adapter (raw, cursor and auto sources, lazy recentring with echo handling, release on focus loss, mouse deltas never multiplied by dt: turn is counts x sensitivity at 1, 7, 60 and 500 frames), and the trace format `spike11-trace-v1` (JSON Lines, documented in `src/trace.rs`) with a headless replay that shares the live window's code and reproduces a recorded final pose bit for bit. The owner's remote session (Android touch screen over Chrome Remote Desktop, no mouse) did not capture the mouse: no button event reached the window; 402 raw motion events did arrive. Out of scope by the owner's decision. The same trace was checked for keyboard movement against heading and pitch: 4,542 movement frames, 0 sign disagreements; what can look wrong is documented in `spikes/mouse-look/results/remote-session-analysis.md` (W follows the horizontal heading, no ground clamp so Q goes below the surface, speed scales with altitude on a 1 km planet). Still open: the local check (raw against cursor against auto, grab modes, focus loss, DPI, high-rate mice) and the recommendation.
 
 ## SPIKE-08 Ocean connectivity at 16384
 Status: closed

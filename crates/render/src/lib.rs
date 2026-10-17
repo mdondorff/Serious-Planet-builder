@@ -14,6 +14,8 @@ pub mod spike_compact;
 #[cfg(feature = "spike07")]
 pub mod spike_detail;
 pub mod terrain;
+pub mod water;
+pub mod water_gpu;
 pub mod window;
 pub use atmosphere::{atmosphere_shaders, AtmospherePath, ProbeKind};
 pub use compact::{compact_terrain_shader, set_buffer_atlas};
@@ -24,6 +26,8 @@ pub use terrain::{
     execute_terrain, execute_terrain_tiles, DrawMode, FirstUse, FrameTiming, InitCounts, ResidentFormat, TerrainRenderer, TerrainStats,
     UploadCounters, UploadMode, UploadTimes, RING_SETS, TERRAIN_SHADERS, WARM_NODES,
 };
+pub use water::water_shaders;
+pub use water_gpu::{probe_surface, probe_waves, SurfaceProbe, WaveProbe};
 pub use window::{Presented, WindowHandles, WindowSurface, WINDOW_SHADERS};
 
 /// How terrain tiles are held and drawn (ADR 0033): the compact format for levels 3 and finer (default) or the 44-byte vertex format

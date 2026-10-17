@@ -4,6 +4,7 @@
 
 use crate::compact::{compact_terrain_shader, CompactGpu, REF_BYTES};
 use crate::lit::LitPath;
+use crate::water_gpu::{CompactLayouts, WaterGpu};
 use crate::{read_rgba8, ExecError, GpuContext, RgbaFrame};
 use planet_frame::draw::{buffer_of, build_draw_list_placed, DrawBuffer, DRAW_RECORD_BYTES};
 use planet_frame::pool::tier_pool;
@@ -84,8 +85,7 @@ struct VsOut {
     @location(6) aux: vec2<f32>,
 };
 
-@vertex
-fn vs(@builtin(instance_index) inst: u32, @location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) normal: vec3<f32>, @location(3) height: f32, @location(4) coarse_height: f32, @location(5) climate: vec2<f32>) -> VsOut {
+fn terrain_vertex(inst: u32, pos: vec3<f32>, coarse: vec3<f32>, normal: vec3<f32>, height: f32, coarse_height: f32, climate: vec2<f32>) -> VsOut {
     // The morph distance is measured to the vertex's real position: node selection and the morph interval use bounding
     // volumes that include the node's height range.
     let node = nodes[inst];
@@ -104,6 +104,11 @@ fn vs(@builtin(instance_index) inst: u32, @location(0) pos: vec3<f32>, @location
     out.node_index = inst;
     out.aux = climate;
     return out;
+}
+
+@vertex
+fn vs(@builtin(instance_index) inst: u32, @location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) normal: vec3<f32>, @location(3) height: f32, @location(4) coarse_height: f32, @location(5) climate: vec2<f32>) -> VsOut {
+    return terrain_vertex(inst, pos, coarse, normal, height, coarse_height, climate);
 }
 
 // The climate at a fragment of a vertex-format tile: the value interpolated from the vertices (the compact format reads its texture).
@@ -331,6 +336,8 @@ pub struct TerrainStats {
     pub argument_bytes: u64,
     /// Bytes of tile references written this frame (compact renderer only: 16 per node).
     pub tile_ref_bytes: u64,
+    /// Draws of the water pass (one per water node, per-draw submission).
+    pub water_draws: u32,
 }
 
 /// How the renderer submits the planned draws (REND-015). Both draw the same plan in the same order.
@@ -374,6 +381,9 @@ struct FrameSet {
     /// Compact format only: one tile reference per node, and the group-1 bind group (slot records plus these).
     refs: Option<wgpu::Buffer>,
     frame_bind: Option<wgpu::BindGroup>,
+    /// The water pass's per-node records and globals (bindings 2 and 3 of the group `bind`; written only by frames with water).
+    water_nodes: wgpu::Buffer,
+    water_globals: wgpu::Buffer,
 }
 
 /// Where a resident tile's data sits.
@@ -578,6 +588,8 @@ pub struct FrameTiming {
     pub total_ms: f64,
     /// GPU time of the render pass from timestamp queries, when the device supports them.
     pub gpu_ms: Option<f64>,
+    /// GPU time of the water pass (the scene copy is outside it), when the frame drew water and timestamps are supported.
+    pub water_gpu_ms: Option<f64>,
 }
 
 /// Terrain renderer with persistent resources: pipeline, uniform buffers, per-tile vertex buffers and render targets are
@@ -637,6 +649,8 @@ pub struct TerrainRenderer {
     lit: Option<LitGpu>,
     /// Pipelines and targets made by `enable_lit` (zero before it): fixed once enabled, so no lit frame creates one (REND-017).
     lit_objects: u32,
+    /// The water pass (ADR 0041, ADR 0042 point 2): None until [`enable_water`](TerrainRenderer::enable_water).
+    water: Option<WaterGpu>,
 }
 
 /// The lit path's terrain pipelines (HDR target, `fs_lit`) and its post chain.
@@ -823,7 +837,12 @@ impl TerrainRenderer {
         };
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("terrain-bgl"),
-            entries: &[entry(0, wgpu::BufferBindingType::Uniform), entry(1, wgpu::BufferBindingType::Storage { read_only: true })],
+            entries: &[
+                entry(0, wgpu::BufferBindingType::Uniform),
+                entry(1, wgpu::BufferBindingType::Storage { read_only: true }),
+                entry(2, wgpu::BufferBindingType::Storage { read_only: true }),
+                entry(3, wgpu::BufferBindingType::Uniform),
+            ],
         });
         let compact_gpu = compact.then(|| Self::make_compact(ctx, &bgl, format, cells, &pool));
         let ring = Self::make_ring(device, &bgl, node_capacity, compact_gpu.as_ref());
@@ -885,17 +904,17 @@ impl TerrainRenderer {
             queries: device.create_query_set(&wgpu::QuerySetDescriptor {
                 label: Some("terrain-timestamps"),
                 ty: wgpu::QueryType::Timestamp,
-                count: 2,
+                count: 4,
             }),
             resolve: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("timestamp-resolve"),
-                size: 16,
+                size: 32,
                 usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             }),
             readback: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("timestamp-readback"),
-                size: 16,
+                size: 32,
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                 mapped_at_creation: false,
             }),
@@ -935,6 +954,7 @@ impl TerrainRenderer {
             used: UseMasks::default(),
             lit: None,
             lit_objects: 0,
+            water: None,
         }
     }
 
@@ -1049,12 +1069,24 @@ impl TerrainRenderer {
                 let nodes = buffer("nodes", NODE_BYTES * capacity as u64, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
                 let args =
                     buffer("draw-args", DRAW_RECORD_BYTES * capacity as u64, wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST);
+                let water_nodes = buffer(
+                    "water-nodes",
+                    planet_frame::look::water::NODE_RECORD_BYTES * capacity as u64,
+                    wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                );
+                let water_globals = buffer(
+                    "water-globals",
+                    planet_frame::look::water::GLOBALS_BYTES,
+                    wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                );
                 let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("terrain-bind"),
                     layout: bgl,
                     entries: &[
                         wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
                         wgpu::BindGroupEntry { binding: 1, resource: nodes.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 2, resource: water_nodes.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 3, resource: water_globals.as_entire_binding() },
                     ],
                 });
                 let refs = compact
@@ -1069,7 +1101,7 @@ impl TerrainRenderer {
                         ],
                     })
                 });
-                FrameSet { globals, nodes, args, bind, refs, frame_bind }
+                FrameSet { globals, nodes, args, bind, refs, frame_bind, water_nodes, water_globals }
             })
             .collect()
     }
@@ -1280,6 +1312,36 @@ impl TerrainRenderer {
         self.lit_objects += 1 + u32::from(compact_pipeline.is_some()) + ATMOSPHERE_PATH_OBJECTS - 3;
         lit.atmosphere_pipeline = Some(pipeline);
         lit.atmosphere_compact_pipeline = compact_pipeline;
+        if let Some(w) = self.water.as_mut() {
+            let layouts = self.compact.as_ref().map(|c| CompactLayouts { frame: &c.bgl_frame, atlas: &c.bgl_atlas, cells: self.cells });
+            let before = w.objects;
+            w.add_atmosphere(device, &self.bgl, layouts.as_ref(), lit.path.atmosphere().expect("just enabled"));
+            self.lit_objects += w.objects - before;
+        }
+    }
+
+    /// Enable the water pass (ADR 0041 points 4 to 6, ADR 0042 point 2): the copy of the scene target the water reads the seabed
+    /// from, the group-3 bind group and the water pipelines of both tile formats (and, when the atmosphere is enabled, of its
+    /// lighting). Needs [`enable_lit`](TerrainRenderer::enable_lit); call it before the measured frames (REND-017). A plan with a
+    /// water part on a renderer without it is refused naming this call.
+    pub fn enable_water(&mut self, ctx: &GpuContext) {
+        assert!(self.lit.is_some(), "enable_lit before enable_water");
+        if self.water.is_some() {
+            return;
+        }
+        let device = &ctx.device;
+        let layouts = self.compact.as_ref().map(|c| CompactLayouts { frame: &c.bgl_frame, atlas: &c.bgl_atlas, cells: self.cells });
+        let mut water = WaterGpu::new(device, self.size, &self.bgl, layouts.as_ref());
+        if let Some(a) = self.lit.as_ref().and_then(|l| l.path.atmosphere()) {
+            water.add_atmosphere(device, &self.bgl, layouts.as_ref(), a);
+        }
+        self.lit_objects += water.objects;
+        self.water = Some(water);
+    }
+
+    /// Whether the water pass is enabled.
+    pub fn water_enabled(&self) -> bool {
+        self.water.is_some()
     }
 
     /// Long-lived GPU objects the lit path made (scene target, exposure buffers, the post pipelines and the terrain pipelines).
@@ -1300,9 +1362,11 @@ impl TerrainRenderer {
     /// Bytes of all frame targets the renderer holds for the lit path: the scene target, the depth target, the histogram and the
     /// exposure history. The frame-target share counts exactly these (REND-020).
     pub fn lit_frame_target_bytes(&self) -> Option<u64> {
-        self.lit
-            .as_ref()
-            .map(|l| l.path.allocated_bytes() + u64::from(self.size.0) * u64::from(self.size.1) * crate::graph::DEPTH_BYTES_PER_PIXEL)
+        self.lit.as_ref().map(|l| {
+            l.path.allocated_bytes()
+                + u64::from(self.size.0) * u64::from(self.size.1) * crate::graph::DEPTH_BYTES_PER_PIXEL
+                + self.water.as_ref().map_or(0, |w| w.copy_bytes)
+        })
     }
 
     /// Long-lived GPU objects created so far (REND-013): the counters a test compares before and after a frame.
@@ -1434,6 +1498,9 @@ impl TerrainRenderer {
         self.enable_lit(ctx);
         if let Some(a) = &lit.atmosphere {
             self.enable_atmosphere(ctx, &a.atmosphere);
+        }
+        if plan.water.is_some() {
+            self.enable_water(ctx);
         }
         // Like the debug warm-up, these frames do not count: the frame clock of the slot retirement and the retired total (which a
         // pipelined loop compares with its own submissions) are put back.
@@ -2113,6 +2180,26 @@ impl TerrainRenderer {
         if plan.lit.as_ref().is_some_and(|l| l.atmosphere.is_some()) && self.lit.as_ref().is_some_and(|l| l.path.atmosphere().is_none()) {
             return Err(ExecError::AtmosphereNotEnabled);
         }
+        if let Some(w) = &plan.water {
+            if plan.lit.is_none() {
+                return Err(ExecError::BadWaterPlan(
+                    "the plan carries water but no lit part: the water pass belongs to the lit path".into(),
+                ));
+            }
+            w.validate().map_err(ExecError::BadWaterPlan)?;
+            if self.water.is_none() {
+                return Err(ExecError::WaterNotEnabled);
+            }
+            if let Some(n) = w.nodes.iter().find(|n| n.node as usize >= plan.nodes.len()) {
+                return Err(ExecError::BadWaterPlan(format!(
+                    "water node {} is not a node of the plan ({} nodes)",
+                    n.node,
+                    plan.nodes.len()
+                )));
+            }
+        }
+        // A frame draws the water pass only when some node carries water.
+        let water_frame = plan.lit.is_some() && plan.water.as_ref().is_some_and(|w| !w.nodes.is_empty());
         self.frame += 1;
         let device = &ctx.device;
         if plan.nodes.len() > self.node_capacity {
@@ -2156,6 +2243,10 @@ impl TerrainRenderer {
         }
         let set = &self.ring[ring_index];
         ctx.queue.write_buffer(&set.globals, 0, &globals);
+        if let (Some(w), true) = (&plan.water, water_frame) {
+            ctx.queue.write_buffer(&set.water_globals, 0, &crate::water::globals_bytes(w));
+            ctx.queue.write_buffer(&set.water_nodes, 0, &crate::water::node_records(w, plan.nodes.len()));
+        }
         let mut nodes = vec![0u8; NODE_BYTES as usize * plan.nodes.len().max(1)];
         for (i, d) in plan.nodes.iter().enumerate() {
             let r = d.camera_relative_origin;
@@ -2218,7 +2309,7 @@ impl TerrainRenderer {
         if let (Some(l), Some(lit)) = (self.lit.as_mut(), plan.lit.as_ref()) {
             // The compiled graph, the parameters and, with an atmosphere, the tables and the frame's block; then the passes that come
             // before the terrain (the sky-view table and the aerial-perspective volume).
-            l.path.prepare(ctx, lit, &plan.camera);
+            l.path.prepare(ctx, lit, &plan.camera, water_frame);
             l.path.record_pre(&mut encoder);
         }
         let lit_gpu = plan.lit.as_ref().and(self.lit.as_ref());
@@ -2244,10 +2335,10 @@ impl TerrainRenderer {
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth_view,
-                    // The composite reads the depth, so an atmosphere frame keeps it.
+                    // The composite and the water pass read the depth, so an atmosphere or water frame keeps it.
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(0.0),
-                        store: if atmosphere_frame { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
+                        store: if atmosphere_frame || water_frame { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
                     }),
                     stencil_ops: None,
                 }),
@@ -2339,12 +2430,95 @@ impl TerrainRenderer {
             stats.draw_calls = plan.nodes.len() as u32;
             stats.triangles = plan.nodes.len() as u64 * u64::from(self.index_count) / 3;
         }
+        let mut water_timed = false;
+        if let (true, Some(w), Some(wp), Some(l), Some(lit)) =
+            (water_frame, self.water.as_ref(), plan.water.as_ref(), lit_gpu, plan.lit.as_ref())
+        {
+            // The scene target is copied (the water reads the seabed through itself, and a pass cannot sample what it draws into),
+            // then the terrain grid is drawn again at the water level over the same target and depth.
+            encoder.copy_texture_to_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: l.path.terrain_texture(lit),
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &w.copy,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d { width: self.size.0, height: self.size.1, depth_or_array_layers: 1 },
+            );
+            let flavour = if atmosphere_frame { w.atmosphere.as_ref().expect("atmosphere water enabled") } else { &w.plain };
+            water_timed = timing.is_some();
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("water-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: color_target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: if atmosphere_frame { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: timing.map(|t| wgpu::RenderPassTimestampWrites {
+                    query_set: &t.queries,
+                    beginning_of_pass_write_index: Some(2),
+                    end_of_pass_write_index: Some(3),
+                }),
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+            let mut compact_bound: Option<u32> = None;
+            let mut vertex_bound = false;
+            for n in &wp.nodes {
+                let i = n.node as usize;
+                let r = self.tiles[&plan.nodes[i].tile];
+                if r.place == Place::Atlas {
+                    let c = self.compact.as_ref().expect("compact renderer");
+                    let b = r.slot.index / self.pool.block_slots;
+                    if compact_bound != Some(b) {
+                        if vertex_bound || compact_bound.is_none() {
+                            pass.set_pipeline(flavour.compact.as_ref().expect("compact renderer"));
+                            pass.set_bind_group(0, &set.bind, &[]);
+                            pass.set_bind_group(1, set.frame_bind.as_ref(), &[]);
+                            pass.set_bind_group(3, &flavour.bind, &[]);
+                        }
+                        pass.set_bind_group(2, &c.atlases[b as usize].as_ref().expect("atlas of a resident tile").bind, &[]);
+                        compact_bound = Some(b);
+                        vertex_bound = false;
+                    }
+                } else {
+                    if !vertex_bound {
+                        pass.set_pipeline(&flavour.vertex);
+                        pass.set_bind_group(0, &set.bind, &[]);
+                        pass.set_bind_group(3, &flavour.bind, &[]);
+                        vertex_bound = true;
+                        compact_bound = None;
+                    }
+                    let (buffer, offset) = self.vertex_slot_buffer(&r);
+                    pass.set_vertex_buffer(0, buffer.slice(offset..offset + self.pool.vertex_slot_bytes));
+                }
+                pass.draw_indexed(0..self.index_count, 0, i as u32..i as u32 + 1);
+                stats.water_draws += 1;
+            }
+        }
         if let Some(l) = self.lit.as_ref().filter(|_| plan.lit.is_some()) {
             l.path.record_post(&mut encoder, &self.color_view);
         }
         if let Some(t) = timing {
-            encoder.resolve_query_set(&t.queries, 0..2, &t.resolve, 0);
-            encoder.copy_buffer_to_buffer(&t.resolve, 0, &t.readback, 0, 16);
+            let (queries, bytes) = if water_timed { (0..4, 32) } else { (0..2, 16) };
+            encoder.resolve_query_set(&t.queries, queries, &t.resolve, 0);
+            encoder.copy_buffer_to_buffer(&t.resolve, 0, &t.readback, 0, bytes);
         }
         let command_buffer = encoder.finish();
         let index = ctx.queue.submit([command_buffer]);
@@ -2355,24 +2529,30 @@ impl TerrainRenderer {
         self.in_flight.push_back(index);
         let cpu_ms = started.elapsed().as_secs_f64() * 1000.0;
         if !wait {
-            return Ok((FrameTiming { cpu_ms, total_ms: cpu_ms, gpu_ms: None }, stats));
+            return Ok((FrameTiming { cpu_ms, total_ms: cpu_ms, gpu_ms: None, water_gpu_ms: None }, stats));
         }
         ctx.device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
         let total_ms = started.elapsed().as_secs_f64() * 1000.0;
-        let gpu_ms = timing.and_then(|t| {
-            let slice = t.readback.slice(..);
-            slice.map_async(wgpu::MapMode::Read, |r| r.expect("timestamp map failed"));
-            ctx.device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
-            let data = slice.get_mapped_range().expect("timestamp range");
-            let ticks = |k: usize| u64::from_le_bytes(data[k * 8..k * 8 + 8].try_into().expect("8 bytes"));
-            let delta = ticks(1).saturating_sub(ticks(0));
-            drop(data);
-            t.readback.unmap();
-            // A zero or negative interval is a broken query, not a free frame: report nothing instead of 0 ms.
-            (delta > 0).then(|| delta as f64 * f64::from(ctx.queue.get_timestamp_period()) / 1.0e6)
-        });
+        let (gpu_ms, water_gpu_ms) = timing
+            .map(|t| {
+                let slice = t.readback.slice(..);
+                slice.map_async(wgpu::MapMode::Read, |r| r.expect("timestamp map failed"));
+                ctx.device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
+                let data = slice.get_mapped_range().expect("timestamp range");
+                let ticks = |k: usize| u64::from_le_bytes(data[k * 8..k * 8 + 8].try_into().expect("8 bytes"));
+                let ms = |a: usize, b: usize| {
+                    let delta = ticks(b).saturating_sub(ticks(a));
+                    // A zero or negative interval is a broken query, not a free frame: report nothing instead of 0 ms.
+                    (delta > 0).then(|| delta as f64 * f64::from(ctx.queue.get_timestamp_period()) / 1.0e6)
+                };
+                let out = (ms(0, 1), if water_timed { ms(2, 3) } else { None });
+                drop(data);
+                t.readback.unmap();
+                out
+            })
+            .unwrap_or((None, None));
         self.reap();
-        Ok((FrameTiming { cpu_ms, total_ms, gpu_ms }, stats))
+        Ok((FrameTiming { cpu_ms, total_ms, gpu_ms, water_gpu_ms }, stats))
     }
 
     /// The vertex buffer and byte offset of a resident tile held in the vertex format.
