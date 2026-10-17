@@ -967,6 +967,7 @@ impl TerrainRenderer {
         pool: &PoolConfig,
     ) -> CompactGpu {
         let device = &ctx.device;
+        let buffer_mode = crate::compact::buffer_blocks();
         let side = ((pool.block_alloc_bytes / planet_generators::compact::TEXEL_BYTES) as f64).sqrt().round() as u32;
         assert_eq!(
             u64::from(side) * u64::from(side) * planet_generators::compact::TEXEL_BYTES,
@@ -999,10 +1000,18 @@ impl TerrainRenderer {
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Uint,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
+                ty: if buffer_mode {
+                    wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    }
+                } else {
+                    wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    }
                 },
                 count: None,
             }],
@@ -1050,6 +1059,8 @@ impl TerrainRenderer {
             side,
             fallback: SlotPool::new(pool.fallback_slots, pool.frames_in_flight),
             fallback_base: pool.managed_vertex_slots(),
+            buffer_mode,
+            block_bytes: pool.slot_bytes * u64::from(pool.block_slots),
         }
     }
 
@@ -1712,17 +1723,21 @@ impl TerrainRenderer {
         debug_assert_eq!(bytes, tile.texel_data());
         self.upload_counters.write_calls += 2;
         self.upload_counters.staging_bytes += bytes.len() as u64 + COMPACT_RECORD_BYTES;
-        ctx.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &atlas.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d { x, y, z: 0 },
-                aspect: wgpu::TextureAspect::All,
-            },
-            &bytes,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(8 * w), rows_per_image: Some(w) },
-            wgpu::Extent3d { width: w, height: w, depth_or_array_layers: 1 },
-        );
+        if let Some(buffer) = &atlas.buffer {
+            ctx.queue.write_buffer(buffer, u64::from(local) * n, &bytes);
+        } else {
+            ctx.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: atlas.texture.as_ref().expect("atlas texture"),
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x, y, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &bytes,
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(8 * w), rows_per_image: Some(w) },
+                wgpu::Extent3d { width: w, height: w, depth_or_array_layers: 1 },
+            );
+        }
         let records = &self.compact.as_ref().expect("compact mode").records;
         ctx.queue.write_buffer(records, u64::from(slot.index) * COMPACT_RECORD_BYTES, &tile.record_bytes());
     }
@@ -1777,6 +1792,9 @@ impl TerrainRenderer {
             .iter()
             .map(|a| {
                 let a = a.as_ref()?;
+                if let Some(buffer) = &a.buffer {
+                    return Some(read_buffer(buffer, buffer.size()));
+                }
                 let size = u64::from(padded) * u64::from(side);
                 let readback = ctx.device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("atlas-readback"),
@@ -1787,7 +1805,7 @@ impl TerrainRenderer {
                 let mut encoder = ctx.device.create_command_encoder(&Default::default());
                 encoder.copy_texture_to_buffer(
                     wgpu::TexelCopyTextureInfo {
-                        texture: &a.texture,
+                        texture: a.texture.as_ref().expect("atlas texture"),
                         mip_level: 0,
                         origin: wgpu::Origin3d::ZERO,
                         aspect: wgpu::TextureAspect::All,
@@ -1881,13 +1899,14 @@ impl TerrainRenderer {
         // Compact texels: runs of adjacent slots in one row of one atlas, interleaved row by row into one rectangle.
         if places > 0 {
             let cols = self.compact.as_ref().expect("compact mode").cols;
+            let buffer_mode = self.compact.as_ref().expect("compact mode").buffer_mode;
             let mut k = 0;
             while k < places {
                 let (block, first, _) = sc.texel_order[k];
                 let mut n = 1;
                 while k + n < places
                     && (sc.texel_order[k + n].0, sc.texel_order[k + n].1) == (block, first + n as u32)
-                    && !(first + n as u32).is_multiple_of(cols)
+                    && (buffer_mode || !(first + n as u32).is_multiple_of(cols))
                 {
                     n += 1;
                 }
@@ -1896,6 +1915,10 @@ impl TerrainRenderer {
                 for t in 0..n {
                     let at = sc.tiles[sc.texel_order[k + t].2 as usize].2;
                     let src = &sc.texels[at..at + tile_bytes];
+                    if buffer_mode {
+                        sc.run[t * tile_bytes..(t + 1) * tile_bytes].copy_from_slice(src);
+                        continue;
+                    }
                     for row in 0..w as usize {
                         let dst = (row * n + t) * row_bytes;
                         sc.run[dst..dst + row_bytes].copy_from_slice(&src[row * row_bytes..(row + 1) * row_bytes]);
@@ -1903,17 +1926,21 @@ impl TerrainRenderer {
                 }
                 let atlas = self.compact.as_ref().expect("compact mode").atlases[block].as_ref().expect("atlas allocated");
                 let trw = std::time::Instant::now();
-                ctx.queue.write_texture(
-                    wgpu::TexelCopyTextureInfo {
-                        texture: &atlas.texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d { x: (first % cols) * w, y: (first / cols) * w, z: 0 },
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    &sc.run,
-                    wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some((n * row_bytes) as u32), rows_per_image: Some(w) },
-                    wgpu::Extent3d { width: n as u32 * w, height: w, depth_or_array_layers: 1 },
-                );
+                if let Some(buffer) = &atlas.buffer {
+                    ctx.queue.write_buffer(buffer, u64::from(first) * tile_bytes as u64, &sc.run);
+                } else {
+                    ctx.queue.write_texture(
+                        wgpu::TexelCopyTextureInfo {
+                            texture: atlas.texture.as_ref().expect("atlas texture"),
+                            mip_level: 0,
+                            origin: wgpu::Origin3d { x: (first % cols) * w, y: (first / cols) * w, z: 0 },
+                            aspect: wgpu::TextureAspect::All,
+                        },
+                        &sc.run,
+                        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some((n * row_bytes) as u32), rows_per_image: Some(w) },
+                        wgpu::Extent3d { width: n as u32 * w, height: w, depth_or_array_layers: 1 },
+                    );
+                }
                 self.upload_times.queue += trw.elapsed();
                 self.upload_counters.write_calls += 1;
                 self.upload_counters.staging_bytes += sc.run.len() as u64;
@@ -2051,7 +2078,9 @@ impl TerrainRenderer {
     pub fn pool_allocated_bytes(&self) -> u64 {
         let blocks: u64 = self.blocks.iter().flatten().map(wgpu::Buffer::size).sum();
         let atlases: u64 = self.compact.as_ref().map_or(0, |c| {
-            c.atlases.iter().flatten().count() as u64 * u64::from(c.side) * u64::from(c.side) * planet_generators::compact::TEXEL_BYTES
+            let one =
+                if c.buffer_mode { c.block_bytes } else { u64::from(c.side) * u64::from(c.side) * planet_generators::compact::TEXEL_BYTES };
+            c.atlases.iter().flatten().count() as u64 * one
         });
         let records = self.compact.as_ref().map_or(0, |c| c.records.size());
         blocks
@@ -2264,7 +2293,11 @@ impl TerrainRenderer {
                 let r = &self.tiles[&d.tile];
                 if r.place == Place::Atlas {
                     let local = r.slot.index % self.pool.block_slots;
-                    let words = [(local % c.cols) * w, (local / c.cols) * w, r.slot.index, 0u32];
+                    let words = if c.buffer_mode {
+                        [local * w * w, 0, r.slot.index, 0u32]
+                    } else {
+                        [(local % c.cols) * w, (local / c.cols) * w, r.slot.index, 0u32]
+                    };
                     for (k, v) in words.iter().enumerate() {
                         bytes[i * REF_BYTES as usize + 4 * k..i * REF_BYTES as usize + 4 * k + 4].copy_from_slice(&v.to_le_bytes());
                     }

@@ -18,7 +18,7 @@ pub mod water;
 pub mod water_gpu;
 pub mod window;
 pub use atmosphere::{atmosphere_shaders, AtmospherePath, ProbeKind};
-pub use compact::compact_terrain_shader;
+pub use compact::{compact_terrain_shader, set_buffer_blocks};
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
 pub use gate::requirements as adapter_requirements;
 pub use lit::{lit_post_shaders, ExposureState, LitPath};
