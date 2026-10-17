@@ -39,8 +39,21 @@ pub const FLAG_OCEAN: u8 = 2;
 const FLAGS_ALL: u8 = FLAG_WET | FLAG_OCEAN;
 
 /// How much of a tile's edge the reach of a coarse tile counts from its centre: more than the 0.71 of the exact test (half the
-/// diagonal), so that the cube's anisotropy near a face corner cannot make a parent drier than a child.
-pub const COARSE_REACH_EDGE_FRACTION: f64 = 0.8;
+/// diagonal). A child's centre lies at most `0.4083` of the parent's edge from the parent's centre (`1/sqrt(6)`, at the cube's
+/// corners), so a parent whose reach is `f` edges contains its child's reach (`f/2` edges) when `f >= 2/sqrt(6) = 0.8165`.
+pub const COARSE_REACH_EDGE_FRACTION: f64 = 0.82;
+
+/// The most cells a summary may have (`6 * 1024^2`): a header that implies more is refused before anything is allocated.
+pub const MAX_SUMMARY_CELLS: u64 = 6 << 20;
+
+/// The number of cells of the summary of a bake of `res` cells in blocks of `block_cells`, if they make one.
+pub fn summary_cell_count(res: u32, block_cells: u32) -> Option<u64> {
+    if res == 0 || !res.is_power_of_two() || block_cells == 0 || !block_cells.is_power_of_two() || block_cells > res {
+        return None;
+    }
+    let g = u64::from(res / summary_edge(block_cells));
+    Some(6 * g * g).filter(|n| *n <= MAX_SUMMARY_CELLS)
+}
 
 /// One cell of the summary.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -111,7 +124,10 @@ pub fn summarize_block(block_cells: u32, samples: &[GlobalSample], ocean: &Ocean
                 // A continentalness that is not a number counts as not above the sea (the producer's test is `c > L` negated).
                 sea_corner |= c.partial_cmp(&sea) != Some(std::cmp::Ordering::Greater);
                 land_corner |= c > sea;
-                low = low.min(samples[i].elevation_m);
+                // A plain comparison, not `f32::min` (which of two zeros of different sign it returns is unspecified, CON-14).
+                if samples[i].elevation_m < low {
+                    low = samples[i].elevation_m;
+                }
                 let (ck, cl) = corner(i);
                 ocean_any |= ocean.get(ck as u32, cl as u32);
             }
@@ -121,8 +137,8 @@ pub fn summarize_block(block_cells: u32, samples: &[GlobalSample], ocean: &Ocean
                     cell.flags |= FLAG_WET;
                 }
             }
-            if land_corner {
-                cell.band_elevation_m = cell.band_elevation_m.min(low);
+            if land_corner && low < cell.band_elevation_m {
+                cell.band_elevation_m = low;
             }
         }
     }
@@ -145,34 +161,21 @@ pub struct WaterSummary {
 impl WaterSummary {
     /// An empty summary for a bake of `res` cells per face edge in blocks of `block_cells`.
     pub fn new(res: u32, block_cells: u32) -> Result<WaterSummary, SummaryError> {
-        let shape = SummaryError::Shape { res, block_cells };
-        if res == 0 || !res.is_power_of_two() || block_cells == 0 || !block_cells.is_power_of_two() || block_cells > res {
-            return Err(shape);
-        }
-        let d = summary_edge(block_cells);
-        let g = res / d;
-        Ok(WaterSummary {
-            res,
-            block_cells,
-            d,
-            g,
-            cells: vec![SummaryCell::EMPTY; 6 * g as usize * g as usize],
-            ocean_dirs: OnceLock::new(),
-        })
+        let n = summary_cell_count(res, block_cells).ok_or(SummaryError::Shape { res, block_cells })?;
+        WaterSummary::from_cells(res, block_cells, vec![SummaryCell::EMPTY; n as usize])
     }
 
     /// A summary from its cells (face-major, row-major): the decoder's way in.
     pub fn from_cells(res: u32, block_cells: u32, cells: Vec<SummaryCell>) -> Result<WaterSummary, SummaryError> {
-        let mut s = WaterSummary::new(res, block_cells)?;
-        if cells.len() != s.cells.len() {
+        let n = summary_cell_count(res, block_cells).ok_or(SummaryError::Shape { res, block_cells })?;
+        if cells.len() as u64 != n {
             return Err(SummaryError::Block(format!(
-                "{} summary cells, a bake of {res} cells in blocks of {block_cells} has {}",
-                cells.len(),
-                s.cells.len()
+                "{} summary cells, a bake of {res} cells in blocks of {block_cells} has {n}",
+                cells.len()
             )));
         }
-        s.cells = cells;
-        Ok(s)
+        let d = summary_edge(block_cells);
+        Ok(WaterSummary { res, block_cells, d, g: res / d, cells, ocean_dirs: OnceLock::new() })
     }
 
     pub fn res(&self) -> u32 {
@@ -240,8 +243,10 @@ impl WaterSummary {
         // The tile's lattice rectangle (a tile is a rectangle of whole cells at or above the block level) and the summary cells it touches.
         let span = self.res >> tile.level();
         let (x0, y0) = (tile.x() * span, tile.y() * span);
-        let (cx0, cx1) = (x0 / self.d, ((x0 + span) / self.d).min(self.g - 1));
-        let (cy0, cy1) = (y0 / self.d, ((y0 + span) / self.d).min(self.g - 1));
+        // One lattice cell more on the low side: a sample on the tile's low edge can land a rounding error below it, and then the vertices
+        // of the cell before the edge carry a tiny weight (GEN-023 counts every vertex with a non-zero weight).
+        let (cx0, cx1) = (x0.saturating_sub(1) / self.d, ((x0 + span) / self.d).min(self.g - 1));
+        let (cy0, cy1) = (y0.saturating_sub(1) / self.d, ((y0 + span) / self.d).min(self.g - 1));
         let band_limit = coast_band_elevation_m(sea.level_m);
         let mut band = false;
         for cy in cy0..=cy1 {

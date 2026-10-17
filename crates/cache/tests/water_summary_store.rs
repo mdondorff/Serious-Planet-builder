@@ -81,7 +81,7 @@ fn the_summary_payload_round_trips_and_a_hostile_payload_is_refused_without_allo
     v[0] = 2;
     assert_eq!(decode_summary(&v).unwrap_err(), BlockCodecError::SummaryVersion(2));
     // A hostile resolution or block size is refused from the header, before any allocation.
-    for (res, cells) in [(0u32, 4u32), (31, 4), (u32::MAX, 4), (1 << 20, 4), (32, 0), (32, 3), (32, 2048), (2, 4)] {
+    for (res, cells) in [(0u32, 4u32), (31, 4), (u32::MAX, 4), (1 << 20, 4), (32, 0), (32, 3), (32, 2048), (2, 4), (65536, 1), (65536, 2)] {
         let mut h = bytes.clone();
         h[1..5].copy_from_slice(&res.to_le_bytes());
         h[5..9].copy_from_slice(&cells.to_le_bytes());
@@ -99,7 +99,7 @@ fn the_summary_payload_round_trips_and_a_hostile_payload_is_refused_without_allo
     assert!(matches!(decode_summary(&forged).unwrap_err(), BlockCodecError::Summary(m) if m.contains("flag")));
 }
 
-const KNOWN_SUMMARY_KEY: &str = "924f98adcb48928d7a48ed29fa42309d";
+const KNOWN_SUMMARY_KEY: &str = "1162f2bb92e005af8ade819a1b9bf017";
 
 // spec: STRM-025
 #[test]
@@ -118,7 +118,7 @@ fn the_summary_key_covers_the_bake_the_grid_the_threshold_and_not_the_sea_level(
     );
     let inputs = w.summary_key_inputs(res, cells);
     assert_eq!(inputs.kind, Kind::GlobalWaterSummary);
-    assert_eq!(inputs.implementation_id, SUMMARY_IMPLEMENTATION_ID);
+    assert_eq!(inputs.implementation_id, format!("{SUMMARY_IMPLEMENTATION_ID}+{}", planet_generators::ocean::OCEAN_IMPLEMENTATION_ID));
     assert_eq!(inputs.tile, GlobalWorld::summary_tile());
     assert_eq!(inputs.source, Some(w.stage_key(res)));
     assert_eq!(inputs.output_params.get(&PARAM_RESOLUTION), Some(&cells.to_le_bytes().to_vec()));

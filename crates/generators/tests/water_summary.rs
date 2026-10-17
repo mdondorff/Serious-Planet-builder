@@ -184,3 +184,52 @@ fn the_summary_of_a_bake_equals_the_reference_read_off_whole_faces_and_does_not_
     }
     assert_eq!(rev.cells(), a.cells());
 }
+
+// spec: GEN-024
+#[test]
+fn a_tile_counts_the_cells_just_below_its_low_edge_because_its_border_samples_can_weigh_the_vertices_there() {
+    // 256 cells in blocks of 64: 4 x 4 summary cells per face, block level 2. The tile (1, 1) of level 2 starts at cell 64.
+    let tile = TileId::new(Face(0), 2, 1, 1).unwrap();
+    for (cx, cy) in [(0usize, 1usize), (1, 0), (0, 0)] {
+        let mut cells = vec![SummaryCell::EMPTY; 6 * 16];
+        cells[cy * 4 + cx] = SummaryCell { flags: FLAG_WET | FLAG_OCEAN, band_elevation_m: f32::INFINITY };
+        let s = WaterSummary::from_cells(256, 64, cells).unwrap();
+        assert!(s.tile_water(&TangentWarp, tile, R, &sea()).unwrap().is_some(), "wet cell ({cx}, {cy}) below the low edge");
+    }
+    // Two cells away it does not count.
+    let mut cells = vec![SummaryCell::EMPTY; 6 * 16];
+    cells[0] = SummaryCell { flags: FLAG_WET, band_elevation_m: f32::INFINITY };
+    let s = WaterSummary::from_cells(256, 64, cells).unwrap();
+    assert!(s.tile_water(&TangentWarp, TileId::new(Face(0), 2, 2, 2).unwrap(), R, &sea()).unwrap().is_none());
+}
+
+// spec: GEN-024
+#[test]
+fn the_coarse_reach_of_a_parent_contains_its_childs_at_every_level_including_beside_a_face_corner() {
+    for level in 1..=10u8 {
+        let side = 1u32 << level;
+        let edge = core::f64::consts::FRAC_PI_2 / f64::from(1u32 << (level - 1));
+        let mut worst: f64 = 0.0;
+        for y in 0..side {
+            for x in 0..side {
+                let child = TileId::new(Face(0), level, x, y).unwrap();
+                let parent = child.parent().unwrap();
+                let (c, p) = (child.center_direction(&TangentWarp), parent.center_direction(&TangentWarp));
+                worst = worst.max(libm::acos(c.dot(p).min(1.0)) / edge);
+            }
+        }
+        // The child's reach (f/2 edges of the parent) must lie in the parent's (f edges): the centres are at most (f/2) edges apart.
+        assert!(
+            worst <= 0.5 * planet_generators::water_summary::COARSE_REACH_EDGE_FRACTION,
+            "level {level}: a child centre is {worst} parent edges from the parent's"
+        );
+    }
+}
+
+// spec: GEN-024
+#[test]
+fn a_summary_that_implies_too_many_cells_is_refused_before_it_is_allocated() {
+    assert!(WaterSummary::new(65536, 1).is_err());
+    assert!(WaterSummary::new(16384, 1024).is_ok());
+    assert_eq!(planet_generators::water_summary::summary_cell_count(16384, 1024), Some(6 * 256 * 256));
+}

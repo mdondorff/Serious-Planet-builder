@@ -263,8 +263,6 @@ pub struct WaterTileCache {
     book: Option<std::sync::Arc<WaterBook>>,
     /// Tiles answered from the book.
     pub book_hits: u64,
-    /// Tiles answered by the coarse level of W (ADR 0057), which reads no block.
-    pub coarse_answers: u64,
     /// Field queries made and the nanoseconds they took, for the cost report (recorded only).
     pub queries: u64,
     /// Band and connectivity queries (ADR 0056), counted apart from the selection's own.
@@ -317,7 +315,6 @@ impl WaterTileCache {
         }
         let started = std::time::Instant::now();
         if let Some(coarse) = src.coarse_tile_water(map, tile, radius_m)? {
-            self.coarse_answers += 1;
             self.tiles.insert(tile, coarse);
             return Ok(coarse);
         }

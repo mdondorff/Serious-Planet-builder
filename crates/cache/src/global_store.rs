@@ -290,8 +290,10 @@ pub fn decode_summary(bytes: &[u8]) -> Result<WaterSummary, BlockCodecError> {
     if u64::from(res) > MAX_TILED_RES || !valid_cells(cells) || cells > res {
         return Err(BlockCodecError::Summary(format!("a bake of {res} cells in blocks of {cells} makes no summary")));
     }
-    let summary = WaterSummary::new(res, cells)?;
-    let n = summary.cells().len();
+    // The size the header implies is checked against the claim before any cell is allocated.
+    let n = planet_generators::water_summary::summary_cell_count(res, cells).ok_or_else(|| {
+        BlockCodecError::Summary(format!("a bake of {res} cells in blocks of {cells} makes no summary (or too many cells)"))
+    })? as usize;
     let expected = 5 * n as u64;
     if u64::from(claimed) != expected {
         return Err(BlockCodecError::RawLength { claimed, expected });
@@ -528,7 +530,8 @@ impl GlobalWorld {
             kind: Kind::GlobalWaterSummary,
             hash_version: HASH_VERSION,
             generator_version: GLOBAL_VERSION,
-            implementation_id: SUMMARY_IMPLEMENTATION_ID.to_string(),
+            // A function of the ocean bits too: renaming the ocean channel's implementation renames the summary.
+            implementation_id: format!("{SUMMARY_IMPLEMENTATION_ID}+{OCEAN_IMPLEMENTATION_ID}"),
             face_mapping_id: TangentWarp.id().to_string(),
             body: self.body,
             body_params: self.body_params(),
