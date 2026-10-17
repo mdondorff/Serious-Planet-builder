@@ -86,10 +86,22 @@ fn changed_paths(root: &Path) -> Vec<String> {
     if let Ok(s) = capture(root, "git", &["status", "--porcelain", "--untracked-files=all"]) {
         paths.extend(s.lines().filter(|l| l.len() > 3).map(|l| l[3..].trim().trim_matches('"').to_string()));
     }
-    if let Ok(s) = capture(root, "git", &["diff", "--name-only", "main...HEAD"]) {
+    let base = diff_base(&|r| capture(root, "git", &["rev-parse", "--verify", "--quiet", r]).is_ok());
+    if let Ok(s) = capture(root, "git", &["diff", "--name-only", &format!("{base}...HEAD")]) {
         paths.extend(s.lines().map(String::from));
     }
     paths
+}
+
+/// The ref a branch is compared with to find its changed files: the remote `origin/main` when there is one, else `main`. A
+/// worktree's local `main` is whatever the primary checkout last pulled, often hundreds of commits behind, and against it every
+/// change looks like "everything changed" (BUILD-003).
+fn diff_base(exists: &dyn Fn(&str) -> bool) -> &'static str {
+    if exists("origin/main") {
+        "origin/main"
+    } else {
+        "main"
+    }
 }
 
 /// The nextest filter of a `test` subcommand. On the real GPU (`test gpu --real`) the tier-B oracles run with tier C:
@@ -782,6 +794,14 @@ mod tests {
             assert!(packages_for_changes(&s(paths)).len() >= 12, "{paths:?}");
         }
         assert_eq!(packages_for_changes(&s(&["xtask/src/main.rs"])), ["xtask"]);
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn changed_files_are_found_against_the_remote_main_when_there_is_one() {
+        assert_eq!(diff_base(&|r| r == "origin/main" || r == "main"), "origin/main");
+        assert_eq!(diff_base(&|r| r == "main"), "main");
+        assert_eq!(diff_base(&|_| false), "main");
     }
 
     // spec: BUILD-003
