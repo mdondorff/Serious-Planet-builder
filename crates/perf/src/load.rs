@@ -340,6 +340,21 @@ pub fn query_raw() -> Option<RawSample> {
     out.status.success().then(|| parse_raw(&String::from_utf8_lossy(&out.stdout))).flatten()
 }
 
+/// The competing CPU load (percent of the whole machine) between two readings `seconds` apart: every process but `own_pid` and
+/// the helpers that read the machine. `None` where a reading fails or the clock did not advance. Blocks for `seconds`.
+pub fn competing_load(seconds: u32, own_pid: u32) -> Option<f64> {
+    let logical = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let a = query_raw()?;
+    std::thread::sleep(std::time::Duration::from_secs(u64::from(seconds)));
+    let b = query_raw()?;
+    competing_between(&a, &b, logical, own_pid)
+}
+
+/// [`competing_load`] from two readings already taken.
+pub fn competing_between(a: &RawSample, b: &RawSample, logical: usize, own_pid: u32) -> Option<f64> {
+    between(a, b, logical, own_pid, 0.0).map(|s| s.competing_pct)
+}
+
 /// A background sampler of the host's load beside a case. Start it before the measured frames, stop it after; it reads on its own
 /// thread, so the frame loop never waits for a process spawn.
 pub struct LoadSampler {
@@ -409,6 +424,37 @@ mod tests {
         let names: Vec<&str> = s.procs.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["Idle", "System", "chrome", "Code"]);
         assert!(parse_raw("").is_none() && parse_raw("garbage").is_none(), "a failed query is not a sample");
+    }
+
+    // spec: TEST-032
+    #[test]
+    fn the_gate_and_the_settle_poll_read_the_competing_load_and_not_the_harness_start() {
+        // A child that has just started: it uses 30 % of an 8-processor machine itself (store open, world build) and its sampler
+        // helper 1 %; a browser uses 6 %. The gate's reading is the browser's 6 %, whatever the harness is doing.
+        let a = raw(1_000_000_000, &[(0, "Idle", 0), (100, "planet", 0), (300, "powershell", 0), (200, "chrome", 0)]);
+        let b = raw(
+            1_100_000_000,
+            &[(0, "Idle", 5_000_000_000), (100, "planet", 240_000_000), (300, "powershell", 8_000_000), (200, "chrome", 48_000_000)],
+        );
+        let gate = competing_between(&a, &b, 8, 100).unwrap();
+        assert!((gate - 6.0).abs() < 1e-9, "{gate}");
+        // The settle poll runs in the xtask process (pid 7) between children: the same two readings give the same reading when the
+        // harness child is a competitor to it (its tail), and a quiet machine reads zero.
+        let poll = competing_between(&a, &b, 8, 7).unwrap();
+        assert!((poll - 36.0).abs() < 1e-9, "the previous child's tail counts for the poll: {poll}");
+        let quiet = raw(1_100_000_000, &[(0, "Idle", 5_000_000_000), (100, "planet", 0), (300, "powershell", 0), (200, "chrome", 0)]);
+        assert_eq!(competing_between(&a, &quiet, 8, 100), Some(0.0));
+        assert!(competing_between(&b, &a, 8, 100).is_none(), "time must advance");
+    }
+
+    /// By hand on Windows (`cargo test -p planet-perf live_competing -- --ignored --nocapture`): the live reading is a sane percentage.
+    // spec: TEST-032
+    #[test]
+    #[ignore = "reads the live machine through PowerShell"]
+    fn live_competing_load_is_a_percentage() {
+        let v = competing_load(2, std::process::id()).expect("a reading");
+        println!("competing load over 2 s: {v:.1} %");
+        assert!((0.0..=100.0).contains(&v), "{v}");
     }
 
     // spec: TEST-023
