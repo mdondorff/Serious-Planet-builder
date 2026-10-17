@@ -12,8 +12,8 @@
 //! nothing escalates and 3 otherwise (`cargo xtask golden-review` then reports a failure); 2 on bad arguments.
 
 use planet_testkit::review::{
-    classify, classify_m5_first, debug_view_agreement, declared_goldens, driver_gate, m5_declarations, parse_classes, Change, GoldenClass,
-    M5Evidence, Observation, TestOutcomes, Verdict, ViewState,
+    classify, classify_m5_first, debug_view_agreement, declared_goldens, driver_gate, m5_declarations, parse_classes, view_diff, Change,
+    GoldenClass, M5Evidence, Observation, TestOutcomes, Verdict, ViewDiff, ViewState,
 };
 use planet_testkit::{read_png, repo_root, write_png, Image};
 use std::collections::{BTreeMap, BTreeSet};
@@ -135,7 +135,7 @@ impl Run<'_> {
             };
             states.insert(adapter.clone(), state);
         }
-        // New candidates are compared with one another: a debug view is exact on every adapter.
+        // New candidates are compared with one another: compared pairwise under ADR 0052 (delta 1 plus at most 64 edge pixels).
         let news: Vec<&String> = states.iter().filter(|(_, s)| **s == ViewState::New).map(|(a, _)| a).collect();
         let mut pairs = vec![];
         for (i, a) in news.iter().enumerate() {
@@ -145,9 +145,9 @@ impl Run<'_> {
                     read_png(&self.candidates[&((*b).clone(), view.to_string())]).expect("candidate"),
                 );
                 let c = if (ia.width, ia.height) == (ib.width, ib.height) {
-                    change(&ia, &ib)
+                    view_diff(&ia, &ib)
                 } else {
-                    Change { pixels: usize::MAX, max_delta: u8::MAX }
+                    ViewDiff { pixels: usize::MAX, beyond_rounding: usize::MAX, max_delta: u8::MAX }
                 };
                 pairs.push(((*a).clone(), (*b).clone(), c));
             }

@@ -25,7 +25,8 @@ pub enum GoldenClass {
 /// The M5 window of ADR 0037 (accepted 2026-10-15, owner policy): the first golden of one of these classes is blessed under
 /// policy when [`classify_m5_first`]'s conditions all hold. Every other class, and every golden that already exists, keeps
 /// ADR 0017 exactly. The owner revisits this window at the M5 gate ("after the M5 gate the owner decides whether this rule
-/// continues"); ending it means emptying this list through a superseding ADR.
+/// continues"); ending it means emptying this list through a superseding ADR. ADR 0052 (accepted 2026-10-17) amended point
+/// 1(b) of this window with [`ADR_0052_EDGE_PIXELS`]; it ends with the window.
 pub const ADR_0037_M5_CLASSES: [GoldenClass; 3] = [GoldenClass::Lit, GoldenClass::Sky, GoldenClass::Water];
 
 impl GoldenClass {
@@ -82,6 +83,37 @@ pub enum Verdict {
 
 pub const ROUNDING_MAX_PIXELS: usize = 32;
 pub const ROUNDING_MAX_DELTA: u8 = 1;
+
+/// ADR 0052 point 1 (amends ADR 0037 point 1(b)): the candidates of a new debug view of a first M5 golden agree pairwise
+/// when every pixel is within [`ROUNDING_MAX_DELTA`] except at most this many pixels, which may differ by any amount
+/// (adapters rasterise silhouettes and band edges differently). Part of the ADR 0037 window: it ends with it.
+pub const ADR_0052_EDGE_PIXELS: usize = 64;
+
+/// How two candidates of the same view differ, for the cross-adapter check of a new debug view (ADR 0052).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ViewDiff {
+    /// Pixels that differ at all.
+    pub pixels: usize,
+    /// Pixels whose largest channel delta exceeds [`ROUNDING_MAX_DELTA`]; only these count against [`ADR_0052_EDGE_PIXELS`].
+    pub beyond_rounding: usize,
+    pub max_delta: u8,
+}
+
+/// How two same-sized candidates of a new debug view differ (ADR 0052): all differing pixels, those whose largest channel
+/// delta (alpha included) exceeds delta 1, and the largest delta. (`Change` is the same count without the split, used for
+/// candidates against their goldens.)
+pub fn view_diff(a: &crate::Image, b: &crate::Image) -> ViewDiff {
+    let mut d = ViewDiff { pixels: 0, beyond_rounding: 0, max_delta: 0 };
+    for (p, q) in a.pixels().zip(b.pixels()) {
+        if p != q {
+            let delta = (0..4).map(|c| p[c].abs_diff(q[c])).max().unwrap_or(0);
+            d.pixels += 1;
+            d.beyond_rounding += usize::from(delta > ROUNDING_MAX_DELTA);
+            d.max_delta = d.max_delta.max(delta);
+        }
+    }
+    d
+}
 
 /// Do two numbers agree within +-5 % of the larger, or within `floor`?
 fn agree(a: usize, b: usize, floor: usize) -> bool {
@@ -245,14 +277,14 @@ pub enum ViewState {
 /// ADR 0037 point 1(b): the feature's debug view exists and agrees across the adapters under ADR 0017's cross-adapter rule.
 /// `states` holds only the adapters that took part in this run; `not_run` those that have goldens but did not, which are
 /// reported and never counted as agreeing. A view with a blessed golden is checked by ADR 0017's own classification of its
-/// candidates (`Matches` or an auto `Differs`); a view that is new is checked candidate against candidate, where the
-/// debug-view rule is exactness, so `new_pairs` (adapter, adapter, difference of their candidates) may differ by no more
-/// than rounding noise ([`ROUNDING_MAX_PIXELS`], [`ROUNDING_MAX_DELTA`]). At least two adapters must take part.
+/// candidates (`Matches` or an auto `Differs`); a view that is new is checked candidate against candidate (ADR 0052):
+/// in every pair of `new_pairs` (adapter, adapter, difference of their candidates) all pixels are within
+/// [`ROUNDING_MAX_DELTA`] except at most [`ADR_0052_EDGE_PIXELS`] of any delta. At least two adapters must take part.
 /// `Ok` carries the evidence line for the report.
 pub fn debug_view_agreement(
     view: &str,
     states: &BTreeMap<String, ViewState>,
-    new_pairs: &[(String, String, Change)],
+    new_pairs: &[(String, String, ViewDiff)],
     not_run: &[String],
 ) -> Result<String, String> {
     let note = if not_run.is_empty() { String::new() } else { format!("; NOT RUN, not counted as agreeing: {}", not_run.join(", ")) };
@@ -271,19 +303,27 @@ pub fn debug_view_agreement(
     }
     let apart: Vec<String> = new_pairs
         .iter()
-        .filter(|(_, _, c)| c.pixels > ROUNDING_MAX_PIXELS || c.max_delta > ROUNDING_MAX_DELTA)
-        .map(|(a, b, c)| format!("{a} vs {b}: {} px differ, max delta {}", c.pixels, c.max_delta))
+        .filter(|(_, _, c)| c.beyond_rounding > ADR_0052_EDGE_PIXELS)
+        .map(|(a, b, c)| {
+            format!(
+                "{a} vs {b}: {} px beyond delta {ROUNDING_MAX_DELTA} ({} px differ), max delta {}",
+                c.beyond_rounding, c.pixels, c.max_delta
+            )
+        })
         .collect();
     if !apart.is_empty() {
         return Err(format!(
-            "debug view {view}: the adapters disagree ({}; a debug view is exact up to {ROUNDING_MAX_PIXELS} px and delta {ROUNDING_MAX_DELTA}){note}",
+            "debug view {view}: the adapters disagree ({}; all pixels within delta {ROUNDING_MAX_DELTA} except at most {ADR_0052_EDGE_PIXELS} px of any delta, ADR 0052){note}",
             apart.join("; ")
         ));
     }
-    let worst = new_pairs.iter().map(|(_, _, c)| (c.pixels, c.max_delta)).fold((0, 0), |w, c| (w.0.max(c.0), w.1.max(c.1)));
+    let worst = new_pairs.iter().map(|(_, _, c)| (c.beyond_rounding, c.max_delta)).fold((0, 0), |w, c| (w.0.max(c.0), w.1.max(c.1)));
     let kind = if new == 0 { "matches its blessed golden or an auto-blessed change" } else { "candidates agree pairwise" };
     let adapters = states.keys().cloned().collect::<Vec<_>>().join(", ");
-    Ok(format!("debug view {view}: {kind} on {adapters} (worst pair {} px, delta {}){note}", worst.0, worst.1))
+    Ok(format!(
+        "debug view {view}: {kind} on {adapters} (worst pair {} px beyond delta {ROUNDING_MAX_DELTA}, max delta {}){note}",
+        worst.0, worst.1
+    ))
 }
 
 /// The evidence for ADR 0037 point 1, gathered by the caller for one golden.
@@ -558,8 +598,9 @@ mod tests {
     fn states(v: &[(&str, ViewState)]) -> BTreeMap<String, ViewState> {
         v.iter().map(|(a, s)| (a.to_string(), *s)).collect()
     }
-    fn pair(a: &str, b: &str, pixels: usize, max_delta: u8) -> (String, String, Change) {
-        (a.into(), b.into(), Change { pixels, max_delta })
+    /// A pair differing in `beyond` pixels of delta `max_delta` (> 1, or 0 with none) plus `ones` pixels of delta 1.
+    fn pair(a: &str, b: &str, beyond: usize, ones: usize, max_delta: u8) -> (String, String, ViewDiff) {
+        (a.into(), b.into(), ViewDiff { pixels: beyond + ones, beyond_rounding: beyond, max_delta })
     }
 
     // spec: TEST-022
@@ -570,7 +611,7 @@ mod tests {
         let ok = debug_view_agreement(
             "v",
             &states(&[("warp", ViewState::New), ("nv", ViewState::New)]),
-            &[pair("warp", "nv", 0, 0)],
+            &[pair("warp", "nv", 0, 0, 0)],
             &["vulkan-llvmpipe".to_string()],
         )
         .unwrap();
@@ -594,17 +635,73 @@ mod tests {
         assert!(debug_view_agreement("v", &gone, &[], &none).unwrap_err().contains("does not exist on nv"));
         let bad = states(&[("warp", ViewState::Matches), ("nv", ViewState::Differs { auto: false })]);
         assert!(debug_view_agreement("v", &bad, &[], &none).unwrap_err().contains("does not bless"));
-        // New candidates must agree to rounding noise; a real difference is disagreement.
+        // New candidates (ADR 0052): every pixel within delta 1 except at most 64 of any delta.
         let new = states(&[("warp", ViewState::New), ("nv", ViewState::New), ("llvm", ViewState::New)]);
-        let near = [pair("warp", "nv", 32, 1), pair("warp", "llvm", 0, 0), pair("nv", "llvm", 5, 1)];
-        assert!(debug_view_agreement("v", &new, &near, &none).is_ok());
-        for far in [pair("nv", "llvm", 33, 1), pair("nv", "llvm", 2, 2)] {
-            let e = debug_view_agreement("v", &new, &[pair("warp", "nv", 0, 0), far], &none).unwrap_err();
-            assert!(e.contains("disagree"), "{e}");
-        }
+        let zero = pair("warp", "nv", 0, 0, 0);
+        let agree = |p: (String, String, ViewDiff)| debug_view_agreement("v", &new, &[zero.clone(), p], &none);
+        // Boundary: 63 and exactly 64 pixels of any delta agree, 65 disagree.
+        assert!(agree(pair("nv", "llvm", 63, 0, 95)).is_ok());
+        assert!(agree(pair("nv", "llvm", 64, 0, 95)).is_ok());
+        let e = agree(pair("nv", "llvm", 65, 0, 95)).unwrap_err();
+        assert!(e.contains("disagree") && e.contains("65 px beyond delta 1"), "{e}");
+        // Delta-1 pixels are free and do not count against the 64; one delta-2 pixel outside the 64 does.
+        assert!(agree(pair("nv", "llvm", 64, 5000, 95)).is_ok());
+        assert!(agree(pair("nv", "llvm", 0, 5000, 1)).is_ok());
+        let e = agree(pair("nv", "llvm", 65, 0, 2)).unwrap_err();
+        assert!(e.contains("disagree"), "{e}");
+        // Any one pair beyond the limit fails the view, not only the worst-looking one.
+        let near = [pair("warp", "nv", 64, 3, 11), pair("warp", "llvm", 0, 0, 0), pair("nv", "llvm", 65, 0, 2)];
+        assert!(debug_view_agreement("v", &new, &near, &none).is_err());
+        let ok = debug_view_agreement("v", &new, &near[..2], &none).unwrap();
+        assert!(ok.contains("worst pair 64 px beyond delta 1, max delta 11"), "{ok}");
         // New on one adapter and blessed on another is not one view.
         let mixed = states(&[("warp", ViewState::New), ("nv", ViewState::Matches)]);
         assert!(debug_view_agreement("v", &mixed, &[], &none).unwrap_err().contains("new on some"));
+    }
+
+    // spec: TEST-022
+    #[test]
+    fn view_diff_counts_pixels_beyond_delta_1_by_their_largest_channel_including_alpha() {
+        let base = crate::Image::new(100, 100, vec![100; 100 * 100 * 4]);
+        let mut other = base.clone();
+        let set = |img: &mut crate::Image, i: usize, ch: usize, v: u8| img.rgba[i * 4 + ch] = v;
+        for i in 0..64 {
+            set(&mut other, i, 0, 195); // delta 95
+        }
+        for i in 64..5000 {
+            set(&mut other, i, 1, 101); // delta 1 in a single channel
+        }
+        let d = view_diff(&base, &other);
+        assert_eq!((d.pixels, d.beyond_rounding, d.max_delta), (5000, 64, 95));
+        // Two small deltas in different channels are still delta 1 per pixel (the max, not the sum).
+        set(&mut other, 6000, 0, 101);
+        set(&mut other, 6000, 2, 99);
+        assert_eq!(view_diff(&base, &other).beyond_rounding, 64);
+        // A delta-2 alpha difference is the 65th pixel beyond delta 1.
+        set(&mut other, 7000, 3, 102);
+        let d = view_diff(&base, &other);
+        assert_eq!((d.beyond_rounding, d.max_delta), (65, 95));
+        let none: Vec<String> = vec![];
+        let new = states(&[("warp", ViewState::New), ("nv", ViewState::New)]);
+        assert!(debug_view_agreement("v", &new, &[("warp".into(), "nv".into(), d)], &none).is_err());
+        assert_eq!(view_diff(&base, &base), ViewDiff { pixels: 0, beyond_rounding: 0, max_delta: 0 });
+    }
+
+    // spec: TEST-022
+    #[test]
+    fn the_existing_golden_path_keeps_adr_0017_thresholds() {
+        // ADR 0052 touches only new-vs-new candidates: rounding noise stays 32 px and delta 1, and the 8 px agreement floor
+        // for declared changes is unchanged, for a debug view with a blessed golden.
+        let d = Some(GoldenClass::Debug);
+        assert_eq!(classify("warp", "g", &seen(&[("warp", ch(32, 1))]), d, false), Verdict::AutoRounding);
+        assert!(matches!(classify("warp", "g", &seen(&[("warp", ch(64, 1))]), d, false), Verdict::Escalate(_)));
+        let apart = seen(&[("warp", ch(951, 147)), ("nv", ch(951 - 49, 147))]);
+        assert!(matches!(classify("warp", "g", &apart, d, true), Verdict::Escalate(_)));
+        // A blessed view still matches or changes only as ADR 0017 blesses; the tolerance does not reach it.
+        let none: Vec<String> = vec![];
+        let bad = states(&[("warp", ViewState::Matches), ("nv", ViewState::Differs { auto: false })]);
+        assert!(debug_view_agreement("v", &bad, &[], &none).is_err());
+        assert_eq!(ADR_0052_EDGE_PIXELS, 64);
     }
 
     // spec: TEST-022

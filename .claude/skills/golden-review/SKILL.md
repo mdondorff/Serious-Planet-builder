@@ -1,6 +1,6 @@
 ---
 name: golden-review
-description: Review candidate golden images against the owner's policy (ADR 0017, plus ADR 0037 for the first goldens of M5 classes), auto-bless rounding noise, declared cross-adapter-consistent debug-view changes and conforming first M5 goldens, and escalate everything else to the owner's /bless. Use whenever a change produces golden candidates (a golden test mismatch or PENDING) before declaring the change done.
+description: Review candidate golden images against the owner's policy (ADR 0017, plus ADR 0037 and ADR 0052 for the first goldens of M5 classes), auto-bless rounding noise, declared cross-adapter-consistent debug-view changes and conforming first M5 goldens, and escalate everything else to the owner's /bless. Use whenever a change produces golden candidates (a golden test mismatch or PENDING) before declaring the change done.
 ---
 Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; the M5 window: `docs/adr/0037-m5-new-goldens-and-look-review.md`. Never bless outside them; when unsure, escalate.
 
@@ -30,6 +30,9 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; the M5 window: `
    rules: every assertion of the golden test other than the golden comparison), and the change's verifier and reviewers
    have no open finding about pixels. An `AUTO-M5` needs the same. If either fails, or any reviewer objects, treat the
    candidate as `ESCALATE`.
+   For the debug view of a first M5 golden, candidates that are new in this run agree pairwise when every pixel is within
+   delta 1 except at most 64 pixels of any delta (ADR 0052, which amends ADR 0037 point 1(b); `ADR_0052_EDGE_PIXELS`); a
+   debug view that already has a blessed golden is still checked by ADR 0017. The report prints the worst pair.
    The driver gate is never relaxed, for first goldens too: a candidate rendered by another driver than the one in
    `driver.txt` escalates.
 4. **Bless the auto verdicts.** `cargo xtask golden-review ... --apply` copies only `AUTO-R`/`AUTO-E`/`AUTO-M5` candidates
