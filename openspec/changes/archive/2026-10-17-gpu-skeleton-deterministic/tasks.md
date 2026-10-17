@@ -1,0 +1,3 @@
+- [x] 1.1 `Streamer::unfinished_jobs`; `run_script` lockstep; `--lockstep` option (pipelined only), parse test
+- [x] 1.2 `gpu_skeleton` upload test runs in lockstep, same assertions plus equal tile counts
+- [x] 2.1 spec-guardian, verifier; test, spec-lint, fmt, clippy; log line; status line removed; PR; CI

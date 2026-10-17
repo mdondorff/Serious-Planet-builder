@@ -38,6 +38,8 @@ modes:
                              the GPU never waited for; STRM-016): from a cold start, then (with --then) after a jump to the other camera; the
                              image is the one frame the loop settles on, equal to the default path's; --out-dir DIR also writes pipelined.txt
                              (per-frame kind, counts and the time columns plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms)
+    --lockstep               with --pipelined: wait for the plan worker and the generation after every iteration, so the frames and the tiles each
+                             uploads do not depend on thread timing (a test mode; slower than the free-running loop)
     --view face|tile-id|level|morph|height|normals|depth|relief|morph-height   debug view (tiles scene: face, tile-id, height; a flight defaults to relief)
     --tile FACE,LEVEL,X,Y    tile to draw (repeatable; default: a tile and its east neighbour)
     --seed N --res N         generator seed and tile resolution (cells, power of two)
@@ -135,6 +137,9 @@ pub struct Options {
     /// `--pipelined`: the terrain view through the pipelined loop (STRM-016); `--then SCRIPT` jumps to another camera afterwards.
     pub pipelined: bool,
     pub then: Option<String>,
+    /// `--lockstep` (with `--pipelined`): after every iteration wait until the plan worker and the generation are idle, so the
+    /// frames drawn and the tiles each one uploads are a function of the script alone, not of thread timing (TEST-012).
+    pub lockstep: bool,
     pub cells: u32,
     /// `--finest-level N`: the LOD cap (`LodParams::max_level`); none = the production default for the tile size (LOD-010).
     pub finest_level: Option<u8>,
@@ -232,6 +237,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         script: "3".into(),
         stream: false,
         pipelined: false,
+        lockstep: false,
         then: None,
         cells: 32,
         finest_level: None,
@@ -257,6 +263,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--offscreen" => o.offscreen = true,
             "--stream" => o.stream = true,
             "--pipelined" => o.pipelined = true,
+            "--lockstep" => o.lockstep = true,
             "--then" => o.then = Some(it.next().ok_or("--then needs a script index or name")?.clone()),
             "--perf-smoke" => o.perf_smoke = true,
             "--store" => o.store = Some(PathBuf::from(it.next().ok_or("--store needs the directory of a stored bake")?)),
@@ -428,6 +435,9 @@ fn check_flight_options(o: &Options) -> Result<(), String> {
         }
     } else if let Some(f) = FLIGHT_ONLY.iter().find(|f| o.given.contains(**f) && !(o.pipelined && **f == "--out-dir")) {
         return Err(format!("{f} only applies to --flight"));
+    }
+    if o.lockstep && !o.pipelined {
+        return Err("--lockstep only applies to --pipelined".into());
     }
     if o.then.is_some() && !o.pipelined {
         return Err("--then only applies to --pipelined".into());
@@ -712,6 +722,16 @@ mod tests {
         assert_eq!(args(&["test-render", "--gen-reserve", "0"]).gen_workers().workers, cores);
         assert!(parse_args(&["test-render".into(), "--gen-reserve".into(), "x".into()]).unwrap_err().contains("non-negative"));
         assert!(parse_args(&["test-render".into(), "--gen-reserve".into()]).unwrap_err().contains("needs a count"));
+    }
+
+    // spec: STRM-016, TEST-012
+    #[test]
+    fn lockstep_is_a_pipelined_only_test_mode() {
+        let parse = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert!(!parse(&["test-render", "--scene", "terrain", "--pipelined"]).unwrap().lockstep);
+        assert!(parse(&["test-render", "--scene", "terrain", "--pipelined", "--lockstep"]).unwrap().lockstep);
+        let o = parse(&["test-render", "--scene", "terrain", "--lockstep"]).unwrap();
+        assert!(check_flight_options(&o).unwrap_err().contains("--lockstep only applies to --pipelined"));
     }
 
     // spec: STRM-020, TEST-012

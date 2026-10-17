@@ -22,7 +22,6 @@ Dormant (no near trigger; not asked now):
 - **M3 gate condition 2** (trigger: before the first regional field is stored): per-tile node set id (ADR 0025 point 3), the declared-versus-recorded reads contract test (ADR 0021 point 7), a tile-level GEN-017 test.
 - **Cold start without the pre-fill:** dive-cold lag 1.77 levels and a 48 ms frame 2 (M4 report). The viewer window measures the real cold start once.
 
-- **Timing flake in `gpu_skeleton`** (`the_upload_flag_selects_the_write_path_and_the_batched_loop_draws_the_same_frames_in_fewer_calls`: batched 106 tiles against 175 per slot on a Windows CI run of #215, passed on rerun): a test that depends on streaming timing is not deterministic (CLAUDE.md). sonnet-explorer makes it deterministic (drive the loop to a fixed residency state before comparing, or compare per drawn tile, not per slot) as a small change after item 7; until then a rerun is allowed and each failure is noted here.
 
 ## M5 Atmosphere & ocean: design constraints (owner, 2026-10-15)
 Scope as in the architecture report (Hillaire atmosphere, aerial perspective, HDR and exposure, ocean surface and shoreline; gate after M5). These constraints keep later work possible without rework:

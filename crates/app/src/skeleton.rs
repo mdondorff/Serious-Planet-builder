@@ -639,7 +639,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
             requests.push(TerrainRequest { camera: then_camera, ..request.clone() });
             shown = then_name;
         }
-        let (frame, log) = crate::pipelined::run_script(ctx, &world, &requests, o.gen_workers(), out)?;
+        let (frame, log) = crate::pipelined::run_script(ctx, &world, &requests, o.gen_workers(), o.lockstep, out)?;
         writeln!(out, "terrain {shown} ({}) pipelined: {} frames drawn", view.name(), log.len()).map_err(err)?;
         if let Some(path) = &o.out {
             write_frame(&frame, path, out)?;
