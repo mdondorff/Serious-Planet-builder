@@ -6,4 +6,4 @@ Name: `<YYYY-MM-DD>-<description>.png` (lowercase, dashes). Keep each file under
 
 | File | What it shows |
 |---|---|
-| `2026-10-17-atmosphere-orbit.png` | The viewer at orbit (altitude 7,225 km) with lighting and atmosphere on (EV 13.9, adapted), while the bake loads. The first look at the atmosphere and the ocean coastlines on the RTX, captured over remote desktop. |
+| `2026-10-17-atmosphere-orbit.png` | The viewer at orbit (altitude 7,225 km) with lighting and atmosphere on (EV 13.9, adapted), while the bake loads. The first look at the atmosphere and the ocean coastlines. Rendered by the software adapter (WARP) during a coder's test run, hence 1 fps and 249 ms of GPU time. Captured over remote desktop. |
