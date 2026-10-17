@@ -5,8 +5,8 @@ A planet-scale generator, editor and real-time renderer: Rust + wgpu, one binary
 
 ## Sources of truth (highest first)
 1. `docs/constitution.md`: non-negotiable rules. Read it at the start of every session. Never edit it; propose amendments as ADRs.
-2. `docs/adr/`: accepted decisions. Never edit an accepted ADR except its status line.
-3. `openspec/specs/`: current subsystem specs. Read only the 2–3 specs your task touches.
+2. `openspec/specs/`: current subsystem specs, the single home of current rules (every normative number, budget, limit and format; ADR 0055). Read only the 2–3 specs your task touches.
+3. `docs/adr/`: accepted decisions and why they were made. Never edit an accepted ADR except its status line.
 4. `docs/background/`: frozen research and setup docs. **Read only when an ADR, spec or task points at a specific section** (e.g. "background report §5"). Never treat them as requirements, never update them.
 
 Working files: `docs/status.md` (forward state only: waiting for the owner, the current queue, the current stop report, tracked items), `docs/log.md` (the current milestone's log, newest first), `docs/spikes.md` (spike register), `docs/learnings.md` (findings, each with a scope). Finished milestones are archived in `docs/archive/<M>/` by the `housekeeping` skill.
@@ -29,8 +29,14 @@ Until an xtask command exists, create it in `xtask/` rather than writing a scrip
 2. For each task: write the failing test at the cheapest tier that can falsify it, then implement. Every test cites its requirement ID (`// spec: COORD-003`).
 3. Run the `numerics-reviewer` agent for changes in `core`, `generators` or shaders, and the `spec-guardian` agent before archiving a change.
 4. Run the `verifier` agent before declaring any task done. Fix what it finds; don't argue with it.
-5. Archive the change in OpenSpec when all its requirements pass, then add one line at the top of `docs/log.md`.
-6. A new decision → `/adr`. A time-boxed experiment → `/spike`. A surprise or a corrected assumption → `/learning`.
+5. Archive the change in OpenSpec when all its requirements pass; in the same PR delete the archived change's `design.md` and `tasks.md` (keep `proposal.md` and the spec deltas; ADR 0055). Then add one line at the top of `docs/log.md`.
+6. A new decision → `/adr`. A time-boxed experiment → `/spike`. A surprise or a corrected assumption → `/learning`. How a decision was built goes in the change's design notes, not in a new ADR; write an ADR only for a new decision or a departure from an accepted one (ADR 0055).
+
+## Writing (ADR 0055)
+Specs, ADRs and working files are read by agents and the owner. Write definitions, not narration:
+- one statement per line or bullet; numbers in tables;
+- no conversational asides, no "we" or "I"; who decided goes on the status line, not in the prose;
+- an ADR is at most about one page (Context up to 5 bullets, Decision as numbered one- or two-line points, Consequences); the current value of a number lives in the spec, not the ADR.
 
 ## Rules that are easy to break
 - The renderer executes a `FramePlan`; decisions live in GPU-free crates (CON-03).
