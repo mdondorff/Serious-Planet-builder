@@ -268,7 +268,7 @@ fn a_neighbour_with_weight_zero_is_not_read_and_a_stored_negative_zero_stays() {
 #[test]
 fn the_reader_has_pinned_known_answers() {
     assert_eq!(READER_VERSION, 1, "the known answers belong to this reader version");
-    assert_eq!(planet_generators::global::GLOBAL_VERSION, 2, "and to this field version: re-pin both together, not one silently");
+    assert_eq!(planet_generators::global::GLOBAL_VERSION, 3, "and to this field version: re-pin both together, not one silently");
     let g = grid(16);
     let src = GridSource(&g);
     let picks = [(Face(0), 7i64, 9i64, 6u32), (Face(3), 33, 1, 6), (Face(5), 64, 64, 6), (Face(2), 5, 60, 6), (Face(1), 3, 4, 4)];
@@ -276,4 +276,4 @@ fn the_reader_has_pinned_known_answers() {
     assert_eq!(format!("{got:08x?}"), KNOWN_READS, "pinned reads");
 }
 
-const KNOWN_READS: &str = "[[3f1868e5, 440fb307, 414e4bbd, 437c2590], [3e4dd9ee, 42581a35, be1290e0, 449703ce], [3f10cf0d, 440385a8, 410d220c, 44156778], [3f06602a, 45a8088c, c1df24f5, 444c3e9e], [3c3bf224, c2f41cde, 418e9f24, 42eec8b4]]";
+const KNOWN_READS: &str = "[[3f1868e5, 440fb307, 417a2af4, 4313b29e], [3e4dd9ee, 42581a35, 40224592, 4489e84c], [3f10cf0d, 440385a8, 410d220c, 44156778], [3f06602a, 45a8088c, c1a04c7c, 439fed8e], [3c3bf224, c2f41cde, 41b114c2, 4416de0d]]";

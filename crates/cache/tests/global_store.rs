@@ -157,7 +157,7 @@ fn a_block_key_covers_the_tile_the_cells_the_grid_and_the_stage_key_and_the_know
     assert_ne!(w.stage_key(32), w.stage_key(64));
     assert_ne!(w.stage_key(32), world(8).stage_key(32));
     assert_eq!(KIND_GLOBAL_BLOCK, 3);
-    assert_eq!(GLOBAL_VERSION, 2, "the known answers belong to this version");
+    assert_eq!(GLOBAL_VERSION, 3, "the known answers belong to this version");
     assert_eq!(w.stage_key(32).to_hex(), KNOWN_STAGE_KEY);
     assert_eq!(base.to_hex(), KNOWN_BLOCK_KEY);
 }
@@ -386,6 +386,7 @@ fn another_body_or_a_missing_node_is_refused_and_the_radius_is_in_the_key_but_no
     assert!(GlobalWorld::from_definition(&WorldDefinition::empty()).is_err());
 }
 
-const KNOWN_STAGE_KEY: &str = "db3dbfc6e3118079df7dfedc53e81fec";
-const KNOWN_BLOCK_KEY: &str = "efbf6c92372e6d5a97492d5773fddce5";
+// Both keys moved with GLOBAL_VERSION 3 (latitude from the +z pole): the stage key names the bake version.
+const KNOWN_STAGE_KEY: &str = "c91fccae01d58cf954c7c896c5fc4a97";
+const KNOWN_BLOCK_KEY: &str = "8a2519d5ec1cc5cdba280e8a56994658";
 const KNOWN_NODE_SET_ID: &str = "92572f1974620d913454c89a22aca7be";

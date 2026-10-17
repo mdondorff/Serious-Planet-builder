@@ -20,7 +20,7 @@ use planet_world_def::{BodyId, GenContext, MissingNode, ReadRecord};
 use crate::height::layer_noise;
 
 /// Bump whenever any output of this module changes (ADR 0006).
-pub const GLOBAL_VERSION: u32 = 2;
+pub const GLOBAL_VERSION: u32 = 3;
 /// Names this implementation in cache keys (CON-07).
 pub const IMPLEMENTATION_ID: &str = "cpu-global-coarse-v1";
 
@@ -151,6 +151,13 @@ fn gauss(x: f64, mean: f64, width: f64) -> f64 {
     libm::exp(-z * z)
 }
 
+/// Sine of the latitude of the unit direction `d` in COORD's axes: +z is the north pole, so it is `d.z` (the equator is the
+/// plane through +x, longitude 0, and +y, longitude 90 degrees east). GLOBAL_VERSION 2 took it from `d.y`, which put the poles at
+/// +-y and disagreed with every other consumer of the axes (the sun, the camera); version 3 is this one.
+pub fn sin_latitude(d: Vec3) -> f64 {
+    d.z.clamp(-1.0, 1.0)
+}
+
 /// The global-coarse field at the unit direction `d`. Pure: the same `(seed, d)` gives the same bits everywhere.
 pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
     // Continents: low-frequency fBm of a domain-warped direction, so coastlines are not round blobs.
@@ -182,8 +189,8 @@ pub fn sample(seed: u64, d: Vec3) -> GlobalSample {
     let inland = smoothstep(0.02, 0.35, land_depth);
     let elevation = (base + 5200.0 * ridge * zone * inland).clamp(MIN_ELEVATION_M, MAX_ELEVATION_M);
 
-    // Climate: temperature falls with latitude and, over land, with height; rain follows the latitude bands.
-    let sin_lat = d.y.clamp(-1.0, 1.0);
+    // Climate (latitude from COORD's +z pole, see [`sin_latitude`]): temperature falls with latitude and, over land, with height; rain follows the latitude bands.
+    let sin_lat = sin_latitude(d);
     let lat_deg = libm::asin(sin_lat) * (180.0 / core::f64::consts::PI);
     let abs_lat = libm::fabs(lat_deg);
     let altitude_km = elevation.max(0.0) / 1000.0;
@@ -1007,7 +1014,7 @@ pub fn product(grid: &GlobalGrid, channel: Channel) -> crate::dump::Rgba {
     crate::dump::Rgba { width: w, height: h, data }
 }
 
-/// An equirectangular map (longitude along x, latitude up) of one channel straight from [`sample`], `width` by `width / 2`
+/// An equirectangular map (longitude along x, latitude up; COORD's axes, so the poles are +-z) of one channel straight from [`sample`], `width` by `width / 2`
 /// pixels: the picture people expect of a planet, and independent of the face grid.
 pub fn equirect_product(seed: u64, width: u32, channel: Channel) -> crate::dump::Rgba {
     let height = (width / 2).max(1);
@@ -1017,7 +1024,8 @@ pub fn equirect_product(seed: u64, width: u32, channel: Channel) -> crate::dump:
         let (sl, cl) = (libm::sin(lat), libm::cos(lat));
         for px in 0..width {
             let lon = ((f64::from(px) + 0.5) / f64::from(width) - 0.5) * 2.0 * core::f64::consts::PI;
-            let d = Vec3::new(cl * libm::sin(lon), sl, cl * libm::cos(lon));
+            // COORD's axes: +z the north pole, longitude 0 at +x, 90 degrees east at +y.
+            let d = Vec3::new(cl * libm::cos(lon), cl * libm::sin(lon), sl);
             data.extend(colour(&sample(seed, d), channel));
         }
     }

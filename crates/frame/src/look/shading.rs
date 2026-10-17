@@ -463,8 +463,7 @@ fn normalize(v: [f64; 3]) -> [f64; 3] {
 /// sun comes from a time-of-day value the view sets). The axes are COORD's: +z is the north pole, +x is latitude 0 and longitude 0,
 /// +y is longitude 90 degrees east. The sub-solar point is at latitude `declination` and at longitude 0 at 12:00, moving westward by
 /// 15 degrees per hour: `(cos d cos l, cos d sin l, sin d)` with `l = -15 degrees (hours - 12)`. Computed in f64 with `libm` and
-/// rounded once to f32 (the view decides, the renderer executes). (The analytic climate takes its latitude from `d.y`, an older
-/// convention that disagrees with COORD; it is a function of the direction only and does not depend on this one.)
+/// rounded once to f32 (the view decides, the renderer executes).
 pub fn sun_direction(time_of_day_hours: f64, declination_deg: f64) -> [f32; 3] {
     let rad = core::f64::consts::PI / 180.0;
     let lon = -15.0 * (time_of_day_hours - 12.0) * rad;

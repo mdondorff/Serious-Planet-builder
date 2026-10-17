@@ -147,14 +147,14 @@ fn the_climate_is_bit_identical_across_thread_counts_and_matches_the_known_answe
     let one = hashes(1);
     assert_eq!(one, hashes(5), "thread count changed a climate texture");
     assert_eq!(one, hashes(24));
-    // Known answers (CI runs this on Windows and Linux): CLIMATE_VERSION 1, READER_VERSION 1, GLOBAL_VERSION 2.
+    // Known answers (CI runs this on Windows and Linux): CLIMATE_VERSION 1, READER_VERSION 1, GLOBAL_VERSION 3 (2 -> 3: latitude from COORD's +z pole instead of d.y; the texel construction is unchanged, so CLIMATE_VERSION stays and the version word moves through GLOBAL_VERSION).
     let probe: Vec<u64> = vec![one[0], one[1], one[2], one[23]];
     assert_eq!(probe, KNOWN_CLIMATE, "climate content hashes changed: {probe:016x?}: bump CLIMATE_VERSION and re-record");
     assert_eq!(climate_version_word(), KNOWN_VERSION_WORD, "the version word changed: {:#018x}", climate_version_word());
 }
 
-const KNOWN_CLIMATE: [u64; 4] = [0x904c3f688483190d, 0x1bf63c7a0fdc70e3, 0x693167f9e0b60749, 0x02834c6ed1b1beb3];
-const KNOWN_VERSION_WORD: u64 = 0x4ab35e66f8b5d020;
+const KNOWN_CLIMATE: [u64; 4] = [0x51ac8669a763110c, 0x7313b10e0fa593be, 0xde85ff4b9e5bb2bc, 0xb1ccdcde645c74bb];
+const KNOWN_VERSION_WORD: u64 = 0xef179b4c0d16425d;
 
 // spec: GEN-021
 #[test]
@@ -165,8 +165,12 @@ fn the_analytic_climate_is_a_pure_function_of_seed_and_tile() {
     assert_ne!(a, analytic_climate(SEED + 1, &TangentWarp, t));
     assert_eq!(a, Reference(SEED).climate(&TangentWarp, t), "the reference field's default is the analytic climate");
     let equator = analytic_climate(SEED, &TangentWarp, id(0, 3, 4, 4));
-    let pole = analytic_climate(SEED, &TangentWarp, id(2, 3, 4, 4));
-    assert!(equator.texel(4, 4).0 != pole.texel(4, 4).0);
+    // Face 4 is the +z face: its centre tile is at the north pole of COORD (latitude about 90), face 0 (+x) is on the equator.
+    let pole = analytic_climate(SEED, &TangentWarp, id(4, 3, 4, 4));
+    let (t_eq, t_pole) = (equator.texel(4, 4).0, pole.texel(4, 4).0);
+    assert!(t_eq > t_pole + 30.0, "equator {t_eq} C, pole {t_pole} C");
+    let south = analytic_climate(SEED, &TangentWarp, id(5, 3, 4, 4));
+    assert!(t_eq > south.texel(4, 4).0 + 30.0, "the south pole (-z face) is cold too");
 }
 
 // spec: GEN-021
