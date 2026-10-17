@@ -687,6 +687,9 @@ pub struct Streamer<T: Send + Sync + 'static> {
     pub dispatch_log: Vec<TileId>,
     /// The jobs that ran, as their workers saw them (STRM-022; recorded only).
     job_log: Arc<JobLog>,
+    /// Jobs that have sent their result (or their cancellation) to the channel; the difference to `stats.dispatched` is the jobs
+    /// still running or waiting, which a test mode waits out ([`Streamer::unfinished_jobs`]).
+    sent: Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// The best class among the layers a tile is in: draw, residency, prefetch.
@@ -752,6 +755,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             draw_counted: 0,
             dispatch_log: Vec::new(),
             job_log: Arc::default(),
+            sent: Arc::default(),
         }
     }
 
@@ -882,6 +886,13 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             main_free: self.pools.main.free() as usize,
             ..self.stats
         }
+    }
+
+    /// Jobs handed to the spawner whose result has not reached the channel yet (running or waiting for a worker). Results that
+    /// did arrive but were not collected by [`Streamer::step`] are not counted: when this is 0 the next step collects every
+    /// job dispatched so far. For harnesses that make a loop independent of thread timing (`test-render --lockstep`).
+    pub fn unfinished_jobs(&self) -> u64 {
+        self.stats.dispatched.saturating_sub(self.sent.load(Ordering::SeqCst))
     }
 
     /// The log of the jobs that ran (STRM-022): recorded only, shared with the workers.
@@ -1223,11 +1234,13 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 self.dispatch_log.push(tile);
             }
             let (source, tx, log) = (Arc::clone(&self.source), self.tx.clone(), Arc::clone(&self.job_log));
+            let sent = Arc::clone(&self.sent);
             let queued = std::time::Instant::now();
             self.spawner.spawn(Box::new(move || {
                 let cancel = CancelToken(token);
                 if cancel.is_cancelled() {
                     let _ = tx.send((tile, Outcome::Cancelled));
+                    sent.fetch_add(1, Ordering::SeqCst);
                     return;
                 }
                 // A panicking source must not wedge the tile: it becomes a failure with the usual retry delay.
@@ -1244,6 +1257,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                     Err(_) => Outcome::Failed(format!("source panicked while loading {tile:?}")),
                 };
                 let _ = tx.send((tile, outcome));
+                sent.fetch_add(1, Ordering::SeqCst);
             }));
         }
     }

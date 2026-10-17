@@ -264,6 +264,8 @@ fn the_draw_flag_selects_the_path_and_every_loop_draws_the_same_frame_on_either(
 fn the_upload_flag_selects_the_write_path_and_the_batched_loop_draws_the_same_frames_in_fewer_calls() {
     // The cold start, then a jump (a dive's and a teleport's uploads): the frame the loop settles on is the same in both modes,
     // and the log's `upload_calls` column shows the calls per frame.
+    // `--lockstep` makes the sequence of frames and the tiles each uploads a function of the script alone (the loop waits for
+    // the plan worker and the generation after every iteration), so the counts below do not depend on thread timing.
     let runs = |upload: &str, script: &str, then: Option<&str>, name: &str| {
         let (png, dir) = (tmp(&format!("{name}.png")), tmp(&format!("{name}-log")));
         let mut args = vec![
@@ -277,6 +279,7 @@ fn the_upload_flag_selects_the_write_path_and_the_batched_loop_draws_the_same_fr
             "--adapter",
             "software",
             "--pipelined",
+            "--lockstep",
             "--upload",
             upload,
             "--out",
@@ -306,6 +309,8 @@ fn the_upload_flag_selects_the_write_path_and_the_batched_loop_draws_the_same_fr
         let (per_slot, batched) = (runs("per-slot", script, then, "up-per"), runs("batched", script, then, "up-bat"));
         assert_eq!(per_slot.0, batched.0, "{script}: the batched path draws another image");
         assert!(per_slot.2 > 6 && batched.2 > 6, "{script}: tiles must be uploaded");
+        // In lockstep the two modes schedule identically, so the same tiles are uploaded (the mode changes only the calls).
+        assert_eq!(per_slot.2, batched.2, "{script}: the upload mode changed which tiles were uploaded");
         // Per slot a tile costs at least one call (two for a compact tile); batched, runs of adjacent slots share one.
         assert!(per_slot.1 >= per_slot.2, "{script}: {} calls for {} tiles per slot", per_slot.1, per_slot.2);
         assert!(

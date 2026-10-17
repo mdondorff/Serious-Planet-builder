@@ -142,11 +142,16 @@ impl Rig {
 /// The residency manager drives the requests: the plan worker computes the draw set D and, after it, the residency set R from the
 /// camera position only; the manager requests D first, then the rest of R, within the slots of the renderer's pools, and the
 /// loop executes its placement with `upload_at` (STRM-005, STRM-006, STRM-007).
+///
+/// With `lockstep` every iteration ends by waiting until the plan worker is idle and no generation job is running, so what
+/// arrives before the next iteration is everything the last one asked for: the sequence of frames and the tiles each uploads are
+/// then a function of the script, not of thread timing (a test mode; the loop otherwise never waits).
 pub fn run_script(
     ctx: &GpuContext,
     world: &Arc<WorldTerrain>,
     requests: &[TerrainRequest],
     gen: planet_streaming::GenWorkers,
+    lockstep: bool,
     out: &mut dyn Write,
 ) -> Result<(RgbaFrame, Vec<FrameLog>), String> {
     let first = requests.first().ok_or("an empty script")?;
@@ -222,6 +227,15 @@ pub fn run_script(
                     managed.manager().streamer().stats(),
                     fi.in_flight()
                 ));
+            }
+            if lockstep {
+                // Everything this iteration asked for arrives before the next one looks (bounded like the settle itself).
+                while managed.pipeline().worker().busy() || managed.manager().streamer().unfinished_jobs() > 0 {
+                    if started.elapsed().as_secs() > SETTLE_LIMIT_S {
+                        return Err(format!("view {n}: the plan worker or the generation did not go idle within {SETTLE_LIMIT_S} s"));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
             }
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
