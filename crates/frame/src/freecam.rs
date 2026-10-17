@@ -84,7 +84,8 @@ impl FreePose {
 /// The speed in metres per second at `height_m` above the terrain: proportional to the height within the parameters' limits,
 /// scaled by the input's boost (0 means 1).
 pub fn speed_mps(height_m: f64, scale: f64, p: &ControllerParams) -> f64 {
-    (height_m.max(0.0) * p.heights_per_second).clamp(p.min_speed_mps, p.max_speed_mps) * if scale > 0.0 { scale } else { 1.0 }
+    let (lo, hi) = p.speed_limits();
+    (height_m.max(0.0) * p.heights_per_second).clamp(lo, hi) * if scale > 0.0 { scale } else { 1.0 }
 }
 
 /// The next pose after `dt` seconds of `input` at `height_m` above the terrain (the caller measures it: the terrain is not the
@@ -368,6 +369,79 @@ mod tests {
         let lifted = keep_clearance(low, R + 300.0, 1.0);
         assert!((lifted.position.0.length() - (R + 301.0)).abs() < 1e-6);
         assert_eq!(keep_clearance(p, R, 1.0), p);
+    }
+
+    /// The speed before the limits scaled with the radius, copied here so that Earth's speeds are pinned to it bit for bit.
+    fn speed_before_radius_scaling(height_m: f64, scale: f64, p: &ControllerParams) -> f64 {
+        (height_m.max(0.0) * p.heights_per_second).clamp(p.min_speed_mps, p.max_speed_mps) * if scale > 0.0 { scale } else { 1.0 }
+    }
+
+    // spec: VIEW-004
+    #[test]
+    fn an_earth_sized_body_moves_exactly_as_before_the_speed_scaled_with_the_radius() {
+        let earth = ControllerParams::for_radius(crate::controller::EARTH_RADIUS_M);
+        assert_eq!(earth, ControllerParams::default());
+        for h in [-5.0, 0.0, 0.3, 1.0, 1.7, 40.0, 3_000.0, 12_345.678, 5.0e5, 2.0e6, 3.0e6, 9.9e6, 1.0e9, f64::INFINITY] {
+            for scale in [0.0, 1.0, 2.5, 8.0] {
+                assert_eq!(
+                    speed_mps(h, scale, &earth).to_bits(),
+                    speed_before_radius_scaling(h, scale, &earth).to_bits(),
+                    "height {h} boost {scale}"
+                );
+            }
+        }
+        // The same through a whole step: the pose after a second of forward flight is bit-identical to a pose moved at the old speed.
+        let p = pose_at(Vec3::new(1.0, 1.0, 1.0), 3_000.0, Vec3::new(0.0, 0.0, 1.0), 0.0);
+        let fast = free_step(p, &keys(1.0, 0.0, 0.0, 0.0, 0.0), 1.0, 3_000.0, &earth);
+        let old = ControllerParams { min_speed_mps: 0.5, max_speed_mps: 3.0e6, ..earth };
+        assert_eq!(fast, free_step(p, &keys(1.0, 0.0, 0.0, 0.0, 0.0), 1.0, 3_000.0, &old));
+    }
+
+    // spec: VIEW-004
+    #[test]
+    fn a_body_of_half_the_radius_has_half_the_speed_limits_and_the_same_speed_between_them() {
+        let half = ControllerParams::for_radius(crate::controller::EARTH_RADIUS_M / 2.0);
+        let earth = ControllerParams::default();
+        assert_eq!(half.speed_limits(), (0.25, 1.5e6));
+        // Between the limits the speed follows the height alone (a body of half the radius has half the height in orbit).
+        for h in [1.0, 40.0, 3_000.0, 5.0e5] {
+            assert_eq!(speed_mps(h, 1.0, &half), speed_mps(h, 1.0, &earth), "height {h}");
+        }
+        // At the limits it is half: standing still near the ground, and the top speed far out.
+        assert_eq!(speed_mps(0.0, 1.0, &half), speed_mps(0.0, 1.0, &earth) / 2.0);
+        assert_eq!(speed_mps(1.0e9, 1.0, &half), speed_mps(1.0e9, 1.0, &earth) / 2.0);
+        assert_eq!(speed_mps(1.0e9, 2.0, &half), 3.0e6, "the boost multiplies the scaled limit");
+        // A body of twice the radius: twice the limits. An unusable radius counts as the Earth's.
+        assert_eq!(ControllerParams::for_radius(2.0 * crate::controller::EARTH_RADIUS_M).speed_limits(), (1.0, 6.0e6));
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(ControllerParams::for_radius(bad).speed_limits(), earth.speed_limits(), "radius {bad}");
+        }
+        // The old controller scales with the same limits.
+        let c = crate::controller::CameraController::new(PlanetFixed(Vec3::new(0.0, 0.0, R + 10.0)), Vec3::new(1.0, 0.0, 0.0), half);
+        assert_eq!(c.speed_for_height(0.0), 0.25);
+        assert_eq!(c.speed_for_height(1.0e12), 1.5e6);
+    }
+
+    // spec: VIEW-004
+    #[test]
+    fn the_eye_never_ends_below_the_terrain_plus_the_margin_whichever_way_it_moves() {
+        // A 300 m hill ahead: flying down and forward into it, 20 seconds in ten steps, the eye stays at or above hill + margin
+        // (the clamp reads the terrain at the pose AFTER the move, as the viewer does).
+        let hill = |p: PlanetFixed| if p.0.normalized().dot(Vec3::new(0.0, 0.0, 1.0)) > 0.0 { R + 300.0 } else { R };
+        let params = ControllerParams::default();
+        let mut p = pose_at(Vec3::new(1.0, 0.0, 0.5), 20.0, Vec3::new(0.0, 0.0, 1.0), -0.5);
+        for _ in 0..40 {
+            let h = p.position.0.length() - hill(p.position);
+            let moved = free_step(p, &keys(1.0, 0.0, -1.0, 0.0, 0.0), 0.5, h, &params);
+            p = keep_clearance(moved, hill(moved.position), params.min_clearance_m);
+            assert!(
+                p.position.0.length() >= hill(p.position) + params.min_clearance_m - 1e-9,
+                "{}",
+                p.position.0.length() - hill(p.position)
+            );
+        }
+        // It ended on the ground (the clamp engaged), not flying: within a metre of terrain + margin.
+        assert!(p.position.0.length() - hill(p.position) < params.min_clearance_m + 1.0);
     }
 
     // spec: VIEW-004

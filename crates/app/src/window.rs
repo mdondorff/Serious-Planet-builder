@@ -629,7 +629,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         field: field.as_ref(),
         cameras: &script.cameras,
         clock: Arc::new(SystemClock::new()),
-        params: ControllerParams::default(),
+        params: ControllerParams::for_radius(radius_m),
         state: None,
         error: None,
         summary: None,

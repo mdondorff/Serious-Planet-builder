@@ -37,9 +37,29 @@ pub struct ControllerParams {
     pub radius_m: f64,
 }
 
+/// The radius the speed limits of [`ControllerParams`] are written for: the Earth's mean radius. A body of this radius moves exactly
+/// as before the limits scaled (VIEW-004).
+pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
+
 impl Default for ControllerParams {
     fn default() -> Self {
-        Self { heights_per_second: 1.0, min_speed_mps: 0.5, max_speed_mps: 3.0e6, min_clearance_m: 1.0, radius_m: 6_371_000.0 }
+        Self { heights_per_second: 1.0, min_speed_mps: 0.5, max_speed_mps: 3.0e6, min_clearance_m: 1.0, radius_m: EARTH_RADIUS_M }
+    }
+}
+
+impl ControllerParams {
+    /// The defaults for a body of `radius_m` (the viewer passes the opened world's radius).
+    pub fn for_radius(radius_m: f64) -> Self {
+        Self { radius_m, ..Self::default() }
+    }
+
+    /// The least and the greatest speed in metres per second: the written limits scaled by the body's radius over the Earth's, so
+    /// that a small moon does not cross itself in a second at its top speed and a large planet is not crawled across. Exactly the
+    /// written limits for an Earth-sized body (the factor is 1.0, and a product with 1.0 is exact); a radius that is not positive
+    /// and finite counts as the Earth's. Between the limits the speed is proportional to the height, which follows the radius already.
+    pub fn speed_limits(&self) -> (f64, f64) {
+        let k = if self.radius_m.is_finite() && self.radius_m > 0.0 { self.radius_m / EARTH_RADIUS_M } else { 1.0 };
+        (self.min_speed_mps * k, self.max_speed_mps * k)
     }
 }
 
@@ -88,7 +108,8 @@ impl CameraController {
 
     /// Speed in metres per second for a given height above the terrain.
     pub fn speed_for_height(&self, height_m: f64) -> f64 {
-        (height_m.max(0.0) * self.params.heights_per_second).clamp(self.params.min_speed_mps, self.params.max_speed_mps)
+        let (lo, hi) = self.params.speed_limits();
+        (height_m.max(0.0) * self.params.heights_per_second).clamp(lo, hi)
     }
 
     /// Height above the terrain surface: distance from the centre minus the radius minus the terrain height below.
