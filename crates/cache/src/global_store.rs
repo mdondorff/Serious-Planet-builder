@@ -14,7 +14,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
@@ -506,6 +506,9 @@ pub struct StoreSource<'a> {
     lock_wait_ns: AtomicU64,
     fetch_ns: AtomicU64,
     decode_ns: AtomicU64,
+    /// The most blocks the shared cache has held at once, counted under its lock after every insert and eviction (STRM-014: the
+    /// budget is never exceeded, at any moment, not only when a test samples it).
+    peak_blocks: AtomicUsize,
     shared: Mutex<Vec<(TileId, Arc<Slot>)>>,
 }
 
@@ -524,6 +527,8 @@ pub struct SourceStats {
     /// Blocks in the shared cache, including blocks being decoded.
     pub resident_blocks: usize,
     pub resident_bytes: u64,
+    /// The most blocks the shared cache has held at once since the source was made (never above `budget_blocks`).
+    pub peak_resident_blocks: usize,
     pub budget_bytes: u64,
     /// The budget in whole blocks (at least one).
     pub budget_blocks: usize,
@@ -601,6 +606,7 @@ impl<'a> StoreSource<'a> {
             lock_wait_ns: AtomicU64::new(0),
             fetch_ns: AtomicU64::new(0),
             decode_ns: AtomicU64::new(0),
+            peak_blocks: AtomicUsize::new(0),
             shared: Mutex::new(Vec::new()),
         })
     }
@@ -613,6 +619,7 @@ impl<'a> StoreSource<'a> {
             shared_lookups: self.lookups.load(Ordering::Relaxed),
             resident_blocks: resident,
             resident_bytes: resident as u64 * self.block_bytes,
+            peak_resident_blocks: self.peak_blocks.load(Ordering::Relaxed),
             budget_bytes: self.budget_blocks as u64 * self.block_bytes,
             budget_blocks: self.budget_blocks,
             shared_hits: self.shared_hits.load(Ordering::Relaxed),
@@ -643,6 +650,7 @@ impl<'a> StoreSource<'a> {
             shared.remove(0);
             self.evictions.fetch_add(1, Ordering::Relaxed);
         }
+        self.peak_blocks.fetch_max(shared.len(), Ordering::Relaxed);
         (slot, false)
     }
 

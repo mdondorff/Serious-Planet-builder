@@ -82,18 +82,9 @@ fn resident_bytes_never_exceed_the_budget_and_reads_stay_exact() {
         let src = StoreSource::with_budget(&store, &w, RES, budget_blocks * BLOCK_BYTES).unwrap();
         let cap = budget_blocks.max(1) * BLOCK_BYTES;
         assert_eq!(src.stats().budget_bytes, cap);
-        let stop = AtomicBool::new(false);
+        // The source counts the most blocks its cache ever held, under the cache lock after every insert and eviction, so no
+        // moment above the budget can be missed (a sampling thread could miss one, and a spinning one cost a core of `test fast`).
         std::thread::scope(|s| {
-            let watcher = s.spawn(|| {
-                let mut worst = 0;
-                while !stop.load(Ordering::SeqCst) {
-                    worst = worst.max(src.stats().resident_bytes);
-                    // Sample often, but give the core away: a spinning watcher took a whole core of `test fast` for the
-                    // length of the test.
-                    std::thread::yield_now();
-                }
-                worst
-            });
             let readers: Vec<_> = (0..4)
                 .map(|t| {
                     let (src, grid) = (&src, &grid);
@@ -103,9 +94,10 @@ fn resident_bytes_never_exceed_the_budget_and_reads_stay_exact() {
             for r in readers {
                 r.join().unwrap();
             }
-            stop.store(true, Ordering::SeqCst);
-            assert!(watcher.join().unwrap() <= cap, "budget {budget_blocks} blocks");
         });
+        let st = src.stats();
+        assert!(st.peak_resident_blocks as u64 * BLOCK_BYTES <= cap, "budget {budget_blocks} blocks: peak {st:?}");
+        assert_eq!(st.peak_resident_blocks as u64, budget_blocks.max(1), "the cache was filled to its budget and no further: {st:?}");
         let st = src.stats();
         assert!(st.resident_bytes <= cap && st.resident_blocks as u64 * BLOCK_BYTES == st.resident_bytes, "{st:?}");
     }
