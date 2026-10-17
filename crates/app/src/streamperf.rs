@@ -26,7 +26,7 @@ pub const PRODUCTION_BAKE_RES: u32 = 16384;
 const SETTLE_LIMIT_S: f64 = 900.0;
 /// Seconds between the clock samples taken during a case.
 const CLOCK_SAMPLE_PERIOD_S: u64 = 3;
-/// Frames of the measured part of a smoke run.
+/// Frames of the measured part of a smoke run (`--frames N` asks for more, for diagnosis: a smoke run is never a measurement).
 const SMOKE_FRAMES: usize = 24;
 
 /// Whether `--scene NAME` names a streaming scene (one of the six, or `streaming` for all of them).
@@ -186,16 +186,22 @@ impl Driver<'_> {
         }
         // The lit path puts the look's lit plan (adaptive exposure on the frame step, the atmosphere) and the water of the frame on the
         // plan the loop decided, inside the timed frame as in the viewer (VIEW-007, VIEW-009).
-        let lit_plan = match self.lit.as_mut() {
-            Some((setup, world)) => Some(setup.plan(
-                world,
-                &frame.pipeline.draw.plan,
-                100.0 + self.ticks as f64 * FRAME_STEP_S,
-                FRAME_STEP_S as f32,
-                self.ticks == 0,
-            )?),
-            None => None,
+        let lit_started = Instant::now();
+        let (lit_plan, water) = match self.lit.as_mut() {
+            Some((setup, world)) => {
+                let before = setup.water_counters();
+                let plan = setup.plan(
+                    world,
+                    &frame.pipeline.draw.plan,
+                    100.0 + self.ticks as f64 * FRAME_STEP_S,
+                    FRAME_STEP_S as f32,
+                    self.ticks == 0,
+                )?;
+                (Some(plan), setup.water_counters().since(before))
+            }
+            None => (None, planet_frame::water::WaterCounters::default()),
         };
+        let lit_plan_ms = lit_started.elapsed().as_secs_f64() * 1000.0;
         self.ticks += 1;
         let (timing, _) =
             self.rig.renderer.submit(ctx, lit_plan.as_ref().unwrap_or(&frame.pipeline.draw.plan)).map_err(|e| e.to_string())?;
@@ -237,6 +243,10 @@ impl Driver<'_> {
             cancelled: c.cancelled,
             degraded: c.degraded,
             allocated_bytes: self.rig.renderer.pool_allocated_bytes(),
+            queries: water.queries,
+            tile_misses: water.tile_misses,
+            band_queries: water.band_queries,
+            lit_plan_ms,
         };
         self.pace();
         Ok(Tick { record, settled, drawn })
@@ -331,6 +341,7 @@ fn run_case(
     script: &planet_frame::scenes::SceneScript,
     req: &(dyn Fn(planet_frame::Camera) -> TerrainRequest + Sync),
     smoke: bool,
+    smoke_frames: usize,
     gen: planet_streaming::GenWorkers,
     lit: Option<crate::litperf::LitSetup>,
     out: &mut dyn Write,
@@ -405,7 +416,7 @@ fn run_case(
     let load_sampler = (!smoke).then(|| planet_perf::load::LoadSampler::start(planet_perf::load::SAMPLE_PERIOD_S));
     let (counters_before, job_log) = (world.counters(), d.rig.managed.manager().streamer().job_log());
     let jobs_before = job_log.len();
-    let n = if smoke { script.cameras.len().min(SMOKE_FRAMES) } else { script.cameras.len() };
+    let n = if smoke { script.cameras.len().min(smoke_frames) } else { script.cameras.len() };
     d.next_deadline = Instant::now();
     let (mut frames, mut blanks) = (Vec::with_capacity(n), Vec::new());
     // What the post-pass needs of each frame, kept as small as the plan actually drawn: the f64 pose and the drawn tile ids.
@@ -510,6 +521,7 @@ fn blank_failure_lines(
 pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
     use planet_perf::compare;
     let smoke = o.perf_smoke;
+    let smoke_frames = if o.given.contains("--frames") { o.frames } else { SMOKE_FRAMES };
     let scenes = scenes_of(&o.scene);
     if scenes.is_empty() {
         return Err(format!("unknown streaming scene '{}'", o.scene));
@@ -634,7 +646,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         let scene_field = scene_world.field()?;
         let script = build_script(scene, radius_m, aspect, scene_field.as_ref(), LOOK_SEED);
         drop(scene_field);
-        let shown = if smoke { script.cameras.len().min(SMOKE_FRAMES) } else { script.cameras.len() };
+        let shown = if smoke { script.cameras.len().min(smoke_frames) } else { script.cameras.len() };
         writeln!(
             out,
             "{}: {shown} of {} frames of {:.4} s{}",
@@ -647,7 +659,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         writeln!(out, "{}: script built in {:.1} s", scene.name(), built.elapsed().as_secs_f64()).map_err(err)?;
         let case_started = Instant::now();
         let lit_setup = if o.lit { Some(crate::litperf::LitSetup::new(o, &scene_world, &lod)?) } else { None };
-        let run = run_case(ctx, &scene_world, &script, &req_of, smoke, o.gen_workers(), lit_setup, out)?;
+        let run = run_case(ctx, &scene_world, &script, &req_of, smoke, smoke_frames, o.gen_workers(), lit_setup, out)?;
         writeln!(out, "{}: case ran in {:.1} s (teardown {:.2} s)", scene.name(), case_started.elapsed().as_secs_f64(), run.teardown_s)
             .map_err(err)?;
         if o.lit {
@@ -1003,6 +1015,7 @@ mod tests {
             cancelled: 0,
             degraded: 0,
             allocated_bytes: 0,
+            ..FrameRecord::default()
         };
         let mut frames = vec![frame(), frame()];
         let lags = vec![

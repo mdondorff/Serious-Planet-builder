@@ -182,9 +182,15 @@ impl WaterBook {
         // for the slowest block, not for the sum.
         let n = TILE_SAMPLES;
         let dirs: Vec<Vec3> = (0..=n).flat_map(|l| (0..=n).map(move |k| tile.sample_direction(map, n, k, l))).collect();
+        // The helper threads run at the job's priority (a new thread starts at normal): the workers run below normal so that the frame
+        // thread gets its core back (STRM-020), and a job's helpers must not take it.
+        let priority = planet_streaming::priority::current();
         std::thread::scope(|scope| {
             for chunk in dirs.chunks(dirs.len().div_ceil(8)) {
                 scope.spawn(move || {
+                    if let Some(p) = priority {
+                        planet_streaming::priority::set_current(p);
+                    }
                     for d in chunk {
                         let _ = src.water_at(*d);
                     }
@@ -206,6 +212,25 @@ impl WaterBook {
     /// Tiles computed by [`fill`](WaterBook::fill).
     pub fn filled(&self) -> u64 {
         self.filled.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// What a [`WaterTileCache`] has counted so far; the difference of two snapshots is the share of the plans between them (the
+/// frames log's recorded-only columns).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WaterCounters {
+    pub queries: u64,
+    pub tile_misses: u64,
+    pub band_queries: u64,
+}
+
+impl WaterCounters {
+    pub fn since(self, earlier: WaterCounters) -> WaterCounters {
+        WaterCounters {
+            queries: self.queries - earlier.queries,
+            tile_misses: self.tile_misses - earlier.tile_misses,
+            band_queries: self.band_queries - earlier.band_queries,
+        }
     }
 }
 
@@ -233,6 +258,10 @@ impl WaterTileCache {
     /// A cache that reads the answers the tile jobs left in `book` before it asks the field.
     pub fn with_book(book: std::sync::Arc<WaterBook>) -> WaterTileCache {
         WaterTileCache { book: Some(book), ..WaterTileCache::default() }
+    }
+
+    pub fn counters(&self) -> WaterCounters {
+        WaterCounters { queries: self.queries, tile_misses: self.tile_misses, band_queries: self.band_queries }
     }
 
     pub fn clear(&mut self) {

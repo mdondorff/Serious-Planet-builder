@@ -61,6 +61,12 @@ pub struct FrameRecord {
     pub degraded: usize,
     /// Bytes the renderer has allocated for terrain after the frame.
     pub allocated_bytes: u64,
+    /// The lit path's water plan of the frame (recorded only, not judged; all zero on the debug path): field queries it made, tiles
+    /// it asked the tile jobs' book for and found none, coastal-band queries, and the milliseconds the plan took on the frame thread.
+    pub queries: u64,
+    pub tile_misses: u64,
+    pub band_queries: u64,
+    pub lit_plan_ms: f64,
 }
 
 /// How a lag rule counts towards the verdict (the owner's decision of 2026-10-15, ADR 0032).
@@ -502,12 +508,12 @@ pub fn column_metrics(frames: &[FrameRecord]) -> Vec<(String, Stats)> {
 /// The per-frame log as text (one line per frame): the columns of TEST-012 and the counts of the frame.
 pub fn frames_text(frames: &[FrameRecord]) -> String {
     let mut s = String::from(
-        "# frame plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms lag uncovered blank upload_bytes resident in_flight queued dispatched uploaded cancelled degraded allocated_bytes upload_calls\n",
+        "# frame plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms lag uncovered blank upload_bytes resident in_flight queued dispatched uploaded cancelled degraded allocated_bytes upload_calls queries tile_misses band_queries lit_plan_ms\n",
     );
     for (k, f) in frames.iter().enumerate() {
         let opt = |v: Option<f64>| v.map_or("-".to_string(), |v| format!("{v:.3}"));
         s.push_str(&format!(
-            "{k} {:.3} {:.3} {:.3} {:.3} {} {:.3} {} {} {} {} {} {} {} {} {} {} {} {} {}\n",
+            "{k} {:.3} {:.3} {:.3} {:.3} {} {:.3} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {:.3}\n",
             f.plan_ms,
             f.scheduler_ms,
             f.upload_ms,
@@ -526,7 +532,11 @@ pub fn frames_text(frames: &[FrameRecord]) -> String {
             f.cancelled,
             f.degraded,
             f.allocated_bytes,
-            f.upload_calls
+            f.upload_calls,
+            f.queries,
+            f.tile_misses,
+            f.band_queries,
+            f.lit_plan_ms
         ));
     }
     s
@@ -782,6 +792,7 @@ mod tests {
             cancelled: 0,
             degraded: 0,
             allocated_bytes: 1 << 30,
+            ..FrameRecord::default()
         }
     }
 
@@ -1034,6 +1045,7 @@ mod fresh_lag_tests {
                 cancelled: 0,
                 degraded: 0,
                 allocated_bytes: 0,
+                ..FrameRecord::default()
             })
             .collect()
     }

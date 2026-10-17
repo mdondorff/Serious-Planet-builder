@@ -205,8 +205,8 @@ pub fn parse_frames(text: &str) -> Result<Vec<FrameRecord>, String> {
             continue;
         }
         let t: Vec<&str> = line.split_whitespace().collect();
-        if t.len() != 20 {
-            return Err(format!("frames.txt line {}: {} columns, expected 20", n + 2, t.len()));
+        if t.len() != 24 {
+            return Err(format!("frames.txt line {}: {} columns, expected 24", n + 2, t.len()));
         }
         let bad = |what: &str| format!("frames.txt line {}: `{}` is not a {what}", n + 2, line);
         let f = |i: usize| t[i].parse::<f64>().map_err(|_| bad("number"));
@@ -235,6 +235,10 @@ pub fn parse_frames(text: &str) -> Result<Vec<FrameRecord>, String> {
             degraded: u(17)? as usize,
             allocated_bytes: u(18)?,
             upload_calls: u(19)?,
+            queries: u(20)?,
+            tile_misses: u(21)?,
+            band_queries: u(22)?,
+            lit_plan_ms: f(23)?,
             ..FrameRecord::default()
         });
     }
@@ -1124,7 +1128,7 @@ mod tests {
         }
     }
 
-    // spec: TEST-021
+    // spec: TEST-021, TEST-031
     #[test]
     fn frames_text_round_trips_through_the_reader() {
         let mut fr = good_frames("look-1m");
@@ -1132,14 +1136,23 @@ mod tests {
         fr[1].lag = None;
         fr[2].uncovered_nodes = 4;
         fr[3].upload_calls = 17;
+        (fr[4].queries, fr[4].tile_misses, fr[4].band_queries, fr[4].lit_plan_ms) = (1089, 2, 3400, 12.5);
         let back = parse_frames(&frames_text(&fr)).unwrap();
         assert_eq!(back.len(), fr.len());
         assert_eq!((back[0].gpu_ms, back[1].lag, back[2].uncovered_nodes, back[5].allocated_bytes), (Some(1.25), None, 4, 1 << 30));
         assert_eq!(back[3].upload_calls, 17, "the call count is the last column");
-        assert!(frames_text(&[]).trim_end().ends_with("allocated_bytes upload_calls"), "the header names it (TEST-012)");
+        assert_eq!(
+            (back[4].queries, back[4].tile_misses, back[4].band_queries, back[4].lit_plan_ms),
+            (1089, 2, 3400, 12.5),
+            "the lit path's water counters are the last four columns (recorded only)"
+        );
+        assert!(
+            frames_text(&[]).trim_end().ends_with("allocated_bytes upload_calls queries tile_misses band_queries lit_plan_ms"),
+            "the header names them (TEST-012)"
+        );
         // A log from before the column (19 columns, the old header) is refused as old-format, never read with a zero.
         let old = frames_text(&fr).replace(
-            " upload_calls
+            " upload_calls queries tile_misses band_queries lit_plan_ms
 ",
             "
 ",
