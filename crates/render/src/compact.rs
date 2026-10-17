@@ -19,6 +19,18 @@ pub const MAX_ONE_SHOT_SIDE: u32 = 8192;
 /// Bytes of one tile reference: texel origin x, y, slot index, reserved.
 pub const REF_BYTES: u64 = 16;
 
+/// EXPLORATION ONLY (compact tiles in a storage buffer): when set, compact renderers made from now on keep their blocks in storage
+/// buffers read by index (vertex pulling) instead of atlas textures. Read when a renderer or a compact shader is built.
+static BUFFER_ATLAS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_buffer_atlas(on: bool) {
+    BUFFER_ATLAS.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn buffer_atlas() -> bool {
+    BUFFER_ATLAS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// The compact pipeline's shader for tiles of `cells`: the product shader's header, fragment stage and helpers unchanged (spliced
 /// at build time so the two pipelines cannot drift apart there), the vertex stage replaced by vertex pulling from the atlas.
 pub fn compact_terrain_shader(cells: u32) -> String {
@@ -27,7 +39,20 @@ pub fn compact_terrain_shader(cells: u32) -> String {
     let tail_at = src.find("// Distance in pixels to the nearest integer").expect("product shader helper marker");
     let head = &src[..vs_at];
     assert!(head.contains("@group(0) @binding(1) var<storage, read> nodes: array<Node>;"), "product node binding changed");
-    let vertex = COMPACT_VERTEX.replace("{CELLS}", &cells.to_string());
+    let mut vertex = COMPACT_VERTEX.replace("{CELLS}", &cells.to_string());
+    if buffer_atlas() {
+        vertex = vertex
+            .replace("@group(2) @binding(0) var atlas: texture_2d<u32>;", "@group(2) @binding(0) var<storage, read> atlas: array<vec2<u32>>;")
+            .replace(
+                "    return textureLoad(atlas, origin + vec2<i32>(i, j), 0);",
+                "    let t = atlas[u32(origin.x + j * (CELLS + 1) + i)];\n    return vec4<u32>(t.x & 0xffffu, t.x >> 16u, t.y & 0xffffu, t.y >> 16u);",
+            )
+            .replace(
+                "    return textureLoad(atlas, base + vec2<i32>(idx % (CELLS + 1), idx / (CELLS + 1)), 0).w;",
+                "    return atlas[u32(base.x + idx)].y >> 16u;",
+            );
+        assert!(!vertex.contains("textureLoad"), "buffer variant left a texture read");
+    }
     format!("{head}{vertex}{}", &src[tail_at..])
 }
 
@@ -240,7 +265,9 @@ const _: () = assert!(COMPACT_RECORD_BYTES == 128);
 
 /// One atlas texture and the bind group that names it for a run (group 2).
 pub(crate) struct Atlas {
-    pub(crate) texture: wgpu::Texture,
+    pub(crate) texture: Option<wgpu::Texture>,
+    /// Buffer variant (exploration): the block as `side * side` texels of 8 bytes, slot after slot.
+    pub(crate) buffer: Option<wgpu::Buffer>,
     pub(crate) bind: wgpu::BindGroup,
 }
 
@@ -263,6 +290,8 @@ pub(crate) struct CompactGpu {
     pub(crate) fallback: SlotPool,
     /// First vertex-pool slot of the fallback region.
     pub(crate) fallback_base: u32,
+    /// Blocks are storage buffers read by index (exploration).
+    pub(crate) buffer_mode: bool,
 }
 
 impl CompactGpu {
@@ -271,9 +300,23 @@ impl CompactGpu {
         if self.atlases.len() <= block {
             self.atlases.resize_with(block + 1, || None);
         }
-        let (side, bgl) = (self.side, &self.bgl_atlas);
+        let (side, bgl, buffer_mode) = (self.side, &self.bgl_atlas, self.buffer_mode);
         self.atlases[block].get_or_insert_with(|| {
             init.pool_allocations += 1;
+            if buffer_mode {
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("compact-block-buffer"),
+                    size: u64::from(side) * u64::from(side) * 8,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                });
+                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("compact-block-bind"),
+                    layout: bgl,
+                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
+                });
+                return Atlas { texture: None, buffer: Some(buffer), bind };
+            }
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("compact-atlas"),
                 size: wgpu::Extent3d { width: side, height: side, depth_or_array_layers: 1 },
@@ -290,7 +333,7 @@ impl CompactGpu {
                 layout: bgl,
                 entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
             });
-            Atlas { texture, bind }
+            Atlas { texture: Some(texture), buffer: None, bind }
         })
     }
 }

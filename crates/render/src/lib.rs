@@ -16,7 +16,7 @@ pub mod spike_detail;
 pub mod terrain;
 pub mod window;
 pub use atmosphere::{atmosphere_shaders, AtmospherePath, ProbeKind};
-pub use compact::compact_terrain_shader;
+pub use compact::{compact_terrain_shader, set_buffer_atlas};
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
 pub use gate::requirements as adapter_requirements;
 pub use lit::{lit_post_shaders, ExposureState, LitPath};
@@ -163,6 +163,13 @@ impl GpuContext {
     }
 
     /// Adapter name as the driver reports it.
+    /// EXPLORATION ONLY: wait for all submitted work.
+    pub fn probe_wait(&self) {
+        // An empty submission carries the writes staged since the last one; then wait for the queue.
+        self.queue.submit(std::iter::empty::<wgpu::CommandBuffer>());
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+    }
+
     pub fn adapter_name(&self) -> &str {
         &self.info.name
     }

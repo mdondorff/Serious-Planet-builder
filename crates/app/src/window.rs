@@ -485,6 +485,9 @@ fn smoke_summary(st: &Running) -> String {
 
 /// `planet editor`: open the window and run the flight until it is closed (or, for `--smoke`, for a few dozen frames).
 pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+    if std::env::var("PROBE_BUFFER").is_ok() {
+        planet_render::set_buffer_atlas(true);
+    }
     crate::worldfield::check_options(o)?;
     // The adapter policy: the application runs on a discrete GPU only; the software adapters are the test and CI mode.
     let policy = if o.smoke {
