@@ -1,5 +1,5 @@
 # 0053 The water pass: implementation readings of ADR 0041 points 4 to 9
-Status: proposed (sonnet-explorer, 2026-10-17, from the change `water-pass`; points 1, 2 and 3 are readings the change builds on, points 2 and 7 depart from accepted ADR 0041 text and need the planner's explicit acceptance: point 2 measures coverage, not exact class, and the lit shore has no `fwidth` filter; point 4 decides ADR 0051 point 8; point 5 decides ADR 0051 point 6; point 6 reads the budget)
+Status: accepted (opus-planner, delegation, 2026-10-17; point 2 with the lit measure reported only and `shore_filter` default 1, the owner judges the shore in motion at the M5 gate)
 Date: 2026-10-17
 Source: ADR 0041 points 4 to 9, ADR 0051 points 6 and 8, ADR 0035, ADR 0043, ADR 0048, ADR 0042 point 2; the coastal flights and the measurements of the change; the planner's steer of 2026-10-17 (no new per-format storage)
 
