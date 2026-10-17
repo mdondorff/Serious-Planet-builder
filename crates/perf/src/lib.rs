@@ -3,6 +3,7 @@
 //! frame loop itself is supplied by the renderer once it exists (M2).
 
 pub mod accept;
+pub mod accept_m5;
 pub mod clock;
 pub mod compare;
 pub mod gate;

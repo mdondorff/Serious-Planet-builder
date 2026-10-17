@@ -59,6 +59,7 @@ modes:
     --tile-format vertex|compact   how terrain tiles are built and held (ADR 0033): compact (default) for levels 3 and finer, vertex the 44-byte reference format for all
     --lit                    the streaming perf scenes on the lit path with the atmosphere and water (TEST-025): same scripts, same verdicts, logs named <scene>-lit
     --views a,b,c            only these views of the lit perf scenes (ground-1m, aerial-20km, coast-2km, coast-3m, orbit, coast-glide, coast-descent); a partial log is not a window
+    --scene capture-flights  the two coastal flights as 1440p PNG sequences (shore_filter 1 and 0) in --out-dir, never a measurement (TEST-027; `cargo xtask capture flights` also makes the videos); needs --store DIR or --allow-memory-bake, takes --size WxH, --flight-frames N
     --flight-frames N        frames of each coastal flight of the lit perf scenes (default 240; --scene lit | lit-formats, TEST-025)
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
     --machine-ready          owner override of a failed readiness gate (ADR 0020); recorded in the log
@@ -456,7 +457,9 @@ fn check_flight_options(o: &Options) -> Result<(), String> {
         if o.out_dir.is_none() {
             return Err("--flight needs --out-dir".into());
         }
-    } else if let Some(f) = FLIGHT_ONLY.iter().find(|f| o.given.contains(**f) && !(o.pipelined && **f == "--out-dir")) {
+    } else if let Some(f) =
+        FLIGHT_ONLY.iter().find(|f| o.given.contains(**f) && !(o.pipelined && **f == "--out-dir") && !litperf::is_capture_scene(&o.scene))
+    {
         return Err(format!("{f} only applies to --flight"));
     }
     if o.lockstep && !o.pipelined {
@@ -494,8 +497,8 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
         // The global-bake perf scene takes the definition, grid size and thread count of the global commands.
         let bake_scene = matches!(o.mode, Mode::TestRender) && o.perf && o.scene == "global-bake";
         let stream_scene = matches!(o.mode, Mode::TestRender)
-            && (o.perf || o.perf_smoke)
-            && (streamperf::is_stream_scene(&o.scene) || litperf::is_lit_scene(&o.scene));
+            && (o.perf || o.perf_smoke || litperf::is_capture_scene(&o.scene))
+            && (streamperf::is_stream_scene(&o.scene) || litperf::is_lit_scene(&o.scene) || litperf::is_capture_scene(&o.scene));
         let terrain_scene = matches!(o.mode, Mode::TestRender) && o.scene == "terrain";
         let window = matches!(o.mode, Mode::Editor) && !o.offscreen && !o.no_window;
         let allowed: &[&str] = if bake_scene {
@@ -631,10 +634,15 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.lit && !streamperf::is_stream_scene(&o.scene) {
         return Err("--lit applies to the streaming perf scenes (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, dive-cold, streaming); the scenes `lit` and `lit-formats` are always lit".into());
     }
-    if (o.given.contains("--flight-frames") || o.given.contains("--views")) && !litperf::is_lit_scene(&o.scene) {
-        return Err("--flight-frames and --views apply to the scenes `lit` and `lit-formats`".into());
+    if o.given.contains("--views") && !litperf::is_lit_scene(&o.scene)
+        || o.given.contains("--flight-frames") && !litperf::is_lit_scene(&o.scene) && !litperf::is_capture_scene(&o.scene)
+    {
+        return Err("--views applies to the scenes `lit` and `lit-formats`, --flight-frames to those and `capture-flights`".into());
     }
     streamperf::check_options(o)?;
+    if litperf::is_capture_scene(&o.scene) {
+        return litperf::capture_flights(o, &ctx, out);
+    }
     if o.flight.is_some() {
         return skeleton::render_flight(&ctx, o, out);
     }

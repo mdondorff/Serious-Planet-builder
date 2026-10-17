@@ -1,7 +1,7 @@
 //! `cargo xtask accept <milestone>`: runs the automated part of milestone acceptance and writes
 //! `target/review/accept-<milestone>.md`. The tier C run covers both the software adapter and the discrete GPU
-//! (`--real`; the command fails on a machine without one). M4 leaves `--real` to the manual list and also judges the perf logs of a
-//! streaming window, refusing without a valid one (TEST-021). Criteria that need CI, the owner or Rasierklinge are listed
+//! (`--real`; the command fails on a machine without one). M4 and M5 leave `--real` to the manual list and also judge the perf logs
+//! of a window, refusing without a valid one (TEST-021, TEST-026). Criteria that need CI, the owner or Rasierklinge are listed
 //! as such, never as passed.
 
 use crate::util::{run as exec, Res};
@@ -55,6 +55,14 @@ fn manual_criteria(milestone: &str) -> &'static [&'static str] {
             "Candidate goldens: `cargo xtask bless` lists any waiting for the owner",
             "The findings slots of the report (cold start, upload cap, RAM split, prefetch look-ahead, ...), the verifier over the milestone and the recommendation for M5: the architect (M4 is not a go/no-go gate)",
         ],
+        "M5" => &[
+            "The owner's single look review of the contact sheet, the six-frame strips (`target/review/water-inspection/flight_*_strip.png`) and the 1440p flight videos (`cargo xtask capture flights --store <store>`, shore_filter 0 and 1) (ADR 0037, milestone gate)",
+            "CI green on Windows (WARP) and Linux (lavapipe): needs a pushed branch",
+            "Candidate goldens blessed under policy or by the owner (`golden-review`, ADR 0037, ADR 0052)",
+            "The viewer's manual checks, repeated at the gate: mouse look locally (SPIKE-11), keyboard feel (VIEW-004)",
+            "A discrete-GPU run of the tiers (`cargo xtask test gpu --real`): not run by this command so that acceptance may sit beside the architect's window",
+            "The go / no-go for M6 (milestone gate after M5): the owner",
+        ],
         _ => &["No automated criteria are defined for this milestone yet"],
     }
 }
@@ -76,12 +84,34 @@ fn read_m4_logs(dir: &Path) -> Vec<SceneFiles> {
         .collect()
 }
 
-/// Where a generated M4 report goes: the milestone report if none exists yet, else beside the other review output, so a report the
+/// The M5 window's files, read from `dir` (a missing file is `None`; judging is the library's job, TEST-026): `lit.json`,
+/// `lit-formats.json`, and for each streaming scene `<scene>-lit.json` with `<scene>-lit.frames.txt`.
+fn read_m5_logs(dir: &Path) -> planet_perf::accept_m5::WindowFiles {
+    planet_perf::accept_m5::WindowFiles {
+        lit: std::fs::read(dir.join("lit.json")).ok(),
+        formats: std::fs::read(dir.join("lit-formats.json")).ok(),
+        streams: planet_perf::streaming::SCENES
+            .iter()
+            .map(|scene| SceneFiles {
+                scene: (*scene).to_string(),
+                json: std::fs::read(dir.join(format!("{scene}-lit.json"))).ok(),
+                frames: std::fs::read_to_string(dir.join(format!("{scene}-lit.frames.txt"))).ok(),
+                last_valid_present: dir.join(format!("{scene}-lit.last-valid.json")).is_file(),
+            })
+            .collect(),
+    }
+}
+
+/// Where a generated milestone report goes (`M4` or `M5`): the milestone report if none exists yet, else beside the other review output, so a report the
 /// architect has already completed is never overwritten, and a run with a failed automated step never creates the milestone report.
 fn m4_report_path(root: &Path, steps_failed: bool) -> PathBuf {
-    let report = root.join("docs").join("milestones").join("M4-report.md");
+    milestone_report_path(root, "M4", steps_failed)
+}
+
+fn milestone_report_path(root: &Path, milestone: &str, steps_failed: bool) -> PathBuf {
+    let report = root.join("docs").join("milestones").join(format!("{milestone}-report.md"));
     if report.exists() || steps_failed {
-        root.join("target").join("review").join("M4-report.generated.md")
+        root.join("target").join("review").join(format!("{milestone}-report.generated.md"))
     } else {
         report
     }
@@ -108,22 +138,23 @@ pub fn run(root: &Path, args: &[String]) -> Res {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--logs" => logs = Some(PathBuf::from(it.next().ok_or("--logs needs a directory")?)),
-            other if other.starts_with("--") => return Err(format!("unknown option {other} (known: --logs DIR, M4 only)")),
+            other if other.starts_with("--") => return Err(format!("unknown option {other} (known: --logs DIR, M4 and M5 only)")),
             _ => milestone = Some(a),
         }
     }
     let Some(milestone) = milestone else {
-        return Err("usage: cargo xtask accept <milestone>, e.g. M0 (M4 also takes --logs DIR, default perf/logs)".into());
+        return Err("usage: cargo xtask accept <milestone>, e.g. M0 (M4 and M5 also take --logs DIR, default perf/logs)".into());
     };
     let m = milestone.to_uppercase();
-    if logs.is_some() && m != "M4" {
-        return Err("--logs only applies to M4 (the perf logs of the streaming scenes)".into());
+    if logs.is_some() && m != "M4" && m != "M5" {
+        return Err("--logs only applies to M4 and M5 (the perf logs of a window)".into());
     }
     let logs_dir = logs.map_or_else(|| root.join(M4_LOGS), |p| if p.is_absolute() { p } else { root.join(p) });
     let logs_shown = logs_dir.strip_prefix(root).unwrap_or(&logs_dir).to_string_lossy().replace('\\', "/");
     // M4's hardware verdicts come from the logs of the architect's perf window, read first: cheap, and a refusal must not wait for
     // the test run. Nothing here measures anything (TEST-021).
     let m4 = (m == "M4").then(|| planet_perf::accept::evaluate(&read_m4_logs(&logs_dir)));
+    let m5 = (m == "M5").then(|| planet_perf::accept_m5::evaluate(&read_m5_logs(&logs_dir)));
     let mut steps = vec![
         step("check (fmt, clippy, layering)", || crate::testcmd::check(root)),
         step("spec-lint", || crate::speclint::run(root)),
@@ -132,7 +163,7 @@ pub fn run(root: &Path, args: &[String]) -> Res {
     ];
     // M4 leaves the discrete GPU out of the automated steps: acceptance may run next to the architect's window and
     // `test gpu --real` never runs during one (CLAUDE.md); it is listed under the manual criteria instead.
-    if m != "M4" {
+    if m != "M4" && m != "M5" {
         steps.push(step("test gpu --real (tier C, discrete GPU)", || {
             crate::testcmd::test(root, &["gpu".to_string(), "--real".to_string()])
         }));
@@ -197,6 +228,35 @@ pub fn run(root: &Path, args: &[String]) -> Res {
             }
         }
     }
+    match &m5 {
+        None => {}
+        Some(planet_perf::accept_m5::Evaluation5::Refused(reasons)) => {
+            let text = planet_perf::accept_m5::refusal_text(reasons, &logs_shown);
+            md += &format!("\nHardware criteria (perf logs in {logs_shown}/): REFUSED, no verdict.\n\n{text}");
+            hardware_error = Some(format!(
+                "acceptance M5 refuses to judge the hardware criteria ({} reason(s)): no valid perf window in {logs_shown}/",
+                reasons.len()
+            ));
+        }
+        Some(planet_perf::accept_m5::Evaluation5::Judged(j)) => {
+            let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            let report = planet_perf::accept_m5::render_report(j, &steps_md, &utc_date(secs));
+            let path = milestone_report_path(root, "M5", failed);
+            std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+            std::fs::write(&path, &report).map_err(|e| e.to_string())?;
+            md += &format!(
+                "\nHardware criteria (perf logs in {logs_shown}/): {}; report written to {} (sections marked TO FILL are the architect's).\n",
+                j.outcome.word(),
+                path.strip_prefix(root).unwrap_or(&path).display()
+            );
+            for l in j.failing.iter().chain(j.incomplete.iter()) {
+                md += &format!("  {l}\n");
+            }
+            if j.outcome != planet_perf::accept_m5::Outcome::Pass {
+                hardware_error = Some(format!("acceptance M5: the hardware criteria are {} (see the report)", j.outcome.word()));
+            }
+        }
+    }
     md += "\nNeeds CI, the owner or Rasierklinge (not passed by this command):\n\n";
     for c in manual_criteria(&m) {
         md += &format!("- {c}\n");
@@ -255,6 +315,37 @@ mod tests {
             "a failed step never writes the milestone report"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // spec: TEST-026
+    #[test]
+    fn the_m5_log_reader_takes_the_lit_logs_by_their_names_and_no_logs_is_a_refusal() {
+        let dir = std::env::temp_dir().join(format!("xtask-m5-logs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("lit.json"), b"{}").unwrap();
+        std::fs::write(dir.join("dive-lit.json"), b"{}").unwrap();
+        std::fs::write(dir.join("dive-lit.frames.txt"), "x").unwrap();
+        // The debug path's logs of the same scene are not the lit window's.
+        std::fs::write(dir.join("look-1m.json"), b"{}").unwrap();
+        let w = read_m5_logs(&dir);
+        assert!(w.lit.is_some() && w.formats.is_none());
+        assert_eq!(w.streams.len(), 7);
+        let dive = w.streams.iter().find(|f| f.scene == "dive").unwrap();
+        assert!(dive.json.is_some() && dive.frames.as_deref() == Some("x"));
+        assert!(w.streams.iter().find(|f| f.scene == "look-1m").unwrap().json.is_none());
+        let none = read_m5_logs(&dir.join("absent"));
+        match planet_perf::accept_m5::evaluate(&none) {
+            planet_perf::accept_m5::Evaluation5::Refused(why) => {
+                assert!(
+                    why.iter().any(|w| w.contains("lit: no log `lit.json`"))
+                        && why.iter().any(|w| w.contains("dive-lit: no log `dive-lit.json`")),
+                    "{why:?}"
+                )
+            }
+            _ => panic!("no logs must be refused"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

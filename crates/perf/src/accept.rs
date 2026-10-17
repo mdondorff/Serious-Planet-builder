@@ -178,14 +178,14 @@ pub fn evaluate(files: &[SceneFiles]) -> Evaluation {
     }))
 }
 
-fn str_at<'a>(j: &'a Json, key: &str) -> Option<&'a str> {
+pub(crate) fn str_at<'a>(j: &'a Json, key: &str) -> Option<&'a str> {
     match j.get(key) {
         Some(Json::Str(s)) => Some(s),
         _ => None,
     }
 }
 
-fn count(counts: &Json, key: &str) -> Option<u64> {
+pub(crate) fn count(counts: &Json, key: &str) -> Option<u64> {
     counts.get(key).and_then(Json::num).map(|n| n as u64)
 }
 
@@ -243,13 +243,22 @@ pub fn parse_frames(text: &str) -> Result<Vec<FrameRecord>, String> {
 
 /// Read and judge one scene's log; `Err` lists every reason it cannot be judged.
 pub fn read_scene(f: &SceneFiles) -> Result<SceneRead, Vec<String>> {
+    read_scene_as(f, false)
+}
+
+/// [`read_scene`] for the log of a scene's lit variant (`--lit`, TEST-025) when `lit` is set: the run is `stream-lit/<scene>` and the
+/// field says it drew the lit path. Everything else is judged exactly as the debug path's log.
+pub fn read_scene_as(f: &SceneFiles, lit: bool) -> Result<SceneRead, Vec<String>> {
     let scene = f.scene.as_str();
     let mut why: Vec<String> = Vec::new();
     let Some(json_bytes) = &f.json else {
-        return Err(vec![format!("no log `{scene}.json`")]);
+        return Err(vec![format!("no log `{scene}{}.json`", if lit { "-lit" } else { "" })]);
     };
     let Some(frames_txt) = &f.frames else {
-        return Err(vec![format!("no per-frame log `{scene}.frames.txt` (a log from before the streaming scenes wrote it is old-format)")]);
+        return Err(vec![format!(
+            "no per-frame log `{scene}{}.frames.txt` (a log from before the streaming scenes wrote it is old-format)",
+            if lit { "-lit" } else { "" }
+        )]);
     };
     let Some(spec_frames) = (match scene {
         "dive" | "dive-fast" | "dive-cold" => Some(DIVE_FRAMES),
@@ -285,6 +294,9 @@ pub fn read_scene(f: &SceneFiles) -> Result<SceneRead, Vec<String>> {
         None => (None, PrefillState::Unstated),
     };
     let field = protocol.and_then(|p| str_at(p, "field")).map(str::to_string);
+    let field_wanted =
+        if lit { format!("{PRODUCTION_FIELD}; lit path (atmosphere, water), compact tiles") } else { PRODUCTION_FIELD.to_string() };
+    let run_path = format!("{}/{scene}", if lit { "stream-lit" } else { "stream" });
     match &source {
         None => why.push("old-format log: no protocol.source (written before the streaming scenes recorded where the bake was read from)".into()),
         Some(s) if s.contains("NOT the production source") || !s.starts_with("store ") => {
@@ -297,15 +309,16 @@ pub fn read_scene(f: &SceneFiles) -> Result<SceneRead, Vec<String>> {
     }
     match &field {
         None => why.push("old-format log: no protocol.field".into()),
-        Some(s) if s != PRODUCTION_FIELD => {
-            why.push(format!("protocol.field is `{s}`, not `{PRODUCTION_FIELD}` (the world's eroded field)"))
-        }
+        Some(s) if s.as_str() != field_wanted => why.push(format!(
+            "protocol.field is `{s}`, not `{field_wanted}` (the world's eroded field{})",
+            if lit { " drawn on the lit path" } else { "" }
+        )),
         Some(_) => {}
     }
     let run = match root.get("runs") {
-        Some(Json::Arr(a)) if a.len() == 1 && str_at(&a[0], "path") == Some(&format!("stream/{scene}")) => Some(&a[0]),
+        Some(Json::Arr(a)) if a.len() == 1 && str_at(&a[0], "path") == Some(&run_path) => Some(&a[0]),
         _ => {
-            why.push(format!("the log does not hold exactly one run `stream/{scene}`"));
+            why.push(format!("the log does not hold exactly one run `{run_path}`"));
             None
         }
     };

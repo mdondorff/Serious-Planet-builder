@@ -724,6 +724,99 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     Ok(())
 }
 
+/// Whether `--scene NAME` names the flight capture (a tool, never a measurement).
+pub fn is_capture_scene(name: &str) -> bool {
+    name == "capture-flights"
+}
+
+/// `test-render --scene capture-flights --out-dir DIR [--store DIR | --allow-memory-bake --global-res N] [--size WxH] [--flight-frames N]`
+/// (TEST-027): the two coastal flights drawn on the lit path, each with `water.shore_filter` at the look's default and at the other
+/// setting, every frame written as `DIR/<flight>-filter<k>/frame_NNNN.png` (1440p by default) for the owner's look review (ADR 0037).
+/// It takes no timestamp, no clock reading and no gate, prints no budget and writes no perf log: it is a separate tool beside the
+/// harness and must not run during a perf window. `cargo xtask capture flights` runs it and encodes the videos when `ffmpeg` exists.
+pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
+    let dir = o.out_dir.clone().ok_or("capture-flights needs --out-dir")?;
+    let from_store = o.store.is_some();
+    let world = crate::streamperf::open_world(o, false)?.bounding_water();
+    if !world.has_water() {
+        return Err(
+            "the flights need the water: this world has no ocean channel (regenerate the store with `generate --global-dir`)".into()
+        );
+    }
+    let field = world.field()?;
+    let radius_m = world.radius_m();
+    let size = o.size.unwrap_or((2560, 1440));
+    let max_level = o.finest_level_for(o.cells);
+    // The production tolerance at 1440p; a smaller frame keeps the plan's viewport-to-tolerance ratio above its minimum.
+    let tau = if size.1 >= 1440 { o.tau } else { o.tau.min(f64::from(size.1) / 72.0) };
+    let lod = LodParams {
+        cells: o.cells,
+        viewport_h_px: f64::from(size.1),
+        tau_px: tau,
+        max_level,
+        radius_m,
+        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
+        ..LodParams::earth_1080p()
+    };
+    lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
+    let aspect = f64::from(size.0) / f64::from(size.1);
+    let mut setup = LitSetup::new(o, &world, &lod)?;
+    let is_sea = |d: planet_core::Vec3| {
+        world.with_water(|f| planet_frame::water::WaterSource::water_at(f, d).ok().flatten().is_some()).ok().flatten().unwrap_or(false)
+    };
+    let frames = o.flight_frames;
+    let views = lit_views(radius_m, aspect, field.as_ref(), setup.level_m, &is_sea, frames)?;
+    let rig =
+        Rig { ctx, world: &world, field: field.as_ref(), lod: &lod, size, smoke: true, frames: 0, cells: o.cells, max_level, radius_m };
+    let software = crate::facts(ctx).kind == planet_perf::DeviceKind::Cpu;
+    if software && o.tile_format.is_none() {
+        ctx.prefer_tile_format(TileFormat::Vertex);
+    }
+    writeln!(
+        out,
+        "capture-flights: NOT a measurement (no gate, no timestamps, no log); {}x{}, {} cameras per flight, tile format {}, {}{}",
+        size.0,
+        size.1,
+        frames,
+        ctx.default_tile_format().name(),
+        world.describe(),
+        if from_store { "" } else { " (in-memory bake)" }
+    )
+    .map_err(err)?;
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    let mut index = String::from("# directory frames width height shore_filter\n");
+    let default = setup.look.water.shore_filter;
+    let first = views[0].cameras[0];
+    let mut r = new_renderer(&rig, &setup, first)?;
+    for view in views.iter().filter(|v| v.kind == ViewKind::Flight) {
+        for filter in [default, if default == 0.0 { 1.0 } else { 0.0 }] {
+            setup.look.water.shore_filter = filter;
+            let name = format!("{}-filter{}", view.name, filter as u32);
+            let sub = dir.join(&name);
+            std::fs::create_dir_all(&sub).map_err(err)?;
+            let started = Instant::now();
+            let mut cache = SelectionCache::new();
+            for (k, camera) in view.cameras.iter().enumerate() {
+                let plan = planet_frame::plan_terrain_cached(&request(&rig, *camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
+                crate::skeleton::upload_missing_meshes(ctx, &mut r, &plan, rig.field, radius_m, o.cells, max_level)?;
+                let lit = setup.plan(&world, &plan, WATER_T0 + k as f64 / 60.0, 1.0 / 60.0, k == 0)?;
+                r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
+                let image = r.read_color(ctx);
+                image.write_png(&sub.join(format!("frame_{k:04}.png"))).map_err(|e| format!("writing frame {k} of {name}: {e}"))?;
+                if k % 40 == 39 {
+                    writeln!(out, "{name}: {} of {} frames", k + 1, view.cameras.len()).map_err(err)?;
+                }
+            }
+            writeln!(out, "{name}: {} frames in {:.1} s -> {}", view.cameras.len(), started.elapsed().as_secs_f64(), sub.display())
+                .map_err(err)?;
+            index += &format!("{name} {} {} {} {}\n", view.cameras.len(), size.0, size.1, filter as u32);
+        }
+    }
+    setup.look.water.shore_filter = default;
+    std::fs::write(dir.join("capture.txt"), index).map_err(err)?;
+    writeln!(out, "wrote {} (frames of each flight and shore filter, and capture.txt)", dir.display()).map_err(err)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
