@@ -1,0 +1,4 @@
+- [x] 1.1 Failing known-answer tests at the poles and the equator; `sin_latitude`; `GLOBAL_VERSION` 3; the equirectangular map in COORD's axes (GEN-013, GEN-021)
+- [x] 1.2 Re-record the pins and snapshots with their reasons (GEN-013, GEN-015, GEN-021, GEN-019, STRM-003, STRM-012)
+- [x] 1.3 Goldens: run test gpu, golden-review; list escalations
+- [x] 2.1 numerics-reviewer, spec-guardian, verifier; test, test gpu, test gpu --real, spec-lint, fmt, clippy; archive; log line

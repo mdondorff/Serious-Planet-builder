@@ -6,8 +6,8 @@ use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::dump::NET_BACKGROUND;
 use planet_generators::global::{
-    bake, bake_block, bake_blocks, equirect_product, grid_hash, product, sample, BakeError, Channel, GlobalGrid, GlobalSample,
-    GLOBAL_VERSION, MAX_BAKE_RES, MAX_BLOCK_CELLS, SEA_LEVEL_C, SEA_LEVEL_F32,
+    bake, bake_block, bake_blocks, equirect_product, grid_hash, product, sample, sin_latitude, BakeError, Channel, GlobalGrid,
+    GlobalSample, GLOBAL_VERSION, MAX_BAKE_RES, MAX_BLOCK_CELLS, SEA_LEVEL_C, SEA_LEVEL_F32,
 };
 
 const SEED: u64 = 7;
@@ -75,7 +75,7 @@ fn the_field_has_continents_oceans_mountains_and_latitude_bands() {
         for l in 0..=64 {
             for k in 0..=64 {
                 let s = g.at(Face(f), k, l);
-                let y = root.sample_direction(&TangentWarp, 64, k, l).y;
+                let y = root.sample_direction(&TangentWarp, 64, k, l).z; // latitude: COORD's +z pole
                 total += 1;
                 land += usize::from(s.is_land());
                 lo = lo.min(s.elevation_m);
@@ -142,14 +142,14 @@ fn land_is_above_and_ocean_at_or_below_sea_level_for_any_direction() {
 // spec: GEN-013
 #[test]
 fn a_cold_peak_and_a_warm_lowland_follow_the_lapse_rate() {
-    // Temperature falls with height over land: among land samples at similar latitude the high ones are colder.
+    // Temperature falls with height over land: among land samples at similar latitude (z in the band; the +x face spans z in -0.71 .. 0.71, the +z face has z of 0.577 and more) the high ones are colder.
     let g = grid(128, 4);
-    let root = TileId::new(Face(4), 0, 0, 0).unwrap();
+    let root = TileId::new(Face(0), 0, 0, 0).unwrap();
     let (mut high, mut low) = ((0.0f64, 0u32), (0.0f64, 0u32));
     for l in 0..=128 {
         for k in 0..=128 {
-            let s = g.at(Face(4), k, l);
-            let y = root.sample_direction(&TangentWarp, 128, k, l).y;
+            let s = g.at(Face(0), k, l);
+            let y = root.sample_direction(&TangentWarp, 128, k, l).z;
             if !s.is_land() || !(0.3..0.5).contains(&y) {
                 continue;
             }
@@ -162,6 +162,45 @@ fn a_cold_peak_and_a_warm_lowland_follow_the_lapse_rate() {
     }
     assert!(high.1 > 3 && low.1 > 3, "need both high and low land in the band: {} / {}", high.1, low.1);
     assert!(high.0 / f64::from(high.1) < low.0 / f64::from(low.1) - 8.0, "high ground is colder than lowland");
+}
+
+// spec: GEN-013, GEN-021
+#[test]
+fn latitude_is_measured_from_the_plus_z_pole_of_coord() {
+    // COORD: +z is the north pole (latitude 90), -z the south pole, +x (longitude 0) and +y (longitude 90 E) are on the equator.
+    assert_eq!(sin_latitude(Vec3::new(0.0, 0.0, 1.0)), 1.0);
+    assert_eq!(sin_latitude(Vec3::new(0.0, 0.0, -1.0)), -1.0);
+    assert_eq!(sin_latitude(Vec3::new(1.0, 0.0, 0.0)), 0.0);
+    assert_eq!(sin_latitude(Vec3::new(0.0, 1.0, 0.0)), 0.0);
+    assert_eq!(sin_latitude(Vec3::new(0.0, -1.0, 0.0)), 0.0);
+    // The temperature is at most 30 - 55 + 4 = -21 degrees C at either pole whatever the height (the fBm is normalised to [-1, 1]), and the rain there
+    // follows the polar band; both poles of every seed are cold, and the +y direction (the pole under GLOBAL_VERSION 2) is not.
+    for seed in [SEED, 1, 2, 3, 99] {
+        for z in [1.0, -1.0] {
+            let s = sample(seed, Vec3::new(0.0, 0.0, z));
+            assert!(s.temperature_c <= -20.0, "seed {seed}: the pole at z = {z} is {} C", s.temperature_c);
+        }
+    }
+    // Over sea (no lapse) the equator at +x and +y is warm, near 30 degrees C minus 4 of noise at most, and equal in distribution:
+    // averaged over many seeds, the poles are cold and both equator points are far warmer.
+    let (mut pole, mut x, mut y, mut n) = (0.0f64, 0.0f64, 0.0f64, 0);
+    for seed in 0..64u64 {
+        let (sp, sn, sx, sy) = (
+            sample(seed, Vec3::new(0.0, 0.0, 1.0)),
+            sample(seed, Vec3::new(0.0, 0.0, -1.0)),
+            sample(seed, Vec3::new(1.0, 0.0, 0.0)),
+            sample(seed, Vec3::new(0.0, 1.0, 0.0)),
+        );
+        if !(sx.is_land() || sy.is_land()) {
+            pole += f64::from(sp.temperature_c + sn.temperature_c) * 0.5;
+            x += f64::from(sx.temperature_c);
+            y += f64::from(sy.temperature_c);
+            n += 1;
+        }
+    }
+    assert!(n >= 10, "only {n} ocean equators");
+    let n = f64::from(n);
+    assert!(x / n > pole / n + 40.0 && y / n > pole / n + 40.0, "poles {} C, equator at +x {} C and at +y {} C", pole / n, x / n, y / n);
 }
 
 // spec: GEN-013
@@ -204,6 +243,16 @@ fn the_data_products_show_the_world_in_every_channel() {
     let map = equirect_product(SEED, 128, Channel::Elevation);
     assert_eq!((map.width, map.height), (128, 64));
     assert_ne!(map.pixel(0, 0), map.pixel(64, 32));
+    // The map's top row is the north pole of COORD (+z): its temperature colour is the cold (blue) end, the middle row is warmer.
+    let temp = equirect_product(SEED, 128, Channel::Temperature);
+    let mean_red = |y: u32| (0..temp.width).map(|x| f64::from(temp.pixel(x, y)[0])).sum::<f64>() / f64::from(temp.width);
+    assert!(
+        mean_red(0) + 60.0 < mean_red(32) && mean_red(63) + 60.0 < mean_red(32),
+        "poles {} / {}, equator {}",
+        mean_red(0),
+        mean_red(63),
+        mean_red(32)
+    );
 
     // Written for review (not goldens): target/review/global-coarse/<channel>-net.png and <channel>-map.png.
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/review/global-coarse");
@@ -363,6 +412,6 @@ fn the_peak_of_live_blocks_is_counted_between_creation_and_delivery() {
 }
 
 /// The version the known answers below were recorded against (ADR 0006): changing the output without a bump fails here.
-const RECORDED_VERSION: u32 = 2;
-const KNOWN_POINTS: &str = "[[3f3ef54b, 44cb75f7, 41a18f38, 45032416], [be83b213, c4c37fdb, c1cfa1d5, 442c4f54], [bed97260, c52f51c0, 41eb8eac, 451e5422], [3e25822e, 42c5afbf, 4192eb50, 430d7a6e], [beff7496, c54fe3c7, 40aa0957, 446de42a]]";
-const KNOWN_GRID_HASH: &str = "4e56a28cf452a416";
+const RECORDED_VERSION: u32 = 3; // 2 -> 3: latitude from COORD's +z pole (was d.y); continent and elevation bits are unchanged
+const KNOWN_POINTS: &str = "[[3f3ef54b, 44cb75f7, 41a18f38, 45032416], [be83b213, c4c37fdb, 41e85e2b, 451fdf30], [bed97260, c52f51c0, c1cc7154, 442aa58a], [3e25822e, 42c5afbf, c0853821, 44c8606a], [beff7496, c54fe3c7, 4172b6d8, 42fa29a4]]";
+const KNOWN_GRID_HASH: &str = "b56dcabe1a6c853f";

@@ -90,12 +90,12 @@ mod tests {
         // The literals of crates/cache/tests/keys.rs and global_store.rs: one pin, two places.
         assert_eq!(get("base"), "b00fa2b4b0f9accc87be74b4dd9d40ca");
         assert_eq!(get("height"), "340480159ae2ca791db08d1cae1232ce");
-        assert_eq!(get("mesh"), "c9264cb1899fd837fe9997f64667d47c");
+        assert_eq!(get("mesh"), "1040d826b633179027f11a2079c893f1");
         assert_eq!(get("node"), "dd934e9e858a828bb73c45e8a4eb4d45");
         assert_eq!(get("body"), "91f0cebc78907779e2f87196650d468e");
         assert_eq!(get("emptyquery"), "a97668a9d9614a3f4a73f2fceae97219");
-        assert_eq!(get("stagekey32"), "db3dbfc6e3118079df7dfedc53e81fec");
-        assert_eq!(get("blockkey"), "efbf6c92372e6d5a97492d5773fddce5");
+        assert_eq!(get("stagekey32"), "c91fccae01d58cf954c7c896c5fc4a97");
+        assert_eq!(get("blockkey"), "8a2519d5ec1cc5cdba280e8a56994658");
         assert_eq!(get("nodesetid"), "92572f1974620d913454c89a22aca7be");
         assert_eq!(m.lines().filter(|l| l.starts_with("persistent ")).count(), 9);
         assert!(m.starts_with(&planet_generators::manifest::determinism_manifest()), "the generators' manifest comes first, unchanged");
