@@ -1,0 +1,3 @@
+- [x] 1.1 `testkit::review`: `ADR_0052_EDGE_PIXELS`, `ViewDiff`, `debug_view_agreement` per ADR 0052; `golden-review` binary computes `ViewDiff`; tier A tests at 63, 64, 65 pixels, delta-2 pixel outside the 64, 32 at delta 1 plus 64 beyond agree, 33 at delta 1 escalate, 32 plus 65 escalate, existing-golden path unchanged (TEST-022)
+- [x] 2.1 `golden-review` skill, testing spec (TEST-022), constant comments
+- [x] 3.1 spec-guardian, verifier; test, spec-lint, fmt, clippy; archive; log line; PR; CI (no merge: the planner reviews test integrity)
