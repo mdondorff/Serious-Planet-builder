@@ -1,0 +1,2 @@
+- [x] 1.1 Review 18 pending M5 goldens; apply the AUTO verdicts; pending.txt; status; log
+- [x] 1.2 Doc-comment fix in testkit::review
