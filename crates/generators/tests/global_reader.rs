@@ -268,7 +268,7 @@ fn a_neighbour_with_weight_zero_is_not_read_and_a_stored_negative_zero_stays() {
 #[test]
 fn the_reader_has_pinned_known_answers() {
     assert_eq!(READER_VERSION, 1, "the known answers belong to this reader version");
-    assert_eq!(planet_generators::global::GLOBAL_VERSION, 3, "and to this field version: re-pin both together, not one silently");
+    assert_eq!(planet_generators::global::GLOBAL_VERSION, 4, "and to this field version: re-pin both together, not one silently");
     let g = grid(16);
     let src = GridSource(&g);
     let picks = [(Face(0), 7i64, 9i64, 6u32), (Face(3), 33, 1, 6), (Face(5), 64, 64, 6), (Face(2), 5, 60, 6), (Face(1), 3, 4, 4)];

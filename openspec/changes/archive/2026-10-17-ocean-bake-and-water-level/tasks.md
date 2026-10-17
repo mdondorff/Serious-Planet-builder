@@ -1,0 +1,9 @@
+- [x] 1.1 Failing tests first: ocean connectivity against the serial reference (real bakes and random site percolation, every block size and thread count), nodes and areas, the dry-basin fixture (GEN-022)
+- [x] 1.2 `generators::ocean`: nodes, areas, block analysis, merger, bits, serial reference; `bake_blocks_with` (analysis on the worker); `GLOBAL_VERSION` 4 (GEN-022)
+- [x] 1.3 `cache::global_store`: ocean block kind, codec, key, `build_global` with the channel, `StoreOceanSource`, verify, liveness, CLI output (STRM-023)
+- [x] 1.4 Re-record the pins and snapshots with their reasons; the manifest gains the ocean table and channel hashes (GEN-003, GEN-013, GEN-015, GEN-019, GEN-021, STRM-003, STRM-012)
+- [x] 2.1 `world-def`: the liquid table and the sea of a body, schema version 2 with the identity migration and a v2 fixture (WDEF-002, WDEF-006)
+- [x] 2.2 `generators::water`: the field W, the sea producer, plan data; the retrofit test with one synthetic lake; the field over the store (GEN-023)
+- [x] 2.3 `LitPlan::with_water_level` and the viewer's plan from the sea of the definition (LOOK-007)
+- [x] 3.1 Ad hoc cost at 256 and 1024 cells; proposed ADR for the readings
+- [x] 3.2 numerics-reviewer, spec-guardian, verifier; test, test gpu, test gpu --real, spec-lint, fmt, clippy; archive; log line

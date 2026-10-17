@@ -5,14 +5,15 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use planet_cache::global_store::{
-    block_cells, build_global, decode_block, encode_block, verify_global, BlockCodecError, GlobalWorld, BLOCK_CODEC_VERSION,
-    KIND_GLOBAL_BLOCK,
+    block_cells, build_global, decode_block, decode_ocean_block, encode_block, encode_ocean_block, ocean_table_of_store, verify_global,
+    BlockCodecError, GlobalWorld, StoreOceanSource, BLOCK_CODEC_VERSION, KIND_GLOBAL_BLOCK, KIND_GLOBAL_OCEAN, OCEAN_CODEC_VERSION,
 };
-use planet_cache::key::{encode, Kind, PARAM_GRID_RES, PARAM_RESOLUTION};
+use planet_cache::key::{encode, Kind, PARAM_GRID_RES, PARAM_OCEAN_AREA_FRACTION, PARAM_RESOLUTION};
 use planet_cache::pack::{PackWriter, TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId};
-use planet_generators::global::{bake_block, GlobalSample, GLOBAL_VERSION, MAX_BLOCK_CELLS};
+use planet_generators::global::{bake, bake_block, GlobalSample, GLOBAL_VERSION, MAX_BLOCK_CELLS};
+use planet_generators::ocean::{reference_ocean, tiled_ocean, OceanBits, OceanLattice, EARTH_OCEAN_MIN_AREA_FRACTION};
 use planet_world_def::{BodyId, NodeValue, WorldDefinition};
 
 const R: f64 = 6_371_000.0;
@@ -157,7 +158,7 @@ fn a_block_key_covers_the_tile_the_cells_the_grid_and_the_stage_key_and_the_know
     assert_ne!(w.stage_key(32), w.stage_key(64));
     assert_ne!(w.stage_key(32), world(8).stage_key(32));
     assert_eq!(KIND_GLOBAL_BLOCK, 3);
-    assert_eq!(GLOBAL_VERSION, 3, "the known answers belong to this version");
+    assert_eq!(GLOBAL_VERSION, 4, "the known answers belong to this version");
     assert_eq!(w.stage_key(32).to_hex(), KNOWN_STAGE_KEY);
     assert_eq!(base.to_hex(), KNOWN_BLOCK_KEY);
 }
@@ -194,9 +195,9 @@ fn a_bake_is_built_once_reused_afterwards_and_verifies_clean() {
     assert_eq!((again.written, again.reused), (0, 24), "a second run computes and writes nothing");
 
     let store = TileStore::open(d.path(), w.params()).unwrap();
-    assert_eq!(store.len(), 24);
+    assert_eq!(store.len(), 48, "24 blocks and the 24 blocks of their ocean channel (STRM-023)");
     let all = verify_global(&store, &w, 0);
-    assert_eq!((all.checked, all.matching, all.stale, all.unexplained_stale, all.unsupported), (24, 24, 0, 0, 0));
+    assert_eq!((all.checked, all.matching, all.stale, all.unexplained_stale, all.unsupported), (48, 48, 0, 0, 0));
     assert!(all.passed());
     assert_eq!(verify_global(&store, &w, 5).checked, 5);
 
@@ -212,7 +213,7 @@ fn a_bake_is_built_once_reused_afterwards_and_verifies_clean() {
     let other = world(8);
     let store = TileStore::open(d.path(), other.params()).unwrap();
     let r = verify_global(&store, &other, 0);
-    assert_eq!((r.checked, r.matching, r.unexplained_stale), (24, 0, 24));
+    assert_eq!((r.checked, r.matching, r.unexplained_stale), (48, 0, 48));
     assert!(r.compared_nothing() && !r.passed());
 }
 
@@ -386,7 +387,277 @@ fn another_body_or_a_missing_node_is_refused_and_the_radius_is_in_the_key_but_no
     assert!(GlobalWorld::from_definition(&WorldDefinition::empty()).is_err());
 }
 
-// Both keys moved with GLOBAL_VERSION 3 (latitude from the +z pole): the stage key names the bake version.
-const KNOWN_STAGE_KEY: &str = "c91fccae01d58cf954c7c896c5fc4a97";
-const KNOWN_BLOCK_KEY: &str = "8a2519d5ec1cc5cdba280e8a56994658";
+// Both keys moved with GLOBAL_VERSION 4 (the ocean channel; 3 was the latitude from the +z pole): the stage key names the bake version.
+const KNOWN_STAGE_KEY: &str = "9a64d68a38a57d47c0762bdbec4cb95c";
+const KNOWN_BLOCK_KEY: &str = "995ef36e9bddc3cd742437e94a726785";
 const KNOWN_NODE_SET_ID: &str = "92572f1974620d913454c89a22aca7be";
+
+// spec: STRM-023
+#[test]
+fn an_ocean_block_key_covers_the_tile_the_grid_the_threshold_and_the_stage_key() {
+    let w = world(7);
+    let (res, cells) = (32u32, 8u32);
+    let base = w.ocean_key(tile(), cells);
+    assert_ne!(base, w.block_key(tile(), cells), "the channel and the samples of one block have different keys");
+    assert_ne!(base, w.ocean_key(TileId::new(Face(2), 2, 1, 2).unwrap(), cells));
+    assert_ne!(base, w.ocean_key(tile(), 4));
+    assert_ne!(base, w.ocean_key(TileId::new(Face(2), 3, 1, 3).unwrap(), cells));
+    assert_ne!(base, world(8).ocean_key(tile(), cells), "another seed is another bake");
+    assert_ne!(base, world(7).with_ocean_area_fraction(0.01).ocean_key(tile(), cells), "the area threshold is an output parameter");
+    let inputs = w.ocean_key_inputs(tile(), cells);
+    assert_eq!(inputs.kind, Kind::GlobalOcean);
+    assert_eq!(inputs.source, Some(w.stage_key(res)), "the bake's one stage key is the source");
+    assert_eq!(inputs.output_params.get(&PARAM_RESOLUTION), Some(&cells.to_le_bytes().to_vec()));
+    assert_eq!(inputs.output_params.get(&PARAM_GRID_RES), Some(&res.to_le_bytes().to_vec()));
+    assert_eq!(inputs.output_params.get(&PARAM_OCEAN_AREA_FRACTION), Some(&EARTH_OCEAN_MIN_AREA_FRACTION.to_bits().to_le_bytes().to_vec()));
+    assert!(inputs.reads.is_empty());
+    assert_eq!(encode(&inputs)[..2], [planet_cache::key::KEY_FORMAT_TAG, 4]);
+    assert_eq!(KIND_GLOBAL_OCEAN, 4);
+    assert_eq!(base.to_hex(), KNOWN_OCEAN_KEY);
+    // The sea nodes of the definition set the threshold; a world that sets none has the Earth default.
+    let mut def = WorldDefinition::single_planet(R, 7);
+    assert_eq!(GlobalWorld::from_definition(&def).unwrap().sea().min_area_fraction, EARTH_OCEAN_MIN_AREA_FRACTION);
+    def.set(&planet_world_def::body_sea_min_area_path(BodyId::PLANET), NodeValue::F64(0.01));
+    let set = GlobalWorld::from_definition(&def).unwrap().with_block_limit(4);
+    assert_eq!(set.ocean_key(tile(), cells), world(7).with_ocean_area_fraction(0.01).ocean_key(tile(), cells));
+    assert_eq!(set.block_key(tile(), cells), world(7).block_key(tile(), cells), "the sea is not an input of the bake");
+    assert_eq!(set.stage_key(32), world(7).stage_key(32));
+    def.set(&planet_world_def::body_sea_min_area_path(BodyId::PLANET), NodeValue::F64(2.0));
+    assert!(GlobalWorld::from_definition(&def).is_err(), "a fraction above 1 names its node");
+}
+
+// spec: STRM-023
+#[test]
+fn an_ocean_block_round_trips_and_a_hostile_payload_is_refused_without_allocating() {
+    for cells in [1u32, 2, 4, 8, 32] {
+        let mut b = OceanBits::zeros(cells);
+        for l in 0..=cells {
+            for k in 0..=cells {
+                if (k * 7 + l * 3) % 5 < 2 {
+                    b.set(k, l);
+                }
+            }
+        }
+        let bytes = encode_ocean_block(&b).unwrap();
+        assert_eq!(bytes[0], OCEAN_CODEC_VERSION);
+        assert_eq!(u32::from_le_bytes(bytes[1..5].try_into().unwrap()), cells);
+        assert_eq!(u64::from(u32::from_le_bytes(bytes[5..9].try_into().unwrap())), (u64::from(cells) + 1).pow(2).div_ceil(8));
+        assert_eq!(decode_ocean_block(&bytes).unwrap(), b, "cells {cells}");
+    }
+    // A one-cell block written out by hand: four vertices, bits 0 and 3 set, one byte 0b1001.
+    let mut one = OceanBits::zeros(1);
+    one.set(0, 0);
+    one.set(1, 1);
+    let bytes = encode_ocean_block(&one).unwrap();
+    assert_eq!(bytes[..9], [1, 1, 0, 0, 0, 1, 0, 0, 0]);
+    assert_eq!(lz4_flex::decompress(&bytes[9..], 1).unwrap(), [0b1001]);
+    let good = encode_ocean_block(&OceanBits::zeros(4)).unwrap();
+    assert!(matches!(decode_ocean_block(&good[..5]), Err(BlockCodecError::Short)));
+    let mut v = good.clone();
+    v[0] = 2;
+    assert_eq!(decode_ocean_block(&v).unwrap_err(), BlockCodecError::OceanVersion(2));
+    for cells in [0u32, 3, 2048, u32::MAX] {
+        let mut c = good.clone();
+        c[1..5].copy_from_slice(&cells.to_le_bytes());
+        assert_eq!(decode_ocean_block(&c).unwrap_err(), BlockCodecError::Cells(cells), "a hostile header never allocates");
+    }
+    let mut raw = good.clone();
+    raw[5..9].copy_from_slice(&1u32.to_le_bytes());
+    assert!(matches!(decode_ocean_block(&raw).unwrap_err(), BlockCodecError::RawLength { .. }));
+    assert!(decode_ocean_block(&good[..good.len() - 1]).is_err());
+    // A bit set beyond the last vertex of 4 cells (25 bits in 4 bytes) is damage.
+    let mut spare = Vec::from(&good[..9]);
+    spare.extend(lz4_flex::compress(&[0, 0, 0, 0x80]));
+    assert_eq!(decode_ocean_block(&spare).unwrap_err(), BlockCodecError::OceanBits);
+    assert!(matches!(encode_ocean_block(&OceanBits::zeros(3)), Err(BlockCodecError::Cells(3))));
+}
+
+// spec: STRM-023
+#[test]
+fn the_build_stores_the_ocean_channel_once_and_the_store_reads_it_like_the_in_memory_computation() {
+    let d = Dir::new("ocean-build");
+    let w = world(7);
+    let r = build_global(d.path(), &w, 16, 3, DEFAULT_MAX_PACK_BYTES).unwrap();
+    assert_eq!((r.written, r.reused, r.ocean_written, r.ocean_reused), (96, 0, 96, 0));
+    assert!(r.ocean_components >= 1 && r.ocean_oceans >= 1 && r.ocean_merger_bytes > 0 && r.peak_resident_blocks <= 3);
+    let again = build_global(d.path(), &w, 16, 3, DEFAULT_MAX_PACK_BYTES).unwrap();
+    assert_eq!((again.written, again.reused, again.ocean_written, again.ocean_reused), (0, 96, 0, 96), "a second run writes nothing");
+    assert_eq!(again.ocean_components, 0, "and does not recompute the table");
+
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    // The stored channel equals the in-memory computation and the serial reference, vertex by vertex.
+    let grid = bake(7, &TangentWarp, 16, 2).unwrap();
+    let fraction = w.sea().min_area_fraction;
+    let (mem_table, mem) = tiled_ocean(&grid, &TangentWarp, 4, 2, fraction).unwrap();
+    let (ref_table, reference) = reference_ocean(&grid, &TangentWarp, fraction).unwrap();
+    assert_eq!(mem, reference);
+    let table = ocean_table_of_store(&store, &w, 16, 2).unwrap();
+    assert_eq!(table, mem_table);
+    assert_eq!(table.hash(), ref_table.hash());
+    assert_eq!((r.ocean_components, r.ocean_oceans), (table.components.len(), table.ocean_components().count()));
+    let src = StoreOceanSource::new(&store, &w, 16).unwrap();
+    assert_eq!(src.res(), 16);
+    for f in 0..6u8 {
+        for j in 0..=16 {
+            for i in 0..=16 {
+                assert_eq!(src.is_ocean(Face(f), i, j).unwrap(), mem.get(Face(f), i, j), "face {f} vertex ({i}, {j})");
+            }
+        }
+    }
+    assert!(src.is_ocean(Face(0), 17, 0).is_err());
+    assert!(src.decodes() >= 1 && src.resident_blocks() <= 64);
+    assert_eq!(verify_global(&store, &w, 0).matching, 192);
+    // Thread count and batch size do not change a bit of the stored channel.
+    let d2 = Dir::new("ocean-build-1");
+    build_global(d2.path(), &w, 16, 1, DEFAULT_MAX_PACK_BYTES).unwrap();
+    let store2 = TileStore::open(d2.path(), w.params()).unwrap();
+    for f in 0..6u8 {
+        for y in 0..4 {
+            for x in 0..4 {
+                let t = TileId::new(Face(f), 2, x, y).unwrap();
+                let a = store.get(KIND_GLOBAL_OCEAN, t, w.ocean_key(t, 4)).unwrap().unwrap();
+                let b = store2.get(KIND_GLOBAL_OCEAN, t, w.ocean_key(t, 4)).unwrap().unwrap();
+                assert_eq!(a.payload, b.payload, "face {f} block ({x}, {y})");
+            }
+        }
+    }
+}
+
+// spec: STRM-023
+#[test]
+fn another_threshold_adds_the_ocean_blocks_from_the_stored_bake_without_baking_again() {
+    let d = Dir::new("ocean-threshold");
+    let w = world(7);
+    build_global(d.path(), &w, 8, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
+    let all_sea = world(7).with_ocean_area_fraction(0.0);
+    let r = build_global(d.path(), &all_sea, 8, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
+    assert_eq!((r.written, r.reused, r.ocean_written, r.ocean_reused), (0, 24, 24, 0), "the blocks are reused, the channel is new");
+    assert!(r.ocean_components > 0 && r.ocean_oceans == r.ocean_components, "a threshold of 0 makes every sea component ocean");
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    // Both channels live side by side under their own keys and read their own answers.
+    let (a, b) = (StoreOceanSource::new(&store, &w, 8).unwrap(), StoreOceanSource::new(&store, &all_sea, 8).unwrap());
+    let grid = bake(7, &TangentWarp, 8, 1).unwrap();
+    let (_, strict) = tiled_ocean(&grid, &TangentWarp, 4, 1, w.sea().min_area_fraction).unwrap();
+    let (_, loose) = tiled_ocean(&grid, &TangentWarp, 4, 1, 0.0).unwrap();
+    for f in 0..6u8 {
+        for j in 0..=8 {
+            for i in 0..=8 {
+                assert_eq!(a.is_ocean(Face(f), i, j).unwrap(), strict.get(Face(f), i, j));
+                assert_eq!(b.is_ocean(Face(f), i, j).unwrap(), loose.get(Face(f), i, j));
+            }
+        }
+    }
+    // A source over a store that lacks the channel names the block and its key.
+    let empty = Dir::new("ocean-empty");
+    fs::create_dir_all(empty.path()).unwrap();
+    let nothing = TileStore::open(empty.path(), w.params()).unwrap();
+    let missing = StoreOceanSource::new(&nothing, &w, 8).unwrap();
+    let e = missing.is_ocean(Face(2), 5, 7).unwrap_err().to_string();
+    assert!(
+        e.contains("ocean block")
+            && e.contains("not stored under the current key")
+            && e.contains(&w.ocean_key(TileId::new(Face(2), 1, 1, 1).unwrap(), 4).to_hex()),
+        "{e}"
+    );
+    assert!(StoreOceanSource::new(&nothing, &w, 100).is_err());
+}
+
+// spec: STRM-023
+#[test]
+fn a_wrong_or_damaged_ocean_block_is_reported_by_verify_with_its_vertex() {
+    let w = world(7);
+    let d = Dir::new("ocean-bad");
+    build_global(d.path(), &w, 8, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    // Right key and metadata, one vertex flipped.
+    let t = TileId::new(Face(1), 1, 0, 1).unwrap();
+    let rec = store.get(KIND_GLOBAL_OCEAN, t, w.ocean_key(t, 4)).unwrap().unwrap();
+    let mut bits = decode_ocean_block(&rec.payload).unwrap();
+    if bits.get(2, 3) {
+        bits.words[0] &= !(1 << (3 * 5 + 2));
+    } else {
+        bits.set(2, 3);
+    }
+    let bad = w.ocean_record(t, &bits).unwrap();
+    let mut junk = rec.clone();
+    junk.tile = TileId::new(Face(1), 1, 1, 1).unwrap();
+    junk.key = w.ocean_key(junk.tile, 4);
+    junk.payload[0] = 9;
+    // Appended after the good records (the later record of a key wins).
+    let mut writer = PackWriter::open(d.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    writer.append(&bad).unwrap();
+    writer.append(&junk).unwrap();
+    writer.finish().unwrap();
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    let r = verify_global(&store, &w, 0);
+    assert_eq!(r.mismatches.len(), 1, "{r:?}");
+    assert_eq!(r.unreadable.len(), 1, "{r:?}");
+    assert!(
+        r.mismatches[0].detail.contains("vertex (2, 3)") && r.mismatches[0].detail.contains("missing from its key"),
+        "{}",
+        r.mismatches[0].detail
+    );
+    assert!(r.unreadable[0].contains("ocean block") && r.unreadable[0].contains("version 9"), "{}", r.unreadable[0]);
+    assert!(!r.passed());
+    // Another threshold's channel is stale for this world.
+    let other = world(7).with_ocean_area_fraction(0.0);
+    let r = verify_global(&store, &other, 0);
+    assert!(r.unexplained_stale >= 23, "{r:?}");
+}
+
+// spec: STRM-023
+#[test]
+fn the_ocean_channel_needs_the_blocks_and_names_the_missing_one() {
+    let w = world(7);
+    let d = Dir::new("ocean-partial");
+    let mut writer = PackWriter::open(d.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    for f in 0..6u8 {
+        for y in 0..2 {
+            for x in 0..2 {
+                if (f, x, y) == (3, 1, 1) {
+                    continue;
+                }
+                let t = TileId::new(Face(f), 1, x, y).unwrap();
+                writer.append(&w.block_record(t, 4, &bake_block(7, &TangentWarp, t, 4)).unwrap()).unwrap();
+            }
+        }
+    }
+    writer.finish().unwrap();
+    let store = TileStore::open(d.path(), w.params()).unwrap();
+    let e = ocean_table_of_store(&store, &w, 8, 2).unwrap_err().to_string();
+    assert!(
+        e.contains("not stored under the current key") && e.contains(&w.block_key(TileId::new(Face(3), 1, 1, 1).unwrap(), 4).to_hex()),
+        "{e}"
+    );
+    // A build over it bakes the missing block and then has them all.
+    let r = build_global(d.path(), &w, 8, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
+    assert_eq!((r.written, r.reused, r.ocean_written), (1, 23, 24));
+    assert!(ocean_table_of_store(&TileStore::open(d.path(), w.params()).unwrap(), &w, 8, 2).is_ok());
+}
+
+const KNOWN_OCEAN_KEY: &str = "e652f9786c2ec96f65747583c43390a9";
+
+// spec: STRM-023
+// spec: STRM-013
+#[test]
+fn an_ocean_block_is_live_by_the_rule_of_the_sample_blocks() {
+    let w = world(7);
+    let t = TileId::new(Face(0), 1, 0, 0).unwrap();
+    let rec = w.ocean_record(t, &OceanBits::zeros(4)).unwrap();
+    assert!(w.is_live(&rec));
+    let mut old = rec.clone();
+    old.generator_version = GLOBAL_VERSION - 1;
+    assert!(!w.is_live(&old), "an ocean block of an older global version is dead");
+    let mut other_set = rec.clone();
+    other_set.node_set_id = [9; 16];
+    assert!(!w.is_live(&other_set));
+    let mut unknown = rec;
+    unknown.kind = 77;
+    unknown.generator_version = 1;
+    assert!(w.is_live(&unknown), "a record of a kind this world does not judge is kept");
+    // The block of another layout is refused by the keyer.
+    assert!(matches!(
+        GlobalWorld::from_definition(&WorldDefinition::single_planet(R, 7)).unwrap().ocean_record(t, &OceanBits::zeros(4)),
+        Err(BlockCodecError::Grid { .. })
+    ));
+}

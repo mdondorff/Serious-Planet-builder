@@ -412,6 +412,6 @@ fn the_peak_of_live_blocks_is_counted_between_creation_and_delivery() {
 }
 
 /// The version the known answers below were recorded against (ADR 0006): changing the output without a bump fails here.
-const RECORDED_VERSION: u32 = 3; // 2 -> 3: latitude from COORD's +z pole (was d.y); continent and elevation bits are unchanged
+const RECORDED_VERSION: u32 = 4; // 3 -> 4: the ocean channel (ADR 0041); no sample bit moved, the grid hash names the version. 2 -> 3: latitude from COORD's +z pole (was d.y)
 const KNOWN_POINTS: &str = "[[3f3ef54b, 44cb75f7, 41a18f38, 45032416], [be83b213, c4c37fdb, 41e85e2b, 451fdf30], [bed97260, c52f51c0, c1cc7154, 442aa58a], [3e25822e, 42c5afbf, c0853821, 44c8606a], [beff7496, c54fe3c7, 4172b6d8, 42fa29a4]]";
-const KNOWN_GRID_HASH: &str = "b56dcabe1a6c853f";
+const KNOWN_GRID_HASH: &str = "33d719d1d0abe93b";

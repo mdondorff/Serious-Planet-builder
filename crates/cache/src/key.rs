@@ -67,6 +67,8 @@ pub enum Kind {
     Mesh = 2,
     /// A block of the global-coarse bake (ADR 0026 point 6).
     GlobalBlock = 3,
+    /// A block of the ocean-connectivity channel of the global bake (ADR 0041 point 2): one bit per vertex.
+    GlobalOcean = 4,
 }
 
 /// One entry of a read set, in its 128-bit form (ADR 0018).
@@ -243,6 +245,8 @@ pub const PARAM_MESH_VERSION: u8 = 3;
 pub const PARAM_GRID_RES: u8 = 4;
 /// The climate version word of a mesh key ([`HeightField::climate_version_word`]); tag 5 is the form of a pre-filled tile.
 pub const PARAM_CLIMATE_VERSION: u8 = 6;
+/// The area threshold of an ocean block (the bits of the `f64` fraction of the body's surface, ADR 0041 point 2).
+pub const PARAM_OCEAN_AREA_FRACTION: u8 = 7;
 
 fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> KeyInputs {
     assert!(

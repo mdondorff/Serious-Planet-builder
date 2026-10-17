@@ -372,6 +372,25 @@ fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         if samples > 0.0 { secs * threads as f64 / samples * 1e6 } else { 0.0 }
     )
     .map_err(err)?;
+    // The ocean-connectivity channel (ADR 0041 point 2, STRM-023) is part of the bake.
+    if report.ocean_components > 0 || report.ocean_written > 0 {
+        writeln!(
+            out,
+            "global ocean channel: {} blocks written, {} already stored; {} sea components, {} of them ocean (area threshold {:.4} % of the surface); {:.1} s beyond the bake, {:.1} s of analysis thread time inside it, the merger held {} bytes",
+            report.ocean_written,
+            report.ocean_reused,
+            report.ocean_components,
+            report.ocean_oceans,
+            world.sea().min_area_fraction * 100.0,
+            report.ocean_seconds,
+            report.ocean_in_bake_thread_seconds,
+            report.ocean_merger_bytes
+        )
+        .map_err(err)?;
+    } else {
+        writeln!(out, "global ocean channel: {} blocks already stored under their current key, nothing recomputed", report.ocean_reused)
+            .map_err(err)?;
+    }
     // The coarse tiles go into the same pack (STRM-021, ADR 0045 point 3): levels 0..=4 unless `--prefill-levels` says otherwise.
     crate::prefill::prefill_store(o, dir, out)
 }

@@ -48,11 +48,12 @@ fn manifest_lists_the_global_bake_and_both_terrain_fields_at_edges_and_corners()
     // 64 cells per face edge as 16-cell blocks of level 2: 16 blocks per face.
     assert_eq!(count("globalblock"), 6 * 16, "every block of the small bake");
     assert_eq!(count("globalgrid"), 1, "the whole-grid hash");
+    assert_eq!((count("oceantable"), count("oceangrid")), (1, 1), "the ocean channel: its component table and its bits");
     assert_eq!(count("terrain"), 6 * 12, "the terrain field, 12 directions per face");
     assert_eq!(count("erosion"), 6 * 12, "the eroded field, 12 directions per face");
     assert!(
         a.contains(
-            "version global cpu-global-coarse-v1 3
+            "version global cpu-global-coarse-v1 4
 "
         ),
         "the bake's implementation id and version"
@@ -74,12 +75,12 @@ fn one_ulp_in_any_new_entry_changes_the_manifest_in_that_entry_only() {
     let base = values.entries(&|_, _| None);
     assert!(determinism_manifest().contains(&base), "the new entries are the manifest's own section");
     let new: Vec<&str> = base.lines().collect();
-    assert_eq!(new.len(), 96 + 1 + 72 + 72);
+    assert_eq!(new.len(), 96 + 1 + 2 + 72 + 72);
     for line in new {
         let (head, value) = line.rsplit_once(' ').unwrap();
         let (kind, key) = head.split_once(' ').unwrap();
         // Bake entries: every channel at the first and at the last sample; fields: one variant.
-        let variants = if kind == "terrain" || kind == "erosion" { 1 } else { 8 };
+        let variants = if kind == "terrain" || kind == "erosion" || kind.starts_with("ocean") { 1 } else { 8 };
         for v in 0..variants {
             let m = values.entries(&|k, kk| (k == kind && kk == key).then_some(v));
             let diff: Vec<(&str, &str)> = base.lines().zip(m.lines()).filter(|(x, y)| x != y).collect();

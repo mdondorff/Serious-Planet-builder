@@ -19,8 +19,10 @@ use planet_world_def::{BodyId, GenContext, MissingNode, ReadRecord};
 
 use crate::height::layer_noise;
 
-/// Bump whenever any output of this module changes (ADR 0006).
-pub const GLOBAL_VERSION: u32 = 3;
+/// Bump whenever any output of this module changes (ADR 0006). History: 2 = the climate's pole axis moved to COORD's +z (3);
+/// 4 = the global stage gains the ocean-connectivity channel (`crate::ocean`, ADR 0041 point 2); the four sample channels are
+/// unchanged, but every key under this version is new, so stored blocks of version 3 are unreachable.
+pub const GLOBAL_VERSION: u32 = 4;
 /// Names this implementation in cache keys (CON-07).
 pub const IMPLEMENTATION_ID: &str = "cpu-global-coarse-v1";
 
@@ -400,6 +402,24 @@ pub fn bake_blocks_where(
     want: &(dyn Fn(TileId) -> bool + Sync),
     sink: &mut dyn FnMut(TileId, Vec<GlobalSample>),
 ) -> Result<TiledBakeStats, BakeError> {
+    bake_blocks_with(seed, map, level, cells, threads, want, &|_, _| (), &mut |t, b, ()| sink(t, b))
+}
+
+/// [`bake_blocks_where`] with `analyse`, a pure function of a block that runs on the worker thread that baked it while the block
+/// is in memory (the ocean-connectivity pass of ADR 0041 point 2 labels its components here); the sink receives the block and what
+/// `analyse` returned for it. `analyse` runs once per accepted block and its result is part of what a batch holds, so a large
+/// result counts against the caller's memory, not the block budget.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn bake_blocks_with<A: Send>(
+    seed: u64,
+    map: &(dyn FaceMapping + Sync),
+    level: u8,
+    cells: u32,
+    threads: usize,
+    want: &(dyn Fn(TileId) -> bool + Sync),
+    analyse: &(dyn Fn(TileId, &[GlobalSample]) -> A + Sync),
+    sink: &mut dyn FnMut(TileId, Vec<GlobalSample>, A),
+) -> Result<TiledBakeStats, BakeError> {
     check_tiled(level, cells)?;
     let side = 1u64 << level;
     let total = 6 * side * side;
@@ -427,7 +447,7 @@ pub fn bake_blocks_where(
             next = end;
             continue;
         }
-        let blocks: Vec<Vec<GlobalSample>> = std::thread::scope(|scope| {
+        let blocks: Vec<(Vec<GlobalSample>, A)> = std::thread::scope(|scope| {
             let (live, peak) = (&live, &peak);
             let handles: Vec<_> = batch
                 .iter()
@@ -435,14 +455,15 @@ pub fn bake_blocks_where(
                     scope.spawn(move || {
                         let block = bake_block(seed, map, *t, cells);
                         peak.fetch_max(live.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
-                        block
+                        let a = analyse(*t, &block);
+                        (block, a)
                     })
                 })
                 .collect();
             handles.into_iter().map(|h| h.join().expect("bake thread panicked")).collect()
         });
-        for (t, b) in batch.iter().zip(blocks) {
-            sink(*t, b);
+        for (t, (b, a)) in batch.iter().zip(blocks) {
+            sink(*t, b, a);
             live.fetch_sub(1, Ordering::SeqCst);
             stats.blocks += 1;
         }
@@ -601,7 +622,51 @@ pub fn read_tile_sample(src: &dyn LatticeSource, tile: TileId, cells: u32, k: i6
 /// [`read_tile_sample`] its weights are not exact dyadic fractions and it is not bit-equal to a lattice read of the same
 /// sample; a field uses one or the other, never both (ADR 0028).
 pub fn read_direction(src: &dyn LatticeSource, map: &dyn FaceMapping, dir: Vec3) -> Result<GlobalSample, ReadError> {
-    let res = src.res();
+    let at = locate_direction(src.res(), map, dir)?;
+    blend_cell(src, at.face, at.i, at.j, at.wu, at.wv)
+}
+
+/// Where a direction falls in the bake's lattice: the face, the cell `(i, j)` (the lower corner vertex) and the exact weights of
+/// the next vertex along each axis (ADR 0027 point 2; a weight of 0 means the far vertex is not read).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LatticePos {
+    /// The lattice's cells per face edge.
+    pub res: u32,
+    pub face: Face,
+    pub i: u32,
+    pub j: u32,
+    pub wu: f64,
+    pub wv: f64,
+}
+
+impl LatticePos {
+    /// The vertices that carry a non-zero weight (ADR 0041 point 1): the lower corner always (its weight `(1 - wu)(1 - wv)` is
+    /// positive), the others only when their axis weight is not zero. At most four, in the order `(i, j)`, `(i + 1, j)`,
+    /// `(i, j + 1)`, `(i + 1, j + 1)`; `res` is the lattice resolution (a vertex never lies beyond it).
+    pub fn weighted_vertices(&self, res: u32) -> ([(u32, u32); 4], usize) {
+        let mut out = [(self.i, self.j); 4];
+        let mut n = 1;
+        let i1 = (self.i + 1).min(res);
+        let j1 = (self.j + 1).min(res);
+        if self.wu != 0.0 {
+            out[n] = (i1, self.j);
+            n += 1;
+        }
+        if self.wv != 0.0 {
+            out[n] = (self.i, j1);
+            n += 1;
+        }
+        if self.wu != 0.0 && self.wv != 0.0 {
+            out[n] = (i1, j1);
+            n += 1;
+        }
+        (out, n)
+    }
+}
+
+/// The position of `dir` in the lattice of `res` cells per face edge: the face and face coordinates come from `direction_to_face`,
+/// the lattice position from the face coordinates in floating point. [`read_direction`] reads at this position.
+pub fn locate_direction(res: u32, map: &dyn FaceMapping, dir: Vec3) -> Result<LatticePos, ReadError> {
     if res == 0 || !res.is_power_of_two() {
         return Err(ReadError::Shape(format!("a reader needs a power-of-two bake resolution (res {res})")));
     }
@@ -617,7 +682,7 @@ pub fn read_direction(src: &dyn LatticeSource, map: &dyn FaceMapping, dir: Vec3)
         }
     };
     let ((i, wu), (j, wv)) = (axis(pos(s)), axis(pos(t)));
-    blend_cell(src, face, i, j, wu, wv)
+    Ok(LatticePos { res, face, i, j, wu, wv })
 }
 
 /// Interleave the bits of two block indices (Z order): blocks that are neighbours on the face are close in this order, so a

@@ -268,6 +268,17 @@ impl LitPlan {
         Ok(self)
     }
 
+    /// This plan shaded against the water level `level_m` (metres above the reference surface): the level the water-level field W
+    /// gives for the view (ADR 0041 point 1, `planet_generators::water::WaterField::plan_water`; the sea's constant level in M5),
+    /// which the beach band of the albedo is measured from (ADR 0039 point 3). The level reaches the shader as an `f32`
+    /// (presentation data, ADR 0035: relative rounding 6e-8, 0.6 mm at 10 km); a level of 0, the Earth default, leaves the plan text
+    /// and hash as they were.
+    pub fn with_water_level(mut self, level_m: f64) -> LitPlan {
+        // -0.0 is the default level too: it must not change the plan text.
+        self.water_level_m = if level_m == 0.0 { 0.0 } else { level_m as f32 };
+        self
+    }
+
     /// An adaptive-exposure lit plan whose range, speeds, units and histogram come from a body's look parameters.
     pub fn adaptive_with(look: &file::LookParams, pre_ev100: f32, dt_s: f32) -> Self {
         Self { exposure: ExposureMode::Adaptive { params: look.exposure_params(), pre_ev100 }, dt_s, ..Self::fixed_with(look, pre_ev100) }

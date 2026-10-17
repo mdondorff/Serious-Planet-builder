@@ -18,7 +18,8 @@ use std::fmt;
 use crate::{is_height_field_path, valid_implementation_id, NodeValue, WorldDefinition, HEIGHT_FIELD_PATH};
 
 /// Schema version this build writes and reads without migration.
-pub const SCHEMA_VERSION: u32 = 1;
+/// History: 1 = the first layout; 2 = adds the liquid table (`liquid.<k>.*`) and the sea of a body (`body.<n>.sea.*`), WDEF-006.
+pub const SCHEMA_VERSION: u32 = 2;
 
 const VERSION_KEY: &str = "schema_version";
 
@@ -29,8 +30,10 @@ pub struct Migration {
     pub apply: fn(&mut toml::Table) -> Result<(), String>,
 }
 
-/// Migrations from every older version to the current one (none yet: version 1 is the first).
-pub const MIGRATIONS: &[Migration] = &[];
+/// Migrations from every older version to the current one. Version 1 to 2 changes no layout: version 2 only adds keys (the
+/// liquid table and the sea of a body, both optional with Earth defaults), so a version 1 file means the same definition. The
+/// step exists so that an older build says "newer schema version" instead of "unknown key" (the rule of ADR 0049 point 4).
+pub const MIGRATIONS: &[Migration] = &[Migration { from: 1, apply: |_| Ok(()) }];
 
 /// Why a definition file could not be loaded or written. Every variant names what to fix.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -129,6 +132,14 @@ enum Kind {
 fn expected_kind(path: &str) -> Option<Kind> {
     if path == WorldDefinition::SEED_PATH {
         return Some(Kind::Integer);
+    }
+    if crate::water::liquid_node(path).is_some() {
+        return Some(Kind::Float);
+    }
+    match crate::water::sea_node(path) {
+        Some("sea.liquid") => return Some(Kind::Integer),
+        Some(_) => return Some(Kind::Float),
+        None => {}
     }
     let rest = path.strip_prefix("body.")?;
     let (index, leaf) = rest.split_once('.')?;

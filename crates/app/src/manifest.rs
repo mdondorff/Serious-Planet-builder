@@ -61,6 +61,7 @@ pub fn persistent_known_answers() -> String {
     line("stagekey32", world.stage_key(32).to_hex());
     line("blockkey", world.block_key(block_tile, 8).to_hex());
     line("nodesetid", hex(world.node_set_id()));
+    line("oceankey", world.ocean_key(block_tile, 8).to_hex());
     s
 }
 
@@ -90,14 +91,15 @@ mod tests {
         // The literals of crates/cache/tests/keys.rs and global_store.rs: one pin, two places.
         assert_eq!(get("base"), "b00fa2b4b0f9accc87be74b4dd9d40ca");
         assert_eq!(get("height"), "340480159ae2ca791db08d1cae1232ce");
-        assert_eq!(get("mesh"), "1040d826b633179027f11a2079c893f1");
+        assert_eq!(get("mesh"), "f077d99860608b088e1caf6509ca9d89");
         assert_eq!(get("node"), "dd934e9e858a828bb73c45e8a4eb4d45");
         assert_eq!(get("body"), "91f0cebc78907779e2f87196650d468e");
         assert_eq!(get("emptyquery"), "a97668a9d9614a3f4a73f2fceae97219");
-        assert_eq!(get("stagekey32"), "c91fccae01d58cf954c7c896c5fc4a97");
-        assert_eq!(get("blockkey"), "8a2519d5ec1cc5cdba280e8a56994658");
+        assert_eq!(get("stagekey32"), "9a64d68a38a57d47c0762bdbec4cb95c");
+        assert_eq!(get("blockkey"), "995ef36e9bddc3cd742437e94a726785");
         assert_eq!(get("nodesetid"), "92572f1974620d913454c89a22aca7be");
-        assert_eq!(m.lines().filter(|l| l.starts_with("persistent ")).count(), 9);
+        assert_eq!(get("oceankey"), "e652f9786c2ec96f65747583c43390a9");
+        assert_eq!(m.lines().filter(|l| l.starts_with("persistent ")).count(), 10);
         assert!(m.starts_with(&planet_generators::manifest::determinism_manifest()), "the generators' manifest comes first, unchanged");
         let mut keys: Vec<&str> = m.lines().map(|l| l.rsplit_once(' ').unwrap().0).collect();
         keys.sort_unstable();
