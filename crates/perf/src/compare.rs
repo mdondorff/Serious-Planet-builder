@@ -498,7 +498,7 @@ pub fn comparison_lines_gpu(last_valid: Option<&[u8]>, last_gpu_valid: Option<&[
         }
         let new_state = match validity {
             GpuValidity::Valid(s) => s,
-            GpuValidity::Invalid(r) => {
+            GpuValidity::Invalid(r) | GpuValidity::Below(_, r) => {
                 lines.push(format!("GPU medians of {path} not compared: NOT VALID for GPU budgets ({r})"));
                 continue;
             }
@@ -515,7 +515,7 @@ pub fn comparison_lines_gpu(last_valid: Option<&[u8]>, last_gpu_valid: Option<&[
         };
         match old.gpu.get(path) {
             None => continue,
-            Some(GpuValidity::Invalid(r)) => {
+            Some(GpuValidity::Invalid(r) | GpuValidity::Below(_, r)) => {
                 lines.push(format!("GPU medians of {path} not compared: the baseline view was not valid for GPU budgets ({r})"))
             }
             Some(GpuValidity::Valid(old_state)) if !equal_clock_state(old_state, new_state) => {

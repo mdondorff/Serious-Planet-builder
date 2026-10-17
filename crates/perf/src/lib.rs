@@ -299,7 +299,7 @@ pub fn session_warnings(adapter: &AdapterFacts, power_scheme: Option<&str>, runs
 fn gpu_valid_json(v: &clock::GpuValidity) -> (String, String) {
     match v {
         clock::GpuValidity::Valid(s) => ("true".into(), json_str(&s.to_string())),
-        clock::GpuValidity::Invalid(r) => ("false".into(), json_str(r)),
+        clock::GpuValidity::Invalid(r) | clock::GpuValidity::Below(_, r) => ("false".into(), json_str(r)),
     }
 }
 
@@ -347,6 +347,33 @@ pub fn view_power_cap(runs: &[RunReport], path: &str) -> bool {
         .filter(|r| r.path_name == path)
         .flat_map(|r| [&r.clocks_before, &r.clocks_after])
         .any(|c| c.as_ref().is_some_and(|c| gate::has_power_cap(&c.throttle_reasons)))
+}
+
+/// Wait, idle, for the GPU to cool to [`clock::COOL_START_C`] before a view's warm-up (ADR 0057): polls `nvidia-smi` every
+/// [`clock::COOL_POLL_S`] seconds, at most [`clock::COOL_CAP_S`]. Blocks; never on a frame path, never in a smoke run.
+pub fn cool_gpu() -> clock::CoolOutcome {
+    let started = std::time::Instant::now();
+    clock::cool_down(
+        clock::COOL_START_C,
+        clock::COOL_CAP_S,
+        || query_nvidia_smi().map(|c| c.temperature_c),
+        || std::thread::sleep(std::time::Duration::from_secs_f64(clock::COOL_POLL_S)),
+        || started.elapsed().as_secs_f64(),
+    )
+}
+
+/// The temperature and power the GPU read around the runs of the view `path`, for the line beside its GPU rows (ADR 0057):
+/// `68-74 C, up to 95 W`. `None` without a sample. The clock is the reading that matters, the heat and the power are why.
+pub fn view_thermal_text(runs: &[RunReport], path: &str) -> Option<String> {
+    let samples: Vec<&ClockSample> =
+        runs.iter().filter(|r| r.path_name == path).flat_map(|r| [&r.clocks_before, &r.clocks_after]).flatten().collect();
+    if samples.is_empty() {
+        return None;
+    }
+    let (lo, hi) = samples.iter().fold((f64::MAX, f64::MIN), |(l, h), c| (l.min(c.temperature_c), h.max(c.temperature_c)));
+    let power = samples.iter().map(|c| c.power_w).fold(f64::MIN, f64::max);
+    let temp = if (hi - lo).abs() < 0.5 { format!("{hi:.0} C") } else { format!("{lo:.0}-{hi:.0} C") };
+    Some(format!("{temp}, up to {power:.0} W"))
 }
 
 /// [`report_json`] plus the warm-up outcome of each view (`warmups`: view name and what the warm-up did).
@@ -647,13 +674,13 @@ pub fn terrain_view_line(
         format!("frame median {:.2} ms, p99 {:.2} ms (budget {}) {}", total.median, total.p99, FRAME_P99_BUDGET_MS, word(v.frame_ok));
     let state = match clock {
         clock::GpuValidity::Valid(s) => s.to_string(),
-        clock::GpuValidity::Invalid(r) => r.clone(),
+        clock::GpuValidity::Invalid(r) | clock::GpuValidity::Below(_, r) => r.clone(),
     };
     let cap = if power_cap && !smoke { " [power cap 0x4 recorded, not invalidating]" } else { "" };
     let tag = if smoke { String::new() } else { format!(" [clock state {state}]{cap}") };
     let gpu_text = match (gpu, clock) {
         (None, _) => "no GPU timestamps (no GPU verdict)".to_string(),
-        (Some(g), clock::GpuValidity::Invalid(r)) if !smoke => {
+        (Some(g), clock::GpuValidity::Invalid(r) | clock::GpuValidity::Below(_, r)) if !smoke => {
             format!("NOT VALID for GPU budgets ({r}): GPU median {:.2} ms (no verdict)", g.median)
         }
         (Some(g), _) => format!("GPU median {:.2} ms (budget {}) {}", g.median, TERRAIN_GPU_BUDGET_MS, word(v.gpu_ok == Some(true))),

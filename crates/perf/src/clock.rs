@@ -19,6 +19,12 @@ pub const WARMUP_CHUNK_FRAMES: usize = 60;
 /// Consecutive readings at or above the floor that end the warm-up of the lit views (a clock that reads the floor once and falls
 /// below it in the first run is not lifted: window 6, coast-2km, coast-3m and the flights).
 pub const WARMUP_HOLD_READINGS: usize = 3;
+/// The GPU temperature (Celsius) a view's warm-up starts at or below (ADR 0057). Window 7: the views that started at 54 to 59 C held
+/// 1,455 to 1,567 MHz under the software power cap, those that started at 66 to 77 C read 1,282 to 1,380 MHz.
+pub const COOL_START_C: f64 = 60.0;
+/// How long the cool-down waits for [`COOL_START_C`], in seconds, and the pause between two temperature readings.
+pub const COOL_CAP_S: f64 = 120.0;
+pub const COOL_POLL_S: f64 = 5.0;
 /// A warm-up chunk of the lit views renders at least this long (seconds), so the readings see a sustained load, not a burst.
 pub const WARMUP_MIN_CHUNK_S: f64 = 1.0;
 
@@ -52,14 +58,31 @@ impl fmt::Display for ClockState {
 #[derive(Clone, Debug, PartialEq)]
 pub enum GpuValidity {
     Valid(ClockState),
-    /// The reason names the measured state (`P2 1150 MHz`, `mixed P0/P2`, `no clock sample`).
+    /// Every sample was read and the GPU ran below the floor (ADR 0057): the figures are over-stated by the slow clock, so a figure
+    /// within its budget is a pass and a figure over it is inconclusive. Carries the median state and the reason
+    /// (`P2 1150 MHz, below the 1400 MHz floor`, the lowest sample). Comparisons need [`GpuValidity::Valid`].
+    Below(ClockState, String),
+    /// The reason names what is missing (`no clock sample`).
     Invalid(String),
 }
 
 impl GpuValidity {
+    /// Valid for judging a figure over its budget and for comparing views (the clock reached the floor).
     pub fn is_valid(&self) -> bool {
         matches!(self, GpuValidity::Valid(_))
     }
+}
+
+/// The state in the words of a below-floor reason (`P0 1282 MHz, below the 1400 MHz floor`), as the logs carry them: the lowest
+/// sample's state, or `None` for any other text.
+pub fn parse_below_floor(text: &str) -> Option<ClockState> {
+    if !text.ends_with(" MHz floor") {
+        return None;
+    }
+    let head = text.split(", below the ").next().filter(|h| h.len() < text.len())?;
+    let mut it = head.rsplitn(3, ' ');
+    let (unit, mhz, pstate) = (it.next()?, it.next()?.parse::<f64>().ok()?, it.next()?);
+    (unit == "MHz").then(|| ClockState { pstate: pstate.to_string(), mhz })
 }
 
 /// The clock state of a view from every sample taken before and after its runs (`None` is a missing sample). The P-state is
@@ -89,9 +112,12 @@ pub fn gpu_validity(points: &[Option<ClockPoint>]) -> GpuValidity {
     };
     // Any sample not at or above the floor (a NaN reads as below) invalidates; the reason names the lowest such sample.
     let low = points.iter().flatten().filter(|p| p.mhz.is_nan() || p.mhz < GPU_CLOCK_FLOOR_MHZ).min_by(|a, b| a.mhz.total_cmp(&b.mhz));
+    let reason = |l: &ClockPoint| format!("{} {:.0} MHz, below the {GPU_CLOCK_FLOOR_MHZ:.0} MHz floor", l.pstate, l.mhz);
     match low {
         None => GpuValidity::Valid(state),
-        Some(l) => GpuValidity::Invalid(format!("{} {:.0} MHz, below the {GPU_CLOCK_FLOOR_MHZ:.0} MHz floor", l.pstate, l.mhz)),
+        // (a NaN clock is unreadable, not slow: it stays invalid)
+        Some(l) if l.mhz.is_nan() => GpuValidity::Invalid(reason(l)),
+        Some(l) => GpuValidity::Below(state, reason(l)),
     }
 }
 
@@ -170,6 +196,59 @@ pub fn warm_up_held(
     }
 }
 
+/// What the cool-down before a view's warm-up did.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CoolOutcome {
+    /// The temperature was at or below the target at the last reading.
+    pub cooled: bool,
+    pub start_c: Option<f64>,
+    pub end_c: Option<f64>,
+    pub seconds: f64,
+}
+
+impl CoolOutcome {
+    pub fn line(&self, view: &str) -> String {
+        let t = |v: Option<f64>| v.map_or("unreadable".to_string(), |v| format!("{v:.0} C"));
+        if self.cooled {
+            format!("cool-down {view}: {} -> {} after {:.0} s (target {COOL_START_C:.0} C)", t(self.start_c), t(self.end_c), self.seconds)
+        } else {
+            format!(
+                "cool-down {view}: NOT cooled, {} -> {} after {:.0} s (target {COOL_START_C:.0} C, cap {COOL_CAP_S:.0} s)",
+                t(self.start_c),
+                t(self.end_c),
+                self.seconds
+            )
+        }
+    }
+}
+
+/// Wait, idle, until the GPU temperature reads `target_c` or less, or `cap_s` seconds have passed (checked after each reading, a
+/// reading at the target counts). `sample` returns the temperature (`None`: unreadable, which ends the wait at once: there is
+/// nothing to wait on), `pause` sleeps [`COOL_POLL_S`] seconds, `now` returns seconds.
+pub fn cool_down(
+    target_c: f64,
+    cap_s: f64,
+    mut sample: impl FnMut() -> Option<f64>,
+    mut pause: impl FnMut(),
+    mut now: impl FnMut() -> f64,
+) -> CoolOutcome {
+    let start = now();
+    let mut start_c = None;
+    loop {
+        let reading = sample();
+        let seconds = now() - start;
+        if start_c.is_none() {
+            start_c = reading;
+        }
+        match reading {
+            None => return CoolOutcome { cooled: false, start_c, end_c: None, seconds },
+            Some(c) if c <= target_c => return CoolOutcome { cooled: true, start_c, end_c: Some(c), seconds },
+            Some(c) if seconds >= cap_s => return CoolOutcome { cooled: false, start_c, end_c: Some(c), seconds },
+            Some(_) => pause(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,12 +269,15 @@ mod tests {
         assert_eq!(GPU_CLOCK_FLOOR_MHZ, 1400.0);
         assert!(gpu_validity(&[p("P0", 1400.0)]).is_valid());
         // Below the floor is not, in P0 as in P2.
-        assert_eq!(gpu_validity(&[p("P2", 1200.0), p("P2", 1200.0)]), GpuValidity::Invalid("P2 1200 MHz, below the 1400 MHz floor".into()));
+        assert_eq!(
+            gpu_validity(&[p("P2", 1200.0), p("P2", 1200.0)]),
+            GpuValidity::Below(ClockState { pstate: "P2".into(), mhz: 1200.0 }, "P2 1200 MHz, below the 1400 MHz floor".into())
+        );
         assert!(!gpu_validity(&[p("P0", 1399.0)]).is_valid());
         // Mixed samples: one below the floor invalidates, and the reason names the lowest one.
         assert_eq!(
             gpu_validity(&[p("P0", 1470.0), p("P2", 1150.0), p("P0", 1470.0)]),
-            GpuValidity::Invalid("P2 1150 MHz, below the 1400 MHz floor".into())
+            GpuValidity::Below(ClockState { pstate: "P0/P2".into(), mhz: 1470.0 }, "P2 1150 MHz, below the 1400 MHz floor".into())
         );
         // Mixed P-states, all at or above the floor: valid, the states are printed together.
         let mixed = gpu_validity(&[p("P0", 1470.0), p("P2", 1710.0)]);
@@ -338,5 +420,61 @@ mod tests {
         assert!(out.reached && out.seconds == 10.0, "{out:?}");
         let err = warm_up(30.0, || Err("lost device".into()), || None, || 0.0).unwrap_err();
         assert_eq!(err, "lost device");
+    }
+    // spec: TEST-033
+    #[test]
+    fn the_cool_down_waits_for_the_target_in_polls_and_stops_at_the_cap_or_an_unreadable_sensor() {
+        // 74 C falls 5 C a poll: 74, 69, 64, 59 -> cooled at the third pause.
+        let mut temps = vec![Some(74.0), Some(69.0), Some(64.0), Some(59.0)].into_iter();
+        let (t, pauses) = (std::cell::Cell::new(0.0), std::cell::Cell::new(0));
+        let out = cool_down(
+            60.0,
+            120.0,
+            || temps.next().unwrap(),
+            || {
+                pauses.set(pauses.get() + 1);
+                t.set(t.get() + COOL_POLL_S);
+            },
+            || t.get(),
+        );
+        assert!(out.cooled && pauses.get() == 3 && out.start_c == Some(74.0) && out.end_c == Some(59.0), "{out:?}");
+        assert_eq!(out.seconds, 15.0);
+        assert!(out.line("coast-2km").starts_with("cool-down coast-2km: 74 C -> 59 C after "), "{}", out.line("coast-2km"));
+        // Already cool: no pause, no wait.
+        let mut pauses = 0;
+        let out = cool_down(60.0, 120.0, || Some(55.0), || pauses += 1, || 0.0);
+        assert!(out.cooled && pauses == 0 && out.seconds == 0.0, "{out:?}");
+        // A GPU that stays hot gives up at the cap, and the line says NOT cooled with the cap.
+        let mut t = 0.0;
+        let out = cool_down(
+            60.0,
+            120.0,
+            || Some(72.0),
+            || {},
+            || {
+                t += 40.0;
+                t
+            },
+        );
+        assert!(!out.cooled && out.seconds >= 120.0 && out.end_c == Some(72.0), "{out:?}");
+        let line = out.line("orbit");
+        assert!(line.contains("NOT cooled") && line.contains("cap 120 s"), "{line}");
+        // An unreadable sensor ends the wait at once.
+        let mut pauses = 0;
+        let out = cool_down(60.0, 120.0, || None, || pauses += 1, || 0.0);
+        assert!(!out.cooled && pauses == 0 && out.end_c.is_none() && out.line("v").contains("unreadable"), "{out:?}");
+        // The target is the temperature the held views of window 7 started at.
+        assert_eq!((COOL_START_C, COOL_CAP_S, COOL_POLL_S), (60.0, 120.0, 5.0));
+    }
+
+    // spec: TEST-034
+    #[test]
+    fn a_below_floor_state_is_read_back_from_the_words_the_logs_carry_and_a_nan_clock_stays_invalid() {
+        let st = parse_below_floor("P0 1282 MHz, below the 1400 MHz floor").unwrap();
+        assert_eq!((st.pstate.as_str(), st.mhz), ("P0", 1282.0));
+        assert!(parse_below_floor("P2 1710 MHz").is_none() && parse_below_floor("no clock sample").is_none());
+        assert!(parse_below_floor("P5 840 MHz, below the 1400 MHz floor").is_some());
+        assert!(matches!(gpu_validity(&[p("P0", f64::NAN)]), GpuValidity::Invalid(_)));
+        assert!(!gpu_validity(&[p("P0", 1399.0)]).is_valid(), "Below is not valid for comparisons");
     }
 }
