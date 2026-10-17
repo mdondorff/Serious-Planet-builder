@@ -412,7 +412,7 @@ Status: active
 Source: ADR 0041 point 2, SPIKE-08, ADR 0026, ADR 0027, ADR 0035, CON-07, CON-14
 
 #### Scenario: Against the serial reference
-- **WHEN** real bakes (seeds 1 and 7 at 64 and 128 cells) and random site-percolation masks (res 1 to 32, 55 to 70 % sea, shared nodes equal) are computed tiled with blocks of 1 to the whole face and 1, 2, 3 or 4 threads, at thresholds 0, small, the Earth default, large and 1 (tier A: a slice of this grid, one seed at 64 cells and half the masks, threads 1 to 3; the full sweep is tier B, `oracle_ocean_sweep`)
+- **WHEN** real bakes (seeds 1 and 7 at 64 and 128 cells) and random site-percolation masks (res 1 to 32, 55 to 70 % sea, shared nodes equal) are computed tiled with blocks of 1 to the whole face and 1, 2, 3 or 4 threads, at thresholds 0, small, the Earth default, large and 1 (tier A: a slice of this grid (one seed at 64 cells, four of the seven mask sizes with two seeds), threads 1 to 3; the full sweep is tier B, `oracle_ocean_sweep`)
 - **THEN** the components (label, nodes, area, ocean flag) and every bit equal the serial reference's, and the block reports can be merged in any order with the same table
 
 #### Scenario: Nodes and areas

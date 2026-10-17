@@ -48,9 +48,10 @@ fn the_plan_equals_the_per_node_evaluation_at_every_thread_count() {
     let any = Blocks::new(usize::MAX);
     let field = eroded(&any);
     let map = TangentWarp;
-    // The small variant (tier A): every third camera, one thread against three; every camera against 20 threads is
+    // The small variant (tier A): every third camera plus the cube-corner and pole views, one thread against three; every camera against 20 threads is
     // `oracle_plan_origin_batch.rs` (tier B).
-    for (name, camera) in cameras(&field).into_iter().step_by(3) {
+    let every_third = |i: usize, name: &str| i.is_multiple_of(3) || name == "cube-corner-1km" || name == "north-pole-1km";
+    for (name, camera) in cameras(&field).into_iter().enumerate().filter(|(i, (n, _))| every_third(*i, n)).map(|(_, c)| c) {
         let req = request(camera, &field);
         let one = plan_terrain_cached(&req, &field, &mut SelectionCache::new()).unwrap_or_else(|e| panic!("{name}: {e}"));
         let many = plan_terrain_threaded(&req, &field, &mut SelectionCache::new(), 3).unwrap();

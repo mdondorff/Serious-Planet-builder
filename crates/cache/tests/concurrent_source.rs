@@ -6,7 +6,7 @@ include!("support/concurrent_source.rs");
 // spec: STRM-014
 #[test]
 fn tiles_over_the_store_are_identical_at_1_and_3_threads_and_to_the_in_memory_bake() {
-    // The small variant (tier A): one thread against three, on the first three tiles of every face (levels 0 to 2, so a face
+    // The small variant (tier A): one thread against three, on four tiles of every face (levels 0 to 2 and a fine edge tile, so a face
     // edge and block borders still occur); 1, 4 and 20 threads on all tiles is `oracle_concurrent_source.rs` (tier B).
     let (d, w) = stored("tiles");
     let store = TileStore::open(d.path(), w.params()).unwrap();
@@ -16,7 +16,7 @@ fn tiles_over_the_store_are_identical_at_1_and_3_threads_and_to_the_in_memory_ba
     // Tiles at several levels, across face edges and block borders.
     let mut ids = Vec::new();
     for f in 0..6u8 {
-        for (l, x, y) in [(0u8, 0u32, 0u32), (1, 1, 0), (2, 3, 2)] {
+        for (l, x, y) in [(0u8, 0u32, 0u32), (1, 1, 0), (2, 3, 2), (4, 9, 15)] {
             ids.push(TileId::new(Face(f), l, x, y).unwrap());
         }
     }
@@ -89,8 +89,8 @@ fn resident_bytes_never_exceed_the_budget_and_reads_stay_exact() {
                 while !stop.load(Ordering::SeqCst) {
                     worst = worst.max(src.stats().resident_bytes);
                     // Sample often, but give the core away: a spinning watcher took a whole core of `test fast` for the
-                    // length of the test (and so does a yielding one: it never gives up its place in the run queue).
-                    std::thread::sleep(std::time::Duration::from_micros(50));
+                    // length of the test.
+                    std::thread::yield_now();
                 }
                 worst
             });
@@ -344,7 +344,7 @@ fn the_source_counts_its_cache_behaviour_exactly_and_the_reads_stay_the_stored_b
     // counts a wait, and no more waits than hits.
     let roomy = StoreSource::with_budget(&store, &w, RES, BLOCKS * BLOCK_BYTES).unwrap();
     std::thread::scope(|s| {
-        for t in 0..4 {
+        for t in 0..8 {
             let (src, grid) = (&roomy, &grid);
             s.spawn(move || read_all(src, &GridSource(grid), t));
         }
