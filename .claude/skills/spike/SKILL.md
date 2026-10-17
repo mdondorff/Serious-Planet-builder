@@ -16,7 +16,16 @@ Fallback if it fails: <the plan B>
 Code location: spikes/<name>/ (throwaway; not part of the main crates)
 ```
 
-**Closing a spike** (`/spike close SPIKE-NN`): set `Status: closed`, add `Closed:`, `Result:` (with numbers, images in `target/review/` or committed under `spikes/<name>/results/`), and `Recommendation:`. Then run `/adr` for the resulting decision and, if an assumption turned out wrong, `/learning`.
+**Closing a spike** (`/spike close SPIKE-NN`): set `Status: closed`, add `Closed:`, `Result:` (with numbers, linking `spikes/<name>/results/results.md`), and `Recommendation:`. Then run `/adr` for the resulting decision and, if an assumption turned out wrong, `/learning`.
+
+**Spike output: one place** (owner, 2026-10-17). Everything a spike or an exploration keeps goes to `spikes/<name>/results/`:
+- `results.md`: the report (question, method, numbers, recommendation). It ends with a **Visuals** section that embeds the renders with relative links (`![caption](images/<file>.png)`) and a one-line caption each: what the image shows, the adapter, and the view. Use before/after or side-by-side comparisons where the question has two options.
+- `images/`: the renders as PNG or JPG, each under 1 MB (a contact sheet under 1 MB beats many files). Never commit `target/review/` paths as the only copy.
+- Raw numbers and logs as `.txt`/`.md` next to `results.md`.
+- A spike whose question has nothing to look at (a pure CPU cost, a crash bisection) says so in one line under **Visuals** instead of leaving the section out.
+- Every exploration gets a register entry (`SPIKE-NN`) like a spike, so `docs/spikes.md` lists everything.
+
+`docs/spikes/` holds only the frozen images of SPIKE-03 to 07, which accepted ADRs link to; nothing new goes there.
 
 Spike code is never merged into the main crates as-is; the real implementation goes through an OpenSpec change.
 
