@@ -31,8 +31,9 @@ Housekeeping is split (owner, 2026-10-16): the **architect** curates, deciding w
 4. **ADR status index.** Check every ADR's status line against later ADRs. When a later ADR decided an open point, edit only the earlier ADR's status line to say so (allowed for accepted ADRs). Then refresh the table in `docs/adr/README.md`: number, title, status, open points (with the milestone or trigger that decides them).
 5. **Briefings.** Replace or delete `docs/briefings/*` for the finished milestone; the next milestone's briefing is written when its queue starts.
 6. **Owner items.** List the dormant ones (an open question with no near trigger) with their trigger in the status file; do not ask the owner about them now.
-7. **Agent memory.** Update `.claude/agent-memory/architect/MEMORY.md` with the milestone's decisions and delete what the repo now records.
-8. Then write the coder's list (below) as a queue item.
+7. **Documentation model (ADR 0055).** Check that every current number lives in a spec, not only in an ADR amendment chain; that no new readings ADR appeared; and that archived changes hold only `proposal.md` and spec deltas. Fix the cause in the skill or CLAUDE.md if any of these drifted.
+8. **Agent memory.** Update `.claude/agent-memory/architect/MEMORY.md` with the milestone's decisions and delete what the repo now records.
+9. Then write the coder's list (below) as a queue item.
 
 ## Coder: mechanical pass (one change, from the architect's list)
 - Stale references in specs and code comments: "not yet built", "proposed ADR NNNN" for accepted ADRs, superseded requirement IDs, dead `file:line` references. Each fix is a text change; never change a requirement's meaning (that is a spec delta).
