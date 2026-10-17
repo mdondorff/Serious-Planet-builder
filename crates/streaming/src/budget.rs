@@ -46,7 +46,7 @@ impl Tier {
 pub struct PoolConfig {
     /// Bytes of one slot of the main pool (the tile format of the day).
     pub slot_bytes: u64,
-    /// Slots per block (an atlas or a vertex buffer): blocks are allocated on demand.
+    /// Slots per block (a compact buffer or a vertex buffer): blocks are allocated on demand.
     pub block_slots: u32,
     /// Most blocks the main pool may allocate: the share's ceiling.
     pub main_blocks: u32,
@@ -60,9 +60,6 @@ pub struct PoolConfig {
     pub node_record_bytes: u64,
     /// A freed slot is reusable this many frames after its release (frames in flight).
     pub frames_in_flight: u64,
-    /// Bytes one block really allocates when that is not `slot_bytes * block_slots` (a compact atlas is a whole texture whose
-    /// slots do not fill it); 0 means `slot_bytes * block_slots` (the vertex-format blocks).
-    pub block_alloc_bytes: u64,
     /// Bytes of the per-slot record of the compact format (ADR 0033: 128), held for every slot of the main pool in one
     /// buffer allocated with the renderer; 0 for the vertex format.
     pub slot_record_bytes: u64,
@@ -89,7 +86,6 @@ impl PoolConfig {
             block_slots,
             0,
             0,
-            0,
             vertex_slot_bytes,
             index_bytes,
             node_record_bytes,
@@ -97,15 +93,13 @@ impl PoolConfig {
         )
     }
 
-    /// [`fit_share`](PoolConfig::fit_share) for a main pool whose block is a texture of `block_alloc_bytes` (0: `slot_bytes *
-    /// block_slots`) with a record of `slot_record_bytes` per slot, and `fallback_slots` of the vertex pool kept for fallback
+    /// [`fit_share`](PoolConfig::fit_share) for a main pool with a record of `slot_record_bytes` per slot, and `fallback_slots` of the vertex pool kept for fallback
     /// tiles. The record buffer (`main_slots * slot_record_bytes`) counts with the fixed items.
     #[allow(clippy::too_many_arguments)]
     pub fn fit_share_with(
         share_bytes: u64,
         slot_bytes: u64,
         block_slots: u32,
-        block_alloc_bytes: u64,
         slot_record_bytes: u64,
         fallback_slots: u32,
         vertex_slot_bytes: u64,
@@ -122,7 +116,6 @@ impl PoolConfig {
             index_bytes,
             node_record_bytes,
             frames_in_flight,
-            block_alloc_bytes,
             slot_record_bytes,
             fallback_slots,
         };
@@ -149,7 +142,7 @@ impl PoolConfig {
             return Err(format!("a share of {share_bytes} B holds no block of {block_bytes} B"));
         }
         // The slot records scale with the main pool: they belong to the fixed items and must fit their reserve with the rest. A tile
-        // size with many small slots per atlas (cells 16: 57,600) gives fewer atlases than the share's bytes would allow: the share
+        // size with many small slots per block (cells 16: 58,052) gives fewer blocks than the share's bytes would allow: the share
         // is a ceiling, not a target.
         while c.fixed_bytes() > FIXED_RESERVE_BYTES && c.main_blocks > 1 {
             c.main_blocks -= 1;
@@ -166,11 +159,7 @@ impl PoolConfig {
 
     /// Bytes one block of the main pool allocates.
     pub fn block_bytes(&self) -> u64 {
-        if self.block_alloc_bytes > 0 {
-            self.block_alloc_bytes
-        } else {
-            self.slot_bytes * u64::from(self.block_slots)
-        }
+        self.slot_bytes * u64::from(self.block_slots)
     }
 
     /// Bytes of the slot-record buffer: one record per slot of the main pool at its ceiling.

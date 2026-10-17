@@ -45,15 +45,15 @@ impl DrawRecord {
     }
 }
 
-/// What a run of draws names: the small vertex pool, one block of the vertex-format main pool, or one atlas of the compact
-/// format (ADR 0033 point 3: a draw names its atlas by being in a run of that atlas; the node's slot reaches the shader through
-/// the node's tile reference, the atlas through the run's bind group). Atlas runs use the compact pipeline, the others the
-/// vertex pipeline.
+/// What a run of draws names: the small vertex pool, one block of the vertex-format main pool, or one storage-buffer block of the
+/// compact format (ADR 0033 point 3, ADR 0054: a draw names its block by being in a run of that block; the node's slot reaches the
+/// shader through the node's tile reference, the block through the run's bind group). Compact runs use the compact pipeline, the
+/// others the vertex pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DrawBuffer {
     VertexPool,
     Block(u32),
-    Atlas(u32),
+    Compact(u32),
 }
 
 /// Consecutive records that draw from one buffer: records `first..first + count`.
@@ -104,7 +104,7 @@ pub fn build_draw_list(slots: impl IntoIterator<Item = SlotRef>, block_slots: u3
 }
 
 /// [`build_draw_list`] for nodes whose buffer and first vertex are already known: `(buffer, base vertex)` per node, in the plan's
-/// order (a compact tile in an atlas has base vertex 0; a vertex-format tile has its slot's first vertex).
+/// order (a compact tile in a block has base vertex 0; a vertex-format tile has its slot's first vertex).
 pub fn build_draw_list_placed(nodes: impl IntoIterator<Item = (DrawBuffer, u64)>, index_count: u32) -> DrawList {
     let mut list = DrawList::default();
     for (i, (buffer, first_vertex)) in nodes.into_iter().enumerate() {

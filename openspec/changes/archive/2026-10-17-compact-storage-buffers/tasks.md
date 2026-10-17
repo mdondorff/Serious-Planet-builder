@@ -1,0 +1,6 @@
+- [x] 1.1 transitional buffer path beside the atlas; image differential on WARP and RTX (byte-identical)
+- [x] 1.2 failing tests first: pool arithmetic (frame), gate limits, REND-018 run model, block geometry
+- [x] 1.3 remove the atlas path; blocks only; known-answer hash tests; remove `block_alloc_bytes`
+- [x] 1.4 spec deltas (REND-016/017/018, STRM-006, VIEW-001)
+- [x] 1.5 numerics-reviewer (shader), spec-guardian, verifier
+- [ ] 1.6 test, test gpu, test gpu --real, spec-lint, fmt, clippy; archive; status and log; PR; CI; merge

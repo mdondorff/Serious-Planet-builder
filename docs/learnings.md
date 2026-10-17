@@ -342,6 +342,12 @@ Assumption it changes: ADR 0041 points 5 and 6 as written (ADR 0053 records the 
 Proposed follow-up: the planner accepts ADR 0053 (point 2 decided: coverage budget normative, lit shore flash reported only, `shore_filter` default 1, the owner judges the shore in motion at the gate); a line-crawl count for the metric.
 Obsolete when: ADR 0053 is accepted, or hydrology replaces the tile-granular water selection.
 
+## 2026-10-17 A 128 MiB block holds 15,406 compact slots, not 15,405; ADR 0054's buffer path needed no limit the gate lacked
+Scope: project
+What happened: building `compact-storage-buffers` (ADR 0054): 134,217,728 / 8,712 B = 15,406.9, so a block holds 15,406 slots (ADR text and the exploration said 15,405); 15 blocks (mid) and 23 (high) still fit the shares (231,090 and 354,338 slots). The gate already required `max_storage_buffer_binding_size`, `max_buffer_size` and `max_storage_buffers_per_shader_stage` by name; the compact stages use at most four storage buffers. The image differential against the atlas path was byte-identical on WARP and the RTX in every view; the batched upload now makes one call per run of adjacent slots in a block (the atlas cut runs at row ends). The WARP device removal with the compact format and the atmosphere persists (0 of 5 window smokes).
+Assumption it changes: ADR 0054's slot count (15,405).
+Proposed follow-up: none; the hashes of the atlas path are the known answers of `gpu_compact_blocks` and `gpu_water`, keyed by driver build.
+Obsolete when: the compact format or its block layout changes.
 ## 2026-10-17 A bigger compact record eats ADR 0033's fixed reserve, not the slot count you expect (SPIKE-12)
 Scope: ADR 0033 point 3, `streaming::budget::fit_share_with`
 What happened: `fit_share_with` counts the per-slot record buffer among the fixed items of the 128 MiB reserve. With the records of the retirement layout (644 B instead of 128 B: climate block and the 5x5 control points) the reserve check removes whole 128 MiB blocks: the mid share falls from 230,640 to 123,008 slots (8 blocks) and the high share to the same, although the bytes per slot grow only 5.9 %. Charged per slot (the record inside the slot, stride 9,360 B) the counts are 215,085 mid and 329,797 high (-6.7 %).

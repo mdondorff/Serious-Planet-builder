@@ -1,5 +1,5 @@
 //! REND-013, REND-016, TEST-018: no one-time initialisation inside a measured frame. After construction and `warm_up` the vertex
-//! pool and the first block (or atlas) exist, the ring is grown, both pipelines have drawn once, and a script whose first frames
+//! pool and the first block exist, the ring is grown, both pipelines have drawn once, and a script whose first frames
 //! fit those creates nothing in frames 0 and 1; the image is the cold renderer's. The guarantee is the counters; the wall-clock
 //! probe only reports (CON-17, CON-20: time budgets are the reference machine's).
 
@@ -36,16 +36,21 @@ fn vertex_pool() -> PoolConfig {
         index_bytes: grid_indices(CELLS).len() as u64 * 4,
         node_record_bytes: 4096 * 512,
         frames_in_flight: 1,
-        block_alloc_bytes: 0,
         slot_record_bytes: 0,
         fallback_slots: 0,
     }
 }
 
-/// Compact pools: atlases of 24 x 24 slots, a roomy vertex pool for levels 0-2 and fallbacks.
+/// Compact pools: blocks of 576 slots, a roomy vertex pool for levels 0-2 and fallbacks.
 fn compact_pool() -> PoolConfig {
-    let side = 24 * (CELLS + 1);
-    let one = compact_format_pool_with((128 << 20) + 4 * u64::from(side) * u64::from(side) * 8, CELLS, side, 1).unwrap();
+    let block_slots = 24 * 24;
+    let one = compact_format_pool_with(
+        (128 << 20) + 4 * u64::from(block_slots) * planet_generators::compact::slot_texel_bytes(CELLS),
+        CELLS,
+        block_slots,
+        1,
+    )
+    .unwrap();
     PoolConfig { vertex_slots: 256, fallback_slots: 192, ..one }
 }
 

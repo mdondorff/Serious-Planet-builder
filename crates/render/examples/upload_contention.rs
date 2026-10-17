@@ -39,8 +39,14 @@ fn stats(v: &[f64]) -> String {
 }
 
 fn pool() -> PoolConfig {
-    let side = COLS * (CELLS + 1);
-    let one = compact_format_pool_with((128 << 20) + 40 * u64::from(side) * u64::from(side) * 8, CELLS, side, 1).unwrap();
+    let block_slots = COLS * COLS;
+    let one = compact_format_pool_with(
+        (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_texel_bytes(CELLS),
+        CELLS,
+        block_slots,
+        1,
+    )
+    .unwrap();
     PoolConfig { vertex_slots: 4096, fallback_slots: 3968, ..one }
 }
 

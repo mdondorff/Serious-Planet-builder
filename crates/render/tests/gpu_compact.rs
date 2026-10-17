@@ -1,10 +1,10 @@
-//! REND-016: the compact tile path (atlases of `Rgba16Uint` texels, the vertex stage placing vertices from texels, exact morph
+//! REND-016: the compact tile path (storage-buffer blocks of texels, the vertex stage placing vertices from texels, exact morph
 //! targets) draws the images of the vertex path within the stated model tolerance, on every adapter; fallback tiles (CON-13) and
 //! levels 0-2 stay in the vertex format in the same frame; the per-draw loop and the indirect multi-draw agree; the allocation
 //! equals the pure model.
 
 use planet_core::cube::TangentWarp;
-use planet_frame::pool::{atlas_columns, compact_format_pool_with};
+use planet_frame::pool::{block_slots_in, compact_format_pool_with, COMPACT_BLOCK_BYTES};
 use planet_frame::{
     plan_terrain, plan_terrain_field, scripted_views, scripted_views_field, LodParams, TerrainPlan, TerrainRequest, TerrainView,
 };
@@ -18,11 +18,17 @@ use planet_streaming::{PoolConfig, PoolKind, SlotRef};
 const R: f64 = 6_371_000.0;
 const SIZE: (u32, u32) = (128, 96);
 
-/// Small compact pools: atlases of 8 x 8 slots, so a plan spans several atlases.
+/// Small compact pools: blocks of 64 slots, so a plan spans several blocks.
 fn small_pool(cells: u32) -> PoolConfig {
-    let side = 8 * (cells + 1);
-    // The 128 MiB reserve of the fixed items plus 40 atlases, plenty for these plans.
-    let one = compact_format_pool_with((128 << 20) + 40 * u64::from(side) * u64::from(side) * 8, cells, side, 1).unwrap();
+    let block_slots = 8 * 8;
+    // The 128 MiB reserve of the fixed items plus 40 blocks, plenty for these plans.
+    let one = compact_format_pool_with(
+        (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_texel_bytes(cells),
+        cells,
+        block_slots,
+        1,
+    )
+    .unwrap();
     // A roomy vertex pool: the steep fixture makes many fallback tiles.
     PoolConfig { vertex_slots: 4096, fallback_slots: 3968, ..one }
 }
@@ -59,7 +65,7 @@ fn compact_renderer(ctx: &GpuContext, field: &dyn HeightField, p: &TerrainPlan, 
     for n in &p.nodes {
         let data = tile_data_field(field, &TangentWarp, n.tile, p.cells, R, finest);
         if scattered {
-            // Manager-style placement: levels 0-2 in the managed vertex pool, the rest spread over the atlases from the top.
+            // Manager-style placement: levels 0-2 in the managed vertex pool, the rest spread over the blocks from the top.
             let slot = if n.tile.level() <= 2 {
                 vertex += 1;
                 SlotRef { pool: PoolKind::Vertex, index: vertex - 1 }
@@ -131,7 +137,7 @@ fn the_compact_path_is_identical_per_draw_and_indirect_wherever_the_tiles_sit() 
                 assert_eq!(r.read_color(&ctx), reference, "view {index} scattered {scattered}: indirect differs from per-draw");
                 assert!(indirect.encoded_draws >= 1 && indirect.encoded_draws <= indirect.draw_calls);
                 if scattered && compact_nodes > 3 {
-                    assert!(indirect.encoded_draws > 1, "nodes in several atlases need several multi-draws: {indirect:?}");
+                    assert!(indirect.encoded_draws > 1, "nodes in several blocks need several multi-draws: {indirect:?}");
                 }
             }
             // Where a tile sits does not change the image.
@@ -210,7 +216,6 @@ fn the_compact_allocation_equals_the_pure_model() {
         "the ring (globals, nodes, arguments, tile references) stays inside the node-record budget"
     );
     assert!(config.allocated_bytes() <= 2u64 << 30, "STRM-006: the share");
-    assert_eq!(atlas_columns(8 * (cells + 1), cells), 8);
 }
 
 // spec: REND-016, CON-11
@@ -273,18 +278,18 @@ fn a_morph_forced_to_the_parent_grid_agrees_so_the_shaders_morph_target_is_the_m
 
 // spec: REND-016, STRM-006
 #[test]
-fn the_production_atlas_geometry_works_on_this_adapter() {
-    use planet_frame::pool::ATLAS_SIDE;
+fn the_production_block_geometry_works_on_this_adapter() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let field = Reference(1);
     let cells = 32;
-    // One real 4096 x 4096 atlas: 124 x 124 slots, tiles in the last slots of the last rows.
-    let pool = compact_format_pool_with((128 << 20) + 4096 * 4096 * 8, cells, ATLAS_SIDE, 1).unwrap();
-    assert_eq!((pool.main_blocks, pool.block_slots), (1, 15_376));
+    // One real block of 128 MiB (the largest storage binding every adapter offers): 15,406 slots, tiles in its last slots.
+    let slots = block_slots_in(COMPACT_BLOCK_BYTES, cells);
+    let pool = compact_format_pool_with((128 << 20) + COMPACT_BLOCK_BYTES, cells, slots, 1).unwrap();
+    assert_eq!((pool.main_blocks, pool.block_slots), (1, 15_406));
     let p = plan_of(&field, cells, 26, 6, TerrainView::Relief, false);
     let reference = vertex_render(&ctx, &field, &p, 26);
     let mut r = TerrainRenderer::with_compact_pools(&ctx, SIZE, cells, pool);
-    let mut next = 15_375u32;
+    let mut next = slots - 1;
     for n in &p.nodes {
         let data = tile_data_field(&field, &TangentWarp, n.tile, cells, R, 26);
         if n.tile.level() <= 2 {
@@ -310,7 +315,7 @@ fn a_tile_in_the_wrong_pool_is_refused_not_written() {
     let main = SlotRef { pool: PoolKind::Main, index: 3 };
     assert!(
         matches!(r.upload_at(&ctx, &mesh, main), Err(planet_render::ExecError::CompactUnsupported { .. })),
-        "a level 0-2 mesh in an atlas slot"
+        "a level 0-2 mesh in a block slot"
     );
     let fine = planet_core::TileId::new(planet_core::Face(1), 6, 1, 1).unwrap();
     let c = planet_generators::compact::compact_tile_field(&field, &TangentWarp, coarse, cells, R);

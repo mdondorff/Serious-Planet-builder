@@ -40,10 +40,10 @@ fn texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
     }
 }
 
-/// The compact format's two bind group layouts (frame records and atlas), which the compact water pipeline shares with the terrain's.
+/// The compact format's two bind group layouts (frame records and block), which the compact water pipeline shares with the terrain's.
 pub(crate) struct CompactLayouts<'a> {
     pub(crate) frame: &'a wgpu::BindGroupLayout,
-    pub(crate) atlas: &'a wgpu::BindGroupLayout,
+    pub(crate) block: &'a wgpu::BindGroupLayout,
     pub(crate) cells: u32,
 }
 
@@ -109,7 +109,7 @@ fn pipelines(
     let compact = compact.map(|c| {
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("water-compact-layout"),
-            bind_group_layouts: &[Some(bgl0), Some(c.frame), Some(c.atlas), Some(g3)],
+            bind_group_layouts: &[Some(bgl0), Some(c.frame), Some(c.block), Some(g3)],
             immediate_size: 0,
         });
         make("water-compact-pipeline", water_compact_source(c.cells, atmosphere), &layout, &[])

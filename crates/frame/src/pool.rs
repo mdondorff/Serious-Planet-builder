@@ -2,10 +2,10 @@
 //! numbers `planet_streaming::PoolConfig` counts in. GPU-free; the renderer allocates exactly this.
 //!
 //! The slot is the vertex-format tile at the given `cells`: `(cells + 1)^2` grid vertices plus `4 (cells + 1)` skirt vertices,
-//! 44 bytes each (53,724 B at cells 32). ADR 0033's slot counts (230,640 at the mid share) are for the compact tile; the
+//! 44 bytes each (53,724 B at cells 32). ADR 0033's slot counts (231,090 at the mid share) are for the compact tile; the
 //! vertex format has fewer, and the share is a byte ceiling, so the slot count follows from the format.
 
-use planet_generators::compact::{slot_texel_bytes, COMPACT_RECORD_BYTES, TEXEL_BYTES};
+use planet_generators::compact::{slot_texel_bytes, COMPACT_RECORD_BYTES};
 use planet_generators::mesh::{grid_indices, vertex_count, MeshVertex};
 use planet_streaming::{PoolConfig, Tier};
 
@@ -40,33 +40,32 @@ pub fn tier_pool(tier: Tier, cells: u32, frames_in_flight: u64) -> Result<PoolCo
     vertex_format_pool(tier.terrain_share_bytes(), cells, frames_in_flight)
 }
 
-/// Side of one atlas texture in texels (ADR 0033 point 3: 4096 x 4096 atlases).
-pub const ATLAS_SIDE: u32 = 4096;
+/// Bytes of one block of the compact main pool: the largest storage-buffer binding every adapter offers (ADR 0054 point 1,
+/// `max_storage_buffer_binding_size` of wgpu's default limits, which the adapter gate requires by name, VIEW-001).
+pub const COMPACT_BLOCK_BYTES: u64 = 128 << 20;
 
 /// Vertex-pool slots kept for the CON-13 fallback tiles of the compact format (the top of the small vertex pool; ADR 0033 point 3
 /// fixes the pool at 512 slots, levels 0-2 need at most 126 of them).
 pub const FALLBACK_SLOTS: u32 = 256;
 
-/// Slots along one side of an atlas of `side` texels for tiles of `cells`: `side / (cells + 1)`.
-pub fn atlas_columns(side: u32, cells: u32) -> u32 {
-    side / (cells + 1)
+/// Slots of a block of at most `block_bytes` for tiles of `cells`: `block_bytes / slot_texel_bytes` (15,406 at cells 32 in 128 MiB).
+pub fn block_slots_in(block_bytes: u64, cells: u32) -> u32 {
+    u32::try_from(block_bytes / slot_texel_bytes(cells)).unwrap_or(u32::MAX)
 }
 
-/// The compact pools of a terrain share for atlases of `side` x `side` texels (ADR 0033 point 3): a block is one atlas texture of
-/// `Rgba16Uint` (8 B per texel), `columns^2` slots of `(cells + 1)^2` texels, a 128 B record per slot, and the vertex pool
-/// (53,724 B slots at cells 32) for levels 0-2 and the fallback tiles. `slot_bytes` is the texel bytes of one slot.
-pub fn compact_format_pool_with(share_bytes: u64, cells: u32, side: u32, frames_in_flight: u64) -> Result<PoolConfig, String> {
-    let columns = atlas_columns(side, cells);
-    if columns == 0 {
-        return Err(format!("an atlas of {side} texels holds no tile of {cells} cells"));
+/// The compact pools of a terrain share for blocks of `block_slots` slots (ADR 0054): a block is one storage buffer of
+/// `block_slots * slot_texel_bytes` bytes (the texels of 8 B, slot after slot), a 128 B record per slot in one buffer, and the vertex
+/// pool (53,724 B slots at cells 32) for levels 0-2 and the fallback tiles.
+pub fn compact_format_pool_with(share_bytes: u64, cells: u32, block_slots: u32, frames_in_flight: u64) -> Result<PoolConfig, String> {
+    if block_slots == 0 {
+        return Err(format!("a block of 0 slots holds no tile of {cells} cells"));
     }
     let vertex_slot = vertex_slot_bytes(cells);
     let index_bytes = grid_indices(cells).len() as u64 * 4;
     PoolConfig::fit_share_with(
         share_bytes,
         slot_texel_bytes(cells),
-        columns * columns,
-        u64::from(side) * u64::from(side) * TEXEL_BYTES,
+        block_slots,
         COMPACT_RECORD_BYTES,
         FALLBACK_SLOTS,
         vertex_slot,
@@ -76,12 +75,12 @@ pub fn compact_format_pool_with(share_bytes: u64, cells: u32, side: u32, frames_
     )
 }
 
-/// [`compact_format_pool_with`] for the 4096-texel atlases.
+/// [`compact_format_pool_with`] for blocks of [`COMPACT_BLOCK_BYTES`].
 pub fn compact_format_pool(share_bytes: u64, cells: u32, frames_in_flight: u64) -> Result<PoolConfig, String> {
-    compact_format_pool_with(share_bytes, cells, ATLAS_SIDE, frames_in_flight)
+    compact_format_pool_with(share_bytes, cells, block_slots_in(COMPACT_BLOCK_BYTES, cells), frames_in_flight)
 }
 
-/// The compact pools of a hardware tier's terrain share: 15 atlases = 230,640 slots at the mid share, 23 = 353,648 at the high
+/// The compact pools of a hardware tier's terrain share: 15 blocks = 231,090 slots at the mid share, 23 = 354,338 at the high
 /// share at cells 32 (ADR 0033 point 3).
 pub fn tier_compact_pool(tier: Tier, cells: u32, frames_in_flight: u64) -> Result<PoolConfig, String> {
     compact_format_pool(tier.terrain_share_bytes(), cells, frames_in_flight)
