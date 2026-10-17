@@ -12,12 +12,23 @@ use std::time::Instant;
 struct Step {
     name: &'static str,
     outcome: Result<f64, String>,
+    /// Said beside `pass` in the table (a number the step reports).
+    note: String,
 }
 
 fn step(name: &'static str, f: impl FnOnce() -> Res) -> Step {
     let t = Instant::now();
     let outcome = f().map(|_| t.elapsed().as_secs_f64());
-    Step { name, outcome }
+    Step { name, outcome, note: String::new() }
+}
+
+/// A step whose result carries a note for its row.
+fn step_with_note(name: &'static str, f: impl FnOnce() -> Result<String, String>) -> Step {
+    let t = Instant::now();
+    match f() {
+        Ok(note) => Step { name, outcome: Ok(t.elapsed().as_secs_f64()), note },
+        Err(e) => Step { name, outcome: Err(e), note: String::new() },
+    }
 }
 
 /// Criteria no local run can settle, per milestone (report §15).
@@ -172,15 +183,10 @@ pub fn run(root: &Path, args: &[String]) -> Res {
         step("run mode editor --smoke", || exec(root, "cargo", &["run", "-q", "-p", "planet", "--", "editor", "--smoke"], &[])),
         step("run mode generate --smoke", || exec(root, "cargo", &["run", "-q", "-p", "planet", "--", "generate", "--smoke"], &[])),
         step("run mode test-render --smoke", || exec(root, "cargo", &["run", "-q", "-p", "planet", "--", "test-render", "--smoke"], &[])),
-        step("test fast (timing)", || {
-            let t = Instant::now();
-            crate::testcmd::test(root, &["fast".to_string()])?;
-            let secs = t.elapsed().as_secs_f64();
-            // The budget is 20 s since the owner's decision of 2026-10-16.
-            if secs > crate::testcmd::FAST_BUDGET_SECS {
-                return Err(format!("test fast took {secs:.1}s, budget is {} s (owner, 2026-10-16)", crate::testcmd::FAST_BUDGET_SECS));
-            }
-            Ok(())
+        // BUILD-003: the budget is the test time (not the compile) of a selection of changed crates (owner, 2026-10-16); a run of every
+        // crate is reported with its number and not judged.
+        step_with_note("test fast (timing)", || {
+            crate::testcmd::judge_fast_timing(crate::testcmd::test_timed(root, &["fast".to_string()])?)
         }),
     ]);
 
@@ -188,7 +194,7 @@ pub fn run(root: &Path, args: &[String]) -> Res {
     let mut failed = false;
     for s in &steps {
         match &s.outcome {
-            Ok(secs) => steps_md += &format!("| {} | pass | {secs:.1} |\n", s.name),
+            Ok(secs) => steps_md += &format!("| {} | pass{} | {secs:.1} |\n", s.name, s.note),
             Err(e) => {
                 failed = true;
                 steps_md += &format!("| {} | FAIL: {} | |\n", s.name, e.lines().next().unwrap_or(""));

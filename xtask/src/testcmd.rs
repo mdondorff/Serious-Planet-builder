@@ -136,7 +136,19 @@ fn tier_filter(sub: Option<&str>, real: bool) -> &'static str {
     }
 }
 
+/// What a run of `test` measured: the test time (nextest's run, not the compile) and whether the run selected every crate.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TestTiming {
+    pub test_secs: f64,
+    pub whole: bool,
+}
+
 pub fn test(root: &Path, args: &[String]) -> Res {
+    test_timed(root, args).map(|_| ())
+}
+
+/// [`test`] that also says how long the tests took and what they covered (BUILD-003), for `cargo xtask accept`.
+pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
     let mut sub = None;
     let (mut strict, mut real, mut all) = (false, false, false);
     let mut passthrough: Vec<&str> = Vec::new();
@@ -218,7 +230,20 @@ pub fn test(root: &Path, args: &[String]) -> Res {
             eprintln!("{} candidate golden(s) wait for the owner's /bless (`cargo xtask bless` lists them)", pending.len());
         }
     }
-    result
+    result.map(|()| TestTiming { test_secs: secs, whole })
+}
+
+/// How `cargo xtask accept` reads the timing of `test fast` (BUILD-003): within the budget, or over it on a selection of changed
+/// crates, is judged; a run of every crate is reported with its number and never fails the step. `Ok` carries the note for the
+/// step's row.
+pub fn judge_fast_timing(t: TestTiming) -> Result<String, String> {
+    match budget_verdict(t.test_secs, t.whole) {
+        Budget::Within => Ok(format!(" ({:.1} s of tests, budget {FAST_BUDGET_SECS} s)", t.test_secs)),
+        Budget::Note => Ok(format!(" (whole workspace: reported (BUILD-003), {:.1} s of tests, budget {FAST_BUDGET_SECS} s)", t.test_secs)),
+        Budget::Over => {
+            Err(format!("test fast took {:.1}s of tests, budget is {FAST_BUDGET_SECS} s (owner, 2026-10-16; BUILD-003)", t.test_secs))
+        }
+    }
 }
 
 pub fn check(root: &Path) -> Res {
@@ -854,6 +879,20 @@ mod tests {
         assert_eq!(budget_verdict(5.0, true), Budget::Within);
         assert_eq!(packages_for_changes(&[]), all_packages());
         assert_ne!(packages_for_changes(&s(&["crates/app/src/lib.rs"])), all_packages());
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn acceptance_judges_a_selection_by_test_time_and_only_reports_a_whole_workspace_run() {
+        let t = |test_secs: f64, whole: bool| judge_fast_timing(TestTiming { test_secs, whole });
+        // A selection of changed crates: within the budget passes with its number, over it fails naming the test time.
+        assert!(t(19.9, false).unwrap().contains("19.9 s of tests"));
+        let e = t(32.3, false).unwrap_err();
+        assert!(e.contains("32.3s of tests") && e.contains("BUILD-003"), "{e}");
+        // A run of every crate is reported with its number and never fails the step (32.3 s was the first M5 acceptance).
+        let note = t(32.3, true).unwrap();
+        assert!(note.contains("whole workspace: reported (BUILD-003)") && note.contains("32.3 s of tests"), "{note}");
+        assert!(t(5.0, true).unwrap().contains("5.0 s of tests"));
     }
 
     // spec: BUILD-003
