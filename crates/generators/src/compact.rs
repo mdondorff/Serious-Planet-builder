@@ -53,7 +53,7 @@ pub fn texel_count(cells: u32) -> usize {
     ((cells + 1) * (cells + 1)) as usize
 }
 
-/// Bytes a compact tile occupies in its atlas slot at `cells` (texels only).
+/// Bytes a compact tile occupies in its slot at `cells` (texels only).
 pub fn slot_texel_bytes(cells: u32) -> u64 {
     texel_count(cells) as u64 * TEXEL_BYTES
 }
@@ -92,7 +92,7 @@ pub struct CompactTile {
 }
 
 impl CompactTile {
-    /// Bytes this tile occupies in the atlas.
+    /// Bytes this tile occupies in its slot.
     pub fn texel_bytes(&self) -> u64 {
         self.texels.len() as u64 * TEXEL_BYTES
     }
@@ -102,7 +102,7 @@ impl CompactTile {
         self.texel_bytes() + COMPACT_RECORD_BYTES
     }
 
-    /// The texels as the atlas holds them: little-endian `u16` x 4 per texel, row `j` major.
+    /// The texels as the block holds them: little-endian `u16` x 4 per texel, row `j` major.
     pub fn texel_data(&self) -> Vec<u8> {
         self.texels.iter().flat_map(|t| t.iter().flat_map(|c| c.to_le_bytes())).collect()
     }

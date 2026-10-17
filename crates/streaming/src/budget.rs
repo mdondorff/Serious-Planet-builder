@@ -46,7 +46,7 @@ impl Tier {
 pub struct PoolConfig {
     /// Bytes of one slot of the main pool (the tile format of the day).
     pub slot_bytes: u64,
-    /// Slots per block (an atlas or a vertex buffer): blocks are allocated on demand.
+    /// Slots per block (a compact buffer or a vertex buffer): blocks are allocated on demand.
     pub block_slots: u32,
     /// Most blocks the main pool may allocate: the share's ceiling.
     pub main_blocks: u32,
@@ -142,7 +142,7 @@ impl PoolConfig {
             return Err(format!("a share of {share_bytes} B holds no block of {block_bytes} B"));
         }
         // The slot records scale with the main pool: they belong to the fixed items and must fit their reserve with the rest. A tile
-        // size with many small slots per atlas (cells 16: 57,600) gives fewer atlases than the share's bytes would allow: the share
+        // size with many small slots per block (cells 16: 58,052) gives fewer blocks than the share's bytes would allow: the share
         // is a ceiling, not a target.
         while c.fixed_bytes() > FIXED_RESERVE_BYTES && c.main_blocks > 1 {
             c.main_blocks -= 1;

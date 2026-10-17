@@ -2504,6 +2504,17 @@ pub fn execute_terrain(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[&TileMesh
     Ok((renderer.read_color(ctx), stats))
 }
 
+/// The compact pools of a one-shot render of `nodes` nodes: blocks just large enough for the tiles (a block never over 128 MiB, so
+/// a big plan spans several blocks).
+fn one_shot_pool(nodes: usize, cells: u32) -> Result<PoolConfig, String> {
+    let slot = planet_generators::compact::slot_texel_bytes(cells);
+    let nodes = u32::try_from(nodes.max(1)).map_err(|e| e.to_string())?;
+    let block_slots = nodes.min(planet_frame::pool::block_slots_in(planet_frame::pool::COMPACT_BLOCK_BYTES, cells)).max(1);
+    let blocks = u64::from(nodes.div_ceil(block_slots));
+    let share = planet_streaming::budget::FIXED_RESERVE_BYTES + blocks * u64::from(block_slots) * slot;
+    planet_frame::pool::compact_format_pool_with(share, cells, block_slots, 1)
+}
+
 /// [`execute_terrain`] for tiles in either format (`planet_generators::compact::tile_data_field`): the product's tile path. The
 /// renderer's pools are sized to the plan (one block just large enough for its tiles); a plan of only vertex-format tiles uses the
 /// vertex-format renderer, as before.
@@ -2511,11 +2522,7 @@ pub fn execute_terrain_tiles(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[&Ren
     let lookup: HashMap<_, _> = tiles.iter().map(|t| (t.id(), *t)).collect();
     let mut renderer = if tiles.iter().any(|t| t.is_compact()) {
         let cells = plan.cells;
-        // One block just large enough for the plan's tiles, one slot more than nodes at least.
-        let block_slots = plan.nodes.len().max(1) as u32;
-        let share =
-            planet_streaming::budget::FIXED_RESERVE_BYTES + u64::from(block_slots) * planet_generators::compact::slot_texel_bytes(cells);
-        let pool = planet_frame::pool::compact_format_pool_with(share, cells, block_slots, 1).map_err(ExecError::BadPool)?;
+        let pool = one_shot_pool(plan.nodes.len(), cells).map_err(ExecError::BadPool)?;
         TerrainRenderer::with_compact_pools(ctx, plan.size, cells, pool)
     } else {
         TerrainRenderer::new(ctx, plan.size, plan.cells)
@@ -2527,4 +2534,19 @@ pub fn execute_terrain_tiles(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[&Ren
     let (_, mut stats) = renderer.render(ctx, plan, false)?;
     stats.vertex_bytes = renderer.uploaded_bytes;
     Ok((renderer.read_color(ctx), stats))
+}
+
+#[cfg(test)]
+mod one_shot_tests {
+    use super::*;
+
+    // spec: REND-016
+    #[test]
+    fn a_one_shot_plan_larger_than_a_block_spans_several_blocks_instead_of_failing() {
+        for (nodes, cells) in [(1usize, 32u32), (100, 16), (15_406, 32), (15_407, 32), (32_768, 32), (4_000, 64)] {
+            let pool = one_shot_pool(nodes, cells).unwrap_or_else(|e| panic!("{nodes} nodes at cells {cells}: {e}"));
+            assert!(pool.main_slots() as usize >= nodes, "{nodes} nodes at cells {cells}: {} slots", pool.main_slots());
+            assert!(pool.block_bytes() <= planet_frame::pool::COMPACT_BLOCK_BYTES);
+        }
+    }
 }

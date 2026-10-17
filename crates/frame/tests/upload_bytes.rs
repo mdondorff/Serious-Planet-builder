@@ -28,7 +28,7 @@ fn tile_id() -> TileId {
 
 // spec: STRM-006, TEST-012
 #[test]
-fn a_compact_tile_counts_at_its_atlas_size_and_a_vertex_fallback_tile_at_its_vertex_size() {
+fn a_compact_tile_counts_at_its_slot_size_and_a_vertex_fallback_tile_at_its_vertex_size() {
     let field = Reference(1);
     let compact = RenderTile::Compact(compact_tile_field(&field, &TangentWarp, tile_id(), CELLS, RADIUS_M));
     let mesh = tile_mesh_field(&field, &TangentWarp, tile_id(), CELLS, RADIUS_M);

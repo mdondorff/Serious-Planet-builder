@@ -12,7 +12,7 @@ pub const VERTEX_POOL_MAX_LEVEL: u8 = 2;
 /// Which pool a slot belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PoolKind {
-    /// Levels 3 and finer: the large pool (atlases or vertex blocks, whatever the tile format of the day).
+    /// Levels 3 and finer: the large pool (compact blocks or vertex blocks, whatever the tile format of the day).
     Main,
     /// Levels 0-2 and the CON-13 fallback tiles: a small pool of the vertex format, fixed capacity.
     Vertex,

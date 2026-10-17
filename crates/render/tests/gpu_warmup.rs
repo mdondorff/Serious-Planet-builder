@@ -1,5 +1,5 @@
 //! REND-013, REND-016, TEST-018: no one-time initialisation inside a measured frame. After construction and `warm_up` the vertex
-//! pool and the first block (or atlas) exist, the ring is grown, both pipelines have drawn once, and a script whose first frames
+//! pool and the first block exist, the ring is grown, both pipelines have drawn once, and a script whose first frames
 //! fit those creates nothing in frames 0 and 1; the image is the cold renderer's. The guarantee is the counters; the wall-clock
 //! probe only reports (CON-17, CON-20: time budgets are the reference machine's).
 
@@ -41,7 +41,7 @@ fn vertex_pool() -> PoolConfig {
     }
 }
 
-/// Compact pools: atlases of 24 x 24 slots, a roomy vertex pool for levels 0-2 and fallbacks.
+/// Compact pools: blocks of 576 slots, a roomy vertex pool for levels 0-2 and fallbacks.
 fn compact_pool() -> PoolConfig {
     let block_slots = 24 * 24;
     let one = compact_format_pool_with(

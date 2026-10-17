@@ -31,11 +31,11 @@ Source: CON-14, CON-20, CON-21, ADR 0031 point 4, ADR 0033 points 1-3, 9 (accept
 
 #### Scenario: Headroom
 - **WHEN** the ten standard views are planned over the default world, against the slots of `tier_compact_pool` (the pools the renderer allocates)
-- **THEN** R with ancestors is at most 10 % and the ground-1m D with ancestors at most 6 % of the mid tier's 230,640 compact slots (R at most 10 % of the high tier's 353,648), the allocation model stays inside both shares, and the vertex-format fractions are pinned at 45 % and 12 % of the mid tier's 34,304 slots (R at most 30 % of the high tier's 52,480 slots), re-pinned from 40 % and 26 % of 37,376 and 57,344 slots when the vertex slot grew with the climate (MESH_VERSION 7), and the compact slot (8,712 B of texels and a 128-byte record) did not grow: the 324 bytes of climate ride in the spare channel of its texels, so its pins and the 230,640 and 353,648 slots are unchanged
+- **THEN** R with ancestors is at most 10 % and the ground-1m D with ancestors at most 6 % of the mid tier's 231,090 compact slots (R at most 10 % of the high tier's 354,338), the allocation model stays inside both shares, and the vertex-format fractions are pinned at 45 % and 12 % of the mid tier's 34,304 slots (R at most 30 % of the high tier's 52,480 slots), re-pinned from 40 % and 26 % of 37,376 and 57,344 slots when the vertex slot grew with the climate (MESH_VERSION 7), and the compact slot (8,712 B of texels and a 128-byte record) did not grow: the 324 bytes of climate ride in the spare channel of its texels, so its pins and the 231,090 and 354,338 slots are unchanged
 
 #### Scenario: Compact pools
 - **WHEN** the tier pools are configured for the compact format at cells 32, 64 and 16
-- **THEN** at cells 32 the mid and high shares hold 15 and 23 atlases and one more atlas would not fit, the fixed items (vertex pool, index buffers, node records, slot records) stay inside their reserve, and a tile size with many small slots per atlas gets fewer atlases
+- **THEN** at cells 32 the mid and high shares hold 15 and 23 blocks of at most 128 MiB (15,406 slots at cells 32) and one more block would not fit, the fixed items (vertex pool, index buffers, node records, slot records) stay inside their reserve, and a tile size with many small slots per block gets fewer blocks
 
 #### Scenario: Per frame through the loop
 - **WHEN** the managed frame loop (STRM-017) turns through eight directions with a share much smaller than R

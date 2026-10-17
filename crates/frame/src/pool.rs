@@ -2,7 +2,7 @@
 //! numbers `planet_streaming::PoolConfig` counts in. GPU-free; the renderer allocates exactly this.
 //!
 //! The slot is the vertex-format tile at the given `cells`: `(cells + 1)^2` grid vertices plus `4 (cells + 1)` skirt vertices,
-//! 44 bytes each (53,724 B at cells 32). ADR 0033's slot counts (230,640 at the mid share) are for the compact tile; the
+//! 44 bytes each (53,724 B at cells 32). ADR 0033's slot counts (231,090 at the mid share) are for the compact tile; the
 //! vertex format has fewer, and the share is a byte ceiling, so the slot count follows from the format.
 
 use planet_generators::compact::{slot_texel_bytes, COMPACT_RECORD_BYTES};
@@ -80,7 +80,7 @@ pub fn compact_format_pool(share_bytes: u64, cells: u32, frames_in_flight: u64) 
     compact_format_pool_with(share_bytes, cells, block_slots_in(COMPACT_BLOCK_BYTES, cells), frames_in_flight)
 }
 
-/// The compact pools of a hardware tier's terrain share: 15 atlases = 230,640 slots at the mid share, 23 = 353,648 at the high
+/// The compact pools of a hardware tier's terrain share: 15 blocks = 231,090 slots at the mid share, 23 = 354,338 at the high
 /// share at cells 32 (ADR 0033 point 3).
 pub fn tier_compact_pool(tier: Tier, cells: u32, frames_in_flight: u64) -> Result<PoolConfig, String> {
     compact_format_pool(tier.terrain_share_bytes(), cells, frames_in_flight)
