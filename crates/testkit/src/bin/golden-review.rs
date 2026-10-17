@@ -124,15 +124,17 @@ fn git(root: &Path, args: &[&str]) -> String {
 /// ADR 0037 point 2: the evidence for a change that declares look parameter changes under `Look changes:`. The files the change
 /// touches (against the base branch, plus the working tree), the zero-context diff of each look data file
 /// (`tests/goldens/look_data.txt`), and whether any debug or shaded golden moved beyond rounding on any adapter.
-fn look_evidence(root: &Path, goldens: &Path, run: &Run<'_>, proposal: &str) -> LookEvidence {
+fn look_evidence(root: &Path, run: &Run<'_>, proposal: &str) -> LookEvidence {
     let declarations = look_declarations(proposal);
-    let patterns: Vec<String> = std::fs::read_to_string(goldens.join("look_data.txt"))
-        .unwrap_or_default()
+    // The list of look data files comes from the base branch, never from the change under review: a change could add `*.rs` to its
+    // own list (an edit of the list in the change takes effect only after it is merged).
+    let base = diff_base(root);
+    let patterns: Vec<String> = git(root, &["show", &format!("{base}:tests/goldens/look_data.txt")])
+        .as_str()
         .lines()
         .map(|l| l.split('#').next().unwrap_or("").trim().to_string())
         .filter(|l| !l.is_empty())
         .collect();
-    let base = diff_base(root);
     let mut changed: BTreeSet<String> = git(root, &["diff", "--name-only", base]).lines().map(str::to_string).collect();
     changed.extend(git(root, &["ls-files", "--others", "--exclude-standard"]).lines().map(str::to_string));
     let changed: Vec<String> = changed.into_iter().filter(|f| !f.is_empty()).collect();
@@ -146,11 +148,15 @@ fn look_evidence(root: &Path, goldens: &Path, run: &Run<'_>, proposal: &str) -> 
         .filter(|(_, c)| matches!(c, GoldenClass::Debug | GoldenClass::Shaded))
         .map(|(n, _)| (n.clone(), observe(run.goldens, run.adapters, run.candidates, n).0))
         .collect();
-    LookEvidence {
-        diff: look_diff_ok(&changed, &diffs, &patterns, &declarations),
-        debug_views: debug_views_unchanged(&views),
-        declarations,
-    }
+    // The debug views are judged only on the candidates a run delivered: an adapter that delivered none (NOT RUN) proves nothing about
+    // them, so the look path needs every adapter with goldens to take part.
+    let not_run = run.not_run();
+    let debug_views = if not_run.is_empty() {
+        debug_views_unchanged(&views)
+    } else {
+        Err(format!("the adapters {} delivered no candidates (NOT RUN), so their debug views are unchecked", not_run.join(", ")))
+    };
+    LookEvidence { diff: look_diff_ok(&changed, &diffs, &patterns, &declarations), debug_views, declarations }
 }
 
 /// Everything the verdicts of one run need.
@@ -343,7 +349,7 @@ fn main() {
     ));
     report.push_str("| Adapter | Golden | Changed px | Max delta | Class | Declared | Verdict |\n|---|---|---|---|---|---|---|\n");
     // ADR 0037 point 2: the look path is computed once, and only when the proposal declares look changes.
-    let look = (!look_declarations(&proposal_text).is_empty()).then(|| look_evidence(&root, &goldens, &run, &proposal_text));
+    let look = (!look_declarations(&proposal_text).is_empty()).then(|| look_evidence(&root, &run, &proposal_text));
     let mut escalated = 0;
     let mut applied = vec![];
     let mut conditions = String::new();

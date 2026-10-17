@@ -482,7 +482,12 @@ pub fn look_diff_ok(
                 Some(c @ ('+' | '-')) if !line.starts_with("+++") && !line.starts_with("---") => (c, &line[1..]),
                 _ => continue,
             };
-            let hit = mine.iter().find(|(_, d)| text.contains(&d.key) && text.contains(if sign == '-' { &d.old } else { &d.new }));
+            // Exactly `key = value` (a trailing comment and comma aside): a longer key, a longer value or a second change on the
+            // line is not the declared change.
+            let (k, v) = text.split('#').next().unwrap_or("").split_once('=').map_or(("", ""), |(k, v)| (k.trim(), v.trim()));
+            let unquote = |x: &str| x.trim().trim_end_matches(',').trim().trim_matches('"').to_string();
+            let v = unquote(v);
+            let hit = mine.iter().find(|(_, d)| k == d.key && v == unquote(if sign == '-' { &d.old } else { &d.new }));
             match hit {
                 Some((i, _)) => {
                     if sign == '-' {
@@ -1076,6 +1081,27 @@ mod tests {
         // An extra line in the look file that no declaration names.
         let extra = diffs("-shore_filter = 1\n+shore_filter = 0\n-sun_lux = 1\n+sun_lux = 2\n");
         assert!(look_diff_ok(&files(&["worlds/earth.look.toml"]), &extra, &patterns, &d).unwrap_err().contains("sun_lux"));
+        // A longer key, a longer value, a second change hidden in a comment: none of them is the declared line.
+        for sneaky in [
+            "-shore_filter = 1
++shore_filter = 10
+",
+            "-shore_filter = 1
++max_shore_filter = 0
+",
+            "-shore_filter = 1
++sun_lux = 9 # shore_filter = 0
+",
+        ] {
+            assert!(look_diff_ok(&files(&["worlds/earth.look.toml"]), &diffs(sneaky), &patterns, &d).is_err(), "{sneaky}");
+        }
+        // A trailing comment and comma and quotes do not matter.
+        let spaced = diffs(
+            "-shore_filter=1 # was
++  shore_filter = 0,
+",
+        );
+        assert_eq!(look_diff_ok(&files(&["worlds/earth.look.toml"]), &spaced, &patterns, &d), Ok(()));
         // The wrong value, and a declaration that is not in the diff.
         let wrong = diffs("-shore_filter = 1\n+shore_filter = 2\n");
         assert!(look_diff_ok(&files(&["worlds/earth.look.toml"]), &wrong, &patterns, &d).is_err());
