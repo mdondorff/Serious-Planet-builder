@@ -1,0 +1,12 @@
+adapter: Dx12 Microsoft Basic Render Driver (Cpu), key dx12-microsoft-basic-render-driver
+view 6 ground-1m: 2378 nodes, 2378 compact, tiles built in 0.5 s
+
+Upload of 2378 tiles (2378 compact), median of 5 fresh renderers. first = the first upload into fresh blocks (includes the driver's / wgpu's
+first-touch initialisation of the block), warm = the same tiles written again into the same slots. calls = frame-thread time in the
+upload calls, wall = calls plus an empty submission and waiting until the queue is idle:
+  per slot, contiguous     atlas   first: calls    39.55 wall    281.92 ms | warm: calls   40.30 wall   279.68 ms = 117.61 us/tile (4756 write calls, 21021520 bytes)
+  per slot, contiguous     buffer  first: calls    35.42 wall   1582.30 ms | warm: calls   34.74 wall  1591.08 ms = 669.09 us/tile (4756 write calls, 21021520 bytes)
+  batched, contiguous      atlas   first: calls    17.98 wall    242.29 ms | warm: calls    9.62 wall   230.69 ms = 97.01 us/tile (21 write calls, 21021520 bytes)
+  batched, contiguous      buffer  first: calls    22.49 wall   1624.26 ms | warm: calls   11.75 wall  1624.64 ms = 683.20 us/tile (2 write calls, 21021520 bytes)
+  batched, every 3rd slot  atlas   first: calls    55.13 wall    298.54 ms | warm: calls   45.96 wall   291.07 ms = 122.40 us/tile (4756 write calls, 21021520 bytes)
+  batched, every 3rd slot  buffer  first: calls    48.94 wall   1683.17 ms | warm: calls   40.07 wall  1653.56 ms = 695.36 us/tile (4756 write calls, 21021520 bytes)
