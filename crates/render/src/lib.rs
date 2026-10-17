@@ -119,6 +119,9 @@ impl GpuContext {
     }
 
     async fn new_async(policy: AdapterPolicy) -> Result<Self, GpuError> {
+        if std::env::var("PROBE_DRED").is_ok() {
+            crate::lit::probe_enable_dred();
+        }
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let adapter = match policy {
             // The test adapters: WARP or lavapipe, the fallback adapter of the platform (test and CI mode, VIEW-001).

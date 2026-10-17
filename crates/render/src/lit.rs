@@ -485,11 +485,15 @@ impl LitPath {
         // frames in flight read their own parameters.
         ctx.queue.write_buffer(&self.params, 0, &Self::params_bytes(plan, reset));
         if let (Some(path), Some(ap)) = (self.atmosphere.as_mut(), plan.atmosphere.as_ref()) {
-            path.ensure_tables(ctx, &ap.atmosphere);
+            if !probe_skip("write-tables") {
+                path.ensure_tables(ctx, &ap.atmosphere);
+            }
             let sun = plan.sun_dir.map(f64::from);
             let geometry = planet_frame::look::atmosphere::FrameGeometry::new(&ap.atmosphere, camera, sun);
             let factor = look::pre_exposure_factor_with(&plan.units, f64::from(plan.exposure.pre_ev100())) as f32;
-            path.write_frame(ctx, &ap.atmosphere, &geometry, factor, ap.view);
+            if !probe_skip("write-frame") {
+                path.write_frame(ctx, &ap.atmosphere, &geometry, factor, ap.view);
+            }
         }
     }
 
@@ -498,6 +502,9 @@ impl LitPath {
     pub(crate) fn record_pre(&self, encoder: &mut wgpu::CommandEncoder) {
         let (_, graph, compiled) = self.compiled.as_ref().expect("prepared");
         for &i in &compiled.order {
+            if probe_skip(graph.passes()[i].name) {
+                continue;
+            }
             match graph.passes()[i].name {
                 "terrain" => break,
                 // The tables were uploaded in `prepare` when they changed; the pass is the graph's marker for it.
@@ -515,6 +522,9 @@ impl LitPath {
         let (_, graph, compiled) = self.compiled.as_ref().expect("prepared");
         let after_terrain = compiled.order.iter().position(|&i| graph.passes()[i].name == "terrain").map_or(0, |p| p + 1);
         for &i in &compiled.order[after_terrain..] {
+            if probe_skip(graph.passes()[i].name) {
+                continue;
+            }
             match graph.passes()[i].name {
                 "sky-composite" => self.atmosphere.as_ref().expect("atmosphere enabled").record_composite(encoder, &self.hdr_view),
                 "exposure-histogram" => {
@@ -687,6 +697,8 @@ pub(crate) fn read_buffer_bytes(ctx: &GpuContext, buffer: &wgpu::Buffer, bytes: 
 }
 
 fn read_buffer(ctx: &GpuContext, buffer: &wgpu::Buffer, bytes: u64) -> Vec<u8> {
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    eprintln!("PROBE read_buffer #{} size {bytes} usage {:?}", N.fetch_add(1, std::sync::atomic::Ordering::SeqCst), buffer.usage());
     let readback = ctx.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("lit-readback"),
         size: bytes,
@@ -697,11 +709,36 @@ fn read_buffer(ctx: &GpuContext, buffer: &wgpu::Buffer, bytes: u64) -> Vec<u8> {
     encoder.copy_buffer_to_buffer(buffer, 0, &readback, 0, bytes);
     ctx.queue.submit([encoder.finish()]);
     let slice = readback.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |r| r.expect("readback map failed"));
-    ctx.device.poll(wgpu::PollType::wait_indefinitely()).expect("device poll failed");
+    let failed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let f2 = failed.clone();
+    slice.map_async(wgpu::MapMode::Read, move |r| {
+        if let Err(e) = r {
+            eprintln!("PROBE map_async error: {e:?}");
+            f2.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+    let polled = ctx.device.poll(wgpu::PollType::wait_indefinitely());
+    if failed.load(std::sync::atomic::Ordering::SeqCst) || polled.is_err() {
+        eprintln!("PROBE poll result: {polled:?}");
+        probe_removal_reason(ctx);
+        panic!("probe: readback failed");
+    }
     let data = slice.get_mapped_range().expect("readback range").to_vec();
     readback.unmap();
     data
+}
+
+/// EXPLORATION ONLY: the D3D12 device-removed reason of the wgpu device.
+pub(crate) fn probe_removal_reason(ctx: &GpuContext) {
+    unsafe {
+        if let Some(d) = ctx.device.as_hal::<wgpu::hal::api::Dx12>() {
+            let r = d.raw_device().GetDeviceRemovedReason();
+            eprintln!("PROBE GetDeviceRemovedReason: {r:?}; memory (ws, private MB) {:?}", probe_memory_mb());
+            probe_dred_report(ctx);
+        } else {
+            eprintln!("PROBE not a Dx12 device");
+        }
+    }
 }
 
 /// One input of [`probe_lit_radiance`]: the arguments of the terrain shader's lit pixel (`shade_lit`).
@@ -932,5 +969,112 @@ mod tests {
         assert_eq!(f32_to_f16_bits(1.0 + (1.0f32 / 2048.0)), 0x3c00);
         assert_eq!(f32_to_f16_bits(1.0 + 3.0 * (1.0f32 / 2048.0)), 0x3c02);
         assert!(f16_bits_to_f32(f32_to_f16_bits(f32::NAN)).is_nan());
+    }
+}
+
+/// EXPLORATION ONLY: wait for the GPU and report whether the D3D12 device has been removed.
+pub fn probe_check(ctx: &GpuContext) -> Option<String> {
+    let _ = ctx.device.poll(wgpu::PollType::wait_indefinitely());
+    unsafe {
+        let d = ctx.device.as_hal::<wgpu::hal::api::Dx12>()?;
+        let (ws, private) = probe_memory_mb();
+        d.raw_device().GetDeviceRemovedReason().err().map(|e| format!("{:?} (ws {ws} MB, private {private} MB)", e.code())).or(Some(format!("ok (ws {ws} MB, private {private} MB)")).filter(|_| false))
+    }
+}
+
+/// EXPLORATION ONLY: (working set, private bytes) of this process, in MB.
+pub fn probe_memory_mb() -> (u64, u64) {
+    #[repr(C)]
+    struct Pmc {
+        cb: u32,
+        page_faults: u32,
+        peak_ws: usize,
+        ws: usize,
+        a: usize,
+        b: usize,
+        c: usize,
+        d: usize,
+        pagefile: usize,
+        peak_pagefile: usize,
+        private: usize,
+    }
+    extern "system" {
+        fn GetCurrentProcess() -> isize;
+        fn K32GetProcessMemoryInfo(h: isize, p: *mut Pmc, cb: u32) -> i32;
+    }
+    unsafe {
+        let mut m: Pmc = std::mem::zeroed();
+        m.cb = std::mem::size_of::<Pmc>() as u32;
+        K32GetProcessMemoryInfo(GetCurrentProcess(), &mut m, m.cb);
+        ((m.ws >> 20) as u64, (m.private >> 20) as u64)
+    }
+}
+
+/// EXPLORATION ONLY: PROBE_SKIP="sky-view,aerial-perspective,..." leaves those passes out of the recorded frame.
+pub(crate) fn probe_skip(name: &str) -> bool {
+    std::env::var("PROBE_SKIP").map(|v| v.split(',').any(|x| x == name)).unwrap_or(false)
+}
+
+/// EXPLORATION ONLY: switch on DRED (auto breadcrumbs and page-fault reporting) before any device exists.
+pub fn probe_enable_dred() {
+    use windows::Win32::Graphics::Direct3D12::*;
+    unsafe {
+        let mut settings: Option<ID3D12DeviceRemovedExtendedDataSettings1> = None;
+        match D3D12GetDebugInterface(&mut settings) {
+            Ok(()) => {
+                if let Some(s) = settings {
+                    s.SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+                    s.SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+                    s.SetBreadcrumbContextEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+                    eprintln!("PROBE DRED enabled");
+                }
+            }
+            Err(e) => eprintln!("PROBE DRED not available: {e:?}"),
+        }
+    }
+}
+
+/// EXPLORATION ONLY: print the DRED breadcrumbs and page-fault info of the (removed) device.
+pub fn probe_dred_report(ctx: &GpuContext) {
+    use windows::core::Interface;
+    use windows::Win32::Graphics::Direct3D12::*;
+    unsafe {
+        let Some(d) = ctx.device.as_hal::<wgpu::hal::api::Dx12>() else { return };
+        let dev = d.raw_device().clone();
+        let dred: windows::core::Result<ID3D12DeviceRemovedExtendedData> = dev.cast();
+        let Ok(dred) = dred else {
+            eprintln!("PROBE DRED interface not available on the device");
+            return;
+        };
+        match dred.GetAutoBreadcrumbsOutput() {
+            Ok(out) => {
+                let mut node = out.pHeadAutoBreadcrumbNode;
+                let mut n = 0;
+                while !node.is_null() {
+                    let nd = &*node;
+                    let done = if nd.pLastBreadcrumbValue.is_null() { 0 } else { *nd.pLastBreadcrumbValue };
+                    let name = |p: *const u8| if p.is_null() { String::new() } else { std::ffi::CStr::from_ptr(p.cast()).to_string_lossy().into_owned() };
+                    let q = name(nd.pCommandQueueDebugNameA);
+                    let cl = name(nd.pCommandListDebugNameA);
+                    eprintln!("PROBE DRED node {n}: queue '{q}' list '{cl}' completed {done} of {} ops", nd.BreadcrumbCount);
+                    if done < nd.BreadcrumbCount {
+                        let hist = std::slice::from_raw_parts(nd.pCommandHistory, nd.BreadcrumbCount as usize);
+                        let lo = done.saturating_sub(4) as usize;
+                        let hi = ((done + 3) as usize).min(hist.len());
+                        for (i, op) in hist.iter().enumerate().take(hi).skip(lo) {
+                            eprintln!("PROBE DRED    op {i}{}: {:?}", if i as u32 == done { "  <== first not completed" } else { "" }, op);
+                        }
+                    }
+                    node = nd.pNext;
+                    n += 1;
+                }
+                eprintln!("PROBE DRED {n} breadcrumb node(s)");
+            }
+            Err(e) => eprintln!("PROBE DRED breadcrumbs unavailable: {e:?}"),
+        }
+        match dred.GetPageFaultAllocationOutput() {
+            Ok(pf) => eprintln!("PROBE DRED page fault VA {:#x}", pf.PageFaultVA),
+            Err(e) => eprintln!("PROBE DRED page fault info unavailable: {e:?}"),
+        }
     }
 }

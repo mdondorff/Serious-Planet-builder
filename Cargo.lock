@@ -1246,6 +1246,7 @@ dependencies = [
  "pollster",
  "raw-window-handle",
  "wgpu",
+ "windows",
 ]
 
 [[package]]

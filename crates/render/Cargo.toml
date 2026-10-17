@@ -29,3 +29,6 @@ spike06 = []
 # SPIKE-07 (docs/archive/M4/spikes.md): experimental shader detail term below the finest geometry level (visual only). Not part of the
 # product: off by default, never enabled by another crate's default features.
 spike07 = []
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Graphics_Direct3D12"] }

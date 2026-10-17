@@ -206,8 +206,15 @@ impl GpuContext {
         policy: AdapterPolicy,
         vsync: bool,
     ) -> Result<(GpuContext, WindowSurface), GpuError> {
+        if std::env::var("PROBE_DRED").is_ok() {
+            crate::lit::probe_enable_dred();
+        }
         pollster::block_on(async {
-            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(Box::new(Arc::clone(&window))));
+            let mut desc = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(Arc::clone(&window)));
+            if std::env::var("PROBE_BACKEND").as_deref() == Ok("dx12") {
+                desc.backends = wgpu::Backends::DX12;
+            }
+            let instance = wgpu::Instance::new(desc);
             let surface = instance.create_surface(window).map_err(|e| GpuError::Device(format!("creating the window surface: {e}")))?;
             let mode = match policy {
                 AdapterPolicy::HighPerformance => SelectionMode::Interactive,
@@ -299,7 +306,11 @@ impl WindowSurface {
                 self.surface.configure(&ctx.device, &self.config);
                 return Ok(Presented::Skipped("surface lost, reconfigured"));
             }
-            C::Validation => return Err(GpuError::Device("the surface reported a validation error while acquiring a frame".into())),
+            C::Validation => {
+                eprintln!("PROBE surface validation error: {:?}", crate::lit::probe_check(ctx));
+                crate::lit::probe_dred_report(ctx);
+                return Err(GpuError::Device("the surface reported a validation error while acquiring a frame".into()));
+            }
         };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(self.blit.format), ..Default::default() });
         self.blit.draw(ctx, renderer.color_view(), renderer.target_size(), &view, (self.config.width, self.config.height));

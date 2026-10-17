@@ -2124,7 +2124,7 @@ impl TerrainRenderer {
         }
         debug_assert_eq!(globals.len() as u64, GLOBALS_BYTES);
         // Each frame writes its own set of the ring, so a frame still in flight keeps the records it reads.
-        let ring_index = (self.frame % RING as u64) as usize;
+        let ring_index = if std::env::var("PROBE_RING0").is_ok() { 0 } else { (self.frame % RING as u64) as usize };
         self.used.ring |= 1 << ring_index;
         self.used.modes |= if self.draw_mode == DrawMode::Indirect { 0b10 } else { 0b01 };
         if let Some(l) = &plan.lit {
@@ -2199,6 +2199,11 @@ impl TerrainRenderer {
             // before the terrain (the sky-view table and the aerial-perspective volume).
             l.path.prepare(ctx, lit, &plan.camera);
             l.path.record_pre(&mut encoder);
+            if std::env::var("PROBE_SPLIT").is_ok_and(|v| v == "both" || v == "pre") {
+                let cb = std::mem::replace(&mut encoder, device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("terrain-2") })).finish();
+                ctx.queue.submit([cb]);
+                eprintln!("PROBE split after pre-passes (and all queued writes): {:?}", crate::lit::probe_check(ctx));
+            }
         }
         let lit_gpu = plan.lit.as_ref().and(self.lit.as_ref());
         let atmosphere_frame = plan.lit.as_ref().is_some_and(|l| l.atmosphere.is_some());
@@ -2241,8 +2246,24 @@ impl TerrainRenderer {
             pass.set_pipeline(vertex_pipeline);
             pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.set_bind_group(0, &set.bind, &[]);
-            if let Some(a) = lit_gpu.filter(|_| atmosphere_frame).and_then(|l| l.path.atmosphere()) {
-                pass.set_bind_group(3, a.terrain_bind(), &[]);
+            if std::env::var("PROBE_CHECK").is_ok() {
+                let mut desc = String::new();
+                if let Some(list) = &indirect {
+                    for run in &list.runs {
+                        let k = match run.buffer {
+                            DrawBuffer::Atlas(b) => format!("A{b}"),
+                            DrawBuffer::VertexPool => "V".to_string(),
+                            DrawBuffer::Block(b) => format!("B{b}"),
+                        };
+                        desc += &format!("{k}x{}@{} ", run.count, run.first);
+                    }
+                }
+                eprintln!("PROBE draw: nodes {} atmosphere_frame {atmosphere_frame} indirect {} runs: {desc}", plan.nodes.len(), indirect.is_some());
+            }
+            let probe_rebind = std::env::var("PROBE_REBIND3").is_ok();
+            let probe_abind = lit_gpu.filter(|_| atmosphere_frame).and_then(|l| l.path.atmosphere()).map(|a| a.terrain_bind());
+            if let Some(b) = probe_abind {
+                pass.set_bind_group(3, b, &[]);
             }
             // Which pipeline is bound: a run of an atlas needs the compact one with its two bind groups.
             let mut compact_bound: Option<u32> = None;
@@ -2257,6 +2278,9 @@ impl TerrainRenderer {
                                     let c = self.compact.as_ref().expect("compact renderer");
                                     if vertex_bound || compact_bound.is_none() {
                                         pass.set_pipeline(compact_pipeline.expect("compact renderer"));
+                                    if let (true, Some(b)) = (probe_rebind, probe_abind) {
+                                        pass.set_bind_group(3, b, &[]);
+                                    }
                                         pass.set_bind_group(0, &set.bind, &[]);
                                         pass.set_bind_group(1, set.frame_bind.as_ref(), &[]);
                                     }
@@ -2268,6 +2292,9 @@ impl TerrainRenderer {
                             other => {
                                 if !vertex_bound {
                                     pass.set_pipeline(vertex_pipeline);
+                                    if let (true, Some(b)) = (probe_rebind, probe_abind) {
+                                        pass.set_bind_group(3, b, &[]);
+                                    }
                                     pass.set_bind_group(0, &set.bind, &[]);
                                     vertex_bound = true;
                                     compact_bound = None;
@@ -2293,6 +2320,9 @@ impl TerrainRenderer {
                             if compact_bound != Some(b) {
                                 if vertex_bound || compact_bound.is_none() {
                                     pass.set_pipeline(compact_pipeline.expect("compact renderer"));
+                                    if let (true, Some(b)) = (probe_rebind, probe_abind) {
+                                        pass.set_bind_group(3, b, &[]);
+                                    }
                                     pass.set_bind_group(0, &set.bind, &[]);
                                     pass.set_bind_group(1, set.frame_bind.as_ref(), &[]);
                                 }
@@ -2319,6 +2349,11 @@ impl TerrainRenderer {
             stats.triangles = plan.nodes.len() as u64 * u64::from(self.index_count) / 3;
         }
         if let Some(l) = self.lit.as_ref().filter(|_| plan.lit.is_some()) {
+            if std::env::var("PROBE_SPLIT").is_ok_and(|v| v == "both" || v == "post") {
+                let cb = std::mem::replace(&mut encoder, device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("terrain-3") })).finish();
+                ctx.queue.submit([cb]);
+                eprintln!("PROBE split after the terrain pass: {:?}", crate::lit::probe_check(ctx));
+            }
             l.path.record_post(&mut encoder, &self.color_view);
         }
         if let Some(t) = timing {

@@ -274,6 +274,11 @@ impl App<'_> {
             if timed {
                 st.gpu_ms = timing.gpu_ms;
             }
+            if std::env::var("PROBE_CHECK").is_ok() {
+                let t = Instant::now();
+                let r = planet_render::lit::probe_check(ctx);
+                eprintln!("PROBE frame {} timed {timed} lit {} wait {:.0} ms: {:?} mem {:?}", st.frames, lit_plan.is_some(), t.elapsed().as_secs_f64() * 1e3, r, planet_render::lit::probe_memory_mb());
+            }
             let drew_lit = lit_plan.is_some();
             if drew_lit {
                 st.counts.lit_frames += 1;
