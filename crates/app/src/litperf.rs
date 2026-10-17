@@ -63,6 +63,11 @@ impl LitSetup {
         })
     }
 
+    /// What the water plan cache has counted so far (the streaming scenes log each frame's share).
+    pub(crate) fn water_counters(&self) -> planet_frame::water::WaterCounters {
+        self.cache.counters()
+    }
+
     /// The plan of the throwaway frames that warm the lit path, the atmosphere and (in a world with water) the water pass before the
     /// first measured frame (REND-017).
     pub(crate) fn warm_plan(&self, camera: Camera, size: (u32, u32), cells: u32) -> Result<TerrainPlan, String> {

@@ -280,6 +280,59 @@ fn request<'a>(src: &'a dyn WaterSource, table: &'a LiquidTable, look: &'a Water
     WaterRequest { source: src, map: &TangentWarp, liquids: table, look, lod, time_s: t, view: WaterView::Lit }
 }
 
+// spec: STRM-024
+#[test]
+fn the_helper_threads_of_a_tiles_water_fill_run_at_the_jobs_priority_not_at_normal() {
+    use planet_streaming::priority::{current, set_current, Priority};
+    struct Spy(std::sync::Mutex<Vec<Option<Priority>>>);
+    impl WaterSource for Spy {
+        fn water_at(&self, _dir: Vec3) -> Result<Option<WaterSample>, ReadError> {
+            self.0.lock().unwrap().push(current());
+            Ok(None)
+        }
+    }
+    let spy = Spy(std::sync::Mutex::new(Vec::new()));
+    let book = planet_frame::water::WaterBook::new();
+    let applied = std::sync::atomic::AtomicBool::new(false);
+    let tile = plan_of(4).nodes[0].tile;
+    // Run as a worker does: a thread of its own at below-normal priority (a test thread keeps the harness's priority).
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            if !set_current(Priority::BelowNormal) {
+                return; // a platform without priorities: nothing to check
+            }
+            applied.store(true, std::sync::atomic::Ordering::SeqCst);
+            book.fill(&spy, &TangentWarp, tile, R).unwrap();
+        });
+    });
+    let seen = spy.0.lock().unwrap();
+    // Without the fix the helper threads report normal (a new thread starts there), so the check fails on a regression.
+    if applied.load(std::sync::atomic::Ordering::SeqCst) {
+        assert!(!seen.is_empty(), "the fill made no query");
+        assert!(seen.iter().all(|p| *p == Some(Priority::BelowNormal)), "queries by priority: {seen:?}");
+    }
+}
+
+// spec: TEST-031
+#[test]
+fn the_caches_counters_come_as_a_snapshot_whose_difference_is_one_frames_share_for_the_frames_log() {
+    let field = Reference(1);
+    let src = HeightSea { field: &field, level: 0.0 };
+    let (table, look, lod) = (LiquidTable::earth(), WaterLook::EARTH, lod16());
+    let plan = plan_of(4);
+    let mut cache = WaterTileCache::new();
+    let start = cache.counters();
+    assert_eq!((start.queries, start.tile_misses, start.band_queries), (0, 0, 0));
+    plan_water(&request(&src, &table, &look, &lod, 5.0), &mut cache, &plan).unwrap();
+    let first = cache.counters().since(start);
+    let samples = u64::from((TILE_SAMPLES + 1) * (TILE_SAMPLES + 1));
+    assert_eq!((first.queries, first.tile_misses), (samples * plan.nodes.len() as u64, plan.nodes.len() as u64), "the first plan asks");
+    let mid = cache.counters();
+    plan_water(&request(&src, &table, &look, &lod, 6.0), &mut cache, &plan).unwrap();
+    let second = cache.counters().since(mid);
+    assert_eq!((second.queries, second.tile_misses, second.band_queries), (0, 0, 0), "the memoised second plan asks nothing");
+}
+
 // spec: ATMO-012
 #[test]
 fn a_tile_carries_water_when_any_sample_of_it_is_wet_and_the_answer_is_asked_once_per_tile() {
