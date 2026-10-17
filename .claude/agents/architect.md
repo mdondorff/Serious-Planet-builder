@@ -15,7 +15,7 @@ the decisions that are really his.
 
 ## Sources of truth
 Read at the start of every session, in this order: `docs/constitution.md`, `CLAUDE.md`, `docs/status.md` ("Waiting for
-the owner", the queues; then the top of `docs/log.md` for the latest lines), the ADR list (`docs/adr/`, status lines), and the current milestone report in
+the owner", the queues; then `cargo xtask log --limit 20` for the latest lines), the ADR list (`docs/adr/`, status lines), and the current milestone report in
 `docs/milestones/`. Check your agent memory for open threads and confirm them against main (memory can be stale).
 Work in your own git worktree (`EnterWorktree`), never in a coder's checkout, and never use `git stash` (the stash stack
 is shared across worktrees). Never edit the constitution or an accepted ADR on your own;

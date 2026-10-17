@@ -3,6 +3,7 @@
 mod accept;
 mod detdiff;
 mod layering;
+mod logcmd;
 mod repocheck;
 mod speclint;
 mod testcmd;
@@ -18,6 +19,7 @@ const USAGE: &str = "cargo xtask <command>
   check                rustfmt --check, clippy -D warnings, layering
   layering             crate layering and GPU-free dependency check (CON-02)
   spec-lint            trace IDs, tiers, requirement coverage (CON-16)
+  log [--since YYYY-MM-DD] [--limit N]   the project log: fragments of docs/log.d/ and the entries of docs/log.md, newest first (BUILD-010)
   accept <milestone>   run milestone acceptance, e.g. M0; M4 also judges the perf logs of a streaming window (--logs DIR, default perf/logs) and refuses without a valid one
   repro <bundle>       replay a repro bundle (format arrives in M1)
   perf [--machine-ready]   performance harness on Rasierklinge; the harness measures readiness and refuses (ADR 0020);
@@ -44,6 +46,7 @@ fn main() -> ExitCode {
         Some("check") => testcmd::check(&root),
         Some("layering") => layering::run(&root),
         Some("spec-lint") => speclint::run(&root),
+        Some("log") => logcmd::run(&root, &args[1..]),
         Some("accept") => accept::run(&root, &args[1..]),
         Some("repro") => testcmd::repro(&root, &args[1..]),
         Some("perf") => testcmd::perf(&root, &args[1..]),
