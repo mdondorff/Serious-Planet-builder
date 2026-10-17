@@ -239,7 +239,7 @@ Status: active
 Source: STRM-012, CON-14, CON-20, ADR 0027 point 7, ADR 0033, M4 item 7b
 
 #### Scenario: Identical at any thread count
-- **WHEN** tiles of the eroded field are generated over a stored bake at 1, 4 and 20 threads
+- **WHEN** tiles of the eroded field are generated over a stored bake at 1, 4 and 20 threads (tier A: 1 and 3 threads on four tiles of every face (levels 0 to 2 and (4, 9, 15)); the full sweep is tier B, `oracle_concurrent_source`)
 - **THEN** every tile is bit-identical to the others and to the tile over an in-memory bake of the same grid
 
 #### Scenario: One decode per block

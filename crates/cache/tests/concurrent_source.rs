@@ -1,83 +1,13 @@
 //! STRM-014: the stored global bake read by many threads (M4 item 7b).
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Mutex;
-
-use planet_cache::global_store::{build_global, GlobalWorld, StoreSource, SOURCE_CACHE_BYTES};
-use planet_cache::pack::{TileStore, DEFAULT_MAX_PACK_BYTES};
-use planet_core::cube::TangentWarp;
-use planet_core::{Face, TileId};
-use planet_generators::erosion::ErosionGenerator;
-use planet_generators::global::{bake, GlobalSample, GridSource, LatticeSource};
-use planet_generators::mesh::tile_mesh_field;
-use planet_world_def::{BodyId, GenContext, WorldDefinition};
-
-const R: f64 = 6_371_000.0;
-const RES: u32 = 64;
-// Blocks of 4 cells: 25 samples of 16 bytes; a grid of 64 cells is level 4, 16 x 16 blocks per face.
-const BLOCK_BYTES: u64 = 400;
-const BLOCKS: u64 = 6 * 16 * 16;
-
-struct Dir(PathBuf);
-
-impl Dir {
-    fn new(name: &str) -> Dir {
-        static N: AtomicUsize = AtomicUsize::new(0);
-        let p = std::env::temp_dir().join(format!("planet-conc-source-{}-{}-{name}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
-        let _ = fs::remove_dir_all(&p);
-        Dir(p)
-    }
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for Dir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn world_with_limit(seed: u64, limit: u32) -> GlobalWorld {
-    GlobalWorld::from_definition(&WorldDefinition::single_planet(R, seed)).unwrap().with_block_limit(limit)
-}
-
-fn world(seed: u64) -> GlobalWorld {
-    // A small block limit (store policy, ADR 0027 point 1) so small grids still have many blocks.
-    world_with_limit(seed, 4)
-}
-
-fn bits(s: &GlobalSample) -> [u32; 4] {
-    [s.continent.to_bits(), s.elevation_m.to_bits(), s.temperature_c.to_bits(), s.precipitation_mm.to_bits()]
-}
-
-fn stored(name: &str) -> (Dir, GlobalWorld) {
-    let d = Dir::new(name);
-    let w = world(7);
-    build_global(d.path(), &w, RES, 3, DEFAULT_MAX_PACK_BYTES).unwrap();
-    (d, w)
-}
-
-/// Every vertex of the grid in a thread-specific order (a stride coprime to the vertex count), so threads collide on blocks.
-fn read_all(src: &dyn LatticeSource, grid: &GridSource, thread: usize) {
-    let n = (RES + 1) as usize;
-    let total = 6 * n * n;
-    let stride = [1usize, 7, 11, 17, 19, 23, 29, 31][thread % 8];
-    let mut at = thread * 977 % total;
-    for _ in 0..total {
-        let f = at / (n * n);
-        let (i, j) = ((at % (n * n)) % n, (at % (n * n)) / n);
-        let (face, i, j) = (Face(f as u8), i as u32, j as u32);
-        assert_eq!(bits(&src.at(face, i, j).unwrap()), bits(&grid.at(face, i, j).unwrap()), "thread {thread} face {f} ({i}, {j})");
-        at = (at + stride) % total;
-    }
-}
+// The store, the directories and the readers are shared with `oracle_concurrent_source.rs` (tier B).
+include!("support/concurrent_source.rs");
 
 // spec: STRM-014
 #[test]
-fn tiles_over_the_store_are_identical_at_1_4_and_20_threads_and_to_the_in_memory_bake() {
+fn tiles_over_the_store_are_identical_at_1_and_3_threads_and_to_the_in_memory_bake() {
+    // The small variant (tier A): one thread against three, on four tiles of every face (levels 0 to 2 and a fine edge tile, so a face
+    // edge and block borders still occur); 1, 4 and 20 threads on all tiles is `oracle_concurrent_source.rs` (tier B).
     let (d, w) = stored("tiles");
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let grid = bake(7, &TangentWarp, RES, 2).unwrap();
@@ -86,7 +16,7 @@ fn tiles_over_the_store_are_identical_at_1_4_and_20_threads_and_to_the_in_memory
     // Tiles at several levels, across face edges and block borders.
     let mut ids = Vec::new();
     for f in 0..6u8 {
-        for (l, x, y) in [(0u8, 0u32, 0u32), (1, 1, 0), (2, 3, 2), (3, 7, 7), (3, 0, 4), (4, 9, 15)] {
+        for (l, x, y) in [(0u8, 0u32, 0u32), (1, 1, 0), (2, 3, 2), (4, 9, 15)] {
             ids.push(TileId::new(Face(f), l, x, y).unwrap());
         }
     }
@@ -114,7 +44,7 @@ fn tiles_over_the_store_are_identical_at_1_4_and_20_threads_and_to_the_in_memory
         out.into_iter().map(|m| m.into_inner().unwrap()).collect()
     };
     let memory = mesh_bits(&GridSource(&grid), 1);
-    for threads in [1usize, 4, 20] {
+    for threads in [1usize, 3] {
         // A fresh source each time; a budget of a few blocks makes evictions happen under contention too.
         let tight = StoreSource::with_budget(&store, &w, RES, 6 * BLOCK_BYTES).unwrap();
         assert!(mesh_bits(&tight, threads) == memory, "{threads} threads, tight budget");
@@ -131,7 +61,7 @@ fn threads_that_want_one_block_share_one_decode() {
     let grid = bake(7, &TangentWarp, RES, 2).unwrap();
     let src = StoreSource::with_budget(&store, &w, RES, BLOCKS * BLOCK_BYTES).unwrap();
     std::thread::scope(|s| {
-        for t in 0..8 {
+        for t in 0..4 {
             let (src, grid) = (&src, &grid);
             s.spawn(move || read_all(src, &GridSource(grid), t));
         }
@@ -370,8 +300,10 @@ fn a_threaded_batch_over_the_store_decodes_each_block_once_whatever_the_budget_a
         roomy.stats().decodes
     };
     assert!(distinct > 8, "{distinct} distinct blocks");
-    for blocks in [1u64, 3, 31] {
-        for threads in [1usize, 2, 20] {
+    // The small variant (tier A): threads 1 and 3 over budgets of 1 and 31 blocks; 1, 2 and 20 threads over 1, 3 and 31 blocks
+    // is `oracle_concurrent_source.rs` (tier B).
+    for blocks in [1u64, 31] {
+        for threads in [1usize, 3] {
             let src = StoreSource::with_budget(&store, &w, RES, blocks * BLOCK_BYTES).unwrap();
             let field = ErosionGenerator.field(&GenContext::new(&def), BodyId::PLANET, &src, key).unwrap();
             let got: Vec<u64> = field.heights_threaded(&dirs, threads).iter().map(|h| h.to_bits()).collect();

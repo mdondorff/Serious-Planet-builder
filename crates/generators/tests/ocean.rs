@@ -5,65 +5,15 @@ use std::collections::HashSet;
 use planet_core::cube::TangentWarp;
 use planet_core::hash::hash_u64s;
 use planet_core::{Face, TileId};
-use planet_generators::global::{bake, GlobalGrid, GlobalSample, GLOBAL_VERSION, SEA_LEVEL_F32};
+use planet_generators::global::{bake, GlobalGrid, GLOBAL_VERSION, SEA_LEVEL_F32};
 use planet_generators::ocean::{
     analyse_block, block_tiles, grid_block, is_sea, ocean_bits, reference_ocean, threshold_fp, tiled_ocean, vertex_area_fp, CubeIndex,
     OceanBits, OceanError, OceanGrid, OceanLattice, OceanMerger, EARTH_OCEAN_MIN_AREA_FRACTION, SPHERE_AREA_FP,
 };
 
-const SEA: f32 = -1.0;
-const LAND: f32 = 1.0;
-
-fn sample(continent: f32) -> GlobalSample {
-    GlobalSample { continent, elevation_m: 0.0, temperature_c: 0.0, precipitation_mm: 0.0 }
-}
-
-/// A bake whose sea is a set of nodes: every copy of a node gets the same value, as a real bake's shared vertices do.
-fn grid_from_nodes(res: u32, sea_nodes: &HashSet<u64>) -> GlobalGrid {
-    let index = CubeIndex::new(res);
-    let n = (res + 1) as usize;
-    let faces = std::array::from_fn(|f| {
-        let mut v = Vec::with_capacity(n * n);
-        for j in 0..=res {
-            for i in 0..=res {
-                v.push(sample(if sea_nodes.contains(&index.node_id(Face(f as u8), i, j)) { SEA } else { LAND }));
-            }
-        }
-        v
-    });
-    GlobalGrid { seed: 0, res, faces }
-}
-
-fn node_set(res: u32, pred: &dyn Fn(Face, u32, u32) -> bool) -> HashSet<u64> {
-    let index = CubeIndex::new(res);
-    let mut set = HashSet::new();
-    for f in 0..6u8 {
-        for j in 0..=res {
-            for i in 0..=res {
-                if pred(Face(f), i, j) {
-                    set.insert(index.node_id(Face(f), i, j));
-                }
-            }
-        }
-    }
-    set
-}
-
-fn random_grid(res: u32, seed: u64, percent: u64) -> GlobalGrid {
-    let index = CubeIndex::new(res);
-    let set = node_set(res, &|f, i, j| hash_u64s(seed, &[index.node_id(f, i, j)]) % 100 < percent);
-    grid_from_nodes(res, &set)
-}
-
-/// The tiled result equals the serial reference for the table's components and every bit.
-fn assert_equal_to_reference(grid: &GlobalGrid, cells: u32, threads: usize, fraction: f64, what: &str) {
-    let (rt, rg) = reference_ocean(grid, &TangentWarp, fraction).unwrap();
-    let (tt, tg) = tiled_ocean(grid, &TangentWarp, cells, threads, fraction).unwrap();
-    assert_eq!(rt.components, tt.components, "{what}: components, blocks of {cells}, {threads} threads");
-    assert_eq!(rt.hash(), tt.hash(), "{what}");
-    assert_eq!(rg, tg, "{what}: ocean bits, blocks of {cells}, {threads} threads");
-    assert_eq!(rg.hash(), tg.hash());
-}
+#[path = "support/ocean.rs"]
+mod support;
+use support::*;
 
 // spec: GEN-022
 #[test]
@@ -139,13 +89,14 @@ fn vertex_areas_add_up_to_the_sphere_and_the_block_table_equals_the_vertex_formu
 // spec: GEN-022
 #[test]
 fn a_real_bake_gives_the_serial_reference_for_every_block_size_and_thread_count() {
-    for (seed, res) in [(1u64, 64u32), (7, 128)] {
-        let grid = bake(seed, &TangentWarp, res, 4).unwrap();
-        for fraction in [0.0, 0.0005, 0.02, EARTH_OCEAN_MIN_AREA_FRACTION, 0.5, 1.0] {
-            for cells in [4u32, 16, 32, res] {
-                for threads in [1usize, 3] {
-                    assert_equal_to_reference(&grid, cells, threads, fraction, &format!("seed {seed} res {res} fraction {fraction}"));
-                }
+    // The small variant (tier A): one seed at 64 cells, one thread against three; the full sweep (two seeds, six area
+    // fractions, 128 cells) is `oracle_ocean_sweep.rs` (tier B).
+    let (seed, res) = (1u64, 64u32);
+    let grid = bake(seed, &TangentWarp, res, 4).unwrap();
+    for fraction in [0.0, 0.02, EARTH_OCEAN_MIN_AREA_FRACTION, 1.0] {
+        for cells in [4u32, 16, res] {
+            for threads in [1usize, 3] {
+                assert_equal_to_reference(&grid, cells, threads, fraction, &format!("seed {seed} res {res} fraction {fraction}"));
             }
         }
     }
@@ -155,14 +106,15 @@ fn a_real_bake_gives_the_serial_reference_for_every_block_size_and_thread_count(
 #[test]
 fn random_sea_masks_percolate_alike_in_the_serial_and_the_tiled_computation() {
     // Site percolation on the cube graph near its threshold: many components, big ones crossing blocks, faces and corners.
-    for (res, percent) in [(1u32, 70u64), (2, 60), (4, 55), (16, 60), (16, 70), (32, 55), (32, 62)] {
-        for seed in 0..3u64 {
+    // The small variant (tier A): fewer grids and thread counts 1, 2 and 3; the full sweep is `oracle_ocean_sweep.rs` (tier B).
+    for (res, percent) in [(1u32, 70u64), (4, 55), (16, 60), (32, 62)] {
+        for seed in 0..2u64 {
             let grid = random_grid(res, 1000 * seed + u64::from(res), percent);
             let mut sizes = vec![res, (res / 2).max(1), (res / 4).max(1), 1];
             sizes.sort_unstable();
             sizes.dedup();
             for cells in sizes {
-                for (threads, fraction) in [(1usize, 0.0), (4, 0.0), (2, 0.01), (3, 0.1)] {
+                for (threads, fraction) in [(1usize, 0.0), (2, 0.01), (3, 0.1)] {
                     assert_equal_to_reference(&grid, cells, threads, fraction, &format!("res {res} {percent} % seed {seed}"));
                 }
             }
