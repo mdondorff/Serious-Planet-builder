@@ -1,5 +1,5 @@
 # 0053 The water pass: implementation readings of ADR 0041 points 4 to 9
-Status: accepted (opus-planner, delegation, 2026-10-17; points 4 and 5 amended by 0056 (proposed); point 2 with the lit measure reported only and `shore_filter` default 1, the owner judges the shore in motion at the M5 gate)
+Status: accepted (opus-planner, delegation, 2026-10-17; points 4 and 5 amended by 0056; point 2 with the lit measure reported only and `shore_filter` default 1, the owner judges the shore in motion at the M5 gate)
 Date: 2026-10-17
 Source: ADR 0041 points 4 to 9, ADR 0051 points 6 and 8, ADR 0035, ADR 0043, ADR 0048, ADR 0042 point 2; the coastal flights and the measurements of the change; the planner's steer of 2026-10-17 (no new per-format storage)
 

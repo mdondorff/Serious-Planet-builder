@@ -1,5 +1,5 @@
 # 0056 Water selection: the coastal band, tile water in the tile job, a pixel-footprint wave fade
-Status: proposed
+Status: accepted (opus-planner, delegation, 2026-10-17)
 Date: 2026-10-17
 Source: window 6 stalls and coastal captures (docs/log.md), ADR 0041, ADR 0051 point 6, ADR 0053 points 4 and 5; spec ATMO-012, ATMO-013, ATMO-019
 
