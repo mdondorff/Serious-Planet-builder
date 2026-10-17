@@ -62,8 +62,5 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0050 | [Atmosphere: implementation readings of ADR 0040](0050-atmosphere-implementation-readings.md) | accepted |  |
 | 0051 | [Ocean channel, liquid table and the water-level field: implementation readings of ADR 0041](0051-ocean-channel-liquid-table-and-water-field-readings.md) | accepted |  |
 | 0052 | [First M5 goldens: an edge tolerance for the cross-adapter debug-view check](0052-m5-debug-view-edge-tolerance.md) | accepted |  |
-<<<<<<< HEAD
 | 0053 | [The water pass: implementation readings of ADR 0041 points 4 to 9](0053-water-pass-readings-of-adr-0041.md) | accepted | owner judges `shore_filter` at the M5 gate |
-=======
 | 0054 | [Compact tiles in storage buffers instead of texture atlases (amends ADR 0033 point 3)](0054-compact-tiles-in-storage-buffers.md) | accepted |  |
->>>>>>> origin/main

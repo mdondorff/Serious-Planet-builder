@@ -1,14 +1,24 @@
 # Spike register
 
-Time-boxed experiments that answer a question before a decision. Opened and closed with `/spike`. Spike code lives in `spikes/<name>/` and is never merged into the main crates as-is.
+Time-boxed experiments that answer a question before a decision. Opened and closed with `/spike`. Spike code lives on its spike branch and is never merged into the main crates as-is. **Each spike's report, numbers and renders live in `spikes/<name>/results/`** (`results.md` with a Visuals section; the `spike` skill has the rule). `docs/spikes/` holds only the frozen images of SPIKE-03 to 07.
 
-Planned spikes from the background report (open them when their milestone starts):
-- GPU-driven indirect terrain/instance path in wgpu. Milestone: M2. (SPIKE-01, closed 2026-10-10.)
-- CDLOD morph quality on steep terrain. Milestone: M2. (SPIKE-02, closed 2026-10-10 for smooth terrain; steep terrain remains open for M3.)
-- Global hydrology on the sphere (stream-power on a 1–4 km grid + halo-based local carving). Milestone: M3. Fallback: local erosion filter + rivers on a coarse flow grid.
-- City HLOD with 10^5 buildings. Milestone: M7.
+Planned spikes from the background report still to open: city HLOD with 10^5 buildings (M7).
 
-Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to 04), `docs/archive/M4/spikes.md` (SPIKE-05 to 07).
+Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to 04), `docs/archive/M4/spikes.md` (SPIKE-05 to 07). SPIKE-10 was never used.
+
+## Index of M5 spikes and explorations
+| Id | Title | Status | Results |
+|---|---|---|---|
+| SPIKE-08 | Ocean connectivity at 16384 | closed 2026-10-16 | `spikes/ocean-connectivity/results/` |
+| SPIKE-09 | Atmosphere f32 forms | closed | `spikes/atmosphere-f32/results/` |
+| SPIKE-11 | Mouse look plumbing | open (owner's local check) | `spikes/mouse-look/results/` |
+| SPIKE-12 | Retiring the vertex tile format | open (2026-10-17) | `spikes/vertex-retirement/results/` |
+| exploration | WARP parallel-device crash: inside WARP, test-only (PRs #195, #196) | closed | `spikes/warp-crash/results/` |
+| exploration | WARP device removal with compact tiles and the atmosphere: test-only (PRs #212, #213) | closed | `spikes/warp-compact-atmosphere/results/` |
+| exploration | Tile-format duality: cost of retiring the vertex format (PR #218) | closed; SPIKE-12 follows | `spikes/tile-format-duality/results/` |
+| exploration | Compact tiles in storage buffers (PR #225; ADR 0054) | closed | `spikes/compact-storage-buffer/results/` |
+
+The explorations before 2026-10-17 had no register entry; from now on every exploration gets a `SPIKE-NN` entry.
 
 ## SPIKE-11 Mouse look plumbing
 Status: open (waiting for the owner's local check; the remote part is dropped, owner, 2026-10-17)
