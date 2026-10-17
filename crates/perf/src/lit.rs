@@ -83,6 +83,9 @@ pub fn metrics_of(frames: &[LitFrame]) -> Vec<(String, Stats)> {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Status {
     Ok,
+    /// Within the budget at a clock below the floor (ADR 0057): a slower clock only overstates GPU time, so this is a pass. Carries
+    /// the state the figure was measured at.
+    OkBelowFloor(String),
     Over,
     /// The view's clock state does not allow GPU verdicts (ADR 0036); the figure is shown without one.
     NotValid(String),
@@ -115,6 +118,7 @@ impl LitVerdict {
         let b = self.budget.map_or(String::new(), |b| format!(" (budget {b} ms)"));
         let word = match (&self.status, self.gated) {
             (Status::Ok, _) => "ok".to_string(),
+            (Status::OkBelowFloor(r), _) => format!("ok at a low clock ({r}: a slower clock only overstates the time)"),
             (Status::Over, true) => "OVER".to_string(),
             (Status::Over, false) => "over (not gated)".to_string(),
             (Status::NotValid(r), _) => format!("NOT VALID for GPU budgets ({r})"),
@@ -147,6 +151,9 @@ pub fn view_verdicts(
             (Some(_), GpuValidity::Invalid(r)) => Status::NotValid(r.clone()),
             (Some(v), GpuValidity::Valid(_)) if *v <= budget => Status::Ok,
             (Some(_), GpuValidity::Valid(_)) => Status::Over,
+            // Below the floor (ADR 0057): within the budget even at the slow clock is a pass; over it proves nothing.
+            (Some(v), GpuValidity::Below(_, r)) if *v <= budget => Status::OkBelowFloor(r.clone()),
+            (Some(_), GpuValidity::Below(_, r)) => Status::NotValid(format!("over budget at a clock below the floor, inconclusive: {r}")),
             // (an exhaustive match keeps a new validity state from being judged by accident)
         };
         LitVerdict { measure, stat, value, budget: Some(budget), gated, status }
@@ -323,6 +330,35 @@ mod tests {
         }
         let frame_row = rows.iter().find(|r| r.measure == "frame (waited)").unwrap();
         assert!(frame_row.fails(), "p99 31 ms is over 20 ms at any clock state: {frame_row:?}");
+    }
+
+    // spec: TEST-034
+    #[test]
+    fn below_the_floor_a_figure_within_its_budget_passes_and_one_over_it_is_inconclusive_and_a_valid_clock_changes_nothing() {
+        use crate::clock::ClockState;
+        let below = GpuValidity::Below(ClockState { pstate: "P0".into(), mhz: 1300.0 }, "P0 1282 MHz, below the 1400 MHz floor".into());
+        let f = summarize(&[10.0, 11.0, 12.0], 0).unwrap();
+        let gpu_rows = |rows: &[LitVerdict]| rows.iter().filter(|r| r.gated && r.measure != "frame (waited)").cloned().collect::<Vec<_>>();
+        // Within every budget at the slow clock: a pass, named as such, and never a failure.
+        let within = metrics_of(&(0..5).map(|_| lit(0.8, 1.5)).collect::<Vec<_>>());
+        let rows = gpu_rows(&view_verdicts(&within, &f, &below, true, 40, true));
+        assert!(rows.len() == 3 && rows.iter().all(|r| matches!(r.status, Status::OkBelowFloor(_)) && !r.fails()), "{rows:?}");
+        let line = rows[0].line("coast-2km");
+        assert!(line.contains("ok at a low clock (P0 1282 MHz, below the 1400 MHz floor") && line.contains("overstates"), "{line}");
+        // Over a budget at the slow clock: inconclusive (the slow clock may be the cause), not a failure.
+        let over = metrics_of(&(0..5).map(|_| lit(1.5, 2.2)).collect::<Vec<_>>());
+        let rows = gpu_rows(&view_verdicts(&over, &f, &below, true, 40, true));
+        assert!(rows.iter().any(|r| matches!(&r.status, Status::NotValid(w) if w.contains("inconclusive"))), "{rows:?}");
+        assert!(rows.iter().all(|r| !r.fails()), "{rows:?}");
+        // At a valid clock nothing changed: within is ok, over is OVER.
+        let rows = gpu_rows(&view_verdicts(&within, &f, &valid(), true, 40, true));
+        assert!(rows.iter().all(|r| r.status == Status::Ok), "{rows:?}");
+        let rows = gpu_rows(&view_verdicts(&over, &f, &valid(), true, 40, true));
+        assert!(rows.iter().any(LitVerdict::fails), "{rows:?}");
+        // The frame verdict stays at any clock.
+        let slow = summarize(&[10.0, 30.0, 31.0], 0).unwrap();
+        let rows = view_verdicts(&within, &slow, &below, true, 40, true);
+        assert!(rows.iter().find(|r| r.measure == "frame (waited)").unwrap().fails());
     }
 
     // spec: TEST-025

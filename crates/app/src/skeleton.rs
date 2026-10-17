@@ -1247,6 +1247,8 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         // Bring the GPU to its loaded state before measuring (ADR 0034): chunks of frames until the graphics clock reads the floor (ADR 0036), with a
         // measured cap. Not in a smoke run (it is no measurement and may be on a software adapter without `nvidia-smi`).
         if !smoke {
+            // The GPU is power-capped and its clock falls with its temperature, so a view starts cool (ADR 0057).
+            writeln!(out, "{}", planet_perf::cool_gpu().line(name)).map_err(err)?;
             let started = Instant::now();
             let outcome = planet_perf::clock::warm_up(
                 planet_perf::clock::WARMUP_CAP_S,

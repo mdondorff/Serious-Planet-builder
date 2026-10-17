@@ -804,7 +804,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         let clock_state = planet_perf::view_gpu_validity(std::slice::from_ref(report), &report.path_name);
         let state = match &clock_state {
             planet_perf::clock::GpuValidity::Valid(s) => s.to_string(),
-            planet_perf::clock::GpuValidity::Invalid(r) => r.clone(),
+            planet_perf::clock::GpuValidity::Invalid(r) | planet_perf::clock::GpuValidity::Below(_, r) => r.clone(),
         };
         let cap = if planet_perf::view_power_cap(std::slice::from_ref(report), &report.path_name) && !smoke {
             " [power cap 0x4 recorded, not invalidating]"
