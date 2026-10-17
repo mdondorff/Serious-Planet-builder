@@ -19,7 +19,7 @@
 //! CON-13: the height step is `relief / 65,535`, so 1 mm holds while a finest tile has at most [`FALLBACK_RELIEF_M`] of relief;
 //! a finest tile with more falls back to the vertex format ([`tile_data_field`]).
 
-use crate::climate::{ClimateTexture, CLIMATE_MIN_COMPACT_CELLS};
+use crate::climate::{ClimateTexture, CLIMATE_MIN_COMPACT_CELLS, CLIMATE_TEXELS};
 use crate::height::HeightField;
 use crate::mesh::{
     finest_class_key, mesh_key_field, normal_from_stencil, normal_stencil, skirt_depth, tile_mesh_field, vertex_count, MeshVertex, TileMesh,
@@ -32,6 +32,61 @@ use planet_core::{PlanetFixed, TileId, Vec3};
 /// surface errs by about 0.018 theta^2 of the tile edge, too much for levels 0-2; ADR 0033 point 4).
 pub const COMPACT_MIN_LEVEL: u8 = 3;
 
+/// SPIKE-12 ONLY (never merged): prototype switches, read when a tile or a shader is built. Bit 0: 5 x 5 base surface (16 more control
+/// points in the record); bit 1: wide texel (32-bit height, two 15-bit normal components; the climate moves into the record);
+/// bit 2: levels 0-2 are compact too; bit 3: the flat-record shader generator (also on without the other bits); bit 4: both texel
+/// decoders in one shader, chosen per slot by a record flag.
+static SPIKE12: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+pub const SPIKE_BASE5: u32 = 1;
+pub const SPIKE_WIDE: u32 = 2;
+pub const SPIKE_COARSE: u32 = 4;
+pub const SPIKE_V2_SHADER: u32 = 8;
+pub const SPIKE_BOTH: u32 = 16;
+
+pub fn spike_set(flags: u32) {
+    SPIKE12.store(flags, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn spike_flags() -> u32 {
+    SPIKE12.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+fn spike_has(bit: u32) -> bool {
+    spike_flags() & bit != 0
+}
+
+/// The first compact level: [`COMPACT_MIN_LEVEL`], or 0 with [`SPIKE_COARSE`].
+pub fn compact_min_level() -> u8 {
+    if spike_has(SPIKE_COARSE) {
+        0
+    } else {
+        COMPACT_MIN_LEVEL
+    }
+}
+
+/// Words of the record before the extra control points: nine control points, `hr_min`, `hr_step`, `h_origin`, skirt depth, flags.
+pub const REC_HEADER_WORDS: usize = 32;
+/// Words of the 16 extra control points of the 5 x 5 base surface.
+pub const REC_EXT_WORDS: usize = 48;
+/// Words of the climate block in the record (temperature | precipitation << 16 per climate texel).
+pub const REC_CLIMATE_WORDS: usize = 81;
+
+/// Words of one record under the current switches.
+pub fn record_words() -> usize {
+    REC_HEADER_WORDS + if spike_has(SPIKE_BASE5) { REC_EXT_WORDS } else { 0 } + if spike_has(SPIKE_WIDE) || spike_has(SPIKE_BOTH) { REC_CLIMATE_WORDS } else { 0 }
+}
+
+/// Bytes of one record under the current switches (128 without any).
+pub fn record_stride() -> u64 {
+    record_words() as u64 * 4
+}
+
+/// Word offset of the climate block in a record.
+pub fn record_climate_offset() -> usize {
+    REC_HEADER_WORDS + if spike_has(SPIKE_BASE5) { REC_EXT_WORDS } else { 0 }
+}
+
 /// Bytes of one texel (`Rgba16Uint`).
 pub const TEXEL_BYTES: u64 = 8;
 
@@ -40,6 +95,9 @@ pub const COMPACT_RECORD_BYTES: u64 = 9 * 12 + 4 * 4 + 4;
 
 /// Quantisation levels of the height: 16 bits.
 pub const HEIGHT_STEPS: f64 = 65_535.0;
+
+/// SPIKE-12: quantisation levels of the wide texel's height: 32 bits.
+pub const WIDE_HEIGHT_STEPS: f64 = 4_294_967_295.0;
 
 /// CON-13: tile-vertex quantisation at the finest level at most this many metres.
 pub const MAX_FINEST_STEP_M: f64 = 1.0e-3;
@@ -60,7 +118,7 @@ pub fn slot_texel_bytes(cells: u32) -> u64 {
 
 /// Texel bytes plus the record: what ADR 0033 calls the 8.8 KB tile at cells 32.
 pub fn slot_bytes(cells: u32) -> u64 {
-    slot_texel_bytes(cells) + COMPACT_RECORD_BYTES
+    slot_texel_bytes(cells) + record_stride()
 }
 
 /// One compact tile: control points, quantised heights and normals.
@@ -89,6 +147,13 @@ pub struct CompactTile {
     pub relief_m: f64,
     /// `(cells + 1)^2` texels `[height, normal_x, normal_y, 0]`, row `j` major.
     pub texels: Vec<[u16; 4]>,
+    /// SPIKE-12: the 16 control points of the 5 x 5 base surface that the 3 x 3 lattice does not hold (empty: 3 x 3 base), row-major
+    /// over the lattice `(a, b)` with `a` or `b` odd.
+    pub ext: Vec<[f32; 3]>,
+    /// SPIKE-12: wide texel (lanes 0-1 the 32-bit height step count, lanes 2-3 two 15-bit normal components).
+    pub wide: bool,
+    /// SPIKE-12: the climate block of a wide tile (81 words, temperature | precipitation << 16); empty otherwise.
+    pub clim: Vec<u32>,
 }
 
 impl CompactTile {
@@ -99,7 +164,7 @@ impl CompactTile {
 
     /// Texel bytes plus the record.
     pub fn resident_bytes(&self) -> u64 {
-        self.texel_bytes() + COMPACT_RECORD_BYTES
+        self.texel_bytes() + self.record_bytes().len() as u64
     }
 
     /// The texels as the atlas holds them: little-endian `u16` x 4 per texel, row `j` major.
@@ -109,25 +174,61 @@ impl CompactTile {
 
     /// The record as the slot-record buffer holds it: 9 control points as f32 triples, `hr_min`, `hr_step`, `h_origin`,
     /// `skirt_depth`, then the flip flag as a `u32`; 128 bytes.
-    pub fn record_bytes(&self) -> [u8; COMPACT_RECORD_BYTES as usize] {
-        let mut out = [0u8; COMPACT_RECORD_BYTES as usize];
+    pub fn record_bytes(&self) -> Vec<u8> {
+        let mut out = vec![0u8; record_stride() as usize];
         let mut words = self.ctrl.iter().flatten().copied().collect::<Vec<f32>>();
         words.extend([self.hr_min, self.hr_step, self.h_origin, self.skirt_depth]);
         for (k, w) in words.iter().enumerate() {
             out[k * 4..k * 4 + 4].copy_from_slice(&w.to_le_bytes());
         }
-        out[124..128].copy_from_slice(&u32::from(self.flip).to_le_bytes());
+        // SPIKE-12: flags word: bit 0 flip, bit 1 wide texel.
+        out[124..128].copy_from_slice(&(u32::from(self.flip) | u32::from(self.wide) << 1).to_le_bytes());
+        if spike_has(SPIKE_BASE5) {
+            for (k, v) in self.ext.iter().flatten().enumerate() {
+                out[(REC_HEADER_WORDS + k) * 4..(REC_HEADER_WORDS + k) * 4 + 4].copy_from_slice(&v.to_le_bytes());
+            }
+        }
+        if !self.clim.is_empty() {
+            let at = record_climate_offset();
+            for (k, w) in self.clim.iter().enumerate() {
+                out[(at + k) * 4..(at + k) * 4 + 4].copy_from_slice(&w.to_le_bytes());
+            }
+        }
         out
     }
 
     /// The tile's climate field (ADR 0039 point 2), read back from the spare channel of the texels.
     pub fn climate(&self) -> ClimateTexture {
+        if self.wide {
+            let mut t = ClimateTexture::default();
+            for k in 0..self.clim.len() {
+                t.temperature[k] = (self.clim[k] & 0xffff) as u16;
+                t.precipitation[k] = (self.clim[k] >> 16) as u16;
+            }
+            return t;
+        }
         ClimateTexture::read_texels(&self.texels)
+    }
+
+    /// The 32-bit height step count of a texel of a wide tile.
+    pub fn wide_q(&self, k: usize) -> u32 {
+        u32::from(self.texels[k][0]) | u32::from(self.texels[k][1]) << 16
+    }
+
+    /// The two 15-bit normal components of a texel of a wide tile (signed).
+    pub fn wide_normal(&self, k: usize) -> [i32; 2] {
+        let w = u32::from(self.texels[k][2]) | u32::from(self.texels[k][3]) << 16;
+        let s = |v: u32| ((v << 17) as i32) >> 17;
+        [s(w & 0x7fff), s((w >> 15) & 0x7fff)]
     }
 
     /// Height of a texel relative to the origin height, as the shader computes it.
     pub fn rel_height(&self, i: usize, j: usize) -> f32 {
-        self.hr_min + f32::from(self.texels[j * (self.cells as usize + 1) + i][0]) * self.hr_step
+        let k = j * (self.cells as usize + 1) + i;
+        if self.wide {
+            return self.hr_min + self.wide_q(k) as f32 * self.hr_step;
+        }
+        self.hr_min + f32::from(self.texels[k][0]) * self.hr_step
     }
 
     /// The largest error the 16-bit height quantisation can cause: half a step.
@@ -210,9 +311,9 @@ pub enum VertexReason {
 /// The format decision of a tile, from its level and relief alone (pure; CON-03). `relief_m` is only read at the finest level.
 /// `finest_level` is the LOD parameter `max_level`.
 pub fn vertex_reason(level: u8, finest_level: u8, relief_m: f64) -> Option<VertexReason> {
-    if level < COMPACT_MIN_LEVEL {
+    if level < compact_min_level() {
         Some(VertexReason::CoarseLevel)
-    } else if level >= finest_level && relief_m / HEIGHT_STEPS > MAX_FINEST_STEP_M {
+    } else if level >= finest_level && !spike_has(SPIKE_WIDE) && relief_m / HEIGHT_STEPS > MAX_FINEST_STEP_M {
         Some(VertexReason::Relief)
     } else {
         None
@@ -232,6 +333,31 @@ pub fn oct_encode(n: Vec3) -> [u16; 2] {
     }
     let q = |v: f64| ((v.clamp(-1.0, 1.0) * 32767.0).round() as i16) as u16;
     [q(x), q(y)]
+}
+
+/// SPIKE-12: the octahedral encoding with 15-bit signed components (scale 16383), as two `i32` in `-16383..=16383`.
+pub fn oct_encode15(n: Vec3) -> [i32; 2] {
+    let l1 = n.x.abs() + n.y.abs() + n.z.abs();
+    let (mut x, mut y) = (n.x / l1, n.y / l1);
+    if n.z < 0.0 {
+        let sx = if x >= 0.0 { 1.0 } else { -1.0 };
+        let sy = if y >= 0.0 { 1.0 } else { -1.0 };
+        (x, y) = ((1.0 - y.abs()) * sx, (1.0 - x.abs()) * sy);
+    }
+    let q = |v: f64| (v.clamp(-1.0, 1.0) * 16383.0).round() as i32;
+    [q(x), q(y)]
+}
+
+/// SPIKE-12: decode 15-bit components as the shader does.
+pub fn oct_decode15(e: [i32; 2]) -> [f32; 3] {
+    let s = |b: i32| (b as f32 / 16383.0).max(-1.0);
+    let (x, y) = (s(e[0]), s(e[1]));
+    let mut n = [x, y, 1.0 - x.abs() - y.abs()];
+    if n[2] < 0.0 {
+        let (sx, sy) = (if n[0] >= 0.0 { 1.0 } else { -1.0 }, if n[1] >= 0.0 { 1.0 } else { -1.0 });
+        n = [(1.0 - n[1].abs()) * sx, (1.0 - n[0].abs()) * sy, n[2]];
+    }
+    norm(n)
 }
 
 /// Decode as the shader does (`unpack2x16snorm`, then the octahedral fold, f32).
@@ -301,28 +427,65 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
             ctrl[3 * b as usize + a as usize] = [p.x as f32, p.y as f32, p.z as f32];
         }
     }
+    // SPIKE-12: the 5 x 5 lattice's other 16 control points (lattice step cells / 4).
+    let mut ext = Vec::new();
+    if spike_has(SPIKE_BASE5) {
+        let quarter = cells / 4;
+        for b in 0..5u32 {
+            for a in 0..5u32 {
+                if a % 2 == 0 && b % 2 == 0 {
+                    continue;
+                }
+                let p = id.sample_direction(map, cells, a * quarter, b * quarter) * shell - origin.0;
+                ext.push([p.x as f32, p.y as f32, p.z as f32]);
+            }
+        }
+    }
+    let wide = spike_has(SPIKE_WIDE);
     let mut hr = vec![0f64; count];
     let mut normals = vec![[0u16; 2]; count];
+    let mut normals15 = vec![[0i32; 2]; count];
     for k in 0..count {
         hr[k] = all[1 + k] - h_origin;
         let s0 = 1 + count + 4 * k;
         let st = [dirs[s0], dirs[s0 + 1], dirs[s0 + 2], dirs[s0 + 3]];
-        normals[k] = oct_encode(normal_from_stencil(&st, &[all[s0], all[s0 + 1], all[s0 + 2], all[s0 + 3]], radius_m));
+        let n = normal_from_stencil(&st, &[all[s0], all[s0 + 1], all[s0 + 2], all[s0 + 3]], radius_m);
+        if wide {
+            normals15[k] = oct_encode15(n);
+        } else {
+            normals[k] = oct_encode(n);
+        }
     }
     let lo = hr.iter().copied().fold(f64::INFINITY, f64::min);
     let hi = hr.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    // Rounded so that level 0 is not above the lowest height and level 65,535 not below the highest: no clamping error.
+    // Rounded so that level 0 is not above the lowest height and the top level not below the highest: no clamping error.
     let hr_min = f32_down(lo);
-    let hr_step = if hi > lo { f32_up((hi - f64::from(hr_min)) / HEIGHT_STEPS) } else { 1.0e-30 };
-    let mut texels: Vec<[u16; 4]> = hr
-        .iter()
-        .zip(&normals)
-        .map(|(h, n)| {
-            let q = ((h - f64::from(hr_min)) / f64::from(hr_step)).round().clamp(0.0, HEIGHT_STEPS) as u16;
-            [q, n[0], n[1], 0]
-        })
-        .collect();
-    climate.write_texels(&mut texels);
+    let steps = if wide { WIDE_HEIGHT_STEPS } else { HEIGHT_STEPS };
+    let hr_step = if hi > lo { f32_up((hi - f64::from(hr_min)) / steps) } else { 1.0e-30 };
+    let mut clim = Vec::new();
+    let mut texels: Vec<[u16; 4]> = if wide {
+        hr.iter()
+            .zip(&normals15)
+            .map(|(h, n)| {
+                let q = ((h - f64::from(hr_min)) / f64::from(hr_step)).round().clamp(0.0, steps) as u32;
+                let nw = (n[0] as u32 & 0x7fff) | (n[1] as u32 & 0x7fff) << 15;
+                [q as u16, (q >> 16) as u16, nw as u16, (nw >> 16) as u16]
+            })
+            .collect()
+    } else {
+        hr.iter()
+            .zip(&normals)
+            .map(|(h, n)| {
+                let q = ((h - f64::from(hr_min)) / f64::from(hr_step)).round().clamp(0.0, steps) as u16;
+                [q, n[0], n[1], 0]
+            })
+            .collect()
+    };
+    if wide {
+        clim = (0..CLIMATE_TEXELS).map(|k| u32::from(climate.temperature[k]) | u32::from(climate.precipitation[k]) << 16).collect();
+    } else {
+        climate.write_texels(&mut texels);
+    }
     let mut tile = CompactTile {
         id,
         cells,
@@ -336,6 +499,9 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
         flip: false,
         relief_m: hi - lo,
         texels,
+        ext,
+        wide,
+        clim,
     };
     let (du, dv) = tile.base_derivs(0.5, 0.5);
     let c = [centre.x as f32, centre.y as f32, centre.z as f32];
@@ -412,9 +578,71 @@ fn dbasis(t: f32) -> [f32; 3] {
     [4.0 * t - 3.0, 4.0 - 8.0 * t, 4.0 * t - 1.0]
 }
 
+/// SPIKE-12: Lagrange basis of degree 4 through t = 0, 1/4, 1/2, 3/4, 1.
+fn basis5(t: f32) -> [f32; 5] {
+    let nodes = [0.0f32, 0.25, 0.5, 0.75, 1.0];
+    let mut out = [1.0f32; 5];
+    for k in 0..5 {
+        for m in 0..5 {
+            if m != k {
+                out[k] *= (t - nodes[m]) / (nodes[k] - nodes[m]);
+            }
+        }
+    }
+    out
+}
+
+fn dbasis5(t: f32) -> [f32; 5] {
+    let nodes = [0.0f32, 0.25, 0.5, 0.75, 1.0];
+    let mut out = [0.0f32; 5];
+    for k in 0..5 {
+        for j in 0..5 {
+            if j == k {
+                continue;
+            }
+            let mut term = 1.0 / (nodes[k] - nodes[j]);
+            for m in 0..5 {
+                if m != k && m != j {
+                    term *= (t - nodes[m]) / (nodes[k] - nodes[m]);
+                }
+            }
+            out[k] += term;
+        }
+    }
+    out
+}
+
 #[allow(clippy::needless_range_loop)]
 impl CompactTile {
+    /// SPIKE-12: lattice nodes per side of the base surface (3, or 5 with the extra control points).
+    fn nodes(&self) -> usize {
+        if self.ext.is_empty() {
+            3
+        } else {
+            5
+        }
+    }
+
+    /// Control point `(a, b)` of the 5 x 5 lattice.
+    fn node5(&self, a: usize, b: usize) -> V {
+        if a % 2 == 0 && b % 2 == 0 {
+            return self.ctrl[3 * (b / 2) + a / 2];
+        }
+        let before: usize = (0..b).map(|rb| if rb % 2 == 0 { 2 } else { 5 }).sum();
+        self.ext[before + if b % 2 == 0 { (a - 1) / 2 } else { a }]
+    }
+
     fn base_point(&self, u: f32, v: f32) -> V {
+        if self.nodes() == 5 {
+            let (bu, bv) = (basis5(u), basis5(v));
+            let mut p = [0f32; 3];
+            for b in 0..5 {
+                for a in 0..5 {
+                    p = add(p, scale(self.node5(a, b), bu[a] * bv[b]));
+                }
+            }
+            return p;
+        }
         let (bu, bv) = (basis(u), basis(v));
         let mut p = [0f32; 3];
         for b in 0..3 {
@@ -426,6 +654,18 @@ impl CompactTile {
     }
 
     fn base_derivs(&self, u: f32, v: f32) -> (V, V) {
+        if self.nodes() == 5 {
+            let (bu, bv, du, dv) = (basis5(u), basis5(v), dbasis5(u), dbasis5(v));
+            let (mut pu, mut pv) = ([0f32; 3], [0f32; 3]);
+            for b in 0..5 {
+                for a in 0..5 {
+                    let c = self.node5(a, b);
+                    pu = add(pu, scale(c, du[a] * bv[b]));
+                    pv = add(pv, scale(c, bu[a] * dv[b]));
+                }
+            }
+            return (pu, pv);
+        }
         let (bu, bv, du, dv) = (basis(u), basis(v), dbasis(u), dbasis(v));
         let (mut pu, mut pv) = ([0f32; 3], [0f32; 3]);
         for b in 0..3 {
@@ -494,7 +734,7 @@ impl CompactTile {
             cpos = sub(cpos, d);
         }
         let t = self.texels[j as usize * w as usize + i as usize];
-        let normal = oct_decode([t[1], t[2]]);
+        let normal = if self.wide { oct_decode15(self.wide_normal(j as usize * w as usize + i as usize)) } else { oct_decode([t[1], t[2]]) };
         MeshVertex { pos, coarse: cpos, normal, height: self.h_origin + own_h, coarse_height: self.h_origin + ch }
     }
 

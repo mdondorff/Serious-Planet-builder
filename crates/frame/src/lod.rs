@@ -32,6 +32,17 @@ pub struct LodParams {
     pub cull_horizon: bool,
 }
 
+/// SPIKE-12 ONLY (never merged): the render floor, the lowest level a leaf may have (0: none).
+static SPIKE_FLOOR: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub fn spike_set_floor(level: u8) {
+    SPIKE_FLOOR.store(level, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn spike_floor() -> u8 {
+    SPIKE_FLOOR.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// log2 of the cells per face edge at the production finest level: a face edge is `2^level` tiles of `cells` cells, and the
 /// production cap fixes `2^level * cells = 2^27` (134 million cells; `radius * pi/2 / 2^27` = 7.46 cm of vertex spacing on an
 /// Earth-sized body), so level 22 at 32 cells and 21 at 64 (ADR 0033 point 6, owner 2026-10-15).
@@ -480,8 +491,10 @@ fn select_impl(
             }
         }
         let split = p.split_distance(t.level());
+        // SPIKE-12: a render floor: tiles above it are always split.
+        let forced = t.level() < spike_floor();
         // The bound that needs no height bounds rules most tiles out before the bounds are computed.
-        if t.level() < p.max_level && geoms.distance_lower_bound(t, camera) < split && geoms.distance(t, camera) < split {
+        if t.level() < p.max_level && (forced || (geoms.distance_lower_bound(t, camera) < split && geoms.distance(t, camera) < split)) {
             stack.extend(children_of(t));
         } else {
             leaves.insert(t);

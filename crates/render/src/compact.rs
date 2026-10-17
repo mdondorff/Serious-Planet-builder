@@ -28,7 +28,7 @@ pub fn set_buffer_atlas(on: bool) {
 }
 
 pub fn buffer_atlas() -> bool {
-    BUFFER_ATLAS.load(std::sync::atomic::Ordering::SeqCst)
+    BUFFER_ATLAS.load(std::sync::atomic::Ordering::SeqCst) || crate::compact_v2::v2_active()
 }
 
 /// The compact pipeline's shader for tiles of `cells`: the product shader's header, fragment stage and helpers unchanged (spliced
@@ -39,6 +39,9 @@ pub fn compact_terrain_shader(cells: u32) -> String {
     let tail_at = src.find("// Distance in pixels to the nearest integer").expect("product shader helper marker");
     let head = &src[..vs_at];
     assert!(head.contains("@group(0) @binding(1) var<storage, read> nodes: array<Node>;"), "product node binding changed");
+    if crate::compact_v2::v2_active() {
+        return crate::compact_v2::shader(cells, head, &src[tail_at..]);
+    }
     let mut vertex = COMPACT_VERTEX.replace("{CELLS}", &cells.to_string());
     if buffer_atlas() {
         vertex = vertex

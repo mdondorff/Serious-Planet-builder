@@ -9,7 +9,7 @@ use crate::{read_rgba8, ExecError, GpuContext, RgbaFrame};
 use planet_frame::draw::{buffer_of, build_draw_list_placed, DrawBuffer, DRAW_RECORD_BYTES};
 use planet_frame::pool::tier_pool;
 use planet_frame::{TerrainPlan, TerrainView};
-use planet_generators::compact::{CompactTile, RenderTile, COMPACT_RECORD_BYTES};
+use planet_generators::compact::{record_stride, CompactTile, RenderTile};
 use planet_generators::mesh::{grid_indices, MeshVertex, TileMesh};
 use planet_streaming::{PoolConfig, PoolKind, SlotPool, SlotPools, SlotRef, Tier};
 use std::collections::HashMap;
@@ -554,7 +554,7 @@ struct BatchScratch {
     /// Per compact tile in collection order: its atlas block, its slot within the block and the offset of its texels in `texels`.
     tiles: Vec<(usize, u32, usize)>,
     /// Per compact tile in collection order: its slot index and its record.
-    records: Vec<(u32, [u8; COMPACT_RECORD_BYTES as usize])>,
+    records: Vec<(u32, Vec<u8>)>,
     /// The texel writes sorted by place (the index of the write in `tiles` last, so that the last write of a place is the last
     /// of its equals), and the record writes likewise.
     texel_order: Vec<(usize, u32, u32)>,
@@ -770,7 +770,7 @@ impl TerrainRenderer {
             planet_frame::pool::vertex_slot_bytes(cells),
             "the vertex pool slot is not the vertex-format tile"
         );
-        assert_eq!(pool.slot_record_bytes, COMPACT_RECORD_BYTES, "the pool slot record is not the compact record");
+        assert_eq!(pool.slot_record_bytes, record_stride(), "the pool slot record is not the compact record");
         assert!(
             pool.fallback_slots > 0 && pool.fallback_slots < pool.vertex_slots,
             "the compact renderer needs a fallback region in its vertex pool"
@@ -982,7 +982,7 @@ impl TerrainRenderer {
         // The tile references (binding 1) and the atlas are read by the fragment stage too (the climate of the tile, ADR 0039).
         let storage = |binding| wgpu::BindGroupLayoutEntry {
             binding,
-            visibility: if binding == 1 { wgpu::ShaderStages::VERTEX_FRAGMENT } else { wgpu::ShaderStages::VERTEX },
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Storage { read_only: true },
                 has_dynamic_offset: false,
@@ -1040,7 +1040,7 @@ impl TerrainRenderer {
         });
         let records = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("compact-slot-records"),
-            size: pool.slot_record_total_bytes().max(COMPACT_RECORD_BYTES),
+            size: pool.slot_record_total_bytes().max(record_stride()),
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
@@ -1581,7 +1581,7 @@ impl TerrainRenderer {
         }
         let compact_mode = self.compact.is_some();
         if let TileRef::Compact(_) = tile {
-            if id.level() < planet_generators::compact::COMPACT_MIN_LEVEL {
+            if id.level() < planet_generators::compact::compact_min_level() {
                 return Err(ExecError::CompactUnsupported { tile: id });
             }
         }
@@ -1703,7 +1703,7 @@ impl TerrainRenderer {
         let w = self.cells + 1;
         let (x, y) = ((local % cols) * w, (local / cols) * w);
         let n = tile.texels.len() as u64 * 8;
-        self.uploaded_bytes += n + COMPACT_RECORD_BYTES;
+        self.uploaded_bytes += n + record_stride();
         if self.scratch.open {
             // Held back: converted straight into the batch's texel buffer, written by the flush.
             let at = self.scratch.texels.len();
@@ -1716,7 +1716,7 @@ impl TerrainRenderer {
         let bytes = texel_bytes(&tile.texels);
         debug_assert_eq!(bytes, tile.texel_data());
         self.upload_counters.write_calls += 2;
-        self.upload_counters.staging_bytes += bytes.len() as u64 + COMPACT_RECORD_BYTES;
+        self.upload_counters.staging_bytes += bytes.len() as u64 + record_stride();
         if let Some(buffer) = &atlas.buffer {
             ctx.queue.write_buffer(buffer, u64::from(local) * u64::from(w) * u64::from(w) * 8, &bytes);
         } else {
@@ -1733,7 +1733,7 @@ impl TerrainRenderer {
             );
         }
         let records = &self.compact.as_ref().expect("compact mode").records;
-        ctx.queue.write_buffer(records, u64::from(slot.index) * COMPACT_RECORD_BYTES, &tile.record_bytes());
+        ctx.queue.write_buffer(records, u64::from(slot.index) * record_stride(), &tile.record_bytes());
     }
 
     fn write_buf_now(&mut self, ctx: &GpuContext, target: BufTarget, offset: u64, bytes: &[u8]) {
@@ -1955,7 +1955,7 @@ impl TerrainRenderer {
             }
             let buffer = &self.compact.as_ref().expect("compact mode").records;
             let trw = std::time::Instant::now();
-            ctx.queue.write_buffer(buffer, u64::from(sc.record_order[k].0) * COMPACT_RECORD_BYTES, &sc.run_records);
+            ctx.queue.write_buffer(buffer, u64::from(sc.record_order[k].0) * record_stride(), &sc.run_records);
             self.upload_times.queue += trw.elapsed();
             self.upload_counters.write_calls += 1;
             self.upload_counters.staging_bytes += sc.run_records.len() as u64;

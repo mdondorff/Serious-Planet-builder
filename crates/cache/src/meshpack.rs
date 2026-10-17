@@ -306,6 +306,9 @@ pub fn decode_render_tile(id: TileId, bytes: &[u8]) -> Result<RenderTile, MeshCo
                 flip,
                 relief_m,
                 texels,
+                ext: Vec::new(),
+                wide: false,
+                clim: Vec::new(),
             })
         }
     })

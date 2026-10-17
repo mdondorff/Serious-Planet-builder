@@ -5,6 +5,7 @@ use std::fmt;
 
 pub mod atmosphere;
 pub mod compact;
+pub mod compact_v2;
 pub mod exec;
 pub mod gate;
 pub mod graph;

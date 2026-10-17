@@ -5,7 +5,7 @@
 //! 44 bytes each (53,724 B at cells 32). ADR 0033's slot counts (230,640 at the mid share) are for the compact tile; the
 //! vertex format has fewer, and the share is a byte ceiling, so the slot count follows from the format.
 
-use planet_generators::compact::{slot_texel_bytes, COMPACT_RECORD_BYTES, TEXEL_BYTES};
+use planet_generators::compact::{record_stride, slot_texel_bytes, TEXEL_BYTES};
 use planet_generators::mesh::{grid_indices, vertex_count, MeshVertex};
 use planet_streaming::{PoolConfig, Tier};
 
@@ -67,7 +67,7 @@ pub fn compact_format_pool_with(share_bytes: u64, cells: u32, side: u32, frames_
         slot_texel_bytes(cells),
         columns * columns,
         u64::from(side) * u64::from(side) * TEXEL_BYTES,
-        COMPACT_RECORD_BYTES,
+        record_stride(),
         FALLBACK_SLOTS,
         vertex_slot,
         index_bytes,
