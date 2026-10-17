@@ -66,3 +66,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0054 | [Compact tiles in storage buffers instead of texture atlases (amends ADR 0033 point 3)](0054-compact-tiles-in-storage-buffers.md) | accepted |  |
 | 0055 | [Documentation model: specs hold current rules, ADRs record why](0055-documentation-model.md) | accepted | point 6: consolidation in the M5 housekeeping (queue item 10b) |
 | 0056 | [Water selection: the coastal band, tile water in the tile job, a pixel-footprint wave fade](0056-coastal-band-water-selection.md) | accepted | amends 0053 points 4 and 5 |
+| 0057 | [A coarse level of the water field: a summary the bake writes once](0057-coarse-level-of-the-water-field.md) | proposed | departs from 0053 (coarse tiles answer by union); opus-planner reviews |

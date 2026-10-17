@@ -26,6 +26,7 @@ use planet_world_def::{LiquidKindId, SeaParams};
 
 use crate::global::{locate_direction, read_direction, GlobalSample, LatticePos, LatticeSource, ReadError, SEA_LEVEL_C};
 use crate::ocean::OceanLattice;
+use crate::water_summary::WaterSummary;
 
 /// Bump whenever any answer of this module changes (ADR 0006).
 pub const WATER_VERSION: u32 = 1;
@@ -83,17 +84,35 @@ pub trait WaterProducer: Sync {
     fn ocean_bit_at(&self, _q: &WaterQuery) -> Result<bool, ReadError> {
         Ok(false)
     }
+
+    /// The water of a tile that spans more than one block of the bake, from this producer's summary (ADR 0057): `None` when the
+    /// producer has no summary for the tile (the field asks it point by point), else the answer for the whole tile.
+    fn coarse_tile_water(
+        &self,
+        _map: &dyn FaceMapping,
+        _tile: planet_core::TileId,
+        _radius_m: f64,
+    ) -> Result<Option<Option<WaterSample>>, ReadError> {
+        Ok(None)
+    }
 }
 
 /// The sea (ADR 0041 point 1): W is the definition's sea level where the point is ocean-connected sea.
 pub struct SeaProducer<'a> {
     ocean: &'a dyn OceanLattice,
     sea: SeaParams,
+    summary: Option<&'a WaterSummary>,
 }
 
 impl<'a> SeaProducer<'a> {
     pub fn new(ocean: &'a dyn OceanLattice, sea: SeaParams) -> SeaProducer<'a> {
-        SeaProducer { ocean, sea }
+        SeaProducer { ocean, sea, summary: None }
+    }
+
+    /// The same with the coarse level of W (ADR 0057): tiles at or above the bake's block level are answered from `summary`.
+    pub fn with_summary(mut self, summary: &'a WaterSummary) -> SeaProducer<'a> {
+        self.summary = Some(summary);
+        self
     }
 
     pub fn sea(&self) -> SeaParams {
@@ -131,6 +150,23 @@ impl WaterProducer for SeaProducer<'_> {
         let land = f64::from(q.ground.continent) > SEA_LEVEL_C;
         let low = f64::from(q.ground.elevation_m) <= coast_band_elevation_m(self.sea.level_m);
         Ok((land && low).then_some(WaterSample { level_m: self.sea.level_m, body: WaterBodyId::SEA, kind: self.sea.liquid }))
+    }
+
+    fn coarse_tile_water(
+        &self,
+        map: &dyn FaceMapping,
+        tile: planet_core::TileId,
+        radius_m: f64,
+    ) -> Result<Option<Option<WaterSample>>, ReadError> {
+        let Some(summary) = self.summary else { return Ok(None) };
+        if summary.res() != self.ocean.res() {
+            return Err(ReadError::Shape(format!(
+                "the water summary is of a {}-cell bake and the ocean channel of a {}-cell bake",
+                summary.res(),
+                self.ocean.res()
+            )));
+        }
+        Ok(summary.tile_water(map, tile, radius_m, &self.sea))
     }
 
     fn ocean_bit_at(&self, q: &WaterQuery) -> Result<bool, ReadError> {
@@ -208,6 +244,25 @@ impl<'a> WaterField<'a> {
             }
         }
         Ok(None)
+    }
+
+    /// The water of `tile` from the producers' summaries (ADR 0057), when every producer has one for it: the first producer with water
+    /// wins, as in [`water_at`](WaterField::water_at); `None` when some producer must be asked point by point.
+    pub fn coarse_tile_water(
+        &self,
+        map: &dyn FaceMapping,
+        tile: planet_core::TileId,
+        radius_m: f64,
+    ) -> Result<Option<Option<WaterSample>>, ReadError> {
+        let mut found = None;
+        for p in &self.producers {
+            match p.coarse_tile_water(map, tile, radius_m)? {
+                None => return Ok(None),
+                Some(Some(w)) => found = found.or(Some(w)),
+                Some(None) => {}
+            }
+        }
+        Ok(Some(found))
     }
 
     /// Whether the ocean channel has a vertex at `dir`'s cell.

@@ -1116,6 +1116,26 @@ mod tests {
         assert!(e.contains("holds no bake"), "{e}");
         let e = WorldTerrain::open_store(def(), &dir.join("nope"), 8).err().unwrap();
         assert!(e.contains("no such store directory"), "{e}");
+        // spec: STRM-025
+        // A store as an earlier build left it (every record but the water summary) is refused, with the command that adds it.
+        let old = std::env::temp_dir().join(format!("planet-no-summary-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&old);
+        {
+            let world = planet_cache::global_store::GlobalWorld::from_definition(&def()).unwrap();
+            let src = planet_cache::pack::TileStore::open(&dir, world.params()).unwrap();
+            let mut writer =
+                planet_cache::pack::PackWriter::open(&old, world.params(), planet_cache::pack::DEFAULT_MAX_PACK_BYTES).unwrap();
+            for item in src.sample_records(0) {
+                let rec = item.unwrap().record;
+                if rec.kind != planet_cache::global_store::KIND_GLOBAL_WATER_SUMMARY {
+                    writer.append(&rec).unwrap();
+                }
+            }
+            writer.finish().unwrap();
+        }
+        let e = WorldTerrain::open_store(def(), &old, 8).err().unwrap();
+        assert!(e.contains("water summary") && e.contains("generate --global-dir"), "{e}");
+        let _ = std::fs::remove_dir_all(&old);
         // An in-memory bake is labelled and the label is what the log records in `protocol.source`.
         let mem = WorldTerrain::open(def(), 8).unwrap();
         let label = source_label(&mem, false);
