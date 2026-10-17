@@ -45,14 +45,17 @@ fn package(dir: &str) -> String {
     }
 }
 
+/// Every crate of the workspace, the selection of a run with nothing to narrow it (BUILD-003).
+pub fn all_packages() -> Vec<String> {
+    let mut v: Vec<String> = CHAIN.iter().map(|d| package(d)).collect();
+    v.extend(["planet-testkit", "planet-perf", "xtask"].map(String::from));
+    v
+}
+
 /// Crates whose tests `test fast` runs: the changed crates and every crate above them in the chain.
 /// With nothing changed, or a change outside `crates/`, everything runs.
 pub fn packages_for_changes(changed_paths: &[String]) -> Vec<String> {
-    let all = || {
-        let mut v: Vec<String> = CHAIN.iter().map(|d| package(d)).collect();
-        v.extend(["planet-testkit", "planet-perf", "xtask"].map(String::from));
-        v
-    };
+    let all = all_packages;
     let mut lowest: Option<usize> = None;
     let mut extra: BTreeSet<String> = BTreeSet::new();
     for p in changed_paths {
@@ -86,10 +89,40 @@ fn changed_paths(root: &Path) -> Vec<String> {
     if let Ok(s) = capture(root, "git", &["status", "--porcelain", "--untracked-files=all"]) {
         paths.extend(s.lines().filter(|l| l.len() > 3).map(|l| l[3..].trim().trim_matches('"').to_string()));
     }
-    if let Ok(s) = capture(root, "git", &["diff", "--name-only", "main...HEAD"]) {
+    let base = diff_base(&|r| capture(root, "git", &["rev-parse", "--verify", "--quiet", r]).is_ok());
+    if let Ok(s) = capture(root, "git", &["diff", "--name-only", &format!("{base}...HEAD")]) {
         paths.extend(s.lines().map(String::from));
     }
     paths
+}
+
+/// What `test fast` says about its test time (BUILD-003).
+#[derive(Debug, PartialEq, Eq)]
+enum Budget {
+    Within,
+    /// Over the budget on a run of every crate: reported, not gated.
+    Note,
+    /// Over the budget on a selection of changed crates: a warning that names the slowest tests.
+    Over,
+}
+
+fn budget_verdict(test_secs: f64, whole_workspace: bool) -> Budget {
+    match (test_secs > FAST_BUDGET_SECS, whole_workspace) {
+        (false, _) => Budget::Within,
+        (true, true) => Budget::Note,
+        (true, false) => Budget::Over,
+    }
+}
+
+/// The ref a branch is compared with to find its changed files: the remote `origin/main` when there is one, else `main`. A
+/// worktree's local `main` is whatever the primary checkout last pulled, often hundreds of commits behind, and against it every
+/// change looks like "everything changed" (BUILD-003).
+fn diff_base(exists: &dyn Fn(&str) -> bool) -> &'static str {
+    if exists("origin/main") {
+        "origin/main"
+    } else {
+        "main"
+    }
 }
 
 /// The nextest filter of a `test` subcommand. On the real GPU (`test gpu --real`) the tier-B oracles run with tier C:
@@ -105,7 +138,7 @@ fn tier_filter(sub: Option<&str>, real: bool) -> &'static str {
 
 pub fn test(root: &Path, args: &[String]) -> Res {
     let mut sub = None;
-    let (mut strict, mut real) = (false, false);
+    let (mut strict, mut real, mut all) = (false, false, false);
     let mut passthrough: Vec<&str> = Vec::new();
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -113,41 +146,61 @@ pub fn test(root: &Path, args: &[String]) -> Res {
             "fast" | "gpu" if sub.is_none() => sub = Some(a.as_str()),
             "--strict" => strict = true,
             "--real" => real = true,
+            "--all" => all = true,
             "--" => {
                 passthrough.extend(it.by_ref().map(String::as_str));
             }
             other => {
-                return Err(format!("unknown test argument '{other}'\n(test fast | test | test gpu [--strict] [--real] [-- nextest args])"))
+                return Err(format!(
+                    "unknown test argument '{other}'\n(test fast [--all] | test | test gpu [--strict] [--real] [-- nextest args])"
+                ))
             }
         }
     }
     let adapter = if real { "hardware" } else { "software" };
     let env_strict = std::env::var("PLANET_GOLDEN_STRICT").unwrap_or_default() == "1";
     let env = [("PLANET_ADAPTER", adapter), ("PLANET_GOLDEN_STRICT", if strict || env_strict { "1" } else { "0" })];
-    let started = Instant::now();
     // A report left by an earlier run must not be taken for this one's.
     let _ = std::fs::remove_file(root.join(JUNIT));
 
     let mut cmd: Vec<String> = vec!["nextest".into(), "run".into(), "--no-tests=pass".into()];
+    let mut whole = sub != Some("fast");
+    let mut selection: Vec<String> = Vec::new();
     if sub == Some("fast") {
-        let pkgs = packages_for_changes(&changed_paths(root));
-        eprintln!("test fast: {}", pkgs.join(", "));
+        let pkgs = if all { all_packages() } else { packages_for_changes(&changed_paths(root)) };
+        whole = pkgs == all_packages();
+        eprintln!("test fast: {}", if whole { "every crate".to_string() } else { pkgs.join(", ") });
         for p in pkgs {
-            cmd.extend(["-p".into(), p]);
+            selection.extend(["-p".into(), p]);
         }
     } else {
-        cmd.push("--workspace".into());
+        selection.push("--workspace".into());
     }
+    cmd.extend(selection.iter().cloned());
     let filter = tier_filter(sub, real);
     cmd.extend(["-E".into(), filter.into()]);
     cmd.extend(passthrough.iter().map(|s| s.to_string()));
+    // The compile is timed apart from the tests: the budget is for the tests (BUILD-003), and an incremental compile of the
+    // changed crate is the compiler's time.
+    let built = Instant::now();
+    let mut build: Vec<&str> = vec!["nextest", "run", "--no-run"];
+    build.extend(selection.iter().map(String::as_str));
+    run(root, "cargo", &build, &env)?;
+    let build_secs = built.elapsed().as_secs_f64();
+    let started = Instant::now();
     let args: Vec<&str> = cmd.iter().map(String::as_str).collect();
     let result = run(root, "cargo", &args, &env);
 
     let secs = started.elapsed().as_secs_f64();
-    eprintln!("elapsed {secs:.1}s");
-    if sub == Some("fast") && secs > FAST_BUDGET_SECS {
-        eprintln!("warning: test fast took {secs:.1}s, over the {FAST_BUDGET_SECS}s budget (BUILD-003); see docs/status.md");
+    eprintln!("elapsed {secs:.1}s (tests; build {build_secs:.1}s)");
+    if sub == Some("fast") {
+        match budget_verdict(secs, whole) {
+            Budget::Within => {}
+            Budget::Note => eprintln!(
+                "note: a run of every crate took {secs:.1}s; the {FAST_BUDGET_SECS}s budget gates a selection of changed crates, not the whole workspace (BUILD-003)"
+            ),
+            Budget::Over => eprintln!("warning: test fast took {secs:.1}s, over the {FAST_BUDGET_SECS}s budget (BUILD-003); see docs/status.md"),
+        }
     }
     if sub == Some("fast") {
         // The budget is a warning, not a failure: a loaded machine makes any hard limit flaky. The names make a regression
@@ -782,6 +835,25 @@ mod tests {
             assert!(packages_for_changes(&s(paths)).len() >= 12, "{paths:?}");
         }
         assert_eq!(packages_for_changes(&s(&["xtask/src/main.rs"])), ["xtask"]);
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn changed_files_are_found_against_the_remote_main_when_there_is_one() {
+        assert_eq!(diff_base(&|r| r == "origin/main" || r == "main"), "origin/main");
+        assert_eq!(diff_base(&|r| r == "main"), "main");
+        assert_eq!(diff_base(&|_| false), "main");
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn the_budget_gates_a_selection_of_changed_crates_and_only_reports_the_whole_workspace() {
+        assert_eq!(budget_verdict(19.9, false), Budget::Within);
+        assert_eq!(budget_verdict(25.0, false), Budget::Over);
+        assert_eq!(budget_verdict(25.0, true), Budget::Note);
+        assert_eq!(budget_verdict(5.0, true), Budget::Within);
+        assert_eq!(packages_for_changes(&[]), all_packages());
+        assert_ne!(packages_for_changes(&s(&["crates/app/src/lib.rs"])), all_packages());
     }
 
     // spec: BUILD-003

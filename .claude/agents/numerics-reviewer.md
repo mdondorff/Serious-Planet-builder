@@ -4,7 +4,7 @@ description: Reviews code touching coordinates, precision, determinism, noise, h
 tools: Read, Glob, Grep, Bash
 model: opus
 ---
-Review the diff (`git diff main...HEAD` plus uncommitted changes) for:
+Review the diff (`git diff origin/main...HEAD` plus uncommitted changes) for:
 
 - f32 used where planet-scale values occur on the CPU;
 - shaders computing values of planet-radius magnitude, or f64→f32 conversions that are not tile-local or camera-relative (CON-11);

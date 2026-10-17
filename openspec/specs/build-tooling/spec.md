@@ -48,7 +48,7 @@ Source: CON-25, CLAUDE.md
 - **THEN** `--machine-ready` is passed through only when given, and any other option is an error naming the override
 
 ### Requirement: BUILD-003 Tiered test commands
-`cargo xtask test fast` SHALL run tier A tests for the changed crates and every crate above them, `cargo xtask test` SHALL run tiers A and B, and `cargo xtask test gpu` SHALL run tier C; tiers SHALL be selected by test-binary name (`gpu_*` is tier C, `oracle_*` tier B, all others tier A) on the software adapter unless `--real` is given. `cargo xtask test gpu --real` SHALL also run the tier-B oracles, on the real adapter. After a `test fast` run the command SHALL print the five slowest tests of that run and, when the run took longer than the 20 s budget (the owner's decision of 2026-10-16), a warning (a printed warning, not a failure: a hard limit on a loaded machine is flaky; `cargo xtask accept` enforces the budget in its timing step).
+`cargo xtask test fast` SHALL run tier A tests for the changed crates and every crate above them, `cargo xtask test` SHALL run tiers A and B, and `cargo xtask test gpu` SHALL run tier C; tiers SHALL be selected by test-binary name (`gpu_*` is tier C, `oracle_*` tier B, all others tier A) on the software adapter unless `--real` is given. `cargo xtask test gpu --real` SHALL also run the tier-B oracles, on the real adapter. After a `test fast` run the command SHALL print the five slowest tests of that run, the compile time apart from the test time, and, when the test time (nextest's run time, not the compile) of a selection of changed crates exceeded the 20 s budget (the owner's decision of 2026-10-16), a warning (a printed warning, not a failure: a hard limit on a loaded machine is flaky; `cargo xtask accept` enforces the budget in its timing step). A run that selects every crate (nothing changed, a root manifest changed, or `--all`) SHALL report its time and SHALL NOT warn. The changed files SHALL be those against `origin/main` when it exists, else `main`.
 
 Verify: A
 Status: active
@@ -57,6 +57,14 @@ Source: ADR 0009, report §16
 #### Scenario: Change in a middle crate
 - **WHEN** only files of `streaming` changed
 - **THEN** `test fast` selects `streaming`, `frame`, `render`, `editor` and `app`
+
+#### Scenario: Budget on a selection
+- **WHEN** `test fast` selects some crates and the tests take longer than 20 s
+- **THEN** it prints the warning and the five slowest tests; when it selects every crate it prints a note and no warning; the compile time is never counted
+
+#### Scenario: Stale local main
+- **WHEN** a branch is checked out in a worktree whose local `main` is behind `origin/main`
+- **THEN** the changed files are those of `origin/main...HEAD` (and the working tree), not of `main...HEAD`; `main` is used only when there is no `origin/main`
 
 #### Scenario: Shared crate changed
 - **WHEN** `testkit`, `perf` or a root manifest changed, or nothing changed
