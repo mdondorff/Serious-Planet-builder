@@ -12,13 +12,26 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | SPIKE-08 | Ocean connectivity at 16384 | closed 2026-10-16 | `spikes/ocean-connectivity/results/` |
 | SPIKE-09 | Atmosphere f32 forms | closed | `spikes/atmosphere-f32/results/` |
 | SPIKE-11 | Mouse look plumbing | open (owner's local check) | `spikes/mouse-look/results/` |
-| SPIKE-12 | Retiring the vertex tile format | open (2026-10-17) | `spikes/vertex-retirement/results/` |
+| SPIKE-12 | Retiring the vertex tile format | closed 2026-10-17 (recommendation: retire, early M6; owner decides at the M5 gate) | `spikes/vertex-retirement/results/` |
 | exploration | WARP parallel-device crash: inside WARP, test-only (PRs #195, #196) | closed | `spikes/warp-crash/results/` |
 | exploration | WARP device removal with compact tiles and the atmosphere: test-only (PRs #212, #213) | closed | `spikes/warp-compact-atmosphere/results/` |
 | exploration | Tile-format duality: cost of retiring the vertex format (PR #218) | closed; SPIKE-12 follows | `spikes/tile-format-duality/results/` |
 | exploration | Compact tiles in storage buffers (PR #225; ADR 0054) | closed | `spikes/compact-storage-buffer/results/` |
 
 The explorations before 2026-10-17 had no register entry; from now on every exploration gets a `SPIKE-NN` entry.
+
+## SPIKE-12 Retiring the vertex tile format
+Status: closed
+Opened: 2026-10-17
+Closed: 2026-10-17
+Question: Can the compact tile format draw levels 0-2 and the CON-13 cliff tiles, so that the vertex format retires from rendering, and what does that cost in GPU time, bytes, code, tests and goldens?
+Why it matters: the M5 gate decision "retire the vertex tile format from rendering, or keep both" (`docs/status.md`, item 7c and the gate item); the duality exploration (PR #218) estimated 5-7 coder days with two unprototyped parts.
+Time box: 1.5 days of agent work.
+Success criteria: for levels 0-2 a 5x5 base surface (error per level in pixels) and a level-3 render floor (draws and slots at the ten standard views, indicative RTX time at orbit and aerial-200km), each with image differences against the current vertex path on WARP and the RTX; for the cliff tiles a 32-bit height with 15-bit normals against CON-13 and CON-14 on the steep field, GPU time against the 8 B texel, bytes per slot; a concrete slot layout against ADR 0033's shares; line, test and golden counts; an ordered plan with a firmer estimate and a recommendation.
+Fallback if it fails: keep both formats (the status quo).
+Code location: spikes/vertex-retirement/ (results only); prototype on branch `spike/spike-12-vertex-retirement`, cut from `explore/compact-storage-buffer`, never merged (switches in `generators::compact`, a level floor in `frame::lod`, `render/src/compact_v2.rs`, experiments in `crates/render/tests/spike12.rs`).
+Result (2026-10-17, sonnet-spikes; report `spikes/vertex-retirement/results/results.md`, tables and images next to it). Levels 0-2: the 3x3 base errs 0.46 px (worst, 0.25 mean) on the 52 level-2 nodes of the orbit view at 2560 x 1440, a 5x5 base 0.0018 px (level 0: 0.35 px, level 1: 0.04 px, SPIKE-06's 190-pixel tile), but the 5x5 base costs vertex-stage time on every tile: +9.8 % at aerial-200km, +47.6 % at ground-1m (2.74 against 1.86 ms), +35.6 % on the steep field, +192 B per record, and it moves every terrain view by rounding noise (0.3 to 6 % of pixels). A render floor at level 3 changes only the orbit view (52 level-2 nodes become 181 level-3 nodes; 11,713 to 11,842 nodes over the ten views; the other nine plans are identical, 0 pixels differ): GPU time 0.174 to 0.321 ms at orbit, unchanged at aerial-200km, no bytes per slot; a floor leaf must be root-like (no morph, exempt from the empty-interval check). Cliff tiles: a 32-bit height with two 15-bit normal components keeps the 8 B texel, holds CON-13 (step 0.0004 mm against 28.6 mm for 16 bits at 1.9 km relief) and CON-14 (worst 0.0072 degrees against 0.01) on the steep field, and costs the same GPU time as the 16-bit texel (ratios 1.001 to 1.005 at ground-1m, aerial-200km and the steep field; per-slot dual decoders 1.003 to 1.015); one layout for all tiles. Slot: the climate leaves the spare texel channel for a 324 B block; slot 9,360 B (+5.9 %); with the record still in ADR 0033's 128 MiB reserve the mid share would fall from 230,640 to 123,008 slots, charged per slot it is 215,085 (-6.7 %) and 329,797 at the high share. Counts: about 950 production lines removed and 200 added (net about -750), about 40 of 805 tests touched, a test-only vertex renderer should stay as the independent image reference, all terrain goldens at rounding noise (the two orbit goldens by declaration), `MESH_VERSION` 7 to 8. Plan: four small changes (slot v2 and pool arithmetic 3.5 days, floor 1.5, removal 2) plus goldens and one perf window 1 day: about 8 coder days (range 7 to 9). GPU numbers are indicative (RTX 3080 Ti Laptop, 2026-10-17 about 11:31, sonnet-explorer confirmed the GPU free, no perf window).
+Recommendation: retire the vertex format from rendering with the level-3 floor and the wide texel for all tiles, in early M6 (not before item 8's perf window); do not adopt the 5x5 base. The owner decides retire or keep, the visible orbit change and the 5.9 % larger slot at the gate; the architect writes the ADR 0033 amendment.
 
 ## SPIKE-11 Mouse look plumbing
 Status: open (waiting for the owner's local check; the remote part is dropped, owner, 2026-10-17)
