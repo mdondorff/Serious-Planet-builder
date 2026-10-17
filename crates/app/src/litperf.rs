@@ -11,7 +11,7 @@
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
 use planet_core::cube::{FaceMapping, TangentWarp};
-use planet_frame::litscenes::{lit_views, LitView, ViewKind, FLIGHTS, STATIC_VIEWS};
+use planet_frame::litscenes::{lit_views, LitView, ViewKind};
 use planet_frame::look::file::LookParams;
 use planet_frame::viewer::{lit_warm_plan, viewer_lit_plan};
 use planet_frame::water::{empty_water_plan, plan_water, WaterRequest, WaterTileCache, WaterView};
@@ -106,7 +106,6 @@ struct ViewResult {
     /// Every frame of the final batch, for the verdict rows.
     frames: Vec<LitFrame>,
     water_draws: u64,
-    nodes: usize,
     warmup: Option<planet_perf::clock::WarmUpOutcome>,
     load: planet_perf::load::CaseLoad,
     noisy: Option<f64>,
@@ -304,7 +303,6 @@ fn measure_static(
         reports,
         frames: batch_frames,
         water_draws,
-        nodes: plan.nodes.len(),
         warmup,
         load,
         noisy,
@@ -328,7 +326,7 @@ fn measure_flight(
     let mut frames: Vec<LitFrame> = Vec::new();
     let (mut water_max, mut nodes_max) = (0u64, 0usize);
     let mut warmup = None;
-    let before = planet_perf::query_nvidia_smi();
+    let mut before = None;
     let mut load_sampler = None;
     let started = Instant::now();
     let mut last_stats = planet_render::TerrainStats::default();
@@ -341,6 +339,7 @@ fn measure_flight(
         nodes_max = nodes_max.max(plan.nodes.len());
         if k == 0 {
             warmup = warm_clock(rig, r, &lit)?;
+            before = planet_perf::query_nvidia_smi();
             load_sampler = (!rig.smoke).then(|| planet_perf::load::LoadSampler::start(planet_perf::load::SAMPLE_PERIOD_S));
         }
         // The first draw of a new set of tiles pays for their first use; it is not a measured frame.
@@ -385,7 +384,6 @@ fn measure_flight(
         reports: vec![report],
         frames,
         water_draws: water_max,
-        nodes: nodes_max,
         warmup,
         load,
         noisy: None,
@@ -422,6 +420,18 @@ fn print_view(res: &ViewResult, gpu: &planet_perf::clock::GpuValidity, smoke: bo
         }
     }
     writeln!(out, "  {}: {}", res.path, planet_perf::lit::pass_rows_line(&metrics)).map_err(err)?;
+    // The sums need every pass of a frame: a frame that lost one drops out of the median, so the count is shown.
+    let n_of = |m: &str| metrics.iter().find(|(n, _)| n == m).map_or(0, |(_, s)| s.samples);
+    writeln!(
+        out,
+        "  {}: frames behind the sums: atmosphere {} of {}, water {} of {}",
+        res.path,
+        n_of("gpu_atmosphere_ms"),
+        res.frames.len(),
+        n_of("gpu_water_total_ms"),
+        res.frames.len()
+    )
+    .map_err(err)?;
     if !smoke {
         writeln!(out, "  {}: {}", res.path, res.load.line()).map_err(err)?;
         for n in res.load.notes() {
@@ -557,32 +567,51 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
                 per_format.push(measure_static(&rig, r, &mut setup, view, &format!("lit-formats/{name}/{}", f.name()), *f, out)?);
             }
             if let [v, c] = per_format.as_mut_slice() {
-                let median = |res: &ViewResult, m: &str| metrics_of(&res.frames).into_iter().find(|(n, _)| n == m).map(|(_, s)| s.median);
-                let mut parts = Vec::new();
-                for (label, m) in [
-                    ("terrain pass", "gpu_ms"),
-                    ("atmosphere", "gpu_atmosphere_ms"),
-                    ("water", "gpu_water_total_ms"),
-                    ("GPU span", "gpu_span_ms"),
-                ] {
-                    if let (Some(a), Some(b)) = (median(c, m), median(v, m)) {
-                        if b <= 0.0 {
-                            continue;
+                // ADR 0036 point 2 and ADR 0034 points 5 and 6: GPU figures are compared only between two GPU-valid views at equal clock
+                // state; otherwise the line says why and no ratio is stored. A smoke run has no clock state and proves the path only.
+                let why_not = if smoke {
+                    None
+                } else {
+                    match (planet_perf::view_gpu_validity(&v.reports, &v.path), planet_perf::view_gpu_validity(&c.reports, &c.path)) {
+                        (planet_perf::clock::GpuValidity::Valid(a), planet_perf::clock::GpuValidity::Valid(b)) => {
+                            (!planet_perf::clock::equal_clock_state(&a, &b)).then(|| format!("not comparable: clock state {a} vs {b}"))
                         }
-                        let ratio = a / b;
-                        parts.push(format!("{label} {ratio:.3} ({a:.3} / {b:.3} ms)"));
-                        if let Some(rep) = c.reports.last_mut() {
-                            rep.counts.push((
-                                format!("ratio_{}_permille", m.trim_start_matches("gpu_").trim_end_matches("_ms")),
-                                (ratio * 1000.0).round() as u64,
-                            ));
+                        (planet_perf::clock::GpuValidity::Invalid(r), _) => {
+                            Some(format!("not compared: the vertex view is NOT VALID for GPU budgets ({r})"))
+                        }
+                        (_, planet_perf::clock::GpuValidity::Invalid(r)) => {
+                            Some(format!("not compared: the compact view is NOT VALID for GPU budgets ({r})"))
                         }
                     }
+                };
+                if let Some(why) = why_not {
+                    extra_lines.push(format!("lit-formats/{name}: compact / vertex GPU time ratio {why}"));
+                } else {
+                    let median =
+                        |res: &ViewResult, m: &str| metrics_of(&res.frames).into_iter().find(|(n, _)| n == m).map(|(_, s)| s.median);
+                    let mut parts = Vec::new();
+                    for (label, key, m) in [
+                        ("terrain pass", "terrain", "gpu_ms"),
+                        ("atmosphere", "atmosphere", "gpu_atmosphere_ms"),
+                        ("water", "water", "gpu_water_total_ms"),
+                        ("GPU span", "span", "gpu_span_ms"),
+                    ] {
+                        if let (Some(a), Some(b)) = (median(c, m), median(v, m)) {
+                            if b <= 0.0 {
+                                continue;
+                            }
+                            let ratio = a / b;
+                            parts.push(format!("{label} {ratio:.3} ({a:.3} / {b:.3} ms)"));
+                            if let Some(rep) = c.reports.last_mut() {
+                                rep.counts.push((format!("ratio_{key}_permille"), (ratio * 1000.0).round() as u64));
+                            }
+                        }
+                    }
+                    extra_lines.push(format!(
+                        "lit-formats/{name}: compact / vertex GPU time ratio (median): {}",
+                        if parts.is_empty() { "not measured".to_string() } else { parts.join(", ") }
+                    ));
                 }
-                extra_lines.push(format!(
-                    "lit-formats/{name}: compact / vertex GPU time ratio (median): {}",
-                    if parts.is_empty() { "not measured".to_string() } else { parts.join(", ") }
-                ));
             }
             results.extend(per_format);
         }
@@ -593,7 +622,7 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     let throttled: Vec<String> = all_reports.iter().filter(|r| crate::run_throttled(r)).map(|r| r.path_name.clone()).collect();
     let noisy: Vec<(String, f64)> = results.iter().filter_map(|r| r.noisy.map(|n| (r.path.clone(), n))).collect();
     let mut validity = if smoke { planet_perf::gate::Validity::default() } else { planet_perf::gate::validity(&throttled, &noisy) };
-    if !production_source(from_store) {
+    if !from_store {
         validity.reasons.push(format!("the bake is {source}: the lit budgets are judged over the production store only"));
     }
     let verdict = planet_perf::validity::SessionVerdict::assess(
@@ -627,7 +656,6 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
                 }
             }
         }
-        let _ = res.nodes;
     }
     for l in &extra_lines {
         writeln!(out, "{l}").map_err(err)?;
@@ -670,11 +698,16 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
             writeln!(out, "{line}").map_err(err)?;
         }
         std::fs::write(&path, &json).map_err(err)?;
-        if compare::replaces_baseline(json.as_bytes()) {
-            std::fs::write(&baseline, &json).map_err(err)?;
-        }
-        if compare::replaces_gpu_baseline(json.as_bytes()) {
-            std::fs::write(&gpu_baseline, &json).map_err(err)?;
+        // A partial log (`--views`) is not a window: it never becomes a baseline.
+        if o.views.is_some() {
+            writeln!(out, "--views: a partial log, not kept as a baseline").map_err(err)?;
+        } else {
+            if compare::replaces_baseline(json.as_bytes()) {
+                std::fs::write(&baseline, &json).map_err(err)?;
+            }
+            if compare::replaces_gpu_baseline(json.as_bytes()) {
+                std::fs::write(&gpu_baseline, &json).map_err(err)?;
+            }
         }
         writeln!(out, "wrote {}", path.display()).map_err(err)?;
     }
@@ -688,17 +721,13 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     for f in &failed {
         writeln!(out, "{f}").map_err(err)?;
     }
-    let _ = (STATIC_VIEWS, FLIGHTS);
     Ok(())
-}
-
-fn production_source(from_store: bool) -> bool {
-    from_store
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use planet_frame::litscenes::{FLIGHTS, STATIC_VIEWS};
 
     // spec: TEST-025
     #[test]

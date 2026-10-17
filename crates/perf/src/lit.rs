@@ -4,9 +4,10 @@
 //! same functions.
 //!
 //! Budgets (owner, 2026-10-15): atmosphere at most 1 ms and water at most 2 ms of GPU time at 1440p (medians of a static view that is
-//! valid for GPU figures, ADR 0036); the terrain pass keeps M2's 8 ms; the frame is judged as the terrain scene judges it (the GPU span
-//! of the lit frame against 16.6 ms, the p99 of the waited frame against 20 ms; the pipelined frame time of the streaming scenes is
-//! TEST-019's). Flights are report only.
+//! valid for GPU figures, ADR 0036); the terrain pass keeps M2's 8 ms; the p99 of the waited frame is judged against 20 ms at any clock
+//! state as the terrain scene judges it. The frame median of 16.6 ms is the pipelined frame time of the streaming scenes on the lit
+//! path (TEST-019, `--lit`); the GPU span of a waited frame is a reported figure beside it (timestamps serialise the passes, so it is an
+//! upper bound), not a verdict. Flights are report only.
 
 use crate::clock::GpuValidity;
 use crate::{summarize, Stats};
@@ -15,8 +16,6 @@ use crate::{summarize, Stats};
 pub const ATMOSPHERE_GPU_BUDGET_MS: f64 = 1.0;
 /// Water budget: the water pass and the copy of the scene target it reads, median of their per-frame sum.
 pub const WATER_GPU_BUDGET_MS: f64 = 2.0;
-/// The lit frame's GPU span against the frame budget (CON-21: 60 FPS median).
-pub const SPAN_BUDGET_MS: f64 = crate::streaming::FRAME_MEDIAN_BUDGET_MS;
 
 /// The passes with timestamps, in the renderer's order (`planet_render::GpuPass::ALL`; a test in the app crate pins the equality).
 pub const PASS_NAMES: [&str; 8] =
@@ -183,7 +182,16 @@ pub fn view_verdicts(
             status: Status::NotInView("no water node in the view"),
         });
     }
-    rows.push(judged("GPU span of the lit frame", "median", median("gpu_span_ms"), SPAN_BUDGET_MS));
+    // Reported, never judged: the frame median of the owner's budget is the streaming scenes' (TEST-019 with --lit).
+    let span = median("gpu_span_ms");
+    rows.push(LitVerdict {
+        measure: "GPU span of the lit frame (reported; the frame median is the streaming --lit scenes')",
+        stat: "median",
+        value: span,
+        budget: None,
+        gated: false,
+        status: if span.is_some() { Status::Reported } else { Status::NotMeasured },
+    });
     // The frame verdict holds at any clock state (ADR 0034 as amended): the p99 of the waited frame against CON-21's 20 ms.
     let over = frame.p99 > crate::FRAME_P99_BUDGET_MS;
     rows.push(LitVerdict {
@@ -289,8 +297,11 @@ mod tests {
         let m = metrics_of(&frames);
         let f = summarize(&[10.0, 11.0, 12.0], 0).unwrap();
         let rows = view_verdicts(&m, &f, &valid(), true, 40, true);
-        assert!(rows.iter().all(|r| r.status == Status::Ok), "atmosphere exactly 1 ms and water 1.7 + 0.3 = 2 ms are within: {rows:?}");
-        assert!(rows.iter().all(|r| r.gated) && rows.len() == 5);
+        let judged: Vec<&LitVerdict> = rows.iter().filter(|r| r.gated).collect();
+        assert!(judged.iter().all(|r| r.status == Status::Ok), "atmosphere exactly 1 ms and water 1.7 + 0.3 = 2 ms are within: {rows:?}");
+        assert!(judged.len() == 4 && rows.len() == 5, "the GPU span is reported, not judged: {rows:?}");
+        let span = rows.iter().find(|r| r.measure.starts_with("GPU span")).unwrap();
+        assert!(!span.gated && span.status == Status::Reported && span.line("v").ends_with("reported"), "{span:?}");
         // Over: atmosphere 1.5 ms, water 2.5 ms.
         let m = metrics_of(&(0..5).map(|_| lit(1.5, 2.2)).collect::<Vec<_>>());
         let rows = view_verdicts(&m, &f, &valid(), true, 40, true);
@@ -306,7 +317,7 @@ mod tests {
         let m = metrics_of(&(0..5).map(|_| lit(1.5, 2.2)).collect::<Vec<_>>());
         let slow = summarize(&[10.0, 30.0, 31.0], 0).unwrap();
         let rows = view_verdicts(&m, &slow, &GpuValidity::Invalid("P2 1150 MHz, below the 1400 MHz floor".into()), true, 10, true);
-        for r in rows.iter().filter(|r| r.measure != "frame (waited)") {
+        for r in rows.iter().filter(|r| r.measure != "frame (waited)" && r.gated) {
             assert!(matches!(r.status, Status::NotValid(_)) && !r.fails(), "{r:?}");
             assert!(r.line("v").contains("NOT VALID for GPU budgets (P2 1150 MHz"), "{}", r.line("v"));
         }

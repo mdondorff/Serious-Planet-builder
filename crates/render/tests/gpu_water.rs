@@ -1091,16 +1091,23 @@ fn a_timed_lit_frame_reports_the_gpu_time_of_every_pass_it_ran_and_the_pixels_do
         assert!(timed.passes.span_ms.is_none() && timed.gpu_ms.is_none(), "no timestamps, no times: {timed:?}");
         return;
     }
-    for p in GpuPass::ALL {
+    // The long passes always read an interval; a very short one may read zero on a coarse clock and then reports nothing, never 0 ms.
+    for p in [GpuPass::Terrain, GpuPass::Water, GpuPass::SkyView, GpuPass::AerialPerspective, GpuPass::SkyComposite] {
         let ms = timed.passes.get(p).unwrap_or_else(|| panic!("{}: no time in {timed:?}", p.name()));
         assert!(ms > 0.0 && ms < 1000.0, "{}: {ms}", p.name());
     }
+    for p in GpuPass::ALL {
+        assert!(timed.passes.get(p).is_none_or(|ms| ms > 0.0 && ms < 1000.0), "{}: {timed:?}", p.name());
+    }
     assert_eq!(timed.gpu_ms, timed.passes.get(GpuPass::Terrain));
     assert_eq!(timed.water_gpu_ms, timed.passes.get(GpuPass::Water));
-    let copy = timed.passes.scene_copy_ms.expect("the scene copy between terrain and water");
+    // The copy is the gap between two passes: a clock that overlaps them reports none, never a negative time.
     let span = timed.passes.span_ms.unwrap();
     let longest = GpuPass::ALL.iter().filter_map(|p| timed.passes.get(*p)).fold(0.0f64, f64::max);
-    assert!(copy >= 0.0 && span >= longest, "span {span} covers the longest pass {longest} and the copy {copy}");
+    assert!(
+        timed.passes.scene_copy_ms.is_none_or(|c| c > 0.0) && span >= longest,
+        "span {span} covers the longest pass {longest}: {timed:?}"
+    );
     // A debug frame times the terrain pass alone.
     let mut debug = plan.clone();
     debug.lit = None;
