@@ -1,0 +1,1 @@
+- 2026-10-18 **perf window 8** (coordinator session, opus-planner GO): `perf m5` on main 42508bf; the descent-lag fix holds on dive-fast (mean 0.633, max 17.7 ms) and the window-7 stalls are gone, but the gated lit `dive` CRASHED (wgpu `globals` buffer invalid, twice), so `accept M5` refused; coast water medians over 2 ms at below-floor clocks; results in `docs/perf/window-8.md`.
