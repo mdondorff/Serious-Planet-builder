@@ -137,7 +137,7 @@ pub fn readiness(f: &MachineFacts) -> Vec<GateFailure> {
     }
     match f.cpu_load_pct {
         Some(v) if v < MAX_CPU_LOAD_PCT => {}
-        v => fail("CPU load", format!("{} % mean over {LOAD_WINDOW_S} s (limit {MAX_CPU_LOAD_PCT} %)", pct(v))),
+        v => fail("CPU load", format!("{} % competing load, mean over {LOAD_WINDOW_S} s (limit {MAX_CPU_LOAD_PCT} %)", pct(v))),
     }
     match f.gpu_util_pct {
         Some(v) if v < MAX_GPU_UTIL_PCT => {}
@@ -244,15 +244,14 @@ pub fn query_processes() -> Option<Vec<ProcInfo>> {
     (!v.is_empty()).then_some(v)
 }
 
-/// Mean total CPU load over `seconds`, one sample per second. Uses the CIM class `Win32_PerfFormattedData_PerfOS_Processor`
-/// (counter paths of `Get-Counter` are localised and fail on a German Windows, which is Rasierklinge's).
+/// The CPU load the readiness gate and the settle poll of `perf m5` both read (TEST-032): the share of the machine that other
+/// processes used over `seconds`, from two per-process readings of the raw CPU times. This process and the helpers it starts to
+/// read the machine (`powershell`, `nvidia-smi`, ...) are not counted: the gate runs inside a child that has just started
+/// (opening a store, building a world), and counting that start made the gate read 15.5-18.5 % where the poll between children
+/// read 8-14 % (window 7). The raw per-process counters are the ones the host-load record uses (TEST-023), and they work on a
+/// localised Windows (counter paths of `Get-Counter` do not; Rasierklinge is German).
 pub fn query_cpu_load(seconds: u32) -> Option<f64> {
-    let script = format!(
-        "1..{seconds} | ForEach-Object {{ (Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter \"Name='_Total'\").PercentProcessorTime; Start-Sleep -Seconds 1 }}"
-    );
-    let s = powershell(&script)?;
-    let v: Vec<f64> = s.lines().filter_map(|l| l.trim().replace(',', ".").parse().ok()).collect();
-    (!v.is_empty()).then(|| v.iter().sum::<f64>() / v.len() as f64)
+    crate::load::competing_load(seconds, std::process::id())
 }
 
 /// Parse one `nvidia-smi --query-gpu=utilization.gpu,temperature.gpu --format=csv,noheader,nounits` line.

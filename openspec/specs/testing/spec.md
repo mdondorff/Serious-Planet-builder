@@ -668,7 +668,7 @@ Source: M5 item 10 (status.md: the 1440p flight videos of the glide and the desc
 - **THEN** the run refuses before any work and names what is missing
 
 ### Requirement: TEST-028 CPU settle between the children of perf m5
-`cargo xtask perf m5` SHALL, after every child except the last, poll the system CPU load (the mean over one readiness-gate window, ADR 0020) until a reading is below the gate's limit, at most 30 polls. It SHALL print one line per wait: the child, the last reading, the limit, the polls, `settled` or `NOT settled`. An unreadable load ends the wait. The next gate decides.
+`cargo xtask perf m5` SHALL, after every child except the last, poll the competing CPU load (TEST-032: the mean over one readiness-gate window, ADR 0020) until a reading is below the gate's limit, at most 30 polls. It SHALL print one line per wait: the child, the last reading, the limit, the polls, `settled` or `NOT settled`. An unreadable load ends the wait. The next gate decides.
 
 Verify: A
 Status: active
@@ -714,3 +714,18 @@ Source: M5 item 9a.1 (status.md), TEST-012, TEST-021
 #### Scenario: A memoised plan asks nothing
 - **WHEN** the same terrain plan is planned twice with one cache
 - **THEN** the second plan's counter difference is 0, 0, 0
+
+### Requirement: TEST-032 One CPU-load reading for the gate and the settle poll
+The CPU load of the readiness gate (ADR 0020, limit 15 %) and of the settle poll of `perf m5` (TEST-028) SHALL be one reading: the competing load, the share of the whole machine that processes other than the reading process and the helpers it starts to read the machine (`powershell`, `nvidia-smi`, `wmiprvse`, `conhost`) used over the 10 s window, from two readings of the raw per-process CPU times (TEST-023). The gate's failure line SHALL say `competing load`. The readiness gate's other conditions are unchanged.
+
+Verify: A
+Status: active
+Source: window 7 (the settle poll read 8-14 % where the gate refused at 15.5-18.5 %), ADR 0020, TEST-023, TEST-028
+
+#### Scenario: The harness start is not load
+- **WHEN** a freshly started harness process uses 30 % of the machine and a browser uses 6 %
+- **THEN** the gate's reading is 6 %
+
+#### Scenario: The previous child's tail is load for the poll
+- **WHEN** the settle poll of the parent reads the same interval
+- **THEN** it counts the child as a competitor and reads 36 %, and a quiet machine reads 0 %
