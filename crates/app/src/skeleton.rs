@@ -817,9 +817,12 @@ impl planet_streaming::TileSource<RenderTile> for MeshSource {
         let field = self.world.field()?;
         // A pre-filled coarse tile is read from the pack instead of generated (STRM-021): the same tile, bit for bit.
         if let Some(t) = self.world.prefilled_tile(field.as_ref(), tile, self.cells, self.max_level, self.format) {
+            self.world.fill_water(tile);
             return Ok(t);
         }
-        Ok(tile_for(self.format, field.as_ref(), tile, self.cells, self.world.radius_m(), self.max_level))
+        let made = tile_for(self.format, field.as_ref(), tile, self.cells, self.world.radius_m(), self.max_level);
+        self.world.fill_water(tile);
+        Ok(made)
     }
 
     /// The stage boundary of a tile is every height sample: once the token is set the field answers 0 without reading the
@@ -837,11 +840,19 @@ impl MeshSource {
     fn load_staged_timed(&self, tile: TileId, cancel: &planet_streaming::CancelToken) -> Result<Option<RenderTile>, String> {
         let field = self.world.field()?;
         if let Some(t) = self.world.prefilled_tile(field.as_ref(), tile, self.cells, self.max_level, self.format) {
+            if !cancel.is_cancelled() {
+                self.world.fill_water(tile);
+            }
             return Ok(Some(t));
         }
         let guarded = CancelGuarded { inner: field.as_ref(), cancel };
         let made = tile_for(self.format, &guarded, tile, self.cells, self.world.radius_m(), self.max_level);
-        Ok((!cancel.is_cancelled()).then_some(made))
+        if cancel.is_cancelled() {
+            return Ok(None);
+        }
+        // The tile's water (ADR 0056) is computed here, in the job, so the plan of a frame only looks it up.
+        self.world.fill_water(tile);
+        Ok(Some(made))
     }
 }
 
@@ -1420,6 +1431,58 @@ mod tests {
         assert!(source.load_staged(tile, &CancelToken::cancelled()).unwrap().is_none(), "cancelled before it starts: no tile");
         let live = source.load_staged(tile, &CancelToken::never()).unwrap().expect("a live job returns its tile");
         assert_eq!(live, source.load(tile).unwrap(), "the staged path builds the tile of the plain one");
+    }
+
+    // spec: ATMO-012
+    #[test]
+    fn a_tile_job_computes_the_water_of_its_tile_and_the_plan_then_asks_the_field_nothing() {
+        use planet_frame::water::WaterTileCache;
+        use planet_streaming::{CancelToken, TileSource};
+        let world = std::sync::Arc::new(
+            WorldTerrain::open(planet_world_def::WorldDefinition::single_planet(RADIUS_M, 5), 128)
+                .expect("a small in-memory world")
+                .bounding_water(),
+        );
+        let source =
+            MeshSource { world: std::sync::Arc::clone(&world), format: planet_render::TileFormat::Vertex, max_level: 22, cells: 16 };
+        let tiles: Vec<TileId> =
+            (0..6u8).flat_map(|f| [TileId::new(Face(f), 2, 1, 2).unwrap(), TileId::new(Face(f), 4, 7, 9).unwrap()]).collect();
+        // A cancelled job leaves nothing; the jobs of the live tiles fill the book.
+        assert!(source.load_staged(tiles[0], &CancelToken::cancelled()).unwrap().is_none());
+        assert_eq!(world.water_book().filled(), 0, "a cancelled job computes no water");
+        for t in &tiles {
+            source.load_staged(*t, &CancelToken::never()).unwrap().unwrap();
+        }
+        assert_eq!(world.water_book().filled(), tiles.len() as u64);
+        // The plan's cache answers every tile from the book: no field query, no miss (no store block read on the plan thread).
+        let mut cache = WaterTileCache::with_book(world.water_book());
+        let from_book: Vec<_> = world
+            .with_water(|f| {
+                tiles.iter().map(|t| cache.tile_water(f, &planet_core::cube::TangentWarp, *t, RADIUS_M).unwrap()).collect::<Vec<_>>()
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!((cache.queries, cache.tile_misses, cache.book_hits), (0, 0, tiles.len() as u64));
+        // The same answers as the plan thread's own query (the answer is a pure function of the tile and the field, CON-14).
+        let mut own = WaterTileCache::new();
+        let direct: Vec<_> = world
+            .with_water(|f| {
+                tiles.iter().map(|t| own.tile_water(f, &planet_core::cube::TangentWarp, *t, RADIUS_M).unwrap()).collect::<Vec<_>>()
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(from_book, direct);
+        assert!(
+            own.queries > 0 && from_book.iter().any(Option::is_some) && from_book.iter().any(Option::is_none),
+            "the tiles are a mix of sea and land"
+        );
+        // A world without the lit path computes no water in its jobs (the debug path pays nothing).
+        let debug =
+            std::sync::Arc::new(WorldTerrain::open(planet_world_def::WorldDefinition::single_planet(RADIUS_M, 5), 128).expect("world"));
+        MeshSource { world: std::sync::Arc::clone(&debug), format: planet_render::TileFormat::Vertex, max_level: 22, cells: 16 }
+            .load(tiles[1])
+            .unwrap();
+        assert_eq!(debug.water_book().filled(), 0);
     }
 
     /// A height field that counts the samples it is asked for.

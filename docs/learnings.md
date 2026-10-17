@@ -368,3 +368,10 @@ What happened: the review pass of the 18 pending M5 goldens showed RTX against W
 Assumption it changes: ADR 0017 rounding noise (32 px at delta 1) as a cross-adapter bound: it holds for candidate against golden on one adapter, not for hardware against software.
 Proposed follow-up: none; ADR 0052 as written (at most 64 pixels beyond delta 1, any number at delta 1) stands, the bound tests guard the values.
 Obsolete when: the ADR 0037 window ends at the M5 gate.
+
+## 2026-10-17 The coastal plain below the level, and water queries on the frame thread
+Scope: water selection (ADR 0053), erosion, streaming lit scenes
+What happened: window 6's 8 s frames were `plan_water` reading 25 store blocks (about 20 ms each) per new tile of level 0 to 3 on the frame thread (394 loads, 7.7 s, in frame 5 of the dive); first lit plans cost 0.5 to 3 s. Separately, the bake's land (continentalness above 0.1) of elevation up to about 64 m lies below the level after erosion (mean -17 m over plains 200 to 400 km wide), so the selection left a flat dry seabed to the horizon behind a staircase of water.
+Assumption it changes: ADR 0053's "the coast is a function of the terrain and the level on every LOD" held only where the bake says sea; and "a tile query is cheap" held only over an in-memory bake.
+Proposed follow-up: ADR 0056 (band, tile water in the job, pixel-footprint fade); a per-vertex sea mask (ADR 0051 option 3) if the reach approximation shows.
+Obsolete when: ADR 0056 is accepted and the housekeeping folds it into the specs.

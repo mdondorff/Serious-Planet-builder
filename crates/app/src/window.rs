@@ -218,7 +218,7 @@ impl App<'_> {
             exposure: None,
             atmosphere: cfg.atmosphere,
             counts: SmokeCounts::default(),
-            water_cache: WaterTileCache::new(),
+            water_cache: WaterTileCache::with_book(self.world.water_book()),
         });
         Ok(())
     }

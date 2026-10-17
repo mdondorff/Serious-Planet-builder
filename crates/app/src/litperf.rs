@@ -58,7 +58,7 @@ impl LitSetup {
             level_m,
             lod: lod.clone(),
             radius_m: world.radius_m(),
-            cache: WaterTileCache::new(),
+            cache: WaterTileCache::with_book(world.water_book()),
             has_water: world.has_water(),
         })
     }
@@ -492,9 +492,7 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
     let aspect = f64::from(size.0) / f64::from(size.1);
     let mut setup = LitSetup::new(o, &world, &lod)?;
-    let is_sea = |d: planet_core::Vec3| {
-        world.with_water(|f| planet_frame::water::WaterSource::water_at(f, d).ok().flatten().is_some()).ok().flatten().unwrap_or(false)
-    };
+    let is_sea = |d: planet_core::Vec3| carries_sea(&world, d);
     let flight_frames = if smoke && !o.given.contains("--flight-frames") { 4 } else { o.flight_frames };
     let mut views = lit_views(radius_m, aspect, field.as_ref(), setup.level_m, &is_sea, flight_frames)?;
     if let Some(names) = &o.views {
@@ -735,6 +733,18 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     Ok(())
 }
 
+/// Whether the plan carries the sea at `dir` (ADR 0056): the water of the tile of level 14 (about 600 m) that holds it, by the rule of
+/// the water plan, so the coast views stand where the water is drawn.
+pub fn carries_sea(world: &WorldTerrain, dir: planet_core::Vec3) -> bool {
+    let map = planet_core::cube::TangentWarp;
+    let tile = planet_core::TileId::from_direction(&map, dir, 14);
+    world
+        .with_water(|f| WaterTileCache::new().tile_water(f, &map, tile, world.radius_m()).ok().flatten().is_some())
+        .ok()
+        .flatten()
+        .unwrap_or(false)
+}
+
 /// Whether `--scene NAME` names the flight capture (a tool, never a measurement).
 pub fn is_capture_scene(name: &str) -> bool {
     name == "capture-flights"
@@ -772,9 +782,7 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
     let aspect = f64::from(size.0) / f64::from(size.1);
     let mut setup = LitSetup::new(o, &world, &lod)?;
-    let is_sea = |d: planet_core::Vec3| {
-        world.with_water(|f| planet_frame::water::WaterSource::water_at(f, d).ok().flatten().is_some()).ok().flatten().unwrap_or(false)
-    };
+    let is_sea = |d: planet_core::Vec3| carries_sea(&world, d);
     let frames = o.flight_frames;
     let views = lit_views(radius_m, aspect, field.as_ref(), setup.level_m, &is_sea, frames)?;
     let rig =

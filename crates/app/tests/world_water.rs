@@ -74,8 +74,10 @@ fn the_cost_of_the_per_tile_water_query() {
         let tiles = view_tiles(&w);
         let mut cache = WaterTileCache::new();
         let started = std::time::Instant::now();
-        let wet =
-            w.with_water(|f| tiles.iter().filter(|t| cache.tile_water(f, &TangentWarp, **t).unwrap().is_some()).count()).unwrap().unwrap();
+        let wet = w
+            .with_water(|f| tiles.iter().filter(|t| cache.tile_water(f, &TangentWarp, **t, 6_371_000.0).unwrap().is_some()).count())
+            .unwrap()
+            .unwrap();
         let total = started.elapsed();
         println!(
             "bake {res}: {} tiles of the scripted views ({wet} wet), {} field queries, {:.1} ms in all: {:.1} us per tile, {:.2} us per query (cache recorded {:.1} ms)",
@@ -90,7 +92,7 @@ fn the_cost_of_the_per_tile_water_query() {
         let again = std::time::Instant::now();
         w.with_water(|f| {
             tiles.iter().for_each(|t| {
-                let _ = cache.tile_water(f, &TangentWarp, *t).unwrap();
+                let _ = cache.tile_water(f, &TangentWarp, *t, 6_371_000.0).unwrap();
             })
         })
         .unwrap();

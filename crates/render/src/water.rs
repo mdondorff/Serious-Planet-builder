@@ -52,7 +52,7 @@ fn water_wave_arg(kw: vec4<f32>, local: vec3<f32>, phase: f32) -> f32 {
 // Gerstner displacement (planet-fixed axes, metres) and slope (the gradient along the tangent plane) of a liquid at a tile-local point.
 // A wave's weight is the product of its tangent share (a wave that points out of the surface has none), its resolution (it fades out
 // at the vertex's own spacing, from the plan and the morph) and the shore (the amplitude falls to zero with the depth), each continuous.
-fn water_waves(liq: WLiquid, local: vec3<f32>, up: vec3<f32>, phases: vec4<f32>, spacing: f32, depth: f32, choppy: f32) -> WaveOut {
+fn water_waves(liq: WLiquid, local: vec3<f32>, up: vec3<f32>, phases: vec4<f32>, spacing: f32, depth: f32, choppy: f32, footprint: f32) -> WaveOut {
     var out: WaveOut;
     out.disp = vec3<f32>(0.0);
     out.slope = vec3<f32>(0.0);
@@ -76,7 +76,12 @@ fn water_waves(liq: WLiquid, local: vec3<f32>, up: vec3<f32>, phases: vec4<f32>,
         let s = length(tang);
         let w_tan = w_smooth(0.25, 0.6, s);
         let w_res = w_smooth(4.0, 8.0, (W_TWO_PI / klen) / spacing);
-        let w = w_tan * w_res * shore;
+        // A wave under about two pixels per wavelength fades out of the shading (footprint 0: the vertex stage, no fade).
+        var w_px = 1.0;
+        if (footprint > 0.0) {
+            w_px = w_smooth(2.0, 4.0, (W_TWO_PI / klen) / footprint);
+        }
+        let w = w_tan * w_res * w_px * shore;
         if (w <= 0.0) {
             continue;
         }
@@ -168,7 +173,7 @@ fn water_vertex(t: VsOut) -> WOut {
     let up = up_at(node.up, t.local);
     let base = t.local + up * depth;
     let spacing = rec.a.z * (1.0 + t.morph);
-    let w = water_waves(liq, base, up, rec.phases, spacing, depth, WG.a.w);
+    let w = water_waves(liq, base, up, rec.phases, spacing, depth, WG.a.w, 0.0);
     var out: WOut;
     out.pos = g.view_proj * vec4<f32>(node.origin_rel.xyz + base + w.disp, 1.0);
     out.local = base;
@@ -188,6 +193,7 @@ struct WLight {
 fn fs_water(in: WOut) -> @location(0) vec4<f32> {
     // The derivative first, in uniform control flow (before the discard).
     let depth_width = WG.b.z * fwidth(in.depth);
+    let footprint = max(length(dpdx(in.local)), length(dpdy(in.local)));
     if (in.depth <= 0.0) {
         discard;
     }
@@ -197,7 +203,7 @@ fn fs_water(in: WOut) -> @location(0) vec4<f32> {
     let up = up_at(node.up, in.local);
     let cam = node.origin_rel.xyz + in.local;
     let dist = length(cam);
-    let w = water_waves(liq, in.local, up, rec.phases, in.spacing, in.depth, WG.a.w);
+    let w = water_waves(liq, in.local, up, rec.phases, in.spacing, in.depth, WG.a.w, footprint);
     let n = normalize(up - w.slope);
     let v = -cam / dist;
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));

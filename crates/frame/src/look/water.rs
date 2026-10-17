@@ -50,6 +50,9 @@ pub const WAVE_DIRECTIONS: [[f64; 3]; WAVES] = [
 /// The tangent share of a wave (the length of its direction's part along the surface) below which it has no weight, and above which
 /// it has full weight (a smoothstep between).
 pub const TANGENT_SHARE: (f64, f64) = (0.25, 0.6);
+/// Pixels per wavelength over which a wave fades out of the shading (ADR 0056): none below the first, full from the second. The
+/// footprint is the pixel's size on the surface; the vertex stage has no footprint and applies no fade.
+pub const PIXEL_FADE: (f64, f64) = (2.0, 4.0);
 /// The largest `|k . local|` (rad) any wave with weight may have in a shader (about 1e3 would cost the argument its f32 digits);
 /// tested on real plans.
 pub const WAVE_ARGUMENT_BOUND: f64 = 1.0e3;
@@ -354,6 +357,9 @@ pub struct WavePoint {
     pub spacing: f64,
     /// Vertical depth `W - h_morph` (m); the waves fall to zero as it does.
     pub depth: f64,
+    /// The pixel's size on the surface (m), the larger of its two screen-axis derivatives of the position; 0 where there is no pixel
+    /// (the vertex stage): no pixel fade.
+    pub footprint: f64,
 }
 
 /// The weights of the waves at a point: tangent share, resolution and shore (each continuous in the point).
@@ -377,7 +383,9 @@ pub fn wave_weights(liquid: &LiquidAppearance, p: &WavePoint) -> [f64; WAVES] {
         // Resolution: full weight from eight vertices per wavelength, none below four (continuous in the spacing, which is continuous
         // in the morph factor, so no LOD border shows).
         let w_res = smoothstep(4.0, 8.0, lambda / p.spacing);
-        *o = w_tan * w_res * shore;
+        // Pixel footprint (ADR 0056): a wave under about two pixels per wavelength fades out of the shading instead of aliasing.
+        let w_px = if p.footprint > 0.0 { smoothstep(PIXEL_FADE.0, PIXEL_FADE.1, lambda / p.footprint) } else { 1.0 };
+        *o = w_tan * w_res * w_px * shore;
     }
     out
 }

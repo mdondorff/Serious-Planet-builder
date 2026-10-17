@@ -5,11 +5,12 @@
 //! bundle was made with it, so they do not move.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use planet_cache::global_store::{GlobalWorld, StoreSource};
 use planet_cache::meshpack::{RenderForm, TileSpec};
 use planet_core::cube::TangentWarp;
-use planet_core::Face;
+use planet_core::{Face, TileId};
 use planet_generators::global::{GlobalCoarseGenerator, GlobalGrid, GlobalSample, GridSource, LatticeSource, ReadError};
 use planet_generators::height::{HeightField, IMPLEMENTATION_ID as REFERENCE_ID};
 use planet_generators::height_fields::{build_field, resolve, HeightFieldKind};
@@ -134,6 +135,14 @@ impl SourceCounters {
     }
 }
 
+/// What the bake holds at a direction (see [`WorldTerrain::bake_probe`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BakeProbe {
+    pub continent: f32,
+    pub elevation_m: f32,
+    pub ocean_vertex: bool,
+}
+
 /// A world's terrain: the definition, the field it selects and the bake the field reads.
 pub struct WorldTerrain {
     def: WorldDefinition,
@@ -165,6 +174,8 @@ pub struct WorldTerrain {
     /// Whether the fields this world builds bound their tiles up to the sea level (the viewer's lit path: the water of a tile whose
     /// terrain the view culls must not be culled with it, `WaterBounded`). Off for every other run: plans and keys are unchanged.
     bound_water: bool,
+    /// The water of the tiles the jobs loaded (ADR 0056), filled when `bound_water` (the lit path) is on.
+    water_book: Arc<planet_frame::water::WaterBook>,
 }
 
 /// The ocean channel of a stored bake as the water field's lattice.
@@ -242,6 +253,7 @@ impl WorldTerrain {
             store_source: None,
             ocean,
             bound_water: false,
+            water_book: Default::default(),
         })
     }
 
@@ -296,6 +308,7 @@ impl WorldTerrain {
             store_source: Some(src),
             ocean,
             bound_water: false,
+            water_book: Default::default(),
         })
     }
 
@@ -493,7 +506,39 @@ impl WorldTerrain {
         self
     }
 
+    /// The water of tiles computed off the frame (ADR 0056).
+    pub fn water_book(&self) -> Arc<planet_frame::water::WaterBook> {
+        Arc::clone(&self.water_book)
+    }
+
+    /// Whether a tile's job computes the tile's water (the lit path of a world with water).
+    pub fn fills_water(&self) -> bool {
+        self.bound_water
+    }
+
+    /// Compute the water of `tile` into the book, if this world has water and the lit path is on; called by the tile's job, off the
+    /// frame (ADR 0056). A failed read leaves the tile to the plan, which reports it.
+    pub fn fill_water(&self, tile: TileId) {
+        if !self.bound_water {
+            return;
+        }
+        let radius_m = self.radius_m;
+        let book = &self.water_book;
+        let _ = self.with_water(|f| book.fill(f, &TangentWarp, tile, radius_m));
+    }
+
     /// Whether this world has water: a bake with its ocean channel (the sea of the definition, ADR 0041).
+    /// The bake's continentalness and elevation at `dir` and whether a vertex of its cell is ocean (ADR 0041 point 2): the facts the
+    /// water field decides from, for diagnostics and the coverage oracle. `None` without a bake or an ocean channel, or on a read error.
+    pub fn bake_probe(&self, dir: planet_core::Vec3) -> Option<BakeProbe> {
+        let ocean = self.ocean.as_deref()?;
+        let g = planet_generators::global::read_direction(self.src.as_ref(), &TangentWarp, dir).ok()?;
+        let q = planet_generators::global::locate_direction(self.src.res(), &TangentWarp, dir).ok()?;
+        let (v, n) = q.weighted_vertices(q.res);
+        let ocean_vertex = v[..n].iter().any(|&(i, j)| ocean.is_ocean(q.face, i, j).unwrap_or(false));
+        Some(BakeProbe { continent: g.continent, elevation_m: g.elevation_m, ocean_vertex })
+    }
+
     pub fn has_water(&self) -> bool {
         self.ocean.is_some()
     }

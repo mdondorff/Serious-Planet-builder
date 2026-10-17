@@ -180,7 +180,7 @@ struct WaveProbe { liq: WLiquid, local_spacing: vec4<f32>, up_depth: vec4<f32>, 
 @compute @workgroup_size(1)
 fn probe_waves(@builtin(global_invocation_id) id: vec3<u32>) {
     let p = wave_probes[id.x];
-    let w = water_waves(p.liq, p.local_spacing.xyz, p.up_depth.xyz, p.phases, p.local_spacing.w, p.up_depth.w, p.extra.x);
+    let w = water_waves(p.liq, p.local_spacing.xyz, p.up_depth.xyz, p.phases, p.local_spacing.w, p.up_depth.w, p.extra.x, p.extra.y);
     results[2u * id.x] = vec4<f32>(w.disp, 0.0);
     results[2u * id.x + 1u] = vec4<f32>(w.slope, 0.0);
 }
@@ -210,6 +210,8 @@ pub struct WaveProbe {
     pub depth: f32,
     pub phases: [f32; WAVES],
     pub choppy: f32,
+    /// The pixel's size on the surface (m); 0 for the vertex stage's evaluation.
+    pub footprint: f32,
 }
 
 /// One input of [`probe_surface`]: the arguments of the shader's `water_surface`.
@@ -316,7 +318,7 @@ pub fn probe_waves(ctx: &GpuContext, probes: &[WaveProbe]) -> Vec<([f32; 3], [f3
         push4(&mut input, p.local, p.spacing);
         push4(&mut input, p.up, p.depth);
         input.extend(p.phases);
-        input.extend([p.choppy, 0.0, 0.0, 0.0]);
+        input.extend([p.choppy, p.footprint, 0.0, 0.0]);
     }
     let r = run_probe(ctx, "probe_waves", &input, probes.len(), 2);
     r.chunks(2).map(|c| ([c[0][0], c[0][1], c[0][2]], [c[1][0], c[1][1], c[1][2]])).collect()
