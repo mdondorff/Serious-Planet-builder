@@ -5,8 +5,6 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 ## Waiting for the owner
 - **SPIKE-11 manual check** (mouse look, about ten minutes; `spikes/mouse-look/CHECKLIST.md` in the sonnet-spikes worktree). Nothing else waits on it.
 
-- **Sky goldens (M5 item 5)**: six new first goldens of class `sky` (`sky_orbit_ev15`, `sky_aerial20km_ev15`, `sky_ground1m_ev15`, `sky_ground1m_sunset_ev11`, `sky_orbit_transmittance_lut`, `sky_orbit_multiscatter_lut`) escalate in `golden-review` (report `target/review/golden-review/report.md`): the local WARP driver (.9711) differs from CI's recorded .33438 (driver gate, unchanged), and llvmpipe is NOT RUN locally (the CI Linux candidates decide ADR 0037 (b)); the bound tests are green. The two table views are CPU-computed discrete bands, identical on WARP and the RTX. All six stay in `tests/goldens/pending.txt`; nothing in the queue waits on them.
-
 Dormant (no near trigger; not asked now):
 - **ADR 0037 window** (`ADR_0037_M5_CLASSES` in `testkit::review`): the owner decides at the M5 gate whether first goldens of `lit`/`sky`/`water` keep being blessed under policy; if not, empty the constant (superseding ADR).
 - **CON-08 reading** (ADR 0022): may a field read another field of its own stage? Trigger: a regional chain that needs same-stage reads. Until then one field per chain.
