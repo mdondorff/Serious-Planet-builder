@@ -221,6 +221,11 @@ fn t3_floor_counts() {
                 *hist.entry(n.level).or_insert(0usize) += 1;
             }
             let coarse = plan.nodes.iter().filter(|n| n.level < 3).count();
+            if floor == 3 && index == 0 {
+                let mm = plan.nodes.iter().map(|n| n.morph).fold(0.0f32, f32::max);
+                let ms = plan.nodes.iter().map(|n| n.morph_start_m).fold(f32::INFINITY, f32::min);
+                writeln!(out, "(orbit with floor 3: largest selection morph of any node {mm}, smallest morph start {ms:.3e} m)").unwrap();
+            }
             totals[k].0 += plan.nodes.len();
             totals[k].1 += coarse;
             let levels = hist.iter().map(|(l, c)| format!("{l}:{c}")).collect::<Vec<_>>().join(" ");
@@ -713,4 +718,42 @@ fn t9_share_arithmetic() {
     }
     println!("{out}");
     std::fs::write(out_dir().join("t9-share-arithmetic.md"), out).unwrap();
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// T10 (GPU): the wide texel (all tiles) against the current compact path on the Reference field: the golden-noise question.
+
+#[test]
+#[ignore]
+fn t10_wide_texel_image_noise() {
+    let _g = LOCK.lock().unwrap();
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let log = ctx.adapter_log_line();
+    let tag = if log.contains("Cpu") { "warp" } else { "rtx" };
+    let size = (960u32, 540u32);
+    let field = Reference(SEED);
+    let finest = planet_frame::production_finest_level(CELLS);
+    let mut report = String::new();
+    writeln!(report, "# T10: wide texel on every tile against the current compact tiles, Reference field ({log})").unwrap();
+    writeln!(report, "960x540, tau 6, cells {CELLS}, ten standard views, the vertex format kept for levels 0-2 in both. Pixel counts as in T4.\n").unwrap();
+    writeln!(report, "| view | debug view | nodes | diff px | max | over8 | mean |\n|---|---|---|---|---|---|---|").unwrap();
+    for index in 0..10usize {
+        reset();
+        let (name, plan) = plan_at(index, size, TerrainView::Relief, 6.0);
+        let base = tiles_of(&plan, &field, finest);
+        let base_frames = draw_all(&ctx, &plan, &base);
+        set(SPIKE_WIDE, 0);
+        let wide = tiles_of(&plan, &field, finest);
+        let wide_frames = draw_all(&ctx, &plan, &wide);
+        reset();
+        for (vi, v) in TerrainView::ALL.iter().enumerate() {
+            if !matches!(v, TerrainView::Relief | TerrainView::Normals | TerrainView::Height) {
+                continue;
+            }
+            let (n, max, over8, mean) = diff_stats(&base_frames[vi], &wide_frames[vi]);
+            writeln!(report, "| {name} | {} | {} | {n} | {max} | {over8} | {mean:.2} |", v.name(), plan.nodes.len()).unwrap();
+        }
+    }
+    println!("{report}");
+    std::fs::write(out_dir().join(format!("t10-wide-texel-image-noise-{tag}.md")), report).unwrap();
 }

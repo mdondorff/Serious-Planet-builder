@@ -505,7 +505,8 @@ fn select_impl(
         .iter()
         .map(|&tile| {
             let distance_m = geoms.distance(tile, camera);
-            let (morph, morph_start_m, morph_end_m) = match tile.parent() {
+            // SPIKE-12: a leaf at the render floor has no drawn parent: it does not morph (like a root).
+            let (morph, morph_start_m, morph_end_m) = match tile.parent().filter(|_| tile.level() > spike_floor()) {
                 None => (0.0, 1.0e30, 1.0e30),
                 Some(parent) => {
                     let d = geoms.distance(parent, camera) / p.split_distance(parent.level());

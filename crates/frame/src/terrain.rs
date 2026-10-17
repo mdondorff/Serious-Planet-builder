@@ -218,7 +218,7 @@ pub(crate) fn plan_terrain_keyed(
     let selection = select_nodes_in_view_cached(map.as_ref(), &req.camera, field, &req.lod, cache);
     // A morph interval that cannot be crack-free (the neighbourhood's height extent leaves no room) is an error, never a
     // narrowed interval: relief this steep at this tile size needs a larger viewport_h_px / tau_px or fewer cells.
-    if let Some(n) = selection.nodes.iter().find(|n| n.tile.level() > 0 && n.morph_start_m > 0.95 * n.morph_end_m) {
+    if let Some(n) = selection.nodes.iter().find(|n| n.tile.level() > crate::lod::spike_floor().max(0) && n.morph_start_m > 0.95 * n.morph_end_m) {
         return Err(PlanError::InvalidLod(format!(
             "tile {:?} (level {}): morph interval [{:.1}, {:.1}] m is empty because the height extent of its neighbourhood leaves no room; \
              this terrain is too steep for cells {} and viewport_h_px / tau_px {:.0}: raise viewport_h_px / tau_px or reduce cells",
