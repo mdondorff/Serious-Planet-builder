@@ -80,6 +80,11 @@ fn observe(
                     Observation::SizeChanged
                 } else {
                     let ch = change(&g, &c);
+                    if ch.pixels == 0 {
+                        // A candidate equal to its golden (a CI artefact beside a golden blessed since) changes nothing.
+                        seen.insert(adapter.clone(), Observation::Unchanged);
+                        continue;
+                    }
                     images.insert(adapter.clone(), (g, c));
                     Observation::Changed(ch)
                 }
@@ -135,7 +140,7 @@ impl Run<'_> {
             };
             states.insert(adapter.clone(), state);
         }
-        // New candidates are compared with one another: compared pairwise under ADR 0052 (at most 64 px beyond delta 1 plus at most 32 px at delta 1).
+        // New candidates are compared with one another: compared pairwise under ADR 0052 (at most 64 px beyond delta 1, any number at delta 1).
         let news: Vec<&String> = states.iter().filter(|(_, s)| **s == ViewState::New).map(|(a, _)| a).collect();
         let mut pairs = vec![];
         for (i, a) in news.iter().enumerate() {
@@ -353,5 +358,32 @@ fn main() {
     if escalated > 0 {
         println!("{escalated} candidate(s) escalated to the owner (/bless)");
         std::process::exit(3);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // spec: TEST-022
+    #[test]
+    fn a_candidate_equal_to_its_golden_is_unchanged_not_a_zero_pixel_change() {
+        let dir = std::env::temp_dir().join(format!("golden-review-observe-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("g/warp")).unwrap();
+        let img = Image::new(2, 2, vec![10; 16]);
+        write_png(&dir.join("g/warp/v.png"), &img).unwrap();
+        let mut other = img.clone();
+        other.rgba[0] = 12;
+        write_png(&dir.join("cand_same.png"), &img).unwrap();
+        write_png(&dir.join("cand_diff.png"), &other).unwrap();
+        let adapters = vec!["warp".to_string()];
+        let observe_with = |file: &str| {
+            let cands: Candidates = [(("warp".to_string(), "v".to_string()), dir.join(file))].into();
+            observe(&dir.join("g"), &adapters, &cands, "v").0["warp"].clone()
+        };
+        assert_eq!(observe_with("cand_same.png"), Observation::Unchanged);
+        assert_eq!(observe_with("cand_diff.png"), Observation::Changed(Change { pixels: 1, max_delta: 2 }));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
