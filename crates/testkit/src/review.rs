@@ -280,7 +280,7 @@ pub enum ViewState {
 /// `states` holds only the adapters that took part in this run; `not_run` those that have goldens but did not, which are
 /// reported and never counted as agreeing. A view with a blessed golden is checked by ADR 0017's own classification of its
 /// candidates (`Matches` or an auto `Differs`); a view that is new is checked candidate against candidate (ADR 0052):
-/// in every pair of `new_pairs` (adapter, adapter, difference of their candidates) all pixels are within
+/// in every pair of `new_pairs` (adapter, adapter, difference of their candidates)
 /// at most [`ADR_0052_EDGE_PIXELS`] pixels differ beyond [`ROUNDING_MAX_DELTA`] and at most [`ROUNDING_MAX_PIXELS`] at
 /// exactly that delta. At least two adapters must take part.
 /// `Ok` carries the evidence line for the report.
