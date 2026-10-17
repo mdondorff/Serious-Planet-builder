@@ -715,6 +715,44 @@ Source: M5 item 9a.1 (status.md), TEST-012, TEST-021
 - **WHEN** the same terrain plan is planned twice with one cache
 - **THEN** the second plan's counter difference is 0, 0, 0
 
+### Requirement: TEST-033 Cool start of a view
+Before the warm-up of every view (the terrain scene's and the lit scenes', not in a smoke run) the harness SHALL wait, idle, until the GPU temperature reads 60 C or less, polling every 5 s for at most 120 s, and SHALL print one line per view: the temperatures at the start and the end and the seconds, or `NOT cooled` with the cap. An unreadable sensor ends the wait at once. The wait adds nothing to a measured frame.
+
+Verify: A
+Status: active
+Source: perf window 7 (the clock follows the GPU temperature under the software power cap), ADR 0057 point 1, TEST-012, TEST-029
+
+#### Scenario: Cooling
+- **WHEN** the temperature reads 74, 69, 64 and 59 C on four polls
+- **THEN** the wait ends after three pauses (15 s) as cooled, and a GPU that stays at 72 C ends at the cap as `NOT cooled`
+
+#### Scenario: Cool already, or no sensor
+- **WHEN** the first reading is 55 C, or the sensor gives nothing
+- **THEN** the wait ends at once, cooled in the first case
+
+### Requirement: TEST-034 A pass below the clock floor
+A view whose clock samples were all read, some below the 1,400 MHz floor of ADR 0036, SHALL be judged one-sidedly on its GPU rows (ADR 0057): a figure within its budget is a pass (`ok at a low clock`, with the state), a figure over its budget is inconclusive (`NOT VALID for GPU budgets`, not a failure, and the acceptance outcome is INCOMPLETE). A view with a missing or unreadable clock sample stays not valid, a view at or above the floor is judged as before, and comparisons between views still need both at or above the floor. The acceptance report SHALL print the clock state, the temperature range, the power and the software power cap reading beside the GPU rows of every view. The rule applies to the lit rows of the M5 scenes (TEST-025, TEST-026); the M4 terrain scene keeps its console wording (TEST-012).
+
+Verify: A
+Status: active
+Source: perf window 7, ADR 0057 point 2, ADR 0036 point 2, TEST-025, TEST-026
+
+#### Scenario: Within budget at a low clock
+- **WHEN** a view read 1,282 MHz and its atmosphere, water and terrain medians are within their budgets
+- **THEN** its GPU rows are `ok at a low clock (P0 1282 MHz, below the 1400 MHz floor ...)` and it fails nothing
+
+#### Scenario: Over budget at a low clock
+- **WHEN** the same view's atmosphere median is 1.5 ms
+- **THEN** that row is `NOT VALID for GPU budgets (over budget at a clock below the floor, inconclusive ...)`, no row fails, and the window is INCOMPLETE
+
+#### Scenario: At a valid clock
+- **WHEN** a view's samples are all at or above the floor
+- **THEN** a figure within its budget is ok and one over it is OVER, as before
+
+#### Scenario: The log's words
+- **WHEN** a run of a log has `gpu_valid` false and `gpu_clock_state` `P0 1282 MHz, below the 1400 MHz floor`
+- **THEN** acceptance reads it as below the floor at P0 1282 MHz, and `no clock sample` stays not valid
+
 ### Requirement: TEST-032 One CPU-load reading for the gate and the settle poll
 The CPU load of the readiness gate (ADR 0020, limit 15 %) and of the settle poll of `perf m5` (TEST-028) SHALL be one reading: the competing load, the share of the whole machine that processes other than the reading process and the helpers it starts to read the machine (`powershell`, `nvidia-smi`, `wmiprvse`, `conhost`) used over the 10 s window, from two readings of the raw per-process CPU times (TEST-023). The gate's failure line SHALL say `competing load`. The readiness gate's other conditions are unchanged.
 

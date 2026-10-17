@@ -563,7 +563,7 @@ pub const FINDING_SLOTS: [(&str, &str); 14] = [
 fn word(s: &Status, gated: bool) -> String {
     match (s, gated) {
         (Status::Ok, _) => "pass".to_string(),
-        (Status::OkBelowFloor(r), _) => format!("pass at a low clock ({r}; a slower clock only overstates the time)"),
+        (Status::OkBelowFloor(r), _) => format!("ok at a low clock ({r}; a slower clock only overstates the time)"),
         (Status::Over, true) => "FAIL".to_string(),
         (Status::Over, false) => "over (not gated)".to_string(),
         (Status::NotValid(r), _) => format!("NOT VALID for GPU budgets ({r})"),
@@ -1040,7 +1040,7 @@ mod tests {
         assert_eq!(j.outcome, Outcome::Pass, "{:?} {:?}", j.failing, j.incomplete);
         assert!(j.views.iter().any(|v| v.rows.iter().any(|r| matches!(r.status, Status::OkBelowFloor(_)))));
         let r = render_report(&j, "", "d");
-        assert!(r.contains("pass at a low clock") && r.contains("GPU thermal:"), "the clock and the heat stay beside the rows");
+        assert!(r.contains("ok at a low clock") && r.contains("GPU thermal:"), "the clock and the heat stay beside the rows");
         // ... and a figure over its budget at that clock is inconclusive, as before the amendment.
         let j = judged(evaluate(&window(&Fx { mhz: 1150, atmosphere_orbit: 1.3, ..fx() })));
         assert_eq!(j.outcome, Outcome::Incomplete, "{:?}", j.failing);
