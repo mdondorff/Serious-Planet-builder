@@ -183,10 +183,12 @@ fn surface_cases(count: usize, seed: u64) -> (Vec<SurfaceProbe>, Vec<[f64; 3]>) 
         let depth = [0.0, 0.01, 0.04, 0.2, 0.39, 1.0, 3.0, 9.0, 60.0][(k % 9) as usize];
         let liquid = if k % 5 == 4 { lava } else { water };
         let rgb = |i: u64, s: f64| [unit(seed, 16 * k + i) * s, unit(seed, 16 * k + i + 1) * s, unit(seed, 16 * k + i + 2) * s];
+        // The filter width of the shore bands: none, a hair, a fraction of the foam band, wider than it.
+        let width = [0.0, 0.003, 0.05, 0.4][(k % 4) as usize] as f32;
         let probe = SurfaceProbe {
             liquid,
             la,
-            lb,
+            lb: [lb[0], lb[1], width, 0.0],
             n: f32s(n),
             v: f32s(v),
             up: f32s(up),
@@ -207,6 +209,7 @@ fn surface_cases(count: usize, seed: u64) -> (Vec<SurfaceProbe>, Vec<[f64; 3]>) 
             sun: wide(probe.sun),
             depth: f64::from(probe.depth),
             foam_mod: f64::from(probe.foam_mod),
+            depth_width: f64::from(probe.lb[2]),
             seabed: wide(probe.seabed),
             diffuse: wide(probe.diffuse),
             sun_t: wide(probe.sun_t),
@@ -290,6 +293,7 @@ fn a_camera_walking_a_millimetre_at_a_time_at_one_metre_changes_the_surface_by_n
             sun: wide(probe.sun),
             depth: 3.0,
             foam_mod: 0.5,
+            depth_width: 0.0,
             seabed: wide(probe.seabed),
             diffuse: wide(probe.diffuse),
             sun_t: wide(probe.sun_t),

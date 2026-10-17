@@ -715,11 +715,24 @@ struct FlightFrame {
     classes: ClassMap,
     tiles: Vec<TileId>,
     nodes: usize,
+    /// The same frame without water (the terrain alone).
+    base_lum: Vec<f64>,
+    /// What the water does to the terrain's luminance: lit over terrain alone (the shore pixels' own contribution, free of the
+    /// seabed's shading).
+    ratio: Vec<f64>,
 }
 
 /// Fly `cameras` over the coast: each frame is planned, its tiles uploaded, its water planned at the clock `100 + k dt` (the waves move
 /// all the while) and drawn in the class view and without water.
-fn fly(ctx: &GpuContext, field: &dyn HeightField, size: (u32, u32), cameras: &[Camera], dt: f64, waves: bool) -> Vec<FlightFrame> {
+fn fly(
+    ctx: &GpuContext,
+    field: &dyn HeightField,
+    size: (u32, u32),
+    cameras: &[Camera],
+    dt: f64,
+    waves: bool,
+    shore_filter: f64,
+) -> Vec<FlightFrame> {
     let table = LiquidTable::earth();
     let src = HeightSea { field, level: 0.0 };
     let mut look = LookParams::default();
@@ -728,6 +741,7 @@ fn fly(ctx: &GpuContext, field: &dyn HeightField, size: (u32, u32), cameras: &[C
     if !waves {
         look.water.wave_scale = 0.0;
     }
+    look.water.shore_filter = shore_filter;
     let mut cache = WaterTileCache::new();
     let mut r = new_renderer(ctx, false, size);
     r.enable_water(ctx);
@@ -752,7 +766,14 @@ fn fly(ctx: &GpuContext, field: &dyn HeightField, size: (u32, u32), cameras: &[C
         .unwrap();
         let base = frame(ctx, &mut r, &plan, None, false);
         let with = frame(ctx, &mut r, &plan, Some(&wp), false);
+        let mut lit_wp = wp.clone();
+        lit_wp.view = WaterView::Lit;
+        let lit = frame(ctx, &mut r, &plan, Some(&lit_wp), false);
+        let lum: Vec<f64> = lit.iter().map(|p| look::luminance([f64::from(p[0]), f64::from(p[1]), f64::from(p[2])])).collect();
+        let base_lum: Vec<f64> = base.iter().map(|p| look::luminance([f64::from(p[0]), f64::from(p[1]), f64::from(p[2])])).collect();
         frames.push(FlightFrame {
+            ratio: lum.iter().zip(&base_lum).map(|(l, b): (&f64, &f64)| l / b.max(1.0e-3)).collect(),
+            base_lum,
             camera: *camera,
             classes: class_map(&base, &with, size),
             tiles: plan.nodes.iter().map(|n| n.tile).collect(),
@@ -760,6 +781,32 @@ fn fly(ctx: &GpuContext, field: &dyn HeightField, size: (u32, u32), cameras: &[C
         });
     }
     frames
+}
+
+fn lit_shore_of(frames: &[FlightFrame], field: &dyn HeightField) -> planet_frame::look::water::LitShoreReport {
+    lit_shore_with(frames, field, |f| &f.ratio)
+}
+
+fn lit_shore_with(
+    frames: &[FlightFrame],
+    field: &dyn HeightField,
+    lum: impl Fn(&FlightFrame) -> &Vec<f64>,
+) -> planet_frame::look::water::LitShoreReport {
+    let mut total = planet_frame::look::water::LitShoreReport::default();
+    let inside = |x: Vec3| x.length() - R < field.height(x.normalized());
+    for w in frames.windows(3) {
+        total.add(planet_frame::look::water::lit_shore_flash(
+            &w[1].classes,
+            lum(&w[1]),
+            &w[1].camera,
+            (lum(&w[0]), w[0].classes.size, &w[0].camera),
+            (lum(&w[2]), w[2].classes.size, &w[2].camera),
+            R,
+            planet_frame::look::water::LIT_SHORE_THRESHOLD,
+            Some(&inside),
+        ));
+    }
+    total
 }
 
 fn flicker_of(frames: &[FlightFrame], field: &dyn HeightField) -> planet_frame::look::water::FlickerReport {
@@ -782,7 +829,8 @@ fn a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_cha
     let aspect = f64::from(size.0) / f64::from(size.1);
     // Flight A: a low glide towards the coast, 6 m over the water, 12 m a frame from 400 m out (the foam band and the film approach).
     let glide: Vec<Camera> = (0..20).map(|k| coast_camera(c, heading, 0.0, 6.0, 400.0, 12.0 * f64::from(k), 6.0, aspect)).collect();
-    let a = fly(&ctx, &field, size, &glide, 0.25, false);
+    let a = fly(&ctx, &field, size, &glide, 0.25, false, 1.0);
+    let a_unfiltered = fly(&ctx, &field, size, &glide, 0.25, false, 0.0);
     // Flight B: a descent from 300 m to 4 m (log-spaced) towards the coast: every distance band of the LOD passes under the camera.
     let descent: Vec<Camera> = (0..24)
         .map(|k| {
@@ -790,7 +838,8 @@ fn a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_cha
             coast_camera(c, heading, 0.0, 300.0 * libm::pow(4.0 / 300.0, t), 1200.0 - 700.0 * t, 0.0, 10.0, aspect)
         })
         .collect();
-    let b = fly(&ctx, &field, size, &descent, 0.25, false);
+    let b = fly(&ctx, &field, size, &descent, 0.25, false, 1.0);
+    let b_unfiltered = fly(&ctx, &field, size, &descent, 0.25, false, 0.0);
     for (name, frames) in [("glide", &a), ("descent", &b)] {
         for k in [5usize, 6] {
             let m = &frames[k].classes;
@@ -804,6 +853,19 @@ fn a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_cha
             write_inspection(&format!("flight_{name}_{k}"), &img);
         }
         let report = flicker_of(frames, &field);
+        let unfiltered = if name == "glide" { &a_unfiltered } else { &b_unfiltered };
+        let (lit, lit_before) = (lit_shore_of(frames, &field), lit_shore_of(unfiltered, &field));
+        println!(
+            "{name}: lit shore flash of the water over the terrain > {:.0} %: {:.3} % of {} shore pixels with the fwidth filter, {:.3} % of {} without (the terrain's own shading flashes {:.3} % of them); exact-class share {:.3} % with, {:.3} % without",
+            planet_frame::look::water::LIT_SHORE_THRESHOLD * 100.0,
+            lit.share() * 100.0,
+            lit.covered,
+            lit_before.share() * 100.0,
+            lit_before.covered,
+            lit_shore_with(frames, &field, |f| &f.base_lum).share() * 100.0,
+            report.changed_fine as f64 / report.covered.max(1) as f64 * 100.0,
+            flicker_of(unfiltered, &field).changed_fine as f64 / flicker_of(unfiltered, &field).covered.max(1) as f64 * 100.0
+        );
         // The tiles of the frames change along the flight (the LOD changes under the shoreline).
         let sets: std::collections::BTreeSet<Vec<TileId>> = frames.iter().map(|f| f.tiles.clone()).collect();
         let nodes: Vec<usize> = frames.iter().map(|f| f.nodes).collect();

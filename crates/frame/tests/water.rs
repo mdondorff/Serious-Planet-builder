@@ -401,17 +401,17 @@ fn the_shoreline_functions_are_zero_at_the_waterline_continuous_and_discrete_by_
     assert_eq!(water_class(1.0, &look), WaterClass::Shallow);
     assert_eq!(water_class(5.0, &look), WaterClass::Mid);
     assert_eq!(water_class(50.0, &look), WaterClass::Deep);
-    assert_eq!(shore_cover(0.0, &look), 0.0);
-    assert_eq!(shore_cover(look.shore_fade_m, &look), 1.0);
-    assert_eq!(foam_amount(0.0, &look, 1.0), 0.0, "no foam on the waterline itself");
-    assert_eq!(foam_amount(look.foam_width_m, &look, 1.0), 0.0);
-    assert!(foam_amount(0.15 * look.foam_width_m, &look, 1.0) > 0.7 * look.foam_strength);
+    assert_eq!(shore_cover(0.0, &look, 0.0), 0.0);
+    assert_eq!(shore_cover(look.shore_fade_m, &look, 0.0), 1.0);
+    assert_eq!(foam_amount(0.0, &look, 1.0, 0.0), 0.0, "no foam on the waterline itself");
+    assert_eq!(foam_amount(look.foam_width_m, &look, 1.0, 0.0), 0.0);
+    assert!(foam_amount(0.15 * look.foam_width_m, &look, 1.0, 0.0) > 0.7 * look.foam_strength);
     // Continuity: no step anywhere on a fine scan; the largest step is far below one grey level of the foam.
-    let mut prev = (shore_cover(0.0, &look), foam_amount(0.0, &look, 0.5));
+    let mut prev = (shore_cover(0.0, &look, 0.0), foam_amount(0.0, &look, 0.5, 0.0));
     let mut worst: f64 = 0.0;
     for k in 1..=4000 {
         let d = f64::from(k) * 0.001;
-        let cur = (shore_cover(d, &look), foam_amount(d, &look, 0.5));
+        let cur = (shore_cover(d, &look, 0.0), foam_amount(d, &look, 0.5, 0.0));
         worst = worst.max((cur.0 - prev.0).abs()).max((cur.1 - prev.1).abs());
         prev = cur;
     }
@@ -434,6 +434,7 @@ fn inputs(depth: f64) -> SurfaceInputs {
         sun: Vec3::new(0.0, -0.5, 0.8).normalized().into_array(),
         depth,
         foam_mod: 0.5,
+        depth_width: 0.0,
         seabed: [0.2, 0.18, 0.12],
         diffuse: [0.25, 0.25, 0.25],
         sun_t: [0.9, 0.85, 0.8],
@@ -689,4 +690,25 @@ fn a_sea_level_other_than_zero_moves_the_water_nodes_and_the_level_the_plan_carr
     let (low, zero, high) = (nodes_at(-300.0), nodes_at(0.0), nodes_at(300.0));
     assert!(low.is_subset(&zero) && zero.is_subset(&high), "{} <= {} <= {}", low.len(), zero.len(), high.len());
     assert!(low.len() < high.len(), "the level moves the selection: {} against {}", low.len(), high.len());
+}
+
+// spec: ATMO-015
+#[test]
+fn the_shore_filter_spreads_a_band_narrower_than_a_pixel_and_leaves_the_waterline_and_wide_bands_alone() {
+    let look = WaterLook::EARTH;
+    // The waterline stays zero at any width; the foam of a band far wider than the filter is what it was.
+    for width in [0.0, 0.01, 0.3, 2.0] {
+        assert_eq!(shore_cover(0.0, &look, width), 0.0);
+        assert_eq!(foam_amount(0.0, &look, 1.0, width), 0.0);
+    }
+    let sharp = foam_amount(0.06, &look, 1.0, 0.0);
+    assert!((foam_amount(0.06, &look, 1.0, 1.0e-4) - sharp).abs() < 1.0e-3 * sharp, "a filter of 0.1 mm leaves the band");
+    // A pixel 3 m of depth wide (a 1:50 beach seen from far away) cannot hold the 0.4 m band: the filtered foam is a fraction of the
+    // sharp peak everywhere, and it changes by far less between neighbouring depths than the sharp band does.
+    let step = |w: f64| (0..4000).map(|k| f64::from(k) * 0.001).map(|d| foam_amount(d, &look, 1.0, w)).collect::<Vec<_>>();
+    let (sharp_band, filtered) = (step(0.0), step(3.0));
+    let peak = |v: &[f64]| v.iter().cloned().fold(0.0, f64::max);
+    assert!(peak(&filtered) < 0.2 * peak(&sharp_band), "{} against {}", peak(&filtered), peak(&sharp_band));
+    // The cover rises over about two filter widths.
+    assert!(shore_cover(look.shore_fade_m, &look, 1.0) < 0.1 && shore_cover(2.5, &look, 1.0) > 0.99);
 }

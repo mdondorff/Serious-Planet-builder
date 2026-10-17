@@ -32,6 +32,7 @@ The look of a body SHALL be presentation data (ADR 0035) held in a TOML look fil
 | `water.absorption_per_m` (scale of the extinction per metre of a liquid, `-ln(max(colour, 1e-3)) / -ln(1e-3)` per channel) | presentation | 0.5 | 1e-3 to 100 | rounded once to f32; the surface radiance matches the f64 reference within the bound of ATMO-014 |
 | `water.fresnel_f0` (reflectance at normal incidence), `water.glint_roughness` (GGX roughness of the sun glint) | presentation | 0.02, 0.08 | 0 to 0.2; 0.01 to 1 | as above |
 | `water.shore_fade_m` (depth over which the surface layer fades in), `water.foam_width_m` (depth of the foam band), `water.foam_strength` (share of foam at its densest) | presentation | 0.05, 0.4, 0.8 | 1e-3 to 10; 1e-2 to 100; 0 to 1 | as above (the shader divides by the fade and the width) |
+| `water.shore_filter` (strength of the `fwidth` filter of the shore bands: the cover and the foam are stretched by this multiple of the pixel's change of depth; 0 is off) | presentation | 1.0 | 0 to 4 | as above |
 | `water.choppy` (horizontal displacement of a crest relative to its height), `water.gravity_m_s2` (deep-water dispersion), `water.wave_scale` (multiplies the wave height of every liquid; 0 switches the waves off) | presentation | 0.8, 9.81, 1.0 | 0 to 2; 0.1 to 100; 0 to 10 | wave displacement within 1 mm + 1e-3 x the sum of the amplitudes (ATMO-014) |
 
 Verify: A

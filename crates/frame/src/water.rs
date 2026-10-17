@@ -328,8 +328,8 @@ impl WaterPlan {
             match t.as_slice() {
                 ["water", "time", time, "view", view, "look", rest @ ..] => {
                     let mut look = WaterLook::EARTH;
-                    if rest.len() != 9 {
-                        return Err(format!("water line: the look needs 9 values, got {}", rest.len()));
+                    if rest.len() != WaterLook::KEYS.len() {
+                        return Err(format!("water line: the look needs {} values, got {}", WaterLook::KEYS.len(), rest.len()));
                     }
                     for (slot, s) in look.values_mut().into_iter().zip(rest) {
                         *slot = p64(s)?;

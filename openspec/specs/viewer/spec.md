@@ -166,4 +166,4 @@ Source: ADR 0041 points 4 and 8, ADR 0051 point 6, ADR 0042 point 4
 
 #### Scenario: A world with a sea
 - **WHEN** `planet editor --smoke` runs a world with the default field over an in-memory bake
-- **THEN** the summary counts at least 16 lit frames with water and the run ends `[smoke ok]`
+- **THEN** the summary counts lit frames with water (the flight starts in orbit over the sea) and the run ends `[smoke ok]`

@@ -78,6 +78,10 @@ pub struct WaterLook {
     pub gravity_m_s2: f64,
     /// Multiplies the wave height of every liquid (a look override of the table's amplitude; 0 switches the waves off).
     pub wave_scale: f64,
+    /// Strength of the `fwidth` filter of the shore bands (ADR 0041 point 6): the cover, the foam and their edges are widened by this
+    /// multiple of the screen-space change of the depth per pixel, so a band narrower than a pixel fades instead of coming and going
+    /// with sub-pixel motion. 0 switches the filter off (the aliased bands, for comparison).
+    pub shore_filter: f64,
 }
 
 impl WaterLook {
@@ -91,10 +95,11 @@ impl WaterLook {
         choppy: 0.8,
         gravity_m_s2: 9.81,
         wave_scale: 1.0,
+        shore_filter: 1.0,
     };
 
     /// The keys of the table in the order of [`WaterLook::values`].
-    pub const KEYS: [&'static str; 9] = [
+    pub const KEYS: [&'static str; 10] = [
         "absorption_per_m",
         "fresnel_f0",
         "glint_roughness",
@@ -104,13 +109,24 @@ impl WaterLook {
         "choppy",
         "gravity_m_s2",
         "wave_scale",
+        "shore_filter",
     ];
 
     /// The valid range of each key (the shader divides by the fade and the width, and the colours are linear).
-    pub const RANGES: [(f64, f64); 9] =
-        [(1.0e-3, 100.0), (0.0, 0.2), (0.01, 1.0), (1.0e-3, 10.0), (1.0e-2, 100.0), (0.0, 1.0), (0.0, 2.0), (0.1, 100.0), (0.0, 10.0)];
+    pub const RANGES: [(f64, f64); 10] = [
+        (1.0e-3, 100.0),
+        (0.0, 0.2),
+        (0.01, 1.0),
+        (1.0e-3, 10.0),
+        (1.0e-2, 100.0),
+        (0.0, 1.0),
+        (0.0, 2.0),
+        (0.1, 100.0),
+        (0.0, 10.0),
+        (0.0, 4.0),
+    ];
 
-    pub fn values(&self) -> [f64; 9] {
+    pub fn values(&self) -> [f64; 10] {
         [
             self.absorption_per_m,
             self.fresnel_f0,
@@ -121,10 +137,11 @@ impl WaterLook {
             self.choppy,
             self.gravity_m_s2,
             self.wave_scale,
+            self.shore_filter,
         ]
     }
 
-    pub fn values_mut(&mut self) -> [&mut f64; 9] {
+    pub fn values_mut(&mut self) -> [&mut f64; 10] {
         [
             &mut self.absorption_per_m,
             &mut self.fresnel_f0,
@@ -135,6 +152,7 @@ impl WaterLook {
             &mut self.choppy,
             &mut self.gravity_m_s2,
             &mut self.wave_scale,
+            &mut self.shore_filter,
         ]
     }
 
@@ -444,16 +462,22 @@ pub fn water_class(depth: f64, look: &WaterLook) -> WaterClass {
 }
 
 /// How much of the surface layer (reflection, specular) shows at `depth`: it fades in from the shore.
-pub fn shore_cover(depth: f64, look: &WaterLook) -> f64 {
-    smoothstep(0.0, look.shore_fade_m, depth)
+///
+/// `width` is the filter width in metres of depth (the shader's `shore_filter x fwidth(depth)`): the fade is stretched by two widths, so
+/// a fade narrower than a pixel spreads over about a pixel and the waterline itself stays at zero.
+pub fn shore_cover(depth: f64, look: &WaterLook, width: f64) -> f64 {
+    smoothstep(0.0, look.shore_fade_m + 2.0 * width, depth)
 }
 
 /// The share of foam at `depth`: zero at the shore line, densest a little inside, gone at the band's width; modulated by `modulation`
 /// in [0, 1] (the swell's phase), never fully off.
-pub fn foam_amount(depth: f64, look: &WaterLook, modulation: f64) -> f64 {
+///
+/// `width` as in [`shore_cover`]: the rise is stretched by two widths and the fall's edges by one width each way, so a band narrower
+/// than a pixel loses height instead of flickering.
+pub fn foam_amount(depth: f64, look: &WaterLook, modulation: f64, width: f64) -> f64 {
     let w = look.foam_width_m;
-    let f_in = smoothstep(0.0, 0.15 * w, depth);
-    let f_out = 1.0 - smoothstep(0.15 * w, w, depth);
+    let f_in = smoothstep(0.0, 0.15 * w + 2.0 * width, depth);
+    let f_out = 1.0 - smoothstep(0.15 * w - width, w + width, depth);
     look.foam_strength * f_in * f_out * (0.6 + 0.4 * modulation)
 }
 
@@ -465,9 +489,11 @@ pub struct SurfaceInputs {
     pub v: [f64; 3],
     pub up: [f64; 3],
     pub sun: [f64; 3],
-    /// Vertical depth (m) and the wave modulation of the foam in [0, 1].
+    /// Vertical depth (m), the wave modulation of the foam in [0, 1] and the filter width of the shore bands in metres of depth
+    /// (`shore_filter x fwidth(depth)` of the pixel).
     pub depth: f64,
     pub foam_mod: f64,
+    pub depth_width: f64,
     /// The scene under the water (the terrain pass's radiance at this pixel).
     pub seabed: [f64; 3],
     /// Radiance per unit albedo of the horizontal surface (sun and ambient), the sun's transmitted share (RGB) and the sky's
@@ -502,8 +528,8 @@ pub fn surface_radiance(liquid: &LiquidAppearance, look: &WaterLook, i: &Surface
     let spec_gate = (nl * 20.0).min(1.0);
     let spec_scale = fresnel * d / (4.0 * mu_v.max(0.05)) * spec_gate;
     let mut out = [0.0; 3];
-    let cover = shore_cover(i.depth, look);
-    let foam = foam_amount(i.depth, look, i.foam_mod);
+    let cover = shore_cover(i.depth, look, i.depth_width);
+    let foam = foam_amount(i.depth, look, i.foam_mod, i.depth_width);
     for c in 0..3 {
         let body = liquid.colour[c] * i.diffuse[c];
         let refracted = i.seabed[c] * t[c] + body * (1.0 - t[c]);
@@ -721,3 +747,103 @@ pub fn class_flicker_both(
     r.add(class_flicker(b, cam_b, a, cam_a, water_radius_m, ground));
     r
 }
+
+/// What [`lit_shore_change`] counted.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LitShoreReport {
+    /// Shore-band pixels of the first frame whose point is judged (inside the second frame, resolved, not hidden).
+    pub covered: u64,
+    /// Of those, the pixels whose lit luminance changed by more than the threshold, relative to the larger of the two values.
+    pub changed: u64,
+}
+
+impl LitShoreReport {
+    pub fn share(&self) -> f64 {
+        if self.covered == 0 {
+            0.0
+        } else {
+            self.changed as f64 / self.covered as f64
+        }
+    }
+
+    pub fn add(&mut self, o: LitShoreReport) {
+        self.covered += o.covered;
+        self.changed += o.changed;
+    }
+}
+
+/// The lit-path temporal measure of the shore (ADR 0053 point 2): the **flash** of a shore pixel over three consecutive frames. For
+/// the pixels of the middle frame whose class is in the shore band (`Film`, `Foam`, `Shallow` of `b_classes`), the point on the water
+/// is reprojected with the f64 poses into the frame before and the frame after (bilinear at the reprojected position, so sub-pixel
+/// motion is not a change); a pixel flashes when its lit luminance leaves the mean of the other two by more than `threshold` relative
+/// to the largest of the three. A smooth change of the shading with the camera (Fresnel, the sun's angle, the seabed) is linear over
+/// three frames and does not flash; a band that comes and goes with sub-pixel motion does. Calm sea, the same exclusions as the
+/// coverage metric (horizon, left the frame, hidden by terrain via `ground`).
+#[allow(clippy::too_many_arguments)]
+pub fn lit_shore_flash(
+    b_classes: &ClassMap,
+    b_lum: &[f64],
+    cam_b: &Camera,
+    a: (&[f64], (u32, u32), &Camera),
+    c: (&[f64], (u32, u32), &Camera),
+    water_radius_m: f64,
+    threshold: f64,
+    ground: Option<&dyn Fn(Vec3) -> bool>,
+) -> LitShoreReport {
+    let (w, h) = (f64::from(b_classes.size.0), f64::from(b_classes.size.1));
+    let (right, up, fwd) = cam_b.ray_frame();
+    let pixel_angle = 2.0 * libm::tan(0.5 * cam_b.fov_y_rad) / h;
+    let mut report = LitShoreReport::default();
+    // The luminance of `frame` at the reprojection of `p`, bilinear; None when the point leaves it or is hidden.
+    let sample = |frame: &(&[f64], (u32, u32), &Camera), p: Vec3| -> Option<f64> {
+        let (lum, size, cam) = (frame.0, frame.1, frame.2);
+        let q = cam.project(p - cam.position.0);
+        if q[3] <= 0.0 {
+            return None;
+        }
+        let (px, py) = ((q[0] / q[3] * 0.5 + 0.5) * f64::from(size.0), (0.5 - q[1] / q[3] * 0.5) * f64::from(size.1));
+        if px < 0.5 || py < 0.5 || px >= f64::from(size.0) - 0.5 || py >= f64::from(size.1) - 0.5 {
+            return None;
+        }
+        let (fx, fy) = (px - 0.5, py - 0.5);
+        let (x0, y0) = (libm::floor(fx) as usize, libm::floor(fy) as usize);
+        let (tx, ty) = (fx - libm::floor(fx), fy - libm::floor(fy));
+        let at = |x: usize, y: usize| lum[y * size.0 as usize + x];
+        Some((at(x0, y0) * (1.0 - tx) + at(x0 + 1, y0) * tx) * (1.0 - ty) + (at(x0, y0 + 1) * (1.0 - tx) + at(x0 + 1, y0 + 1) * tx) * ty)
+    };
+    for y in 0..b_classes.size.1 {
+        for x in 0..b_classes.size.0 {
+            let class = b_classes.class[y as usize * b_classes.size.0 as usize + x as usize];
+            if !(WaterClass::Film as u8..=WaterClass::Shallow as u8).contains(&class) {
+                continue;
+            }
+            let (u, v) = (2.0 * (f64::from(x) + 0.5) / w - 1.0, 1.0 - 2.0 * (f64::from(y) + 0.5) / h);
+            let dir = (fwd + right * u + up * v).normalized();
+            let Some(p) = ray_sphere(cam_b.position.0, dir, water_radius_m) else { continue };
+            if (-dir.dot(p.normalized())).abs() < HORIZON_PIXELS * pixel_angle {
+                continue;
+            }
+            let (Some(ya), Some(yc)) = (sample(&a, p), sample(&c, p)) else { continue };
+            let yb = b_lum[y as usize * b_classes.size.0 as usize + x as usize];
+            let rel = (yb - 0.5 * (ya + yc)).abs() / ya.max(yb).max(yc).max(1.0e-3);
+            report.covered += 1;
+            if rel > threshold {
+                if let Some(inside) = ground {
+                    let hidden = [cam_b.position.0, a.2.position.0, c.2.position.0]
+                        .iter()
+                        .any(|from| (1..128).any(|k| inside(*from + (p - *from) * (f64::from(k) / 128.0))));
+                    if hidden {
+                        report.covered -= 1;
+                        continue;
+                    }
+                }
+                report.changed += 1;
+            }
+        }
+    }
+    report
+}
+
+/// The relative flash of lit luminance in the shore band above which a pixel counts as flashing (a quarter: 0.3 stops, about the
+/// smallest step a viewer sees as a flash in a moving picture).
+pub const LIT_SHORE_THRESHOLD: f64 = 0.25;

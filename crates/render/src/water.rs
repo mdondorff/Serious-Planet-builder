@@ -93,7 +93,8 @@ fn water_waves(liq: WLiquid, local: vec3<f32>, up: vec3<f32>, phases: vec4<f32>,
 // The radiance leaving the surface towards the viewer, before the pre-exposure: the seabed seen through the extinction and the
 // liquid body's own colour lit by the same light, the Fresnel-weighted sky and the GGX sun glint, the emission, all faded in from the
 // shore (`la.x`), then the foam band (`la.y` wide, `la.z` dense). `la` = (shore fade, foam width, foam strength, choppy);
-// `lb` = (Fresnel F0, glint roughness, 0, 0).
+// `lb` = (Fresnel F0, glint roughness, the filter width of the shore bands in metres of depth, 0).  The filter (ADR 0041 point 6)
+// stretches the bands' edges by that width so a band narrower than a pixel fades instead of coming and going.
 fn water_surface(liq: WLiquid, la: vec4<f32>, lb: vec4<f32>, n: vec3<f32>, v: vec3<f32>, up: vec3<f32>, sun: vec3<f32>, depth: f32,
                  foam_mod: f32, seabed: vec3<f32>, diffuse: vec3<f32>, sun_t: vec3<f32>, sky: vec3<f32>) -> vec3<f32> {
     let mu_v = clamp(dot(n, v), 0.0, 1.0);
@@ -112,9 +113,9 @@ fn water_surface(liq: WLiquid, la: vec4<f32>, lb: vec4<f32>, n: vec3<f32>, v: ve
     let denom = dot(nxh, nxh) + al * al * nh * nh;
     let d = al * al / (W_PI * denom * denom);
     let spec = fresnel * d / (4.0 * max(mu_v, 0.05)) * min(nl * 20.0, 1.0);
-    let cover = w_smooth(0.0, la.x, depth);
-    let f_in = w_smooth(0.0, 0.15 * la.y, depth);
-    let f_out = 1.0 - w_smooth(0.15 * la.y, la.y, depth);
+    let cover = w_smooth(0.0, la.x + 2.0 * lb.z, depth);
+    let f_in = w_smooth(0.0, 0.15 * la.y + 2.0 * lb.z, depth);
+    let f_out = 1.0 - w_smooth(0.15 * la.y - lb.z, la.y + lb.z, depth);
     let foam = la.z * f_in * f_out * (0.6 + 0.4 * foam_mod);
     let body = liq.colour.xyz * diffuse;
     let refracted = seabed * t + body * (vec3<f32>(1.0) - t);
@@ -136,7 +137,7 @@ struct WaterNodeRec {
 struct WaterGlobals {
     // x: shore fade, y: foam width, z: foam strength, w: choppy.
     a: vec4<f32>,
-    // x: Fresnel F0, y: glint roughness, zw: reserved.
+    // x: Fresnel F0, y: glint roughness, z: the shore filter strength (a multiple of fwidth of the depth), w: reserved.
     b: vec4<f32>,
     // x: debug view (0 lit, 1 class, 2 waves, 3 normals), y: liquid count.
     c: vec4<u32>,
@@ -185,6 +186,8 @@ struct WLight {
 
 @fragment
 fn fs_water(in: WOut) -> @location(0) vec4<f32> {
+    // The derivative first, in uniform control flow (before the discard).
+    let depth_width = WG.b.z * fwidth(in.depth);
     if (in.depth <= 0.0) {
         discard;
     }
@@ -224,7 +227,7 @@ fn fs_water(in: WOut) -> @location(0) vec4<f32> {
     let light = water_light(n, up, rec.a.x, sun, reflect(-v, n));
     let seabed = textureLoad(scene_copy, vec2<i32>(in.pos.xy), 0).rgb / factor;
     let foam_mod = 0.5 + 0.5 * cos(water_wave_arg(liq.wave[0], in.local, rec.phases.x));
-    let rgb = water_surface(liq, WG.a, WG.b, n, v, up, sun, in.depth, foam_mod, seabed, light.diffuse, light.sun_t, light.sky);
+    let rgb = water_surface(liq, WG.a, vec4<f32>(WG.b.x, WG.b.y, depth_width, 0.0), n, v, up, sun, in.depth, foam_mod, seabed, light.diffuse, light.sun_t, light.sky);
     return vec4<f32>(clamp(rgb * factor, vec3<f32>(0.0), vec3<f32>(60000.0)), 1.0);
 }
 "#;
@@ -343,7 +346,7 @@ pub fn globals_bytes(plan: &WaterPlan) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::with_capacity(GLOBALS_BYTES as usize);
     let f = |out: &mut Vec<u8>, v: &[f32]| out.extend(v.iter().flat_map(|x| x.to_le_bytes()));
     f(&mut out, &[l.shore_fade_m as f32, l.foam_width_m as f32, l.foam_strength as f32, l.choppy as f32]);
-    f(&mut out, &[l.fresnel_f0 as f32, l.glint_roughness as f32, 0.0, 0.0]);
+    f(&mut out, &[l.fresnel_f0 as f32, l.glint_roughness as f32, l.shore_filter as f32, 0.0]);
     out.extend([plan.view.index(), plan.liquids.len() as u32, 0, 0].iter().flat_map(|x| x.to_le_bytes()));
     for k in 0..MAX_LIQUIDS {
         match plan.liquids.get(k) {
