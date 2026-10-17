@@ -10,8 +10,12 @@
 use crate::pipelined::{RendererSink, Rig};
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
+use planet_frame::look::file::LookParams;
 use planet_frame::scenes::{build_script, DrawnSet, StreamScene};
-use planet_frame::viewer::{title, view_coverage, Command, FrameStats, Held, Readiness, TitleInfo, ViewCoverage, ViewerState, KEYS_HELP};
+use planet_frame::viewer::{
+    lit_warm_plan, mode_label, smoke_verdict, title, view_coverage, viewer_lit_plan, Command, ExposureReading, FrameStats, Held, Readiness,
+    SmokeCounts, TitleInfo, ViewCoverage, ViewerState, KEYS_HELP,
+};
 use planet_frame::{Camera, ControllerParams, LodParams, TerrainRequest, TerrainView};
 use planet_generators::height::HeightField;
 use planet_render::{AdapterPolicy, GpuContext, Presented, WindowSurface};
@@ -49,6 +53,7 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
         KeyCode::KeyV => Command::NextView,
         KeyCode::KeyT => Command::ToggleVsync,
         KeyCode::KeyC => Command::ToggleCamera,
+        KeyCode::KeyL => Command::ToggleLit,
         KeyCode::Escape => Command::Quit,
         _ => return None,
     })
@@ -92,6 +97,11 @@ struct Config {
     draw: Option<planet_render::DrawMode>,
     upload: Option<planet_render::UploadMode>,
     tile_format: Option<planet_render::TileFormat>,
+    /// The body's look (`--look`, the file beside `--world`, else the Earth defaults): the sun, units, exposure range and atmosphere of
+    /// the lit path (VIEW-007).
+    look: LookParams,
+    /// Whether the lit path draws the atmosphere (the look's atmosphere fits the body); the lit path starts on, the debug path with L.
+    atmosphere: bool,
 }
 
 /// Everything that exists once the window does.
@@ -113,8 +123,14 @@ struct Running {
     skipped: Option<&'static str>,
     views_seen: usize,
     adapter_line: String,
+    /// Whether the lit frames draw the atmosphere.
+    atmosphere: bool,
     /// The last title set (the smoke run prints it).
     last_title: String,
+    /// The exposure the last sampled lit frame was shown at (the title).
+    exposure: Option<ExposureReading>,
+    /// What the smoke run counts (VIEW-005); kept in every run, judged only in the smoke run.
+    counts: SmokeCounts,
 }
 
 struct App<'w> {
@@ -157,9 +173,15 @@ impl App<'_> {
             ctx.prefer_tile_format(format);
         }
         let first = self.request(self.cameras[0], TerrainView::ALL[cfg.initial_view]);
-        let rig = Rig::new(&ctx, self.world, &first, cfg.gen)?;
+        let mut rig = Rig::new(&ctx, self.world, &first, cfg.gen)?;
+        // `enable_lit` is not part of `warm_up`: the lit and atmosphere passes are enabled and used once per ring set here, before the
+        // first measured frame, whether the window starts lit or on the debug path (REND-017, VIEW-007).
+        let warm_lit = viewer_lit_plan(&cfg.look, cfg.radius_m, 0.0, true, cfg.atmosphere)?;
+        rig.renderer
+            .warm_up_lit(&ctx, &lit_warm_plan(self.cameras[0], cfg.size, cfg.lod.cells, warm_lit))
+            .map_err(|e| format!("warming the lit path: {e}"))?;
         let now = self.clock.now_ms();
-        let viewer = ViewerState::new(now, TerrainView::ALL.len(), cfg.initial_view, cfg.vsync);
+        let viewer = ViewerState::new(now, TerrainView::ALL.len(), cfg.initial_view, cfg.vsync).with_lit(true);
         self.state = Some(Running {
             window,
             ctx,
@@ -179,6 +201,9 @@ impl App<'_> {
             views_seen: 0,
             adapter_line,
             last_title: String::new(),
+            exposure: None,
+            atmosphere: cfg.atmosphere,
+            counts: SmokeCounts::default(),
         });
         Ok(())
     }
@@ -225,21 +250,56 @@ impl App<'_> {
                 st.rig.fi.retire_to(st.rig.renderer.wait_oldest(ctx));
             }
             let draw = &frame.pipeline.draw;
+            // The lit path puts the look's lit plan (adaptive exposure on this frame's dt, the sun and the atmosphere) on the plan
+            // the pipelined loop decided; the debug path draws the plan as it is (VIEW-007).
+            let lit_plan = if st.viewer.lit {
+                let reset = st.viewer.take_exposure_reset();
+                let lit = viewer_lit_plan(&cfg.look, cfg.radius_m, dt as f32, reset, cfg.atmosphere)?;
+                let mut plan = draw.plan.clone();
+                plan.lit = Some(lit);
+                Some(plan)
+            } else {
+                None
+            };
+            let plan = lit_plan.as_ref().unwrap_or(&draw.plan);
             // One frame a second is timed on the GPU, which waits for it: the title's GPU time (meaningful with vsync off).
             let timed = ctx.timestamps_supported() && st.last_gpu_sample.elapsed() >= GPU_SAMPLE_PERIOD;
             let (timing, _) = if timed {
                 st.last_gpu_sample = Instant::now();
-                st.rig.renderer.render(ctx, &draw.plan, true)
+                st.rig.renderer.render(ctx, plan, true)
             } else {
-                st.rig.renderer.submit(ctx, &draw.plan)
+                st.rig.renderer.submit(ctx, plan)
             }
             .map_err(|e| format!("frame {}: {e}", st.frames))?;
             if timed {
                 st.gpu_ms = timing.gpu_ms;
             }
+            let drew_lit = lit_plan.is_some();
+            if drew_lit {
+                st.counts.lit_frames += 1;
+                st.counts.atmosphere_frames += u64::from(plan.lit.is_some_and(|l| l.atmosphere.is_some()));
+                if cfg.smoke {
+                    // The renderer's own account of the last frame's passes: the exposure passes ran, and the sky with the atmosphere.
+                    let passes = st.rig.renderer.lit_path().map(|p| p.executed_passes()).unwrap_or_default();
+                    st.counts.renderer_ran_lit |= passes.contains(&"exposure-histogram") && passes.contains(&"exposure-adapt");
+                    st.counts.renderer_ran_atmosphere |= passes.contains(&"sky-view");
+                }
+            } else {
+                st.counts.debug_frames += 1;
+            }
             st.rig.fi.submit();
             let cpu_ms = began.elapsed().as_secs_f64() * 1000.0 - if timed { timing.total_ms - timing.cpu_ms } else { 0.0 };
-            if let Some(report) = st.stats.frame(self.clock.now_ms(), cpu_ms) {
+            // The exposure the GPU holds is read back where the title wants it (a wait for the GPU, twice a second), and in a smoke
+            // run every eighth frame so that a short run takes readings by frame count.
+            let report = st.stats.frame(self.clock.now_ms(), cpu_ms);
+            if drew_lit && (report.is_some() || (cfg.smoke && st.frames % 8 == 0)) {
+                if let Some(path) = st.rig.renderer.lit_path() {
+                    let e = path.read_exposure(ctx);
+                    st.exposure = Some(ExposureReading { ev100: e.ev100, target_ev100: e.target_ev100 });
+                    st.counts.exposure_readings += 1;
+                }
+            }
+            if let Some(report) = report {
                 st.report = Some(report);
                 let wanted: Vec<_> = frame.pipeline.wanted.iter().map(|w| w.0).collect();
                 st.readiness.view = view_coverage(&wanted, &DrawnSet::of_plan(&draw.plan));
@@ -248,12 +308,22 @@ impl App<'_> {
                 st.last_title = text;
             }
             match st.surface.present(ctx, &st.rig.renderer).map_err(|e| e.to_string())? {
-                Presented::Yes => st.presented += 1,
+                Presented::Yes => {
+                    st.presented += 1;
+                    if drew_lit {
+                        st.counts.lit_presented += 1;
+                    } else {
+                        st.counts.debug_presented += 1;
+                    }
+                }
                 Presented::Skipped(why) => st.skipped = Some(why),
             }
             st.frames += 1;
             if cfg.smoke {
                 if st.frames >= cfg.smoke_frames.max(SMOKE_FRAMES) && st.presented > 0 {
+                    // The verdict is on counts: lit frames with the atmosphere drawn and presented, the debug path too, an exposure
+                    // reading, and the renderer's own account that the passes ran. No wall-clock (VIEW-005).
+                    smoke_verdict(&st.counts, cfg.atmosphere)?;
                     quit = true;
                 } else if st.presented == 0 && st.frames >= SMOKE_GIVE_UP {
                     return Err(format!(
@@ -294,11 +364,12 @@ fn title_text(st: &Running, now_ms: u64) -> String {
         gpu_ms: st.gpu_ms,
         vsync: st.viewer.vsync,
         present_mode: st.surface.present_mode_name(),
-        view: TerrainView::ALL[st.viewer.view_index].name().to_string(),
+        view: mode_label(st.viewer.lit, st.atmosphere, TerrainView::ALL[st.viewer.view_index].name()),
         free: st.viewer.is_free(),
         paused: st.viewer.clock.is_paused(),
         flight_s: st.viewer.clock.time_s(now_ms),
         altitude_m: st.altitude_m,
+        exposure: st.exposure.filter(|_| st.viewer.lit),
         readiness: st.readiness,
     };
     title(&info)
@@ -316,9 +387,13 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
         }
     };
     match st.frames {
+        // The window starts lit: V does nothing there, L goes to the debug path, V cycles a debug view, L comes back.
         4 => press(st, Command::NextView),
-        8 => press(st, Command::ToggleVsync),
+        6 => press(st, Command::ToggleLit),
+        8 => press(st, Command::NextView),
+        10 => press(st, Command::ToggleLit),
         12 => press(st, Command::ToggleVsync),
+        14 => press(st, Command::ToggleVsync),
         16 => press(st, Command::TogglePause),
         20 => press(st, Command::TogglePause),
         24 => {
@@ -389,10 +464,16 @@ impl ApplicationHandler for App<'_> {
 
 fn smoke_summary(st: &Running) -> String {
     format!(
-        "{} frames drawn, {} presented, {} view change(s), present mode {}, {}
+        "{} frames drawn ({} lit, {} with the atmosphere, {} debug), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
   last title: {}",
         st.frames,
+        st.counts.lit_frames,
+        st.counts.atmosphere_frames,
+        st.counts.debug_frames,
         st.presented,
+        st.counts.lit_presented,
+        st.counts.debug_presented,
+        st.counts.exposure_readings,
         st.views_seen.max(usize::from(st.viewer.view_index != 0)),
         st.surface.present_mode_name(),
         st.adapter_line,
@@ -450,13 +531,23 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         .position(|v| *v == view_name)
         .ok_or_else(|| format!("--view must be one of {}, got '{view_name}'", views.join(", ")))?;
     let (bake_done, bake_total) = world.bake_blocks();
-    let tile_format = o.tile_format.unwrap_or(planet_render::TileFormat::Compact);
+    // The software adapter runs the smoke in the vertex format (the reference format): the compact format with the atmosphere removes the
+    // WARP device when a buffer is read back after a frame (docs/learnings.md, 2026-10-17); the compact format keeps the debug path's
+    // coverage and the discrete GPU's smoke.
+    let software_smoke = o.smoke && policy == AdapterPolicy::Software;
+    let tile_format_pref = o.tile_format.or(software_smoke.then_some(planet_render::TileFormat::Vertex));
+    let tile_format = tile_format_pref.unwrap_or(planet_render::TileFormat::Compact);
     let (prefill_done, prefill_total) = if o.store.is_some() {
         let levels = o.prefill_levels.unwrap_or(READINESS_PREFILL_LEVELS);
         world.prefill_present(levels, o.cells, o.finest_level_for(o.cells), tile_format).map(|(p, t)| (p as u64, t as u64))?
     } else {
         (0, 0)
     };
+    // The lit path draws the body's look (VIEW-007); a look whose atmosphere does not fit the body (a radius too small for it) leaves the
+    // lit path without the atmosphere, and the run says so.
+    let look = crate::lookload::load(o)?.params(planet_world_def::BodyId::PLANET);
+    let atmosphere_note = viewer_lit_plan(&look, radius_m, 0.0, true, true).err();
+    let atmosphere = atmosphere_note.is_none();
     let cfg = Config {
         size,
         lod,
@@ -471,10 +562,21 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         radius_m,
         draw: o.draw,
         upload: o.upload,
-        tile_format: o.tile_format,
+        tile_format: tile_format_pref,
+        look,
+        atmosphere,
     };
     writeln!(out, "planet editor: {} ({})", if o.smoke { "smoke test" } else { "viewer" }, world.describe()).map_err(err)?;
     writeln!(out, "keys: {KEYS_HELP}").map_err(err)?;
+    writeln!(
+        out,
+        "view: the lit path with {} (the look's sun, adaptive exposure); L switches to the debug path",
+        if atmosphere { "the atmosphere" } else { "no atmosphere" }
+    )
+    .map_err(err)?;
+    if let Some(why) = atmosphere_note {
+        writeln!(out, "atmosphere off: {why}").map_err(err)?;
+    }
     let mut app = App {
         cfg: &cfg,
         world: &world,
@@ -514,6 +616,7 @@ mod tests {
             (KeyCode::KeyV, Command::NextView),
             (KeyCode::KeyT, Command::ToggleVsync),
             (KeyCode::KeyC, Command::ToggleCamera),
+            (KeyCode::KeyL, Command::ToggleLit),
             (KeyCode::Escape, Command::Quit),
         ] {
             assert_eq!(key_command(code), Some(cmd), "{code:?}");
@@ -521,7 +624,7 @@ mod tests {
         for code in [KeyCode::KeyW, KeyCode::KeyA, KeyCode::KeyX, KeyCode::Enter, KeyCode::F5] {
             assert_eq!(key_command(code), None, "{code:?} is not a command");
         }
-        for ch in ["pause", "restart", "debug view", "vsync", "free camera", "WASD", "Esc"] {
+        for ch in ["pause", "restart", "debug view", "vsync", "free camera", "WASD", "Esc", "lit", "atmosphere"] {
             assert!(KEYS_HELP.to_lowercase().contains(&ch.to_lowercase()), "the help names {ch}: {KEYS_HELP}");
         }
     }

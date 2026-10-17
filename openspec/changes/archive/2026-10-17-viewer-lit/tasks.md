@@ -1,0 +1,5 @@
+- [x] 1.1 `frame::viewer`: ToggleLit, lit flag and one-shot exposure reset, `viewer_lit_plan`, pre-exposure, warm plan, exposure reading and text, mode label, `SmokeCounts` and `smoke_verdict`, title exposure field (VIEW-003, VIEW-005, VIEW-007)
+- [x] 2.1 `render`: `TerrainRenderer::warm_up_lit`, `FirstUse::lit_variants`; tier-C test of the lit warm-up (REND-017)
+- [x] 3.1 `app::window`: key L, lit by default with the look and the atmosphere, exposure readback for the title, lit warm-up at start, smoke keys and verdict, software smoke in the vertex format (VIEW-005, VIEW-007)
+- [x] 4.1 Tier C: window smoke lit with the atmosphere, the look file drawn, counts (VIEW-005, VIEW-007, LOOK-005)
+- [x] 5.1 Spec deltas, learning, log line, delete queue item 5b; spec-guardian, verifier; test, test gpu, test gpu --real, spec-lint, fmt, clippy; archive

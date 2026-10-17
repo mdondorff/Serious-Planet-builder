@@ -226,3 +226,48 @@ fn the_warm_up_frame_touches_everything_a_measured_frame_first_uses() {
         }
     }
 }
+
+// spec: REND-017, VIEW-007
+#[test]
+fn the_lit_warm_up_touches_the_lit_and_atmosphere_passes_before_the_first_measured_lit_frame() {
+    use planet_frame::look::file::LookParams;
+    use planet_frame::viewer::{lit_warm_plan, viewer_lit_plan};
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let p = plan(5);
+    for compact in [false, true] {
+        let what = format!("compact {compact}");
+        let mut r = renderer(&ctx, compact);
+        r.warm_up(&ctx);
+        // `enable_lit` is not part of `warm_up`: the debug warm-up leaves the lit path untouched.
+        assert!(!r.lit_enabled() && r.first_use().lit_variants == 0, "{what}");
+        let lit = viewer_lit_plan(&LookParams::default(), R, 0.016, true, true).unwrap();
+        r.warm_up_lit(&ctx, &lit_warm_plan(p.camera, SIZE, CELLS, lit)).unwrap();
+        let warm = r.first_use();
+        assert!(r.lit_enabled(), "{what}");
+        assert_eq!(warm.lit_variants, 2, "{what}: a lit frame and a lit frame with the atmosphere were recorded");
+        assert_eq!(warm.waited_submissions, 1 + RING_SETS, "{what}: the debug warm-up's, and one waited frame per ring set");
+        assert_eq!(r.retired_frames(&ctx), 0, "{what}: the lit warm-up frames are not frames of the loop");
+        assert_eq!(r.resident_tiles(), 0, "{what}: no tile became resident");
+        let objects = r.lit_objects();
+        // The measured lit frames, with tiles, adaptive and with the atmosphere, create and first-use nothing more.
+        upload(&ctx, &mut r, &p, compact);
+        for frame in 0..4 {
+            let mut plan = p.clone();
+            plan.lit = Some(viewer_lit_plan(&LookParams::default(), R, 0.016, frame == 0, true).unwrap());
+            if frame % 2 == 0 {
+                r.submit(&ctx, &plan).unwrap();
+            } else {
+                r.render(&ctx, &plan, true).unwrap();
+            }
+            let now = r.first_use();
+            assert_eq!(
+                FirstUse { waited_submissions: 0, ..now },
+                FirstUse { waited_submissions: 0, ..warm },
+                "{what}: lit frame {frame} first-used something"
+            );
+            assert_eq!(r.lit_objects(), objects, "{what}: lit frame {frame} created a long-lived object");
+        }
+        let e = r.lit_path().unwrap().read_exposure(&ctx);
+        assert!(e.ev100.is_finite() && e.target_ev100.is_finite(), "{what}: {e:?}");
+    }
+}
