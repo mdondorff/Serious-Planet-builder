@@ -245,3 +245,134 @@ fn the_gated_dives_refuse_a_store_without_the_pre_filled_levels_before_anything_
     assert!(e.contains("not a discrete GPU"), "{e}");
     let _ = std::fs::remove_dir_all(&store);
 }
+
+// spec: TEST-025, TEST-012, TEST-023
+#[test]
+fn the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_the_metrics_in_smoke_mode() {
+    let log = tmp("lit.json");
+    let out = run(&[
+        "test-render",
+        "--perf-smoke",
+        "--scene",
+        "lit",
+        "--adapter",
+        "software",
+        "--global-res",
+        "128",
+        "--out",
+        log.to_str().unwrap(),
+    ])
+    .unwrap();
+    assert!(out.contains("SMOKE RUN") && out.contains("not a measurement"), "{out}");
+    for view in [
+        "ground-1m",
+        "aerial-20km",
+        "coast-2km",
+        "coast-3m",
+        "orbit",
+        "coast-glide",
+        "coast-glide@filter0",
+        "coast-descent",
+        "coast-descent@filter0",
+    ] {
+        assert!(out.contains(&format!("lit/{view}: frame (waited) median")), "{view}: {out}");
+        assert!(out.contains(&format!("  lit/{view}: GPU ms per pass (median / p99 / max): terrain ")), "{view}: {out}");
+    }
+    assert!(
+        out.contains("lit path (atmosphere, water)") && out.contains("tile format vertex"),
+        "the software smoke runs the vertex format: {out}"
+    );
+    assert!(!out.contains("terrain pass median") && !out.contains("budget 1 ms"), "a smoke run prints no budget rows: {out}");
+    let json = std::fs::read_to_string(&log).unwrap();
+    assert!(json.contains("\"valid_for_budgets\":false") && json.contains("smoke run"), "{json}");
+    for path in ["lit/ground-1m", "lit/coast-glide", "lit/coast-glide@filter0", "lit/coast-descent@filter0"] {
+        assert!(json.contains(&format!("\"path\":\"{path}\"")), "{path}: {json}");
+    }
+    assert!(json.contains("\"load\":{\"measured\":false}"), "{json}");
+    if out.contains("timestamps true") {
+        // The adapter times its passes: the per-pass metrics are in the log, the atmosphere and the water sums with them.
+        for m in [
+            "gpu_ms",
+            "gpu_water_ms",
+            "gpu_sky_view_ms",
+            "gpu_aerial_perspective_ms",
+            "gpu_sky_composite_ms",
+            "gpu_exposure_histogram_ms",
+            "gpu_exposure_adapt_ms",
+            "gpu_tonemap_ms",
+            "gpu_scene_copy_ms",
+            "gpu_atmosphere_ms",
+            "gpu_water_total_ms",
+            "gpu_span_ms",
+        ] {
+            assert!(json.contains(&format!("\"{m}\":{{")), "{m}: {json}");
+        }
+    }
+    for c in ["tile_format_compact", "water_nodes", "atmosphere"] {
+        assert!(json.contains(&format!("\"{c}\":")), "{c}: {json}");
+    }
+    // A view that does not exist is refused with the list; the options belong to the lit scenes.
+    let e = run(&["test-render", "--perf-smoke", "--scene", "lit", "--adapter", "software", "--global-res", "128", "--views", "moon"])
+        .unwrap_err();
+    assert!(e.contains("no view 'moon'") && e.contains("coast-glide"), "{e}");
+    let e = run(&["test-render", "--perf-smoke", "--scene", "dive", "--adapter", "software", "--global-res", "8", "--views", "orbit"])
+        .unwrap_err();
+    assert!(e.contains("--flight-frames and --views apply to the scenes"), "{e}");
+    let e = run(&["test-render", "--perf-smoke", "--scene", "terrain", "--adapter", "software", "--global-res", "8", "--lit"]).unwrap_err();
+    assert!(e.contains("--lit applies to the streaming perf scenes"), "{e}");
+    let _ = std::fs::remove_file(&log);
+}
+
+// spec: TEST-025
+#[test]
+fn the_lit_formats_scene_runs_four_views_in_each_format_and_logs_a_path_per_format() {
+    let log = tmp("litformats.json");
+    let out = run(&[
+        "test-render",
+        "--perf-smoke",
+        "--scene",
+        "lit-formats",
+        "--adapter",
+        "software",
+        "--global-res",
+        "128",
+        "--out",
+        log.to_str().unwrap(),
+    ])
+    .unwrap();
+    // The software adapter runs the vertex format only (WARP removes its device with the compact format and the atmosphere).
+    for view in ["ground-1m", "aerial-20km", "coast-2km", "orbit"] {
+        assert!(out.contains(&format!("lit-formats/{view}/vertex: frame (waited) median")), "{view}: {out}");
+    }
+    assert!(!out.contains("/compact:"), "{out}");
+    let json = std::fs::read_to_string(&log).unwrap();
+    assert!(json.contains("\"path\":\"lit-formats/orbit/vertex\""), "{json}");
+    let _ = std::fs::remove_file(&log);
+}
+
+// spec: TEST-025, TEST-019
+#[test]
+fn a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name() {
+    let log = tmp("look-1m-lit.json");
+    let out = run(&[
+        "test-render",
+        "--perf-smoke",
+        "--scene",
+        "look-1m",
+        "--lit",
+        "--adapter",
+        "software",
+        "--global-res",
+        "128",
+        "--tile-format",
+        "vertex",
+        "--out",
+        log.to_str().unwrap(),
+    ])
+    .unwrap();
+    assert!(out.contains("lit path (atmosphere, water)") && out.contains("look-1m: blank tiles: none in any of the frames ok"), "{out}");
+    let json = std::fs::read_to_string(&log).unwrap();
+    assert!(json.contains("\"path\":\"stream-lit/look-1m\"") && json.contains("lit path (atmosphere, water)"), "{json}");
+    assert!(json.contains("\"load\":{\"measured\":false}"), "{json}");
+    let _ = std::fs::remove_file(&log);
+}

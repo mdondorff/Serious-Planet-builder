@@ -2,6 +2,7 @@
 //! and `test-render` (headless harness). M0 only wires them up; real work arrives with M1+.
 
 pub mod globalperf;
+pub mod litperf;
 pub mod lookload;
 pub mod manifest;
 pub mod pipelined;
@@ -56,6 +57,9 @@ modes:
     --gen-ahead N            jobs queued behind the running ones so a worker that finishes between two frames takes the next at once (STRM-020; default: the worker count; 0: refill at frame boundaries only)
     --gen-priority below-normal|normal   OS priority of the generation workers (STRM-020, ADR 0046; default below-normal: the frame thread wins a core both want; no result depends on it)
     --tile-format vertex|compact   how terrain tiles are built and held (ADR 0033): compact (default) for levels 3 and finer, vertex the 44-byte reference format for all
+    --lit                    the streaming perf scenes on the lit path with the atmosphere and water (TEST-025): same scripts, same verdicts, logs named <scene>-lit
+    --views a,b,c            only these views of the lit perf scenes (ground-1m, aerial-20km, coast-2km, coast-3m, orbit, coast-glide, coast-descent); a partial log is not a window
+    --flight-frames N        frames of each coastal flight of the lit perf scenes (default 240; --scene lit | lit-formats, TEST-025)
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
     --machine-ready          owner override of a failed readiness gate (ADR 0020); recorded in the log
     --smoke                  start and exit";
@@ -146,6 +150,12 @@ pub struct Options {
     pub tau: f64,
     pub frames: usize,
     pub perf_smoke: bool,
+    /// `--lit`: the streaming perf scenes draw the lit path with the atmosphere and the water (TEST-025).
+    pub lit: bool,
+    /// `--flight-frames N`: frames of each coastal flight of the lit perf scenes.
+    pub flight_frames: usize,
+    /// `--views a,b,c`: only these views of the lit perf scenes.
+    pub views: Option<Vec<String>>,
     /// `--store DIR`: the stored bake the streaming perf scenes read (the production source, GEN-014); `--allow-memory-bake` runs them over the in-memory bake of `--global-res` cells instead, labelled and not valid for streaming budgets.
     pub store: Option<PathBuf>,
     pub allow_memory_bake: bool,
@@ -244,6 +254,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         tau: 6.0,
         frames: 300,
         perf_smoke: false,
+        lit: false,
+        flight_frames: 240,
+        views: None,
         store: None,
         allow_memory_bake: false,
         flight: None,
@@ -266,6 +279,16 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--lockstep" => o.lockstep = true,
             "--then" => o.then = Some(it.next().ok_or("--then needs a script index or name")?.clone()),
             "--perf-smoke" => o.perf_smoke = true,
+            "--lit" => o.lit = true,
+            "--views" => {
+                o.views = Some(it.next().ok_or("--views needs a comma-separated list")?.split(',').map(|v| v.trim().to_string()).collect())
+            }
+            "--flight-frames" => {
+                o.flight_frames = it.next().ok_or("--flight-frames needs a value")?.parse().map_err(|e| format!("--flight-frames: {e}"))?;
+                if o.flight_frames < 2 {
+                    return Err("--flight-frames must be at least 2".into());
+                }
+            }
             "--store" => o.store = Some(PathBuf::from(it.next().ok_or("--store needs the directory of a stored bake")?)),
             "--allow-memory-bake" => o.allow_memory_bake = true,
             "--cells" => o.cells = it.next().ok_or("--cells needs a value")?.parse().map_err(|e| format!("--cells: {e}"))?,
@@ -470,7 +493,9 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     if !matches!(o.mode, Mode::Generate) {
         // The global-bake perf scene takes the definition, grid size and thread count of the global commands.
         let bake_scene = matches!(o.mode, Mode::TestRender) && o.perf && o.scene == "global-bake";
-        let stream_scene = matches!(o.mode, Mode::TestRender) && (o.perf || o.perf_smoke) && streamperf::is_stream_scene(&o.scene);
+        let stream_scene = matches!(o.mode, Mode::TestRender)
+            && (o.perf || o.perf_smoke)
+            && (streamperf::is_stream_scene(&o.scene) || litperf::is_lit_scene(&o.scene));
         let terrain_scene = matches!(o.mode, Mode::TestRender) && o.scene == "terrain";
         let window = matches!(o.mode, Mode::Editor) && !o.offscreen && !o.no_window;
         let allowed: &[&str] = if bake_scene {
@@ -600,8 +625,14 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.perf && o.perf_smoke {
         return Err("--perf and --perf-smoke exclude each other: a smoke run is never a measurement".into());
     }
-    if o.perf_smoke && o.scene != "terrain" && !streamperf::is_stream_scene(&o.scene) {
-        return Err("--perf-smoke is only available for --scene terrain or a streaming scene (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, streaming)".into());
+    if o.perf_smoke && o.scene != "terrain" && !streamperf::is_stream_scene(&o.scene) && !litperf::is_lit_scene(&o.scene) {
+        return Err("--perf-smoke is only available for --scene terrain, a streaming scene (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, streaming) or a lit scene (lit, lit-formats)".into());
+    }
+    if o.lit && !streamperf::is_stream_scene(&o.scene) {
+        return Err("--lit applies to the streaming perf scenes (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, dive-cold, streaming); the scenes `lit` and `lit-formats` are always lit".into());
+    }
+    if (o.given.contains("--flight-frames") || o.given.contains("--views")) && !litperf::is_lit_scene(&o.scene) {
+        return Err("--flight-frames and --views apply to the scenes `lit` and `lit-formats`".into());
     }
     streamperf::check_options(o)?;
     if o.flight.is_some() {
@@ -612,6 +643,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
             "terrain" => skeleton::perf_terrain(o, &ctx, out),
             "global-bake" => globalperf::perf_global_bake(o, &ctx, out),
             s if streamperf::is_stream_scene(s) => streamperf::perf_streaming(o, &ctx, out),
+            s if litperf::is_lit_scene(s) => litperf::perf_lit(o, &ctx, out),
             _ => perf_skeleton(o, &ctx, out),
         };
     }

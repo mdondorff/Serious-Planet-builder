@@ -297,6 +297,89 @@ pub fn cache_verify(root: &Path, args: &[String]) -> Res {
     run(root, "cargo", &refs, &[])
 }
 
+/// The lit perf scenes (TEST-025): per-pass GPU time of the lit path over the viewer's views and the coastal flights, and the same
+/// views in both tile formats.
+const LIT_SCENES: [&str; 2] = ["lit", "lit-formats"];
+
+/// The `cargo` arguments of `perf lit | lit-formats [--store DIR | --allow-memory-bake] [--global-res N] [--out PATH] [--frames N]
+/// [--flight-frames N] [--tile-format F] [--machine-ready] [--smoke]`: the scenes under the readiness gate; `--smoke` is the
+/// software-adapter proof (never a measurement).
+fn perf_lit_args(scene: &str, args: &[String]) -> Result<Vec<String>, String> {
+    if !LIT_SCENES.contains(&scene) {
+        return Err(format!("unknown lit scene '{scene}' (known: {})", LIT_SCENES.join(", ")));
+    }
+    let mut smoke = false;
+    let mut tail: Vec<String> = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--smoke" => smoke = true,
+            "--machine-ready" | "--allow-memory-bake" => tail.push(a.clone()),
+            "--store" | "--global-res" | "--out" | "--frames" | "--flight-frames" | "--views" | "--tile-format" | "--prefill-levels" | "--look" | "--world" => {
+                let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
+                tail.push(a.clone());
+                tail.push(value.clone());
+            }
+            other => {
+                return Err(format!(
+                    "unknown perf {scene} option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out PATH, --frames N, --flight-frames N, --views a,b,c, --tile-format vertex|compact, --prefill-levels N, --look F, --world F, --smoke, --machine-ready, the owner's override of a failed readiness gate)"
+                ))
+            }
+        }
+    }
+    let mut v: Vec<String> = if smoke {
+        ["run", "-q", "-p", "planet", "--", "test-render", "--perf-smoke", "--scene", scene, "--adapter", "software"]
+    } else {
+        ["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", scene, "--adapter", "hardware"]
+    }
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    v.extend(tail);
+    Ok(v)
+}
+
+/// `perf m5 --store DIR [--out DIR] [--machine-ready]`: the first M5 window in the order the architect authorizes it: the lit views and
+/// flights, the same views in both tile formats, then the seven streaming scenes on the lit path (one child process each). Every
+/// part runs under the readiness gate; a failing part does not stop the next; the exit is non-zero if any failed.
+fn perf_m5(root: &Path, args: &[String]) -> Res {
+    let mut out_dir: Option<String> = None;
+    let mut rest: Vec<String> = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--out" {
+            out_dir = Some(it.next().ok_or("--out needs a directory")?.clone());
+        } else if a == "--smoke" {
+            return Err("perf m5 is the measured window; smoke the parts with `perf lit --smoke`, `perf lit-formats --smoke` and `perf stream all --lit --smoke`".into());
+        } else {
+            rest.push(a.clone());
+        }
+    }
+    let dir = out_dir.unwrap_or_else(|| "perf/logs".to_string());
+    let mut failed: Vec<String> = Vec::new();
+    for scene in LIT_SCENES {
+        let mut a = rest.clone();
+        a.push("--out".into());
+        a.push(Path::new(&dir).join(format!("{scene}.json")).to_string_lossy().into_owned());
+        let cargo_args = perf_lit_args(scene, &a)?;
+        let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+        eprintln!("$ cargo {}", refs.join(" "));
+        if let Err(e) = run(root, "cargo", &refs, &[]) {
+            failed.push(format!("{scene}: {e}"));
+        }
+    }
+    let mut stream = rest.clone();
+    stream.extend(["--lit".to_string(), "--out".to_string(), dir.clone()]);
+    if let Err(e) = perf_stream_all(root, &stream) {
+        failed.push(format!("stream --lit: {e}"));
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("perf m5: {} part(s) failed: {}", failed.len(), failed.join("; ")))
+    }
+}
+
 /// The `cargo` arguments of `perf global-bake` (GEN-014): the global-bake scene under the same readiness gate, with the grid
 /// size and thread count as options. The default grid is the 1 km one of GEN-014 (16384 cells per face edge).
 fn perf_global_bake_args(args: &[String]) -> Result<Vec<String>, String> {
@@ -349,7 +432,7 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
     while let Some(a) = it.next() {
         match a.as_str() {
             "--smoke" => smoke = true,
-            "--machine-ready" | "--allow-memory-bake" => tail.push(a.clone()),
+            "--machine-ready" | "--allow-memory-bake" | "--lit" => tail.push(a.clone()),
             "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
@@ -357,7 +440,7 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
             }
             other => {
                 return Err(format!(
-                    "unknown perf stream option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out, --upload per-slot|batched, --prefill-levels N, --gen-workers N, --gen-ahead N, --gen-reserve N, --gen-priority below-normal|normal, --smoke, --machine-ready, the owner's override of a failed readiness gate)"
+                    "unknown perf stream option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out, --upload per-slot|batched, --prefill-levels N, --lit (the lit path with the atmosphere and water, TEST-025), --gen-workers N, --gen-ahead N, --gen-reserve N, --gen-priority below-normal|normal, --smoke, --machine-ready, the owner's override of a failed readiness gate)"
                 ))
             }
         }
@@ -414,11 +497,13 @@ fn stream_runs_all(args: &[String]) -> bool {
 fn perf_stream_child_args(scene: &str, rest: &[String]) -> Result<Vec<String>, String> {
     let mut a = vec![scene.to_string()];
     let mut it = rest.iter();
+    // The lit variant keeps its own logs beside the debug path's: `<scene>-lit.json`.
+    let suffix = if rest.iter().any(|x| x == "--lit") { "-lit" } else { "" };
     while let Some(x) = it.next() {
         if x == "--out" {
             let dir = it.next().ok_or("--out needs a value")?;
             a.push(x.clone());
-            a.push(Path::new(dir).join(format!("{scene}.json")).to_string_lossy().into_owned());
+            a.push(Path::new(dir).join(format!("{scene}{suffix}.json")).to_string_lossy().into_owned());
         } else {
             a.push(x.clone());
         }
@@ -478,6 +563,14 @@ pub fn perf(root: &Path, args: &[String]) -> Res {
         let cargo_args = perf_stream_args(&args[1..])?;
         let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
         return run(root, "cargo", &refs, &[]);
+    }
+    if let Some(scene) = args.first().filter(|a| LIT_SCENES.contains(&a.as_str())) {
+        let cargo_args = perf_lit_args(scene, &args[1..])?;
+        let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+        return run(root, "cargo", &refs, &[]);
+    }
+    if args.first().map(String::as_str) == Some("m5") {
+        return perf_m5(root, &args[1..]);
     }
     if args.first().map(String::as_str) == Some("global-bake") {
         let cargo_args = perf_global_bake_args(&args[1..])?;
@@ -615,6 +708,30 @@ mod tests {
         assert_eq!(over.last(), Some(&"--machine-ready"));
         let e = perf_cargo_args(&s(&["--force"])).unwrap_err();
         assert!(e.contains("--force") && e.contains("override"), "{e}");
+    }
+
+    // spec: TEST-019, TEST-025
+    #[test]
+    fn the_lit_scenes_and_the_lit_stream_variant_build_their_command_lines_and_keep_their_logs_apart() {
+        let a = perf_lit_args("lit", &s(&["--store", "C:/bake", "--out", "perf/logs/lit.json", "--machine-ready"])).unwrap();
+        assert!(a.contains(&"--perf".to_string()) && a.contains(&"hardware".to_string()) && a.contains(&"--release".to_string()), "{a:?}");
+        assert_eq!(a[a.iter().position(|x| x == "--scene").unwrap() + 1], "lit");
+        assert_eq!(a[a.iter().position(|x| x == "--store").unwrap() + 1], "C:/bake");
+        let smoke = perf_lit_args("lit-formats", &s(&["--smoke", "--global-res", "128"])).unwrap();
+        assert!(
+            smoke.contains(&"--perf-smoke".to_string())
+                && smoke.contains(&"software".to_string())
+                && !smoke.contains(&"--perf".to_string()),
+            "{smoke:?}"
+        );
+        assert!(perf_lit_args("dive", &[]).unwrap_err().contains("known: lit, lit-formats"));
+        assert!(perf_lit_args("lit", &s(&["--force"])).unwrap_err().contains("override"));
+        // The lit variant of the streaming scenes: --lit goes through, and a log directory gets `<scene>-lit.json`.
+        let d = perf_stream_child_args("dive", &s(&["--lit", "--store", "S", "--out", "D"])).unwrap();
+        assert!(d.contains(&"--lit".to_string()), "{d:?}");
+        assert!(d[d.iter().position(|x| x == "--out").unwrap() + 1].replace('\\', "/").ends_with("D/dive-lit.json"), "{d:?}");
+        let plain = perf_stream_child_args("dive", &s(&["--out", "D"])).unwrap();
+        assert!(plain[plain.iter().position(|x| x == "--out").unwrap() + 1].replace('\\', "/").ends_with("D/dive.json"), "{plain:?}");
     }
 
     // spec: TEST-019

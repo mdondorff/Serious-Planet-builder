@@ -1011,7 +1011,7 @@ fn streamed_meshes(
 
 /// Generate the meshes `plan` needs that `renderer` does not hold (by tile and mesh key) in parallel, then upload them.
 /// Returns the number of new meshes.
-fn upload_missing_meshes(
+pub(crate) fn upload_missing_meshes(
     ctx: &GpuContext,
     renderer: &mut planet_render::TerrainRenderer,
     plan: &planet_frame::TerrainPlan,

@@ -1054,3 +1054,71 @@ fn the_lit_water_views_are_written_for_inspection() {
         write_inspection(name, &image_of(&r, &ctx));
     }
 }
+
+// spec: REND-028
+#[test]
+fn a_timed_lit_frame_reports_the_gpu_time_of_every_pass_it_ran_and_the_pixels_do_not_change() {
+    use planet_render::GpuPass;
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let field = Reference(1);
+    let size = (256, 160);
+    let (c, heading) = coast(&field, 0.0);
+    let table = LiquidTable::earth();
+    let src = HeightSea { field: &field, level: 0.0 };
+    let camera = coast_camera(c, heading, 0.0, 120.0, 800.0, 0.0, 12.0, 1.6);
+    let plan = Scene { camera, size, field: &field }.terrain();
+    let water = water_plan(&plan, &src, &table, size, 2.0, WaterView::Lit);
+    assert!(!water.nodes.is_empty(), "the view holds water");
+    let mut r = new_renderer(&ctx, true, size);
+    upload_all(&ctx, &mut r, &plan, &field, true);
+    r.enable_atmosphere(&ctx, &Atmosphere::earth(R));
+    r.enable_water(&ctx);
+    let mut lit = plan.clone();
+    lit.lit = Some(lit_plan(true));
+    lit.water = Some(water);
+    // Adaptive exposure runs the histogram pass (a fixed exposure culls it).
+    lit.lit = Some(planet_frame::look::LitPlan::adaptive(11.0, 0.016).with_atmosphere(&LookParams::default(), R).unwrap());
+    // Untimed and timed frames draw the same pixels.
+    r.render(&ctx, &lit, false).unwrap();
+    let untimed = r.read_color(&ctx).rgba;
+    let mut timed = None;
+    for _ in 0..3 {
+        timed = Some(r.render(&ctx, &lit, true).unwrap().0);
+    }
+    let timed = timed.unwrap();
+    assert_eq!(untimed, r.read_color(&ctx).rgba, "timestamps change no pixel");
+    if !ctx.timestamps_supported() {
+        assert!(timed.passes.span_ms.is_none() && timed.gpu_ms.is_none(), "no timestamps, no times: {timed:?}");
+        return;
+    }
+    for p in GpuPass::ALL {
+        let ms = timed.passes.get(p).unwrap_or_else(|| panic!("{}: no time in {timed:?}", p.name()));
+        assert!(ms > 0.0 && ms < 1000.0, "{}: {ms}", p.name());
+    }
+    assert_eq!(timed.gpu_ms, timed.passes.get(GpuPass::Terrain));
+    assert_eq!(timed.water_gpu_ms, timed.passes.get(GpuPass::Water));
+    let copy = timed.passes.scene_copy_ms.expect("the scene copy between terrain and water");
+    let span = timed.passes.span_ms.unwrap();
+    let longest = GpuPass::ALL.iter().filter_map(|p| timed.passes.get(*p)).fold(0.0f64, f64::max);
+    assert!(copy >= 0.0 && span >= longest, "span {span} covers the longest pass {longest} and the copy {copy}");
+    // A debug frame times the terrain pass alone.
+    let mut debug = plan.clone();
+    debug.lit = None;
+    debug.water = None;
+    let t = r.render(&ctx, &debug, true).unwrap().0;
+    assert!(
+        t.passes.get(GpuPass::Terrain).is_some() && t.passes.get(GpuPass::Water).is_none() && t.passes.scene_copy_ms.is_none(),
+        "{t:?}"
+    );
+    // A fixed-exposure frame without the atmosphere runs no sky pass and no histogram.
+    let mut plain = plan.clone();
+    plain.lit = Some(lit_plan(false));
+    let t = r.render(&ctx, &plain, true).unwrap().0;
+    assert!(
+        t.passes.get(GpuPass::SkyView).is_none()
+            && t.passes.get(GpuPass::SkyComposite).is_none()
+            && t.passes.get(GpuPass::ExposureHistogram).is_none(),
+        "{t:?}"
+    );
+    assert!(t.passes.get(GpuPass::Tonemap).is_some() && t.passes.get(GpuPass::ExposureAdapt).is_some(), "{t:?}");
+}

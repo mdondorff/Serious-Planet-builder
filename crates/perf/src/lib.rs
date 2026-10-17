@@ -7,6 +7,7 @@ pub mod clock;
 pub mod compare;
 pub mod gate;
 pub mod host;
+pub mod lit;
 pub mod load;
 pub mod prefill;
 pub mod session;

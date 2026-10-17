@@ -7,6 +7,7 @@ pub mod atmosphere;
 pub mod compact;
 pub mod exec;
 pub mod gate;
+pub mod gpu_timing;
 pub mod graph;
 pub mod lit;
 #[cfg(feature = "spike06")]
@@ -21,6 +22,7 @@ pub use atmosphere::{atmosphere_shaders, AtmospherePath, ProbeKind};
 pub use compact::compact_terrain_shader;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
 pub use gate::requirements as adapter_requirements;
+pub use gpu_timing::{GpuPass, PassTimes};
 pub use lit::{lit_post_shaders, ExposureState, LitPath};
 pub use terrain::{
     execute_terrain, execute_terrain_tiles, DrawMode, FirstUse, FrameTiming, InitCounts, ResidentFormat, TerrainRenderer, TerrainStats,
