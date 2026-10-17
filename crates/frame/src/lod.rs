@@ -248,6 +248,7 @@ impl SelectionCache {
         for t in tiles {
             n += usize::from(self.origin_heights.remove(t).is_some());
             self.mesh_keys.remove(t);
+            self.volumes.remove(t);
         }
         n
     }

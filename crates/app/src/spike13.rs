@@ -66,7 +66,7 @@ impl StampSet {
 }
 
 /// The boxed base field handed to threads: it is read-only after construction (the spike's bake is leaked), so sharing it is sound.
-pub struct SendBase(pub Box<dyn HeightField>);
+pub struct SendBase(pub Box<dyn HeightField>, pub Option<Arc<crate::worldfield::WorldTerrain>>);
 unsafe impl Send for SendBase {}
 impl std::ops::Deref for SendBase {
     type Target = dyn HeightField;
@@ -131,7 +131,17 @@ impl HeightField for StampField {
     }
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         let (lo, hi) = self.base.height_bounds(centre, angular_radius);
-        (lo, hi + MAX_STAMP_AMP_M)
+        // Items change the bounds only where they reach: the bump is largest at the cap's point nearest to the stamp centre.
+        let mut up = 0.0f64;
+        for st in &self.set.stamps {
+            let angle = 2.0 * libm::asin(((centre - st.dir).length() / 2.0).min(1.0));
+            let d_min = (R * (angle - angular_radius)).max(0.0);
+            if d_min < st.radius_m {
+                let w = 1.0 - (d_min / st.radius_m) * (d_min / st.radius_m);
+                up += st.amp_m * w * w;
+            }
+        }
+        (lo, hi + up)
     }
 }
 
@@ -173,12 +183,22 @@ impl TileSource<RenderTile> for StampSource {
 }
 
 /// The base world: a small in-memory bake and the eroded field over it.
-pub fn base_world(seed: u64) -> (WorldDefinition, Arc<SendBase>) {
-    let grid = bake(seed, &TangentWarp, 16, 2).expect("bake");
+pub fn base_world(seed: u64, res: u32) -> (WorldDefinition, Arc<SendBase>) {
+    let grid = bake(seed, &TangentWarp, res, 2).expect("bake");
     let def = WorldDefinition::single_planet(R, seed);
     let src = Box::leak(Box::new(GridSource(Box::leak(Box::new(grid)))));
     let field = build_field(HeightFieldKind::Eroded, &GenContext::new(&def), BodyId::PLANET, src, [1; 16]).expect("eroded field");
-    (def, Arc::new(SendBase(field)))
+    (def, Arc::new(SendBase(field, None)))
+}
+
+/// The product's field: the eroded terrain over a stored global bake (read-only), as the viewer reads it.
+pub fn base_world_store(dir: &std::path::Path, res: u32, seed: u64) -> Result<(WorldDefinition, Arc<SendBase>), String> {
+    let def = WorldDefinition::single_planet(R, seed);
+    let world = Arc::new(crate::worldfield::WorldTerrain::open_store(def.clone(), dir, res)?);
+    let field = world.field()?;
+    // The field borrows the world; the world is kept alive beside it and the field is dropped first.
+    let field: Box<dyn HeightField> = unsafe { std::mem::transmute::<Box<dyn HeightField + '_>, Box<dyn HeightField + 'static>>(field) };
+    Ok((def, Arc::new(SendBase(field, Some(world)))))
 }
 
 pub struct Rig {
@@ -254,8 +274,14 @@ pub fn touches(tile: TileId, stamp: &Stamp) -> bool {
     d < stamp.radius_m + 0.8 * edge
 }
 
+static SEED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(7);
+
+pub fn set_seed(s: u64) {
+    SEED.store(s, std::sync::atomic::Ordering::SeqCst);
+}
+
 pub fn request(camera: Camera, size: (u32, u32), lod: &LodParams) -> TerrainRequest {
-    TerrainRequest { camera, size, view: TerrainView::Relief, lod: lod.clone(), face_mapping: "tangent-v1".into(), seed: 7 }
+    TerrainRequest { camera, size, view: TerrainView::Relief, lod: lod.clone(), face_mapping: "tangent-v1".into(), seed: SEED.load(std::sync::atomic::Ordering::SeqCst) }
 }
 
 pub fn ms(t: Instant) -> f64 {
@@ -264,8 +290,8 @@ pub fn ms(t: Instant) -> f64 {
 
 pub fn _unused(_: &RendererSink<'_>) {}
 
-// ---------------------------------------------------------------------------------------------------------------------------------
-// The case runner.
+// The case runner: one rig per altitude (settled once from empty), then one edit per (radius, camera) case on it; each edit is reverted
+// and the rig settled again before the next.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -283,7 +309,7 @@ pub struct CaseCfg {
     pub workers: usize,
     pub mode: Mode,
     pub preview: bool,
-    /// 0: the plan cache is not told (stale keys), 1: targeted per tile, 2: cleared.
+    /// 0: the plan cache is not told, 1: targeted per tile, 2: cleared.
     pub cache_mode: u8,
     pub size: (u32, u32),
     /// Write the before / preview / exact frames of a still case here.
@@ -319,7 +345,6 @@ pub struct CaseResult {
     pub upload_frames: usize,
     pub tiles_uploaded: u64,
     pub scheduler_ms_max: f64,
-    pub frame_cpu_ms_max: f64,
     pub substituted_max: usize,
     pub blank_max: usize,
     pub frames: usize,
@@ -334,15 +359,66 @@ fn stamp_for(radius_m: f64) -> Stamp {
     Stamp { id: 1, dir, radius_m, amp_m: (0.2 * radius_m).min(100.0) }
 }
 
-pub fn run_case(ctx: &GpuContext, base: &(WorldDefinition, Arc<SendBase>), cfg: CaseCfg) -> CaseResult {
-    match run_case_inner(ctx, base, cfg) {
-        Ok(r) => r,
-        Err(e) => CaseResult { error: Some(e), ..Default::default() },
+/// The loop: one managed frame, one frame submitted.
+pub struct Harness<'a> {
+    pub ctx: &'a GpuContext,
+    pub rig: Rig,
+    pub iteration: u64,
+}
+
+impl Harness<'_> {
+    pub fn step(&mut self, req: &TerrainRequest) -> Result<planet_frame::managed::ManagedFrame, String> {
+        self.iteration += 1;
+        let ctx = self.ctx;
+        let rig = &mut self.rig;
+        let frame = rig.managed.begin_frame(req, &mut RendererSink { ctx, renderer: &mut rig.renderer })?;
+        rig.fi.retire_to(rig.renderer.retired_frames(ctx));
+        while rig.fi.is_full() {
+            rig.fi.note_wait();
+            rig.fi.retire_to(rig.renderer.wait_oldest(ctx));
+        }
+        rig.renderer.submit(ctx, &frame.pipeline.draw.plan).map_err(|e| format!("frame {}: {e}", self.iteration))?;
+        rig.fi.submit();
+        Ok(frame)
+    }
+
+    /// Frames with the camera still until the plan is exact and nothing is generating or waiting for upload.
+    pub fn settle(&mut self, req: &TerrainRequest, limit_s: u64) -> Result<f64, String> {
+        let t = Instant::now();
+        let mut calm = 0;
+        loop {
+            let frame = self.step(req)?;
+            let idle = self.rig.managed.manager().streamer().unfinished_jobs() == 0
+                && !self.rig.managed.pipeline().worker().busy()
+                && self.rig.managed.pending().is_empty();
+            calm = if frame.pipeline.draw.kind == planet_frame::pipeline::DrawKind::Exact && idle { calm + 1 } else { 0 };
+            if calm >= 20 {
+                return Ok(t.elapsed().as_secs_f64());
+            }
+            if t.elapsed().as_secs() > limit_s {
+                return Err(format!("did not settle in {limit_s} s ({:?})", self.rig.managed.manager().streamer().stats()));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
     }
 }
 
-fn run_case_inner(ctx: &GpuContext, base: &(WorldDefinition, Arc<SendBase>), cfg: CaseCfg) -> Result<CaseResult, String> {
-    let stamp = stamp_for(cfg.radius_m);
+pub struct AltitudeCfg {
+    pub altitude_m: f64,
+    pub workers: usize,
+    pub size: (u32, u32),
+    pub mode: Mode,
+    pub preview: bool,
+    pub cache_mode: u8,
+    pub images: Option<&'static str>,
+    /// `(radius, moving)` cases, run in order on one settled rig.
+    pub cases: Vec<(f64, bool)>,
+    pub settle_limit_s: u64,
+}
+
+/// Run the cases of one altitude. Each result is `(radius, moving, result)`.
+pub fn run_altitude(ctx: &GpuContext, base: &(WorldDefinition, Arc<SendBase>), cfg: &AltitudeCfg) -> Vec<(f64, bool, CaseResult)> {
+    let mut out = Vec::new();
     let aspect = f64::from(cfg.size.0) / f64::from(cfg.size.1);
     let set0 = Arc::new(StampSet { def: base.0.clone(), stamps: Vec::new() });
     let field0 = Arc::new(StampField { set: Arc::clone(&set0), base: Arc::clone(&base.1) });
@@ -355,99 +431,102 @@ fn run_case_inner(ctx: &GpuContext, base: &(WorldDefinition, Arc<SendBase>), cfg
         max_height_m: 10_000.0,
         ..LodParams::earth_1080p()
     };
-    let rho = (1.5 * cfg.radius_m).max(cfg.altitude_m);
+    let rho_of = |radius: f64| (1.5 * radius).max(cfg.altitude_m);
+    // The rig is made for the first case's camera; every case of an altitude shares the position of its still camera only by radius.
+    let stamp_first = stamp_for(cfg.cases[0].0);
+    let first = request(camera_around(&stamp_first, &*field0, rho_of(cfg.cases[0].0), cfg.altitude_m, 0.0, aspect), cfg.size, &lod);
+    planet_render::set_stamp_preview(None);
+    planet_render::set_stamp_preview_tiles(Default::default());
+    planet_frame::pipeline::SPIKE_STALE_OK.store(cfg.mode == Mode::Refresh, std::sync::atomic::Ordering::SeqCst);
+    let rig = match Rig::new(ctx, Arc::clone(&shared), &first, cfg.workers) {
+        Ok(r) => r,
+        Err(e) => return vec![(cfg.cases[0].0, false, CaseResult { error: Some(e), ..Default::default() })],
+    };
+    let mut h = Harness { ctx, rig, iteration: 0 };
+    let mut cold_settle = None;
+    for &(radius, moving) in &cfg.cases {
+        let stamp = stamp_for(radius);
+        let rho = rho_of(radius);
+        let still = request(camera_around(&stamp, &*field0, rho, cfg.altitude_m, 0.0, aspect), cfg.size, &lod);
+        let settle = match h.settle(&still, cfg.settle_limit_s) {
+            Ok(s) => s,
+            Err(e) => {
+                out.push((radius, moving, CaseResult { error: Some(e), ..Default::default() }));
+                break;
+            }
+        };
+        if cold_settle.is_none() {
+            cold_settle = Some(settle);
+        }
+        let mut r = match edit_case(&mut h, &shared, &base.1, &set0, &stamp, &lod, cfg, radius, moving, rho) {
+            Ok(r) => r,
+            Err(e) => CaseResult { error: Some(e), ..Default::default() },
+        };
+        r.settle_s = if out.is_empty() { cold_settle.unwrap_or(0.0) } else { settle };
+        let failed = r.error.is_some();
+        out.push((radius, moving, r));
+        // Revert the edit: the old field back, the affected tiles refreshed, the preview off.
+        planet_render::set_stamp_preview(None);
+        planet_render::set_stamp_preview_tiles(Default::default());
+        let cur = shared.current();
+        let tiles: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
+        *shared.field.write().expect("field") = Arc::clone(&field0);
+        let affected: Vec<TileId> = tiles.iter().copied().filter(|t| cur.inputs_hash_for(*t, &TangentWarp) != field0.inputs_hash_for(*t, &TangentWarp)).collect();
+        h.rig.managed.spike_edit(&affected, 1, true);
+        if failed {
+            break;
+        }
+    }
+    planet_frame::pipeline::SPIKE_STALE_OK.store(false, std::sync::atomic::Ordering::SeqCst);
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn edit_case(
+    h: &mut Harness<'_>,
+    shared: &Arc<Shared>,
+    base: &Arc<SendBase>,
+    set0: &Arc<StampSet>,
+    stamp: &Stamp,
+    lod: &LodParams,
+    cfg: &AltitudeCfg,
+    radius: f64,
+    moving: bool,
+    rho: f64,
+) -> Result<CaseResult, String> {
+    let ctx = h.ctx;
+    let aspect = f64::from(cfg.size.0) / f64::from(cfg.size.1);
     let speed = match cfg.altitude_m as u64 {
         0..=10 => 5.0,
         11..=500 => 50.0,
         _ => 250.0,
     };
     let omega = speed / rho;
-    let cam_at = |theta: f64, field: &dyn HeightField| camera_around(&stamp, field, rho, cfg.altitude_m, theta, aspect);
-    let first = request(cam_at(0.0, &*field0), cfg.size, &lod);
-    planet_render::set_stamp_preview(None);
-    planet_render::set_stamp_preview_tiles(Default::default());
-    planet_frame::pipeline::SPIKE_STALE_OK.store(cfg.mode == Mode::Refresh, std::sync::atomic::Ordering::SeqCst);
-    let mut rig = Rig::new(ctx, Arc::clone(&shared), &first, cfg.workers)?;
-    let mut last_plan: Option<TerrainPlan> = None;
-    let mut iteration = 0u64;
-
-    // One iteration of the loop: the manager's frame (requests, collection, uploads), the plan, a frame submitted.
-    let mut step = |rig: &mut Rig, req: &TerrainRequest| -> Result<planet_frame::managed::ManagedFrame, String> {
-        iteration += 1;
-        let frame = rig.managed.begin_frame(req, &mut RendererSink { ctx, renderer: &mut rig.renderer })?;
-        rig.fi.retire_to(rig.renderer.retired_frames(ctx));
-        while rig.fi.is_full() {
-            rig.fi.note_wait();
-            rig.fi.retire_to(rig.renderer.wait_oldest(ctx));
-        }
-        if let Err(e) = rig.renderer.submit(ctx, &frame.pipeline.draw.plan) {
-            let f = rig.shared.current();
-            let keyer = planet_generators::mesh::MeshKeyer::new(&*f, &TangentWarp, 32, R).at_finest_level(22);
-            let bad: Vec<String> = frame
-                .pipeline
-                .draw
-                .plan
-                .nodes
-                .iter()
-                .filter(|d| rig.renderer.tile_key(d.tile).is_some_and(|k| k != d.mesh_key))
-                .take(3)
-                .map(|d| format!("level {} plan {:#x} renderer {:#x?} managed {:#x?} true {:#x} kind {:?} subst {}", d.level, d.mesh_key, rig.renderer.tile_key(d.tile), rig.managed.resident().get(&d.tile).map(|r| r.mesh_key), keyer.key(d.tile), frame.pipeline.draw.kind, frame.pipeline.draw.substituted))
-                .collect();
-            return Err(format!("frame {iteration}: {e} :: {bad:?}"));
-        }
-        rig.fi.submit();
-        last_plan = Some(frame.pipeline.draw.plan.clone());
-        Ok(frame)
-    };
-
-    // Settle: the camera still until the plan is exact and nothing is generating.
-    let settle0 = Instant::now();
-    let mut calm = 0;
-    loop {
-        let frame = step(&mut rig, &first)?;
-        let idle = rig.managed.manager().streamer().unfinished_jobs() == 0
-            && !rig.managed.pipeline().worker().busy()
-            && rig.managed.pending().is_empty();
-        if frame.pipeline.draw.kind == planet_frame::pipeline::DrawKind::Exact && idle {
-            calm += 1;
-        } else {
-            calm = 0;
-        }
-        if calm >= 20 {
-            break;
-        }
-        if settle0.elapsed().as_secs() > 240 {
-            return Err(format!("did not settle in 240 s ({:?})", rig.managed.manager().streamer().stats()));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-    let settle_s = settle0.elapsed().as_secs_f64();
-    let mut out = CaseResult { settle_s, ..Default::default() };
-    // The frame before the edit (for the image comparison).
-    let before_img = rig.renderer.read_color(ctx).rgba;
-    let resident_before: Vec<(TileId, u64)> = rig.managed.resident().iter().map(|(t, r)| (*t, r.mesh_key)).collect();
+    let field0 = shared.current();
+    let cam_at = |theta: f64, field: &dyn HeightField| camera_around(stamp, field, rho, cfg.altitude_m, theta, aspect);
+    let first = request(cam_at(0.0, &*field0), cfg.size, lod);
+    let mut out = CaseResult::default();
+    let before_img = h.rig.renderer.read_color(ctx).rgba;
+    let resident_before: Vec<(TileId, u64)> = h.rig.managed.resident().iter().map(|(t, r)| (*t, r.mesh_key)).collect();
     out.resident_before = resident_before.len();
     let old_keys: std::collections::HashMap<TileId, u64> = resident_before.iter().copied().collect();
-
     let sampler = planet_perf::load::LoadSampler::start(1);
-    let jobs_before = rig.managed.manager().streamer().job_log().len();
-    let dispatched_before = rig.managed.manager().streamer().stats().dispatched;
+    let jobs_before = h.rig.managed.manager().streamer().job_log().len();
+    let dispatched_before = h.rig.managed.manager().streamer().stats().dispatched;
 
     // ---- the edit ----
     let t0 = Instant::now();
     let tiles: Vec<TileId> = resident_before.iter().map(|(t, _)| *t).collect();
-    let new_set = Arc::new(set0.with(stamp));
-    let new_field = Arc::new(StampField { set: Arc::clone(&new_set), base: Arc::clone(&base.1) });
-    // Find, by the key of each resident tile (the declared reads of the cell index).
+    let new_set = Arc::new(set0.with(*stamp));
+    let new_field = Arc::new(StampField { set: Arc::clone(&new_set), base: Arc::clone(base) });
     let tf = Instant::now();
     let map = TangentWarp;
     let affected: Vec<TileId> = tiles.iter().copied().filter(|t| field0.inputs_hash_for(*t, &map) != new_field.inputs_hash_for(*t, &map)).collect();
     out.find_keys_ms = ms(tf);
-    // Find, from the cell grid alone (the cells the stamp's cell margin touches).
     let tf = Instant::now();
     let cell_level = planet_world_def::cells::cell_level(R);
     let item_cell = planet_world_def::cells::cell_of(R, stamp.dir);
-    let affected_by_cells = tiles
+    out.affected_cells_method = tiles
         .iter()
         .filter(|t| match planet_world_def::cells::cells_covering(**t, cell_level, 64) {
             Some(c) => planet_world_def::cells::with_margin(&c, 1).contains(&item_cell),
@@ -455,16 +534,14 @@ fn run_case_inner(ctx: &GpuContext, base: &(WorldDefinition, Arc<SendBase>), cfg
         })
         .count();
     out.find_cells_ms = ms(tf);
-    out.affected_cells_method = affected_by_cells;
     for t in &affected {
         *out.affected.0.entry(t.level()).or_insert(0) += 1;
     }
     let affected_set: std::collections::HashSet<TileId> = affected.iter().copied().collect();
-    // Install the new field, then tell the cache, the streamer and the plan.
     let ta = Instant::now();
     *shared.field.write().expect("field") = Arc::clone(&new_field);
-    let edit_seq = rig.managed.pipeline().frame() + 1;
-    rig.managed.spike_edit(&affected, cfg.cache_mode, cfg.mode == Mode::Refresh);
+    let edit_seq = h.rig.managed.pipeline().frame() + 1;
+    h.rig.managed.spike_edit(&affected, cfg.cache_mode, cfg.mode == Mode::Refresh);
     out.apply_ms = ms(ta);
     let center = stamp.dir * (R + new_field.base.height(stamp.dir));
     if cfg.preview {
@@ -472,15 +549,14 @@ fn run_case_inner(ctx: &GpuContext, base: &(WorldDefinition, Arc<SendBase>), cfg
         planet_render::set_stamp_preview_tiles(affected_set.clone());
     }
     let mut preview_img: Option<Vec<u8>> = None;
-    let mut first_dispatch_seen = false;
-    let mut preview_done = !cfg.preview;
-    let mut new_key_seen = false;
+    let (mut first_dispatch_seen, mut preview_done, mut new_key_seen) = (false, !cfg.preview, false);
     let mut calm = 0;
     loop {
         let now = t0.elapsed().as_secs_f64() * 1000.0;
-        let cam = if cfg.moving { cam_at(omega * now / 1000.0, &*new_field) } else { first.camera };
-        let req = request(cam, cfg.size, &lod);
-        let frame = step(&mut rig, &req)?;
+        let cam = if moving { cam_at(omega * now / 1000.0, &*new_field) } else { first.camera };
+        let req = request(cam, cfg.size, lod);
+        let frame = h.step(&req)?;
+        let rig = &mut h.rig;
         out.frames += 1;
         out.upload_ms_total += frame.upload_ms;
         out.upload_frames += usize::from(frame.counts.uploaded > 0);
@@ -498,7 +574,6 @@ fn run_case_inner(ctx: &GpuContext, base: &(WorldDefinition, Arc<SendBase>), cfg
             first_dispatch_seen = true;
             out.first_dispatch_ms = Some(ms(t0));
         }
-        // Keep the preview on the tiles that still hold the old version.
         if cfg.preview {
             let stale: std::collections::HashSet<TileId> = affected
                 .iter()
@@ -508,30 +583,26 @@ fn run_case_inner(ctx: &GpuContext, base: &(WorldDefinition, Arc<SendBase>), cfg
             planet_render::set_stamp_preview_tiles(stale);
         }
         if !preview_done {
-            // The first frame submitted with the preview: visible when the GPU has finished it.
             ctx.probe_wait();
             out.preview_ms = Some(ms(t0));
             preview_done = true;
-            if cfg.images.is_some() && !cfg.moving {
+            if cfg.images.is_some() && !moving {
                 preview_img = Some(rig.renderer.read_color(ctx).rgba);
             }
         }
-        // The new plan's tiles that touch the stamp, and whether each holds its new version.
-        let mut exact_now = false;
         if let Some(cur) = rig.managed.pipeline().current().filter(|c| c.seq >= edit_seq) {
-            let target: Vec<(TileId, u64)> = cur.plan.nodes.iter().filter(|d| touches(d.tile, &stamp)).map(|d| (d.tile, d.mesh_key)).collect();
+            let target: Vec<(TileId, u64)> = cur.plan.nodes.iter().filter(|d| touches(d.tile, stamp)).map(|d| (d.tile, d.mesh_key)).collect();
             let newer = target.iter().filter(|(t, k)| rig.managed.resident().get(t).is_some_and(|r| r.mesh_key == *k && old_keys.get(t) != Some(&r.mesh_key))).count();
             if newer > 0 && !new_key_seen {
                 new_key_seen = true;
                 out.first_new_ms = Some(ms(t0));
             }
-            exact_now = !target.is_empty() && target.iter().all(|(t, k)| rig.managed.resident().get(t).is_some_and(|r| r.mesh_key == *k));
+            let exact_now = !target.is_empty() && target.iter().all(|(t, k)| rig.managed.resident().get(t).is_some_and(|r| r.mesh_key == *k));
             if exact_now && out.exact_ms.is_none() {
                 let tf = Instant::now();
                 ctx.probe_wait();
                 out.exact_frame_ms = ms(tf);
                 out.exact_ms = Some(ms(t0));
-                out.target = LevelCounts::default();
                 for (t, _) in &target {
                     *out.target.0.entry(t.level()).or_insert(0) += 1;
                 }
@@ -542,25 +613,18 @@ fn run_case_inner(ctx: &GpuContext, base: &(WorldDefinition, Arc<SendBase>), cfg
             out.all_ms = Some(ms(t0));
         }
         if out.exact_ms.is_some() && out.all_ms.is_some() {
-            let idle = rig.managed.manager().streamer().unfinished_jobs() == 0;
-            calm = if idle { calm + 1 } else { 0 };
+            calm = if rig.managed.manager().streamer().unfinished_jobs() == 0 { calm + 1 } else { 0 };
             if calm >= 5 {
                 break;
             }
         }
-        if t0.elapsed().as_secs() > 180 {
-            out.error = Some(format!(
-                "timeout after 180 s: exact {:?}, all {:?}, streamer {:?}",
-                out.exact_ms,
-                out.all_ms,
-                rig.managed.manager().streamer().stats()
-            ));
+        if t0.elapsed().as_secs() > 240 {
+            out.error = Some(format!("timeout after 240 s: exact {:?}, all {:?}", out.exact_ms, out.all_ms));
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
-    // Generation per level, from the job log.
-    let samples = rig.managed.manager().streamer().job_log().since(jobs_before);
+    let samples = h.rig.managed.manager().streamer().job_log().since(jobs_before);
     let mut waits = 0.0;
     for s in &samples {
         let e = out.gen.per_level.entry(s.level).or_insert((0, 0.0, 0.0));
@@ -576,24 +640,21 @@ fn run_case_inner(ctx: &GpuContext, base: &(WorldDefinition, Arc<SendBase>), cfg
         e.1 /= e.0 as f64;
     }
     out.load_line = sampler.stop().line();
-    if let (Some(dir), false) = (cfg.images, cfg.moving) {
-        let after = rig.renderer.read_color(ctx).rgba;
-        let w = cfg.size.0;
-        let h = cfg.size.1;
-        let name = |s: &str| std::path::Path::new(dir).join(s);
+    if let (Some(dir), false) = (cfg.images, moving) {
+        let after = h.rig.renderer.read_color(ctx).rgba;
+        let name = |s: &str| std::path::Path::new(dir).join(format!("{}-r{}-{s}.png", cfg.altitude_m, radius));
         let _ = std::fs::create_dir_all(dir);
-        let mut sheet_parts: Vec<(&str, Vec<u8>)> = vec![("before", before_img)];
+        let mut parts: Vec<(&str, Vec<u8>)> = vec![("before", before_img)];
         if let Some(p) = preview_img {
-            sheet_parts.push(("preview", p));
+            parts.push(("preview", p));
         }
-        sheet_parts.push(("exact", after));
-        for (n, img) in &sheet_parts {
-            let _ = planet_testkit_write(&name(&format!("{n}.png")), w, h, img);
+        parts.push(("exact", after));
+        for (n, img) in &parts {
+            let _ = planet_testkit_write(&name(n), cfg.size.0, cfg.size.1, img);
         }
     }
     planet_render::set_stamp_preview(None);
     planet_render::set_stamp_preview_tiles(Default::default());
-    planet_frame::pipeline::SPIKE_STALE_OK.store(false, std::sync::atomic::Ordering::SeqCst);
     Ok(out)
 }
 

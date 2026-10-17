@@ -1143,6 +1143,10 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             }
         }
         self.work.updated += 1;
+        if self.resident.contains_key(&t) && self.queue.remove(t).is_some() && new.is_some() {
+            // SPIKE-13: a refresh request of a resident tile follows the tile's class.
+            self.request(t);
+        }
         if let Some(r) = self.resident.get_mut(&t) {
             if t.level() > 0 {
                 let kind = self.pools.kind_of(t) as usize;

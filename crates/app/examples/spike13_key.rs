@@ -8,7 +8,7 @@ use planet_generators::mesh::MeshKeyer;
 use std::sync::Arc;
 
 fn main() {
-    let base = base_world(7);
+    let base = base_world(7, 16);
     let set = Arc::new(StampSet { def: base.0.clone(), stamps: Vec::new() });
     let field = StampField { set, base: Arc::clone(&base.1) };
     let id = TileId::from_raw(648518346341588470).unwrap();
