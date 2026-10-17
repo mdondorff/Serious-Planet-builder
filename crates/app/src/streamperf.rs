@@ -631,6 +631,10 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         let run = run_case(ctx, &scene_world, &script, &req_of, smoke, o.gen_workers(), lit_setup, out)?;
         writeln!(out, "{}: case ran in {:.1} s (teardown {:.2} s)", scene.name(), case_started.elapsed().as_secs_f64(), run.teardown_s)
             .map_err(err)?;
+        if o.lit {
+            writeln!(out, "{}: water of {} tiles computed in the tile jobs (ADR 0056)", scene.name(), scene_world.water_book().filled())
+                .map_err(err)?;
+        }
         let mem = MemoryFacts {
             driver_vram_bytes: if smoke { None } else { planet_perf::streaming::query_gpu_memory_used() },
             process_peak_bytes: planet_perf::streaming::query_process_peak_bytes(),

@@ -9,7 +9,7 @@ use planet_frame::look::file::LookParams;
 use planet_frame::look::water::{
     class_flicker, class_flicker_both, foam_amount, shore_cover, surface_radiance, tile_phase, tile_phases, water_class, wave_argument,
     wave_normal, wave_sample, wave_weights, ClassMap, LiquidAppearance, SurfaceInputs, WaterClass, WaterLook, Wave, WavePoint,
-    FLICKER_BUDGET, MAX_LIQUIDS, TANGENT_SHARE, WAVES, WAVE_ARGUMENT_BOUND, WAVE_DIRECTIONS,
+    FLICKER_BUDGET, MAX_LIQUIDS, PIXEL_FADE, TANGENT_SHARE, WAVES, WAVE_ARGUMENT_BOUND, WAVE_DIRECTIONS,
 };
 use planet_frame::water::{plan_water, WaterError, WaterPlan, WaterRequest, WaterSource, WaterTileCache, WaterView, TILE_SAMPLES};
 use planet_frame::{plan_terrain, scripted_views, Camera, LodParams, TerrainPlan, TerrainRequest, TerrainView};
@@ -80,7 +80,7 @@ fn two_tiles_that_hold_one_point_agree_about_its_waves_also_across_a_face_edge()
                 let local = [local_f64.x as f32, local_f64.y as f32, local_f64.z as f32].map(f64::from);
                 let phases = tile_phases(&l, [o.x, o.y, o.z], 77.7).map(f64::from);
                 let up = d;
-                let point = WavePoint { local, up: [up.x, up.y, up.z], phases, spacing: 2.0, depth: f };
+                let point = WavePoint { local, up: [up.x, up.y, up.z], phases, spacing: 2.0, depth: f, footprint: 0.0 };
                 (wave_sample(&l, &point, 0.8), local_f64.length())
             };
             let (a, la) = eval(tile);
@@ -98,7 +98,7 @@ fn two_tiles_that_hold_one_point_agree_about_its_waves_also_across_a_face_edge()
 }
 
 fn point(local: [f64; 3], up: [f64; 3], spacing: f64, depth: f64) -> WavePoint {
-    WavePoint { local, up, phases: [0.3, 1.7, 2.2, 5.1], spacing, depth }
+    WavePoint { local, up, phases: [0.3, 1.7, 2.2, 5.1], spacing, depth, footprint: 0.0 }
 }
 
 // spec: ATMO-013
@@ -161,7 +161,7 @@ fn the_waves_stay_within_their_amplitudes_and_never_lift_the_surface_below_the_s
                 let v = Vec3::new(0.3 + 0.01 * f64::from(ix), -0.5, 0.8).normalized();
                 [v.x, v.y, v.z]
             };
-            let p = WavePoint { local, up, phases: [0.1 * f64::from(ix), 2.0, 3.0, 4.0], spacing: 1.0, depth };
+            let p = WavePoint { local, up, phases: [0.1 * f64::from(ix), 2.0, 3.0, 4.0], spacing: 1.0, depth, footprint: 0.0 };
             let s = wave_sample(&l, &p, 0.8);
             let vertical = s.disp[0] * up[0] + s.disp[1] * up[1] + s.disp[2] * up[2];
             assert!(vertical.abs() <= total + 1e-12, "{vertical} against {total}");
@@ -222,7 +222,8 @@ fn the_argument_the_shader_adds_stays_small_wherever_a_wave_has_weight_on_real_p
                 let up = [upv.x, upv.y, upv.z];
                 let base = pos + upv * depth;
                 let spacing = f64::from(n.spacing_m);
-                let p = WavePoint { local: [base.x, base.y, base.z], up, phases: [0.0; WAVES], spacing, depth: depth.max(0.0) };
+                let p =
+                    WavePoint { local: [base.x, base.y, base.z], up, phases: [0.0; WAVES], spacing, depth: depth.max(0.0), footprint: 0.0 };
                 let weights = wave_weights(&l, &p);
                 for (i, w) in l.waves.iter().enumerate() {
                     if weights[i] > 0.0 {
@@ -258,7 +259,7 @@ impl WaterSource for HeightSea<'_> {
 /// A source with a table of answers by direction octant, to pin the selection rule.
 struct Scripted<F: Fn(Vec3) -> Option<WaterSample>>(F);
 
-impl<F: Fn(Vec3) -> Option<WaterSample>> WaterSource for Scripted<F> {
+impl<F: Fn(Vec3) -> Option<WaterSample> + Sync> WaterSource for Scripted<F> {
     fn water_at(&self, dir: Vec3) -> Result<Option<WaterSample>, ReadError> {
         Ok((self.0)(dir))
     }
@@ -656,7 +657,7 @@ fn a_field_that_names_a_water_level_keeps_the_tiles_of_water_above_a_seabed_the_
         for w in &l.waves {
             let klen = (w.k.iter().map(|c| c * c).sum::<f64>()).sqrt();
             let lambda = core::f64::consts::TAU / klen;
-            let p = WavePoint { local: [0.0; 3], up: [0.0, 0.0, 1.0], phases: [0.0; WAVES], spacing, depth: 100.0 };
+            let p = WavePoint { local: [0.0; 3], up: [0.0, 0.0, 1.0], phases: [0.0; WAVES], spacing, depth: 100.0, footprint: 0.0 };
             let weight = wave_weights(&l, &p)[l.waves.iter().position(|x| x == w).unwrap()];
             if weight > 0.0 {
                 held += 1;
@@ -711,4 +712,32 @@ fn the_shore_filter_spreads_a_band_narrower_than_a_pixel_and_leaves_the_waterlin
     assert!(peak(&filtered) < 0.2 * peak(&sharp_band), "{} against {}", peak(&filtered), peak(&sharp_band));
     // The cover rises over about two filter widths.
     assert!(shore_cover(look.shore_fade_m, &look, 1.0) < 0.1 && shore_cover(2.5, &look, 1.0) > 0.99);
+}
+
+// spec: ATMO-013
+#[test]
+fn a_wave_under_about_two_pixels_per_wavelength_fades_out_of_the_shading_and_no_footprint_means_no_fade() {
+    let l = water_liquid();
+    let up = [0.0, 0.0, 1.0];
+    for (i, w) in l.waves.iter().enumerate() {
+        let lambda = core::f64::consts::TAU / (w.k.iter().map(|c| c * c).sum::<f64>()).sqrt();
+        let at = |footprint: f64| {
+            let mut p = point([0.0; 3], up, lambda / 9.0, 100.0);
+            p.footprint = footprint;
+            wave_weights(&l, &p)[i]
+        };
+        let whole = at(0.0);
+        assert!(whole > 0.0, "wave {i} has weight on the open sea");
+        assert_eq!(at(lambda / (PIXEL_FADE.1 + 0.001)), whole, "from four pixels per wavelength the wave is whole");
+        assert_eq!(at(lambda / (PIXEL_FADE.0 - 0.001)), 0.0, "under two pixels per wavelength it is gone");
+        let mid = at(lambda / 3.0);
+        assert!(mid > 0.0 && mid < whole, "wave {i}: {mid} between 0 and {whole}");
+        // Monotone and continuous in the footprint.
+        let mut last = whole;
+        for k in 1..400 {
+            let w = at(lambda * f64::from(k) / 400.0);
+            assert!(w <= last + 1.0e-12 && (last - w) < 0.02 * whole + 1.0e-9, "wave {i}, footprint {k}/400 wavelengths: {last} then {w}");
+            last = w;
+        }
+    }
 }

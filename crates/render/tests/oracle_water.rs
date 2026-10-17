@@ -57,6 +57,7 @@ fn wave_cases(alt: f64, count: usize, seed: u64) -> (Vec<WaveProbe>, WaveRefs) {
             depth: depth as f32,
             phases,
             choppy: look.choppy as f32,
+            footprint: 0.0,
         };
         let point = WavePoint {
             local: wide(probe.local),
@@ -64,6 +65,7 @@ fn wave_cases(alt: f64, count: usize, seed: u64) -> (Vec<WaveProbe>, WaveRefs) {
             phases: probe.phases.map(f64::from),
             spacing: f64::from(probe.spacing),
             depth: f64::from(probe.depth),
+            footprint: 0.0,
         };
         let r = wave_sample(&liquid.as_f32(), &point, f64::from(probe.choppy));
         refs.push((r.disp, r.slope));
@@ -126,6 +128,7 @@ fn the_waves_hold_a_long_run_and_planet_sized_origins_because_the_phases_are_red
                 depth: 25.0,
                 phases: tile_phases(&liquid, origin, t),
                 choppy: look.choppy as f32,
+                footprint: 0.0,
             };
             let p = WavePoint {
                 local: wide(probe.local),
@@ -133,6 +136,7 @@ fn the_waves_hold_a_long_run_and_planet_sized_origins_because_the_phases_are_red
                 phases: probe.phases.map(f64::from),
                 spacing: 2.0,
                 depth: f64::from(probe.depth),
+                footprint: 0.0,
             };
             refs.push(wave_sample(&liquid.as_f32(), &p, look.choppy).disp);
             probes.push(probe);
@@ -309,6 +313,7 @@ fn a_camera_walking_a_millimetre_at_a_time_at_one_metre_changes_the_surface_by_n
             depth: 3.0,
             phases,
             choppy: look.choppy as f32,
+            footprint: 0.0,
         };
         let w = WavePoint {
             local: wide(wp.local),
@@ -316,6 +321,7 @@ fn a_camera_walking_a_millimetre_at_a_time_at_one_metre_changes_the_surface_by_n
             phases: phases.map(f64::from),
             spacing: f64::from(wp.spacing),
             depth: 3.0,
+            footprint: 0.0,
         };
         want_waves.push(wave_sample(&water.as_f32(), &w, look.choppy).disp);
         waves.push(wp);
@@ -335,4 +341,70 @@ fn a_camera_walking_a_millimetre_at_a_time_at_one_metre_changes_the_surface_by_n
         }
     }
     assert_eq!(steps, 199 * 3);
+}
+
+// spec: ATMO-014, ATMO-013
+#[test]
+fn the_pixel_footprint_fade_of_the_shader_matches_the_reference_and_a_far_grazing_pixel_has_no_waves_left() {
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let look = WaterLook::EARTH;
+    let liquid = LiquidAppearance::new(0, &LiquidKind::WATER, &look);
+    let bound = 1.0e-3 + 1.0e-3 * liquid.amplitude_sum();
+    let origin = norm3([0.3, -0.5, 0.8]).map(|c| c * (R + 10.0));
+    let up = norm3([0.3, -0.5, 0.8]);
+    let mut probes = Vec::new();
+    let mut refs = Vec::new();
+    // A pixel's footprint from 2 cm to 500 m: near water to a far grazing pixel (5 km away at 1440 p the pixel is 4 m across the view
+    // and about 115 m along it at 2 degrees of grazing).
+    for (k, footprint) in [0.02, 0.1, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 40.0, 115.0, 500.0].into_iter().enumerate() {
+        for j in 0..20u64 {
+            let local = [(unit(5, 3 * j + k as u64) - 0.5) * 400.0, (unit(6, 3 * j + k as u64) - 0.5) * 400.0, 0.2];
+            let probe = WaveProbe {
+                liquid,
+                local: f32s(local),
+                spacing: 0.4,
+                up: f32s(up),
+                depth: 40.0,
+                phases: tile_phases(&liquid, origin, 77.0 + j as f64),
+                choppy: look.choppy as f32,
+                footprint: footprint as f32,
+            };
+            let p = WavePoint {
+                local: wide(probe.local),
+                up: wide(probe.up),
+                phases: probe.phases.map(f64::from),
+                spacing: 0.4,
+                depth: 40.0,
+                footprint: f64::from(probe.footprint),
+            };
+            refs.push(wave_sample(&liquid.as_f32(), &p, look.choppy));
+            probes.push((footprint, probe));
+        }
+    }
+    let got = probe_waves(&ctx, &probes.iter().map(|(_, p)| *p).collect::<Vec<_>>());
+    let (mut far_slope, mut near_slope): (f64, f64) = (0.0, 0.0);
+    for (((footprint, _), (disp, slope)), want) in probes.iter().zip(&got).zip(&refs) {
+        for c in 0..3 {
+            assert!(
+                (f64::from(disp[c]) - want.disp[c]).abs() <= bound,
+                "footprint {footprint}: displacement {disp:?} against {:?}",
+                want.disp
+            );
+            assert!(
+                (f64::from(slope[c]) - want.slope[c]).abs() <= 2.0e-4,
+                "footprint {footprint}: slope {slope:?} against {:?}",
+                want.slope
+            );
+        }
+        let s = libm::sqrt(slope.iter().map(|c| f64::from(*c) * f64::from(*c)).sum::<f64>());
+        if *footprint >= 115.0 {
+            far_slope = far_slope.max(s);
+        } else if *footprint <= 0.1 {
+            near_slope = near_slope.max(s);
+        }
+    }
+    // The far pixel keeps no wave of the liquid (its shortest wavelength is far above two pixels only for the longest wave of 100 m
+    // and up): the shading normal is the surface's own, within the f32 noise; the near pixel has the waves.
+    assert!(near_slope > 0.01, "the near pixels have slopes: {near_slope}");
+    assert!(far_slope < 1.0e-3, "the far grazing pixel has no wave left to alias: {far_slope}");
 }

@@ -72,6 +72,17 @@ pub trait WaterProducer: Sync {
     fn reference_level_m(&self) -> Option<f64> {
         None
     }
+
+    /// The water this producer makes at the query by the coastal band (ADR 0056), if any: where the bake says land but the ground is
+    /// low enough for erosion to cut it below the level. The default has no band.
+    fn band_at(&self, _q: &WaterQuery) -> Result<Option<WaterSample>, ReadError> {
+        Ok(None)
+    }
+
+    /// Whether the ocean channel marks a vertex that weighs in the interpolation at the query (ADR 0041 point 2).
+    fn ocean_bit_at(&self, _q: &WaterQuery) -> Result<bool, ReadError> {
+        Ok(false)
+    }
 }
 
 /// The sea (ADR 0041 point 1): W is the definition's sea level where the point is ocean-connected sea.
@@ -115,6 +126,40 @@ impl WaterProducer for SeaProducer<'_> {
     fn reference_level_m(&self) -> Option<f64> {
         Some(self.sea.level_m)
     }
+
+    fn band_at(&self, q: &WaterQuery) -> Result<Option<WaterSample>, ReadError> {
+        let land = f64::from(q.ground.continent) > SEA_LEVEL_C;
+        let low = f64::from(q.ground.elevation_m) <= coast_band_elevation_m(self.sea.level_m);
+        Ok((land && low).then_some(WaterSample { level_m: self.sea.level_m, body: WaterBodyId::SEA, kind: self.sea.liquid }))
+    }
+
+    fn ocean_bit_at(&self, q: &WaterQuery) -> Result<bool, ReadError> {
+        if self.ocean.res() != q.pos.res {
+            return Err(ReadError::Shape(format!(
+                "the ocean channel is of a {}-cell bake and the water field reads a {}-cell bake",
+                self.ocean.res(),
+                q.pos.res
+            )));
+        }
+        let (vertices, n) = q.pos.weighted_vertices(q.pos.res);
+        for &(i, j) in &vertices[..n] {
+            if self.ocean.is_ocean(q.pos.face, i, j)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+}
+
+/// How far the sea reaches over the coastal band from an ocean vertex of the bake (ADR 0056), metres: a tile of the band carries the
+/// sea when an ocean vertex lies within this distance of it, or within two of its own edges when it is larger.
+pub const COAST_REACH_M: f64 = 100_000.0;
+
+/// The highest bake elevation (m) at which a point of the coastal band can still lie below the sea level `level_m` (ADR 0056): the
+/// fixed point of `E = level + the deepest flat-ground cut at E` ([`crate::erosion::flat_ground_band_elevation_m`], about 64 m at level 0).
+/// Monotone in the level. Steep ground (a larger slope factor) is not covered.
+pub fn coast_band_elevation_m(level_m: f64) -> f64 {
+    crate::erosion::flat_ground_band_elevation_m(level_m)
 }
 
 /// W over a body: the producers, the bake they read and its face mapping.
@@ -149,6 +194,34 @@ impl<'a> WaterField<'a> {
             }
         }
         Ok(None)
+    }
+
+    /// The sea of the coastal band at `dir` (ADR 0056): the bake says land, the ground is low enough for the terrain to dip below the
+    /// level, and no producer has water there. `None` elsewhere.
+    pub fn band_at(&self, dir: Vec3) -> Result<Option<WaterSample>, ReadError> {
+        let pos = locate_direction(self.bake.res(), self.map, dir)?;
+        let ground = read_direction(self.bake, self.map, dir)?;
+        let q = WaterQuery { dir, pos, ground };
+        for p in &self.producers {
+            if let Some(w) = p.band_at(&q)? {
+                return Ok(Some(w));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Whether the ocean channel has a vertex at `dir`'s cell.
+    pub fn ocean_bit_at(&self, dir: Vec3) -> Result<bool, ReadError> {
+        let pos = locate_direction(self.bake.res(), self.map, dir)?;
+        // Only the lattice position decides: the bake is not read.
+        let ground = GlobalSample { continent: 0.0, elevation_m: 0.0, temperature_c: 0.0, precipitation_mm: 0.0 };
+        let q = WaterQuery { dir, pos, ground };
+        for p in &self.producers {
+            if p.ocean_bit_at(&q)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// The level of the water at `dir`, if there is water.

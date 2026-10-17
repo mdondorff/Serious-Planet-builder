@@ -65,3 +65,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0053 | [The water pass: implementation readings of ADR 0041 points 4 to 9](0053-water-pass-readings-of-adr-0041.md) | accepted | owner judges `shore_filter` at the M5 gate |
 | 0054 | [Compact tiles in storage buffers instead of texture atlases (amends ADR 0033 point 3)](0054-compact-tiles-in-storage-buffers.md) | accepted |  |
 | 0055 | [Documentation model: specs hold current rules, ADRs record why](0055-documentation-model.md) | accepted | point 6: consolidation in the M5 housekeeping (queue item 10b) |
+| 0056 | [Water selection: the coastal band, tile water in the tile job, a pixel-footprint wave fade](0056-coastal-band-water-selection.md) | proposed | amends 0053 points 4 and 5 |

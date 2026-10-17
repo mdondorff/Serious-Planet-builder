@@ -269,10 +269,10 @@ fn fnv(h: u64, bytes: &[u8]) -> u64 {
 fn the_lit_water_and_atmosphere_frames_over_compact_blocks_are_the_recorded_pixels() {
     // The hash of the HDR and colour targets of five frames of the aerial coast (no water, the atmosphere, the class view, the lit
     // water without and with the atmosphere), as the atlas textures drew them (recorded by the differential of ADR 0054's change,
-    // byte-identical to the buffer blocks on WARP and on the RTX). A driver not in the table prints its hash and records nothing.
+    // byte-identical to the buffer blocks on WARP and on the RTX; re-recorded by the pixel-footprint fade of the waves, ADR 0056). A driver not in the table prints its hash and records nothing.
     const KNOWN: [(&str, u64); 2] = [
-        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0x8803_a586_d854_b57d),
-        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '591.86'", 0xcb25_56c7_d53d_1825),
+        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0x0a28_e95f_1bd9_f086),
+        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '591.86'", 0x7cf6_ffb0_1398_e4e3),
     ];
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let field = Reference(1);

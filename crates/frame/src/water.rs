@@ -19,7 +19,7 @@ use crate::terrain::TerrainPlan;
 use planet_core::cube::FaceMapping;
 use planet_core::{TileId, Vec3};
 use planet_generators::global::ReadError;
-use planet_generators::water::{WaterBodyId, WaterField, WaterSample};
+use planet_generators::water::{WaterBodyId, WaterField, WaterSample, COAST_REACH_M};
 use planet_world_def::{LiquidKindId, LiquidTable};
 use std::collections::HashMap;
 
@@ -132,13 +132,80 @@ impl From<ReadError> for WaterError {
 }
 
 /// A source of the field W by direction (the production one is [`WaterField`]; a test may stand in).
-pub trait WaterSource {
+pub trait WaterSource: Sync {
     fn water_at(&self, dir: Vec3) -> Result<Option<WaterSample>, ReadError>;
+
+    /// The sea of the coastal band at `dir` (ADR 0056); a source without a band has none.
+    fn band_at(&self, _dir: Vec3) -> Result<Option<WaterSample>, ReadError> {
+        Ok(None)
+    }
+
+    /// Whether the ocean channel marks a vertex at `dir`'s cell (ADR 0056); a source without one never does.
+    fn ocean_bit_at(&self, _dir: Vec3) -> Result<bool, ReadError> {
+        Ok(false)
+    }
 }
 
 impl WaterSource for WaterField<'_> {
     fn water_at(&self, dir: Vec3) -> Result<Option<WaterSample>, ReadError> {
         WaterField::water_at(self, dir)
+    }
+
+    fn band_at(&self, dir: Vec3) -> Result<Option<WaterSample>, ReadError> {
+        WaterField::band_at(self, dir)
+    }
+
+    fn ocean_bit_at(&self, dir: Vec3) -> Result<bool, ReadError> {
+        WaterField::ocean_bit_at(self, dir)
+    }
+}
+
+/// The water of tiles computed off the frame (ADR 0056): the tile's job fills its answer here and the plan reads it. A tile's answer
+/// is a pure function of the tile and the field, so which thread computes it, and when, changes nothing (CON-14).
+#[derive(Default)]
+pub struct WaterBook {
+    tiles: std::sync::Mutex<HashMap<TileId, Option<WaterSample>>>,
+    filled: std::sync::atomic::AtomicU64,
+}
+
+impl WaterBook {
+    pub fn new() -> WaterBook {
+        WaterBook::default()
+    }
+
+    /// Compute the water of `tile` (in the caller's thread, a tile job) and keep it. A tile already held is not computed again.
+    pub fn fill(&self, src: &dyn WaterSource, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> Result<(), WaterError> {
+        if self.tiles.lock().expect("water book").contains_key(&tile) {
+            return Ok(());
+        }
+        // The store blocks the samples touch load in parallel first (a tile of level 0 to 3 spans up to 25 blocks): the job then waits
+        // for the slowest block, not for the sum.
+        let n = TILE_SAMPLES;
+        let dirs: Vec<Vec3> = (0..=n).flat_map(|l| (0..=n).map(move |k| tile.sample_direction(map, n, k, l))).collect();
+        std::thread::scope(|scope| {
+            for chunk in dirs.chunks(dirs.len().div_ceil(8)) {
+                scope.spawn(move || {
+                    for d in chunk {
+                        let _ = src.water_at(*d);
+                    }
+                });
+            }
+        });
+        let answer = WaterTileCache::new().tile_water(src, map, tile, radius_m)?;
+        // Two jobs of one tile compute the same answer; only the first to insert counts.
+        if self.tiles.lock().expect("water book").insert(tile, answer).is_none() {
+            self.filled.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        Ok(())
+    }
+
+    pub fn get(&self, tile: TileId) -> Option<Option<WaterSample>> {
+        self.tiles.lock().expect("water book").get(&tile).copied()
+    }
+
+    /// Tiles computed by [`fill`](WaterBook::fill).
+    pub fn filled(&self) -> u64 {
+        self.filled.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -146,8 +213,14 @@ impl WaterSource for WaterField<'_> {
 #[derive(Default)]
 pub struct WaterTileCache {
     tiles: HashMap<TileId, Option<WaterSample>>,
+    /// Where the tiles' jobs left their answers (ADR 0056); a tile found there costs no field query.
+    book: Option<std::sync::Arc<WaterBook>>,
+    /// Tiles answered from the book.
+    pub book_hits: u64,
     /// Field queries made and the nanoseconds they took, for the cost report (recorded only).
     pub queries: u64,
+    /// Band and connectivity queries (ADR 0056), counted apart from the selection's own.
+    pub band_queries: u64,
     pub tile_misses: u64,
     pub query_ns: u64,
 }
@@ -155,6 +228,11 @@ pub struct WaterTileCache {
 impl WaterTileCache {
     pub fn new() -> WaterTileCache {
         WaterTileCache::default()
+    }
+
+    /// A cache that reads the answers the tile jobs left in `book` before it asks the field.
+    pub fn with_book(book: std::sync::Arc<WaterBook>) -> WaterTileCache {
+        WaterTileCache { book: Some(book), ..WaterTileCache::default() }
     }
 
     pub fn clear(&mut self) {
@@ -170,9 +248,20 @@ impl WaterTileCache {
     }
 
     /// The water of `tile` (module doc), memoised.
-    pub fn tile_water(&mut self, src: &dyn WaterSource, map: &dyn FaceMapping, tile: TileId) -> Result<Option<WaterSample>, WaterError> {
+    pub fn tile_water(
+        &mut self,
+        src: &dyn WaterSource,
+        map: &dyn FaceMapping,
+        tile: TileId,
+        radius_m: f64,
+    ) -> Result<Option<WaterSample>, WaterError> {
         if let Some(w) = self.tiles.get(&tile) {
             return Ok(*w);
+        }
+        if let Some(w) = self.book.as_ref().and_then(|b| b.get(tile)) {
+            self.book_hits += 1;
+            self.tiles.insert(tile, w);
+            return Ok(w);
         }
         let started = std::time::Instant::now();
         let n = TILE_SAMPLES;
@@ -189,11 +278,64 @@ impl WaterTileCache {
             }
         }
         // The most frequent body; ties go to the lower body id (a deterministic rule).
-        let best = found.into_iter().max_by(|a, b| a.1.cmp(&b.1).then(b.0.body.cmp(&a.0.body))).map(|(w, _)| w);
+        let mut best = found.into_iter().max_by(|a, b| a.1.cmp(&b.1).then(b.0.body.cmp(&a.0.body))).map(|(w, _)| w);
+        if best.is_none() {
+            best = self.band_water(src, map, tile, radius_m)?;
+        }
         self.query_ns += u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
         self.tile_misses += 1;
         self.tiles.insert(tile, best);
         Ok(best)
+    }
+}
+
+/// Probes of the connectivity test per axis at most (a grid of `2 * N + 1` squared over the reach).
+const REACH_PROBES: i32 = 25;
+
+impl WaterTileCache {
+    /// The sea of the coastal band for a tile with no water of its own (ADR 0056): a sample of the tile is band and an ocean vertex of the
+    /// bake lies within [`COAST_REACH_M`] of the tile (of its centre plus half its diagonal). The band sample's level and body.
+    fn band_water(
+        &mut self,
+        src: &dyn WaterSource,
+        map: &dyn FaceMapping,
+        tile: TileId,
+        radius_m: f64,
+    ) -> Result<Option<WaterSample>, WaterError> {
+        let n = TILE_SAMPLES;
+        let mut band = None;
+        'samples: for l in 0..=n {
+            for k in 0..=n {
+                self.band_queries += 1;
+                if let Some(w) = src.band_at(tile.sample_direction(map, n, k, l))? {
+                    band = Some(w);
+                    break 'samples;
+                }
+            }
+        }
+        let Some(band) = band else { return Ok(None) };
+        let edge_m = core::f64::consts::FRAC_PI_2 * radius_m / f64::from(1u32 << tile.level().min(30));
+        // The reach counts from the nearest point of the tile, not from its centre: a tile is wet when any point of it is within the reach, so
+        // a parent is wet wherever its children are (no water vanishes as the tiles refine).
+        let reach_m = COAST_REACH_M + 0.71 * edge_m;
+        let centre = tile.center_direction(map);
+        let helper = if centre.z.abs() < 0.9 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(1.0, 0.0, 0.0) };
+        let east = centre.cross(helper).normalized();
+        let north = centre.cross(east).normalized();
+        let step = reach_m / f64::from(REACH_PROBES) / radius_m;
+        for j in -REACH_PROBES..=REACH_PROBES {
+            for i in -REACH_PROBES..=REACH_PROBES {
+                if i * i + j * j > REACH_PROBES * REACH_PROBES {
+                    continue;
+                }
+                self.band_queries += 1;
+                let d = (centre + east * (f64::from(i) * step) + north * (f64::from(j) * step)).normalized();
+                if src.ocean_bit_at(d)? {
+                    return Ok(Some(band));
+                }
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -215,7 +357,7 @@ pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &
     let mut liquids: Vec<LiquidAppearance> = Vec::new();
     let mut nodes = Vec::new();
     for (i, n) in terrain.nodes.iter().enumerate() {
-        let Some(w) = cache.tile_water(req.source, req.map, n.tile)? else { continue };
+        let Some(w) = cache.tile_water(req.source, req.map, n.tile, req.lod.radius_m)? else { continue };
         if !w.level_m.is_finite() || w.level_m.abs() > 1.0e5 {
             return Err(WaterError::BadLevel { tile: n.tile, level_m: w.level_m });
         }

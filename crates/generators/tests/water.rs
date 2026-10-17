@@ -366,3 +366,25 @@ fn directions_on_face_edges_and_cube_corners_are_pinned_and_agree_with_the_verte
 
 const KNOWN_EDGE_WET: usize = 42;
 const KNOWN_EDGE_HASH: u64 = 17169129414116492182;
+
+// spec: ATMO-019
+#[test]
+fn the_coastal_band_edge_is_the_highest_elevation_where_flat_ground_can_still_be_cut_below_the_level() {
+    use planet_generators::erosion::{flat_ground_band_elevation_m, flat_ground_incision_m};
+    use planet_generators::water::coast_band_elevation_m;
+    // E = level + 0.75 x 0.15 x (80 + 900 smoothstep(-200, 300, E)): at level 0 about 64 m.
+    let zero = coast_band_elevation_m(0.0);
+    assert!((zero - 63.9).abs() < 0.5, "about 64 m at the level 0: {zero}");
+    let mut last = f64::NEG_INFINITY;
+    for level in [-300.0, -30.0, 0.0, 12.5, 40.0, 400.0, 3000.0] {
+        let edge = flat_ground_band_elevation_m(level);
+        assert_eq!(coast_band_elevation_m(level).to_bits(), edge.to_bits());
+        // A fixed point, to the bit of the iteration: the cut at the edge reaches exactly the level.
+        assert!((edge - flat_ground_incision_m(edge) - level).abs() < 1e-9, "level {level}: edge {edge}");
+        // Ground at the edge can be cut to the level; ground above it cannot (the cut grows slower than the elevation).
+        let above = edge + 0.01;
+        assert!(above - flat_ground_incision_m(above) > level, "level {level}: ground just above the edge stays above");
+        assert!(edge > last, "the edge rises with the level");
+        last = edge;
+    }
+}

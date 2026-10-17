@@ -44,6 +44,8 @@ const CARVE_FROM: f64 = 0.01;
 const CARVE_TO: f64 = 0.2;
 /// The crease sum lies in [-0.75, 0.25], so the detail lies in [-0.75, 0.25] times the largest amplitude.
 const AMPLITUDE_MAX_M: f64 = AMPLITUDE_OCEAN_M + AMPLITUDE_LAND_M;
+/// The lower bound of the crease sum.
+const CREASE_LOW: f64 = -0.75;
 const DETAIL_DOWN_M: f64 = 0.75 * AMPLITUDE_MAX_M;
 
 /// Largest height the field takes in magnitude: the bake's elevation clamp plus the deepest incision.
@@ -62,6 +64,24 @@ fn amplitude_m(elevation_m: f64, carve: f64) -> f64 {
 /// Share of the amplitude at a slope (rise over run; nondecreasing).
 fn carve(slope: f64) -> f64 {
     CARVE_FLOOR + (1.0 - CARVE_FLOOR) * smoothstep(CARVE_FROM, CARVE_TO, slope)
+}
+
+/// The deepest cut (m, positive) the erosion makes into flat ground (slope below `CARVE_FROM`: the slope factor is `CARVE_FLOOR`) of
+/// bake elevation `elevation_m`: `0.75 A(E)`, 0.75 being the lower bound of the crease sum.
+pub fn flat_ground_incision_m(elevation_m: f64) -> f64 {
+    -CREASE_LOW * amplitude_m(elevation_m, carve(0.0))
+}
+
+/// The highest bake elevation (m) at which flat ground can still lie below the level `level_m`: the fixed point of
+/// `E = level + flat_ground_incision_m(E)`. Found by iterating from the level (the map is increasing and contracting, so the root is
+/// unique and the result is the same bits everywhere, CON-14); `level_m = 0` gives about 64 m. The coastal band of the water field reads
+/// it (ADR 0056).
+pub fn flat_ground_band_elevation_m(level_m: f64) -> f64 {
+    let mut e = level_m;
+    for _ in 0..64 {
+        e = level_m + flat_ground_incision_m(e);
+    }
+    e
 }
 
 /// One octave's term `0.25 - (1 - |n|)^3` for a noise value.
