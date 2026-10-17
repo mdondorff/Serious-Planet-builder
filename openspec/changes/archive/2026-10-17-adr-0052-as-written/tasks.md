@@ -1,0 +1,4 @@
+- [x] 1.1 Remove the delta-1 cap from the ADR 0052 path; tests: 33 and 5000 at delta 1 agree, a whole-image shift agrees, 64 agrees, 65 beyond escalates whatever the delta-1 count
+- [x] 1.2 Qualified bound-test names (`binary::name`) with a tier-A test
+- [x] 2.1 TEST-022, skill, log; review pass re-run with `--apply`; status item removed
+- [x] 1.3 `observe`: a candidate equal to its golden is Unchanged (tier-A test)

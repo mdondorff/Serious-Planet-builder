@@ -361,3 +361,10 @@ What happened: a quartic base surface through 25 control points removes the leve
 Assumption it changes: the duality exploration's "5 x 5 base or a floor, either removes the blocker" (equal in cost): the 5x5 base is the expensive one.
 Proposed follow-up: the retirement uses the floor; the terrain-lod spec states that a leaf at the floor has no parent to morph to.
 Obsolete when: the retirement is decided (accepted or dropped).
+
+## 2026-10-17 Hardware against software adapters differ by one level across whole debug views
+Scope: golden-review, ADR 0052 path
+What happened: the review pass of the 18 pending M5 goldens showed RTX against WARP and llvmpipe differing at delta 1 in 36 to 3,448 pixels per view (never WARP against llvmpipe), while the pixels beyond delta 1 stayed at most 24 (cap 64). A 32-pixel delta-1 cap added to ADR 0052 point 1 by a reading blocked 11 goldens and was withdrawn.
+Assumption it changes: ADR 0017 rounding noise (32 px at delta 1) as a cross-adapter bound: it holds for candidate against golden on one adapter, not for hardware against software.
+Proposed follow-up: none; ADR 0052 as written (at most 64 pixels beyond delta 1, any number at delta 1) stands, the bound tests guard the values.
+Obsolete when: the ADR 0037 window ends at the M5 gate.

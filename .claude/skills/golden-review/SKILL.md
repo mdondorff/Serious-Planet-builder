@@ -9,8 +9,7 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; the M5 window: `
    For the first golden of an M5 class (`lit`, later `sky` and `water`, in `tests/goldens/classes.txt`; ADR 0037, a window the
    owner revisits at the M5 gate) the proposal also needs a section `ADR 0037 conditions:` with one line per golden:
    `- <golden name>: debug-view=<golden name of the feature's debug view>; bound-tests=<test>, <test>`. The tests are the ones
-   that prove the attribute's declared bound (ADR 0035; the change's spec deltas name class and bound), as `test_name` or
-   `binary::test_name`. The debug view may be a golden of this run (a new view) or a blessed one.
+   that prove the attribute's declared bound (ADR 0035; the change's spec deltas name class and bound), as `test_name`, `binary::test_name` or `crate::binary::test_name`. The debug view may be a golden of this run (a new view) or a blessed one.
 2. **Collect candidates for every adapter that has the golden.** Start from an empty `target/review/candidates/`
    (delete it first) so nothing from an earlier run is reviewed.
    - WARP: `cargo xtask test gpu` (writes `target/review/candidates/dx12-microsoft-basic-render-driver/`). Or download
@@ -30,10 +29,12 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; the M5 window: `
    rules: every assertion of the golden test other than the golden comparison), and the change's verifier and reviewers
    have no open finding about pixels. An `AUTO-M5` needs the same. If either fails, or any reviewer objects, treat the
    candidate as `ESCALATE`.
-   For the debug view of a first M5 golden, candidates that are new in this run agree pairwise when every pixel is within
-   delta 1 except at most 64 pixels of any delta, plus at most 32 pixels at exactly delta 1 (ADR 0017 rounding noise stays;
-   a whole-image one-level shift is not agreement; ADR 0052, which amends ADR 0037 point 1(b); `ADR_0052_EDGE_PIXELS`); a
-   debug view that already has a blessed golden is still checked by ADR 0017. The report prints the worst pair.
+   For the debug view of a first M5 golden, candidates that are new in this run agree pairwise when at most 64 pixels
+   differ by more than delta 1 (any amount) and any number differ at exactly delta 1 (ADR 0052 as written, which amends
+   ADR 0037 point 1(b); `ADR_0052_EDGE_PIXELS`; the planner's 32-px reading of 2026-10-17 was withdrawn because
+   RTX-against-software rounding spreads delta 1 across whole views). The same-adapter check of a candidate against its
+   golden is unchanged (ADR 0017, 32 px at delta 1). A debug view that already has a blessed golden is still checked by
+   ADR 0017. The report prints the worst pair and, on a failure, the cap exceeded and the counts.
    The driver gate is never relaxed, for first goldens too: a candidate rendered by another driver than the one in
    `driver.txt` escalates.
 4. **Bless the auto verdicts.** `cargo xtask golden-review ... --apply` copies only `AUTO-R`/`AUTO-E`/`AUTO-M5` candidates
