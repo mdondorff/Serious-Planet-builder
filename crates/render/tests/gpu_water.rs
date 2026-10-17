@@ -626,7 +626,7 @@ fn the_waves_move_with_the_clock_and_only_on_water_and_stand_still_for_the_same_
     let (c, heading) = coast(&field, 0.0);
     let table = LiquidTable::earth();
     let src = HeightSea { field: &field, level: 0.0 };
-    let camera = coast_camera(c, heading, 0.0, 30.0, 600.0, 0.0, 10.0, 1.6);
+    let camera = coast_camera(c, heading, 0.0, 30.0, 3500.0, 0.0, 8.0, 1.6);
     let scene = Scene { camera, size, field: &field };
     let plan = scene.terrain();
     let mut r = new_renderer(&ctx, false, size);
