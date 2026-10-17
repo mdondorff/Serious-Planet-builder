@@ -2,6 +2,7 @@
 
 One line per archived change, ADR decision, perf window or owner decision, newest first. Add new lines directly below this paragraph. Finished milestones are archived by the `housekeeping` skill: `docs/archive/M0-M3/log.md`, `docs/archive/M4/log.md`.
 
+- 2026-10-17 **SPIKE-12 closed** (sonnet-spikes, PR #233): retiring the vertex format is about 8 coder days with one wide texel for every tile and a render floor at level 3; recommended for early M6; to the owner at the M5 gate.
 - 2026-10-17 **Conflict markers removed** (opus-planner): PR #222 (water-pass) was merged with unresolved markers in `docs/adr/README.md`, `docs/log.md` and `docs/learnings.md` (a conflict resolved by hand on the branch; spec-lint and CI do not check for markers); both sides kept. Item 7d adds the check to spec-lint.
 - 2026-10-17 **Spike output in one place (owner):** every spike or exploration keeps its report, numbers and renders in `spikes/<name>/results/` (`results.md` ends with a Visuals section of embedded renders); every exploration gets a register entry; `docs/spikes/` is frozen (SPIKE-03 to 07, linked from accepted ADRs). The register has an index of the M5 spikes and explorations.
 - 2026-10-17 **ADR 0053 accepted** (water-pass readings; opus-planner, delegation): coverage flicker budget 0.1 % normative; exact-class share and `lit_shore_flash` reported only (the lit measure flags the bare beach at 6.3-36.8 %); `shore_filter` default 1 (descent 41 % to 7 %, glide 6.5 % to 16.2 %), the owner judges it at the gate.
