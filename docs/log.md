@@ -2,6 +2,7 @@
 
 One line per archived change, ADR decision, perf window or owner decision, newest first. Add new lines directly below this paragraph. Finished milestones are archived by the `housekeeping` skill: `docs/archive/M0-M3/log.md`, `docs/archive/M4/log.md`.
 
+- 2026-10-17 **Spike output in one place (owner):** every spike or exploration keeps its report, numbers and renders in `spikes/<name>/results/` (`results.md` ends with a Visuals section of embedded renders); every exploration gets a register entry; `docs/spikes/` is frozen (SPIKE-03 to 07, linked from accepted ADRs). The register has an index of the M5 spikes and explorations.
 - 2026-10-17 **ADR 0053 accepted** (water-pass readings; opus-planner, delegation): coverage flicker budget 0.1 % normative; exact-class share and `lit_shore_flash` reported only (the lit measure flags the bare beach at 6.3-36.8 %); `shore_filter` default 1 (descent 41 % to 7 %, glide 6.5 % to 16.2 %), the owner judges it at the gate.
 <<<<<<< HEAD
 - 2026-10-17 **water-pass archived** (sonnet-explorer, M5 item 7): water on the terrain grid with Gerstner waves (planet-fixed, CPU-reduced phases), the shoreline from `W - h_morph`, lit surface with absorption, Fresnel, glint and emission (atmosphere over it), the lava lake through the same pass, the coverage flicker metric (0.0000 % on a glide and a descent), the frustum cut that keeps water above culled seabed, look schema 4, the viewer's ocean; ADR 0051 point 6 decided as option 1 (3.6 us per new tile, no storage); ADR 0053 proposed; four `water` goldens pending for 7b.

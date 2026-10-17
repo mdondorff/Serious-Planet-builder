@@ -33,6 +33,7 @@ Your session was cleared, so everything you need is below or in the files it nam
 - Write only your `docs/spikes.md` entry, `docs/learnings.md` entries and `spikes/vertex-retirement/results/`. Never edit `docs/status.md`, `docs/log.md`, specs, ADRs or the main crates.
 - **RTX timings** are allowed as indicative numbers, without a separate go from opus-planner. Before each timing run, ask sonnet-explorer whether the GPU is free, and tell it when you're done. Label every number indicative (not a perf window), with its time. Never run `cargo xtask perf`. If opus-planner announces a perf window, stop all runs.
 - The WARP device removal with compact tiles plus atmosphere is known and accepted as test-only. Don't chase it; use the debug views without atmosphere on WARP.
+- `results.md` ends with a **Visuals** section (the `spike` skill's output rule, owner 2026-10-17): side-by-side renders of the vertex path against (a) the 5x5 base and (b) the level-3 floor at orbit and aerial views, the cliff texel on the steep field against the CPU mesh, and the difference images. Images go in `spikes/vertex-retirement/results/images/`, each under 1 MB.
 - Write files with LF line endings and forward slashes in paths (the PR #224 lesson).
 - No production code. Prototype code stays on the spike branch.
 
