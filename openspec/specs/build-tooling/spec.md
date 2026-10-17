@@ -58,6 +58,10 @@ Source: ADR 0009, report §16
 - **WHEN** only files of `streaming` changed
 - **THEN** `test fast` selects `streaming`, `frame`, `render`, `editor` and `app`
 
+#### Scenario: Stale local main
+- **WHEN** a branch is checked out in a worktree whose local `main` is behind `origin/main`
+- **THEN** the changed files are those of `origin/main...HEAD` (and the working tree), not of `main...HEAD`; `main` is used only when there is no `origin/main`
+
 #### Scenario: Shared crate changed
 - **WHEN** `testkit`, `perf` or a root manifest changed, or nothing changed
 - **THEN** `test fast` selects every crate
