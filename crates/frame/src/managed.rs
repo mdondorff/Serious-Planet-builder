@@ -324,6 +324,21 @@ impl ManagedLoop {
         &self.manager
     }
 
+    /// SPIKE-13 ONLY (never merged): an item edit. Drops the resident tiles in `tiles`, forgets their cached keys and origins (all
+    /// of the plan cache when `full_cache`), and asks for a new plan.
+    pub fn spike_edit(&mut self, tiles: &[TileId], cache_mode: u8, refresh: bool) -> usize {
+        match cache_mode {
+            1 => self.pipe.worker().invalidate_cache(Some(tiles)),
+            2 => self.pipe.worker().invalidate_cache(None),
+            _ => {}
+        }
+        let n = if refresh { self.manager.streamer_mut().refresh(tiles) } else { self.manager.streamer_mut().invalidate(tiles) };
+        self.pipe.force_replan();
+        self.classes_stale = true;
+        self.prefetch_closure_stale = true;
+        n
+    }
+
     /// The tiles the sink holds (what a frame may draw).
     pub fn resident(&self) -> &HashMap<TileId, ResidentTile> {
         &self.resident

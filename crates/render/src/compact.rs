@@ -138,6 +138,26 @@ fn oct_decode(e: vec2<f32>) -> vec3<f32> {
     return normalize(n);
 }
 
+// SPIKE-13: the stamp preview. g.albedo[0] = (stamp centre relative to the camera, radius), g.albedo[1] = (amplitude, enabled).
+// A raised disc, bump(d) = A (1 - (d/r)^2)^2 along the tile's up; returns (bump, gradient of the bump along the ground).
+fn stamp_bump(p_rel: vec3<f32>, up: vec3<f32>) -> vec4<f32> {
+    if (g.albedo[1].y < 0.5) {
+        return vec4<f32>(0.0);
+    }
+    let d3 = p_rel - g.albedo[0].xyz;
+    let dh = d3 - up * dot(d3, up);
+    let d = length(dh);
+    let r = g.albedo[0].w;
+    if (d >= r) {
+        return vec4<f32>(0.0);
+    }
+    let w = 1.0 - (d / r) * (d / r);
+    let a = g.albedo[1].x;
+    let slope = a * 2.0 * w * (-2.0 * d / (r * r));
+    let dir = select(vec3<f32>(0.0), dh / d, d > 1e-6);
+    return vec4<f32>(a * w * w, dir * slope);
+}
+
 fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
     let node = nodes[inst];
     let tref = tile_refs[inst];
@@ -187,14 +207,19 @@ fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
         pos = pos - d;
         cpos = cpos - d;
     }
+    let sup = node.up.xyz;
+    let sb = select(vec4<f32>(0.0), stamp_bump(node.origin_rel.xyz + pos, sup), node.morph.z > 0.5);
+    let sc = select(vec4<f32>(0.0), stamp_bump(node.origin_rel.xyz + cpos, sup), node.morph.z > 0.5);
+    pos = pos + sup * sb.x;
+    cpos = cpos + sup * sc.x;
     let m = clamp((length(node.origin_rel.xyz + pos) - node.morph.x) / max(node.morph.y - node.morph.x, 1e-6), 0.0, 1.0);
     let local = mix(pos, cpos, m);
     let p = node.origin_rel.xyz + local;
-    let h = h_origin + own.w;
-    let ch = h_origin + coarse.w;
+    let h = h_origin + own.w + sb.x;
+    let ch = h_origin + coarse.w + sc.x;
     var out: VsOut;
     out.pos = g.view_proj * vec4<f32>(p, 1.0);
-    out.normal = oct_decode(unpack2x16snorm(own_t.y | (own_t.z << 16u)));
+    out.normal = normalize(oct_decode(unpack2x16snorm(own_t.y | (own_t.z << 16u))) - sb.yzw);
     out.height = mix(h, ch, m);
     out.height_fine = h;
     out.morph = m;

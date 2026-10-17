@@ -242,6 +242,16 @@ impl SelectionCache {
         SelectionCache::default()
     }
 
+    /// SPIKE-13 ONLY (never merged): forget the origin height and mesh key of `tiles` (an item edit changed what they read).
+    pub fn invalidate_tiles(&mut self, tiles: &[TileId]) -> usize {
+        let mut n = 0;
+        for t in tiles {
+            n += usize::from(self.origin_heights.remove(t).is_some());
+            self.mesh_keys.remove(t);
+        }
+        n
+    }
+
     pub fn clear(&mut self) {
         self.tiles.clear();
         self.volumes.clear();

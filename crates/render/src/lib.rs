@@ -20,6 +20,7 @@ pub mod water_gpu;
 pub mod window;
 pub use atmosphere::{atmosphere_shaders, AtmospherePath, ProbeKind};
 pub use compact::compact_terrain_shader;
+pub use terrain::{set_stamp_preview, set_stamp_preview_tiles};
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
 pub use gate::requirements as adapter_requirements;
 pub use gpu_timing::{GpuPass, PassTimes};
@@ -169,6 +170,12 @@ impl GpuContext {
     }
 
     /// Adapter name as the driver reports it.
+    /// SPIKE-13 ONLY: submit nothing and wait until the queue is idle (every frame submitted so far has finished).
+    pub fn probe_wait(&self) {
+        self.queue.submit(std::iter::empty::<wgpu::CommandBuffer>());
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+    }
+
     pub fn adapter_name(&self) -> &str {
         &self.info.name
     }

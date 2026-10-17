@@ -41,6 +41,20 @@ pub fn grid_phases(origin: [f64; 3]) -> [[f32; 3]; 9] {
     })
 }
 
+/// SPIKE-13 ONLY (never merged): the stamp preview, `(centre in planet axes, radius m, amplitude m)`, read when the debug path writes its globals.
+static STAMP_PREVIEW: std::sync::Mutex<Option<([f64; 3], f64, f64)>> = std::sync::Mutex::new(None);
+
+/// SPIKE-13 ONLY: the tiles the preview displaces (those still holding the old version).
+static STAMP_PREVIEW_TILES: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<planet_core::TileId>>> = std::sync::LazyLock::new(Default::default);
+
+pub fn set_stamp_preview_tiles(t: std::collections::HashSet<planet_core::TileId>) {
+    *STAMP_PREVIEW_TILES.lock().expect("preview tiles") = t;
+}
+
+pub fn set_stamp_preview(p: Option<([f64; 3], f64, f64)>) {
+    *STAMP_PREVIEW.lock().expect("stamp preview") = p;
+}
+
 const SHADER: &str = r#"
 struct Globals {
     view_proj: mat4x4<f32>,
@@ -2133,6 +2147,15 @@ impl TerrainRenderer {
             None => {
                 globals.extend(f32_bytes(&[lo, hi, 0.0, 0.0]));
                 globals.extend([view_index(plan.view), 0, 0, 0].iter().flat_map(|v: &u32| v.to_le_bytes()));
+                globals.extend(vec![0u8; 16]);
+                // SPIKE-13: the stamp preview in the albedo lanes, unused by the debug path.
+                match *STAMP_PREVIEW.lock().expect("stamp preview") {
+                    Some((c, r, a)) => {
+                        let p = plan.camera.position.0;
+                        globals.extend(f32_bytes(&[(c[0] - p.x) as f32, (c[1] - p.y) as f32, (c[2] - p.z) as f32, r as f32, a as f32, 1.0, 0.0, 0.0]));
+                    }
+                    None => globals.extend(vec![0u8; 32]),
+                }
                 globals.extend(vec![0u8; GLOBALS_BYTES as usize - globals.len()]);
             }
         }
@@ -2157,7 +2180,8 @@ impl TerrainRenderer {
         for (i, d) in plan.nodes.iter().enumerate() {
             let r = d.camera_relative_origin;
             let c = d.color.map(|v| f32::from(v) / 255.0);
-            let mut floats = vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, 0.0, 0.0];
+            let preview_node = STAMP_PREVIEW_TILES.lock().expect("preview tiles").contains(&d.tile);
+            let mut floats = vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, if preview_node { 1.0 } else { 0.0 }, 0.0];
             for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
                 floats.extend([p[0], p[1], p[2], 0.0]);
             }

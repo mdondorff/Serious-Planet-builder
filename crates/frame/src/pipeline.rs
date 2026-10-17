@@ -40,6 +40,9 @@ pub const STALE_MOVE_FRACTION: f64 = 0.25;
 /// ... and while the view and up directions are within this angle (0.5 degrees) of the plan's.
 pub const STALE_ROTATION_RAD: f64 = 0.008_726_646_259_971_648;
 
+/// SPIKE-13 ONLY (never merged): draw a resident tile whose key differs from the plan's (an edit's old version) as it is.
+pub static SPIKE_STALE_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// The count of frames in flight (STRM-016): submitted minus finished, never above the bound.
 #[derive(Clone, Debug)]
 pub struct FramesInFlight {
@@ -216,6 +219,18 @@ pub fn draw_plan_with(
                 let rel = d.origin.0 - req.camera.position.0;
                 shown.insert(d.tile, TerrainDraw { camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32], ..*d });
                 continue;
+            }
+            // SPIKE-13: a resident tile of another version is drawn as it is (stale-while-revalidate) instead of its ancestor.
+            if SPIKE_STALE_OK.load(std::sync::atomic::Ordering::SeqCst) {
+                if let Some(r) = resident.resident(d.tile) {
+                    substituted += 1;
+                    let rel = r.origin.0 - req.camera.position.0;
+                    shown.insert(
+                        d.tile,
+                        TerrainDraw { origin: r.origin, camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32], mesh_key: r.mesh_key, ..*d },
+                    );
+                    continue;
+                }
             }
             let mut up = d.tile.parent();
             let found = loop {
@@ -403,6 +418,17 @@ pub struct PlanWorker {
 impl PlanWorker {
     pub fn new(spawner: Arc<dyn Spawner>, field: Arc<dyn PlanField>, threads: usize) -> Self {
         Self { spawner, field, cache: Arc::new(Mutex::new(SelectionCache::new())), threads, state: Arc::default() }
+    }
+
+    /// SPIKE-13 ONLY (never merged): forget cached origin heights and mesh keys of `tiles` (item edit), or everything with `None`.
+    pub fn invalidate_cache(&self, tiles: Option<&[TileId]>) {
+        let mut c = self.cache.lock().expect("selection cache");
+        match tiles {
+            Some(t) => {
+                c.invalidate_tiles(t);
+            }
+            None => c.clear(),
+        }
     }
 
     /// Ask for the plan of `req`. Never blocks and never plans on the calling thread.
@@ -596,6 +622,11 @@ pub struct PlanPipeline {
 impl PlanPipeline {
     pub fn new(worker: PlanWorker) -> Self {
         Self { worker, current: None, residency: None, last_requested: None, last_predicted: None, frame: 0 }
+    }
+
+    /// SPIKE-13 ONLY (never merged): ask for a new plan at the next frame although the camera did not change.
+    pub fn force_replan(&mut self) {
+        self.last_requested = None;
     }
 
     pub fn worker(&self) -> &PlanWorker {

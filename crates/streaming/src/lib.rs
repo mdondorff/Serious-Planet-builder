@@ -759,6 +759,41 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         }
     }
 
+    /// SPIKE-13 ONLY (never merged): request the resident tiles of `tiles` again without dropping them (stale while revalidating): the
+    /// new tile takes a second slot, replaces the old one when it completes and gives the old slot back. Returns the requests queued.
+    pub fn refresh(&mut self, tiles: &[TileId]) -> usize {
+        let mut n = 0;
+        for &t in tiles {
+            if self.resident.contains_key(&t) && !self.in_flight.contains_key(&t) {
+                if self.class_of(t).is_none() {
+                    // Held only until the share needs the slot: not worth a request, drop the old version.
+                    self.evict(t);
+                    continue;
+                }
+                self.request(t);
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// SPIKE-13 ONLY (never merged): drop the resident tiles of `tiles` and cancel their running jobs, so the next frames request them
+    /// again (they are still in their classes). Returns how many resident tiles were dropped.
+    pub fn invalidate(&mut self, tiles: &[TileId]) -> usize {
+        let mut dropped = 0;
+        for &t in tiles {
+            if let Some(f) = self.in_flight.get(&t) {
+                f.token.store(true, Ordering::SeqCst);
+            }
+            if self.resident.contains_key(&t) {
+                self.evict(t);
+                dropped += 1;
+            }
+        }
+        self.rescan = true;
+        dropped
+    }
+
     /// Cancel everything that is not resident: the queued requests are dropped and never reach the spawner, the dispatched
     /// ones are told to stop (a job still waiting in the spawner ends at once, a running one at its next stage boundary,
     /// STRM-005) and none of them becomes resident. Returns how many requests were cancelled. Dropping the streamer does this.
@@ -1034,8 +1069,13 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                         self.retry_due.remove(&(at, tile));
                     }
                     self.last_error.remove(&tile);
-                    self.resident
-                        .insert(tile, Resident { data: Arc::new(data), inserted: self.frame, last_used: self.frame, slot: flight.slot });
+                    if let Some(old) = self.resident.insert(tile, Resident { data: Arc::new(data), inserted: self.frame, last_used: self.frame, slot: flight.slot }) {
+                        // SPIKE-13: a refreshed tile: its old slot goes back (reusable after the frames in flight retire).
+                        self.pools.release(old.slot, self.frame);
+                        if tile.level() > 0 {
+                            self.victims[self.pools.kind_of(tile) as usize].remove(&(old.last_used, tile));
+                        }
+                    }
                     if tile.level() > 0 && !self.is_active(tile) {
                         self.victims[self.pools.kind_of(tile) as usize].insert((self.frame, tile));
                         self.work.updated += 1;
