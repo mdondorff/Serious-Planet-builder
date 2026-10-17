@@ -2,6 +2,7 @@
 
 One line per archived change, ADR decision, perf window or owner decision, newest first. Add new lines directly below this paragraph. Finished milestones are archived by the `housekeeping` skill: `docs/archive/M0-M3/log.md`, `docs/archive/M4/log.md`.
 
+- 2026-10-17 **SPIKE-11 remote check (owner):** over Chrome Remote Desktop from a touch screen, mouse look did not work and keyboard movement looked reasonable; mouse look over remote desktop is out of scope (owner). The local mouse check waits for the owner's physical access.
 - 2026-10-17 **Tile-format duality explored** (sonnet-spikes, PR #218): retiring the vertex format from rendering is feasible at about 5-7 coder days (render floor at level 3 or a 5x5 base; 32-bit heights for cliff tiles); put to the owner at the M5 gate. Until then item 7 keeps new per-vertex data out of per-format storage.
 - 2026-10-17 **ADR 0052 accepted (owner):** first M5 goldens' debug views agree across adapters with every pixel within delta 1 except at most 64 pixels of any delta (edges and band boundaries); queue item 7b implements it in `golden-review` and reviews the 14 pending goldens again.
 - 2026-10-17 **ADR 0051 accepted** (ocean channel, liquid table in the definition per the owner's constraint 3, the water-level field; opus-planner, delegation; point 6 left to item 7).
