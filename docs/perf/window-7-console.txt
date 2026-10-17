@@ -1,0 +1,191 @@
+## m5-run1
+lit/aerial-20km: run-to-run noise 0.114 above 0.1: one retry
+SESSION INVALID for budgets: frame verdicts: NO; GPU verdicts: NO; the verdicts below do not count
+  INVALID SESSION: run-to-run noise 0.108 on 'lit/aerial-20km' is above 0.1 after one retry
+warm-up lit/ground-1m: P0 1597 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+  lit/ground-1m: host load (1 samples, recorded not judged): system mean 6.5 % max 6.5 %; harness 2.0 %; competing mean 4.5 % max 4.5 %; top competitors: find 1.4 % (max 1.4), claude 0.7 % (max 0.7), MsMpEng 0.5 % (max 0.5), svchost 0.4 % (max 0.4), Code 0.2 %
+  lit/ground-1m: atmosphere run-to-run noise 0.058 (0.012 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit/ground-1m: water run-to-run noise 0.047 (0.004 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit/aerial-20km: still P0 1335 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit/aerial-20km: host load (1 samples, recorded not judged): system mean 4.4 % max 4.4 %; harness 1.6 %; competing mean 2.8 % max 2.8 %; top competitors: MsMpEng 1.1 % (max 1.1), claude 0.5 % (max 0.5), System 0.4 % (max 0.4), svchost 0.4 % (max 0.4), csrss 
+  lit/aerial-20km: atmosphere run-to-run noise 0.139 (0.035 ms): above the 10 % rule: yes; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit/aerial-20km: water run-to-run noise 0.145 (0.026 ms): above the 10 % rule: yes; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit/coast-2km: still P3 1162 MHz, below the 1400 MHz floor, after 30.4 s (29 chunks, cap 30 s)
+  lit/coast-2km: host load (1 samples, recorded not judged): system mean 7.7 % max 7.7 %; harness 1.4 %; competing mean 6.3 % max 6.3 %; top competitors: find 2.9 % (max 2.9), Code 1.3 % (max 1.3), MsMpEng 0.7 % (max 0.7), svchost 0.3 % (max 0.3), claude 0.3 %
+  lit/coast-2km: atmosphere run-to-run noise 0.016 (0.005 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit/coast-2km: water run-to-run noise 0.016 (0.035 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit/coast-3m: still P2 1155 MHz, below the 1400 MHz floor, after 30.4 s (29 chunks, cap 30 s)
+  lit/coast-3m: host load (2 samples, recorded not judged): system mean 6.4 % max 8.4 %; harness 2.0 %; competing mean 4.4 % max 5.8 %; top competitors: find 2.6 % (max 4.7), MsMpEng 0.4 % (max 0.5), claude 0.4 % (max 0.6), svchost 0.3 % (max 0.4), System 0.2 
+  lit/coast-3m: atmosphere run-to-run noise 0.051 (0.013 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit/coast-3m: water run-to-run noise 0.044 (0.137 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit/orbit: P0 1477 MHz (floor 1400 MHz, held 3 readings) after 13.6 s (13 chunks)
+  lit/orbit: host load (1 samples, recorded not judged): system mean 2.7 % max 2.7 %; harness 1.6 %; competing mean 1.1 % max 1.1 %; top competitors: claude 0.3 % (max 0.3), System 0.2 % (max 0.2), MsMpEng 0.1 % (max 0.1), svchost 0.1 % (max 0.1), NVDisplay.Co
+  lit/orbit: atmosphere run-to-run noise 0.014 (0.010 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit/orbit: water run-to-run noise 0.012 (0.002 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit/coast-glide: still P0 1335 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit/coast-glide: host load (5 samples, recorded not judged): system mean 18.7 % max 24.4 %; harness 16.9 %; competing mean 1.9 % max 2.2 %; top competitors: System 0.7 % (max 0.9), svchost 0.3 % (max 0.4), MsMpEng 0.2 % (max 0.4), claude 0.2 % (max 0.2), Cod
+warm-up lit/coast-glide@filter0: still P0 1282 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit/coast-glide@filter0: host load (2 samples, recorded not judged): system mean 4.0 % max 5.6 %; harness 2.9 %; competing mean 1.1 % max 1.4 %; top competitors: MsMpEng 0.5 % (max 0.8), svchost 0.3 % (max 0.4), System 0.2 % (max 0.2), claude 0.0 % (max 0.1)
+warm-up lit/coast-descent: still P0 1305 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit/coast-descent: host load (7 samples, recorded not judged): system mean 26.8 % max 30.8 %; harness 24.9 %; competing mean 1.9 % max 2.2 %; top competitors: System 0.7 % (max 0.9), svchost 0.3 % (max 0.4), MsMpEng 0.3 % (max 0.5), claude 0.2 % (max 0.4), C
+warm-up lit/coast-descent@filter0: still P0 1312 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit/coast-descent@filter0: host load (1 samples, recorded not judged): system mean 2.4 % max 2.4 %; harness 1.7 %; competing mean 0.7 % max 0.7 %; top competitors: svchost 0.2 % (max 0.2), System 0.2 % (max 0.2), MsMpEng 0.2 % (max 0.2), claude 0.1 % (max 0.
+after lit: system CPU load settled to 5.9 % (limit 15 %) after 3 poll(s)
+lit-formats/aerial-20km/vertex: run-to-run noise 0.143 above 0.1: one retry
+lit-formats/aerial-20km/compact: run-to-run noise 0.132 above 0.1: one retry
+lit-formats/orbit/vertex: run-to-run noise 0.231 above 0.1: one retry
+lit-formats/orbit/compact: run-to-run noise 0.170 above 0.1: one retry
+SESSION INVALID for budgets: frame verdicts: NO; GPU verdicts: NO; the verdicts below do not count
+  INVALID SESSION: run-to-run noise 0.182 on 'lit-formats/orbit/vertex' is above 0.1 after one retry
+  INVALID SESSION: run-to-run noise 0.145 on 'lit-formats/orbit/compact' is above 0.1 after one retry
+warm-up lit-formats/ground-1m/vertex: P0 1635 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+  lit-formats/ground-1m/vertex: host load (1 samples, recorded not judged): system mean 3.2 % max 3.2 %; harness 2.3 %; competing mean 0.9 % max 0.9 %; top competitors: System 0.2 % (max 0.2), svchost 0.2 % (max 0.2), MsMpEng 0.2 % (max 0.2), claude 0.2 % (max
+  lit-formats/ground-1m/vertex: atmosphere run-to-run noise 0.030 (0.006 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/ground-1m/vertex: water run-to-run noise 0.013 (0.001 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit-formats/ground-1m/compact: P0 1605 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+  lit-formats/ground-1m/compact: host load (1 samples, recorded not judged): system mean 3.4 % max 3.4 %; harness 1.9 %; competing mean 1.5 % max 1.5 %; top competitors: System 0.6 % (max 0.6), svchost 0.2 % (max 0.2), claude 0.2 % (max 0.2), MsMpEng 0.2 % (ma
+  lit-formats/ground-1m/compact: atmosphere run-to-run noise 0.035 (0.007 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/ground-1m/compact: water run-to-run noise 0.024 (0.002 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit-formats/aerial-20km/vertex: P0 1552 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+  lit-formats/aerial-20km/vertex: host load (1 samples, recorded not judged): system mean 3.2 % max 3.2 %; harness 1.7 %; competing mean 1.4 % max 1.4 %; top competitors: claude 0.4 % (max 0.4), System 0.4 % (max 0.4), MsMpEng 0.3 % (max 0.3), svchost 0.2 % (m
+  lit-formats/aerial-20km/vertex: atmosphere run-to-run noise 0.007 (0.002 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/aerial-20km/vertex: water run-to-run noise 0.007 (0.001 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit-formats/aerial-20km/compact: P0 1462 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+  lit-formats/aerial-20km/compact: host load (1 samples, recorded not judged): system mean 3.0 % max 3.0 %; harness 1.5 %; competing mean 1.5 % max 1.5 %; top competitors: System 0.4 % (max 0.4), MsMpEng 0.3 % (max 0.3), claude 0.3 % (max 0.3), svchost 0.2 % (
+  lit-formats/aerial-20km/compact: atmosphere run-to-run noise 0.015 (0.004 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/aerial-20km/compact: water run-to-run noise 0.012 (0.002 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit-formats/coast-2km/vertex: still P0 1320 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit-formats/coast-2km/vertex: host load (1 samples, recorded not judged): system mean 2.5 % max 2.5 %; harness 1.5 %; competing mean 1.0 % max 1.0 %; top competitors: svchost 0.3 % (max 0.3), claude 0.2 % (max 0.2), MsMpEng 0.1 % (max 0.1), System 0.1 % (max
+  lit-formats/coast-2km/vertex: atmosphere run-to-run noise 0.015 (0.004 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/coast-2km/vertex: water run-to-run noise 0.014 (0.024 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit-formats/coast-2km/compact: still P2 1312 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit-formats/coast-2km/compact: host load (1 samples, recorded not judged): system mean 2.8 % max 2.8 %; harness 1.4 %; competing mean 1.4 % max 1.4 %; top competitors: System 0.3 % (max 0.3), MsMpEng 0.3 % (max 0.3), svchost 0.2 % (max 0.2), claude 0.2 % (ma
+  lit-formats/coast-2km/compact: atmosphere run-to-run noise 0.024 (0.006 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/coast-2km/compact: water run-to-run noise 0.021 (0.044 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit-formats/orbit/vertex: P0 1605 MHz (floor 1400 MHz, held 3 readings) after 4.2 s (4 chunks)
+  lit-formats/orbit/vertex: host load (1 samples, recorded not judged): system mean 2.5 % max 2.5 %; harness 1.1 %; competing mean 1.4 % max 1.4 %; top competitors: svchost 0.3 % (max 0.3), claude 0.2 % (max 0.2), MsMpEng 0.2 % (max 0.2), System 0.2 % (max 0.2
+  lit-formats/orbit/vertex: atmosphere run-to-run noise 0.023 (0.016 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/orbit/vertex: water run-to-run noise 0.025 (0.004 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit-formats/orbit/compact: P0 1507 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+  lit-formats/orbit/compact: host load (1 samples, recorded not judged): system mean 2.6 % max 2.6 %; harness 0.8 %; competing mean 1.7 % max 1.7 %; top competitors: MsMpEng 0.4 % (max 0.4), System 0.2 % (max 0.2), claude 0.2 % (max 0.2), svchost 0.2 % (max 0.
+  lit-formats/orbit/compact: atmosphere run-to-run noise 0.003 (0.002 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/orbit/compact: water run-to-run noise 0.006 (0.001 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+lit-formats/ground-1m: compact / vertex GPU time ratio not comparable: clock state P0 1635 MHz vs P0 1522 MHz
+lit-formats/coast-2km: compact / vertex GPU time ratio not compared: the vertex view is NOT VALID for GPU budgets (P0 1320 MHz, below the 1400 MHz floor)
+lit-formats/orbit: compact / vertex GPU time ratio not comparable: clock state P0 1470 MHz vs P0 1638 MHz
+after lit-formats: system CPU load settled to 11.6 % (limit 15 %) after 1 poll(s)
+SESSION VALID for frame verdicts: yes; GPU verdicts: NOT VALID (run 'stream-lit/dive' started with the GPU in P8 at 210 MHz: the workload is too light or the warm-up too short to reach steady clocks (GPU verdicts only; frame verdicts stand))
+dive: host load (8 samples, recorded not judged): system mean 74.2 % max 97.5 %; harness 71.0 %; competing mean 3.3 % max 5.5 %; top competitors: System 1.3 % (max 3.1), svchost 0.5 % (max 0.7), MsMpEng 0.4 % (max 0.7), claude 0.3 % (max 0.5), csrss 0.0 % (max
+after dive: system CPU load settled to 11.7 % (limit 15 %) after 1 poll(s)
+error: refusing to measure: the machine is not ready (ADR 0020):
+  CPU load: 18.4 % mean over 10 s (limit 15 %)
+after dive-fast: system CPU load settled to 8.3 % (limit 15 %) after 1 poll(s)
+error: refusing to measure: the machine is not ready (ADR 0020):
+  CPU load: 18.5 % mean over 10 s (limit 15 %)
+after teleport-1m: system CPU load settled to 12.0 % (limit 15 %) after 1 poll(s)
+error: refusing to measure: the machine is not ready (ADR 0020):
+  CPU load: 15.5 % mean over 10 s (limit 15 %)
+after teleport-2km: system CPU load settled to 14.0 % (limit 15 %) after 3 poll(s)
+SESSION VALID for frame verdicts: yes; GPU verdicts: NOT VALID (run 'stream-lit/look-1m' started with the GPU in P8 at 412 MHz: the workload is too light or the warm-up too short to reach steady clocks (GPU verdicts only; frame verdicts stand))
+look-1m: host load (2 samples, recorded not judged): system mean 3.5 % max 3.7 %; harness 2.0 %; competing mean 1.5 % max 1.6 %; top competitors: System 0.4 % (max 0.4), claude 0.3 % (max 0.3), svchost 0.2 % (max 0.3), MsMpEng 0.2 % (max 0.2), NVDisplay.Contai
+after look-1m: system CPU load settled to 10.3 % (limit 15 %) after 1 poll(s)
+SESSION VALID for frame verdicts: yes; GPU verdicts: NOT VALID (run 'stream-lit/look-2km' started with the GPU in P5 at 450 MHz: the workload is too light or the warm-up too short to reach steady clocks (GPU verdicts only; frame verdicts stand))
+look-2km: host load (2 samples, recorded not judged): system mean 2.8 % max 2.9 %; harness 1.6 %; competing mean 1.2 % max 1.4 %; top competitors: claude 0.3 % (max 0.4), svchost 0.2 % (max 0.3), MsMpEng 0.2 % (max 0.3), System 0.2 % (max 0.2), firefox 0.0 % (
+after look-2km: system CPU load settled to 13.2 % (limit 15 %) after 3 poll(s)
+SESSION VALID for frame verdicts: yes; GPU verdicts: NOT VALID (run 'stream-lit/dive-cold' started with the GPU in P8 at 210 MHz: the workload is too light or the warm-up too short to reach steady clocks (GPU verdicts only; frame verdicts stand))
+dive-cold: host load (8 samples, recorded not judged): system mean 83.6 % max 97.4 %; harness 80.2 %; competing mean 3.4 % max 4.2 %; top competitors: System 1.1 % (max 1.8), svchost 0.8 % (max 1.1), MsMpEng 0.4 % (max 0.7), claude 0.4 % (max 0.7), WmiApSrv 0.
+## rerun-dive-fast-1
+SESSION VALID for frame verdicts: yes; GPU verdicts: NOT VALID (run 'stream-lit/dive-fast' started with the GPU in P8 at 210 MHz: the workload is too light or the warm-up too short to reach steady clocks (GPU verdicts only; frame verdicts stand))
+dive-fast: host load (8 samples, recorded not judged): system mean 93.5 % max 98.2 %; harness 90.1 %; competing mean 3.4 % max 5.2 %; top competitors: System 1.3 % (max 3.1), svchost 0.7 % (max 2.3), MsMpEng 0.5 % (max 0.7), claude 0.4 % (max 0.6), csrss 0.1 %
+## rerun-teleport-1m-1
+SESSION VALID for frame verdicts: yes; GPU verdicts: NOT VALID (run 'stream-lit/teleport-1m' started with the GPU in P5 at 435 MHz: the workload is too light or the warm-up too short to reach steady clocks (GPU verdicts only; frame verdicts stand))
+teleport-1m: host load (2 samples, recorded not judged): system mean 90.3 % max 93.6 %; harness 87.7 %; competing mean 2.6 % max 3.0 %; top competitors: System 1.1 % (max 1.5), svchost 0.4 % (max 0.5), MsMpEng 0.3 % (max 0.3), claude 0.3 % (max 0.3), firefox 0
+## rerun-teleport-2km-1
+error: refusing to measure: the machine is not ready (ADR 0020):
+  CPU load: 17.7 % mean over 10 s (limit 15 %)
+## rerun-teleport-2km-2
+error: refusing to measure: the machine is not ready (ADR 0020):
+  CPU load: 16.5 % mean over 10 s (limit 15 %)
+## rerun-teleport-2km-3
+SESSION VALID for frame verdicts: yes; GPU verdicts: NOT VALID (run 'stream-lit/teleport-2km' started with the GPU in P8 at 337 MHz: the workload is too light or the warm-up too short to reach steady clocks (GPU verdicts only; frame verdicts stand))
+teleport-2km: host load (2 samples, recorded not judged): system mean 90.0 % max 93.6 %; harness 87.4 %; competing mean 2.7 % max 2.8 %; top competitors: System 0.9 % (max 0.9), svchost 0.6 % (max 0.7), MsMpEng 0.3 % (max 0.3), claude 0.3 % (max 0.3), Code 0.2
+## rerun-lit-1
+lit/aerial-20km: run-to-run noise 0.161 above 0.1: one retry
+SESSION VALID for budgets: frame verdicts: yes; GPU verdicts: yes (each view judged against the 1400 MHz clock floor)
+warm-up lit/ground-1m: P0 1500 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+  lit/ground-1m: host load (1 samples, recorded not judged): system mean 3.3 % max 3.3 %; harness 2.0 %; competing mean 1.3 % max 1.3 %; top competitors: Code 0.5 % (max 0.5), claude 0.2 % (max 0.2), System 0.2 % (max 0.2), svchost 0.1 % (max 0.1), MsMpEng 0.1
+  lit/ground-1m: atmosphere run-to-run noise 0.030 (0.006 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit/ground-1m: water run-to-run noise 0.023 (0.002 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit/aerial-20km: P0 1537 MHz (floor 1400 MHz, held 3 readings) after 4.2 s (4 chunks)
+  lit/aerial-20km: host load (1 samples, recorded not judged): system mean 2.8 % max 2.8 %; harness 1.7 %; competing mean 1.1 % max 1.1 %; top competitors: System 0.4 % (max 0.4), claude 0.2 % (max 0.2), svchost 0.2 % (max 0.2), MsMpEng 0.1 % (max 0.1), NVDisp
+  lit/aerial-20km: atmosphere run-to-run noise 0.025 (0.006 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit/aerial-20km: water run-to-run noise 0.025 (0.004 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit/coast-2km: still P0 1282 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit/coast-2km: host load (1 samples, recorded not judged): system mean 2.1 % max 2.1 %; harness 1.4 %; competing mean 0.7 % max 0.7 %; top competitors: svchost 0.2 % (max 0.2), claude 0.1 % (max 0.1), MsMpEng 0.1 % (max 0.1), System 0.0 % (max 0.0), Code 0.0
+  lit/coast-2km: atmosphere run-to-run noise 0.029 (0.007 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit/coast-2km: water run-to-run noise 0.025 (0.051 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit/coast-3m: still P0 1380 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit/coast-3m: host load (2 samples, recorded not judged): system mean 3.1 % max 4.0 %; harness 2.2 %; competing mean 0.9 % max 1.2 %; top competitors: MsMpEng 0.2 % (max 0.3), System 0.2 % (max 0.3), svchost 0.2 % (max 0.2), claude 0.1 % (max 0.2), firefox 0
+  lit/coast-3m: atmosphere run-to-run noise 0.003 (0.001 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit/coast-3m: water run-to-run noise 0.001 (0.003 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit/orbit: P0 1567 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+  lit/orbit: host load (1 samples, recorded not judged): system mean 4.6 % max 4.6 %; harness 2.1 %; competing mean 2.5 % max 2.5 %; top competitors: MsMpEng 0.7 % (max 0.7), svchost 0.6 % (max 0.6), System 0.3 % (max 0.3), NVDisplay.Container 0.2 % (max 0.2),
+  lit/orbit: atmosphere run-to-run noise 0.050 (0.037 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit/orbit: water run-to-run noise 0.050 (0.009 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit/coast-glide: still P0 1297 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit/coast-glide: host load (5 samples, recorded not judged): system mean 18.1 % max 21.2 %; harness 16.5 %; competing mean 1.6 % max 1.9 %; top competitors: System 0.7 % (max 0.9), svchost 0.3 % (max 0.3), claude 0.2 % (max 0.2), MsMpEng 0.2 % (max 0.2), Wmi
+warm-up lit/coast-glide@filter0: still P2 1290 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit/coast-glide@filter0: host load (2 samples, recorded not judged): system mean 5.1 % max 7.0 %; harness 3.2 %; competing mean 1.9 % max 2.5 %; top competitors: svchost 0.7 % (max 1.2), MsMpEng 0.5 % (max 0.8), System 0.3 % (max 0.4), claude 0.3 % (max 0.4)
+warm-up lit/coast-descent: still P2 1380 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit/coast-descent: host load (7 samples, recorded not judged): system mean 26.0 % max 31.6 %; harness 24.0 %; competing mean 2.0 % max 2.4 %; top competitors: System 0.8 % (max 1.0), svchost 0.3 % (max 0.6), MsMpEng 0.3 % (max 0.4), claude 0.2 % (max 0.3), W
+warm-up lit/coast-descent@filter0: still P0 1350 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit/coast-descent@filter0: host load (1 samples, recorded not judged): system mean 2.7 % max 2.7 %; harness 1.8 %; competing mean 0.9 % max 0.9 %; top competitors: svchost 0.2 % (max 0.2), claude 0.2 % (max 0.2), MsMpEng 0.1 % (max 0.1), System 0.1 % (max 0.
+GPU medians of lit/coast-2km not compared: NOT VALID for GPU budgets (P0 1282 MHz, below the 1400 MHz floor)
+GPU medians of lit/coast-3m not compared: NOT VALID for GPU budgets (P0 1335 MHz, below the 1400 MHz floor)
+GPU medians of lit/coast-descent not compared: NOT VALID for GPU budgets (P8 285 MHz, below the 1400 MHz floor)
+GPU medians of lit/coast-descent@filter0 not compared: NOT VALID for GPU budgets (P0 1350 MHz, below the 1400 MHz floor)
+GPU medians of lit/coast-glide not compared: NOT VALID for GPU budgets (P5 840 MHz, below the 1400 MHz floor)
+GPU medians of lit/coast-glide@filter0 not compared: NOT VALID for GPU budgets (P2 1290 MHz, below the 1400 MHz floor)
+GPU medians of lit/orbit not compared: NOT VALID for GPU budgets (P0 1342 MHz, below the 1400 MHz floor)
+## rerun-litformats-1
+lit-formats/aerial-20km/vertex: run-to-run noise 0.134 above 0.1: one retry
+lit-formats/aerial-20km/compact: run-to-run noise 0.118 above 0.1: one retry
+lit-formats/orbit/vertex: run-to-run noise 0.187 above 0.1: one retry
+lit-formats/orbit/compact: run-to-run noise 0.250 above 0.1: one retry
+SESSION INVALID for budgets: frame verdicts: NO; GPU verdicts: NO; the verdicts below do not count
+  INVALID SESSION: run-to-run noise 0.131 on 'lit-formats/orbit/vertex' is above 0.1 after one retry
+warm-up lit-formats/ground-1m/vertex: P0 1725 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+  lit-formats/ground-1m/vertex: host load (1 samples, recorded not judged): system mean 2.9 % max 2.9 %; harness 2.1 %; competing mean 0.8 % max 0.8 %; top competitors: System 0.2 % (max 0.2), MsMpEng 0.2 % (max 0.2), svchost 0.1 % (max 0.1), WmiApSrv 0.1 % (m
+  lit-formats/ground-1m/vertex: atmosphere run-to-run noise 0.023 (0.005 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/ground-1m/vertex: water run-to-run noise 0.000 (0.000 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit-formats/ground-1m/compact: P0 1582 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+  lit-formats/ground-1m/compact: host load (1 samples, recorded not judged): system mean 4.0 % max 4.0 %; harness 2.0 %; competing mean 2.0 % max 2.0 %; top competitors: svchost 0.4 % (max 0.4), claude 0.3 % (max 0.3), MsMpEng 0.3 % (max 0.3), System 0.3 % (ma
+  lit-formats/ground-1m/compact: atmosphere run-to-run noise 0.023 (0.005 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/ground-1m/compact: water run-to-run noise 0.012 (0.001 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit-formats/aerial-20km/vertex: P0 1477 MHz (floor 1400 MHz, held 3 readings) after 4.2 s (4 chunks)
+  lit-formats/aerial-20km/vertex: host load (1 samples, recorded not judged): system mean 2.4 % max 2.4 %; harness 1.6 %; competing mean 0.8 % max 0.8 %; top competitors: MsMpEng 0.2 % (max 0.2), svchost 0.1 % (max 0.1), System 0.1 % (max 0.1), claude 0.1 % (m
+  lit-formats/aerial-20km/vertex: atmosphere run-to-run noise 0.038 (0.009 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/aerial-20km/vertex: water run-to-run noise 0.014 (0.002 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit-formats/aerial-20km/compact: P0 1492 MHz (floor 1400 MHz, held 3 readings) after 5.2 s (5 chunks)
+  lit-formats/aerial-20km/compact: host load (1 samples, recorded not judged): system mean 2.6 % max 2.6 %; harness 1.3 %; competing mean 1.3 % max 1.3 %; top competitors: System 0.3 % (max 0.3), svchost 0.3 % (max 0.3), claude 0.2 % (max 0.2), MsMpEng 0.2 % (
+  lit-formats/aerial-20km/compact: atmosphere run-to-run noise 0.025 (0.006 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/aerial-20km/compact: water run-to-run noise 0.034 (0.006 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit-formats/coast-2km/vertex: still P0 1290 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit-formats/coast-2km/vertex: host load (1 samples, recorded not judged): system mean 2.3 % max 2.3 %; harness 1.4 %; competing mean 0.9 % max 0.9 %; top competitors: svchost 0.2 % (max 0.2), System 0.2 % (max 0.2), claude 0.1 % (max 0.1), MsMpEng 0.1 % (max
+  lit-formats/coast-2km/vertex: atmosphere run-to-run noise 0.023 (0.006 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/coast-2km/vertex: water run-to-run noise 0.021 (0.036 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit-formats/coast-2km/compact: still P0 1290 MHz, below the 1400 MHz floor, after 30.3 s (29 chunks, cap 30 s)
+  lit-formats/coast-2km/compact: host load (1 samples, recorded not judged): system mean 2.6 % max 2.6 %; harness 1.5 %; competing mean 1.1 % max 1.1 %; top competitors: System 0.3 % (max 0.3), claude 0.2 % (max 0.2), svchost 0.2 % (max 0.2), MsMpEng 0.1 % (ma
+  lit-formats/coast-2km/compact: atmosphere run-to-run noise 0.014 (0.004 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/coast-2km/compact: water run-to-run noise 0.016 (0.034 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit-formats/orbit/vertex: P0 1537 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+  lit-formats/orbit/vertex: host load (1 samples, recorded not judged): system mean 2.0 % max 2.0 %; harness 1.3 %; competing mean 0.7 % max 0.7 %; top competitors: System 0.2 % (max 0.2), svchost 0.2 % (max 0.2), MsMpEng 0.1 % (max 0.1), WmiApSrv 0.1 % (max 0
+  lit-formats/orbit/vertex: atmosphere run-to-run noise 0.029 (0.019 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/orbit/vertex: water run-to-run noise 0.031 (0.005 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+warm-up lit-formats/orbit/compact: P0 1627 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+  lit-formats/orbit/compact: host load (1 samples, recorded not judged): system mean 2.0 % max 2.0 %; harness 1.1 %; competing mean 0.9 % max 0.9 %; top competitors: claude 0.2 % (max 0.2), MsMpEng 0.2 % (max 0.2), System 0.2 % (max 0.2), svchost 0.1 % (max 0.
+  lit-formats/orbit/compact: atmosphere run-to-run noise 0.010 (0.007 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+  lit-formats/orbit/compact: water run-to-run noise 0.013 (0.002 ms): above the 10 % rule: no; above the proposed ADR 0036 point 3 floor too: no (recorded, not applied)
+lit-formats/ground-1m: compact / vertex GPU time ratio not comparable: clock state P0 1657 MHz vs P0/P2 1567 MHz
+lit-formats/aerial-20km: compact / vertex GPU time ratio not compared: the vertex view is NOT VALID for GPU budgets (P0 1380 MHz, below the 1400 MHz floor)
+lit-formats/coast-2km: compact / vertex GPU time ratio not compared: the vertex view is NOT VALID for GPU budgets (P0 1282 MHz, below the 1400 MHz floor)
