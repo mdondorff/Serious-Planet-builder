@@ -4,17 +4,19 @@
 //! pool a tenth of its size, a scheduler or upload step ten times its cost), without a perf window. Pure over the log text.
 //!
 //! The thresholds are about a tenth of the first measurements on the software adapter (WARP, 2026-10-17, dive, 48 frames, 6
-//! workers, a 256-cell in-memory bake; three runs): 187 tile jobs, at most 6 and a median of 4 running at once, 189 resident slots,
+//! workers, a 256-cell in-memory bake; three runs): at most 6 and a median of 4 jobs running at once,
 //! 231,090 slots in the pool, medians of 0.044 ms (scheduler) and 0.16 ms (upload). The concurrency is judged against the workers
-//! the run was asked for, not against a constant.
+//! the run was asked for, not against a constant. The number of tile jobs and of resident slots is NOT judged against a tenth of the
+//! first run (187 jobs, 189 slots): the frame loop of a software renderer paces the dive, and the first CI run (a 4-core runner)
+//! finished 5 jobs and 11 slots in the same 48 frames. Those two only show that the streamer works at all.
 
 use crate::accept::count;
 use crate::compare::{parse, Json};
 
-/// Fewest tile jobs a 48-frame dive must complete (measured 187).
-pub const MIN_JOBS: u64 = 18;
-/// Fewest resident slots at the peak (measured 189).
-pub const MIN_RESIDENT_SLOTS: u64 = 18;
+/// Fewest tile jobs a 48-frame dive must complete (187 on the development machine, 5 on a 4-core CI runner): the streamer is alive.
+pub const MIN_JOBS: u64 = 3;
+/// Fewest resident slots at the peak (189 and 11): tiles reached the pool.
+pub const MIN_RESIDENT_SLOTS: u64 = 3;
 /// Fewest slots the pool offers (measured 231,090 for the tier's share).
 pub const MIN_POOL_SLOTS: u64 = 23_109;
 /// Most the median of the scheduler step may cost, ms (measured 0.044).
@@ -57,7 +59,7 @@ pub fn streaming_smoke_findings(log: &str, workers: usize) -> Vec<String> {
         &format!("the streamer ran fewer jobs at once than {workers} workers allow (a worker or ahead cap?)"),
         &mut out,
     );
-    need("load_jobs", MIN_JOBS, "the streamer finished too few tile jobs (a tenth of the first measurement)", &mut out);
+    need("load_jobs", MIN_JOBS, "the streamer finished almost no tile jobs", &mut out);
     need("max_resident_slots", MIN_RESIDENT_SLOTS, "too few slots became resident", &mut out);
     need("pool_slots", MIN_POOL_SLOTS, "the pool is a tenth of its size or less (a pool cap?)", &mut out);
     for (name, max) in [("scheduler_ms", MAX_SCHEDULER_MEDIAN_MS), ("upload_ms", MAX_UPLOAD_MEDIAN_MS)] {
@@ -92,7 +94,7 @@ mod tests {
         let f = streaming_smoke_findings(&log(1, 58, 63, 231_090, 0.033, 0.14), 6);
         assert!(f.len() == 1 && f[0].contains("load_running_max") && f[0].contains("6 workers"), "{f:?}");
         // A pool of a tenth of its size, too few jobs, too few resident slots, a scheduler and an upload step ten times dearer.
-        let f = streaming_smoke_findings(&log(6, 9, 5, 20_000, 0.6, 2.0), 6);
+        let f = streaming_smoke_findings(&log(6, 1, 1, 20_000, 0.6, 2.0), 6);
         for name in ["load_jobs", "max_resident_slots", "pool_slots", "scheduler_ms", "upload_ms"] {
             assert!(f.iter().any(|l| l.contains(name)), "{name}: {f:?}");
         }
