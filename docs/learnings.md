@@ -348,3 +348,16 @@ What happened: building `compact-storage-buffers` (ADR 0054): 134,217,728 / 8,71
 Assumption it changes: ADR 0054's slot count (15,405).
 Proposed follow-up: none; the hashes of the atlas path are the known answers of `gpu_compact_blocks` and `gpu_water`, keyed by driver build.
 Obsolete when: the compact format or its block layout changes.
+## 2026-10-17 A bigger compact record eats ADR 0033's fixed reserve, not the slot count you expect (SPIKE-12)
+Scope: ADR 0033 point 3, `streaming::budget::fit_share_with`
+What happened: `fit_share_with` counts the per-slot record buffer among the fixed items of the 128 MiB reserve. With the records of the retirement layout (644 B instead of 128 B: climate block and the 5x5 control points) the reserve check removes whole 128 MiB blocks: the mid share falls from 230,640 to 123,008 slots (8 blocks) and the high share to the same, although the bytes per slot grow only 5.9 %. Charged per slot (the record inside the slot, stride 9,360 B) the counts are 215,085 mid and 329,797 high (-6.7 %).
+Assumption it changes: ADR 0033's "8.8 KB per tile, 230,640 slots at the mid share" assumes the 128 B record fits the reserve at any slot count.
+Proposed follow-up: any change of the compact slot (the retirement, item 7's per-tile blocks) moves the record into the slot's cost and re-cuts the reserve; run `t9_share_arithmetic` (`spikes/vertex-retirement`) first.
+Obsolete when: the slot layout of the retirement (or another) is built and ADR 0033's share table is amended.
+
+## 2026-10-17 A 5x5 base surface is 10 to 48 % of vertex time on every tile; a render floor is free outside orbit (SPIKE-12)
+Scope: compact tile format (ADR 0033 point 4), terrain-lod
+What happened: a quartic base surface through 25 control points removes the level 0-2 error (0.46 px to 0.0018 px at orbit) but `place` evaluates the surface and its normal up to five times per vertex: GPU time +9.8 % at aerial-200km, +47.6 % at ground-1m, +35.6 % on the steep field (RTX, indicative). A floor at level 3 changes only the orbit view (52 to 181 nodes, +0.15 ms). A floor leaf must not morph: its parent is never drawn, so the first prototype morphed every vertex beyond 11,380 km to an undrawn grid, and the plan builder refused the root-like interval until floor leaves were exempted like roots.
+Assumption it changes: the duality exploration's "5 x 5 base or a floor, either removes the blocker" (equal in cost): the 5x5 base is the expensive one.
+Proposed follow-up: the retirement uses the floor; the terrain-lod spec states that a leaf at the floor has no parent to morph to.
+Obsolete when: the retirement is decided (accepted or dropped).
