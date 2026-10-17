@@ -82,9 +82,28 @@ pub fn require_prefilled(scene: &str, present: usize, total: usize, levels: u8, 
     ))
 }
 
+/// The log file of a scene for `--out VALUE`: a path ending in `.json` is the file itself; an existing directory, or a path with no
+/// extension, is a directory that gets `<file_name>` (`<scene>[-lit].json`). Any other value is refused, so the case is never run
+/// to write a log that cannot be written (TEST-019).
+pub fn out_log_path(out: &std::path::Path, file_name: &str) -> Result<std::path::PathBuf, String> {
+    let is_json = out.extension().is_some_and(|e| e.eq_ignore_ascii_case("json"));
+    if out.is_dir() || (out.extension().is_none() && !out.is_file()) {
+        return Ok(out.join(file_name));
+    }
+    if is_json && !out.is_dir() {
+        return Ok(out.to_path_buf());
+    }
+    Err(format!("--out {}: give a directory (the log is written there as {file_name}) or a path ending in .json", out.display()))
+}
+
 /// Reject option combinations the streaming scenes would ignore, and refuse the dive/teleport/look scenes without a store.
 pub fn check_options(o: &Options) -> Result<(), String> {
     let capture = crate::litperf::is_capture_scene(&o.scene);
+    if let Some(out) = &o.out {
+        if (is_stream_scene(&o.scene) || crate::litperf::is_lit_scene(&o.scene)) && o.scene != "streaming" && (o.perf || o.perf_smoke) {
+            out_log_path(out, "x.json")?;
+        }
+    }
     let stream = (o.perf || o.perf_smoke || capture) && (is_stream_scene(&o.scene) || crate::litperf::is_lit_scene(&o.scene) || capture);
     if !stream && (o.store.is_some() || o.allow_memory_bake) {
         return Err("--store and --allow-memory-bake only apply to the streaming perf scenes (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, streaming)".into());
@@ -805,7 +824,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
             &[(report.path_name.clone(), summary.host_load.clone())],
         );
         let path = match (&o.out, single) {
-            (Some(p), true) => p.clone(),
+            (Some(p), true) => out_log_path(p, &format!("{}{lit_suffix}.json", scene.name()))?,
             (Some(dir), false) => dir.join(format!("{}{lit_suffix}.json", scene.name())),
             (None, _) => std::path::Path::new("perf").join("logs").join(format!("{}{lit_suffix}.json", scene.name())),
         };
@@ -911,6 +930,28 @@ mod tests {
         let d = std::env::temp_dir().join(format!("planet-streamperf-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    // spec: TEST-030
+    #[test]
+    fn the_out_of_a_single_scene_is_a_directory_or_a_json_file_and_anything_else_fails_before_the_case() {
+        let d = tmp("outdir");
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(out_log_path(&d, "dive-lit.json").unwrap(), d.join("dive-lit.json"), "an existing directory");
+        let fresh = d.join("logs");
+        assert_eq!(out_log_path(&fresh, "dive-lit.json").unwrap(), fresh.join("dive-lit.json"), "a path without an extension");
+        let file = d.join("mine.json");
+        assert_eq!(out_log_path(&file, "dive-lit.json").unwrap(), file, "a .json path is the file");
+        let odd = d.join("notes.txt");
+        std::fs::write(&odd, "x").unwrap();
+        let e = out_log_path(&odd, "dive-lit.json").unwrap_err();
+        assert!(e.contains("give a directory") && e.contains("dive-lit.json"), "{e}");
+        // The refusal comes from the option check, before any case runs.
+        let o = opts(&["test-render", "--perf-smoke", "--scene", "dive", "--allow-memory-bake", "--out", odd.to_str().unwrap()]);
+        assert!(check_options(&o).unwrap_err().contains("give a directory"));
+        let lit = opts(&["test-render", "--perf-smoke", "--scene", "lit", "--allow-memory-bake", "--out", odd.to_str().unwrap()]);
+        assert!(check_options(&lit).unwrap_err().contains("give a directory"), "a lit scene is refused before its case too");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     // spec: TEST-019

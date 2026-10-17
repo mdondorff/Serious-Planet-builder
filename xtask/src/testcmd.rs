@@ -367,10 +367,12 @@ fn perf_m5(root: &Path, args: &[String]) -> Res {
         if let Err(e) = run(root, "cargo", &refs, &[]) {
             failed.push(format!("{scene}: {e}"));
         }
+        // The next gate must not measure this child's tail (window 6: three refusals after the heavy children).
+        settle_cpu_after(scene);
     }
     let mut stream = rest.clone();
     stream.extend(["--lit".to_string(), "--out".to_string(), dir.clone()]);
-    if let Err(e) = perf_stream_all(root, &stream) {
+    if let Err(e) = perf_stream_all(root, &stream, true) {
         failed.push(format!("stream --lit: {e}"));
     }
     if failed.is_empty() {
@@ -604,9 +606,24 @@ fn perf_stream_child_args(scene: &str, rest: &[String]) -> Result<Vec<String>, S
 /// The real [`ChildRunner`]: `cargo` with the child's arguments, stdout teed to the console and kept for the summary.
 struct CargoChildren<'a> {
     root: &'a Path,
+    /// Wait for the system CPU load to settle between children (the measured window, `perf m5`).
+    settle: bool,
+}
+
+/// Wait until the system CPU load is below the readiness gate's limit (polling one gate window at a time, capped) and say so.
+fn settle_cpu_after(scene: &str) {
+    let mut read = || planet_perf::gate::query_cpu_load(planet_perf::gate::LOAD_WINDOW_S);
+    let s = planet_perf::session::settle_cpu(&mut read, planet_perf::gate::MAX_CPU_LOAD_PCT, planet_perf::session::SETTLE_MAX_POLLS);
+    eprintln!("{}", planet_perf::session::settle_line(scene, &s, planet_perf::gate::MAX_CPU_LOAD_PCT));
 }
 
 impl planet_perf::session::ChildRunner for CargoChildren<'_> {
+    fn settle_after(&mut self, scene: &str) {
+        if self.settle {
+            settle_cpu_after(scene);
+        }
+    }
+
     fn run(&mut self, args: &[String]) -> Result<planet_perf::session::ChildResult, String> {
         use std::io::BufRead;
         eprintln!("$ cargo {}", args.join(" "));
@@ -632,8 +649,8 @@ impl planet_perf::session::ChildRunner for CargoChildren<'_> {
 /// `perf stream all`: one child process per scene, in order, so each scene's RAM is its own peak working set and each starts cold.
 /// The readiness gate (ADR 0020) runs in every child, before its measured case: each scene is gated on the machine as it is then.
 /// A failing scene does not stop the others; the exit is non-zero if any failed.
-fn perf_stream_all(root: &Path, rest: &[String]) -> Res {
-    let mut runner = CargoChildren { root };
+fn perf_stream_all(root: &Path, rest: &[String], settle: bool) -> Res {
+    let mut runner = CargoChildren { root, settle };
     let outcomes = planet_perf::session::run_scenes(&mut runner, &STREAM_SCENES, &|scene| perf_stream_child_args(scene, rest))?;
     let (text, ok) = planet_perf::session::summary(&outcomes);
     println!("{text}");
@@ -648,7 +665,7 @@ pub fn perf(root: &Path, args: &[String]) -> Res {
     if args.first().map(String::as_str) == Some("stream") {
         if stream_runs_all(&args[1..]) {
             let rest = if args.get(1).is_some_and(|a| a == "all") { &args[2..] } else { &args[1..] };
-            return perf_stream_all(root, rest);
+            return perf_stream_all(root, rest, false);
         }
         let cargo_args = perf_stream_args(&args[1..])?;
         let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
