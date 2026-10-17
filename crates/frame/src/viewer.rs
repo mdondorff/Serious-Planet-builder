@@ -478,6 +478,7 @@ pub fn lit_warm_plan(camera: crate::camera::Camera, size: (u32, u32), cells: u32
         cells,
         nodes: Vec::new(),
         lit: Some(lit),
+        water: None,
     }
 }
 
@@ -524,6 +525,10 @@ pub struct SmokeCounts {
     pub exposure_readings: u64,
     pub renderer_ran_lit: bool,
     pub renderer_ran_atmosphere: bool,
+    /// Lit frames whose plan had water nodes, and whether the renderer reports having run the water pass (a world and a flight that
+    /// never see water leave both at zero: the verdict does not require them, the summary reports them).
+    pub water_frames: u64,
+    pub renderer_ran_water: bool,
 }
 
 /// Frames a smoke run must have drawn lit.
@@ -968,6 +973,8 @@ mod tests {
             exposure_readings: 3,
             renderer_ran_lit: true,
             renderer_ran_atmosphere: true,
+            water_frames: 0,
+            renderer_ran_water: false,
         }
     }
 

@@ -4,7 +4,7 @@ use planet_render::{
     compact_terrain_shader, lit_post_shaders, AdapterPolicy, GpuContext, EXEC_SHADERS, SHADERS, TERRAIN_SHADERS, WINDOW_SHADERS,
 };
 
-// spec: REND-002, ATMO-011
+// spec: REND-002, ATMO-011, ATMO-016
 #[test]
 fn every_shader_module_validates() {
     // PLANET_ADAPTER (software by default; `cargo xtask test gpu --real` runs the oracles on the real GPU too, TEST-013).
@@ -23,6 +23,12 @@ fn every_shader_module_validates() {
     }
     // The atmosphere's passes and the terrain's atmosphere lighting (ATMO-011).
     for (name, source) in planet_render::atmosphere_shaders() {
+        if let Err(e) = ctx.validate_wgsl(name, &source) {
+            panic!("{e}");
+        }
+    }
+    // The water pass: the pure maths alone and the two tile formats with and without the atmosphere's lighting (ATMO-014, ATMO-016).
+    for (name, source) in planet_render::water_shaders() {
         if let Err(e) = ctx.validate_wgsl(name, &source) {
             panic!("{e}");
         }

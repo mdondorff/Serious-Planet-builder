@@ -612,6 +612,12 @@ pub fn terrain_atmosphere_source() -> String {
     format!("{TERRAIN}{DECLS}{LIGHTING}{TERRAIN_MAIN}")
 }
 
+/// What the water shader adds to the terrain's atmosphere declarations: the ray-march helpers (the sky-view coordinates) in the
+/// order the lighting needs them.
+pub(crate) fn water_atmosphere_source() -> String {
+    format!("{TERRAIN}{DECLS}{MARCH}{LIGHTING}")
+}
+
 pub fn sky_view_shader() -> String {
     format!("{SKY_VIEW}{DECLS}{MARCH}{SKY_VIEW_MAIN}")
 }
@@ -943,6 +949,62 @@ impl AtmospherePath {
 
     pub(crate) fn terrain_bind(&self) -> &wgpu::BindGroup {
         &self.terrain_bind
+    }
+
+    /// The water pass's group 3 with the atmosphere: the uniform block (0), the two static tables (1, 2), the sky-view table (3) and
+    /// the copy of the scene target (4). Returns the layout and the bind group.
+    pub(crate) fn water_group(&self, device: &wgpu::Device, scene_copy: &wgpu::TextureView) -> (wgpu::BindGroupLayout, wgpu::BindGroup) {
+        let tex = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("water-atmosphere"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                tex(1),
+                tex(2),
+                tex(3),
+                tex(4),
+            ],
+        });
+        let (tr, ms, sky) = (
+            self.tr_lut.create_view(&Default::default()),
+            self.ms_lut.create_view(&Default::default()),
+            self.sky_view.create_view(&Default::default()),
+        );
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("water-atmosphere"),
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: self.uniform.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&tr) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&ms) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&sky) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(scene_copy) },
+            ],
+        });
+        (layout, bind)
+    }
+
+    /// The scene target's texture (copy source of the water pass).
+    pub(crate) fn scene_texture(&self) -> &wgpu::Texture {
+        &self.scene
     }
 
     /// How often the static tables were computed and uploaded.

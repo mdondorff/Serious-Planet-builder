@@ -1,0 +1,14 @@
+# A hand-written look file, schema version 4 (the version that added the `water` table, ADR 0041 points 4 to 6): comments, key
+# order and spacing never matter. Body 1 is a glassy, clear sea with big, slow foam; every key it leaves out is the Earth default.
+schema_version = 4
+kind = "look"
+
+[body.1.water]
+absorption_per_m = 0.25
+fresnel_f0 = 0.04
+foam_width_m = 2
+choppy = 0.0
+wave_scale = 0.0
+
+[body.1.units]
+solar_illuminance_lux = 90000.0

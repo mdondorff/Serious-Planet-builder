@@ -38,7 +38,7 @@ fn the_scanner_flags_planet_scale_constants_and_names() {
     assert!(scan("let ok = 1e-6 + 0.5 + 255.0; // 6371000.0 in a comment").is_empty());
 }
 
-// spec: REND-005
+// spec: REND-005, ATMO-016
 #[test]
 fn shipped_shaders_contain_no_planet_scale_values() {
     let mut all = Vec::new();
@@ -60,6 +60,20 @@ fn shipped_shaders_contain_no_planet_scale_values() {
             all.push(format!("{name}: {h}"));
         }
         // A vertex stage places geometry: it must not read the atmosphere's block (which holds the body's radius).
+        for (at, _) in src.match_indices("@vertex") {
+            let body = &src[at..];
+            let end = body.find("\n}\n").unwrap_or(body.len());
+            if body[..end].contains("A.") {
+                all.push(format!("{name}: a vertex stage reads the atmosphere's uniform block"));
+            }
+        }
+    }
+    // The water pass places a surface on the terrain's grid (geometry stays tile-local, CON-11): no planet-scale literal or name in any
+    // flavour, and the vertex stage reads neither the atmosphere's block nor anything but the node's tile-local numbers.
+    for (name, src) in planet_render::water_shaders() {
+        for h in scan(&src) {
+            all.push(format!("{name}: {h}"));
+        }
         for (at, _) in src.match_indices("@vertex") {
             let body = &src[at..];
             let end = body.find("\n}\n").unwrap_or(body.len());

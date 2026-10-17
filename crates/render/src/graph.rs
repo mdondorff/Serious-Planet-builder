@@ -249,12 +249,15 @@ pub struct LitShape {
     /// The frame has an atmosphere (ADR 0040, ADR 0042 point 2): the static tables, the sky-view table and the aerial-perspective
     /// volume are made before the terrain, which draws into a scene target the sky and aerial-perspective composite reads.
     pub atmosphere: bool,
+    /// The frame has water tiles (ADR 0041 point 4, ADR 0042 point 2): the terrain's target is copied and the water pass draws the
+    /// terrain's grid again at the water level, over the same depth.
+    pub water: bool,
 }
 
 /// The lit path as a graph: with an atmosphere the static tables' upload, the sky-view table and the aerial-perspective volume
 /// (compute); terrain into HDR colour and depth; the sky and aerial-perspective composite (reading the one depth buffer); then the
-/// exposure histogram and adaptation and the tone map into the presentable target. The water pass of ADR 0042 point 2 joins as its
-/// change lands.
+/// exposure histogram and adaptation and the tone map into the presentable target. The water pass of ADR 0042 point 2 (with the copy of the scene target it reads) joins when the frame has
+/// water tiles.
 pub fn lit_frame_graph(shape: &LitShape) -> RenderGraph {
     let pixels = u64::from(shape.size.0) * u64::from(shape.size.1);
     let mut g = RenderGraph::new(&["presentable"]);
@@ -273,6 +276,18 @@ pub fn lit_frame_graph(shape: &LitShape) -> RenderGraph {
         g.add_pass("sky-view", &["transmittance-lut", "multiscatter-lut"], &["sky-view-lut"], false);
         g.add_pass("aerial-perspective", &["transmittance-lut", "multiscatter-lut"], &["aerial-perspective-volume"], false);
         g.add_pass("terrain", &["transmittance-lut", "multiscatter-lut"], &["hdr-scene", "depth"], false);
+        if shape.water {
+            g.describe_sized("scene-copy", "rgba16float-frame", pixels * HDR_BYTES_PER_PIXEL);
+            g.add_pass("scene-copy", &["hdr-scene"], &["scene-copy"], false);
+            // The water pass reads the copy (the seabed seen through the water) and the sky-view table it reflects, and draws over the
+            // scene target and the one depth buffer; the composite then hazes water as it hazes terrain.
+            g.add_pass(
+                "water",
+                &["scene-copy", "hdr-scene", "depth", "sky-view-lut", "transmittance-lut", "multiscatter-lut"],
+                &["hdr-scene", "depth"],
+                false,
+            );
+        }
         g.add_pass(
             "sky-composite",
             &["hdr-scene", "depth", "sky-view-lut", "aerial-perspective-volume", "transmittance-lut", "multiscatter-lut"],
@@ -281,6 +296,11 @@ pub fn lit_frame_graph(shape: &LitShape) -> RenderGraph {
         );
     } else {
         g.add_pass("terrain", &[], &["hdr", "depth"], false);
+        if shape.water {
+            g.describe_sized("scene-copy", "rgba16float-frame", pixels * HDR_BYTES_PER_PIXEL);
+            g.add_pass("scene-copy", &["hdr"], &["scene-copy"], false);
+            g.add_pass("water", &["scene-copy", "hdr", "depth"], &["hdr", "depth"], false);
+        }
     }
     g.add_pass("exposure-histogram", &["hdr"], &["histogram"], false);
     // Fixed exposure reads no histogram, so the histogram pass above is culled by the compile, not by a branch in the executor.

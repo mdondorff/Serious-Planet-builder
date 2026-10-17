@@ -166,3 +166,103 @@ impl<'a> WaterField<'a> {
         Ok(PlanWater { level_m, water: None })
     }
 }
+
+/// A height field that names a water level for the frustum cut of the node selection: the volume a tile is culled by then reaches up to
+/// the level, so the water of a tile whose terrain the view does not see (a camera low over deep water, a steep view down) is not
+/// culled with the seabed (ADR 0053). Every height, bound, key and reading is the inner field's, so meshes, mesh keys and caches are
+/// unchanged; only [`HeightField::water_cull_level`] differs.
+pub struct WaterBounded<'a> {
+    inner: Inner<'a>,
+    level_m: f64,
+}
+
+enum Inner<'a> {
+    Owned(Box<dyn crate::height::HeightField + 'a>),
+    Borrowed(&'a dyn crate::height::HeightField),
+}
+
+impl<'a> WaterBounded<'a> {
+    pub fn new(inner: Box<dyn crate::height::HeightField + 'a>, level_m: f64) -> WaterBounded<'a> {
+        WaterBounded { inner: Inner::Owned(inner), level_m }
+    }
+
+    pub fn borrowed(inner: &'a dyn crate::height::HeightField, level_m: f64) -> WaterBounded<'a> {
+        WaterBounded { inner: Inner::Borrowed(inner), level_m }
+    }
+
+    fn f(&self) -> &dyn crate::height::HeightField {
+        match &self.inner {
+            Inner::Owned(b) => b.as_ref(),
+            Inner::Borrowed(r) => *r,
+        }
+    }
+}
+
+impl crate::height::HeightField for WaterBounded<'_> {
+    fn height(&self, dir: Vec3) -> f64 {
+        self.f().height(dir)
+    }
+    fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
+        self.f().heights_until(dirs, stop)
+    }
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
+        self.f().heights_threaded_until(dirs, stop, threads)
+    }
+    fn seed(&self) -> u64 {
+        self.f().seed()
+    }
+    fn implementation_id(&self) -> &'static str {
+        self.f().implementation_id()
+    }
+    fn version(&self) -> u32 {
+        self.f().version()
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        self.f().max_abs_height_m()
+    }
+    fn inputs_hash(&self) -> u64 {
+        self.f().inputs_hash()
+    }
+    fn read_records(&self) -> Vec<planet_world_def::ReadRecord> {
+        self.f().read_records()
+    }
+    fn read_records_for(&self, tile: planet_core::TileId, map: &dyn FaceMapping) -> Vec<planet_world_def::ReadRecord> {
+        self.f().read_records_for(tile, map)
+    }
+    fn reads_cells(&self) -> bool {
+        self.f().reads_cells()
+    }
+    fn inputs_hash_for(&self, tile: planet_core::TileId, map: &dyn FaceMapping) -> u64 {
+        self.f().inputs_hash_for(tile, map)
+    }
+    fn body(&self) -> planet_world_def::BodyId {
+        self.f().body()
+    }
+    fn source_key(&self) -> Option<[u8; 16]> {
+        self.f().source_key()
+    }
+    fn surface_id(&self) -> &'static str {
+        self.f().surface_id()
+    }
+    fn climate(&self, map: &dyn FaceMapping, id: planet_core::TileId) -> crate::climate::ClimateTexture {
+        self.f().climate(map, id)
+    }
+    fn heights_and_climate(
+        &self,
+        map: &dyn FaceMapping,
+        id: planet_core::TileId,
+        dirs: &[Vec3],
+        stop: &dyn Fn() -> bool,
+    ) -> (Vec<f64>, crate::climate::ClimateTexture) {
+        self.f().heights_and_climate(map, id, dirs, stop)
+    }
+    fn climate_version_word(&self) -> u64 {
+        self.f().climate_version_word()
+    }
+    fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
+        self.f().height_bounds(centre, angular_radius)
+    }
+    fn water_cull_level(&self) -> Option<f64> {
+        Some(self.level_m)
+    }
+}

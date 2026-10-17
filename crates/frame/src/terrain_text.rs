@@ -45,8 +45,18 @@ impl TerrainPlan {
     pub fn to_text(&self) -> String {
         // Exhaustiveness guards: adding a field to the plan, the camera or a draw is a compile error here until the text
         // form below carries it (and `from_text` reads it).
-        let TerrainPlan { size: _, view: _, camera: _, view_projection: _, clear_color: _, height_range: _, cells: _, nodes: _, lit: _ } =
-            self;
+        let TerrainPlan {
+            size: _,
+            view: _,
+            camera: _,
+            view_projection: _,
+            clear_color: _,
+            height_range: _,
+            cells: _,
+            nodes: _,
+            lit: _,
+            water: _,
+        } = self;
         let Camera { position: _, forward: _, up: _, fov_y_rad: _, aspect: _, near_m: _ } = self.camera;
         let c = &self.camera;
         let mut s = format!("planet-terrainplan {TERRAIN_PLAN_FORMAT_VERSION}\n");
@@ -74,6 +84,11 @@ impl TerrainPlan {
         // The lit path's line exists only for a lit plan, so the text (and the hash) of every debug-path plan is unchanged.
         if let Some(lit) = &self.lit {
             s += &lit.to_text();
+            s.push('\n');
+        }
+        // Likewise the water lines exist only for a plan with water.
+        if let Some(water) = &self.water {
+            s += &water.to_text();
             s.push('\n');
         }
         for n in &self.nodes {
@@ -121,6 +136,7 @@ impl TerrainPlan {
         let (mut size, mut view, mut cells, mut camera, mut vp, mut clear, mut range) = (None, None, None, None, None, None, None);
         let mut nodes = Vec::new();
         let mut lit = None;
+        let mut water_lines: Vec<Vec<&str>> = Vec::new();
         for line in lines.filter(|l| !l.trim().is_empty()) {
             let t: Vec<&str> = line.split_whitespace().collect();
             let int = |s: &str| s.parse::<u32>().map_err(|e| format!("bad number '{s}' in '{line}': {e}"));
@@ -146,6 +162,7 @@ impl TerrainPlan {
                 ["clear", r, g, b, a] => clear = Some([byte(r)?, byte(g)?, byte(b)?, byte(a)?]),
                 ["height_range", a, b] => range = Some([p32(a)?, p32(b)?]),
                 ["lit", rest @ ..] => lit = Some(crate::look::LitPlan::from_tokens(rest)?),
+                ["water", ..] | ["liquid", ..] | ["wnode", ..] => water_lines.push(t.clone()),
                 ["node", id, "level", level, "origin", ox, oy, oz, "rel", rx, ry, rz, "morph", m, ms, me, "color", r, g, b, a, "mesh_key", key] =>
                 {
                     let raw = u64::from_str_radix(id, 16).map_err(|e| format!("bad tile id '{id}': {e}"))?;
@@ -174,6 +191,7 @@ impl TerrainPlan {
             cells: cells.ok_or("plan has no cells")?,
             nodes,
             lit,
+            water: if water_lines.is_empty() { None } else { Some(crate::water::WaterPlan::from_lines(&water_lines)?) },
         })
     }
 

@@ -839,7 +839,7 @@ impl CompactRenderer {
             t.readback.unmap();
             (delta > 0).then(|| delta as f64 * f64::from(ctx.queue.get_timestamp_period()) / 1.0e6)
         });
-        Ok((FrameTiming { cpu_ms, total_ms, gpu_ms }, stats))
+        Ok((FrameTiming { cpu_ms, total_ms, gpu_ms, ..Default::default() }, stats))
     }
 
     pub fn read_color(&self, ctx: &GpuContext) -> RgbaFrame {

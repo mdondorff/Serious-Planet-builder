@@ -16,6 +16,7 @@ use planet_frame::viewer::{
     lit_warm_plan, mode_label, smoke_verdict, title, view_coverage, viewer_lit_plan, Command, ExposureReading, FrameStats, Held, Readiness,
     SmokeCounts, TitleInfo, ViewCoverage, ViewerState, KEYS_HELP,
 };
+use planet_frame::water::{empty_water_plan, plan_water, WaterRequest, WaterTileCache, WaterView};
 use planet_frame::{Camera, ControllerParams, LodParams, TerrainRequest, TerrainView};
 use planet_generators::height::HeightField;
 use planet_render::{AdapterPolicy, GpuContext, Presented, WindowSurface};
@@ -104,6 +105,8 @@ struct Config {
     look: LookParams,
     /// Whether the lit path draws the atmosphere (the look's atmosphere fits the body); the lit path starts on, the debug path with L.
     atmosphere: bool,
+    /// The liquid table of the world definition (WDEF-006): what the water tiles are made of.
+    liquids: planet_world_def::LiquidTable,
 }
 
 /// Everything that exists once the window does.
@@ -133,6 +136,8 @@ struct Running {
     exposure: Option<ExposureReading>,
     /// What the smoke run counts (VIEW-005); kept in every run, judged only in the smoke run.
     counts: SmokeCounts,
+    /// The per-tile answers of the water selection query (ADR 0051 point 6, option 1), kept for the life of the run.
+    water_cache: WaterTileCache,
 }
 
 struct App<'w> {
@@ -180,7 +185,14 @@ impl App<'_> {
         // first measured frame, whether the window starts lit or on the debug path (REND-017, VIEW-007).
         let warm_lit = viewer_lit_plan(&cfg.look, cfg.radius_m, 0.0, true, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
         rig.renderer
-            .warm_up_lit(&ctx, &lit_warm_plan(self.cameras[0], cfg.size, cfg.lod.cells, warm_lit))
+            .warm_up_lit(&ctx, &{
+                let mut warm = lit_warm_plan(self.cameras[0], cfg.size, cfg.lod.cells, warm_lit);
+                // A world with water warms the water pass too (no node: the pipelines and the copy target exist before frame 0).
+                if self.world.has_water() {
+                    warm.water = Some(empty_water_plan(&cfg.look.water, &cfg.lod));
+                }
+                warm
+            })
             .map_err(|e| format!("warming the lit path: {e}"))?;
         let now = self.clock.now_ms();
         let viewer = ViewerState::new(now, TerrainView::ALL.len(), cfg.initial_view, cfg.vsync).with_lit(true);
@@ -206,6 +218,7 @@ impl App<'_> {
             exposure: None,
             atmosphere: cfg.atmosphere,
             counts: SmokeCounts::default(),
+            water_cache: WaterTileCache::new(),
         });
         Ok(())
     }
@@ -259,6 +272,26 @@ impl App<'_> {
                 let lit = viewer_lit_plan(&cfg.look, cfg.radius_m, dt as f32, reset, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
                 let mut plan = draw.plan.clone();
                 plan.lit = Some(lit);
+                // The water of the frame (ADR 0041, ADR 0051 point 6): the nodes that carry water, decided by one query of the field W
+                // per new tile; the renderer draws what the plan says.
+                let time_s = now_ms as f64 / 1000.0;
+                let (look, liquids, lod) = (&cfg.look.water, &cfg.liquids, &cfg.lod);
+                let cache = &mut st.water_cache;
+                let water = self.world.with_water(|field| {
+                    let req = WaterRequest {
+                        source: field,
+                        map: &planet_core::cube::TangentWarp,
+                        liquids,
+                        look,
+                        lod,
+                        time_s,
+                        view: WaterView::Lit,
+                    };
+                    plan_water(&req, cache, &plan)
+                })?;
+                if let Some(w) = water {
+                    plan.water = Some(w.map_err(|e| e.to_string())?);
+                }
                 Some(plan)
             } else {
                 None
@@ -280,11 +313,13 @@ impl App<'_> {
             if drew_lit {
                 st.counts.lit_frames += 1;
                 st.counts.atmosphere_frames += u64::from(plan.lit.is_some_and(|l| l.atmosphere.is_some()));
+                st.counts.water_frames += u64::from(plan.water.as_ref().is_some_and(|w| !w.nodes.is_empty()));
                 if cfg.smoke {
                     // The renderer's own account of the last frame's passes: the exposure passes ran, and the sky with the atmosphere.
                     let passes = st.rig.renderer.lit_path().map(|p| p.executed_passes()).unwrap_or_default();
                     st.counts.renderer_ran_lit |= passes.contains(&"exposure-histogram") && passes.contains(&"exposure-adapt");
                     st.counts.renderer_ran_atmosphere |= passes.contains(&"sky-view");
+                    st.counts.renderer_ran_water |= passes.contains(&"water");
                 }
             } else {
                 st.counts.debug_frames += 1;
@@ -466,11 +501,12 @@ impl ApplicationHandler for App<'_> {
 
 fn smoke_summary(st: &Running) -> String {
     format!(
-        "{} frames drawn ({} lit, {} with the atmosphere, {} debug), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
+        "{} frames drawn ({} lit, {} with the atmosphere, {} with water, {} debug), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
   last title: {}",
         st.frames,
         st.counts.lit_frames,
         st.counts.atmosphere_frames,
+        st.counts.water_frames,
         st.counts.debug_frames,
         st.presented,
         st.counts.lit_presented,
@@ -498,17 +534,21 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     // The display first: a machine without one is told so before any world is baked.
     let event_loop = EventLoop::new().map_err(|e| format!("{NO_DISPLAY}the event loop could not start: {e}"))?;
 
-    let world = Arc::new(match &o.store {
-        Some(dir) => {
-            let res = if o.given.contains("--global-res") { o.global_res } else { crate::streamperf::PRODUCTION_BAKE_RES };
-            let def = match &o.world {
-                Some(p) => crate::worldfield::load_world(p)?,
-                None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
-            };
-            WorldTerrain::open_store(def, dir, res)?
+    let world = Arc::new(
+        match &o.store {
+            Some(dir) => {
+                let res = if o.given.contains("--global-res") { o.global_res } else { crate::streamperf::PRODUCTION_BAKE_RES };
+                let def = match &o.world {
+                    Some(p) => crate::worldfield::load_world(p)?,
+                    None => planet_world_def::WorldDefinition::single_planet(crate::skeleton::RADIUS_M, o.seed),
+                };
+                WorldTerrain::open_store(def, dir, res)?
+            }
+            None => WorldTerrain::of_perf_options(o, crate::skeleton::RADIUS_M)?,
         }
-        None => WorldTerrain::of_perf_options(o, crate::skeleton::RADIUS_M)?,
-    });
+        // The viewer's plans keep the tiles whose water the view sees even where their terrain is culled (ADR 0053).
+        .bounding_water(),
+    );
     let field = world.field()?;
     let radius_m = world.radius_m();
     let size = o.size.unwrap_or((1280, 720));
@@ -570,6 +610,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         tile_format: tile_format_pref,
         look,
         atmosphere,
+        liquids: world.definition().liquids().map_err(|e| format!("the liquid table of the definition: {e}"))?,
     };
     writeln!(out, "planet editor: {} ({})", if o.smoke { "smoke test" } else { "viewer" }, world.describe()).map_err(err)?;
     writeln!(out, "keys: {KEYS_HELP}").map_err(err)?;

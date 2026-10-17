@@ -13,3 +13,7 @@ sky_ground1m_ev15
 sky_ground1m_sunset_ev11
 sky_orbit_transmittance_lut
 sky_orbit_multiscatter_lut
+water_class_coast_aerial2km
+water_class_coast_low3m
+water_class_orbit
+water_class_lava_lake
