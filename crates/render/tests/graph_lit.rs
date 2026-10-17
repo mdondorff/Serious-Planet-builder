@@ -5,7 +5,7 @@ use planet_render::graph::*;
 const P1440: (u32, u32) = (2560, 1440);
 
 fn compile(size: (u32, u32), adaptive: bool) -> (RenderGraph, CompiledGraph) {
-    let g = lit_frame_graph(&LitShape { size, adaptive, atmosphere: false });
+    let g = lit_frame_graph(&LitShape { size, adaptive, atmosphere: false, water: false });
     let c = g.compile().expect("the lit frame compiles");
     (g, c)
 }
@@ -50,10 +50,10 @@ fn the_lit_frame_is_rejected_when_a_pass_loses_its_producer() {
 // spec: REND-019
 #[test]
 fn the_compile_is_a_pure_function_of_the_shape() {
-    let a = lit_frame_graph(&LitShape { size: P1440, adaptive: true, atmosphere: false }).compile().unwrap();
-    let b = lit_frame_graph(&LitShape { size: P1440, adaptive: true, atmosphere: false }).compile().unwrap();
+    let a = lit_frame_graph(&LitShape { size: P1440, adaptive: true, atmosphere: false, water: false }).compile().unwrap();
+    let b = lit_frame_graph(&LitShape { size: P1440, adaptive: true, atmosphere: false, water: false }).compile().unwrap();
     assert_eq!(a, b);
-    let other = lit_frame_graph(&LitShape { size: (1280, 720), adaptive: true, atmosphere: false }).compile().unwrap();
+    let other = lit_frame_graph(&LitShape { size: (1280, 720), adaptive: true, atmosphere: false, water: false }).compile().unwrap();
     assert_ne!(a, other, "a new size is a new compiled frame");
     assert_eq!(a.order, other.order, "the order does not depend on the size");
 }
@@ -117,7 +117,7 @@ fn equal_class_targets_with_disjoint_lifetimes_could_share_memory() {
 }
 
 fn compile_atmosphere(size: (u32, u32), adaptive: bool) -> (RenderGraph, CompiledGraph) {
-    let g = lit_frame_graph(&LitShape { size, adaptive, atmosphere: true });
+    let g = lit_frame_graph(&LitShape { size, adaptive, atmosphere: true, water: false });
     let c = g.compile().expect("the lit frame with an atmosphere compiles");
     (g, c)
 }

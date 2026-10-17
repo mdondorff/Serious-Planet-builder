@@ -21,6 +21,7 @@ pub mod terrain;
 pub mod terrain_text;
 pub mod upload;
 pub mod viewer;
+pub mod water;
 
 pub use camera::{Camera, Frustum};
 pub use controller::{CameraController, CameraInput, CameraMode, ControllerParams};

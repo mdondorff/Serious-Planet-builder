@@ -568,6 +568,7 @@ mod tests {
             cells: 16,
             nodes: tiles.iter().map(|t| draw(*t, &camera)).collect(),
             lit: None,
+            water: None,
         }
     }
 

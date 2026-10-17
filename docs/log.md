@@ -2,9 +2,13 @@
 
 One line per archived change, ADR decision, perf window or owner decision, newest first. Add new lines directly below this paragraph. Finished milestones are archived by the `housekeeping` skill: `docs/archive/M0-M3/log.md`, `docs/archive/M4/log.md`.
 
+<<<<<<< HEAD
+- 2026-10-17 **water-pass archived** (sonnet-explorer, M5 item 7): water on the terrain grid with Gerstner waves (planet-fixed, CPU-reduced phases), the shoreline from `W - h_morph`, lit surface with absorption, Fresnel, glint and emission (atmosphere over it), the lava lake through the same pass, the coverage flicker metric (0.0000 % on a glide and a descent), the frustum cut that keeps water above culled seabed, look schema 4, the viewer's ocean; ADR 0051 point 6 decided as option 1 (3.6 us per new tile, no storage); ADR 0053 proposed; four `water` goldens pending for 7b.
+=======
 - 2026-10-17 **ADR 0054 accepted (owner):** compact tiles move from texture atlases to storage buffers within M5 (queue item 7c, after item 7, before 7b and item 8); the vertex format's retirement stays a gate question. Viewer keyboard (owner): keep the feel and the orbit behaviour; add a ground clamp and speed scaled by the body's radius (Earth unchanged) in item 1b.
 - 2026-10-17 **Compact tiles in storage buffers explored** (sonnet-spikes, PR #225): same images on WARP and the RTX, equal RTX draw time (indicative), cheaper per-slot uploads, about 1-1.5 coder days; recommended as the first step of the vertex-format retirement, to the owner at the M5 gate. The WARP device removal persists with buffers (the atlas is not the trigger).
 - 2026-10-17 **SPIKE-11 remote check (owner):** over Chrome Remote Desktop from a touch screen, mouse look did not work and keyboard movement looked reasonable; mouse look over remote desktop is out of scope (owner). The local mouse check waits for the owner's physical access.
+>>>>>>> origin/main
 - 2026-10-17 **Tile-format duality explored** (sonnet-spikes, PR #218): retiring the vertex format from rendering is feasible at about 5-7 coder days (render floor at level 3 or a 5x5 base; 32-bit heights for cliff tiles); put to the owner at the M5 gate. Until then item 7 keeps new per-vertex data out of per-format storage.
 - 2026-10-17 **ADR 0052 accepted (owner):** first M5 goldens' debug views agree across adapters with every pixel within delta 1 except at most 64 pixels of any delta (edges and band boundaries); queue item 7b implements it in `golden-review` and reviews the 14 pending goldens again.
 - 2026-10-17 **ADR 0051 accepted** (ocean channel, liquid table in the definition per the owner's constraint 3, the water-level field; opus-planner, delegation; point 6 left to item 7).

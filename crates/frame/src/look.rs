@@ -13,6 +13,7 @@
 pub mod atmosphere;
 pub mod file;
 pub mod shading;
+pub mod water;
 
 use atmosphere::AtmospherePlan;
 use planet_core::hash::hash_u64s;

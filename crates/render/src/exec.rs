@@ -77,6 +77,10 @@ pub enum ExecError {
     BadLitPlan(String),
     /// The plan carries an atmosphere but `TerrainRenderer::enable_atmosphere` was not called.
     AtmosphereNotEnabled,
+    /// The plan carries water but `TerrainRenderer::enable_water` was not called.
+    WaterNotEnabled,
+    /// The plan's water part has values the renderer cannot use (the message names them).
+    BadWaterPlan(String),
 }
 
 impl fmt::Display for ExecError {
@@ -107,6 +111,10 @@ impl fmt::Display for ExecError {
                 write!(f, "the plan has {planned} nodes but the node record buffer holds {max}")
             }
             ExecError::BadLitPlan(m) => write!(f, "{m}"),
+            ExecError::BadWaterPlan(m) => write!(f, "{m}"),
+            ExecError::WaterNotEnabled => {
+                write!(f, "the plan carries water but the renderer was not given the water pass; call TerrainRenderer::enable_water first")
+            }
             ExecError::AtmosphereNotEnabled => {
                 write!(
                     f,

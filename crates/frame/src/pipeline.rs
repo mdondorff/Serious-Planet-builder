@@ -279,6 +279,7 @@ pub fn draw_plan_with(
             cells: req.lod.cells,
             nodes,
             lit: None,
+            water: None,
         },
     };
     Ok(DrawPlan { plan, kind, substituted, blank })

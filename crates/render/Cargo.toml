@@ -20,6 +20,7 @@ planet-generators.workspace = true
 [dev-dependencies]
 planet-generators = { workspace = true, features = ["stress"] }
 planet-testkit.workspace = true
+planet-world-def.workspace = true
 libm.workspace = true
 
 [features]

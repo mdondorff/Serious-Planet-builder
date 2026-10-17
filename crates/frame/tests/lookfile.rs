@@ -4,12 +4,14 @@
 use planet_frame::look::atmosphere::AtmosphereParams;
 use planet_frame::look::file::*;
 use planet_frame::look::shading::AlbedoParams;
+use planet_frame::look::water::WaterLook;
 use planet_frame::look::{self, ExposureMode, HistogramParams, LitPlan, SceneUnits, ToneMapMode};
 use planet_world_def::BodyId;
 
 const FIXTURE_V1: &str = include_str!("data/look_v1_moon_and_earth.toml");
 const FIXTURE_V2: &str = include_str!("data/look_v2_albedo_and_sun.toml");
 const FIXTURE_V3: &str = include_str!("data/look_v3_atmosphere.toml");
+const FIXTURE_V4: &str = include_str!("data/look_v4_water.toml");
 
 fn err(text: &str) -> String {
     parse_look(text).unwrap_err().to_string()
@@ -24,6 +26,7 @@ fn custom() -> LookParams {
         albedo: AlbedoParams { snow: [0.7, 0.72, 0.75], wet_mm: 1200.0, beach_height_m: 2.0, ..AlbedoParams::EARTH },
         sun: SunLook { direction: [0.0, 1.0, 0.0] },
         atmosphere: AtmosphereParams { mie_g: 0.55, top_height_m: 80_000.0, ..AtmosphereParams::EARTH },
+        water: WaterLook { absorption_per_m: 0.35, foam_width_m: 0.6, wave_scale: 1.5, ..WaterLook::EARTH },
     }
 }
 
@@ -58,7 +61,7 @@ fn canonical_text_is_deterministic_and_round_trips_bit_for_bit() {
     let text = to_toml(&f);
     assert_eq!(parse_look(&text).unwrap(), f);
     assert_eq!(to_toml(&parse_look(&text).unwrap()), text, "writing what was read gives the same text");
-    assert!(text.starts_with("schema_version = 3\nkind = \"look\"\n"));
+    assert!(text.starts_with("schema_version = 4\nkind = \"look\"\n"));
     let order: Vec<usize> = ["[body.0.units]", "[body.7.units]", "[body.12.units]"].iter().map(|k| text.find(k).unwrap()).collect();
     assert!(order[0] < order[1] && order[1] < order[2], "bodies are written in id order");
     // The same content from a differently formatted file writes the same text.
@@ -237,11 +240,11 @@ fn migration_failures_name_the_step_and_the_gap() {
 #[test]
 fn the_production_chain_reads_the_version_1_fixture_and_writes_the_current_layout() {
     assert_eq!(
-        SCHEMA_VERSION, 3,
+        SCHEMA_VERSION, 4,
         "a new table or key needs a new version, an identity step in MIGRATIONS and a fixture of this version kept"
     );
     assert_eq!(MIGRATIONS.len() as u32, SCHEMA_VERSION - 1, "one step per older version");
-    assert_eq!(MIGRATIONS.iter().map(|m| m.from).collect::<Vec<_>>(), [1, 2], "the steps run from version 1 up without a gap");
+    assert_eq!(MIGRATIONS.iter().map(|m| m.from).collect::<Vec<_>>(), [1, 2, 3], "the steps run from version 1 up without a gap");
     // The version 1 fixture goes through the real chain (the identity step 1 to 2) and reads as written.
     let f = parse_look(FIXTURE_V1).unwrap();
     assert_eq!(f.body(BodyId(3)).units.solar_illuminance_lux, 25_000.0);
@@ -279,6 +282,49 @@ fn the_production_chain_reads_the_version_1_fixture_and_writes_the_current_layou
     assert_eq!(h.body(BodyId(2)).units.solar_illuminance_lux, 55_000.0);
     assert_eq!(parse_look(&to_toml(&h)).unwrap(), h);
     assert_eq!(to_toml(&parse_look(&to_toml(&h)).unwrap()), to_toml(&h));
+    assert_eq!(h.body(BodyId(2)).water, WaterLook::EARTH, "a version 3 file has no water table: the Earth default");
+    // The same content as a version 4 file reads equal (the identity step 3 to 4).
+    let h4 = FIXTURE_V3.replacen("schema_version = 3", "schema_version = 4", 1);
+    assert_eq!(parse_look(&h4).unwrap(), h);
+    // The fixture of version 4 carries the water table; keys it leaves out are the Earth default.
+    let w = parse_look(FIXTURE_V4).unwrap();
+    let water = w.body(BodyId(1)).water;
+    assert_eq!((water.absorption_per_m, water.fresnel_f0, water.foam_width_m, water.choppy, water.wave_scale), (0.25, 0.04, 2.0, 0.0, 0.0));
+    assert_eq!(water.glint_roughness, WaterLook::EARTH.glint_roughness, "a key left out is the default");
+    assert_eq!(water.shore_fade_m, WaterLook::EARTH.shore_fade_m);
+    assert_eq!(w.body(BodyId(1)).units.solar_illuminance_lux, 90_000.0);
+    assert_eq!(parse_look(&to_toml(&w)).unwrap(), w);
+    assert_eq!(to_toml(&parse_look(&to_toml(&w)).unwrap()), to_toml(&w));
+}
+
+// spec: LOOK-001, LOOK-002
+#[test]
+fn an_older_build_refuses_the_water_table_as_a_newer_schema_and_water_values_outside_their_range_are_refused_naming_the_key() {
+    // A build that knows versions up to 3 refuses a version 4 file with "newer", not "unknown key".
+    let e = parse_with(FIXTURE_V4, 3, &MIGRATIONS[..2]).unwrap_err();
+    assert_eq!(e, LookError::NewerSchema { found: 4, known: 3 });
+    assert!(e.to_string().contains("update the program"), "{e}");
+    let bad = FIXTURE_V4.replace("[body.1.water]", "[body.1.waters]");
+    assert!(err(&bad).contains("body.1.waters"), "{}", err(&bad));
+    let bad = FIXTURE_V4.replace("fresnel_f0", "fresnel_f1");
+    assert!(err(&bad).contains("body.1.water.fresnel_f1"), "{}", err(&bad));
+    let with = |line: &str| format!("schema_version = 4\nkind = \"look\"\n[body.4.water]\n{line}\n");
+    for (line, key, value) in [
+        ("absorption_per_m = 0.0", "body.4.water.absorption_per_m", "0.0"),
+        ("fresnel_f0 = 0.5", "body.4.water.fresnel_f0", "0.5"),
+        ("glint_roughness = 0.0", "body.4.water.glint_roughness", "0.0"),
+        ("shore_fade_m = 0.0", "body.4.water.shore_fade_m", "0.0"),
+        ("foam_width_m = 0.0", "body.4.water.foam_width_m", "0.0"),
+        ("foam_strength = 1.5", "body.4.water.foam_strength", "1.5"),
+        ("choppy = -0.1", "body.4.water.choppy", "-0.1"),
+        ("gravity_m_s2 = 0.0", "body.4.water.gravity_m_s2", "0.0"),
+        ("wave_scale = 11.0", "body.4.water.wave_scale", "11.0"),
+        ("wave_scale = \"big\"", "body.4.water.wave_scale", "string"),
+    ] {
+        let e = err(&with(line));
+        assert!(e.contains(key) && e.contains(value), "{line}: {e}");
+    }
+    assert!(parse_look(&with("wave_scale = 0.0\nchoppy = 2.0")).is_ok(), "the ends of the ranges are valid");
 }
 
 // spec: LOOK-001, LOOK-002

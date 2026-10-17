@@ -162,6 +162,10 @@ struct Volume {
     half_range: f64,
     /// Upper height bound, metres.
     max_height: f64,
+    /// The sphere the frustum cut tests: the volume above, with its upper bound raised to the field's water level (ADR 0053); the
+    /// volume itself when the field names none.
+    cull_centre: Vec3,
+    cull_radius: f64,
 }
 
 fn tile_volume(g: &TileGeom, field: &dyn HeightField, p: &LodParams) -> Volume {
@@ -170,7 +174,12 @@ fn tile_volume(g: &TileGeom, field: &dyn HeightField, p: &LodParams) -> Volume {
     let centre = g.dir * (p.radius_m + 0.5 * (hi + lo));
     // Terrain points sit further from the planet axis than reference points by up to the factor 1 + hi/R.
     let horizontal = g.radius * (1.0 + hi.max(0.0) / p.radius_m);
-    Volume { centre, radius: extent(horizontal, half_range), half_range, max_height: hi }
+    let radius = extent(horizontal, half_range);
+    let (cull_centre, cull_radius) = match field.water_cull_level().filter(|w| *w > hi) {
+        Some(w) => (g.dir * (p.radius_m + 0.5 * (w + lo)), extent(g.radius * (1.0 + w.max(0.0) / p.radius_m), 0.5 * (w - lo))),
+        None => (centre, radius),
+    };
+    Volume { centre, radius, half_range, max_height: hi, cull_centre, cull_radius }
 }
 
 /// Skirt depth of a tile with 5 % to spare (the mesh builder's rule, shared): the skirts are drawn, so the frustum cut must
@@ -295,6 +304,8 @@ impl SelectionCache {
                 field.inputs_hash(),
                 u64::from(field.body().0),
                 p.radius_m.to_bits(),
+                // The cull spheres of the cached volumes reach up to the field's water level.
+                field.water_cull_level().map_or(0, |w| planet_core::hash::hash_u64s(5, &[w.to_bits()]) | 1),
                 // The mesh key chains the reference surface (GEN-012): a field on another surface must not reuse keys.
                 planet_core::hash::hash_u64s(3, &text(field.surface_id())),
             ],
@@ -464,7 +475,7 @@ fn select_impl(
                 continue;
             }
             let v = geoms.volume(t);
-            if fr.culls_sphere(v.centre, v.radius + skirt_depth(t, p)) {
+            if fr.culls_sphere(v.cull_centre, v.cull_radius + skirt_depth(t, p)) {
                 continue;
             }
         }
@@ -610,7 +621,7 @@ impl<'a> ViewTest<'a> {
         if self.frustum.culls_sphere(g.centre, g.radius + p.max_height_m + skirt) {
             return true;
         }
-        self.bounds.tiles.get(&t).is_some_and(|(_, v)| self.frustum.culls_sphere(v.centre, v.radius + skirt))
+        self.bounds.tiles.get(&t).is_some_and(|(_, v)| self.frustum.culls_sphere(v.cull_centre, v.cull_radius + skirt))
     }
 
     /// Distance from the camera to the tile: to its height-aware volume when the bounds hold it (what the plan measures),

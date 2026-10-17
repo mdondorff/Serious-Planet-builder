@@ -23,7 +23,7 @@ pub const REF_BYTES: u64 = 16;
 /// at build time so the two pipelines cannot drift apart there), the vertex stage replaced by vertex pulling from the atlas.
 pub fn compact_terrain_shader(cells: u32) -> String {
     let src = TERRAIN_SHADERS[0].1;
-    let vs_at = src.find("@vertex").expect("product shader has a vertex stage");
+    let vs_at = src.find("fn terrain_vertex(").expect("product shader has a vertex stage");
     let tail_at = src.find("// Distance in pixels to the nearest integer").expect("product shader helper marker");
     let head = &src[..vs_at];
     assert!(head.contains("@group(0) @binding(1) var<storage, read> nodes: array<Node>;"), "product node binding changed");
@@ -137,8 +137,7 @@ fn oct_decode(e: vec2<f32>) -> vec3<f32> {
     return normalize(n);
 }
 
-@vertex
-fn vs(@builtin(instance_index) inst: u32, @builtin(vertex_index) vi: u32) -> VsOut {
+fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
     let node = nodes[inst];
     let tref = tile_refs[inst];
     load_tile(tref.z, tref.xy);
@@ -202,6 +201,11 @@ fn vs(@builtin(instance_index) inst: u32, @builtin(vertex_index) vi: u32) -> VsO
     out.node_index = inst;
     out.aux = vec2<f32>(f32(i), f32(j)) / f32(CELLS);
     return out;
+}
+
+@vertex
+fn vs(@builtin(instance_index) inst: u32, @builtin(vertex_index) vi: u32) -> VsOut {
+    return terrain_vertex(inst, vi);
 }
 
 // The climate texel `idx` (row-major over the 9 x 9 texture) of the tile at texel origin `base`: the fourth channel of the slot's
