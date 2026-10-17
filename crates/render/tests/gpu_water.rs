@@ -717,6 +717,8 @@ struct FlightFrame {
     nodes: usize,
     /// The same frame without water (the terrain alone).
     base_lum: Vec<f64>,
+    /// The lit frame as displayed (for the inspection strips).
+    shown: Image,
     /// What the water does to the terrain's luminance: lit over terrain alone (the shore pixels' own contribution, free of the
     /// seabed's shading).
     ratio: Vec<f64>,
@@ -772,6 +774,7 @@ fn fly(
         let lum: Vec<f64> = lit.iter().map(|p| look::luminance([f64::from(p[0]), f64::from(p[1]), f64::from(p[2])])).collect();
         let base_lum: Vec<f64> = base.iter().map(|p| look::luminance([f64::from(p[0]), f64::from(p[1]), f64::from(p[2])])).collect();
         frames.push(FlightFrame {
+            shown: image_of(&r, ctx),
             ratio: lum.iter().zip(&base_lum).map(|(l, b): (&f64, &f64)| l / b.max(1.0e-3)).collect(),
             base_lum,
             camera: *camera,
@@ -841,6 +844,22 @@ fn a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_cha
     let b = fly(&ctx, &field, size, &descent, 0.25, false, 1.0);
     let b_unfiltered = fly(&ctx, &field, size, &descent, 0.25, false, 0.0);
     for (name, frames) in [("glide", &a), ("descent", &b)] {
+        // Frame strips for the gate's contact sheet (ADR 0037 point 2): every fourth frame of the flight, side by side, drawn with the
+        // fwidth filter on (the look's default) and off, so the owner sees both.
+        let unfiltered_frames = if name == "glide" { &a_unfiltered } else { &b_unfiltered };
+        for (tag, strip_frames) in [("filter1", frames), ("filter0", unfiltered_frames)] {
+            let picks: Vec<&FlightFrame> = strip_frames.iter().step_by(4).collect();
+            let (w, h) = (picks[0].shown.width, picks[0].shown.height);
+            let mut strip = Image::filled(w * picks.len() as u32, h, [0, 0, 0, 255]);
+            for (i, f) in picks.iter().enumerate() {
+                for y in 0..h {
+                    for x in 0..w {
+                        strip.set_pixel(i as u32 * w + x, y, f.shown.pixel(x, y));
+                    }
+                }
+            }
+            write_inspection(&format!("flight_{name}_{tag}_strip"), &strip);
+        }
         for k in [5usize, 6] {
             let m = &frames[k].classes;
             let mut img = Image::filled(m.size.0, m.size.1, [0, 0, 0, 255]);
