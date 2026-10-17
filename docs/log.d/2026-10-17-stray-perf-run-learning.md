@@ -1,0 +1,1 @@
+- 2026-10-17 **learning: stray `cargo xtask perf`** — a window-7 subagent ran a bare `cargo xtask perf` (terrain scene) before the quiet check; its logs were set aside and not counted. Rule: subagent prompts forbid `cargo xtask perf`; every perf run happens in the coordinator's own session.
