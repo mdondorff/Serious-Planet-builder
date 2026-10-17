@@ -1,4 +1,4 @@
-# 0057 A coarse level of the water field: a summary the bake writes once
+# 0058 A coarse level of the water field: a summary the bake writes once
 Status: proposed
 Date: 2026-10-17
 Source: docs/learnings.md 2026-10-17 (dive-lit lag), docs/status.md item 9a.1, ADR 0041 point 2, ADR 0053 points 4 and 5, ADR 0056 points 1 and 4; specs GEN-024, STRM-025, ATMO-012, ATMO-019

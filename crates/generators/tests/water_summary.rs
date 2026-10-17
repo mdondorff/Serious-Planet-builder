@@ -1,4 +1,4 @@
-//! GEN-024: the coarse level of the water field (ADR 0057): the summary of a bake, its known answers, its tile query and its
+//! GEN-024: the coarse level of the water field (ADR 0058): the summary of a bake, its known answers, its tile query and its
 //! independence of the order and thread count of the blocks.
 
 use planet_core::cube::TangentWarp;

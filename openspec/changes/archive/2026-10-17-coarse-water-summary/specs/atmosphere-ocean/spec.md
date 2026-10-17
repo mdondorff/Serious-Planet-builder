@@ -7,7 +7,7 @@ Cost of a query on the plan thread, measured ad hoc on an in-memory bake (not a 
 
 Verify: A
 Status: active
-Source: ADR 0041 point 8, ADR 0051 point 6, ADR 0057, CON-03, CON-04
+Source: ADR 0041 point 8, ADR 0051 point 6, ADR 0058, CON-03, CON-04
 
 #### Scenario: Selection
 - **WHEN** a plan of a coastal view is made over the reference sea
@@ -34,7 +34,7 @@ A tile with no sea of its own SHALL carry the sea when one of its 25 samples is 
 
 Verify: A, C
 Status: active
-Source: ADR 0056, ADR 0057, ADR 0041 point 2, ADR 0053, window 6 captures
+Source: ADR 0056, ADR 0058, ADR 0041 point 2, ADR 0053, window 6 captures
 
 #### Scenario: Coverage oracle on a real world
 - **WHEN** an aerial (2 km up) and a low (30 m) view from the sea towards a coastal plain below the level, and a view at a beach, of the in-memory eroded world of 1,024 cells are drawn in the class view, and every pixel whose CPU ray meets the sea sphere where the terrain is under -12 m and an ocean vertex lies within 100 km is compared

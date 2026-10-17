@@ -1,4 +1,4 @@
-//! STRM-025: the water summary of the global bake in the store (ADR 0057): its record, key, codec, build, migration of a store that has the
+//! STRM-025: the water summary of the global bake in the store (ADR 0058): its record, key, codec, build, migration of a store that has the
 //! blocks and the ocean channel but no summary, and verification.
 
 use std::fs;

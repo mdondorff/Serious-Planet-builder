@@ -1,5 +1,5 @@
 ## Why
-M5 item 9a.1 (the dive's detail lag): the first wave of the dive is 36 coarse tiles, and each tile's water fill reads up to 25 blocks of the stored bake through a 31-block cache (about 900 loads at about 180 ms, the first tile resident at frame 430, lag mean 1.7 against a budget of 1). The decision of the planner (2026-10-17) is a coarse level of the water field that the bake writes once, not a stopgap in the tile jobs. ADR 0057 (proposed).
+M5 item 9a.1 (the dive's detail lag): the first wave of the dive is 36 coarse tiles, and each tile's water fill reads up to 25 blocks of the stored bake through a 31-block cache (about 900 loads at about 180 ms, the first tile resident at frame 430, lag mean 1.7 against a budget of 1). The decision of the planner (2026-10-17) is a coarse level of the water field that the bake writes once, not a stopgap in the tile jobs. ADR 0058 (proposed).
 
 ## What Changes
 - `generators::water_summary` (GEN-024): the summary of a bake (a flag pair and a band elevation per 64 x 64 bake cells), the per-block computation, and the tile query that answers tiles at or above the block level.

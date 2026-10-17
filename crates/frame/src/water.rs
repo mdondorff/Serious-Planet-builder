@@ -13,7 +13,7 @@
 //! flooded, and a lake smaller than a tile's sample spacing can be missed at the tile's coarse levels; the per-vertex mask
 //! (ADR 0051 point 6, option 3) is the fix if either shows.
 //!
-//! **Coarse tiles (ADR 0057, GEN-024).** A tile whose area is at least one block of the stored bake is not asked point by point (that
+//! **Coarse tiles (ADR 0058, GEN-024).** A tile whose area is at least one block of the stored bake is not asked point by point (that
 //! reads up to 25 blocks): the source answers it from the coarse level of W, a summary the bake wrote once, as the union over the cells
 //! the tile touches (a superset of the point query's answer, and a parent is wet wherever its children are). The query is
 //! [`WaterSource::coarse_tile_water`]; a source without a summary answers `None` and the tile is asked point by point.
@@ -150,7 +150,7 @@ pub trait WaterSource: Sync {
         Ok(false)
     }
 
-    /// The water of a tile that spans more than one block of the bake, from the coarse level of W (ADR 0057): `None` when the source
+    /// The water of a tile that spans more than one block of the bake, from the coarse level of W (ADR 0058): `None` when the source
     /// has none for the tile (the tile is asked point by point), else the answer for the whole tile.
     fn coarse_tile_water(&self, _map: &dyn FaceMapping, _tile: TileId, _radius_m: f64) -> Result<Option<Option<WaterSample>>, ReadError> {
         Ok(None)
@@ -193,7 +193,7 @@ impl WaterBook {
         if self.tiles.lock().expect("water book").contains_key(&tile) {
             return Ok(());
         }
-        // A tile that spans more than one block is answered by the coarse level of W and reads none (ADR 0057).
+        // A tile that spans more than one block is answered by the coarse level of W and reads none (ADR 0058).
         if let Some(answer) = src.coarse_tile_water(map, tile, radius_m)? {
             if self.tiles.lock().expect("water book").insert(tile, answer).is_none() {
                 self.filled.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

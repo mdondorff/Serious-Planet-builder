@@ -700,7 +700,7 @@ Class (ADR 0035): the storage of GEN-024's **field**; bound: exact, every bit.
 
 Verify: A
 Status: active
-Source: ADR 0057, ADR 0041 point 2, ADR 0018, ADR 0019, STRM-012, STRM-013, STRM-023, CON-05, CON-14
+Source: ADR 0058, ADR 0041 point 2, ADR 0018, ADR 0019, STRM-012, STRM-013, STRM-023, CON-05, CON-14
 
 #### Scenario: Codec
 - **WHEN** a summary is encoded and decoded, its header is read, and hostile payloads (short, another version, hostile resolution or block size, wrong raw length, cut, an unknown flag bit) are decoded

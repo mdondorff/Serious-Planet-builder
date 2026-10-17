@@ -189,10 +189,26 @@ fn gpu_validity_of(root: &Json, runs: &[&Json]) -> GpuValidity {
         let why = crate::validity::log_gpu_only_reasons(root);
         return GpuValidity::Invalid(why.first().cloned().unwrap_or_else(|| "the session is not fit for GPU verdicts".to_string()));
     }
+    // A run below the floor (ADR 0057) keeps its words in the log (`P0 1282 MHz, below the 1400 MHz floor`); any other text of a
+    // run that is not valid is a missing sample. The view is Below only when every run that is not valid is below the floor, and
+    // it names the lowest.
+    let mut lowest: Option<(ClockState, String)> = None;
     for r in runs {
-        if !matches!(r.get("gpu_valid"), Some(Json::Bool(true))) {
-            return GpuValidity::Invalid(str_at(r, "gpu_clock_state").unwrap_or("no clock state").to_string());
+        if matches!(r.get("gpu_valid"), Some(Json::Bool(true))) {
+            continue;
         }
+        let text = str_at(r, "gpu_clock_state").unwrap_or("no clock state");
+        match crate::clock::parse_below_floor(text) {
+            None => return GpuValidity::Invalid(text.to_string()),
+            Some(state) => {
+                if lowest.as_ref().is_none_or(|(l, _)| state.mhz < l.mhz) {
+                    lowest = Some((state, text.to_string()));
+                }
+            }
+        }
+    }
+    if let Some((state, text)) = lowest {
+        return GpuValidity::Below(state, text);
     }
     let state = runs.first().and_then(|r| str_at(r, "gpu_clock_state")).unwrap_or("");
     // `P2 1710 MHz` (the log's words) back into a state; any other text is kept as the P-state with an unknown clock.
@@ -224,9 +240,21 @@ fn read_view(root: &Json, path: &str, gated: bool) -> Result<ViewRead, String> {
         frame.max,
         match &gpu {
             GpuValidity::Valid(s) => format!("{s}"),
+            GpuValidity::Below(_, r) => format!("below the floor ({r}): within-budget figures pass, over-budget ones are inconclusive"),
             GpuValidity::Invalid(r) => format!("NOT VALID for GPU budgets ({r})"),
         }
     )];
+    // The heat and the power beside the GPU rows (ADR 0057): the clock below the floor is the power cap trading clock for heat.
+    let samples: Vec<&Json> = runs.iter().flat_map(|r| ["clocks_before", "clocks_after"].into_iter().filter_map(|k| r.get(k))).collect();
+    let temps: Vec<f64> = samples.iter().filter_map(|c| num(c, "temperature_c")).collect();
+    if let (Some(lo), Some(hi)) = (temps.iter().copied().min_by(f64::total_cmp), temps.iter().copied().max_by(f64::total_cmp)) {
+        let power = samples.iter().filter_map(|c| num(c, "power_w")).fold(f64::MIN, f64::max);
+        let cap = samples.iter().any(|c| str_at(c, "throttle_reasons").is_some_and(crate::gate::has_power_cap));
+        facts.push(format!(
+            "GPU thermal: {lo:.0}-{hi:.0} C, up to {power:.0} W{}",
+            if cap { ", software power cap (0x4) read" } else { "" }
+        ));
+    }
     facts.push(format!(
         "{} nodes, {} with water, {} water draws; tile format {}",
         counts("nodes").max(counts("nodes_max")),
@@ -535,6 +563,7 @@ pub const FINDING_SLOTS: [(&str, &str); 14] = [
 fn word(s: &Status, gated: bool) -> String {
     match (s, gated) {
         (Status::Ok, _) => "pass".to_string(),
+        (Status::OkBelowFloor(r), _) => format!("ok at a low clock ({r}; a slower clock only overstates the time)"),
         (Status::Over, true) => "FAIL".to_string(),
         (Status::Over, false) => "over (not gated)".to_string(),
         (Status::NotValid(r), _) => format!("NOT VALID for GPU budgets ({r})"),
@@ -1006,10 +1035,21 @@ mod tests {
     // spec: TEST-026
     #[test]
     fn a_view_below_the_clock_floor_or_after_an_idle_start_is_incomplete_not_failed_and_not_passed() {
+        // ADR 0057 (it changes this test's first half): at 1,150 MHz, below the floor, figures within their budgets pass ...
         let j = judged(evaluate(&window(&Fx { mhz: 1150, ..fx() })));
+        assert_eq!(j.outcome, Outcome::Pass, "{:?} {:?}", j.failing, j.incomplete);
+        assert!(j.views.iter().any(|v| v.rows.iter().any(|r| matches!(r.status, Status::OkBelowFloor(_)))));
+        let r = render_report(&j, "", "d");
+        assert!(r.contains("ok at a low clock") && r.contains("GPU thermal:"), "the clock and the heat stay beside the rows");
+        // ... and a figure over its budget at that clock is inconclusive, as before the amendment.
+        let j = judged(evaluate(&window(&Fx { mhz: 1150, atmosphere_orbit: 1.3, ..fx() })));
         assert_eq!(j.outcome, Outcome::Incomplete, "{:?}", j.failing);
         assert!(j.failing.is_empty() && !j.incomplete.is_empty());
-        assert!(j.incomplete.iter().any(|l| l.contains("NOT VALID for GPU budgets") && l.contains("1150 MHz")), "{:?}", j.incomplete);
+        assert!(
+            j.incomplete.iter().any(|l| l.contains("NOT VALID for GPU budgets") && l.contains("inconclusive") && l.contains("1150 MHz")),
+            "{:?}",
+            j.incomplete
+        );
         let r = render_report(&j, "", "d");
         assert!(r.contains("Verdict on the hardware criteria: INCOMPLETE") && r.contains("could not be judged"));
         // An idle GPU start voids the GPU verdicts of the whole session; the frame rows are still judged.

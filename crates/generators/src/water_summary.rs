@@ -1,4 +1,4 @@
-//! The coarse level of the water field W: a summary of the bake, written once (ADR 0057, GEN-024).
+//! The coarse level of the water field W: a summary of the bake, written once (ADR 0058, GEN-024).
 //!
 //! A tile at or above the level of the bake's blocks spans many of them. Asking W at its sample directions (ADR 0053) loads up to 25
 //! blocks of the stored bake; the summary answers the same question from a small table instead. The table has one cell per

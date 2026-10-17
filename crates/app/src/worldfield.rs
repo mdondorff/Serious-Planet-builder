@@ -171,7 +171,7 @@ pub struct WorldTerrain {
     /// The ocean channel of the bake (ADR 0041 point 2): the sea of the water field W. `None` for a field that reads no bake (no
     /// bake, no ocean, no water) and for a store without the channel.
     ocean: Option<Box<dyn OceanLattice + Send + Sync>>,
-    /// The coarse level of W (ADR 0057): the summary of the stored bake, which answers the tiles that span more than one block.
+    /// The coarse level of W (ADR 0058): the summary of the stored bake, which answers the tiles that span more than one block.
     /// `None` for an in-memory bake (one block per face: no tile spans more than one) and for a world without water.
     summary: Option<&'static planet_generators::water_summary::WaterSummary>,
     /// Whether the fields this world builds bound their tiles up to the sea level (the viewer's lit path: the water of a tile whose
@@ -289,7 +289,7 @@ impl WorldTerrain {
         let ocean: Option<Box<dyn OceanLattice + Send + Sync>> = planet_cache::global_store::StoreOceanSource::new(store, world, res)
             .ok()
             .map(|o| Box::new(SharedOcean(Box::leak(Box::new(o)))) as Box<dyn OceanLattice + Send + Sync>);
-        // The coarse level of W (ADR 0057): a store with the ocean channel and without the summary is refused, because every coarse tile
+        // The coarse level of W (ADR 0058): a store with the ocean channel and without the summary is refused, because every coarse tile
         // would then read up to 25 blocks and the dive would lag; the message names the command that adds it.
         let summary = match &ocean {
             Some(_) => Some(&*Box::leak(Box::new(

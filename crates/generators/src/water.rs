@@ -85,7 +85,7 @@ pub trait WaterProducer: Sync {
         Ok(false)
     }
 
-    /// The water of a tile that spans more than one block of the bake, from this producer's summary (ADR 0057): `None` when the
+    /// The water of a tile that spans more than one block of the bake, from this producer's summary (ADR 0058): `None` when the
     /// producer has no summary for the tile (the field asks it point by point), else the answer for the whole tile.
     fn coarse_tile_water(
         &self,
@@ -109,7 +109,7 @@ impl<'a> SeaProducer<'a> {
         SeaProducer { ocean, sea, summary: None }
     }
 
-    /// The same with the coarse level of W (ADR 0057): tiles at or above the bake's block level are answered from `summary`.
+    /// The same with the coarse level of W (ADR 0058): tiles at or above the bake's block level are answered from `summary`.
     pub fn with_summary(mut self, summary: &'a WaterSummary) -> SeaProducer<'a> {
         self.summary = Some(summary);
         self
@@ -246,7 +246,7 @@ impl<'a> WaterField<'a> {
         Ok(None)
     }
 
-    /// The water of `tile` from the producers' summaries (ADR 0057), when every producer has one for it: the first producer with water
+    /// The water of `tile` from the producers' summaries (ADR 0058), when every producer has one for it: the first producer with water
     /// wins, as in [`water_at`](WaterField::water_at); `None` when some producer must be asked point by point.
     pub fn coarse_tile_water(
         &self,

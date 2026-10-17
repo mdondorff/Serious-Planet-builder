@@ -69,7 +69,7 @@ pub enum Kind {
     GlobalBlock = 3,
     /// A block of the ocean-connectivity channel of the global bake (ADR 0041 point 2): one bit per vertex.
     GlobalOcean = 4,
-    /// The coarse level of the water field: the summary of a global bake (ADR 0057), one record per bake.
+    /// The coarse level of the water field: the summary of a global bake (ADR 0058), one record per bake.
     GlobalWaterSummary = 5,
 }
 

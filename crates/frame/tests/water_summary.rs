@@ -1,4 +1,4 @@
-//! Tier A: the coarse level of the water field (ADR 0057, GEN-024, ATMO-012, ATMO-019): a tile that spans more than one block of the bake is
+//! Tier A: the coarse level of the water field (ADR 0058, GEN-024, ATMO-012, ATMO-019): a tile that spans more than one block of the bake is
 //! answered by the stored summary and reads no block; the answer is a superset of the point-by-point one, a parent is wet wherever its
 //! children are, tiles at the block level and below keep their exact answers, and nothing depends on the thread.
 

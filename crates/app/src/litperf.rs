@@ -164,10 +164,19 @@ fn count_water(plan: &TerrainPlan) -> u64 {
 }
 
 /// Bring the GPU to its loaded state with chunks of frames of `plan` (ADR 0034, ADR 0036); not in a smoke run.
-fn warm_clock(rig: &Rig<'_>, r: &mut TerrainRenderer, plan: &TerrainPlan) -> Result<Option<planet_perf::clock::WarmUpOutcome>, String> {
+fn warm_clock(
+    rig: &Rig<'_>,
+    r: &mut TerrainRenderer,
+    plan: &TerrainPlan,
+    view: &str,
+    out: &mut dyn Write,
+) -> Result<Option<planet_perf::clock::WarmUpOutcome>, String> {
     if rig.smoke {
         return Ok(None);
     }
+    // The GPU is power-capped and its clock falls with its temperature (window 7: 54-59 C held 1,455-1,567 MHz, 66-77 C read
+    // 1,282-1,380 MHz), so a view starts cool (ADR 0057).
+    writeln!(out, "{}", planet_perf::cool_gpu().line(view)).map_err(err)?;
     let started = Instant::now();
     // Warm-load phase (unmeasured): chunks of at least WARMUP_MIN_CHUNK_S of frames, until the clock has read the floor
     // WARMUP_HOLD_READINGS times in a row, with the cap of ADR 0034; the light views would otherwise read the floor once and fall.
@@ -242,7 +251,7 @@ fn measure_static(
     for _ in 0..warm {
         r.render(rig.ctx, &lit, true).map_err(|e| e.to_string())?;
     }
-    let warmup = warm_clock(rig, r, &lit)?;
+    let warmup = warm_clock(rig, r, &lit, path, out)?;
     let load_sampler = (!rig.smoke).then(|| planet_perf::load::LoadSampler::start(planet_perf::load::SAMPLE_PERIOD_S));
     let mut attempt = 0;
     let (mut reports, mut batch_frames, mut noisy, mut noise_lines);
@@ -350,7 +359,7 @@ fn measure_flight(
         water_max = water_max.max(count_water(&lit));
         nodes_max = nodes_max.max(plan.nodes.len());
         if k == 0 {
-            warmup = warm_clock(rig, r, &lit)?;
+            warmup = warm_clock(rig, r, &lit, path, out)?;
             before = planet_perf::query_nvidia_smi();
             load_sampler = (!rig.smoke).then(|| planet_perf::load::LoadSampler::start(planet_perf::load::SAMPLE_PERIOD_S));
         }
@@ -412,7 +421,12 @@ fn print_view(res: &ViewResult, gpu: &planet_perf::clock::GpuValidity, smoke: bo
     let gated = res.kind == ViewKind::Static;
     let state = match gpu {
         planet_perf::clock::GpuValidity::Valid(s) => format!("clock state {s}"),
+        planet_perf::clock::GpuValidity::Below(_, r) => format!("GPU below the floor: {r}"),
         planet_perf::clock::GpuValidity::Invalid(r) => format!("GPU not valid: {r}"),
+    };
+    let state = match planet_perf::view_thermal_text(&res.reports, &res.path) {
+        Some(t) if !smoke => format!("{state} ({t})"),
+        _ => state,
     };
     writeln!(
         out,
@@ -586,10 +600,10 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
                         (planet_perf::clock::GpuValidity::Valid(a), planet_perf::clock::GpuValidity::Valid(b)) => {
                             (!planet_perf::clock::equal_clock_state(&a, &b)).then(|| format!("not comparable: clock state {a} vs {b}"))
                         }
-                        (planet_perf::clock::GpuValidity::Invalid(r), _) => {
+                        (planet_perf::clock::GpuValidity::Invalid(r) | planet_perf::clock::GpuValidity::Below(_, r), _) => {
                             Some(format!("not compared: the vertex view is NOT VALID for GPU budgets ({r})"))
                         }
-                        (_, planet_perf::clock::GpuValidity::Invalid(r)) => {
+                        (_, planet_perf::clock::GpuValidity::Invalid(r) | planet_perf::clock::GpuValidity::Below(_, r)) => {
                             Some(format!("not compared: the compact view is NOT VALID for GPU budgets ({r})"))
                         }
                     }

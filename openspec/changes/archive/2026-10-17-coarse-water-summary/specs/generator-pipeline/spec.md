@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: GEN-024 The coarse level of the water field W
-The generators SHALL provide a coarse level of W (ADR 0057), the `WaterSummary` of a bake of `res` cells per face edge in blocks of `B` cells: one cell per `d x d` bake cells, `d = min(B, 64)`, so `6 (res / d)^2` cells (face, row, column, x fastest), each inside one block. A cell holds two flags and a number, functions of the bake and its ocean channel alone (the sea level and the liquid of the definition are no input):
+The generators SHALL provide a coarse level of W (ADR 0058), the `WaterSummary` of a bake of `res` cells per face edge in blocks of `B` cells: one cell per `d x d` bake cells, `d = min(B, 64)`, so `6 (res / d)^2` cells (face, row, column, x fastest), each inside one block. A cell holds two flags and a number, functions of the bake and its ocean channel alone (the sea level and the liquid of the definition are no input):
 - WET: some lattice cell of the summary cell has an ocean vertex among its four corners and a corner whose continentalness is not above `SEA_LEVEL_C` (a NaN counts as not above), the necessary condition for any point of that lattice cell to be sea (GEN-023);
 - OCEAN: some vertex of the summary cell is ocean;
 - band elevation: the lowest corner elevation among the lattice cells that have a corner above `SEA_LEVEL_C`, infinity when none has, the necessary condition for a band point (ATMO-019).
@@ -10,7 +10,7 @@ The generators SHALL provide a coarse level of W (ADR 0057), the `WaterSummary` 
 
 Verify: A
 Status: active
-Source: ADR 0057, ADR 0041 point 2, ADR 0056, GEN-022, GEN-023, ATMO-019, CON-07, CON-14
+Source: ADR 0058, ADR 0041 point 2, ADR 0056, GEN-022, GEN-023, ATMO-019, CON-07, CON-14
 
 #### Scenario: A hand-made block
 - **WHEN** a block of 2 cells is summarised with no ocean vertex, with an ocean vertex among land corners, with an ocean vertex beside a sea corner, with the sea corner in another lattice cell, and with a NaN corner, and a block of 128 cells with one ocean vertex and one sea corner

@@ -56,7 +56,7 @@ pub const KIND_GLOBAL_OCEAN: u8 = Kind::GlobalOcean as u8;
 /// Version of the ocean block payload layout. History: 1 = `(B + 1)^2` bits, LSB first, as an LZ4 block.
 pub const OCEAN_CODEC_VERSION: u8 = 1;
 
-/// The kind byte of the water summary of the global bake (ADR 0057): the coarse level of the water field.
+/// The kind byte of the water summary of the global bake (ADR 0058): the coarse level of the water field.
 pub const KIND_GLOBAL_WATER_SUMMARY: u8 = Kind::GlobalWaterSummary as u8;
 
 /// Version of the summary payload layout. History: 1 = one flag byte per cell, then the band elevations as a byte-shuffled `f32`
@@ -519,7 +519,7 @@ impl GlobalWorld {
     /// The inputs of the content key of the water summary of the bake of `res` cells per face edge in blocks of `cells`: kind 5, the
     /// root tile of face 0, the bake's stage key as its source (so a new bake is a new summary), `B` under tag 1, `res` under tag 4,
     /// the area threshold of the ocean channel it summarises under tag 7, an empty read set. The sea level of the definition is no input
-    /// (it is applied when a tile is asked, ADR 0057).
+    /// (it is applied when a tile is asked, ADR 0058).
     pub fn summary_key_inputs(&self, res: u32, cells: u32) -> KeyInputs {
         let tile = GlobalWorld::summary_tile();
         let mut output_params = BTreeMap::new();
@@ -952,7 +952,7 @@ pub struct GlobalBuildReport {
     /// bits), and of the analysis that ran inside the bake's worker threads (thread time, summed over blocks).
     pub ocean_seconds: f64,
     pub ocean_in_bake_thread_seconds: f64,
-    /// Whether this run wrote the water summary (ADR 0057; `false`: it was already stored under its current key), the seconds that
+    /// Whether this run wrote the water summary (ADR 0058; `false`: it was already stored under its current key), the seconds that
     /// took and the payload's bytes (0 when not written).
     pub summary_written: bool,
     pub summary_seconds: f64,
@@ -1172,7 +1172,7 @@ pub fn build_global(
     Ok(report)
 }
 
-/// The water summary of a stored bake, computed from its stored sample blocks and ocean blocks (ADR 0057): the known answer of a
+/// The water summary of a stored bake, computed from its stored sample blocks and ocean blocks (ADR 0058): the known answer of a
 /// bake and the reference of [`verify_global`] for the summary record. A pure function of the stored blocks, so the thread count
 /// changes nothing.
 pub fn water_summary_of_store(store: &TileStore, world: &GlobalWorld, res: u32, threads: usize) -> Result<WaterSummary, GlobalBuildError> {
@@ -1204,7 +1204,7 @@ pub fn water_summary_of_store(store: &TileStore, world: &GlobalWorld, res: u32, 
 }
 
 /// The stored water summary of the bake of `res` cells in `store`, decoded: an error naming the record and the command that adds it
-/// when it is missing, damaged or of another shape (ADR 0057).
+/// when it is missing, damaged or of another shape (ADR 0058).
 pub fn load_water_summary(store: &TileStore, world: &GlobalWorld, res: u32) -> Result<WaterSummary, ReadError> {
     let (_, cells) = world.layout(res).map_err(|e| ReadError::Source(e.to_string()))?;
     let key = world.summary_key(res, cells);
