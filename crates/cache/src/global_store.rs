@@ -22,14 +22,23 @@ use planet_core::cube::TangentWarp;
 use planet_core::hash::HASH_VERSION;
 use planet_core::{Face, FaceMapping, TileId};
 use planet_generators::global::{
-    bake_block, bake_blocks_where, check_tiled, BakeError, GlobalCoarseGenerator, GlobalSample, LatticeSource, ReadError, GLOBAL_VERSION,
-    IMPLEMENTATION_ID, MAX_BLOCK_CELLS, MAX_TILED_RES,
+    bake_block, bake_blocks_with, check_tiled, BakeError, GlobalCoarseGenerator, GlobalSample, LatticeSource, ReadError, GLOBAL_VERSION,
+    IMPLEMENTATION_ID, MAX_BATCH_BYTES, MAX_BLOCK_CELLS, MAX_TILED_RES,
+};
+use planet_generators::ocean::{
+    analyse_block, ocean_bits, parallel_map, BlockAnalysis, OceanBits, OceanError, OceanLattice, OceanMerger, OceanTable,
+    OCEAN_IMPLEMENTATION_ID,
 };
 use planet_generators::stage::{FieldGraph, FieldSpec, Scope, Stage};
-use planet_world_def::{body_radius_path, body_seed_path, BodyId, GenContext, MissingNode, NodeValue, WorldDefinition, SPHERE_SURFACE_ID};
+use planet_world_def::{
+    body_radius_path, body_seed_path, BodyId, GenContext, MissingNode, NodeValue, SeaParams, WorldDefinition, SPHERE_SURFACE_ID,
+};
 
 use crate::codec::shuffle;
-use crate::key::{body_params_hash128, cache_key, read_entry, CacheKey, KeyInputs, Kind, ReadEntry, PARAM_GRID_RES, PARAM_RESOLUTION};
+use crate::key::{
+    body_params_hash128, cache_key, read_entry, CacheKey, KeyInputs, Kind, ReadEntry, PARAM_GRID_RES, PARAM_OCEAN_AREA_FRACTION,
+    PARAM_RESOLUTION,
+};
 use crate::pack::{PackError, PackWriter, Record, StoreParams, TileStore};
 use crate::stage_key::{stage_key, StageKeyContext};
 use crate::tiles::{Mismatch, VerifyReport};
@@ -39,6 +48,12 @@ pub const KIND_GLOBAL_BLOCK: u8 = Kind::GlobalBlock as u8;
 
 /// Version of the block payload layout. History: 1 = four shuffled `f32` planes, LZ4 block.
 pub const BLOCK_CODEC_VERSION: u8 = 1;
+
+/// The kind byte of a block of the ocean-connectivity channel (ADR 0041 point 2).
+pub const KIND_GLOBAL_OCEAN: u8 = Kind::GlobalOcean as u8;
+
+/// Version of the ocean block payload layout. History: 1 = `(B + 1)^2` bits, LSB first, as an LZ4 block.
+pub const OCEAN_CODEC_VERSION: u8 = 1;
 
 const HEADER_LEN: usize = 9;
 
@@ -67,6 +82,10 @@ pub enum BlockCodecError {
         got: usize,
         expected: u64,
     },
+    /// An ocean block whose bits do not fit its cells (a bit set beyond the last vertex).
+    OceanBits,
+    /// An ocean block of another codec version.
+    OceanVersion(u8),
 }
 
 impl std::fmt::Display for BlockCodecError {
@@ -82,6 +101,8 @@ impl std::fmt::Display for BlockCodecError {
             BlockCodecError::Lz4(e) => write!(f, "the LZ4 block is damaged: {e}"),
             BlockCodecError::Samples { got, expected } => write!(f, "the block has {got} samples, {expected} are needed for its cells"),
             BlockCodecError::Grid { level, cells } => write!(f, "{cells} cells per block at level {level} is not a grid this build bakes"),
+            BlockCodecError::OceanBits => write!(f, "the ocean block has a bit set beyond its last vertex"),
+            BlockCodecError::OceanVersion(v) => write!(f, "ocean block codec version {v}, this build reads {OCEAN_CODEC_VERSION}"),
         }
     }
 }
@@ -172,6 +193,52 @@ pub fn decode_block(bytes: &[u8]) -> Result<(u32, Vec<GlobalSample>), BlockCodec
     Ok((cells, samples))
 }
 
+fn ocean_raw_len(cells: u32) -> u64 {
+    ((u64::from(cells) + 1) * (u64::from(cells) + 1)).div_ceil(8)
+}
+
+/// Encode an ocean block: `codec version (u8) | cells per block edge B (u32 LE) | raw length (u32 LE) | LZ4 block` of the
+/// `(B + 1)^2` bits, row-major (`k` fastest), eight to a byte, the first vertex in the lowest bit.
+pub fn encode_ocean_block(bits: &OceanBits) -> Result<Vec<u8>, BlockCodecError> {
+    if !valid_cells(bits.cells) {
+        return Err(BlockCodecError::Cells(bits.cells));
+    }
+    let raw = bits.to_bytes();
+    if raw.len() as u64 != ocean_raw_len(bits.cells) {
+        return Err(BlockCodecError::Samples { got: raw.len(), expected: ocean_raw_len(bits.cells) });
+    }
+    let mut out = Vec::with_capacity(HEADER_LEN + raw.len() / 4);
+    out.push(OCEAN_CODEC_VERSION);
+    out.extend_from_slice(&bits.cells.to_le_bytes());
+    out.extend_from_slice(&u32::try_from(raw.len()).expect("at most 1025^2 / 8 bytes").to_le_bytes());
+    out.extend_from_slice(&lz4_flex::compress(&raw));
+    Ok(out)
+}
+
+/// Decode an ocean block payload; it refuses what [`encode_ocean_block`] would not write, without allocating more than `B` allows.
+pub fn decode_ocean_block(bytes: &[u8]) -> Result<OceanBits, BlockCodecError> {
+    if bytes.len() < HEADER_LEN {
+        return Err(BlockCodecError::Short);
+    }
+    if bytes[0] != OCEAN_CODEC_VERSION {
+        return Err(BlockCodecError::OceanVersion(bytes[0]));
+    }
+    let cells = u32::from_le_bytes(bytes[1..5].try_into().expect("4 bytes"));
+    if !valid_cells(cells) {
+        return Err(BlockCodecError::Cells(cells));
+    }
+    let claimed = u32::from_le_bytes(bytes[5..9].try_into().expect("4 bytes"));
+    let expected = ocean_raw_len(cells);
+    if u64::from(claimed) != expected {
+        return Err(BlockCodecError::RawLength { claimed, expected });
+    }
+    let raw = lz4_flex::decompress(&bytes[HEADER_LEN..], claimed as usize).map_err(|e| BlockCodecError::Lz4(e.to_string()))?;
+    if raw.len() as u64 != expected {
+        return Err(BlockCodecError::Truncated { got: raw.len(), expected });
+    }
+    OceanBits::from_bytes(cells, &raw).ok_or(BlockCodecError::OceanBits)
+}
+
 /// The global-coarse bake of one body of a definition as the store sees it: its seed (through the recording context), radius,
 /// the entries of its read set and what identifies its store and its blocks.
 pub struct GlobalWorld {
@@ -183,6 +250,9 @@ pub struct GlobalWorld {
     /// Cells per block edge at most (store policy, ADR 0027 point 1): not a key input, it decides `B`.
     block_limit: u32,
     graph: FieldGraph,
+    /// The sea of the body (ADR 0041): its level and liquid for the water field, and the area threshold of the ocean channel,
+    /// which is part of every ocean block's key (not of the bake's, which it does not change).
+    sea: SeaParams,
 }
 
 impl GlobalWorld {
@@ -248,7 +318,31 @@ impl GlobalWorld {
             halo_fraction: 0.0,
         }])
         .expect("one global field is a valid graph");
-        Ok(GlobalWorld { seed: field.seed(), body, radius_m, reads, node_set_id, graph, block_limit: MAX_BLOCK_CELLS })
+        // The sea is read from the definition directly, like the radius: it is not an input of the bake, so it does not enter the
+        // bake's read set; the one number the ocean channel depends on (the area threshold) is in the ocean blocks' keys.
+        let sea = def.sea(body)?;
+        // The sea's liquid is a row of the world's table: a dangling kind would only fail later, in the water pass.
+        if def.liquids()?.get(sea.liquid).is_none() {
+            return Err(MissingNode(format!(
+                "{} (liquid kind {} is not in the world's liquid table)",
+                planet_world_def::body_sea_liquid_path(body),
+                sea.liquid.0
+            )));
+        }
+        Ok(GlobalWorld { seed: field.seed(), body, radius_m, reads, node_set_id, graph, block_limit: MAX_BLOCK_CELLS, sea })
+    }
+
+    /// The sea of this body as the definition gives it (Earth defaults for what it does not set).
+    pub fn sea(&self) -> SeaParams {
+        self.sea
+    }
+
+    /// Another area threshold for the ocean channel (test support): a fraction of the body's surface from 0 to 1.
+    #[doc(hidden)]
+    pub fn with_ocean_area_fraction(mut self, fraction: f64) -> GlobalWorld {
+        assert!((0.0..=1.0).contains(&fraction), "an area fraction is from 0 to 1, got {fraction}");
+        self.sea.min_area_fraction = fraction;
+        self
     }
 
     pub fn seed(&self) -> u64 {
@@ -306,10 +400,57 @@ impl GlobalWorld {
         cache_key(&self.block_key_inputs(tile, cells))
     }
 
-    /// Whether a stored global block is still current for this world: its generator version, hash version and node set id
-    /// equal the world's (STRM-013). Other kinds are not this world's to judge: `true`.
+    /// (The implementation id `cpu-ocean-connectivity-v1` is the channel's own version: a change of the connectivity rule or the area
+    /// formula that leaves the samples alone renames it, and the stale ocean blocks are unreachable without touching the bake.)
+    /// The inputs of the content key of one block of the ocean channel: kind 4, the block's tile, the bake's stage key as its
+    /// source (so a new bake is a new channel), `B`, `res` and the area threshold as output parameters, an empty read set.
+    pub fn ocean_key_inputs(&self, tile: TileId, cells: u32) -> KeyInputs {
+        let res = grid_res(tile, cells).expect("a block of a bake the tiled bake accepts: see grid_res");
+        let mut output_params = BTreeMap::new();
+        output_params.insert(PARAM_RESOLUTION, cells.to_le_bytes().to_vec());
+        output_params.insert(PARAM_GRID_RES, res.to_le_bytes().to_vec());
+        output_params.insert(PARAM_OCEAN_AREA_FRACTION, self.sea.min_area_fraction.to_bits().to_le_bytes().to_vec());
+        KeyInputs {
+            kind: Kind::GlobalOcean,
+            hash_version: HASH_VERSION,
+            generator_version: GLOBAL_VERSION,
+            implementation_id: OCEAN_IMPLEMENTATION_ID.to_string(),
+            face_mapping_id: TangentWarp.id().to_string(),
+            body: self.body,
+            body_params: self.body_params(),
+            tile,
+            source: Some(self.stage_key(res)),
+            output_params,
+            reads: Vec::new(),
+        }
+    }
+
+    pub fn ocean_key(&self, tile: TileId, cells: u32) -> CacheKey {
+        cache_key(&self.ocean_key_inputs(tile, cells))
+    }
+
+    /// The record of a block of ocean bits.
+    pub fn ocean_record(&self, tile: TileId, bits: &OceanBits) -> Result<Record, BlockCodecError> {
+        let cells = bits.cells;
+        let res = grid_res(tile, cells).ok_or(BlockCodecError::Grid { level: tile.level(), cells })?;
+        if self.layout(res).ok() != Some((tile.level(), cells)) {
+            return Err(BlockCodecError::Grid { level: tile.level(), cells });
+        }
+        Ok(Record {
+            key: self.ocean_key(tile, cells),
+            kind: KIND_GLOBAL_OCEAN,
+            tile,
+            generator_version: GLOBAL_VERSION,
+            hash_version: HASH_VERSION,
+            node_set_id: self.node_set_id,
+            payload: encode_ocean_block(bits)?,
+        })
+    }
+
+    /// Whether a stored global block (of the bake or of its ocean channel) is still current for this world: its generator version,
+    /// hash version and node set id equal the world's (STRM-013). Other kinds are not this world's to judge: `true`.
     pub fn is_live(&self, record: &Record) -> bool {
-        record.kind != KIND_GLOBAL_BLOCK
+        (record.kind != KIND_GLOBAL_BLOCK && record.kind != KIND_GLOBAL_OCEAN)
             || (record.generator_version == GLOBAL_VERSION && record.hash_version == HASH_VERSION && record.node_set_id == self.node_set_id)
     }
 
@@ -599,11 +740,14 @@ impl LatticeSource for StoreSource<'_> {
 }
 
 /// Why a build failed.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum GlobalBuildError {
     Bake(BakeError),
     Codec(BlockCodecError),
     Pack(PackError),
+    Ocean(OceanError),
+    /// A block the ocean channel needs is not in the store (under its current key, decodable, of the layout's cells).
+    MissingBlock(String),
 }
 
 impl std::fmt::Display for GlobalBuildError {
@@ -612,6 +756,8 @@ impl std::fmt::Display for GlobalBuildError {
             GlobalBuildError::Bake(e) => write!(f, "{e}"),
             GlobalBuildError::Codec(e) => write!(f, "{e}"),
             GlobalBuildError::Pack(e) => write!(f, "{e}"),
+            GlobalBuildError::Ocean(e) => write!(f, "{e}"),
+            GlobalBuildError::MissingBlock(e) => write!(f, "the ocean channel needs a block the store does not hold: {e}"),
         }
     }
 }
@@ -633,19 +779,123 @@ impl From<PackError> for GlobalBuildError {
         GlobalBuildError::Pack(e)
     }
 }
+impl From<OceanError> for GlobalBuildError {
+    fn from(e: OceanError) -> Self {
+        GlobalBuildError::Ocean(e)
+    }
+}
 
 /// What a build did.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug)]
 pub struct GlobalBuildReport {
     pub written: usize,
     pub reused: usize,
     /// The most blocks the bake held in memory at once.
     pub peak_resident_blocks: usize,
+    /// Ocean blocks written, and found in the store under their current key.
+    pub ocean_written: usize,
+    pub ocean_reused: usize,
+    /// The sea components of the bake (0 when every ocean block was already stored and the table was not recomputed).
+    pub ocean_components: usize,
+    /// How many of them are ocean.
+    pub ocean_oceans: usize,
+    /// The bytes the ocean merger held at its largest: the extra memory of the global union-find (0 when it did not run).
+    pub ocean_merger_bytes: usize,
+    /// Seconds of the build spent on the ocean channel beyond the bake itself (the analysis of reused blocks, the merge and the
+    /// bits), and of the analysis that ran inside the bake's worker threads (thread time, summed over blocks).
+    pub ocean_seconds: f64,
+    pub ocean_in_bake_thread_seconds: f64,
+}
+
+/// Bytes per vertex of a block alive in the ocean passes beyond the bake's own 16: a block read back from the store holds its payload,
+/// the decompressed planes and the samples (about 33 B), and the analysis adds the sea mask and the union-find (about 10 B).
+const OCEAN_READ_BYTES_PER_VERTEX: u64 = 48;
+/// The same while a baked block is analysed on its worker: 16 B of samples and about 10 B of analysis.
+const OCEAN_BAKE_BYTES_PER_VERTEX: u64 = 26;
+
+/// How many blocks of `cells` cells an ocean pass keeps alive at once: the thread count, at most [`MAX_BATCH_BYTES`] of blocks at
+/// `bytes_per_vertex` each (so the 1 GiB bound of the bake holds with the ocean pass included), and at least one.
+fn batch_blocks_of(cells: u32, threads: usize, bytes_per_vertex: u64) -> usize {
+    let block_bytes = bytes_per_vertex * (u64::from(cells) + 1) * (u64::from(cells) + 1);
+    threads.max(1).min(usize::try_from((MAX_BATCH_BYTES / block_bytes).max(1)).unwrap_or(usize::MAX))
+}
+
+/// Finish the merge once every one of the `total` blocks has reported: a missing or repeated report would change an area, so it is an error.
+fn finish_merger(merger: OceanMerger, total: usize) -> Result<OceanTable, GlobalBuildError> {
+    if merger.blocks() != total {
+        return Err(GlobalBuildError::MissingBlock(format!("the ocean merger received {} reports for {total} blocks", merger.blocks())));
+    }
+    Ok(merger.finish())
+}
+
+/// The tile of block `index` of a grid at `level`, in the order of the bake (face, row, column): no list of tiles is built.
+fn tile_at(level: u8, index: usize) -> TileId {
+    let side = 1usize << level;
+    let (face, rest) = (index / (side * side), index % (side * side));
+    TileId::new(Face(face as u8), level, (rest % side) as u32, (rest / side) as u32).expect("in range")
+}
+
+/// The stored sample block of `tile`, decoded: an error naming the block when it is missing, damaged or of other cells.
+fn stored_block(store: &TileStore, world: &GlobalWorld, tile: TileId, cells: u32) -> Result<Vec<GlobalSample>, GlobalBuildError> {
+    let key = world.block_key(tile, cells);
+    let what = |why: String| GlobalBuildError::MissingBlock(format!("block {:#018x} key {key}: {why}", tile.raw()));
+    let rec = store
+        .get(KIND_GLOBAL_BLOCK, tile, key)
+        .map_err(|e| what(e.to_string()))?
+        .ok_or_else(|| what("not stored under the current key".into()))?;
+    let (c, samples) = decode_block(&rec.payload).map_err(|e| what(e.to_string()))?;
+    if c != cells {
+        return Err(what(format!("its payload has {c} cells per edge, the layout says {cells}")));
+    }
+    Ok(samples)
+}
+
+/// The reports of `tiles` (stored blocks) for the ocean merger, a batch at a time on up to `threads` threads: at most
+/// [`batch_blocks`] blocks are decoded at once.
+fn analyse_stored(
+    store: &TileStore,
+    world: &GlobalWorld,
+    res: u32,
+    cells: u32,
+    threads: usize,
+    tiles: &mut dyn Iterator<Item = TileId>,
+    merger: &mut OceanMerger,
+) -> Result<(), GlobalBuildError> {
+    let batch_n = batch_blocks_of(cells, threads, OCEAN_READ_BYTES_PER_VERTEX);
+    loop {
+        let batch: Vec<TileId> = (&mut *tiles).take(batch_n).collect();
+        if batch.is_empty() {
+            return Ok(());
+        }
+        let results = parallel_map(&batch, threads.min(batch_n), &|t| -> Result<BlockAnalysis, GlobalBuildError> {
+            let samples = stored_block(store, world, *t, cells)?;
+            Ok(analyse_block(&TangentWarp, res, *t, cells, &samples)?)
+        });
+        for r in results {
+            merger.add(r?);
+        }
+    }
+}
+
+/// The ocean table of a stored bake, computed from its stored blocks (the known answers of a bake, and the reference of
+/// [`verify_global`] for ocean blocks): the same table the build computes.
+pub fn ocean_table_of_store(store: &TileStore, world: &GlobalWorld, res: u32, threads: usize) -> Result<OceanTable, GlobalBuildError> {
+    let (level, cells) = world.layout(res)?;
+    let total = 6usize << (2 * u32::from(level));
+    let mut merger = OceanMerger::new(res, world.sea.min_area_fraction)?;
+    analyse_stored(store, world, res, cells, threads, &mut (0..total).map(|i| tile_at(level, i)), &mut merger)?;
+    finish_merger(merger, total)
 }
 
 /// Bake the grid of `res` cells per face edge into the store in `dir` in its canonical layout (ADR 0027 point 1: blocks of
-/// `min(res, limit)` cells, the tiles of the level that covers the grid). A block the store already holds under the current
-/// key, and whose payload decodes, is reused and not computed, so a second run writes nothing.
+/// `min(res, limit)` cells, the tiles of the level that covers the grid), then its ocean-connectivity channel (ADR 0041
+/// point 2). A block the store already holds under the current key, and whose payload decodes, is reused and not computed, so a
+/// second run writes nothing.
+///
+/// The ocean channel is computed in three steps (`planet_generators::ocean`): each block that is baked is analysed on its worker
+/// thread while it is in memory, the blocks that were already stored are decoded and analysed in batches, the reports are merged,
+/// and the ocean blocks the store lacks are written from a second pass over the stored blocks. When every ocean block is already
+/// stored under its current key, none of this runs.
 pub fn build_global(
     dir: &Path,
     world: &GlobalWorld,
@@ -662,24 +912,47 @@ pub fn build_global(
     // A block is kept only if it decodes with the cells the key says: a payload of another `B` under this key is a
     // wrongly written record and is written again.
     let have = |tile: TileId| matches!(existing.get(KIND_GLOBAL_BLOCK, tile, world.block_key(tile, cells)), Ok(Some(r)) if matches!(decode_block(&r.payload), Ok((c, _)) if c == cells));
+    let have_ocean = |tile: TileId| matches!(existing.get(KIND_GLOBAL_OCEAN, tile, world.ocean_key(tile, cells)), Ok(Some(r)) if matches!(decode_ocean_block(&r.payload), Ok(b) if b.cells == cells));
+    let total = 6usize << (2 * u32::from(level));
+    let need_ocean = (0..total).any(|i| !have_ocean(tile_at(level, i)));
+    let mut merger = if need_ocean { Some(OceanMerger::new(res, world.sea.min_area_fraction)?) } else { None };
     let (mut written, mut failed) = (0usize, None);
     let stop = AtomicBool::new(false);
-    let stats = bake_blocks_where(
+    let in_bake_ns = AtomicU64::new(0);
+    let stats = bake_blocks_with(
         world.seed(),
         &TangentWarp,
         level,
         cells,
-        threads,
+        if need_ocean { batch_blocks_of(cells, threads, OCEAN_BAKE_BYTES_PER_VERTEX) } else { threads },
         &|t| !stop.load(Ordering::SeqCst) && !have(t),
-        &mut |tile, samples| {
+        &|t, samples| {
+            if !need_ocean {
+                return None;
+            }
+            let started = Instant::now();
+            let a = analyse_block(&TangentWarp, res, t, cells, samples);
+            in_bake_ns.fetch_add(u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX), Ordering::Relaxed);
+            Some(a)
+        },
+        &mut |tile, samples, analysis| {
             if failed.is_some() {
                 return;
             }
-            match world
-                .block_record(tile, cells, &samples)
-                .map_err(GlobalBuildError::from)
-                .and_then(|r| writer.append(&r).map_err(Into::into))
-            {
+            let analysed = match (analysis, merger.as_mut()) {
+                (Some(Ok(a)), Some(m)) => {
+                    m.add(a);
+                    Ok(())
+                }
+                (Some(Err(e)), _) => Err(GlobalBuildError::from(e)),
+                _ => Ok(()),
+            };
+            match analysed.and_then(|()| {
+                world
+                    .block_record(tile, cells, &samples)
+                    .map_err(GlobalBuildError::from)
+                    .and_then(|r| writer.append(&r).map_err(Into::into))
+            }) {
                 Ok(()) => written += 1,
                 Err(e) => {
                     // The first failure ends the bake: no further block is accepted for computing.
@@ -692,9 +965,269 @@ pub fn build_global(
     if let Some(e) = failed {
         return Err(e);
     }
+    let mut report = GlobalBuildReport {
+        written,
+        reused: total - stats.blocks,
+        peak_resident_blocks: stats.peak_resident_blocks,
+        ocean_written: 0,
+        ocean_reused: total,
+        ocean_components: 0,
+        ocean_oceans: 0,
+        ocean_merger_bytes: 0,
+        ocean_seconds: 0.0,
+        ocean_in_bake_thread_seconds: in_bake_ns.load(Ordering::Relaxed) as f64 * 1e-9,
+    };
+    let Some(mut merger) = merger else {
+        writer.finish()?;
+        return Ok(report);
+    };
+    let started = Instant::now();
+    // The blocks that were stored before this run were not in memory: decode and analyse them now.
+    analyse_stored(&existing, world, res, cells, threads, &mut (0..total).map(|i| tile_at(level, i)).filter(|t| have(*t)), &mut merger)?;
+    report.ocean_merger_bytes = merger.held_bytes();
+    let table = finish_merger(merger, total)?;
+    report.ocean_components = table.components.len();
+    report.ocean_oceans = table.ocean_components().count();
+    // The blocks written above must be readable for the second pass: put their index on disk and look at the store again.
+    writer.write_index()?;
+    let store = TileStore::open(dir, world.params())?;
+    let batch_n = batch_blocks_of(cells, threads, OCEAN_READ_BYTES_PER_VERTEX);
+    let mut todo = (0..total).map(|i| tile_at(level, i)).filter(|t| !have_ocean(*t));
+    report.ocean_reused = total;
+    loop {
+        let batch: Vec<TileId> = todo.by_ref().take(batch_n).collect();
+        if batch.is_empty() {
+            break;
+        }
+        let records = parallel_map(&batch, threads.min(batch_n), &|t| -> Result<Record, GlobalBuildError> {
+            let samples = stored_block(&store, world, *t, cells)?;
+            let bits = ocean_bits(res, *t, cells, &samples, &table)?;
+            Ok(world.ocean_record(*t, &bits)?)
+        });
+        for r in records {
+            writer.append(&r?)?;
+            report.ocean_written += 1;
+            report.ocean_reused -= 1;
+        }
+    }
+    report.ocean_seconds = started.elapsed().as_secs_f64();
     writer.finish()?;
-    let total = 6usize << (2 * u32::from(level));
-    Ok(GlobalBuildReport { written, reused: total - stats.blocks, peak_resident_blocks: stats.peak_resident_blocks })
+    Ok(report)
+}
+
+/// The ocean channel of a stored bake as a [`OceanLattice`] for the water-level field (ADR 0041 point 1): it finds the block that
+/// holds a vertex through the canonical layout, decodes it once and keeps the most recent ones (a small bound: a block is
+/// `(B + 1)^2 / 8` bytes, 131 kB at 1024 cells). A block that is missing or damaged is an error naming the block and its key, never
+/// a default (dry or wet).
+pub struct StoreOceanSource<'a> {
+    store: &'a TileStore,
+    world: &'a GlobalWorld,
+    res: u32,
+    level: u8,
+    cells: u32,
+    budget_blocks: usize,
+    decodes: AtomicU64,
+    shared: Mutex<Vec<(TileId, Arc<OceanSlot>)>>,
+}
+
+/// One block of the ocean cache: filled once by the first thread that wants it.
+struct OceanSlot {
+    block: OnceLock<Result<Arc<OceanBits>, ReadError>>,
+}
+
+/// Default number of decoded ocean blocks a [`StoreOceanSource`] keeps: 64 (8 MB at 1024 cells).
+pub const OCEAN_SOURCE_BLOCKS: usize = 64;
+
+impl<'a> StoreOceanSource<'a> {
+    pub fn new(store: &'a TileStore, world: &'a GlobalWorld, res: u32) -> Result<StoreOceanSource<'a>, BakeError> {
+        StoreOceanSource::with_budget(store, world, res, OCEAN_SOURCE_BLOCKS)
+    }
+
+    /// The same keeping at most `budget_blocks` decoded blocks (at least one).
+    pub fn with_budget(
+        store: &'a TileStore,
+        world: &'a GlobalWorld,
+        res: u32,
+        budget_blocks: usize,
+    ) -> Result<StoreOceanSource<'a>, BakeError> {
+        let (level, cells) = world.layout(res)?;
+        Ok(StoreOceanSource {
+            store,
+            world,
+            res,
+            level,
+            cells,
+            budget_blocks: budget_blocks.max(1),
+            decodes: AtomicU64::new(0),
+            shared: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// Blocks decoded so far (a block evicted and wanted again counts again).
+    pub fn decodes(&self) -> u64 {
+        self.decodes.load(Ordering::Relaxed)
+    }
+
+    /// Blocks in the cache now.
+    pub fn resident_blocks(&self) -> usize {
+        self.shared.lock().expect("ocean cache mutex").len()
+    }
+
+    fn load(&self, tile: TileId) -> Result<Arc<OceanBits>, ReadError> {
+        let key = self.world.ocean_key(tile, self.cells);
+        let what = |why: String| {
+            ReadError::Source(format!(
+                "ocean block {:#018x} (face {} level {} x {} y {}) key {key}: {why}",
+                tile.raw(),
+                tile.face().0,
+                tile.level(),
+                tile.x(),
+                tile.y()
+            ))
+        };
+        let rec = self
+            .store
+            .get(KIND_GLOBAL_OCEAN, tile, key)
+            .map_err(|e| what(e.to_string()))?
+            .ok_or_else(|| what("not stored under the current key (build the bake again)".into()))?;
+        let bits = decode_ocean_block(&rec.payload).map_err(|e| what(e.to_string()))?;
+        if bits.cells != self.cells {
+            return Err(what(format!("its payload has {} cells per edge, the layout says {}", bits.cells, self.cells)));
+        }
+        self.decodes.fetch_add(1, Ordering::Relaxed);
+        Ok(Arc::new(bits))
+    }
+
+    fn block(&self, tile: TileId) -> Result<Arc<OceanBits>, ReadError> {
+        let slot = {
+            let mut shared = self.shared.lock().expect("ocean cache mutex");
+            if let Some(at) = shared.iter().position(|(t, _)| *t == tile) {
+                let entry = shared.remove(at);
+                let slot = Arc::clone(&entry.1);
+                shared.push(entry);
+                slot
+            } else {
+                let slot = Arc::new(OceanSlot { block: OnceLock::new() });
+                shared.push((tile, Arc::clone(&slot)));
+                if shared.len() > self.budget_blocks {
+                    shared.remove(0);
+                }
+                slot
+            }
+        };
+        match slot.block.get_or_init(|| self.load(tile)) {
+            Ok(b) => Ok(Arc::clone(b)),
+            Err(e) => {
+                // Not kept: the next reader reads again.
+                let mut shared = self.shared.lock().expect("ocean cache mutex");
+                if let Some(at) = shared.iter().position(|(t, s)| *t == tile && Arc::ptr_eq(s, &slot)) {
+                    shared.remove(at);
+                }
+                Err(e.clone())
+            }
+        }
+    }
+}
+
+impl OceanLattice for StoreOceanSource<'_> {
+    fn res(&self) -> u32 {
+        self.res
+    }
+
+    fn is_ocean(&self, face: Face, i: u32, j: u32) -> Result<bool, ReadError> {
+        if i > self.res || j > self.res {
+            return Err(ReadError::Source(format!("vertex ({i}, {j}) of a {}-cell grid", self.res)));
+        }
+        // The block that holds a vertex: the last block of a row holds the far edge as its own last sample.
+        let side = 1u32 << self.level;
+        let shift = self.cells.trailing_zeros();
+        let (bx, by) = ((i >> shift).min(side - 1), (j >> shift).min(side - 1));
+        let tile = TileId::new(face, self.level, bx, by).expect("a tile of the grid");
+        Ok(self.block(tile)?.get(i - bx * self.cells, j - by * self.cells))
+    }
+}
+
+/// One ocean block of the store against the channel recomputed from the stored sample blocks (the sample blocks themselves are
+/// compared with regeneration by [`verify_global`]): the same rules as for sample blocks, decode first, a record under another key
+/// stale, a record under the world's key equal bit for bit.
+fn verify_ocean_record(
+    store: &TileStore,
+    world: &GlobalWorld,
+    stored: &crate::pack::Stored,
+    reference: &mut Option<Result<OceanTable, String>>,
+    report: &mut VerifyReport,
+) {
+    let r = &stored.record;
+    let where_ = format!("{}: ocean block {:#018x} key {} at offset {}", stored.pack, r.tile.raw(), r.key, stored.offset);
+    let kept = match decode_ocean_block(&r.payload) {
+        Ok(b) => b,
+        Err(e) => {
+            report.unreadable.push(format!("{where_}: {e}"));
+            return;
+        }
+    };
+    let cells = kept.cells;
+    let Some(res) = grid_res(r.tile, cells) else {
+        report.unreadable.push(format!("{where_}: {cells} cells per block at level {} is not a grid this build bakes", r.tile.level()));
+        return;
+    };
+    if world.layout(res).ok() != Some((r.tile.level(), cells)) {
+        report.unreadable.push(format!(
+            "{where_}: {cells} cells per block at level {} is not the canonical layout of a {res}-cell grid",
+            r.tile.level()
+        ));
+        return;
+    }
+    let metadata_current = r.generator_version == GLOBAL_VERSION && r.hash_version == HASH_VERSION && r.node_set_id == world.node_set_id;
+    if world.ocean_key(r.tile, cells) != r.key {
+        if metadata_current {
+            report.unexplained_stale += 1;
+        } else {
+            report.stale += 1;
+        }
+        return;
+    }
+    let mismatch = |detail: String| Mismatch { tile: r.tile, key: r.key, pack: stored.pack.clone(), offset: stored.offset, detail };
+    if !metadata_current {
+        report.mismatches.push(mismatch(
+            "the key is the world's but the record disagrees with it in its versions or node set id: the record was written wrongly".into(),
+        ));
+        return;
+    }
+    let table = reference.get_or_insert_with(|| {
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+        ocean_table_of_store(store, world, res, threads).map_err(|e| e.to_string())
+    });
+    let table = match table {
+        Ok(t) if t.res == res => t,
+        Ok(t) => {
+            report.unreadable.push(format!("{where_}: the store holds ocean blocks of a {res}-cell bake and of a {}-cell bake", t.res));
+            return;
+        }
+        Err(e) => {
+            report.unreadable.push(format!("{where_}: the ocean channel cannot be recomputed from the stored blocks: {e}"));
+            return;
+        }
+    };
+    let fresh = stored_block(store, world, r.tile, cells)
+        .and_then(|samples| ocean_bits(res, r.tile, cells, &samples, table).map_err(GlobalBuildError::from));
+    match fresh {
+        Err(e) => report.unreadable.push(format!("{where_}: {e}")),
+        Ok(fresh) if fresh == kept => report.matching += 1,
+        Ok(fresh) => {
+            let n = cells + 1;
+            let first = (0..n * n).find(|i| fresh.get(i % n, i / n) != kept.get(i % n, i / n)).unwrap_or(0);
+            let count = (0..n * n).filter(|i| fresh.get(i % n, i / n) != kept.get(i % n, i / n)).count();
+            report.mismatches.push(mismatch(format!(
+                "vertex ({}, {}): stored {}, recomputed {}; {count} of {} vertices differ: an input of the ocean channel is missing from its key",
+                first % n,
+                first / n,
+                kept.get(first % n, first / n),
+                fresh.get(first % n, first / n),
+                n * n
+            )));
+        }
+    }
 }
 
 /// Verify `sample` evenly spaced block records of the store (all of them when `sample` is 0) against regeneration: the
@@ -704,6 +1237,8 @@ pub fn build_global(
 pub fn verify_global(store: &TileStore, world: &GlobalWorld, sample: usize) -> VerifyReport {
     let mut report = VerifyReport::default();
     report.unreadable.extend(store.damaged().iter().map(ToString::to_string));
+    // The ocean table of the stored bake, computed once when the first ocean block is checked.
+    let mut ocean_reference: Option<Result<OceanTable, String>> = None;
     for item in store.sample_records(sample) {
         report.checked += 1;
         let stored = match item {
@@ -714,6 +1249,10 @@ pub fn verify_global(store: &TileStore, world: &GlobalWorld, sample: usize) -> V
             }
         };
         let r = &stored.record;
+        if r.kind == KIND_GLOBAL_OCEAN {
+            verify_ocean_record(store, world, &stored, &mut ocean_reference, &mut report);
+            continue;
+        }
         if r.kind != KIND_GLOBAL_BLOCK {
             report.unsupported += 1;
             continue;

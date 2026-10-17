@@ -1,0 +1,36 @@
+# A hand-written world whose sea is lava: two liquid kinds (id 0 water, id 1 lava), the sea of body 0 made of kind 1 and a small
+# area threshold. Integer literals stand for float nodes; comments, key order and spacing never matter to the hash.
+schema_version = 2
+
+[world]
+seed = 42
+
+[body.0]
+radius_m = 6371000
+
+[body.0.sea]
+level_m = 0
+liquid = 1
+min_area_fraction = 0.01
+
+[liquid.0]
+colour_r = 0.010
+colour_g = 0.060
+colour_b = 0.110
+emission_r = 0
+emission_g = 0
+emission_b = 0
+viscosity_pa_s = 0.001
+wave_amplitude_m = 0.5
+wave_length_m = 60
+
+[liquid.1]
+colour_r = 0.8
+colour_g = 0.12
+colour_b = 0.02
+emission_r = 40
+emission_g = 9
+emission_b = 0.5
+viscosity_pa_s = 1000
+wave_amplitude_m = 0
+wave_length_m = 0

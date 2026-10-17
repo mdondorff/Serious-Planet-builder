@@ -94,6 +94,8 @@ struct Config {
     /// Pre-fill and bake progress of the world, fixed for the run.
     base_readiness: Readiness,
     radius_m: f64,
+    /// The water level W the lit plan shades against: the sea of the definition (ADR 0041 point 1; the sea is M5's only producer).
+    water_level_m: f64,
     draw: Option<planet_render::DrawMode>,
     upload: Option<planet_render::UploadMode>,
     tile_format: Option<planet_render::TileFormat>,
@@ -176,7 +178,7 @@ impl App<'_> {
         let mut rig = Rig::new(&ctx, self.world, &first, cfg.gen)?;
         // `enable_lit` is not part of `warm_up`: the lit and atmosphere passes are enabled and used once per ring set here, before the
         // first measured frame, whether the window starts lit or on the debug path (REND-017, VIEW-007).
-        let warm_lit = viewer_lit_plan(&cfg.look, cfg.radius_m, 0.0, true, cfg.atmosphere)?;
+        let warm_lit = viewer_lit_plan(&cfg.look, cfg.radius_m, 0.0, true, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
         rig.renderer
             .warm_up_lit(&ctx, &lit_warm_plan(self.cameras[0], cfg.size, cfg.lod.cells, warm_lit))
             .map_err(|e| format!("warming the lit path: {e}"))?;
@@ -254,7 +256,7 @@ impl App<'_> {
             // the pipelined loop decided; the debug path draws the plan as it is (VIEW-007).
             let lit_plan = if st.viewer.lit {
                 let reset = st.viewer.take_exposure_reset();
-                let lit = viewer_lit_plan(&cfg.look, cfg.radius_m, dt as f32, reset, cfg.atmosphere)?;
+                let lit = viewer_lit_plan(&cfg.look, cfg.radius_m, dt as f32, reset, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
                 let mut plan = draw.plan.clone();
                 plan.lit = Some(lit);
                 Some(plan)
@@ -548,6 +550,8 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let look = crate::lookload::load(o)?.params(planet_world_def::BodyId::PLANET);
     let atmosphere_note = viewer_lit_plan(&look, radius_m, 0.0, true, true).err();
     let atmosphere = atmosphere_note.is_none();
+    let water_level_m =
+        world.definition().sea(planet_world_def::BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
     let cfg = Config {
         size,
         lod,
@@ -560,6 +564,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         initial_view,
         base_readiness: Readiness { bake_done, bake_total, prefill_done, prefill_total, view: ViewCoverage::default() },
         radius_m,
+        water_level_m,
         draw: o.draw,
         upload: o.upload,
         tile_format: tile_format_pref,

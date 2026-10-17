@@ -23,7 +23,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
   editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync]; --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
-  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) and prints the time per sample; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] writes the coarse tiles of levels 0..=L (default 4; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables); --smoke starts and exits
+  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] writes the coarse tiles of levels 0..=L (default 4; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
@@ -827,10 +827,13 @@ mod tests {
         );
         let again = run_str(&["generate", "--global-dir", &store, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();
         assert!(again.contains("0 blocks written, 6 already stored"), "{again}");
+        // spec: STRM-023
+        assert!(built.contains("global ocean channel: 6 blocks written, 0 already stored; "), "{built}");
+        assert!(again.contains("global ocean channel: 6 blocks already stored under their current key, nothing recomputed"), "{again}");
         let ok = run_str(&["generate", "--verify-global", &store, "--seed", "3"]).unwrap();
-        assert!(ok.contains("checked 6 of 6 entries: 6 match"), "{ok}");
+        assert!(ok.contains("checked 12 of 12 entries: 12 match"), "6 blocks and 6 ocean blocks: {ok}");
         let sampled = run_str(&["generate", "--verify-global", &store, "--seed", "3", "--sample", "5"]).unwrap();
-        assert!(sampled.contains("checked 5 of 6 entries: 5 match"), "{sampled}");
+        assert!(sampled.contains("checked 5 of 12 entries: 5 match"), "{sampled}");
         // Another seed: all stale, nothing compared.
         let e = run_str(&["generate", "--verify-global", &store, "--seed", "4"]).unwrap_err();
         assert!(e.contains("compared nothing") && e.contains("--allow-stale"), "{e}");
@@ -868,7 +871,7 @@ mod tests {
         );
         // The bake still verifies; the tiles are another kind to it.
         let ok = run_str(&["generate", "--verify-global", &a, "--seed", "3"]).unwrap();
-        assert!(ok.contains("6 match") && ok.contains("30 of another kind"), "{ok}");
+        assert!(ok.contains("12 match") && ok.contains("30 of another kind"), "6 blocks and 6 ocean blocks match: {ok}");
         // Into an existing bake, a deeper pre-fill adds the new level only; levels 0 disables.
         run_str(&["generate", "--global-dir", &b, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();
         let off = run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();

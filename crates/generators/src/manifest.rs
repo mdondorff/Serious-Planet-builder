@@ -10,6 +10,7 @@ use crate::erosion::{ErosionGenerator, EROSION_IMPLEMENTATION_ID, EROSION_VERSIO
 use crate::global::{
     bake, bake_blocks, grid_hash, GlobalGrid, GlobalSample, GridSource, GLOBAL_VERSION, IMPLEMENTATION_ID as GLOBAL_IMPLEMENTATION_ID,
 };
+use crate::ocean::{tiled_ocean, OceanGrid, OceanTable, EARTH_OCEAN_MIN_AREA_FRACTION};
 use crate::terrain::{TerrainGenerator, TERRAIN_IMPLEMENTATION_ID, TERRAIN_VERSION};
 
 use crate::height::{cache_key, generate_tile, GENERATOR_VERSION, IMPLEMENTATION_ID, KEY_FORMAT_VERSION};
@@ -164,6 +165,8 @@ pub fn determinism_manifest_perturbed(perturb: &dyn Fn(&str, &str) -> Option<usi
 /// times without baking again.
 pub struct GlobalFieldValues {
     grid: GlobalGrid,
+    /// The ocean-connectivity channel of the whole grid (GEN-022): the component table and the one-bit-per-vertex channel.
+    ocean: (OceanTable, OceanGrid),
     blocks: Vec<(TileId, Vec<GlobalSample>)>,
     /// `(kind, key, height)` of the terrain field and then the eroded field.
     heights: Vec<(&'static str, String, f64)>,
@@ -175,6 +178,8 @@ impl GlobalFieldValues {
         let def = WorldDefinition::single_planet(MANIFEST_RADIUS_M, MANIFEST_SEED);
         let seed = GenContext::new(&def).body_seed(BodyId::PLANET).expect("the planet's seed");
         let grid = bake(seed, &TangentWarp, MANIFEST_BAKE_RES, 1).expect("a power-of-two resolution");
+        let ocean =
+            tiled_ocean(&grid, &TangentWarp, MANIFEST_BLOCK_CELLS, 1, EARTH_OCEAN_MIN_AREA_FRACTION).expect("a valid ocean computation");
         let mut blocks = Vec::new();
         bake_blocks(seed, &TangentWarp, MANIFEST_BLOCK_LEVEL, MANIFEST_BLOCK_CELLS, 1, &mut |id, b| blocks.push((id, b)))
             .expect("a valid tiled bake");
@@ -191,7 +196,7 @@ impl GlobalFieldValues {
         }
         assert!(terrain.error().is_none() && eroded.error().is_none(), "the manifest's bake reads must succeed");
         assert!(heights.iter().all(|h| h.2.is_finite()), "a NaN height would pass the cross-OS diff silently");
-        GlobalFieldValues { grid, blocks, heights }
+        GlobalFieldValues { grid, ocean, blocks, heights }
     }
 
     /// The manifest lines: the bake hashed whole (`globalgrid`) and block by block (`globalblock`), then the heights
@@ -209,6 +214,23 @@ impl GlobalFieldValues {
             grid_hash(&self.grid)
         };
         s.push_str(&format!("globalgrid {grid_key} {h:016x}\n"));
+        // The ocean channel (GEN-022): the component table and every bit of the channel; a perturbation changes one area, one bit.
+        let h = if perturb("oceantable", &grid_key).is_some() {
+            let mut t = self.ocean.0.clone();
+            t.components[0].area_fp += 1;
+            t.hash()
+        } else {
+            self.ocean.0.hash()
+        };
+        s.push_str(&format!("oceantable {grid_key} {h:016x}\n"));
+        let h = if perturb("oceangrid", &grid_key).is_some() {
+            let mut g = self.ocean.1.clone();
+            g.faces[0][0] ^= 1;
+            g.hash()
+        } else {
+            self.ocean.1.hash()
+        };
+        s.push_str(&format!("oceangrid {grid_key} {h:016x}\n"));
         for (id, block) in &self.blocks {
             let key = format!("{}/{}/{}/{}", id.face().0, id.level(), id.x(), id.y());
             let h = if let Some(v) = perturb("globalblock", &key) {

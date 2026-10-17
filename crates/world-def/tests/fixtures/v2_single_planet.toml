@@ -1,0 +1,9 @@
+# Schema version 2 adds the liquid table and the sea of a body; a world that sets neither means the Earth defaults, so this is the
+# same definition as the version 1 fixture.
+schema_version = 2
+
+[world]
+seed = 42
+
+[body.0]
+radius_m = 6371000.0

@@ -22,8 +22,8 @@ fn the_committed_fixture_loads_to_the_definition_it_describes() {
 #[test]
 fn the_canonical_text_is_pinned_and_round_trips() {
     let text = to_toml(&planet()).unwrap();
-    assert_eq!(text, "schema_version = 1\n\n[body.0]\nradius_m = 6371000.0\n\n[world]\nseed = 42\n");
-    assert_eq!(SCHEMA_VERSION, 1, "a new schema version needs a migration, a fixture and a new pinned text");
+    assert_eq!(text, "schema_version = 2\n\n[body.0]\nradius_m = 6371000.0\n\n[world]\nseed = 42\n");
+    assert_eq!(SCHEMA_VERSION, 2, "a new schema version needs a migration, a fixture and a new pinned text");
     assert_eq!(parse_definition(&text).unwrap(), planet());
 }
 
@@ -123,7 +123,7 @@ fn the_version_is_required_and_checked_before_anything_else() {
     assert_eq!(parse_definition("[world]\nseed = 1\n"), Err(LoadError::MissingSchemaVersion));
     assert!(matches!(parse_definition("schema_version = \"1\"\n"), Err(LoadError::BadSchemaVersion(_))));
     assert!(matches!(parse_definition("schema_version = -1\n"), Err(LoadError::BadSchemaVersion(_))));
-    assert_eq!(parse_definition("schema_version = 2\n[world]\nseed = 1\n"), Err(LoadError::NewerSchema { found: 2, known: 1 }));
+    assert_eq!(parse_definition("schema_version = 3\n[world]\nseed = 1\n"), Err(LoadError::NewerSchema { found: 3, known: 2 }));
     assert!(matches!(parse_definition("schema_version = 1\n[world\n"), Err(LoadError::Syntax(_))));
     assert!(parse_definition("schema_version = 1\n[world\n").unwrap_err().to_string().starts_with("not valid TOML"));
 }
@@ -309,7 +309,7 @@ fn a_definition_with_authored_items_is_not_written_as_a_file_that_would_lose_the
 // spec: WDEF-003
 #[test]
 fn the_height_field_id_loads_round_trips_and_enters_the_hash() {
-    let text = "schema_version = 1\n\n[body.0]\nradius_m = 6371000.0\n\n[world]\nheight_field = \"cpu-terrain-v1\"\nseed = 42\n";
+    let text = "schema_version = 2\n\n[body.0]\nradius_m = 6371000.0\n\n[world]\nheight_field = \"cpu-terrain-v1\"\nseed = 42\n";
     let mut named = planet();
     named.set_height_field("cpu-terrain-v1");
     assert_eq!(parse_definition(text).unwrap(), named);

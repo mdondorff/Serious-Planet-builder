@@ -13,10 +13,12 @@ pub mod height;
 pub mod height_fields;
 pub mod manifest;
 pub mod mesh;
+pub mod ocean;
 pub mod stage;
 /// Test-only stress terrain; only test builds enable the `stress` feature (dev-dependencies).
 #[cfg(feature = "stress")]
 pub mod stress;
 pub mod terrain;
+pub mod water;
 
 pub use height::{cache_key, generate_region, generate_tile, TileData, GENERATOR_VERSION, IMPLEMENTATION_ID};

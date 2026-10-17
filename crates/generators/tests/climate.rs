@@ -147,14 +147,14 @@ fn the_climate_is_bit_identical_across_thread_counts_and_matches_the_known_answe
     let one = hashes(1);
     assert_eq!(one, hashes(5), "thread count changed a climate texture");
     assert_eq!(one, hashes(24));
-    // Known answers (CI runs this on Windows and Linux): CLIMATE_VERSION 1, READER_VERSION 1, GLOBAL_VERSION 3 (2 -> 3: latitude from COORD's +z pole instead of d.y; the texel construction is unchanged, so CLIMATE_VERSION stays and the version word moves through GLOBAL_VERSION).
+    // Known answers (CI runs this on Windows and Linux): CLIMATE_VERSION 1, READER_VERSION 1, GLOBAL_VERSION 4 (3 -> 4: the ocean channel, no texel moves; 2 -> 3: latitude from COORD's +z pole instead of d.y; the texel construction is unchanged, so CLIMATE_VERSION stays and the version word moves through GLOBAL_VERSION).
     let probe: Vec<u64> = vec![one[0], one[1], one[2], one[23]];
     assert_eq!(probe, KNOWN_CLIMATE, "climate content hashes changed: {probe:016x?}: bump CLIMATE_VERSION and re-record");
     assert_eq!(climate_version_word(), KNOWN_VERSION_WORD, "the version word changed: {:#018x}", climate_version_word());
 }
 
 const KNOWN_CLIMATE: [u64; 4] = [0x51ac8669a763110c, 0x7313b10e0fa593be, 0xde85ff4b9e5bb2bc, 0xb1ccdcde645c74bb];
-const KNOWN_VERSION_WORD: u64 = 0xef179b4c0d16425d;
+const KNOWN_VERSION_WORD: u64 = 0x8c8f1b00d02cb203;
 
 // spec: GEN-021
 #[test]

@@ -8,6 +8,12 @@
 
 pub mod cells;
 pub mod toml_io;
+pub mod water;
+
+pub use water::{
+    body_sea_level_path, body_sea_liquid_path, body_sea_min_area_path, liquid_path, LiquidKind, LiquidKindId, LiquidTable, SeaParams,
+    DEFAULT_SEA_LEVEL_M, EARTH_OCEAN_MIN_AREA_FRACTION, LIQUID_FIELDS,
+};
 
 use planet_core::hash::{hash_u64s, HASH_VERSION};
 use planet_core::{TileId, Vec3};
