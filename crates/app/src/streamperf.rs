@@ -84,7 +84,8 @@ pub fn require_prefilled(scene: &str, present: usize, total: usize, levels: u8, 
 
 /// Reject option combinations the streaming scenes would ignore, and refuse the dive/teleport/look scenes without a store.
 pub fn check_options(o: &Options) -> Result<(), String> {
-    let stream = (o.perf || o.perf_smoke) && (is_stream_scene(&o.scene) || crate::litperf::is_lit_scene(&o.scene));
+    let capture = crate::litperf::is_capture_scene(&o.scene);
+    let stream = (o.perf || o.perf_smoke || capture) && (is_stream_scene(&o.scene) || crate::litperf::is_lit_scene(&o.scene) || capture);
     if !stream && (o.store.is_some() || o.allow_memory_bake) {
         return Err("--store and --allow-memory-bake only apply to the streaming perf scenes (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, streaming)".into());
     }
@@ -505,7 +506,11 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     let field = world.field()?;
     writeln!(out, "world opened in {:.1} s", opened.elapsed().as_secs_f64()).map_err(err)?;
     let radius_m = world.radius_m();
-    let measured_field = if o.lit { format!("{}; lit path (atmosphere, water)", world.describe()) } else { world.describe() };
+    let measured_field = if o.lit {
+        format!("{}; lit path (atmosphere, water), {} tiles", world.describe(), ctx.default_tile_format().name())
+    } else {
+        world.describe()
+    };
     let source = source_label(&world, from_store);
     let production = from_store;
     let mut owner_override: Vec<String> = Vec::new();

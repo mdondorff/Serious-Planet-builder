@@ -539,6 +539,7 @@ pub fn check_options(o: &Options) -> Result<(), String> {
     }
     let perf_terrain = (o.perf || o.perf_smoke)
         && (o.scene == "terrain" || crate::streamperf::is_stream_scene(&o.scene) || crate::litperf::is_lit_scene(&o.scene));
+    let perf_terrain = perf_terrain || crate::litperf::is_capture_scene(&o.scene);
     let given_res = o.given.contains("--global-res");
     if o.world.is_none() {
         return if given_res && !perf_terrain {

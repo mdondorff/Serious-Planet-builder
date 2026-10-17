@@ -380,6 +380,96 @@ fn perf_m5(root: &Path, args: &[String]) -> Res {
     }
 }
 
+/// The `cargo` arguments of `capture flights` (TEST-027) and the directory the frames go to: the flight capture of `test-render`
+/// (a tool beside the harness, never a measurement). `--smoke` runs it on the software adapter.
+fn capture_args(args: &[String]) -> Result<(Vec<String>, String), String> {
+    let mut it = args.iter();
+    match it.next().map(String::as_str) {
+        Some("flights") => {}
+        other => return Err(format!("usage: cargo xtask capture flights [--store DIR | --allow-memory-bake --global-res N] [--out-dir DIR] [--size WxH] [--flight-frames N] [--smoke] (got {other:?})")),
+    }
+    let mut smoke = false;
+    let mut out_dir = "target/review/m5-flights".to_string();
+    let mut tail: Vec<String> = Vec::new();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--smoke" => smoke = true,
+            "--allow-memory-bake" => tail.push(a.clone()),
+            "--out-dir" => out_dir = it.next().ok_or("--out-dir needs a directory")?.clone(),
+            "--store" | "--global-res" | "--size" | "--flight-frames" | "--tile-format" | "--look" | "--world" | "--prefill-levels" => {
+                let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
+                tail.push(a.clone());
+                tail.push(value.clone());
+            }
+            other => {
+                return Err(format!(
+                    "unknown capture option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out-dir DIR, --size WxH, --flight-frames N, --tile-format, --look F, --world F, --smoke)"
+                ))
+            }
+        }
+    }
+    let mut v: Vec<String> = if smoke {
+        ["run", "-q", "-p", "planet", "--", "test-render", "--scene", "capture-flights", "--adapter", "software"]
+    } else {
+        ["run", "--release", "-p", "planet", "--", "test-render", "--scene", "capture-flights", "--adapter", "hardware"]
+    }
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    v.extend(tail);
+    v.extend(["--out-dir".to_string(), out_dir.clone()]);
+    Ok((v, out_dir))
+}
+
+/// The `ffmpeg` arguments that encode one frame sequence (`<dir>/frame_NNNN.png`) at 60 frames per second (the flights' frame step)
+/// into `<out>/<name>.mp4`: H.264, yuv420p (plays everywhere), visually lossless.
+fn ffmpeg_args(dir: &Path, out: &Path) -> Vec<String> {
+    [
+        "-y",
+        "-loglevel",
+        "error",
+        "-framerate",
+        "60",
+        "-i",
+        &dir.join("frame_%04d.png").to_string_lossy(),
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-crf",
+        "14",
+        &out.to_string_lossy(),
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+/// `cargo xtask capture flights`: the frames, then a video per flight and shore filter when `ffmpeg` is installed (else the PNG
+/// sequences stand and the command says so). Writes only below `--out-dir`.
+pub fn capture_cmd(root: &Path, args: &[String]) -> Res {
+    let (cargo_args, out_dir) = capture_args(args)?;
+    let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+    run(root, "cargo", &refs, &[])?;
+    let dir = if Path::new(&out_dir).is_absolute() { Path::new(&out_dir).to_path_buf() } else { root.join(&out_dir) };
+    let index = std::fs::read_to_string(dir.join("capture.txt")).map_err(|e| format!("{}: {e}", dir.join("capture.txt").display()))?;
+    let have_ffmpeg = std::process::Command::new("ffmpeg").arg("-version").output().is_ok_and(|o| o.status.success());
+    if !have_ffmpeg {
+        eprintln!("ffmpeg is not on the PATH: the frames are PNG sequences in {} (no video was made)", dir.display());
+        return Ok(());
+    }
+    for line in index.lines().filter(|l| !l.starts_with('#') && !l.trim().is_empty()) {
+        let name = line.split_whitespace().next().unwrap_or("");
+        let mp4 = dir.join(format!("{name}.mp4"));
+        let a = ffmpeg_args(&dir.join(name), &mp4);
+        let refs: Vec<&str> = a.iter().map(String::as_str).collect();
+        eprintln!("$ ffmpeg {}", refs.join(" "));
+        run(root, "ffmpeg", &refs, &[])?;
+        eprintln!("wrote {}", mp4.display());
+    }
+    Ok(())
+}
+
 /// The `cargo` arguments of `perf global-bake` (GEN-014): the global-bake scene under the same readiness gate, with the grid
 /// size and thread count as options. The default grid is the 1 km one of GEN-014 (16384 cells per face edge).
 fn perf_global_bake_args(args: &[String]) -> Result<Vec<String>, String> {
@@ -708,6 +798,34 @@ mod tests {
         assert_eq!(over.last(), Some(&"--machine-ready"));
         let e = perf_cargo_args(&s(&["--force"])).unwrap_err();
         assert!(e.contains("--force") && e.contains("override"), "{e}");
+    }
+
+    // spec: TEST-027
+    #[test]
+    fn the_capture_builds_its_command_line_encodes_at_60_fps_and_refuses_what_it_does_not_know() {
+        let (a, dir) = capture_args(&s(&["flights", "--store", "C:/bake", "--flight-frames", "240"])).unwrap();
+        assert_eq!(dir, "target/review/m5-flights");
+        assert!(
+            a.contains(&"capture-flights".to_string()) && a.contains(&"hardware".to_string()) && a.contains(&"--release".to_string()),
+            "{a:?}"
+        );
+        assert_eq!(a[a.iter().position(|x| x == "--store").unwrap() + 1], "C:/bake");
+        assert_eq!(a[a.iter().position(|x| x == "--out-dir").unwrap() + 1], "target/review/m5-flights");
+        assert!(!a.contains(&"--perf".to_string()) && !a.contains(&"--machine-ready".to_string()), "a tool, not a measurement: {a:?}");
+        let (a, dir) = capture_args(&s(&["flights", "--smoke", "--allow-memory-bake", "--global-res", "128", "--out-dir", "X"])).unwrap();
+        assert_eq!(dir, "X");
+        assert!(a.contains(&"software".to_string()) && !a.contains(&"--release".to_string()), "{a:?}");
+        assert!(capture_args(&s(&["videos"])).unwrap_err().contains("usage"));
+        assert!(capture_args(&s(&["flights", "--machine-ready"])).unwrap_err().contains("unknown capture option"));
+        let f = ffmpeg_args(Path::new("d/coast-glide-filter1"), Path::new("d/coast-glide-filter1.mp4"));
+        assert_eq!(f[f.iter().position(|x| x == "-framerate").unwrap() + 1], "60");
+        assert!(
+            f.iter().any(|x| x.replace('\\', "/") == "d/coast-glide-filter1/frame_%04d.png")
+                && f.contains(&"libx264".to_string())
+                && f.contains(&"yuv420p".to_string()),
+            "{f:?}"
+        );
+        assert!(f.last().unwrap().ends_with("coast-glide-filter1.mp4"));
     }
 
     // spec: TEST-019, TEST-025

@@ -317,7 +317,7 @@ fn the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_
     assert!(e.contains("no view 'moon'") && e.contains("coast-glide"), "{e}");
     let e = run(&["test-render", "--perf-smoke", "--scene", "dive", "--adapter", "software", "--global-res", "8", "--views", "orbit"])
         .unwrap_err();
-    assert!(e.contains("--flight-frames and --views apply to the scenes"), "{e}");
+    assert!(e.contains("--views applies to the scenes"), "{e}");
     let e = run(&["test-render", "--perf-smoke", "--scene", "terrain", "--adapter", "software", "--global-res", "8", "--lit"]).unwrap_err();
     assert!(e.contains("--lit applies to the streaming perf scenes"), "{e}");
     let _ = std::fs::remove_file(&log);
@@ -375,4 +375,51 @@ fn a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_na
     assert!(json.contains("\"path\":\"stream-lit/look-1m\"") && json.contains("lit path (atmosphere, water)"), "{json}");
     assert!(json.contains("\"load\":{\"measured\":false}"), "{json}");
     let _ = std::fs::remove_file(&log);
+}
+
+// spec: TEST-027
+#[test]
+fn the_flight_capture_writes_a_png_sequence_per_flight_and_shore_filter_and_is_no_measurement() {
+    let dir = tmp("capture");
+    let out = run(&[
+        "test-render",
+        "--scene",
+        "capture-flights",
+        "--adapter",
+        "software",
+        "--allow-memory-bake",
+        "--global-res",
+        "128",
+        "--size",
+        "320x180",
+        "--flight-frames",
+        "2",
+        "--out-dir",
+        dir.to_str().unwrap(),
+    ])
+    .unwrap();
+    assert!(out.contains("capture-flights: NOT a measurement (no gate, no timestamps, no log)"), "{out}");
+    let index = std::fs::read_to_string(dir.join("capture.txt")).unwrap();
+    let names: Vec<&str> = index.lines().filter(|l| !l.starts_with('#')).map(|l| l.split_whitespace().next().unwrap()).collect();
+    assert_eq!(names, ["coast-glide-filter1", "coast-glide-filter0", "coast-descent-filter1", "coast-descent-filter0"], "{index}");
+    for n in names {
+        for k in 0..2 {
+            let p = dir.join(n).join(format!("frame_{k:04}.png"));
+            let bytes = std::fs::read(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+            assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "{}", p.display());
+            // IHDR: width and height, big endian, at bytes 16..24.
+            assert_eq!(
+                (u32::from_be_bytes(bytes[16..20].try_into().unwrap()), u32::from_be_bytes(bytes[20..24].try_into().unwrap())),
+                (320, 180)
+            );
+        }
+    }
+    assert!(!dir.join("lit.json").exists() && !out.contains("budget"), "a tool: no perf log, no budget row: {out}");
+    // It needs an output directory and a world source, and a perf option is refused.
+    let e = run(&["test-render", "--scene", "capture-flights", "--adapter", "software", "--allow-memory-bake", "--global-res", "128"])
+        .unwrap_err();
+    assert!(e.contains("--out-dir"), "{e}");
+    let e = run(&["test-render", "--scene", "capture-flights", "--adapter", "software", "--out-dir", dir.to_str().unwrap()]).unwrap_err();
+    assert!(e.contains("--store DIR") && e.contains("--allow-memory-bake"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
