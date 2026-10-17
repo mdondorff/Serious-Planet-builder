@@ -164,11 +164,18 @@ fn warm_clock(rig: &Rig<'_>, r: &mut TerrainRenderer, plan: &TerrainPlan) -> Res
         return Ok(None);
     }
     let started = Instant::now();
-    planet_perf::clock::warm_up(
+    // Warm-load phase (unmeasured): chunks of at least WARMUP_MIN_CHUNK_S of frames, until the clock has read the floor
+    // WARMUP_HOLD_READINGS times in a row, with the cap of ADR 0034; the light views would otherwise read the floor once and fall.
+    planet_perf::clock::warm_up_held(
         planet_perf::clock::WARMUP_CAP_S,
+        planet_perf::clock::WARMUP_HOLD_READINGS,
         || {
-            for _ in 0..planet_perf::clock::WARMUP_CHUNK_FRAMES {
+            let chunk = Instant::now();
+            let mut frames = 0;
+            while frames < planet_perf::clock::WARMUP_CHUNK_FRAMES || chunk.elapsed().as_secs_f64() < planet_perf::clock::WARMUP_MIN_CHUNK_S
+            {
                 r.render(rig.ctx, plan, true).map_err(|e| e.to_string())?;
+                frames += 1;
             }
             Ok(())
         },
@@ -684,7 +691,11 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     if smoke && o.out.is_none() {
         writeln!(out, "smoke run: no log written (pass --out to keep it)").map_err(err)?;
     } else {
-        let path = o.out.clone().unwrap_or_else(|| std::path::Path::new("perf").join("logs").join(format!("{}.json", o.scene)));
+        let file = format!("{}.json", o.scene);
+        let path = match &o.out {
+            Some(p) => crate::streamperf::out_log_path(p, &file)?,
+            None => std::path::Path::new("perf").join("logs").join(&file),
+        };
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(err)?;
         }
