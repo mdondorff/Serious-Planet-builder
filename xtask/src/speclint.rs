@@ -14,7 +14,7 @@
 //! Review: <artefact>   (tier D only)
 //! ```
 
-use crate::util::{files_with_ext, Res};
+use crate::util::{capture, files_with_ext, Res};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -340,6 +340,48 @@ pub fn lint(specs: &BTreeMap<String, String>, sources: &BTreeMap<PathBuf, String
     Report { errors, summary }
 }
 
+/// Largest tracked file the conflict-marker scan reads (BUILD-009); bigger files are generated or binary in practice.
+const MARKER_SCAN_MAX_BYTES: usize = 2 * 1024 * 1024;
+
+/// BUILD-009: the 1-based line of a git conflict marker in `text`, if any. A full block (opening, separator, closing, in order)
+/// reports its opening line; an opening or closing marker of git format (`<<<<<<< ref`) alone reports its own line. A lone
+/// `=======` (a markdown setext underline) or a bare `<<<<<<<` never counts.
+pub fn conflict_marker_line(text: &str) -> Option<usize> {
+    // A marker of git format: seven characters, a space, a ref name.
+    fn named(line: &str, c: char) -> bool {
+        let seven = c.to_string().repeat(7);
+        line.strip_prefix(seven.as_str()).is_some_and(|rest| rest.strip_prefix(' ').is_some_and(|r| !r.trim().is_empty()))
+    }
+    let (mut open, mut sep) = (None, false);
+    for (i, line) in text.lines().enumerate() {
+        let open_marker = line == "<<<<<<<" || line.starts_with("<<<<<<< ");
+        let close_marker = line == ">>>>>>>" || line.starts_with(">>>>>>> ");
+        if named(line, '<') || named(line, '>') {
+            return Some(open.unwrap_or(i + 1));
+        }
+        if open_marker && open.is_none() {
+            open = Some(i + 1);
+        } else if open.is_some() && line == "=======" {
+            sep = true;
+        } else if close_marker && sep {
+            return open;
+        }
+    }
+    None
+}
+
+/// BUILD-009: one message per file with conflict markers. Files that are not UTF-8, hold a NUL byte or exceed the size cap are skipped.
+pub fn conflict_marker_errors(files: &[(String, Vec<u8>)]) -> Vec<String> {
+    files
+        .iter()
+        .filter(|(_, bytes)| bytes.len() <= MARKER_SCAN_MAX_BYTES && !bytes.contains(&0))
+        .filter_map(|(path, bytes)| {
+            let line = conflict_marker_line(std::str::from_utf8(bytes).ok()?)?;
+            Some(format!("{path}:{line}: git conflict marker (resolve the merge conflict; BUILD-009)"))
+        })
+        .collect()
+}
+
 pub fn run(root: &Path) -> Res {
     let mut specs = BTreeMap::new();
     let openspec = root.join("openspec");
@@ -370,7 +412,12 @@ pub fn run(root: &Path) -> Res {
         sources.insert(rel, std::fs::read_to_string(&f).map_err(|e| format!("{}: {e}", f.display()))?);
     }
     let constitution = std::fs::read_to_string(root.join("docs").join("constitution.md")).map_err(|e| e.to_string())?;
-    let report = lint(&specs, &sources, &constitution);
+    let mut report = lint(&specs, &sources, &constitution);
+    // BUILD-009: tracked files only (git is on every CI runner).
+    let tracked = capture(root, "git", &["ls-files", "-z"])?;
+    let files: Vec<(String, Vec<u8>)> =
+        tracked.split('\0').filter(|p| !p.is_empty()).filter_map(|p| Some((p.to_string(), std::fs::read(root.join(p)).ok()?))).collect();
+    report.errors.extend(conflict_marker_errors(&files));
     eprint!("{}", report.summary);
     if report.errors.is_empty() {
         eprintln!("spec-lint ok");
@@ -383,6 +430,59 @@ pub fn run(root: &Path) -> Res {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn marks(c: char) -> String {
+        c.to_string().repeat(7)
+    }
+
+    /// A merge-conflict block, built at run time so that no tracked file holds a marker line.
+    fn conflict_block() -> String {
+        format!("intro\n{} HEAD\nours\n{}\ntheirs\n{} origin/main\noutro\n", marks('<'), marks('='), marks('>'))
+    }
+
+    // spec: BUILD-009
+    #[test]
+    fn full_conflict_block_names_file_and_line() {
+        let files = [("docs/log.md".to_string(), conflict_block().into_bytes())];
+        let errs = conflict_marker_errors(&files);
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(errs[0].contains("docs/log.md:2"), "{errs:?}");
+    }
+
+    // spec: BUILD-009
+    #[test]
+    fn lone_marker_with_ref_fails_but_bare_or_separator_passes() {
+        assert_eq!(conflict_marker_line(&format!("a\n{} main\n", marks('>'))), Some(2));
+        assert_eq!(conflict_marker_line(&format!("a\r\n{} main\r\n", marks('<'))), Some(2));
+        assert_eq!(conflict_marker_line(&format!("a\n{}\n", marks('<'))), None);
+        assert_eq!(conflict_marker_line(&format!("{}\nb\n{}\n", marks('='), marks('='))), None);
+        // out of order: closing, separator, opening is not a block
+        assert_eq!(conflict_marker_line(&format!("{}\n{}\n{}\n", marks('>'), marks('='), marks('<'))), None);
+        // indented quotes (code in a list) are not markers
+        assert_eq!(conflict_marker_line(&format!("  {} HEAD\n", marks('<'))), None);
+    }
+
+    // spec: BUILD-009
+    #[test]
+    fn setext_underline_and_clean_tree_pass() {
+        let md = format!("Title\n{}\n\ntext\n", marks('='));
+        let files = [("README.md".to_string(), md.into_bytes()), ("a.rs".to_string(), b"fn main() {}\n".to_vec())];
+        assert!(conflict_marker_errors(&files).is_empty());
+        assert!(conflict_marker_errors(&[]).is_empty());
+    }
+
+    // spec: BUILD-009
+    #[test]
+    fn binary_and_oversized_files_are_skipped() {
+        let mut bin = conflict_block().into_bytes();
+        bin.push(0);
+        let mut big = conflict_block().into_bytes();
+        big.resize(MARKER_SCAN_MAX_BYTES + 1, b'x');
+        let mut non_utf8 = conflict_block().into_bytes();
+        non_utf8.push(0xff);
+        let files = [("a.png".to_string(), bin), ("big.txt".to_string(), big), ("b.bin".to_string(), non_utf8)];
+        assert!(conflict_marker_errors(&files).is_empty());
+    }
 
     const SPEC: &str = "\
 ### Requirement: COORD-003 Geo round-trip
