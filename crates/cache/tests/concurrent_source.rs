@@ -98,7 +98,6 @@ fn resident_bytes_never_exceed_the_budget_and_reads_stay_exact() {
         let st = src.stats();
         assert!(st.peak_resident_blocks as u64 * BLOCK_BYTES <= cap, "budget {budget_blocks} blocks: peak {st:?}");
         assert_eq!(st.peak_resident_blocks as u64, budget_blocks.max(1), "the cache was filled to its budget and no further: {st:?}");
-        let st = src.stats();
         assert!(st.resident_bytes <= cap && st.resident_blocks as u64 * BLOCK_BYTES == st.resident_bytes, "{st:?}");
     }
 }
