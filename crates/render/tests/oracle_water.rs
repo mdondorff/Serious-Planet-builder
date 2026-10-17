@@ -3,9 +3,7 @@
 //! `max(1 % |v|, 1e-4)`, both on the f32-rounded inputs the GPU receives, at camera altitudes from 1 m to 20 km and in a 1 m walk.
 
 use planet_core::hash::{hash_u64s, unit_f64};
-use planet_frame::look::water::{
-    fade_scale_for, surface_radiance, tile_phases, wave_sample, LiquidAppearance, SurfaceInputs, WaterLook, WavePoint, WAVES,
-};
+use planet_frame::look::water::{surface_radiance, tile_phases, wave_sample, LiquidAppearance, SurfaceInputs, WaterLook, WavePoint, WAVES};
 use planet_render::{probe_surface, probe_waves, AdapterPolicy, GpuContext, SurfaceProbe, WaveProbe};
 use planet_world_def::LiquidKind;
 
@@ -36,7 +34,6 @@ type WaveRefs = Vec<([f64; 3], [f64; 3])>;
 fn wave_cases(alt: f64, count: usize, seed: u64) -> (Vec<WaveProbe>, WaveRefs) {
     let look = WaterLook::EARTH;
     let liquid = LiquidAppearance::new(0, &LiquidKind::WATER, &look);
-    let scale = fade_scale_for(60f64.to_radians(), 6.0, 1080.0) as f32;
     let mut probes = Vec::new();
     let mut refs = Vec::new();
     for k in 0..count as u64 {
@@ -48,27 +45,27 @@ fn wave_cases(alt: f64, count: usize, seed: u64) -> (Vec<WaveProbe>, WaveRefs) {
             [(unit(seed, 8 * k + 3) - 0.5) * 2.0 * reach, (unit(seed, 8 * k + 4) - 0.5) * 2.0 * reach, (unit(seed, 8 * k + 5) - 0.5) * 4.0];
         let up = norm3([o_dir[0] + local[0] / R, o_dir[1] + local[1] / R, o_dir[2] + local[2] / R]);
         let depth = [0.002, 0.05, 0.6, 1.5, 4.0, 30.0, 400.0][(k % 7) as usize] * (0.5 + unit(seed, 8 * k + 6));
-        let dist = alt * (0.7 + 6.0 * unit(seed, 8 * k + 7));
+        // The vertex spacing of the tile there: from eight vertices per wavelength of the longest wave to fewer than four of the shortest.
+        let spacing = 0.4 + 8.0 * unit(seed, 8 * k + 7);
         let t = 1234.5 + 3.7 * k as f64;
         let phases = tile_phases(&liquid, origin, t);
         let probe = WaveProbe {
             liquid,
             local: f32s(local),
-            dist: dist as f32,
+            spacing: spacing as f32,
             up: f32s(up),
             depth: depth as f32,
             phases,
-            fade_scale: scale,
             choppy: look.choppy as f32,
         };
         let point = WavePoint {
             local: wide(probe.local),
             up: wide(probe.up),
             phases: probe.phases.map(f64::from),
-            dist: f64::from(probe.dist),
+            spacing: f64::from(probe.spacing),
             depth: f64::from(probe.depth),
         };
-        let r = wave_sample(&liquid.as_f32(), &point, f64::from(probe.fade_scale), f64::from(probe.choppy));
+        let r = wave_sample(&liquid.as_f32(), &point, f64::from(probe.choppy));
         refs.push((r.disp, r.slope));
         probes.push(probe);
     }
@@ -112,7 +109,6 @@ fn the_waves_hold_a_long_run_and_planet_sized_origins_because_the_phases_are_red
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let look = WaterLook::EARTH;
     let liquid = LiquidAppearance::new(0, &LiquidKind::WATER, &look);
-    let scale = fade_scale_for(60f64.to_radians(), 6.0, 1080.0) as f32;
     let bound = 1.0e-3 + 1.0e-3 * liquid.amplitude_sum();
     // The same tile and points at t = 1e6 s and at the far side of the planet: the reduced phases keep the shader's argument small.
     let mut probes = Vec::new();
@@ -125,21 +121,20 @@ fn the_waves_hold_a_long_run_and_planet_sized_origins_because_the_phases_are_red
             let probe = WaveProbe {
                 liquid,
                 local: f32s(local),
-                dist: 80.0,
+                spacing: 2.0,
                 up: f32s(up),
                 depth: 25.0,
                 phases: tile_phases(&liquid, origin, t),
-                fade_scale: scale,
                 choppy: look.choppy as f32,
             };
             let p = WavePoint {
                 local: wide(probe.local),
                 up: wide(probe.up),
                 phases: probe.phases.map(f64::from),
-                dist: 80.0,
+                spacing: 2.0,
                 depth: f64::from(probe.depth),
             };
-            refs.push(wave_sample(&liquid.as_f32(), &p, f64::from(scale), look.choppy).disp);
+            refs.push(wave_sample(&liquid.as_f32(), &p, look.choppy).disp);
             probes.push(probe);
         }
     }
@@ -261,7 +256,6 @@ fn a_camera_walking_a_millimetre_at_a_time_at_one_metre_changes_the_surface_by_n
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let look = WaterLook::EARTH;
     let water = LiquidAppearance::new(0, &LiquidKind::WATER, &look);
-    let scale = fade_scale_for(60f64.to_radians(), 6.0, 1080.0) as f32;
     let sun = norm3([0.3, -0.5, 0.8]);
     let point = [14.0_f64, 3.0, 0.0];
     let mut surface = Vec::new();
@@ -273,12 +267,11 @@ fn a_camera_walking_a_millimetre_at_a_time_at_one_metre_changes_the_surface_by_n
         // The camera 1 m above the water, 14 m to the south of the point, walking 1 mm a frame towards it.
         let cam = [0.0, -14.0 + step as f64 * 0.001, 1.0];
         let to_cam = [cam[0] - point[0], cam[1] - point[1], cam[2] - point[2]];
-        let dist = (to_cam[0] * to_cam[0] + to_cam[1] * to_cam[1] + to_cam[2] * to_cam[2]).sqrt();
         let v = norm3(to_cam);
         let probe = SurfaceProbe {
             liquid: water,
             la: [look.shore_fade_m as f32, look.foam_width_m as f32, look.foam_strength as f32, look.choppy as f32],
-            lb: [look.fresnel_f0 as f32, look.glint_roughness as f32, scale, 0.0],
+            lb: [look.fresnel_f0 as f32, look.glint_roughness as f32, 0.0, 0.0],
             n: f32s(norm3([0.02, -0.03, 1.0])),
             v: f32s(v),
             up: [0.0, 0.0, 1.0],
@@ -307,16 +300,20 @@ fn a_camera_walking_a_millimetre_at_a_time_at_one_metre_changes_the_surface_by_n
         let wp = WaveProbe {
             liquid: water,
             local: f32s(point),
-            dist: dist as f32,
+            spacing: (2.0 + 0.001 * step as f64) as f32,
             up: [0.0, 0.0, 1.0],
             depth: 3.0,
             phases,
-            fade_scale: scale,
             choppy: look.choppy as f32,
         };
-        let w =
-            WavePoint { local: wide(wp.local), up: [0.0, 0.0, 1.0], phases: phases.map(f64::from), dist: f64::from(wp.dist), depth: 3.0 };
-        want_waves.push(wave_sample(&water.as_f32(), &w, f64::from(scale), look.choppy).disp);
+        let w = WavePoint {
+            local: wide(wp.local),
+            up: [0.0, 0.0, 1.0],
+            phases: phases.map(f64::from),
+            spacing: f64::from(wp.spacing),
+            depth: 3.0,
+        };
+        want_waves.push(wave_sample(&water.as_f32(), &w, look.choppy).disp);
         waves.push(wp);
     }
     let got_surface = probe_surface(&ctx, &surface);

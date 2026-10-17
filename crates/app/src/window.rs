@@ -189,7 +189,7 @@ impl App<'_> {
                 let mut warm = lit_warm_plan(self.cameras[0], cfg.size, cfg.lod.cells, warm_lit);
                 // A world with water warms the water pass too (no node: the pipelines and the copy target exist before frame 0).
                 if self.world.has_water() {
-                    warm.water = Some(empty_water_plan(&cfg.look.water, &cfg.lod));
+                    warm.water = Some(empty_water_plan(&cfg.look.water));
                 }
                 warm
             })

@@ -327,3 +327,10 @@ What happened: opus-planner asked whether keeping two tile formats spreads speci
 Assumption it changes: ADR 0033 point 4 (about 0.002 degrees for 16-bit normals: 0.0037 measured, still inside CON-14) and its reading of why levels 0-2 stay in the vertex format (the base surface, not the height encoding).
 Proposed follow-up: the owner decides at the M5 gate whether to retire the vertex format from rendering (about 5-7 coder days: texel layout v2 with 32-bit height and 15-bit normals and the climate in a 324 B per-tile block, a render floor at level 3, then deleting the vertex path), preferably before item 7's water mask.
 Obsolete when: the vertex format has been retired from rendering, or the compact format changes (re-measure the base-surface error then).
+
+## 2026-10-17 The water pass: four first readings were wrong
+Scope: project
+What happened: building `water-pass` (ADR 0053) (1) a per-tile tangent projection of the wave vector (ADR 0041 point 5) opens a seam of about half a radian at every tile border, so the waves are planet-fixed and weighted by their tangent share at the point; (2) a wave fade by camera distance, as first built, is wrong over deep water because the grid is spaced for the distance to the seabed (the numerics review found it), so the fade follows the vertex spacing times one plus the morph factor; (3) the exact-class share of a coastal flight is 0.2 % to 2 % noise because bands thinner than a pixel come and go by sampling, so the metric counts coverage (water or not) and reports the class count; (4) the frustum cut culled the seabed tile and the water above it, leaving a band of seabed along the bottom of a low view (found by the flight itself); raising the tile height bounds instead breaks the morph intervals, so only the frustum sphere reaches up to the water level.
+Assumption it changes: ADR 0041 points 5 and 6 as written (ADR 0053 records the readings).
+Proposed follow-up: the planner accepts ADR 0053; a line-crawl count for the metric and an `fwidth` filter on the lit shore if the gate's flight shows shimmer.
+Obsolete when: ADR 0053 is accepted, or hydrology replaces the tile-granular water selection.

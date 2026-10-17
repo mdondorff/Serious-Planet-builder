@@ -7,9 +7,9 @@ use planet_core::tile::Side;
 use planet_core::{PlanetFixed, TileId, Vec3};
 use planet_frame::look::file::LookParams;
 use planet_frame::look::water::{
-    class_flicker, class_flicker_both, fade_scale_for, foam_amount, shore_cover, surface_radiance, tile_phase, tile_phases, water_class,
-    wave_argument, wave_normal, wave_sample, wave_weights, ClassMap, LiquidAppearance, SurfaceInputs, WaterClass, WaterLook, Wave,
-    WavePoint, FLICKER_BUDGET, MAX_LIQUIDS, TANGENT_SHARE, WAVES, WAVE_ARGUMENT_BOUND, WAVE_DIRECTIONS,
+    class_flicker, class_flicker_both, foam_amount, shore_cover, surface_radiance, tile_phase, tile_phases, water_class, wave_argument,
+    wave_normal, wave_sample, wave_weights, ClassMap, LiquidAppearance, SurfaceInputs, WaterClass, WaterLook, Wave, WavePoint,
+    FLICKER_BUDGET, MAX_LIQUIDS, TANGENT_SHARE, WAVES, WAVE_ARGUMENT_BOUND, WAVE_DIRECTIONS,
 };
 use planet_frame::water::{plan_water, WaterError, WaterPlan, WaterRequest, WaterSource, WaterTileCache, WaterView, TILE_SAMPLES};
 use planet_frame::{plan_terrain, scripted_views, Camera, LodParams, TerrainPlan, TerrainRequest, TerrainView};
@@ -80,8 +80,8 @@ fn two_tiles_that_hold_one_point_agree_about_its_waves_also_across_a_face_edge()
                 let local = [local_f64.x as f32, local_f64.y as f32, local_f64.z as f32].map(f64::from);
                 let phases = tile_phases(&l, [o.x, o.y, o.z], 77.7).map(f64::from);
                 let up = d;
-                let point = WavePoint { local, up: [up.x, up.y, up.z], phases, dist: 400.0, depth: f };
-                (wave_sample(&l, &point, 38.97, 0.8), local_f64.length())
+                let point = WavePoint { local, up: [up.x, up.y, up.z], phases, spacing: 2.0, depth: f };
+                (wave_sample(&l, &point, 0.8), local_f64.length())
             };
             let (a, la) = eval(tile);
             let (b, lb) = eval(nb);
@@ -97,23 +97,21 @@ fn two_tiles_that_hold_one_point_agree_about_its_waves_also_across_a_face_edge()
     assert_eq!(checked, 15);
 }
 
-fn point(local: [f64; 3], up: [f64; 3], dist: f64, depth: f64) -> WavePoint {
-    WavePoint { local, up, phases: [0.3, 1.7, 2.2, 5.1], dist, depth }
+fn point(local: [f64; 3], up: [f64; 3], spacing: f64, depth: f64) -> WavePoint {
+    WavePoint { local, up, phases: [0.3, 1.7, 2.2, 5.1], spacing, depth }
 }
 
 // spec: ATMO-013
 #[test]
 fn a_waves_weight_is_continuous_and_a_wave_that_the_grid_cannot_hold_or_that_points_out_of_the_surface_has_none() {
     let l = water_liquid();
-    let scale = fade_scale_for(60f64.to_radians(), 6.0, 1080.0);
-    assert!((scale - 38.97).abs() < 0.01, "{scale}");
     let up = [0.0, 0.0, 1.0];
-    // Beyond lambda x scale of distance a wave is gone; below half of it it is whole.
+    // A wave on a grid of fewer than four vertices per wavelength is gone; from eight it is whole.
     for (i, w) in l.waves.iter().enumerate() {
         let lambda = core::f64::consts::TAU / (w.k.iter().map(|c| c * c).sum::<f64>()).sqrt();
-        let near = wave_weights(&l, &point([0.0; 3], up, 0.4 * lambda * scale, 100.0), scale)[i];
-        let far = wave_weights(&l, &point([0.0; 3], up, 1.01 * lambda * scale, 100.0), scale)[i];
-        let mid = wave_weights(&l, &point([0.0; 3], up, 0.75 * lambda * scale, 100.0), scale)[i];
+        let near = wave_weights(&l, &point([0.0; 3], up, lambda / 9.0, 100.0))[i];
+        let far = wave_weights(&l, &point([0.0; 3], up, lambda / 3.9, 100.0))[i];
+        let mid = wave_weights(&l, &point([0.0; 3], up, lambda / 6.0, 100.0))[i];
         // The tangent share of tetrahedron wave i at this up decides the rest.
         let kn = WAVE_DIRECTIONS[i][2];
         let s = (1.0 - kn * kn).sqrt();
@@ -125,10 +123,10 @@ fn a_waves_weight_is_continuous_and_a_wave_that_the_grid_cannot_hold_or_that_poi
     }
     // Along the wave's own direction the wave has no tangent share: a surface whose up is wave 0's direction does not carry it.
     let up0 = WAVE_DIRECTIONS[0];
-    assert_eq!(wave_weights(&l, &point([0.0; 3], up0, 10.0, 100.0), scale)[0], 0.0);
+    assert_eq!(wave_weights(&l, &point([0.0; 3], up0, 1.0, 100.0))[0], 0.0);
     // Continuity: a tiny move changes the weights tiny.
-    let a = wave_weights(&l, &point([0.0; 3], up, 500.0, 0.8), scale);
-    let b = wave_weights(&l, &point([0.0; 3], up, 500.001, 0.8001), scale);
+    let a = wave_weights(&l, &point([0.0; 3], up, 5.0, 0.8));
+    let b = wave_weights(&l, &point([0.0; 3], up, 5.001, 0.8001));
     for i in 0..WAVES {
         assert!((a[i] - b[i]).abs() < 1.0e-4, "{i}: {} {}", a[i], b[i]);
     }
@@ -145,7 +143,7 @@ fn a_waves_weight_is_continuous_and_a_wave_that_the_grid_cannot_hold_or_that_poi
         &WaterLook::EARTH,
     );
     assert!(!lava.has_waves());
-    let s = wave_sample(&lava, &point([1.0, 2.0, 3.0], up, 100.0, 50.0), scale, 0.8);
+    let s = wave_sample(&lava, &point([1.0, 2.0, 3.0], up, 1.0, 50.0), 0.8);
     assert_eq!((s.disp, s.slope), ([0.0; 3], [0.0; 3]));
 }
 
@@ -154,7 +152,6 @@ fn a_waves_weight_is_continuous_and_a_wave_that_the_grid_cannot_hold_or_that_poi
 fn the_waves_stay_within_their_amplitudes_and_never_lift_the_surface_below_the_seabed_where_the_water_is_thin() {
     let l = water_liquid();
     let total = l.amplitude_sum();
-    let scale = 38.97;
     let mut worst_ratio: f64 = 0.0;
     let mut n = 0;
     for ix in 0..40 {
@@ -164,8 +161,8 @@ fn the_waves_stay_within_their_amplitudes_and_never_lift_the_surface_below_the_s
                 let v = Vec3::new(0.3 + 0.01 * f64::from(ix), -0.5, 0.8).normalized();
                 [v.x, v.y, v.z]
             };
-            let p = WavePoint { local, up, phases: [0.1 * f64::from(ix), 2.0, 3.0, 4.0], dist: 100.0, depth };
-            let s = wave_sample(&l, &p, scale, 0.8);
+            let p = WavePoint { local, up, phases: [0.1 * f64::from(ix), 2.0, 3.0, 4.0], spacing: 1.0, depth };
+            let s = wave_sample(&l, &p, 0.8);
             let vertical = s.disp[0] * up[0] + s.disp[1] * up[1] + s.disp[2] * up[2];
             assert!(vertical.abs() <= total + 1e-12, "{vertical} against {total}");
             // The vertical displacement is at most half the depth: the surface stays above the terrain where the water is thin.
@@ -178,7 +175,7 @@ fn the_waves_stay_within_their_amplitudes_and_never_lift_the_surface_below_the_s
     assert!(worst_ratio <= 0.5 + 1e-9, "{worst_ratio}");
     // The shading normal is a unit vector close to up for these slopes.
     let p = point([3.0, 1.0, 0.0], [0.0, 0.0, 1.0], 100.0, 40.0);
-    let s = wave_sample(&l, &p, scale, 0.8);
+    let s = wave_sample(&l, &p, 0.8);
     let nrm = wave_normal(p.up, s.slope);
     assert!(((nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]) - 1.0).abs() < 1e-12 && nrm[2] > 0.9, "{nrm:?}");
 }
@@ -192,7 +189,6 @@ fn the_argument_the_shader_adds_stays_small_wherever_a_wave_has_weight_on_real_p
     let table = LiquidTable::earth();
     let cells = 32;
     let lod = LodParams { cells, viewport_h_px: 1080.0, tau_px: 6.0, max_level: 22, ..LodParams::earth_1080p() };
-    let scale = fade_scale_for(lod.fov_y_rad, lod.tau_px, lod.viewport_h_px);
     let src = HeightSea { field: &field, level: 0.0 };
     let l = LiquidAppearance::new(0, table.get(LiquidKindId::WATER).unwrap(), &look);
     let mut worst: f64 = 0.0;
@@ -225,14 +221,9 @@ fn the_argument_the_shader_adds_stays_small_wherever_a_wave_has_weight_on_real_p
                 let upv = (o.normalized() + pos * inv_r).normalized();
                 let up = [upv.x, upv.y, upv.z];
                 let base = pos + upv * depth;
-                let dist = (Vec3::new(
-                    f64::from(d.camera_relative_origin[0]),
-                    f64::from(d.camera_relative_origin[1]),
-                    f64::from(d.camera_relative_origin[2]),
-                ) + base)
-                    .length();
-                let p = WavePoint { local: [base.x, base.y, base.z], up, phases: [0.0; WAVES], dist, depth: depth.max(0.0) };
-                let weights = wave_weights(&l, &p, scale);
+                let spacing = f64::from(n.spacing_m);
+                let p = WavePoint { local: [base.x, base.y, base.z], up, phases: [0.0; WAVES], spacing, depth: depth.max(0.0) };
+                let weights = wave_weights(&l, &p);
                 for (i, w) in l.waves.iter().enumerate() {
                     if weights[i] > 0.0 {
                         let arg = w.k[0] * base.x + w.k[1] * base.y + w.k[2] * base.z;
@@ -611,8 +602,8 @@ fn a_water_plan_that_names_a_liquid_slot_or_a_phase_that_cannot_exist_is_refused
     bad.nodes[0].phases[2] = 7.0;
     assert!(bad.validate().unwrap_err().contains("phase"));
     let mut bad = good.clone();
-    bad.fade_scale = 0.0;
-    assert!(bad.validate().unwrap_err().contains("fade scale"));
+    bad.nodes[0].level_m = f32::NAN;
+    assert!(bad.validate().unwrap_err().contains("level"));
     let mut bad = good;
     bad.look.foam_width_m = 0.0;
     assert!(bad.validate().unwrap_err().contains("foam_width_m"));
@@ -637,14 +628,8 @@ fn a_field_that_names_a_water_level_keeps_the_tiles_of_water_above_a_seabed_the_
     };
     let s = (0..4000).map(|k| f64::from(k) * 500.0).find(|s| field.height(at(*s)) < -40.0).expect("deep water");
     let dir = at(s);
-    let camera = Camera::at_surface_point(
-        PlanetFixed(dir * (R + 6.0)),
-        Vec3::new(0.0, 0.0, 1.0),
-        6f64.to_radians(),
-        60f64.to_radians(),
-        1.6,
-        0.1,
-    );
+    let camera =
+        Camera::at_surface_point(PlanetFixed(dir * (R + 6.0)), Vec3::new(0.0, 0.0, 1.0), 6f64.to_radians(), 60f64.to_radians(), 1.6, 0.1);
     let lod = LodParams { cells: 16, viewport_h_px: 256.0, tau_px: 4.0, max_level: 26, max_height_m: 40_000.0, ..LodParams::earth_1080p() };
     let request = TerrainRequest { camera, size: (192, 120), view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 1 };
     let plain = planet_frame::plan_terrain_field(&request, &field).unwrap();
@@ -653,9 +638,55 @@ fn a_field_that_names_a_water_level_keeps_the_tiles_of_water_above_a_seabed_the_
     let nearest = |p: &TerrainPlan| p.nodes.iter().map(|n| (n.origin.0 - camera.position.0).length()).fold(f64::INFINITY, f64::min);
     assert!(kept.nodes.len() > plain.nodes.len(), "{} tiles against {}", kept.nodes.len(), plain.nodes.len());
     assert!(nearest(&kept) < 0.8 * nearest(&plain), "the nearest tile is {:.1} m away, against {:.1} m", nearest(&kept), nearest(&plain));
+    // One selection cache serving a field with and without a water level gives the plans of fresh caches (the level is in its key).
+    let mut shared = planet_frame::SelectionCache::new();
+    let first = planet_frame::plan_terrain_cached(&request, &field, &mut shared).unwrap();
+    let second = planet_frame::plan_terrain_cached(&request, &bounded, &mut shared).unwrap();
+    assert_eq!(first.nodes.len(), plain.nodes.len());
+    assert_eq!(second.nodes, kept.nodes, "a cache that saw the plain field must not hand its volumes to the bounded one");
+    // Over deep water the grid under the camera is spaced for the seabed's distance: the waves that grid cannot hold (fewer than four
+    // vertices per wavelength at its own spacing) have no weight, and the argument of those that have stays small, tile by tile.
+    let l = water_liquid();
+    let lod16 =
+        LodParams { cells: 16, viewport_h_px: 256.0, tau_px: 4.0, max_level: 26, max_height_m: 40_000.0, ..LodParams::earth_1080p() };
+    let mut held = 0;
+    for n in &kept.nodes {
+        let spacing = lod16.sample_spacing(n.level);
+        for w in &l.waves {
+            let klen = (w.k.iter().map(|c| c * c).sum::<f64>()).sqrt();
+            let lambda = core::f64::consts::TAU / klen;
+            let p = WavePoint { local: [0.0; 3], up: [0.0, 0.0, 1.0], phases: [0.0; WAVES], spacing, depth: 100.0 };
+            let weight = wave_weights(&l, &p)[l.waves.iter().position(|x| x == w).unwrap()];
+            if weight > 0.0 {
+                held += 1;
+                assert!(lambda >= 4.0 * spacing, "level {}: a wave of {lambda} m on a grid of {spacing} m", n.level);
+                assert!(klen * lod16.node_radius_bound(n.level) < WAVE_ARGUMENT_BOUND);
+            }
+        }
+    }
+    assert!(held > 0);
     // Heights, keys and bounds are the field's own: every tile of the plain plan is in the kept one with the same mesh key.
     for n in &plain.nodes {
         let k = kept.nodes.iter().find(|m| m.tile == n.tile).expect("a tile of the plain plan is kept");
         assert_eq!((k.mesh_key, k.origin), (n.mesh_key, n.origin));
     }
+}
+
+// spec: ATMO-012, ATMO-004
+#[test]
+fn a_sea_level_other_than_zero_moves_the_water_nodes_and_the_level_the_plan_carries() {
+    // ADR 0053 point 4: the field's wet tiles follow the sea's own level (a raised sea touches more tiles, a lowered one fewer), every
+    // node carries that level, and the pass then draws water wherever the level is above the terrain.
+    let field = Reference(1);
+    let (table, look, lod) = (LiquidTable::earth(), WaterLook::EARTH, lod16());
+    let plan = plan_of(4);
+    let nodes_at = |level: f64| {
+        let src = HeightSea { field: &field, level };
+        let wp = plan_water(&request(&src, &table, &look, &lod, 0.0), &mut WaterTileCache::new(), &plan).unwrap();
+        assert!(wp.nodes.iter().all(|n| f64::from(n.level_m) == level), "every node carries the level {level}");
+        wp.nodes.iter().map(|n| n.node).collect::<std::collections::BTreeSet<_>>()
+    };
+    let (low, zero, high) = (nodes_at(-300.0), nodes_at(0.0), nodes_at(300.0));
+    assert!(low.is_subset(&zero) && zero.is_subset(&high), "{} <= {} <= {}", low.len(), zero.len(), high.len());
+    assert!(low.len() < high.len(), "the level moves the selection: {} against {}", low.len(), high.len());
 }

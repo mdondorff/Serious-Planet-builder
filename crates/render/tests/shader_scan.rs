@@ -81,6 +81,16 @@ fn shipped_shaders_contain_no_planet_scale_values() {
                 all.push(format!("{name}: a vertex stage reads the atmosphere's uniform block"));
             }
         }
+        // The functions the vertex stage calls: the entry is a one-line call, so their bodies are scanned too.
+        for func in ["fn water_vertex(", "fn water_waves(", "fn terrain_vertex("] {
+            for (at, _) in src.match_indices(func) {
+                let body = &src[at..];
+                let end = body.find("\n}\n").unwrap_or(body.len());
+                if body[..end].contains("A.") {
+                    all.push(format!("{name}: {func} reads the atmosphere's uniform block"));
+                }
+            }
+        }
     }
     for cells in [4, 32, 64] {
         for h in scan(&compact_terrain_shader(cells)) {

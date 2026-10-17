@@ -72,8 +72,12 @@ Source: CON-10, ADR 0042 point 6, WDEF-002, ADR 0039
 - **WHEN** the version 3 fixture with a partial `atmosphere` table (integer literals exact as floats among the numbers) is loaded
 - **THEN** the keys it names are read, the keys it leaves out are the Earth default, the canonical text reads back equal, and a build that knows only version 2 refuses the file as a newer schema while a misspelt table or key in a version 3 file is an unknown key naming it
 
+#### Scenario: Version 4 fixture
+- **WHEN** the version 4 fixture with a partial `water` table is loaded
+- **THEN** the keys it names are read, the keys it leaves out are the Earth default, the canonical text reads back equal, a version 3 file with the same content reads equal (the identity step 3 to 4), a build that knows only version 3 refuses the file as a newer schema, a misspelt table or key is an unknown key naming it, and a water value outside its range is refused naming the key and the value
+
 #### Scenario: Unloadable file
-- **WHEN** the version is missing, newer than the build (for example 4), has no migration path, or a migration step fails
+- **WHEN** the version is missing, newer than the build (for example 5), has no migration path, or a migration step fails
 - **THEN** loading fails with an error that names the versions or the step and what to do
 
 #### Scenario: Not interchangeable with a definition

@@ -7,4 +7,4 @@
 - [x] 4.1 The frustum cut keeps the water above culled seabed (`water_cull_level`)
 - [x] 5.1 Viewer: the world's ocean, the water plan per frame, the warm-up, the smoke count; the atmosphere-fallback test (VIEW-008, VIEW-009)
 - [x] 6.1 Per-tile query cost and the decision of ADR 0051 point 6; ADR 0053 (proposed)
-- [ ] 7.1 numerics-reviewer, spec-guardian, verifier; test, test gpu, test gpu --real, spec-lint, fmt, clippy; archive; log line; PR
+- [x] 7.1 numerics-reviewer and spec-guardian findings fixed or recorded; verifier, test gpu, test gpu --real, archive, PR

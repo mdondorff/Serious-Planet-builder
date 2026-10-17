@@ -17,8 +17,8 @@
 //! mod 2 pi` per tile (O the tile origin, in f64) and the shader adds `k_i . local`, `local` the tile-local position of the point,
 //! so the argument of every sine is small and two tiles agree on the phase of a shared point (no projection onto a per-tile tangent
 //! plane, which would open a seam at every tile border). A wave's weight is the product of three continuous factors: its tangent
-//! share (a wave that points up out of the surface has none), its resolution (a wave the vertex grid cannot hold fades out with the
-//! distance, from the plan's `fade_scale`) and the shore (the amplitude falls to zero with the depth, so the surface never dips below
+//! share (a wave that points up out of the surface has none), its resolution (a wave the vertex grid cannot hold, fewer than four vertices
+//! per wavelength at the vertex's own spacing, fades out) and the shore (the amplitude falls to zero with the depth, so the surface never dips below
 //! the terrain where the water is thin).
 
 use super::shading::smoothstep;
@@ -71,7 +71,8 @@ pub struct WaterLook {
     /// Depth of the foam band at the shore, and the share of the band that is foam at its densest.
     pub foam_width_m: f64,
     pub foam_strength: f64,
-    /// Horizontal displacement of a crest relative to its height (0 sinusoidal, 1 sharpest crests that stay loop-free).
+    /// Horizontal displacement of a crest as a multiple of its height (0 sinusoidal). A liquid of short, high waves folds the surface
+    /// over itself when `choppy x |k| x amplitude` of its waves sums above 1: keep it small there.
     pub choppy: f64,
     /// Gravity of the body in m/s2: the dispersion `omega = sqrt(g k)` of deep-water waves.
     pub gravity_m_s2: f64,
@@ -330,29 +331,21 @@ pub struct WavePoint {
     pub up: [f64; 3],
     /// The tile's reduced phases ([`tile_phases`], f32 values).
     pub phases: [f64; WAVES],
-    /// Distance from the camera (m).
-    pub dist: f64,
+    /// The effective vertex spacing of the tile at the point (m): the tile's sample spacing times `1 + m`, `m` the vertex's morph
+    /// factor (a vertex morphed onto the parent grid sits on a grid twice as coarse). A wave needs four vertices per wavelength.
+    pub spacing: f64,
     /// Vertical depth `W - h_morph` (m); the waves fall to zero as it does.
     pub depth: f64,
 }
 
-/// The plan's wave-resolution scale: a wave of wavelength `lambda` has full weight up to half of `lambda x fade_scale` of distance and
-/// none beyond `lambda x fade_scale`.
-pub fn fade_scale_for(fov_y_rad: f64, tau_px: f64, viewport_h_px: f64) -> f64 {
-    // The vertex spacing at distance d is at most rho d, with rho = 2 tan(fov/2) tau / H (the LOD's own split rule, LOD-001); a wave
-    // needs four vertices per wavelength, so it is resolved up to lambda / (4 rho).
-    let rho = 2.0 * libm::tan(0.5 * fov_y_rad) * tau_px / viewport_h_px;
-    1.0 / (4.0 * rho)
-}
-
 /// The weights of the waves at a point: tangent share, resolution and shore (each continuous in the point).
-pub fn wave_weights(liquid: &LiquidAppearance, p: &WavePoint, fade_scale: f64) -> [f64; WAVES] {
+pub fn wave_weights(liquid: &LiquidAppearance, p: &WavePoint) -> [f64; WAVES] {
     let total = liquid.amplitude_sum();
     let mut out = [0.0; WAVES];
     if total <= 0.0 {
         return out;
     }
-    let shore = smoothstep(0.0, 2.0 * total, p.depth);
+    let shore = smoothstep(0.0, 4.0 * total, p.depth);
     for (o, w) in out.iter_mut().zip(&liquid.waves) {
         if w.amplitude <= 0.0 {
             continue;
@@ -363,9 +356,10 @@ pub fn wave_weights(liquid: &LiquidAppearance, p: &WavePoint, fade_scale: f64) -
         let s = libm::sqrt((1.0 - kn * kn).max(0.0));
         let w_tan = smoothstep(TANGENT_SHARE.0, TANGENT_SHARE.1, s);
         let lambda = TWO_PI / klen;
-        let d_fade = lambda * fade_scale;
-        let w_dist = 1.0 - smoothstep(0.5 * d_fade, d_fade, p.dist);
-        *o = w_tan * w_dist * shore;
+        // Resolution: full weight from eight vertices per wavelength, none below four (continuous in the spacing, which is continuous
+        // in the morph factor, so no LOD border shows).
+        let w_res = smoothstep(4.0, 8.0, lambda / p.spacing);
+        *o = w_tan * w_res * shore;
     }
     out
 }
@@ -377,8 +371,8 @@ pub fn wave_argument(w: &Wave, local: [f64; 3], phase: f64) -> f64 {
 }
 
 /// Gerstner displacement and slope of a liquid at a point (the f64 reference of the shader's `water_waves`).
-pub fn wave_sample(liquid: &LiquidAppearance, p: &WavePoint, fade_scale: f64, choppy: f64) -> WaveSample {
-    let weights = wave_weights(liquid, p, fade_scale);
+pub fn wave_sample(liquid: &LiquidAppearance, p: &WavePoint, choppy: f64) -> WaveSample {
+    let weights = wave_weights(liquid, p);
     let mut disp = [0.0; 3];
     let mut slope = [0.0; 3];
     for (i, w) in liquid.waves.iter().enumerate() {

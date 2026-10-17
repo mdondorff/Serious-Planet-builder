@@ -304,6 +304,8 @@ impl SelectionCache {
                 field.inputs_hash(),
                 u64::from(field.body().0),
                 p.radius_m.to_bits(),
+                // The cull spheres of the cached volumes reach up to the field's water level.
+                field.water_cull_level().map_or(0, |w| planet_core::hash::hash_u64s(5, &[w.to_bits()]) | 1),
                 // The mesh key chains the reference surface (GEN-012): a field on another surface must not reuse keys.
                 planet_core::hash::hash_u64s(3, &text(field.surface_id())),
             ],

@@ -14,7 +14,7 @@
 //! (ADR 0051 point 6, option 3) is the fix if either shows.
 
 use crate::lod::LodParams;
-use crate::look::water::{fade_scale_for, tile_phases, LiquidAppearance, WaterLook, MAX_LIQUIDS, WAVES};
+use crate::look::water::{tile_phases, LiquidAppearance, WaterLook, MAX_LIQUIDS, WAVES};
 use crate::terrain::TerrainPlan;
 use planet_core::cube::FaceMapping;
 use planet_core::{TileId, Vec3};
@@ -73,6 +73,9 @@ pub struct WaterNode {
     pub liquid: u8,
     /// The waves' reduced phases at the node's origin at the plan's time (`look::water::tile_phases`).
     pub phases: [f32; WAVES],
+    /// The sample spacing of the node's tile (m, `LodParams::sample_spacing`): the shader multiplies it by `1 + morph` for the
+    /// vertex's own spacing, which decides which waves the grid can hold.
+    pub spacing_m: f32,
 }
 
 /// The water of one frame.
@@ -83,8 +86,6 @@ pub struct WaterPlan {
     /// Seconds on the injected clock (CON-04): the only time the waves see. Kept for the text form and the diagnostics; the nodes'
     /// phases already contain it.
     pub time_s: f64,
-    /// See `look::water::fade_scale_for`.
-    pub fade_scale: f32,
     pub view: WaterView,
     /// The liquids the nodes use, at most [`MAX_LIQUIDS`].
     pub liquids: Vec<LiquidAppearance>,
@@ -235,28 +236,15 @@ pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &
             level_m: w.level_m as f32,
             liquid: slot as u8,
             phases: tile_phases(&liquids[slot], [o.x, o.y, o.z], req.time_s),
+            spacing_m: req.lod.sample_spacing(n.level) as f32,
         });
     }
-    Ok(WaterPlan {
-        look: *req.look,
-        time_s: req.time_s,
-        fade_scale: fade_scale_for(req.lod.fov_y_rad, req.lod.tau_px, req.lod.viewport_h_px) as f32,
-        view: req.view,
-        liquids,
-        nodes,
-    })
+    Ok(WaterPlan { look: *req.look, time_s: req.time_s, view: req.view, liquids, nodes })
 }
 
 /// An empty water plan (no node): what a viewer warms the pass with.
-pub fn empty_water_plan(look: &WaterLook, lod: &LodParams) -> WaterPlan {
-    WaterPlan {
-        look: *look,
-        time_s: 0.0,
-        fade_scale: fade_scale_for(lod.fov_y_rad, lod.tau_px, lod.viewport_h_px) as f32,
-        view: WaterView::Lit,
-        liquids: Vec::new(),
-        nodes: Vec::new(),
-    }
+pub fn empty_water_plan(look: &WaterLook) -> WaterPlan {
+    WaterPlan { look: *look, time_s: 0.0, view: WaterView::Lit, liquids: Vec::new(), nodes: Vec::new() }
 }
 
 /// The sea's body id, for tests that look for it.
@@ -288,9 +276,6 @@ impl WaterPlan {
         if let Err((key, value, why)) = self.look.validate() {
             return Err(format!("water plan: `{key}` = {value}: {why}"));
         }
-        if !(self.fade_scale.is_finite() && self.fade_scale > 0.0) {
-            return Err(format!("water plan: fade scale {} is not a positive number", self.fade_scale));
-        }
         for n in &self.nodes {
             if usize::from(n.liquid) >= self.liquids.len() {
                 return Err(format!("water plan: node {} names liquid slot {}, the plan has {}", n.node, n.liquid, self.liquids.len()));
@@ -309,7 +294,7 @@ impl WaterPlan {
     /// `wnode` line per node.
     pub fn to_text(&self) -> String {
         let l = self.look.values().map(h64).join(" ");
-        let mut s = format!("water time {} fade {} view {} look {l}\n", h64(self.time_s), h32(self.fade_scale), self.view.name());
+        let mut s = format!("water time {} view {} look {l}\n", h64(self.time_s), self.view.name());
         for q in &self.liquids {
             let mut v: Vec<f64> = Vec::new();
             v.extend(q.colour);
@@ -322,7 +307,14 @@ impl WaterPlan {
             s += &format!("liquid {} {}\n", q.kind, v.into_iter().map(h64).collect::<Vec<_>>().join(" "));
         }
         for n in &self.nodes {
-            s += &format!("wnode {} level {} liquid {} phases {}\n", n.node, h32(n.level_m), n.liquid, n.phases.map(h32).join(" "));
+            s += &format!(
+                "wnode {} level {} liquid {} phases {} spacing {}\n",
+                n.node,
+                h32(n.level_m),
+                n.liquid,
+                n.phases.map(h32).join(" "),
+                h32(n.spacing_m)
+            );
         }
         // No trailing newline: the caller adds the separators.
         s.pop();
@@ -334,7 +326,7 @@ impl WaterPlan {
         let mut plan: Option<WaterPlan> = None;
         for t in lines {
             match t.as_slice() {
-                ["water", "time", time, "fade", fade, "view", view, "look", rest @ ..] => {
+                ["water", "time", time, "view", view, "look", rest @ ..] => {
                     let mut look = WaterLook::EARTH;
                     if rest.len() != 9 {
                         return Err(format!("water line: the look needs 9 values, got {}", rest.len()));
@@ -345,7 +337,6 @@ impl WaterPlan {
                     plan = Some(WaterPlan {
                         look,
                         time_s: p64(time)?,
-                        fade_scale: p32(fade)?,
                         view: WaterView::parse(view).ok_or(format!("unknown water view '{view}'"))?,
                         liquids: Vec::new(),
                         nodes: Vec::new(),
@@ -371,13 +362,14 @@ impl WaterPlan {
                         waves,
                     });
                 }
-                ["wnode", node, "level", level, "liquid", liquid, "phases", a, b, c, d] => {
+                ["wnode", node, "level", level, "liquid", liquid, "phases", a, b, c, d, "spacing", sp] => {
                     let p = plan.as_mut().ok_or("a wnode line before the water line")?;
                     p.nodes.push(WaterNode {
                         node: node.parse().map_err(|e| format!("bad node index '{node}': {e}"))?,
                         level_m: p32(level)?,
                         liquid: liquid.parse().map_err(|e| format!("bad liquid slot '{liquid}': {e}"))?,
                         phases: [p32(a)?, p32(b)?, p32(c)?, p32(d)?],
+                        spacing_m: p32(sp)?,
                     });
                 }
                 other => return Err(format!("cannot parse water plan line '{}'", other.join(" "))),
