@@ -177,10 +177,152 @@ impl SessionVerdict {
     }
 }
 
-/// Whether a log's frame verdicts count. New logs carry `frame_valid`. A log from before it carried only `valid_for_budgets`,
-/// where an idle GPU start voided the whole session: it is re-read as frame-valid when every warning is that idle-start warning
-/// (the warnings list every cause, so nothing else voided it). A log with neither field is not valid.
+/// Whether a log has a `warnings` list and a recorded verdict field (`valid_for_budgets` or `frame_valid`): the inputs to judge it again.
+/// A log that records the session as not valid without any reason in its warnings cannot be judged again (nothing says why): its
+/// recorded flags stand.
+fn has_verdict_inputs(root: &Json) -> bool {
+    let unexplained =
+        ["valid_for_budgets", "frame_valid", "gpu_session_valid"].iter().any(|k| matches!(root.get(k), Some(Json::Bool(false))))
+            && log_warnings(root).is_empty();
+    matches!(root.get("warnings"), Some(Json::Arr(_)))
+        && (root.get("frame_valid").is_some() || root.get("valid_for_budgets").is_some())
+        && !unexplained
+}
+
+/// The warnings of a log judged again with today's rules (accept derives every verdict from the logged data, not from the flags
+/// written at run time). The throttling reasons are rebuilt from the logged throttle masks of every run and the noise reasons from
+/// the logged run medians of every view with at least two runs, both through [`gate::validity`], the function the harness used; every
+/// other cause (smoke, adapter, power scheme, source, owner override, idle start) stays as recorded. A kind whose inputs are not
+/// all in the log keeps its recorded reasons. The second value lists what was kept for that reason.
+fn recomputed_warnings(root: &Json) -> (Vec<String>, Vec<String>) {
+    let recorded = log_warnings(root);
+    let runs: Vec<&Json> = match root.get("runs") {
+        Some(Json::Arr(a)) => a.iter().collect(),
+        _ => Vec::new(),
+    };
+    let path_of = |r: &Json| match r.get("path") {
+        Some(Json::Str(s)) => s.clone(),
+        _ => String::new(),
+    };
+    let mut kept = Vec::new();
+    // Throttling: every run needs both clock samples with a throttle mask.
+    let mask = |r: &Json, k: &str| match r.get(k).and_then(|c| c.get("throttle_reasons")) {
+        Some(Json::Str(s)) => Some(s.clone()),
+        _ => None,
+    };
+    let throttle_complete =
+        !runs.is_empty() && runs.iter().all(|r| mask(r, "clocks_before").is_some() && mask(r, "clocks_after").is_some());
+    let throttled: Vec<String> = runs
+        .iter()
+        .filter(|r| ["clocks_before", "clocks_after"].iter().any(|k| mask(r, k).is_some_and(|m| gate::is_throttling(&m))))
+        .map(|r| path_of(r))
+        .collect();
+    // Noise: the views with two or more runs (the streaming scenes are not noise-checked by the harness).
+    let mut by_path: Vec<(String, Vec<f64>)> = Vec::new();
+    for r in &runs {
+        let (p, m) = (path_of(r), r.get("median_ms").and_then(Json::num));
+        let (Some(m), true) = (m, takes_gpu_rows(&p)) else { continue };
+        match by_path.iter_mut().find(|(q, _)| *q == p) {
+            Some((_, v)) => v.push(m),
+            None => by_path.push((p, vec![m])),
+        }
+    }
+    by_path.retain(|(_, v)| v.len() >= 2);
+    let noisy: Vec<(String, f64)> = by_path
+        .iter()
+        .filter(|(_, v)| gate::noise_needs_retry(v))
+        .map(|(p, v)| (p.clone(), crate::run_to_run_noise(v).unwrap_or(f64::NAN)))
+        .collect();
+    let fresh = gate::validity(if throttle_complete { &throttled } else { &[] }, &noisy).reasons;
+    let mut out = Vec::new();
+    for w in &recorded {
+        let is_throttle = w.starts_with(gate::THROTTLE_REASON_PREFIX);
+        let is_noise = w.starts_with(gate::NOISE_REASON_PREFIX);
+        let noise_path = is_noise.then(|| w.split(" on '").nth(1).and_then(|s| s.split('\'').next()).unwrap_or("").to_string());
+        let rederived = (is_throttle && throttle_complete) || noise_path.as_ref().is_some_and(|p| by_path.iter().any(|(q, _)| q == p));
+        if rederived {
+            continue;
+        }
+        if is_throttle || is_noise {
+            kept.push(format!("kept as recorded (inputs not in the log): {w}"));
+        }
+        out.push(w.clone());
+    }
+    out.extend(fresh);
+    (out, kept)
+}
+
+fn recomputed_or_recorded(root: &Json) -> Vec<String> {
+    if has_verdict_inputs(root) {
+        recomputed_warnings(root).0
+    } else {
+        log_warnings(root)
+    }
+}
+
+/// Where the session verdict derived from the logged data differs from the one recorded at run time, and which reasons stayed as
+/// recorded for want of inputs. One line each; empty when they agree.
+pub(crate) fn session_verdict_notes(root: &Json) -> Vec<String> {
+    if !has_verdict_inputs(root) {
+        return vec![
+            "no `warnings` list, no verdict field or no reason for a recorded invalid session: the recorded flags are used as written"
+                .to_string(),
+        ];
+    }
+    let (now, kept) = recomputed_warnings(root);
+    let recorded = log_warnings(root);
+    let mut notes: Vec<String> = Vec::new();
+    for w in recorded.iter().filter(|w| !now.contains(w)) {
+        notes.push(format!("recorded at run time, not true when judged again: {w}"));
+    }
+    for w in now.iter().filter(|w| !recorded.contains(w)) {
+        notes.push(format!("not recorded at run time, true when judged again: {w}"));
+    }
+    let flag = |k: &str| match root.get(k) {
+        Some(Json::Bool(b)) => Some(*b),
+        _ => None,
+    };
+    let (frame, gpu) = (log_frame_valid(root), log_gpu_session_valid(root));
+    if let Some(r) = flag("frame_valid").filter(|r| *r != frame) {
+        notes.push(format!("frame_valid: recorded {r}, judged again {frame}"));
+    }
+    if let Some(r) = flag("gpu_session_valid").filter(|r| *r != gpu) {
+        notes.push(format!("gpu_session_valid: recorded {r}, judged again {gpu}"));
+    }
+    notes.extend(kept);
+    notes
+}
+
+/// The GPU validity of a view from the logged clock samples of its runs (`clocks_before` and `clocks_after`), judged again by
+/// [`clock::gpu_validity`] against today's floor. `None` when a run has no readable sample: the recorded verdict is used then.
+pub(crate) fn view_gpu_validity_from_log(runs: &[&Json]) -> Option<clock::GpuValidity> {
+    let point = |r: &Json, k: &str| -> Option<clock::ClockPoint> {
+        let c = r.get(k)?;
+        let pstate = match c.get("pstate") {
+            Some(Json::Str(s)) => s.clone(),
+            _ => return None,
+        };
+        Some(clock::ClockPoint { pstate, mhz: c.get("graphics_mhz")?.num()? })
+    };
+    if runs.is_empty() {
+        return None;
+    }
+    let mut points = Vec::new();
+    for r in runs {
+        for k in ["clocks_before", "clocks_after"] {
+            points.push(Some(point(r, k)?));
+        }
+    }
+    Some(clock::gpu_validity(&points))
+}
+
+/// Whether a log's frame verdicts count, derived from its warnings judged again ([`recomputed_warnings`]): none but the idle-start
+/// warning. A log without `warnings` falls back to its recorded flags: `frame_valid`, else `valid_for_budgets`, else (an old log that
+/// voided the whole session for an idle start) every warning being that one. A log with no verdict field is not valid.
 pub(crate) fn log_frame_valid(root: &Json) -> bool {
+    if has_verdict_inputs(root) {
+        return recomputed_warnings(root).0.iter().all(|w| is_low_start_warning(w));
+    }
     if let Some(Json::Bool(b)) = root.get("frame_valid") {
         return *b;
     }
@@ -191,22 +333,26 @@ pub(crate) fn log_frame_valid(root: &Json) -> bool {
     !ws.is_empty() && ws.iter().all(|w| is_low_start_warning(w)) && root.get("valid_for_budgets").is_some()
 }
 
-/// Whether a log's session is fit for GPU verdicts (old logs: exactly when `valid_for_budgets` is true).
+/// Whether a log's session is fit for GPU verdicts: no warning left after judging them again (without `warnings`: the recorded
+/// `gpu_session_valid`, else exactly when `valid_for_budgets` is true).
 pub(crate) fn log_gpu_session_valid(root: &Json) -> bool {
+    if has_verdict_inputs(root) {
+        return recomputed_warnings(root).0.is_empty();
+    }
     match root.get("gpu_session_valid") {
         Some(Json::Bool(b)) => *b,
         _ => matches!(root.get("valid_for_budgets"), Some(Json::Bool(true))),
     }
 }
 
-/// The warnings of a log that void its frame verdicts (all but the idle-start warning).
+/// The warnings of a log, judged again, that void its frame verdicts (all but the idle-start warning).
 pub(crate) fn log_frame_void_reasons(root: &Json) -> Vec<String> {
-    log_warnings(root).into_iter().filter(|w| !is_low_start_warning(w)).collect()
+    recomputed_or_recorded(root).into_iter().filter(|w| !is_low_start_warning(w)).collect()
 }
 
-/// The warnings of a log that void GPU verdicts only.
+/// The warnings of a log, judged again, that void GPU verdicts only.
 pub(crate) fn log_gpu_only_reasons(root: &Json) -> Vec<String> {
-    log_warnings(root).into_iter().filter(|w| is_low_start_warning(w)).collect()
+    recomputed_or_recorded(root).into_iter().filter(|w| is_low_start_warning(w)).collect()
 }
 
 fn log_warnings(root: &Json) -> Vec<String> {
@@ -343,5 +489,96 @@ mod tests {
         assert!(!log_frame_valid(&j) && log_frame_void_reasons(&j).len() == 1);
         // No fields at all: not valid.
         assert!(!log_frame_valid(&parse(b"{\"runs\":[]}").unwrap()));
+    }
+
+    /// A log with the given recorded flags and warnings and one run per `(path, median_ms, before_mhz, after_mhz, throttle mask)`.
+    fn log_of(frame_valid: bool, warnings: &[&str], runs: &[(&str, f64, f64, Option<f64>, &str)]) -> Json {
+        let sample = |mhz: f64, mask: &str| {
+            format!("{{\"graphics_mhz\":{mhz},\"pstate\":\"P0\",\"temperature_c\":60,\"power_w\":80,\"throttle_reasons\":\"{mask}\"}}")
+        };
+        let runs: Vec<String> = runs
+            .iter()
+            .map(|(p, m, b, a, mask)| {
+                let after = a.map_or("null".to_string(), |a| sample(a, mask));
+                format!("{{\"path\":\"{p}\",\"median_ms\":{m},\"clocks_before\":{},\"clocks_after\":{after}}}", sample(*b, mask))
+            })
+            .collect();
+        let warnings: Vec<String> = warnings.iter().map(|w| format!("\"{w}\"")).collect();
+        let text = format!(
+            "{{\"valid_for_budgets\":{frame_valid},\"frame_valid\":{frame_valid},\"gpu_session_valid\":{frame_valid},\"warnings\":[{}],\"runs\":[{}]}}",
+            warnings.join(","),
+            runs.join(",")
+        );
+        parse(text.as_bytes()).unwrap()
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn accept_judges_the_noise_again_from_the_logged_run_medians_and_says_where_it_differs() {
+        // Window 9's orbit: invalid at run time (0.149 on a 1.5 ms frame), valid under ADR 0059's floor of 0.5 ms.
+        let w = "run-to-run noise 0.149 on 'lit/orbit' is above 0.1 after one retry";
+        let orbit: Vec<_> = [1.708, 1.557, 1.475].iter().map(|m| ("lit/orbit", *m, 1500.0, Some(1500.0), "0x4")).collect();
+        let j = log_of(false, &[w], &orbit);
+        assert!(log_frame_valid(&j) && log_gpu_session_valid(&j) && log_frame_void_reasons(&j).is_empty());
+        let notes = session_verdict_notes(&j);
+        assert!(notes.iter().any(|n| n.contains("not true when judged again") && n.contains("lit/orbit")), "{notes:?}");
+        assert!(notes.iter().any(|n| n.starts_with("frame_valid: recorded false, judged again true")), "{notes:?}");
+        // A 10 ms frame with a 1.5 ms spread that the run did not flag is invalid when judged again, with the harness's own text.
+        let big: Vec<_> = [10.0, 11.5, 10.2].iter().map(|m| ("lit/aerial-20km", *m, 1500.0, Some(1500.0), "0x4")).collect();
+        let j = log_of(true, &[], &big);
+        assert!(!log_frame_valid(&j) && !log_gpu_session_valid(&j));
+        assert_eq!(log_frame_void_reasons(&j), gate::validity(&[], &[("lit/aerial-20km".into(), 1.5 / 10.2)]).reasons);
+        // A view with a single run (the flights) has no noise; the streaming scenes are not noise-checked.
+        let one = [("lit/coast-glide", 13.2, 1500.0, Some(1500.0), "0x4")];
+        assert!(log_frame_valid(&log_of(true, &[], &one)));
+        let stream: Vec<_> = [10.0, 30.0, 10.0].iter().map(|m| ("stream/dive", *m, 1500.0, Some(1500.0), "0x0")).collect();
+        assert!(log_frame_valid(&log_of(true, &[], &stream)));
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn accept_judges_throttling_and_the_clock_floor_again_from_the_logged_samples() {
+        // A thermal mask in a sample the run did not flag voids the session; the power cap alone does not.
+        let hot = [("lit/coast-2km", 4.7, 1500.0, Some(1500.0), "0x8"), ("lit/coast-2km", 4.7, 1500.0, Some(1500.0), "0x4")];
+        let j = log_of(true, &[], &hot);
+        assert!(!log_frame_valid(&j) && log_frame_void_reasons(&j).iter().all(|r| r.starts_with(gate::THROTTLE_REASON_PREFIX)));
+        let capped = [("lit/coast-2km", 4.7, 1500.0, Some(1500.0), "0x4")];
+        assert!(log_frame_valid(&log_of(true, &[], &capped)));
+        // A throttling reason the run recorded and the samples do not support goes away.
+        let j = log_of(false, &["GPU throttling reported during 'lit/coast-2km'"], &capped);
+        assert!(log_frame_valid(&j) && session_verdict_notes(&j).iter().any(|n| n.contains("not true when judged again")));
+        // The clock floor is applied to the samples, whatever the run recorded: 1,395 MHz is below 1,400, 1,400 is at it.
+        let view = |after: f64| log_of(true, &[], &[("lit/coast-2km", 4.7, 1500.0, Some(after), "0x4")]);
+        let (below, at) = (view(1395.0), view(1400.0));
+        fn runs_of(j: &Json) -> Vec<&Json> {
+            match j.get("runs") {
+                Some(Json::Arr(a)) => a.iter().collect(),
+                _ => vec![],
+            }
+        }
+        assert!(matches!(view_gpu_validity_from_log(&runs_of(&below)), Some(clock::GpuValidity::Below(..))));
+        assert!(matches!(view_gpu_validity_from_log(&runs_of(&at)), Some(clock::GpuValidity::Valid(_))));
+    }
+
+    // spec: TEST-012
+    #[test]
+    fn a_log_missing_the_inputs_keeps_the_recorded_verdict_and_says_so() {
+        // No `after` sample: the throttling and the clock cannot be judged again; the recorded throttling reason stays.
+        let w = "GPU throttling reported during 'lit/coast-2km'";
+        let j = log_of(false, &[w], &[("lit/coast-2km", 4.7, 1500.0, None, "0x4")]);
+        assert!(!log_frame_valid(&j) && log_frame_void_reasons(&j) == vec![w.to_string()]);
+        assert!(session_verdict_notes(&j).iter().any(|n| n.starts_with("kept as recorded (inputs not in the log)")));
+        let runs = match j.get("runs") {
+            Some(Json::Arr(a)) => a.iter().collect::<Vec<_>>(),
+            _ => vec![],
+        };
+        assert!(view_gpu_validity_from_log(&runs).is_none());
+        // A recorded noise reason of a view whose runs are not in the log stays as well.
+        let n = "run-to-run noise 0.250 on 'terrain/x' is above 0.1 and 0.5 ms after one retry";
+        let j = log_of(false, &[n], &[]);
+        assert!(!log_frame_valid(&j));
+        // No warnings list: the recorded flags are used as written, and the notes say so.
+        let j = parse(b"{\"valid_for_budgets\":true,\"runs\":[]}").unwrap();
+        assert!(log_frame_valid(&j) && session_verdict_notes(&j)[0].contains("recorded flags are used as written"));
     }
 }

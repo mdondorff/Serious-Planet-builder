@@ -211,13 +211,18 @@ pub fn noise_needs_retry(run_medians: &[f64]) -> bool {
 pub fn validity(throttled: &[String], noisy: &[(String, f64)]) -> Validity {
     let mut reasons = Vec::new();
     for t in throttled {
-        reasons.push(format!("GPU throttling reported during '{t}'"));
+        reasons.push(format!("{THROTTLE_REASON_PREFIX}{t}'"));
     }
     for (name, n) in noisy {
-        reasons.push(format!("run-to-run noise {n:.3} on '{name}' is above {MAX_NOISE} and {NOISE_FLOOR_FRAME_MS} ms after one retry"));
+        reasons.push(format!("{NOISE_REASON_PREFIX}{n:.3} on '{name}' is above {MAX_NOISE} and {NOISE_FLOOR_FRAME_MS} ms after one retry"));
     }
     Validity { reasons }
 }
+
+/// The start of a throttling reason of [`validity`] (the logs carry these texts; the readers recognise them by it).
+pub const THROTTLE_REASON_PREFIX: &str = "GPU throttling reported during '";
+/// The start of a noise reason of [`validity`].
+pub const NOISE_REASON_PREFIX: &str = "run-to-run noise ";
 
 // ---- platform queries (thin; the rules above take their output) ----
 
