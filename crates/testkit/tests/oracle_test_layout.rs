@@ -1,0 +1,79 @@
+//! BUILD-015 (tier B): a crate that builds one test binary per tier loses no test. The test names `cargo nextest list` reports for its
+//! `it`, `oracle_all` and `gpu_all` binaries are exactly the `#[test]` functions of its test files (a test marked `#[ignore]` is not
+//! listed), each as `<file>::<function>`.
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
+}
+
+/// `<file>::<function>` of every `#[test]` of the test files of `krate` that is not `#[ignore]`d.
+fn declared_tests(krate: &Path) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let aggregators = ["it", "oracle_all", "gpu_all"];
+    for entry in std::fs::read_dir(krate.join("tests")).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Some(stem) = name.strip_suffix(".rs").filter(|s| !aggregators.contains(s)) else { continue };
+        let text = std::fs::read_to_string(entry.path()).unwrap();
+        let (mut pending, mut ignored) = (false, false);
+        for line in text.lines().map(str::trim) {
+            if line == "#[test]" {
+                (pending, ignored) = (true, false);
+            } else if pending && line.starts_with("#[") {
+                ignored |= line.starts_with("#[ignore");
+            } else if pending && !line.starts_with("//") {
+                if let Some(rest) = line.strip_prefix("fn ") {
+                    if !ignored {
+                        out.insert(format!("{stem}::{}", rest.split('(').next().unwrap().trim()));
+                    }
+                }
+                pending = false;
+            }
+        }
+    }
+    out
+}
+
+/// The tests `cargo nextest list` reports for the per-tier binaries of package `pkg`, as `<file>::<function>`.
+fn listed_tests(pkg: &str) -> BTreeSet<String> {
+    let out = Command::new("cargo")
+        .args(["nextest", "list", "-p", pkg, "--message-format", "oneline"])
+        .current_dir(repo_root())
+        .output()
+        .expect("cargo nextest list");
+    assert!(out.status.success(), "cargo nextest list -p {pkg}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let (binary, test) = l.split_once(' ')?;
+            let (_, bin) = binary.split_once("::")?;
+            ["it", "oracle_all", "gpu_all"].contains(&bin).then(|| test.trim().to_string())
+        })
+        .collect()
+}
+
+// spec: BUILD-015
+#[test]
+fn a_crate_with_one_test_binary_per_tier_lists_exactly_the_test_functions_of_its_test_files() {
+    let mut checked = Vec::new();
+    for krate in std::fs::read_dir(repo_root().join("crates")).unwrap().flatten() {
+        let manifest = std::fs::read_to_string(krate.path().join("Cargo.toml")).unwrap_or_default();
+        if !manifest.contains("autotests = false") {
+            continue;
+        }
+        let pkg = manifest.lines().find_map(|l| l.strip_prefix("name = \"")).and_then(|r| r.split('"').next()).unwrap().to_string();
+        let (declared, listed) = (declared_tests(&krate.path()), listed_tests(&pkg));
+        let missing: Vec<_> = declared.difference(&listed).collect();
+        let extra: Vec<_> = listed.difference(&declared).collect();
+        assert!(
+            missing.is_empty() && extra.is_empty(),
+            "{pkg}: not listed by nextest {missing:?}; listed but not a #[test] of a test file {extra:?}"
+        );
+        assert!(declared.len() >= 10, "{pkg}: only {} tests found, the scan is wrong", declared.len());
+        checked.push(pkg);
+    }
+    assert!(checked.iter().any(|p| p == "planet") && checked.iter().any(|p| p == "planet-generators"), "{checked:?}");
+}

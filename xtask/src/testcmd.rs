@@ -1019,6 +1019,39 @@ mod tests {
         assert_eq!(JUNIT_REAL, "target/nextest/real-gpu/junit.xml");
     }
 
+    /// The files an aggregator declares: each `#[path = "<file>.rs"]` line must be followed by `mod <file>;`; anything else that is
+    /// code (a comment line is not) is an error, so a commented-out or renamed module cannot pass for a declared one.
+    fn aggregator_modules(text: &str) -> Result<Vec<String>, String> {
+        let mut out = Vec::new();
+        let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("//"));
+        while let Some(line) = lines.next() {
+            let file =
+                line.strip_prefix("#[path = \"").and_then(|r| r.strip_suffix(".rs\"]")).ok_or(format!("unexpected line `{line}`"))?;
+            let next = lines.next().unwrap_or_default();
+            if next != format!("mod {file};") {
+                return Err(format!("`#[path = \"{file}.rs\"]` must be followed by `mod {file};`, not `{next}`"));
+            }
+            out.push(file.to_string());
+        }
+        Ok(out)
+    }
+
+    // spec: BUILD-015
+    #[test]
+    fn an_aggregator_declares_each_file_as_a_module_and_a_comment_or_a_mismatch_is_not_a_declaration() {
+        let ok = "#[path = \"a.rs\"]\nmod a;\n// #[path = \"gone.rs\"]\n// mod gone;\n#[path = \"b.rs\"]\nmod b;\n";
+        assert_eq!(aggregator_modules(ok).unwrap(), ["a", "b"]);
+        assert!(aggregator_modules("#[path = \"a.rs\"]\nmod b;\n").unwrap_err().contains("must be followed by `mod a;`"));
+        assert!(aggregator_modules("#[path = \"a.rs\"]\n").is_err(), "a path without its module");
+        assert!(aggregator_modules("mod a;\n").unwrap_err().contains("unexpected line"));
+        assert_eq!(aggregator_modules("").unwrap(), Vec::<String>::new());
+        assert_eq!(
+            aggregator_modules("#[path = \"a.rs\"]\nmod a;\r\n#[path = \"a.rs\"]\r\nmod a;\r\n").unwrap(),
+            ["a", "a"],
+            "CRLF is read, a duplicate is kept so the comparison with the files fails"
+        );
+    }
+
     // spec: BUILD-015
     #[test]
     fn every_test_file_of_a_per_tier_crate_is_a_module_of_the_aggregator_of_its_tier_and_of_no_other() {
@@ -1032,6 +1065,9 @@ mod tests {
             converted.push(krate.file_name().to_string_lossy().to_string());
             let aggregators = ["it", "oracle_all", "gpu_all"];
             let text = |n: &str| std::fs::read_to_string(krate.path().join("tests").join(format!("{n}.rs"))).unwrap_or_default();
+            // The test files of each tier (by the tier-prefix rule of BUILD-003), and the modules each aggregator declares: the two
+            // lists must be equal, so a file is declared once, in its own tier's aggregator, and every declared file exists.
+            let mut files: std::collections::BTreeMap<&str, Vec<String>> = std::collections::BTreeMap::new();
             for entry in std::fs::read_dir(krate.path().join("tests")).unwrap().flatten() {
                 let name = entry.file_name().to_string_lossy().to_string();
                 let Some(stem) = name.strip_suffix(".rs").filter(|s| !aggregators.contains(s)) else { continue };
@@ -1042,15 +1078,20 @@ mod tests {
                 } else {
                     "it"
                 };
-                for agg in aggregators {
-                    let included = text(agg).contains(&format!("#[path = \"{stem}.rs\"]\nmod {stem};"));
-                    assert_eq!(
-                        included,
-                        agg == tier,
-                        "{}: tests/{name} must be a module of {tier}.rs and of no other aggregator",
-                        krate.file_name().to_string_lossy()
-                    );
-                }
+                files.entry(tier).or_default().push(stem.to_string());
+            }
+            for agg in aggregators {
+                let mut expected = files.remove(agg).unwrap_or_default();
+                expected.sort();
+                let mut declared = aggregator_modules(&text(agg))
+                    .unwrap_or_else(|e| panic!("{}: tests/{agg}.rs: {e}", krate.file_name().to_string_lossy()));
+                declared.sort();
+                assert_eq!(
+                    declared,
+                    expected,
+                    "{}: tests/{agg}.rs must declare each test file of its tier once, as `#[path = \"<file>.rs\"] mod <file>;`",
+                    krate.file_name().to_string_lossy()
+                );
             }
             // Each aggregator that exists is declared as a [[test]], and the crate's tests are the declared ones.
             for agg in aggregators.iter().filter(|a| krate.path().join("tests").join(format!("{a}.rs")).is_file()) {

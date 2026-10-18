@@ -12,8 +12,12 @@ Source: SPIKE-15 (step 3), BUILD-003, BUILD-011, owner and opus-planner (2026-10
 - **THEN** tier A is the `it` binary, tier B `oracle_all` and tier C `gpu_all`, no test is lost (each crate's test count is the number of its `#[test]` functions) and the tier-A filter `not binary(/^gpu_/) and not binary(/^oracle_/)` still matches `it`
 
 #### Scenario: Every test file is in its aggregator
-- **WHEN** a crate with `autotests = false` has a test file that no aggregator names, or names in the aggregator of another tier
-- **THEN** the xtask guard fails naming the file and the aggregator it belongs to
+- **WHEN** a crate with `autotests = false` has a test file that no aggregator declares, declares twice, declares in the aggregator of another tier or only in a comment, or an aggregator declares a file that does not exist
+- **THEN** the xtask guard fails naming the crate and the aggregator
+
+#### Scenario: No test is lost
+- **WHEN** `cargo xtask test` (tier B, `oracle_test_layout` of `testkit`) compares the tests `cargo nextest list` reports for the `it`, `oracle_all` and `gpu_all` binaries of a converted crate with the `#[test]` functions of its test files (an `#[ignore]`d one is not listed)
+- **THEN** the two sets are equal as `<file>::<function>`, and a test file left out of an aggregator fails the comparison naming the missing tests
 
 #### Scenario: The heavy GPU tests keep their group
 - **WHEN** `test gpu --real` runs under the `real-gpu` profile
