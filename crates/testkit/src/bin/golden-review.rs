@@ -1,5 +1,6 @@
-//! `cargo xtask golden-review`: evidence and verdicts for candidate golden images under the owner's policy (ADR 0017) and,
-//! for the first goldens of M5 classes, ADR 0037's conditions.
+//! `cargo xtask golden-review`: evidence and verdicts for candidate golden images under the owner's policy (ADR 0017 as amended by
+//! ADR 0061: every adapter's candidate is judged against its own golden, the first golden of any class is the owner's) and the look
+//! path of ADR 0037 point 2.
 //!
 //! Usage: golden-review [--proposal <proposal.md>] [--extra <dir with <adapter>/<name>.png>]... [--tests <junit.xml>]... [--apply]
 //! Reads candidates from `target/review/candidates/<adapter>/` and every `--extra` directory, compares each with
@@ -7,14 +8,13 @@
 //! `target/review/golden-review/`, prints one verdict per candidate and, with `--apply`, copies only the auto verdicts
 //! into `tests/goldens/`. A candidate whose `driver.txt` differs from the recorded one always escalates. `--tests` names the
 //! nextest JUnit reports of this run (`target/nextest/default/junit.xml`, `target/nextest/real-gpu/junit.xml` for a `--real` run, copied after each `cargo xtask test` run): the
-//! bound tests that the proposal declares under `ADR 0037 conditions:` must be green in them. An adapter takes part in the
-//! run when it delivered candidates; the adapters that did not are printed and never counted as agreeing. Exits 0 when
+//! report counts their testcases as the evidence of the bound tests. An adapter takes part in the run when it delivered candidates;
+//! the adapters that did not are printed (the look path needs every adapter with goldens to take part). Exits 0 when
 //! nothing escalates and 3 otherwise (`cargo xtask golden-review` then reports a failure); 2 on bad arguments.
 
 use planet_testkit::review::{
-    classify, classify_look_change, classify_m5_first, debug_view_agreement, debug_views_unchanged, declared_goldens, driver_gate,
-    look_declarations, look_diff_ok, m5_declarations, parse_classes, view_diff, Change, GoldenClass, LookEvidence, M5Evidence, Observation,
-    TestOutcomes, Verdict, ViewDiff, ViewState,
+    classify, classify_look_change, debug_views_unchanged, declared_goldens, driver_gate, look_declarations, look_diff_ok, parse_classes,
+    Change, GoldenClass, LookEvidence, Observation, TestOutcomes, Verdict,
 };
 use planet_testkit::{read_png, repo_root, write_png, Image};
 use std::collections::{BTreeMap, BTreeSet};
@@ -165,11 +165,7 @@ struct Run<'a> {
     adapters: &'a [String],
     candidates: &'a Candidates,
     classes: &'a BTreeMap<String, GoldenClass>,
-    declared: &'a BTreeSet<String>,
     ran: &'a BTreeSet<String>,
-    outcomes: &'a TestOutcomes,
-    tests_given: bool,
-    m5: &'a BTreeMap<String, planet_testkit::review::M5Declaration>,
 }
 
 impl Run<'_> {
@@ -177,7 +173,7 @@ impl Run<'_> {
         std::fs::read_to_string(p).ok()
     }
 
-    /// The driver gate (ADR 0017, not relaxed by ADR 0037) for the candidate of `name` on `adapter`.
+    /// The driver gate (ADR 0017, not relaxed by ADR 0061) for the candidate of `name` on `adapter`.
     fn gate(&self, adapter: &str, name: &str) -> Option<String> {
         let src = self.candidates.get(&(adapter.to_string(), name.to_string()))?;
         let recorded = self.read(self.goldens.join(adapter).join("driver.txt"));
@@ -185,64 +181,9 @@ impl Run<'_> {
         driver_gate(adapter, recorded.as_deref(), cand.as_deref())
     }
 
-    /// ADR 0037 point 1(b) for the debug view `view`, over the adapters that took part in this run.
-    fn view_agreement(&self, view: &str) -> Result<String, String> {
-        let (seen, _) = observe(self.goldens, self.adapters, self.candidates, view);
-        let class = self.classes.get(view).copied();
-        let mut states: BTreeMap<String, ViewState> = BTreeMap::new();
-        for adapter in self.ran {
-            let state = match seen.get(adapter) {
-                None => ViewState::Missing,
-                Some(Observation::Unchanged) => ViewState::Matches,
-                Some(_) if self.gate(adapter, view).is_some() => ViewState::Differs { auto: false },
-                Some(Observation::NoGolden) => ViewState::New,
-                Some(Observation::SizeChanged) => ViewState::Differs { auto: false },
-                Some(Observation::Changed(_)) => {
-                    let auto = !matches!(classify(adapter, view, &seen, class, self.declared.contains(view)), Verdict::Escalate(_));
-                    ViewState::Differs { auto }
-                }
-            };
-            states.insert(adapter.clone(), state);
-        }
-        // New candidates are compared with one another: compared pairwise under ADR 0052 (at most 64 px beyond delta 1, any number at delta 1).
-        let news: Vec<&String> = states.iter().filter(|(_, s)| **s == ViewState::New).map(|(a, _)| a).collect();
-        let mut pairs = vec![];
-        for (i, a) in news.iter().enumerate() {
-            for b in &news[i + 1..] {
-                let (ia, ib) = (
-                    read_png(&self.candidates[&((*a).clone(), view.to_string())]).expect("candidate"),
-                    read_png(&self.candidates[&((*b).clone(), view.to_string())]).expect("candidate"),
-                );
-                let c = if (ia.width, ia.height) == (ib.width, ib.height) {
-                    view_diff(&ia, &ib)
-                } else {
-                    ViewDiff { at_rounding: usize::MAX, beyond_rounding: usize::MAX, max_delta: u8::MAX }
-                };
-                pairs.push(((*a).clone(), (*b).clone(), c));
-            }
-        }
-        debug_view_agreement(view, &states, &pairs, &self.not_run())
-    }
-
     /// Adapters that have goldens but delivered no candidate in this run.
     fn not_run(&self) -> Vec<String> {
         self.adapters.iter().filter(|a| !self.ran.contains(*a)).cloned().collect()
-    }
-
-    fn evidence(&self, name: &str) -> M5Evidence {
-        let declaration = self.m5.get(name).cloned();
-        let (bound_tests, debug_view) = match &declaration {
-            None => (Err("no declaration".to_string()), Err("no declaration".to_string())),
-            Some(d) => (
-                if self.tests_given {
-                    self.outcomes.all_green(&d.bound_tests)
-                } else {
-                    Err("no --tests report given, so no bound test is known to have run".to_string())
-                },
-                self.view_agreement(&d.debug_view),
-            ),
-        };
-        M5Evidence { declaration, bound_tests, debug_view }
     }
 }
 
@@ -282,7 +223,6 @@ fn main() {
         .map(|p| std::fs::read_to_string(p).unwrap_or_else(|e| panic!("reading {}: {e}", p.display())))
         .unwrap_or_default();
     let declared: BTreeSet<String> = declared_goldens(&proposal_text).into_iter().collect();
-    let m5 = m5_declarations(&proposal_text);
     let mut outcomes = TestOutcomes::default();
     for t in &tests {
         let p = root.join(t);
@@ -320,26 +260,16 @@ fn main() {
         .into_iter()
         .collect();
     let ran: BTreeSet<String> = candidates.keys().map(|(a, _)| a.clone()).collect();
-    let run = Run {
-        goldens: &goldens,
-        adapters: &adapters,
-        candidates: &candidates,
-        classes: &classes,
-        declared: &declared,
-        ran: &ran,
-        outcomes: &outcomes,
-        tests_given: !tests.is_empty(),
-        m5: &m5,
-    };
+    let run = Run { goldens: &goldens, adapters: &adapters, candidates: &candidates, classes: &classes, ran: &ran };
 
-    // Which adapters took part: a missing one is said so and never counts as agreeing (ADR 0037 (b)).
-    let mut report = String::from("# Golden review (ADR 0017, ADR 0037 for first goldens of M5 classes)\n\n");
+    // Which adapters took part: a missing one is said so (the look path needs every adapter with goldens).
+    let mut report = String::from("# Golden review (ADR 0017, ADR 0061; ADR 0037 point 2 for look changes)\n\n");
     let took_part = format!("Adapters that took part (delivered candidates): {}\n", ran.iter().cloned().collect::<Vec<_>>().join(", "));
     let not_run = run.not_run();
     let missing = if not_run.is_empty() {
         "All adapters with goldens took part.\n".to_string()
     } else {
-        format!("NOT RUN in this review (no candidates; never counted as agreeing): {}\n", not_run.join(", "))
+        format!("NOT RUN in this review (no candidates): {}\n", not_run.join(", "))
     };
     print!("{took_part}{missing}");
     report.push_str(&format!(
@@ -352,34 +282,17 @@ fn main() {
     let look = (!look_declarations(&proposal_text).is_empty()).then(|| look_evidence(&root, &run, &proposal_text));
     let mut escalated = 0;
     let mut applied = vec![];
-    let mut conditions = String::new();
     for name in &names {
         let (seen, images) = observe(&goldens, &adapters, &candidates, name);
         let class = classes.get(name).copied();
-        // ADR 0037 evidence only for a first golden of an M5 class (it is computed once per golden).
-        let m5_evidence = class.filter(|c| c.is_m5()).map(|_| run.evidence(name));
-        if let Some(e) = &m5_evidence {
-            conditions.push_str(&format!(
-                "- **{name}**: bound tests: {}; {}\n",
-                match &e.bound_tests {
-                    Ok(()) => format!("green in this run ({})", e.declaration.as_ref().map_or(String::new(), |d| d.bound_tests.join(", "))),
-                    Err(r) => format!("NOT SATISFIED: {r}"),
-                },
-                match &e.debug_view {
-                    Ok(l) => l.clone(),
-                    Err(r) => format!("debug view NOT SATISFIED: {r}"),
-                }
-            ));
-        }
         for adapter in adapters.iter().filter(|a| candidates.contains_key(&((*a).clone(), name.clone()))) {
             let src = &candidates[&(adapter.clone(), name.clone())];
             let is_declared = declared.contains(name);
             let verdict = match run.gate(adapter, name) {
                 Some(reason) => Verdict::Escalate(reason),
-                None => m5_evidence
+                None => look
                     .as_ref()
-                    .and_then(|e| classify_m5_first(adapter, name, &seen, class, is_declared, e))
-                    .or_else(|| look.as_ref().and_then(|l| classify_look_change(adapter, name, &seen, class, is_declared, l)))
+                    .and_then(|l| classify_look_change(adapter, name, &seen, class, is_declared, l))
                     .unwrap_or_else(|| classify(adapter, name, &seen, class, is_declared)),
             };
             let (px, delta) = match seen.get(adapter) {
@@ -393,7 +306,6 @@ fn main() {
             let v = match &verdict {
                 Verdict::AutoRounding => "AUTO-R".to_string(),
                 Verdict::AutoExplained => "AUTO-E".to_string(),
-                Verdict::AutoM5(e) => format!("AUTO-M5 {e}"),
                 Verdict::AutoLook(e) => format!("AUTO-L {e}"),
                 Verdict::Escalate(r) => format!("ESCALATE {r}"),
             };
@@ -412,10 +324,6 @@ fn main() {
                 applied.push(format!("{adapter}/{name}"));
             }
         }
-    }
-    if !conditions.is_empty() {
-        report.push_str(&format!("\n## ADR 0037 conditions (first goldens of M5 classes)\n\n{conditions}"));
-        print!("ADR 0037 conditions:\n{conditions}");
     }
     report.push_str(&format!("\nTriptychs (golden | candidate | diff): `{}`\n", out.display()));
     std::fs::write(out.join("report.md"), &report).expect("report");

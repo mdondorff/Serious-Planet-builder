@@ -69,7 +69,7 @@ fn manual_criteria(milestone: &str) -> &'static [&'static str] {
         "M5" => &[
             "The owner's single look review of the contact sheet, the six-frame strips (`target/review/water-inspection/flight_*_strip.png`) and the 1440p flight videos (`cargo xtask capture flights --store <store>`, shore_filter 0 and 1) (ADR 0037, milestone gate)",
             "CI green on Windows (WARP) and Linux (lavapipe): needs a pushed branch",
-            "Candidate goldens blessed under policy or by the owner (`golden-review`, ADR 0037, ADR 0052)",
+            "Candidate goldens blessed under policy or by the owner (`golden-review`, ADR 0061)",
             "The viewer's manual checks, repeated at the gate: mouse look locally (SPIKE-11), keyboard feel (VIEW-004)",
             "A discrete-GPU run of the tiers (`cargo xtask test gpu --real`): not run by this command so that acceptance may sit beside the architect's window",
             "The go / no-go for M6 (milestone gate after M5): the owner",
