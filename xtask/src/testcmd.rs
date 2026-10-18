@@ -1101,6 +1101,15 @@ mod tests {
                     krate.file_name().to_string_lossy()
                 );
             }
+            // ... and it declares no other [[test]] (a stray one would be a binary outside the three tiers).
+            let declared = manifest.split("[[test]]").skip(1).filter_map(|p| p.lines().find_map(|l| l.trim().strip_prefix("name = \"")));
+            for name in declared.map(|n| n.split('"').next().unwrap_or("")) {
+                assert!(
+                    aggregators.contains(&name),
+                    "{}: [[test]] `{name}` is not one of it, oracle_all, gpu_all",
+                    krate.file_name().to_string_lossy()
+                );
+            }
         }
         for c in ["generators", "cache", "streaming", "app"] {
             assert!(converted.iter().any(|k| k == c), "{c} builds one test binary per tier (BUILD-015)");
