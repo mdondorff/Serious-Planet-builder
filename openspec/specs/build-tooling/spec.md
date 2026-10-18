@@ -66,6 +66,11 @@ Source: ADR 0009, report §16
 - **WHEN** `cargo xtask accept <milestone>` runs its `test fast` timing step
 - **THEN** the step judges the test time (not the compile) of a selection of changed crates against 20 s and fails over it; a run of every crate passes the step with its number in the row, marked `whole workspace: reported (BUILD-003)`
 
+#### Scenario: Real-GPU parallelism cap
+- **WHEN** `cargo xtask test gpu --real` runs on the discrete adapter
+- **THEN** it runs nextest under the `real-gpu` profile (`.config/nextest.toml`) with at most 4 test processes alive at once (`--test-threads 4`, unless the caller passes `-j` or `--test-threads`), and the heavy binaries (the lit, water, atmosphere and streaming-perf scenes, `gpu_compact_blocks`, `oracle_concurrent_source`, `oracle_lit`) share a test group of at most 2; about 20 parallel processes lost the device (`wgpu device lost (Unknown)`)
+- **AND** no test is skipped, retried or changed, the software and WARP runs keep the default profile, and the JUnit report of a `--real` run is `target/nextest/real-gpu/junit.xml`
+
 #### Scenario: Stale local main
 - **WHEN** a branch is checked out in a worktree whose local `main` is behind `origin/main`
 - **THEN** the changed files are those of `origin/main...HEAD` (and the working tree), not of `main...HEAD`; `main` is used only when there is no `origin/main`
