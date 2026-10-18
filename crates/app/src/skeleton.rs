@@ -1032,9 +1032,13 @@ fn streamed_meshes(
 }
 
 /// Generate the meshes `plan` needs that `renderer` does not hold (by tile and mesh key) in parallel, then upload them.
-/// Returns the number of new meshes.
+/// Returns the number of new meshes. With `world` the tile's water is computed beside its mesh, as a tile job does (ADR 0056,
+/// ATMO-020): the book then holds the answer and the lowest own vertex of every tile the plan draws, so the cut of a held view or a
+/// flight is the exact one. Without it (no water plan in the caller) nothing is filled.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn upload_missing_meshes(
     ctx: &GpuContext,
+    world: Option<&WorldTerrain>,
     renderer: &mut planet_render::TerrainRenderer,
     plan: &planet_frame::TerrainPlan,
     field: &dyn planet_generators::height::HeightField,
@@ -1049,7 +1053,19 @@ pub(crate) fn upload_missing_meshes(
     let meshes: Vec<RenderTile> = std::thread::scope(|s| {
         let handles: Vec<_> = missing
             .chunks(chunk)
-            .map(|part| s.spawn(move || part.iter().map(|&t| tile_for(format, field, t, cells, radius_m, max_level)).collect::<Vec<_>>()))
+            .map(|part| {
+                s.spawn(move || {
+                    part.iter()
+                        .map(|&t| {
+                            let made = tile_for(format, field, t, cells, radius_m, max_level);
+                            if let Some(w) = world {
+                                w.fill_water(t, &made);
+                            }
+                            made
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
             .collect();
         handles.into_iter().flat_map(|h| h.join().expect("mesh thread")).collect()
     });
@@ -1114,7 +1130,7 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
         if renderer.resident_tiles() > 0 && renderer.resident_tiles() + missing > FLIGHT_RESIDENT_CAP {
             renderer = TerrainRenderer::for_context(ctx, size, o.cells, 1);
         }
-        upload_missing_meshes(ctx, &mut renderer, &plan, field.as_ref(), radius_m, o.cells, lod.max_level)?;
+        upload_missing_meshes(ctx, None, &mut renderer, &plan, field.as_ref(), radius_m, o.cells, lod.max_level)?;
         renderer.render(ctx, &plan, false).map_err(|e| format!("frame {i}: {e}"))?;
         let path = dir.join(format!("frame_{i:04}.png"));
         let image = renderer.read_color(ctx);
@@ -1241,7 +1257,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         }
         let plan = planet_frame::plan_terrain_cached(&req, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
         let started = Instant::now();
-        let new_meshes = upload_missing_meshes(ctx, &mut renderer, &plan, field.as_ref(), radius_m, o.cells, lod.max_level)?;
+        let new_meshes = upload_missing_meshes(ctx, None, &mut renderer, &plan, field.as_ref(), radius_m, o.cells, lod.max_level)?;
         let plan_median = summarize(&plan_samples, 0).map_or(f64::NAN, |s| s.median);
         plan_lines.push((name, plan_median));
         writeln!(

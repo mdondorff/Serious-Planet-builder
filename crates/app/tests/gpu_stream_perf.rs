@@ -246,7 +246,7 @@ fn the_gated_dives_refuse_a_store_without_the_pre_filled_levels_before_anything_
     let _ = std::fs::remove_dir_all(&store);
 }
 
-// spec: TEST-025, TEST-012, TEST-023
+// spec: TEST-025, TEST-012, TEST-023, ATMO-020
 #[test]
 fn the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_the_metrics_in_smoke_mode() {
     let log = tmp("lit.json");
@@ -282,6 +282,21 @@ fn the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_
         out.contains("lit path (atmosphere, water)") && out.contains("tile format vertex"),
         "the software smoke runs the vertex format: {out}"
     );
+    // The held views plan water with the exact dry-tile minimum of every tile (ATMO-020): the cut counts are on the view lines.
+    for view in ["coast-2km", "coast-3m"] {
+        let line = out
+            .lines()
+            .find(|l| l.starts_with(&format!("lit/{view}: ")) && l.contains("with water (cut "))
+            .unwrap_or_else(|| panic!("{view}: no cut line in {out}"));
+        let exact: u64 = line
+            .split("height (")
+            .nth(1)
+            .and_then(|t| t.split(' ').next())
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("{line}"));
+        assert!(exact > 0, "{view}: the exact minimum cut no node: {line}");
+        assert!(line.contains(", 0 kept with no minimum)"), "{view}: tiles without a minimum: {line}");
+    }
     assert!(!out.contains("terrain pass median") && !out.contains("budget 1 ms"), "a smoke run prints no budget rows: {out}");
     let json = std::fs::read_to_string(&log).unwrap();
     assert!(json.contains("\"valid_for_budgets\":false") && json.contains("smoke run"), "{json}");
