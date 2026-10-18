@@ -45,7 +45,7 @@ path = "junit.xml"
 [[profile.real-gpu.overrides]]
 filter = '''
 binary(gpu_lit) or binary(gpu_water) or binary(gpu_atmosphere) or binary(gpu_compact_blocks) or binary(oracle_lit)
+or binary(oracle_concurrent_source)
 or (package(=planet) and binary(gpu_all) and test(/^(gpu_water_coverage|gpu_stream_perf|gpu_flight|gpu_world_field)::/))
-or (package(=planet-cache) and binary(oracle_all) and test(/^oracle_concurrent_source::/))
 '''
 test-group = "real-gpu-heavy"

@@ -1061,7 +1061,7 @@ mod tests {
                 );
             }
         }
-        for c in ["generators", "cache", "streaming", "app"] {
+        for c in ["generators", "app"] {
             assert!(converted.iter().any(|k| k == c), "{c} builds one test binary per tier (BUILD-015)");
         }
     }
@@ -1083,7 +1083,7 @@ mod tests {
             .match_indices("test(/^")
             .flat_map(|(i, _)| real_part[i + 7..].split("::/)").next().unwrap().trim_matches(['(', ')']).split('|'))
             .collect();
-        assert!(modules.len() >= 5, "{modules:?}");
+        assert!(modules.len() >= 4, "{modules:?}");
         let (mut binaries, mut files) = (Vec::new(), Vec::new());
         for krate in std::fs::read_dir(root.join("crates")).unwrap().flatten() {
             if let Ok(rd) = std::fs::read_dir(krate.path().join("tests")) {
