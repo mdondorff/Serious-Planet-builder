@@ -250,3 +250,137 @@ fn a_tile_that_floods_is_never_cut_and_a_camera_under_the_level_cuts_nothing_by_
     water(&src, &plan, Some(&field), &mut cache);
     assert_eq!(cache.cut_horizon, 0, "under the level nothing is beyond the horizon");
 }
+
+/// A book that holds the answers of every node of `plan` (water everywhere at `level`) and no minimum.
+fn answered_book(plan: &TerrainPlan, level: f64) -> std::sync::Arc<planet_frame::water::WaterBook> {
+    let book = std::sync::Arc::new(planet_frame::water::WaterBook::new());
+    for n in &plan.nodes {
+        book.fill(&Everywhere(level), &TangentWarp, n.tile, R).unwrap();
+    }
+    book
+}
+
+/// The lowest own vertex a tile job would leave, the same for every tile of `plan`.
+fn set_mins(book: &planet_frame::water::WaterBook, plan: &TerrainPlan, min: f32) {
+    for n in &plan.nodes {
+        book.set_min_height(n.tile, min);
+    }
+}
+
+fn rise() -> f64 {
+    let table = LiquidTable::earth();
+    planet_frame::look::water::LiquidAppearance::new(0, table.get(LiquidKindId::WATER).unwrap(), &WaterLook::EARTH).amplitude_sum()
+}
+
+/// The lowest f32 for which the height test cuts at `level` and the f32 below it (the boundary within one ulp).
+fn boundary(level: f64, rise: f64) -> (f32, f32) {
+    let mut m = (level + rise - 1.0) as f32;
+    while !tile_above_water(f64::from(m), level, rise) {
+        m = f32::from_bits(if m >= 0.0 { m.to_bits() + 1 } else { m.to_bits() - 1 });
+    }
+    let below = f32::from_bits(if m > 0.0 { m.to_bits() - 1 } else { m.to_bits() + 1 });
+    (m, below)
+}
+
+// spec: ATMO-020
+#[test]
+fn the_exact_minimum_cuts_a_node_at_its_bound_and_keeps_it_one_ulp_below_for_any_level_and_a_camera_at_1_m() {
+    let field = Reference(1);
+    let plan = terrain(6);
+    let rise = rise();
+    let mut exercised = 0;
+    for level in [0.0, 37.5, -140.0, 4000.0, 9000.0] {
+        let (cut_at, kept_below) = boundary(level, rise);
+        assert!(tile_above_water(f64::from(cut_at), level, rise) && !tile_above_water(f64::from(kept_below), level, rise));
+        let loose = water(&Everywhere(level), &plan, Some(&field), &mut WaterTileCache::new());
+        // A node the horizon and the loose bound keep: the tile under the camera.
+        let Some(first) = loose.nodes.first() else { continue };
+        exercised += 1;
+        let target = first.node;
+        let tile = plan.nodes[target as usize].tile;
+        let book = answered_book(&plan, level);
+        for (min, cut) in [(cut_at, true), (kept_below, false), (cut_at + 1.0, true), (-50.0, false)] {
+            book.set_min_height(tile, min);
+            let mut cache = WaterTileCache::with_book(std::sync::Arc::clone(&book));
+            let exact = water(&Everywhere(level), &plan, Some(&field), &mut cache);
+            assert_eq!(!exact.nodes.iter().any(|n| n.node == target), cut, "level {level} min {min}: node cut or kept");
+            assert_eq!(cache.cut_exact, u64::from(cut), "level {level} min {min}");
+            // Every other node is the loose plan's, bit for bit.
+            let others: Vec<_> = loose.nodes.iter().filter(|n| n.node != target).collect();
+            assert_eq!(exact.nodes.iter().filter(|n| n.node != target).collect::<Vec<_>>(), others);
+        }
+    }
+    assert!(exercised >= 2, "{exercised} levels exercised");
+}
+
+// spec: ATMO-020
+#[test]
+fn a_dry_basin_under_a_dry_rim_is_cut_by_the_exact_minimum_where_the_loose_bound_keeps_it_and_a_tile_without_a_minimum_keeps_the_loose_verdict(
+) {
+    let field = Reference(1);
+    for index in [3usize, 4, 5, 6] {
+        let plan = terrain(index);
+        let src = Everywhere(0.0);
+        let loose = water(&src, &plan, Some(&field), &mut WaterTileCache::new());
+        // A book with answers and no minimum (roots, a job that did not run) is the loose cut.
+        let book = answered_book(&plan, 0.0);
+        let mut cache = WaterTileCache::with_book(std::sync::Arc::clone(&book));
+        assert_eq!(water(&src, &plan, Some(&field), &mut cache), loose, "view {index}");
+        assert_eq!(cache.cut_exact, 0);
+        // Every tile's job left a minimum 30 m over the level: all cut.
+        set_mins(&book, &plan, 30.0);
+        let mut cache = WaterTileCache::with_book(std::sync::Arc::clone(&book));
+        let dry = water(&src, &plan, Some(&field), &mut cache);
+        assert!(dry.nodes.is_empty(), "view {index}: tiles 30 m over the level show no water");
+        assert_eq!(cache.cut_horizon + cache.cut_height, plan.nodes.len() as u64);
+        assert_eq!(cache.cut_exact, loose.nodes.len() as u64, "view {index}: the exact minimum cuts every node the loose cut kept");
+        // Minimums under the level change nothing.
+        set_mins(&book, &plan, -3.0);
+        assert_eq!(water(&src, &plan, Some(&field), &mut WaterTileCache::with_book(book)), loose, "view {index}");
+    }
+}
+
+// spec: ATMO-020
+#[test]
+fn a_camera_under_the_level_is_cut_by_the_exact_minimum_alike_and_a_late_minimum_is_found_by_a_later_plan() {
+    let field = Reference(1);
+    let (_, mut camera) = scripted_views(R, 4.0 / 3.0, 1)[6];
+    camera.position = planet_core::PlanetFixed(camera.position.0.normalized() * (R - 20.0));
+    let plan = plan_terrain(&TerrainRequest {
+        camera,
+        size: (128, 96),
+        view: TerrainView::Level,
+        lod: lod(),
+        face_mapping: "tangent-v1".into(),
+        seed: 1,
+    })
+    .unwrap();
+    let src = Everywhere(0.0);
+    let book = answered_book(&plan, 0.0);
+    let mut cache = WaterTileCache::with_book(std::sync::Arc::clone(&book));
+    let before = water(&src, &plan, Some(&field), &mut cache);
+    assert_eq!(cache.cut_exact, 0);
+    // The jobs' minimums arrive after the first plan (the tile cache memoised the answers, not the missing minimums).
+    set_mins(&book, &plan, 25.0);
+    let after = water(&src, &plan, Some(&field), &mut cache);
+    assert!(after.nodes.is_empty() && !before.nodes.is_empty());
+    assert_eq!(cache.cut_exact, before.nodes.len() as u64);
+    // The cut changes no answer: no field query was made by either plan.
+    assert_eq!(cache.counters().queries, 0);
+}
+
+// spec: ATMO-020
+#[test]
+fn the_book_keeps_a_minimum_only_beside_a_wet_answer() {
+    use planet_core::{Face, TileId};
+    let book = planet_frame::water::WaterBook::new();
+    let (wet, dry) = (TileId::new(Face(0), 4, 3, 3).unwrap(), TileId::new(Face(0), 4, 4, 4).unwrap());
+    book.set_min_height(wet, 1.0);
+    assert_eq!(book.min_height(wet), None, "no answer yet: no minimum");
+    book.fill(&Everywhere(0.0), &TangentWarp, wet, R).unwrap();
+    book.fill(&HeightSea { field: &Reference(1), level: -1.0e6 }, &TangentWarp, dry, R).unwrap();
+    book.set_min_height(wet, 1.0);
+    book.set_min_height(dry, 1.0);
+    book.set_min_height(wet, f32::NAN);
+    assert_eq!((book.min_height(wet), book.min_height(dry)), (Some(1.0), None));
+}

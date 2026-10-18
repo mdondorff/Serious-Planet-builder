@@ -537,13 +537,18 @@ impl WorldTerrain {
 
     /// Compute the water of `tile` into the book, if this world has water and the lit path is on; called by the tile's job, off the
     /// frame (ADR 0056). A failed read leaves the tile to the plan, which reports it.
-    pub fn fill_water(&self, tile: TileId) {
+    ///
+    /// `built` is the mesh the job made for `tile`: its lowest own vertex is kept beside the answer for the exact dry-tile cut
+    /// (ATMO-020), computed here in the job and never on the plan thread.
+    pub fn fill_water(&self, tile: TileId, built: &planet_generators::compact::RenderTile) {
         if !self.bound_water {
             return;
         }
         let radius_m = self.radius_m;
         let book = &self.water_book;
-        let _ = self.with_water(|f| book.fill(f, &TangentWarp, tile, radius_m));
+        if matches!(self.with_water(|f| book.fill(f, &TangentWarp, tile, radius_m)), Ok(Some(Ok(())))) {
+            book.set_min_height(tile, built.min_height_m());
+        }
     }
 
     /// Whether this world has water: a bake with its ocean channel (the sea of the definition, ADR 0041).
