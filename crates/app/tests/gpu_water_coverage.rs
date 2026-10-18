@@ -167,24 +167,23 @@ impl Connected<'_> {
     }
 }
 
-fn water_plan_of(world: &WorldTerrain, plan: &TerrainPlan, size: (u32, u32), cut: Option<&dyn HeightField>) -> WaterPlan {
+fn water_plan_of(
+    world: &WorldTerrain,
+    plan: &TerrainPlan,
+    size: (u32, u32),
+    cut: Option<&dyn HeightField>,
+    exact: bool,
+    view: WaterView,
+) -> WaterPlan {
     let look = LookParams::default();
     let table = world.definition().liquids().unwrap();
     let lod = lod_for(size);
-    let mut cache = WaterTileCache::new();
+    // The exact minimum comes from the book the tile jobs filled (the test uploads the meshes it built, as a job does).
+    let mut cache = if exact { WaterTileCache::with_book(world.water_book()) } else { WaterTileCache::new() };
     world
         .with_water(|f| {
             plan_water(
-                &WaterRequest {
-                    source: f,
-                    map: &TangentWarp,
-                    liquids: &table,
-                    look: &look.water,
-                    lod: &lod,
-                    time_s: 2.0,
-                    view: WaterView::Class,
-                    cut,
-                },
+                &WaterRequest { source: f, map: &TangentWarp, liquids: &table, look: &look.water, lod: &lod, time_s: 2.0, view, cut },
                 &mut cache,
                 plan,
             )
@@ -202,9 +201,7 @@ fn frame(ctx: &GpuContext, r: &mut TerrainRenderer, plan: &TerrainPlan, water: O
     r.lit_path().unwrap().read_hdr(ctx)
 }
 
-// spec: ATMO-019, ATMO-020
-#[test]
-fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to_the_horizon() {
+fn coverage(views: &[&str]) {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let world = WorldTerrain::open(WorldDefinition::single_planet(R, 5), 1024).expect("the world opens").bounding_water();
     let field = world.field().unwrap();
@@ -214,8 +211,14 @@ fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to
     // The aerial view (2 km up, 3 km out, level) and the low view (30 m up, level), both from the sea towards the plain.
     let beach = planet_frame::litscenes::find_coast(&|d| planet::litperf::carries_sea(&world, d), &|d| field.height(d), 0.0, 20.0, 30.0, R)
         .expect("the world has a beach: the coast views of the lit scenes stand there");
-    let cases = [("aerial", coast, 2000.0, 3000.0, 2.0), ("low", coast, 30.0, 600.0, 0.5), ("beach", beach, 2000.0, 3000.0, 25.0)];
-    for (name, coast, alt, back, pitch) in cases {
+    let cases = [
+        ("aerial", coast, 2000.0, 3000.0, 2.0),
+        ("low", coast, 30.0, 600.0, 0.5),
+        ("beach", beach, 2000.0, 3000.0, 25.0),
+        ("inland", beach, 600.0, -4000.0, 10.0),
+    ];
+    let mut exact_cut = 0;
+    for (name, coast, alt, back, pitch) in cases.into_iter().filter(|c| views.contains(&c.0)) {
         let camera = coast_camera(&coast, R, 0.0, alt, back, 0.0, pitch, aspect);
         let bounded = planet_generators::water::WaterBounded::borrowed(field.as_ref(), 0.0);
         let plan = plan_terrain_field(
@@ -227,17 +230,43 @@ fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to
         r.enable_lit(&ctx);
         for n in &plan.nodes {
             if r.slot_of(n.tile).is_none() {
-                r.upload(&ctx, &vertex_tile_field(field.as_ref(), &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
+                let mesh = vertex_tile_field(field.as_ref(), &TangentWarp, n.tile, CELLS, R, FINEST);
+                r.upload(&ctx, &mesh).unwrap();
+                world.fill_water(n.tile, &planet_generators::compact::RenderTile::Vertex(mesh));
             }
         }
         r.enable_water(&ctx);
         // The nodes the pass draws are the cut ones (ATMO-020); the full selection draws the same pixels.
-        let wp = water_plan_of(&world, &plan, size, Some(field.as_ref()));
-        let full = water_plan_of(&world, &plan, size, None);
+        let wp = water_plan_of(&world, &plan, size, Some(field.as_ref()), false, WaterView::Class);
+        let exact = water_plan_of(&world, &plan, size, Some(field.as_ref()), true, WaterView::Class);
+        let full = water_plan_of(&world, &plan, size, None, false, WaterView::Class);
         let base = frame(&ctx, &mut r, &plan, None);
         let with = frame(&ctx, &mut r, &plan, Some(&wp));
         let map = class_map(&base, &with, size);
         let with_full = frame(&ctx, &mut r, &plan, Some(&full));
+        let with_exact = frame(&ctx, &mut r, &plan, Some(&exact));
+        assert!(exact.nodes.len() <= wp.nodes.len());
+        exact_cut += wp.nodes.len() - exact.nodes.len();
+        assert!(
+            with_exact == with_full,
+            "{name}: the exact dry-tile cut ({} nodes, {} by the loose cut, {} before) changes pixels of the picture",
+            exact.nodes.len(),
+            wp.nodes.len(),
+            full.nodes.len()
+        );
+        // The lit view too (waves, absorption, glint): the colours of the exact cut are the full selection's, bit for bit.
+        // (Where the cut is large: the beach and the inland view.)
+        if matches!(name, "beach" | "inland") {
+            let (lit_full, lit_exact) = (
+                water_plan_of(&world, &plan, size, None, false, WaterView::Lit),
+                water_plan_of(&world, &plan, size, Some(field.as_ref()), true, WaterView::Lit),
+            );
+            assert!(lit_exact.nodes.len() <= lit_full.nodes.len());
+            assert!(
+                frame(&ctx, &mut r, &plan, Some(&lit_full)) == frame(&ctx, &mut r, &plan, Some(&lit_exact)),
+                "{name}: the lit view changes"
+            );
+        }
         assert!(wp.nodes.len() <= full.nodes.len());
         assert!(with == with_full, "{name}: the cut ({} nodes of {}) changes pixels of the picture", wp.nodes.len(), full.nodes.len());
         let mut connected = Connected { world: &world, memo: Default::default() };
@@ -267,12 +296,17 @@ fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to
             }
         }
         println!(
-            "{name}: {expected} sea pixels expected, {missing} not water (first {first_missing:?}), {} water nodes ({} before the cut) of {}",
+            "{name}: {expected} sea pixels expected, {missing} not water (first {first_missing:?}), {} water nodes ({} before the cut, {} with the exact minimum) of {}",
             wp.nodes.len(),
             full.nodes.len(),
+            exact.nodes.len(),
             plan.nodes.len()
         );
-        let least = if name == "beach" { 100 } else { 2000 };
+        let least = match name {
+            "inland" => 50,
+            "beach" => 100,
+            _ => 2000,
+        };
         assert!(expected > least, "{name}: only {expected} pixels to check: the view does not look at enough sea");
         // The edge allowance: the shore of the water mesh and the tile edges, 1 % of the pixels.
         assert!(flooded * 100 <= dry_checked.max(1), "{name}: {flooded} of {dry_checked} pixels over land above the level are water");
@@ -281,4 +315,17 @@ fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to
             "{name}: {missing} of {expected} ocean-connected sea pixels are not water (first {first_missing:?})"
         );
     }
+    assert!(exact_cut > 0, "the exact minimum cut no node the loose bound kept in any view");
+}
+
+// spec: ATMO-019, ATMO-020
+#[test]
+fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to_the_horizon() {
+    coverage(&["aerial", "low"]);
+}
+
+// spec: ATMO-019, ATMO-020
+#[test]
+fn the_water_class_covers_the_sea_at_a_beach_and_inland_and_the_exact_dry_tile_cut_draws_the_same_pixels() {
+    coverage(&["beach", "inland"]);
 }
