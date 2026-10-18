@@ -42,7 +42,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0030 | [Erosion strategy: local filter in M3, a coarse global stream-power stage after it](0030-erosion-strategy-hybrid.md) | accepted |  |
 | 0031 | [Residency set and request priorities](0031-residency-set-and-request-priorities.md) | accepted |  |
 | 0032 | [Streaming test definitions: dive, teleport, mouse look](0032-streaming-test-definitions.md) | accepted |  |
-| 0033 | [Memory budgets and terrain's VRAM share](0033-memory-budgets-and-terrain-vram-share.md) | accepted | point 3 amended by 0054; points 3-5 by 0062 and 0063 |
+| 0033 | [Memory budgets and terrain's VRAM share](0033-memory-budgets-and-terrain-vram-share.md) | accepted | point 3 amended by 0054; points 3-5 by 0062 and 0063; point 9 by 0064 |
 | 0034 | [GPU clock state in performance measurements](0034-gpu-clock-state-in-perf-measurements.md) | accepted with a change |  |
 | 0035 | [CPU/GPU equality applies to fields, not to presentation data](0035-cpu-gpu-equality-applies-to-fields.md) | accepted |  |
 | 0036 | [Perf validity at full GPU load: power cap and clock band](0036-perf-validity-at-full-gpu-load.md) | accepted in part | point 3 (GPU noise floor): first M5 perf window with GPU verdicts |
@@ -73,3 +73,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0061 | [Goldens after M5: the M5 window closes, goldens are per-adapter regression checks](0061-goldens-after-m5.md) | accepted (owner) | supersedes 0037 point 1 and 0052; amends 0017 |
 | 0062 | [Retire the vertex tile format from rendering](0062-retire-the-vertex-tile-format.md) | accepted (owner) | first work of M6; point 4 amended by 0063 |
 | 0063 | [Slot v2 without the 5x5 reserve: 9,168 B](0063-slot-v2-size-correction.md) | accepted | corrects 0062 point 4; for the owner at the M5 gate |
+| 0064 | [The render floor's roots load outside the per-frame upload cap](0064-floor-roots-exempt-from-the-upload-cap.md) | accepted | amends 0033 point 9 |
