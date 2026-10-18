@@ -26,3 +26,7 @@ Source: CON-02, ADR 0004, ADR 0008, ADR 0015, ADR 0062
 #### Scenario: Reference renderer in a product build
 - **WHEN** a `[dependencies]` or `[build-dependencies]` entry of any crate enables the `reference-renderer` feature of `render` (inline, table form or through a renamed package), or a `default` feature lists it
 - **THEN** `cargo xtask layering` fails and names the crate and the entry
+
+#### Scenario: wgpu type in render's public API
+- **WHEN** a public item of `render` names a wgpu type
+- **THEN** `cargo xtask layering` fails with file and line

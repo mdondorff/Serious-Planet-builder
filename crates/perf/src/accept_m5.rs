@@ -567,7 +567,7 @@ pub fn window_commands(logs_dir: &str) -> String {
         "Architect, in a perf window on Rasierklinge (coders never run these; the readiness gate of ADR 0020 decides; the store is the regenerated 16384-cell store with its pre-fill):\n  \
          cargo xtask perf stream dive --smoke --store <store>   (once, before the window: a read-only store check, not a measurement)\n  \
          cargo xtask perf m5 --store <store> --out {logs_dir}\n  \
-         (runs `perf lit`, `perf lit-formats` and the seven streaming scenes with --lit, one child per streaming scene: lit.json, lit-formats.json and <scene>-lit.json with <scene>-lit.frames.txt in {logs_dir}/;\n  \
+         (runs `perf lit` and the seven streaming scenes with --lit, one child per streaming scene: lit.json and <scene>-lit.json with <scene>-lit.frames.txt in {logs_dir}/;\n  \
          do not pass --views, --allow-memory-bake or --smoke: those logs are refused)\n\
          Then:\n  cargo xtask accept M5\n  (reads {logs_dir}/, writes docs/milestones/M5-report.md from the logs when they are valid)\n"
     )

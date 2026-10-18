@@ -60,7 +60,7 @@ modes:
     --lit                    the streaming perf scenes on the lit path with the atmosphere and water (TEST-025): same scripts, same verdicts, logs named <scene>-lit
     --views a,b,c            only these views of the lit perf scenes (ground-1m, aerial-20km, coast-2km, coast-3m, orbit, coast-glide, coast-descent); a partial log is not a window
     --scene capture-flights  the two coastal flights as 1440p PNG sequences (shore_filter at the look default, 0, and then 1) in --out-dir, never a measurement (TEST-027; `cargo xtask capture flights` also makes the videos); needs --store DIR or --allow-memory-bake, takes --size WxH, --flight-frames N
-    --flight-frames N        frames of each coastal flight of the lit perf scenes (default 240; --scene lit | lit-formats, TEST-025)
+    --flight-frames N        frames of each coastal flight of the lit perf scenes (default 240; --scene lit, TEST-025)
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
     --machine-ready          owner override of a failed readiness gate (ADR 0020); recorded in the log
     --smoke                  start and exit";
@@ -690,16 +690,16 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         return Err("--perf and --perf-smoke exclude each other: a smoke run is never a measurement".into());
     }
     if o.perf_smoke && o.scene != "terrain" && !streamperf::is_stream_scene(&o.scene) && !litperf::is_lit_scene(&o.scene) {
-        return Err("--perf-smoke is only available for --scene terrain, a streaming scene (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, streaming) or a lit scene (lit, lit-formats)".into());
+        return Err("--perf-smoke is only available for --scene terrain, a streaming scene (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, streaming) or the lit scene (lit)".into());
     }
     if o.lit && !streamperf::is_stream_scene(&o.scene) {
-        return Err("--lit applies to the streaming perf scenes (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, dive-cold, streaming); the scenes `lit` and `lit-formats` are always lit".into());
+        return Err("--lit applies to the streaming perf scenes (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, dive-cold, streaming); the scene `lit` is always lit".into());
     }
     if o.given.contains("--views") && !litperf::is_lit_scene(&o.scene) && !litperf::is_capture_scene(&o.scene)
         || o.given.contains("--flight-frames") && !litperf::is_lit_scene(&o.scene) && !litperf::is_capture_scene(&o.scene)
     {
         return Err(
-            "--views applies to the scenes `lit`, `lit-formats` and `capture-flights`, --flight-frames to those and `capture-flights`"
+            "--views applies to the scenes `lit` and `capture-flights`, --flight-frames to those"
                 .into(),
         );
     }
