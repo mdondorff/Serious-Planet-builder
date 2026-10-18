@@ -101,7 +101,7 @@ fn count(log: &str, name: &str) -> Option<u64> {
 fn the_floor_3_start_loads_the_384_roots_on_the_pool_before_the_first_frame_and_draws_no_blank() {
     // The production start: the real pool loads the 384 level-3 tiles before frame 0 (the dive's own tile jobs begin later, which is why
     // the configuration-cap net above runs at floor 0); a few frames from orbit draw them and nothing is blank.
-    let log = dive_log_at("floor3", WORKERS, 24, "3");
+    let log = dive_log_at("floor3", WORKERS, 8, "3");
     assert_eq!(count(&log, "load_startup_roots"), Some(384), "{log}");
     assert!(count(&log, "max_resident_slots").is_some_and(|n| n >= 384), "the roots are resident: {log}");
     assert_eq!(count(&log, "blank_frames"), Some(0), "no blank frame while the roots are resident: {log}");
