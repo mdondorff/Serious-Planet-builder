@@ -37,6 +37,22 @@ Dormant (no near trigger; not asked now):
 4b. **Process budgets** (owner, 2026-10-18; sonnet-crusader, small xtask change): xtask reports when edit-to-first-test time exceeds about 30 s (after SPIKE-15's steps) or the CI median exceeds about 16 min; the figures live in the BUILD spec; an exceeded budget becomes a Tracked item.
 5. **The editor's first slice**: planned by opus-planner from the M6 inputs above (SPIKE-13 build order, SPIKE-14 UI) while 1-3 run.
 
+## Editor MVP requirements (owner interview, 2026-10-18)
+Mock: https://claude.ai/artifact/Srj3NGEYUkGQsfhne7kdCs (private to the owner).
+
+| Topic | MVP |
+|---|---|
+| Edits | stamps (shapes with handles, editable later), lines (ridge, carved channel, region outline), regions (mask other edits, surface type, name) |
+| Scale | local (1-500 m, exact result <= 1 s) and regional (1-50 km, preview at once, exact in seconds) |
+| Brush | raise, lower, smooth, flatten; after stamps |
+| Managing edits | map first: select on the planet, outline and name on hover, search, list of edits near the camera; layer list and graph as secondary views of the same items (ADR 0007 stack) |
+| Views | 3D free camera, globe overview |
+| Surface type | stored on the region; a debug overlay tints regions by type; materials are drawn later |
+| History | plain undo/redo (1,000 operations, M6 exit criterion) |
+| Input | mouse and keyboard |
+
+Out of the MVP, its own later step (owner, 2026-10-18): **global-scale authoring**: continental edits (100+ km), the global re-bake they need, and a generator editor UI (changing the procedural generator's parameters, Houdini-style). Both change the global bake, so they are designed together.
+
 ## M5 Atmosphere & ocean: design constraints (owner, 2026-10-15)
 Scope as in the architecture report (Hillaire atmosphere, aerial perspective, HDR and exposure, ocean surface and shoreline; gate after M5). These constraints keep later work possible without rework:
 1. **Water level is a field, not a constant.** A water-surface height W(dir) and a water-body kind sit next to `height(dir)`; in M5 the sea is the only producer (a constant level). Shoreline and water rendering read W and the kind, never a hard-coded sea level (lakes, rivers and deltas plug in later as producers).

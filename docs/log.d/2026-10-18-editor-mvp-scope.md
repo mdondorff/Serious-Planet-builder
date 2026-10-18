@@ -1,0 +1,1 @@
+- 2026-10-18 **Editor MVP requirements (owner interview):** local and regional stamps, lines and regions, map-first selection with layer and graph views, 3D and globe views, surface type as stored data with a debug overlay, plain undo/redo; continental edits, the global re-bake and a generator editor UI move to a later global-scale authoring step.
