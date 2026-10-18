@@ -46,7 +46,7 @@ The lit, atmosphere, shading, water and warm-up tests (and `gpu_water_coverage`)
 ## Keys (analysis, 2026-10-18)
 Removing `finest_class_key` changes the in-memory key of a tile at or above the LOD cap (`max_level`): it was `hash_u64s(0x0066_696e, &[base])`, it is now the base key. No stored record can come back with the wrong content:
 - The persistent pack key is `mesh_key_inputs` (field, tile, cells, skirt, `MESH_VERSION`, climate version word) plus the output parameter `PARAM_RENDER_FORM`, which stays and now only holds `COMPACT_FORM` = 1. `storable()` stops below the cap, so the pack never held a tile at the cap, with or without the class: the class key never reached a store.
-- Repro bundles carry plans, whose `mesh_key` of a cap tile changes; they are refused or re-derived by the same rule as every key change (TEST-008) and no committed bundle holds a cap tile at a class key (checked by `cargo xtask test`).
+- Repro bundles carry plans, whose `mesh_key` of a cap tile changes; they follow the same rule as every key change (TEST-008), and the repository commits no bundle.
 - A pack written with the vertex form byte (0) is read as `MeshCodecError::Form(0)` ("vertex form (0) is no longer read"), a miss that regenerates, never a wrong tile.
 - `MESH_VERSION` stays 8: no tile content changes, and the only key that changes is one that was never stored. A test (`a_cap_level_request_never_hits_a_record_written_under_the_former_finest_class_key`) pins the legacy key value against the new one.
 
