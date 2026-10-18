@@ -1,6 +1,7 @@
 //! `cargo xtask`: the only command surface (CON-25). std only, so it builds in about a second.
 
 mod accept;
+mod blesscmd;
 mod cistats;
 mod detdiff;
 mod layering;
@@ -37,7 +38,7 @@ const USAGE: &str = "cargo xtask <command>
   ci-stats [--runs N] median and p90 of each CI job over the last N (default 20) completed main runs, read with gh; a median over 16 min is flagged (BUILD-014)
   det-diff <a> <b>    compare two determinism manifests (GEN-003; CI diffs Windows against Linux)
   golden-review [--proposal <file>] [--extra <dir>]... [--tests <junit.xml>]... [--apply]   classify golden candidates under ADR 0017, and ADR 0037 for first goldens of M5 classes (auto-bless or escalate)
-  bless                list candidate goldens (agents promote under ADR 0017 via golden-review; the rest is the owner's /bless)
+  bless [--extra <dir>]... [--apply <name>[,<name>]... --approved-by <who>]   list candidate goldens of every adapter (agents promote under ADR 0017 via golden-review; the rest is the owner's /bless, which applies what the owner approved with --apply; --apply runs only after the owner's /bless approval in the same session and --approved-by names the owner, never on an agent's own judgement)
 
 options for test: --strict (a missing golden fails), --real (use the discrete GPU), extra args after `--` go to nextest";
 
@@ -63,7 +64,7 @@ fn main() -> ExitCode {
             a.extend(args[1..].iter().map(String::as_str));
             util::run(&root, "cargo", &a, &[])
         }
-        Some("bless") => testcmd::bless_list(&root),
+        Some("bless") => blesscmd::run(&root, &args[1..]),
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
