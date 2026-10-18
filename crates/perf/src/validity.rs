@@ -63,6 +63,12 @@ pub fn is_low_start_warning(w: &str) -> bool {
     w.starts_with("run '") && w.contains(LOW_START_MARKER)
 }
 
+/// Whether a run takes GPU time at all: the pipelined streaming scenes (`stream/<scene>`, `stream-lit/<scene>`) do not, so the clock
+/// they started at says nothing about any verdict (recorded, not judged; TEST-037).
+pub fn takes_gpu_rows(path_name: &str) -> bool {
+    !(path_name.starts_with("stream/") || path_name.starts_with("stream-lit/"))
+}
+
 /// The session-level causes from the machine and the runs (not the after-the-run rules): smoke, adapter, power scheme, idle start.
 pub fn session_causes(adapter: &AdapterFacts, power_scheme: Option<&str>, runs: &[RunReport], smoke: bool) -> Vec<Cause> {
     let mut c = Vec::new();
@@ -84,7 +90,7 @@ pub fn session_causes(adapter: &AdapterFacts, power_scheme: Option<&str>, runs: 
         ),
         None => push(CauseKind::PowerScheme, "the active power scheme could not be read".to_string()),
     }
-    for r in runs {
+    for r in runs.iter().filter(|r| takes_gpu_rows(&r.path_name)) {
         if let Some(cl) = &r.clocks_before {
             let low = cl.pstate.trim_start_matches('P').parse::<u32>().is_ok_and(|n| n >= 5);
             if low {
@@ -145,6 +151,15 @@ impl SessionVerdict {
 
     /// The console lines of the verdict, printed once before any budget verdict. The only place that words the session's validity.
     pub fn lines(&self) -> Vec<String> {
+        self.lines_for(true)
+    }
+
+    /// [`lines`](SessionVerdict::lines) for a session whose runs take GPU rows (`gpu_rows`) or do not (the streaming scenes: "no GPU
+    /// rows" instead of a GPU verdict that does not exist).
+    pub fn lines_for(&self, gpu_rows: bool) -> Vec<String> {
+        if self.causes.is_empty() && !gpu_rows {
+            return vec!["SESSION VALID for budgets: frame verdicts: yes; no GPU rows (the pipelined scenes take no GPU time)".to_string()];
+        }
         if self.causes.is_empty() {
             return vec![format!(
                 "SESSION VALID for budgets: frame verdicts: yes; GPU verdicts: yes (each view judged against the {:.0} MHz clock floor)",
@@ -215,7 +230,8 @@ mod tests {
     fn run(pstate: &str, mhz: u32) -> RunReport {
         let c = parse_nvidia_smi(&format!("X, {mhz}, 405, 15, 50, {pstate}, 0x0")).unwrap();
         RunReport {
-            path_name: "stream/dive".into(),
+            // A view that takes GPU rows (the lit and terrain views); the streaming scenes do not (`takes_gpu_rows`).
+            path_name: "lit/coast-2km".into(),
             vram_cap_gb: 8,
             stats: summarize(&[1.0, 2.0], 0).unwrap(),
             clocks_before: Some(c),
@@ -238,6 +254,28 @@ mod tests {
         assert_eq!(l.len(), 1, "{l:?}");
         assert!(l[0].starts_with("SESSION VALID for frame verdicts: yes; GPU verdicts: NOT VALID (") && l[0].contains("P8"), "{l:?}");
         assert!(!l[0].contains("INVALID for budgets"), "the lines never say valid and invalid of the same thing: {l:?}");
+    }
+
+    // spec: TEST-037
+    #[test]
+    fn a_streaming_scene_started_at_an_idle_clock_voids_nothing_and_the_console_says_no_gpu_rows() {
+        let mut r = run("P8", 210);
+        for path in ["stream/dive", "stream-lit/teleport-1m"] {
+            r.path_name = path.into();
+            let v = assess(std::slice::from_ref(&r), false, &gate::Validity::default(), &[]);
+            assert!(v.frame_valid() && v.gpu_session_valid() && v.warnings().is_empty(), "{path}: {:?}", v.warnings());
+            let l = v.lines_for(false);
+            assert_eq!(l.len(), 1, "{l:?}");
+            assert!(l[0].contains("no GPU rows") && !l[0].contains("NOT VALID"), "{l:?}");
+        }
+        assert!(!takes_gpu_rows("stream/dive") && !takes_gpu_rows("stream-lit/look-2km"));
+        assert!(takes_gpu_rows("lit/coast-glide") && takes_gpu_rows("terrain/ground-1m"));
+        // A view that takes GPU rows still has its idle start voiding the GPU verdicts (the test above), and a real cause still
+        // voids a streaming session.
+        let throttled = gate::validity(&["stream/dive".into()], &[]);
+        r.path_name = "stream/dive".into();
+        let v = assess(std::slice::from_ref(&r), false, &throttled, &[]);
+        assert!(!v.frame_valid());
     }
 
     // spec: TEST-012

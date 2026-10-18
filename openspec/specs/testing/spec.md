@@ -761,16 +761,20 @@ Source: ADR 0037 point 2, ADR 0017, ADR 0035, M5 queue item 10
 - **WHEN** a water golden changes but the declarations affect only `sky`
 - **THEN** it escalates
 
-### Requirement: TEST-037 Streaming scenes start cool and at the loaded clock
-Before the measured span of a streaming scene (not in a smoke run) the harness SHALL apply the cool start of TEST-033 and, for a scene that starts from a settled view (a prelude: the teleports and the looks), the held-clock warm-up of TEST-029: it renders the settled start view without pacing until the graphics clock has read the floor three times in a row (cap 30 s), so that nothing queued, in flight or waiting and nothing resident changes and no frame of the measured span is touched. A scene that starts from an empty cache (the dive, dive-fast, dive-cold) SHALL only cool down, and its console SHALL say that no warm-up was made and why: rendering its first frame would load the tiles whose first loads it measures. The warm-up outcome SHALL be logged in `warmups` under the scene's path and printed; the clock before the measured span is read after the warm-up, so a run no longer starts at an idle P-state because the warm-up was missing. The camera scripts, the budgets and the streaming code are unchanged, and the frame verdicts too.
+### Requirement: TEST-037 Streaming scenes start cool and take no GPU rows
+Before the measured span of a streaming scene (not in a smoke run) the harness SHALL apply the cool start of TEST-033. There is no warm-up: the loop is paced to 60 Hz and CPU-bound, so no amount of rendering it brings the GPU to the loaded clock (look-2km at 58 C stayed at P3, 1,087 MHz, after 30 s unpaced), the held views and flights are already unpaced back-to-back waited frames, and the streaming scenes take no GPU time for the clock to matter to. A streaming scene (`stream/<scene>`, `stream-lit/<scene>`) SHALL NOT make a session invalid for GPU verdicts by the clock it started at (it has none): the clock stays recorded in the log, the session line reads `no GPU rows (the pipelined scenes take no GPU time)`, and the acceptance facts of a scene say the same; logs written before this rule, which carry the idle-start warning, are still read as valid for frame verdicts. A view that takes GPU rows keeps ADR 0034's idle start rule. The camera scripts, the budgets and the streaming code are unchanged, and the frame verdicts too.
 
 Verify: A
 Status: active
-Source: perf windows 7 and 8 (every streaming scene started at P5 or P8; the lit dive's two device losses came after long runs on a hot GPU), ADR 0057, TEST-029, TEST-033
+Source: perf windows 7 and 8 (every streaming scene started at P5 or P8; the lit dive's two device losses came after long runs on a hot GPU), the look-2km diagnostic run of 2026-10-18, ADR 0057, TEST-033
 
 #### Scenario: Which steps a scene takes
-- **WHEN** a smoke run, a scene with a settled start and a scene from an empty cache are started
-- **THEN** the smoke run takes no step, the settled scene cools and warms up, the empty-cache scene only cools; the choice follows the script's prelude
+- **WHEN** a smoke run and a measured streaming scene are started
+- **THEN** the smoke run takes no step and the measured scene cools down; no scene warms up
+
+#### Scenario: An idle start of a streaming scene
+- **WHEN** a streaming scene began at P8, 210 MHz
+- **THEN** the session is valid for frame verdicts and for GPU rows (none exist), its line says `no GPU rows`, and the warnings are empty; the same start of a lit view still voids the session's GPU verdicts
 
 ### Requirement: TEST-033 Cool start of a view
 Before the warm-up of every view (the terrain scene's and the lit scenes', not in a smoke run) the harness SHALL wait, idle, until the GPU temperature reads 60 C or less, polling every 5 s for at most 120 s, and SHALL print one line per view: the temperatures at the start and the end and the seconds, or `NOT cooled` with the cap. An unreadable sensor ends the wait at once. The wait adds nothing to a measured frame.

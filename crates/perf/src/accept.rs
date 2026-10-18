@@ -432,7 +432,7 @@ pub fn read_scene_as(f: &SceneFiles, lit: bool) -> Result<SceneRead, Vec<String>
     let gpu_valid = matches!(run.get("gpu_valid"), Some(Json::Bool(true)));
     // One definition (validity.rs): frame verdicts count here, or this scene was refused above.
     facts.push(if crate::validity::log_gpu_session_valid(&root) {
-        "session valid for frame verdicts: yes; GPU verdicts: eligible (not part of M4's criteria)".to_string()
+        "session valid for frame verdicts: yes; no GPU rows (the pipelined scenes take no GPU time)".to_string()
     } else {
         format!(
             "session valid for frame verdicts: yes; GPU verdicts: NOT VALID ({}); no M4 criterion is a GPU time",
@@ -750,6 +750,22 @@ mod tests {
         };
         let validity = gate::Validity { reasons: f.invalid.clone() };
         let json = report_json_with_warmups(&adapter, Some(f.scheme), &[], &validity, &protocol, &[run], &[]);
+        // The logs of windows 7 and 8 carry the idle-start warning of a streaming scene that began at P8 (the harness no longer makes it:
+        // `takes_gpu_rows`, TEST-037): the readers still judge such logs by their frame verdicts, so the fixture writes it in by hand.
+        let json = if f.p8_start {
+            let w = format!("run 'stream/{scene}' started with the GPU in P8 at 210 MHz: the workload is too light or the warm-up too short to reach steady clocks (GPU verdicts only; frame verdicts stand)");
+            let json = json
+                .replace("\"valid_for_budgets\":true", "\"valid_for_budgets\":false")
+                .replace("\"gpu_session_valid\":true", "\"gpu_session_valid\":false")
+                .replace("\"gpu_only_causes\":[]", &format!("\"gpu_only_causes\":[\"{w}\"]"));
+            if json.contains("\"warnings\":[]") {
+                json.replace("\"warnings\":[]", &format!("\"warnings\":[\"{w}\"]"))
+            } else {
+                json.replace("\"warnings\":[", &format!("\"warnings\":[\"{w}\","))
+            }
+        } else {
+            json
+        };
         SceneFiles { scene: scene.into(), json: Some(json.into_bytes()), frames: Some(frames_text(frames)), last_valid_present: false }
     }
 
