@@ -12,6 +12,7 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | SPIKE-08 | Ocean connectivity at 16384 | closed 2026-10-16 | `spikes/ocean-connectivity/results/` |
 | SPIKE-09 | Atmosphere f32 forms | closed | `spikes/atmosphere-f32/results/` |
 | SPIKE-11 | Mouse look plumbing | open (owner's local check) | `spikes/mouse-look/results/` |
+| SPIKE-15 | Edit-to-test build time | closed 2026-10-18 | `spikes/build-speed/results/` |
 | SPIKE-14 | egui in the frame | closed 2026-10-18 | `spikes/egui/results/` |
 | SPIKE-13 | Edit-to-visible latency | closed 2026-10-18 | `spikes/edit-latency/results/` |
 | SPIKE-12 | Retiring the vertex tile format | closed 2026-10-17 (recommendation: retire, early M6; owner decides at the M5 gate) | `spikes/vertex-retirement/results/` |
@@ -21,6 +22,26 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | exploration | Compact tiles in storage buffers (PR #225; ADR 0054) | closed | `spikes/compact-storage-buffer/results/` |
 
 The explorations before 2026-10-17 had no register entry; from now on every exploration gets a `SPIKE-NN` entry.
+
+## SPIKE-15 Edit-to-test build time
+Status: closed
+Opened: 2026-10-18
+Closed: 2026-10-18
+Question: Where do the 50-100 s of build after a one-line edit go, and which of a faster linker, fewer test binaries and test-profile tuning bring the edit to the first test result to 20-30 s?
+Why it matters: the owner's development speed; BUILD-003 measures only the test half of `test fast`.
+Time box: 1 day.
+Success criteria: breakdown per edit; median of 3 with the load for each step; recommendation with the expected time.
+Fallback if it fails: a development-only dynamic library of wgpu and winit.
+Code location: branch `spike/spike-15-build-speed` (never merged); results `spikes/build-speed/results/`.
+Result (Rasierklinge, median of 3, build only, cumulative steps):
+| Configuration | frame edit | generators edit | app edit |
+|---|---|---|---|
+| Baseline | 88.8 s | 120.6 s | 31.4 s |
+| `rust-lld` | 78.6 s | 96.9 s | 15.8 s |
+| plus one test binary per tier (frame, render) | 41.6 s | 60.5 s | 18.2 s |
+| plus `debug = "line-tables-only"`, dependencies without debug info | 23.2 s | 41.7 s | 15.2 s |
+| (instead) workspace `opt-level = 0` | 32.1 s | 49.0 s | 33.0 s; tests 28.4 s against 21.2 s |
+Recommendation: apply the debug-info and `rust-lld` changes, then per-tier test binaries for every crate with more than 5 test files (needs the nextest group and xtask guard rework); skip `opt-level = 0` and the dynamic library.
 
 ## SPIKE-14 egui in the frame
 Status: closed
