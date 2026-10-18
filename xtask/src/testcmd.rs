@@ -1,4 +1,5 @@
 use crate::layering::CHAIN;
+use crate::testlog;
 use crate::util::{capture, files_with_ext, run, Res};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -228,14 +229,21 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
     cmd.extend(passthrough.iter().map(|s| s.to_string()));
     // The compile is timed apart from the tests: the budget is for the tests (BUILD-003), and an incremental compile of the
     // changed crate is the compiler's time.
+    // The whole output goes to a log file too (BUILD-012), whose path is printed at the end, pass or fail.
+    let secs_now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let log = testlog::new_log(&root.join(testlog::DIR), &testlog::command_key(sub, real), secs_now)?;
+    let log_path = log.strip_prefix(root).unwrap_or(&log).display().to_string();
     let built = Instant::now();
     let mut build: Vec<&str> = vec!["nextest", "run", "--no-run"];
     build.extend(selection.iter().map(String::as_str));
-    run(root, "cargo", &build, &env)?;
+    if let Err(e) = testlog::run_logged(root, "cargo", &build, &env, &log) {
+        eprintln!("full output: {log_path}");
+        return Err(e);
+    }
     let build_secs = built.elapsed().as_secs_f64();
     let started = Instant::now();
     let args: Vec<&str> = cmd.iter().map(String::as_str).collect();
-    let result = run(root, "cargo", &args, &env);
+    let result = testlog::run_logged(root, "cargo", &args, &env, &log);
 
     let secs = started.elapsed().as_secs_f64();
     eprintln!("elapsed {secs:.1}s (tests; build {build_secs:.1}s)");
@@ -264,6 +272,7 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
             eprintln!("{} candidate golden(s) wait for the owner's /bless (`cargo xtask bless` lists them)", pending.len());
         }
     }
+    eprintln!("full output: {log_path}");
     result.map(|()| TestTiming { test_secs: secs, whole })
 }
 

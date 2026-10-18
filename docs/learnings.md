@@ -450,3 +450,10 @@ What happened: the draft of LOD-011 said nine of the ten standard views have "id
 Assumption it changes: the draft numbers ("plans equal", 11,661 nodes as plans) in the LOD-011 delta; the spec now says same tiles, equal above the floor, no morph at the floor.
 Proposed follow-up: none; `floor_zero_reproduces_the_plans_recorded_before_the_floor` keeps the earlier plans as the floor-0 record (`terrain_plans_floor0.txt`).
 Obsolete when: the vertex render path is removed and the floor is the only start of the tree.
+
+## 2026-10-18 A failing test's output was lost twice in a day: xtask printed what nextest printed and nothing else
+Scope: BUILD-003, BUILD-012
+What happened: `cargo xtask test` passed nextest's output through to the terminal and kept nothing, so a failure that scrolled away, or was seen only as a summary, could not be read again without another long run (the `gpu_window` failure of 2026-10-18 on the RTX was the second case). Runs on the shared RTX cannot be repeated freely. Each run now tees its build and nextest output into `target/test-logs/<command>-<UTC time>.log` and prints the path last.
+Assumption it changes: the console is enough evidence of a test run: it is not; a run's output is its record.
+Proposed follow-up: none; `perf` and `accept` keep their own logs.
+Obsolete when: nextest or CI keeps every run's output where the agents can read it.
