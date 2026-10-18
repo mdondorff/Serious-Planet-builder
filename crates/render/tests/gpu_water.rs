@@ -1,5 +1,5 @@
 //! Tier C: the water pass through the terrain renderer (ADR 0041 points 4 to 6 and 9, ADR 0042 point 2, ADR 0053): water on the
-//! terrain's own grid in both tile formats, with and without the atmosphere; the shoreline from `W - h_morph` against a CPU oracle of
+//! terrain's own grid on compact tiles, with and without the atmosphere; the shoreline from `W - h_morph` against a CPU oracle of
 //! the depth; the synthetic lava lake through the same pass (the retrofit, ADR 0041 point 7); the coastal-flight flicker metric; nothing
 //! created per frame; the frame targets equal to the compiled graph's count; goldens of the discrete shoreline views.
 
@@ -9,13 +9,12 @@ use planet_frame::look::atmosphere::Atmosphere;
 use planet_frame::look::file::LookParams;
 use planet_frame::look::water::{class_flicker_both, water_class, ClassMap, WaterClass, WaterLook, FLICKER_BUDGET};
 use planet_frame::look::{self, LitPlan};
-use planet_frame::pool::{compact_format_pool_with, vertex_slot_bytes};
+use planet_frame::pool::compact_format_pool_with;
 use planet_frame::water::{plan_water, WaterPlan, WaterRequest, WaterSource, WaterTileCache, WaterView};
 use planet_frame::{plan_terrain_field, Camera, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::{tile_data_field, vertex_tile_field};
+use planet_generators::compact::tile_data_field;
 use planet_generators::global::ReadError;
 use planet_generators::height::{HeightField, Reference};
-use planet_generators::mesh::grid_indices;
 use planet_generators::water::{WaterBodyId, WaterSample};
 use planet_render::graph::{lit_frame_graph, LitShape};
 use planet_render::{AdapterPolicy, ExecError, GpuContext, TerrainRenderer};
@@ -45,21 +44,6 @@ fn lod_for(size: (u32, u32)) -> LodParams {
     }
 }
 
-fn vertex_pool() -> PoolConfig {
-    let slot = vertex_slot_bytes(CELLS);
-    PoolConfig {
-        slot_bytes: slot,
-        block_slots: 512,
-        main_blocks: 8,
-        vertex_slot_bytes: slot,
-        vertex_slots: 64,
-        index_bytes: grid_indices(CELLS).len() as u64 * 4,
-        node_record_bytes: 4096 * 512,
-        frames_in_flight: 1,
-        fallback_slots: 0,
-    }
-}
-
 fn compact_pool() -> PoolConfig {
     let block_slots = 40 * 40;
     let one = compact_format_pool_with(
@@ -72,26 +56,18 @@ fn compact_pool() -> PoolConfig {
     PoolConfig { vertex_slots: 768, fallback_slots: 512, ..one }
 }
 
-fn new_renderer(ctx: &GpuContext, compact: bool, size: (u32, u32)) -> TerrainRenderer {
-    let mut r = if compact {
-        TerrainRenderer::with_compact_pools(ctx, size, CELLS, compact_pool())
-    } else {
-        TerrainRenderer::with_pools(ctx, size, CELLS, vertex_pool())
-    };
+fn new_renderer(ctx: &GpuContext, size: (u32, u32)) -> TerrainRenderer {
+    let mut r = TerrainRenderer::with_compact_pools(ctx, size, CELLS, compact_pool());
     r.enable_lit(ctx);
     r
 }
 
-fn upload_all(ctx: &GpuContext, r: &mut TerrainRenderer, plan: &TerrainPlan, field: &dyn HeightField, compact: bool) {
+fn upload_all(ctx: &GpuContext, r: &mut TerrainRenderer, plan: &TerrainPlan, field: &dyn HeightField) {
     for n in &plan.nodes {
         if r.slot_of(n.tile).is_some() {
             continue;
         }
-        if compact {
-            r.upload_tile(ctx, &tile_data_field(field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
-        } else {
-            r.upload(ctx, &vertex_tile_field(field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
-        }
+        r.upload_tile(ctx, &tile_data_field(field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
     }
 }
 
@@ -283,8 +259,8 @@ fn the_lit_water_and_atmosphere_frames_over_compact_blocks_are_the_recorded_pixe
     let plan = Scene { camera, size, field: &field }.terrain();
     let lit_water = water_plan(&plan, &src, &table, size, 2.0, WaterView::Lit);
     let class_water = water_plan(&plan, &src, &table, size, 2.0, WaterView::Class);
-    let mut r = new_renderer(&ctx, true, size);
-    upload_all(&ctx, &mut r, &plan, &field, true);
+    let mut r = new_renderer(&ctx, size);
+    upload_all(&ctx, &mut r, &plan, &field);
     r.enable_atmosphere(&ctx, &Atmosphere::earth(R));
     r.enable_water(&ctx);
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
@@ -318,8 +294,8 @@ fn a_water_plan_needs_the_water_pass_and_names_the_missing_call_and_a_bad_node_i
     let src = HeightSea { field: &field, level: 0.0 };
     let wp = water_plan(&plan, &src, &table, size, 1.0, WaterView::Lit);
     assert!(!wp.nodes.is_empty());
-    let mut r = new_renderer(&ctx, false, size);
-    upload_all(&ctx, &mut r, &plan, &field, false);
+    let mut r = new_renderer(&ctx, size);
+    upload_all(&ctx, &mut r, &plan, &field);
     let mut p = plan.clone();
     p.lit = Some(lit_plan(false));
     p.water = Some(wp.clone());
@@ -341,7 +317,7 @@ fn a_water_plan_needs_the_water_pass_and_names_the_missing_call_and_a_bad_node_i
 
 // spec: ATMO-004, ATMO-015
 #[test]
-fn the_class_view_follows_the_depth_of_the_terrain_under_the_water_in_both_tile_formats() {
+fn the_class_view_follows_the_depth_of_the_terrain_under_the_water() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let field = Reference(1);
     let size = (256, 160);
@@ -356,21 +332,16 @@ fn the_class_view_follows_the_depth_of_the_terrain_under_the_water_in_both_tile_
         let scene = Scene { camera, size, field: &field };
         let plan = scene.terrain();
         let wp = water_plan(&plan, &src, &table, size, 2.0, WaterView::Class);
-        let mut per_format = Vec::new();
-        for compact in [false, true] {
-            let mut r = new_renderer(&ctx, compact, size);
-            upload_all(&ctx, &mut r, &plan, &field, compact);
-            r.enable_water(&ctx);
-            let base = frame(&ctx, &mut r, &plan, None, false);
-            let with = frame(&ctx, &mut r, &plan, Some(&wp), false);
-            // The water pass changes no pixel the terrain covers that is not water, and never adds coverage.
-            assert!(base.iter().zip(&with).all(|(a, b)| (a[3] > 0.0) == (b[3] > 0.0)), "{name}: the water adds no coverage");
-            let map = class_map(&base, &with, size);
-            per_format.push(map);
-        }
+        let mut r = new_renderer(&ctx, size);
+        upload_all(&ctx, &mut r, &plan, &field);
+        r.enable_water(&ctx);
+        let base = frame(&ctx, &mut r, &plan, None, false);
+        let with = frame(&ctx, &mut r, &plan, Some(&wp), false);
+        // The water pass changes no pixel the terrain covers that is not water, and never adds coverage.
+        assert!(base.iter().zip(&with).all(|(a, b)| (a[3] > 0.0) == (b[3] > 0.0)), "{name}: the water adds no coverage");
+        let map = class_map(&base, &with, size);
         // The oracle: the class of every water pixel is the class of the CPU's depth at the point its ray meets the water, up to the
         // mesh's own interpolation (the vertex heights are exact, the surface between them is linear) near the band edges.
-        let map = &per_format[0];
         let water: usize = map.class.iter().filter(|c| **c != 0).count();
         assert!(water > 1000, "{name}: {water} water pixels");
         let mut wrong = 0;
@@ -401,10 +372,8 @@ fn the_class_view_follows_the_depth_of_the_terrain_under_the_water_in_both_tile_
         }
         assert!(checked > 1000, "{name}: {checked} water pixels checked");
         assert!(wrong * 100 <= checked, "{name}: {wrong} of {checked} pixels have a class the CPU's depth does not give");
-        // The two tile formats draw the same shoreline: the classes differ on at most 0.5 % of the frame.
-        let differing = per_format[0].class.iter().zip(&per_format[1].class).filter(|(a, b)| a != b).count();
-        assert!(differing * 200 <= (size.0 * size.1) as usize, "{name}: formats differ on {differing} pixels");
-        println!("{name}: {water} water pixels, {wrong} of {checked} off the oracle, formats differ on {differing}");
+        // (The comparison of the two tile formats' shorelines went with the vertex format: the CPU depth oracle above is the reference.)
+        println!("{name}: {water} water pixels, {wrong} of {checked} off the oracle");
         // Along the middle column the classes only grow with the distance from the shore (monotone out to sea).
         let col = size.0 / 2;
         let mut last = 0u8;
@@ -420,7 +389,7 @@ fn the_class_view_follows_the_depth_of_the_terrain_under_the_water_in_both_tile_
             last = k;
         }
         assert!(order_breaks <= 3, "{name}: the classes along the middle column are not ordered: {order_breaks} breaks");
-        maps.push((name.to_string(), per_format.remove(1)));
+        maps.push((name.to_string(), map));
     }
     assert!(maps.iter().any(|(_, m)| m.class.contains(&(WaterClass::Foam as u8))), "a foam band shows on the coast");
 }
@@ -439,45 +408,40 @@ fn the_lit_water_covers_what_the_class_view_covers_is_finite_and_the_atmosphere_
     let plan = scene.terrain();
     let lit_water = water_plan(&plan, &src, &table, size, 2.0, WaterView::Lit);
     let class_water = water_plan(&plan, &src, &table, size, 2.0, WaterView::Class);
-    for compact in [false, true] {
-        let mut r = new_renderer(&ctx, compact, size);
-        upload_all(&ctx, &mut r, &plan, &field, compact);
-        r.enable_atmosphere(&ctx, &Atmosphere::earth(R));
-        r.enable_water(&ctx);
-        let mut luminance = [0.0f64; 2];
-        for (k, atmosphere) in [false, true].into_iter().enumerate() {
-            let base = frame(&ctx, &mut r, &plan, None, atmosphere);
-            let class = frame(&ctx, &mut r, &plan, Some(&class_water), false);
-            let plain_base = frame(&ctx, &mut r, &plan, None, false);
-            let water_mask: Vec<bool> = plain_base.iter().zip(&class).map(|(a, b)| a != b).collect();
-            let lit = frame(&ctx, &mut r, &plan, Some(&lit_water), atmosphere);
-            let n = water_mask.iter().filter(|m| **m).count();
-            assert!(n > 2000, "compact {compact}, atmosphere {atmosphere}: {n} water pixels");
-            assert!(
-                lit.iter().all(|p| p.iter().all(|v| v.is_finite() && *v >= 0.0 && *v <= look::HDR_CLAMP)),
-                "compact {compact}, atmosphere {atmosphere}: finite and clamped"
-            );
-            // Only water pixels change.
-            for (i, (a, b)) in base.iter().zip(&lit).enumerate() {
-                if !water_mask[i] {
-                    assert_eq!(a, b, "pixel {i} is not water and must not change (compact {compact}, atmosphere {atmosphere})");
-                }
-            }
-            let mean: f64 = lit
-                .iter()
-                .zip(&water_mask)
-                .filter(|(_, m)| **m)
-                .map(|(p, _)| look::luminance([f64::from(p[0]), f64::from(p[1]), f64::from(p[2])]))
-                .sum::<f64>()
-                / n as f64;
-            luminance[k] = mean;
-            assert!(mean > 0.0, "the water is lit");
-            if compact && atmosphere {
-                write_inspection("coast_aerial_lit_atmosphere", &image_of(&r, &ctx));
+    let mut r = new_renderer(&ctx, size);
+    upload_all(&ctx, &mut r, &plan, &field);
+    r.enable_atmosphere(&ctx, &Atmosphere::earth(R));
+    r.enable_water(&ctx);
+    let mut luminance = [0.0f64; 2];
+    for (k, atmosphere) in [false, true].into_iter().enumerate() {
+        let base = frame(&ctx, &mut r, &plan, None, atmosphere);
+        let class = frame(&ctx, &mut r, &plan, Some(&class_water), false);
+        let plain_base = frame(&ctx, &mut r, &plan, None, false);
+        let water_mask: Vec<bool> = plain_base.iter().zip(&class).map(|(a, b)| a != b).collect();
+        let lit = frame(&ctx, &mut r, &plan, Some(&lit_water), atmosphere);
+        let n = water_mask.iter().filter(|m| **m).count();
+        assert!(n > 2000, "{n} water pixels");
+        assert!(lit.iter().all(|p| p.iter().all(|v| v.is_finite() && *v >= 0.0 && *v <= look::HDR_CLAMP)), "finite and clamped");
+        // Only water pixels change.
+        for (i, (a, b)) in base.iter().zip(&lit).enumerate() {
+            if !water_mask[i] {
+                assert_eq!(a, b, "pixel {i} is not water and must not change");
             }
         }
-        assert!((luminance[0] - luminance[1]).abs() > 1e-3 * luminance[0].max(1e-9), "the atmosphere changes the water: {luminance:?}");
+        let mean: f64 = lit
+            .iter()
+            .zip(&water_mask)
+            .filter(|(_, m)| **m)
+            .map(|(p, _)| look::luminance([f64::from(p[0]), f64::from(p[1]), f64::from(p[2])]))
+            .sum::<f64>()
+            / n as f64;
+        luminance[k] = mean;
+        assert!(mean > 0.0, "the water is lit");
+        if atmosphere {
+            write_inspection("coast_aerial_lit_atmosphere", &image_of(&r, &ctx));
+        }
     }
+    assert!((luminance[0] - luminance[1]).abs() > 1e-3 * luminance[0].max(1e-9), "the atmosphere changes the water: {luminance:?}");
 }
 
 /// The reference terrain with its relief scaled up: the shelf and the coast of the reference field are a gradient of 2.5 m per km, far
@@ -629,42 +593,38 @@ fn a_lava_lake_with_its_own_level_and_emission_goes_through_the_same_water_pass_
     let lava_slot = lit_water.liquids.iter().position(|l| l.kind == 1).expect("the lava is in the plan");
     assert!(lake_nodes.iter().all(|n| usize::from(n.liquid) == lava_slot));
     assert!(!lit_water.liquids[lava_slot].has_waves(), "lava has no waves");
-    for compact in [false, true] {
-        let mut r = new_renderer(&ctx, compact, size);
-        upload_all(&ctx, &mut r, &plan, &field, compact);
-        r.enable_water(&ctx);
-        let (objects, built) = (r.lit_objects(), r.init_counts());
-        let base = frame(&ctx, &mut r, &plan, None, false);
-        let lit = frame(&ctx, &mut r, &plan, Some(&lit_water), false);
-        // The same pipelines draw the lake: nothing new was made for a second liquid.
-        assert_eq!((r.lit_objects(), r.init_counts()), (objects, built));
-        let changed: Vec<usize> = base.iter().zip(&lit).enumerate().filter(|(_, (a, b))| a != b).map(|(i, _)| i).collect();
-        assert!(changed.len() > 800, "compact {compact}: the lake covers {} pixels", changed.len());
-        // Emission: the lava is far brighter than the sunlit terrain around it, and red.
-        let lum = |p: &[f32; 4]| look::luminance([f64::from(p[0]), f64::from(p[1]), f64::from(p[2])]);
-        let lake_mean = changed.iter().map(|&i| lum(&lit[i])).sum::<f64>() / changed.len() as f64;
-        let land: Vec<usize> = (0..lit.len()).filter(|i| lit[*i][3] > 0.0 && base[*i] == lit[*i]).collect();
-        let land_mean = land.iter().map(|&i| lum(&lit[i])).sum::<f64>() / land.len() as f64;
-        assert!(lake_mean > 5.0 * land_mean, "compact {compact}: the lava glows: {lake_mean} against the land's {land_mean}");
-        let centre_px = changed[changed.len() / 2];
-        assert!(lit[centre_px][0] > lit[centre_px][1] && lit[centre_px][1] > lit[centre_px][2], "the lava is red: {:?}", lit[centre_px]);
-        // No waves: the wave view is one level on the whole lake, and the water view of the class bands shows its depth.
-        let mut waves = water_plan(&plan, &src, &table, size, 5.0, WaterView::Waves);
-        let wave_frame = frame(&ctx, &mut r, &plan, Some(&waves), false);
-        let levels: std::collections::BTreeSet<u32> = changed.iter().map(|&i| (wave_frame[i][0] * 1000.0).round() as u32).collect();
-        assert_eq!(levels.len(), 1, "compact {compact}: {levels:?}");
-        waves.view = WaterView::Class;
-        let class_frame = frame(&ctx, &mut r, &plan, Some(&waves), false);
-        let map = class_map(&base, &class_frame, size);
-        let classes: std::collections::BTreeSet<u8> = map.class.iter().copied().filter(|c| *c != 0).collect();
-        assert!(classes.len() >= 3, "compact {compact}: the basin has a shoreline with bands: {classes:?}");
-        if compact {
-            write_inspection("lava_lake_lit", &{
-                let _ = frame(&ctx, &mut r, &plan, Some(&lit_water), false);
-                image_of(&r, &ctx)
-            });
-        }
-    }
+    let mut r = new_renderer(&ctx, size);
+    upload_all(&ctx, &mut r, &plan, &field);
+    r.enable_water(&ctx);
+    let (objects, built) = (r.lit_objects(), r.init_counts());
+    let base = frame(&ctx, &mut r, &plan, None, false);
+    let lit = frame(&ctx, &mut r, &plan, Some(&lit_water), false);
+    // The same pipelines draw the lake: nothing new was made for a second liquid.
+    assert_eq!((r.lit_objects(), r.init_counts()), (objects, built));
+    let changed: Vec<usize> = base.iter().zip(&lit).enumerate().filter(|(_, (a, b))| a != b).map(|(i, _)| i).collect();
+    assert!(changed.len() > 800, "the lake covers {} pixels", changed.len());
+    // Emission: the lava is far brighter than the sunlit terrain around it, and red.
+    let lum = |p: &[f32; 4]| look::luminance([f64::from(p[0]), f64::from(p[1]), f64::from(p[2])]);
+    let lake_mean = changed.iter().map(|&i| lum(&lit[i])).sum::<f64>() / changed.len() as f64;
+    let land: Vec<usize> = (0..lit.len()).filter(|i| lit[*i][3] > 0.0 && base[*i] == lit[*i]).collect();
+    let land_mean = land.iter().map(|&i| lum(&lit[i])).sum::<f64>() / land.len() as f64;
+    assert!(lake_mean > 5.0 * land_mean, "the lava glows: {lake_mean} against the land's {land_mean}");
+    let centre_px = changed[changed.len() / 2];
+    assert!(lit[centre_px][0] > lit[centre_px][1] && lit[centre_px][1] > lit[centre_px][2], "the lava is red: {:?}", lit[centre_px]);
+    // No waves: the wave view is one level on the whole lake, and the water view of the class bands shows its depth.
+    let mut waves = water_plan(&plan, &src, &table, size, 5.0, WaterView::Waves);
+    let wave_frame = frame(&ctx, &mut r, &plan, Some(&waves), false);
+    let levels: std::collections::BTreeSet<u32> = changed.iter().map(|&i| (wave_frame[i][0] * 1000.0).round() as u32).collect();
+    assert_eq!(levels.len(), 1, "{levels:?}");
+    waves.view = WaterView::Class;
+    let class_frame = frame(&ctx, &mut r, &plan, Some(&waves), false);
+    let map = class_map(&base, &class_frame, size);
+    let classes: std::collections::BTreeSet<u8> = map.class.iter().copied().filter(|c| *c != 0).collect();
+    assert!(classes.len() >= 3, "the basin has a shoreline with bands: {classes:?}");
+    write_inspection("lava_lake_lit", &{
+        let _ = frame(&ctx, &mut r, &plan, Some(&lit_water), false);
+        image_of(&r, &ctx)
+    });
 }
 
 // spec: ATMO-013
@@ -679,8 +639,8 @@ fn the_waves_move_with_the_clock_and_only_on_water_and_stand_still_for_the_same_
     let camera = coast_camera(c, heading, 0.0, 30.0, 3500.0, 0.0, 8.0, 1.6);
     let scene = Scene { camera, size, field: &field };
     let plan = scene.terrain();
-    let mut r = new_renderer(&ctx, false, size);
-    upload_all(&ctx, &mut r, &plan, &field, false);
+    let mut r = new_renderer(&ctx, size);
+    upload_all(&ctx, &mut r, &plan, &field);
     r.enable_water(&ctx);
     let base = frame(&ctx, &mut r, &plan, None, false);
     let mut at = |t: f64, view: WaterView| frame(&ctx, &mut r, &plan, Some(&water_plan(&plan, &src, &table, size, t, view)), false);
@@ -716,8 +676,8 @@ fn nothing_is_created_per_frame_after_enable_water_and_the_frame_targets_equal_t
     let scene = Scene { camera, size, field: &field };
     let plan = scene.terrain();
     let wp = water_plan(&plan, &src, &table, size, 3.0, WaterView::Lit);
-    let mut r = new_renderer(&ctx, true, size);
-    upload_all(&ctx, &mut r, &plan, &field, true);
+    let mut r = new_renderer(&ctx, size);
+    upload_all(&ctx, &mut r, &plan, &field);
     let before = r.lit_frame_target_bytes().unwrap();
     r.enable_atmosphere(&ctx, &Atmosphere::earth(R));
     r.enable_water(&ctx);
@@ -795,13 +755,13 @@ fn fly(
     }
     look.water.shore_filter = shore_filter;
     let mut cache = WaterTileCache::new();
-    let mut r = new_renderer(ctx, false, size);
+    let mut r = new_renderer(ctx, size);
     r.enable_water(ctx);
     let mut frames = Vec::new();
     for (k, camera) in cameras.iter().enumerate() {
         let scene = Scene { camera: *camera, size, field };
         let plan = scene.terrain();
-        upload_all(ctx, &mut r, &plan, field, false);
+        upload_all(ctx, &mut r, &plan, field);
         let wp = plan_water(
             &WaterRequest {
                 source: &src,
@@ -989,8 +949,8 @@ fn water_class_views_match_the_adapters_goldens() {
         let scene = Scene { camera, size, field: &field };
         let plan = scene.terrain();
         let wp = water_plan(&plan, &src, &table, size, 0.0, WaterView::Class);
-        let mut r = new_renderer(&ctx, true, size);
-        upload_all(&ctx, &mut r, &plan, &field, true);
+        let mut r = new_renderer(&ctx, size);
+        upload_all(&ctx, &mut r, &plan, &field);
         r.enable_water(&ctx);
         let base = frame(&ctx, &mut r, &plan, None, false);
         let with = frame(&ctx, &mut r, &plan, Some(&wp), false);
@@ -1020,8 +980,8 @@ fn water_class_views_match_the_adapters_goldens() {
     let scene = Scene { camera, size, field: &basin };
     let plan = scene.terrain();
     let wp = water_plan(&plan, &lake, &lava, size, 0.0, WaterView::Class);
-    let mut r = new_renderer(&ctx, true, size);
-    upload_all(&ctx, &mut r, &plan, &basin, true);
+    let mut r = new_renderer(&ctx, size);
+    upload_all(&ctx, &mut r, &plan, &basin);
     r.enable_water(&ctx);
     let base = frame(&ctx, &mut r, &plan, None, false);
     let with = frame(&ctx, &mut r, &plan, Some(&wp), false);
@@ -1052,8 +1012,8 @@ fn the_lit_water_views_are_written_for_inspection() {
         let scene = Scene { camera, size, field: &field };
         let plan = scene.terrain();
         let wp = water_plan(&plan, &src, &table, size, 7.0, WaterView::Lit);
-        let mut r = new_renderer(&ctx, true, size);
-        upload_all(&ctx, &mut r, &plan, &field, true);
+        let mut r = new_renderer(&ctx, size);
+        upload_all(&ctx, &mut r, &plan, &field);
         if atmosphere {
             r.enable_atmosphere(&ctx, &Atmosphere::earth(R));
         }
@@ -1080,8 +1040,8 @@ fn a_timed_lit_frame_reports_the_gpu_time_of_every_pass_it_ran_and_the_pixels_do
     let plan = Scene { camera, size, field: &field }.terrain();
     let water = water_plan(&plan, &src, &table, size, 2.0, WaterView::Lit);
     assert!(!water.nodes.is_empty(), "the view holds water");
-    let mut r = new_renderer(&ctx, true, size);
-    upload_all(&ctx, &mut r, &plan, &field, true);
+    let mut r = new_renderer(&ctx, size);
+    upload_all(&ctx, &mut r, &plan, &field);
     r.enable_atmosphere(&ctx, &Atmosphere::earth(R));
     r.enable_water(&ctx);
     let mut lit = plan.clone();

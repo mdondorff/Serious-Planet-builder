@@ -1,14 +1,13 @@
 //! Tier C: the lit path through the terrain renderer (ADR 0038, ADR 0042 points 1-3 and 5): terrain into the `Rgba16Float` scene
-//! target with the pre-exposure, the histogram exposure and the tone map, on both tile formats; the debug path unchanged; the frame
+//! target with the pre-exposure, the histogram exposure and the tone map, on compact tiles; the debug path unchanged; the frame
 //! targets equal to the compiled graph's count; goldens of the lit frames at a fixed exposure.
 
 use planet_core::cube::TangentWarp;
 use planet_frame::look::{self, LitPlan, ToneMapMode};
-use planet_frame::pool::{compact_format_pool_with, vertex_slot_bytes};
+use planet_frame::pool::compact_format_pool_with;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::{tile_data_field, vertex_tile_field};
+use planet_generators::compact::tile_data_field;
 use planet_generators::height::Reference;
-use planet_generators::mesh::grid_indices;
 use planet_render::graph::{frame_target_share_bytes, lit_frame_graph, LitShape};
 use planet_render::{AdapterPolicy, ExecError, GpuContext, TerrainRenderer};
 use planet_streaming::PoolConfig;
@@ -32,21 +31,6 @@ fn lit(mut p: TerrainPlan, l: LitPlan) -> TerrainPlan {
     p
 }
 
-fn vertex_pool() -> PoolConfig {
-    let slot = vertex_slot_bytes(CELLS);
-    PoolConfig {
-        slot_bytes: slot,
-        block_slots: 512,
-        main_blocks: 4,
-        vertex_slot_bytes: slot,
-        vertex_slots: 64,
-        index_bytes: grid_indices(CELLS).len() as u64 * 4,
-        node_record_bytes: 4096 * 512,
-        frames_in_flight: 1,
-        fallback_slots: 0,
-    }
-}
-
 fn compact_pool() -> PoolConfig {
     let block_slots = 24 * 24;
     let one = compact_format_pool_with(
@@ -59,13 +43,9 @@ fn compact_pool() -> PoolConfig {
     PoolConfig { vertex_slots: 256, fallback_slots: 192, ..one }
 }
 
-/// A renderer in `compact` or vertex format holding the tiles of `plans`.
-fn renderer(ctx: &GpuContext, compact: bool, plans: &[&TerrainPlan], enable_lit: bool) -> TerrainRenderer {
-    let mut r = if compact {
-        TerrainRenderer::with_compact_pools(ctx, SIZE, CELLS, compact_pool())
-    } else {
-        TerrainRenderer::with_pools(ctx, SIZE, CELLS, vertex_pool())
-    };
+/// A compact-format renderer holding the tiles of `plans`.
+fn renderer(ctx: &GpuContext, plans: &[&TerrainPlan], enable_lit: bool) -> TerrainRenderer {
+    let mut r = TerrainRenderer::with_compact_pools(ctx, SIZE, CELLS, compact_pool());
     if enable_lit {
         r.enable_lit(ctx);
     }
@@ -75,11 +55,7 @@ fn renderer(ctx: &GpuContext, compact: bool, plans: &[&TerrainPlan], enable_lit:
             if r.slot_of(n.tile).is_some() {
                 continue;
             }
-            if compact {
-                r.upload_tile(ctx, &tile_data_field(&field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
-            } else {
-                r.upload(ctx, &vertex_tile_field(&field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
-            }
+            r.upload_tile(ctx, &tile_data_field(&field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
         }
     }
     r
@@ -109,42 +85,40 @@ fn the_lit_path_formats_are_rgba16_float_and_reversed_z_depth32() {
 fn a_lit_plan_needs_the_lit_path_and_names_the_missing_call() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan(3);
-    let mut r = renderer(&ctx, false, &[&p], false);
+    let mut r = renderer(&ctx, &[&p], false);
     let e = r.render(&ctx, &lit(p, LitPlan::fixed(EV)), false).unwrap_err();
     assert!(matches!(e, ExecError::LitNotEnabled) && e.to_string().contains("enable_lit"), "{e}");
 }
 
 // spec: REND-026
 #[test]
-fn the_lit_frame_covers_the_same_pixels_as_the_debug_frame_in_both_tile_formats() {
+fn the_lit_frame_covers_the_same_pixels_as_the_debug_frame() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
-    for compact in [false, true] {
-        for index in [0usize, 3, 6] {
-            let what = format!("compact {compact}, view {index}");
-            let p = plan(index);
-            let mut r = renderer(&ctx, compact, &[&p], true);
-            r.render(&ctx, &p, false).unwrap();
-            let debug = image(&r, &ctx);
-            r.render(&ctx, &lit(p.clone(), LitPlan::fixed(EV)), false).unwrap();
-            let hdr = r.lit_path().unwrap().read_hdr(&ctx);
-            let covered_hdr: Vec<bool> = hdr.iter().map(|p| p[3] > 0.0).collect();
-            let covered_dbg: Vec<bool> = debug.pixels().map(|px| px != p.clear_color).collect();
-            assert_eq!(covered_hdr, covered_dbg, "{what}: the lit and debug paths draw the same pixels (same geometry, same depth test)");
-            assert!(covered_hdr.iter().filter(|c| **c).count() > 100, "{what}: the planet is visible");
-            // Every value is finite and inside the clamp: no inf or NaN can reach the histogram (ADR 0038 point 1).
-            for (i, px) in hdr.iter().enumerate() {
-                assert!(px.iter().all(|v| v.is_finite() && *v >= 0.0 && *v <= look::HDR_CLAMP), "{what}: pixel {i} holds {px:?}");
-            }
-            // Some of the planet is lit (the sun is fixed in the plan), some is in shadow.
-            let lit_px = hdr.iter().filter(|p| p[3] > 0.0 && look::luminance(rgb64(p)) > 0.0).count();
-            assert!(lit_px > 0, "{what}: no lit terrain at all");
-            // The debug path of a lit-enabled renderer draws what it always drew.
-            let mut plain = renderer(&ctx, compact, &[&p], false);
-            plain.render(&ctx, &p, false).unwrap();
-            assert_eq!(image(&plain, &ctx), debug, "{what}: enabling the lit path must not change the debug image");
-            r.render(&ctx, &p, false).unwrap();
-            assert_eq!(image(&r, &ctx), debug, "{what}: a debug frame after a lit frame is unchanged");
+    for index in [0usize, 3, 6] {
+        let what = format!("view {index}");
+        let p = plan(index);
+        let mut r = renderer(&ctx, &[&p], true);
+        r.render(&ctx, &p, false).unwrap();
+        let debug = image(&r, &ctx);
+        r.render(&ctx, &lit(p.clone(), LitPlan::fixed(EV)), false).unwrap();
+        let hdr = r.lit_path().unwrap().read_hdr(&ctx);
+        let covered_hdr: Vec<bool> = hdr.iter().map(|p| p[3] > 0.0).collect();
+        let covered_dbg: Vec<bool> = debug.pixels().map(|px| px != p.clear_color).collect();
+        assert_eq!(covered_hdr, covered_dbg, "{what}: the lit and debug paths draw the same pixels (same geometry, same depth test)");
+        assert!(covered_hdr.iter().filter(|c| **c).count() > 100, "{what}: the planet is visible");
+        // Every value is finite and inside the clamp: no inf or NaN can reach the histogram (ADR 0038 point 1).
+        for (i, px) in hdr.iter().enumerate() {
+            assert!(px.iter().all(|v| v.is_finite() && *v >= 0.0 && *v <= look::HDR_CLAMP), "{what}: pixel {i} holds {px:?}");
         }
+        // Some of the planet is lit (the sun is fixed in the plan), some is in shadow.
+        let lit_px = hdr.iter().filter(|p| p[3] > 0.0 && look::luminance(rgb64(p)) > 0.0).count();
+        assert!(lit_px > 0, "{what}: no lit terrain at all");
+        // The debug path of a lit-enabled renderer draws what it always drew.
+        let mut plain = renderer(&ctx, &[&p], false);
+        plain.render(&ctx, &p, false).unwrap();
+        assert_eq!(image(&plain, &ctx), debug, "{what}: enabling the lit path must not change the debug image");
+        r.render(&ctx, &p, false).unwrap();
+        assert_eq!(image(&r, &ctx), debug, "{what}: a debug frame after a lit frame is unchanged");
     }
 }
 
@@ -154,7 +128,7 @@ fn the_scene_unit_scale_of_the_look_scales_the_scene_target() {
     use planet_frame::look::SceneUnits;
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let base = plan(3);
-    let mut r = renderer(&ctx, false, &[&base], true);
+    let mut r = renderer(&ctx, &[&base], true);
     r.render(&ctx, &lit(base.clone(), LitPlan::fixed(EV)), false).unwrap();
     let earth = r.lit_path().unwrap().read_hdr(&ctx);
     // A sun a quarter as bright (a body four times as far away): every written value is a quarter of the Earth's.
@@ -184,24 +158,22 @@ fn the_scene_unit_scale_of_the_look_scales_the_scene_target() {
 #[test]
 fn the_lit_frame_is_tone_mapped_from_its_scene_target_within_one_step() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
-    for compact in [false, true] {
-        let p = lit(plan(3), LitPlan::fixed(EV));
-        let mut r = renderer(&ctx, compact, &[&p], true);
-        r.render(&ctx, &p, false).unwrap();
-        let hdr = r.lit_path().unwrap().read_hdr(&ctx);
-        let ldr = r.read_color(&ctx);
-        let mut worst = 0i32;
-        for (i, px) in hdr.iter().enumerate() {
-            let want = look::tonemap_pixel(rgb64(px), f64::from(EV), f64::from(EV));
-            for (c, w) in want.iter().enumerate() {
-                let d = (i32::from(ldr.rgba[4 * i + c]) - i32::from(*w)).abs();
-                worst = worst.max(d);
-                assert!(d <= 1, "compact {compact}: pixel {i} channel {c}: GPU {}, reference {w}", ldr.rgba[4 * i + c]);
-            }
-            assert_eq!(ldr.rgba[4 * i + 3], 255);
+    let p = lit(plan(3), LitPlan::fixed(EV));
+    let mut r = renderer(&ctx, &[&p], true);
+    r.render(&ctx, &p, false).unwrap();
+    let hdr = r.lit_path().unwrap().read_hdr(&ctx);
+    let ldr = r.read_color(&ctx);
+    let mut worst = 0i32;
+    for (i, px) in hdr.iter().enumerate() {
+        let want = look::tonemap_pixel(rgb64(px), f64::from(EV), f64::from(EV));
+        for (c, w) in want.iter().enumerate() {
+            let d = (i32::from(ldr.rgba[4 * i + c]) - i32::from(*w)).abs();
+            worst = worst.max(d);
+            assert!(d <= 1, "pixel {i} channel {c}: GPU {}, reference {w}", ldr.rgba[4 * i + c]);
         }
-        println!("lit tone map (compact {compact}): worst difference {worst}/255");
+        assert_eq!(ldr.rgba[4 * i + 3], 255);
     }
+    println!("lit tone map: worst difference {worst}/255");
 }
 
 // spec: REND-022
@@ -209,7 +181,7 @@ fn the_lit_frame_is_tone_mapped_from_its_scene_target_within_one_step() {
 fn the_adaptive_exposure_of_a_terrain_frame_follows_the_cpu_reference_from_its_scene_target() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let base = plan(3);
-    let mut r = renderer(&ctx, true, &[&base], true);
+    let mut r = renderer(&ctx, &[&base], true);
     let params = look::ExposureParams::default();
     let mut ev: Option<f64> = None;
     // Three frames at a pre-exposure far from the right one: the first snaps to the scene, the next two stay (same scene).
@@ -245,7 +217,7 @@ fn the_adaptive_exposure_of_a_terrain_frame_follows_the_cpu_reference_from_its_s
 fn the_renderers_frame_targets_equal_the_compiled_graphs_count_and_fit_the_share() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan(3);
-    let mut r = renderer(&ctx, false, &[&p], false);
+    let mut r = renderer(&ctx, &[&p], false);
     assert_eq!(r.lit_frame_target_bytes(), None, "no lit targets before enable_lit");
     r.enable_lit(&ctx);
     let compiled = lit_frame_graph(&LitShape { size: SIZE, adaptive: true, atmosphere: false, water: false }).compile().unwrap();
@@ -263,7 +235,7 @@ fn the_renderers_frame_targets_equal_the_compiled_graphs_count_and_fit_the_share
 fn lit_frames_create_nothing_after_the_lit_path_is_enabled() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan(3);
-    let mut r = renderer(&ctx, true, &[&p], true);
+    let mut r = renderer(&ctx, &[&p], true);
     let (built, objects) = (r.init_counts(), r.lit_objects());
     assert!(objects >= 6, "{objects}");
     for plan in [lit(p.clone(), LitPlan::fixed(EV)), lit(p.clone(), LitPlan::adaptive(EV, 0.016)), lit(p.clone(), LitPlan::fixed(EV))] {
@@ -283,7 +255,7 @@ fn lit_frames_create_nothing_after_the_lit_path_is_enabled() {
 fn the_same_lit_plan_gives_the_same_image_and_the_sun_moves_the_light() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let base = plan(3);
-    let mut r = renderer(&ctx, true, &[&base], true);
+    let mut r = renderer(&ctx, &[&base], true);
     let p = lit(base.clone(), LitPlan::fixed(EV));
     r.render(&ctx, &p, false).unwrap();
     let first = image(&r, &ctx);
@@ -307,7 +279,7 @@ fn lit_frames_match_the_adapters_goldens() {
     let mut goldens = GoldenChecks::new(&ctx.adapter_key(), &ctx.driver_string());
     for (index, golden) in [(0usize, "lit_orbit_ev15"), (3, "lit_aerial20km_ev15"), (6, "lit_ground1m_ev15")] {
         let p = lit(plan(index), LitPlan::fixed(EV));
-        let mut r = renderer(&ctx, true, &[&p], true);
+        let mut r = renderer(&ctx, &[&p], true);
         r.render(&ctx, &p, false).unwrap();
         let img = image(&r, &ctx);
         // The test's own oracle for the candidate: the planet is there and not everything is black or clipped.
@@ -322,7 +294,7 @@ fn lit_frames_match_the_adapters_goldens() {
     let mut bands = LitPlan::fixed(EV);
     bands.tonemap = ToneMapMode::EvBands;
     let p = lit(plan(0), bands);
-    let mut r = renderer(&ctx, true, &[&p], true);
+    let mut r = renderer(&ctx, &[&p], true);
     r.render(&ctx, &p, false).unwrap();
     let img = image(&r, &ctx);
     let shown: std::collections::BTreeSet<[u8; 3]> = img.pixels().map(|p| [p[0], p[1], p[2]]).collect();

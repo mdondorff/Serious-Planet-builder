@@ -85,7 +85,8 @@ pub fn execute_reference(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[&TileMe
             view_formats: &[],
         })
     };
-    let color = target("reference-color", wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
+    let color =
+        target("reference-color", wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
     let depth = target("reference-depth", DEPTH_FORMAT, wgpu::TextureUsages::RENDER_ATTACHMENT);
     let (color_view, depth_view) = (color.create_view(&Default::default()), depth.create_view(&Default::default()));
 
@@ -131,7 +132,8 @@ pub fn execute_reference(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[&TileMe
         source: wgpu::ShaderSource::Wgsl(reference_shader().into()),
     });
     // 11 floats per vertex: pos, coarse, normal, height, coarse height (`MeshVertex::to_floats`).
-    let attr = |format, k: usize, shader_location| wgpu::VertexAttribute { format, offset: 4 * MeshVertex::OFFSETS[k] as u64, shader_location };
+    let attr =
+        |format, k: usize, shader_location| wgpu::VertexAttribute { format, offset: 4 * MeshVertex::OFFSETS[k] as u64, shader_location };
     let attrs = [
         attr(wgpu::VertexFormat::Float32x3, 0, 0),
         attr(wgpu::VertexFormat::Float32x3, 1, 1),
@@ -147,7 +149,11 @@ pub fn execute_reference(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[&TileMe
             module: &module,
             entry_point: Some("vs"),
             compilation_options: Default::default(),
-            buffers: &[Some(wgpu::VertexBufferLayout { array_stride: MeshVertex::STRIDE, step_mode: wgpu::VertexStepMode::Vertex, attributes: &attrs })],
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: MeshVertex::STRIDE,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &attrs,
+            })],
         },
         fragment: Some(wgpu::FragmentState {
             module: &module,

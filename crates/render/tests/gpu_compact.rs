@@ -53,11 +53,8 @@ fn differing(a: &RgbaFrame, b: &RgbaFrame, limit: u8) -> usize {
 /// The image of the test-only reference renderer (REND-031) from the plan's CPU meshes: the independent reference of the compact
 /// renderer (pixel-identical to the former vertex renderer in the debug views, `gpu_reference.rs`).
 fn reference_render(ctx: &GpuContext, field: &dyn HeightField, p: &TerrainPlan, finest: u8) -> RgbaFrame {
-    let meshes: Vec<_> = p
-        .nodes
-        .iter()
-        .map(|n| planet_generators::compact::vertex_tile_field(field, &TangentWarp, n.tile, p.cells, R, finest))
-        .collect();
+    let meshes: Vec<_> =
+        p.nodes.iter().map(|n| planet_generators::compact::vertex_tile_field(field, &TangentWarp, n.tile, p.cells, R, finest)).collect();
     let refs: Vec<_> = meshes.iter().collect();
     planet_render::reference::execute_reference(ctx, p, &refs).unwrap()
 }

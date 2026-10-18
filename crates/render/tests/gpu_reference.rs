@@ -18,8 +18,13 @@ const FINEST: u8 = 26;
 
 fn pool() -> PoolConfig {
     let block_slots = 8 * 8;
-    compact_format_pool_with((128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS), CELLS, block_slots, 1)
-        .unwrap()
+    compact_format_pool_with(
+        (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
+        CELLS,
+        block_slots,
+        1,
+    )
+    .unwrap()
 }
 
 fn plan_of(index: usize, view: TerrainView) -> TerrainPlan {
@@ -93,7 +98,11 @@ fn the_reference_renderer_equals_the_vertex_renderer_pixel_for_pixel_in_every_de
             let drawn = reference.rgba.chunks(4).filter(|q| q[..3] != clear).count();
             assert!(drawn > 0, "{view:?} view {index}: the reference drew nothing");
             drawn_total += drawn;
-            assert_eq!(differing(&reference, &r.read_color(&ctx), 0), 0, "{view:?} view {index}: reference differs from the vertex renderer");
+            assert_eq!(
+                differing(&reference, &r.read_color(&ctx), 0),
+                0,
+                "{view:?} view {index}: reference differs from the vertex renderer"
+            );
         }
     }
     println!("pixels drawn over the 20 comparisons: {drawn_total}");

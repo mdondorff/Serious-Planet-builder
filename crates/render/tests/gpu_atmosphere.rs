@@ -1,16 +1,15 @@
 //! Tier C: the lit path with the atmosphere through the terrain renderer (ADR 0040, ADR 0042 points 1-3 and 5; ATMO-002, ATMO-011):
-//! sky and aerial perspective over the terrain on both tile formats, the frame targets equal to the compiled graph's count, nothing
+//! sky and aerial perspective over the terrain on compact tiles, the frame targets equal to the compiled graph's count, nothing
 //! created after the atmosphere is enabled, the lit path without an atmosphere unchanged, goldens of the sky at a fixed exposure.
 
 use planet_core::cube::TangentWarp;
 use planet_frame::look::atmosphere::{Atmosphere, AtmosphereView};
 use planet_frame::look::file::LookParams;
 use planet_frame::look::{self, LitPlan};
-use planet_frame::pool::{compact_format_pool_with, vertex_slot_bytes};
+use planet_frame::pool::compact_format_pool_with;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::{tile_data_field, vertex_tile_field};
+use planet_generators::compact::tile_data_field;
 use planet_generators::height::Reference;
-use planet_generators::mesh::grid_indices;
 use planet_render::graph::{frame_target_share_bytes, lit_frame_graph, LitShape};
 use planet_render::{AdapterPolicy, ExecError, GpuContext, TerrainRenderer};
 use planet_streaming::PoolConfig;
@@ -34,21 +33,6 @@ fn lit(mut p: TerrainPlan, l: LitPlan) -> TerrainPlan {
     p
 }
 
-fn vertex_pool() -> PoolConfig {
-    let slot = vertex_slot_bytes(CELLS);
-    PoolConfig {
-        slot_bytes: slot,
-        block_slots: 512,
-        main_blocks: 4,
-        vertex_slot_bytes: slot,
-        vertex_slots: 64,
-        index_bytes: grid_indices(CELLS).len() as u64 * 4,
-        node_record_bytes: 4096 * 512,
-        frames_in_flight: 1,
-        fallback_slots: 0,
-    }
-}
-
 fn compact_pool() -> PoolConfig {
     let block_slots = 24 * 24;
     let one = compact_format_pool_with(
@@ -61,13 +45,9 @@ fn compact_pool() -> PoolConfig {
     PoolConfig { vertex_slots: 256, fallback_slots: 192, ..one }
 }
 
-/// A renderer in `compact` or vertex format holding the tiles of `plans`.
-fn renderer(ctx: &GpuContext, compact: bool, plans: &[&TerrainPlan], enable_lit: bool) -> TerrainRenderer {
-    let mut r = if compact {
-        TerrainRenderer::with_compact_pools(ctx, SIZE, CELLS, compact_pool())
-    } else {
-        TerrainRenderer::with_pools(ctx, SIZE, CELLS, vertex_pool())
-    };
+/// A compact-format renderer holding the tiles of `plans`.
+fn renderer(ctx: &GpuContext, plans: &[&TerrainPlan], enable_lit: bool) -> TerrainRenderer {
+    let mut r = TerrainRenderer::with_compact_pools(ctx, SIZE, CELLS, compact_pool());
     if enable_lit {
         r.enable_lit(ctx);
     }
@@ -77,11 +57,7 @@ fn renderer(ctx: &GpuContext, compact: bool, plans: &[&TerrainPlan], enable_lit:
             if r.slot_of(n.tile).is_some() {
                 continue;
             }
-            if compact {
-                r.upload_tile(ctx, &tile_data_field(&field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
-            } else {
-                r.upload(ctx, &vertex_tile_field(&field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
-            }
+            r.upload_tile(ctx, &tile_data_field(&field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
         }
     }
     r
@@ -102,8 +78,8 @@ fn atmosphere_plan(view: AtmosphereView) -> LitPlan {
     l
 }
 
-fn renderer_atmosphere(ctx: &GpuContext, compact: bool, plans: &[&TerrainPlan]) -> TerrainRenderer {
-    let mut r = renderer(ctx, compact, plans, true);
+fn renderer_atmosphere(ctx: &GpuContext, plans: &[&TerrainPlan]) -> TerrainRenderer {
+    let mut r = renderer(ctx, plans, true);
     r.enable_atmosphere(ctx, &Atmosphere::earth(R));
     r
 }
@@ -117,45 +93,40 @@ fn luminance_of(p: &[f32; 4]) -> f64 {
 fn an_atmosphere_plan_needs_the_atmosphere_and_names_the_missing_call() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan(3);
-    let mut r = renderer(&ctx, false, &[&p], true);
+    let mut r = renderer(&ctx, &[&p], true);
     let e = r.render(&ctx, &lit(p, atmosphere_plan(AtmosphereView::Composite)), false).unwrap_err();
     assert!(matches!(e, ExecError::AtmosphereNotEnabled) && e.to_string().contains("enable_atmosphere"), "{e}");
 }
 
 // spec: ATMO-002
 #[test]
-fn the_atmosphere_lights_the_sky_and_hazes_the_terrain_in_both_tile_formats() {
+fn the_atmosphere_lights_the_sky_and_hazes_the_terrain() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
-    for compact in [false, true] {
-        for index in [0usize, 3, 6] {
-            let what = format!("compact {compact}, view {index}");
-            let base = plan(index);
-            let mut r = renderer_atmosphere(&ctx, compact, &[&base]);
-            r.render(&ctx, &lit(base.clone(), LitPlan::fixed(EV)), false).unwrap();
-            let plain = r.lit_path().unwrap().read_hdr(&ctx);
-            r.render(&ctx, &lit(base.clone(), atmosphere_plan(AtmosphereView::Composite)), false).unwrap();
-            let hdr = r.lit_path().unwrap().read_hdr(&ctx);
-            // The terrain covers the same pixels (alpha is the terrain's coverage).
-            let covered: Vec<bool> = hdr.iter().map(|p| p[3] > 0.0).collect();
-            assert_eq!(covered, plain.iter().map(|p| p[3] > 0.0).collect::<Vec<_>>(), "{what}: same coverage");
-            assert!(
-                hdr.iter().all(|p| p.iter().all(|v| v.is_finite() && *v >= 0.0 && *v <= look::HDR_CLAMP)),
-                "{what}: finite and clamped"
-            );
-            // Without terrain the plain frame is black; with the atmosphere the sky is lit.
-            let sky: Vec<&[f32; 4]> = hdr.iter().filter(|p| p[3] == 0.0).collect();
-            let lit_sky = sky.iter().filter(|p| luminance_of(p) > 0.0).count();
-            match index {
-                3 => assert!(lit_sky * 2 > sky.len(), "{what}: the sky is lit"),
-                0 => assert!(lit_sky > 20, "{what}: the limb glows ({lit_sky} sky pixels)"),
-                _ => {}
-            }
-            assert!(plain.iter().filter(|p| p[3] == 0.0).all(|p| luminance_of(p) == 0.0), "{what}: no sky without an atmosphere");
-            // The terrain is lit differently: the sun's light is dimmed and the sky adds ambient and haze.
-            let a: f64 = hdr.iter().filter(|p| p[3] > 0.0).map(luminance_of).sum();
-            let b: f64 = plain.iter().filter(|p| p[3] > 0.0).map(luminance_of).sum();
-            assert!(a > 0.0 && (a - b).abs() > 1e-3 * b.max(1e-9), "{what}: terrain luminance {a} vs {b}");
+    for index in [0usize, 3, 6] {
+        let what = format!("view {index}");
+        let base = plan(index);
+        let mut r = renderer_atmosphere(&ctx, &[&base]);
+        r.render(&ctx, &lit(base.clone(), LitPlan::fixed(EV)), false).unwrap();
+        let plain = r.lit_path().unwrap().read_hdr(&ctx);
+        r.render(&ctx, &lit(base.clone(), atmosphere_plan(AtmosphereView::Composite)), false).unwrap();
+        let hdr = r.lit_path().unwrap().read_hdr(&ctx);
+        // The terrain covers the same pixels (alpha is the terrain's coverage).
+        let covered: Vec<bool> = hdr.iter().map(|p| p[3] > 0.0).collect();
+        assert_eq!(covered, plain.iter().map(|p| p[3] > 0.0).collect::<Vec<_>>(), "{what}: same coverage");
+        assert!(hdr.iter().all(|p| p.iter().all(|v| v.is_finite() && *v >= 0.0 && *v <= look::HDR_CLAMP)), "{what}: finite and clamped");
+        // Without terrain the plain frame is black; with the atmosphere the sky is lit.
+        let sky: Vec<&[f32; 4]> = hdr.iter().filter(|p| p[3] == 0.0).collect();
+        let lit_sky = sky.iter().filter(|p| luminance_of(p) > 0.0).count();
+        match index {
+            3 => assert!(lit_sky * 2 > sky.len(), "{what}: the sky is lit"),
+            0 => assert!(lit_sky > 20, "{what}: the limb glows ({lit_sky} sky pixels)"),
+            _ => {}
         }
+        assert!(plain.iter().filter(|p| p[3] == 0.0).all(|p| luminance_of(p) == 0.0), "{what}: no sky without an atmosphere");
+        // The terrain is lit differently: the sun's light is dimmed and the sky adds ambient and haze.
+        let a: f64 = hdr.iter().filter(|p| p[3] > 0.0).map(luminance_of).sum();
+        let b: f64 = plain.iter().filter(|p| p[3] > 0.0).map(luminance_of).sum();
+        assert!(a > 0.0 && (a - b).abs() > 1e-3 * b.max(1e-9), "{what}: terrain luminance {a} vs {b}");
     }
 }
 
@@ -164,7 +135,7 @@ fn the_atmosphere_lights_the_sky_and_hazes_the_terrain_in_both_tile_formats() {
 fn the_frame_targets_with_an_atmosphere_equal_the_compiled_graphs_count_and_nothing_is_created_per_frame() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan(3);
-    let mut r = renderer_atmosphere(&ctx, true, &[&p]);
+    let mut r = renderer_atmosphere(&ctx, &[&p]);
     let compiled = lit_frame_graph(&LitShape { size: SIZE, adaptive: true, atmosphere: true, water: false }).compile().unwrap();
     let held = r.lit_frame_target_bytes().unwrap();
     assert_eq!(held, compiled.frame_target_bytes(), "what the renderer allocates is what the compiled graph counts");
@@ -193,14 +164,14 @@ fn the_frame_targets_with_an_atmosphere_equal_the_compiled_graphs_count_and_noth
 fn a_plan_without_an_atmosphere_draws_what_it_drew_with_the_atmosphere_enabled() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let base = plan(3);
-    let mut plain = renderer(&ctx, true, &[&base], true);
+    let mut plain = renderer(&ctx, &[&base], true);
     plain.render(&ctx, &lit(base.clone(), LitPlan::fixed(EV)), false).unwrap();
     let want = plain.read_color(&ctx);
-    let mut with = renderer_atmosphere(&ctx, true, &[&base]);
+    let mut with = renderer_atmosphere(&ctx, &[&base]);
     with.render(&ctx, &lit(base.clone(), LitPlan::fixed(EV)), false).unwrap();
     assert_eq!(with.read_color(&ctx).rgba, want.rgba);
     with.render(&ctx, &base, false).unwrap();
-    let mut debug = renderer(&ctx, true, &[&base], false);
+    let mut debug = renderer(&ctx, &[&base], false);
     debug.render(&ctx, &base, false).unwrap();
     assert_eq!(with.read_color(&ctx).rgba, debug.read_color(&ctx).rgba, "the debug path is untouched");
 }
@@ -210,7 +181,7 @@ fn a_plan_without_an_atmosphere_draws_what_it_drew_with_the_atmosphere_enabled()
 fn the_atmosphere_debug_views_are_discrete_levels_and_the_table_views_show_their_table() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let base = plan(0);
-    let mut r = renderer_atmosphere(&ctx, true, &[&base]);
+    let mut r = renderer_atmosphere(&ctx, &[&base]);
     for view in [
         AtmosphereView::TransmittanceLut,
         AtmosphereView::MultiScatterLut,
@@ -258,7 +229,7 @@ fn sky_frames_match_the_adapters_goldens() {
     cases.push(("sky_ground1m_sunset_ev11", 6, sunset));
     for (golden, index, l) in cases {
         let p = lit(plan(index), l);
-        let mut r = renderer_atmosphere(&ctx, true, &[&p]);
+        let mut r = renderer_atmosphere(&ctx, &[&p]);
         r.render(&ctx, &p, false).unwrap();
         let img = image(&r, &ctx);
         let lit_px = img.pixels().filter(|p| p[0] > 8 || p[1] > 8 || p[2] > 8).count();
@@ -270,33 +241,31 @@ fn sky_frames_match_the_adapters_goldens() {
 
 // spec: ATMO-002
 #[test]
-fn the_atmosphere_lit_terrain_is_the_albedo_times_the_lighting_in_both_tile_formats() {
+fn the_atmosphere_lit_terrain_is_the_albedo_times_the_lighting() {
     use planet_frame::look::shading::ShadeView;
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
-    for compact in [false, true] {
-        let base = plan(3);
-        let mut r = renderer_atmosphere(&ctx, compact, &[&base]);
-        let mut scene = |view: ShadeView| {
-            let mut l = atmosphere_plan(AtmosphereView::Composite);
-            l.view = view;
-            r.render(&ctx, &lit(base.clone(), l), false).unwrap();
-            r.lit_path().unwrap().atmosphere().unwrap().read_scene(&ctx)
-        };
-        let (lit_px, albedo, lighting) = (scene(ShadeView::Lit), scene(ShadeView::Albedo), scene(ShadeView::Lighting));
-        let mut checked = 0;
-        for i in 0..lit_px.len() {
-            if lit_px[i][3] == 0.0 {
-                continue;
-            }
-            for k in 0..3 {
-                // The albedo view holds albedo / pi, the lighting view the light; every value is written times the pre-exposure.
-                let factor = look::pre_exposure_factor(f64::from(EV));
-                let want = f64::from(albedo[i][k]) * std::f64::consts::PI * f64::from(lighting[i][k]) / factor;
-                let got = f64::from(lit_px[i][k]);
-                assert!((got - want).abs() <= 3e-3 * want.abs() + 2e-3, "compact {compact} pixel {i} channel {k}: {got} vs {want}");
-            }
-            checked += 1;
+    let base = plan(3);
+    let mut r = renderer_atmosphere(&ctx, &[&base]);
+    let mut scene = |view: ShadeView| {
+        let mut l = atmosphere_plan(AtmosphereView::Composite);
+        l.view = view;
+        r.render(&ctx, &lit(base.clone(), l), false).unwrap();
+        r.lit_path().unwrap().atmosphere().unwrap().read_scene(&ctx)
+    };
+    let (lit_px, albedo, lighting) = (scene(ShadeView::Lit), scene(ShadeView::Albedo), scene(ShadeView::Lighting));
+    let mut checked = 0;
+    for i in 0..lit_px.len() {
+        if lit_px[i][3] == 0.0 {
+            continue;
         }
-        assert!(checked > 100, "compact {compact}: {checked} terrain pixels");
+        for k in 0..3 {
+            // The albedo view holds albedo / pi, the lighting view the light; every value is written times the pre-exposure.
+            let factor = look::pre_exposure_factor(f64::from(EV));
+            let want = f64::from(albedo[i][k]) * std::f64::consts::PI * f64::from(lighting[i][k]) / factor;
+            let got = f64::from(lit_px[i][k]);
+            assert!((got - want).abs() <= 3e-3 * want.abs() + 2e-3, "pixel {i} channel {k}: {got} vs {want}");
+        }
+        checked += 1;
     }
+    assert!(checked > 100, "{checked} terrain pixels");
 }
