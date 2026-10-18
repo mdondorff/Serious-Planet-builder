@@ -43,6 +43,22 @@ pub fn scenes_of(name: &str) -> Vec<StreamScene> {
     }
 }
 
+/// What a streaming scene does before its measured span (TEST-037).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StartSteps {
+    /// Wait for the GPU to cool to 60 C (ADR 0057, TEST-033).
+    pub cool: bool,
+    /// Warm the GPU to its loaded clock on the settled start view (TEST-029).
+    pub warm: bool,
+}
+
+/// The steps before the measured span: none in a smoke run (no measurement, perhaps no `nvidia-smi`); the cool start always otherwise;
+/// the warm-up only for a scene with a settled start view, because the warm-up renders that view and nothing queued, in flight or
+/// waiting changes, while rendering the first frame of a scene that starts from an empty cache would load the tiles it measures.
+pub fn start_steps(smoke: bool, has_settled_start: bool) -> StartSteps {
+    StartSteps { cool: !smoke, warm: !smoke && has_settled_start }
+}
+
 /// The source of the bake for the log (`protocol.source`) and whether it is the production one: the stored bake is, an
 /// in-memory one is labelled and never valid for streaming budgets (a cold plan and a tile's generation differ over the store:
 /// block decodes and the cache working set, SPIKE-05).
@@ -170,6 +186,8 @@ struct Driver<'a> {
     lit: Option<(crate::litperf::LitSetup, Arc<WorldTerrain>)>,
     /// Frames ticked, for the clock of the waves and the exposure's first frame.
     ticks: u64,
+    /// No pacing sleep: the GPU warm-up before the measured span renders as fast as the loop goes (ADR 0057, TEST-029).
+    unpaced: bool,
 }
 
 impl Driver<'_> {
@@ -255,6 +273,9 @@ impl Driver<'_> {
     /// Hold the loop to the frame step of script time: the next iteration starts one step after this one was due (a late frame
     /// moves the schedule, it is not made up for). Sleeps most of the wait and spins the last two milliseconds.
     fn pace(&mut self) {
+        if self.unpaced {
+            return;
+        }
         self.next_deadline += Duration::from_secs_f64(FRAME_STEP_S);
         let now = Instant::now();
         if self.next_deadline <= now {
@@ -330,6 +351,8 @@ struct CaseRun {
     pool: planet_streaming::PoolConfig,
     /// The log counts of the case's tile loads (STRM-022; every name starts with `load_`).
     load_counts: Vec<(String, u64)>,
+    /// What the held-clock warm-up before the measured span did (`None`: a smoke run, or a scene that starts from an empty cache).
+    warmup: Option<planet_perf::clock::WarmUpOutcome>,
     /// The host's CPU load and the competing processes during the measured part (TEST-023; `not measured` in a smoke run).
     host_load: planet_perf::load::CaseLoad,
 }
@@ -356,7 +379,7 @@ fn run_case(
             .warm_up_lit(ctx, &setup.warm_plan(first.camera, first.size, first.lod.cells)?)
             .map_err(|e| format!("warming the lit path: {e}"))?;
     }
-    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), ticks: 0 };
+    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), ticks: 0, unpaced: false };
     // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022:
     // recorded only, never judged; the per-tile times of the log read against it). Nothing of the case runs yet.
     let calib_threads = gen.workers;
@@ -390,6 +413,54 @@ fn run_case(
         writeln!(out, "{}: settled at the start view after {:.1} s ({frames} frames)", script.scene.name(), settle_s.unwrap_or(0.0))
             .map_err(err)?;
     }
+    // The GPU is power-capped and its clock follows its temperature (windows 7 and 8: every streaming scene started at P5 or P8, 210 to
+    // 525 MHz, and both device losses of the lit dive came after long runs on a hot GPU), so the measured span starts cool and at the
+    // loaded clock (ADR 0057, TEST-033, TEST-029). A scene with a settled start warms up on that start view, unpaced, which changes
+    // nothing resident or measured (nothing is queued, in flight or waiting); a scene that starts from an empty cache only cools down:
+    // rendering its first frame would load the tiles whose first loads it measures.
+    let steps = start_steps(smoke, script.prelude.is_some());
+    let warmup = if !steps.cool {
+        None
+    } else {
+        writeln!(out, "{}", planet_perf::cool_gpu().line(script.scene.name())).map_err(err)?;
+        match &script.prelude {
+            Some(pre) if steps.warm => {
+                let r = req(*pre);
+                d.unpaced = true;
+                let started = Instant::now();
+                let outcome = planet_perf::clock::warm_up_held(
+                    planet_perf::clock::WARMUP_CAP_S,
+                    planet_perf::clock::WARMUP_HOLD_READINGS,
+                    || {
+                        let chunk = Instant::now();
+                        let mut frames = 0;
+                        while frames < planet_perf::clock::WARMUP_CHUNK_FRAMES
+                            || chunk.elapsed().as_secs_f64() < planet_perf::clock::WARMUP_MIN_CHUNK_S
+                        {
+                            d.tick(&r)?;
+                            frames += 1;
+                        }
+                        Ok(())
+                    },
+                    || planet_perf::query_nvidia_smi().as_ref().map(planet_perf::clock::ClockPoint::from),
+                    || started.elapsed().as_secs_f64(),
+                );
+                d.unpaced = false;
+                let outcome = outcome?;
+                writeln!(out, "{}", outcome.line(script.scene.name())).map_err(err)?;
+                Some(outcome)
+            }
+            _ => {
+                writeln!(
+                    out,
+                    "{}: no warm-up: the scene starts from an empty cache and a warm-up would load what it measures",
+                    script.scene.name()
+                )
+                .map_err(err)?;
+                None
+            }
+        }
+    };
     // The clock, before, during (a sampler thread: a process spawn never on the frame path) and after the case.
     let mut clocks: Vec<planet_perf::ClockSample> = Vec::new();
     let cpu_before = (!smoke).then(planet_perf::host::query_cpu_clock).flatten();
@@ -474,7 +545,7 @@ fn run_case(
         post.elapsed().as_secs_f64()
     )
     .map_err(err)?;
-    Ok(CaseRun { frames, blanks, settle_s, clocks, teardown_s, cpu_before, cpu_after, pool, load_counts, host_load })
+    Ok(CaseRun { frames, blanks, settle_s, clocks, teardown_s, cpu_before, cpu_after, pool, load_counts, host_load, warmup })
 }
 
 /// The `BLANK TILE` lines of a case, which fail the run after the logs are written (ADR 0032's hard measure: a tile, root or
@@ -752,6 +823,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
             counts,
         };
         let summary = CaseRunSummary {
+            warmup: run.warmup,
             host_load: run.host_load,
             frames: run.frames,
             settle_s: run.settle_s,
@@ -836,7 +908,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
             &validity,
             &scene_protocol,
             one,
-            &[],
+            &summary.warmup.iter().map(|w| (report.path_name.clone(), w.clone())).collect::<Vec<_>>(),
             &[(report.path_name.clone(), summary.host_load.clone())],
         );
         let path = match (&o.out, single) {
@@ -906,6 +978,7 @@ fn share_slots_of(pool: &planet_streaming::PoolConfig, share_bytes: u64) -> u64 
 }
 
 struct CaseRunSummary {
+    warmup: Option<planet_perf::clock::WarmUpOutcome>,
     host_load: planet_perf::load::CaseLoad,
     frames: Vec<FrameRecord>,
     settle_s: Option<f64>,
@@ -988,6 +1061,25 @@ mod tests {
             let script = build_script(scene, 6_371_000.0, 16.0 / 9.0, &planet_generators::height::Reference(1), LOOK_SEED);
             let spec = case_spec(scene.name(), script.cameras.len(), FRAME_STEP_S, script.descent_frames).unwrap();
             assert_eq!(spec.frames, script.cameras.len());
+        }
+    }
+
+    // spec: TEST-037
+    #[test]
+    fn a_streaming_scene_cools_down_always_and_warms_up_only_from_a_settled_start() {
+        // A smoke run does neither (no measurement, perhaps no nvidia-smi).
+        assert_eq!(start_steps(true, true), StartSteps { cool: false, warm: false });
+        assert_eq!(start_steps(true, false), StartSteps { cool: false, warm: false });
+        // A measured scene with a settled start view (the teleports and the looks) cools and warms up on that view.
+        assert_eq!(start_steps(false, true), StartSteps { cool: true, warm: true });
+        // A scene from an empty cache (the dive, dive-fast, dive-cold) only cools: a warm-up would load what it measures.
+        assert_eq!(start_steps(false, false), StartSteps { cool: true, warm: false });
+        // The scenes of the harness: which have a settled start follows their script, not a list kept here.
+        for scene in planet_frame::scenes::StreamScene::ALL {
+            let script = planet_frame::scenes::build_script(scene, 6_371_000.0, 16.0 / 9.0, &planet_generators::height::Reference(1), 1);
+            let steps = start_steps(false, script.prelude.is_some());
+            assert!(steps.cool, "{scene:?}");
+            assert_eq!(steps.warm, script.prelude.is_some(), "{scene:?}");
         }
     }
 
