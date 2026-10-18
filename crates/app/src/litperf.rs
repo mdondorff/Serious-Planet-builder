@@ -144,6 +144,8 @@ struct Rig<'a> {
     lod: &'a LodParams,
     size: (u32, u32),
     smoke: bool,
+    /// Measure the CPU calibration in a smoke run too (`--calibrate`, TEST-039).
+    calibrate: bool,
     frames: usize,
     cells: u32,
     max_level: u8,
@@ -225,7 +227,7 @@ fn calibration_threads() -> usize {
 
 /// Measure the CPU calibration of a view's session now (not in a smoke run): the fixed job alone and on all the threads (STRM-022).
 fn calibrate_before(rig: &Rig<'_>) -> Option<planet_perf::streaming::CpuCalibration> {
-    (!rig.smoke).then(|| planet_perf::streaming::calibrate_cpu(calibration_threads()))
+    (!rig.smoke || rig.calibrate).then(|| planet_perf::streaming::calibrate_cpu(calibration_threads()))
 }
 
 /// Add the calibration of a view (before and after its measured frames) to the counts of its runs; the harness judges it (ADR 0065).
@@ -587,8 +589,19 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     if views.is_empty() {
         return Err("--views names no view".into());
     }
-    let rig =
-        Rig { ctx, world: &world, field: field.as_ref(), lod: &lod, size, smoke, frames: o.frames, cells: o.cells, max_level, radius_m };
+    let rig = Rig {
+        ctx,
+        world: &world,
+        field: field.as_ref(),
+        lod: &lod,
+        size,
+        smoke,
+        calibrate: o.calibrate,
+        frames: o.frames,
+        cells: o.cells,
+        max_level,
+        radius_m,
+    };
     // The software adapter's device is removed by the compact format with the atmosphere (status.md, WARP): its smoke runs the vertex
     // format; the discrete GPU runs whatever `--tile-format` asks, the compact format by default.
     let software = crate::facts(ctx).kind == planet_perf::DeviceKind::Cpu;
@@ -886,8 +899,19 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
         // The first view of the list seeds the renderer: keep the static views, drop the flights that were not asked for.
         views.retain(|v| v.kind == ViewKind::Static || names.iter().any(|n| n == v.name));
     }
-    let rig =
-        Rig { ctx, world: &world, field: field.as_ref(), lod: &lod, size, smoke: true, frames: 0, cells: o.cells, max_level, radius_m };
+    let rig = Rig {
+        ctx,
+        world: &world,
+        field: field.as_ref(),
+        lod: &lod,
+        size,
+        smoke: true,
+        calibrate: false,
+        frames: 0,
+        cells: o.cells,
+        max_level,
+        radius_m,
+    };
     let software = crate::facts(ctx).kind == planet_perf::DeviceKind::Cpu;
     if software && o.tile_format.is_none() {
         ctx.prefer_tile_format(TileFormat::Vertex);
