@@ -1,5 +1,5 @@
 # 0017 Golden review policy and agent blessing
-Status: accepted
+Status: accepted; cross-adapter agreement amended by 0061
 Date: 2026-10-11
 Source: owner decision 2026-10-11 (bless of PR #43's terrain goldens); constitution CON-18 (amended to v1.2 by this ADR); ADR 0009
 Supersedes: ADR 0009 in part (its clause "promotion is owner-only (`/bless`)"); the rest of ADR 0009 stands.

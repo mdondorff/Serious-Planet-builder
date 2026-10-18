@@ -1,5 +1,5 @@
 # 0037 M5: new goldens under policy, look reviewed at the gate
-Status: accepted (owner, 2026-10-15, opus-planner session). Amends ADR 0017 in part, for milestone M5 only.
+Status: accepted (owner, 2026-10-15, opus-planner session); point 1 superseded by 0061. Amends ADR 0017 in part, for milestone M5 only.
 Date: 2026-10-15
 Source: owner's decisions of 2026-10-15 (`docs/status.md`, M5 section); ADR 0017; ADR 0035 (presentation data and declared bounds); constitution CON-18 (v1.2), CON-14 (v1.3)
 
