@@ -109,8 +109,24 @@ struct Config {
     liquids: planet_world_def::LiquidTable,
 }
 
+/// SPIKE-14: the egui side of the window (`PLANET_UI=1`).
+struct UiState {
+    ctx: egui::Context,
+    winit: egui_winit::State,
+    painter: planet_render::UiPainter,
+    panel: crate::spike14::PanelState,
+    router: crate::spike14::Router,
+    pending: egui::TexturesDelta,
+    /// Pointer events the router gave to the world (mouse look would get them) and to the UI.
+    world_pointer: u64,
+    ui_pointer: u64,
+    ui_frames: u64,
+    ui_ms: f64,
+}
+
 /// Everything that exists once the window does.
 struct Running {
+    ui: Option<UiState>,
     window: Arc<Window>,
     ctx: GpuContext,
     surface: WindowSurface,
@@ -196,7 +212,24 @@ impl App<'_> {
             .map_err(|e| format!("warming the lit path: {e}"))?;
         let now = self.clock.now_ms();
         let viewer = ViewerState::new(now, TerrainView::ALL.len(), cfg.initial_view, cfg.vsync).with_lit(true);
+        let ui = std::env::var("PLANET_UI").is_ok().then(|| {
+            let egui_ctx = egui::Context::default();
+            let winit = egui_winit::State::new(egui_ctx.clone(), egui::ViewportId::ROOT, &*window, Some(window.scale_factor() as f32), None, None);
+            UiState {
+                ctx: egui_ctx,
+                winit,
+                painter: surface.ui_painter(&ctx),
+                panel: Default::default(),
+                router: Default::default(),
+                pending: Default::default(),
+                world_pointer: 0,
+                ui_pointer: 0,
+                ui_frames: 0,
+                ui_ms: 0.0,
+            }
+        });
         self.state = Some(Running {
+            ui,
             window,
             ctx,
             surface,
@@ -344,7 +377,24 @@ impl App<'_> {
                 st.window.set_title(&text);
                 st.last_title = text;
             }
-            match st.surface.present(ctx, &st.rig.renderer).map_err(|e| e.to_string())? {
+            let presented = if let Some(ui) = st.ui.as_mut() {
+                let t = Instant::now();
+                let raw = ui.winit.take_egui_input(&st.window);
+                                let out = ui.ctx.run_ui(raw, |u| crate::spike14::panel(u, &mut ui.panel));
+                ui.winit.handle_platform_output(&st.window, out.platform_output);
+                ui.pending.append(out.textures_delta);
+                let frame_ui = planet_render::UiFrame {
+                    primitives: ui.ctx.tessellate(out.shapes, out.pixels_per_point),
+                    textures_delta: std::mem::take(&mut ui.pending),
+                    pixels_per_point: out.pixels_per_point,
+                };
+                ui.ui_ms += t.elapsed().as_secs_f64() * 1000.0;
+                ui.ui_frames += 1;
+                st.surface.present_with_ui(ctx, &st.rig.renderer, Some((&mut ui.painter, &frame_ui))).map_err(|e| e.to_string())?
+            } else {
+                st.surface.present(ctx, &st.rig.renderer).map_err(|e| e.to_string())?
+            };
+            match presented {
                 Presented::Yes => {
                     st.presented += 1;
                     if drew_lit {
@@ -459,6 +509,33 @@ impl ApplicationHandler for App<'_> {
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        // SPIKE-14: egui sees every window event first; the router decides what the camera may have.
+        let mut ui_keys = false;
+        if let Some(st) = self.state.as_mut() {
+            if let Some(ui) = st.ui.as_mut() {
+                let resp = ui.winit.on_window_event(&st.window, &event);
+                match &event {
+                    WindowEvent::MouseInput { state, .. } => {
+                        use crate::spike14::Target;
+                        let t = if *state == ElementState::Pressed { ui.router.pointer_press(&ui.ctx) } else { ui.router.pointer_release().unwrap_or(Target::World) };
+                        if t == Target::World && !resp.consumed {
+                            ui.world_pointer += 1;
+                        } else {
+                            ui.ui_pointer += 1;
+                        }
+                    }
+                    WindowEvent::CursorMoved { .. } => {
+                        if ui.router.pointer_motion(&ui.ctx) == crate::spike14::Target::World && !resp.consumed {
+                            ui.world_pointer += 1;
+                        } else {
+                            ui.ui_pointer += 1;
+                        }
+                    }
+                    WindowEvent::KeyboardInput { .. } => ui_keys = resp.consumed || ui.router.key(&ui.ctx) == crate::spike14::Target::Ui,
+                    _ => {}
+                }
+            }
+        }
         match event {
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::Resized(size) => {
@@ -466,7 +543,7 @@ impl ApplicationHandler for App<'_> {
                     st.surface.resize(&st.ctx, (size.width, size.height));
                 }
             }
-            WindowEvent::KeyboardInput { event, .. } if !self.cfg.smoke => {
+            WindowEvent::KeyboardInput { event, .. } if !self.cfg.smoke && !ui_keys => {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
                 let down = event.state == ElementState::Pressed;
                 if let Some(st) = self.state.as_mut() {
@@ -500,6 +577,16 @@ impl ApplicationHandler for App<'_> {
 }
 
 fn smoke_summary(st: &Running) -> String {
+    let ui = st
+        .ui
+        .as_ref()
+        .map(|u| format!("
+  ui: {} frames with the egui panel, {:.3} ms mean CPU per frame (run + tessellate), pointer events to ui {} / world {}", u.ui_frames, u.ui_ms / u.ui_frames.max(1) as f64, u.ui_pointer, u.world_pointer))
+        .unwrap_or_default();
+    format!("{}{ui}", smoke_summary_base(st))
+}
+
+fn smoke_summary_base(st: &Running) -> String {
     format!(
         "{} frames drawn ({} lit, {} with the atmosphere, {} with water, {} debug), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
   last title: {}",

@@ -16,6 +16,7 @@ pub mod spike_compact;
 #[cfg(feature = "spike07")]
 pub mod spike_detail;
 pub mod terrain;
+pub mod ui;
 pub mod water;
 pub mod water_gpu;
 pub mod window;
@@ -24,6 +25,7 @@ pub use compact::compact_terrain_shader;
 pub use exec::{execute, reference_frame, ExecError, ExecStats, TileResource, EXEC_SHADERS};
 pub use gate::requirements as adapter_requirements;
 pub use gpu_timing::{GpuPass, PassTimes};
+pub use ui::{UiFrame, UiPainter};
 pub use lit::{lit_post_shaders, ExposureState, LitPath};
 pub use terrain::{
     execute_terrain, execute_terrain_tiles, DrawMode, FirstUse, FrameTiming, InitCounts, ResidentFormat, TerrainRenderer, TerrainStats,

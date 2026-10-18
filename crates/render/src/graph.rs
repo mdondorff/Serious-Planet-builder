@@ -309,3 +309,11 @@ pub fn lit_frame_graph(shape: &LitShape) -> RenderGraph {
     g.add_pass("tonemap", &["hdr", "exposure-state"], &["presentable"], true);
     g
 }
+
+/// SPIKE-14: [`lit_frame_graph`] with the UI as one more node after the tone map (ADR 0042 point 2, node 8): it reads and writes the
+/// presentable target only, so no HDR or depth resource, lifetime or byte count changes.
+pub fn lit_frame_graph_with_ui(shape: &LitShape) -> RenderGraph {
+    let mut g = lit_frame_graph(shape);
+    g.add_pass("ui", &["presentable"], &["presentable"], true);
+    g
+}
