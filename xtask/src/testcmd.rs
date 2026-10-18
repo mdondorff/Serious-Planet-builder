@@ -121,6 +121,26 @@ fn budget_verdict(test_secs: f64, whole_workspace: bool) -> Budget {
     }
 }
 
+/// The process budget of the owner (2026-10-18; BUILD-014): the build and the tests of a `test fast` run together, from an edit to the
+/// first test result, take at most this many seconds.
+pub const EDIT_TO_TEST_BUDGET_SECS: f64 = 30.0;
+
+/// The line `test fast` prints for its edit-to-first-test time (build plus test wall time), and whether the budget is exceeded.
+/// A warning, never a failure (BUILD-014).
+fn edit_to_first_test_line(build_secs: f64, test_secs: f64) -> (String, bool) {
+    let total = build_secs + test_secs;
+    if total > EDIT_TO_TEST_BUDGET_SECS {
+        (
+            format!(
+                "BUDGET EXCEEDED: edit-to-first-test {total:.0} s > {EDIT_TO_TEST_BUDGET_SECS:.0} s (build {build_secs:.1} s + tests {test_secs:.1} s); make it a Tracked item in docs/status.md (BUILD-014)"
+            ),
+            true,
+        )
+    } else {
+        (format!("edit-to-first-test {total:.1} s (build {build_secs:.1} s + tests {test_secs:.1} s; budget {EDIT_TO_TEST_BUDGET_SECS:.0} s)"), false)
+    }
+}
+
 /// The ref a branch is compared with to find its changed files: the remote `origin/main` when there is one, else `main`. A
 /// worktree's local `main` is whatever the primary checkout last pulled, often hundreds of commits behind, and against it every
 /// change looks like "everything changed" (BUILD-003).
@@ -263,6 +283,9 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
 
     let secs = started.elapsed().as_secs_f64();
     eprintln!("elapsed {secs:.1}s (tests; build {build_secs:.1}s)");
+    if sub == Some("fast") {
+        eprintln!("{}", edit_to_first_test_line(build_secs, secs).0);
+    }
     if sub == Some("fast") {
         match budget_verdict(secs, whole) {
             Budget::Within => {}
@@ -837,6 +860,18 @@ mod tests {
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+
+    // spec: BUILD-014
+    #[test]
+    fn the_edit_to_first_test_time_is_reported_and_flagged_over_30_s_build_plus_tests() {
+        let (line, over) = edit_to_first_test_line(12.0, 9.5);
+        assert!(!over && line == "edit-to-first-test 21.5 s (build 12.0 s + tests 9.5 s; budget 30 s)", "{line}");
+        let (_, at) = edit_to_first_test_line(20.0, 10.0);
+        assert!(!at, "exactly 30 s is within the budget");
+        let (line, over) = edit_to_first_test_line(49.0, 13.2);
+        assert!(over && line.starts_with("BUDGET EXCEEDED: edit-to-first-test 62 s > 30 s (build 49.0 s + tests 13.2 s)"), "{line}");
+        assert!(line.contains("Tracked item in docs/status.md"), "{line}");
     }
 
     // spec: TEST-019
