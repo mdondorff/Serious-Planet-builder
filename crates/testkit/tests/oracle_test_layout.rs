@@ -40,7 +40,7 @@ fn declared_tests(krate: &Path) -> BTreeSet<String> {
 /// The tests `cargo nextest list` reports for the per-tier binaries of package `pkg`, as `<file>::<function>`.
 fn listed_tests(pkg: &str) -> BTreeSet<String> {
     let out = Command::new("cargo")
-        .args(["nextest", "list", "-p", pkg, "--message-format", "oneline"])
+        .args(["nextest", "list", "-p", pkg, "-E", "binary(it) or binary(oracle_all) or binary(gpu_all)", "--message-format", "oneline"])
         .current_dir(repo_root())
         .output()
         .expect("cargo nextest list");
