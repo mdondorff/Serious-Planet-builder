@@ -183,8 +183,26 @@ fn combined_frame(runs: &[&Json]) -> Option<Stats> {
     })
 }
 
-/// The GPU validity of a view's runs: every run valid (the log's per-view `gpu_valid`) and the session fit for GPU verdicts.
-fn gpu_validity_of(root: &Json, runs: &[&Json]) -> GpuValidity {
+/// The GPU validity of a view's runs, derived from the logged data: the session fit for GPU verdicts (its warnings judged again) and
+/// the clock samples of the view's runs judged again against today's floor (ADR 0057). A view whose samples are not all in the log
+/// keeps the recorded per-run verdict. The second value says where the derived verdict differs from the recorded one.
+fn gpu_validity_of(root: &Json, runs: &[&Json]) -> (GpuValidity, Option<String>) {
+    let recorded = recorded_gpu_validity(root, runs);
+    if !crate::validity::log_gpu_session_valid(root) {
+        return (recorded, None);
+    }
+    match crate::validity::view_gpu_validity_from_log(runs) {
+        None => (recorded, Some("clock samples missing in the log: the recorded GPU verdict is used".to_string())),
+        Some(now) => {
+            let same = std::mem::discriminant(&now) == std::mem::discriminant(&recorded);
+            let note = (!same).then(|| format!("GPU clock verdict judged again from the logged samples: {now:?}, recorded: {recorded:?}"));
+            (now, note)
+        }
+    }
+}
+
+/// The GPU validity as the run recorded it: every run valid (the log's per-view `gpu_valid`) and the session fit for GPU verdicts.
+fn recorded_gpu_validity(root: &Json, runs: &[&Json]) -> GpuValidity {
     if !crate::validity::log_gpu_session_valid(root) {
         let why = crate::validity::log_gpu_only_reasons(root);
         return GpuValidity::Invalid(why.first().cloned().unwrap_or_else(|| "the session is not fit for GPU verdicts".to_string()));
@@ -227,7 +245,7 @@ fn read_view(root: &Json, path: &str, gated: bool) -> Result<ViewRead, String> {
     }
     let frame = combined_frame(&runs).ok_or_else(|| format!("`{path}` has no frame statistics"))?;
     let metrics = combined_metrics(&runs);
-    let gpu = gpu_validity_of(root, &runs);
+    let (gpu, clock_note) = gpu_validity_of(root, &runs);
     let counts = |k: &str| runs.iter().filter_map(|r| r.get("counts").and_then(|c| count(c, k))).max().unwrap_or(0);
     // Water must be in every run of the view, not in one of them: the smallest count decides.
     let water_min = runs.iter().map(|r| r.get("counts").and_then(|c| count(c, "water_nodes")).unwrap_or(0)).min().unwrap_or(0);
@@ -244,6 +262,7 @@ fn read_view(root: &Json, path: &str, gated: bool) -> Result<ViewRead, String> {
             GpuValidity::Invalid(r) => format!("NOT VALID for GPU budgets ({r})"),
         }
     )];
+    facts.extend(clock_note);
     // The heat and the power beside the GPU rows (ADR 0057): the clock below the floor is the power cap trading clock for heat.
     let samples: Vec<&Json> = runs.iter().flat_map(|r| ["clocks_before", "clocks_after"].into_iter().filter_map(|k| r.get(k))).collect();
     let temps: Vec<f64> = samples.iter().filter_map(|c| num(c, "temperature_c")).collect();
@@ -359,6 +378,11 @@ pub fn evaluate(files: &WindowFiles) -> Evaluation5 {
                             format!("NOT VALID ({})", crate::validity::log_gpu_only_reasons(&root).join("; "))
                         }
                     ));
+                    facts.extend(
+                        crate::validity::session_verdict_notes(&root)
+                            .into_iter()
+                            .map(|n| format!("lit.json verdict derived from the logged data: {n}")),
+                    );
                     if let Some(Json::Arr(n)) = root.get("load_notes") {
                         load_notes.extend(n.iter().filter_map(|x| if let Json::Str(s) = x { Some(format!("lit: {s}")) } else { None }));
                     }
@@ -449,7 +473,10 @@ pub fn evaluate(files: &WindowFiles) -> Evaluation5 {
             if !why.is_empty() {
                 return Err(format!("not shown: {}", why.join("; ")));
             }
-            let mut lines = Vec::new();
+            let mut lines: Vec<String> = crate::validity::session_verdict_notes(&root)
+                .into_iter()
+                .map(|n| format!("lit-formats verdict derived from the logged data: {n}"))
+                .collect();
             for v in FORMAT_VIEWS {
                 let c = runs_of(&root, &format!("lit-formats/{v}/compact"));
                 let ratios: Vec<String> = ["terrain", "atmosphere", "water", "span"]
@@ -833,7 +860,17 @@ mod tests {
             } else {
                 sample(f.mhz)
             }),
-            clocks_after: Some(sample(f.mhz)),
+            // The throttled fixture is backed by the logged data (accept judges throttling again from the masks): the orbit run reads
+            // the hardware-slowdown bit.
+            clocks_after: Some(if f.throttled && path == "lit/orbit" {
+                crate::parse_nvidia_smi(&format!(
+                    "NVIDIA GeForce RTX 3080 Ti Laptop GPU, {}, 6000, 87.5, 61, P2, 0x0000000000000008",
+                    f.mhz
+                ))
+                .unwrap()
+            } else {
+                sample(f.mhz)
+            }),
             metrics: metrics_of(&frames),
             counts: vec![
                 ("nodes".into(), 3000),

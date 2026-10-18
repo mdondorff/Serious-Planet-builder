@@ -265,6 +265,13 @@ Source: CON-20, CON-21, REND-018, M4 fix F10, M4 fix F5, M4 item 7d, ADR 0034, A
 - **WHEN** the run-to-run noise `(max - min) / median` of a view's run medians is computed
 - **THEN** it counts as above the limit only when it exceeds both 10 % of the median and an absolute floor: 0.5 ms for a waited frame total, 0.1 ms for a per-pass GPU figure (`gate::NOISE_FLOOR_FRAME_MS`, `NOISE_FLOOR_PASS_MS`); a spread of exactly 10 % or exactly the floor is not above; fewer than two runs or a non-positive median still counts as noisy
 
+#### Scenario: Acceptance derives validity from the logged data
+- **WHEN** `cargo xtask accept` reads a perf log
+- **THEN** it judges again, with the harness's own functions (`gate::validity`, `gate::noise_needs_retry`, `clock::gpu_validity`), the throttling reasons from the logged throttle masks of every run, the noise reasons from the logged run medians of every view with two or more runs (the streaming scenes are not noise-checked), and each view's GPU clock validity from its logged clock samples against the current floor; the recorded flags and reasons stay in the log as a record
+- **AND** it prints each place where the derived verdict differs from the recorded one (reasons recorded and not true, reasons true and not recorded, `frame_valid`, `gpu_session_valid`, a view's GPU clock verdict)
+- **AND** a kind of reason whose inputs are not all in the log (a missing clock sample or throttle mask, a view whose runs are absent), a log without a `warnings` list, and a recorded invalid session without any reason keep their recorded verdict and the output says so
+- **AND** causes that depend on the run alone (smoke, adapter, power scheme, source, readiness gate, owner override, idle start, load calibration) stay as recorded
+
 #### Scenario: Power cap
 - **WHEN** a run reports throttle reason 0x4 (software power cap) and nothing else but idle, applications-clock or sync-boost bits
 - **THEN** the log has `power_cap` true for the runs of that view and the raw reasons in its samples, the console prints `[power cap 0x4 recorded, not invalidating]` on the view's line, and neither the view nor the session is invalid; 0x4 together with a thermal, hardware-slowdown or power-brake bit still invalidates the session, and the cap is still recorded
