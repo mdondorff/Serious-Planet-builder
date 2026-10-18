@@ -11,7 +11,7 @@
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
 use planet_core::cube::{FaceMapping, TangentWarp};
-use planet_frame::litscenes::{lit_views, LitView, ViewKind};
+use planet_frame::litscenes::{lit_views, shore_flight_views, LitView, ViewKind};
 use planet_frame::look::file::LookParams;
 use planet_frame::viewer::{lit_warm_plan, viewer_lit_plan};
 use planet_frame::water::{empty_water_plan, plan_water, WaterRequest, WaterTileCache, WaterView};
@@ -809,7 +809,18 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
     let mut setup = LitSetup::new(o, &world, &lod)?;
     let is_sea = |d: planet_core::Vec3| carries_sea(&world, d);
     let frames = o.flight_frames;
-    let views = lit_views(radius_m, aspect, field.as_ref(), setup.level_m, &is_sea, frames)?;
+    let mut views = lit_views(radius_m, aspect, field.as_ref(), setup.level_m, &is_sea, frames)?;
+    // The capture-only shore flights (20 s and 15 s at 60 frames per second unless `--flight-frames` is given).
+    let shore_frames = o.given.contains("--flight-frames").then_some(frames);
+    views.extend(shore_flight_views(radius_m, aspect, field.as_ref(), setup.level_m, &is_sea, shore_frames)?);
+    if let Some(names) = &o.views {
+        let flights: Vec<&str> = views.iter().filter(|v| v.kind == ViewKind::Flight).map(|v| v.name).collect();
+        if let Some(bad) = names.iter().find(|n| !flights.contains(&n.as_str())) {
+            return Err(format!("--views: no flight '{bad}' (the capture flights: {})", flights.join(", ")));
+        }
+        // The first view of the list seeds the renderer: keep the static views, drop the flights that were not asked for.
+        views.retain(|v| v.kind == ViewKind::Static || names.iter().any(|n| n == v.name));
+    }
     let rig =
         Rig { ctx, world: &world, field: field.as_ref(), lod: &lod, size, smoke: true, frames: 0, cells: o.cells, max_level, radius_m };
     let software = crate::facts(ctx).kind == planet_perf::DeviceKind::Cpu;
@@ -828,7 +839,9 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
     )
     .map_err(err)?;
     std::fs::create_dir_all(&dir).map_err(err)?;
-    let mut index = String::from("# directory frames width height shore_filter\n");
+    let clamp_note = "the one-frame stills (still-*) set the camera directly, below the viewer's 1 m ground clamp (VIEW-004): the viewer itself does not go this low";
+    writeln!(out, "capture-flights: {clamp_note}").map_err(err)?;
+    let mut index = format!("# directory frames width height shore_filter\n# {clamp_note}\n");
     let default = setup.look.water.shore_filter;
     let first = views[0].cameras[0];
     let mut r = new_renderer(&rig, &setup, first)?;
