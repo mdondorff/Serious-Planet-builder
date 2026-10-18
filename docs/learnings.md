@@ -389,3 +389,29 @@ What happened: with the summary of ADR 0058 in the 16384 store, non-measured RTX
 Assumption it changes: item 9a.1's "the first wave of coarse fills is the cause" holds for the first 600 frames and not for the rest of the descent.
 Proposed follow-up: window 8 reads the lag; if it is over 1, attribute the plan worker's 0.8 to 1.9 s (block reads of the planner's height bounds, as M4 F3 found for a cold plan) before anything else.
 Obsolete when: a dive window reads lag under 1.
+
+## 2026-10-18 One edited item re-keys most resident tiles; reach and key-aware refresh are M6 work (SPIKE-13)
+Scope: ADR 0021 points 2, 5, 8; streaming, frame
+| Observation | Number |
+|---|---|
+| Tiles re-keyed by one stamp (cell and margin ring), 150 m radius | 3,788 of 6,445 resident (2 km); 12,110 of 14,543 (1 m) |
+| Tiles that touch the stamp | 36-2,812 |
+| Streamer re-fetch of a resident tile with a changed key | none; `draw_plan` substitutes ancestors |
+| Plan after an edit with a still camera | not requested; forced in the prototype |
+| Keys of a cell-reading field per plan | recomputed (`reuse = !reads_cells`): worker 21-134 ms |
+| Item-dependent bounds as a constant over-estimate (+120 m) | planning fails at 200 m and 1 m (empty morph interval, levels 16-18) |
+| Find by key / cell grid / footprint | 260-820 / 34-91 / 0.6-3.7 ms |
+Proposed follow-up: decide ADR 0021 points 2, 5, 8 before the first authored stage; M6 build list in `spikes/edit-latency/results/results.md`.
+Obsolete when: the authored-layer change with reach and refresh is accepted.
+
+## 2026-10-18 egui fits wgpu 30 and winit 0.30; two traps: bundled fonts and dropped texture deltas (SPIKE-14)
+Scope: ADR 0015, ADR 0042, `deny.toml` (CON-27)
+| Observation | Value |
+|---|---|
+| egui, egui-wgpu, egui-winit 0.36.2 and 0.37.0 | require wgpu ^30, winit ^0.30.13; 0.35 and older require wgpu 29 |
+| `default-features = false` without `default_fonts` | no font; labels blank |
+| `default_fonts` | OFL-1.1 and Ubuntu-font-1.0 fail `cargo deny check licenses` |
+| Texture deltas of earlier passes dropped | glyph atlas never uploaded; text blank |
+| Typical panel at 1080p on the RTX | egui 0.175 ms CPU, UI pass 0.12 ms |
+Proposed follow-up: the owner decides the font licences before the editor UI change; the editor accumulates every pass's `textures_delta` until painted.
+Obsolete when: the editor UI change lands.

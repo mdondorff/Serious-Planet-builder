@@ -258,8 +258,19 @@ Source: CON-20, CON-21, REND-018, M4 fix F10, M4 fix F5, M4 item 7d, ADR 0034, A
 - **THEN** nothing is compared and the console says why; only a valid session replaces the baseline
 
 #### Scenario: Session validity
-- **WHEN** a run reports hardware slowdown, thermal throttling or a power brake (or an unparseable reason), or a view's run-to-run noise stays above 10 % after one retry
+- **WHEN** a run reports hardware slowdown, thermal throttling or a power brake (or an unparseable reason), or a view's run-to-run noise stays above the limit after one retry
 - **THEN** the session prints `SESSION INVALID for budgets` with the reasons before any verdict and the log has `valid_for_budgets` false
+
+#### Scenario: Noise floor (ADR 0059)
+- **WHEN** the run-to-run noise `(max - min) / median` of a view's run medians is computed
+- **THEN** it counts as above the limit only when it exceeds both 10 % of the median and an absolute floor: 0.5 ms for a waited frame total, 0.1 ms for a per-pass GPU figure (`gate::NOISE_FLOOR_FRAME_MS`, `NOISE_FLOOR_PASS_MS`); a spread of exactly 10 % or exactly the floor is not above; fewer than two runs or a non-positive median still counts as noisy
+
+#### Scenario: Acceptance derives validity from the logged data
+- **WHEN** `cargo xtask accept` reads a perf log
+- **THEN** it judges again, with the harness's own functions (`gate::validity`, `gate::noise_needs_retry`, `clock::gpu_validity`), the throttling reasons from the logged throttle masks of every run, the noise reasons from the logged run medians of every view with two or more runs (the streaming scenes are not noise-checked), and each view's GPU clock validity from its logged clock samples against the current floor; the recorded flags and reasons stay in the log as a record
+- **AND** it prints each place where the derived verdict differs from the recorded one (reasons recorded and not true, reasons true and not recorded, `frame_valid`, `gpu_session_valid`, a view's GPU clock verdict)
+- **AND** a kind of reason whose inputs are not all in the log (a missing clock sample or throttle mask, a view whose runs are absent), a log without a `warnings` list, and a recorded invalid session without any reason keep their recorded verdict and the output says so
+- **AND** causes that depend on the run alone (smoke, adapter, power scheme, source, readiness gate, owner override, idle start, load calibration) stay as recorded
 
 #### Scenario: Power cap
 - **WHEN** a run reports throttle reason 0x4 (software power cap) and nothing else but idle, applications-clock or sync-boost bits
@@ -760,6 +771,21 @@ Source: ADR 0037 point 2, ADR 0017, ADR 0035, M5 queue item 10
 #### Scenario: A golden outside the affected classes
 - **WHEN** a water golden changes but the declarations affect only `sky`
 - **THEN** it escalates
+
+### Requirement: TEST-037 Streaming scenes start cool and take no GPU rows
+Before the measured span of a streaming scene (not in a smoke run) the harness SHALL apply the cool start of TEST-033. There is no warm-up: the loop is paced to 60 Hz and CPU-bound, so no amount of rendering it brings the GPU to the loaded clock (look-2km at 58 C stayed at P3, 1,087 MHz, after 30 s unpaced), the held views and flights are already unpaced back-to-back waited frames, and the streaming scenes take no GPU time for the clock to matter to. A streaming scene (`stream/<scene>`, `stream-lit/<scene>`) SHALL NOT make a session invalid for GPU verdicts by the clock it started at (it has none): the clock stays recorded in the log, the session line reads `no GPU rows (the pipelined scenes take no GPU time)`, and the acceptance facts of a scene say the same; logs written before this rule, which carry the idle-start warning, are still read as valid for frame verdicts. A view that takes GPU rows keeps ADR 0034's idle start rule. The camera scripts, the budgets and the streaming code are unchanged, and the frame verdicts too.
+
+Verify: A
+Status: active
+Source: perf windows 7 and 8 (every streaming scene started at P5 or P8; the lit dive's two device losses came after long runs on a hot GPU), the look-2km diagnostic run of 2026-10-18, ADR 0057, TEST-033
+
+#### Scenario: Which steps a scene takes
+- **WHEN** a smoke run and a measured streaming scene are started
+- **THEN** the smoke run takes no step and the measured scene cools down; no scene warms up
+
+#### Scenario: An idle start of a streaming scene
+- **WHEN** a streaming scene began at P8, 210 MHz
+- **THEN** the session is valid for frame verdicts and for GPU rows (none exist), its line says `no GPU rows`, and the warnings are empty; the same start of a lit view still voids the session's GPU verdicts
 
 ### Requirement: TEST-033 Cool start of a view
 Before the warm-up of every view (the terrain scene's and the lit scenes', not in a smoke run) the harness SHALL wait, idle, until the GPU temperature reads 60 C or less, polling every 5 s for at most 120 s, and SHALL print one line per view: the temperatures at the start and the end and the seconds, or `NOT cooled` with the cap. An unreadable sensor ends the wait at once. The wait adds nothing to a measured frame.

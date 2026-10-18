@@ -43,6 +43,19 @@ pub fn scenes_of(name: &str) -> Vec<StreamScene> {
     }
 }
 
+/// What a streaming scene does before its measured span (TEST-037): the cool start (ADR 0057, TEST-033: wait for the GPU to read
+/// 60 C or less) in a measured run, nothing in a smoke run (no measurement, perhaps no `nvidia-smi`). There is no warm-up: the loop
+/// is paced to 60 Hz and CPU-bound, so no amount of rendering it brings the GPU to the loaded clock (look-2km at 58 C stayed at P3
+/// 1,087 MHz after 30 s unpaced), and the scenes take no GPU time for the clock to matter to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StartSteps {
+    pub cool: bool,
+}
+
+pub fn start_steps(smoke: bool) -> StartSteps {
+    StartSteps { cool: !smoke }
+}
+
 /// The source of the bake for the log (`protocol.source`) and whether it is the production one: the stored bake is, an
 /// in-memory one is labelled and never valid for streaming budgets (a cold plan and a tile's generation differ over the store:
 /// block decodes and the cache working set, SPIKE-05).
@@ -168,6 +181,8 @@ struct Driver<'a> {
     next_deadline: Instant,
     /// The lit path (`--lit`, TEST-025): the look, the sea and the water plan cache, with the world they plan against.
     lit: Option<(crate::litperf::LitSetup, Arc<WorldTerrain>)>,
+    /// The terrain's height field the water plan cuts its nodes with (ATMO-020); built with the lit path, before the case's counters.
+    cut_field: Option<Box<dyn planet_generators::height::HeightField + 'a>>,
     /// Frames ticked, for the clock of the waves and the exposure's first frame.
     ticks: u64,
 }
@@ -192,6 +207,7 @@ impl Driver<'_> {
                 let before = setup.water_counters();
                 let plan = setup.plan(
                     world,
+                    self.cut_field.as_deref().ok_or("the lit path has no height field")?,
                     &frame.pipeline.draw.plan,
                     100.0 + self.ticks as f64 * FRAME_STEP_S,
                     FRAME_STEP_S as f32,
@@ -356,7 +372,8 @@ fn run_case(
             .warm_up_lit(ctx, &setup.warm_plan(first.camera, first.size, first.lod.cells)?)
             .map_err(|e| format!("warming the lit path: {e}"))?;
     }
-    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), ticks: 0 };
+    let cut_field = if lit.is_some() { Some(world.field()?) } else { None };
+    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), cut_field, ticks: 0 };
     // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022:
     // recorded only, never judged; the per-tile times of the log read against it). Nothing of the case runs yet.
     let calib_threads = gen.workers;
@@ -389,6 +406,11 @@ fn run_case(
         settle_s = Some(started.elapsed().as_secs_f64());
         writeln!(out, "{}: settled at the start view after {:.1} s ({frames} frames)", script.scene.name(), settle_s.unwrap_or(0.0))
             .map_err(err)?;
+    }
+    // Both device losses of the lit dive (window 8) came after long runs on a hot GPU, so the measured span starts cool (ADR 0057,
+    // TEST-033). No warm-up: see `StartSteps`.
+    if start_steps(smoke).cool {
+        writeln!(out, "{}", planet_perf::cool_gpu().line(script.scene.name())).map_err(err)?;
     }
     // The clock, before, during (a sampler thread: a process spawn never on the frame path) and after the case.
     let mut clocks: Vec<planet_perf::ClockSample> = Vec::new();
@@ -784,7 +806,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
             writeln!(out, "WARNING (not valid for time budgets): {w}").map_err(err)?;
         }
     } else {
-        crate::session_verdict_line(out, &verdict)?;
+        crate::session_verdict_line_for(out, &verdict, false)?;
     }
     let protocol = Protocol {
         warmup_frames: 0,
@@ -988,6 +1010,21 @@ mod tests {
             let script = build_script(scene, 6_371_000.0, 16.0 / 9.0, &planet_generators::height::Reference(1), LOOK_SEED);
             let spec = case_spec(scene.name(), script.cameras.len(), FRAME_STEP_S, script.descent_frames).unwrap();
             assert_eq!(spec.frames, script.cameras.len());
+        }
+    }
+
+    // spec: TEST-037
+    #[test]
+    fn a_streaming_scene_cools_down_in_a_measured_run_and_never_warms_up() {
+        // A smoke run takes no step (no measurement, perhaps no nvidia-smi); a measured run cools the GPU first.
+        assert_eq!(start_steps(true), StartSteps { cool: false });
+        assert_eq!(start_steps(false), StartSteps { cool: true });
+        // No scene warms up, whether it starts from a settled view or from an empty cache: the loop is CPU-bound at 60 Hz, so a warm-up
+        // cannot reach the clock floor (look-2km: P3 1,087 MHz after 30 s unpaced), and a warm-up from an empty cache would load what
+        // the scene measures. The steps have no warm-up field to set.
+        for scene in planet_frame::scenes::StreamScene::ALL {
+            let script = planet_frame::scenes::build_script(scene, 6_371_000.0, 16.0 / 9.0, &planet_generators::height::Reference(1), 1);
+            assert!(start_steps(false).cool, "{scene:?} ({} a settled start)", if script.prelude.is_some() { "has" } else { "has not" });
         }
     }
 

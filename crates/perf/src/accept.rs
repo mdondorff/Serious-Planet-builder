@@ -432,13 +432,14 @@ pub fn read_scene_as(f: &SceneFiles, lit: bool) -> Result<SceneRead, Vec<String>
     let gpu_valid = matches!(run.get("gpu_valid"), Some(Json::Bool(true)));
     // One definition (validity.rs): frame verdicts count here, or this scene was refused above.
     facts.push(if crate::validity::log_gpu_session_valid(&root) {
-        "session valid for frame verdicts: yes; GPU verdicts: eligible (not part of M4's criteria)".to_string()
+        "session valid for frame verdicts: yes; no GPU rows (the pipelined scenes take no GPU time)".to_string()
     } else {
         format!(
             "session valid for frame verdicts: yes; GPU verdicts: NOT VALID ({}); no M4 criterion is a GPU time",
             crate::validity::log_gpu_only_reasons(&root).first().map_or("idle GPU start", String::as_str)
         )
     });
+    facts.extend(crate::validity::session_verdict_notes(&root).into_iter().map(|n| format!("verdict derived from the logged data: {n}")));
     facts.push(format!(
         "GPU clock state {}{} ({} samples, lowest {} MHz); frame verdicts stand at any clock state, GPU time is not measured in the pipelined scenes",
         str_at(run, "gpu_clock_state").unwrap_or("unknown"),
@@ -695,9 +696,15 @@ mod tests {
     }
 
     fn files(scene: &str, frames: &[FrameRecord], f: &Fx) -> SceneFiles {
+        // A throttling reason of the fixture is backed by the logged data (accept judges throttling again from the logged masks):
+        // the samples carry the hardware-slowdown bit.
+        let mask = if f.invalid.iter().any(|r| r.starts_with(crate::gate::THROTTLE_REASON_PREFIX)) {
+            "0x0000000000000008"
+        } else {
+            "0x0000000000000000"
+        };
         let sample = |mhz: u32| {
-            crate::parse_nvidia_smi(&format!("NVIDIA GeForce RTX 3080 Ti Laptop GPU, {mhz}, 6000, 87.5, 61, P0, 0x0000000000000000"))
-                .unwrap()
+            crate::parse_nvidia_smi(&format!("NVIDIA GeForce RTX 3080 Ti Laptop GPU, {mhz}, 6000, 87.5, 61, P0, {mask}")).unwrap()
         };
         let wall: Vec<f64> = frames.iter().map(|x| x.wall_ms).collect();
         let mut counts: Vec<(String, u64)> = vec![
@@ -750,6 +757,22 @@ mod tests {
         };
         let validity = gate::Validity { reasons: f.invalid.clone() };
         let json = report_json_with_warmups(&adapter, Some(f.scheme), &[], &validity, &protocol, &[run], &[]);
+        // The logs of windows 7 and 8 carry the idle-start warning of a streaming scene that began at P8 (the harness no longer makes it:
+        // `takes_gpu_rows`, TEST-037): the readers still judge such logs by their frame verdicts, so the fixture writes it in by hand.
+        let json = if f.p8_start {
+            let w = format!("run 'stream/{scene}' started with the GPU in P8 at 210 MHz: the workload is too light or the warm-up too short to reach steady clocks (GPU verdicts only; frame verdicts stand)");
+            let json = json
+                .replace("\"valid_for_budgets\":true", "\"valid_for_budgets\":false")
+                .replace("\"gpu_session_valid\":true", "\"gpu_session_valid\":false")
+                .replace("\"gpu_only_causes\":[]", &format!("\"gpu_only_causes\":[\"{w}\"]"));
+            if json.contains("\"warnings\":[]") {
+                json.replace("\"warnings\":[]", &format!("\"warnings\":[\"{w}\"]"))
+            } else {
+                json.replace("\"warnings\":[", &format!("\"warnings\":[\"{w}\","))
+            }
+        } else {
+            json
+        };
         SceneFiles { scene: scene.into(), json: Some(json.into_bytes()), frames: Some(frames_text(frames)), last_valid_present: false }
     }
 

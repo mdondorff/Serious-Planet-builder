@@ -49,3 +49,9 @@ Ratios, current main against window 6: glide water nodes, triangles and vertices
 - The store is the production store, opened read-only by builds that did not write it (b21e4ff and f0d68b0 read it as written by the current build).
 
 Raw per-frame lines: `water-attribution/frames-window6-b21e4ff.txt`, `frames-pr248-f0d68b0.txt`, `frames-main-9f7fb66.txt` (`flight frame terrain_nodes water_nodes triangles vertices pixels`, then the medians).
+
+## Terrain occlusion and the exact dry tile (2026-10-18, CPU only, 16384 store read-only, main dd967b3)
+- A conservative terrain-occlusion cut for water nodes (z-buffer of node quads at R + hmin - sag, 128x72) never dropped visible water, but over 88 cases only 0-8 nodes per frame (106 in total, under 1 % of the 1,100-1,650 kept) are hidden by terrain; the prototype removed 0. CPU 0.35-0.5 ms per frame for a gain of about 0.004 ms; 4-6 coder-days. Not worth building.
+- The surplus is 400-700 kept nodes per frame with no visible water (coastal-band and coarse-tile wet answers over land): not occluded, not off-screen.
+- An exact dry-tile cut (the minimum height over the tile's own (cells+1)^2 mesh vertices at or above W + A + 4 eps_f32 max(1, |W|, |min|)) drops 238-372 nodes per view with 0 visible-water violations: coast-2km 1,082 to 844, coast-3m 1,181 to 840, glide 1,237-1,354 to 897-1,039, descent 1,157-1,473 to 804-1,135; about 0.09 / 0.17 / 0.16-0.19 ms of water pass (about 0.5 us per node). The minimum must come from the tile's worker job, stored beside the WaterBook entry. About 2-3 coder-days; held for the owner's coast-3m budget decision (about 2.0 ms at 1,290 MHz with it, 2.17 without).
+- Sources: scratch `water_occ.rs` and `sweep.txt` (the coordinator's scratchpad); the old `water_attrib.rs` no longer compiles (WaterRequest gained `cut`) and its pixel count ignores terrain occlusion, so the field-march variant was used.

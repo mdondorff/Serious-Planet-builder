@@ -227,14 +227,14 @@ pub fn pass_rows_line(metrics: &[(String, Stats)]) -> String {
     cells.join(", ").replacen(", ", " ", 1)
 }
 
-/// The proposed ADR 0036 point 3, as data for the decision (not applied): a view's run-to-run noise `(max - min) / median` of the
-/// medians of one metric and the absolute spread. It would count as noisy only above both 10 % and 0.1 ms.
+/// ADR 0036 point 3 (amended by ADR 0059): a view's run-to-run noise `(max - min) / median` of the medians of one per-pass metric
+/// and the absolute spread. It counts as noisy only above both 10 % and 0.1 ms (`noisy_with_floor`; `noisy_now` is the 10 % alone).
 pub fn noise_floor_report(run_medians: &[f64]) -> Option<(f64, f64, bool, bool)> {
     let rel = crate::run_to_run_noise(run_medians)?;
     let (lo, hi) = run_medians.iter().fold((f64::MAX, f64::MIN), |(l, h), v| (l.min(*v), h.max(*v)));
     let abs = hi - lo;
     let noisy_now = rel > crate::gate::MAX_NOISE;
-    let noisy_with_floor = noisy_now && abs > 0.1;
+    let noisy_with_floor = crate::gate::noise_exceeds(run_medians, crate::gate::NOISE_FLOOR_PASS_MS);
     Some((rel, abs, noisy_now, noisy_with_floor))
 }
 
@@ -406,7 +406,7 @@ mod tests {
                 && at("tonemap") < at("scene-copy"),
             "{line}"
         );
-        // ADR 0036 point 3 (proposed): 0.2 ms vs 0.23 ms is 15 % noise but 0.03 ms: noisy now, not with the floor.
+        // ADR 0036 point 3 (ADR 0059): 0.2 ms vs 0.23 ms is 15 % noise but 0.03 ms: noisy now, not with the floor.
         let (rel, abs, now, floor) = noise_floor_report(&[0.20, 0.23, 0.21]).unwrap();
         assert!(rel > 0.1 && abs < 0.1 && now && !floor, "{rel} {abs}");
         let (_, _, now, floor) = noise_floor_report(&[2.0, 2.4, 2.1]).unwrap();

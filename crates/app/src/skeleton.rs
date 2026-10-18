@@ -1325,9 +1325,10 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
             }
             writeln!(
                 out,
-                "{name}: run-to-run noise {:.3} above {}: one retry",
+                "{name}: run-to-run noise {:.3} above {} and {} ms: one retry",
                 planet_perf::run_to_run_noise(&medians).unwrap_or(f64::NAN),
-                planet_perf::gate::MAX_NOISE
+                planet_perf::gate::MAX_NOISE,
+                planet_perf::gate::NOISE_FLOOR_FRAME_MS
             )
             .map_err(err)?;
             reports.truncate(batch_start);
