@@ -12,7 +12,7 @@ The owner accepted M4 on 2026-10-16 and started M5. Your queue is "Queued for M5
 - **Defaults:** look parameters are data with physically based Earth defaults (look file, item 3).
 - **Time boxes and fallbacks:** each ADR names a time box and a fallback (Bruneton 2008 for the atmosphere, flat water for the waves). Take the fallback without asking when the box runs out, and report it.
 - **Every change** opens its spec deltas with each attribute's class (field or presentation) and bound (ADR 0035). Fields follow CON-07 and CON-14 (CPU reference, `libm`, known answers); presentation shading declares and tests its bound, including temporal stability at 1 m where planet-sized values are used (CON-11 v1.4).
-- **Perf windows:** ask opus-planner. It authorizes the window; you run it from your session (owner, 2026-10-16). Validity: `load_calib_before_single_us` <= 50,000 and `load_calib_before_parallel_median_us` <= 100,000 per gated scene. Never start a window without the authorization.
+- **Perf windows:** ask opus-planner. It authorizes the window; you run it from your session (owner, 2026-10-16). Validity: the harness judges the CPU calibration of every scene and `accept` refuses one outside the limits (TEST-039, ADR 0065). Never start a window without the authorization.
 - **`test fast` budget:** 20 s (owner, 2026-10-16).
 - **Parallel spikes:** sonnet-spikes may run explorations in its own worktree. It writes only its own files; opus-planner coordinates.
 

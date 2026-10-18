@@ -9,6 +9,7 @@
 //! | not a performance power scheme / unreadable        | yes                  | yes                |
 //! | run validity rule (thermal/hardware throttling, noise, not the production source) | yes | yes |
 //! | owner override of the readiness gate               | yes                  | yes                |
+//! | a scene's CPU calibration outside the limits (ADR 0065, TEST-039) | yes   | yes                |
 //! | a run started with the GPU in P5 or lower (idle clock) | NO               | yes                |
 //! | a view's clock sample below the 1,400 MHz floor    | NO (per view)        | yes (that view)    |
 //! | software power cap 0x4                             | no (recorded only)   | no                 |
@@ -16,6 +17,7 @@
 //! Frame verdicts (frame time, CPU times, plan time, counts, RAM, slots, lag) hold at any clock state of the GPU (owner,
 //! 2026-10-15); only `gpu_ms`, the GPU budget and GPU comparisons need a GPU-valid view.
 
+use crate::calibration::{self, Judgement};
 use crate::compare::Json;
 use crate::{check_reference_adapter, clock, gate, is_performance_scheme, AdapterFacts, RunReport};
 
@@ -30,6 +32,8 @@ pub enum CauseKind {
     OwnerOverride,
     /// A run started with the GPU in P5 or lower: the workload did not raise the clocks.
     LowStartClock,
+    /// The scene's CPU calibration lies outside the limits of [`calibration`] before or after the case (ADR 0065): no verdict.
+    CpuCalibration,
 }
 
 impl CauseKind {
@@ -105,7 +109,41 @@ pub fn session_causes(adapter: &AdapterFacts, power_scheme: Option<&str>, runs: 
             }
         }
     }
+    // ADR 0065: a scene whose CPU calibration lies outside the limits gets no verdict (a scene without a calibration is not judged).
+    let mut judged_paths: Vec<&str> = Vec::new();
+    for r in runs {
+        if judged_paths.contains(&r.path_name.as_str()) {
+            continue;
+        }
+        let count = |k: &str| r.counts.iter().find(|(n, _)| n == k).map(|(_, v)| *v);
+        if let Judgement::Outside(over) = calibration::judge(&count) {
+            judged_paths.push(&r.path_name);
+            push(CauseKind::CpuCalibration, calibration::reason(&r.path_name, &over));
+        }
+    }
     c
+}
+
+/// The CPU calibration verdict of a session (ADR 0065) for the log: `Some(true)` when every scene that logged a calibration is within the
+/// limits, `Some(false)` with the reasons (one per scene) when one is not, `None` when no run logged a calibration (not judged).
+pub fn calibration_status(runs: &[RunReport]) -> (Option<bool>, Vec<String>) {
+    let (mut judged, mut reasons, mut seen) = (false, Vec::new(), Vec::<&str>::new());
+    for r in runs {
+        if seen.contains(&r.path_name.as_str()) {
+            continue;
+        }
+        let count = |k: &str| r.counts.iter().find(|(n, _)| n == k).map(|(_, v)| *v);
+        match calibration::judge(&count) {
+            Judgement::NotJudged => {}
+            Judgement::Within => judged = true,
+            Judgement::Outside(over) => {
+                judged = true;
+                seen.push(&r.path_name);
+                reasons.push(calibration::reason(&r.path_name, &over));
+            }
+        }
+    }
+    (judged.then_some(reasons.is_empty()), reasons)
 }
 
 impl SessionVerdict {
@@ -234,8 +272,29 @@ fn recomputed_warnings(root: &Json) -> (Vec<String>, Vec<String>) {
         .map(|(p, v)| (p.clone(), crate::run_to_run_noise(v).unwrap_or(f64::NAN)))
         .collect();
     let fresh = gate::validity(if throttle_complete { &throttled } else { &[] }, &noisy).reasons;
+    // The CPU calibration (ADR 0065) is judged again from the logged counts of every run; a log with no calibration readings keeps what it
+    // recorded (it was not judged then either).
+    let (mut calibrated, mut cal_fresh, mut cal_paths) = (false, Vec::new(), Vec::<String>::new());
+    for r in &runs {
+        let count = |k: &str| r.get("counts").and_then(|c| c.get(k)).and_then(Json::num).map(|n| n as u64);
+        match calibration::judge(&count) {
+            Judgement::NotJudged => {}
+            Judgement::Within => calibrated = true,
+            Judgement::Outside(over) => {
+                calibrated = true;
+                let p = path_of(r);
+                if !cal_paths.contains(&p) {
+                    cal_fresh.push(calibration::reason(&p, &over));
+                    cal_paths.push(p);
+                }
+            }
+        }
+    }
     let mut out = Vec::new();
     for w in &recorded {
+        if calibrated && w.starts_with(calibration::REASON_PREFIX) {
+            continue;
+        }
         let is_throttle = w.starts_with(gate::THROTTLE_REASON_PREFIX);
         let is_noise = w.starts_with(gate::NOISE_REASON_PREFIX);
         let noise_path = is_noise.then(|| w.split(" on '").nth(1).and_then(|s| s.split('\'').next()).unwrap_or("").to_string());
@@ -249,6 +308,7 @@ fn recomputed_warnings(root: &Json) -> (Vec<String>, Vec<String>) {
         out.push(w.clone());
     }
     out.extend(fresh);
+    out.extend(cal_fresh);
     (out, kept)
 }
 
@@ -590,5 +650,96 @@ mod tests {
         // No warnings list: the recorded flags are used as written, and the notes say so.
         let j = parse(b"{\"valid_for_budgets\":true,\"runs\":[]}").unwrap();
         assert!(log_frame_valid(&j) && session_verdict_notes(&j)[0].contains("recorded flags are used as written"));
+    }
+
+    /// The counts of a scene's calibration (18 threads), before and after.
+    fn calib(b: (u64, u64), a: (u64, u64)) -> Vec<(String, u64)> {
+        let mut c = Vec::new();
+        for (when, (single, parallel)) in [("before", b), ("after", a)] {
+            c.push((format!("load_calib_{when}_threads"), 18));
+            c.push((format!("load_calib_{when}_single_us"), single));
+            c.push((format!("load_calib_{when}_parallel_median_us"), parallel));
+        }
+        c
+    }
+
+    // spec: TEST-039
+    #[test]
+    fn a_scene_outside_the_calibration_limits_has_no_verdict_and_the_log_says_which_reading() {
+        let mut r = run("P0", 1500);
+        r.path_name = "stream-lit/dive".into();
+        // Within the limits (a quiet scene of window 11): valid, calibration valid in the log.
+        r.counts = calib((46_296, 96_434), (46_902, 95_388));
+        let v = assess(std::slice::from_ref(&r), false, &gate::Validity::default(), &[]);
+        assert!(v.frame_valid() && v.warnings().is_empty());
+        let proto = Protocol::default();
+        let json = report_json(&rtx(), Some(GOOD), &[], &gate::Validity::default(), &proto, std::slice::from_ref(&r));
+        assert!(json.contains("\"cpu_calibration_valid\":true,\"cpu_calibration_reasons\":[]"), "{json}");
+        // The smoke dive disturbed by git: the after single reading is out.
+        r.counts = calib((46_984, 105_071), (59_335, 91_121));
+        let v = assess(std::slice::from_ref(&r), false, &gate::Validity::default(), &[]);
+        assert!(!v.frame_valid() && !v.gpu_session_valid(), "no verdict: the whole scene does not count");
+        assert_eq!(v.causes.len(), 1);
+        assert_eq!(v.causes[0].kind, CauseKind::CpuCalibration);
+        let reason =
+            "no verdict: CPU calibration of 'stream-lit/dive' outside the limits (ADR 0065): after single 59,335 us over 56,000 us";
+        assert_eq!(v.warnings(), vec![reason.to_string()]);
+        assert!(v.lines().iter().any(|l| l.contains(reason)), "{:?}", v.lines());
+        let json = report_json(&rtx(), Some(GOOD), &[], &gate::Validity::default(), &proto, std::slice::from_ref(&r));
+        assert!(json.contains("\"frame_valid\":false") && json.contains("\"cpu_calibration_valid\":false"), "{json}");
+        assert!(json.contains(&format!("\"cpu_calibration_reasons\":[\"{reason}\"]")), "{json}");
+        // Three runs of one view carry the same calibration: one cause, not three.
+        let three = vec![r.clone(), r.clone(), r.clone()];
+        assert_eq!(assess(&three, false, &gate::Validity::default(), &[]).causes.len(), 1);
+        // A scene without a calibration is not judged: valid, and `null` in the log.
+        r.counts = vec![];
+        let v = assess(std::slice::from_ref(&r), false, &gate::Validity::default(), &[]);
+        assert!(v.frame_valid());
+        let json = report_json(&rtx(), Some(GOOD), &[], &gate::Validity::default(), &proto, std::slice::from_ref(&r));
+        assert!(json.contains("\"cpu_calibration_valid\":null,\"cpu_calibration_reasons\":[]"), "{json}");
+    }
+
+    /// A log with one run whose counts are `counts`, recorded flags and warnings as given.
+    fn log_with_counts(frame_valid: bool, warnings: &[&str], path: &str, counts: &[(String, u64)]) -> Json {
+        let counts: Vec<String> = counts.iter().map(|(n, v)| format!("\"{n}\":{v}")).collect();
+        let warnings: Vec<String> = warnings.iter().map(|w| format!("\"{w}\"")).collect();
+        parse(
+            format!(
+                "{{\"valid_for_budgets\":{frame_valid},\"frame_valid\":{frame_valid},\"gpu_session_valid\":{frame_valid},\"warnings\":[{}],\"runs\":[{{\"path\":\"{path}\",\"median_ms\":5.0,\"counts\":{{{}}}}}]}}",
+                warnings.join(","),
+                counts.join(",")
+            )
+            .as_bytes(),
+        )
+        .unwrap()
+    }
+
+    // spec: TEST-039
+    #[test]
+    fn accept_judges_the_calibration_again_from_the_logged_counts_and_leaves_logs_without_one_alone() {
+        // A log written before the rule, with the slow planner terminal's readings: now no verdict, with the reason.
+        let slow = log_with_counts(true, &[], "stream/dive", &calib((66_877, 130_386), (48_553, 133_755)));
+        assert!(!log_frame_valid(&slow) && !log_gpu_session_valid(&slow));
+        let reasons = log_frame_void_reasons(&slow);
+        assert_eq!(reasons.len(), 1);
+        assert!(
+            reasons[0].starts_with("no verdict: CPU calibration of 'stream/dive'")
+                && reasons[0].contains("before single 66,877 us over 52,000 us"),
+            "{reasons:?}"
+        );
+        assert!(session_verdict_notes(&slow).iter().any(|n| n.starts_with("not recorded at run time, true when judged again")));
+        // A quiet scene of window 11 stays valid.
+        assert!(log_frame_valid(&log_with_counts(true, &[], "stream-lit/dive", &calib((46_296, 96_434), (46_902, 95_388)))));
+        // A reason recorded at run time that the logged counts do not support goes away; one the counts support stays (once).
+        let w = "no verdict: CPU calibration of 'stream-lit/dive' outside the limits (ADR 0065): after single 59,335 us over 56,000 us";
+        let ok = log_with_counts(false, &[w], "stream-lit/dive", &calib((46_296, 96_434), (46_902, 95_388)));
+        assert!(log_frame_valid(&ok), "judged again with the counts of the log");
+        let out = log_with_counts(false, &[w], "stream-lit/dive", &calib((46_984, 105_071), (59_335, 91_121)));
+        assert!(!log_frame_valid(&out) && log_frame_void_reasons(&out) == vec![w.to_string()]);
+        // A log without calibration counts (the lit scenes before this change) is not judged: valid, and a recorded reason stays as it was.
+        let none = log_with_counts(true, &[], "stream-lit/dive", &[]);
+        assert!(log_frame_valid(&none));
+        let kept = log_with_counts(false, &[w], "stream-lit/dive", &[]);
+        assert!(!log_frame_valid(&kept), "no counts to judge again: the recorded reason stands");
     }
 }

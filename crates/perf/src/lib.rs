@@ -4,6 +4,7 @@
 
 pub mod accept;
 pub mod accept_m5;
+pub mod calibration;
 pub mod clock;
 pub mod compare;
 pub mod gate;
@@ -411,6 +412,7 @@ pub fn report_json_full(
     }
     let verdict = crate::validity::SessionVerdict::assess(adapter, power_scheme, runs, protocol.smoke, validity, owner_override);
     let warnings = verdict.warnings();
+    let (calibration_valid, calibration_reasons) = crate::validity::calibration_status(runs);
     let run_json: Vec<String> = runs
         .iter()
         .map(|r| {
@@ -437,7 +439,7 @@ pub fn report_json_full(
         })
         .collect();
     format!(
-        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"frame_valid\":{},\"gpu_session_valid\":{},\"gpu_only_causes\":[{}],\"warnings\":[{}],\"load_notes\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{},\"source\":{},\"gen\":{}}},\"runs\":[{}]}}\n",
+        "{{\"adapter\":{{\"name\":{},\"backend\":{}}},\"power_scheme\":{},\"owner_override\":[{}],\"valid_for_budgets\":{},\"frame_valid\":{},\"gpu_session_valid\":{},\"gpu_only_causes\":[{}],\"cpu_calibration_valid\":{},\"cpu_calibration_reasons\":[{}],\"warnings\":[{}],\"load_notes\":[{}],\"warmups\":[{}],\"protocol\":{{\"warmup_frames\":{},\"measured_frames\":{},\"runs\":{},\"vram_caps_gb\":{:?},\"internal_resolution\":[{},{}],\"field\":{},\"source\":{},\"gen\":{}}},\"runs\":[{}]}}\n",
         json_str(&adapter.name),
         json_str(&adapter.backend),
         power_scheme.map_or("null".to_string(), json_str),
@@ -446,6 +448,8 @@ pub fn report_json_full(
         verdict.frame_valid(),
         verdict.gpu_session_valid(),
         verdict.gpu_only().iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
+        calibration_valid.map_or("null".to_string(), |v| v.to_string()),
+        calibration_reasons.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
         warnings.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
         load_notes.iter().map(|w| json_str(w)).collect::<Vec<_>>().join(","),
         warmups.iter().map(|(v, w)| warmup_json(v, w)).collect::<Vec<_>>().join(","),
