@@ -355,21 +355,6 @@ fn candidates(root: &Path) -> Vec<(String, String)> {
     out
 }
 
-pub fn bless_list(root: &Path) -> Res {
-    let c = candidates(root);
-    if c.is_empty() {
-        eprintln!("no candidate goldens in target/review/candidates/");
-        return Ok(());
-    }
-    for (adapter, name) in c {
-        let golden = root.join("tests").join("goldens").join(&adapter).join(&name);
-        let state = if golden.is_file() { "differs from golden" } else { "no golden yet" };
-        eprintln!("{adapter}/{name}: {state}");
-    }
-    eprintln!("Promotion is owner-only: run /bless in a Claude Code session and answer each prompt.");
-    Ok(())
-}
-
 pub fn repro(root: &Path, args: &[String]) -> Res {
     let Some(bundle) = args.iter().find(|a| !a.starts_with("--")) else {
         return Err("usage: cargo xtask repro <bundle> [--real]".into());
