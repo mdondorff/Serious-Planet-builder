@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: GEN-019 Compact tile
-The tile builder SHALL produce, for levels 3 and finer, a compact tile (ADR 0033 point 4): one 8-byte texel per grid vertex (`(cells + 1)^2` texels: a 32-bit height step count between the tile's own minimum and maximum, then in the second word two signed 15-bit octahedral normal components in bits 0-14 and 15-29, bits 30-31 zero), the tile's climate block (GEN-021: 81 words, 324 bytes) and a 128-byte header (nine tile-local control points of a biquadratic base surface on the shell through the tile origin, the height range `hr_min` and `hr_step`, the origin height, the skirt depth and the flags: bit 0 the orientation flip, every other bit zero), laid out as one slot of 9,360 bytes at cells 32 (GEN-025; `MESH_VERSION` 8). A compact tile keeps the minimum of 16 cells per tile edge (a build with fewer cells is refused naming the minimum; the former reason, 162 climate values in 162 texels, is gone, the minimum stays so that the cells 16 configurations and their pool arithmetic are unchanged). A tile SHALL have the same key in either format (the mesh key of its finest-level class, GEN-010). The stored normal SHALL equal the canonical CPU normal within 0.01 degrees (CON-14); the height SHALL be reconstructed as `hr_min + f32(q) * hr_step` with the step the relief over 4,294,967,295 and the range rounded outwards so no height is clamped, the height error SHALL be at most half a step plus f32 rounding (the reconstruction is exact to about relief x 3e-8, so 1 mm holds up to about 30 km of relief in one tile), and a finest-level tile (a tile at or deeper than the LOD cap `max_level`, LOD-010) with more than 65.535 m of relief SHALL still be built in the vertex format instead, as SHALL every tile of levels 0-2 (the wide texel holds CON-13's 1 mm on such a tile; the guard and the finest-level class of the key stay, so formats and keys stay as they are, until the vertex format is removed by `remove-vertex-render-path`; a builder switch turns the guard off for the CON-13 tests) (the base surface's model error of about 0.018 theta^2 of the tile edge is too large there). The CPU mirror of the shader's vertex stage (position, morph target, skirts, heights, normal) SHALL agree with the canonical CPU mesh at every vertex of tiles of levels 3 to 26 within the model error, the quantisation step and f32 rounding, with the exact morph target (neighbour heights read from the texels), and neighbouring tiles of one level SHALL meet within the model error of the two (millimetres from level 12). Tiles SHALL be bit-identical across runs and thread counts, with known-answer hashes next to the mesh version they belong to. Every value in a tile SHALL be tile-local or a unit vector (CON-11).
+The tile builder SHALL produce, for levels 3 and finer, a compact tile (ADR 0033 point 4): one 8-byte texel per grid vertex (`(cells + 1)^2` texels: a 32-bit height step count between the tile's own minimum and maximum, then in the second word two signed 15-bit octahedral normal components in bits 0-14 and 15-29, bits 30-31 zero), the tile's climate block (GEN-021: 81 words, 324 bytes) and a 128-byte header (nine tile-local control points of a biquadratic base surface on the shell through the tile origin, the height range `hr_min` and `hr_step`, the origin height, the skirt depth and the flags: bit 0 the orientation flip, every other bit zero), laid out as one slot of 9,168 bytes at cells 32 (GEN-025; `MESH_VERSION` 8). A compact tile keeps the minimum of 16 cells per tile edge (a build with fewer cells is refused naming the minimum; the former reason, 162 climate values in 162 texels, is gone, the minimum stays so that the cells 16 configurations and their pool arithmetic are unchanged). A tile SHALL have the same key in either format (the mesh key of its finest-level class, GEN-010). The stored normal SHALL equal the canonical CPU normal within 0.01 degrees (CON-14); the height SHALL be reconstructed as `hr_min + f32(q) * hr_step` with the step the relief over 4,294,967,295 and the range rounded outwards so no height is clamped, the height error SHALL be at most half a step plus f32 rounding (the reconstruction is exact to about relief x 3e-8, so 1 mm holds up to about 30 km of relief in one tile), and a finest-level tile (a tile at or deeper than the LOD cap `max_level`, LOD-010) with more than 65.535 m of relief SHALL still be built in the vertex format instead, as SHALL every tile of levels 0-2 (the wide texel holds CON-13's 1 mm on such a tile; the guard and the finest-level class of the key stay, so formats and keys stay as they are, until the vertex format is removed by `remove-vertex-render-path`; a builder switch turns the guard off for the CON-13 tests) (the base surface's model error of about 0.018 theta^2 of the tile edge is too large there). The CPU mirror of the shader's vertex stage (position, morph target, skirts, heights, normal) SHALL agree with the canonical CPU mesh at every vertex of tiles of levels 3 to 26 within the model error, the quantisation step and f32 rounding, with the exact morph target (neighbour heights read from the texels), and neighbouring tiles of one level SHALL meet within the model error of the two (millimetres from level 12). Tiles SHALL be bit-identical across runs and thread counts, with known-answer hashes next to the mesh version they belong to. Every value in a tile SHALL be tile-local or a unit vector (CON-11).
 
 Verify: A, B, C
 Status: planned
@@ -9,7 +9,7 @@ Source: ADR 0033 points 4 and 5, SPIKE-06, CON-11, CON-13, CON-14, LOD-010, GEN-
 
 #### Scenario: Layout and bytes
 - **WHEN** a tile is built at cells 32 and cells 64
-- **THEN** it has 1,089 / 4,225 texels of 8 bytes, a 128-byte header and a 324-byte climate block (slots of 9,360 B and 34,448 B, GEN-025), no texel carries climate, and its key equals the mesh key of the same tile (of its class) under `MESH_VERSION` 8
+- **THEN** it has 1,089 / 4,225 texels of 8 bytes, a 128-byte header and a 324-byte climate block (slots of 9,168 B and 34,256 B, GEN-025), no texel carries climate, and its key equals the mesh key of the same tile (of its class) under `MESH_VERSION` 8
 
 #### Scenario: Normals
 - **WHEN** 200,000 random directions, the axes and the octahedron's fold are encoded and decoded, and the stored normals of tiles of levels 3 to 22 are compared with the CPU mesh
@@ -82,28 +82,46 @@ Source: ADR 0039 point 2, ADR 0027, ADR 0035, ADR 0033, CON-07, CON-14, CON-05, 
 - **WHEN** the climate texture is built (analytically and over a bake) for the tile at the +z pole, the tile at the -z pole and a tile on the equator at +x
 - **THEN** the temperature texels at both poles are at least 30 degrees C colder than the equator's, and the version word names the current `GLOBAL_VERSION`
 
+### Requirement: GEN-010 Mesh keys and known answers
+A tile mesh SHALL carry a key covering everything its vertices depend on (tile height key, grid size, the body parameter hash with the radius, skirt fraction and a mesh version), and the mesh version SHALL be bumped whenever vertex output changes for the same inputs, the compact construction (GEN-019) changes or the key composition changes; version 5 introduced the compact tile, which carries the mesh key of its tile, so a tile has one key in either format; version 6 adds the finest-level class (LOD-010): a tile at or deeper than the view's finest level has the key of its tile rehashed with the class, because the format of a finest tile is decided from its relief (GEN-019) and a resident tile is reused by its key, so the key SHALL identify what the format decision depended on; tiles below the finest level keep their base key; version 7 adds the climate field (GEN-021): a tile carries 9 x 9 f16 texels of temperature and precipitation, and the key names the climate version word (the climate, reader and bake versions) so a change of any of them re-keys every tile, while the vertex output and the compact geometry are unchanged (the committed vertex mesh hashes, which do not cover the climate, stay as they were under version 6); version 8 changes the compact tile to the slot of GEN-025 (wide texel, climate block and record inside the slot): every compact key changes, the content of the vertex tiles and the committed vertex mesh hashes stay as they were. The plan's keys, the compact tiles and the vertex tiles of one view SHALL all carry the key of the view's finest level, and a finest tile decided as a fallback under one cap SHALL NOT share a key with the compact tile of the same tile under a deeper cap. Persisted height tiles (STRM-009) are not meshes and are unchanged by it; persistent mesh keys (kind mesh) change with the version, and repro bundles of an older mesh version are refused with the versions named (TEST-008). Known-answer hashes of committed meshes SHALL be identical on every platform and SHALL be asserted next to the version they belong to.
+
+Verify: A
+Status: planned
+Source: ADR 0006, CON-14, LOD-010, GEN-025, ADR 0062
+
+#### Scenario: Key follows inputs
+- **WHEN** the seed, tile, grid size or radius of a mesh changes
+- **THEN** its key changes, and equal inputs give equal keys
+
+#### Scenario: Finest-level class
+- **WHEN** the plan of a view is built with the cap 22 and with the cap 23
+- **THEN** the draw tiles at level 22 of the first plan have the class key of their base key, every tile below the cap has its base key, and the same level-22 tile has its base key under cap 23
+
+#### Scenario: Known answers
+- **WHEN** the committed meshes are generated
+- **THEN** their content hashes equal the committed values, and the test fails if the mesh version differs from the one the values belong to
+
 ## ADDED Requirements
 
 ### Requirement: GEN-025 Compact slot layout
-A compact tile SHALL be one slot of contiguous bytes, the same bytes in the CPU tile, the pack payload (STRM-021), the block of the pool (REND-016) and the shader's reads, so no second resource per tile exists (ADR 0062 point 2). At cells 32 the slot is 9,360 bytes, a multiple of 16:
+A compact tile SHALL be one slot of contiguous bytes, the same bytes in the CPU tile, the pack payload (STRM-021), the block of the pool (REND-016) and the shader's reads, so no second resource per tile exists (ADR 0062 point 2). At cells 32 the slot is 9,168 bytes, a multiple of 16:
 
 | offset | bytes | content |
 |---|---|---|
 | 0 | 128 | header: nine control points (108 B), `hr_min`, `hr_step`, origin height, skirt depth (16 B), flags (4 B) |
-| 128 | 192 | reserved, zero (room for a higher-order base surface or a per-tile block; ADR 0062 point 5 does not adopt the 5x5 base) |
-| 320 | 324 | climate block (GEN-021): 81 words, temperature f16 in the low half, precipitation f16 in the high half |
-| 644 | 4 | pad |
-| 648 | 8 (cells + 1)^2 | texels (GEN-019), row-major, 8,712 B at cells 32 |
+| 128 | 324 | climate block (GEN-021): 81 words, temperature f16 in the low half, precipitation f16 in the high half |
+| 452 | 4 | pad |
+| 456 | 8 (cells + 1)^2 | texels (GEN-019), row-major, 8,712 B at cells 32 |
 
-The stride SHALL be `648 + 8 (cells + 1)^2` bytes (9,360 B at cells 32, 2,960 B at cells 16, 34,448 B at cells 64: a multiple of 16 for every even cell count), and the offsets SHALL be constants of the layout version; a later per-tile block is appended after the climate block and moves the texel offset by its size without changing any other offset. `MESH_VERSION` SHALL be 8: every key and persistent key of a compact tile changes, the pack payload version is 3 (STRM-021), and the known-answer hashes of GEN-019 and GEN-021 are re-recorded. The slot SHALL be bit-identical across runs, thread counts and operating systems, and every value in it SHALL be tile-local or a unit vector (CON-11).
+The stride SHALL be `456 + 8 (cells + 1)^2` bytes (9,168 B at cells 32, 2,768 B at cells 16, 34,256 B at cells 64: a multiple of 16 for every even cell count), and the offsets SHALL be constants of the layout version; a later per-tile block is appended after the climate block and moves the texel offset by its size without changing any other offset. `MESH_VERSION` SHALL be 8: every key and persistent key of a compact tile changes, the pack payload version is 3 (STRM-021), and the known-answer hashes of GEN-019 and GEN-021 are re-recorded. The slot SHALL be bit-identical across runs, thread counts and operating systems, and every value in it SHALL be tile-local or a unit vector (CON-11).
 
 Verify: A, B
 Status: planned
-Source: ADR 0062 points 2 and 4, SPIKE-12 Q3, ADR 0033 points 3-4, GEN-019, GEN-021, CON-11, CON-14
+Source: ADR 0062 point 2, ADR 0063, SPIKE-12 Q3, ADR 0033 points 3-4, GEN-019, GEN-021, CON-11, CON-14
 
 #### Scenario: Offsets and stride
 - **WHEN** a slot is built at cells 16, 32 and 64
-- **THEN** the strides are 2,960, 9,360 and 34,448 bytes, every stride is a multiple of 16, the header, climate block and texels sit at the offsets of the table, and the reserved bytes are zero
+- **THEN** the strides are 2,768, 9,168 and 34,256 bytes, every stride is a multiple of 16, and the header, climate block, pad and texels sit at the offsets of the table
 
 #### Scenario: One byte string
 - **WHEN** a tile's slot is encoded to the pack payload, decoded, uploaded to a block and read back
