@@ -45,7 +45,7 @@ Other passes now (ground-1m / coast-2km, ms median): sky-view 0.036 / 0.039, aer
 | frame p99 | 13.57 | 15.41 | +13.6 % |
 | frame max | 15.73 | 19.21 | +22 % |
 
-Columns now (median / p99 / max): plan 0.68 / 15.70 / 1501.37 (off the frame's path), scheduler 0.20 / 0.99 / 2.69, upload 0.16 / 0.67 / 2.78, record 1.72 / 5.32 / 7.25. Clock state P8 210 MHz at the sample (15 samples; the scene takes no GPU time). All budgets ok; terrain slots 219,585 of 219,585; RAM peak 0.93 GiB; VRAM used 1.61 GiB. Window 11's dive median in window 9 and 10 was 5.41 and 5.33, p99 13.04 and 13.57, so 15.41 is outside the three earlier values. One run: not attributed.
+Columns now (median / p99 / max): plan 0.68 / 15.70 / 1501.37 (off the frame's path), scheduler 0.20 / 0.99 / 2.69, upload 0.16 / 0.67 / 2.78, record 1.72 / 5.32 / 7.25. Clock state P8 210 MHz at the sample (15 samples; the scene takes no GPU time). All budgets ok; terrain slots 219,585 of 219,585; RAM peak 0.93 GiB; VRAM used 1.61 GiB. Window 10 to 11 was 5.41 -> 5.33 median and 13.04 -> 13.57 p99, so 15.41 is above both earlier windows. One run: not attributed.
 
 ## Open
 
