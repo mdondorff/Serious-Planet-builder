@@ -41,4 +41,4 @@ pub use terrain::{
     plan_terrain_threaded, scripted_views, scripted_views_field, CountBudget, PlanCounts, TerrainDraw, TerrainPlan, TerrainRequest,
     TerrainView,
 };
-pub use terrain_text::{BundleWorld, TerrainBundle};
+pub use terrain_text::{BundleWorld, DrawnFrame, TerrainBundle};

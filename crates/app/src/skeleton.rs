@@ -690,14 +690,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
     if let Some(path) = &o.bundle_out {
         // A run that named a world records it whole (definition text, field id, bake size): the replay rebuilds the field
         // from the bundle alone. The seed-only run records none and means the reference field of its seed.
-        let (definition_hash, world_section) = if o.world.is_some() {
-            let toml = planet_world_def::toml_io::to_toml(world.definition()).map_err(|e| format!("recording the world: {e}"))?;
-            let section =
-                planet_frame::BundleWorld { height_field: world.id().to_string(), global_res: world.global_res(), definition_toml: toml };
-            (world.definition().hash(), Some(section))
-        } else {
-            (definition_hash(request.seed, request.lod.radius_m), None)
-        };
+        let (definition_hash, world_section) = bundle_world(&world, o.world.is_some(), request.seed, request.lod.radius_m)?;
         let bundle = planet_frame::TerrainBundle {
             generator_version: GENERATOR_VERSION,
             implementation_id: IMPLEMENTATION_ID.to_string(),
@@ -707,6 +700,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
             world: world_section,
             request,
             plan,
+            frame: None,
         };
         std::fs::write(path, bundle.to_text()).map_err(|e| format!("writing {}: {e}", path.display()))?;
         writeln!(out, "wrote repro bundle {}", path.display()).map_err(err)?;
@@ -736,6 +730,9 @@ fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>,
         }
     };
     let field = world.as_ref().map(|w| w.field()).transpose()?;
+    if b.frame.is_some() {
+        return replay_frame(ctx, &b, field.as_deref(), png, out);
+    }
     let rebuilt = match &field {
         Some(f) => planet_frame::plan_terrain_field(&b.request, f.as_ref()),
         None => plan_terrain(&b.request),
@@ -806,6 +803,115 @@ fn world_of_bundle(w: &planet_frame::BundleWorld, b: &planet_frame::TerrainBundl
         return Err(format!("bundle records radius {} m, its recorded world has {} m", b.request.lod.radius_m, terrain.radius_m()));
     }
     Ok(terrain)
+}
+
+/// The definition hash and the world section a bundle of `world` records: the whole world when the run named one (`named`: `--world`),
+/// nothing for the seed-only reference field. A world read from a store is refused: replay would need the store.
+pub fn bundle_world(
+    world: &WorldTerrain,
+    named: bool,
+    seed: u64,
+    radius_m: f64,
+) -> Result<(u64, Option<planet_frame::BundleWorld>), String> {
+    if !named {
+        return Ok((definition_hash(seed, radius_m), None));
+    }
+    if world.is_stored() {
+        return Err(format!(
+            "a bundle cannot record a world read from a store ({}): replay would need the store; run with --global-res N (at most 1024) to record one",
+            world.source()
+        ));
+    }
+    let toml = planet_world_def::toml_io::to_toml(world.definition()).map_err(|e| format!("recording the world: {e}"))?;
+    let section = planet_frame::BundleWorld { height_field: world.id().to_string(), global_res: world.global_res(), definition_toml: toml };
+    Ok((world.definition().hash(), Some(section)))
+}
+
+/// The bundle of a viewer frame (TEST-008, version 3): the request, the plan as it was drawn (lit and water parts included) and how it
+/// was decided. The world is recorded like a terrain run's.
+pub fn frame_bundle(
+    adapter: String,
+    world: &WorldTerrain,
+    named: bool,
+    request: planet_frame::TerrainRequest,
+    plan: planet_frame::TerrainPlan,
+    frame: planet_frame::DrawnFrame,
+) -> Result<planet_frame::TerrainBundle, String> {
+    let (definition_hash, world_section) = bundle_world(world, named, request.seed, request.lod.radius_m)?;
+    Ok(planet_frame::TerrainBundle {
+        generator_version: GENERATOR_VERSION,
+        implementation_id: IMPLEMENTATION_ID.to_string(),
+        mesh_version: planet_generators::mesh::MESH_VERSION,
+        definition_hash,
+        adapter,
+        world: world_section,
+        request,
+        plan,
+        frame: Some(frame),
+    })
+}
+
+/// Replay a frame bundle: the plan as it was drawn is not the plan of its request, so it is drawn as recorded (the tiles of its
+/// nodes regenerated from the rebuilt world, the lit and water parts as recorded) and the request's own plan is only reported beside it.
+fn replay_frame(
+    ctx: &GpuContext,
+    b: &planet_frame::TerrainBundle,
+    field: Option<&dyn planet_generators::height::HeightField>,
+    png: Option<&Path>,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    let frame = b.frame.ok_or("not a frame bundle")?;
+    let own = match field {
+        Some(f) => planet_frame::plan_terrain_field(&b.request, f),
+        None => planet_frame::plan_terrain(&b.request),
+    }
+    .map_err(|e| e.to_string())?;
+    writeln!(
+        out,
+        "replay: frame drawn {:?} with {} nodes ({} substituted, {} blank); the plan of its request alone has {} nodes ({:016x}); recorded on adapter {}",
+        frame.kind,
+        b.plan.nodes.len(),
+        frame.substituted,
+        frame.blank,
+        own.nodes.len(),
+        own.plan_hash(),
+        b.adapter
+    )
+    .map_err(err)?;
+    let map = planet_frame::plan::face_mapping_by_id(&b.request.face_mapping)
+        .ok_or_else(|| format!("unknown face mapping '{}'", b.request.face_mapping))?;
+    let (seed, cells, radius) = (b.request.seed, b.request.lod.cells, b.request.lod.radius_m);
+    let reference = planet_generators::height::Reference(seed);
+    let mut renderer = planet_render::TerrainRenderer::with_frames_in_flight(ctx, b.plan.size, cells, 1);
+    if let Some(lit) = &b.plan.lit {
+        renderer.enable_lit(ctx);
+        if let Some(a) = &lit.atmosphere {
+            renderer.enable_atmosphere(ctx, &a.atmosphere);
+        }
+        if b.plan.water.is_some() {
+            renderer.enable_water(ctx);
+        }
+    }
+    for n in &b.plan.nodes {
+        let tile = match field {
+            Some(f) => planet_generators::compact::compact_tile_field(f, map.as_ref(), n.tile, cells, radius),
+            None => planet_generators::compact::compact_tile_field(&reference, map.as_ref(), n.tile, cells, radius),
+        };
+        renderer.upload_tile(ctx, &tile).map_err(|e| format!("tile {:?}: {e}", n.tile))?;
+    }
+    let (_, stats) = renderer.render(ctx, &b.plan, false).map_err(|e| e.to_string())?;
+    writeln!(
+        out,
+        "replay: {} draw calls, {} triangles, {} water nodes",
+        stats.draw_calls,
+        stats.triangles,
+        b.plan.water.as_ref().map_or(0, |w| w.nodes.len())
+    )
+    .map_err(err)?;
+    if let Some(p) = png {
+        write_frame(&renderer.read_color(ctx), p, out)?;
+    }
+    Ok(())
 }
 
 /// Tile meshes of the run's world field. Each load builds the field afresh (cheap: it only reads the definition and holds the
@@ -1627,6 +1733,7 @@ mod tests {
             world: Some(world.clone()),
             request,
             plan,
+            frame: None,
         };
         assert!(world_of_bundle(&world, &bundle).is_ok(), "the canonical text round-trips to the recorded hash");
         let e = world_of_bundle(&world, &TerrainBundle { definition_hash: def.hash() ^ 1, ..bundle.clone() }).err().unwrap();
@@ -1636,5 +1743,34 @@ mod tests {
         let mut other_radius = bundle.clone();
         other_radius.request.lod.radius_m += 1.0;
         assert!(world_of_bundle(&world, &other_radius).err().unwrap().contains("radius"));
+    }
+
+    // spec: TEST-008, VIEW-003
+    #[test]
+    fn a_frame_bundle_of_a_world_records_the_world_and_the_drawn_plan_and_rebuilds_the_field() {
+        use planet_frame::look::LitPlan;
+        use planet_frame::pipeline::DrawKind;
+        use planet_frame::{plan_terrain_field, DrawnFrame, LodParams, TerrainBundle, TerrainRequest, TerrainView};
+        let def = planet_world_def::WorldDefinition::single_planet(RADIUS_M, 5);
+        let world = WorldTerrain::open(def, 64).unwrap();
+        let field = world.field().unwrap();
+        let (_, camera) = planet_frame::scripted_views_field(RADIUS_M, 4.0 / 3.0, field.as_ref())[3];
+        let lod = LodParams { cells: 16, viewport_h_px: 192.0, tau_px: 4.0, max_height_m: 40_000.0, ..LodParams::earth_1080p() };
+        let request =
+            TerrainRequest { camera, size: (256, 192), view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 5 };
+        let mut drawn = plan_terrain_field(&request, field.as_ref()).unwrap();
+        drawn.lit = Some(LitPlan::fixed(14.0));
+        let frame = DrawnFrame { kind: DrawKind::Cover, substituted: 0, blank: 0 };
+        let b = frame_bundle("adapter".into(), &world, true, request.clone(), drawn.clone(), frame).unwrap();
+        let back = TerrainBundle::from_text(&b.to_text()).unwrap();
+        assert_eq!(back, b, "the bundle reads back equal");
+        assert_eq!(back.frame, Some(frame));
+        assert_eq!(back.plan.plan_hash(), drawn.plan_hash(), "the plan is the drawn plan, lit part included");
+        let section = back.world.as_ref().expect("a named world is recorded whole");
+        let rebuilt = world_of_bundle(section, &back).expect("the world rebuilds from the bundle alone");
+        assert_eq!(rebuilt.id(), world.id());
+        // A run that named no world is the seed-only reference field and records none.
+        let seed_only = frame_bundle("adapter".into(), &world, false, request, drawn, frame).unwrap();
+        assert!(seed_only.world.is_none() && seed_only.definition_hash == definition_hash(5, RADIUS_M));
     }
 }

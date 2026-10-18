@@ -9,7 +9,8 @@ use planet_core::{PlanetFixed, TileId, Vec3};
 
 pub const TERRAIN_PLAN_FORMAT_VERSION: u32 = 1;
 /// Version 2 adds the optional world section ([`BundleWorld`]); version 1 bundles (the seed-only reference field) still read.
-pub const TERRAIN_BUNDLE_FORMAT_VERSION: u32 = 2;
+/// Version 3 adds the frame section ([`DrawnFrame`], written by the viewer's F9); a bundle without it is written as version 2.
+pub const TERRAIN_BUNDLE_FORMAT_VERSION: u32 = 3;
 
 fn h64(v: f64) -> String {
     format!("{:016x}", v.to_bits())
@@ -262,6 +263,27 @@ fn unescape_line(s: &str) -> Result<String, String> {
     Ok(out)
 }
 
+/// How the plan of a viewer frame was decided (TEST-008, version 3): the plan of a frame is what the pipelined loop drew, which is
+/// not the plan of its request when nodes stand in for tiles that were not resident or the plan is the cover of the resident set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DrawnFrame {
+    pub kind: crate::pipeline::DrawKind,
+    /// Plan nodes drawn as a resident ancestor instead.
+    pub substituted: usize,
+    /// Plan nodes with nothing resident to show.
+    pub blank: usize,
+}
+
+impl DrawnFrame {
+    fn kind_name(&self) -> &'static str {
+        match self.kind {
+            crate::pipeline::DrawKind::Exact => "exact",
+            crate::pipeline::DrawKind::Stale => "stale",
+            crate::pipeline::DrawKind::Cover => "cover",
+        }
+    }
+}
+
 /// A terrain repro bundle: the request that produced a plan, the plan itself and the versions it needs to replay.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TerrainBundle {
@@ -275,19 +297,26 @@ pub struct TerrainBundle {
     /// The world the field came from; `None`: the seed-only reference field of `request.seed`.
     pub world: Option<BundleWorld>,
     pub request: TerrainRequest,
+    /// The plan: the plan of the request, or, with `frame`, the plan of the frame as it was drawn (lit and water parts included).
     pub plan: TerrainPlan,
+    /// Present in a bundle of a viewer frame: how `plan` was decided.
+    pub frame: Option<DrawnFrame>,
 }
 
 impl TerrainBundle {
     pub fn to_text(&self) -> String {
         let r = &self.request;
         let l = &r.lod;
-        let mut s = format!("planet-terrain-repro {TERRAIN_BUNDLE_FORMAT_VERSION}\n");
+        let version = if self.frame.is_some() { TERRAIN_BUNDLE_FORMAT_VERSION } else { 2 };
+        let mut s = format!("planet-terrain-repro {version}\n");
         s += &format!(
             "generator_version {}\nimplementation_id {}\nmesh_version {}\nseed {}\n",
             self.generator_version, self.implementation_id, self.mesh_version, r.seed
         );
         s += &format!("definition_hash {:016x}\nadapter {}\n", self.definition_hash, self.adapter);
+        if let Some(f) = &self.frame {
+            s += &format!("drawn {} substituted {} blank {}\n", f.kind_name(), f.substituted, f.blank);
+        }
         if let Some(w) = &self.world {
             s += &format!("height_field {}\nglobal_res {}\nworld_toml {}\n", w.height_field, w.global_res, escape_line(&w.definition_toml));
         }
@@ -327,13 +356,15 @@ impl TerrainBundle {
         let version = match first {
             "planet-terrain-repro 1" => 1,
             "planet-terrain-repro 2" => 2,
+            "planet-terrain-repro 3" => 3,
             _ => {
                 return Err(format!(
-                    "unsupported bundle header '{first}' (this build reads planet-terrain-repro 1 and {TERRAIN_BUNDLE_FORMAT_VERSION})"
+                    "unsupported bundle header '{first}' (this build reads planet-terrain-repro 1 to {TERRAIN_BUNDLE_FORMAT_VERSION})"
                 ))
             }
         };
         let (mut field_id, mut global_res, mut world_toml) = (None, None, None);
+        let mut frame = None;
         let plan = TerrainPlan::from_text(plan_text)?;
         let (mut gv, mut imp, mut mv, mut seed, mut dh, mut adapter) = (None, None, None, None, 0u64, String::new());
         let (mut mapping, mut view, mut size, mut camera, mut lod, mut recorded) = (None, None, None, None, None, None);
@@ -347,6 +378,15 @@ impl TerrainBundle {
                 ["seed", v] => seed = Some(v.parse::<u64>().map_err(bad)?),
                 ["definition_hash", v] => dh = u64::from_str_radix(v, 16).map_err(bad)?,
                 ["adapter", v] => adapter = v.to_string(),
+                ["drawn", kind, "substituted", sub, "blank", blank] if version >= 3 => {
+                    let kind = match *kind {
+                        "exact" => crate::pipeline::DrawKind::Exact,
+                        "stale" => crate::pipeline::DrawKind::Stale,
+                        "cover" => crate::pipeline::DrawKind::Cover,
+                        other => return Err(format!("unknown frame kind '{other}' in '{line}'")),
+                    };
+                    frame = Some(DrawnFrame { kind, substituted: sub.parse().map_err(bad)?, blank: blank.parse().map_err(bad)? });
+                }
                 ["height_field", v] => field_id = Some(v.to_string()),
                 ["global_res", v] => global_res = Some(v.parse::<u32>().map_err(bad)?),
                 ["world_toml", ..] => world_toml = Some(unescape_line(line.strip_prefix("world_toml ").unwrap_or(""))?),
@@ -421,6 +461,7 @@ impl TerrainBundle {
                 seed: seed.ok_or("bundle has no seed")?,
             },
             plan,
+            frame,
         })
     }
 }

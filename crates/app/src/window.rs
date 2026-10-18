@@ -43,6 +43,9 @@ const TITLE_PERIOD_MS: u64 = 500;
 /// The smoke run reports sooner, so that its short run shows a title.
 const SMOKE_TITLE_PERIOD_MS: u64 = 100;
 const GPU_SAMPLE_PERIOD: Duration = Duration::from_secs(1);
+/// Where F9 writes its repro bundles (relative to the working directory, like the review images), and how long the title names it.
+const CAPTURE_DIR: &str = "target/review";
+const FLASH_MS: u64 = 6_000;
 /// The pre-fill levels the readiness report counts (ADR 0045 point 3 default).
 const READINESS_PREFILL_LEVELS: u8 = 4;
 
@@ -55,6 +58,7 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
         KeyCode::KeyT => Command::ToggleVsync,
         KeyCode::KeyC => Command::ToggleCamera,
         KeyCode::KeyL => Command::ToggleLit,
+        KeyCode::F9 => Command::CaptureFrame,
         KeyCode::Escape => Command::Quit,
         _ => return None,
     })
@@ -97,6 +101,10 @@ struct Config {
     radius_m: f64,
     /// The water level W the lit plan shades against: the sea of the definition (ADR 0041 point 1; the sea is M5's only producer).
     water_level_m: f64,
+    /// Whether the run named a world (`--world`): a frame bundle records it whole (TEST-008).
+    world_named: bool,
+    /// Where F9 writes its repro bundles: `target/review` (like the review images); a smoke run uses a directory of its own.
+    capture_dir: std::path::PathBuf,
     draw: Option<planet_render::DrawMode>,
     upload: Option<planet_render::UploadMode>,
     /// The body's look (`--look`, the file beside `--world`, else the Earth defaults): the sun, units, exposure range and atmosphere of
@@ -137,6 +145,12 @@ struct Running {
     counts: SmokeCounts,
     /// The per-tile answers of the water selection query (ADR 0051 point 6, option 1), kept for the life of the run.
     water_cache: WaterTileCache,
+    /// The text F9 flashes in the title (the bundle's path, or why it was not written) and the time it stays until.
+    flash: Option<(String, u64)>,
+    /// Bundles written by F9 in this run (the number in the file name).
+    captures: u64,
+    /// The path of the last bundle F9 wrote (the smoke summary names it).
+    last_bundle: Option<String>,
 }
 
 struct App<'w> {
@@ -218,6 +232,9 @@ impl App<'_> {
             atmosphere: cfg.atmosphere,
             counts: SmokeCounts::default(),
             water_cache: WaterTileCache::with_book(self.world.water_book()),
+            flash: None,
+            captures: 0,
+            last_bundle: None,
         });
         Ok(())
     }
@@ -297,6 +314,28 @@ impl App<'_> {
                 None
             };
             let plan = lit_plan.as_ref().unwrap_or(&draw.plan);
+            // F9: the frame about to be drawn goes to a repro bundle (VIEW-003, TEST-008). A failure is named in the title, never fatal.
+            if st.viewer.take_capture() {
+                let drawn = planet_frame::DrawnFrame { kind: draw.kind, substituted: draw.substituted, blank: draw.blank };
+                let path = cfg.capture_dir.join(format!("frame-{}.txt", st.captures + 1));
+                let written =
+                    crate::skeleton::frame_bundle(ctx.adapter_key(), self.world, cfg.world_named, req.clone(), plan.clone(), drawn)
+                        .and_then(|b| {
+                            std::fs::create_dir_all(&cfg.capture_dir)
+                                .map_err(|e| format!("creating {}: {e}", cfg.capture_dir.display()))?;
+                            std::fs::write(&path, b.to_text()).map_err(|e| format!("writing {}: {e}", path.display()))
+                        });
+                let text = match written {
+                    Ok(()) => {
+                        st.captures += 1;
+                        st.last_bundle = Some(path.display().to_string());
+                        format!("bundle {}", path.display())
+                    }
+                    Err(e) => format!("bundle not written: {e}"),
+                };
+                st.window.set_title(&format!("planet | {text}"));
+                st.flash = Some((text, now_ms + FLASH_MS));
+            }
             // One frame a second is timed on the GPU, which waits for it: the title's GPU time (meaningful with vsync off).
             let timed = ctx.timestamps_supported() && st.last_gpu_sample.elapsed() >= GPU_SAMPLE_PERIOD;
             let (timing, _) = if timed {
@@ -409,7 +448,11 @@ fn title_text(st: &Running, now_ms: u64) -> String {
         exposure: st.exposure.filter(|_| st.viewer.lit),
         readiness: st.readiness,
     };
-    title(&info)
+    let text = title(&info);
+    match &st.flash {
+        Some((flash, until)) if now_ms < *until => format!("{text} | {flash}"),
+        _ => text,
+    }
 }
 
 /// The keys the smoke run presses, by frame: the view cycle, vsync off and on, pause and resume, the free camera with W held,
@@ -442,6 +485,8 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
             press(st, Command::ToggleCamera);
         }
         36 => press(st, Command::Restart),
+        // F9 on the lit path (the flight's restart left it lit): the next frame is written as a bundle.
+        40 => press(st, Command::CaptureFrame),
         _ => {}
     }
     Ok(false)
@@ -516,7 +561,7 @@ fn smoke_summary(st: &Running) -> String {
         st.surface.present_mode_name(),
         st.adapter_line,
         st.last_title
-    )
+    ) + &format!("\n  {} bundle(s) written, last bundle: {}", st.captures, st.last_bundle.as_deref().unwrap_or("none"))
 }
 
 /// `planet editor`: open the window and run the flight until it is closed (or, for `--smoke`, for a few dozen frames).
@@ -599,6 +644,12 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         base_readiness: Readiness { bake_done, bake_total, prefill_done, prefill_total, view: ViewCoverage::default() },
         radius_m,
         water_level_m,
+        world_named: o.world.is_some(),
+        capture_dir: if o.smoke {
+            std::env::temp_dir().join(format!("planet-smoke-bundles-{}", std::process::id()))
+        } else {
+            CAPTURE_DIR.into()
+        },
         draw: o.draw,
         upload: o.upload,
         look,
@@ -656,14 +707,15 @@ mod tests {
             (KeyCode::KeyT, Command::ToggleVsync),
             (KeyCode::KeyC, Command::ToggleCamera),
             (KeyCode::KeyL, Command::ToggleLit),
+            (KeyCode::F9, Command::CaptureFrame),
             (KeyCode::Escape, Command::Quit),
         ] {
             assert_eq!(key_command(code), Some(cmd), "{code:?}");
         }
-        for code in [KeyCode::KeyW, KeyCode::KeyA, KeyCode::KeyX, KeyCode::Enter, KeyCode::F5] {
+        for code in [KeyCode::KeyW, KeyCode::KeyA, KeyCode::KeyX, KeyCode::Enter, KeyCode::F5, KeyCode::F8, KeyCode::F10] {
             assert_eq!(key_command(code), None, "{code:?} is not a command");
         }
-        for ch in ["pause", "restart", "debug view", "vsync", "free camera", "WASD", "Esc", "lit", "atmosphere"] {
+        for ch in ["pause", "restart", "debug view", "vsync", "free camera", "WASD", "Esc", "lit", "atmosphere", "F9"] {
             assert!(KEYS_HELP.to_lowercase().contains(&ch.to_lowercase()), "the help names {ch}: {KEYS_HELP}");
         }
     }

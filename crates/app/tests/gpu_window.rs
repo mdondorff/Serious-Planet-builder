@@ -156,3 +156,27 @@ fn a_world_with_a_bake_has_an_ocean_and_the_window_draws_its_water_through_the_w
     assert!(count_before(&stdout, " with water") > 0, "the lit frames carry water: {stdout}");
     assert!(count_before(&stdout, " with the atmosphere") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
 }
+
+// spec: VIEW-003, TEST-008
+#[test]
+fn the_f9_key_writes_a_repro_bundle_of_the_frame_that_names_its_world_and_its_lit_plan() {
+    let dir = std::env::temp_dir().join(format!("planet-viewer-capture-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let world = dir.join("earth.toml");
+    std::fs::write(&world, "schema_version = 2\n[body.0]\nradius_m = 6371000.0\n[world]\nseed = 5\n").unwrap();
+    let out = smoke(&["--scene", "terrain", "--world", world.to_str().unwrap(), "--global-res", "64", "--size", "320x200"]);
+    let _ = std::fs::remove_dir_all(&dir);
+    let Some(stdout) = out else { return };
+    assert!(stdout.contains("1 bundle(s) written"), "the smoke run pressed F9 once: {stdout}");
+    let path =
+        stdout.split("last bundle: ").nth(1).and_then(|t| t.lines().next()).expect("the summary names the bundle").trim().to_string();
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path}: {e}"));
+    let bundle = planet_frame::TerrainBundle::from_text(&text).expect("the bundle reads back (its plan hash holds)");
+    assert!(
+        bundle.frame.is_some() && bundle.world.is_some(),
+        "a frame bundle of a named world: {}",
+        text.lines().take(12).collect::<Vec<_>>().join("\n")
+    );
+    assert!(bundle.plan.lit.is_some(), "the viewer was on the lit path");
+    let _ = std::fs::remove_file(&path);
+}

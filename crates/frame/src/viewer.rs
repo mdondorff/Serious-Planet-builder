@@ -107,6 +107,8 @@ pub enum Command {
     ToggleCamera,
     /// L: the lit path with the atmosphere, or the debug path (VIEW-007).
     ToggleLit,
+    /// F9: write a repro bundle of the next frame drawn (TEST-008, VIEW-003).
+    CaptureFrame,
     Quit,
 }
 
@@ -153,7 +155,7 @@ impl Held {
 }
 
 /// The key bindings, as text for the usage message and the log.
-pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, V next debug view (debug path), T vsync on/off, C flight or free camera, \
+pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, V next debug view (debug path), T vsync on/off, C flight or free camera, F9 write a repro bundle of the frame (target/review), \
      free camera: WASD move, Q/E down/up, arrows look, Shift boost; Esc quits";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -180,6 +182,8 @@ pub struct ViewerState {
     exposure_reset: bool,
     /// The user paused the flight (as against the free camera holding the clock).
     user_paused: bool,
+    /// F9 was pressed: the next frame drawn is written as a repro bundle.
+    capture_requested: bool,
 }
 
 impl ViewerState {
@@ -195,6 +199,7 @@ impl ViewerState {
             lit: false,
             exposure_reset: true,
             user_paused: false,
+            capture_requested: false,
         }
     }
 
@@ -208,6 +213,11 @@ impl ViewerState {
     /// switched back on and after a restart of the flight (a cut).
     pub fn take_exposure_reset(&mut self) -> bool {
         std::mem::take(&mut self.exposure_reset)
+    }
+
+    /// Whether F9 was pressed since the last frame: true once, then false until it is pressed again.
+    pub fn take_capture(&mut self) -> bool {
+        std::mem::take(&mut self.capture_requested)
     }
 
     pub fn is_free(&self) -> bool {
@@ -241,6 +251,7 @@ impl ViewerState {
                 self.lit = !self.lit;
                 self.exposure_reset |= self.lit;
             }
+            Command::CaptureFrame => self.capture_requested = true,
             Command::ToggleVsync => self.vsync = !self.vsync,
             Command::ToggleCamera => match self.mode {
                 CameraMode::Flight => {

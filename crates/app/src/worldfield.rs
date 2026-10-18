@@ -498,6 +498,11 @@ impl WorldTerrain {
         self.radius_m
     }
 
+    /// Whether the bake is read from a store (a repro bundle cannot record one: replay needs the store itself).
+    pub fn is_stored(&self) -> bool {
+        self.store_source.is_some()
+    }
+
     /// Where the bake was read from: `store DIR, N cells` or `in-memory N cells`.
     pub fn source(&self) -> &str {
         &self.source

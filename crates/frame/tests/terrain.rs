@@ -388,6 +388,7 @@ fn a_terrain_bundle_round_trips_and_detects_corruption() {
         world: None,
         request: request.clone(),
         plan: plan.clone(),
+        frame: None,
     };
     let text = bundle.to_text();
     assert_eq!(TerrainBundle::from_text(&text).unwrap(), bundle);
@@ -435,6 +436,7 @@ fn a_bundle_records_the_render_floor_and_one_without_min_level_replays_as_floor_
             world: None,
             request,
             plan,
+            frame: None,
         }
     };
     for floor in [3u8, 0] {
@@ -481,6 +483,7 @@ fn a_world_bundle_records_the_definition_and_bake_and_a_version_one_bundle_still
         world: Some(world.clone()),
         request,
         plan,
+        frame: None,
     };
     let text = bundle.to_text();
     assert!(text.starts_with("planet-terrain-repro 2\n"), "{}", text.lines().next().unwrap());
@@ -638,4 +641,56 @@ fn the_reference_finest_level_26_keeps_its_ground_1m_pin_and_only_that_view_diff
             assert_eq!(l22, l26, "{name}: no tile finer than 22 is drawn, so the cap changes nothing");
         }
     }
+}
+
+// spec: TEST-008
+#[test]
+fn a_frame_bundle_records_the_drawn_plan_with_its_stand_ins_lit_and_water_and_reads_back_equal() {
+    use planet_frame::look::file::LookParams;
+    use planet_frame::look::LitPlan;
+    use planet_frame::pipeline::DrawKind;
+    use planet_frame::water::empty_water_plan;
+    use planet_frame::{DrawnFrame, TerrainBundle};
+    let (_, camera) = scripted_views(R, 4.0 / 3.0, 1)[4];
+    let request =
+        TerrainRequest { camera, size: (128, 96), view: TerrainView::Level, lod: lod(), face_mapping: "tangent-v1".into(), seed: 7 };
+    let request_plan = plan_terrain(&request).unwrap();
+    // The frame drawn: the first node stands in for children that were not resident (a parent: its own geometry, no morph), the
+    // viewer's lit part and a water part on it.
+    let mut drawn = request_plan.clone();
+    let parent = drawn.nodes[0].tile.parent().expect("a node below the roots has a parent");
+    drawn.nodes[0].tile = parent;
+    drawn.nodes[0].level = parent.level();
+    drawn.nodes[0].morph_start_m = 1.0e30;
+    drawn.nodes[0].morph_end_m = 1.0e30;
+    drawn.lit = Some(LitPlan::fixed(14.0));
+    drawn.water = Some(empty_water_plan(&LookParams::default().water));
+    let frame = DrawnFrame { kind: DrawKind::Stale, substituted: 1, blank: 0 };
+    let bundle = TerrainBundle {
+        generator_version: 2,
+        implementation_id: "cpu-ref-height-v2".into(),
+        mesh_version: planet_generators::mesh::MESH_VERSION,
+        definition_hash: 0,
+        adapter: "test-adapter".into(),
+        world: None,
+        request,
+        plan: drawn.clone(),
+        frame: Some(frame),
+    };
+    let text = bundle.to_text();
+    assert!(text.starts_with("planet-terrain-repro 3\n") && text.contains("\ndrawn stale substituted 1 blank 0\n"), "{text}");
+    let back = TerrainBundle::from_text(&text).unwrap();
+    assert_eq!(back, bundle);
+    assert_eq!(back.plan.nodes[0].tile, parent, "the stand-in survives");
+    assert!(back.plan.lit.is_some() && back.plan.water.is_some(), "the lit and the water part survive");
+    assert_ne!(back.plan.plan_hash(), request_plan.plan_hash(), "a frame plan is not the plan of its request");
+    // A corrupted plan is refused by its hash; a bundle without a frame is still written as version 2.
+    let corrupt = text.replacen(&format!("node {:016x}", parent.raw()), &format!("node {:016x}", parent.parent().unwrap().raw()), 1);
+    assert!(TerrainBundle::from_text(&corrupt).unwrap_err().contains("corrupt"), "a tampered plan is refused");
+    let plain = TerrainBundle { frame: None, plan: request_plan, ..bundle };
+    assert!(plain.to_text().starts_with("planet-terrain-repro 2\n"));
+    assert!(TerrainBundle::from_text(&plain.to_text()).unwrap().frame.is_none());
+    // Version 3 text with an unknown frame kind is refused naming it.
+    let odd = text.replacen("drawn stale", "drawn sideways", 1);
+    assert!(TerrainBundle::from_text(&odd).unwrap_err().contains("sideways"));
 }
