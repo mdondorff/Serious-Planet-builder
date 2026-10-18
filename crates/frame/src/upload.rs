@@ -1,7 +1,7 @@
 //! The per-frame upload budget (STRM-006 upload cap, STRM-017; ADR 0033 point 9, ADR 0032, CON-21: uploads <= 2 ms a frame).
 //! GPU-free (CON-03): the managed loop asks this module which of the finished tiles may be written to the pool this frame.
 //!
-//! **What the cap counts.** ADR 0033 point 9 applies the cap to *tile data* (the slot's texels and record), "about 118
+//! **What the cap counts.** ADR 0033 point 9 applies the cap to *tile data* (the slot's texels and record), "about 114
 //! compact slots" for 1 MiB; so [`UploadBudget::tile_bytes_per_frame`] is a count of tile bytes, each tile's size being what
 //! the sink says it uploads ([`crate::managed::TileSink::upload_bytes`], a function of the tile's format). The per-frame node
 //! records (the indirect path's `indirect_frame_bytes`, a CPU write into a ring) are not tiles and cannot be deferred: the

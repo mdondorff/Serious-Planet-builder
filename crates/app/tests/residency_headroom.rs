@@ -3,7 +3,7 @@
 //! terrain share's slots (ADR 0033 point 2). Counts only, no device.
 //!
 //! ADR 0033's fractions (R with ancestors at most 10 % of the mid tier's slots, the ground-1m draw set with ancestors at
-//! most 6 %) are for the compact tile's slot count (231,090 at the mid share), which is what the product builds (the pools come
+//! most 6 %) are for the compact tile's slot count (219,585 at the mid share since the slot of 9,168 B), which is what the product builds (the pools come
 //! from `tier_compact_pool`, so the pins follow the real configuration). The vertex format (the reference, `--tile-format vertex`)
 //! has slots 6 times larger, so the same tile counts take a larger fraction of fewer slots: both are pinned.
 

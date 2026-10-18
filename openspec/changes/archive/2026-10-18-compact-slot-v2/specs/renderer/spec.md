@@ -52,7 +52,7 @@ Source: CON-20, CON-21, STRM-006, REND-013, REND-016, ADR 0033 point 9, ADR 0054
 
 #### Scenario: Same pools and images
 - **WHEN** the same tiles are placed per slot and batched, including a slot written twice in one batch and the ten standard views with levels 0-2 in the vertex pool
-- **THEN** every block and the slot records read back equal, the images are identical, and a batch that fails writes the tiles placed before the error
+- **THEN** every block read back equal, the images are identical, and a batch that fails writes the tiles placed before the error
 
 #### Scenario: The loop hands over one batch
 - **WHEN** the managed loop runs the ground fill with caps of 1, 10 and 118 tiles

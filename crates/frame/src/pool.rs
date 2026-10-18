@@ -2,7 +2,7 @@
 //! numbers `planet_streaming::PoolConfig` counts in. GPU-free; the renderer allocates exactly this.
 //!
 //! The slot is the vertex-format tile at the given `cells`: `(cells + 1)^2` grid vertices plus `4 (cells + 1)` skirt vertices,
-//! 44 bytes each (53,724 B at cells 32). ADR 0033's slot counts (231,090 at the mid share) are for the compact tile; the
+//! 44 bytes each (53,724 B at cells 32). ADR 0033's slot counts (231,090 before the slot of 9,168 B, 219,585 now, at the mid share) are for the compact tile; the
 //! vertex format has fewer, and the share is a byte ceiling, so the slot count follows from the format.
 
 use planet_generators::compact::slot_bytes;

@@ -3,6 +3,7 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to `docs/log.md`. When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. The `housekeeping` skill cleans the rest at milestone boundaries. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`.
 
 ## Waiting for the owner
+- **compact-slot-v2 (#302) goldens: `/bless`** for 8 WARP candidates (terrain_aerial200km_height, terrain_cube_corner_normals, lit_aerial20km_ev15, lit_aerial20km_albedo_ev15, sky_aerial20km_ev15, sky_ground1m_sunset_ev11, water_class_coast_aerial2km, water_class_lava_lake; max delta 1, 2 to 109 px; local WARP driver differs from the recorded one, so golden-review escalates). Tracking entry: the RTX known-answer hashes in `gpu_compact_blocks.rs` and `gpu_water.rs` were removed (stale under MESH_VERSION 8) and need a `test gpu --real` re-record.
 - **SPIKE-11 manual check, local part** (mouse look, about ten minutes at the laptop; `spikes/mouse-look/CHECKLIST.md` in the sonnet-spikes worktree), when the owner has physical access. The remote part is dropped (owner, 2026-10-17). Nothing else waits on it.
 
 Dormant (no near trigger; not asked now):
