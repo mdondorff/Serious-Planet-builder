@@ -96,6 +96,31 @@ mod tests {
         }
     }
 
+    // spec: BUILD-011
+    #[test]
+    fn dev_builds_link_with_rust_lld_and_carry_line_tables_only() {
+        let root = repo_root();
+        let cargo = std::fs::read_to_string(root.join(".cargo/config.toml")).expect(".cargo/config.toml");
+        assert!(
+            cargo.contains("[target.x86_64-pc-windows-msvc]") && cargo.contains("linker = \"rust-lld\""),
+            ".cargo/config.toml must link x86_64-pc-windows-msvc with rust-lld (BUILD-011)"
+        );
+        let manifest = std::fs::read_to_string(root.join("Cargo.toml")).expect("Cargo.toml");
+        // The lines of one table: from its header to the next header.
+        let table = |header: &str| -> Vec<String> {
+            let lines = manifest.lines().skip_while(|l| l.trim() != header).skip(1);
+            lines.take_while(|l| !l.trim_start().starts_with('[')).map(|l| l.trim().to_string()).collect()
+        };
+        assert!(
+            table("[profile.dev]").iter().any(|l| l.starts_with("debug = \"line-tables-only\"")),
+            "[profile.dev] needs debug = \"line-tables-only\""
+        );
+        assert!(
+            table("[profile.dev.package.\"*\"]").iter().any(|l| l.starts_with("debug = false")),
+            "dependencies need debug = false in the dev profile"
+        );
+    }
+
     /// Names of the changes in `changes` (name and `tasks.md` text, `None` when there is none) whose tasks are all
     /// done: at least one `- [x]` task and no `- [ ]` task.
     fn finished_changes(changes: &[(String, Option<String>)]) -> Vec<String> {

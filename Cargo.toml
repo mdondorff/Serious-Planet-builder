@@ -59,9 +59,11 @@ planet-perf = { path = "crates/perf" }
 
 [profile.dev]
 opt-level = 1
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 2
+debug = false
 
 # Math and noise stay fast in the dev profile (report §16 build-speed measures).
 [profile.dev.package.planet-core]
