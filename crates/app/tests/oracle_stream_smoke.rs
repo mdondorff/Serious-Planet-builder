@@ -6,6 +6,7 @@
 //! starts at level 3, so a floor below draws nothing, ADR 0062): the net judges the streamer's and the pool's concurrency over the dive's
 //! own tile jobs. Before `remove-vertex-render-path` it ran at floor 0 because the roots loaded at start-up cost every run again and the
 //! first frames from orbit asked the streamer for no work; the liveness condition below is unchanged and held at floor 3 in the first run.
+//! Tiles have 16 cells (the roots cost a quarter of cells 32 at start-up; on the CI runner 384 roots at cells 32 took 58 s and used the whole liveness cap).
 //! The start at floor 3 has its own test (LOD-011, STRM-001).
 
 use planet_perf::smoke::{liveness_met, streaming_smoke_findings};
@@ -46,6 +47,8 @@ fn dive_log_at(name: &str, workers: usize, frames: usize, floor: &str) -> String
         "256",
         "--floor-level",
         floor,
+        "--cells",
+        "16",
         "--frames",
         &frames,
         "--gen-workers",
