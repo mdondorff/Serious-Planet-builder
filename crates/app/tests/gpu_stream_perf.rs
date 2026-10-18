@@ -283,7 +283,7 @@ fn the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_
         "the software smoke runs the vertex format: {out}"
     );
     // The held views plan water with the exact dry-tile minimum of every tile (ATMO-020): the cut counts are on the view lines.
-    for view in ["coast-2km", "coast-3m"] {
+    for view in ["coast-2km", "coast-3m", "coast-glide", "coast-glide@filter0", "coast-descent", "coast-descent@filter0"] {
         let line = out
             .lines()
             .find(|l| l.starts_with(&format!("lit/{view}: ")) && l.contains("with water (cut "))
