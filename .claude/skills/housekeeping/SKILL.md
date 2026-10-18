@@ -45,6 +45,7 @@ Housekeeping is split (owner, 2026-10-16): the **architect** curates, deciding w
    | coordination stalls: idle sessions, unwatched CI, lost messages | log, status, owner nudges |
 
    Then three to five improvements ranked by gain against cost, each with an owner session. Easy-to-reverse ones go into the next milestone's queue; a trade-off goes to the owner. A process cost that a budget check could have caught gets a budget (below).
+   **Budgets** (BUILD-014): `cargo xtask test fast` prints `BUDGET EXCEEDED: edit-to-first-test ...` over 30 s of build plus tests, and `cargo xtask ci-stats` flags a CI job median over 16 min. The tools only report: any such line, seen in a run or in this review, becomes a Tracked item in `docs/status.md` (the figure, the date, the cause if known). Run `cargo xtask ci-stats` for the CI row of the table above.
 10. Then write the coder's list (below) as a queue item.
 
 ## Coder: mechanical pass (one change, from the architect's list)
