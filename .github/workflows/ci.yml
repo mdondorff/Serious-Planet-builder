@@ -18,8 +18,10 @@ env:
   PLANET_REQUIRE_ADAPTER_GOLDENS: "1"
 
 jobs:
+  # Each OS runs two jobs in parallel (SPIKE-15 / BUILD-014: the WARP job took about 20 min as one job, the sum of its steps):
+  # `test` (checks, determinism manifest, tiers A+B, run modes) and `gpu` (tier C on the software adapter). Both build the workspace.
   test:
-    name: ${{ matrix.name }}
+    name: ${{ matrix.name }} A+B
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -61,6 +63,54 @@ jobs:
         run: cargo deny check licenses bans sources
       - name: test (tiers A+B)
         run: cargo xtask test
+      - name: run modes start (CON-01)
+        run: |
+          cargo run -q -p planet -- editor --smoke --no-window
+          cargo run -q -p planet -- generate --smoke
+          cargo run -q -p planet -- test-render --smoke
+      - name: test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ runner.os }}-ab
+          path: target/test-logs/
+          if-no-files-found: ignore
+      - name: review images (tiers A+B)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-${{ runner.os }}-ab
+          path: target/review/
+          if-no-files-found: ignore
+
+  gpu:
+    name: ${{ matrix.name }} C
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows (WARP)
+            os: windows-latest
+          - name: linux (lavapipe)
+            os: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # The dependencies are those of the `test` job (same profile): restore its cache and leave saving to it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          save-if: "false"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: Software Vulkan (lavapipe)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers libvulkan1 vulkan-tools
+          vulkaninfo --summary
       - name: test gpu (tier C, software adapter)
         run: cargo xtask test gpu
         env:
@@ -70,11 +120,14 @@ jobs:
       - name: viewer window smoke (VIEW-005)
         if: runner.os == 'Linux'
         run: echo "viewer window smoke (VIEW-005) SKIPPED on this runner - no display; it runs on Windows CI and on Rasierklinge with test gpu --real" >> "$GITHUB_STEP_SUMMARY"
-      - name: run modes start (CON-01)
-        run: |
-          cargo run -q -p planet -- editor --smoke --no-window
-          cargo run -q -p planet -- generate --smoke
-          cargo run -q -p planet -- test-render --smoke
+      - name: test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ runner.os }}-gpu
+          path: target/test-logs/
+          if-no-files-found: ignore
+      # The golden candidates: the name the golden-review and bless skills download.
       - name: review images
         if: always()
         uses: actions/upload-artifact@v4
