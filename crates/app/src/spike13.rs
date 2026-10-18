@@ -331,6 +331,8 @@ pub struct CaseResult {
     pub target: LevelCounts,
     pub find_keys_ms: f64,
     pub find_cells_ms: f64,
+    pub mask_ms: f64,
+    pub refreshed: usize,
     pub apply_ms: f64,
     pub plan_delivered_ms: Option<f64>,
     pub plan_worker_ms: f64,
@@ -414,6 +416,10 @@ pub struct AltitudeCfg {
     /// `(radius, moving)` cases, run in order on one settled rig.
     pub cases: Vec<(f64, bool)>,
     pub settle_limit_s: u64,
+    /// Refresh only the tiles whose footprint touches the stamp (an item reach, ADR 0021 point 2), not every tile that reads its cell.
+    pub reach: bool,
+    /// Find the tiles to refresh by their footprint alone (no key per resident tile, no cell query).
+    pub find_footprint: bool,
 }
 
 /// Run the cases of one altitude. Each result is `(radius, moving, result)`.
@@ -463,7 +469,7 @@ pub fn run_altitude(ctx: &GpuContext, base: &(WorldDefinition, Arc<SendBase>), c
             Err(e) => CaseResult { error: Some(e), ..Default::default() },
         };
         r.settle_s = if out.is_empty() { cold_settle.unwrap_or(0.0) } else { settle };
-        let failed = r.error.is_some();
+        let failed = r.exact_ms.is_none();
         out.push((radius, moving, r));
         // Revert the edit: the old field back, the affected tiles refreshed, the preview off.
         planet_render::set_stamp_preview(None);
@@ -517,39 +523,61 @@ fn edit_case(
     // ---- the edit ----
     let t0 = Instant::now();
     let tiles: Vec<TileId> = resident_before.iter().map(|(t, _)| *t).collect();
+    // The preview first: the stamp's parameters and the resident tiles under its footprint (no key, no cell query).
+    let foot: Vec<TileId> = tiles.iter().copied().filter(|t| touches(*t, stamp)).collect();
+    let foot_set: std::collections::HashSet<TileId> = foot.iter().copied().collect();
+    let center0 = stamp.dir * (R + field0.base.height(stamp.dir));
+    if cfg.preview {
+        planet_render::set_stamp_preview(Some(([center0.x, center0.y, center0.z], stamp.radius_m, stamp.amp_m)));
+        planet_render::set_stamp_preview_tiles(foot_set.clone());
+    }
+    out.mask_ms = ms(t0);
+    let mut preview_img: Option<Vec<u8>> = None;
+    let mut preview_done = !cfg.preview;
+    if cfg.preview {
+        // One frame at once: the camera still or moving, the preview on the tiles under the footprint.
+        let cam = first.camera;
+        h.step(&request(cam, cfg.size, lod))?;
+        ctx.probe_wait();
+        out.preview_ms = Some(ms(t0));
+        preview_done = true;
+        if cfg.images.is_some() && !moving {
+            preview_img = Some(h.rig.renderer.read_color(ctx).rgba);
+        }
+    }
     let new_set = Arc::new(set0.with(*stamp));
     let new_field = Arc::new(StampField { set: Arc::clone(&new_set), base: Arc::clone(base) });
-    let tf = Instant::now();
     let map = TangentWarp;
-    let affected: Vec<TileId> = tiles.iter().copied().filter(|t| field0.inputs_hash_for(*t, &map) != new_field.inputs_hash_for(*t, &map)).collect();
-    out.find_keys_ms = ms(tf);
-    let tf = Instant::now();
-    let cell_level = planet_world_def::cells::cell_level(R);
-    let item_cell = planet_world_def::cells::cell_of(R, stamp.dir);
-    out.affected_cells_method = tiles
-        .iter()
-        .filter(|t| match planet_world_def::cells::cells_covering(**t, cell_level, 64) {
-            Some(c) => planet_world_def::cells::with_margin(&c, 1).contains(&item_cell),
-            None => true,
-        })
-        .count();
-    out.find_cells_ms = ms(tf);
+    let affected: Vec<TileId> = if cfg.find_footprint {
+        foot.clone()
+    } else {
+        let tf = Instant::now();
+        let a: Vec<TileId> = tiles.iter().copied().filter(|t| field0.inputs_hash_for(*t, &map) != new_field.inputs_hash_for(*t, &map)).collect();
+        out.find_keys_ms = ms(tf);
+        let tf = Instant::now();
+        let cell_level = planet_world_def::cells::cell_level(R);
+        let item_cell = planet_world_def::cells::cell_of(R, stamp.dir);
+        out.affected_cells_method = tiles
+            .iter()
+            .filter(|t| match planet_world_def::cells::cells_covering(**t, cell_level, 64) {
+                Some(c) => planet_world_def::cells::with_margin(&c, 1).contains(&item_cell),
+                None => true,
+            })
+            .count();
+        out.find_cells_ms = ms(tf);
+        a
+    };
     for t in &affected {
         *out.affected.0.entry(t.level()).or_insert(0) += 1;
     }
-    let affected_set: std::collections::HashSet<TileId> = affected.iter().copied().collect();
+    let affected: Vec<TileId> = if cfg.reach { affected.into_iter().filter(|t| foot_set.contains(t)).collect() } else { affected };
+    out.refreshed = affected.len();
     let ta = Instant::now();
     *shared.field.write().expect("field") = Arc::clone(&new_field);
     let edit_seq = h.rig.managed.pipeline().frame() + 1;
     h.rig.managed.spike_edit(&affected, cfg.cache_mode, cfg.mode == Mode::Refresh);
     out.apply_ms = ms(ta);
-    let center = stamp.dir * (R + new_field.base.height(stamp.dir));
-    if cfg.preview {
-        planet_render::set_stamp_preview(Some(([center.x, center.y, center.z], stamp.radius_m, stamp.amp_m)));
-        planet_render::set_stamp_preview_tiles(affected_set.clone());
-    }
-    let mut preview_img: Option<Vec<u8>> = None;
-    let (mut first_dispatch_seen, mut preview_done, mut new_key_seen) = (false, !cfg.preview, false);
+    let (mut first_dispatch_seen, mut new_key_seen) = (false, false);
     let mut calm = 0;
     loop {
         let now = t0.elapsed().as_secs_f64() * 1000.0;
@@ -575,20 +603,12 @@ fn edit_case(
             out.first_dispatch_ms = Some(ms(t0));
         }
         if cfg.preview {
-            let stale: std::collections::HashSet<TileId> = affected
+            let stale: std::collections::HashSet<TileId> = foot
                 .iter()
                 .copied()
                 .filter(|t| rig.managed.resident().get(t).is_some_and(|r| old_keys.get(t) == Some(&r.mesh_key)))
                 .collect();
             planet_render::set_stamp_preview_tiles(stale);
-        }
-        if !preview_done {
-            ctx.probe_wait();
-            out.preview_ms = Some(ms(t0));
-            preview_done = true;
-            if cfg.images.is_some() && !moving {
-                preview_img = Some(rig.renderer.read_color(ctx).rgba);
-            }
         }
         if let Some(cur) = rig.managed.pipeline().current().filter(|c| c.seq >= edit_seq) {
             let target: Vec<(TileId, u64)> = cur.plan.nodes.iter().filter(|d| touches(d.tile, stamp)).map(|d| (d.tile, d.mesh_key)).collect();
@@ -612,8 +632,8 @@ fn edit_case(
         if all_new && out.all_ms.is_none() {
             out.all_ms = Some(ms(t0));
         }
-        if out.exact_ms.is_some() && out.all_ms.is_some() {
-            calm = if rig.managed.manager().streamer().unfinished_jobs() == 0 { calm + 1 } else { 0 };
+        if out.exact_ms.is_some() {
+            calm = if rig.managed.manager().streamer().unfinished_jobs() == 0 && rig.managed.pending().is_empty() { calm + 1 } else { 0 };
             if calm >= 5 {
                 break;
             }

@@ -28,12 +28,12 @@ fn f(v: Option<f64>) -> String {
     v.map_or("-".into(), |x| format!("{x:.1}"))
 }
 
-const HEADER: &str = "| altitude m | radius m | camera | mode | workers | resident | affected by key (levels) / by cells | find keys / cells / apply ms | plan delivered ms | first dispatch ms | preview ms | first new ms | exact ms | all ms | generation sum ms / mean wait ms | upload ms / tiles | substituted max / blank max | generation per level n x mean/max ms | settle, exact frame, frames, host load / error |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|";
+const HEADER: &str = "| altitude m | radius m | camera | mode | workers | resident | affected by key (levels) / by cells | preview mask / find keys / find cells / apply ms | refreshed | plan delivered ms | first dispatch ms | preview ms | first new ms | exact ms | all ms | generation sum ms / mean wait ms | upload ms / tiles | substituted max / blank max | generation per level n x mean/max ms | settle, exact frame, frames, host load / error |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|";
 
 fn row(cfg: &AltitudeCfg, radius: f64, moving: bool, r: &CaseResult) -> String {
     let gen: Vec<String> = r.gen.per_level.iter().map(|(l, (n, mean, max))| format!("{l}:{n}x{mean:.1}/{max:.0}")).collect();
     format!(
-        "| {} | {} | {} | {:?} | {} | {} | {} ({}) / {} | {:.1} / {:.1} / {:.1} | {} | {} | {} | {} | {} | {} | {:.0} / {:.1} | {:.1} / {} | {} / {} | {} | settle {:.0} s, exact frame {:.1} ms, {} frames; {}{} |",
+        "| {} | {} | {} | {:?} | {} | {} | {} ({}) / {} | {:.1} / {:.1} / {:.1} / {:.1} | {} | {} | {} | {} | {} | {} | {} | {:.0} / {:.1} | {:.1} / {} | {} / {} | {} | settle {:.0} s, exact frame {:.1} ms, {} frames; {}{} |",
         cfg.altitude_m,
         radius,
         if moving { "moving" } else { "still" },
@@ -43,9 +43,11 @@ fn row(cfg: &AltitudeCfg, radius: f64, moving: bool, r: &CaseResult) -> String {
         r.affected.total(),
         r.affected.text(),
         r.affected_cells_method,
+        r.mask_ms,
         r.find_keys_ms,
         r.find_cells_ms,
         r.apply_ms,
+        r.refreshed,
         format!("{} (worker {:.0})", f(r.plan_delivered_ms), r.plan_worker_ms),
         f(r.first_dispatch_ms),
         f(r.preview_ms),
@@ -110,6 +112,8 @@ fn main() {
             images,
             cases,
             settle_limit_s: arg("--settle-limit").and_then(|v| v.parse().ok()).unwrap_or(1800),
+            reach: flag("--reach"),
+            find_footprint: flag("--find-footprint"),
         };
         for (radius, moving, r) in run_altitude(&ctx, &base, &cfg) {
             let line = row(&cfg, radius, moving, &r);
