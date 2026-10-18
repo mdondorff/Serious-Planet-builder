@@ -231,19 +231,35 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
     // changed crate is the compiler's time.
     // The whole output goes to a log file too (BUILD-012), whose path is printed at the end, pass or fail.
     let secs_now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let log = testlog::new_log(&root.join(testlog::DIR), &testlog::command_key(sub, real), secs_now)?;
-    let log_path = log.strip_prefix(root).unwrap_or(&log).display().to_string();
+    // A log that cannot be created is a warning: the tests still run, on the console only.
+    let log = match testlog::new_log(&root.join(testlog::DIR), &testlog::command_key(sub, real), secs_now) {
+        Ok(p) => Some(p),
+        Err(e) => {
+            eprintln!("warning: no test log this run ({e})");
+            None
+        }
+    };
+    let log_path = log.as_ref().map(|l| l.strip_prefix(root).unwrap_or(l).display().to_string().replace('\\', "/"));
+    let say_log = || {
+        if let Some(p) = &log_path {
+            eprintln!("full output: {p}");
+        }
+    };
+    let go = |args: &[&str]| match &log {
+        Some(l) => testlog::run_logged(root, "cargo", args, &env, l),
+        None => run(root, "cargo", args, &env),
+    };
     let built = Instant::now();
     let mut build: Vec<&str> = vec!["nextest", "run", "--no-run"];
     build.extend(selection.iter().map(String::as_str));
-    if let Err(e) = testlog::run_logged(root, "cargo", &build, &env, &log) {
-        eprintln!("full output: {log_path}");
+    if let Err(e) = go(&build) {
+        say_log();
         return Err(e);
     }
     let build_secs = built.elapsed().as_secs_f64();
     let started = Instant::now();
     let args: Vec<&str> = cmd.iter().map(String::as_str).collect();
-    let result = testlog::run_logged(root, "cargo", &args, &env, &log);
+    let result = go(&args);
 
     let secs = started.elapsed().as_secs_f64();
     eprintln!("elapsed {secs:.1}s (tests; build {build_secs:.1}s)");
@@ -272,7 +288,7 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
             eprintln!("{} candidate golden(s) wait for the owner's /bless (`cargo xtask bless` lists them)", pending.len());
         }
     }
-    eprintln!("full output: {log_path}");
+    say_log();
     result.map(|()| TestTiming { test_secs: secs, whole })
 }
 

@@ -99,11 +99,8 @@ pub fn run_logged(root: &Path, program: &str, args: &[&str], env: &[(&str, &str)
             for line in BufReader::new(reader).split(b'\n').map_while(Result::ok) {
                 let text = String::from_utf8_lossy(&line);
                 let text = text.trim_end_matches('\r');
-                if to_stderr {
-                    eprintln!("{text}");
-                } else {
-                    println!("{text}");
-                }
+                // A closed console (`| head`) must not stop the pump: the log still gets every line.
+                let _ = if to_stderr { writeln!(std::io::stderr(), "{text}") } else { writeln!(std::io::stdout(), "{text}") };
                 let _ = writeln!(file.lock().unwrap(), "{text}");
             }
         })
