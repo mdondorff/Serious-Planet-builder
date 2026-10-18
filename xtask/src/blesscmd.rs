@@ -45,13 +45,15 @@ fn driver_problem(root: &Path, adapter: &str, candidate: &Path) -> Option<String
     match (recorded, cand) {
         (Some(r), Some(c)) if r != c => Some(format!("driver changed on {adapter}: recorded '{r}', candidate '{c}'")),
         (None, Some(c)) => Some(format!("{adapter} has no recorded driver; candidate driver '{c}'")),
+        (Some(r), None) => Some(format!("{adapter} has recorded driver '{r}' but the candidate has no driver.txt beside it")),
         _ => None,
     }
 }
 
 /// Promotes the candidates of `names` on every adapter that has one and removes the names from `tests/goldens/pending.txt`.
-/// Returns the `adapter/name` promoted. A name without a candidate, or a candidate failing the driver gate, is an error and
-/// nothing is written.
+/// Returns the `adapter/name` promoted. A name without a candidate, or a candidate failing the driver gate (a different driver, or
+/// none beside it where one is recorded), is an error and nothing is written; an I/O error while copying stops there (what was
+/// copied stays, and the error says so) because there is no staging.
 pub fn apply(root: &Path, names: &[String], extras: &[PathBuf]) -> Res<Vec<String>> {
     let all = collect(root, extras);
     let mut plan: Vec<(String, String, PathBuf)> = Vec::new();
@@ -81,7 +83,8 @@ pub fn apply(root: &Path, names: &[String], extras: &[PathBuf]) -> Res<Vec<Strin
     let pending = root.join("tests").join("goldens").join("pending.txt");
     if let Ok(text) = std::fs::read_to_string(&pending) {
         let kept: Vec<&str> = text.lines().filter(|l| !names.iter().any(|n| l.trim() == n)).collect();
-        let _ = std::fs::write(&pending, kept.join("\n") + "\n");
+        std::fs::write(&pending, kept.join("\n") + "\n")
+            .map_err(|e| format!("promoted {}, but cannot update {}: {e}", done.join(", "), pending.display()))?;
     }
     Ok(done)
 }
@@ -179,6 +182,10 @@ mod tests {
         let keys: Vec<_> = all.keys().map(|(a, n)| format!("{a}/{n}")).collect();
         assert_eq!(keys, ["llvmpipe/v", "rtx/v", "warp/v"]);
         assert_eq!(collect(&r, &[]).len(), 1, "without --extra only the local run's candidate");
+        // A later source replaces an earlier one: the extra's rtx candidate wins over the local run's.
+        put(r.join("target/review/ci-linux/candidates/rtx/v.png"), "later");
+        let later = collect(&r, &extras());
+        assert_eq!(std::fs::read_to_string(&later[&("rtx".to_string(), "v".to_string())]).unwrap(), "later");
         let _ = std::fs::remove_dir_all(&r);
     }
 
@@ -209,6 +216,14 @@ mod tests {
         assert!(err.contains("llvmpipe/v: driver changed on llvmpipe"), "{err}");
         let err = apply(&r, &["nope".to_string()], &extras()).unwrap_err();
         assert!(err.contains("nope: no candidate"), "{err}");
+        put(r.join("target/review/ci-linux/candidates/llvmpipe/driver.txt"), "drv-1");
+        std::fs::remove_file(r.join("target/review/ci-windows/candidates/warp/driver.txt")).unwrap();
+        let err = apply(&r, &["v".to_string()], &extras()).unwrap_err();
+        assert!(err.contains("warp/v: warp has recorded driver 'drv-1' but the candidate has no driver.txt"), "{err}");
+        put(r.join("target/review/ci-windows/candidates/warp/driver.txt"), "drv-1");
+        std::fs::remove_file(r.join("tests/goldens/rtx/driver.txt")).unwrap();
+        let err = apply(&r, &["v".to_string()], &extras()).unwrap_err();
+        assert!(err.contains("rtx/v: rtx has no recorded driver; candidate driver 'drv-1'"), "{err}");
         assert_eq!(
             std::fs::read_to_string(r.join("tests/goldens/rtx/v.png")).unwrap(),
             "old",
