@@ -109,7 +109,7 @@ impl Rig {
         gen: planet_streaming::GenWorkers,
         progress: &mut dyn FnMut(usize, usize),
     ) -> Result<Rig, String> {
-        let mut renderer = TerrainRenderer::for_context(ctx, first.size, first.lod.cells, u64::from(MAX_FRAMES_IN_FLIGHT));
+        let mut renderer = TerrainRenderer::with_frames_in_flight(ctx, first.size, first.lod.cells, u64::from(MAX_FRAMES_IN_FLIGHT));
         // REND-013: the pools' first block, the ring and every pipeline's first draw happen here, before frame 0 (frame 0 stays
         // a measured frame, ADR 0032).
         renderer.warm_up(ctx);
@@ -120,18 +120,12 @@ impl Rig {
         let pool = *renderer.pool_config();
         let clock: Arc<dyn planet_streaming::Clock> = Arc::new(SystemClock::new());
         let mut streamer = Streamer::new(
-            Arc::new(MeshSource {
-                world: Arc::clone(world),
-                format: ctx.default_tile_format(),
-                max_level: first.lod.max_level,
-                cells: first.lod.cells,
-            }),
+            Arc::new(MeshSource { world: Arc::clone(world), max_level: first.lod.max_level, cells: first.lod.cells }),
             // The tile threads and the jobs running at once are one number (STRM-020).
             gen.pool(),
             Arc::clone(&clock),
             gen.apply(StreamConfig {
                 capacity: pool.main_slots() as usize,
-                vertex_pool_slots: pool.managed_vertex_slots() as usize,
                 retire_frames: u64::from(MAX_FRAMES_IN_FLIGHT),
                 retry_after_ms: 1000,
                 floor: first.lod.floor_level(),

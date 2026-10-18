@@ -213,7 +213,7 @@ fn frames_in_flight_are_counted_and_never_exceed_the_bound() {
     }
     assert_eq!((fast.peak(), fast.waits()), (1, 0));
     // The renderer's pools retire a released slot after exactly the bound.
-    let pool = planet_frame::pool::tier_pool(planet_streaming::Tier::Mid, 16, fi.slot_retire_frames()).unwrap();
+    let pool = planet_frame::pool::tier_compact_pool(planet_streaming::Tier::Mid, 16, fi.slot_retire_frames()).unwrap();
     assert_eq!(pool.frames_in_flight, u64::from(MAX_FRAMES_IN_FLIGHT));
 }
 

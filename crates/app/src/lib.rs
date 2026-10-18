@@ -57,7 +57,6 @@ modes:
     --gen-reserve N          hardware threads the default generation pool leaves free for the frame thread, the plan worker and the driver (STRM-020; default 2; ignored when --gen-workers is given)
     --gen-ahead N            jobs queued behind the running ones so a worker that finishes between two frames takes the next at once (STRM-020; default: the worker count; 0: refill at frame boundaries only)
     --gen-priority below-normal|normal   OS priority of the generation workers (STRM-020, ADR 0046; default below-normal: the frame thread wins a core both want; no result depends on it)
-    --tile-format vertex|compact   how terrain tiles are built and held (ADR 0033): compact (default) for levels 3 and finer, vertex the 44-byte reference format for all
     --lit                    the streaming perf scenes on the lit path with the atmosphere and water (TEST-025): same scripts, same verdicts, logs named <scene>-lit
     --views a,b,c            only these views of the lit perf scenes (ground-1m, aerial-20km, coast-2km, coast-3m, orbit, coast-glide, coast-descent); a partial log is not a window
     --scene capture-flights  the two coastal flights as 1440p PNG sequences (shore_filter at the look default, 0, and then 1) in --out-dir, never a measurement (TEST-027; `cargo xtask capture flights` also makes the videos); needs --store DIR or --allow-memory-bake, takes --size WxH, --flight-frames N
@@ -82,8 +81,6 @@ pub struct Options {
     pub adapter: Option<AdapterPolicy>,
     /// `--draw per-draw|indirect`: how the terrain renderer submits draws (REND-015); default indirect where supported.
     pub draw: Option<planet_render::DrawMode>,
-    /// `--tile-format vertex|compact`: how terrain tiles are built and held (ADR 0033); default compact, the vertex format is the reference.
-    pub tile_format: Option<planet_render::TileFormat>,
     /// `--upload per-slot|batched`: how a frame's tile writes reach the queue (REND-016); default batched, per-slot the reference.
     pub upload: Option<planet_render::UploadMode>,
     /// `--gen-workers N` and `--gen-ahead N`: the tile generation pool (STRM-020); default the machine's threads and as many queued.
@@ -235,7 +232,6 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         out: None,
         adapter: None,
         draw: None,
-        tile_format: None,
         upload: None,
         gen_workers: None,
         gen_priority: None,
@@ -390,9 +386,6 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--machine-ready" => o.machine_ready = true,
             "--scene" => o.scene = it.next().ok_or("--scene needs a value")?.clone(),
             "--out" => o.out = Some(PathBuf::from(it.next().ok_or("--out needs a value")?)),
-            "--tile-format" => {
-                o.tile_format = Some(planet_render::TileFormat::parse(it.next().ok_or("--tile-format needs vertex or compact")?)?)
-            }
             "--upload" => {
                 let v = it.next().ok_or("--upload needs per-slot or batched")?;
                 o.upload =
@@ -684,13 +677,10 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if let Some(mode) = o.upload {
         ctx.prefer_upload_mode(mode);
     }
-    if let Some(format) = o.tile_format {
-        ctx.prefer_tile_format(format);
-    }
-    writeln!(out, "tile format: {}", ctx.default_tile_format().name()).map_err(err)?;
-    if ctx.default_tile_format() == planet_render::TileFormat::Compact && o.cells < planet_generators::climate::CLIMATE_MIN_COMPACT_CELLS {
+    writeln!(out, "tile format: compact").map_err(err)?;
+    if o.cells < planet_generators::climate::CLIMATE_MIN_COMPACT_CELLS {
         return Err(format!(
-            "--cells {}: the compact tile format needs at least {} cells per tile edge (the climate of a tile rides in the spare channel of its first 162 texels, GEN-021): use --cells {} or more, or --tile-format vertex",
+            "--cells {}: the compact tile format needs at least {} cells per tile edge (the climate of a tile rides in the spare channel of its first 162 texels, GEN-021): use --cells {} or more",
             o.cells,
             planet_generators::climate::CLIMATE_MIN_COMPACT_CELLS,
             planet_generators::climate::CLIMATE_MIN_COMPACT_CELLS
@@ -1139,8 +1129,8 @@ mod tests {
     // spec: GEN-019
     #[test]
     fn the_compact_format_with_fewer_than_16_cells_is_refused_naming_the_minimum() {
-        let e = run_str(&["test-render", "--scene", "terrain", "--cells", "8", "--tile-format", "compact"]).unwrap_err();
-        assert!(e.contains("--cells 8") && e.contains("at least 16") && e.contains("--tile-format vertex"), "{e}");
+        let e = run_str(&["test-render", "--scene", "terrain", "--cells", "8"]).unwrap_err();
+        assert!(e.contains("--cells 8") && e.contains("at least 16"), "{e}");
     }
 
     // spec: STRM-021, STRM-022
@@ -1158,9 +1148,9 @@ mod tests {
             "--seed",
             "3",
             "--prefill-levels",
-            "3",
+            "4",
             "--floor-level",
-            "0",
+            "3",
             "--threads",
             "4",
             "--cells",
@@ -1169,44 +1159,31 @@ mod tests {
         .unwrap();
         let def = || planet_world_def::WorldDefinition::single_planet(skeleton::RADIUS_M, 3);
         let world = std::sync::Arc::new(worldfield::WorldTerrain::open_store(def(), std::path::Path::new(&store), 8).unwrap());
-        // Levels 0..=3 are all present for the run's cells and finest level in the compact form; the vertex form finds only levels 0-2
-        // (those records are shared by both forms, the pack holds the compact form of level 3).
-        assert_eq!(world.prefill_present(0, 3, 16, 22, planet_render::TileFormat::Compact).unwrap(), (510, 510));
-        assert_eq!(world.prefill_present(0, 3, 16, 22, planet_render::TileFormat::Vertex).unwrap(), (126, 510));
-        assert_eq!(world.prefill_present(0, 4, 16, 22, planet_render::TileFormat::Compact).unwrap(), (510, 2046));
-        assert_eq!(world.prefill_present(0, 3, 32, 22, planet_render::TileFormat::Compact).unwrap(), (0, 510), "other cells");
-        let src = |w: &std::sync::Arc<worldfield::WorldTerrain>, format| skeleton::MeshSource {
+        // Levels 3..=4 (the render floor to the pre-fill depth) are all present for the run's cells and finest level.
+        assert_eq!(world.prefill_present(3, 4, 16, 22).unwrap(), (1920, 1920));
+        assert_eq!(world.prefill_present(3, 3, 16, 22).unwrap(), (384, 384));
+        assert_eq!(world.prefill_present(3, 5, 16, 22).unwrap(), (1920, 1920 + 6 * 1024), "level 5 was not pre-filled");
+        assert_eq!(world.prefill_present(3, 4, 32, 22).unwrap(), (0, 1920), "other cells");
+        let src = |w: &std::sync::Arc<worldfield::WorldTerrain>| skeleton::MeshSource {
             world: std::sync::Arc::clone(w),
-            format,
             max_level: 22,
             cells: 16,
         };
         let cold = std::sync::Arc::new(worldfield::WorldTerrain::open_store(def(), std::path::Path::new(&store), 8).unwrap().cold());
         let field = world.field().unwrap();
         let mut sampled = 0;
-        for tile in planet_cache::meshpack::prefill_tiles(3)
+        for tile in planet_cache::meshpack::prefill_tiles_from(3, 4)
             .into_iter()
             .step_by(11)
-            .chain(planet_cache::meshpack::prefill_tiles(3).into_iter().take(8))
+            .chain(planet_cache::meshpack::prefill_tiles_from(3, 4).into_iter().take(8))
         {
-            let on_demand = skeleton::tile_for(planet_render::TileFormat::Compact, field.as_ref(), tile, 16, world.radius_m(), 22);
+            let on_demand = skeleton::tile_for(field.as_ref(), tile, 16, world.radius_m());
             let before = world.prefill_hits();
-            assert_eq!(
-                src(&world, planet_render::TileFormat::Compact).load(tile).unwrap(),
-                on_demand,
-                "level {} tile {:#x} from the pack",
-                tile.level(),
-                tile.raw()
-            );
+            assert_eq!(src(&world).load(tile).unwrap(), on_demand, "level {} tile {:#x} from the pack", tile.level(), tile.raw());
             assert_eq!(world.prefill_hits(), before + 1, "served from the pack");
-            let staged =
-                src(&world, planet_render::TileFormat::Compact).load_staged(tile, &planet_streaming::CancelToken::never()).unwrap();
+            let staged = src(&world).load_staged(tile, &planet_streaming::CancelToken::never()).unwrap();
             assert_eq!(staged, Some(on_demand.clone()));
-            assert_eq!(
-                src(&cold, planet_render::TileFormat::Compact).load(tile).unwrap(),
-                on_demand,
-                "the cold reader generates the same tile"
-            );
+            assert_eq!(src(&cold).load(tile).unwrap(), on_demand, "the cold reader generates the same tile");
             sampled += 1;
         }
         assert_eq!(cold.prefill_hits(), 0, "the cold reader never reads the pack");
@@ -1221,13 +1198,13 @@ mod tests {
         // A tile deeper than the pre-fill is generated, not found.
         let deep = planet_core::TileId::new(planet_core::Face(0), 5, 1, 1).unwrap();
         let before = world.prefill_hits();
-        src(&world, planet_render::TileFormat::Compact).load(deep).unwrap();
+        src(&world).load(deep).unwrap();
         assert_eq!(world.prefill_hits(), before);
         // A tile deeper than the pre-fill but within the readable levels is looked up and missed; one beyond them is skipped at once.
         let after = world.counters().since(&c);
         assert_eq!((after.prefill_lookups, after.prefill_found, after.prefill_skipped), (1, 0, 0), "{after:?}");
         let beyond = planet_core::TileId::new(planet_core::Face(0), 9, 1, 1).unwrap();
-        src(&world, planet_render::TileFormat::Compact).load(beyond).unwrap();
+        src(&world).load(beyond).unwrap();
         let after = world.counters().since(&c);
         assert_eq!((after.prefill_lookups, after.prefill_skipped), (1, 1), "{after:?}");
     }

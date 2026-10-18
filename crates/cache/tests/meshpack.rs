@@ -116,7 +116,10 @@ fn the_key_names_the_field_and_the_cells_and_keeps_the_form_parameter_of_every_e
     assert_eq!(cache_key(&inputs), key(&a, 4, CELLS), "the key of a compact record is the ADR 0018 mesh key plus form parameter 1");
     // The level below the compact format and the finest levels are never pre-filled.
     let spec = spec_of(&a, MAX_LEVEL);
-    assert!(!spec.storable(tile(2)) && spec.storable(tile(3)) && spec.storable(tile(8)) && !spec.storable(tile(9)), "storable levels 3 to 8");
+    assert!(
+        !spec.storable(tile(2)) && spec.storable(tile(3)) && spec.storable(tile(8)) && !spec.storable(tile(9)),
+        "storable levels 3 to 8"
+    );
     assert!(!TileSpec::new(&a, R, CELLS, MAX_LEVEL).storable(tile(2)), "even a floor-0 run does not look up level 2");
 }
 
@@ -255,7 +258,10 @@ fn a_prefill_never_stores_a_finest_level_tile_or_a_depth_beyond_the_limit_and_an
     assert!(spec.lookup(&store, t).is_some());
     let other = Reference(6);
     assert!(spec_of(&other, MAX_LEVEL).lookup(&store, t).is_none(), "another seed");
-    assert!(spec_of(&field, 3).lookup(&store, t).is_none(), "a finest tile is never read from the pack: a cap-level request does not hit a record");
+    assert!(
+        spec_of(&field, 3).lookup(&store, t).is_none(),
+        "a finest tile is never read from the pack: a cap-level request does not hit a record"
+    );
     assert!(TileSpec::new(&field, R, 32, MAX_LEVEL).with_floor(3).lookup(&store, t).is_none(), "other cells");
 }
 

@@ -18,7 +18,7 @@
 // Spike code: platform maths is fine here (the CPU reference is a check, not a canonical field).
 #![allow(clippy::disallowed_methods, clippy::needless_range_loop)]
 
-use crate::terrain::{grid_phases, GRID_SPACINGS_M, TERRAIN_SHADERS};
+use crate::terrain::{grid_phases, GRID_SPACINGS_M};
 use crate::{read_rgba8, ExecError, GpuContext, RgbaFrame};
 use planet_core::{TileId, Vec3};
 use planet_frame::TerrainPlan;
@@ -123,12 +123,12 @@ fn d_normal(n: vec3<f32>, local: vec3<f32>, foot: vec3<f32>, height: f32) -> vec
 
 /// The product relief shader with the detail term spliced in (relief view only; `mode.y != 0` switches it on).
 pub fn detail_shader() -> String {
-    let src = TERRAIN_SHADERS[0].1;
+    let src = crate::reference::reference_shader();
     let patch = |s: String, from: &str, to: String| {
         assert!(s.contains(from), "product shader changed: {from:?} not found");
         s.replacen(from, &to, 1)
     };
-    let s = patch(src.to_string(), "    phase: array<vec4<f32>, 9>,\n};", format!("    phase: array<vec4<f32>, 9>,\n{DETAIL_MEMBERS}}};"));
+    let s = patch(src, "    phase: array<vec4<f32>, 9>,\n};", format!("    phase: array<vec4<f32>, 9>,\n{DETAIL_MEMBERS}}};"));
     let s = patch(s, "// Relief: fixed-sun", format!("{DETAIL_FN}\n// Relief: fixed-sun"));
     patch(
         s,

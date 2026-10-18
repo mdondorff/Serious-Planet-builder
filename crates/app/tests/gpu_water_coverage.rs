@@ -215,7 +215,7 @@ fn coverage(views: &[&str]) {
             &bounded,
         )
         .unwrap();
-        let mut r = TerrainRenderer::with_compact_pools(&ctx, size, CELLS, compact_pool());
+        let mut r = TerrainRenderer::with_pools(&ctx, size, CELLS, compact_pool());
         r.enable_lit(&ctx);
         for n in &plan.nodes {
             if r.slot_of(n.tile).is_none() {

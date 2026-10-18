@@ -23,7 +23,6 @@ use crate::terrain::TerrainRequest;
 use crate::upload::{sort_waiting, upload_count, UploadBudget, UploadClass, Waiting};
 use planet_core::TileId;
 use planet_generators::compact::CompactTile;
-use planet_generators::mesh::MeshVertex;
 use planet_streaming::{Clock, ResidencyManager, ResidentChange, SchedWork, SlotRef, StreamStats, Wants};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -31,16 +30,13 @@ use std::time::Instant;
 
 /// Where the managed loop puts tiles: the renderer, or a counter in tests.
 pub trait TileSink {
-    /// Write `tile` (either format) into `slot` (the slot the manager chose). Whatever tile the slot held before is gone.
+    /// Write `tile` into `slot` (the slot the manager chose). Whatever tile the slot held before is gone.
     fn upload_at(&mut self, tile: &CompactTile, slot: SlotRef) -> Result<(), String>;
     /// Bytes `upload_at` writes for `tile`: the tile's size in the sink's format (the per-frame upload budget counts in
-    /// them, STRM-006). The default is what the renderer writes: a vertex tile at its vertex size, a compact tile at its
+    /// them, STRM-006). The default is what the renderer writes: a compact tile at its
     /// slot (header, climate block and texels, 9,168 B at cells 32); a sink that writes something else says so.
     fn upload_bytes(&self, tile: &CompactTile) -> u64 {
-        match tile {
-            RenderTile::Vertex(m) => m.vertices.len() as u64 * MeshVertex::GPU_STRIDE,
-            RenderTile::Compact(c) => c.resident_bytes(),
-        }
+        tile.resident_bytes()
     }
     /// Write a frame's tiles, in this order, each into its slot: the same result as `upload_at` for each (STRM-006). A sink that
     /// can write runs of adjacent slots in one go overrides this and says what it cost; the default is the loop over

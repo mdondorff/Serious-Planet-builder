@@ -527,9 +527,9 @@ fn plan_counts_stay_within_the_budget_over_the_scripted_views() {
         // The counts follow from the plan: one draw call per node, equal triangle counts per node, one buffer per tile.
         assert_eq!(c.draw_calls as usize, plan.nodes.len(), "{name}");
         // Per-tile constants at cells = 32 (the budget below is derived from them): 2 x 32^2 grid triangles plus 4 skirt strips of
-        // 32 quads; 33^2 grid vertices plus 4 x 33 skirt vertices at 11 f32 each.
+        // 32 quads; the upload of a tile is its compact slot (GEN-025, 9,168 B at cells 32).
         assert_eq!(c.triangles, plan.nodes.len() as u64 * 2_304, "{name}");
-        assert_eq!(c.upload_bytes, u64::from(c.resident_tiles) * 1_221 * 48, "{name}");
+        assert_eq!(c.upload_bytes, u64::from(c.resident_tiles) * planet_generators::compact::slot_bytes(32), "{name}");
         assert_eq!(c.resident_tiles as usize, plan.nodes.len(), "{name}: every node of a plan is a distinct tile");
         c.check(&CountBudget::REFERENCE_1440P).unwrap_or_else(|e| panic!("{name}: {e}"));
         worst = worst.max(c.draw_calls);
@@ -601,7 +601,7 @@ fn every_standard_view_stays_within_its_own_pinned_counts() {
             max_draw_calls: pin,
             max_triangles: u64::from(pin) * 2_304,
             max_resident_tiles: pin,
-            max_upload_bytes: u64::from(pin) * 1_221 * 48,
+            max_upload_bytes: u64::from(pin) * planet_generators::compact::slot_bytes(32),
         };
         if let Err(e) = plan.counts().check(&budget) {
             failures.push(format!("{name}: {e} (nodes {} against pin {pin})", plan.nodes.len()));

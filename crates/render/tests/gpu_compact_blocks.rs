@@ -51,7 +51,7 @@ fn compact_pool() -> PoolConfig {
         1,
     )
     .unwrap();
-    PoolConfig { vertex_slots: 256, fallback_slots: 192, ..one }
+    one
 }
 
 fn one_shot(ctx: &GpuContext, plan: &TerrainPlan) -> Vec<u8> {
@@ -95,7 +95,7 @@ fn one_shot_frames_in_every_debug_view_are_the_recorded_pixels() {
 }
 
 fn persistent(ctx: &GpuContext, plan: &TerrainPlan, mode: UploadMode, lit: Option<LitPlan>) -> Vec<u8> {
-    let mut r = TerrainRenderer::with_compact_pools(ctx, SIZE, CELLS, compact_pool());
+    let mut r = TerrainRenderer::with_pools(ctx, SIZE, CELLS, compact_pool());
     r.set_upload_mode(mode);
     if lit.is_some() {
         r.enable_lit(ctx);

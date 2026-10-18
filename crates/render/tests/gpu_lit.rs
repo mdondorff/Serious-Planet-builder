@@ -40,12 +40,12 @@ fn compact_pool() -> PoolConfig {
         1,
     )
     .unwrap();
-    PoolConfig { vertex_slots: 256, fallback_slots: 192, ..one }
+    one
 }
 
 /// A compact-format renderer holding the tiles of `plans`.
 fn renderer(ctx: &GpuContext, plans: &[&TerrainPlan], enable_lit: bool) -> TerrainRenderer {
-    let mut r = TerrainRenderer::with_compact_pools(ctx, SIZE, CELLS, compact_pool());
+    let mut r = TerrainRenderer::with_pools(ctx, SIZE, CELLS, compact_pool());
     if enable_lit {
         r.enable_lit(ctx);
     }

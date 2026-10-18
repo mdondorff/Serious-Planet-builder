@@ -34,7 +34,7 @@ fn compact_pool_of(block_slots: u32, blocks: u64) -> PoolConfig {
         1,
     )
     .unwrap();
-    PoolConfig { vertex_slots: 256, fallback_slots: 192, ..one }
+    one
 }
 
 /// Blocks of 576 slots: room for a whole plan in block 0.
@@ -43,7 +43,7 @@ fn compact_pool() -> PoolConfig {
 }
 
 fn renderer(ctx: &GpuContext) -> TerrainRenderer {
-    TerrainRenderer::with_compact_pools(ctx, SIZE, CELLS, compact_pool())
+    TerrainRenderer::with_pools(ctx, SIZE, CELLS, compact_pool())
 }
 
 fn upload(ctx: &GpuContext, r: &mut TerrainRenderer, p: &TerrainPlan) {
@@ -65,15 +65,15 @@ fn a_warmed_renderer_creates_nothing_in_its_first_frames() {
         r.set_draw_mode(&ctx, mode);
         let built = r.init_counts();
         assert_eq!(built, InitCounts { pipelines: 2, pool_allocations: 0, ring_builds: 1 }, "{what}");
-        assert_eq!(r.live_pools(), (0, false), "{what}: nothing allocated before the warm-up");
+        assert_eq!(r.live_blocks(), 0, "{what}: nothing allocated before the warm-up");
         r.warm_up(&ctx);
         let warm = r.init_counts();
         assert_eq!(warm.pipelines, built.pipelines, "{what}: warming creates no pipeline");
         assert_eq!(r.resident_tiles(), 0, "{what}: no tile became resident");
         // The vertex pool and one block: counted in the model (STRM-006), the rest of the share stays on demand.
-        assert_eq!(r.live_pools(), (1, true), "{what}");
+        assert_eq!(r.live_blocks(), 1, "{what}");
         let config = *r.pool_config();
-        let modelled = config.allocated_bytes_with(1, true) - config.node_record_bytes + r.node_buffer_bytes();
+        let modelled = config.allocated_bytes_with(1) - config.node_record_bytes + r.node_buffer_bytes();
         assert_eq!(r.pool_allocated_bytes(), modelled, "{what}: the real allocation equals the model with one block");
         assert!(r.pool_allocated_bytes() <= config.allocated_bytes(), "{what}: under the share");
         assert!(r.node_buffer_bytes() <= config.node_record_bytes, "{what}: the ring is inside its budget");
@@ -82,7 +82,7 @@ fn a_warmed_renderer_creates_nothing_in_its_first_frames() {
         for frame in 0..3 {
             r.submit(&ctx, &p).unwrap();
             assert_eq!(r.init_counts(), warm, "{what}: frame {frame} created a pipeline, pool block or ring");
-            assert_eq!(r.live_pools(), (1, true), "{what}: frame {frame} allocated a block");
+            assert_eq!(r.live_blocks(), 1, "{what}: frame {frame} allocated a block");
         }
         // The counter sees real creations: a cold renderer allocates in the same frames.
         let mut cold = renderer(&ctx);
@@ -145,16 +145,16 @@ fn frame_zero_timing_is_reported_with_and_without_the_warm_up() {
 fn growth_beyond_the_warmed_block_stays_on_demand() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan(5);
-    let mut r = TerrainRenderer::with_compact_pools(&ctx, SIZE, CELLS, compact_pool_of(64, 16));
+    let mut r = TerrainRenderer::with_pools(&ctx, SIZE, CELLS, compact_pool_of(64, 16));
     r.warm_up(&ctx);
     let warm = r.init_counts();
-    assert_eq!(r.live_pools(), (1, true));
+    assert_eq!(r.live_blocks(), 1);
     upload(&ctx, &mut r, &p);
-    let (blocks, _) = r.live_pools();
+    let blocks = r.live_blocks();
     assert!(blocks > 1, "a plan of {} nodes needs more than the warmed block", p.nodes.len());
     assert_eq!(r.init_counts().pool_allocations, warm.pool_allocations + (blocks - 1), "each further block is one counted allocation");
     let config = *r.pool_config();
-    let modelled = config.allocated_bytes_with(blocks, true) - config.node_record_bytes + r.node_buffer_bytes();
+    let modelled = config.allocated_bytes_with(blocks) - config.node_record_bytes + r.node_buffer_bytes();
     assert_eq!(r.pool_allocated_bytes(), modelled);
 }
 

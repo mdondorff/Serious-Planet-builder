@@ -99,7 +99,6 @@ struct Config {
     water_level_m: f64,
     draw: Option<planet_render::DrawMode>,
     upload: Option<planet_render::UploadMode>,
-    tile_format: Option<planet_render::TileFormat>,
     /// The body's look (`--look`, the file beside `--world`, else the Earth defaults): the sun, units, exposure range and atmosphere of
     /// the lit path (VIEW-007).
     look: LookParams,
@@ -175,9 +174,6 @@ impl App<'_> {
         }
         if let Some(mode) = cfg.upload {
             ctx.prefer_upload_mode(mode);
-        }
-        if let Some(format) = cfg.tile_format {
-            ctx.prefer_tile_format(format);
         }
         let first = self.request(self.cameras[0], TerrainView::ALL[cfg.initial_view]);
         // The 384 floor tiles load here, before frame 0 (STRM-001): the title shows how many are in.
@@ -577,17 +573,9 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         .position(|v| *v == view_name)
         .ok_or_else(|| format!("--view must be one of {}, got '{view_name}'", views.join(", ")))?;
     let (bake_done, bake_total) = world.bake_blocks();
-    // The software adapter runs the smoke in the vertex format (the reference format): the compact format with the atmosphere removes the
-    // WARP device when a buffer is read back after a frame (docs/learnings.md, 2026-10-17); the compact format keeps the debug path's
-    // coverage and the discrete GPU's smoke.
-    let software_smoke = o.smoke && policy == AdapterPolicy::Software;
-    let tile_format_pref = o.tile_format.or(software_smoke.then_some(planet_render::TileFormat::Vertex));
-    let tile_format = tile_format_pref.unwrap_or(planet_render::TileFormat::Compact);
     let (prefill_done, prefill_total) = if o.store.is_some() {
         let levels = o.prefill_levels.unwrap_or(READINESS_PREFILL_LEVELS);
-        world
-            .prefill_present(o.floor_for(o.cells), levels, o.cells, o.finest_level_for(o.cells), tile_format)
-            .map(|(p, t)| (p as u64, t as u64))?
+        world.prefill_present(o.floor_for(o.cells), levels, o.cells, o.finest_level_for(o.cells)).map(|(p, t)| (p as u64, t as u64))?
     } else {
         (0, 0)
     };
@@ -613,7 +601,6 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         water_level_m,
         draw: o.draw,
         upload: o.upload,
-        tile_format: tile_format_pref,
         look,
         atmosphere,
         liquids: world.definition().liquids().map_err(|e| format!("the liquid table of the definition: {e}"))?,

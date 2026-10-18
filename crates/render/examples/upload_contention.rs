@@ -47,7 +47,7 @@ fn pool() -> PoolConfig {
         1,
     )
     .unwrap();
-    PoolConfig { vertex_slots: 4096, fallback_slots: 3968, ..one }
+    one
 }
 
 /// Busy workers: each builds compact tiles in a loop (the generation workers' kind of work: heap-heavy, no GPU) until stopped.
@@ -87,7 +87,7 @@ fn main() {
     );
 
     let size = (128, 96);
-    let mut renderer = TerrainRenderer::with_compact_pools(&ctx, size, CELLS, pool());
+    let mut renderer = TerrainRenderer::with_pools(&ctx, size, CELLS, pool());
     // A frame that draws nothing: its submit flushes the frame's pending queue writes, as the loop's frame does.
     let lod = LodParams { cells: CELLS, max_level: 26, ..LodParams::earth_1080p() };
     let camera = scripted_views(R, 4.0 / 3.0, 1)[4].1;

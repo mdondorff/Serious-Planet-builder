@@ -2,10 +2,10 @@
 //! renderer only copies them into a buffer (CON-03: the CPU decides what is drawn, the GPU culls nothing).
 //!
 //! One record per plan node, in the plan's order: `first_instance` is the node's index (the shader reads its node record at
-//! that index), `base_vertex` is the first vertex of the node's slot inside the vertex buffer the draw names. A draw names
-//! its buffer by being in a *run*: consecutive nodes whose slots are in the same buffer (one block of the main pool, or the
-//! small vertex pool) form one run, and the renderer binds that buffer once and issues one multi-draw per run. The order of
-//! the draws is the plan's, so the picture is the per-draw loop's even where two tiles tie in depth.
+//! that index). A compact tile has no vertex buffer (the vertex stage pulls from the block, ADR 0054), so `base_vertex` is 0. A draw
+//! names its block by being in a *run*: consecutive nodes whose slots are in the same block of the pool form one run, and the
+//! renderer binds that block once and issues one multi-draw per run. The order of the draws is the plan's, so the picture is the
+//! per-draw loop's even where two tiles tie in depth.
 
 use planet_streaming::{PoolKind, SlotRef};
 
@@ -27,7 +27,7 @@ pub struct DrawRecord {
     pub index_count: u32,
     pub instance_count: u32,
     pub first_index: u32,
-    /// First vertex of the slot in the bound buffer, in vertices.
+    /// First vertex in the bound buffer, in vertices: 0 for a compact tile (no vertex buffer).
     pub base_vertex: i32,
     /// The node's index in the plan.
     pub first_instance: u32,
@@ -45,18 +45,12 @@ impl DrawRecord {
     }
 }
 
-/// What a run of draws names: the small vertex pool, one block of the vertex-format main pool, or one storage-buffer block of the
-/// compact format (ADR 0033 point 3, ADR 0054: a draw names its block by being in a run of that block; the node's slot reaches the
-/// shader through the node's tile reference, the block through the run's bind group). Compact runs use the compact pipeline, the
-/// others the vertex pipeline.
+/// What a run of draws names: one storage-buffer block of the pool (ADR 0033 point 3, ADR 0054: a draw names its block by being in a
+/// run of that block; the node's slot reaches the shader through the node's tile reference, the block through the run's bind group).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum DrawBuffer {
-    VertexPool,
-    Block(u32),
-    Compact(u32),
-}
+pub struct DrawBuffer(pub u32);
 
-/// Consecutive records that draw from one buffer: records `first..first + count`.
+/// Consecutive records that draw from one block: records `first..first + count`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DrawRun {
     pub buffer: DrawBuffer,
@@ -64,7 +58,7 @@ pub struct DrawRun {
     pub count: u32,
 }
 
-/// The records of a plan and the runs that group them by buffer.
+/// The records of a plan and the runs that group them by block.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct DrawList {
     pub records: Vec<DrawRecord>,
@@ -83,33 +77,24 @@ impl DrawList {
     }
 }
 
-/// The buffer and the slot index within it of `slot`.
-pub fn buffer_of(slot: SlotRef, block_slots: u32) -> (DrawBuffer, u32) {
+/// The block of `slot`.
+pub fn buffer_of(slot: SlotRef, block_slots: u32) -> DrawBuffer {
     match slot.pool {
-        PoolKind::Vertex => (DrawBuffer::VertexPool, slot.index),
-        PoolKind::Main => (DrawBuffer::Block(slot.index / block_slots), slot.index % block_slots),
+        PoolKind::Main => DrawBuffer(slot.index / block_slots),
     }
 }
 
-/// Build the records for nodes whose tiles sit in `slots` (one per node, the plan's order). `vertices_per_slot` is the vertex
-/// count of a slot (the same for every slot of both pools); `index_count` the index count of the tile mesh.
-pub fn build_draw_list(slots: impl IntoIterator<Item = SlotRef>, block_slots: u32, vertices_per_slot: u32, index_count: u32) -> DrawList {
-    build_draw_list_placed(
-        slots.into_iter().map(|slot| {
-            let (buffer, within) = buffer_of(slot, block_slots);
-            (buffer, u64::from(within) * u64::from(vertices_per_slot))
-        }),
-        index_count,
-    )
+/// Build the records for nodes whose tiles sit in `slots` (one per node, the plan's order); `index_count` the index count of the
+/// tile mesh.
+pub fn build_draw_list(slots: impl IntoIterator<Item = SlotRef>, block_slots: u32, index_count: u32) -> DrawList {
+    build_draw_list_placed(slots.into_iter().map(|slot| buffer_of(slot, block_slots)), index_count)
 }
 
-/// [`build_draw_list`] for nodes whose buffer and first vertex are already known: `(buffer, base vertex)` per node, in the plan's
-/// order (a compact tile in a block has base vertex 0; a vertex-format tile has its slot's first vertex).
-pub fn build_draw_list_placed(nodes: impl IntoIterator<Item = (DrawBuffer, u64)>, index_count: u32) -> DrawList {
+/// [`build_draw_list`] for nodes whose block is already known: one block per node, in the plan's order.
+pub fn build_draw_list_placed(nodes: impl IntoIterator<Item = DrawBuffer>, index_count: u32) -> DrawList {
     let mut list = DrawList::default();
-    for (i, (buffer, first_vertex)) in nodes.into_iter().enumerate() {
-        let base_vertex = i32::try_from(first_vertex).expect("a block's vertices fit a 32-bit base vertex");
-        list.records.push(DrawRecord { index_count, instance_count: 1, first_index: 0, base_vertex, first_instance: i as u32 });
+    for (i, buffer) in nodes.into_iter().enumerate() {
+        list.records.push(DrawRecord { index_count, instance_count: 1, first_index: 0, base_vertex: 0, first_instance: i as u32 });
         match list.runs.last_mut() {
             Some(run) if run.buffer == buffer => run.count += 1,
             _ => list.runs.push(DrawRun { buffer, first: i as u32, count: 1 }),
@@ -128,20 +113,15 @@ mod tests {
 
     // spec: REND-015
     #[test]
-    fn records_follow_the_nodes_and_runs_follow_the_buffers() {
-        let slots = [main(0), main(5), main(256), main(257), SlotRef { pool: PoolKind::Vertex, index: 3 }, main(2)];
-        let list = build_draw_list(slots, 256, 1_221, 6_144);
+    fn records_follow_the_nodes_and_runs_follow_the_blocks() {
+        let slots = [main(0), main(5), main(256), main(257), main(3), main(2)];
+        let list = build_draw_list(slots, 256, 6_144);
         assert_eq!(list.records.len(), 6);
         for (i, r) in list.records.iter().enumerate() {
-            assert_eq!((r.first_instance, r.instance_count, r.first_index, r.index_count), (i as u32, 1, 0, 6_144));
+            assert_eq!((r.first_instance, r.instance_count, r.first_index, r.index_count, r.base_vertex), (i as u32, 1, 0, 6_144, 0));
         }
-        let bases: Vec<i32> = list.records.iter().map(|r| r.base_vertex).collect();
-        assert_eq!(bases, [0, 5 * 1_221, 0, 1_221, 3 * 1_221, 2 * 1_221]);
         let runs: Vec<(DrawBuffer, u32, u32)> = list.runs.iter().map(|r| (r.buffer, r.first, r.count)).collect();
-        assert_eq!(
-            runs,
-            [(DrawBuffer::Block(0), 0, 2), (DrawBuffer::Block(1), 2, 2), (DrawBuffer::VertexPool, 4, 1), (DrawBuffer::Block(0), 5, 1)]
-        );
+        assert_eq!(runs, [(DrawBuffer(0), 0, 2), (DrawBuffer(1), 2, 2), (DrawBuffer(0), 4, 2)]);
         assert_eq!(list.record_bytes().len() as u64, list.argument_bytes());
     }
 

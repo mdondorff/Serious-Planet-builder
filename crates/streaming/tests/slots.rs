@@ -3,7 +3,7 @@
 //! eviction order under a hard slot capacity. No device.
 
 use planet_core::{Face, TileId};
-use planet_streaming::budget::{FIXED_RESERVE_BYTES, GIB, VERTEX_POOL_SLOTS};
+use planet_streaming::budget::{FIXED_RESERVE_BYTES, GIB};
 use planet_streaming::{
     FakeClock, ManualSpawner, PoolConfig, PoolKind, SlotPool, SlotPools, Spawner, StreamConfig, Streamer, Tier, TileSource, Wants,
 };
@@ -74,45 +74,42 @@ fn a_released_slot_is_reused_only_after_the_frames_in_flight_retire() {
 // spec: STRM-006
 #[test]
 fn the_terrain_share_bounds_the_allocated_bytes_at_both_tiers() {
-    // The vertex format at cells 32: 1,221 vertices of 44 bytes; blocks of 256 slots; node records 512 B x 32,768.
-    let slot = 1_221 * 44;
-    for (tier, share) in [(Tier::Mid, 2 * GIB), (Tier::High, 3 * GIB)] {
+    // The compact slot at cells 32 (9,168 B, GEN-025); a block of 128 MiB holds 14,639 slots; node records 512 B x 32,768.
+    let (slot, block_slots) = (9_168u64, 14_639u32);
+    for (tier, share, blocks) in [(Tier::Mid, 2 * GIB, 15u32), (Tier::High, 3 * GIB, 23)] {
         assert_eq!(tier.terrain_share_bytes(), share);
-        let c = PoolConfig::fit_share(share, slot, 256, slot, 25_000, 512 * 32_768, 2).unwrap();
+        let c = PoolConfig::fit_share(share, slot, block_slots, 25_000, 512 * 32_768, 2).unwrap();
+        assert_eq!(c.main_blocks, blocks, "{tier:?}: blocks of the share");
+        assert_eq!(c.main_slots(), blocks * block_slots, "{tier:?}: 219,585 slots at the mid share, 336,697 at the high one");
         assert!(c.fixed_bytes() <= FIXED_RESERVE_BYTES, "{tier:?}: fixed items {} B", c.fixed_bytes());
         assert!(c.allocated_bytes() <= share, "{tier:?}: {} B allocated against a share of {share} B", c.allocated_bytes());
         // One more block would breach the share: the ceiling is tight to a block.
         assert!(share - FIXED_RESERVE_BYTES - u64::from(c.main_blocks) * c.block_bytes() < c.block_bytes(), "one more block would fit");
         assert!(c.allocated_bytes() < tier.vram_cap_bytes());
-        assert_eq!(c.main_slots(), c.main_blocks * 256);
         // Nothing allocated until used; each block adds exactly its bytes.
-        assert_eq!(c.allocated_bytes_with(0, false), c.index_bytes + c.node_record_bytes);
-        assert_eq!(c.allocated_bytes_with(3, false) - c.allocated_bytes_with(2, false), c.block_bytes());
+        assert_eq!(c.allocated_bytes_with(0), c.index_bytes + c.node_record_bytes);
+        assert_eq!(c.allocated_bytes_with(3) - c.allocated_bytes_with(2), c.block_bytes());
         assert_eq!(c.blocks_for(0), 0);
         assert_eq!(c.blocks_for(1), 1);
-        assert_eq!(c.blocks_for(256), 1);
-        assert_eq!(c.blocks_for(257), 2);
+        assert_eq!(c.blocks_for(block_slots), 1);
+        assert_eq!(c.blocks_for(block_slots + 1), 2);
     }
-    let mid = PoolConfig::fit_share(Tier::Mid.terrain_share_bytes(), slot, 256, slot, 25_000, 512 * 32_768, 2).unwrap();
-    let high = PoolConfig::fit_share(Tier::High.terrain_share_bytes(), slot, 256, slot, 25_000, 512 * 32_768, 2).unwrap();
+    let mid = PoolConfig::fit_share(Tier::Mid.terrain_share_bytes(), slot, block_slots, 25_000, 512 * 32_768, 2).unwrap();
+    let high = PoolConfig::fit_share(Tier::High.terrain_share_bytes(), slot, block_slots, 25_000, 512 * 32_768, 2).unwrap();
     assert!(high.main_slots() > mid.main_slots());
-    assert_eq!(mid.vertex_slots, VERTEX_POOL_SLOTS);
 }
 
 // spec: STRM-006
 #[test]
 fn a_share_that_cannot_hold_a_block_or_the_fixed_items_is_refused() {
-    let slot = 1_221 * 44;
-    assert!(PoolConfig::fit_share(GIB / 16, slot, 256, slot, 25_000, 512 * 32_768, 2).is_err(), "below the fixed reserve");
-    assert!(PoolConfig::fit_share(FIXED_RESERVE_BYTES + slot, slot, 256, slot, 25_000, 512 * 32_768, 2).is_err(), "no whole block");
-    // A big vertex slot first shrinks the small pool (never under 128 slots), then drops it; fixed items that stay over their
-    // reserve (here the node records) are refused.
-    let shrunk = PoolConfig::fit_share(2 * GIB, slot, 256, 600_000, 25_000, 512 * 32_768, 2).unwrap();
-    assert_eq!(shrunk.vertex_slots, 128, "512 slots of 600 kB do not fit the reserve, 256 and 128 are tried");
-    let dropped = PoolConfig::fit_share(2 * GIB, slot, 256, 1_000_000, 25_000, 512 * 32_768, 2).unwrap();
-    assert_eq!(dropped.vertex_slots, 0, "128 slots of 1 MB do not fit either: one pool for every level");
-    assert!(dropped.fixed_bytes() <= FIXED_RESERVE_BYTES);
-    assert!(PoolConfig::fit_share(2 * GIB, slot, 256, slot, 25_000, 2 * FIXED_RESERVE_BYTES, 2).is_err(), "fixed items over their reserve");
+    let (slot, block_slots, node_records) = (9_168, 14_639, 512 * 32_768);
+    assert!(PoolConfig::fit_share(GIB / 16, slot, block_slots, 25_000, node_records, 2).is_err(), "below the fixed reserve");
+    assert!(PoolConfig::fit_share(FIXED_RESERVE_BYTES + slot, slot, block_slots, 25_000, node_records, 2).is_err(), "no whole block");
+    // Fixed items over their reserve (here the node records) are refused.
+    assert!(
+        PoolConfig::fit_share(2 * GIB, slot, block_slots, 25_000, 2 * FIXED_RESERVE_BYTES, 2).is_err(),
+        "fixed items over their reserve"
+    );
 }
 
 #[derive(Default)]
@@ -263,26 +260,24 @@ fn a_residency_request_never_evicts_an_r_tile() {
 
 // spec: STRM-006
 #[test]
-fn the_vertex_pool_holds_levels_zero_to_two_and_does_not_count_against_the_main_capacity() {
-    let config = StreamConfig { max_in_flight: 8, capacity: 4, vertex_pool_slots: 512, ..Default::default() };
+fn one_pool_serves_every_level_and_every_tile_counts_against_its_capacity() {
+    // Replaces the vertex pool test (`remove-vertex-render-path`, ADR 0062): levels 0-2 had a small pool of their own that did not
+    // count against the capacity; there is one pool now, and the render floor keeps levels 0-2 out of it.
+    let config = StreamConfig { max_in_flight: 8, capacity: 8, ..Default::default() };
     let (mut s, sp) = fixture(config);
-    assert!(s.has_vertex_pool());
     let low: Vec<TileId> = (0..4).map(|x| id(0, 2, x, 0)).collect();
     let high: Vec<TileId> = (0..6).map(|x| id(0, 3, x, 0)).collect();
     let all: Vec<(TileId, f64)> = low.iter().chain(&high).map(|t| (*t, 1.0)).collect();
     run_frames(&mut s, &sp, &Wants { draw: vec![], residency: all, prefetch: vec![] }, 10);
-    for t in &low {
-        assert_eq!(s.slot_of(*t).map(|r| r.pool), Some(PoolKind::Vertex), "{t:?}");
+    let resident = s.stats().main_in_use - s.stats().in_flight;
+    assert!(resident <= 8, "the one pool holds {resident} of its 8 slots (the six roots included), whatever the level");
+    assert!(s.stats().main_in_use <= 8);
+    for t in low.iter().chain(&high).filter(|t| s.is_resident(**t)) {
+        assert_eq!(s.slot_of(*t).map(|r| r.pool), Some(PoolKind::Main), "{t:?}");
     }
-    let main_resident = high.iter().filter(|t| s.is_resident(**t)).count();
-    assert!(main_resident <= 4, "the main pool holds {main_resident} of its 4 slots");
-    assert_eq!(s.stats().main_in_use, main_resident + s.stats().in_flight);
-    for f in Face::ALL {
-        assert_eq!(s.slot_of(id(f.0, 0, 0, 0)).map(|r| r.pool), Some(PoolKind::Vertex), "roots live in the vertex pool");
-    }
-    // SlotPools alone: the pool kind follows the level.
-    let pools = SlotPools::new(10, 512, 0);
-    assert_eq!(pools.kind_of(id(0, 2, 0, 0)), PoolKind::Vertex);
+    // SlotPools alone: every level is in the one pool.
+    let pools = SlotPools::new(10, 0);
+    assert_eq!(pools.kind_of(id(0, 2, 0, 0)), PoolKind::Main);
     assert_eq!(pools.kind_of(id(0, 3, 0, 0)), PoolKind::Main);
-    assert_eq!(SlotPools::new(10, 0, 0).kind_of(id(0, 0, 0, 0)), PoolKind::Main, "no small pool: one pool for every level");
+    assert_eq!(pools.kind_of(id(0, 0, 0, 0)), PoolKind::Main);
 }

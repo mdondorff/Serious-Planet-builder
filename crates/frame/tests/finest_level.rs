@@ -1,7 +1,6 @@
 //! LOD-010, tier A: the finest geometry level is one LOD parameter (`LodParams::max_level`), with the production default
 //! `27 - ceil(log2(cells))` (22 at cells 32, 21 at 64: equal vertex spacing of about 7.5 cm); selection, the residency set R,
-//! prefetch, the cover plan and the draw set all read it from there, and the mesh key carries whether a tile is a finest tile of
-//! the view, so the compact format's CON-13 guard is a function of what the key identifies.
+//! prefetch, the cover plan and the draw set all read it from there, and a tile has the same key under every cap.
 
 use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::{PlanetFixed, TileId, Vec3};
@@ -12,7 +11,7 @@ use planet_frame::{
 };
 use planet_generators::compact::compact_tile_field;
 use planet_generators::height::{HeightField, Reference};
-use planet_generators::mesh::{finest_class_key, mesh_key_field};
+use planet_generators::mesh::mesh_key_field;
 
 const R: f64 = 6_371_000.0;
 const SIZE: (u32, u32) = (1280, 720);
@@ -88,7 +87,9 @@ fn draws_by_tile(plan: &planet_frame::TerrainPlan) -> std::collections::BTreeMap
 
 // spec: LOD-010, LOD-009, GEN-010
 #[test]
-fn a_tile_at_the_cap_has_the_key_of_its_class_and_other_tiles_keep_their_base_key() {
+fn a_tile_at_the_cap_has_its_base_key_like_every_other_tile() {
+    // Until `remove-vertex-render-path` a tile at the cap carried the base key rehashed with its finest-level class, because the
+    // CON-13 guard decided its format from its relief. There is no guard and one format now: every tile of the plan has its base key.
     let field = Reference(1);
     let params = |cap| LodParams { max_height_m: field.max_abs_height_m(), ..lod(32, cap) };
     let p22 = plan_terrain_field(&request(params(22)), &field).unwrap();
@@ -96,22 +97,18 @@ fn a_tile_at_the_cap_has_the_key_of_its_class_and_other_tiles_keep_their_base_ke
     let base = |t: TileId| mesh_key_field(&field, &TangentWarp, t, 32, R);
     let mut at_cap = 0;
     for d in &p22.nodes {
-        if d.level == 22 {
-            at_cap += 1;
-            assert_eq!(d.mesh_key, finest_class_key(base(d.tile), d.tile, 22));
-            assert_ne!(d.mesh_key, base(d.tile), "a finest tile is another key than the same tile below the cap");
-        } else {
-            assert_eq!(d.mesh_key, base(d.tile), "{:?} is below the cap and keeps its base key", d.tile);
-        }
+        at_cap += usize::from(d.level == 22);
+        assert_eq!(d.mesh_key, base(d.tile), "{:?} (level {}) has its base key, the cap's level included", d.tile, d.level);
     }
     assert!(at_cap > 0, "the 1 m view reaches the cap");
-    // The same tile at level 22 is a finest tile under cap 22 and an ordinary one under cap 23: another key, so a resident tile
-    // decided under one cap is not taken for the other.
+    // The same tile is the same key under another cap: a resident tile is not taken for another content, and not needlessly replaced.
     let p23 = draws_by_tile(&p23);
     let t23 = p23.keys().find(|t| t.level() == 23).copied().expect("a level-23 draw under cap 23");
     let a22 = t23.parent().unwrap();
-    assert_ne!(finest_class_key(base(a22), a22, 22), finest_class_key(base(a22), a22, 23), "level 22 is finest under cap 22 only");
-    assert_eq!(finest_class_key(base(a22), a22, 23), base(a22));
+    assert_eq!(base(a22), base(a22));
+    for (t, d) in &p23 {
+        assert_eq!(d.mesh_key, base(*t));
+    }
     // A cap change invalidates a warm plan cache's keys (LOD-009): the plan equals the plan of a fresh cache.
     let mut cache = SelectionCache::new();
     let warm22 = planet_frame::plan_terrain_cached(&request(params(22)), &field, &mut cache).unwrap();
@@ -122,21 +119,14 @@ fn a_tile_at_the_cap_has_the_key_of_its_class_and_other_tiles_keep_their_base_ke
 
 // spec: LOD-010, GEN-019, CON-13
 #[test]
-fn the_format_of_a_resident_tile_is_a_function_of_its_key() {
-    use planet_generators::compact::CompactTile;
+fn a_tile_is_the_same_tile_whatever_the_cap_of_the_view() {
     use planet_generators::stress::Steep;
-    // The steep field has far more than 65 m of relief on a level-9 tile: it is a vertex-format tile where level 9 is the cap, and
-    // a compact one where the cap is deeper. The two must not share a key, or a resident tile decided for one cap would be reused
-    // for the other (the compact tile's guard is decided once, at build).
+    // The steep field has far more than 65 m of relief on a level-9 tile. It used to be a vertex-format tile where level 9 was the cap
+    // and a compact one where the cap was deeper, under two keys. There is one format and one key: the tile does not depend on the cap.
     let steep = Steep(1);
     let tile = TileId::new(planet_core::Face::ALL[4], 9, 100, 100).unwrap();
-    let (capped, deeper) = (compact_tile_field(&steep, &TangentWarp, tile, 32, R), compact_tile_field(&steep, &TangentWarp, tile, 32, R));
-    assert!(matches!(capped, RenderTile::Vertex(_)) && deeper.is_compact(), "fixture: the cap decides the format of this tile");
-    assert_ne!(capped.key(), deeper.key(), "the key must identify the class the format was decided for");
-    // Each key is the plan's key for that cap, whichever format the tile has.
-    let base = mesh_key_field(&steep, &TangentWarp, tile, 32, R);
-    assert_eq!(capped.key(), finest_class_key(base, tile, 9));
-    assert_eq!(deeper.key(), base);
-    // Tiles with the same class share a key: the format decision no longer depends on the cap's value.
-    assert_eq!(compact_tile_field(&steep, &TangentWarp, tile, 32, R).key(), capped.key());
+    let built = compact_tile_field(&steep, &TangentWarp, tile, 32, R);
+    assert!(built.relief_m > 65.535, "fixture: {} m of relief", built.relief_m);
+    assert_eq!(built.key(), mesh_key_field(&steep, &TangentWarp, tile, 32, R), "the plan's key for the tile, under any cap");
+    assert_eq!(built, compact_tile_field(&steep, &TangentWarp, tile, 32, R));
 }

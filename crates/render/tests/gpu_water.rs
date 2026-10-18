@@ -53,11 +53,11 @@ fn compact_pool() -> PoolConfig {
         1,
     )
     .unwrap();
-    PoolConfig { vertex_slots: 768, fallback_slots: 512, ..one }
+    one
 }
 
 fn new_renderer(ctx: &GpuContext, size: (u32, u32)) -> TerrainRenderer {
-    let mut r = TerrainRenderer::with_compact_pools(ctx, size, CELLS, compact_pool());
+    let mut r = TerrainRenderer::with_pools(ctx, size, CELLS, compact_pool());
     r.enable_lit(ctx);
     r
 }

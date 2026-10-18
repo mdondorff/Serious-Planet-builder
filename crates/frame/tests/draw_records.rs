@@ -41,12 +41,12 @@ fn draw_records_equal_the_plan_nodes_and_their_bytes_are_counted_per_standard_vi
         .unwrap();
         // Slots as the renderer's free list would hand them out: the plan's order, lowest first, 256 per block.
         let slots = (0..plan.nodes.len() as u32).map(|i| SlotRef { pool: PoolKind::Main, index: i });
-        let (vertices, indices) = (1_221u32, 6_144u32);
-        let list = build_draw_list(slots, 256, vertices, indices);
+        let indices = 6_144u32;
+        let list = build_draw_list(slots, 256, indices);
         assert_eq!(list.records.len(), plan.nodes.len(), "{name}: one record per node");
         for (i, r) in list.records.iter().enumerate() {
             assert_eq!(r.first_instance as usize, i, "{name}: first_instance is the node index");
-            assert_eq!(r.base_vertex as u64, (i as u64 % 256) * u64::from(vertices), "{name}: base_vertex is the slot's first vertex");
+            assert_eq!(r.base_vertex, 0, "{name}: a compact tile has no vertex buffer, so no base vertex");
             assert_eq!((r.index_count, r.instance_count), (indices, 1), "{name}");
         }
         assert_eq!(list.runs.iter().map(|r| r.count as usize).sum::<usize>(), plan.nodes.len(), "{name}: the runs cover the records");
@@ -63,9 +63,9 @@ fn draw_records_equal_the_plan_nodes_and_their_bytes_are_counted_per_standard_vi
 // spec: REND-015, STRM-006
 #[test]
 fn the_shares_node_record_bytes_hold_a_ring_for_the_largest_plan() {
-    use planet_frame::pool::{tier_pool, MAX_PLAN_NODES};
+    use planet_frame::pool::{tier_compact_pool, MAX_PLAN_NODES};
     // The renderer keeps two sets (node records, argument records, 96 B of globals) and refuses plans over MAX_PLAN_NODES.
     let need = 2 * (MAX_PLAN_NODES * (NODE_RECORD_BYTES + DRAW_RECORD_BYTES) + 96);
-    let pool = tier_pool(planet_streaming::Tier::Mid, 32, 2).unwrap();
+    let pool = tier_compact_pool(planet_streaming::Tier::Mid, 32, 2).unwrap();
     assert!(pool.node_record_bytes >= need, "{} B reserved, {need} B needed", pool.node_record_bytes);
 }

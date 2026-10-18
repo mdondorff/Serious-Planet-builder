@@ -131,11 +131,10 @@ fn the_cut_water_nodes_cover_the_same_sea_pixels_as_the_full_selection_in_the_fo
             let new: Vec<TileId> = cut.nodes.iter().map(|n| plan.nodes[n.node as usize].tile).filter(|t| jobs.insert(*t)).collect();
             std::thread::scope(|s| {
                 for chunk in new.chunks(new.len().div_ceil(8).max(1)) {
-                    let (world, field, lod) = (&world, &field, &lod);
+                    let (world, field) = (&world, &field);
                     s.spawn(move || {
                         for tile in chunk {
-                            let built =
-                                planet_generators::compact::compact_tile_field(field.as_ref(), &TangentWarp, *tile, o.cells, R);
+                            let built = planet_generators::compact::compact_tile_field(field.as_ref(), &TangentWarp, *tile, o.cells, R);
                             world.fill_water(*tile, &built);
                         }
                     });

@@ -11,7 +11,6 @@ use planet_frame::upload::UploadBudget;
 use planet_frame::{Camera, LodParams, TerrainRequest, TerrainView};
 use planet_generators::compact::CompactTile;
 use planet_generators::height::{HeightField, Reference};
-use planet_generators::mesh::TileMesh;
 use planet_streaming::{FakeClock, ManualSpawner, ResidencyManager, SlotRef, Spawner, StreamConfig, Streamer, TileSource};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -100,14 +99,21 @@ impl TileSource<CompactTile> for Source {
     fn load(&self, tile: TileId) -> Result<CompactTile, String> {
         let field = Reference(1);
         let rec = ResidentRecords::new(&field, &TangentWarp, &self.lod).record(tile);
-        Ok(RenderTile::Vertex(TileMesh {
+        Ok(CompactTile {
             id: tile,
             cells: CELLS,
             key: rec.mesh_key,
             origin: rec.origin,
-            vertices: Vec::new(),
-            climate: Default::default(),
-        }))
+            ctrl: [[0.0; 3]; 9],
+            h_origin: 0.0,
+            hr_min: 0.0,
+            hr_step: 1.0,
+            skirt_depth: 0.0,
+            flip: false,
+            relief_m: 0.0,
+            climate_words: [0; planet_generators::climate::CLIMATE_TEXELS],
+            texels: Vec::new(),
+        })
     }
 }
 

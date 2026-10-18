@@ -35,7 +35,7 @@ fn small_pool() -> PoolConfig {
 }
 
 fn renderer(ctx: &GpuContext, ts: &[CompactTile], scattered: bool) -> TerrainRenderer {
-    let mut r = TerrainRenderer::with_compact_pools(ctx, SIZE, CELLS, small_pool());
+    let mut r = TerrainRenderer::with_pools(ctx, SIZE, CELLS, small_pool());
     let mut main = 5999u32;
     for t in ts {
         if scattered {

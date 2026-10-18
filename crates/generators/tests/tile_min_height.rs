@@ -3,7 +3,7 @@
 
 use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId};
-use planet_generators::compact::{compact_tile_field, CompactTile};
+use planet_generators::compact::compact_tile_field;
 use planet_generators::height::{HeightField, Reference};
 use planet_generators::mesh::{grid_vertex_count, tile_mesh_field, vertex_count, MeshVertex};
 use planet_generators::stress::Steep;

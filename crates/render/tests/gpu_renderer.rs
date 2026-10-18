@@ -31,8 +31,7 @@ fn a_persistent_renderer_uploads_each_tile_once_and_matches_the_one_shot_path() 
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let (p_near, p_far) = (plan(4), plan(3));
     let tiles: Vec<_> = p_near.nodes.iter().chain(&p_far.nodes).map(|n| tile(1, n.tile, CELLS)).collect();
-    assert!(tiles.iter().all(RenderTile::is_compact), "the render floor leaves only compact tiles");
-    let mut r = TerrainRenderer::new_compact(&ctx, SIZE, CELLS);
+    let mut r = TerrainRenderer::new(&ctx, SIZE, CELLS);
     for t in &tiles {
         r.upload_tile(&ctx, t).unwrap();
     }
@@ -54,15 +53,15 @@ fn a_persistent_renderer_uploads_each_tile_once_and_matches_the_one_shot_path() 
     }
     assert_eq!((r.uploaded_bytes, r.resident_tiles()), (uploaded, resident), "rendering must not upload");
     // A renderer that only ever saw one plan holds exactly the tiles the plan implies (TEST-011).
-    let mut single = TerrainRenderer::new_compact(&ctx, SIZE, CELLS);
+    let mut single = TerrainRenderer::new(&ctx, SIZE, CELLS);
     for n in &p_near.nodes {
         single.upload_tile(&ctx, &tile(1, n.tile, CELLS)).unwrap();
     }
     let counts = p_near.counts();
     assert_eq!(single.resident_tiles() as u32, counts.resident_tiles);
-    // `PlanCounts::upload_bytes` still models the vertex tile (GPU_STRIDE); it becomes the compact slot in task 3.2. Until then the
-    // compact bytes are checked against the same count of tiles at the compact slot size.
-    assert_eq!(single.uploaded_bytes, u64::from(counts.resident_tiles) * planet_generators::compact::slot_bytes(CELLS), "TEST-011");
+    // The plan's upload bytes are the compact slots of its tiles: the renderer wrote exactly the count (TEST-011).
+    assert_eq!(single.uploaded_bytes, counts.upload_bytes);
+    assert_eq!(counts.upload_bytes, u64::from(counts.resident_tiles) * planet_generators::compact::slot_bytes(CELLS));
 }
 
 // spec: REND-013
@@ -70,7 +69,7 @@ fn a_persistent_renderer_uploads_each_tile_once_and_matches_the_one_shot_path() 
 fn frames_are_timed_and_a_missing_tile_is_an_error() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan(5);
-    let mut r = TerrainRenderer::new_compact(&ctx, SIZE, CELLS);
+    let mut r = TerrainRenderer::new(&ctx, SIZE, CELLS);
     let e = r.render(&ctx, &p, true).unwrap_err();
     assert!(matches!(e, planet_render::ExecError::MissingTile(_)), "{e}");
     for n in &p.nodes {
@@ -102,7 +101,7 @@ fn a_tile_with_another_key_replaces_the_resident_buffer() {
     let id = p.nodes[0].tile;
     let (one, two) = (tile(1, id, CELLS), tile(2, id, CELLS));
     assert_ne!(one.key(), two.key());
-    let mut r = TerrainRenderer::new_compact(&ctx, SIZE, CELLS);
+    let mut r = TerrainRenderer::new(&ctx, SIZE, CELLS);
     r.upload_tile(&ctx, &one).unwrap();
     let after_one = r.uploaded_bytes;
     r.upload_tile(&ctx, &two).unwrap();
@@ -114,7 +113,7 @@ fn a_tile_with_another_key_replaces_the_resident_buffer() {
     single.nodes[0].mesh_key = two.key(); // the plan of a seed-2 request expects the seed-2 tile
     r.render(&ctx, &single, false).unwrap();
     let replaced = r.read_color(&ctx);
-    let mut fresh = TerrainRenderer::new_compact(&ctx, SIZE, CELLS);
+    let mut fresh = TerrainRenderer::new(&ctx, SIZE, CELLS);
     fresh.upload_tile(&ctx, &two).unwrap();
     fresh.render(&ctx, &single, false).unwrap();
     assert_eq!(replaced, fresh.read_color(&ctx), "a replaced buffer must draw exactly like a fresh upload of the new tile");
@@ -125,7 +124,7 @@ fn a_tile_with_another_key_replaces_the_resident_buffer() {
 fn a_plan_for_another_seed_refuses_stale_buffers() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan(5); // seed 1
-    let mut r = TerrainRenderer::new_compact(&ctx, SIZE, CELLS);
+    let mut r = TerrainRenderer::new(&ctx, SIZE, CELLS);
     for n in &p.nodes {
         r.upload_tile(&ctx, &tile(2, n.tile, CELLS)).unwrap(); // seed 2: stale for this plan
     }

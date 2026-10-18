@@ -33,7 +33,7 @@ fn plan(index: usize) -> planet_frame::TerrainPlan {
 fn tiles(p: &planet_frame::TerrainPlan) -> Vec<CompactTile> {
     let ts: Vec<CompactTile> = p.nodes.iter().map(|n| compact_tile_field(&Reference(1), &TangentWarp, n.tile, CELLS, R)).collect();
     // The render floor (LOD-009): nothing coarser than level 3 is planned, so every planned tile is compact.
-    assert!(ts.iter().all(|t| t.id().level() >= 3 && t.is_compact()), "every planned tile is a compact tile of level 3 or finer");
+    assert!(ts.iter().all(|t| t.id().level() >= 3), "every planned tile is of level 3 or finer");
     ts
 }
 
@@ -53,7 +53,7 @@ fn the_image_does_not_depend_on_where_the_tiles_sit() {
         let refs: Vec<&CompactTile> = ts.iter().collect();
         let (reference, _) = execute_terrain_tiles(&ctx, &p, &refs).unwrap();
         // The renderer's own free list in a pool of 3-slot blocks.
-        let mut own = TerrainRenderer::with_compact_pools(&ctx, SIZE, CELLS, small_pool(1));
+        let mut own = TerrainRenderer::with_pools(&ctx, SIZE, CELLS, small_pool(1));
         for t in &ts {
             own.upload_tile(&ctx, t).unwrap();
         }
@@ -62,7 +62,7 @@ fn the_image_does_not_depend_on_where_the_tiles_sit() {
         // Placed by the caller, scattered over blocks in reverse order with gaps.
         let config = small_pool(1);
         assert_eq!(config.main_slots(), 600, "the fixture's pool holds 200 blocks of 3");
-        let mut placed = TerrainRenderer::with_compact_pools(&ctx, SIZE, CELLS, config);
+        let mut placed = TerrainRenderer::with_pools(&ctx, SIZE, CELLS, config);
         let mut main = 599u32;
         for t in ts.iter().rev() {
             main -= 2;
@@ -83,26 +83,25 @@ fn the_allocation_equals_the_model_and_stays_under_the_share() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan(4);
     let ts = tiles(&p);
-    let mut r = TerrainRenderer::with_compact_pools(&ctx, SIZE, CELLS, small_pool(1));
+    let mut r = TerrainRenderer::with_pools(&ctx, SIZE, CELLS, small_pool(1));
     let config = *r.pool_config();
     assert_eq!(r.pool_allocated_bytes(), config.index_bytes + r.node_buffer_bytes(), "nothing allocated before the first tile");
     for t in &ts {
         r.upload_tile(&ctx, t).unwrap();
     }
     r.render(&ctx, &p, false).unwrap();
-    let (blocks, vertex_live) = r.live_pools();
+    let blocks = r.live_blocks();
     let (in_use, retiring, free) = r.main_slot_counts();
     assert_eq!(in_use as usize, ts.len());
     assert_eq!((retiring, in_use + free), (0, config.main_slots()));
     // Lowest slot first: the touched blocks are exactly the ones the slots in use need.
     assert_eq!(blocks, config.blocks_for(in_use), "{in_use} slots touch {blocks} blocks");
-    assert!(!vertex_live, "no tile of level 2 or coarser is drawn, so the small vertex pool stays unallocated");
-    let modelled = config.allocated_bytes_with(blocks, vertex_live) - config.node_record_bytes + r.node_buffer_bytes();
+    let modelled = config.allocated_bytes_with(blocks) - config.node_record_bytes + r.node_buffer_bytes();
     assert_eq!(r.pool_allocated_bytes(), modelled, "the real buffers equal the pure model");
     assert!(r.node_buffer_bytes() <= config.node_record_bytes);
     assert!(r.pool_allocated_bytes() <= config.allocated_bytes());
     // The default compact renderer: the mid tier's share is a ceiling on the model, at the renderer's own slot size.
-    let default = TerrainRenderer::new_compact(&ctx, SIZE, CELLS);
+    let default = TerrainRenderer::new(&ctx, SIZE, CELLS);
     assert!(default.pool_config().allocated_bytes() <= Tier::Mid.terrain_share_bytes());
     assert_eq!(default.pool_config(), &tier_compact_pool(Tier::Mid, CELLS, 1).unwrap());
     assert!(default.pool_allocated_bytes() < default.pool_config().allocated_bytes(), "pools are allocated on demand");
@@ -117,7 +116,7 @@ fn a_full_pool_is_refused_and_a_freed_slot_waits_for_the_frames_in_flight() {
     assert_eq!(ts.len(), 4, "the fixture has four tiles");
     let config = PoolConfig { main_blocks: 1, block_slots: 3, ..small_pool(1) };
     assert_eq!(config.slot_bytes, planet_generators::compact::slot_bytes(CELLS));
-    let mut r = TerrainRenderer::with_compact_pools(&ctx, SIZE, CELLS, config);
+    let mut r = TerrainRenderer::with_pools(&ctx, SIZE, CELLS, config);
     for t in &ts[..3] {
         r.upload_tile(&ctx, t).unwrap();
     }
@@ -173,12 +172,12 @@ fn the_residency_managers_slots_drive_the_renderer_and_the_images_are_unchanged(
     // evicts and reuses slots.
     let main_levels = |s: &HashSet<TileId>| s.iter().filter(|t| t.level() > 2).count();
     let capacity = main_levels(&closure(&pa)).max(main_levels(&closure(&pb))) + 6;
-    let config = StreamConfig { max_in_flight: 16, capacity, vertex_pool_slots: 512, retire_frames: 1, ..Default::default() };
+    let config = StreamConfig { max_in_flight: 16, capacity, retire_frames: 1, ..Default::default() };
     let spawner = Arc::new(ManualSpawner::default());
     let mut streamer = Streamer::new(Arc::new(TileData), spawner.clone() as Arc<dyn Spawner>, Arc::new(FakeClock::default()), config);
     streamer.load_roots_blocking().unwrap();
     let mut manager = ResidencyManager::new(streamer);
-    let mut renderer = TerrainRenderer::new_compact(&ctx, SIZE, CELLS);
+    let mut renderer = TerrainRenderer::new(&ctx, SIZE, CELLS);
     let mut evictions_seen = 0;
     for (round, p) in [&pa, &pb, &pa].into_iter().enumerate() {
         let wanted: Vec<(TileId, f64)> = p.nodes.iter().enumerate().map(|(i, n)| (n.tile, i as f64)).collect();

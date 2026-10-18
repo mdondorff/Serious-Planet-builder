@@ -2,7 +2,7 @@
 //! most 128 MiB (ADR 0054) of slots of 9,168 B (the record and the climate block in the slot, GEN-025), the vertex pool for levels
 //! 0-2 and fallback tiles, all inside the tier share and counted without a device.
 
-use planet_frame::pool::{block_slots_in, tier_compact_pool, COMPACT_BLOCK_BYTES, FALLBACK_SLOTS};
+use planet_frame::pool::{block_slots_in, tier_compact_pool, COMPACT_BLOCK_BYTES};
 use planet_generators::compact::slot_bytes;
 use planet_streaming::budget::GIB;
 use planet_streaming::Tier;
@@ -27,14 +27,13 @@ fn the_compact_shares_hold_the_slots_the_specs_count() {
     assert!(u64::from(mid.main_blocks + 1) * mid.block_bytes() > 2 * GIB - GIB / 8, "one more block would not fit");
     assert!(u64::from(high.main_blocks) * high.block_bytes() <= 3 * GIB - GIB / 8);
     assert!(u64::from(high.main_blocks + 1) * high.block_bytes() > 3 * GIB - GIB / 8, "one more block would not fit");
-    // The record is part of the slot: no per-slot item remains, the vertex pool is 512 vertex-format tiles (the top 256 for fallbacks).
+    // The record is part of the slot: no per-slot item remains, and no pool of another format (ADR 0062).
     assert_eq!(mid.slot_bytes, 9_168);
-    assert_eq!((mid.vertex_slots, mid.fallback_slots, mid.managed_vertex_slots()), (512, FALLBACK_SLOTS, 256));
     // The model never exceeds the share and the fixed items stay inside their reserve (STRM-006).
     for (c, tier) in [(mid, Tier::Mid), (high, Tier::High)] {
         assert!(c.allocated_bytes() <= tier.terrain_share_bytes(), "{} > {}", c.allocated_bytes(), tier.terrain_share_bytes());
         assert!(c.fixed_bytes() <= GIB / 8, "fixed items {} B over the reserve", c.fixed_bytes());
-        assert_eq!(c.allocated_bytes_with(0, false) + c.vertex_slot_bytes * u64::from(c.vertex_slots), c.fixed_bytes());
+        assert_eq!(c.allocated_bytes_with(0), c.fixed_bytes());
     }
 }
 
@@ -67,7 +66,7 @@ fn the_fixed_reserve_holds_no_per_slot_item_so_no_tile_size_overflows_it() {
     }
     // The share is a ceiling: small tiles take as many blocks as the bytes allow (15 at the mid share at cells 16 too).
     assert_eq!(tier_compact_pool(Tier::Mid, 16, 2).unwrap().main_blocks, 15);
-    // A vertex pool too small for 128 coarse tiles plus the fallback region is refused.
-    let tiny = planet_streaming::PoolConfig::fit_share_with(2 * GIB, 9_168, 14_639, 256, 1_000_000, 25_000, 1 << 20, 1);
+    // Fixed items over their reserve are refused.
+    let tiny = planet_streaming::PoolConfig::fit_share(2 * GIB, 9_168, 14_639, 25_000, 2 * GIB, 1);
     assert!(tiny.is_err(), "{tiny:?}");
 }

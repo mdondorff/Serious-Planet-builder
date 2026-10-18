@@ -42,11 +42,11 @@ fn compact_pool() -> PoolConfig {
         1,
     )
     .unwrap();
-    PoolConfig { vertex_slots: 256, fallback_slots: 192, ..one }
+    one
 }
 
 fn renderer(ctx: &GpuContext, p: &TerrainPlan) -> TerrainRenderer {
-    let mut r = TerrainRenderer::with_compact_pools(ctx, SIZE, CELLS, compact_pool());
+    let mut r = TerrainRenderer::with_pools(ctx, SIZE, CELLS, compact_pool());
     r.enable_lit(ctx);
     let field = Reference(1);
     for n in &p.nodes {
@@ -138,7 +138,7 @@ fn the_climate_views_show_the_climate_field_of_the_world() {
 
 /// The same renderer with the tiles scattered over the blocks in reverse order with gaps (a manager's placement), not the free list's.
 fn renderer_scattered(ctx: &GpuContext, p: &TerrainPlan) -> TerrainRenderer {
-    let mut r = TerrainRenderer::with_compact_pools(ctx, SIZE, CELLS, compact_pool());
+    let mut r = TerrainRenderer::with_pools(ctx, SIZE, CELLS, compact_pool());
     r.enable_lit(ctx);
     let field = Reference(1);
     let mut slot = r.pool_config().main_slots() - 1;

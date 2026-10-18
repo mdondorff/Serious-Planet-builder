@@ -27,14 +27,8 @@ winit.workspace = true
 planet-testkit.workspace = true
 
 [features]
-# SPIKE-06 measurement example (`cargo run --release -p planet --features spike06 --example compact_tile`).
-spike06 = ["planet-render/spike06"]
 # SPIKE-07 measurement example (`cargo run --release -p planet --features spike07 --example finest_level`).
 spike07 = ["planet-render/spike07"]
-
-[[example]]
-name = "compact_tile"
-required-features = ["spike06"]
 
 [[example]]
 name = "finest_level"

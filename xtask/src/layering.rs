@@ -123,7 +123,9 @@ pub fn check_reference_feature(dir: &str, manifest: &str) -> Vec<String> {
         }
         let key = t.split(|c: char| c == '=' || c.is_whitespace()).next().unwrap_or("").trim_matches('"');
         let product_dependency = section.contains("dependencies") && !section.contains("dev-dependencies");
-        let feature_entry = section == "features" && key != REFERENCE_FEATURE;
+        // In `[features]`: the `default` list, or another crate's feature forwarding to it (`planet-render/reference-renderer`). A feature of
+        // render itself that turns it on (`spike07 = ["reference-renderer"]`) is off by default and fine.
+        let feature_entry = section == "features" && key != REFERENCE_FEATURE && (key == "default" || t.contains("/reference-renderer"));
         if product_dependency || feature_entry {
             errors.push(format!(
                 "crates/{dir}/Cargo.toml:{}: '{dir}' enables the test-only feature '{REFERENCE_FEATURE}' of render outside [dev-dependencies] (REND-031, BUILD-001)",
@@ -250,6 +252,7 @@ pub fn e() { let _ = wgpu::Instance::new(); }
 planet-render = { workspace = true, features = [\"reference-renderer\"] }
 [features]
 reference-renderer = []
+spike07 = [\"reference-renderer\"]
 ";
         assert!(check_reference_feature("render", render).is_empty());
         for (what, manifest) in [
@@ -264,7 +267,10 @@ reference-renderer = []
             assert_eq!(e.len(), 1, "{what}: {e:?}");
             assert!(e[0].contains("outside [dev-dependencies]"), "{what}: {e:?}");
         }
-        let e = check_reference_feature("app", "[dev-dependencies]\nplanet-render = { workspace = true, features = [\"reference-renderer\"] }\n");
+        let e = check_reference_feature(
+            "app",
+            "[dev-dependencies]\nplanet-render = { workspace = true, features = [\"reference-renderer\"] }\n",
+        );
         assert!(e.is_empty(), "{e:?}");
     }
 

@@ -24,8 +24,8 @@ fn plan(index: usize) -> planet_frame::TerrainPlan {
 fn frames_submitted_without_waiting_are_counted_bounded_and_draw_the_same_image() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let plans: Vec<_> = [3usize, 4, 5, 4, 3].iter().map(|&i| plan(i)).collect();
-    let mut renderer = TerrainRenderer::with_frames_in_flight_compact(&ctx, SIZE, CELLS, u64::from(MAX_FRAMES_IN_FLIGHT));
-    let mut reference = TerrainRenderer::new_compact(&ctx, SIZE, CELLS);
+    let mut renderer = TerrainRenderer::with_frames_in_flight(&ctx, SIZE, CELLS, u64::from(MAX_FRAMES_IN_FLIGHT));
+    let mut reference = TerrainRenderer::new(&ctx, SIZE, CELLS);
     for p in &plans {
         for n in &p.nodes {
             let m: CompactTile = compact_tile_field(&Reference(1), &TangentWarp, n.tile, CELLS, R);

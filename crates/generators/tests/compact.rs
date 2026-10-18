@@ -5,9 +5,8 @@ use planet_core::cube::TangentWarp;
 use planet_core::hash::SplitMix64;
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::compact::{
-    compact_tile_field, oct_decode, oct_encode, pack_normal, slot_bytes, slot_texel_bytes,
-    unpack_normal, CompactTile, COMPACT_MIN_LEVEL, HEIGHT_STEPS,
-    SLOT_CLIMATE_OFFSET, SLOT_HEADER_BYTES, SLOT_PAD_OFFSET, SLOT_TEXEL_OFFSET, TEXEL_BYTES, WIDE_RELIEF_1MM_M,
+    compact_tile_field, oct_decode, oct_encode, pack_normal, slot_bytes, slot_texel_bytes, unpack_normal, CompactTile, COMPACT_MIN_LEVEL,
+    HEIGHT_STEPS, SLOT_CLIMATE_OFFSET, SLOT_HEADER_BYTES, SLOT_PAD_OFFSET, SLOT_TEXEL_OFFSET, TEXEL_BYTES, WIDE_RELIEF_1MM_M,
 };
 use planet_generators::global::{bake, GridSource};
 use planet_generators::height::{HeightField, Reference};
@@ -243,7 +242,9 @@ fn the_height_step_is_relief_over_2_pow_24_minus_1_so_one_millimetre_holds_to_16
     let unit = compact_tile_field(&Ramp(1.0), &TangentWarp, t, 32, R).relief_m;
     assert!(unit > 0.0);
     let mut worst_step_error = 0.0f64;
-    for (target, within_mm) in [(1_000.0f64, true), (16_700.0, true), (WIDE_RELIEF_1MM_M * 0.999, true), (20_000.0, false), (40_000.0, false)] {
+    for (target, within_mm) in
+        [(1_000.0f64, true), (16_700.0, true), (WIDE_RELIEF_1MM_M * 0.999, true), (20_000.0, false), (40_000.0, false)]
+    {
         let tile = compact_tile_field(&Ramp(target / unit), &TangentWarp, t, 32, R);
         assert!((tile.relief_m - target).abs() <= 1e-6 * target, "relief {} against the target {target}", tile.relief_m);
         let step = f64::from(tile.hr_step);

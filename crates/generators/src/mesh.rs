@@ -200,13 +200,6 @@ impl TileMesh {
         self.vertices[..grid_vertex_count(self.cells)].iter().map(|v| v.height).fold(f32::INFINITY, f32::min)
     }
 
-    /// The climate of vertex `vi` as the GPU vertex buffer carries it: the two `f16` of [`ClimateTexture::vertex_value`] at the
-    /// vertex's grid coordinates (presentation data derived at upload time).
-    pub fn gpu_climate(&self, vi: usize) -> [u16; 2] {
-        let (i, j) = vertex_grid_coords(self.cells, vi);
-        self.climate.vertex_value(i, j, self.cells)
-    }
-
     /// Hash of the exact vertex bits and origin, for known-answer tests (CON-14).
     pub fn content_hash(&self) -> u64 {
         let mut v =
@@ -348,11 +341,6 @@ impl MeshVertex {
     pub const STRIDE: u64 = (Self::FLOATS * 4) as u64;
     /// The attribute offsets (in floats) of `pos`, `coarse`, `normal`, `height` and `coarse_height`.
     pub const OFFSETS: [usize; 5] = [0, 3, 6, 9, 10];
-    /// Byte stride of a vertex in a GPU vertex buffer: the 11 floats and the climate of the vertex (temperature and precipitation,
-    /// two `f16`, [`TileMesh::gpu_climate`]) at byte offset [`MeshVertex::STRIDE`]. The stored form of a tile stays [`STRIDE`](MeshVertex::STRIDE)
-    /// bytes per vertex plus the 324-byte climate field; the GPU form carries the field's value at each vertex (ADR 0039 point 2).
-    pub const GPU_STRIDE: u64 = Self::STRIDE + 4;
-
     pub fn to_floats(&self) -> [f32; Self::FLOATS] {
         let (p, c, n) = (self.pos, self.coarse, self.normal);
         [p[0], p[1], p[2], c[0], c[1], c[2], n[0], n[1], n[2], self.height, self.coarse_height]

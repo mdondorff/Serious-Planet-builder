@@ -7,7 +7,7 @@
 //! It is not a second production path: the feature `reference-renderer` is off by default, no product crate enables it and
 //! `cargo xtask layering` fails when a non-dev dependency edge does (REND-031).
 
-use crate::terrain::{node_record_bytes, view_index, DEPTH_COMPARE, DEPTH_FORMAT, GLOBALS_BYTES, TERRAIN_SHADERS};
+use crate::terrain::{node_record_bytes, view_index, DEPTH_COMPARE, DEPTH_FORMAT, GLOBALS_BYTES, SHADER_HEAD, SHADER_TAIL};
 use crate::{read_rgba8, ExecError, GpuContext, RgbaFrame};
 use planet_frame::TerrainPlan;
 use planet_generators::mesh::{grid_indices, MeshVertex, TileMesh};
@@ -44,12 +44,10 @@ fn tile_climate(in: VsOut) -> vec2<f32> {
 
 "#;
 
-fn reference_shader() -> String {
-    let src = TERRAIN_SHADERS[0].1;
-    let vs_at = src.find("fn terrain_vertex(").expect("product shader has a vertex stage");
-    let tail_at = src.find("// Distance in pixels to the nearest integer").expect("product shader helper marker");
-    assert!(src[..vs_at].contains("@group(0) @binding(1) var<storage, read> nodes: array<Node>;"), "product node binding changed");
-    format!("{}{REFERENCE_VERTEX}{}", &src[..vs_at], &src[tail_at..])
+/// The reference renderer's WGSL module (for the validation and scan tests).
+pub fn reference_shader() -> String {
+    assert!(SHADER_HEAD.contains("@group(0) @binding(1) var<storage, read> nodes: array<Node>;"), "product node binding changed");
+    format!("{SHADER_HEAD}{REFERENCE_VERTEX}{SHADER_TAIL}")
 }
 
 /// Render the debug view of `plan` from `meshes` (one per planned tile, the key checked against the plan's) into an RGBA frame.

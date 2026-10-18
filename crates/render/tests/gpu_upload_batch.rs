@@ -27,11 +27,11 @@ fn small_pool() -> PoolConfig {
         1,
     )
     .unwrap();
-    PoolConfig { vertex_slots: 4096, fallback_slots: 3968, ..one }
+    one
 }
 
 fn renderer(ctx: &GpuContext, mode: UploadMode) -> TerrainRenderer {
-    let mut r = TerrainRenderer::with_compact_pools(ctx, SIZE, CELLS, small_pool());
+    let mut r = TerrainRenderer::with_pools(ctx, SIZE, CELLS, small_pool());
     r.set_upload_mode(mode);
     r
 }
@@ -47,7 +47,6 @@ fn tiles(n: usize) -> Vec<CompactTile> {
         .map(|k| {
             let id = TileId::new(Face(0), 6, k % 40, k / 40).unwrap();
             let t = compact_tile_field(&field, &TangentWarp, id, CELLS, R);
-            assert!(matches!(t, RenderTile::Compact(_)), "the fixture tiles are compact");
             t
         })
         .collect()
@@ -97,7 +96,7 @@ fn a_frames_compact_tiles_make_one_call_per_run_and_leave_the_pools_of_the_per_s
         assert!(calls.write_calls <= ref_calls.write_calls, "{name}");
         assert_eq!(calls.staging_bytes, ref_calls.staging_bytes, "{name}: the same bytes travel, in fewer calls");
         assert_eq!(batched.uploaded_bytes, reference.uploaded_bytes, "{name}");
-        assert_eq!(batched.format_counts(), reference.format_counts(), "{name}");
+        assert_eq!(batched.resident_tiles(), reference.resident_tiles(), "{name}");
         for (tile, slot) in t.iter().zip(&slots) {
             assert_eq!(batched.slot_of(tile.id()), Some(main_slot(*slot)), "{name}");
         }
@@ -109,7 +108,7 @@ fn a_frames_compact_tiles_make_one_call_per_run_and_leave_the_pools_of_the_per_s
         }
         // One slot, one write: the block holds the CPU tile's slot bytes (GEN-025) at the slot's place, the record inside.
         for (tile, slot) in t.iter().zip(&slots) {
-            let RenderTile::Compact(c) = tile else { panic!("compact tile expected") };
+            let c = tile;
             let bytes = c.slot_data();
             let at = (*slot % BLOCK) as usize * bytes.len();
             let block = a_new[(*slot / BLOCK) as usize].as_ref().expect("block allocated");

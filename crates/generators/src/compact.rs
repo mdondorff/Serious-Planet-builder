@@ -62,17 +62,17 @@ pub const WIDE_RELIEF_1MM_M: f64 = MAX_FINEST_STEP_M * HEIGHT_STEPS;
 pub const MAX_FINEST_STEP_M: f64 = 1.0e-3;
 
 /// Texels of a slot at `cells`: `(cells + 1)^2`.
-pub fn texel_count(cells: u32) -> usize {
+pub const fn texel_count(cells: u32) -> usize {
     ((cells + 1) * (cells + 1)) as usize
 }
 
 /// Bytes of the texels of a slot at `cells` (texels only).
-pub fn slot_texel_bytes(cells: u32) -> u64 {
+pub const fn slot_texel_bytes(cells: u32) -> u64 {
     texel_count(cells) as u64 * TEXEL_BYTES
 }
 
 /// The stride of a slot at `cells`: `456 + 8 (cells + 1)^2` (GEN-025: 2,768, 9,168 and 34,256 B at cells 16, 32 and 64).
-pub fn slot_bytes(cells: u32) -> u64 {
+pub const fn slot_bytes(cells: u32) -> u64 {
     SLOT_TEXEL_OFFSET + slot_texel_bytes(cells)
 }
 
