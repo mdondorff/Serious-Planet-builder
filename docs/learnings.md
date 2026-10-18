@@ -403,3 +403,15 @@ Scope: ADR 0021 points 2, 5, 8; streaming, frame
 | Find by key / cell grid / footprint | 260-820 / 34-91 / 0.6-3.7 ms |
 Proposed follow-up: decide ADR 0021 points 2, 5, 8 before the first authored stage; M6 build list in `spikes/edit-latency/results/results.md`.
 Obsolete when: the authored-layer change with reach and refresh is accepted.
+
+## 2026-10-18 egui fits wgpu 30 and winit 0.30; two traps: bundled fonts and dropped texture deltas (SPIKE-14)
+Scope: ADR 0015, ADR 0042, `deny.toml` (CON-27)
+| Observation | Value |
+|---|---|
+| egui, egui-wgpu, egui-winit 0.36.2 and 0.37.0 | require wgpu ^30, winit ^0.30.13; 0.35 and older require wgpu 29 |
+| `default-features = false` without `default_fonts` | no font; labels blank |
+| `default_fonts` | OFL-1.1 and Ubuntu-font-1.0 fail `cargo deny check licenses` |
+| Texture deltas of earlier passes dropped | glyph atlas never uploaded; text blank |
+| Typical panel at 1080p on the RTX | egui 0.175 ms CPU, UI pass 0.12 ms |
+Proposed follow-up: the owner decides the font licences before the editor UI change; the editor accumulates every pass's `textures_delta` until painted.
+Obsolete when: the editor UI change lands.

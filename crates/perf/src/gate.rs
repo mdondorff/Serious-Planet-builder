@@ -19,6 +19,11 @@ pub const MAX_GPU_TEMP_C: f64 = 70.0;
 pub const LOAD_WINDOW_S: u32 = 10;
 /// Largest accepted run-to-run noise `(max - min) / median`.
 pub const MAX_NOISE: f64 = 0.10;
+/// Absolute floor of the noise rule for a waited frame total (ms), ADR 0059: 2.5 % of the 20 ms p99 budget, so a smaller spread cannot
+/// move any frame verdict however small the frame is.
+pub const NOISE_FLOOR_FRAME_MS: f64 = 0.5;
+/// Absolute floor of the noise rule for a per-pass GPU figure (ms), ADR 0036 point 3 as amended by ADR 0059.
+pub const NOISE_FLOOR_PASS_MS: f64 = 0.1;
 
 /// One entry of the process table.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -186,9 +191,18 @@ impl Validity {
     }
 }
 
-/// Whether the run-to-run noise of one workload's run medians needs a retry (above [`MAX_NOISE`], or not computable).
+/// Whether the spread of run medians counts as noise (ADR 0059): above [`MAX_NOISE`] of the median AND above `floor_ms` in absolute
+/// terms. Not computable (fewer than two runs, a non-positive median) counts as noisy.
+pub fn noise_exceeds(run_medians: &[f64], floor_ms: f64) -> bool {
+    let Some(rel) = crate::run_to_run_noise(run_medians) else { return true };
+    let (lo, hi) = run_medians.iter().fold((f64::MAX, f64::MIN), |(l, h), v| (l.min(*v), h.max(*v)));
+    rel > MAX_NOISE && hi - lo > floor_ms
+}
+
+/// Whether the run-to-run noise of one workload's run medians (waited frame totals, ms) needs a retry: above [`MAX_NOISE`] and above
+/// [`NOISE_FLOOR_FRAME_MS`], or not computable.
 pub fn noise_needs_retry(run_medians: &[f64]) -> bool {
-    crate::run_to_run_noise(run_medians).is_none_or(|n| n > MAX_NOISE)
+    noise_exceeds(run_medians, NOISE_FLOOR_FRAME_MS)
 }
 
 /// Validity of a finished session: no throttling seen during measured runs, and the noise of each workload (after its
@@ -197,13 +211,18 @@ pub fn noise_needs_retry(run_medians: &[f64]) -> bool {
 pub fn validity(throttled: &[String], noisy: &[(String, f64)]) -> Validity {
     let mut reasons = Vec::new();
     for t in throttled {
-        reasons.push(format!("GPU throttling reported during '{t}'"));
+        reasons.push(format!("{THROTTLE_REASON_PREFIX}{t}'"));
     }
     for (name, n) in noisy {
-        reasons.push(format!("run-to-run noise {n:.3} on '{name}' is above {MAX_NOISE} after one retry"));
+        reasons.push(format!("{NOISE_REASON_PREFIX}{n:.3} on '{name}' is above {MAX_NOISE} and {NOISE_FLOOR_FRAME_MS} ms after one retry"));
     }
     Validity { reasons }
 }
+
+/// The start of a throttling reason of [`validity`] (the logs carry these texts; the readers recognise them by it).
+pub const THROTTLE_REASON_PREFIX: &str = "GPU throttling reported during '";
+/// The start of a noise reason of [`validity`].
+pub const NOISE_REASON_PREFIX: &str = "run-to-run noise ";
 
 // ---- platform queries (thin; the rules above take their output) ----
 
@@ -476,6 +495,17 @@ mod tests {
         assert!(!noise_needs_retry(&[10.0, 10.5, 10.2]));
         assert!(noise_needs_retry(&[10.0, 11.5, 10.2]));
         assert!(noise_needs_retry(&[]));
+        // The floor (ADR 0059): window 9's orbit view (frame totals about 1.5 ms, spread 0.233 ms = 0.149) is valid; a 10 ms frame with a
+        // 1.5 ms spread is not; both limits are strict.
+        assert!(!noise_needs_retry(&[1.708, 1.557, 1.475]));
+        assert!(noise_needs_retry(&[10.0, 11.5, 10.2]));
+        assert!(!noise_needs_retry(&[2.0, 2.5, 2.1]), "0.5 ms exactly is not above the floor");
+        assert!(noise_needs_retry(&[2.0, 2.51, 2.1]));
+        assert!(!noise_needs_retry(&[10.0, 11.0, 10.0]), "10 % exactly is not above the limit");
+        assert!(noise_needs_retry(&[10.0, 11.02, 10.0]));
+        assert!(noise_exceeds(&[0.20, 0.30, 0.21], 0.0) && !noise_exceeds(&[0.20, 0.30, 0.21], NOISE_FLOOR_PASS_MS), "0.1 ms exactly");
+        assert!(!noise_exceeds(&[0.051, 0.060, 0.052], NOISE_FLOOR_PASS_MS), "a tiny pass with 17 % noise is valid");
+        assert!(noise_exceeds(&[2.0, 2.4, 2.1], NOISE_FLOOR_PASS_MS), "a large pass over 10 % and 0.1 ms is invalid");
         assert!(validity(&[], &[]).is_valid());
         let v = validity(&["terrain/ground-1m".into()], &[("terrain/aerial".into(), 0.18)]);
         assert_eq!(v.reasons.len(), 2);

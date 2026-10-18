@@ -1,0 +1,1 @@
+- 2026-10-18 **water occlusion estimate** (coordinator session, opus-planner request): a terrain-occlusion cut for water nodes removes under 1 % of the kept nodes (not worth building); an exact dry-tile cut removes 238-372 nodes per view for about 0.1-0.2 ms (2-3 coder-days, held for the owner); numbers in `docs/perf/water-attribution.md`.

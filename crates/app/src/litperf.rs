@@ -84,6 +84,7 @@ impl LitSetup {
     pub(crate) fn plan(
         &mut self,
         world: &WorldTerrain,
+        field: &dyn planet_generators::height::HeightField,
         base: &TerrainPlan,
         time_s: f64,
         dt_s: f32,
@@ -94,8 +95,12 @@ impl LitSetup {
         plan.lit = Some(lit);
         let (look, liquids, lod) = (&self.look.water, &self.liquids, &self.lod);
         let cache = &mut self.cache;
-        let water = world.with_water(|field| {
-            plan_water(&WaterRequest { source: field, map: &TangentWarp, liquids, look, lod, time_s, view: WaterView::Lit }, cache, &plan)
+        let water = world.with_water(|wf| {
+            plan_water(
+                &WaterRequest { source: wf, map: &TangentWarp, liquids, look, lod, time_s, view: WaterView::Lit, cut: Some(field) },
+                cache,
+                &plan,
+            )
         })?;
         if let Some(w) = water {
             plan.water = Some(w.map_err(|e| e.to_string())?);
@@ -236,9 +241,9 @@ fn measure_static(
     let started = Instant::now();
     let new = crate::skeleton::upload_missing_meshes(rig.ctx, r, &plan, rig.field, rig.radius_m, rig.cells, rig.max_level)?;
     // Seed the exposure at the view (reset), then hold it: later frames adapt by one 60 Hz step each.
-    let seed = setup.plan(rig.world, &plan, WATER_T0, 0.0, true)?;
+    let seed = setup.plan(rig.world, rig.field, &plan, WATER_T0, 0.0, true)?;
     r.render(rig.ctx, &seed, true).map_err(|e| e.to_string())?;
-    let lit = setup.plan(rig.world, &plan, WATER_T0, 1.0 / 60.0, false)?;
+    let lit = setup.plan(rig.world, rig.field, &plan, WATER_T0, 1.0 / 60.0, false)?;
     let water_draws = count_water(&lit);
     writeln!(
         out,
@@ -290,13 +295,13 @@ fn measure_static(
             });
             batch_frames.extend(frames);
         }
-        // The noise rule of the accepted ADRs (10 % of the waited frame median, one retry); the proposed ADR 0036 point 3 (the
-        // absolute floor of 0.1 ms) is only reported, from the atmosphere and water medians, for the decision it waits for.
+        // The noise rule (ADR 0020, 0036 point 3, 0059): above 10 % of the median and above the absolute floor, one retry. The waited
+        // frame total decides (floor 0.5 ms); the atmosphere and water medians are reported with the per-pass floor of 0.1 ms.
         let needs_retry = !rig.smoke && planet_perf::gate::noise_needs_retry(&totals_by_run);
         for (label, medians) in [("atmosphere", &atmo_by_run), ("water", &water_by_run)] {
             if let Some((rel, abs, now, floor)) = planet_perf::lit::noise_floor_report(medians) {
                 noise_lines.push(format!(
-                    "  {path}: {label} run-to-run noise {rel:.3} ({abs:.3} ms): above the 10 % rule: {}; above the proposed ADR 0036 point 3 floor too: {} (recorded, not applied)",
+                    "  {path}: {label} run-to-run noise {rel:.3} ({abs:.3} ms): above 10 %: {}; above 10 % and the 0.1 ms floor (ADR 0059): {}",
                     if now { "yes" } else { "no" },
                     if floor { "yes" } else { "no" }
                 ));
@@ -305,9 +310,10 @@ fn measure_static(
         if needs_retry && attempt == 0 {
             writeln!(
                 out,
-                "{path}: run-to-run noise {:.3} above {}: one retry",
+                "{path}: run-to-run noise {:.3} above {} and {} ms: one retry",
                 planet_perf::run_to_run_noise(&totals_by_run).unwrap_or(f64::NAN),
-                planet_perf::gate::MAX_NOISE
+                planet_perf::gate::MAX_NOISE,
+                planet_perf::gate::NOISE_FLOOR_FRAME_MS
             )
             .map_err(err)?;
             attempt += 1;
@@ -355,7 +361,7 @@ fn measure_flight(
         let plan = planet_frame::plan_terrain_cached(&request(rig, *camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
         crate::skeleton::upload_missing_meshes(rig.ctx, r, &plan, rig.field, rig.radius_m, rig.cells, rig.max_level)?;
         let t = WATER_T0 + k as f64 / 60.0;
-        let lit = setup.plan(rig.world, &plan, t, 1.0 / 60.0, k == 0)?;
+        let lit = setup.plan(rig.world, rig.field, &plan, t, 1.0 / 60.0, k == 0)?;
         water_max = water_max.max(count_water(&lit));
         nodes_max = nodes_max.max(plan.nodes.len());
         if k == 0 {
@@ -837,7 +843,7 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
             for (k, camera) in view.cameras.iter().enumerate() {
                 let plan = planet_frame::plan_terrain_cached(&request(&rig, *camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
                 crate::skeleton::upload_missing_meshes(ctx, &mut r, &plan, rig.field, radius_m, o.cells, max_level)?;
-                let lit = setup.plan(&world, &plan, WATER_T0 + k as f64 / 60.0, 1.0 / 60.0, k == 0)?;
+                let lit = setup.plan(&world, rig.field, &plan, WATER_T0 + k as f64 / 60.0, 1.0 / 60.0, k == 0)?;
                 r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
                 let image = r.read_color(ctx);
                 image.write_png(&sub.join(format!("frame_{k:04}.png"))).map_err(|e| format!("writing frame {k} of {name}: {e}"))?;

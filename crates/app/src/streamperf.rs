@@ -181,6 +181,8 @@ struct Driver<'a> {
     next_deadline: Instant,
     /// The lit path (`--lit`, TEST-025): the look, the sea and the water plan cache, with the world they plan against.
     lit: Option<(crate::litperf::LitSetup, Arc<WorldTerrain>)>,
+    /// The terrain's height field the water plan cuts its nodes with (ATMO-020); built with the lit path, before the case's counters.
+    cut_field: Option<Box<dyn planet_generators::height::HeightField + 'a>>,
     /// Frames ticked, for the clock of the waves and the exposure's first frame.
     ticks: u64,
 }
@@ -205,6 +207,7 @@ impl Driver<'_> {
                 let before = setup.water_counters();
                 let plan = setup.plan(
                     world,
+                    self.cut_field.as_deref().ok_or("the lit path has no height field")?,
                     &frame.pipeline.draw.plan,
                     100.0 + self.ticks as f64 * FRAME_STEP_S,
                     FRAME_STEP_S as f32,
@@ -369,7 +372,8 @@ fn run_case(
             .warm_up_lit(ctx, &setup.warm_plan(first.camera, first.size, first.lod.cells)?)
             .map_err(|e| format!("warming the lit path: {e}"))?;
     }
-    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), ticks: 0 };
+    let cut_field = if lit.is_some() { Some(world.field()?) } else { None };
+    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), cut_field, ticks: 0 };
     // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022:
     // recorded only, never judged; the per-tile times of the log read against it). Nothing of the case runs yet.
     let calib_threads = gen.workers;

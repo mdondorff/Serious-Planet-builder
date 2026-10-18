@@ -13,6 +13,12 @@ const TIER_BC_REAL: &str = "binary(/^gpu_/) or binary(/^oracle_/)";
 pub const FAST_BUDGET_SECS: f64 = 20.0;
 /// Where nextest writes the run's JUnit report (`.config/nextest.toml`, `[profile.default.junit]`).
 const JUNIT: &str = "target/nextest/default/junit.xml";
+/// The JUnit report of a `--real` run: it has a profile of its own (BUILD-003).
+const JUNIT_REAL: &str = "target/nextest/real-gpu/junit.xml";
+/// The nextest profile of `test gpu --real` (`.config/nextest.toml`): the heavy binaries share a test group of two.
+const REAL_GPU_PROFILE: &str = "real-gpu";
+/// Most test processes alive at once on the discrete GPU (BUILD-003): about 20 parallel processes lost the device.
+const REAL_GPU_THREADS: usize = 4;
 /// How many of the slowest tests `test fast` names after a run.
 const SLOWEST: usize = 5;
 
@@ -136,6 +142,20 @@ fn tier_filter(sub: Option<&str>, real: bool) -> &'static str {
     }
 }
 
+/// The nextest arguments that cap a run on the discrete GPU (BUILD-003): the `real-gpu` profile and at most [`REAL_GPU_THREADS`]
+/// processes at once, unless the caller passed its own `-j` / `--test-threads`. Nothing for a run on a software adapter.
+fn real_gpu_args(real: bool, passthrough: &[&str]) -> Vec<String> {
+    if !real {
+        return Vec::new();
+    }
+    let mut v: Vec<String> = vec!["--profile".into(), REAL_GPU_PROFILE.into()];
+    let own = passthrough.iter().any(|a| *a == "-j" || a.starts_with("-j") || *a == "--test-threads" || a.starts_with("--test-threads="));
+    if !own {
+        v.extend(["--test-threads".into(), REAL_GPU_THREADS.to_string()]);
+    }
+    v
+}
+
 /// What a run of `test` measured: the test time (nextest's run, not the compile) and whether the run selected every crate.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TestTiming {
@@ -173,7 +193,7 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
     let env_strict = std::env::var("PLANET_GOLDEN_STRICT").unwrap_or_default() == "1";
     let env = [("PLANET_ADAPTER", adapter), ("PLANET_GOLDEN_STRICT", if strict || env_strict { "1" } else { "0" })];
     // A report left by an earlier run must not be taken for this one's.
-    let _ = std::fs::remove_file(root.join(JUNIT));
+    let _ = std::fs::remove_file(root.join(if real { JUNIT_REAL } else { JUNIT }));
 
     let mut cmd: Vec<String> = vec!["nextest".into(), "run".into(), "--no-tests=pass".into()];
     let mut whole = sub != Some("fast");
@@ -191,6 +211,7 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
     cmd.extend(selection.iter().cloned());
     let filter = tier_filter(sub, real);
     cmd.extend(["-E".into(), filter.into()]);
+    cmd.extend(real_gpu_args(real, &passthrough));
     cmd.extend(passthrough.iter().map(|s| s.to_string()));
     // The compile is timed apart from the tests: the budget is for the tests (BUILD-003), and an incremental compile of the
     // changed crate is the compiler's time.
@@ -902,6 +923,40 @@ mod tests {
         assert_eq!(tier_filter(None, false), TIER_AB);
         assert_eq!(tier_filter(Some("gpu"), false), TIER_C);
         assert_eq!(tier_filter(Some("gpu"), true), "binary(/^gpu_/) or binary(/^oracle_/)");
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn a_real_gpu_run_uses_the_capped_profile_and_a_software_run_is_untouched() {
+        assert!(real_gpu_args(false, &[]).is_empty() && real_gpu_args(false, &["-j", "2"]).is_empty());
+        assert_eq!(real_gpu_args(true, &[]), ["--profile", "real-gpu", "--test-threads", "4"]);
+        // The caller's own thread count wins, in every spelling nextest takes; the profile stays.
+        for own in [vec!["-j", "2"], vec!["-j2"], vec!["--test-threads", "1"], vec!["--test-threads=3"]] {
+            assert_eq!(real_gpu_args(true, &own), ["--profile", "real-gpu"], "{own:?}");
+        }
+        assert_eq!(JUNIT_REAL, "target/nextest/real-gpu/junit.xml");
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn the_real_gpu_profile_groups_existing_binaries_only_and_leaves_the_default_profile_alone() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let toml = std::fs::read_to_string(root.join(".config/nextest.toml")).unwrap();
+        let (default_part, real_part) = toml.split_once("[profile.real-gpu]").expect("the real-gpu profile exists");
+        assert!(!default_part.contains("test-group ="), "the default profile (software, WARP, CI) has no test group");
+        assert!(toml.contains("real-gpu-heavy = { max-threads ="));
+        // Every binary the group names is a test file somewhere in the workspace (a typo would silently leave a heavy binary uncapped).
+        let named: Vec<&str> = real_part.match_indices("binary(").map(|(i, _)| real_part[i + 7..].split(')').next().unwrap()).collect();
+        assert!(named.len() >= 8, "{named:?}");
+        let mut files = Vec::new();
+        for krate in std::fs::read_dir(root.join("crates")).unwrap().flatten() {
+            if let Ok(rd) = std::fs::read_dir(krate.path().join("tests")) {
+                files.extend(rd.flatten().map(|e| e.file_name().to_string_lossy().trim_end_matches(".rs").to_string()));
+            }
+        }
+        for n in named {
+            assert!(files.iter().any(|f| f == n), "{n} is not a test binary");
+        }
     }
 
     // spec: STRM-004

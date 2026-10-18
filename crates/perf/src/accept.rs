@@ -439,6 +439,7 @@ pub fn read_scene_as(f: &SceneFiles, lit: bool) -> Result<SceneRead, Vec<String>
             crate::validity::log_gpu_only_reasons(&root).first().map_or("idle GPU start", String::as_str)
         )
     });
+    facts.extend(crate::validity::session_verdict_notes(&root).into_iter().map(|n| format!("verdict derived from the logged data: {n}")));
     facts.push(format!(
         "GPU clock state {}{} ({} samples, lowest {} MHz); frame verdicts stand at any clock state, GPU time is not measured in the pipelined scenes",
         str_at(run, "gpu_clock_state").unwrap_or("unknown"),
@@ -695,9 +696,15 @@ mod tests {
     }
 
     fn files(scene: &str, frames: &[FrameRecord], f: &Fx) -> SceneFiles {
+        // A throttling reason of the fixture is backed by the logged data (accept judges throttling again from the logged masks):
+        // the samples carry the hardware-slowdown bit.
+        let mask = if f.invalid.iter().any(|r| r.starts_with(crate::gate::THROTTLE_REASON_PREFIX)) {
+            "0x0000000000000008"
+        } else {
+            "0x0000000000000000"
+        };
         let sample = |mhz: u32| {
-            crate::parse_nvidia_smi(&format!("NVIDIA GeForce RTX 3080 Ti Laptop GPU, {mhz}, 6000, 87.5, 61, P0, 0x0000000000000000"))
-                .unwrap()
+            crate::parse_nvidia_smi(&format!("NVIDIA GeForce RTX 3080 Ti Laptop GPU, {mhz}, 6000, 87.5, 61, P0, {mask}")).unwrap()
         };
         let wall: Vec<f64> = frames.iter().map(|x| x.wall_ms).collect();
         let mut counts: Vec<(String, u64)> = vec![
