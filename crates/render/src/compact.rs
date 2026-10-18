@@ -1,18 +1,19 @@
-//! The compact tile format on the GPU (REND-016, ADR 0033 points 3 and 4 as amended by ADR 0054): storage-buffer blocks of 8-byte
-//! texels (16-bit height, two 16-bit octahedral normal components, 16 spare bits), one slot per tile, a persistent record buffer
-//! indexed by slot, and the vertex stage that places a vertex from the texels of the tile and of its neighbours (the exact morph
-//! target). The renderer executes the placement; it decides nothing (CON-03).
+//! The compact tile format on the GPU (REND-016, ADR 0033 points 3 and 4 as amended by ADR 0054 and ADR 0062): storage-buffer blocks of
+//! slots (GEN-025: a 128-byte header, the 324-byte climate block, a pad word and 8-byte texels, a 32-bit height step count and two
+//! 15-bit octahedral normal components), one slot per tile and no second resource per tile, and the vertex stage that places a vertex
+//! from the texels of the tile and of its neighbours (the exact morph target). The renderer executes the placement; it decides
+//! nothing (CON-03).
 //!
 //! How a draw names its slot: the draw list groups consecutive nodes of one block into a run (`DrawBuffer::Compact`), the run's bind
 //! group (group 2) holds that block, and the node's *tile reference* (a 16-byte entry of a per-frame storage buffer indexed by the
-//! instance index, which is `first_instance` = the node index) holds the index of the slot's first texel in the block and the slot
-//! index, which selects the 128-byte record in the persistent record buffer (group 1). No binding arrays or texture-index-per-draw
-//! features are needed, so the same path runs on WARP, lavapipe and the discrete GPU. Fifteen blocks (mid share) cost at most
-//! fifteen bind-group changes along a plan; the lowest-slot-first free list keeps a settled view in one or two. A block is at most
-//! 128 MiB, the `max_storage_buffer_binding_size` every adapter offers (VIEW-001 requires it by name).
+//! instance index, which is `first_instance` = the node index) holds the index of the slot's first word in the block and the slot
+//! index. No binding arrays or texture-index-per-draw features are needed, so the same path runs on WARP, lavapipe and the discrete
+//! GPU. Fifteen blocks (mid share) cost at most fifteen bind-group changes along a plan; the lowest-slot-first free list keeps a
+//! settled view in one or two. A block is at most 128 MiB, the `max_storage_buffer_binding_size` every adapter offers (VIEW-001
+//! requires it by name).
 
 use crate::terrain::TERRAIN_SHADERS;
-use planet_generators::compact::COMPACT_RECORD_BYTES;
+use planet_generators::compact::{NORMAL_SCALE, SLOT_CLIMATE_OFFSET, SLOT_TEXEL_OFFSET};
 use planet_streaming::SlotPool;
 
 /// Bytes of one tile reference: the slot's first texel in its block, reserved, slot index, reserved.
@@ -26,21 +27,26 @@ pub fn compact_terrain_shader(cells: u32) -> String {
     let tail_at = src.find("// Distance in pixels to the nearest integer").expect("product shader helper marker");
     let head = &src[..vs_at];
     assert!(head.contains("@group(0) @binding(1) var<storage, read> nodes: array<Node>;"), "product node binding changed");
-    let vertex = COMPACT_VERTEX.replace("{CELLS}", &cells.to_string());
+    let vertex = COMPACT_VERTEX
+        .replace("{CELLS}", &cells.to_string())
+        .replace("{CLIMATE_WORD}", &(SLOT_CLIMATE_OFFSET / 4).to_string())
+        .replace("{TEXEL_WORD}", &(SLOT_TEXEL_OFFSET / 4).to_string())
+        .replace("{NORMAL_SCALE}", &format!("{NORMAL_SCALE:?}"));
     format!("{head}{vertex}{}", &src[tail_at..])
 }
 
 const COMPACT_VERTEX: &str = r#"
-// Compact tiles (REND-016). Group 1: the persistent record per slot (words: nine control points as 27 f32, hr_min, hr_step,
-// h_origin, skirt depth, then the flip flag) and the per-frame tile reference of each node (first texel, slot). Group 2: the block.
-struct TileRec {
-    w: array<u32, 32>,
-};
-@group(1) @binding(0) var<storage, read> tile_records: array<TileRec>;
-@group(1) @binding(1) var<storage, read> tile_refs: array<vec4<u32>>;
-@group(2) @binding(0) var<storage, read> block: array<vec2<u32>>;
+// Compact tiles (REND-016, GEN-025). Group 1: the per-frame tile reference of each node (first word of its slot in the block, reserved,
+// slot index, reserved). Group 2: the block, read as words: the slot's header (nine control points as 27 f32, hr_min, hr_step,
+// h_origin, skirt depth, the flags word), the climate block (81 words) and the texels (two words each).
+@group(1) @binding(0) var<storage, read> tile_refs: array<vec4<u32>>;
+@group(2) @binding(0) var<storage, read> block: array<u32>;
 
 const CELLS: i32 = {CELLS};
+// Word offsets inside the slot (GEN-025: climate block at byte 128, texels at byte 456).
+const CLIMATE_WORD: u32 = {CLIMATE_WORD}u;
+const TEXEL_WORD: u32 = {TEXEL_WORD}u;
+const NORMAL_SCALE: f32 = {NORMAL_SCALE};
 
 var<private> c0: vec3<f32>;
 var<private> c1: vec3<f32>;
@@ -56,30 +62,33 @@ var<private> hr_step: f32;
 var<private> h_origin: f32;
 var<private> skirt_depth: f32;
 var<private> flip: bool;
-// Index of the slot's first texel in the block (texels of 8 bytes, slot after slot, row-major).
-var<private> origin: i32;
+// Index of the slot's first word in the block.
+var<private> origin: u32;
 
-fn rf(r: ptr<function, TileRec>, k: i32) -> f32 {
-    return bitcast<f32>((*r).w[k]);
+fn hf(k: u32) -> f32 {
+    return bitcast<f32>(block[origin + k]);
 }
 
-fn load_tile(slot: u32, first_texel: u32) {
-    var r = tile_records[slot];
-    c0 = vec3<f32>(rf(&r, 0), rf(&r, 1), rf(&r, 2));
-    c1 = vec3<f32>(rf(&r, 3), rf(&r, 4), rf(&r, 5));
-    c2 = vec3<f32>(rf(&r, 6), rf(&r, 7), rf(&r, 8));
-    c3 = vec3<f32>(rf(&r, 9), rf(&r, 10), rf(&r, 11));
-    c4 = vec3<f32>(rf(&r, 12), rf(&r, 13), rf(&r, 14));
-    c5 = vec3<f32>(rf(&r, 15), rf(&r, 16), rf(&r, 17));
-    c6 = vec3<f32>(rf(&r, 18), rf(&r, 19), rf(&r, 20));
-    c7 = vec3<f32>(rf(&r, 21), rf(&r, 22), rf(&r, 23));
-    c8 = vec3<f32>(rf(&r, 24), rf(&r, 25), rf(&r, 26));
-    hr_min = rf(&r, 27);
-    hr_step = rf(&r, 28);
-    h_origin = rf(&r, 29);
-    skirt_depth = rf(&r, 30);
-    flip = r.w[31] != 0u;
-    origin = i32(first_texel);
+fn hv(k: u32) -> vec3<f32> {
+    return vec3<f32>(hf(k), hf(k + 1u), hf(k + 2u));
+}
+
+fn load_tile(first_word: u32) {
+    origin = first_word;
+    c0 = hv(0u);
+    c1 = hv(3u);
+    c2 = hv(6u);
+    c3 = hv(9u);
+    c4 = hv(12u);
+    c5 = hv(15u);
+    c6 = hv(18u);
+    c7 = hv(21u);
+    c8 = hv(24u);
+    hr_min = hf(27u);
+    hr_step = hf(28u);
+    h_origin = hf(29u);
+    skirt_depth = hf(30u);
+    flip = (block[origin + 31u] & 1u) != 0u;
 }
 
 fn basis(t: f32) -> vec3<f32> {
@@ -113,13 +122,21 @@ fn base_normal(u: f32, v: f32) -> vec3<f32> {
     return normalize(cross(pu, pv)) * select(1.0, -1.0, flip);
 }
 
-fn texel(i: i32, j: i32) -> vec4<u32> {
-    let t = block[u32(origin + j * (CELLS + 1) + i)];
-    return vec4<u32>(t.x & 0xffffu, t.x >> 16u, t.y & 0xffffu, t.y >> 16u);
+// Texel (i, j): word 0 the 32-bit height step count, word 1 the two 15-bit octahedral normal components (bits 0-14 and 15-29).
+fn texel(i: i32, j: i32) -> vec2<u32> {
+    let k = origin + TEXEL_WORD + u32(j * (CELLS + 1) + i) * 2u;
+    return vec2<u32>(block[k], block[k + 1u]);
 }
 
-fn rel_height(t: vec4<u32>) -> f32 {
+fn rel_height(t: vec2<u32>) -> f32 {
     return hr_min + f32(t.x) * hr_step;
+}
+
+fn texel_normal(t: vec2<u32>) -> vec3<f32> {
+    let w = bitcast<i32>(t.y);
+    let x = max(f32(extractBits(w, 0u, 15u)) / NORMAL_SCALE, -1.0);
+    let y = max(f32(extractBits(w, 15u, 15u)) / NORMAL_SCALE, -1.0);
+    return oct_decode(vec2<f32>(x, y));
 }
 
 // Position (tile-local) of lattice vertex (i, j) with its tile-relative height `hr`, and the height itself in w.
@@ -141,7 +158,7 @@ fn oct_decode(e: vec2<f32>) -> vec3<f32> {
 fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
     let node = nodes[inst];
     let tref = tile_refs[inst];
-    load_tile(tref.z, tref.x);
+    load_tile(tref.x);
     let w = CELLS + 1;
     let idx = i32(vi);
     var i = 0;
@@ -194,7 +211,7 @@ fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
     let ch = h_origin + coarse.w;
     var out: VsOut;
     out.pos = g.view_proj * vec4<f32>(p, 1.0);
-    out.normal = oct_decode(unpack2x16snorm(own_t.y | (own_t.z << 16u)));
+    out.normal = texel_normal(own_t);
     out.height = mix(h, ch, m);
     out.height_fine = h;
     out.morph = m;
@@ -209,21 +226,17 @@ fn vs(@builtin(instance_index) inst: u32, @builtin(vertex_index) vi: u32) -> VsO
     return terrain_vertex(inst, vi);
 }
 
-// The climate texel `idx` (row-major over the 9 x 9 texture) of the tile whose first texel is `base`: the fourth channel of the slot's
-// texel `idx` holds the temperature and of texel `81 + idx` the precipitation, as f16 bits (GEN-021).
-fn climate_bits(base: i32, idx: i32) -> u32 {
-    return block[u32(base + idx)].y >> 16u;
-}
-
-fn climate_texel(base: i32, idx: i32) -> vec2<f32> {
-    return unpack2x16float(climate_bits(base, idx) | (climate_bits(base, 81 + idx) << 16u));
+// The climate texel `idx` (row-major over the 9 x 9 texture) of the tile whose slot starts at word `base`: one word of the slot's
+// climate block, the temperature as f16 in the low half and the precipitation in the high half (GEN-021, GEN-025).
+fn climate_texel(base: u32, idx: i32) -> vec2<f32> {
+    return unpack2x16float(block[base + CLIMATE_WORD + u32(idx)]);
 }
 
 // The climate at a fragment of a compact tile (presentation data): the bilinear interpolation of the tile's 9 x 9 texture at the
 // fragment's tile coordinates (`aux`, interpolated from the vertices). The f16 decode is exact.
 fn tile_climate(in: VsOut) -> vec2<f32> {
     let tref = tile_refs[in.node_index];
-    let base = i32(tref.x);
+    let base = tref.x;
     let x = clamp(in.aux.x, 0.0, 1.0) * 8.0;
     let y = clamp(in.aux.y, 0.0, 1.0) * 8.0;
     let a = min(i32(x), 7);
@@ -240,10 +253,7 @@ fn tile_climate(in: VsOut) -> vec2<f32> {
 
 "#;
 
-/// The record buffer holds one [`COMPACT_RECORD_BYTES`] record per slot of the main pool.
-const _: () = assert!(COMPACT_RECORD_BYTES == 128);
-
-/// One block of the compact main pool: a storage buffer of `block_slots` slots of texels (8 bytes each, slot after slot) and the bind
+/// One block of the compact main pool: a storage buffer of `block_slots` slots (GEN-025, slot after slot) and the bind
 /// group that names it for a run (group 2).
 pub(crate) struct Block {
     pub(crate) buffer: wgpu::Buffer,
@@ -253,12 +263,10 @@ pub(crate) struct Block {
 /// GPU state of the compact format.
 pub(crate) struct CompactGpu {
     pub(crate) pipeline: wgpu::RenderPipeline,
-    /// Group 1: slot records and the frame's tile references.
+    /// Group 1: the frame's tile references.
     pub(crate) bgl_frame: wgpu::BindGroupLayout,
     /// Group 2: one block.
     pub(crate) bgl_block: wgpu::BindGroupLayout,
-    /// One record per slot of the main pool, allocated with the renderer (a fixed item of the share).
-    pub(crate) records: wgpu::Buffer,
     /// The blocks, allocated on first use.
     pub(crate) blocks: Vec<Option<Block>>,
     /// Bytes of one block: `block_slots * slot_bytes`.

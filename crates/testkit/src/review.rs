@@ -379,6 +379,61 @@ pub fn driver_gate(adapter: &str, recorded: Option<&str>, candidate: Option<&str
     }
 }
 
+/// The `Bound tests:` section of a proposal: `- <golden>: <test>, <test>` per line until a blank line or heading, the tests that prove
+/// the golden's declared bound (ADR 0035), as `test_name`, `binary::test_name` or `crate::binary::test_name`. A line without a golden or
+/// without a test does not count.
+pub fn bound_test_declarations(proposal: &str) -> BTreeMap<String, Vec<String>> {
+    let mut out = BTreeMap::new();
+    let mut inside = false;
+    for line in proposal.lines() {
+        let t = line.trim();
+        if t.trim_start_matches('#').trim().eq_ignore_ascii_case("bound tests:") {
+            inside = true;
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        if t.is_empty() || t.starts_with('#') {
+            break;
+        }
+        let Some((name, tests)) = t.trim_start_matches(['-', '*']).trim().split_once(':') else { continue };
+        let tests: Vec<String> = tests.split(',').map(|x| x.trim().trim_matches('`').to_string()).filter(|x| !x.is_empty()).collect();
+        let name = name.trim().trim_matches('`');
+        if !name.is_empty() && !tests.is_empty() {
+            out.insert(name.to_string(), tests);
+        }
+    }
+    out
+}
+
+/// ADR 0061 point 3: a bless of a change (`AUTO-E`, `AUTO-L`) needs the golden's declared bound tests green in the `--tests` JUnit reports
+/// of the same run. Any other verdict (rounding noise blesses no change, an escalation stays one) is returned as it is. A golden with
+/// no `Bound tests:` entry, a run without a `--tests` report, and a test that is missing, failed, skipped or retried escalate,
+/// naming what is missing.
+pub fn enforce_bound_tests(
+    verdict: Verdict,
+    name: &str,
+    declared: Option<&Vec<String>>,
+    outcomes: &TestOutcomes,
+    tests_given: bool,
+) -> Verdict {
+    if !matches!(verdict, Verdict::AutoExplained | Verdict::AutoLook(_)) {
+        return verdict;
+    }
+    let esc = |why: String| Verdict::Escalate(format!("{name}: {why} (ADR 0061 point 3)"));
+    let Some(tests) = declared else {
+        return esc("no bound tests are declared for it under 'Bound tests:' in the change's proposal".into());
+    };
+    if !tests_given {
+        return esc("no --tests report was given, so no bound test is known to have run".into());
+    }
+    match outcomes.all_green(tests) {
+        Ok(()) => verdict,
+        Err(why) => esc(why),
+    }
+}
+
 /// Golden names listed under `Expected golden changes:` in a proposal (`- <name>: <reason>` lines until the next heading
 /// or blank line). A line without a reason does not count.
 pub fn declared_goldens(proposal: &str) -> Vec<String> {
@@ -598,6 +653,65 @@ mod tests {
         assert!(out.all_green(&w(&["tone_ok_after_retry"])).unwrap_err().contains("not green"));
         assert!(out.all_green(&w(&["never_ran"])).unwrap_err().contains("did not run"));
         assert!(TestOutcomes::default().all_green(&w(&["tone_ok"])).is_err(), "no report is no evidence");
+    }
+
+    fn outcomes(green: &[&str], red: &[&str]) -> TestOutcomes {
+        let mut lines = vec!["<testsuites><testsuite name=\"s\">".to_string()];
+        for t in green {
+            lines.push(format!("<testcase name=\"{t}\" classname=\"planet-render::oracle_x\" time=\"0.1\"/>"));
+        }
+        for t in red {
+            lines.push(format!("<testcase name=\"{t}\" classname=\"planet-render::oracle_x\" time=\"0.1\">"));
+            lines.push("<failure message=\"boom\"/>".to_string());
+            lines.push("</testcase>".to_string());
+        }
+        lines.push("</testsuite></testsuites>".to_string());
+        let mut out = TestOutcomes::default();
+        out.add_junit(&lines.join("\n"));
+        out
+    }
+
+    // spec: TEST-022
+    #[test]
+    fn a_blessed_change_needs_its_declared_bound_tests_green_in_the_same_run() {
+        let tests = vec!["bound_a".to_string(), "planet-render::oracle_x::bound_b".to_string()];
+        let why = |v: Verdict| match v {
+            Verdict::Escalate(r) => r,
+            other => panic!("expected an escalation, got {other:?}"),
+        };
+        for blessed in [Verdict::AutoExplained, Verdict::AutoLook("look".into())] {
+            // The same declared change: green tests bless it...
+            let ok = outcomes(&["bound_a", "bound_b"], &[]);
+            assert_eq!(enforce_bound_tests(blessed.clone(), "g", Some(&tests), &ok, true), blessed);
+            // ...a missing test, a failing test, a missing declaration and a missing report escalate, naming what is wrong.
+            let missing = outcomes(&["bound_a"], &[]);
+            let r = why(enforce_bound_tests(blessed.clone(), "g", Some(&tests), &missing, true));
+            assert!(r.contains("bound_b") && r.contains("did not run") && r.contains("ADR 0061"), "{r}");
+            let failing = outcomes(&["bound_a"], &["bound_b"]);
+            let r = why(enforce_bound_tests(blessed.clone(), "g", Some(&tests), &failing, true));
+            assert!(r.contains("bound_b") && r.contains("not green"), "{r}");
+            let r = why(enforce_bound_tests(blessed.clone(), "g", None, &ok, true));
+            assert!(r.contains("no bound tests are declared") && r.contains("'Bound tests:'"), "{r}");
+            let r = why(enforce_bound_tests(blessed.clone(), "g", Some(&tests), &TestOutcomes::default(), false));
+            assert!(r.contains("no --tests report"), "{r}");
+        }
+        // Rounding noise blesses no change and an escalation stays one, whatever the tests say.
+        let none = TestOutcomes::default();
+        assert_eq!(enforce_bound_tests(Verdict::AutoRounding, "g", None, &none, false), Verdict::AutoRounding);
+        let e = Verdict::Escalate("first golden".into());
+        assert_eq!(enforce_bound_tests(e.clone(), "g", None, &none, false), e);
+    }
+
+    // spec: TEST-022
+    #[test]
+    fn the_bound_tests_section_parses_strictly() {
+        let p =
+            "## What\n- x\n\nBound tests:\n- lit_a: t1, `planet-render::b::t2`\n- lit_b:\n- : t3\n- sky_c: t4\n\n## After\n- lit_d: t5\n";
+        let d = bound_test_declarations(p);
+        assert_eq!(d.len(), 2, "an entry needs a golden and a test: {d:?}");
+        assert_eq!(d["lit_a"], ["t1", "planet-render::b::t2"]);
+        assert_eq!(d["sky_c"], ["t4"]);
+        assert!(bound_test_declarations("no section").is_empty());
     }
 
     // spec: TEST-016

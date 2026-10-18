@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use planet_cache::meshpack::{
     decode_render_tile, encode_render_tile, missing_tiles, payload_form, prefill, prefill_tile_count, prefill_tiles, render_key,
-    MeshCodecError, PrefillError, RenderForm, TileSpec, KIND_MESH, MAX_PREFILL_LEVELS,
+    MeshCodecError, PrefillError, RenderForm, TileSpec, KIND_MESH, MAX_PREFILL_LEVELS, PAYLOAD_VERSION,
 };
 use planet_cache::pack::{PackWriter, Record, TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_core::cube::TangentWarp;
@@ -208,24 +208,23 @@ fn a_prefill_never_stores_a_finest_level_tile_or_a_depth_beyond_the_limit_and_an
     assert!(TileSpec::new(&field, R, 32, MAX_LEVEL, RenderForm::Compact).lookup(&store, t).is_none(), "other cells");
 }
 
-// spec: STRM-021, GEN-021
+// spec: STRM-021, GEN-021, GEN-025
 #[test]
-fn a_pack_pre_filled_under_mesh_version_6_is_all_misses_and_the_prefill_writes_it_again() {
-    use planet_cache::key::{cache_key, mesh_key_inputs, PARAM_CLIMATE_VERSION, PARAM_MESH_VERSION};
+fn a_pack_pre_filled_under_mesh_version_7_is_all_misses_and_the_prefill_writes_it_again() {
+    use planet_cache::key::{cache_key, mesh_key_inputs, PARAM_MESH_VERSION};
     use planet_cache::meshpack::{store_params, PARAM_RENDER_FORM};
     let field = Reference(5);
     let spec = TileSpec::new(&field, R, CELLS, MAX_LEVEL, RenderForm::Compact);
     let d = Dir::new("stale");
-    // The records of an older build: the version-6 key (no climate word) and a version-1 payload.
+    // The records of an older build: the version-7 key and a version-2 payload.
     let tiles = prefill_tiles(1);
     let mut w = PackWriter::open(d.path(), store_params(), DEFAULT_MAX_PACK_BYTES).unwrap();
     for t in &tiles {
         let mut inputs = mesh_key_inputs(&field, &TangentWarp, *t, CELLS, R);
-        inputs.output_params.insert(PARAM_MESH_VERSION, 6u32.to_le_bytes().to_vec());
-        inputs.output_params.remove(&PARAM_CLIMATE_VERSION);
+        inputs.output_params.insert(PARAM_MESH_VERSION, 7u32.to_le_bytes().to_vec());
         inputs.output_params.insert(PARAM_RENDER_FORM, vec![RenderForm::of_level(t.level(), RenderForm::Compact) as u8]);
         let mut payload = encode_render_tile(&spec.generate(*t)).unwrap();
-        payload[0] = 1;
+        payload[0] = 2;
         let current = spec.record(&spec.generate(*t)).unwrap();
         w.append(&Record { key: cache_key(&inputs), payload, ..current }).unwrap();
     }
@@ -233,16 +232,43 @@ fn a_pack_pre_filled_under_mesh_version_6_is_all_misses_and_the_prefill_writes_i
     let store = TileStore::open(d.path(), store_params()).unwrap();
     assert_eq!(missing_tiles(&store, &spec, 1).len(), tiles.len(), "every old record is a miss: its key is another key");
     assert!(tiles.iter().all(|t| spec.lookup(&store, *t).is_none()));
-    // Even under the current key a version-1 payload is refused, not misread.
+    // Even under the current key a version-1 or version-2 payload is refused naming the version, not misread.
     let t = tiles[0];
-    let mut old = spec.record(&spec.generate(t)).unwrap();
-    old.payload[0] = 1;
-    assert_eq!(decode_render_tile(t, &old.payload).unwrap_err(), MeshCodecError::Version(1));
+    for old_version in [1u8, 2] {
+        let mut old = spec.record(&spec.generate(t)).unwrap();
+        old.payload[0] = old_version;
+        assert_eq!(decode_render_tile(t, &old.payload).unwrap_err(), MeshCodecError::Version(old_version));
+    }
     drop(store);
     let again = prefill(d.path(), &spec, 1, 2, DEFAULT_MAX_PACK_BYTES, &progress).unwrap();
     assert_eq!((again.present, again.written), (0, tiles.len()), "the pre-fill writes every tile again");
     let store = TileStore::open(d.path(), store_params()).unwrap();
     assert!(tiles.iter().all(|t| spec.lookup(&store, *t).unwrap() == spec.generate(*t)));
+}
+
+// spec: STRM-021, GEN-025
+#[test]
+fn the_compact_payload_is_the_slot_and_a_damaged_slot_is_refused() {
+    use planet_generators::compact::{slot_bytes, RenderTile};
+    let field = Reference(7);
+    let spec = TileSpec::new(&field, R, CELLS, MAX_LEVEL, RenderForm::Compact);
+    let id = TileId::new(Face(3), 4, 1, 2).unwrap();
+    let tile = spec.generate(id);
+    let RenderTile::Compact(c) = &tile else { panic!("level 4 is compact") };
+    assert_eq!(PAYLOAD_VERSION, 3);
+    // The payload's raw bytes end in the slot, byte for byte (GEN-025).
+    let payload = encode_render_tile(&tile).unwrap();
+    let raw_len = u32::from_le_bytes(payload[6..10].try_into().unwrap()) as usize;
+    let raw = lz4_flex::decompress(&payload[10..], raw_len).unwrap();
+    assert_eq!(&raw[raw.len() - slot_bytes(CELLS) as usize..], &c.slot_data()[..]);
+    // A slot with a reserved bit set is refused naming the slot, not decoded into a tile.
+    let mut bad = raw.clone();
+    let flags_at = raw.len() - slot_bytes(CELLS) as usize + 124;
+    bad[flags_at] = 7;
+    let mut p = payload[..10].to_vec();
+    p.extend_from_slice(&lz4_flex::compress(&bad));
+    let e = decode_render_tile(id, &p).unwrap_err();
+    assert!(e.to_string().contains("slot"), "{e}");
 }
 
 // spec: GEN-019, STRM-021

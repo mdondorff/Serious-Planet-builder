@@ -265,7 +265,7 @@ fn hex(b: [u8; 16]) -> String {
 
 const KNOWN_BASE: &str = "b00fa2b4b0f9accc87be74b4dd9d40ca";
 const KNOWN_HEIGHT: &str = "340480159ae2ca791db08d1cae1232ce";
-const KNOWN_MESH: &str = "f077d99860608b088e1caf6509ca9d89"; // mesh version 7 (the climate version word is an output parameter); moved with GLOBAL_VERSION 4 (the ocean channel; 3 was the latitude axis), which the word folds in
+const KNOWN_MESH: &str = "c5e1668239aa1514b39bc992dd7c9318"; // mesh version 8 (the slot of GEN-025; was f077d99860608b088e1caf6509ca9d89 under 7: the climate version word is an output parameter); moved with GLOBAL_VERSION 4 (the ocean channel; 3 was the latitude axis), which the word folds in
 const KNOWN_NODE: &str = "dd934e9e858a828bb73c45e8a4eb4d45";
 const KNOWN_BODY: &str = "91f0cebc78907779e2f87196650d468e";
 const KNOWN_EMPTY_QUERY: &str = "a97668a9d9614a3f4a73f2fceae97219";

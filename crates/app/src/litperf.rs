@@ -1,6 +1,6 @@
 //! The M5 lit perf scenes (TEST-025, M5 item 8): the lit path (atmosphere, water, exposure, tone map) at 1440p with a GPU timestamp for
 //! every pass, over the views of the viewer (`planet_frame::litscenes`: ground 1 m, aerial 20 km, the coast at 2 km and 3 m, orbit) and
-//! the two coastal flights, with `water.shore_filter` 1 (the look's default) and 0 for inspection. `lit-formats` runs four of the views
+//! the two coastal flights, with `water.shore_filter` at the look default (0) and 1 for inspection. `lit-formats` runs four of the views
 //! in the vertex and the compact tile format back to back and logs the per-pass GPU ratio.
 //!
 //! The scenes follow `skeleton::perf_terrain`: the readiness gate, the warm-up to the clock floor (ADR 0034, ADR 0036), runs of waited

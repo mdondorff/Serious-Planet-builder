@@ -2,10 +2,10 @@
 //! numbers `planet_streaming::PoolConfig` counts in. GPU-free; the renderer allocates exactly this.
 //!
 //! The slot is the vertex-format tile at the given `cells`: `(cells + 1)^2` grid vertices plus `4 (cells + 1)` skirt vertices,
-//! 44 bytes each (53,724 B at cells 32). ADR 0033's slot counts (231,090 at the mid share) are for the compact tile; the
+//! 44 bytes each (53,724 B at cells 32). ADR 0033's slot counts (231,090 before the slot of 9,168 B, 219,585 now, at the mid share) are for the compact tile; the
 //! vertex format has fewer, and the share is a byte ceiling, so the slot count follows from the format.
 
-use planet_generators::compact::{slot_texel_bytes, COMPACT_RECORD_BYTES};
+use planet_generators::compact::slot_bytes;
 use planet_generators::mesh::{grid_indices, vertex_count, MeshVertex};
 use planet_streaming::{PoolConfig, Tier};
 
@@ -48,14 +48,14 @@ pub const COMPACT_BLOCK_BYTES: u64 = 128 << 20;
 /// fixes the pool at 512 slots, levels 0-2 need at most 126 of them).
 pub const FALLBACK_SLOTS: u32 = 256;
 
-/// Slots of a block of at most `block_bytes` for tiles of `cells`: `block_bytes / slot_texel_bytes` (15,406 at cells 32 in 128 MiB).
+/// Slots of a block of at most `block_bytes` for tiles of `cells`: `block_bytes / slot_bytes` (GEN-025; 14,639 at cells 32 in 128 MiB).
 pub fn block_slots_in(block_bytes: u64, cells: u32) -> u32 {
-    u32::try_from(block_bytes / slot_texel_bytes(cells)).unwrap_or(u32::MAX)
+    u32::try_from(block_bytes / slot_bytes(cells)).unwrap_or(u32::MAX)
 }
 
 /// The compact pools of a terrain share for blocks of `block_slots` slots (ADR 0054): a block is one storage buffer of
-/// `block_slots * slot_texel_bytes` bytes (the texels of 8 B, slot after slot), a 128 B record per slot in one buffer, and the vertex
-/// pool (53,724 B slots at cells 32) for levels 0-2 and the fallback tiles.
+/// `block_slots * slot_bytes` bytes (the slots of GEN-025, header, climate block and texels, slot after slot; no record buffer), and
+/// the vertex pool (53,724 B slots at cells 32) for levels 0-2 and the fallback tiles.
 pub fn compact_format_pool_with(share_bytes: u64, cells: u32, block_slots: u32, frames_in_flight: u64) -> Result<PoolConfig, String> {
     if block_slots == 0 {
         return Err(format!("a block of 0 slots holds no tile of {cells} cells"));
@@ -64,9 +64,8 @@ pub fn compact_format_pool_with(share_bytes: u64, cells: u32, block_slots: u32, 
     let index_bytes = grid_indices(cells).len() as u64 * 4;
     PoolConfig::fit_share_with(
         share_bytes,
-        slot_texel_bytes(cells),
+        slot_bytes(cells),
         block_slots,
-        COMPACT_RECORD_BYTES,
         FALLBACK_SLOTS,
         vertex_slot,
         index_bytes,
@@ -80,8 +79,8 @@ pub fn compact_format_pool(share_bytes: u64, cells: u32, frames_in_flight: u64) 
     compact_format_pool_with(share_bytes, cells, block_slots_in(COMPACT_BLOCK_BYTES, cells), frames_in_flight)
 }
 
-/// The compact pools of a hardware tier's terrain share: 15 blocks = 231,090 slots at the mid share, 23 = 354,338 at the high
-/// share at cells 32 (ADR 0033 point 3).
+/// The compact pools of a hardware tier's terrain share: 15 blocks = 219,585 slots at the mid share, 23 = 336,697 at the high
+/// share at cells 32 (ADR 0033 point 3 as amended by ADR 0062 and 0063).
 pub fn tier_compact_pool(tier: Tier, cells: u32, frames_in_flight: u64) -> Result<PoolConfig, String> {
     compact_format_pool(tier.terrain_share_bytes(), cells, frames_in_flight)
 }

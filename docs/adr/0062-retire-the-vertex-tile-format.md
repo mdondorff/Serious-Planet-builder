@@ -1,5 +1,5 @@
 # 0062 Retire the vertex tile format from rendering
-Status: accepted (owner, 2026-10-18, opus-planner session; M5 gate decision 5). Amends ADR 0033 point 3 (slot layout and share table) and ADR 0054.
+Status: accepted (owner, 2026-10-18, opus-planner session; M5 gate decision 5); point 4 amended by 0063; the 1 mm relief limit is 16.7 km per tile (GEN-019, 2^24-1 height steps), not about 30 km. Amends ADR 0033 point 3 (slot layout and share table) and ADR 0054.
 Date: 2026-10-18
 Source: SPIKE-12 (`spikes/vertex-retirement/results/results.md`, PR #233); M5 report section 5
 

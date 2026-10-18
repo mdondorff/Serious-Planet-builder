@@ -13,8 +13,8 @@
 //! nothing escalates and 3 otherwise (`cargo xtask golden-review` then reports a failure); 2 on bad arguments.
 
 use planet_testkit::review::{
-    classify, classify_look_change, debug_views_unchanged, declared_goldens, driver_gate, look_declarations, look_diff_ok, parse_classes,
-    Change, GoldenClass, LookEvidence, Observation, TestOutcomes, Verdict,
+    bound_test_declarations, classify, classify_look_change, debug_views_unchanged, declared_goldens, driver_gate, enforce_bound_tests,
+    look_declarations, look_diff_ok, parse_classes, Change, GoldenClass, LookEvidence, Observation, TestOutcomes, Verdict,
 };
 use planet_testkit::{read_png, repo_root, write_png, Image};
 use std::collections::{BTreeMap, BTreeSet};
@@ -223,6 +223,7 @@ fn main() {
         .map(|p| std::fs::read_to_string(p).unwrap_or_else(|e| panic!("reading {}: {e}", p.display())))
         .unwrap_or_default();
     let declared: BTreeSet<String> = declared_goldens(&proposal_text).into_iter().collect();
+    let bound = bound_test_declarations(&proposal_text);
     let mut outcomes = TestOutcomes::default();
     for t in &tests {
         let p = root.join(t);
@@ -295,6 +296,8 @@ fn main() {
                     .and_then(|l| classify_look_change(adapter, name, &seen, class, is_declared, l))
                     .unwrap_or_else(|| classify(adapter, name, &seen, class, is_declared)),
             };
+            // ADR 0061 point 3: a blessed change needs its declared bound tests green in the --tests reports of this run.
+            let verdict = enforce_bound_tests(verdict, name, bound.get(name), &outcomes, !tests.is_empty());
             let (px, delta) = match seen.get(adapter) {
                 Some(Observation::Changed(c)) => (c.pixels.to_string(), c.max_delta.to_string()),
                 _ => ("-".into(), "-".into()),

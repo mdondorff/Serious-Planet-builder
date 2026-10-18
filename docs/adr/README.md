@@ -42,13 +42,13 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0030 | [Erosion strategy: local filter in M3, a coarse global stream-power stage after it](0030-erosion-strategy-hybrid.md) | accepted |  |
 | 0031 | [Residency set and request priorities](0031-residency-set-and-request-priorities.md) | accepted |  |
 | 0032 | [Streaming test definitions: dive, teleport, mouse look](0032-streaming-test-definitions.md) | accepted |  |
-| 0033 | [Memory budgets and terrain's VRAM share](0033-memory-budgets-and-terrain-vram-share.md) | accepted | point 3 amended by 0054 and 0062 |
+| 0033 | [Memory budgets and terrain's VRAM share](0033-memory-budgets-and-terrain-vram-share.md) | accepted | point 3 amended by 0054; points 3-5 by 0062 and 0063 |
 | 0034 | [GPU clock state in performance measurements](0034-gpu-clock-state-in-perf-measurements.md) | accepted with a change |  |
 | 0035 | [CPU/GPU equality applies to fields, not to presentation data](0035-cpu-gpu-equality-applies-to-fields.md) | accepted |  |
 | 0036 | [Perf validity at full GPU load: power cap and clock band](0036-perf-validity-at-full-gpu-load.md) | accepted in part | point 3 (GPU noise floor): first M5 perf window with GPU verdicts |
 | 0037 | [M5: new goldens under policy, look reviewed at the gate](0037-m5-new-goldens-and-look-review.md) | accepted | point 1 superseded by 0061 |
 | 0038 | [HDR target, exposure and tone mapping](0038-hdr-exposure-and-tone-mapping.md) | accepted | accepted when the M5 queue starts |
-| 0039 | [Sun lighting and terrain base shading](0039-sun-lighting-and-terrain-base-shading.md) | accepted | accepted when the M5 queue starts |
+| 0039 | [Sun lighting and terrain base shading](0039-sun-lighting-and-terrain-base-shading.md) | accepted | climate storage amended by 0062 |
 | 0040 | [Atmosphere: Hillaire 2020 LUTs, CPU reference, and CON-11](0040-atmosphere-model-and-cpu-reference.md) | accepted |  |
 | 0041 | [Water: level field, ocean connectivity, Gerstner waves, shoreline](0041-water-level-field-ocean-and-shoreline.md) | accepted |  |
 | 0042 | [M5 frame structure, look data and the viewer window](0042-m5-frame-structure-and-viewer-window.md) | accepted | accepted when the M5 queue starts |
@@ -58,7 +58,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0046 | [Generation workers run below normal priority](0046-generation-workers-run-below-normal-priority.md) | accepted |  |
 | 0047 | [Adapter gate: a discrete GPU, chosen before the device exists](0047-adapter-gate.md) | accepted |  |
 | 0048 | [Frame-target share (amends ADR 0033's remainder) and the lit path's readings of ADR 0038 and ADR 0042](0048-frame-target-share-and-lit-path-readings.md) | accepted |  |
-| 0049 | [The climate field's bound and storage (amends ADR 0039 point 2), and the look file's version rule](0049-climate-field-bound-and-storage.md) | accepted |  |
+| 0049 | [The climate field's bound and storage (amends ADR 0039 point 2), and the look file's version rule](0049-climate-field-bound-and-storage.md) | accepted | climate storage amended by 0062 |
 | 0050 | [Atmosphere: implementation readings of ADR 0040](0050-atmosphere-implementation-readings.md) | accepted |  |
 | 0051 | [Ocean channel, liquid table and the water-level field: implementation readings of ADR 0041](0051-ocean-channel-liquid-table-and-water-field-readings.md) | accepted |  |
 | 0052 | [First M5 goldens: an edge tolerance for the cross-adapter debug-view check](0052-m5-debug-view-edge-tolerance.md) | superseded by 0061 |  |
@@ -71,4 +71,5 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0059 | [Noise floors: 0.1 ms per pass, 0.5 ms per frame total](0059-noise-floors.md) | accepted | amends 0036 point 3; for the owner at the M5 gate |
 | 0060 | [A power-capped P0 clock is valid; coast-3m water budget 2.2 ms](0060-power-capped-clock-and-coast-3m-water.md) | accepted (owner) | amends 0036 point 2 and 0057 point 2 |
 | 0061 | [Goldens after M5: the M5 window closes, goldens are per-adapter regression checks](0061-goldens-after-m5.md) | accepted (owner) | supersedes 0037 point 1 and 0052; amends 0017 |
-| 0062 | [Retire the vertex tile format from rendering](0062-retire-the-vertex-tile-format.md) | accepted (owner) | first work of M6 |
+| 0062 | [Retire the vertex tile format from rendering](0062-retire-the-vertex-tile-format.md) | accepted (owner) | first work of M6; point 4 amended by 0063 |
+| 0063 | [Slot v2 without the 5x5 reserve: 9,168 B](0063-slot-v2-size-correction.md) | accepted | corrects 0062 point 4; for the owner at the M5 gate |
