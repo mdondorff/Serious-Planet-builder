@@ -11,7 +11,7 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 |---|---|---|---|
 | SPIKE-08 | Ocean connectivity at 16384 | closed 2026-10-16 | `spikes/ocean-connectivity/results/` |
 | SPIKE-09 | Atmosphere f32 forms | closed | `spikes/atmosphere-f32/results/` |
-| SPIKE-11 | Mouse look plumbing | open (owner's local check) | `spikes/mouse-look/results/` |
+| SPIKE-11 | Mouse look plumbing | closed 2026-10-18 (recommendation: raw events, Locked then Confined) | `spikes/mouse-look/results/` |
 | SPIKE-15 | Edit-to-test build time | closed 2026-10-18 | `spikes/build-speed/results/` |
 | SPIKE-14 | egui in the frame | closed 2026-10-18 | `spikes/egui/results/` |
 | SPIKE-13 | Edit-to-visible latency | closed 2026-10-18 | `spikes/edit-latency/results/` |
@@ -100,7 +100,7 @@ Result (2026-10-17, sonnet-spikes; report `spikes/vertex-retirement/results/resu
 Recommendation: retire the vertex format from rendering with the level-3 floor and the wide texel for all tiles, in early M6 (not before item 8's perf window); do not adopt the 5x5 base. The owner decides retire or keep, the visible orbit change and the 5.9 % larger slot at the gate; the architect writes the ADR 0033 amendment.
 
 ## SPIKE-11 Mouse look plumbing
-Status: open (waiting for the owner's local check; the remote part is dropped, owner, 2026-10-17)
+Status: closed
 Opened: 2026-10-16
 Question: Which mouse input path gives usable mouse look on Windows with `winit` (raw `DeviceEvent::MouseMotion` against `CursorMoved` with recentring), which cursor grab works (`Confined` plus hidden cursor plus recentring, since `Locked` is unsupported there), what happens at focus loss and alt-tab, with DPI scaling and high-poll-rate mice, and can sensitivity be independent of the frame rate?
 Why it matters: M5 item 1b (free-camera-mouse) builds mouse look on the pose function as this spike recommends; an earlier prototype in another app failed at mouse look (owner).
@@ -109,6 +109,10 @@ Success criteria: a recommendation (event source, grab mode, fallback) from the 
 Fallback if it fails: keyboard look only (item 1b's fallback), reported.
 Code location: spikes/mouse-look/ (throwaway; branch `spike/spike-11-mouse-look`, never merged). Run from that folder: `target/release/mouse-look.exe`; checklist `CHECKLIST.md`; traces land in `target/traces/`; `mouse-look replay FILE` replays a trace.
 Interim result (2026-10-17): built and unit-tested (13 tests): the draft pose function (yaw and pitch relative to the local vertical, heading by parallel transport along the great circle, pitch clamped at 89 degrees; no roll after 20,000 random inputs, reversible, split-invariant, continuous across the pole), the input adapter (raw, cursor and auto sources, lazy recentring with echo handling, release on focus loss, mouse deltas never multiplied by dt: turn is counts x sensitivity at 1, 7, 60 and 500 frames), and the trace format `spike11-trace-v1` (JSON Lines, documented in `src/trace.rs`) with a headless replay that shares the live window's code and reproduces a recorded final pose bit for bit. The owner's remote session (Android touch screen over Chrome Remote Desktop, no mouse) did not capture the mouse: no button event reached the window; 402 raw motion events did arrive. Out of scope by the owner's decision. The same trace was checked for keyboard movement against heading and pitch: 4,542 movement frames, 0 sign disagreements; what can look wrong is documented in `spikes/mouse-look/results/remote-session-analysis.md` (W follows the horizontal heading, no ground clamp so Q goes below the surface, speed scales with altitude on a 1 km planet). Still open: the local check (raw against cursor against auto, grab modes, focus loss, DPI, high-rate mice) and the recommendation.
+Closed: 2026-10-18
+Result: the owner's local check (RTX, Windows 11, scale 1.0): raw mouse motion works and feels right, independent of frame rate, no problem with fast spins, focus loss or poles; cursor mode with recentring does not work (86 % of recentres failed in one session, 14 cursor events against 938 raw while captured); `Locked` was accepted, so the Confined fallback was not needed here; 1000 Hz+ mice and DPI scaling not tested. See `spikes/mouse-look/results/results.md`.
+Recommendation: raw `DeviceEvent::MouseMotion` as counts x sensitivity (never times dt); request `Locked`, fall back to `Confined`, cursor hidden, release on Esc and focus loss; no recentring; the spike's pose function plus the altitude clamp and speed scaling of the remote-session analysis; arrow-key look as fallback. For M5 item 1b / the editor camera.
+
 
 ## SPIKE-08 Ocean connectivity at 16384
 Status: closed
