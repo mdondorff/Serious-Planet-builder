@@ -3,6 +3,7 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to `docs/log.md`. When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. The `housekeeping` skill cleans the rest at milestone boundaries. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`.
 
 ## Waiting for the owner
+- **compact-slot-v2 (#302) goldens: blessed by the owner (2026-10-18)**: lit_aerial20km_ev15, lit_aerial20km_albedo_ev15, sky_aerial20km_ev15, sky_ground1m_sunset_ev11 (WARP only), water_class_coast_aerial2km, water_class_lava_lake (WARP and llvmpipe). Auto-blessed under policy: terrain_aerial200km_height, terrain_ground1m_depth, terrain_cube_corner_normals. Tracking entry: the RTX known-answer hashes in `gpu_compact_blocks.rs` and `gpu_water.rs` were removed (stale under MESH_VERSION 8) and need a `test gpu --real` re-record.
 - **M5 gate passed (owner, 2026-10-18): GO for M6.** Look approved ("shore rendering looking reasonable"); hardware criteria PASS (window 10, ADR 0060); report `docs/milestones/M5-report.md`.
 - **Open from the gate:**
   - `shore_filter` default (decision 2): the planner recommends 0; the owner's choice is pending (0 moves the water goldens and needs one more `/bless`; 1 changes nothing).

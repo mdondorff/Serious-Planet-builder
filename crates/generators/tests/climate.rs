@@ -175,16 +175,19 @@ fn the_analytic_climate_is_a_pure_function_of_seed_and_tile() {
 
 // spec: GEN-021
 #[test]
-fn the_texture_round_trips_through_its_bytes_and_the_spare_channel() {
+fn the_texture_round_trips_through_its_bytes_and_the_slot_words() {
     let a = analytic_climate(SEED, &TangentWarp, id(1, 6, 10, 20));
     assert_eq!(ClimateTexture::from_bytes(&a.to_bytes()), a);
     assert_eq!(a.to_bytes().len(), CLIMATE_BYTES);
     assert_eq!(CLIMATE_BYTES, 324);
-    let mut texels = vec![[1u16, 2, 3, 0]; 289];
-    a.write_texels(&mut texels);
-    assert_eq!(ClimateTexture::read_texels(&texels), a);
-    assert!(texels.iter().all(|t| t[..3] == [1, 2, 3]), "only the fourth channel is written");
-    assert!(texels[2 * CLIMATE_TEXELS..].iter().all(|t| t[3] == 0), "the rest of the spare channel stays zero");
+    // The slot's climate block (GEN-025): 81 words, temperature in the low half, precipitation in the high half.
+    let words = a.to_words();
+    assert_eq!(words.len(), CLIMATE_TEXELS);
+    assert_eq!(ClimateTexture::from_words(&words), a);
+    for (k, w) in words.iter().enumerate() {
+        assert_eq!((w & 0xffff) as u16, a.temperature[k]);
+        assert_eq!((w >> 16) as u16, a.precipitation[k]);
+    }
 }
 
 // spec: GEN-021, GEN-019
@@ -196,8 +199,11 @@ fn a_compact_tile_carries_the_climate_of_its_field_and_a_vertex_tile_the_same() 
     let m = tile_mesh_field(&f, &TangentWarp, t, 32, R);
     assert_eq!(c.climate(), f.climate(&TangentWarp, t));
     assert_eq!(m.climate, c.climate(), "a tile has one climate whichever format it is in");
-    // The texels hold 8,712 bytes whatever the climate: the bytes of a compact tile did not change.
+    // The texels hold 8,712 bytes whatever the climate; the climate block is 324 bytes of the slot (GEN-025).
     assert_eq!(c.texel_data().len(), 8_712);
+    let slot = c.slot_data();
+    assert_eq!(slot[128..452], c.climate().to_bytes(), "the slot's climate block is the pack's 324 bytes");
+    assert!(c.texels.iter().all(|t| t[1] >> 30 == 0), "no texel carries climate");
 }
 
 struct Other<'a>(&'a Reference);

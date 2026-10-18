@@ -69,7 +69,7 @@ impl TileSink for Sink {
     }
 
     fn upload_bytes(&self, _tile: &RenderTile) -> u64 {
-        8_840
+        planet_generators::compact::slot_bytes(32)
     }
 
     fn forget(&mut self, _tile: TileId) {}

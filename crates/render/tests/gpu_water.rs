@@ -56,7 +56,6 @@ fn vertex_pool() -> PoolConfig {
         index_bytes: grid_indices(CELLS).len() as u64 * 4,
         node_record_bytes: 4096 * 512,
         frames_in_flight: 1,
-        slot_record_bytes: 0,
         fallback_slots: 0,
     }
 }
@@ -64,7 +63,7 @@ fn vertex_pool() -> PoolConfig {
 fn compact_pool() -> PoolConfig {
     let block_slots = 40 * 40;
     let one = compact_format_pool_with(
-        (128 << 20) + 4 * u64::from(block_slots) * planet_generators::compact::slot_texel_bytes(CELLS),
+        (128 << 20) + 4 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
         CELLS,
         block_slots,
         1,
@@ -270,9 +269,9 @@ fn the_lit_water_and_atmosphere_frames_over_compact_blocks_are_the_recorded_pixe
     // The hash of the HDR and colour targets of five frames of the aerial coast (no water, the atmosphere, the class view, the lit
     // water without and with the atmosphere), as the atlas textures drew them (recorded by the differential of ADR 0054's change,
     // byte-identical to the buffer blocks on WARP and on the RTX; re-recorded by the pixel-footprint fade of the waves, ADR 0056). A driver not in the table prints its hash and records nothing.
-    const KNOWN: [(&str, u64); 2] = [
-        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0x0a28_e95f_1bd9_f086),
-        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '591.86'", 0x7cf6_ffb0_1398_e4e3),
+    const KNOWN: [(&str, u64); 1] = [
+        // RTX: re-record with `test gpu --real` (MESH_VERSION 8 moved it)
+        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0x7ce8_c407_f5f2_5a27),
     ];
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let field = Reference(1);

@@ -57,9 +57,9 @@ fn mirror_error(field: &dyn HeightField, cells: u32, tiles: &[TileId]) -> (f64, 
             let d = dist(a.pos, b.pos).max(dist(a.coarse, b.coarse));
             // The biquadratic base surface errs by about 0.018 theta^2 of the tile edge, plus f32 rounding of the tile-local numbers,
             // one half height step, and the f32 error of the base normal (about 2e-7 rad) times the tile's relief.
-            let bound = edge * (0.03 * theta * theta + 1e-6) + 0.51 * f64::from(ct.hr_step) + 5e-7 * 65535.0 * f64::from(ct.hr_step);
+            let bound = edge * (0.03 * theta * theta + 1e-6) + 0.51 * f64::from(ct.hr_step) + 5e-7 * ct.relief_m;
             pos = pos.max(d / bound);
-            let slack = 0.51 * f64::from(ct.hr_step) + 2.4e-7 * f64::from(a.height.abs().max(1.0));
+            let slack = 0.51 * f64::from(ct.hr_step) + 2.4e-7 * f64::from(a.height.abs().max(1.0)) + 1.2e-7 * ct.relief_m;
             height = height.max(f64::from((a.height - b.height).abs().max((a.coarse_height - b.coarse_height).abs())) - slack);
             normal = normal.max(angle_deg(a.normal, b.normal));
         }
