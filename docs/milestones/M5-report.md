@@ -1,12 +1,22 @@
-# M5 Atmosphere & ocean: report (draft of 2026-10-18)
+# M5 Atmosphere & ocean: report (2026-10-18)
 
-Drafted by sonnet-crusader, completed by opus-planner. Streaming rows: window 8 (`perf m5`, main 42508bf, 2026-10-18 00:29-00:50) and one dive re-run (main 211bf99, 01:46). Held views and flights: window 9 (`perf lit`, `perf lit-formats`, main 501ad15, 04:13-04:35), re-judged under ADR 0059 by `accept M5` deriving verdicts from the logged data. Generated report: `sonnet-m4/docs/milestones/M5-report.md` (not committed).
+Drafted by sonnet-crusader, completed by opus-planner. Streaming rows: window 8 (`perf m5`, main 42508bf, 2026-10-18 00:29-00:50) and one dive re-run (main 211bf99, 01:46). Held views and flights: window 10 (`perf lit`, `perf lit-formats`, main a4479cb; `docs/perf/window-10.md`), judged by `accept M5` with ADR 0060 (#291), verdicts derived from the logged data. Sections 1 and 2 below show window 9's figures; window 10's differ by at most 0.03 ms (table below).
 
-## Verdict (opus-planner): GO for M6 recommended, with one open row for the owner
+## Verdict (opus-planner): hardware criteria PASS; GO for M6 recommended
 
-- Hardware criteria: **INCOMPLETE on one row**: coast-3m water 2.175 ms against 2 ms, read at P0 1,290 MHz (software power cap, below the 1,400 MHz floor; ADR 0057: over budget below the floor is inconclusive). Every other gated row passes.
-- The automated steps pass.
-- The open row is closed by the owner's decisions 11 and 12 (section 5): the clock rule under the power cap, and the coast-3m water budget.
+- `cargo xtask accept M5` (window 10 logs, ADR 0060): **PASS** on every gated row; every automated step green on a quiet run (tiers A+B 81.6 s, tier C software 117 of 117, smokes, `test fast` 24.1 s whole workspace, reported).
+- The owner's decisions 11 and 12 are taken (ADR 0060, owner, 2026-10-18): a P0 view limited only by the power cap is GPU-valid; coast-3m water budget 2.2 ms.
+- Open for the gate: decisions 1, 2, 13 (look review, `shore_filter`, `/bless` of #275) and 3-8, 10, 14. Decisions 9 and 15 (at the laptop) are postponed by the owner and do not block M6.
+
+| Window 10 view | terrain <= 8 | atmosphere <= 1 | water | p99 <= 20 |
+|---|---|---|---|---|
+| ground-1m | 1.079 | 0.209 | not in view | 3.54 |
+| aerial-20km | 0.788 | 0.235 | 0.112 / 2 | 2.94 |
+| coast-2km | 1.058 | 0.258 | 1.863 / 2 | 5.69 |
+| coast-3m | 1.350 | 0.236 | 2.170 / 2.2 | 6.58 |
+| orbit | 0.052 | 0.679 | 0.168 / 2 | 2.94 |
+
+Known gap: the exact dry-tile cut (#286) does not yet take effect in the lit scene path (window 10's node counts equal window 9's); sonnet-m4 is fixing it. It is margin, not a criterion.
 
 ## 1. Exit criteria
 
