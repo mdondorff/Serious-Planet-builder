@@ -239,14 +239,14 @@ fn the_streamer_alone_requests_cancels_and_evicts_exactly_as_before() {
 fn the_managed_loop_requests_cancels_evicts_and_uploads_exactly_as_before() {
     let budgeted = UploadBudget { tile_bytes_per_frame: 40_000, node_records_in_cap: false };
     let digests = [
-        loop_script(1_000_000, true, 8_840, budgeted, 12),
+        loop_script(1_000_000, true, 9_168, budgeted, 12),
         loop_script(500, true, 0, UploadBudget::default(), 24),
-        loop_script(500, false, 8_840, budgeted, 7),
+        loop_script(500, false, 9_168, budgeted, 7),
     ];
     eprintln!("loop digests: {digests:?}");
     assert_eq!(digests, LOOP_DIGESTS);
 }
 
 const STREAMER_DIGESTS: [u64; 3] = [15300534013828900970, 689671829587726302, 5616887668897300662];
-// Re-recorded with MESH_VERSION 7: the vertex tiles the loop uploads are 58,608 B (the climate of each vertex, ADR 0039 point 2) and the keys name the climate version. The streamer digests above did not move.
-const LOOP_DIGESTS: [u64; 3] = [8683852565277776977, 7816254472082388215, 2721754417281521069];
+// Re-recorded with the compact slot of 9,168 B (the sink counts compact tiles at 9,168 B, GEN-025; the first and third digests moved, the second uses no budget). Before: MESH_VERSION 7: the vertex tiles the loop uploads are 58,608 B (the climate of each vertex, ADR 0039 point 2) and the keys name the climate version. The streamer digests above did not move.
+const LOOP_DIGESTS: [u64; 3] = [15828054011086783679, 7816254472082388215, 411128933421171783];

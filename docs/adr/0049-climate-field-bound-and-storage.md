@@ -1,5 +1,5 @@
 # 0049 The climate field's bound and storage (amends ADR 0039 point 2), and the look file's version rule
-Status: accepted (opus-planner, 2026-10-17, under the owner's delegation; ADR 0039, which it amends, was accepted under the same delegation)
+Status: accepted (opus-planner, 2026-10-17, under the owner's delegation; ADR 0039, which it amends, was accepted under the same delegation); climate storage amended by 0062 (climate block in the slot)
 Date: 2026-10-16
 Source: ADR 0039 point 2; ADR 0027; ADR 0033 points 2-4; ADR 0035; constitution CON-07, CON-14; the planner's review of the look file change (#203)
 

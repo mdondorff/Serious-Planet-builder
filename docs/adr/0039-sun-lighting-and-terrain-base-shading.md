@@ -1,5 +1,5 @@
 # 0039 Sun lighting and terrain base shading
-Status: accepted (opus-planner, 2026-10-16, under the owner's delegation of 2026-10-12, as the M5 queue starts; sketch by opus-planner, 2026-10-15, for M5, revised after the spec-guardian review; decided under the owner's delegation of 2026-10-12 once the M5 queue starts)
+Status: accepted (opus-planner, 2026-10-16, under the owner's delegation of 2026-10-12, as the M5 queue starts; sketch by opus-planner, 2026-10-15, for M5, revised after the spec-guardian review; decided under the owner's delegation of 2026-10-12 once the M5 queue starts); climate storage amended by 0062 (climate block in the slot)
 Date: 2026-10-15
 Source: architecture report M5 row (ground, limb and sunset goldens need a lit surface); `docs/status.md` M5 section; ADR 0026 (bake channels; point 5, reading the bake, still open); ADR 0033 (compact tile); ADR 0035, ADR 0038, ADR 0040, ADR 0041; constitution CON-02, CON-07, CON-11, CON-14
 

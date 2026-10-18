@@ -9,7 +9,7 @@ use crate::{read_rgba8, ExecError, GpuContext, RgbaFrame};
 use planet_frame::draw::{buffer_of, build_draw_list_placed, DrawBuffer, DRAW_RECORD_BYTES};
 use planet_frame::pool::tier_pool;
 use planet_frame::{TerrainPlan, TerrainView};
-use planet_generators::compact::{CompactTile, RenderTile, COMPACT_RECORD_BYTES};
+use planet_generators::compact::{CompactTile, RenderTile};
 use planet_generators::mesh::{grid_indices, MeshVertex, TileMesh};
 use planet_streaming::{PoolConfig, PoolKind, SlotPool, SlotPools, SlotRef, Tier};
 use std::collections::HashMap;
@@ -481,25 +481,8 @@ fn dedup_places<T: Copy, K: PartialEq>(v: &mut Vec<T>, key: impl Fn(&T) -> K) ->
     kept
 }
 
-/// A compact tile's texels as the block holds them (`CompactTile::texel_data`'s bytes, converted without the byte-wise iterator).
-fn texel_bytes(texels: &[[u16; 4]]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(texels.len() * 8);
-    texel_bytes_into(&mut out, texels);
-    out
-}
-
-/// [`texel_bytes`] appended to `out`.
-fn texel_bytes_into(out: &mut Vec<u8>, texels: &[[u16; 4]]) {
-    out.reserve(texels.len() * 8);
-    for t in texels {
-        for c in t {
-            out.extend_from_slice(&c.to_le_bytes());
-        }
-    }
-}
-
 /// How a frame's tile writes reach the queue (REND-016, STRM-006): `PerSlot` is the reference (one `write_buffer` or
-/// `write_texture` call per compact slot, plus one for its record), `Batched` collects the frame's compact tiles and writes each
+/// `write_texture` call per compact slot), `Batched` collects the frame's compact tiles and writes each
 /// run of adjacent slots with one call. Both leave identical pool contents.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum UploadMode {
@@ -557,33 +540,22 @@ enum BufTarget {
 struct BatchScratch {
     /// Whether a batch is being collected (`upload_tiles_at`).
     open: bool,
-    /// The converted texels of the batch's compact tiles, one after the other, `tile_bytes` each.
+    /// The slots of the batch's compact tiles (GEN-025), one after the other, `tile_bytes` each.
     texels: Vec<u8>,
-    /// Per compact tile in collection order: its block, its slot within the block and the offset of its texels in `texels`.
+    /// Per compact tile in collection order: its block, its slot within the block and the offset of its slot bytes in `texels`.
     tiles: Vec<(usize, u32, usize)>,
-    /// Per compact tile in collection order: its slot index and its record.
-    records: Vec<(u32, [u8; COMPACT_RECORD_BYTES as usize])>,
-    /// The texel writes sorted by place (the index of the write in `tiles` last, so that the last write of a place is the last
-    /// of its equals), and the record writes likewise.
+    /// The slot writes sorted by place (the index of the write in `tiles` last, so that the last write of a place is the last
+    /// of its equals).
     texel_order: Vec<(usize, u32, u32)>,
-    record_order: Vec<(u32, u32)>,
-    /// The rectangle of one run of texels, and the bytes of one run of records.
+    /// The bytes of one run of adjacent slots.
     run: Vec<u8>,
-    run_records: Vec<u8>,
     /// The bytes of a vertex-format tile (converted, then written at once).
     vertex: Vec<u8>,
 }
 
 impl BatchScratch {
     fn capacity(&self) -> usize {
-        self.texels.capacity()
-            + self.tiles.capacity()
-            + self.records.capacity()
-            + self.texel_order.capacity()
-            + self.record_order.capacity()
-            + self.run.capacity()
-            + self.run_records.capacity()
-            + self.vertex.capacity()
+        self.texels.capacity() + self.tiles.capacity() + self.texel_order.capacity() + self.run.capacity() + self.vertex.capacity()
     }
 }
 
@@ -767,21 +739,21 @@ impl TerrainRenderer {
         Self::build(ctx, size, cells, pool, false)
     }
 
-    /// A renderer whose main pool is the compact format (REND-016, ADR 0033): storage-buffer blocks of texels with a record per slot,
-    /// the small vertex pool for levels 0-2 and for the CON-13 fallback tiles. `pool` comes from `planet_frame::pool::compact_format_pool`
-    /// (or a small one for tests): its slot is the texels of one tile and its block is one storage buffer.
+    /// A renderer whose main pool is the compact format (REND-016, ADR 0033): storage-buffer blocks of slots (header, climate block and
+    /// texels, GEN-025), the small vertex pool for levels 0-2 and for the CON-13 fallback tiles. `pool` comes from
+    /// `planet_frame::pool::compact_format_pool` (or a small one for tests): its slot is the slot of one tile and its block is one
+    /// storage buffer.
     pub fn with_compact_pools(ctx: &GpuContext, size: (u32, u32), cells: u32, pool: PoolConfig) -> Self {
         assert_eq!(
             pool.slot_bytes,
-            planet_generators::compact::slot_texel_bytes(cells),
-            "the pool slot is not the compact tile of {cells} cells"
+            planet_generators::compact::slot_bytes(cells),
+            "the pool slot is not the compact slot of {cells} cells"
         );
         assert_eq!(
             pool.vertex_slot_bytes,
             planet_frame::pool::vertex_slot_bytes(cells),
             "the vertex pool slot is not the vertex-format tile"
         );
-        assert_eq!(pool.slot_record_bytes, COMPACT_RECORD_BYTES, "the pool slot record is not the compact record");
         assert!(
             pool.fallback_slots > 0 && pool.fallback_slots < pool.vertex_slots,
             "the compact renderer needs a fallback region in its vertex pool"
@@ -798,7 +770,7 @@ impl TerrainRenderer {
         }
     }
 
-    /// A compact-format renderer with the mid tier terrain share (15 blocks, 231,090 slots at cells 32).
+    /// A compact-format renderer with the mid tier terrain share (15 blocks, 219,585 slots at cells 32).
     pub fn new_compact(ctx: &GpuContext, size: (u32, u32), cells: u32) -> Self {
         Self::with_frames_in_flight_compact(ctx, size, cells, 1)
     }
@@ -969,7 +941,7 @@ impl TerrainRenderer {
         }
     }
 
-    /// The compact format pipeline, record buffer and (empty) block table.
+    /// The compact format pipeline and (empty) block table.
     fn make_compact(
         ctx: &GpuContext,
         bgl0: &wgpu::BindGroupLayout,
@@ -989,10 +961,10 @@ impl TerrainRenderer {
             label: Some("terrain-compact"),
             source: wgpu::ShaderSource::Wgsl(compact_terrain_shader(cells).into()),
         });
-        // The tile references (binding 1) and the block are read by the fragment stage too (the climate of the tile, ADR 0039).
+        // The tile references and the block are read by the fragment stage too (the climate block of the slot, ADR 0039, GEN-025).
         let storage = |binding| wgpu::BindGroupLayoutEntry {
             binding,
-            visibility: if binding == 1 { wgpu::ShaderStages::VERTEX_FRAGMENT } else { wgpu::ShaderStages::VERTEX },
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
             ty: wgpu::BindingType::Buffer {
                 ty: wgpu::BufferBindingType::Storage { read_only: true },
                 has_dynamic_offset: false,
@@ -1000,10 +972,8 @@ impl TerrainRenderer {
             },
             count: None,
         };
-        let bgl_frame = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("compact-frame-bgl"),
-            entries: &[storage(0), storage(1)],
-        });
+        let bgl_frame =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("compact-frame-bgl"), entries: &[storage(0)] });
         let bgl_block = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("compact-block-bgl"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -1044,17 +1014,10 @@ impl TerrainRenderer {
             multiview_mask: None,
             cache: None,
         });
-        let records = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("compact-slot-records"),
-            size: pool.slot_record_total_bytes().max(COMPACT_RECORD_BYTES),
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        });
         CompactGpu {
             pipeline,
             bgl_frame,
             bgl_block,
-            records,
             blocks: Vec::new(),
             block_bytes: pool.slot_bytes * u64::from(pool.block_slots),
             fallback: SlotPool::new(pool.fallback_slots, pool.frames_in_flight),
@@ -1099,10 +1062,7 @@ impl TerrainRenderer {
                     device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("compact-frame-bind"),
                         layout: &c.bgl_frame,
-                        entries: &[
-                            wgpu::BindGroupEntry { binding: 0, resource: c.records.as_entire_binding() },
-                            wgpu::BindGroupEntry { binding: 1, resource: refs.as_entire_binding() },
-                        ],
+                        entries: &[wgpu::BindGroupEntry { binding: 0, resource: refs.as_entire_binding() }],
                     })
                 });
                 FrameSet { globals, nodes, args, bind, refs, frame_bind, water_nodes, water_globals }
@@ -1703,24 +1663,24 @@ impl TerrainRenderer {
         let c = self.compact.as_mut().expect("compact mode");
         let (block, local) = ((slot.index / block_slots) as usize, slot.index % block_slots);
         let block_buffer = &c.block(&ctx.device, block, &mut self.init).buffer;
-        let n = tile.texels.len() as u64 * 8;
-        self.uploaded_bytes += n + COMPACT_RECORD_BYTES;
+        let n = tile.resident_bytes();
+        debug_assert_eq!(n, self.pool.slot_bytes, "a compact tile fills its slot exactly");
+        self.uploaded_bytes += n;
         if self.scratch.open {
-            // Held back: converted straight into the batch's texel buffer, written by the flush.
+            // Held back: converted straight into the batch's slot buffer, written by the flush.
             let at = self.scratch.texels.len();
-            texel_bytes_into(&mut self.scratch.texels, &tile.texels);
-            debug_assert_eq!(&self.scratch.texels[at..], &tile.texel_data()[..]);
+            tile.write_slot_into(&mut self.scratch.texels);
+            debug_assert_eq!(&self.scratch.texels[at..], &tile.slot_data()[..]);
             self.scratch.tiles.push((block, local, at));
-            self.scratch.records.push((slot.index, tile.record_bytes()));
             return;
         }
-        let bytes = texel_bytes(&tile.texels);
-        debug_assert_eq!(bytes, tile.texel_data());
-        self.upload_counters.write_calls += 2;
-        self.upload_counters.staging_bytes += bytes.len() as u64 + COMPACT_RECORD_BYTES;
+        // One slot, one write (REND-016): header, climate block and texels are one contiguous range of the block.
+        let mut bytes = Vec::with_capacity(n as usize);
+        tile.write_slot_into(&mut bytes);
+        debug_assert_eq!(bytes, tile.slot_data());
+        self.upload_counters.write_calls += 1;
+        self.upload_counters.staging_bytes += bytes.len() as u64;
         ctx.queue.write_buffer(block_buffer, u64::from(local) * n, &bytes);
-        let records = &self.compact.as_ref().expect("compact mode").records;
-        ctx.queue.write_buffer(records, u64::from(slot.index) * COMPACT_RECORD_BYTES, &tile.record_bytes());
     }
 
     fn write_buf_now(&mut self, ctx: &GpuContext, target: BufTarget, offset: u64, bytes: &[u8]) {
@@ -1744,11 +1704,11 @@ impl TerrainRenderer {
         self.upload_mode
     }
 
-    /// The bytes of the compact pools as the GPU holds them (REND-016): every allocated block (`block_slots` slots of texels of 8 bytes,
-    /// slot after slot, `None` for a block not yet allocated) and the slot records. A test aid: it submits copies and waits. Empty for a
-    /// renderer without the compact format.
-    pub fn read_compact_pools(&self, ctx: &GpuContext) -> (Vec<Option<Vec<u8>>>, Vec<u8>) {
-        let Some(c) = &self.compact else { return (Vec::new(), Vec::new()) };
+    /// The bytes of the compact pools as the GPU holds them (REND-016): every allocated block (`block_slots` slots of GEN-025, slot
+    /// after slot, `None` for a block not yet allocated). A test aid: it submits copies and waits. Empty for a renderer without the
+    /// compact format.
+    pub fn read_compact_pools(&self, ctx: &GpuContext) -> Vec<Option<Vec<u8>>> {
+        let Some(c) = &self.compact else { return Vec::new() };
         let read_buffer = |buffer: &wgpu::Buffer, size: u64| -> Vec<u8> {
             let readback = ctx.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("pool-readback"),
@@ -1765,9 +1725,7 @@ impl TerrainRenderer {
             readback.unmap();
             data
         };
-        let blocks = c.blocks.iter().map(|b| b.as_ref().map(|b| read_buffer(&b.buffer, b.buffer.size()))).collect();
-        let records = read_buffer(&c.records, c.records.size());
-        (blocks, records)
+        c.blocks.iter().map(|b| b.as_ref().map(|b| read_buffer(&b.buffer, b.buffer.size()))).collect()
     }
 
     /// Queue calls and staging bytes of the tile writes so far.
@@ -1782,8 +1740,8 @@ impl TerrainRenderer {
 
     /// Place a frame's tiles, in order, each in the slot the manager chose ([`upload_tile_at`](TerrainRenderer::upload_tile_at) for
     /// each). In [`UploadMode::Batched`] the writes of compact tiles are held back and issued after the last tile: a slot written
-    /// twice keeps the last tile, and each run of adjacent slots is one call (a run of adjacent slots of one block for texels, a run of
-    /// slot indices for records), so a frame makes one call per run instead of two per slot. Vertex-format tiles are written at
+    /// twice keeps the last tile, and each run of adjacent slots of one block is one call (header, climate block and texels, GEN-025),
+    /// so a frame makes one call per run instead of one per slot. Vertex-format tiles are written at
     /// once, one call each (their 53,724 bytes dominate the call). The bookkeeping of every tile is as with single uploads. On an
     /// error the tiles placed before it are written and the error returned.
     pub fn upload_tiles_at(&mut self, ctx: &GpuContext, tiles: &[(&RenderTile, SlotRef)]) -> Result<(), ExecError> {
@@ -1822,17 +1780,13 @@ impl TerrainRenderer {
         }
         let sc = &mut self.scratch;
         sc.open = false;
-        let w = self.cells + 1;
-        let tile_bytes = 8 * (w * w) as usize;
+        let tile_bytes = planet_generators::compact::slot_bytes(self.cells) as usize;
         sc.texel_order.clear();
         sc.texel_order.extend(sc.tiles.iter().enumerate().map(|(i, &(block, local, _))| (block, local, i as u32)));
         sc.texel_order.sort_unstable();
-        sc.record_order.clear();
-        sc.record_order.extend(sc.records.iter().enumerate().map(|(i, &(index, _))| (index, i as u32)));
-        sc.record_order.sort_unstable();
         // Of several writes to one place the last (the greatest index, sorted last) is kept.
         let places = dedup_places(&mut sc.texel_order, |o| (o.0, o.1));
-        // Compact texels: runs of adjacent slots of one block, one contiguous range of the buffer.
+        // Compact slots: runs of adjacent slots of one block, one contiguous range of the buffer.
         if places > 0 {
             let mut k = 0;
             while k < places {
@@ -1857,29 +1811,8 @@ impl TerrainRenderer {
                 k += n;
             }
         }
-        // Slot records: runs of adjacent slot indices (across blocks: one buffer).
-        let places = dedup_places(&mut sc.record_order, |o| o.0);
-        let mut k = 0;
-        while k < places {
-            let mut n = 1;
-            while k + n < places && sc.record_order[k + n].0 == sc.record_order[k].0 + n as u32 {
-                n += 1;
-            }
-            sc.run_records.clear();
-            for t in 0..n {
-                sc.run_records.extend_from_slice(&sc.records[sc.record_order[k + t].1 as usize].1);
-            }
-            let buffer = &self.compact.as_ref().expect("compact mode").records;
-            let trw = std::time::Instant::now();
-            ctx.queue.write_buffer(buffer, u64::from(sc.record_order[k].0) * COMPACT_RECORD_BYTES, &sc.run_records);
-            self.upload_times.queue += trw.elapsed();
-            self.upload_counters.write_calls += 1;
-            self.upload_counters.staging_bytes += sc.run_records.len() as u64;
-            k += n;
-        }
         sc.texels.clear();
         sc.tiles.clear();
-        sc.records.clear();
     }
 
     /// The buffer and byte offset of `slot`, allocating its block (or the vertex pool) on first use.
@@ -1981,20 +1914,14 @@ impl TerrainRenderer {
         self.compact.as_ref().map_or((0, 0, 0), |c| (c.fallback.in_use(), c.fallback.retiring(), c.fallback.free()))
     }
 
-    /// Bytes of the tile pools (vertex blocks, compact blocks, the vertex pool), the slot records, the index buffer and the node record
-    /// buffers as allocated now (summed from the buffers' and textures' real sizes). The pools, records and the index buffer equal
+    /// Bytes of the tile pools (vertex blocks, compact blocks, the vertex pool), the index buffer and the node record
+    /// buffers as allocated now (summed from the buffers' and textures' real sizes). The pools and the index buffer equal
     /// what `PoolConfig::allocated_bytes_with` says for the live blocks; the node records are as large as the largest plan so
     /// far, at most the configured buffer; the whole stays under the terrain share (STRM-006).
     pub fn pool_allocated_bytes(&self) -> u64 {
         let blocks: u64 = self.blocks.iter().flatten().map(wgpu::Buffer::size).sum();
         let compact: u64 = self.compact.as_ref().map_or(0, |c| c.blocks.iter().flatten().map(|b| b.buffer.size()).sum());
-        let records = self.compact.as_ref().map_or(0, |c| c.records.size());
-        blocks
-            + compact
-            + records
-            + self.vertex_pool.as_ref().map_or(0, wgpu::Buffer::size)
-            + self.indices.size()
-            + self.node_buffer_bytes()
+        blocks + compact + self.vertex_pool.as_ref().map_or(0, wgpu::Buffer::size) + self.indices.size() + self.node_buffer_bytes()
     }
 
     /// Bytes of the per-frame buffers (the ring of globals, node records, draw arguments and tile references) as allocated now (it grows with the largest plan, up to the configured maximum).
@@ -2192,14 +2119,14 @@ impl TerrainRenderer {
             }
         };
         if let (Some(_), Some(refs)) = (&self.compact, &set.refs) {
-            // One tile reference per node (the first texel of its slot in its block and the slot's record); unused entries stay zero.
-            let w = self.cells + 1;
+            // One tile reference per node (the first word of its slot in its block and the slot index); unused entries stay zero.
+            let slot_words = (planet_generators::compact::slot_bytes(self.cells) / 4) as u32;
             let mut bytes = vec![0u8; REF_BYTES as usize * plan.nodes.len().max(1)];
             for (i, d) in plan.nodes.iter().enumerate() {
                 let r = &self.tiles[&d.tile];
                 if r.place == Place::Compact {
                     let local = r.slot.index % self.pool.block_slots;
-                    let words = [local * w * w, 0, r.slot.index, 0u32];
+                    let words = [local * slot_words, 0, r.slot.index, 0u32];
                     for (k, v) in words.iter().enumerate() {
                         bytes[i * REF_BYTES as usize + 4 * k..i * REF_BYTES as usize + 4 * k + 4].copy_from_slice(&v.to_le_bytes());
                     }
@@ -2518,7 +2445,7 @@ pub fn execute_terrain(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[&TileMesh
 /// The compact pools of a one-shot render of `nodes` nodes: blocks just large enough for the tiles (a block never over 128 MiB, so
 /// a big plan spans several blocks).
 fn one_shot_pool(nodes: usize, cells: u32) -> Result<PoolConfig, String> {
-    let slot = planet_generators::compact::slot_texel_bytes(cells);
+    let slot = planet_generators::compact::slot_bytes(cells);
     let nodes = u32::try_from(nodes.max(1)).map_err(|e| e.to_string())?;
     let block_slots = nodes.min(planet_frame::pool::block_slots_in(planet_frame::pool::COMPACT_BLOCK_BYTES, cells)).max(1);
     let blocks = u64::from(nodes.div_ceil(block_slots));
@@ -2565,7 +2492,7 @@ mod one_shot_tests {
     // spec: REND-016
     #[test]
     fn a_one_shot_plan_larger_than_a_block_spans_several_blocks_instead_of_failing() {
-        for (nodes, cells) in [(1usize, 32u32), (100, 16), (15_406, 32), (15_407, 32), (32_768, 32), (4_000, 64)] {
+        for (nodes, cells) in [(1usize, 32u32), (100, 16), (14_639, 32), (14_640, 32), (32_768, 32), (4_000, 64)] {
             let pool = one_shot_pool(nodes, cells).unwrap_or_else(|e| panic!("{nodes} nodes at cells {cells}: {e}"));
             assert!(pool.main_slots() as usize >= nodes, "{nodes} nodes at cells {cells}: {} slots", pool.main_slots());
             assert!(pool.block_bytes() <= planet_frame::pool::COMPACT_BLOCK_BYTES);

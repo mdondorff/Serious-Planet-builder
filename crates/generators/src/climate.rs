@@ -35,8 +35,8 @@ pub const CLIMATE_CELLS: u32 = 8;
 pub const CLIMATE_TEXELS: usize = CLIMATE_EDGE * CLIMATE_EDGE;
 /// Bytes of one tile's climate: two `f16` per texel.
 pub const CLIMATE_BYTES: usize = CLIMATE_TEXELS * 4;
-/// Compact tiles keep the climate in the spare fourth channel of their first `2 * CLIMATE_TEXELS` texels, so a tile needs at least
-/// this many texels, i.e. `cells >= 16` (a compact tile of 8 cells has 81).
+/// A compact tile has at least this many cells per edge (GEN-019): the climate no longer rides in the texels, the minimum stays so
+/// that the cells 16 configurations and their pool arithmetic are unchanged.
 pub const CLIMATE_MIN_COMPACT_CELLS: u32 = 16;
 
 /// `f32` to `f16` bits, round to nearest, ties to even; overflow gives infinity (the climate never reaches it: 65,504 is the
@@ -136,35 +136,18 @@ impl ClimateTexture {
         t
     }
 
-    /// Store the texture in the spare channel of a compact tile's texels: texel `k < 81` holds temperature `k`, texel `81 + k`
-    /// precipitation `k` (the texels must number at least [`CLIMATE_TEXELS`] x 2).
-    pub fn write_texels(&self, texels: &mut [[u16; 4]]) {
-        assert!(
-            texels.len() >= 2 * CLIMATE_TEXELS,
-            "a compact tile needs {} texels for its climate, has {}",
-            2 * CLIMATE_TEXELS,
-            texels.len()
-        );
-        for k in 0..CLIMATE_TEXELS {
-            texels[k][3] = self.temperature[k];
-            texels[CLIMATE_TEXELS + k][3] = self.precipitation[k];
-        }
+    /// The climate block of a compact slot (GEN-025): per texel one word, the temperature `f16` in the low half and the
+    /// precipitation `f16` in the high half.
+    pub fn to_words(&self) -> [u32; CLIMATE_TEXELS] {
+        std::array::from_fn(|k| u32::from(self.temperature[k]) | u32::from(self.precipitation[k]) << 16)
     }
 
-    /// Inverse of [`write_texels`](ClimateTexture::write_texels).
-    pub fn read_texels(texels: &[[u16; 4]]) -> Self {
-        assert!(
-            texels.len() >= 2 * CLIMATE_TEXELS,
-            "a compact tile needs {} texels for its climate, has {}",
-            2 * CLIMATE_TEXELS,
-            texels.len()
-        );
-        let mut t = Self::default();
-        for k in 0..CLIMATE_TEXELS {
-            t.temperature[k] = texels[k][3];
-            t.precipitation[k] = texels[CLIMATE_TEXELS + k][3];
+    /// Inverse of [`to_words`](ClimateTexture::to_words).
+    pub fn from_words(words: &[u32; CLIMATE_TEXELS]) -> Self {
+        Self {
+            temperature: std::array::from_fn(|k| (words[k] & 0xffff) as u16),
+            precipitation: std::array::from_fn(|k| (words[k] >> 16) as u16),
         }
-        t
     }
 
     /// Bilinear interpolation at tile coordinates `(u, v)` in `[0, 1]` (clamped), in `f32` with `mix(a, b, t) = a (1 - t) + b t`:
