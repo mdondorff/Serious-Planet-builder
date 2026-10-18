@@ -698,10 +698,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.given.contains("--views") && !litperf::is_lit_scene(&o.scene) && !litperf::is_capture_scene(&o.scene)
         || o.given.contains("--flight-frames") && !litperf::is_lit_scene(&o.scene) && !litperf::is_capture_scene(&o.scene)
     {
-        return Err(
-            "--views applies to the scenes `lit` and `capture-flights`, --flight-frames to those"
-                .into(),
-        );
+        return Err("--views applies to the scenes `lit` and `capture-flights`, --flight-frames to those".into());
     }
     streamperf::check_options(o)?;
     if litperf::is_capture_scene(&o.scene) {

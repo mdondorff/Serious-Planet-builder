@@ -168,10 +168,7 @@ pub fn run_script(
     out: &mut dyn Write,
 ) -> Result<(RgbaFrame, Vec<FrameLog>), String> {
     let first = requests.first().ok_or("an empty script")?;
-    // One tile size and one finest level per script: the pools are sized for the first request's cells, and the streamer's source
-    // builds its tiles for the first request's finest level. The mesh key carries the finest-level class of a tile (LOD-010,
-    // `finest_class_key`), so the CON-13 format decision is a function of what the key identifies and a tile built for another
-    // class is never taken for the planned one (it would show as a stale mesh, not as a wrong format); the streamer does not
+    // One tile size and one finest level per script: the pools are sized for the first request's cells, and the streamer does not
     // re-fetch resident tiles when the cap changes, so a script that changes it is refused.
     if let Some(r) = requests.iter().find(|r| r.lod.cells != first.lod.cells || r.lod.max_level != first.lod.max_level) {
         return Err(format!(
