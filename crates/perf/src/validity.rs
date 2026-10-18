@@ -302,7 +302,11 @@ pub(crate) fn view_gpu_validity_from_log(runs: &[&Json]) -> Option<clock::GpuVal
             Some(Json::Str(s)) => s.clone(),
             _ => return None,
         };
-        Some(clock::ClockPoint { pstate, mhz: c.get("graphics_mhz")?.num()? })
+        let throttle = match c.get("throttle_reasons") {
+            Some(Json::Str(t)) => t.clone(),
+            _ => String::new(),
+        };
+        Some(clock::ClockPoint { pstate, mhz: c.get("graphics_mhz")?.num()?, throttle })
     };
     if runs.is_empty() {
         return None;
@@ -548,8 +552,8 @@ mod tests {
         let j = log_of(false, &["GPU throttling reported during 'lit/coast-2km'"], &capped);
         assert!(log_frame_valid(&j) && session_verdict_notes(&j).iter().any(|n| n.contains("not true when judged again")));
         // The clock floor is applied to the samples, whatever the run recorded: 1,395 MHz is below 1,400, 1,400 is at it.
-        let view = |after: f64| log_of(true, &[], &[("lit/coast-2km", 4.7, 1500.0, Some(after), "0x4")]);
-        let (below, at) = (view(1395.0), view(1400.0));
+        let view = |after: f64, mask: &str| log_of(true, &[], &[("lit/coast-2km", 4.7, 1500.0, Some(after), mask)]);
+        let (below, at) = (view(1395.0, "0x0"), view(1400.0, "0x0"));
         fn runs_of(j: &Json) -> Vec<&Json> {
             match j.get("runs") {
                 Some(Json::Arr(a)) => a.iter().collect(),
@@ -558,6 +562,12 @@ mod tests {
         }
         assert!(matches!(view_gpu_validity_from_log(&runs_of(&below)), Some(clock::GpuValidity::Below(..))));
         assert!(matches!(view_gpu_validity_from_log(&runs_of(&at)), Some(clock::GpuValidity::Valid(_))));
+        // ADR 0060: the same 1,395 MHz at P0 with the power cap as the only reason is valid when judged again.
+        let capped = view(1395.0, "0x4");
+        assert!(matches!(view_gpu_validity_from_log(&runs_of(&capped)), Some(clock::GpuValidity::Valid(_))));
+        // ...but not with a thermal bit beside the cap.
+        let hot = view(1395.0, "0x44");
+        assert!(matches!(view_gpu_validity_from_log(&runs_of(&hot)), Some(clock::GpuValidity::Below(..))));
     }
 
     // spec: TEST-012

@@ -447,7 +447,15 @@ fn print_view(res: &ViewResult, gpu: &planet_perf::clock::GpuValidity, smoke: bo
     .map_err(err)?;
     // A smoke run is no measurement: no budget rows, only the pass rows that prove the timestamps flow.
     if !smoke {
-        for row in planet_perf::lit::view_verdicts(&metrics, &frame, gpu, gated, res.water_draws, true) {
+        for row in planet_perf::lit::view_verdicts_with(
+            &metrics,
+            &frame,
+            gpu,
+            gated,
+            res.water_draws,
+            true,
+            planet_perf::lit::water_budget_ms(&res.path),
+        ) {
             writeln!(out, "{}", row.line(&res.path)).map_err(err)?;
         }
     }
@@ -680,7 +688,15 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
         if res.kind == ViewKind::Static && !formats_scene && !smoke {
             let totals: Vec<f64> = res.frames.iter().map(|f| f.total_ms).collect();
             let frame = summarize(&totals, 0).ok_or("no frames")?;
-            for row in planet_perf::lit::view_verdicts(&metrics_of(&res.frames), &frame, &gpu, true, res.water_draws, true) {
+            for row in planet_perf::lit::view_verdicts_with(
+                &metrics_of(&res.frames),
+                &frame,
+                &gpu,
+                true,
+                res.water_draws,
+                true,
+                planet_perf::lit::water_budget_ms(&res.path),
+            ) {
                 if row.fails() && verdict.frame_valid() {
                     failed.push(row.line(&res.path));
                 }

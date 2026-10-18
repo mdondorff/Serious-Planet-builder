@@ -16,6 +16,18 @@ use crate::{summarize, Stats};
 pub const ATMOSPHERE_GPU_BUDGET_MS: f64 = 1.0;
 /// Water budget: the water pass and the copy of the scene target it reads, median of their per-frame sum.
 pub const WATER_GPU_BUDGET_MS: f64 = 2.0;
+/// Water budget of the held view coast 3 m (ADR 0060): the worst-case view's own number; the other views keep [`WATER_GPU_BUDGET_MS`].
+pub const COAST_3M_WATER_GPU_BUDGET_MS: f64 = 2.2;
+
+/// The water budget of the view at `path` (`lit/coast-3m` or `coast-3m`): [`COAST_3M_WATER_GPU_BUDGET_MS`] for coast 3 m, else
+/// [`WATER_GPU_BUDGET_MS`].
+pub fn water_budget_ms(path: &str) -> f64 {
+    if path == "coast-3m" || path.ends_with("/coast-3m") {
+        COAST_3M_WATER_GPU_BUDGET_MS
+    } else {
+        WATER_GPU_BUDGET_MS
+    }
+}
 
 /// The passes with timestamps, in the renderer's order (`planet_render::GpuPass::ALL`; a test in the app crate pins the equality).
 pub const PASS_NAMES: [&str; 8] =
@@ -144,6 +156,19 @@ pub fn view_verdicts(
     water_draws: u64,
     atmosphere: bool,
 ) -> Vec<LitVerdict> {
+    view_verdicts_with(metrics, frame, gpu, gated, water_draws, atmosphere, WATER_GPU_BUDGET_MS)
+}
+
+/// [`view_verdicts`] with the water budget of the view (`water_budget_ms(path)`, ADR 0060).
+pub fn view_verdicts_with(
+    metrics: &[(String, Stats)],
+    frame: &Stats,
+    gpu: &GpuValidity,
+    gated: bool,
+    water_draws: u64,
+    atmosphere: bool,
+    water_budget: f64,
+) -> Vec<LitVerdict> {
     let mut rows = Vec::new();
     let judged = |measure: &'static str, stat: &'static str, value: Option<f64>, budget: f64| {
         let status = match (&value, gpu) {
@@ -178,13 +203,13 @@ pub fn view_verdicts(
         });
     }
     if water_draws > 0 {
-        rows.push(judged("water (pass + scene copy)", "median", median("gpu_water_total_ms"), WATER_GPU_BUDGET_MS));
+        rows.push(judged("water (pass + scene copy)", "median", median("gpu_water_total_ms"), water_budget));
     } else {
         rows.push(LitVerdict {
             measure: "water (pass + scene copy)",
             stat: "median",
             value: None,
-            budget: Some(WATER_GPU_BUDGET_MS),
+            budget: Some(water_budget),
             gated,
             status: Status::NotInView("no water node in the view"),
         });
@@ -295,6 +320,34 @@ mod tests {
         assert!(
             stat_of(&m, "gpu_atmosphere_ms").is_none() && stat_of(&m, "gpu_water_total_ms").is_none() && stat_of(&m, "gpu_ms").is_some()
         );
+    }
+
+    // spec: TEST-025
+    #[test]
+    fn coast_3m_has_a_water_budget_of_2_2_ms_and_every_other_view_keeps_2_ms() {
+        assert_eq!(COAST_3M_WATER_GPU_BUDGET_MS, 2.2);
+        assert_eq!((water_budget_ms("lit/coast-3m"), water_budget_ms("coast-3m")), (2.2, 2.2));
+        for other in ["lit/coast-2km", "lit/orbit", "lit/ground-1m", "lit/aerial-20km", "lit/coast-glide", "lit-formats/orbit/compact"] {
+            assert_eq!(water_budget_ms(other), WATER_GPU_BUDGET_MS, "{other}");
+        }
+        let f = summarize(&[10.0, 11.0, 12.0], 0).unwrap();
+        // The water sum is the pass plus the 0.3 ms copy: 2.15 ms is within 2.2 and over 2; 2.25 ms is over both.
+        let water = |m: &[(String, Stats)], path: &str| {
+            let rows = view_verdicts_with(m, &f, &valid(), true, 40, true, water_budget_ms(path));
+            rows.into_iter().find(|r| r.measure.starts_with("water")).unwrap()
+        };
+        let within = metrics_of(&(0..5).map(|_| lit(0.5, 1.85)).collect::<Vec<_>>());
+        let over = metrics_of(&(0..5).map(|_| lit(0.5, 1.95)).collect::<Vec<_>>());
+        assert_eq!(water(&within, "lit/coast-3m").status, Status::Ok);
+        assert_eq!(water(&over, "lit/coast-3m").status, Status::Over);
+        assert_eq!(water(&within, "lit/coast-2km").status, Status::Over, "another view at 2.15 ms fails its 2 ms");
+        assert!(water(&over, "lit/coast-3m").line("coast-3m").contains("budget 2.2 ms"));
+        // The boundary itself, on the figures of the ADR: exactly 2.2 ms is within, 2.21 ms is over; another view at 2.1 ms is over.
+        let sum = |v: f64| vec![("gpu_water_total_ms".to_string(), summarize(&[v; 5], 0).unwrap())];
+        assert_eq!(water(&sum(2.2), "lit/coast-3m").status, Status::Ok);
+        assert_eq!(water(&sum(2.21), "lit/coast-3m").status, Status::Over);
+        assert_eq!(water(&sum(2.1), "lit/coast-2km").status, Status::Over);
+        assert_eq!(water(&sum(2.0), "lit/coast-2km").status, Status::Ok);
     }
 
     // spec: TEST-025
