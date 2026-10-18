@@ -1,6 +1,0 @@
-- [x] 1.1 failing tests: frame `pipeline` (STRM-016, STRM-002, STRM-005, CON-14, TEST-012), render `gpu_pipelined`, app `gpu_skeleton` (pipelined equals synchronous)
-- [x] 1.2 frame: `cover_selection`, `plan_terrain_threaded`, `pipeline` module
-- [x] 1.3 render: `submit`, `retired_frames`, `wait_oldest`, `with_frames_in_flight`
-- [x] 1.4 app: `--pipelined`, `--then`, per-frame columns log
-- [x] 1.5 spec delta (STRM-002, STRM-016, TEST-012)
-- [x] 1.6 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge

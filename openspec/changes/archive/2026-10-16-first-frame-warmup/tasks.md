@@ -1,7 +1,0 @@
-- [x] 1.1 measure the one-time costs before any fix (software, release; `gpu_warmup.rs` probe and the `perf stream dive --smoke` frames file), record in docs/learnings.md
-- [x] 1.2 failing tests first (`crates/render/tests/gpu_warmup.rs`: counters, model, image, frame-0 probe)
-- [x] 1.3 render: `InitCounts`, `warm_up`, pool/atlas/ring creation through counted helpers
-- [x] 1.4 app: `Rig::new` warms the renderer before frame 0
-- [x] 1.5 measure after (smoke frames file), learnings, log line
-- [x] 1.6 spec: REND-017 (new)
-- [x] 1.7 reviewers (spec-guardian, verifier), archive, PR, CI green, merge

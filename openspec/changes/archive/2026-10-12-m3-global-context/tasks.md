@@ -1,3 +1,0 @@
-- [x] 1.1 Generator wrapper through GenContext
-- [x] 1.2 Contract tests and key test
-- [x] 1.3 reviews, verifier, status line

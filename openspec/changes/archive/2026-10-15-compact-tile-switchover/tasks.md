@@ -1,6 +1,0 @@
-- [x] 1.1 tests: gpu_terrain from compact tiles (goldens, holes, counts, projection and morph oracles), flight compact against vertex, headroom pins, known answers re-recorded, compact pools at small cells
-- [x] 1.2 MESH_VERSION 5; execute_terrain_tiles, TileFormat, for_context; managed loop and app on RenderTile; --tile-format
-- [x] 1.3 specs (STRM-006, STRM-007, GEN-010, REND-016)
-- [x] 1.4 ad hoc timings (example compact_vs_vertex), learnings
-- [x] 1.5 test gpu, test gpu --real, golden-review with the CI candidates
-- [x] 1.6 reviewers (numerics, spec-guardian, verifier), archive, log line, PR, CI green, merge

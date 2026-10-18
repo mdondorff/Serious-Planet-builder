@@ -1,4 +1,0 @@
-- [x] 1.1 Failing tests first: the raw reading parser, the load between two readings (harness, helper, competitors, a new process, the top cut), the case summary and its notes at ADR 0020's numbers, the log object, the session log with and without load
-- [x] 1.2 `planet_perf::load`, `report_json_full`; the sampler beside the terrain views and the streaming scenes
-- [x] 2.1 `WorldTerrain::ocean_probe` and `store_check`, the smoke's store check; tier A on the problems, tier C over a stored 256-cell bake (lines, failure on a missing level, store unchanged)
-- [x] 3.1 spec-guardian and verifier, test, test gpu, test gpu --real, spec-lint, fmt, clippy; archive; PR

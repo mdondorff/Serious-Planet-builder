@@ -1,5 +1,0 @@
-- [x] 1.1 failing tier-A test of the lint rule (`a_perf_scene_citation_is_tier_c_evidence`)
-- [x] 1.2 spec-lint: `parse_scene_citations`, `is_perf_scene_file`
-- [x] 1.3 `perf_global_bake` cites GEN-014; GEN-014 active; TEST-001 text
-- [x] 1.4 spec-guardian, verifier (findings fixed)
-- [x] 1.5 log line, CI green, merge

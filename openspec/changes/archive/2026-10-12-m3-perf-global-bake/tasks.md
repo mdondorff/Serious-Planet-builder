@@ -1,3 +1,0 @@
-- [x] 1.1 global-bake perf scene and budgets
-- [x] 1.2 xtask perf global-bake
-- [x] 1.3 GEN-014 text, status line

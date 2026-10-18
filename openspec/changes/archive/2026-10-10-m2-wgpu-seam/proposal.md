@@ -1,6 +1,6 @@
 ## Why
 
-ADR 0004 review (relayed by the SMB exploration session on behalf of the owner): `render` re-exported `wgpu` and exposed `device`, `queue` and `info` publicly, so any crate could reach the graphics API. This change closes the outer boundary of ADR 0004's seam (no wgpu type crosses render's API); it does not build the internal device/buffer/pipeline interface the ADR also describes (see design.md).
+ADR 0004 review (relayed by the SMB exploration session on behalf of the owner): `render` re-exported `wgpu` and exposed `device`, `queue` and `info` publicly, so any crate could reach the graphics API. This change closes the outer boundary of ADR 0004's seam (no wgpu type crosses render's API); it does not build the internal device/buffer/pipeline interface the ADR also describes (see ADR 0004).
 
 ## What Changes
 

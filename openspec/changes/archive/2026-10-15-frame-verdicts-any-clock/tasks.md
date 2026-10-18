@@ -1,4 +1,0 @@
-- [x] 1.1 failing tests first: compare fixtures (frame medians across unequal states with both printed, GPU not compared, old-format logs) and `terrain_view_line` (P2 view keeps its frame verdict, loses its GPU verdict)
-- [x] 1.2 `GPU_METRICS`, `LogSummary::clock`, frame state lines, `terrain_view_line`, skeleton console
-- [x] 1.3 TEST-012 delta
-- [x] 1.4 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge

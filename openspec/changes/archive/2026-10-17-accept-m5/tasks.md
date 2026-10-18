@@ -1,4 +1,0 @@
-- [x] 1.1 Failing tests first: a valid window passes and the report has every part and slot; an over-budget row fails and is named; a view below the floor or an idle start is incomplete; a coast view without water is incomplete; untrustworthy logs are refused with every reason; optional parts never refuse (TEST-026)
-- [x] 1.2 `planet_perf::accept_m5`, `read_scene_as`, `xtask accept M5` (logs, report path, outcome, manual criteria)
-- [x] 2.1 The flight capture scene and `cargo xtask capture flights` with ffmpeg encoding; tier A on the command lines, tier C on the software adapter (TEST-027)
-- [x] 3.1 spec-guardian and verifier, test, test gpu, test gpu --real, spec-lint, fmt, clippy; archive; PR; status item 8 removed

@@ -1,4 +1,0 @@
-- [x] 1.1 failing tests: layout and bytes, one key, normals (sweep and tiles), height step and error bound at levels 3-26, fallback decision, determinism and known answers; tier B mirror against the product mesh at levels 3-26 on three fields, seams
-- [x] 1.2 generators `compact` module
-- [x] 1.3 spec GEN-019
-- [x] 1.4 reviewers (numerics, spec-guardian, verifier), archive, log line, PR, CI green, merge

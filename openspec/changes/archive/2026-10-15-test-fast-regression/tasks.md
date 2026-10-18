@@ -1,9 +1,0 @@
-- [x] 1.1 measure: per-test timings of `cargo xtask test fast` on a quiet machine, wall and test time, 3 runs; CPU time per test (one core)
-- [x] 1.2 frustum_cut: parallel cameras, shared meshes, helpers in `tests/support/frustum_cut.rs`
-- [x] 1.3 tier split: tier-A slice in `frustum_cut.rs`, full density in `oracle_frustum_cut_sweep.rs`
-- [x] 1.4 height_aware: views on their own threads
-- [x] 1.5 residency_headroom: one bake, both levels side by side; concurrent_source: yielding watcher
-- [x] 1.6 xtask: the slowest five tests after `test fast` (JUnit report), unit test; nextest priority and JUnit
-- [x] 1.7 spec deltas (BUILD-003 scenario, LOD-007 scenario text), learning, log line
-- [x] 1.8 three runs recorded in the PR; spec-guardian, verifier (findings fixed)
-- [x] 1.9 archive, CI green, merge

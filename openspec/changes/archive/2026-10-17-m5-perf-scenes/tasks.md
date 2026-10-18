@@ -1,5 +1,0 @@
-- [x] 1.1 Failing tests first: pass times from ticks, query layout (REND-028); the coast search, the flights, the view set (TEST-025); metric names, budget rows, flights, noise report (TEST-025)
-- [x] 1.2 `render::gpu_timing`, `FrameTiming::passes`, stamps in the terrain, water, atmosphere and post passes; tier C: every pass of a lit frame has a time, pixels unchanged, a debug frame times the terrain pass alone
-- [x] 2.1 `litscenes`, `planet_perf::lit`, `planet::litperf`, the streaming `--lit` variant, xtask `perf lit | lit-formats | m5` and `--lit`
-- [x] 2.2 Tier C smokes on the software adapter (lit, lit-formats, streaming --lit), options refused; smoke on the RTX
-- [x] 3.1 spec-guardian and verifier, test, test gpu, test gpu --real, spec-lint, fmt, clippy; archive; PR

@@ -1,6 +1,0 @@
-- [x] 1.1 ablation: `plan_ablation` example over the 16384 store, result in `docs/learnings.md`
-- [x] 1.2 failing tier-A tests (`crates/frame/tests/plan_reuse.rs`): warm plan evaluates the field zero times, moved camera evaluates only new tiles, cells change restarts the key memo
-- [x] 1.3 `SelectionCache` memo of origin height and mesh key; `plan_terrain_cached` uses it
-- [x] 1.4 spec LOD-009; docs (spikes.md correction, status.md item 7a)
-- [x] 1.5 ad hoc warm plan times at the standard views with the eroded field over the 16384 store
-- [x] 1.6 reviewers (numerics, spec-guardian, verifier), archive, log line, PR, CI green, merge

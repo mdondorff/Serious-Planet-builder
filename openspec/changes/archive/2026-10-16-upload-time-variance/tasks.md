@@ -1,9 +1,0 @@
-- [x] 1.1 ablation (workers 8, 16, 18, 20 on the smoke dive with per-step timers; micro-benchmark with N busy workers); learnings entry with the table before the fix
-- [x] 1.2 failing tests first: scratch capacity (gpu_upload_batch), ranking rebuild counts (managed), class equivalence (unit), default worker count (dispatch_throughput), options, `protocol.gen` and its comparison
-- [x] 1.3 render: kept staging buffers (`BatchScratch`), `batch_scratch_capacity`, `UploadTimes`
-- [x] 1.4 frame: early-stopping draw class in a kept map, R lookup, prefetch closure on change, kept lists, `ranking_rebuilds`
-- [x] 1.5 streaming/app/xtask: `GEN_RESERVE`, `GenWorkers::workers_for`, `--gen-reserve`
-- [x] 1.6 perf: `protocol.gen`, `GenSettings`, comparison rule
-- [x] 1.7 example `upload_contention`; ad hoc before/after numbers
-- [x] 1.8 spec deltas: REND-018, STRM-020, TEST-012 (modified)
-- [x] 1.9 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge

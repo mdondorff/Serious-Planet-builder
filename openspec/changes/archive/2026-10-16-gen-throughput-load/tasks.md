@@ -1,7 +1,0 @@
-- [x] 1.1 ablation: workers 1/4/8/12/18 x ahead, block-cache budgets 7/31/127 blocks, planner threads 1/4/20, pack lookups, calibration, unbuffered read probe; learnings entry with the tables
-- [x] 1.2 failing tests first: job log (streaming), cache and pack counters (cache), load counts and calibration (perf), counters of the pre-filled lookups (app), the `load_` counts in a smoke log (tier C), never compared
-- [x] 1.3 streaming: `JobLog`, `JobSample`, `Streamer::job_log`
-- [x] 1.4 cache: `SourceStats` fields, `thread_block_wait_ns`, `thread_block_decodes`, `StoreReadStats`
-- [x] 1.5 app/perf: `WorldTerrain::counters`, `timed_load`, `load_counts`, `LoadCounters`, `calibrate_cpu`, the `load_` prefix in the comparison
-- [x] 1.6 spec delta: STRM-022 added
-- [x] 1.7 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge

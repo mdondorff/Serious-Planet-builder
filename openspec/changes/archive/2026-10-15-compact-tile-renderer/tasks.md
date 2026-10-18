@@ -1,5 +1,0 @@
-- [x] 1.1 failing tests: gpu_compact (images against the vertex path, per-draw/indirect identity, scattered slots, fallback, allocation model, cells 32), compact_pool (shares), shader scan and validation of the compact shader
-- [x] 1.2 streaming PoolConfig fields; frame compact pools and `build_draw_list_placed`; render compact module, atlases, records, pipeline, runs
-- [x] 1.3 spec REND-016
-- [x] 1.4 `test gpu`, `test gpu --real`, golden status (no candidates expected: the default path is unchanged)
-- [x] 1.5 reviewers (numerics, spec-guardian, verifier), archive, log line, PR, CI green, merge
