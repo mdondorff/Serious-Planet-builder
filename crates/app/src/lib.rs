@@ -577,7 +577,16 @@ pub(crate) fn run_throttled(r: &planet_perf::RunReport) -> bool {
 /// The session verdict, printed once before any budget verdict so a bad session never shows "ok" first (ADR 0020). One definition
 /// of what voids frame verdicts and what only GPU verdicts (`planet_perf::validity`); the lines come from it.
 pub(crate) fn session_verdict_line(out: &mut dyn Write, verdict: &planet_perf::validity::SessionVerdict) -> Result<(), String> {
-    for l in verdict.lines() {
+    session_verdict_line_for(out, verdict, true)
+}
+
+/// [`session_verdict_line`] for a session that takes no GPU rows (the streaming scenes) when `gpu_rows` is false.
+pub(crate) fn session_verdict_line_for(
+    out: &mut dyn Write,
+    verdict: &planet_perf::validity::SessionVerdict,
+    gpu_rows: bool,
+) -> Result<(), String> {
+    for l in verdict.lines_for(gpu_rows) {
         writeln!(out, "{l}").map_err(err)?;
     }
     Ok(())
