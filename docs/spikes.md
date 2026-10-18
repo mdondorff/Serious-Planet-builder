@@ -12,6 +12,7 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | SPIKE-08 | Ocean connectivity at 16384 | closed 2026-10-16 | `spikes/ocean-connectivity/results/` |
 | SPIKE-09 | Atmosphere f32 forms | closed | `spikes/atmosphere-f32/results/` |
 | SPIKE-11 | Mouse look plumbing | open (owner's local check) | `spikes/mouse-look/results/` |
+| SPIKE-14 | egui in the frame | closed 2026-10-18 | `spikes/egui/results/` |
 | SPIKE-13 | Edit-to-visible latency | closed 2026-10-18 | `spikes/edit-latency/results/` |
 | SPIKE-12 | Retiring the vertex tile format | closed 2026-10-17 (recommendation: retire, early M6; owner decides at the M5 gate) | `spikes/vertex-retirement/results/` |
 | exploration | WARP parallel-device crash: inside WARP, test-only (PRs #195, #196) | closed | `spikes/warp-crash/results/` |
@@ -20,6 +21,29 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | exploration | Compact tiles in storage buffers (PR #225; ADR 0054) | closed | `spikes/compact-storage-buffer/results/` |
 
 The explorations before 2026-10-17 had no register entry; from now on every exploration gets a `SPIKE-NN` entry.
+
+## SPIKE-14 egui in the frame
+Status: closed
+Opened: 2026-10-18
+Closed: 2026-10-18
+Question: Do egui and egui-wgpu fit wgpu 30.0.1 and winit 0.30.13, does a panel after the tone map work on the RTX and WARP at two DPI scales at a carryable cost, and which input rule separates panel and camera?
+Why it matters: M6 editor UI toolkit (architecture report proposes egui); ADR 0015 (painter in render), ADR 0042 (UI node after the tone map).
+Time box: 1 day.
+Success criteria: version pair and build result; panel as one graph node over the lit viewer; RTX and WARP; DPI 100 % and 150 %; GPU and CPU cost per frame; input routing checks; recommendation.
+Fallback if it fails: nearest compatible pair, an upgrade or a fork.
+Code location: branch `spike/spike-14-egui` (never merged); results `spikes/egui/results/`.
+Result (RTX, indicative): all numbers in `results.md`.
+| Item | Result |
+|---|---|
+| Version pair | egui, egui-wgpu, egui-winit 0.36.2 and 0.37.0 build against wgpu 30.0.1 and winit 0.30.13; 0.35 and older need wgpu 29; no upgrade or fork |
+| New crates | 33 (0.36.2), 36 (0.37.0); `cargo xtask layering` ok |
+| Licences | `default_fonts` brings OFL-1.1 and Ubuntu-font-1.0, not on the `deny.toml` allow-list; without it labels are blank |
+| Graph | node `ui` after `tonemap`; no frame-target byte or lifetime changes (test) |
+| Cost, 1080p, typical panel, RTX | egui 0.175 ms CPU, UI pass 0.12 ms; window 48 of 48 frames presented, 0.53 ms CPU per frame |
+| WARP | UI pass 17-23 ms (software rasteriser), egui 0.16 ms CPU |
+| Outside the panel | 0 pixels differ from the blit, both adapters, both DPI scales |
+| Routing | press on the panel goes to the UI; a drag started in the world stays with the camera across the panel; keys go to a focused text field |
+Recommendation: egui `=0.36.2` for the M6 editor UI; painter in `render`, `ui` node after `tonemap`, editor builds the GPU-free frame; pointer latched at press. Owner decides the font licences (add OFL-1.1 and Ubuntu-font-1.0 to the allow-list, or ship a font under an allowed licence).
 
 ## SPIKE-13 Edit-to-visible latency
 Status: closed
