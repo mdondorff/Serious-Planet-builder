@@ -984,6 +984,53 @@ mod tests {
         assert_eq!(JUNIT_REAL, "target/nextest/real-gpu/junit.xml");
     }
 
+    // spec: BUILD-015
+    #[test]
+    fn every_test_file_of_a_per_tier_crate_is_a_module_of_the_aggregator_of_its_tier_and_of_no_other() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut converted = Vec::new();
+        for krate in std::fs::read_dir(root.join("crates")).unwrap().flatten() {
+            let manifest = std::fs::read_to_string(krate.path().join("Cargo.toml")).unwrap_or_default();
+            if !manifest.contains("autotests = false") {
+                continue;
+            }
+            converted.push(krate.file_name().to_string_lossy().to_string());
+            let aggregators = ["it", "oracle_all", "gpu_all"];
+            let text = |n: &str| std::fs::read_to_string(krate.path().join("tests").join(format!("{n}.rs"))).unwrap_or_default();
+            for entry in std::fs::read_dir(krate.path().join("tests")).unwrap().flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let Some(stem) = name.strip_suffix(".rs").filter(|s| !aggregators.contains(s)) else { continue };
+                let tier = if stem.starts_with("gpu_") {
+                    "gpu_all"
+                } else if stem.starts_with("oracle_") {
+                    "oracle_all"
+                } else {
+                    "it"
+                };
+                for agg in aggregators {
+                    let included = text(agg).contains(&format!("#[path = \"{stem}.rs\"]\nmod {stem};"));
+                    assert_eq!(
+                        included,
+                        agg == tier,
+                        "{}: tests/{name} must be a module of {tier}.rs and of no other aggregator",
+                        krate.file_name().to_string_lossy()
+                    );
+                }
+            }
+            // Each aggregator that exists is declared as a [[test]], and the crate's tests are the declared ones.
+            for agg in aggregators.iter().filter(|a| krate.path().join("tests").join(format!("{a}.rs")).is_file()) {
+                assert!(
+                    manifest.contains(&format!("name = \"{agg}\"\npath = \"tests/{agg}.rs\"")),
+                    "{} lacks [[test]] {agg}",
+                    krate.file_name().to_string_lossy()
+                );
+            }
+        }
+        for c in ["generators", "cache", "streaming", "app"] {
+            assert!(converted.iter().any(|k| k == c), "{c} builds one test binary per tier (BUILD-015)");
+        }
+    }
+
     // spec: BUILD-003
     #[test]
     fn the_real_gpu_profile_groups_existing_binaries_only_and_leaves_the_default_profile_alone() {
@@ -992,17 +1039,35 @@ mod tests {
         let (default_part, real_part) = toml.split_once("[profile.real-gpu]").expect("the real-gpu profile exists");
         assert!(!default_part.contains("test-group ="), "the default profile (software, WARP, CI) has no test group");
         assert!(toml.contains("real-gpu-heavy = { max-threads ="));
-        // Every binary the group names is a test file somewhere in the workspace (a typo would silently leave a heavy binary uncapped).
+        // Every binary the group names is a test binary somewhere in the workspace (a test file, or a `[[test]]` of a crate with one
+        // binary per tier, BUILD-015), and every module of a `test(/^(a|b)::/)` pattern is a test file (a typo would silently leave a
+        // heavy test uncapped).
         let named: Vec<&str> = real_part.match_indices("binary(").map(|(i, _)| real_part[i + 7..].split(')').next().unwrap()).collect();
-        assert!(named.len() >= 8, "{named:?}");
-        let mut files = Vec::new();
+        assert!(named.len() >= 7, "{named:?}");
+        let modules: Vec<&str> = real_part
+            .match_indices("test(/^")
+            .flat_map(|(i, _)| real_part[i + 7..].split("::/)").next().unwrap().trim_matches(['(', ')']).split('|'))
+            .collect();
+        assert!(modules.len() >= 5, "{modules:?}");
+        let (mut binaries, mut files) = (Vec::new(), Vec::new());
         for krate in std::fs::read_dir(root.join("crates")).unwrap().flatten() {
             if let Ok(rd) = std::fs::read_dir(krate.path().join("tests")) {
-                files.extend(rd.flatten().map(|e| e.file_name().to_string_lossy().trim_end_matches(".rs").to_string()));
+                let stems = rd.flatten().map(|e| e.file_name().to_string_lossy().trim_end_matches(".rs").to_string());
+                files.extend(stems);
+            }
+            if let Ok(manifest) = std::fs::read_to_string(krate.path().join("Cargo.toml")) {
+                for part in manifest.split("[[test]]").skip(1) {
+                    let name = part.lines().find_map(|l| l.trim().strip_prefix("name = \""));
+                    binaries.extend(name.and_then(|n| n.split('"').next()).map(String::from));
+                }
             }
         }
+        binaries.extend(files.iter().cloned());
         for n in named {
-            assert!(files.iter().any(|f| f == n), "{n} is not a test binary");
+            assert!(binaries.iter().any(|f| f == n), "{n} is not a test binary");
+        }
+        for m in modules {
+            assert!(files.iter().any(|f| f == m), "{m} is not a test file (a module of a per-tier binary)");
         }
     }
 
