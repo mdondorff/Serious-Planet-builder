@@ -9,7 +9,7 @@ use planet_generators::compact::{tile_data_field, RenderTile};
 use planet_generators::dump::FACE_COLORS;
 use planet_generators::height::Reference;
 use planet_generators::mesh::{grid_indices, TileMesh};
-use planet_render::{execute_terrain, execute_terrain_tiles, AdapterPolicy, GpuContext};
+use planet_render::{execute_terrain_tiles, AdapterPolicy, GpuContext};
 use planet_testkit::{GoldenChecks, Image, Tolerance};
 
 const R: f64 = 6_371_000.0;
@@ -60,10 +60,10 @@ fn vertex_meshes_for(plan: &TerrainPlan) -> Vec<TileMesh> {
         .collect()
 }
 
-fn render_vertex(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[TileMesh]) -> (Image, planet_render::TerrainStats) {
+fn render_reference(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[TileMesh]) -> Image {
     let refs: Vec<&TileMesh> = meshes.iter().collect();
-    let (frame, stats) = execute_terrain(ctx, plan, &refs).unwrap();
-    (Image::new(frame.width, frame.height, frame.rgba), stats)
+    let frame = planet_render::reference::execute_reference(ctx, plan, &refs).unwrap();
+    Image::new(frame.width, frame.height, frame.rgba)
 }
 
 /// Pixels whose view ray hits the sphere just below the lowest terrain: they must show terrain, never the background.
@@ -123,7 +123,7 @@ fn ten_scripted_views_have_no_holes_and_exact_draw_counts() {
         assert_eq!(stats.vertex_bytes, expected, "{name}: bytes uploaded");
         assert!(stats.vertex_bytes <= counts.upload_bytes, "{name}: the compact format never uploads more than the vertex format");
         // The vertex format is the reference: the product's compact image equals it up to edge pixels.
-        let (reference, _) = render_vertex(&ctx, &plan, &vertex_meshes_for(&plan));
+        let reference = render_reference(&ctx, &plan, &vertex_meshes_for(&plan));
         let wrong = img.pixels().zip(reference.pixels()).filter(|(p, q)| (0..3).any(|c| p[c].abs_diff(q[c]) > 12)).count();
         assert!(wrong * 1000 <= (img.width * img.height) as usize, "{name}: {wrong} pixels differ from the vertex-format image");
         let h = holes(&plan, &img);

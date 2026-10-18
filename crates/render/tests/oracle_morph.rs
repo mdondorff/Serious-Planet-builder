@@ -7,7 +7,7 @@ use planet_core::cube::TangentWarp;
 use planet_core::Vec3;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
 use planet_generators::mesh::{tile_mesh, TileMesh};
-use planet_render::{execute_terrain, AdapterPolicy, GpuContext};
+use planet_render::{AdapterPolicy, GpuContext};
 use planet_testkit::Image;
 
 const R: f64 = 6_371_000.0;
@@ -23,7 +23,7 @@ fn plan(index: usize, view: TerrainView) -> TerrainPlan {
 
 fn render(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[TileMesh]) -> Image {
     let refs: Vec<&TileMesh> = meshes.iter().collect();
-    let (frame, _) = execute_terrain(ctx, plan, &refs).unwrap();
+    let frame = planet_render::reference::execute_reference(ctx, plan, &refs).unwrap();
     Image::new(frame.width, frame.height, frame.rgba)
 }
 
