@@ -384,3 +384,21 @@ fn the_book_keeps_a_minimum_only_beside_a_wet_answer() {
     book.set_min_height(wet, f32::NAN);
     assert_eq!((book.min_height(wet), book.min_height(dry)), (Some(1.0), None));
 }
+
+// spec: ATMO-020
+#[test]
+fn a_minimum_the_book_changes_later_is_the_one_the_next_plan_cuts_by_for_a_tile_rebuilt_in_another_format() {
+    let field = Reference(1);
+    let plan = terrain(6);
+    let src = Everywhere(0.0);
+    let book = answered_book(&plan, 0.0);
+    let loose = water(&src, &plan, Some(&field), &mut WaterTileCache::new());
+    let mut cache = WaterTileCache::with_book(std::sync::Arc::clone(&book));
+    // The first format\'s tiles leave a minimum over the bound: every node is cut.
+    set_mins(&book, &plan, 25.0);
+    assert!(water(&src, &plan, Some(&field), &mut cache).nodes.is_empty());
+    // The tiles are rebuilt in the other format; its lowest vertex is under the bound: the same cache keeps every node again.
+    set_mins(&book, &plan, -1.0);
+    assert_eq!(water(&src, &plan, Some(&field), &mut cache), loose);
+    assert_eq!((cache.cut_exact, cache.no_minimum), (0, 0));
+}

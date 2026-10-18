@@ -298,9 +298,8 @@ pub struct WaterTileCache {
     pub cut_exact: u64,
     /// Nodes that passed the loose test with no minimum in the book (their job has not left one): they keep the loose verdict.
     pub no_minimum: u64,
-    /// The extent, the lowest terrain bound and the exact vertex minimum (once the tile's job left it in the book) of the tiles the
-    /// cut has looked at (pure functions of the tile and the height field).
-    extents: HashMap<TileId, (TileExtent, Option<f64>, Option<f32>)>,
+    /// The extent and the lowest terrain bound of the tiles the cut has looked at (pure functions of the tile and the height field).
+    extents: HashMap<TileId, (TileExtent, Option<f64>)>,
 }
 
 impl WaterTileCache {
@@ -517,7 +516,7 @@ pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &
             let rise = liquids[slot].amplitude_sum();
             let shift = rise * (1.0 + req.look.choppy);
             let (extent, lowest) = {
-                let entry = cache.extents.entry(n.tile).or_insert_with(|| (tile_extent(req.map, n.tile, req.lod), None, None));
+                let entry = cache.extents.entry(n.tile).or_insert_with(|| (tile_extent(req.map, n.tile, req.lod), None));
                 (entry.0, entry.1)
             };
             let level = f64::from(w.level_m as f32);
@@ -541,17 +540,9 @@ pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &
                 continue;
             }
             // The exact minimum of the tile's own mesh vertices, when its job left one (a tile with none keeps the loose bound's
-            // verdict). Read from the book on the plan thread (a lookup, never a computation) until found, then memoised.
-            let exact = match cache.extents.get(&n.tile).and_then(|e| e.2) {
-                Some(m) => Some(m),
-                None => {
-                    let m = cache.book.as_ref().and_then(|b| b.min_height(n.tile));
-                    if let Some(e) = cache.extents.get_mut(&n.tile) {
-                        e.2 = m;
-                    }
-                    m
-                }
-            };
+            // verdict). Read from the book on the plan thread on every plan (a lookup, never a computation, and never memoised: a
+            // tile rebuilt in another format leaves that format's minimum, and the plan must cut by what is drawn).
+            let exact = cache.book.as_ref().and_then(|b| b.min_height(n.tile));
             cache.no_minimum += u64::from(exact.is_none());
             if exact.is_some_and(|m| tile_above_water(f64::from(m), level, rise)) {
                 cache.cut_height += 1;
