@@ -15,6 +15,8 @@ pub mod lit;
 pub mod spike_compact;
 #[cfg(feature = "spike07")]
 pub mod spike_detail;
+#[cfg(feature = "reference-renderer")]
+pub mod reference;
 pub mod terrain;
 pub mod water;
 pub mod water_gpu;

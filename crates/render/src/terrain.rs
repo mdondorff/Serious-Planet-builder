@@ -19,7 +19,7 @@ pub const GRID_SPACINGS_M: [f64; 9] = [0.01, 0.1, 1.0, 10.0, 100.0, 1.0e3, 1.0e4
 
 /// Bytes of one node record (origin, colour, morph interval, one grid phase per decade) in the storage buffer the shader
 /// indexes with the instance index.
-const NODE_BYTES: u64 = 48 + 16 * GRID_SPACINGS_M.len() as u64 + 16;
+pub(crate) const NODE_BYTES: u64 = 48 + 16 * GRID_SPACINGS_M.len() as u64 + 16;
 const _: () = assert!(NODE_BYTES == planet_frame::draw::NODE_RECORD_BYTES, "the frame crate counts the same record size");
 
 /// The relief grid's anchors for a tile origin (planet-fixed, f64): for each decade the fractional part of
@@ -324,8 +324,30 @@ pub const TERRAIN_SHADERS: &[(&str, &str)] = &[("terrain", SHADER)];
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 pub(crate) const DEPTH_COMPARE: wgpu::CompareFunction = wgpu::CompareFunction::Greater;
 
-fn view_index(v: TerrainView) -> u32 {
+pub(crate) fn view_index(v: TerrainView) -> u32 {
     TerrainView::ALL.iter().position(|x| *x == v).expect("known view") as u32
+}
+
+/// The node records of a plan, `NODE_BYTES` each (at least one record's worth, zero-filled when the plan has no nodes), as the shader
+/// indexes them with the instance index.
+pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
+    let mut nodes = vec![0u8; NODE_BYTES as usize * plan.nodes.len().max(1)];
+    for (i, d) in plan.nodes.iter().enumerate() {
+        let r = d.camera_relative_origin;
+        let c = d.color.map(|v| f32::from(v) / 255.0);
+        let mut floats = vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, d.shore_ramp_min_m, 0.0];
+        for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
+            floats.extend([p[0], p[1], p[2], 0.0]);
+        }
+        // The unit up vector of the tile origin and the inverse of its distance from the planet centre (decided in f64, rounded
+        // once): the shader forms up at a fragment as normalize(up + local * inv_r), which is tile-local arithmetic (CON-11).
+        let o = d.origin.0;
+        let len = (o.x * o.x + o.y * o.y + o.z * o.z).sqrt();
+        floats.extend([(o.x / len) as f32, (o.y / len) as f32, (o.z / len) as f32, (1.0 / len) as f32]);
+        let b = f32_bytes(&floats);
+        nodes[i * NODE_BYTES as usize..(i + 1) * NODE_BYTES as usize].copy_from_slice(&b);
+    }
+    nodes
 }
 
 /// Counts that are deterministic on every adapter (CON-20).
@@ -379,7 +401,7 @@ impl DrawMode {
 const RING: usize = 2;
 
 /// Bytes of the globals uniform (view-projection, height range, view mode, the shading extras and the albedo table).
-const GLOBALS_BYTES: u64 = 96 + 16 + 16 * planet_frame::look::shading::ALBEDO_VEC4S as u64;
+pub(crate) const GLOBALS_BYTES: u64 = 96 + 16 + 16 * planet_frame::look::shading::ALBEDO_VEC4S as u64;
 
 struct FrameSet {
     globals: wgpu::Buffer,
@@ -2088,22 +2110,7 @@ impl TerrainRenderer {
             ctx.queue.write_buffer(&set.water_globals, 0, &crate::water::globals_bytes(w));
             ctx.queue.write_buffer(&set.water_nodes, 0, &crate::water::node_records(w, plan.nodes.len()));
         }
-        let mut nodes = vec![0u8; NODE_BYTES as usize * plan.nodes.len().max(1)];
-        for (i, d) in plan.nodes.iter().enumerate() {
-            let r = d.camera_relative_origin;
-            let c = d.color.map(|v| f32::from(v) / 255.0);
-            let mut floats = vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, d.shore_ramp_min_m, 0.0];
-            for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
-                floats.extend([p[0], p[1], p[2], 0.0]);
-            }
-            // The unit up vector of the tile origin and the inverse of its distance from the planet centre (decided in f64, rounded
-            // once): the shader forms up at a fragment as normalize(up + local * inv_r), which is tile-local arithmetic (CON-11).
-            let o = d.origin.0;
-            let len = (o.x * o.x + o.y * o.y + o.z * o.z).sqrt();
-            floats.extend([(o.x / len) as f32, (o.y / len) as f32, (o.z / len) as f32, (1.0 / len) as f32]);
-            let b = f32_bytes(&floats);
-            nodes[i * NODE_BYTES as usize..(i + 1) * NODE_BYTES as usize].copy_from_slice(&b);
-        }
+        let nodes = node_record_bytes(plan);
         ctx.queue.write_buffer(&set.nodes, 0, &nodes);
         let mut stats = TerrainStats { node_record_bytes: nodes.len() as u64, ..Default::default() };
         // The argument records come from the plan and the slots alone (CON-03: the GPU culls and decides nothing).
