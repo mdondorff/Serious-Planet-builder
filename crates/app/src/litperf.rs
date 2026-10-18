@@ -225,7 +225,7 @@ fn calibration_threads() -> usize {
     planet_streaming::GenWorkers::workers_for(std::thread::available_parallelism().map_or(4, |n| n.get()), planet_streaming::GEN_RESERVE)
 }
 
-/// Measure the CPU calibration of a view's session now (not in a smoke run): the fixed job alone and on all the threads (STRM-022).
+/// Measure the CPU calibration of a view's session now (not in a smoke run unless `--calibrate` asks for it): the fixed job alone and on all the threads (STRM-022).
 fn calibrate_before(rig: &Rig<'_>) -> Option<planet_perf::streaming::CpuCalibration> {
     (!rig.smoke || rig.calibrate).then(|| planet_perf::streaming::calibrate_cpu(calibration_threads()))
 }

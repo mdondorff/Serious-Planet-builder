@@ -37,7 +37,7 @@ Dormant (no near trigger; not asked now):
 3. **remove-vertex-render-path** (#304) and one perf window.
 4. **M5 housekeeping 10b** (documentation consolidation, ADR 0055): after 3, so the spec rewrite does not collide with the open spec deltas of 1-3; the M5 archive step of the `housekeeping` skill with it, including its first process review (step 9, owner 2026-10-18).
 4c. **free-camera-mouse** (sonnet-crusader, support lane, after SPIKE-15 step 3; SPIKE-11 closed, #328; owner: raw mode is the first camera interface for editor and viewer): mouse look on the keyboard camera's pose function. Raw `DeviceEvent::MouseMotion` as counts x sensitivity, never times dt; request `Locked`, fall back to `Confined`; cursor hidden; released on Esc and focus loss; no recentring (86 % of recentres failed in the spike); arrow-key look kept as the fallback. A thin adapter turns window events into input deltas (tier A, synthetic events); the SPIKE-11 traces become replay tests with known final poses. 1000 Hz mice and DPI scaling were not tested: a manual check at the laptop. The keyboard and orbit feel stay as they are until the owner judges them.
-5. **The editor's first slice**: planned by opus-planner from the M6 inputs above (SPIKE-13 build order, SPIKE-14 UI) while 1-3 run.
+5. **The editor**: plan in `docs/briefings/m6-editor-plan.md` (opus-planner, 2026-10-19): main lane E0 (authored-items ADR) then E1-E6, support lane U1-U4; E0, U1 and U2 start now.
 
 ## Editor MVP requirements (owner interview, 2026-10-18)
 Mock: https://claude.ai/artifact/Srj3NGEYUkGQsfhne7kdCs (private to the owner).
