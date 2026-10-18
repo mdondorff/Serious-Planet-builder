@@ -16,7 +16,8 @@
 //! CON-11: everything the shader sees is tile-local (control points, heights relative to the tile origin) or a unit vector; the
 //! control points are `shell * dir - origin` rounded once from f64.
 //!
-//! CON-13: the height step is `relief / 4,294,967,295`, so 1 mm holds up to about 30 km of relief in one tile. The relief guard
+//! CON-13: the height step is `relief / 16,777,215` (2^24 - 1 levels in the 32-bit field): every level is an integer an f32 holds
+//! exactly, so CPU and GPU form the same `f32(q)`, and 1 mm holds up to [`WIDE_RELIEF_1MM_M`] (16.7 km) of relief in one tile. The relief guard
 //! (a finest tile with more than [`FALLBACK_RELIEF_M`] falls back to the vertex format, [`tile_data_field`]) stays until the vertex
 //! format is removed; [`tile_data_field_guarded`] with `false` turns it off for the CON-13 tests.
 
@@ -54,8 +55,12 @@ pub const SLOT_TEXEL_OFFSET: u64 = SLOT_PAD_OFFSET + 4;
 /// Scale of the 15-bit normal components: `2^14 - 1`.
 pub const NORMAL_SCALE: f32 = 16_383.0;
 
-/// Quantisation levels of the height: 32 bits.
-pub const HEIGHT_STEPS: f64 = 4_294_967_295.0;
+/// Quantisation levels of the height: the field is 32 bits wide, the count of levels is 2^24 - 1 so that `q` converts to f32 exactly
+/// (an f32 holds integers up to 2^24), identically on the CPU and in the shader (GEN-019).
+pub const HEIGHT_STEPS: f64 = 16_777_215.0;
+
+/// Relief (metres) up to which one tile's height step is at most [`MAX_FINEST_STEP_M`]: 1 mm x [`HEIGHT_STEPS`] = 16,777 m.
+pub const WIDE_RELIEF_1MM_M: f64 = MAX_FINEST_STEP_M * HEIGHT_STEPS;
 
 /// The 16-bit levels of the former texel: the relief guard of GEN-019 stays at the relief where that step passed 1 mm.
 const GUARD_STEPS: f64 = 65_535.0;

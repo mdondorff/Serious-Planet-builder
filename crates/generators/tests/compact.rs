@@ -6,8 +6,8 @@ use planet_core::hash::SplitMix64;
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::compact::{
     compact_tile_field, oct_decode, oct_encode, pack_normal, slot_bytes, slot_texel_bytes, tile_data_field, tile_data_field_guarded,
-    unpack_normal, vertex_reason, CompactTile, RenderTile, VertexReason, COMPACT_MIN_LEVEL, FALLBACK_RELIEF_M, SLOT_CLIMATE_OFFSET,
-    SLOT_HEADER_BYTES, SLOT_PAD_OFFSET, SLOT_TEXEL_OFFSET, TEXEL_BYTES,
+    unpack_normal, vertex_reason, CompactTile, RenderTile, VertexReason, COMPACT_MIN_LEVEL, FALLBACK_RELIEF_M, HEIGHT_STEPS,
+    SLOT_CLIMATE_OFFSET, SLOT_HEADER_BYTES, SLOT_PAD_OFFSET, SLOT_TEXEL_OFFSET, TEXEL_BYTES, WIDE_RELIEF_1MM_M,
 };
 use planet_generators::global::{bake, GridSource};
 use planet_generators::height::{HeightField, Reference};
@@ -181,7 +181,7 @@ fn the_height_step_is_under_a_millimetre_at_the_finest_levels_and_bounds_the_hei
             }
             let slack = 0.5 * f64::from(c.hr_step) + 4.0e-7 * f64::from(m.vertices[0].height.abs().max(1.0)) + 1.0e-7 * c.relief_m;
             assert!(worst <= slack, "tile {t:?}: height error {worst} m beyond half a step {slack}");
-            // CON-14's mixed bound max(1e-6 |v|, 1 mm) holds wherever the step is at most 2 mm; and every texel level is inside 0..=2^32-1.
+            // CON-14's mixed bound max(1e-6 |v|, 1 mm) holds wherever the step is at most 2 mm; and every texel level is inside 0..=2^24-1.
             if f64::from(c.hr_step) <= 2.0e-3 {
                 assert!(worst <= 1.0e-6 * f64::from(m.vertices[0].height.abs()).max(1.0e3) + 1.0e-3, "tile {t:?}: {worst}");
             }
@@ -192,12 +192,18 @@ fn the_height_step_is_under_a_millimetre_at_the_finest_levels_and_bounds_the_hei
                 // level at most an ulp and the rounded-up step above the highest.
                 let slack = 3.0e-7 * (f64::from(c.hr_min).abs() + c.relief_m) + f64::from(c.hr_step);
                 assert!(
-                    f64::from(qmin) * f64::from(c.hr_step) <= slack && f64::from(u32::MAX - qmax) * f64::from(c.hr_step) <= slack,
+                    f64::from(qmin) * f64::from(c.hr_step) <= slack
+                        && f64::from(HEIGHT_STEPS as u32 - qmax) * f64::from(c.hr_step) <= slack,
                     "tile {t:?}: quantisation levels {qmin}..{qmax}"
                 );
             }
-            // The step is at most 1 mm at every level (relief up to 30 km in one tile).
-            assert!(c.step_within_con13(), "level {level}: step {} m exceeds 1 mm", c.hr_step);
+            // Every level converts to f32 exactly, so the CPU mirror and the shader form the same `f32(q)` (GEN-019).
+            assert!(
+                qmax <= HEIGHT_STEPS as u32 && c.texels.iter().all(|t| (t[0] as f32) as u32 == t[0]),
+                "tile {t:?}: a level is not exact in f32"
+            );
+            // The step is at most 1 mm while the relief stays under WIDE_RELIEF_1MM_M (these tiles have far less).
+            assert!(c.relief_m < WIDE_RELIEF_1MM_M && c.step_within_con13(), "level {level}: step {} m exceeds 1 mm", c.hr_step);
             checked += 1;
         }
     }
@@ -293,7 +299,7 @@ fn compact_tiles_are_bit_identical_across_thread_counts_and_match_the_known_answ
     assert_eq!(one, KNOWN_ANSWERS, "compact tile content hashes changed: {one:016x?}");
 }
 
-const KNOWN_ANSWERS: [u64; 4] = [16317442497310121000, 12915908104420781678, 675929460719006013, 16976385179961748364];
+const KNOWN_ANSWERS: [u64; 4] = [2175441651109346958, 4429028654179405316, 7060940787204524714, 7402522155882393221];
 
 // spec: GEN-019, CON-13, CON-14
 #[test]
@@ -359,4 +365,39 @@ fn a_flat_tile_quantises_without_dividing_by_zero() {
     assert!(c.texels.iter().all(|t| t[0] == c.texels[0][0]));
     assert_eq!(c.relief_m, 0.0);
     assert_eq!(c.shade_all().len(), vertex_count(16));
+}
+
+// spec: GEN-019, CON-13
+#[test]
+fn the_one_millimetre_step_bound_is_falsifiable_and_ends_at_16_7_km_of_relief() {
+    // A cliff of `h` metres across a tile: the step is relief / (2^24 - 1), at most 1 mm exactly while the relief is under 16,777 m.
+    struct Cliff(f64);
+    impl HeightField for Cliff {
+        fn height(&self, d: Vec3) -> f64 {
+            if d.y > 0.05 {
+                self.0
+            } else {
+                0.0
+            }
+        }
+        fn seed(&self) -> u64 {
+            0
+        }
+        fn implementation_id(&self) -> &'static str {
+            "cliff-test"
+        }
+        fn version(&self) -> u32 {
+            1
+        }
+        fn max_abs_height_m(&self) -> f64 {
+            self.0
+        }
+    }
+    assert!((WIDE_RELIEF_1MM_M - 16_777.215).abs() < 1e-9);
+    for (relief, ok) in [(16_000.0, true), (20_000.0, false)] {
+        let c = compact_tile_field(&Cliff(relief), &TangentWarp, id(0, 2, 2, 2), 16, R);
+        assert!((c.relief_m - relief).abs() < 1e-6, "fixture: the tile straddles the cliff");
+        assert_eq!(c.step_within_con13(), ok, "relief {relief} m: step {} m", c.hr_step);
+        assert!(c.texels.iter().all(|t| (t[0] as f32) as u32 == t[0]), "levels are exact in f32");
+    }
 }

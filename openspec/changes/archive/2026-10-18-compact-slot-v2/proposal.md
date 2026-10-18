@@ -21,3 +21,8 @@ Expected golden changes:
 - terrain_aerial20km_level: only if the texel moves it (expected unchanged)
 - lit_orbit_ev15, lit_aerial20km_ev15, lit_ground1m_ev15, lit_orbit_ev_bands, lit_orbit_temperature_ev15, lit_orbit_precipitation_ev15, lit_aerial20km_albedo_ev15, lit_orbit_lighting_ev15: wide texel (normals and heights feed shading; owner's /bless for lit)
 - water_class_coast_aerial2km, water_class_coast_low3m, water_class_orbit, water_class_lava_lake: wide texel under the water pass (rounding noise, owner's if class water escalates)
+
+Bound tests:
+- terrain_cube_corner_normals: planet-generators::compact::a_tiles_stored_normals_equal_the_cpu_normal_within_the_bound, planet-generators::compact::fifteen_bit_octahedral_normals_stay_inside_the_normal_bound, planet-generators::oracle_compact_mirror::the_cpu_mirror_matches_the_product_mesh_at_every_level_from_3_to_26
+- terrain_aerial200km_height: planet-generators::compact::the_height_step_is_under_a_millimetre_at_the_finest_levels_and_bounds_the_height_error, planet-generators::oracle_compact_mirror::the_cpu_mirror_matches_the_product_mesh_at_every_level_from_3_to_26
+- terrain_ground1m_depth: planet-generators::compact::the_height_step_is_under_a_millimetre_at_the_finest_levels_and_bounds_the_height_error, planet-generators::oracle_compact_mirror::the_cpu_mirror_matches_the_product_mesh_at_every_level_from_3_to_26

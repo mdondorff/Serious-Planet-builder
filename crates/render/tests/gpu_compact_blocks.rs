@@ -89,7 +89,7 @@ fn one_shot_frames_in_every_debug_view_are_the_recorded_pixels() {
     }
     assert_eq!((frames, compact_nodes), (90, 16_542), "the scripted views changed");
     println!("one_shot: {frames} frames, {compact_nodes} compact nodes drawn, hash {all:016x}");
-    expect(&ctx, "one_shot", all, &[(WARP, 0xa536_f5ee_ab71_abc7)]); // RTX: re-record with `test gpu --real` (MESH_VERSION 8 moved it)
+    expect(&ctx, "one_shot", all, &[(WARP, 0x7c3d_3ad9_aa77_fca7)]); // RTX: re-record with `test gpu --real` (MESH_VERSION 8 moved it)
 }
 
 fn persistent(ctx: &GpuContext, plan: &TerrainPlan, mode: UploadMode, lit: Option<LitPlan>) -> Vec<u8> {

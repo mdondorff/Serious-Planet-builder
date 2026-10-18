@@ -13,6 +13,7 @@
 //! requires it by name).
 
 use crate::terrain::TERRAIN_SHADERS;
+use planet_generators::compact::{NORMAL_SCALE, SLOT_CLIMATE_OFFSET, SLOT_TEXEL_OFFSET};
 use planet_streaming::SlotPool;
 
 /// Bytes of one tile reference: the slot's first texel in its block, reserved, slot index, reserved.
@@ -26,7 +27,11 @@ pub fn compact_terrain_shader(cells: u32) -> String {
     let tail_at = src.find("// Distance in pixels to the nearest integer").expect("product shader helper marker");
     let head = &src[..vs_at];
     assert!(head.contains("@group(0) @binding(1) var<storage, read> nodes: array<Node>;"), "product node binding changed");
-    let vertex = COMPACT_VERTEX.replace("{CELLS}", &cells.to_string());
+    let vertex = COMPACT_VERTEX
+        .replace("{CELLS}", &cells.to_string())
+        .replace("{CLIMATE_WORD}", &(SLOT_CLIMATE_OFFSET / 4).to_string())
+        .replace("{TEXEL_WORD}", &(SLOT_TEXEL_OFFSET / 4).to_string())
+        .replace("{NORMAL_SCALE}", &format!("{:.1}", NORMAL_SCALE));
     format!("{head}{vertex}{}", &src[tail_at..])
 }
 
@@ -39,8 +44,9 @@ const COMPACT_VERTEX: &str = r#"
 
 const CELLS: i32 = {CELLS};
 // Word offsets inside the slot (GEN-025: climate block at byte 128, texels at byte 456).
-const CLIMATE_WORD: u32 = 32u;
-const TEXEL_WORD: u32 = 114u;
+const CLIMATE_WORD: u32 = {CLIMATE_WORD}u;
+const TEXEL_WORD: u32 = {TEXEL_WORD}u;
+const NORMAL_SCALE: f32 = {NORMAL_SCALE};
 
 var<private> c0: vec3<f32>;
 var<private> c1: vec3<f32>;
@@ -128,8 +134,8 @@ fn rel_height(t: vec2<u32>) -> f32 {
 
 fn texel_normal(t: vec2<u32>) -> vec3<f32> {
     let w = bitcast<i32>(t.y);
-    let x = max(f32(extractBits(w, 0u, 15u)) / 16383.0, -1.0);
-    let y = max(f32(extractBits(w, 15u, 15u)) / 16383.0, -1.0);
+    let x = max(f32(extractBits(w, 0u, 15u)) / NORMAL_SCALE, -1.0);
+    let y = max(f32(extractBits(w, 15u, 15u)) / NORMAL_SCALE, -1.0);
     return oct_decode(vec2<f32>(x, y));
 }
 
