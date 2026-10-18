@@ -40,6 +40,17 @@ pub const SHORE_RAMP_K: f64 = 2.0;
 /// 3 m. Above it the ramp would only turn the colour of the deep seabed into the beach's in terrain-only views.
 pub const SHORE_RAMP_MAX_M: f64 = 8.0;
 
+/// The ramp height at a vertex of a node whose least ramp is `ramp_min_m` and whose morph factor is `morph` (0 at full detail, 1 on
+/// the parent's grid), REND-030: `mix(ramp_min, parent's ramp_min, morph)`, where the parent's is `min(2 * ramp_min, cap)` (the sample
+/// spacing halves per level, so the parent's uncapped ramp is twice the node's, and the cap is common). The morph reaches 1 where the
+/// node meets a node of the coarser level, whose own factor is 0 there, so the ramp is continuous across every level border (a
+/// width that was constant per node stepped at each border: a dark tile-shaped patch in the foreground water of a descent). The WGSL
+/// `shore_ramp_at` is the same function.
+pub fn shore_ramp_at(ramp_min_m: f64, morph: f64) -> f64 {
+    let parent = (2.0 * ramp_min_m).min(SHORE_RAMP_MAX_M);
+    ramp_min_m + (parent - ramp_min_m) * morph
+}
+
 /// log2 of the cells per face edge at the production finest level: a face edge is `2^level` tiles of `cells` cells, and the
 /// production cap fixes `2^level * cells = 2^27` (134 million cells; `radius * pi/2 / 2^27` = 7.46 cm of vertex spacing on an
 /// Earth-sized body), so level 22 at 32 cells and 21 at 64 (ADR 0033 point 6, owner 2026-10-15).

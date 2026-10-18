@@ -17,6 +17,44 @@ fn close3(a: [f64; 3], b: [f64; 3], tol: f64, what: &str) {
 
 // spec: REND-030
 #[test]
+fn the_ramp_and_the_albedo_agree_at_the_border_between_two_levels() {
+    use planet_frame::lod::{shore_ramp_at, LodParams, SHORE_RAMP_MAX_M};
+    let lod = LodParams::earth_1080p();
+    let morph_at = |level: u8, d: f64| {
+        let (start, end) = lod.morph_interval(level);
+        ((d - start) / (end - start)).clamp(0.0, 1.0)
+    };
+    for level in 2..=22u8 {
+        // The border between a node of `level` and its parent's level: the fine node is fully morphed onto the parent's grid at the
+        // distance where the parent stops splitting, and the coarse neighbour has not started to morph there (the crack-free rule of
+        // `morph_interval`). A ramp constant per node stepped here (a dark tile-shaped patch in the foreground water of the descent).
+        let d = lod.morph_interval(level).1;
+        let (fine, coarse) = (lod.shore_ramp_min_m(level), lod.shore_ramp_min_m(level - 1));
+        let (rf, rc) = (shore_ramp_at(fine, morph_at(level, d)), shore_ramp_at(coarse, morph_at(level - 1, d)));
+        assert!((rf - rc).abs() <= 1e-9 * rc.max(1.0), "level {level}: ramp {rf} on the fine side, {rc} on the coarse side");
+        for h in [-12.0, -6.0, -3.0, -1.0, -0.2, 0.0, 1.0] {
+            let (af, ac) = (E.albedo_with_ramp(20.0, 50.0, 1.0, h, rf), E.albedo_with_ramp(20.0, 50.0, 1.0, h, rc));
+            assert_eq!(af, ac, "level {level}, h {h}");
+        }
+        // And along the node's own morph the ramp moves smoothly from its width to the parent's, never beyond the cap.
+        let mut last = fine;
+        for k in 0..=20 {
+            let r = shore_ramp_at(fine, f64::from(k) / 20.0);
+            assert!(
+                r >= last - 1e-12 && r <= SHORE_RAMP_MAX_M + 1e-12 && r - last <= 0.5 * fine.max(0.01) + 1e-12,
+                "level {level}, step {k}: {r}"
+            );
+            last = r;
+        }
+    }
+    assert_eq!(shore_ramp_at(3.0, 0.0), 3.0);
+    assert_eq!(shore_ramp_at(3.0, 1.0), 6.0, "the parent's ramp is twice the node's below the cap");
+    assert_eq!(shore_ramp_at(5.0, 1.0), SHORE_RAMP_MAX_M, "and the cap above it");
+    assert_eq!(shore_ramp_at(8.0, 0.5), 8.0);
+}
+
+// spec: REND-030
+#[test]
 fn the_shore_ramp_is_the_looks_blend_where_the_mesh_is_fine_and_follows_the_tolerance_where_it_is_not() {
     use planet_frame::lod::{LodParams, SHORE_RAMP_K, SHORE_RAMP_MAX_M};
     let lod = LodParams::earth_1080p();

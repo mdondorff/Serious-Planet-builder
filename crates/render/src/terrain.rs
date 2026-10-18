@@ -256,6 +256,12 @@ fn albedo_of(tab: array<vec4<f32>, 10>, t: f32, p: f32, cs: f32, h: f32, ramp_mi
     return mix(tab[7].xyz, shore, land_w);
 }
 
+// The ramp height at a vertex of a node of least ramp `z` and morph factor `m` (REND-030, `planet_frame::lod::shore_ramp_at`): `z` at
+// full detail, the parent's `min(2 z, 8)` on the parent's grid, so the ramp is continuous across a level border.
+fn shore_ramp_at(z: f32, m: f32) -> f32 {
+    return mix(z, min(2.0 * z, 8.0), m);
+}
+
 // The false colour of a climate channel (the debug views): temperature blue to red over -30..40 C, precipitation sand to blue over
 // 0..3000 mm.
 fn climate_colour(view: u32, t: f32, p: f32) -> vec3<f32> {
@@ -308,7 +314,7 @@ fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
-    return vec4<f32>(shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, nodes[in.node_index].morph.z, sun, g.range.z), 1.0);
+    return vec4<f32>(shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(nodes[in.node_index].morph.z, in.morph), sun, g.range.z), 1.0);
 }
 "#;
 
@@ -2544,6 +2550,17 @@ pub fn execute_terrain_tiles(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[&Ren
 #[cfg(test)]
 mod one_shot_tests {
     use super::*;
+
+    // spec: REND-030
+    #[test]
+    fn the_shaders_ramp_function_is_the_references_with_the_same_cap() {
+        let cap = format!("min(2.0 * z, {:.1})", planet_frame::lod::SHORE_RAMP_MAX_M);
+        assert!(
+            SHADER.contains("fn shore_ramp_at(z: f32, m: f32) -> f32") && SHADER.contains(&cap),
+            "the cap of the WGSL is the reference's"
+        );
+        assert!(SHADER.contains("shore_ramp_at(nodes[in.node_index].morph.z, in.morph)"), "the lit fragment ramps with the vertex's morph");
+    }
 
     // spec: REND-016
     #[test]
