@@ -740,7 +740,7 @@ Source: M5 item 9a.1 (status.md), TEST-012, TEST-021
 - **THEN** the second plan's counter difference is 0, 0, 0
 
 ### Requirement: TEST-035 Streaming smoke without a perf window
-A tier-B test SHALL run the real streamer and pool through a short scripted dive (48 frames, `test-render --perf-smoke --scene dive`) from an empty cache over a small in-memory bake on the software adapter, with an explicit number of generation workers, and SHALL read the run's log for findings that name a configuration cap: the most jobs that ran at once below a third of the workers (at least two), fewer than 3 tile jobs finished or 3 resident slots at the peak (the streamer is alive; the counts depend on the machine, 187 jobs on a development machine and 5 on a 4-core CI runner), a pool below 23,109 slots, a median of the scheduler step above 0.5 ms or of the upload step above 1.6 ms (about a tenth, and ten times, the first measurements on the software adapter, 2026-10-17). It is not a performance verdict, and it never replaces a perf window. A run of the same dive with one worker where six are expected SHALL produce a finding that names the concurrency. Each run takes a few seconds.
+A tier-B test SHALL run the real streamer and pool through a short scripted dive (`test-render --perf-smoke --scene dive`, 48 frames, repeated with twice as many while the streamer has not shown it is alive, up to a wall-time cap of 60 s, checked between dives, whose expiry is the failure) from an empty cache over a small in-memory bake on the software adapter, with an explicit number of generation workers, and SHALL read the run's log for findings that name a configuration cap: the most jobs that ran at once below a third of the workers (at least two), fewer than 3 tile jobs finished or 3 resident slots at the peak (the streamer is alive; the counts depend on the machine, 187 jobs on a development machine and 5 on a 4-core CI runner), a pool below 23,109 slots, a median of the scheduler step above 0.5 ms or of the upload step above 1.6 ms (about a tenth, and ten times, the first measurements on the software adapter, 2026-10-17). It is not a performance verdict, and it never replaces a perf window. A run of the same dive with one worker where six are expected SHALL produce a finding that names the concurrency. Each run takes a few seconds.
 
 Verify: B
 Status: active
@@ -749,6 +749,10 @@ Source: M5 item 9 (owner, 2026-10-16), the M4 configuration cap, TEST-019
 #### Scenario: A healthy dive
 - **WHEN** the dive runs with 6 workers
 - **THEN** there are no findings
+
+#### Scenario: A slow runner
+- **WHEN** a 48-frame dive finishes fewer than 3 tile jobs or has fewer than 3 resident slots at the peak (a loaded runner: 2 jobs observed)
+- **THEN** the dive is run again with 96 frames, 192 and so on until at least 3 jobs finished and 3 slots were resident (`liveness_met`), and only then are the findings read; at the 60 s cap the last log goes to the findings, which name the missing jobs; the other checks (concurrency, pool, scheduler and upload medians) are unchanged
 
 #### Scenario: An injected cap
 - **WHEN** the dive runs with 1 worker and the check expects 6
