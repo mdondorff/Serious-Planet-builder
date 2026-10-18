@@ -5,7 +5,7 @@
 use planet_core::cube::TangentWarp;
 use planet_frame::pipeline::{FramesInFlight, MAX_FRAMES_IN_FLIGHT};
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainRequest, TerrainView};
-use planet_generators::compact::{tile_data_field, RenderTile};
+use planet_generators::compact::{compact_tile_field, CompactTile};
 use planet_generators::height::Reference;
 use planet_render::{AdapterPolicy, GpuContext, TerrainRenderer};
 
@@ -28,7 +28,7 @@ fn frames_submitted_without_waiting_are_counted_bounded_and_draw_the_same_image(
     let mut reference = TerrainRenderer::new_compact(&ctx, SIZE, CELLS);
     for p in &plans {
         for n in &p.nodes {
-            let m: RenderTile = tile_data_field(&Reference(1), &TangentWarp, n.tile, CELLS, R, 26);
+            let m: CompactTile = compact_tile_field(&Reference(1), &TangentWarp, n.tile, CELLS, R);
             renderer.upload_tile(&ctx, &m).unwrap();
             reference.upload_tile(&ctx, &m).unwrap();
         }

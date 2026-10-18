@@ -10,7 +10,7 @@ use planet_frame::{
     cover_selection, plan_terrain_field, production_finest_level, residency_set_field, scripted_views_field, select_nodes_in_view_field,
     LodParams, SelectionCache, TerrainDraw, TerrainRequest, TerrainView,
 };
-use planet_generators::compact::tile_data_field;
+use planet_generators::compact::compact_tile_field;
 use planet_generators::height::{HeightField, Reference};
 use planet_generators::mesh::{finest_class_key, mesh_key_field};
 
@@ -123,14 +123,14 @@ fn a_tile_at_the_cap_has_the_key_of_its_class_and_other_tiles_keep_their_base_ke
 // spec: LOD-010, GEN-019, CON-13
 #[test]
 fn the_format_of_a_resident_tile_is_a_function_of_its_key() {
-    use planet_generators::compact::RenderTile;
+    use planet_generators::compact::CompactTile;
     use planet_generators::stress::Steep;
     // The steep field has far more than 65 m of relief on a level-9 tile: it is a vertex-format tile where level 9 is the cap, and
     // a compact one where the cap is deeper. The two must not share a key, or a resident tile decided for one cap would be reused
     // for the other (the compact tile's guard is decided once, at build).
     let steep = Steep(1);
     let tile = TileId::new(planet_core::Face::ALL[4], 9, 100, 100).unwrap();
-    let (capped, deeper) = (tile_data_field(&steep, &TangentWarp, tile, 32, R, 9), tile_data_field(&steep, &TangentWarp, tile, 32, R, 10));
+    let (capped, deeper) = (compact_tile_field(&steep, &TangentWarp, tile, 32, R), compact_tile_field(&steep, &TangentWarp, tile, 32, R));
     assert!(matches!(capped, RenderTile::Vertex(_)) && deeper.is_compact(), "fixture: the cap decides the format of this tile");
     assert_ne!(capped.key(), deeper.key(), "the key must identify the class the format was decided for");
     // Each key is the plan's key for that cap, whichever format the tile has.
@@ -138,5 +138,5 @@ fn the_format_of_a_resident_tile_is_a_function_of_its_key() {
     assert_eq!(capped.key(), finest_class_key(base, tile, 9));
     assert_eq!(deeper.key(), base);
     // Tiles with the same class share a key: the format decision no longer depends on the cap's value.
-    assert_eq!(tile_data_field(&steep, &TangentWarp, tile, 32, R, 8).key(), capped.key());
+    assert_eq!(compact_tile_field(&steep, &TangentWarp, tile, 32, R).key(), capped.key());
 }

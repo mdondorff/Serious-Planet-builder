@@ -5,7 +5,7 @@
 use planet_core::cube::TangentWarp;
 use planet_frame::pool::compact_format_pool_with;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::{tile_data_field, vertex_tile_field};
+use planet_generators::compact::{compact_tile_field, vertex_tile_field};
 use planet_generators::height::{HeightField, Reference};
 use planet_render::reference::execute_reference;
 use planet_render::{AdapterPolicy, GpuContext, RgbaFrame, TerrainRenderer};
@@ -38,7 +38,7 @@ fn differing(a: &RgbaFrame, b: &RgbaFrame, limit: u8) -> usize {
 }
 
 fn reference_image(ctx: &GpuContext, field: &dyn HeightField, p: &TerrainPlan) -> RgbaFrame {
-    let meshes: Vec<_> = p.nodes.iter().map(|n| vertex_tile_field(field, &TangentWarp, n.tile, CELLS, R, FINEST)).collect();
+    let meshes: Vec<_> = p.nodes.iter().map(|n| tile_mesh_field(field, &TangentWarp, n.tile, CELLS, R)).collect();
     let refs: Vec<_> = meshes.iter().collect();
     execute_reference(ctx, p, &refs).unwrap()
 }
@@ -56,7 +56,7 @@ fn the_reference_renderer_draws_the_images_of_the_compact_renderer_within_the_mo
             let reference = reference_image(&ctx, &field, &p);
             let mut r = TerrainRenderer::with_compact_pools(&ctx, SIZE, CELLS, pool());
             for n in &p.nodes {
-                r.upload_tile(&ctx, &tile_data_field(&field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
+                r.upload_tile(&ctx, &compact_tile_field(&field, &TangentWarp, n.tile, CELLS, R)).unwrap();
             }
             r.render(&ctx, &p, false).unwrap();
             let image = r.read_color(&ctx);
@@ -91,7 +91,7 @@ fn the_reference_renderer_equals_the_vertex_renderer_pixel_for_pixel_in_every_de
             let reference = reference_image(&ctx, &field, &p);
             let mut r = TerrainRenderer::new(&ctx, SIZE, CELLS);
             for n in &p.nodes {
-                r.upload(&ctx, &vertex_tile_field(&field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
+                r.upload(&ctx, &tile_mesh_field(&field, &TangentWarp, n.tile, CELLS, R)).unwrap();
             }
             r.render(&ctx, &p, false).unwrap();
             let clear = [p.clear_color[0], p.clear_color[1], p.clear_color[2]];

@@ -241,8 +241,7 @@ pub(crate) fn plan_terrain_keyed(
         )));
     }
     let heights = origin_heights(&selection, map.as_ref(), field, cache, threads);
-    let keyer =
-        planet_generators::mesh::MeshKeyer::new(field, map.as_ref(), req.lod.cells, req.lod.radius_m).at_finest_level(req.lod.max_level);
+    let keyer = planet_generators::mesh::MeshKeyer::new(field, map.as_ref(), req.lod.cells, req.lod.radius_m);
     let derive_key = |tile: TileId| key_override.map_or_else(|| keyer.key(tile), |f| f(tile));
     let nodes = selection
         .nodes

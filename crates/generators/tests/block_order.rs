@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use planet_core::cube::TangentWarp;
 use planet_core::hash::SplitMix64;
 use planet_core::{Face, TileId, Vec3};
-use planet_generators::compact::tile_data_field;
+use planet_generators::compact::compact_tile_field;
 use planet_generators::erosion::{ErosionField, ErosionGenerator};
 use planet_generators::global::{bake, GlobalGrid, GlobalSample, GridSource, LatticeSource, ReadError};
 use planet_generators::height::HeightField;
@@ -147,8 +147,8 @@ fn tiles_are_bit_identical_in_raster_and_block_order_on_the_synthetic_and_the_in
         for cells in [8u32, 32] {
             assert!(mesh_bits(&field(&raster), id, cells) == mesh_bits(&field(&ordered), id, cells), "{id:?} cells {cells}");
         }
-        let a = tile_data_field(&field(&raster), &TangentWarp, id, 32, R, 22);
-        let b = tile_data_field(&field(&ordered), &TangentWarp, id, 32, R, 22);
+        let a = compact_tile_field(&field(&raster), &TangentWarp, id, 32, R);
+        let b = compact_tile_field(&field(&ordered), &TangentWarp, id, 32, R);
         assert!(a == b, "{id:?}: the compact or vertex tile differs");
     }
     let def = WorldDefinition::single_planet(R, SEED);

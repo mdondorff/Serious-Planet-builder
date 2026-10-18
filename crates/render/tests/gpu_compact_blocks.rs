@@ -8,7 +8,7 @@ use planet_frame::look::file::LookParams;
 use planet_frame::look::LitPlan;
 use planet_frame::pool::compact_format_pool_with;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::{tile_data_field, RenderTile};
+use planet_generators::compact::{compact_tile_field, CompactTile};
 use planet_generators::height::Reference;
 use planet_render::{execute_terrain_tiles, AdapterPolicy, GpuContext, TerrainRenderer, UploadMode};
 use planet_streaming::PoolConfig;
@@ -38,8 +38,8 @@ fn plan_for(index: usize, view: TerrainView) -> TerrainPlan {
     plan_terrain(&TerrainRequest { camera, size: SIZE, view, lod: lod(), face_mapping: "tangent-v1".into(), seed: 1 }).unwrap()
 }
 
-fn tiles(plan: &TerrainPlan) -> Vec<RenderTile> {
-    plan.nodes.iter().map(|n| tile_data_field(&Reference(SEED), &TangentWarp, n.tile, CELLS, R, lod().max_level)).collect()
+fn tiles(plan: &TerrainPlan) -> Vec<CompactTile> {
+    plan.nodes.iter().map(|n| compact_tile_field(&Reference(SEED), &TangentWarp, n.tile, CELLS, R)).collect()
 }
 
 fn compact_pool() -> PoolConfig {
@@ -56,7 +56,7 @@ fn compact_pool() -> PoolConfig {
 
 fn one_shot(ctx: &GpuContext, plan: &TerrainPlan) -> Vec<u8> {
     let t = tiles(plan);
-    let refs: Vec<&RenderTile> = t.iter().collect();
+    let refs: Vec<&CompactTile> = t.iter().collect();
     let (frame, _) = execute_terrain_tiles(ctx, plan, &refs).unwrap();
     frame.rgba
 }

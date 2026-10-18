@@ -12,7 +12,7 @@ use planet_frame::look::{self, LitPlan};
 use planet_frame::pool::compact_format_pool_with;
 use planet_frame::water::{plan_water, WaterPlan, WaterRequest, WaterSource, WaterTileCache, WaterView};
 use planet_frame::{plan_terrain_field, Camera, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::tile_data_field;
+use planet_generators::compact::compact_tile_field;
 use planet_generators::global::ReadError;
 use planet_generators::height::{HeightField, Reference};
 use planet_generators::water::{WaterBodyId, WaterSample};
@@ -67,7 +67,7 @@ fn upload_all(ctx: &GpuContext, r: &mut TerrainRenderer, plan: &TerrainPlan, fie
         if r.slot_of(n.tile).is_some() {
             continue;
         }
-        r.upload_tile(ctx, &tile_data_field(field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
+        r.upload_tile(ctx, &compact_tile_field(field, &TangentWarp, n.tile, CELLS, R)).unwrap();
     }
 }
 

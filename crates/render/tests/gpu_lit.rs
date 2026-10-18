@@ -6,7 +6,7 @@ use planet_core::cube::TangentWarp;
 use planet_frame::look::{self, LitPlan, ToneMapMode};
 use planet_frame::pool::compact_format_pool_with;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::tile_data_field;
+use planet_generators::compact::compact_tile_field;
 use planet_generators::height::Reference;
 use planet_render::graph::{frame_target_share_bytes, lit_frame_graph, LitShape};
 use planet_render::{AdapterPolicy, ExecError, GpuContext, TerrainRenderer};
@@ -55,7 +55,7 @@ fn renderer(ctx: &GpuContext, plans: &[&TerrainPlan], enable_lit: bool) -> Terra
             if r.slot_of(n.tile).is_some() {
                 continue;
             }
-            r.upload_tile(ctx, &tile_data_field(&field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
+            r.upload_tile(ctx, &compact_tile_field(&field, &TangentWarp, n.tile, CELLS, R)).unwrap();
         }
     }
     r

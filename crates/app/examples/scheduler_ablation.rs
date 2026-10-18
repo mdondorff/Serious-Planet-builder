@@ -12,7 +12,7 @@ use planet_frame::managed::{ManagedLoop, TileSink};
 use planet_frame::pipeline::{residency_of, PlanField, PlanPipeline, PlanWorker, ResidentRecords};
 use planet_frame::scenes::{build_script, StreamScene, LOOK_SEED};
 use planet_frame::{plan_terrain_threaded, LodParams, PlanError, ResidencySet, SelectionCache, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::RenderTile;
+use planet_generators::compact::CompactTile;
 use planet_generators::mesh::TileMesh;
 use planet_streaming::{ResidencyManager, SlotRef, StreamConfig, Streamer, SystemClock, ThreadPool, TileSource};
 use planet_world_def::WorldDefinition;
@@ -46,8 +46,8 @@ struct Source {
     lod: LodParams,
 }
 
-impl TileSource<RenderTile> for Source {
-    fn load(&self, tile: TileId) -> Result<RenderTile, String> {
+impl TileSource<CompactTile> for Source {
+    fn load(&self, tile: TileId) -> Result<CompactTile, String> {
         let field = self.world.field()?;
         let rec = ResidentRecords::new(field.as_ref(), &TangentWarp, &self.lod).record(tile);
         Ok(RenderTile::Vertex(TileMesh {
@@ -64,11 +64,11 @@ impl TileSource<RenderTile> for Source {
 struct Sink;
 
 impl TileSink for Sink {
-    fn upload_at(&mut self, _tile: &RenderTile, _slot: SlotRef) -> Result<(), String> {
+    fn upload_at(&mut self, _tile: &CompactTile, _slot: SlotRef) -> Result<(), String> {
         Ok(())
     }
 
-    fn upload_bytes(&self, _tile: &RenderTile) -> u64 {
+    fn upload_bytes(&self, _tile: &CompactTile) -> u64 {
         planet_generators::compact::slot_bytes(32)
     }
 

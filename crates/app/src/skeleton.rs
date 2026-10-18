@@ -597,7 +597,7 @@ fn generate_store(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     .map_err(err)
 }
 
-use planet_generators::compact::RenderTile;
+use planet_generators::compact::CompactTile;
 
 const TERRAIN_SIZE: (u32, u32) = (256, 192);
 const TERRAIN_CELLS: u32 = 16;
@@ -666,7 +666,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
     let mut cache = planet_frame::SelectionCache::new();
     let plan = planet_frame::plan_terrain_cached(&request, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
     let format = ctx.default_tile_format();
-    let meshes: Vec<std::sync::Arc<RenderTile>> = if o.stream {
+    let meshes: Vec<std::sync::Arc<CompactTile>> = if o.stream {
         // R is selected on the plan's cache (its tile geometry and height volumes are hits), from the position only.
         let residency = planet_frame::pipeline::residency_of(&request, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
         streamed_meshes(&world, &plan, &residency, format, request.lod.max_level, request.lod.floor_level())?
@@ -676,7 +676,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
             .map(|n| std::sync::Arc::new(tile_for(format, field.as_ref(), n.tile, TERRAIN_CELLS, radius_m, request.lod.max_level)))
             .collect()
     };
-    let refs: Vec<&RenderTile> = meshes.iter().map(|m| m.as_ref()).collect();
+    let refs: Vec<&CompactTile> = meshes.iter().map(|m| m.as_ref()).collect();
     let (frame, stats) = planet_render::execute_terrain_tiles(ctx, &plan, &refs).map_err(|e| e.to_string())?;
     writeln!(
         out,
@@ -770,7 +770,7 @@ fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>,
     let format = ctx.default_tile_format();
     let max_level = b.request.lod.max_level;
     let reference = planet_generators::height::Reference(seed);
-    let meshes: Vec<RenderTile> = rebuilt
+    let meshes: Vec<CompactTile> = rebuilt
         .nodes
         .iter()
         .map(|n| match &field {
@@ -778,7 +778,7 @@ fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>,
             None => tile_with(format, &reference, map.as_ref(), n.tile, cells, radius, max_level),
         })
         .collect();
-    let refs: Vec<&RenderTile> = meshes.iter().collect();
+    let refs: Vec<&CompactTile> = meshes.iter().collect();
     let (frame, stats) = planet_render::execute_terrain_tiles(ctx, &rebuilt, &refs).map_err(|e| e.to_string())?;
     writeln!(out, "replay: {} draw calls, {} triangles", stats.draw_calls, stats.triangles).map_err(err)?;
     if let Some(p) = png {
@@ -824,8 +824,8 @@ pub(crate) struct MeshSource {
     pub(crate) cells: u32,
 }
 
-impl planet_streaming::TileSource<RenderTile> for MeshSource {
-    fn load(&self, tile: TileId) -> Result<RenderTile, String> {
+impl planet_streaming::TileSource<CompactTile> for MeshSource {
+    fn load(&self, tile: TileId) -> Result<CompactTile, String> {
         let field = self.world.field()?;
         // A pre-filled coarse tile is read from the pack instead of generated (STRM-021): the same tile, bit for bit.
         if let Some(t) = self.world.prefilled_tile(field.as_ref(), tile, self.cells, self.max_level, self.format) {
@@ -840,7 +840,7 @@ impl planet_streaming::TileSource<RenderTile> for MeshSource {
     /// The stage boundary of a tile is every height sample: once the token is set the field answers 0 without reading the
     /// store, so the generation runs out in microseconds and the garbage tile is dropped, never returned (STRM-005: a job
     /// stops at its next stage boundary; a teardown or a teleport does not wait for a cold tile to read its blocks).
-    fn load_staged(&self, tile: TileId, cancel: &planet_streaming::CancelToken) -> Result<Option<RenderTile>, String> {
+    fn load_staged(&self, tile: TileId, cancel: &planet_streaming::CancelToken) -> Result<Option<CompactTile>, String> {
         if cancel.is_cancelled() {
             return Ok(None);
         }
@@ -849,7 +849,7 @@ impl planet_streaming::TileSource<RenderTile> for MeshSource {
 }
 
 impl MeshSource {
-    fn load_staged_timed(&self, tile: TileId, cancel: &planet_streaming::CancelToken) -> Result<Option<RenderTile>, String> {
+    fn load_staged_timed(&self, tile: TileId, cancel: &planet_streaming::CancelToken) -> Result<Option<CompactTile>, String> {
         let field = self.world.field()?;
         if let Some(t) = self.world.prefilled_tile(field.as_ref(), tile, self.cells, self.max_level, self.format) {
             if !cancel.is_cancelled() {
@@ -958,7 +958,7 @@ pub(crate) fn tile_for(
     cells: u32,
     radius_m: f64,
     max_level: u8,
-) -> RenderTile {
+) -> CompactTile {
     tile_with(format, field, &TangentWarp, tile, cells, radius_m, max_level)
 }
 
@@ -970,11 +970,11 @@ fn tile_with(
     cells: u32,
     radius_m: f64,
     max_level: u8,
-) -> RenderTile {
+) -> CompactTile {
     match format {
-        planet_render::TileFormat::Compact => planet_generators::compact::tile_data_field(field, map, tile, cells, radius_m, max_level),
+        planet_render::TileFormat::Compact => planet_generators::compact::compact_tile_field(field, map, tile, cells, radius_m),
         planet_render::TileFormat::Vertex => {
-            RenderTile::Vertex(planet_generators::compact::vertex_tile_field(field, map, tile, cells, radius_m, max_level))
+            RenderTile::Vertex(planet_generators::compact::tile_mesh_field(field, map, tile, cells, radius_m))
         }
     }
 }
@@ -991,7 +991,7 @@ fn streamed_meshes(
     format: planet_render::TileFormat,
     max_level: u8,
     floor: u8,
-) -> Result<Vec<std::sync::Arc<RenderTile>>, String> {
+) -> Result<Vec<std::sync::Arc<CompactTile>>, String> {
     use planet_streaming::{ResidencyManager, StreamConfig, Streamer, SystemClock, Tier, Wants};
     // Four tile threads and four queued behind them (STRM-020): the pool size and the limit are one number.
     let gen = planet_streaming::GenWorkers::new(4);
@@ -1053,7 +1053,7 @@ pub(crate) fn upload_missing_meshes(
     let missing: Vec<TileId> = plan.nodes.iter().filter(|n| !renderer.has_mesh(n.tile, n.mesh_key)).map(|n| n.tile).collect();
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let chunk = missing.len().div_ceil(threads).max(1);
-    let meshes: Vec<RenderTile> = std::thread::scope(|s| {
+    let meshes: Vec<CompactTile> = std::thread::scope(|s| {
         let handles: Vec<_> = missing
             .chunks(chunk)
             .map(|part| {

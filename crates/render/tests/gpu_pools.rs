@@ -9,7 +9,7 @@ use planet_core::cube::TangentWarp;
 use planet_core::TileId;
 use planet_frame::pool::{compact_format_pool_with, tier_compact_pool};
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainRequest, TerrainView};
-use planet_generators::compact::{tile_data_field, RenderTile};
+use planet_generators::compact::{compact_tile_field, CompactTile};
 use planet_generators::height::Reference;
 use planet_render::{execute_terrain_tiles, AdapterPolicy, ExecError, GpuContext, TerrainRenderer};
 use planet_streaming::budget::FIXED_RESERVE_BYTES;
@@ -30,8 +30,8 @@ fn plan(index: usize) -> planet_frame::TerrainPlan {
     plan_terrain(&TerrainRequest { camera, size: SIZE, view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 1 }).unwrap()
 }
 
-fn tiles(p: &planet_frame::TerrainPlan) -> Vec<RenderTile> {
-    let ts: Vec<RenderTile> = p.nodes.iter().map(|n| tile_data_field(&Reference(1), &TangentWarp, n.tile, CELLS, R, FINEST)).collect();
+fn tiles(p: &planet_frame::TerrainPlan) -> Vec<CompactTile> {
+    let ts: Vec<CompactTile> = p.nodes.iter().map(|n| compact_tile_field(&Reference(1), &TangentWarp, n.tile, CELLS, R)).collect();
     // The render floor (LOD-009): nothing coarser than level 3 is planned, so every planned tile is compact.
     assert!(ts.iter().all(|t| t.id().level() >= 3 && t.is_compact()), "every planned tile is a compact tile of level 3 or finer");
     ts
@@ -50,7 +50,7 @@ fn the_image_does_not_depend_on_where_the_tiles_sit() {
     for index in [3, 4, 5] {
         let p = plan(index);
         let ts = tiles(&p);
-        let refs: Vec<&RenderTile> = ts.iter().collect();
+        let refs: Vec<&CompactTile> = ts.iter().collect();
         let (reference, _) = execute_terrain_tiles(&ctx, &p, &refs).unwrap();
         // The renderer's own free list in a pool of 3-slot blocks.
         let mut own = TerrainRenderer::with_compact_pools(&ctx, SIZE, CELLS, small_pool(1));
@@ -113,7 +113,7 @@ fn the_allocation_equals_the_model_and_stays_under_the_share() {
 fn a_full_pool_is_refused_and_a_freed_slot_waits_for_the_frames_in_flight() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let p = plan(4);
-    let ts: Vec<RenderTile> = tiles(&p).into_iter().take(4).collect();
+    let ts: Vec<CompactTile> = tiles(&p).into_iter().take(4).collect();
     assert_eq!(ts.len(), 4, "the fixture has four tiles");
     let config = PoolConfig { main_blocks: 1, block_slots: 3, ..small_pool(1) };
     assert_eq!(config.slot_bytes, planet_generators::compact::slot_bytes(CELLS));
@@ -139,13 +139,13 @@ fn a_full_pool_is_refused_and_a_freed_slot_waits_for_the_frames_in_flight() {
 
 struct TileData;
 
-impl TileSource<RenderTile> for TileData {
-    fn load(&self, tile: TileId) -> Result<RenderTile, String> {
-        Ok(tile_data_field(&Reference(1), &TangentWarp, tile, CELLS, R, FINEST))
+impl TileSource<CompactTile> for TileData {
+    fn load(&self, tile: TileId) -> Result<CompactTile, String> {
+        Ok(compact_tile_field(&Reference(1), &TangentWarp, tile, CELLS, R))
     }
 }
 
-fn settle(m: &mut ResidencyManager<RenderTile>, sp: &ManualSpawner, w: &Wants) {
+fn settle(m: &mut ResidencyManager<CompactTile>, sp: &ManualSpawner, w: &Wants) {
     for _ in 0..60 {
         m.begin_frame(w);
         sp.run(32);
@@ -197,7 +197,7 @@ fn the_residency_managers_slots_drive_the_renderer_and_the_images_are_unchanged(
         }
         renderer.render(&ctx, p, false).unwrap();
         let ts = tiles(p);
-        let refs: Vec<&RenderTile> = ts.iter().collect();
+        let refs: Vec<&CompactTile> = ts.iter().collect();
         let (reference, _) = execute_terrain_tiles(&ctx, p, &refs).unwrap();
         assert_eq!(renderer.read_color(&ctx), reference, "round {round}: pooled slots draw the same image");
         let st = s.stats();

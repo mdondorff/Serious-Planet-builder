@@ -12,7 +12,7 @@ use planet_frame::pipeline::{
     residency_of, DrawKind, FrameColumns, FramesInFlight, PlanField, PlanPipeline, PlanWorker, MAX_FRAMES_IN_FLIGHT,
 };
 use planet_frame::{plan_terrain_threaded, PlanError, ResidencySet, SelectionCache, TerrainPlan, TerrainRequest};
-use planet_generators::compact::RenderTile;
+use planet_generators::compact::CompactTile;
 use planet_render::{GpuContext, RgbaFrame, TerrainRenderer};
 use planet_streaming::{ResidencyManager, SlotRef, StreamConfig, Streamer, SystemClock, ThreadPool};
 use std::io::Write;
@@ -60,11 +60,11 @@ pub(crate) struct RendererSink<'a> {
 }
 
 impl TileSink for RendererSink<'_> {
-    fn upload_at(&mut self, tile: &RenderTile, slot: SlotRef) -> Result<(), String> {
+    fn upload_at(&mut self, tile: &CompactTile, slot: SlotRef) -> Result<(), String> {
         self.renderer.upload_tile_at(self.ctx, tile, slot).map_err(|e| e.to_string())
     }
 
-    fn upload_batch(&mut self, tiles: &[(&RenderTile, SlotRef)]) -> Result<UploadStats, String> {
+    fn upload_batch(&mut self, tiles: &[(&CompactTile, SlotRef)]) -> Result<UploadStats, String> {
         let before = self.renderer.upload_counters();
         self.renderer.upload_tiles_at(self.ctx, tiles).map_err(|e| format!("placing a batch of {} tiles: {e}", tiles.len()))?;
         let after = self.renderer.upload_counters();

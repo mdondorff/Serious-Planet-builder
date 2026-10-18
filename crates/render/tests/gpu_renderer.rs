@@ -5,7 +5,7 @@
 use planet_core::cube::TangentWarp;
 use planet_core::TileId;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainRequest, TerrainView};
-use planet_generators::compact::{tile_data_field, RenderTile};
+use planet_generators::compact::{compact_tile_field, CompactTile};
 use planet_generators::height::Reference;
 use planet_render::{execute_terrain_tiles, AdapterPolicy, GpuContext, TerrainRenderer};
 
@@ -15,8 +15,8 @@ const CELLS: u32 = 16;
 const FINEST: u8 = 26;
 
 /// The tile of `id` from the reference field of `seed` (compact: levels 3 and finer are the only ones planned, the render floor).
-fn tile(seed: u64, id: TileId, cells: u32) -> RenderTile {
-    tile_data_field(&Reference(seed), &TangentWarp, id, cells, R, FINEST)
+fn tile(seed: u64, id: TileId, cells: u32) -> CompactTile {
+    compact_tile_field(&Reference(seed), &TangentWarp, id, cells, R)
 }
 
 fn plan(index: usize) -> planet_frame::TerrainPlan {

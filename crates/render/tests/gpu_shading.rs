@@ -7,7 +7,7 @@ use planet_frame::look::shading::{climate_view_colour, AlbedoParams, ShadeView};
 use planet_frame::look::{self, LitPlan};
 use planet_frame::pool::compact_format_pool_with;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::tile_data_field;
+use planet_generators::compact::compact_tile_field;
 use planet_generators::global::sample;
 use planet_generators::height::Reference;
 use planet_render::{AdapterPolicy, GpuContext, TerrainRenderer};
@@ -53,7 +53,7 @@ fn renderer(ctx: &GpuContext, p: &TerrainPlan) -> TerrainRenderer {
         if r.slot_of(n.tile).is_some() {
             continue;
         }
-        r.upload_tile(ctx, &tile_data_field(&field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
+        r.upload_tile(ctx, &compact_tile_field(&field, &TangentWarp, n.tile, CELLS, R)).unwrap();
     }
     r
 }
@@ -143,7 +143,7 @@ fn renderer_scattered(ctx: &GpuContext, p: &TerrainPlan) -> TerrainRenderer {
     let field = Reference(1);
     let mut slot = r.pool_config().main_slots() - 1;
     for n in &p.nodes {
-        let tile = tile_data_field(&field, &TangentWarp, n.tile, CELLS, R, FINEST);
+        let tile = compact_tile_field(&field, &TangentWarp, n.tile, CELLS, R);
         r.upload_tile_at(ctx, &tile, planet_streaming::SlotRef { pool: planet_streaming::PoolKind::Main, index: slot }).unwrap();
         slot -= 3;
     }

@@ -135,7 +135,7 @@ fn the_cut_water_nodes_cover_the_same_sea_pixels_as_the_full_selection_in_the_fo
                     s.spawn(move || {
                         for tile in chunk {
                             let built =
-                                planet_generators::compact::tile_data_field(field.as_ref(), &TangentWarp, *tile, o.cells, R, lod.max_level);
+                                planet_generators::compact::compact_tile_field(field.as_ref(), &TangentWarp, *tile, o.cells, R);
                             world.fill_water(*tile, &built);
                         }
                     });

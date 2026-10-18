@@ -4,7 +4,7 @@
 use planet_core::cube::TangentWarp;
 use planet_core::TileId;
 use planet_frame::managed::TileSink;
-use planet_generators::compact::{compact_tile_field, slot_bytes, RenderTile};
+use planet_generators::compact::{compact_tile_field, slot_bytes, CompactTile};
 use planet_generators::height::Reference;
 use planet_generators::mesh::{tile_mesh_field, MeshVertex};
 use planet_streaming::SlotRef;
@@ -16,7 +16,7 @@ const RADIUS_M: f64 = 6_371_000.0;
 struct DefaultSink;
 
 impl TileSink for DefaultSink {
-    fn upload_at(&mut self, _tile: &RenderTile, _slot: SlotRef) -> Result<(), String> {
+    fn upload_at(&mut self, _tile: &CompactTile, _slot: SlotRef) -> Result<(), String> {
         Ok(())
     }
     fn forget(&mut self, _tile: TileId) {}

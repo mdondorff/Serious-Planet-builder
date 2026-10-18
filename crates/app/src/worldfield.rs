@@ -371,7 +371,7 @@ impl WorldTerrain {
         cells: u32,
         max_level: u8,
         format: planet_render::TileFormat,
-    ) -> Option<planet_generators::compact::RenderTile> {
+    ) -> Option<planet_generators::compact::CompactTile> {
         use std::sync::atomic::Ordering::Relaxed;
         let pack = self.pack.filter(|_| self.use_prefilled)?;
         let spec = TileSpec::new(field, self.radius_m, cells, max_level, form_of_format(format));
@@ -543,7 +543,7 @@ impl WorldTerrain {
     ///
     /// `built` is the mesh the job made for `tile`: its lowest own vertex is kept beside the answer for the exact dry-tile cut
     /// (ATMO-020), computed here in the job and never on the plan thread.
-    pub fn fill_water(&self, tile: TileId, built: &planet_generators::compact::RenderTile) {
+    pub fn fill_water(&self, tile: TileId, built: &planet_generators::compact::CompactTile) {
         if !self.bound_water {
             return;
         }

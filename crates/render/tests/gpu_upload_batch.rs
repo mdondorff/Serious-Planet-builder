@@ -6,7 +6,7 @@ use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId};
 use planet_frame::pool::compact_format_pool_with;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainRequest, TerrainView};
-use planet_generators::compact::{tile_data_field, RenderTile};
+use planet_generators::compact::{compact_tile_field, CompactTile};
 use planet_generators::height::Reference;
 use planet_render::{AdapterPolicy, GpuContext, TerrainRenderer, UploadMode};
 use planet_streaming::{PoolConfig, PoolKind, SlotRef};
@@ -41,12 +41,12 @@ fn main_slot(index: u32) -> SlotRef {
 }
 
 /// `n` distinct compact tiles of level 6 (11 x 11 and more of them fit a face).
-fn tiles(n: usize) -> Vec<RenderTile> {
+fn tiles(n: usize) -> Vec<CompactTile> {
     let field = Reference(1);
     (0..n as u32)
         .map(|k| {
             let id = TileId::new(Face(0), 6, k % 40, k / 40).unwrap();
-            let t = tile_data_field(&field, &TangentWarp, id, CELLS, R, 26);
+            let t = compact_tile_field(&field, &TangentWarp, id, CELLS, R);
             assert!(matches!(t, RenderTile::Compact(_)), "the fixture tiles are compact");
             t
         })
@@ -62,9 +62,9 @@ fn model_calls(slots: &[u32]) -> u64 {
     (1 + s.windows(2).filter(|w| !(w[1] == w[0] + 1 && w[1] / BLOCK == w[0] / BLOCK)).count()) as u64
 }
 
-fn place(ctx: &GpuContext, mode: UploadMode, tiles: &[RenderTile], slots: &[u32]) -> TerrainRenderer {
+fn place(ctx: &GpuContext, mode: UploadMode, tiles: &[CompactTile], slots: &[u32]) -> TerrainRenderer {
     let mut r = renderer(ctx, mode);
-    let batch: Vec<(&RenderTile, SlotRef)> = tiles.iter().zip(slots).map(|(t, s)| (t, main_slot(*s))).collect();
+    let batch: Vec<(&CompactTile, SlotRef)> = tiles.iter().zip(slots).map(|(t, s)| (t, main_slot(*s))).collect();
     r.upload_tiles_at(ctx, &batch).unwrap();
     r
 }
@@ -142,7 +142,7 @@ fn the_batched_path_reuses_its_staging_buffers_and_grows_none_per_frame_after_wa
     ];
     let mut capacities = Vec::new();
     for slots in &frames {
-        let batch: Vec<(&RenderTile, SlotRef)> = t.iter().zip(slots).map(|(tile, s)| (tile, main_slot(*s))).collect();
+        let batch: Vec<(&CompactTile, SlotRef)> = t.iter().zip(slots).map(|(tile, s)| (tile, main_slot(*s))).collect();
         batched.upload_tiles_at(&ctx, &batch).unwrap();
         reference.upload_tiles_at(&ctx, &batch).unwrap();
         capacities.push(batched.batch_scratch_capacity());
@@ -186,12 +186,12 @@ fn a_batch_draws_the_image_of_the_per_slot_path_for_the_standard_views() {
         let plan = plan_terrain(&req).unwrap();
         // Manager-style placement as in `gpu_compact`: the tiles spread over the blocks (the render floor leaves no level 0-2 tile).
         let mut main = 0u32;
-        let placed: Vec<(RenderTile, SlotRef)> = plan
+        let placed: Vec<(CompactTile, SlotRef)> = plan
             .nodes
             .iter()
             .map(|n| {
                 assert!(n.tile.level() >= 3, "the render floor plans no tile of level 0-2");
-                let data = tile_data_field(&field, &TangentWarp, n.tile, CELLS, R, 26);
+                let data = compact_tile_field(&field, &TangentWarp, n.tile, CELLS, R);
                 main = (main + 1) % (40 * 64);
                 (data, main_slot(main))
             })
@@ -200,7 +200,7 @@ fn a_batch_draws_the_image_of_the_per_slot_path_for_the_standard_views() {
         let mut calls = Vec::new();
         for mode in [UploadMode::PerSlot, UploadMode::Batched] {
             let mut r = renderer(&ctx, mode);
-            let batch: Vec<(&RenderTile, SlotRef)> = placed.iter().map(|(t, s)| (t, *s)).collect();
+            let batch: Vec<(&CompactTile, SlotRef)> = placed.iter().map(|(t, s)| (t, *s)).collect();
             r.upload_tiles_at(&ctx, &batch).unwrap();
             r.render(&ctx, &plan, false).unwrap();
             images.push(r.read_color(&ctx));

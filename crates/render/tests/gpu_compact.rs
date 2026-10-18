@@ -8,7 +8,7 @@ use planet_frame::pool::{block_slots_in, compact_format_pool_with, COMPACT_BLOCK
 use planet_frame::{
     plan_terrain, plan_terrain_field, scripted_views, scripted_views_field, LodParams, TerrainPlan, TerrainRequest, TerrainView,
 };
-use planet_generators::compact::{tile_data_field, RenderTile};
+use planet_generators::compact::{compact_tile_field, CompactTile};
 use planet_generators::height::{HeightField, Reference};
 use planet_generators::mesh::tile_mesh_field;
 use planet_generators::stress::Steep;
@@ -54,7 +54,7 @@ fn differing(a: &RgbaFrame, b: &RgbaFrame, limit: u8) -> usize {
 /// renderer (pixel-identical to the former vertex renderer in the debug views, `gpu_reference.rs`).
 fn reference_render(ctx: &GpuContext, field: &dyn HeightField, p: &TerrainPlan, finest: u8) -> RgbaFrame {
     let meshes: Vec<_> =
-        p.nodes.iter().map(|n| planet_generators::compact::vertex_tile_field(field, &TangentWarp, n.tile, p.cells, R, finest)).collect();
+        p.nodes.iter().map(|n| planet_generators::compact::tile_mesh_field(field, &TangentWarp, n.tile, p.cells, R)).collect();
     let refs: Vec<_> = meshes.iter().collect();
     planet_render::reference::execute_reference(ctx, p, &refs).unwrap()
 }
@@ -63,7 +63,7 @@ fn compact_renderer(ctx: &GpuContext, field: &dyn HeightField, p: &TerrainPlan, 
     let mut r = TerrainRenderer::with_compact_pools(ctx, SIZE, p.cells, small_pool(p.cells));
     let (mut main, mut vertex) = (0u32, 0u32);
     for n in &p.nodes {
-        let data = tile_data_field(field, &TangentWarp, n.tile, p.cells, R, finest);
+        let data = compact_tile_field(field, &TangentWarp, n.tile, p.cells, R);
         if scattered {
             // Manager-style placement: levels 0-2 in the managed vertex pool, the rest spread over the blocks from the top.
             let slot = if n.tile.level() <= 2 {
@@ -170,7 +170,7 @@ fn fallback_tiles_and_coarse_levels_draw_in_the_vertex_format_beside_compact_til
             for n in &p.nodes {
                 let expected = if n.tile.level() <= 2 {
                     ResidentFormat::Vertex
-                } else if matches!(tile_data_field(&steep, &TangentWarp, n.tile, cells, R, 9), RenderTile::Vertex(_)) {
+                } else if matches!(compact_tile_field(&steep, &TangentWarp, n.tile, cells, R), RenderTile::Vertex(_)) {
                     ResidentFormat::Fallback
                 } else {
                     ResidentFormat::Compact
@@ -208,7 +208,7 @@ fn steep_finest_tiles_draw_compact_with_the_wide_texel_and_match_the_reference_r
         let reference = reference_render(&ctx, &steep, &p, 9);
         let mut r = TerrainRenderer::with_compact_pools(&ctx, SIZE, cells, small_pool(cells));
         for n in &p.nodes {
-            let data = planet_generators::compact::tile_data_field_guarded(&steep, &TangentWarp, n.tile, cells, R, 9, false);
+            let data = planet_generators::compact::compact_tile_field(&steep, &TangentWarp, n.tile, cells, R);
             assert!(data.is_compact(), "{:?}: with no relief guard every tile of level 3 or finer is compact", n.tile);
             finest_tiles += usize::from(n.tile.level() >= 9);
             r.upload_tile(&ctx, &data).unwrap();
@@ -321,7 +321,7 @@ fn the_production_block_geometry_works_on_this_adapter() {
     let mut r = TerrainRenderer::with_compact_pools(&ctx, SIZE, cells, pool);
     let mut next = slots - 1;
     for n in &p.nodes {
-        let data = tile_data_field(&field, &TangentWarp, n.tile, cells, R, 26);
+        let data = compact_tile_field(&field, &TangentWarp, n.tile, cells, R);
         if n.tile.level() <= 2 {
             r.upload_tile(&ctx, &data).unwrap();
         } else {

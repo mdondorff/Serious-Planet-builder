@@ -12,7 +12,7 @@ use planet::worldfield::WorldTerrain;
 use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::TileId;
 use planet_frame::{plan_terrain_cached, scripted_views_field, LodParams, SelectionCache, TerrainRequest, TerrainView};
-use planet_generators::compact::{tile_data_field, RenderTile};
+use planet_generators::compact::{compact_tile_field, CompactTile};
 use planet_generators::mesh::tile_mesh_field;
 use planet_render::{AdapterPolicy, DrawMode, GpuContext, RgbaFrame, TerrainRenderer};
 use planet_world_def::WorldDefinition;
@@ -103,11 +103,11 @@ fn main() -> Result<(), String> {
     println!("view {view_name}, cells {cells}, finest level {max_level}: {} nodes, {} distinct tiles", plan.nodes.len(), tiles.len());
 
     let t = Instant::now();
-    let vertex: Vec<RenderTile> =
+    let vertex: Vec<CompactTile> =
         par_map(&tiles, &|id| RenderTile::Vertex(tile_mesh_field(field.as_ref(), &TangentWarp, id, cells, RADIUS_M)));
     let vertex_s = t.elapsed().as_secs_f64();
     let t = Instant::now();
-    let compact: Vec<RenderTile> = par_map(&tiles, &|id| tile_data_field(field.as_ref(), &TangentWarp, id, cells, RADIUS_M, max_level));
+    let compact: Vec<CompactTile> = par_map(&tiles, &|id| compact_tile_field(field.as_ref(), &TangentWarp, id, cells, RADIUS_M));
     println!("generation on all threads: vertex format {vertex_s:.1} s, compact format {:.1} s", t.elapsed().as_secs_f64());
     let fallbacks = compact.iter().filter(|t| matches!(t, RenderTile::Vertex(_))).count();
     let compact_tiles = compact.len() - fallbacks;

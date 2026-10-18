@@ -5,14 +5,14 @@ use planet_core::cube::TangentWarp;
 use planet_core::hash::SplitMix64;
 use planet_core::{Face, TileId, Vec3};
 use planet_generators::compact::{
-    compact_tile_field, oct_decode, oct_encode, pack_normal, slot_bytes, slot_texel_bytes, tile_data_field, tile_data_field_guarded,
-    unpack_normal, vertex_reason, CompactTile, RenderTile, VertexReason, COMPACT_MIN_LEVEL, FALLBACK_RELIEF_M, HEIGHT_STEPS,
+    compact_tile_field, oct_decode, oct_encode, pack_normal, slot_bytes, slot_texel_bytes,
+    unpack_normal, CompactTile, COMPACT_MIN_LEVEL, HEIGHT_STEPS,
     SLOT_CLIMATE_OFFSET, SLOT_HEADER_BYTES, SLOT_PAD_OFFSET, SLOT_TEXEL_OFFSET, TEXEL_BYTES, WIDE_RELIEF_1MM_M,
 };
 use planet_generators::global::{bake, GridSource};
 use planet_generators::height::{HeightField, Reference};
 use planet_generators::height_fields::{build_field, HeightFieldKind};
-use planet_generators::mesh::{finest_class_key, mesh_key_field, tile_mesh_field, vertex_count};
+use planet_generators::mesh::{mesh_key_field, tile_mesh_field, vertex_count};
 use planet_generators::stress::Steep;
 use planet_world_def::{BodyId, GenContext, WorldDefinition};
 
@@ -210,65 +210,90 @@ fn the_height_step_is_under_a_millimetre_at_the_finest_levels_and_bounds_the_hei
     assert_eq!(checked, 24);
 }
 
-// spec: GEN-019, CON-13
-#[test]
-fn the_format_follows_the_level_and_the_relief_of_a_finest_tile() {
-    // Levels 0-2 keep the vertex format; the compact format starts at level 3.
-    assert_eq!(COMPACT_MIN_LEVEL, 3);
-    for l in 0..3u8 {
-        assert_eq!(vertex_reason(l, 22, 0.0), Some(VertexReason::CoarseLevel));
+/// A test field whose height is `amplitude * dir.x`: a ramp, so a tile's relief is a known multiple of `amplitude`.
+struct Ramp(f64);
+
+impl HeightField for Ramp {
+    fn height(&self, dir: Vec3) -> f64 {
+        self.0 * dir.x
     }
-    assert_eq!(vertex_reason(3, 22, 1.0e4), None, "a coarse tile with large relief stays compact: CON-13 binds the finest level only");
-    // At the finest level the guard is the 1 mm step: relief / 65,535 > 1 mm.
-    assert!((FALLBACK_RELIEF_M - 65.535).abs() < 1e-9);
-    assert_eq!(vertex_reason(22, 22, 65.0), None);
-    assert_eq!(vertex_reason(22, 22, 66.0), Some(VertexReason::Relief));
-    assert_eq!(vertex_reason(21, 22, 66.0), None);
+    fn seed(&self) -> u64 {
+        1
+    }
+    fn implementation_id(&self) -> &'static str {
+        "test-ramp"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        self.0.abs()
+    }
 }
 
 // spec: GEN-019, CON-13
 #[test]
-fn a_steep_finest_tile_falls_back_to_the_vertex_format_and_a_gentle_one_does_not() {
-    // The steep stress field has kilometres of relief per coarse tile: declaring such a tile the finest makes it exceed 65 m.
+fn the_height_step_is_relief_over_2_pow_24_minus_1_so_one_millimetre_holds_to_16_7_km_and_grows_beyond() {
+    // The compact format starts at level 3 and has no relief guard and no fallback (ADR 0062): a tile with more relief than
+    // WIDE_RELIEF_1MM_M keeps its format and its step is relief / (2^24 - 1), a documented bound (GEN-019), not a failure.
+    assert_eq!(COMPACT_MIN_LEVEL, 3);
+    assert!((WIDE_RELIEF_1MM_M - 16_777.215).abs() < 1e-9, "1 mm x 2^24-1 steps");
+    let t = id(2, 3, 3, 4);
+    // Calibrate the ramp so the tile's relief is the target (the relief of a ramp is linear in its amplitude).
+    let unit = compact_tile_field(&Ramp(1.0), &TangentWarp, t, 32, R).relief_m;
+    assert!(unit > 0.0);
+    let mut worst_step_error = 0.0f64;
+    for (target, within_mm) in [(1_000.0f64, true), (16_700.0, true), (WIDE_RELIEF_1MM_M * 0.999, true), (20_000.0, false), (40_000.0, false)] {
+        let tile = compact_tile_field(&Ramp(target / unit), &TangentWarp, t, 32, R);
+        assert!((tile.relief_m - target).abs() <= 1e-6 * target, "relief {} against the target {target}", tile.relief_m);
+        let step = f64::from(tile.hr_step);
+        let expected = target / HEIGHT_STEPS;
+        assert!((step - expected).abs() <= 2.0e-7 * expected, "relief {target}: step {step} against {expected}");
+        assert_eq!(tile.step_within_con13(), within_mm, "relief {target} m: step {step:e} m");
+        worst_step_error = worst_step_error.max((step - expected).abs() / expected);
+        // The format does not change with the relief: every tile of level 3 and finer is a CompactTile with the same slot.
+        assert_eq!(tile.slot_data().len() as u64, slot_bytes(32));
+        // The quantisation error of a height is at most half a step.
+        assert!((tile.height_error_bound_m() - 0.5 * step).abs() < 1e-12);
+    }
+    // The documented figures: 1 mm at 16.7 km, about 1.19 mm at 20 km.
+    let at_20km = compact_tile_field(&Ramp(20_000.0 / unit), &TangentWarp, t, 32, R);
+    assert!((f64::from(at_20km.hr_step) * 1.0e3 - 1.19209).abs() < 1e-3, "{} mm at 20 km", f64::from(at_20km.hr_step) * 1.0e3);
+    println!("worst relative error of the step against relief / (2^24 - 1): {worst_step_error:.2e}");
+}
+
+// spec: GEN-019, CON-13
+#[test]
+fn a_finest_tile_is_compact_with_the_base_key_whatever_its_relief() {
+    // The steep stress field has kilometres of relief per coarse tile: declaring such a tile the finest used to send it to the vertex
+    // format under a key of its class. There is no fallback and no class: the tile is compact and carries the base mesh key.
     let steep = Steep(1);
     let t = id(4, 9, 100, 100);
-    let probe = compact_tile_field(&steep, &TangentWarp, t, 32, R);
-    assert!(probe.relief_m > FALLBACK_RELIEF_M, "fixture: the steep tile has {} m of relief", probe.relief_m);
-    match tile_data_field(&steep, &TangentWarp, t, 32, R, 9) {
-        RenderTile::Vertex(m) => {
-            let product = tile_mesh_field(&steep, &TangentWarp, t, 32, R);
-            assert_eq!(m.vertices, product.vertices, "the fallback is the product mesh");
-            assert_eq!(m.key, finest_class_key(product.key, t, 9), "under the key of its finest-level class");
+    let tile = compact_tile_field(&steep, &TangentWarp, t, 32, R);
+    assert!(tile.relief_m > 65.535, "fixture: the steep tile has {} m of relief", tile.relief_m);
+    let base = mesh_key_field(&steep, &TangentWarp, t, 32, R);
+    assert_eq!(tile.key(), base, "a finest tile has its base mesh key, as every other tile");
+    // The key a finest tile carried until `remove-vertex-render-path` (the base key rehashed with the finest-level class): a record
+    // stored under it is not what a request now computes, so it is orphaned, never returned for other content.
+    let legacy_class_key = planet_core::hash::hash_u64s(0x0066_696e, &[base]);
+    assert_ne!(tile.key(), legacy_class_key);
+    // Level by level, the key never equals the legacy class key of any tile of the sample (a collision would be a 64-bit hash coincidence).
+    let mut rng = SplitMix64(7);
+    let mut bases = Vec::new();
+    for level in [3u8, 5, 9, 14, 22] {
+        let n = 1u64 << level;
+        for _ in 0..8 {
+            let tid = id((rng.next_u64() % 6) as u8, level, (rng.next_u64() % n) as u32, (rng.next_u64() % n) as u32);
+            bases.push(mesh_key_field(&Reference(1), &TangentWarp, tid, 32, R));
         }
-        RenderTile::Compact(_) => panic!("a finest tile with {} m of relief must fall back", probe.relief_m),
     }
-    // The same tile one level above the finest is compact (CON-13 binds the finest level).
-    assert!(tile_data_field(&steep, &TangentWarp, t, 32, R, 10).is_compact());
-    // The format depends on the view's finest level, and the key says which class it was decided for (LOD-010): the fallback tile and
-    // the compact tile of the same tile have different keys, so one is never reused for the other.
-    assert_ne!(tile_data_field(&steep, &TangentWarp, t, 32, R, 9).key(), tile_data_field(&steep, &TangentWarp, t, 32, R, 10).key());
-    let RenderTile::Compact(c10) = tile_data_field(&steep, &TangentWarp, t, 32, R, 10) else { unreachable!() };
-    assert!(c10.allowed_at_finest_level(10) && !c10.allowed_at_finest_level(9));
+    let legacy: std::collections::HashSet<u64> = bases.iter().map(|b| planet_core::hash::hash_u64s(0x0066_696e, &[*b])).collect();
+    assert!(bases.iter().all(|b| !legacy.contains(b)), "a base key equals the legacy class key of another tile");
     // A fine tile of the reference field has centimetres of relief: compact, with the same key as its mesh.
     let g = id(4, 22, 1000, 2000);
-    let d = tile_data_field(&Reference(1), &TangentWarp, g, 32, R, 22);
-    assert!(d.is_compact());
-    assert_eq!(
-        d.key(),
-        finest_class_key(mesh_key_field(&Reference(1), &TangentWarp, g, 32, R), g, 22),
-        "the key of a finest tile carries its class"
-    );
-    let below = tile_data_field(&Reference(1), &TangentWarp, g, 32, R, 23);
-    assert_eq!(below.key(), mesh_key_field(&Reference(1), &TangentWarp, g, 32, R), "a tile below the cap has the base key");
-    // Levels 0-2 are vertex format whatever the field.
-    for l in 0..3u8 {
-        assert!(!tile_data_field(&Reference(1), &TangentWarp, id(1, l, 0, 0), 32, R, 22).is_compact());
-    }
-    assert_eq!(
-        tile_data_field(&Reference(1), &TangentWarp, id(1, 2, 3, 3), 8, R, 22).cells(),
-        8,
-        "the format decision does not change the grid size"
-    );
+    let d = compact_tile_field(&Reference(1), &TangentWarp, g, 32, R);
+    assert_eq!(d.key(), mesh_key_field(&Reference(1), &TangentWarp, g, 32, R));
+    assert_eq!(compact_tile_field(&Reference(1), &TangentWarp, id(1, 2, 3, 3), 16, R).cells(), 16);
 }
 
 fn tile_hashes(threads: usize) -> Vec<u64> {
@@ -316,9 +341,7 @@ fn cliff_tiles_hold_one_millimetre_with_the_guard_off() {
         let mut max_relief = 0.0f64;
         for _ in 0..3 {
             let t = id((rng.next_u64() % 6) as u8, level, (rng.next_u64() % u64::from(n)) as u32, (rng.next_u64() % u64::from(n)) as u32);
-            let RenderTile::Compact(c) = tile_data_field_guarded(&steep, &TangentWarp, t, 32, R, level, false) else {
-                panic!("the guard is off: tile {t:?} must be compact")
-            };
+            let c = compact_tile_field(&steep, &TangentWarp, t, 32, R);
             let m = tile_mesh_field(&steep, &TangentWarp, t, 32, R);
             let shaded = c.shade_all();
             for (k, v) in m.vertices.iter().enumerate().take(33 * 33) {

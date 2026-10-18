@@ -14,7 +14,7 @@ use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId};
 use planet_frame::pool::compact_format_pool_with;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainRequest, TerrainView};
-use planet_generators::compact::{tile_data_field, RenderTile};
+use planet_generators::compact::{compact_tile_field, CompactTile};
 use planet_generators::height::Reference;
 use planet_render::{AdapterPolicy, GpuContext, TerrainRenderer};
 use planet_streaming::{PoolConfig, PoolKind, SlotRef};
@@ -61,7 +61,7 @@ fn spawn_workers(n: usize, stop: &Arc<AtomicBool>) -> Vec<std::thread::JoinHandl
                 let mut k = w as u32 * 977;
                 while !stop.load(Ordering::Relaxed) {
                     let id = TileId::new(Face(0), 12, k % 3000, (k / 3000) % 3000).unwrap();
-                    std::hint::black_box(tile_data_field(&field, &TangentWarp, id, CELLS, R, 26));
+                    std::hint::black_box(compact_tile_field(&field, &TangentWarp, id, CELLS, R));
                     k = k.wrapping_add(1);
                     built += 1;
                 }
@@ -95,8 +95,8 @@ fn main() {
     let mut plan = plan_terrain(&req).unwrap();
     plan.nodes.clear();
     let field = Reference(1);
-    let tiles: Vec<RenderTile> = (0..tiles_per_frame as u32)
-        .map(|k| tile_data_field(&field, &TangentWarp, TileId::new(Face(0), 12, k, 5).unwrap(), CELLS, R, 26))
+    let tiles: Vec<CompactTile> = (0..tiles_per_frame as u32)
+        .map(|k| compact_tile_field(&field, &TangentWarp, TileId::new(Face(0), 12, k, 5).unwrap(), CELLS, R))
         .collect();
     let staging_bytes = tiles_per_frame * ((CELLS + 1) * (CELLS + 1) * 8) as usize;
 
@@ -112,7 +112,7 @@ fn main() {
         let started = Instant::now();
         for f in 0..frames {
             let base = ((f * tiles_per_frame) % 200) as u32;
-            let batch: Vec<(&RenderTile, SlotRef)> =
+            let batch: Vec<(&CompactTile, SlotRef)> =
                 tiles.iter().enumerate().map(|(i, t)| (t, SlotRef { pool: PoolKind::Main, index: base + i as u32 })).collect();
             let before = renderer.upload_times();
             let t = Instant::now();

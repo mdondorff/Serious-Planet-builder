@@ -5,7 +5,7 @@ use planet_core::cube::TangentWarp;
 use planet_core::{PlanetFixed, Vec3};
 use planet_frame::Camera;
 use planet_frame::{level_color, plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::{tile_data_field, RenderTile};
+use planet_generators::compact::{compact_tile_field, CompactTile};
 use planet_generators::dump::FACE_COLORS;
 use planet_generators::height::Reference;
 use planet_generators::mesh::{grid_indices, TileMesh};
@@ -33,12 +33,12 @@ fn plan_for(name_index: usize, view: TerrainView) -> (&'static str, TerrainPlan)
 }
 
 /// The tiles of the plan in the product's format: compact for levels 3 and finer, the vertex format below (REND-016).
-fn meshes_for(plan: &TerrainPlan) -> Vec<RenderTile> {
+fn meshes_for(plan: &TerrainPlan) -> Vec<CompactTile> {
     tiles_with(plan, CELLS)
 }
 
-fn tiles_with(plan: &TerrainPlan, cells: u32) -> Vec<RenderTile> {
-    plan.nodes.iter().map(|n| tile_data_field(&Reference(SEED), &TangentWarp, n.tile, cells, R, plan_finest(plan))).collect()
+fn tiles_with(plan: &TerrainPlan, cells: u32) -> Vec<CompactTile> {
+    plan.nodes.iter().map(|n| compact_tile_field(&Reference(SEED), &TangentWarp, n.tile, cells, R)).collect()
 }
 
 /// The finest level the test plans allow (`lod().max_level`).
@@ -46,8 +46,8 @@ fn plan_finest(_plan: &TerrainPlan) -> u8 {
     lod().max_level
 }
 
-fn render(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[RenderTile]) -> (Image, planet_render::TerrainStats) {
-    let refs: Vec<&RenderTile> = tiles.iter().collect();
+fn render(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[CompactTile]) -> (Image, planet_render::TerrainStats) {
+    let refs: Vec<&CompactTile> = tiles.iter().collect();
     let (frame, stats) = execute_terrain_tiles(ctx, plan, &refs).unwrap();
     (Image::new(frame.width, frame.height, frame.rgba), stats)
 }
@@ -56,7 +56,7 @@ fn render(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[RenderTile]) -> (Image,
 fn vertex_meshes_for(plan: &TerrainPlan) -> Vec<TileMesh> {
     plan.nodes
         .iter()
-        .map(|n| planet_generators::compact::vertex_tile_field(&Reference(SEED), &TangentWarp, n.tile, CELLS, R, plan_finest(plan)))
+        .map(|n| planet_generators::compact::tile_mesh_field(&Reference(SEED), &TangentWarp, n.tile, CELLS, R))
         .collect()
 }
 

@@ -8,7 +8,7 @@ use planet_core::TileId;
 use planet_frame::look::file::LookParams;
 use planet_frame::water::{plan_water, tile_above_water, WaterRequest, WaterTileCache, WaterView};
 use planet_frame::{plan_terrain_cached, scripted_views, LodParams, SelectionCache, TerrainRequest, TerrainView};
-use planet_generators::compact::tile_data_field;
+use planet_generators::compact::compact_tile_field;
 use planet_world_def::WorldDefinition;
 
 const R: f64 = 6_371_000.0;
@@ -58,7 +58,7 @@ fn the_job_of_a_prefilled_tile_leaves_the_minimum_of_the_tile_it_read_and_the_pl
                         wet += 1;
                         assert_eq!(book.min_height(tile), Some(t.min_height_m()), "{tile:?}");
                         // The pack holds the tile the streamer generates, bit for bit.
-                        let made = tile_data_field(field.as_ref(), &TangentWarp, tile, cells, R, max_level);
+                        let made = compact_tile_field(field.as_ref(), &TangentWarp, tile, cells, R);
                         assert_eq!(t, made, "{tile:?}");
                     } else {
                         dry += 1;
@@ -91,7 +91,7 @@ fn the_job_of_a_prefilled_tile_leaves_the_minimum_of_the_tile_it_read_and_the_pl
             world.fill_water(n.tile, &t);
             if let Some(m) = world.water_book().min_height(n.tile) {
                 // The pack's tile is the generated tile bit for bit, so is its minimum.
-                let made = tile_data_field(field.as_ref(), &TangentWarp, n.tile, cells, R, max_level);
+                let made = compact_tile_field(field.as_ref(), &TangentWarp, n.tile, cells, R);
                 assert_eq!(t, made, "{:?}: the pack holds the tile the streamer generates", n.tile);
                 assert_eq!(m, made.min_height_m(), "{:?}: the book's minimum is the pre-filled tile's", n.tile);
             }

@@ -13,7 +13,7 @@ use planet_frame::look::LitPlan;
 use planet_frame::pool::compact_format_pool_with;
 use planet_frame::water::{plan_water, WaterPlan, WaterRequest, WaterTileCache, WaterView};
 use planet_frame::{plan_terrain_field, Camera, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::tile_data_field;
+use planet_generators::compact::compact_tile_field;
 use planet_generators::height::HeightField;
 use planet_render::{AdapterPolicy, GpuContext, TerrainRenderer};
 use planet_streaming::budget::FIXED_RESERVE_BYTES;
@@ -219,7 +219,7 @@ fn coverage(views: &[&str]) {
         r.enable_lit(&ctx);
         for n in &plan.nodes {
             if r.slot_of(n.tile).is_none() {
-                let tile = tile_data_field(field.as_ref(), &TangentWarp, n.tile, CELLS, R, FINEST);
+                let tile = compact_tile_field(field.as_ref(), &TangentWarp, n.tile, CELLS, R);
                 r.upload_tile(&ctx, &tile).unwrap();
                 world.fill_water(n.tile, &tile);
             }

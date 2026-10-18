@@ -22,7 +22,7 @@ use crate::residency::ResidencySet;
 use crate::terrain::TerrainRequest;
 use crate::upload::{sort_waiting, upload_count, UploadBudget, UploadClass, Waiting};
 use planet_core::TileId;
-use planet_generators::compact::RenderTile;
+use planet_generators::compact::CompactTile;
 use planet_generators::mesh::MeshVertex;
 use planet_streaming::{Clock, ResidencyManager, ResidentChange, SchedWork, SlotRef, StreamStats, Wants};
 use std::collections::{HashMap, HashSet};
@@ -32,11 +32,11 @@ use std::time::Instant;
 /// Where the managed loop puts tiles: the renderer, or a counter in tests.
 pub trait TileSink {
     /// Write `tile` (either format) into `slot` (the slot the manager chose). Whatever tile the slot held before is gone.
-    fn upload_at(&mut self, tile: &RenderTile, slot: SlotRef) -> Result<(), String>;
+    fn upload_at(&mut self, tile: &CompactTile, slot: SlotRef) -> Result<(), String>;
     /// Bytes `upload_at` writes for `tile`: the tile's size in the sink's format (the per-frame upload budget counts in
     /// them, STRM-006). The default is what the renderer writes: a vertex tile at its vertex size, a compact tile at its
     /// slot (header, climate block and texels, 9,168 B at cells 32); a sink that writes something else says so.
-    fn upload_bytes(&self, tile: &RenderTile) -> u64 {
+    fn upload_bytes(&self, tile: &CompactTile) -> u64 {
         match tile {
             RenderTile::Vertex(m) => m.vertices.len() as u64 * MeshVertex::GPU_STRIDE,
             RenderTile::Compact(c) => c.resident_bytes(),
@@ -45,7 +45,7 @@ pub trait TileSink {
     /// Write a frame's tiles, in this order, each into its slot: the same result as `upload_at` for each (STRM-006). A sink that
     /// can write runs of adjacent slots in one go overrides this and says what it cost; the default is the loop over
     /// `upload_at` and counts one call and `upload_bytes` per tile. An error names the tile it failed on.
-    fn upload_batch(&mut self, tiles: &[(&RenderTile, SlotRef)]) -> Result<UploadStats, String> {
+    fn upload_batch(&mut self, tiles: &[(&CompactTile, SlotRef)]) -> Result<UploadStats, String> {
         let mut stats = UploadStats::default();
         for (tile, slot) in tiles {
             self.upload_at(tile, *slot).map_err(|e| format!("placing {:?} in {slot:?}: {e}", tile.id()))?;
@@ -157,7 +157,7 @@ pub struct ManagedFrame {
 
 pub struct ManagedLoop {
     pipe: PlanPipeline,
-    manager: ResidencyManager<RenderTile>,
+    manager: ResidencyManager<CompactTile>,
     /// What the sink holds, with the slot of each tile.
     resident: HashMap<TileId, ResidentTile>,
     slots: HashMap<TileId, SlotRef>,
@@ -180,7 +180,7 @@ pub struct ManagedLoop {
     prefetch_closure_stale: bool,
     /// The waiting tiles and the frame's batch, kept between frames so that a frame that uploads allocates no list for them.
     waiting_scratch: Vec<Waiting>,
-    batch_scratch: Vec<(TileId, Arc<RenderTile>, SlotRef, u64)>,
+    batch_scratch: Vec<(TileId, Arc<CompactTile>, SlotRef, u64)>,
     /// How often the class sets and the prefetch closure were rebuilt (O(wants) each): a frame whose wants did not change
     /// rebuilds neither (REND-018, STRM-019).
     class_rebuilds: u64,
@@ -248,7 +248,7 @@ impl Classes {
 impl ManagedLoop {
     /// `manager`'s streamer must have been built with `StreamConfig::record_changes` and have its roots loaded
     /// ([`planet_streaming::Streamer::load_roots_blocking`], the only wait); they are put on the sink by the first frame.
-    pub fn new(pipe: PlanPipeline, manager: ResidencyManager<RenderTile>) -> Self {
+    pub fn new(pipe: PlanPipeline, manager: ResidencyManager<CompactTile>) -> Self {
         assert!(manager.streamer().records_changes(), "the managed loop follows the streamer through StreamConfig::record_changes");
         let last = manager.streamer().stats();
         Self {
@@ -320,7 +320,7 @@ impl ManagedLoop {
         &self.pipe
     }
 
-    pub fn manager(&self) -> &ResidencyManager<RenderTile> {
+    pub fn manager(&self) -> &ResidencyManager<CompactTile> {
         &self.manager
     }
 
@@ -445,7 +445,7 @@ impl ManagedLoop {
                 let (Some(mesh), Some(slot)) = (streamer.get(w.tile), streamer.slot_of(w.tile)) else { continue };
                 batch.push((w.tile, mesh, slot, w.bytes));
             }
-            let refs: Vec<(&RenderTile, SlotRef)> = batch.iter().map(|(_, mesh, slot, _)| (&**mesh, *slot)).collect();
+            let refs: Vec<(&CompactTile, SlotRef)> = batch.iter().map(|(_, mesh, slot, _)| (&**mesh, *slot)).collect();
             let stats = sink.upload_batch(&refs)?;
             upload_calls += stats.calls;
             for (tile, mesh, slot, bytes) in &batch {

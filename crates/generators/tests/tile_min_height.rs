@@ -3,7 +3,7 @@
 
 use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId};
-use planet_generators::compact::{compact_tile_field, RenderTile};
+use planet_generators::compact::{compact_tile_field, CompactTile};
 use planet_generators::height::{HeightField, Reference};
 use planet_generators::mesh::{grid_vertex_count, tile_mesh_field, vertex_count, MeshVertex};
 use planet_generators::stress::Steep;
@@ -75,7 +75,7 @@ fn the_minimum_of_a_tiles_own_vertices_bounds_every_height_the_tile_draws_morph_
                 assert!((f64::from(mesh.min_height_m()) - field_min).abs() <= 1.0e-6 * field_min.abs().max(1.0), "{fname} {id:?}");
                 let compact = compact_tile_field(field.as_ref(), &TangentWarp, id, cells, R);
                 check(&format!("{fname} compact format, {cells} cells"), id, cells, &compact.shade_all(), compact.min_height_m());
-                assert_eq!(RenderTile::Compact(compact.clone()).min_height_m(), compact.min_height_m());
+                assert_eq!(compact.clone().min_height_m(), compact.min_height_m());
                 // The compact format's minimum differs from the vertex format's by the 16-bit quantisation (half a step) at most.
                 let d = (f64::from(compact.min_height_m()) - f64::from(mesh.min_height_m())).abs();
                 assert!(d <= f64::from(compact.hr_step) + 1.0e-5 * field_min.abs().max(1.0), "{fname} {id:?}: {d}");

@@ -9,7 +9,7 @@ use crate::{read_rgba8, ExecError, GpuContext, RgbaFrame};
 use planet_frame::draw::{buffer_of, build_draw_list_placed, DrawBuffer, DRAW_RECORD_BYTES};
 use planet_frame::pool::tier_pool;
 use planet_frame::{TerrainPlan, TerrainView};
-use planet_generators::compact::{CompactTile, RenderTile};
+use planet_generators::compact::{CompactTile, CompactTile};
 use planet_generators::mesh::{grid_indices, MeshVertex, TileMesh};
 use planet_streaming::{PoolConfig, PoolKind, SlotPool, SlotPools, SlotRef, Tier};
 use std::collections::HashMap;
@@ -455,7 +455,7 @@ enum TileRef<'a> {
 }
 
 impl<'a> TileRef<'a> {
-    fn of(tile: &'a RenderTile) -> Self {
+    fn of(tile: &'a CompactTile) -> Self {
         match tile {
             RenderTile::Vertex(m) => TileRef::Vertex(m),
             RenderTile::Compact(c) => TileRef::Compact(c),
@@ -1535,9 +1535,9 @@ impl TerrainRenderer {
         self.place_tile(ctx, TileRef::Vertex(mesh), None)
     }
 
-    /// Upload a tile in whichever format the builder chose (`planet_generators::compact::tile_data_field`), placed by the
+    /// Upload a tile in whichever format the builder chose (`planet_generators::compact::compact_tile_field`), placed by the
     /// renderer like [`upload`](TerrainRenderer::upload).
-    pub fn upload_tile(&mut self, ctx: &GpuContext, tile: &RenderTile) -> Result<(), ExecError> {
+    pub fn upload_tile(&mut self, ctx: &GpuContext, tile: &CompactTile) -> Result<(), ExecError> {
         self.place_tile(ctx, TileRef::of(tile), None)
     }
 
@@ -1551,7 +1551,7 @@ impl TerrainRenderer {
     /// [`upload_at`](TerrainRenderer::upload_at) for a tile in either format. A compact tile goes to a slot of the main pool; a
     /// vertex-format tile of level 3 or finer (a fallback) is given the main slot the manager reserved for it, which stays empty,
     /// and the renderer keeps it in its own fallback region of the vertex pool.
-    pub fn upload_tile_at(&mut self, ctx: &GpuContext, tile: &RenderTile, slot: SlotRef) -> Result<(), ExecError> {
+    pub fn upload_tile_at(&mut self, ctx: &GpuContext, tile: &CompactTile, slot: SlotRef) -> Result<(), ExecError> {
         self.place_tile(ctx, TileRef::of(tile), Some(slot))
     }
 
@@ -1766,7 +1766,7 @@ impl TerrainRenderer {
     /// so a frame makes one call per run instead of one per slot. Vertex-format tiles are written at
     /// once, one call each (their 53,724 bytes dominate the call). The bookkeeping of every tile is as with single uploads. On an
     /// error the tiles placed before it are written and the error returned.
-    pub fn upload_tiles_at(&mut self, ctx: &GpuContext, tiles: &[(&RenderTile, SlotRef)]) -> Result<(), ExecError> {
+    pub fn upload_tiles_at(&mut self, ctx: &GpuContext, tiles: &[(&CompactTile, SlotRef)]) -> Result<(), ExecError> {
         let started = std::time::Instant::now();
         if self.upload_mode == UploadMode::PerSlot {
             for (tile, slot) in tiles {
@@ -2460,10 +2460,10 @@ fn one_shot_pool(nodes: usize, cells: u32) -> Result<PoolConfig, String> {
     planet_frame::pool::compact_format_pool_with(share, cells, block_slots, 1)
 }
 
-/// [`execute_terrain`] for tiles in either format (`planet_generators::compact::tile_data_field`): the product's tile path. The
+/// [`execute_terrain`] for tiles in either format (`planet_generators::compact::compact_tile_field`): the product's tile path. The
 /// renderer's pools are sized to the plan (one block just large enough for its tiles); a plan of only vertex-format tiles uses the
 /// vertex-format renderer, as before.
-pub fn execute_terrain_tiles(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[&RenderTile]) -> Result<(RgbaFrame, TerrainStats), ExecError> {
+pub fn execute_terrain_tiles(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[&CompactTile]) -> Result<(RgbaFrame, TerrainStats), ExecError> {
     let lookup: HashMap<_, _> = tiles.iter().map(|t| (t.id(), *t)).collect();
     let mut renderer = if tiles.iter().any(|t| t.is_compact()) {
         let cells = plan.cells;

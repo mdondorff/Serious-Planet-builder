@@ -9,7 +9,7 @@ use planet_frame::pipeline::{PlanPipeline, PlanWorker, ResidentRecords};
 use planet_frame::prefetch::PrefetchConfig;
 use planet_frame::upload::UploadBudget;
 use planet_frame::{Camera, LodParams, TerrainRequest, TerrainView};
-use planet_generators::compact::RenderTile;
+use planet_generators::compact::CompactTile;
 use planet_generators::height::{HeightField, Reference};
 use planet_generators::mesh::TileMesh;
 use planet_streaming::{FakeClock, ManualSpawner, ResidencyManager, SlotRef, Spawner, StreamConfig, Streamer, TileSource};
@@ -96,8 +96,8 @@ pub struct Source {
     pub lod: LodParams,
 }
 
-impl TileSource<RenderTile> for Source {
-    fn load(&self, tile: TileId) -> Result<RenderTile, String> {
+impl TileSource<CompactTile> for Source {
+    fn load(&self, tile: TileId) -> Result<CompactTile, String> {
         let field = Reference(1);
         let rec = ResidentRecords::new(&field, &TangentWarp, &self.lod).record(tile);
         Ok(RenderTile::Vertex(TileMesh {
@@ -119,11 +119,11 @@ pub struct CountingSink {
 }
 
 impl TileSink for CountingSink {
-    fn upload_bytes(&self, _tile: &RenderTile) -> u64 {
+    fn upload_bytes(&self, _tile: &CompactTile) -> u64 {
         self.bytes
     }
 
-    fn upload_at(&mut self, tile: &RenderTile, _slot: SlotRef) -> Result<(), String> {
+    fn upload_at(&mut self, tile: &CompactTile, _slot: SlotRef) -> Result<(), String> {
         self.order.push(tile.id());
         Ok(())
     }

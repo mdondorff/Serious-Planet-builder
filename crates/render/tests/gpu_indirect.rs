@@ -8,7 +8,7 @@
 use planet_core::cube::TangentWarp;
 use planet_frame::pool::compact_format_pool_with;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::{tile_data_field, RenderTile};
+use planet_generators::compact::{compact_tile_field, CompactTile};
 use planet_generators::height::Reference;
 use planet_render::{AdapterPolicy, DrawMode, GpuContext, TerrainRenderer};
 use planet_streaming::budget::FIXED_RESERVE_BYTES;
@@ -25,8 +25,8 @@ fn plan(index: usize, view: TerrainView) -> TerrainPlan {
     plan_terrain(&TerrainRequest { camera, size: SIZE, view, lod, face_mapping: "tangent-v1".into(), seed: 1 }).unwrap()
 }
 
-fn tiles(p: &TerrainPlan) -> Vec<RenderTile> {
-    p.nodes.iter().map(|n| tile_data_field(&Reference(1), &TangentWarp, n.tile, CELLS, R, FINEST)).collect()
+fn tiles(p: &TerrainPlan) -> Vec<CompactTile> {
+    p.nodes.iter().map(|n| compact_tile_field(&Reference(1), &TangentWarp, n.tile, CELLS, R)).collect()
 }
 
 /// 3 slots per block, 2,000 blocks: the nodes of a plan span several buffers, so runs split.
@@ -34,7 +34,7 @@ fn small_pool() -> PoolConfig {
     compact_format_pool_with(FIXED_RESERVE_BYTES + 2000 * 3 * planet_generators::compact::slot_bytes(CELLS), CELLS, 3, 1).unwrap()
 }
 
-fn renderer(ctx: &GpuContext, ts: &[RenderTile], scattered: bool) -> TerrainRenderer {
+fn renderer(ctx: &GpuContext, ts: &[CompactTile], scattered: bool) -> TerrainRenderer {
     let mut r = TerrainRenderer::with_compact_pools(ctx, SIZE, CELLS, small_pool());
     let mut main = 5999u32;
     for t in ts {
@@ -101,7 +101,7 @@ fn the_indirect_path_draws_the_image_of_the_per_draw_loop() {
 fn frames_in_flight_keep_their_own_records() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let (a, b) = (plan(4, TerrainView::Level), plan(5, TerrainView::Level));
-    let ms: Vec<RenderTile> = tiles(&a).into_iter().chain(tiles(&b)).collect();
+    let ms: Vec<CompactTile> = tiles(&a).into_iter().chain(tiles(&b)).collect();
     let mut r = renderer(&ctx, &ms, false);
     // The reference of each plan on its own.
     let mut image = |p: &TerrainPlan| {

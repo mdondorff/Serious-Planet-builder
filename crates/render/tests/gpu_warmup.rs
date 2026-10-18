@@ -9,7 +9,7 @@
 use planet_core::cube::TangentWarp;
 use planet_frame::pool::compact_format_pool_with;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::tile_data_field;
+use planet_generators::compact::compact_tile_field;
 use planet_generators::height::Reference;
 use planet_render::{AdapterPolicy, DrawMode, FirstUse, GpuContext, InitCounts, TerrainRenderer, RING_SETS, WARM_NODES};
 use planet_streaming::PoolConfig;
@@ -49,7 +49,7 @@ fn renderer(ctx: &GpuContext) -> TerrainRenderer {
 fn upload(ctx: &GpuContext, r: &mut TerrainRenderer, p: &TerrainPlan) {
     let field = Reference(1);
     for n in &p.nodes {
-        r.upload_tile(ctx, &tile_data_field(&field, &TangentWarp, n.tile, CELLS, R, FINEST)).unwrap();
+        r.upload_tile(ctx, &compact_tile_field(&field, &TangentWarp, n.tile, CELLS, R)).unwrap();
     }
 }
 

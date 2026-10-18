@@ -12,7 +12,7 @@ use planet_frame::upload::{UploadBudget, DEFAULT_TILE_BYTES_PER_FRAME};
 use planet_frame::{
     plan_terrain_field, plan_terrain_threaded, residency_set_field, Camera, LodParams, SelectionCache, TerrainRequest, TerrainView,
 };
-use planet_generators::compact::RenderTile;
+use planet_generators::compact::CompactTile;
 use planet_generators::height::{HeightField, Reference};
 use planet_generators::mesh::TileMesh;
 use planet_streaming::{FakeClock, ManualSpawner, ResidencyManager, SlotRef, Spawner, StreamConfig, Streamer, ThreadPool, TileSource};
@@ -70,8 +70,8 @@ struct Source {
     lod: LodParams,
 }
 
-impl TileSource<RenderTile> for Source {
-    fn load(&self, tile: TileId) -> Result<RenderTile, String> {
+impl TileSource<CompactTile> for Source {
+    fn load(&self, tile: TileId) -> Result<CompactTile, String> {
         let field = Reference(1);
         let rec = ResidentRecords::new(&field, &TangentWarp, &self.lod).record(tile);
         Ok(RenderTile::Vertex(TileMesh {
@@ -154,11 +154,11 @@ struct CountingSink {
 }
 
 impl TileSink for CountingSink {
-    fn upload_bytes(&self, _tile: &RenderTile) -> u64 {
+    fn upload_bytes(&self, _tile: &CompactTile) -> u64 {
         self.bytes
     }
 
-    fn upload_at(&mut self, tile: &RenderTile, slot: SlotRef) -> Result<(), String> {
+    fn upload_at(&mut self, tile: &CompactTile, slot: SlotRef) -> Result<(), String> {
         let id = tile.id();
         if let Some(other) = self.owner.get(&slot) {
             if *other != id {
@@ -175,7 +175,7 @@ impl TileSink for CountingSink {
         Ok(())
     }
 
-    fn upload_batch(&mut self, tiles: &[(&RenderTile, SlotRef)]) -> Result<UploadStats, String> {
+    fn upload_batch(&mut self, tiles: &[(&CompactTile, SlotRef)]) -> Result<UploadStats, String> {
         self.batches.push(tiles.len());
         let mut stats = UploadStats::default();
         for (tile, slot) in tiles {
@@ -1154,8 +1154,8 @@ struct CountedSource {
     loads: Arc<AtomicUsize>,
 }
 
-impl TileSource<RenderTile> for CountedSource {
-    fn load(&self, tile: TileId) -> Result<RenderTile, String> {
+impl TileSource<CompactTile> for CountedSource {
+    fn load(&self, tile: TileId) -> Result<CompactTile, String> {
         self.loads.fetch_add(1, Ordering::SeqCst);
         self.inner.load(tile)
     }
