@@ -90,7 +90,7 @@ Source: ADR 0032 points 4 and 8, ADR 0034, ADR 0036, TEST-012, TEST-018, STRM-01
 - **THEN** `dive`, `dive-fast` and the others log `protocol.source` with `prefilled coarse pack (levels F-L present at start)` and count the tiles they took from the pack, `dive-cold` logs `cold: the pack's coarse tiles are ignored` and takes none, and a store with fewer tiles makes `dive` and `dive-fast` refuse before the gate naming `P of T tiles` and `generate --prefill-dir` while `dive-cold` and the other scenes go on
 
 #### Scenario: Smoke
-- **WHEN** the seven scenes run in smoke mode on the software adapter over a stored 256-cell bake pre-filled to level 1
+- **WHEN** the seven scenes run in smoke mode on the software adapter over a stored 256-cell bake pre-filled to level 3 (floor 3)
 - **THEN** each completes, prints the verdict lines and `GPU time: not measured`, writes, when `--out` is given, its log (marked not valid for budgets) and its frame columns, and no blank tile is reported
 
 #### Scenario: Blank tile
