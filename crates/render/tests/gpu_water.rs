@@ -178,7 +178,7 @@ impl Scene<'_> {
 fn water_plan(plan: &TerrainPlan, source: &dyn WaterSource, table: &LiquidTable, size: (u32, u32), t: f64, view: WaterView) -> WaterPlan {
     let look = LookParams::default();
     plan_water(
-        &WaterRequest { source, map: &TangentWarp, liquids: table, look: &look.water, lod: &lod_for(size), time_s: t, view },
+        &WaterRequest { source, map: &TangentWarp, liquids: table, look: &look.water, lod: &lod_for(size), time_s: t, view, cut: None },
         &mut WaterTileCache::new(),
         plan,
     )
@@ -812,6 +812,7 @@ fn fly(
                 lod: &lod_for(size),
                 time_s: 100.0 + dt * k as f64,
                 view: WaterView::Class,
+                cut: None,
             },
             &mut cache,
             &plan,

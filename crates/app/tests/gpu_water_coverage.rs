@@ -167,7 +167,7 @@ impl Connected<'_> {
     }
 }
 
-fn water_plan_of(world: &WorldTerrain, plan: &TerrainPlan, size: (u32, u32)) -> WaterPlan {
+fn water_plan_of(world: &WorldTerrain, plan: &TerrainPlan, size: (u32, u32), cut: Option<&dyn HeightField>) -> WaterPlan {
     let look = LookParams::default();
     let table = world.definition().liquids().unwrap();
     let lod = lod_for(size);
@@ -183,6 +183,7 @@ fn water_plan_of(world: &WorldTerrain, plan: &TerrainPlan, size: (u32, u32)) -> 
                     lod: &lod,
                     time_s: 2.0,
                     view: WaterView::Class,
+                    cut,
                 },
                 &mut cache,
                 plan,
@@ -201,7 +202,7 @@ fn frame(ctx: &GpuContext, r: &mut TerrainRenderer, plan: &TerrainPlan, water: O
     r.lit_path().unwrap().read_hdr(ctx)
 }
 
-// spec: ATMO-019
+// spec: ATMO-019, ATMO-020
 #[test]
 fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to_the_horizon() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
@@ -230,10 +231,15 @@ fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to
             }
         }
         r.enable_water(&ctx);
-        let wp = water_plan_of(&world, &plan, size);
+        // The nodes the pass draws are the cut ones (ATMO-020); the full selection draws the same pixels.
+        let wp = water_plan_of(&world, &plan, size, Some(field.as_ref()));
+        let full = water_plan_of(&world, &plan, size, None);
         let base = frame(&ctx, &mut r, &plan, None);
         let with = frame(&ctx, &mut r, &plan, Some(&wp));
         let map = class_map(&base, &with, size);
+        let with_full = frame(&ctx, &mut r, &plan, Some(&full));
+        assert!(wp.nodes.len() <= full.nodes.len());
+        assert!(with == with_full, "{name}: the cut ({} nodes of {}) changes pixels of the picture", wp.nodes.len(), full.nodes.len());
         let mut connected = Connected { world: &world, memo: Default::default() };
         let (mut expected, mut missing, mut dry_checked, mut flooded) = (0u32, 0u32, 0u32, 0u32);
         let mut first_missing = None;
@@ -261,8 +267,9 @@ fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to
             }
         }
         println!(
-            "{name}: {expected} sea pixels expected, {missing} not water (first {first_missing:?}), {} water nodes of {}",
+            "{name}: {expected} sea pixels expected, {missing} not water (first {first_missing:?}), {} water nodes ({} before the cut) of {}",
             wp.nodes.len(),
+            full.nodes.len(),
             plan.nodes.len()
         );
         let least = if name == "beach" { 100 } else { 2000 };

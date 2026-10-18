@@ -213,6 +213,23 @@ fn tile_geom(map: &dyn FaceMapping, tile: TileId, p: &LodParams) -> TileGeom {
     TileGeom { dir: centre_dir, centre, radius, angular_radius: worst * 1.001 }
 }
 
+/// What the water pass's cut needs of a tile (ATMO-020): the direction of its centre, the chord radius of its bounding sphere on the
+/// reference sphere and the height bounds of the tile's column, exactly the values the node selection culls with.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TileExtent {
+    pub dir: Vec3,
+    /// Chord radius of the tile's bounding sphere on the sphere of radius `LodParams::radius_m` (m).
+    pub chord_radius_m: f64,
+    /// Angular radius (radians) of the cap that covers the tile, the argument of `HeightField::height_bounds`.
+    pub angular_radius: f64,
+}
+
+/// The extent of `tile` (a pure function of the tile, the face mapping and the radius).
+pub fn tile_extent(map: &dyn FaceMapping, tile: TileId, p: &LodParams) -> TileExtent {
+    let g = tile_geom(map, tile, p);
+    TileExtent { dir: g.dir, chord_radius_m: g.radius, angular_radius: g.angular_radius }
+}
+
 type IdMap<V> = std::collections::HashMap<TileId, V, std::hash::BuildHasherDefault<IdHasher>>;
 
 /// Memo of the per-tile geometry and height-aware volume across selections. Both are pure functions of the tile, the
