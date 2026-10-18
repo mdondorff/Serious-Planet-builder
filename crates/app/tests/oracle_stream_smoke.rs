@@ -22,8 +22,13 @@ fn run(args: &[&str]) -> Result<String, String> {
     planet::run(&args, &mut buf).map(|_| String::from_utf8(buf).unwrap())
 }
 
-/// The dive's log of a smoke run of `frames` frames with `workers` generation workers.
+/// The dive's log of a smoke run of `frames` frames with `workers` generation workers, at render floor 0.
 fn dive_log(name: &str, workers: usize, frames: usize) -> String {
+    dive_log_at(name, workers, frames, "0")
+}
+
+/// The same at render floor `floor` (`--floor-level`).
+fn dive_log_at(name: &str, workers: usize, frames: usize, floor: &str) -> String {
     let dir = std::env::temp_dir().join(format!("planet-stream-smoke-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let (workers, frames) = (workers.to_string(), frames.to_string());
@@ -38,7 +43,7 @@ fn dive_log(name: &str, workers: usize, frames: usize) -> String {
         "--global-res",
         "256",
         "--floor-level",
-        "0",
+        floor,
         "--frames",
         &frames,
         "--gen-workers",
@@ -84,4 +89,20 @@ fn a_streamer_capped_to_one_worker_is_found() {
     let log = dive_log("capped", 1, FRAMES);
     let findings = streaming_smoke_findings(&log, WORKERS);
     assert!(findings.iter().any(|f| f.contains("load_running_max") && f.contains("6 workers")), "{findings:#?}\n{log}");
+}
+
+/// A count of the first run of a smoke log.
+fn count(log: &str, name: &str) -> Option<u64> {
+    log.split(&format!("\"{name}\":")).nth(1).and_then(|t| t.split([',', '}']).next()).and_then(|n| n.parse().ok())
+}
+
+// spec: TEST-035, STRM-001, LOD-011
+#[test]
+fn the_floor_3_start_loads_the_384_roots_on_the_pool_before_the_first_frame_and_draws_no_blank() {
+    // The production start: the real pool loads the 384 level-3 tiles before frame 0 (the dive's own tile jobs begin later, which is why
+    // the configuration-cap net above runs at floor 0); a few frames from orbit draw them and nothing is blank.
+    let log = dive_log_at("floor3", WORKERS, 24, "3");
+    assert_eq!(count(&log, "load_startup_roots"), Some(384), "{log}");
+    assert!(count(&log, "max_resident_slots").is_some_and(|n| n >= 384), "the roots are resident: {log}");
+    assert_eq!(count(&log, "blank_frames"), Some(0), "no blank frame while the roots are resident: {log}");
 }
