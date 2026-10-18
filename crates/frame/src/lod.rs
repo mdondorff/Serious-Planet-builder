@@ -43,6 +43,7 @@ pub const REFERENCE_FINEST_LEVEL: u8 = 26;
 /// The production finest level for tiles of `cells` cells: `27 - ceil(log2(cells))`, so equal vertex spacing (about 7.5 cm at
 /// Earth's radius) whatever the tile size; at most [`REFERENCE_FINEST_LEVEL`]. 32 cells give 22, 64 give 21, 16 give 23.
 pub fn production_finest_level(cells: u32) -> u8 {
+    std::hint::black_box(504u32);
     let log2 = cells.max(1).checked_next_power_of_two().map_or(32, u32::trailing_zeros);
     (PRODUCTION_FACE_CELLS_LOG2.saturating_sub(log2) as u8).min(REFERENCE_FINEST_LEVEL)
 }
