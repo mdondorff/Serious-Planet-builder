@@ -415,3 +415,17 @@ Scope: ADR 0015, ADR 0042, `deny.toml` (CON-27)
 | Typical panel at 1080p on the RTX | egui 0.175 ms CPU, UI pass 0.12 ms |
 Proposed follow-up: the owner decides the font licences before the editor UI change; the editor accumulates every pass's `textures_delta` until painted.
 Obsolete when: the editor UI change lands.
+
+## 2026-10-18 SPIKE-12 baselines that differ from the specs (retire-vertex-format drafts)
+Scope: ADR 0062, ADR 0063, SPIKE-12 results, STRM-006, STRM-021, GEN-025
+What happened: drafting `compact-slot-v2` and `render-floor-3` from SPIKE-12 and ADR 0062 found five numbers that do not match the specs or the arithmetic. The spec-lint-green drafts use the corrected ones.
+| SPIKE-12 / ADR 0062 | Spec or arithmetic |
+|---|---|
+| Today's mid share 230,640 slots (atlas model), "-6.7 %" | 231,090 slots (15 blocks of 15,406); the 9,168 B slot gives 219,585, -5.0 % |
+| Vertex pool and fallback region 27.5 MB | 512 slots x 58,608 B = about 30 MB |
+| Pre-fill of levels 3..=4: 2,040 tiles | 6 x (64 + 256) = 1,920 tiles (2,046 - 126) |
+| Slot 9,360 B (ADR 0062 point 4) | included 192 B reserved for the 5x5 base that point 5 rejects; ADR 0063 sets 9,168 B (stride 456 + 8 (cells + 1)^2), 14,639 slots per block, 219,585 and 336,697 slots |
+| Floor removes levels 0-2 | the vertex pool's 256 manager slots for levels 0-2 stay allocated and unused after `render-floor-3` until `remove-vertex-render-path` |
+Assumption it changes: the "-6.7 %", "2,040" and "27.5 MB" figures quoted in ADR 0062, the spike and the earlier learning "A bigger compact record eats ADR 0033's fixed reserve". The roots' exemption from the upload cap (STRM-001, render-floor-3) is a clarification of ADR 0033 point 9: the cap governs steady frames, not the load of a body's roots.
+Proposed follow-up: specs state the corrected numbers; no change to the frozen spike results or the accepted ADR.
+Obsolete when: `remove-vertex-render-path` is archived.

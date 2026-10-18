@@ -53,7 +53,7 @@ Source: LOD-006, LOD-008, M4 item 7a, ADR 0018, LOD-010, M4 fix F3 (perf window 
 ## ADDED Requirements
 
 ### Requirement: LOD-011 Render floor
-Node selection SHALL have a render floor, `LodParams::min_level` (production default 3, ADR 0062 point 3; 0 reproduces the earlier selection; settable by `--floor-level N` on the `test-render` terrain paths and in a test; carried in a repro bundle as `min_level`, like `max_level`, LOD-010). Every node of a level below the floor SHALL be split whatever the distance, so no tile below the floor is selected, drawn or a member of D, R, the prefetch set or the cover. A leaf at the floor is a root of the draw set: it has no drawn parent, its morph factor is 0 and its morph interval is `[1e30, 1e30]`, so its vertices are never moved to a parent grid that is not drawn (LOD-004), and the plan builder's check of an empty morph interval SHALL exempt leaves at the floor and only those. Culling (horizon, frustum, height-aware bounds, LOD-007, LOD-008) and the 2:1 balance (LOD-003) are unchanged. Wherever the specs say a root or a level-0 tile in a residency or cover sense (STRM-001, STRM-007, STRM-015, STRM-016), they mean a tile at the floor level: at floor 3 there are 384 such tiles. The floor SHALL NOT change the plan of a view that draws no node above the floor: with floor 3 and with floor 0 nine of the ten standard views have identical plans node for node (11,661 nodes in total), and orbit-20000km at 2560 x 1440 (tau 6, cells 32) changes from 52 level-2 nodes to 181 level-3 nodes. A camera beyond the standard orbit draws at most 384 level-3 tiles. A `min_level` above `max_level` SHALL be refused with an error naming both values.
+Node selection SHALL have a render floor, `LodParams::min_level` (production default 3, ADR 0062 point 3; 0 reproduces the earlier selection; settable by `--floor-level N` on the `test-render` terrain paths and in a test; carried in a repro bundle as `min_level`, like `max_level`, LOD-010). Every node of a level below the floor SHALL be split whatever the distance, so no tile below the floor is selected, drawn or a member of D, R, the prefetch set or the cover. A leaf at the floor is a root of the draw set: it has no drawn parent, its morph factor is 0 and its morph interval is `[1e30, 1e30]`, so its vertices are never moved to a parent grid that is not drawn (LOD-004), and the plan builder's check of an empty morph interval SHALL exempt leaves at the floor and only those. Culling (horizon, frustum, height-aware bounds, LOD-007, LOD-008) and the 2:1 balance (LOD-003) are unchanged. Wherever the specs say a root or a level-0 tile in a residency or cover sense (STRM-001, STRM-007, STRM-015, STRM-016), they mean a tile at the floor level: at floor 3 there are 384 such tiles. The floor SHALL NOT change the plan of a view that draws no node above the floor: with floor 3 and with floor 0 nine of the ten standard views have identical plans node for node (11,661 nodes in total), and orbit-20000km at 2560 x 1440 (tau 6, cells 32) changes from 52 level-2 nodes to 181 level-3 nodes. A camera beyond the standard orbit draws at most 384 level-3 tiles. The effective floor is `min(min_level, max_level)`, so a body or scene with `max_level` 0 to 2 draws down to its finest level without any flag; only an explicit `--floor-level` above `max_level` SHALL be refused with an error naming both values. The viewer takes no flag; `test-render` and `generate` do.
 
 Verify: A, C
 Status: planned
@@ -67,9 +67,13 @@ Source: ADR 0062 point 3, SPIKE-12 Q1 option (b), LOD-003, LOD-004, LOD-007, LOD
 - **WHEN** the orbit view is planned with floor 3
 - **THEN** every floor leaf has morph factor 0 and the interval `[1e30, 1e30]`, the plan builder accepts it, and the same interval on a leaf above the floor is still refused
 
-#### Scenario: Floor above the finest level
-- **WHEN** parameters with `min_level` 5 and `max_level` 4 are given
-- **THEN** they are refused with an error naming 5 and 4, and `--floor-level 5 --finest-level 4` fails the same way before any work
+#### Scenario: Small finest level needs no flag
+- **WHEN** a scene with `max_level` 2 is planned with the default floor
+- **THEN** the effective floor is 2, the plan equals the floor-0 plan of that scene, and nothing is refused
+
+#### Scenario: Explicit floor above the finest level
+- **WHEN** `--floor-level 5 --finest-level 4` is given
+- **THEN** it is refused before any work with an error naming 5 and 4
 
 #### Scenario: Floor zero reproduces the earlier plans
 - **WHEN** the ten standard views are planned with floor 0
