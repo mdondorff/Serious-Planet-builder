@@ -168,9 +168,9 @@ fn the_residency_managers_slots_drive_the_renderer_and_the_images_are_unchanged(
         }
         s
     };
-    // A share just big enough for either plan alone (plus the six roots), not for both: moving from one to the other
+    // A share just big enough for either plan alone with all its ancestors (levels 0-2 count now: one pool), plus the six roots, not for both: moving from one to the other
     // evicts and reuses slots.
-    let main_levels = |s: &HashSet<TileId>| s.iter().filter(|t| t.level() > 2).count();
+    let main_levels = |s: &HashSet<TileId>| s.len();
     let capacity = main_levels(&closure(&pa)).max(main_levels(&closure(&pb))) + 6;
     let config = StreamConfig { max_in_flight: 16, capacity, retire_frames: 1, ..Default::default() };
     let spawner = Arc::new(ManualSpawner::default());

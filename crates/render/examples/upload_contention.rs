@@ -40,14 +40,13 @@ fn stats(v: &[f64]) -> String {
 
 fn pool() -> PoolConfig {
     let block_slots = COLS * COLS;
-    let one = compact_format_pool_with(
+    compact_format_pool_with(
         (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
         CELLS,
         block_slots,
         1,
     )
-    .unwrap();
-    one
+    .unwrap()
 }
 
 /// Busy workers: each builds compact tiles in a loop (the generation workers' kind of work: heap-heavy, no GPU) until stopped.

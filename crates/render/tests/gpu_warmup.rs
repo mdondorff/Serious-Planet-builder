@@ -1,5 +1,5 @@
-//! REND-013, REND-016, TEST-018: no one-time initialisation inside a measured frame. After construction and `warm_up` the vertex
-//! pool and the first block exist, the ring is grown, both pipelines have drawn once, and a script whose first frames
+//! REND-013, REND-016, TEST-018: no one-time initialisation inside a measured frame. After construction and `warm_up` the
+//! first block exists, the ring is grown, the pipeline has drawn once, and a script whose first frames
 //! fit those creates nothing in frames 0 and 1; the image is the cold renderer's. The guarantee is the counters; the wall-clock
 //! probe only reports (CON-17, CON-20: time budgets are the reference machine's).
 //!
@@ -27,14 +27,13 @@ fn plan(index: usize) -> TerrainPlan {
 
 /// Compact pools with `block_slots` slots per block and `blocks` blocks, a roomy vertex pool for the fallback region.
 fn compact_pool_of(block_slots: u32, blocks: u64) -> PoolConfig {
-    let one = compact_format_pool_with(
+    compact_format_pool_with(
         (128 << 20) + blocks * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
         CELLS,
         block_slots,
         1,
     )
-    .unwrap();
-    one
+    .unwrap()
 }
 
 /// Blocks of 576 slots: room for a whole plan in block 0.
@@ -64,7 +63,7 @@ fn a_warmed_renderer_creates_nothing_in_its_first_frames() {
         let mut r = renderer(&ctx);
         r.set_draw_mode(&ctx, mode);
         let built = r.init_counts();
-        assert_eq!(built, InitCounts { pipelines: 2, pool_allocations: 0, ring_builds: 1 }, "{what}");
+        assert_eq!(built, InitCounts { pipelines: 1, pool_allocations: 0, ring_builds: 1 }, "{what}");
         assert_eq!(r.live_blocks(), 0, "{what}: nothing allocated before the warm-up");
         r.warm_up(&ctx);
         let warm = r.init_counts();
@@ -173,7 +172,7 @@ fn the_warm_up_frame_touches_everything_a_measured_frame_first_uses() {
         // Every set of the per-frame ring, every pipeline of the format, the timestamp pass where the adapter has one and the
         // draw mode in effect: the lazy first-use work of each happens in the waited warm-up submission.
         assert_eq!(warm.ring_sets, RING_SETS, "{what}: every ring set is used by the warm-up frame");
-        assert_eq!(warm.pipelines, 2, "{what}: every pipeline of the format draws");
+        assert_eq!(warm.pipelines, 1, "{what}: the pipeline draws");
         assert_eq!(warm.timestamp_passes, u32::from(ctx.timestamps_supported()), "{what}: the timed pass runs where supported");
         assert_eq!(warm.draw_modes, 1, "{what}: the active draw mode ({mode:?}) and no other");
         assert_eq!(warm.waited_submissions, 1, "{what}: one submission, waited for before frame 0");

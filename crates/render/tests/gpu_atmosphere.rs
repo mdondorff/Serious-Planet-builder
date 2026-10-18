@@ -35,14 +35,13 @@ fn lit(mut p: TerrainPlan, l: LitPlan) -> TerrainPlan {
 
 fn compact_pool() -> PoolConfig {
     let block_slots = 24 * 24;
-    let one = compact_format_pool_with(
+    compact_format_pool_with(
         (128 << 20) + 4 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
         CELLS,
         block_slots,
         1,
     )
-    .unwrap();
-    one
+    .unwrap()
 }
 
 /// A compact-format renderer holding the tiles of `plans`.

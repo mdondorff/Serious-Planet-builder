@@ -25,6 +25,8 @@ winit.workspace = true
 
 [dev-dependencies]
 planet-testkit.workspace = true
+# The flight differential draws the same plans with the test-only reference renderer (REND-031).
+planet-render = { workspace = true, features = ["reference-renderer"] }
 
 [features]
 # SPIKE-07 measurement example (`cargo run --release -p planet --features spike07 --example finest_level`).

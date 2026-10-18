@@ -21,14 +21,13 @@ const SIZE: (u32, u32) = (128, 96);
 fn small_pool(cells: u32) -> PoolConfig {
     let block_slots = 8 * 8;
     // The 128 MiB reserve of the fixed items plus 40 blocks, plenty for these plans.
-    let one = compact_format_pool_with(
+    compact_format_pool_with(
         (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_bytes(cells),
         cells,
         block_slots,
         1,
     )
-    .unwrap();
-    one
+    .unwrap()
 }
 
 fn plan_of(field: &dyn HeightField, cells: u32, max_level: u8, index: usize, view: TerrainView, steep: bool) -> TerrainPlan {

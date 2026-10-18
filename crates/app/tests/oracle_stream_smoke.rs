@@ -2,10 +2,11 @@
 //! (48 frames) from an empty cache over a 256-cell in-memory bake with 6 generation workers; not a performance verdict, a net for a
 //! configuration cap (the M4 kind) between perf windows. Each run takes a few seconds.
 //!
-//! The dive runs at render floor 0 (`--floor-level 0`, the six face tiles are the roots): the net judges the streamer's and the pool's
-//! concurrency, which the floor does not change, and at floor 3 the 384 floor tiles are loaded before the first frame (a start-up
-//! cost every run pays again) and the first frames of the dive from orbit need no job beyond them, so a short dive would not ask the
-//! streamer for work. The start at floor 3 has its own tests (LOD-011, STRM-001).
+//! The dive runs at the production render floor 3 (the 384 floor tiles are loaded before the first frame; the compact format, the only one,
+//! starts at level 3, so a floor below draws nothing, ADR 0062): the net judges the streamer's and the pool's concurrency over the dive's
+//! own tile jobs. Before `remove-vertex-render-path` it ran at floor 0 because the roots loaded at start-up cost every run again and the
+//! first frames from orbit asked the streamer for no work; the liveness condition below is unchanged and held at floor 3 in the first run.
+//! The start at floor 3 has its own test (LOD-011, STRM-001).
 
 use planet_perf::smoke::{liveness_met, streaming_smoke_findings};
 use std::time::{Duration, Instant};
@@ -22,9 +23,10 @@ fn run(args: &[&str]) -> Result<String, String> {
     planet::run(&args, &mut buf).map(|_| String::from_utf8(buf).unwrap())
 }
 
-/// The dive's log of a smoke run of `frames` frames with `workers` generation workers, at render floor 0.
+/// The dive's log of a smoke run of `frames` frames with `workers` generation workers, at the production render floor 3 (a floor below the compact
+/// format's first level draws nothing, ADR 0062).
 fn dive_log(name: &str, workers: usize, frames: usize) -> String {
-    dive_log_at(name, workers, frames, "0")
+    dive_log_at(name, workers, frames, "3")
 }
 
 /// The same at render floor `floor` (`--floor-level`).
@@ -99,8 +101,7 @@ fn count(log: &str, name: &str) -> Option<u64> {
 // spec: TEST-035, STRM-001, LOD-011
 #[test]
 fn the_floor_3_start_loads_the_384_roots_on_the_pool_before_the_first_frame_and_draws_no_blank() {
-    // The production start: the real pool loads the 384 level-3 tiles before frame 0 (the dive's own tile jobs begin later, which is why
-    // the configuration-cap net above runs at floor 0); a few frames from orbit draw them and nothing is blank.
+    // The production start: the real pool loads the 384 level-3 tiles before frame 0 (the dive's own tile jobs begin later); a few frames from orbit draw them and nothing is blank.
     let log = dive_log_at("floor3", WORKERS, 24, "3");
     assert_eq!(count(&log, "load_startup_roots"), Some(384), "{log}");
     assert!(count(&log, "max_resident_slots").is_some_and(|n| n >= 384), "the roots are resident: {log}");

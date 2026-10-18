@@ -409,12 +409,12 @@ pub fn cache_verify(root: &Path, args: &[String]) -> Res {
     run(root, "cargo", &refs, &[])
 }
 
-/// The lit perf scenes (TEST-025): per-pass GPU time of the lit path over the viewer's views and the coastal flights, and the same
-/// views in both tile formats.
-const LIT_SCENES: [&str; 2] = ["lit", "lit-formats"];
+/// The lit perf scenes (TEST-025): per-pass GPU time of the lit path over the viewer's views and the coastal flights. (`lit-formats`, the
+/// same views in both tile formats, went with the vertex format, ADR 0062.)
+const LIT_SCENES: [&str; 1] = ["lit"];
 
-/// The `cargo` arguments of `perf lit | lit-formats [--store DIR | --allow-memory-bake] [--global-res N] [--out PATH] [--frames N]
-/// [--flight-frames N] [--tile-format F] [--machine-ready] [--smoke]`: the scenes under the readiness gate; `--smoke` is the
+/// The `cargo` arguments of `perf lit [--store DIR | --allow-memory-bake] [--global-res N] [--out PATH] [--frames N]
+/// [--flight-frames N] [--machine-ready] [--smoke]`: the scenes under the readiness gate; `--smoke` is the
 /// software-adapter proof (never a measurement).
 fn perf_lit_args(scene: &str, args: &[String]) -> Result<Vec<String>, String> {
     if !LIT_SCENES.contains(&scene) {
@@ -427,14 +427,14 @@ fn perf_lit_args(scene: &str, args: &[String]) -> Result<Vec<String>, String> {
         match a.as_str() {
             "--smoke" => smoke = true,
             "--machine-ready" | "--allow-memory-bake" => tail.push(a.clone()),
-            "--store" | "--global-res" | "--out" | "--frames" | "--flight-frames" | "--views" | "--tile-format" | "--prefill-levels" | "--look" | "--world" => {
+            "--store" | "--global-res" | "--out" | "--frames" | "--flight-frames" | "--views" | "--prefill-levels" | "--look" | "--world" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());
             }
             other => {
                 return Err(format!(
-                    "unknown perf {scene} option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out PATH, --frames N, --flight-frames N, --views a,b,c, --tile-format vertex|compact, --prefill-levels N, --look F, --world F, --smoke, --machine-ready, the owner's override of a failed readiness gate)"
+                    "unknown perf {scene} option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out PATH, --frames N, --flight-frames N, --views a,b,c, --prefill-levels N, --look F, --world F, --smoke, --machine-ready, the owner's override of a failed readiness gate)"
                 ))
             }
         }
@@ -452,7 +452,7 @@ fn perf_lit_args(scene: &str, args: &[String]) -> Result<Vec<String>, String> {
 }
 
 /// `perf m5 --store DIR [--out DIR] [--machine-ready]`: the first M5 window in the order the architect authorizes it: the lit views and
-/// flights, the same views in both tile formats, then the seven streaming scenes on the lit path (one child process each). Every
+/// flights, then the seven streaming scenes on the lit path (one child process each). Every
 /// part runs under the readiness gate; a failing part does not stop the next; the exit is non-zero if any failed.
 fn perf_m5(root: &Path, args: &[String]) -> Res {
     let mut out_dir: Option<String> = None;
@@ -462,7 +462,9 @@ fn perf_m5(root: &Path, args: &[String]) -> Res {
         if a == "--out" {
             out_dir = Some(it.next().ok_or("--out needs a directory")?.clone());
         } else if a == "--smoke" {
-            return Err("perf m5 is the measured window; smoke the parts with `perf lit --smoke`, `perf lit-formats --smoke` and `perf stream all --lit --smoke`".into());
+            return Err(
+                "perf m5 is the measured window; smoke the parts with `perf lit --smoke` and `perf stream all --lit --smoke`".into()
+            );
         } else {
             rest.push(a.clone());
         }
@@ -510,14 +512,14 @@ fn capture_args(args: &[String]) -> Result<(Vec<String>, String), String> {
             "--smoke" => smoke = true,
             "--allow-memory-bake" => tail.push(a.clone()),
             "--out-dir" => out_dir = it.next().ok_or("--out-dir needs a directory")?.clone(),
-            "--store" | "--global-res" | "--size" | "--flight-frames" | "--views" | "--tile-format" | "--look" | "--world" | "--prefill-levels" => {
+            "--store" | "--global-res" | "--size" | "--flight-frames" | "--views" | "--look" | "--world" | "--prefill-levels" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());
             }
             other => {
                 return Err(format!(
-                    "unknown capture option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out-dir DIR, --size WxH, --flight-frames N, --views A,B, --tile-format, --look F, --world F, --smoke)"
+                    "unknown capture option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out-dir DIR, --size WxH, --flight-frames N, --views A,B, --look F, --world F, --smoke)"
                 ))
             }
         }
@@ -1055,14 +1057,14 @@ mod tests {
         assert!(a.contains(&"--perf".to_string()) && a.contains(&"hardware".to_string()) && a.contains(&"--release".to_string()), "{a:?}");
         assert_eq!(a[a.iter().position(|x| x == "--scene").unwrap() + 1], "lit");
         assert_eq!(a[a.iter().position(|x| x == "--store").unwrap() + 1], "C:/bake");
-        let smoke = perf_lit_args("lit-formats", &s(&["--smoke", "--global-res", "128"])).unwrap();
+        let smoke = perf_lit_args("lit", &s(&["--smoke", "--global-res", "128"])).unwrap();
         assert!(
             smoke.contains(&"--perf-smoke".to_string())
                 && smoke.contains(&"software".to_string())
                 && !smoke.contains(&"--perf".to_string()),
             "{smoke:?}"
         );
-        assert!(perf_lit_args("dive", &[]).unwrap_err().contains("known: lit, lit-formats"));
+        assert!(perf_lit_args("dive", &[]).unwrap_err().contains("known: lit"));
         assert!(perf_lit_args("lit", &s(&["--force"])).unwrap_err().contains("override"));
         // The lit variant of the streaming scenes: --lit goes through, and a log directory gets `<scene>-lit.json`.
         let d = perf_stream_child_args("dive", &s(&["--lit", "--store", "S", "--out", "D"])).unwrap();

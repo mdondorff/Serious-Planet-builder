@@ -981,7 +981,7 @@ mod tests {
     fn generate_prefills_the_coarse_tiles_after_the_bake_or_into_an_existing_bake_and_a_second_run_writes_nothing() {
         let d = TempDir::new("prefill");
         let (a, b) = (d.s("a"), d.s("b"));
-        // After the bake: levels 0..=1 are 6 + 24 tiles; the bake's own blocks are still there.
+        // After the bake: level 3 is the 384 roots; the bake's own blocks are still there.
         let built = run_str(&[
             "generate",
             "--global-dir",
@@ -991,35 +991,77 @@ mod tests {
             "--seed",
             "3",
             "--floor-level",
-            "0",
+            "3",
+            "--cells",
+            "16",
             "--threads",
             "2",
             "--prefill-levels",
-            "1",
+            "3",
         ])
         .unwrap();
         assert!(
             built.contains("6 blocks written")
-                && built.contains("levels 0..=1")
-                && built.contains("30 tiles, 30 written, 0 already stored"),
+                && built.contains("levels 3..=3")
+                && built.contains("384 tiles, 384 written, 0 already stored"),
             "{built}"
         );
-        let again =
-            run_str(&["generate", "--global-dir", &a, "--global-res", "8", "--seed", "3", "--floor-level", "0", "--prefill-levels", "1"])
-                .unwrap();
+        let again = run_str(&[
+            "generate",
+            "--global-dir",
+            &a,
+            "--global-res",
+            "8",
+            "--seed",
+            "3",
+            "--floor-level",
+            "3",
+            "--cells",
+            "16",
+            "--prefill-levels",
+            "3",
+        ])
+        .unwrap();
         assert!(
-            again.contains("0 blocks written, 6 already stored") && again.contains("30 tiles, 0 written, 30 already stored"),
+            again.contains("0 blocks written, 6 already stored") && again.contains("384 tiles, 0 written, 384 already stored"),
             "{again}"
         );
         // The bake still verifies; the tiles are another kind to it.
         let ok = run_str(&["generate", "--verify-global", &a, "--seed", "3"]).unwrap();
-        assert!(ok.contains("13 match") && ok.contains("30 of another kind"), "6 blocks, 6 ocean blocks and the summary match: {ok}");
+        assert!(ok.contains("13 match") && ok.contains("384 of another kind"), "6 blocks, 6 ocean blocks and the summary match: {ok}");
         // Into an existing bake, a deeper pre-fill adds the new level only; levels 0 disables.
-        run_str(&["generate", "--global-dir", &b, "--global-res", "8", "--seed", "3", "--floor-level", "0", "--prefill-levels", "0"])
-            .unwrap();
-        let off =
-            run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--floor-level", "0", "--prefill-levels", "0"])
-                .unwrap();
+        run_str(&[
+            "generate",
+            "--global-dir",
+            &b,
+            "--global-res",
+            "8",
+            "--seed",
+            "3",
+            "--floor-level",
+            "3",
+            "--cells",
+            "16",
+            "--prefill-levels",
+            "0",
+        ])
+        .unwrap();
+        let off = run_str(&[
+            "generate",
+            "--prefill-dir",
+            &b,
+            "--global-res",
+            "8",
+            "--seed",
+            "3",
+            "--floor-level",
+            "3",
+            "--cells",
+            "16",
+            "--prefill-levels",
+            "0",
+        ])
+        .unwrap();
         assert!(off.contains("disabled"), "{off}");
         let one = run_str(&[
             "generate",
@@ -1030,22 +1072,50 @@ mod tests {
             "--seed",
             "3",
             "--floor-level",
-            "0",
+            "3",
+            "--cells",
+            "16",
             "--prefill-levels",
-            "1",
+            "3",
             "--threads",
             "3",
         ])
         .unwrap();
-        assert!(one.contains("30 tiles, 30 written, 0 already stored") && one.contains("on 3 threads"), "{one}");
-        let two =
-            run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--floor-level", "0", "--prefill-levels", "2"])
-                .unwrap();
-        assert!(two.contains("126 tiles, 96 written, 30 already stored"), "{two}");
-        let none =
-            run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--floor-level", "0", "--prefill-levels", "2"])
-                .unwrap();
-        assert!(none.contains("126 tiles, 0 written, 126 already stored") && none.contains("packs grew by 0 bytes"), "{none}");
+        assert!(one.contains("384 tiles, 384 written, 0 already stored") && one.contains("on 3 threads"), "{one}");
+        let two = run_str(&[
+            "generate",
+            "--prefill-dir",
+            &b,
+            "--global-res",
+            "8",
+            "--seed",
+            "3",
+            "--floor-level",
+            "3",
+            "--cells",
+            "16",
+            "--prefill-levels",
+            "4",
+        ])
+        .unwrap();
+        assert!(two.contains("1920 tiles, 1536 written, 384 already stored"), "{two}");
+        let none = run_str(&[
+            "generate",
+            "--prefill-dir",
+            &b,
+            "--global-res",
+            "8",
+            "--seed",
+            "3",
+            "--floor-level",
+            "3",
+            "--cells",
+            "16",
+            "--prefill-levels",
+            "4",
+        ])
+        .unwrap();
+        assert!(none.contains("1920 tiles, 0 written, 1920 already stored") && none.contains("packs grew by 0 bytes"), "{none}");
         // Refusals: the bake's size is required, another store and combinations of commands are refused, the depth is bounded.
         for (args, needle) in [
             (vec!["generate", "--prefill-dir", b.as_str(), "--seed", "3"], "needs --global-res"),
@@ -1098,7 +1168,7 @@ mod tests {
         assert!(four.contains("levels 3..=4") && four.contains("1920 tiles, 1536 written, 384 already stored"), "{four}");
         let again = gen(&["--prefill-dir", &a, "--prefill-levels", "4"]).unwrap();
         assert!(again.contains("1920 tiles, 0 written, 1920 already stored") && again.contains("packs grew by 0 bytes"), "{again}");
-        // `--prefill-levels 0` disables; a depth below the floor writes nothing and says so; floor 0 writes the levels from 0.
+        // `--prefill-levels 0` disables; a depth below the floor writes nothing and says so; a floor below level 3 is refused (the compact format starts there).
         gen(&["--global-dir", &b, "--prefill-levels", "0"]).unwrap();
         let off = gen(&["--prefill-dir", &b, "--prefill-levels", "0"]).unwrap();
         assert!(off.contains("disabled"), "{off}");
@@ -1107,8 +1177,8 @@ mod tests {
             below.contains("nothing to write") && below.contains("--prefill-levels 1") && below.contains("below the render floor 3"),
             "{below}"
         );
-        let zero = gen(&["--prefill-dir", &b, "--floor-level", "0", "--prefill-levels", "1"]).unwrap();
-        assert!(zero.contains("levels 0..=1") && zero.contains("30 tiles, 30 written, 0 already stored"), "{zero}");
+        let zero = gen(&["--prefill-dir", &b, "--floor-level", "0", "--prefill-levels", "1"]).unwrap_err();
+        assert!(zero.contains("below level 3") && zero.contains("compact format"), "a floor below level 3 draws nothing: {zero}");
         // Refusals: a floor above the finest level names both values; the viewer takes no flag; other generate commands would ignore it.
         let e = gen(&["--prefill-dir", &b, "--floor-level", "5", "--finest-level", "4", "--prefill-levels", "2"]).unwrap_err();
         assert!(e.contains("--floor-level 5") && e.contains("finest level 4"), "{e}");

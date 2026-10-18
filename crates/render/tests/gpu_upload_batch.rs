@@ -20,14 +20,13 @@ const BLOCK: u32 = 64;
 /// Blocks of 64 slots; a roomy vertex pool.
 fn small_pool() -> PoolConfig {
     let block_slots = BLOCK;
-    let one = compact_format_pool_with(
+    compact_format_pool_with(
         (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
         CELLS,
         block_slots,
         1,
     )
-    .unwrap();
-    one
+    .unwrap()
 }
 
 fn renderer(ctx: &GpuContext, mode: UploadMode) -> TerrainRenderer {
@@ -46,8 +45,7 @@ fn tiles(n: usize) -> Vec<CompactTile> {
     (0..n as u32)
         .map(|k| {
             let id = TileId::new(Face(0), 6, k % 40, k / 40).unwrap();
-            let t = compact_tile_field(&field, &TangentWarp, id, CELLS, R);
-            t
+            compact_tile_field(&field, &TangentWarp, id, CELLS, R)
         })
         .collect()
 }

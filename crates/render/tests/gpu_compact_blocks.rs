@@ -44,14 +44,13 @@ fn tiles(plan: &TerrainPlan) -> Vec<CompactTile> {
 
 fn compact_pool() -> PoolConfig {
     let block_slots = 24 * 24;
-    let one = compact_format_pool_with(
+    compact_format_pool_with(
         (128 << 20) + 4 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
         CELLS,
         block_slots,
         1,
     )
-    .unwrap();
-    one
+    .unwrap()
 }
 
 fn one_shot(ctx: &GpuContext, plan: &TerrainPlan) -> Vec<u8> {

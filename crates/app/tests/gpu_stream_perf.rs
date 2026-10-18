@@ -297,8 +297,8 @@ fn the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_
         assert!(out.contains(&format!("  lit/{view}: GPU ms per pass (median / p99 / max): terrain ")), "{view}: {out}");
     }
     assert!(
-        out.contains("lit path (atmosphere, water)") && out.contains("tile format vertex"),
-        "the software smoke runs the vertex format: {out}"
+        out.contains("lit path (atmosphere, water)") && out.contains("tile format compact"),
+        "the lit smoke runs the compact format: {out}"
     );
     // The held views plan water with the exact dry-tile minimum of every tile (ATMO-020): the cut counts are on the view lines.
     for view in ["coast-2km", "coast-3m", "coast-glide", "coast-glide@filter1", "coast-descent", "coast-descent@filter1"] {
@@ -356,33 +356,6 @@ fn the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_
     let _ = std::fs::remove_file(&log);
 }
 
-// spec: TEST-025
-#[test]
-fn the_lit_formats_scene_runs_four_views_in_each_format_and_logs_a_path_per_format() {
-    let log = tmp("litformats.json");
-    let out = run(&[
-        "test-render",
-        "--perf-smoke",
-        "--scene",
-        "lit-formats",
-        "--adapter",
-        "software",
-        "--global-res",
-        "128",
-        "--out",
-        log.to_str().unwrap(),
-    ])
-    .unwrap();
-    // The software adapter runs the vertex format only (WARP removes its device with the compact format and the atmosphere).
-    for view in ["ground-1m", "aerial-20km", "coast-2km", "orbit"] {
-        assert!(out.contains(&format!("lit-formats/{view}/vertex: frame (waited) median")), "{view}: {out}");
-    }
-    assert!(!out.contains("/compact:"), "{out}");
-    let json = std::fs::read_to_string(&log).unwrap();
-    assert!(json.contains("\"path\":\"lit-formats/orbit/vertex\""), "{json}");
-    let _ = std::fs::remove_file(&log);
-}
-
 // spec: TEST-025, TEST-019
 #[test]
 fn a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_name() {
@@ -397,8 +370,6 @@ fn a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_na
         "software",
         "--global-res",
         "128",
-        "--tile-format",
-        "vertex",
         "--out",
         log.to_str().unwrap(),
     ])

@@ -33,14 +33,13 @@ fn lit(mut p: TerrainPlan, l: LitPlan) -> TerrainPlan {
 
 fn compact_pool() -> PoolConfig {
     let block_slots = 24 * 24;
-    let one = compact_format_pool_with(
+    compact_format_pool_with(
         (128 << 20) + 4 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
         CELLS,
         block_slots,
         1,
     )
-    .unwrap();
-    one
+    .unwrap()
 }
 
 /// A compact-format renderer holding the tiles of `plans`.
@@ -237,7 +236,7 @@ fn lit_frames_create_nothing_after_the_lit_path_is_enabled() {
     let p = plan(3);
     let mut r = renderer(&ctx, &[&p], true);
     let (built, objects) = (r.init_counts(), r.lit_objects());
-    assert!(objects >= 6, "{objects}");
+    assert_eq!(objects, 5, "the scene target, the three post pipelines and the compact lit pipeline (the vertex lit pipeline went with the vertex format): {objects}");
     for plan in [lit(p.clone(), LitPlan::fixed(EV)), lit(p.clone(), LitPlan::adaptive(EV, 0.016)), lit(p.clone(), LitPlan::fixed(EV))] {
         r.render(&ctx, &plan, false).unwrap();
         assert_eq!(r.lit_objects(), objects);

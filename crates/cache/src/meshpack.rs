@@ -415,12 +415,6 @@ pub fn prefill(
     if levels < spec.floor {
         return Ok(PrefillReport { total: 0, present: 0, written: 0, payload_bytes: 0 });
     }
-    if spec.floor < COMPACT_MIN_LEVEL {
-        return Err(PrefillError::Levels(format!(
-            "a pre-fill from level {} reaches below level {COMPACT_MIN_LEVEL}, the first level of the compact format (the only format; the render floor is at least {COMPACT_MIN_LEVEL})",
-            spec.floor
-        )));
-    }
     if spec.cells < planet_generators::climate::CLIMATE_MIN_COMPACT_CELLS && levels >= COMPACT_MIN_LEVEL {
         return Err(PrefillError::Levels(format!(
             "the compact tile format needs at least {} cells per tile edge (the climate of a tile rides in the spare channel of its first 162 texels, GEN-021), got {}: use more cells",
@@ -432,6 +426,12 @@ pub fn prefill(
         return Err(PrefillError::Levels(format!(
             "a pre-fill of levels {}..={levels} reaches the finest level {} of the view: such tiles are never stored",
             spec.floor, spec.max_level
+        )));
+    }
+    if spec.floor < COMPACT_MIN_LEVEL {
+        return Err(PrefillError::Levels(format!(
+            "a pre-fill from level {} reaches below level {COMPACT_MIN_LEVEL}, the first level of the compact format (the only format; the render floor is at least {COMPACT_MIN_LEVEL})",
+            spec.floor
         )));
     }
     let store = TileStore::open(dir, store_params())?;
