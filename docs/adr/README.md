@@ -75,3 +75,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0063 | [Slot v2 without the 5x5 reserve: 9,168 B](0063-slot-v2-size-correction.md) | accepted | corrects 0062 point 4; for the owner at the M5 gate |
 | 0064 | [The render floor's roots load outside the per-frame upload cap](0064-floor-roots-exempt-from-the-upload-cap.md) | accepted | amends 0033 point 9 |
 | 0065 | [CPU calibration decides whether a perf scene counts](0065-cpu-calibration-validity.md) | accepted | extends 0020 and 0036 |
+| 0066 | [Authored items: reach, region summaries, stages, selection bounds, item files, command log](0066-authored-items-reach-summaries-stages-and-files.md) | proposed | decides 0021 points 2, 5, 6, 8; amends 0018; for the owner (file format) |
