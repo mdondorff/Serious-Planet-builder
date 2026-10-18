@@ -184,21 +184,16 @@ fn a_batch_draws_the_image_of_the_per_slot_path_for_the_standard_views() {
         let camera = scripted_views(R, 4.0 / 3.0, 1)[index].1;
         let req = TerrainRequest { camera, size: SIZE, view: TerrainView::Relief, lod, face_mapping: "tangent-v1".into(), seed: 1 };
         let plan = plan_terrain(&req).unwrap();
-        // Manager-style placement as in `gpu_compact`: levels 0-2 in the managed vertex pool, the rest spread over the blocks.
-        let (mut main, mut vertex) = (0u32, 0u32);
+        // Manager-style placement as in `gpu_compact`: the tiles spread over the blocks (the render floor leaves no level 0-2 tile).
+        let mut main = 0u32;
         let placed: Vec<(RenderTile, SlotRef)> = plan
             .nodes
             .iter()
             .map(|n| {
+                assert!(n.tile.level() >= 3, "the render floor plans no tile of level 0-2");
                 let data = tile_data_field(&field, &TangentWarp, n.tile, CELLS, R, 26);
-                let slot = if n.tile.level() <= 2 {
-                    vertex += 1;
-                    SlotRef { pool: PoolKind::Vertex, index: vertex - 1 }
-                } else {
-                    main = (main + 1) % (40 * 64);
-                    main_slot(main)
-                };
-                (data, slot)
+                main = (main + 1) % (40 * 64);
+                (data, main_slot(main))
             })
             .collect();
         let mut images = Vec::new();
