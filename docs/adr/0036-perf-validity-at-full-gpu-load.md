@@ -1,5 +1,5 @@
 # 0036 Perf validity at full GPU load: power cap and clock band
-Status: accepted in part (points 1 and 2: owner, 2026-10-15, opus-planner session; point 3 accepted and amended by 0059; point 2 amended by 0057). Amends ADR 0020 (throttle rule) and ADR 0034 (P0 rule) in part.
+Status: accepted in part (points 1 and 2: owner, 2026-10-15, opus-planner session; point 3 accepted and amended by 0059; point 2 amended by 0057 and 0060). Amends ADR 0020 (throttle rule) and ADR 0034 (P0 rule) in part.
 Date: 2026-10-15
 Source: first M4 perf window, 2026-10-15 (`docs/log.md`; main at d6f4564; `perf/logs/terrain.json`); ADR 0020; ADR 0034; constitution CON-21
 
