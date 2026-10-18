@@ -1,0 +1,1 @@
+- 2026-10-18 **golden-review escalations get a summary per cause (owner):** what changed, why, what to look for and a recommendation, before the old, new and diff images are shown for `/bless`.
