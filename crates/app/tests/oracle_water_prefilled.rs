@@ -55,6 +55,9 @@ fn the_job_of_a_prefilled_tile_leaves_the_minimum_of_the_tile_it_read_and_the_pl
                     if book.get(tile).flatten().is_some() {
                         wet += 1;
                         assert_eq!(book.min_height(tile), Some(t.min_height_m()), "{tile:?}");
+                        // The pack holds the tile the streamer generates, bit for bit.
+                        let made = tile_data_field(field.as_ref(), &TangentWarp, tile, cells, R, max_level);
+                        assert_eq!(t, made, "{tile:?}");
                     } else {
                         dry += 1;
                         assert_eq!(book.min_height(tile), None, "{tile:?}");

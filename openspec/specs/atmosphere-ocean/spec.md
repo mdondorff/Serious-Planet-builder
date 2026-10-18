@@ -412,4 +412,4 @@ Source: ADR 0056, ADR 0058, ATMO-012, ATMO-016, ATMO-019, docs/perf/water-attrib
 
 #### Scenario: Pre-filled tiles
 - **WHEN** the 30 pre-filled tiles of levels 0 and 1 of a stored bake of 256 cells are read from the pack and their jobs fill the water, and orbital plans over the store are made with the book
-- **THEN** a wet tile's stored minimum equals the minimum of the pre-filled tile (which is the generated tile bit for bit), a dry tile has none, and the plan keeps exactly the nodes whose stored minimum is below the bound
+- **THEN** each pre-filled tile equals the generated tile bit for bit, a wet tile's stored minimum equals its minimum, a dry tile has none, and the plan keeps the nodes the stored minimum allows (none of these views has a node cut by it, so the cutting side is covered by the generated-tile scenarios)
