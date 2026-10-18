@@ -156,6 +156,18 @@ fn real_gpu_args(real: bool, passthrough: &[&str]) -> Vec<String> {
     v
 }
 
+/// `--no-fail-fast` for the GPU tier (BUILD-003): every golden test runs to the end and writes its candidates, so one failing test
+/// no longer cancels the rest and hides their candidates from `golden-review` (CI's WARP run delivered only the sky goldens of the
+/// first failing test). Left out when the caller passed its own `--fail-fast` / `--no-fail-fast`.
+fn fail_fast_args(sub: Option<&str>, passthrough: &[&str]) -> Vec<String> {
+    let own = passthrough.iter().any(|a| *a == "--fail-fast" || *a == "--no-fail-fast");
+    if sub == Some("gpu") && !own {
+        vec!["--no-fail-fast".into()]
+    } else {
+        Vec::new()
+    }
+}
+
 /// What a run of `test` measured: the test time (nextest's run, not the compile) and whether the run selected every crate.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TestTiming {
@@ -212,6 +224,7 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
     let filter = tier_filter(sub, real);
     cmd.extend(["-E".into(), filter.into()]);
     cmd.extend(real_gpu_args(real, &passthrough));
+    cmd.extend(fail_fast_args(sub, &passthrough));
     cmd.extend(passthrough.iter().map(|s| s.to_string()));
     // The compile is timed apart from the tests: the budget is for the tests (BUILD-003), and an incremental compile of the
     // changed crate is the compiler's time.
@@ -914,6 +927,14 @@ mod tests {
         let note = t(32.3, true).unwrap();
         assert!(note.contains("whole workspace: reported (BUILD-003)") && note.contains("32.3 s of tests"), "{note}");
         assert!(t(5.0, true).unwrap().contains("5.0 s of tests"));
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn the_gpu_tier_runs_every_test_so_that_every_candidate_golden_is_written() {
+        assert_eq!(fail_fast_args(Some("gpu"), &[]), ["--no-fail-fast"]);
+        assert!(fail_fast_args(Some("gpu"), &["--fail-fast"]).is_empty() && fail_fast_args(Some("gpu"), &["--no-fail-fast"]).is_empty());
+        assert!(fail_fast_args(Some("fast"), &[]).is_empty() && fail_fast_args(None, &[]).is_empty());
     }
 
     // spec: BUILD-003
