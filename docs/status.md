@@ -11,8 +11,17 @@ Dormant (no near trigger; not asked now):
 - **Planner decisions to confirm** (for the M5 gate; opus-planner 2026-10-17, reversible, made while the owner was away):
   - ADR 0056 (coastal band, tile water in the tile job, pixel-footprint wave fade; amends ADR 0053 points 4 and 5).
   - ADR 0057 (cool start before each view; a GPU figure within budget below the 1,400 MHz floor is a pass, over budget stays inconclusive; amends owner-accepted ADR 0036 point 2).
-  - The coarse water summary (queue 9a.1, option b; its ADR follows from sonnet-m4), chosen over a geometry-first stopgap.
+  - ADR 0058 (coarse level of the water field, the summary the bake writes once), chosen over a geometry-first stopgap.
+  - ADR 0059 (noise floors: 0.1 ms per pass, 0.5 ms per frame total; accepts and amends ADR 0036 point 3).
+  - ATMO-020 (#273): water nodes cut beyond the sea horizon and above W + wave height; sea pixels unchanged on the 16384 store; known limit: a dry basin below the level between camera and sea.
   - `test fast` (BUILD-003, #255): the 20 s budget counts test time, not compile time; a whole-workspace run reports without a warning. A stale local `main` had made every run select the whole workspace and the reviewer agents diff against it (fixed: `origin/main`).
+- **Owner decisions open for the M5 gate** (opus-planner 2026-10-18):
+  - Clock rule under the power cap: heavy views hold P0 at 1,245-1,365 MHz with SW power cap only (ADR 0036 point 1 calls the cap normal), below the 1,400 MHz floor. Recommendation: P0 with the power cap as the only throttle reason counts as GPU-valid.
+  - Coast-3m water: 2.175 ms against 2 ms at P0 1,290 MHz (window 9, after the horizon cut); the only open row of `accept M5`. Options: accept about 2.2 ms for this view; a terrain-occlusion cut (estimate pending from sonnet-m4; perfect culling bound about 1.8 ms); or keep the row open.
+  - Beach flash fix (#275, REND-030; terrain-own flash 36.8 % to 0.0 %): 7 lit/sky/water goldens move by 3 to 91 coastline pixels; waits for `/bless`.
+  - egui fonts (SPIKE-14): `default_fonts` fails `cargo deny` (OFL-1.1, Ubuntu-font-1.0). Recommendation: ship one font under an allowed licence (for example Roboto, Apache-2.0); alternative: an ADR allowing OFL-1.1 for font assets only.
+  - NVIDIA driver 591.86 (2026-01-20): device losses under parallel GPU load (Tracked); an update is the owner's step (admin), not claimed as the fix.
+- **M6 inputs** (SPIKE-13, SPIKE-14): edit-to-visible targets preview <= 16 ms, exact <= 300 ms up to 150 m stamps and <= 1 s up to 500 m or at 1 m altitude; build order: reach and footprint invalidation, key-aware refresh with stale-while-revalidate, an edit event that forces a plan, the preview displacement, a request class for edited tiles; ADR 0021 points 2, 5 and 8 before the first authored stage. Editor UI: egui `=0.36.2`, one `ui` node after `tonemap`, egui first with the pointer latched at press.
 - **ADR 0037 window** (`ADR_0037_M5_CLASSES` in `testkit::review`): the owner decides at the M5 gate whether first goldens of `lit`/`sky`/`water` keep being blessed under policy; if not, empty the constant (superseding ADR).
 - **CON-08 reading** (ADR 0022): may a field read another field of its own stage? Trigger: a regional chain that needs same-stage reads. Until then one field per chain.
 - **ADR 0045** (bodies, bake resolution and the storage budget; point 3 decided): proposed. Trigger: multi-body work, or the editor (M6) for point 7.
