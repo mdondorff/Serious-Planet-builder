@@ -45,7 +45,7 @@ fn tiles(plan: &TerrainPlan) -> Vec<RenderTile> {
 fn compact_pool() -> PoolConfig {
     let block_slots = 24 * 24;
     let one = compact_format_pool_with(
-        (128 << 20) + 4 * u64::from(block_slots) * planet_generators::compact::slot_texel_bytes(CELLS),
+        (128 << 20) + 4 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
         CELLS,
         block_slots,
         1,
@@ -90,7 +90,7 @@ fn one_shot_frames_in_every_debug_view_are_the_recorded_pixels() {
     }
     assert_eq!((frames, compact_nodes), (90, 16_542), "the scripted views changed");
     println!("one_shot: {frames} frames, {compact_nodes} compact nodes drawn, hash {all:016x}");
-    expect(&ctx, "one_shot", all, &[(WARP, 0xca8b_6fe9_15c8_b05c), (RTX, 0x589c_b3b9_b389_7e0d)]);
+    expect(&ctx, "one_shot", all, &[(WARP, 0x7c3d_3ad9_aa77_fca7), (RTX, 0x1613_d074_caed_d5dd)]);
 }
 
 fn persistent(ctx: &GpuContext, plan: &TerrainPlan, mode: UploadMode, lit: Option<LitPlan>) -> Vec<u8> {
@@ -126,5 +126,5 @@ fn persistent_renderers_per_slot_and_batched_and_the_lit_atmosphere_frame_are_th
         frames += 3;
     }
     println!("persistent: {frames} frames, hash {all:016x}");
-    expect(&ctx, "persistent", all, &[(WARP, 0x2bc4_d565_a9cd_eeb5), (RTX, 0x0250_cafb_b749_0083)]);
+    expect(&ctx, "persistent", all, &[(WARP, 0x3e1b_2c5c_20ae_7767), (RTX, 0x9c6b_642d_a2a4_1d8b)]);
 }

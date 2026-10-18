@@ -1,0 +1,5050 @@
+
+<html>
+<head>
+  <title>Cargo Build Timings — planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet 0.0.0, planet-editor 0.0.0, planet-editor 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-frame 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0, planet-render 0.0.0</title>
+  <meta charset="utf-8">
+<style type="text/css">
+:root {
+  --error-text: #e80000;
+  --text: #000;
+  --background: #fff;
+  --h1-border-bottom: #c0c0c0;
+  --table-box-shadow: rgba(0, 0, 0, 0.1);
+  --table-th: #d5dde5;
+  --table-th-background: #1b1e24;
+  --table-th-border-bottom: #9ea7af;
+  --table-th-border-right: #343a45;
+  --table-tr-border-top: #c1c3d1;
+  --table-tr-border-bottom: #c1c3d1;
+  --table-tr-odd-background: #ebebeb;
+  --table-td-background: #ffffff;
+  --table-td-border-right: #C1C3D1;
+  --canvas-background: #f7f7f7;
+  --canvas-axes: #303030;
+  --canvas-grid: #e6e6e6;
+  --canvas-codegen: #aa95e8;
+  --canvas-link: #95e8aa;
+  --canvas-other: #e895aa;
+  --canvas-custom-build: #f0b165;
+  --canvas-not-custom-build: #95cce8;
+  --canvas-dep-line: #ddd;
+  --canvas-dep-line-highlighted: #000;
+  --canvas-cpu: rgba(250, 119, 0, 0.2);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --error-text: #e80000;
+    --text: #fff;
+    --background: #121212;
+    --h1-border-bottom: #444;
+    --table-box-shadow: rgba(255, 255, 255, 0.1);
+    --table-th: #a0a0a0;
+    --table-th-background: #2c2c2c;
+    --table-th-border-bottom: #555;
+    --table-th-border-right: #444;
+    --table-tr-border-top: #333;
+    --table-tr-border-bottom: #333;
+    --table-tr-odd-background: #1e1e1e;
+    --table-td-background: #262626;
+    --table-td-border-right: #333;
+    --canvas-background: #1a1a1a;
+    --canvas-axes: #b0b0b0;
+    --canvas-grid: #333;
+    --canvas-block: #aa95e8;
+    --canvas-custom-build: #f0b165;
+    --canvas-not-custom-build: #95cce8;
+    --canvas-dep-line: #444;
+    --canvas-dep-line-highlighted: #fff;
+    --canvas-cpu: rgba(250, 119, 0, 0.2);
+  }
+}
+
+html {
+  font-family: sans-serif;
+  color: var(--text);
+  background: var(--background);
+}
+
+.canvas-container {
+  position: relative;
+  margin-top: 5px;
+  margin-bottom: 5px;
+}
+
+.canvas-container.hidden {
+  display: none;
+}
+
+h1 {
+  border-bottom: 1px solid var(--h1-border-bottom);
+}
+
+.graph {
+  display: block;
+}
+
+.my-table {
+  margin-top: 20px;
+  margin-bottom: 20px;
+  border-collapse: collapse;
+  box-shadow: 0 5px 10px var(--table-box-shadow);
+}
+
+.my-table th {
+  color: var(--table-th);
+  background: var(--table-th-background);
+  border-bottom: 4px solid var(--table-th-border-bottom);
+  border-right: 1px solid var(--table-th-border-right);
+  font-size: 18px;
+  font-weight: 100;
+  padding: 12px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.my-table th:first-child {
+  border-top-left-radius: 3px;
+}
+
+.my-table th:last-child {
+  border-top-right-radius: 3px;
+  border-right:none;
+}
+
+.my-table tr {
+  border-top: 1px solid var(--table-tr-border-top);
+  border-bottom: 1px solid var(--table-tr-border-bottom);
+  font-size: 16px;
+  font-weight: normal;
+}
+
+.my-table tr:first-child {
+  border-top:none;
+}
+
+.my-table tr:last-child {
+  border-bottom:none;
+}
+
+.my-table tr:nth-child(odd) td {
+  background: var(--table-tr-odd-background);
+}
+
+.my-table tr:last-child td:first-child {
+  border-bottom-left-radius:3px;
+}
+
+.my-table tr:last-child td:last-child {
+  border-bottom-right-radius:3px;
+}
+
+.my-table td {
+  background: var(--table-td-background);
+  padding: 10px;
+  text-align: left;
+  vertical-align: middle;
+  font-weight: 300;
+  font-size: 14px;
+  border-right: 1px solid var(--table-td-border-right);
+}
+
+.my-table td:last-child {
+  border-right: 0px;
+}
+
+.summary-table td:first-child {
+  vertical-align: top;
+  text-align: right;
+}
+
+.input-table td {
+  text-align: center;
+}
+
+.error-text {
+  color: var(--error-text);
+}
+
+</style>
+</head>
+<body>
+
+<h1>Cargo Build Timings</h1>
+See <a href="https://doc.rust-lang.org/nightly/cargo/reference/timings.html">Documentation</a>
+
+<table class="my-table summary-table">
+<tr>
+<td>Targets:</td><td>planet 0.0.0 (lib)<br>planet 0.0.0 (lib)<br>planet 0.0.0 ( planet "bin")<br>planet 0.0.0 ( gpu_flight "test")<br>planet 0.0.0 ( gpu_modes "test")<br>planet 0.0.0 ( gpu_skeleton "test")<br>planet 0.0.0 ( gpu_stream_perf "test")<br>planet 0.0.0 ( gpu_water_coverage "test")<br>planet 0.0.0 ( gpu_window "test")<br>planet 0.0.0 ( gpu_world_field "test")<br>planet 0.0.0 ( oracle_plan_check "test")<br>planet 0.0.0 ( oracle_stream_smoke "test")<br>planet 0.0.0 ( oracle_water_cut "test")<br>planet 0.0.0 ( oracle_water_prefilled "test")<br>planet 0.0.0 ( residency_headroom "test")<br>planet 0.0.0 ( world_field "test")<br>planet 0.0.0 ( world_view_pins "test")<br>planet 0.0.0 ( world_water "test")<br>planet 0.0.0 ( compact_vs_vertex "example")<br>planet 0.0.0 ( plan_ablation "example")<br>planet 0.0.0 ( plan_bands "example")<br>planet 0.0.0 ( residency_counts "example")<br>planet 0.0.0 ( scheduler_ablation "example")<br>planet 0.0.0 ( store_blocks "example")<br>planet-editor 0.0.0 (lib)<br>planet-editor 0.0.0 (lib)<br>planet-frame 0.0.0 (lib)<br>planet-frame 0.0.0 (lib)<br>planet-frame 0.0.0 ( atmosphere "test")<br>planet-frame 0.0.0 ( compact_pool "test")<br>planet-frame 0.0.0 ( controller "test")<br>planet-frame 0.0.0 ( cover "test")<br>planet-frame 0.0.0 ( dive "test")<br>planet-frame 0.0.0 ( draw_records "test")<br>planet-frame 0.0.0 ( finest_level "test")<br>planet-frame 0.0.0 ( flight "test")<br>planet-frame 0.0.0 ( frustum_cut "test")<br>planet-frame 0.0.0 ( height_aware "test")<br>planet-frame 0.0.0 ( lod "test")<br>planet-frame 0.0.0 ( look "test")<br>planet-frame 0.0.0 ( look_independence "test")<br>planet-frame 0.0.0 ( lookfile "test")<br>planet-frame 0.0.0 ( managed "test")<br>planet-frame 0.0.0 ( manager_real "test")<br>planet-frame 0.0.0 ( morph "test")<br>planet-frame 0.0.0 ( oracle_frustum_cut "test")<br>planet-frame 0.0.0 ( oracle_frustum_cut_sweep "test")<br>planet-frame 0.0.0 ( oracle_lod_coverage "test")<br>planet-frame 0.0.0 ( oracle_plan_origin_batch "test")<br>planet-frame 0.0.0 ( oracle_steep_morph "test")<br>planet-frame 0.0.0 ( pipeline "test")<br>planet-frame 0.0.0 ( plan "test")<br>planet-frame 0.0.0 ( plan_origin_batch "test")<br>planet-frame 0.0.0 ( plan_reuse "test")<br>planet-frame 0.0.0 ( prefetch "test")<br>planet-frame 0.0.0 ( residency "test")<br>planet-frame 0.0.0 ( scheduler_equivalence "test")<br>planet-frame 0.0.0 ( scheduler_incremental "test")<br>planet-frame 0.0.0 ( scheduler_rotation "test")<br>planet-frame 0.0.0 ( shading "test")<br>planet-frame 0.0.0 ( steep "test")<br>planet-frame 0.0.0 ( terrain "test")<br>planet-frame 0.0.0 ( terrain_field "test")<br>planet-frame 0.0.0 ( upload_budget "test")<br>planet-frame 0.0.0 ( upload_bytes "test")<br>planet-frame 0.0.0 ( water "test")<br>planet-frame 0.0.0 ( water_band "test")<br>planet-frame 0.0.0 ( water_cut "test")<br>planet-frame 0.0.0 ( water_plan "test")<br>planet-frame 0.0.0 ( water_summary "test")<br>planet-render 0.0.0 (lib)<br>planet-render 0.0.0 (lib)<br>planet-render 0.0.0 ( gpu_atmosphere "test")<br>planet-render 0.0.0 ( gpu_compact "test")<br>planet-render 0.0.0 ( gpu_compact_blocks "test")<br>planet-render 0.0.0 ( gpu_debug_views "test")<br>planet-render 0.0.0 ( gpu_diagnostics "test")<br>planet-render 0.0.0 ( gpu_hello_triangle "test")<br>planet-render 0.0.0 ( gpu_indirect "test")<br>planet-render 0.0.0 ( gpu_lit "test")<br>planet-render 0.0.0 ( gpu_pipelined "test")<br>planet-render 0.0.0 ( gpu_pools "test")<br>planet-render 0.0.0 ( gpu_renderer "test")<br>planet-render 0.0.0 ( gpu_shading "test")<br>planet-render 0.0.0 ( gpu_steep_terrain "test")<br>planet-render 0.0.0 ( gpu_terrain "test")<br>planet-render 0.0.0 ( gpu_upload_batch "test")<br>planet-render 0.0.0 ( gpu_warmup "test")<br>planet-render 0.0.0 ( gpu_water "test")<br>planet-render 0.0.0 ( gpu_window_blit "test")<br>planet-render 0.0.0 ( graph "test")<br>planet-render 0.0.0 ( graph_lit "test")<br>planet-render 0.0.0 ( graph_water "test")<br>planet-render 0.0.0 ( grid_phase "test")<br>planet-render 0.0.0 ( oracle_atmosphere "test")<br>planet-render 0.0.0 ( oracle_debug_views "test")<br>planet-render 0.0.0 ( oracle_lit "test")<br>planet-render 0.0.0 ( oracle_lit_shading "test")<br>planet-render 0.0.0 ( oracle_morph "test")<br>planet-render 0.0.0 ( oracle_shader_validation "test")<br>planet-render 0.0.0 ( oracle_water "test")<br>planet-render 0.0.0 ( shader_scan "test")<br>planet-render 0.0.0 ( spike06_compact "test")<br>planet-render 0.0.0 ( spike07_detail "test")<br>planet-render 0.0.0 ( upload_bench "example")<br>planet-render 0.0.0 ( upload_contention "example")</td>
+</tr>
+<tr>
+<td>Profile:</td><td>test</td>
+</tr>
+<tr>
+<td>Fresh units:</td><td>143</td>
+</tr>
+<tr>
+<td>Dirty units:</td><td>107</td>
+</tr>
+<tr>
+<td>Total units:</td><td>250</td>
+</tr>
+<tr>
+<td>Max concurrency:</td><td>12 (jobs=10 ncpu=20)</td>
+</tr>
+<tr>
+<td>Build start:</td><td>2026-10-18T11:14:30.6365844Z</td>
+</tr>
+<tr>
+<td>Total time:</td><td>74.6s (1m 14.6s)</td>
+</tr>
+<tr>
+<td>rustc:</td><td>rustc 1.99.0 (b940084d7 2026-09-28)<br>Host: x86_64-pc-windows-msvc<br>Target: x86_64-pc-windows-msvc</td>
+</tr>
+
+</table>
+
+<table class="input-table">
+  <tr>
+    <td><label for="min-unit-time">Min unit time:</label></td>
+    <td title="Scale corresponds to a number of pixels per second. It is automatically initialized based on your viewport width.">
+      <label for="scale">Scale:</label>
+    </td>
+  </tr>
+  <tr>
+    <td><input type="range" min="0" max="30" step="0.1" value="0" id="min-unit-time"></td>
+    <!--
+        The scale corresponds to some number of "pixels per second".
+        Its min, max, and initial values are automatically set by JavaScript on page load,
+        based on the client viewport.
+    -->
+    <td><input type="range" min="1" max="100" value="50" id="scale"></td>
+  </tr>
+  <tr>
+    <td><output for="min-unit-time" id="min-unit-time-output"></output></td>
+    <td><output for="scale" id="scale-output"></output></td>
+    <td></td>
+  </tr>
+</table>
+
+<div id="pipeline-container" class="canvas-container"></div>
+<div id="timing-container" class="canvas-container"></div>
+
+<table class="my-table">
+<thead>
+<tr>
+  <th></th>
+  <th>Unit</th>
+  <th>Total</th>
+  <th>Frontend</th>
+<th>Codegen</th>
+  <th>Features</th>
+</tr>
+</thead>
+<tbody>
+
+<tr>
+<td>1.</td>
+<td>planet v0.0.0 gpu_stream_perf "test" (test)</td>
+<td>19.1s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>2.</td>
+<td>planet v0.0.0 world_field "test" (test)</td>
+<td>17.3s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>3.</td>
+<td>planet v0.0.0 oracle_water_prefilled "test" (test)</td>
+<td>17.1s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>4.</td>
+<td>planet v0.0.0 world_water "test" (test)</td>
+<td>17.0s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>5.</td>
+<td>planet v0.0.0 planet "bin"</td>
+<td>16.9s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>6.</td>
+<td>planet v0.0.0 world_view_pins "test" (test)</td>
+<td>16.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>7.</td>
+<td>planet v0.0.0 gpu_skeleton "test" (test)</td>
+<td>16.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>8.</td>
+<td>planet v0.0.0 oracle_stream_smoke "test" (test)</td>
+<td>16.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>9.</td>
+<td>planet v0.0.0 gpu_flight "test" (test)</td>
+<td>16.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>10.</td>
+<td>planet v0.0.0 planet "lib" (test)</td>
+<td>14.7s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>11.</td>
+<td>planet v0.0.0 planet "bin" (test)</td>
+<td>13.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>12.</td>
+<td>planet-render v0.0.0 gpu_steep_terrain "test" (test)</td>
+<td>12.1s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>13.</td>
+<td>planet-frame v0.0.0 scheduler_rotation "test" (test)</td>
+<td>12.0s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>14.</td>
+<td>planet-frame v0.0.0 managed "test" (test)</td>
+<td>11.9s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>15.</td>
+<td>planet-render v0.0.0 oracle_morph "test" (test)</td>
+<td>11.9s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>16.</td>
+<td>planet-render v0.0.0 gpu_water "test" (test)</td>
+<td>11.3s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>17.</td>
+<td>planet-frame v0.0.0 lod "test" (test)</td>
+<td>10.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>18.</td>
+<td>planet-render v0.0.0 gpu_upload_batch "test" (test)</td>
+<td>10.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>19.</td>
+<td>planet-render v0.0.0 planet_render "lib" (test)</td>
+<td>10.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>20.</td>
+<td>planet-frame v0.0.0 water_band "test" (test)</td>
+<td>10.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>21.</td>
+<td>planet-render v0.0.0 upload_contention "example"</td>
+<td>10.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>22.</td>
+<td>planet-frame v0.0.0 terrain "test" (test)</td>
+<td>10.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>23.</td>
+<td>planet-render v0.0.0 grid_phase "test" (test)</td>
+<td>9.9s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>24.</td>
+<td>planet-frame v0.0.0 dive "test" (test)</td>
+<td>9.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>25.</td>
+<td>planet-render v0.0.0 gpu_compact_blocks "test" (test)</td>
+<td>9.7s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>26.</td>
+<td>planet-render v0.0.0 oracle_debug_views "test" (test)</td>
+<td>9.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>27.</td>
+<td>planet v0.0.0 residency_headroom "test" (test)</td>
+<td>9.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>28.</td>
+<td>planet-frame v0.0.0 scheduler_equivalence "test" (test)</td>
+<td>8.7s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>29.</td>
+<td>planet-render v0.0.0 gpu_compact "test" (test)</td>
+<td>8.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>30.</td>
+<td>planet v0.0.0 gpu_modes "test" (test)</td>
+<td>8.3s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>31.</td>
+<td>planet-frame v0.0.0 height_aware "test" (test)</td>
+<td>8.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>32.</td>
+<td>planet-frame v0.0.0 pipeline "test" (test)</td>
+<td>7.9s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>33.</td>
+<td>planet-render v0.0.0 oracle_lit_shading "test" (test)</td>
+<td>7.9s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>34.</td>
+<td>planet-render v0.0.0 gpu_diagnostics "test" (test)</td>
+<td>7.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>35.</td>
+<td>planet v0.0.0 compact_vs_vertex "example"</td>
+<td>7.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>36.</td>
+<td>planet-render v0.0.0 gpu_debug_views "test" (test)</td>
+<td>7.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>37.</td>
+<td>planet-frame v0.0.0 morph "test" (test)</td>
+<td>7.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>38.</td>
+<td>planet-render v0.0.0 gpu_pipelined "test" (test)</td>
+<td>7.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>39.</td>
+<td>planet-frame v0.0.0 look "test" (test)</td>
+<td>7.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>40.</td>
+<td>planet v0.0.0 gpu_world_field "test" (test)</td>
+<td>7.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>41.</td>
+<td>planet-render v0.0.0 oracle_atmosphere "test" (test)</td>
+<td>7.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>42.</td>
+<td>planet-render v0.0.0 gpu_renderer "test" (test)</td>
+<td>7.3s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>43.</td>
+<td>planet-render v0.0.0 graph_water "test" (test)</td>
+<td>7.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>44.</td>
+<td>planet-render v0.0.0 oracle_shader_validation "test" (test)</td>
+<td>7.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>45.</td>
+<td>planet-frame v0.0.0 controller "test" (test)</td>
+<td>7.0s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>46.</td>
+<td>planet-render v0.0.0 graph "test" (test)</td>
+<td>7.0s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>47.</td>
+<td>planet-frame v0.0.0 lookfile "test" (test)</td>
+<td>6.7s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>48.</td>
+<td>planet-frame v0.0.0 water_cut "test" (test)</td>
+<td>6.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>49.</td>
+<td>planet-render v0.0.0 gpu_terrain "test" (test)</td>
+<td>6.3s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>50.</td>
+<td>planet v0.0.0 store_blocks "example"</td>
+<td>6.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>51.</td>
+<td>planet v0.0.0 gpu_water_coverage "test" (test)</td>
+<td>6.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>52.</td>
+<td>planet-render v0.0.0 upload_bench "example"</td>
+<td>6.1s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>53.</td>
+<td>planet-render v0.0.0 oracle_water "test" (test)</td>
+<td>5.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>54.</td>
+<td>planet-render v0.0.0 gpu_warmup "test" (test)</td>
+<td>5.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>55.</td>
+<td>planet-render v0.0.0 oracle_lit "test" (test)</td>
+<td>5.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>56.</td>
+<td>planet-render v0.0.0 gpu_atmosphere "test" (test)</td>
+<td>5.7s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>57.</td>
+<td>planet v0.0.0 gpu_window "test" (test)</td>
+<td>5.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>58.</td>
+<td>planet-frame v0.0.0 manager_real "test" (test)</td>
+<td>5.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>59.</td>
+<td>planet-frame v0.0.0 frustum_cut "test" (test)</td>
+<td>5.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>60.</td>
+<td>planet v0.0.0 plan_bands "example"</td>
+<td>5.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>61.</td>
+<td>planet v0.0.0 residency_counts "example"</td>
+<td>5.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>62.</td>
+<td>planet v0.0.0 plan_ablation "example"</td>
+<td>5.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>63.</td>
+<td>planet-frame v0.0.0 water_summary "test" (test)</td>
+<td>4.9s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>64.</td>
+<td>planet-render v0.0.0 gpu_lit "test" (test)</td>
+<td>4.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>65.</td>
+<td>planet-frame v0.0.0 terrain_field "test" (test)</td>
+<td>4.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>66.</td>
+<td>planet-frame v0.0.0 plan_reuse "test" (test)</td>
+<td>4.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>67.</td>
+<td>planet-render v0.0.0 gpu_hello_triangle "test" (test)</td>
+<td>4.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>68.</td>
+<td>planet-frame v0.0.0 oracle_frustum_cut_sweep "test" (test)</td>
+<td>4.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>69.</td>
+<td>planet v0.0.0 oracle_plan_check "test" (test)</td>
+<td>4.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>70.</td>
+<td>planet-render v0.0.0 gpu_pools "test" (test)</td>
+<td>4.3s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>71.</td>
+<td>planet-render v0.0.0 shader_scan "test" (test)</td>
+<td>4.0s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>72.</td>
+<td>planet-frame v0.0.0 look_independence "test" (test)</td>
+<td>4.0s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>73.</td>
+<td>planet-render v0.0.0 gpu_indirect "test" (test)</td>
+<td>3.9s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>74.</td>
+<td>planet-frame v0.0.0 oracle_lod_coverage "test" (test)</td>
+<td>3.9s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>75.</td>
+<td>planet v0.0.0 scheduler_ablation "example"</td>
+<td>3.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>76.</td>
+<td>planet v0.0.0 oracle_water_cut "test" (test)</td>
+<td>3.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>77.</td>
+<td>planet-render v0.0.0 gpu_shading "test" (test)</td>
+<td>3.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>78.</td>
+<td>planet-frame v0.0.0 oracle_frustum_cut "test" (test)</td>
+<td>3.3s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>79.</td>
+<td>planet-frame v0.0.0 oracle_plan_origin_batch "test" (test)</td>
+<td>3.0s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>80.</td>
+<td>planet-render v0.0.0 graph_lit "test" (test)</td>
+<td>2.9s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>81.</td>
+<td>planet-frame v0.0.0 oracle_steep_morph "test" (test)</td>
+<td>2.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>82.</td>
+<td>planet-frame v0.0.0</td>
+<td>2.6s</td>
+<td>0.5s (19%)</td>
+<td>2.1s (81%)</td>
+<td></td>
+</tr>
+
+<tr>
+<td>83.</td>
+<td>planet-frame v0.0.0 shading "test" (test)</td>
+<td>2.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>84.</td>
+<td>planet-frame v0.0.0 water "test" (test)</td>
+<td>2.3s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>85.</td>
+<td>planet-frame v0.0.0 plan_origin_batch "test" (test)</td>
+<td>2.3s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>86.</td>
+<td>planet-render v0.0.0 gpu_window_blit "test" (test)</td>
+<td>2.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>87.</td>
+<td>planet-frame v0.0.0 planet_frame "lib" (test)</td>
+<td>2.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>88.</td>
+<td>planet-frame v0.0.0 residency "test" (test)</td>
+<td>2.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>89.</td>
+<td>planet-frame v0.0.0 prefetch "test" (test)</td>
+<td>2.1s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>90.</td>
+<td>planet-frame v0.0.0 atmosphere "test" (test)</td>
+<td>2.1s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>91.</td>
+<td>planet-frame v0.0.0 scheduler_incremental "test" (test)</td>
+<td>2.1s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>92.</td>
+<td>planet-frame v0.0.0 finest_level "test" (test)</td>
+<td>2.0s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>93.</td>
+<td>planet-frame v0.0.0 plan "test" (test)</td>
+<td>1.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>94.</td>
+<td>planet-frame v0.0.0 cover "test" (test)</td>
+<td>1.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>95.</td>
+<td>planet v0.0.0</td>
+<td>1.3s</td>
+<td>1.0s (76%)</td>
+<td>0.3s (24%)</td>
+<td></td>
+</tr>
+
+<tr>
+<td>96.</td>
+<td>planet-frame v0.0.0 upload_budget "test" (test)</td>
+<td>1.3s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>97.</td>
+<td>planet-render v0.0.0</td>
+<td>1.2s</td>
+<td>0.7s (54%)</td>
+<td>0.6s (46%)</td>
+<td></td>
+</tr>
+
+<tr>
+<td>98.</td>
+<td>planet-frame v0.0.0 steep "test" (test)</td>
+<td>1.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>99.</td>
+<td>planet-frame v0.0.0 water_plan "test" (test)</td>
+<td>1.1s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>100.</td>
+<td>planet-frame v0.0.0 draw_records "test" (test)</td>
+<td>1.1s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>101.</td>
+<td>planet-render v0.0.0 spike07_detail "test" (test)</td>
+<td>1.1s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>102.</td>
+<td>planet-frame v0.0.0 compact_pool "test" (test)</td>
+<td>1.0s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>103.</td>
+<td>planet-frame v0.0.0 flight "test" (test)</td>
+<td>1.0s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>104.</td>
+<td>planet-frame v0.0.0 upload_bytes "test" (test)</td>
+<td>0.9s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>105.</td>
+<td>planet-editor v0.0.0 planet_editor "lib" (test)</td>
+<td>0.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>106.</td>
+<td>planet-render v0.0.0 spike06_compact "test" (test)</td>
+<td>0.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>107.</td>
+<td>planet-editor v0.0.0</td>
+<td>0.2s</td>
+<td>0.1s (65%)</td>
+<td>0.1s (35%)</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<script>
+DURATION = 75;
+const UNIT_DATA = [
+  {
+    "i": 93,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 0.22,
+    "duration": 2.6,
+    "unblocked_units": [
+      164,
+      157,
+      162,
+      154,
+      155,
+      146,
+      110,
+      136,
+      109,
+      152,
+      107,
+      108,
+      168,
+      106,
+      148,
+      105,
+      104,
+      166,
+      103,
+      156,
+      150,
+      174,
+      97,
+      158,
+      173,
+      142,
+      102,
+      170,
+      160,
+      61,
+      139,
+      134,
+      135,
+      133,
+      144,
+      132,
+      175,
+      96,
+      131,
+      172,
+      117,
+      153,
+      101,
+      128,
+      167,
+      124,
+      118,
+      165,
+      123,
+      99,
+      159,
+      95,
+      125,
+      149,
+      122,
+      143,
+      130,
+      163,
+      89,
+      129,
+      151,
+      127,
+      147,
+      126,
+      145,
+      121,
+      161,
+      98,
+      120,
+      100,
+      119,
+      116,
+      115,
+      114,
+      169,
+      113,
+      112,
+      171,
+      111
+    ],
+    "unblocked_rmeta_units": [
+      140
+    ],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 0.5
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 0.5,
+          "end": 2.6
+        }
+      ]
+    ]
+  },
+  {
+    "i": 92,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " planet_frame \"lib\" (test)",
+    "features": [],
+    "start": 0.23,
+    "duration": 2.22,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 140,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 0.73,
+    "duration": 1.21,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [
+      90
+    ],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 0.65
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 0.65,
+          "end": 1.21
+        }
+      ]
+    ]
+  },
+  {
+    "i": 90,
+    "name": "planet-editor",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 1.44,
+    "duration": 0.17,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [
+      62
+    ],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 0.11
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 0.11,
+          "end": 0.17
+        }
+      ]
+    ]
+  },
+  {
+    "i": 62,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 1.62,
+    "duration": 1.31,
+    "unblocked_units": [
+      71,
+      80,
+      82,
+      78,
+      85,
+      86,
+      69,
+      76,
+      77,
+      72,
+      81,
+      65,
+      67,
+      68,
+      66,
+      70,
+      64,
+      74,
+      83,
+      84,
+      73,
+      79,
+      75
+    ],
+    "unblocked_rmeta_units": [],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 1.0
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 1.0,
+          "end": 1.31
+        }
+      ]
+    ]
+  },
+  {
+    "i": 110,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " manager_real \"test\" (test)",
+    "features": [],
+    "start": 2.83,
+    "duration": 5.46,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 155,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_terrain \"test\" (test)",
+    "features": [],
+    "start": 2.83,
+    "duration": 6.31,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 103,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " frustum_cut \"test\" (test)",
+    "features": [],
+    "start": 2.83,
+    "duration": 5.45,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 157,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_warmup \"test\" (test)",
+    "features": [],
+    "start": 2.83,
+    "duration": 5.77,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 166,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_lit \"test\" (test)",
+    "features": [],
+    "start": 2.83,
+    "duration": 5.75,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 174,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " upload_bench \"example\"",
+    "features": [],
+    "start": 2.83,
+    "duration": 6.12,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 61,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " planet \"lib\" (test)",
+    "features": [],
+    "start": 2.83,
+    "duration": 14.72,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 131,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " upload_bytes \"test\" (test)",
+    "features": [],
+    "start": 2.83,
+    "duration": 0.86,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 170,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_water \"test\" (test)",
+    "features": [],
+    "start": 2.83,
+    "duration": 5.77,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 70,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_water_coverage \"test\" (test)",
+    "features": [],
+    "start": 2.93,
+    "duration": 6.21,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 77,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " residency_headroom \"test\" (test)",
+    "features": [],
+    "start": 3.69,
+    "duration": 9.43,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 72,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_world_field \"test\" (test)",
+    "features": [],
+    "start": 8.28,
+    "duration": 7.36,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 71,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_window \"test\" (test)",
+    "features": [],
+    "start": 8.28,
+    "duration": 5.58,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 83,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " plan_bands \"example\"",
+    "features": [],
+    "start": 8.58,
+    "duration": 5.38,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 82,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " plan_ablation \"example\"",
+    "features": [],
+    "start": 8.59,
+    "duration": 5.17,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 86,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " store_blocks \"example\"",
+    "features": [],
+    "start": 8.59,
+    "duration": 6.21,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 81,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " compact_vs_vertex \"example\"",
+    "features": [],
+    "start": 8.95,
+    "duration": 7.57,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 84,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " residency_counts \"example\"",
+    "features": [],
+    "start": 9.13,
+    "duration": 5.25,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 67,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_modes \"test\" (test)",
+    "features": [],
+    "start": 9.15,
+    "duration": 8.34,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 73,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_plan_check \"test\" (test)",
+    "features": [],
+    "start": 13.12,
+    "duration": 4.37,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 76,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_water_prefilled \"test\" (test)",
+    "features": [],
+    "start": 13.77,
+    "duration": 17.09,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 80,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " world_water \"test\" (test)",
+    "features": [],
+    "start": 13.86,
+    "duration": 16.97,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 65,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " planet \"bin\"",
+    "features": [],
+    "start": 13.97,
+    "duration": 16.85,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 68,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_skeleton \"test\" (test)",
+    "features": [],
+    "start": 14.39,
+    "duration": 16.44,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 66,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_flight \"test\" (test)",
+    "features": [],
+    "start": 14.81,
+    "duration": 16.21,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 79,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " world_view_pins \"test\" (test)",
+    "features": [],
+    "start": 15.64,
+    "duration": 16.82,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 69,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_stream_perf \"test\" (test)",
+    "features": [],
+    "start": 16.52,
+    "duration": 19.09,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 78,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " world_field \"test\" (test)",
+    "features": [],
+    "start": 17.49,
+    "duration": 17.28,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 74,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_stream_smoke \"test\" (test)",
+    "features": [],
+    "start": 17.49,
+    "duration": 16.38,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 64,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " planet \"bin\" (test)",
+    "features": [],
+    "start": 17.55,
+    "duration": 13.85,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 75,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_water_cut \"test\" (test)",
+    "features": [],
+    "start": 30.82,
+    "duration": 3.53,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 153,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_shading \"test\" (test)",
+    "features": [],
+    "start": 30.83,
+    "duration": 3.53,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 85,
+    "name": "planet",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " scheduler_ablation \"example\"",
+    "features": [],
+    "start": 30.83,
+    "duration": 3.78,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 118,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " plan \"test\" (test)",
+    "features": [],
+    "start": 30.86,
+    "duration": 1.6,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 149,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_lit \"test\" (test)",
+    "features": [],
+    "start": 31.02,
+    "duration": 4.59,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 130,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " upload_budget \"test\" (test)",
+    "features": [],
+    "start": 31.39,
+    "duration": 1.26,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 151,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_pools \"test\" (test)",
+    "features": [],
+    "start": 32.47,
+    "duration": 4.34,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 121,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " prefetch \"test\" (test)",
+    "features": [],
+    "start": 32.47,
+    "duration": 2.13,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 115,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_plan_origin_batch \"test\" (test)",
+    "features": [],
+    "start": 32.65,
+    "duration": 2.95,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 111,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " morph \"test\" (test)",
+    "features": [],
+    "start": 33.87,
+    "duration": 7.51,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 154,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_steep_terrain \"test\" (test)",
+    "features": [],
+    "start": 34.35,
+    "duration": 12.14,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 146,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_diagnostics \"test\" (test)",
+    "features": [],
+    "start": 34.36,
+    "duration": 7.77,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 109,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " managed \"test\" (test)",
+    "features": [],
+    "start": 34.6,
+    "duration": 11.93,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 168,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_morph \"test\" (test)",
+    "features": [],
+    "start": 34.6,
+    "duration": 11.88,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 106,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " look \"test\" (test)",
+    "features": [],
+    "start": 34.78,
+    "duration": 7.42,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 158,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_water \"test\" (test)",
+    "features": [],
+    "start": 35.6,
+    "duration": 11.29,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 134,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " water_cut \"test\" (test)",
+    "features": [],
+    "start": 35.61,
+    "duration": 6.51,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 160,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " graph \"test\" (test)",
+    "features": [],
+    "start": 35.61,
+    "duration": 7.02,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 144,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_compact_blocks \"test\" (test)",
+    "features": [],
+    "start": 36.81,
+    "duration": 9.69,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 96,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " compact_pool \"test\" (test)",
+    "features": [],
+    "start": 41.39,
+    "duration": 1.04,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 167,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_lit_shading \"test\" (test)",
+    "features": [],
+    "start": 42.13,
+    "duration": 7.9,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 117,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " pipeline \"test\" (test)",
+    "features": [],
+    "start": 42.13,
+    "duration": 7.91,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 123,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " scheduler_equivalence \"test\" (test)",
+    "features": [],
+    "start": 42.2,
+    "duration": 8.73,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 143,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_compact \"test\" (test)",
+    "features": [],
+    "start": 42.44,
+    "duration": 8.47,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 129,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " terrain_field \"test\" (test)",
+    "features": [],
+    "start": 42.63,
+    "duration": 4.54,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 147,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_hello_triangle \"test\" (test)",
+    "features": [],
+    "start": 46.48,
+    "duration": 4.42,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 120,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " plan_reuse \"test\" (test)",
+    "features": [],
+    "start": 46.49,
+    "duration": 4.42,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 114,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_lod_coverage \"test\" (test)",
+    "features": [],
+    "start": 46.5,
+    "duration": 3.91,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 113,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_frustum_cut_sweep \"test\" (test)",
+    "features": [],
+    "start": 46.53,
+    "duration": 4.4,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 171,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " shader_scan \"test\" (test)",
+    "features": [],
+    "start": 46.89,
+    "duration": 4.03,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 136,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " water_summary \"test\" (test)",
+    "features": [],
+    "start": 47.17,
+    "duration": 4.94,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 107,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " look_independence \"test\" (test)",
+    "features": [],
+    "start": 50.03,
+    "duration": 3.95,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 148,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_indirect \"test\" (test)",
+    "features": [],
+    "start": 50.04,
+    "duration": 3.93,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 105,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " lod \"test\" (test)",
+    "features": [],
+    "start": 50.41,
+    "duration": 10.75,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 156,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_upload_batch \"test\" (test)",
+    "features": [],
+    "start": 50.9,
+    "duration": 10.75,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 139,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " planet_render \"lib\" (test)",
+    "features": [],
+    "start": 50.91,
+    "duration": 10.58,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 173,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " spike07_detail \"test\" (test)",
+    "features": [],
+    "start": 50.91,
+    "duration": 1.09,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 133,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " water_band \"test\" (test)",
+    "features": [],
+    "start": 50.92,
+    "duration": 10.57,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 175,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " upload_contention \"example\"",
+    "features": [],
+    "start": 50.93,
+    "duration": 10.55,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 128,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " terrain \"test\" (test)",
+    "features": [],
+    "start": 50.93,
+    "duration": 10.23,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 165,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_debug_views \"test\" (test)",
+    "features": [],
+    "start": 52.0,
+    "duration": 9.6,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 99,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " dive \"test\" (test)",
+    "features": [],
+    "start": 52.11,
+    "duration": 9.75,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 125,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " scheduler_rotation \"test\" (test)",
+    "features": [],
+    "start": 53.97,
+    "duration": 12.03,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 163,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " grid_phase \"test\" (test)",
+    "features": [],
+    "start": 53.98,
+    "duration": 9.94,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 127,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " steep \"test\" (test)",
+    "features": [],
+    "start": 61.16,
+    "duration": 1.21,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 89,
+    "name": "planet-editor",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " planet_editor \"lib\" (test)",
+    "features": [],
+    "start": 61.16,
+    "duration": 0.64,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 145,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_debug_views \"test\" (test)",
+    "features": [],
+    "start": 61.48,
+    "duration": 7.54,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 98,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " cover \"test\" (test)",
+    "features": [],
+    "start": 61.49,
+    "duration": 1.56,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 119,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " plan_origin_batch \"test\" (test)",
+    "features": [],
+    "start": 61.49,
+    "duration": 2.32,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 169,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_shader_validation \"test\" (test)",
+    "features": [],
+    "start": 61.6,
+    "duration": 7.16,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 164,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_atmosphere \"test\" (test)",
+    "features": [],
+    "start": 61.65,
+    "duration": 7.36,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 162,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " graph_water \"test\" (test)",
+    "features": [],
+    "start": 61.8,
+    "duration": 7.21,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 152,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_renderer \"test\" (test)",
+    "features": [],
+    "start": 61.87,
+    "duration": 7.33,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 108,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " lookfile \"test\" (test)",
+    "features": [],
+    "start": 62.37,
+    "duration": 6.74,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 104,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " height_aware \"test\" (test)",
+    "features": [],
+    "start": 63.05,
+    "duration": 8.25,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 150,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_pipelined \"test\" (test)",
+    "features": [],
+    "start": 63.81,
+    "duration": 7.49,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 97,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " controller \"test\" (test)",
+    "features": [],
+    "start": 63.92,
+    "duration": 7.05,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 142,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_atmosphere \"test\" (test)",
+    "features": [],
+    "start": 66.0,
+    "duration": 5.66,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 102,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " flight \"test\" (test)",
+    "features": [],
+    "start": 68.76,
+    "duration": 1.01,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 135,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " water_plan \"test\" (test)",
+    "features": [],
+    "start": 69.01,
+    "duration": 1.11,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 132,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " water \"test\" (test)",
+    "features": [],
+    "start": 69.01,
+    "duration": 2.33,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 172,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " spike06_compact \"test\" (test)",
+    "features": [],
+    "start": 69.02,
+    "duration": 0.38,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 101,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " finest_level \"test\" (test)",
+    "features": [],
+    "start": 69.12,
+    "duration": 2.02,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 124,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " scheduler_incremental \"test\" (test)",
+    "features": [],
+    "start": 69.2,
+    "duration": 2.1,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 159,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " gpu_window_blit \"test\" (test)",
+    "features": [],
+    "start": 69.4,
+    "duration": 2.25,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 95,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " atmosphere \"test\" (test)",
+    "features": [],
+    "start": 69.77,
+    "duration": 2.11,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 122,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " residency \"test\" (test)",
+    "features": [],
+    "start": 70.13,
+    "duration": 2.17,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 161,
+    "name": "planet-render",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " graph_lit \"test\" (test)",
+    "features": [],
+    "start": 70.97,
+    "duration": 2.94,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 126,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " shading \"test\" (test)",
+    "features": [],
+    "start": 71.13,
+    "duration": 2.45,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 116,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_steep_morph \"test\" (test)",
+    "features": [],
+    "start": 71.3,
+    "duration": 2.62,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 100,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " draw_records \"test\" (test)",
+    "features": [],
+    "start": 71.3,
+    "duration": 1.1,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 112,
+    "name": "planet-frame",
+    "version": "0.0.0",
+    "mode": "todo",
+    "target": " oracle_frustum_cut \"test\" (test)",
+    "features": [],
+    "start": 71.3,
+    "duration": 3.33,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  }
+];
+const CONCURRENCY_DATA = [
+  {
+    "t": 0.22,
+    "active": 1,
+    "waiting": 0,
+    "inactive": 106
+  },
+  {
+    "t": 0.23,
+    "active": 2,
+    "waiting": 0,
+    "inactive": 105
+  },
+  {
+    "t": 0.72,
+    "active": 2,
+    "waiting": 1,
+    "inactive": 104
+  },
+  {
+    "t": 0.73,
+    "active": 3,
+    "waiting": 0,
+    "inactive": 104
+  },
+  {
+    "t": 1.38,
+    "active": 3,
+    "waiting": 1,
+    "inactive": 103
+  },
+  {
+    "t": 1.44,
+    "active": 4,
+    "waiting": 0,
+    "inactive": 103
+  },
+  {
+    "t": 1.55,
+    "active": 4,
+    "waiting": 1,
+    "inactive": 102
+  },
+  {
+    "t": 1.6099999999999999,
+    "active": 3,
+    "waiting": 1,
+    "inactive": 102
+  },
+  {
+    "t": 1.62,
+    "active": 4,
+    "waiting": 0,
+    "inactive": 102
+  },
+  {
+    "t": 1.94,
+    "active": 3,
+    "waiting": 0,
+    "inactive": 102
+  },
+  {
+    "t": 2.45,
+    "active": 2,
+    "waiting": 0,
+    "inactive": 102
+  },
+  {
+    "t": 2.8200000000000003,
+    "active": 1,
+    "waiting": 79,
+    "inactive": 23
+  },
+  {
+    "t": 2.83,
+    "active": 10,
+    "waiting": 70,
+    "inactive": 23
+  },
+  {
+    "t": 2.93,
+    "active": 10,
+    "waiting": 92,
+    "inactive": 0
+  },
+  {
+    "t": 3.69,
+    "active": 10,
+    "waiting": 91,
+    "inactive": 0
+  },
+  {
+    "t": 8.28,
+    "active": 12,
+    "waiting": 89,
+    "inactive": 0
+  },
+  {
+    "t": 8.280000000000001,
+    "active": 11,
+    "waiting": 89,
+    "inactive": 0
+  },
+  {
+    "t": 8.29,
+    "active": 10,
+    "waiting": 89,
+    "inactive": 0
+  },
+  {
+    "t": 8.58,
+    "active": 10,
+    "waiting": 88,
+    "inactive": 0
+  },
+  {
+    "t": 8.59,
+    "active": 12,
+    "waiting": 86,
+    "inactive": 0
+  },
+  {
+    "t": 8.6,
+    "active": 10,
+    "waiting": 86,
+    "inactive": 0
+  },
+  {
+    "t": 8.95,
+    "active": 10,
+    "waiting": 85,
+    "inactive": 0
+  },
+  {
+    "t": 9.13,
+    "active": 11,
+    "waiting": 84,
+    "inactive": 0
+  },
+  {
+    "t": 9.14,
+    "active": 9,
+    "waiting": 84,
+    "inactive": 0
+  },
+  {
+    "t": 9.15,
+    "active": 10,
+    "waiting": 83,
+    "inactive": 0
+  },
+  {
+    "t": 13.12,
+    "active": 10,
+    "waiting": 82,
+    "inactive": 0
+  },
+  {
+    "t": 13.76,
+    "active": 9,
+    "waiting": 82,
+    "inactive": 0
+  },
+  {
+    "t": 13.77,
+    "active": 10,
+    "waiting": 81,
+    "inactive": 0
+  },
+  {
+    "t": 13.86,
+    "active": 10,
+    "waiting": 80,
+    "inactive": 0
+  },
+  {
+    "t": 13.96,
+    "active": 9,
+    "waiting": 80,
+    "inactive": 0
+  },
+  {
+    "t": 13.97,
+    "active": 10,
+    "waiting": 79,
+    "inactive": 0
+  },
+  {
+    "t": 14.38,
+    "active": 9,
+    "waiting": 79,
+    "inactive": 0
+  },
+  {
+    "t": 14.39,
+    "active": 10,
+    "waiting": 78,
+    "inactive": 0
+  },
+  {
+    "t": 14.8,
+    "active": 9,
+    "waiting": 78,
+    "inactive": 0
+  },
+  {
+    "t": 14.81,
+    "active": 10,
+    "waiting": 77,
+    "inactive": 0
+  },
+  {
+    "t": 15.64,
+    "active": 10,
+    "waiting": 76,
+    "inactive": 0
+  },
+  {
+    "t": 16.52,
+    "active": 10,
+    "waiting": 75,
+    "inactive": 0
+  },
+  {
+    "t": 17.49,
+    "active": 11,
+    "waiting": 73,
+    "inactive": 0
+  },
+  {
+    "t": 17.490000000000002,
+    "active": 10,
+    "waiting": 73,
+    "inactive": 0
+  },
+  {
+    "t": 17.55,
+    "active": 10,
+    "waiting": 72,
+    "inactive": 0
+  },
+  {
+    "t": 30.82,
+    "active": 10,
+    "waiting": 71,
+    "inactive": 0
+  },
+  {
+    "t": 30.83,
+    "active": 11,
+    "waiting": 69,
+    "inactive": 0
+  },
+  {
+    "t": 30.830000000000002,
+    "active": 10,
+    "waiting": 69,
+    "inactive": 0
+  },
+  {
+    "t": 30.86,
+    "active": 10,
+    "waiting": 68,
+    "inactive": 0
+  },
+  {
+    "t": 31.02,
+    "active": 11,
+    "waiting": 67,
+    "inactive": 0
+  },
+  {
+    "t": 31.020000000000003,
+    "active": 10,
+    "waiting": 67,
+    "inactive": 0
+  },
+  {
+    "t": 31.39,
+    "active": 11,
+    "waiting": 66,
+    "inactive": 0
+  },
+  {
+    "t": 31.4,
+    "active": 10,
+    "waiting": 66,
+    "inactive": 0
+  },
+  {
+    "t": 32.46,
+    "active": 8,
+    "waiting": 66,
+    "inactive": 0
+  },
+  {
+    "t": 32.47,
+    "active": 10,
+    "waiting": 64,
+    "inactive": 0
+  },
+  {
+    "t": 32.65,
+    "active": 10,
+    "waiting": 63,
+    "inactive": 0
+  },
+  {
+    "t": 33.87,
+    "active": 10,
+    "waiting": 62,
+    "inactive": 0
+  },
+  {
+    "t": 34.35,
+    "active": 10,
+    "waiting": 61,
+    "inactive": 0
+  },
+  {
+    "t": 34.36,
+    "active": 10,
+    "waiting": 60,
+    "inactive": 0
+  },
+  {
+    "t": 34.6,
+    "active": 11,
+    "waiting": 58,
+    "inactive": 0
+  },
+  {
+    "t": 34.61,
+    "active": 10,
+    "waiting": 58,
+    "inactive": 0
+  },
+  {
+    "t": 34.769999999999996,
+    "active": 9,
+    "waiting": 58,
+    "inactive": 0
+  },
+  {
+    "t": 34.78,
+    "active": 10,
+    "waiting": 57,
+    "inactive": 0
+  },
+  {
+    "t": 35.6,
+    "active": 10,
+    "waiting": 56,
+    "inactive": 0
+  },
+  {
+    "t": 35.61,
+    "active": 10,
+    "waiting": 54,
+    "inactive": 0
+  },
+  {
+    "t": 36.81,
+    "active": 10,
+    "waiting": 53,
+    "inactive": 0
+  },
+  {
+    "t": 41.379999999999995,
+    "active": 9,
+    "waiting": 53,
+    "inactive": 0
+  },
+  {
+    "t": 41.39,
+    "active": 10,
+    "waiting": 52,
+    "inactive": 0
+  },
+  {
+    "t": 42.12,
+    "active": 9,
+    "waiting": 52,
+    "inactive": 0
+  },
+  {
+    "t": 42.129999999999995,
+    "active": 8,
+    "waiting": 52,
+    "inactive": 0
+  },
+  {
+    "t": 42.13,
+    "active": 10,
+    "waiting": 50,
+    "inactive": 0
+  },
+  {
+    "t": 42.2,
+    "active": 10,
+    "waiting": 49,
+    "inactive": 0
+  },
+  {
+    "t": 42.43,
+    "active": 9,
+    "waiting": 49,
+    "inactive": 0
+  },
+  {
+    "t": 42.44,
+    "active": 10,
+    "waiting": 48,
+    "inactive": 0
+  },
+  {
+    "t": 42.629999999999995,
+    "active": 9,
+    "waiting": 48,
+    "inactive": 0
+  },
+  {
+    "t": 42.63,
+    "active": 10,
+    "waiting": 47,
+    "inactive": 0
+  },
+  {
+    "t": 46.48,
+    "active": 11,
+    "waiting": 46,
+    "inactive": 0
+  },
+  {
+    "t": 46.480000000000004,
+    "active": 10,
+    "waiting": 46,
+    "inactive": 0
+  },
+  {
+    "t": 46.49,
+    "active": 10,
+    "waiting": 45,
+    "inactive": 0
+  },
+  {
+    "t": 46.5,
+    "active": 10,
+    "waiting": 44,
+    "inactive": 0
+  },
+  {
+    "t": 46.53,
+    "active": 10,
+    "waiting": 43,
+    "inactive": 0
+  },
+  {
+    "t": 46.89,
+    "active": 10,
+    "waiting": 42,
+    "inactive": 0
+  },
+  {
+    "t": 47.17,
+    "active": 10,
+    "waiting": 41,
+    "inactive": 0
+  },
+  {
+    "t": 50.03,
+    "active": 10,
+    "waiting": 40,
+    "inactive": 0
+  },
+  {
+    "t": 50.04,
+    "active": 11,
+    "waiting": 39,
+    "inactive": 0
+  },
+  {
+    "t": 50.040000000000006,
+    "active": 10,
+    "waiting": 39,
+    "inactive": 0
+  },
+  {
+    "t": 50.41,
+    "active": 10,
+    "waiting": 38,
+    "inactive": 0
+  },
+  {
+    "t": 50.9,
+    "active": 10,
+    "waiting": 37,
+    "inactive": 0
+  },
+  {
+    "t": 50.91,
+    "active": 11,
+    "waiting": 35,
+    "inactive": 0
+  },
+  {
+    "t": 50.910000000000004,
+    "active": 10,
+    "waiting": 35,
+    "inactive": 0
+  },
+  {
+    "t": 50.92,
+    "active": 10,
+    "waiting": 34,
+    "inactive": 0
+  },
+  {
+    "t": 50.93,
+    "active": 11,
+    "waiting": 32,
+    "inactive": 0
+  },
+  {
+    "t": 50.93000000000001,
+    "active": 10,
+    "waiting": 32,
+    "inactive": 0
+  },
+  {
+    "t": 52.0,
+    "active": 10,
+    "waiting": 31,
+    "inactive": 0
+  },
+  {
+    "t": 52.11,
+    "active": 10,
+    "waiting": 30,
+    "inactive": 0
+  },
+  {
+    "t": 53.97,
+    "active": 10,
+    "waiting": 29,
+    "inactive": 0
+  },
+  {
+    "t": 53.98,
+    "active": 11,
+    "waiting": 28,
+    "inactive": 0
+  },
+  {
+    "t": 53.980000000000004,
+    "active": 10,
+    "waiting": 28,
+    "inactive": 0
+  },
+  {
+    "t": 61.16,
+    "active": 10,
+    "waiting": 26,
+    "inactive": 0
+  },
+  {
+    "t": 61.48,
+    "active": 11,
+    "waiting": 25,
+    "inactive": 0
+  },
+  {
+    "t": 61.480000000000004,
+    "active": 10,
+    "waiting": 25,
+    "inactive": 0
+  },
+  {
+    "t": 61.489999999999995,
+    "active": 9,
+    "waiting": 25,
+    "inactive": 0
+  },
+  {
+    "t": 61.49,
+    "active": 10,
+    "waiting": 23,
+    "inactive": 0
+  },
+  {
+    "t": 61.6,
+    "active": 10,
+    "waiting": 22,
+    "inactive": 0
+  },
+  {
+    "t": 61.65,
+    "active": 10,
+    "waiting": 21,
+    "inactive": 0
+  },
+  {
+    "t": 61.8,
+    "active": 10,
+    "waiting": 20,
+    "inactive": 0
+  },
+  {
+    "t": 61.86,
+    "active": 9,
+    "waiting": 20,
+    "inactive": 0
+  },
+  {
+    "t": 61.87,
+    "active": 10,
+    "waiting": 19,
+    "inactive": 0
+  },
+  {
+    "t": 62.37,
+    "active": 10,
+    "waiting": 18,
+    "inactive": 0
+  },
+  {
+    "t": 63.05,
+    "active": 11,
+    "waiting": 17,
+    "inactive": 0
+  },
+  {
+    "t": 63.050000000000004,
+    "active": 10,
+    "waiting": 17,
+    "inactive": 0
+  },
+  {
+    "t": 63.81,
+    "active": 10,
+    "waiting": 16,
+    "inactive": 0
+  },
+  {
+    "t": 63.919999999999995,
+    "active": 9,
+    "waiting": 16,
+    "inactive": 0
+  },
+  {
+    "t": 63.92,
+    "active": 10,
+    "waiting": 15,
+    "inactive": 0
+  },
+  {
+    "t": 66.0,
+    "active": 10,
+    "waiting": 14,
+    "inactive": 0
+  },
+  {
+    "t": 68.76,
+    "active": 10,
+    "waiting": 13,
+    "inactive": 0
+  },
+  {
+    "t": 69.00999999999999,
+    "active": 9,
+    "waiting": 13,
+    "inactive": 0
+  },
+  {
+    "t": 69.01,
+    "active": 10,
+    "waiting": 11,
+    "inactive": 0
+  },
+  {
+    "t": 69.02,
+    "active": 10,
+    "waiting": 10,
+    "inactive": 0
+  },
+  {
+    "t": 69.11,
+    "active": 9,
+    "waiting": 10,
+    "inactive": 0
+  },
+  {
+    "t": 69.12,
+    "active": 10,
+    "waiting": 9,
+    "inactive": 0
+  },
+  {
+    "t": 69.2,
+    "active": 10,
+    "waiting": 8,
+    "inactive": 0
+  },
+  {
+    "t": 69.39999999999999,
+    "active": 9,
+    "waiting": 8,
+    "inactive": 0
+  },
+  {
+    "t": 69.4,
+    "active": 10,
+    "waiting": 7,
+    "inactive": 0
+  },
+  {
+    "t": 69.77,
+    "active": 11,
+    "waiting": 6,
+    "inactive": 0
+  },
+  {
+    "t": 69.77000000000001,
+    "active": 10,
+    "waiting": 6,
+    "inactive": 0
+  },
+  {
+    "t": 70.12,
+    "active": 9,
+    "waiting": 6,
+    "inactive": 0
+  },
+  {
+    "t": 70.13,
+    "active": 10,
+    "waiting": 5,
+    "inactive": 0
+  },
+  {
+    "t": 70.97,
+    "active": 10,
+    "waiting": 4,
+    "inactive": 0
+  },
+  {
+    "t": 71.13,
+    "active": 11,
+    "waiting": 3,
+    "inactive": 0
+  },
+  {
+    "t": 71.14,
+    "active": 10,
+    "waiting": 3,
+    "inactive": 0
+  },
+  {
+    "t": 71.3,
+    "active": 10,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 71.34,
+    "active": 9,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 71.65,
+    "active": 8,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 71.66,
+    "active": 7,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 71.88,
+    "active": 6,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 72.3,
+    "active": 5,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 72.39999999999999,
+    "active": 4,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 73.58,
+    "active": 3,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 73.91,
+    "active": 2,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 73.92,
+    "active": 1,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 74.63,
+    "active": 0,
+    "waiting": 0,
+    "inactive": 0
+  }
+];
+const CPU_USAGE = [
+  [
+    0.2266814,
+    6.962025316455694
+  ],
+  [
+    0.7264558,
+    20.421052631578945
+  ],
+  [
+    1.2394619,
+    31.931818181818187
+  ],
+  [
+    1.3802975,
+    63.758389261744966
+  ],
+  [
+    1.5484693,
+    66.82692307692308
+  ],
+  [
+    1.9406189999999999,
+    50.16129032258064
+  ],
+  [
+    2.3872365,
+    62.65709156193896
+  ],
+  [
+    2.6240772,
+    36.66666666666667
+  ],
+  [
+    2.8257727,
+    26.203208556149733
+  ],
+  [
+    2.9338956,
+    41.62162162162162
+  ],
+  [
+    3.4492185,
+    39.91989319092123
+  ],
+  [
+    3.685315,
+    60.06711409395973
+  ],
+  [
+    4.1885406,
+    92.20389805097452
+  ],
+  [
+    4.6901213,
+    77.1103896103896
+  ],
+  [
+    5.2022241,
+    7.692307692307693
+  ],
+  [
+    5.7141722,
+    7.082152974504254
+  ],
+  [
+    6.2147778,
+    5.714285714285722
+  ],
+  [
+    6.7232565,
+    2.338129496402871
+  ],
+  [
+    7.2315415,
+    1.5313935681470099
+  ],
+  [
+    7.7427939,
+    46.44607843137255
+  ],
+  [
+    8.2549114,
+    44.54545454545455
+  ],
+  [
+    8.5791891,
+    40.57971014492754
+  ],
+  [
+    8.9513799,
+    21.663019693654263
+  ],
+  [
+    9.1326137,
+    43.43891402714932
+  ],
+  [
+    9.6582885,
+    19.7389885807504
+  ],
+  [
+    10.170016,
+    0.6611570247933969
+  ],
+  [
+    10.6756837,
+    0.6163328197226576
+  ],
+  [
+    11.176852,
+    0.5298013245033104
+  ],
+  [
+    11.6838157,
+    0.16207455429497486
+  ],
+  [
+    12.1889224,
+    0.894187779433679
+  ],
+  [
+    12.6959702,
+    0.6069802731411187
+  ],
+  [
+    13.1188129,
+    3.9426523297491087
+  ],
+  [
+    13.6226998,
+    92.1996879875195
+  ],
+  [
+    13.7666105,
+    89.5
+  ],
+  [
+    13.9636686,
+    96.66666666666667
+  ],
+  [
+    14.3822531,
+    98.51851851851852
+  ],
+  [
+    14.8046883,
+    98.33333333333333
+  ],
+  [
+    15.3262664,
+    93.81598793363499
+  ],
+  [
+    15.6368487,
+    97.73299748110831
+  ],
+  [
+    16.1553242,
+    85.47400611620795
+  ],
+  [
+    16.5052393,
+    52.36051502145923
+  ],
+  [
+    17.0278359,
+    19.778481012658233
+  ],
+  [
+    17.4866654,
+    16.082802547770697
+  ],
+  [
+    18.0519319,
+    36.23595505617978
+  ],
+  [
+    18.5538513,
+    4.948805460750847
+  ],
+  [
+    19.0675366,
+    0.5025125628140756
+  ],
+  [
+    19.5718217,
+    0.1356852103120758
+  ],
+  [
+    20.081907,
+    4.153846153846146
+  ],
+  [
+    20.5916592,
+    3.091190108191654
+  ],
+  [
+    21.1003037,
+    23.726114649681534
+  ],
+  [
+    21.6043171,
+    0.7923930269413688
+  ],
+  [
+    22.1085521,
+    1.7699115044247833
+  ],
+  [
+    22.6124603,
+    0.31104199066874116
+  ],
+  [
+    23.1241498,
+    0.6745362563237762
+  ],
+  [
+    23.639367,
+    0.6191950464396285
+  ],
+  [
+    24.1413872,
+    0.11792452830188438
+  ],
+  [
+    24.6429423,
+    0.6779661016949206
+  ],
+  [
+    25.1553947,
+    1.26939351198871
+  ],
+  [
+    25.6626474,
+    1.112877583465817
+  ],
+  [
+    26.1682293,
+    0.4524886877828038
+  ],
+  [
+    26.6805275,
+    0.3521126760563362
+  ],
+  [
+    27.190652,
+    0.49261083743841994
+  ],
+  [
+    27.7049449,
+    0.31695721077655037
+  ],
+  [
+    28.2118685,
+    0.6441223832528209
+  ],
+  [
+    28.716579199999998,
+    0.6230529595015639
+  ],
+  [
+    29.2220737,
+    0.6423982869379046
+  ],
+  [
+    29.7229263,
+    0.5934718100890137
+  ],
+  [
+    30.2303911,
+    0.6319115323854589
+  ],
+  [
+    30.733666200000002,
+    1.9469026548672588
+  ],
+  [
+    30.8611289,
+    40.46822742474916
+  ],
+  [
+    31.0213657,
+    93.0
+  ],
+  [
+    31.391257,
+    96.66666666666667
+  ],
+  [
+    31.9071621,
+    91.71597633136095
+  ],
+  [
+    32.4442515,
+    100.0
+  ],
+  [
+    32.6476883,
+    99.23076923076923
+  ],
+  [
+    33.1621487,
+    95.0
+  ],
+  [
+    33.6792459,
+    95.75757575757575
+  ],
+  [
+    33.8710983,
+    30.0
+  ],
+  [
+    34.3467998,
+    36.31921824104235
+  ],
+  [
+    34.6006227,
+    15.030674846625772
+  ],
+  [
+    34.775032,
+    35.609756097560975
+  ],
+  [
+    35.2879068,
+    6.239460370994948
+  ],
+  [
+    35.5985095,
+    6.888888888888886
+  ],
+  [
+    36.1239607,
+    16.02288984263234
+  ],
+  [
+    36.6253386,
+    4.140127388535035
+  ],
+  [
+    36.8057776,
+    16.756756756756758
+  ],
+  [
+    37.310349,
+    18.250377073906492
+  ],
+  [
+    37.8205001,
+    0.49019607843136725
+  ],
+  [
+    38.3323426,
+    3.5161744022503427
+  ],
+  [
+    38.8364683,
+    4.545454545454547
+  ],
+  [
+    39.3398138,
+    0.0
+  ],
+  [
+    39.8533951,
+    0.15797788309637895
+  ],
+  [
+    40.3657681,
+    1.0606060606060623
+  ],
+  [
+    40.8777998,
+    10.879629629629633
+  ],
+  [
+    41.3836714,
+    84.0625
+  ],
+  [
+    41.909735,
+    100.0
+  ],
+  [
+    42.1241148,
+    98.21428571428571
+  ],
+  [
+    42.43454,
+    85.52631578947368
+  ],
+  [
+    42.6282452,
+    90.76923076923077
+  ],
+  [
+    43.1343951,
+    61.421319796954315
+  ],
+  [
+    43.6388241,
+    0.8955223880597032
+  ],
+  [
+    44.1403304,
+    1.4897579143389237
+  ],
+  [
+    44.6466831,
+    0.27359781121751325
+  ],
+  [
+    45.1539376,
+    0.4777070063694282
+  ],
+  [
+    45.6659303,
+    0.9493670886076018
+  ],
+  [
+    46.1738051,
+    3.728362183754996
+  ],
+  [
+    46.4818381,
+    65.26315789473685
+  ],
+  [
+    46.886507,
+    78.65384615384616
+  ],
+  [
+    47.1687577,
+    81.11111111111111
+  ],
+  [
+    47.6810878,
+    89.739663093415
+  ],
+  [
+    48.182945,
+    71.11459968602826
+  ],
+  [
+    48.6958108,
+    15.074626865671632
+  ],
+  [
+    49.2056816,
+    1.305057096247964
+  ],
+  [
+    49.7176323,
+    0.6504065040650318
+  ],
+  [
+    50.0302227,
+    10.109890109890102
+  ],
+  [
+    50.4103356,
+    5.859375
+  ],
+  [
+    50.9021393,
+    17.892976588628756
+  ],
+  [
+    51.4398374,
+    28.551724137931032
+  ],
+  [
+    51.9532579,
+    32.13728549141965
+  ],
+  [
+    52.1116166,
+    37.55656108597285
+  ],
+  [
+    52.6195725,
+    72.8125
+  ],
+  [
+    53.1228615,
+    43.797856049004594
+  ],
+  [
+    53.6296885,
+    70.96273291925465
+  ],
+  [
+    53.9679621,
+    9.174311926605512
+  ],
+  [
+    54.490939,
+    18.45140032948929
+  ],
+  [
+    54.9925644,
+    0.1706484641638184
+  ],
+  [
+    55.5079396,
+    0.15082956259426794
+  ],
+  [
+    56.0090499,
+    0.7288629737609398
+  ],
+  [
+    56.5138763,
+    0.48780487804877737
+  ],
+  [
+    57.0232201,
+    0.6400000000000006
+  ],
+  [
+    57.5266163,
+    0.2713704206241516
+  ],
+  [
+    58.0373864,
+    0.31695721077655037
+  ],
+  [
+    58.5429346,
+    0.589970501474923
+  ],
+  [
+    59.0562164,
+    0.6191950464396285
+  ],
+  [
+    59.5632841,
+    0.7598784194528889
+  ],
+  [
+    60.0771067,
+    0.5042016806722671
+  ],
+  [
+    60.5908663,
+    0.7434944237918302
+  ],
+  [
+    61.093661,
+    0.8849557522123916
+  ],
+  [
+    61.4761171,
+    20.0
+  ],
+  [
+    61.5948492,
+    70.73170731707317
+  ],
+  [
+    61.8010221,
+    62.745098039215684
+  ],
+  [
+    62.3712969,
+    77.47252747252747
+  ],
+  [
+    62.8913699,
+    99.26470588235294
+  ],
+  [
+    63.0476348,
+    99.0
+  ],
+  [
+    63.5542718,
+    71.83333333333333
+  ],
+  [
+    63.795404,
+    13.043478260869563
+  ],
+  [
+    63.918783,
+    64.51612903225806
+  ],
+  [
+    64.425503,
+    11.478260869565219
+  ],
+  [
+    64.9281159,
+    0.6220839813374823
+  ],
+  [
+    65.3722879,
+    5.140186915887853
+  ],
+  [
+    65.8735081,
+    2.113821138211378
+  ],
+  [
+    66.0033394,
+    0.0
+  ],
+  [
+    66.5082914,
+    3.606557377049185
+  ],
+  [
+    67.0130797,
+    0.0
+  ],
+  [
+    67.518627,
+    0.4405286343612431
+  ],
+  [
+    68.0313385,
+    0.7504690431519663
+  ],
+  [
+    68.5434683,
+    0.48780487804877737
+  ],
+  [
+    68.7587134,
+    9.615384615384613
+  ],
+  [
+    69.0106926,
+    10.543130990415335
+  ],
+  [
+    69.1160053,
+    66.42857142857143
+  ],
+  [
+    69.3708579,
+    74.00611620795107
+  ],
+  [
+    69.7683462,
+    73.65384615384616
+  ],
+  [
+    70.1253655,
+    83.62445414847161
+  ],
+  [
+    70.6271153,
+    84.01253918495297
+  ],
+  [
+    70.965613,
+    29.245283018867923
+  ],
+  [
+    71.1131329,
+    89.0
+  ],
+  [
+    71.2968978,
+    23.84937238493724
+  ],
+  [
+    71.6505428,
+    39.08045977011494
+  ],
+  [
+    71.8760235,
+    33.33333333333334
+  ],
+  [
+    72.2945216,
+    55.094339622641506
+  ],
+  [
+    72.4002611,
+    59.859154929577464
+  ],
+  [
+    72.9147462,
+    30.731707317073173
+  ],
+  [
+    73.4161243,
+    1.317957166392091
+  ],
+  [
+    73.581453,
+    5.964912280701753
+  ],
+  [
+    73.9067308,
+    4.90654205607477
+  ],
+  [
+    74.4220551,
+    2.5316455696202524
+  ],
+  [
+    74.6287154,
+    0.6711409395973078
+  ]
+];
+// Position of the vertical axis.
+const X_LINE = 50;
+// General-use margin size.
+const MARGIN = 5;
+// Position of the horizontal axis, relative to the bottom.
+const Y_LINE = 35;
+// Minimum distance between time tick labels.
+const MIN_TICK_DIST = 50;
+// Radius for rounded rectangle corners.
+const RADIUS = 3;
+// Height of unit boxes.
+const BOX_HEIGHT = 25;
+// Distance between Y tick marks on the unit graph.
+const Y_TICK_DIST = BOX_HEIGHT + 2;
+// Rects used for mouseover detection.
+// Objects of {x, y, x2, y2, i} where `i` is the index into UNIT_DATA.
+let HIT_BOXES = [];
+// Index into UNIT_DATA of the last unit hovered over by mouse.
+let LAST_HOVER = null;
+// Key is unit index, value is {x, y, width, sections} of the box.
+let UNIT_COORDS = {};
+// Map of unit index to the index it was unlocked by.
+let REVERSE_UNIT_DEPS = {};
+let REVERSE_UNIT_RMETA_DEPS = {};
+let UNIT_BY_INDEX = {};
+
+const MIN_GRAPH_WIDTH = 200;
+const MAX_GRAPH_WIDTH = 4096;
+
+// How many pixels per second is added by each scale value
+const SCALE_PIXELS_PER_SEC = 8;
+
+function scale_to_graph_width(scale) {
+  // The scale corresponds to `SCALE_PIXELS_PER_SEC` pixels per seconds.
+  // We thus multiply it by that, and the total duration, to get the graph width.
+  const width = scale * SCALE_PIXELS_PER_SEC * DURATION;
+
+  // We then cap the size of the graph. It is hard to view if it is too large, and
+  // browsers may not render a large graph because it takes too much memory.
+  // 4096 is still ridiculously large, and probably won't render on mobile
+  // browsers, but should be ok for many desktop environments.
+  // Also use a minimum width of 200.
+  return Math.max(MIN_GRAPH_WIDTH, Math.min(MAX_GRAPH_WIDTH, width));
+}
+
+// This function performs the reverse of `scale_to_graph_width`.
+function width_to_graph_scale(width) {
+  const maxWidth = Math.min(MAX_GRAPH_WIDTH, width);
+  const minWidth = Math.max(MIN_GRAPH_WIDTH, width);
+
+  const trimmedWidth = Math.max(minWidth, Math.min(maxWidth, width));
+
+  const scale = Math.round(trimmedWidth / (DURATION * SCALE_PIXELS_PER_SEC));
+  return Math.max(1, scale);
+}
+
+// Init scale value and limits based on the client's window width and min/max graph width.
+const scaleElement = document.getElementById('scale');
+scaleElement.min = width_to_graph_scale(MIN_GRAPH_WIDTH);
+scaleElement.max = width_to_graph_scale(MAX_GRAPH_WIDTH);
+scaleElement.value = width_to_graph_scale(window.innerWidth * 0.75);
+
+// Colors from css
+const getCssColor = name => getComputedStyle(document.body).getPropertyValue(name);
+const TEXT_COLOR = getCssColor('--text');
+const BG_COLOR = getCssColor('--background');
+const CANVAS_BG = getCssColor('--canvas-background');
+const AXES_COLOR = getCssColor('--canvas-axes');
+const GRID_COLOR = getCssColor('--canvas-grid');
+const CODEGEN_COLOR = getCssColor('--canvas-codegen');
+const LINK_COLOR = getCssColor('--canvas-link');
+// Final leftover section after link
+const OTHER_COLOR = getCssColor('--canvas-other');
+const CUSTOM_BUILD_COLOR = getCssColor('--canvas-custom-build');
+const NOT_CUSTOM_BUILD_COLOR = getCssColor('--canvas-not-custom-build');
+const DEP_LINE_COLOR = getCssColor('--canvas-dep-line');
+const DEP_LINE_HIGHLIGHTED_COLOR = getCssColor('--canvas-dep-line-highlighted');
+const CPU_COLOR = getCssColor('--canvas-cpu');
+
+for (const unit of UNIT_DATA) {
+  UNIT_BY_INDEX[unit.i] = unit;
+  for (let unblocked of unit.unblocked_units) {
+    REVERSE_UNIT_DEPS[unblocked] = unit.i;
+  }
+  for (let unblocked of unit.unblocked_rmeta_units) {
+    REVERSE_UNIT_RMETA_DEPS[unblocked] = unit.i;
+  }
+}
+
+// Compute x,y coordinate of each block.
+// We also populate a map with the count of each unit name to disambiguate if necessary
+function compute_unit_coords(units, px_per_sec) {
+  const unitCount = new Map();
+  UNIT_COORDS = {};
+  for (i = 0; i < units.length; i++) {
+    let unit = units[i];
+    let y = i * Y_TICK_DIST + 1;
+    let x = px_per_sec * unit.start;
+
+    const sections = [];
+    if (unit.sections !== null) {
+      // We have access to compilation sections
+      for (const section of unit.sections) {
+        const [name, { start, end }] = section;
+        sections.push({
+          name,
+          start: x + px_per_sec * start,
+          width: (end - start) * px_per_sec
+        });
+      }
+    }
+
+    let width = Math.max(px_per_sec * unit.duration, 1.0);
+    UNIT_COORDS[unit.i] = { x, y, width, sections };
+
+    const count = unitCount.get(unit.name) || 0;
+    unitCount.set(unit.name, count + 1);
+  }
+
+  return { UNIT_COORDS, unitCount }
+}
+
+class SvgRenderer {
+  constructor() {}
+
+  render_pipeline_graph() {
+    if (UNIT_DATA.length == 0) {
+      return;
+    }
+    HIT_BOXES.length = 0;
+    const min_time = document.getElementById('min-unit-time').valueAsNumber;
+
+    const units = UNIT_DATA.filter(unit => unit.duration >= min_time);
+
+    const graph_height = Y_TICK_DIST * units.length;
+    let { canvas_height, canvas_width, graph_width, px_per_sec } = graph_dimension(graph_height);
+    const axes = this._draw_graph_axes({ canvas_height, graph_height, graph_width, px_per_sec });
+
+    // Draw Y tick marks.
+    let y_ticks = '';
+    if (units.length != 0) {
+      const path_commands = Array(units.length - 1)
+        .fill(0)
+        .map((_, idx) => {
+          const n = idx + 1;
+          const y = MARGIN + Y_TICK_DIST * n;
+          return `M${X_LINE} ${y} h-5`;
+        });
+      y_ticks = `<path class="axis axis-y" d="${path_commands.join(" ")}"></path>`;
+    }
+
+    // Draw Y labels.
+    const y_labels = Array(units.length)
+      .fill(0)
+      .map((_, n) => {
+          let y = MARGIN + Y_TICK_DIST * n + Y_TICK_DIST / 2;
+          return `<text class="axis axis-y" x="${X_LINE - 4}" y="${y}">${n + 1}</text>`;
+      })
+      .join("");
+
+    // Draw the graph.
+    const { UNIT_COORDS, unitCount } = compute_unit_coords(units, px_per_sec);
+    const presentSections = new Set();
+
+    // Draw the blocks.
+    let blocks = Array(units.length)
+      .fill(0)
+      .map((_, i) => {
+        let unit = units[i];
+        let { x, y, width, sections } = UNIT_COORDS[unit.i];
+
+        const boxes = [this._roundedRect("", x, y, width, unit)].concat(
+          sections.map((section) => {
+            presentSections.add(section.name);
+            return this._roundedRect(
+              section.name,
+              section.start,
+              y,
+              section.width,
+              unit,
+            );
+          }),
+        );
+
+        const labelName = (unitCount.get(unit.name) || 0) > 1 ? `${unit.name} (v${unit.version})${unit.target}` : `${unit.name}${unit.target}`;
+        const label = `${labelName}: ${unit.duration}s`;
+
+        const text_info_width = measure_text_width(label);
+        const label_x = Math.min(x + 5.0, canvas_width - text_info_width - X_LINE);
+        const box_label = `<text class="box" x="${label_x}" y="${y + BOX_HEIGHT / 2}">${label}</text>`;
+
+        const dep_lines = this._draw_dep_lines(unit.i);
+        return boxes.concat(box_label).concat(dep_lines);
+      })
+      .flat()
+      .join("");
+
+    blocks = `
+<g id="boxes" transform="translate(${X_LINE} ${MARGIN})">${blocks}</g>
+<g id="hl-dep-lines" transform="translate(${X_LINE} ${MARGIN})"></g>`;
+
+    // Draw a legend.
+    const legend = `
+<g class="legend" transform="translate(${canvas_width-200},${MARGIN})">
+  ${this._draw_legend(160, get_legend_entries(presentSections))}
+</g>`;
+
+    const svg_container = document.getElementById("pipeline-container");
+    if (svg_container) {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("width", canvas_width);
+      svg.setAttribute("height", canvas_height);
+      Object.assign(svg.style, {
+        background: CANVAS_BG,
+        color: TEXT_COLOR,
+        fontFamily: 'sans-serif',
+        fontSize: '16px'
+      });
+      svg.innerHTML = `
+<style type="text/css">
+  path.axis {
+    fill: none;
+    stroke: ${AXES_COLOR};
+    stroke-width: 2;
+  }
+  text.axis {
+    fill: ${AXES_COLOR};
+    font-size: 16px;
+    stroke: none;
+    text-anchor: middle;
+  }
+  text.axis-y {
+    dominant-baseline: middle;
+    text-anchor: end;
+  }
+  .grid {
+    stroke: ${GRID_COLOR};
+    stroke-dasharray: 2 4;
+    stroke-width: 2;
+  }
+  rect.box {
+    fill: ${NOT_CUSTOM_BUILD_COLOR};
+    height: ${BOX_HEIGHT}px;
+    rx: ${RADIUS}px;
+    ry: ${RADIUS}px;
+  }
+  rect.box.run-custom-build {
+    fill: ${CUSTOM_BUILD_COLOR};
+  }
+  rect.box.codegen {
+    fill: ${CODEGEN_COLOR};
+  }
+  rect.box.link {
+    fill: ${LINK_COLOR};
+  }
+  rect.box.other {
+    fill: ${OTHER_COLOR}
+  }
+  text.box {
+    dominant-baseline: middle;
+    fill: ${TEXT_COLOR};
+    font-size: 14px;
+    text-anchor: start
+  }
+  .dep-line {
+    fill: none;
+    stroke: ${DEP_LINE_COLOR};
+    stroke-dasharray: 2;
+    stroke-width: 2;
+  }
+  #hl-dep-lines .dep-line{
+    stroke: ${DEP_LINE_HIGHLIGHTED_COLOR};
+  }
+  path.legend__cell {
+    stroke-width: 2;
+  }
+  .legend__desc {
+    fill: ${TEXT_COLOR};
+    dominant-baseline: middle;
+  }
+</style>
+${axes}
+${y_ticks}
+${y_labels}
+${blocks}
+${legend}`;
+      svg_container.innerHTML = svg.outerHTML;
+    }
+  }
+
+  // Draw a legend at the current position of the ctx.
+  // entries should be an array of objects with the following scheme:
+  // {
+  //   "name": <name of the legend entry> [string],
+  //   "color": <color of the legend entry> [string],
+  //   "line": <should the entry be a thin line or a rectangle> [bool]
+  // }
+  _draw_legend(width, entries) {
+    const entry_height = 20;
+
+    // Add a bit of margin to the bottom and top
+    const height = entries.length * entry_height + 4;
+
+    // Draw background
+    let legend = [];
+    legend.push(`<rect stroke="${TEXT_COLOR}" stroke-width="1" fill="${BG_COLOR}" width="${width}" height="${height}"></rect>`);
+
+    // Dimension of a block
+    const block_height = 15;
+    const block_width = 30;
+
+    // Margin from the left edge
+    const x_start = 5;
+    // Width of the "mark" section (line/block)
+    const mark_width = 45;
+
+    // Draw legend entries
+    let y = 12;
+    for (const entry of entries) {
+      const cell = entry.line ?
+        `<path class="legend__cell" stroke="${entry.color}" d="M${x_start} ${y} h ${mark_width}"></path>` :
+        `
+<rect class="legend__cell" fill="${entry.color}" width="${block_width}" height="${block_height}"
+  x="${x_start + (mark_width - block_width) / 2}" y="${y - (block_height / 2)}"
+></rect>`;
+      legend.push(cell);
+      legend.push(`<text class="legend__desc" x="${x_start + mark_width + 4}" y="${y + 1}">${entry.name}</text>`)
+      y += entry_height;
+    }
+    return legend.join("")
+  }
+
+  // Draws lines from the given unit to the units it unlocks.
+  _draw_dep_lines(unit_idx) {
+    const unit = UNIT_BY_INDEX[unit_idx];
+    const { x, y, sections } = UNIT_COORDS[unit_idx];
+    return unit.unblocked_units
+      .map((unblocked) => this._draw_one_dep_line(x, y, unblocked, unit_idx))
+      .concat(
+        unit.unblocked_rmeta_units.map((unblocked) => {
+          const codegen_x = get_codegen_section_x(sections);
+          return this._draw_one_dep_line(codegen_x, y, unblocked, unit_idx);
+        }),
+      )
+      .join("");
+  }
+
+  _draw_one_dep_line(from_x, from_y, to_unit, from_unit) {
+    if (to_unit in UNIT_COORDS) {
+      let { x: u_x, y: u_y } = UNIT_COORDS[to_unit];
+      // Use multiple path instead to avoid potential rendering issue while scrolling in Firefox.
+      return `
+<path class="dep-line" data-unblocked="${to_unit}" data-unblocked-by="${from_unit}" d="M ${from_x} ${from_y + BOX_HEIGHT / 2} h -5"></path>
+<path class="dep-line" data-unblocked="${to_unit}" data-unblocked-by="${from_unit}" d="M ${from_x - 5} ${from_y + BOX_HEIGHT / 2} V ${u_y + BOX_HEIGHT / 2}"></path>
+<path class="dep-line" data-unblocked="${to_unit}" data-unblocked-by="${from_unit}" d="M ${from_x - 5} ${u_y + BOX_HEIGHT / 2} H${u_x}"></path>
+`;
+    }
+  }
+
+  render_timing_graph() {
+    if (CONCURRENCY_DATA.length == 0) {
+      return;
+    }
+    const HEIGHT = 400;
+    const AXIS_HEIGHT = HEIGHT - MARGIN - Y_LINE;
+    const TOP_MARGIN = 10;
+    const GRAPH_HEIGHT = AXIS_HEIGHT - TOP_MARGIN;
+
+    let { canvas_height, canvas_width, graph_height, graph_width, px_per_sec } = graph_dimension(AXIS_HEIGHT);
+    const axis_bottom = this._draw_graph_axes({ canvas_height, graph_height, graph_width, px_per_sec });
+
+    // Draw Y tick marks and labels.
+    let max_v = 0;
+    for (let c of CONCURRENCY_DATA) {
+      max_v = Math.max(max_v, c.active, c.waiting, c.inactive);
+    }
+    const px_per_v = GRAPH_HEIGHT / max_v;
+    const { step, tick_dist, num_ticks } = split_ticks(max_v, px_per_v, GRAPH_HEIGHT);
+
+    const labels = [];
+    const ticks_path_commands = Array(num_ticks)
+      .fill(0)
+      .map((_, n) => {
+        const y = HEIGHT - Y_LINE - ((n + 1) * tick_dist);
+        labels.push( `<text class="axis axis-y" x="${X_LINE - 10}" y="${y}">${(n + 1) * step}</text>`);
+        return `M${X_LINE} ${y} h-5`;
+      })
+      .join(" ");
+    const ticks = `<path class="axis axis-y" d="${ticks_path_commands}"></path>`;
+    const ticks_labels = labels.join("");
+
+    // Label the Y axis.
+    let label_y = (HEIGHT - Y_LINE) / 2;
+
+    const y_axis_label = `<text class="axis axis-label" transform="translate(15, ${label_y}) rotate(270)"># Units</text>`
+    const axis_left = `${y_axis_label}${ticks}${ticks_labels}`;
+
+    // Draw the graph.
+
+    function coord(t, v) {
+      return {
+        x: graph_width * (t / DURATION),
+        y: TOP_MARGIN + GRAPH_HEIGHT * (1.0 - (v / max_v))
+      };
+    }
+
+    const cpuFillStyle = CPU_COLOR;
+    let cpu = "";
+    if (CPU_USAGE.length > 1) {
+      const bottomLeft = coord(CPU_USAGE[0][0], 0);
+      const bottomRight = coord(CPU_USAGE[CPU_USAGE.length - 1][0], 0);
+      const path_commands = [`M${bottomLeft.x} ${bottomLeft.y}`]
+      .concat(
+        Array(CPU_USAGE.length)
+          .fill(0)
+          .map((_, i) => {
+            let [time, usage] = CPU_USAGE[i];
+            let { x, y } = coord(time, (usage / 100.0) * max_v);
+            return `L${x} ${y}`;
+          }),
+      )
+      .concat(`L${bottomRight.x} ${bottomRight.y}`);
+      cpu = `<path stroke-width="0" fill="${cpuFillStyle}" d="${path_commands.join("")}"></path>`;
+    }
+
+    function draw_line(style, key) {
+      let first = CONCURRENCY_DATA[0];
+      let last = coord(first.t, key(first));
+      const path_commands = [];
+      path_commands.push(`M${last.x} ${last.y}`)
+      for (let i = 1; i < CONCURRENCY_DATA.length; i++) {
+        let c = CONCURRENCY_DATA[i];
+        let { x, y } = coord(c.t, key(c));
+        path_commands.push(`L${x} ${last.y} V${y}`);
+        last = { x, y };
+      }
+      return `<path class="status-line" stroke="${style}" d="${path_commands.join("")}"></path>`
+    }
+
+    const lines = [];
+    lines.push(draw_line('blue', function(c) { return c.inactive; }));
+    lines.push(draw_line('red', function(c) { return c.waiting; }));
+    lines.push(draw_line('green', function(c) { return c.active; }));
+
+    const timings = `<g class="graph-content" transform="translate(${X_LINE} ${MARGIN})">${cpu}${lines}</g>`;
+
+    // Draw a legend.
+    const legend = `
+<g class="legend" transform="translate(${canvas_width-200},${MARGIN})">
+${this._draw_legend(150, [{
+    name: "Waiting",
+    color: "red",
+    line: true
+  }, {
+    name: "Inactive",
+    color: "blue",
+    line: true
+  }, {
+    name: "Active",
+    color: "green",
+    line: true
+  }, {
+    name: "CPU Usage",
+    color: cpuFillStyle,
+    line: false
+}])}
+</g>`;
+
+    const svg_container = document.getElementById("timing-container");
+    if (svg_container) {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("width", canvas_width);
+      svg.setAttribute("height", canvas_height);
+      Object.assign(svg.style, {
+        background: CANVAS_BG,
+        color: TEXT_COLOR,
+        fontFamily: 'sans-serif',
+        fontSize: '16px'
+      });
+      svg.innerHTML = `
+<style type="text/css">
+  path.axis {
+    fill: none;
+    stroke: ${AXES_COLOR};
+    stroke-width: 2;
+  }
+  text.axis {
+    fill: ${AXES_COLOR};
+    font-size: 16px;
+    stroke: none;
+    text-anchor: middle;
+  }
+  text.axis-y {
+    dominant-baseline: middle;
+    text-anchor: end;
+  }
+  .grid {
+    stroke: ${GRID_COLOR};
+    stroke-dasharray: 2 4;
+    stroke-width: 2;
+  }
+  .status-line {
+    fill: none;
+    stroke-width: 2;
+  }
+  path.legend__cell {
+    stroke-width: 2;
+  }
+  .legend__desc {
+    fill: ${TEXT_COLOR};
+    dominant-baseline: middle;
+  }
+</style>
+${axis_bottom}
+${axis_left}
+${timings}
+${legend}
+`;
+      svg_container.innerHTML = svg.outerHTML;
+    }
+  }
+
+  _draw_graph_axes({ canvas_height, graph_height, graph_width, px_per_sec }) {
+    // Draw main axes.
+    const main_axes = `
+<path class="axis" d="
+  M${X_LINE} ${MARGIN}
+  V${graph_height + MARGIN}
+  H${X_LINE + graph_width + 20}"
+></path>`;
+
+    // Draw X tick marks.
+    const { step, tick_dist, num_ticks } = split_ticks(DURATION, px_per_sec, graph_width);
+    const TICK_LENGTH = 5;
+    const grid_height = canvas_height - Y_LINE;
+    const labels = [];
+    const ticks_path_commands = Array(num_ticks)
+        .fill(0)
+        .map((_, n) => {
+          const x = X_LINE + ((n + 1) * tick_dist);
+          const label = `
+  <text class="axis" x="${x}" y="${grid_height + 20}">
+    ${(n + 1) * step}s
+  </text>`;
+          labels.push(label);
+          return `M${x} ${grid_height} v${TICK_LENGTH}`;
+        })
+        .join(" ");
+
+    const ticks = `<path class="axis"  d="${ticks_path_commands}"></path>`;
+    const ticks_labels = labels.join("")
+
+    // Draw vertical lines.
+    const vertical_lines = Array(num_ticks)
+      .fill(0)
+      .map((_, n) => {
+        const x = X_LINE + ((n + 1) * tick_dist);
+        return `<path class="grid" d="M${x} ${grid_height - 1} V${MARGIN}"></path>`;
+      })
+      .join("");
+    return `${main_axes}${ticks}${vertical_lines}${ticks_labels}`;
+  }
+
+  _roundedRect(section_name, x, y, width, unit) {
+    return `
+<rect class="box ${unit.mode} ${section_name}" data-i="${unit.i}" x="${x}" y="${y}" width="${width}"
+  onmousemove="hl(${unit.i})"
+>
+</rect>`
+  }
+}
+
+// Determine the width of text for svg.
+function measure_text_width(text) {
+  let ctx;
+  let canvas = measure_text_width.canvas;
+  if (!canvas) {
+    canvas = (measure_text_width.canvas = document.createElement("canvas"));
+  }
+  ctx = canvas.getContext("2d");
+  ctx.font = '14px sans-serif';
+  const text_info = ctx.measureText(text);
+  return text_info.width;
+}
+
+// Gets the x-coordinate of the codegen section of a unit.
+//
+// This is for drawing rmeta dependency lines.
+function get_codegen_section_x(sections) {
+    const codegen_section = sections.find(s => s.name === "codegen")
+    if (!codegen_section) {
+        // This happens only when type-checking (e.g., `cargo check`)
+        return null;
+    }
+    return codegen_section.start;
+}
+
+function get_legend_entries(presentSections) {
+    let frontend_name = "Frontend/rest";
+    if (presentSections.has("other")) {
+      frontend_name = "Frontend";
+    }
+
+    const legend_entries = [{
+      name: frontend_name,
+      color: NOT_CUSTOM_BUILD_COLOR,
+      line: false
+    }];
+    if (presentSections.has("codegen")) {
+      legend_entries.push({
+        name: "Codegen",
+        color: CODEGEN_COLOR,
+        line: false
+      });
+    }
+    if (presentSections.has("link")) {
+      legend_entries.push({
+        name: "Linking",
+        color: LINK_COLOR,
+        line: false
+      });
+    }
+    if (presentSections.has("other")) {
+      legend_entries.push({
+        name: "Other",
+        color: OTHER_COLOR,
+        line: false
+      });
+    }
+  return legend_entries
+}
+
+function graph_dimension(graph_height) {
+  const scale = document.getElementById('scale').valueAsNumber;
+  const graph_width = scale_to_graph_width(scale);
+  const px_per_sec = graph_width / DURATION;
+  const canvas_width = Math.max(graph_width + X_LINE + 30, X_LINE + 250);
+  const canvas_height = graph_height + MARGIN + Y_LINE;
+  return { canvas_height, canvas_width, graph_height, graph_width, px_per_sec, scale }
+}
+
+// Determine the spacing and number of ticks along an axis.
+function split_ticks(max_value, px_per_v, max_px) {
+  const max_ticks = Math.floor(max_px / MIN_TICK_DIST);
+  if (max_ticks <= 1) {
+    // Graph is too small for even 1 tick.
+    return {step: max_value, tick_dist: max_px, num_ticks: 1};
+  }
+  let step;
+  if (max_value <= max_ticks) {
+    step = 1;
+  } else if (max_value <= max_ticks * 2) {
+    step = 2;
+  } else if (max_value <= max_ticks * 4) {
+    step = 4;
+  } else if (max_value <= max_ticks * 5) {
+    step = 5;
+  } else {
+    step = 10;
+    let count = 0;
+    while (true) {
+      if (count > 100) {
+        throw Error("tick loop too long");
+      }
+      count += 1;
+      if (max_value <= max_ticks * step) {
+        break;
+      }
+      step += 10;
+    }
+  }
+  const tick_dist = px_per_v * step;
+  const num_ticks = Math.floor(max_value / step);
+  return {step, tick_dist, num_ticks};
+}
+
+function hl(i) {
+  // Highlight dependency lines on mouse hover.
+  if (i === undefined || i == LAST_HOVER) {
+    return
+  }
+  LAST_HOVER = i;
+  let g = document.getElementById("hl-dep-lines");
+
+  if (g) {
+    const selector = '#boxes .dep-line[data-unblocked="'+i+'"],#boxes .dep-line[data-unblocked-by="' + i + '"]';
+    const lines = Array.from(document.querySelectorAll(selector)).map(el => el.outerHTML);
+    g.innerHTML = lines.join("");
+  }
+}
+
+let renderer = new SvgRenderer();
+try {
+  renderer.render_pipeline_graph();
+  renderer.render_timing_graph();
+} catch (err) {
+  console.error(err);
+}
+
+// Set up and handle controls.
+{
+  const range = document.getElementById('min-unit-time');
+  const time_output = document.getElementById('min-unit-time-output');
+  time_output.innerHTML = `${range.value}s`;
+  range.oninput = event => {
+    time_output.innerHTML = `${range.value}s`;
+    try {
+      renderer.render_pipeline_graph();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const scale = document.getElementById('scale');
+  const scale_output = document.getElementById('scale-output');
+  scale_output.innerHTML = `${scale.value}`;
+  scale.oninput = event => {
+    scale_output.innerHTML = `${scale.value}`;
+    try {
+      renderer.render_pipeline_graph();
+      renderer.render_timing_graph();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  Array.from(document.querySelectorAll("input[name='renderer']")).forEach(function(el) {
+    el.addEventListener("change", function(event) {
+      renderer = setupRenderer(event.target.value);
+      try {
+        renderer.render_pipeline_graph();
+        renderer.render_timing_graph();
+      } catch (err) {
+        console.error(err);
+      }
+    });
+  });
+}
+
+</script>
+</body>
+</html>

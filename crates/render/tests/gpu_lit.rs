@@ -43,7 +43,6 @@ fn vertex_pool() -> PoolConfig {
         index_bytes: grid_indices(CELLS).len() as u64 * 4,
         node_record_bytes: 4096 * 512,
         frames_in_flight: 1,
-        slot_record_bytes: 0,
         fallback_slots: 0,
     }
 }
@@ -51,7 +50,7 @@ fn vertex_pool() -> PoolConfig {
 fn compact_pool() -> PoolConfig {
     let block_slots = 24 * 24;
     let one = compact_format_pool_with(
-        (128 << 20) + 4 * u64::from(block_slots) * planet_generators::compact::slot_texel_bytes(CELLS),
+        (128 << 20) + 4 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
         CELLS,
         block_slots,
         1,

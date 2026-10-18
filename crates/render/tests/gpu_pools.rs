@@ -40,7 +40,6 @@ fn small_pool(vertex_slots: u32, retire: u64) -> PoolConfig {
         index_bytes: grid_indices(CELLS).len() as u64 * 4,
         node_record_bytes: 4096 * 512,
         frames_in_flight: retire,
-        slot_record_bytes: 0,
         fallback_slots: 0,
     }
 }

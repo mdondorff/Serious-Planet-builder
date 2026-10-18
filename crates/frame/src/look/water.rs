@@ -3,7 +3,7 @@
 //! function the water shader evaluates lives here (CON-02, CON-03): the renderer executes, the tests compare.
 //!
 //! Class (ADR 0035): **presentation data**. Wave displacement, shading and foam are never stored, keyed or read back; the field W and
-//! the liquid table they read are world data (item `ocean-bake-and-water-level`). Declared bounds (REND-030, REND-031):
+//! the liquid table they read are world data (item `ocean-bake-and-water-level`). Declared bounds (ATMO-014):
 //! * wave displacement and slope: the GPU's agree with this module's evaluation of the same f32-rounded inputs and CPU-reduced phases
 //!   within `1 mm + 1e-3 x (sum of the amplitudes)` per component (WGSL guarantees `sin` and `cos` only to about 5e-4 absolute);
 //! * the surface's radiance: within `max(1 % |v|, 1e-4)` per channel before the f16 store, on the same inputs;
@@ -83,7 +83,8 @@ pub struct WaterLook {
     pub wave_scale: f64,
     /// Strength of the `fwidth` filter of the shore bands (ADR 0041 point 6): the cover, the foam and their edges are widened by this
     /// multiple of the screen-space change of the depth per pixel, so a band narrower than a pixel fades instead of coming and going
-    /// with sub-pixel motion. 0 switches the filter off (the aliased bands, for comparison).
+    /// with sub-pixel motion. 0 switches the filter off (the aliased bands; the default since the owner's M5 gate decision of 2026-10-18,
+    /// the cheaper shore).
     pub shore_filter: f64,
 }
 
@@ -98,7 +99,7 @@ impl WaterLook {
         choppy: 0.8,
         gravity_m_s2: 9.81,
         wave_scale: 1.0,
-        shore_filter: 1.0,
+        shore_filter: 0.0,
     };
 
     /// The keys of the table in the order of [`WaterLook::values`].

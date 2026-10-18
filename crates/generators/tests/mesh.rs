@@ -360,7 +360,7 @@ const KNOWN_MESH_HASHES: [((u8, u8, u32, u32), u64); 3] =
 #[test]
 fn mesh_hashes_match_the_committed_known_answers() {
     // The table belongs to these versions: bumping either must come with new answers.
-    assert_eq!((planet_generators::mesh::MESH_VERSION, planet_generators::height::GENERATOR_VERSION), (7, 2));
+    assert_eq!((planet_generators::mesh::MESH_VERSION, planet_generators::height::GENERATOR_VERSION), (8, 2));
     for ((f, l, x, y), want) in KNOWN_MESH_HASHES {
         let got = tile_mesh(1, &TangentWarp, id(f, l, x, y), CELLS, R).content_hash();
         assert_eq!(got, want, "mesh ({f},{l},{x},{y}) changed: if intended, bump MESH_VERSION and update the table (got {got})");

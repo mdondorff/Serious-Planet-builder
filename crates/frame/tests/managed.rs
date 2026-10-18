@@ -1410,12 +1410,12 @@ fn rotation_at_the_settled_state_has_lag_zero_and_nothing_uncovered_in_every_fra
 
 // ---- batched tile writes (STRM-006, REND-016) ----
 
-/// Bytes of one compact tile at cells 32: 33 x 33 texels of 8 bytes and the 128-byte record (what the renderer uploads).
-const COMPACT_TILE_BYTES: u64 = 8_840;
+/// Bytes of one compact tile at cells 32: its slot of 9,168 B (GEN-025; what the renderer uploads).
+const COMPACT_TILE_BYTES: u64 = 9_168;
 
 /// Run the ground fill with the budget `budget` and return, per frame that wrote tiles, `(counts, slots written)`.
 fn ground_fill(budget: UploadBudget, coalesce: bool, frames: usize) -> (Rig, Vec<(FrameCounts, Vec<SlotRef>)>) {
-    // Up to 256 jobs finish a frame, so a frame can have the 118 tiles of the 1 MiB cap to write.
+    // Up to 256 jobs finish a frame, so a frame can have the 114 tiles of the 1 MiB cap to write.
     let mut rig = Rig::build_full(1_000_000, false, COMPACT_TILE_BYTES, budget, 256);
     rig.sink.coalesce = coalesce;
     let ground = track(0.0, 2.0);

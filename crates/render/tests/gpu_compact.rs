@@ -23,7 +23,7 @@ fn small_pool(cells: u32) -> PoolConfig {
     let block_slots = 8 * 8;
     // The 128 MiB reserve of the fixed items plus 40 blocks, plenty for these plans.
     let one = compact_format_pool_with(
-        (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_texel_bytes(cells),
+        (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_bytes(cells),
         cells,
         block_slots,
         1,
@@ -282,10 +282,10 @@ fn the_production_block_geometry_works_on_this_adapter() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let field = Reference(1);
     let cells = 32;
-    // One real block of 128 MiB (the largest storage binding every adapter offers): 15,406 slots, tiles in its last slots.
+    // One real block of 128 MiB (the largest storage binding every adapter offers): 14,639 slots, tiles in its last slots.
     let slots = block_slots_in(COMPACT_BLOCK_BYTES, cells);
     let pool = compact_format_pool_with((128 << 20) + COMPACT_BLOCK_BYTES, cells, slots, 1).unwrap();
-    assert_eq!((pool.main_blocks, pool.block_slots), (1, 15_406));
+    assert_eq!((pool.main_blocks, pool.block_slots), (1, 14_639));
     let p = plan_of(&field, cells, 26, 6, TerrainView::Relief, false);
     let reference = vertex_render(&ctx, &field, &p, 26);
     let mut r = TerrainRenderer::with_compact_pools(&ctx, SIZE, cells, pool);

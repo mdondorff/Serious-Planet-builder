@@ -55,7 +55,7 @@ pub const SKIRT_FRACTION: f64 = 0.08;
 /// depth, normal stencil, origin rule, vertex layout). History: 1 = first meshes; 2 = seam-consistent normals (#15);
 /// 3 = no `ref_pos` attribute: the morph distance is measured to the real vertex position (LOD-008); 4 = the 44-byte vertex (#65);
 /// 5 = the compact tile format (GEN-019, ADR 0033) exists beside the vertex format: a tile's key now stands for either, and the
-/// compact construction (control points, 16-bit height and snorm16 octahedral normals, record layout) is covered by this version.
+/// compact construction (control points, height and octahedral normals, record layout; 16-bit and snorm16 until version 8) is covered by this version.
 /// 6 = the key names whether the tile is a finest-level tile of the view (level at or above the LOD cap, [`finest_class_key`]):
 /// the compact format's CON-13 guard decides the format of such a tile from its relief, so the key must identify that class
 /// (finest tiles get other keys; tiles below the cap keep the version-5 composition under the new version).
@@ -63,7 +63,9 @@ pub const SKIRT_FRACTION: f64 = 0.08;
 /// channel of the first 162 texels of a compact tile, a 324-byte block of a vertex tile) and the key names the climate version word
 /// ([`HeightField::climate_version_word`]: the climate, reader and bake versions). Tiles stored under version 6 are unreachable (their
 /// keys differ) and the coarse pre-fill of a pack must be written again.
-pub const MESH_VERSION: u32 = 7;
+/// 8 = the compact tile is the slot of GEN-025 (ADR 0062): a 32-bit height step count and two 15-bit octahedral normal components per
+/// texel, the climate block and the header inside the slot; every compact key changes, vertex tiles are unchanged.
+pub const MESH_VERSION: u32 = 8;
 
 /// Key of a mesh: the height key of the tile (generator, seed, mapping, tile; resolution = `cells`), the grid size, the
 /// radius bits, the skirt fraction bits and [`MESH_VERSION`].

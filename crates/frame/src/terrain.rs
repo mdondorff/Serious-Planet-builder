@@ -72,6 +72,9 @@ pub struct TerrainDraw {
     /// Vertex distances (metres) between which a vertex morphs to the parent grid.
     pub morph_start_m: f32,
     pub morph_end_m: f32,
+    /// The least height range (m) of the albedo's seabed-to-shore ramp at this node: `LodParams::shore_ramp_min_m(level)`, decided
+    /// here and read by the lit shader as `max(shore_blend_m, this)` (REND-030).
+    pub shore_ramp_min_m: f32,
     /// Flat colour of the face, tile-id and level views.
     pub color: [u8; 4],
     /// Key of the mesh this draw expects ([`planet_generators::mesh::mesh_key`]): a resident buffer with another key is
@@ -256,6 +259,7 @@ pub(crate) fn plan_terrain_keyed(
                 morph: n.morph,
                 morph_start_m: n.morph_start_m as f32,
                 morph_end_m: n.morph_end_m as f32,
+                shore_ramp_min_m: req.lod.shore_ramp_min_m(n.tile.level()) as f32,
                 color,
                 mesh_key: if reuse {
                     cache.mesh_key(n.tile, req.lod.cells, req.lod.max_level, || derive_key(n.tile))

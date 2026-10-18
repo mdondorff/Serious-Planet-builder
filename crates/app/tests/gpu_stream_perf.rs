@@ -271,9 +271,9 @@ fn the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_
         "coast-3m",
         "orbit",
         "coast-glide",
-        "coast-glide@filter0",
+        "coast-glide@filter1",
         "coast-descent",
-        "coast-descent@filter0",
+        "coast-descent@filter1",
     ] {
         assert!(out.contains(&format!("lit/{view}: frame (waited) median")), "{view}: {out}");
         assert!(out.contains(&format!("  lit/{view}: GPU ms per pass (median / p99 / max): terrain ")), "{view}: {out}");
@@ -283,7 +283,7 @@ fn the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_
         "the software smoke runs the vertex format: {out}"
     );
     // The held views plan water with the exact dry-tile minimum of every tile (ATMO-020): the cut counts are on the view lines.
-    for view in ["coast-2km", "coast-3m", "coast-glide", "coast-glide@filter0", "coast-descent", "coast-descent@filter0"] {
+    for view in ["coast-2km", "coast-3m", "coast-glide", "coast-glide@filter1", "coast-descent", "coast-descent@filter1"] {
         let line = out
             .lines()
             .find(|l| l.starts_with(&format!("lit/{view}: ")) && l.contains("with water (cut "))
@@ -300,7 +300,7 @@ fn the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_
     assert!(!out.contains("terrain pass median") && !out.contains("budget 1 ms"), "a smoke run prints no budget rows: {out}");
     let json = std::fs::read_to_string(&log).unwrap();
     assert!(json.contains("\"valid_for_budgets\":false") && json.contains("smoke run"), "{json}");
-    for path in ["lit/ground-1m", "lit/coast-glide", "lit/coast-glide@filter0", "lit/coast-descent@filter0"] {
+    for path in ["lit/ground-1m", "lit/coast-glide", "lit/coast-glide@filter1", "lit/coast-descent@filter1"] {
         assert!(json.contains(&format!("\"path\":\"{path}\"")), "{path}: {json}");
     }
     assert!(json.contains("\"load\":{\"measured\":false}"), "{json}");
@@ -481,7 +481,7 @@ fn the_flight_capture_writes_a_png_sequence_per_flight_and_shore_filter_and_is_n
     assert!(out.contains("capture-flights: NOT a measurement (no gate, no timestamps, no log)"), "{out}");
     let index = std::fs::read_to_string(dir.join("capture.txt")).unwrap();
     let names: Vec<&str> = index.lines().filter(|l| !l.starts_with('#')).map(|l| l.split_whitespace().next().unwrap()).collect();
-    assert_eq!(names, ["coast-glide-filter1", "coast-glide-filter0", "coast-descent-filter1", "coast-descent-filter0"], "{index}");
+    assert_eq!(names, ["coast-glide-filter0", "coast-glide-filter1", "coast-descent-filter0", "coast-descent-filter1"], "{index}");
     for n in names {
         for k in 0..2 {
             let p = dir.join(n).join(format!("frame_{k:04}.png"));

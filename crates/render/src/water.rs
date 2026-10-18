@@ -5,7 +5,7 @@
 //! `planet_frame::look::water`.
 //!
 //! Class and bound (ADR 0035, ADR 0043): presentation data. Wave displacement and slope match the reference within
-//! `1 mm + 1e-3 x (sum of the amplitudes)`; the surface's radiance within `max(1 % |v|, 1e-4)` per channel (REND-030). Geometry stays
+//! `1 mm + 1e-3 x (sum of the amplitudes)`; the surface's radiance within `max(1 % |v|, 1e-4)` per channel (ATMO-014). Geometry stays
 //! tile-local (CON-11): a water vertex is the terrain vertex's tile-local position plus `up x (W - h_morph)` plus the wave
 //! displacement, `up` formed from the node's tile-local numbers; no planet-sized value reaches the shader, and the waves' phases are
 //! reduced on the CPU in f64 (the node record holds `(k . O + phi - omega t) mod 2 pi`, the shader adds `k . local`).

@@ -47,7 +47,7 @@ fn a_settled_still_view_through_the_loop_does_no_scheduler_work_and_a_rotation_t
     let mut sizes = Vec::new();
     for tau in [8.0, 3.0] {
         let lp = finer(tau);
-        let mut rig = loop_rig_for(lp.clone(), 1_000_000, true, 8_840, UploadBudget::default());
+        let mut rig = loop_rig_for(lp.clone(), 1_000_000, true, 9_168, UploadBudget::default());
         let first = request_with(lp.clone(), here(), 0.0, -0.4);
         let (_, r_len) = settle(&mut rig, &first);
         sizes.push(r_len);

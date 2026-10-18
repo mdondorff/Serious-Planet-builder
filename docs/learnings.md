@@ -415,3 +415,17 @@ Scope: ADR 0015, ADR 0042, `deny.toml` (CON-27)
 | Typical panel at 1080p on the RTX | egui 0.175 ms CPU, UI pass 0.12 ms |
 Proposed follow-up: the owner decides the font licences before the editor UI change; the editor accumulates every pass's `textures_delta` until painted.
 Obsolete when: the editor UI change lands.
+
+## 2026-10-18 A 32-bit height step count is only exact in f32 up to 2^24, so the wide texel uses 2^24 - 1 levels (compact-slot-v2)
+ADR 0062 and SPIKE-12 assumed a 32-bit count (4,294,967,295 levels) gave 1 mm up to about 30 km of relief. An f32 holds integers exactly only up to 2^24, and WGSL leaves the rounding of `f32(u32)` above that open, so CPU and GPU could form different heights, and the precision was relief / 2^24 anyway. GEN-019 now uses 16,777,215 levels in the 32-bit field: the step is at most 1 mm up to 16.7 km of relief; the reconstruction error of `hr_min + f32(q) * hr_step` stays within 1 mm up to 8,192 m (f32 spacing of the sum). Nothing reaches this while the relief guard (65.5 m) stays; the removal change decides what a tile above 8 km does. ADR 0062's "about 30 km" is superseded by the spec's numbers.
+
+## 2026-10-18 Edit-to-test build time is the number of linked test binaries, not compilation (SPIKE-15)
+Scope: `Cargo.toml` profiles, `.cargo/config.toml`, test layout of frame, render, generators, cache, app, `.config/nextest.toml`
+| Observation | Value |
+|---|---|
+| Frame edit, `cargo xtask test fast` | 120 s wall: build 102.9 s, tests 14.1 s |
+| Frame edit, `--timings` | 107 units, about 100 test and example binaries of 1-17 s each; the edited library compiles in 2.3 s |
+| Frame edit, build only: baseline / lld / per-tier binaries / line-tables-only debug info | 88.8 / 78.6 / 41.6 / 23.2 s |
+| Workspace `opt-level = 0` | slower build (32 s) and 34 % slower tests |
+Proposed follow-up: an OpenSpec change applying the debug-info and linker settings, then per-tier test binaries; results `spikes/build-speed/results/results.md`.
+Obsolete when: the build-speed change is archived.

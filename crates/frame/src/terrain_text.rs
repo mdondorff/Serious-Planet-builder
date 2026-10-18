@@ -100,12 +100,13 @@ impl TerrainPlan {
                 morph: _,
                 morph_start_m: _,
                 morph_end_m: _,
+                shore_ramp_min_m: _,
                 color: _,
                 mesh_key: _,
             } = n;
             let r = n.camera_relative_origin;
             s += &format!(
-                "node {:016x} level {} origin {} rel {} {} {} morph {} {} {} color {} {} {} {} mesh_key {:016x}\n",
+                "node {:016x} level {} origin {} rel {} {} {} morph {} {} {} color {} {} {} {} mesh_key {:016x} shore_ramp {}\n",
                 n.tile.raw(),
                 n.level,
                 vec3(n.origin.0),
@@ -119,7 +120,8 @@ impl TerrainPlan {
                 n.color[1],
                 n.color[2],
                 n.color[3],
-                n.mesh_key
+                n.mesh_key,
+                h32(n.shore_ramp_min_m)
             );
         }
         s
@@ -163,8 +165,14 @@ impl TerrainPlan {
                 ["height_range", a, b] => range = Some([p32(a)?, p32(b)?]),
                 ["lit", rest @ ..] => lit = Some(crate::look::LitPlan::from_tokens(rest)?),
                 ["water", ..] | ["liquid", ..] | ["wnode", ..] => water_lines.push(t.clone()),
-                ["node", id, "level", level, "origin", ox, oy, oz, "rel", rx, ry, rz, "morph", m, ms, me, "color", r, g, b, a, "mesh_key", key] =>
+                ["node", id, "level", level, "origin", ox, oy, oz, "rel", rx, ry, rz, "morph", m, ms, me, "color", r, g, b, a, "mesh_key", key, tail @ ..] =>
                 {
+                    // `shore_ramp <h32>` ends a node line since REND-030; a recorded plan without it ramps by the look's blend alone.
+                    let shore_ramp_min_m = match tail {
+                        [] => 0.0,
+                        ["shore_ramp", v] => p32(v)?,
+                        _ => return Err(format!("cannot parse terrain plan line '{line}'")),
+                    };
                     let raw = u64::from_str_radix(id, 16).map_err(|e| format!("bad tile id '{id}': {e}"))?;
                     nodes.push(TerrainDraw {
                         tile: TileId::from_raw(raw).ok_or(format!("invalid tile id {raw:#x}"))?,
@@ -174,6 +182,7 @@ impl TerrainPlan {
                         morph: p32(m)?,
                         morph_start_m: p32(ms)?,
                         morph_end_m: p32(me)?,
+                        shore_ramp_min_m,
                         color: [byte(r)?, byte(g)?, byte(b)?, byte(a)?],
                         mesh_key: u64::from_str_radix(key, 16).map_err(|e| format!("bad mesh key '{key}': {e}"))?,
                     });

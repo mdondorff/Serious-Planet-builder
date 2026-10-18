@@ -576,7 +576,7 @@ fn atm_terrain_lighting(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<
 
 const TERRAIN_MAIN: &str = r#"
 
-fn atm_terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, h_alt: f32, sun: vec3<f32>) -> vec3<f32> {
+fn atm_terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, h_alt: f32, sun: vec3<f32>) -> vec3<f32> {
     let n = normalize(normal);
     let cs = clamp(dot(n, up), 0.0, 1.0);
     let inv_pi = 0.31830988618;
@@ -587,15 +587,15 @@ fn atm_terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>,
     if (view == 2u) {
         return light;
     }
-    let a = albedo_of(tab, t, p, cs, h);
+    let a = albedo_of(tab, t, p, cs, h, ramp_min);
     if (view == 1u) {
         return a * inv_pi;
     }
     return a * light;
 }
 
-fn atm_shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, h_alt: f32, sun: vec3<f32>, factor: f32) -> vec3<f32> {
-    return clamp(atm_terrain_radiance(view, tab, normal, up, t, p, h, h_alt, sun) * factor, vec3<f32>(0.0), vec3<f32>(60000.0));
+fn atm_shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, h_alt: f32, sun: vec3<f32>, factor: f32) -> vec3<f32> {
+    return clamp(atm_terrain_radiance(view, tab, normal, up, t, p, h, ramp_min, h_alt, sun) * factor, vec3<f32>(0.0), vec3<f32>(60000.0));
 }
 
 @fragment
@@ -603,7 +603,7 @@ fn fs_lit_atmo(in: VsOut) -> @location(0) vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
-    return vec4<f32>(atm_shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, in.height, sun, g.range.z), 1.0);
+    return vec4<f32>(atm_shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(nodes[in.node_index].morph.z, in.morph), in.height, sun, g.range.z), 1.0);
 }
 "#;
 
