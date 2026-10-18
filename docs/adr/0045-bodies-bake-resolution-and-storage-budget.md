@@ -1,5 +1,5 @@
 # 0045 Bodies, bake resolution and the storage budget
-Status: proposed (draft by opus-planner, 2026-10-16, at the owner's request; point 3 decided by the owner 2026-10-16; the rest is decided when several bodies become a milestone, or earlier if the editor (M6) needs point 7)
+Status: proposed (draft by opus-planner, 2026-10-16, at the owner's request; point 3 decided by the owner 2026-10-16, pre-fill levels amended by 0062 and 0063; the rest is decided when several bodies become a milestone, or earlier if the editor (M6) needs point 7)
 Date: 2026-10-16
 Source: owner's questions of 2026-10-16 (generation cost, disk per planet, "amount of planets vs quality vs speed", authored regions); M4 perf windows 1 and 2 and sonnet-explorer's measurements (#157, #162); ADR 0006, ADR 0007, ADR 0018, ADR 0019, ADR 0021 (points 2, 5, 6, 8 open), ADR 0026, ADR 0027, ADR 0028, ADR 0029, ADR 0033; constitution CON-05, CON-06, CON-08, CON-14, CON-21
 
