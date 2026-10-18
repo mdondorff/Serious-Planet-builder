@@ -1,4 +1,0 @@
-- [x] 1.1 Block codec, keys, node set id, build and verify
-- [x] 1.2 generate --global-dir / --verify-global / --global-products
-- [x] 1.3 STRM-012, tests, known answers
-- [x] 1.4 reviews, verifier, status line

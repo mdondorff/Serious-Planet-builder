@@ -1,3 +1,0 @@
-- [x] 1.1 Split the morph sweep into parallel chunks without changing the checked heights or per-step checks
-- [x] 1.2 Keep the merge-count guard as a coarse level-span check
-- [x] 1.3 verifier, status line

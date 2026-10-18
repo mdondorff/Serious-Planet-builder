@@ -1,4 +1,0 @@
-- [x] 1.1 measure test fast per test (nextest JUnit, -j 20 and -j 1)
-- [x] 1.2 budget 15 s in xtask (testcmd, accept) and BUILD-003, owner's decision named
-- [x] 1.3 status line: gpu_skeleton / gpu_warmup crash; check xtask and CI isolation
-- [x] 1.4 reviewers (spec-guardian, verifier), full test, spec-lint, fmt, clippy, archive, log line, PR, CI green, merge

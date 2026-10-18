@@ -1,5 +1,0 @@
-- [x] 1.1 failing tests: tier A managed (rotation at the settled state: lag 0 and nothing uncovered at 0.2 to 15 degrees a frame, with pitch; fails on main), cover equals the plan on the ten views and a rotation script, partial residency, draw rule, coverage test, perf verdicts and app exit lines for uncovered nodes
-- [x] 1.2 `cover_selection_bounded`, `TileBounds`, `plan_covers_view`; `ResidencySet.bounds`; `draw_plan_with`; the pipeline passes the newest R's bounds
-- [x] 1.3 perf: `uncovered nodes` gated (dive-fast report-only) with tile ids; app: `BLANK TILE` lines and a non-zero exit
-- [x] 1.4 specs (STRM-002, STRM-016, LOD-007, TEST-018, TEST-019, TEST-020), learning
-- [x] 1.5 reviewers (spec-guardian, verifier; numerics-reviewer not needed: no core/generators/shader change), archive, log line, PR, CI green, merge

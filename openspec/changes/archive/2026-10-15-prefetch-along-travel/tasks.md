@@ -1,5 +1,0 @@
-- [x] 1.1 tests first: estimator (stationary, straight, cap, descent, teleport, window), set order, cap by free slots (`tests/prefetch.rs`)
-- [x] 1.2 loop tests on fakes: rotation, straight travel with/without, dive script with/without, free share, direction change, teleport, determinism 1/2/8, off the frame (`tests/managed.rs`)
-- [x] 1.3 `prefetch` module, worker and pipeline plumbing, `ManagedLoop::with_prefetch`, app wiring
-- [x] 1.4 spec STRM-018, STRM-017
-- [x] 1.5 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge

@@ -1,3 +1,0 @@
-- [x] 1.1 `stage_key` module, tests, known answers
-- [x] 1.2 STRM-011
-- [x] 1.3 reviews, verifier, status line

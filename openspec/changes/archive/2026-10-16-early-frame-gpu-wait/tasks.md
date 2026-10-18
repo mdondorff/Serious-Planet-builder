@@ -1,5 +1,0 @@
-- [x] 1.1 failing test first (`crates/render/tests/gpu_warmup.rs`: `FirstUse` after the warm-up and after frames 0..3, cold renderer)
-- [x] 1.2 render: `FirstUse`, `first_use()`, `RING_SETS`; warm-up draws from every ring set, the timed pass and a two-record multi-draw
-- [x] 1.3 measure on the RTX (ad hoc probe, no perf run), learning, log line
-- [x] 1.4 spec: REND-017 modified
-- [x] 1.5 reviewers (spec-guardian, verifier), archive, PR, CI green, merge

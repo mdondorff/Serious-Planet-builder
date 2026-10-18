@@ -1,6 +1,0 @@
-## Decisions
-
-- **Mechanism**: the streamer's own spawner and `CancelToken`; no new threading primitive. Jobs report on a private channel; the caller drains it.
-- **Determinism (CON-14)**: slots are acquired in face order before any job starts; results are stored by face and inserted in face order after all six are in, so the resident set, the slots and the change log are independent of completion order, spawner and thread count. The reported error is the lowest failing face (a real failure is preferred over the cancellations it caused).
-- **Deterministic spawners**: `Spawner::help` runs one waiting job on the caller. The default is false (a pool runs its own jobs; the caller blocks on the channel). `ManualSpawner` and the frame tests' `BatchSpawner` implement it.
-- **Within-tile parallelism: skipped.** One root samples the store through the erosion generator's per-vertex reads; splitting a tile over the pool would need the generator's sample order to stay fixed per vertex and a second level of jobs inside a job on the same pool (a job waiting on jobs of the pool it runs on can deadlock a small pool). The six-way split already saturates a 6-thread pool and the block cache shares the decodes; the gain of a further split is bounded by the decode rate, not by sampling.

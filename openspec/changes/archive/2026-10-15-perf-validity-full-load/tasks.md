@@ -1,4 +1,0 @@
-- [x] 1.1 failing tests first: throttle classification (0x4 alone recorded, thermal/hardware/unknown invalid), the clock band (P2 1710 valid, P0 1200 not, mixed, missing, NaN), equal state, warm-up to the floor, report fixtures re-labelled (no assertion weakened), console line
-- [x] 1.2 `gate`, `clock`, `compare`, `lib` (log field, console line), `skeleton.rs` wording
-- [x] 1.3 TEST-012 delta
-- [x] 1.4 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge

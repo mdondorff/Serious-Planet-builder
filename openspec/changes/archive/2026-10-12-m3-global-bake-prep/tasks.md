@@ -1,4 +1,0 @@
-- [x] 1.1 (h) sea level exact f32, version bump, known answers
-- [x] 1.2 (i) doc, (j) production-resolution lattice tests
-- [x] 1.3 (k) tiled bake and the memory clause test
-- [x] 1.4 reviews, verifier, status line

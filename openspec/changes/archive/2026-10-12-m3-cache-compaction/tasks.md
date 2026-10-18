@@ -1,4 +1,0 @@
-- [x] 1.1 STRM-013
-- [x] 1.2 compact, liveness, CLI, xtask
-- [x] 1.3 tests, status line
-- [x] 1.4 reviews and verifier (ADR 0029 proposed)

@@ -1,7 +1,0 @@
-## Decisions
-
-- The seam is render's public API: it names no wgpu type, and only render's manifest may depend on the graphics API. Enforced by `cargo xtask layering` (manifest scan incl. table form, quoted keys and `package = ` renames; text scan of render's `pub` signatures).
-- ADR 0004 also describes an internal device/buffer/pipeline interface inside render so a raw-Vulkan/D3D12 backend can replace wgpu. That interface is NOT built here: with a single backend it would be an abstraction nobody uses. The owner decides (queued in docs/status.md): revise ADR 0004 (still proposed) to define the seam as render's public API and defer the internal interface until a second backend is pursued, or schedule it.
-- The ban lists differ on purpose: the GPU-free tree ban covers winit and egui too; the render-only list (wgpu, wgpu-core, wgpu-hal, naga, ash) leaves windowing and UI to editor/app. Open for the window milestone: an `egui-wgpu` integration in editor would pull wgpu in transitively and force wgpu types into editor code, so render must own surface and UI painting or the rule needs an exception.
-- Tests that need raw wgpu objects must be unit tests inside render; the only integration test that did (shader validation) now goes through `GpuContext::validate_wgsl`.
-- `device_type_name` was dropped (no caller); `adapter_log_line` keeps the first output line byte-identical (verified against main on WARP and NVIDIA).

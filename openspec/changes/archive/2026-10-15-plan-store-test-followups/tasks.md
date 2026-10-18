@@ -1,4 +1,0 @@
-- [x] 1.1 failing tier A test: mesh keys are derived once per tile (LOD-009), mutation-checked
-- [x] 1.2 failing tier A proxy test for the 20-thread store rate (STRM-014); the measured rate is an example check (`store_blocks --memory-rate`)
-- [x] 1.3 implement the test hooks (`plan_terrain_keyed`, `SourceStats::shared_lookups`)
-- [x] 1.4 spec scenarios; reviewers (spec-guardian, verifier); archive, log line, PR, CI, merge

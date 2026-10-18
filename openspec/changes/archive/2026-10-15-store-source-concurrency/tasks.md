@@ -1,6 +1,0 @@
-- [x] 1.1 ablation: `store_blocks` example over the 16384 store (cold plan ms, blocks touched, 1/4/20 thread rate), `docs/learnings.md`
-- [x] 1.2 failing tier-A tests (`crates/cache/tests/concurrent_source.rs`, `crc_reference.rs`): STRM-014 scenarios, CRC against the bytewise reference
-- [x] 1.3 implement: sharing, budget, thread memo, in-flight decode; CRC slicing-by-8; positional pack reads; one-pass decode
-- [x] 1.4 spec STRM-014; docs (status.md item 7b, SPIKE-05 note in spikes.md)
-- [x] 1.5 ad hoc numbers after: cold plans at four views, 1/4/20 thread rate
-- [x] 1.6 reviewers (numerics, spec-guardian, verifier), archive, log line, PR, CI green, merge
