@@ -342,6 +342,12 @@ mod tests {
         assert_eq!(water(&over, "lit/coast-3m").status, Status::Over);
         assert_eq!(water(&within, "lit/coast-2km").status, Status::Over, "another view at 2.15 ms fails its 2 ms");
         assert!(water(&over, "lit/coast-3m").line("coast-3m").contains("budget 2.2 ms"));
+        // The boundary itself, on the figures of the ADR: exactly 2.2 ms is within, 2.21 ms is over; another view at 2.1 ms is over.
+        let sum = |v: f64| vec![("gpu_water_total_ms".to_string(), summarize(&[v; 5], 0).unwrap())];
+        assert_eq!(water(&sum(2.2), "lit/coast-3m").status, Status::Ok);
+        assert_eq!(water(&sum(2.21), "lit/coast-3m").status, Status::Over);
+        assert_eq!(water(&sum(2.1), "lit/coast-2km").status, Status::Over);
+        assert_eq!(water(&sum(2.0), "lit/coast-2km").status, Status::Ok);
     }
 
     // spec: TEST-025
