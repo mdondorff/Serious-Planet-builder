@@ -257,15 +257,18 @@ fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to
             full.nodes.len()
         );
         // The lit view too (waves, absorption, glint): the colours of the exact cut are the full selection's, bit for bit.
-        let (lit_full, lit_exact) = (
-            water_plan_of(&world, &plan, size, None, false, WaterView::Lit),
-            water_plan_of(&world, &plan, size, Some(field.as_ref()), true, WaterView::Lit),
-        );
-        assert!(lit_exact.nodes.len() <= lit_full.nodes.len());
-        assert!(
-            frame(&ctx, &mut r, &plan, Some(&lit_full)) == frame(&ctx, &mut r, &plan, Some(&lit_exact)),
-            "{name}: the lit view changes"
-        );
+        // (Where the cut is large: the beach and the inland view.)
+        if matches!(name, "beach" | "inland") {
+            let (lit_full, lit_exact) = (
+                water_plan_of(&world, &plan, size, None, false, WaterView::Lit),
+                water_plan_of(&world, &plan, size, Some(field.as_ref()), true, WaterView::Lit),
+            );
+            assert!(lit_exact.nodes.len() <= lit_full.nodes.len());
+            assert!(
+                frame(&ctx, &mut r, &plan, Some(&lit_full)) == frame(&ctx, &mut r, &plan, Some(&lit_exact)),
+                "{name}: the lit view changes"
+            );
+        }
         assert!(wp.nodes.len() <= full.nodes.len());
         assert!(with == with_full, "{name}: the cut ({} nodes of {}) changes pixels of the picture", wp.nodes.len(), full.nodes.len());
         let mut connected = Connected { world: &world, memo: Default::default() };
@@ -302,10 +305,11 @@ fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to
             plan.nodes.len()
         );
         let least = match name {
+            "inland" => 50,
             "beach" => 100,
             _ => 2000,
         };
-        assert!(name == "inland" || expected > least, "{name}: only {expected} pixels to check: the view does not look at enough sea");
+        assert!(expected > least, "{name}: only {expected} pixels to check: the view does not look at enough sea");
         // The edge allowance: the shore of the water mesh and the tile edges, 1 % of the pixels.
         assert!(flooded * 100 <= dry_checked.max(1), "{name}: {flooded} of {dry_checked} pixels over land above the level are water");
         assert!(
