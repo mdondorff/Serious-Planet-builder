@@ -1,6 +1,11 @@
 //! Tier B: the real streamer and pool on the software adapter, read for order-of-magnitude findings (TEST-035). A short scripted dive
 //! (48 frames) from an empty cache over a 256-cell in-memory bake with 6 generation workers; not a performance verdict, a net for a
 //! configuration cap (the M4 kind) between perf windows. Each run takes a few seconds.
+//!
+//! The dive runs at render floor 0 (`--floor-level 0`, the six face tiles are the roots): the net judges the streamer's and the pool's
+//! concurrency, which the floor does not change, and at floor 3 the 384 floor tiles are loaded before the first frame (a start-up
+//! cost every run pays again) and the first frames of the dive from orbit need no job beyond them, so a short dive would not ask the
+//! streamer for work. The start at floor 3 has its own tests (LOD-011, STRM-001).
 
 use planet_perf::smoke::{liveness_met, streaming_smoke_findings};
 use std::time::{Duration, Instant};
@@ -32,6 +37,8 @@ fn dive_log(name: &str, workers: usize, frames: usize) -> String {
         "--allow-memory-bake",
         "--global-res",
         "256",
+        "--floor-level",
+        "0",
         "--frames",
         &frames,
         "--gen-workers",
