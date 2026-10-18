@@ -7,6 +7,7 @@ mod logcmd;
 mod repocheck;
 mod speclint;
 mod testcmd;
+mod testlog;
 mod util;
 
 use std::process::ExitCode;
