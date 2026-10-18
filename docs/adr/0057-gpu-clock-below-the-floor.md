@@ -1,5 +1,5 @@
 # 0057 GPU figures below the clock floor: a cool start, and a pass is a pass
-Status: accepted (opus-planner, delegation, 2026-10-17; the owner confirms at the M5 gate, since it amends owner-accepted ADR 0036 point 2)
+Status: accepted (opus-planner, delegation, 2026-10-17; the owner confirms at the M5 gate, since it amends owner-accepted ADR 0036 point 2); point 2 amended by 0060
 Date: 2026-10-17
 Source: perf window 7 (`lit.json`: clocks, power and temperature of every run), ADR 0036 point 2, ADR 0034; spec TEST-033, TEST-034
 

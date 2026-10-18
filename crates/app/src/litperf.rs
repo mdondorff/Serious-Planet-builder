@@ -11,7 +11,7 @@
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
 use planet_core::cube::{FaceMapping, TangentWarp};
-use planet_frame::litscenes::{lit_views, LitView, ViewKind};
+use planet_frame::litscenes::{lit_views, shore_flight_views, LitView, ViewKind};
 use planet_frame::look::file::LookParams;
 use planet_frame::viewer::{lit_warm_plan, viewer_lit_plan};
 use planet_frame::water::{empty_water_plan, plan_water, WaterRequest, WaterTileCache, WaterView};
@@ -63,6 +63,19 @@ impl LitSetup {
         })
     }
 
+    /// The cut counters of the last water plan: horizon, height, of which the exact minimum, and nodes with no minimum (ATMO-020).
+    pub(crate) fn cut_counts(&self) -> [u64; 4] {
+        let c = &self.cache;
+        [c.cut_horizon, c.cut_height, c.cut_exact, c.no_minimum]
+    }
+}
+
+/// The log text of cut counters (summed over a flight's plans or those of one held view's).
+fn cut_text(c: [u64; 4]) -> String {
+    format!("cut {} horizon + {} height ({} by the exact minimum), {} kept with no minimum", c[0], c[1], c[2], c[3])
+}
+
+impl LitSetup {
     /// What the water plan cache has counted so far (the streaming scenes log each frame's share).
     pub(crate) fn water_counters(&self) -> planet_frame::water::WaterCounters {
         self.cache.counters()
@@ -239,7 +252,8 @@ fn measure_static(
     let mut cache = SelectionCache::new();
     let plan = planet_frame::plan_terrain_cached(&req, rig.field, &mut cache).map_err(|e| e.to_string())?;
     let started = Instant::now();
-    let new = crate::skeleton::upload_missing_meshes(rig.ctx, r, &plan, rig.field, rig.radius_m, rig.cells, rig.max_level)?;
+    let new =
+        crate::skeleton::upload_missing_meshes(rig.ctx, Some(rig.world), r, &plan, rig.field, rig.radius_m, rig.cells, rig.max_level)?;
     // Seed the exposure at the view (reset), then hold it: later frames adapt by one 60 Hz step each.
     let seed = setup.plan(rig.world, rig.field, &plan, WATER_T0, 0.0, true)?;
     r.render(rig.ctx, &seed, true).map_err(|e| e.to_string())?;
@@ -247,9 +261,10 @@ fn measure_static(
     let water_draws = count_water(&lit);
     writeln!(
         out,
-        "{path}: {} nodes ({new} new meshes in {:.1} s), {water_draws} with water",
+        "{path}: {} nodes ({new} new meshes in {:.1} s), {water_draws} with water ({})",
         plan.nodes.len(),
-        started.elapsed().as_secs_f64()
+        started.elapsed().as_secs_f64(),
+        cut_text(setup.cut_counts())
     )
     .map_err(err)?;
     let (warm, measured, runs) = if rig.smoke { (1usize, 3usize, 1usize) } else { (60usize, rig.frames.max(10), 3usize) };
@@ -352,6 +367,7 @@ fn measure_flight(
     let mut cache = SelectionCache::new();
     let mut frames: Vec<LitFrame> = Vec::new();
     let (mut water_max, mut nodes_max) = (0u64, 0usize);
+    let mut cut_total = [0u64; 4];
     let mut warmup = None;
     let mut before = None;
     let mut load_sampler = None;
@@ -359,10 +375,13 @@ fn measure_flight(
     let mut last_stats = planet_render::TerrainStats::default();
     for (k, camera) in view.cameras.iter().enumerate() {
         let plan = planet_frame::plan_terrain_cached(&request(rig, *camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
-        crate::skeleton::upload_missing_meshes(rig.ctx, r, &plan, rig.field, rig.radius_m, rig.cells, rig.max_level)?;
+        crate::skeleton::upload_missing_meshes(rig.ctx, Some(rig.world), r, &plan, rig.field, rig.radius_m, rig.cells, rig.max_level)?;
         let t = WATER_T0 + k as f64 / 60.0;
         let lit = setup.plan(rig.world, rig.field, &plan, t, 1.0 / 60.0, k == 0)?;
         water_max = water_max.max(count_water(&lit));
+        for (acc, c) in cut_total.iter_mut().zip(setup.cut_counts()) {
+            *acc += c;
+        }
         nodes_max = nodes_max.max(plan.nodes.len());
         if k == 0 {
             warmup = warm_clock(rig, r, &lit, path, out)?;
@@ -380,9 +399,10 @@ fn measure_flight(
     let load = load_sampler.map_or_else(planet_perf::load::CaseLoad::not_measured, planet_perf::load::LoadSampler::stop);
     writeln!(
         out,
-        "{path}: {} cameras x {reps} timed frames in {:.1} s, up to {nodes_max} nodes, {water_max} with water",
+        "{path}: {} cameras x {reps} timed frames in {:.1} s, up to {nodes_max} nodes, {water_max} with water ({})",
         view.cameras.len(),
-        started.elapsed().as_secs_f64()
+        started.elapsed().as_secs_f64(),
+        cut_text(cut_total)
     )
     .map_err(err)?;
     let totals: Vec<f64> = frames.iter().map(|f| f.total_ms).collect();
@@ -447,7 +467,15 @@ fn print_view(res: &ViewResult, gpu: &planet_perf::clock::GpuValidity, smoke: bo
     .map_err(err)?;
     // A smoke run is no measurement: no budget rows, only the pass rows that prove the timestamps flow.
     if !smoke {
-        for row in planet_perf::lit::view_verdicts(&metrics, &frame, gpu, gated, res.water_draws, true) {
+        for row in planet_perf::lit::view_verdicts_with(
+            &metrics,
+            &frame,
+            gpu,
+            gated,
+            res.water_draws,
+            true,
+            planet_perf::lit::water_budget_ms(&res.path),
+        ) {
             writeln!(out, "{}", row.line(&res.path)).map_err(err)?;
         }
     }
@@ -680,7 +708,15 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
         if res.kind == ViewKind::Static && !formats_scene && !smoke {
             let totals: Vec<f64> = res.frames.iter().map(|f| f.total_ms).collect();
             let frame = summarize(&totals, 0).ok_or("no frames")?;
-            for row in planet_perf::lit::view_verdicts(&metrics_of(&res.frames), &frame, &gpu, true, res.water_draws, true) {
+            for row in planet_perf::lit::view_verdicts_with(
+                &metrics_of(&res.frames),
+                &frame,
+                &gpu,
+                true,
+                res.water_draws,
+                true,
+                planet_perf::lit::water_budget_ms(&res.path),
+            ) {
                 if row.fails() && verdict.frame_valid() {
                     failed.push(row.line(&res.path));
                 }
@@ -809,7 +845,18 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
     let mut setup = LitSetup::new(o, &world, &lod)?;
     let is_sea = |d: planet_core::Vec3| carries_sea(&world, d);
     let frames = o.flight_frames;
-    let views = lit_views(radius_m, aspect, field.as_ref(), setup.level_m, &is_sea, frames)?;
+    let mut views = lit_views(radius_m, aspect, field.as_ref(), setup.level_m, &is_sea, frames)?;
+    // The capture-only shore flights (20 s and 15 s at 60 frames per second unless `--flight-frames` is given).
+    let shore_frames = o.given.contains("--flight-frames").then_some(frames);
+    views.extend(shore_flight_views(radius_m, aspect, field.as_ref(), setup.level_m, &is_sea, shore_frames)?);
+    if let Some(names) = &o.views {
+        let flights: Vec<&str> = views.iter().filter(|v| v.kind == ViewKind::Flight).map(|v| v.name).collect();
+        if let Some(bad) = names.iter().find(|n| !flights.contains(&n.as_str())) {
+            return Err(format!("--views: no flight '{bad}' (the capture flights: {})", flights.join(", ")));
+        }
+        // The first view of the list seeds the renderer: keep the static views, drop the flights that were not asked for.
+        views.retain(|v| v.kind == ViewKind::Static || names.iter().any(|n| n == v.name));
+    }
     let rig =
         Rig { ctx, world: &world, field: field.as_ref(), lod: &lod, size, smoke: true, frames: 0, cells: o.cells, max_level, radius_m };
     let software = crate::facts(ctx).kind == planet_perf::DeviceKind::Cpu;
@@ -828,7 +875,9 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
     )
     .map_err(err)?;
     std::fs::create_dir_all(&dir).map_err(err)?;
-    let mut index = String::from("# directory frames width height shore_filter\n");
+    let clamp_note = "the one-frame stills (still-*) set the camera directly, below the viewer's 1 m ground clamp (VIEW-004): the viewer itself does not go this low";
+    writeln!(out, "capture-flights: {clamp_note}").map_err(err)?;
+    let mut index = format!("# directory frames width height shore_filter\n# {clamp_note}\n");
     let default = setup.look.water.shore_filter;
     let first = views[0].cameras[0];
     let mut r = new_renderer(&rig, &setup, first)?;
@@ -842,7 +891,7 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
             let mut cache = SelectionCache::new();
             for (k, camera) in view.cameras.iter().enumerate() {
                 let plan = planet_frame::plan_terrain_cached(&request(&rig, *camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
-                crate::skeleton::upload_missing_meshes(ctx, &mut r, &plan, rig.field, radius_m, o.cells, max_level)?;
+                crate::skeleton::upload_missing_meshes(ctx, Some(rig.world), &mut r, &plan, rig.field, radius_m, o.cells, max_level)?;
                 let lit = setup.plan(&world, rig.field, &plan, WATER_T0 + k as f64 / 60.0, 1.0 / 60.0, k == 0)?;
                 r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
                 let image = r.read_color(ctx);

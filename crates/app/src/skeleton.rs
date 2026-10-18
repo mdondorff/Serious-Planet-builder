@@ -828,11 +828,11 @@ impl planet_streaming::TileSource<RenderTile> for MeshSource {
         let field = self.world.field()?;
         // A pre-filled coarse tile is read from the pack instead of generated (STRM-021): the same tile, bit for bit.
         if let Some(t) = self.world.prefilled_tile(field.as_ref(), tile, self.cells, self.max_level, self.format) {
-            self.world.fill_water(tile);
+            self.world.fill_water(tile, &t);
             return Ok(t);
         }
         let made = tile_for(self.format, field.as_ref(), tile, self.cells, self.world.radius_m(), self.max_level);
-        self.world.fill_water(tile);
+        self.world.fill_water(tile, &made);
         Ok(made)
     }
 
@@ -852,7 +852,7 @@ impl MeshSource {
         let field = self.world.field()?;
         if let Some(t) = self.world.prefilled_tile(field.as_ref(), tile, self.cells, self.max_level, self.format) {
             if !cancel.is_cancelled() {
-                self.world.fill_water(tile);
+                self.world.fill_water(tile, &t);
             }
             return Ok(Some(t));
         }
@@ -862,7 +862,7 @@ impl MeshSource {
             return Ok(None);
         }
         // The tile's water (ADR 0056) is computed here, in the job, so the plan of a frame only looks it up.
-        self.world.fill_water(tile);
+        self.world.fill_water(tile, &made);
         Ok(Some(made))
     }
 }
@@ -1032,9 +1032,13 @@ fn streamed_meshes(
 }
 
 /// Generate the meshes `plan` needs that `renderer` does not hold (by tile and mesh key) in parallel, then upload them.
-/// Returns the number of new meshes.
+/// Returns the number of new meshes. With `world` the tile's water is computed beside its mesh, as a tile job does (ADR 0056,
+/// ATMO-020): the book then holds the answer and the lowest own vertex of every tile the plan draws, so the cut of a held view or a
+/// flight is the exact one. Without it (no water plan in the caller) nothing is filled.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn upload_missing_meshes(
     ctx: &GpuContext,
+    world: Option<&WorldTerrain>,
     renderer: &mut planet_render::TerrainRenderer,
     plan: &planet_frame::TerrainPlan,
     field: &dyn planet_generators::height::HeightField,
@@ -1049,7 +1053,19 @@ pub(crate) fn upload_missing_meshes(
     let meshes: Vec<RenderTile> = std::thread::scope(|s| {
         let handles: Vec<_> = missing
             .chunks(chunk)
-            .map(|part| s.spawn(move || part.iter().map(|&t| tile_for(format, field, t, cells, radius_m, max_level)).collect::<Vec<_>>()))
+            .map(|part| {
+                s.spawn(move || {
+                    part.iter()
+                        .map(|&t| {
+                            let made = tile_for(format, field, t, cells, radius_m, max_level);
+                            if let Some(w) = world {
+                                w.fill_water(t, &made);
+                            }
+                            made
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
             .collect();
         handles.into_iter().flat_map(|h| h.join().expect("mesh thread")).collect()
     });
@@ -1114,7 +1130,7 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
         if renderer.resident_tiles() > 0 && renderer.resident_tiles() + missing > FLIGHT_RESIDENT_CAP {
             renderer = TerrainRenderer::for_context(ctx, size, o.cells, 1);
         }
-        upload_missing_meshes(ctx, &mut renderer, &plan, field.as_ref(), radius_m, o.cells, lod.max_level)?;
+        upload_missing_meshes(ctx, None, &mut renderer, &plan, field.as_ref(), radius_m, o.cells, lod.max_level)?;
         renderer.render(ctx, &plan, false).map_err(|e| format!("frame {i}: {e}"))?;
         let path = dir.join(format!("frame_{i:04}.png"));
         let image = renderer.read_color(ctx);
@@ -1241,7 +1257,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         }
         let plan = planet_frame::plan_terrain_cached(&req, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
         let started = Instant::now();
-        let new_meshes = upload_missing_meshes(ctx, &mut renderer, &plan, field.as_ref(), radius_m, o.cells, lod.max_level)?;
+        let new_meshes = upload_missing_meshes(ctx, None, &mut renderer, &plan, field.as_ref(), radius_m, o.cells, lod.max_level)?;
         let plan_median = summarize(&plan_samples, 0).map_or(f64::NAN, |s| s.median);
         plan_lines.push((name, plan_median));
         writeln!(
@@ -1497,6 +1513,57 @@ mod tests {
             .load(tiles[1])
             .unwrap();
         assert_eq!(debug.water_book().filled(), 0);
+    }
+
+    // spec: ATMO-020
+    #[test]
+    fn a_tile_job_keeps_the_exact_minimum_of_its_own_vertices_beside_a_wet_answer_and_only_there() {
+        use planet_streaming::{CancelToken, TileSource};
+        let world = std::sync::Arc::new(
+            WorldTerrain::open(planet_world_def::WorldDefinition::single_planet(RADIUS_M, 5), 128)
+                .expect("a small in-memory world")
+                .bounding_water(),
+        );
+        let tiles: Vec<TileId> =
+            (0..6u8).flat_map(|f| [TileId::new(Face(f), 2, 1, 2).unwrap(), TileId::new(Face(f), 4, 7, 9).unwrap()]).collect();
+        let (mut wet_seen, mut dry_seen) = (0, 0);
+        for format in [planet_render::TileFormat::Vertex, planet_render::TileFormat::Compact] {
+            let world = if format == planet_render::TileFormat::Vertex {
+                std::sync::Arc::clone(&world)
+            } else {
+                std::sync::Arc::new(
+                    WorldTerrain::open(planet_world_def::WorldDefinition::single_planet(RADIUS_M, 5), 128).unwrap().bounding_water(),
+                )
+            };
+            let source = MeshSource { world: std::sync::Arc::clone(&world), format, max_level: 22, cells: 16 };
+            assert!(source.load_staged(tiles[0], &CancelToken::cancelled()).unwrap().is_none());
+            assert_eq!(world.water_book().min_height(tiles[0]), None, "a cancelled job keeps no minimum");
+            let field = world.field().unwrap();
+            for t in &tiles {
+                let built = source.load_staged(*t, &CancelToken::never()).unwrap().unwrap();
+                let book = world.water_book();
+                // The minimum recomputed from the tile as the shader shades it: every lattice vertex's height, skirts excluded.
+                let n = (built.cells() as usize + 1) * (built.cells() as usize + 1);
+                let recomputed = match &built {
+                    RenderTile::Vertex(m) => m.vertices[..n].iter().map(|v| v.height).fold(f32::INFINITY, f32::min),
+                    RenderTile::Compact(c) => c.shade_all()[..n].iter().map(|v| v.height).fold(f32::INFINITY, f32::min),
+                };
+                if book.get(*t).flatten().is_some() {
+                    wet_seen += 1;
+                    assert_eq!(book.min_height(*t), Some(recomputed), "{t:?} {format:?}: the job's minimum is the mesh's");
+                    // And the field's own minimum over the lattice, up to the 16-bit quantisation (0.5 mm at most) and f32 rounding.
+                    let m = (0..=16u32)
+                        .flat_map(|j| (0..=16u32).map(move |i| (i, j)))
+                        .map(|(i, j)| field.height(t.sample_direction(&TangentWarp, 16, i, j)))
+                        .fold(f64::INFINITY, f64::min);
+                    assert!((f64::from(recomputed) - m).abs() <= 2.0e-3 + 1.0e-6 * m.abs(), "{t:?} {format:?}: {recomputed} against {m}");
+                } else {
+                    dry_seen += 1;
+                    assert_eq!(book.min_height(*t), None, "{t:?}: a dry tile keeps no minimum");
+                }
+            }
+        }
+        assert!(wet_seen > 0 && dry_seen > 0, "the tiles are a mix of sea and land");
     }
 
     /// A height field that counts the samples it is asked for.

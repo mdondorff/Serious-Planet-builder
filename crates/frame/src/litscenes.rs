@@ -107,6 +107,216 @@ pub fn descent_cameras(c: &Coast, radius_m: f64, level_m: f64, aspect: f64, fram
         .collect()
 }
 
+/// The capture-only shore flights (`cargo xtask capture flights`, never the perf scenes): they stay on the beach, where the coast
+/// flights above are mostly open water (the owner's look review, M5).
+pub const SHORE_FLIGHTS: [&str; 2] = ["shore-run-30m", "shore-approach-3m"];
+/// Frames per second of the captured videos (the flights' frame step).
+pub const CAPTURE_FPS: usize = 60;
+/// Duration of the shore run and of the shore approach, seconds.
+pub const SHORE_RUN_S: usize = 20;
+pub const SHORE_APPROACH_S: usize = 15;
+/// The shore run: height above the water level, distance seaward of the waterline, length along the beach (about 25 m/s), the yaw
+/// toward the land and the pitch down of the view (looking along the shore and slightly toward it).
+pub const SHORE_RUN_ALT_M: f64 = 30.0;
+pub const SHORE_RUN_OFFSHORE_M: f64 = 150.0;
+pub const SHORE_RUN_LENGTH_M: f64 = 500.0;
+pub const SHORE_RUN_YAW_DEG: f64 = 25.0;
+pub const SHORE_RUN_PITCH_DEG: f64 = 8.0;
+/// The shore approach: height above the water level over the sea, the distance out where it starts, how far past the waterline it
+/// ends (over the sand; the camera then keeps [`SHORE_APPROACH_CLEARANCE_M`] above the ground), and the pitch down of the view.
+pub const SHORE_APPROACH_ALT_M: f64 = 3.0;
+pub const SHORE_APPROACH_START_M: f64 = 1_000.0;
+pub const SHORE_APPROACH_END_M: f64 = 40.0;
+pub const SHORE_APPROACH_CLEARANCE_M: f64 = 2.0;
+pub const SHORE_APPROACH_PITCH_DEG: f64 = 3.0;
+
+/// The local frame of a coast: the point on the shoreline, `along` the beach (horizontal, perpendicular to the heading) and the
+/// heading from the sea to the land. `point(s, t)` is the unit direction `s` metres along the beach and `t` metres towards the land
+/// (a tangent-plane offset, exact to well under a millimetre at the kilometres these flights span).
+struct ShoreFrame {
+    dir: Vec3,
+    along: Vec3,
+    heading: Vec3,
+    radius_m: f64,
+}
+
+impl ShoreFrame {
+    fn new(c: &Coast, radius_m: f64) -> Self {
+        let up = c.dir.normalized();
+        let heading = (c.heading - up * c.heading.dot(up)).normalized();
+        Self { dir: up, along: up.cross(heading).normalized(), heading, radius_m }
+    }
+    fn point(&self, s: f64, t: f64) -> Vec3 {
+        (self.dir + self.along * (s / self.radius_m) + self.heading * (t / self.radius_m)).normalized()
+    }
+    /// The tangent-plane coordinates `(s, t)` of a direction near the coast: the inverse of [`ShoreFrame::point`] (the tests').
+    #[cfg(test)]
+    fn coords(&self, d: Vec3) -> (f64, f64) {
+        let o = d.normalized() - self.dir;
+        (o.dot(self.along) * self.radius_m, o.dot(self.heading) * self.radius_m)
+    }
+}
+
+/// Where the shoreline crosses the line `s` metres along the beach, as metres towards the land from the coast point: the first
+/// rise through `level_m` going landward within 400 m, scanned every 10 m and bisected to a millimetre; 0 when the line has none.
+fn shore_crossing(f: &ShoreFrame, height: &dyn Fn(Vec3) -> f64, level_m: f64, s: f64) -> f64 {
+    let wet = |t: f64| height(f.point(s, t)) < level_m;
+    let mut t = -400.0;
+    while t < 400.0 {
+        if wet(t) && !wet(t + 10.0) {
+            let (mut a, mut b) = (t, t + 10.0);
+            for _ in 0..24 {
+                let m = 0.5 * (a + b);
+                if wet(m) {
+                    a = m;
+                } else {
+                    b = m;
+                }
+            }
+            return b;
+        }
+        t += 10.0;
+    }
+    0.0
+}
+
+/// The shoreline's landward offset at `n` positions from `-length/2` to `+length/2` along the beach, found every 25 m and smoothed
+/// (two passes of a three-point mean) so that the camera path follows the beach without following every cusp.
+fn shoreline(f: &ShoreFrame, height: &dyn Fn(Vec3) -> f64, level_m: f64, length_m: f64) -> Vec<(f64, f64)> {
+    let n = (length_m / 25.0).ceil() as usize + 1;
+    let mut pts: Vec<(f64, f64)> = (0..n)
+        .map(|k| {
+            let s = -0.5 * length_m + length_m * k as f64 / (n - 1) as f64;
+            (s, shore_crossing(f, height, level_m, s))
+        })
+        .collect();
+    for _ in 0..2 {
+        let prev: Vec<f64> = pts.iter().map(|p| p.1).collect();
+        for k in 0..n {
+            let (lo, hi) = (k.saturating_sub(1), (k + 1).min(n - 1));
+            pts[k].1 = (prev[lo] + prev[k] + prev[hi]) / 3.0;
+        }
+    }
+    pts
+}
+
+fn interpolate(pts: &[(f64, f64)], s: f64) -> f64 {
+    let i = pts.partition_point(|p| p.0 <= s).clamp(1, pts.len() - 1);
+    let ((s0, t0), (s1, t1)) = (pts[i - 1], pts[i]);
+    t0 + (t1 - t0) * ((s - s0) / (s1 - s0)).clamp(0.0, 1.0)
+}
+
+/// The shore run: `frames` cameras 30 m above the water, 150 m seaward of the waterline (which they follow along the beach, found
+/// from the terrain-height crossings), moving 500 m along the beach and looking along it and 25 degrees toward the land, pitched 8
+/// degrees down.
+pub fn shore_run_cameras(c: &Coast, radius_m: f64, level_m: f64, height: &dyn Fn(Vec3) -> f64, aspect: f64, frames: usize) -> Vec<Camera> {
+    let f = ShoreFrame::new(c, radius_m);
+    let line = shoreline(&f, height, level_m, SHORE_RUN_LENGTH_M);
+    let n = frames.max(2);
+    let yaw = SHORE_RUN_YAW_DEG.to_radians();
+    let look = f.along * libm::cos(yaw) + f.heading * libm::sin(yaw);
+    (0..n)
+        .map(|k| {
+            let s = -0.5 * SHORE_RUN_LENGTH_M + SHORE_RUN_LENGTH_M * k as f64 / (n - 1) as f64;
+            let t = interpolate(&line, s) - SHORE_RUN_OFFSHORE_M;
+            let position = PlanetFixed(f.point(s, t) * (radius_m + level_m + SHORE_RUN_ALT_M));
+            Camera::at_surface_point(position, look, SHORE_RUN_PITCH_DEG.to_radians(), FOV_DEG.to_radians(), aspect, 0.1)
+        })
+        .collect()
+}
+
+/// The shore approach: `frames` cameras 3 m above the water, starting 1 km out and flying straight (perpendicular to the beach)
+/// toward it at constant speed, ending 40 m past the waterline over the sand, where the camera keeps 2 m above the ground.
+pub fn shore_approach_cameras(
+    c: &Coast,
+    radius_m: f64,
+    level_m: f64,
+    height: &dyn Fn(Vec3) -> f64,
+    aspect: f64,
+    frames: usize,
+) -> Vec<Camera> {
+    let f = ShoreFrame::new(c, radius_m);
+    let shore = shore_crossing(&f, height, level_m, 0.0);
+    let n = frames.max(2);
+    (0..n)
+        .map(|k| {
+            let u = k as f64 / (n - 1) as f64;
+            let t = shore - SHORE_APPROACH_START_M + (SHORE_APPROACH_START_M + SHORE_APPROACH_END_M) * u;
+            let d = f.point(0.0, t);
+            let alt = SHORE_APPROACH_ALT_M.max(height(d) - level_m + SHORE_APPROACH_CLEARANCE_M);
+            let position = PlanetFixed(d * (radius_m + level_m + alt));
+            Camera::at_surface_point(position, f.heading, SHORE_APPROACH_PITCH_DEG.to_radians(), FOV_DEG.to_radians(), aspect, 0.1)
+        })
+        .collect()
+}
+
+/// The capture-only stills very close to the ground (the owner's look review: do problems appear at 0.5 m or below?), one camera
+/// each, with the eye height above the local terrain or the water surface, whichever is higher. They bypass the viewer's 1 m ground
+/// clamp (VIEW-004): the camera is set directly, so the viewer itself does not go this low.
+pub const SHORE_STILLS: [&str; 4] =
+    ["still-sand-0p5m-along", "still-water-0p5m-20m-beach", "still-sand-0p2m-seaward", "still-water-0p1m-along"];
+
+/// The four stills of [`SHORE_STILLS`], in that order: 0.5 m above the wet sand at the waterline looking along the shore; 0.5 m above
+/// the water 20 m out looking at the beach; 0.2 m above the sand at the waterline looking seaward; 0.1 m above the water 30 m out
+/// looking along the shore. Level view (no pitch) except the first, which looks 2 degrees down.
+pub fn shore_still_cameras(c: &Coast, radius_m: f64, level_m: f64, height: &dyn Fn(Vec3) -> f64, aspect: f64) -> Vec<Camera> {
+    let f = ShoreFrame::new(c, radius_m);
+    let shore = shore_crossing(&f, height, level_m, 0.0);
+    let cam = |t: f64, eye_m: f64, look: Vec3, pitch_deg: f64| {
+        let d = f.point(0.0, t);
+        let alt = height(d).max(level_m) - level_m + eye_m;
+        Camera::at_surface_point(
+            PlanetFixed(d * (radius_m + level_m + alt)),
+            look,
+            pitch_deg.to_radians(),
+            FOV_DEG.to_radians(),
+            aspect,
+            0.1,
+        )
+    };
+    vec![
+        cam(shore, 0.5, f.along, 2.0),
+        cam(shore - 20.0, 0.5, f.heading, 0.0),
+        cam(shore, 0.2, f.heading * -1.0, 0.0),
+        cam(shore - 30.0, 0.1, f.along, 0.0),
+    ]
+}
+
+/// The coast of the lit scenes and flights (the one `lit_views` uses).
+pub fn lit_coast(radius_m: f64, field: &dyn HeightField, level_m: f64, is_sea: &dyn Fn(Vec3) -> bool) -> Result<Coast, String> {
+    find_coast(is_sea, &|d| field.height(d), level_m, 20.0, 30.0, radius_m)
+        .ok_or("the world has no beach (sea 2 km out below the level by 5 m, land 500 m in above it by 3 m) within three parallels of 20 N: no coast view can be measured".into())
+}
+
+/// The capture-only shore flights as views (`SHORE_FLIGHTS`), `frames` as given or the duration at [`CAPTURE_FPS`] when `None`.
+pub fn shore_flight_views(
+    radius_m: f64,
+    aspect: f64,
+    field: &dyn HeightField,
+    level_m: f64,
+    is_sea: &dyn Fn(Vec3) -> bool,
+    frames: Option<usize>,
+) -> Result<Vec<LitView>, String> {
+    let coast = lit_coast(radius_m, field, level_m, is_sea)?;
+    let height = |d: Vec3| field.height(d);
+    let stills = shore_still_cameras(&coast, radius_m, level_m, &height, aspect);
+    let mut views: Vec<LitView> =
+        SHORE_STILLS.iter().zip(stills).map(|(name, camera)| LitView { name, cameras: vec![camera], kind: ViewKind::Flight }).collect();
+    views.extend([
+        LitView {
+            name: SHORE_FLIGHTS[0],
+            cameras: shore_run_cameras(&coast, radius_m, level_m, &height, aspect, frames.unwrap_or(SHORE_RUN_S * CAPTURE_FPS)),
+            kind: ViewKind::Flight,
+        },
+        LitView {
+            name: SHORE_FLIGHTS[1],
+            cameras: shore_approach_cameras(&coast, radius_m, level_m, &height, aspect, frames.unwrap_or(SHORE_APPROACH_S * CAPTURE_FPS)),
+            kind: ViewKind::Flight,
+        },
+    ]);
+    Ok(views)
+}
+
 /// What a view is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewKind {
@@ -135,8 +345,7 @@ pub fn lit_views(
 ) -> Result<Vec<LitView>, String> {
     let named = scripted_views_field(radius_m, aspect, field);
     let get = |n: &str| named.iter().find(|(k, _)| *k == n).map(|(_, c)| *c).ok_or_else(|| format!("no scripted view {n}"));
-    let coast = find_coast(is_sea, &|d| field.height(d), level_m, 20.0, 30.0, radius_m)
-        .ok_or("the world has no beach (sea 2 km out below the level by 5 m, land 500 m in above it by 3 m) within three parallels of 20 N: no coast view can be measured")?;
+    let coast = lit_coast(radius_m, field, level_m, is_sea)?;
     let cam = |alt, back, pitch| coast_camera(&coast, radius_m, level_m, alt, back, 0.0, pitch, aspect);
     let one = |name, camera| LitView { name, cameras: vec![camera], kind: ViewKind::Static };
     Ok(vec![
@@ -276,5 +485,115 @@ mod tests {
         assert!((alt("coast-2km") - 2_000.0).abs() < 1e-6 && (alt("coast-3m") - 3.0).abs() < 1e-6);
         let e = lit_views(R, 1.6, &field, 0.0, &|_| false, 30).unwrap_err();
         assert!(e.contains("no beach"), "{e}");
+    }
+
+    /// A 1:50 beach whose waterline wanders 20 m (wavelength about 380 m) around the coast point, in the coast's own frame.
+    fn wavy_beach() -> (Coast, impl Fn(Vec3) -> f64) {
+        let coast = Coast { dir: Vec3::new(1.0, 0.0, 0.0), heading: Vec3::new(0.0, 1.0, 0.0) };
+        let f = ShoreFrame::new(&coast, R);
+        let height = move |d: Vec3| {
+            let (s, t) = f.coords(d);
+            0.02 * (t - 20.0 * libm::sin(s / 60.0))
+        };
+        (coast, height)
+    }
+
+    /// Metres seaward of the waterline of the line through the camera's ground point, and the camera's height above the level.
+    fn offshore_and_altitude(c: &Coast, height: &dyn Fn(Vec3) -> f64, cam: &Camera) -> (f64, f64) {
+        let f = ShoreFrame::new(c, R);
+        let (s, t) = f.coords(cam.position.0);
+        (shore_crossing(&f, height, 0.0, s) - t, cam.position.0.length() - R)
+    }
+
+    // spec: TEST-025
+    #[test]
+    fn the_shore_run_stays_30_m_up_and_100_to_200_m_off_a_wandering_beach_for_20_seconds() {
+        let (coast, height) = wavy_beach();
+        let cams = shore_run_cameras(&coast, R, 0.0, &height, 16.0 / 9.0, SHORE_RUN_S * CAPTURE_FPS);
+        assert_eq!(cams.len(), 1_200);
+        let (mut lo, mut hi) = (f64::MAX, 0.0f64);
+        for cam in &cams {
+            let (off, alt) = offshore_and_altitude(&coast, &height, cam);
+            assert!((alt - SHORE_RUN_ALT_M).abs() < 1e-6, "altitude {alt}");
+            assert!((100.0..=200.0).contains(&off), "{off} m off the waterline");
+            assert!(height(cam.position.0.normalized()) < 0.0, "over the sea");
+            (lo, hi) = (lo.min(off), hi.max(off));
+        }
+        assert!(hi - lo > 1.0, "the path follows the wandering beach: {lo}..{hi}");
+        let travelled = (cams[1_199].position.0 - cams[0].position.0).length();
+        assert!((travelled - SHORE_RUN_LENGTH_M).abs() < 30.0, "{travelled} m along the beach");
+        // Looking along the beach and slightly toward the land, pitched down.
+        let f = ShoreFrame::new(&coast, R);
+        let c = cams[600];
+        assert!(c.forward.dot(f.along) > 0.8 && c.forward.dot(f.heading) > 0.2 && c.forward.dot(c.up) < -0.1);
+    }
+
+    // spec: TEST-025
+    #[test]
+    fn the_shore_approach_flies_3_m_up_over_the_sea_straight_at_the_beach_and_ends_over_the_sand() {
+        let (coast, height) = wavy_beach();
+        let cams = shore_approach_cameras(&coast, R, 0.0, &height, 16.0 / 9.0, SHORE_APPROACH_S * CAPTURE_FPS);
+        assert_eq!(cams.len(), 900);
+        let f = ShoreFrame::new(&coast, R);
+        let shore = shore_crossing(&f, &height, 0.0, 0.0);
+        let mut last_t = f64::MIN;
+        for cam in &cams {
+            let (s, t) = f.coords(cam.position.0);
+            let ground = height(cam.position.0.normalized());
+            let alt = cam.position.0.length() - R;
+            assert!(s.abs() < 0.01, "straight at the beach: {s} m along it");
+            assert!(t > last_t, "moving landward");
+            last_t = t;
+            // 3 m above the level over the sea; over the sand never lower than 2 m above the ground.
+            assert!((alt - SHORE_APPROACH_ALT_M.max(ground + SHORE_APPROACH_CLEARANCE_M)).abs() < 1e-6, "altitude {alt}, ground {ground}");
+            assert!(alt >= SHORE_APPROACH_ALT_M - 1e-9);
+        }
+        let (_, t0) = f.coords(cams[0].position.0);
+        assert!(((shore - t0) - SHORE_APPROACH_START_M).abs() < 0.01, "starts {} m out", shore - t0);
+        let (_, t1) = f.coords(cams[899].position.0);
+        assert!(
+            ((t1 - shore) - SHORE_APPROACH_END_M).abs() < 0.01 && height(cams[899].position.0.normalized()) > 0.0,
+            "ends over the sand"
+        );
+        assert!(cams[0].forward.dot(f.heading) > 0.99, "looking at the beach");
+    }
+
+    // spec: TEST-025
+    #[test]
+    fn the_four_stills_sit_at_their_eye_heights_above_the_higher_of_the_terrain_and_the_water_and_face_their_way() {
+        let (coast, height) = wavy_beach();
+        let cams = shore_still_cameras(&coast, R, 0.0, &height, 16.0 / 9.0);
+        assert_eq!(cams.len(), SHORE_STILLS.len());
+        let f = ShoreFrame::new(&coast, R);
+        let shore = shore_crossing(&f, &height, 0.0, 0.0);
+        // (eye height, metres seaward of the waterline, looking: dot with along, dot with heading)
+        let want = [(0.5, 0.0, (1.0, 0.0)), (0.5, 20.0, (0.0, 1.0)), (0.2, 0.0, (0.0, -1.0)), (0.1, 30.0, (1.0, 0.0))];
+        for (cam, (eye, out, (along, toward))) in cams.iter().zip(want) {
+            let (_, t) = f.coords(cam.position.0);
+            let ground = height(cam.position.0.normalized()).max(0.0);
+            assert!((cam.position.0.length() - R - ground - eye).abs() < 1e-6, "eye height {eye}");
+            assert!((shore - t - out).abs() < 0.01, "{out} m seaward");
+            assert!(
+                (cam.forward.dot(f.along) - along).abs() < 0.05 && (cam.forward.dot(f.heading) - toward).abs() < 0.05,
+                "{:?}",
+                cam.forward
+            );
+        }
+    }
+
+    // spec: TEST-025
+    #[test]
+    fn the_shore_flight_views_are_the_two_named_capture_flights_and_the_perf_flights_are_unchanged() {
+        let field = Reference(1);
+        let reference_sea = |d: Vec3| field.height(d) < 0.0;
+        let v = shore_flight_views(R, 16.0 / 9.0, &field, 0.0, &reference_sea, Some(10)).unwrap();
+        let want: Vec<&str> = SHORE_STILLS.iter().chain(SHORE_FLIGHTS.iter()).copied().collect();
+        assert_eq!(v.iter().map(|x| x.name).collect::<Vec<_>>(), want);
+        assert!(v.iter().all(|x| x.kind == ViewKind::Flight));
+        assert!(v[..4].iter().all(|x| x.cameras.len() == 1) && v[4..].iter().all(|x| x.cameras.len() == 10));
+        // The perf scenes' view list does not contain them.
+        let perf = lit_views(R, 16.0 / 9.0, &field, 0.0, &reference_sea, 10).unwrap();
+        assert!(perf.iter().all(|x| !want.contains(&x.name)) && FLIGHTS == ["coast-glide", "coast-descent"]);
+        assert!(shore_flight_views(R, 1.6, &field, 0.0, &|_| false, None).is_err());
     }
 }

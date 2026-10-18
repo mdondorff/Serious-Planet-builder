@@ -185,12 +185,29 @@ impl WaterSource for WaterField<'_> {
 #[derive(Default)]
 pub struct WaterBook {
     tiles: std::sync::Mutex<HashMap<TileId, Option<WaterSample>>>,
+    /// The lowest height of the own lattice vertices of the tiles whose job built the mesh and whose answer is wet (ATMO-020).
+    mins: std::sync::Mutex<HashMap<TileId, f32>>,
     filled: std::sync::atomic::AtomicU64,
 }
 
 impl WaterBook {
     pub fn new() -> WaterBook {
         WaterBook::default()
+    }
+
+    /// Keep `min_m`, the lowest height of the own lattice vertices of `tile`'s mesh, for the height test of the cut (ATMO-020). Only a
+    /// tile whose answer in the book is wet keeps one (a dry tile is never a water node); called by the tile's job after
+    /// [`fill`](WaterBook::fill). A pure function of the tile and the field, so two jobs of one tile agree.
+    pub fn set_min_height(&self, tile: TileId, min_m: f32) {
+        if !min_m.is_finite() || !matches!(self.get(tile), Some(Some(_))) {
+            return;
+        }
+        self.mins.lock().expect("water book").insert(tile, min_m);
+    }
+
+    /// The lowest height of the own lattice vertices of `tile`'s mesh, when its job left one.
+    pub fn min_height(&self, tile: TileId) -> Option<f32> {
+        self.mins.lock().expect("water book").get(&tile).copied()
     }
 
     /// Compute the water of `tile` (in the caller's thread, a tile job) and keep it. A tile already held is not computed again.
@@ -277,7 +294,11 @@ pub struct WaterTileCache {
     /// Nodes of the last plan left out by the horizon test and by the height test (ATMO-020); recorded only.
     pub cut_horizon: u64,
     pub cut_height: u64,
-    /// The extent and the lowest terrain of the tiles the cut has looked at (pure functions of the tile and the height field).
+    /// Of `cut_height`, the nodes cut by the exact minimum of the tile's own vertices (and not by the loose bound).
+    pub cut_exact: u64,
+    /// Nodes that passed the loose test with no minimum in the book (their job has not left one): they keep the loose verdict.
+    pub no_minimum: u64,
+    /// The extent and the lowest terrain bound of the tiles the cut has looked at (pure functions of the tile and the height field).
     extents: HashMap<TileId, (TileExtent, Option<f64>)>,
 }
 
@@ -473,7 +494,7 @@ pub fn tile_above_water(lowest_m: f64, level_m: f64, rise_m: f64) -> bool {
 pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &TerrainPlan) -> Result<WaterPlan, WaterError> {
     let mut liquids: Vec<LiquidAppearance> = Vec::new();
     let mut nodes = Vec::new();
-    (cache.cut_horizon, cache.cut_height) = (0, 0);
+    (cache.cut_horizon, cache.cut_height, cache.cut_exact, cache.no_minimum) = (0, 0, 0, 0);
     let camera = terrain.camera.position.0;
     for (i, n) in terrain.nodes.iter().enumerate() {
         let Some(w) = cache.tile_water(req.source, req.map, n.tile, req.lod.radius_m)? else { continue };
@@ -516,6 +537,16 @@ pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &
             };
             if tile_above_water(lowest, level, rise) {
                 cache.cut_height += 1;
+                continue;
+            }
+            // The exact minimum of the tile's own mesh vertices, when its job left one (a tile with none keeps the loose bound's
+            // verdict). Read from the book on the plan thread on every plan (a lookup, never a computation, and never memoised: a
+            // tile rebuilt in another format leaves that format's minimum, and the plan must cut by what is drawn).
+            let exact = cache.book.as_ref().and_then(|b| b.min_height(n.tile));
+            cache.no_minimum += u64::from(exact.is_none());
+            if exact.is_some_and(|m| tile_above_water(f64::from(m), level, rise)) {
+                cache.cut_height += 1;
+                cache.cut_exact += 1;
                 continue;
             }
         }

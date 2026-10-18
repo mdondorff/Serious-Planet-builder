@@ -135,6 +135,14 @@ impl CompactTile {
         0.5 * f64::from(self.hr_step)
     }
 
+    /// The lowest height (m, f32 as the shader forms it) over the tile's own `(cells + 1)^2` lattice vertices: the exact minimum of the
+    /// drawn terrain, which is linear between vertices and morphs only to averages of own vertices (ATMO-020). The 16-bit heights are
+    /// monotone in the texel, so the lowest texel gives it.
+    pub fn min_height_m(&self) -> f32 {
+        let q = self.texels.iter().map(|t| t[0]).min().unwrap_or(0);
+        self.h_origin + (self.hr_min + f32::from(q) * self.hr_step)
+    }
+
     /// Whether the CON-13 step bound (1 mm) holds for this tile.
     pub fn step_within_con13(&self) -> bool {
         f64::from(self.hr_step) <= MAX_FINEST_STEP_M * (1.0 + 1.0e-6)
@@ -164,6 +172,14 @@ pub enum RenderTile {
 }
 
 impl RenderTile {
+    /// The lowest height of the tile's own lattice vertices ([`CompactTile::min_height_m`], [`TileMesh::min_height_m`]).
+    pub fn min_height_m(&self) -> f32 {
+        match self {
+            RenderTile::Vertex(m) => m.min_height_m(),
+            RenderTile::Compact(c) => c.min_height_m(),
+        }
+    }
+
     pub fn id(&self) -> TileId {
         match self {
             RenderTile::Vertex(m) => m.id,

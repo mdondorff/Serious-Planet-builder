@@ -246,7 +246,7 @@ fn the_gated_dives_refuse_a_store_without_the_pre_filled_levels_before_anything_
     let _ = std::fs::remove_dir_all(&store);
 }
 
-// spec: TEST-025, TEST-012, TEST-023
+// spec: TEST-025, TEST-012, TEST-023, ATMO-020
 #[test]
 fn the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_the_metrics_in_smoke_mode() {
     let log = tmp("lit.json");
@@ -282,6 +282,21 @@ fn the_lit_scene_runs_every_view_and_both_flights_with_a_pass_row_each_and_logs_
         out.contains("lit path (atmosphere, water)") && out.contains("tile format vertex"),
         "the software smoke runs the vertex format: {out}"
     );
+    // The held views plan water with the exact dry-tile minimum of every tile (ATMO-020): the cut counts are on the view lines.
+    for view in ["coast-2km", "coast-3m", "coast-glide", "coast-glide@filter0", "coast-descent", "coast-descent@filter0"] {
+        let line = out
+            .lines()
+            .find(|l| l.starts_with(&format!("lit/{view}: ")) && l.contains("with water (cut "))
+            .unwrap_or_else(|| panic!("{view}: no cut line in {out}"));
+        let exact: u64 = line
+            .split("height (")
+            .nth(1)
+            .and_then(|t| t.split(' ').next())
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("{line}"));
+        assert!(exact > 0, "{view}: the exact minimum cut no node: {line}");
+        assert!(line.contains(", 0 kept with no minimum)"), "{view}: tiles without a minimum: {line}");
+    }
     assert!(!out.contains("terrain pass median") && !out.contains("budget 1 ms"), "a smoke run prints no budget rows: {out}");
     let json = std::fs::read_to_string(&log).unwrap();
     assert!(json.contains("\"valid_for_budgets\":false") && json.contains("smoke run"), "{json}");
@@ -379,6 +394,69 @@ fn a_streaming_scene_on_the_lit_path_logs_beside_the_debug_path_under_its_own_na
 
 // spec: TEST-027
 #[test]
+fn the_capture_adds_the_shore_flights_and_the_close_stills_and_says_the_stills_bypass_the_ground_clamp() {
+    let dir = tmp("capture-shore");
+    let views =
+        "shore-run-30m,shore-approach-3m,still-sand-0p5m-along,still-water-0p5m-20m-beach,still-sand-0p2m-seaward,still-water-0p1m-along";
+    let out = run(&[
+        "test-render",
+        "--scene",
+        "capture-flights",
+        "--adapter",
+        "software",
+        "--allow-memory-bake",
+        "--global-res",
+        "128",
+        "--size",
+        "320x180",
+        "--flight-frames",
+        "2",
+        "--views",
+        views,
+        "--out-dir",
+        dir.to_str().unwrap(),
+    ])
+    .unwrap();
+    assert!(out.contains("1 m ground clamp (VIEW-004)"), "{out}");
+    let index = std::fs::read_to_string(dir.join("capture.txt")).unwrap();
+    assert!(index.contains("VIEW-004"), "{index}");
+    let rows: Vec<(&str, usize)> = index
+        .lines()
+        .filter(|l| !l.starts_with('#'))
+        .map(|l| {
+            let mut c = l.split_whitespace();
+            (c.next().unwrap(), c.next().unwrap().parse().unwrap())
+        })
+        .collect();
+    // Four stills (one frame each) and two flights (the given frame count), every one at shore_filter 1 and 0.
+    assert_eq!(rows.len(), 12, "{index}");
+    for (name, frames) in rows {
+        assert_eq!(frames, if name.starts_with("still-") { 1 } else { 2 }, "{name}");
+        for k in 0..frames {
+            assert!(dir.join(name).join(format!("frame_{k:04}.png")).exists(), "{name} frame {k}");
+        }
+    }
+    let e = run(&[
+        "test-render",
+        "--scene",
+        "capture-flights",
+        "--adapter",
+        "software",
+        "--allow-memory-bake",
+        "--global-res",
+        "128",
+        "--views",
+        "nope",
+        "--out-dir",
+        dir.to_str().unwrap(),
+    ])
+    .unwrap_err();
+    assert!(e.contains("no flight 'nope'"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// spec: TEST-027
+#[test]
 fn the_flight_capture_writes_a_png_sequence_per_flight_and_shore_filter_and_is_no_measurement() {
     let dir = tmp("capture");
     let out = run(&[
@@ -394,6 +472,8 @@ fn the_flight_capture_writes_a_png_sequence_per_flight_and_shore_filter_and_is_n
         "320x180",
         "--flight-frames",
         "2",
+        "--views",
+        "coast-glide,coast-descent",
         "--out-dir",
         dir.to_str().unwrap(),
     ])

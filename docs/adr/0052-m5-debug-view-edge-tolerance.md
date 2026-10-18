@@ -1,5 +1,5 @@
 # 0052 First M5 goldens: an edge tolerance for the cross-adapter debug-view check (amends ADR 0037 point 1(b))
-Status: accepted (owner, 2026-10-17, opus-planner session)
+Status: superseded by 0061
 Date: 2026-10-17
 Source: ADR 0037 point 1(b); ADR 0017 (rounding noise: 32 px, delta 1; cross-adapter agreement); TEST-022; the reviews of the lit and sky goldens (PRs #199, #204, #207)
 

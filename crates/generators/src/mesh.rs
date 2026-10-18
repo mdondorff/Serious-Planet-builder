@@ -212,6 +212,13 @@ pub fn vertex_grid_coords(cells: u32, vi: usize) -> (u32, u32) {
 }
 
 impl TileMesh {
+    /// The lowest height (m) over the tile's own `(cells + 1)^2` lattice vertices (the skirt vertices repeat their edge vertex's
+    /// height): the exact minimum of the drawn terrain, which is linear between vertices and morphs only to averages of own
+    /// vertices (ATMO-020).
+    pub fn min_height_m(&self) -> f32 {
+        self.vertices[..grid_vertex_count(self.cells)].iter().map(|v| v.height).fold(f32::INFINITY, f32::min)
+    }
+
     /// The climate of vertex `vi` as the GPU vertex buffer carries it: the two `f16` of [`ClimateTexture::vertex_value`] at the
     /// vertex's grid coordinates (presentation data derived at upload time).
     pub fn gpu_climate(&self, vi: usize) -> [u16; 2] {

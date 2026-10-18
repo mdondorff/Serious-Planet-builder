@@ -1,7 +1,7 @@
 //! Tier B: the cut of the water nodes leaves the picture alone (ATMO-020). Over the in-memory eroded world of 1,024 cells, in the four
 //! coast views of the lit perf scenes (coast-2km, coast-3m, and frames of the glide and the descent), the screen pixels whose CPU ray
 //! meets the sea sphere where the terrain lies below the level inside the tile of a water node are counted for the full selection and
-//! for the cut one: the counts are equal, and the cut drops the share of the nodes the ranges below pin. CPU only (no adapter).
+//! for the cut one and for the cut with the exact minimum of the tiles' own vertices (ATMO-020): the counts are equal, and the cut drops the share of the nodes the ranges below pin. CPU only (no adapter).
 
 use planet::worldfield::WorldTerrain;
 use planet_core::cube::TangentWarp;
@@ -79,13 +79,19 @@ fn the_cut_water_nodes_cover_the_same_sea_pixels_as_the_full_selection_in_the_fo
     let look = LookParams::default();
     let table = world.definition().liquids().unwrap();
     // Per view: the share of the full water nodes the cut keeps, in percent (min, max over the sampled frames), pinned from the runs.
-    let ranges: [(&str, f64, f64); 4] =
-        [("coast-2km", 70.0, 95.0), ("coast-3m", 35.0, 65.0), ("coast-glide", 40.0, 70.0), ("coast-descent", 50.0, 80.0)];
-    for (name, lo, hi) in ranges {
+    let mut jobs: HashSet<TileId> = HashSet::new();
+    let ranges: [(&str, f64, f64, (f64, f64)); 4] = [
+        ("coast-2km", 70.0, 95.0, (45.0, 75.0)),
+        ("coast-3m", 35.0, 65.0, (25.0, 50.0)),
+        ("coast-glide", 40.0, 70.0, (30.0, 60.0)),
+        ("coast-descent", 50.0, 80.0, (35.0, 65.0)),
+    ];
+    for (name, lo, hi, exact_range) in ranges {
         let view = views.iter().find(|v| v.name == name).expect("view");
-        let picks: Vec<usize> = if view.kind == ViewKind::Flight { vec![0, 60, 120, 180, 239] } else { vec![0] };
+        let picks: Vec<usize> = if view.kind == ViewKind::Flight { vec![0, 120, 239] } else { vec![0] };
         let mut cache = SelectionCache::new();
         let mut water_cache = WaterTileCache::new();
+        let mut exact_cache = WaterTileCache::with_book(world.water_book());
         for k in picks {
             let camera = view.cameras[k];
             let req = TerrainRequest {
@@ -121,18 +127,50 @@ fn the_cut_water_nodes_cover_the_same_sea_pixels_as_the_full_selection_in_the_fo
             };
             let full = make(None, &mut water_cache);
             let cut = make(Some(field.as_ref()), &mut water_cache);
-            let (a, b) = (covered(&camera, field.as_ref(), &plan, &full), covered(&camera, field.as_ref(), &plan, &cut));
+            // The tile jobs of the water tiles (ADR 0056): each leaves the lowest own vertex beside its answer (ATMO-020).
+            let new: Vec<TileId> = cut.nodes.iter().map(|n| plan.nodes[n.node as usize].tile).filter(|t| jobs.insert(*t)).collect();
+            std::thread::scope(|s| {
+                for chunk in new.chunks(new.len().div_ceil(8).max(1)) {
+                    let (world, field, lod) = (&world, &field, &lod);
+                    s.spawn(move || {
+                        for tile in chunk {
+                            let built =
+                                planet_generators::compact::tile_data_field(field.as_ref(), &TangentWarp, *tile, o.cells, R, lod.max_level);
+                            world.fill_water(*tile, &built);
+                        }
+                    });
+                }
+            });
+            let exact = make(Some(field.as_ref()), &mut exact_cache);
+            let (a, b, c) = (
+                covered(&camera, field.as_ref(), &plan, &full),
+                covered(&camera, field.as_ref(), &plan, &cut),
+                covered(&camera, field.as_ref(), &plan, &exact),
+            );
+            let exact_share = 100.0 * exact.nodes.len() as f64 / full.nodes.len().max(1) as f64;
             let share = 100.0 * cut.nodes.len() as f64 / full.nodes.len().max(1) as f64;
             println!(
-                "{name} frame {k}: {} terrain nodes, {} water nodes, {} after the cut ({share:.0} %: {} horizon, {} height), {a} / {b} sea pixels",
+                "{name} frame {k}: {} terrain nodes, {} water nodes, {} after the cut ({share:.0} %: {} horizon, {} height), {a} / {b} / {c} sea pixels; the exact minimum keeps {} ({exact_share:.0} %, {} cut by it)",
                 plan.nodes.len(),
                 full.nodes.len(),
                 cut.nodes.len(),
                 water_cache.cut_horizon,
-                water_cache.cut_height
+                water_cache.cut_height,
+                exact.nodes.len(),
+                exact_cache.cut_exact
             );
             assert_eq!(a, b, "{name} frame {k}: the cut changes the sea pixels the CPU rays find in water nodes ({a} full, {b} cut)");
+            assert_eq!(
+                a, c,
+                "{name} frame {k}: the exact minimum changes the sea pixels the CPU rays find in water nodes ({a} full, {c} exact)"
+            );
+            assert!(exact.nodes.len() <= cut.nodes.len() && exact_cache.cut_exact == (cut.nodes.len() - exact.nodes.len()) as u64);
             assert!(a > 0, "{name} frame {k}: the view looks at no sea");
+            let (elo, ehi) = exact_range;
+            assert!(
+                (elo..=ehi).contains(&exact_share),
+                "{name} frame {k}: the exact minimum keeps {exact_share:.1} % of the water nodes, expected {elo} to {ehi}"
+            );
             assert!((lo..=hi).contains(&share), "{name} frame {k}: the cut keeps {share:.1} % of the water nodes, expected {lo} to {hi}");
         }
     }

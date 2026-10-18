@@ -500,7 +500,7 @@ fn capture_args(args: &[String]) -> Result<(Vec<String>, String), String> {
     let mut it = args.iter();
     match it.next().map(String::as_str) {
         Some("flights") => {}
-        other => return Err(format!("usage: cargo xtask capture flights [--store DIR | --allow-memory-bake --global-res N] [--out-dir DIR] [--size WxH] [--flight-frames N] [--smoke] (got {other:?})")),
+        other => return Err(format!("usage: cargo xtask capture flights [--store DIR | --allow-memory-bake --global-res N] [--out-dir DIR] [--size WxH] [--flight-frames N] [--views A,B] [--smoke] (got {other:?})")),
     }
     let mut smoke = false;
     let mut out_dir = "target/review/m5-flights".to_string();
@@ -510,14 +510,14 @@ fn capture_args(args: &[String]) -> Result<(Vec<String>, String), String> {
             "--smoke" => smoke = true,
             "--allow-memory-bake" => tail.push(a.clone()),
             "--out-dir" => out_dir = it.next().ok_or("--out-dir needs a directory")?.clone(),
-            "--store" | "--global-res" | "--size" | "--flight-frames" | "--tile-format" | "--look" | "--world" | "--prefill-levels" => {
+            "--store" | "--global-res" | "--size" | "--flight-frames" | "--views" | "--tile-format" | "--look" | "--world" | "--prefill-levels" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());
             }
             other => {
                 return Err(format!(
-                    "unknown capture option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out-dir DIR, --size WxH, --flight-frames N, --tile-format, --look F, --world F, --smoke)"
+                    "unknown capture option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out-dir DIR, --size WxH, --flight-frames N, --views A,B, --tile-format, --look F, --world F, --smoke)"
                 ))
             }
         }
@@ -573,7 +573,13 @@ pub fn capture_cmd(root: &Path, args: &[String]) -> Res {
         return Ok(());
     }
     for line in index.lines().filter(|l| !l.starts_with('#') && !l.trim().is_empty()) {
-        let name = line.split_whitespace().next().unwrap_or("");
+        let mut cols = line.split_whitespace();
+        let name = cols.next().unwrap_or("");
+        // A one-frame entry is a still (a PNG), not a video.
+        if cols.next().and_then(|n| n.parse::<usize>().ok()).is_some_and(|n| n < 2) {
+            eprintln!("{name}: a still, {}", dir.join(name).join("frame_0000.png").display());
+            continue;
+        }
         let mp4 = dir.join(format!("{name}.mp4"));
         let a = ffmpeg_args(&dir.join(name), &mp4);
         let refs: Vec<&str> = a.iter().map(String::as_str).collect();
@@ -927,6 +933,16 @@ mod tests {
         let note = t(32.3, true).unwrap();
         assert!(note.contains("whole workspace: reported (BUILD-003)") && note.contains("32.3 s of tests"), "{note}");
         assert!(t(5.0, true).unwrap().contains("5.0 s of tests"));
+    }
+
+    // spec: BUILD-003
+    #[test]
+    fn the_gpu_binaries_terminate_after_300_s_and_every_other_test_after_180_s() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let toml = std::fs::read_to_string(root.join(".config/nextest.toml")).unwrap();
+        assert!(toml.contains(r#"slow-timeout = { period = "60s", terminate-after = 3 }"#), "the default limit is 180 s");
+        let (_, gpu) = toml.split_once("filter = 'binary(/^gpu_/)'").expect("an override for the gpu_ binaries");
+        assert!(gpu.trim_start().starts_with(r#"slow-timeout = { period = "60s", terminate-after = 5 }"#), "300 s for them");
     }
 
     // spec: BUILD-003
