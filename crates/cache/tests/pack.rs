@@ -605,8 +605,10 @@ fn lock_holder_child_process_helper() {
 #[test]
 fn a_writer_process_that_is_killed_releases_its_lock() {
     let d = Dir::new("killed");
+    // The helper's name as libtest knows it: this file is a module of the per-tier binary `it` (BUILD-015), so it is `pack::...` there.
+    let helper = module_path!().split_once("::").map_or(String::new(), |(_, m)| format!("{m}::")) + "lock_holder_child_process_helper";
     let mut child = Command::new(std::env::current_exe().unwrap())
-        .args(["lock_holder_child_process_helper", "--exact", "--nocapture", "--test-threads=1"])
+        .args([helper.as_str(), "--exact", "--nocapture", "--test-threads=1"])
         .env("PLANET_PACK_LOCK_CHILD", d.path())
         .stdout(Stdio::piped())
         .spawn()
