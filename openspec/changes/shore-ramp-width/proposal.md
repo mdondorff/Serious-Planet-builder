@@ -14,3 +14,14 @@ Expected golden changes:
 - sky_orbit_ev15: coastline pixels of the coarse nodes, 3 pixels on WARP
 - sky_aerial20km_ev15: coastline pixels of the 20 km view, 90 pixels on WARP
 - water_class_orbit: coastline pixels of the coarse nodes, 4 pixels on WARP
+
+Bound tests:
+- lit_orbit_ev15: oracle_lit_shading::the_lit_radiance_matches_the_f64_reference_within_its_declared_bound, gpu_water::a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it
+- lit_orbit_ev_bands: oracle_lit_shading::the_lit_radiance_matches_the_f64_reference_within_its_declared_bound
+- lit_aerial20km_ev15: oracle_lit_shading::the_lit_radiance_matches_the_f64_reference_within_its_declared_bound, gpu_water::a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it
+- lit_aerial20km_albedo_ev15: oracle_lit_shading::the_lit_radiance_matches_the_f64_reference_within_its_declared_bound
+- sky_orbit_ev15: oracle_lit_shading::the_lit_radiance_matches_the_f64_reference_within_its_declared_bound
+- sky_aerial20km_ev15: oracle_lit_shading::the_lit_radiance_matches_the_f64_reference_within_its_declared_bound
+- water_class_orbit: gpu_water::a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_changes_under_it
+
+Owner decision folded in (M5 gate 2, 2026-10-18): `water.shore_filter` defaults to 0 (the cheaper shore; `WaterLook::EARTH`, the look spec table, ADR 0053 status line); the other setting of the coastal flights and of the capture is now 1 (`@filter1`, `-filter1`). The seven goldens above are the same ones and move by the same pixels with the new default; the known-answer hashes of `gpu_water` are re-recorded (WARP local and RTX).

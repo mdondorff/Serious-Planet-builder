@@ -362,6 +362,10 @@ pub fn evaluate(files: &WindowFiles) -> Evaluation5 {
                         }
                     }
                     for f in FLIGHT_PATHS {
+                        // The other setting of the shore filter is named by its value: `@filter0` in logs written while the look's default
+                        // was 1, `@filter1` since the owner made it 0 (M5 gate, 2026-10-18).
+                        let f =
+                            if runs_of(&root, &format!("lit/{f}")).is_empty() { f.replace("@filter0", "@filter1") } else { f.to_string() };
                         flights.push(read_view(&root, &format!("lit/{f}"), false).map_err(|e| format!("{e} (flights are report only)")));
                     }
                     lit_source = root.get("protocol").and_then(|p| str_at(p, "source")).unwrap_or("").to_string();
