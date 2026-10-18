@@ -6,6 +6,7 @@
 use crate::camera::Camera;
 use crate::controller::{CameraInput, ControllerParams};
 use crate::freecam::{free_step, keep_clearance, FreeInput, FreePose};
+use crate::mouselook::MouseLook;
 use crate::scenes::{DrawnSet, FRAME_STEP_S};
 use planet_core::{PlanetFixed, TileId};
 
@@ -154,7 +155,7 @@ impl Held {
 
 /// The key bindings, as text for the usage message and the log.
 pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, V next debug view (debug path), T vsync on/off, C flight or free camera, \
-     free camera: WASD move, Q/E down/up, arrows look, Shift boost; Esc quits";
+     free camera: WASD move, Q/E down/up, arrows look, click captures the mouse to look (Esc releases it), Shift boost; Esc quits";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CameraMode {
@@ -174,6 +175,8 @@ pub struct ViewerState {
     pub vsync: bool,
     pub mode: CameraMode,
     pub held: Held,
+    /// Mouse look of the free camera (VIEW-010): the grab state and the raw motion since the last frame.
+    pub mouse: MouseLook,
     /// The lit path is shown (VIEW-007); the debug path otherwise.
     pub lit: bool,
     /// The next lit frame snaps the exposure (a first lit frame, a return to the lit path, a restart of the flight).
@@ -192,6 +195,7 @@ impl ViewerState {
             vsync,
             mode: CameraMode::Flight,
             held: Held::default(),
+            mouse: MouseLook::new(),
             lit: false,
             exposure_reset: true,
             user_paused: false,
@@ -229,6 +233,7 @@ impl ViewerState {
                 self.exposure_reset = true;
                 self.user_paused = false;
                 self.mode = CameraMode::Flight;
+                self.mouse.release();
                 self.clock.restart(now_ms);
             }
             // The debug views belong to the debug path; on the lit path V does nothing.
@@ -249,6 +254,7 @@ impl ViewerState {
                 }
                 CameraMode::Free(_) => {
                     self.mode = CameraMode::Flight;
+                    self.mouse.release();
                     if !self.user_paused {
                         self.clock.resume(now_ms);
                     }
@@ -257,6 +263,12 @@ impl ViewerState {
             Command::Quit => return true,
         }
         false
+    }
+
+    /// The window lost the focus (VIEW-010): the mouse is released and no key stays down.
+    pub fn focus_lost(&mut self) {
+        self.mouse.focus_lost();
+        self.held = Held::default();
     }
 
     /// The camera of this frame. In flight mode it is the script's at the clock's time; in free mode the pose moves by `dt` seconds
@@ -275,7 +287,9 @@ impl ViewerState {
             CameraMode::Flight => camera_at(cameras, self.clock.time_s(now_ms)),
             CameraMode::Free(pose) => {
                 let shape = cameras[0];
-                let moved = free_step(*pose, &self.held.input(), dt_s, height_m(pose.position), params);
+                // The mouse's turn of this frame rides on the held keys' input: counts x sensitivity, not scaled by `dt_s`.
+                let input = FreeInput { look_delta_rad: self.mouse.take_delta(), ..self.held.input() };
+                let moved = free_step(*pose, &input, dt_s, height_m(pose.position), params);
                 *pose = keep_clearance(moved, ground_radius_m(moved.position), params.min_clearance_m);
                 pose.camera(shape.fov_y_rad, shape.aspect, shape.near_m)
             }
@@ -747,6 +761,63 @@ mod tests {
         let i = Held { forward: true, back: true, ..Held::default() }.input();
         assert_eq!(i.keys.forward, 0.0);
         assert_eq!(i.look_delta_rad, [0.0, 0.0]);
+    }
+
+    // spec: VIEW-010
+    #[test]
+    fn the_mouse_turns_the_free_camera_by_counts_times_sensitivity_and_not_the_flight() {
+        let cams = script(600);
+        let p = ControllerParams::default();
+        let h = |_: PlanetFixed| 5000.0;
+        let g = |_: PlanetFixed| 6.0e6;
+        let mut v = ViewerState::new(0, 9, 7, true);
+        let before = v.camera(&cams, 1000, 0.016, &p, &h, &g);
+        // In the scripted flight a click does not capture, and motion changes nothing.
+        v.mouse.click(v.is_free());
+        v.mouse.motion(300.0, 0.0);
+        assert!(!v.mouse.captured());
+        v.command(Command::ToggleCamera, 1000, &before);
+        v.mouse.click(v.is_free());
+        assert!(v.mouse.captured());
+        let b = v.camera(&cams, 1000, 0.016, &p, &h, &g);
+        v.mouse.motion(100.0, -50.0);
+        let turned = v.camera(&cams, 1016, 0.016, &p, &h, &g);
+        // The camera turned right by 100 counts and up by 50, whatever the frame time.
+        let (pb, pt) = (FreePose::from_camera(&b), FreePose::from_camera(&turned));
+        let yaw = libm::acos(pb.heading.dot(pt.heading).clamp(-1.0, 1.0));
+        assert!((yaw - 100.0 * crate::mouselook::SENSITIVITY_RAD_PER_COUNT).abs() < 1e-9, "yaw {yaw}");
+        assert!((pt.pitch - pb.pitch - 50.0 * crate::mouselook::SENSITIVITY_RAD_PER_COUNT).abs() < 1e-9, "pitch {}", pt.pitch - pb.pitch);
+        assert!(pb.heading.cross(pt.heading).dot(pb.up()).is_sign_negative(), "a turn to the right is clockwise seen from above");
+        // The same counts over a frame of 1 ms and of 1 s turn by the same angle.
+        let turn_for = |dt: f64| {
+            let mut w = v;
+            w.mouse.motion(40.0, 0.0);
+            let before = FreePose::from_camera(&w.camera(&cams, 2000, 0.0, &p, &h, &g));
+            w.mouse.motion(40.0, 0.0);
+            let after = FreePose::from_camera(&w.camera(&cams, 2000, dt, &p, &h, &g));
+            libm::acos(before.heading.dot(after.heading).clamp(-1.0, 1.0))
+        };
+        assert!((turn_for(0.001) - turn_for(1.0)).abs() < 1e-9);
+        // Leaving the free camera (C) releases the mouse, and a restart does too.
+        let free_camera = v.camera(&cams, 3000, 0.016, &p, &h, &g);
+        v.command(Command::ToggleCamera, 3000, &free_camera);
+        assert!(!v.mouse.captured() && !v.is_free());
+        v.mouse.click(true);
+        v.command(Command::Restart, 4000, &free_camera);
+        assert!(!v.mouse.captured());
+    }
+
+    // spec: VIEW-010
+    #[test]
+    fn focus_loss_releases_the_mouse_and_lets_go_of_every_held_key() {
+        let mut v = ViewerState::new(0, 9, 7, true);
+        v.held = Held { forward: true, look_left: true, boost: true, ..Held::default() };
+        v.mouse.click(true);
+        v.mouse.take_grab_change();
+        v.focus_lost();
+        assert_eq!(v.held, Held::default(), "no key stays down after Alt-Tab");
+        assert!(!v.mouse.captured());
+        assert_eq!(v.mouse.take_grab_change(), Some(crate::mouselook::GrabChange::Release));
     }
 
     fn tile(level: u8, x: u32, y: u32) -> TileId {
