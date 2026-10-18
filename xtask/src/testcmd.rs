@@ -1,4 +1,5 @@
 use crate::layering::CHAIN;
+use crate::testlog;
 use crate::util::{capture, files_with_ext, run, Res};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -120,6 +121,26 @@ fn budget_verdict(test_secs: f64, whole_workspace: bool) -> Budget {
     }
 }
 
+/// The process budget of the owner (2026-10-18; BUILD-014): the build and the tests of a `test fast` run together, from an edit to the
+/// first test result, take at most this many seconds.
+pub const EDIT_TO_TEST_BUDGET_SECS: f64 = 30.0;
+
+/// The line `test fast` prints for its edit-to-first-test time (build plus test wall time), and whether the budget is exceeded.
+/// A warning, never a failure (BUILD-014).
+fn edit_to_first_test_line(build_secs: f64, test_secs: f64) -> (String, bool) {
+    let total = build_secs + test_secs;
+    if total > EDIT_TO_TEST_BUDGET_SECS {
+        (
+            format!(
+                "BUDGET EXCEEDED: edit-to-first-test {total:.0} s > {EDIT_TO_TEST_BUDGET_SECS:.0} s (build {build_secs:.1} s + tests {test_secs:.1} s); make it a Tracked item in docs/status.md (BUILD-014)"
+            ),
+            true,
+        )
+    } else {
+        (format!("edit-to-first-test {total:.1} s (build {build_secs:.1} s + tests {test_secs:.1} s; budget {EDIT_TO_TEST_BUDGET_SECS:.0} s)"), false)
+    }
+}
+
 /// The ref a branch is compared with to find its changed files: the remote `origin/main` when there is one, else `main`. A
 /// worktree's local `main` is whatever the primary checkout last pulled, often hundreds of commits behind, and against it every
 /// change looks like "everything changed" (BUILD-003).
@@ -228,17 +249,43 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
     cmd.extend(passthrough.iter().map(|s| s.to_string()));
     // The compile is timed apart from the tests: the budget is for the tests (BUILD-003), and an incremental compile of the
     // changed crate is the compiler's time.
+    // The whole output goes to a log file too (BUILD-012), whose path is printed at the end, pass or fail.
+    let secs_now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    // A log that cannot be created is a warning: the tests still run, on the console only.
+    let log = match testlog::new_log(&root.join(testlog::DIR), &testlog::command_key(sub, real), secs_now) {
+        Ok(p) => Some(p),
+        Err(e) => {
+            eprintln!("warning: no test log this run ({e})");
+            None
+        }
+    };
+    let log_path = log.as_ref().map(|l| l.strip_prefix(root).unwrap_or(l).display().to_string().replace('\\', "/"));
+    let say_log = || {
+        if let Some(p) = &log_path {
+            eprintln!("full output: {p}");
+        }
+    };
+    let go = |args: &[&str]| match &log {
+        Some(l) => testlog::run_logged(root, "cargo", args, &env, l),
+        None => run(root, "cargo", args, &env),
+    };
     let built = Instant::now();
     let mut build: Vec<&str> = vec!["nextest", "run", "--no-run"];
     build.extend(selection.iter().map(String::as_str));
-    run(root, "cargo", &build, &env)?;
+    if let Err(e) = go(&build) {
+        say_log();
+        return Err(e);
+    }
     let build_secs = built.elapsed().as_secs_f64();
     let started = Instant::now();
     let args: Vec<&str> = cmd.iter().map(String::as_str).collect();
-    let result = run(root, "cargo", &args, &env);
+    let result = go(&args);
 
     let secs = started.elapsed().as_secs_f64();
     eprintln!("elapsed {secs:.1}s (tests; build {build_secs:.1}s)");
+    if sub == Some("fast") {
+        eprintln!("{}", edit_to_first_test_line(build_secs, secs).0);
+    }
     if sub == Some("fast") {
         match budget_verdict(secs, whole) {
             Budget::Within => {}
@@ -264,6 +311,7 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
             eprintln!("{} candidate golden(s) wait for the owner's /bless (`cargo xtask bless` lists them)", pending.len());
         }
     }
+    say_log();
     result.map(|()| TestTiming { test_secs: secs, whole })
 }
 
@@ -328,21 +376,6 @@ fn candidates(root: &Path) -> Vec<(String, String)> {
         }
     }
     out
-}
-
-pub fn bless_list(root: &Path) -> Res {
-    let c = candidates(root);
-    if c.is_empty() {
-        eprintln!("no candidate goldens in target/review/candidates/");
-        return Ok(());
-    }
-    for (adapter, name) in c {
-        let golden = root.join("tests").join("goldens").join(&adapter).join(&name);
-        let state = if golden.is_file() { "differs from golden" } else { "no golden yet" };
-        eprintln!("{adapter}/{name}: {state}");
-    }
-    eprintln!("Promotion is owner-only: run /bless in a Claude Code session and answer each prompt.");
-    Ok(())
 }
 
 pub fn repro(root: &Path, args: &[String]) -> Res {
@@ -814,6 +847,18 @@ mod tests {
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+
+    // spec: BUILD-014
+    #[test]
+    fn the_edit_to_first_test_time_is_reported_and_flagged_over_30_s_build_plus_tests() {
+        let (line, over) = edit_to_first_test_line(12.0, 9.5);
+        assert!(!over && line == "edit-to-first-test 21.5 s (build 12.0 s + tests 9.5 s; budget 30 s)", "{line}");
+        let (_, at) = edit_to_first_test_line(20.0, 10.0);
+        assert!(!at, "exactly 30 s is within the budget");
+        let (line, over) = edit_to_first_test_line(49.0, 13.2);
+        assert!(over && line.starts_with("BUDGET EXCEEDED: edit-to-first-test 62 s > 30 s (build 49.0 s + tests 13.2 s)"), "{line}");
+        assert!(line.contains("Tracked item in docs/status.md"), "{line}");
     }
 
     // spec: TEST-019
