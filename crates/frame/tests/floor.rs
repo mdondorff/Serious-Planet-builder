@@ -6,9 +6,9 @@ use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::{PlanetFixed, TileId, Vec3};
 use planet_frame::pipeline::{ResidentRecords, ResidentTile};
 use planet_frame::{
-    check_explicit_floor, cover_selection_bounded, first_empty_morph_interval, floor_tiles, plan_terrain, plan_terrain_field,
-    production_finest_level, residency_set_field, scripted_views, scripted_views_field, Camera, LodParams, SelectedNode, SelectionCache,
-    TerrainPlan, TerrainRequest, TerrainView, TileBounds, DEFAULT_RENDER_FLOOR,
+    check_explicit_floor, cover_selection_bounded, first_empty_morph_interval, floor_tiles, plan_terrain, plan_terrain_cached,
+    plan_terrain_field, production_finest_level, residency_set_field, scripted_views, scripted_views_field, Camera, LodParams,
+    SelectedNode, SelectionCache, TerrainPlan, TerrainRequest, TerrainView, TileBounds, DEFAULT_RENDER_FLOOR,
 };
 use planet_generators::height::Reference;
 use std::collections::HashMap;
@@ -245,5 +245,41 @@ fn at_floor_3_the_cover_with_r_resident_equals_the_plan_and_with_only_the_roots_
         let roots: HashMap<TileId, ResidentTile> = floor_tiles(&lod).into_iter().map(|t| (t, records.record(t))).collect();
         let cover = cover_selection_bounded(&TangentWarp, &camera, &lod, &|t| roots.get(&t).map(|r| r.origin), &bounds);
         assert!(!cover.is_empty() && cover.iter().all(|t| t.level() == 3 && roots.contains_key(t)), "{name}: the visible roots");
+    }
+}
+
+// spec: LOD-009, LOD-011
+#[test]
+fn a_change_of_the_render_floor_starts_the_reused_values_over_and_every_plan_equals_the_plan_of_a_fresh_cache() {
+    let (_, camera) = views().into_iter().nth(1).unwrap();
+    let request = |floor: u8| TerrainRequest {
+        camera,
+        size: SIZE,
+        view: TerrainView::Level,
+        lod: production(floor),
+        face_mapping: TangentWarp.id().to_string(),
+        seed: 1,
+    };
+    let field = Reference(1);
+    let mut cache = SelectionCache::new();
+    let warm0 = plan_terrain_cached(&request(0), &field, &mut cache).unwrap();
+    let misses = cache.misses();
+    assert!(misses > 0);
+    assert_eq!(plan_terrain_cached(&request(0), &field, &mut cache).unwrap(), warm0, "a warm plan is the first plan");
+    assert_eq!(cache.misses(), misses, "and computes no tile again");
+    // The floor changes: everything is computed again, and the plan is the plan of a fresh cache at that floor.
+    let at3 = plan_terrain_cached(&request(3), &field, &mut cache).unwrap();
+    assert!(cache.misses() > misses, "the reused values start over when the floor changes");
+    assert_eq!(at3, plan_terrain_field(&request(3), &field).unwrap());
+    let back = plan_terrain_cached(&request(0), &field, &mut cache).unwrap();
+    assert_eq!(back, warm0, "and back again");
+}
+
+// spec: LOD-011, STRM-001
+#[test]
+fn the_roots_of_the_streamer_and_of_the_selection_are_the_same_tiles_at_every_floor() {
+    for floor in 0..=4u8 {
+        assert_eq!(planet_streaming::floor_roots(floor), floor_tiles(&production(floor)), "floor {floor}");
+        assert_eq!(planet_streaming::StreamConfig { floor, ..Default::default() }.roots().len(), 6 * 4usize.pow(u32::from(floor)));
     }
 }

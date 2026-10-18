@@ -410,6 +410,55 @@ cells 17
     assert!(TerrainBundle::from_text("planet-terrain-repro 9\n---\n").unwrap_err().contains("unsupported"));
 }
 
+// spec: TEST-008, LOD-011
+#[test]
+fn a_bundle_records_the_render_floor_and_one_without_min_level_replays_as_floor_0() {
+    use planet_frame::TerrainBundle;
+    // The orbit view, whose plan depends on the floor (14 nodes at floor 0, 181 at floor 3 at this size).
+    let (_, camera) = scripted_views(R, 4.0 / 3.0, 1)[0];
+    let bundle_of = |floor: u8| {
+        let request = TerrainRequest {
+            camera,
+            size: (128, 96),
+            view: TerrainView::Level,
+            lod: LodParams { min_level: floor, ..lod() },
+            face_mapping: "tangent-v1".into(),
+            seed: 7,
+        };
+        let plan = plan_terrain(&request).unwrap();
+        TerrainBundle {
+            generator_version: 2,
+            implementation_id: "cpu-ref-height-v2".into(),
+            mesh_version: planet_generators::mesh::MESH_VERSION,
+            definition_hash: 0,
+            adapter: "test-adapter".into(),
+            world: None,
+            request,
+            plan,
+        }
+    };
+    for floor in [3u8, 0] {
+        let bundle = bundle_of(floor);
+        let text = bundle.to_text();
+        assert!(text.contains(&format!("max_level 26 min_level {floor} morph_band")), "the lod line names the floor: {text}");
+        let back = TerrainBundle::from_text(&text).unwrap();
+        assert_eq!(back.request.lod.min_level, floor);
+        assert_eq!(back, bundle, "floor {floor}: the bundle round trips");
+        assert!(plan_terrain(&back.request).unwrap().diff(&back.plan).is_empty(), "floor {floor}: the replayed plan is the recorded one");
+    }
+    // A bundle written before the floor has no `min_level`: it replays as floor 0, the plan it recorded.
+    let old = bundle_of(0).to_text().replacen(" min_level 0", "", 1);
+    assert!(!old.contains("min_level"));
+    let back = TerrainBundle::from_text(&old).unwrap();
+    assert_eq!(back.request.lod.min_level, 0);
+    assert!(plan_terrain(&back.request).unwrap().diff(&back.plan).is_empty(), "replays as the floor-0 plan it recorded");
+    // The same text of a floor-3 plan without the token replays as floor 0 and so reports the difference in numbers.
+    let stripped = bundle_of(3).to_text().replacen(" min_level 3", "", 1);
+    let back = TerrainBundle::from_text(&stripped).unwrap();
+    assert_eq!(back.request.lod.min_level, 0);
+    assert!(!plan_terrain(&back.request).unwrap().diff(&back.plan).is_empty());
+}
+
 // spec: TEST-008
 #[test]
 fn a_world_bundle_records_the_definition_and_bake_and_a_version_one_bundle_still_reads() {

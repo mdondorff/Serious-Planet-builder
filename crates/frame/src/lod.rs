@@ -39,6 +39,13 @@ pub struct LodParams {
 /// The production render floor (LOD-011, ADR 0062 point 3): levels 0 to 2 are not drawn, the 384 tiles of level 3 are the roots.
 pub const DEFAULT_RENDER_FLOOR: u8 = 3;
 
+/// The effective render floor of a floor asked for and a finest level: the lower of the two (LOD-011), so a body whose finest level
+/// is 0 to 2 draws down to its finest level without a flag. The one place the rule is written (`LodParams::floor_level` and the
+/// application's options take it from here).
+pub fn effective_floor(min_level: u8, max_level: u8) -> u8 {
+    min_level.min(max_level)
+}
+
 /// An explicit render floor (`--floor-level N`) must not lie above the finest level (LOD-011): it is refused before any work, with an
 /// error naming both values. The default floor needs no check: the effective floor is [`LodParams::floor_level`], the lower of the two.
 pub fn check_explicit_floor(floor: u8, max_level: u8) -> Result<(), String> {
@@ -104,7 +111,7 @@ impl LodParams {
     /// The effective render floor (LOD-011): `min(min_level, max_level)`, so a body whose finest level is 0 to 2 draws down to its
     /// finest level without a flag. Every tile of this level is a root; there are `6 * 4^floor` of them (384 at floor 3).
     pub fn floor_level(&self) -> u8 {
-        self.min_level.min(self.max_level)
+        effective_floor(self.min_level, self.max_level)
     }
 
     /// Distance (to the node's bounding volume, LOD-008) below which a node of `level` is split.

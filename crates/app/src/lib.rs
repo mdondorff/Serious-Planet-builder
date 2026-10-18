@@ -208,7 +208,7 @@ impl Options {
     /// The effective render floor of a run with tiles of `cells` cells: `min(min_level, finest level)` (LOD-011), the level whose
     /// tiles are the roots and the first level the pre-fill writes.
     pub fn floor_for(&self, cells: u32) -> u8 {
-        self.min_level().min(self.finest_level_for(cells))
+        planet_frame::effective_floor(self.min_level(), self.finest_level_for(cells))
     }
 
     /// An explicit `--floor-level` above the finest level is refused, naming both (LOD-011): checked before any work.
@@ -1122,6 +1122,8 @@ mod tests {
         // Refusals: a floor above the finest level names both values; the viewer takes no flag; other generate commands would ignore it.
         let e = gen(&["--prefill-dir", &b, "--floor-level", "5", "--finest-level", "4", "--prefill-levels", "2"]).unwrap_err();
         assert!(e.contains("--floor-level 5") && e.contains("finest level 4"), "{e}");
+        let e = run_str(&["test-render", "--scene", "terrain", "--repro", "bundle.txt", "--floor-level", "3"]).unwrap_err();
+        assert!(e.contains("does not apply to --repro"), "{e}");
         let e = run_str(&["editor", "--floor-level", "3"]).unwrap_err();
         assert!(e.contains("the viewer takes no flag"), "{e}");
         let e = gen(&["--verify-global", &a, "--floor-level", "3"]).unwrap_err();
