@@ -252,7 +252,7 @@ fn the_managed_loop_requests_cancels_evicts_and_uploads_exactly_as_before() {
 // Re-recorded by `remove-vertex-render-path` (ADR 0062): the third script (cap 250, 8 in flight, jobs 100) ran with a small vertex pool of 64 slots for
 // levels 0-2 before; there is one pool now, so its digest moved from 5616887668897300662. The first two scripts (no vertex pool) are unchanged.
 const STREAMER_DIGESTS: [u64; 3] = [15300534013828900970, 689671829587726302, 10625407479935128016];
-// Re-recorded with the compact slot of 9,168 B (the sink counts compact tiles at 9,168 B, GEN-025; the first and third digests moved, the second uses no budget). Before: MESH_VERSION 7: the vertex tiles the loop uploads are 58,608 B (the climate of each vertex, ADR 0039 point 2) and the keys name the climate version. The streamer digests above did not move.
+// Re-recorded with the compact slot of 9,168 B (the sink counts compact tiles at 9,168 B, GEN-025; the first and third digests moved, the second uses no budget). Before: the loop uploaded 58,608 B vertex tiles. The streamer digests above did not move.
 // Re-pinned by render-floor-3 (STRM-001): the start-up load of the roots is exempt from the upload cap, so frame 0 writes the six roots
 // without spending its allowance on them; the first and third digests (the two that run under the 40,000 B cap) moved, the second (the
 // default cap and 0-byte tiles) is unchanged; the totals of the counters in the log (resident, uploads, evicted) did not move.

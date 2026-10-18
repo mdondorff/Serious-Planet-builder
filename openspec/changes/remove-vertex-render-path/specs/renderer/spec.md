@@ -4,7 +4,7 @@
 `render` SHALL offer a test-only reference renderer (`render::reference`, behind the cargo feature `reference-renderer`, ADR 0062 point 1) that draws a `TerrainPlan` from CPU `TileMesh`es in the debug views, with one pipeline and one vertex buffer per tile, so that the compact renderer's image tests keep an independent geometry source. It SHALL have no pools, no fallback, no lit path, no atmosphere and no water, and SHALL refuse a plan with a lit part. It SHALL NOT be a second production path: the feature is off by default and no product crate and no non-dev dependency edge enables it (BUILD-001).
 
 Verify: C
-Status: planned
+Status: active
 Source: ADR 0062, SPIKE-12 Q4, REND-016
 
 #### Scenario: Reference against the compact renderer
@@ -47,6 +47,21 @@ Source: CON-20, CON-21, ADR 0013, ADR 0033 point 3
 #### Scenario: Full pool
 - **WHEN** every slot is in use or still in flight and another tile is uploaded
 - **THEN** the upload fails with the tile id, and succeeds into the freed slot once a frame has retired it
+
+### Requirement: REND-014 Vertex-shader morph
+The terrain vertex shader SHALL morph each vertex from its own position towards its parent-grid position, and its height towards the parent-grid height, by the factor `clamp((d - start) / (end - start), 0, 1)`, where `d` is the camera distance to the vertex's own position and `start`, `end` are the node's morph interval from the plan; the shader SHALL read no other morph input. The CPU twin is checked on the reference renderer's copy of the shader (REND-031: the same WGSL head and tail as the compact shader, with the vertex stage reading a vertex buffer); the compact vertex stage's morph is checked against the reference by the differential of REND-016 with every vertex morphed to the parent grid. The `morph-height` debug view SHALL show the morphed height minus the vertex's own height over the plan's height range as the delta window.
+
+Verify: B
+Status: active
+Source: CON-11, ADR 0014, ADR 0016
+
+#### Scenario: GPU against CPU twin
+- **WHEN** the morph debug view of a scripted view is rendered on the software adapter
+- **THEN** at every visible interior vertex the red channel equals the f64 CPU value of the formula within the steepest neighbour step plus 2/255, and the worst error stays below 0.05
+
+#### Scenario: Height against CPU twin
+- **WHEN** the morph-height debug view of the 2,000 km and 200 km views is rendered on the software adapter with the plan's height range set to plus and minus the median nonzero height morph delta
+- **THEN** at visible interior vertices whose pixel centre is within 0.15 px, the grey value equals the CPU value (morph factor times the vertex's coarse-minus-own height, as a fraction of the window) within the derived neighbour bound (interpolation share scaled by 5, because adjacent vertices alternate between morphed and not) plus 2/255, the worst error stays below a quarter of the window, at least 60 compared vertices show a morph, and a shader that leaves the height unmorphed fails
 
 ### Requirement: REND-015 Indirect multi-draw
 The terrain renderer SHALL be able to submit a plan's draws as indirect multi-draws built from the plan on the CPU: one `DrawIndexedIndirect` record per planned node in the plan's order (`first_instance` = the node's index, `base_vertex` 0, because a compact tile has no vertex buffer and the vertex stage pulls from the block (ADR 0054), `instance_count` 1, the index count of the tile grid), grouped into runs of consecutive nodes that sit in one block of the pool, one `multi_draw_indexed_indirect` per run, with the per-node records in a storage buffer the shader indexes with the instance index. The per-draw loop SHALL remain, selectable (`--draw per-draw|indirect`), as the fallback where the adapter lacks `INDIRECT_FIRST_INSTANCE` or indirect execution, and as the reference: both paths SHALL draw identical images for the same plan. The records SHALL come from the plan and the slots alone (no GPU-side culling or decisions, CON-03); per-frame globals, node records and argument records SHALL live in a ring so a frame in flight is never overwritten (STRM-016); shaders SHALL read only camera-relative and tile-local values (REND-005). The bytes written per frame for node and argument records SHALL be reported (TEST-011).

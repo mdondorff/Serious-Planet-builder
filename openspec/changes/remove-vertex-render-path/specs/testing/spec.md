@@ -27,6 +27,17 @@ Source: CON-20, M4 item 7d, LOD-010, GEN-025, ADR 0062
 - **WHEN** a compact tile is uploaded
 - **THEN** the bytes counted are its slot (9,168 B at cells 32, GEN-025), and the pinned upload bytes of the standard views are re-pinned with that change and its reason
 
+### Requirement: TEST-030 Log path of a single scene
+`--out` of a single scene (`perf stream <scene>`, `perf lit`) SHALL take a directory (existing, or a path without an extension) and write `<scene>[-lit].json` inside it, or a path ending in `.json` as the file. Any other value SHALL be refused by the option check before the case runs, naming the file name the directory would get.
+
+Verify: A
+Status: active
+Source: window 6 (single-scene `--out DIR`), TEST-019, TEST-025
+
+#### Scenario: Out path
+- **WHEN** `--out` is an existing directory, a new path without extension, a `.json` path, or an existing `.txt` file, for a streaming scene and for a lit scene
+- **THEN** the log path is `<dir>/<scene>-lit.json`, the same under the new directory, the file itself, and a refusal by the option check before the case
+
 ### Requirement: TEST-024 Store check in the smoke run
 A smoke run over a stored bake (`test-render --perf-smoke --scene S --store DIR`, `cargo xtask perf stream S --smoke --store DIR`) SHALL first check the store read-only and print the result before any scene: the store, `GLOBAL_VERSION` and `MESH_VERSION`, the ocean channel read at a fixed grid of 288 directions (12 latitudes by 24 longitudes) with the counts of sea and land, and the number of tiles of levels F to L (`--prefill-levels L`, default 4; F is the render floor, LOD-011, default 3) the tile pack holds, each present tile read and decoded through the pack's checks. The run SHALL fail before any scene, naming the problem and the command that fixes it, when the store has no ocean channel, when the channel reads all land or all sea on the grid, or when the pack lacks tiles of levels F to L (the compact form, the only form). The check SHALL write nothing to the store, and the smoke run is labelled as no measurement.
 
