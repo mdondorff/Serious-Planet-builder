@@ -225,7 +225,13 @@ pub fn summarize_log(text: &[u8]) -> Result<LogSummary, String> {
         let entry = samples.entry(path.clone()).or_default();
         for key in ["clocks_before", "clocks_after"] {
             let point = run.get(key).and_then(|c| match (c.get("pstate"), c.get("graphics_mhz").and_then(Json::num)) {
-                (Some(Json::Str(p)), Some(mhz)) => Some(ClockPoint { pstate: p.clone(), mhz }),
+                (Some(Json::Str(p)), Some(mhz)) => {
+                    let throttle = match c.get("throttle_reasons") {
+                        Some(Json::Str(t)) => t.clone(),
+                        _ => String::new(),
+                    };
+                    Some(ClockPoint { pstate: p.clone(), mhz, throttle })
+                }
                 _ => None,
             });
             points.entry(path.clone()).or_default().push(point);

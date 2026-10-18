@@ -17,7 +17,7 @@ use crate::accept::{
 };
 use crate::clock::{ClockState, GpuValidity};
 use crate::compare::{parse, Json};
-use crate::lit::{pass_rows_line, view_verdicts, LitVerdict, Status};
+use crate::lit::{pass_rows_line, LitVerdict, Status};
 use crate::prefill::PrefillState;
 use crate::Stats;
 
@@ -249,7 +249,7 @@ fn read_view(root: &Json, path: &str, gated: bool) -> Result<ViewRead, String> {
     let counts = |k: &str| runs.iter().filter_map(|r| r.get("counts").and_then(|c| count(c, k))).max().unwrap_or(0);
     // Water must be in every run of the view, not in one of them: the smallest count decides.
     let water_min = runs.iter().map(|r| r.get("counts").and_then(|c| count(c, "water_nodes")).unwrap_or(0)).min().unwrap_or(0);
-    let rows = view_verdicts(&metrics, &frame, &gpu, gated, water_min, true);
+    let rows = crate::lit::view_verdicts_with(&metrics, &frame, &gpu, gated, water_min, true, crate::lit::water_budget_ms(path));
     let mut facts = vec![format!(
         "{} run(s); waited frame median {:.3} / p99 {:.3} / max {:.3} ms; GPU clock state {}",
         runs.len(),
@@ -1011,6 +1011,37 @@ mod tests {
         }
     }
 
+    // spec: TEST-034
+    #[test]
+    fn a_view_recorded_below_the_floor_at_a_power_capped_p0_is_derived_valid_and_the_difference_is_printed() {
+        // Window 9's coast 3 m: the run recorded `gpu_valid` false at P0 1,290 MHz; its samples carry the power cap only.
+        let sample = |mhz: u32, pstate: &str| {
+            format!("{{\"graphics_mhz\":{mhz},\"pstate\":\"{pstate}\",\"temperature_c\":70,\"power_w\":90,\"throttle_reasons\":\"0x0000000000000004\"}}")
+        };
+        let log = |pstate: &str| {
+            let run = format!(
+                "{{\"path\":\"lit/coast-3m\",\"median_ms\":5.8,\"gpu_valid\":false,\"gpu_clock_state\":\"P0 1290 MHz, below the 1400 MHz floor\",\"clocks_before\":{},\"clocks_after\":{}}}",
+                sample(1290, pstate),
+                sample(1300, pstate)
+            );
+            parse(
+                format!("{{\"valid_for_budgets\":true,\"frame_valid\":true,\"gpu_session_valid\":true,\"warnings\":[],\"runs\":[{run}]}}")
+                    .as_bytes(),
+            )
+            .unwrap()
+        };
+        let root = log("P0");
+        let runs = runs_of(&root, "lit/coast-3m");
+        let (gpu, note) = gpu_validity_of(&root, &runs);
+        assert!(gpu.is_valid(), "{gpu:?} {:?}", crate::validity::session_verdict_notes(&root));
+        assert!(note.is_some_and(|n| n.contains("judged again")));
+        // In P2 (the cap beside another state) the verdict stays below the floor, as recorded: no difference to print.
+        let root = log("P2");
+        let runs = runs_of(&root, "lit/coast-3m");
+        let (gpu, note) = gpu_validity_of(&root, &runs);
+        assert!(matches!(gpu, GpuValidity::Below(..)) && note.is_none(), "{gpu:?} {note:?}");
+    }
+
     // spec: TEST-026
     #[test]
     fn a_valid_window_within_the_budgets_passes_and_the_report_has_the_gated_and_report_only_parts_and_the_slots() {
@@ -1034,7 +1065,7 @@ mod tests {
             "## Compact against vertex (report only)",
             "orbit: compact / vertex GPU time ratio",
             "lit/orbit | atmosphere (sky view + aerial perspective + composite) median | pass | 0.800 ms against 1 ms",
-            "lit/coast-3m | water (pass + scene copy) median | pass | 1.500 ms against 2 ms",
+            "lit/coast-3m | water (pass + scene copy) median | pass | 1.500 ms against 2.2 ms",
             "dive-lit | ",
             "## dive-fast on the lit path",
             "## dive-cold on the lit path",

@@ -33,11 +33,14 @@ pub const WARMUP_MIN_CHUNK_S: f64 = 1.0;
 pub struct ClockPoint {
     pub pstate: String,
     pub mhz: f64,
+    /// The sample's `clocks_throttle_reasons.active` mask as `nvidia-smi` prints it; empty when the log does not carry it (then the
+    /// power-cap rule of [`gpu_validity`] cannot apply).
+    pub throttle: String,
 }
 
 impl From<&ClockSample> for ClockPoint {
     fn from(c: &ClockSample) -> Self {
-        Self { pstate: c.pstate.clone(), mhz: c.graphics_mhz }
+        Self { pstate: c.pstate.clone(), mhz: c.graphics_mhz, throttle: c.throttle_reasons.clone() }
     }
 }
 
@@ -102,14 +105,29 @@ pub fn view_clock_state(points: &[Option<ClockPoint>]) -> Result<ClockState, Str
     Ok(ClockState { pstate: states.join("/"), mhz: median })
 }
 
+/// Whether the clock below the floor is the laptop's sustained clock (ADR 0060): every sample reads P0, none reports a throttle
+/// reason that changes the measurement (hardware slowdown, thermal, power brake, or one that cannot be read) and at least one reports
+/// the software power cap (`0x4`), the only reason for the slow clock.
+pub fn power_capped_p0(points: &[ClockPoint]) -> bool {
+    !points.is_empty()
+        && points.iter().all(|p| p.pstate == "P0" && !crate::gate::is_throttling(&p.throttle))
+        && points.iter().any(|p| crate::gate::has_power_cap(&p.throttle))
+}
+
 /// ADR 0036 point 2: a view is valid for GPU figures only if every sample exists and reads at least
 /// [`GPU_CLOCK_FLOOR_MHZ`]; the P-state does not matter (P2 at 1,710 MHz is valid, P0 at 1,200 MHz is not). One sample
-/// below the floor, or an unreadable one, invalidates the view.
+/// below the floor, or an unreadable one, invalidates the view. ADR 0060: except a view whose samples all read P0 with the software
+/// power cap as their only throttle reason ([`power_capped_p0`]), which is valid whatever its clock; below the floor in any other
+/// state ADR 0057 point 2 applies (the figure within budget passes, over it is inconclusive).
 pub fn gpu_validity(points: &[Option<ClockPoint>]) -> GpuValidity {
     let state = match view_clock_state(points) {
         Ok(s) => s,
         Err(e) => return GpuValidity::Invalid(e),
     };
+    let all: Vec<ClockPoint> = points.iter().flatten().cloned().collect();
+    if power_capped_p0(&all) && all.iter().all(|p| !p.mhz.is_nan()) {
+        return GpuValidity::Valid(state);
+    }
     // Any sample not at or above the floor (a NaN reads as below) invalidates; the reason names the lowest such sample.
     let low = points.iter().flatten().filter(|p| p.mhz.is_nan() || p.mhz < GPU_CLOCK_FLOOR_MHZ).min_by(|a, b| a.mhz.total_cmp(&b.mhz));
     let reason = |l: &ClockPoint| format!("{} {:.0} MHz, below the {GPU_CLOCK_FLOOR_MHZ:.0} MHz floor", l.pstate, l.mhz);
@@ -254,7 +272,39 @@ mod tests {
     use super::*;
 
     fn p(pstate: &str, mhz: f64) -> Option<ClockPoint> {
-        Some(ClockPoint { pstate: pstate.into(), mhz })
+        Some(ClockPoint { pstate: pstate.into(), mhz, throttle: String::new() })
+    }
+
+    fn pm(pstate: &str, mhz: f64, mask: &str) -> Option<ClockPoint> {
+        Some(ClockPoint { pstate: pstate.into(), mhz, throttle: mask.into() })
+    }
+
+    // spec: TEST-034
+    #[test]
+    fn a_power_capped_p0_view_is_valid_whatever_its_clock_and_nothing_else_below_the_floor_is() {
+        const CAP: &str = "0x0000000000000004";
+        // ADR 0060: P0 below the floor with the software power cap as the only throttle reason (window 9's coast views) is valid.
+        let capped = gpu_validity(&[pm("P0", 1245.0, CAP), pm("P0", 1290.0, CAP), pm("P0", 1365.0, CAP)]);
+        assert_eq!(capped, GpuValidity::Valid(ClockState { pstate: "P0".into(), mhz: 1290.0 }));
+        // The cap is still the only reason when idle and applications-clock bits ride along.
+        assert!(gpu_validity(&[pm("P0", 1300.0, "0x0000000000000005"), pm("P0", 1300.0, CAP)]).is_valid());
+        // A thermal, hardware-slowdown or power-brake reason beside the cap: not valid (ADR 0057 point 2 applies).
+        for bad in ["0x000000000000000c", "0x0000000000000024", "0x0000000000000044", "0x0000000000000084"] {
+            let v = gpu_validity(&[pm("P0", 1290.0, CAP), pm("P0", 1290.0, bad)]);
+            assert!(matches!(v, GpuValidity::Below(..)), "{bad}: {v:?}");
+        }
+        // An unreadable mask is an unknown reason, not the cap.
+        assert!(matches!(gpu_validity(&[pm("P0", 1290.0, CAP), pm("P0", 1290.0, "[Not Supported]")]), GpuValidity::Below(..)));
+        // Any other state: P2 below the floor with the cap, or one P2 sample among P0 ones, is not valid.
+        assert!(matches!(gpu_validity(&[pm("P2", 1290.0, CAP), pm("P2", 1290.0, CAP)]), GpuValidity::Below(..)));
+        assert!(matches!(gpu_validity(&[pm("P0", 1290.0, CAP), pm("P2", 1290.0, CAP)]), GpuValidity::Below(..)));
+        // P0 below the floor with no throttle reason at all (nothing explains the slow clock) is not valid either.
+        assert!(matches!(gpu_validity(&[pm("P0", 1290.0, "0x0000000000000000")]), GpuValidity::Below(..)));
+        // A missing sample is still a missing sample, and a log without masks keeps the ADR 0057 verdict.
+        assert!(matches!(gpu_validity(&[pm("P0", 1290.0, CAP), None]), GpuValidity::Invalid(_)));
+        assert!(matches!(gpu_validity(&[p("P0", 1290.0)]), GpuValidity::Below(..)));
+        // At or above the floor nothing changes: the cap does not matter.
+        assert!(gpu_validity(&[pm("P0", 1470.0, CAP)]).is_valid());
     }
 
     // spec: TEST-012
