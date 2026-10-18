@@ -1,0 +1,1 @@
+- 2026-10-18 **spike-13-edit-latency** (sonnet-spikes): exact edit-to-visible 144 ms (200 m altitude, 50 m stamp) with reach-limited refresh and footprint find against 1,790 ms with cell-wide invalidation; preview 4-14 ms; results `spikes/edit-latency/results/results.md`, entry in `docs/spikes.md`.
