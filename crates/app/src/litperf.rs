@@ -379,8 +379,8 @@ fn measure_flight(
         let t = WATER_T0 + k as f64 / 60.0;
         let lit = setup.plan(rig.world, rig.field, &plan, t, 1.0 / 60.0, k == 0)?;
         water_max = water_max.max(count_water(&lit));
-        for (t, c) in cut_total.iter_mut().zip(setup.cut_counts()) {
-            *t += c;
+        for (acc, c) in cut_total.iter_mut().zip(setup.cut_counts()) {
+            *acc += c;
         }
         nodes_max = nodes_max.max(plan.nodes.len());
         if k == 0 {
