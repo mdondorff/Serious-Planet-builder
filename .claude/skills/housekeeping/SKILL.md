@@ -33,7 +33,19 @@ Housekeeping is split (owner, 2026-10-16): the **architect** curates, deciding w
 6. **Owner items.** List the dormant ones (an open question with no near trigger) with their trigger in the status file; do not ask the owner about them now.
 7. **Documentation model (ADR 0055).** Check that every current number lives in a spec, not only in an ADR amendment chain; that no new readings ADR appeared; and that archived changes hold only `proposal.md` and spec deltas. Fix the cause in the skill or CLAUDE.md if any of these drifted.
 8. **Agent memory.** Update `.claude/agent-memory/architect/MEMORY.md` with the milestone's decisions and delete what the repo now records.
-9. Then write the coder's list (below) as a queue item.
+9. **Process review** (owner, 2026-10-18). One table in `docs/milestones/<M>-report.md` (section "Process review"), each measure against the previous milestone, from recorded data only (no estimates without a mark):
+
+   | Measure | Source |
+   |---|---|
+   | edit-to-first-test time, `test fast`, `test`, `test gpu` wall time | xtask timings, `target/test-logs/` |
+   | CI median per job, flaky reruns, quarantines | GitHub runs (`gh run list`) |
+   | PR lead time; time waiting on CI and on the owner | PR timestamps |
+   | perf windows run, and how many gave no verdict | log, perf reports |
+   | rework: reverted or redone changes, corrected figures | log, learnings |
+   | coordination stalls: idle sessions, unwatched CI, lost messages | log, status, owner nudges |
+
+   Then three to five improvements ranked by gain against cost, each with an owner session. Easy-to-reverse ones go into the next milestone's queue; a trade-off goes to the owner. A process cost that a budget check could have caught gets a budget (below).
+10. Then write the coder's list (below) as a queue item.
 
 ## Coder: mechanical pass (one change, from the architect's list)
 - Stale references in specs and code comments: "not yet built", "proposed ADR NNNN" for accepted ADRs, superseded requirement IDs, dead `file:line` references. Each fix is a text change; never change a requirement's meaning (that is a spec delta).
@@ -47,6 +59,7 @@ Housekeeping is split (owner, 2026-10-16): the **architect** curates, deciding w
 - **Learnings rot** because entries have no scope or end: the `learning` skill asks for `Scope:` (project or milestone) and `Obsolete when:`.
 - **ADR statuses drift** because a later ADR decides an earlier one's open point: the `adr` skill updates the earlier status line and the README table in the same PR.
 - **Spikes collide** with the main coder: the `spike` skill's parallel-session practice.
+- **Process costs grow unnoticed** between reviews: each has a budget that its tool checks and reports when exceeded (`test fast` 20 s; edit-to-first-test and CI time, BUILD spec). An exceeded budget becomes a Tracked item in `docs/status.md`, not a remark.
 
 Run notes: append one line per run to `docs/archive/README.md`: date, milestone, what moved, what was deleted, and any rule fixed.
 
