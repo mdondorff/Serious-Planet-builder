@@ -8,7 +8,7 @@ Counts: 17 `crates/render/tests` files, 6 `crates/app/tests` files and 4 `crates
 
 | File | Hits | Kind | Replacement (to fill) |
 |---|---|---|---|
-| `render/tests/gpu_pools.rs` | 18 | `with_pools` small pools, `PoolKind::Vertex` slots, `execute_terrain` reference, `PoolFull` and freed-slot-in-flight tests | |
+| `render/tests/gpu_pools.rs` | 18 | `with_pools` small pools, `PoolKind::Vertex` slots, `execute_terrain` reference, `PoolFull` and freed-slot-in-flight tests | DONE a commit "gpu_pools: four scenarios on the compact path" (2.2): same four tests, compact pools of 3-slot blocks, `RenderTile`, the compact one-shot as reference; level 0-2 branch replaced by an assertion that every planned tile is compact and level 3 or finer |
 | `render/tests/gpu_renderer.rs` | 17 | `TerrainRenderer::new` + `upload(TileMesh)`, `execute_terrain` one-shot, stale-mesh (`StaleMesh`, key) tests, wrong-cells upload error | |
 | `render/tests/gpu_compact.rs` | 7 | compact against vertex reference, vertex fallback slots, `CompactUnsupported` on a vertex upload, steep fallback tile check | |
 | `render/tests/gpu_indirect.rs` | 4 | vertex pool + main pool placement with indirect draws | |
