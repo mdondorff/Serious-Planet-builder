@@ -113,6 +113,36 @@ fn triptych(a: &Image, b: &Image, rect: (u32, u32, u32, u32), s: u32) -> Image {
     out
 }
 
+/// Writes `<out>/<adapter>/<name>.png` (enlarged golden | candidate | diff) and `<name>.crop.png` (the differing pixels, enlarged
+/// further) and returns the report line naming them and the bounding box; `None` when the pictures do not differ (TEST-038).
+fn write_evidence(out: &Path, adapter: &str, name: &str, g: &Image, c: &Image) -> Option<String> {
+    let bbox = diff_bbox(g, c)?;
+    let full = (0, 0, g.width - 1, g.height - 1);
+    let path = out.join(adapter).join(format!("{name}.png"));
+    write_png(&path, &triptych(g, c, full, zoom_factor(g.width, &[8, 6, 4]))).expect("triptych");
+    let rect = crop_rect(bbox, g.width, g.height);
+    let crop = out.join(adapter).join(format!("{name}.crop.png"));
+    write_png(&crop, &triptych(g, c, rect, zoom_factor(rect.2 - rect.0 + 1, &[32, 24, 16, 8]))).expect("crop");
+    Some(format!(
+        "- {adapter} {name}: differing pixels x {}..{}, y {}..{}; `{}`, `{}`",
+        bbox.0,
+        bbox.2,
+        bbox.1,
+        bbox.3,
+        path.display(),
+        crop.display()
+    ))
+}
+
+/// The evidence section of `report.md`.
+fn evidence_section(out: &Path, evidence: &[String]) -> String {
+    format!(
+        "\nEvidence (TEST-038), golden | candidate | diff enlarged, then the same cropped to the differing pixels, in `{}`:\n\n{}\n",
+        out.display(),
+        evidence.join("\n")
+    )
+}
+
 type Candidates = BTreeMap<(String, String), PathBuf>;
 
 /// What every adapter shows for golden `name`, and the golden | candidate images of the adapters whose candidate changed.
@@ -360,23 +390,7 @@ fn main() {
                 _ => ("-".into(), "-".into()),
             };
             if let Some((g, c)) = images.get(adapter) {
-                let full = (0, 0, g.width - 1, g.height - 1);
-                let path = out.join(adapter).join(format!("{name}.png"));
-                write_png(&path, &triptych(g, c, full, zoom_factor(g.width, &[8, 6, 4]))).expect("triptych");
-                if let Some(bbox) = diff_bbox(g, c) {
-                    let rect = crop_rect(bbox, g.width, g.height);
-                    let crop = out.join(adapter).join(format!("{name}.crop.png"));
-                    write_png(&crop, &triptych(g, c, rect, zoom_factor(rect.2 - rect.0 + 1, &[32, 24, 16, 8]))).expect("crop");
-                    evidence.push(format!(
-                        "- {adapter} {name}: differing pixels x {}..{}, y {}..{}; `{}`, `{}`",
-                        bbox.0,
-                        bbox.2,
-                        bbox.1,
-                        bbox.3,
-                        path.display(),
-                        crop.display()
-                    ));
-                }
+                evidence.extend(write_evidence(&out, adapter, name, g, c));
             }
             let v = match &verdict {
                 Verdict::AutoRounding => "AUTO-R".to_string(),
@@ -400,11 +414,7 @@ fn main() {
             }
         }
     }
-    report.push_str(&format!(
-        "\nEvidence (TEST-038), golden | candidate | diff enlarged, then the same cropped to the differing pixels, in `{}`:\n\n{}\n",
-        out.display(),
-        evidence.join("\n")
-    ));
+    report.push_str(&evidence_section(&out, &evidence));
     std::fs::write(out.join("report.md"), &report).expect("report");
     if apply {
         println!("applied {} auto verdicts: {}", applied.len(), applied.join(", "));
@@ -442,6 +452,33 @@ mod tests {
         assert_eq!(crop_rect((127, 95, 127, 95), 128, 96), (112, 80, 127, 95));
         assert_eq!(crop_rect((5, 5, 5, 5), 128, 96), (0, 0, 15, 15), "grown past the corner margin, shifted inside");
         assert_eq!(crop_rect((2, 2, 3, 3), 10, 8), (0, 0, 9, 7), "a picture under 16 px is cropped whole");
+    }
+
+    // spec: TEST-038
+    #[test]
+    fn a_changed_candidate_writes_the_enlarged_and_the_cropped_png_and_the_report_names_them() {
+        let dir = std::env::temp_dir().join(format!("golden-review-evidence-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let g = Image::new(128, 96, vec![40; 128 * 96 * 4]);
+        let mut c = g.clone();
+        for (x, y) in [(50, 40), (52, 41), (51, 43)] {
+            c.set_pixel(x, y, [200, 10, 10, 255]);
+        }
+        let line = write_evidence(&dir, "warp", "view", &g, &c).expect("the pictures differ");
+        // Full picture: factor 6 (the three panels and the gaps are 392 px wide); crop: x 44..59, y 34..49, 16 px square, factor 32.
+        let full = read_png(&dir.join("warp").join("view.png")).expect("the enlarged triptych is written");
+        assert_eq!((full.width, full.height), (392 * 6, 96 * 6));
+        let crop = read_png(&dir.join("warp").join("view.crop.png")).expect("the crop is written");
+        assert_eq!((crop.width, crop.height), ((3 * 16 + 8) * 32, 16 * 32));
+        // The crop's candidate panel shows the changed pixel (50, 40) at source offset (6, 6), as a 32 px block.
+        assert_eq!(crop.pixel((16 + 4) * 32 + 6 * 32 + 5, 6 * 32 + 5), [200, 10, 10, 255]);
+        assert!(line.contains("warp view: differing pixels x 50..52, y 40..43;"), "{line}");
+        assert!(line.contains("view.png") && line.contains("view.crop.png"), "{line}");
+        let report = evidence_section(&dir, std::slice::from_ref(&line));
+        assert!(report.contains("Evidence (TEST-038)") && report.contains(&line), "{report}");
+        assert_eq!(write_evidence(&dir, "warp", "same", &g, &g.clone()), None, "an unchanged candidate writes nothing");
+        assert!(!dir.join("warp").join("same.png").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // spec: TEST-038
