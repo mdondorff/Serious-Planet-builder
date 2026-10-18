@@ -157,6 +157,7 @@ fn draw_of(req: &TerrainRequest, tile: TileId, r: ResidentTile) -> TerrainDraw {
         // A tile drawn for its own level or as a stand-in for finer ones does not morph (like a root): its geometry is its own.
         morph_start_m: 1.0e30,
         morph_end_m: 1.0e30,
+        shore_ramp_min_m: req.lod.shore_ramp_min_m(tile.level()) as f32,
         color: node_color(req.view, tile),
         mesh_key: r.mesh_key,
     }

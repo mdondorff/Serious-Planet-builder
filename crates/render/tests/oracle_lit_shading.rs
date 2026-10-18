@@ -12,7 +12,7 @@
 //!
 //! The functions are the shader's own: the terrain module is compiled with extra compute entries that call them.
 
-use planet_frame::look::shading::{terrain_radiance, AlbedoParams, ShadeView};
+use planet_frame::look::shading::{terrain_radiance_with_ramp, AlbedoParams, ShadeView};
 use planet_frame::look::{self};
 use planet_render::lit::{probe_lit_radiance, probe_up_at, LitProbe};
 use planet_render::{AdapterPolicy, GpuContext};
@@ -24,6 +24,8 @@ struct Case {
     t: f64,
     p: f64,
     h: f64,
+    /// The node's least height range of the seabed-to-shore ramp (REND-030); 0 ramps by the table's blend alone.
+    ramp: f64,
     sun: [f64; 3],
     pre_ev: f64,
     table: AlbedoParams,
@@ -88,6 +90,8 @@ fn cases() -> Vec<Case> {
             t: -45.0 + 90.0 * next(),
             p: 4500.0 * next() * next(),
             h: if k % 4 == 0 { -40.0 + 80.0 * next() } else { 200.0 * next() * next() - 20.0 },
+            // A third of the probes sit at a node with a wider ramp (up to 30 m), as the coarse nodes of a coastal view do.
+            ramp: if k % 3 == 1 { 30.0 * next() * next() } else { 0.0 },
             sun: unit(next(), next()),
             pre_ev: [-4.0, 0.0, 8.0, 12.0, 15.0, 18.0][k % 6],
             table: if k % 2 == 0 { AlbedoParams::EARTH } else { other_table() },
@@ -114,7 +118,25 @@ fn cases() -> Vec<Case> {
         let up = [0.0, 0.0, 1.0];
         let n = [libm::sqrt(1.0 - cs * cs), 0.0, cs];
         for view in ShadeView::ALL {
-            out.push(Case { view, normal: n, up, t, p, h, sun: [0.0, 0.0, 1.0], pre_ev: 15.0, table: e });
+            out.push(Case { view, normal: n, up, t, p, h, ramp: 0.0, sun: [0.0, 0.0, 1.0], pre_ev: 15.0, table: e });
+        }
+    }
+    // The ramp's own corners (REND-030): heights at its foot, middle and top for a node of 8 m ramp and for one that ramps by the blend
+    // alone, and a ramp narrower than the blend (the blend wins).
+    for (h, ramp) in [(-8.0, 8.0), (-4.0, 8.0), (-0.5, 8.0), (0.0, 8.0), (-4.0, 0.0), (-0.5, 0.5), (-0.5, 0.0)] {
+        for view in ShadeView::ALL {
+            out.push(Case {
+                view,
+                normal: [0.0, 0.0, 1.0],
+                up: [0.0, 0.0, 1.0],
+                t: 20.0,
+                p: 50.0,
+                h,
+                ramp,
+                sun: [0.0, 0.0, 1.0],
+                pre_ev: 15.0,
+                table: e,
+            });
         }
     }
     out
@@ -134,6 +156,7 @@ fn the_lit_radiance_matches_the_f64_reference_within_its_declared_bound() {
             temperature_c: c.t as f32,
             precipitation_mm: c.p as f32,
             height_above_water_m: c.h as f32,
+            shore_ramp_min_m: c.ramp as f32,
             sun: c.sun.map(|v| v as f32),
             factor: look::pre_exposure_factor(c.pre_ev) as f32,
             table: c.table.to_words(),
@@ -144,7 +167,7 @@ fn the_lit_radiance_matches_the_f64_reference_within_its_declared_bound() {
     for (i, c) in cases.iter().enumerate() {
         // The reference sees exactly what the shader received: the f32 inputs and the f32 table.
         let p = &probes[i];
-        let radiance = terrain_radiance(
+        let radiance = terrain_radiance_with_ramp(
             &c.table.as_f32(),
             c.view,
             p.normal.map(f64::from),
@@ -152,6 +175,7 @@ fn the_lit_radiance_matches_the_f64_reference_within_its_declared_bound() {
             f64::from(p.temperature_c),
             f64::from(p.precipitation_mm),
             f64::from(p.height_above_water_m),
+            f64::from(p.shore_ramp_min_m),
             p.sun.map(f64::from),
         );
         let want = look::written_value(radiance, c.pre_ev);

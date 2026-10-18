@@ -32,6 +32,14 @@ pub struct LodParams {
     pub cull_horizon: bool,
 }
 
+/// How many of the parent's sample spacings the shore ramp must span at least ([`LodParams::shore_ramp_min_m`], REND-030).
+pub const SHORE_RAMP_K: f64 = 2.0;
+
+/// The tallest ramp the tolerance asks for (m), REND-030: the water pass absorbs 0.5 per metre of depth by default, so below 8 m
+/// (four e-folds, 98 % absorbed) the seabed's own colour is hidden whatever the ramp is, and the flights of the flash test need
+/// 3 m. Above it the ramp would only turn the colour of the deep seabed into the beach's in terrain-only views.
+pub const SHORE_RAMP_MAX_M: f64 = 8.0;
+
 /// log2 of the cells per face edge at the production finest level: a face edge is `2^level` tiles of `cells` cells, and the
 /// production cap fixes `2^level * cells = 2^27` (134 million cells; `radius * pi/2 / 2^27` = 7.46 cm of vertex spacing on an
 /// Earth-sized body), so level 22 at 32 cells and 21 at 64 (ADR 0033 point 6, owner 2026-10-15).
@@ -97,6 +105,22 @@ impl LodParams {
             }
         }
         Ok(())
+    }
+
+    /// The least height range (metres) over which the albedo may change from the seabed to the shore at a node of `level` (REND-030,
+    /// ATMO-020). The albedo's ramp is `max(shore_blend_m, this)`.
+    ///
+    /// A node of `level >= 1` is drawn only closer than its parent's split distance, where the parent's sample spacing `s(level - 1)`
+    /// projects to `tau_px` pixels: `tau_px * pixel_angle * split(level - 1) = s(level - 1)`, whatever the field of view, the viewport
+    /// and `tau_px` are. That is the world size of the screen-space tolerance of the selection at the farthest distance the node is
+    /// drawn, and the height at one ground point differs between the node's mesh, its parent's mesh and the morph between them by a
+    /// fraction of it. The factor is [`SHORE_RAMP_K`] (REND-030: measured on the coastal flights, k = 1 leaves 4.3 % of the shore
+    /// pixels of the glide flashing, k = 1.5, 2 and 3 none; 2 is taken). A ramp narrower than this makes the seabed-to-shore albedo,
+    /// which differs by a factor of eight in luminance, flash with decimetre height changes between frames. Near the camera
+    /// `s(level - 1)` is centimetres and the ramp stays at the look's `shore_blend_m`. The value is capped at [`SHORE_RAMP_MAX_M`]: far
+    /// from the camera the tolerance is kilometres, and a ramp that tall would paint the deep seabed with the beach's colour.
+    pub fn shore_ramp_min_m(&self, level: u8) -> f64 {
+        (SHORE_RAMP_K * self.sample_spacing(level.saturating_sub(1))).min(SHORE_RAMP_MAX_M)
     }
 
     /// Worst-case sample spacing on the sphere at `level`, metres (face centre, tangent warp).

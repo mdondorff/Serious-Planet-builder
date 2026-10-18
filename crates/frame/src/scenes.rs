@@ -552,6 +552,7 @@ mod tests {
             morph: 0.0,
             morph_start_m: 0.0,
             morph_end_m: 0.0,
+            shore_ramp_min_m: 0.0,
             color: [0; 4],
             mesh_key: 0,
         }
