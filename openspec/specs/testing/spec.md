@@ -258,8 +258,12 @@ Source: CON-20, CON-21, REND-018, M4 fix F10, M4 fix F5, M4 item 7d, ADR 0034, A
 - **THEN** nothing is compared and the console says why; only a valid session replaces the baseline
 
 #### Scenario: Session validity
-- **WHEN** a run reports hardware slowdown, thermal throttling or a power brake (or an unparseable reason), or a view's run-to-run noise stays above 10 % after one retry
+- **WHEN** a run reports hardware slowdown, thermal throttling or a power brake (or an unparseable reason), or a view's run-to-run noise stays above the limit after one retry
 - **THEN** the session prints `SESSION INVALID for budgets` with the reasons before any verdict and the log has `valid_for_budgets` false
+
+#### Scenario: Noise floor (ADR 0059)
+- **WHEN** the run-to-run noise `(max - min) / median` of a view's run medians is computed
+- **THEN** it counts as above the limit only when it exceeds both 10 % of the median and an absolute floor: 0.5 ms for a waited frame total, 0.1 ms for a per-pass GPU figure (`gate::NOISE_FLOOR_FRAME_MS`, `NOISE_FLOOR_PASS_MS`); a spread of exactly 10 % or exactly the floor is not above; fewer than two runs or a non-positive median still counts as noisy
 
 #### Scenario: Power cap
 - **WHEN** a run reports throttle reason 0x4 (software power cap) and nothing else but idle, applications-clock or sync-boost bits

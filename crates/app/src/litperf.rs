@@ -295,13 +295,13 @@ fn measure_static(
             });
             batch_frames.extend(frames);
         }
-        // The noise rule of the accepted ADRs (10 % of the waited frame median, one retry); the proposed ADR 0036 point 3 (the
-        // absolute floor of 0.1 ms) is only reported, from the atmosphere and water medians, for the decision it waits for.
+        // The noise rule (ADR 0020, 0036 point 3, 0059): above 10 % of the median and above the absolute floor, one retry. The waited
+        // frame total decides (floor 0.5 ms); the atmosphere and water medians are reported with the per-pass floor of 0.1 ms.
         let needs_retry = !rig.smoke && planet_perf::gate::noise_needs_retry(&totals_by_run);
         for (label, medians) in [("atmosphere", &atmo_by_run), ("water", &water_by_run)] {
             if let Some((rel, abs, now, floor)) = planet_perf::lit::noise_floor_report(medians) {
                 noise_lines.push(format!(
-                    "  {path}: {label} run-to-run noise {rel:.3} ({abs:.3} ms): above the 10 % rule: {}; above the proposed ADR 0036 point 3 floor too: {} (recorded, not applied)",
+                    "  {path}: {label} run-to-run noise {rel:.3} ({abs:.3} ms): above 10 %: {}; above 10 % and the 0.1 ms floor (ADR 0059): {}",
                     if now { "yes" } else { "no" },
                     if floor { "yes" } else { "no" }
                 ));
@@ -310,9 +310,10 @@ fn measure_static(
         if needs_retry && attempt == 0 {
             writeln!(
                 out,
-                "{path}: run-to-run noise {:.3} above {}: one retry",
+                "{path}: run-to-run noise {:.3} above {} and {} ms: one retry",
                 planet_perf::run_to_run_noise(&totals_by_run).unwrap_or(f64::NAN),
-                planet_perf::gate::MAX_NOISE
+                planet_perf::gate::MAX_NOISE,
+                planet_perf::gate::NOISE_FLOOR_FRAME_MS
             )
             .map_err(err)?;
             attempt += 1;
