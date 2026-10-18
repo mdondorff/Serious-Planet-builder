@@ -201,9 +201,7 @@ fn frame(ctx: &GpuContext, r: &mut TerrainRenderer, plan: &TerrainPlan, water: O
     r.lit_path().unwrap().read_hdr(ctx)
 }
 
-// spec: ATMO-019, ATMO-020
-#[test]
-fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to_the_horizon() {
+fn coverage(views: &[&str]) {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let world = WorldTerrain::open(WorldDefinition::single_planet(R, 5), 1024).expect("the world opens").bounding_water();
     let field = world.field().unwrap();
@@ -220,7 +218,7 @@ fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to
         ("inland", beach, 600.0, -4000.0, 10.0),
     ];
     let mut exact_cut = 0;
-    for (name, coast, alt, back, pitch) in cases {
+    for (name, coast, alt, back, pitch) in cases.into_iter().filter(|c| views.contains(&c.0)) {
         let camera = coast_camera(&coast, R, 0.0, alt, back, 0.0, pitch, aspect);
         let bounded = planet_generators::water::WaterBounded::borrowed(field.as_ref(), 0.0);
         let plan = plan_terrain_field(
@@ -318,4 +316,16 @@ fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to
         );
     }
     assert!(exact_cut > 0, "the exact minimum cut no node the loose bound kept in any view");
+}
+
+// spec: ATMO-019, ATMO-020
+#[test]
+fn the_water_class_covers_every_ocean_connected_sea_pixel_of_a_real_world_out_to_the_horizon() {
+    coverage(&["aerial", "low"]);
+}
+
+// spec: ATMO-019, ATMO-020
+#[test]
+fn the_water_class_covers_the_sea_at_a_beach_and_inland_and_the_exact_dry_tile_cut_draws_the_same_pixels() {
+    coverage(&["beach", "inland"]);
 }
