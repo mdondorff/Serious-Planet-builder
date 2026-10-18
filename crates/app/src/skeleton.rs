@@ -878,6 +878,24 @@ fn replay_frame(
         b.adapter
     )
     .map_err(err)?;
+    // What the frame drew near the camera against what its request asks for there: a coarse node close by (the streaming has not
+    // caught up) shows as a lower level than the request's own plan has at the same place.
+    let level_near = |plan: &planet_frame::TerrainPlan| {
+        let cam = b.request.camera.position.0;
+        plan.nodes
+            .iter()
+            .filter(|n| (n.origin.0 - cam).length() < 1_000.0 + 2.0 * b.request.lod.sample_spacing(n.level) * 32.0)
+            .map(|n| n.level)
+            .min()
+    };
+    writeln!(
+        out,
+        "replay: coarsest node within about 1 km of the camera: level {:?} drawn, level {:?} in the request's own plan; finest drawn level {:?}",
+        level_near(&b.plan),
+        level_near(&own),
+        b.plan.nodes.iter().map(|n| n.level).max()
+    )
+    .map_err(err)?;
     let map = planet_frame::plan::face_mapping_by_id(&b.request.face_mapping)
         .ok_or_else(|| format!("unknown face mapping '{}'", b.request.face_mapping))?;
     let (seed, cells, radius) = (b.request.seed, b.request.lod.cells, b.request.lod.radius_m);
