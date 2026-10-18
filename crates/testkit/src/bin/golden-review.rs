@@ -6,7 +6,7 @@
 //! `tests/goldens/<adapter>/<name>.png`, writes golden | candidate | diff triptychs and `report.md` to
 //! `target/review/golden-review/`, prints one verdict per candidate and, with `--apply`, copies only the auto verdicts
 //! into `tests/goldens/`. A candidate whose `driver.txt` differs from the recorded one always escalates. `--tests` names the
-//! nextest JUnit reports of this run (`target/nextest/default/junit.xml`, copied after each `cargo xtask test` run): the
+//! nextest JUnit reports of this run (`target/nextest/default/junit.xml`, `target/nextest/real-gpu/junit.xml` for a `--real` run, copied after each `cargo xtask test` run): the
 //! bound tests that the proposal declares under `ADR 0037 conditions:` must be green in them. An adapter takes part in the
 //! run when it delivered candidates; the adapters that did not are printed and never counted as agreeing. Exits 0 when
 //! nothing escalates and 3 otherwise (`cargo xtask golden-review` then reports a failure); 2 on bad arguments.
