@@ -443,3 +443,10 @@ Scope: `Cargo.toml` profiles, `.cargo/config.toml`, test layout of frame, render
 | Workspace `opt-level = 0` | slower build (32 s) and 34 % slower tests |
 Proposed follow-up: an OpenSpec change applying the debug-info and linker settings, then per-tier test binaries; results `spikes/build-speed/results/results.md`.
 Obsolete when: the build-speed change is archived.
+
+## 2026-10-18 A floor leaf is not the floor-0 node of the same tile: it has no parent to morph to (render-floor-3)
+Scope: LOD-011, LOD-004, the plan snapshots, the loop tests that start at level 0
+What happened: the draft of LOD-011 said nine of the ten standard views have "identical plans node for node" at floor 3 and at floor 0, and that a scene with a finest level of 2 "equals the floor-0 plan". The tiles and mesh keys are equal, but every node at the floor differs in its morph (0 and the interval `[1e30, 1e30]` against the parent's interval at floor 0), so the plans are equal only above the floor; the 128 x 96 snapshot view high-2000km also changes (73 to 71 nodes: three level-2 nodes at its edge whose children are all outside the view become one level-3 node). The orbit view is 52 to 181 nodes over the reference field and 182 over the default world's eroded field. R and D drop their levels 0-2 ancestors in every view (4 to 34 slots), and the 6 roots of floor 0 are now also exempt from the upload cap, which moved two scheduler digests (the two that run under a 40,000 B cap) and made the old "roots go one a frame under a tiny cap" test a statement of the opposite rule.
+Assumption it changes: the draft numbers ("plans equal", 11,661 nodes as plans) in the LOD-011 delta; the spec now says same tiles, equal above the floor, no morph at the floor.
+Proposed follow-up: none; `floor_zero_reproduces_the_plans_recorded_before_the_floor` keeps the earlier plans as the floor-0 record (`terrain_plans_floor0.txt`).
+Obsolete when: the vertex render path is removed and the floor is the only start of the tree.

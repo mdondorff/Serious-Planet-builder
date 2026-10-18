@@ -1,4 +1,4 @@
-orbit-20000km: nodes 51 [L1:3 L2:48] hash 07a0f12586254017
+orbit-20000km: nodes 181 [L3:181] hash d7ac78b7ee8e3c29
 high-2000km: nodes 437 [L4:189 L5:248] hash acefa64c305b72e9
 aerial-200km: nodes 1158 [L5:65 L6:342 L7:334 L8:341 L9:76] hash 449ed3c2c52d8d77
 aerial-20km: nodes 1976 [L6:23 L7:342 L8:354 L9:347 L10:334 L11:352 L12:224] hash 2640d1a682af8a09

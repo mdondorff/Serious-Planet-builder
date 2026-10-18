@@ -24,11 +24,12 @@ use planet_render::{AdapterPolicy, GpuContext};
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
   editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync]; --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
-  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] writes the coarse tiles of levels 0..=L (default 4; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables); --smoke starts and exits
+  generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] [--floor-level F] writes the coarse tiles of levels F..=L (F the render floor, default 3; L default 4; an L below F writes nothing and says so; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables; --floor-level takes both); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
     --script N|name          scripted terrain camera 0..9 or its name (default 3 = aerial-20km)
     --cells N --tau PX --frames N   terrain perf workload parameters (defaults 32, 6, 300)
+    --floor-level N          the render floor (LOD-011, default 3): levels below it are not drawn, its 384 tiles at level 3 are the roots; test-render's terrain, streaming and lit scenes and generate's pre-fill take it, the viewer takes no flag; above --finest-level it is refused (the effective floor is the lower of the two)
     --finest-level N         the LOD cap, the finest geometry level of the single views, --stream, --pipelined, --flight and --perf (default 27 - ceil(log2(cells)): 22 at cells 32, 21 at 64, equal vertex spacing of about 7.5 cm; 26 reproduces the SPIKE-07 reference)
     --perf-smoke             run the terrain perf path briefly on any adapter (labelled, never a measurement)
     --flight N --out-dir DIR [--size WxH]   render the scripted orbit-to-1 m flight (TEST-013) as DIR/frame_0000.png... plus DIR/flight.txt and DIR/contact_sheet.png
@@ -126,7 +127,7 @@ pub struct Options {
     pub verify_global: Option<PathBuf>,
     /// `generate`: plan the standard flight at production parameters over the stored global bake in this directory.
     pub plan_check: Option<PathBuf>,
-    /// `generate`: write the coarse tiles (levels `0..=--prefill-levels`) into the pack of the stored bake in this directory (STRM-021).
+    /// `generate`: write the coarse tiles (levels `F..=--prefill-levels`, F the render floor) into the pack of the stored bake in this directory (STRM-021).
     pub prefill_dir: Option<PathBuf>,
     /// `--global-dir` and `--prefill-dir`: how many levels of coarse tiles the pre-fill writes, 0 for none (default 4, ADR 0045 point 3).
     pub prefill_levels: Option<u8>,
@@ -148,6 +149,9 @@ pub struct Options {
     pub cells: u32,
     /// `--finest-level N`: the LOD cap (`LodParams::max_level`); none = the production default for the tile size (LOD-010).
     pub finest_level: Option<u8>,
+    /// `--floor-level N`: the render floor (`LodParams::min_level`, LOD-011); none = the production default
+    /// ([`planet_frame::DEFAULT_RENDER_FLOOR`], 3). Taken by `test-render` and `generate` (the pre-fill), never by the viewer.
+    pub floor_level: Option<u8>,
     pub tau: f64,
     pub frames: usize,
     pub perf_smoke: bool,
@@ -193,6 +197,26 @@ impl Options {
     /// (`planet_frame::production_finest_level`: 22 at cells 32, 21 at 64). The one place the apps take the LOD cap from (LOD-010).
     pub fn finest_level_for(&self, cells: u32) -> u8 {
         self.finest_level.unwrap_or_else(|| planet_frame::production_finest_level(cells))
+    }
+
+    /// The render floor asked for (`LodParams::min_level`): `--floor-level`, else the production default. The effective floor of a
+    /// run is the lower of this and the finest level ([`Options::floor_for`], LOD-011).
+    pub fn min_level(&self) -> u8 {
+        self.floor_level.unwrap_or(planet_frame::DEFAULT_RENDER_FLOOR)
+    }
+
+    /// The effective render floor of a run with tiles of `cells` cells: `min(min_level, finest level)` (LOD-011), the level whose
+    /// tiles are the roots and the first level the pre-fill writes.
+    pub fn floor_for(&self, cells: u32) -> u8 {
+        self.min_level().min(self.finest_level_for(cells))
+    }
+
+    /// An explicit `--floor-level` above the finest level is refused, naming both (LOD-011): checked before any work.
+    pub fn check_floor(&self) -> Result<(), String> {
+        match self.floor_level {
+            Some(f) => planet_frame::check_explicit_floor(f, self.finest_level_for(self.cells)),
+            None => Ok(()),
+        }
     }
 }
 
@@ -252,6 +276,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         then: None,
         cells: 32,
         finest_level: None,
+        floor_level: None,
         tau: 6.0,
         frames: 300,
         perf_smoke: false,
@@ -300,6 +325,13 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
                     return Err(format!("--finest-level must be at most {}, got {level}", planet_core::tile::MAX_LEVEL));
                 }
                 o.finest_level = Some(level);
+            }
+            "--floor-level" => {
+                let level: u8 = it.next().ok_or("--floor-level needs a level")?.parse().map_err(|e| format!("--floor-level: {e}"))?;
+                if level > planet_core::tile::MAX_LEVEL {
+                    return Err(format!("--floor-level must be at most {}, got {level}", planet_core::tile::MAX_LEVEL));
+                }
+                o.floor_level = Some(level);
             }
             "--frames" => o.frames = it.next().ok_or("--frames needs a value")?.parse().map_err(|e| format!("--frames: {e}"))?,
             "--flight" => o.flight = Some(it.next().ok_or("--flight needs a frame count")?.parse().map_err(|e| format!("--flight: {e}"))?),
@@ -481,6 +513,35 @@ fn check_flight_options(o: &Options) -> Result<(), String> {
     Ok(())
 }
 
+/// `--floor-level` (LOD-011): `test-render` and `generate` take it, the viewer takes no flag; it applies to the terrain scenes, the
+/// streaming and lit scenes and the pre-fill commands only (anything else would ignore it), not to a replayed bundle (the bundle
+/// carries its own `min_level`); and an explicit floor above the finest level is refused, naming both, before any work.
+fn check_floor_option(o: &Options) -> Result<(), String> {
+    if !o.given.contains("--floor-level") {
+        return Ok(());
+    }
+    match o.mode {
+        Mode::Editor => return Err("--floor-level applies to `test-render` and `generate`: the viewer takes no flag (LOD-011)".into()),
+        Mode::Generate if o.prefill_dir.is_none() && o.global_dir.is_none() => {
+            return Err("--floor-level only applies to the pre-fill of `generate` (--prefill-dir, --global-dir)".into())
+        }
+        Mode::TestRender => {
+            if o.repro.is_some() {
+                return Err("--floor-level does not apply to --repro: a bundle carries its own render floor (`min_level`)".into());
+            }
+            let takes = o.scene == "terrain"
+                || streamperf::is_stream_scene(&o.scene)
+                || litperf::is_lit_scene(&o.scene)
+                || litperf::is_capture_scene(&o.scene);
+            if !takes {
+                return Err(format!("--floor-level does not apply to --scene {}: it applies to the terrain and streaming scenes", o.scene));
+            }
+        }
+        Mode::Generate => {}
+    }
+    o.check_floor()
+}
+
 fn parse_size(s: &str) -> Result<(u32, u32), String> {
     let bad = || format!("--size must be WxH with both sides 16..=8192, got '{s}'");
     let (w, h) = s.split_once('x').ok_or_else(bad)?;
@@ -493,6 +554,7 @@ fn parse_size(s: &str) -> Result<(u32, u32), String> {
 
 pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     let o = parse_args(args)?;
+    check_floor_option(&o)?;
     if !matches!(o.mode, Mode::Generate) {
         // The global-bake perf scene takes the definition, grid size and thread count of the global commands.
         let bake_scene = matches!(o.mode, Mode::TestRender) && o.perf && o.scene == "global-bake";
@@ -930,16 +992,31 @@ mod tests {
         let d = TempDir::new("prefill");
         let (a, b) = (d.s("a"), d.s("b"));
         // After the bake: levels 0..=1 are 6 + 24 tiles; the bake's own blocks are still there.
-        let built =
-            run_str(&["generate", "--global-dir", &a, "--global-res", "8", "--seed", "3", "--threads", "2", "--prefill-levels", "1"])
-                .unwrap();
+        let built = run_str(&[
+            "generate",
+            "--global-dir",
+            &a,
+            "--global-res",
+            "8",
+            "--seed",
+            "3",
+            "--floor-level",
+            "0",
+            "--threads",
+            "2",
+            "--prefill-levels",
+            "1",
+        ])
+        .unwrap();
         assert!(
             built.contains("6 blocks written")
                 && built.contains("levels 0..=1")
                 && built.contains("30 tiles, 30 written, 0 already stored"),
             "{built}"
         );
-        let again = run_str(&["generate", "--global-dir", &a, "--global-res", "8", "--seed", "3", "--prefill-levels", "1"]).unwrap();
+        let again =
+            run_str(&["generate", "--global-dir", &a, "--global-res", "8", "--seed", "3", "--floor-level", "0", "--prefill-levels", "1"])
+                .unwrap();
         assert!(
             again.contains("0 blocks written, 6 already stored") && again.contains("30 tiles, 0 written, 30 already stored"),
             "{again}"
@@ -948,16 +1025,36 @@ mod tests {
         let ok = run_str(&["generate", "--verify-global", &a, "--seed", "3"]).unwrap();
         assert!(ok.contains("13 match") && ok.contains("30 of another kind"), "6 blocks, 6 ocean blocks and the summary match: {ok}");
         // Into an existing bake, a deeper pre-fill adds the new level only; levels 0 disables.
-        run_str(&["generate", "--global-dir", &b, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();
-        let off = run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--prefill-levels", "0"]).unwrap();
-        assert!(off.contains("disabled"), "{off}");
-        let one =
-            run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--prefill-levels", "1", "--threads", "3"])
+        run_str(&["generate", "--global-dir", &b, "--global-res", "8", "--seed", "3", "--floor-level", "0", "--prefill-levels", "0"])
+            .unwrap();
+        let off =
+            run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--floor-level", "0", "--prefill-levels", "0"])
                 .unwrap();
+        assert!(off.contains("disabled"), "{off}");
+        let one = run_str(&[
+            "generate",
+            "--prefill-dir",
+            &b,
+            "--global-res",
+            "8",
+            "--seed",
+            "3",
+            "--floor-level",
+            "0",
+            "--prefill-levels",
+            "1",
+            "--threads",
+            "3",
+        ])
+        .unwrap();
         assert!(one.contains("30 tiles, 30 written, 0 already stored") && one.contains("on 3 threads"), "{one}");
-        let two = run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--prefill-levels", "2"]).unwrap();
+        let two =
+            run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--floor-level", "0", "--prefill-levels", "2"])
+                .unwrap();
         assert!(two.contains("126 tiles, 96 written, 30 already stored"), "{two}");
-        let none = run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--prefill-levels", "2"]).unwrap();
+        let none =
+            run_str(&["generate", "--prefill-dir", &b, "--global-res", "8", "--seed", "3", "--floor-level", "0", "--prefill-levels", "2"])
+                .unwrap();
         assert!(none.contains("126 tiles, 0 written, 126 already stored") && none.contains("packs grew by 0 bytes"), "{none}");
         // Refusals: the bake's size is required, another store and combinations of commands are refused, the depth is bounded.
         for (args, needle) in [
@@ -992,6 +1089,51 @@ mod tests {
         }
     }
 
+    // spec: STRM-021, LOD-011
+    #[test]
+    fn generate_prefills_from_the_render_floor_says_so_when_the_depth_is_below_it_and_refuses_a_floor_above_the_finest_level() {
+        let d = TempDir::new("prefill-floor");
+        let (a, b) = (d.s("a"), d.s("b"));
+        let common = ["--global-res", "8", "--seed", "3", "--cells", "16", "--threads", "4"];
+        let gen = |extra: &[&str]| {
+            let mut args = vec!["generate"];
+            args.extend(common);
+            args.extend(extra);
+            run_str(&args)
+        };
+        // After the bake, at the default floor 3: levels 3 are the 384 roots; a deeper run adds level 4 only; a third writes nothing.
+        let built = gen(&["--global-dir", &a, "--prefill-levels", "3"]).unwrap();
+        assert!(built.contains("levels 3..=3") && built.contains("384 tiles, 384 written, 0 already stored"), "{built}");
+        let four = gen(&["--prefill-dir", &a, "--prefill-levels", "4"]).unwrap();
+        assert!(four.contains("levels 3..=4") && four.contains("1920 tiles, 1536 written, 384 already stored"), "{four}");
+        let again = gen(&["--prefill-dir", &a, "--prefill-levels", "4"]).unwrap();
+        assert!(again.contains("1920 tiles, 0 written, 1920 already stored") && again.contains("packs grew by 0 bytes"), "{again}");
+        // `--prefill-levels 0` disables; a depth below the floor writes nothing and says so; floor 0 writes the levels from 0.
+        gen(&["--global-dir", &b, "--prefill-levels", "0"]).unwrap();
+        let off = gen(&["--prefill-dir", &b, "--prefill-levels", "0"]).unwrap();
+        assert!(off.contains("disabled"), "{off}");
+        let below = gen(&["--prefill-dir", &b, "--floor-level", "3", "--prefill-levels", "1"]).unwrap();
+        assert!(
+            below.contains("nothing to write") && below.contains("--prefill-levels 1") && below.contains("below the render floor 3"),
+            "{below}"
+        );
+        let zero = gen(&["--prefill-dir", &b, "--floor-level", "0", "--prefill-levels", "1"]).unwrap();
+        assert!(zero.contains("levels 0..=1") && zero.contains("30 tiles, 30 written, 0 already stored"), "{zero}");
+        // Refusals: a floor above the finest level names both values; the viewer takes no flag; other generate commands would ignore it.
+        let e = gen(&["--prefill-dir", &b, "--floor-level", "5", "--finest-level", "4", "--prefill-levels", "2"]).unwrap_err();
+        assert!(e.contains("--floor-level 5") && e.contains("finest level 4"), "{e}");
+        let e = run_str(&["editor", "--floor-level", "3"]).unwrap_err();
+        assert!(e.contains("the viewer takes no flag"), "{e}");
+        let e = gen(&["--verify-global", &a, "--floor-level", "3"]).unwrap_err();
+        assert!(e.contains("--floor-level only applies to the pre-fill"), "{e}");
+        let e = run_str(&["test-render", "--scene", "hello-triangle", "--floor-level", "3"]).unwrap_err();
+        assert!(e.contains("does not apply to --scene hello-triangle"), "{e}");
+        // The effective floor is the lower of the floor and the finest level: a finest level of 2 needs no flag.
+        let o = parse_args(&["test-render".to_string(), "--finest-level".to_string(), "2".to_string()]).unwrap();
+        assert_eq!((o.floor_for(32), o.min_level()), (2, 3));
+        assert_eq!(parse_args(&["test-render".to_string()]).unwrap().floor_for(32), 3);
+    }
+
     // spec: GEN-019
     #[test]
     fn the_compact_format_with_fewer_than_16_cells_is_refused_naming_the_minimum() {
@@ -1015,6 +1157,8 @@ mod tests {
             "3",
             "--prefill-levels",
             "3",
+            "--floor-level",
+            "0",
             "--threads",
             "4",
             "--cells",
@@ -1025,10 +1169,10 @@ mod tests {
         let world = std::sync::Arc::new(worldfield::WorldTerrain::open_store(def(), std::path::Path::new(&store), 8).unwrap());
         // Levels 0..=3 are all present for the run's cells and finest level in the compact form; the vertex form finds only levels 0-2
         // (those records are shared by both forms, the pack holds the compact form of level 3).
-        assert_eq!(world.prefill_present(3, 16, 22, planet_render::TileFormat::Compact).unwrap(), (510, 510));
-        assert_eq!(world.prefill_present(3, 16, 22, planet_render::TileFormat::Vertex).unwrap(), (126, 510));
-        assert_eq!(world.prefill_present(4, 16, 22, planet_render::TileFormat::Compact).unwrap(), (510, 2046));
-        assert_eq!(world.prefill_present(3, 32, 22, planet_render::TileFormat::Compact).unwrap(), (0, 510), "other cells");
+        assert_eq!(world.prefill_present(0, 3, 16, 22, planet_render::TileFormat::Compact).unwrap(), (510, 510));
+        assert_eq!(world.prefill_present(0, 3, 16, 22, planet_render::TileFormat::Vertex).unwrap(), (126, 510));
+        assert_eq!(world.prefill_present(0, 4, 16, 22, planet_render::TileFormat::Compact).unwrap(), (510, 2046));
+        assert_eq!(world.prefill_present(0, 3, 32, 22, planet_render::TileFormat::Compact).unwrap(), (0, 510), "other cells");
         let src = |w: &std::sync::Arc<worldfield::WorldTerrain>, format| skeleton::MeshSource {
             world: std::sync::Arc::clone(w),
             format,

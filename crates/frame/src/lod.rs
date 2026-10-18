@@ -26,10 +26,29 @@ pub struct LodParams {
     /// cover plan, the draw set and the compact tile format's CON-13 guard all read it from here. The production value is
     /// [`production_finest_level`]`(cells)`; `--finest-level` and tests set it explicitly.
     pub max_level: u8,
+    /// The render floor (LOD-011, ADR 0062 point 3): no node of a lower level is selected, drawn or resident; the leaves at the floor
+    /// are the roots of the draw set. The production value is [`DEFAULT_RENDER_FLOOR`]; 0 reproduces the selection that starts at the
+    /// six face tiles. The effective floor is [`LodParams::floor_level`].
+    pub min_level: u8,
     /// Fraction of the split distance over which a node morphs (0.3 = last 30 % before it merges into its parent).
     pub morph_band: f64,
     /// Drop nodes that lie entirely below the horizon (padded by `max_height_m`).
     pub cull_horizon: bool,
+}
+
+/// The production render floor (LOD-011, ADR 0062 point 3): levels 0 to 2 are not drawn, the 384 tiles of level 3 are the roots.
+pub const DEFAULT_RENDER_FLOOR: u8 = 3;
+
+/// An explicit render floor (`--floor-level N`) must not lie above the finest level (LOD-011): it is refused before any work, with an
+/// error naming both values. The default floor needs no check: the effective floor is [`LodParams::floor_level`], the lower of the two.
+pub fn check_explicit_floor(floor: u8, max_level: u8) -> Result<(), String> {
+    if floor > max_level {
+        return Err(format!(
+            "--floor-level {floor} is above the finest level {max_level}: no tile of a level below the floor is drawn, so nothing would be; \
+             lower --floor-level or raise --finest-level"
+        ));
+    }
+    Ok(())
 }
 
 /// How many of the parent's sample spacings the shore ramp must span at least ([`LodParams::shore_ramp_min_m`], REND-030).
@@ -76,9 +95,16 @@ impl LodParams {
             tau_px: 6.0,
             cells: 32,
             max_level: production_finest_level(32),
+            min_level: DEFAULT_RENDER_FLOOR,
             morph_band: 0.3,
             cull_horizon: true,
         }
+    }
+
+    /// The effective render floor (LOD-011): `min(min_level, max_level)`, so a body whose finest level is 0 to 2 draws down to its
+    /// finest level without a flag. Every tile of this level is a root; there are `6 * 4^floor` of them (384 at floor 3).
+    pub fn floor_level(&self) -> u8 {
+        self.min_level.min(self.max_level)
     }
 
     /// Distance (to the node's bounding volume, LOD-008) below which a node of `level` is split.
@@ -360,6 +386,8 @@ impl SelectionCache {
                 field.water_cull_level().map_or(0, |w| planet_core::hash::hash_u64s(5, &[w.to_bits()]) | 1),
                 // The mesh key chains the reference surface (GEN-012): a field on another surface must not reuse keys.
                 planet_core::hash::hash_u64s(3, &text(field.surface_id())),
+                // The reused values start over when the render floor changes (LOD-009, LOD-011).
+                planet_core::hash::hash_u64s(6, &[u64::from(p.min_level)]),
             ],
         );
         if key != self.key
@@ -502,6 +530,23 @@ pub fn select_nodes_in_view_cached(
     select_impl(map, camera.position, Some(camera.frustum()), field, p, cache)
 }
 
+/// The roots of the draw set (LOD-011): every tile of the effective render floor level, `6 * 4^floor` of them (the six face tiles at
+/// floor 0, 384 at floor 3), in ascending tile-id order.
+pub fn floor_tiles(p: &LodParams) -> Vec<TileId> {
+    let level = p.floor_level();
+    let side = 1u32 << level;
+    let mut out = Vec::with_capacity(6 * (side as usize) * (side as usize));
+    for f in Face::ALL {
+        for x in 0..side {
+            for y in 0..side {
+                out.push(TileId::new(f, level, x, y).expect("a tile of the floor level"));
+            }
+        }
+    }
+    out.sort_unstable();
+    out
+}
+
 fn select_impl(
     map: &dyn FaceMapping,
     camera: PlanetFixed,
@@ -514,6 +559,7 @@ fn select_impl(
     let SelectionCache { tiles, volumes, misses, .. } = cache;
     let mut geoms = GeomCache { map, field, p, tiles, volumes, misses };
     let mut leaves: BTreeSet<TileId> = BTreeSet::new();
+    let floor = p.floor_level();
     let mut stack: Vec<TileId> = Face::ALL.iter().map(|&f| TileId::new(f, 0, 0, 0).expect("root")).collect();
     while let Some(t) = stack.pop() {
         let g = geoms.get(t);
@@ -532,8 +578,11 @@ fn select_impl(
             }
         }
         let split = p.split_distance(t.level());
+        // A tile below the render floor is split whatever the distance (LOD-011); the floor level is never above the finest level.
         // The bound that needs no height bounds rules most tiles out before the bounds are computed.
-        if t.level() < p.max_level && geoms.distance_lower_bound(t, camera) < split && geoms.distance(t, camera) < split {
+        if t.level() < floor
+            || (t.level() < p.max_level && geoms.distance_lower_bound(t, camera) < split && geoms.distance(t, camera) < split)
+        {
             stack.extend(children_of(t));
         } else {
             leaves.insert(t);
@@ -544,14 +593,15 @@ fn select_impl(
         .iter()
         .map(|&tile| {
             let distance_m = geoms.distance(tile, camera);
+            // A leaf at the render floor is a root: its parent is not drawn, so it never morphs (LOD-004, LOD-011).
             let (morph, morph_start_m, morph_end_m) = match tile.parent() {
-                None => (0.0, 1.0e30, 1.0e30),
-                Some(parent) => {
+                Some(parent) if tile.level() > floor => {
                     let d = geoms.distance(parent, camera) / p.split_distance(parent.level());
                     let morph = ((d - (1.0 - p.morph_band)) / p.morph_band).clamp(0.0, 1.0);
                     let (start, end) = morph_interval_for(&mut geoms, tile);
                     (morph, start, end)
                 }
+                _ => (0.0, 1.0e30, 1.0e30),
             };
             SelectedNode { tile, morph: morph as f32, distance_m, morph_start_m, morph_end_m }
         })
@@ -560,11 +610,11 @@ fn select_impl(
     // equal or the border opens. One start per level, the largest any leaf of the level needs. Where the terrain keeps
     // every leaf at the base start (the reference field at production parameters) this is the level constant of old.
     let mut level_start = [0.0f64; 32];
-    for n in nodes.iter().filter(|n| n.tile.level() > 0) {
+    for n in nodes.iter().filter(|n| n.tile.level() > floor) {
         let s = &mut level_start[n.tile.level() as usize];
         *s = s.max(n.morph_start_m);
     }
-    for n in nodes.iter_mut().filter(|n| n.tile.level() > 0) {
+    for n in nodes.iter_mut().filter(|n| n.tile.level() > floor) {
         n.morph_start_m = level_start[n.tile.level() as usize];
     }
     NodeSelection { nodes }
@@ -721,8 +771,7 @@ pub fn cover_selection_bounded(
     let mut view = ViewTest::new(map, camera, p, bounds);
     let mut leaves: BTreeSet<TileId> = BTreeSet::new();
     let mut stack: Vec<TileId> = Vec::new();
-    for f in Face::ALL {
-        let root = TileId::new(f, 0, 0, 0).expect("root");
+    for root in floor_tiles(p) {
         if resident(root).is_some() && !view.culled(root) {
             stack.push(root);
         }

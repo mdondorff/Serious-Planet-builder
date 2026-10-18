@@ -422,10 +422,12 @@ impl WorldTerrain {
         self.prefill_hits.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// How many of the tiles of levels `0..=levels` the pack holds for a run with `cells`, `max_level` and `format`, and how many
-    /// there are: `(present, total)`. Reads every present tile (the pack's CRC and the codec decide), whatever `cold` says.
+    /// How many of the tiles of levels `floor..=levels` (`floor`: the render floor of the run, LOD-011) the pack holds for a run with
+    /// `cells`, `max_level` and `format`, and how many there are: `(present, total)`. Reads every present tile (the pack's CRC and
+    /// the codec decide), whatever `cold` says.
     pub fn prefill_present(
         &self,
+        floor: u8,
         levels: u8,
         cells: u32,
         max_level: u8,
@@ -433,8 +435,8 @@ impl WorldTerrain {
     ) -> Result<(usize, usize), String> {
         let pack = self.pack.ok_or("this terrain has no tile pack (an in-memory bake)")?;
         let field = self.field()?;
-        let spec = TileSpec::new(field.as_ref(), self.radius_m, cells, max_level, form_of_format(format));
-        let total = planet_cache::meshpack::prefill_tile_count(levels);
+        let spec = TileSpec::new(field.as_ref(), self.radius_m, cells, max_level, form_of_format(format)).with_floor(floor);
+        let total = planet_cache::meshpack::prefill_tile_count_from(floor, levels);
         let missing = planet_cache::meshpack::missing_tiles(pack, &spec, levels).len();
         Ok((total - missing, total))
     }
@@ -461,16 +463,17 @@ impl WorldTerrain {
     }
 
     /// The read-only check of a stored production world before a window (TEST-024): the bake answers, the ocean channel reads, and the
-    /// tile pack holds levels `0..=levels` in the compact form (the form the production run draws) and, for information, the vertex
-    /// form. Writes nothing: the store is opened for reading only. Every present pack tile is read and decoded by `prefill_present`.
-    pub fn store_check(&self, levels: u8, cells: u32, max_level: u8) -> Result<StoreCheck, String> {
+    /// tile pack holds levels `floor..=levels` (`floor`: the render floor, LOD-011) in the compact form (the form the production run
+    /// draws) and, for information, the vertex form. Writes nothing: the store is opened for reading only. Every present pack tile is
+    /// read and decoded by `prefill_present`.
+    pub fn store_check(&self, floor: u8, levels: u8, cells: u32, max_level: u8) -> Result<StoreCheck, String> {
         if self.pack.is_none() {
             return Err("this terrain has no tile pack (an in-memory bake): there is no store to check".into());
         }
         let ocean = self.ocean_probe()?;
-        let compact = self.prefill_present(levels, cells, max_level, planet_render::TileFormat::Compact)?;
-        let vertex = self.prefill_present(levels, cells, max_level, planet_render::TileFormat::Vertex)?;
-        Ok(StoreCheck { source: self.source.clone(), res: self.res, levels, ocean, compact, vertex })
+        let compact = self.prefill_present(floor, levels, cells, max_level, planet_render::TileFormat::Compact)?;
+        let vertex = self.prefill_present(floor, levels, cells, max_level, planet_render::TileFormat::Vertex)?;
+        Ok(StoreCheck { source: self.source.clone(), res: self.res, floor, levels, ocean, compact, vertex })
     }
 
     /// Bake blocks `(done, total)` for the readiness report (ADR 0045 point 5). A run opens a complete bake (an in-memory one is
@@ -653,10 +656,12 @@ pub fn form_of_format(format: planet_render::TileFormat) -> RenderForm {
 pub struct StoreCheck {
     pub source: String,
     pub res: u32,
+    /// The levels checked: `floor..=levels`.
+    pub floor: u8,
     pub levels: u8,
     /// Directions read of the ocean channel and how many were sea; `None`: the store has no ocean channel.
     pub ocean: Option<(usize, usize)>,
-    /// `(present, total)` tiles of levels `0..=levels` in the compact form, and in the vertex form.
+    /// `(present, total)` tiles of levels `floor..=levels` in the compact form, and in the vertex form.
     pub compact: (usize, usize),
     pub vertex: (usize, usize),
 }
@@ -680,9 +685,10 @@ impl StoreCheck {
         }
         if self.compact.0 != self.compact.1 {
             p.push(format!(
-                "the tile pack holds {} of {} compact tiles of levels 0-{} at MESH_VERSION {}: pre-fill it with `generate --prefill-dir <store> --global-res {}`",
+                "the tile pack holds {} of {} compact tiles of levels {}-{} at MESH_VERSION {}: pre-fill it with `generate --prefill-dir <store> --global-res {}`",
                 self.compact.0,
                 self.compact.1,
+                self.floor,
                 self.levels,
                 planet_generators::mesh::MESH_VERSION,
                 self.res
@@ -706,8 +712,8 @@ impl StoreCheck {
             ),
             format!("  ocean channel: {ocean}"),
             format!(
-                "  tile pack, levels 0-{}: compact form {} of {} present (each read and decoded), vertex form {} of {}",
-                self.levels, self.compact.0, self.compact.1, self.vertex.0, self.vertex.1
+                "  tile pack, levels {}-{}: compact form {} of {} present (each read and decoded), vertex form {} of {}",
+                self.floor, self.levels, self.compact.0, self.compact.1, self.vertex.0, self.vertex.1
             ),
         ]
     }

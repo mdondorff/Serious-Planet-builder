@@ -21,6 +21,7 @@ fn lod() -> LodParams {
         viewport_h_px: f64::from(SIZE.1),
         tau_px: 2.5,
         max_level: 26,
+        min_level: 0,
         radius_m: R,
         max_height_m: LodParams::earth_1080p().max_height_m.max(Reference(7).max_abs_height_m()),
         ..LodParams::earth_1080p()

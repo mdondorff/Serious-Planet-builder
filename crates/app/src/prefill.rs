@@ -1,6 +1,6 @@
 //! The coarse pre-fill of the tile pack (STRM-021, ADR 0045 point 3): `generate --prefill-dir DIR --global-res N` writes the
-//! tiles of levels `0..=--prefill-levels` (default 4) of a stored bake into its pack, and `generate --global-dir` does the same
-//! right after the bake. The tiles are the ones the streamer generates on demand (`TileSpec::generate`), so a pre-filled tile
+//! tiles of levels `F..=--prefill-levels` (default 4; F the render floor, `--floor-level`, default 3, LOD-011) of a stored bake into
+//! its pack, and `generate --global-dir` does the same right after the bake. The tiles are the ones the streamer generates on demand (`TileSpec::generate`), so a pre-filled tile
 //! equals the generated one bit for bit and a second run writes nothing.
 
 use crate::worldfield::{form_of_format, load_world, WorldTerrain};
@@ -61,7 +61,8 @@ pub(crate) fn prefill_dir(o: &Options, out: &mut dyn Write) -> Result<(), String
 }
 
 /// Pre-fill the store in `dir` (a bake of `o.global_res` cells of the definition of `--world` or `--seed`) with levels
-/// `0..=--prefill-levels` and print what was done: tiles, bytes and wall time.
+/// `F..=--prefill-levels` (F the effective render floor) and print what was done: tiles, bytes and wall time. A `--prefill-levels`
+/// below the floor writes nothing and says so.
 pub(crate) fn prefill_store(o: &Options, dir: &Path, out: &mut dyn Write) -> Result<(), String> {
     let levels = o.prefill_levels.unwrap_or(DEFAULT_PREFILL_LEVELS);
     if levels == 0 {
@@ -75,7 +76,16 @@ pub(crate) fn prefill_store(o: &Options, dir: &Path, out: &mut dyn Write) -> Res
     let field = world.field()?;
     let format = o.tile_format.unwrap_or(planet_render::TileFormat::Compact);
     let max_level = o.finest_level_for(o.cells);
-    let spec = TileSpec::new(field.as_ref(), world.radius_m(), o.cells, max_level, form_of_format(format));
+    let floor = o.floor_for(o.cells);
+    if levels < floor {
+        return writeln!(
+            out,
+            "pre-fill {}: nothing to write: --prefill-levels {levels} is below the render floor {floor} (no tile of a lower level is drawn, LOD-011)",
+            dir.display()
+        )
+        .map_err(err);
+    }
+    let spec = TileSpec::new(field.as_ref(), world.radius_m(), o.cells, max_level, form_of_format(format)).with_floor(floor);
     let threads = if o.threads == 0 { std::thread::available_parallelism().map_or(1, |n| n.get()) } else { o.threads };
     let (bytes_before, started) = (pack_bytes(dir), std::time::Instant::now());
     let report = prefill(dir, &spec, levels, threads, DEFAULT_MAX_PACK_BYTES, &|level, n| {
@@ -86,7 +96,7 @@ pub(crate) fn prefill_store(o: &Options, dir: &Path, out: &mut dyn Write) -> Res
     let grown = pack_bytes(dir).saturating_sub(bytes_before);
     writeln!(
         out,
-        "pre-fill {}: levels 0..={levels} of cells {}, {} form, finest level {max_level}: {} tiles, {} written, {} already stored; \
+        "pre-fill {}: levels {floor}..={levels} of cells {}, {} form, finest level {max_level}: {} tiles, {} written, {} already stored; \
          {} payload bytes, packs grew by {grown} bytes; {secs:.1} s on {threads} threads",
         dir.display(),
         o.cells,

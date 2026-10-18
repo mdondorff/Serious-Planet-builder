@@ -84,6 +84,9 @@ pub(crate) struct Rig {
     pub managed: ManagedLoop,
     pub fi: FramesInFlight,
     pub pool: planet_streaming::PoolConfig,
+    /// The start-up load of the roots (the tiles of the render floor, STRM-001): how many and how long it waited for them (a reading,
+    /// STRM-022: the cold start of a run without a pre-fill is the one without the pack's tiles).
+    pub roots: (usize, std::time::Duration),
 }
 
 impl Rig {
@@ -93,6 +96,18 @@ impl Rig {
         world: &Arc<WorldTerrain>,
         first: &TerrainRequest,
         gen: planet_streaming::GenWorkers,
+    ) -> Result<Rig, String> {
+        Rig::new_with_progress(ctx, world, first, gen, &mut |_, _| {})
+    }
+
+    /// [`Rig::new`] reporting the start-up load of the roots: `progress(done, total)` as in
+    /// `Streamer::load_roots_blocking_with` (the window shows it in its title).
+    pub(crate) fn new_with_progress(
+        ctx: &GpuContext,
+        world: &Arc<WorldTerrain>,
+        first: &TerrainRequest,
+        gen: planet_streaming::GenWorkers,
+        progress: &mut dyn FnMut(usize, usize),
     ) -> Result<Rig, String> {
         let mut renderer = TerrainRenderer::for_context(ctx, first.size, first.lod.cells, u64::from(MAX_FRAMES_IN_FLIGHT));
         // REND-013: the pools' first block, the ring and every pipeline's first draw happen here, before frame 0 (frame 0 stays
@@ -119,20 +134,24 @@ impl Rig {
                 vertex_pool_slots: pool.managed_vertex_slots() as usize,
                 retire_frames: u64::from(MAX_FRAMES_IN_FLIGHT),
                 retry_after_ms: 1000,
+                floor: first.lod.floor_level(),
                 record_dispatches: false,
                 record_changes: true,
                 ..Default::default()
             }),
         );
-        // The one wait of the loop (CON-22): the six roots exist before the first frame, so there is always something to draw.
-        streamer.load_roots_blocking()?;
+        // The one wait of the loop (CON-22): the roots (the tiles of the render floor, 384 at floor 3) exist before the first frame,
+        // so there is always something to draw; a load step of the body, not a steady frame (STRM-001).
+        let roots_started = Instant::now();
+        streamer.load_roots_blocking_with(progress)?;
+        let roots = (streamer.stats().resident, roots_started.elapsed());
         // Prefetch along the camera's translation (STRM-018, ADR 0031): the same clock as the streamer's.
         let managed = ManagedLoop::new(pipe, ResidencyManager::new(streamer)).with_prefetch(
             planet_frame::prefetch::PrefetchConfig::default(),
             first.lod.radius_m,
             clock,
         );
-        Ok(Rig { renderer, managed, fi: FramesInFlight::new(MAX_FRAMES_IN_FLIGHT), pool })
+        Ok(Rig { renderer, managed, fi: FramesInFlight::new(MAX_FRAMES_IN_FLIGHT), pool, roots })
     }
 }
 
@@ -166,7 +185,15 @@ pub fn run_script(
             first.lod.cells, first.lod.max_level, r.lod.cells, r.lod.max_level
         ));
     }
-    let Rig { mut renderer, mut managed, mut fi, pool } = Rig::new(ctx, world, first, gen)?;
+    // The streamer's roots are the tiles of the first request's render floor and are never evicted: another floor is refused.
+    if let Some(r) = requests.iter().find(|r| r.lod.floor_level() != first.lod.floor_level()) {
+        return Err(format!(
+            "every request of a script must use the first one's render floor ({}), got {}",
+            first.lod.floor_level(),
+            r.lod.floor_level()
+        ));
+    }
+    let Rig { mut renderer, mut managed, mut fi, pool, .. } = Rig::new(ctx, world, first, gen)?;
     let mut log: Vec<FrameLog> = Vec::new();
     let mut last_drawn: Option<TerrainPlan> = None;
     let mut iteration = 0u64;

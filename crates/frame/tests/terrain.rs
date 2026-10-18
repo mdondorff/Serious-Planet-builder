@@ -506,8 +506,11 @@ fn plan_counts_stay_within_the_budget_over_the_scripted_views() {
 /// Re-pinned 2026-10-15 by `finest-level-cap` (LOD-010, declared: finest level 22): the standard views are planned at the production
 /// finest level (`production_finest_level(32)` = 22), which only ground-1m reaches: 2,897 to 2,378 nodes (-17.9 %); every other view is
 /// unchanged. The level-26 reference is pinned beside (`REFERENCE_L26_GROUND_1M`).
+/// Re-pinned 2026-10-18 by `render-floor-3` (LOD-011, ADR 0062 point 3, declared): orbit-20000km draws the 181 level-3 tiles of the
+/// whole visible hemisphere instead of 52 level-2 tiles (+129 nodes, SPIKE-12 Q5); the other nine views draw the nodes they drew at
+/// floor 0 (`the_floor_changes_the_orbit_view_only_...` in `floor.rs`).
 const VIEW_NODE_PINS: [(&str, u32); 10] = [
-    ("orbit-20000km", 52),
+    ("orbit-20000km", 181),
     ("high-2000km", 428),
     ("aerial-200km", 630),
     ("aerial-20km", 892),

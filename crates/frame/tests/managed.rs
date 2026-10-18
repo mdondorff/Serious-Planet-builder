@@ -31,6 +31,7 @@ fn lod() -> LodParams {
         viewport_h_px: 360.0,
         tau_px: 8.0,
         max_level: 16,
+        min_level: 0,
         max_height_m: Reference(1).max_abs_height_m(),
         ..LodParams::earth_1080p()
     }
@@ -905,7 +906,8 @@ fn upload_ranker(wants: &planet_streaming::Wants) -> impl Fn(TileId) -> (u8, u8)
     }
 }
 
-/// What the frame did, for comparing runs.
+/// What the frame did, for comparing runs. `bytes` are the steady bytes: the roots written by the start-up load (STRM-001) are
+/// exempt from the cap and not counted (these tests run at floor 0: the roots are the six level-0 tiles).
 #[derive(Debug, PartialEq)]
 struct UploadFrame {
     written: Vec<TileId>,
@@ -927,16 +929,15 @@ fn run_budgeted(rig: &mut Rig, frames: usize, script: &dyn Fn(usize) -> PlanetFi
         let written: Vec<TileId> = rig.sink.order[before..].to_vec();
         assert_eq!(c.uploaded as usize, written.len());
         assert_eq!(c.upload_bytes, written.len() as u64 * bytes, "frame {k}: the counts report what was written");
+        // The roots (level 0 at floor 0) are the start-up load: exempt from the cap, written whatever their bytes (STRM-001); the cap
+        // governs the tiles behind them.
+        let roots = written.iter().filter(|t| t.level() == 0).count() as u64;
+        let (steady_bytes, steady) = (c.upload_bytes - roots * bytes, c.uploaded - roots);
         // The cap is exceeded only by the one-tile rule; a frame that defers is full (nothing more fits).
-        assert!(c.upload_bytes <= cap || c.uploaded == 1, "frame {k}: {} bytes in {} tiles over the cap {cap}", c.upload_bytes, c.uploaded);
+        assert!(steady_bytes <= cap || steady == 1, "frame {k}: {steady_bytes} bytes in {steady} tiles over the cap {cap}");
         if c.deferred > 0 {
-            assert!(c.uploaded >= 1, "frame {k}: tiles wait but none was written (starvation)");
-            assert!(
-                c.upload_bytes + bytes > cap,
-                "frame {k}: deferred {} tiles though {} of {cap} bytes were used",
-                c.deferred,
-                c.upload_bytes
-            );
+            assert!(steady >= 1, "frame {k}: tiles wait but none was written (starvation)");
+            assert!(steady_bytes + bytes > cap, "frame {k}: deferred {} tiles though {steady_bytes} of {cap} bytes were used", c.deferred);
         }
         // Class order: the written tiles are in rank order, and nothing that waits ranks before the last one written.
         let rank = upload_ranker(&wants);
@@ -954,7 +955,7 @@ fn run_budgeted(rig: &mut Rig, frames: usize, script: &dyn Fn(usize) -> PlanetFi
         if check_blank {
             assert_eq!(f.pipeline.draw.blank, 0, "frame {k}: blank while tiles wait");
         }
-        out.push(UploadFrame { written, bytes: c.upload_bytes, deferred: c.deferred, resident: st.resident });
+        out.push(UploadFrame { written, bytes: steady_bytes, deferred: c.deferred, resident: st.resident });
         rig.finish();
     }
     out
@@ -1002,12 +1003,14 @@ fn on_the_dive_and_a_teleport_the_upload_cap_holds_in_every_frame_in_class_order
 fn a_tile_larger_than_the_cap_is_still_written_one_a_frame_and_nothing_starves() {
     let mut rig =
         Rig::budgeted(1_000_000, false, VERTEX_TILE_BYTES, UploadBudget { tile_bytes_per_frame: 10_000, node_records_in_cap: false });
-    // The six roots go first, one per frame; the view is blank only until they are in.
+    // The six roots are the start-up load: all written in frame 0 whatever their bytes (STRM-001, exempt from the cap); every tile
+    // after them is a steady one and goes one a frame, though each is over the cap.
     let frames = run_budgeted(&mut rig, 40, &|_| here(), false);
-    assert!(frames.iter().all(|f| f.written.len() <= 1), "one tile a frame at most, though every tile is over the cap");
-    assert!(frames.iter().take(30).all(|f| f.written.len() == 1), "and one a frame while any waits: {frames:?}");
-    let roots: Vec<_> = frames.iter().take(6).flat_map(|f| f.written.iter()).collect();
-    assert!(roots.iter().all(|t| t.level() == 0), "the roots first: {roots:?}");
+    assert_eq!(frames[0].written.len(), 6, "the roots in frame 0, over the cap: {:?}", frames[0]);
+    assert!(frames[0].written.iter().all(|t| t.level() == 0), "the roots first: {:?}", frames[0].written);
+    assert!(frames[1..].iter().all(|f| f.written.len() <= 1), "one tile a frame at most, though every tile is over the cap");
+    assert!(frames[1..].iter().filter(|f| f.deferred > 0).count() >= 20, "the script must keep tiles waiting: {frames:?}");
+    assert!(frames[1..].iter().all(|f| f.deferred == 0 || f.written.len() == 1), "and one a frame while any waits: {frames:?}");
     let f = rig.step(&request(here(), 0.3, -0.4));
     assert_eq!(f.pipeline.draw.blank, 0, "never blank once the roots are in");
 }
