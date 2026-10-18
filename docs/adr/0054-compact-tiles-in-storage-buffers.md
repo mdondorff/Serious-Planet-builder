@@ -1,5 +1,5 @@
 # 0054 Compact tiles in storage buffers instead of texture atlases (amends ADR 0033 point 3)
-Status: accepted (owner, 2026-10-17, opus-planner session)
+Status: accepted (owner, 2026-10-17, opus-planner session); slot layout amended by 0062
 Date: 2026-10-17
 Source: the storage-buffer exploration (sonnet-spikes, PR #225, `spikes/compact-storage-buffer/results/results.md`); ADR 0033 points 3 and 4; the tile-format duality exploration (PR #218); learnings of 2026-10-17
 
