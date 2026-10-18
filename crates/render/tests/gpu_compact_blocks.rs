@@ -88,9 +88,10 @@ fn one_shot_frames_in_every_debug_view_are_the_recorded_pixels() {
             frames += 1;
         }
     }
-    assert_eq!((frames, compact_nodes), (90, 16_542), "the scripted views changed");
+    // 18,180 since render-floor-3 (LOD-011, declared): the orbit views draw the 181 level-3 tiles instead of 52 level-2 tiles (16,542).
+    assert_eq!((frames, compact_nodes), (90, 18_180), "the scripted views changed");
     println!("one_shot: {frames} frames, {compact_nodes} compact nodes drawn, hash {all:016x}");
-    expect(&ctx, "one_shot", all, &[(WARP, 0x7c3d_3ad9_aa77_fca7), (RTX, 0x1613_d074_caed_d5dd)]);
+    expect(&ctx, "one_shot", all, &[(WARP, 0x4b54_f0ab_0d06_67ec), (RTX, 0x805c_02e1_79f7_c61d)]);
 }
 
 fn persistent(ctx: &GpuContext, plan: &TerrainPlan, mode: UploadMode, lit: Option<LitPlan>) -> Vec<u8> {

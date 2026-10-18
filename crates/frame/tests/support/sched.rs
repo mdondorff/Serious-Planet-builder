@@ -44,6 +44,8 @@ pub fn lod() -> LodParams {
         viewport_h_px: 360.0,
         tau_px: 8.0,
         max_level: 16,
+        // The loop tests of the scheduler start at the six face tiles (floor 0); the floor-3 loop has its own tests (LOD-011).
+        min_level: 0,
         max_height_m: Reference(1).max_abs_height_m(),
         ..LodParams::earth_1080p()
     }
@@ -153,6 +155,7 @@ pub fn loop_rig_for(lod: LodParams, capacity: usize, prefetch: bool, tile_bytes:
         capacity,
         retire_frames: 2,
         retry_after_ms: 100,
+        floor: lod.floor_level(),
         record_dispatches: true,
         record_changes: true,
         ..Default::default()

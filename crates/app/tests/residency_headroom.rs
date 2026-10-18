@@ -34,7 +34,8 @@ const COMPACT_HIGH_SLOTS: u64 = 23 * 14_639;
 const VERTEX_MID_SLOTS: u64 = 34_304;
 const VERTEX_HIGH_SLOTS: u64 = 52_480;
 
-fn closure(tiles: impl IntoIterator<Item = TileId>) -> BTreeSet<TileId> {
+/// The tiles with all their ancestors down to the render `floor` (LOD-011: no tile above the floor is ever a member).
+fn closure(tiles: impl IntoIterator<Item = TileId>, floor: u8) -> BTreeSet<TileId> {
     let mut out = BTreeSet::new();
     for t in tiles {
         let mut x = Some(t);
@@ -42,7 +43,7 @@ fn closure(tiles: impl IntoIterator<Item = TileId>) -> BTreeSet<TileId> {
             if !out.insert(a) {
                 break;
             }
-            x = a.parent();
+            x = a.parent().filter(|_| a.level() > floor);
         }
     }
     out
@@ -66,7 +67,7 @@ fn measure(world: &WorldTerrain, max_level: u8) -> Vec<(String, usize, usize, us
         let position: PlanetFixed = camera.position;
         let r = residency_set_field(&TangentWarp, position, field.as_ref(), &lod, &mut cache);
         let d = select_nodes_in_view_field(&TangentWarp, &camera, field.as_ref(), &lod);
-        let d_closure = closure(d.nodes.iter().map(|n| n.tile));
+        let d_closure = closure(d.nodes.iter().map(|n| n.tile), lod.floor_level());
         assert!(d_closure.iter().all(|t| r.contains(*t)), "{name}: D with its ancestors is inside R");
         out.push((name.to_string(), r.len(), d_closure.len(), d.nodes.len()));
     }
@@ -78,21 +79,25 @@ fn measure(world: &WorldTerrain, max_level: u8) -> Vec<(String, usize, usize, us
 /// position-based set with all its ancestors. Pinned 2026-10-15 by `residency-manager`; re-pinned 2026-10-15 by `finest-level-cap`
 /// (LOD-010, declared: finest level 22): only ground-1m reaches level 22, R 14,325 to 11,493 (-19.8 %) and D with ancestors 4,063 to
 /// 3,336 (-17.9 %). Raising a pin is a decision: say why in the change that does it (CON-20).
+/// Re-pinned 2026-10-18 by `render-floor-3` (LOD-011, ADR 0062 point 3, declared): R and D hold no tile above the render floor (level 3),
+/// so the levels 0-2 ancestors drop out of every view (-4 to -34 slots), and orbit-20000km is the 182 level-3 tiles of the visible
+/// hemisphere (73 before: 52 level-2 tiles and their ancestors) in both R and D.
 const PINS: [(&str, usize, usize); 10] = [
-    ("orbit-20000km", 73, 73),
-    ("high-2000km", 945, 597),
-    ("aerial-200km", 2650, 893),
-    ("aerial-20km", 4252, 1252),
-    ("low-2km", 6362, 1807),
-    ("ground-200m", 8677, 2384),
-    ("ground-1m", 11493, 3336),
-    ("north-pole-1km", 5633, 1603),
-    ("cube-corner-1km", 7899, 2185),
-    ("face-edge-1km", 7822, 2133),
+    ("orbit-20000km", 182, 182),
+    ("high-2000km", 911, 574),
+    ("aerial-200km", 2640, 886),
+    ("aerial-20km", 4246, 1249),
+    ("low-2km", 6358, 1804),
+    ("ground-200m", 8673, 2381),
+    ("ground-1m", 11489, 3333),
+    ("north-pole-1km", 5624, 1598),
+    ("cube-corner-1km", 7890, 2182),
+    ("face-edge-1km", 7812, 2127),
 ];
 
 /// The same at the reference finest level 26 (the cap before ADR 0033 point 6, `--finest-level 26`), where it differs: only ground-1m.
-const PINS_L26_GROUND_1M: (usize, usize) = (14325, 4063);
+/// (14,325 and 4,063 before render-floor-3, which drops the 4 and 3 ancestors above the floor.)
+const PINS_L26_GROUND_1M: (usize, usize) = (14321, 4060);
 
 fn check_pins(measured: &[(String, usize, usize, usize)], pins: &[(&str, usize, usize)]) -> Vec<String> {
     let mut failures = Vec::new();
@@ -133,14 +138,12 @@ fn the_slots_every_standard_view_needs_stay_within_their_pins_and_the_share() {
     if (g.1, g.2) != PINS_L26_GROUND_1M {
         failures.push(format!("ground-1m at the reference level 26: R {} and D {} against pins {:?}", g.1, g.2, PINS_L26_GROUND_1M));
     }
+    let measured: Vec<String> = l22.iter().map(|m| format!("(\"{}\", {}, {}),", m.0, m.1, m.2)).collect();
     assert!(
         failures.is_empty(),
-        "slot demand against its pins:
-{}",
-        failures.join(
-            "
-"
-        )
+        "slot demand against its pins:\n{}\nmeasured (R, D with ancestors):\n{}",
+        failures.join("\n"),
+        measured.join("\n")
     );
 
     // ADR 0033 point 2 for the compact tile's slot count, from the pools the renderer allocates: R with ancestors at most 10 % of the

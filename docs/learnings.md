@@ -416,6 +416,20 @@ Scope: ADR 0015, ADR 0042, `deny.toml` (CON-27)
 Proposed follow-up: the owner decides the font licences before the editor UI change; the editor accumulates every pass's `textures_delta` until painted.
 Obsolete when: the editor UI change lands.
 
+## 2026-10-18 SPIKE-12 baselines that differ from the specs (retire-vertex-format drafts)
+Scope: ADR 0062, ADR 0063, SPIKE-12 results, STRM-006, STRM-021, GEN-025
+What happened: drafting `compact-slot-v2` and `render-floor-3` from SPIKE-12 and ADR 0062 found five numbers that do not match the specs or the arithmetic. The spec-lint-green drafts use the corrected ones.
+| SPIKE-12 / ADR 0062 | Spec or arithmetic |
+|---|---|
+| Today's mid share 230,640 slots (atlas model), "-6.7 %" | 231,090 slots (15 blocks of 15,406); the 9,168 B slot gives 219,585, -5.0 % |
+| Vertex pool and fallback region 27.5 MB | 512 slots x 58,608 B = about 30 MB |
+| Pre-fill of levels 3..=4: 2,040 tiles | 6 x (64 + 256) = 1,920 tiles (2,046 - 126) |
+| Slot 9,360 B (ADR 0062 point 4) | included 192 B reserved for the 5x5 base that point 5 rejects; ADR 0063 sets 9,168 B (stride 456 + 8 (cells + 1)^2), 14,639 slots per block, 219,585 and 336,697 slots |
+| Floor removes levels 0-2 | the vertex pool's 256 manager slots for levels 0-2 stay allocated and unused after `render-floor-3` until `remove-vertex-render-path` |
+Assumption it changes: the "-6.7 %", "2,040" and "27.5 MB" figures quoted in ADR 0062, the spike and the earlier learning "A bigger compact record eats ADR 0033's fixed reserve". The roots' exemption from the upload cap (STRM-001, render-floor-3) is a clarification of ADR 0033 point 9: the cap governs steady frames, not the load of a body's roots.
+Proposed follow-up: specs state the corrected numbers; no change to the frozen spike results or the accepted ADR.
+Obsolete when: `remove-vertex-render-path` is archived.
+
 ## 2026-10-18 A 32-bit height step count is only exact in f32 up to 2^24, so the wide texel uses 2^24 - 1 levels (compact-slot-v2)
 ADR 0062 and SPIKE-12 assumed a 32-bit count (4,294,967,295 levels) gave 1 mm up to about 30 km of relief. An f32 holds integers exactly only up to 2^24, and WGSL leaves the rounding of `f32(u32)` above that open, so CPU and GPU could form different heights, and the precision was relief / 2^24 anyway. GEN-019 now uses 16,777,215 levels in the 32-bit field: the step is at most 1 mm up to 16.7 km of relief; the reconstruction error of `hr_min + f32(q) * hr_step` stays within 1 mm up to 8,192 m (f32 spacing of the sum). Nothing reaches this while the relief guard (65.5 m) stays; the removal change decides what a tile above 8 km does. ADR 0062's "about 30 km" is superseded by the spec's numbers.
 
@@ -429,3 +443,10 @@ Scope: `Cargo.toml` profiles, `.cargo/config.toml`, test layout of frame, render
 | Workspace `opt-level = 0` | slower build (32 s) and 34 % slower tests |
 Proposed follow-up: an OpenSpec change applying the debug-info and linker settings, then per-tier test binaries; results `spikes/build-speed/results/results.md`.
 Obsolete when: the build-speed change is archived.
+
+## 2026-10-18 A floor leaf is not the floor-0 node of the same tile: it has no parent to morph to (render-floor-3)
+Scope: LOD-011, LOD-004, the plan snapshots, the loop tests that start at level 0
+What happened: the draft of LOD-011 said nine of the ten standard views have "identical plans node for node" at floor 3 and at floor 0, and that a scene with a finest level of 2 "equals the floor-0 plan". The tiles and mesh keys are equal, but every node at the floor differs in its morph (0 and the interval `[1e30, 1e30]` against the parent's interval at floor 0), so the plans are equal only above the floor; the 128 x 96 snapshot view high-2000km also changes (73 to 71 nodes: three level-2 nodes at its edge whose children are all outside the view become one level-3 node). The orbit view is 52 to 181 nodes over the reference field and 182 over the default world's eroded field. R and D drop their levels 0-2 ancestors in every view (4 to 34 slots), and the 6 roots of floor 0 are now also exempt from the upload cap, which moved two scheduler digests (the two that run under a 40,000 B cap) and made the old "roots go one a frame under a tiny cap" test a statement of the opposite rule.
+Assumption it changes: the draft numbers ("plans equal", 11,661 nodes as plans) in the LOD-011 delta; the spec now says same tiles, equal above the floor, no morph at the floor.
+Proposed follow-up: none; `floor_zero_reproduces_the_plans_recorded_before_the_floor` keeps the earlier plans as the floor-0 record (`terrain_plans_floor0.txt`).
+Obsolete when: the vertex render path is removed and the floor is the only start of the tree.

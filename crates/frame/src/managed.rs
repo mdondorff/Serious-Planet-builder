@@ -212,14 +212,14 @@ impl Classes {
     #[cfg(test)]
     fn of(wants: &Wants) -> Classes {
         let mut c = Classes::default();
-        c.fill(wants);
+        c.fill(wants, 0);
         c
     }
 
     /// Rebuilt after the draw wants changed and only when a tile waits, in the map the last build left (its memory is kept: a
     /// fresh map of a few thousand entries is a megabyte the OS must hand out and zero every time, which is where a frame shared
-    /// with the generation threads loses milliseconds).
-    fn fill(&mut self, wants: &Wants) {
+    /// with the generation threads loses milliseconds). The walks end at the render `floor` (LOD-011): no tile above it is a member.
+    fn fill(&mut self, wants: &Wants, floor: u8) {
         // An entry's ancestors always hold a priority at most its own (every walk lowers them all), so a walk that meets a tile
         // already at or below its priority has nothing left to change above it: the draw set's tiles share their ancestors, and
         // the walks stop there instead of running to the root (the priorities are plan indices, never NaN).
@@ -239,7 +239,7 @@ impl Classes {
                         e.insert(priority);
                     }
                 }
-                t = x.parent();
+                t = x.parent().filter(|_| x.level() > floor);
             }
         }
     }
@@ -350,6 +350,8 @@ impl ManagedLoop {
     /// Begin the next frame for `req`; never waits. See the module documentation for the order of the three steps.
     pub fn begin_frame(&mut self, req: &TerrainRequest, sink: &mut dyn TileSink) -> Result<ManagedFrame, String> {
         let t = Instant::now();
+        // The roots of the draw set are the tiles of the streamer's render floor (LOD-011): no ancestor above it is requested.
+        let floor = self.manager.streamer().floor();
         // Only the lists that changed are handed over (STRM-019); a frame after which nothing changed does no work per tile.
         if std::mem::take(&mut self.draw_changed) {
             self.manager.set_draw(&self.wants.draw);
@@ -390,7 +392,7 @@ impl ManagedLoop {
         // The budget (STRM-006): the finished tiles in class order while their bytes fit, at least one.
         if !self.pending.is_empty() {
             if self.classes_stale || self.classes.is_none() {
-                self.classes.get_or_insert_with(Classes::default).fill(&self.wants);
+                self.classes.get_or_insert_with(Classes::default).fill(&self.wants, floor);
                 self.classes_stale = false;
                 self.class_rebuilds += 1;
             }
@@ -402,7 +404,7 @@ impl ManagedLoop {
                         if !self.prefetch_closure.insert(x) {
                             break;
                         }
-                        t = x.parent();
+                        t = x.parent().filter(|_| x.level() > floor);
                     }
                 }
                 self.prefetch_closure_stale = false;
@@ -418,7 +420,7 @@ impl ManagedLoop {
                 let Some(mesh) = streamer.get(tile) else { continue };
                 let (class, priority) = if let Some(p) = classes.draw.get(&tile) {
                     (UploadClass::Draw, *p)
-                } else if tile.level() == 0 {
+                } else if tile.level() <= floor {
                     (UploadClass::Draw, 0.0)
                 } else if residency.is_some_and(|r| r.contains(tile)) {
                     (UploadClass::Residency, 0.0)
@@ -430,7 +432,11 @@ impl ManagedLoop {
                 waiting.push(Waiting { tile, class, priority, bytes: sink.upload_bytes(&mesh) });
             }
             sort_waiting(&mut waiting);
-            let take = upload_count(&waiting, self.budget.allowance(self.last_node_bytes));
+            // The start-up load of the roots is not a steady frame (STRM-001, a declared exception to the cap of STRM-006): every
+            // root that waits is written before the frame is drawn, whatever its bytes. They sort first (the draw class, the
+            // lowest level); the cap and the one-tile rule then govern the tiles behind them, the first steady frame's.
+            let roots = waiting.iter().take_while(|w| w.tile.level() <= floor).count();
+            let take = roots + upload_count(&waiting[roots..], self.budget.allowance(self.last_node_bytes));
             // The frame's tiles in upload order, written as one batch (a sink that coalesces adjacent slots makes one call per run).
             let mut batch = std::mem::take(&mut self.batch_scratch);
             batch.clear();

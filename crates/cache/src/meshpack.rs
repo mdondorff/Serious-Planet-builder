@@ -1,6 +1,7 @@
 //! Pre-filled coarse tiles in the tile pack (STRM-021, ADR 0045 point 3).
 //!
-//! The bake step also writes the finished render tiles of levels `0..=N` (default 4) into the pack of the bake, as records of
+//! The bake step also writes the finished render tiles of levels `F..=N` (F the render floor, default 3, LOD-011; N default 4) into
+//! the pack of the bake, as records of
 //! kind 2 ([`Kind::Mesh`]) under the existing ADR 0018 key of the tile's mesh (`mesh_key_inputs`) plus one output parameter
 //! naming the form of the tile ([`PARAM_RENDER_FORM`]), so the streamer reads a coarse tile from disk instead of generating it
 //! (a level-0 tile reads about 320 bake blocks: 6.6 s on one thread). The payload is the tile exactly as the generators build it
@@ -48,7 +49,7 @@ pub const PARAM_RENDER_FORM: u8 = 5;
 /// 3 = the compact form is the slot of GEN-025 (`MESH_VERSION` 8).
 pub const PAYLOAD_VERSION: u8 = 3;
 
-/// The default depth of the pre-fill: levels 0 to this one (2,046 tiles).
+/// The default depth of the pre-fill: levels from the render floor to this one (1,920 tiles at floor 3, 2,046 at floor 0).
 pub const DEFAULT_PREFILL_LEVELS: u8 = 4;
 
 /// The deepest level a pre-fill may name (4^8 x 6 tiles at level 8 alone are 393,216): a guard against a typo, and the deepest
@@ -314,12 +315,25 @@ pub struct TileSpec<'a> {
     max_level: u8,
     /// The form the run draws levels 3 and deeper in.
     form: RenderForm,
+    /// The render floor of the run (LOD-011): a tile of a lower level is never drawn, so never stored or looked up. 0 by default.
+    floor: u8,
     node_set_id: std::sync::OnceLock<[u8; 16]>,
 }
 
 impl<'a> TileSpec<'a> {
     pub fn new(field: &'a dyn HeightField, radius_m: f64, cells: u32, max_level: u8, form: RenderForm) -> TileSpec<'a> {
-        TileSpec { field, radius_m, cells, max_level, form, node_set_id: std::sync::OnceLock::new() }
+        TileSpec { field, radius_m, cells, max_level, form, floor: 0, node_set_id: std::sync::OnceLock::new() }
+    }
+
+    /// The same run with render floor `floor` (the effective floor of LOD-011): the pre-fill covers levels `floor..=N` and a tile
+    /// below the floor is not storable.
+    pub fn with_floor(mut self, floor: u8) -> TileSpec<'a> {
+        self.floor = floor;
+        self
+    }
+
+    pub fn floor(&self) -> u8 {
+        self.floor
     }
 
     pub fn max_level(&self) -> u8 {
@@ -336,9 +350,10 @@ impl<'a> TileSpec<'a> {
         }
     }
 
-    /// Whether a tile may be read from the pack: shallow enough to be pre-filled, and not a finest tile of this run.
+    /// Whether a tile may be read from the pack: not below the render floor (such a tile is never drawn), shallow enough to be
+    /// pre-filled, and not a finest tile of this run.
     pub fn storable(&self, tile: TileId) -> bool {
-        tile.level() <= MAX_PREFILL_LEVELS && tile.level() < self.max_level
+        tile.level() >= self.floor && tile.level() <= MAX_PREFILL_LEVELS && tile.level() < self.max_level
     }
 
     fn key_of(&self, tile: TileId) -> CacheKey {
@@ -372,8 +387,14 @@ impl<'a> TileSpec<'a> {
 
 /// The tiles of levels `0..=levels` in the order the pre-fill works and writes them: level, face, row, column.
 pub fn prefill_tiles(levels: u8) -> Vec<TileId> {
+    prefill_tiles_from(0, levels)
+}
+
+/// The tiles of levels `floor..=levels` (the pre-fill of a run with render floor `floor`), in the order of [`prefill_tiles`]. None
+/// when `levels` is below `floor`.
+pub fn prefill_tiles_from(floor: u8, levels: u8) -> Vec<TileId> {
     let mut out = Vec::new();
-    for level in 0..=levels {
+    for level in floor..=levels {
         let n = 1u32 << level;
         for face in 0..6u8 {
             for y in 0..n {
@@ -389,6 +410,14 @@ pub fn prefill_tiles(levels: u8) -> Vec<TileId> {
 /// Count of tiles in levels `0..=levels`: `6 (4^(levels + 1) - 1) / 3`.
 pub fn prefill_tile_count(levels: u8) -> usize {
     6 * ((1usize << (2 * (usize::from(levels) + 1))) - 1) / 3
+}
+
+/// Count of tiles in levels `floor..=levels`: 1,920 for floor 3 and levels 4, 384 for floor 3 and levels 3, 0 below the floor.
+pub fn prefill_tile_count_from(floor: u8, levels: u8) -> usize {
+    if levels < floor {
+        return 0;
+    }
+    prefill_tile_count(levels) - if floor == 0 { 0 } else { prefill_tile_count(floor - 1) }
 }
 
 /// Why a pre-fill failed.
@@ -427,7 +456,7 @@ impl From<MeshCodecError> for PrefillError {
 /// What a pre-fill did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PrefillReport {
-    /// Tiles in levels `0..=levels`.
+    /// Tiles in levels `floor..=levels`.
     pub total: usize,
     /// Tiles the pack already held (under the current key, payload decoding): skipped.
     pub present: usize,
@@ -437,12 +466,13 @@ pub struct PrefillReport {
     pub payload_bytes: u64,
 }
 
-/// Which of the tiles of levels `0..=levels` the pack holds.
+/// Which of the tiles of levels `floor..=levels` (the floor of `spec`) the pack lacks.
 pub fn missing_tiles(store: &TileStore, spec: &TileSpec<'_>, levels: u8) -> Vec<TileId> {
-    prefill_tiles(levels).into_iter().filter(|t| spec.lookup(store, *t).is_none()).collect()
+    prefill_tiles_from(spec.floor, levels).into_iter().filter(|t| spec.lookup(store, *t).is_none()).collect()
 }
 
-/// Write the tiles of levels `0..=levels` the pack of `dir` lacks. Tiles are generated on `threads` threads, heaviest (coarsest)
+/// Write the tiles of levels `floor..=levels` (the floor of `spec`, 0 by default) the pack of `dir` lacks. A `levels` below the
+/// floor writes nothing and opens nothing (the caller says so). Tiles are generated on `threads` threads, heaviest (coarsest)
 /// first, and appended in the fixed order of [`prefill_tiles`], so the records, their order and the bytes of the pack do not
 /// depend on the thread count (CON-14). A tile the pack already holds under the current key, whose payload decodes, is skipped
 /// and a run that finds nothing missing opens no writer and changes no byte. `progress` is called after each level with
@@ -456,7 +486,13 @@ pub fn prefill(
     progress: &(dyn Fn(u8, usize) + Sync),
 ) -> Result<PrefillReport, PrefillError> {
     if levels > MAX_PREFILL_LEVELS {
-        return Err(PrefillError::Levels(format!("a pre-fill of levels 0..={levels} is too deep (at most {MAX_PREFILL_LEVELS})")));
+        return Err(PrefillError::Levels(format!(
+            "a pre-fill of levels {}..={levels} is too deep (at most {MAX_PREFILL_LEVELS})",
+            spec.floor
+        )));
+    }
+    if levels < spec.floor {
+        return Ok(PrefillReport { total: 0, present: 0, written: 0, payload_bytes: 0 });
     }
     if spec.form == RenderForm::Compact && spec.cells < planet_generators::climate::CLIMATE_MIN_COMPACT_CELLS && levels >= COMPACT_MIN_LEVEL
     {
@@ -468,12 +504,12 @@ pub fn prefill(
     }
     if levels >= spec.max_level {
         return Err(PrefillError::Levels(format!(
-            "a pre-fill of levels 0..={levels} reaches the finest level {} of the view: such tiles are decided by their relief and are never stored",
-            spec.max_level
+            "a pre-fill of levels {}..={levels} reaches the finest level {} of the view: such tiles are decided by their relief and are never stored",
+            spec.floor, spec.max_level
         )));
     }
     let store = TileStore::open(dir, store_params())?;
-    let all = prefill_tiles(levels);
+    let all = prefill_tiles_from(spec.floor, levels);
     let total = all.len();
     let missing = missing_tiles(&store, spec, levels);
     let present = total - missing.len();

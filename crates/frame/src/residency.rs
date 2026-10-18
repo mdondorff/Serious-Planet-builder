@@ -22,32 +22,36 @@ pub struct ResidencyEntry {
     pub distance_m: f64,
 }
 
-/// R: entries in ascending tile-id order, closed under parents.
+/// R: entries in ascending tile-id order, closed under parents down to the render floor: a tile above the floor is never a member
+/// (LOD-011, STRM-015).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ResidencySet {
     pub tiles: Vec<ResidencyEntry>,
+    /// The effective render floor R was made for ([`LodParams::floor_level`]): the chain of a tile's ancestors ends at this level.
+    pub floor: u8,
     /// The bounds the selection cached for the tiles of R (empty for R over flat terrain and for sets made by hand): what the
     /// frame path's cover reads to cull and measure like the plan without evaluating a field (STRM-016).
     pub bounds: TileBounds,
 }
 
 impl ResidencySet {
-    /// R from a position-only selection: its leaves and all their ancestors.
-    pub fn from_selection(selection: &NodeSelection) -> ResidencySet {
+    /// R from a position-only selection: its leaves and all their ancestors down to the render `floor` (none above it).
+    pub fn from_selection(selection: &NodeSelection, floor: u8) -> ResidencySet {
         let mut all: BTreeMap<TileId, (bool, f64)> = BTreeMap::new();
         for n in &selection.nodes {
             all.insert(n.tile, (true, n.distance_m));
         }
         for n in &selection.nodes {
-            let mut t = n.tile.parent();
+            let mut t = n.tile.parent().filter(|_| n.tile.level() > floor);
             while let Some(a) = t {
                 let e = all.entry(a).or_insert((false, f64::INFINITY));
                 e.1 = e.1.min(n.distance_m);
-                t = a.parent();
+                t = a.parent().filter(|_| a.level() > floor);
             }
         }
         ResidencySet {
             tiles: all.into_iter().map(|(tile, (leaf, distance_m))| ResidencyEntry { tile, leaf, distance_m }).collect(),
+            floor,
             bounds: TileBounds::default(),
         }
     }
@@ -59,7 +63,9 @@ impl ResidencySet {
     /// Whether the tiles are in ascending order and every tile's parent is in the set: what [`ResidencySet::contains`] and the
     /// managed loop's ranking of the residency class (a lookup in R instead of a closure over it) rely on.
     pub fn is_sorted_and_closed(&self) -> bool {
-        self.tiles.windows(2).all(|w| w[0].tile < w[1].tile) && self.tiles.iter().all(|e| e.tile.parent().is_none_or(|p| self.contains(p)))
+        let floor = self.floor;
+        self.tiles.windows(2).all(|w| w[0].tile < w[1].tile)
+            && self.tiles.iter().all(|e| e.tile.parent().filter(|_| e.tile.level() > floor).is_none_or(|p| self.contains(p)))
     }
 
     pub fn len(&self) -> usize {
@@ -78,7 +84,7 @@ impl ResidencySet {
 
 /// R over flat terrain.
 pub fn residency_set(map: &dyn FaceMapping, position: PlanetFixed, p: &LodParams, cache: &mut SelectionCache) -> ResidencySet {
-    ResidencySet::from_selection(&select_nodes_cached(map, position, p, cache))
+    ResidencySet::from_selection(&select_nodes_cached(map, position, p, cache), p.floor_level())
 }
 
 /// R over the terrain of `field` (per-node height bounds).
@@ -89,7 +95,7 @@ pub fn residency_set_field(
     p: &LodParams,
     cache: &mut SelectionCache,
 ) -> ResidencySet {
-    let mut r = ResidencySet::from_selection(&select_nodes_field_cached(map, position, field, p, cache));
+    let mut r = ResidencySet::from_selection(&select_nodes_field_cached(map, position, field, p, cache), p.floor_level());
     // Every tile of R was visited by the selection, so its geometry and volume are in the cache: the bounds are lookups.
     r.bounds = cache.bounds_of(r.tiles.iter().map(|e| e.tile), position, map, field, p);
     r

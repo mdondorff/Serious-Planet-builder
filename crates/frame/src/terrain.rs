@@ -193,6 +193,13 @@ pub fn plan_terrain_threaded(
     plan_terrain_keyed(req, field, cache, None, threads)
 }
 
+/// The first node whose morph interval is empty (it starts after 95 % of its length: no room for a crack-free morph), if any. The
+/// leaves at the render `floor` are roots with the interval `[1e30, 1e30]` and are exempt, and only those (LOD-011): the same interval
+/// on a leaf above the floor is an empty one.
+pub fn first_empty_morph_interval(nodes: &[crate::lod::SelectedNode], floor: u8) -> Option<&crate::lod::SelectedNode> {
+    nodes.iter().find(|n| n.tile.level() > floor && n.morph_start_m > 0.95 * n.morph_end_m)
+}
+
 /// [`plan_terrain_cached`] with an optional replacement for the per-tile mesh key derivation (`None`: the production
 /// `MeshKeyer`). A test hook: the reference and eroded keyers hash constants per tile and touch no field, so a counting
 /// keyer is the only observable of the mesh-key memo (LOD-009).
@@ -221,7 +228,7 @@ pub(crate) fn plan_terrain_keyed(
     let selection = select_nodes_in_view_cached(map.as_ref(), &req.camera, field, &req.lod, cache);
     // A morph interval that cannot be crack-free (the neighbourhood's height extent leaves no room) is an error, never a
     // narrowed interval: relief this steep at this tile size needs a larger viewport_h_px / tau_px or fewer cells.
-    if let Some(n) = selection.nodes.iter().find(|n| n.tile.level() > 0 && n.morph_start_m > 0.95 * n.morph_end_m) {
+    if let Some(n) = first_empty_morph_interval(&selection.nodes, req.lod.floor_level()) {
         return Err(PlanError::InvalidLod(format!(
             "tile {:?} (level {}): morph interval [{:.1}, {:.1}] m is empty because the height extent of its neighbourhood leaves no room; \
              this terrain is too steep for cells {} and viewport_h_px / tau_px {:.0}: raise viewport_h_px / tau_px or reduce cells",

@@ -303,7 +303,7 @@ impl TerrainBundle {
             h64(c.near_m)
         );
         s += &format!(
-            "lod radius {} max_height {} fov {} viewport_h {} tau {} cells {} max_level {} morph_band {} cull_horizon {}\n",
+            "lod radius {} max_height {} fov {} viewport_h {} tau {} cells {} max_level {} min_level {} morph_band {} cull_horizon {}\n",
             h64(l.radius_m),
             h64(l.max_height_m),
             h64(l.fov_y_rad),
@@ -311,6 +311,7 @@ impl TerrainBundle {
             h64(l.tau_px),
             l.cells,
             l.max_level,
+            l.min_level,
             h64(l.morph_band),
             l.cull_horizon
         );
@@ -362,7 +363,14 @@ impl TerrainBundle {
                         near_m: p64(near)?,
                     })
                 }
-                ["lod", "radius", r, "max_height", mh, "fov", fov, "viewport_h", vh, "tau", tau, "cells", cells, "max_level", ml, "morph_band", mb, "cull_horizon", ch] => {
+                // A bundle written before the render floor has no `min_level`: it replays as floor 0, the plan it recorded (TEST-008).
+                ["lod", "radius", r, "max_height", mh, "fov", fov, "viewport_h", vh, "tau", tau, "cells", cells, "max_level", ml, "min_level", _, "morph_band", mb, "cull_horizon", ch]
+                | ["lod", "radius", r, "max_height", mh, "fov", fov, "viewport_h", vh, "tau", tau, "cells", cells, "max_level", ml, "morph_band", mb, "cull_horizon", ch] =>
+                {
+                    let min_level = match t.as_slice() {
+                        [.., "min_level", _, "morph_band", _, "cull_horizon", _] => t[t.len() - 5].parse().map_err(bad)?,
+                        _ => 0,
+                    };
                     lod = Some(LodParams {
                         radius_m: p64(r)?,
                         max_height_m: p64(mh)?,
@@ -371,6 +379,7 @@ impl TerrainBundle {
                         tau_px: p64(tau)?,
                         cells: cells.parse().map_err(bad)?,
                         max_level: ml.parse().map_err(bad)?,
+                        min_level,
                         morph_band: p64(mb)?,
                         cull_horizon: ch.parse().map_err(|e| format!("bad bool '{ch}': {e}"))?,
                     })

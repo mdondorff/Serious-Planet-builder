@@ -30,7 +30,7 @@ pub use manager::{degrade, DegradationReport, Degraded, ManagerFrame, ResidencyM
 pub use priority::Priority;
 pub use slots::{PoolKind, SlotPool, SlotPools, SlotRef, VERTEX_POOL_MAX_LEVEL};
 
-use layer::{normalized, Layer};
+use layer::{normalized, parent_in, Layer};
 use planet_core::{TileId, Vec3};
 use queue::RequestQueue;
 use std::cmp::Reverse;
@@ -518,6 +518,10 @@ pub struct StreamConfig {
     pub retire_frames: u64,
     /// A failed tile is retried after this many milliseconds.
     pub retry_after_ms: u64,
+    /// The render floor (LOD-011): the tiles of this level are the roots of the tree. No tile above it is ever listed, requested or
+    /// resident, a chain of ancestors ends there, and the roots are loaded at start-up and never evicted (STRM-001, STRM-007).
+    /// 0: the six face tiles are the roots.
+    pub floor: u8,
     /// Keep the order in which tiles were dispatched in `dispatch_log` (tests and diagnostics; grows without bound).
     pub record_dispatches: bool,
     /// Record every tile that becomes resident or is evicted for [`Streamer::take_changes`] (a loop that mirrors the resident
@@ -534,6 +538,7 @@ impl Default for StreamConfig {
             vertex_pool_slots: 0,
             retire_frames: 0,
             retry_after_ms: 1000,
+            floor: 0,
             record_dispatches: false,
             record_changes: false,
         }
@@ -545,6 +550,26 @@ impl StreamConfig {
     pub fn job_limit(&self) -> usize {
         self.max_in_flight + self.queue_ahead
     }
+
+    /// The roots of the tree: every tile of the render floor level, in ascending tile-id order (six at floor 0, 384 at floor 3).
+    pub fn roots(&self) -> Vec<TileId> {
+        floor_roots(self.floor)
+    }
+}
+
+/// The tiles of the render floor level `floor`, in ascending tile-id order: `6 * 4^floor` of them.
+pub fn floor_roots(floor: u8) -> Vec<TileId> {
+    let side = 1u32 << floor;
+    let mut out = Vec::with_capacity(6 * (side as usize) * (side as usize));
+    for f in planet_core::Face::ALL {
+        for x in 0..side {
+            for y in 0..side {
+                out.push(TileId::new(f, floor, x, y).expect("a tile of the floor level"));
+            }
+        }
+    }
+    out.sort_unstable();
+    out
 }
 
 /// Hardware threads the default tile generation pool leaves free (STRM-020, perf window 2): the frame thread, the plan worker and
@@ -745,7 +770,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 config.retire_frames,
             ),
             changes: Vec::new(),
-            layers: [Layer::new(true), Layer::new(false), Layer::new(false)],
+            layers: [Layer::new(true, config.floor), Layer::new(false, config.floor), Layer::new(false, config.floor)],
             pending: [None, None, None],
             missing: FxSet::default(),
             victims: [BTreeSet::new(), BTreeSet::new()],
@@ -776,13 +801,21 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         n
     }
 
-    /// Load the six level-0 tiles once at start-up, so that some level of detail always exists (CON-22). This is the only
-    /// place that waits. The six jobs are handed to the spawner together and the caller waits for all of them, so a pool
-    /// loads them concurrently (STRM-001); the tiles are made resident in face order once all have arrived, so the
-    /// result does not depend on the spawner, the thread count or the order the jobs finish (CON-14). If one fails, the
-    /// others are told to stop, nothing becomes resident and the error names the failing tile (the lowest face if several).
+    /// Load the roots (the tiles of the render floor, [`StreamConfig::roots`]: six at floor 0, 384 at floor 3) once at start-up, so
+    /// that some level of detail always exists (CON-22). This is the only place that waits. The jobs are handed to the spawner
+    /// together and the caller waits for all of them, so a pool loads them concurrently (STRM-001); the tiles are made resident in
+    /// tile-id order once all have arrived, so the result does not depend on the spawner, the thread count or the order the jobs
+    /// finish (CON-14). If one fails, the others are told to stop, nothing becomes resident and the error names the failing tile
+    /// (the lowest id if several).
     pub fn load_roots_blocking(&mut self) -> Result<(), String> {
-        let ids: Vec<TileId> = planet_core::Face::ALL.iter().map(|&f| TileId::new(f, 0, 0, 0).expect("root")).collect();
+        self.load_roots_blocking_with(&mut |_, _| {})
+    }
+
+    /// [`load_roots_blocking`](Streamer::load_roots_blocking) reporting its progress: `progress(done, total)` is called with `(0, total)`
+    /// once every job is handed over and again after each root's result arrived (a loop shows the roots loaded so far in the window
+    /// title, STRM-001, ADR 0045 point 5). A reading only: it changes nothing the load does.
+    pub fn load_roots_blocking_with(&mut self, progress: &mut dyn FnMut(usize, usize)) -> Result<(), String> {
+        let ids: Vec<TileId> = self.config.roots();
         let mut slots = Vec::with_capacity(ids.len());
         for &id in &ids {
             let kind = self.pools.kind_of(id);
@@ -792,7 +825,12 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                     for slot in slots {
                         self.pools.release(slot, self.frame);
                     }
-                    return Err(format!("no slot for root {id:?}: capacity {} is below the six roots", self.config.capacity));
+                    return Err(format!(
+                        "no slot for root {id:?}: capacity {} is below the {} roots (floor level {})",
+                        self.config.capacity,
+                        ids.len(),
+                        self.config.floor
+                    ));
                 }
             }
         }
@@ -816,6 +854,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             }));
         }
         drop(tx);
+        progress(0, ids.len());
         let mut results: Vec<Option<Outcome<T>>> = ids.iter().map(|_| None).collect();
         let mut missing = ids.len();
         while missing > 0 {
@@ -838,6 +877,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             let i = ids.iter().position(|&x| x == id).expect("a root id");
             results[i] = Some(outcome);
             missing -= 1;
+            progress(ids.len() - missing, ids.len());
         }
         // A real failure is reported before the cancellations it caused (lowest face first within each).
         let mut error = results.iter().enumerate().find_map(|(i, r)| match r {
@@ -905,6 +945,16 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         self.work
     }
 
+    /// The render floor of this streamer ([`StreamConfig::floor`]): its roots are the tiles of this level.
+    pub fn floor(&self) -> u8 {
+        self.config.floor
+    }
+
+    /// How many roots the streamer has: `6 * 4^floor`.
+    pub fn root_count(&self) -> usize {
+        6usize << (2 * u32::from(self.config.floor))
+    }
+
     /// Slots of the main pool: what the residency manager fits R to.
     pub fn main_capacity(&self) -> usize {
         self.config.capacity
@@ -939,7 +989,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             if self.resident.contains_key(&t) {
                 return Some(t);
             }
-            t = t.parent()?;
+            t = parent_in(t, self.config.floor)?;
         }
     }
 
@@ -982,11 +1032,11 @@ impl<T: Send + Sync + 'static> Streamer<T> {
     }
 
     /// Two numbers of a degradation report that the layers know without a pass over the wants: the tiles in the draw or
-    /// residency class, with the six roots, that count against the pool; and the counted tiles of the draw set's closure with
+    /// residency class, with the roots, that count against the pool; and the counted tiles of the draw set's closure with
     /// the roots.
     pub fn closure_numbers(&self) -> (usize, usize) {
         let counted = |t: TileId| !self.has_vertex_pool() || t.level() > VERTEX_POOL_MAX_LEVEL;
-        let roots: Vec<TileId> = planet_core::Face::ALL.iter().map(|&f| TileId::new(f, 0, 0, 0).expect("root")).collect();
+        let roots: Vec<TileId> = self.config.roots();
         let root_outside_draw = roots.iter().filter(|&&r| counted(r) && !self.layers[0].has(r)).count();
         let root_outside_active = roots.iter().filter(|&&r| counted(r) && !self.is_active(r)).count();
         (self.active_counted + root_outside_active, self.draw_counted + root_outside_draw)
@@ -1036,7 +1086,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                     self.last_error.remove(&tile);
                     self.resident
                         .insert(tile, Resident { data: Arc::new(data), inserted: self.frame, last_used: self.frame, slot: flight.slot });
-                    if tile.level() > 0 && !self.is_active(tile) {
+                    if tile.level() > self.config.floor && !self.is_active(tile) {
                         self.victims[self.pools.kind_of(tile) as usize].insert((self.frame, tile));
                         self.work.updated += 1;
                     }
@@ -1104,7 +1154,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         }
         self.work.updated += 1;
         if let Some(r) = self.resident.get_mut(&t) {
-            if t.level() > 0 {
+            if t.level() > self.config.floor {
                 let kind = self.pools.kind_of(t) as usize;
                 if active(old) && !active(new) {
                     // Last in use the frame before (or the frame it arrived, if that is now).
@@ -1310,7 +1360,9 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                     .resident
                     .keys()
                     .copied()
-                    .filter(|&t| t.level() != 0 && self.pools.kind_of(t) == kind && self.class_of(t) == Some(RequestClass::Residency))
+                    .filter(|&t| {
+                        t.level() > self.config.floor && self.pools.kind_of(t) == kind && self.class_of(t) == Some(RequestClass::Residency)
+                    })
                     .collect();
                 self.work.scanned += self.resident.len() as u64;
                 let mut tier1: Vec<(Reverse<u64>, Reverse<u8>, TileId)> =
@@ -1330,7 +1382,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             self.pools.release(r.slot, self.frame);
             self.stats.evicted += 1;
             self.work.updated += 1;
-            if tile.level() != 0 {
+            if tile.level() > self.config.floor {
                 self.victims[self.pools.kind_of(tile) as usize].remove(&(r.last_used, tile));
             }
             self.note(ResidentChange::Evicted(tile));

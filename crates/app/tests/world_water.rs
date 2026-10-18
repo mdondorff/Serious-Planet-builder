@@ -108,7 +108,7 @@ fn the_ocean_probe_reads_a_fixed_grid_and_a_world_without_a_store_has_nothing_to
     assert_eq!(read, 288, "12 latitudes by 24 longitudes");
     assert!(sea > 20 && sea < 268, "an ocean world, neither all land nor all sea: {sea} of {read}");
     assert_eq!(w.ocean_probe().unwrap(), Some((read, sea)), "a fixed grid gives the same answer every time");
-    let e = w.store_check(1, 32, 22).unwrap_err();
+    let e = w.store_check(0, 1, 32, 22).unwrap_err();
     assert!(e.contains("no tile pack"), "{e}");
 }
 
@@ -119,15 +119,16 @@ fn a_store_check_names_every_problem_of_a_store_and_passes_a_complete_one() {
     let good = StoreCheck {
         source: "store S, 16384 cells".into(),
         res: 16384,
+        floor: 3,
         levels: 4,
         ocean: Some((288, 140)),
-        compact: (2046, 2046),
-        vertex: (0, 2046),
+        compact: (1920, 1920),
+        vertex: (0, 1920),
     };
     assert!(good.problems().is_empty(), "the vertex form is information only: {:?}", good.problems());
     let text = good.lines().join("\n");
     assert!(text.contains("ocean channel: present, 288 directions read, 140 sea and 148 land"), "{text}");
-    assert!(text.contains("levels 0-4: compact form 2046 of 2046 present") && text.contains("vertex form 0 of 2046"), "{text}");
+    assert!(text.contains("levels 3-4: compact form 1920 of 1920 present") && text.contains("vertex form 0 of 1920"), "{text}");
     assert!(
         text.contains(&format!("GLOBAL_VERSION {}", planet_generators::global::GLOBAL_VERSION))
             && text.contains(&format!("MESH_VERSION {}", planet_generators::mesh::MESH_VERSION)),
@@ -139,12 +140,15 @@ fn a_store_check_names_every_problem_of_a_store_and_passes_a_complete_one() {
         let p = StoreCheck { ocean: Some((288, sea)), ..good.clone() }.problems();
         assert!(p.len() == 1 && p[0].contains(&format!("reads {word} on all 288")), "{p:?}");
     }
-    let short = StoreCheck { compact: (2000, 2046), ..good.clone() }.problems();
+    let short = StoreCheck { compact: (1900, 1920), ..good.clone() }.problems();
     assert!(
-        short.len() == 1 && short[0].contains("2000 of 2046") && short[0].contains("MESH_VERSION") && short[0].contains("--prefill-dir"),
+        short.len() == 1
+            && short[0].contains("1900 of 1920 compact tiles of levels 3-4")
+            && short[0].contains("MESH_VERSION")
+            && short[0].contains("--prefill-dir"),
         "{short:?}"
     );
-    let both = StoreCheck { ocean: None, compact: (0, 2046), ..good }.problems();
+    let both = StoreCheck { ocean: None, compact: (0, 1920), ..good }.problems();
     assert_eq!(both.len(), 2);
 }
 

@@ -9,7 +9,7 @@ use planet_generators::height::{HeightField, Reference};
 const R: f64 = 6_371_000.0;
 
 fn lod() -> LodParams {
-    LodParams { cells: 16, viewport_h_px: 360.0, tau_px: 4.0, max_level: 16, ..LodParams::earth_1080p() }
+    LodParams { cells: 16, viewport_h_px: 360.0, tau_px: 4.0, max_level: 16, min_level: 0, ..LodParams::earth_1080p() }
 }
 
 fn position(height: f64) -> PlanetFixed {

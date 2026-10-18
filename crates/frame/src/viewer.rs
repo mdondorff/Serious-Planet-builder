@@ -354,6 +354,12 @@ impl Readiness {
     }
 }
 
+/// The window title while the roots (the tiles of the render floor, 384 at floor 3) load before frame 0: the readiness report's
+/// `loading` with the roots loaded so far (STRM-001, ADR 0045 point 5).
+pub fn roots_title(done: usize, total: usize) -> String {
+    format!("planet | loading - roots {done}/{total} (the tiles of the render floor)")
+}
+
 /// Frame statistics over a window of injected time: the frame rate and the mean CPU frame time of the frames since the last
 /// report.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -795,6 +801,13 @@ mod tests {
         assert_eq!(r.summary(), "ready - bake 6/6, prefill 340/340, view 100% (lag 0.00)");
         let none = Readiness { bake_done: 6, bake_total: 6, ..Default::default() };
         assert!(none.summary().contains("prefill n/a"));
+    }
+
+    // spec: STRM-001, VIEW-003
+    #[test]
+    fn the_title_shows_the_roots_loaded_so_far_while_they_load() {
+        assert_eq!(roots_title(0, 384), "planet | loading - roots 0/384 (the tiles of the render floor)");
+        assert!(roots_title(120, 384).contains("roots 120/384") && roots_title(384, 384).contains("roots 384/384"));
     }
 
     // spec: VIEW-003

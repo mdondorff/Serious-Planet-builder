@@ -18,7 +18,7 @@ const PIN_BAKE_RES: u32 = 256;
 /// level 22 (cells 32); only ground-1m reaches it: 2,936 to 2,409 nodes (-17.9 %), every other view is unchanged. The level-26
 /// reference is `REFERENCE_L26_GROUND_1M` below.
 const EROSION_VIEW_NODE_PINS: [(&str, u32); 10] = [
-    ("orbit-20000km", 52),
+    ("orbit-20000km", 182), // 52 until render-floor-3 (LOD-011): the 182 level-3 tiles of the visible hemisphere (181 over the reference field)
     ("high-2000km", 430),
     ("aerial-200km", 634),
     ("aerial-20km", 900),

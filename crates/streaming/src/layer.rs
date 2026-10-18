@@ -25,6 +25,17 @@ pub(crate) fn parent_of(t: TileId) -> Option<TileId> {
     Some(TileId::from_raw(face | ((level - 1) << 56) | (path >> 2)).expect("the parent of a tile is a tile"))
 }
 
+/// The parent of `t` in the tree that starts at the render floor (LOD-011): the tiles at the floor level (and any above it) have
+/// none, so a chain of ancestors stops there and no tile above the floor is ever a member of a layer. Floor 0 is [`parent_of`].
+#[inline]
+pub(crate) fn parent_in(t: TileId, floor: u8) -> Option<TileId> {
+    if t.level() <= floor {
+        None
+    } else {
+        parent_of(t)
+    }
+}
+
 /// What the scheduler's frame touched (CON-20: counts, not time). Cumulative; a test takes the difference of two readings.
 /// `scanned` counts elements read in sequential passes (the comparison of a new wants list with the held one, completions
 /// drained, the queue's re-keying); `updated` counts elements written (set and map insertions and removals, queue and
@@ -88,11 +99,13 @@ pub(crate) struct Layer {
     /// The draw layer orders ancestors before descendants through the priority: a tile `d` levels above a listed one is
     /// `d * 1e12` ahead of it.
     depth_term: bool,
+    /// The render floor: the chain of ancestors of a tile ends at the floor level ([`parent_in`]).
+    floor: u8,
 }
 
 impl Layer {
-    pub fn new(depth_term: bool) -> Layer {
-        Layer { items: Vec::new(), count: FxMap::default(), keys: None, direct: !depth_term, depth_term }
+    pub fn new(depth_term: bool, floor: u8) -> Layer {
+        Layer { items: Vec::new(), count: FxMap::default(), keys: None, direct: !depth_term, depth_term, floor }
     }
 
     #[inline]
@@ -145,7 +158,7 @@ impl Layer {
         }
         self.items = new;
         self.keys = None;
-        self.direct = !self.depth_term && parents_listed(&self.items, true);
+        self.direct = !self.depth_term && parents_listed(&self.items, true, self.floor);
         // Removals first, then additions: a tile that leaves and enters again in one change flips twice and nets to nothing.
         let mut was: FxMap<TileId, bool> = FxMap::default();
         for t in removed {
@@ -170,7 +183,7 @@ impl Layer {
                 break;
             }
             was.entry(cur).or_insert(false);
-            match parent_of(cur) {
+            match parent_in(cur, self.floor) {
                 Some(p) => cur = p,
                 None => break,
             }
@@ -188,7 +201,7 @@ impl Layer {
             }
             self.count.remove(&cur);
             was.entry(cur).or_insert(true);
-            match parent_of(cur) {
+            match parent_in(cur, self.floor) {
                 Some(p) => cur = p,
                 None => break,
             }
@@ -235,7 +248,7 @@ impl Layer {
                         }
                     }
                     depth += 1.0;
-                    t = parent_of(x);
+                    t = parent_in(x, self.floor);
                 }
             }
         } else {
@@ -257,7 +270,7 @@ impl Layer {
                             e.insert(k);
                         }
                     }
-                    t = parent_of(x);
+                    t = parent_in(x, self.floor);
                 }
             }
         }
@@ -267,8 +280,8 @@ impl Layer {
 
 /// Whether every listed tile's parent is listed too (`items` sorted ascending by tile), and, with `monotone`, no parent has a
 /// worse priority than a child: one pass with a cursor per level, no hashing. A residency set built from a selection is both;
-/// a hand-made list may not be.
-pub(crate) fn parents_listed(items: &[(TileId, f64)], monotone: bool) -> bool {
+/// a hand-made list may not be. A tile at the render `floor` has no parent to list.
+pub(crate) fn parents_listed(items: &[(TileId, f64)], monotone: bool, floor: u8) -> bool {
     let mut cursor = [usize::MAX; 32];
     let mut face = u64::MAX;
     let mut face_start = 0usize;
@@ -280,7 +293,7 @@ pub(crate) fn parents_listed(items: &[(TileId, f64)], monotone: bool) -> bool {
             cursor = [usize::MAX; 32];
         }
         let level = usize::from(t.level());
-        let Some(parent) = parent_of(t) else { continue };
+        let Some(parent) = parent_in(t, floor) else { continue };
         if cursor[level] == usize::MAX {
             cursor[level] = face_start + items[face_start..].partition_point(|e| e.0 < parent);
         }
@@ -367,7 +380,7 @@ mod tests {
         let mut r = Rng(0xfeed_beef_0bad_cafe);
         for round in 0..300u64 {
             for depth_term in [false, true] {
-                let mut layer = Layer::new(depth_term);
+                let mut layer = Layer::new(depth_term, 0);
                 let mut work = SchedWork::default();
                 let mut model: BTreeMap<TileId, f64> = BTreeMap::new();
                 let kind = round % 5;
@@ -444,8 +457,8 @@ mod tests {
             let closed = items.iter().all(|(t, _)| t.parent().is_none_or(|p| set.contains_key(&p)));
             let monotone =
                 items.iter().all(|(t, p)| t.parent().is_none_or(|a| set.get(&a).is_none_or(|ap| priority_key(*ap) <= priority_key(*p))));
-            assert_eq!(parents_listed(&items, false), closed);
-            assert_eq!(parents_listed(&items, true), closed && monotone);
+            assert_eq!(parents_listed(&items, false, 0), closed);
+            assert_eq!(parents_listed(&items, true, 0), closed && monotone);
         }
     }
 }

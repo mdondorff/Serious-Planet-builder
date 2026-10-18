@@ -34,11 +34,12 @@ fn listing(dir: &std::path::Path) -> Vec<(String, u64, std::time::SystemTime)> {
 #[test]
 fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_source() {
     let store = tmp("store");
-    // Levels 0-1 pre-filled (30 tiles): the scenes check the same levels at their start (the gated run needs 0-4, the smoke run less).
+    // Level 3 pre-filled (the 384 tiles of render floor 3): the scenes check the same levels at their start (the gated run needs
+    // levels 3-4, the smoke run less).
     let built =
-        run(&["generate", "--global-dir", store.to_str().unwrap(), "--global-res", "256", "--threads", "2", "--prefill-levels", "1"])
+        run(&["generate", "--global-dir", store.to_str().unwrap(), "--global-res", "256", "--threads", "4", "--prefill-levels", "3"])
             .unwrap();
-    assert!(built.contains("30 tiles, 30 written"), "{built}");
+    assert!(built.contains("levels 3..=3") && built.contains("384 tiles, 384 written"), "{built}");
     let logs = tmp("logs");
     let before = listing(&store);
     let out = run(&[
@@ -53,7 +54,7 @@ fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_so
         "--global-res",
         "256",
         "--prefill-levels",
-        "1",
+        "3",
         "--out",
         logs.to_str().unwrap(),
     ])
@@ -64,7 +65,7 @@ fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_so
         out.contains("store check (smoke, read-only, NOT a measurement)") && out.contains("ocean channel: present, 288 directions read"),
         "{out}"
     );
-    assert!(out.contains("tile pack, levels 0-1: compact form 30 of 30 present") && out.contains("store check ok"), "{out}");
+    assert!(out.contains("tile pack, levels 3-3: compact form 384 of 384 present") && out.contains("store check ok"), "{out}");
     assert_eq!(before, listing(&store), "the smoke run wrote into the store");
     assert!(out.contains("host load: not measured"), "a smoke run takes no host load: {out}");
     assert!(out.contains(&format!("source: store {}, 256 cells", store.display())), "the source is printed: {out}");
@@ -78,7 +79,7 @@ fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_so
         let marker = if scene == "dive-cold" {
             "cold: the pack's coarse tiles are ignored"
         } else {
-            "prefilled coarse pack (levels 0-1 present at start)"
+            "prefilled coarse pack (levels 3-3 present at start)"
         };
         assert!(json.contains("\"source\":\"store ") && json.contains(&format!("256 cells; {marker}")), "{scene}: {json}");
         assert!(out.contains(&format!("{scene}: tile pack at the start: {marker}")), "{scene}: {out}");
@@ -144,11 +145,11 @@ fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_so
         "--global-res",
         "256",
         "--prefill-levels",
-        "2",
+        "4",
     ])
     .unwrap_err();
     assert!(
-        e.contains("store check FAILED") && e.contains("of 126 compact tiles of levels 0-2") && e.contains("generate --prefill-dir"),
+        e.contains("store check FAILED") && e.contains("of 1920 compact tiles of levels 3-4") && e.contains("generate --prefill-dir"),
         "{e}"
     );
     assert_eq!(before, listing(&store), "the failed check wrote nothing either");
@@ -196,8 +197,8 @@ fn the_gated_dives_refuse_a_store_without_the_pre_filled_levels_before_anything_
     for scene in ["dive", "dive-fast"] {
         let e = run(&["test-render", "--perf", "--scene", scene, "--adapter", "software", "--store", s, "--global-res", "8"]).unwrap_err();
         assert!(
-            e.contains(&format!("{scene} starts with levels 0-4 pre-filled"))
-                && e.contains("holds 0 of the 2046 tiles")
+            e.contains(&format!("{scene} starts with levels 3-4 pre-filled"))
+                && e.contains("holds 0 of the 1920 tiles")
                 && e.contains("generate --prefill-dir"),
             "{scene}: {e}"
         );
@@ -215,18 +216,11 @@ fn the_gated_dives_refuse_a_store_without_the_pre_filled_levels_before_anything_
         "--global-res",
         "8",
         "--prefill-levels",
-        "1",
+        "3",
     ])
     .unwrap_err();
-    assert!(e.contains("levels 0-1 pre-filled") && e.contains("holds 0 of the 30 tiles"), "{e}");
-    // The scenes that only use the pack, and the cold dive, are not refused for lacking it: they go on to the next check (the adapter).
-    for scene in ["dive-cold", "teleport-1m", "look-2km"] {
-        let e = run(&["test-render", "--perf", "--scene", scene, "--adapter", "software", "--store", s, "--global-res", "8"]).unwrap_err();
-        assert!(e.contains("not a discrete GPU"), "{scene}: {e}");
-    }
-    // After the pre-fill (idempotent, into the existing bake) the gated dive passes the check and meets the adapter check.
-    let done = run(&["generate", "--prefill-dir", s, "--global-res", "8", "--prefill-levels", "1", "--threads", "2"]).unwrap();
-    assert!(done.contains("30 tiles, 30 written"), "{done}");
+    assert!(e.contains("levels 3-3 pre-filled") && e.contains("holds 0 of the 384 tiles"), "{e}");
+    // A depth below the render floor would check no tile at all: refused, not passed.
     let e = run(&[
         "test-render",
         "--perf",
@@ -240,6 +234,30 @@ fn the_gated_dives_refuse_a_store_without_the_pre_filled_levels_before_anything_
         "8",
         "--prefill-levels",
         "1",
+    ])
+    .unwrap_err();
+    assert!(e.contains("--prefill-levels 1") && e.contains("below the render floor 3"), "{e}");
+    // The scenes that only use the pack, and the cold dive, are not refused for lacking it: they go on to the next check (the adapter).
+    for scene in ["dive-cold", "teleport-1m", "look-2km"] {
+        let e = run(&["test-render", "--perf", "--scene", scene, "--adapter", "software", "--store", s, "--global-res", "8"]).unwrap_err();
+        assert!(e.contains("not a discrete GPU"), "{scene}: {e}");
+    }
+    // After the pre-fill (idempotent, into the existing bake) the gated dive passes the check and meets the adapter check.
+    let done = run(&["generate", "--prefill-dir", s, "--global-res", "8", "--prefill-levels", "3", "--threads", "4"]).unwrap();
+    assert!(done.contains("384 tiles, 384 written"), "{done}");
+    let e = run(&[
+        "test-render",
+        "--perf",
+        "--scene",
+        "dive",
+        "--adapter",
+        "software",
+        "--store",
+        s,
+        "--global-res",
+        "8",
+        "--prefill-levels",
+        "3",
     ])
     .unwrap_err();
     assert!(e.contains("not a discrete GPU"), "{e}");

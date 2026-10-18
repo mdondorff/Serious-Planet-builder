@@ -9,7 +9,7 @@ const R: f64 = 6_371_000.0;
 
 /// Node counts of the standard views over the reference field (the same table as `terrain.rs`, VIEW_NODE_PINS).
 const VIEW_NODES: [(&str, usize); 10] = [
-    ("orbit-20000km", 52),
+    ("orbit-20000km", 181), // 52 until render-floor-3 (LOD-011): the 181 level-3 tiles of the visible hemisphere
     ("high-2000km", 428),
     ("aerial-200km", 630),
     ("aerial-20km", 892),

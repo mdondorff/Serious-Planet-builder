@@ -17,7 +17,13 @@ const R: f64 = 6_371_000.0;
 const SIZE: (u32, u32) = (1280, 720);
 
 fn lod() -> LodParams {
-    LodParams { viewport_h_px: f64::from(SIZE.1), tau_px: 6.0, max_height_m: Reference(1).max_abs_height_m(), ..LodParams::earth_1080p() }
+    LodParams {
+        viewport_h_px: f64::from(SIZE.1),
+        tau_px: 6.0,
+        min_level: 0,
+        max_height_m: Reference(1).max_abs_height_m(),
+        ..LodParams::earth_1080p()
+    }
 }
 
 fn request(camera: Camera) -> TerrainRequest {

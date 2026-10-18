@@ -629,6 +629,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
         viewport_h_px: f64::from(TERRAIN_SIZE.1),
         tau_px: 4.0,
         max_level: o.finest_level_for(TERRAIN_CELLS),
+        min_level: o.min_level(),
         radius_m,
         max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
         ..LodParams::earth_1080p()
@@ -668,7 +669,7 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
     let meshes: Vec<std::sync::Arc<RenderTile>> = if o.stream {
         // R is selected on the plan's cache (its tile geometry and height volumes are hits), from the position only.
         let residency = planet_frame::pipeline::residency_of(&request, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
-        streamed_meshes(&world, &plan, &residency, format, request.lod.max_level)?
+        streamed_meshes(&world, &plan, &residency, format, request.lod.max_level, request.lod.floor_level())?
     } else {
         plan.nodes
             .iter()
@@ -989,6 +990,7 @@ fn streamed_meshes(
     residency: &planet_frame::ResidencySet,
     format: planet_render::TileFormat,
     max_level: u8,
+    floor: u8,
 ) -> Result<Vec<std::sync::Arc<RenderTile>>, String> {
     use planet_streaming::{ResidencyManager, StreamConfig, Streamer, SystemClock, Tier, Wants};
     // Four tile threads and four queued behind them (STRM-020): the pool size and the limit are one number.
@@ -1002,6 +1004,7 @@ fn streamed_meshes(
         capacity: share.main_slots() as usize,
         vertex_pool_slots: share.managed_vertex_slots() as usize,
         retry_after_ms: 1000,
+        floor,
         record_dispatches: false,
         ..Default::default()
     });
@@ -1112,6 +1115,7 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
         viewport_h_px: f64::from(size.1),
         tau_px: o.tau,
         max_level: o.finest_level_for(o.cells),
+        min_level: o.min_level(),
         radius_m,
         max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
         ..LodParams::earth_1080p()
@@ -1189,6 +1193,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         viewport_h_px: f64::from(size.1),
         tau_px: o.tau,
         max_level: o.finest_level_for(o.cells),
+        min_level: o.min_level(),
         radius_m,
         max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
         ..LodParams::earth_1080p()

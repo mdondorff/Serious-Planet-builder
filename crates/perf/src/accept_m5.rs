@@ -411,7 +411,7 @@ pub fn evaluate(files: &WindowFiles) -> Evaluation5 {
             None => refusals.push(format!("{scene}-lit: no log was given")),
             Some(f) => match read_scene_as(f, true) {
                 Ok(r) if scene == "dive" && !r.prefill.counts_for_the_gated_dive() => refusals.push(format!(
-                    "{scene}-lit: the log's source `{}` says {}: the gated dive is judged only from a run that started with levels 0-{} pre-filled in the tile pack (ADR 0045 point 3)",
+                    "{scene}-lit: the log's source `{}` says {}: the gated dive is judged only from a run that started with levels F-{} pre-filled in the tile pack (F the render floor, ADR 0045 point 3)",
                     r.source_text,
                     r.prefill.describe(),
                     crate::prefill::GATED_PREFILL_LEVELS
@@ -967,7 +967,7 @@ mod tests {
             ("process_peak_bytes".into(), 5 << 30),
             ("driver_vram_bytes".into(), 3 << 30),
         ];
-        let marker = if scene == "dive-cold" { prefill::COLD_MARKER.to_string() } else { prefill::prefilled_marker(4) };
+        let marker = if scene == "dive-cold" { prefill::COLD_MARKER.to_string() } else { prefill::prefilled_marker(3, 4) };
         let base = f.stream_source.clone().unwrap_or_else(|| f.source.clone());
         let r = RunReport {
             path_name: format!("stream-lit/{scene}"),
@@ -1194,7 +1194,7 @@ mod tests {
         w.streams[0] = {
             let mut s = stream_files("dive", &fx(), 8.0);
             let text = String::from_utf8(s.json.take().unwrap()).unwrap();
-            s.json = Some(text.replace(&prefill::prefilled_marker(4), prefill::COLD_MARKER).into_bytes());
+            s.json = Some(text.replace(&prefill::prefilled_marker(3, 4), prefill::COLD_MARKER).into_bytes());
             s
         };
         assert!(refused(evaluate(&w)).contains("dive-lit: the log's source"));
