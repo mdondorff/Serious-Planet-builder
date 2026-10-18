@@ -42,7 +42,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0030 | [Erosion strategy: local filter in M3, a coarse global stream-power stage after it](0030-erosion-strategy-hybrid.md) | accepted |  |
 | 0031 | [Residency set and request priorities](0031-residency-set-and-request-priorities.md) | accepted |  |
 | 0032 | [Streaming test definitions: dive, teleport, mouse look](0032-streaming-test-definitions.md) | accepted |  |
-| 0033 | [Memory budgets and terrain's VRAM share](0033-memory-budgets-and-terrain-vram-share.md) | accepted | none (points 8 and 9 decided after M4 window 5) |
+| 0033 | [Memory budgets and terrain's VRAM share](0033-memory-budgets-and-terrain-vram-share.md) | accepted | point 3 amended by 0054 and 0062 |
 | 0034 | [GPU clock state in performance measurements](0034-gpu-clock-state-in-perf-measurements.md) | accepted with a change |  |
 | 0035 | [CPU/GPU equality applies to fields, not to presentation data](0035-cpu-gpu-equality-applies-to-fields.md) | accepted |  |
 | 0036 | [Perf validity at full GPU load: power cap and clock band](0036-perf-validity-at-full-gpu-load.md) | accepted in part | point 3 (GPU noise floor): first M5 perf window with GPU verdicts |
@@ -63,7 +63,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0051 | [Ocean channel, liquid table and the water-level field: implementation readings of ADR 0041](0051-ocean-channel-liquid-table-and-water-field-readings.md) | accepted |  |
 | 0052 | [First M5 goldens: an edge tolerance for the cross-adapter debug-view check](0052-m5-debug-view-edge-tolerance.md) | superseded by 0061 |  |
 | 0053 | [The water pass: implementation readings of ADR 0041 points 4 to 9](0053-water-pass-readings-of-adr-0041.md) | accepted | owner judges `shore_filter` at the M5 gate |
-| 0054 | [Compact tiles in storage buffers instead of texture atlases (amends ADR 0033 point 3)](0054-compact-tiles-in-storage-buffers.md) | accepted |  |
+| 0054 | [Compact tiles in storage buffers instead of texture atlases (amends ADR 0033 point 3)](0054-compact-tiles-in-storage-buffers.md) | accepted | slot layout amended by 0062 |
 | 0055 | [Documentation model: specs hold current rules, ADRs record why](0055-documentation-model.md) | accepted | point 6: consolidation in the M5 housekeeping (queue item 10b) |
 | 0056 | [Water selection: the coastal band, tile water in the tile job, a pixel-footprint wave fade](0056-coastal-band-water-selection.md) | accepted | amends 0053 points 4 and 5 |
 | 0057 | [GPU figures below the clock floor: a cool start, and a pass is a pass](0057-gpu-clock-below-the-floor.md) | accepted | amends 0036 point 2 |
@@ -71,3 +71,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0059 | [Noise floors: 0.1 ms per pass, 0.5 ms per frame total](0059-noise-floors.md) | accepted | amends 0036 point 3; for the owner at the M5 gate |
 | 0060 | [A power-capped P0 clock is valid; coast-3m water budget 2.2 ms](0060-power-capped-clock-and-coast-3m-water.md) | accepted (owner) | amends 0036 point 2 and 0057 point 2 |
 | 0061 | [Goldens after M5: the M5 window closes, goldens are per-adapter regression checks](0061-goldens-after-m5.md) | accepted (owner) | supersedes 0037 point 1 and 0052; amends 0017 |
+| 0062 | [Retire the vertex tile format from rendering](0062-retire-the-vertex-tile-format.md) | accepted (owner) | first work of M6 |
