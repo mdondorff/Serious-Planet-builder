@@ -11,3 +11,13 @@ ADR 0062 (accepted 2026-10-18) retires the vertex tile format from rendering. It
 
 ## Impact
 Spec: GEN-010, GEN-019, GEN-021, REND-016, REND-018, REND-027, STRM-006, STRM-021, TEST-011 modified; GEN-025 added. Not in this change: the render floor (`render-floor-3`, independent; STRM-021 is modified by both, archive this one first), the removal of the vertex path, any perf verdict (indicative SPIKE-12 numbers: GPU time +0.1 to 0.5 %; the perf window follows the removal). Order within M6: before the edit path (SPIKE-13).
+
+Expected golden changes:
+- terrain_aerial200km_height: wide texel (rounding noise of height and normals, ADR 0017)
+- terrain_cube_corner_normals: 15-bit normals instead of 16-bit (rounding noise)
+- terrain_ground1m_depth: wide texel (rounding noise)
+- terrain_low2km_morph: wide texel (rounding noise)
+- terrain_orbit_tile_id: only if the texel moves it (expected unchanged)
+- terrain_aerial20km_level: only if the texel moves it (expected unchanged)
+- lit_orbit_ev15, lit_aerial20km_ev15, lit_ground1m_ev15, lit_orbit_ev_bands, lit_orbit_temperature_ev15, lit_orbit_precipitation_ev15, lit_aerial20km_albedo_ev15, lit_orbit_lighting_ev15: wide texel (normals and heights feed shading; owner's /bless for lit)
+- water_class_coast_aerial2km, water_class_coast_low3m, water_class_orbit, water_class_lava_lake: wide texel under the water pass (rounding noise, owner's if class water escalates)

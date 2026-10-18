@@ -91,7 +91,7 @@ mod tests {
         // The literals of crates/cache/tests/keys.rs and global_store.rs: one pin, two places.
         assert_eq!(get("base"), "b00fa2b4b0f9accc87be74b4dd9d40ca");
         assert_eq!(get("height"), "340480159ae2ca791db08d1cae1232ce");
-        assert_eq!(get("mesh"), "f077d99860608b088e1caf6509ca9d89");
+        assert_eq!(get("mesh"), "c5e1668239aa1514b39bc992dd7c9318");
         assert_eq!(get("node"), "dd934e9e858a828bb73c45e8a4eb4d45");
         assert_eq!(get("body"), "91f0cebc78907779e2f87196650d468e");
         assert_eq!(get("emptyquery"), "a97668a9d9614a3f4a73f2fceae97219");

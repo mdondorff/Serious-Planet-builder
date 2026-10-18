@@ -21,7 +21,7 @@ const BLOCK: u32 = 64;
 fn small_pool() -> PoolConfig {
     let block_slots = BLOCK;
     let one = compact_format_pool_with(
-        (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_texel_bytes(CELLS),
+        (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
         CELLS,
         block_slots,
         1,
@@ -53,15 +53,13 @@ fn tiles(n: usize) -> Vec<RenderTile> {
         .collect()
 }
 
-/// The calls a batch of compact tiles in `slots` needs, by the model of the batch: one per run of adjacent slots of one block
-/// for the texels, one per run of adjacent slot indices for the records.
+/// The calls a batch of compact tiles in `slots` needs, by the model of the batch: one per run of adjacent slots of one block (the
+/// slot holds its record, GEN-025).
 fn model_calls(slots: &[u32]) -> u64 {
     let mut s: Vec<u32> = slots.to_vec();
     s.sort_unstable();
     s.dedup();
-    let texel_runs = 1 + s.windows(2).filter(|w| !(w[1] == w[0] + 1 && w[1] / BLOCK == w[0] / BLOCK)).count();
-    let record_runs = 1 + s.windows(2).filter(|w| w[1] != w[0] + 1).count();
-    (texel_runs + record_runs) as u64
+    (1 + s.windows(2).filter(|w| !(w[1] == w[0] + 1 && w[1] / BLOCK == w[0] / BLOCK)).count()) as u64
 }
 
 fn place(ctx: &GpuContext, mode: UploadMode, tiles: &[RenderTile], slots: &[u32]) -> TerrainRenderer {
@@ -71,7 +69,7 @@ fn place(ctx: &GpuContext, mode: UploadMode, tiles: &[RenderTile], slots: &[u32]
     r
 }
 
-// spec: REND-018, REND-016, STRM-006
+// spec: REND-018, REND-016, STRM-006, GEN-025
 #[test]
 fn a_frames_compact_tiles_make_one_call_per_run_and_leave_the_pools_of_the_per_slot_path() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
@@ -90,7 +88,11 @@ fn a_frames_compact_tiles_make_one_call_per_run_and_leave_the_pools_of_the_per_s
         let reference = place(&ctx, UploadMode::PerSlot, &t, &slots);
         let batched = place(&ctx, UploadMode::Batched, &t, &slots);
         let (ref_calls, calls) = (reference.upload_counters(), batched.upload_counters());
-        assert_eq!(ref_calls.write_calls, 2 * slots.len() as u64, "{name}: the reference writes a texture and a record per slot");
+        assert_eq!(
+            ref_calls.write_calls,
+            slots.len() as u64,
+            "{name}: the reference writes one range per slot (the record is in the slot)"
+        );
         assert_eq!(calls.write_calls, model_calls(&slots), "{name}: one call per run");
         assert!(calls.write_calls <= ref_calls.write_calls, "{name}");
         assert_eq!(calls.staging_bytes, ref_calls.staging_bytes, "{name}: the same bytes travel, in fewer calls");
@@ -99,13 +101,20 @@ fn a_frames_compact_tiles_make_one_call_per_run_and_leave_the_pools_of_the_per_s
         for (tile, slot) in t.iter().zip(&slots) {
             assert_eq!(batched.slot_of(tile.id()), Some(main_slot(*slot)), "{name}");
         }
-        let (a_ref, rec_ref) = reference.read_compact_pools(&ctx);
-        let (a_new, rec_new) = batched.read_compact_pools(&ctx);
+        let a_ref = reference.read_compact_pools(&ctx);
+        let a_new = batched.read_compact_pools(&ctx);
         assert_eq!(a_ref.len(), a_new.len(), "{name}: the same blocks are allocated");
         for (b, (x, y)) in a_ref.iter().zip(&a_new).enumerate() {
             assert!(x == y, "{name}: block {b} differs between the per-slot and the batched path");
         }
-        assert!(rec_ref == rec_new, "{name}: the slot records differ");
+        // One slot, one write: the block holds the CPU tile's slot bytes (GEN-025) at the slot's place, the record inside.
+        for (tile, slot) in t.iter().zip(&slots) {
+            let RenderTile::Compact(c) = tile else { panic!("compact tile expected") };
+            let bytes = c.slot_data();
+            let at = (*slot % BLOCK) as usize * bytes.len();
+            let block = a_new[(*slot / BLOCK) as usize].as_ref().expect("block allocated");
+            assert!(block[at..at + bytes.len()] == bytes[..], "{name}: slot {slot} differs from the CPU tile's slot");
+        }
         println!("{name}: {} calls batched against {} per slot, {} bytes", calls.write_calls, ref_calls.write_calls, calls.staging_bytes);
     }
 }
@@ -144,9 +153,9 @@ fn the_batched_path_reuses_its_staging_buffers_and_grows_none_per_frame_after_wa
         "the staging buffers grew after the second frame: {capacities:?}"
     );
     // Reuse leaves nothing of an earlier frame behind: the pools equal those of the per-slot path that wrote the same frames.
-    let (a_ref, rec_ref) = reference.read_compact_pools(&ctx);
-    let (a_new, rec_new) = batched.read_compact_pools(&ctx);
-    assert!(a_ref == a_new && rec_ref == rec_new, "the pools differ after frames that reused the staging buffers");
+    let a_ref = reference.read_compact_pools(&ctx);
+    let a_new = batched.read_compact_pools(&ctx);
+    assert!(a_ref == a_new, "the pools differ after frames that reused the staging buffers");
 }
 
 // spec: REND-018, REND-016
@@ -157,9 +166,9 @@ fn a_slot_written_twice_in_one_batch_holds_the_last_tile_as_in_the_per_slot_path
     let slots = [4u32, 5, 4];
     let reference = place(&ctx, UploadMode::PerSlot, &t, &slots);
     let batched = place(&ctx, UploadMode::Batched, &t, &slots);
-    let (a_ref, rec_ref) = reference.read_compact_pools(&ctx);
-    let (a_new, rec_new) = batched.read_compact_pools(&ctx);
-    assert!(a_ref == a_new && rec_ref == rec_new, "the pools differ");
+    let a_ref = reference.read_compact_pools(&ctx);
+    let a_new = batched.read_compact_pools(&ctx);
+    assert!(a_ref == a_new, "the pools differ");
     assert_eq!(batched.slot_of(t[2].id()), Some(main_slot(4)));
     assert_eq!(batched.slot_of(t[0].id()), None, "the first tile of slot 4 was replaced");
 }
@@ -219,10 +228,10 @@ fn a_failed_batch_writes_the_tiles_placed_before_the_error() {
     let bad = main_slot(40 * 64 + 5);
     let batch = [(&t[0], main_slot(0)), (&t[1], main_slot(1)), (&t[2], bad)];
     assert!(r.upload_tiles_at(&ctx, &batch).is_err());
-    assert_eq!(r.upload_counters().write_calls, 2, "the two good tiles are one texture run and one record run");
+    assert_eq!(r.upload_counters().write_calls, 1, "the two good tiles are one run of slots");
     assert_eq!(r.slot_of(t[1].id()), Some(main_slot(1)));
     let reference = place(&ctx, UploadMode::PerSlot, &t[..2], &[0, 1]);
-    let (a, rec) = r.read_compact_pools(&ctx);
-    let (a_ref, rec_ref) = reference.read_compact_pools(&ctx);
-    assert!(a == a_ref && rec == rec_ref);
+    let a = r.read_compact_pools(&ctx);
+    let a_ref = reference.read_compact_pools(&ctx);
+    assert!(a == a_ref);
 }

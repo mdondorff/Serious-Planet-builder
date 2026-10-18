@@ -24,9 +24,9 @@ const R: f64 = 6_371_000.0;
 const PIN_BAKE_RES: u32 = 256;
 const CELLS: u32 = 32;
 
-/// Slots of ADR 0033's compact tile at the mid / high share: 15 / 23 blocks of 15,406 slots (cells 32, 128 MiB, ADR 0054).
-const COMPACT_MID_SLOTS: u64 = 15 * 15_406;
-const COMPACT_HIGH_SLOTS: u64 = 23 * 15_406;
+/// Slots of the compact tile at the mid / high share: 15 / 23 blocks of 14,639 slots (cells 32, 128 MiB, slot of 9,168 B, STRM-006).
+const COMPACT_MID_SLOTS: u64 = 15 * 14_639;
+const COMPACT_HIGH_SLOTS: u64 = 23 * 14_639;
 
 /// The same shares in vertex-format slots (cells 32, 58,608 B since MESH_VERSION 7: the 44-byte vertex and the 4-byte climate of each of
 /// the 1,221 vertices, ADR 0039 point 2; blocks of 256): `tier_pool(tier, 32, 2).main_slots()`. Under MESH_VERSION 6 these were 37,376 and

@@ -9,13 +9,17 @@
 //!
 //! Payload: `codec version (u8) | form (u8: 0 vertex, 1 compact) | cells (u32 LE) | raw length (u32 LE) | LZ4 block`. The raw
 //! bytes are the tile's mesh key (u64), its origin (3 x f64), then for the vertex form the `vertex_count(cells)` vertices as 11
-//! `f32` each (byte-shuffled as in the height codec) and the 324 bytes of the climate field ([`ClimateTexture::to_bytes`]), for the compact form the 9 control points, `h_origin`, `hr_min`,
-//! `hr_step`, `skirt_depth` (f32), the flip flag (u8), the relief (f64) and the `(cells + 1)^2` texels of 4 `u16` (the fourth channel
-//! carries the climate field). Everything is little endian. The decoder never allocates more than `cells` allows.
+//! `f32` each (byte-shuffled as in the height codec) and the 324 bytes of the climate field ([`ClimateTexture::to_bytes`]), for the compact form
+//! the relief (f64) and the slot of GEN-025 byte for byte ([`CompactTile::slot_data`]: header, climate block, pad, texels).
+//! Everything is little endian. The decoder never allocates more than `cells` allows.
 //!
 //! Version 2 (MESH_VERSION 7, ADR 0039 point 2): the vertex form gained the climate block. A version-1 payload (and every record
 //! under a version-6 key, which the new keys never name) is a miss: [`decode_render_tile`] refuses the version, [`TileSpec::lookup`]
 //! turns that into `None`, and the pre-fill writes the tile again.
+//!
+//! Version 3 (MESH_VERSION 8, ADR 0062, GEN-025): the compact form is the slot (wide texel, climate block in the slot); the vertex
+//! form is unchanged. A version-1 or version-2 payload is refused naming the version, and records written under MESH_VERSION 7 are
+//! unreachable (the version is in the key).
 
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -25,7 +29,7 @@ use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::hash::HASH_VERSION;
 use planet_core::{Face, PlanetFixed, TileId, Vec3};
 use planet_generators::climate::{ClimateTexture, CLIMATE_BYTES};
-use planet_generators::compact::{tile_data_field, vertex_tile_field, CompactTile, RenderTile, COMPACT_MIN_LEVEL};
+use planet_generators::compact::{slot_bytes, tile_data_field, vertex_tile_field, CompactTile, RenderTile, COMPACT_MIN_LEVEL};
 use planet_generators::height::HeightField;
 use planet_generators::mesh::{vertex_count, MeshVertex, TileMesh};
 use planet_world_def::{body_radius_path, ReadRecord};
@@ -40,8 +44,9 @@ pub const KIND_MESH: u8 = Kind::Mesh as u8;
 /// Output parameter tag: the form of the stored tile (0 vertex, 1 compact).
 pub const PARAM_RENDER_FORM: u8 = 5;
 
-/// Version of the payload layout. History: 1 = LZ4 block of the exact tile; 2 = the vertex form carries the climate block.
-pub const PAYLOAD_VERSION: u8 = 2;
+/// Version of the payload layout. History: 1 = LZ4 block of the exact tile; 2 = the vertex form carries the climate block;
+/// 3 = the compact form is the slot of GEN-025 (`MESH_VERSION` 8).
+pub const PAYLOAD_VERSION: u8 = 3;
 
 /// The default depth of the pre-fill: levels 0 to this one (2,046 tiles).
 pub const DEFAULT_PREFILL_LEVELS: u8 = 4;
@@ -116,10 +121,6 @@ fn put_f64(out: &mut Vec<u8>, v: f64) {
     out.extend_from_slice(&v.to_bits().to_le_bytes());
 }
 
-fn put_f32(out: &mut Vec<u8>, v: f32) {
-    out.extend_from_slice(&v.to_le_bytes());
-}
-
 struct Reader<'a> {
     bytes: &'a [u8],
     at: usize,
@@ -137,26 +138,17 @@ impl Reader<'_> {
     fn f64(&mut self) -> f64 {
         f64::from_bits(self.u64())
     }
-    fn f32(&mut self) -> f32 {
-        f32::from_le_bytes(self.take())
-    }
-    fn u16(&mut self) -> u16 {
-        u16::from_le_bytes(self.take())
-    }
-    fn u8(&mut self) -> u8 {
-        self.take::<1>()[0]
-    }
 }
 
 /// Raw bytes of the fixed part (key, origin) both forms start with.
 const FIXED: usize = 8 + 3 * 8;
-/// Raw bytes of a compact tile besides its texels: control points, four f32, the flip flag and the relief.
-const COMPACT_FIXED: usize = FIXED + 27 * 4 + 4 * 4 + 1 + 8;
+/// Raw bytes of a compact tile besides its slot: the relief.
+const COMPACT_FIXED: usize = FIXED + 8;
 
 fn raw_len(form: RenderForm, cells: u32) -> u64 {
     match form {
         RenderForm::Vertex => FIXED as u64 + vertex_count(cells) as u64 * MeshVertex::STRIDE + CLIMATE_BYTES as u64,
-        RenderForm::Compact => COMPACT_FIXED as u64 + (u64::from(cells) + 1) * (u64::from(cells) + 1) * 8,
+        RenderForm::Compact => COMPACT_FIXED as u64 + slot_bytes(cells),
     }
 }
 
@@ -203,19 +195,8 @@ pub fn encode_render_tile(tile: &RenderTile) -> Result<Vec<u8>, MeshCodecError> 
                     c.texels.len()
                 )));
             }
-            for p in c.ctrl.iter().flatten() {
-                put_f32(&mut raw, *p);
-            }
-            for v in [c.h_origin, c.hr_min, c.hr_step, c.skirt_depth] {
-                put_f32(&mut raw, v);
-            }
-            raw.push(u8::from(c.flip));
             put_f64(&mut raw, c.relief_m);
-            for t in &c.texels {
-                for w in t {
-                    raw.extend_from_slice(&w.to_le_bytes());
-                }
-            }
+            raw.extend_from_slice(&c.slot_data());
         }
     }
     debug_assert_eq!(raw.len() as u64, raw_len(form, cells));
@@ -285,28 +266,11 @@ pub fn decode_render_tile(id: TileId, bytes: &[u8]) -> Result<RenderTile, MeshCo
             RenderTile::Vertex(TileMesh { id, cells, key, origin, vertices, climate })
         }
         RenderForm::Compact => {
-            let mut ctrl = [[0f32; 3]; 9];
-            for p in ctrl.iter_mut().flatten() {
-                *p = r.f32();
-            }
-            let (h_origin, hr_min, hr_step, skirt_depth) = (r.f32(), r.f32(), r.f32(), r.f32());
-            let flip = r.u8() != 0;
             let relief_m = r.f64();
-            let texels = (0..(cells as usize + 1) * (cells as usize + 1)).map(|_| [r.u16(), r.u16(), r.u16(), r.u16()]).collect();
-            RenderTile::Compact(CompactTile {
-                id,
-                cells,
-                key,
-                origin,
-                ctrl,
-                h_origin,
-                hr_min,
-                hr_step,
-                skirt_depth,
-                flip,
-                relief_m,
-                texels,
-            })
+            let slot = &raw[r.at..];
+            let tile = CompactTile::from_slot_data(id, cells, key, origin, relief_m, slot)
+                .map_err(|e| MeshCodecError::Shape(format!("the compact slot is damaged: {e}")))?;
+            RenderTile::Compact(tile)
         }
     })
 }

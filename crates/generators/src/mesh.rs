@@ -63,7 +63,9 @@ pub const SKIRT_FRACTION: f64 = 0.08;
 /// channel of the first 162 texels of a compact tile, a 324-byte block of a vertex tile) and the key names the climate version word
 /// ([`HeightField::climate_version_word`]: the climate, reader and bake versions). Tiles stored under version 6 are unreachable (their
 /// keys differ) and the coarse pre-fill of a pack must be written again.
-pub const MESH_VERSION: u32 = 7;
+/// 8 = the compact tile is the slot of GEN-025 (ADR 0062): a 32-bit height step count and two 15-bit octahedral normal components per
+/// texel, the climate block and the header inside the slot; every compact key changes, vertex tiles are unchanged.
+pub const MESH_VERSION: u32 = 8;
 
 /// Key of a mesh: the height key of the tile (generator, seed, mapping, tile; resolution = `cells`), the grid size, the
 /// radius bits, the skirt fraction bits and [`MESH_VERSION`].

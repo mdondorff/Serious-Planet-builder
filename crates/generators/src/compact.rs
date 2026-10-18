@@ -6,20 +6,21 @@
 //! surface through nine tile-local control points plus the tile-relative height along the base normal. This module is the
 //! GPU-free builder (CON-02/CON-03: decisions live here, the renderer executes them) and the CPU mirror of the shader.
 //!
-//! A texel is `Rgba16Uint`, 8 bytes: `[height, normal_x, normal_y, climate]`. The height is 16 bits between the tile's own
-//! minimum and maximum (`hr_min + q * hr_step`, relative to the tile origin's height); the normal is two snorm16 octahedral
-//! components (`i16` bits in a `u16`), 0.0037 degrees at worst, measured (CON-14: 0.01 degrees). The fourth channel carries the
-//! tile's climate field (ADR 0039 point 2, GEN-021): texel `k < 81` holds the temperature at climate texel `k` and texel `81 + k`
-//! the precipitation (`f16` bits, [`ClimateTexture::write_texels`]), the rest is zero. The 324 bytes ride in bits that were reserved,
-//! so a compact tile stays 8,712 B of texels plus its 128 B record and a tile needs at least 16 cells.
+//! A tile is one slot of contiguous bytes (GEN-025, ADR 0062): a 128-byte header (nine control points, `hr_min`, `hr_step`,
+//! the origin height, the skirt depth, the flags), the 324-byte climate block (GEN-021: 81 words, temperature `f16` low, precipitation
+//! `f16` high), 4 bytes of padding and the texels. A texel is 8 bytes, two words (GEN-019): word 0 is the 32-bit height step count
+//! (`hr_min + f32(q) * hr_step`, relative to the tile origin's height), word 1 holds two signed 15-bit octahedral normal components
+//! in bits 0-14 and 15-29 (0.0072 degrees at worst, measured; CON-14: 0.01 degrees), bits 30-31 zero. The slot is the same bytes in
+//! the CPU tile, the pack payload, the block of the pool and the shader's reads.
 //!
 //! CON-11: everything the shader sees is tile-local (control points, heights relative to the tile origin) or a unit vector; the
 //! control points are `shell * dir - origin` rounded once from f64.
 //!
-//! CON-13: the height step is `relief / 65,535`, so 1 mm holds while a finest tile has at most [`FALLBACK_RELIEF_M`] of relief;
-//! a finest tile with more falls back to the vertex format ([`tile_data_field`]).
+//! CON-13: the height step is `relief / 4,294,967,295`, so 1 mm holds up to about 30 km of relief in one tile. The relief guard
+//! (a finest tile with more than [`FALLBACK_RELIEF_M`] falls back to the vertex format, [`tile_data_field`]) stays until the vertex
+//! format is removed; [`tile_data_field_guarded`] with `false` turns it off for the CON-13 tests.
 
-use crate::climate::{ClimateTexture, CLIMATE_MIN_COMPACT_CELLS};
+use crate::climate::{ClimateTexture, CLIMATE_BYTES, CLIMATE_MIN_COMPACT_CELLS, CLIMATE_TEXELS};
 use crate::height::HeightField;
 use crate::mesh::{
     finest_class_key, mesh_key_field, normal_from_stencil, normal_stencil, skirt_depth, tile_mesh_field, vertex_count, MeshVertex, TileMesh,
@@ -32,38 +33,56 @@ use planet_core::{PlanetFixed, TileId, Vec3};
 /// surface errs by about 0.018 theta^2 of the tile edge, too much for levels 0-2; ADR 0033 point 4).
 pub const COMPACT_MIN_LEVEL: u8 = 3;
 
-/// Bytes of one texel (`Rgba16Uint`).
+/// Bytes of one texel: two words (GEN-019).
 pub const TEXEL_BYTES: u64 = 8;
 
-/// Bytes of the per-slot record: nine control points (27 f32), `hr_min`, `hr_step`, `h_origin`, `skirt depth` and the flip flag.
-pub const COMPACT_RECORD_BYTES: u64 = 9 * 12 + 4 * 4 + 4;
+/// Bytes of the slot header: nine control points (27 f32), `hr_min`, `hr_step`, `h_origin`, the skirt depth and the flags word.
+pub const SLOT_HEADER_BYTES: u64 = 9 * 12 + 4 * 4 + 4;
 
-/// Quantisation levels of the height: 16 bits.
-pub const HEIGHT_STEPS: f64 = 65_535.0;
+/// Offset of the climate block in the slot (GEN-025).
+pub const SLOT_CLIMATE_OFFSET: u64 = SLOT_HEADER_BYTES;
+
+/// Bytes of the climate block: 81 words.
+pub const SLOT_CLIMATE_BYTES: u64 = CLIMATE_BYTES as u64;
+
+/// Offset of the pad word (GEN-025).
+pub const SLOT_PAD_OFFSET: u64 = SLOT_CLIMATE_OFFSET + SLOT_CLIMATE_BYTES;
+
+/// Offset of the texels in the slot: 456 bytes of header, climate block and pad (GEN-025), a multiple of 8.
+pub const SLOT_TEXEL_OFFSET: u64 = SLOT_PAD_OFFSET + 4;
+
+/// Scale of the 15-bit normal components: `2^14 - 1`.
+pub const NORMAL_SCALE: f32 = 16_383.0;
+
+/// Quantisation levels of the height: 32 bits.
+pub const HEIGHT_STEPS: f64 = 4_294_967_295.0;
+
+/// The 16-bit levels of the former texel: the relief guard of GEN-019 stays at the relief where that step passed 1 mm.
+const GUARD_STEPS: f64 = 65_535.0;
 
 /// CON-13: tile-vertex quantisation at the finest level at most this many metres.
 pub const MAX_FINEST_STEP_M: f64 = 1.0e-3;
 
-/// Relief (metres) above which a finest tile's height step exceeds [`MAX_FINEST_STEP_M`]: such a tile falls back to the vertex
-/// format (ADR 0033 point 5).
-pub const FALLBACK_RELIEF_M: f64 = MAX_FINEST_STEP_M * HEIGHT_STEPS;
+/// Relief (metres) above which the former 16-bit height step exceeded [`MAX_FINEST_STEP_M`]: the guard that sends such a finest tile
+/// to the vertex format stays at this relief until `remove-vertex-render-path` (GEN-019).
+pub const FALLBACK_RELIEF_M: f64 = MAX_FINEST_STEP_M * GUARD_STEPS;
 
 /// Texels of a slot at `cells`: `(cells + 1)^2`.
 pub fn texel_count(cells: u32) -> usize {
     ((cells + 1) * (cells + 1)) as usize
 }
 
-/// Bytes a compact tile occupies in its slot at `cells` (texels only).
+/// Bytes of the texels of a slot at `cells` (texels only).
 pub fn slot_texel_bytes(cells: u32) -> u64 {
     texel_count(cells) as u64 * TEXEL_BYTES
 }
 
-/// Texel bytes plus the record: what ADR 0033 calls the 8.8 KB tile at cells 32.
+/// The stride of a slot at `cells`: `456 + 8 (cells + 1)^2` (GEN-025: 2,768, 9,168 and 34,256 B at cells 16, 32 and 64).
 pub fn slot_bytes(cells: u32) -> u64 {
-    slot_texel_bytes(cells) + COMPACT_RECORD_BYTES
+    SLOT_TEXEL_OFFSET + slot_texel_bytes(cells)
 }
 
-/// One compact tile: control points, quantised heights and normals.
+/// One compact tile: control points, climate, quantised heights and normals (one slot, GEN-025).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompactTile {
     pub id: TileId,
@@ -87,30 +106,32 @@ pub struct CompactTile {
     pub flip: bool,
     /// Relief of the tile in metres (maximum minus minimum height, f64): what the CON-13 guard looks at.
     pub relief_m: f64,
-    /// `(cells + 1)^2` texels `[height, normal_x, normal_y, 0]`, row `j` major.
-    pub texels: Vec<[u16; 4]>,
+    /// The climate block (GEN-021), 81 words: temperature `f16` low, precipitation `f16` high.
+    pub climate_words: [u32; CLIMATE_TEXELS],
+    /// `(cells + 1)^2` texels `[height step count, two 15-bit normal components]`, row `j` major.
+    pub texels: Vec<[u32; 2]>,
 }
 
 impl CompactTile {
-    /// Bytes this tile occupies in its slot.
+    /// Bytes of this tile's texels.
     pub fn texel_bytes(&self) -> u64 {
         self.texels.len() as u64 * TEXEL_BYTES
     }
 
-    /// Texel bytes plus the record.
+    /// Bytes this tile occupies in its slot (the stride of GEN-025).
     pub fn resident_bytes(&self) -> u64 {
-        self.texel_bytes() + COMPACT_RECORD_BYTES
+        SLOT_TEXEL_OFFSET + self.texel_bytes()
     }
 
-    /// The texels as the block holds them: little-endian `u16` x 4 per texel, row `j` major.
+    /// The texels as the slot holds them: two little-endian words per texel, row `j` major.
     pub fn texel_data(&self) -> Vec<u8> {
         self.texels.iter().flat_map(|t| t.iter().flat_map(|c| c.to_le_bytes())).collect()
     }
 
-    /// The record as the slot-record buffer holds it: 9 control points as f32 triples, `hr_min`, `hr_step`, `h_origin`,
-    /// `skirt_depth`, then the flip flag as a `u32`; 128 bytes.
-    pub fn record_bytes(&self) -> [u8; COMPACT_RECORD_BYTES as usize] {
-        let mut out = [0u8; COMPACT_RECORD_BYTES as usize];
+    /// The header as the slot holds it: 9 control points as f32 triples, `hr_min`, `hr_step`, `h_origin`, `skirt_depth`, then the
+    /// flags word (bit 0 the orientation flip, every other bit zero); 128 bytes.
+    pub fn header_bytes(&self) -> [u8; SLOT_HEADER_BYTES as usize] {
+        let mut out = [0u8; SLOT_HEADER_BYTES as usize];
         let mut words = self.ctrl.iter().flatten().copied().collect::<Vec<f32>>();
         words.extend([self.hr_min, self.hr_step, self.h_origin, self.skirt_depth]);
         for (k, w) in words.iter().enumerate() {
@@ -120,27 +141,117 @@ impl CompactTile {
         out
     }
 
-    /// The tile's climate field (ADR 0039 point 2), read back from the spare channel of the texels.
+    /// The whole slot, byte for byte as the pool's block holds it (GEN-025): header, climate block, pad, texels.
+    pub fn slot_data(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        self.write_slot_into(&mut out);
+        out
+    }
+
+    /// [`slot_data`](CompactTile::slot_data) appended to `out` (word by word: no byte-wise iterator, REND-018).
+    pub fn write_slot_into(&self, out: &mut Vec<u8>) {
+        let at = out.len();
+        out.reserve(self.resident_bytes() as usize);
+        out.extend_from_slice(&self.header_bytes());
+        for w in &self.climate_words {
+            out.extend_from_slice(&w.to_le_bytes());
+        }
+        out.extend_from_slice(&[0u8; 4]);
+        for t in &self.texels {
+            out.extend_from_slice(&t[0].to_le_bytes());
+            out.extend_from_slice(&t[1].to_le_bytes());
+        }
+        debug_assert_eq!((out.len() - at) as u64, self.resident_bytes());
+    }
+
+    /// Rebuild a tile from the bytes of its slot (the inverse of [`slot_data`](CompactTile::slot_data)); the fields the slot does
+    /// not hold (key, origin, relief) come from the caller. Names what is wrong with the bytes: a wrong length, flag bits, a pad word
+    /// or texel bits that must be zero.
+    pub fn from_slot_data(
+        id: TileId,
+        cells: u32,
+        key: u64,
+        origin: PlanetFixed,
+        relief_m: f64,
+        bytes: &[u8],
+    ) -> Result<CompactTile, String> {
+        if bytes.len() as u64 != slot_bytes(cells) {
+            return Err(format!("a slot at cells {cells} is {} bytes, got {}", slot_bytes(cells), bytes.len()));
+        }
+        let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().expect("4 bytes"));
+        let f = |k: usize| f32::from_bits(word(k * 4));
+        let mut ctrl = [[0f32; 3]; 9];
+        for (k, c) in ctrl.iter_mut().enumerate() {
+            *c = [f(3 * k), f(3 * k + 1), f(3 * k + 2)];
+        }
+        let flags = word(124);
+        if flags > 1 {
+            return Err(format!("the slot's flags word {flags:#x} has reserved bits set"));
+        }
+        if word(SLOT_PAD_OFFSET as usize) != 0 {
+            return Err("the slot's pad word is not zero".into());
+        }
+        let mut climate_words = [0u32; CLIMATE_TEXELS];
+        for (k, w) in climate_words.iter_mut().enumerate() {
+            *w = word(SLOT_CLIMATE_OFFSET as usize + 4 * k);
+        }
+        let texels: Vec<[u32; 2]> = bytes[SLOT_TEXEL_OFFSET as usize..]
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|c| [u32::from_le_bytes(c[..4].try_into().expect("4 bytes")), u32::from_le_bytes(c[4..].try_into().expect("4 bytes"))])
+            .collect();
+        if texels.iter().any(|t| t[1] >> 30 != 0) {
+            return Err("a texel has its two reserved normal bits set".into());
+        }
+        Ok(CompactTile {
+            id,
+            cells,
+            key,
+            origin,
+            ctrl,
+            hr_min: f(27),
+            hr_step: f(28),
+            h_origin: f(29),
+            skirt_depth: f(30),
+            flip: flags == 1,
+            relief_m,
+            climate_words,
+            texels,
+        })
+    }
+
+    /// The tile's climate field (ADR 0039 point 2), read from the climate block of the slot.
     pub fn climate(&self) -> ClimateTexture {
-        ClimateTexture::read_texels(&self.texels)
+        ClimateTexture::from_words(&self.climate_words)
+    }
+
+    /// The 32-bit height step count of texel `k`.
+    pub fn height_q(&self, k: usize) -> u32 {
+        self.texels[k][0]
+    }
+
+    /// The two signed 15-bit normal components of texel `k`.
+    pub fn normal_components(&self, k: usize) -> [i32; 2] {
+        unpack_normal(self.texels[k][1])
     }
 
     /// Height of a texel relative to the origin height, as the shader computes it.
     pub fn rel_height(&self, i: usize, j: usize) -> f32 {
-        self.hr_min + f32::from(self.texels[j * (self.cells as usize + 1) + i][0]) * self.hr_step
+        self.hr_min + self.texels[j * (self.cells as usize + 1) + i][0] as f32 * self.hr_step
     }
 
-    /// The largest error the 16-bit height quantisation can cause: half a step.
+    /// The largest error the 32-bit height quantisation can cause: half a step.
     pub fn height_error_bound_m(&self) -> f64 {
         0.5 * f64::from(self.hr_step)
     }
 
     /// The lowest height (m, f32 as the shader forms it) over the tile's own `(cells + 1)^2` lattice vertices: the exact minimum of the
-    /// drawn terrain, which is linear between vertices and morphs only to averages of own vertices (ATMO-020). The 16-bit heights are
-    /// monotone in the texel, so the lowest texel gives it.
+    /// drawn terrain, which is linear between vertices and morphs only to averages of own vertices (ATMO-020). The step counts are
+    /// monotone in the height, so the lowest texel gives it.
     pub fn min_height_m(&self) -> f32 {
         let q = self.texels.iter().map(|t| t[0]).min().unwrap_or(0);
-        self.h_origin + (self.hr_min + f32::from(q) * self.hr_step)
+        self.h_origin + (self.hr_min + q as f32 * self.hr_step)
     }
 
     /// Whether the CON-13 step bound (1 mm) holds for this tile.
@@ -148,7 +259,7 @@ impl CompactTile {
         f64::from(self.hr_step) <= MAX_FINEST_STEP_M * (1.0 + 1.0e-6)
     }
 
-    /// Hash of the exact texel, record and origin bits, for known-answer tests (CON-14).
+    /// Hash of the exact slot and origin bits, for known-answer tests (CON-14).
     pub fn content_hash(&self) -> u64 {
         let mut v = vec![
             self.id.raw(),
@@ -158,8 +269,7 @@ impl CompactTile {
             self.origin.0.y.to_bits(),
             self.origin.0.z.to_bits(),
         ];
-        v.extend(self.record_bytes().chunks(4).map(|c| u64::from(u32::from_le_bytes(c.try_into().expect("4 bytes")))));
-        v.extend(self.texels.iter().map(|t| u64::from(t[0]) | u64::from(t[1]) << 16 | u64::from(t[2]) << 32 | u64::from(t[3]) << 48));
+        v.extend(self.slot_data().chunks(4).map(|c| u64::from(u32::from_le_bytes(c.try_into().expect("a slot is a multiple of 4 bytes")))));
         hash_u64s(0x0063_706b, &v)
     }
 }
@@ -228,7 +338,7 @@ pub enum VertexReason {
 pub fn vertex_reason(level: u8, finest_level: u8, relief_m: f64) -> Option<VertexReason> {
     if level < COMPACT_MIN_LEVEL {
         Some(VertexReason::CoarseLevel)
-    } else if level >= finest_level && relief_m / HEIGHT_STEPS > MAX_FINEST_STEP_M {
+    } else if level >= finest_level && relief_m / GUARD_STEPS > MAX_FINEST_STEP_M {
         Some(VertexReason::Relief)
     } else {
         None
@@ -237,8 +347,8 @@ pub fn vertex_reason(level: u8, finest_level: u8, relief_m: f64) -> Option<Verte
 
 // ---- encoding ----
 
-/// Octahedral encoding of a unit vector into two snorm16 components (as `u16` bit patterns of `i16`).
-pub fn oct_encode(n: Vec3) -> [u16; 2] {
+/// Octahedral encoding of a unit vector into two signed 15-bit components in `-16383..=16383` (GEN-019).
+pub fn oct_encode(n: Vec3) -> [i32; 2] {
     let l1 = n.x.abs() + n.y.abs() + n.z.abs();
     let (mut x, mut y) = (n.x / l1, n.y / l1);
     if n.z < 0.0 {
@@ -246,13 +356,13 @@ pub fn oct_encode(n: Vec3) -> [u16; 2] {
         let sy = if y >= 0.0 { 1.0 } else { -1.0 };
         (x, y) = ((1.0 - y.abs()) * sx, (1.0 - x.abs()) * sy);
     }
-    let q = |v: f64| ((v.clamp(-1.0, 1.0) * 32767.0).round() as i16) as u16;
+    let q = |v: f64| (v.clamp(-1.0, 1.0) * f64::from(NORMAL_SCALE)).round() as i32;
     [q(x), q(y)]
 }
 
-/// Decode as the shader does (`unpack2x16snorm`, then the octahedral fold, f32).
-pub fn oct_decode(e: [u16; 2]) -> [f32; 3] {
-    let s = |b: u16| (f32::from(b as i16) / 32767.0).max(-1.0);
+/// Decode as the shader does (`extractBits` to a signed value, scale, then the octahedral fold, f32).
+pub fn oct_decode(e: [i32; 2]) -> [f32; 3] {
+    let s = |b: i32| (b as f32 / NORMAL_SCALE).max(-1.0);
     let (x, y) = (s(e[0]), s(e[1]));
     let mut n = [x, y, 1.0 - x.abs() - y.abs()];
     if n[2] < 0.0 {
@@ -260,6 +370,17 @@ pub fn oct_decode(e: [u16; 2]) -> [f32; 3] {
         n = [(1.0 - n[1].abs()) * sx, (1.0 - n[0].abs()) * sy, n[2]];
     }
     norm(n)
+}
+
+/// The normal word of a texel: component `x` in bits 0-14, `y` in bits 15-29 (two's complement), bits 30-31 zero.
+pub fn pack_normal(e: [i32; 2]) -> u32 {
+    (e[0] as u32 & 0x7fff) | (e[1] as u32 & 0x7fff) << 15
+}
+
+/// Inverse of [`pack_normal`]: sign-extend the two 15-bit fields (what `extractBits` does in the shader).
+pub fn unpack_normal(w: u32) -> [i32; 2] {
+    let s = |v: u32| ((v << 17) as i32) >> 17;
+    [s(w & 0x7fff), s((w >> 15) & 0x7fff)]
 }
 
 /// The largest f32 not above `x`.
@@ -286,7 +407,7 @@ fn f32_up(x: f64) -> f32 {
 pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> CompactTile {
     assert!(
         cells >= CLIMATE_MIN_COMPACT_CELLS && cells.is_power_of_two(),
-        "a compact tile needs a power-of-two number of cells of at least {CLIMATE_MIN_COMPACT_CELLS} (its climate rides in 162 texels)"
+        "a compact tile needs a power-of-two number of cells of at least {CLIMATE_MIN_COMPACT_CELLS}"
     );
     let w = (cells + 1) as usize;
     let centre = id.center_direction(map);
@@ -318,27 +439,26 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
         }
     }
     let mut hr = vec![0f64; count];
-    let mut normals = vec![[0u16; 2]; count];
+    let mut normals = vec![0u32; count];
     for k in 0..count {
         hr[k] = all[1 + k] - h_origin;
         let s0 = 1 + count + 4 * k;
         let st = [dirs[s0], dirs[s0 + 1], dirs[s0 + 2], dirs[s0 + 3]];
-        normals[k] = oct_encode(normal_from_stencil(&st, &[all[s0], all[s0 + 1], all[s0 + 2], all[s0 + 3]], radius_m));
+        normals[k] = pack_normal(oct_encode(normal_from_stencil(&st, &[all[s0], all[s0 + 1], all[s0 + 2], all[s0 + 3]], radius_m)));
     }
     let lo = hr.iter().copied().fold(f64::INFINITY, f64::min);
     let hi = hr.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    // Rounded so that level 0 is not above the lowest height and level 65,535 not below the highest: no clamping error.
+    // Rounded so that level 0 is not above the lowest height and the top level not below the highest: no clamping error.
     let hr_min = f32_down(lo);
     let hr_step = if hi > lo { f32_up((hi - f64::from(hr_min)) / HEIGHT_STEPS) } else { 1.0e-30 };
-    let mut texels: Vec<[u16; 4]> = hr
+    let texels: Vec<[u32; 2]> = hr
         .iter()
         .zip(&normals)
         .map(|(h, n)| {
-            let q = ((h - f64::from(hr_min)) / f64::from(hr_step)).round().clamp(0.0, HEIGHT_STEPS) as u16;
-            [q, n[0], n[1], 0]
+            let q = if hi > lo { ((h - f64::from(hr_min)) / f64::from(hr_step)).round().clamp(0.0, HEIGHT_STEPS) as u32 } else { 0 };
+            [q, *n]
         })
         .collect();
-    climate.write_texels(&mut texels);
     let mut tile = CompactTile {
         id,
         cells,
@@ -351,6 +471,7 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
         skirt_depth: skirt_depth(id.level(), radius_m) as f32,
         flip: false,
         relief_m: hi - lo,
+        climate_words: climate.to_words(),
         texels,
     };
     let (du, dv) = tile.base_derivs(0.5, 0.5);
@@ -387,12 +508,26 @@ pub fn tile_data_field(
     radius_m: f64,
     finest_level: u8,
 ) -> RenderTile {
+    tile_data_field_guarded(field, map, id, cells, radius_m, finest_level, true)
+}
+
+/// [`tile_data_field`] with the relief guard switchable: `relief_guard = false` builds a finest tile of any relief compact (the
+/// CON-13 tests of the wide texel, GEN-019); levels 0-2 stay in the vertex format. The guard goes with the vertex format.
+pub fn tile_data_field_guarded(
+    field: &dyn HeightField,
+    map: &dyn FaceMapping,
+    id: TileId,
+    cells: u32,
+    radius_m: f64,
+    finest_level: u8,
+    relief_guard: bool,
+) -> RenderTile {
     let vertex = || RenderTile::Vertex(vertex_tile_field(field, map, id, cells, radius_m, finest_level));
     if vertex_reason(id.level(), finest_level, 0.0).is_some() {
         return vertex();
     }
     let mut tile = compact_tile_field(field, map, id, cells, radius_m);
-    match vertex_reason(id.level(), finest_level, tile.relief_m) {
+    match vertex_reason(id.level(), finest_level, if relief_guard { tile.relief_m } else { 0.0 }) {
         Some(_) => vertex(),
         None => {
             tile.key = finest_class_key(tile.key, id, finest_level);
@@ -510,7 +645,7 @@ impl CompactTile {
             cpos = sub(cpos, d);
         }
         let t = self.texels[j as usize * w as usize + i as usize];
-        let normal = oct_decode([t[1], t[2]]);
+        let normal = oct_decode(unpack_normal(t[1]));
         MeshVertex { pos, coarse: cpos, normal, height: self.h_origin + own_h, coarse_height: self.h_origin + ch }
     }
 

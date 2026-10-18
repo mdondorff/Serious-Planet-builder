@@ -35,7 +35,7 @@ pub trait TileSink {
     fn upload_at(&mut self, tile: &RenderTile, slot: SlotRef) -> Result<(), String>;
     /// Bytes `upload_at` writes for `tile`: the tile's size in the sink's format (the per-frame upload budget counts in
     /// them, STRM-006). The default is what the renderer writes: a vertex tile at its vertex size, a compact tile at its
-    /// texels plus its record (8,840 B at cells 32); a sink that writes something else says so.
+    /// slot (header, climate block and texels, 9,168 B at cells 32); a sink that writes something else says so.
     fn upload_bytes(&self, tile: &RenderTile) -> u64 {
         match tile {
             RenderTile::Vertex(m) => m.vertices.len() as u64 * MeshVertex::GPU_STRIDE,

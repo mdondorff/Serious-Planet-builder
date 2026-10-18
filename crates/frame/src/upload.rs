@@ -21,7 +21,7 @@
 
 use planet_core::TileId;
 
-/// Starting value of the cap: 1 MiB of tile data per frame (ADR 0033 point 9, accepted; about 118 compact slots of 8,840 B,
+/// Starting value of the cap: 1 MiB of tile data per frame (ADR 0033 point 9, accepted; about 114 compact slots of 9,168 B,
 /// 17 vertex-format slots of 58,608 B at cells 32 (the 44-byte vertex and its climate)).
 pub const DEFAULT_TILE_BYTES_PER_FRAME: u64 = 1 << 20;
 
