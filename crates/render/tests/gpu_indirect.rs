@@ -2,58 +2,47 @@
 //! supports it, with the draw records built on the CPU from the plan (CON-03). Where the adapter lacks the feature the mode
 //! falls back to the per-draw loop and says so.
 
+//!
+//! On the compact path (converted from the vertex-format renderer by `remove-vertex-render-path`, task 2.2).
+
 use planet_core::cube::TangentWarp;
-use planet_frame::pool::vertex_slot_bytes;
+use planet_frame::pool::compact_format_pool_with;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::mesh::{grid_indices, tile_mesh, TileMesh};
+use planet_generators::compact::{tile_data_field, RenderTile};
+use planet_generators::height::Reference;
 use planet_render::{AdapterPolicy, DrawMode, GpuContext, TerrainRenderer};
+use planet_streaming::budget::FIXED_RESERVE_BYTES;
 use planet_streaming::{PoolConfig, PoolKind, SlotRef};
 
 const R: f64 = 6_371_000.0;
 const SIZE: (u32, u32) = (128, 96);
 const CELLS: u32 = 16;
+const FINEST: u8 = 26;
 
 fn plan(index: usize, view: TerrainView) -> TerrainPlan {
     let (_, camera) = scripted_views(R, 4.0 / 3.0, 1)[index];
-    let lod = LodParams { cells: CELLS, viewport_h_px: 96.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() };
+    let lod = LodParams { cells: CELLS, viewport_h_px: 96.0, tau_px: 2.5, max_level: FINEST, ..LodParams::earth_1080p() };
     plan_terrain(&TerrainRequest { camera, size: SIZE, view, lod, face_mapping: "tangent-v1".into(), seed: 1 }).unwrap()
 }
 
-fn meshes(p: &TerrainPlan) -> Vec<TileMesh> {
-    p.nodes.iter().map(|n| tile_mesh(1, &TangentWarp, n.tile, CELLS, R)).collect()
+fn tiles(p: &TerrainPlan) -> Vec<RenderTile> {
+    p.nodes.iter().map(|n| tile_data_field(&Reference(1), &TangentWarp, n.tile, CELLS, R, FINEST)).collect()
 }
 
-/// 3 slots per block and a vertex pool for levels 0-2: the nodes of a plan span several buffers, so runs split.
+/// 3 slots per block, 2,000 blocks: the nodes of a plan span several buffers, so runs split.
 fn small_pool() -> PoolConfig {
-    let slot = vertex_slot_bytes(CELLS);
-    PoolConfig {
-        slot_bytes: slot,
-        block_slots: 3,
-        main_blocks: 2000,
-        vertex_slot_bytes: slot,
-        vertex_slots: 128,
-        index_bytes: grid_indices(CELLS).len() as u64 * 4,
-        node_record_bytes: 4096 * 512,
-        frames_in_flight: 1,
-        fallback_slots: 0,
-    }
+    compact_format_pool_with(FIXED_RESERVE_BYTES + 2000 * 3 * planet_generators::compact::slot_bytes(CELLS), CELLS, 3, 1).unwrap()
 }
 
-fn renderer(ctx: &GpuContext, ms: &[TileMesh], scattered: bool) -> TerrainRenderer {
-    let mut r = TerrainRenderer::with_pools(ctx, SIZE, CELLS, small_pool());
-    let (mut main, mut vertex) = (5999u32, 0u32);
-    for m in ms {
+fn renderer(ctx: &GpuContext, ts: &[RenderTile], scattered: bool) -> TerrainRenderer {
+    let mut r = TerrainRenderer::with_compact_pools(ctx, SIZE, CELLS, small_pool());
+    let mut main = 5999u32;
+    for t in ts {
         if scattered {
-            let slot = if m.id.level() <= 2 {
-                vertex += 1;
-                SlotRef { pool: PoolKind::Vertex, index: vertex - 1 }
-            } else {
-                main -= 2;
-                SlotRef { pool: PoolKind::Main, index: main }
-            };
-            r.upload_at(ctx, m, slot).unwrap();
+            main -= 2;
+            r.upload_tile_at(ctx, t, SlotRef { pool: PoolKind::Main, index: main }).unwrap();
         } else {
-            r.upload(ctx, m).unwrap();
+            r.upload_tile(ctx, t).unwrap();
         }
     }
     r
@@ -68,7 +57,7 @@ fn the_indirect_path_draws_the_image_of_the_per_draw_loop() {
     for view in [TerrainView::Level, TerrainView::Relief] {
         for index in 0..10 {
             let p = plan(index, view);
-            let ms = meshes(&p);
+            let ms = tiles(&p);
             for scattered in [false, true] {
                 let mut r = renderer(&ctx, &ms, scattered);
                 assert_eq!(r.set_draw_mode(&ctx, DrawMode::PerDraw), DrawMode::PerDraw);
@@ -112,7 +101,7 @@ fn the_indirect_path_draws_the_image_of_the_per_draw_loop() {
 fn frames_in_flight_keep_their_own_records() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let (a, b) = (plan(4, TerrainView::Level), plan(5, TerrainView::Level));
-    let ms: Vec<TileMesh> = meshes(&a).into_iter().chain(meshes(&b)).collect();
+    let ms: Vec<RenderTile> = tiles(&a).into_iter().chain(tiles(&b)).collect();
     let mut r = renderer(&ctx, &ms, false);
     // The reference of each plan on its own.
     let mut image = |p: &TerrainPlan| {
