@@ -1,5 +1,0 @@
-- [x] 1.1 failing tests first: scripts and lag (`planet_frame::scenes`), verdicts and registry (`planet_perf::streaming`), source separation (`compare`), xtask arguments, app registry/refusals/source, tier-C smoke of the six scenes
-- [x] 1.2 `planet_frame::scenes`; `planet_perf::streaming`, `Protocol.source`; `streamperf.rs`, `WorldTerrain::open_store`, `pipelined::Rig`, `MeshSource` cells; `cargo xtask perf stream`
-- [x] 1.3 spec deltas TEST-018, TEST-019
-- [x] 1.4 reviewers (spec-guardian: lag coverage guard, source label, own-reader scripts, spec wording fixed; verifier: pass), archive, log line, PR
-- Deferred (not in this change, tracked here): ADR 0032 mouse look from empty (request ids equal the still camera's), the fake-clock tier-A cases and tier-B renders using the scripts, the STRM-002/STRM-005/STRM-006/TEST-011 spec deltas of ADR 0032, exact lag for turning cameras (learnings 2026-10-15), GPU time per frame, dive pitch and ground-segment gating confirmation.

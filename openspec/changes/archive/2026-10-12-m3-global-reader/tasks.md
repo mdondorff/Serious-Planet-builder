@@ -1,4 +1,0 @@
-- [x] 1.1 Canonical layout in build, keyer, verify and CLI
-- [x] 1.2 Reader, lattice sources, tests, known answers
-- [x] 1.3 GEN-015, STRM-012, ADR 0027 (proposed)
-- [x] 1.4 reviews, verifier, status line

@@ -1,7 +1,0 @@
-- [x] 1.1 failing tier-A tests: new kinds and counts, edge and corner points, one-ulp mutation of every new entry
-- [x] 1.2 manifest: `globalgrid`, `globalblock`, `terrain`, `erosion`, version lines (`GlobalFieldValues`), finite-height and shared-direction checks
-- [x] 1.3 `app`: persistent known answers appended by `generate --manifest`, test against the pinned literals
-- [x] 1.4 GEN-003 spec text; det-diff reports heights, delta and ulps for terrain and erosion lines
-- [x] 1.5 numerics review, spec-guardian, verifier (findings fixed)
-- [x] 1.6 CI det-diff green on Windows and Linux (PR checks)
-- [x] 1.7 log line

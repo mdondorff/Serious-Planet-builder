@@ -1,6 +1,0 @@
-- [x] 1.1 failing tests: frame `managed` through the loop (STRM-005, STRM-006, STRM-007, STRM-015, STRM-017), streamer change log, app `gpu_skeleton` count columns
-- [x] 1.2 frame: `PlanField::residency`, worker R after the plan with reuse, `ManagedLoop`, `FrameCounts`
-- [x] 1.3 streaming: `record_changes`, `take_changes`, `dispatched`
-- [x] 1.4 app: pipelined loop on `ManagedLoop` with the renderer as sink; `--stream` through the manager
-- [x] 1.5 spec delta (STRM-005, 006, 007, 015, 016, new STRM-017)
-- [x] 1.6 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge

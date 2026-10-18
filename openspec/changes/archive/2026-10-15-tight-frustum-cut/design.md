@@ -1,9 +1,0 @@
-## Decisions
-
-- Two-stage test inside `select_impl`: the padded reference sphere first (no height bounds needed, as before), then the tile's `Volume` (centre at mid-height, radius = horizontal extent stretched by the highest point, combined with half the height range). The volume is already what the distance test uses and is computed at most once per tile (cached in `SelectionCache`), so the extra bound evaluations are for tiles that survive the padded test, most of which need the volume for the split test or as leaves anyway.
-- The sphere is enlarged by the skirt depth (`SKIRT_FRACTION` of the edge length, 5 % spare): skirt triangles are drawn and the oracle counts them.
-- A culled interior node removes its subtree. Safe because a node's height bounds cover its whole footprint, so its volume covers every descendant's geometry (the ancestor-covers-descendant property is also what the tier-A vertex test samples).
-- The `max_height_m` pad stays for the horizon test and as the first filter; it is not removed.
-- Oracle: a CPU depth pass (SPIKE-05) over the horizon-cut surroundings set (the superset), 1280x720 raster; every tile that owns a nearest-depth pixel must be in the plan. Tier B for time (about 26 s); the tier-A test checks geometry instead (no vertex of a cut tile inside the frustum).
-- Morphed positions stay inside the bound: a vertex's geomorph target (`coarse`) is an average of the tile's own grid vertices, so it lies in their hull; the tier-A tests and the oracle use the unmorphed `pos`, which therefore bounds both.
-- Oracle limits: it rasterizes at 1280x720 (same aspect as the 2560x1440 plan), so a tile owning only a pixel or two at 1440p may be invisible to it; the tier-A vertex test (every third dropped tile, reference and steep fields) checks vertices, not triangles, and the sphere bound is what carries the proof.

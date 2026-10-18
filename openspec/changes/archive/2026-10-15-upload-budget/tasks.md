@@ -1,4 +1,0 @@
-- [x] 1.1 failing tests first: loop tests on fakes (cap on the dive and a teleport, class order, tile larger than the cap, node records, 1/2/8 threads, fill) and pure tests (`upload_budget.rs`)
-- [x] 1.2 `planet_frame::upload` and the budget in `ManagedLoop`; `TileSink::upload_bytes`; counts and log columns
-- [x] 1.3 spec deltas STRM-006, STRM-017, TEST-012
-- [x] 1.4 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge

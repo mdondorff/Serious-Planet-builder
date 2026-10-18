@@ -62,7 +62,7 @@ ADRs 0038-0042 are accepted. Briefing: `docs/briefings/sonnet-explorer-m5.md`. E
    - rewrite the live specs in ADR 0055's style, without changing any requirement's meaning (a meaning change is a separate spec delta);
    - move the current value of every ADR amendment chain into the spec that owns it (for example ADR 0033 with 0048 and 0054; 0037 with 0052; 0041 with 0051 and 0053);
    - set the readings ADRs (0027, 0044, 0048, 0050, 0051, 0053) to `superseded by 0055 (content in specs)` after their content is in the specs (status lines only);
-   - delete `design.md` and `tasks.md` from the earlier archived changes;
+   - delete `design.md` and `tasks.md` from the earlier archived changes (done 2026-10-18: 207 files, archive markdown 248,789 to 206,941 words);
    - spec-lint gains the countable style checks (for example a requirement statement over 120 words fails), with tier-A tests.
    Report the word counts before and after.
 9a. **M5 gate blocked after window 7** (opus-planner 2026-10-17): `accept M5` fails on the `dive` rows (frame max 61.19 ms vs 40; descent detail lag mean 1.70 levels vs 1, worst 8.17 vs 3) and the GPU rows of orbit, the coast views and the flights have no verdict (clock under 1,400 MHz). Queue, in order, then a partial window 8 (dive, dive-fast, dive-cold, the lit views, the coast flights with filter 0 and 1; lit-formats only if 9a.3 makes it valid; ask the planner):

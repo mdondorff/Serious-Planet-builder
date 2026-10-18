@@ -1,3 +1,0 @@
-- [x] 1.1 Empty run fails (library, CLI, tests)
-- [x] 1.2 STRM-010 and pinned known answer
-- [x] 1.3 Reviews, verifier, status line

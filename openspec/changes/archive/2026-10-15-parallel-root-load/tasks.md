@@ -1,5 +1,0 @@
-- [x] 1.1 failing tests first (`crates/streaming/tests/roots.rs`): six dispatched before the wait, six at once on a pool, identical for manual/1/2/8, error path, capacity below six
-- [x] 1.2 `load_roots_blocking` concurrent; `Spawner::help`
-- [x] 1.3 spec delta STRM-001
-- [x] 1.4 measurement example, root-load time before/after, learnings entry (blocks and bytes per root)
-- [x] 1.5 reviewers (spec-guardian, verifier), archive, log line, PR, CI green, merge

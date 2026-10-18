@@ -1,5 +1,0 @@
-- [x] 1.1 Look schema 3: `atmosphere` table, identity step, fixtures, ranges, plan builder checks (LOOK-001, LOOK-002, LOOK-003)
-- [x] 2.1 `frame::look::atmosphere`: parameters, primitives, tables on N threads, known answers (ATMO-005, ATMO-006)
-- [x] 2.2 Sky-view mapping and reference, aerial-perspective texel and lookup, the orbit march, sun disc, frame geometry and its word layout (ATMO-006, ATMO-008)
-- [x] 3.1 Tier A: analytic cases, discretisation bounds, the regimes meeting at the top, the plan's tokens (ATMO-007, ATMO-008, ATMO-009)
-- [x] 4.1 numerics-reviewer, spec-guardian, verifier; test, test gpu, spec-lint, fmt, clippy; archive; log line; status item 5 now names the passes change
