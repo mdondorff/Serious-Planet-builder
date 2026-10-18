@@ -643,10 +643,13 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.lit && !streamperf::is_stream_scene(&o.scene) {
         return Err("--lit applies to the streaming perf scenes (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, dive-cold, streaming); the scenes `lit` and `lit-formats` are always lit".into());
     }
-    if o.given.contains("--views") && !litperf::is_lit_scene(&o.scene)
+    if o.given.contains("--views") && !litperf::is_lit_scene(&o.scene) && !litperf::is_capture_scene(&o.scene)
         || o.given.contains("--flight-frames") && !litperf::is_lit_scene(&o.scene) && !litperf::is_capture_scene(&o.scene)
     {
-        return Err("--views applies to the scenes `lit` and `lit-formats`, --flight-frames to those and `capture-flights`".into());
+        return Err(
+            "--views applies to the scenes `lit`, `lit-formats` and `capture-flights`, --flight-frames to those and `capture-flights`"
+                .into(),
+        );
     }
     streamperf::check_options(o)?;
     if litperf::is_capture_scene(&o.scene) {

@@ -670,6 +670,11 @@ Source: M5 item 10 (status.md: the 1440p flight videos of the glide and the desc
 - **WHEN** the capture runs on the software adapter over an in-memory bake at 320 by 180 with two cameras per flight
 - **THEN** four directories `coast-glide-filter1`, `coast-glide-filter0`, `coast-descent-filter1` and `coast-descent-filter0` each hold `frame_0000.png` and `frame_0001.png` of 320 by 180, `capture.txt` lists them, and no perf log or budget is written
 
+#### Scenario: Shore flights and close stills
+- **WHEN** the capture runs (all flights by default, or the ones named by `--views A,B`; an unknown name is refused)
+- **THEN** beside the two coastal flights it draws the capture-only flights `shore-run-30m` (20 s at 60 frames per second: 30 m above the water level, 150 m seaward of the waterline, which it follows over 500 m of beach from the terrain-height crossings, looking along the shore 25 degrees toward the land, pitched 8 degrees down) and `shore-approach-3m` (15 s: 3 m above the level, from 1 km out straight at the beach, ending 40 m past the waterline over the sand where it keeps 2 m above the ground), and four one-frame stills at eye heights above the higher of the terrain and the water: 0.5 m above the wet sand at the waterline looking along the shore, 0.5 m above the water 20 m out looking at the beach, 0.2 m above the sand at the waterline looking seaward, 0.1 m above the water looking along the shore; `--flight-frames N` replaces the frame counts of the flights
+- **AND** the stills set the camera directly, below the viewer's 1 m ground clamp (VIEW-004), and the output and `capture.txt` say so; a one-frame entry is a PNG and gets no video; the perf scenes' flights (`coast-glide`, `coast-descent`) are unchanged
+
 #### Scenario: Command lines
 - **WHEN** `capture flights` is given a store, a frame count and the smoke flag
 - **THEN** the cargo arguments run the capture scene (on the hardware adapter without the flag, on the software adapter with it), carry no perf or gate option and end with the output directory, and the `ffmpeg` arguments read the sequence at 60 frames per second and write H.264 in yuv420p
