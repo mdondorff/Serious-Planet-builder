@@ -40,3 +40,7 @@ Coupling found by the re-grep (each is a decision inside a task below, not a new
 - [ ] 6.3 `golden-review` over the goldens this change moves; escalations go to the owner's `/bless`.
 - [ ] 6.4 Removal perf window (opus-planner's GO only): compact terrain and water GPU per view before and after removal, attribution of window 11's +17 to 26 % terrain, dive samples from the desktop app compared with docs/perf/smoke-desktop-app.md; tell opus-planner before merge if it stays above 10 %.
 - [ ] 6.5 Archive the change, one line in docs/status.md.
+
+## Notes added while working (2026-10-18)
+- 3.2 also: `PlanCounts::upload_bytes` (`crates/frame/src/terrain.rs`, `counts()`) and `CountBudget::max_upload_bytes` model the vertex tile (`vertex_count * GPU_STRIDE`, `10_000 * 1_221 * 48`); they become `resident_tiles * slot_bytes(cells)` with the compact slot (9,168 B at cells 32). Dependents: `app/tests/world_view_pins.rs` (`1_221 * 48`), `frame/tests/floor_loop.rs`, `frame/tests/managed.rs:931`, `app/src/streamperf.rs`, TEST-011/TEST-012 numbers, and the plan text snapshots if they print the counts. `gpu_renderer.rs` checks the compact bytes against `resident_tiles * slot_bytes` until then.
+- 2.2 progress: `gpu_pools.rs` and `gpu_renderer.rs` are converted to the compact path (same tests, same requirement IDs); numerics-reviewer on the reference renderer found no defect and two maintainability notes, both applied (vertex attributes from `MeshVertex::OFFSETS` and `STRIDE`; splice guard).

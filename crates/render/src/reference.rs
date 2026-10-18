@@ -10,7 +10,7 @@
 use crate::terrain::{node_record_bytes, view_index, DEPTH_COMPARE, DEPTH_FORMAT, GLOBALS_BYTES, TERRAIN_SHADERS};
 use crate::{read_rgba8, ExecError, GpuContext, RgbaFrame};
 use planet_frame::TerrainPlan;
-use planet_generators::mesh::{grid_indices, TileMesh};
+use planet_generators::mesh::{grid_indices, MeshVertex, TileMesh};
 use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 
@@ -48,6 +48,7 @@ fn reference_shader() -> String {
     let src = TERRAIN_SHADERS[0].1;
     let vs_at = src.find("fn terrain_vertex(").expect("product shader has a vertex stage");
     let tail_at = src.find("// Distance in pixels to the nearest integer").expect("product shader helper marker");
+    assert!(src[..vs_at].contains("@group(0) @binding(1) var<storage, read> nodes: array<Node>;"), "product node binding changed");
     format!("{}{REFERENCE_VERTEX}{}", &src[..vs_at], &src[tail_at..])
 }
 
@@ -130,13 +131,13 @@ pub fn execute_reference(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[&TileMe
         source: wgpu::ShaderSource::Wgsl(reference_shader().into()),
     });
     // 11 floats per vertex: pos, coarse, normal, height, coarse height (`MeshVertex::to_floats`).
-    let attr = |format, offset: u64, shader_location| wgpu::VertexAttribute { format, offset, shader_location };
+    let attr = |format, k: usize, shader_location| wgpu::VertexAttribute { format, offset: 4 * MeshVertex::OFFSETS[k] as u64, shader_location };
     let attrs = [
         attr(wgpu::VertexFormat::Float32x3, 0, 0),
-        attr(wgpu::VertexFormat::Float32x3, 12, 1),
-        attr(wgpu::VertexFormat::Float32x3, 24, 2),
-        attr(wgpu::VertexFormat::Float32, 36, 3),
-        attr(wgpu::VertexFormat::Float32, 40, 4),
+        attr(wgpu::VertexFormat::Float32x3, 1, 1),
+        attr(wgpu::VertexFormat::Float32x3, 2, 2),
+        attr(wgpu::VertexFormat::Float32, 3, 3),
+        attr(wgpu::VertexFormat::Float32, 4, 4),
     ];
     let format = wgpu::TextureFormat::Rgba8Unorm;
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -146,7 +147,7 @@ pub fn execute_reference(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[&TileMe
             module: &module,
             entry_point: Some("vs"),
             compilation_options: Default::default(),
-            buffers: &[Some(wgpu::VertexBufferLayout { array_stride: 44, step_mode: wgpu::VertexStepMode::Vertex, attributes: &attrs })],
+            buffers: &[Some(wgpu::VertexBufferLayout { array_stride: MeshVertex::STRIDE, step_mode: wgpu::VertexStepMode::Vertex, attributes: &attrs })],
         },
         fragment: Some(wgpu::FragmentState {
             module: &module,
