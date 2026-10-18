@@ -184,5 +184,18 @@ fn a_capacity_below_six_is_still_reported() {
         StreamConfig { capacity: 5, ..Default::default() },
     );
     let e = s.load_roots_blocking().unwrap_err();
-    assert!(e.contains("below the six roots"), "{e}");
+    assert!(e.contains("below the 6 roots") && e.contains("floor level 0"), "{e}");
+}
+
+// spec: STRM-001
+#[test]
+fn a_capacity_below_the_roots_of_the_floor_is_reported_with_their_count() {
+    let mut s = Streamer::new(
+        Arc::new(Plain) as Arc<dyn TileSource<u64>>,
+        Arc::new(ManualSpawner::default()) as Arc<dyn Spawner>,
+        Arc::new(FakeClock::default()),
+        StreamConfig { capacity: 383, floor: 3, ..Default::default() },
+    );
+    let e = s.load_roots_blocking().unwrap_err();
+    assert!(e.contains("capacity 383 is below the 384 roots") && e.contains("floor level 3"), "{e}");
 }

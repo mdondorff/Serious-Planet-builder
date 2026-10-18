@@ -1,5 +1,6 @@
 //! Tier B: a pre-filled tile (read from the tile pack of a stored bake, STRM-021) leaves the same minimum in the `WaterBook` as a
-//! generated one, and the plan cuts with it (ATMO-020). A small stored bake of 256 cells with levels 0 and 1 pre-filled, software only.
+//! generated one, and the plan cuts with it (ATMO-020). A small stored bake of 256 cells with the 384 tiles of level 3 pre-filled
+//! (the render floor 3, LOD-011), software only.
 
 use planet::worldfield::WorldTerrain;
 use planet_core::cube::TangentWarp;
@@ -24,15 +25,15 @@ fn the_job_of_a_prefilled_tile_leaves_the_minimum_of_the_tile_it_read_and_the_pl
     let store = std::env::temp_dir().join(format!("planet-prefilled-min-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&store);
     let built =
-        run(&["generate", "--global-dir", store.to_str().unwrap(), "--global-res", "256", "--threads", "2", "--prefill-levels", "1"])
+        run(&["generate", "--global-dir", store.to_str().unwrap(), "--global-res", "256", "--threads", "2", "--prefill-levels", "3"])
             .unwrap();
-    assert!(built.contains("30 tiles, 30 written"), "{built}");
+    assert!(built.contains("384 tiles, 384 written"), "{built}");
     let o = planet::parse_args(&["test-render".to_string(), "--scene".to_string(), "lit".to_string()]).expect("options");
     let world = WorldTerrain::open_store(WorldDefinition::single_planet(R, o.seed), &store, 256).expect("the store opens").bounding_water();
     let field = world.field().unwrap();
     let (cells, max_level) = (32u32, 22u8);
     let format = planet_render::TileFormat::Compact;
-    // An orbital plan: coarse nodes, the pre-filled levels 0 and 1 among them.
+    // An orbital plan: the nodes of the floor (level 3) and finer, the pre-filled tiles of level 3 among them.
     let lod = LodParams {
         cells,
         viewport_h_px: 1440.0,
@@ -42,14 +43,15 @@ fn the_job_of_a_prefilled_tile_leaves_the_minimum_of_the_tile_it_read_and_the_pl
         max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
         ..LodParams::earth_1080p()
     };
-    // Every pre-filled tile (levels 0 and 1, 30 tiles): wet ones leave their minimum, dry ones none.
+    // Every pre-filled tile (level 3, 384 tiles): wet ones leave their minimum, dry ones none.
     let (mut wet, mut dry) = (0, 0);
     for face in 0..6u8 {
-        for level in 0..=1u8 {
+        for level in 3..=3u8 {
             for x in 0..(1u32 << level) {
                 for y in 0..(1u32 << level) {
                     let tile = TileId::new(planet_core::Face(face), level, x, y).unwrap();
-                    let t = world.prefilled_tile(field.as_ref(), tile, cells, max_level, format).expect("the pack holds levels 0 and 1");
+                    let t =
+                        world.prefilled_tile(field.as_ref(), tile, cells, max_level, format).expect("the pack holds the tiles of level 3");
                     world.fill_water(tile, &t);
                     let book = world.water_book();
                     if book.get(tile).flatten().is_some() {
@@ -66,7 +68,7 @@ fn the_job_of_a_prefilled_tile_leaves_the_minimum_of_the_tile_it_read_and_the_pl
             }
         }
     }
-    assert_eq!(wet + dry, 30);
+    assert_eq!(wet + dry, 384);
     assert!(wet > 0, "no pre-filled tile carries water");
     let mut sel = SelectionCache::new();
     let mut prefilled = 0;

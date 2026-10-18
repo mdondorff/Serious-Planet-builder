@@ -538,6 +538,7 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
         viewport_h_px: f64::from(size.1),
         tau_px: tau,
         max_level,
+        min_level: o.min_level(),
         radius_m,
         max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
         ..LodParams::earth_1080p()
@@ -836,6 +837,7 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
         viewport_h_px: f64::from(size.1),
         tau_px: tau,
         max_level,
+        min_level: o.min_level(),
         radius_m,
         max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
         ..LodParams::earth_1080p()

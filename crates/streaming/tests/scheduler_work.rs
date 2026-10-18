@@ -186,7 +186,7 @@ fn the_manager_reports_the_degradation_numbers_of_the_pure_function_without_fitt
         m.set_draw(&draw);
         m.set_residency(&r);
         let report = m.step().clone();
-        let want = degrade(&draw, &r, capacity, false).report;
+        let want = degrade(&draw, &r, capacity, false, 0).report;
         assert_eq!(report, want, "capacity {capacity}");
         assert_eq!(report.dropped, 0);
     }
@@ -197,7 +197,7 @@ fn the_manager_reports_the_degradation_numbers_of_the_pure_function_without_fitt
     m.set_draw(&draw);
     m.set_residency(&r);
     let report = m.step().clone();
-    assert_eq!(report, degrade(&draw, &r, capacity, false).report);
+    assert_eq!(report, degrade(&draw, &r, capacity, false, 0).report);
     assert!(report.dropped > 0, "the pool is smaller than R: {report:?}");
     let _ = Wants::default();
 }

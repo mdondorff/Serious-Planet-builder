@@ -376,7 +376,7 @@ Known limit: the blocking surface is the sphere `R + W` less `s`, so dry ground 
 
 Verify: A, B, C
 Status: active
-Source: ADR 0056, ADR 0058, ATMO-012, ATMO-016, ATMO-019, docs/perf/water-attribution.md, CON-11
+Source: ADR 0056, ADR 0058, ATMO-012, ATMO-016, ATMO-019, docs/perf/water-attribution.md, CON-11, LOD-011, ADR 0062
 
 #### Scenario: The horizon at its boundary
 - **WHEN** a tile lies 0.5 m inside and 0.5 m beyond the visible distance, for cameras 1 m, 3 m, 2 km and 20,000 km above the level, at levels of -140 m, 0 and 37.5 m
@@ -411,9 +411,10 @@ Source: ADR 0056, ADR 0058, ATMO-012, ATMO-016, ATMO-019, docs/perf/water-attrib
 - **THEN** the HDR frames are equal, and the exact cut keeps fewer nodes than the loose cut over the four views together
 
 #### Scenario: Pre-filled tiles
-- **WHEN** the 30 pre-filled tiles of levels 0 and 1 of a stored bake of 256 cells are read from the pack and their jobs fill the water, and orbital plans over the store are made with the book
+- **WHEN** the 384 pre-filled tiles of level 3 of a stored bake of 256 cells (floor 3) are read from the pack and their jobs fill the water, and orbital plans over the store are made with the book
 - **THEN** each pre-filled tile equals the generated tile bit for bit, a wet tile's stored minimum equals its minimum, a dry tile has none, and the plan keeps the nodes the stored minimum allows (none of these views has a node cut by it, so the cutting side is covered by the generated-tile scenarios)
 
 #### Scenario: Held views of the lit scenes
 - **WHEN** the lit scene runs its held views coast-2km and coast-3m and its two flights (each also with the shore filter off) in smoke mode
 - **THEN** each line reports a nonzero number of nodes cut by the exact minimum and 0 kept with no minimum
+

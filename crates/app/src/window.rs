@@ -180,7 +180,10 @@ impl App<'_> {
             ctx.prefer_tile_format(format);
         }
         let first = self.request(self.cameras[0], TerrainView::ALL[cfg.initial_view]);
-        let mut rig = Rig::new(&ctx, self.world, &first, cfg.gen)?;
+        // The 384 floor tiles load here, before frame 0 (STRM-001): the title shows how many are in.
+        let mut rig = Rig::new_with_progress(&ctx, self.world, &first, cfg.gen, &mut |done, total| {
+            window.set_title(&planet_frame::viewer::roots_title(done, total));
+        })?;
         // `enable_lit` is not part of `warm_up`: the lit and atmosphere passes are enabled and used once per ring set here, before the
         // first measured frame, whether the window starts lit or on the debug path (REND-017, VIEW-007).
         let warm_lit = viewer_lit_plan(&cfg.look, cfg.radius_m, 0.0, true, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
@@ -582,7 +585,9 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let tile_format = tile_format_pref.unwrap_or(planet_render::TileFormat::Compact);
     let (prefill_done, prefill_total) = if o.store.is_some() {
         let levels = o.prefill_levels.unwrap_or(READINESS_PREFILL_LEVELS);
-        world.prefill_present(levels, o.cells, o.finest_level_for(o.cells), tile_format).map(|(p, t)| (p as u64, t as u64))?
+        world
+            .prefill_present(o.floor_for(o.cells), levels, o.cells, o.finest_level_for(o.cells), tile_format)
+            .map(|(p, t)| (p as u64, t as u64))?
     } else {
         (0, 0)
     };

@@ -73,23 +73,24 @@ pub fn needs_prefilled_pack(scene: StreamScene) -> bool {
     matches!(scene, StreamScene::Dive | StreamScene::DiveFast)
 }
 
-/// The marker of the log's `protocol.source` for a scene that reads the pack: `present` of the `total` tiles of levels `0..=levels`.
-pub fn coarse_marker(present: usize, total: usize, levels: u8) -> String {
+/// The marker of the log's `protocol.source` for a scene that reads the pack: `present` of the `total` tiles of levels
+/// `floor..=levels` (`floor`: the render floor, LOD-011).
+pub fn coarse_marker(present: usize, total: usize, floor: u8, levels: u8) -> String {
     if present == total {
-        planet_perf::prefill::prefilled_marker(levels)
+        planet_perf::prefill::prefilled_marker(floor, levels)
     } else {
-        planet_perf::prefill::absent_marker(present, total, levels)
+        planet_perf::prefill::absent_marker(present, total, floor, levels)
     }
 }
 
-/// Refuse a gated dive over a pack that lacks tiles of levels `0..=levels`, naming the count and the command that fixes it
+/// Refuse a gated dive over a pack that lacks tiles of levels `floor..=levels`, naming the count and the command that fixes it
 /// (TEST-019: a cold start is the scene `dive-cold`, never the gated dive).
-pub fn require_prefilled(scene: &str, present: usize, total: usize, levels: u8, store: &str) -> Result<(), String> {
+pub fn require_prefilled(scene: &str, present: usize, total: usize, floor: u8, levels: u8, store: &str) -> Result<(), String> {
     if present == total {
         return Ok(());
     }
     Err(format!(
-        "{scene} starts with levels 0-{levels} pre-filled in the tile pack (owner, 2026-10-16, ADR 0045 point 3), but {store} holds {present} of the {total} tiles \
+        "{scene} starts with levels {floor}-{levels} pre-filled in the tile pack (owner, 2026-10-16, ADR 0045 point 3), but {store} holds {present} of the {total} tiles \
          (compact form, cells and finest level of this run): pre-fill it once with `cargo run -p planet --release -- generate --prefill-dir <store> --global-res {PRODUCTION_BAKE_RES}` \
          (idempotent; the bake step of `generate --global-dir` does it for a new bake). The cold start is the separate scene `dive-cold`, which ignores the pack's coarse tiles and is never gated"
     ))
@@ -124,6 +125,15 @@ pub fn check_options(o: &Options) -> Result<(), String> {
     if o.store.is_some() && o.allow_memory_bake {
         return Err("--store and --allow-memory-bake exclude each other: the store is the production source".into());
     }
+    // A pre-fill depth below the render floor names no tile: the scenes would check nothing, so it is refused (`generate` only says so).
+    if let Some(n) = o.prefill_levels.filter(|n| *n < o.floor_for(o.cells)) {
+        if stream {
+            return Err(format!(
+                "--prefill-levels {n} is below the render floor {} (--floor-level, LOD-011): no tile of levels up to {n} is drawn, so the scenes would check none; name a depth of at least the floor",
+                o.floor_for(o.cells)
+            ));
+        }
+    }
     if stream && o.store.is_none() && !o.allow_memory_bake && !o.perf_smoke {
         return Err(format!(
             "the streaming scene '{}' measures cold plans and tile generation, which differ over the production store (block decodes, SPIKE-05): \
@@ -155,7 +165,7 @@ pub(crate) fn open_world(o: &Options, cold: bool) -> Result<WorldTerrain, String
 /// The read-only check of a stored world that a smoke run starts with (TEST-024): prints it and fails on a problem.
 pub(crate) fn print_store_check(world: &WorldTerrain, o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let levels = o.prefill_levels.unwrap_or(planet_perf::prefill::GATED_PREFILL_LEVELS);
-    let check = world.store_check(levels, o.cells, o.finest_level_for(o.cells))?;
+    let check = world.store_check(o.floor_for(o.cells), levels, o.cells, o.finest_level_for(o.cells))?;
     for l in check.lines() {
         writeln!(out, "{l}").map_err(err)?;
     }
@@ -379,6 +389,10 @@ fn run_case(
     let calib_threads = gen.workers;
     let calib_before = (!smoke).then(|| planet_perf::streaming::calibrate_cpu(calib_threads));
     writeln!(out, "{}: rig built in {:.2} s", script.scene.name(), rig_started.elapsed().as_secs_f64()).map_err(err)?;
+    // The start-up load of the roots, before frame 0 (STRM-001): a reading of the cold start (with the pack ignored, `dive-cold`, it is
+    // every root generated), recorded under the `load_` prefix like the tile loads.
+    let roots = d.rig.roots;
+    writeln!(out, "{}: start-up load of {} root tiles took {:.2} s", script.scene.name(), roots.0, roots.1.as_secs_f64()).map_err(err)?;
     // Settle at the prelude camera (unmeasured): R fully resident, nothing queued, in flight or waiting, for one second of script
     // time. A smoke run only runs a few frames.
     let mut settle_s = None;
@@ -478,6 +492,8 @@ fn run_case(
     let torn = Instant::now();
     drop(d);
     let teardown_s = torn.elapsed().as_secs_f64();
+    load_counts.push(("load_startup_roots".into(), roots.0 as u64));
+    load_counts.push(("load_startup_roots_ms".into(), u64::try_from(roots.1.as_millis()).unwrap_or(u64::MAX)));
     if let Some(c) = &calib_before {
         load_counts.extend(planet_perf::streaming::calibration_counts("before", c));
         load_counts.extend(planet_perf::streaming::calibration_counts("after", &planet_perf::streaming::calibrate_cpu(calib_threads)));
@@ -567,14 +583,16 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     let source = source_label(&world, from_store);
     let production = from_store;
     let mut owner_override: Vec<String> = Vec::new();
-    // The tile pack at the start (STRM-021, ADR 0045 point 3): the gated dives start with levels 0-N pre-filled, checked before the
+    // The tile pack at the start (STRM-021, ADR 0045 point 3): the gated dives start with levels F-N pre-filled (F the render floor,
+    // LOD-011), checked before the
     // gate so a store without them is refused at once; every other scene records what the pack held.
     let pack_levels = o.prefill_levels.unwrap_or(planet_perf::prefill::GATED_PREFILL_LEVELS);
+    let pack_floor = o.floor_for(o.cells);
     let tile_format = ctx.default_tile_format();
     if from_store && !smoke {
         for scene in scenes.iter().filter(|s| needs_prefilled_pack(**s)) {
-            let (present, total) = world.prefill_present(pack_levels, o.cells, o.finest_level_for(o.cells), tile_format)?;
-            require_prefilled(scene.name(), present, total, pack_levels, world.source())?;
+            let (present, total) = world.prefill_present(pack_floor, pack_levels, o.cells, o.finest_level_for(o.cells), tile_format)?;
+            require_prefilled(scene.name(), present, total, pack_floor, pack_levels, world.source())?;
         }
     }
     // A smoke run over a store is also the check of the store before a window (TEST-024): it reads the ocean channel and every pre-filled
@@ -594,6 +612,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         viewport_h_px: f64::from(size.1),
         tau_px: tau,
         max_level: o.finest_level_for(o.cells),
+        min_level: o.min_level(),
         radius_m,
         max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
         ..LodParams::earth_1080p()
@@ -652,11 +671,11 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         let marker = if scene == StreamScene::DiveCold {
             Some(planet_perf::prefill::COLD_MARKER.to_string())
         } else if from_store {
-            let (present, total) = scene_world.prefill_present(pack_levels, o.cells, lod.max_level, tile_format)?;
+            let (present, total) = scene_world.prefill_present(pack_floor, pack_levels, o.cells, lod.max_level, tile_format)?;
             if needs_prefilled_pack(scene) && !smoke {
-                require_prefilled(scene.name(), present, total, pack_levels, &source)?;
+                require_prefilled(scene.name(), present, total, pack_floor, pack_levels, &source)?;
             }
-            Some(coarse_marker(present, total, pack_levels))
+            Some(coarse_marker(present, total, pack_floor, pack_levels))
         } else {
             None
         };
@@ -1207,11 +1226,11 @@ mod prefill_pack_tests {
     fn only_the_dives_that_are_judged_need_the_pre_filled_pack_and_a_pack_that_lacks_tiles_is_refused_with_the_remedy() {
         let needs: Vec<&str> = StreamScene::ALL.into_iter().filter(|s| needs_prefilled_pack(*s)).map(StreamScene::name).collect();
         assert_eq!(needs, ["dive", "dive-fast"], "dive-cold ignores the pack, the others use what is there");
-        assert!(require_prefilled("dive", 2046, 2046, 4, "store S").is_ok());
-        let e = require_prefilled("dive", 126, 2046, 4, "store D:/s, 16384 cells").unwrap_err();
+        assert!(require_prefilled("dive", 1920, 1920, 3, 4, "store S").is_ok());
+        let e = require_prefilled("dive", 126, 1920, 3, 4, "store D:/s, 16384 cells").unwrap_err();
         for needle in [
-            "dive starts with levels 0-4 pre-filled",
-            "holds 126 of the 2046 tiles",
+            "dive starts with levels 3-4 pre-filled",
+            "holds 126 of the 1920 tiles",
             "store D:/s, 16384 cells",
             "generate --prefill-dir <store> --global-res 16384",
             "dive-cold",
@@ -1219,11 +1238,12 @@ mod prefill_pack_tests {
             assert!(e.contains(needle), "{needle}: {e}");
         }
         // The marker the log records: pre-filled only when every tile of the checked levels was there.
-        assert_eq!(coarse_marker(2046, 2046, 4), "prefilled coarse pack (levels 0-4 present at start)");
-        assert!(coarse_marker(2045, 2046, 4).starts_with("no pre-filled coarse pack (2045 of 2046"));
+        assert_eq!(coarse_marker(1920, 1920, 3, 4), "prefilled coarse pack (levels 3-4 present at start)");
+        assert_eq!(coarse_marker(2046, 2046, 0, 4), "prefilled coarse pack (levels 0-4 present at start)", "floor 0 as before");
+        assert!(coarse_marker(1919, 1920, 3, 4).starts_with("no pre-filled coarse pack (1919 of 1920"));
         assert_eq!(
-            planet_perf::prefill::parse(&planet_perf::prefill::labelled("store S, 16384 cells", &coarse_marker(2046, 2046, 4))).1,
-            planet_perf::prefill::PrefillState::Prefilled(4)
+            planet_perf::prefill::parse(&planet_perf::prefill::labelled("store S, 16384 cells", &coarse_marker(1920, 1920, 3, 4))).1,
+            planet_perf::prefill::PrefillState::Prefilled { floor: 3, levels: 4 }
         );
     }
 }

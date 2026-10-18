@@ -37,6 +37,12 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; goldens after M5
    `docs/status.md`. Remove a golden's line from `tests/goldens/pending.txt` once every adapter has it.
 5. **Escalate the rest.** Leave escalated candidates in place, list them with their reasons and the report path under
    "Waiting for the owner" in `docs/status.md`, and stop work that depends on them. The owner decides with `/bless`.
+   Present the escalated set to the owner as groups of the same cause, each with a plain-language summary (owner, 2026-10-18):
+   - **What changed:** the views and adapters, pixel count and largest delta, and where in the picture (coastline, limb, sky, whole frame).
+   - **Why:** the change's cause in one or two sentences (the requirement or ADR, and what it does to the picture), or "unexplained" if it is not known.
+   - **What to look for:** the failure that would make it wrong (holes, seams, wrong colours, changes outside the expected area).
+   - **Recommendation:** approve or reject, with the reason.
+   Then show the old picture, the new one and the diff image.
 
 Never delete or overwrite a golden by hand, never relax a tolerance to make a candidate pass, never bless a lit, sky or water view
 outside the look path (a changed existing one escalates), a first golden of any class, or a new adapter family.

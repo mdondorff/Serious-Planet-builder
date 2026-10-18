@@ -120,6 +120,7 @@ fn main() -> Result<(), String> {
             vertex_pool_slots: 256,
             retire_frames: 2,
             retry_after_ms: 1000,
+            floor: lod.floor_level(),
             record_dispatches: false,
             record_changes: true,
         },

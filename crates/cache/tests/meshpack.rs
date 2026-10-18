@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use planet_cache::meshpack::{
-    decode_render_tile, encode_render_tile, missing_tiles, payload_form, prefill, prefill_tile_count, prefill_tiles, render_key,
-    MeshCodecError, PrefillError, RenderForm, TileSpec, KIND_MESH, MAX_PREFILL_LEVELS, PAYLOAD_VERSION,
+    decode_render_tile, encode_render_tile, missing_tiles, payload_form, prefill, prefill_tile_count, prefill_tile_count_from,
+    prefill_tiles, prefill_tiles_from, render_key, MeshCodecError, PrefillError, RenderForm, TileSpec, KIND_MESH, MAX_PREFILL_LEVELS,
+    PAYLOAD_VERSION,
 };
 use planet_cache::pack::{PackWriter, Record, TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_core::cube::TangentWarp;
@@ -124,6 +125,52 @@ fn the_tiles_of_levels_0_to_n_are_counted_and_ordered() {
         raw.dedup();
         assert_eq!(raw.len(), t.len(), "no tile twice");
     }
+}
+
+// spec: STRM-021, LOD-011
+#[test]
+fn the_pre_fill_range_starts_at_the_render_floor() {
+    assert_eq!((prefill_tile_count_from(3, 4), prefill_tile_count_from(0, 4)), (1920, 2046), "6 x (64 + 256) from floor 3, 6 x 341 from 0");
+    assert_eq!((prefill_tile_count_from(3, 3), prefill_tile_count_from(3, 2), prefill_tile_count_from(0, 1)), (384, 0, 30));
+    assert_eq!(prefill_tile_count_from(0, 3), prefill_tile_count(3));
+    for (floor, n) in [(3u8, 4u8), (3, 3), (0, 2), (2, 4)] {
+        let t = prefill_tiles_from(floor, n);
+        assert_eq!(t.len(), prefill_tile_count_from(floor, n), "floor {floor} to {n}");
+        assert!(t.iter().all(|x| x.level() >= floor && x.level() <= n) && t.windows(2).all(|w| w[0].level() <= w[1].level()));
+    }
+    assert!(prefill_tiles_from(3, 2).is_empty(), "a depth below the floor names no tile");
+    assert_eq!(prefill_tiles_from(0, 3), prefill_tiles(3));
+}
+
+// spec: STRM-021, LOD-011
+#[test]
+fn a_floor_3_pre_fill_stores_levels_3_and_4_only_and_a_depth_below_the_floor_writes_nothing() {
+    let field = Reference(5);
+    let floor3 = TileSpec::new(&field, R, CELLS, MAX_LEVEL, RenderForm::Compact).with_floor(3);
+    let floor0 = TileSpec::new(&field, R, CELLS, MAX_LEVEL, RenderForm::Compact);
+    let d = Dir::new("floor3");
+    let r = prefill(d.path(), &floor3, 4, 4, DEFAULT_MAX_PACK_BYTES, &progress).unwrap();
+    assert_eq!((r.total, r.present, r.written), (1920, 0, 1920));
+    let store = TileStore::open(d.path(), planet_cache::meshpack::store_params()).unwrap();
+    assert!(missing_tiles(&store, &floor3, 4).is_empty());
+    // Levels 0-2 are not stored: a floor-0 view of the same pack misses exactly those 126 tiles, and a floor-3 reader never looks them up.
+    let missing: Vec<TileId> = missing_tiles(&store, &floor0, 4);
+    assert_eq!(missing.len(), 126);
+    assert!(missing.iter().all(|t| t.level() <= 2));
+    let low = TileId::new(Face(1), 2, 1, 1).unwrap();
+    assert!(!floor3.storable(low) && floor3.lookup(&store, low).is_none() && floor0.storable(low));
+    // Every stored tile is the generated one.
+    for t in prefill_tiles_from(3, 4).into_iter().step_by(37) {
+        assert_eq!(floor3.lookup(&store, t).unwrap(), floor3.generate(t), "{t:?}");
+    }
+    drop(store);
+    // The same with floor 0 and depth 1: 30 tiles of levels 0-1; with floor 3 and depth 1: nothing, and no file appears.
+    let (a, b) = (Dir::new("floor0-depth1"), Dir::new("floor3-depth1"));
+    let r = prefill(a.path(), &floor0, 1, 2, DEFAULT_MAX_PACK_BYTES, &progress).unwrap();
+    assert_eq!((r.total, r.written), (30, 30));
+    let none = prefill(b.path(), &floor3, 1, 2, DEFAULT_MAX_PACK_BYTES, &progress).unwrap();
+    assert_eq!((none.total, none.present, none.written, none.payload_bytes), (0, 0, 0, 0));
+    assert!(!b.path().exists() || fs::read_dir(b.path()).unwrap().next().is_none(), "a depth below the floor creates nothing");
 }
 
 // spec: STRM-021
