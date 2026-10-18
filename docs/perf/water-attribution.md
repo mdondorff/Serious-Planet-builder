@@ -7,7 +7,7 @@ Question (opus-planner): water GPU time on the coast flights rose from 1.79 ms (
 - terrain nodes and water nodes of the plans;
 - water triangles (`water nodes x 2 x 32^2`) and vertices (`water nodes x 33^2`): the grid the water pass draws per node;
 - screen pixels whose CPU ray meets the sea sphere (level 0) where the terrain lies below the level, inside the tile of a water node (1 ray per 8x8 pixels, counts multiplied by 64).
-Three builds, each in its own worktree (`.claude/worktrees/attrib-*`, removed afterwards): `b21e4ff` (main before window 6 harness lessons; the last code commit before window 6, assumed, the window itself left no commit note), `f0d68b0` (#248, coastal band: window 7's build), `9f7fb66` (current main, with #261's coarse union). The tool is unchanged between builds except for the `is_sea` helper of the old one. CPU only, no GPU, no change to any branch.
+Each build replayed ITS OWN cameras (the scripts of its `lit_views`); #248 changed `find_coast`, so the flights stand in different places before and after it (see "Same cameras" below). Three builds, each in its own worktree (`.claude/worktrees/attrib-*`, removed afterwards): `b21e4ff` (the window-6 build: window 6 left no commit note; it ran after the flights existed (`dcf03e3`, 16:50 on 2026-10-17) and before the harness changes of #244 (`be11027`, 18:41), and `dcf03e3` and `b21e4ff` have the same water, plan and camera code, so the choice between them does not matter), `f0d68b0` (#248, coastal band: window 7's build), `9f7fb66` (current main, with #261's coarse union). The tool is unchanged between builds except for the `is_sea` helper of the old one. CPU only, no GPU, no change to any branch.
 
 ## Result (medians of 60 frames)
 | flight | build | terrain nodes | water nodes | water triangles | water vertices | sea pixels (CPU) |
@@ -21,15 +21,31 @@ Three builds, each in its own worktree (`.claude/worktrees/attrib-*`, removed af
 
 Ratios, current main against window 6: glide water nodes, triangles and vertices x3.74 (688 to 2,570; range over the flight 574-761 against 2,552-2,597); descent x3.53 (632 to 2,233; 277-888 against 1,754-2,586); sea pixels x1.00 on both (2.108 M against 2.107 M; 2.270 M against 2.268 M); terrain nodes x1.13 (glide) and x1.12 (descent). #261 changed nothing on these flights (#248 and main are identical).
 
+## Same cameras (the check of 2026-10-18)
+`find_coast` changed in #248 (a terrain-height beach instead of the bake's sea edge), so the table above mixes the place of the flights with the selection of the water. Current main run again with window 6's coast (the old `find_coast` copied into the tool, `--old-coast`; `frames-main-9f7fb66-window6-cameras.txt`):
+
+| flight | window 6 build, its cameras | main, window 6's cameras | main, its own cameras |
+|---|---|---|---|
+| glide: terrain nodes | 2,282 | 2,282 | 2,570 |
+| glide: water nodes | 688 | 2,033 | 2,570 |
+| glide: water vertices | 0.75 M | 2.21 M | 2.80 M |
+| glide: sea pixels (CPU) | 2.108 M | 2.171 M | 2.107 M |
+| descent: terrain nodes | 1,985 | 1,985 | 2,233 |
+| descent: water nodes | 632 | 1,730 | 2,233 |
+| descent: sea pixels (CPU) | 2.270 M | 2.380 M | 2.268 M |
+
+- The terrain +12 % is the place: at window 6's cameras the terrain plans are identical in node count (2,282 and 1,985).
+- At the same cameras the selection alone gives x2.95 (glide, 688 to 2,033) and x2.74 (descent, 632 to 1,730) water nodes, and the CPU sea pixels grow 3.0 % and 4.8 % (the band floods a little more of the plain).
+- The place adds x1.26 (glide, 2,033 to 2,570) and x1.29 (descent, 1,730 to 2,233) on top; the x3.7 and x3.5 of the first table is selection x place. The two places have the same sea on screen to 0.05 %, a coincidence of the two shores.
+
 ## Reading
 - The sea on screen is the same: the pixels whose ray meets the sea inside a water node are equal to 0.05 % in both flights. Nothing in #248 or #261 made the water cover more of the picture.
 - What changed is how much water geometry is drawn to cover it: after #248 every node of the plan carries water (water nodes = terrain nodes, 100 %) where before about 30 % did, so the water pass draws 3.5 to 3.7 times the triangles and vertices for the same pixels. Most of the added nodes are dry or far tiles, flooded nowhere (the shader floods per vertex where `W - h_morph > 0`), so they cost vertex work, rasterisation of triangles and discards, not shading of more water.
 - The GPU time went up x1.7 (1.79 to about 3.0 ms, the clocks of window 8 being lower and not comparable). A x3.7 growth in vertices with unchanged pixels is the kind of change that raises time by a fraction of itself; whether the fraction is the whole of x1.7 or only a part is for the GPU side (explorer: the pass with the nodes of the old selection, and with the fade on and off).
-- Terrain nodes also grew about 12 % (2,282 to 2,570), so part of the added water nodes is the added terrain nodes; that growth is in the terrain plan and predates the water selection (it is not explained here).
+- Terrain nodes also grew about 12 % (2,282 to 2,570): that is the new place of the flights (the beach found by terrain height), not a change of the plan (same cameras, same nodes). Of the x3.7 water growth about x2.9 is the selection and x1.26 the place.
 
 ## Limits
 - The pixel count is a geometric estimate (sea sphere hit, terrain below the level, inside a water node), not the rasteriser's coverage; it is built identically for the three builds. Subsampled 1 in 64, cameras 1 in 4.
-- The window-6 build is the last code state before that window as far as the log shows, not a recorded commit.
 - The store is the production store, opened read-only by builds that did not write it (b21e4ff and f0d68b0 read it as written by the current build).
 
 Raw per-frame lines: `water-attribution/frames-window6-b21e4ff.txt`, `frames-pr248-f0d68b0.txt`, `frames-main-9f7fb66.txt` (`flight frame terrain_nodes water_nodes triangles vertices pixels`, then the medians).

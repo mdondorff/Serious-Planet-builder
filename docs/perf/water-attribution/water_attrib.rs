@@ -8,7 +8,7 @@
 use planet::worldfield::WorldTerrain;
 use planet_core::cube::TangentWarp;
 use planet_core::{TileId, Vec3};
-use planet_frame::litscenes::lit_views;
+use planet_frame::litscenes::{descent_cameras, glide_cameras, lit_views, Coast, LitView, ViewKind};
 use planet_frame::look::file::LookParams;
 use planet_frame::water::{plan_water, WaterRequest, WaterTileCache, WaterView};
 use planet_frame::{plan_terrain_cached, Camera, LodParams, SelectionCache, TerrainRequest, TerrainView};
@@ -29,6 +29,41 @@ fn sea_point(cam: &Camera, size: (u32, u32), x: u32, y: u32, r: f64) -> Option<V
     }
     let t = if c >= 0.0 { -b - disc.sqrt() } else { -b + disc.sqrt() };
     (t > 0.0).then(|| (from + dir * t).normalized())
+}
+
+/// The coast of window 6's build (`find_coast` before #248): the first shoreline east of `lon0_deg` on the parallels around `lat_deg`
+/// where the bake's sea lies to the west, the sea 2 km out and the land 500 m in.
+fn old_find_coast(is_sea: &dyn Fn(Vec3) -> bool, lat_deg: f64, lon0_deg: f64, radius_m: f64) -> Option<Coast> {
+    const STEP_M: f64 = 20_000.0;
+    let on_parallel = |lat: f64, lon: f64| Vec3::new(libm::cos(lat) * libm::cos(lon), libm::cos(lat) * libm::sin(lon), libm::sin(lat));
+    for off in [0.0, 10.0, -10.0, 20.0, -20.0, 30.0, -30.0] {
+        let lat = (lat_deg + off).clamp(-80.0, 80.0).to_radians();
+        let ring = std::f64::consts::TAU * radius_m * libm::cos(lat);
+        let at = |s: f64| on_parallel(lat, lon0_deg.to_radians() + s / (radius_m * libm::cos(lat)));
+        let steps = (ring / STEP_M).ceil() as usize;
+        let mut prev = is_sea(at(0.0));
+        for k in 1..=steps {
+            let s = k as f64 * STEP_M;
+            let cur = is_sea(at(s));
+            if prev && !cur {
+                let (mut a, mut b) = (s - STEP_M, s);
+                for _ in 0..44 {
+                    let m = 0.5 * (a + b);
+                    if is_sea(at(m)) {
+                        a = m;
+                    } else {
+                        b = m;
+                    }
+                }
+                if is_sea(at(b - 2_000.0)) && !is_sea(at(b + 500.0)) {
+                    let heading = (at(b + 10.0) - at(b - 10.0)).normalized();
+                    return Some(Coast { dir: at(b), heading });
+                }
+            }
+            prev = cur;
+        }
+    }
+    None
 }
 
 fn median(v: &mut [f64]) -> f64 {
@@ -74,7 +109,20 @@ fn main() {
         ..LodParams::earth_1080p()
     };
     let is_sea = |d: Vec3| planet::litperf::carries_sea(&world, d);
-    let views = lit_views(radius_m, aspect, field.as_ref(), level_m, &is_sea, frames).expect("views");
+    let mut views = lit_views(radius_m, aspect, field.as_ref(), level_m, &is_sea, frames).expect("views");
+    // `--old-coast`: the flights stand where window 6's build put them (the bake's sea edge), with this build's selection.
+    if args.iter().any(|a| a == "--old-coast") {
+        let bake_sea = |d: Vec3| world.with_water(|f| planet_frame::water::WaterSource::water_at(f, d).ok().flatten().is_some()).ok().flatten().unwrap_or(false);
+        let coast = old_find_coast(&bake_sea, 20.0, 30.0, radius_m).expect("old coast");
+        println!("OLDCOAST dir {:?} heading {:?}", coast.dir, coast.heading);
+        views.retain(|v| v.kind != ViewKind::Flight);
+        views.push(LitView { name: "coast-glide", cameras: glide_cameras(&coast, radius_m, level_m, aspect, frames), kind: ViewKind::Flight });
+        views.push(LitView { name: "coast-descent", cameras: descent_cameras(&coast, radius_m, level_m, aspect, frames), kind: ViewKind::Flight });
+    }
+    for v in views.iter().filter(|v| v.kind == ViewKind::Flight) {
+        let p = v.cameras[0].position.0;
+        println!("CAMERA0 {} {:.1} {:.1} {:.1}", v.name, p.x, p.y, p.z);
+    }
     let look = LookParams::default();
     let table = world.definition().liquids().expect("liquids");
     let map = TangentWarp;
