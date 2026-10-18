@@ -2,6 +2,14 @@
 [profile.default]
 slow-timeout = { period = "60s", terminate-after = 3 }
 
+# The software-adapter GPU tier (BUILD-003): the heavy `gpu_*` tests take 40 to 66 s alone and up to 144 s beside the other processes of
+# a full `cargo xtask test gpu` (about 20 at once, each software rasteriser multi-threaded), so they reach the 120 s mark of the default
+# limit. The limit is there to catch a hang, not to budget a test: these binaries terminate after 300 s (5 x 60 s). Grouping the heavy
+# tests did not shorten the run (the run is 182 s; groups of 4 and 6 gave 190 to 250 s). No test is skipped, retried or changed.
+[[profile.default.overrides]]
+filter = 'binary(/^gpu_/)'
+slow-timeout = { period = "60s", terminate-after = 5 }
+
 # The tier-A tests that take longest start first, so that they do not run last and alone (the tail of `cargo xtask test fast`,
 # TEST-001 budget). A start order only: no test is skipped, retried or changed. `cargo xtask test fast` prints the slowest five.
 [[profile.default.overrides]]
