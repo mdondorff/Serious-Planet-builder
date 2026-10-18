@@ -31,7 +31,6 @@ Dormant (no near trigger; not asked now):
 
 ## Queued for M6 (owner GO, 2026-10-18)
 1. **compact-slot-v2** (#302, sonnet-m4): ADR 0062 and 0063; wide texel, climate in the slot, 9,168 B.
-2. **render-floor-3** (#303, sonnet-crusader, in parallel; archives after 1).
 3. **remove-vertex-render-path** (#304) and one perf window.
 4. **M5 housekeeping 10b** (documentation consolidation, ADR 0055): after 3, so the spec rewrite does not collide with the open spec deltas of 1-3; the M5 archive step of the `housekeeping` skill with it, including its first process review (step 9, owner 2026-10-18).
 4b. **Process budgets** (owner, 2026-10-18; sonnet-crusader, small xtask change): xtask reports when edit-to-first-test time exceeds about 30 s (after SPIKE-15's steps) or the CI median exceeds about 16 min; the figures live in the BUILD spec; an exceeded budget becomes a Tracked item.
