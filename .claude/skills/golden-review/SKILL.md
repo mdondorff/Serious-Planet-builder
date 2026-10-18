@@ -20,11 +20,11 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; goldens after M5
    Keep this run's test reports (the bound tests of the proposal must be green in them): after each `cargo xtask test`, `test gpu` or `test gpu --real`
    copy `target/nextest/default/junit.xml` (`target/nextest/real-gpu/junit.xml` for a `--real` run) to a file of its own (nextest overwrites it), and pass each with `--tests`.
 3. **Review.** `cargo xtask golden-review --proposal openspec/changes/<id>/proposal.md [--extra target/review/ci-linux/candidates]... [--tests <junit.xml>]...`.
-   It writes `target/review/golden-review/report.md` and a golden | candidate | diff triptych per candidate, and prints
+   It writes `target/review/golden-review/report.md` and, per changed candidate (TEST-038), `<adapter>/<name>.png` (golden | candidate | diff, enlarged 4x to 8x, nearest-neighbour) and `<adapter>/<name>.crop.png` (the same cropped to the differing pixels and enlarged further); the report lists both files and the bounding box of the differing pixels. It prints
    which adapters took part (an adapter that has goldens but delivered no candidates is printed as NOT RUN) and one verdict per candidate: `AUTO-R`, `AUTO-E`,
    `AUTO-L` or `ESCALATE <reason>`. Each adapter's candidate is judged against that adapter's own golden: agreement between adapters
    is not a condition (ADR 0061), so a declared change of a debug or shaded view is `AUTO-E` on each adapter that shows it, whatever the others show.
-   Look at every triptych yourself; if a picture contradicts its verdict (a hole, a seam, a colour that should not exist), treat it as `ESCALATE`.
+   Look at every enlarged triptych and crop yourself; if a picture contradicts its verdict (a hole, a seam, a colour that should not exist), treat it as `ESCALATE`.
    An `AUTO-L` needs the same oracle check as an `AUTO-E` (commit it as `bless(auto): <tests> [L]`).
    An `AUTO-E` also needs, per ADR 0017 and ADR 0061 point 3: at least one adapter with a candidate, the declared bound tests green in the same run (enforced by the tool from the `--tests` reports), the test's own oracles passing on the candidate frame (no holes, coverage, colour
    rules, every assertion of the golden test other than the golden comparison; the agent checks this), and the change's verifier and reviewers
@@ -42,7 +42,8 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; goldens after M5
    - **Why:** the change's cause in one or two sentences (the requirement or ADR, and what it does to the picture), or "unexplained" if it is not known.
    - **What to look for:** the failure that would make it wrong (holes, seams, wrong colours, changes outside the expected area).
    - **Recommendation:** approve or reject, with the reason.
-   Then show the old picture, the new one and the diff image.
+   Then show the enlarged triptych and the crop of each candidate (not the raw golden thumbnails). State only what a checked diff shows (the bounding box and pixel counts of the report); mark anything else "not checked".
+   A full-size inspection render (RTX, 1280x720 or larger, old code against new) is not made by default: offer it only when a diff looks odd and the owner or a reviewer asks.
 
 Never delete or overwrite a golden by hand, never relax a tolerance to make a candidate pass, never bless a lit, sky or water view
 outside the look path (a changed existing one escalates), a first golden of any class, or a new adapter family.

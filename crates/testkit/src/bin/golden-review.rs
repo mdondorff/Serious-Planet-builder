@@ -4,8 +4,8 @@
 //!
 //! Usage: golden-review [--proposal <proposal.md>] [--extra <dir with <adapter>/<name>.png>]... [--tests <junit.xml>]... [--apply]
 //! Reads candidates from `target/review/candidates/<adapter>/` and every `--extra` directory, compares each with
-//! `tests/goldens/<adapter>/<name>.png`, writes golden | candidate | diff triptychs and `report.md` to
-//! `target/review/golden-review/`, prints one verdict per candidate and, with `--apply`, copies only the auto verdicts
+//! `tests/goldens/<adapter>/<name>.png`, writes golden | candidate | diff triptychs (enlarged 4x to 8x, and a crop of the differing
+//! pixels enlarged further, TEST-038) and `report.md` to `target/review/golden-review/`, prints one verdict per candidate and, with `--apply`, copies only the auto verdicts
 //! into `tests/goldens/`. A candidate whose `driver.txt` differs from the recorded one always escalates. `--tests` names the
 //! nextest JUnit reports of this run (`target/nextest/default/junit.xml`, `target/nextest/real-gpu/junit.xml` for a `--real` run, copied after each `cargo xtask test` run): the
 //! report counts their testcases as the evidence of the bound tests. An adapter takes part in the run when it delivered candidates;
@@ -32,13 +32,69 @@ fn change(a: &Image, b: &Image) -> Change {
     Change { pixels, max_delta }
 }
 
-/// golden | candidate | diff (changed pixels red, others dimmed), side by side, scaled 3x.
-fn triptych(a: &Image, b: &Image) -> Image {
-    let (w, h, gap, s) = (a.width, a.height, 4u32, 3u32);
+/// Gap between the panels, in source pixels.
+const GAP: u32 = 4;
+/// Widest evidence image, in pixels (TEST-038).
+const MAX_WIDTH: u32 = 2400;
+/// Margin of the crop around the differing pixels, and its least side, in source pixels.
+const CROP_MARGIN: u32 = 4;
+const CROP_MIN: u32 = 16;
+
+/// The largest of `factors` (descending) for which three panels of width `w` and their gaps stay within `MAX_WIDTH`; the last when none does.
+fn zoom_factor(w: u32, factors: &[u32]) -> u32 {
+    factors.iter().copied().find(|s| (3 * w + 2 * GAP) * s <= MAX_WIDTH).unwrap_or(*factors.last().unwrap())
+}
+
+/// The inclusive bounding box `(x0, y0, x1, y1)` of the pixels in which `a` and `b` differ.
+fn diff_bbox(a: &Image, b: &Image) -> Option<(u32, u32, u32, u32)> {
+    let mut bbox: Option<(u32, u32, u32, u32)> = None;
+    for y in 0..a.height {
+        for x in 0..a.width {
+            if a.pixel(x, y) != b.pixel(x, y) {
+                bbox = Some(bbox.map_or((x, y, x, y), |(x0, y0, x1, y1)| (x0.min(x), y0.min(y), x1.max(x), y1.max(y))));
+            }
+        }
+    }
+    bbox
+}
+
+/// One axis of the crop: `lo..=hi` widened by the margin, clipped to `0..size`, grown to `CROP_MIN` (or the whole axis) and shifted inside.
+fn crop_axis(lo: u32, hi: u32, size: u32) -> (u32, u32) {
+    let (mut lo, mut hi) = (i64::from(lo) - i64::from(CROP_MARGIN), i64::from(hi) + i64::from(CROP_MARGIN));
+    let size = i64::from(size);
+    lo = lo.max(0);
+    hi = hi.min(size - 1);
+    let need = i64::from(CROP_MIN).min(size) - (hi - lo + 1);
+    if need > 0 {
+        lo -= need / 2;
+        hi += need - need / 2;
+        if lo < 0 {
+            hi -= lo;
+            lo = 0;
+        }
+        if hi > size - 1 {
+            lo -= hi - (size - 1);
+            hi = size - 1;
+        }
+    }
+    (lo as u32, hi as u32)
+}
+
+/// The crop `(x0, y0, x1, y1)` (inclusive) of a `width` x `height` picture around the differing pixels `bbox` (TEST-038).
+fn crop_rect(bbox: (u32, u32, u32, u32), width: u32, height: u32) -> (u32, u32, u32, u32) {
+    let (x0, x1) = crop_axis(bbox.0, bbox.2, width);
+    let (y0, y1) = crop_axis(bbox.1, bbox.3, height);
+    (x0, y0, x1, y1)
+}
+
+/// golden | candidate | diff (changed pixels red, others dimmed), side by side, of the inclusive region `rect`, each source pixel a
+/// `s` x `s` block (nearest neighbour).
+fn triptych(a: &Image, b: &Image, rect: (u32, u32, u32, u32), s: u32) -> Image {
+    let (rx, ry, w, h, gap) = (rect.0, rect.1, rect.2 - rect.0 + 1, rect.3 - rect.1 + 1, GAP);
     let mut out = Image::new((3 * w + 2 * gap) * s, h * s, vec![255; ((3 * w + 2 * gap) * s * h * s * 4) as usize]);
     for y in 0..h {
         for x in 0..w {
-            let (p, q) = (a.pixel(x, y), b.pixel(x, y));
+            let (p, q) = (a.pixel(rx + x, ry + y), b.pixel(rx + x, ry + y));
             let d = if p == q {
                 let g = ((u32::from(q[0]) + u32::from(q[1]) + u32::from(q[2])) / 6) as u8;
                 [g, g, g, 255]
@@ -283,6 +339,7 @@ fn main() {
     let look = (!look_declarations(&proposal_text).is_empty()).then(|| look_evidence(&root, &run, &proposal_text));
     let mut escalated = 0;
     let mut applied = vec![];
+    let mut evidence: Vec<String> = vec![];
     for name in &names {
         let (seen, images) = observe(&goldens, &adapters, &candidates, name);
         let class = classes.get(name).copied();
@@ -303,8 +360,23 @@ fn main() {
                 _ => ("-".into(), "-".into()),
             };
             if let Some((g, c)) = images.get(adapter) {
+                let full = (0, 0, g.width - 1, g.height - 1);
                 let path = out.join(adapter).join(format!("{name}.png"));
-                write_png(&path, &triptych(g, c)).expect("triptych");
+                write_png(&path, &triptych(g, c, full, zoom_factor(g.width, &[8, 6, 4]))).expect("triptych");
+                if let Some(bbox) = diff_bbox(g, c) {
+                    let rect = crop_rect(bbox, g.width, g.height);
+                    let crop = out.join(adapter).join(format!("{name}.crop.png"));
+                    write_png(&crop, &triptych(g, c, rect, zoom_factor(rect.2 - rect.0 + 1, &[32, 24, 16, 8]))).expect("crop");
+                    evidence.push(format!(
+                        "- {adapter} {name}: differing pixels x {}..{}, y {}..{}; `{}`, `{}`",
+                        bbox.0,
+                        bbox.2,
+                        bbox.1,
+                        bbox.3,
+                        path.display(),
+                        crop.display()
+                    ));
+                }
             }
             let v = match &verdict {
                 Verdict::AutoRounding => "AUTO-R".to_string(),
@@ -328,7 +400,11 @@ fn main() {
             }
         }
     }
-    report.push_str(&format!("\nTriptychs (golden | candidate | diff): `{}`\n", out.display()));
+    report.push_str(&format!(
+        "\nEvidence (TEST-038), golden | candidate | diff enlarged, then the same cropped to the differing pixels, in `{}`:\n\n{}\n",
+        out.display(),
+        evidence.join("\n")
+    ));
     std::fs::write(out.join("report.md"), &report).expect("report");
     if apply {
         println!("applied {} auto verdicts: {}", applied.len(), applied.join(", "));
@@ -343,6 +419,51 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: TEST-038
+    #[test]
+    fn the_zoom_factor_is_the_largest_that_fits_and_never_below_the_last() {
+        assert_eq!([128, 256, 1000].map(|w| zoom_factor(w, &[8, 6, 4])), [6, 4, 4]);
+        assert_eq!(zoom_factor(16, &[8, 6, 4]), 8);
+        assert_eq!([8, 40, 100, 400].map(|w| zoom_factor(w, &[32, 24, 16, 8])), [32, 16, 8, 8]);
+    }
+
+    // spec: TEST-038
+    #[test]
+    fn the_crop_is_the_bounding_box_plus_a_margin_at_least_16_px_inside_the_picture() {
+        let a = Image::new(128, 96, vec![0; 128 * 96 * 4]);
+        let mut b = a.clone();
+        assert_eq!(diff_bbox(&a, &b), None);
+        b.set_pixel(43, 27, [9, 0, 0, 255]);
+        b.set_pixel(84, 68, [9, 0, 0, 255]);
+        assert_eq!(diff_bbox(&a, &b), Some((43, 27, 84, 68)));
+        assert_eq!(crop_rect((43, 27, 84, 68), 128, 96), (39, 23, 88, 72));
+        assert_eq!(crop_rect((0, 0, 0, 0), 128, 96), (0, 0, 15, 15));
+        assert_eq!(crop_rect((127, 95, 127, 95), 128, 96), (112, 80, 127, 95));
+        assert_eq!(crop_rect((5, 5, 5, 5), 128, 96), (0, 0, 15, 15), "grown past the corner margin, shifted inside");
+        assert_eq!(crop_rect((2, 2, 3, 3), 10, 8), (0, 0, 9, 7), "a picture under 16 px is cropped whole");
+    }
+
+    // spec: TEST-038
+    #[test]
+    fn every_panel_pixel_is_a_factor_square_block_of_its_source_pixel() {
+        let mut g = Image::new(4, 3, vec![10; 4 * 3 * 4]);
+        let mut c = g.clone();
+        g.set_pixel(1, 1, [200, 100, 50, 255]);
+        c.set_pixel(1, 1, [7, 8, 9, 255]);
+        let (rect, s) = ((1, 1, 2, 2), 5);
+        let t = triptych(&g, &c, rect, s);
+        let (w, h) = (2u32, 2u32);
+        assert_eq!((t.width, t.height), ((3 * w + 2 * GAP) * s, h * s));
+        for dy in 0..s {
+            for dx in 0..s {
+                assert_eq!(t.pixel(dx, dy), [200, 100, 50, 255], "golden panel");
+                assert_eq!(t.pixel((w + GAP) * s + dx, dy), [7, 8, 9, 255], "candidate panel");
+                assert_eq!(t.pixel((2 * (w + GAP)) * s + dx, dy), [255, 0, 0, 255], "diff panel");
+            }
+        }
+        assert_eq!(t.pixel(s, 0), [10; 4], "the next source pixel, unchanged");
+    }
 
     // spec: TEST-022
     #[test]
