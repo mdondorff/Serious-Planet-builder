@@ -12,6 +12,7 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | SPIKE-08 | Ocean connectivity at 16384 | closed 2026-10-16 | `spikes/ocean-connectivity/results/` |
 | SPIKE-09 | Atmosphere f32 forms | closed | `spikes/atmosphere-f32/results/` |
 | SPIKE-11 | Mouse look plumbing | open (owner's local check) | `spikes/mouse-look/results/` |
+| SPIKE-13 | Edit-to-visible latency | closed 2026-10-18 | `spikes/edit-latency/results/` |
 | SPIKE-12 | Retiring the vertex tile format | closed 2026-10-17 (recommendation: retire, early M6; owner decides at the M5 gate) | `spikes/vertex-retirement/results/` |
 | exploration | WARP parallel-device crash: inside WARP, test-only (PRs #195, #196) | closed | `spikes/warp-crash/results/` |
 | exploration | WARP device removal with compact tiles and the atmosphere: test-only (PRs #212, #213) | closed | `spikes/warp-compact-atmosphere/results/` |
@@ -19,6 +20,26 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | exploration | Compact tiles in storage buffers (PR #225; ADR 0054) | closed | `spikes/compact-storage-buffer/results/` |
 
 The explorations before 2026-10-17 had no register entry; from now on every exploration gets a `SPIKE-NN` entry.
+
+## SPIKE-13 Edit-to-visible latency
+Status: closed
+Opened: 2026-10-18
+Closed: 2026-10-18
+Question: How long from editing an authored item to the first frame showing the new terrain at full resolution near the camera, per stage, and what must M6 build to reach a realistic target?
+Why it matters: M6 risk "editor on a streamed world" (target 1 s at nearby LODs, architecture report); ADR 0021 points 2, 5, 8.
+Time box: 1 day.
+Success criteria: latency table (median, worst) per altitude, stamp size and camera; stage breakdown; the floor; a preview latency and fidelity; targets and the M6 build list.
+Fallback if it fails: none.
+Code location: branch `spike/spike-13-edit-latency` (never merged); results `spikes/edit-latency/results/`.
+Result (RTX, indicative, host load per row): all numbers in `results.md`.
+| Case | Today's path | Floor measured |
+|---|---|---|
+| Exact, 200 m altitude, 50 m stamp, still | 1,790 ms | 144 ms |
+| Exact, median over 3 radii: 2 km / 200 m / 1 m | 404-492 / 919-949 / 1,435-1,478 ms (reach, find by key) | 63-72 / 443 / 773-831 ms (reach, find by footprint, undisturbed) |
+| Preview (vertex-stage displacement) | - | 4-14 ms |
+| Find stage | 260-820 ms by key; 34-91 ms by cell grid | 0.6-3.7 ms by footprint |
+| Tiles re-keyed by one 150 m stamp (cell invalidation) | 3,788 of 6,445 (2 km); 12,110 of 14,543 (1 m) | 36-2,812 touch the stamp |
+Recommendation: preview at most 16 ms, exact at most 300 ms for stamps up to 150 m and at most 1 s up to 500 m; M6 builds item reach, key-aware refresh with stale-while-revalidate, an edit event (plan keys, cached volumes, forced plan), the preview displacement and a request class for edited tiles; the owner decides nothing now (ADR 0021 points 2, 5, 8 before the first authored stage).
 
 ## SPIKE-12 Retiring the vertex tile format
 Status: closed
