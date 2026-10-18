@@ -269,9 +269,9 @@ fn the_lit_water_and_atmosphere_frames_over_compact_blocks_are_the_recorded_pixe
     // The hash of the HDR and colour targets of five frames of the aerial coast (no water, the atmosphere, the class view, the lit
     // water without and with the atmosphere), as the atlas textures drew them (recorded by the differential of ADR 0054's change,
     // byte-identical to the buffer blocks on WARP and on the RTX; re-recorded by the pixel-footprint fade of the waves, ADR 0056). A driver not in the table prints its hash and records nothing.
-    const KNOWN: [(&str, u64); 1] = [
-        // RTX: re-record with `test gpu --real` (MESH_VERSION 8 moved it)
-        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0x7ce8_c407_f5f2_5a27),
+    const KNOWN: [(&str, u64); 2] = [
+        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0xcb6b_6c6e_2739_010e),
+        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '591.86'", 0x1e73_f182_7758_74fa),
     ];
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let field = Reference(1);
@@ -935,6 +935,17 @@ fn a_coastal_flight_at_low_altitude_flickers_within_the_budget_while_the_lod_cha
             lit_shore_with(frames, &field, |f| &f.base_lum).share() * 100.0,
             report.changed_fine as f64 / report.covered.max(1) as f64 * 100.0,
             flicker_of(unfiltered, &field).changed_fine as f64 / flicker_of(unfiltered, &field).covered.max(1) as f64 * 100.0
+        );
+        // The terrain's own shading at the shore does not flash (REND-030): with the seabed-to-shore ramp as tall as the mesh's tolerance,
+        // at most 0.5 % of the shore-band pixels change their terrain-only luminance by more than a quarter between three frames
+        // (6.3 % on the glide and 36.8 % on the descent with the look's fixed 1 m ramp).
+        let own = lit_shore_with(frames, &field, |f| &f.base_lum);
+        assert!(own.covered > 1000, "{name}: {own:?}");
+        assert!(
+            own.share() <= 0.005,
+            "{name}: the terrain's own shading flashes {:.3} % of {} shore pixels",
+            own.share() * 100.0,
+            own.covered
         );
         // The tiles of the frames change along the flight (the LOD changes under the shoreline).
         let sets: std::collections::BTreeSet<Vec<TileId>> = frames.iter().map(|f| f.tiles.clone()).collect();

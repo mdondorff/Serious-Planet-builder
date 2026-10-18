@@ -55,8 +55,9 @@ struct Globals {
 struct Node {
     origin_rel: vec4<f32>,
     color: vec4<f32>,
-    // x, y: vertex distances between which a vertex morphs to the parent grid; z, w: padding (the plan's node-level
-    // `morph` is a diagnostic of the CPU selection and is not read by the shader).
+    // x, y: vertex distances between which a vertex morphs to the parent grid; z: the least height range of the albedo's seabed-to-shore
+    // ramp at this node (REND-030: the plan's `shore_ramp_min_m`); w: padding (the plan's node-level `morph` is a diagnostic of the CPU
+    // selection and is not read by the shader).
     morph: vec4<f32>,
     // Per grid decade (1 cm .. 1,000 km) the fractional part of (planet-fixed tile origin / spacing), xyz, taken in f64 on
     // the CPU: they anchor the relief grid to the world instead of to this tile, so neighbouring tiles and LOD splits draw
@@ -234,8 +235,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
 // The albedo of the surface (ADR 0039 point 3, REND-026): ground from the climate (desert, grass, forest, tundra), bare rock on
 // steep ground, snow by temperature and slope, a beach band above the water and the seabed below it. `t` is the temperature in
 // degrees C, `p` the precipitation in mm, `cs` the cosine of the slope and `h` the height above the water level. The same function
-// as `AlbedoParams::albedo` (the f64 reference in `planet_frame::look::shading`).
-fn albedo_of(tab: array<vec4<f32>, 10>, t: f32, p: f32, cs: f32, h: f32) -> vec3<f32> {
+// as `AlbedoParams::albedo_with_ramp` (the f64 reference in `planet_frame::look::shading`). `ramp_min` is the node's least ramp height
+// (REND-030): the seabed-to-shore ramp is `max(shore_blend, ramp_min)` tall.
+fn albedo_of(tab: array<vec4<f32>, 10>, t: f32, p: f32, cs: f32, h: f32, ramp_min: f32) -> vec3<f32> {
     let wet = smoothstep(tab[0].w, tab[1].w, p);
     let forest = smoothstep(tab[2].w, tab[3].w, p);
     let vegetation = mix(tab[2].xyz, tab[3].xyz, forest);
@@ -250,8 +252,14 @@ fn albedo_of(tab: array<vec4<f32>, 10>, t: f32, p: f32, cs: f32, h: f32) -> vec3
     let land = mix(base, tab[1].xyz, snow_w);
     let beach_w = (1.0 - smoothstep(tab[9].x, tab[9].x + tab[9].y, h)) * (1.0 - snow_w);
     let shore = mix(land, tab[6].xyz, beach_w);
-    let land_w = smoothstep(-tab[9].z, 0.0, h);
+    let land_w = smoothstep(-max(tab[9].z, ramp_min), 0.0, h);
     return mix(tab[7].xyz, shore, land_w);
+}
+
+// The ramp height at a vertex of a node of least ramp `z` and morph factor `m` (REND-030, `planet_frame::lod::shore_ramp_at`): `z` at
+// full detail, the parent's `min(2 z, 8)` on the parent's grid, so the ramp is continuous across a level border.
+fn shore_ramp_at(z: f32, m: f32) -> f32 {
+    return mix(z, min(2.0 * z, 8.0), m);
 }
 
 // The false colour of a climate channel (the debug views): temperature blue to red over -30..40 C, precipitation sand to blue over
@@ -268,7 +276,7 @@ fn climate_colour(view: u32, t: f32, p: f32) -> vec3<f32> {
 // The lit terrain's radiance before the pre-exposure (ADR 0039 point 4, REND-026): Lambert diffuse `albedo * max(n . sun, 0) / pi`
 // for the sun's illuminance of one unit, in the view `view` (0 lit, 1 albedo, 2 lighting, 3 temperature, 4 precipitation). `up` is
 // the unit up vector at the point; the climate comes from the tile's field. No ambient, no shadows, no specular.
-fn terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, sun: vec3<f32>) -> vec3<f32> {
+fn terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, sun: vec3<f32>) -> vec3<f32> {
     let n = normalize(normal);
     let cs = clamp(dot(n, up), 0.0, 1.0);
     let ndl = max(dot(n, sun), 0.0);
@@ -279,7 +287,7 @@ fn terrain_radiance(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up:
     if (view == 2u) {
         return vec3<f32>(ndl * inv_pi);
     }
-    let a = albedo_of(tab, t, p, cs, h);
+    let a = albedo_of(tab, t, p, cs, h, ramp_min);
     if (view == 1u) {
         return a * inv_pi;
     }
@@ -294,8 +302,8 @@ fn up_at(node_up: vec4<f32>, local: vec3<f32>) -> vec3<f32> {
 
 // What the lit path writes for a fragment (ADR 0038 point 1, REND-025/026): the radiance times the pre-exposure factor of the plan,
 // clamped to 60,000 so the scene target does not hold inf in f16.
-fn shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, sun: vec3<f32>, factor: f32) -> vec3<f32> {
-    return clamp(terrain_radiance(view, tab, normal, up, t, p, h, sun) * factor, vec3<f32>(0.0), vec3<f32>(60000.0));
+fn shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32, ramp_min: f32, sun: vec3<f32>, factor: f32) -> vec3<f32> {
+    return clamp(terrain_radiance(view, tab, normal, up, t, p, h, ramp_min, sun) * factor, vec3<f32>(0.0), vec3<f32>(60000.0));
 }
 
 // The sun direction and the pre-exposure factor travel in the otherwise unused words of the globals (mode.yzw as bits, range.z), the
@@ -306,7 +314,7 @@ fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
-    return vec4<f32>(shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, sun, g.range.z), 1.0);
+    return vec4<f32>(shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(nodes[in.node_index].morph.z, in.morph), sun, g.range.z), 1.0);
 }
 "#;
 
@@ -2084,7 +2092,7 @@ impl TerrainRenderer {
         for (i, d) in plan.nodes.iter().enumerate() {
             let r = d.camera_relative_origin;
             let c = d.color.map(|v| f32::from(v) / 255.0);
-            let mut floats = vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, 0.0, 0.0];
+            let mut floats = vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, d.shore_ramp_min_m, 0.0];
             for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
                 floats.extend([p[0], p[1], p[2], 0.0]);
             }
@@ -2469,6 +2477,17 @@ pub fn execute_terrain_tiles(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[&Ren
 #[cfg(test)]
 mod one_shot_tests {
     use super::*;
+
+    // spec: REND-030
+    #[test]
+    fn the_shaders_ramp_function_is_the_references_with_the_same_cap() {
+        let cap = format!("min(2.0 * z, {:.1})", planet_frame::lod::SHORE_RAMP_MAX_M);
+        assert!(
+            SHADER.contains("fn shore_ramp_at(z: f32, m: f32) -> f32") && SHADER.contains(&cap),
+            "the cap of the WGSL is the reference's"
+        );
+        assert!(SHADER.contains("shore_ramp_at(nodes[in.node_index].morph.z, in.morph)"), "the lit fragment ramps with the vertex's morph");
+    }
 
     // spec: REND-016
     #[test]

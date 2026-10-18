@@ -72,6 +72,7 @@ fn expect(ctx: &GpuContext, what: &str, got: u64, known: &[(&str, u64)]) {
 }
 
 const WARP: &str = "Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''";
+const RTX: &str = "NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '591.86'";
 
 // spec: REND-016
 #[test]
@@ -89,7 +90,7 @@ fn one_shot_frames_in_every_debug_view_are_the_recorded_pixels() {
     }
     assert_eq!((frames, compact_nodes), (90, 16_542), "the scripted views changed");
     println!("one_shot: {frames} frames, {compact_nodes} compact nodes drawn, hash {all:016x}");
-    expect(&ctx, "one_shot", all, &[(WARP, 0x7c3d_3ad9_aa77_fca7)]); // RTX: re-record with `test gpu --real` (MESH_VERSION 8 moved it)
+    expect(&ctx, "one_shot", all, &[(WARP, 0x7c3d_3ad9_aa77_fca7), (RTX, 0x1613_d074_caed_d5dd)]);
 }
 
 fn persistent(ctx: &GpuContext, plan: &TerrainPlan, mode: UploadMode, lit: Option<LitPlan>) -> Vec<u8> {
@@ -125,5 +126,5 @@ fn persistent_renderers_per_slot_and_batched_and_the_lit_atmosphere_frame_are_th
         frames += 3;
     }
     println!("persistent: {frames} frames, hash {all:016x}");
-    expect(&ctx, "persistent", all, &[(WARP, 0xd329_822b_b343_73ba)]); // RTX: re-record with `test gpu --real`
+    expect(&ctx, "persistent", all, &[(WARP, 0x3e1b_2c5c_20ae_7767), (RTX, 0x9c6b_642d_a2a4_1d8b)]);
 }

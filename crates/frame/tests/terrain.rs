@@ -349,6 +349,28 @@ fn terrain_plans_match_the_committed_snapshots() {
     check_snapshot("terrain_plan_orbit.txt", &plan_of(0, TerrainView::Level, 1).to_text());
 }
 
+// spec: REND-030
+#[test]
+fn every_node_carries_the_least_shore_ramp_of_its_level_and_the_text_form_keeps_it() {
+    let p = plan_of(4, TerrainView::Level, 1);
+    assert!(!p.nodes.is_empty());
+    let lod = lod();
+    for n in &p.nodes {
+        assert_eq!(n.shore_ramp_min_m, lod.shore_ramp_min_m(n.level) as f32, "level {}", n.level);
+    }
+    // The text carries it (`shore_ramp`), the round trip keeps it, and a recorded plan without the token reads as 0.
+    let text = p.to_text();
+    assert!(text.lines().filter(|l| l.starts_with("node ")).all(|l| l.contains(" shore_ramp ")));
+    assert_eq!(planet_frame::TerrainPlan::from_text(&text).unwrap(), p);
+    let old: String = text
+        .lines()
+        .map(|l| if l.starts_with("node ") { l.split(" shore_ramp ").next().unwrap().to_string() } else { l.to_string() })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let parsed = planet_frame::TerrainPlan::from_text(&old).unwrap();
+    assert!(parsed.nodes.iter().all(|n| n.shore_ramp_min_m == 0.0), "a plan recorded before the field ramps by the look's blend alone");
+}
+
 // spec: TEST-009, TEST-008
 #[test]
 fn a_terrain_bundle_round_trips_and_detects_corruption() {

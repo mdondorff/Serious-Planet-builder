@@ -567,3 +567,32 @@ Source: perf window 8 (dive on the lit path, `Buffer with 'globals' label is inv
 #### Scenario: The first error is kept
 - **WHEN** a buffer with an invalid descriptor is created on a context
 - **THEN** `first_error` holds the description, stays the same after a second error, and the creating call panicked with `wgpu error:`
+
+### Requirement: REND-030 The shore ramp follows the mesh's tolerance
+The lit terrain's albedo goes from the seabed to the shore over a ramp of height above the water. The ramp SHALL be `max(shore_blend_m, shore_ramp_min_m)` tall, where `shore_ramp_min_m` is decided per node on the CPU as `SHORE_RAMP_K` times the sample spacing of the node's parent level (`LodParams::shore_ramp_min_m(level)`; level 0 uses its own spacing), capped at `SHORE_RAMP_MAX_M` = 8 m, carried in the node's draw (`TerrainDraw::shore_ramp_min_m`, in the plan text as `shore_ramp`; a recorded plan without it reads 0) and read by the shader from the node record. The width at a vertex SHALL be continuous across node borders: the shader ramps with `shore_ramp_at(shore_ramp_min_m, morph)` = `mix(shore_ramp_min_m, min(2 * shore_ramp_min_m, SHORE_RAMP_MAX_M), morph)` (`planet_frame::lod::shore_ramp_at`) where `morph` is the vertex's interpolated morph factor, so that a node fully morphed onto its parent's grid and the parent's node, not yet morphing there, agree (a width constant per node stepped at every border between levels: a dark, tile-shaped patch in the foreground water of the coastal descent). The same width SHALL enter the f64 reference `AlbedoParams::albedo_with_ramp` and the shader's `albedo_of`, so that `oracle_lit_shading` pins them together.
+
+Derivation of the width (no look number, no screen derivative). A node is drawn only closer than its parent's split distance, where the parent's sample spacing projects to `tau_px` pixels: `tau_px * pixel_angle * split(level - 1) = s(level - 1)` whatever the field of view, the viewport and `tau_px` are. So `s(level - 1)` is the world size of the selection's screen-space tolerance at the farthest distance the node is drawn, and the height of one ground point differs between the node's mesh, its parent's mesh and the morph between them by a fraction of it. A ramp narrower than that makes an albedo that differs by a factor of eight in luminance between seabed and beach (0.06 against 0.52) flash with decimetre changes of height between frames. `SHORE_RAMP_K` is the smallest factor found that holds the terrain's own shading flash at the shore of both coastal flights under 0.5 %: on the flights of `gpu_water` (a 1:50 beach, tau 4 px) k = 1 leaves 4.3 % of the glide's shore pixels flashing, k = 1.5, 2 and 3 leave none; 2 is taken. The cap of 8 m is four absorption lengths of the water pass (0.5 per metre by default: 98 % absorbed), below which the seabed's own colour is hidden whatever the ramp is; the flights need 3 m (a fixed `shore_blend_m` of 3 m gives no flash either); without the cap the coarse nodes of an orbit view ask for kilometres and the deep seabed takes the beach's colour in terrain-only views. Near the camera `s(level - 1)` is centimetres (level 22 at 32 cells: 0.3 m) and the ramp stays at the look's `shore_blend_m`, 1 m by default; it widens only where the mesh cannot hold 1 m of height. The seabed and the beach colours, the beach band above the water, and every other term of the albedo are unchanged.
+
+Verify: A, B, C
+Status: active
+Source: M5 gate tracked item "terrain shading at the beach flashes" (6.3 % of the shore-band pixels of the glide and 36.8 % of the descent flashed by more than a quarter between frames with no water drawn), the attribution of 2026-10-18 (one term: the 1 m seabed-to-shore ramp), ADR 0039 point 3, REND-026
+
+#### Scenario: The width
+- **WHEN** the tolerance is 0, 0.3, 7.5 m or unreadable
+- **THEN** the ramp is the look's blend (1 m), the blend, 7.5 m and the blend; the width never falls below the blend and never shrinks as the tolerance grows
+
+#### Scenario: The node's tolerance
+- **WHEN** the tolerance of a node of any level 1 to 22 is taken for two different tau, viewport and field-of-view settings
+- **THEN** it is `SHORE_RAMP_K` times the parent's sample spacing up to 8 m, equal for both settings, never smaller for coarser levels, tau pixels at the node's far morph distance equal that spacing, and at level 22 it is below the blend
+
+#### Scenario: Continuous across a level border
+- **WHEN** the ramp and the albedo are evaluated for a node of any level 2 to 22 at the distance where its parent stops splitting (the node fully morphed) and for the parent's node at the same distance (not yet morphing), at heights from 12 m below the water to 1 m above it
+- **THEN** the ramps agree to 1e-9 relative and the albedos are equal; along a node's morph the ramp rises monotonically from its width to the parent's and never above 8 m
+
+#### Scenario: Shader and reference
+- **WHEN** probes sit at the foot, the middle and the top of a ramp of 8 m and at nodes with random least heights up to 8 m and random morph factors
+- **THEN** the shader's radiance equals the reference's within the declared bound of `oracle_lit_shading`
+
+#### Scenario: No flash on the coastal flights
+- **WHEN** the glide and the descent over a 1:50 beach are drawn with the plan's ramp
+- **THEN** at most 0.5 % of the shore-band pixels change their terrain-only luminance by more than a quarter between three consecutive frames

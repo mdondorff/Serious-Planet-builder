@@ -680,7 +680,7 @@ Source: M5 item 10 (status.md: the 1440p flight videos of the glide and the desc
 
 #### Scenario: Frames per flight and filter
 - **WHEN** the capture runs on the software adapter over an in-memory bake at 320 by 180 with two cameras per flight
-- **THEN** four directories `coast-glide-filter1`, `coast-glide-filter0`, `coast-descent-filter1` and `coast-descent-filter0` each hold `frame_0000.png` and `frame_0001.png` of 320 by 180, `capture.txt` lists them, and no perf log or budget is written
+- **THEN** four directories `coast-glide-filter0`, `coast-glide-filter1`, `coast-descent-filter0` and `coast-descent-filter1` (the look default 0 first, then 1) each hold `frame_0000.png` and `frame_0001.png` of 320 by 180, `capture.txt` lists them, and no perf log or budget is written
 
 #### Scenario: Shore flights and close stills
 - **WHEN** the capture runs (all flights by default, or the ones named by `--views A,B`; an unknown name is refused)

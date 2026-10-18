@@ -217,6 +217,25 @@ impl AlbedoParams {
     /// (desert, grass, forest, tundra), bare rock on steep ground, snow by temperature and slope, a beach band just above the water,
     /// the seabed below it.
     pub fn albedo(&self, temperature_c: f64, precipitation_mm: f64, cos_slope: f64, height_above_water_m: f64) -> [f64; 3] {
+        self.albedo_with_ramp(temperature_c, precipitation_mm, cos_slope, height_above_water_m, 0.0)
+    }
+
+    /// The width of the seabed-to-shore ramp at a node whose mesh cannot hold less than `ramp_min_m` of height (REND-030): the look's
+    /// `shore_blend_m`, or `ramp_min_m` where that is larger. Monotone in `ramp_min_m`, equal to `shore_blend_m` where it is small.
+    pub fn shore_ramp_m(&self, ramp_min_m: f64) -> f64 {
+        self.shore_blend_m.max(if ramp_min_m.is_finite() { ramp_min_m } else { 0.0 })
+    }
+
+    /// [`albedo`](AlbedoParams::albedo) with the node's least ramp height (`TerrainDraw::shore_ramp_min_m`): the CPU reference of the
+    /// shader's `albedo_of`. With `ramp_min_m` 0 it is `albedo`.
+    pub fn albedo_with_ramp(
+        &self,
+        temperature_c: f64,
+        precipitation_mm: f64,
+        cos_slope: f64,
+        height_above_water_m: f64,
+        ramp_min_m: f64,
+    ) -> [f64; 3] {
         let cos = cos_slope.clamp(0.0, 1.0);
         let wet = smoothstep(self.dry_mm, self.wet_mm, precipitation_mm);
         let forest = smoothstep(self.forest_mm_lo, self.forest_mm_hi, precipitation_mm);
@@ -233,7 +252,7 @@ impl AlbedoParams {
         let beach_w =
             (1.0 - smoothstep(self.beach_height_m, self.beach_height_m + self.beach_fade_m, height_above_water_m)) * (1.0 - snow_w);
         let shore = mix3(land, self.beach, beach_w);
-        let land_w = smoothstep(-self.shore_blend_m, 0.0, height_above_water_m);
+        let land_w = smoothstep(-self.shore_ramp_m(ramp_min_m), 0.0, height_above_water_m);
         mix3(self.seabed, shore, land_w)
     }
 
@@ -438,6 +457,22 @@ pub fn terrain_radiance(
     height_above_water_m: f64,
     sun: [f64; 3],
 ) -> [f64; 3] {
+    terrain_radiance_with_ramp(params, view, normal, up, temperature_c, precipitation_mm, height_above_water_m, 0.0, sun)
+}
+
+/// [`terrain_radiance`] at a node with the least ramp height `ramp_min_m` (REND-030).
+#[allow(clippy::too_many_arguments)]
+pub fn terrain_radiance_with_ramp(
+    params: &AlbedoParams,
+    view: ShadeView,
+    normal: [f64; 3],
+    up: [f64; 3],
+    temperature_c: f64,
+    precipitation_mm: f64,
+    height_above_water_m: f64,
+    ramp_min_m: f64,
+    sun: [f64; 3],
+) -> [f64; 3] {
     let n = normalize(normal);
     let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     let cos_slope = dot(n, up).clamp(0.0, 1.0);
@@ -445,10 +480,12 @@ pub fn terrain_radiance(
     let pi = core::f64::consts::PI;
     match view {
         ShadeView::Lit => {
-            let a = params.albedo(temperature_c, precipitation_mm, cos_slope, height_above_water_m);
+            let a = params.albedo_with_ramp(temperature_c, precipitation_mm, cos_slope, height_above_water_m, ramp_min_m);
             a.map(|c| c * ndl / pi)
         }
-        ShadeView::Albedo => params.albedo(temperature_c, precipitation_mm, cos_slope, height_above_water_m).map(|c| c / pi),
+        ShadeView::Albedo => {
+            params.albedo_with_ramp(temperature_c, precipitation_mm, cos_slope, height_above_water_m, ramp_min_m).map(|c| c / pi)
+        }
         ShadeView::Lighting => [ndl / pi; 3],
         ShadeView::Temperature | ShadeView::Precipitation => climate_view_colour(view, temperature_c, precipitation_mm).map(|c| c / pi),
     }
