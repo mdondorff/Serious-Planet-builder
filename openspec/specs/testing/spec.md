@@ -761,6 +761,17 @@ Source: ADR 0037 point 2, ADR 0017, ADR 0035, M5 queue item 10
 - **WHEN** a water golden changes but the declarations affect only `sky`
 - **THEN** it escalates
 
+### Requirement: TEST-037 Streaming scenes start cool and at the loaded clock
+Before the measured span of a streaming scene (not in a smoke run) the harness SHALL apply the cool start of TEST-033 and, for a scene that starts from a settled view (a prelude: the teleports and the looks), the held-clock warm-up of TEST-029: it renders the settled start view without pacing until the graphics clock has read the floor three times in a row (cap 30 s), so that nothing queued, in flight or waiting and nothing resident changes and no frame of the measured span is touched. A scene that starts from an empty cache (the dive, dive-fast, dive-cold) SHALL only cool down, and its console SHALL say that no warm-up was made and why: rendering its first frame would load the tiles whose first loads it measures. The warm-up outcome SHALL be logged in `warmups` under the scene's path and printed; the clock before the measured span is read after the warm-up, so a run no longer starts at an idle P-state because the warm-up was missing. The camera scripts, the budgets and the streaming code are unchanged, and the frame verdicts too.
+
+Verify: A
+Status: active
+Source: perf windows 7 and 8 (every streaming scene started at P5 or P8; the lit dive's two device losses came after long runs on a hot GPU), ADR 0057, TEST-029, TEST-033
+
+#### Scenario: Which steps a scene takes
+- **WHEN** a smoke run, a scene with a settled start and a scene from an empty cache are started
+- **THEN** the smoke run takes no step, the settled scene cools and warms up, the empty-cache scene only cools; the choice follows the script's prelude
+
 ### Requirement: TEST-033 Cool start of a view
 Before the warm-up of every view (the terrain scene's and the lit scenes', not in a smoke run) the harness SHALL wait, idle, until the GPU temperature reads 60 C or less, polling every 5 s for at most 120 s, and SHALL print one line per view: the temperatures at the start and the end and the seconds, or `NOT cooled` with the cap. An unreadable sensor ends the wait at once. The wait adds nothing to a measured frame.
 
