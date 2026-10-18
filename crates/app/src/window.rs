@@ -101,7 +101,7 @@ struct Config {
     radius_m: f64,
     /// The water level W the lit plan shades against: the sea of the definition (ADR 0041 point 1; the sea is M5's only producer).
     water_level_m: f64,
-    /// Whether the run named a world (`--world`): a frame bundle records it whole (TEST-008).
+    /// Whether a frame bundle records the world whole (TEST-008): always, the viewer's default world is the eroded field over an in-memory bake, not the seed-only reference field.
     world_named: bool,
     /// Where F9 writes its repro bundles: `target/review` (like the review images); a smoke run uses a directory of its own.
     capture_dir: std::path::PathBuf,
@@ -644,7 +644,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         base_readiness: Readiness { bake_done, bake_total, prefill_done, prefill_total, view: ViewCoverage::default() },
         radius_m,
         water_level_m,
-        world_named: o.world.is_some(),
+        world_named: true,
         capture_dir: if o.smoke {
             std::env::temp_dir().join(format!("planet-smoke-bundles-{}", std::process::id()))
         } else {

@@ -160,12 +160,8 @@ fn a_world_with_a_bake_has_an_ocean_and_the_window_draws_its_water_through_the_w
 // spec: VIEW-003, TEST-008
 #[test]
 fn the_f9_key_writes_a_repro_bundle_of_the_frame_that_names_its_world_and_its_lit_plan() {
-    let dir = std::env::temp_dir().join(format!("planet-viewer-capture-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let world = dir.join("earth.toml");
-    std::fs::write(&world, "schema_version = 2\n[body.0]\nradius_m = 6371000.0\n[world]\nseed = 5\n").unwrap();
-    let out = smoke(&["--scene", "terrain", "--world", world.to_str().unwrap(), "--global-res", "64", "--size", "320x200"]);
-    let _ = std::fs::remove_dir_all(&dir);
+    // No --world: the viewer's default world (the eroded field over an in-memory bake), which the bundle must record whole.
+    let out = smoke(&["--scene", "terrain", "--size", "320x200"]);
     let Some(stdout) = out else { return };
     assert!(stdout.contains("1 bundle(s) written"), "the smoke run pressed F9 once: {stdout}");
     let path =
