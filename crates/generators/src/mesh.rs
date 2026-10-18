@@ -55,7 +55,7 @@ pub const SKIRT_FRACTION: f64 = 0.08;
 /// depth, normal stencil, origin rule, vertex layout). History: 1 = first meshes; 2 = seam-consistent normals (#15);
 /// 3 = no `ref_pos` attribute: the morph distance is measured to the real vertex position (LOD-008); 4 = the 44-byte vertex (#65);
 /// 5 = the compact tile format (GEN-019, ADR 0033) exists beside the vertex format: a tile's key now stands for either, and the
-/// compact construction (control points, 16-bit height and snorm16 octahedral normals, record layout) is covered by this version.
+/// compact construction (control points, height and octahedral normals, record layout; 16-bit and snorm16 until version 8) is covered by this version.
 /// 6 = the key names whether the tile is a finest-level tile of the view (level at or above the LOD cap, [`finest_class_key`]):
 /// the compact format's CON-13 guard decides the format of such a tile from its relief, so the key must identify that class
 /// (finest tiles get other keys; tiles below the cap keep the version-5 composition under the new version).

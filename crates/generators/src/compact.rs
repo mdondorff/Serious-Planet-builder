@@ -17,7 +17,7 @@
 //! control points are `shell * dir - origin` rounded once from f64.
 //!
 //! CON-13: the height step is `relief / 16,777,215` (2^24 - 1 levels in the 32-bit field): every level is an integer an f32 holds
-//! exactly, so CPU and GPU form the same `f32(q)`, and 1 mm holds up to [`WIDE_RELIEF_1MM_M`] (16.7 km) of relief in one tile. The relief guard
+//! exactly, so CPU and GPU form the same `f32(q)`, and the step is at most 1 mm up to [`WIDE_RELIEF_1MM_M`] (16.7 km) of relief in one tile; the reconstruction error stays within 1 mm up to 8,192 m (the f32 sum, GEN-019). The relief guard
 //! (a finest tile with more than [`FALLBACK_RELIEF_M`] falls back to the vertex format, [`tile_data_field`]) stays until the vertex
 //! format is removed; [`tile_data_field_guarded`] with `false` turns it off for the CON-13 tests.
 

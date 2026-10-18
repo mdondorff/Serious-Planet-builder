@@ -105,11 +105,13 @@ fn shipped_shaders_contain_no_planet_scale_values() {
 fn the_compact_shader_takes_the_slot_offsets_and_the_normal_scale_from_the_generators_constants() {
     use planet_generators::compact::{NORMAL_SCALE, SLOT_CLIMATE_OFFSET, SLOT_TEXEL_OFFSET};
     let src = compact_terrain_shader(32);
-    assert!(!src.contains('{') || !src.contains("{TEXEL_WORD}"), "an unreplaced placeholder");
+    for p in ["{CELLS}", "{CLIMATE_WORD}", "{TEXEL_WORD}", "{NORMAL_SCALE}"] {
+        assert!(!src.contains(p), "an unreplaced placeholder {p}");
+    }
     for needle in [
         format!("const CLIMATE_WORD: u32 = {}u;", SLOT_CLIMATE_OFFSET / 4),
         format!("const TEXEL_WORD: u32 = {}u;", SLOT_TEXEL_OFFSET / 4),
-        format!("const NORMAL_SCALE: f32 = {NORMAL_SCALE:.1};"),
+        format!("const NORMAL_SCALE: f32 = {NORMAL_SCALE:?};"),
     ] {
         assert!(src.contains(&needle), "the shader lacks `{needle}`");
     }

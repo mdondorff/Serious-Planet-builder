@@ -401,3 +401,41 @@ fn the_one_millimetre_step_bound_is_falsifiable_and_ends_at_16_7_km_of_relief() 
         assert!(c.texels.iter().all(|t| (t[0] as f32) as u32 == t[0]), "levels are exact in f32");
     }
 }
+
+// spec: GEN-019, CON-13
+#[test]
+fn a_ramp_tile_of_about_8_km_reconstructs_within_a_millimetre() {
+    // The reconstruction error (not the step) is what CON-13 bounds: `hr_min + f32(q) * hr_step` is exact to 1 mm while the relief stays
+    // under 8,192 m, where the f32 spacing of the sum is 2^-11 m. Measured against the f64 height relative to the stored origin height.
+    struct Ramp(f64);
+    impl HeightField for Ramp {
+        fn height(&self, d: Vec3) -> f64 {
+            self.0 * d.y
+        }
+        fn seed(&self) -> u64 {
+            0
+        }
+        fn implementation_id(&self) -> &'static str {
+            "ramp-test"
+        }
+        fn version(&self) -> u32 {
+            1
+        }
+        fn max_abs_height_m(&self) -> f64 {
+            self.0.abs()
+        }
+    }
+    let field = Ramp(20_000.0);
+    let t = id(0, 2, 2, 2);
+    let c = compact_tile_field(&field, &TangentWarp, t, 16, R);
+    assert!(c.relief_m > 6_000.0 && c.relief_m < 8_192.0, "fixture: {} m of relief", c.relief_m);
+    let mut worst = 0.0f64;
+    for j in 0..=16u32 {
+        for i in 0..=16u32 {
+            let exact = field.height(t.sample_direction(&TangentWarp, 16, i, j)) - f64::from(c.h_origin);
+            worst = worst.max((exact - f64::from(c.rel_height(i as usize, j as usize))).abs());
+        }
+    }
+    eprintln!("ramp tile: relief {:.0} m, reconstruction error {worst:.2e} m", c.relief_m);
+    assert!(worst <= 1.0e-3, "reconstruction error {worst} m at {} m of relief", c.relief_m);
+}

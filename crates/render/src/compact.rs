@@ -31,7 +31,7 @@ pub fn compact_terrain_shader(cells: u32) -> String {
         .replace("{CELLS}", &cells.to_string())
         .replace("{CLIMATE_WORD}", &(SLOT_CLIMATE_OFFSET / 4).to_string())
         .replace("{TEXEL_WORD}", &(SLOT_TEXEL_OFFSET / 4).to_string())
-        .replace("{NORMAL_SCALE}", &format!("{:.1}", NORMAL_SCALE));
+        .replace("{NORMAL_SCALE}", &format!("{NORMAL_SCALE:?}"));
     format!("{head}{vertex}{}", &src[tail_at..])
 }
 
