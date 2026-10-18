@@ -937,6 +937,16 @@ mod tests {
 
     // spec: BUILD-003
     #[test]
+    fn the_gpu_binaries_terminate_after_300_s_and_every_other_test_after_180_s() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let toml = std::fs::read_to_string(root.join(".config/nextest.toml")).unwrap();
+        assert!(toml.contains(r#"slow-timeout = { period = "60s", terminate-after = 3 }"#), "the default limit is 180 s");
+        let (_, gpu) = toml.split_once("filter = 'binary(/^gpu_/)'").expect("an override for the gpu_ binaries");
+        assert!(gpu.trim_start().starts_with(r#"slow-timeout = { period = "60s", terminate-after = 5 }"#), "300 s for them");
+    }
+
+    // spec: BUILD-003
+    #[test]
     fn the_gpu_tier_runs_every_test_so_that_every_candidate_golden_is_written() {
         assert_eq!(fail_fast_args(Some("gpu"), &[]), ["--no-fail-fast"]);
         assert!(fail_fast_args(Some("gpu"), &["--fail-fast"]).is_empty() && fail_fast_args(Some("gpu"), &["--no-fail-fast"]).is_empty());
