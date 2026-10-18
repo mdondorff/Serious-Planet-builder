@@ -372,7 +372,7 @@ Result:
 - The cache SHALL count the nodes cut by the horizon (`cut_horizon`), by the height tests (`cut_height`) and, of those, by `m` (`cut_exact`); recorded only.
 
 Class (ADR 0035): plan data (no GPU twin, no stored data). Bound: exact; `m` is the minimum of the f32 heights the vertex stage reads, so the f32 rounding of the vertex stage's `h_origin + hr` and of the water pass's `W - h` is inside the 4 eps margin.
-Known limit: the blocking surface is the sphere `R + W` less `s`, so dry ground below `W` between the camera and the tile (a valley under a lake, a dry basin below the sea) can hide nothing and the tile is cut where it is visible; the waves' troughs are taken to be hidden by their crests; skirts add `skirt depth^2 / (2 c)` to a tile's reach when `S` is 0. The terrain between the mesh's vertices is the mesh's, not the field's: a field detail below the lattice spacing that dips under `W` between dry vertices is not drawn and not covered. A node whose tile has no minimum yet is looked up in the book on every plan (a lock shared with the jobs, no computation) until its job leaves one.
+Known limit: the blocking surface is the sphere `R + W` less `s`, so dry ground below `W` between the camera and the tile (a valley under a lake, a dry basin below the sea) can hide nothing and the tile is cut where it is visible; the waves' troughs are taken to be hidden by their crests; skirts add `skirt depth^2 / (2 c)` to a tile's reach when `S` is 0. The terrain between the mesh's vertices is the mesh's, not the field's: a field detail below the lattice spacing that dips under `W` between dry vertices is not drawn and not covered. A node whose tile has no minimum yet is looked up in the book on every plan (a lock shared with the jobs, no computation) until its job leaves one. Reduced coverage: the tier B scenario of the four coast views samples frames 0, 120 and 239 of the glide and of the descent (not 0, 60, 120, 180 and 239), to keep the test near 16 s; the tier C pictures cover the exact cut at four views only.
 
 Verify: A, B, C
 Status: active
@@ -409,3 +409,7 @@ Source: ADR 0056, ADR 0058, ATMO-012, ATMO-016, ATMO-019, docs/perf/water-attrib
 #### Scenario: Pictures
 - **WHEN** an aerial, a low, a beach and an inland view of the 1,024-cell world are drawn in the class view and the lit view with the full selection and with the exact cut
 - **THEN** the HDR frames are equal, and the exact cut keeps fewer nodes than the loose cut over the four views together
+
+#### Scenario: Pre-filled tiles
+- **WHEN** the 30 pre-filled tiles of levels 0 and 1 of a stored bake of 256 cells are read from the pack and their jobs fill the water, and orbital plans over the store are made with the book
+- **THEN** a wet tile's stored minimum equals the minimum of the pre-filled tile (which is the generated tile bit for bit), a dry tile has none, and the plan keeps exactly the nodes whose stored minimum is below the bound
