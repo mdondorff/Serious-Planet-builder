@@ -19,3 +19,24 @@ priority = 50
 # `cargo xtask test fast` reads this to print the slowest tests (TEST-001 budget guard).
 [profile.default.junit]
 path = "junit.xml"
+
+# `cargo xtask test gpu --real` runs the GPU tests on the discrete GPU under this profile (BUILD-003). nextest starts one process per
+# test, as many as there are cores (about 20 on Rasierklinge); that many processes on one device lost it ("wgpu device lost
+# (Unknown)"). xtask caps the processes at `REAL_GPU_THREADS` (`--test-threads`) and the heavy binaries share a smaller group below.
+# Only the start order and the overlap change: no test is skipped, retried or changed, and the software and WARP runs keep the
+# default profile.
+[test-groups]
+real-gpu-heavy = { max-threads = 2 }
+
+[profile.real-gpu]
+inherits = "default"
+
+[profile.real-gpu.junit]
+path = "junit.xml"
+
+[[profile.real-gpu.overrides]]
+filter = '''
+binary(gpu_lit) or binary(gpu_water) or binary(gpu_water_coverage) or binary(gpu_atmosphere) or binary(gpu_compact_blocks)
+or binary(gpu_stream_perf) or binary(gpu_flight) or binary(gpu_world_field) or binary(oracle_concurrent_source) or binary(oracle_lit)
+'''
+test-group = "real-gpu-heavy"

@@ -20,7 +20,7 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; the M5 window: `
    - llvmpipe: push the branch, then `gh run download <run> -n review-Linux -D target/review/ci-linux`.
    Golden tests report every mismatch of a run (`GoldenChecks`), so one run per adapter is enough.
    For a first M5 golden also keep this run's test reports: after each `cargo xtask test`, `test gpu` or `test gpu --real`
-   copy `target/nextest/default/junit.xml` to a file of its own (nextest overwrites it), and pass each with `--tests`.
+   copy `target/nextest/default/junit.xml` (`target/nextest/real-gpu/junit.xml` for a `--real` run) to a file of its own (nextest overwrites it), and pass each with `--tests`.
 3. **Review.** `cargo xtask golden-review --proposal openspec/changes/<id>/proposal.md [--extra target/review/ci-linux/candidates]... [--tests <junit.xml>]...`.
    It writes `target/review/golden-review/report.md` and a golden | candidate | diff triptych per candidate, and prints
    which adapters took part (an adapter that has goldens but delivered no candidates is printed as NOT RUN and is never
