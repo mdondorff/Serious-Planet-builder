@@ -17,13 +17,18 @@
 //! reads up to 25 blocks): the source answers it from the coarse level of W, a summary the bake wrote once, as the union over the cells
 //! the tile touches (a superset of the point query's answer, and a parent is wet wherever its children are). The query is
 //! [`WaterSource::coarse_tile_water`]; a source without a summary answers `None` and the tile is asked point by point.
+//!
+//! **The cut (ATMO-020).** The nodes handed to the water pass are those that can show water from the camera: a node whose tile lies
+//! beyond the horizon of its own level, or whose terrain stays above its level plus the waves' rise, is left out. The cut is made
+//! where the plan assembles the node list; the tile's answer above, the [`WaterBook`] and every key are untouched.
 
-use crate::lod::LodParams;
+use crate::lod::{tile_extent, LodParams, TileExtent};
 use crate::look::water::{tile_phases, LiquidAppearance, WaterLook, MAX_LIQUIDS, WAVES};
 use crate::terrain::TerrainPlan;
 use planet_core::cube::FaceMapping;
 use planet_core::{TileId, Vec3};
 use planet_generators::global::ReadError;
+use planet_generators::height::HeightField;
 use planet_generators::water::{WaterBodyId, WaterField, WaterSample, COAST_REACH_M};
 use planet_world_def::{LiquidKindId, LiquidTable};
 use std::collections::HashMap;
@@ -269,6 +274,11 @@ pub struct WaterTileCache {
     pub band_queries: u64,
     pub tile_misses: u64,
     pub query_ns: u64,
+    /// Nodes of the last plan left out by the horizon test and by the height test (ATMO-020); recorded only.
+    pub cut_horizon: u64,
+    pub cut_height: u64,
+    /// The extent and the lowest terrain of the tiles the cut has looked at (pure functions of the tile and the height field).
+    extents: HashMap<TileId, (TileExtent, Option<f64>)>,
 }
 
 impl WaterTileCache {
@@ -287,6 +297,7 @@ impl WaterTileCache {
 
     pub fn clear(&mut self) {
         self.tiles.clear();
+        self.extents.clear();
     }
 
     pub fn len(&self) -> usize {
@@ -403,6 +414,58 @@ pub struct WaterRequest<'a> {
     /// Seconds on the injected clock.
     pub time_s: f64,
     pub view: WaterView,
+    /// The terrain's height field: `Some` switches the cut of ATMO-020 on (the horizon and the height test, the tile's height bounds
+    /// being the ones the node selection culls with); `None` keeps every node that carries water.
+    pub cut: Option<&'a dyn HeightField>,
+}
+
+/// The distance (m) from a camera `height_m` above the level `level_m` out to which a surface that rises `rise_m` above that level
+/// can be seen over the sphere of radius `radius_m + level_m`: the tangent length of the camera plus that of the raised surface.
+/// `sag_m` lowers the blocking sphere (the drawn surface lies under it); the camera and the rise grow by it. A pure function of its
+/// arguments (f64, `libm`); `height_m`, `rise_m` and `sag_m` are not negative.
+pub fn visible_distance_m(radius_m: f64, level_m: f64, height_m: f64, rise_m: f64, sag_m: f64) -> f64 {
+    let r = radius_m + level_m - sag_m;
+    let (h, a) = (height_m + sag_m, rise_m + sag_m);
+    libm::sqrt(2.0 * r * h + h * h) + libm::sqrt(2.0 * r * a + a * a)
+}
+
+/// The sag of the drawn surface under the sphere of radius `r`: a chord of two sample spacings `spacing_m`.
+pub fn surface_sag_m(r: f64, spacing_m: f64) -> f64 {
+    let chord = 2.0 * spacing_m;
+    chord * chord / (8.0 * r)
+}
+
+/// Whether a tile lies beyond the horizon of the level (ATMO-020). `camera` is the planet-fixed position, `dir` the unit direction
+/// of the tile's centre, `chord_radius_m` the chord radius of its bounding sphere on the sphere of `radius_m`, `rise_m` the largest
+/// vertical displacement of the waves, `shift_m` the largest displacement of a surface point in any direction and `sag_m` the sag of
+/// the drawn surface ([`surface_sag_m`]). The camera at or below the level never cuts. The tile is cut when the nearest point its
+/// water can reach, the distance from the camera to the tile's centre on the sphere `radius_m + level_m` less the tile's radius
+/// scaled to that sphere and less `shift_m`, is farther than [`visible_distance_m`].
+#[allow(clippy::too_many_arguments)]
+pub fn tile_beyond_horizon(
+    camera: Vec3,
+    dir: Vec3,
+    chord_radius_m: f64,
+    radius_m: f64,
+    level_m: f64,
+    rise_m: f64,
+    shift_m: f64,
+    sag_m: f64,
+) -> bool {
+    let r = radius_m + level_m;
+    let height = camera.length() - r;
+    if height.is_nan() || height <= 0.0 {
+        return false;
+    }
+    let near = (camera - dir * r).length() - chord_radius_m * (r / radius_m) - shift_m;
+    near > visible_distance_m(radius_m, level_m, height, rise_m, sag_m)
+}
+
+/// Whether the lowest terrain of a tile keeps its water from showing (ATMO-020): the tile's lower height bound is at or above the
+/// level plus the waves' rise and four f32 roundings of the larger height (the GPU holds heights as f32).
+pub fn tile_above_water(lowest_m: f64, level_m: f64, rise_m: f64) -> bool {
+    let eps = 4.0 * f64::from(f32::EPSILON) * lowest_m.abs().max(level_m.abs()).max(1.0);
+    lowest_m >= level_m + rise_m + eps
 }
 
 /// The water plan for the nodes of `terrain`: the nodes that carry water with their level, liquid and reduced wave phases.
@@ -410,6 +473,8 @@ pub struct WaterRequest<'a> {
 pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &TerrainPlan) -> Result<WaterPlan, WaterError> {
     let mut liquids: Vec<LiquidAppearance> = Vec::new();
     let mut nodes = Vec::new();
+    (cache.cut_horizon, cache.cut_height) = (0, 0);
+    let camera = terrain.camera.position.0;
     for (i, n) in terrain.nodes.iter().enumerate() {
         let Some(w) = cache.tile_water(req.source, req.map, n.tile, req.lod.radius_m)? else { continue };
         if !w.level_m.is_finite() || w.level_m.abs() > 1.0e5 {
@@ -426,6 +491,34 @@ pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &
                 liquids.len() - 1
             }
         };
+        if let Some(field) = req.cut {
+            let rise = liquids[slot].amplitude_sum();
+            let shift = rise * (1.0 + req.look.choppy);
+            let (extent, lowest) = {
+                let entry = cache.extents.entry(n.tile).or_insert_with(|| (tile_extent(req.map, n.tile, req.lod), None));
+                (entry.0, entry.1)
+            };
+            let level = f64::from(w.level_m as f32);
+            let sag = surface_sag_m(req.lod.radius_m + level, req.lod.sample_spacing(n.level));
+            if tile_beyond_horizon(camera, extent.dir, extent.chord_radius_m, req.lod.radius_m, level, rise, shift, sag) {
+                cache.cut_horizon += 1;
+                continue;
+            }
+            let lowest = match lowest {
+                Some(l) => l,
+                None => {
+                    let l = field.height_bounds(extent.dir, extent.angular_radius).0;
+                    if let Some(e) = cache.extents.get_mut(&n.tile) {
+                        e.1 = Some(l);
+                    }
+                    l
+                }
+            };
+            if tile_above_water(lowest, level, rise) {
+                cache.cut_height += 1;
+                continue;
+            }
+        }
         let o = n.origin.0;
         nodes.push(WaterNode {
             node: i as u32,

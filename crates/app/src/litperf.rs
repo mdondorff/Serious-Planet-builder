@@ -84,6 +84,7 @@ impl LitSetup {
     pub(crate) fn plan(
         &mut self,
         world: &WorldTerrain,
+        field: &dyn planet_generators::height::HeightField,
         base: &TerrainPlan,
         time_s: f64,
         dt_s: f32,
@@ -94,8 +95,12 @@ impl LitSetup {
         plan.lit = Some(lit);
         let (look, liquids, lod) = (&self.look.water, &self.liquids, &self.lod);
         let cache = &mut self.cache;
-        let water = world.with_water(|field| {
-            plan_water(&WaterRequest { source: field, map: &TangentWarp, liquids, look, lod, time_s, view: WaterView::Lit }, cache, &plan)
+        let water = world.with_water(|wf| {
+            plan_water(
+                &WaterRequest { source: wf, map: &TangentWarp, liquids, look, lod, time_s, view: WaterView::Lit, cut: Some(field) },
+                cache,
+                &plan,
+            )
         })?;
         if let Some(w) = water {
             plan.water = Some(w.map_err(|e| e.to_string())?);
@@ -236,9 +241,9 @@ fn measure_static(
     let started = Instant::now();
     let new = crate::skeleton::upload_missing_meshes(rig.ctx, r, &plan, rig.field, rig.radius_m, rig.cells, rig.max_level)?;
     // Seed the exposure at the view (reset), then hold it: later frames adapt by one 60 Hz step each.
-    let seed = setup.plan(rig.world, &plan, WATER_T0, 0.0, true)?;
+    let seed = setup.plan(rig.world, rig.field, &plan, WATER_T0, 0.0, true)?;
     r.render(rig.ctx, &seed, true).map_err(|e| e.to_string())?;
-    let lit = setup.plan(rig.world, &plan, WATER_T0, 1.0 / 60.0, false)?;
+    let lit = setup.plan(rig.world, rig.field, &plan, WATER_T0, 1.0 / 60.0, false)?;
     let water_draws = count_water(&lit);
     writeln!(
         out,
@@ -355,7 +360,7 @@ fn measure_flight(
         let plan = planet_frame::plan_terrain_cached(&request(rig, *camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
         crate::skeleton::upload_missing_meshes(rig.ctx, r, &plan, rig.field, rig.radius_m, rig.cells, rig.max_level)?;
         let t = WATER_T0 + k as f64 / 60.0;
-        let lit = setup.plan(rig.world, &plan, t, 1.0 / 60.0, k == 0)?;
+        let lit = setup.plan(rig.world, rig.field, &plan, t, 1.0 / 60.0, k == 0)?;
         water_max = water_max.max(count_water(&lit));
         nodes_max = nodes_max.max(plan.nodes.len());
         if k == 0 {
@@ -837,7 +842,7 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
             for (k, camera) in view.cameras.iter().enumerate() {
                 let plan = planet_frame::plan_terrain_cached(&request(&rig, *camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
                 crate::skeleton::upload_missing_meshes(ctx, &mut r, &plan, rig.field, radius_m, o.cells, max_level)?;
-                let lit = setup.plan(&world, &plan, WATER_T0 + k as f64 / 60.0, 1.0 / 60.0, k == 0)?;
+                let lit = setup.plan(&world, rig.field, &plan, WATER_T0 + k as f64 / 60.0, 1.0 / 60.0, k == 0)?;
                 r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
                 let image = r.read_color(ctx);
                 image.write_png(&sub.join(format!("frame_{k:04}.png"))).map_err(|e| format!("writing frame {k} of {name}: {e}"))?;

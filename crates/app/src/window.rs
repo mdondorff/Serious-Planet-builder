@@ -277,15 +277,16 @@ impl App<'_> {
                 let time_s = now_ms as f64 / 1000.0;
                 let (look, liquids, lod) = (&cfg.look.water, &cfg.liquids, &cfg.lod);
                 let cache = &mut st.water_cache;
-                let water = self.world.with_water(|field| {
+                let water = self.world.with_water(|wf| {
                     let req = WaterRequest {
-                        source: field,
+                        source: wf,
                         map: &planet_core::cube::TangentWarp,
                         liquids,
                         look,
                         lod,
                         time_s,
                         view: WaterView::Lit,
+                        cut: Some(field),
                     };
                     plan_water(&req, cache, &plan)
                 })?;
