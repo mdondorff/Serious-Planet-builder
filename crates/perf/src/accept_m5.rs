@@ -550,7 +550,7 @@ pub const FINDING_SLOTS: [(&str, &str); 14] = [
     ("Water pass", "the water sum per view against 2 ms; the coast views at 3 m and 2 km"),
     ("Compact against vertex GPU ratio", "the `lit-formats` lines above; the M4 report left this open (ADR 0033)"),
     ("Per-pass costs", "the pass rows of every view: which pass is the largest where; exposure histogram and tone map at 1440p"),
-    ("ADR 0036 point 3 (proposed, GPU noise floor 0.1 ms)", "the first window with GPU verdicts: which views the floor would have rescued (the `run-to-run noise` lines of the window's console output, printed per view for the atmosphere and water sums) and whether their verdicts were stable; accept or amend"),
+    ("ADR 0059 (noise floors 0.1 ms per pass, 0.5 ms per frame total)", "the first window run with the floors: which views they rescued (the `run-to-run noise` lines of the console output) and whether their verdicts were stable; the owner confirms or amends"),
     ("Shore filter in motion", "glide and descent with shore_filter 0 and 1: the owner's judgement from the videos; the terrain beach shading flash (status, tracked) in the same frames"),
     ("Store regeneration (GLOBAL_VERSION 4)", "the 16384 regeneration time, merger bytes and the ocean channel's cost as `generate --global-dir` printed them (no log carries them)"),
     ("Host load", "the load lines of every case: any LOAD NOTE; whether a note should ever void a session (TEST-023)"),
@@ -1006,7 +1006,7 @@ mod tests {
             assert!(r.contains(needle), "missing `{needle}` in:\n{r}");
         }
         assert_eq!(r.matches("| TO FILL |").count(), FINDING_SLOTS.len(), "every finding slot is TO FILL");
-        assert!(r.contains("Look review (ADR 0037)") && r.contains("ADR 0036 point 3") && r.contains("Compact against vertex GPU ratio"));
+        assert!(r.contains("Look review (ADR 0037)") && r.contains("ADR 0059") && r.contains("Compact against vertex GPU ratio"));
     }
 
     // spec: TEST-026
