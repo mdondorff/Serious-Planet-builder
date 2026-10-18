@@ -63,15 +63,19 @@ impl LitSetup {
         })
     }
 
-    /// The cut counters of the last water plan: horizon, height (of which the exact minimum), and nodes with no minimum (ATMO-020).
-    pub(crate) fn cut_counts(&self) -> String {
+    /// The cut counters of the last water plan: horizon, height, of which the exact minimum, and nodes with no minimum (ATMO-020).
+    pub(crate) fn cut_counts(&self) -> [u64; 4] {
         let c = &self.cache;
-        format!(
-            "cut {} horizon + {} height ({} by the exact minimum), {} kept with no minimum",
-            c.cut_horizon, c.cut_height, c.cut_exact, c.no_minimum
-        )
+        [c.cut_horizon, c.cut_height, c.cut_exact, c.no_minimum]
     }
+}
 
+/// The log text of cut counters (summed over a flight's plans or those of one held view's).
+fn cut_text(c: [u64; 4]) -> String {
+    format!("cut {} horizon + {} height ({} by the exact minimum), {} kept with no minimum", c[0], c[1], c[2], c[3])
+}
+
+impl LitSetup {
     /// What the water plan cache has counted so far (the streaming scenes log each frame's share).
     pub(crate) fn water_counters(&self) -> planet_frame::water::WaterCounters {
         self.cache.counters()
@@ -260,7 +264,7 @@ fn measure_static(
         "{path}: {} nodes ({new} new meshes in {:.1} s), {water_draws} with water ({})",
         plan.nodes.len(),
         started.elapsed().as_secs_f64(),
-        setup.cut_counts()
+        cut_text(setup.cut_counts())
     )
     .map_err(err)?;
     let (warm, measured, runs) = if rig.smoke { (1usize, 3usize, 1usize) } else { (60usize, rig.frames.max(10), 3usize) };
@@ -363,6 +367,7 @@ fn measure_flight(
     let mut cache = SelectionCache::new();
     let mut frames: Vec<LitFrame> = Vec::new();
     let (mut water_max, mut nodes_max) = (0u64, 0usize);
+    let mut cut_total = [0u64; 4];
     let mut warmup = None;
     let mut before = None;
     let mut load_sampler = None;
@@ -374,6 +379,9 @@ fn measure_flight(
         let t = WATER_T0 + k as f64 / 60.0;
         let lit = setup.plan(rig.world, rig.field, &plan, t, 1.0 / 60.0, k == 0)?;
         water_max = water_max.max(count_water(&lit));
+        for (acc, c) in cut_total.iter_mut().zip(setup.cut_counts()) {
+            *acc += c;
+        }
         nodes_max = nodes_max.max(plan.nodes.len());
         if k == 0 {
             warmup = warm_clock(rig, r, &lit, path, out)?;
@@ -391,9 +399,10 @@ fn measure_flight(
     let load = load_sampler.map_or_else(planet_perf::load::CaseLoad::not_measured, planet_perf::load::LoadSampler::stop);
     writeln!(
         out,
-        "{path}: {} cameras x {reps} timed frames in {:.1} s, up to {nodes_max} nodes, {water_max} with water",
+        "{path}: {} cameras x {reps} timed frames in {:.1} s, up to {nodes_max} nodes, {water_max} with water ({})",
         view.cameras.len(),
-        started.elapsed().as_secs_f64()
+        started.elapsed().as_secs_f64(),
+        cut_text(cut_total)
     )
     .map_err(err)?;
     let totals: Vec<f64> = frames.iter().map(|f| f.total_ms).collect();
