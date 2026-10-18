@@ -4,26 +4,17 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 ## Waiting for the owner
 - **compact-slot-v2 (#302) goldens: blessed by the owner (2026-10-18)**: lit_aerial20km_ev15, lit_aerial20km_albedo_ev15, sky_aerial20km_ev15, sky_ground1m_sunset_ev11 (WARP only), water_class_coast_aerial2km, water_class_lava_lake (WARP and llvmpipe). Auto-blessed under policy: terrain_aerial200km_height, terrain_ground1m_depth, terrain_cube_corner_normals. Tracking entry: the RTX known-answer hashes in `gpu_compact_blocks.rs` and `gpu_water.rs` were removed (stale under MESH_VERSION 8) and need a `test gpu --real` re-record.
-- **SPIKE-11 manual check, local part** (mouse look, about ten minutes at the laptop; `spikes/mouse-look/CHECKLIST.md` in the sonnet-spikes worktree), when the owner has physical access. The remote part is dropped (owner, 2026-10-17). Nothing else waits on it.
+- **M5 gate passed (owner, 2026-10-18): GO for M6.** Look approved ("shore rendering looking reasonable"); hardware criteria PASS (window 10, ADR 0060); report `docs/milestones/M5-report.md`.
+- **Open from the gate:**
+  - `shore_filter` default (decision 2): the planner recommends 0; the owner's choice is pending (0 moves the water goldens and needs one more `/bless`; 1 changes nothing).
+  - `/bless` of #275's 21 candidates (REND-030, 7 goldens x 3 adapters, coastline pixels only): sonnet-crusader prepares the set; the owner types `/bless` in that session.
+  - Taken as confirmed with the GO unless the owner objects: ADR 0056, 0057, 0058, 0059, 0063, ATMO-020 and the BUILD-003 `test fast` reading.
+- **At the laptop (postponed by the owner):** SPIKE-11 mouse look and the keyboard feel after VIEW-004 (`spikes/mouse-look/CHECKLIST.md`); an optional NVIDIA driver update (591.86, 2026-01-20; device losses under parallel GPU load, Tracked).
 
 Dormant (no near trigger; not asked now):
-- **Retire the vertex tile format** (decided, owner 2026-10-18, ADR 0062; slot 9,168 B per ADR 0063, owner to confirm): first work of M6, SPIKE-12's four changes and one perf window; until then new per-vertex data avoids a second per-format storage.
-- **Planner decisions to confirm** (for the M5 gate; opus-planner 2026-10-17, reversible, made while the owner was away):
-  - ADR 0056 (coastal band, tile water in the tile job, pixel-footprint wave fade; amends ADR 0053 points 4 and 5).
-  - ADR 0057 (cool start before each view; a GPU figure within budget below the 1,400 MHz floor is a pass, over budget stays inconclusive; amends owner-accepted ADR 0036 point 2).
-  - ADR 0058 (coarse level of the water field, the summary the bake writes once), chosen over a geometry-first stopgap.
-  - ADR 0059 (noise floors: 0.1 ms per pass, 0.5 ms per frame total; accepts and amends ADR 0036 point 3).
-  - ATMO-020 (#273): water nodes cut beyond the sea horizon and above W + wave height; sea pixels unchanged on the 16384 store; known limit: a dry basin below the level between camera and sea.
-  - `test fast` (BUILD-003, #255): the 20 s budget counts test time, not compile time; a whole-workspace run reports without a warning. A stale local `main` had made every run select the whole workspace and the reviewer agents diff against it (fixed: `origin/main`).
-- **Owner decisions open for the M5 gate** (opus-planner 2026-10-18):
-  - Decided (owner, 2026-10-18, ADR 0060): a P0 view limited only by the power cap is GPU-valid; the coast-3m water budget is 2.2 ms. Harness and `accept M5`: sonnet-crusader.
-  - Beach flash fix (#275, REND-030; terrain-own flash 36.8 % to 0.0 %): 7 lit/sky/water goldens move by 3 to 91 coastline pixels; waits for `/bless`; `golden-review` escalated all 21 candidates (7 goldens x 3 adapters; lit/sky/water views, declared); triptychs and counts: M5-report.md decision 13.
-  - Decided (owner, 2026-10-18): goldens after M5 per ADR 0061 (the ADR 0037 window closes, cross-adapter agreement dropped; `golden-review` change: sonnet-crusader); egui fonts: ship one font under an allowed licence (for example Roboto, Apache-2.0), no allow-list change (recorded with the M6 editor UI change).
-  - NVIDIA driver 591.86 (2026-01-20): device losses under parallel GPU load (Tracked); an update is the owner's step (admin), not claimed as the fix.
-- **M6 inputs** (SPIKE-13, SPIKE-14): edit-to-visible targets preview <= 16 ms, exact <= 300 ms up to 150 m stamps and <= 1 s up to 500 m or at 1 m altitude; build order: reach and footprint invalidation, key-aware refresh with stale-while-revalidate, an edit event that forces a plan, the preview displacement, a request class for edited tiles; ADR 0021 points 2, 5 and 8 before the first authored stage. Editor UI: egui `=0.36.2`, one `ui` node after `tonemap`, egui first with the pointer latched at press.
+- **M6 inputs** (SPIKE-13, SPIKE-14): edit-to-visible targets preview <= 16 ms, exact <= 300 ms up to 150 m stamps and <= 1 s up to 500 m or at 1 m altitude; build order: reach and footprint invalidation, key-aware refresh with stale-while-revalidate, an edit event that forces a plan, the preview displacement, a request class for edited tiles; ADR 0021 points 2, 5 and 8 before the first authored stage. Editor UI: egui `=0.36.2`, one `ui` node after `tonemap`, egui first with the pointer latched at press; fonts under an allowed licence (owner, 2026-10-18).
 - **CON-08 reading** (ADR 0022): may a field read another field of its own stage? Trigger: a regional chain that needs same-stage reads. Until then one field per chain.
 - **ADR 0045** (bodies, bake resolution and the storage budget; point 3 decided): proposed. Trigger: multi-body work, or the editor (M6) for point 7.
-- **ADR 0036 point 3** (GPU noise floor 0.1 ms): proposed. Trigger: the first M5 perf window with GPU verdicts.
 
 ## Tracked
 - **Intermittent device loss in the lit dive** (window 8, 2026-10-18): 2 of 3 measured dive runs lost the device (presumed; wgpu `Buffer with 'globals' label is invalid` at `write_buffer` right after "rig built", exit 101) before the diagnostics; 0 of 1 since REND-029 (main 211bf99: the dive passed all gated rows). A recurrence prints `wgpu device lost (<reason>)` and `first wgpu error: ...`; then stop and investigate (an unexplained TDR would be a GPU frame past the Windows timeout). Hypothesis: both crashes came after long GPU runs on a hot GPU (inside `perf m5`, and right after it); the passing run started idle. The ADR 0057 cool start (`cool_gpu`) does NOT cover the streaming scenes (its only call sites are `litperf.rs` lit/look views and `skeleton.rs`); not changed now. Software-adapter parallel crashes are a separate line. **Update 2026-10-18 (sonnet-m4):** second form, in parallel real-GPU runs: `cargo xtask test gpu --real` on main 5b54b2b lost the device in the window smokes (`planet::gpu_window a_world_with_a_bake_has_an_ocean_and_the_window_draws_its_water_through_the_water_pass`, `the_window_path_opens_runs_the_flight_lit_with_the_atmosphere_and_closes`) in 3 of 3 full runs (about 20 GPU tests at once), printing `wgpu device lost (Unknown): Unexpected error variant (driver implementation is at fault)` then `device creation failed: the surface reported a validation error while acquiring a frame`; the same tests pass alone (3 of 3, three times); earlier full `--real` runs passed 154/162 and 162/162. The Windows System log has no Display 4101 (TDR) in 40 h but 902 `nvlddmkm` Event 153 entries, clustered at every GPU-heavy period including passing runs (window 8 00:43-01:11, the passing dive at 01:46), so they do not discriminate. Driver: NVIDIA 591.86 (Win32 32.0.15.9186, dated 2026-01-20), RTX 3080 Ti Laptop, vbios 94.03.19.00.6f; a driver update is the owner's step (admin). The real-GPU parallelism cap (a nextest group) is with sonnet-crusader.
@@ -39,6 +30,13 @@ Dormant (no near trigger; not asked now):
 - **M3 gate condition 2** (trigger: before the first regional field is stored): per-tile node set id (ADR 0025 point 3), the declared-versus-recorded reads contract test (ADR 0021 point 7), a tile-level GEN-017 test.
 - **Cold start without the pre-fill:** dive-cold lag 1.77 levels and a 48 ms frame 2 (M4 report). The viewer window measures the real cold start once.
 
+
+## Queued for M6 (owner GO, 2026-10-18)
+1. **compact-slot-v2** (#302, sonnet-m4): ADR 0062 and 0063; wide texel, climate in the slot, 9,168 B.
+2. **render-floor-3** (#303, sonnet-crusader, in parallel; archives after 1).
+3. **remove-vertex-render-path** (#304) and one perf window.
+4. **M5 housekeeping 10b** (documentation consolidation, ADR 0055): after 3, so the spec rewrite does not collide with the open spec deltas of 1-3; the M5 archive step of the `housekeeping` skill with it.
+5. **The editor's first slice**: planned by opus-planner from the M6 inputs above (SPIKE-13 build order, SPIKE-14 UI) while 1-3 run.
 
 ## M5 Atmosphere & ocean: design constraints (owner, 2026-10-15)
 Scope as in the architecture report (Hillaire atmosphere, aerial perspective, HDR and exposure, ocean surface and shoreline; gate after M5). These constraints keep later work possible without rework:

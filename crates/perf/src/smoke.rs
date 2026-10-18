@@ -30,6 +30,21 @@ pub fn min_concurrent_jobs(workers: usize) -> u64 {
     (workers as u64 / 3).max(2)
 }
 
+/// Whether the streamer of a smoke log has shown it is alive: at least [`MIN_JOBS`] tile jobs finished and [`MIN_RESIDENT_SLOTS`] slots
+/// were resident at the peak. The stop rule of the tier-B smoke: the dive is run until this holds (with a wall-time cap whose expiry is
+/// the failure), so that the check judges liveness, not how many frames a loaded runner paced in a fixed number. An unreadable or
+/// incomplete log is not alive.
+pub fn liveness_met(log: &str) -> bool {
+    let Ok(root) = parse(log.as_bytes()) else { return false };
+    let counts = match root.get("runs") {
+        Some(Json::Arr(a)) => a.first().and_then(|r| r.get("counts")),
+        _ => None,
+    };
+    counts.is_some_and(|c| {
+        count(c, "load_jobs").is_some_and(|v| v >= MIN_JOBS) && count(c, "max_resident_slots").is_some_and(|v| v >= MIN_RESIDENT_SLOTS)
+    })
+}
+
 /// The findings of a smoke log of a streaming scene run with `workers` generation workers; empty means every check holds. Each
 /// finding names the measure, the value and the limit.
 pub fn streaming_smoke_findings(log: &str, workers: usize) -> Vec<String> {
@@ -101,6 +116,22 @@ mod tests {
         // The limits are inclusive: exactly at them passes.
         let edge = log(2, MIN_JOBS, MIN_RESIDENT_SLOTS, MIN_POOL_SLOTS, MAX_SCHEDULER_MEDIAN_MS, MAX_UPLOAD_MEDIAN_MS);
         assert!(streaming_smoke_findings(&edge, 6).is_empty(), "{:?}", streaming_smoke_findings(&edge, 6));
+    }
+
+    // spec: TEST-035
+    #[test]
+    fn the_stop_rule_is_liveness_at_the_limits_and_an_unreadable_log_is_not_alive() {
+        assert!(liveness_met(&log(6, 187, 189, 231_090, 0.044, 0.16)));
+        // Exactly the limits are alive; one short of either is not (the runner that finished 2 jobs in 48 frames).
+        assert!(liveness_met(&log(1, MIN_JOBS, MIN_RESIDENT_SLOTS, 0, 9.0, 9.0)), "inclusive");
+        assert!(!liveness_met(&log(6, MIN_JOBS - 1, 189, 231_090, 0.044, 0.16)));
+        assert!(!liveness_met(&log(6, 187, MIN_RESIDENT_SLOTS - 1, 231_090, 0.044, 0.16)));
+        // Only liveness stops the dive: a capped streamer (one worker, pool or timing findings) is alive and its findings stay.
+        assert!(liveness_met(&log(1, 58, 63, 20_000, 0.6, 2.0)));
+        assert!(!streaming_smoke_findings(&log(1, 58, 63, 231_090, 0.033, 0.14), 6).is_empty());
+        // No log, no run, no counts, missing counters: not alive.
+        assert!(!liveness_met("not json") && !liveness_met("{\"runs\":[]}") && !liveness_met("{\"runs\":[{\"counts\":{}}]}"));
+        assert!(!liveness_met("{\"runs\":[{\"counts\":{\"load_jobs\":9}}]}"), "both counters are needed");
     }
 
     // spec: TEST-035

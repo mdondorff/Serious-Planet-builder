@@ -48,7 +48,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0036 | [Perf validity at full GPU load: power cap and clock band](0036-perf-validity-at-full-gpu-load.md) | accepted in part | point 3 (GPU noise floor): first M5 perf window with GPU verdicts |
 | 0037 | [M5: new goldens under policy, look reviewed at the gate](0037-m5-new-goldens-and-look-review.md) | accepted | point 1 superseded by 0061 |
 | 0038 | [HDR target, exposure and tone mapping](0038-hdr-exposure-and-tone-mapping.md) | accepted | accepted when the M5 queue starts |
-| 0039 | [Sun lighting and terrain base shading](0039-sun-lighting-and-terrain-base-shading.md) | accepted | accepted when the M5 queue starts |
+| 0039 | [Sun lighting and terrain base shading](0039-sun-lighting-and-terrain-base-shading.md) | accepted | climate storage amended by 0062 |
 | 0040 | [Atmosphere: Hillaire 2020 LUTs, CPU reference, and CON-11](0040-atmosphere-model-and-cpu-reference.md) | accepted |  |
 | 0041 | [Water: level field, ocean connectivity, Gerstner waves, shoreline](0041-water-level-field-ocean-and-shoreline.md) | accepted |  |
 | 0042 | [M5 frame structure, look data and the viewer window](0042-m5-frame-structure-and-viewer-window.md) | accepted | accepted when the M5 queue starts |
@@ -58,7 +58,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0046 | [Generation workers run below normal priority](0046-generation-workers-run-below-normal-priority.md) | accepted |  |
 | 0047 | [Adapter gate: a discrete GPU, chosen before the device exists](0047-adapter-gate.md) | accepted |  |
 | 0048 | [Frame-target share (amends ADR 0033's remainder) and the lit path's readings of ADR 0038 and ADR 0042](0048-frame-target-share-and-lit-path-readings.md) | accepted |  |
-| 0049 | [The climate field's bound and storage (amends ADR 0039 point 2), and the look file's version rule](0049-climate-field-bound-and-storage.md) | accepted |  |
+| 0049 | [The climate field's bound and storage (amends ADR 0039 point 2), and the look file's version rule](0049-climate-field-bound-and-storage.md) | accepted | climate storage amended by 0062 |
 | 0050 | [Atmosphere: implementation readings of ADR 0040](0050-atmosphere-implementation-readings.md) | accepted |  |
 | 0051 | [Ocean channel, liquid table and the water-level field: implementation readings of ADR 0041](0051-ocean-channel-liquid-table-and-water-field-readings.md) | accepted |  |
 | 0052 | [First M5 goldens: an edge tolerance for the cross-adapter debug-view check](0052-m5-debug-view-edge-tolerance.md) | superseded by 0061 |  |
