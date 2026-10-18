@@ -6,7 +6,7 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 - **SPIKE-11 manual check, local part** (mouse look, about ten minutes at the laptop; `spikes/mouse-look/CHECKLIST.md` in the sonnet-spikes worktree), when the owner has physical access. The remote part is dropped (owner, 2026-10-17). Nothing else waits on it.
 
 Dormant (no near trigger; not asked now):
-- **Retire the vertex tile format** (decided, owner 2026-10-18, ADR 0062): first work of M6, SPIKE-12's four changes and one perf window; until then new per-vertex data avoids a second per-format storage.
+- **Retire the vertex tile format** (decided, owner 2026-10-18, ADR 0062; slot 9,168 B per ADR 0063, owner to confirm): first work of M6, SPIKE-12's four changes and one perf window; until then new per-vertex data avoids a second per-format storage.
 - **Planner decisions to confirm** (for the M5 gate; opus-planner 2026-10-17, reversible, made while the owner was away):
   - ADR 0056 (coastal band, tile water in the tile job, pixel-footprint wave fade; amends ADR 0053 points 4 and 5).
   - ADR 0057 (cool start before each view; a GPU figure within budget below the 1,400 MHz floor is a pass, over budget stays inconclusive; amends owner-accepted ADR 0036 point 2).
