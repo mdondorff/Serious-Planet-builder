@@ -50,13 +50,16 @@ fn differing(a: &RgbaFrame, b: &RgbaFrame, limit: u8) -> usize {
     a.rgba.chunks(4).zip(b.rgba.chunks(4)).filter(|(p, q)| (0..3).any(|c| p[c].abs_diff(q[c]) > limit)).count()
 }
 
-fn vertex_render(ctx: &GpuContext, field: &dyn HeightField, p: &TerrainPlan, finest: u8) -> RgbaFrame {
-    let mut r = TerrainRenderer::new(ctx, SIZE, p.cells);
-    for n in &p.nodes {
-        r.upload(ctx, &planet_generators::compact::vertex_tile_field(field, &TangentWarp, n.tile, p.cells, R, finest)).unwrap();
-    }
-    r.render(ctx, p, false).unwrap();
-    r.read_color(ctx)
+/// The image of the test-only reference renderer (REND-031) from the plan's CPU meshes: the independent reference of the compact
+/// renderer (pixel-identical to the former vertex renderer in the debug views, `gpu_reference.rs`).
+fn reference_render(ctx: &GpuContext, field: &dyn HeightField, p: &TerrainPlan, finest: u8) -> RgbaFrame {
+    let meshes: Vec<_> = p
+        .nodes
+        .iter()
+        .map(|n| planet_generators::compact::vertex_tile_field(field, &TangentWarp, n.tile, p.cells, R, finest))
+        .collect();
+    let refs: Vec<_> = meshes.iter().collect();
+    planet_render::reference::execute_reference(ctx, p, &refs).unwrap()
 }
 
 fn compact_renderer(ctx: &GpuContext, field: &dyn HeightField, p: &TerrainPlan, finest: u8, scattered: bool) -> TerrainRenderer {
@@ -83,7 +86,7 @@ fn compact_renderer(ctx: &GpuContext, field: &dyn HeightField, p: &TerrainPlan, 
 
 // spec: REND-016
 #[test]
-fn compact_tiles_draw_the_images_of_the_vertex_format_within_the_model_tolerance() {
+fn compact_tiles_draw_the_images_of_the_reference_renderer_within_the_model_tolerance() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     println!("{}", ctx.adapter_log_line());
     let field = Reference(1);
@@ -92,7 +95,7 @@ fn compact_tiles_draw_the_images_of_the_vertex_format_within_the_model_tolerance
     for view in [TerrainView::Level, TerrainView::Relief, TerrainView::Normals] {
         for index in 0..10 {
             let p = plan_of(&field, cells, 26, index, view, false);
-            let reference = vertex_render(&ctx, &field, &p, 26);
+            let reference = reference_render(&ctx, &field, &p, 26);
             let mut r = compact_renderer(&ctx, &field, &p, 26, false);
             r.render(&ctx, &p, false).unwrap();
             let image = r.read_color(&ctx);
@@ -108,7 +111,7 @@ fn compact_tiles_draw_the_images_of_the_vertex_format_within_the_model_tolerance
             }
         }
     }
-    println!("compact against vertex: worst fraction of pixels over 12 levels: level {worst_level:.5}, relief/normals {worst_other:.5}; compact tiles drawn {compact_tiles}");
+    println!("compact against the reference renderer: worst fraction of pixels over 12 levels: level {worst_level:.5}, relief/normals {worst_other:.5}; compact tiles drawn {compact_tiles}");
     assert!(compact_tiles > 100, "the compact path must actually be exercised");
     assert!(worst_level <= 0.0005, "level view: {worst_level} of the pixels differ");
     assert!(worst_other <= 0.002, "relief/normals views: {worst_other} of the pixels differ");
@@ -160,7 +163,7 @@ fn fallback_tiles_and_coarse_levels_draw_in_the_vertex_format_beside_compact_til
     for index in [2usize, 3, 5, 7] {
         // The LOD cap is 9 for this plan: the steep field's tiles of level 9 (the finest) exceed 65.535 m of relief: fallbacks.
         let p = plan_of(&steep, cells, 9, index, TerrainView::Relief, true);
-        let reference = vertex_render(&ctx, &steep, &p, 9);
+        let reference = reference_render(&ctx, &steep, &p, 9);
         for scattered in [false, true] {
             let mut r = compact_renderer(&ctx, &steep, &p, 9, scattered);
             r.render(&ctx, &p, false).unwrap();
@@ -193,6 +196,36 @@ fn fallback_tiles_and_coarse_levels_draw_in_the_vertex_format_beside_compact_til
     assert_eq!(checked, 8);
 }
 
+// spec: REND-016, GEN-019
+#[test]
+fn steep_finest_tiles_draw_compact_with_the_wide_texel_and_match_the_reference_renderer() {
+    // The replacement of the fallback test above once the vertex format is gone (`remove-vertex-render-path`): the steep field's
+    // finest tiles (level 9 under this cap, more than 65.535 m of relief) are compact tiles with no relief guard, and the compact
+    // image stays within the model tolerance of the reference renderer's.
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let steep = Steep(1);
+    let cells = 16;
+    let mut finest_tiles = 0;
+    for index in [2usize, 3, 5, 7] {
+        let p = plan_of(&steep, cells, 9, index, TerrainView::Relief, true);
+        let reference = reference_render(&ctx, &steep, &p, 9);
+        let mut r = TerrainRenderer::with_compact_pools(&ctx, SIZE, cells, small_pool(cells));
+        for n in &p.nodes {
+            let data = planet_generators::compact::tile_data_field_guarded(&steep, &TangentWarp, n.tile, cells, R, 9, false);
+            assert!(data.is_compact(), "{:?}: with no relief guard every tile of level 3 or finer is compact", n.tile);
+            finest_tiles += usize::from(n.tile.level() >= 9);
+            r.upload_tile(&ctx, &data).unwrap();
+        }
+        r.render(&ctx, &p, false).unwrap();
+        let (v, c, f) = r.format_counts();
+        assert_eq!((v, f), (0, 0), "view {index}: no vertex or fallback tile is resident");
+        assert_eq!(c, r.resident_tiles());
+        let wrong = differing(&reference, &r.read_color(&ctx), 12) as f64 / (SIZE.0 * SIZE.1) as f64;
+        assert!(wrong <= 0.01, "steep view {index}: {wrong} of the pixels differ from the reference renderer");
+    }
+    assert!(finest_tiles > 0, "the fixture must draw finest tiles of the steep field");
+}
+
 // spec: STRM-006, REND-016
 #[test]
 fn the_compact_allocation_equals_the_pure_model() {
@@ -220,7 +253,7 @@ fn the_compact_allocation_equals_the_pure_model() {
 
 // spec: REND-016, CON-11
 #[test]
-fn production_tiles_of_32_cells_draw_the_vertex_images_including_the_ground_view() {
+fn production_tiles_of_32_cells_draw_the_reference_images_including_the_ground_view() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let field = Reference(1);
     let cells = 32;
@@ -229,7 +262,7 @@ fn production_tiles_of_32_cells_draw_the_vertex_images_including_the_ground_view
     for index in [3usize, 6, 9] {
         for view in [TerrainView::Relief, TerrainView::Level] {
             let p = plan_of(&field, cells, 26, index, view, false);
-            let reference = vertex_render(&ctx, &field, &p, 26);
+            let reference = reference_render(&ctx, &field, &p, 26);
             let mut r = compact_renderer(&ctx, &field, &p, 26, false);
             r.render(&ctx, &p, false).unwrap();
             assert!(r.format_counts().1 > 0);
@@ -260,7 +293,7 @@ fn a_morph_forced_to_the_parent_grid_agrees_so_the_shaders_morph_target_is_the_m
                 n.morph_start_m = 0.0;
                 n.morph_end_m = 1.0e-3;
             }
-            let reference = vertex_render(&ctx, &steep, &p, 12);
+            let reference = reference_render(&ctx, &steep, &p, 12);
             let mut r = compact_renderer(&ctx, &steep, &p, 12, false);
             r.render(&ctx, &p, false).unwrap();
             let image = r.read_color(&ctx);
@@ -287,7 +320,7 @@ fn the_production_block_geometry_works_on_this_adapter() {
     let pool = compact_format_pool_with((128 << 20) + COMPACT_BLOCK_BYTES, cells, slots, 1).unwrap();
     assert_eq!((pool.main_blocks, pool.block_slots), (1, 14_639));
     let p = plan_of(&field, cells, 26, 6, TerrainView::Relief, false);
-    let reference = vertex_render(&ctx, &field, &p, 26);
+    let reference = reference_render(&ctx, &field, &p, 26);
     let mut r = TerrainRenderer::with_compact_pools(&ctx, SIZE, cells, pool);
     let mut next = slots - 1;
     for n in &p.nodes {
