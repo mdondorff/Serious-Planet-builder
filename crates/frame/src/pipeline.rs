@@ -310,6 +310,11 @@ pub trait PlanField: Send + Sync + 'static {
     /// volume the plan already computed is a hit and R needs no origin height or mesh key at all (a resident tile carries its
     /// own origin and key); what R adds is the volumes of the tiles outside the frustum, once per tile.
     fn residency(&self, req: &TerrainRequest, cache: &mut SelectionCache) -> Result<ResidencySet, PlanError>;
+
+    /// The revision of the authored items the field reads (STRM-027), 0 when it tracks none: R is selected again when it changes.
+    fn item_revision(&self) -> u64 {
+        0
+    }
 }
 
 impl<T: HeightField + Send + Sync + 'static> PlanField for T {
@@ -319,6 +324,10 @@ impl<T: HeightField + Send + Sync + 'static> PlanField for T {
 
     fn residency(&self, req: &TerrainRequest, cache: &mut SelectionCache) -> Result<ResidencySet, PlanError> {
         residency_of(req, self, cache)
+    }
+
+    fn item_revision(&self) -> u64 {
+        HeightField::item_revision(self)
     }
 }
 
@@ -336,11 +345,13 @@ struct ResidencyKey {
     lod: LodParams,
     face_mapping: String,
     seed: u64,
+    /// The items the field reads: an edit changes the height bounds that R holds (STRM-027).
+    item_revision: u64,
 }
 
 impl ResidencyKey {
-    fn of(req: &TerrainRequest) -> Self {
-        Self { position: req.camera.position, lod: req.lod.clone(), face_mapping: req.face_mapping.clone(), seed: req.seed }
+    fn of(req: &TerrainRequest, item_revision: u64) -> Self {
+        Self { position: req.camera.position, lod: req.lod.clone(), face_mapping: req.face_mapping.clone(), seed: req.seed, item_revision }
     }
 }
 
@@ -487,7 +498,7 @@ impl PlanWorker {
             // R follows the plan in the same job, after the plan is out (a frame never waits for it). It shares the plan's
             // cache, and when the position and parameters equal the previous R's (a rotation) nothing is selected at all.
             let residency = (planned && !state.lock().expect("worker state").closed).then(|| {
-                let key = ResidencyKey::of(&req);
+                let key = ResidencyKey::of(&req, field.item_revision());
                 let reuse =
                     state.lock().expect("worker state").last_residency.as_ref().filter(|(k, _)| *k == key).map(|(_, r)| Arc::clone(r));
                 let started = std::time::Instant::now();

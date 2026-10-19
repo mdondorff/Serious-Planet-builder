@@ -140,7 +140,7 @@ fn origin_heights(
     cache: &mut SelectionCache,
     threads: usize,
 ) -> Vec<f64> {
-    let reuse = !field.reads_cells();
+    let reuse = !field.reads_cells() || cache.tracks_items();
     let mut heights = vec![f64::NAN; selection.nodes.len()];
     let mut missing: Vec<usize> = Vec::new();
     for (i, n) in selection.nodes.iter().enumerate() {
@@ -241,6 +241,8 @@ pub(crate) fn plan_terrain_keyed(
             req.lod.viewport_h_px / req.lod.tau_px
         )));
     }
+    // A field that reads authored items keys its tiles by their reads: what the cache holds of a tile whose reads changed is dropped (STRM-027).
+    cache.verify_tiles(selection.nodes.iter().map(|n| n.tile), map.as_ref(), field);
     let heights = origin_heights(&selection, map.as_ref(), field, cache, threads);
     let keyer = planet_generators::mesh::MeshKeyer::new(field, map.as_ref(), req.lod.cells, req.lod.radius_m);
     let derive_key = |tile: TileId| key_override.map_or_else(|| keyer.key(tile), |f| f(tile));
@@ -254,7 +256,7 @@ pub(crate) fn plan_terrain_keyed(
             // A field that reads authored cells declares reads per tile at plan time (WDEF-005): an edit changes heights and
             // keys without changing the field's identity, so nothing is reused for it. A non-finite height (a failed bake
             // read) is never kept.
-            let reuse = !field.reads_cells();
+            let reuse = !field.reads_cells() || cache.tracks_items();
             let origin = PlanetFixed(centre * (req.lod.radius_m + height));
             let rel = origin.0 - req.camera.position.0;
             let color = node_color(req.view, n.tile);

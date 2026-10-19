@@ -256,6 +256,7 @@ impl Item {
             }
             finite(&format!("params.{k}"), *v)?;
         }
+        crate::stamp::Stamp::from_file(&self.kind, &self.params).map_err(|why| err("params", why))?;
         Ok(())
     }
 
@@ -301,7 +302,7 @@ impl Item {
 
     /// The item as the index takes it: the layer, priority, anchor direction, content hash, reach and height bound.
     pub fn spec(&self) -> ItemSpec {
-        ItemSpec {
+        let spec = ItemSpec {
             id: self.id,
             layer: self.layer.clone(),
             priority: self.priority,
@@ -309,9 +310,14 @@ impl Item {
             content_hash: self.hash(),
             reach_m: canonical(self.reach_m),
             max_delta_m: canonical(self.max_delta_m),
-            // The map from an item file to a stamp (kind and parameters) comes with the stamp stage (E2); until then a file item has no
-            // height output of its own and its content hash is the file hash.
             stamp: None,
+        };
+        // A stamp kind (WDEF-010): the stamp is set and the content hash is the one derived from kind and parameters, so an edit of a
+        // field that changes no output (the name, the versions recorded) re-keys nothing. Any other kind has no height output of its own
+        // and keeps the file hash.
+        match crate::stamp::Stamp::from_file(&self.kind, &self.params) {
+            Ok(Some(stamp)) => spec.with_stamp(stamp),
+            _ => spec,
         }
     }
 

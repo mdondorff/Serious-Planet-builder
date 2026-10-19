@@ -375,6 +375,9 @@ impl crate::height::HeightField for WaterBounded<'_> {
     fn stage_params(&self) -> Option<(&str, u32)> {
         self.f().stage_params()
     }
+    fn item_revision(&self) -> u64 {
+        self.f().item_revision()
+    }
     fn surface_id(&self) -> &'static str {
         self.f().surface_id()
     }

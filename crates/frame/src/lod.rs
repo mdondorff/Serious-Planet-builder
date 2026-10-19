@@ -351,6 +351,45 @@ pub struct SelectionCache {
     /// either parameter starts it over).
     mesh_keys: IdMap<u64>,
     mesh_key_params: (u32, u8),
+    /// The content keys of the tiles of a field that reads authored items (STRM-027).
+    hashes: TileHashes,
+}
+
+/// The content key of each tile the cache holds values of, for a field whose tiles read authored items: the field's hash of the tile's
+/// reads ([`HeightField::inputs_hash_for`]), checked again only when the field's item revision changes (it is process-unique, so a
+/// reload into a fresh definition cannot match). A tile whose hash differs has its origin height, mesh key and volume dropped, whoever
+/// changed the items and whether or not the editor named the tile (`invalidate_tiles` is the fast path, not the guarantee).
+#[derive(Default)]
+struct TileHashes {
+    /// The field's item revision (0: it reads no items and nothing is tracked).
+    revision: u64,
+    /// Hash and revision it was taken at, by tile.
+    seen: IdMap<(u64, u64)>,
+    /// Tiles whose hash changed since the last drain.
+    stale: Vec<TileId>,
+    /// Footprint hashes computed since the cache was created (the cost of the check).
+    computed: u64,
+}
+
+impl TileHashes {
+    /// Whether the values cached of `tile` are stale. Free while the revision is the one the tile was last checked at.
+    fn verify(&mut self, tile: TileId, map: &dyn FaceMapping, field: &dyn HeightField) -> bool {
+        if self.revision == 0 {
+            return false;
+        }
+        if let Some((_, at)) = self.seen.get(&tile) {
+            if *at == self.revision {
+                return false;
+            }
+        }
+        let hash = field.inputs_hash_for(tile, map);
+        self.computed += 1;
+        let changed = self.seen.insert(tile, (hash, self.revision)).is_some_and(|(old, _)| old != hash);
+        if changed {
+            self.stale.push(tile);
+        }
+        changed
+    }
 }
 
 impl SelectionCache {
@@ -379,6 +418,35 @@ impl SelectionCache {
         self.volumes.clear();
         self.origin_heights.clear();
         self.mesh_keys.clear();
+        self.hashes.seen.clear();
+        self.hashes.stale.clear();
+    }
+
+    /// Whether the cache tracks the items the prepared field reads (it has a revision to check): the origin heights and mesh keys of
+    /// its tiles can be reused after [`SelectionCache::verify_tiles`].
+    pub(crate) fn tracks_items(&self) -> bool {
+        self.hashes.revision != 0
+    }
+
+    /// Footprint hashes computed since the cache was created (STRM-027).
+    pub fn hashes_computed(&self) -> u64 {
+        self.hashes.computed
+    }
+
+    /// Drop what is cached of the tiles whose content key changed (the check of STRM-027) among `tiles` and those the selection found
+    /// changed. Valid after a selection with the same map and field has prepared the cache.
+    pub(crate) fn verify_tiles(&mut self, tiles: impl IntoIterator<Item = TileId>, map: &dyn FaceMapping, field: &dyn HeightField) {
+        for t in tiles {
+            if self.hashes.verify(t, map, field) {
+                self.volumes.remove(&t);
+            }
+        }
+        // The tiles a selection found changed already had their volume recomputed there: only the values it does not hold are dropped.
+        let stale = std::mem::take(&mut self.hashes.stale);
+        for t in stale {
+            self.origin_heights.remove(&t);
+            self.mesh_keys.remove(&t);
+        }
     }
 
     /// Field height at the centre of `tile` (the plan's tile origin): `compute` runs only the first time a tile is asked
@@ -444,6 +512,7 @@ impl SelectionCache {
                 planet_core::hash::hash_u64s(6, &[u64::from(p.min_level)]),
             ],
         );
+        self.hashes.revision = field.item_revision();
         if key != self.key
             || self.tiles.len() > Self::MAX_TILES
             || self.origin_heights.len() > Self::MAX_TILES
@@ -463,6 +532,7 @@ struct GeomCache<'a> {
     tiles: &'a mut IdMap<TileGeom>,
     volumes: &'a mut IdMap<Volume>,
     misses: &'a mut u64,
+    hashes: &'a mut TileHashes,
 }
 
 impl GeomCache<'_> {
@@ -477,6 +547,9 @@ impl GeomCache<'_> {
 
     /// Height-aware volume of a tile, computed on first use (the height bounds cost lattice lookups per octave).
     fn volume(&mut self, tile: TileId) -> Volume {
+        if self.hashes.verify(tile, self.map, self.field) {
+            self.volumes.remove(&tile);
+        }
         if let Some(v) = self.volumes.get(&tile) {
             return *v;
         }
@@ -610,8 +683,8 @@ fn select_impl(
     cache: &mut SelectionCache,
 ) -> NodeSelection {
     cache.prepare(map, field, p);
-    let SelectionCache { tiles, volumes, misses, .. } = cache;
-    let mut geoms = GeomCache { map, field, p, tiles, volumes, misses };
+    let SelectionCache { tiles, volumes, misses, hashes, .. } = cache;
+    let mut geoms = GeomCache { map, field, p, tiles, volumes, misses, hashes };
     let mut leaves: BTreeSet<TileId> = BTreeSet::new();
     let floor = p.floor_level();
     let mut stack: Vec<TileId> = Face::ALL.iter().map(|&f| TileId::new(f, 0, 0, 0).expect("root")).collect();
@@ -717,8 +790,8 @@ impl SelectionCache {
         p: &LodParams,
     ) -> TileBounds {
         self.prepare(map, field, p);
-        let SelectionCache { tiles: geom_memo, volumes, misses, .. } = self;
-        let mut geoms = GeomCache { map, field, p, tiles: geom_memo, volumes, misses };
+        let SelectionCache { tiles: geom_memo, volumes, misses, hashes, .. } = self;
+        let mut geoms = GeomCache { map, field, p, tiles: geom_memo, volumes, misses, hashes };
         let mut out = TileBounds { for_view: Some((position, p.clone())), tiles: IdMap::default() };
         for t in tiles {
             let v = geoms.volume(t);
