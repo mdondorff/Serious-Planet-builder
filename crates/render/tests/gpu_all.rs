@@ -28,6 +28,8 @@ mod gpu_reference;
 mod gpu_renderer;
 #[path = "gpu_shading.rs"]
 mod gpu_shading;
+#[path = "gpu_stamps.rs"]
+mod gpu_stamps;
 #[path = "gpu_steep_terrain.rs"]
 mod gpu_steep_terrain;
 #[path = "gpu_terrain.rs"]

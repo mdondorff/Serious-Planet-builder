@@ -115,22 +115,37 @@ fn item(kind: StampKind, at: Vec3, amount: f64, reach_m: f64) -> planet_world_de
 // spec: REND-033
 #[test]
 fn the_preview_over_the_stale_tiles_is_close_to_the_exact_tiles_of_the_edited_world() {
+    close_to_exact(TerrainView::Height, 3, 1.0, "height");
+}
+
+// spec: REND-033
+#[test]
+fn the_previews_normals_are_close_to_the_exact_tiles_normals() {
+    // The Normals view colours the unit normal: the finite-difference slope of the delta, and a plateau's flattening, against the exact tile's.
+    // Steeper stamps (three times the amplitude) so the normals move by several grey levels.
+    close_to_exact(TerrainView::Normals, 6, 3.0, "normals");
+}
+
+/// The frame of the stale tiles with the stamp as preview against the frame of the edited world's exact tiles, in `view`: at most 5 % of the
+/// pixels the edit changes stay more than `grey` levels away from the exact frame.
+fn close_to_exact(view: TerrainView, grey: u8, scale: f64, tag: &str) {
     use planet_generators::stamp::{StampStage, STAMP_STAGE_VERSION};
     use planet_world_def::{BodyId, WorldDefinition};
     use std::sync::Arc;
 
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
-    let mut plan = plan_for(8, TerrainView::Height);
+    let mut plan = plan_for(8, view);
     let cam = plan.camera.position.0.normalized();
     let near = plan.nodes.iter().map(|n| n.tile).max_by(|a, b| {
         a.center_direction(&TangentWarp).dot(cam).total_cmp(&b.center_direction(&TangentWarp).dot(cam)).then(b.level().cmp(&a.level()))
     });
     let at = near.unwrap().center_direction(&TangentWarp);
-    for (name, kind, amount, reach) in [
-        ("hill", StampKind::Hill, 60.0, 2_000.0),
-        ("crater", StampKind::Crater, 50.0, 2_000.0),
+    for (kind_name, kind, amount, reach) in [
+        ("hill", StampKind::Hill, 60.0 * scale, 2_000.0),
+        ("crater", StampKind::Crater, 50.0 * scale, 2_000.0),
         ("plateau", StampKind::Plateau, 150.0, 3_000.0),
     ] {
+        let name = format!("{tag}-{kind_name}");
         let mut def = WorldDefinition::single_planet(R, SEED);
         def.put_item_spec(BodyId::PLANET, item(kind, at, amount, reach)).unwrap();
         let base: Arc<dyn planet_generators::height::HeightField> = Arc::new(Reference(SEED));
@@ -139,7 +154,7 @@ fn the_preview_over_the_stale_tiles_is_close_to_the_exact_tiles_of_the_edited_wo
         // The exact frame: tiles of the edited world, nothing flagged. The preview frame: the stale tiles of the unedited world, flagged,
         // with the stamp as the preview.
         // The plan of the edited world (its tile origins and keys follow the edit), drawn from its own tiles.
-        let exact_plan = planet_frame::plan_terrain_field(&request_for(8, TerrainView::Height), &stage).unwrap();
+        let exact_plan = planet_frame::plan_terrain_field(&request_for(8, view), &stage).unwrap();
         let exact_tiles: Vec<CompactTile> =
             exact_plan.nodes.iter().map(|n| compact_tile_field(&stage, &TangentWarp, n.tile, CELLS, R)).collect();
         let refs: Vec<&CompactTile> = exact_tiles.iter().collect();
@@ -160,18 +175,16 @@ fn the_preview_over_the_stale_tiles_is_close_to_the_exact_tiles_of_the_edited_wo
         let off = max_diff(&previewed, &exact);
         let count = |d: &[u8], t: u8| d.iter().filter(|v| **v > t).count();
         println!(
-            "{name}: pixels off the exact frame by > 3 grey levels: unedited {} -> preview {} of {} (> 8: {} -> {})",
-            count(&unedited, 3),
-            count(&off, 3),
-            off.len(),
-            count(&unedited, 8),
-            count(&off, 8)
+            "{name}: pixels off the exact frame by > {grey} grey levels: unedited {} -> preview {} of {}",
+            count(&unedited, grey),
+            count(&off, grey),
+            off.len()
         );
         {
             let mut sums = [0.0f64; 3];
             let mut n = 0.0;
             for k in 0..plain.len() / 4 {
-                if unedited[k] > 3 {
+                if unedited[k] > grey {
                     sums[0] += f64::from(plain[4 * k]);
                     sums[1] += f64::from(exact[4 * k]);
                     sums[2] += f64::from(previewed[4 * k]);
@@ -189,8 +202,8 @@ fn the_preview_over_the_stale_tiles_is_close_to_the_exact_tiles_of_the_edited_wo
         write_ppm(&format!("{name}-preview"), &previewed);
         write_ppm(&format!("{name}-stale"), &plain);
         // The preview is closer to the exact frame than the stale one, where there is anything to see.
-        if count(&unedited, 3) > 50 {
-            assert!(count(&off, 3) * 20 <= count(&unedited, 3), "{name}: the preview should remove (nearly) all of the difference");
+        if count(&unedited, grey) > 50 {
+            assert!(count(&off, grey) * 20 <= count(&unedited, grey), "{name}: the preview should remove (nearly) all of the difference");
         }
     }
 }

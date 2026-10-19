@@ -648,4 +648,4 @@ Source: SPIKE-13, ADR 0066 points 3 and 5, M6 plan row E3
 
 #### Scenario: Close to the exact tiles
 - **WHEN** a hill, a crater and a plateau are added to a world, and the Height view is drawn from the stale tiles of the unedited world with the stamp as preview, and from the exact tiles of the edited world planned for it
-- **THEN** the preview frame differs from the exact frame by more than three grey levels in at most 5 % of the pixels the edit changes
+- **THEN** the preview frame differs from the exact frame by more than three grey levels in at most 5 % of the pixels the edit changes, and the same holds for the Normals view with steeper stamps (more than six grey levels)
