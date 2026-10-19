@@ -1,0 +1,1 @@
+- 2026-10-19 **egui-button-release archived (VIEW-022 modified):** a look-around with the right button no longer leaves the button down for egui: when a pointer capture starts and ends the window lets go of every button for egui, with a move away first so that it is no click (sonnet-crusader).
