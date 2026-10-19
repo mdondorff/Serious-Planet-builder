@@ -1,0 +1,1 @@
+- 2026-10-20 **Edit-latency exact part:** windows 13-15 miss the M6 exact budgets on refresh throughput; options A/B/C for the owner in status.md "Waiting for the owner".
