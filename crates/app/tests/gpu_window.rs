@@ -170,3 +170,36 @@ fn a_world_with_a_bake_has_an_ocean_and_the_window_draws_its_water_through_the_w
     assert!(count_before(&stdout, " with water") > 0, "the lit frames carry water: {stdout}");
     assert!(count_before(&stdout, " with the atmosphere") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
 }
+
+// spec: VIEW-022
+#[test]
+fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_writes_the_item_file() {
+    let dir = std::env::temp_dir().join(format!("planet-editor-smoke-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let Some(stdout) = smoke(&["--edit", "--items", dir.to_str().unwrap()]) else { return };
+    assert!(stdout.contains("[smoke ok]"), "{stdout}");
+    // The script of the run (placing with the stamp tool, dragging the move handle, typing a radius, undo, redo, delete, undo) is judged by
+    // the run itself (`EditRuntime::smoke_verdict`); the summary shows the counts.
+    let line = stdout.lines().find(|l| l.trim_start().starts_with("edit:")).unwrap_or_else(|| panic!("no edit line in: {stdout}"));
+    let count = |after: &str| -> u64 {
+        line.split(after)
+            .next()
+            .and_then(|s| s.rsplit(|c: char| !c.is_ascii_digit()).next())
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("no count before '{after}' in: {line}"))
+    };
+    assert_eq!(count(" placed"), 1, "{line}");
+    assert_eq!(count(" dragged"), 1, "{line}");
+    assert_eq!(count(" typed"), 1, "{line}");
+    assert_eq!(count(" deleted"), 1, "{line}");
+    assert_eq!(count(" undone"), 2, "{line}");
+    assert_eq!(count(" redone"), 1, "{line}");
+    assert_eq!(count(" refused"), 0, "{line}");
+    assert!(count(" frames in the editor mode") > 0 && count(" tiles sent to refresh") > 0, "{line}");
+    // The run ends with the edit back (the last command undid the delete): one file, written through by every command.
+    let files: Vec<_> =
+        std::fs::read_dir(dir.join("0")).expect("the items directory of the planet").map(|f| f.unwrap().file_name()).collect();
+    assert_eq!(files.len(), 1, "{files:?}");
+    assert!(files[0].to_string_lossy().ends_with(".toml"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

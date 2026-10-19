@@ -1,10 +1,12 @@
 //! The single binary's run modes (CON-01): `editor` (interactive viewer), `generate` (headless CLI)
 //! and `test-render` (headless harness). M0 only wires them up; real work arrives with M1+.
 
+pub mod editwin;
 pub mod globalperf;
 pub mod litperf;
 pub mod lookload;
 pub mod manifest;
+pub mod panels;
 pub mod pipelined;
 mod plancheck;
 pub mod prefill;
@@ -24,7 +26,7 @@ use planet_render::{AdapterPolicy, GpuContext};
 
 pub const USAGE: &str = "usage: planet <mode> [options]
 modes:
-  editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
+  editor        the viewer window (VIEW-001..VIEW-007): the scripted orbit-to-1 m flight on the pipelined loop; keys P/Space pause, R restart, L lit (with the atmosphere) or debug path, V debug view, T vsync, C flight or free camera (WASD move, Q/E down/up, arrows look, Shift boost), Esc quit; the window opens on the lit path with the atmosphere, the look file drawn (sun, adaptive exposure); the title shows frame rate, CPU and GPU time, the path (or the debug view), on the lit path the exposure, and the readiness report; runs on a discrete GPU only (an integrated GPU, a software adapter or an adapter missing a feature or limit is refused with the reason); [--world F --global-res N | --store DIR] [--look F] [--size WxH] [--view NAME] [--cells N --tau PX --finest-level N] [--no-vsync] [--no-ui] (the editor UI, an egui layer drawn after the tone map, VIEW-011) [--edit] (start in the editor mode, VIEW-022: Tab toggles it; the panels, stamps by 2-4 and a click, handles on the planet, Ctrl+Z / Ctrl+Y) [--items DIR] (the edits as one TOML file each in DIR, loaded at the start) [--editor-layout F] (the panel layout, VIEW-018) [--marker LAT,LON[,RADIUS_M]]... (item markers of the globe overview, G, VIEW-013); --smoke opens the window, drives the keys for a few dozen frames and closes it (test mode: PLANET_ADAPTER or --adapter, software by default; exits with `no display` where there is none); --no-window starts and exits without a window; --offscreen runs the skeleton without a window
   generate      headless generator CLI: --tile F,L,X,Y [--seed N --res N --out height.png --face-net net.png]; --manifest <file> writes the determinism manifest (GEN-003); --cache-dir <dir> --region F,L [--res N] writes a tile face region into a tile store; --verify-cache <dir> [--sample N] regenerates stored tiles and compares (both take --world <definition.toml> or --seed N; --verify-cache fails when nothing could be compared, --allow-stale accepts that); --global-dir <dir> [--global-res N, default 256] bakes the global-coarse field (continents, elevation, climate) of N cells per face edge into a tile store as blocks in the canonical layout (blocks of min(N, 1024) cells) together with its ocean-connectivity channel (one bit per vertex; the area threshold is the definition's `body.0.sea.min_area_fraction`) and prints the time per sample and the channel's cost; --verify-global <dir> [--sample N] regenerates stored blocks and compares; --global-products <dir> [--global-res N] writes cube nets and maps of an in-memory bake (these take --world or --seed and --threads N); --plan-check <dir> --global-res N (required) plans the standard flight at cells 32 and viewport / tau 240 over the stored bake with the terrain and the eroded field and fails if a view is rejected (M3 acceptance); --prefill-dir <dir> --global-res N [--prefill-levels L] [--floor-level F] writes the coarse tiles of levels F..=L (F the render floor, default 3; L default 4; an L below F writes nothing and says so; the tiles of cells 32, finest level 22, compact form, as the streamer generates them) of the stored bake into its tile pack, skipping what is there; --global-dir pre-fills the same way after the bake (--prefill-levels 0 disables; --floor-level takes both); --smoke starts and exits
   test-render   headless render harness
     --scene hello-triangle|tiles|terrain   render a scene (default hello-triangle)
@@ -162,6 +164,12 @@ pub struct Options {
     pub views: Option<Vec<String>>,
     /// `--no-ui`: the editor window without the UI (VIEW-011).
     pub no_ui: bool,
+    /// `editor --edit`: start in the editor mode (VIEW-022); Tab toggles it in the window.
+    pub edit: bool,
+    /// `editor --items DIR`: the directory the edits are written to and loaded from (one TOML file per edit, AUTH-001); without it they live in memory.
+    pub items: Option<PathBuf>,
+    /// `editor --editor-layout F`: the panel layout file (VIEW-018).
+    pub editor_layout: Option<PathBuf>,
     /// `--marker LAT,LON[,RADIUS_M]` (repeatable): an item marker for the globe overview (VIEW-013).
     pub markers: Vec<String>,
     /// `--calibrate`: measure the CPU calibration in a smoke run too (TEST-039).
@@ -288,6 +296,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         flight_frames: 240,
         views: None,
         no_ui: false,
+        edit: false,
+        items: None,
+        editor_layout: None,
         markers: Vec::new(),
         calibrate: false,
         store: None,
@@ -314,6 +325,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--perf-smoke" => o.perf_smoke = true,
             "--lit" => o.lit = true,
             "--no-ui" => o.no_ui = true,
+            "--edit" => o.edit = true,
+            "--items" => o.items = Some(PathBuf::from(it.next().ok_or("--items needs a directory")?)),
+            "--editor-layout" => o.editor_layout = Some(PathBuf::from(it.next().ok_or("--editor-layout needs a file")?)),
             "--marker" => o.markers.push(it.next().ok_or("--marker needs LAT,LON[,RADIUS_M]")?.clone()),
             "--calibrate" => o.calibrate = true,
             "--views" => {
@@ -817,6 +831,22 @@ mod tests {
         assert_eq!((o.finest_level, o.finest_level_for(64)), (Some(26), 26), "the explicit cap wins whatever the tile size");
         assert!(parse_args(&["test-render".into(), "--finest-level".into(), "29".into()]).unwrap_err().contains("at most 28"));
         assert!(parse_args(&["test-render".into(), "--finest-level".into()]).unwrap_err().contains("needs a level"));
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn the_editor_mode_options_are_parsed() {
+        let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap();
+        let o = args(&["editor"]);
+        assert!(!o.edit && o.items.is_none() && o.editor_layout.is_none(), "off by default, edits in memory");
+        let o = args(&["editor", "--edit", "--items", "edits", "--editor-layout", "layout.toml"]);
+        assert!(o.edit);
+        assert_eq!(o.items, Some(PathBuf::from("edits")));
+        assert_eq!(o.editor_layout, Some(PathBuf::from("layout.toml")));
+        for flag in ["--items", "--editor-layout"] {
+            assert!(parse_args(&["editor".to_string(), flag.to_string()]).is_err(), "{flag} needs a value");
+        }
+        assert!(USAGE.contains("--edit") && USAGE.contains("--items") && USAGE.contains("--editor-layout"));
     }
 
     // spec: VIEW-011

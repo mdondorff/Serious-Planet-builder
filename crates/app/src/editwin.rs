@@ -1,0 +1,911 @@
+//! The editor mode of the window (VIEW-022): the session over the item store, the pointer and the keys turned into session calls, the
+//! panels' data each frame, and the camera flight to an edit. The window (`window.rs`) is glue around this: it hands over the camera, the
+//! cursor and the events, and draws what comes back. Nothing here names a window or a GPU type, so the flows are tested without either.
+
+use crate::panels::{Event, PanelData, PanelState};
+use planet_core::{PlanetFixed, TileId, Vec3};
+use planet_editor::commands::{Affected, Editor};
+use planet_editor::ids::IdMaker;
+use planet_editor::interaction::{Interaction, PointerView, Pressed};
+use planet_editor::layout::Layout;
+use planet_editor::lists::{LayerGroup, Row};
+use planet_editor::overlay::{self, OverlayItem};
+use planet_editor::params::{kind_title, Inspector, STAMP_KINDS};
+use planet_editor::relevance::ViewState;
+use planet_editor::session::{Session, SessionError, Tool};
+use planet_editor::shape::{self, Handle};
+use planet_frame::freecam::FreePose;
+use planet_frame::globe::Viewport;
+use planet_frame::pick::{cursor_ray, pick_surface, PickLimits, SurfaceHit};
+use planet_frame::Camera;
+use planet_generators::height::HeightField;
+use planet_world_def::item::Item;
+use planet_world_def::item_store::{ItemStore, LooseFileStore, MemoryStore, StoreError};
+use planet_world_def::{BodyId, ItemId, WorldDefinition};
+use std::path::{Path, PathBuf};
+
+/// The stage version new edits are authored against (the stamp stage of the generators takes it from the item).
+pub const EDIT_STAGE_VERSION: u32 = 1;
+
+/// Where the items go: memory (lost with the window) or one file each in a directory.
+pub enum EditStore {
+    Memory(MemoryStore),
+    Files(LooseFileStore),
+}
+
+impl ItemStore for EditStore {
+    fn put(&mut self, item: &Item) -> Result<(), StoreError> {
+        match self {
+            EditStore::Memory(s) => s.put(item),
+            EditStore::Files(s) => s.put(item),
+        }
+    }
+
+    fn delete(&mut self, body: BodyId, id: ItemId) -> Result<bool, StoreError> {
+        match self {
+            EditStore::Memory(s) => s.delete(body, id),
+            EditStore::Files(s) => s.delete(body, id),
+        }
+    }
+
+    fn get(&self, body: BodyId, id: ItemId) -> Result<Option<Item>, StoreError> {
+        match self {
+            EditStore::Memory(s) => s.get(body, id),
+            EditStore::Files(s) => s.get(body, id),
+        }
+    }
+
+    fn load_all(&self, body: BodyId) -> Result<Vec<Item>, StoreError> {
+        match self {
+            EditStore::Memory(s) => s.load_all(body),
+            EditStore::Files(s) => s.load_all(body),
+        }
+    }
+}
+
+/// What the editor mode did in the run (the smoke summary reports it).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EditStats {
+    pub frames: u64,
+    pub placed: u64,
+    pub selected: u64,
+    pub dragged: u64,
+    pub typed: u64,
+    pub deleted: u64,
+    pub undone: u64,
+    pub redone: u64,
+    pub flights: u64,
+    pub refused: u64,
+    /// The most edits the camera showed in one frame.
+    pub shown_max: usize,
+    /// The resident tiles the footprint find sent to refresh, summed over the commands (the terrain follows once the definition is live).
+    pub refresh_tiles: u64,
+}
+
+/// A key the editor mode takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditKey {
+    /// A tool by number: 1 select, 2 and on the stamp kinds in order.
+    Tool(usize),
+    Undo,
+    Redo,
+    Delete,
+    /// Esc: abandon a drag, else leave the stamp tool, else deselect.
+    Escape,
+}
+
+/// The lists the panels show this frame.
+#[derive(Default)]
+struct Lists {
+    near: Vec<Row>,
+    found: Vec<Row>,
+    groups: Vec<LayerGroup>,
+    chain: Vec<Row>,
+    hidden: Vec<ItemId>,
+    inspector: Option<Inspector>,
+}
+
+/// The cursor in render pixels and whether it is over a panel.
+#[derive(Clone, Copy, Debug)]
+pub struct Pointer {
+    pub cursor: [f64; 2],
+    pub over_ui: bool,
+}
+
+/// The editor mode.
+pub struct EditRuntime {
+    pub session: Session<EditStore>,
+    pub interaction: Interaction,
+    pub panels: PanelState,
+    pub layout: Layout,
+    /// The mode is on: the panels and the outlines show and the pointer edits.
+    pub on: bool,
+    pub stats: EditStats,
+    saved: String,
+    radius_m: f64,
+    shown: Vec<ItemId>,
+    overlay: Vec<OverlayItem>,
+    handles: Vec<(Handle, [f64; 2])>,
+    lists: Lists,
+    camera_position: Vec3,
+    /// An edit the camera is to fly to (set by a double click or Fly to; the window takes it).
+    fly: Option<ItemId>,
+    /// The places the commands of this frame changed, for the footprint find of the tiles (`take_affected`).
+    affected: Vec<Affected>,
+}
+
+fn open_store(dir: Option<&Path>) -> (EditStore, String) {
+    match dir {
+        Some(d) => (EditStore::Files(LooseFileStore::new(d)), format!("saved in {}", d.display())),
+        None => (EditStore::Memory(MemoryStore::new()), "not saved (start with --items DIR)".to_string()),
+    }
+}
+
+impl EditRuntime {
+    /// The editor mode over a copy of the world's definition. With a directory the items in it are loaded and every command writes its file.
+    pub fn new(def: WorldDefinition, radius_m: f64, items: Option<&PathBuf>, layout: Layout) -> Result<EditRuntime, String> {
+        let (store, saved) = open_store(items.map(PathBuf::as_path));
+        let ids = IdMaker::system();
+        let mut editor = Editor::new(def, store, ids, planet_generators::GENERATOR_VERSION, EDIT_STAGE_VERSION);
+        let loaded = editor.load(BodyId::PLANET).map_err(|e| format!("loading the items: {e}"))?;
+        let mut session = Session::new(editor, BodyId::PLANET, radius_m);
+        session.set_status(if loaded > 0 { format!("{loaded} edits loaded") } else { String::new() });
+        Ok(EditRuntime {
+            interaction: Interaction::new(layout.handle_hit_px),
+            panels: PanelState::new(&layout),
+            session,
+            layout,
+            on: false,
+            stats: EditStats::default(),
+            saved,
+            radius_m,
+            shown: Vec::new(),
+            overlay: Vec::new(),
+            handles: Vec::new(),
+            lists: Lists::default(),
+            camera_position: Vec3::new(radius_m, 0.0, 0.0),
+            fly: None,
+            affected: Vec::new(),
+        })
+    }
+
+    pub fn edit_count(&self) -> usize {
+        self.session.editor().items().count()
+    }
+
+    /// The edit mode on or off. Leaving it abandons a drag.
+    pub fn toggle(&mut self) {
+        self.on = !self.on;
+        if !self.on {
+            let _ = self.interaction.cancel(&mut self.session);
+            self.session.set_hover(None);
+        }
+    }
+
+    fn note(&mut self, r: Result<(), SessionError>) {
+        if let Err(e) = r {
+            self.stats.refused += 1;
+            self.session.set_status(e.to_string());
+        }
+    }
+
+    /// The places the commands since the last call changed.
+    pub fn take_affected(&mut self) -> Vec<Affected> {
+        std::mem::take(&mut self.affected)
+    }
+
+    /// Draw the outlines, names and handles over the planet and the panels; returns what the panels asked for. `scale` is window pixels per
+    /// render pixel on each axis (the overlay is projected in render pixels).
+    pub fn draw(&mut self, ui: &mut egui::Ui, view_status: &str, scale: [f64; 2]) -> Vec<Event> {
+        let ppp = f64::from(ui.ctx().pixels_per_point());
+        crate::panels::draw_overlay(ui, &self.overlay, |p| egui::pos2((p[0] * scale[0] / ppp) as f32, (p[1] * scale[1] / ppp) as f32));
+        // The panels read the lists and write their own state: take the state out for the call.
+        let mut panels = std::mem::replace(&mut self.panels, PanelState::new(&self.layout));
+        let events = crate::panels::show(ui, &mut panels, &self.panel_data(view_status));
+        self.panels = panels;
+        events
+    }
+
+    /// The tiles of `resident` the commands since the last call changed (the footprint find, `planet_editor::feed`), counted. The call
+    /// of `ManagedLoop::edit` with them waits for the live definition (`WorldTerrain::set_definition`): until then the terrain does not
+    /// change, and refreshing tiles whose definition did not change would only cost generation.
+    pub fn refresh_tiles(&mut self, resident: &[TileId]) -> Vec<TileId> {
+        let affected = self.take_affected();
+        if affected.is_empty() {
+            return Vec::new();
+        }
+        let tiles = planet_editor::feed::edited_tiles(&affected, BodyId::PLANET, resident, self.radius_m, &planet_core::cube::TangentWarp);
+        self.stats.refresh_tiles += tiles.len() as u64;
+        tiles
+    }
+
+    /// The edit the camera is to fly to, once.
+    pub fn take_fly(&mut self) -> Option<ItemId> {
+        self.fly.take()
+    }
+
+    fn view(&self, camera: &Camera, viewport: Viewport) -> ViewState {
+        ViewState { camera: *camera, viewport, radius_m: self.radius_m }
+    }
+
+    /// The surface under a cursor (render pixels).
+    pub fn hit_at(
+        camera: &Camera,
+        viewport: Viewport,
+        cursor: [f64; 2],
+        limits: &PickLimits,
+        field: &dyn HeightField,
+    ) -> Option<SurfaceHit> {
+        let ray = cursor_ray(camera, cursor[0], cursor[1], viewport.width_px, viewport.height_px);
+        pick_surface(&ray, limits, &|d| field.height(d))
+    }
+
+    /// The frame: which edits the camera shows (the footprint find over the `wanted` tiles), their outlines and handles on the screen,
+    /// the hover, and the lists the panels show. `over_ui` is whether the cursor is over a panel (no hover then).
+    pub fn update(
+        &mut self,
+        camera: &Camera,
+        viewport: Viewport,
+        wanted: &[TileId],
+        field: &dyn HeightField,
+        limits: &PickLimits,
+        pointer: Pointer,
+    ) {
+        let Pointer { cursor, over_ui } = pointer;
+        if !self.on {
+            return;
+        }
+        self.stats.frames += 1;
+        self.camera_position = camera.position.0;
+        let view = self.view(camera, viewport);
+        self.shown = self.session.shown(wanted, &view).unwrap_or_default();
+        self.stats.shown_max = self.stats.shown_max.max(self.shown.len());
+        self.overlay = overlay::build(&self.session, &self.shown, &view, &|d| field.height(d));
+        self.handles = overlay::handle_pixels(&self.overlay);
+        if !over_ui {
+            let hit = Self::hit_at(camera, viewport, cursor, limits, field);
+            let mpp = self.height_mpp(camera, viewport);
+            let v = PointerView { cursor, hit, shown: &self.shown, handles: &self.handles, metres_per_pixel: mpp };
+            self.interaction.hover(&mut self.session, &v);
+        } else if self.session.dragging().is_none() {
+            self.session.set_hover(None);
+        }
+        // Hover and selection show in the outlines of this frame's overlay.
+        for o in &mut self.overlay {
+            o.hovered = self.session.hovered() == Some(o.id);
+        }
+        let cam = self.camera_position;
+        let s = &self.session;
+        let q = self.panels.query.trim();
+        let kind = self.panels.kind.as_deref();
+        self.lists = Lists {
+            near: s.near(&self.shown, cam),
+            found: if q.is_empty() && kind.is_none() { Vec::new() } else { s.search(q, kind, cam) },
+            groups: s.layer_groups(cam),
+            chain: s.chain(cam),
+            hidden: s.editor().items().filter(|i| s.is_hidden(i.id)).map(|i| i.id).collect(),
+            inspector: s.inspector(cam),
+        };
+    }
+
+    /// Metres one pixel spans at the selected edit's height handle.
+    fn height_mpp(&self, camera: &Camera, viewport: Viewport) -> f64 {
+        let at = self.session.handles(0.0).into_iter().find(|(h, _)| *h == Handle::Height).map(|(_, p)| p);
+        at.map_or(1.0, |p| shape::metres_per_pixel(camera, viewport.height_px, p))
+    }
+
+    /// The overlay to draw this frame.
+    pub fn overlay(&self) -> &[OverlayItem] {
+        &self.overlay
+    }
+
+    /// The data the panels show this frame.
+    pub fn panel_data<'a>(&'a self, view_status: &'a str) -> PanelData<'a> {
+        let s = &self.session;
+        PanelData {
+            layout: &self.layout,
+            tool: s.tool(),
+            selected: s.selected(),
+            near: &self.lists.near,
+            found: &self.lists.found,
+            groups: &self.lists.groups,
+            chain: &self.lists.chain,
+            hidden: &self.lists.hidden,
+            inspector: self.lists.inspector.as_ref(),
+            can_undo: s.editor().can_undo(),
+            can_redo: s.editor().can_redo(),
+            undo_depth: s.editor().undo_depth(),
+            status: s.status(),
+            edit_count: self.edit_count(),
+            saved: &self.saved,
+            view_status,
+        }
+    }
+
+    /// The primary button went down in the world at `cursor`.
+    pub fn press(&mut self, camera: &Camera, viewport: Viewport, cursor: [f64; 2], limits: &PickLimits, field: &dyn HeightField) {
+        if !self.on {
+            return;
+        }
+        let hit = Self::hit_at(camera, viewport, cursor, limits, field);
+        // The view borrows the lists and the interaction needs the session mutably: it works on copies.
+        let (shown, handles, mpp) = (self.shown.clone(), self.handles.clone(), self.height_mpp(camera, viewport));
+        let v = PointerView { cursor, hit, shown: &shown, handles: &handles, metres_per_pixel: mpp };
+        match self.interaction.press(&mut self.session, &v) {
+            Ok((Pressed::Placed(_), affected)) => {
+                self.stats.placed += 1;
+                self.affected.extend(affected);
+            }
+            Ok((Pressed::Selected(_), _)) => self.stats.selected += 1,
+            Ok(_) => {}
+            Err(e) => self.note(Err(e)),
+        }
+    }
+
+    /// The pointer moved with the primary button down.
+    pub fn moved(&mut self, camera: &Camera, viewport: Viewport, cursor: [f64; 2], limits: &PickLimits, field: &dyn HeightField) {
+        if !self.on || self.session.dragging().is_none() {
+            return;
+        }
+        let hit = Self::hit_at(camera, viewport, cursor, limits, field);
+        let (shown, handles, mpp) = (self.shown.clone(), self.handles.clone(), self.height_mpp(camera, viewport));
+        let v = PointerView { cursor, hit, shown: &shown, handles: &handles, metres_per_pixel: mpp };
+        match self.interaction.moved(&mut self.session, &v) {
+            Ok(a) => self.affected.extend(a),
+            Err(e) => self.note(Err(e)),
+        }
+    }
+
+    /// The primary button went up.
+    pub fn release(&mut self) {
+        match self.interaction.release(&mut self.session) {
+            Ok(Some(a)) => {
+                self.stats.dragged += 1;
+                self.affected.extend(a);
+            }
+            Ok(None) => {}
+            Err(e) => self.note(Err(e)),
+        }
+    }
+
+    /// The window lost the focus or a drag was abandoned.
+    pub fn cancel_drag(&mut self) {
+        match self.interaction.cancel(&mut self.session) {
+            Ok(Some(a)) => self.affected.extend(a),
+            Ok(None) => {}
+            Err(e) => self.note(Err(e)),
+        }
+    }
+
+    /// A key of the editor mode.
+    pub fn key(&mut self, k: EditKey) {
+        if !self.on {
+            return;
+        }
+        match k {
+            EditKey::Tool(n) => self.apply(vec![Event::Tool(tool_number(n))]),
+            EditKey::Undo => self.apply(vec![Event::Undo]),
+            EditKey::Redo => self.apply(vec![Event::Redo]),
+            EditKey::Delete => self.apply(vec![Event::Delete]),
+            EditKey::Escape => {
+                if self.session.dragging().is_some() {
+                    self.cancel_drag();
+                } else if self.session.tool() != &Tool::Select {
+                    self.session.set_tool(Tool::Select);
+                } else {
+                    self.session.deselect();
+                }
+            }
+        }
+    }
+
+    /// What the panels asked for.
+    pub fn apply(&mut self, events: Vec<Event>) {
+        for e in events {
+            match e {
+                Event::Tool(t) => self.session.set_tool(t),
+                Event::Select(id) => {
+                    self.session.select(id);
+                    self.stats.selected += 1;
+                }
+                Event::FlyTo(id) => {
+                    self.session.select(id);
+                    self.fly = Some(id);
+                }
+                Event::Deselect => self.session.deselect(),
+                Event::Undo => match self.session.undo() {
+                    Ok(Some(a)) => {
+                        self.stats.undone += 1;
+                        self.affected.extend(a);
+                    }
+                    Ok(None) => self.session.set_status("nothing to undo"),
+                    Err(e) => self.note(Err(e)),
+                },
+                Event::Redo => match self.session.redo() {
+                    Ok(Some(a)) => {
+                        self.stats.redone += 1;
+                        self.affected.extend(a);
+                    }
+                    Ok(None) => self.session.set_status("nothing to redo"),
+                    Err(e) => self.note(Err(e)),
+                },
+                Event::Delete => match self.session.delete_selected() {
+                    Ok(a) => {
+                        self.stats.deleted += 1;
+                        self.affected.extend(a);
+                    }
+                    Err(e) => self.note(Err(e)),
+                },
+                Event::Param { key, text } => match self.session.set_param_text(&key, &text) {
+                    Ok(a) => {
+                        self.stats.typed += 1;
+                        self.affected.extend(a);
+                    }
+                    Err(e) => self.note(Err(e)),
+                },
+                Event::Rename(name) => match self.session.rename_selected(&name) {
+                    Ok(a) => self.affected.extend(a),
+                    Err(e) => self.note(Err(e)),
+                },
+                Event::ToggleHidden(id) => self.session.toggle_hidden(id),
+            }
+        }
+    }
+
+    /// The camera pose that looks at an edit from the south, `2.5` outline radii away and `1.2` up (at least 150 m and 80 m), pitched
+    /// down at it. `ground_m` is the height of the ground at a direction.
+    pub fn fly_pose(&self, id: ItemId, ground_m: &dyn Fn(Vec3) -> f64) -> Option<FreePose> {
+        let it = self.session.item(id)?;
+        let dir = it.direction();
+        let radius = shape::outline_radius_m(it);
+        let (back, up) = ((2.5 * radius).max(150.0), (1.2 * radius).max(80.0));
+        let from = shape::point_at(dir, 180.0, back, self.radius_m);
+        let position = from * (self.radius_m + ground_m(dir).max(ground_m(from)) + up);
+        let north = shape::tangent_frame(from).0;
+        Some(FreePose::new(PlanetFixed(position), north, -libm::atan2(up, back)))
+    }
+}
+
+/// The keys of the editor mode, for the usage text and the log.
+pub const EDIT_KEYS_HELP: &str = "editor mode: Tab on/off (the panels, the outlines of the edits the camera shows, the planet is for editing: the pointer is free), \
+     1 select, 2 crater, 3 hill, 4 plateau then click the planet to place it, click an edit to select it (double-click in a list to fly there), drag its handles \
+     (circle: move, square: radius, light circle: height) or type values in the inspector, Ctrl+Z undo, Ctrl+Y or Ctrl+Shift+Z redo, Delete deletes, Esc steps back \
+     (drag, tool, selection) and does not quit; hold the right mouse button to look around, WASD/QE move";
+
+/// The first frame of the smoke run's editing script.
+pub const SMOKE_FIRST_FRAME: u64 = 60;
+/// The frames a smoke run with the editing script drives.
+pub const SMOKE_EDIT_FRAMES: u64 = 90;
+
+impl EditRuntime {
+    /// A pixel on the vertical line through the middle of the view where the mouse ray meets the surface, from the lower part up.
+    fn surface_pixel(camera: &Camera, viewport: Viewport, limits: &PickLimits, field: &dyn HeightField) -> Option<[f64; 2]> {
+        (1..=9)
+            .rev()
+            .map(|k| [viewport.width_px / 2.0, viewport.height_px * f64::from(k) / 10.0])
+            .find(|c| Self::hit_at(camera, viewport, *c, limits, field).is_some())
+    }
+
+    /// One frame of the smoke run's editing script, driven through the same calls as the pointer and the keys: the mode on, a hill placed
+    /// where the view meets the surface, its move handle dragged, a value typed, undo, redo, delete, undo. Frames other than the script's
+    /// do nothing.
+    pub fn smoke_step(
+        &mut self,
+        frame: u64,
+        camera: &Camera,
+        viewport: Viewport,
+        limits: &PickLimits,
+        field: &dyn HeightField,
+    ) -> Result<(), String> {
+        match frame {
+            f if f == SMOKE_FIRST_FRAME => {
+                if !self.on {
+                    self.toggle();
+                }
+                self.key(EditKey::Tool(3));
+            }
+            f if f == SMOKE_FIRST_FRAME + 2 => {
+                let c = Self::surface_pixel(camera, viewport, limits, field).ok_or("edit smoke: no pixel of the view meets the surface")?;
+                self.press(camera, viewport, c, limits, field);
+                self.release();
+                if self.stats.placed == 0 {
+                    return Err(format!("edit smoke: the click at {c:?} placed nothing ({})", self.session.status()));
+                }
+            }
+            f if f == SMOKE_FIRST_FRAME + 4 => {
+                let h = self
+                    .handles
+                    .iter()
+                    .find(|(k, _)| *k == Handle::Move)
+                    .map(|(_, p)| *p)
+                    .ok_or("edit smoke: the placed stamp has no move handle on the screen")?;
+                self.press(camera, viewport, h, limits, field);
+                self.moved(camera, viewport, [h[0] + 12.0, h[1]], limits, field);
+            }
+            f if f == SMOKE_FIRST_FRAME + 6 => self.release(),
+            f if f == SMOKE_FIRST_FRAME + 8 => self.apply(vec![Event::Param { key: "radius_m".to_string(), text: "300".to_string() }]),
+            f if f == SMOKE_FIRST_FRAME + 10 => self.key(EditKey::Undo),
+            f if f == SMOKE_FIRST_FRAME + 12 => self.key(EditKey::Redo),
+            f if f == SMOKE_FIRST_FRAME + 14 => self.key(EditKey::Delete),
+            f if f == SMOKE_FIRST_FRAME + 16 => self.key(EditKey::Undo),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// The verdict of the editing script: everything it drove happened and nothing was refused.
+    pub fn smoke_verdict(&self) -> Result<(), String> {
+        let s = &self.stats;
+        let ok = s.placed >= 1
+            && s.dragged >= 1
+            && s.typed >= 1
+            && s.undone >= 2
+            && s.redone >= 1
+            && s.deleted >= 1
+            && s.refused == 0
+            && s.shown_max >= 1;
+        if ok && self.edit_count() == 1 {
+            Ok(())
+        } else {
+            Err(format!("edit smoke: the script did not complete: {} (one edit expected, {} there)", self.summary(), self.edit_count()))
+        }
+    }
+
+    /// The counts of the run, one line.
+    pub fn summary(&self) -> String {
+        let s = &self.stats;
+        format!(
+            "{} frames in the editor mode, {} placed, {} selected, {} dragged, {} typed, {} deleted, {} undone, {} redone, {} flights, {} refused, up to {} edits shown, {} tiles sent to refresh",
+            s.frames, s.placed, s.selected, s.dragged, s.typed, s.deleted, s.undone, s.redone, s.flights, s.refused, s.shown_max, s.refresh_tiles
+        )
+    }
+}
+
+/// The tool a number key picks: 1 select, then the stamp kinds in the order of the rail.
+pub fn tool_number(n: usize) -> Tool {
+    match n {
+        0 | 1 => Tool::Select,
+        n => STAMP_KINDS.get(n - 2).map_or(Tool::Select, |k| Tool::Stamp((*k).to_string())),
+    }
+}
+
+/// The status line of the editor mode in the window.
+pub fn mode_status(e: &EditRuntime) -> String {
+    match e.session.tool() {
+        Tool::Select => "Select".to_string(),
+        Tool::Stamp(k) => format!("Place {}", kind_title(k)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use planet_core::cube::TangentWarp;
+    use planet_world_def::cells::cell_of;
+
+    const R: f64 = 6_371_000.0;
+    const VIEWPORT: Viewport = Viewport { width_px: 1000.0, height_px: 1000.0 };
+
+    /// A bare sphere.
+    struct Flat;
+
+    impl HeightField for Flat {
+        fn height(&self, _dir: Vec3) -> f64 {
+            0.0
+        }
+        fn seed(&self) -> u64 {
+            1
+        }
+        fn implementation_id(&self) -> &'static str {
+            "flat-test"
+        }
+        fn version(&self) -> u32 {
+            1
+        }
+        fn max_abs_height_m(&self) -> f64 {
+            0.0
+        }
+    }
+
+    fn unit(lat_deg: f64, lon_deg: f64) -> Vec3 {
+        let (lat, lon) = (lat_deg.to_radians(), lon_deg.to_radians());
+        Vec3::new(libm::cos(lat) * libm::cos(lon), libm::cos(lat) * libm::sin(lon), libm::sin(lat))
+    }
+
+    fn above(dir: Vec3, altitude_m: f64) -> Camera {
+        Camera::at_surface_point(
+            PlanetFixed(dir * (R + altitude_m)),
+            Vec3::new(0.0, 0.0, 1.0),
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::FRAC_PI_3,
+            1.0,
+            1.0,
+        )
+    }
+
+    fn runtime(items: Option<&PathBuf>) -> EditRuntime {
+        EditRuntime::new(WorldDefinition::single_planet(R, 7), R, items, Layout::default()).unwrap()
+    }
+
+    const CENTRE: [f64; 2] = [500.0, 500.0];
+
+    fn limits() -> PickLimits {
+        PickLimits::new(R, 9_000.0)
+    }
+
+    fn frame(e: &mut EditRuntime, cam: &Camera, over_ui: bool) {
+        let tiles = [TileId::from_direction(&TangentWarp, cam.position.0.normalized(), 8), cell_of(R, cam.position.0.normalized())];
+        e.update(cam, VIEWPORT, &tiles, &Flat, &limits(), Pointer { cursor: CENTRE, over_ui });
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("planet-editwin-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn nothing_happens_until_the_mode_is_on_and_leaving_it_abandons_a_drag() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.key(EditKey::Tool(2));
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        frame(&mut e, &cam, false);
+        assert_eq!((e.edit_count(), e.stats, e.overlay().len()), (0, EditStats::default(), 0), "off: nothing is placed, counted or drawn");
+        e.toggle();
+        assert!(e.on);
+        e.key(EditKey::Tool(2));
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        frame(&mut e, &cam, false);
+        e.press(&cam, VIEWPORT, e.handles[0].1, &limits(), &Flat);
+        assert!(e.session.dragging().is_some(), "the move handle of the new stamp is held");
+        e.moved(&cam, VIEWPORT, [CENTRE[0] + 30.0, CENTRE[1]], &limits(), &Flat);
+        let before = e.session.editor().hash();
+        e.toggle();
+        assert!(!e.on && e.session.dragging().is_none(), "leaving the mode abandons the drag");
+        assert_ne!(e.session.editor().hash(), before, "and the edit goes back");
+        assert_eq!(e.session.editor().undo_depth(), 1, "only the placement is recorded");
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn a_stamp_is_placed_dragged_typed_undone_redone_and_deleted_by_the_pointer_and_the_keys() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.toggle();
+        frame(&mut e, &cam, false);
+        assert!(e.panel_data("").near.is_empty());
+        // Place a hill with the stamp tool at the centre of the view.
+        e.key(EditKey::Tool(3));
+        assert_eq!(e.session.tool(), &Tool::Stamp("hill".into()));
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        let placed = e.take_affected();
+        assert_eq!((e.stats.placed, e.edit_count(), placed.len()), (1, 1, 1));
+        let id = e.session.selected().expect("the new stamp is selected");
+        assert!(e.session.item(id).unwrap().direction().dot(at) > 1.0 - 1e-9, "placed under the cursor");
+        frame(&mut e, &cam, false);
+        assert_eq!(e.overlay().len(), 1);
+        let d = e.panel_data("view");
+        assert_eq!(
+            (d.edit_count, d.near.len(), d.inspector.is_some(), d.saved, d.view_status),
+            (1, 1, true, "not saved (start with --items DIR)", "view")
+        );
+        assert_eq!(mode_status(&e), "Select");
+        // Drag the move handle 60 pixels right: one command.
+        let depth = e.session.editor().undo_depth();
+        let handle = e.handles.iter().find(|(h, _)| *h == Handle::Move).unwrap().1;
+        e.press(&cam, VIEWPORT, handle, &limits(), &Flat);
+        assert_eq!(e.session.dragging(), Some(Handle::Move));
+        let before = e.session.item(id).unwrap().direction();
+        for k in 1..=6 {
+            e.moved(&cam, VIEWPORT, [handle[0] + 10.0 * f64::from(k), handle[1]], &limits(), &Flat);
+        }
+        e.release();
+        assert_eq!((e.stats.dragged, e.session.editor().undo_depth()), (1, depth + 1));
+        let after = e.session.item(id).unwrap().direction();
+        let moved_m = R * libm::atan2(before.cross(after).length(), before.dot(after));
+        let want = 60.0 * 3_000.0 * 2.0 * libm::tan(std::f64::consts::FRAC_PI_6) / 1000.0;
+        assert!((moved_m - want).abs() < 0.03 * want, "60 px at 3 km up is {want} m, moved {moved_m}");
+        assert!(!e.take_affected().is_empty());
+        // A typed value, a refused one, and the status that says why.
+        e.apply(vec![Event::Param { key: "radius_m".into(), text: "1.2 km".into() }]);
+        assert_eq!((e.stats.typed, e.session.item(id).unwrap().params["radius_m"]), (1, 1_200.0));
+        e.apply(vec![Event::Param { key: "radius_m".into(), text: "9 km".into() }]);
+        assert_eq!(e.stats.refused, 1);
+        assert!(e.session.status().contains("Radius must be between"), "{}", e.session.status());
+        // Undo, redo, delete through the keys; the places to refresh come out.
+        let _ = e.take_affected();
+        e.key(EditKey::Undo);
+        e.key(EditKey::Redo);
+        e.key(EditKey::Delete);
+        assert_eq!((e.stats.undone, e.stats.redone, e.stats.deleted, e.edit_count()), (1, 1, 1, 0));
+        assert_eq!(e.take_affected().len(), 2 + 2 + 1, "undo and redo of a change have two places each, a delete one");
+        e.key(EditKey::Undo);
+        e.key(EditKey::Undo);
+        e.key(EditKey::Undo);
+        e.key(EditKey::Undo);
+        e.key(EditKey::Undo);
+        assert_eq!(e.edit_count(), 0, "everything undone");
+        e.key(EditKey::Undo);
+        assert!(e.session.status().contains("nothing to undo"));
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn a_press_selects_the_edit_under_it_and_escape_steps_back_one_thing_at_a_time() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.toggle();
+        e.key(EditKey::Tool(2));
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        let id = e.session.selected().unwrap();
+        e.session.deselect();
+        frame(&mut e, &cam, false);
+        assert_eq!(e.session.hovered(), Some(id), "the cursor is over it");
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        assert_eq!((e.session.selected(), e.stats.selected), (Some(id), 1));
+        e.release();
+        // Over a panel there is no hover.
+        frame(&mut e, &cam, true);
+        assert_eq!(e.session.hovered(), None);
+        frame(&mut e, &cam, false);
+        // Esc: a drag first, then the tool, then the selection.
+        let h = e.handles[0].1;
+        e.press(&cam, VIEWPORT, h, &limits(), &Flat);
+        e.key(EditKey::Escape);
+        assert!(e.session.dragging().is_none() && e.session.selected().is_some());
+        e.key(EditKey::Tool(2));
+        e.key(EditKey::Escape);
+        assert_eq!((e.session.tool().clone(), e.session.selected()), (Tool::Select, Some(id)));
+        e.key(EditKey::Escape);
+        assert_eq!(e.session.selected(), None);
+        assert_eq!(tool_number(0), Tool::Select);
+        assert_eq!(tool_number(1), Tool::Select);
+        assert_eq!(tool_number(2), Tool::Stamp("crater".into()));
+        assert_eq!(tool_number(4), Tool::Stamp("plateau".into()));
+        assert_eq!(tool_number(9), Tool::Select);
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn a_double_click_or_fly_to_takes_the_camera_to_the_edit_looking_at_it() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.toggle();
+        e.key(EditKey::Tool(4));
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        let id = e.session.selected().unwrap();
+        assert_eq!(e.take_fly(), None);
+        e.apply(vec![Event::FlyTo(id)]);
+        assert_eq!(e.take_fly(), Some(id));
+        assert_eq!(e.take_fly(), None, "once");
+        let pose = e.fly_pose(id, &|_| 0.0).unwrap();
+        let item_pos = e.session.item(id).unwrap().direction() * R;
+        let view = (item_pos - pose.position.0).normalized();
+        let camera = pose.camera(std::f64::consts::FRAC_PI_3, 1.0, 1.0);
+        assert!(camera.forward.dot(view) > 0.99, "the camera looks at the edit: {}", camera.forward.dot(view));
+        let altitude = pose.position.0.length() - R;
+        let radius = shape::outline_radius_m(e.session.item(id).unwrap());
+        assert!((altitude - 1.2 * radius).abs() < 0.01 * radius, "{altitude} vs {radius}");
+        assert!(e.fly_pose(12345, &|_| 0.0).is_none());
+        // A small stamp is flown to from at least 150 m away and 80 m up.
+        e.key(EditKey::Tool(3));
+        e.session.set_tool(Tool::Stamp("hill".into()));
+        let (hill, _) = e.session.place("hill", unit(10.0, 10.0)).unwrap();
+        e.session
+            .editor_mut()
+            .change(hill, |it| {
+                it.params.insert("radius_m".into(), 50.0);
+            })
+            .unwrap();
+        let p = e.fly_pose(hill, &|_| 0.0).unwrap();
+        assert!((p.position.0.length() - R - 80.0).abs() < 1.0);
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn the_edits_are_written_to_the_directory_and_come_back_when_it_is_opened_again() {
+        let dir = temp_dir("items");
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(Some(&dir));
+        assert!(e.panel_data("").saved.starts_with("saved in "));
+        e.toggle();
+        e.key(EditKey::Tool(2));
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        let id = e.session.selected().unwrap();
+        e.apply(vec![Event::Param { key: "depth_m".into(), text: "400".into() }]);
+        let files: Vec<_> =
+            std::fs::read_dir(dir.join("0")).unwrap().map(|f| f.unwrap().file_name().to_string_lossy().to_string()).collect();
+        assert_eq!(files, [format!("{}.toml", planet_world_def::item::ulid_text(id))]);
+        let hash = e.session.editor().hash();
+        drop(e);
+        let again = runtime(Some(&dir));
+        assert_eq!(again.edit_count(), 1);
+        assert_eq!(again.session.item(id).unwrap().params["depth_m"], 400.0);
+        assert_eq!(again.session.editor().hash(), hash, "the definition is the same");
+        assert!(again.session.status().contains("1 edits loaded"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn the_search_lists_the_planet_and_the_nearby_list_the_shown_edits() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.toggle();
+        e.key(EditKey::Tool(2));
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        e.session.place("plateau", unit(-30.0, 120.0)).unwrap();
+        e.session.deselect();
+        frame(&mut e, &cam, false);
+        assert_eq!(e.panel_data("").near.len(), 1, "only the crater is in view");
+        assert!(e.panel_data("").found.is_empty(), "no search yet");
+        e.panels.query = "plateau".into();
+        frame(&mut e, &cam, false);
+        let found = &e.panel_data("").found;
+        assert_eq!(found.len(), 1);
+        assert!(found[0].distance_m > 1_000_000.0, "planet-wide, from the other side");
+        e.panels.query.clear();
+        e.panels.kind = Some("crater".into());
+        frame(&mut e, &cam, false);
+        assert_eq!(e.panel_data("").found.len(), 1);
+        assert_eq!(e.stats.shown_max, 1);
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn the_smoke_script_places_drags_types_undoes_redoes_and_deletes_and_its_verdict_says_so() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        assert!(e.smoke_verdict().is_err(), "nothing driven yet");
+        for f in 0..SMOKE_EDIT_FRAMES {
+            e.smoke_step(f, &cam, VIEWPORT, &limits(), &Flat).unwrap_or_else(|why| panic!("frame {f}: {why}"));
+            frame(&mut e, &cam, false);
+        }
+        e.smoke_verdict().unwrap();
+        let s = e.stats;
+        assert_eq!((s.placed, s.dragged, s.typed, s.deleted, s.undone, s.redone, s.refused), (1, 1, 1, 1, 2, 1, 0));
+        assert!(e.summary().contains("1 placed") && e.summary().contains("2 undone"));
+        // The same script over a sky: no pixel meets the surface and the step says so.
+        let sky = Camera::at_surface_point(
+            PlanetFixed(at * (R + 3_000.0)),
+            Vec3::new(0.0, 0.0, 1.0),
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::FRAC_PI_3,
+            1.0,
+            1.0,
+        );
+        let away = Camera { forward: sky.forward * -1.0, ..sky };
+        let mut e2 = runtime(None);
+        e2.smoke_step(SMOKE_FIRST_FRAME, &away, VIEWPORT, &limits(), &Flat).unwrap();
+        let err = e2.smoke_step(SMOKE_FIRST_FRAME + 2, &away, VIEWPORT, &limits(), &Flat).unwrap_err();
+        assert!(err.contains("no pixel"), "{err}");
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn the_commands_name_the_resident_tiles_to_refresh_and_count_them() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.toggle();
+        e.key(EditKey::Tool(4));
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        let level = 8;
+        let near = TileId::from_direction(&TangentWarp, at, level);
+        let far = TileId::from_direction(&TangentWarp, unit(-40.0, 100.0), level);
+        let tiles = e.refresh_tiles(&[near, far]);
+        assert_eq!(tiles, vec![near], "the plateau's reach touches the near tile and not the far one");
+        assert_eq!(e.stats.refresh_tiles, 1);
+        assert!(e.refresh_tiles(&[near, far]).is_empty(), "the places are taken once");
+        assert_eq!(e.stats.refresh_tiles, 1);
+    }
+}
