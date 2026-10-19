@@ -1,0 +1,1 @@
+- 2026-10-19 **Water-motion bug parked (owner):** an M5 leftover, not urgent; sonnet-spikes diagnoses it without fixing; sonnet-explorer continues with the M6 plan.
