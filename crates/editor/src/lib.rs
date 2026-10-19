@@ -14,6 +14,7 @@ pub mod layout;
 pub mod lists;
 pub mod overlay;
 pub mod params;
+pub mod polyline;
 pub mod relevance;
 pub mod session;
 pub mod shape;
