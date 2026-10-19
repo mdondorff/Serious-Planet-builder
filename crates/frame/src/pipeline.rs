@@ -30,7 +30,7 @@ use planet_core::cube::FaceMapping;
 use planet_core::{PlanetFixed, TileId};
 use planet_generators::height::HeightField;
 use planet_streaming::Spawner;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 /// Frames the loop may have submitted and not yet seen finish. The slot pools of the renderer retire a released slot this
@@ -228,7 +228,7 @@ pub fn draw_plan_preview(
     bounds: &TileBounds,
     preview: &[PreviewStamp],
 ) -> Result<DrawPlan, PlanError> {
-    draw_plan_edited(req, base, resident, bounds, preview, &HashSet::new())
+    draw_plan_edited(req, base, resident, bounds, preview, &BTreeSet::new())
 }
 
 /// [`draw_plan_preview`] for the frames between an edit and the first plan made after it (REND-033): the plan in hand still carries the
@@ -241,7 +241,7 @@ pub fn draw_plan_edited(
     resident: &dyn ResidentSet,
     bounds: &TileBounds,
     preview: &[PreviewStamp],
-    edited: &HashSet<TileId>,
+    edited: &BTreeSet<TileId>,
 ) -> Result<DrawPlan, PlanError> {
     let map = face_mapping_by_id(&req.face_mapping).ok_or_else(|| PlanError::UnknownFaceMapping(req.face_mapping.clone()))?;
     let mut shown: BTreeMap<TileId, TerrainDraw> = BTreeMap::new();
@@ -675,7 +675,7 @@ pub struct PlanPipeline {
     preview: Vec<PreviewStamp>,
     /// The tiles named by the edits since the last plan made after one was delivered, and the request number of the first plan that is
     /// made after the latest edit (a plan with a lower number predates it).
-    edited: HashSet<TileId>,
+    edited: BTreeSet<TileId>,
     edit_seq: u64,
 }
 
@@ -689,7 +689,7 @@ impl PlanPipeline {
             last_predicted: None,
             frame: 0,
             preview: Vec::new(),
-            edited: HashSet::new(),
+            edited: BTreeSet::new(),
             edit_seq: 0,
         }
     }
