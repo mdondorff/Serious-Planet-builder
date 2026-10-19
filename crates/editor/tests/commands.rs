@@ -533,3 +533,41 @@ fn loading_the_same_items_twice_is_refused_as_a_duplicate() {
     assert!(matches!(ed.load(BodyId::PLANET), Err(EditError::Duplicate(d)) if d == id));
     assert_eq!(ed.hash(), hash, "a refused load changes nothing");
 }
+
+// spec: AUTH-004
+#[test]
+fn the_revision_counts_every_change_of_the_definition_and_only_those() {
+    let mut ed = editor(MemoryStore::new(), 77);
+    assert_eq!(ed.revision(), 0);
+    let (id, _) = ed.put(new_item(1)).unwrap();
+    assert_eq!(ed.revision(), 1, "a put");
+    ed.change(id, |it| it.priority = 3).unwrap();
+    assert_eq!(ed.revision(), 2, "a change");
+    ed.undo().unwrap();
+    ed.redo().unwrap();
+    assert_eq!(ed.revision(), 4, "undo and redo");
+    ed.begin_edit(id).unwrap();
+    assert_eq!(ed.revision(), 4, "beginning a drag changes nothing");
+    ed.edit(|it| it.priority = 1).unwrap();
+    assert_eq!(ed.revision(), 5, "a step of the drag");
+    ed.cancel_edit().unwrap();
+    assert_eq!(ed.revision(), 6, "the drag goes back");
+    ed.begin_edit(id).unwrap();
+    ed.edit(|it| it.priority = 2).unwrap();
+    let before_end = ed.revision();
+    ed.end_edit().unwrap();
+    assert_eq!(ed.revision(), before_end, "ending the drag writes the file and moves nothing more");
+    ed.delete(id).unwrap();
+    assert_eq!(ed.revision(), before_end + 1, "a delete");
+    // Reading changes nothing; a load is a change.
+    let _ = (ed.hash(), ed.item_ids(), ed.items().count());
+    assert_eq!(ed.revision(), before_end + 1);
+    let mut store = MemoryStore::new();
+    let mut other = editor(MemoryStore::new(), 78);
+    let (oid, _) = other.put(new_item(2)).unwrap();
+    store.put(other.item(oid).unwrap()).unwrap();
+    let mut loader = editor(store, 79);
+    assert_eq!(loader.revision(), 0);
+    loader.load(BodyId::PLANET).unwrap();
+    assert_eq!(loader.revision(), 1, "a load");
+}

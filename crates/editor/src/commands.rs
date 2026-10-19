@@ -137,6 +137,8 @@ pub struct Editor<S: ItemStore> {
     open: Option<OpenEdit>,
     /// The items by id, the copy the log works from (the definition keeps the index form).
     items: BTreeMap<ItemId, Item>,
+    /// Counts the changes made to the definition (commands, undo, redo, a drag step, a load); a cheap way to ask whether it moved.
+    revision: u64,
 }
 
 impl<S: ItemStore> Editor<S> {
@@ -144,7 +146,18 @@ impl<S: ItemStore> Editor<S> {
     /// is that of the definition at the time of each command. The items already in `def` are not known to the editor (use
     /// [`load`](Editor::load) for those of the store).
     pub fn new(def: WorldDefinition, store: S, ids: IdMaker, generator_version: u32, stage_version: u32) -> Editor<S> {
-        Editor { def, store, ids, generator_version, stage_version, undo: Vec::new(), redo: Vec::new(), open: None, items: BTreeMap::new() }
+        Editor {
+            def,
+            store,
+            ids,
+            generator_version,
+            stage_version,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            open: None,
+            items: BTreeMap::new(),
+            revision: 0,
+        }
     }
 
     /// Load the items of a body from the store into the definition. An item authored against other versions than the active ones is
@@ -169,6 +182,8 @@ impl<S: ItemStore> Editor<S> {
             item.put_into(&mut trial).map_err(EditError::from)?;
         }
         self.def = trial;
+        // A load that finds nothing leaves the definition as it was.
+        self.revision += u64::from(!items.is_empty());
         for item in &items {
             self.items.insert(item.id, item.clone().canonical());
         }
@@ -181,6 +196,11 @@ impl<S: ItemStore> Editor<S> {
     }
 
     /// The hash of the definition.
+    /// How many times the definition has been changed (zero at the start): equal revisions are the same definition.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     pub fn hash(&self) -> u64 {
         self.def.hash()
     }
@@ -301,6 +321,7 @@ impl<S: ItemStore> Editor<S> {
         next.validate()?;
         let affected = vec![affected_of(&open.now), affected_of(&next)];
         next.put_into(&mut self.def).map_err(EditError::from)?;
+        self.revision += 1;
         self.items.insert(next.id, next.clone());
         self.open.as_mut().expect("open").now = next;
         Ok(affected)
@@ -328,6 +349,7 @@ impl<S: ItemStore> Editor<S> {
         // The item goes back first: a refusal (which cannot happen for an item that was accepted before) would leave the drag open.
         let open = self.open.as_ref().ok_or(EditError::NoEditOpen)?;
         open.before.put_into(&mut self.def).map_err(EditError::from)?;
+        self.revision += 1;
         let open = self.open.take().expect("open");
         let affected = vec![affected_of(&open.now), affected_of(&open.before)];
         self.items.insert(open.before.id, open.before);
@@ -390,6 +412,7 @@ impl<S: ItemStore> Editor<S> {
     /// Bring the store, the definition and the item copy to the state after `command`. A failure leaves everything as it was: the index
     /// refuses an item before it changes anything, and a store failure puts the definition back.
     fn run(&mut self, command: &Command) -> Result<Vec<Affected>, EditError> {
+        self.revision += 1;
         let id = command.id();
         let current = self.items.get(&id).cloned();
         match (&command.after, current) {

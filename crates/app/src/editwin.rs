@@ -138,7 +138,7 @@ pub struct EditRuntime {
     fly: Option<ItemId>,
     /// The places the commands of this frame changed, for the footprint find of the tiles (`take_affected`).
     affected: Vec<Affected>,
-    /// The hash of the definition the generator was last given (the one the window opened with at first).
+    /// The revision of the editor's definition the generator was last given (zero: the one the window opened with).
     published: u64,
     /// The next refresh is every resident tile (the definition changed with no command: items loaded at the start).
     refresh_all: bool,
@@ -168,7 +168,7 @@ impl EditRuntime {
         let (store, saved) = open_store(items.map(PathBuf::as_path));
         let mut editor = Editor::new(def, store, ids, planet_generators::GENERATOR_VERSION, EDIT_STAGE_VERSION);
         // What the generator has is the definition as it was given, before the items of the directory are loaded into the editor's copy.
-        let published = editor.hash();
+        let published = editor.revision();
         let loaded = editor.load(BodyId::PLANET).map_err(|e| format!("loading the items: {e}"))?;
         let mut session = Session::new(editor, BodyId::PLANET, radius_m);
         session.set_status(if loaded > 0 { format!("{loaded} edits loaded") } else { String::new() });
@@ -235,11 +235,11 @@ impl EditRuntime {
     /// shared snapshot (STRM-028). The commands that made the change have named the places to refresh; a change with no command (the items
     /// loaded at the start) refreshes every resident tile.
     pub fn take_changed_definition(&mut self) -> Option<std::sync::Arc<WorldDefinition>> {
-        let hash = self.session.editor().hash();
-        if hash == self.published {
+        let revision = self.session.editor().revision();
+        if revision == self.published {
             return None;
         }
-        self.published = hash;
+        self.published = revision;
         self.refresh_all |= self.affected.is_empty();
         self.stats.published += 1;
         Some(std::sync::Arc::new(self.session.editor().definition().clone()))

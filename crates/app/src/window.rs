@@ -246,7 +246,8 @@ struct Running {
 struct App<'w> {
     cfg: &'w Config,
     world: &'w Arc<WorldTerrain>,
-    field: &'w (dyn HeightField + 'w),
+    /// The height field the window picks and reads the ground from; rebuilt when the edits change the definition.
+    field: Box<dyn HeightField + 'w>,
     cameras: &'w [Camera],
     clock: Arc<SystemClock>,
     params: ControllerParams,
@@ -352,7 +353,7 @@ impl App<'_> {
         let Some(st) = self.state.as_mut() else { return };
         let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
         let limits = planet_frame::pick::PickLimits::new(self.cfg.radius_m, self.cfg.lod.max_height_m);
-        let field = self.field;
+        let field = self.field.as_ref();
         let height = |d: planet_core::Vec3| field.height(d);
         if let Some(g) = st.viewer.globe.as_mut() {
             if g.click(st.cursor, &st.last_camera, viewport, &st.markers, &limits, &height).is_some() {
@@ -378,7 +379,32 @@ impl App<'_> {
         let cfg = self.cfg;
         let began = Instant::now();
         let now_ms = self.clock.now_ms();
-        let (field, radius) = (self.field, cfg.radius_m);
+        // A changed definition goes to the generator before the frame plans: the definition first, then the tiles it changed (STRM-028); the
+        // field the window picks and reads the ground from is then built again from the new definition.
+        let mut republished = false;
+        if let Some(st) = self.state.as_mut() {
+            if let Some(e) = st.edit.as_mut() {
+                if let Some(def) = e.take_changed_definition() {
+                    match self.world.set_definition(def) {
+                        Ok(()) => {
+                            let resident: Vec<_> = st.rig.managed.resident().keys().copied().collect();
+                            let tiles = e.refresh_tiles(&resident);
+                            st.rig.managed.edit(&tiles);
+                            republished = true;
+                        }
+                        Err(why) => {
+                            e.stats.refused += 1;
+                            e.session.set_status(format!("the terrain did not take the edit: {why}"));
+                        }
+                    }
+                }
+            }
+        }
+        if republished {
+            let world = self.world;
+            self.field = world.field()?;
+        }
+        let (field, radius) = (self.field.as_ref(), cfg.radius_m);
         // Take the state out so the helpers that borrow `self` stay usable; it is put back before returning.
         let mut st = self.state.take().ok_or("no window")?;
         let result = (|| {
@@ -389,22 +415,6 @@ impl App<'_> {
             let mut quit = false;
             if cfg.smoke {
                 quit |= smoke_keys(&mut st, self.cameras, now_ms)?;
-            }
-            // A changed definition goes to the generator before the frame plans: the definition first, then the tiles it changed (STRM-028).
-            if let Some(e) = st.edit.as_mut() {
-                if let Some(def) = e.take_changed_definition() {
-                    match self.world.set_definition(def) {
-                        Ok(()) => {
-                            let resident: Vec<_> = st.rig.managed.resident().keys().copied().collect();
-                            let tiles = e.refresh_tiles(&resident);
-                            st.rig.managed.edit(&tiles);
-                        }
-                        Err(why) => {
-                            e.stats.refused += 1;
-                            e.session.set_status(format!("the terrain did not take the edit: {why}"));
-                        }
-                    }
-                }
             }
             // The editor mode edits from the free camera, with no overview over it.
             if st.edit.as_ref().is_some_and(|e| e.on) {
@@ -645,7 +655,7 @@ impl App<'_> {
     fn edit_mouse(&mut self, state: ElementState, button: MouseButton, world: bool) {
         let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
         let limits = PickLimits::new(self.cfg.radius_m, self.cfg.lod.max_height_m);
-        let field = self.field;
+        let field = self.field.as_ref();
         let Some(st) = self.state.as_mut() else { return };
         match edit_mouse_action(button, state, world, st.viewer.mouse.captured(), st.edit_down) {
             Some(EditMouse::Press) => {
@@ -944,7 +954,7 @@ impl ApplicationHandler for App<'_> {
                         let limits = PickLimits::new(self.cfg.radius_m, self.cfg.lod.max_height_m);
                         let camera = st.last_camera;
                         if let Some(e) = st.edit.as_mut() {
-                            e.moved(&camera, viewport, now, &limits, self.field);
+                            e.moved(&camera, viewport, now, &limits, self.field.as_ref());
                         }
                     }
                 }
@@ -1211,7 +1221,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let mut app = App {
         cfg: &cfg,
         world: &world,
-        field: field.as_ref(),
+        field,
         cameras: &script.cameras,
         clock: Arc::new(SystemClock::new()),
         params: ControllerParams::for_radius(radius_m),
