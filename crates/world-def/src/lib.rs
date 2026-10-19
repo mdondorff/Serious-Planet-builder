@@ -7,6 +7,7 @@
 //! are read and written as TOML (`toml_io`, WDEF-002).
 
 pub mod cells;
+pub mod footprint;
 pub mod toml_io;
 pub mod water;
 
@@ -79,10 +80,36 @@ pub fn set_hash(entries: &BTreeMap<NodePath, u64>) -> u64 {
 
 /// An authored item as the index keeps it: the opaque content hash (M6 defines payloads) and the bits of its unit
 /// direction, which the cell of the item is derived from whenever the body's radius changes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ItemRec {
     content: u64,
     dir: [u64; 3],
+    /// Bits of `reach_m` and `max_delta_m` (`-0.0` stored as `0.0`).
+    reach_bits: u64,
+    max_delta_bits: u64,
+    layer: String,
+    priority: i32,
+}
+
+/// The layer and the numbers of an item put with [`WorldDefinition::put_item`].
+pub const DEFAULT_ITEM_LAYER: &str = "items";
+
+/// An authored item as it is put into the definition (WDEF-007).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ItemSpec {
+    pub id: u64,
+    /// The layer the item belongs to (not empty).
+    pub layer: String,
+    /// Application order within the layer: lower first, ties by id.
+    pub priority: i32,
+    /// Where the item is anchored; any non-zero finite vector, normalised on entry.
+    pub dir: Vec3,
+    /// Stands for everything about the item except its place, reach and bound.
+    pub content_hash: u64,
+    /// Arc distance in metres beyond which the item changes no output; finite, at least 0 and at most [`cells::CELL_EDGE_M`].
+    pub reach_m: f64,
+    /// Bound in metres on the height change anywhere in the reach; finite and at least 0.
+    pub max_delta_m: f64,
 }
 
 /// Why an item could not be put into the index.
@@ -92,6 +119,12 @@ pub enum ItemError {
     Radius(MissingNode),
     /// The direction is zero or not finite.
     Direction,
+    /// The reach is not finite, below 0 or over the limit of one cell edge (WDEF-007).
+    Reach { id: u64, reach_m: f64, limit_m: f64 },
+    /// The height bound is not finite or below 0.
+    MaxDelta { id: u64, max_delta_m: f64 },
+    /// The layer name is empty.
+    Layer { id: u64 },
 }
 
 impl core::fmt::Display for ItemError {
@@ -99,7 +132,21 @@ impl core::fmt::Display for ItemError {
         match self {
             ItemError::Radius(m) => write!(f, "{m}: an item needs the radius of its body to find its cell"),
             ItemError::Direction => write!(f, "an item's direction must be a finite non-zero vector"),
+            ItemError::Reach { id, reach_m, limit_m } => {
+                write!(f, "item {id}: reach {reach_m} m must be finite, at least 0 and at most {limit_m} m (one cell edge)")
+            }
+            ItemError::MaxDelta { id, max_delta_m } => write!(f, "item {id}: max_delta {max_delta_m} m must be finite and at least 0"),
+            ItemError::Layer { id } => write!(f, "item {id}: the layer name must not be empty"),
         }
+    }
+}
+
+/// `-0.0` read as `0.0`, as bits (WDEF-003).
+fn canonical_bits(v: f64) -> u64 {
+    if v == 0.0 {
+        0.0f64.to_bits()
+    } else {
+        v.to_bits()
     }
 }
 
@@ -211,6 +258,7 @@ impl WorldDefinition {
         let mut v = vec![u64::from(HASH_VERSION), base, self.items.len() as u64];
         for ((body, id), rec) in &self.items {
             v.extend([u64::from(body.0), *id, rec.content, rec.dir[0], rec.dir[1], rec.dir[2]]);
+            v.extend([rec.reach_bits, rec.max_delta_bits, u64::from(rec.priority as u32), hash_u64s(3, &path_words(&rec.layer))]);
         }
         hash_u64s(0x0069_7465, &v)
     }
@@ -242,14 +290,37 @@ impl WorldDefinition {
     /// hash (which stands for everything about the item except its place, which the index keeps). The cell level comes
     /// from the body's radius node. Returns the cell.
     pub fn put_item(&mut self, body: BodyId, id: u64, dir: Vec3, content_hash: u64) -> Result<TileId, ItemError> {
+        let spec = ItemSpec { id, layer: DEFAULT_ITEM_LAYER.to_string(), priority: 0, dir, content_hash, reach_m: 0.0, max_delta_m: 0.0 };
+        self.put_item_spec(body, spec)
+    }
+
+    /// [`put_item`](WorldDefinition::put_item) with a layer, a priority, a reach and a height bound (WDEF-007). A refused
+    /// item leaves the definition unchanged (an item of the same id stays where it was).
+    pub fn put_item_spec(&mut self, body: BodyId, spec: ItemSpec) -> Result<TileId, ItemError> {
         let radius = self.usable_radius(body).map_err(ItemError::Radius)?;
-        let len = dir.length();
+        let len = spec.dir.length();
         if !len.is_finite() || len < 1e-12 {
             return Err(ItemError::Direction);
         }
-        let unit = dir.normalized();
+        if !(spec.reach_m.is_finite() && (0.0..=cells::CELL_EDGE_M).contains(&spec.reach_m)) {
+            return Err(ItemError::Reach { id: spec.id, reach_m: spec.reach_m, limit_m: cells::CELL_EDGE_M });
+        }
+        if !(spec.max_delta_m.is_finite() && spec.max_delta_m >= 0.0) {
+            return Err(ItemError::MaxDelta { id: spec.id, max_delta_m: spec.max_delta_m });
+        }
+        if spec.layer.is_empty() {
+            return Err(ItemError::Layer { id: spec.id });
+        }
+        let (id, unit) = (spec.id, spec.dir.normalized());
         self.remove_item(body, id);
-        let rec = ItemRec { content: content_hash, dir: [unit.x.to_bits(), unit.y.to_bits(), unit.z.to_bits()] };
+        let rec = ItemRec {
+            content: spec.content_hash,
+            dir: [canonical_bits(unit.x), canonical_bits(unit.y), canonical_bits(unit.z)],
+            reach_bits: canonical_bits(spec.reach_m),
+            max_delta_bits: canonical_bits(spec.max_delta_m),
+            layer: spec.layer,
+            priority: spec.priority,
+        };
         let cell = cells::cell_of(radius, unit);
         self.items.insert((body, id), rec);
         self.cells.entry((body, cell.raw())).or_default().insert(id);
@@ -295,8 +366,80 @@ impl WorldDefinition {
     }
 
     fn entry(&self, body: BodyId, id: u64) -> cells::ItemEntry {
-        let rec = self.items[&(body, id)];
+        let rec = &self.items[&(body, id)];
         (id, rec.content, rec.dir)
+    }
+
+    /// The items of `layer` whose reach touches the footprint of `tile` with a halo of `halo` tile edges (WDEF-007), in
+    /// application order (priority, then id). The tile must come from the tangent-warp mapping. Candidates are the items
+    /// of the cell of the tile plus [`footprint::candidate_rings`] rings, or every item of the body for a tile coarser
+    /// than the cell level; the touch test decides, and a test checks that both ways give the same set.
+    pub fn footprint_items(
+        &self,
+        body: BodyId,
+        layer: &str,
+        tile: TileId,
+        halo: f64,
+    ) -> Result<Vec<footprint::FootprintItem>, MissingNode> {
+        if !(halo.is_finite() && (0.0..=1.0).contains(&halo)) {
+            return Err(MissingNode(format!("a footprint halo in [0, 1] (got {halo})")));
+        }
+        let radius = self.usable_radius(body)?;
+        let cap = footprint::tile_cap(&planet_core::TangentWarp, tile, halo);
+        let level = cells::cell_level(radius);
+        // A tile at or below the cell level lies in one cell, so its cap (a few tile edges wide) is within the rings; a coarser
+        // tile covers many cells and its cap and halo are many cells wide, so it scans the body (step 1b replaces the scan).
+        let rings = footprint::candidate_rings(cap, radius, level);
+        let candidates: Vec<u64> = match rings {
+            Some(rings) if tile.level() >= level => {
+                let covering = cells::cells_covering(tile, level, footprint::FOOTPRINT_MAX_CELLS).expect("one cell");
+                cells::with_margin(&covering, rings)
+                    .iter()
+                    .filter_map(|c| self.cells.get(&(body, c.raw())))
+                    .flat_map(|ids| ids.iter().copied())
+                    .collect()
+            }
+            _ => self.body_item_ids(body),
+        };
+        let mut out: Vec<footprint::FootprintItem> = candidates
+            .into_iter()
+            .filter_map(|id| {
+                let rec = &self.items[&(body, id)];
+                (rec.layer == layer && footprint::touches(cap, rec.unit(), f64::from_bits(rec.reach_bits), radius)).then(|| {
+                    footprint::FootprintItem {
+                        id,
+                        priority: rec.priority,
+                        content: rec.content,
+                        dir: rec.dir,
+                        reach_bits: rec.reach_bits,
+                        max_delta_bits: rec.max_delta_bits,
+                        layer: rec.layer.clone(),
+                    }
+                })
+            })
+            .collect();
+        out.sort_by_key(|i| (i.priority, i.id));
+        out.dedup_by_key(|i| i.id);
+        Ok(out)
+    }
+
+    /// The anchor (unit direction) and reach in metres of an item, if it exists.
+    pub fn item_anchor(&self, body: BodyId, id: u64) -> Option<(Vec3, f64)> {
+        self.items.get(&(body, id)).map(|rec| (rec.unit(), f64::from_bits(rec.reach_bits)))
+    }
+
+    /// The height bound in metres of an item, if it exists.
+    pub fn item_max_delta(&self, body: BodyId, id: u64) -> Option<f64> {
+        self.items.get(&(body, id)).map(|rec| f64::from_bits(rec.max_delta_bits))
+    }
+
+    /// The ids of the items of a body, in id order.
+    pub fn item_ids(&self, body: BodyId) -> Vec<u64> {
+        self.body_item_ids(body)
+    }
+
+    fn body_item_ids(&self, body: BodyId) -> Vec<u64> {
+        self.items.range((body, 0)..=(body, u64::MAX)).map(|((_, id), _)| *id).collect()
     }
 
     fn all_entries(&self, body: BodyId) -> Vec<cells::ItemEntry> {
@@ -335,6 +478,24 @@ pub fn cell_query_path(body: BodyId, cell: TileId) -> NodePath {
     format!("derived.cell.{}.{:016x}", body.0, cell.raw())
 }
 
+/// Path under which a footprint query is recorded (the layer is length-prefixed so no two queries share a path).
+pub fn footprint_query_path(body: BodyId, layer: &str, tile: TileId, halo_bits: u64) -> NodePath {
+    format!("derived.footprint.{}.{}:{}.{:016x}.{:016x}", body.0, layer.len(), layer, tile.raw(), halo_bits)
+}
+
+/// The 64-bit hash of a footprint result: the items in application order with everything that can change an output.
+pub fn footprint_hash(items: &[footprint::FootprintItem]) -> u64 {
+    // Application order whatever order a hand-built record was given in, as the 128-bit path does.
+    let mut sorted: Vec<&footprint::FootprintItem> = items.iter().collect();
+    sorted.sort_by_key(|i| (i.priority, i.id));
+    let mut v = vec![u64::from(HASH_VERSION), items.len() as u64];
+    for i in sorted {
+        v.extend([i.id, u64::from(i.priority as u32), i.content, i.dir[0], i.dir[1], i.dir[2], i.reach_bits, i.max_delta_bits]);
+        v.push(hash_u64s(3, &path_words(&i.layer)));
+    }
+    hash_u64s(0x0066_7074, &v)
+}
+
 /// Path under which a read of every item of a body is recorded.
 pub fn cell_query_all_path(body: BodyId) -> NodePath {
     format!("derived.cell.{}.all", body.0)
@@ -368,6 +529,9 @@ pub enum ReadRecord {
     Cell { body: BodyId, cell: TileId, items: Vec<cells::ItemEntry> },
     /// A read of every item of a body (a tile over the cell limit).
     Body { body: BodyId, items: Vec<cells::ItemEntry> },
+    /// A footprint query of one layer for one tile (query kind 3, WDEF-007): the items whose reach touches the tile, in
+    /// application order. `halo_bits` are the bits of the halo (`-0.0` read as `0.0`).
+    Footprint { body: BodyId, layer: String, tile: TileId, halo_bits: u64, items: Vec<footprint::FootprintItem> },
 }
 
 impl ReadRecord {
@@ -377,6 +541,7 @@ impl ReadRecord {
             ReadRecord::Node { path, .. } => path.clone(),
             ReadRecord::Cell { body, cell, .. } => cell_query_path(*body, *cell),
             ReadRecord::Body { body, .. } => cell_query_all_path(*body),
+            ReadRecord::Footprint { body, layer, tile, halo_bits, .. } => footprint_query_path(*body, layer, *tile, *halo_bits),
         }
     }
 
@@ -385,6 +550,7 @@ impl ReadRecord {
         match self {
             ReadRecord::Node { path, value } => node_hash(path, *value),
             ReadRecord::Cell { items, .. } | ReadRecord::Body { items, .. } => cells::cell_hash(items),
+            ReadRecord::Footprint { items, .. } => footprint_hash(items),
         }
     }
 }
@@ -481,6 +647,27 @@ impl<'a> GenContext<'a> {
         }
         self.record(cell_query_all_path(body), ReadRecord::Body { body, items: self.def.all_entries(body) });
         Ok(self.def.items.range((body, 0)..=(body, u64::MAX)).map(|((_, id), rec)| (*id, rec.content)).collect())
+    }
+
+    /// The items of `layer` whose reach touches `tile` with a halo of `halo` tile edges (WDEF-007, query kind 3), in
+    /// application order. The read is recorded with its result, an empty one included, so adding an item that reaches the
+    /// tile changes the key and an item out of reach changes nothing. `halo` must be finite and in `[0, 1]`.
+    pub fn query_footprint(
+        &self,
+        body: BodyId,
+        layer: &str,
+        tile: TileId,
+        halo: f64,
+    ) -> Result<Vec<footprint::FootprintItem>, MissingNode> {
+        if !(halo.is_finite() && (0.0..=1.0).contains(&halo)) {
+            return Err(MissingNode(format!("a footprint halo in [0, 1] (got {halo})")));
+        }
+        self.body_radius_m(body)?;
+        let items = self.def.footprint_items(body, layer, tile, halo)?;
+        let halo_bits = if halo == 0.0 { 0.0f64.to_bits() } else { halo.to_bits() };
+        let path = footprint_query_path(body, layer, tile, halo_bits);
+        self.record(path, ReadRecord::Footprint { body, layer: layer.to_string(), tile, halo_bits, items: items.clone() });
+        Ok(items)
     }
 
     /// Hash of everything read so far (WDEF-004): the definition part of a cache key.

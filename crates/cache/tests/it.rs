@@ -10,6 +10,8 @@ mod global_store;
 mod hilbert_crc;
 #[path = "keys.rs"]
 mod keys;
+#[path = "keys_footprint.rs"]
+mod keys_footprint;
 #[path = "meshpack.rs"]
 mod meshpack;
 #[path = "pack.rs"]
