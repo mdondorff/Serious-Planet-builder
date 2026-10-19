@@ -229,7 +229,7 @@ pub fn eval_chunked(dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: us
 /// without touching production paths. Generators (`HeightGenerator`) build a field through a `GenContext`; production paths still
 /// build `Reference(seed)` directly (the planet's seed), which keys identically (`inputs_hash`). Plans for other bodies take
 /// their field from the generator (multi-body seams).
-pub trait HeightField: Sync {
+pub trait HeightField: Send + Sync {
     /// Height in metres at a unit direction.
     fn height(&self, dir: Vec3) -> f64;
     /// The heights of `dirs`, in the caller's order: element `k` is bit for bit `self.height(dirs[k])` (GEN-020). A field is free to
@@ -312,6 +312,16 @@ pub trait HeightField: Sync {
     /// of its persistent height key, so a change of the bake re-keys the tiles made from it. Fields that read only
     /// definition nodes have none.
     fn source_key(&self) -> Option<[u8; 16]> {
+        None
+    }
+    /// The field this one is a stage over (STRM-027): the height key of a tile of an authored stage chains the key of the same tile of
+    /// this field, so a change of the base re-keys the stage. A field that wraps another and forwards its keying methods forwards this
+    /// one too, or the chain is lost.
+    fn upstream(&self) -> Option<&dyn HeightField> {
+        None
+    }
+    /// The layer name and the layer's index in the stack (ADR 0007) of an authored stage (STRM-027): output parameters of its keys.
+    fn stage_params(&self) -> Option<(&str, u32)> {
         None
     }
     /// Id of the reference surface of this field's body (CON-15); part of every height and mesh key.
@@ -540,6 +550,12 @@ impl<F: HeightField> HeightField for Bound<F> {
     }
     fn source_key(&self) -> Option<[u8; 16]> {
         self.field.source_key()
+    }
+    fn upstream(&self) -> Option<&dyn HeightField> {
+        self.field.upstream()
+    }
+    fn stage_params(&self) -> Option<(&str, u32)> {
+        self.field.stage_params()
     }
     fn surface_id(&self) -> &'static str {
         self.field.surface_id()

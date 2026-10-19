@@ -617,6 +617,11 @@ impl WorldDefinition {
         self.items.get(&(body, id)).map(|rec| (rec.unit(), f64::from_bits(rec.reach_bits)))
     }
 
+    /// The layer of an item, if it exists.
+    pub fn item_layer(&self, body: BodyId, id: ItemId) -> Option<String> {
+        self.items.get(&(body, id)).map(|rec| rec.layer.clone())
+    }
+
     /// The height bound in metres of an item, if it exists.
     pub fn item_max_delta(&self, body: BodyId, id: ItemId) -> Option<f64> {
         self.items.get(&(body, id)).map(|rec| f64::from_bits(rec.max_delta_bits))

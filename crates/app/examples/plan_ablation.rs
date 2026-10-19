@@ -92,6 +92,12 @@ impl HeightField for Counting<'_> {
     fn source_key(&self) -> Option<[u8; 16]> {
         self.f().source_key()
     }
+    fn upstream(&self) -> Option<&dyn planet_generators::height::HeightField> {
+        self.f().upstream()
+    }
+    fn stage_params(&self) -> Option<(&str, u32)> {
+        self.f().stage_params()
+    }
     fn surface_id(&self) -> &'static str {
         self.f().surface_id()
     }

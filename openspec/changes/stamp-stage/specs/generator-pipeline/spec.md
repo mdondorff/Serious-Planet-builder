@@ -32,7 +32,7 @@ Source: ADR 0066 points 1, 4 and 5, ADR 0021 point 7, SPIKE-13, M6 plan row E2
 - **THEN** every item the reader returned is in the footprint result the tile declared, and the output is unchanged beyond `reach_m` of every stamp and within `max_delta_m`
 
 #### Scenario: Tile alone
-- **WHEN** a stamped tile over the eroded field, over an in-memory bake and over a stored bake, is generated alone and its samples are cut from its parent's grid
+- **WHEN** a stamped tile over the eroded field (an in-memory bake) is generated alone and its samples are cut from its parent's grid
 - **THEN** they are bit-identical, whatever the order of generation
 
 #### Scenario: Stamped scene

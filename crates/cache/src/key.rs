@@ -317,6 +317,9 @@ pub const PARAM_GRID_RES: u8 = 4;
 pub const PARAM_CLIMATE_VERSION: u8 = 6;
 /// The area threshold of an ocean block (the bits of the `f64` fraction of the body's surface, ADR 0041 point 2).
 pub const PARAM_OCEAN_AREA_FRACTION: u8 = 7;
+/// The layer name of an authored stage (UTF-8 bytes) and its index in the stack of ADR 0007 (`u32` little endian), STRM-027.
+pub const PARAM_STAGE_LAYER: u8 = 8;
+pub const PARAM_STAGE_INDEX: u8 = 9;
 
 fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> KeyInputs {
     assert!(
@@ -328,6 +331,11 @@ fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile
         !field.reads_cells() || reads.iter().any(|r| matches!(r, ReadEntry::Query { .. })),
         "a field that reads cells must report its cell queries in read_records_for"
     );
+    let mut output_params = BTreeMap::new();
+    if let Some((layer, index)) = field.stage_params() {
+        output_params.insert(PARAM_STAGE_LAYER, layer.as_bytes().to_vec());
+        output_params.insert(PARAM_STAGE_INDEX, index.to_le_bytes().to_vec());
+    }
     KeyInputs {
         kind,
         hash_version: planet_core::hash::HASH_VERSION,
@@ -340,7 +348,7 @@ fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile
         // A field built over a baked input names that bake's stage key as its source (ADR 0028 point 5); a mesh key replaces it with
         // its height key, which already carries it.
         source: field.source_key().map(CacheKey),
-        output_params: BTreeMap::new(),
+        output_params,
         reads,
     }
 }
@@ -352,6 +360,11 @@ fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile
 pub fn height_key(field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, res: u32, radius_m: f64) -> CacheKey {
     let mut inputs = field_inputs(Kind::Height, field, map, tile, radius_m);
     inputs.output_params.insert(PARAM_RESOLUTION, res.to_le_bytes().to_vec());
+    // An authored stage chains the key of the same tile of the stage below, at the same resolution (STRM-027); the base's own key
+    // carries a bake's stage key, so a stage has no field-wide source of its own.
+    if let Some(upstream) = field.upstream() {
+        inputs.source = Some(height_key(upstream, map, tile, res, radius_m));
+    }
     cache_key(&inputs)
 }
 

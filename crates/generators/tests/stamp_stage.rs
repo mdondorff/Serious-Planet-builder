@@ -1,0 +1,300 @@
+//! GEN-026: the stamp stage. Profiles, the stage over a base field, order, determinism, bounds, and the reads it declares against the reads it
+//! makes (ADR 0021 point 7).
+
+use std::sync::{Arc, Mutex};
+
+use planet_core::cube::TangentWarp;
+use planet_core::{TileId, Vec3};
+use planet_generators::height::{generate_tile_field, HeightField, Reference};
+use planet_generators::stamp::{crater_delta, hill_delta, plateau_delta, plateau_weight, ItemReader, StampStage, STAGE_HALO};
+use planet_world_def::footprint::{angle_between, Cap, FootprintItem};
+use planet_world_def::stamp::{Stamp, StampKind};
+use planet_world_def::{BodyId, ItemSpec, ReadRecord, WorldDefinition, DEFAULT_ITEM_LAYER};
+
+const R: f64 = 6_371_000.0;
+
+fn dir(x: f64, y: f64, z: f64) -> Vec3 {
+    Vec3::new(x, y, z).normalized()
+}
+
+/// The point `d_m` metres from `anchor` on the sphere, towards `hint`.
+fn at_distance(anchor: Vec3, hint: Vec3, d_m: f64) -> Vec3 {
+    let t = (hint - anchor * anchor.dot(hint)).normalized();
+    let a = d_m / R;
+    (anchor * libm::cos(a) + t * libm::sin(a)).normalized()
+}
+
+fn item(id: u128, priority: i32, at: Vec3, reach_m: f64, max_delta_m: f64, stamp: Stamp) -> ItemSpec {
+    ItemSpec { id, layer: DEFAULT_ITEM_LAYER.into(), priority, dir: at, content_hash: 0, reach_m, max_delta_m, stamp: None }
+        .with_stamp(stamp)
+}
+
+fn world(items: Vec<ItemSpec>) -> Arc<WorldDefinition> {
+    let mut d = WorldDefinition::single_planet(R, 1);
+    for i in items {
+        d.put_item_spec(BodyId::PLANET, i).unwrap();
+    }
+    Arc::new(d)
+}
+
+fn stage(def: Arc<WorldDefinition>) -> StampStage {
+    StampStage::new(Arc::new(Reference(1)), def, BodyId::PLANET, DEFAULT_ITEM_LAYER, 0, 1).expect("a body with a radius")
+}
+
+// spec: GEN-026
+#[test]
+fn the_profiles_equal_their_known_answers_are_c1_at_the_edge_zero_beyond_and_bounded() {
+    let eq = |a: f64, b: f64, what: &str| assert!((a - b).abs() <= 1e-12, "{what}: {a} against {b}");
+    eq(hill_delta(10.0, 0.0), 10.0, "hill centre");
+    eq(hill_delta(10.0, 0.5), 5.625, "hill half");
+    eq(hill_delta(-10.0, 0.5), -5.625, "a pit");
+    eq(crater_delta(10.0, 0.0), -10.0, "crater centre");
+    eq(crater_delta(10.0, 0.5), -3.164_062_5, "crater bowl at 0.5");
+    eq(crater_delta(10.0, 0.7), -0.429_687_5, "crater at 0.7, the rim not yet up");
+    eq(crater_delta(10.0, 0.85), 2.0, "crater rim crest: 0.2 of the depth");
+    eq(plateau_weight(0.0), 1.0, "plateau weight inside");
+    eq(plateau_weight(0.7), 1.0, "plateau weight at 0.7");
+    eq(plateau_weight(0.85), 0.5, "plateau weight half way");
+    eq(plateau_weight(1.0), 0.0, "plateau weight at the edge");
+    eq(plateau_delta(100.0, 40.0, 25.0, 0.0), 25.0, "plateau clamped to the bound");
+    eq(plateau_delta(100.0, 90.0, 25.0, 0.0), 10.0, "plateau reaches the target when within the bound");
+    for f in
+        [hill_delta(7.0, 1.0), crater_delta(7.0, 1.0), plateau_delta(100.0, 0.0, 7.0, 1.0), hill_delta(7.0, 3.0), crater_delta(7.0, 3.0)]
+    {
+        assert_eq!(f, 0.0, "exactly zero at and beyond the edge");
+    }
+    // C1 at x = 1 (value and slope, one-sided), and at 0.7 for the plateau weight's join.
+    let h = 1e-8;
+    for (name, f) in [
+        ("hill", Box::new(|x| hill_delta(7.0, x)) as Box<dyn Fn(f64) -> f64>),
+        ("crater", Box::new(|x| crater_delta(7.0, x))),
+        ("plateau", Box::new(|x| plateau_delta(100.0, 0.0, 7.0, x))),
+    ] {
+        let (v, slope) = (f(1.0 - h), (f(1.0 - h) - f(1.0 - 2.0 * h)) / h);
+        assert!(v.abs() <= 1e-9 && slope.abs() <= 1e-4, "{name}: value {v} and slope {slope} just inside the edge");
+    }
+    // Bounded by M on a dense sweep, for every kind.
+    for k in 0..=1300 {
+        let x = f64::from(k) / 1000.0;
+        assert!(hill_delta(7.0, x).abs() <= 7.0 && hill_delta(-7.0, x).abs() <= 7.0, "hill at {x}");
+        assert!(crater_delta(7.0, x).abs() <= 7.0, "crater at {x}");
+        for h in [-1000.0, -3.0, 0.0, 5.0, 1000.0] {
+            assert!(plateau_delta(2.0, h, 7.0, x).abs() <= 7.0, "plateau at {x} from {h}");
+        }
+    }
+}
+
+// spec: GEN-026
+#[test]
+fn the_stage_adds_the_stamps_whose_reach_contains_the_point_and_nothing_elsewhere() {
+    let at = dir(1.0, 0.2, 0.1);
+    let hint = dir(0.0, 1.0, 0.0);
+    let s = stage(world(vec![item(1, 0, at, 2_000.0, 50.0, Stamp::new(StampKind::Hill, [30.0, 0.0, 0.0]))]));
+    let base = Reference(1);
+    // At the centre, inside, at the edge and beyond.
+    for (d, want_x) in [(0.0, 0.0), (500.0, 0.25), (1_500.0, 0.75), (1_999.0, 0.9995), (2_000.0, 1.0), (50_000.0, 25.0)] {
+        let p = at_distance(at, hint, d);
+        let x = R * angle_between(at, p) / 2_000.0;
+        assert!((x - want_x).abs() < 1e-6 * want_x.max(1.0), "the setup: {x} against {want_x}");
+        let want = base.height(p) + if x < 1.0 { hill_delta(30.0, x) } else { 0.0 };
+        assert!((s.height(p) - want).abs() < 1e-9, "d = {d} m: {} against {want}", s.height(p));
+    }
+    assert_eq!(s.height(dir(-1.0, 0.0, 0.0)), base.height(dir(-1.0, 0.0, 0.0)), "the other side of the planet is the base");
+}
+
+// spec: GEN-026
+#[test]
+fn stamps_apply_in_application_order_and_a_plateau_flattens_what_is_under_it() {
+    let at = dir(1.0, 0.2, 0.1);
+    let p = at_distance(at, dir(0.0, 1.0, 0.0), 100.0);
+    let base = Reference(1).height(p);
+    let hill = |id, priority| item(id, priority, at, 2_000.0, 80.0, Stamp::new(StampKind::Hill, [40.0, 0.0, 0.0]));
+    let plateau = |id, priority| item(id, priority, at, 2_000.0, 80.0, Stamp::new(StampKind::Plateau, [base + 5.0, 0.0, 0.0]));
+    let hill_then_plateau = stage(world(vec![hill(1, 0), plateau(2, 1)])).height(p);
+    let plateau_then_hill = stage(world(vec![plateau(2, 0), hill(1, 1)])).height(p);
+    assert_ne!(hill_then_plateau, plateau_then_hill, "the order matters");
+    let x = R * angle_between(at, p) / 2_000.0;
+    let after_hill = base + hill_delta(40.0, x);
+    assert!(
+        (hill_then_plateau - (after_hill + plateau_delta(base + 5.0, after_hill, 80.0, x))).abs() < 1e-9,
+        "hill, then the plateau toward its target"
+    );
+    let after_plateau = base + plateau_delta(base + 5.0, base, 80.0, x);
+    assert!((plateau_then_hill - (after_plateau + hill_delta(40.0, x))).abs() < 1e-9, "the plateau, then the hill on top of it");
+    // The same priority is ordered by id.
+    let by_id = stage(world(vec![hill(2, 0), plateau(1, 0)])).height(p);
+    assert_eq!(by_id, plateau_then_hill, "ties go by id: the lower id (the plateau) first");
+    // Under a plateau the ground is flat to the clamp: a ramp of points near the centre ends within a hair of the target.
+    let flat = stage(world(vec![item(3, 0, at, 2_000.0, 1_000.0, Stamp::new(StampKind::Plateau, [10.0, 0.0, 0.0]))]));
+    for d in [0.0, 100.0, 600.0, 1_000.0] {
+        let q = at_distance(at, dir(0.0, 1.0, 0.0), d);
+        assert!((flat.height(q) - 10.0).abs() < 1e-9, "inside x <= 0.7 the ground is the target: {} at {d} m", flat.height(q));
+    }
+}
+
+// spec: GEN-026
+#[test]
+fn the_heights_of_a_tile_are_bit_identical_at_any_thread_count_batch_order_and_batch_size() {
+    let at = dir(1.0, 0.2, 0.1);
+    let tile = TileId::from_direction(&TangentWarp, at, 15);
+    let s = stage(world(vec![
+        item(1, 0, at, 3_000.0, 60.0, Stamp::new(StampKind::Hill, [30.0, 0.0, 0.0])),
+        item(2, 1, at_distance(at, dir(0.0, 1.0, 0.0), 800.0), 1_500.0, 60.0, Stamp::new(StampKind::Crater, [25.0, 0.0, 0.0])),
+        item(3, 2, at_distance(at, dir(0.0, 0.0, 1.0), 1_200.0), 2_000.0, 60.0, Stamp::new(StampKind::Plateau, [12.0, 0.0, 0.0])),
+    ]));
+    let dirs: Vec<Vec3> =
+        (0..=16u32).flat_map(|l| (0..=16u32).map(move |k| (k, l))).map(|(k, l)| tile.sample_direction(&TangentWarp, 16, k, l)).collect();
+    let one = s.heights(&dirs);
+    let threaded1 = s.heights_threaded(&dirs, 1);
+    let threaded3 = s.heights_threaded(&dirs, 3);
+    let single: Vec<f64> = dirs.iter().map(|d| s.height(*d)).collect();
+    let mut reversed: Vec<Vec3> = dirs.clone();
+    reversed.reverse();
+    let mut rev = s.heights(&reversed);
+    rev.reverse();
+    let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    assert_eq!(bits(&one), bits(&threaded1));
+    assert_eq!(bits(&one), bits(&threaded3));
+    assert_eq!(bits(&one), bits(&single), "one point at a time");
+    assert_eq!(bits(&one), bits(&rev), "reversed order");
+    assert!(one.iter().zip(&Reference(1).heights(&dirs)).any(|(a, b)| a != b), "the stamps act in this tile");
+    // The tile through the generic path is the same as the batch.
+    let data = generate_tile_field(&s, &TangentWarp, tile, 16);
+    assert_eq!(data.heights.iter().map(|h| h.to_bits()).collect::<Vec<_>>(), one.iter().map(|h| (*h as f32).to_bits()).collect::<Vec<_>>());
+}
+
+// spec: GEN-026
+#[test]
+fn the_bounds_widen_by_the_bounds_of_the_items_in_reach_and_hold_for_every_sampled_height() {
+    let at = dir(1.0, 0.2, 0.1);
+    let s = stage(world(vec![
+        item(1, 0, at, 3_000.0, 60.0, Stamp::new(StampKind::Hill, [30.0, 0.0, 0.0])),
+        item(2, 1, at_distance(at, dir(0.0, 1.0, 0.0), 800.0), 1_500.0, 40.0, Stamp::new(StampKind::Crater, [25.0, 0.0, 0.0])),
+    ]));
+    let base = Reference(1);
+    let widened = |centre: Vec3, angle: f64| {
+        let (lo, hi) = s.height_bounds(centre, angle);
+        let (blo, bhi) = base.height_bounds(centre, angle);
+        (blo - lo, hi - bhi)
+    };
+    // A cap on the stamps: both bounds count. A cap far away: none.
+    let (a, b) = widened(at, 100.0 / R);
+    assert!((a - 100.0).abs() < 1e-9 && (b - 100.0).abs() < 1e-9, "both items touch: 60 + 40 on each side, got {a} and {b}");
+    let (a, b) = widened(dir(-1.0, 0.0, 0.0), 100.0 / R);
+    assert_eq!((a, b), (0.0, 0.0), "no item in reach, no widening");
+    // The only-first-item cap.
+    let (a, _) = widened(at_distance(at, dir(0.0, -1.0, 0.0), 2_500.0), 100.0 / R);
+    assert!((a - 60.0).abs() < 1e-9, "only the first item reaches 2.5 km on the far side: {a}");
+    // Every height in the cap lies within the bounds.
+    for (centre, angle) in [(at, 4_000.0 / R), (at_distance(at, dir(0.0, 1.0, 0.0), 700.0), 1_000.0 / R)] {
+        let (lo, hi) = s.height_bounds(centre, angle);
+        for k in 0..400 {
+            let t = f64::from(k) / 400.0 * core::f64::consts::TAU;
+            let r = angle * f64::from(k % 7) / 7.0;
+            let h = s.height(at_distance_around(centre, t, r));
+            assert!(h >= lo && h <= hi, "{h} outside [{lo}, {hi}]");
+        }
+    }
+    assert!(s.max_abs_height_m() >= base.max_abs_height_m() + 100.0, "the field-wide bound adds every item's bound");
+}
+
+/// The point at angle `r` from `centre` on the bearing `t`.
+fn at_distance_around(centre: Vec3, t: f64, r: f64) -> Vec3 {
+    let a = if centre.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+    let e1 = (a - centre * centre.dot(a)).normalized();
+    let e2 = centre.cross(e1);
+    (centre * libm::cos(r) + (e1 * libm::cos(t) + e2 * libm::sin(t)) * libm::sin(r)).normalized()
+}
+
+/// A reader that records every item the stage asked for (the recording context of ADR 0021 point 7).
+struct Recording {
+    inner: Arc<WorldDefinition>,
+    seen: Mutex<Vec<u128>>,
+}
+
+impl ItemReader for Recording {
+    fn radius_m(&self, body: BodyId) -> Option<f64> {
+        self.inner.radius_m(body)
+    }
+    fn items(&self, body: BodyId, layer: &str, cap: Cap) -> Vec<FootprintItem> {
+        let items = self.inner.items(body, layer, cap);
+        self.seen.lock().unwrap().extend(items.iter().map(|i| i.id));
+        items
+    }
+    fn max_delta_sum(&self, body: BodyId, layer: &str) -> f64 {
+        self.inner.max_delta_sum(body, layer)
+    }
+    fn tile_reads(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> Vec<ReadRecord> {
+        self.inner.tile_reads(body, layer, tile, halo)
+    }
+}
+
+// spec: GEN-026, WDEF-007
+#[test]
+fn every_item_the_stage_reads_over_a_tile_is_in_the_footprint_the_tile_declared_and_nothing_changes_beyond_the_reach() {
+    let at = dir(1.0, 0.2, 0.1);
+    // Items around the tile: some on it, some at the edge of the declared halo, some far.
+    let mut specs = Vec::new();
+    for (i, (along, reach)) in
+        [(0.0, 400.0), (300.0, 900.0), (900.0, 700.0), (2_500.0, 1_200.0), (6_000.0, 3_000.0), (20_000.0, 5_000.0)].into_iter().enumerate()
+    {
+        let kind = [StampKind::Hill, StampKind::Crater, StampKind::Plateau][i % 3];
+        let params = match kind {
+            StampKind::Plateau => [3.0, 0.0, 0.0],
+            _ => [15.0, 0.0, 0.0],
+        };
+        specs.push(item(i as u128 + 1, i as i32, at_distance(at, dir(0.0, 1.0, 0.0), along), reach, 40.0, Stamp::new(kind, params)));
+    }
+    let def = world(specs);
+    for level in [13u8, 15, 17] {
+        let tile = TileId::from_direction(&TangentWarp, at, level);
+        let reader = Arc::new(Recording { inner: Arc::clone(&def), seen: Mutex::default() });
+        let s = StampStage::new(Arc::new(Reference(1)), reader.clone() as Arc<dyn ItemReader>, BodyId::PLANET, DEFAULT_ITEM_LAYER, 0, 1)
+            .unwrap();
+        // The samples a tile reads: its grid and a one-sample halo.
+        let mut dirs = Vec::new();
+        for l in -1..=17i64 {
+            for k in -1..=17i64 {
+                dirs.push(tile.sample_direction_ext(&TangentWarp, 16, k, l));
+            }
+        }
+        let _ = s.heights(&dirs);
+        let declared: Vec<u128> =
+            def.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, STAGE_HALO).unwrap().iter().map(|i| i.id).collect();
+        let seen = reader.seen.lock().unwrap().clone();
+        for id in &seen {
+            assert!(declared.contains(id), "level {level}: item {id} was read but the tile did not declare it (declared {declared:?})");
+        }
+        // Every item that acts on a sample is among those read.
+        for (k, d) in dirs.iter().enumerate() {
+            let with = s.height(*d);
+            let without = Reference(1).height(*d);
+            if with != without {
+                let touched: Vec<u128> = declared
+                    .iter()
+                    .copied()
+                    .filter(|id| {
+                        let (a, r) = def.item_anchor(BodyId::PLANET, *id).unwrap();
+                        R * angle_between(a, *d) < r
+                    })
+                    .collect();
+                assert!(!touched.is_empty(), "level {level} sample {k}: the height changed with no item in reach");
+            }
+        }
+    }
+    // Beyond its reach an item changes nothing, within it by at most its bound.
+    let (anchor, reach) = def.item_anchor(BodyId::PLANET, 2).unwrap();
+    let mut without = (*def).clone();
+    assert!(without.remove_item(BodyId::PLANET, 2));
+    let (with_s, without_s) = (stage(Arc::clone(&def)), stage(Arc::new(without)));
+    for k in 0..200 {
+        let d = f64::from(k) * reach * 2.0 / 200.0;
+        let p = at_distance(anchor, dir(0.3, 0.2, 1.0), d);
+        let (a, b) = (with_s.height(p), without_s.height(p));
+        if d >= reach {
+            assert_eq!(a, b, "beyond the reach of item 2 ({d} m)");
+        } else {
+            assert!((a - b).abs() <= 40.0 + 1e-9, "within the reach, the change {} is within the bound", (a - b).abs());
+        }
+    }
+}
