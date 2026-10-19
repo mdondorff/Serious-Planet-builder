@@ -44,7 +44,8 @@ path = "junit.xml"
 
 [[profile.real-gpu.overrides]]
 filter = '''
-binary(gpu_lit) or binary(gpu_water) or binary(gpu_atmosphere) or binary(gpu_compact_blocks) or binary(oracle_lit)
+(package(=planet-render) and binary(gpu_all) and test(/^(gpu_lit|gpu_water|gpu_atmosphere|gpu_compact_blocks)::/))
+or (package(=planet-render) and binary(oracle_all) and test(/^oracle_lit::/))
 or (package(=planet) and binary(gpu_all) and test(/^(gpu_water_coverage|gpu_stream_perf|gpu_flight|gpu_world_field)::/))
 or (package(=planet-cache) and binary(oracle_all) and test(/^oracle_concurrent_source::/))
 '''

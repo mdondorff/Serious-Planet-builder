@@ -1113,7 +1113,7 @@ mod tests {
                 );
             }
         }
-        for c in ["generators", "cache", "streaming", "app"] {
+        for c in ["generators", "cache", "streaming", "app", "frame", "render"] {
             assert!(converted.iter().any(|k| k == c), "{c} builds one test binary per tier (BUILD-015)");
         }
     }
