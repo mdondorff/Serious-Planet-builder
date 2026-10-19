@@ -5,6 +5,7 @@
 //! step's time and one verdict line. Lavapipe-only golden differences stay CI's job.
 
 use crate::testcmd;
+use crate::util::capture;
 use std::path::Path;
 use std::time::Instant;
 
@@ -54,10 +55,42 @@ pub fn no_crate_changed(changed: &[String]) -> bool {
     !changed.is_empty() && testcmd::packages_for_changes(changed).is_empty()
 }
 
+/// The object id `git merge-tree --write-tree` prints first: 40 (SHA-1) or 64 (SHA-256) hex digits on the first line.
+pub fn tree_id(output: &str) -> Option<String> {
+    let first = output.lines().next()?.trim();
+    ((first.len() == 40 || first.len() == 64) && first.bytes().all(|b| b.is_ascii_hexdigit())).then(|| first.to_string())
+}
+
+/// `spec-lint` on the branch merged onto the current `origin/main` (BUILD-022): what main will hold once the PR lands, so a requirement
+/// ID or a spec that another change added meanwhile collides here and not on main. The merge is made by `git merge-tree` in the object
+/// database and checked out in a temporary worktree; the branch, the index and the working tree are not touched. A fetch that fails
+/// (offline) or a branch that already holds `origin/main` has nothing to add and passes; a branch that does not merge cleanly fails.
+pub fn merged_spec_lint(root: &Path) -> Res {
+    if let Err(e) = capture(root, "git", &["fetch", "--quiet", "origin", "main"]) {
+        eprintln!("prepush: cannot fetch origin/main ({}), so the merged-tree spec-lint is skipped", e.lines().next().unwrap_or(""));
+        return Ok(());
+    }
+    if capture(root, "git", &["merge-base", "--is-ancestor", "origin/main", "HEAD"]).is_ok() {
+        eprintln!("prepush: the branch holds origin/main, so the merged tree is the branch (its spec-lint is the next step)");
+        return Ok(());
+    }
+    let merged = capture(root, "git", &["merge-tree", "--write-tree", "HEAD", "origin/main"]).map_err(|e| {
+        format!("the branch does not merge cleanly onto origin/main: merge origin/main into it first ({})", e.lines().next().unwrap_or(""))
+    })?;
+    let tree = tree_id(&merged).ok_or_else(|| format!("git merge-tree printed no tree id: {merged}"))?;
+    let tmp = std::env::temp_dir().join(format!("planet-prepush-merged-{}", std::process::id()));
+    let tmp_s = tmp.to_string_lossy().into_owned();
+    capture(root, "git", &["worktree", "add", "--detach", "--quiet", &tmp_s, "HEAD"])?;
+    let result = capture(&tmp, "git", &["read-tree", "-u", "--reset", &tree]).and_then(|_| crate::speclint::run(&tmp));
+    let _ = capture(root, "git", &["worktree", "remove", "--force", &tmp_s]);
+    result.map_err(|e| format!("spec-lint of the branch merged onto origin/main: {e}"))
+}
+
 /// The steps `prepush` runs for a diff, in order (BUILD-016, BUILD-021): `spec-lint` alone when no changed path is a crate path, else
 /// `check` and `test fast`; `test gpu` after them when a golden-producing path changed.
 pub fn plan_steps(changed: &[String]) -> Vec<&'static str> {
-    let mut steps = if no_crate_changed(changed) { vec!["spec-lint"] } else { vec!["check", "test fast"] };
+    let mut steps = vec!["merged spec-lint"];
+    steps.extend(if no_crate_changed(changed) { vec!["spec-lint"] } else { vec!["check", "test fast"] });
     if !golden_triggers(changed).is_empty() {
         steps.push("test gpu");
     }
@@ -79,6 +112,7 @@ pub fn run(root: &Path) -> Res {
     let mut plan: Vec<(&str, Action)> = Vec::new();
     for name in plan_steps(&changed) {
         let action: Action = match name {
+            "merged spec-lint" => Box::new(|| merged_spec_lint(root)),
             "spec-lint" => {
                 eprintln!("prepush: no crate path changed, so check and test fast are skipped; spec-lint runs");
                 Box::new(|| crate::speclint::run(root))
@@ -115,15 +149,22 @@ mod tests {
     // spec: BUILD-021
     #[test]
     fn the_plan_of_a_diff_is_spec_lint_alone_for_docs_and_the_gpu_tier_follows_a_golden_path() {
-        assert_eq!(plan_steps(&paths(&["docs/status.md"])), ["spec-lint"]);
-        assert_eq!(plan_steps(&paths(&["docs/status.md", "crates/editor/src/lib.rs"])), ["check", "test fast"]);
-        assert_eq!(plan_steps(&paths(&["crates/render/src/terrain.rs"])), ["check", "test fast", "test gpu"]);
+        assert_eq!(plan_steps(&paths(&["docs/status.md"])), ["merged spec-lint", "spec-lint"]);
+        assert_eq!(plan_steps(&paths(&["docs/status.md", "crates/editor/src/lib.rs"])), ["merged spec-lint", "check", "test fast"]);
+        assert_eq!(plan_steps(&paths(&["crates/render/src/terrain.rs"])), ["merged spec-lint", "check", "test fast", "test gpu"]);
         assert_eq!(
             plan_steps(&paths(&["spikes/x/shader.wgsl", "docs/a.md"])),
-            ["spec-lint", "test gpu"],
+            ["merged spec-lint", "spec-lint", "test gpu"],
             "a golden path outside the crates"
         );
-        assert_eq!(plan_steps(&[]), ["check", "test fast"], "nothing changed is the whole workspace");
+        assert_eq!(plan_steps(&[]), ["merged spec-lint", "check", "test fast"], "nothing changed is the whole workspace");
+
+        // The tree id git prints first (BUILD-022); anything else is not one.
+        let id = "0123456789abcdef0123456789abcdef01234567";
+        assert_eq!(tree_id(&format!("{id}\n\nAuto-merging x\n")).as_deref(), Some(id));
+        assert_eq!(tree_id(&format!("{id}{id}\n")).as_deref(), None, "80 digits");
+        assert_eq!(tree_id("CONFLICT (content): Merge conflict in x\n"), None);
+        assert_eq!(tree_id(""), None);
     }
 
     // spec: BUILD-016
