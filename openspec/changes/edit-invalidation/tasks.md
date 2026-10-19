@@ -1,6 +1,6 @@
 ## 1. edit-invalidation-reach
-- [ ] 1.1 Read the key code (cache `key.rs`, `ReadEntry::Query`, `inputs_hash_for`, `cells_covering`) and write step 1's design: kind 3 layout, margin, tag 3 effect on worlds without items, store migration
-- [ ] 1.2 Spec deltas: WDEF-005 (footprint is the invalidation unit), STRM-003/STRM-010 (node set id per tile), GEN-017 (tile level), TEST (reads contract)
+- [x] 1.1 Read the key code (cache `key.rs`, `ReadEntry::Query`, `inputs_hash_for`, `cells_covering`) and write step 1's design: kind 3 layout, margin, tag 3 effect on worlds without items, store migration
+- [x] 1.2 Spec deltas: WDEF-005 (footprint is the invalidation unit), STRM-003/STRM-010 (node set id per tile), GEN-017 (tile level), TEST (reads contract)
 - [ ] 1.3 Failing tests: footprint find returns exactly the tiles within reach (false positives allowed, no false negatives); moving an item outside a tile's reach changes no key; the declared-versus-recorded reads contract
 - [ ] 1.4 Item `reach_m`, `max_delta_m`; refusal over the reach limit; query kind 3 and its result material; tag 3
 - [ ] 1.5 numerics-reviewer (core/generators), spec-guardian, verifier; PR
