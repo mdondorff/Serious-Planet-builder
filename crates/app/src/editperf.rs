@@ -7,7 +7,7 @@
 //!
 //! Timing starts at the call of `set_definition` and ends when the GPU has finished the frame (the loop waits for it), so the numbers
 //! include the footprint find, the plan, the refresh of the tiles, their generation, upload and the frame. A smoke run exercises the path
-//! (one altitude, one radius, one repeat, 1280x720, no gate) and is never a measurement.
+//! (one altitude, one radius, one repeat, 768x432, no gate) and is never a measurement.
 
 use crate::pipelined::{RendererSink, Rig};
 use crate::worldfield::WorldTerrain;
@@ -300,8 +300,8 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
         crate::readiness_gate(o, ctx, out)?;
     }
-    let size = if smoke { (1280u32, 720u32) } else { (2560u32, 1440u32) };
-    let tau = if smoke { o.tau * f64::from(size.1) / 1440.0 } else { o.tau };
+    let size = if smoke { (768u32, 432u32) } else { (2560u32, 1440u32) };
+    let tau = o.tau;
     let field = world.field()?;
     let lod = LodParams {
         cells: o.cells,
@@ -323,7 +323,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     if smoke {
         writeln!(
             out,
-            "SMOKE RUN: exercises the edit path only (one altitude, one radius, 1280x720, no gate); the numbers are not a measurement"
+            "SMOKE RUN: exercises the edit path only (one altitude, one radius, 768x432, no gate); the numbers are not a measurement"
         )
         .map_err(err)?;
     }

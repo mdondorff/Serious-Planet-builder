@@ -31,7 +31,11 @@ fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
     assert!(out.contains("| altitude | stamp radius | preview ms (budget 16) | exact ms (budget)"), "{out}");
     // One altitude, one radius, one run: a row with a preview and an exact time.
     let row = out.lines().find(|l| l.starts_with("| 200 m | 50 m |")).unwrap_or_else(|| panic!("no row: {out}"));
-    assert!(!row.contains("| - |"), "the preview and the exact frame both happened: {row}");
+    // The preview column may read `-` on a slow adapter: the refreshed tiles can arrive within one frame, so no frame draws a stale tile
+    // (the scene says "no result" then). The exact column is always set (the scene errors when the edit never became exact), and the
+    // preview itself is asserted by gpu_preview.
+    let cells: Vec<&str> = row.split('|').map(str::trim).collect();
+    assert!(cells[5] != "-", "the exact frame happened: {row}");
     let table = std::fs::read_to_string(logs.join("edit-latency.md")).unwrap();
     assert!(table.contains("| 200 m | 50 m |"), "{table}");
 }
