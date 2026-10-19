@@ -412,7 +412,7 @@ fn a_coarse_tiles_node_set_id_names_its_summary_nodes_and_not_their_hashes() {
     assert_eq!(id(&fp, coarse), id(&fe, coarse), "an edit changes the node hashes, never which nodes the tile reads");
     // By hand: the sorted, length-prefixed paths of the field-wide reads, the radius node and the summary nodes of the tile.
     let mut paths = vec!["world.seed".to_string(), "derived.body.0.seed".to_string(), "body.0.radius_m".to_string()];
-    for node in plain.summary_cover(BodyId::PLANET, coarse, 0.25).unwrap().expect("a coarse tile") {
+    for &node in plain.summary_cover(BodyId::PLANET, coarse, 0.25).unwrap().expect("a coarse tile").iter() {
         paths.push(planet_world_def::summary_node_path(BodyId::PLANET, "items", node));
     }
     paths.sort();
