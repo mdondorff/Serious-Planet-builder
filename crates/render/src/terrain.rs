@@ -53,12 +53,15 @@ struct Globals {
     // Lit path only: the albedo table of the look (ADR 0039 point 3): eight colours with a threshold in the fourth lane, then
     // (snow_c_full, snow_c_none, snow_cos_none, snow_cos_full) and (beach_height, beach_fade, shore_blend, 0).
     albedo: array<vec4<f32>, 10>,
+    // The edit preview (REND-033), read only for a previewed node and only when extra.w (the count, at most 8) is above 0: per stamp two
+    // entries, (anchor relative to the camera, reach in metres) and (amount in metres, kind 1 hill / 2 crater / 3 plateau, sign, bound).
+    preview: array<vec4<f32>, 16>,
 };
 struct Node {
     origin_rel: vec4<f32>,
     color: vec4<f32>,
-    // x, y: vertex distances between which a vertex morphs to the parent grid; z: padding (the shore ramp follows the fragment's distance,
-    // REND-030, and is in the globals); w: the tile's level of detail (the wireframe overlay's colour, VIEW-014; the plan's node-level
+    // x, y: vertex distances between which a vertex morphs to the parent grid; z: 1 for a previewed node (REND-033), else 0 (the shore ramp
+    // follows the fragment's distance, REND-030, and is in the globals); w: the tile's level of detail (the wireframe overlay's colour, VIEW-014; the plan's node-level
     // `morph` is a diagnostic of the CPU selection and is not read by the shader).
     morph: vec4<f32>,
     // Per grid decade (1 cm .. 1,000 km) the fractional part of (planet-fixed tile origin / spacing), xyz, taken in f64 on
@@ -318,7 +321,20 @@ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
     for (i, d) in plan.nodes.iter().enumerate() {
         let r = d.camera_relative_origin;
         let c = d.color.map(|v| f32::from(v) / 255.0);
-        let mut floats = vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, 0.0, f32::from(d.level)];
+        let mut floats = vec![
+            r[0],
+            r[1],
+            r[2],
+            0.0,
+            c[0],
+            c[1],
+            c[2],
+            c[3],
+            d.morph_start_m,
+            d.morph_end_m,
+            if d.preview { 1.0 } else { 0.0 },
+            f32::from(d.level),
+        ];
         for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
             floats.extend([p[0], p[1], p[2], 0.0]);
         }
@@ -384,7 +400,25 @@ impl DrawMode {
 const RING: usize = 2;
 
 /// Bytes of the globals uniform (view-projection, height range, view mode, the shading extras and the albedo table).
-pub(crate) const GLOBALS_BYTES: u64 = 96 + 16 + 16 * planet_frame::look::shading::ALBEDO_VEC4S as u64;
+pub(crate) const GLOBALS_BYTES: u64 = 96 + 16 + 16 * planet_frame::look::shading::ALBEDO_VEC4S as u64 + PREVIEW_BYTES;
+
+/// Bytes of the preview table at the end of the globals: [`planet_frame::preview::MAX_PREVIEW_STAMPS`] stamps of two vec4s.
+pub(crate) const PREVIEW_BYTES: u64 = 32 * planet_frame::preview::MAX_PREVIEW_STAMPS as u64;
+
+/// The preview table of the globals (REND-033) for `stamps` seen from `camera`, `radius_m` the body's: per stamp its anchor on the
+/// reference sphere relative to the camera (f64 on the CPU, rounded once), its reach, amount, kind, sign and bound. The count is the
+/// caller's to put in `extra.w`.
+pub(crate) fn preview_table(stamps: &[planet_frame::preview::PreviewStamp], camera: planet_core::Vec3, radius_m: f64) -> Vec<u8> {
+    let mut rows = Vec::with_capacity(PREVIEW_BYTES as usize);
+    for s in stamps.iter().take(planet_frame::preview::MAX_PREVIEW_STAMPS) {
+        let c = s.dir * radius_m - camera;
+        let kind = s.kind_code();
+        rows.extend(f32_bytes(&[c.x as f32, c.y as f32, c.z as f32, s.reach_m as f32]));
+        rows.extend(f32_bytes(&[s.amount_m as f32, kind, f32::from(s.sign), s.max_delta_m as f32]));
+    }
+    rows.resize(PREVIEW_BYTES as usize, 0);
+    rows
+}
 
 struct FrameSet {
     globals: wgpu::Buffer,
@@ -512,6 +546,8 @@ pub struct FrameTiming {
 /// Terrain renderer with persistent resources: pipelines, uniform buffers, the pool of compact blocks and render targets are
 /// created once, so a frame only writes a few small buffers and records the draws. `execute_terrain_tiles` is the one-shot wrapper.
 pub struct TerrainRenderer {
+    /// The preview stamps of the edit in flight and the body's radius (REND-033), written into the globals of each frame.
+    preview: (Vec<planet_frame::preview::PreviewStamp>, f64),
     size: (u32, u32),
     cells: u32,
     bgl: wgpu::BindGroupLayout,
@@ -630,6 +666,17 @@ struct TimingResources {
 }
 
 impl TerrainRenderer {
+    /// [`TerrainRenderer::set_preview`] for the preview of a frame's draw plan (REND-033): call before submitting it.
+    pub fn set_preview_of(&mut self, draw: &planet_frame::pipeline::DrawPlan) {
+        self.set_preview(&draw.preview, draw.preview_radius_m);
+    }
+
+    /// Set the preview stamps drawn on the nodes flagged `preview` (REND-033; `DrawPlan::preview`) and the radius of the body they lie on. An
+    /// empty list ends the preview: the vertex stage is then not entered and the frame is the frame of a build without it.
+    pub fn set_preview(&mut self, stamps: &[planet_frame::preview::PreviewStamp], radius_m: f64) {
+        self.preview = (stamps.iter().copied().take(planet_frame::preview::MAX_PREVIEW_STAMPS).collect(), radius_m);
+    }
+
     /// A renderer with the mid tier's terrain share (ADR 0033: 2 GiB, a ceiling counted in slots: 15 blocks, 219,585 slots at cells
     /// 32). Slots are reusable one frame after their release (the renderer finishes a frame before it returns).
     pub fn new(ctx: &GpuContext, size: (u32, u32), cells: u32) -> Self {
@@ -728,6 +775,7 @@ impl TerrainRenderer {
             }),
         });
         Self {
+            preview: (Vec::new(), 0.0),
             size,
             cells,
             bgl,
@@ -1568,8 +1616,16 @@ impl TerrainRenderer {
             None => {
                 globals.extend(f32_bytes(&[lo, hi, 0.0, 0.0]));
                 globals.extend([view_index(plan.view), 0, 0, 0].iter().flat_map(|v: &u32| v.to_le_bytes()));
-                globals.extend(vec![0u8; GLOBALS_BYTES as usize - globals.len()]);
+                globals.extend(vec![0u8; GLOBALS_BYTES as usize - PREVIEW_BYTES as usize - globals.len()]);
             }
+        }
+        // The preview table after the albedo table, its count in extra.w (REND-033); zeros when there is no preview.
+        globals.resize(GLOBALS_BYTES as usize - PREVIEW_BYTES as usize, 0);
+        if self.preview.0.is_empty() {
+            globals.extend(vec![0u8; PREVIEW_BYTES as usize]);
+        } else {
+            globals.extend(preview_table(&self.preview.0, plan.camera.position.0, self.preview.1));
+            globals[108..112].copy_from_slice(&(self.preview.0.len() as f32).to_le_bytes());
         }
         debug_assert_eq!(globals.len() as u64, GLOBALS_BYTES);
         // Each frame writes its own set of the ring, so a frame still in flight keeps the records it reads.
@@ -1837,10 +1893,23 @@ fn one_shot_pool(nodes: usize, cells: u32) -> Result<PoolConfig, String> {
 /// Execute the plan on the GPU with the compact tiles of its nodes and read the frame back: the one-shot wrapper over
 /// [`TerrainRenderer`]. The renderer's pools are sized to the plan (one block just large enough for its tiles).
 pub fn execute_terrain_tiles(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[&CompactTile]) -> Result<(RgbaFrame, TerrainStats), ExecError> {
+    execute_terrain_tiles_preview(ctx, plan, tiles, &[], 0.0)
+}
+
+/// [`execute_terrain_tiles`] with the edit preview (REND-033): the nodes of the plan flagged `preview` show the delta of `stamps` on the
+/// body of radius `radius_m`. An empty list is [`execute_terrain_tiles`] exactly.
+pub fn execute_terrain_tiles_preview(
+    ctx: &GpuContext,
+    plan: &TerrainPlan,
+    tiles: &[&CompactTile],
+    stamps: &[planet_frame::preview::PreviewStamp],
+    radius_m: f64,
+) -> Result<(RgbaFrame, TerrainStats), ExecError> {
     let lookup: HashMap<_, _> = tiles.iter().map(|t| (t.id(), *t)).collect();
     let cells = plan.cells;
     let pool = one_shot_pool(plan.nodes.len(), cells).map_err(ExecError::BadPool)?;
     let mut renderer = TerrainRenderer::with_pools(ctx, plan.size, cells, pool);
+    renderer.set_preview(stamps, radius_m);
     for d in &plan.nodes {
         let t = lookup.get(&d.tile).ok_or(ExecError::MissingTile(d.tile))?;
         renderer.upload_tile(ctx, t)?;
@@ -1868,6 +1937,36 @@ mod one_shot_tests {
         );
     }
 
+    // spec: REND-033
+    #[test]
+    fn the_preview_profiles_of_the_vertex_stage_are_the_stamp_stages_and_a_frame_without_a_preview_never_enters_them() {
+        let shader = crate::compact::compact_terrain_shader(16);
+        // GEN-026: hill a (1 - x^2)^2; crater a (-bowl + 0.2 rim), bowl = 1 - s(min(x / 0.8, 1)), rim on 0.7..1 at (x - 0.85) / 0.15;
+        // plateau w(x) clamp(target - h, -M, M), w = 1 - s(clamp((x - 0.7) / 0.3, 0, 1)).
+        for needle in [
+            "let q = 1.0 - x * x;",
+            "1.0 - smooth01(min(x / 0.8, 1.0))",
+            "if (x >= 0.7)",
+            "let u = (x - 0.85) / 0.15;",
+            "0.2 * rim",
+            "1.0 - smooth01(clamp((x - 0.7) / 0.3, 0.0, 1.0))",
+            "clamp(a - h, -m, m)",
+            "t * t * (3.0 - 2.0 * t)",
+        ] {
+            assert!(shader.contains(needle), "the preview profile lost '{needle}'");
+        }
+        // The stage is entered only for a flagged node when the count is above 0, and the normal is touched only then.
+        assert!(shader.contains("let previewed = g.extra.w > 0.5 && node.morph.z > 0.5;"));
+        assert!(shader.contains("out.normal = normalize(mix(out.normal, vup, flat_w) - grad);"));
+        // No planet-radius value in the preview code (CON-11): the distance is the tile-tangent plane's.
+        let preview_code = &shader[shader.find("fn preview_profile").unwrap()..shader.find("fn terrain_vertex").unwrap()];
+        let code: String = preview_code.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join(
+            "
+",
+        );
+        assert!(!code.contains("radius") && !code.contains("6371"));
+    }
+
     // spec: REND-030
     #[test]
     fn the_node_record_carries_no_ramp_so_the_same_ground_point_ramps_alike_under_a_tile_of_any_level() {
@@ -1882,6 +1981,7 @@ mod one_shot_tests {
             morph_end_m: 20.0,
             color: [1, 2, 3, 255],
             mesh_key: 7,
+            preview: false,
         };
         let (coarse, fine) = (TileId::new(planet_core::Face(0), 17, 1, 1).unwrap(), TileId::new(planet_core::Face(0), 20, 8, 8).unwrap());
         let mut plan = planet_frame::viewer::lit_warm_plan(

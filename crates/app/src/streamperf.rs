@@ -229,6 +229,7 @@ impl Driver<'_> {
         };
         let lit_plan_ms = lit_started.elapsed().as_secs_f64() * 1000.0;
         self.ticks += 1;
+        self.rig.renderer.set_preview_of(&frame.pipeline.draw);
         let (timing, _) =
             self.rig.renderer.submit(ctx, lit_plan.as_ref().unwrap_or(&frame.pipeline.draw.plan)).map_err(|e| e.to_string())?;
         self.rig.fi.submit();

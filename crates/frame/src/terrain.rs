@@ -77,6 +77,9 @@ pub struct TerrainDraw {
     /// Key of the mesh this draw expects ([`planet_generators::mesh::mesh_key`]): a resident buffer with another key is
     /// stale and must not be drawn.
     pub mesh_key: u64,
+    /// The node is drawn from a stale resident tile that a preview stamp touches (REND-033): the vertex stage adds the preview's delta.
+    /// A runtime flag of the draw plan; the recorded text form does not carry it.
+    pub preview: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -274,6 +277,7 @@ pub(crate) fn plan_terrain_keyed(
                 } else {
                     derive_key(n.tile)
                 },
+                preview: false,
             }
         })
         .collect();

@@ -107,6 +107,8 @@ impl TerrainPlan {
                 morph_end_m: _,
                 color: _,
                 mesh_key: _,
+                // A runtime flag of the draw plan (REND-033), not part of a recorded plan.
+                preview: _,
             } = n;
             let r = n.camera_relative_origin;
             s += &format!(
@@ -188,6 +190,7 @@ impl TerrainPlan {
                         morph_end_m: p32(me)?,
                         color: [byte(r)?, byte(g)?, byte(b)?, byte(a)?],
                         mesh_key: u64::from_str_radix(key, 16).map_err(|e| format!("bad mesh key '{key}': {e}"))?,
+                        preview: false,
                     });
                 }
                 _ => return Err(format!("cannot parse terrain plan line '{line}'")),
