@@ -170,6 +170,8 @@ pub struct WorldTerrain {
     field_ns: std::sync::atomic::AtomicU64,
     /// The stored bake behind `src`, for the counters (`None`: an in-memory bake or no bake).
     store_source: Option<&'static StoreSource<'static>>,
+    /// Layers whose stamp stage exists even while they hold no stamp (the editor's, `WorldTerrain::with_edit_layers`).
+    edit_layers: Vec<String>,
     /// The ocean channel of the bake (ADR 0041 point 2): the sea of the water field W. `None` for a field that reads no bake (no
     /// bake, no ocean, no water) and for a store without the channel.
     ocean: Option<Box<dyn OceanLattice + Send + Sync>>,
@@ -262,6 +264,7 @@ impl WorldTerrain {
             field_builds: Default::default(),
             field_ns: Default::default(),
             store_source: None,
+            edit_layers: Vec::new(),
             ocean,
             summary: summary_owned,
             bound_water: false,
@@ -326,6 +329,7 @@ impl WorldTerrain {
             field_builds: Default::default(),
             field_ns: Default::default(),
             store_source: Some(src),
+            edit_layers: Vec::new(),
             ocean,
             summary,
             bound_water: false,
@@ -357,6 +361,15 @@ impl WorldTerrain {
     /// cache (the `dive-cold` scene, ADR 0045 point 3). The bake is read as before.
     pub fn cold(mut self) -> WorldTerrain {
         self.use_prefilled = false;
+        self
+    }
+
+    /// This terrain with a stamp stage for each of `layers` from the start, even while the layer holds no stamp. An editor needs it: the
+    /// first stamp of a layer would otherwise add the stage and re-key every tile of the world (a stage's key chains the base and carries
+    /// its own implementation id), where with the stage already there it re-keys only the tiles the stamp's footprint touches (STRM-028).
+    /// The keys of an editing world differ from those of a world without stages: a pre-filled pack of the plain world does not serve it.
+    pub fn with_edit_layers(mut self, layers: &[&str]) -> WorldTerrain {
+        self.edit_layers = layers.iter().map(|l| (*l).to_string()).collect();
         self
     }
 
@@ -600,7 +613,7 @@ impl WorldTerrain {
         let ctx = GenContext::new(&def);
         let built = build_field(self.kind, &ctx, BodyId::PLANET, self.src.as_ref(), self.bake_key)
             .map_err(|e| format!("the definition cannot be generated: {e}"))
-            .and_then(|base| with_stamps(base, &def));
+            .and_then(|base| with_stamps(base, &def, &self.edit_layers));
         self.field_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let spent = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
         self.field_ns.fetch_add(spent, std::sync::atomic::Ordering::Relaxed);
@@ -616,9 +629,13 @@ impl WorldTerrain {
 
 /// `base` with the stamp stages of the definition's layers over it, lowest layer first (GEN-026, ADR 0007); the base itself when the
 /// definition holds no stamp. The stages read the snapshot `def`, so the field keeps what it was built from.
-fn with_stamps<'a>(base: Box<dyn HeightField + 'a>, def: &Arc<WorldDefinition>) -> Result<Box<dyn HeightField + 'a>, String> {
+fn with_stamps<'a>(
+    base: Box<dyn HeightField + 'a>,
+    def: &Arc<WorldDefinition>,
+    edit_layers: &[String],
+) -> Result<Box<dyn HeightField + 'a>, String> {
     use planet_generators::stamp::{ItemReader, StampStage, STAMP_STAGE_VERSION};
-    let layers = def.stamp_layers(BodyId::PLANET);
+    let layers = def.stamp_layers_with(BodyId::PLANET, edit_layers);
     let Some((top, below)) = layers.split_last() else { return Ok(base) };
     let stage = |field: Arc<dyn HeightField + 'a>, layer: &str, index: usize| {
         let items: Arc<dyn ItemReader> = def.clone();

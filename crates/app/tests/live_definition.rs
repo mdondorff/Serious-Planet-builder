@@ -91,6 +91,36 @@ fn the_stages_stack_in_the_order_of_the_layer_stack_each_at_its_place_in_it_and_
 
 // spec: STRM-028
 #[test]
+fn with_the_stage_of_an_edit_layer_from_the_start_the_first_stamp_re_keys_only_the_tiles_it_touches() {
+    use planet_core::cube::TangentWarp;
+    use planet_core::TileId;
+    use planet_generators::height::cache_key_field;
+
+    let key = |world: &WorldTerrain, tile: TileId| cache_key_field(&*world.field().unwrap(), &TangentWarp, tile, 32);
+    let near = TileId::from_direction(&TangentWarp, at(), 12);
+    let far = TileId::from_direction(&TangentWarp, -at(), 12);
+    let put = |world: &WorldTerrain| {
+        let mut edited = (*world.definition()).clone();
+        edited.put_item_spec(BodyId::PLANET, hill(1, "stamps", 40.0)).unwrap();
+        world.set_definition(Arc::new(edited)).unwrap();
+    };
+    // Without the stage the first stamp adds one, and every tile of the world is re-keyed (a stage's key carries its own id and chain).
+    let plain = WorldTerrain::open(base(), RES).unwrap();
+    let (plain_far, near_before) = (key(&plain, far), key(&plain, near));
+    put(&plain);
+    assert_ne!(key(&plain, far), plain_far, "the first stage re-keys the whole world");
+    assert_ne!(key(&plain, near), near_before);
+    // With it, a far tile keeps its key and the tile under the stamp does not.
+    let editing = WorldTerrain::open(base(), RES).unwrap().with_edit_layers(&["stamps"]);
+    let (far_before, near_before) = (key(&editing, far), key(&editing, near));
+    assert_ne!(far_before, plain_far, "an editing world is another keyspace than a plain one");
+    put(&editing);
+    assert_eq!(key(&editing, far), far_before, "a tile out of reach keeps its key");
+    assert_ne!(key(&editing, near), near_before, "the tile under the stamp is re-keyed");
+}
+
+// spec: STRM-028
+#[test]
 fn a_definition_with_another_base_is_refused_and_changes_nothing() {
     let world = WorldTerrain::open(base(), RES).unwrap();
     let revision = world.definition().revision();

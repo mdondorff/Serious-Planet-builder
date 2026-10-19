@@ -1,6 +1,7 @@
 //! The single binary's run modes (CON-01): `editor` (interactive viewer), `generate` (headless CLI)
 //! and `test-render` (headless harness). M0 only wires them up; real work arrives with M1+.
 
+pub mod editperf;
 pub mod editwin;
 pub mod globalperf;
 pub mod litperf;
@@ -739,6 +740,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         return match o.scene.as_str() {
             "terrain" => skeleton::perf_terrain(o, &ctx, out),
             "global-bake" => globalperf::perf_global_bake(o, &ctx, out),
+            s if editperf::is_edit_scene(s) => editperf::perf_edit_latency(o, &ctx, out),
             s if streamperf::is_stream_scene(s) => streamperf::perf_streaming(o, &ctx, out),
             s if litperf::is_lit_scene(s) => litperf::perf_lit(o, &ctx, out),
             _ => perf_skeleton(o, &ctx, out),

@@ -644,11 +644,18 @@ impl WorldDefinition {
     /// The layers of `body` that hold at least one stamp, in stack order (ADR 0007: [`LAYER_STACK`] first, then other names in name
     /// order): the order the stamp stages are stacked in.
     pub fn stamp_layers(&self, body: BodyId) -> Vec<String> {
+        self.stamp_layers_with(body, &[])
+    }
+
+    /// [`stamp_layers`](WorldDefinition::stamp_layers) with the layers in `extra` too, whether they hold a stamp or not: an editor's layers,
+    /// whose stage exists from the start so that the first stamp re-keys only the tiles its footprint touches (STRM-028).
+    pub fn stamp_layers_with(&self, body: BodyId, extra: &[String]) -> Vec<String> {
         let mut layers: Vec<String> = self
             .items
             .range((body, 0)..=(body, ItemId::MAX))
             .filter(|(_, rec)| rec.stamp.is_some())
             .map(|(_, rec)| rec.layer.clone())
+            .chain(extra.iter().cloned())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
