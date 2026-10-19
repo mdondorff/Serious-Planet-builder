@@ -21,6 +21,9 @@ fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
         "edit-latency",
         "--adapter",
         "software",
+        // The software rasteriser takes every core of a small runner; below-normal generation workers then never finish a job.
+        "--gen-priority",
+        "normal",
         "--global-res",
         "128",
         "--out",
