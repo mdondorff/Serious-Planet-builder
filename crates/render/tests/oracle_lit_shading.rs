@@ -188,7 +188,10 @@ fn the_lit_radiance_matches_the_f64_reference_within_its_declared_bound() {
             f64::from(p.height_above_water_m),
             planet_frame::lod::shore_ramp_at(
                 f64::from(p.shore_ramp_per_m),
-                ((0..3).map(|k| (f64::from(p.origin_rel[k]) + f64::from(p.local[k])).powi(2)).sum::<f64>()).sqrt(),
+                ((0..3)
+                    .map(|k| (f64::from(p.origin_rel[k]) + f64::from(p.local[k])) * (f64::from(p.origin_rel[k]) + f64::from(p.local[k])))
+                    .sum::<f64>())
+                .sqrt(),
             ),
             p.sun.map(f64::from),
         );
