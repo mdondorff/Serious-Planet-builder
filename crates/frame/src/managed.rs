@@ -62,6 +62,14 @@ pub struct UploadStats {
     pub staging_bytes: u64,
 }
 
+/// What [`ManagedLoop::upload_roots`] wrote before frame 0: the tiles, their bytes in the sink's format and the sink's calls.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RootUpload {
+    pub uploaded: u64,
+    pub bytes: u64,
+    pub calls: u64,
+}
+
 /// What the scheduler and the manager did in one frame (counts only, CON-20). The `*_total` fields of the streamer's
 /// [`StreamStats`] are cumulative; these are per frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -358,6 +366,50 @@ impl ManagedLoop {
     pub fn work(&self) -> SchedWork {
         let w = self.manager.streamer().work();
         SchedWork { scanned: w.scanned + self.extra.scanned, updated: w.updated + self.extra.updated, layer_updates: w.layer_updates }
+    }
+
+    /// Write the roots (the tiles of the render floor, loaded by [`planet_streaming::Streamer::load_roots_blocking`]) to the sink now,
+    /// before frame 0, outside the per-frame cap (STRM-001, ADR 0064): the start-up load is a step of the body and not a measured frame, so
+    /// a harness that calls this finds no root upload in its first frame. A caller that does not call it gets them in the first frame as
+    /// before. Only tiles at or above the floor are written; any other change stays for the first frame.
+    pub fn upload_roots(&mut self, sink: &mut dyn TileSink) -> Result<RootUpload, String> {
+        let floor = self.manager.streamer().floor();
+        let streamer = self.manager.streamer_mut();
+        for change in streamer.take_changes() {
+            match change {
+                ResidentChange::Evicted(tile) => {
+                    self.pending.remove(&tile);
+                    if self.resident.remove(&tile).is_some() {
+                        self.slots.remove(&tile);
+                        sink.forget(tile);
+                    }
+                }
+                ResidentChange::Added(tile) => {
+                    let (Some(mesh), Some(slot)) = (streamer.get(tile), streamer.slot_of(tile)) else { continue };
+                    if self.slots.get(&tile) == Some(&slot) && self.resident.get(&tile).is_some_and(|r| r.mesh_key == mesh.key()) {
+                        continue;
+                    }
+                    self.pending.insert(tile);
+                }
+            }
+        }
+        let mut roots: Vec<TileId> = self.pending.iter().copied().filter(|t| t.level() <= floor && streamer.is_resident(*t)).collect();
+        roots.sort();
+        let mut batch = Vec::with_capacity(roots.len());
+        for tile in &roots {
+            let (Some(mesh), Some(slot)) = (streamer.get(*tile), streamer.slot_of(*tile)) else { continue };
+            batch.push((*tile, mesh, slot));
+        }
+        let refs: Vec<(&CompactTile, SlotRef)> = batch.iter().map(|(_, mesh, slot)| (&**mesh, *slot)).collect();
+        let stats = sink.upload_batch(&refs)?;
+        let mut bytes = 0u64;
+        for (tile, mesh, slot) in &batch {
+            self.pending.remove(tile);
+            self.resident.insert(*tile, ResidentTile { mesh_key: mesh.key(), origin: mesh.origin() });
+            self.slots.insert(*tile, *slot);
+            bytes += sink.upload_bytes(mesh);
+        }
+        Ok(RootUpload { uploaded: batch.len() as u64, bytes, calls: stats.calls })
     }
 
     /// Begin the next frame for `req`; never waits. See the module documentation for the order of the three steps.
