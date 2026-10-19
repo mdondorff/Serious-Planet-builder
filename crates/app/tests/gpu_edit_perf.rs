@@ -1,0 +1,44 @@
+//! Tier C, SPIKE-13 / M6 exit: the edit-latency scene (`test-render --perf --scene edit-latency`) runs end to end on the software adapter in
+//! smoke mode: the stamp is put through `set_definition`, the preview is drawn, the tiles become exact, the edit is taken back, and the
+//! report table is printed and written. The numbers are not a measurement (a smoke run never is); the scene's own logic is checked.
+
+fn run(args: &[&str]) -> Result<String, String> {
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let mut buf = Vec::new();
+    planet::run(&args, &mut buf).map(|_| String::from_utf8(buf).unwrap())
+}
+
+// spec: TEST-019
+#[test]
+fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
+    let logs = std::env::temp_dir().join(format!("planet-edit-perf-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&logs);
+    std::fs::create_dir_all(&logs).unwrap();
+    let out = run(&[
+        "test-render",
+        "--perf-smoke",
+        "--scene",
+        "edit-latency",
+        "--adapter",
+        "software",
+        // The software rasteriser takes every core of a small runner; below-normal generation workers then never finish a job.
+        "--gen-priority",
+        "normal",
+        "--global-res",
+        "128",
+        "--out",
+        logs.to_str().unwrap(),
+    ])
+    .unwrap();
+    assert!(out.contains("SMOKE RUN") && out.contains("not a measurement"), "{out}");
+    assert!(out.contains("| altitude | stamp radius | preview ms (budget 16) | exact ms (budget)"), "{out}");
+    // One altitude, one radius, one run: a row with a preview and an exact time.
+    let row = out.lines().find(|l| l.starts_with("| 200 m | 50 m |")).unwrap_or_else(|| panic!("no row: {out}"));
+    // The preview column may read `-` on a slow adapter: the refreshed tiles can arrive within one frame, so no frame draws a stale tile
+    // (the scene says "no result" then). The exact column is always set (the scene errors when the edit never became exact), and the
+    // preview itself is asserted by gpu_preview.
+    let cells: Vec<&str> = row.split('|').map(str::trim).collect();
+    assert!(cells[5] != "-", "the exact frame happened: {row}");
+    let table = std::fs::read_to_string(logs.join("edit-latency.md")).unwrap();
+    assert!(table.contains("| 200 m | 50 m |"), "{table}");
+}

@@ -660,6 +660,9 @@ fn perf_global_bake_args(args: &[String]) -> Result<Vec<String>, String> {
 }
 
 /// The streaming scenes of `perf stream` (ADR 0032 point 8 and `dive-cold`, ADR 0045 point 3); `all` runs the seven, one child process each.
+/// The edit-to-visible scene (SPIKE-13, M6 exit): run by name under the same gate and options, never part of `all`.
+const EDIT_SCENE: &str = "edit-latency";
+
 const STREAM_SCENES: [&str; 7] = ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km", "dive-cold"];
 
 /// The `cargo` arguments of `perf stream [SCENE|all] [--store DIR | --allow-memory-bake] [--global-res N] [--out PATH]
@@ -671,10 +674,10 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
     if let Some(first) = args.first().filter(|a| !a.starts_with("--")) {
         if first == "all" {
             scene = "streaming".into();
-        } else if STREAM_SCENES.contains(&first.as_str()) {
+        } else if STREAM_SCENES.contains(&first.as_str()) || first == EDIT_SCENE {
             scene = first.clone();
         } else {
-            return Err(format!("unknown streaming scene '{first}' (known: {}, all)", STREAM_SCENES.join(", ")));
+            return Err(format!("unknown streaming scene '{first}' (known: {}, {EDIT_SCENE}, all)", STREAM_SCENES.join(", ")));
         }
         rest = &args[1..];
     }
@@ -866,6 +869,18 @@ mod tests {
         let (line, over) = edit_to_first_test_line(49.0, 13.2);
         assert!(over && line.starts_with("BUDGET EXCEEDED: edit-to-first-test 62 s > 30 s (build 49.0 s + tests 13.2 s)"), "{line}");
         assert!(line.contains("Tracked item in docs/status.md"), "{line}");
+    }
+
+    // spec: TEST-019
+    #[test]
+    fn the_edit_latency_scene_runs_by_name_with_the_stream_options_and_is_not_part_of_all() {
+        let a = perf_stream_args(&s(&["edit-latency", "--store", "D:/bake", "--out", "target/perf-w13"])).unwrap();
+        let at = a.iter().position(|x| x == "--scene").unwrap();
+        assert_eq!(a[at + 1], "edit-latency");
+        assert!(a.contains(&"--perf".to_string()) && a.contains(&"hardware".to_string()) && a.contains(&"D:/bake".to_string()));
+        let smoke = perf_stream_args(&s(&["edit-latency", "--smoke"])).unwrap();
+        assert!(smoke.contains(&"--perf-smoke".to_string()) && smoke.contains(&"software".to_string()));
+        assert!(!STREAM_SCENES.contains(&EDIT_SCENE), "`perf stream all` does not run it");
     }
 
     // spec: TEST-019

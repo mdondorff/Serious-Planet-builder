@@ -1,3 +1,5 @@
+#[path = "gpu_edit_perf.rs"]
+mod gpu_edit_perf;
 #[path = "gpu_flight.rs"]
 mod gpu_flight;
 #[path = "gpu_modes.rs"]
