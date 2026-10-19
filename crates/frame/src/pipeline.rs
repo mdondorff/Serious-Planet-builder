@@ -149,6 +149,8 @@ pub struct DrawPlan {
     /// The preview stamps the frame draws (REND-033): the list given to [`draw_plan_preview`], which the renderer evaluates on the nodes
     /// flagged `preview`. Empty for a frame without an edit in flight.
     pub preview: Vec<PreviewStamp>,
+    /// The radius of the body the preview stamps lie on (the request's), for the renderer to place their anchors.
+    pub preview_radius_m: f64,
 }
 
 fn draw_of(req: &TerrainRequest, tile: TileId, r: ResidentTile) -> TerrainDraw {
@@ -313,7 +315,7 @@ pub fn draw_plan_preview(
             water: None,
         },
     };
-    Ok(DrawPlan { plan, kind, substituted, blank, preview: preview.to_vec() })
+    Ok(DrawPlan { plan, kind, substituted, blank, preview: preview.to_vec(), preview_radius_m: req.lod.radius_m })
 }
 
 /// Whether the reach of a preview stamp touches the cap of `tile` (REND-033), with the halo the stamp stage declares its items with.
@@ -321,7 +323,7 @@ fn previewed(preview: &[PreviewStamp], map: &dyn FaceMapping, tile: TileId, radi
     if preview.is_empty() {
         return false;
     }
-    let cap = planet_world_def::footprint::tile_cap(map, tile, 0.25);
+    let cap = planet_world_def::footprint::tile_cap(map, tile, planet_generators::stamp::STAGE_HALO);
     preview.iter().any(|s| planet_world_def::footprint::touches(cap, s.dir, s.reach_m, radius_m))
 }
 

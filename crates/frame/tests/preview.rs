@@ -144,3 +144,40 @@ fn only_a_node_drawn_from_a_stale_tile_under_a_stamp_is_previewed_and_the_exact_
     assert_eq!(plain, none);
     assert!(flagged(&none).is_empty() && none.preview.is_empty());
 }
+
+// spec: REND-033
+#[test]
+fn a_removed_plateau_is_not_previewed_whole_items_are_kept_or_dropped_and_a_drag_is_one_delta_from_the_first_state() {
+    let cam = dir(1.0, 0.0, 0.0);
+    // A removed plateau shows only at the exact tile; a changed plateau previews as its new state.
+    let flat = spec(3, 0, dir(1.0, 0.02, 0.0), StampKind::Plateau, 200.0);
+    let flatter = spec(3, 0, dir(1.0, 0.02, 0.0), StampKind::Plateau, 150.0);
+    assert!(preview_delta(&all(&world(std::slice::from_ref(&flat))), &[], cam).stamps.is_empty());
+    assert_eq!(signs(&preview_delta(&all(&world(&[flat])), &all(&world(&[flatter])), cam).stamps), [(1, StampKind::Plateau, 150.0)]);
+    // One addition and four resized hills, the addition nearest: 9 entries, 8 fit; the farthest changed item goes whole, never half.
+    let mut before = Vec::new();
+    let mut after = vec![spec(100, 0, dir(1.0, 0.0, 0.001), StampKind::Hill, 5.0)];
+    for k in 0..4u128 {
+        let at = dir(1.0, 0.01 * (k as f64 + 2.0), 0.0);
+        before.push(spec(k + 1, 0, at, StampKind::Hill, 20.0));
+        after.push(spec(k + 1, 0, at, StampKind::Hill, 40.0));
+    }
+    let list = preview_delta(&all(&world(&before)), &all(&world(&after)), cam);
+    assert_eq!(list.stamps.len(), 7, "the addition (1) and three changed items (2 each); the farthest item is out whole");
+    assert_eq!(list.dropped, 2);
+    assert_eq!(list.stamps.iter().filter(|s| s.sign < 0).count(), 3);
+    assert_eq!(list.stamps.iter().filter(|s| s.sign > 0).count(), 4);
+    // A drag A -> B -> C is the delta from A to C, not the sum of two steps: a tile still at state A shows the hill at C and none at B.
+    let (a, b, c) = (dir(1.0, 0.03, 0.0), dir(1.0, 0.05, 0.0), dir(1.0, 0.07, 0.0));
+    let state = |at: Vec3| all(&world(&[spec(1, 0, at, StampKind::Hill, 40.0)]));
+    let from_oldest = preview_delta(&state(a), &state(c), cam);
+    assert_eq!(
+        from_oldest.stamps.iter().map(|s| (s.sign, (s.dir - if s.sign < 0 { a } else { c }).length() < 1e-12)).collect::<Vec<_>>(),
+        [(-1, true), (1, true)]
+    );
+    let step2 = preview_delta(&state(b), &state(c), cam);
+    assert!(
+        step2.stamps.iter().any(|s| s.sign < 0 && (s.dir - b).length() < 1e-12),
+        "the single step names B: a caller must diff from the oldest state, not the last"
+    );
+}

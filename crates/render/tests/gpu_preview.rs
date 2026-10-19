@@ -15,7 +15,7 @@ const SIZE: (u32, u32) = (160, 120);
 const CELLS: u32 = 16;
 const SEED: u64 = 1;
 
-fn plan_for(index: usize, view: TerrainView) -> TerrainPlan {
+fn request_for(index: usize, view: TerrainView) -> TerrainRequest {
     let lod = LodParams {
         cells: CELLS,
         viewport_h_px: f64::from(SIZE.1),
@@ -24,7 +24,11 @@ fn plan_for(index: usize, view: TerrainView) -> TerrainPlan {
         ..LodParams::earth_1080p()
     };
     let (_, camera) = scripted_views(R, f64::from(SIZE.0) / f64::from(SIZE.1), SEED)[index];
-    plan_terrain(&TerrainRequest { camera, size: SIZE, view, lod, face_mapping: "tangent-v1".into(), seed: 1 }).unwrap()
+    TerrainRequest { camera, size: SIZE, view, lod, face_mapping: "tangent-v1".into(), seed: 1 }
+}
+
+fn plan_for(index: usize, view: TerrainView) -> TerrainPlan {
+    plan_terrain(&request_for(index, view)).unwrap()
 }
 
 fn frame(ctx: &GpuContext, plan: &TerrainPlan, stamps: &[PreviewStamp]) -> Vec<u8> {
@@ -90,6 +94,103 @@ fn the_preview_draws_nothing_without_a_stamp_or_a_flag_and_a_stamp_only_inside_i
         assert!(differing(&small, &plain) <= changed, "view {index}: a smaller reach changes no more pixels");
         if index == 6 {
             assert!(changed > 0, "view {index}: the hill is seen");
+        }
+    }
+}
+
+fn item(kind: StampKind, at: Vec3, amount: f64, reach_m: f64) -> planet_world_def::ItemSpec {
+    planet_world_def::ItemSpec {
+        id: 1,
+        layer: planet_world_def::DEFAULT_ITEM_LAYER.into(),
+        priority: 0,
+        dir: at,
+        content_hash: 0,
+        reach_m,
+        max_delta_m: amount.abs() * 1.5,
+        stamp: None,
+    }
+    .with_stamp(planet_world_def::stamp::Stamp::new(kind, [amount, 0.0, 0.0]))
+}
+
+// spec: REND-033
+#[test]
+fn the_preview_over_the_stale_tiles_is_close_to_the_exact_tiles_of_the_edited_world() {
+    use planet_generators::stamp::{StampStage, STAMP_STAGE_VERSION};
+    use planet_world_def::{BodyId, WorldDefinition};
+    use std::sync::Arc;
+
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let mut plan = plan_for(8, TerrainView::Height);
+    let cam = plan.camera.position.0.normalized();
+    let near = plan.nodes.iter().map(|n| n.tile).max_by(|a, b| {
+        a.center_direction(&TangentWarp).dot(cam).total_cmp(&b.center_direction(&TangentWarp).dot(cam)).then(b.level().cmp(&a.level()))
+    });
+    let at = near.unwrap().center_direction(&TangentWarp);
+    for (name, kind, amount, reach) in [
+        ("hill", StampKind::Hill, 60.0, 2_000.0),
+        ("crater", StampKind::Crater, 50.0, 2_000.0),
+        ("plateau", StampKind::Plateau, 150.0, 3_000.0),
+    ] {
+        let mut def = WorldDefinition::single_planet(R, SEED);
+        def.put_item_spec(BodyId::PLANET, item(kind, at, amount, reach)).unwrap();
+        let base: Arc<dyn planet_generators::height::HeightField> = Arc::new(Reference(SEED));
+        let stage =
+            StampStage::new(base, Arc::new(def), BodyId::PLANET, planet_world_def::DEFAULT_ITEM_LAYER, 0, STAMP_STAGE_VERSION).unwrap();
+        // The exact frame: tiles of the edited world, nothing flagged. The preview frame: the stale tiles of the unedited world, flagged,
+        // with the stamp as the preview.
+        // The plan of the edited world (its tile origins and keys follow the edit), drawn from its own tiles.
+        let exact_plan = planet_frame::plan_terrain_field(&request_for(8, TerrainView::Height), &stage).unwrap();
+        let exact_tiles: Vec<CompactTile> =
+            exact_plan.nodes.iter().map(|n| compact_tile_field(&stage, &TangentWarp, n.tile, CELLS, R)).collect();
+        let refs: Vec<&CompactTile> = exact_tiles.iter().collect();
+        let exact = execute_terrain_tiles_preview(&ctx, &exact_plan, &refs, &[], R).unwrap().0.rgba;
+        for n in &mut plan.nodes {
+            n.preview = false;
+        }
+        let plain = frame(&ctx, &plan, &[]);
+        for n in &mut plan.nodes {
+            n.preview = true;
+        }
+        let stamp = PreviewStamp { sign: 1, kind, amount_m: amount, dir: at, reach_m: reach, max_delta_m: amount * 1.5 };
+        let previewed = frame(&ctx, &plan, &[stamp]);
+        let max_diff = |a: &[u8], b: &[u8]| {
+            a.chunks(4).zip(b.chunks(4)).map(|(x, y)| (0..3).map(|c| x[c].abs_diff(y[c])).max().unwrap()).collect::<Vec<u8>>()
+        };
+        let unedited = max_diff(&plain, &exact);
+        let off = max_diff(&previewed, &exact);
+        let count = |d: &[u8], t: u8| d.iter().filter(|v| **v > t).count();
+        println!(
+            "{name}: pixels off the exact frame by > 3 grey levels: unedited {} -> preview {} of {} (> 8: {} -> {})",
+            count(&unedited, 3),
+            count(&off, 3),
+            off.len(),
+            count(&unedited, 8),
+            count(&off, 8)
+        );
+        {
+            let mut sums = [0.0f64; 3];
+            let mut n = 0.0;
+            for k in 0..plain.len() / 4 {
+                if unedited[k] > 3 {
+                    sums[0] += f64::from(plain[4 * k]);
+                    sums[1] += f64::from(exact[4 * k]);
+                    sums[2] += f64::from(previewed[4 * k]);
+                    n += 1.0;
+                }
+            }
+            println!(
+                "{name}: over the {n} pixels the exact frame moves: mean red stale {:.1}, exact {:.1}, preview {:.1}",
+                sums[0] / n,
+                sums[1] / n,
+                sums[2] / n
+            );
+        }
+        write_ppm(&format!("{name}-exact"), &exact);
+        write_ppm(&format!("{name}-preview"), &previewed);
+        write_ppm(&format!("{name}-stale"), &plain);
+        // The preview is closer to the exact frame than the stale one, where there is anything to see.
+        if count(&unedited, 3) > 50 {
+            assert!(count(&off, 3) * 20 <= count(&unedited, 3), "{name}: the preview should remove (nearly) all of the difference");
         }
     }
 }

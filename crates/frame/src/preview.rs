@@ -61,12 +61,18 @@ fn entry(item: &FootprintItem, sign: i8) -> Option<(i32, ItemId, PreviewStamp)> 
 }
 
 /// The preview of an edit that took the footprint items `before` to `after` (any items: only stamps count): the removals and additions
-/// that differ, the 8 nearest to `camera` (a planet-fixed position) when there are more, in application order.
+/// that differ, in application order. `before` must be the items the stale tiles were built from, the oldest state any resident tile
+/// still shows (the caller keeps it until every tile has been refreshed), and `after` the current items: the list then takes any
+/// stale tile to the current state however many edits came between (a drag in many steps is one delta from the first state).
+///
+/// A removed plateau is not previewed: its effect on a stale tile depends on the ground the plateau flattened, which the tile no longer
+/// holds, so the exact tile shows it (a changed plateau previews as its new state only). With more than [`MAX_PREVIEW_STAMPS`] entries
+/// the items nearest to `camera` (a planet-fixed position) are kept, an item's two entries together or not at all.
 pub fn preview_delta(before: &[FootprintItem], after: &[FootprintItem], camera: Vec3) -> PreviewList {
     let mut entries: Vec<(i32, ItemId, PreviewStamp)> = Vec::new();
     for old in before {
         if !after.iter().any(|new| new == old) {
-            entries.extend(entry(old, -1));
+            entries.extend(entry(old, -1).filter(|e| e.2.kind != StampKind::Plateau));
         }
     }
     for new in after {
@@ -74,13 +80,28 @@ pub fn preview_delta(before: &[FootprintItem], after: &[FootprintItem], camera: 
             entries.extend(entry(new, 1));
         }
     }
-    let dropped = entries.len().saturating_sub(MAX_PREVIEW_STAMPS);
-    if dropped > 0 {
-        // Nearest first: by the angle between the anchor and the camera direction (smaller angle = larger cosine), ties by id.
+    let total = entries.len();
+    if total > MAX_PREVIEW_STAMPS {
+        // Whole items, nearest first: the angle between the item's nearest entry and the camera direction (larger cosine = nearer), ties by id.
         let cam = camera.normalized();
-        entries.sort_by(|a, b| b.2.dir.dot(cam).total_cmp(&a.2.dir.dot(cam)).then(a.1.cmp(&b.1)).then(a.2.sign.cmp(&b.2.sign)));
-        entries.truncate(MAX_PREVIEW_STAMPS);
+        let mut ids: Vec<ItemId> = entries.iter().map(|e| e.1).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        let near = |id: &ItemId| entries.iter().filter(|e| e.1 == *id).map(|e| e.2.dir.dot(cam)).fold(f64::NEG_INFINITY, f64::max);
+        ids.sort_by(|a, b| near(b).total_cmp(&near(a)).then(a.cmp(b)));
+        let mut kept: Vec<ItemId> = Vec::new();
+        let mut count = 0;
+        for id in ids {
+            let n = entries.iter().filter(|e| e.1 == id).count();
+            if count + n > MAX_PREVIEW_STAMPS {
+                break;
+            }
+            count += n;
+            kept.push(id);
+        }
+        entries.retain(|e| kept.contains(&e.1));
     }
+    let dropped = total - entries.len();
     // Application order; a changed item's removal (-1) comes before its addition (+1).
     entries.sort_by_key(|a| (a.0, a.1, a.2.sign));
     PreviewList { stamps: entries.into_iter().map(|e| e.2).collect(), dropped }

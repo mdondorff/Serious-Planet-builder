@@ -666,6 +666,11 @@ struct TimingResources {
 }
 
 impl TerrainRenderer {
+    /// [`TerrainRenderer::set_preview`] for the preview of a frame's draw plan (REND-033): call before submitting it.
+    pub fn set_preview_of(&mut self, draw: &planet_frame::pipeline::DrawPlan) {
+        self.set_preview(&draw.preview, draw.preview_radius_m);
+    }
+
     /// Set the preview stamps drawn on the nodes flagged `preview` (REND-033; `DrawPlan::preview`) and the radius of the body they lie on. An
     /// empty list ends the preview: the vertex stage is then not entered and the frame is the frame of a build without it.
     pub fn set_preview(&mut self, stamps: &[planet_frame::preview::PreviewStamp], radius_m: f64) {
@@ -1952,10 +1957,14 @@ mod one_shot_tests {
         }
         // The stage is entered only for a flagged node when the count is above 0, and the normal is touched only then.
         assert!(shader.contains("let previewed = g.extra.w > 0.5 && node.morph.z > 0.5;"));
-        assert!(shader.contains("if (previewed) {\n        out.normal = normalize(out.normal - sb.yzw);"));
+        assert!(shader.contains("out.normal = normalize(mix(out.normal, vup, flat_w) - grad);"));
         // No planet-radius value in the preview code (CON-11): the distance is the tile-tangent plane's.
         let preview_code = &shader[shader.find("fn preview_profile").unwrap()..shader.find("fn terrain_vertex").unwrap()];
-        assert!(!preview_code.contains("radius") && !preview_code.contains("6371"));
+        let code: String = preview_code.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join(
+            "
+",
+        );
+        assert!(!code.contains("radius") && !code.contains("6371"));
     }
 
     // spec: REND-030
