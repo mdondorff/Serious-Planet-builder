@@ -164,6 +164,8 @@ struct Harness<'a> {
     ctx: &'a GpuContext,
     rig: Rig,
     iteration: u64,
+    /// How long a settle may take before it is an error (a smoke run is short, so a hang names itself instead of waiting for the runner).
+    settle_limit: Duration,
 }
 
 impl Harness<'_> {
@@ -194,7 +196,8 @@ impl Harness<'_> {
     }
 
     /// Frames with the camera still until `calm` consecutive idle frames.
-    fn settle(&mut self, req: &TerrainRequest, calm: usize, limit: Duration) -> Result<f64, String> {
+    fn settle(&mut self, req: &TerrainRequest, calm: usize) -> Result<f64, String> {
+        let limit = self.settle_limit;
         let started = Instant::now();
         let mut quiet = 0;
         loop {
@@ -204,7 +207,17 @@ impl Harness<'_> {
                 return Ok(started.elapsed().as_secs_f64());
             }
             if started.elapsed() > limit {
-                return Err(format!("did not settle in {} s", limit.as_secs()));
+                return Err(format!(
+                    "did not settle in {} s after {} frames: kind {:?}, substituted {}, blank {}, unfinished jobs {}, plan worker busy {}, pending {}",
+                    limit.as_secs(),
+                    self.iteration,
+                    frame.pipeline.draw.kind,
+                    frame.pipeline.draw.substituted,
+                    frame.pipeline.draw.blank,
+                    self.rig.managed.manager().streamer().unfinished_jobs(),
+                    self.rig.managed.pipeline().worker().busy(),
+                    self.rig.managed.pending().len()
+                ));
             }
             std::thread::sleep(Duration::from_millis(1));
         }
@@ -283,7 +296,7 @@ fn run_once(
     world.set_definition(before_def)?;
     h.rig.managed.edit(&tiles);
     h.rig.managed.set_preview(Vec::new());
-    h.settle(req, 20, SETTLE_LIMIT)?;
+    h.settle(req, 20)?;
     Ok(out)
 }
 
@@ -354,12 +367,12 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         let rho = (1.5 * radii[0]).max(altitude);
         let first = req_of(camera_for(first_stamp.dir, &ground, radius_m, rho, altitude, aspect));
         let rig = Rig::new(ctx, &world, &first, o.gen_workers())?;
-        let mut h = Harness { ctx, rig, iteration: 0 };
+        let mut h = Harness { ctx, rig, iteration: 0, settle_limit: if smoke { Duration::from_secs(120) } else { SETTLE_LIMIT } };
         for &r in &radii {
             let stamp = case_stamp(r);
             let rho = (1.5 * r).max(altitude);
             let req = req_of(camera_for(stamp.dir, &ground, radius_m, rho, altitude, aspect));
-            let settle = h.settle(&req, 20, SETTLE_LIMIT)?;
+            let settle = h.settle(&req, 20)?;
             writeln!(out, "  altitude {altitude} m, stamp radius {r} m: settled in {settle:.1} s").map_err(err)?;
             let mut runs = Vec::new();
             for _ in 0..repeats {
