@@ -309,6 +309,9 @@ impl Item {
             content_hash: self.hash(),
             reach_m: canonical(self.reach_m),
             max_delta_m: canonical(self.max_delta_m),
+            // The map from an item file to a stamp (kind and parameters) comes with the stamp stage (E2); until then a file item has no
+            // height output of its own and its content hash is the file hash.
+            stamp: None,
         }
     }
 
