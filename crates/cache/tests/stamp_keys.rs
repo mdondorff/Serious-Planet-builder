@@ -210,7 +210,7 @@ fn a_stage_that_passes_a_tile_through_keys_as_its_source_in_both_key_domains_wha
     }
 }
 
-// spec: STRM-027
+// spec: STRM-027, STRM-029
 #[test]
 fn a_key_without_a_stage_is_what_it_was_and_every_wrapper_that_forwards_the_source_key_forwards_the_chain() {
     let tile = TileId::new(Face(2), 5, 3, 7).unwrap();
