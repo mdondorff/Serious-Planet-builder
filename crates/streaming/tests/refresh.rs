@@ -28,13 +28,14 @@ impl TileSource<(u64, u64)> for RevSource {
 }
 
 type Fixture = (Streamer<(u64, u64)>, Arc<ManualSpawner>, Arc<RevSource>);
+type ClockedFixture = (Streamer<(u64, u64)>, Arc<ManualSpawner>, Arc<RevSource>, Arc<FakeClock>);
 
 fn fixture(max_in_flight: usize) -> Fixture {
     let (s, spawner, source, _) = fixture_with_clock(max_in_flight);
     (s, spawner, source)
 }
 
-fn fixture_with_clock(max_in_flight: usize) -> (Streamer<(u64, u64)>, Arc<ManualSpawner>, Arc<RevSource>, Arc<FakeClock>) {
+fn fixture_with_clock(max_in_flight: usize) -> ClockedFixture {
     let spawner = Arc::new(ManualSpawner::default());
     let source = Arc::new(RevSource::default());
     let clock = Arc::new(FakeClock::default());
@@ -223,6 +224,39 @@ fn a_frame_with_nothing_to_refresh_does_no_work_and_a_refresh_counts_only_what_i
         s.begin_frame(&wants);
     }
     assert_eq!(quiet(&mut s), (0, 0), "after the replacement the loop is quiet again");
+}
+
+// spec: STRM-026, STRM-007
+#[test]
+fn a_refresh_that_finds_no_free_slot_waits_and_the_old_version_is_served_meanwhile() {
+    // Six roots and one level-1 tile fill a pool of seven: the second slot of a refresh does not exist.
+    let spawner = Arc::new(ManualSpawner::default());
+    let source = Arc::new(RevSource::default());
+    let config = StreamConfig { max_in_flight: 2, capacity: 7, record_changes: true, ..Default::default() };
+    let mut s = Streamer::new(
+        Arc::clone(&source) as Arc<dyn TileSource<(u64, u64)>>,
+        spawner.clone() as Arc<dyn Spawner>,
+        Arc::new(FakeClock::default()),
+        config,
+    );
+    s.load_roots_blocking().unwrap();
+    let t = id(2, 1, 0, 0);
+    let wants = [(t, 1.0)];
+    settle(&mut s, &spawner, &wants, t);
+    for _ in 0..8 {
+        s.begin_frame(&wants);
+    }
+    assert_eq!(s.stats().main_free, 0, "the pool is full");
+    source.rev.store(1, Ordering::SeqCst);
+    assert_eq!(s.refresh(&[t]), 1);
+    for _ in 0..4 {
+        s.begin_frame(&wants);
+        spawner.run(4);
+    }
+    assert_eq!(s.stats().in_flight, 0, "no job could start without a slot");
+    assert!(s.stats().blocked >= 1, "the request found no slot");
+    assert_eq!(s.get(t).as_deref(), Some(&(t.raw(), 0)), "the old version is served meanwhile");
+    assert!(s.is_resident(t));
 }
 
 // spec: STRM-026, STRM-005
