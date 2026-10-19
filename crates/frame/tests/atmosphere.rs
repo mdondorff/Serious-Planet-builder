@@ -721,6 +721,7 @@ fn terrain_beyond_the_aerial_perspective_range_is_hazed_the_same_just_inside_and
         let o = outside.orbit_ray_cosines(atm, luts, mu_o, cos_o, Some(t_ground));
         let b: Vec<f64> = (0..3).map(|k| land[k] * o.transmittance[k] + o.radiance[k]).collect();
         let _ = cos_vs;
+        eprintln!("row {iy}: ground {:.0} km, inside rgb {:.5} {:.5} {:.5}, outside rgb {:.5} {:.5} {:.5}", t_ground / 1000.0, a[0], a[1], a[2], b[0], b[1], b[2]);
         for k in 0..3 {
             let rel = (a[k] - b[k]).abs() / b[k].abs().max(1e-9);
             if rel > worst.0 {

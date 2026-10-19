@@ -50,6 +50,34 @@ fn cam_shore(c: &Coast, radius_m: f64, level_m: f64, back_m: f64, shore_m: f64, 
     )
 }
 
+/// SPIKE-17: the owner's descent: from 100 km over the sea 20 km off the coast down to 60 m, the altitude falling by e^-k (k 0.255 per
+/// second: 100 km to 100 m in 27 s, the video's 0:26 to 0:53), the camera moving 5 % of its altitude per second towards the coast,
+/// pitched 20 degrees down, then 5 s of hold.
+pub fn descent_script(radius_m: f64, aspect: f64, level_m: f64, c: &Coast, scene: StreamScene) -> SceneScript {
+    let k: f64 = std::env::var("WATER_GAP_RATE").ok().and_then(|v| v.parse().ok()).unwrap_or(0.255);
+    let mut cameras = Vec::new();
+    let (mut alt, mut back) = (100_000.0f64, std::env::var("WATER_GAP_BACK").ok().and_then(|v| v.parse().ok()).unwrap_or(6_000.0f64));
+    let dt = 1.0 / 60.0;
+    for _ in 0..120 {
+        cameras.push(cam_at(c, radius_m, level_m, alt, back, 20.0, aspect));
+    }
+    while alt > 60.0 {
+        back -= std::env::var("WATER_GAP_DRIFT").ok().and_then(|v| v.parse().ok()).unwrap_or(0.01f64) * alt * dt;
+        alt *= libm::exp(-k * dt);
+        cameras.push(cam_at(c, radius_m, level_m, alt, back, 20.0, aspect));
+    }
+    for _ in 0..300 {
+        cameras.push(cam_at(c, radius_m, level_m, alt, back, 20.0, aspect));
+    }
+    let prelude = Some(cameras[0]);
+    SceneScript { scene, prelude, cameras, descent_frames: 0 }
+}
+
+fn cam_at(c: &Coast, radius_m: f64, level_m: f64, alt_m: f64, back_m: f64, pitch_deg: f64, aspect: f64) -> Camera {
+    let pos_dir = (c.dir - c.heading * (back_m / radius_m)).normalized();
+    Camera::at_surface_point(PlanetFixed(pos_dir * (radius_m + level_m + alt_m)), c.heading, pitch_deg.to_radians(), FOV_DEG.to_radians(), aspect, 0.1)
+}
+
 /// The path of the viewer's free camera at 80 m (its speed is about 200 m/s there): 120 still frames, a 10 s yaw sweep of +-90 degrees,
 /// 20 s along the shore at SPEED m/s (tiles stream behind it), 10 s of sweep while gliding back, 400 m out to sea.
 pub fn script(
@@ -61,6 +89,9 @@ pub fn script(
     scene: StreamScene,
 ) -> Result<SceneScript, String> {
     let coast = lit_coast(radius_m, field, level_m, is_sea)?;
+    if std::env::var("WATER_GAP_DESCENT").is_ok() {
+        return Ok(descent_script(radius_m, aspect, level_m, &coast, scene));
+    }
     let speed: f64 = std::env::var("WATER_GAP_SPEED").ok().and_then(|v| v.parse().ok()).unwrap_or(150.0);
     let back = 400.0;
     let pitch = 12.0;
@@ -130,6 +161,7 @@ impl GapLog {
         level_m: f64,
     ) -> usize {
         let water_nodes = plan.water.as_ref().map_or(0, |w| w.nodes.len());
+        let alt = req_cam.position.0.length() - 6_371_000.0 - level_m;
         let mut gaps = Vec::new();
         let mut reasons = std::collections::BTreeMap::<&str, usize>::new();
         let cpos = req_cam.position.0;
@@ -139,7 +171,7 @@ impl GapLog {
                 continue;
             }
             let node = &plan.nodes[d.node as usize];
-            if (node.origin.0 - cpos).length() > 20_000.0 {
+            if (node.origin.0 - cpos).length() > (4.0 * alt).max(20_000.0) {
                 continue;
             }
             let tm = *self.mins.entry(d.tile).or_insert_with(|| Self::true_min(field, d.tile));
@@ -151,7 +183,7 @@ impl GapLog {
         }
         let cam_same = plan.camera.position.0 == cpos;
         let mut line = format!(
-            "frame {k} bevy {frame_no} kind {kind} subst {substituted} blank {blank} base_seq {base_seq:?} cam_same {cam_same} nodes {} water {water_nodes} reasons {reasons:?} gaps {}",
+            "frame {k} alt {alt:.0} bevy {frame_no} kind {kind} subst {substituted} blank {blank} base_seq {base_seq:?} cam_same {cam_same} nodes {} water {water_nodes} reasons {reasons:?} gaps {}",
             plan.nodes.len(),
             gaps.len()
         );

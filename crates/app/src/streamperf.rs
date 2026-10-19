@@ -225,10 +225,6 @@ impl Driver<'_> {
                     FRAME_STEP_S as f32,
                     self.ticks == 0,
                 )?;
-                let mut plan = plan;
-                if let Some(l) = std::env::var("WATER_GAP_RAMP_LEVEL").ok().and_then(|v| v.parse::<u8>().ok()) {
-                    setup.clamp_ramp(&mut plan, l);
-                }
                 (Some(plan), setup.water_counters().since(before))
             }
             None => (None, planet_frame::water::WaterCounters::default()),
@@ -732,7 +728,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         }
         let built = Instant::now();
         let scene_field = scene_world.field()?;
-        let script = if crate::watergap::enabled() {
+        let script = if crate::watergap::enabled() && std::env::var("WATER_GAP_KEEP").is_err() {
             let is_sea = |d: planet_core::Vec3| crate::litperf::carries_sea(&scene_world, d);
             let level = scene_world.definition().sea(planet_world_def::BodyId::PLANET).map_err(|e| e.to_string())?.level_m;
             crate::watergap::script(radius_m, aspect, scene_field.as_ref(), level, &is_sea, scene)?
