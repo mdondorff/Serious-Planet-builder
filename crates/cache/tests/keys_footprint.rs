@@ -106,6 +106,44 @@ fn a_footprint_edit_changes_the_keys_of_the_tiles_its_reach_touches_and_no_other
     assert_eq!(keys(&edited), before, "removing the item restores every key");
 }
 
+// spec: STRM-003, WDEF-008
+#[test]
+fn a_coarse_tile_keys_on_summary_nodes_with_tag_3_and_an_item_far_away_leaves_its_key_alone() {
+    let at = dir(1.0, 0.2, 0.1);
+    let coarse = TileId::from_direction(&TangentWarp, at, 4);
+    let plain = WorldDefinition::single_planet(R, 7);
+    let mut near = plain.clone();
+    near.put_item_spec(BodyId::PLANET, stamp(1, at, 150.0)).unwrap();
+    let mut far = plain.clone();
+    far.put_item_spec(BodyId::PLANET, stamp(2, dir(-1.0, -0.3, -0.2), 150.0)).unwrap();
+    let key = |d: &WorldDefinition| {
+        let f = Footprinted { inner: Reference(7), def: d };
+        height_key(&f, &TangentWarp, coarse, 16, R)
+    };
+    assert_ne!(key(&plain), key(&near), "an item under the coarse tile re-keys it");
+    assert_eq!(key(&plain), key(&far), "an item on the other side of the planet does not");
+    let f = Footprinted { inner: Reference(7), def: &near };
+    let inputs = mesh_key_inputs(&f, &TangentWarp, coarse, 16, R);
+    assert!(inputs.reads.iter().any(|r| matches!(r, ReadEntry::Query { kind: QUERY_SUMMARY, .. })), "region summary entries (kind 4)");
+    assert!(!inputs.reads.iter().any(|r| matches!(r, ReadEntry::Query { kind: QUERY_FOOTPRINT, .. })), "no footprint result entry");
+    assert_eq!(encode(&inputs)[0], KEY_FORMAT_TAG_FOOTPRINT);
+    // The parameters are `body | layer | level | node raw id`.
+    let node = TileId::from_direction(&TangentWarp, at, 4);
+    let p = summary_params(BodyId(3), "items", node);
+    assert_eq!(p.len(), 4 + 4 + 5 + 1 + 8);
+    assert_eq!(p[13], 4, "the level byte");
+    // Pinned bytes: body 3 (LE), layer length 5 (LE), "items", level 4, then the raw id (LE).
+    let mut want = vec![3, 0, 0, 0, 5, 0, 0, 0];
+    want.extend_from_slice(b"items");
+    want.push(4);
+    want.extend_from_slice(&node.raw().to_le_bytes());
+    assert_eq!(p, want);
+    // And a key that carries one summary entry: pinned.
+    let mut with = base();
+    with.reads.push(ReadEntry::Query { kind: QUERY_SUMMARY, params: p.clone(), result: [7; 16] });
+    assert_eq!(cache_key(&with).to_hex(), KNOWN_SUMMARY_KEY);
+}
+
 // spec: STRM-003
 #[test]
 fn a_key_without_a_footprint_entry_keeps_tag_2_byte_for_byte_and_one_with_it_starts_with_tag_3() {
@@ -358,6 +396,35 @@ fn a_field_that_reads_items_has_a_node_set_id_per_tile_that_names_its_reads_and_
     assert_eq!(id(&seed_only, a), id(&seed_only, b));
 }
 
+// spec: STRM-010, WDEF-008
+#[test]
+fn a_coarse_tiles_node_set_id_names_its_summary_nodes_and_not_their_hashes() {
+    use planet_cache::meshpack::node_set_id_of_tile;
+    let at = dir(1.0, 0.2, 0.1);
+    let coarse = TileId::from_direction(&TangentWarp, at, 4);
+    let other = TileId::from_direction(&TangentWarp, dir(-1.0, 0.3, 0.2), 4);
+    let plain = WorldDefinition::single_planet(R, 7);
+    let mut edited = plain.clone();
+    edited.put_item_spec(BodyId::PLANET, stamp(1, at, 150.0)).unwrap();
+    let (fp, fe) = (Footprinted { inner: Reference(7), def: &plain }, Footprinted { inner: Reference(7), def: &edited });
+    let id = |f: &dyn HeightField, t: TileId| node_set_id_of_tile(f, t, &TangentWarp);
+    assert_ne!(id(&fp, coarse), id(&fp, other), "two coarse tiles read different nodes");
+    assert_eq!(id(&fp, coarse), id(&fe, coarse), "an edit changes the node hashes, never which nodes the tile reads");
+    // By hand: the sorted, length-prefixed paths of the field-wide reads, the radius node and the summary nodes of the tile.
+    let mut paths = vec!["world.seed".to_string(), "derived.body.0.seed".to_string(), "body.0.radius_m".to_string()];
+    for node in plain.summary_cover(BodyId::PLANET, coarse, 0.25).unwrap().expect("a coarse tile") {
+        paths.push(planet_world_def::summary_node_path(BodyId::PLANET, "items", node));
+    }
+    paths.sort();
+    let mut material = Vec::new();
+    for p in &paths {
+        material.extend_from_slice(&(p.len() as u32).to_le_bytes());
+        material.extend_from_slice(p.as_bytes());
+    }
+    assert_eq!(id(&fp, coarse)[..], blake3::derive_key("planet-builder node set v1", &material)[..16]);
+}
+
+const KNOWN_SUMMARY_KEY: &str = "f2d4549a1167e3bdcde6c7c25d0bef81";
 const KNOWN_EMPTY_FOOTPRINT: &str = "e99c6b49146b3b01808bed3d94a3bb02";
 const KNOWN_FOOTPRINT_ITEM: &str = "545f0ddd4f9bf86df105c9727134ea89";
 const KNOWN_FOOTPRINT_RESULT: &str = "0644d35398ab52e3dad17e01a1d97d18";
