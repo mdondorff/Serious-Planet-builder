@@ -1,5 +1,5 @@
 # 0067 Stamp key hash and height bounds by delta range
-Status: accepted (opus-planner under the owner's delegation of 2026-10-12, 2026-10-19; built by sonnet-m4 in stamp-stage). Amends ADR 0066 points 2 and 5; ADR 0066 point 6 (the item file and its hash) is unchanged.
+Status: accepted (opus-planner under the owner's delegation of 2026-10-12, 2026-10-19; built by sonnet-m4 in stamp-stage). Amends ADR 0066 points 2 and 5, and point 6 in one respect: for stamp kinds the key uses the derived stamp hash (decision points 1 and 3), so the file hash and its recorded versions no longer enter tile keys; the file format and the file hash are unchanged (status line extended 2026-10-19 after the spec-guardian review of stamp-stage).
 Date: 2026-10-19
 Source: ADR 0066; stamp-stage (#365, #366, change/stamp-stage-cache); WDEF-010; GEN-026
 
