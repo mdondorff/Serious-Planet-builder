@@ -94,7 +94,8 @@ pub const QUERY_CELL: u8 = 1;
 pub const QUERY_BODY: u8 = 2;
 /// The items of one layer whose reach touches a tile (WDEF-007): body, layer, tile and halo.
 pub const QUERY_FOOTPRINT: u8 = 3;
-/// Region summary nodes (ADR 0066 point 3, a later step): a key carrying one has [`KEY_FORMAT_TAG_FOOTPRINT`] too.
+/// One node of the region summary tree a coarse tile reads (WDEF-008, ADR 0066 point 3): a key carrying one has
+/// [`KEY_FORMAT_TAG_FOOTPRINT`] too.
 pub const QUERY_SUMMARY: u8 = 4;
 
 /// Everything a key covers (ADR 0018).

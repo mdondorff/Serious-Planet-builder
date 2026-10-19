@@ -132,6 +132,16 @@ fn a_coarse_tile_keys_on_summary_nodes_with_tag_3_and_an_item_far_away_leaves_it
     let p = summary_params(BodyId(3), "items", node);
     assert_eq!(p.len(), 4 + 4 + 5 + 1 + 8);
     assert_eq!(p[13], 4, "the level byte");
+    // Pinned bytes: body 3 (LE), layer length 5 (LE), "items", level 4, then the raw id (LE).
+    let mut want = vec![3, 0, 0, 0, 5, 0, 0, 0];
+    want.extend_from_slice(b"items");
+    want.push(4);
+    want.extend_from_slice(&node.raw().to_le_bytes());
+    assert_eq!(p, want);
+    // And a key that carries one summary entry: pinned.
+    let mut with = base();
+    with.reads.push(ReadEntry::Query { kind: QUERY_SUMMARY, params: p.clone(), result: [7; 16] });
+    assert_eq!(cache_key(&with).to_hex(), KNOWN_SUMMARY_KEY);
 }
 
 // spec: STRM-003
@@ -386,6 +396,7 @@ fn a_field_that_reads_items_has_a_node_set_id_per_tile_that_names_its_reads_and_
     assert_eq!(id(&seed_only, a), id(&seed_only, b));
 }
 
+const KNOWN_SUMMARY_KEY: &str = "f2d4549a1167e3bdcde6c7c25d0bef81";
 const KNOWN_EMPTY_FOOTPRINT: &str = "e99c6b49146b3b01808bed3d94a3bb02";
 const KNOWN_FOOTPRINT_ITEM: &str = "545f0ddd4f9bf86df105c9727134ea89";
 const KNOWN_FOOTPRINT_RESULT: &str = "0644d35398ab52e3dad17e01a1d97d18";

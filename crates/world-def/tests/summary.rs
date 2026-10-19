@@ -237,5 +237,93 @@ fn the_items_a_coarse_tile_receives_have_their_anchors_in_the_cells_its_nodes_co
     assert!(returned > 100, "the setup must return items, {returned}");
 }
 
+// spec: WDEF-008
+#[test]
+fn the_stored_tree_equals_a_from_scratch_computation_of_the_cell_rows_and_non_empty_hashes_are_pinned() {
+    use planet_world_def::footprint::FootprintItem;
+    let level = cell_level(R);
+    let mut rng = Rng(5);
+    let mut d = WorldDefinition::single_planet(R, 7);
+    for id in 1..=30u64 {
+        d.put_item_spec(BodyId::PLANET, spec(id, rng.dir(), rng.unit() * 40_000.0)).unwrap();
+    }
+    // Independent of `refresh_summary`: group the items by cell, hash the cells, then fold the quadtree upwards level by level.
+    let mut rows: std::collections::BTreeMap<u64, Vec<FootprintItem>> = Default::default();
+    for id in d.item_ids(BodyId::PLANET) {
+        let (anchor, reach) = d.item_anchor(BodyId::PLANET, id).unwrap();
+        let item = FootprintItem {
+            id,
+            priority: 0,
+            content: id * 7 + 1,
+            dir: [anchor.x.to_bits(), anchor.y.to_bits(), anchor.z.to_bits()],
+            reach_bits: reach.to_bits(),
+            max_delta_bits: 10.0f64.to_bits(),
+            layer: DEFAULT_ITEM_LAYER.into(),
+        };
+        rows.entry(cell_of(R, anchor).raw()).or_default().push(item);
+    }
+    let mut level_hashes: std::collections::BTreeMap<u64, [u8; 16]> = rows.iter().map(|(c, r)| (*c, cell_hash128(r))).collect();
+    let mut expected: std::collections::BTreeMap<(u8, u64), [u8; 16]> = level_hashes.iter().map(|(c, h)| ((level, *c), *h)).collect();
+    for l in (0..level).rev() {
+        let parents: BTreeSet<u64> = level_hashes.keys().map(|c| TileId::from_raw(*c).unwrap().parent().unwrap().raw()).collect();
+        let mut next = std::collections::BTreeMap::new();
+        for p in parents {
+            let kids = TileId::from_raw(p).unwrap().children().unwrap();
+            let empty = empty_hash128(l + 1, level);
+            let four: [[u8; 16]; 4] = std::array::from_fn(|i| level_hashes.get(&kids[i].raw()).copied().unwrap_or(empty));
+            let h = node_hash128(l, &four);
+            expected.insert((l, p), h);
+            next.insert(p, h);
+        }
+        level_hashes = next;
+    }
+    assert_eq!(d.summary_nodes(BodyId::PLANET, DEFAULT_ITEM_LAYER), expected);
+    // Pinned non-empty hashes.
+    let item = FootprintItem {
+        id: 1,
+        priority: 0,
+        content: 5,
+        dir: [1, 2, 3],
+        reach_bits: 150.0f64.to_bits(),
+        max_delta_bits: 20.0f64.to_bits(),
+        layer: "items".into(),
+    };
+    let hex = |b: [u8; 16]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+    let cell = cell_hash128(std::slice::from_ref(&item));
+    assert_eq!(hex(cell), KNOWN_CELL_ONE_ITEM);
+    let empty = empty_hash128(5, 5);
+    assert_eq!(hex(node_hash128(4, &[cell, empty, empty, empty])), KNOWN_NODE_ONE_CELL);
+}
+
+// spec: WDEF-008
+#[test]
+fn layers_have_their_own_trees_and_a_tile_that_needs_too_many_rings_reads_the_six_face_roots() {
+    let at = dir(1.0, 0.2, 0.1);
+    let mut d = WorldDefinition::single_planet(R, 7);
+    d.put_item_spec(BodyId::PLANET, ItemSpec { layer: "a".into(), ..spec(1, at, 100.0) }).unwrap();
+    let a_before = d.summary_nodes(BodyId::PLANET, "a");
+    assert!(d.summary_nodes(BodyId::PLANET, "b").is_empty(), "an item of layer a is not in layer b's tree");
+    d.put_item_spec(BodyId::PLANET, ItemSpec { layer: "b".into(), ..spec(2, dir(1.0, -0.4, 0.3), 100.0) }).unwrap();
+    assert_eq!(d.summary_nodes(BodyId::PLANET, "a"), a_before, "an edit in layer b leaves layer a's tree alone");
+    let tile = TileId::from_direction(&TangentWarp, at, 4);
+    let reads = |d: &WorldDefinition, layer: &str| {
+        let ctx = GenContext::new(d);
+        ctx.query_footprint(BodyId::PLANET, layer, tile, 1.0 / 32.0).unwrap();
+        ctx.read_records()
+    };
+    let (a0, b0) = (reads(&d, "a"), reads(&d, "b"));
+    d.put_item_spec(BodyId::PLANET, ItemSpec { layer: "b".into(), ..spec(3, at, 100.0) }).unwrap();
+    assert_eq!(reads(&d, "a"), a0, "an edit in layer b does not re-key a tile reading layer a");
+    assert_ne!(reads(&d, "b"), b0);
+    // A level-0 tile with a halo needs more rings than the limit: the six face roots, whatever the items.
+    let root = TileId::new(planet_core::Face(0), 0, 0, 0).unwrap();
+    assert_eq!(margin_rings(root, 0.25, R, cell_level(R)), None);
+    let nodes = d.summary_cover(BodyId::PLANET, root, 0.25).unwrap().unwrap();
+    assert_eq!(nodes.len(), 6);
+    assert!(nodes.iter().all(|n| n.level() == 0));
+}
+
+const KNOWN_CELL_ONE_ITEM: &str = "028bae5b98a17a280f03ed22aa71621e";
+const KNOWN_NODE_ONE_CELL: &str = "f115d967fcc52b8b3d00f138237701e6";
 const KNOWN_EMPTY_CELL: &str = "bc60602dff5649e21a97e05feaf28b78";
 const KNOWN_EMPTY_ROOT: &str = "552b79f2eedcdad6d9225b52ed58b97d";
