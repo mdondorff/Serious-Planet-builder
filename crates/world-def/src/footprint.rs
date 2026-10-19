@@ -41,9 +41,9 @@ const MAX_EXTENDED_FACE_COORD: f64 = 1.5;
 /// One item as a footprint query returns it: everything the result hash covers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FootprintItem {
-    pub id: u64,
+    pub id: crate::item_id::ItemId,
     pub priority: i32,
-    pub content: u64,
+    pub content: crate::item_id::ItemHash,
     /// Bits of the unit direction of the anchor.
     pub dir: [u64; 3],
     /// Bits of `reach_m` and `max_delta_m`, `-0.0` read as `0.0`.
@@ -90,10 +90,10 @@ pub fn touches(cap: Cap, anchor: Vec3, reach_m: f64, radius_m: f64) -> bool {
     angle_between(cap.centre, anchor) <= limit * (1.0 + FOOTPRINT_REL_MARGIN) + FOOTPRINT_ABS_MARGIN_RAD
 }
 
-/// The 16-byte id of an item: its `u64` zero-extended, big-endian, so the byte order is the numeric order and a later 128-bit id
-/// changes a type and not this encoding.
-pub fn id_bytes(id: u64) -> [u8; 16] {
-    u128::from(id).to_be_bytes()
+/// The 16-byte id of an item, big-endian, so the byte order is the numeric order (an id below `2^64` is zero-extended, as it was when
+/// ids were 64 bits).
+pub fn id_bytes(id: crate::item_id::ItemId) -> [u8; 16] {
+    id.to_be_bytes()
 }
 
 /// 128-bit hash of one item as the footprint and summary reads see it (`planet-builder footprint item v1`): the layer, the
@@ -104,7 +104,12 @@ pub fn item_hash128(item: &FootprintItem) -> [u8; 16] {
     m.extend_from_slice(&u32::try_from(item.layer.len()).expect("a layer name under 4 GiB").to_le_bytes());
     m.extend_from_slice(item.layer.as_bytes());
     m.extend_from_slice(&item.priority.to_le_bytes());
-    m.extend_from_slice(&item.content.to_le_bytes());
+    // The content hash as 8 bytes when it fits (the encoding from before it was 128 bits) and as 16 bytes otherwise: the input is
+    // then 8 bytes longer, so the two never give the same material.
+    match u64::try_from(item.content) {
+        Ok(narrow) => m.extend_from_slice(&narrow.to_le_bytes()),
+        Err(_) => m.extend_from_slice(&item.content.to_le_bytes()),
+    }
     for d in item.dir {
         m.extend_from_slice(&d.to_le_bytes());
     }

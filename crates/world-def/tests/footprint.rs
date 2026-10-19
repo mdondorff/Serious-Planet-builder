@@ -31,7 +31,7 @@ impl Rng {
     }
 }
 
-fn spec(id: u64, dir: Vec3, reach_m: f64) -> ItemSpec {
+fn spec(id: u128, dir: Vec3, reach_m: f64) -> ItemSpec {
     ItemSpec { id, layer: DEFAULT_ITEM_LAYER.into(), priority: 0, dir, content_hash: id * 7 + 1, reach_m, max_delta_m: 10.0 }
 }
 
@@ -73,7 +73,7 @@ fn the_footprint_query_returns_every_item_whose_reach_reaches_a_point_of_the_til
     }
     // Items around every tile, near enough that many reach it: up to 60 km from its centre, with reaches up to the limit.
     let mut d = WorldDefinition::single_planet(R, 7);
-    let mut id = 0u64;
+    let mut id = 0u128;
     for tile in &tiles {
         let c = tile.center_direction(&TangentWarp);
         for _ in 0..12 {
@@ -87,7 +87,7 @@ fn the_footprint_query_returns_every_item_whose_reach_reaches_a_point_of_the_til
     let mut found = 0;
     for tile in tiles {
         for halo in [0.0, 0.25, 1.0] {
-            let got: Vec<u64> = d.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, halo).unwrap().iter().map(|i| i.id).collect();
+            let got: Vec<u128> = d.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, halo).unwrap().iter().map(|i| i.id).collect();
             let samples = halo_samples(tile, halo);
             for id in 1..=id {
                 let (anchor, reach) = item_anchor_and_reach(&d, id);
@@ -103,7 +103,7 @@ fn the_footprint_query_returns_every_item_whose_reach_reaches_a_point_of_the_til
     assert!(found > 20, "the setup must exercise the positive case, {found} of {checked} reached");
 }
 
-fn item_anchor_and_reach(d: &WorldDefinition, id: u64) -> (Vec3, f64) {
+fn item_anchor_and_reach(d: &WorldDefinition, id: u128) -> (Vec3, f64) {
     d.item_anchor(BodyId::PLANET, id).expect("the item exists")
 }
 
@@ -123,7 +123,7 @@ fn the_result_is_the_same_by_the_cell_index_and_by_a_scan_of_every_item() {
         }
     }
     let mut d = WorldDefinition::single_planet(R, 7);
-    let mut count = 0u64;
+    let mut count = 0u128;
     for tile in &tiles {
         let c = tile.center_direction(&TangentWarp);
         for _ in 0..10 {
@@ -137,13 +137,13 @@ fn the_result_is_the_same_by_the_cell_index_and_by_a_scan_of_every_item() {
     for tile in tiles {
         for halo in [0.0, 0.25, 1.0] {
             let cap = tile_cap(&TangentWarp, tile, halo);
-            let want: Vec<u64> = (1..=count)
+            let want: Vec<u128> = (1..=count)
                 .filter(|id| {
                     let (anchor, reach) = item_anchor_and_reach(&d, *id);
                     touches(cap, anchor, reach, R)
                 })
                 .collect();
-            let mut got: Vec<u64> =
+            let mut got: Vec<u128> =
                 d.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, halo).unwrap().iter().map(|i| i.id).collect();
             got.sort_unstable();
             positives += want.len();
@@ -194,7 +194,7 @@ fn items_just_inside_the_cap_in_every_direction_are_found_by_the_index_as_by_the
                     let cap = tile_cap(&TangentWarp, tile, halo);
                     let reach = 39_000.0;
                     let mut d = WorldDefinition::single_planet(radius, 7);
-                    let mut id = 0u64;
+                    let mut id = 0u128;
                     let c = cap.centre;
                     let t1 = if c.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
                     let e1 = (t1 - c * c.dot(t1)).normalized();
@@ -209,13 +209,13 @@ fn items_just_inside_the_cap_in_every_direction_are_found_by_the_index_as_by_the
                             d.put_item_spec(BodyId::PLANET, spec(id, at.normalized(), reach)).unwrap();
                         }
                     }
-                    let want: Vec<u64> = (1..=id)
+                    let want: Vec<u128> = (1..=id)
                         .filter(|i| {
                             let (anchor, r) = d.item_anchor(BodyId::PLANET, *i).unwrap();
                             touches(cap, anchor, r, radius)
                         })
                         .collect();
-                    let mut got: Vec<u64> =
+                    let mut got: Vec<u128> =
                         d.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, halo).unwrap().iter().map(|i| i.id).collect();
                     got.sort_unstable();
                     assert_eq!(got, want, "radius {radius}, tile {tile:?}, halo {halo}");
@@ -283,7 +283,7 @@ fn the_result_is_in_application_order_and_every_field_of_an_item_is_in_the_read(
         ctx.query_footprint(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, 0.0).unwrap();
         ctx.read_set_hash()
     };
-    let item = |id: u64, priority: i32| ItemSpec { priority, ..spec(id, dir, 500.0) };
+    let item = |id: u128, priority: i32| ItemSpec { priority, ..spec(id, dir, 500.0) };
     let mut a = WorldDefinition::single_planet(R, 7);
     a.put_item_spec(BodyId::PLANET, item(1, 5)).unwrap();
     a.put_item_spec(BodyId::PLANET, item(2, 1)).unwrap();
@@ -291,7 +291,7 @@ fn the_result_is_in_application_order_and_every_field_of_an_item_is_in_the_read(
     b.put_item_spec(BodyId::PLANET, item(2, 1)).unwrap();
     b.put_item_spec(BodyId::PLANET, item(1, 5)).unwrap();
     assert_eq!(read(&a), read(&b), "insertion order does not matter");
-    let order: Vec<u64> = a.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, 0.0).unwrap().iter().map(|i| i.id).collect();
+    let order: Vec<u128> = a.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, 0.0).unwrap().iter().map(|i| i.id).collect();
     assert_eq!(order, vec![2, 1], "lower priority first");
     // Each field changes the read.
     let base = read(&a);

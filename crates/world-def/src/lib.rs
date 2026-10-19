@@ -8,6 +8,7 @@
 
 pub mod cells;
 pub mod footprint;
+pub mod item_id;
 pub mod summary;
 pub mod toml_io;
 pub mod water;
@@ -17,6 +18,7 @@ pub use water::{
     DEFAULT_SEA_LEVEL_M, EARTH_OCEAN_MIN_AREA_FRACTION, LIQUID_FIELDS,
 };
 
+pub use item_id::{ItemHash, ItemId};
 use planet_core::hash::{hash_u64s, HASH_VERSION};
 use planet_core::{TileId, Vec3};
 use std::cell::RefCell;
@@ -83,7 +85,7 @@ pub fn set_hash(entries: &BTreeMap<NodePath, u64>) -> u64 {
 /// direction, which the cell of the item is derived from whenever the body's radius changes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ItemRec {
-    content: u64,
+    content: ItemHash,
     dir: [u64; 3],
     /// Bits of `reach_m` and `max_delta_m` (`-0.0` stored as `0.0`).
     reach_bits: u64,
@@ -98,7 +100,7 @@ pub const DEFAULT_ITEM_LAYER: &str = "items";
 /// An authored item as it is put into the definition (WDEF-007).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ItemSpec {
-    pub id: u64,
+    pub id: ItemId,
     /// The layer the item belongs to (not empty).
     pub layer: String,
     /// Application order within the layer: lower first, ties by id.
@@ -106,7 +108,7 @@ pub struct ItemSpec {
     /// Where the item is anchored; any non-zero finite vector, normalised on entry.
     pub dir: Vec3,
     /// Stands for everything about the item except its place, reach and bound.
-    pub content_hash: u64,
+    pub content_hash: ItemHash,
     /// Arc distance in metres beyond which the item changes no output; finite, at least 0 and at most [`cells::CELL_EDGE_M`].
     pub reach_m: f64,
     /// Bound in metres on the height change anywhere in the reach; finite and at least 0.
@@ -121,11 +123,11 @@ pub enum ItemError {
     /// The direction is zero or not finite.
     Direction,
     /// The reach is not finite, below 0 or over the limit of one cell edge (WDEF-007).
-    Reach { id: u64, reach_m: f64, limit_m: f64 },
+    Reach { id: ItemId, reach_m: f64, limit_m: f64 },
     /// The height bound is not finite or below 0.
-    MaxDelta { id: u64, max_delta_m: f64 },
+    MaxDelta { id: ItemId, max_delta_m: f64 },
     /// The layer name is empty.
-    Layer { id: u64 },
+    Layer { id: ItemId },
 }
 
 impl core::fmt::Display for ItemError {
@@ -157,10 +159,10 @@ fn canonical_bits(v: f64) -> u64 {
 pub struct WorldDefinition {
     nodes: BTreeMap<NodePath, NodeValue>,
     /// Authored items by `(body, id)` (WDEF-005): the truth the index is derived from.
-    items: BTreeMap<(BodyId, u64), ItemRec>,
+    items: BTreeMap<(BodyId, ItemId), ItemRec>,
     /// The index: item ids by `(body, cell)`, at the cell level of the body's current radius. Rebuilt for a body whenever
     /// its radius node changes, so a radius edit across a level boundary never strands items in old cells.
-    cells: BTreeMap<(BodyId, u64), BTreeSet<u64>>,
+    cells: BTreeMap<(BodyId, u64), BTreeSet<ItemId>>,
     /// The Merkle quadtree of region summaries (WDEF-008) by `(body, layer, level, node raw id)`: the non-empty cells at the
     /// cell level and their ancestors, kept in step with the items (one node per level per edit). Derived data: equal items
     /// give an equal map.
@@ -268,9 +270,11 @@ impl WorldDefinition {
         }
         let mut v = vec![u64::from(HASH_VERSION), base, self.items.len() as u64];
         for ((body, id), rec) in &self.items {
-            v.extend([u64::from(body.0), *id, rec.content, rec.dir[0], rec.dir[1], rec.dir[2]]);
+            v.extend([u64::from(body.0), item_id::lo(*id), item_id::lo(rec.content), rec.dir[0], rec.dir[1], rec.dir[2]]);
             v.extend([rec.reach_bits, rec.max_delta_bits, u64::from(rec.priority as u32), hash_u64s(3, &path_words(&rec.layer))]);
         }
+        // Ids and content hashes above 64 bits: their high words after the rows (empty for the 64-bit values of before).
+        v.extend(item_id::wide_tail(self.items.iter().map(|((_, id), rec)| (*id, rec.content))));
         hash_u64s(0x0069_7465, &v)
     }
 
@@ -300,7 +304,7 @@ impl WorldDefinition {
     /// Add or move the authored item `id` of `body` to where the unit direction `dir` points, with the given content
     /// hash (which stands for everything about the item except its place, which the index keeps). The cell level comes
     /// from the body's radius node. Returns the cell.
-    pub fn put_item(&mut self, body: BodyId, id: u64, dir: Vec3, content_hash: u64) -> Result<TileId, ItemError> {
+    pub fn put_item(&mut self, body: BodyId, id: ItemId, dir: Vec3, content_hash: ItemHash) -> Result<TileId, ItemError> {
         let spec = ItemSpec { id, layer: DEFAULT_ITEM_LAYER.to_string(), priority: 0, dir, content_hash, reach_m: 0.0, max_delta_m: 0.0 };
         self.put_item_spec(body, spec)
     }
@@ -341,7 +345,7 @@ impl WorldDefinition {
     }
 
     /// Remove an item; `false` if there was none.
-    pub fn remove_item(&mut self, body: BodyId, id: u64) -> bool {
+    pub fn remove_item(&mut self, body: BodyId, id: ItemId) -> bool {
         let Some(rec) = self.items.remove(&(body, id)) else { return false };
         // The item sits in the cell of its direction at the level of the current radius (the index is rebuilt on every
         // radius change, so this is where it was filed).
@@ -363,7 +367,7 @@ impl WorldDefinition {
         self.cells.retain(|(b, _), _| *b != body);
         self.summaries.retain(|(b, ..), _| *b != body);
         let Ok(radius) = self.usable_radius(body) else { return };
-        let ids: Vec<(u64, Vec3)> = self.items.range((body, 0)..=(body, u64::MAX)).map(|((_, id), rec)| (*id, rec.unit())).collect();
+        let ids: Vec<(ItemId, Vec3)> = self.items.range((body, 0)..=(body, ItemId::MAX)).map(|((_, id), rec)| (*id, rec.unit())).collect();
         let mut touched: BTreeSet<(String, TileId)> = BTreeSet::new();
         for (id, unit) in ids {
             let cell = cells::cell_of(radius, unit);
@@ -376,7 +380,7 @@ impl WorldDefinition {
     }
 
     /// The footprint form of one item.
-    fn footprint_item(&self, body: BodyId, id: u64) -> footprint::FootprintItem {
+    fn footprint_item(&self, body: BodyId, id: ItemId) -> footprint::FootprintItem {
         let rec = &self.items[&(body, id)];
         footprint::FootprintItem {
             id,
@@ -449,7 +453,7 @@ impl WorldDefinition {
     }
 
     /// The items of one cell, `(id, content hash)` in id order.
-    pub fn items_in_cell(&self, body: BodyId, cell: TileId) -> Vec<(u64, u64)> {
+    pub fn items_in_cell(&self, body: BodyId, cell: TileId) -> Vec<(ItemId, ItemHash)> {
         self.cell_entries(body, cell).into_iter().map(|(id, content, _)| (id, content)).collect()
     }
 
@@ -458,7 +462,7 @@ impl WorldDefinition {
         ids.iter().map(|id| self.entry(body, *id)).collect()
     }
 
-    fn entry(&self, body: BodyId, id: u64) -> cells::ItemEntry {
+    fn entry(&self, body: BodyId, id: ItemId) -> cells::ItemEntry {
         let rec = &self.items[&(body, id)];
         (id, rec.content, rec.dir)
     }
@@ -483,7 +487,7 @@ impl WorldDefinition {
         // A tile at or below the cell level lies in one cell, so its cap (a few tile edges wide) is within the rings; a coarser
         // tile covers many cells and its cap and halo are many cells wide, so it scans the body.
         let rings = footprint::candidate_rings(cap, radius, level);
-        let candidates: Vec<u64> = match rings {
+        let candidates: Vec<ItemId> = match rings {
             Some(rings) if tile.level() >= level => {
                 let covering = cells::cells_covering(tile, level, footprint::FOOTPRINT_MAX_CELLS).expect("one cell");
                 cells::with_margin(&covering, rings)
@@ -517,26 +521,26 @@ impl WorldDefinition {
     }
 
     /// The anchor (unit direction) and reach in metres of an item, if it exists.
-    pub fn item_anchor(&self, body: BodyId, id: u64) -> Option<(Vec3, f64)> {
+    pub fn item_anchor(&self, body: BodyId, id: ItemId) -> Option<(Vec3, f64)> {
         self.items.get(&(body, id)).map(|rec| (rec.unit(), f64::from_bits(rec.reach_bits)))
     }
 
     /// The height bound in metres of an item, if it exists.
-    pub fn item_max_delta(&self, body: BodyId, id: u64) -> Option<f64> {
+    pub fn item_max_delta(&self, body: BodyId, id: ItemId) -> Option<f64> {
         self.items.get(&(body, id)).map(|rec| f64::from_bits(rec.max_delta_bits))
     }
 
     /// The ids of the items of a body, in id order.
-    pub fn item_ids(&self, body: BodyId) -> Vec<u64> {
+    pub fn item_ids(&self, body: BodyId) -> Vec<ItemId> {
         self.body_item_ids(body)
     }
 
-    fn body_item_ids(&self, body: BodyId) -> Vec<u64> {
-        self.items.range((body, 0)..=(body, u64::MAX)).map(|((_, id), _)| *id).collect()
+    fn body_item_ids(&self, body: BodyId) -> Vec<ItemId> {
+        self.items.range((body, 0)..=(body, ItemId::MAX)).map(|((_, id), _)| *id).collect()
     }
 
     fn all_entries(&self, body: BodyId) -> Vec<cells::ItemEntry> {
-        self.items.range((body, 0)..=(body, u64::MAX)).map(|((_, id), _)| self.entry(body, *id)).collect()
+        self.items.range((body, 0)..=(body, ItemId::MAX)).map(|((_, id), _)| self.entry(body, *id)).collect()
     }
 }
 
@@ -587,10 +591,20 @@ pub fn footprint_hash(items: &[footprint::FootprintItem]) -> u64 {
     let mut sorted: Vec<&footprint::FootprintItem> = items.iter().collect();
     sorted.sort_by_key(|i| (i.priority, i.id));
     let mut v = vec![u64::from(HASH_VERSION), items.len() as u64];
-    for i in sorted {
-        v.extend([i.id, u64::from(i.priority as u32), i.content, i.dir[0], i.dir[1], i.dir[2], i.reach_bits, i.max_delta_bits]);
+    for i in &sorted {
+        v.extend([
+            item_id::lo(i.id),
+            u64::from(i.priority as u32),
+            item_id::lo(i.content),
+            i.dir[0],
+            i.dir[1],
+            i.dir[2],
+            i.reach_bits,
+            i.max_delta_bits,
+        ]);
         v.push(hash_u64s(3, &path_words(&i.layer)));
     }
+    v.extend(item_id::wide_tail(sorted.iter().map(|i| (i.id, i.content))));
     hash_u64s(0x0066_7074, &v)
 }
 
@@ -726,7 +740,7 @@ impl<'a> GenContext<'a> {
 
     /// The items of one cell (WDEF-005). The read records the cell's hash, also when the cell is empty, so adding an
     /// item to a cell that was queried and found empty changes the key. `cell` must be at the body's cell level.
-    pub fn query_cell(&self, body: BodyId, cell: TileId) -> Result<Vec<(u64, u64)>, MissingNode> {
+    pub fn query_cell(&self, body: BodyId, cell: TileId) -> Result<Vec<(ItemId, ItemHash)>, MissingNode> {
         let level = self.cell_level(body)?;
         if cell.level() != level {
             return Err(MissingNode(format!("a cell of body {} at level {level} (got level {})", body.0, cell.level())));
@@ -741,7 +755,13 @@ impl<'a> GenContext<'a> {
     /// and recorded. A tile that would touch more than `max_cells` cells reads the whole body instead: the hash of all the
     /// body's items is recorded under `derived.cell.<body>.all` and all of them are returned, so the answer is always
     /// exact and never silently stale. The tile id must come from the tangent-warp mapping ([`cells::CELL_MAPPING_ID`]).
-    pub fn query_tile(&self, body: BodyId, tile: TileId, margin_cells: u32, max_cells: usize) -> Result<Vec<(u64, u64)>, MissingNode> {
+    pub fn query_tile(
+        &self,
+        body: BodyId,
+        tile: TileId,
+        margin_cells: u32,
+        max_cells: usize,
+    ) -> Result<Vec<(ItemId, ItemHash)>, MissingNode> {
         let level = self.cell_level(body)?;
         if let Some(covering) = cells::cells_covering(tile, level, max_cells) {
             let wanted = if margin_cells == 0 { covering } else { cells::with_margin(&covering, margin_cells) };
@@ -754,7 +774,7 @@ impl<'a> GenContext<'a> {
             }
         }
         self.record(cell_query_all_path(body), ReadRecord::Body { body, items: self.def.all_entries(body) });
-        Ok(self.def.items.range((body, 0)..=(body, u64::MAX)).map(|((_, id), rec)| (*id, rec.content)).collect())
+        Ok(self.def.items.range((body, 0)..=(body, ItemId::MAX)).map(|((_, id), rec)| (*id, rec.content)).collect())
     }
 
     /// The items of `layer` whose reach touches `tile` with a halo of `halo` tile edges (WDEF-007, query kind 3), in

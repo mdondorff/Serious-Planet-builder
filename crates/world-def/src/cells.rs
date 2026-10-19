@@ -87,15 +87,16 @@ pub fn with_margin(cells: &[TileId], margin: u32) -> Vec<TileId> {
 
 /// One item as the cell hash sees it: id, content hash and the bits of its unit direction (so moving an item inside its
 /// cell changes the hash).
-pub type ItemEntry = (u64, u64, [u64; 3]);
+pub type ItemEntry = (crate::item_id::ItemId, crate::item_id::ItemHash, [u64; 3]);
 
 /// Hash of the items in one cell, in id order. An empty cell has a fixed hash, so a query that found nothing is still a
 /// read whose result can change.
 pub fn cell_hash(items: &[ItemEntry]) -> u64 {
     let mut v = vec![u64::from(HASH_VERSION), items.len() as u64];
     for (id, content, dir) in items {
-        v.extend([*id, *content, dir[0], dir[1], dir[2]]);
+        v.extend([crate::item_id::lo(*id), crate::item_id::lo(*content), dir[0], dir[1], dir[2]]);
     }
+    v.extend(crate::item_id::wide_tail(items.iter().map(|(id, content, _)| (*id, *content))));
     hash_u64s(0x0063_656c, &v)
 }
 
