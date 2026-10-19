@@ -9,7 +9,7 @@ M6 step U3, second half: the egui editor panels and the window wiring, so the ow
 ## Notes
 - VIEW-003 and VIEW-010 gain one clause each: in the editor mode Esc does not quit and the right button captures the pointer while the left button edits.
 - Undo and redo are the keys labelled Z and Y (logical keys), so they are right on a QWERTZ keyboard (docs/learnings.md).
-- The terrain does not change yet: the definition the generator reads is swapped by `WorldTerrain::set_definition` (explorer's `live-definition`) and `ManagedLoop::edit` takes the tiles `feed` finds; the mode counts the tiles it would send. The next step wires both when `set_definition` is in main (tracked in docs/status.md).
+- The terrain follows the edits: the window hands the changed definition to `WorldTerrain::set_definition` (STRM-028) and refreshes the tiles `feed` finds with `ManagedLoop::edit`. Picking and the ground under the outlines still read the field the window opened with, so they ignore the stamps' own height.
 - The parameter names are the provisional table of `planet_editor::params`; the stamp stage's spelling (kind, `reach_m` as the radius, `height_m`, `depth_m`, `target_m`) is adapted in a small change once the stamp stage is in main.
 - Lines, regions and the brush are the later steps E5 and E6; their rail buttons are disabled.
 

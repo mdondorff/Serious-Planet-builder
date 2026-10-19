@@ -7,7 +7,7 @@
 //! `--smoke` is the test mode: it opens the window, drives the keys through the same command path for a few dozen frames and
 //! closes it. Where there is no display it stops with an error that starts with [`NO_DISPLAY`], which a test reports as a skip.
 
-use crate::editwin::{EditKey, EditRuntime, Pointer, EDIT_KEYS_HELP, SMOKE_EDIT_FRAMES};
+use crate::editwin::{EditKey, EditRuntime, Pointer, EDIT_HEIGHT_MARGIN_M, EDIT_KEYS_HELP, SMOKE_EDIT_FRAMES};
 use crate::pipelined::{RendererSink, Rig};
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
@@ -301,7 +301,7 @@ impl App<'_> {
         let viewer = ViewerState::new(now, TerrainView::ALL.len(), cfg.initial_view, cfg.vsync).with_lit(true).with_radius_m(cfg.radius_m);
         let ui = cfg.ui.then(|| crate::ui::EditorUi::new(&window, surface.ui_painter(&ctx)));
         let edit = if cfg.ui {
-            let mut e = EditRuntime::new(self.world.definition().clone(), cfg.radius_m, cfg.items.as_ref(), cfg.layout.clone())?;
+            let mut e = EditRuntime::new(self.world.definition().as_ref().clone(), cfg.radius_m, cfg.items.as_ref(), cfg.layout.clone())?;
             // A smoke run turns the mode on itself, at the frame its script says, after the overview phases.
             e.on = cfg.edit && !cfg.smoke;
             Some(e)
@@ -390,6 +390,22 @@ impl App<'_> {
             if cfg.smoke {
                 quit |= smoke_keys(&mut st, self.cameras, now_ms)?;
             }
+            // A changed definition goes to the generator before the frame plans: the definition first, then the tiles it changed (STRM-028).
+            if let Some(e) = st.edit.as_mut() {
+                if let Some(def) = e.take_changed_definition() {
+                    match self.world.set_definition(def) {
+                        Ok(()) => {
+                            let resident: Vec<_> = st.rig.managed.resident().keys().copied().collect();
+                            let tiles = e.refresh_tiles(&resident);
+                            st.rig.managed.edit(&tiles);
+                        }
+                        Err(why) => {
+                            e.stats.refused += 1;
+                            e.session.set_status(format!("the terrain did not take the edit: {why}"));
+                        }
+                    }
+                }
+            }
             // The editor mode edits from the free camera, with no overview over it.
             if st.edit.as_ref().is_some_and(|e| e.on) {
                 let flight = planet_frame::viewer::camera_at(self.cameras, st.viewer.clock.time_s(now_ms));
@@ -452,8 +468,6 @@ impl App<'_> {
                 let limits = PickLimits::new(radius, cfg.lod.max_height_m);
                 let over_ui = st.ui.as_ref().is_some_and(|u| u.ctx.is_pointer_over_egui());
                 e.update(&camera, viewport, &wanted, field, &limits, Pointer { cursor: st.cursor, over_ui });
-                let resident: Vec<_> = st.rig.managed.resident().keys().copied().collect();
-                let _ = e.refresh_tiles(&resident);
             }
             st.rig.fi.retire_to(st.rig.renderer.retired_frames(ctx));
             while st.rig.fi.is_full() {
@@ -1118,7 +1132,9 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         tau_px: tau,
         max_level: o.finest_level_for(o.cells),
         radius_m,
-        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
+        // With the editor UI the stamps may lift the field above its baked maximum: the plan keeps the headroom (VIEW-022).
+        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m())
+            + if o.no_ui { 0.0 } else { EDIT_HEIGHT_MARGIN_M },
         ..LodParams::earth_1080p()
     };
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;

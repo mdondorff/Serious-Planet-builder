@@ -24,6 +24,10 @@ use planet_world_def::item_store::{ItemStore, LooseFileStore, MemoryStore, Store
 use planet_world_def::{BodyId, ItemId, WorldDefinition};
 use std::path::{Path, PathBuf};
 
+/// The headroom, metres, above the baked maximum height of the field that the plan keeps for horizon and frustum padding when the editor
+/// UI is on: a stamp lifts the field (the largest height the parameter table allows is 400 m).
+pub const EDIT_HEIGHT_MARGIN_M: f64 = 1_000.0;
+
 /// The stage version new edits are authored against (the stamp stage of the generators takes it from the item).
 pub const EDIT_STAGE_VERSION: u32 = 1;
 
@@ -80,6 +84,8 @@ pub struct EditStats {
     pub shown_max: usize,
     /// The resident tiles the footprint find sent to refresh, summed over the commands (the terrain follows once the definition is live).
     pub refresh_tiles: u64,
+    /// The times the definition was handed to the generator.
+    pub published: u64,
 }
 
 /// A key the editor mode takes.
@@ -132,6 +138,10 @@ pub struct EditRuntime {
     fly: Option<ItemId>,
     /// The places the commands of this frame changed, for the footprint find of the tiles (`take_affected`).
     affected: Vec<Affected>,
+    /// The hash of the definition the generator was last given (the one the window opened with at first).
+    published: u64,
+    /// The next refresh is every resident tile (the definition changed with no command: items loaded at the start).
+    refresh_all: bool,
 }
 
 fn open_store(dir: Option<&Path>) -> (EditStore, String) {
@@ -157,6 +167,8 @@ impl EditRuntime {
     ) -> Result<EditRuntime, String> {
         let (store, saved) = open_store(items.map(PathBuf::as_path));
         let mut editor = Editor::new(def, store, ids, planet_generators::GENERATOR_VERSION, EDIT_STAGE_VERSION);
+        // What the generator has is the definition as it was given, before the items of the directory are loaded into the editor's copy.
+        let published = editor.hash();
         let loaded = editor.load(BodyId::PLANET).map_err(|e| format!("loading the items: {e}"))?;
         let mut session = Session::new(editor, BodyId::PLANET, radius_m);
         session.set_status(if loaded > 0 { format!("{loaded} edits loaded") } else { String::new() });
@@ -176,6 +188,8 @@ impl EditRuntime {
             camera_position: Vec3::new(radius_m, 0.0, 0.0),
             fly: None,
             affected: Vec::new(),
+            published,
+            refresh_all: false,
         })
     }
 
@@ -217,11 +231,28 @@ impl EditRuntime {
         events
     }
 
-    /// The tiles of `resident` the commands since the last call changed (the footprint find, `planet_editor::feed`), counted. The call
-    /// of `ManagedLoop::edit` with them waits for the live definition (`WorldTerrain::set_definition`): until then the terrain does not
-    /// change, and refreshing tiles whose definition did not change would only cost generation.
+    /// The definition to hand to the generator when it differs from the one it was last given (once per change): the editor's copy as a
+    /// shared snapshot (STRM-028). The commands that made the change have named the places to refresh; a change with no command (the items
+    /// loaded at the start) refreshes every resident tile.
+    pub fn take_changed_definition(&mut self) -> Option<std::sync::Arc<WorldDefinition>> {
+        let hash = self.session.editor().hash();
+        if hash == self.published {
+            return None;
+        }
+        self.published = hash;
+        self.refresh_all |= self.affected.is_empty();
+        self.stats.published += 1;
+        Some(std::sync::Arc::new(self.session.editor().definition().clone()))
+    }
+
+    /// The tiles of `resident` the commands since the last call changed (the footprint find, `planet_editor::feed`), counted; every
+    /// resident tile after a change with no command. The window gives them to `ManagedLoop::edit` after it has handed over the definition.
     pub fn refresh_tiles(&mut self, resident: &[TileId]) -> Vec<TileId> {
         let affected = self.take_affected();
+        if std::mem::take(&mut self.refresh_all) {
+            self.stats.refresh_tiles += resident.len() as u64;
+            return resident.to_vec();
+        }
         if affected.is_empty() {
             return Vec::new();
         }
@@ -560,7 +591,8 @@ impl EditRuntime {
             && s.redone >= 1
             && s.deleted >= 1
             && s.refused == 0
-            && s.shown_max >= 1;
+            && s.shown_max >= 1
+            && s.published >= 1;
         if ok && self.edit_count() == 1 {
             Ok(())
         } else {
@@ -572,8 +604,8 @@ impl EditRuntime {
     pub fn summary(&self) -> String {
         let s = &self.stats;
         format!(
-            "{} frames in the editor mode, {} placed, {} selected, {} dragged, {} typed, {} deleted, {} undone, {} redone, {} flights, {} refused, up to {} edits shown, {} tiles sent to refresh",
-            s.frames, s.placed, s.selected, s.dragged, s.typed, s.deleted, s.undone, s.redone, s.flights, s.refused, s.shown_max, s.refresh_tiles
+            "{} frames in the editor mode, {} placed, {} selected, {} dragged, {} typed, {} deleted, {} undone, {} redone, {} flights, {} refused, up to {} edits shown, {} tiles sent to refresh, {} definitions handed to the generator",
+            s.frames, s.placed, s.selected, s.dragged, s.typed, s.deleted, s.undone, s.redone, s.flights, s.refused, s.shown_max, s.refresh_tiles, s.published
         )
     }
 }
@@ -886,6 +918,10 @@ mod tests {
         let mut e = runtime(None);
         assert!(e.smoke_verdict().is_err(), "nothing driven yet");
         for f in 0..SMOKE_EDIT_FRAMES {
+            // The window hands a changed definition to the generator at the start of each frame.
+            if e.take_changed_definition().is_some() {
+                let _ = e.refresh_tiles(&[]);
+            }
             e.smoke_step(f, &cam, VIEWPORT, &limits(), &Flat).unwrap_or_else(|why| panic!("frame {f}: {why}"));
             frame(&mut e, &cam, false);
         }
@@ -926,5 +962,50 @@ mod tests {
         assert_eq!(e.stats.refresh_tiles, 1);
         assert!(e.refresh_tiles(&[near, far]).is_empty(), "the places are taken once");
         assert_eq!(e.stats.refresh_tiles, 1);
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn a_changed_definition_is_handed_over_once_and_the_tiles_it_changed_are_refreshed() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let near = TileId::from_direction(&TangentWarp, at, 8);
+        let far = TileId::from_direction(&TangentWarp, unit(-40.0, 100.0), 8);
+        let mut e = runtime(None);
+        assert!(e.take_changed_definition().is_none(), "nothing changed yet");
+        e.toggle();
+        e.key(EditKey::Tool(4));
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        let def = e.take_changed_definition().expect("a placement changes the definition");
+        assert_eq!(def.item_ids(BodyId::PLANET).len(), 1);
+        assert!(e.take_changed_definition().is_none(), "once per change");
+        assert_eq!(e.refresh_tiles(&[near, far]), vec![near], "the tiles the plateau's reach touches");
+        e.key(EditKey::Undo);
+        let back = e.take_changed_definition().expect("an undo changes it again");
+        assert!(back.item_ids(BodyId::PLANET).is_empty());
+        assert_eq!(e.refresh_tiles(&[near, far]), vec![near], "where the plateau was");
+        assert_eq!(e.stats.published, 2);
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn items_loaded_at_the_start_reach_the_generator_and_refresh_every_resident_tile() {
+        let dir = temp_dir("publish-load");
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let near = TileId::from_direction(&TangentWarp, at, 8);
+        let far = TileId::from_direction(&TangentWarp, unit(-40.0, 100.0), 8);
+        let mut first = runtime(Some(&dir));
+        first.toggle();
+        first.key(EditKey::Tool(3));
+        first.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        drop(first);
+        let mut again = runtime(Some(&dir));
+        let def = again.take_changed_definition().expect("the loaded item is not in the generator's definition");
+        assert_eq!(def.item_ids(BodyId::PLANET).len(), 1);
+        assert_eq!(again.refresh_tiles(&[near, far]), vec![near, far], "no command named a place: every resident tile");
+        assert!(again.refresh_tiles(&[near, far]).is_empty(), "once");
+        assert!(again.take_changed_definition().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

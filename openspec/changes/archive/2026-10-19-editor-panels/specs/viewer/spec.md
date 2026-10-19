@@ -94,6 +94,8 @@ Source: owner (M6 step U3: map first, list, search, inspector bound to the comma
 - Keys go to a text field with the focus.
 - Turning the mode off abandons a drag; its places are still named for the refresh.
 - The mode finds the shown edits every frame by the footprint find over the tiles the plan wants (VIEW-015), draws their outlines, names and handles (VIEW-020), lists them (VIEW-016), and names the resident tiles to refresh after each command (VIEW-019).
+- Before the frame plans, a changed definition is handed to the generator (`WorldTerrain::set_definition`, STRM-028) and then the named tiles are refreshed (`ManagedLoop::edit`), so the terrain follows the edits; a definition the generator refuses is a refused count and a status line. Items loaded at the start refresh every resident tile.
+- With the UI on, the plan keeps 1,000 m of headroom above the baked maximum height of the field (the stamps lift it; the table's greatest height is 400 m).
 - `--smoke --edit` runs a script of the mode after the overview phases (VIEW-005): the mode on, a hill placed where the view meets the surface, its move handle dragged, a radius typed, undo, redo, delete, undo; the run fails unless all of it happened and nothing was refused, and the summary reports the counts.
 
 The keys of the mode, taken by the letter on the key where a letter is meant (so on a QWERTZ keyboard the key labelled Z undoes):
@@ -144,4 +146,4 @@ Source: owner (M6 step U3, 2026-10-19), VIEW-003, VIEW-010, VIEW-011, VIEW-017, 
 
 #### Scenario: The real window
 - **WHEN** `planet editor --smoke --edit --items DIR` runs on the selected adapter
-- **THEN** the run succeeds with one edit placed, one drag, one typed value, one delete, two undos and one redo and nothing refused, tiles sent to refresh, and one item file in DIR
+- **THEN** the run succeeds with one edit placed, one drag, one typed value, one delete, two undos and one redo and nothing refused, definitions handed to the generator, tiles sent to refresh, and one item file in DIR
