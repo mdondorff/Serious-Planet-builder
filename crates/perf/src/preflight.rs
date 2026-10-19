@@ -12,7 +12,7 @@ use crate::streaming::{calibration_counts, CpuCalibration};
 /// Calibration rounds of one preflight.
 pub const ROUNDS: usize = 3;
 /// Seconds between two rounds.
-pub const ROUND_SPACING_S: u64 = 20;
+pub const ROUND_SPACING_S: u64 = 30;
 
 /// Everything the decision looks at.
 #[derive(Clone, Debug)]

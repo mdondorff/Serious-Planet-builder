@@ -1,5 +1,5 @@
 //! The perf preflight scene (TEST-040): `cargo xtask perf preflight`, or `test-render --perf --scene preflight`. It measures the host for
-//! about 70 s (the readiness gate, three CPU calibrations 20 s apart, the load of the whole period) and lets
+//! about 70 s (the readiness gate, three CPU calibrations 30 s apart, the load of the whole period) and lets
 //! `planet_perf::preflight::decide` say whether a perf window may start. It renders nothing and writes no perf log.
 
 use crate::{err, Options};
@@ -20,7 +20,21 @@ pub fn perf_preflight(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     if smoke {
         writeln!(out, "SMOKE RUN: one calibration round on any adapter; the preflight never refuses and is no measurement").map_err(err)?;
     }
-    writeln!(out, "preflight: sampling the machine for about {} s ...", 10 + (rounds as u64 - 1) * ROUND_SPACING_S + 5).map_err(err)?;
+    // The report's place is checked and made before the measurement: a bad `--out` must not cost the run.
+    let report_path = match &o.out {
+        Some(dir) => {
+            let path = crate::streamperf::out_log_path(dir, "preflight.md")?;
+            if path.file_name().is_none_or(|n| n != "preflight.md") {
+                return Err(format!("--out {}: give a directory (the report is written there as preflight.md)", dir.display()));
+            }
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+            }
+            Some(path)
+        }
+        None => None,
+    };
+    writeln!(out, "preflight: sampling the machine for about {} s ...", 10 + (rounds as u64 - 1) * ROUND_SPACING_S + 2).map_err(err)?;
     let sampler = planet_perf::load::LoadSampler::start(1);
     // The gate samples the machine for its own 10 s window; the calibration rounds follow it.
     let machine = planet_perf::gate::measure_machine(crate::facts(ctx));
@@ -45,10 +59,9 @@ pub fn perf_preflight(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     for l in &verdict.report {
         writeln!(out, "{l}").map_err(err)?;
     }
-    if let Some(dir) = &o.out {
-        let path = crate::streamperf::out_log_path(dir, "preflight.md")?;
+    if let Some(path) = &report_path {
         let text = format!("# Perf preflight\n\n```\n{}\n```\n", verdict.report.join("\n"));
-        std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+        std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))?;
         writeln!(out, "report written to {}", path.display()).map_err(err)?;
     }
     if verdict.passed() || smoke {
