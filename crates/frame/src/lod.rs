@@ -361,6 +361,19 @@ impl SelectionCache {
         SelectionCache::default()
     }
 
+    /// Forget what is cached of `tiles`: an item edit changed what they read (STRM-026, E1), so their origin height, mesh key and
+    /// height-aware volume are computed again at the next plan. The geometry memo (`tiles`) is a function of the tile alone and stays.
+    /// Returns how many origin heights were dropped.
+    pub fn invalidate_tiles(&mut self, tiles: &[TileId]) -> usize {
+        let mut dropped = 0;
+        for t in tiles {
+            dropped += usize::from(self.origin_heights.remove(t).is_some());
+            self.mesh_keys.remove(t);
+            self.volumes.remove(t);
+        }
+        dropped
+    }
+
     pub fn clear(&mut self) {
         self.tiles.clear();
         self.volumes.clear();

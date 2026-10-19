@@ -41,3 +41,32 @@ Source: CON-05, CON-14, ADR 0019, ADR 0025, ADR 0066
 #### Scenario: Pinned encoding
 - **WHEN** the node set id of the default planet is computed by hand from its sorted paths and compared with the library's
 - **THEN** they are equal and equal to the pinned known answer, another seed gives the same id, and every stored record carries it
+
+## ADDED Requirements
+
+### Requirement: STRM-026 Refresh of resident tiles
+When an item edit changes what some tiles read (the footprint find of the edit, WDEF-007), the streamer SHALL request each resident tile of that set again without dropping it (`Streamer::refresh`): the tile stays resident and served from its slot until the new version arrives, the new version takes a second slot, replaces the old one when its job completes (the loop is told with a new `Added` change) and gives the old slot back. The request SHALL be of the tile's class (draw, residency or prefetch) and, within the class, ahead of its other requests (rank 0), so edited tiles are not queued behind the rest of R. A resident tile in no class SHALL be evicted instead of refreshed. A tile whose job is running SHALL be told to stop, its result SHALL be dropped, and it SHALL be requested again, as a refresh when it was resident, so no tile ever holds a version made from the field before the edit. The frame loop's edit event (`ManagedLoop::edit`) SHALL forget the plan cache entries (origin height, mesh key, volume) of the found tiles, refresh them and ask for a new plan at the next frame although the camera did not move.
+
+Verify: A
+Status: active
+Source: SPIKE-13 variant D, ADR 0066, ADR 0021 point 2, M6 plan row E1
+
+#### Scenario: The old version is served
+- **WHEN** a resident tile is refreshed and the job has not finished
+- **THEN** the tile is resident in its old slot with its old payload, a second slot is in use, and when the job completes the payload is the new one, in the second slot, and the old slot is back after the frames in flight retire
+
+#### Scenario: Nothing to refresh
+- **WHEN** a tile that is resident but in no class, or was never loaded, is named by a refresh
+- **THEN** the first is evicted and the second is left alone, and no request is queued
+
+#### Scenario: A running job
+- **WHEN** a refresh names a tile whose job is running, once for a first load and once for a refresh job
+- **THEN** the job is told to stop, its result is dropped, and the tile ends with the version of the last field, served all the time if it was resident
+
+#### Scenario: Ahead of the rest of the class
+- **WHEN** a refresh of a fine tile and a request of a coarser tile of the same class are both waiting
+- **THEN** the refresh starts first
+
+#### Scenario: The edit event
+- **WHEN** an edit event names the resident tiles it changed while the camera stands still
+- **THEN** a new plan is delivered although the request did not change, the old tiles are drawn until their refreshes finish, and the frame is the synchronous frame of the new field again afterwards, with every requested refresh counted as a replacement

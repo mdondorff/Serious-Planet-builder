@@ -218,6 +218,13 @@ pub fn draw_plan_with(
                 shown.insert(d.tile, TerrainDraw { camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32], ..*d });
                 continue;
             }
+            // Stale while revalidating (REND-032): a resident tile of another version (an edit changed what it reads and its refresh is
+            // on the way) is drawn as it is, not replaced by an ancestor, so an edited place never goes coarse while it reloads.
+            if let Some(r) = resident.resident(d.tile) {
+                substituted += 1;
+                shown.insert(d.tile, draw_of(req, d.tile, r));
+                continue;
+            }
             let mut up = d.tile.parent();
             let found = loop {
                 match up {
@@ -404,6 +411,18 @@ pub struct PlanWorker {
 impl PlanWorker {
     pub fn new(spawner: Arc<dyn Spawner>, field: Arc<dyn PlanField>, threads: usize) -> Self {
         Self { spawner, field, cache: Arc::new(Mutex::new(SelectionCache::new())), threads, state: Arc::default() }
+    }
+
+    /// Forget the cached origin heights, mesh keys and volumes of `tiles` (an item edit changed what they read, STRM-026), or of every
+    /// tile with `None`, so the next plan computes them again.
+    pub fn invalidate_cache(&self, tiles: Option<&[TileId]>) {
+        let mut c = self.cache.lock().expect("selection cache");
+        match tiles {
+            Some(t) => {
+                c.invalidate_tiles(t);
+            }
+            None => c.clear(),
+        }
     }
 
     /// Ask for the plan of `req`. Never blocks and never plans on the calling thread.
@@ -597,6 +616,11 @@ pub struct PlanPipeline {
 impl PlanPipeline {
     pub fn new(worker: PlanWorker) -> Self {
         Self { worker, current: None, residency: None, last_requested: None, last_predicted: None, frame: 0 }
+    }
+
+    /// An edit changed what the world draws: ask for a new plan at the next frame although the camera did not move (STRM-026).
+    pub fn force_replan(&mut self) {
+        self.last_requested = None;
     }
 
     pub fn worker(&self) -> &PlanWorker {

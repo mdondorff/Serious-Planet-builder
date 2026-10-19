@@ -487,6 +487,8 @@ pub struct StreamStats {
     /// Jobs that finished after they were cancelled; their tiles were not made resident.
     pub dropped: u64,
     pub evicted: u64,
+    /// Resident tiles replaced in place by a refresh (STRM-026): the new version arrived and the old slot went back.
+    pub refreshed: u64,
     /// Queued requests by class: draw, residency, prefetch.
     pub queued_by_class: [usize; 3],
     /// Jobs handed to the spawner.
@@ -696,6 +698,9 @@ pub struct Streamer<T: Send + Sync + 'static> {
     pending: [Option<Vec<(TileId, f64)>>; 3],
     /// Tiles that may need a request: wanted, and not resident, running or waiting out a failure when last looked at.
     missing: FxSet<TileId>,
+    /// Resident tiles whose refresh waits for a running job to end (a refresh asked while the tile was loading): requested again when
+    /// that job's result is dropped (STRM-026).
+    refresh_due: FxSet<TileId>,
     /// Resident tiles in no class or in prefetch only (level 0 excluded), per pool, least recently used first: the victims
     /// of [`Streamer::make_room`]'s first tier.
     victims: [BTreeSet<(u64, TileId)>; 2],
@@ -766,6 +771,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             layers: [Layer::new(true, config.floor), Layer::new(false, config.floor), Layer::new(false, config.floor)],
             pending: [None, None, None],
             missing: FxSet::default(),
+            refresh_due: FxSet::default(),
             victims: [BTreeSet::new(), BTreeSet::new()],
             rescan: false,
             work: SchedWork::default(),
@@ -775,6 +781,41 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             job_log: Arc::default(),
             sent: Arc::default(),
         }
+    }
+
+    /// Refresh the tiles of `tiles` after an edit changed what they read (STRM-026): a resident tile is requested again without being
+    /// dropped, so it keeps being drawn from its slot until the new version is resident; the new version takes a second slot, replaces the
+    /// old one when its job completes and gives the old slot back. The request is of the tile's class (draw before residency before
+    /// prefetch) and, within the residency class, ahead of every other request of it. A resident tile in no class is evicted instead (nothing
+    /// wants it, and the next time it is wanted it loads from the new field). A tile whose job is running is told to stop, its result is
+    /// dropped, and it is requested again (a resident one as a refresh); a queued request stays queued (it loads from the new field). Returns
+    /// the number of refresh requests queued.
+    pub fn refresh(&mut self, tiles: &[TileId]) -> usize {
+        let mut queued = 0;
+        for &t in tiles {
+            if let Some(f) = self.in_flight.get(&t) {
+                // Its result may have been made from the field as it was: it is dropped, whatever it was.
+                if !f.token.swap(true, Ordering::SeqCst) {
+                    self.stats.cancelled += 1;
+                    self.stats.cancelled_prefetch += u64::from(f.class == RequestClass::Prefetch);
+                }
+                if self.resident.contains_key(&t) {
+                    self.refresh_due.insert(t);
+                }
+                continue;
+            }
+            if !self.resident.contains_key(&t) {
+                continue;
+            }
+            if self.class_of(t).is_none() && t.level() > self.config.floor {
+                self.evict(t);
+                continue;
+            }
+            self.request_ahead(t);
+            queued += 1;
+        }
+        self.work.updated += tiles.len() as u64;
+        queued
     }
 
     /// Cancel everything that is not resident: the queued requests are dropped and never reach the spawner, the dispatched
@@ -1064,6 +1105,9 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                     self.stats.dropped += 1;
                     self.pools.release(flight.slot, self.frame);
                     self.missing.insert(tile);
+                    if self.refresh_due.remove(&tile) {
+                        self.request_ahead(tile);
+                    }
                 }
                 Outcome::Done(data) => {
                     self.stats.completed += 1;
@@ -1071,8 +1115,17 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                         self.retry_due.remove(&(at, tile));
                     }
                     self.last_error.remove(&tile);
-                    self.resident
+                    let old = self
+                        .resident
                         .insert(tile, Resident { data: Arc::new(data), inserted: self.frame, last_used: self.frame, slot: flight.slot });
+                    if let Some(old) = old {
+                        // A refresh (STRM-026): the old version's slot goes back (reusable after the frames in flight retire).
+                        self.stats.refreshed += 1;
+                        self.pools.release(old.slot, self.frame);
+                        if tile.level() > self.config.floor {
+                            self.victims[self.pools.kind_of(tile) as usize].remove(&(old.last_used, tile));
+                        }
+                    }
                     if tile.level() > self.config.floor && !self.is_active(tile) {
                         self.victims[self.pools.kind_of(tile) as usize].insert((self.frame, tile));
                         self.work.updated += 1;
@@ -1082,6 +1135,9 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 Outcome::Cancelled => {
                     self.pools.release(flight.slot, self.frame);
                     self.missing.insert(tile);
+                    if self.refresh_due.remove(&tile) {
+                        self.request_ahead(tile);
+                    }
                 }
                 Outcome::Failed(message) => {
                     self.last_error.insert(tile, message);
@@ -1172,6 +1228,15 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             Some(_) => {
                 self.missing.insert(t);
             }
+        }
+    }
+
+    /// [`request`](Streamer::request) for a refresh: rank 0 in whatever class the tile has, so it starts ahead of the rest of that class
+    /// (in the residency class the rank is otherwise the level, coarse first).
+    fn request_ahead(&mut self, t: TileId) {
+        let Some(class) = self.class_of(t) else { return };
+        if self.queue.insert(t, class as u8, 0, self.pools.kind_of(t) as usize) {
+            self.work.updated += 1;
         }
     }
 

@@ -13,9 +13,9 @@
 - [ ] 1b.3 Implement; numerics-reviewer on the hash encodings; spec-guardian, verifier; PR
 
 ## 2. edit-invalidation-refresh
-- [ ] 2.1 Design from SPIKE-13 variant D (`spike/spike-13-edit-latency`: `Streamer::refresh`, `force_replan`, stale draw); spec deltas STRM-005, STRM-015, STRM-019
-- [ ] 2.2 Failing tests: a changed planned key refreshes the resident tile and the old one is drawn until the new one is uploaded; an edit event forces a plan while the camera is still; edited tiles are dispatched before the rest of R
-- [ ] 2.3 Implement; keep the key memo per tile invalidated by the item revision counter
+- [x] 2.1 Design from SPIKE-13 variant D (`spike/spike-13-edit-latency`: `Streamer::refresh`, `force_replan`, stale draw); spec deltas STRM-005, STRM-015, STRM-019
+- [x] 2.2 Failing tests: a changed planned key refreshes the resident tile and the old one is drawn until the new one is uploaded; an edit event forces a plan while the camera is still; edited tiles are dispatched before the rest of R
+- [x] 2.3 Implement; keep the key memo per tile invalidated by the item revision counter
 - [ ] 2.4 Reviewers; PR; indicative edit-to-exact numbers from `test gpu --real` (a measured window comes from the planner)
 
 ## 3. edit-invalidation-bounds
