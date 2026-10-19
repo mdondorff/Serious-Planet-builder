@@ -30,21 +30,33 @@ pub enum Handle {
     Height,
 }
 
-/// The radius of the outline of an item, metres: its `radius_m` parameter when it has a positive one, else its reach.
+/// The radius of the outline of an item, metres: the reach of a stamp (its radius is the file's `reach_m`), else the `radius_m` parameter
+/// when it is positive, else the reach.
 pub fn outline_radius_m(item: &Item) -> f64 {
+    if params::is_stamp_kind(&item.kind) {
+        return item.reach_m;
+    }
     match item.params.get(RADIUS_KEY) {
         Some(r) if r.is_finite() && *r > 0.0 => *r,
         _ => item.reach_m,
     }
 }
 
-/// The handles an item has: the anchor always, the radius when it has an outline, the height when it has a `height_m` parameter.
+/// The parameter the height handle edits: a stamp's own (`height_m`, `depth_m`, `target_m`), else `height_m` when the item has it.
+fn height_key(item: &Item) -> Option<&'static str> {
+    if params::is_stamp_kind(&item.kind) {
+        return params::amount_def(&item.kind).map(|d| d.key).filter(|k| item.params.get(*k).is_some_and(|v| v.is_finite()));
+    }
+    item.params.get(HEIGHT_KEY).filter(|h| h.is_finite()).map(|_| HEIGHT_KEY)
+}
+
+/// The handles an item has: the anchor always, the radius when it has an outline, the height when it has the parameter the handle edits.
 pub fn handles_of(item: &Item) -> Vec<Handle> {
     let mut v = vec![Handle::Move];
     if outline_radius_m(item) > 0.0 {
         v.push(Handle::Radius);
     }
-    if item.params.get(HEIGHT_KEY).is_some_and(|h| h.is_finite()) {
+    if height_key(item).is_some() {
         v.push(Handle::Height);
     }
     v
@@ -72,14 +84,22 @@ pub fn point_at(dir: Vec3, heading_deg: f64, arc_m: f64, radius_m: f64) -> Vec3 
 }
 
 /// Where a handle sits in `PlanetFixed`, metres, on a body of `radius_m` whose ground at the item is `ground_m` above the sphere: the
-/// anchor on the ground, the radius handle on the outline along the item's heading, the height handle above the anchor by the height.
+/// anchor on the ground, the radius handle on the outline along the item's heading, the height handle above the anchor by the height of
+/// a hill, below it by the depth of a crater, and at the absolute target of a plateau.
 pub fn handle_point(item: &Item, handle: Handle, radius_m: f64, ground_m: f64) -> Vec3 {
     let dir = item.direction();
     let r = radius_m + ground_m;
     match handle {
         Handle::Move => dir * r,
         Handle::Radius => point_at(dir, item.anchor.heading_deg, outline_radius_m(item), radius_m) * r,
-        Handle::Height => dir * (r + item.params.get(HEIGHT_KEY).copied().unwrap_or(0.0)),
+        Handle::Height => {
+            let amount = height_key(item).and_then(|k| item.params.get(k)).copied().unwrap_or(0.0);
+            match item.kind.as_str() {
+                "crater" => dir * (r - amount),
+                "plateau" => dir * (radius_m + amount),
+                _ => dir * (r + amount),
+            }
+        }
     }
 }
 
@@ -112,8 +132,9 @@ fn drag_range(item: &Item, key: &str, lo: f64, hi: f64) -> (f64, f64) {
     params::def_of(&item.kind, key).map_or((lo, hi), |d| (d.min.max(lo), d.max.min(hi)))
 }
 
-/// The item resized so that its outline passes through the unit direction `dir`: the `radius_m` parameter becomes the arc from the anchor
-/// to `dir`, kept in the kind's range (else 1 m to one cell edge), and the reach grows to hold the outline with its margin (never shrinks).
+/// The item resized so that its outline passes through the unit direction `dir`: the arc from the anchor to `dir`, kept in the kind's range
+/// (else 1 m to one cell edge). A stamp's radius is its `reach_m`; for another kind the `radius_m` parameter becomes the arc and the reach
+/// grows to hold the outline with its margin (never shrinks).
 pub fn resized(item: &Item, dir: Vec3, radius_m: f64) -> Item {
     let c = item.direction();
     let d = dir.normalized();
@@ -121,15 +142,29 @@ pub fn resized(item: &Item, dir: Vec3, radius_m: f64) -> Item {
     let (lo, hi) = drag_range(item, RADIUS_KEY, MIN_RADIUS_M, CELL_EDGE_M);
     let r = arc.clamp(lo, hi);
     let mut it = item.clone();
+    if params::is_stamp_kind(&item.kind) {
+        it.reach_m = r;
+        return it;
+    }
     it.params.insert(RADIUS_KEY.to_string(), r);
     it.reach_m = it.reach_m.max((r * REACH_FACTOR).min(CELL_EDGE_M));
     it
 }
 
-/// The item with its `height_m` changed by `delta_m`, kept in the kind's range (else within the limit on the change) and the bound on the
-/// change grown to hold it (never shrinks).
+/// The item with its height changed by `delta_m` (up is positive), kept in the kind's range (else within the limit on the change) and the
+/// bound on the change adjusted to hold it. A hill's `height_m` and a plateau's `target_m` go up with the pointer; a crater's `depth_m`
+/// goes down (the handle is the bottom of the bowl). A hill's and a crater's bound is their amount; another kind's bound never shrinks.
 pub fn raised(item: &Item, delta_m: f64) -> Item {
     let mut it = item.clone();
+    if params::is_stamp_kind(&item.kind) {
+        if let (Some(key), Some(d)) = (height_key(item), params::amount_def(&item.kind)) {
+            let sign = if item.kind == "crater" { -1.0 } else { 1.0 };
+            let v = (it.params.get(key).copied().unwrap_or(0.0) + sign * delta_m).clamp(d.min, d.max);
+            it.params.insert(key.to_string(), v);
+            params::fit_stamp_bound(&mut it);
+        }
+        return it;
+    }
     let (lo, hi) = drag_range(item, HEIGHT_KEY, -MAX_DELTA_LIMIT_M, MAX_DELTA_LIMIT_M);
     let h = (it.params.get(HEIGHT_KEY).copied().unwrap_or(0.0) + delta_m).clamp(lo, hi);
     it.params.insert(HEIGHT_KEY.to_string(), h);

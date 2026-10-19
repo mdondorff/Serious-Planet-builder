@@ -1,8 +1,11 @@
-//! The parameters an edit shows in the inspector and the typed metric input (VIEW-017). The table is provisional until the stamp stage
-//! fixes its parameter names; a parameter the table does not know is still shown and edited, without a range.
+//! The parameters an edit shows in the inspector and the typed metric input (VIEW-017), and where the stamp stage keeps them in the item
+//! file (WDEF-010): the radius of a stamp is the file's `reach_m`, its one parameter is `height_m` (hill, signed), `depth_m` (crater) or
+//! `target_m` (plateau, an absolute height), and a plateau's `max_delta_m` is how far it moves a point. A parameter the table does not
+//! know is still shown and edited, without a range.
 
-use planet_world_def::item::{ulid_text, Item};
+use planet_world_def::item::{ulid_text, Item, MAX_DELTA_LIMIT_M};
 use planet_world_def::ItemId;
+use std::collections::BTreeMap;
 
 use crate::lists::label_of;
 
@@ -14,7 +17,18 @@ pub enum Unit {
     Plain,
 }
 
-/// A parameter of a kind: its key, the range the inspector accepts, the step of a slider and the value of a new item.
+/// Where a parameter of a stamp kind lives in the item file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stored {
+    /// In `[params]` under its key.
+    Param,
+    /// As the file's `reach_m` (the radius of the stamp).
+    Reach,
+    /// As the file's `max_delta_m`.
+    MaxDelta,
+}
+
+/// A parameter of a kind: its key, the range the inspector accepts, the step of a slider, the value of a new item and where it is stored.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ParamDef {
     pub key: &'static str,
@@ -24,22 +38,32 @@ pub struct ParamDef {
     pub max: f64,
     pub step: f64,
     pub default: f64,
+    pub stored: Stored,
 }
 
-const fn m(key: &'static str, label: &'static str, min: f64, max: f64, step: f64, default: f64) -> ParamDef {
-    ParamDef { key, label, unit: Unit::Metres, min, max, step, default }
+const fn p(key: &'static str, label: &'static str, min: f64, max: f64, step: f64, default: f64) -> ParamDef {
+    ParamDef { key, label, unit: Unit::Metres, min, max, step, default, stored: Stored::Param }
 }
 
-const CRATER: [ParamDef; 3] = [
-    m("radius_m", "Radius", 200.0, 10_000.0, 50.0, 2_000.0),
-    m("depth_m", "Depth", 10.0, 800.0, 10.0, 250.0),
-    m("rim_m", "Rim height", 0.0, 200.0, 5.0, 40.0),
-];
-const HILL: [ParamDef; 2] = [m("radius_m", "Radius", 50.0, 2_000.0, 10.0, 400.0), m("height_m", "Height", 5.0, 400.0, 5.0, 80.0)];
+const fn radius(min: f64, max: f64, step: f64, default: f64) -> ParamDef {
+    ParamDef { key: "radius_m", label: "Radius", unit: Unit::Metres, min, max, step, default, stored: Stored::Reach }
+}
+
+const CRATER: [ParamDef; 2] = [radius(200.0, 10_000.0, 50.0, 2_000.0), p("depth_m", "Depth", 10.0, 800.0, 10.0, 250.0)];
+const HILL: [ParamDef; 2] = [radius(50.0, 2_000.0, 10.0, 400.0), p("height_m", "Height", -400.0, 400.0, 5.0, 80.0)];
 const PLATEAU: [ParamDef; 3] = [
-    m("radius_m", "Radius", 1_000.0, 40_000.0, 500.0, 15_000.0),
-    m("target_m", "Target height", -500.0, 9_000.0, 10.0, 300.0),
-    ParamDef { key: "softness_pct", label: "Edge softness", unit: Unit::Percent, min: 0.0, max: 100.0, step: 1.0, default: 40.0 },
+    radius(1_000.0, 40_000.0, 500.0, 15_000.0),
+    p("target_m", "Target height", -500.0, 9_000.0, 10.0, 300.0),
+    ParamDef {
+        key: "max_delta_m",
+        label: "Flattening limit",
+        unit: Unit::Metres,
+        min: 10.0,
+        max: 5_000.0,
+        step: 10.0,
+        default: 1_000.0,
+        stored: Stored::MaxDelta,
+    },
 ];
 
 /// The kinds the stamp tool places, in the order of its palette.
@@ -52,6 +76,56 @@ pub fn defs_for(kind: &str) -> &'static [ParamDef] {
         "hill" => &HILL,
         "plateau" => &PLATEAU,
         _ => &[],
+    }
+}
+
+/// Whether the table knows `kind` as a stamp: its radius is the file's `reach_m`.
+pub fn is_stamp_kind(kind: &str) -> bool {
+    defs_for(kind).iter().any(|d| d.stored == Stored::Reach)
+}
+
+/// The definition of the one parameter of a stamp kind that lives in `[params]` (`height_m`, `depth_m`, `target_m`).
+pub fn amount_def(kind: &str) -> Option<&'static ParamDef> {
+    defs_for(kind).iter().find(|d| d.stored == Stored::Param)
+}
+
+/// The value of a table parameter in an item, where it is stored.
+pub fn param_value(item: &Item, d: &ParamDef) -> Option<f64> {
+    match d.stored {
+        Stored::Reach => Some(item.reach_m),
+        Stored::MaxDelta => Some(item.max_delta_m),
+        Stored::Param => item.params.get(d.key).copied(),
+    }
+}
+
+/// Set a table parameter in an item, where it is stored.
+pub fn set_param_value(item: &mut Item, d: &ParamDef, v: f64) {
+    match d.stored {
+        Stored::Reach => item.reach_m = v,
+        Stored::MaxDelta => item.max_delta_m = v,
+        Stored::Param => {
+            item.params.insert(d.key.to_string(), v);
+        }
+    }
+}
+
+/// The bound on the change a stamp of `kind` with `params` declares: a hill's height and a crater's depth are exactly its bound (the
+/// stamp stage checks it); a plateau's bound is its own parameter, so a new plateau gets the table's default. 0 for other kinds.
+pub fn bound_for(kind: &str, params: &BTreeMap<String, f64>) -> f64 {
+    let amount = |key: &str| params.get(key).copied().unwrap_or(0.0).abs();
+    let b = match kind {
+        "hill" => amount("height_m"),
+        "crater" => amount("depth_m"),
+        "plateau" => defs_for(kind).iter().find(|d| d.stored == Stored::MaxDelta).map_or(0.0, |d| d.default),
+        _ => 0.0,
+    };
+    b.min(MAX_DELTA_LIMIT_M)
+}
+
+/// Keep the bound of a hill or a crater equal to its amount (a plateau's bound is its own parameter).
+pub fn fit_stamp_bound(item: &mut Item) {
+    if matches!(item.kind.as_str(), "hill" | "crater") {
+        item.max_delta_m = bound_for(&item.kind, &item.params);
     }
 }
 
@@ -162,12 +236,12 @@ pub fn inspector_of(item: &Item, position: (usize, usize), distance_m: f64) -> I
     let mut params: Vec<ParamRow> = defs_for(&item.kind)
         .iter()
         .filter_map(|d| {
-            item.params.get(d.key).map(|v| ParamRow {
+            param_value(item, d).map(|v| ParamRow {
                 key: d.key.to_string(),
                 label: d.label.to_string(),
                 unit: d.unit,
-                value: *v,
-                text: format_value(*v, d.unit),
+                value: v,
+                text: format_value(v, d.unit),
                 range: Some((d.min, d.max)),
                 step: d.step,
             })
