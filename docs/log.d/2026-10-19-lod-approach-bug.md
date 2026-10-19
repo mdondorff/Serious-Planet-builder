@@ -1,0 +1,1 @@
+- 2026-10-19 **Bug tracked (owner):** the drawn LOD coarsens for a moment while slowly approaching from orbit; at-the-laptop reminders for the Windows indexer and F9 captures.
