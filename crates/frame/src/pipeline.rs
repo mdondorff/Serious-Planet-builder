@@ -30,7 +30,7 @@ use planet_core::cube::FaceMapping;
 use planet_core::{PlanetFixed, TileId};
 use planet_generators::height::HeightField;
 use planet_streaming::Spawner;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
 /// Frames the loop may have submitted and not yet seen finish. The slot pools of the renderer retire a released slot this
@@ -228,6 +228,21 @@ pub fn draw_plan_preview(
     bounds: &TileBounds,
     preview: &[PreviewStamp],
 ) -> Result<DrawPlan, PlanError> {
+    draw_plan_edited(req, base, resident, bounds, preview, &BTreeSet::new())
+}
+
+/// [`draw_plan_preview`] for the frames between an edit and the first plan made after it (REND-033): the plan in hand still carries the
+/// mesh keys of the unedited world, so a resident tile that `edited` names (the footprint find of the edit) matches its key although its
+/// content is out of date. Such a tile is drawn as it is like a stale one, counts as substituted (the frame is not exact) and is flagged
+/// when a stamp touches it. An empty set is [`draw_plan_preview`] exactly.
+pub fn draw_plan_edited(
+    req: &TerrainRequest,
+    base: Option<(&TerrainRequest, &TerrainPlan)>,
+    resident: &dyn ResidentSet,
+    bounds: &TileBounds,
+    preview: &[PreviewStamp],
+    edited: &BTreeSet<TileId>,
+) -> Result<DrawPlan, PlanError> {
     let map = face_mapping_by_id(&req.face_mapping).ok_or_else(|| PlanError::UnknownFaceMapping(req.face_mapping.clone()))?;
     let mut shown: BTreeMap<TileId, TerrainDraw> = BTreeMap::new();
     let (mut substituted, mut blank) = (0usize, 0usize);
@@ -235,7 +250,7 @@ pub fn draw_plan_preview(
     let mut cover: Option<Vec<TileId>> = None;
     if let Some((base_req, plan)) = base {
         for d in &plan.nodes {
-            if resident.resident(d.tile).is_some_and(|r| r.mesh_key == d.mesh_key) {
+            if resident.resident(d.tile).is_some_and(|r| r.mesh_key == d.mesh_key) && !edited.contains(&d.tile) {
                 let rel = d.origin.0 - req.camera.position.0;
                 shown.insert(d.tile, TerrainDraw { camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32], ..*d });
                 continue;
@@ -658,11 +673,32 @@ pub struct PlanPipeline {
     frame: u64,
     /// The preview of the edit in flight (REND-033); empty when there is none.
     preview: Vec<PreviewStamp>,
+    /// The tiles named by the edits since the last plan made after one was delivered, and the request number of the first plan that is
+    /// made after the latest edit (a plan with a lower number predates it).
+    edited: BTreeSet<TileId>,
+    edit_seq: u64,
 }
 
 impl PlanPipeline {
     pub fn new(worker: PlanWorker) -> Self {
-        Self { worker, current: None, residency: None, last_requested: None, last_predicted: None, frame: 0, preview: Vec::new() }
+        Self {
+            worker,
+            current: None,
+            residency: None,
+            last_requested: None,
+            last_predicted: None,
+            frame: 0,
+            preview: Vec::new(),
+            edited: BTreeSet::new(),
+            edit_seq: 0,
+        }
+    }
+
+    /// An edit named `tiles` (the footprint find, WDEF-007): until a plan made after it is delivered, the frames draw them as stale and
+    /// preview them (REND-033), so the preview does not wait for the plan worker.
+    pub fn mark_edited(&mut self, tiles: &[TileId]) {
+        self.edited.extend(tiles.iter().copied());
+        self.edit_seq = self.frame + 1;
     }
 
     /// Set the preview of the edit in flight (REND-033, from `preview_delta`): the frames that follow flag the nodes drawn from a stale
@@ -714,6 +750,9 @@ impl PlanPipeline {
         match self.worker.take() {
             Some(Ok(o)) => {
                 delivered = Some((o.seq, o.plan_ms));
+                if o.seq >= self.edit_seq {
+                    self.edited.clear();
+                }
                 if self.current.as_ref().is_none_or(|c| c.seq < o.seq) {
                     self.current = Some(o);
                 }
@@ -741,7 +780,7 @@ impl PlanPipeline {
         let base = self.current.as_ref().filter(|c| c.request == *req || plan_usable(&c.plan, req));
         let empty = TileBounds::default();
         let bounds = self.residency.as_ref().map_or(&empty, |r| &r.residency.bounds);
-        let draw = draw_plan_preview(req, base.map(|c| (&c.request, c.plan.as_ref())), resident, bounds, &self.preview)
+        let draw = draw_plan_edited(req, base.map(|c| (&c.request, c.plan.as_ref())), resident, bounds, &self.preview, &self.edited)
             .map_err(|e| e.to_string())?;
         let wanted =
             self.current.as_ref().map(|c| c.plan.nodes.iter().enumerate().map(|(i, n)| (n.tile, i as f64)).collect()).unwrap_or_default();
