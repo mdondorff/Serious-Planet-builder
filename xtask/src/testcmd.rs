@@ -75,8 +75,9 @@ pub fn packages_for_changes(changed_paths: &[String]) -> Vec<String> {
             let dir = rest.split('/').next().unwrap_or("");
             if let Some(i) = CHAIN.iter().position(|c| *c == dir) {
                 lowest = Some(lowest.map_or(i, |l| l.min(i)));
-            } else if dir == "testkit" || dir == "perf" {
-                // Used by tests of every crate that depends on them: run everything.
+            } else {
+                // `testkit` and `perf` are used by tests of every crate that depends on them, and a directory this list does not know
+                // (a crate added without being put in the chain) has no known place above it: run everything.
                 return all();
             }
         } else if p.starts_with("xtask/")
@@ -84,7 +85,10 @@ pub fn packages_for_changes(changed_paths: &[String]) -> Vec<String> {
             || p == "deny.toml"
             || p.starts_with("openspec/changes/")
             || p.starts_with("tests/goldens/")
-            || [".sh", ".ps1", ".bat", ".cmd"].iter().any(|e| p.ends_with(e))
+            || {
+                let lower = p.to_ascii_lowercase();
+                [".sh", ".ps1", ".bat", ".cmd"].iter().any(|e| lower.ends_with(e))
+            }
         {
             // Read by the repository check tests (no scripts, deny.toml, the CI workflow, unarchived changes, the golden driver lists).
             extra.insert("xtask".into());
@@ -104,6 +108,15 @@ pub fn packages_for_changes(changed_paths: &[String]) -> Vec<String> {
     let mut v: Vec<String> = lowest.map(|i| CHAIN[i..].iter().map(|d| package(d)).collect()).unwrap_or_default();
     v.extend(extra);
     v
+}
+
+/// The crates `test fast` runs: every crate with `--all`, else the selection of the changed paths (empty when none is a crate path).
+fn fast_packages(all: bool, changed: &[String]) -> Vec<String> {
+    if all {
+        all_packages()
+    } else {
+        packages_for_changes(changed)
+    }
 }
 
 pub(crate) fn changed_paths(root: &Path) -> Vec<String> {
@@ -248,7 +261,7 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
     let mut selection: Vec<String> = Vec::new();
     let mut fast_crates: Vec<String> = Vec::new();
     if sub == Some("fast") {
-        let pkgs = if all { all_packages() } else { packages_for_changes(&changed_paths(root)) };
+        let pkgs = fast_packages(all, &changed_paths(root));
         if pkgs.is_empty() {
             eprintln!("test fast: no crate changed (the change touches no crate path), so there is nothing to run (BUILD-021)");
             return Ok(TestTiming { test_secs: 0.0, whole: false });
@@ -1046,6 +1059,19 @@ mod tests {
             assert!(packages_for_changes(&s(paths)).len() >= 12, "{paths:?}");
         }
         assert_eq!(packages_for_changes(&s(&["xtask/src/main.rs"])), ["xtask"]);
+    }
+
+    // spec: BUILD-021
+    #[test]
+    fn an_unknown_crate_directory_and_an_upper_case_script_run_what_they_may_affect_and_fast_has_nothing_to_run_for_docs() {
+        // A crate nobody put in the chain has no known crate above it: everything runs.
+        assert_eq!(packages_for_changes(&s(&["crates/newcrate/src/lib.rs"])), all_packages());
+        assert_eq!(packages_for_changes(&s(&["docs/a.md", "crates/newcrate/Cargo.toml"])), all_packages());
+        assert_eq!(packages_for_changes(&s(&["tools/Build.PS1"])), ["xtask"], "script extensions match in any case");
+        // `test fast` on a docs change selects nothing (it then says so and succeeds without building); `--all` is every crate.
+        assert!(fast_packages(false, &s(&["docs/status.md"])).is_empty());
+        assert_eq!(fast_packages(true, &s(&["docs/status.md"])), all_packages());
+        assert_eq!(fast_packages(false, &[]), all_packages(), "nothing changed is the whole workspace");
     }
 
     // spec: BUILD-021
