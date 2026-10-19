@@ -51,3 +51,22 @@ Source: ADR 0066 points 1 and 2, SPIKE-13
 #### Scenario: Declared against recorded reads
 - **WHEN** a generator samples items while a recording context observes it
 - **THEN** every item it touched is in the footprint result its tile declared, and its output is unchanged beyond `reach_m` of every item and within `max_delta_m`
+
+### Requirement: WDEF-008 Region summaries
+A tile that covers more than 64 cells SHALL record its item read as region summary entries (query kind 4) instead of the footprint result: the smallest set of nodes of a Merkle quadtree over the cell grid that covers exactly its own cells and the margin ring of cells around them, one entry per node with the parameters `body u32 | layer (u32 length + UTF-8) | level u8 | node raw id u64` and the node hash as the result. A leaf SHALL be a cell at the body's cell level, hashed under `planet-builder cell hash v1` over its item rows in application order (each a 16-byte id and the 128-bit footprint item hash); an inner node SHALL be hashed under `planet-builder summary node v1` over its level and its four child hashes in child order; an empty subtree SHALL be the same function over empty children, so its hash depends on its level. The tree SHALL be kept per body and layer and an edit SHALL rewrite one node per level; the margin ring SHALL be wide enough that every item whose reach can touch the tile has its anchor in a covered cell. The items a generator receives for the tile SHALL be the footprint result.
+
+Verify: A
+Status: planned
+Source: ADR 0066 point 3, SPIKE-13
+
+#### Scenario: Edit under a coarse tile
+- **WHEN** an item is added, moved, edited or removed inside the covered cells of a coarse tile
+- **THEN** the tile's keys change, and an edit beyond the margin ring changes none
+
+#### Scenario: One node per level
+- **WHEN** an item is put or removed
+- **THEN** exactly one node per level above its cell is rewritten, and every node equals the one a rebuild from the items gives
+
+#### Scenario: Node set
+- **WHEN** the nodes of a tile's read are listed
+- **THEN** they cover exactly the tile's cells and the margin ring's cells, with no overlap, and an empty subtree hashes differently at each level
