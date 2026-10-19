@@ -416,11 +416,15 @@ impl App<'_> {
         if let Some(st) = self.state.as_mut() {
             if let Some(e) = st.edit.as_mut() {
                 if let Some(def) = e.take_changed_definition() {
-                    match self.world.set_definition(def) {
+                    match self.world.set_definition(Arc::clone(&def)) {
                         Ok(()) => {
                             let resident: Vec<_> = st.rig.managed.resident().keys().copied().collect();
                             let tiles = e.refresh_tiles(&resident);
                             st.rig.managed.edit(&tiles);
+                            // The edit in flight is drawn at once from the stale tiles, displaced by the change (VIEW-023).
+                            e.preview_begin(&def);
+                            let stamps = e.preview_stamps(st.last_camera.position.0);
+                            st.rig.managed.set_preview(stamps);
                             republished = true;
                         }
                         Err(why) => {
@@ -518,6 +522,14 @@ impl App<'_> {
                 })?;
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
             st.last_wanted = frame.pipeline.wanted.iter().map(|w| w.0).collect();
+            // The preview ends when the exact tiles are in (VIEW-023).
+            if let Some(e) = st.edit.as_mut() {
+                e.stats.previewed_max = e.stats.previewed_max.max(frame.pipeline.draw.plan.nodes.iter().filter(|n| n.preview).count());
+                if e.preview_active() && crate::editwin::exact_and_idle(&st.rig.managed, &frame) {
+                    st.rig.managed.set_preview(Vec::new());
+                    e.preview_end();
+                }
+            }
             // The editor mode: what the camera shows of the edits, their outlines and handles, the hover, the lists; the resident tiles the
             // edits of the last frame can touch (the footprint find).
             if let Some(e) = st.edit.as_mut().filter(|e| e.on) {

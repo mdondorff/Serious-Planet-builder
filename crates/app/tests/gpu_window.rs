@@ -197,6 +197,8 @@ fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_
     assert_eq!(count(" refused"), 0, "{line}");
     assert!(count(" frames in the editor mode") > 0 && count(" tiles sent to refresh") > 0, "{line}");
     assert!(count(" definitions handed to the generator") >= 1, "the edits reached the generator: {line}");
+    // spec: VIEW-023
+    assert!(count(" previews set") >= 1, "the window fed the preview of the edit in flight: {line}");
     // The run ends with the edit back (the last command undid the delete): one file, written through by every command.
     let files: Vec<_> =
         std::fs::read_dir(dir.join("0")).expect("the items directory of the planet").map(|f| f.unwrap().file_name()).collect();
