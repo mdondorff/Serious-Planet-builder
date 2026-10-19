@@ -492,3 +492,92 @@ fn the_flight_capture_writes_a_png_sequence_per_flight_and_shore_filter_and_is_n
     assert!(e.contains("--store DIR") && e.contains("--allow-memory-bake"), "{e}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The numbers after every `"key":` in a log.
+fn numbers_of(json: &str, key: &str) -> Vec<u64> {
+    json.split(&format!("\"{key}\":")).skip(1).filter_map(|t| t.split([',', '}']).next().and_then(|n| n.parse().ok())).collect()
+}
+
+// spec: TEST-039
+#[test]
+fn a_lit_view_a_lit_flight_and_a_stream_scene_log_their_cpu_calibration_when_asked_even_in_a_smoke_run() {
+    let keys = [
+        "load_calib_before_single_us",
+        "load_calib_before_parallel_median_us",
+        "load_calib_after_single_us",
+        "load_calib_after_parallel_median_us",
+    ];
+    // One lit view and one lit flight: a run each in a smoke run, each with the four readings and the thread counts, and the log judges them.
+    let log = tmp("calib-lit.json");
+    run(&[
+        "test-render",
+        "--perf-smoke",
+        "--scene",
+        "lit",
+        "--views",
+        "ground-1m,coast-glide",
+        "--adapter",
+        "software",
+        "--global-res",
+        "128",
+        "--calibrate",
+        "--out",
+        log.to_str().unwrap(),
+    ])
+    .unwrap();
+    let json = std::fs::read_to_string(&log).unwrap();
+    assert!(json.contains("\"path\":\"lit/ground-1m\"") && json.contains("\"path\":\"lit/coast-glide\""), "{json}");
+    for key in keys.iter().chain(&["load_calib_before_threads", "load_calib_after_threads"]) {
+        let n = numbers_of(&json, key);
+        assert_eq!(n.len(), 3, "{key}: one reading in the view's run and in each of the flight's two shore-filter runs: {json}");
+        assert!(n.iter().all(|v| *v > 0), "{key}: {n:?}");
+    }
+    assert!(
+        json.contains("\"cpu_calibration_valid\":true") || json.contains("\"cpu_calibration_valid\":false"),
+        "judged, not null: {json}"
+    );
+    assert!(!json.contains("\"cpu_calibration_valid\":null"), "{json}");
+    let _ = std::fs::remove_file(&log);
+    // Without the option a smoke run measures none and the log says it was not judged.
+    let none = tmp("calib-none.json");
+    run(&[
+        "test-render",
+        "--perf-smoke",
+        "--scene",
+        "lit",
+        "--views",
+        "ground-1m",
+        "--adapter",
+        "software",
+        "--global-res",
+        "128",
+        "--out",
+        none.to_str().unwrap(),
+    ])
+    .unwrap();
+    let json = std::fs::read_to_string(&none).unwrap();
+    assert!(!json.contains("load_calib_") && json.contains("\"cpu_calibration_valid\":null"), "{json}");
+    let _ = std::fs::remove_file(&none);
+    // A streaming scene: one run, the same four readings.
+    let stream = tmp("calib-stream.json");
+    run(&[
+        "test-render",
+        "--perf-smoke",
+        "--scene",
+        "look-2km",
+        "--adapter",
+        "software",
+        "--global-res",
+        "8",
+        "--calibrate",
+        "--out",
+        stream.to_str().unwrap(),
+    ])
+    .unwrap();
+    let json = std::fs::read_to_string(&stream).unwrap();
+    for key in keys {
+        assert_eq!(numbers_of(&json, key).len(), 1, "{key}: {json}");
+    }
+    assert!(!json.contains("\"cpu_calibration_valid\":null"), "{json}");
+    let _ = std::fs::remove_file(&stream);
+}

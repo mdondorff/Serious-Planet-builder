@@ -1,0 +1,44 @@
+#[path = "block_order.rs"]
+mod block_order;
+#[path = "body_keys.rs"]
+mod body_keys;
+#[path = "bounds.rs"]
+mod bounds;
+#[path = "cell_keys.rs"]
+mod cell_keys;
+#[path = "climate.rs"]
+mod climate;
+#[path = "compact.rs"]
+mod compact;
+#[path = "erosion.rs"]
+mod erosion;
+#[path = "generator_contract.rs"]
+mod generator_contract;
+#[path = "global.rs"]
+mod global;
+#[path = "global_contract.rs"]
+mod global_contract;
+#[path = "global_reader.rs"]
+mod global_reader;
+#[path = "height_fields.rs"]
+mod height_fields;
+#[path = "manifest.rs"]
+mod manifest;
+#[path = "mesh.rs"]
+mod mesh;
+#[path = "ocean.rs"]
+mod ocean;
+#[path = "pipeline.rs"]
+mod pipeline;
+#[path = "stages.rs"]
+mod stages;
+#[path = "steep.rs"]
+mod steep;
+#[path = "terrain.rs"]
+mod terrain;
+#[path = "tile_min_height.rs"]
+mod tile_min_height;
+#[path = "water.rs"]
+mod water;
+#[path = "water_summary.rs"]
+mod water_summary;

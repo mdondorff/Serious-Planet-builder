@@ -140,6 +140,8 @@ struct Rig<'a> {
     lod: &'a LodParams,
     size: (u32, u32),
     smoke: bool,
+    /// Measure the CPU calibration in a smoke run too (`--calibrate`, TEST-039).
+    calibrate: bool,
     frames: usize,
     cells: u32,
     radius_m: f64,
@@ -212,6 +214,27 @@ fn warm_clock(
     .map(Some)
 }
 
+/// The thread count of the CPU calibration: the generation pool's default (the machine less the reserve), the count the limits of
+/// `planet_perf::calibration` were measured with (ADR 0065).
+fn calibration_threads() -> usize {
+    planet_streaming::GenWorkers::workers_for(std::thread::available_parallelism().map_or(4, |n| n.get()), planet_streaming::GEN_RESERVE)
+}
+
+/// Measure the CPU calibration of a view's session now (not in a smoke run unless `--calibrate` asks for it): the fixed job alone and on all the threads (STRM-022).
+fn calibrate_before(rig: &Rig<'_>) -> Option<planet_perf::streaming::CpuCalibration> {
+    (!rig.smoke || rig.calibrate).then(|| planet_perf::streaming::calibrate_cpu(calibration_threads()))
+}
+
+/// Add the calibration of a view (before and after its measured frames) to the counts of its runs; the harness judges it (ADR 0065).
+fn add_calibration(reports: &mut [RunReport], before: Option<planet_perf::streaming::CpuCalibration>) {
+    let Some(before) = before else { return };
+    let after = planet_perf::streaming::calibrate_cpu(calibration_threads());
+    for rep in reports {
+        rep.counts.extend(planet_perf::streaming::calibration_counts("before", &before));
+        rep.counts.extend(planet_perf::streaming::calibration_counts("after", &after));
+    }
+}
+
 fn counts_of(r: &TerrainRenderer, plan: &TerrainPlan, stats: &planet_render::TerrainStats, water_draws: u64) -> Vec<(String, u64)> {
     vec![
         ("nodes".into(), plan.nodes.len() as u64),
@@ -259,6 +282,7 @@ fn measure_static(
         r.render(rig.ctx, &lit, true).map_err(|e| e.to_string())?;
     }
     let warmup = warm_clock(rig, r, &lit, path, out)?;
+    let calib_before = calibrate_before(rig);
     let load_sampler = (!rig.smoke).then(|| planet_perf::load::LoadSampler::start(planet_perf::load::SAMPLE_PERIOD_S));
     let mut attempt = 0;
     let (mut reports, mut batch_frames, mut noisy, mut noise_lines);
@@ -327,6 +351,7 @@ fn measure_static(
         break;
     }
     let load = load_sampler.map_or_else(planet_perf::load::CaseLoad::not_measured, planet_perf::load::LoadSampler::stop);
+    add_calibration(&mut reports, calib_before);
     Ok(ViewResult {
         path: path.to_string(),
         reports,
@@ -356,6 +381,7 @@ fn measure_flight(
     let mut cut_total = [0u64; 4];
     let mut warmup = None;
     let mut before = None;
+    let mut calib_before = None;
     let mut load_sampler = None;
     let started = Instant::now();
     let mut last_stats = planet_render::TerrainStats::default();
@@ -371,6 +397,7 @@ fn measure_flight(
         nodes_max = nodes_max.max(plan.nodes.len());
         if k == 0 {
             warmup = warm_clock(rig, r, &lit, path, out)?;
+            calib_before = calibrate_before(rig);
             before = planet_perf::query_nvidia_smi();
             load_sampler = (!rig.smoke).then(|| planet_perf::load::LoadSampler::start(planet_perf::load::SAMPLE_PERIOD_S));
         }
@@ -411,9 +438,11 @@ fn measure_flight(
         metrics: metrics_of(&frames),
         counts,
     };
+    let mut reports = vec![report];
+    add_calibration(&mut reports, calib_before);
     Ok(ViewResult {
         path: path.to_string(),
-        reports: vec![report],
+        reports,
         frames,
         water_draws: water_max,
         warmup,
@@ -544,7 +573,7 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     if views.is_empty() {
         return Err("--views names no view".into());
     }
-    let rig = Rig { ctx, world: &world, field: field.as_ref(), lod: &lod, size, smoke, frames: o.frames, cells: o.cells, radius_m };
+    let rig = Rig { ctx, world: &world, field: field.as_ref(), lod: &lod, size, smoke, calibrate: o.calibrate, frames: o.frames, cells: o.cells, radius_m };
     if smoke {
         writeln!(
             out,
@@ -764,7 +793,7 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
         // The first view of the list seeds the renderer: keep the static views, drop the flights that were not asked for.
         views.retain(|v| v.kind == ViewKind::Static || names.iter().any(|n| n == v.name));
     }
-    let rig = Rig { ctx, world: &world, field: field.as_ref(), lod: &lod, size, smoke: true, frames: 0, cells: o.cells, radius_m };
+    let rig = Rig { ctx, world: &world, field: field.as_ref(), lod: &lod, size, smoke: true, calibrate: false, frames: 0, cells: o.cells, radius_m };
     writeln!(
         out,
         "capture-flights: NOT a measurement (no gate, no timestamps, no log); {}x{}, {} cameras per flight, tile format compact, {}{}",

@@ -367,6 +367,7 @@ fn run_case(
     script: &planet_frame::scenes::SceneScript,
     req: &(dyn Fn(planet_frame::Camera) -> TerrainRequest + Sync),
     smoke: bool,
+    calibrate: bool,
     smoke_frames: usize,
     gen: planet_streaming::GenWorkers,
     lit: Option<crate::litperf::LitSetup>,
@@ -387,7 +388,7 @@ fn run_case(
     // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022:
     // recorded only, never judged; the per-tile times of the log read against it). Nothing of the case runs yet.
     let calib_threads = gen.workers;
-    let calib_before = (!smoke).then(|| planet_perf::streaming::calibrate_cpu(calib_threads));
+    let calib_before = (!smoke || calibrate).then(|| planet_perf::streaming::calibrate_cpu(calib_threads));
     writeln!(out, "{}: rig built in {:.2} s", script.scene.name(), rig_started.elapsed().as_secs_f64()).map_err(err)?;
     // The start-up load of the roots, before frame 0 (STRM-001): a reading of the cold start (with the pack ignored, `dive-cold`, it is
     // every root generated), recorded under the `load_` prefix like the tile loads.
@@ -696,7 +697,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         writeln!(out, "{}: script built in {:.1} s", scene.name(), built.elapsed().as_secs_f64()).map_err(err)?;
         let case_started = Instant::now();
         let lit_setup = if o.lit { Some(crate::litperf::LitSetup::new(o, &scene_world, &lod)?) } else { None };
-        let run = run_case(ctx, &scene_world, &script, &req_of, smoke, smoke_frames, o.gen_workers(), lit_setup, out)?;
+        let run = run_case(ctx, &scene_world, &script, &req_of, smoke, o.calibrate, smoke_frames, o.gen_workers(), lit_setup, out)?;
         writeln!(out, "{}: case ran in {:.1} s (teardown {:.2} s)", scene.name(), case_started.elapsed().as_secs_f64(), run.teardown_s)
             .map_err(err)?;
         if o.lit {

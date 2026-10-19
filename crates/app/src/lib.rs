@@ -62,6 +62,7 @@ modes:
     --scene capture-flights  the two coastal flights as 1440p PNG sequences (shore_filter at the look default, 0, and then 1) in --out-dir, never a measurement (TEST-027; `cargo xtask capture flights` also makes the videos); needs --store DIR or --allow-memory-bake, takes --size WxH, --flight-frames N
     --flight-frames N        frames of each coastal flight of the lit perf scenes (default 240; --scene lit, TEST-025)
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
+    --calibrate              measure the CPU calibration in a smoke run too (TEST-039; a measured run always does): proves the logging on any adapter, the log is still no measurement
     --machine-ready          owner override of a failed readiness gate (ADR 0020); recorded in the log
     --smoke                  start and exit";
 
@@ -158,6 +159,8 @@ pub struct Options {
     pub flight_frames: usize,
     /// `--views a,b,c`: only these views of the lit perf scenes.
     pub views: Option<Vec<String>>,
+    /// `--calibrate`: measure the CPU calibration in a smoke run too (TEST-039).
+    pub calibrate: bool,
     /// `--store DIR`: the stored bake the streaming perf scenes read (the production source, GEN-014); `--allow-memory-bake` runs them over the in-memory bake of `--global-res` cells instead, labelled and not valid for streaming budgets.
     pub store: Option<PathBuf>,
     pub allow_memory_bake: bool,
@@ -279,6 +282,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         lit: false,
         flight_frames: 240,
         views: None,
+        calibrate: false,
         store: None,
         allow_memory_bake: false,
         flight: None,
@@ -302,6 +306,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--then" => o.then = Some(it.next().ok_or("--then needs a script index or name")?.clone()),
             "--perf-smoke" => o.perf_smoke = true,
             "--lit" => o.lit = true,
+            "--calibrate" => o.calibrate = true,
             "--views" => {
                 o.views = Some(it.next().ok_or("--views needs a comma-separated list")?.split(',').map(|v| v.trim().to_string()).collect())
             }

@@ -886,6 +886,38 @@ mod tests {
         }
     }
 
+    /// The scene's log with calibration counts (18 threads) added to its run: `(before single, before parallel, after single, after parallel)`.
+    fn with_calibration(mut f: SceneFiles, c: (u64, u64, u64, u64)) -> SceneFiles {
+        let text = String::from_utf8(f.json.take().unwrap()).unwrap();
+        let counts = format!(
+            "\"counts\":{{\"load_calib_before_threads\":18,\"load_calib_before_single_us\":{},\"load_calib_before_parallel_median_us\":{},\"load_calib_after_threads\":18,\"load_calib_after_single_us\":{},\"load_calib_after_parallel_median_us\":{},",
+            c.0, c.1, c.2, c.3
+        );
+        assert!(text.contains("\"counts\":{"));
+        f.json = Some(text.replace("\"counts\":{", &counts).into_bytes());
+        f
+    }
+
+    // spec: TEST-039
+    #[test]
+    fn a_scene_whose_cpu_calibration_is_outside_the_limits_gets_no_verdict_and_accept_names_the_reading() {
+        // Within the limits: the window is judged as before. A scene without calibration counts is not judged.
+        let mut w = window(&fx());
+        let dive = w.iter().position(|f| f.scene == "dive").unwrap();
+        w[dive] = with_calibration(w[dive].clone(), (46_296, 96_434, 46_902, 95_388));
+        assert!(judged(evaluate(&w)).pass);
+        // The slow planner terminal's readings (window of 2026-10-16): the window is refused for the scene, with the reason.
+        w[dive] = with_calibration(files("dive", &good_frames("dive"), &fx()), (66_877, 130_386, 48_553, 133_755));
+        let r = refused(evaluate(&w));
+        assert!(r.contains("INVALID for frame verdicts"), "{r}");
+        assert!(r.contains("no verdict: CPU calibration of 'stream/dive'") && r.contains("before single 66,877 us over 52,000 us"), "{r}");
+        // One microsecond over the after single limit is enough; at the limit it passes.
+        w[dive] = with_calibration(files("dive", &good_frames("dive"), &fx()), (46_000, 90_000, 56_001, 90_000));
+        assert!(refused(evaluate(&w)).contains("after single 56,001 us over 56,000 us"));
+        w[dive] = with_calibration(files("dive", &good_frames("dive"), &fx()), (52_000, 112_000, 56_000, 112_000));
+        assert!(judged(evaluate(&w)).pass);
+    }
+
     // spec: TEST-021
     #[test]
     fn a_missing_scene_or_a_missing_per_frame_log_refuses() {

@@ -11,6 +11,7 @@ use crate::pipelined::{RendererSink, Rig};
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
 use planet_frame::look::file::LookParams;
+use planet_frame::mouselook::{Grab, GrabChange, GRAB_ORDER};
 use planet_frame::scenes::{build_script, DrawnSet, StreamScene};
 use planet_frame::viewer::{
     lit_warm_plan, mode_label, smoke_verdict, title, view_coverage, viewer_lit_plan, Command, ExposureReading, FrameStats, Held, Readiness,
@@ -26,10 +27,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{ElementState, WindowEvent};
+use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Window, WindowId};
+use winit::window::{CursorGrabMode, Window, WindowId};
 
 /// The start of the error of a run that found no display to open a window on: a test reports it as a skip with this reason.
 pub const NO_DISPLAY: &str = "no display: ";
@@ -250,6 +251,8 @@ impl App<'_> {
             if cfg.smoke {
                 quit |= smoke_keys(&mut st, self.cameras, now_ms)?;
             }
+            // A command of this frame (C back to the flight, restart) may have released the mouse.
+            apply_grab(&mut st);
             let ground = |p: planet_core::PlanetFixed| radius + field.height(p.0.normalized());
             let height = |p: planet_core::PlanetFixed| p.0.length() - ground(p);
             let camera = st.viewer.camera(self.cameras, now_ms, dt, &self.params, &height, &ground);
@@ -458,6 +461,13 @@ impl ApplicationHandler for App<'_> {
         }
     }
 
+    /// The raw relative motion of the pointer (VIEW-010): counts, used only while the mouse is captured.
+    fn device_event(&mut self, _el: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
+        if let (DeviceEvent::MouseMotion { delta: (dx, dy) }, Some(st)) = (event, self.state.as_mut()) {
+            st.viewer.mouse.motion(dx, dy);
+        }
+    }
+
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => el.exit(),
@@ -470,6 +480,11 @@ impl ApplicationHandler for App<'_> {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
                 let down = event.state == ElementState::Pressed;
                 if let Some(st) = self.state.as_mut() {
+                    // Esc with the mouse captured releases it and does not quit (VIEW-010).
+                    if down && !event.repeat && code == KeyCode::Escape && st.viewer.mouse.escape() {
+                        apply_grab(st);
+                        return;
+                    }
                     if set_held(&mut st.viewer.held, code, down) {
                         return;
                     }
@@ -480,6 +495,19 @@ impl ApplicationHandler for App<'_> {
                             el.exit();
                         }
                     }
+                }
+            }
+            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } if !self.cfg.smoke => {
+                if let Some(st) = self.state.as_mut() {
+                    let free = st.viewer.is_free();
+                    st.viewer.mouse.click(free);
+                    apply_grab(st);
+                }
+            }
+            WindowEvent::Focused(false) => {
+                if let Some(st) = self.state.as_mut() {
+                    st.viewer.focus_lost();
+                    apply_grab(st);
                 }
             }
             WindowEvent::RedrawRequested => match self.frame() {
@@ -496,6 +524,29 @@ impl ApplicationHandler for App<'_> {
             },
             _ => {}
         }
+    }
+}
+
+/// Apply the grab change the mouse look asked for (VIEW-010): a capture grabs the pointer, `Locked` first and `Confined` when the platform
+/// refuses it, and hides the cursor; a release shows it and lets it go. A capture neither mode allows is released again.
+fn apply_grab(st: &mut Running) {
+    match st.viewer.mouse.take_grab_change() {
+        Some(GrabChange::Capture) => {
+            let mode = |g: &Grab| match g {
+                Grab::Locked => CursorGrabMode::Locked,
+                Grab::Confined => CursorGrabMode::Confined,
+            };
+            if GRAB_ORDER.iter().any(|g| st.window.set_cursor_grab(mode(g)).is_ok()) {
+                st.window.set_cursor_visible(false);
+            } else {
+                st.viewer.mouse.release();
+            }
+        }
+        Some(GrabChange::Release) => {
+            let _ = st.window.set_cursor_grab(CursorGrabMode::None);
+            st.window.set_cursor_visible(true);
+        }
+        None => {}
     }
 }
 
