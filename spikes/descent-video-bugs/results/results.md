@@ -59,3 +59,6 @@ Nothing in the CPU decision (classification, the node list, the cuts) reproduces
 
 ## Files (spike branch)
 - `crates/frame/tests/atmosphere.rs` (the failing test), `crates/app/src/watergap.rs`, `crates/frame/src/water.rs` (the per-node diagnostic record), `crates/app/src/streamperf.rs`, `crates/app/examples/spike17_*.rs`.
+
+## Addendum: the 16384-cell store (`explorer/target/accept/global16384`, read-only)
+Same probes, same result as the 256-cell bake: inland plains (levels 10, 12, 14, 16; 1,611, 1,460, 1,325, 1,269 ocean-connected tiles under -2 m): 0 dry, except 1 at 130 km at level 12 (the reach edge); near-coast tiles of levels 10 and up: 0 dry under -2 m (levels 6 to 9 count inland basins that are not ocean-connected, by design dry); the summary and the point-by-point answers are identical (0 differences at levels 6 to 10); invariant break 5: 2 of 4,775 tiles at levels 7 and 8, none at levels 4 to 6 and 9 to 14. A finer bake does not make the classification a lead; the owner's pose is still needed.
