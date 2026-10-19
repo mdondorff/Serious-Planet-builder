@@ -528,7 +528,8 @@ pub(crate) fn body_key_words(field: &dyn HeightField) -> [u64; 3] {
 /// A field together with the read set of the context it was built from (see [`HeightGenerator`]). Its keys follow the
 /// read set, so a body other than the planet keys differently from a field built directly from the same seed with
 /// `Reference(seed)` (which stands for the planet): plans for other bodies must take their field from the generator
-/// (multi-body seams, next change).
+/// (multi-body seams, next change). It wraps base fields only: it overrides the read set and the body, so it does not forward
+/// [`HeightField::passes_through`], and a stage inside it would not be passed through.
 pub struct Bound<F: HeightField> {
     field: F,
     inputs: u64,
@@ -583,9 +584,6 @@ impl<F: HeightField> HeightField for Bound<F> {
     }
     fn stage_params(&self) -> Option<(&str, u32)> {
         self.field.stage_params()
-    }
-    fn passes_through(&self, tile: TileId, map: &dyn FaceMapping) -> bool {
-        self.field.passes_through(tile, map)
     }
     fn item_revision(&self) -> u64 {
         self.field.item_revision()

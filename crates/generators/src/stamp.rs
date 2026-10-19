@@ -386,8 +386,14 @@ impl HeightField for StampStage<'_> {
 
     /// No item of the layer touches the tile (the footprint it declares is empty): the stage adds nothing there, so its heights, climate
     /// and bounds are the base's bit for bit and its keys are the base's (STRM-029, GEN-027).
-    fn passes_through(&self, tile: TileId, _map: &dyn FaceMapping) -> bool {
-        self.items.footprint_empty(self.body, &self.layer, tile, STAGE_HALO)
+    ///
+    /// Only for tile ids made on the cell grid's mapping (the footprint is made there, `CELL_MAPPING_ID`): on another mapping the same id
+    /// is another place, and the stage does not claim it. Never for a root tile (level 0): the normal stencil of a coarse mesh (4 cells)
+    /// reaches past the declared cap there, and no root is stored or drawn (the render floor is 3).
+    fn passes_through(&self, tile: TileId, map: &dyn FaceMapping) -> bool {
+        tile.level() > 0
+            && map.id() == planet_world_def::cells::CELL_MAPPING_ID
+            && self.items.footprint_empty(self.body, &self.layer, tile, STAGE_HALO)
     }
 }
 
