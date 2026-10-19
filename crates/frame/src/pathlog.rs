@@ -148,7 +148,6 @@ impl PathLog {
         Ok(log)
     }
 
-    /// A few lines for a person: how many poses over how long, where the camera started and ended, the lowest altitude, the slowest frame.
     /// The one-line notice the window shows in its title after F9 wrote `frame-<frame>.bundle` and `frame-<frame>-path.txt` to `dir`, so the
     /// owner sees the capture happened without a console.
     pub fn saved_notice(&self, frame: u64, dir: &str) -> String {
@@ -162,6 +161,7 @@ impl PathLog {
         )
     }
 
+    /// A few lines for a person: how many poses over how long, where the camera started and ended, the lowest altitude, the slowest frame.
     pub fn summary(&self) -> String {
         let (Some(a), Some(b)) = (self.samples.front(), self.samples.back()) else { return "camera path: no samples".to_string() };
         let low = self.samples.iter().map(|s| s.altitude_m).fold(f64::INFINITY, f64::min);
@@ -215,6 +215,7 @@ mod tests {
     }
 
     // spec: VIEW-024
+    // spec: VIEW-025
     #[test]
     fn a_pose_rebuilds_its_camera_with_the_lens_it_is_given_and_f9_names_what_it_wrote() {
         let mut log = PathLog::new();

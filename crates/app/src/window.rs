@@ -283,10 +283,10 @@ struct App<'w> {
     summary: Option<String>,
 }
 
-/// Where F9 writes its files: `PLANET_REPRO_DIR`, else `target/review` (VIEW-024).
-/// How long the title keeps the notice of an F9 capture, milliseconds.
+/// How long the title keeps the notice of an F9 capture, milliseconds (VIEW-025).
 const NOTICE_MS: u64 = 8_000;
 
+/// Where F9 writes its files: `PLANET_REPRO_DIR`, else `target/review` (VIEW-024).
 fn repro_dir() -> PathBuf {
     std::env::var_os("PLANET_REPRO_DIR").map_or_else(|| PathBuf::from("target/review"), PathBuf::from)
 }

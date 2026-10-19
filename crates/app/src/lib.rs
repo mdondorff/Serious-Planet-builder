@@ -1552,6 +1552,20 @@ mod tests {
         assert!(run_str(&["test-render", "--scene"]).unwrap_err().contains("needs a value"));
     }
 
+    // spec: VIEW-025
+    #[test]
+    fn a_path_replay_without_what_it_needs_is_refused_before_any_gpu_work() {
+        let run = |a: &[&str]| {
+            let mut v = vec!["test-render", "--scene", "terrain"];
+            v.extend_from_slice(a);
+            run_str(&v).unwrap_err()
+        };
+        assert!(run(&["--replay-path", "p.txt", "--out-dir", "d"]).contains("--replay-path needs --repro"));
+        assert!(run(&["--replay-path", "p.txt", "--repro", "b.bundle"]).contains("--replay-path needs --out-dir"));
+        assert!(run(&["--replay-every", "5"]).contains("--replay-every only applies to --replay-path"));
+        assert!(run(&["--replay-path", "p.txt", "--repro", "b.bundle", "--out-dir", "d", "--replay-every", "x"]).contains("--replay-every"));
+    }
+
     // spec: TEST-013
     #[test]
     fn flight_options_that_would_be_ignored_are_rejected_before_any_gpu_work() {
