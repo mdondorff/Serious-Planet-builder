@@ -179,6 +179,11 @@ pub struct Stages {
     pub uploaded_ms: Option<f64>,
     /// The median wall time of the frames of the run (a duration): the pacing and the frame cost inside every instant above.
     pub frame_median_ms: f64,
+    /// The footprint find of the edit (`planet_editor::feed::edited_tiles`, what the editor runs), a duration inside `edit_ms`.
+    pub find_ms: f64,
+    /// The first frame after the edit whose draw plan is exact (`DrawKind::Exact`: every drawn tile has the plan's key), which may come
+    /// before the idle frame `exact_ms` waits for (the refreshes of tiles nothing draws).
+    pub drawn_exact_ms: Option<f64>,
 }
 
 /// One row of the report: a case with its repeats.
@@ -246,14 +251,14 @@ pub fn table(rows: &[CaseRow]) -> String {
 /// three calls and the frame median are durations).
 pub fn stages_table(rows: &[CaseRow]) -> String {
     let mut s = String::from(
-        "| altitude | stamp radius | set_definition call | edit call | preview call | plan delivered (worker ms) | R delivered | first job dispatched | half refreshed | all refreshed | uploaded | preview | exact | frame median |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
+        "| altitude | stamp radius | set_definition call | edit call | preview call | plan delivered (worker ms) | R delivered | first job dispatched | half refreshed | all refreshed | uploaded | preview | exact | frame median | find call | drawn exact |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
     );
     let cell = |v: Option<f64>| v.map_or("-".to_string(), |x| format!("{x:.1}"));
     for r in rows {
         let pick = |f: &dyn Fn(&CaseRun) -> Option<f64>| median(r.runs.iter().filter_map(f).collect());
         let (plan, worker) = (pick(&|x| x.stages.plan_delivered_ms), pick(&|x| x.stages.plan_worker_ms));
         s += &format!(
-            "| {} m | {} m | {} | {} | {} | {} ({}) | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| {} m | {} m | {} | {} | {} | {} ({}) | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             r.altitude_m,
             r.radius_m,
             cell(pick(&|x| Some(x.stages.set_definition_ms))),
@@ -269,6 +274,8 @@ pub fn stages_table(rows: &[CaseRow]) -> String {
             cell(r.preview_median()),
             cell(r.exact_median()),
             cell(pick(&|x| Some(x.stages.frame_median_ms))),
+            cell(pick(&|x| Some(x.stages.find_ms))),
+            cell(pick(&|x| x.stages.drawn_exact_ms)),
         );
     }
     s
@@ -337,13 +344,11 @@ impl Harness<'_> {
     }
 }
 
-/// The resident tiles the item's footprint touches: the edit's find (WDEF-007), what `ManagedLoop::edit` is given.
-fn found_tiles(def: &WorldDefinition, resident: impl Iterator<Item = TileId>) -> Vec<TileId> {
-    resident
-        .filter(|t| {
-            def.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, *t, planet_generators::stamp::STAGE_HALO).is_ok_and(|v| !v.is_empty())
-        })
-        .collect()
+/// The resident tiles the stamp's reach touches: the edit's find as the editor makes it (`planet_editor::feed::edited_tiles`), what
+/// `ManagedLoop::edit` is given.
+fn found_tiles(stamp: &ItemSpec, resident: &[TileId], radius_m: f64) -> Vec<TileId> {
+    let affected = [planet_editor::commands::Affected { body: BodyId::PLANET, dir: stamp.dir, reach_m: stamp.reach_m }];
+    planet_editor::feed::edited_tiles(&affected, BodyId::PLANET, resident, radius_m, &TangentWarp)
 }
 
 /// Items near the stamp, for the preview delta (the whole body would be the same list: only stamps that differ count).
@@ -372,7 +377,10 @@ fn run_once(
     world.set_definition(Arc::clone(&edited))?;
     out.stages.set_definition_ms = ms(call);
     let call = Instant::now();
-    let tiles = found_tiles(&edited, h.rig.managed.resident().keys().copied());
+    let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
+    let found = Instant::now();
+    let tiles = found_tiles(stamp, &resident, world.radius_m());
+    out.stages.find_ms = ms(found);
     out.levels = level_rows(&tiles, &h.drawn, &req.lod, stamp.max_delta_m);
     out.refreshed = h.rig.managed.edit(&tiles);
     out.stages.edit_ms = ms(call);
@@ -414,6 +422,9 @@ fn run_once(
             && stats.in_flight == 0
         {
             out.stages.uploaded_ms = Some(at);
+        }
+        if out.stages.drawn_exact_ms.is_none() && out.frames > 1 && frame.pipeline.draw.kind == planet_frame::pipeline::DrawKind::Exact {
+            out.stages.drawn_exact_ms = Some(at);
         }
         let previewed = frame.pipeline.draw.plan.nodes.iter().filter(|n| n.preview).count();
         out.previewed_nodes_max = out.previewed_nodes_max.max(previewed);

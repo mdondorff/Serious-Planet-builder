@@ -48,7 +48,7 @@ fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
     );
     let stages = out.lines().filter(|l| l.starts_with("| 200 m | 50 m |")).nth(1).unwrap_or_else(|| panic!("no stages row: {out}"));
     let cells: Vec<&str> = stages.split('|').map(str::trim).collect();
-    for i in [3, 4, 5, 14] {
+    for i in [3, 4, 5, 14, 15] {
         assert!(cells[i].parse::<f64>().is_ok(), "column {i} of the stages row is a number: {stages}");
     }
     assert!(table.contains("set_definition call"), "edit-latency.md holds both tables: {table}");
