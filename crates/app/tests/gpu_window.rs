@@ -83,7 +83,7 @@ max_ev100 = 16.0
     .unwrap();
     let (first, second) = std::thread::scope(|s| {
         let first = s.spawn(|| smoke(&[]));
-        let second = s.spawn(|| smoke(&["--look", look.to_str().unwrap()]));
+        let second = s.spawn(|| smoke(&["--look", look.to_str().unwrap(), "--no-ui"]));
         (first.join(), second.join())
     });
     let _ = std::fs::remove_dir_all(&dir);
@@ -106,12 +106,16 @@ fn the_window_runs_lit_with_the_atmosphere(stdout: &str) {
     assert!(count_before(stdout, " debug)") > 0, "the L key must have drawn the debug path too: {stdout}");
     assert!(count_before(stdout, " exposure reading") > 0, "{stdout}");
     assert!(stdout.contains("view: the lit path with the atmosphere"), "{stdout}");
+    // VIEW-011: the editor UI ran a pass for every frame it presented (the window draws it by default).
+    assert!(count_before(stdout, " frames with the editor UI") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
     if adapter() != "software" {
         assert!(stdout.contains("DiscreteGpu"), "the real-GPU smoke runs on a discrete GPU: {stdout}");
     }
 }
 
 fn the_look_file_is_drawn_by_the_window(stdout: &str) {
+    // VIEW-011: this run was given `--no-ui`: no UI pass was run.
+    assert!(!stdout.contains("with the editor UI"), "{stdout}");
     assert!(stdout.contains("look: ") && stdout.contains("moonlit.look.toml"), "{stdout}");
     assert!(stdout.contains("[smoke ok]"), "{stdout}");
     assert!(count_before(stdout, " with the atmosphere") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");

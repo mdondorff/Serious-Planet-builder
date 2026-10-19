@@ -51,7 +51,7 @@ fn fs(v: V) -> @location(0) vec4<f32> {
 /// The shaders of this module, so one test validates them with the others.
 pub const WINDOW_SHADERS: &[(&str, &str)] = &[("window-blit", BLIT_WGSL)];
 
-struct Blit {
+pub(crate) struct Blit {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -59,7 +59,7 @@ struct Blit {
 }
 
 impl Blit {
-    fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+    pub(crate) fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("window-blit"),
             source: wgpu::ShaderSource::Wgsl(BLIT_WGSL.into()),
@@ -116,7 +116,14 @@ impl Blit {
     }
 
     /// Draw `src` (of `src_size` pixels) into `target` (of `target_size`), scaled to fit keeping its aspect, bars black.
-    fn draw(&self, ctx: &GpuContext, src: &wgpu::TextureView, src_size: (u32, u32), target: &wgpu::TextureView, target_size: (u32, u32)) {
+    pub(crate) fn draw(
+        &self,
+        ctx: &GpuContext,
+        src: &wgpu::TextureView,
+        src_size: (u32, u32),
+        target: &wgpu::TextureView,
+        target_size: (u32, u32),
+    ) {
         let bind = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("window-blit-bind"),
             layout: &self.layout,
@@ -278,8 +285,24 @@ impl WindowSurface {
         (self.config.width, self.config.height)
     }
 
+    /// A painter for this surface's format (VIEW-011).
+    pub fn ui_painter(&self, ctx: &GpuContext) -> crate::ui::UiPainter {
+        crate::ui::UiPainter::for_format(ctx, self.blit.format)
+    }
+
     /// Show the renderer's colour target (the last frame it submitted) in the window.
     pub fn present(&mut self, ctx: &GpuContext, renderer: &TerrainRenderer) -> Result<Presented, GpuError> {
+        self.present_with_ui(ctx, renderer, None)
+    }
+
+    /// [`WindowSurface::present`] with a UI pass after the blit: the scene is in the swapchain image, the UI is painted over it, then
+    /// the frame is presented (VIEW-011, ADR 0015). Without a UI the frame is the blit alone, bit for bit as before.
+    pub fn present_with_ui(
+        &mut self,
+        ctx: &GpuContext,
+        renderer: &TerrainRenderer,
+        ui: Option<(&mut crate::ui::UiPainter, &mut crate::ui::UiFrame)>,
+    ) -> Result<Presented, GpuError> {
         use wgpu::CurrentSurfaceTexture as C;
         let frame = match self.surface.get_current_texture() {
             C::Success(f) => f,
@@ -303,6 +326,9 @@ impl WindowSurface {
         };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(self.blit.format), ..Default::default() });
         self.blit.draw(ctx, renderer.color_view(), renderer.target_size(), &view, (self.config.width, self.config.height));
+        if let Some((painter, frame_ui)) = ui {
+            painter.paint(ctx, &view, (self.config.width, self.config.height), frame_ui);
+        }
         ctx.queue.present(frame);
         Ok(Presented::Yes)
     }

@@ -87,6 +87,8 @@ struct Config {
     lod: LodParams,
     seed: u64,
     smoke: bool,
+    /// Draw the editor UI (VIEW-011); `--no-ui` turns it off.
+    ui: bool,
     /// Frames a smoke run drives before it closes the window (`--frames`, default [`SMOKE_FRAMES`]).
     smoke_frames: u64,
     vsync: bool,
@@ -112,6 +114,8 @@ struct Config {
 
 /// Everything that exists once the window does.
 struct Running {
+    /// The editor UI (VIEW-011): egui in the frame after the tone map; `None` with `--no-ui`.
+    ui: Option<crate::ui::EditorUi>,
     window: Arc<Window>,
     ctx: GpuContext,
     surface: WindowSurface,
@@ -200,7 +204,9 @@ impl App<'_> {
             .map_err(|e| format!("warming the lit path: {e}"))?;
         let now = self.clock.now_ms();
         let viewer = ViewerState::new(now, TerrainView::ALL.len(), cfg.initial_view, cfg.vsync).with_lit(true);
+        let ui = cfg.ui.then(|| crate::ui::EditorUi::new(&window, surface.ui_painter(&ctx)));
         self.state = Some(Running {
+            ui,
             window,
             ctx,
             surface,
@@ -351,7 +357,15 @@ impl App<'_> {
                 st.window.set_title(&text);
                 st.last_title = text;
             }
-            match st.surface.present(ctx, &st.rig.renderer).map_err(|e| e.to_string())? {
+            let presented = if let Some(ui) = st.ui.as_mut() {
+                let mut frame_ui = ui.frame(&st.window);
+                let shown = st.surface.present_with_ui(ctx, &st.rig.renderer, Some((ui.painter(), &mut frame_ui)));
+                ui.reclaim(frame_ui);
+                shown.map_err(|e| e.to_string())?
+            } else {
+                st.surface.present(ctx, &st.rig.renderer).map_err(|e| e.to_string())?
+            };
+            match presented {
                 Presented::Yes => {
                     st.presented += 1;
                     if drew_lit {
@@ -473,6 +487,23 @@ impl ApplicationHandler for App<'_> {
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        // The editor UI sees every window event first (VIEW-011); `world` says whether the camera and the commands may have it. While the
+        // mouse is captured the pointer belongs to the camera: egui gets no pointer event then.
+        let mut world = true;
+        if let Some(st) = self.state.as_mut() {
+            let pointer = matches!(
+                event,
+                WindowEvent::MouseInput { .. }
+                    | WindowEvent::CursorMoved { .. }
+                    | WindowEvent::CursorEntered { .. }
+                    | WindowEvent::CursorLeft { .. }
+                    | WindowEvent::MouseWheel { .. }
+                    | WindowEvent::Touch(_)
+            );
+            if let Some(ui) = st.ui.as_mut().filter(|_| !(pointer && st.viewer.mouse.captured())) {
+                world = ui.window_event(&st.window, &event);
+            }
+        }
         match event {
             WindowEvent::CloseRequested => el.exit(),
             WindowEvent::Resized(size) => {
@@ -484,6 +515,11 @@ impl ApplicationHandler for App<'_> {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
                 let down = event.state == ElementState::Pressed;
                 if let Some(st) = self.state.as_mut() {
+                    // A key the UI took (a text field has the focus): the camera and the commands get no press. A release still lets go
+                    // of a held key, so none stays down. Esc with the mouse captured is the camera's.
+                    if !world && down && !(code == KeyCode::Escape && st.viewer.mouse.captured()) {
+                        return;
+                    }
                     // Esc with the mouse captured releases it and does not quit (VIEW-010).
                     if down && !event.repeat && code == KeyCode::Escape && st.viewer.mouse.escape() {
                         apply_grab(st);
@@ -501,7 +537,7 @@ impl ApplicationHandler for App<'_> {
                     }
                 }
             }
-            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } if !self.cfg.smoke => {
+            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } if !self.cfg.smoke && world => {
                 if let Some(st) = self.state.as_mut() {
                     let free = st.viewer.is_free();
                     st.viewer.mouse.click(free);
@@ -555,6 +591,16 @@ fn apply_grab(st: &mut Running) {
 }
 
 fn smoke_summary(st: &Running) -> String {
+    let ui = st.ui.as_ref().map_or(String::new(), |u| {
+        format!(
+            "
+  ui: {} frames with the editor UI, {:.3} ms mean CPU per frame (egui run and tessellation), pointer events to the UI {} and to the world {}",
+            u.frames,
+            u.cpu_ms / u.frames.max(1) as f64,
+            u.ui_pointer,
+            u.world_pointer
+        )
+    });
     format!(
         "{} frames drawn ({} lit, {} with the atmosphere, {} with water, {} debug), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
   last title: {}",
@@ -571,7 +617,7 @@ fn smoke_summary(st: &Running) -> String {
         st.surface.present_mode_name(),
         st.adapter_line,
         st.last_title
-    )
+    ) + &ui
 }
 
 /// `planet editor`: open the window and run the flight until it is closed (or, for `--smoke`, for a few dozen frames).
@@ -654,6 +700,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         lod,
         seed: field.seed(),
         smoke: o.smoke,
+        ui: !o.no_ui,
         smoke_frames: if o.given.contains("--frames") { o.frames as u64 } else { SMOKE_FRAMES },
         vsync: !o.no_vsync,
         policy,

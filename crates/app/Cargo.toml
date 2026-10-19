@@ -38,6 +38,8 @@ planet-editor.workspace = true
 planet-perf.workspace = true
 libm.workspace = true
 winit.workspace = true
+egui.workspace = true
+egui-winit.workspace = true
 
 [dev-dependencies]
 planet-testkit.workspace = true
