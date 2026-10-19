@@ -1,0 +1,1 @@
+- 2026-10-19 **M5 process review** (housekeeping step 9, sonnet-crusader for opus-planner): measured table and five ranked improvements in `docs/milestones/M5-report.md`; `windows (WARP) C` CI median 16.9 min is over the BUILD-014 budget (already Tracked).
