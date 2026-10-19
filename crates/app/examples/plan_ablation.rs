@@ -101,6 +101,9 @@ impl HeightField for Counting<'_> {
     fn item_revision(&self) -> u64 {
         self.f().item_revision()
     }
+    fn passes_through(&self, tile: planet_core::TileId, map: &dyn planet_core::FaceMapping) -> bool {
+        self.f().passes_through(tile, map)
+    }
     fn surface_id(&self) -> &'static str {
         self.f().surface_id()
     }

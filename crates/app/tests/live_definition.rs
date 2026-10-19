@@ -89,6 +89,31 @@ fn the_stages_stack_in_the_order_of_the_layer_stack_each_at_its_place_in_it_and_
     assert_eq!(stage(above.upstream().unwrap()), Some(("intent".into(), 2)), "the new layer sits below it");
 }
 
+// spec: STRM-029
+#[test]
+fn the_first_stamp_of_a_world_re_keys_only_the_tiles_it_touches_and_the_rest_keep_the_plain_worlds_keys() {
+    use planet_core::cube::TangentWarp;
+    use planet_core::TileId;
+    use planet_generators::height::cache_key_field;
+
+    let key = |world: &WorldTerrain, tile: TileId| cache_key_field(&*world.field().unwrap(), &TangentWarp, tile, 32);
+    let near = TileId::from_direction(&TangentWarp, at(), 12);
+    let far = TileId::from_direction(&TangentWarp, -at(), 12);
+    let world = WorldTerrain::open(base(), RES).unwrap();
+    let (far_before, near_before) = (key(&world, far), key(&world, near));
+    let mut edited = (*world.definition()).clone();
+    edited.put_item_spec(BodyId::PLANET, hill(1, "stamps", 40.0)).unwrap();
+    world.set_definition(Arc::new(edited)).unwrap();
+    // The stage appeared with the stamp; a tile out of its reach is keyed as the plain world keys it, the tile under it is not.
+    assert_eq!(key(&world, far), far_before, "a tile out of reach keeps the key it had in the plain world");
+    assert_ne!(key(&world, near), near_before, "the tile under the stamp is re-keyed");
+    // A second layer changes nothing out of reach either.
+    let mut more = (*world.definition()).clone();
+    more.put_item_spec(BodyId::PLANET, hill(2, "intent", 10.0)).unwrap();
+    world.set_definition(Arc::new(more)).unwrap();
+    assert_eq!(key(&world, far), far_before);
+}
+
 // spec: STRM-028
 #[test]
 fn a_definition_with_another_base_is_refused_and_changes_nothing() {

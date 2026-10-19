@@ -358,6 +358,8 @@ fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile
 /// same number. `radius_m` is the body's
 /// radius: heights of the reference generator do not depend on it, but the body parameter hash covers it (ADR 0018).
 pub fn height_key(field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, res: u32, radius_m: f64) -> CacheKey {
+    // A stage that is the identity on its source for this tile keys as its source (STRM-029).
+    let field = planet_generators::height::key_source(field, tile, map);
     let mut inputs = field_inputs(Kind::Height, field, map, tile, radius_m);
     inputs.output_params.insert(PARAM_RESOLUTION, res.to_le_bytes().to_vec());
     // An authored stage chains the key of the same tile of the stage below, at the same resolution (STRM-027); the base's own key
@@ -371,6 +373,7 @@ pub fn height_key(field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, 
 /// The inputs of the persistent key of the mesh of that tile: chained to the height key of the same tile at the same number
 /// of cells (`source`), with the grid size, the skirt fraction and the mesh version as output parameters.
 pub fn mesh_key_inputs(field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, cells: u32, radius_m: f64) -> KeyInputs {
+    let field = planet_generators::height::key_source(field, tile, map);
     let mut inputs = field_inputs(Kind::Mesh, field, map, tile, radius_m);
     inputs.source = Some(height_key(field, map, tile, cells, radius_m));
     inputs.output_params.insert(PARAM_RESOLUTION, cells.to_le_bytes().to_vec());
