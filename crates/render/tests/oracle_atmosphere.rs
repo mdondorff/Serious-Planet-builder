@@ -383,6 +383,11 @@ fn the_composite_applies_the_sky_and_the_aerial_perspective_as_the_reference_doe
 }
 
 fn composite_inside(altitude: f64, mu_sun: f64) {
+    composite_inside_at(altitude, mu_sun, 8000.0);
+}
+
+/// The composite with the terrain `terrain_m` along the view axis (right half of the frame), against the reference.
+fn composite_inside_at(altitude: f64, mu_sun: f64, terrain_m: f64) {
     let r = rig();
     let (w, h) = (64usize, 48usize);
     let cam = camera(altitude);
@@ -394,7 +399,7 @@ fn composite_inside(altitude: f64, mu_sun: f64) {
     // The right half of the frame is terrain 8 km along the view axis, the left half is sky.
     let colour = [0.2f32, 0.1, 0.05, 1.0];
     let scene: Vec<[f32; 4]> = (0..w * h).map(|i| if i % w >= w / 2 { colour } else { [0.0; 4] }).collect();
-    let depth: Vec<f32> = (0..w * h).map(|i| if i % w >= w / 2 { (0.1 / 8000.0) as f32 } else { 0.0 }).collect();
+    let depth: Vec<f32> = (0..w * h).map(|i| if i % w >= w / 2 { (0.1 / terrain_m) as f32 } else { 0.0 }).collect();
     r.path.upload_scene(&r.ctx, &scene);
     r.path.upload_depth(&r.ctx, &depth);
     let out = r.path.composite_to_image(&r.ctx);
@@ -405,7 +410,7 @@ fn composite_inside(altitude: f64, mu_sun: f64) {
             let got = out[py * w + px];
             let want: [f64; 3] = if px >= w / 2 {
                 seen_geo += 1;
-                let a = g.ap_lookup(&ap, [(px as f64 + 0.5) / w as f64, (py as f64 + 0.5) / h as f64], 8000.0 * len);
+                let a = g.ap_lookup(&ap, [(px as f64 + 0.5) / w as f64, (py as f64 + 0.5) / h as f64], terrain_m * len);
                 [0, 1, 2].map(|k| f64::from(colour[k]) * a[3] + a[k])
             } else {
                 seen_sky += 1;
@@ -421,6 +426,9 @@ fn composite_inside(altitude: f64, mu_sun: f64) {
     eprintln!(
         "composite inside at {altitude} m, sun {mu_sun}: {seen_sky} sky and {seen_geo} terrain pixels, worst {worst:.3} of the bound"
     );
+    if terrain_m != 8000.0 {
+        return; // the colour-shift check below is the near-ground case's
+    }
     // Distant terrain is hazier and bluer than near terrain (ATMO-002): compare the same colour at 1 km and 100 km.
     let hazy = |t: f64| {
         let a = g.ap_lookup(&ap, [0.75, 0.5], t);
@@ -432,6 +440,15 @@ fn composite_inside(altitude: f64, mu_sun: f64) {
     let (near, far) = (hazy(1000.0), hazy(100_000.0));
     assert!(far[2] / far[0] > near[2] / near[0], "the distance shifts the colour towards blue: {near:?} {far:?}");
     assert!(far[2] > near[2], "and brightens the blue channel of this dark terrain: {near:?} {far:?}");
+}
+
+// spec: ATMO-021
+#[test]
+fn the_composite_reads_the_frames_range_for_terrain_beyond_256_km() {
+    // A camera at 99 km sees terrain 600 km away; the frame's range is its horizon (about 1,130 km), not 256 km, in the volume the
+    // shader reads and the reference reads.
+    composite_inside_at(99_000.0, 0.7, 600_000.0);
+    composite_inside_at(20_000.0, 0.7, 400_000.0);
 }
 
 // spec: ATMO-001

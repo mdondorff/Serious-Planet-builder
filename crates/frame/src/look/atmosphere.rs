@@ -851,6 +851,10 @@ pub struct FrameGeometry {
     /// limb-stable forms `(r mu - q)(r mu + q)` and `(r mu - rho)(r mu + rho)`. The GPU receives each of `r`, `rho` and `q_top` as a
     /// high and a low `f32` (a double-single value) so the factor `r mu + q` near the tangent keeps its digits.
     pub q_top: f64,
+    /// The distance of the last aerial-perspective slice for this frame: `max(AP_MAX_DISTANCE_M, rho)`, the distance to the horizon
+    /// when that is farther (ATMO-006): terrain at the horizon of a camera high in the atmosphere is hazed by the volume to its own
+    /// distance, as the orbit march hazes it from outside. Exactly `AP_MAX_DISTANCE_M` below about 5 km altitude.
+    pub ap_range: f64,
 }
 
 /// A value as the GPU holds it when sent as a high and a low `f32`: their sum.
@@ -946,6 +950,7 @@ impl FrameGeometry {
             near,
             inside: h < top,
             q_top: libm::sqrt(c_top_of(big_r, top, h).max(0.0)),
+            ap_range: if h < top { AP_MAX_DISTANCE_M.max(rho) } else { AP_MAX_DISTANCE_M },
         }
     }
 
@@ -973,6 +978,7 @@ impl FrameGeometry {
             fwd: v3(self.fwd),
             near: r32(self.near),
             inside: self.inside,
+            ap_range: r32(self.ap_range),
         }
     }
 
@@ -1020,7 +1026,7 @@ impl FrameGeometry {
             f(self.near),
             pre_exposure_factor,
             if self.inside { 1.0 } else { 0.0 },
-            f(AP_MAX_DISTANCE_M),
+            f(self.ap_range),
             f32::from_bits(debug_view),
         ]
     }
@@ -1138,13 +1144,24 @@ impl FrameGeometry {
 // Aerial-perspective volume
 // ---------------------------------------------------------------------------------------------------------------------------
 
-/// The distance along the ray of aerial-perspective slice `k`.
+/// The distance along the ray of aerial-perspective slice `k` for the base range (a camera below about 5 km altitude); a frame's own
+/// range is [`FrameGeometry::ap_range`], see [`FrameGeometry::ap_slice_distance`].
 pub fn ap_slice_distance(k: usize) -> f64 {
+    ap_slice_distance_for(AP_MAX_DISTANCE_M, k)
+}
+
+/// The distance along the ray of slice `k` of a volume whose last slice is at `range`.
+pub fn ap_slice_distance_for(range: f64, k: usize) -> f64 {
     let w = (k + 1) as f64 / AP_D as f64;
-    AP_MAX_DISTANCE_M * w * w
+    range * w * w
 }
 
 impl FrameGeometry {
+    /// The distance along the ray of aerial-perspective slice `k` in this frame's volume (the last slice is at [`FrameGeometry::ap_range`]).
+    pub fn ap_slice_distance(&self, k: usize) -> f64 {
+        ap_slice_distance_for(self.ap_range, k)
+    }
+
     /// The (unnormalised) ray through the centre of froxel column `(ix, iy)`: `forward + right a + up b` with `(a, b)` in `[-1, 1]`.
     pub fn froxel_ray(&self, ix: usize, iy: usize) -> [f64; 3] {
         let a = 2.0 * (ix as f64 + 0.5) / AP_W as f64 - 1.0;
@@ -1164,7 +1181,7 @@ impl FrameGeometry {
         // The depth of the geometry ends the ray, not the reference sphere: terrain below it (a basin, a camera below the water level)
         // gets its haze too. Sample altitudes below the surface use the surface's density.
         let limit = distance_to_top(self.r * mu, self.c_top);
-        let s_end = ap_slice_distance(iz).min(limit);
+        let s_end = self.ap_slice_distance(iz).min(limit);
         let o = self.origin(mu);
         let steps = (2 * (iz + 1)).clamp(1, AP_MAX_STEPS);
         let m = atm.march(luts, &o, cos_vs, s_end, StepLayout::Uniform(steps), Scatter::Physical { cos_gamma: cos_vs });
@@ -1177,7 +1194,7 @@ impl FrameGeometry {
     pub fn ap_lookup(&self, table: &[[f64; 4]], uv: [f64; 2], t: f64) -> [f64; 4] {
         let px = (uv[0] * AP_W as f64 - 0.5).clamp(0.0, (AP_W - 1) as f64);
         let py = (uv[1] * AP_H as f64 - 0.5).clamp(0.0, (AP_H - 1) as f64);
-        let w = libm::sqrt((t / AP_MAX_DISTANCE_M).max(0.0));
+        let w = libm::sqrt((t / self.ap_range).max(0.0));
         let pz = (w * AP_D as f64 - 1.0).clamp(-1.0, (AP_D - 1) as f64);
         let x0 = (libm::floor(px) as usize).min(AP_W - 2);
         let y0 = (libm::floor(py) as usize).min(AP_H - 2);
