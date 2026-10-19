@@ -64,6 +64,39 @@ pub fn cells_covering(tile: TileId, cell_level: u8, max_cells: usize) -> Option<
 /// samples its closed border row and a one-sample halo for normals, and an item reaches beyond the cell it is filed in,
 /// so a reader asks for a margin. Sorted by raw id, without duplicates.
 pub fn with_margin(cells: &[TileId], margin: u32) -> Vec<TileId> {
+    with_margin_interior(cells, margin).unwrap_or_else(|| with_margin_walk(cells, margin))
+}
+
+/// [`with_margin`] by the square of grid coordinates around each cell, when every cell is of one level and its square stays on its own
+/// face (the common case: a face is hundreds of cells wide): the same set as the walk, without computing a neighbour across an edge
+/// 12 times per cell. `None` when a square reaches a face edge, or the cells differ in level.
+fn with_margin_interior(cells: &[TileId], margin: u32) -> Option<Vec<TileId>> {
+    let first = cells.first()?;
+    let level = first.level();
+    let n = 1u64.checked_shl(u32::from(level))?;
+    let m = u64::from(margin);
+    if cells.iter().any(|c| {
+        c.level() != level || u64::from(c.x()) < m || u64::from(c.x()) + m >= n || u64::from(c.y()) < m || u64::from(c.y()) + m >= n
+    }) {
+        return None;
+    }
+    let side = 2 * margin + 1;
+    let mut raws: Vec<u64> = Vec::with_capacity(cells.len() * (side * side) as usize);
+    for c in cells {
+        for dy in 0..side {
+            for dx in 0..side {
+                let (x, y) = (c.x() + dx - margin, c.y() + dy - margin);
+                raws.push(TileId::new(c.face(), level, x, y).expect("inside the face").raw());
+            }
+        }
+    }
+    raws.sort_unstable();
+    raws.dedup();
+    Some(raws.into_iter().map(|raw| TileId::from_raw(raw).expect("a raw id taken from a tile")).collect())
+}
+
+/// [`with_margin`] by walking the neighbours ring by ring, across cube faces: the reference the interior form is tested against.
+pub fn with_margin_walk(cells: &[TileId], margin: u32) -> Vec<TileId> {
     let map: &dyn FaceMapping = &TangentWarp;
     let mut all: BTreeSet<u64> = cells.iter().map(|c| c.raw()).collect();
     let mut frontier: Vec<TileId> = cells.to_vec();
