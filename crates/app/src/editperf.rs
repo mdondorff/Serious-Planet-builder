@@ -14,7 +14,6 @@ use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
 use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::{PlanetFixed, TileId, Vec3};
-use planet_frame::pipeline::DrawKind;
 use planet_frame::preview::preview_delta;
 use planet_frame::{Camera, LodParams, TerrainRequest, TerrainView};
 use planet_render::GpuContext;
@@ -188,11 +187,7 @@ impl Harness<'_> {
 
     /// Whether nothing is left to do: the plan is the exact one, nothing generates, nothing waits for an upload.
     fn idle(&self, frame: &planet_frame::managed::ManagedFrame) -> bool {
-        frame.pipeline.draw.kind == DrawKind::Exact
-            && frame.pipeline.draw.substituted == 0
-            && self.rig.managed.manager().streamer().unfinished_jobs() == 0
-            && !self.rig.managed.pipeline().worker().busy()
-            && self.rig.managed.pending().is_empty()
+        crate::editwin::exact_and_idle(&self.rig.managed, frame)
     }
 
     /// Frames with the camera still until `calm` consecutive idle frames.

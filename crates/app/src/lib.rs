@@ -11,6 +11,7 @@ pub mod panels;
 pub mod pipelined;
 mod plancheck;
 pub mod prefill;
+pub mod preflightperf;
 pub mod sheet;
 pub mod skeleton;
 pub mod streamperf;
@@ -719,8 +720,13 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.perf && o.perf_smoke {
         return Err("--perf and --perf-smoke exclude each other: a smoke run is never a measurement".into());
     }
-    if o.perf_smoke && o.scene != "terrain" && !streamperf::is_stream_scene(&o.scene) && !litperf::is_lit_scene(&o.scene) {
-        return Err("--perf-smoke is only available for --scene terrain, a streaming scene (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, streaming) or the lit scene (lit)".into());
+    if o.perf_smoke
+        && o.scene != "terrain"
+        && !streamperf::is_stream_scene(&o.scene)
+        && !litperf::is_lit_scene(&o.scene)
+        && !preflightperf::is_preflight_scene(&o.scene)
+    {
+        return Err("--perf-smoke is only available for --scene terrain, a streaming scene (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, streaming), the lit scene (lit) or preflight".into());
     }
     if o.lit && !streamperf::is_stream_scene(&o.scene) {
         return Err("--lit applies to the streaming perf scenes (dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km, dive-cold, streaming); the scene `lit` is always lit".into());
@@ -741,6 +747,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         return match o.scene.as_str() {
             "terrain" => skeleton::perf_terrain(o, &ctx, out),
             "global-bake" => globalperf::perf_global_bake(o, &ctx, out),
+            s if preflightperf::is_preflight_scene(s) => preflightperf::perf_preflight(o, &ctx, out),
             s if editperf::is_edit_scene(s) => editperf::perf_edit_latency(o, &ctx, out),
             s if streamperf::is_stream_scene(s) => streamperf::perf_streaming(o, &ctx, out),
             s if litperf::is_lit_scene(s) => litperf::perf_lit(o, &ctx, out),

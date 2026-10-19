@@ -17,13 +17,16 @@ use planet_editor::shape::{self, Handle};
 use planet_frame::freecam::FreePose;
 use planet_frame::globe::{Marker, Viewport};
 use planet_frame::pick::{cursor_ray, pick_surface, PickLimits, SurfaceHit};
+use planet_frame::preview::{preview_delta, PreviewStamp};
 use planet_frame::Camera;
 use planet_generators::height::HeightField;
+use planet_world_def::footprint::{Cap, FootprintItem};
 use planet_world_def::item::Item;
 use planet_world_def::item_store::{ItemStore, LooseFileStore, MemoryStore, StoreError};
 use planet_world_def::{BodyId, ItemId, WorldDefinition};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// The first id of the markers the edits have on the globe overview; the markers of `--marker` are numbered from 1 and the smoke run's
 /// own is 1000.
@@ -87,6 +90,10 @@ pub struct EditStats {
     pub refresh_tiles: u64,
     /// The times the definition was handed to the generator.
     pub published: u64,
+    /// The previews set with at least one stamp (VIEW-023).
+    pub previews: u64,
+    /// The most nodes a frame drew previewed.
+    pub previewed_max: usize,
 }
 
 /// A key the editor mode takes.
@@ -141,10 +148,46 @@ pub struct EditRuntime {
     affected: Vec<Affected>,
     /// The revision of the editor's definition the generator was last given (zero: the one the window opened with).
     published: u64,
+    /// The preview of the edit in flight (VIEW-023).
+    feed: PreviewFeed,
     /// The next refresh is every resident tile (the definition changed with no command: items loaded at the start).
     refresh_all: bool,
     /// The edits the last [`globe_markers`](EditRuntime::globe_markers) made markers of, by marker number minus [`EDIT_MARKER_BASE`].
     marker_ids: Vec<ItemId>,
+}
+
+/// The footprint items of the whole body, layer by layer in stack order (the order the stamp stages are stacked in, ADR 0007): what the
+/// preview compares. Only stamps that differ count, so the whole body gives the same list as a neighbourhood of the edit.
+fn body_items(def: &WorldDefinition) -> Vec<FootprintItem> {
+    let all = Cap { centre: Vec3::new(1.0, 0.0, 0.0), angle: core::f64::consts::PI };
+    def.stamp_layers(BodyId::PLANET)
+        .iter()
+        .flat_map(|layer| def.footprint_items_cap(BodyId::PLANET, layer, all).unwrap_or_default())
+        .collect()
+}
+
+/// What the preview of an edit in flight needs (VIEW-023): the definition the generator was last given, and while an edit is in flight the
+/// items of the oldest definition any resident tile was built from and the current items.
+struct PreviewFeed {
+    handed_over: Arc<WorldDefinition>,
+    oldest: Option<Vec<FootprintItem>>,
+    current: Vec<FootprintItem>,
+}
+
+impl PreviewFeed {
+    fn new(handed_over: Arc<WorldDefinition>) -> PreviewFeed {
+        PreviewFeed { handed_over, oldest: None, current: Vec::new() }
+    }
+}
+
+/// The frame is exact with nothing substituted and the loop has nothing in flight: no unfinished tile job, no busy plan worker, no pending
+/// upload (every refreshed tile is in; the end of the preview of VIEW-023 and of the edit-latency scene).
+pub fn exact_and_idle(managed: &planet_frame::managed::ManagedLoop, frame: &planet_frame::managed::ManagedFrame) -> bool {
+    frame.pipeline.draw.kind == planet_frame::pipeline::DrawKind::Exact
+        && frame.pipeline.draw.substituted == 0
+        && managed.manager().streamer().unfinished_jobs() == 0
+        && !managed.pipeline().worker().busy()
+        && managed.pending().is_empty()
 }
 
 fn open_store(dir: Option<&Path>) -> (EditStore, String) {
@@ -172,6 +215,7 @@ impl EditRuntime {
         let mut editor = Editor::new(def, store, ids, planet_generators::GENERATOR_VERSION, EDIT_STAGE_VERSION);
         // What the generator has is the definition as it was given, before the items of the directory are loaded into the editor's copy.
         let published = editor.revision();
+        let feed = PreviewFeed::new(Arc::new(editor.definition().clone()));
         let loaded = editor.load(BodyId::PLANET).map_err(|e| format!("loading the items: {e}"))?;
         let mut session = Session::new(editor, BodyId::PLANET, radius_m);
         session.set_status(if loaded > 0 { format!("{loaded} edits loaded") } else { String::new() });
@@ -192,6 +236,7 @@ impl EditRuntime {
             fly: None,
             affected: Vec::new(),
             published,
+            feed,
             refresh_all: false,
             marker_ids: Vec::new(),
         })
@@ -247,6 +292,35 @@ impl EditRuntime {
         self.refresh_all |= self.affected.is_empty();
         self.stats.published += 1;
         Some(std::sync::Arc::new(self.session.editor().definition().clone()))
+    }
+
+    /// The generator took `def` (VIEW-023): the preview of the edit in flight now runs from the oldest state a resident tile shows to `def`.
+    /// The first hand-over since the preview ended records the items of the definition it replaces; the next ones keep them, so a drag in
+    /// many steps is one delta from its first state.
+    pub fn preview_begin(&mut self, def: &Arc<WorldDefinition>) {
+        let before = std::mem::replace(&mut self.feed.handed_over, Arc::clone(def));
+        if self.feed.oldest.is_none() {
+            self.feed.oldest = Some(body_items(&before));
+        }
+        self.feed.current = body_items(def);
+    }
+
+    /// The stamps to give `ManagedLoop::set_preview` for the camera at `camera` (planet-fixed); empty when no edit is in flight. Counted.
+    pub fn preview_stamps(&mut self, camera: Vec3) -> Vec<PreviewStamp> {
+        let Some(oldest) = &self.feed.oldest else { return Vec::new() };
+        let stamps = preview_delta(oldest, &self.feed.current, camera).stamps;
+        self.stats.previews += u64::from(!stamps.is_empty());
+        stamps
+    }
+
+    /// True while an edit is in flight: the preview is set and the exact tiles are not all in.
+    pub fn preview_active(&self) -> bool {
+        self.feed.oldest.is_some()
+    }
+
+    /// The exact tiles are in: the preview ends and the oldest state is forgotten.
+    pub fn preview_end(&mut self) {
+        self.feed.oldest = None;
     }
 
     /// The tiles of `resident` the commands since the last call changed (the footprint find, `planet_editor::feed`), counted; every
@@ -642,8 +716,8 @@ impl EditRuntime {
     pub fn summary(&self) -> String {
         let s = &self.stats;
         format!(
-            "{} frames in the editor mode, {} placed, {} selected, {} dragged, {} typed, {} deleted, {} undone, {} redone, {} flights, {} refused, up to {} edits shown, {} tiles sent to refresh, {} definitions handed to the generator",
-            s.frames, s.placed, s.selected, s.dragged, s.typed, s.deleted, s.undone, s.redone, s.flights, s.refused, s.shown_max, s.refresh_tiles, s.published
+            "{} frames in the editor mode, {} placed, {} selected, {} dragged, {} typed, {} deleted, {} undone, {} redone, {} flights, {} refused, up to {} edits shown, {} tiles sent to refresh, {} definitions handed to the generator, {} previews set, up to {} nodes previewed",
+            s.frames, s.placed, s.selected, s.dragged, s.typed, s.deleted, s.undone, s.redone, s.flights, s.refused, s.shown_max, s.refresh_tiles, s.published, s.previews, s.previewed_max
         )
     }
 }
@@ -1023,6 +1097,62 @@ mod tests {
         assert!(back.item_ids(BodyId::PLANET).is_empty());
         assert_eq!(e.refresh_tiles(&[near, far]), vec![near], "where the plateau was");
         assert_eq!(e.stats.published, 2);
+    }
+
+    /// What the window does after a change: hand the definition over and start or extend the preview.
+    fn hand_over(e: &mut EditRuntime) -> Arc<WorldDefinition> {
+        let def = e.take_changed_definition().expect("a change to hand over");
+        e.preview_begin(&def);
+        def
+    }
+
+    // spec: VIEW-023
+    #[test]
+    fn a_drag_in_many_steps_previews_as_one_delta_from_its_first_state() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        let base = Arc::new(WorldDefinition::single_planet(R, 7));
+        assert!(e.preview_stamps(cam.position.0).is_empty(), "no edit in flight, no preview");
+        assert!(!e.preview_active());
+        e.toggle();
+        e.key(EditKey::Tool(3));
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        hand_over(&mut e);
+        assert!(e.preview_active());
+        let one = e.preview_stamps(cam.position.0);
+        assert_eq!(one.len(), 1, "the hill is added once: {one:?}");
+        // Two more steps of the same edit before any frame settles (the radius typed twice, as a drag changes it).
+        e.session.set_param_text("radius_m", "333").unwrap();
+        hand_over(&mut e);
+        e.session.set_param_text("radius_m", "1234").unwrap();
+        let last = hand_over(&mut e);
+        let three = e.preview_stamps(cam.position.0);
+        let from_first = preview_delta(&body_items(&base), &body_items(&last), cam.position.0).stamps;
+        assert_eq!(three, from_first, "the delta runs from the state before the first hand-over to the last");
+        assert_eq!(three.len(), 1, "one stamp, at its final size, nothing removed that the first step added");
+        assert_eq!(e.stats.previews, 2, "the previews set with a stamp are counted");
+    }
+
+    // spec: VIEW-023
+    #[test]
+    fn the_preview_ends_when_the_exact_tiles_are_in_and_the_next_edit_starts_from_the_definition_it_replaces() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.toggle();
+        e.key(EditKey::Tool(3));
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        let first = hand_over(&mut e);
+        assert!(e.preview_active());
+        e.preview_end();
+        assert!(!e.preview_active() && e.preview_stamps(cam.position.0).is_empty(), "ended: nothing to preview");
+        e.session.set_param_text("radius_m", "777").unwrap();
+        let second = hand_over(&mut e);
+        let stamps = e.preview_stamps(cam.position.0);
+        let from_replaced = preview_delta(&body_items(&first), &body_items(&second), cam.position.0).stamps;
+        assert_eq!(stamps, from_replaced, "the delta runs from the definition the second hand-over replaced, not from the empty world");
+        assert_eq!(stamps.len(), 2, "the old size is taken out and the new one put in");
     }
 
     // spec: VIEW-022

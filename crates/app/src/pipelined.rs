@@ -149,6 +149,10 @@ impl Rig {
             first.lod.radius_m,
             clock,
         );
+        let mut managed = managed;
+        // The roots go to the GPU here too (STRM-001, ADR 0064): the start-up load is a step of the body, so frame 0 is a steady frame and
+        // carries no root upload (a measured frame stays under the cap of STRM-006 and the CON-21 limits).
+        managed.upload_roots(&mut RendererSink { ctx, renderer: &mut renderer })?;
         Ok(Rig { renderer, managed, fi: FramesInFlight::new(MAX_FRAMES_IN_FLIGHT), pool, roots })
     }
 }

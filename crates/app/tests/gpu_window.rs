@@ -176,7 +176,10 @@ fn a_world_with_a_bake_has_an_ocean_and_the_window_draws_its_water_through_the_w
 fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_writes_the_item_file() {
     let dir = std::env::temp_dir().join(format!("planet-editor-smoke-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let Some(stdout) = smoke(&["--edit", "--items", dir.to_str().unwrap()]) else { return };
+    // A small window: after about 14 s of start-up the run is bound by the software adapter drawing 90 lit frames (0.6 s each at the default
+    // 1280x720: 67 s alone, 100 to 220 s beside the other tier-C processes, against the 300 s limit); at 480x270 a frame costs half. The
+    // counts asserted below are those of the script, which does not depend on the size.
+    let Some(stdout) = smoke(&["--edit", "--size", "480x270", "--items", dir.to_str().unwrap()]) else { return };
     assert!(stdout.contains("[smoke ok]"), "{stdout}");
     // The script of the run (placing with the stamp tool, dragging the move handle, typing a radius, undo, redo, delete, undo) is judged by
     // the run itself (`EditRuntime::smoke_verdict`); the summary shows the counts.
@@ -197,6 +200,8 @@ fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_
     assert_eq!(count(" refused"), 0, "{line}");
     assert!(count(" frames in the editor mode") > 0 && count(" tiles sent to refresh") > 0, "{line}");
     assert!(count(" definitions handed to the generator") >= 1, "the edits reached the generator: {line}");
+    // spec: VIEW-023
+    assert!(count(" previews set") >= 1, "the window fed the preview of the edit in flight: {line}");
     // The run ends with the edit back (the last command undid the delete): one file, written through by every command.
     let files: Vec<_> =
         std::fs::read_dir(dir.join("0")).expect("the items directory of the planet").map(|f| f.unwrap().file_name()).collect();

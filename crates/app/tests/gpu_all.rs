@@ -4,6 +4,8 @@ mod gpu_edit_perf;
 mod gpu_flight;
 #[path = "gpu_modes.rs"]
 mod gpu_modes;
+#[path = "gpu_preflight.rs"]
+mod gpu_preflight;
 #[path = "gpu_skeleton.rs"]
 mod gpu_skeleton;
 #[path = "gpu_stream_perf.rs"]

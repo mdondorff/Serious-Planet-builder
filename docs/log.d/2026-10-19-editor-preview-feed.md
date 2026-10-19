@@ -1,0 +1,1 @@
+- 2026-10-19 **editor-preview-feed** (sonnet-crusader, M6 U4/E3; VIEW-023): the window feeds `ManagedLoop::set_preview` with `preview_delta(oldest resident definition's items, current items, camera)` after each hand-over and ends it when the plan is exact and idle; a drag in many steps previews as one delta from its first state; no `with_edit_layers` (ADR 0068).

@@ -30,7 +30,7 @@ fn listing(dir: &std::path::Path) -> Vec<(String, u64, std::time::SystemTime)> {
     v
 }
 
-// spec: TEST-019, TEST-020, STRM-022, TEST-023, TEST-024
+// spec: TEST-019, TEST-020, STRM-022, TEST-023, TEST-024, STRM-030
 #[test]
 fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_source() {
     let store = tmp("store");
@@ -115,6 +115,11 @@ fn the_six_scenes_run_end_to_end_on_a_stored_bake_in_smoke_mode_and_log_their_so
         let frames = std::fs::read_to_string(logs.join(format!("{scene}.frames.txt"))).unwrap();
         assert!(frames.starts_with("# frame plan_ms scheduler_ms upload_ms record_ms gpu_ms wall_ms lag uncovered blank"), "{frames}");
         assert!(frames.lines().count() > 20, "{scene}: {frames}");
+        // The roots were written to the GPU before frame 0 (STRM-030, ADR 0064): no measured frame carries the start-up load, so frame 0
+        // writes no more than the per-frame cap (the upload_bytes column, index 10).
+        let first = frames.lines().nth(1).unwrap_or_else(|| panic!("{scene}: no frame 0: {frames}"));
+        let bytes: u64 = first.split_whitespace().nth(10).and_then(|v| v.parse().ok()).unwrap_or_else(|| panic!("{scene}: {first}"));
+        assert!(bytes <= 1024 * 1024, "{scene}: frame 0 wrote {bytes} bytes, the roots belong before it: {first}");
         // Every frame has a lag from the post-pass (TEST-020): the lag column (index 7) is a number, never `-`.
         for line in frames.lines().skip(1) {
             let lag = line.split_whitespace().nth(7).unwrap_or("");

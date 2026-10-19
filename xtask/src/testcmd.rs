@@ -712,6 +712,39 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
     Ok(v)
 }
 
+/// The `cargo` arguments of `perf preflight [--out DIR] [--smoke] [--machine-ready]` (TEST-040): the check before a perf window.
+fn perf_preflight_args(args: &[String]) -> Result<Vec<String>, String> {
+    let mut smoke = false;
+    let mut tail: Vec<String> = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--smoke" => smoke = true,
+            "--machine-ready" => tail.push(a.clone()),
+            "--out" => {
+                let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
+                tail.push(a.clone());
+                tail.push(value.clone());
+            }
+            other => {
+                return Err(format!(
+                    "unknown perf preflight option '{other}' (known: --out DIR, --smoke, --machine-ready, the owner's override of a failed preflight)"
+                ))
+            }
+        }
+    }
+    let mut v: Vec<String> = if smoke {
+        ["run", "-q", "-p", "planet", "--", "test-render", "--perf-smoke", "--scene", "preflight", "--adapter", "software"]
+    } else {
+        ["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", "preflight", "--adapter", "hardware"]
+    }
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    v.extend(tail);
+    Ok(v)
+}
+
 /// The `cargo` arguments of a `cache-compact` run: `planet generate --compact-cache <dir>` plus the definition and the cap.
 fn cache_compact_args(args: &[String]) -> Result<Vec<String>, String> {
     let mut it = args.iter();
@@ -842,6 +875,11 @@ pub fn perf(root: &Path, args: &[String]) -> Res {
     if args.first().map(String::as_str) == Some("m5") {
         return perf_m5(root, &args[1..]);
     }
+    if args.first().map(String::as_str) == Some("preflight") {
+        let cargo_args = perf_preflight_args(&args[1..])?;
+        let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+        return run(root, "cargo", &refs, &[]);
+    }
     if args.first().map(String::as_str) == Some("global-bake") {
         let cargo_args = perf_global_bake_args(&args[1..])?;
         let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
@@ -881,6 +919,17 @@ mod tests {
         let smoke = perf_stream_args(&s(&["edit-latency", "--smoke"])).unwrap();
         assert!(smoke.contains(&"--perf-smoke".to_string()) && smoke.contains(&"software".to_string()));
         assert!(!STREAM_SCENES.contains(&EDIT_SCENE), "`perf stream all` does not run it");
+    }
+
+    // spec: TEST-040
+    #[test]
+    fn the_preflight_runs_on_the_hardware_adapter_or_as_a_smoke_on_the_software_one_and_passes_its_options() {
+        let a = perf_preflight_args(&s(&["--out", "target/perf-w13", "--machine-ready"])).unwrap();
+        assert!(a.contains(&"--perf".to_string()) && a.contains(&"hardware".to_string()) && a.contains(&"preflight".to_string()));
+        assert!(a.contains(&"--out".to_string()) && a.contains(&"--machine-ready".to_string()));
+        let smoke = perf_preflight_args(&s(&["--smoke"])).unwrap();
+        assert!(smoke.contains(&"--perf-smoke".to_string()) && smoke.contains(&"software".to_string()));
+        assert!(perf_preflight_args(&s(&["--store", "D"])).is_err(), "no stream options");
     }
 
     // spec: TEST-019
