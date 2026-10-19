@@ -1630,3 +1630,27 @@ fn an_edit_refreshes_the_tiles_it_touches_while_their_old_versions_stay_drawn_an
     assert_eq!(stats.refreshed, queued as u64, "every requested refresh replaced its tile");
     assert!(rig.sink.uploads > sink_uploads, "the new versions were uploaded");
 }
+
+// spec: STRM-030
+#[test]
+fn the_roots_are_written_to_the_sink_before_frame_zero_and_the_first_frame_uploads_none_of_them() {
+    let mut t = torn_rig(None);
+    let mut sink = CountingSink { bytes: 9_168, ..Default::default() };
+    let roots = t.lp.upload_roots(&mut sink).unwrap();
+    assert_eq!(roots.uploaded, 6, "the six roots of floor 0");
+    assert_eq!(roots.bytes, 6 * 9_168, "outside the per-frame cap, whatever their bytes");
+    assert_eq!((sink.uploads, sink.by_tile.len()), (6, 6), "every root is in a slot of the sink");
+    let first = t.lp.begin_frame(&request(here(), 0.0, -0.4), &mut sink).unwrap();
+    assert_eq!((first.counts.uploaded, first.counts.upload_bytes), (0, 0), "frame 0 carries no root upload");
+    assert_eq!(sink.uploads, 6, "and wrote nothing more");
+    assert_eq!(t.lp.resident().len(), 6, "the loop knows the roots as resident: the first plan draws them");
+}
+
+// spec: STRM-030
+#[test]
+fn without_the_pre_frame_call_the_first_frame_uploads_the_roots_as_it_always_did() {
+    let mut t = torn_rig(None);
+    let mut sink = CountingSink { bytes: 9_168, ..Default::default() };
+    let first = t.lp.begin_frame(&request(here(), 0.0, -0.4), &mut sink).unwrap();
+    assert_eq!(first.counts.uploaded, 6, "the exemption of the cap (ADR 0064) is unchanged for a caller that does not call upload_roots");
+}

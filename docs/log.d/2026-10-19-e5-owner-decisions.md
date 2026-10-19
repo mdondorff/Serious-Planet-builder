@@ -1,0 +1,1 @@
+- 2026-10-19 **E5 decisions (owner):** a line is one item with a points list (split into linked items beyond the reach limit); a region mask clips a chosen layer's edits; the first surface type table is rock, sand, grass, snow, forest, ice, desert, wetland, urban.

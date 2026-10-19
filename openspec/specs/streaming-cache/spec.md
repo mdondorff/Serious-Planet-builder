@@ -755,11 +755,11 @@ Source: ADR 0058, ADR 0041 point 2, ADR 0018, ADR 0019, STRM-012, STRM-013, STRM
 - **THEN** it is refused naming the summary record and `generate --global-dir`
 
 ### Requirement: STRM-026 Refresh of resident tiles
-When an item edit changes what some tiles read (the footprint find of the edit, WDEF-007), the streamer SHALL request each resident tile of that set again without dropping it (`Streamer::refresh`): the tile stays resident and served from its slot until the new version arrives, the new version takes a second slot, replaces the old one when its job completes (the loop is told with a new `Added` change) and gives the old slot back. The request SHALL be of the tile's class (draw, residency or prefetch) and, in the residency and prefetch classes, ahead of the other requests of the class (rank 0 instead of the level: an exception to the order of STRM-005, "coarse before fine", for edited tiles only), so edited tiles are not queued behind the rest of R; a draw request has no rank to go ahead of. A resident tile in no class SHALL be evicted instead of refreshed. A tile whose job is running SHALL be told to stop and its result SHALL be dropped. A resident tile that has not been replaced yet SHALL stay marked stale and SHALL be requested again whenever nothing is running for it and something wants it (when its job ended without replacing it, after the retry delay of a failed job, or when it is wanted again after it lost every class), so no tile ever holds a version made from the field before the edit and a failed refresh is never forgotten. While a tile is refreshed it holds two slots (an exception to STRM-006 and STRM-007 that lasts until the new version replaces it, the old slot then returning to the pool); a refresh that finds no free slot waits, and the old version is served meanwhile. The frame loop's edit event (`ManagedLoop::edit`) SHALL forget the plan cache entries (origin height, mesh key, volume) of the found tiles, refresh them and ask for a new plan at the next frame although the camera did not move.
+When an item edit changes what some tiles read (the footprint find of the edit, WDEF-007), the streamer SHALL request each resident tile of that set again without dropping it (`Streamer::refresh`): the tile stays resident and served from its slot until the new version arrives, the new version takes a second slot, replaces the old one when its job completes (the loop is told with a new `Added` change) and gives the old slot back. The request SHALL be of the tile's class (draw, residency or prefetch) and, in the residency and prefetch classes, ahead of the other requests of the class (rank 0 instead of the level: an exception to the order of STRM-005, "coarse before fine", for edited tiles only), so edited tiles are not queued behind the rest of R; a draw request has no rank to go ahead of. A resident tile in no class SHALL be evicted instead of refreshed. A tile whose job is running SHALL be told to stop and its result SHALL be dropped. A resident tile that has not been replaced yet SHALL stay marked stale and SHALL be requested again whenever nothing is running for it and something wants it (when its job ended without replacing it, after the retry delay of a failed job, or when it is wanted again after it lost every class), so no tile ever holds a version made from the field before the edit and a failed refresh is never forgotten. A refresh request that is still queued when its tile leaves every class SHALL be dropped and counted as cancelled (the class it was queued under no longer lists the tile); the tile stays resident and stale. While a tile is refreshed it holds two slots (an exception to STRM-006 and STRM-007 that lasts until the new version replaces it, the old slot then returning to the pool); a refresh that finds no free slot waits, and the old version is served meanwhile. The frame loop's edit event (`ManagedLoop::edit`) SHALL forget the plan cache entries (origin height, mesh key, volume) of the found tiles, refresh them and ask for a new plan at the next frame although the camera did not move.
 
 Verify: A
 Status: active
-Source: SPIKE-13 variant D, ADR 0066, ADR 0021 point 2, M6 plan row E1
+Source: SPIKE-13 variant D, ADR 0066, ADR 0021 point 2, M6 plan row E1, window 13 (2026-10-19)
 
 #### Scenario: The old version is served
 - **WHEN** a resident tile is refreshed and the job has not finished
@@ -788,6 +788,10 @@ Source: SPIKE-13 variant D, ADR 0066, ADR 0021 point 2, M6 plan row E1
 #### Scenario: The edit event
 - **WHEN** an edit event names the resident tiles it changed while the camera stands still
 - **THEN** a new plan is delivered although the request did not change, the old tiles are drawn until their refreshes finish, and the frame is the synchronous frame of the new field again afterwards, with every requested refresh counted as a replacement
+
+#### Scenario: The tile leaves every class
+- **WHEN** a refresh is queued for a resident tile of a residency set made from a selection (closed under its ancestors) and the wants then change so that the tile is in no class before the request starts
+- **THEN** no job starts, the request is dropped and counted as cancelled, the tile stays resident with its old payload, and when it is wanted again the new version replaces it
 
 ### Requirement: STRM-028 The terrain reads the current definition
 A world's terrain SHALL hold its definition as a replaceable shared value and SHALL build every field from a snapshot of it taken when the field is built; a field built before a replacement SHALL keep the definition it was built from (a plan or tile job in flight finishes on the definition it started with, and its keys name it through the item revision and the footprint entries). A replacement SHALL be refused, naming both hashes, when the new definition's base hash differs from the current one's, because the bake the fields read was made from the base. The field of a definition that holds stamps SHALL be the base field with one stamp stage (GEN-026) per layer that holds a stamp, lowest layer first (the layer stack of ADR 0007, then other layer names by name), each at its place in the stack (layers outside it follow the stack's seven, in name order), below the water bound; the field of a definition without stamps SHALL be what it was. The plan worker's residency set SHALL be selected again when the definition's revision changes, whatever the camera did. A caller that edits items SHALL replace the definition first and then name the edited tiles to the managed loop.
@@ -834,3 +838,22 @@ Source: ADR 0066 point 4, ADR 0006, CON-08
 #### Scenario: Unstaged keys
 - **WHEN** the keys of a base field are computed
 - **THEN** they equal the pinned known answers of the key tests, which are unchanged
+
+### Requirement: STRM-030 The roots reach the GPU before frame 0
+The frame loop SHALL offer a pre-frame step that writes the roots to the tile sink (`ManagedLoop::upload_roots`): every resident tile at or above the streamer's render floor, in one batch, outside the per-frame cap (STRM-001, ADR 0064), recorded as resident exactly as the first frame records them. A harness that has loaded the roots SHALL call it before its first measured frame, so that frame 0 writes no root and obeys the cap of STRM-006 and the limits of CON-21; the perf rig (`Rig::new`) SHALL call it at the end of its start-up. A caller that does not call it SHALL see the old behaviour: the first frame writes the roots. The step SHALL change no other tile, no count and no key, and the first plan draws the roots as it did.
+
+Verify: A, C
+Status: active
+Source: STRM-001, ADR 0064, window 13 (2026-10-19)
+
+#### Scenario: Before frame 0
+- **WHEN** the roots are loaded and `upload_roots` is called, then the first frame is begun
+- **THEN** the sink holds every root in its slot, the first frame uploads none of them (uploaded 0, upload bytes 0) and writes nothing more, and the loop knows every root as resident
+
+#### Scenario: Without the call
+- **WHEN** the first frame is begun without `upload_roots`
+- **THEN** it writes the roots, beyond the cap, as before (ADR 0064)
+
+#### Scenario: A measured frame
+- **WHEN** the streaming scenes run in smoke mode
+- **THEN** frame 0 of every scene's frame log writes at most the per-frame cap

@@ -281,3 +281,54 @@ fn a_refresh_starts_ahead_of_the_rest_of_the_residency_class() {
     s.step();
     assert_eq!(s.dispatch_log[before], fine, "the refresh of an edited tile goes before the other requests of its class");
 }
+
+/// `t` and its ancestors down to the render floor of the fixture (level 0): a residency set made from a selection is closed like this.
+fn closed(t: TileId) -> Vec<(TileId, f64)> {
+    let mut v = Vec::new();
+    let mut cur = Some(t);
+    while let Some(c) = cur {
+        v.push((c, f64::from(c.level())));
+        cur = c.parent();
+    }
+    v.sort_by_key(|e| e.0);
+    v
+}
+
+// spec: STRM-026
+#[test]
+fn a_refresh_request_of_a_tile_that_left_every_class_is_dropped_and_counted_and_the_tile_refreshes_when_wanted_again() {
+    let (mut s, sp, source) = fixture(1);
+    let t = id(2, 4, 5, 6);
+    s.set_residency(&closed(t));
+    for _ in 0..40 {
+        s.step();
+        sp.run(4);
+        if s.is_resident(t) && s.stats().in_flight == 0 {
+            break;
+        }
+    }
+    assert!(s.is_resident(t));
+    // The edit queues the refresh; before it starts, the camera moves and the tile is in no class (the plan selected again).
+    source.rev.store(1, Ordering::SeqCst);
+    assert_eq!(s.refresh(&[t]), 1);
+    let cancelled = s.stats().cancelled;
+    s.set_residency(&[]);
+    for _ in 0..4 {
+        s.step();
+        sp.run(4);
+    }
+    assert_eq!(s.stats().in_flight, 0, "no job was started for a tile nothing wants");
+    assert_eq!(s.stats().cancelled, cancelled + 1, "the dropped refresh request is counted");
+    assert!(s.is_resident(t), "the old version stays until its slot is needed");
+    assert_eq!(s.get(t).as_deref(), Some(&(t.raw(), 0)));
+    // Wanted again: the stale version is refreshed.
+    s.set_residency(&closed(t));
+    for _ in 0..40 {
+        s.step();
+        sp.run(4);
+        if s.get(t).as_deref() == Some(&(t.raw(), 1)) {
+            break;
+        }
+    }
+    assert_eq!(s.get(t).as_deref(), Some(&(t.raw(), 1)), "the new version replaced the stale one when the tile was wanted again");
+}

@@ -18,11 +18,17 @@ fn adapter() -> String {
 
 /// Run `planet editor --smoke <extra>`; `None` is the declared skip, a failure panics.
 fn smoke(extra: &[&str]) -> Option<String> {
+    smoke_in(extra, &[])
+}
+
+/// [`smoke`] with more environment variables for the run.
+fn smoke_in(extra: &[&str], envs: &[(&str, &str)]) -> Option<String> {
     let adapter = adapter();
     let out = Command::new(env!("CARGO_BIN_EXE_planet"))
         .args(["editor", "--smoke"])
         .args(extra)
         .env("PLANET_ADAPTER", &adapter)
+        .envs(envs.iter().copied())
         .output()
         .expect("the planet binary starts");
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
@@ -176,7 +182,17 @@ fn a_world_with_a_bake_has_an_ocean_and_the_window_draws_its_water_through_the_w
 fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_writes_the_item_file() {
     let dir = std::env::temp_dir().join(format!("planet-editor-smoke-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let Some(stdout) = smoke(&["--edit", "--items", dir.to_str().unwrap()]) else { return };
+    // A small window: after about 14 s of start-up the run is bound by the software adapter drawing 90 lit frames (0.6 s each at the default
+    // 1280x720: 67 s alone, 100 to 220 s beside the other tier-C processes, against the 300 s limit); at 480x270 a frame costs half. The
+    // counts asserted below are those of the script, which does not depend on the size.
+    // F9 is pressed by the script where a directory for its files is named (VIEW-024).
+    let repro = std::env::temp_dir().join(format!("planet-editor-repro-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&repro);
+    let Some(stdout) =
+        smoke_in(&["--edit", "--size", "480x270", "--items", dir.to_str().unwrap()], &[("PLANET_REPRO_DIR", repro.to_str().unwrap())])
+    else {
+        return;
+    };
     assert!(stdout.contains("[smoke ok]"), "{stdout}");
     // The script of the run (placing with the stamp tool, dragging the move handle, typing a radius, undo, redo, delete, undo) is judged by
     // the run itself (`EditRuntime::smoke_verdict`); the summary shows the counts.
@@ -199,6 +215,21 @@ fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_
     assert!(count(" definitions handed to the generator") >= 1, "the edits reached the generator: {line}");
     // spec: VIEW-023
     assert!(count(" previews set") >= 1, "the window fed the preview of the edit in flight: {line}");
+    // spec: VIEW-024
+    let repro_line = stdout.lines().find(|l| l.trim_start().starts_with("repro:")).unwrap_or_else(|| panic!("no repro line in: {stdout}"));
+    assert!(repro_line.contains(" 1 F9 write(s)"), "the script pressed F9 once: {repro_line}");
+    let names: Vec<String> =
+        std::fs::read_dir(&repro).expect("the F9 directory").map(|f| f.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    let path_name = names.iter().find(|n| n.ends_with("-path.txt")).unwrap_or_else(|| panic!("no path file in {names:?}"));
+    let bundle_name = path_name.replace("-path.txt", ".bundle");
+    assert!(names.contains(&bundle_name), "the bundle next to the path: {names:?}");
+    let path =
+        planet_frame::pathlog::PathLog::from_text(&std::fs::read_to_string(repro.join(path_name)).unwrap()).expect("a valid path file");
+    assert!(path.len() >= 2, "the path holds poses: {}", path.summary());
+    let bundle = std::fs::read_to_string(repro.join(&bundle_name)).unwrap();
+    assert!(bundle.starts_with("planet-terrain-repro "), "{}", &bundle[..bundle.len().min(60)]);
+    assert!(bundle.contains("world_toml "), "the bundle records the world, edits included");
+    let _ = std::fs::remove_dir_all(&repro);
     // The run ends with the edit back (the last command undid the delete): one file, written through by every command.
     let files: Vec<_> =
         std::fs::read_dir(dir.join("0")).expect("the items directory of the planet").map(|f| f.unwrap().file_name()).collect();

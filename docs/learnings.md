@@ -480,3 +480,10 @@ Assumption it changes: VIEW-017 (editor parameters) now follows WDEF-010; the ed
 Proposed follow-up: a new stamp kind is added to the stage and to the editor's table together; the test fails if the keys differ.
 Obsolete when: the editor takes its parameter list from the stamp stage's kinds directly.
 
+
+## 2026-10-19 A software-adapter window smoke costs its pixels (the editor test took 67 to 220 s)
+Scope: project (window smokes on WARP and lavapipe)
+What happened: the real-window editor test took 67 s alone and 100 to 220 s beside the other tier-C processes, against the 300 s limit. Per-frame timing of `planet editor --smoke --edit` on WARP showed about 14 s of start-up (the 256-cell bake and the root tiles) and 90 lit frames at 0.6 s each: the software adapter draws the lit path with the atmosphere and water, and the frame time follows the window size (1280x720: 67 s, 640x360: 40 s, 320x180: 32 s). The CPU side (pre-frame work, the field rebuild after a hand-over, planning) was under 1 s in total. `--tau 4` and `--finest-level 12` or `10` changed nothing.
+Assumption it changes: a window smoke test needs the default window size; the counts the editor test asserts come from the script and not from the pixels, so it runs at 480x270 (34 s alone).
+Proposed follow-up: a new window smoke passes `--size` unless it checks pixels; the start-up share (14 s) is the next cost if the tier needs trimming.
+Obsolete when: the software adapter draws the lit frame in a few tens of milliseconds, or the smokes no longer run on it.

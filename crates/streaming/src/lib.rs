@@ -1211,9 +1211,16 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                     self.victims[kind].remove(&(r.last_used, t));
                 }
             }
-            // A version that predates an edit is refreshed as soon as the tile is wanted again (STRM-026).
+            // A version that predates an edit is refreshed as soon as the tile is wanted again (STRM-026). A refresh request still queued
+            // for a tile that left every class is dropped and counted: the class it was queued under no longer lists the tile, and the
+            // tile stays marked stale, so the request is made again when something wants it.
             if new.is_some() && self.stale.contains(&t) && !self.in_flight.contains_key(&t) {
                 self.request_ahead(t);
+            } else if new.is_none() {
+                if let Some(class) = self.queue.remove(t) {
+                    self.stats.cancelled += 1;
+                    self.stats.cancelled_prefetch += u64::from(class == RequestClass::Prefetch as u8);
+                }
             }
             return;
         }
