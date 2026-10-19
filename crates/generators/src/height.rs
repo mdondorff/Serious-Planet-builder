@@ -324,6 +324,13 @@ pub trait HeightField: Send + Sync {
     fn stage_params(&self) -> Option<(&str, u32)> {
         None
     }
+    /// The revision of the authored items this field reads (STRM-027): 0 when it reads none, else a number that differs after every
+    /// edit of them and between any two definitions of the process. A cache that memoises per-tile results of the field
+    /// ([`inputs_hash_for`](HeightField::inputs_hash_for)) checks them again when it changes. The default is the upstream's, so a wrapper
+    /// that forwards [`upstream`](HeightField::upstream) forwards this.
+    fn item_revision(&self) -> u64 {
+        self.upstream().map_or(0, |u| u.item_revision())
+    }
     /// Id of the reference surface of this field's body (CON-15); part of every height and mesh key.
     fn surface_id(&self) -> &'static str {
         SPHERE_SURFACE_ID

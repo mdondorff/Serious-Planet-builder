@@ -172,19 +172,23 @@ fn the_bounds_widen_by_the_bounds_of_the_items_in_reach_and_hold_for_every_sampl
         item(2, 1, at_distance(at, dir(0.0, 1.0, 0.0), 800.0), 1_500.0, 40.0, Stamp::new(StampKind::Crater, [25.0, 0.0, 0.0])),
     ]));
     let base = Reference(1);
-    let widened = |centre: Vec3, angle: f64| {
+    // The growth of the extent: what the stamps can add inside the cap, not their declared bounds.
+    let growth = |centre: Vec3, angle: f64| {
         let (lo, hi) = s.height_bounds(centre, angle);
         let (blo, bhi) = base.height_bounds(centre, angle);
-        (blo - lo, hi - bhi)
+        (hi - lo) - (bhi - blo)
     };
-    // A cap on the stamps: both bounds count. A cap far away: none.
-    let (a, b) = widened(at, 100.0 / R);
-    assert!((a - 100.0).abs() < 1e-9 && (b - 100.0).abs() < 1e-9, "both items touch: 60 + 40 on each side, got {a} and {b}");
-    let (a, b) = widened(dir(-1.0, 0.0, 0.0), 100.0 / R);
-    assert_eq!((a, b), (0.0, 0.0), "no item in reach, no widening");
-    // The only-first-item cap.
-    let (a, _) = widened(at_distance(at, dir(0.0, -1.0, 0.0), 2_500.0), 100.0 / R);
-    assert!((a - 60.0).abs() < 1e-9, "only the first item reaches 2.5 km on the far side: {a}");
+    // A cap on the stamps: the hill is nearly flat under it (a few centimetres), the crater's bowl varies by metres; far below the
+    // declared 60 + 40 on each side that a bound by `max_delta_m` would add (a fine tile would have no room to morph).
+    let g = growth(at, 100.0 / R);
+    assert!(g > 0.0 && g < 12.0, "a cap on the top of the hill and the slope of a crater: {g}");
+    assert_eq!(growth(dir(-1.0, 0.0, 0.0), 100.0 / R), 0.0, "no item in reach, no widening");
+    // The only-first-item cap, on the slope of the hill at 2.5 km of 3 km.
+    let g = growth(at_distance(at, dir(0.0, -1.0, 0.0), 2_500.0), 100.0 / R);
+    assert!(g > 0.0 && g < 3.0, "only the hill reaches 2.5 km on the far side, on its slope: {g}");
+    // Never wider than the declared bounds say.
+    let g = growth(at, 4_000.0 / R);
+    assert!(g <= 200.0 + 1e-6, "no wider than the sum of both sides of both declared bounds: {g}");
     // Every height in the cap lies within the bounds.
     for (centre, angle) in [(at, 4_000.0 / R), (at_distance(at, dir(0.0, 1.0, 0.0), 700.0), 1_000.0 / R)] {
         let (lo, hi) = s.height_bounds(centre, angle);
@@ -226,6 +230,9 @@ impl ItemReader for Recording {
     }
     fn tile_reads(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> Vec<ReadRecord> {
         self.inner.tile_reads(body, layer, tile, halo)
+    }
+    fn revision(&self) -> u64 {
+        self.inner.revision()
     }
 }
 

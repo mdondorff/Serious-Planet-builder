@@ -9,6 +9,7 @@
 pub mod cells;
 pub mod footprint;
 pub mod item_id;
+pub mod revision;
 pub mod stamp;
 pub mod summary;
 pub mod toml_io;
@@ -215,6 +216,8 @@ pub struct WorldDefinition {
     /// The implementation id of the height field the world names (GEN-018), if it names one. Not a node (nodes are
     /// numbers); it enters the base hash only when set, so a definition that names none hashes as it always did.
     height_field: Option<String>,
+    /// Changes to this instance (STRM-027); not part of the content.
+    revision: revision::Revision,
 }
 
 /// Whether `id` can name an implementation: letters, digits, `_` and `-`, not empty (the TOML key alphabet).
@@ -247,6 +250,7 @@ impl WorldDefinition {
             cells: BTreeMap::new(),
             summaries: BTreeMap::new(),
             height_field: None,
+            revision: revision::Revision::new(),
         }
     }
 
@@ -269,6 +273,7 @@ impl WorldDefinition {
     pub fn set(&mut self, path: &str, value: NodeValue) {
         assert!(!path.starts_with("derived."), "the path '{path}' is in the reserved derived namespace");
         assert!(!is_height_field_path(path), "the path '{path}' is reserved for the height field id (set_height_field)");
+        self.revision.bump();
         self.nodes.insert(path.to_string(), value);
         if let Some(body) = radius_path_body(path) {
             self.reindex(body);
@@ -279,6 +284,7 @@ impl WorldDefinition {
     /// ([`valid_implementation_id`]); whether a build knows it is decided where the implementations are (generators).
     pub fn set_height_field(&mut self, id: &str) {
         assert!(valid_implementation_id(id), "a height field id is letters, digits, `_` and `-`, got '{id}'");
+        self.revision.bump();
         self.height_field = Some(id.to_string());
     }
 
@@ -294,6 +300,12 @@ impl WorldDefinition {
     /// Every node in path order.
     pub fn nodes(&self) -> impl Iterator<Item = (&str, NodeValue)> {
         self.nodes.iter().map(|(p, v)| (p.as_str(), *v))
+    }
+
+    /// A number that differs after every change of this definition and from every other definition of the process (STRM-027): the
+    /// key of anything memoised from what the definition holds. Never 0.
+    pub fn revision(&self) -> u64 {
+        self.revision.value()
     }
 
     pub fn get(&self, path: &str) -> Option<NodeValue> {
@@ -398,6 +410,7 @@ impl WorldDefinition {
         };
         let cell = cells::cell_of(radius, unit);
         let layer = rec.layer.clone();
+        self.revision.bump();
         self.items.insert((body, id), rec);
         self.cells.entry((body, cell.raw())).or_default().insert(id);
         self.refresh_summary(body, &layer, cell);
@@ -407,6 +420,7 @@ impl WorldDefinition {
     /// Remove an item; `false` if there was none.
     pub fn remove_item(&mut self, body: BodyId, id: ItemId) -> bool {
         let Some(rec) = self.items.remove(&(body, id)) else { return false };
+        self.revision.bump();
         // The item sits in the cell of its direction at the level of the current radius (the index is rebuilt on every
         // radius change, so this is where it was filed).
         if let Ok(radius) = self.usable_radius(body) {
