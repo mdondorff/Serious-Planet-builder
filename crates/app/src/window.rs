@@ -7,7 +7,7 @@
 //! `--smoke` is the test mode: it opens the window, drives the keys through the same command path for a few dozen frames and
 //! closes it. Where there is no display it stops with an error that starts with [`NO_DISPLAY`], which a test reports as a skip.
 
-use crate::editwin::{EditKey, EditRuntime, Pointer, EDIT_HEIGHT_MARGIN_M, EDIT_KEYS_HELP, SMOKE_EDIT_FRAMES};
+use crate::editwin::{EditKey, EditRuntime, Pointer, EDIT_KEYS_HELP, SMOKE_EDIT_FRAMES};
 use crate::pipelined::{RendererSink, Rig};
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
@@ -248,6 +248,8 @@ struct App<'w> {
     world: &'w Arc<WorldTerrain>,
     /// The height field the window picks and reads the ground from; rebuilt when the edits change the definition.
     field: Box<dyn HeightField + 'w>,
+    /// The plan parameters: the configured ones, with the height bound raised to the field's maximum when the stamps lift it (VIEW-022).
+    lod: LodParams,
     cameras: &'w [Camera],
     clock: Arc<SystemClock>,
     params: ControllerParams,
@@ -352,7 +354,7 @@ impl App<'_> {
     fn globe_click(&mut self) {
         let Some(st) = self.state.as_mut() else { return };
         let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
-        let limits = planet_frame::pick::PickLimits::new(self.cfg.radius_m, self.cfg.lod.max_height_m);
+        let limits = planet_frame::pick::PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
         let field = self.field.as_ref();
         let height = |d: planet_core::Vec3| field.height(d);
         if let Some(g) = st.viewer.globe.as_mut() {
@@ -368,7 +370,7 @@ impl App<'_> {
             camera,
             size: self.cfg.size,
             view,
-            lod: planet_frame::viewer::effective_lod(&self.cfg.lod, coarse),
+            lod: planet_frame::viewer::effective_lod(&self.lod, coarse),
             face_mapping: planet_core::cube::FaceMapping::id(&planet_core::cube::TangentWarp).to_string(),
             seed: self.cfg.seed,
         }
@@ -403,7 +405,11 @@ impl App<'_> {
         if republished {
             let world = self.world;
             self.field = world.field()?;
+            // The stamps lift the field: the plan's bound for the horizon, the frustum and the morph follows the field's maximum, and is never
+            // below the configured one (a run with no edits plans as it did).
+            self.lod.max_height_m = cfg.lod.max_height_m.max(self.field.max_abs_height_m());
         }
+        let lod_max_height_m = self.lod.max_height_m;
         let (field, radius) = (self.field.as_ref(), cfg.radius_m);
         // Take the state out so the helpers that borrow `self` stay usable; it is put back before returning.
         let mut st = self.state.take().ok_or("no window")?;
@@ -428,7 +434,7 @@ impl App<'_> {
             }
             if cfg.smoke && cfg.edit {
                 let viewport = Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) };
-                let limits = PickLimits::new(radius, cfg.lod.max_height_m);
+                let limits = PickLimits::new(radius, lod_max_height_m);
                 let camera = st.last_camera;
                 let frames = st.frames;
                 if let Some(e) = st.edit.as_mut() {
@@ -454,7 +460,7 @@ impl App<'_> {
                 let (sx, sy) = (f64::from(inner.width) / viewport.width_px, f64::from(inner.height) / viewport.height_px);
                 st.screen_markers = seen.iter().map(|m| ScreenMarker { id: m.id, pixel: [m.pixel[0] * sx, m.pixel[1] * sy] }).collect();
                 if cfg.smoke {
-                    smoke_globe(&mut st, &camera, viewport, radius, cfg.lod.max_height_m, field);
+                    smoke_globe(&mut st, &camera, viewport, radius, lod_max_height_m, field);
                 }
             } else {
                 st.screen_markers.clear();
@@ -475,7 +481,7 @@ impl App<'_> {
             // edits of the last frame can touch (the footprint find).
             if let Some(e) = st.edit.as_mut().filter(|e| e.on) {
                 let wanted: Vec<_> = frame.pipeline.wanted.iter().map(|w| w.0).collect();
-                let limits = PickLimits::new(radius, cfg.lod.max_height_m);
+                let limits = PickLimits::new(radius, lod_max_height_m);
                 let over_ui = st.ui.as_ref().is_some_and(|u| u.ctx.is_pointer_over_egui());
                 e.update(&camera, viewport, &wanted, field, &limits, Pointer { cursor: st.cursor, over_ui });
             }
@@ -654,7 +660,7 @@ impl App<'_> {
     /// around while it is held.
     fn edit_mouse(&mut self, state: ElementState, button: MouseButton, world: bool) {
         let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
-        let limits = PickLimits::new(self.cfg.radius_m, self.cfg.lod.max_height_m);
+        let limits = PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
         let field = self.field.as_ref();
         let Some(st) = self.state.as_mut() else { return };
         match edit_mouse_action(button, state, world, st.viewer.mouse.captured(), st.edit_down) {
@@ -951,7 +957,7 @@ impl ApplicationHandler for App<'_> {
                     st.cursor = now;
                     if world && st.edit_down {
                         let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
-                        let limits = PickLimits::new(self.cfg.radius_m, self.cfg.lod.max_height_m);
+                        let limits = PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
                         let camera = st.last_camera;
                         if let Some(e) = st.edit.as_mut() {
                             e.moved(&camera, viewport, now, &limits, self.field.as_ref());
@@ -1142,9 +1148,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         tau_px: tau,
         max_level: o.finest_level_for(o.cells),
         radius_m,
-        // With the editor UI the stamps may lift the field above its baked maximum: the plan keeps the headroom (VIEW-022).
-        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m())
-            + if o.no_ui { 0.0 } else { EDIT_HEIGHT_MARGIN_M },
+        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
         ..LodParams::earth_1080p()
     };
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
@@ -1222,6 +1226,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         cfg: &cfg,
         world: &world,
         field,
+        lod: cfg.lod.clone(),
         cameras: &script.cameras,
         clock: Arc::new(SystemClock::new()),
         params: ControllerParams::for_radius(radius_m),

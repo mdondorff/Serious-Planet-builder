@@ -547,7 +547,7 @@ Source: owner (M6 step U3: map first, list, search, inspector bound to the comma
 - Turning the mode off abandons a drag; its places are still named for the refresh.
 - The mode finds the shown edits every frame by the footprint find over the tiles the plan wants (VIEW-015), draws their outlines, names and handles (VIEW-020), lists them (VIEW-016), and names the resident tiles to refresh after each command (VIEW-019).
 - Before the frame plans, a changed definition is handed to the generator (`WorldTerrain::set_definition`, STRM-028) and then the named tiles are refreshed (`ManagedLoop::edit`), so the terrain follows the edits; a definition the generator refuses is a refused count and a status line. Items loaded at the start refresh every resident tile.
-- With the UI on, the plan keeps 1,000 m of headroom above the baked maximum height of the field (the stamps lift it; the table's greatest height is 400 m).
+- After a hand-over the plan's height bound is the new field's maximum (which counts the stamps' deltas) when that is above the configured bound, so a stamp on the highest peak does not fail the plan; a run with no edits plans as it did.
 - `--smoke --edit` runs a script of the mode after the overview phases (VIEW-005): the mode on, a hill placed where the view meets the surface, its move handle dragged, a radius typed, undo, redo, delete, undo; the run fails unless all of it happened and nothing was refused, and the summary reports the counts.
 
 The keys of the mode, taken by the letter on the key where a letter is meant (so on a QWERTZ keyboard the key labelled Z undoes):

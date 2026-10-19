@@ -24,10 +24,6 @@ use planet_world_def::item_store::{ItemStore, LooseFileStore, MemoryStore, Store
 use planet_world_def::{BodyId, ItemId, WorldDefinition};
 use std::path::{Path, PathBuf};
 
-/// The headroom, metres, above the baked maximum height of the field that the plan keeps for horizon and frustum padding when the editor
-/// UI is on: a stamp lifts the field (the largest height the parameter table allows is 400 m).
-pub const EDIT_HEIGHT_MARGIN_M: f64 = 1_000.0;
-
 /// The stage version new edits are authored against (the stamp stage of the generators takes it from the item).
 pub const EDIT_STAGE_VERSION: u32 = 1;
 
