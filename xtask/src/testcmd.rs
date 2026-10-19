@@ -404,7 +404,7 @@ fn candidates(root: &Path) -> Vec<(String, String)> {
     out
 }
 
-/// What `cargo xtask repro <file>` was given (VIEW-025): a terrain bundle, or the camera path file F9 wrote beside one
+/// What `cargo xtask repro <file>` was given (VIEW-026): a terrain bundle, or the camera path file F9 wrote beside one
 /// (`frame-<n>-path.txt` next to `frame-<n>.bundle`). Returns the bundle's name and the path file's, when the file names one.
 fn repro_pair(file: &str) -> (String, Option<String>) {
     match file.strip_suffix("-path.txt") {
@@ -1495,7 +1495,7 @@ mod repro_tests {
         assert!(repro(Path::new("."), &["no-such-bundle.repro".to_string()]).unwrap_err().contains("not found"));
     }
 
-    // spec: VIEW-025
+    // spec: VIEW-026
     #[test]
     fn a_camera_path_file_names_its_bundle_and_a_bundle_names_its_path_file() {
         let (bundle, path) = repro_pair("target/review/frame-120-path.txt");

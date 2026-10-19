@@ -229,7 +229,7 @@ fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_
     let bundle = std::fs::read_to_string(repro.join(&bundle_name)).unwrap();
     assert!(bundle.starts_with("planet-terrain-repro "), "{}", &bundle[..bundle.len().min(60)]);
     assert!(bundle.contains("world_toml "), "the bundle records the world, edits included");
-    // spec: VIEW-025
+    // spec: VIEW-026
     let replay_dir = repro.join("replay");
     let replay = Command::new(env!("CARGO_BIN_EXE_planet"))
         .args(["test-render", "--adapter", &adapter()])
@@ -247,7 +247,10 @@ fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_
     assert!(replayed.contains(&format!("replay path: {} poses", path.len())), "{replayed}");
     let rows = std::fs::read_to_string(replay_dir.join("replay.txt")).expect("the replay index");
     assert_eq!(rows.lines().filter(|l| !l.starts_with('#')).count(), path.len(), "one line per pose: {rows}");
-    assert!(replay_dir.join("pose_0000.png").is_file(), "pose 0 is rendered");
+    // A pose the plan refuses is a REFUSED line and is not drawn; the others are, pose 0 among them.
+    if !rows.lines().find(|l| !l.starts_with('#')).is_some_and(|l| l.contains(" REFUSED ")) {
+        assert!(replay_dir.join("pose_0000.png").is_file(), "pose 0 is rendered");
+    }
     let _ = std::fs::remove_dir_all(&repro);
     // The run ends with the edit back (the last command undid the delete): one file, written through by every command.
     let files: Vec<_> =
