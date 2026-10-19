@@ -47,7 +47,7 @@ struct Globals {
     view_proj: mat4x4<f32>,
     range: vec4<f32>,
     mode: vec4<u32>,
-    // Lit path only: x = the water level W in metres (ADR 0041); the other lanes are reserved.
+    // Lit path only: x = the water level W in metres (ADR 0041); y = the debug overlay (VIEW-014: 0 none, 1 tiles, 2 mesh); the other lanes are reserved.
     extra: vec4<f32>,
     // Lit path only: the albedo table of the look (ADR 0039 point 3): eight colours with a threshold in the fourth lane, then
     // (snow_c_full, snow_c_none, snow_cos_none, snow_cos_full) and (beach_height, beach_fade, shore_blend, 0).
@@ -57,8 +57,8 @@ struct Node {
     origin_rel: vec4<f32>,
     color: vec4<f32>,
     // x, y: vertex distances between which a vertex morphs to the parent grid; z: the least height range of the albedo's seabed-to-shore
-    // ramp at this node (REND-030: the plan's `shore_ramp_min_m`); w: padding (the plan's node-level `morph` is a diagnostic of the CPU
-    // selection and is not read by the shader).
+    // ramp at this node (REND-030: the plan's `shore_ramp_min_m`); w: the tile's level of detail (the wireframe overlay's colour, VIEW-014;
+    // the plan's node-level `morph` is a diagnostic of the CPU selection and is not read by the shader).
     morph: vec4<f32>,
     // Per grid decade (1 cm .. 1,000 km) the fractional part of (planet-fixed tile origin / spacing), xyz, taken in f64 on
     // the CPU: they anchor the relief grid to the world instead of to this tile, so neighbouring tiles and LOD splits draw
@@ -288,7 +288,11 @@ fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
-    return vec4<f32>(shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(nodes[in.node_index].morph.z, in.morph), sun, g.range.z), 1.0);
+    var rgb = shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(nodes[in.node_index].morph.z, in.morph), sun, g.range.z);
+    if (g.extra.y > 0.5) {
+        rgb = overlay_wire(in, rgb, g.range.z, g.extra.y);
+    }
+    return vec4<f32>(rgb, 1.0);
 }
 "#;
 
@@ -307,7 +311,8 @@ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
     for (i, d) in plan.nodes.iter().enumerate() {
         let r = d.camera_relative_origin;
         let c = d.color.map(|v| f32::from(v) / 255.0);
-        let mut floats = vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, d.shore_ramp_min_m, 0.0];
+        let mut floats =
+            vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, d.shore_ramp_min_m, f32::from(d.level)];
         for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
             floats.extend([p[0], p[1], p[2], 0.0]);
         }
@@ -1551,7 +1556,7 @@ impl TerrainRenderer {
                         .iter()
                         .flat_map(|v: &u32| v.to_le_bytes()),
                 );
-                globals.extend(f32_bytes(&[lit.water_level_m, 0.0, 0.0, 0.0]));
+                globals.extend(f32_bytes(&[lit.water_level_m, lit.overlay.shader_code(), 0.0, 0.0]));
                 globals.extend(f32_bytes(&lit.albedo.to_words()));
             }
             None => {

@@ -222,6 +222,50 @@ fn vs(@builtin(instance_index) inst: u32, @builtin(vertex_index) vi: u32) -> VsO
     return terrain_vertex(inst, vi);
 }
 
+// The debug overlay (VIEW-014), `mode` 1 (tiles) or 2 (mesh), all coloured by the tile's level of detail (eight colours, wrapping) and
+// dimmed with the morph factor (a vertex at full detail is bright, fully morphed onto the parent grid dim):
+//  - a faint tint of the level's colour over the whole tile, so the levels show even where the mesh is finer than a pixel;
+//  - the outline of the tile (u or v at 0 or 1), always drawn;
+//  - mode 2 only: a line where the fragment is within about a pixel of a grid edge or of the diagonal of the grid's triangulation (a, c of
+//    each cell: from (i, j) to (i + 1, j + 1), `planet_generators::mesh::grid_indices`), a fixed line of about a pixel that does not fade
+//    out however fine the mesh is (the LOD keeps an edge about 2.5 px long; the coarse-LOD view makes them about 10 px).
+// The lines are radiance in the scene units of the frame (`factor` is its pre-exposure), so they stay visible at any exposure. Needs
+// derivatives: the caller takes it in uniform control flow (the overlay code is a uniform).
+fn overlay_wire(in: VsOut, rgb: vec3<f32>, factor: f32, mode: f32) -> vec3<f32> {
+    let gx = in.aux.x * f32(CELLS);
+    let gy = in.aux.y * f32(CELLS);
+    let wx = max(fwidth(gx), 1e-6);
+    let wy = max(fwidth(gy), 1e-6);
+    let wd = max(fwidth(gx - gy), 1e-6);
+    let fx = fract(gx);
+    let fy = fract(gy);
+    let dx = min(fx, 1.0 - fx) / wx;
+    let dy = min(fy, 1.0 - fy) / wy;
+    let dd = abs(fx - fy) / wd;
+    let d = min(min(dx, dy), dd);
+    let cell_line = select(0.0, 1.0 - smoothstep(0.3, 1.0, d), mode > 1.5);
+    let ux = in.aux.x;
+    let uy = in.aux.y;
+    let tile_d = min(min(ux, 1.0 - ux) / max(fwidth(ux), 1e-9), min(uy, 1.0 - uy) / max(fwidth(uy), 1e-9));
+    let tile_line = 1.0 - smoothstep(0.5, 1.5, tile_d);
+    var palette = array<vec3<f32>, 8>(
+        vec3<f32>(1.0, 0.15, 0.15),
+        vec3<f32>(1.0, 0.55, 0.1),
+        vec3<f32>(1.0, 0.95, 0.15),
+        vec3<f32>(0.2, 0.95, 0.2),
+        vec3<f32>(0.1, 0.9, 0.95),
+        vec3<f32>(0.25, 0.4, 1.0),
+        vec3<f32>(0.75, 0.3, 1.0),
+        vec3<f32>(1.0, 1.0, 1.0),
+    );
+    let level = u32(max(nodes[in.node_index].morph.w, 0.0) + 0.5);
+    let hue = palette[level % 8u];
+    let brightness = mix(1.0, 0.3, clamp(in.morph, 0.0, 1.0));
+    let tinted = mix(rgb, rgb * hue * 1.6, 0.4);
+    let line = hue * (brightness * 0.8 * factor);
+    return mix(tinted, line, max(cell_line, tile_line));
+}
+
 // The climate texel `idx` (row-major over the 9 x 9 texture) of the tile whose slot starts at word `base`: one word of the slot's
 // climate block, the temperature as f16 in the low half and the precipitation in the high half (GEN-021, GEN-025).
 fn climate_texel(base: u32, idx: i32) -> vec2<f32> {

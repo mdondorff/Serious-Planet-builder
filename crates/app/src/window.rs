@@ -56,6 +56,8 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
         KeyCode::KeyT => Command::ToggleVsync,
         KeyCode::KeyC => Command::ToggleCamera,
         KeyCode::KeyL => Command::ToggleLit,
+        KeyCode::F3 => Command::CycleOverlay,
+        KeyCode::F4 => Command::ToggleCoarseLod,
         KeyCode::Escape => Command::Quit,
         _ => return None,
     })
@@ -180,7 +182,7 @@ impl App<'_> {
         if let Some(mode) = cfg.upload {
             ctx.prefer_upload_mode(mode);
         }
-        let first = self.request(self.cameras[0], TerrainView::ALL[cfg.initial_view]);
+        let first = self.request(self.cameras[0], TerrainView::ALL[cfg.initial_view], false);
         // The 384 floor tiles load here, before frame 0 (STRM-001): the title shows how many are in.
         let mut rig = Rig::new_with_progress(&ctx, self.world, &first, cfg.gen, &mut |done, total| {
             window.set_title(&planet_frame::viewer::roots_title(done, total));
@@ -229,12 +231,13 @@ impl App<'_> {
         Ok(())
     }
 
-    fn request(&self, camera: Camera, view: TerrainView) -> TerrainRequest {
+    /// The request of a frame; `coarse` is the editor's coarse-LOD inspection view (the error bound times four, VIEW-014).
+    fn request(&self, camera: Camera, view: TerrainView, coarse: bool) -> TerrainRequest {
         TerrainRequest {
             camera,
             size: self.cfg.size,
             view,
-            lod: self.cfg.lod.clone(),
+            lod: planet_frame::viewer::effective_lod(&self.cfg.lod, coarse),
             face_mapping: planet_core::cube::FaceMapping::id(&planet_core::cube::TangentWarp).to_string(),
             seed: self.cfg.seed,
         }
@@ -264,9 +267,20 @@ impl App<'_> {
             let camera = st.viewer.camera(self.cameras, now_ms, dt, &self.params, &height, &ground);
             st.altitude_m = height(camera.position);
             let view = TerrainView::ALL[st.viewer.view_index];
-            let req = self.request(camera, view);
+            let req = self.request(camera, view, st.viewer.coarse_lod);
             let ctx = &st.ctx;
-            let frame = st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer })?;
+            let frame = match st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer }) {
+                // The coarse view's error bound does not fit the terrain here (a steep neighbourhood leaves no morph room, the plan
+                // worker says so): back to the base parameters for this frame and after (F4 asks again), never a dead window.
+                Err(_) if st.viewer.coarse_lod => {
+                    st.viewer.coarse_lod = false;
+                    st.counts.coarse_lod_refusals += 1;
+                    let req = self.request(camera, view, false);
+                    st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer })?
+                }
+                other => other?,
+            };
+            st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
             st.rig.fi.retire_to(st.rig.renderer.retired_frames(ctx));
             while st.rig.fi.is_full() {
                 st.rig.fi.note_wait();
@@ -277,13 +291,18 @@ impl App<'_> {
             // the pipelined loop decided; the debug path draws the plan as it is (VIEW-007).
             let lit_plan = if st.viewer.lit {
                 let reset = st.viewer.take_exposure_reset();
-                let lit = viewer_lit_plan(&cfg.look, cfg.radius_m, dt as f32, reset, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
+                let lit = viewer_lit_plan(&cfg.look, cfg.radius_m, dt as f32, reset, cfg.atmosphere)?
+                    .with_water_level(cfg.water_level_m)
+                    .with_overlay(st.viewer.overlay);
+                st.counts.overlay_frames += u64::from(lit.overlay != planet_frame::look::Overlay::None);
+                st.counts.mesh_overlay_frames += u64::from(lit.overlay == planet_frame::look::Overlay::Mesh);
                 let mut plan = draw.plan.clone();
                 plan.lit = Some(lit);
                 // The water of the frame (ADR 0041, ADR 0051 point 6): the nodes that carry water, decided by one query of the field W
                 // per new tile; the renderer draws what the plan says.
                 let time_s = now_ms as f64 / 1000.0;
-                let (look, liquids, lod) = (&cfg.look.water, &cfg.liquids, &cfg.lod);
+                let coarse_lod = planet_frame::viewer::effective_lod(&cfg.lod, st.viewer.coarse_lod);
+                let (look, liquids, lod) = (&cfg.look.water, &cfg.liquids, &coarse_lod);
                 let cache = &mut st.water_cache;
                 let water = self.world.with_water(|wf| {
                     let req = WaterRequest {
@@ -354,7 +373,9 @@ impl App<'_> {
                 st.last_title = text;
             }
             let presented = if let Some(ui) = st.ui.as_mut() {
-                let mut frame_ui = ui.frame(&st.window);
+                let factor = if st.viewer.coarse_lod { cfg.lod.coarse_factor() } else { 1.0 };
+                let status = planet_frame::viewer::overlay_status(st.viewer.overlay, factor);
+                let mut frame_ui = ui.frame(&st.window, &status);
                 let shown = st.surface.present_with_ui(ctx, &st.rig.renderer, Some((ui.painter(), &mut frame_ui)));
                 ui.reclaim(frame_ui);
                 shown.map_err(|e| e.to_string())?
@@ -458,6 +479,12 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
             st.viewer.held = Held::default();
             press(st, Command::ToggleCamera);
         }
+        // The overlay cycles off, tiles, mesh, off; the coarse LOD is on while the mesh shows.
+        26 => press(st, Command::CycleOverlay),
+        28 => press(st, Command::CycleOverlay),
+        29 => press(st, Command::ToggleCoarseLod),
+        31 => press(st, Command::CycleOverlay),
+        34 => press(st, Command::ToggleCoarseLod),
         36 => press(st, Command::Restart),
         _ => {}
     }
@@ -598,13 +625,17 @@ fn smoke_summary(st: &Running) -> String {
         )
     });
     format!(
-        "{} frames drawn ({} lit, {} with the atmosphere, {} with water, {} debug), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
+        "{} frames drawn ({} lit, {} with the atmosphere, {} with water, {} debug, {} with an overlay ({} the mesh), {} coarse LOD, {} refused), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
   last title: {}",
         st.frames,
         st.counts.lit_frames,
         st.counts.atmosphere_frames,
         st.counts.water_frames,
         st.counts.debug_frames,
+        st.counts.overlay_frames,
+        st.counts.mesh_overlay_frames,
+        st.counts.coarse_lod_frames,
+        st.counts.coarse_lod_refusals,
         st.presented,
         st.counts.lit_presented,
         st.counts.debug_presented,
@@ -754,6 +785,8 @@ mod tests {
             (KeyCode::KeyT, Command::ToggleVsync),
             (KeyCode::KeyC, Command::ToggleCamera),
             (KeyCode::KeyL, Command::ToggleLit),
+            (KeyCode::F3, Command::CycleOverlay),
+            (KeyCode::F4, Command::ToggleCoarseLod),
             (KeyCode::Escape, Command::Quit),
         ] {
             assert_eq!(key_command(code), Some(cmd), "{code:?}");
@@ -761,7 +794,7 @@ mod tests {
         for code in [KeyCode::KeyW, KeyCode::KeyA, KeyCode::KeyX, KeyCode::Enter, KeyCode::F5] {
             assert_eq!(key_command(code), None, "{code:?} is not a command");
         }
-        for ch in ["pause", "restart", "debug view", "vsync", "free camera", "WASD", "Esc", "lit", "atmosphere"] {
+        for ch in ["pause", "restart", "debug view", "vsync", "free camera", "WASD", "Esc", "lit", "atmosphere", "overlay", "coarse LOD"] {
             assert!(KEYS_HELP.to_lowercase().contains(&ch.to_lowercase()), "the help names {ch}: {KEYS_HELP}");
         }
     }
