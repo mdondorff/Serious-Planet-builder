@@ -166,7 +166,7 @@ impl core::fmt::Display for ItemError {
 /// one its kind and parameters give.
 fn stamp_refusal(spec: &ItemSpec, stamp: stamp::Stamp) -> Option<String> {
     let [p0, p1, p2] = stamp.params();
-    if !(spec.reach_m > 0.0) {
+    if spec.reach_m <= 0.0 {
         return Some(format!("a {} needs a reach above 0, got {} m", stamp.kind.name(), spec.reach_m));
     }
     if ![p0, p1, p2].iter().all(|p| p.is_finite()) {
