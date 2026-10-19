@@ -77,7 +77,7 @@ fn the_nodes_of_a_coarse_tiles_read_cover_exactly_its_cells_and_the_margin_ring_
             }
             // Smallest: no node has its three siblings and its parent absent.
             let present: BTreeSet<u64> = nodes.iter().map(|n| n.raw()).collect();
-            for n in &nodes {
+            for n in nodes.iter() {
                 if let Some(p) = n.parent() {
                     let all = p.children().unwrap().iter().all(|c| present.contains(&c.raw()));
                     assert!(!all, "tile {tile:?}: the four children of {p:?} are all in the set and should have been merged");
@@ -354,6 +354,38 @@ fn the_children_of_a_node_hash_in_the_order_of_tile_children_and_a_node_with_its
     assert_ne!(second, third, "the order of the children is part of the hash");
     let hex = |b: [u8; 16]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
     assert_eq!(hex(second), KNOWN_NODE_SECOND_CHILD);
+}
+
+// spec: WDEF-008
+#[test]
+fn the_cover_of_a_coarse_tile_is_built_once_per_tile_halo_and_radius_and_equals_the_uncached_one() {
+    let d = WorldDefinition::single_planet(R, 7);
+    let level = cell_level(R);
+    let tile = TileId::from_direction(&TangentWarp, dir(1.0, 0.2, 0.1), 4);
+    let first = d.summary_cover(BodyId::PLANET, tile, 1.0 / 32.0).unwrap().expect("a coarse tile");
+    let again = d.summary_cover(BodyId::PLANET, tile, 1.0 / 32.0).unwrap().expect("a coarse tile");
+    assert!(std::sync::Arc::ptr_eq(&first, &again), "the second read is the memoised cover");
+    let direct = planet_world_def::summary::cover(tile, level, margin_rings(tile, 1.0 / 32.0, R, level));
+    assert_eq!(*first, direct, "the memo changes no result");
+    // Another halo, another radius and another tile are other covers; a negative zero is a zero.
+    let other_halo = d.summary_cover(BodyId::PLANET, tile, 0.25).unwrap().unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&first, &other_halo));
+    let zero = d.summary_cover(BodyId::PLANET, tile, 0.0).unwrap().unwrap();
+    let neg_zero = d.summary_cover(BodyId::PLANET, tile, -0.0).unwrap().unwrap();
+    assert!(std::sync::Arc::ptr_eq(&zero, &neg_zero));
+    let big = WorldDefinition::single_planet(R * 3.0, 7);
+    let tile_big = TileId::from_direction(&TangentWarp, dir(1.0, 0.2, 0.1), 5);
+    let a = big.summary_cover(BodyId::PLANET, tile_big, 0.0).unwrap().unwrap();
+    assert_eq!(
+        *a,
+        planet_world_def::summary::cover(tile_big, cell_level(R * 3.0), margin_rings(tile_big, 0.0, R * 3.0, cell_level(R * 3.0)))
+    );
+    // Threads that ask at once get equal covers.
+    let covers: Vec<Vec<TileId>> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..4).map(|_| s.spawn(|| (*d.summary_cover(BodyId::PLANET, tile, 0.5).unwrap().unwrap()).clone())).collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    assert!(covers.windows(2).all(|w| w[0] == w[1]));
 }
 
 // spec: WDEF-008
