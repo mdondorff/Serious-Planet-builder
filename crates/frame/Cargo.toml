@@ -18,6 +18,11 @@ path = "tests/it.rs"
 name = "oracle_all"
 path = "tests/oracle_all.rs"
 
+# Several test files include the same helper (`support/sched.rs`) as a module of their own; in the one binary of a tier it is loaded once
+# per file, as it was once per binary before.
+[lints.clippy]
+duplicate_mod = "allow"
+
 [dependencies]
 planet-core.workspace = true
 planet-world-def.workspace = true

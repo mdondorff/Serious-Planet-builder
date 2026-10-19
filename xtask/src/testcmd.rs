@@ -1130,7 +1130,7 @@ mod tests {
         // binary per tier, BUILD-015), and every module of a `test(/^(a|b)::/)` pattern is a test file (a typo would silently leave a
         // heavy test uncapped).
         let named: Vec<&str> = real_part.match_indices("binary(").map(|(i, _)| real_part[i + 7..].split(')').next().unwrap()).collect();
-        assert!(named.len() >= 7, "{named:?}");
+        assert!(named.len() >= 4, "{named:?}");
         let modules: Vec<&str> = real_part
             .match_indices("test(/^")
             .flat_map(|(i, _)| real_part[i + 7..].split("::/)").next().unwrap().trim_matches(['(', ')']).split('|'))

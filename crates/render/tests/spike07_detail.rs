@@ -1,5 +1,5 @@
 //! SPIKE-07 (docs/archive/M4/spikes.md): checks of the experimental shader detail term. Compiled only with `--features spike07`:
-//! `cargo test -p planet-render --features spike07 --test spike07_detail` (PLANET_ADAPTER=hardware for the real GPU).
+//! `cargo nextest run -p planet-render --features spike07 -E 'test(/^spike07_detail::/)'` (PLANET_ADAPTER=hardware for the real GPU).
 #![cfg(feature = "spike07")]
 
 use planet_core::cube::TangentWarp;
