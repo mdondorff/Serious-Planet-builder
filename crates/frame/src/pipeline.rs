@@ -23,6 +23,7 @@
 use crate::lod::{cover_selection_bounded, plan_covers_view, LodParams, SelectionCache, TileBounds};
 use crate::plan::{face_mapping_by_id, PlanError, CLEAR_COLOR, HEIGHT_RANGE};
 use crate::prefetch::prefetch_set;
+use crate::preview::PreviewStamp;
 use crate::residency::{residency_set_field, ResidencySet};
 use crate::terrain::{node_color, plan_terrain_threaded, TerrainDraw, TerrainPlan, TerrainRequest};
 use planet_core::cube::FaceMapping;
@@ -145,6 +146,11 @@ pub struct DrawPlan {
     pub substituted: usize,
     /// Plan nodes with nothing resident to show, not even a root: zero whenever the roots are resident (STRM-002).
     pub blank: usize,
+    /// The preview stamps the frame draws (REND-033): the list given to [`draw_plan_preview`], which the renderer evaluates on the nodes
+    /// flagged `preview`. Empty for a frame without an edit in flight.
+    pub preview: Vec<PreviewStamp>,
+    /// The radius of the body the preview stamps lie on (the request's), for the renderer to place their anchors.
+    pub preview_radius_m: f64,
 }
 
 fn draw_of(req: &TerrainRequest, tile: TileId, r: ResidentTile) -> TerrainDraw {
@@ -160,6 +166,7 @@ fn draw_of(req: &TerrainRequest, tile: TileId, r: ResidentTile) -> TerrainDraw {
         morph_end_m: 1.0e30,
         color: node_color(req.view, tile),
         mesh_key: r.mesh_key,
+        preview: false,
     }
 }
 
@@ -207,6 +214,20 @@ pub fn draw_plan_with(
     resident: &dyn ResidentSet,
     bounds: &TileBounds,
 ) -> Result<DrawPlan, PlanError> {
+    draw_plan_preview(req, base, resident, bounds, &[])
+}
+
+/// [`draw_plan_with`] for a frame with an edit in flight (REND-033): a node drawn from a resident version of another key (stale while
+/// revalidating) is flagged `preview` when the reach of a stamp in `preview` touches the tile, and the list goes to the draw plan. Only
+/// those nodes: a stand-in ancestor, a node whose resident key is the plan's, and a node away from every stamp are not flagged. An empty
+/// list is [`draw_plan_with`] exactly.
+pub fn draw_plan_preview(
+    req: &TerrainRequest,
+    base: Option<(&TerrainRequest, &TerrainPlan)>,
+    resident: &dyn ResidentSet,
+    bounds: &TileBounds,
+    preview: &[PreviewStamp],
+) -> Result<DrawPlan, PlanError> {
     let map = face_mapping_by_id(&req.face_mapping).ok_or_else(|| PlanError::UnknownFaceMapping(req.face_mapping.clone()))?;
     let mut shown: BTreeMap<TileId, TerrainDraw> = BTreeMap::new();
     let (mut substituted, mut blank) = (0usize, 0usize);
@@ -223,7 +244,9 @@ pub fn draw_plan_with(
             // on the way) is drawn as it is, not replaced by an ancestor, so an edited place never goes coarse while it reloads.
             if let Some(r) = resident.resident(d.tile) {
                 substituted += 1;
-                shown.insert(d.tile, draw_of(req, d.tile, r));
+                let mut node = draw_of(req, d.tile, r);
+                node.preview = previewed(preview, map.as_ref(), d.tile, req.lod.radius_m);
+                shown.insert(d.tile, node);
                 continue;
             }
             let mut up = d.tile.parent();
@@ -292,7 +315,16 @@ pub fn draw_plan_with(
             water: None,
         },
     };
-    Ok(DrawPlan { plan, kind, substituted, blank })
+    Ok(DrawPlan { plan, kind, substituted, blank, preview: preview.to_vec(), preview_radius_m: req.lod.radius_m })
+}
+
+/// Whether the reach of a preview stamp touches the cap of `tile` (REND-033), with the halo the stamp stage declares its items with.
+fn previewed(preview: &[PreviewStamp], map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> bool {
+    if preview.is_empty() {
+        return false;
+    }
+    let cap = planet_world_def::footprint::tile_cap(map, tile, planet_generators::stamp::STAGE_HALO);
+    preview.iter().any(|s| planet_world_def::footprint::touches(cap, s.dir, s.reach_m, radius_m))
 }
 
 /// The cover of the frame's view over the resident set (the tiles of [`cover_selection_bounded`]).
@@ -624,11 +656,20 @@ pub struct PlanPipeline {
     last_requested: Option<TerrainRequest>,
     last_predicted: Option<PlanetFixed>,
     frame: u64,
+    /// The preview of the edit in flight (REND-033); empty when there is none.
+    preview: Vec<PreviewStamp>,
 }
 
 impl PlanPipeline {
     pub fn new(worker: PlanWorker) -> Self {
-        Self { worker, current: None, residency: None, last_requested: None, last_predicted: None, frame: 0 }
+        Self { worker, current: None, residency: None, last_requested: None, last_predicted: None, frame: 0, preview: Vec::new() }
+    }
+
+    /// Set the preview of the edit in flight (REND-033, from `preview_delta`): the frames that follow flag the nodes drawn from a stale
+    /// tile under a stamp and carry the list to the renderer. An empty list ends the preview; the flags end by themselves when the exact
+    /// tiles are resident.
+    pub fn set_preview(&mut self, preview: Vec<PreviewStamp>) {
+        self.preview = preview;
     }
 
     /// An edit changed what the world draws: ask for a new plan at the next frame although the camera did not move (STRM-026).
@@ -700,7 +741,8 @@ impl PlanPipeline {
         let base = self.current.as_ref().filter(|c| c.request == *req || plan_usable(&c.plan, req));
         let empty = TileBounds::default();
         let bounds = self.residency.as_ref().map_or(&empty, |r| &r.residency.bounds);
-        let draw = draw_plan_with(req, base.map(|c| (&c.request, c.plan.as_ref())), resident, bounds).map_err(|e| e.to_string())?;
+        let draw = draw_plan_preview(req, base.map(|c| (&c.request, c.plan.as_ref())), resident, bounds, &self.preview)
+            .map_err(|e| e.to_string())?;
         let wanted =
             self.current.as_ref().map(|c| c.plan.nodes.iter().enumerate().map(|(i, n)| (n.tile, i as f64)).collect()).unwrap_or_default();
         Ok(PipelineFrame { frame: self.frame, base_seq: base.map(|c| c.seq), draw, delivered, residency_delivered, requested, wanted })

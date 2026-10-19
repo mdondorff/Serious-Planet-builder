@@ -529,6 +529,7 @@ impl App<'_> {
                 None
             };
             let plan = lit_plan.as_ref().unwrap_or(&draw.plan);
+            st.rig.renderer.set_preview_of(draw);
             // One frame a second is timed on the GPU, which waits for it: the title's GPU time (meaningful with vsync off).
             let timed = ctx.timestamps_supported() && st.last_gpu_sample.elapsed() >= GPU_SAMPLE_PERIOD;
             let (timing, _) = if timed {

@@ -56,6 +56,8 @@ mod plan_origin_batch;
 mod plan_reuse;
 #[path = "prefetch.rs"]
 mod prefetch;
+#[path = "preview.rs"]
+mod preview;
 #[path = "residency.rs"]
 mod residency;
 #[path = "scheduler_equivalence.rs"]

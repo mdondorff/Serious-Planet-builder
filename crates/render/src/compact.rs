@@ -151,6 +151,87 @@ fn oct_decode(e: vec2<f32>) -> vec3<f32> {
     return normalize(n);
 }
 
+// The edit preview (REND-033): the profiles of GEN-026 at x = distance / reach, kind 1 hill, 2 crater, 3 plateau, `a` the amount (the plateau's
+// target is absolute), `m` the bound, `h` the running height above the reference sphere.
+fn smooth01(t: f32) -> f32 {
+    return t * t * (3.0 - 2.0 * t);
+}
+
+fn preview_profile(kind: f32, a: f32, m: f32, x: f32, h: f32) -> f32 {
+    if (x >= 1.0) {
+        return 0.0;
+    }
+    if (kind < 1.5) {
+        let q = 1.0 - x * x;
+        return a * q * q;
+    }
+    if (kind < 2.5) {
+        let bowl = 1.0 - smooth01(min(x / 0.8, 1.0));
+        var rim = 0.0;
+        if (x >= 0.7) {
+            let u = (x - 0.85) / 0.15;
+            let v = 1.0 - u * u;
+            rim = v * v;
+        }
+        return a * (-bowl + 0.2 * rim);
+    }
+    return (1.0 - smooth01(clamp((x - 0.7) / 0.3, 0.0, 1.0))) * clamp(a - h, -m, m);
+}
+
+struct Bump {
+    delta: f32,
+    grad: vec3<f32>,
+    flat_w: f32,
+};
+
+// The summed signed delta of the preview stamps at a point (camera-relative `p_rel`, the radial up `up` AT the point, height `h0` above the
+// sphere), the gradient of the delta along the ground and how flat a plateau makes the ground there (0 none, 1 fully). The distance is
+// measured in the tangent plane of the point's own up, so two tiles that share a border vertex agree on it (CON-11: no planet radius).
+fn preview_bump(p_rel: vec3<f32>, up: vec3<f32>, h0: f32) -> Bump {
+    var total = 0.0;
+    var grad = vec3<f32>(0.0);
+    var flat_w = 0.0;
+    let n = u32(g.extra.w);
+    for (var k = 0u; k < n; k = k + 1u) {
+        let a = g.preview[2u * k];
+        let b = g.preview[2u * k + 1u];
+        let d3 = p_rel - a.xyz;
+        let dh = d3 - up * dot(d3, up);
+        let d = length(dh);
+        if (d < a.w) {
+            let x = d / a.w;
+            let h = h0 + total;
+            // The profiles are even in x: the difference mirrors at 0, so the slope at the centre is 0.
+            let slope = (preview_profile(b.y, b.x, b.w, x + 0.01, h) - preview_profile(b.y, b.x, b.w, abs(x - 0.01), h)) / 0.02;
+            let dir = select(vec3<f32>(0.0), dh / d, d > 1e-6);
+            total = total + b.z * preview_profile(b.y, b.x, b.w, x, h);
+            grad = grad + dir * (b.z * slope / a.w);
+            if (b.y > 2.5 && b.z > 0.0 && abs(b.x - h) <= b.w) {
+                flat_w = max(flat_w, 1.0 - smooth01(clamp((x - 0.7) / 0.3, 0.0, 1.0)));
+            }
+        }
+    }
+    return Bump(total, grad, flat_w);
+}
+
+// A lattice vertex placed with the preview's delta along its own radial up (the position and, in w, the height with the delta), so the
+// parent-grid target built from displaced neighbours is the displaced parent grid.
+fn preview_place(o_rel: vec3<f32>, nup: vec4<f32>, i: i32, j: i32, hr: f32) -> vec4<f32> {
+    let p = place(i, j, hr);
+    let up = normalize(nup.xyz + p.xyz * nup.w);
+    let b = preview_bump(o_rel + p.xyz, up, h_origin + p.w);
+    return vec4<f32>(p.xyz + up * b.delta, p.w + b.delta);
+}
+
+// A neighbour for the parent-grid target: the preview's displaced vertex for a previewed node, the plain one otherwise.
+fn cplace(previewed: bool, o_rel: vec3<f32>, nup: vec4<f32>, i: i32, j: i32) -> vec4<f32> {
+    let hr = rel_height(texel(i, j));
+    if (previewed) {
+        return preview_place(o_rel, nup, i, j, hr);
+    }
+    return place(i, j, hr);
+}
+
 fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
     let node = nodes[inst];
     let tref = tile_refs[inst];
@@ -181,17 +262,29 @@ fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
         }
     }
     let own_t = texel(i, j);
-    let own = place(i, j, rel_height(own_t));
+    // A previewed node (REND-033) shows the edit's delta over its stale tile; every other node, and every frame without a preview, skips this.
+    let previewed = g.extra.w > 0.5 && node.morph.z > 0.5;
+    var own = place(i, j, rel_height(own_t));
+    var grad = vec3<f32>(0.0);
+    var flat_w = 0.0;
+    var vup = vec3<f32>(0.0);
+    if (previewed) {
+        vup = normalize(node.up.xyz + own.xyz * node.up.w);
+        let b0 = preview_bump(node.origin_rel.xyz + own.xyz, vup, h_origin + own.w);
+        grad = b0.grad;
+        flat_w = b0.flat_w;
+        own = vec4<f32>(own.xyz + vup * b0.delta, own.w + b0.delta);
+    }
     // The parent-grid target (exact): the average of the neighbours' positions and heights, as tile_mesh_field builds it.
     var coarse = own;
     let odd_i = (i & 1) == 1;
     let odd_j = (j & 1) == 1;
     if (odd_i && !odd_j) {
-        coarse = 0.5 * (place(i - 1, j, rel_height(texel(i - 1, j))) + place(i + 1, j, rel_height(texel(i + 1, j))));
+        coarse = 0.5 * (cplace(previewed, node.origin_rel.xyz, node.up, i - 1, j) + cplace(previewed, node.origin_rel.xyz, node.up, i + 1, j));
     } else if (!odd_i && odd_j) {
-        coarse = 0.5 * (place(i, j - 1, rel_height(texel(i, j - 1))) + place(i, j + 1, rel_height(texel(i, j + 1))));
+        coarse = 0.5 * (cplace(previewed, node.origin_rel.xyz, node.up, i, j - 1) + cplace(previewed, node.origin_rel.xyz, node.up, i, j + 1));
     } else if (odd_i && odd_j) {
-        coarse = 0.5 * (place(i - 1, j - 1, rel_height(texel(i - 1, j - 1))) + place(i + 1, j + 1, rel_height(texel(i + 1, j + 1))));
+        coarse = 0.5 * (cplace(previewed, node.origin_rel.xyz, node.up, i - 1, j - 1) + cplace(previewed, node.origin_rel.xyz, node.up, i + 1, j + 1));
     }
     var pos = own.xyz;
     var cpos = coarse.xyz;
@@ -208,6 +301,10 @@ fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
     var out: VsOut;
     out.pos = g.view_proj * vec4<f32>(p, 1.0);
     out.normal = texel_normal(own_t);
+    if (previewed) {
+        // A plateau flattens the ground: the normal leans to the vertex's up by how flat it makes it, then the slope of the delta tilts it.
+        out.normal = normalize(mix(out.normal, vup, flat_w) - grad);
+    }
     out.height = mix(h, ch, m);
     out.height_fine = h;
     out.morph = m;

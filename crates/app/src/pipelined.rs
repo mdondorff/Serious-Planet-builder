@@ -218,6 +218,7 @@ pub fn run_script(
                     fi.note_wait();
                     fi.retire_to(renderer.wait_oldest(ctx));
                 }
+                renderer.set_preview_of(draw);
                 let (timing, _) = renderer.submit(ctx, &draw.plan).map_err(|e| format!("frame {iteration}: {e}"))?;
                 fi.submit();
                 debug_assert!(fi.in_flight() <= MAX_FRAMES_IN_FLIGHT);
