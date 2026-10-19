@@ -128,7 +128,9 @@ pub fn pick_surface(ray: &Ray, limits: &PickLimits, height_m: &dyn Fn(Vec3) -> f
         if t >= t_out {
             return None;
         }
-        let next = (t + (f * scale).max(limits.min_step_m)).min(t_out);
+        // The floor grows with the distance from the camera, always far below a pixel's footprint there (about 1e-3 of the distance).
+        let floor = limits.min_step_m.max(t * 1e-6);
+        let next = (t + (f * scale).max(floor)).min(t_out);
         let f_next = f_at(next);
         if !f_next.is_finite() {
             return None;
