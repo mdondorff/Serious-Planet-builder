@@ -8,6 +8,8 @@ mod job_log;
 mod manager;
 #[path = "priority.rs"]
 mod priority;
+#[path = "refresh.rs"]
+mod refresh;
 #[path = "roots.rs"]
 mod roots;
 #[path = "scheduler.rs"]

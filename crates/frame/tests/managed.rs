@@ -91,6 +91,77 @@ impl TileSource<CompactTile> for Source {
     }
 }
 
+/// `Reference(1)` whose tiles on the line of descent to `region` (its ancestors, itself and its descendants) read an edit revision: an
+/// edit bumps `rev`, and exactly those tiles change their mesh key (a stamp's footprint, WDEF-007, without any stamp).
+struct EditField {
+    inner: Reference,
+    rev: Arc<std::sync::atomic::AtomicU64>,
+    region: TileId,
+}
+
+impl EditField {
+    fn touches(&self, tile: TileId) -> bool {
+        let under = |a: TileId, b: TileId| {
+            let mut x = Some(b);
+            while let Some(t) = x {
+                if t == a {
+                    return true;
+                }
+                x = t.parent();
+            }
+            false
+        };
+        under(tile, self.region) || under(self.region, tile)
+    }
+}
+
+impl HeightField for EditField {
+    fn height(&self, d: Vec3) -> f64 {
+        self.inner.height(d)
+    }
+    fn seed(&self) -> u64 {
+        self.inner.seed()
+    }
+    fn implementation_id(&self) -> &'static str {
+        "edit-test"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        self.inner.max_abs_height_m()
+    }
+    fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
+        self.inner.height_bounds(centre, angular_radius)
+    }
+    fn reads_cells(&self) -> bool {
+        true
+    }
+    fn read_records_for(&self, tile: TileId, _map: &dyn FaceMapping) -> Vec<planet_world_def::ReadRecord> {
+        let mut reads = planet_world_def::single_planet_seed_records(self.seed());
+        if self.touches(tile) {
+            reads.push(planet_world_def::ReadRecord::Node {
+                path: "edit.rev".into(),
+                value: planet_world_def::NodeValue::U64(self.rev.load(Ordering::SeqCst)),
+            });
+        }
+        reads
+    }
+}
+
+/// Like [`Source`] over an [`EditField`]: the tile it makes carries the key the field gives it now.
+struct EditSource {
+    lod: LodParams,
+    field: Arc<EditField>,
+}
+
+impl TileSource<CompactTile> for EditSource {
+    fn load(&self, tile: TileId) -> Result<CompactTile, String> {
+        let rec = ResidentRecords::new(self.field.as_ref(), &TangentWarp, &self.lod).record(tile);
+        Source { lod: self.lod.clone() }.load(tile).map(|t| CompactTile { key: rec.mesh_key, origin: rec.origin, ..t })
+    }
+}
+
 /// Tile jobs that wait until the machine finishes them, `threads` at a time (all done when `run` returns): the completion
 /// order differs with the thread count, the results must not.
 #[derive(Default)]
@@ -243,10 +314,26 @@ impl Rig {
     }
 
     fn build_full(capacity: usize, prefetch: bool, tile_bytes: u64, budget: UploadBudget, max_in_flight: usize) -> Rig {
+        Rig::build_edited(capacity, prefetch, tile_bytes, budget, max_in_flight, None)
+    }
+
+    /// A rig over an [`EditField`] (the plan worker and the tile source read the same field), or over `Reference(1)` with `None`.
+    fn build_edited(
+        capacity: usize,
+        prefetch: bool,
+        tile_bytes: u64,
+        budget: UploadBudget,
+        max_in_flight: usize,
+        edit: Option<Arc<EditField>>,
+    ) -> Rig {
         let clock = Arc::new(FakeClock::default());
         let plan_spawner = Arc::new(ManualSpawner::default());
         let tile_spawner = Arc::new(BatchSpawner::default());
-        let pipe = PlanPipeline::new(PlanWorker::new(plan_spawner.clone(), Arc::new(Reference(1)), 2));
+        let plan_field: Arc<dyn PlanField> = match &edit {
+            Some(f) => Arc::clone(f) as Arc<dyn PlanField>,
+            None => Arc::new(Reference(1)),
+        };
+        let pipe = PlanPipeline::new(PlanWorker::new(plan_spawner.clone(), plan_field, 2));
         let config = StreamConfig {
             max_in_flight,
             capacity,
@@ -256,7 +343,11 @@ impl Rig {
             record_changes: true,
             ..Default::default()
         };
-        let mut streamer = Streamer::new(Arc::new(Source { lod: lod() }), tile_spawner.clone() as Arc<dyn Spawner>, clock.clone(), config);
+        let source: Arc<dyn TileSource<CompactTile>> = match edit {
+            Some(field) => Arc::new(EditSource { lod: lod(), field }),
+            None => Arc::new(Source { lod: lod() }),
+        };
+        let mut streamer = Streamer::new(source, tile_spawner.clone() as Arc<dyn Spawner>, clock.clone(), config);
         streamer.load_roots_blocking().unwrap();
         let mut lp = ManagedLoop::new(pipe, ResidencyManager::new(streamer)).with_upload_budget(budget);
         if prefetch {
@@ -1488,4 +1579,54 @@ fn batching_changes_neither_the_order_nor_the_placement_nor_the_bytes_of_the_upl
     assert_eq!(a.sink.slots_written, b.sink.slots_written, "in the same slots");
     let key = |f: &[(FrameCounts, Vec<SlotRef>)]| f.iter().map(|(c, _)| (c.uploaded, c.upload_bytes, c.deferred)).collect::<Vec<_>>();
     assert_eq!(key(&fa), key(&fb), "the same counts per frame, bytes and the cap unchanged");
+}
+
+// spec: STRM-026, REND-032
+#[test]
+fn an_edit_refreshes_the_tiles_it_touches_while_their_old_versions_stay_drawn_and_a_still_camera_gets_a_new_plan() {
+    let rev = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let req = request(here(), 0.0, -0.4);
+    let region = TileId::from_direction(&TangentWarp, here().0.normalized(), 6);
+    let field = Arc::new(EditField { inner: Reference(1), rev: Arc::clone(&rev), region });
+    let mut rig = Rig::build_edited(1_000_000, false, 0, UploadBudget::default(), 64, Some(Arc::clone(&field)));
+    rig.settle(&req);
+    let drawn_before: BTreeSet<TileId> = rig.step(&req).pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+    let affected: Vec<TileId> = rig.lp.resident().keys().filter(|t| field.touches(**t)).copied().collect();
+    assert!(affected.len() > 3 && affected.iter().any(|t| drawn_before.contains(t)), "the edit must touch drawn tiles: {affected:?}");
+    let (completed_before, sink_uploads) = (rig.lp.pipeline().worker().counts().completed, rig.sink.uploads);
+
+    // The edit. Tile jobs wait (the machine is busy) for a few frames: what is drawn meanwhile.
+    rev.store(1, Ordering::SeqCst);
+    let queued = rig.lp.edit(&affected);
+    assert!(queued > 0, "resident tiles in a class are requested again");
+    rig.tile_jobs_per_frame = 0;
+    let mut saw_stale = false;
+    for k in 0..4 {
+        let f = rig.step(&req);
+        assert_eq!(f.pipeline.draw.blank, 0, "frame {k}: never blank");
+        let drawn: BTreeSet<TileId> = f.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+        assert_eq!(drawn, drawn_before, "frame {k}: the edited place is not replaced by coarser tiles while it reloads");
+        if f.pipeline.draw.kind == DrawKind::Stale {
+            saw_stale = true;
+            let want: HashMap<TileId, u64> =
+                plan_terrain_field(&req, field.as_ref()).unwrap().nodes.iter().map(|n| (n.tile, n.mesh_key)).collect();
+            assert!(
+                f.pipeline.draw.plan.nodes.iter().any(|n| want.get(&n.tile).is_some_and(|k| *k != n.mesh_key)),
+                "frame {k}: an old version is what is drawn"
+            );
+        }
+    }
+    assert!(saw_stale, "the new plan (asked for although the camera did not move) was delivered and the old tiles drawn under it");
+    assert!(rig.lp.pipeline().worker().counts().completed > completed_before, "a still camera got a new plan from the edit event");
+    assert_eq!(rig.sink.uploads, sink_uploads, "nothing was uploaded while the jobs waited");
+
+    // The jobs finish: every refreshed tile is replaced in place, the frame is the synchronous frame of the new field again.
+    rig.tile_jobs_per_frame = 10_000;
+    rig.settle_view(&req);
+    let f = rig.step(&req);
+    assert_eq!(f.pipeline.draw.kind, DrawKind::Exact);
+    assert_eq!(f.pipeline.draw.plan, plan_terrain_field(&req, field.as_ref()).unwrap());
+    let stats = rig.lp.manager().streamer().stats();
+    assert_eq!(stats.refreshed, queued as u64, "every requested refresh replaced its tile");
+    assert!(rig.sink.uploads > sink_uploads, "the new versions were uploaded");
 }

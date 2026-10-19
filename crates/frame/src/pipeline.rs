@@ -140,7 +140,8 @@ pub enum DrawKind {
 pub struct DrawPlan {
     pub plan: TerrainPlan,
     pub kind: DrawKind,
-    /// Plan nodes drawn as an ancestor instead (their tile or its key was not resident).
+    /// Plan nodes drawn as an ancestor instead (their tile was not resident), and nodes drawn from a resident version of another key
+    /// (stale while revalidating, REND-032).
     pub substituted: usize,
     /// Plan nodes with nothing resident to show, not even a root: zero whenever the roots are resident (STRM-002).
     pub blank: usize,
@@ -192,7 +193,8 @@ pub fn draw_plan(
 /// usable; `resident` is what the renderer holds; `bounds` the tile bounds of the newest residency set (the cover reads them
 /// instead of evaluating a field). A pure function of its arguments, and no height field is evaluated:
 /// - with a `base` made for exactly `req` and all its nodes resident, the result is that plan unchanged;
-/// - with a `base`, each node whose tile (with its mesh key) is not resident is replaced by its deepest resident ancestor
+/// - with a `base`, each node whose tile is resident with another mesh key is drawn from that resident version (REND-032, an edit's
+///   refresh is on the way) and each node whose tile is not resident is replaced by its deepest resident ancestor
 ///   (the coarser tile wins over any resident descendant it covers, so no two drawn tiles overlap) and the camera of `req` is
 ///   put in (origins and matrix), so the plan's nodes follow the camera; a `base` made for another camera is drawn only if it
 ///   covers the frame's view ([`plan_covers_view`]: every tile of the frame's own cover is drawn by it, or filled by finer
@@ -215,6 +217,13 @@ pub fn draw_plan_with(
             if resident.resident(d.tile).is_some_and(|r| r.mesh_key == d.mesh_key) {
                 let rel = d.origin.0 - req.camera.position.0;
                 shown.insert(d.tile, TerrainDraw { camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32], ..*d });
+                continue;
+            }
+            // Stale while revalidating (REND-032): a resident tile of another version (an edit changed what it reads and its refresh is
+            // on the way) is drawn as it is, not replaced by an ancestor, so an edited place never goes coarse while it reloads.
+            if let Some(r) = resident.resident(d.tile) {
+                substituted += 1;
+                shown.insert(d.tile, draw_of(req, d.tile, r));
                 continue;
             }
             let mut up = d.tile.parent();
@@ -404,6 +413,18 @@ pub struct PlanWorker {
 impl PlanWorker {
     pub fn new(spawner: Arc<dyn Spawner>, field: Arc<dyn PlanField>, threads: usize) -> Self {
         Self { spawner, field, cache: Arc::new(Mutex::new(SelectionCache::new())), threads, state: Arc::default() }
+    }
+
+    /// Forget the cached origin heights, mesh keys and volumes of `tiles` (an item edit changed what they read, STRM-026), or of every
+    /// tile with `None`, so the next plan computes them again.
+    pub fn invalidate_cache(&self, tiles: Option<&[TileId]>) {
+        let mut c = self.cache.lock().expect("selection cache");
+        match tiles {
+            Some(t) => {
+                c.invalidate_tiles(t);
+            }
+            None => c.clear(),
+        }
     }
 
     /// Ask for the plan of `req`. Never blocks and never plans on the calling thread.
@@ -597,6 +618,11 @@ pub struct PlanPipeline {
 impl PlanPipeline {
     pub fn new(worker: PlanWorker) -> Self {
         Self { worker, current: None, residency: None, last_requested: None, last_predicted: None, frame: 0 }
+    }
+
+    /// An edit changed what the world draws: ask for a new plan at the next frame although the camera did not move (STRM-026).
+    pub fn force_replan(&mut self) {
+        self.last_requested = None;
     }
 
     pub fn worker(&self) -> &PlanWorker {
