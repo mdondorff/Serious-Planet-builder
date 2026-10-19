@@ -53,7 +53,10 @@ fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
     }
     assert!(table.contains("set_definition call"), "edit-latency.md holds both tables: {table}");
     // The refreshed set by level (TEST-041): at least one row of the case, named = drawn + resident only.
-    assert!(out.contains("| altitude | stamp radius | level | spacing m | named | drawn | resident only | change below spacing |"), "{out}");
+    assert!(
+        out.contains("| altitude | stamp radius | level | spacing m | named | drawn | resident only | change below spacing |"),
+        "{out}"
+    );
     let after = &out[out.find("| change below spacing |").unwrap()..];
     let level_rows: Vec<Vec<&str>> =
         after.lines().filter(|l| l.starts_with("| 200 m | 50 m | ")).map(|l| l.split('|').map(str::trim).collect()).collect();

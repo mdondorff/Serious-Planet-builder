@@ -521,7 +521,13 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         let rho = (1.5 * radii[0]).max(altitude);
         let first = req_of(camera_for(first_stamp.dir, &ground, radius_m, rho, altitude, aspect));
         let rig = Rig::new(ctx, &world, &first, o.gen_workers())?;
-        let mut h = Harness { ctx, rig, iteration: 0, drawn: HashSet::new(), settle_limit: if smoke { Duration::from_secs(120) } else { SETTLE_LIMIT } };
+        let mut h = Harness {
+            ctx,
+            rig,
+            iteration: 0,
+            drawn: HashSet::new(),
+            settle_limit: if smoke { Duration::from_secs(120) } else { SETTLE_LIMIT },
+        };
         for &r in &radii {
             let stamp = case_stamp(r);
             let rho = (1.5 * r).max(altitude);
