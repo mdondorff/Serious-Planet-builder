@@ -37,7 +37,15 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      # A runner fault (actions/partner-runner-images#169, "bash startup failure") fails the install now and then: one automatic
+      # second attempt (BUILD-017). Any other failure fails the second attempt too, so it stays visible.
       - uses: taiki-e/install-action@v2
+        id: install
+        continue-on-error: true
+        with:
+          tool: cargo-nextest,cargo-deny
+      - uses: taiki-e/install-action@v2
+        if: steps.install.outcome == 'failure'
         with:
           tool: cargo-nextest,cargo-deny
       - name: Software Vulkan (lavapipe)
@@ -103,6 +111,12 @@ jobs:
           shared-key: test
           save-if: "false"
       - uses: taiki-e/install-action@v2
+        id: install
+        continue-on-error: true
+        with:
+          tool: cargo-nextest
+      - uses: taiki-e/install-action@v2
+        if: steps.install.outcome == 'failure'
         with:
           tool: cargo-nextest
       - name: Software Vulkan (lavapipe)
