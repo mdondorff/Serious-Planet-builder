@@ -64,7 +64,7 @@ fn a_wide_id_or_content_hash_changes_the_query_hash_and_no_two_wide_layouts_coll
 }
 
 fn item(id: u128, content: u128) -> FootprintItem {
-    FootprintItem { id, priority: 0, content, dir: [1, 2, 3], reach_bits: 4, max_delta_bits: 5, layer: "items".into() }
+    FootprintItem { id, priority: 0, content, dir: [1, 2, 3], reach_bits: 4, max_delta_bits: 5, layer: "items".into(), stamp: None }
 }
 
 // spec: WDEF-009

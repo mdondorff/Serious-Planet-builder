@@ -9,6 +9,7 @@
 pub mod cells;
 pub mod footprint;
 pub mod item_id;
+pub mod stamp;
 pub mod summary;
 pub mod toml_io;
 pub mod water;
@@ -92,6 +93,8 @@ struct ItemRec {
     max_delta_bits: u64,
     layer: String,
     priority: i32,
+    /// The stamp the item is, if it is one (WDEF-010); its content hash is derived from it.
+    stamp: Option<stamp::Stamp>,
 }
 
 /// The layer and the numbers of an item put with [`WorldDefinition::put_item`].
@@ -113,6 +116,18 @@ pub struct ItemSpec {
     pub reach_m: f64,
     /// Bound in metres on the height change anywhere in the reach; finite and at least 0.
     pub max_delta_m: f64,
+    /// The stamp the item is (WDEF-010), or `None` for an item with no height output of its own. A stamp's `content_hash` is
+    /// [`stamp::Stamp::content_hash`]; [`ItemSpec::with_stamp`] sets both.
+    pub stamp: Option<stamp::Stamp>,
+}
+
+impl ItemSpec {
+    /// This item as a stamp: the stamp is set and the content hash derived from it.
+    pub fn with_stamp(mut self, stamp: stamp::Stamp) -> ItemSpec {
+        self.content_hash = stamp.content_hash();
+        self.stamp = Some(stamp);
+        self
+    }
 }
 
 /// Why an item could not be put into the index.
@@ -128,6 +143,8 @@ pub enum ItemError {
     MaxDelta { id: ItemId, max_delta_m: f64 },
     /// The layer name is empty.
     Layer { id: ItemId },
+    /// A stamp that cannot be one (no reach, a parameter out of range, a content hash that is not the stamp's).
+    Stamp { id: ItemId, reason: String },
 }
 
 impl core::fmt::Display for ItemError {
@@ -140,7 +157,35 @@ impl core::fmt::Display for ItemError {
             }
             ItemError::MaxDelta { id, max_delta_m } => write!(f, "item {id}: max_delta {max_delta_m} m must be finite and at least 0"),
             ItemError::Layer { id } => write!(f, "item {id}: the layer name must not be empty"),
+            ItemError::Stamp { id, reason } => write!(f, "item {id}: {reason}"),
         }
+    }
+}
+
+/// Why a stamp is refused, if it is (WDEF-010): no reach, a parameter that is not finite or out of range, a content hash that is not the
+/// one its kind and parameters give.
+fn stamp_refusal(spec: &ItemSpec, stamp: stamp::Stamp) -> Option<String> {
+    let [p0, p1, p2] = stamp.params();
+    if !(spec.reach_m > 0.0) {
+        return Some(format!("a {} needs a reach above 0, got {} m", stamp.kind.name(), spec.reach_m));
+    }
+    if ![p0, p1, p2].iter().all(|p| p.is_finite()) {
+        return Some(format!("a {} parameter is not finite: {:?}", stamp.kind.name(), stamp.params()));
+    }
+    if (p1, p2) != (0.0, 0.0) {
+        return Some(format!("the two reserved parameters of a {} must be 0, got {p1} and {p2}", stamp.kind.name()));
+    }
+    match stamp.kind {
+        stamp::StampKind::Hill if p0.abs() > spec.max_delta_m => {
+            Some(format!("a hill of {p0} m is above its bound of {} m", spec.max_delta_m))
+        }
+        stamp::StampKind::Crater if p0 < 0.0 || p0 > spec.max_delta_m => {
+            Some(format!("a crater depth of {p0} m must be between 0 and its bound of {} m", spec.max_delta_m))
+        }
+        _ if spec.content_hash != stamp.content_hash() => {
+            Some("the content hash is not the one the stamp's kind and parameters give".to_string())
+        }
+        _ => None,
     }
 }
 
@@ -305,7 +350,16 @@ impl WorldDefinition {
     /// hash (which stands for everything about the item except its place, which the index keeps). The cell level comes
     /// from the body's radius node. Returns the cell.
     pub fn put_item(&mut self, body: BodyId, id: ItemId, dir: Vec3, content_hash: ItemHash) -> Result<TileId, ItemError> {
-        let spec = ItemSpec { id, layer: DEFAULT_ITEM_LAYER.to_string(), priority: 0, dir, content_hash, reach_m: 0.0, max_delta_m: 0.0 };
+        let spec = ItemSpec {
+            id,
+            layer: DEFAULT_ITEM_LAYER.to_string(),
+            priority: 0,
+            dir,
+            content_hash,
+            reach_m: 0.0,
+            max_delta_m: 0.0,
+            stamp: None,
+        };
         self.put_item_spec(body, spec)
     }
 
@@ -326,6 +380,11 @@ impl WorldDefinition {
         if spec.layer.is_empty() {
             return Err(ItemError::Layer { id: spec.id });
         }
+        if let Some(stamp) = spec.stamp {
+            if let Some(reason) = stamp_refusal(&spec, stamp) {
+                return Err(ItemError::Stamp { id: spec.id, reason });
+            }
+        }
         let (id, unit) = (spec.id, spec.dir.normalized());
         self.remove_item(body, id);
         let rec = ItemRec {
@@ -335,6 +394,7 @@ impl WorldDefinition {
             max_delta_bits: canonical_bits(spec.max_delta_m),
             layer: spec.layer,
             priority: spec.priority,
+            stamp: spec.stamp,
         };
         let cell = cells::cell_of(radius, unit);
         let layer = rec.layer.clone();
@@ -390,6 +450,7 @@ impl WorldDefinition {
             reach_bits: rec.reach_bits,
             max_delta_bits: rec.max_delta_bits,
             layer: rec.layer.clone(),
+            stamp: rec.stamp,
         }
     }
 
@@ -498,26 +559,57 @@ impl WorldDefinition {
             }
             _ => self.body_item_ids(body),
         };
+        Ok(self.items_touching(body, layer, cap, radius, candidates))
+    }
+
+    /// The items of `layer` whose reach touches `cap` (WDEF-007), in application order: the footprint of a point or a bundle of points
+    /// (a stage reads its items once per batch, GEN-026). Candidates are the items of the cell of the cap's centre plus
+    /// [`footprint::candidate_rings`] rings, or every item of the body when the cap is too wide; the touch test decides.
+    pub fn footprint_items_cap(
+        &self,
+        body: BodyId,
+        layer: &str,
+        cap: footprint::Cap,
+    ) -> Result<Vec<footprint::FootprintItem>, MissingNode> {
+        if !(cap.angle.is_finite() && (0.0..=core::f64::consts::PI).contains(&cap.angle)) {
+            return Err(MissingNode(format!("a footprint cap angle in [0, pi] (got {})", cap.angle)));
+        }
+        let radius = self.usable_radius(body)?;
+        let level = cells::cell_level(radius);
+        let candidates: Vec<ItemId> = match footprint::candidate_rings(cap, radius, level) {
+            Some(rings) => {
+                let centre = cells::cell_of(radius, cap.centre);
+                cells::with_margin(&[centre], rings)
+                    .iter()
+                    .filter_map(|c| self.cells.get(&(body, c.raw())))
+                    .flat_map(|ids| ids.iter().copied())
+                    .collect()
+            }
+            None => self.body_item_ids(body),
+        };
+        Ok(self.items_touching(body, layer, cap, radius, candidates))
+    }
+
+    /// The candidates that are items of `layer` and touch `cap`, in application order.
+    fn items_touching(
+        &self,
+        body: BodyId,
+        layer: &str,
+        cap: footprint::Cap,
+        radius: f64,
+        candidates: Vec<ItemId>,
+    ) -> Vec<footprint::FootprintItem> {
         let mut out: Vec<footprint::FootprintItem> = candidates
             .into_iter()
-            .filter_map(|id| {
-                let rec = &self.items[&(body, id)];
-                (rec.layer == layer && footprint::touches(cap, rec.unit(), f64::from_bits(rec.reach_bits), radius)).then(|| {
-                    footprint::FootprintItem {
-                        id,
-                        priority: rec.priority,
-                        content: rec.content,
-                        dir: rec.dir,
-                        reach_bits: rec.reach_bits,
-                        max_delta_bits: rec.max_delta_bits,
-                        layer: rec.layer.clone(),
-                    }
-                })
+            .filter(|id| {
+                let rec = &self.items[&(body, *id)];
+                rec.layer == layer && footprint::touches(cap, rec.unit(), f64::from_bits(rec.reach_bits), radius)
             })
+            .map(|id| self.footprint_item(body, id))
             .collect();
         out.sort_by_key(|i| (i.priority, i.id));
         out.dedup_by_key(|i| i.id);
-        Ok(out)
+        out
     }
 
     /// The anchor (unit direction) and reach in metres of an item, if it exists.

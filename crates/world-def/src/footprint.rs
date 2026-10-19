@@ -50,6 +50,8 @@ pub struct FootprintItem {
     pub reach_bits: u64,
     pub max_delta_bits: u64,
     pub layer: String,
+    /// The stamp the item is, if it is one (WDEF-010). Its content hash is derived from it, so it is in the item hash through `content`.
+    pub stamp: Option<crate::stamp::Stamp>,
 }
 
 /// A spherical cap: a unit centre direction and an angle in radians (`PI` is the whole sphere).

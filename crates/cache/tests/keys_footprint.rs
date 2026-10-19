@@ -76,7 +76,7 @@ impl HeightField for Footprinted<'_> {
 }
 
 fn stamp(id: u128, at: Vec3, reach_m: f64) -> ItemSpec {
-    ItemSpec { id, layer: "items".into(), priority: 0, dir: at, content_hash: 5, reach_m, max_delta_m: 20.0 }
+    ItemSpec { id, layer: "items".into(), priority: 0, dir: at, content_hash: 5, reach_m, max_delta_m: 20.0, stamp: None }
 }
 
 // spec: STRM-003, WDEF-007
@@ -182,6 +182,7 @@ fn the_footprint_result_is_in_application_order_with_sixteen_byte_ids_and_pinned
         reach_bits: 150.0f64.to_bits(),
         max_delta_bits: 20.0f64.to_bits(),
         layer: "items".into(),
+        stamp: None,
     };
     assert_eq!(footprint_id_bytes(0x0102_0304_0506_0708), [0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8], "zero-extended, big-endian");
     let a = footprint_result_hash128(&[item(1, 5), item(2, 1)]);
@@ -270,7 +271,16 @@ fn every_item_a_stamp_generator_touches_in_a_tile_is_in_the_footprint_the_tile_d
             let c = dir(1.0, 0.2 + along_m / R, 0.1 + 0.3 * (i + j) as f64 * 1e-5);
             def.put_item_spec(
                 BodyId::PLANET,
-                ItemSpec { id, layer: "items".into(), priority: 0, dir: c, content_hash: id, reach_m, max_delta_m: 5.0 + reach_m * 0.01 },
+                ItemSpec {
+                    id,
+                    layer: "items".into(),
+                    priority: 0,
+                    dir: c,
+                    content_hash: id,
+                    reach_m,
+                    max_delta_m: 5.0 + reach_m * 0.01,
+                    stamp: None,
+                },
             )
             .unwrap();
         }

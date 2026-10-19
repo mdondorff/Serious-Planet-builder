@@ -19,7 +19,16 @@ fn world() -> WorldDefinition {
 }
 
 fn spec(id: ItemId, at: Vec3, content: u128) -> ItemSpec {
-    ItemSpec { id, layer: DEFAULT_ITEM_LAYER.into(), priority: 0, dir: at, content_hash: content, reach_m: 500.0, max_delta_m: 10.0 }
+    ItemSpec {
+        id,
+        layer: DEFAULT_ITEM_LAYER.into(),
+        priority: 0,
+        dir: at,
+        content_hash: content,
+        reach_m: 500.0,
+        max_delta_m: 10.0,
+        stamp: None,
+    }
 }
 
 // spec: WDEF-009
