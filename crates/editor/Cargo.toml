@@ -11,3 +11,5 @@ planet-core.workspace = true
 planet-world-def.workspace = true
 planet-render.workspace = true
 planet-frame.workspace = true
+libm.workspace = true
+toml.workspace = true

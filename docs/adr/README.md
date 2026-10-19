@@ -76,3 +76,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0064 | [The render floor's roots load outside the per-frame upload cap](0064-floor-roots-exempt-from-the-upload-cap.md) | accepted | amends 0033 point 9 |
 | 0065 | [CPU calibration decides whether a perf scene counts](0065-cpu-calibration-validity.md) | accepted | extends 0020 and 0036 |
 | 0066 | [Authored items: reach, region summaries, stages, selection bounds, item files, command log](0066-authored-items-reach-summaries-stages-and-files.md) | accepted | decides 0021 points 2, 5, 6, 8; amends 0007, 0018, 0023 |
+| 0067 | [Stamp key hash and height bounds by delta range](0067-stamp-key-hash-and-delta-range-bounds.md) | accepted | amends 0066 points 2, 5 and the key role of 6 |
