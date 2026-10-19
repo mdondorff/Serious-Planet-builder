@@ -458,6 +458,14 @@ Assumption it changes: the console is enough evidence of a test run: it is not; 
 Proposed follow-up: none; `perf` and `accept` keep their own logs.
 Obsolete when: nextest or CI keeps every run's output where the agents can read it.
 
+## 2026-10-19 Shortcut letters are logical keys, movement keys are physical keys
+Scope: project (editor input)
+What happened: the editor mode binds Ctrl+Z and Ctrl+Y. winit's `KeyCode::KeyZ` and `KeyCode::KeyY` are physical positions, so on a QWERTZ keyboard (Germany, Switzerland) the key labelled Z is `KeyCode::KeyY` and undo and redo would have swapped. The spec-guardian found it before it shipped; WASD and the number row are positions and stay physical.
+Assumption it changes: VIEW-003 and VIEW-004 bind keys by physical code (right for movement); VIEW-022 binds undo and redo by the character on the key.
+Proposed follow-up: new shortcut letters go through `edit_key` (logical character first, physical key as the fallback) and its tier-A test with a QWERTZ case.
+Obsolete when: all key bindings are read from a settings file with a layout-aware default.
+
+
 ## 2026-10-19 Bounding a tile by the declared maximum of a stamp leaves a fine tile no room to morph (stamp-stage)
 Scope: GEN-026, LOD-008, height bounds of authored stages
 What happened: the stage widened a tile's bounds by the sum of the items' `max_delta_m`; a 60 m hill with a 3 km reach made the plan refuse tiles of level 19 (about 20 m wide) with an empty morph interval, although the hill is nearly flat under them.

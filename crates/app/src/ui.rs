@@ -195,14 +195,20 @@ impl EditorUi {
         status: &str,
         markers: &[planet_frame::globe::ScreenMarker],
         hover: Option<u64>,
+        extra: Option<&mut dyn FnMut(&mut egui::Ui)>,
     ) -> UiFrame {
         let started = std::time::Instant::now();
         self.shell.status.clear();
         self.shell.status.push_str(status);
         let raw = self.winit.take_egui_input(window);
         let shell_state = &mut self.shell;
+        // The editor mode (VIEW-022) draws its panels in place of the shell window.
+        let mut extra = extra;
         let out = self.ctx.run_ui(raw, |ui| {
-            shell(ui, shell_state);
+            match extra.as_mut() {
+                Some(draw) => draw(ui),
+                None => shell(ui, shell_state),
+            }
             draw_markers(ui, markers, hover);
         });
         self.winit.handle_platform_output(window, out.platform_output);

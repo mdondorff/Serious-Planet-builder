@@ -7,12 +7,15 @@
 //! `--smoke` is the test mode: it opens the window, drives the keys through the same command path for a few dozen frames and
 //! closes it. Where there is no display it stops with an error that starts with [`NO_DISPLAY`], which a test reports as a skip.
 
+use crate::editwin::{EditKey, EditRuntime, Pointer, EDIT_KEYS_HELP, SMOKE_EDIT_FRAMES};
 use crate::pipelined::{RendererSink, Rig};
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
+use planet_editor::layout::Layout;
 use planet_frame::globe::{marker_at, visible_markers, wheel_zoom_factor, ClickTracker, Marker, ScreenMarker, Viewport, HIT_RADIUS_PX};
 use planet_frame::look::file::LookParams;
 use planet_frame::mouselook::{Grab, GrabChange, GRAB_ORDER};
+use planet_frame::pick::PickLimits;
 use planet_frame::scenes::{build_script, DrawnSet, StreamScene};
 use planet_frame::viewer::{
     lit_warm_plan, mode_label, smoke_verdict, title, view_coverage, viewer_lit_plan, Command, ExposureReading, FrameStats, Held, Readiness,
@@ -24,6 +27,7 @@ use planet_generators::height::HeightField;
 use planet_render::{AdapterPolicy, GpuContext, Presented, WindowSurface};
 use planet_streaming::{Clock, SystemClock};
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
@@ -65,6 +69,64 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
     })
 }
 
+/// What a mouse button does in the editor mode (VIEW-022).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditMouse {
+    /// The left button went down in the world: press.
+    Press,
+    /// The left button went up, wherever: release.
+    Release,
+    /// The right button went down: look around while it is held.
+    StartLook,
+    /// The right button went up: stop looking.
+    EndLook,
+}
+
+/// The decision for a mouse button in the editor mode. `world` says the event is the world's (not a panel's), `captured` that the pointer is
+/// captured (looking around), `holding` that the left button holds an edit.
+pub fn edit_mouse_action(button: MouseButton, state: ElementState, world: bool, captured: bool, holding: bool) -> Option<EditMouse> {
+    match (button, state) {
+        // A press while the pointer is captured is not at the cursor the window last saw: it does nothing.
+        (MouseButton::Left, ElementState::Pressed) if world && !captured => Some(EditMouse::Press),
+        (MouseButton::Left, ElementState::Released) => Some(EditMouse::Release),
+        // Looking around waits for the left button: a handle held is not let go of by a second button.
+        (MouseButton::Right, ElementState::Pressed) if world && !holding => Some(EditMouse::StartLook),
+        (MouseButton::Right, ElementState::Released) => Some(EditMouse::EndLook),
+        _ => None,
+    }
+}
+
+/// The viewer commands the editor mode does not take: it edits from the free camera with no overview (VIEW-022).
+pub fn editor_mode_blocks(cmd: Command) -> bool {
+    matches!(cmd, Command::ToggleCamera | Command::ToggleGlobe)
+}
+
+/// The key of the editor mode a key press asks for, if any (VIEW-022).
+///
+/// Undo and redo are the keys *labelled* Z and Y, whatever the layout (`logical` is the character of the key; on a QWERTZ keyboard the
+/// physical key `KeyZ` is labelled Y); without a character the physical keys of a QWERTY keyboard stand in. The rest are physical keys.
+pub fn edit_key(code: KeyCode, logical: Option<&str>, ctrl: bool, shift: bool) -> Option<EditKey> {
+    let (z, y) = match logical {
+        Some(c) => (c.eq_ignore_ascii_case("z"), c.eq_ignore_ascii_case("y")),
+        None => (code == KeyCode::KeyZ, code == KeyCode::KeyY),
+    };
+    if ctrl && z {
+        return Some(if shift { EditKey::Redo } else { EditKey::Undo });
+    }
+    if ctrl && y {
+        return Some(EditKey::Redo);
+    }
+    Some(match code {
+        KeyCode::Digit1 => EditKey::Tool(1),
+        KeyCode::Digit2 => EditKey::Tool(2),
+        KeyCode::Digit3 => EditKey::Tool(3),
+        KeyCode::Digit4 => EditKey::Tool(4),
+        KeyCode::Delete | KeyCode::Backspace => EditKey::Delete,
+        KeyCode::Escape => EditKey::Escape,
+        _ => return None,
+    })
+}
+
 /// Set or clear the held key `code` stands for; `false` when the key is not a held key.
 pub fn set_held(held: &mut Held, code: KeyCode, down: bool) -> bool {
     let slot = match code {
@@ -93,6 +155,12 @@ struct Config {
     smoke: bool,
     /// Draw the editor UI (VIEW-011); `--no-ui` turns it off.
     ui: bool,
+    /// Start in the editor mode (`--edit`, VIEW-022).
+    edit: bool,
+    /// The directory the edits are written to and loaded from (`--items`).
+    items: Option<PathBuf>,
+    /// The panel layout (`--editor-layout`, VIEW-018).
+    layout: Layout,
     /// Frames a smoke run drives before it closes the window (`--frames`, default [`SMOKE_FRAMES`]).
     smoke_frames: u64,
     vsync: bool,
@@ -130,6 +198,13 @@ struct GlobeStats {
 struct Running {
     /// The editor UI (VIEW-011): egui in the frame after the tone map; `None` with `--no-ui`.
     ui: Option<crate::ui::EditorUi>,
+    /// The editor mode (VIEW-022); present with the UI, on or off.
+    edit: Option<EditRuntime>,
+    /// Control and shift are down (the keys of the editor mode).
+    ctrl: bool,
+    shift: bool,
+    /// The primary button is down in the world in the editor mode.
+    edit_down: bool,
     window: Arc<Window>,
     ctx: GpuContext,
     surface: WindowSurface,
@@ -171,7 +246,10 @@ struct Running {
 struct App<'w> {
     cfg: &'w Config,
     world: &'w Arc<WorldTerrain>,
-    field: &'w (dyn HeightField + 'w),
+    /// The height field the window picks and reads the ground from; rebuilt when the edits change the definition.
+    field: Box<dyn HeightField + 'w>,
+    /// The plan parameters: the configured ones, with the height bound raised to the field's maximum when the stamps lift it (VIEW-022).
+    lod: LodParams,
     cameras: &'w [Camera],
     clock: Arc<SystemClock>,
     params: ControllerParams,
@@ -225,8 +303,20 @@ impl App<'_> {
         let now = self.clock.now_ms();
         let viewer = ViewerState::new(now, TerrainView::ALL.len(), cfg.initial_view, cfg.vsync).with_lit(true).with_radius_m(cfg.radius_m);
         let ui = cfg.ui.then(|| crate::ui::EditorUi::new(&window, surface.ui_painter(&ctx)));
+        let edit = if cfg.ui {
+            let mut e = EditRuntime::new(self.world.definition().as_ref().clone(), cfg.radius_m, cfg.items.as_ref(), cfg.layout.clone())?;
+            // A smoke run turns the mode on itself, at the frame its script says, after the overview phases.
+            e.on = cfg.edit && !cfg.smoke;
+            Some(e)
+        } else {
+            None
+        };
         self.state = Some(Running {
             ui,
+            edit,
+            ctrl: false,
+            shift: false,
+            edit_down: false,
             window,
             ctx,
             surface,
@@ -264,8 +354,8 @@ impl App<'_> {
     fn globe_click(&mut self) {
         let Some(st) = self.state.as_mut() else { return };
         let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
-        let limits = planet_frame::pick::PickLimits::new(self.cfg.radius_m, self.cfg.lod.max_height_m);
-        let field = self.field;
+        let limits = planet_frame::pick::PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
+        let field = self.field.as_ref();
         let height = |d: planet_core::Vec3| field.height(d);
         if let Some(g) = st.viewer.globe.as_mut() {
             if g.click(st.cursor, &st.last_camera, viewport, &st.markers, &limits, &height).is_some() {
@@ -280,7 +370,7 @@ impl App<'_> {
             camera,
             size: self.cfg.size,
             view,
-            lod: planet_frame::viewer::effective_lod(&self.cfg.lod, coarse),
+            lod: planet_frame::viewer::effective_lod(&self.lod, coarse),
             face_mapping: planet_core::cube::FaceMapping::id(&planet_core::cube::TangentWarp).to_string(),
             seed: self.cfg.seed,
         }
@@ -291,7 +381,36 @@ impl App<'_> {
         let cfg = self.cfg;
         let began = Instant::now();
         let now_ms = self.clock.now_ms();
-        let (field, radius) = (self.field, cfg.radius_m);
+        // A changed definition goes to the generator before the frame plans: the definition first, then the tiles it changed (STRM-028); the
+        // field the window picks and reads the ground from is then built again from the new definition.
+        let mut republished = false;
+        if let Some(st) = self.state.as_mut() {
+            if let Some(e) = st.edit.as_mut() {
+                if let Some(def) = e.take_changed_definition() {
+                    match self.world.set_definition(def) {
+                        Ok(()) => {
+                            let resident: Vec<_> = st.rig.managed.resident().keys().copied().collect();
+                            let tiles = e.refresh_tiles(&resident);
+                            st.rig.managed.edit(&tiles);
+                            republished = true;
+                        }
+                        Err(why) => {
+                            e.stats.refused += 1;
+                            e.session.set_status(format!("the terrain did not take the edit: {why}"));
+                        }
+                    }
+                }
+            }
+        }
+        if republished {
+            let world = self.world;
+            self.field = world.field()?;
+            // The stamps lift the field: the plan's bound for the horizon, the frustum and the morph follows the field's maximum, and is never
+            // below the configured one (a run with no edits plans as it did).
+            self.lod.max_height_m = cfg.lod.max_height_m.max(self.field.max_abs_height_m());
+        }
+        let lod_max_height_m = self.lod.max_height_m;
+        let (field, radius) = (self.field.as_ref(), cfg.radius_m);
         // Take the state out so the helpers that borrow `self` stay usable; it is put back before returning.
         let mut st = self.state.take().ok_or("no window")?;
         let result = (|| {
@@ -302,6 +421,25 @@ impl App<'_> {
             let mut quit = false;
             if cfg.smoke {
                 quit |= smoke_keys(&mut st, self.cameras, now_ms)?;
+            }
+            // The editor mode edits from the free camera, with no overview over it.
+            if st.edit.as_ref().is_some_and(|e| e.on) {
+                let flight = planet_frame::viewer::camera_at(self.cameras, st.viewer.clock.time_s(now_ms));
+                if st.viewer.globe.is_some() {
+                    st.viewer.command(Command::ToggleGlobe, now_ms, &flight);
+                }
+                if !st.viewer.is_free() {
+                    st.viewer.command(Command::ToggleCamera, now_ms, &flight);
+                }
+            }
+            if cfg.smoke && cfg.edit {
+                let viewport = Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) };
+                let limits = PickLimits::new(radius, lod_max_height_m);
+                let camera = st.last_camera;
+                let frames = st.frames;
+                if let Some(e) = st.edit.as_mut() {
+                    e.smoke_step(frames, &camera, viewport, &limits, field)?;
+                }
             }
             // A command of this frame (C back to the flight, restart) may have released the mouse.
             apply_grab(&mut st);
@@ -322,7 +460,7 @@ impl App<'_> {
                 let (sx, sy) = (f64::from(inner.width) / viewport.width_px, f64::from(inner.height) / viewport.height_px);
                 st.screen_markers = seen.iter().map(|m| ScreenMarker { id: m.id, pixel: [m.pixel[0] * sx, m.pixel[1] * sy] }).collect();
                 if cfg.smoke {
-                    smoke_globe(&mut st, &camera, viewport, radius, cfg.lod.max_height_m, field);
+                    smoke_globe(&mut st, &camera, viewport, radius, lod_max_height_m, field);
                 }
             } else {
                 st.screen_markers.clear();
@@ -339,6 +477,14 @@ impl App<'_> {
                     st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer })
                 })?;
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
+            // The editor mode: what the camera shows of the edits, their outlines and handles, the hover, the lists; the resident tiles the
+            // edits of the last frame can touch (the footprint find).
+            if let Some(e) = st.edit.as_mut().filter(|e| e.on) {
+                let wanted: Vec<_> = frame.pipeline.wanted.iter().map(|w| w.0).collect();
+                let limits = PickLimits::new(radius, lod_max_height_m);
+                let over_ui = st.ui.as_ref().is_some_and(|u| u.ctx.is_pointer_over_egui());
+                e.update(&camera, viewport, &wanted, field, &limits, Pointer { cursor: st.cursor, over_ui });
+            }
             st.rig.fi.retire_to(st.rig.renderer.retired_frames(ctx));
             while st.rig.fi.is_full() {
                 st.rig.fi.note_wait();
@@ -430,16 +576,44 @@ impl App<'_> {
                 st.window.set_title(&text);
                 st.last_title = text;
             }
+            let mut panel_events: Vec<crate::panels::Event> = Vec::new();
             let presented = if let Some(ui) = st.ui.as_mut() {
                 let factor = if st.viewer.coarse_lod { cfg.lod.coarse_factor() } else { 1.0 };
                 let status = planet_frame::viewer::overlay_status(st.viewer.overlay, factor);
-                let mut frame_ui = ui.frame(&st.window, &status, &st.screen_markers, st.hover);
+                let inner = st.window.inner_size();
+                let scale = [f64::from(inner.width) / viewport.width_px, f64::from(inner.height) / viewport.height_px];
+                let mut frame_ui = match st.edit.as_mut().filter(|e| e.on) {
+                    Some(e) => {
+                        let view_status = format!("{} · {status}", crate::editwin::mode_status(e));
+                        let mut draw = |ui: &mut egui::Ui| panel_events = e.draw(ui, &view_status, scale);
+                        ui.frame(&st.window, &status, &st.screen_markers, st.hover, Some(&mut draw))
+                    }
+                    None => ui.frame(&st.window, &status, &st.screen_markers, st.hover, None),
+                };
                 let shown = st.surface.present_with_ui(ctx, &st.rig.renderer, Some((ui.painter(), &mut frame_ui)));
                 ui.reclaim(frame_ui);
                 shown.map_err(|e| e.to_string())?
             } else {
                 st.surface.present(ctx, &st.rig.renderer).map_err(|e| e.to_string())?
             };
+            // What the panels asked for, and the camera flight to an edit.
+            if let Some(e) = st.edit.as_mut() {
+                e.apply(panel_events);
+            }
+            if let Some(id) = st.edit.as_mut().and_then(|e| e.take_fly()) {
+                if let Some(pose) = st.edit.as_ref().and_then(|e| e.fly_pose(id, &|d| field.height(d))) {
+                    let flight = planet_frame::viewer::camera_at(self.cameras, st.viewer.clock.time_s(now_ms));
+                    if !st.viewer.is_free() {
+                        st.viewer.command(Command::ToggleCamera, now_ms, &flight);
+                    }
+                    st.viewer.mode = planet_frame::viewer::CameraMode::Free(pose);
+                    st.viewer.mouse.release();
+                    apply_grab(&mut st);
+                    if let Some(e) = st.edit.as_mut() {
+                        e.stats.flights += 1;
+                    }
+                }
+            }
             match presented {
                 Presented::Yes => {
                     st.presented += 1;
@@ -457,6 +631,11 @@ impl App<'_> {
                     // The verdict is on counts: lit frames with the atmosphere drawn and presented, the debug path too, an exposure
                     // reading, and the renderer's own account that the passes ran. No wall-clock (VIEW-005).
                     smoke_verdict(&st.counts, cfg.atmosphere)?;
+                    if cfg.edit {
+                        if let Some(e) = st.edit.as_ref() {
+                            e.smoke_verdict()?;
+                        }
+                    }
                     quit = true;
                 } else if st.presented == 0 && st.frames >= SMOKE_GIVE_UP {
                     return Err(format!(
@@ -470,6 +649,47 @@ impl App<'_> {
         })();
         self.state = Some(st);
         result
+    }
+
+    /// The editor mode is on.
+    fn edit_on(&self) -> bool {
+        self.state.as_ref().and_then(|s| s.edit.as_ref()).is_some_and(|e| e.on)
+    }
+
+    /// A mouse button in the editor mode: the left one edits (a press in the world presses, a release always releases), the right one looks
+    /// around while it is held.
+    fn edit_mouse(&mut self, state: ElementState, button: MouseButton, world: bool) {
+        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+        let limits = PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
+        let field = self.field.as_ref();
+        let Some(st) = self.state.as_mut() else { return };
+        match edit_mouse_action(button, state, world, st.viewer.mouse.captured(), st.edit_down) {
+            Some(EditMouse::Press) => {
+                let camera = st.last_camera;
+                if let Some(e) = st.edit.as_mut() {
+                    e.press(&camera, viewport, st.cursor, &limits, field);
+                    st.edit_down = true;
+                }
+            }
+            Some(EditMouse::Release) => {
+                if st.edit_down {
+                    if let Some(e) = st.edit.as_mut() {
+                        e.release();
+                    }
+                }
+                st.edit_down = false;
+            }
+            Some(EditMouse::StartLook) => {
+                let free = st.viewer.is_free();
+                st.viewer.mouse.click(free);
+                apply_grab(st);
+            }
+            Some(EditMouse::EndLook) => {
+                st.viewer.mouse.release();
+                apply_grab(st);
+            }
+            None => {}
+        }
     }
 
     fn command(&mut self, cmd: Command) -> bool {
@@ -654,6 +874,12 @@ impl ApplicationHandler for App<'_> {
         }
         match event {
             WindowEvent::CloseRequested => el.exit(),
+            WindowEvent::ModifiersChanged(m) => {
+                if let Some(st) = self.state.as_mut() {
+                    st.ctrl = m.state().control_key();
+                    st.shift = m.state().shift_key();
+                }
+            }
             WindowEvent::Resized(size) => {
                 if let Some(st) = self.state.as_mut() {
                     st.surface.resize(&st.ctx, (size.width, size.height));
@@ -673,12 +899,35 @@ impl ApplicationHandler for App<'_> {
                         apply_grab(st);
                         return;
                     }
+                    // The editor mode (VIEW-022): Tab turns it on and off; while it is on its keys come first and Esc steps back in it.
+                    if down && !event.repeat {
+                        if code == KeyCode::Tab {
+                            if let Some(e) = st.edit.as_mut() {
+                                e.toggle();
+                                st.edit_down = false;
+                            }
+                            return;
+                        }
+                        let logical = match &event.logical_key {
+                            winit::keyboard::Key::Character(c) => Some(c.to_string()),
+                            _ => None,
+                        };
+                        if let (Some(e), Some(k)) =
+                            (st.edit.as_mut().filter(|e| e.on), edit_key(code, logical.as_deref(), st.ctrl, st.shift))
+                        {
+                            e.key(k);
+                            return;
+                        }
+                    }
                     if set_held(&mut st.viewer.held, code, down) {
                         return;
                     }
                 }
                 if down && !event.repeat {
                     if let Some(cmd) = key_command(code) {
+                        if self.edit_on() && editor_mode_blocks(cmd) {
+                            return;
+                        }
                         if self.command(cmd) {
                             el.exit();
                         }
@@ -706,6 +955,14 @@ impl ApplicationHandler for App<'_> {
                         }
                     }
                     st.cursor = now;
+                    if world && st.edit_down {
+                        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+                        let limits = PickLimits::new(self.cfg.radius_m, self.lod.max_height_m);
+                        let camera = st.last_camera;
+                        if let Some(e) = st.edit.as_mut() {
+                            e.moved(&camera, viewport, now, &limits, self.field.as_ref());
+                        }
+                    }
                 }
             }
             WindowEvent::MouseInput { state, button: MouseButton::Left, .. }
@@ -724,6 +981,11 @@ impl ApplicationHandler for App<'_> {
                     self.globe_click();
                 }
             }
+            WindowEvent::MouseInput { state, button, .. }
+                if !self.cfg.smoke && self.edit_on() && self.state.as_ref().is_some_and(|s| s.viewer.globe.is_none()) =>
+            {
+                self.edit_mouse(state, button, world);
+            }
             WindowEvent::MouseWheel { delta, .. } if world => {
                 if let Some(g) = self.state.as_mut().and_then(|st| st.viewer.globe.as_mut()) {
                     let lines = match delta {
@@ -734,7 +996,7 @@ impl ApplicationHandler for App<'_> {
                 }
             }
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. }
-                if !self.cfg.smoke && world && self.state.as_ref().is_some_and(|s| s.viewer.globe.is_none()) =>
+                if !self.cfg.smoke && world && !self.edit_on() && self.state.as_ref().is_some_and(|s| s.viewer.globe.is_none()) =>
             {
                 if let Some(st) = self.state.as_mut() {
                     let free = st.viewer.is_free();
@@ -746,6 +1008,10 @@ impl ApplicationHandler for App<'_> {
                 if let Some(st) = self.state.as_mut() {
                     st.press.cancel();
                     st.viewer.focus_lost();
+                    if let Some(e) = st.edit.as_mut() {
+                        e.cancel_drag();
+                    }
+                    st.edit_down = false;
                     apply_grab(st);
                 }
             }
@@ -800,6 +1066,14 @@ fn smoke_summary(st: &Running) -> String {
             u.world_pointer
         )
     });
+    let edit = st.edit.as_ref().filter(|e| e.stats.frames > 0 || e.on).map_or(String::new(), |e| {
+        format!(
+            "
+  edit: {} ({})",
+            e.summary(),
+            if e.on { "mode on" } else { "mode off" }
+        )
+    });
     let globe = format!(
         "
   globe: {} frames of the overview, up to {} markers shown, {} flights started, {} landings",
@@ -826,12 +1100,16 @@ fn smoke_summary(st: &Running) -> String {
         st.adapter_line,
         st.last_title
     ) + &ui
+        + &edit
         + &globe
 }
 
 /// `planet editor`: open the window and run the flight until it is closed (or, for `--smoke`, for a few dozen frames).
 pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     crate::worldfield::check_options(o)?;
+    if o.edit && o.no_ui {
+        return Err("--edit needs the editor UI: drop --no-ui".into());
+    }
     // The adapter policy: the application runs on a discrete GPU only; the software adapters are the test and CI mode.
     let policy = if o.smoke {
         o.adapter.unwrap_or_else(AdapterPolicy::from_env)
@@ -902,7 +1180,20 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         seed: field.seed(),
         smoke: o.smoke,
         ui: !o.no_ui,
-        smoke_frames: if o.given.contains("--frames") { o.frames as u64 } else { SMOKE_FRAMES },
+        edit: o.edit,
+        items: o.items.clone(),
+        layout: match &o.editor_layout {
+            Some(p) => Layout::from_toml(&std::fs::read_to_string(p).map_err(|e| format!("--editor-layout {}: {e}", p.display()))?)
+                .map_err(|e| format!("--editor-layout {}: {e}", p.display()))?,
+            None => Layout::default(),
+        },
+        smoke_frames: if o.given.contains("--frames") {
+            o.frames as u64
+        } else if o.smoke && o.edit {
+            SMOKE_EDIT_FRAMES
+        } else {
+            SMOKE_FRAMES
+        },
         vsync: !o.no_vsync,
         policy,
         gen: o.gen_workers(),
@@ -919,6 +1210,9 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     };
     writeln!(out, "planet editor: {} ({})", if o.smoke { "smoke test" } else { "viewer" }, world.describe()).map_err(err)?;
     writeln!(out, "keys: {KEYS_HELP}").map_err(err)?;
+    if !o.no_ui {
+        writeln!(out, "{EDIT_KEYS_HELP}").map_err(err)?;
+    }
     writeln!(
         out,
         "view: the lit path with {} (the look's sun, adaptive exposure); L switches to the debug path",
@@ -931,7 +1225,8 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     let mut app = App {
         cfg: &cfg,
         world: &world,
-        field: field.as_ref(),
+        field,
+        lod: cfg.lod.clone(),
         cameras: &script.cameras,
         clock: Arc::new(SystemClock::new()),
         params: ControllerParams::for_radius(radius_m),
@@ -1055,5 +1350,89 @@ mod tests {
         assert!(!h.forward);
         assert!(!set_held(&mut h, KeyCode::KeyP, true), "P is a command, not a held key");
         assert!(!set_held(&mut h, KeyCode::Space, true));
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn the_keys_of_the_editor_mode_are_the_numbers_ctrl_z_and_y_delete_and_escape_by_the_letter_on_the_key() {
+        use EditKey::*;
+        let k = |code, logical: Option<&str>, ctrl, shift| edit_key(code, logical, ctrl, shift);
+        assert_eq!(k(KeyCode::Digit1, None, false, false), Some(Tool(1)));
+        assert_eq!(k(KeyCode::Digit4, None, false, false), Some(Tool(4)));
+        assert_eq!(k(KeyCode::Delete, None, false, false), Some(Delete));
+        assert_eq!(k(KeyCode::Backspace, None, false, false), Some(Delete));
+        assert_eq!(k(KeyCode::Escape, None, false, false), Some(Escape));
+        // QWERTY: the physical Z key is labelled z.
+        assert_eq!(k(KeyCode::KeyZ, Some("z"), true, false), Some(Undo));
+        assert_eq!(k(KeyCode::KeyZ, Some("Z"), true, true), Some(Redo));
+        assert_eq!(k(KeyCode::KeyY, Some("y"), true, false), Some(Redo));
+        // QWERTZ: the key labelled Z is the physical KeyY, and the key labelled Y is KeyZ.
+        assert_eq!(k(KeyCode::KeyY, Some("z"), true, false), Some(Undo), "Ctrl+Z undoes on a German keyboard");
+        assert_eq!(k(KeyCode::KeyZ, Some("y"), true, false), Some(Redo), "Ctrl+Y redoes on a German keyboard");
+        // Without a character the QWERTY keys stand in; without Ctrl neither letter is a command.
+        assert_eq!(k(KeyCode::KeyZ, None, true, false), Some(Undo));
+        assert_eq!(k(KeyCode::KeyY, None, true, false), Some(Redo));
+        assert_eq!(k(KeyCode::KeyZ, Some("z"), false, false), None);
+        assert_eq!(k(KeyCode::KeyY, Some("y"), false, true), None);
+        // The fly keys are not the editor's: W, S and the rest stay the camera's.
+        for code in [
+            KeyCode::KeyW,
+            KeyCode::KeyA,
+            KeyCode::KeyS,
+            KeyCode::KeyD,
+            KeyCode::KeyQ,
+            KeyCode::KeyE,
+            KeyCode::Space,
+            KeyCode::KeyG,
+            KeyCode::KeyC,
+        ] {
+            assert_eq!(k(code, None, false, false), None, "{code:?}");
+        }
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn the_mouse_in_the_editor_mode_presses_in_the_world_releases_anywhere_and_looks_with_the_right_button() {
+        use EditMouse::*;
+        use ElementState::{Pressed, Released};
+        let a = edit_mouse_action;
+        // The left button: a press in the world edits, one over a panel or while the pointer is captured does nothing, any release releases.
+        assert_eq!(a(MouseButton::Left, Pressed, true, false, false), Some(Press));
+        assert_eq!(a(MouseButton::Left, Pressed, false, false, false), None, "over a panel");
+        assert_eq!(a(MouseButton::Left, Pressed, true, true, false), None, "the pointer is captured: the cursor is stale");
+        for (world, captured, holding) in [(true, false, true), (false, false, true), (true, true, false), (false, true, false)] {
+            assert_eq!(a(MouseButton::Left, Released, world, captured, holding), Some(Release), "released wherever it lands");
+        }
+        // The right button: held, it looks around; it waits while the left button holds an edit; its release always ends the look.
+        assert_eq!(a(MouseButton::Right, Pressed, true, false, false), Some(StartLook));
+        assert_eq!(a(MouseButton::Right, Pressed, true, false, true), None, "a handle is held");
+        assert_eq!(a(MouseButton::Right, Pressed, false, false, false), None, "over a panel");
+        for holding in [false, true] {
+            assert_eq!(a(MouseButton::Right, Released, false, true, holding), Some(EndLook));
+        }
+        // Other buttons are not the editor's.
+        assert_eq!(a(MouseButton::Middle, Pressed, true, false, false), None);
+        assert_eq!(a(MouseButton::Back, Released, true, false, false), None);
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn the_editor_mode_leaves_the_camera_and_the_overview_alone() {
+        assert!(editor_mode_blocks(Command::ToggleCamera) && editor_mode_blocks(Command::ToggleGlobe));
+        for cmd in [
+            Command::TogglePause,
+            Command::Restart,
+            Command::NextView,
+            Command::ToggleLit,
+            Command::ToggleVsync,
+            Command::CycleOverlay,
+            Command::ToggleCoarseLod,
+        ] {
+            assert!(!editor_mode_blocks(cmd), "{cmd:?}");
+        }
+        // The keys that reach them: C and G map to those commands, and Esc to quit (which the editor's Esc takes first).
+        assert_eq!(key_command(KeyCode::KeyC), Some(Command::ToggleCamera));
+        assert_eq!(key_command(KeyCode::KeyG), Some(Command::ToggleGlobe));
+        assert_eq!(edit_key(KeyCode::Escape, None, false, false), Some(EditKey::Escape));
     }
 }
