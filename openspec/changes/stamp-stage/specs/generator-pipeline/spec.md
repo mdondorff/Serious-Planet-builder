@@ -5,7 +5,7 @@ A stamp stage SHALL add the stamps of one layer of a world definition to a base 
 
 Verify: A, B, C
 Status: planned
-Source: ADR 0066 points 1, 4 and 5, ADR 0021 point 7, SPIKE-13, M6 plan row E2
+Source: ADR 0066 points 1, 4 and 5, ADR 0067, ADR 0021 point 7, SPIKE-13, M6 plan row E2
 
 #### Scenario: Profiles
 - **WHEN** each kind is evaluated at fixed `x` from 0 to beyond 1

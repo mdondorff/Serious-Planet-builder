@@ -5,7 +5,7 @@ An authored item SHALL carry a kind and its parameters; the kinds are none, `hil
 
 Verify: A
 Status: active
-Source: ADR 0066 point 6, M6 plan row E2
+Source: ADR 0066 point 6, ADR 0067, M6 plan row E2
 
 #### Scenario: Refusal
 - **WHEN** a stamp is put with no reach, an amount above its bound, a negative crater depth or a non-finite parameter
