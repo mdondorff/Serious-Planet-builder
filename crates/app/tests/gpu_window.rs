@@ -229,6 +229,25 @@ fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_
     let bundle = std::fs::read_to_string(repro.join(&bundle_name)).unwrap();
     assert!(bundle.starts_with("planet-terrain-repro "), "{}", &bundle[..bundle.len().min(60)]);
     assert!(bundle.contains("world_toml "), "the bundle records the world, edits included");
+    // spec: VIEW-025
+    let replay_dir = repro.join("replay");
+    let replay = Command::new(env!("CARGO_BIN_EXE_planet"))
+        .args(["test-render", "--adapter", &adapter()])
+        .arg("--repro")
+        .arg(repro.join(&bundle_name))
+        .arg("--replay-path")
+        .arg(repro.join(path_name))
+        .arg("--out-dir")
+        .arg(&replay_dir)
+        .args(["--replay-every", "1000"])
+        .output()
+        .expect("the planet binary starts");
+    let replayed = String::from_utf8_lossy(&replay.stdout).into_owned();
+    assert!(replay.status.success(), "the replay failed: {replayed}{}", String::from_utf8_lossy(&replay.stderr));
+    assert!(replayed.contains(&format!("replay path: {} poses", path.len())), "{replayed}");
+    let rows = std::fs::read_to_string(replay_dir.join("replay.txt")).expect("the replay index");
+    assert_eq!(rows.lines().filter(|l| !l.starts_with('#')).count(), path.len(), "one line per pose: {rows}");
+    assert!(replay_dir.join("pose_0000.png").is_file(), "pose 0 is rendered");
     let _ = std::fs::remove_dir_all(&repro);
     // The run ends with the edit back (the last command undid the delete): one file, written through by every command.
     let files: Vec<_> =

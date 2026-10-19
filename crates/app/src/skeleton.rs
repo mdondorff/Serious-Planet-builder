@@ -714,10 +714,9 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
     Ok(())
 }
 
-/// Replay a terrain repro bundle: refuse on version mismatch, replan from the recorded request, compare every field of
-/// the plan, then render with meshes generated from the recorded seed.
-fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>, out: &mut dyn Write) -> Result<(), String> {
-    use planet_frame::{plan_terrain, TerrainBundle};
+/// Read a terrain repro bundle and refuse it on a version mismatch; rebuild the world it recorded (none for a seed-only bundle).
+pub(crate) fn open_terrain_bundle(text: &str, path: &Path) -> Result<(planet_frame::TerrainBundle, Option<WorldTerrain>), String> {
+    use planet_frame::TerrainBundle;
     let b = TerrainBundle::from_text(text).map_err(|e| format!("{}: {e}", path.display()))?;
     let mesh_version = planet_generators::mesh::MESH_VERSION;
     if b.generator_version != GENERATOR_VERSION || b.implementation_id != IMPLEMENTATION_ID || b.mesh_version != mesh_version {
@@ -735,6 +734,14 @@ fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>,
             None
         }
     };
+    Ok((b, world))
+}
+
+/// Replay a terrain repro bundle: refuse on version mismatch, replan from the recorded request, compare every field of
+/// the plan, then render with meshes generated from the recorded seed.
+fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>, out: &mut dyn Write) -> Result<(), String> {
+    use planet_frame::plan_terrain;
+    let (b, world) = open_terrain_bundle(text, path)?;
     let field = world.as_ref().map(|w| w.field()).transpose()?;
     let rebuilt = match &field {
         Some(f) => planet_frame::plan_terrain_field(&b.request, f.as_ref()),
