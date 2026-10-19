@@ -89,3 +89,27 @@ pub fn touches(cap: Cap, anchor: Vec3, reach_m: f64, radius_m: f64) -> bool {
     let limit = cap.angle + reach_m / radius_m;
     angle_between(cap.centre, anchor) <= limit * (1.0 + FOOTPRINT_REL_MARGIN) + FOOTPRINT_ABS_MARGIN_RAD
 }
+
+/// The 16-byte id of an item: its `u64` zero-extended, big-endian, so the byte order is the numeric order and a later 128-bit id
+/// changes a type and not this encoding.
+pub fn id_bytes(id: u64) -> [u8; 16] {
+    u128::from(id).to_be_bytes()
+}
+
+/// 128-bit hash of one item as the footprint and summary reads see it (`planet-builder footprint item v1`): the layer, the
+/// priority, the content hash, the exact bits of the anchor, the reach and the height bound. The anchor is inside it, so a
+/// result needs no separate direction. (The item file's own content hash, E2, keeps `planet-builder item hash v1`.)
+pub fn item_hash128(item: &FootprintItem) -> [u8; 16] {
+    let mut m = Vec::with_capacity(96);
+    m.extend_from_slice(&u32::try_from(item.layer.len()).expect("a layer name under 4 GiB").to_le_bytes());
+    m.extend_from_slice(item.layer.as_bytes());
+    m.extend_from_slice(&item.priority.to_le_bytes());
+    m.extend_from_slice(&item.content.to_le_bytes());
+    for d in item.dir {
+        m.extend_from_slice(&d.to_le_bytes());
+    }
+    m.extend_from_slice(&item.reach_bits.to_le_bytes());
+    m.extend_from_slice(&item.max_delta_bits.to_le_bytes());
+    let full = blake3::derive_key("planet-builder footprint item v1", &m);
+    full[..16].try_into().expect("16 of 32 bytes")
+}

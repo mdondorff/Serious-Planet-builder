@@ -106,6 +106,34 @@ fn a_footprint_edit_changes_the_keys_of_the_tiles_its_reach_touches_and_no_other
     assert_eq!(keys(&edited), before, "removing the item restores every key");
 }
 
+// spec: STRM-003, WDEF-008
+#[test]
+fn a_coarse_tile_keys_on_summary_nodes_with_tag_3_and_an_item_far_away_leaves_its_key_alone() {
+    let at = dir(1.0, 0.2, 0.1);
+    let coarse = TileId::from_direction(&TangentWarp, at, 4);
+    let plain = WorldDefinition::single_planet(R, 7);
+    let mut near = plain.clone();
+    near.put_item_spec(BodyId::PLANET, stamp(1, at, 150.0)).unwrap();
+    let mut far = plain.clone();
+    far.put_item_spec(BodyId::PLANET, stamp(2, dir(-1.0, -0.3, -0.2), 150.0)).unwrap();
+    let key = |d: &WorldDefinition| {
+        let f = Footprinted { inner: Reference(7), def: d };
+        height_key(&f, &TangentWarp, coarse, 16, R)
+    };
+    assert_ne!(key(&plain), key(&near), "an item under the coarse tile re-keys it");
+    assert_eq!(key(&plain), key(&far), "an item on the other side of the planet does not");
+    let f = Footprinted { inner: Reference(7), def: &near };
+    let inputs = mesh_key_inputs(&f, &TangentWarp, coarse, 16, R);
+    assert!(inputs.reads.iter().any(|r| matches!(r, ReadEntry::Query { kind: QUERY_SUMMARY, .. })), "region summary entries (kind 4)");
+    assert!(!inputs.reads.iter().any(|r| matches!(r, ReadEntry::Query { kind: QUERY_FOOTPRINT, .. })), "no footprint result entry");
+    assert_eq!(encode(&inputs)[0], KEY_FORMAT_TAG_FOOTPRINT);
+    // The parameters are `body | layer | level | node raw id`.
+    let node = TileId::from_direction(&TangentWarp, at, 4);
+    let p = summary_params(BodyId(3), "items", node);
+    assert_eq!(p.len(), 4 + 4 + 5 + 1 + 8);
+    assert_eq!(p[13], 4, "the level byte");
+}
+
 // spec: STRM-003
 #[test]
 fn a_key_without_a_footprint_entry_keeps_tag_2_byte_for_byte_and_one_with_it_starts_with_tag_3() {

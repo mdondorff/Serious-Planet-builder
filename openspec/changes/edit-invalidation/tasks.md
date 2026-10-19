@@ -9,7 +9,7 @@
 
 ## 1b. edit-invalidation-summaries
 - [x] 1b.1 Design: the summary limit (spec value), kind 4 layout, node store and the rewrite of one node per level on an edit; spec deltas WDEF-005, STRM-003
-- [ ] 1b.2 Failing tests: a coarse tile's keys change on an edit inside its cells and not outside; an edit rewrites one node per level; empty subtree hashes are level-dependent
+- [x] 1b.2 Failing tests: a coarse tile's keys change on an edit inside its cells and not outside; an edit rewrites one node per level; empty subtree hashes are level-dependent
 - [ ] 1b.3 Implement; numerics-reviewer on the hash encodings; spec-guardian, verifier; PR
 
 ## 2. edit-invalidation-refresh
