@@ -6,6 +6,7 @@ pub mod camera;
 pub mod controller;
 pub mod draw;
 pub mod freecam;
+pub mod globe;
 pub mod instances;
 pub mod litscenes;
 pub mod lod;
