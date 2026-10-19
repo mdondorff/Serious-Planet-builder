@@ -3,6 +3,8 @@
 - [x] 1.2 Spec deltas: WDEF-005 (footprint is the invalidation unit), STRM-003/STRM-010 (node set id per tile), GEN-017 (tile level), TEST (reads contract)
 - [ ] 1.3 Failing tests: footprint find returns exactly the tiles within reach (false positives allowed, no false negatives); moving an item outside a tile's reach changes no key; the declared-versus-recorded reads contract
 - [ ] 1.4 Item `reach_m`, `max_delta_m`; refusal over the reach limit; query kind 3 and its result material; tag 3
+- [ ] 1.4b Tier-A test: a key without footprint entries is byte-identical to today's; the encoding writes 16-byte ids and 16-byte content hashes
+- [ ] 1.4c Note for E2/E4: the switch to 128-bit (ULID) ids is a task of whichever first reads or writes item files, before any item file exists
 - [ ] 1.5 numerics-reviewer (core/generators), spec-guardian, verifier; PR
 
 ## 1b. edit-invalidation-summaries
