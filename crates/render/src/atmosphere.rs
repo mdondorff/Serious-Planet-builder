@@ -603,7 +603,11 @@ fn fs_lit_atmo(in: VsOut) -> @location(0) vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
-    return vec4<f32>(atm_shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(nodes[in.node_index].morph.z, in.morph), in.height, sun, g.range.z), 1.0);
+    var rgb = atm_shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(nodes[in.node_index].morph.z, in.morph), in.height, sun, g.range.z);
+    if (g.extra.y > 0.5) {
+        rgb = overlay_wire(in, rgb, g.range.z);
+    }
+    return vec4<f32>(rgb, 1.0);
 }
 "#;
 

@@ -106,6 +106,9 @@ fn the_window_runs_lit_with_the_atmosphere(stdout: &str) {
     assert!(count_before(stdout, " debug)") > 0, "the L key must have drawn the debug path too: {stdout}");
     assert!(count_before(stdout, " exposure reading") > 0, "{stdout}");
     assert!(stdout.contains("view: the lit path with the atmosphere"), "{stdout}");
+    // VIEW-014: the smoke script presses F3 twice, so some lit frames were drawn with the wireframe overlay (and the shader that has it ran
+    // with the atmosphere).
+    assert!(count_before(stdout, " with the wireframe") > 0, "F3 must have turned the wireframe on for some frames: {stdout}");
     // VIEW-011: the editor UI ran a pass for every frame it presented (the window draws it by default).
     assert!(count_before(stdout, " frames with the editor UI") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
     if adapter() != "software" {

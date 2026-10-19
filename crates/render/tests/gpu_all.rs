@@ -14,6 +14,8 @@ mod gpu_hello_triangle;
 mod gpu_indirect;
 #[path = "gpu_lit.rs"]
 mod gpu_lit;
+#[path = "gpu_overlay.rs"]
+mod gpu_overlay;
 #[path = "gpu_pipelined.rs"]
 mod gpu_pipelined;
 #[path = "gpu_pools.rs"]

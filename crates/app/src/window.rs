@@ -56,6 +56,7 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
         KeyCode::KeyT => Command::ToggleVsync,
         KeyCode::KeyC => Command::ToggleCamera,
         KeyCode::KeyL => Command::ToggleLit,
+        KeyCode::F3 => Command::ToggleWireframe,
         KeyCode::Escape => Command::Quit,
         _ => return None,
     })
@@ -277,7 +278,10 @@ impl App<'_> {
             // the pipelined loop decided; the debug path draws the plan as it is (VIEW-007).
             let lit_plan = if st.viewer.lit {
                 let reset = st.viewer.take_exposure_reset();
-                let lit = viewer_lit_plan(&cfg.look, cfg.radius_m, dt as f32, reset, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
+                let lit = viewer_lit_plan(&cfg.look, cfg.radius_m, dt as f32, reset, cfg.atmosphere)?
+                    .with_water_level(cfg.water_level_m)
+                    .with_overlay(st.viewer.overlay);
+                st.counts.wireframe_frames += u64::from(lit.overlay != planet_frame::look::Overlay::None);
                 let mut plan = draw.plan.clone();
                 plan.lit = Some(lit);
                 // The water of the frame (ADR 0041, ADR 0051 point 6): the nodes that carry water, decided by one query of the field W
@@ -458,6 +462,8 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
             st.viewer.held = Held::default();
             press(st, Command::ToggleCamera);
         }
+        26 => press(st, Command::ToggleWireframe),
+        30 => press(st, Command::ToggleWireframe),
         36 => press(st, Command::Restart),
         _ => {}
     }
@@ -598,13 +604,14 @@ fn smoke_summary(st: &Running) -> String {
         )
     });
     format!(
-        "{} frames drawn ({} lit, {} with the atmosphere, {} with water, {} debug), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
+        "{} frames drawn ({} lit, {} with the atmosphere, {} with water, {} debug, {} with the wireframe), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
   last title: {}",
         st.frames,
         st.counts.lit_frames,
         st.counts.atmosphere_frames,
         st.counts.water_frames,
         st.counts.debug_frames,
+        st.counts.wireframe_frames,
         st.presented,
         st.counts.lit_presented,
         st.counts.debug_presented,
@@ -754,6 +761,7 @@ mod tests {
             (KeyCode::KeyT, Command::ToggleVsync),
             (KeyCode::KeyC, Command::ToggleCamera),
             (KeyCode::KeyL, Command::ToggleLit),
+            (KeyCode::F3, Command::ToggleWireframe),
             (KeyCode::Escape, Command::Quit),
         ] {
             assert_eq!(key_command(code), Some(cmd), "{code:?}");
@@ -761,7 +769,7 @@ mod tests {
         for code in [KeyCode::KeyW, KeyCode::KeyA, KeyCode::KeyX, KeyCode::Enter, KeyCode::F5] {
             assert_eq!(key_command(code), None, "{code:?} is not a command");
         }
-        for ch in ["pause", "restart", "debug view", "vsync", "free camera", "WASD", "Esc", "lit", "atmosphere"] {
+        for ch in ["pause", "restart", "debug view", "vsync", "free camera", "WASD", "Esc", "lit", "atmosphere", "wireframe"] {
             assert!(KEYS_HELP.to_lowercase().contains(&ch.to_lowercase()), "the help names {ch}: {KEYS_HELP}");
         }
     }

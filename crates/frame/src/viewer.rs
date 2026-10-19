@@ -6,6 +6,7 @@
 use crate::camera::Camera;
 use crate::controller::{CameraInput, ControllerParams};
 use crate::freecam::{free_step, keep_clearance, FreeInput, FreePose};
+use crate::look::Overlay;
 use crate::mouselook::MouseLook;
 use crate::scenes::{DrawnSet, FRAME_STEP_S};
 use planet_core::{PlanetFixed, TileId};
@@ -108,6 +109,8 @@ pub enum Command {
     ToggleCamera,
     /// L: the lit path with the atmosphere, or the debug path (VIEW-007).
     ToggleLit,
+    /// F3: the wireframe overlay over the lit terrain, or none (VIEW-014).
+    ToggleWireframe,
     Quit,
 }
 
@@ -154,7 +157,7 @@ impl Held {
 }
 
 /// The key bindings, as text for the usage message and the log.
-pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, V next debug view (debug path), T vsync on/off, C flight or free camera, \
+pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, F3 wireframe overlay (lit path), V next debug view (debug path), T vsync on/off, C flight or free camera, \
      free camera: WASD move, Q/E down/up, arrows look, click captures the mouse to look (Esc releases it), Shift boost; Esc quits";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -179,6 +182,8 @@ pub struct ViewerState {
     pub mouse: MouseLook,
     /// The lit path is shown (VIEW-007); the debug path otherwise.
     pub lit: bool,
+    /// The debug overlay drawn over the lit terrain (VIEW-014); off at the start.
+    pub overlay: Overlay,
     /// The next lit frame snaps the exposure (a first lit frame, a return to the lit path, a restart of the flight).
     exposure_reset: bool,
     /// The user paused the flight (as against the free camera holding the clock).
@@ -197,6 +202,7 @@ impl ViewerState {
             held: Held::default(),
             mouse: MouseLook::new(),
             lit: false,
+            overlay: Overlay::None,
             exposure_reset: true,
             user_paused: false,
         }
@@ -245,6 +251,9 @@ impl ViewerState {
             Command::ToggleLit => {
                 self.lit = !self.lit;
                 self.exposure_reset |= self.lit;
+            }
+            Command::ToggleWireframe => {
+                self.overlay = if self.overlay == Overlay::None { Overlay::Wireframe } else { Overlay::None };
             }
             Command::ToggleVsync => self.vsync = !self.vsync,
             Command::ToggleCamera => match self.mode {
@@ -549,6 +558,8 @@ pub struct SmokeCounts {
     /// never see water leave both at zero: the verdict does not require them, the summary reports them).
     pub water_frames: u64,
     pub renderer_ran_water: bool,
+    /// Lit frames drawn with the wireframe overlay (VIEW-014).
+    pub wireframe_frames: u64,
 }
 
 /// Frames a smoke run must have drawn lit.
@@ -1059,7 +1070,33 @@ mod tests {
             renderer_ran_atmosphere: true,
             water_frames: 0,
             renderer_ran_water: false,
+            wireframe_frames: 0,
         }
+    }
+
+    // spec: VIEW-014
+    #[test]
+    fn f3_toggles_the_wireframe_overlay_and_it_starts_off() {
+        let c = camera_for_tests();
+        let mut v = ViewerState::new(0, 3, 0, true).with_lit(true);
+        assert_eq!(v.overlay, Overlay::None, "off at the start");
+        assert!(!v.command(Command::ToggleWireframe, 10, &c));
+        assert_eq!(v.overlay, Overlay::Wireframe);
+        v.command(Command::ToggleLit, 20, &c);
+        assert_eq!(v.overlay, Overlay::Wireframe, "leaving the lit path keeps the choice, the debug path draws no overlay");
+        v.command(Command::ToggleWireframe, 30, &c);
+        assert_eq!(v.overlay, Overlay::None);
+        assert!(KEYS_HELP.contains("F3") && KEYS_HELP.to_lowercase().contains("wireframe"), "{KEYS_HELP}");
+    }
+
+    fn camera_for_tests() -> Camera {
+        Camera::looking_at_centre(
+            planet_core::PlanetFixed(planet_core::Vec3::new(0.0, 0.0, 2.0e7)),
+            planet_core::Vec3::new(0.0, 1.0, 0.0),
+            1.0,
+            1.6,
+            1.0,
+        )
     }
 
     // spec: VIEW-005
