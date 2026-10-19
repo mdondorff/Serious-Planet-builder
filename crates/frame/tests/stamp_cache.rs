@@ -81,6 +81,40 @@ fn a_persistent_cache_plans_what_a_fresh_one_plans_after_put_change_delete_undo_
 
 // spec: STRM-027
 #[test]
+fn the_check_of_an_unchanged_revision_is_free_and_the_first_plan_after_an_edit_hashes_each_tile_once() {
+    use std::time::Instant;
+    let req = request();
+    let shared = Arc::new(RwLock::new(world()));
+    let field = stage(&shared);
+    let mut cache = SelectionCache::new();
+    let empty = plan_terrain_cached(&req, &field, &mut cache).unwrap();
+    let at = empty.nodes[empty.nodes.len() / 2].tile.center_direction(&TangentWarp);
+    let ms = |t: Instant| t.elapsed().as_secs_f64() * 1e3;
+    let cold_hashes = cache.hashes_computed();
+    let t = Instant::now();
+    plan_terrain_cached(&req, &field, &mut cache).unwrap();
+    let warm_ms = ms(t);
+    let hashed = cache.hashes_computed();
+    assert_eq!(hashed, cold_hashes, "a plan after no edit hashes nothing more");
+    shared.write().unwrap().put_item_spec(BodyId::PLANET, hill(1, at, 3_000.0, 40.0)).unwrap();
+    let t = Instant::now();
+    plan_terrain_cached(&req, &field, &mut cache).unwrap();
+    let edit_ms = ms(t);
+    let after_edit = cache.hashes_computed() - hashed;
+    assert!(after_edit > 0, "the edit makes the cache look at the tiles again");
+    let t = Instant::now();
+    plan_terrain_cached(&req, &field, &mut cache).unwrap();
+    let warm_after_ms = ms(t);
+    assert_eq!(cache.hashes_computed() - hashed, after_edit, "the next plan hashes nothing");
+    eprintln!(
+        "stamp-cache cost: {} nodes; warm plan {warm_ms:.2} ms; first plan after an edit {edit_ms:.1} ms ({after_edit} footprint hashes, {:.0} us each); warm plan after it {warm_after_ms:.2} ms",
+        empty.nodes.len(),
+        (edit_ms * 1e3) / after_edit as f64
+    );
+}
+
+// spec: STRM-027
+#[test]
 fn a_reload_into_another_definition_with_the_same_number_of_edits_reuses_nothing_stale() {
     let req = request();
     let a = Arc::new(RwLock::new(world()));

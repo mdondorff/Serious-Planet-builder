@@ -36,8 +36,12 @@ fn new_item(i: u64) -> NewItem {
             heading_deg: (f * 11.0) % 360.0,
         },
         reach_m: 200.0 + (f * 37.0) % 4_000.0,
-        max_delta_m: 5.0 + f % 40.0,
-        params: BTreeMap::from([("radius_m".to_string(), 100.0 + f), ("depth_m".to_string(), 10.0 + (f % 7.0))]),
+        max_delta_m: 20.0 + f % 40.0,
+        // The stamp kinds' own parameter (WDEF-010): `depth_m` for a crater, `height_m` for a hill; the rest is not read.
+        params: BTreeMap::from([
+            ("radius_m".to_string(), 100.0 + f),
+            (if i.is_multiple_of(2) { "depth_m" } else { "height_m" }.to_string(), 10.0 + (f % 7.0)),
+        ]),
         name: (i.is_multiple_of(3)).then(|| format!("item {i}")),
         notes: None,
     }
@@ -88,7 +92,8 @@ fn random_command<S: ItemStore>(ed: &mut Editor<S>, rng: &mut Rng, n: u64) -> bo
             ed.change(id, |it| {
                 it.anchor.latitude_deg = lat;
                 it.anchor.height_m = h;
-                it.params.insert("depth_m".into(), 1.0 + h);
+                let key = if it.kind == "hill" { "height_m" } else { "depth_m" };
+                it.params.insert(key.into(), 1.0 + h / 100.0);
                 it.priority += 1;
             })
             .unwrap();

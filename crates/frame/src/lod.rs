@@ -437,13 +437,15 @@ impl SelectionCache {
     /// changed. Valid after a selection with the same map and field has prepared the cache.
     pub(crate) fn verify_tiles(&mut self, tiles: impl IntoIterator<Item = TileId>, map: &dyn FaceMapping, field: &dyn HeightField) {
         for t in tiles {
-            self.hashes.verify(t, map, field);
+            if self.hashes.verify(t, map, field) {
+                self.volumes.remove(&t);
+            }
         }
+        // The tiles a selection found changed already had their volume recomputed there: only the values it does not hold are dropped.
         let stale = std::mem::take(&mut self.hashes.stale);
         for t in stale {
             self.origin_heights.remove(&t);
             self.mesh_keys.remove(&t);
-            self.volumes.remove(&t);
         }
     }
 

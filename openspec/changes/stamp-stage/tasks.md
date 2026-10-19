@@ -7,3 +7,8 @@
 - [ ] 1.6 Failing then passing: keys chain and edit locality (also a two-layer stack and wrapper forwarding), determinism at 1 and 3 threads and one point at a time, contract test with a recording reader, tile alone over the eroded base in memory (the stored bake reads through the same calls), no empty morph interval at levels 16 to 18, `reach_m = 0` refusal
 - [ ] 1.7 Stamped coast scene (tier C): the debug relief view, a recorded frame hash per adapter family, images to `target/review/stamps/`
 - [ ] 1.8 numerics-reviewer, spec-guardian, verifier; `cargo xtask prepush`; PR
+- [x] 1.9 Item revision (instance-unique, `WorldDefinition::revision`), `HeightField::item_revision`, `SelectionCache` keyed by the tile footprint hash behind the revision (`invalidate_tiles` stays), equivalence test (put, change, delete, undo, reload into another definition, a clone); STRM-027
+- [x] 1.10 Bounds by the delta range of each item over the cap (the sum of `max_delta_m` left no morph room at level 19); GEN-026
+- [x] 1.11 Item file map: `hill`/`height_m`, `crater`/`depth_m`, `plateau`/`target_m`, round trip, derived content hash; WDEF-010; the editor test fixtures use the spelling
+- [ ] 1.12 Memoised key cost per plan on WARP and the RTX in a correctness run (above about 1 ms: numbers to opus-planner)
+- [ ] 1.13 Tier C scene (1.7) as the follow-up `stamp-stage 3b`, with GEN-026 set active there
