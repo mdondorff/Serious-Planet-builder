@@ -1,3 +1,5 @@
+#[path = "live_definition.rs"]
+mod live_definition;
 #[path = "residency_headroom.rs"]
 mod residency_headroom;
 #[path = "world_field.rs"]

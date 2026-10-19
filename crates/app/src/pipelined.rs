@@ -23,6 +23,10 @@ use std::time::Instant;
 struct WorldPlanner(Arc<WorldTerrain>);
 
 impl PlanField for WorldPlanner {
+    fn item_revision(&self) -> u64 {
+        self.0.definition().revision()
+    }
+
     fn plan(&self, req: &TerrainRequest, cache: &mut SelectionCache, threads: usize) -> Result<TerrainPlan, PlanError> {
         let field = self.0.field().map_err(PlanError::HeightField)?;
         plan_terrain_threaded(req, field.as_ref(), cache, threads)

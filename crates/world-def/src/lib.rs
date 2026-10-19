@@ -222,6 +222,9 @@ pub struct WorldDefinition {
     revision: revision::Revision,
 }
 
+/// The layers of the stack of ADR 0007, lowest first. A layer with another name stacks above them, by name.
+pub const LAYER_STACK: [&str; 7] = ["base", "imported", "intent", "stamps", "splines", "placed", "frozen"];
+
 /// Whether `id` can name an implementation: letters, digits, `_` and `-`, not empty (the TOML key alphabet).
 pub fn valid_implementation_id(id: &str) -> bool {
     !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
@@ -636,6 +639,21 @@ impl WorldDefinition {
     /// The layer of an item, if it exists.
     pub fn item_layer(&self, body: BodyId, id: ItemId) -> Option<String> {
         self.items.get(&(body, id)).map(|rec| rec.layer.clone())
+    }
+
+    /// The layers of `body` that hold at least one stamp, in stack order (ADR 0007: [`LAYER_STACK`] first, then other names in name
+    /// order): the order the stamp stages are stacked in.
+    pub fn stamp_layers(&self, body: BodyId) -> Vec<String> {
+        let mut layers: Vec<String> = self
+            .items
+            .range((body, 0)..=(body, ItemId::MAX))
+            .filter(|(_, rec)| rec.stamp.is_some())
+            .map(|(_, rec)| rec.layer.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        layers.sort_by_key(|l| (LAYER_STACK.iter().position(|s| s == l).unwrap_or(LAYER_STACK.len()), l.clone()));
+        layers
     }
 
     /// The height bound in metres of an item, if it exists.
