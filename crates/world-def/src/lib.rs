@@ -8,6 +8,7 @@
 
 pub mod cells;
 pub mod footprint;
+pub mod summary;
 pub mod toml_io;
 pub mod water;
 
@@ -160,6 +161,10 @@ pub struct WorldDefinition {
     /// The index: item ids by `(body, cell)`, at the cell level of the body's current radius. Rebuilt for a body whenever
     /// its radius node changes, so a radius edit across a level boundary never strands items in old cells.
     cells: BTreeMap<(BodyId, u64), BTreeSet<u64>>,
+    /// The Merkle quadtree of region summaries (WDEF-008) by `(body, layer, level, node raw id)`: the non-empty cells at the
+    /// cell level and their ancestors, kept in step with the items (one node per level per edit). Derived data: equal items
+    /// give an equal map.
+    summaries: BTreeMap<(BodyId, String, u8, u64), [u8; 16]>,
     /// The implementation id of the height field the world names (GEN-018), if it names one. Not a node (nodes are
     /// numbers); it enters the base hash only when set, so a definition that names none hashes as it always did.
     height_field: Option<String>,
@@ -189,7 +194,13 @@ impl WorldDefinition {
 
     /// No nodes at all (every read fails).
     pub fn empty() -> WorldDefinition {
-        WorldDefinition { nodes: BTreeMap::new(), items: BTreeMap::new(), cells: BTreeMap::new(), height_field: None }
+        WorldDefinition {
+            nodes: BTreeMap::new(),
+            items: BTreeMap::new(),
+            cells: BTreeMap::new(),
+            summaries: BTreeMap::new(),
+            height_field: None,
+        }
     }
 
     pub fn new(world_seed: u64) -> WorldDefinition {
@@ -322,8 +333,10 @@ impl WorldDefinition {
             priority: spec.priority,
         };
         let cell = cells::cell_of(radius, unit);
+        let layer = rec.layer.clone();
         self.items.insert((body, id), rec);
         self.cells.entry((body, cell.raw())).or_default().insert(id);
+        self.refresh_summary(body, &layer, cell);
         Ok(cell)
     }
 
@@ -340,19 +353,99 @@ impl WorldDefinition {
                     self.cells.remove(&(body, cell.raw()));
                 }
             }
+            self.refresh_summary(body, &rec.layer, cell);
         }
         true
     }
 
-    /// Rebuild the cell index of one body from its items and its radius.
+    /// Rebuild the cell index and the summaries of one body from its items and its radius.
     fn reindex(&mut self, body: BodyId) {
         self.cells.retain(|(b, _), _| *b != body);
+        self.summaries.retain(|(b, ..), _| *b != body);
         let Ok(radius) = self.usable_radius(body) else { return };
         let ids: Vec<(u64, Vec3)> = self.items.range((body, 0)..=(body, u64::MAX)).map(|((_, id), rec)| (*id, rec.unit())).collect();
+        let mut touched: BTreeSet<(String, TileId)> = BTreeSet::new();
         for (id, unit) in ids {
             let cell = cells::cell_of(radius, unit);
             self.cells.entry((body, cell.raw())).or_default().insert(id);
+            touched.insert((self.items[&(body, id)].layer.clone(), cell));
         }
+        for (layer, cell) in touched {
+            self.refresh_summary(body, &layer, cell);
+        }
+    }
+
+    /// The footprint form of one item.
+    fn footprint_item(&self, body: BodyId, id: u64) -> footprint::FootprintItem {
+        let rec = &self.items[&(body, id)];
+        footprint::FootprintItem {
+            id,
+            priority: rec.priority,
+            content: rec.content,
+            dir: rec.dir,
+            reach_bits: rec.reach_bits,
+            max_delta_bits: rec.max_delta_bits,
+            layer: rec.layer.clone(),
+        }
+    }
+
+    /// Rewrite the summary leaf of `cell` for `layer` and its ancestors up to the face root: one node per level (WDEF-008).
+    fn refresh_summary(&mut self, body: BodyId, layer: &str, cell: TileId) {
+        let Ok(radius) = self.usable_radius(body) else { return };
+        let level = cells::cell_level(radius);
+        let rows: Vec<footprint::FootprintItem> = self
+            .cells
+            .get(&(body, cell.raw()))
+            .into_iter()
+            .flatten()
+            .filter(|id| self.items[&(body, **id)].layer == layer)
+            .map(|id| self.footprint_item(body, *id))
+            .collect();
+        let key = |node: TileId| (body, layer.to_string(), node.level(), node.raw());
+        if rows.is_empty() {
+            self.summaries.remove(&key(cell));
+        } else {
+            self.summaries.insert(key(cell), summary::cell_hash128(&rows));
+        }
+        let mut node = cell;
+        while let Some(parent) = node.parent() {
+            let children = parent.children().expect("a parent has children");
+            let hashes: Vec<Option<[u8; 16]>> = children.iter().map(|c| self.summaries.get(&key(*c)).copied()).collect();
+            if hashes.iter().all(Option::is_none) {
+                self.summaries.remove(&key(parent));
+            } else {
+                let empty = summary::empty_hash128(node.level(), level);
+                let four: [[u8; 16]; 4] = std::array::from_fn(|i| hashes[i].unwrap_or(empty));
+                self.summaries.insert(key(parent), summary::node_hash128(parent.level(), &four));
+            }
+            node = parent;
+        }
+    }
+
+    /// The hash of a summary node of `layer` (WDEF-008): the stored one, or the hash of an empty subtree at its level.
+    pub fn summary_hash(&self, body: BodyId, layer: &str, node: TileId) -> Result<[u8; 16], MissingNode> {
+        let level = cells::cell_level(self.usable_radius(body)?);
+        Ok(self
+            .summaries
+            .get(&(body, layer.to_string(), node.level(), node.raw()))
+            .copied()
+            .unwrap_or_else(|| summary::empty_hash128(node.level(), level)))
+    }
+
+    /// The non-empty summary nodes of a body's layer by `(level, node raw id)`, for tests and diagnostics.
+    pub fn summary_nodes(&self, body: BodyId, layer: &str) -> BTreeMap<(u8, u64), [u8; 16]> {
+        self.summaries.iter().filter(|((b, l, ..), _)| *b == body && l == layer).map(|((_, _, lv, raw), h)| ((*lv, *raw), *h)).collect()
+    }
+
+    /// The summary nodes a coarse tile reads (WDEF-008): `None` for a tile that records the footprint result instead. `halo`
+    /// as for [`footprint_items`](WorldDefinition::footprint_items).
+    pub fn summary_cover(&self, body: BodyId, tile: TileId, halo: f64) -> Result<Option<Vec<TileId>>, MissingNode> {
+        let radius = self.usable_radius(body)?;
+        let level = cells::cell_level(radius);
+        if !summary::is_coarse(tile, level) {
+            return Ok(None);
+        }
+        Ok(Some(summary::cover(tile, level, summary::margin_rings(tile, halo, radius, level))))
     }
 
     /// The items of one cell, `(id, content hash)` in id order.
@@ -388,7 +481,7 @@ impl WorldDefinition {
         let cap = footprint::tile_cap(&planet_core::TangentWarp, tile, halo);
         let level = cells::cell_level(radius);
         // A tile at or below the cell level lies in one cell, so its cap (a few tile edges wide) is within the rings; a coarser
-        // tile covers many cells and its cap and halo are many cells wide, so it scans the body (step 1b replaces the scan).
+        // tile covers many cells and its cap and halo are many cells wide, so it scans the body.
         let rings = footprint::candidate_rings(cap, radius, level);
         let candidates: Vec<u64> = match rings {
             Some(rings) if tile.level() >= level => {
@@ -483,6 +576,11 @@ pub fn footprint_query_path(body: BodyId, layer: &str, tile: TileId, halo_bits: 
     format!("derived.footprint.{}.{}:{}.{:016x}.{:016x}", body.0, layer.len(), layer, tile.raw(), halo_bits)
 }
 
+/// Path under which a summary node is recorded (the layer is length-prefixed).
+pub fn summary_node_path(body: BodyId, layer: &str, node: TileId) -> NodePath {
+    format!("derived.summary.{}.{}:{}.{}.{:016x}", body.0, layer.len(), layer, node.level(), node.raw())
+}
+
 /// The 64-bit hash of a footprint result: the items in application order with everything that can change an output.
 pub fn footprint_hash(items: &[footprint::FootprintItem]) -> u64 {
     // Application order whatever order a hand-built record was given in, as the 128-bit path does.
@@ -532,6 +630,8 @@ pub enum ReadRecord {
     /// A footprint query of one layer for one tile (query kind 3, WDEF-007): the items whose reach touches the tile, in
     /// application order. `halo_bits` are the bits of the halo (`-0.0` read as `0.0`).
     Footprint { body: BodyId, layer: String, tile: TileId, halo_bits: u64, items: Vec<footprint::FootprintItem> },
+    /// One node of the region summary tree a coarse tile reads (query kind 4, WDEF-008) and its hash.
+    SummaryNode { body: BodyId, layer: String, node: TileId, hash: [u8; 16] },
 }
 
 impl ReadRecord {
@@ -542,6 +642,7 @@ impl ReadRecord {
             ReadRecord::Cell { body, cell, .. } => cell_query_path(*body, *cell),
             ReadRecord::Body { body, .. } => cell_query_all_path(*body),
             ReadRecord::Footprint { body, layer, tile, halo_bits, .. } => footprint_query_path(*body, layer, *tile, *halo_bits),
+            ReadRecord::SummaryNode { body, layer, node, .. } => summary_node_path(*body, layer, *node),
         }
     }
 
@@ -551,6 +652,13 @@ impl ReadRecord {
             ReadRecord::Node { path, value } => node_hash(path, *value),
             ReadRecord::Cell { items, .. } | ReadRecord::Body { items, .. } => cells::cell_hash(items),
             ReadRecord::Footprint { items, .. } => footprint_hash(items),
+            ReadRecord::SummaryNode { hash, .. } => {
+                let words = [
+                    u64::from_le_bytes(hash[..8].try_into().expect("8 bytes")),
+                    u64::from_le_bytes(hash[8..].try_into().expect("8 bytes")),
+                ];
+                hash_u64s(0x0073_756d, &[u64::from(HASH_VERSION), words[0], words[1]])
+            }
         }
     }
 }
@@ -664,6 +772,14 @@ impl<'a> GenContext<'a> {
         }
         self.body_radius_m(body)?;
         let items = self.def.footprint_items(body, layer, tile, halo)?;
+        if let Some(nodes) = self.def.summary_cover(body, tile, halo)? {
+            for node in nodes {
+                let hash = self.def.summary_hash(body, layer, node)?;
+                let record = ReadRecord::SummaryNode { body, layer: layer.to_string(), node, hash };
+                self.record(record.path(), record);
+            }
+            return Ok(items);
+        }
         let halo_bits = if halo == 0.0 { 0.0f64.to_bits() } else { halo.to_bits() };
         let path = footprint_query_path(body, layer, tile, halo_bits);
         self.record(path, ReadRecord::Footprint { body, layer: layer.to_string(), tile, halo_bits, items: items.clone() });

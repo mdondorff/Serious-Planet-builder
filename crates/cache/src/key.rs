@@ -25,8 +25,6 @@ const NODE_CONTEXT: &str = "planet-builder node hash v1";
 const BODY_CONTEXT: &str = "planet-builder body hash v1";
 const QUERY_CONTEXT: &str = "planet-builder query result v1";
 const FOOTPRINT_CONTEXT: &str = "planet-builder footprint result v1";
-/// The footprint item hash is its own domain: the item file's content hash (E2) keeps `planet-builder item hash v1` for its parsed form.
-const ITEM_CONTEXT: &str = "planet-builder footprint item v1";
 
 /// The tag of a key that carries a footprint (kind 3) or a region summary (kind 4) entry (ADR 0066 point 2). Keys without
 /// such an entry keep [`KEY_FORMAT_TAG`] and stay byte for byte what they were, so no stored entry is invalidated; the tag
@@ -96,7 +94,8 @@ pub const QUERY_CELL: u8 = 1;
 pub const QUERY_BODY: u8 = 2;
 /// The items of one layer whose reach touches a tile (WDEF-007): body, layer, tile and halo.
 pub const QUERY_FOOTPRINT: u8 = 3;
-/// Region summary nodes (ADR 0066 point 3, a later step): a key carrying one has [`KEY_FORMAT_TAG_FOOTPRINT`] too.
+/// One node of the region summary tree a coarse tile reads (WDEF-008, ADR 0066 point 3): a key carrying one has
+/// [`KEY_FORMAT_TAG_FOOTPRINT`] too.
 pub const QUERY_SUMMARY: u8 = 4;
 
 /// Everything a key covers (ADR 0018).
@@ -178,22 +177,13 @@ pub fn query_result_hash128(items: &[ItemEntry]) -> [u8; 16] {
 /// 128-bit hash of one footprint item (`planet-builder item hash v1`): the layer, the priority, the content hash, the exact
 /// bits of the anchor, the reach and the height bound. The anchor is inside it, so the result needs no separate direction.
 pub fn footprint_item_hash128(item: &FootprintItem) -> [u8; 16] {
-    let mut m = Vec::with_capacity(96);
-    put_str(&mut m, &item.layer);
-    m.extend_from_slice(&item.priority.to_le_bytes());
-    m.extend_from_slice(&item.content.to_le_bytes());
-    for d in item.dir {
-        m.extend_from_slice(&d.to_le_bytes());
-    }
-    m.extend_from_slice(&item.reach_bits.to_le_bytes());
-    m.extend_from_slice(&item.max_delta_bits.to_le_bytes());
-    derive(ITEM_CONTEXT, &m)
+    planet_world_def::footprint::item_hash128(item)
 }
 
 /// The 16-byte id of an item: its `u64` zero-extended, big-endian, so the byte order is the numeric order and a later
 /// 128-bit id changes a type and not this encoding.
 pub fn footprint_id_bytes(id: u64) -> [u8; 16] {
-    (u128::from(id)).to_be_bytes()
+    planet_world_def::footprint::id_bytes(id)
 }
 
 /// 128-bit hash of a footprint result: the items in application order (priority, then id big-endian), each as its 16-byte id
@@ -219,6 +209,16 @@ pub fn footprint_params(body: BodyId, layer: &str, tile: TileId, halo_bits: u64)
     p
 }
 
+/// The canonical parameters of a region summary entry: `body u32 | layer (u32 length + UTF-8) | level u8 | node raw id u64`.
+pub fn summary_params(body: BodyId, layer: &str, node: TileId) -> Vec<u8> {
+    let mut p = Vec::with_capacity(17 + layer.len());
+    p.extend_from_slice(&body.0.to_le_bytes());
+    put_str(&mut p, layer);
+    p.push(node.level());
+    p.extend_from_slice(&node.raw().to_le_bytes());
+    p
+}
+
 /// The 128-bit entry for one recorded read.
 pub fn read_entry(record: &ReadRecord) -> ReadEntry {
     match record {
@@ -231,6 +231,9 @@ pub fn read_entry(record: &ReadRecord) -> ReadEntry {
         }
         ReadRecord::Body { body, items } => {
             ReadEntry::Query { kind: QUERY_BODY, params: body.0.to_le_bytes().to_vec(), result: query_result_hash128(items) }
+        }
+        ReadRecord::SummaryNode { body, layer, node, hash } => {
+            ReadEntry::Query { kind: QUERY_SUMMARY, params: summary_params(*body, layer, *node), result: *hash }
         }
         ReadRecord::Footprint { body, layer, tile, halo_bits, items } => ReadEntry::Query {
             kind: QUERY_FOOTPRINT,
