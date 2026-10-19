@@ -1631,6 +1631,50 @@ fn an_edit_refreshes_the_tiles_it_touches_while_their_old_versions_stay_drawn_an
     assert!(rig.sink.uploads > sink_uploads, "the new versions were uploaded");
 }
 
+// spec: REND-033, STRM-026
+#[test]
+fn the_edited_tiles_are_previewed_in_the_frame_after_the_edit_before_any_new_plan_and_the_exact_tiles_end_it() {
+    let rev = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let req = request(here(), 0.0, -0.4);
+    let region = TileId::from_direction(&TangentWarp, here().0.normalized(), 6);
+    let field = Arc::new(EditField { inner: Reference(1), rev: Arc::clone(&rev), region });
+    let mut rig = Rig::build_edited(1_000_000, false, 0, UploadBudget::default(), 64, Some(Arc::clone(&field)));
+    rig.settle(&req);
+    let affected: Vec<TileId> = rig.lp.resident().keys().filter(|t| field.touches(**t)).copied().collect();
+    let drawn_before: BTreeSet<TileId> = rig.step(&req).pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+    let under: Vec<TileId> = affected.iter().copied().filter(|t| drawn_before.contains(t)).collect();
+    assert!(!under.is_empty());
+
+    // The edit, and a stamp over the place; the jobs wait.
+    rev.store(1, Ordering::SeqCst);
+    rig.lp.edit(&affected);
+    rig.lp.set_preview(vec![planet_frame::preview::PreviewStamp {
+        sign: 1,
+        kind: planet_world_def::stamp::StampKind::Hill,
+        amount_m: 30.0,
+        dir: region.center_direction(&TangentWarp),
+        reach_m: 5_000_000.0,
+        max_delta_m: 60.0,
+    }]);
+    rig.tile_jobs_per_frame = 0;
+    // The very next frame has no plan made after the edit (the worker is only asked for it in this frame), and its tiles still have the
+    // key of the unedited plan: the edited tiles are drawn as stale and previewed all the same.
+    let f = rig.step(&req);
+    assert!(f.pipeline.delivered.is_none() || f.pipeline.delivered.is_some_and(|(seq, _)| seq < rig.lp.pipeline().frame()));
+    let flagged: BTreeSet<TileId> = f.pipeline.draw.plan.nodes.iter().filter(|n| n.preview).map(|n| n.tile).collect();
+    assert!(!flagged.is_empty(), "the first frame after the edit previews the edited tiles");
+    assert!(flagged.iter().all(|t| affected.contains(t)), "and only tiles the edit named: {flagged:?}");
+    assert_eq!(f.pipeline.draw.kind, DrawKind::Stale, "the frame is not exact while they are out of date");
+    assert!(f.pipeline.draw.substituted >= flagged.len());
+
+    // The jobs finish: the exact tiles are resident, nothing is previewed, the frame is exact.
+    rig.tile_jobs_per_frame = 10_000;
+    rig.settle_view(&req);
+    let f = rig.step(&req);
+    assert_eq!(f.pipeline.draw.kind, DrawKind::Exact);
+    assert!(f.pipeline.draw.plan.nodes.iter().all(|n| !n.preview), "the exact tiles end the preview");
+}
+
 // spec: STRM-030
 #[test]
 fn the_roots_are_written_to_the_sink_before_frame_zero_and_the_first_frame_uploads_none_of_them() {

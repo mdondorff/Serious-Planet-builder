@@ -333,6 +333,7 @@ impl ManagedLoop {
     /// did not move. `tiles` is the footprint find of the edit (WDEF-007). Returns the refresh requests queued.
     pub fn edit(&mut self, tiles: &[TileId]) -> usize {
         self.pipe.worker().invalidate_cache(Some(tiles));
+        self.pipe.mark_edited(tiles);
         let queued = self.manager.streamer_mut().refresh(tiles);
         self.pipe.force_replan();
         self.classes_stale = true;
