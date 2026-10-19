@@ -7,7 +7,7 @@ Rasierklinge, main 0c637bc (the perf preflight #392, the edit-latency scene #386
 - **Preflight OK** (TEST-040, first use): AC connected, High performance plan, calibration within the ADR 0065 limits in all three rounds.
 - **Part A, streaming scenes:** all seven scenes ran to the end, every scene `SESSION VALID for budgets: frame verdicts: yes`, calibration inside the limits before and after each. Two gated measures are over budget, both on the dive (below, "New finding").
 - **Part A, lit views:** the lit session is **INVALID**: four of the lit runs are outside the ADR 0065 limits (coast-3m after, coast-glide before, coast-glide@filter1 before parallel median by 555 us, coast-descent after). No lit verdict counts; the figures are reported, not judged.
-- **Part B (edit latency):** not complete. The first run panicked in the scheduler (a refresh request left in the class its tile had left, `layer.rs:214`, after 4 of 9 cases settled); fixed in #397 (STRM-026), rerun below.
+- **Part B (edit latency): every case is OVER its budget.** Preview 74 to 247 ms against 16 ms; exact 385 to 1283 ms, over the budget in 8 of 9 cases (only 2 km with a 500 m stamp is within it). The first run of Part B panicked in the scheduler (a refresh request left in the class its tile had left, `layer.rs:214`); fixed in #397 (STRM-026) and rerun after a second preflight (the first of the rerun refused on a 52,837 us single reading while the Windows search indexer ran; the second passed). The session is valid: gate ok.
 
 ## Machine (preflight, `target/perf-w13/preflight.md`)
 
@@ -57,4 +57,25 @@ Window 12 for comparison (did not count): dive 7.70 / 16.24 / 85.41, dive-fast 8
 
 ## Part B (edit latency)
 
-Pending: rerun after #397 (STRM-026). The first run settled and ran the cases at 1 m (settle 17.6, 4.8, 7.3 s) and at 200 m with r = 50 m (16.5 s) and r = 150 m (0.5 s) before the panic; no table was written.
+Rerun after #397 (STRM-026), release build of main 0c139df, `cargo xtask perf stream edit-latency --store <16384 store> --out target/perf-w13b`; the readiness gate was ok; preflight of the rerun: single 46,826 / 46,272 / 50,968 us, parallel median 102,231 / 98,970 / 79,674 us (a first preflight 30 min before refused on round 1, single 52,837 us, with the Windows search indexer running; this one passed with the search indexer out of the top five). The first run (main 0c637bc) panicked in the 200 m / 2 km part of the sequence (scheduler, fixed) and wrote no table. Median of three per row, 2560x1440:
+
+| altitude | stamp radius | preview ms (budget 16) | exact ms (budget) | tiles refreshed / resident | previewed nodes (max) | repeats | verdict |
+|---|---|---|---|---|---|---|---|
+| 1 m | 50 m | 211.2 | 1116.1 (1000) | 542 / 11886 | 321 | 3 | OVER |
+| 1 m | 150 m | 224.7 | 1069.5 (1000) | 519 / 12333 | 309 | 3 | OVER |
+| 1 m | 500 m | 246.8 | 1283.4 (1000) | 514 / 12532 | 309 | 3 | OVER |
+| 200 m | 50 m | 85.6 | 501.5 (300) | 115 / 9120 | 30 | 3 | OVER |
+| 200 m | 150 m | 118.6 | 851.2 (300) | 291 / 9326 | 146 | 3 | OVER |
+| 200 m | 500 m | 187.6 | 1211.7 (1000) | 469 / 9592 | 279 | 3 | OVER |
+| 2 km | 50 m | 74.0 | 407.1 (300) | 58 / 6786 | 6 | 3 | OVER |
+| 2 km | 150 m | 78.5 | 385.5 (300) | 66 / 6786 | 9 | 3 | OVER |
+| 2 km | 500 m | 76.5 | 418.0 (1000) | 96 / 6786 | 26 | 3 | OVER (preview only) |
+
+Settle times (cold first row of each rig, then the same rig): 1 m 17.3 / 3.8 / 7.2 s, 200 m 15.7 / 0.5 / 2.0 s, 2 km 11.9 / 0.0 / 0.0 s.
+
+### Reading
+
+- **Preview 5 to 15 times over its 16 ms budget** (74 to 247 ms), and it grows with the resident count and the tiles refreshed (6,786 resident: 74 to 79 ms; 9,100 to 9,600: 86 to 188 ms; 11,900 to 12,500: 211 to 247 ms). SPIKE-13 measured the vertex displacement itself at 4 to 14 ms, so the time before the first previewed frame is not the displacement. Not measured here which stage it is; the likely one is the plan: a node is flagged only when the plan names a mesh key that differs from the resident tile's, so the first previewed frame waits for the plan worker's re-selection after the definition revision (the pipelined loop delivers a plan per request; its time grows with the resident count). Needs a per-stage timestamp in the scene (`set_definition` return, `edit` return, plan delivered, first flagged frame) before a fix is chosen.
+- **Exact against its budget:** 1 m: 1.07 to 1.28 s against 1 s; 200 m: 0.50 s (50 m, budget 0.3 s), 0.85 s (150 m, 0.3 s), 1.21 s (500 m, 1 s); 2 km: 0.41 s and 0.39 s (budget 0.3 s) and 0.42 s (500 m, within 1 s). The exact time follows the tile count refreshed (58 tiles 0.41 s; 514 to 542 tiles 1.1 to 1.3 s), i.e. about 2 to 3 ms per refreshed tile plus a base of about 0.3 s at 2 km, which includes the same plan latency as the preview.
+- **What this says for the M6 exit criterion** (edits visible within 1 s): the preview, which is what makes an edit visible before the exact tiles, is at 74 to 247 ms and not at 16 ms; the exact result is within 1 s at 200 m (50 m and 150 m stamps) and at 2 km (all three), and over it at 1 m (1.07 to 1.28 s) and at 200 m with the 500 m stamp (1.21 s).
+- Next measurements: the per-stage split above; the same table with the plan worker's time taken out; whether the base of 0.3 s is the retained `edit` re-plan or the first job start.
