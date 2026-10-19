@@ -404,18 +404,73 @@ fn candidates(root: &Path) -> Vec<(String, String)> {
     out
 }
 
+/// What `cargo xtask repro <file>` was given (VIEW-026): a terrain bundle, or the camera path file F9 wrote beside one
+/// (`frame-<n>-path.txt` next to `frame-<n>.bundle`). Returns the bundle's name and the path file's, when the file names one.
+fn repro_pair(file: &str) -> (String, Option<String>) {
+    match file.strip_suffix("-path.txt") {
+        Some(stem) => (format!("{stem}.bundle"), Some(file.to_string())),
+        None => (file.to_string(), file.strip_suffix(".bundle").map(|stem| format!("{stem}-path.txt"))),
+    }
+}
+
 pub fn repro(root: &Path, args: &[String]) -> Res {
-    let Some(bundle) = args.iter().find(|a| !a.starts_with("--")) else {
-        return Err("usage: cargo xtask repro <bundle> [--real]".into());
+    let mut it = args.iter();
+    let mut file = None;
+    let (mut every, mut real) = (None, false);
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--real" => real = true,
+            "--every" => every = Some(it.next().ok_or("--every needs a count")?.clone()),
+            other if other.starts_with("--") => return Err(format!("unknown repro option '{other}' (known: --real, --every N)")),
+            other => file = Some(other.to_string()),
+        }
+    }
+    let Some(file) = file else {
+        return Err("usage: cargo xtask repro <bundle | frame-N-path.txt> [--real] [--every N]".into());
     };
-    let bundle = std::fs::canonicalize(bundle)
-        .or_else(|_| std::fs::canonicalize(root.join(bundle)))
-        .map_err(|e| format!("repro bundle '{bundle}' not found: {e}"))?;
-    let bundle = bundle.to_string_lossy().trim_start_matches("\\?\\").to_string();
-    let bundle = bundle.as_str();
-    let adapter = if args.iter().any(|a| a == "--real") { "hardware" } else { "software" };
+    let resolve = |name: &str| {
+        std::fs::canonicalize(name)
+            .or_else(|_| std::fs::canonicalize(root.join(name)))
+            .map(|p| p.to_string_lossy().trim_start_matches("\\?\\").to_string())
+    };
+    let (bundle_name, path_name) = repro_pair(&file);
+    let bundle = resolve(&bundle_name).map_err(|e| format!("repro bundle '{bundle_name}' not found: {e}"))?;
+    let adapter = if real { "hardware" } else { "software" };
+    if file.ends_with("-path.txt") {
+        let path = resolve(&file).map_err(|e| format!("camera path '{file}' not found: {e}"))?;
+        let mut cargo: Vec<String> = [
+            "run",
+            "-q",
+            "-p",
+            "planet",
+            "--",
+            "test-render",
+            "--adapter",
+            adapter,
+            "--repro",
+            &bundle,
+            "--replay-path",
+            &path,
+            "--out-dir",
+            "target/review/replay",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        if let Some(n) = every {
+            cargo.extend(["--replay-every".to_string(), n]);
+        }
+        let refs: Vec<&str> = cargo.iter().map(String::as_str).collect();
+        return run(root, "cargo", &refs, &[]);
+    }
+    if every.is_some() {
+        return Err("--every applies to a camera path file (frame-N-path.txt)".into());
+    }
+    if let Some(p) = path_name.filter(|p| resolve(p).is_ok()) {
+        println!("a camera path lies beside this bundle: cargo xtask repro {p} replays it pose by pose");
+    }
     let out = "target/review/repro.png";
-    run(root, "cargo", &["run", "-q", "-p", "planet", "--", "test-render", "--adapter", adapter, "--repro", bundle, "--out", out], &[])
+    run(root, "cargo", &["run", "-q", "-p", "planet", "--", "test-render", "--adapter", adapter, "--repro", &bundle, "--out", out], &[])
 }
 
 /// The `cargo` arguments of a perf run. The harness decides readiness itself (ADR 0020: AC power, performance scheme,
@@ -1438,6 +1493,19 @@ mod repro_tests {
     fn repro_needs_an_existing_bundle() {
         assert!(repro(Path::new("."), &[]).unwrap_err().contains("usage"));
         assert!(repro(Path::new("."), &["no-such-bundle.repro".to_string()]).unwrap_err().contains("not found"));
+    }
+
+    // spec: VIEW-026
+    #[test]
+    fn a_camera_path_file_names_its_bundle_and_a_bundle_names_its_path_file() {
+        let (bundle, path) = repro_pair("target/review/frame-120-path.txt");
+        assert_eq!((bundle.as_str(), path.as_deref()), ("target/review/frame-120.bundle", Some("target/review/frame-120-path.txt")));
+        let (bundle, path) = repro_pair("target/review/frame-120.bundle");
+        assert_eq!((bundle.as_str(), path.as_deref()), ("target/review/frame-120.bundle", Some("target/review/frame-120-path.txt")));
+        assert_eq!(repro_pair("old.repro"), ("old.repro".to_string(), None), "an older bundle has no path file");
+        assert!(repro(Path::new("."), &["x-path.txt".to_string(), "--every".to_string()]).unwrap_err().contains("--every needs"));
+        assert!(repro(Path::new("."), &["x.bundle".to_string(), "--bogus".to_string()]).unwrap_err().contains("unknown repro option"));
+        assert!(repro(Path::new("."), &["no-such-path.txt".to_string()]).unwrap_err().contains("not found"));
     }
 }
 

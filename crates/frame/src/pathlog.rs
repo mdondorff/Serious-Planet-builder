@@ -27,6 +27,14 @@ pub struct PathSample {
     pub frame_ms: f64,
 }
 
+impl PathSample {
+    /// The camera of this pose, with the lens (field of view, aspect, near plane) of `lens`: what a replay plans the frame with.
+    pub fn camera(&self, lens: &Camera) -> Camera {
+        let v = |a: [f64; 3]| planet_core::Vec3::new(a[0], a[1], a[2]);
+        Camera { position: planet_core::PlanetFixed(v(self.position)), forward: v(self.forward), up: v(self.up), ..*lens }
+    }
+}
+
 /// The ring of the last minute of poses.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PathLog {
@@ -140,6 +148,19 @@ impl PathLog {
         Ok(log)
     }
 
+    /// The one-line notice the window shows in its title after F9 wrote `frame-<frame>.bundle` and `frame-<frame>-path.txt` to `dir`, so the
+    /// owner sees the capture happened without a console.
+    pub fn saved_notice(&self, frame: u64, dir: &str) -> String {
+        let (Some(a), Some(b)) = (self.samples.front(), self.samples.back()) else {
+            return format!("F9: wrote frame-{frame}.bundle and an empty path to {dir}");
+        };
+        format!(
+            "F9: wrote frame-{frame}.bundle and frame-{frame}-path.txt ({} poses, {:.0} s) to {dir}",
+            self.samples.len(),
+            (b.t_ms - a.t_ms) as f64 / 1000.0
+        )
+    }
+
     /// A few lines for a person: how many poses over how long, where the camera started and ended, the lowest altitude, the slowest frame.
     pub fn summary(&self) -> String {
         let (Some(a), Some(b)) = (self.samples.front(), self.samples.back()) else { return "camera path: no samples".to_string() };
@@ -191,6 +212,25 @@ mod tests {
         assert!(last - first <= WINDOW_MS && last - first > WINDOW_MS - 2 * PERIOD_MS, "{first}..{last}");
         assert!(log.len() <= (WINDOW_MS / PERIOD_MS) as usize + 1, "bounded: {}", log.len());
         assert!(times.windows(2).all(|w| w[1] - w[0] >= PERIOD_MS && w[1] - w[0] < PERIOD_MS + 7), "about 10 Hz: {times:?}");
+    }
+
+    // spec: VIEW-024
+    // spec: VIEW-026
+    #[test]
+    fn a_pose_rebuilds_its_camera_with_the_lens_it_is_given_and_f9_names_what_it_wrote() {
+        let mut log = PathLog::new();
+        assert!(log.saved_notice(7, "d").contains("empty path"), "no samples is said");
+        let c = camera(6_371_000.5);
+        log.record(2_000, &c, 12.0, 16.0);
+        log.record(32_000, &camera(6_371_100.5), 3.0, 40.0);
+        let lens = Camera::at_surface_point(PlanetFixed(Vec3::new(1.0, 0.0, 0.0)), Vec3::new(0.0, 0.0, 1.0), 0.0, 1.1, 2.0, 0.25);
+        let rebuilt = log.samples().next().unwrap().camera(&lens);
+        assert_eq!(rebuilt.position, c.position);
+        assert_eq!(rebuilt.forward, c.forward);
+        assert_eq!(rebuilt.up, c.up);
+        assert_eq!((rebuilt.fov_y_rad, rebuilt.aspect, rebuilt.near_m), (1.1, 2.0, 0.25), "the lens is the bundle's, not the pose's");
+        let n = log.saved_notice(7, "target/review");
+        assert_eq!(n, "F9: wrote frame-7.bundle and frame-7-path.txt (2 poses, 30 s) to target/review");
     }
 
     // spec: VIEW-024
