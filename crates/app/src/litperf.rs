@@ -573,7 +573,18 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     if views.is_empty() {
         return Err("--views names no view".into());
     }
-    let rig = Rig { ctx, world: &world, field: field.as_ref(), lod: &lod, size, smoke, calibrate: o.calibrate, frames: o.frames, cells: o.cells, radius_m };
+    let rig = Rig {
+        ctx,
+        world: &world,
+        field: field.as_ref(),
+        lod: &lod,
+        size,
+        smoke,
+        calibrate: o.calibrate,
+        frames: o.frames,
+        cells: o.cells,
+        radius_m,
+    };
     if smoke {
         writeln!(
             out,
@@ -793,7 +804,18 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
         // The first view of the list seeds the renderer: keep the static views, drop the flights that were not asked for.
         views.retain(|v| v.kind == ViewKind::Static || names.iter().any(|n| n == v.name));
     }
-    let rig = Rig { ctx, world: &world, field: field.as_ref(), lod: &lod, size, smoke: true, calibrate: false, frames: 0, cells: o.cells, radius_m };
+    let rig = Rig {
+        ctx,
+        world: &world,
+        field: field.as_ref(),
+        lod: &lod,
+        size,
+        smoke: true,
+        calibrate: false,
+        frames: 0,
+        cells: o.cells,
+        radius_m,
+    };
     writeln!(
         out,
         "capture-flights: NOT a measurement (no gate, no timestamps, no log); {}x{}, {} cameras per flight, tile format compact, {}{}",
