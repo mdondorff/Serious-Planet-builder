@@ -16,6 +16,9 @@ pub const MIN_REGION_POINTS: usize = 3;
 /// The share of the reach limit a part of a split line may use, so an edit of a part has room before it must split again.
 pub const SPLIT_FRACTION: f64 = 0.8;
 
+/// Two directions closer than this (a few micrometres on the Earth) are one place.
+const SAME_PLACE: f64 = 1e-12;
+
 /// A point on the sphere in degrees.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GeoPoint {
@@ -81,6 +84,19 @@ pub enum PolylineError {
         index: usize,
         len: usize,
     },
+    /// A region whose last point repeats its first: the outline closes by itself.
+    ClosedTwice,
+    /// A region of no area: all its points on one great circle.
+    NoArea,
+    /// A region whose two neighbouring edges run back over each other (a spike): the edges.
+    FoldedBack {
+        edge: usize,
+        other: usize,
+    },
+    /// A width or a radius that is not a finite positive number (a width: not negative).
+    BadNumber {
+        what: &'static str,
+    },
 }
 
 impl fmt::Display for PolylineError {
@@ -102,6 +118,10 @@ impl fmt::Display for PolylineError {
             }
             PolylineError::SelfCrossing { edge, other } => write!(f, "the outline crosses itself: edge {edge} meets edge {other}"),
             PolylineError::NoSuchPoint { index, len } => write!(f, "no point {index} in a list of {len}"),
+            PolylineError::ClosedTwice => write!(f, "the last point repeats the first: a region closes its outline by itself"),
+            PolylineError::NoArea => write!(f, "the outline has no area: its points lie on one line"),
+            PolylineError::FoldedBack { edge, other } => write!(f, "edges {edge} and {other} run back over each other"),
+            PolylineError::BadNumber { what } => write!(f, "{what} is not a usable number"),
         }
     }
 }
@@ -129,7 +149,8 @@ fn check_coordinates(points: &[GeoPoint]) -> Result<(), PolylineError> {
         }
     }
     for index in 1..points.len() {
-        if points[index] == points[index - 1] {
+        // The same place, not the same spelling: (90, 0) and (90, 45) are one point, so are longitude 180 and -180.
+        if points[index].dir().distance(points[index - 1].dir()) < SAME_PLACE {
             return Err(PolylineError::Repeated { index });
         }
     }
@@ -168,6 +189,12 @@ pub fn split_line(points: &[GeoPoint], width_m: f64, radius_m: f64) -> Result<Ve
         return Err(PolylineError::Count { need_min: MIN_LINE_POINTS, got: points.len() });
     }
     check_coordinates(points)?;
+    if !(width_m.is_finite() && width_m >= 0.0) {
+        return Err(PolylineError::BadNumber { what: "the width" });
+    }
+    if !(radius_m.is_finite() && radius_m > 0.0) {
+        return Err(PolylineError::BadNumber { what: "the radius" });
+    }
     if line_fits_one_item(points, width_m, radius_m) {
         return Ok(vec![points.to_vec()]);
     }
@@ -203,7 +230,7 @@ pub fn split_line(points: &[GeoPoint], width_m: f64, radius_m: f64) -> Result<Ve
 /// Whether the closed outline crosses itself, projecting the points onto the tangent plane at their mean direction (a region fits one
 /// item, so the projection is faithful to a fraction of a percent). Returns the two edges that meet; an edge `i` runs from point `i` to
 /// point `i + 1`, the last closes the outline.
-fn crossing_edges(points: &[GeoPoint]) -> Option<(usize, usize)> {
+fn outline_fault(points: &[GeoPoint]) -> Option<PolylineError> {
     let dirs: Vec<Vec3> = points.iter().map(|p| p.dir()).collect();
     let centre = dirs.iter().fold(Vec3::ZERO, |s, d| s + *d);
     if centre.length() < 1e-9 {
@@ -221,11 +248,26 @@ fn crossing_edges(points: &[GeoPoint]) -> Option<(usize, usize)> {
         })
         .collect();
     let n = flat.len();
+    // No area: the shoelace sum against the squared perimeter.
+    let area2: f64 = (0..n).map(|i| flat[i].0 * flat[(i + 1) % n].1 - flat[(i + 1) % n].0 * flat[i].1).sum();
+    let length = |a: (f64, f64), b: (f64, f64)| ((b.0 - a.0) * (b.0 - a.0) + (b.1 - a.1) * (b.1 - a.1)).sqrt();
+    let perimeter: f64 = (0..n).map(|i| length(flat[i], flat[(i + 1) % n])).sum();
+    if area2.abs() <= 1e-9 * perimeter * perimeter {
+        return Some(PolylineError::NoArea);
+    }
     let orient = |a: (f64, f64), b: (f64, f64), p: (f64, f64)| (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0);
+    // Neighbouring edges meet at their shared point by construction; they fold back when they run along one line in opposite directions.
+    for i in 0..n {
+        let (a, b, c) = (flat[i], flat[(i + 1) % n], flat[(i + 2) % n]);
+        let turn = orient(a, b, c);
+        let backwards = (b.0 - a.0) * (c.0 - b.0) + (b.1 - a.1) * (c.1 - b.1) < 0.0;
+        if backwards && turn.abs() <= 1e-9 * length(a, b) * length(b, c) {
+            return Some(PolylineError::FoldedBack { edge: i, other: (i + 1) % n });
+        }
+    }
     for i in 0..n {
         let (a, b) = (flat[i], flat[(i + 1) % n]);
         for j in (i + 1)..n {
-            // Edges that share a point meet there by construction.
             if j == i + 1 || (i == 0 && j == n - 1) {
                 continue;
             }
@@ -233,7 +275,7 @@ fn crossing_edges(points: &[GeoPoint]) -> Option<(usize, usize)> {
             let (d1, d2) = (orient(a, b, p), orient(a, b, q));
             let (d3, d4) = (orient(p, q, a), orient(p, q, b));
             if d1 * d2 <= 0.0 && d3 * d4 <= 0.0 {
-                return Some((i, j));
+                return Some(PolylineError::SelfCrossing { edge: i, other: j });
             }
         }
     }
@@ -250,18 +292,24 @@ pub fn validate_region(points: &[GeoPoint], radius_m: f64) -> Result<(), Polylin
         return Err(PolylineError::TooMany { got: points.len() });
     }
     check_coordinates(points)?;
+    if points[0].dir().distance(points[points.len() - 1].dir()) < SAME_PLACE {
+        return Err(PolylineError::ClosedTwice);
+    }
     let reach_m = extent_m(points, radius_m);
     if reach_m > CELL_EDGE_M {
         return Err(PolylineError::RegionTooLarge { reach_m, limit_m: CELL_EDGE_M });
     }
-    match crossing_edges(points) {
-        Some((edge, other)) => Err(PolylineError::SelfCrossing { edge, other }),
+    match outline_fault(points) {
+        Some(fault) => Err(fault),
         None => Ok(()),
     }
 }
 
 /// The index of the point nearest to `hit` (a unit direction) within `max_arc_m`, if any.
 pub fn nearest_point(points: &[GeoPoint], hit: Vec3, radius_m: f64, max_arc_m: f64) -> Option<usize> {
+    if !(hit.x.is_finite() && hit.y.is_finite() && hit.z.is_finite()) {
+        return None;
+    }
     points
         .iter()
         .enumerate()
@@ -284,7 +332,7 @@ pub struct SegmentHit {
 /// The nearest segment to `hit` and the foot on it. `closed` adds the segment from the last point to the first (a region's outline).
 pub fn nearest_segment(points: &[GeoPoint], closed: bool, hit: Vec3, radius_m: f64) -> Option<SegmentHit> {
     let n = points.len();
-    if n < 2 {
+    if n < 2 || !(hit.x.is_finite() && hit.y.is_finite() && hit.z.is_finite()) {
         return None;
     }
     let segments = if closed { n } else { n - 1 };
@@ -466,6 +514,32 @@ mod tests {
         let pole: Vec<GeoPoint> =
             vec![GeoPoint::new(89.9, 0.0), GeoPoint::new(89.9, 90.0), GeoPoint::new(89.9, 180.0), GeoPoint::new(89.9, -90.0)];
         assert_eq!(validate_region(&pole, R), Ok(()));
+    }
+
+    // spec: VIEW-027
+    #[test]
+    fn a_degenerate_region_the_same_place_spelled_twice_and_unusable_numbers_are_refused() {
+        // Three points on one line, a spike that goes out and back, and a last point equal to the first.
+        assert_eq!(validate_region(&line_of(&[0.0, 5_000.0, 10_000.0]), R), Err(PolylineError::NoArea));
+        let d = 10_000.0 / R * RAD_TO_DEG;
+        let spike = vec![GeoPoint::new(0.0, 0.0), GeoPoint::new(0.0, d), GeoPoint::new(0.0, d * 0.5), GeoPoint::new(d, d * 0.5)];
+        assert_eq!(validate_region(&spike, R), Err(PolylineError::FoldedBack { edge: 0, other: 1 }));
+        let mut closed = square(10_000.0);
+        closed.push(closed[0]);
+        assert_eq!(validate_region(&closed, R), Err(PolylineError::ClosedTwice));
+        // Longitude 180 and -180, and the pole at any longitude, are one place each.
+        let e = validate_line(&[GeoPoint::new(0.0, 180.0), GeoPoint::new(0.0, -180.0)]);
+        assert_eq!(e, Err(PolylineError::Repeated { index: 1 }));
+        assert_eq!(validate_line(&[GeoPoint::new(90.0, 0.0), GeoPoint::new(90.0, 45.0)]), Err(PolylineError::Repeated { index: 1 }));
+        // Width and radius.
+        let l = line_of(&[0.0, 100_000.0]);
+        assert_eq!(split_line(&l, f64::NAN, R), Err(PolylineError::BadNumber { what: "the width" }));
+        assert_eq!(split_line(&l, -5.0, R), Err(PolylineError::BadNumber { what: "the width" }));
+        assert_eq!(split_line(&l, 5.0, 0.0), Err(PolylineError::BadNumber { what: "the radius" }));
+        // A click that is not a direction picks nothing.
+        let nan = Vec3::new(f64::NAN, 0.0, 0.0);
+        assert_eq!(nearest_point(&l, nan, R, 1e9), None);
+        assert!(nearest_segment(&l, false, nan, R).is_none());
     }
 
     // spec: VIEW-027
