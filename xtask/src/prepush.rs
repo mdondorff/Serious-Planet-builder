@@ -147,6 +147,7 @@ mod tests {
 
     // spec: BUILD-016
     // spec: BUILD-021
+    // spec: BUILD-022
     #[test]
     fn the_plan_of_a_diff_is_spec_lint_alone_for_docs_and_the_gpu_tier_follows_a_golden_path() {
         assert_eq!(plan_steps(&paths(&["docs/status.md"])), ["merged spec-lint", "spec-lint"]);
