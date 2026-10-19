@@ -1458,6 +1458,7 @@ dependencies = [
  "planet-core",
  "planet-frame",
  "planet-render",
+ "planet-world-def",
 ]
 
 [[package]]
