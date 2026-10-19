@@ -4,6 +4,7 @@
 //! The parameters are read by key (`radius_m`, `height_m`) and the rest of the item is untouched, so a kind the stamp stage adds later
 //! is edited by the same handles as long as it names its metric parameters this way.
 
+use crate::params;
 use planet_core::Vec3;
 use planet_frame::Camera;
 use planet_world_def::cells::CELL_EDGE_M;
@@ -13,8 +14,10 @@ use planet_world_def::item::{Item, MAX_DELTA_LIMIT_M};
 pub const RADIUS_KEY: &str = "radius_m";
 /// The parameter that is the height of an item's change, metres.
 pub const HEIGHT_KEY: &str = "height_m";
-/// The smallest radius a drag makes, metres.
+/// The smallest radius a drag makes of a kind the parameter table does not know, metres.
 pub const MIN_RADIUS_M: f64 = 1.0;
+/// How much further than its outline the reach of an edit reaches, as a factor.
+pub const REACH_FACTOR: f64 = 1.25;
 
 /// What a handle changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -47,13 +50,13 @@ pub fn handles_of(item: &Item) -> Vec<Handle> {
     v
 }
 
-/// North and east at the unit direction `dir`: north is the pole's direction projected on the tangent plane (the x axis at the poles).
+/// North and east at the unit direction `dir`: north is the pole's direction projected on the tangent plane. At a pole itself north is
+/// the limit along longitude 0 (the spelling an item file gives a pole): -x at the north pole, +x at the south pole.
 pub fn tangent_frame(dir: Vec3) -> (Vec3, Vec3) {
     let pole = Vec3::new(0.0, 0.0, 1.0);
     let mut north = pole - dir * pole.dot(dir);
-    if north.length() < 1e-9 {
-        let x = Vec3::new(1.0, 0.0, 0.0);
-        north = x - dir * x.dot(dir);
+    if north.length() < 1e-15 {
+        north = if dir.z > 0.0 { Vec3::new(-1.0, 0.0, 0.0) } else { Vec3::new(1.0, 0.0, 0.0) };
     }
     let north = north.normalized();
     (north, north.cross(dir).normalized())
@@ -104,22 +107,31 @@ pub fn moved(item: &Item, dir: Vec3) -> Item {
     it
 }
 
+/// The range a drag keeps parameter `key` of `item` in: the kind's range when the table has one, else `(lo, hi)`.
+fn drag_range(item: &Item, key: &str, lo: f64, hi: f64) -> (f64, f64) {
+    params::def_of(&item.kind, key).map_or((lo, hi), |d| (d.min.max(lo), d.max.min(hi)))
+}
+
 /// The item resized so that its outline passes through the unit direction `dir`: the `radius_m` parameter becomes the arc from the anchor
-/// to `dir` (at least [`MIN_RADIUS_M`], at most one cell edge) and the reach grows to hold it.
+/// to `dir`, kept in the kind's range (else 1 m to one cell edge), and the reach grows to hold the outline with its margin (never shrinks).
 pub fn resized(item: &Item, dir: Vec3, radius_m: f64) -> Item {
     let c = item.direction();
-    let arc = radius_m * libm::atan2(c.cross(dir.normalized()).length(), c.dot(dir.normalized()));
-    let r = arc.clamp(MIN_RADIUS_M, CELL_EDGE_M);
+    let d = dir.normalized();
+    let arc = radius_m * libm::atan2(c.cross(d).length(), c.dot(d));
+    let (lo, hi) = drag_range(item, RADIUS_KEY, MIN_RADIUS_M, CELL_EDGE_M);
+    let r = arc.clamp(lo, hi);
     let mut it = item.clone();
     it.params.insert(RADIUS_KEY.to_string(), r);
-    it.reach_m = it.reach_m.max(r);
+    it.reach_m = it.reach_m.max((r * REACH_FACTOR).min(CELL_EDGE_M));
     it
 }
 
-/// The item with its `height_m` changed by `delta_m` (the bound on the change grows to hold it, up to the limit).
+/// The item with its `height_m` changed by `delta_m`, kept in the kind's range (else within the limit on the change) and the bound on the
+/// change grown to hold it (never shrinks).
 pub fn raised(item: &Item, delta_m: f64) -> Item {
     let mut it = item.clone();
-    let h = it.params.get(HEIGHT_KEY).copied().unwrap_or(0.0) + delta_m;
+    let (lo, hi) = drag_range(item, HEIGHT_KEY, -MAX_DELTA_LIMIT_M, MAX_DELTA_LIMIT_M);
+    let h = (it.params.get(HEIGHT_KEY).copied().unwrap_or(0.0) + delta_m).clamp(lo, hi);
     it.params.insert(HEIGHT_KEY.to_string(), h);
     it.max_delta_m = it.max_delta_m.max(h.abs()).min(MAX_DELTA_LIMIT_M);
     it

@@ -123,9 +123,11 @@ fn the_shown_set_is_the_footprint_find_and_not_a_scan_of_every_item() {
     s.deselect();
     let v = view(camera_above(here, 30_000.0));
     let before = s.shown(&[tile_of(here)], &v).unwrap();
-    for i in 0..400 {
-        let far = unit(-60.0 + (i % 20) as f64, 100.0 + (i / 20) as f64 * 3.0);
-        s.place("hill", far).unwrap();
+    // Forty large plateaus 330 to 700 km away: each covers more than 8 pixels from 30 km up, so only the tiles keep them out.
+    for i in 0..40 {
+        let far = unit(13.0 + (i % 8) as f64 * 0.5, 10.0 + (i / 8) as f64 * 0.7);
+        let (id, _) = s.place("plateau", far).unwrap();
+        assert!(reach_px(&v, s.item(id).unwrap().direction(), s.item(id).unwrap().reach_m) > MIN_REACH_PX, "a scan would show it");
     }
     s.deselect();
     assert_eq!(s.shown(&[tile_of(here)], &v).unwrap(), before);
@@ -182,17 +184,20 @@ fn the_search_is_planet_wide_sorted_by_distance_and_matches_words_in_any_case() 
     assert!(s.search("nothing like this", None, cam).is_empty());
     // The id text and the kind match too; an unnamed edit is labelled by its kind and the end of its id.
     let (u, _) = s.place("plateau", unit(0.0, 0.0)).unwrap();
+    s.editor_mut().change(u, |it| it.name = None).unwrap();
     let text = planet_world_def::item::ulid_text(u);
-    let mut unnamed = s.item(u).unwrap().clone();
-    unnamed.name = None;
-    let label = lists::label_of(&unnamed);
-    assert_eq!(label, format!("plateau {}", &text[text.len() - 6..]));
-    assert_eq!(s.search(&text[text.len() - 6..], None, cam).len(), 1);
+    let tail = &text[text.len() - 6..];
+    let rows = s.search(tail, None, cam);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].label, format!("plateau {tail}"));
+    // A name is shown trimmed.
+    s.editor_mut().change(u, |it| it.name = Some("  Padded  ".into())).unwrap();
+    assert_eq!(s.search("padded", None, cam)[0].label, "Padded");
 }
 
 // spec: VIEW-016
 #[test]
-fn the_layers_list_groups_by_layer_in_the_order_the_edits_apply_and_the_chain_is_that_order() {
+fn the_layers_list_follows_the_layer_stack_and_within_a_layer_the_order_the_edits_apply() {
     let mut s = session(6);
     let ids: Vec<ItemId> = (0..4)
         .map(|i| {
@@ -202,14 +207,27 @@ fn the_layers_list_groups_by_layer_in_the_order_the_edits_apply_and_the_chain_is
         .collect();
     s.editor_mut().change(ids[0], |it| it.priority = 5).unwrap();
     s.editor_mut().change(ids[1], |it| it.priority = -1).unwrap();
-    s.editor_mut().change(ids[2], |it| it.layer = "ridges".into()).unwrap();
+    s.editor_mut().change(ids[2], |it| it.layer = "splines".into()).unwrap();
+    s.editor_mut().change(ids[3], |it| it.layer = "my-layer".into()).unwrap();
     let cam = unit(10.0, 20.0) * R;
     let groups = s.layer_groups(cam);
-    assert_eq!(groups.iter().map(|g| g.layer.as_str()).collect::<Vec<_>>(), ["ridges", "stamps"], "the layers by name");
-    let stamps: Vec<ItemId> = groups[1].rows.iter().map(|r| r.id).collect();
-    assert_eq!(stamps, [ids[1], ids[3], ids[0]], "priority -1, 0, 5");
+    assert_eq!(
+        groups.iter().map(|g| g.layer.as_str()).collect::<Vec<_>>(),
+        ["stamps", "splines", "my-layer"],
+        "the stack bottom to top, a layer outside the stack after it"
+    );
+    let stamps: Vec<ItemId> = groups[0].rows.iter().map(|r| r.id).collect();
+    assert_eq!(stamps, [ids[1], ids[0]], "priority -1 then 5");
     let chain: Vec<ItemId> = s.chain(cam).iter().map(|r| r.id).collect();
-    assert_eq!(chain, [ids[1], ids[2], ids[3], ids[0]], "all layers by priority, ties by id");
+    assert_eq!(
+        chain,
+        [ids[1], ids[0], ids[2], ids[3]],
+        "layer first, then priority, then id: a low priority in a higher layer still applies later"
+    );
+    s.editor_mut().change(ids[2], |it| it.priority = -100).unwrap();
+    let chain: Vec<ItemId> = s.chain(cam).iter().map(|r| r.id).collect();
+    assert_eq!(chain, [ids[1], ids[0], ids[2], ids[3]], "priority never reorders layers");
+    assert_eq!(lists::LAYER_STACK, ["base", "imported", "intent", "stamps", "splines", "placed", "frozen"]);
 }
 
 // ---- VIEW-017: selection, handles, drags, typed values ---------------------------------------------------------------------------
@@ -307,24 +325,37 @@ fn a_handle_drag_makes_the_item_the_pointer_says_and_keeps_the_bounds_true() {
     let moved = shape::moved(&it, p);
     assert!(moved.direction().dot(p) > 1.0 - 1e-14);
     assert_eq!((moved.params.clone(), moved.reach_m, moved.anchor.heading_deg), (it.params.clone(), it.reach_m, it.anchor.heading_deg));
-    // Resize: the radius is the arc to the pointer; the reach grows to hold it and does not shrink.
-    let out = shape::point_at(it.direction(), 33.0, 2_000.0, R);
+    // Resize (a hill: 50 m to 2 km): the radius is the arc to the pointer; the reach grows to hold it with its margin and does not shrink.
+    let out = shape::point_at(it.direction(), 33.0, 1_500.0, R);
     let big = shape::resized(&it, out, R);
-    assert!((big.params["radius_m"] - 2_000.0).abs() < 1e-3);
-    assert!(big.reach_m >= big.params["radius_m"], "the reach holds the outline");
+    assert!((big.params["radius_m"] - 1_500.0).abs() < 1e-3);
+    assert!((big.reach_m - big.params["radius_m"] * shape::REACH_FACTOR).abs() < 1e-9, "the reach holds the outline with the margin");
     let small = shape::resized(&it, shape::point_at(it.direction(), 33.0, 100.0, R), R);
     assert!((small.params["radius_m"] - 100.0).abs() < 1e-3 && small.reach_m == it.reach_m, "a smaller outline keeps the reach");
     let none = shape::resized(&it, it.direction(), R);
-    assert_eq!(none.params["radius_m"], shape::MIN_RADIUS_M, "never below the least radius");
+    assert_eq!(none.params["radius_m"], 50.0, "never below the kind's least radius");
     let huge = shape::resized(&it, shape::point_at(it.direction(), 0.0, 90_000.0, R), R);
-    assert_eq!((huge.params["radius_m"], huge.reach_m), (CELL_EDGE_M, CELL_EDGE_M), "never beyond one cell edge");
-    // Raise: the height changes and the bound on the change holds it, up to the limit.
+    assert_eq!(huge.params["radius_m"], 2_000.0, "never beyond the kind's greatest radius, the range a typed value is held to");
+    assert!(huge.reach_m >= huge.params["radius_m"]);
+    // Raise (a hill: 5 m to 400 m): the height stays in the range and the bound on the change holds it, never shrinking.
     let up = shape::raised(&it, 40.0);
     assert_eq!((up.params["height_m"], up.max_delta_m), (120.0, 120.0));
     let down = shape::raised(&it, -200.0);
-    assert_eq!((down.params["height_m"], down.max_delta_m), (-120.0, 120.0), "a hollow's bound is its depth");
-    let limit = shape::raised(&it, 1.0e9);
-    assert_eq!(limit.max_delta_m, planet_world_def::item::MAX_DELTA_LIMIT_M);
+    assert_eq!((down.params["height_m"], down.max_delta_m), (5.0, 80.0), "the least height of the kind; the bound does not shrink");
+    let top = shape::raised(&it, 1.0e9);
+    assert_eq!((top.params["height_m"], top.max_delta_m), (400.0, 400.0));
+    // A kind the table does not know: 1 m to one cell edge, and a height within the limit on the change, whose bound holds it.
+    let mut mesa = it.clone();
+    mesa.kind = "mesa".into();
+    let huge = shape::resized(&mesa, shape::point_at(mesa.direction(), 0.0, 90_000.0, R), R);
+    assert_eq!((huge.params["radius_m"], huge.reach_m), (CELL_EDGE_M, CELL_EDGE_M));
+    assert_eq!(shape::resized(&mesa, mesa.direction(), R).params["radius_m"], shape::MIN_RADIUS_M);
+    for delta in [1.0e9, -1.0e9] {
+        let r = shape::raised(&mesa, delta);
+        assert_eq!(r.params["height_m"].abs(), planet_world_def::item::MAX_DELTA_LIMIT_M);
+        assert!(r.params["height_m"].abs() <= r.max_delta_m, "the bound holds the height");
+        r.validate().unwrap();
+    }
 }
 
 // spec: VIEW-017
@@ -443,6 +474,25 @@ fn a_typed_value_is_one_command_in_its_unit_and_a_value_out_of_range_or_not_a_nu
         .unwrap();
     s.set_param_text("wobble", "7.5").unwrap();
     assert_eq!(s.item(id).unwrap().params["wobble"], 7.5);
+    // The limits of the item file hold where the table has no range: the outline within one cell edge, a change within the bound.
+    s.editor_mut().change(id, |it| it.kind = "mesa".into()).unwrap();
+    for (key, text) in [("radius_m", "100 km"), ("radius_m", "0"), ("radius_m", "-3"), ("wobble_m", "1")] {
+        let r = s.set_param_text(key, text);
+        assert!(matches!(r, Err(SessionError::Refused(_))), "{key}={text}: {r:?}");
+    }
+    s.editor_mut()
+        .change(id, |it| {
+            it.params.insert("lift_m".into(), 1.0);
+        })
+        .unwrap();
+    let h = s.editor().hash();
+    assert!(matches!(s.set_param_text("lift_m", "1000000"), Err(SessionError::Refused(_))));
+    assert_eq!(s.editor().hash(), h);
+    s.set_param_text("radius_m", "30 km").unwrap();
+    s.set_param_text("lift_m", "5000").unwrap();
+    let it = s.item(id).unwrap();
+    assert_eq!((it.params["radius_m"], it.reach_m, it.max_delta_m), (30_000.0, 37_500.0, 5_000.0));
+    assert!(shape::outline_radius_m(it) <= it.reach_m && it.params["lift_m"].abs() <= it.max_delta_m);
 }
 
 // spec: VIEW-017
@@ -599,6 +649,8 @@ fn lengths_are_typed_and_shown_in_metres_or_kilometres_and_a_bad_input_says_why(
         (2_400.0, "2.4 km"),
         (1_234.5, "1.23 km"),
         (-2_400.0, "-2.4 km"),
+        (999.96, "1 km"),
+        (-0.04, "0 m"),
     ] {
         assert_eq!(params::format_metres(v), want);
     }
@@ -614,6 +666,41 @@ fn lengths_are_typed_and_shown_in_metres_or_kilometres_and_a_bad_input_says_why(
         }
     }
     assert!(params::defs_for("volcano").is_empty() && params::def_of("hill", "nope").is_none());
+}
+
+// spec: VIEW-017
+#[test]
+fn a_place_that_is_not_a_direction_is_refused_and_a_selection_waits_for_the_drag() {
+    let mut s = session(13);
+    let (a, _) = s.place("hill", unit(47.2, 8.55)).unwrap();
+    let (b, _) = s.place("hill", unit(47.3, 8.55)).unwrap();
+    let h = s.editor().hash();
+    for bad in [Vec3::new(0.0, 0.0, 0.0), Vec3::new(f64::NAN, 0.0, 0.0), Vec3::new(f64::INFINITY, 0.0, 1.0)] {
+        assert!(matches!(s.place("hill", bad), Err(SessionError::Refused(_))), "{bad:?}");
+    }
+    s.select(a);
+    s.begin_drag(Handle::Move).unwrap();
+    for bad in [Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, f64::NAN, 0.0)] {
+        assert!(matches!(s.drag_surface(bad), Err(SessionError::Refused(_))), "{bad:?}");
+    }
+    s.select(b);
+    assert_eq!(s.selected(), Some(a), "the selection does not change while a handle is held");
+    s.cancel_drag().unwrap();
+    s.select(b);
+    assert_eq!(s.selected(), Some(b));
+    assert_eq!(s.editor().hash(), h);
+}
+
+// spec: VIEW-017
+#[test]
+fn heading_zero_at_a_pole_is_the_limit_along_longitude_zero_and_does_not_jump() {
+    for (lat, near) in [(90.0, 90.0 - 1e-6), (-90.0, -90.0 + 1e-6)] {
+        let at = shape::tangent_frame(unit(lat, 0.0)).0;
+        let next = shape::tangent_frame(unit(near, 0.0)).0;
+        assert!(at.dot(next) > 0.999_999, "lat {lat}: {at:?} vs {next:?}");
+    }
+    let (north, east) = shape::tangent_frame(unit(89.999_999_99, 137.0));
+    assert!(north.dot(unit(89.999_999_99, 137.0)).abs() < 1e-9 && east.dot(north).abs() < 1e-9, "a frame, a hair from the pole");
 }
 
 // ---- VIEW-018: the layout as data ------------------------------------------------------------------------------------------------

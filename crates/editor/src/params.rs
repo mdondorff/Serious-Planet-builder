@@ -77,10 +77,12 @@ fn trimmed(v: f64, decimals: usize) -> String {
 
 /// A length for people: metres under a kilometre, kilometres above.
 pub fn format_metres(v: f64) -> String {
-    if v.abs() >= 1000.0 {
+    // Rounded to a tenth of a metre first, so 999.96 m reads 1 km and not 1000 m.
+    let tenth = (v * 10.0).round() / 10.0;
+    if tenth.abs() >= 1000.0 {
         format!("{} km", trimmed(v / 1000.0, 2))
     } else {
-        format!("{} m", trimmed(v, 1))
+        format!("{} m", trimmed(if tenth == 0.0 { 0.0 } else { tenth }, 1))
     }
 }
 
@@ -149,7 +151,10 @@ pub struct Inspector {
 }
 
 fn degrees(v: f64, pos: char, neg: char) -> String {
-    format!("{:.5}° {}", v.abs(), if v < 0.0 { neg } else { pos })
+    let text = format!("{:.5}", v.abs());
+    // A value that rounds to zero has no sign.
+    let side = if v < 0.0 && text.chars().any(|c| matches!(c, '1'..='9')) { neg } else { pos };
+    format!("{text}° {side}")
 }
 
 /// The inspector of `item`. `position` is `(place, count)` in its layer's apply order, `distance_m` from the camera.

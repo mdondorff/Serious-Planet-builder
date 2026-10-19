@@ -5,6 +5,15 @@ use planet_world_def::item::{ulid_text, Item};
 use planet_world_def::ItemId;
 use std::collections::BTreeSet;
 
+/// The layer stack, bottom to top (ADR 0007, ADR 0066 point 4): edits apply in the order of their layer in this stack, and within a
+/// layer by priority then id. A layer that is not in the stack applies after the known ones, by name.
+pub const LAYER_STACK: [&str; 7] = ["base", "imported", "intent", "stamps", "splines", "placed", "frozen"];
+
+/// Where a layer applies: its place in the stack, then its name.
+pub fn layer_rank(layer: &str) -> (usize, &str) {
+    (LAYER_STACK.iter().position(|l| *l == layer).unwrap_or(LAYER_STACK.len()), layer)
+}
+
 /// One edit in a list.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
@@ -76,10 +85,10 @@ pub fn search_rows<'a>(
     sorted(items.into_iter().filter(|i| matches(i, query, kind)).map(|i| row_of(i, camera_position, radius_m)).collect())
 }
 
-/// The edits in the order they apply: by priority, ties by id.
+/// The edits in the order they apply: by layer in the stack, then priority, then id.
 pub fn apply_order<'a>(items: impl IntoIterator<Item = &'a Item>, camera_position: Vec3, radius_m: f64) -> Vec<Row> {
     let mut v: Vec<&Item> = items.into_iter().collect();
-    v.sort_by_key(|i| (i.priority, i.id));
+    v.sort_by_key(|i| (layer_rank(&i.layer), i.priority, i.id));
     v.into_iter().map(|i| row_of(i, camera_position, radius_m)).collect()
 }
 
@@ -90,10 +99,11 @@ pub struct LayerGroup {
     pub rows: Vec<Row>,
 }
 
-/// The edits by layer: the layers by name, the rows of each in the order they apply.
+/// The edits by layer: the layers in stack order, the rows of each in the order they apply.
 pub fn layer_groups<'a>(items: impl IntoIterator<Item = &'a Item>, camera_position: Vec3, radius_m: f64) -> Vec<LayerGroup> {
     let all: Vec<&Item> = items.into_iter().collect();
-    let layers: BTreeSet<&str> = all.iter().map(|i| i.layer.as_str()).collect();
+    let mut layers: Vec<&str> = all.iter().map(|i| i.layer.as_str()).collect::<BTreeSet<_>>().into_iter().collect();
+    layers.sort_by_key(|l| layer_rank(l));
     layers
         .into_iter()
         .map(|layer| LayerGroup {

@@ -9,7 +9,7 @@ use crate::commands::{Affected, EditError, Editor, NewItem};
 use crate::lists::{self, LayerGroup, Row};
 use crate::params::{self, Inspector, Unit};
 use crate::relevance::{relevant_items, ViewState, MIN_REACH_PX};
-use crate::shape::{self, Handle, RADIUS_KEY};
+use crate::shape::{self, Handle, RADIUS_KEY, REACH_FACTOR};
 use planet_core::{TileId, Vec3};
 use planet_frame::pick::{pick_footprint, Footprint, SurfaceHit};
 use planet_world_def::cells::CELL_EDGE_M;
@@ -21,8 +21,6 @@ use std::fmt;
 
 /// The layer new stamps go into.
 pub const STAMP_LAYER: &str = "stamps";
-/// How much further than its outline the reach of a placed stamp reaches, as a factor.
-pub const REACH_FACTOR: f64 = 1.25;
 
 /// What the pointer does on the planet.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,16 +61,21 @@ fn refused<T>(why: impl Into<String>) -> Result<T, SessionError> {
     Err(SessionError::Refused(why.into()))
 }
 
-/// The reach and the bound on the change that hold a parameter set: the reach holds the outline (at most one cell edge) and the bound
-/// holds the largest of the metric parameters that are not the radius, up to the limit.
+/// The reach and the bound on the change that hold a parameter set, both only growing: the reach holds the outline with its margin (at
+/// most one cell edge) and the bound holds the largest of the metric parameters that are not the radius (at most the limit).
 fn bounds(params: &BTreeMap<String, f64>, reach_m: f64, max_delta_m: f64) -> (f64, f64) {
-    let outline = match params.get(RADIUS_KEY) {
-        Some(r) if r.is_finite() && *r > 0.0 => *r,
-        _ => reach_m,
+    let want = match params.get(RADIUS_KEY) {
+        Some(r) if r.is_finite() && *r > 0.0 => (r * REACH_FACTOR).min(CELL_EDGE_M),
+        _ => 0.0,
     };
     let largest =
         params.iter().filter(|(k, _)| k.as_str() != RADIUS_KEY && k.ends_with("_m")).map(|(_, v)| v.abs()).fold(0.0_f64, f64::max);
-    (reach_m.max(outline).min(CELL_EDGE_M), max_delta_m.max(largest).min(MAX_DELTA_LIMIT_M))
+    (reach_m.max(want).min(CELL_EDGE_M), max_delta_m.max(largest).min(MAX_DELTA_LIMIT_M))
+}
+
+/// Whether `dir` can be a direction: finite and not zero.
+fn is_direction(dir: Vec3) -> bool {
+    dir.x.is_finite() && dir.y.is_finite() && dir.z.is_finite() && dir.length() > 0.0
 }
 
 /// Keep the bounds of an item true to its parameters.
@@ -157,8 +160,9 @@ impl<S: ItemStore> Session<S> {
         self.selection.and_then(|id| self.editor.item(id))
     }
 
+    /// Select an edit. While a handle is held the selection does not change.
     pub fn select(&mut self, id: ItemId) {
-        if self.editor.item(id).is_some() {
+        if self.drag.is_none() && self.editor.item(id).is_some() {
             self.selection = Some(id);
         }
     }
@@ -256,11 +260,13 @@ impl<S: ItemStore> Session<S> {
         if defs.is_empty() {
             return refused(format!("'{kind}' is not a kind of stamp"));
         }
+        if !is_direction(dir) {
+            return refused("that is not a place on the planet");
+        }
         let (lat, lon) = shape::lat_lon_of(dir);
         let params: BTreeMap<String, f64> = defs.iter().map(|d| (d.key.to_string(), d.default)).collect();
         let count = self.editor.items().filter(|i| i.kind == kind).count() + 1;
-        let reach = params.get(RADIUS_KEY).copied().unwrap_or(0.0) * REACH_FACTOR;
-        let (reach_m, max_delta_m) = bounds(&params, reach, 0.0);
+        let (reach_m, max_delta_m) = bounds(&params, 0.0, 0.0);
         let new = NewItem {
             body: self.body,
             surface: planet_world_def::item::DEFAULT_SURFACE.to_string(),
@@ -319,6 +325,14 @@ impl<S: ItemStore> Session<S> {
                     params::format_value(d.max, d.unit)
                 ));
             }
+        } else if unit == Unit::Metres {
+            // No range for this parameter: the limits of the item file hold (an outline within one cell edge, a change within the bound).
+            if key == RADIUS_KEY && !(v > 0.0 && v <= CELL_EDGE_M) {
+                return refused(format!("{key} must be between 0 and {}", params::format_metres(CELL_EDGE_M)));
+            }
+            if key != RADIUS_KEY && v.abs() > MAX_DELTA_LIMIT_M {
+                return refused(format!("{key} must be within {}", params::format_metres(MAX_DELTA_LIMIT_M)));
+            }
         }
         let affected = self.editor.change(id, |it| {
             it.params.insert(key.to_string(), v);
@@ -351,6 +365,9 @@ impl<S: ItemStore> Session<S> {
 
     /// The pointer moved over the surface at the unit direction `dir` while a position or radius handle is held.
     pub fn drag_surface(&mut self, dir: Vec3) -> Result<Vec<Affected>, SessionError> {
+        if !is_direction(dir) {
+            return refused("that is not a place on the planet");
+        }
         let radius_m = self.radius_m;
         match self.drag {
             Some(Handle::Move) => Ok(self.editor.edit(|it| *it = shape::moved(it, dir))?),

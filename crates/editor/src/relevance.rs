@@ -21,7 +21,7 @@ pub struct ViewState {
 }
 
 /// The radius in pixels of a reach of `reach_m` metres around the unit direction `dir`, seen from the camera: the reach over the distance
-/// to the point on the sphere, in the units of the vertical field of view. A camera at the point (or in the reach) gives infinity.
+/// to the point on the sphere, in the units of the vertical field of view. A camera at the point gives infinity.
 pub fn reach_px(view: &ViewState, dir: Vec3, reach_m: f64) -> f64 {
     let d = (dir * view.radius_m - view.camera.position.0).length();
     if d.is_nan() || d <= 0.0 {

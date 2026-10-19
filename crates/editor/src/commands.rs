@@ -194,7 +194,6 @@ impl<S: ItemStore> Editor<S> {
         self.items.get(&id)
     }
 
-    /// The ids of the items, in id order.
     /// Every item the editor knows, in id order.
     pub fn items(&self) -> impl Iterator<Item = &Item> {
         self.items.values()
