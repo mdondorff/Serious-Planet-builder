@@ -84,12 +84,19 @@ impl ItemStore for MemoryStore {
 #[derive(Clone, Debug)]
 pub struct LooseFileStore {
     root: PathBuf,
+    flush: bool,
 }
 
 impl LooseFileStore {
     /// A store under `root` (the directory is made when the first item is written).
     pub fn new(root: impl Into<PathBuf>) -> LooseFileStore {
-        LooseFileStore { root: root.into() }
+        LooseFileStore { root: root.into(), flush: true }
+    }
+
+    /// The same store without the flush of each file to disk (tests that write thousands of files and do not test durability).
+    pub fn without_flush(mut self) -> LooseFileStore {
+        self.flush = false;
+        self
     }
 
     pub fn root(&self) -> &Path {
@@ -149,7 +156,9 @@ impl ItemStore for LooseFileStore {
             use std::io::Write;
             let mut file = std::fs::File::create(&temp).map_err(io("creating", &temp))?;
             file.write_all(text.as_bytes()).map_err(io("writing", &temp))?;
-            file.sync_all().map_err(io("flushing", &temp))?;
+            if self.flush {
+                file.sync_all().map_err(io("flushing", &temp))?;
+            }
             std::fs::rename(&temp, &path).map_err(io("moving into place", &path))
         };
         let result = write();

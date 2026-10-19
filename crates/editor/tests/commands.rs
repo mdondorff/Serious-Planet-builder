@@ -169,7 +169,8 @@ fn temp_dir(tag: &str) -> PathBuf {
 #[test]
 fn a_thousand_commands_undo_and_redo_through_files_that_are_written_through_each_time() {
     let dir = temp_dir("thousand");
-    thousand_operations(editor(LooseFileStore::new(&dir), 12), 2);
+    // Not flushed to disk: this test is about what is written, and 3,000 flushes are minutes on a loaded disk.
+    thousand_operations(editor(LooseFileStore::new(&dir).without_flush(), 12), 2);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
