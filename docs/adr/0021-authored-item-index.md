@@ -1,5 +1,5 @@
 # 0021 Authored-item index: extent, layers, widths, staging
-Status: accepted in part, points 1, 3, 4 and 7 (owner's delegation of 2026-10-12; accepted by opus-planner after the spec-guardian review; points 2, 5, 6 and 8 stay open for new ADRs)
+Status: accepted in part, points 1, 3, 4 and 7 (owner's delegation of 2026-10-12; accepted by opus-planner after the spec-guardian review; points 2, 5, 6 and 8 stay open for new ADRs); points 2, 5, 6 and 8 decided by ADR 0066, 2026-10-19
 Date: 2026-10-11
 Source: spec-guardian and numerics reviews of m3-cell-index (2026-10-11); ADR 0006, ADR 0007 (cell index "fixed in the M3 world-def change"), proposed ADR 0018; constitution CON-05, CON-06, CON-08, CON-23
 

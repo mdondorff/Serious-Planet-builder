@@ -1,5 +1,5 @@
 # 0066 Authored items: reach, region summaries, stages, selection bounds, item files and the command log
-Status: proposed (sonnet-m4, 2026-10-19; for the owner: the item file schema, the item hash and the file naming are hard to reverse). Decides ADR 0021 points 2, 5, 6 and 8; amends ADR 0007 (the cell is no longer the invalidation unit; the command log is decided), ADR 0018 and ADR 0023 points 2 and 3 (query kinds, material, format tag; CON-23).
+Status: accepted (points 1 to 5 and 7: opus-planner under the owner's delegation of 2026-10-12; point 6: owner, 2026-10-19, with the item store interface, grouped brush strokes and the revisit trigger; drafted by sonnet-m4). Decides ADR 0021 points 2, 5, 6 and 8; amends ADR 0007 (the cell is no longer the invalidation unit; the command log is decided), ADR 0018 and ADR 0023 points 2 and 3 (query kinds, material, format tag; CON-23).
 Date: 2026-10-19
 Source: ADR 0021 leanings; ADR 0007; ADR 0018; ADR 0022; ADR 0023; SPIKE-13 (`spikes/edit-latency/results/results.md`, variant D); M6 editor plan, row E0
 
@@ -37,6 +37,9 @@ Source: ADR 0021 leanings; ADR 0007; ADR 0018; ADR 0022; ADR 0023; SPIKE-13 (`sp
    - The writer emits a fixed key order, one key per line, floats in shortest round-trip form (ADR 0007); the loader refuses unknown keys and non-finite numbers.
    - Fields: `schema_version`, `id`, `body`, `surface`, `layer`, `priority` (integer), `kind`, `anchor` (latitude, longitude, height, heading), `reach_m`, `max_delta_m`, the kind's parameters, `base_hash`, the generator and stage versions, optional `name` and `notes`.
    - The content hash is BLAKE3-128 under `planet-builder item hash v1` over the parsed form (WDEF-003): every field except `name` and `notes`, f64 as bit patterns with `-0.0` made `0.0` at load. Versions are inside the hash, so a re-bake under a new generator version re-keys every item, as ADR 0007 intends.
+   - Storage sits behind an item store interface; loose files are its first backend. The id and the content hash do not depend on the backend, so a packed or database backend needs a one-time conversion and no re-key.
+   - A brush item groups many strokes in one area; stroke data beyond the TOML parameters goes to content-addressed blobs (ADR 0007), never one file per stroke.
+   - Revisit trigger: more than 20,000 items in one body, or an item load over 2 s on Rasierklinge; the choice of a packed or database backend is then made from measurements.
 7. **The command log is not persisted.**
    - Every command writes its item files through (undo and redo too); git is the history. A drag is coalesced into one command (E4).
    - The log is an in-memory stack for session undo and redo, at least 1,000 operations, each restoring the exact previous definition hash. Cross-session undo is not offered.
@@ -47,7 +50,7 @@ Source: ADR 0021 leanings; ADR 0007; ADR 0018; ADR 0022; ADR 0023; SPIKE-13 (`sp
 - ADR 0021's status line and ADR 0007's invalidation-unit sentence are marked when this ADR is accepted.
 - A reach or `max_delta_m` declared too small gives stale tiles or wrong bounds: the contract test of ADR 0021 point 7 also asserts that a stage's output is unchanged beyond `reach_m` and within `max_delta_m`.
 - Footprint reads need a per-tile memo invalidated by an item revision counter; the counter enters no key.
-- Easy to reverse: the command log, the summary limit. The reach limit sits in the query margin, so changing it re-keys tiles.
+- Easy to reverse: the command log, the summary limit, the item store backend. The reach limit sits in the query margin, so changing it re-keys tiles.
 - Not decided here: the blob store, blending at frozen-region borders, the expected-result snapshot policy, imported-data provenance.
 
 ## Licences of adopted code or techniques

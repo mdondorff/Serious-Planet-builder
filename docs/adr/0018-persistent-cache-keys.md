@@ -1,5 +1,5 @@
 # 0018 Persistent cache keys: 128 bits from BLAKE3 over a canonical encoding
-Status: accepted (owner, 2026-10-11; decided in the opus-planner session after the review amendments; amended in part by ADR 0023, 2026-10-12)
+Status: accepted (owner, 2026-10-11; decided in the opus-planner session after the review amendments; amended in part by ADR 0023, 2026-10-12; amended in part by ADR 0066, 2026-10-19: query kinds 3 and 4, format tag 3)
 Date: 2026-10-11
 Source: ADR 0006 ("persistent and remote keys are at least 128 bits from a collision-resistant hash; the concrete function is fixed in the M3 cache change and recorded in an ADR before any disk format ships"), ADR 0010, M3 queue item 5; constitution CON-05, CON-06, CON-14, CON-27
 

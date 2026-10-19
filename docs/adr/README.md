@@ -16,7 +16,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0004 | [Language and graphics layer](0004-language-and-graphics-layer.md) | accepted |  |
 | 0005 | [Development environment and workflow](0005-development-environment-and-workflow.md) | accepted |  |
 | 0006 | [Generator purity, versioning and cache keys](0006-generator-purity-versioning-and-cache-keys.md) | accepted |  |
-| 0007 | [Authored-layer data model](0007-authored-layer-data-model.md) | accepted |  |
+| 0007 | [Authored-layer data model](0007-authored-layer-data-model.md) | accepted | amended by ADR 0066 (invalidation unit, command log) |
 | 0008 | [App structure](0008-app-structure.md) | accepted |  |
 | 0009 | [Testing architecture and render boundary](0009-testing-architecture-and-render-boundary.md) | accepted |  |
 | 0010 | [Cross-platform numeric determinism](0010-cross-platform-numeric-determinism.md) | accepted |  |
@@ -30,7 +30,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0018 | [Persistent cache keys: 128 bits from BLAKE3 over a canonical encoding](0018-persistent-cache-keys.md) | accepted |  |
 | 0019 | [Tile storage: an append-only pack with a rebuildable index, Hilbert-ordered](0019-tile-storage-pack-format.md) | accepted |  |
 | 0020 | [Autonomous performance runs behind a measured readiness gate](0020-autonomous-perf-runs.md) | accepted |  |
-| 0021 | [Authored-item index: extent, layers, widths, staging](0021-authored-item-index.md) | accepted in part | points 2 (reach), 5 (region summaries), 6 (authored stages), 8 (item-dependent bounds): before M6 (ADR 0045 point 7 for 5) |
+| 0021 | [Authored-item index: extent, layers, widths, staging](0021-authored-item-index.md) | accepted | points 2, 5, 6, 8 decided by ADR 0066 |
 | 0022 | [Stage reads, scopes and halos](0022-stage-reads-and-halos.md) | accepted | option 2 needs the owner's CON-08 reading (trigger: a chain with same-stage reads) |
 | 0023 | [Clarifications to the persistent key encoding (ADR 0018)](0023-persistent-key-clarifications.md) | accepted |  |
 | 0024 | [Clarifications to the tile pack format (ADR 0019)](0024-tile-pack-clarifications.md) | accepted |  |
@@ -75,4 +75,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0063 | [Slot v2 without the 5x5 reserve: 9,168 B](0063-slot-v2-size-correction.md) | accepted | corrects 0062 point 4; for the owner at the M5 gate |
 | 0064 | [The render floor's roots load outside the per-frame upload cap](0064-floor-roots-exempt-from-the-upload-cap.md) | accepted | amends 0033 point 9 |
 | 0065 | [CPU calibration decides whether a perf scene counts](0065-cpu-calibration-validity.md) | accepted | extends 0020 and 0036 |
-| 0066 | [Authored items: reach, region summaries, stages, selection bounds, item files, command log](0066-authored-items-reach-summaries-stages-and-files.md) | proposed | decides 0021 points 2, 5, 6, 8; amends 0018; for the owner (file format) |
+| 0066 | [Authored items: reach, region summaries, stages, selection bounds, item files, command log](0066-authored-items-reach-summaries-stages-and-files.md) | accepted | decides 0021 points 2, 5, 6, 8; amends 0007, 0018, 0023 |
