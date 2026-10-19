@@ -10,6 +10,7 @@
 use crate::pipelined::{RendererSink, Rig};
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
+use planet_frame::globe::{marker_at, visible_markers, wheel_zoom_factor, ClickTracker, Marker, ScreenMarker, Viewport, HIT_RADIUS_PX};
 use planet_frame::look::file::LookParams;
 use planet_frame::mouselook::{Grab, GrabChange, GRAB_ORDER};
 use planet_frame::scenes::{build_script, DrawnSet, StreamScene};
@@ -27,7 +28,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent};
+use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window, WindowId};
@@ -56,6 +57,7 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
         KeyCode::KeyT => Command::ToggleVsync,
         KeyCode::KeyC => Command::ToggleCamera,
         KeyCode::KeyL => Command::ToggleLit,
+        KeyCode::KeyG => Command::ToggleGlobe,
         KeyCode::F3 => Command::CycleOverlay,
         KeyCode::F4 => Command::ToggleCoarseLod,
         KeyCode::Escape => Command::Quit,
@@ -111,6 +113,17 @@ struct Config {
     atmosphere: bool,
     /// The liquid table of the world definition (WDEF-006): what the water tiles are made of.
     liquids: planet_world_def::LiquidTable,
+    /// The item markers of the globe overview (`--marker`, VIEW-013).
+    markers: Vec<Marker>,
+}
+
+/// What the globe overview did in the run (the smoke summary reports it).
+#[derive(Default)]
+struct GlobeStats {
+    frames: u64,
+    markers_shown_max: usize,
+    flights: u64,
+    landings: u64,
 }
 
 /// Everything that exists once the window does.
@@ -144,6 +157,15 @@ struct Running {
     counts: SmokeCounts,
     /// The per-tile answers of the water selection query (ADR 0051 point 6, option 1), kept for the life of the run.
     water_cache: WaterTileCache,
+    /// The item markers of the globe overview, the ones the overview shows this frame (window pixels) and the one under the cursor.
+    markers: Vec<Marker>,
+    screen_markers: Vec<ScreenMarker>,
+    hover: Option<u64>,
+    /// The cursor in render pixels, the camera of the last frame (what a click on the overview is traced through) and a press in progress.
+    cursor: [f64; 2],
+    last_camera: Camera,
+    press: ClickTracker,
+    globe_stats: GlobeStats,
 }
 
 struct App<'w> {
@@ -201,7 +223,7 @@ impl App<'_> {
             })
             .map_err(|e| format!("warming the lit path: {e}"))?;
         let now = self.clock.now_ms();
-        let viewer = ViewerState::new(now, TerrainView::ALL.len(), cfg.initial_view, cfg.vsync).with_lit(true);
+        let viewer = ViewerState::new(now, TerrainView::ALL.len(), cfg.initial_view, cfg.vsync).with_lit(true).with_radius_m(cfg.radius_m);
         let ui = cfg.ui.then(|| crate::ui::EditorUi::new(&window, surface.ui_painter(&ctx)));
         self.state = Some(Running {
             ui,
@@ -227,8 +249,29 @@ impl App<'_> {
             atmosphere: cfg.atmosphere,
             counts: SmokeCounts::default(),
             water_cache: WaterTileCache::with_book(self.world.water_book()),
+            markers: cfg.markers.clone(),
+            screen_markers: Vec::new(),
+            hover: None,
+            cursor: [0.0, 0.0],
+            last_camera: self.cameras[0],
+            press: ClickTracker::default(),
+            globe_stats: GlobeStats::default(),
         });
         Ok(())
+    }
+
+    /// A click on the globe overview at the cursor: a marker or the surface under it, and the flight there starts (VIEW-013).
+    fn globe_click(&mut self) {
+        let Some(st) = self.state.as_mut() else { return };
+        let viewport = Viewport { width_px: f64::from(self.cfg.size.0), height_px: f64::from(self.cfg.size.1) };
+        let limits = planet_frame::pick::PickLimits::new(self.cfg.radius_m, self.cfg.lod.max_height_m);
+        let field = self.field;
+        let height = |d: planet_core::Vec3| field.height(d);
+        if let Some(g) = st.viewer.globe.as_mut() {
+            if g.click(st.cursor, &st.last_camera, viewport, &st.markers, &limits, &height).is_some() {
+                st.globe_stats.flights += 1;
+            }
+        }
     }
 
     /// The request of a frame; `coarse` is the editor's coarse-LOD inspection view (the error bound times four, VIEW-014).
@@ -264,22 +307,37 @@ impl App<'_> {
             apply_grab(&mut st);
             let ground = |p: planet_core::PlanetFixed| radius + field.height(p.0.normalized());
             let height = |p: planet_core::PlanetFixed| p.0.length() - ground(p);
+            let had_globe = st.viewer.globe.is_some();
             let camera = st.viewer.camera(self.cameras, now_ms, dt, &self.params, &height, &ground);
+            st.last_camera = camera;
+            st.globe_stats.landings += u64::from(had_globe && st.viewer.globe.is_none() && st.viewer.is_free());
+            // The globe overview: the markers it shows (render pixels to window pixels) and the one under the cursor.
+            let viewport = Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) };
+            if st.viewer.globe.is_some() {
+                let seen = visible_markers(&camera, &st.markers, radius, viewport);
+                st.hover = marker_at(&seen, st.cursor, HIT_RADIUS_PX);
+                st.globe_stats.frames += 1;
+                st.globe_stats.markers_shown_max = st.globe_stats.markers_shown_max.max(seen.len());
+                let inner = st.window.inner_size();
+                let (sx, sy) = (f64::from(inner.width) / viewport.width_px, f64::from(inner.height) / viewport.height_px);
+                st.screen_markers = seen.iter().map(|m| ScreenMarker { id: m.id, pixel: [m.pixel[0] * sx, m.pixel[1] * sy] }).collect();
+                if cfg.smoke {
+                    smoke_globe(&mut st, &camera, viewport, radius, cfg.lod.max_height_m, field);
+                }
+            } else {
+                st.screen_markers.clear();
+                st.hover = None;
+            }
             st.altitude_m = height(camera.position);
             let view = TerrainView::ALL[st.viewer.view_index];
-            let req = self.request(camera, view, st.viewer.coarse_lod);
             let ctx = &st.ctx;
-            let frame = match st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer }) {
-                // The coarse view's error bound does not fit the terrain here (a steep neighbourhood leaves no morph room, the plan
-                // worker says so): back to the base parameters for this frame and after (F4 asks again), never a dead window.
-                Err(_) if st.viewer.coarse_lod => {
-                    st.viewer.coarse_lod = false;
-                    st.counts.coarse_lod_refusals += 1;
-                    let req = self.request(camera, view, false);
-                    st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer })?
-                }
-                other => other?,
-            };
+            // The coarse view's error bound may not fit the terrain here (a steep neighbourhood leaves no morph room, the plan worker
+            // says so): back to the base parameters for this frame and after (F4 asks again), never a dead window.
+            let frame =
+                planet_frame::viewer::with_coarse_fallback(&mut st.viewer.coarse_lod, &mut st.counts.coarse_lod_refusals, |coarse| {
+                    let req = self.request(camera, view, coarse);
+                    st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer })
+                })?;
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
             st.rig.fi.retire_to(st.rig.renderer.retired_frames(ctx));
             while st.rig.fi.is_full() {
@@ -375,7 +433,7 @@ impl App<'_> {
             let presented = if let Some(ui) = st.ui.as_mut() {
                 let factor = if st.viewer.coarse_lod { cfg.lod.coarse_factor() } else { 1.0 };
                 let status = planet_frame::viewer::overlay_status(st.viewer.overlay, factor);
-                let mut frame_ui = ui.frame(&st.window, &status);
+                let mut frame_ui = ui.frame(&st.window, &status, &st.screen_markers, st.hover);
                 let shown = st.surface.present_with_ui(ctx, &st.rig.renderer, Some((ui.painter(), &mut frame_ui)));
                 ui.reclaim(frame_ui);
                 shown.map_err(|e| e.to_string())?
@@ -419,6 +477,10 @@ impl App<'_> {
         let Some(st) = self.state.as_mut() else { return false };
         let cam = planet_frame::viewer::camera_at(self.cameras, st.viewer.clock.time_s(now));
         let was_vsync = st.viewer.vsync;
+        if cmd == Command::ToggleGlobe {
+            // A press in progress belongs to the overview that is going away, or to none.
+            st.press.cancel();
+        }
         let quit = st.viewer.command(cmd, now, &cam);
         if st.viewer.vsync != was_vsync {
             st.surface.set_vsync(&st.ctx, st.viewer.vsync);
@@ -427,6 +489,61 @@ impl App<'_> {
             st.views_seen += 1;
         }
         quit
+    }
+}
+
+/// The markers of `--marker LAT,LON[,RADIUS_M]` (degrees; the footprint radius defaults to 1,000 m), numbered from 1 in the order given.
+pub fn parse_markers(texts: &[String]) -> Result<Vec<Marker>, String> {
+    texts
+        .iter()
+        .enumerate()
+        .map(|(i, text)| {
+            let parts: Vec<&str> = text.split(',').map(str::trim).collect();
+            let number = |s: &str| {
+                s.parse::<f64>().ok().filter(|v| v.is_finite()).ok_or_else(|| format!("--marker '{text}': '{s}' is not a number"))
+            };
+            let usage = || format!("--marker '{text}': expected LAT,LON[,RADIUS_M]");
+            let (lat, lon, radius_m) = match parts.as_slice() {
+                [lat, lon] => (number(lat)?, number(lon)?, 1_000.0),
+                [lat, lon, r] => (number(lat)?, number(lon)?, number(r)?),
+                _ => return Err(usage()),
+            };
+            if !(-90.0..=90.0).contains(&lat) {
+                return Err(format!("--marker '{text}': latitude {lat} is outside -90..90"));
+            }
+            if radius_m <= 0.0 {
+                return Err(format!("--marker '{text}': the radius {radius_m} m must be positive"));
+            }
+            let (la, lo) = (lat.to_radians(), lon.to_radians());
+            let dir = planet_core::Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la));
+            Ok(Marker { id: i as u64 + 1, dir, radius_m })
+        })
+        .collect()
+}
+
+/// The smoke run drives the globe overview as the mouse would: a drag and a wheel step, then a click on the marker it put under the camera.
+fn smoke_globe(st: &mut Running, camera: &Camera, viewport: Viewport, radius_m: f64, max_height_m: f64, field: &dyn HeightField) {
+    match st.frames {
+        40 => {
+            if let Some(g) = st.viewer.globe.as_mut() {
+                g.drag(10.0, 5.0, camera.fov_y_rad, viewport.height_px);
+                g.zoom(0.9);
+            }
+        }
+        42 => {
+            let limits = planet_frame::pick::PickLimits::new(radius_m, max_height_m);
+            let seen = visible_markers(camera, &st.markers, radius_m, viewport);
+            if let Some(m) = seen.iter().find(|m| m.id == 1000) {
+                st.cursor = m.pixel;
+                let height = |d: planet_core::Vec3| field.height(d);
+                if let Some(g) = st.viewer.globe.as_mut() {
+                    if g.click(m.pixel, camera, viewport, &st.markers, &limits, &height).is_some() {
+                        st.globe_stats.flights += 1;
+                    }
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -480,6 +597,14 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
             press(st, Command::ToggleCamera);
         }
         // The overlay cycles off, tiles, mesh, off; the coarse LOD is on while the mesh shows.
+        // The globe overview: G shows it over the point under the camera with a marker there (the frame loop drags, zooms and clicks it), G
+        // again at the end of the run.
+        38 => {
+            press(st, Command::ToggleGlobe);
+            if let Some(g) = st.viewer.globe {
+                st.markers.push(Marker { id: 1000, dir: g.view.center, radius_m: 2_000.0 });
+            }
+        }
         26 => press(st, Command::CycleOverlay),
         28 => press(st, Command::CycleOverlay),
         29 => press(st, Command::ToggleCoarseLod),
@@ -560,7 +685,57 @@ impl ApplicationHandler for App<'_> {
                     }
                 }
             }
-            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. } if !self.cfg.smoke && world => {
+            // The globe overview (VIEW-013): the cursor drags it while the left button is down, the wheel zooms, and a press and release that
+            // stay within a few pixels are a click on a marker or the surface.
+            WindowEvent::CursorMoved { position, .. } => {
+                if let Some(st) = self.state.as_mut() {
+                    let inner = st.window.inner_size();
+                    let (sx, sy) = (
+                        f64::from(self.cfg.size.0) / f64::from(inner.width.max(1)),
+                        f64::from(self.cfg.size.1) / f64::from(inner.height.max(1)),
+                    );
+                    let now = [position.x * sx, position.y * sy];
+                    // A press only counts while the overview is shown; otherwise it is stale.
+                    if st.viewer.globe.is_none() {
+                        st.press.cancel();
+                    }
+                    let d = [now[0] - st.cursor[0], now[1] - st.cursor[1]];
+                    if world && st.press.moved_by(libm::hypot(d[0], d[1])) {
+                        if let Some(g) = st.viewer.globe.as_mut() {
+                            g.drag(d[0], d[1], self.cameras[0].fov_y_rad, f64::from(self.cfg.size.1));
+                        }
+                    }
+                    st.cursor = now;
+                }
+            }
+            WindowEvent::MouseInput { state, button: MouseButton::Left, .. }
+                if !self.cfg.smoke && self.state.as_ref().is_some_and(|s| s.viewer.globe.is_some()) =>
+            {
+                let mut clicked = false;
+                if let Some(st) = self.state.as_mut() {
+                    match (state, world) {
+                        (ElementState::Pressed, true) => st.press.press(),
+                        // A release ends the press wherever it lands (over a panel too); only one the overview owns is a click.
+                        (ElementState::Pressed, false) => st.press.cancel(),
+                        (ElementState::Released, _) => clicked = st.press.release() && world,
+                    }
+                }
+                if clicked {
+                    self.globe_click();
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } if world => {
+                if let Some(g) = self.state.as_mut().and_then(|st| st.viewer.globe.as_mut()) {
+                    let lines = match delta {
+                        MouseScrollDelta::LineDelta(_, y) => f64::from(y),
+                        MouseScrollDelta::PixelDelta(p) => p.y / 50.0,
+                    };
+                    g.zoom(wheel_zoom_factor(lines));
+                }
+            }
+            WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. }
+                if !self.cfg.smoke && world && self.state.as_ref().is_some_and(|s| s.viewer.globe.is_none()) =>
+            {
                 if let Some(st) = self.state.as_mut() {
                     let free = st.viewer.is_free();
                     st.viewer.mouse.click(free);
@@ -569,6 +744,7 @@ impl ApplicationHandler for App<'_> {
             }
             WindowEvent::Focused(false) => {
                 if let Some(st) = self.state.as_mut() {
+                    st.press.cancel();
                     st.viewer.focus_lost();
                     apply_grab(st);
                 }
@@ -624,6 +800,11 @@ fn smoke_summary(st: &Running) -> String {
             u.world_pointer
         )
     });
+    let globe = format!(
+        "
+  globe: {} frames of the overview, up to {} markers shown, {} flights started, {} landings",
+        st.globe_stats.frames, st.globe_stats.markers_shown_max, st.globe_stats.flights, st.globe_stats.landings
+    );
     format!(
         "{} frames drawn ({} lit, {} with the atmosphere, {} with water, {} debug, {} with an overlay ({} the mesh), {} coarse LOD, {} refused), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
   last title: {}",
@@ -645,6 +826,7 @@ fn smoke_summary(st: &Running) -> String {
         st.adapter_line,
         st.last_title
     ) + &ui
+        + &globe
 }
 
 /// `planet editor`: open the window and run the flight until it is closed (or, for `--smoke`, for a few dozen frames).
@@ -733,6 +915,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         look,
         atmosphere,
         liquids: world.definition().liquids().map_err(|e| format!("the liquid table of the definition: {e}"))?,
+        markers: parse_markers(&o.markers)?,
     };
     writeln!(out, "planet editor: {} ({})", if o.smoke { "smoke test" } else { "viewer" }, world.describe()).map_err(err)?;
     writeln!(out, "keys: {KEYS_HELP}").map_err(err)?;
@@ -773,6 +956,26 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    // spec: VIEW-013
+    #[test]
+    fn markers_are_given_as_lat_lon_and_an_optional_radius_numbered_from_one() {
+        let ms = parse_markers(&["48.1,11.6".to_string(), " 0 , -90 , 250.5 ".to_string(), "-33,151,10".to_string()]).unwrap();
+        assert_eq!(ms.iter().map(|m| m.id).collect::<Vec<_>>(), [1, 2, 3]);
+        assert_eq!(ms[0].radius_m, 1_000.0);
+        assert_eq!(ms[1].radius_m, 250.5);
+        for m in &ms {
+            assert!((m.dir.length() - 1.0).abs() < 1e-12);
+        }
+        // 0 N, 90 W is the -y axis; 90 N would be +z.
+        assert!((ms[1].dir.y + 1.0).abs() < 1e-12 && ms[1].dir.x.abs() < 1e-12);
+        assert!((parse_markers(&["90,0".to_string()]).unwrap()[0].dir.z - 1.0).abs() < 1e-12);
+        assert!(parse_markers(&[]).unwrap().is_empty());
+        for bad in ["", "1", "1,2,3,4", "x,2", "91,0", "0,0,0", "0,0,-5", "nan,0", "0,inf"] {
+            let e = parse_markers(&[bad.to_string()]).unwrap_err();
+            assert!(e.contains("--marker"), "{bad:?}: {e}");
+        }
+    }
+
     // spec: VIEW-003
     #[test]
     fn every_documented_key_is_bound_and_nothing_else_is() {
@@ -787,6 +990,7 @@ mod tests {
             (KeyCode::KeyL, Command::ToggleLit),
             (KeyCode::F3, Command::CycleOverlay),
             (KeyCode::F4, Command::ToggleCoarseLod),
+            (KeyCode::KeyG, Command::ToggleGlobe),
             (KeyCode::Escape, Command::Quit),
         ] {
             assert_eq!(key_command(code), Some(cmd), "{code:?}");
@@ -794,7 +998,20 @@ mod tests {
         for code in [KeyCode::KeyW, KeyCode::KeyA, KeyCode::KeyX, KeyCode::Enter, KeyCode::F5] {
             assert_eq!(key_command(code), None, "{code:?} is not a command");
         }
-        for ch in ["pause", "restart", "debug view", "vsync", "free camera", "WASD", "Esc", "lit", "atmosphere", "overlay", "coarse LOD"] {
+        for ch in [
+            "pause",
+            "restart",
+            "debug view",
+            "vsync",
+            "free camera",
+            "WASD",
+            "Esc",
+            "lit",
+            "atmosphere",
+            "overlay",
+            "coarse LOD",
+            "globe overview",
+        ] {
             assert!(KEYS_HELP.to_lowercase().contains(&ch.to_lowercase()), "the help names {ch}: {KEYS_HELP}");
         }
     }

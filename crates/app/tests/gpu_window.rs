@@ -111,6 +111,11 @@ fn the_window_runs_lit_with_the_atmosphere(stdout: &str) {
     assert!(count_before(stdout, " with an overlay") > 0, "F3 must have turned an overlay on for some frames: {stdout}");
     assert!(count_before(stdout, " the mesh)") > 0, "the second F3 shows the mesh: {stdout}");
     assert!(count_before(stdout, " coarse LOD,") > 0, "F4 must have planned some frames with the coarse LOD: {stdout}");
+    // VIEW-013: the smoke script shows the globe overview with a marker under the camera, drags and zooms it and clicks the marker: some
+    // frames were the overview, it showed the marker, and a click started a flight.
+    assert!(count_before(stdout, " frames of the overview") > 0, "G must have shown the globe overview: {stdout}");
+    assert!(count_before(stdout, " markers shown") >= 1, "the overview showed the marker: {stdout}");
+    assert!(count_before(stdout, " flights started") >= 1, "the click on the marker started a flight: {stdout}");
     // VIEW-011: the editor UI ran a pass for every frame it presented (the window draws it by default).
     assert!(count_before(stdout, " frames with the editor UI") >= planet_frame::viewer::SMOKE_MIN_LIT_FRAMES, "{stdout}");
     if adapter() != "software" {

@@ -280,3 +280,157 @@ impl GlobeFlight {
         t_s >= self.duration_s
     }
 }
+
+// -------------------------------------------------------------------------------------------------------------------------
+// The overview as the editor window runs it
+
+/// The altitude the overview starts at over the point the camera was over, in planet radii.
+pub const OVERVIEW_ALTITUDE_RADII: f64 = 1.5;
+/// The altitude of the flight that a click on bare surface ends at, metres: a close look from where the free camera takes over.
+pub const LANDING_ALTITUDE_M: f64 = 20_000.0;
+/// How far from a marker's pixel a click still names it.
+pub const HIT_RADIUS_PX: f64 = 12.0;
+/// A press and release that stay within this many pixels are a click, not a drag.
+pub const CLICK_SLOP_PX: f64 = 4.0;
+/// The pitch below the horizon the free camera starts at after a flight over a place, radians.
+pub const LANDING_PITCH_RAD: f64 = 0.5;
+
+/// What a click on the overview found.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Click {
+    /// A marker: the flight goes to its closing view.
+    Marker(u64),
+    /// Bare surface at this direction: the flight goes to a close look over it.
+    Surface(Vec3),
+}
+
+/// The overview while the editor shows it: the view, the flight a click started, and what to do when the flight ends. GPU-free; the window
+/// feeds it the mouse and the frame time and takes the camera from it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GlobeSession {
+    pub view: GlobeView,
+    pub radius_m: f64,
+    flight: Option<(GlobeFlight, f64)>,
+}
+
+impl GlobeSession {
+    /// The overview over the point under a camera at `camera_position` (any distance from the centre), at 1.5 radii up.
+    pub fn enter(camera_position: Vec3, radius_m: f64) -> GlobeSession {
+        let altitude = OVERVIEW_ALTITUDE_RADII * radius_m;
+        GlobeSession { view: GlobeView::new(camera_position, altitude), radius_m, flight: None }
+    }
+
+    /// True while a click's flight runs: the overview takes no drag, zoom or click then.
+    pub fn flying(&self) -> bool {
+        self.flight.is_some()
+    }
+
+    /// Drag by pixels (see [`GlobeView::drag`]); nothing while flying.
+    pub fn drag(&mut self, dx_px: f64, dy_px: f64, fov_y_rad: f64, height_px: f64) {
+        if self.flight.is_none() {
+            self.view.drag(dx_px, dy_px, self.radius_m, fov_y_rad, height_px);
+        }
+    }
+
+    /// Zoom by `factor` (see [`GlobeView::zoom`]); nothing while flying.
+    pub fn zoom(&mut self, factor: f64) {
+        if self.flight.is_none() {
+            self.view.zoom(factor, self.radius_m);
+        }
+    }
+
+    /// A click at `cursor` (pixels, origin top-left) in a view seen by `camera`: the marker within [`HIT_RADIUS_PX`], else the surface
+    /// under the cursor (`pick_surface` against the height field `height_m`), and the flight to it starts. `None` while flying or when the
+    /// click hits neither (the sky, past the horizon).
+    pub fn click(
+        &mut self,
+        cursor: [f64; 2],
+        camera: &Camera,
+        viewport: Viewport,
+        markers: &[Marker],
+        limits: &crate::pick::PickLimits,
+        height_m: &dyn Fn(Vec3) -> f64,
+    ) -> Option<Click> {
+        if self.flight.is_some() {
+            return None;
+        }
+        let visible = visible_markers(camera, markers, self.radius_m, viewport);
+        let (target, click) = if let Some(id) = marker_at(&visible, cursor, HIT_RADIUS_PX) {
+            let marker = markers.iter().find(|m| m.id == id)?;
+            (GlobeView::closing_on(marker), Click::Marker(id))
+        } else {
+            let ray = crate::pick::cursor_ray(camera, cursor[0], cursor[1], viewport.width_px, viewport.height_px);
+            let hit = crate::pick::pick_surface(&ray, limits, height_m)?;
+            (GlobeView::new(hit.dir, LANDING_ALTITUDE_M), Click::Surface(hit.dir))
+        };
+        self.flight = Some((GlobeFlight::new(self.view, target, self.radius_m), 0.0));
+        Some(click)
+    }
+
+    /// Advance a running flight by `dt_s` seconds. The frame the flight ends returns the view it ended at: the window leaves the overview
+    /// there (see [`landing`]).
+    pub fn step(&mut self, dt_s: f64) -> Option<GlobeView> {
+        let (flight, t) = self.flight.as_mut()?;
+        *t += dt_s.max(0.0);
+        self.view = flight.at(*t);
+        if flight.is_done(*t) {
+            let end = flight.to;
+            self.flight = None;
+            return Some(end);
+        }
+        None
+    }
+}
+
+/// Where the free camera starts after a flight that ended at `view`: over the place at the view's altitude, looking north and down by
+/// [`LANDING_PITCH_RAD`]. `(position, heading hint, pitch)`, the arguments of `FreePose::new`.
+pub fn landing(view: &GlobeView, radius_m: f64) -> (PlanetFixed, Vec3, f64) {
+    (PlanetFixed(view.center * (radius_m + view.altitude_m)), Vec3::new(0.0, 0.0, 1.0), -LANDING_PITCH_RAD)
+}
+
+/// The zoom factor of one wheel line over the overview: each line brings the camera 10 % nearer (a negative count goes farther).
+pub const WHEEL_FACTOR_PER_LINE: f64 = 0.9;
+
+/// The factor `GlobeSession::zoom` takes for `lines` wheel lines (positive: towards the planet).
+pub fn wheel_zoom_factor(lines: f64) -> f64 {
+    libm::pow(WHEEL_FACTOR_PER_LINE, lines)
+}
+
+/// A press of the left button over the overview that becomes a click when it is released within [`CLICK_SLOP_PX`] of where it went down
+/// and a drag otherwise. The window cancels it whenever the button's state is in doubt (the overview toggled, the focus lost, a release
+/// the overview did not see), so a stale press never drags the globe.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ClickTracker {
+    moved_px: Option<f64>,
+}
+
+impl ClickTracker {
+    pub fn press(&mut self) {
+        self.moved_px = Some(0.0);
+    }
+
+    /// True while a button is held; the cursor moved by `distance_px` meanwhile (a drag when it returns true).
+    pub fn moved_by(&mut self, distance_px: f64) -> bool {
+        match self.moved_px.as_mut() {
+            Some(m) => {
+                *m += distance_px;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The release: true when it ends a click (a press that stayed within the slop). The press is over either way.
+    pub fn release(&mut self) -> bool {
+        self.moved_px.take().is_some_and(|m| m < CLICK_SLOP_PX)
+    }
+
+    /// Forget the press.
+    pub fn cancel(&mut self) {
+        self.moved_px = None;
+    }
+
+    pub fn pressed(&self) -> bool {
+        self.moved_px.is_some()
+    }
+}

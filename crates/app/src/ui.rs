@@ -98,6 +98,26 @@ pub fn shell(ui: &mut egui::Ui, st: &mut Shell) {
     st.panel_rect = r.map_or(egui::Rect::NOTHING, |r| r.response.rect);
 }
 
+/// The item markers of the globe overview (VIEW-013), drawn over the scene: a dot at each pixel (window pixels, origin top-left) with the
+/// item's id beside it, the one under the cursor larger and brighter.
+pub fn draw_markers(ui: &mut egui::Ui, markers: &[planet_frame::globe::ScreenMarker], hover: Option<u64>) {
+    let ppp = ui.ctx().pixels_per_point();
+    let painter = ui.painter();
+    for m in markers {
+        let at = egui::pos2(m.pixel[0] as f32 / ppp, m.pixel[1] as f32 / ppp);
+        let hot = hover == Some(m.id);
+        let (radius, fill) = if hot { (8.0, egui::Color32::from_rgb(255, 220, 60)) } else { (5.0, egui::Color32::from_rgb(255, 120, 40)) };
+        painter.circle(at, radius, fill, egui::Stroke::new(1.5, egui::Color32::BLACK));
+        painter.text(
+            at + egui::vec2(radius + 3.0, -radius - 3.0),
+            egui::Align2::LEFT_BOTTOM,
+            format!("#{}", m.id),
+            egui::FontId::proportional(13.0),
+            egui::Color32::WHITE,
+        );
+    }
+}
+
 /// The egui side of the editor window.
 pub struct EditorUi {
     pub ctx: egui::Context,
@@ -169,13 +189,22 @@ impl EditorUi {
     }
 
     /// Run one egui pass and tessellate it: the frame to paint after the scene.
-    pub fn frame(&mut self, window: &winit::window::Window, status: &str) -> UiFrame {
+    pub fn frame(
+        &mut self,
+        window: &winit::window::Window,
+        status: &str,
+        markers: &[planet_frame::globe::ScreenMarker],
+        hover: Option<u64>,
+    ) -> UiFrame {
         let started = std::time::Instant::now();
         self.shell.status.clear();
         self.shell.status.push_str(status);
         let raw = self.winit.take_egui_input(window);
         let shell_state = &mut self.shell;
-        let out = self.ctx.run_ui(raw, |ui| shell(ui, shell_state));
+        let out = self.ctx.run_ui(raw, |ui| {
+            shell(ui, shell_state);
+            draw_markers(ui, markers, hover);
+        });
         self.winit.handle_platform_output(window, out.platform_output);
         self.pending.append(out.textures_delta);
         let frame = UiFrame {
