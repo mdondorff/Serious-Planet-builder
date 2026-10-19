@@ -58,10 +58,18 @@ impl Router {
     }
 }
 
-/// The fonts of the UI. Until a font under an allowed licence is shipped (CON-27: egui's bundled fonts are OFL and Ubuntu-font licensed,
-/// neither on the allow-list) there are none, and the labels are blank; the shapes, the layout and the input work.
+/// Roboto Regular v2.138 (Apache-2.0), the one font of the UI. Provenance (CON-27): `assets/fonts/PROVENANCE.md`.
+const ROBOTO_REGULAR: &[u8] = include_bytes!("../assets/fonts/Roboto-Regular.ttf");
+
+/// The fonts of the UI: Roboto Regular for both families (egui's own bundled fonts are OFL and Ubuntu-font licensed, neither on the
+/// CON-27 allow-list, so they are not enabled).
 pub fn fonts() -> egui::FontDefinitions {
-    egui::FontDefinitions::empty()
+    let mut fonts = egui::FontDefinitions::empty();
+    fonts.font_data.insert("Roboto-Regular".into(), std::sync::Arc::new(egui::FontData::from_static(ROBOTO_REGULAR)));
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        fonts.families.entry(family).or_default().push("Roboto-Regular".into());
+    }
+    fonts
 }
 
 /// State of the shell panel.
@@ -281,6 +289,19 @@ mod tests {
         pass(&ctx, &mut st, 1.0, vec![moved(away)], 0.12);
         assert_eq!(router.pointer_motion(&ctx), Target::World);
         assert_eq!(router.key(&ctx), Target::World, "no text field has the focus");
+    }
+
+    // spec: VIEW-011
+    #[test]
+    fn the_shipped_font_gives_labels_a_width() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(fonts());
+        let mut width = 0.0;
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            width = ui.label("Planet editor").rect.width();
+        });
+        out.textures_delta.clear();
+        assert!(width > 40.0, "a 13-character label in Roboto is wider than 40 points: {width}");
     }
 
     // spec: VIEW-011

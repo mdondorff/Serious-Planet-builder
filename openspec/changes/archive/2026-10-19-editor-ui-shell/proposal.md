@@ -9,7 +9,7 @@ M6 step U1 (docs/briefings/m6-editor-plan.md): the editor needs an immediate-mod
 - VIEW-011.
 
 ## Fonts
-No font is shipped in this change: `ui::fonts()` returns empty definitions, so labels are blank (shapes, layout and input work). The owner's gate decision 14 is "fonts under an allowed licence": a font file (an Apache-2.0 release such as Roboto v2.138, the file whose bundled licence text says Apache-2.0) with its source URL, version, licence and SHA-256 goes in behind `ui::fonts()` in a follow-up of this change once the owner has approved the download; the choice is a one-file change.
+Owner gate decision 14 is "fonts under an allowed licence": `ui::fonts()` loads Roboto Regular v2.138 (the 2017 release whose bundled licence text is Apache-2.0; later releases are OFL-1.1) from `crates/app/assets/fonts/`, with source URL, version, licence and SHA-256 in `PROVENANCE.md`. The owner approved the download in the session.
 
 ## No golden moves
 Only `planet editor` draws the UI; `test-render`, the golden tests and the perf scenes never reach `window.rs`. `present` without a UI is the blit alone, bit for bit; the golden tests run unchanged (tier C on the software adapter: no candidate golden appears).
@@ -18,4 +18,4 @@ Only `planet editor` draws the UI; `test-render`, the golden tests and the perf 
 No field and no shader value is added: the UI is drawn by egui's own shader into the presentable target after the tone map.
 
 ## Out of scope
-The panels (U3), the globe view (U4), picking (U2), a font, `ScaleFactorChanged`/IME/clipboard/accesskit checks (SPIKE-14 limits).
+The panels (U3), the globe view (U4), picking (U2), `ScaleFactorChanged`/IME/clipboard/accesskit checks (SPIKE-14 limits).
