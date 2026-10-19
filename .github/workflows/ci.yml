@@ -91,8 +91,10 @@ jobs:
           path: target/review/
           if-no-files-found: ignore
 
+  # Tier C on WARP is one test step of about 1,000 s (BUILD-014: the job median was 16.9 min against the 16 min budget), so the
+  # Windows leg runs in two halves (`--partition count:N/2`, every test in exactly one half); lavapipe runs 8 min and stays whole.
   gpu:
-    name: ${{ matrix.name }} C
+    name: ${{ matrix.name }} C${{ matrix.part && format(' {0}/2', matrix.part) || '' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -100,6 +102,10 @@ jobs:
         include:
           - name: windows (WARP)
             os: windows-latest
+            part: 1
+          - name: windows (WARP)
+            os: windows-latest
+            part: 2
           - name: linux (lavapipe)
             os: ubuntu-24.04
     steps:
@@ -126,7 +132,7 @@ jobs:
           sudo apt-get install -y mesa-vulkan-drivers libvulkan1 vulkan-tools
           vulkaninfo --summary
       - name: test gpu (tier C, software adapter)
-        run: cargo xtask test gpu
+        run: cargo xtask test gpu ${{ matrix.part && format('-- --partition count:{0}/2', matrix.part) || '' }}
         env:
           # The viewer window smoke (VIEW-005) needs a display. The Linux runner has none: the skip is declared here with its
           # reason (the test fails without the declaration) and noted in the job summary below.
@@ -138,7 +144,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-${{ runner.os }}-gpu
+          name: test-logs-${{ runner.os }}-gpu${{ matrix.part && format('-{0}', matrix.part) || '' }}
           path: target/test-logs/
           if-no-files-found: ignore
       # The golden candidates: the name the golden-review and bless skills download.
@@ -146,7 +152,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: review-${{ runner.os }}
+          name: review-${{ runner.os }}${{ matrix.part && format('-{0}', matrix.part) || '' }}
           path: target/review/
           if-no-files-found: ignore
 
