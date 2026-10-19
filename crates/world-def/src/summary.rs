@@ -5,7 +5,8 @@
 //! inner node the hash of its four children, and an empty subtree the same function over empty children, so its hash depends on
 //! its level. An edit rewrites one node per level.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId};
@@ -138,6 +139,34 @@ pub fn cover(tile: TileId, cell_level: u8, rings: Option<u32>) -> Vec<TileId> {
     let mut out: Vec<TileId> = present.into_iter().map(|(_, raw)| TileId::from_raw(raw).expect("a node")).collect();
     out.sort_by_key(|t| (t.level(), t.raw()));
     out
+}
+
+/// Most entries the cover memo holds before it starts over.
+const COVER_MEMO_MAX: usize = 4096;
+
+type CoverMemo = Mutex<HashMap<(u64, u64, u64), Arc<Vec<TileId>>>>;
+
+static COVER_MEMO: OnceLock<CoverMemo> = OnceLock::new();
+
+/// [`cover`] for a tile read with `halo` on a body of `radius_m` (the margin rings follow from them), memoised: the node set of a tile
+/// is a pure function of the tile, the halo, the radius and the cell level (which the radius fixes), so a process-wide memo changes
+/// no result and no key, and a plan that reads the same coarse tiles every frame builds each cover once (about 20,000 cells for a
+/// level-4 tile at the Earth's cell level with 64 rings). The memo starts over past [`COVER_MEMO_MAX`] entries. `halo` is canonical
+/// (`-0.0` read as `0.0`).
+pub fn cover_cached(tile: TileId, halo: f64, radius_m: f64, cell_level: u8) -> Arc<Vec<TileId>> {
+    let halo = if halo == 0.0 { 0.0 } else { halo };
+    let key = (tile.raw(), halo.to_bits(), radius_m.to_bits());
+    let memo = COVER_MEMO.get_or_init(Default::default);
+    if let Some(hit) = memo.lock().expect("cover memo").get(&key) {
+        return Arc::clone(hit);
+    }
+    // Built outside the lock: two threads may build one cover, the results are equal and one entry wins.
+    let built = Arc::new(cover(tile, cell_level, margin_rings(tile, halo, radius_m, cell_level)));
+    let mut map = memo.lock().expect("cover memo");
+    if map.len() >= COVER_MEMO_MAX {
+        map.clear();
+    }
+    Arc::clone(map.entry(key).or_insert(built))
 }
 
 /// Every cell (at `cell_level`) under `node`.
