@@ -145,7 +145,9 @@ pub struct BakeProbe {
 
 /// A world's terrain: the definition, the field it selects and the bake the field reads.
 pub struct WorldTerrain {
-    def: WorldDefinition,
+    /// The definition the fields are built from, replaceable while the terrain is shared ([`WorldTerrain::set_definition`]): a reader takes
+    /// the `Arc` once per job, so a job in flight keeps the definition it started with.
+    def: std::sync::RwLock<Arc<WorldDefinition>>,
     kind: HeightFieldKind,
     src: Box<dyn LatticeSource + Send>,
     has_bake: bool,
@@ -241,7 +243,7 @@ impl WorldTerrain {
         };
         let source = if kind.needs_bake() { format!("in-memory {global_res} cells") } else { "no bake (the field reads none)".to_string() };
         Ok(WorldTerrain {
-            def,
+            def: std::sync::RwLock::new(Arc::new(def)),
             kind,
             src,
             has_bake: kind.needs_bake(),
@@ -305,7 +307,7 @@ impl WorldTerrain {
         };
         let source = format!("store {}, {res} cells", dir.display());
         Ok(WorldTerrain {
-            def,
+            def: std::sync::RwLock::new(Arc::new(def)),
             kind,
             src: Box::new(SharedStore(src)),
             has_bake: true,
@@ -479,9 +481,26 @@ impl WorldTerrain {
         (total, total)
     }
 
-    /// The definition this terrain was built from.
-    pub fn definition(&self) -> &WorldDefinition {
-        &self.def
+    /// The current definition (a snapshot: a later [`WorldTerrain::set_definition`] does not change it).
+    pub fn definition(&self) -> Arc<WorldDefinition> {
+        Arc::clone(&self.def.read().expect("definition lock"))
+    }
+
+    /// Replace the definition the fields are built from, for an edit of its items (the editor's definition after a command). The base
+    /// must be the one the bake was made from (`base_hash`), else the call is refused: a change of the nodes needs another terrain. Fields
+    /// built before the call keep the definition they were built from; the next `field()` reads the new one. After this call, in the
+    /// caller: `ManagedLoop::edit(tiles)`, so the replan sees the new definition.
+    pub fn set_definition(&self, def: Arc<WorldDefinition>) -> Result<(), String> {
+        let mut current = self.def.write().expect("definition lock");
+        if def.base_hash() != current.base_hash() {
+            return Err(format!(
+                "the new definition has another base (hash {:016x}, the bake was made from {:016x}): only the items may change",
+                def.base_hash(),
+                current.base_hash()
+            ));
+        }
+        *current = def;
+        Ok(())
     }
 
     /// Cells per face edge of the bake the field reads (the requested size even for a field that reads none).
@@ -565,7 +584,7 @@ impl WorldTerrain {
     /// has no water. The field is cheap to assemble, so it is built per call and borrows the bake.
     pub fn with_water<R>(&self, f: impl FnOnce(&WaterField<'_>) -> R) -> Result<Option<R>, String> {
         let Some(ocean) = self.ocean.as_deref() else { return Ok(None) };
-        let sea = self.def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?;
+        let sea = self.definition().sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?;
         let producer = match self.summary {
             Some(summary) => SeaProducer::new(ocean, sea).with_summary(summary),
             None => SeaProducer::new(ocean, sea),
@@ -577,20 +596,40 @@ impl WorldTerrain {
     /// Build the field (a fresh context per field: its key covers what it read).
     pub fn field(&self) -> Result<Box<dyn HeightField + '_>, String> {
         let started = std::time::Instant::now();
-        let ctx = GenContext::new(&self.def);
+        let def = self.definition();
+        let ctx = GenContext::new(&def);
         let built = build_field(self.kind, &ctx, BodyId::PLANET, self.src.as_ref(), self.bake_key)
-            .map_err(|e| format!("the definition cannot be generated: {e}"));
+            .map_err(|e| format!("the definition cannot be generated: {e}"))
+            .and_then(|base| with_stamps(base, &def));
         self.field_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let spent = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
         self.field_ns.fetch_add(spent, std::sync::atomic::Ordering::Relaxed);
         match (built, self.bound_water) {
             (Ok(f), true) => {
-                let level = self.def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
+                let level = def.sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
                 Ok(Box::new(planet_generators::water::WaterBounded::new(f, level)))
             }
             (built, _) => built,
         }
     }
+}
+
+/// `base` with the stamp stages of the definition's layers over it, lowest layer first (GEN-026, ADR 0007); the base itself when the
+/// definition holds no stamp. The stages read the snapshot `def`, so the field keeps what it was built from.
+fn with_stamps<'a>(base: Box<dyn HeightField + 'a>, def: &Arc<WorldDefinition>) -> Result<Box<dyn HeightField + 'a>, String> {
+    use planet_generators::stamp::{ItemReader, StampStage, STAMP_STAGE_VERSION};
+    let layers = def.stamp_layers(BodyId::PLANET);
+    let Some((top, below)) = layers.split_last() else { return Ok(base) };
+    let stage = |field: Arc<dyn HeightField + 'a>, layer: &str, index: usize| {
+        let items: Arc<dyn ItemReader> = def.clone();
+        StampStage::new(field, items, BodyId::PLANET, layer, index as u32, STAMP_STAGE_VERSION)
+            .ok_or_else(|| "the definition has stamps but no usable radius".to_string())
+    };
+    let mut field: Arc<dyn HeightField + 'a> = Arc::from(base);
+    for (k, layer) in below.iter().enumerate() {
+        field = Arc::new(stage(field, layer, k)?);
+    }
+    Ok(Box::new(stage(field, top, below.len())?))
 }
 
 /// Reject what a world-selected terrain run cannot do, before any GPU work (GEN-018). `--world` and `--global-res` belong to

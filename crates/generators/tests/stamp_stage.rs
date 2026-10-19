@@ -37,7 +37,7 @@ fn world(items: Vec<ItemSpec>) -> Arc<WorldDefinition> {
     Arc::new(d)
 }
 
-fn stage(def: Arc<WorldDefinition>) -> StampStage {
+fn stage(def: Arc<WorldDefinition>) -> StampStage<'static> {
     StampStage::new(Arc::new(Reference(1)), def, BodyId::PLANET, DEFAULT_ITEM_LAYER, 0, 1).expect("a body with a radius")
 }
 

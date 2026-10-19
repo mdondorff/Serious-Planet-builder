@@ -34,7 +34,7 @@ fn world() -> WorldDefinition {
     WorldDefinition::single_planet(R, 1)
 }
 
-fn stage(def: &Arc<RwLock<WorldDefinition>>) -> StampStage {
+fn stage(def: &Arc<RwLock<WorldDefinition>>) -> StampStage<'static> {
     let base: Arc<dyn HeightField> = Arc::new(Reference(1));
     StampStage::new(base, def.clone(), BodyId::PLANET, DEFAULT_ITEM_LAYER, 0, 1).unwrap()
 }
@@ -98,7 +98,7 @@ fn a_wrapped_stage_reports_the_revision_of_its_items_and_a_persistent_cache_foll
     assert_eq!(plan_terrain_cached(&req, &field, &mut cache).unwrap(), fresh(&req, &field), "change, behind the wrapper");
 }
 
-// spec: STRM-027
+// spec: STRM-027, STRM-028
 #[test]
 fn the_residency_set_of_a_stationary_camera_follows_an_edit_of_the_items() {
     use planet_frame::pipeline::{residency_of, PlanWorker};

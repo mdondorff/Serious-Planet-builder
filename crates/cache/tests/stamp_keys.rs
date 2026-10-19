@@ -29,7 +29,7 @@ fn world(items: &[ItemSpec]) -> Arc<WorldDefinition> {
     Arc::new(d)
 }
 
-fn stage_over(base: Arc<dyn HeightField>, def: &Arc<WorldDefinition>, layer: &str, index: u32, version: u32) -> StampStage {
+fn stage_over(base: Arc<dyn HeightField>, def: &Arc<WorldDefinition>, layer: &str, index: u32, version: u32) -> StampStage<'static> {
     StampStage::new(base, def.clone(), BodyId::PLANET, layer, index, version).unwrap()
 }
 

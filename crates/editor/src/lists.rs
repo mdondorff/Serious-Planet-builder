@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 /// The layer stack, bottom to top (ADR 0007, ADR 0066 point 4): edits apply in the order of their layer in this stack, and within a
 /// layer by priority then id. A layer that is not in the stack applies after the known ones, by name.
-pub const LAYER_STACK: [&str; 7] = ["base", "imported", "intent", "stamps", "splines", "placed", "frozen"];
+pub const LAYER_STACK: [&str; 7] = planet_world_def::LAYER_STACK;
 
 /// Where a layer applies: its place in the stack, then its name.
 pub fn layer_rank(layer: &str) -> (usize, &str) {

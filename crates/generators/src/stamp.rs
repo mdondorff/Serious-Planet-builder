@@ -193,8 +193,8 @@ impl ItemReader for RwLock<WorldDefinition> {
 }
 
 /// The stamps of one layer added to a base field (GEN-026).
-pub struct StampStage {
-    base: Arc<dyn HeightField>,
+pub struct StampStage<'a> {
+    base: Arc<dyn HeightField + 'a>,
     items: Arc<dyn ItemReader>,
     body: BodyId,
     layer: String,
@@ -203,20 +203,23 @@ pub struct StampStage {
     inputs: u64,
 }
 
+/// The version of the stamp stage (bumped whenever its output changes, ADR 0006): part of the key of every stamped tile.
+pub const STAMP_STAGE_VERSION: u32 = 1;
+
 /// The implementation id of the stamp stage in height keys.
 pub const STAMP_STAGE_ID: &str = "stamp-stage";
 
-impl StampStage {
+impl<'a> StampStage<'a> {
     /// A stage over `base` for `layer` of `body`, at `stack_index` in the stack of ADR 0007, version `stage_version`. `None` when the
     /// reader knows no usable radius for the body.
     pub fn new(
-        base: Arc<dyn HeightField>,
+        base: Arc<dyn HeightField + 'a>,
         items: Arc<dyn ItemReader>,
         body: BodyId,
         layer: &str,
         stack_index: u32,
         stage_version: u32,
-    ) -> Option<StampStage> {
+    ) -> Option<StampStage<'a>> {
         items.radius_m(body)?;
         let text: Vec<u64> = layer.bytes().map(u64::from).collect();
         let inputs = planet_core::hash::hash_u64s(
@@ -236,7 +239,7 @@ impl StampStage {
     }
 }
 
-impl HeightField for StampStage {
+impl HeightField for StampStage<'_> {
     fn height(&self, dir: Vec3) -> f64 {
         self.heights(&[dir])[0]
     }
@@ -374,7 +377,7 @@ impl HeightField for StampStage {
     }
 }
 
-impl StampStage {
+impl StampStage<'_> {
     /// The base heights of `dirs` with the stamps added; elements after `stop` turned true are 0.0 (GEN-020).
     fn add_stamps(&self, dirs: &[Vec3], base: Vec<f64>, stop: &dyn Fn() -> bool) -> Vec<f64> {
         let items = self.items_for(dirs);
