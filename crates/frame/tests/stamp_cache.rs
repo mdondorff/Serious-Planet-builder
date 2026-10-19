@@ -81,6 +81,51 @@ fn a_persistent_cache_plans_what_a_fresh_one_plans_after_put_change_delete_undo_
 
 // spec: STRM-027
 #[test]
+fn a_wrapped_stage_reports_the_revision_of_its_items_and_a_persistent_cache_follows_an_edit_behind_it() {
+    use planet_generators::water::WaterBounded;
+    let req = request();
+    let shared = Arc::new(RwLock::new(world()));
+    let stamped = stage(&shared);
+    let field = WaterBounded::borrowed(&stamped, 0.0);
+    assert_eq!(field.item_revision(), stamped.item_revision(), "the wrapper forwards the revision");
+    assert_ne!(field.item_revision(), 0);
+    let mut cache = SelectionCache::new();
+    let empty = plan_terrain_cached(&req, &field, &mut cache).unwrap();
+    let at = empty.nodes[empty.nodes.len() / 2].tile.center_direction(&TangentWarp);
+    shared.write().unwrap().put_item_spec(BodyId::PLANET, hill(1, at, 3_000.0, 40.0)).unwrap();
+    assert_eq!(plan_terrain_cached(&req, &field, &mut cache).unwrap(), fresh(&req, &field), "put, behind the wrapper");
+    shared.write().unwrap().put_item_spec(BodyId::PLANET, hill(1, at, 3_000.0, 12.0)).unwrap();
+    assert_eq!(plan_terrain_cached(&req, &field, &mut cache).unwrap(), fresh(&req, &field), "change, behind the wrapper");
+}
+
+// spec: STRM-027
+#[test]
+fn the_residency_set_of_a_stationary_camera_follows_an_edit_of_the_items() {
+    use planet_frame::pipeline::{residency_of, PlanWorker};
+    use planet_streaming::ManualSpawner;
+    let req = request();
+    let shared = Arc::new(RwLock::new(world()));
+    let field = Arc::new(stage(&shared));
+    let spawner = Arc::new(ManualSpawner::default());
+    let worker = PlanWorker::new(spawner.clone(), field.clone(), 1);
+    let plan = |seq: u64| {
+        worker.submit(seq, req.clone());
+        spawner.run(1);
+        worker.take_residency().expect("R follows the plan").unwrap()
+    };
+    let first = plan(1);
+    assert!(!first.reused);
+    let empty = fresh(&req, field.as_ref());
+    let at = empty.nodes[empty.nodes.len() / 2].tile.center_direction(&TangentWarp);
+    assert!(plan(2).reused, "the same camera and no edit: R is reused");
+    shared.write().unwrap().put_item_spec(BodyId::PLANET, hill(1, at, 3_000.0, 55.0)).unwrap();
+    let after = plan(3);
+    assert!(!after.reused, "the items changed: R is selected again for the same camera");
+    assert_eq!(after.residency.bounds, residency_of(&req, field.as_ref(), &mut SelectionCache::new()).unwrap().bounds);
+}
+
+// spec: STRM-027
+#[test]
 fn the_check_of_an_unchanged_revision_is_free_and_the_first_plan_after_an_edit_hashes_each_tile_once() {
     use std::time::Instant;
     let req = request();

@@ -207,6 +207,29 @@ fn the_bounds_widen_by_the_bounds_of_the_items_in_reach_and_hold_for_every_sampl
     assert!(s.max_abs_height_m() >= base.max_abs_height_m() + 100.0, "the field-wide bound adds every item's bound");
 }
 
+// spec: GEN-026
+#[test]
+fn the_bounds_hold_at_the_rim_of_the_cap_for_a_reach_of_a_metre() {
+    let at = dir(1.0, 0.2, 0.1);
+    for (kind, params) in [(StampKind::Hill, [60.0, 0.0, 0.0]), (StampKind::Crater, [40.0, 0.0, 0.0])] {
+        let s = stage(world(vec![item(1, 0, at, 1.0, 60.0, Stamp::new(kind, params))]));
+        for k in 0..64 {
+            // Caps whose rim cuts the slope: centre 0.2 to 1.2 m from the anchor, radius 0.1 to 0.7 m.
+            let centre = at_distance(at, dir(0.0, 1.0, 0.0), 0.2 + f64::from(k % 8) * 0.125);
+            let angle = (0.1 + f64::from(k / 8) * 0.085) / R;
+            let (lo, hi) = s.height_bounds(centre, angle);
+            for j in 0..72 {
+                let t = f64::from(j) / 72.0 * core::f64::consts::TAU;
+                // Exactly at the rim, and just inside it.
+                for r in [angle, angle * (1.0 - 1e-9), angle * 0.5] {
+                    let h = s.height(at_distance_around(centre, t, r));
+                    assert!(h >= lo && h <= hi, "{kind:?} cap {k} bearing {j} r {r}: {h} outside [{lo}, {hi}]");
+                }
+            }
+        }
+    }
+}
+
 /// The point at angle `r` from `centre` on the bearing `t`.
 fn at_distance_around(centre: Vec3, t: f64, r: f64) -> Vec3 {
     let a = if centre.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };

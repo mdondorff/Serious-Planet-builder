@@ -161,6 +161,9 @@ impl HeightField for Probe<'_> {
     fn stage_params(&self) -> Option<(&str, u32)> {
         self.inner.stage_params()
     }
+    fn item_revision(&self) -> u64 {
+        self.inner.item_revision()
+    }
     fn height_bounds(&self, centre: Vec3, r: f64) -> (f64, f64) {
         self.inner.height_bounds(centre, r)
     }

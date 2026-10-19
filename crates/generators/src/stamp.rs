@@ -81,9 +81,11 @@ fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
     let reach = f64::from_bits(item.reach_bits);
     let d = angle_between(anchor_of(item), cap.centre);
     let to_x = |angle: f64| angle * radius_m / reach;
-    // The distances widen outward by relative 1e-9 and absolute 1e-9: the angle and the profile argument are rounded.
-    let x_min = (to_x((d - cap.angle).max(0.0)) * (1.0 - 1e-9) - 1e-9).max(0.0);
-    let x_max = (to_x(d + cap.angle) * (1.0 + 1e-9) + 1e-9).min(1.0);
+    // The angles widen outward by a few ulps of a radian (an angle from `atan2` is wrong by about that much however short the reach),
+    // then the distances by a relative 1e-9: the profile argument is rounded.
+    let slack = 16.0 * f64::EPSILON;
+    let x_min = (to_x((d - cap.angle - slack).max(0.0)) * (1.0 - 1e-9)).max(0.0);
+    let x_max = (to_x(d + cap.angle + slack) * (1.0 + 1e-9)).min(1.0);
     let a = stamp.params()[0];
     let (lo, hi) = match stamp.kind {
         StampKind::Hill => {

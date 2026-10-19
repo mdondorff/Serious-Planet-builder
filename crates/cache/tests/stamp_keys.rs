@@ -189,8 +189,10 @@ fn a_key_without_a_stage_is_what_it_was_and_every_wrapper_that_forwards_the_sour
             if forwards {
                 forwarding += 1;
                 assert!(
-                    text.contains("fn upstream(&self)") && text.contains("fn stage_params(&self)"),
-                    "{} forwards source_key but not upstream and stage_params",
+                    text.contains("fn upstream(&self)")
+                        && text.contains("fn stage_params(&self)")
+                        && text.contains("fn item_revision(&self)"),
+                    "{} forwards source_key but not upstream, stage_params and item_revision",
                     f.display()
                 );
             }
