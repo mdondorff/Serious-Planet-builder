@@ -151,6 +151,59 @@ fn oct_decode(e: vec2<f32>) -> vec3<f32> {
     return normalize(n);
 }
 
+// The edit preview (REND-033): the profiles of GEN-026 at x = distance / reach, kind 1 hill, 2 crater, 3 plateau, `a` the amount (the plateau's
+// target is absolute), `m` the bound, `h` the running height above the reference sphere.
+fn smooth01(t: f32) -> f32 {
+    return t * t * (3.0 - 2.0 * t);
+}
+
+fn preview_profile(kind: f32, a: f32, m: f32, x: f32, h: f32) -> f32 {
+    if (x >= 1.0) {
+        return 0.0;
+    }
+    if (kind < 1.5) {
+        let q = 1.0 - x * x;
+        return a * q * q;
+    }
+    if (kind < 2.5) {
+        let bowl = 1.0 - smooth01(min(x / 0.8, 1.0));
+        var rim = 0.0;
+        if (x >= 0.7) {
+            let u = (x - 0.85) / 0.15;
+            let v = 1.0 - u * u;
+            rim = v * v;
+        }
+        return a * (-bowl + 0.2 * rim);
+    }
+    return (1.0 - smooth01(clamp((x - 0.7) / 0.3, 0.0, 1.0))) * clamp(a - h, -m, m);
+}
+
+// The summed signed delta of the preview stamps at a point (camera-relative `p_rel`, tile up `up`, height `h0` above the sphere) and the
+// gradient of the delta along the ground (x: delta, yzw: gradient). The distance is measured in the tile's tangent plane (CON-11).
+fn preview_bump(p_rel: vec3<f32>, up: vec3<f32>, h0: f32) -> vec4<f32> {
+    var total = 0.0;
+    var grad = vec3<f32>(0.0);
+    let n = u32(g.extra.w);
+    for (var k = 0u; k < n; k = k + 1u) {
+        let a = g.preview[2u * k];
+        let b = g.preview[2u * k + 1u];
+        let d3 = p_rel - a.xyz;
+        let dh = d3 - up * dot(d3, up);
+        let d = length(dh);
+        if (d < a.w) {
+            let x = d / a.w;
+            let h = h0 + total;
+            let lo = max(x - 0.01, 0.0);
+            let hi = min(x + 0.01, 1.0);
+            let slope = (preview_profile(b.y, b.x, b.w, hi, h) - preview_profile(b.y, b.x, b.w, lo, h)) / max(hi - lo, 1e-6);
+            let dir = select(vec3<f32>(0.0), dh / d, d > 1e-6);
+            total = total + b.z * preview_profile(b.y, b.x, b.w, x, h);
+            grad = grad + dir * (b.z * slope / a.w);
+        }
+    }
+    return vec4<f32>(total, grad);
+}
+
 fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
     let node = nodes[inst];
     let tref = tile_refs[inst];
@@ -200,14 +253,28 @@ fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
         pos = pos - d;
         cpos = cpos - d;
     }
+    // A previewed node (REND-033) shows the edit's delta over its stale tile; every other node, and every frame without a preview, skips this.
+    let previewed = g.extra.w > 0.5 && node.morph.z > 0.5;
+    var sb = vec4<f32>(0.0);
+    var sc = vec4<f32>(0.0);
+    if (previewed) {
+        let sup = node.up.xyz;
+        sb = preview_bump(node.origin_rel.xyz + pos, sup, h_origin + own.w);
+        sc = preview_bump(node.origin_rel.xyz + cpos, sup, h_origin + coarse.w);
+        pos = pos + sup * sb.x;
+        cpos = cpos + sup * sc.x;
+    }
     let m = clamp((length(node.origin_rel.xyz + pos) - node.morph.x) / max(node.morph.y - node.morph.x, 1e-6), 0.0, 1.0);
     let local = mix(pos, cpos, m);
     let p = node.origin_rel.xyz + local;
-    let h = h_origin + own.w;
-    let ch = h_origin + coarse.w;
+    let h = h_origin + own.w + sb.x;
+    let ch = h_origin + coarse.w + sc.x;
     var out: VsOut;
     out.pos = g.view_proj * vec4<f32>(p, 1.0);
     out.normal = texel_normal(own_t);
+    if (previewed) {
+        out.normal = normalize(out.normal - sb.yzw);
+    }
     out.height = mix(h, ch, m);
     out.height_fine = h;
     out.morph = m;

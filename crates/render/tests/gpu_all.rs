@@ -20,6 +20,8 @@ mod gpu_overlay;
 mod gpu_pipelined;
 #[path = "gpu_pools.rs"]
 mod gpu_pools;
+#[path = "gpu_preview.rs"]
+mod gpu_preview;
 #[path = "gpu_reference.rs"]
 mod gpu_reference;
 #[path = "gpu_renderer.rs"]

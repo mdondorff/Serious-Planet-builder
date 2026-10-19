@@ -27,6 +27,13 @@ pub struct PreviewStamp {
     pub max_delta_m: f64,
 }
 
+impl PreviewStamp {
+    /// The kind as the shader reads it: 1 hill, 2 crater, 3 plateau.
+    pub fn kind_code(&self) -> f32 {
+        f32::from(self.kind as u8)
+    }
+}
+
 /// The list of a delta and how many entries it had to leave out.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct PreviewList {
