@@ -70,6 +70,8 @@ mod scheduler_rotation;
 mod shading;
 #[path = "stamp_cache.rs"]
 mod stamp_cache;
+#[path = "stamp_steep.rs"]
+mod stamp_steep;
 #[path = "steep.rs"]
 mod steep;
 #[path = "terrain.rs"]
