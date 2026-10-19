@@ -332,6 +332,11 @@ impl ManagedLoop {
         queued
     }
 
+    /// Set the preview of the edit in flight (REND-033, from `preview_delta`); an empty list ends it. Call after [`ManagedLoop::edit`].
+    pub fn set_preview(&mut self, stamps: Vec<crate::preview::PreviewStamp>) {
+        self.pipe.set_preview(stamps);
+    }
+
     /// The tiles the sink holds (what a frame may draw).
     pub fn resident(&self) -> &HashMap<TileId, ResidentTile> {
         &self.resident

@@ -31,7 +31,7 @@ const SMOKE_FRAMES: usize = 24;
 
 /// Whether `--scene NAME` names a streaming scene (one of the six, or `streaming` for all of them).
 pub fn is_stream_scene(name: &str) -> bool {
-    name == "streaming" || StreamScene::parse(name).is_some()
+    name == "streaming" || StreamScene::parse(name).is_some() || crate::editperf::is_edit_scene(name)
 }
 
 /// The scenes a `--scene` value runs.
