@@ -1,0 +1,1 @@
+- 2026-10-20 **prepush-merged-lint** (sonnet-crusader, opus-planner's request; BUILD-022): `cargo xtask prepush` starts with `spec-lint` on the branch merged onto the fetched `origin/main` (merge-tree and a temporary worktree; branch untouched), so an ID taken twice by parallel changes (VIEW-025) shows before the push and not on main.
