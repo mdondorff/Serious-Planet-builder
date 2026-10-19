@@ -78,4 +78,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0066 | [Authored items: reach, region summaries, stages, selection bounds, item files, command log](0066-authored-items-reach-summaries-stages-and-files.md) | accepted | decides 0021 points 2, 5, 6, 8; amends 0007, 0018, 0023 |
 | 0067 | [Stamp key hash and height bounds by delta range](0067-stamp-key-hash-and-delta-range-bounds.md) | accepted | amends 0066 points 2, 5 and the key role of 6 |
 | 0068 | [An authored stage with an empty footprint passes its source key through](0068-empty-authored-stage-passes-the-key-through.md) | accepted | amends 0066 point 4 |
-| 0069 | [Lines are chains of straight segment items; the stamp machinery carries them](0069-line-items-are-segment-stamps.md) | proposed | extends 0066 point 6 and 0067 |
+| 0069 | [Lines and regions are point-list items; a long line splits into linked items](0069-lines-and-regions-are-point-list-items.md) | proposed | extends 0066 point 6 and 0067 |
