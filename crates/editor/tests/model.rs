@@ -628,7 +628,7 @@ fn a_whole_drag_of_a_handle_is_one_undo_step_and_a_cancelled_drag_is_none() {
 #[test]
 fn delete_and_undo_and_the_handles_of_the_selected_edit() {
     let mut s = session(11);
-    // A hill: the plateau's parameter is an absolute target (WDEF-010) and has no height handle.
+    // A hill has the three handles (a plateau's amount is an absolute target and has its own, VIEW-017).
     s.place("hill", unit(47.2, 8.55)).unwrap();
     let id = s.selected().unwrap();
     let hs = s.handles(0.0);
@@ -838,4 +838,79 @@ fn a_layout_file_with_an_unknown_key_a_bad_value_or_a_bad_tab_list_is_refused_na
         assert_eq!(e.key, key, "{text:?}: {e}");
         assert!(e.to_string().contains(key));
     }
+}
+
+// spec: VIEW-017
+#[test]
+fn every_kind_is_placed_in_the_stamp_stages_spelling_and_the_table_names_the_stages_keys() {
+    let mut s = session(21);
+    for (kind, reach, key, amount, bound) in [
+        ("hill", 400.0, "height_m", 80.0, 80.0),
+        ("crater", 2_000.0, "depth_m", 250.0, 250.0),
+        ("plateau", 15_000.0, "target_m", 300.0, 1_000.0),
+    ] {
+        let (id, _) = s.place(kind, unit(10.0, 10.0)).unwrap();
+        let it = s.item(id).unwrap();
+        assert_eq!(it.reach_m, reach, "{kind}: the radius is the reach");
+        assert_eq!(it.params, BTreeMap::from([(key.to_string(), amount)]), "{kind}: the one parameter of the stage");
+        assert_eq!(it.max_delta_m, bound, "{kind}: the hill's and the crater's bound is the amount, the plateau's its default");
+        it.validate().unwrap();
+        // The stamp stage takes the item as it is, and its key is the one the table names.
+        let stamp = planet_world_def::stamp::Stamp::from_file(kind, &it.params).unwrap().expect("a stamp");
+        assert_eq!(stamp.kind.param_key(), key);
+        assert_eq!(params::amount_def(kind).unwrap().key, key, "{kind}: the table follows the stage");
+    }
+    assert!(
+        params::STAMP_KINDS.iter().all(|k| planet_world_def::stamp::StampKind::from_name(k).is_some()),
+        "every kind of the table is a stamp kind"
+    );
+}
+
+// spec: VIEW-017
+#[test]
+fn a_plateaus_limit_and_target_a_hills_negative_height_and_a_craters_depth_go_to_the_places_they_live_in() {
+    let mut s = session(22);
+    // A plateau: the radius is the reach, the target is a parameter, the flattening limit is the file's max_delta_m.
+    let (plateau, _) = s.place("plateau", unit(10.0, 10.0)).unwrap();
+    let rows: Vec<(String, String)> =
+        s.inspector(Vec3::new(R, 0.0, 0.0)).unwrap().params.iter().map(|p| (p.key.clone(), p.text.clone())).collect();
+    assert_eq!(
+        rows,
+        [
+            ("radius_m".to_string(), "15 km".to_string()),
+            ("target_m".to_string(), "300 m".to_string()),
+            ("max_delta_m".to_string(), "1 km".to_string())
+        ],
+        "the three rows of a plateau, read from where each is stored"
+    );
+    s.set_param_text("max_delta_m", "2 km").unwrap();
+    let it = s.item(plateau).unwrap();
+    assert_eq!((it.max_delta_m, it.reach_m, it.params["target_m"]), (2_000.0, 15_000.0, 300.0));
+    assert!(!it.params.contains_key("max_delta_m"), "the limit is the file's field and no parameter");
+    s.set_param_text("target_m", "-120").unwrap();
+    let it = s.item(plateau).unwrap();
+    assert_eq!((it.params["target_m"], it.max_delta_m), (-120.0, 2_000.0), "the target does not move the plateau's own bound");
+    it.validate().unwrap();
+    let h = s.editor().hash();
+    for (key, text) in [("max_delta_m", "9 km"), ("max_delta_m", "5"), ("target_m", "10 km"), ("target_m", "-600")] {
+        assert!(matches!(s.set_param_text(key, text), Err(SessionError::Refused(_))), "{key}={text}");
+    }
+    assert_eq!(s.editor().hash(), h);
+    // A hill may be a hollow: a negative height is valid and its bound is its size.
+    let (hill, _) = s.place("hill", unit(20.0, 20.0)).unwrap();
+    s.set_param_text("height_m", "-50").unwrap();
+    let it = s.item(hill).unwrap();
+    assert_eq!((it.params["height_m"], it.max_delta_m), (-50.0, 50.0));
+    it.validate().unwrap();
+    assert!(planet_world_def::stamp::Stamp::from_file("hill", &it.params).unwrap().is_some());
+    // A crater: the depth typed is its bound, the radius typed its reach.
+    let (crater, _) = s.place("crater", unit(30.0, 30.0)).unwrap();
+    s.set_param_text("depth_m", "600").unwrap();
+    s.set_param_text("radius_m", "3 km").unwrap();
+    let it = s.item(crater).unwrap();
+    assert_eq!((it.params["depth_m"], it.max_delta_m, it.reach_m), (600.0, 600.0, 3_000.0));
+    it.validate().unwrap();
+    // A depth of 0 or beyond the table's greatest is refused.
+    assert!(matches!(s.set_param_text("depth_m", "0"), Err(SessionError::Refused(_))));
+    assert!(matches!(s.set_param_text("depth_m", "2 km"), Err(SessionError::Refused(_))));
 }

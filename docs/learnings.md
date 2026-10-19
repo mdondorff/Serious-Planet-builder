@@ -472,3 +472,11 @@ What happened: the stage widened a tile's bounds by the sum of the items' `max_d
 Assumption it changes: a bound from the declared maximum is good enough for planning; the extent of a tile must grow by what the stamp varies across it, not by what it can reach at its top.
 Proposed follow-up: none; the stage bounds each item by its delta range over the cap (GEN-026), and a new stamp kind needs a monotone profile or a rule of its own.
 Obsolete when: stamps are replaced by a stage that reports exact per-tile ranges.
+
+## 2026-10-19 A provisional hand table of another stage's keys drifts (editor parameters)
+Scope: project (editor model, stamp stage)
+What happened: the editor shipped a parameter table of its own guess (`radius_m` as a parameter, a reach of 1.25 radii, `rim_m`, `softness_pct`). The stamp stage then fixed the item-file spelling (the radius is `reach_m`, one parameter per kind) and the editor's outlines disagreed with the terrain by a quarter and offered parameters the stage ignores.
+Assumption it changes: VIEW-017 (editor parameters) now follows WDEF-010; the editor's table names the keys of `StampKind::param_key` and a tier-A test asserts it for every kind.
+Proposed follow-up: a new stamp kind is added to the stage and to the editor's table together; the test fails if the keys differ.
+Obsolete when: the editor takes its parameter list from the stamp stage's kinds directly.
+

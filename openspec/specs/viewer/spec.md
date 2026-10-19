@@ -370,7 +370,9 @@ Shape and handles:
 Drags (each result is a valid item and the bounds hold it):
 - move puts the anchor under the pointer;
 - resize sets a stamp's `reach_m` to the arc from the anchor to the pointer, so it follows the pointer in and out; another kind's `radius_m` becomes the arc and its reach grows to 1.25 times it (at most one cell edge, never shrinking);
-- raise adds to a hill's `height_m` and a plateau's `target_m` and subtracts from a crater's `depth_m` (the handle is the bottom of the bowl); the bound of a hill or a crater is exactly its amount, a plateau's bound is its own parameter and does not move, and another kind's bound grows to hold its `height_m` (never shrinking, at most `MAX_DELTA_LIMIT_M`);
+- raise changes the kind's amount: a hill's `height_m` and a plateau's `target_m` go up with the pointer, a crater's `depth_m` goes down (the handle is the bottom of the bowl);
+- the bound of a hill or a crater is exactly its amount, and a plateau's bound is its own parameter and does not move;
+- another kind's raise adds to its `height_m` and its bound grows to hold it (never shrinking, at most `MAX_DELTA_LIMIT_M`);
 - the radius and the height stay in the kind's range from the parameter table, the range a typed value is held to; a kind the table does not know keeps the radius within 1 m and one cell edge and the height within the limit on the change;
 - a pixel is `2 d tan(fov_y / 2) / height_px` metres at a point whose depth along the view axis is `d` (at least 1 m), and a drag up raises.
 
@@ -383,7 +385,10 @@ Typed values:
 - the text is read in the parameter's unit (`450`, `2.4 km`, `40 %`);
 - a value out of the kind's range, not a number, in another unit, or of an unknown parameter changes nothing and says why;
 - where the table has no range the item file's limits hold: a radius within 0 and one cell edge, any other metric parameter within the limit on the change;
-- the radius of a stamp typed is its reach, and the amount of a hill or a crater typed is its bound; a plateau's flattening limit is its `max_delta_m`; for another kind the reach and the bound only grow to hold the value.
+- the radius of a stamp typed is its reach;
+- the amount of a hill or a crater typed is its bound;
+- a plateau's flattening limit is its `max_delta_m`, a field of the file and no parameter;
+- for another kind the reach and the bound only grow to hold the value.
 
 Picking and inspection:
 - the item under the pointer is the nearest in units of its own outline radius among the shown ones (`pick_footprint`); an item that is not shown cannot be picked;
@@ -415,8 +420,8 @@ Source: owner (M6 step U3: handles on the planet are the primary way to edit a s
 - **THEN** each placement is one selected command with the kind's defaults and a written file, a delete deselects, and the undos reach the exact starting hash and clear a selection whose edit is gone
 
 #### Scenario: Typed values
-- **WHEN** `3.5 km`, `300`, `20 km`, `10`, `-5`, `abc`, an empty text, `5 kg`, an unknown parameter and `NaN` are typed, and over-limit values for a kind the table does not know
-- **THEN** the valid values are one command each in their unit with the reach and bound following, every refused value changes nothing, and the stored item keeps its outline within its reach and its height within its bound
+- **WHEN** `3.5 km`, `300`, `20 km`, `10`, `-5`, `abc`, an empty text, `5 kg`, an unknown parameter and `NaN` are typed, a plateau's limit and target, a hill's negative height and a crater's depth are typed, and over-limit values for a kind the table does not know
+- **THEN** the valid values are one command each in their unit with the reach and bound following (a plateau's limit goes to `max_delta_m`, a negative hill height sets the bound to its size, a crater's depth to its bound), every refused value changes nothing, and the stored item keeps its outline within its reach and its height within its bound
 
 #### Scenario: Drags are one command
 - **WHEN** a hundred pointer moves of a position handle end, then radius and height drags end, a drag is cancelled, and a place that is zero, not a number or infinite is given to a drag and to a placement, and another edit is selected during a drag
