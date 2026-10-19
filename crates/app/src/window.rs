@@ -283,7 +283,7 @@ struct App<'w> {
     summary: Option<String>,
 }
 
-/// How long the title keeps the notice of an F9 capture, milliseconds (VIEW-025).
+/// How long the title keeps the notice of an F9 capture, milliseconds (VIEW-026).
 const NOTICE_MS: u64 = 8_000;
 
 /// Where F9 writes its files: `PLANET_REPRO_DIR`, else `target/review` (VIEW-024).

@@ -68,6 +68,8 @@ pub fn stamp_delta(stamp: &Stamp, m: f64, h: f64, x: f64) -> f64 {
         StampKind::Hill => hill_delta(p[0], x),
         StampKind::Crater => crater_delta(p[0], x),
         StampKind::Plateau => plateau_delta(p[0], h, m, x),
+        // The lines are applied by the line stage over their polyline (GEN-028, the next change), not by this radial profile.
+        StampKind::Ridge | StampKind::Channel => 0.0,
     }
 }
 
@@ -76,7 +78,10 @@ pub fn stamp_delta(stamp: &Stamp, m: f64, h: f64, x: f64) -> f64 {
 /// from the anchor; a crater whose cap reaches its rim takes the rim's maximum, and a plateau is bounded by its weight at the nearest
 /// distance times the item's bound. An item that is no stamp adds nothing.
 fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
-    let Some(stamp) = item.stamp else { return (0.0, 0.0) };
+    let Some(stamp) = &item.stamp else { return (0.0, 0.0) };
+    if stamp.kind.is_line() {
+        return (0.0, 0.0);
+    }
     let m = f64::from_bits(item.max_delta_bits);
     let reach = f64::from_bits(item.reach_bits);
     let d = angle_between(anchor_of(item), cap.centre);
@@ -107,6 +112,7 @@ fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
             let w = plateau_weight(x_min) * m;
             (-w, w)
         }
+        StampKind::Ridge | StampKind::Channel => (0.0, 0.0),
     };
     let grow = |x: f64| x.abs() * 8.0 * f64::EPSILON;
     ((lo - grow(lo)).max(-m - grow(m)), (hi + grow(hi)).min(m + grow(m)))
@@ -121,11 +127,11 @@ fn anchor_of(item: &FootprintItem) -> Vec3 {
 pub fn apply_stamps(items: &[FootprintItem], radius_m: f64, dir: Vec3, base: f64) -> f64 {
     let mut h = base;
     for item in items {
-        let Some(stamp) = item.stamp else { continue };
+        let Some(stamp) = &item.stamp else { continue };
         let reach = f64::from_bits(item.reach_bits);
         let x = radius_m * angle_between(anchor_of(item), dir) / reach;
         if x < 1.0 {
-            h += stamp_delta(&stamp, f64::from_bits(item.max_delta_bits), h, x);
+            h += stamp_delta(stamp, f64::from_bits(item.max_delta_bits), h, x);
         }
     }
     h

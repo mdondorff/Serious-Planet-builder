@@ -12,8 +12,11 @@ use planet_core::{TileId, Vec3};
 use std::collections::BTreeMap;
 use std::fmt;
 
-/// The version of the item file layout.
+/// The version of the item file layout of an item without points.
 pub const ITEM_SCHEMA_VERSION: u32 = 1;
+
+/// The version of the item file layout of an item with a points list (AUTH-005, ADR 0069).
+pub const ITEM_SCHEMA_VERSION_POINTS: u32 = 2;
 
 /// The blake3 context of the content hash.
 pub const ITEM_HASH_CONTEXT: &str = "planet-builder item hash v1";
@@ -62,7 +65,19 @@ pub struct Item {
     /// Free text for people: in the file, never in the hash.
     pub name: Option<String>,
     pub notes: Option<String>,
+    /// The points of a line or a region as latitude and longitude in degrees, in order (ADR 0069); empty for an item without points.
+    /// The first is the anchor's place. An item with points is a schema-2 file.
+    pub points: Vec<(f64, f64)>,
+    /// The line or region this item is a part of (a long line split into linked items by the command layer); with `part`.
+    pub group: Option<ItemId>,
+    /// The index of the item in its group; with `group`.
+    pub part: Option<u32>,
+    /// The layer a region clips (WDEF-012); only for the kind `region`.
+    pub mask_layer: Option<String>,
 }
+
+/// The most points an item may carry.
+pub const MAX_POINTS: usize = crate::stamp::MAX_POINTS;
 
 /// Why an item could not be put into a definition.
 #[derive(Clone, Debug, PartialEq)]
@@ -204,7 +219,27 @@ impl Item {
         for v in self.params.values_mut() {
             *v = canonical(*v);
         }
+        for p in &mut self.points {
+            *p = (canonical(p.0), canonical(p.1));
+        }
         self
+    }
+
+    /// The version of the file this item is written as: 2 with a points list, else 1.
+    pub fn schema_version(&self) -> u32 {
+        if self.points.is_empty() {
+            ITEM_SCHEMA_VERSION
+        } else {
+            ITEM_SCHEMA_VERSION_POINTS
+        }
+    }
+
+    /// The unit directions of the points (the sphere conversion, `libm`).
+    pub fn point_directions(&self) -> Vec<Vec3> {
+        self.points
+            .iter()
+            .map(|(la, lo)| Sphere { radius_m: 1.0 }.geo_to_planet_fixed(Geo::new(canonical(*la), canonical(*lo), 0.0)).0)
+            .collect()
     }
 
     /// Refuse an item the file cannot carry or the index cannot take: a number that is not finite, a latitude or longitude out of range,
@@ -257,6 +292,60 @@ impl Item {
             finite(&format!("params.{k}"), *v)?;
         }
         crate::stamp::Stamp::from_file(&self.kind, &self.params).map_err(|why| err("params", why))?;
+        self.validate_points()
+    }
+
+    /// The rules of the points list, the group, the part and the mask layer (AUTH-005, WDEF-011).
+    fn validate_points(&self) -> Result<(), ItemFileError> {
+        let line = crate::stamp::StampKind::from_name(&self.kind).is_some_and(crate::stamp::StampKind::is_line);
+        let region = self.kind == "region";
+        if self.points.is_empty() {
+            if line || region {
+                return Err(err("points", format!("a {} needs a points list", self.kind)));
+            }
+            if self.group.is_some() || self.part.is_some() {
+                return Err(err("group", "a group and a part belong to an item with points"));
+            }
+        } else {
+            if !(line || region) {
+                return Err(err("points", format!("a {} takes no points", self.kind)));
+            }
+            let (lo, what) = if region { (3, "a region") } else { (2, "a line") };
+            if !(lo..=MAX_POINTS).contains(&self.points.len()) {
+                return Err(err("points", format!("{what} has {lo} to {MAX_POINTS} points, got {}", self.points.len())));
+            }
+            for (i, (la, lo)) in self.points.iter().enumerate() {
+                let at = format!("points[{i}]");
+                if !(la.is_finite() && lo.is_finite()) {
+                    return Err(err(&at, "latitude and longitude must be finite"));
+                }
+                if !(-90.0..=90.0).contains(la) {
+                    return Err(err(&format!("{at}.latitude"), format!("{la} is outside -90..90 degrees")));
+                }
+                if !(*lo > -180.0 && *lo <= 180.0) {
+                    return Err(err(&format!("{at}.longitude"), format!("{lo} is outside (-180, 180] degrees")));
+                }
+                if la.abs() == 90.0 && *lo != 0.0 {
+                    return Err(err(&format!("{at}.longitude"), format!("must be 0 at the pole (latitude {la}), got {lo}")));
+                }
+            }
+            if self.points[0] != (canonical(self.anchor.latitude_deg), canonical(self.anchor.longitude_deg)) {
+                return Err(err("points[0]", "the first point must be the anchor's latitude and longitude"));
+            }
+            if let Some(i) = self.points.windows(2).position(|w| w[0] == w[1]) {
+                return Err(err(&format!("points[{}]", i + 1), "repeats the point before it"));
+            }
+        }
+        if self.group.is_some() != self.part.is_some() {
+            return Err(err("group", "a group and a part come together"));
+        }
+        match &self.mask_layer {
+            Some(_) if !region => return Err(err("mask_layer", format!("a {} has no mask layer", self.kind))),
+            Some(layer) if !name_ok(layer, "") => {
+                return Err(err("mask_layer", format!("'{layer}' is not a layer name (letters, digits, `_`, `-`)")));
+            }
+            _ => {}
+        }
         Ok(())
     }
 
@@ -269,7 +358,7 @@ impl Item {
             m.extend_from_slice(&u32::try_from(s.len()).expect("a field under 4 GiB").to_le_bytes());
             m.extend_from_slice(s.as_bytes());
         };
-        m.extend_from_slice(&ITEM_SCHEMA_VERSION.to_le_bytes());
+        m.extend_from_slice(&self.schema_version().to_le_bytes());
         m.extend_from_slice(&self.id.to_be_bytes());
         m.extend_from_slice(&self.body.0.to_le_bytes());
         text(&mut m, &self.surface);
@@ -289,6 +378,29 @@ impl Item {
         m.extend_from_slice(&self.base_hash.to_le_bytes());
         m.extend_from_slice(&self.generator_version.to_le_bytes());
         m.extend_from_slice(&self.stage_version.to_le_bytes());
+        // A schema-2 item (one with points) appends its group, part, mask layer and points; a schema-1 item hashes as it always did.
+        if !self.points.is_empty() {
+            match self.group {
+                Some(g) => {
+                    m.push(1);
+                    m.extend_from_slice(&g.to_be_bytes());
+                }
+                None => m.push(0),
+            }
+            match self.part {
+                Some(p) => {
+                    m.push(1);
+                    m.extend_from_slice(&p.to_le_bytes());
+                }
+                None => m.push(0),
+            }
+            text(&mut m, self.mask_layer.as_deref().unwrap_or(""));
+            m.extend_from_slice(&u32::try_from(self.points.len()).expect("at most 64 points").to_le_bytes());
+            for (la, lo) in &self.points {
+                m.extend_from_slice(&bits(*la).to_le_bytes());
+                m.extend_from_slice(&bits(*lo).to_le_bytes());
+            }
+        }
         let full = blake3::derive_key(ITEM_HASH_CONTEXT, &m);
         u128::from_be_bytes(full[..16].try_into().expect("16 of 32 bytes"))
     }
@@ -316,7 +428,7 @@ impl Item {
         // field that changes no output (the name, the versions recorded) re-keys nothing. Any other kind has no height output of its own
         // and keeps the file hash.
         match crate::stamp::Stamp::from_file(&self.kind, &self.params) {
-            Ok(Some(stamp)) => spec.with_stamp(stamp),
+            Ok(Some(stamp)) => spec.with_stamp(stamp.with_points(&self.point_directions())),
             _ => spec,
         }
     }
@@ -357,7 +469,7 @@ impl Item {
         self.validate()?;
         let item = self.clone().canonical();
         let mut out = String::new();
-        line(&mut out, "schema_version", ITEM_SCHEMA_VERSION.to_string());
+        line(&mut out, "schema_version", item.schema_version().to_string());
         line(&mut out, "id", quote(&ulid_text(item.id)));
         line(&mut out, "body", item.body.0.to_string());
         line(&mut out, "surface", quote(&item.surface));
@@ -375,6 +487,15 @@ impl Item {
         if let Some(notes) = &item.notes {
             line(&mut out, "notes", quote(notes));
         }
+        if let Some(group) = item.group {
+            line(&mut out, "group", quote(&ulid_text(group)));
+        }
+        if let Some(part) = item.part {
+            line(&mut out, "part", part.to_string());
+        }
+        if let Some(layer) = &item.mask_layer {
+            line(&mut out, "mask_layer", quote(layer));
+        }
         out.push_str("\n[anchor]\n");
         line(&mut out, "latitude", float(item.anchor.latitude_deg));
         line(&mut out, "longitude", float(item.anchor.longitude_deg));
@@ -383,6 +504,11 @@ impl Item {
         out.push_str("\n[params]\n");
         for (k, v) in &item.params {
             line(&mut out, k, float(*v));
+        }
+        for (la, lo) in &item.points {
+            out.push_str("\n[[points]]\n");
+            line(&mut out, "latitude", float(*la));
+            line(&mut out, "longitude", float(*lo));
         }
         Ok(out)
     }
@@ -397,13 +523,15 @@ impl Item {
             Some(_) => return Err(err("schema_version", "must be an integer")),
             None => return Err(err("schema_version", "is required")),
         };
-        if version != i64::from(ITEM_SCHEMA_VERSION) {
+        if version != i64::from(ITEM_SCHEMA_VERSION) && version != i64::from(ITEM_SCHEMA_VERSION_POINTS) {
             return Err(err(
                 "schema_version",
-                format!("is {version}; this build reads item files of version {ITEM_SCHEMA_VERSION} (a newer file needs a newer build)"),
+                format!(
+                    "is {version}; this build reads item files of versions {ITEM_SCHEMA_VERSION} and {ITEM_SCHEMA_VERSION_POINTS} (a newer file needs a newer build)"
+                ),
             ));
         }
-        const TOP: [&str; 14] = [
+        const TOP: [&str; 17] = [
             "schema_version",
             "id",
             "body",
@@ -418,9 +546,12 @@ impl Item {
             "stage_version",
             "name",
             "notes",
+            "group",
+            "part",
+            "mask_layer",
         ];
         for key in table.keys() {
-            if !TOP.contains(&key.as_str()) && key != "anchor" && key != "params" {
+            if !TOP.contains(&key.as_str()) && key != "anchor" && key != "params" && key != "points" {
                 return Err(err(key, "is not a key of an item file"));
             }
         }
@@ -486,6 +617,41 @@ impl Item {
             Some(_) => return Err(err("params", "must be a table")),
             None => {}
         }
+        let mut points: Vec<(f64, f64)> = Vec::new();
+        match table.get("points") {
+            Some(toml::Value::Array(rows)) => {
+                for (i, row) in rows.iter().enumerate() {
+                    let toml::Value::Table(t) = row else { return Err(err(&format!("points[{i}]"), "must be a table")) };
+                    let at = format!("points[{i}]");
+                    for key in t.keys() {
+                        if !["latitude", "longitude"].contains(&key.as_str()) {
+                            return Err(err(&format!("{at}.{key}"), "is not a key of a point"));
+                        }
+                    }
+                    points.push((number(t, &at, "latitude")?, number(t, &at, "longitude")?));
+                }
+            }
+            Some(_) => return Err(err("points", "must be an array of tables")),
+            None => {}
+        }
+        if points.is_empty() != (version == i64::from(ITEM_SCHEMA_VERSION)) {
+            return Err(err(
+                "schema_version",
+                if points.is_empty() {
+                    "is 2 but the file has no [[points]]; an item without points is version 1"
+                } else {
+                    "is 1 but the file has [[points]]; an item with points is version 2"
+                },
+            ));
+        }
+        let group = match optional_string("group")? {
+            Some(text) => Some(parse_ulid(&text).map_err(|e| err("group", e.why))?),
+            None => None,
+        };
+        let part = match table.get("part") {
+            Some(_) => Some(u32::try_from(integer("part", 0, i64::from(u32::MAX))?).expect("range checked")),
+            None => None,
+        };
         let base_text = string("base_hash")?;
         if base_text.len() != 16 || !base_text.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
             return Err(err("base_hash", format!("must be 16 lower-case hex digits, got '{base_text}'")));
@@ -506,6 +672,10 @@ impl Item {
             stage_version: u32::try_from(integer("stage_version", 0, i64::from(u32::MAX))?).expect("range checked"),
             name: optional_string("name")?,
             notes: optional_string("notes")?,
+            points,
+            group,
+            part,
+            mask_layer: optional_string("mask_layer")?,
         };
         item.validate()?;
         Ok(item)

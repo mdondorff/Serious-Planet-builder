@@ -105,7 +105,7 @@ pub struct Options {
     pub res: u32,
     pub bundle_out: Option<PathBuf>,
     pub repro: Option<PathBuf>,
-    /// `--replay-path F`: with `--repro`, drive the bundle's terrain through the camera path file F (VIEW-025); `--replay-every N` renders every Nth pose.
+    /// `--replay-path F`: with `--repro`, drive the bundle's terrain through the camera path file F (VIEW-026); `--replay-every N` renders every Nth pose.
     pub replay_path: Option<PathBuf>,
     pub replay_every: usize,
     pub face_net: Option<PathBuf>,
@@ -1552,7 +1552,7 @@ mod tests {
         assert!(run_str(&["test-render", "--scene"]).unwrap_err().contains("needs a value"));
     }
 
-    // spec: VIEW-025
+    // spec: VIEW-026
     #[test]
     fn a_path_replay_without_what_it_needs_is_refused_before_any_gpu_work() {
         let run = |a: &[&str]| {
