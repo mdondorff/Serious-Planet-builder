@@ -5,6 +5,11 @@
 - [ ] 1.4 Item `reach_m`, `max_delta_m`; refusal over the reach limit; query kind 3 and its result material; tag 3
 - [ ] 1.5 numerics-reviewer (core/generators), spec-guardian, verifier; PR
 
+## 1b. edit-invalidation-summaries
+- [ ] 1b.1 Design: the summary limit (spec value), kind 4 layout, node store and the rewrite of one node per level on an edit; spec deltas WDEF-005, STRM-003
+- [ ] 1b.2 Failing tests: a coarse tile's keys change on an edit inside its cells and not outside; an edit rewrites one node per level; empty subtree hashes are level-dependent
+- [ ] 1b.3 Implement; numerics-reviewer on the hash encodings; spec-guardian, verifier; PR
+
 ## 2. edit-invalidation-refresh
 - [ ] 2.1 Design from SPIKE-13 variant D (`spike/spike-13-edit-latency`: `Streamer::refresh`, `force_replan`, stale draw); spec deltas STRM-005, STRM-015, STRM-019
 - [ ] 2.2 Failing tests: a changed planned key refreshes the resident tile and the old one is drawn until the new one is uploaded; an edit event forces a plan while the camera is still; edited tiles are dispatched before the rest of R
