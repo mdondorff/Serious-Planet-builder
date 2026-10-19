@@ -10,7 +10,7 @@
 use crate::pipelined::{RendererSink, Rig};
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
-use planet_frame::globe::{marker_at, visible_markers, Marker, ScreenMarker, Viewport, CLICK_SLOP_PX, HIT_RADIUS_PX};
+use planet_frame::globe::{marker_at, visible_markers, wheel_zoom_factor, ClickTracker, Marker, ScreenMarker, Viewport, HIT_RADIUS_PX};
 use planet_frame::look::file::LookParams;
 use planet_frame::mouselook::{Grab, GrabChange, GRAB_ORDER};
 use planet_frame::scenes::{build_script, DrawnSet, StreamScene};
@@ -117,12 +117,6 @@ struct Config {
     markers: Vec<Marker>,
 }
 
-/// A left press on the globe overview that may become a click or a drag.
-struct Press {
-    /// Pixels the cursor has moved since the press.
-    moved: f64,
-}
-
 /// What the globe overview did in the run (the smoke summary reports it).
 #[derive(Default)]
 struct GlobeStats {
@@ -170,7 +164,7 @@ struct Running {
     /// The cursor in render pixels, the camera of the last frame (what a click on the overview is traced through) and a press in progress.
     cursor: [f64; 2],
     last_camera: Camera,
-    press: Option<Press>,
+    press: ClickTracker,
     globe_stats: GlobeStats,
 }
 
@@ -260,7 +254,7 @@ impl App<'_> {
             hover: None,
             cursor: [0.0, 0.0],
             last_camera: self.cameras[0],
-            press: None,
+            press: ClickTracker::default(),
             globe_stats: GlobeStats::default(),
         });
         Ok(())
@@ -483,6 +477,10 @@ impl App<'_> {
         let Some(st) = self.state.as_mut() else { return false };
         let cam = planet_frame::viewer::camera_at(self.cameras, st.viewer.clock.time_s(now));
         let was_vsync = st.viewer.vsync;
+        if cmd == Command::ToggleGlobe {
+            // A press in progress belongs to the overview that is going away, or to none.
+            st.press.cancel();
+        }
         let quit = st.viewer.command(cmd, now, &cam);
         if st.viewer.vsync != was_vsync {
             st.surface.set_vsync(&st.ctx, st.viewer.vsync);
@@ -697,22 +695,29 @@ impl ApplicationHandler for App<'_> {
                         f64::from(self.cfg.size.1) / f64::from(inner.height.max(1)),
                     );
                     let now = [position.x * sx, position.y * sy];
-                    if let (true, Some(p), Some(g)) = (world, st.press.as_mut(), st.viewer.globe.as_mut()) {
-                        let d = [now[0] - st.cursor[0], now[1] - st.cursor[1]];
-                        p.moved += libm::hypot(d[0], d[1]);
-                        g.drag(d[0], d[1], self.cameras[0].fov_y_rad, f64::from(self.cfg.size.1));
+                    // A press only counts while the overview is shown; otherwise it is stale.
+                    if st.viewer.globe.is_none() {
+                        st.press.cancel();
+                    }
+                    let d = [now[0] - st.cursor[0], now[1] - st.cursor[1]];
+                    if world && st.press.moved_by(libm::hypot(d[0], d[1])) {
+                        if let Some(g) = st.viewer.globe.as_mut() {
+                            g.drag(d[0], d[1], self.cameras[0].fov_y_rad, f64::from(self.cfg.size.1));
+                        }
                     }
                     st.cursor = now;
                 }
             }
             WindowEvent::MouseInput { state, button: MouseButton::Left, .. }
-                if !self.cfg.smoke && world && self.state.as_ref().is_some_and(|s| s.viewer.globe.is_some()) =>
+                if !self.cfg.smoke && self.state.as_ref().is_some_and(|s| s.viewer.globe.is_some()) =>
             {
                 let mut clicked = false;
                 if let Some(st) = self.state.as_mut() {
-                    match state {
-                        ElementState::Pressed => st.press = Some(Press { moved: 0.0 }),
-                        ElementState::Released => clicked = st.press.take().is_some_and(|p| p.moved < CLICK_SLOP_PX),
+                    match (state, world) {
+                        (ElementState::Pressed, true) => st.press.press(),
+                        // A release ends the press wherever it lands (over a panel too); only one the overview owns is a click.
+                        (ElementState::Pressed, false) => st.press.cancel(),
+                        (ElementState::Released, _) => clicked = st.press.release() && world,
                     }
                 }
                 if clicked {
@@ -725,7 +730,7 @@ impl ApplicationHandler for App<'_> {
                         MouseScrollDelta::LineDelta(_, y) => f64::from(y),
                         MouseScrollDelta::PixelDelta(p) => p.y / 50.0,
                     };
-                    g.zoom(libm::pow(0.9, lines));
+                    g.zoom(wheel_zoom_factor(lines));
                 }
             }
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. }
@@ -739,6 +744,7 @@ impl ApplicationHandler for App<'_> {
             }
             WindowEvent::Focused(false) => {
                 if let Some(st) = self.state.as_mut() {
+                    st.press.cancel();
                     st.viewer.focus_lost();
                     apply_grab(st);
                 }

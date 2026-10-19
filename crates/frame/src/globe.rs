@@ -387,3 +387,50 @@ impl GlobeSession {
 pub fn landing(view: &GlobeView, radius_m: f64) -> (PlanetFixed, Vec3, f64) {
     (PlanetFixed(view.center * (radius_m + view.altitude_m)), Vec3::new(0.0, 0.0, 1.0), -LANDING_PITCH_RAD)
 }
+
+/// The zoom factor of one wheel line over the overview: each line brings the camera 10 % nearer (a negative count goes farther).
+pub const WHEEL_FACTOR_PER_LINE: f64 = 0.9;
+
+/// The factor `GlobeSession::zoom` takes for `lines` wheel lines (positive: towards the planet).
+pub fn wheel_zoom_factor(lines: f64) -> f64 {
+    libm::pow(WHEEL_FACTOR_PER_LINE, lines)
+}
+
+/// A press of the left button over the overview that becomes a click when it is released within [`CLICK_SLOP_PX`] of where it went down
+/// and a drag otherwise. The window cancels it whenever the button's state is in doubt (the overview toggled, the focus lost, a release
+/// the overview did not see), so a stale press never drags the globe.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ClickTracker {
+    moved_px: Option<f64>,
+}
+
+impl ClickTracker {
+    pub fn press(&mut self) {
+        self.moved_px = Some(0.0);
+    }
+
+    /// True while a button is held; the cursor moved by `distance_px` meanwhile (a drag when it returns true).
+    pub fn moved_by(&mut self, distance_px: f64) -> bool {
+        match self.moved_px.as_mut() {
+            Some(m) => {
+                *m += distance_px;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The release: true when it ends a click (a press that stayed within the slop). The press is over either way.
+    pub fn release(&mut self) -> bool {
+        self.moved_px.take().is_some_and(|m| m < CLICK_SLOP_PX)
+    }
+
+    /// Forget the press.
+    pub fn cancel(&mut self) {
+        self.moved_px = None;
+    }
+
+    pub fn pressed(&self) -> bool {
+        self.moved_px.is_some()
+    }
+}

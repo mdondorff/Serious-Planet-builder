@@ -3,8 +3,8 @@
 
 use planet_core::Vec3;
 use planet_frame::globe::{
-    landing, visible_markers, Click, GlobeSession, GlobeView, Marker, Viewport, CLICK_SLOP_PX, HIT_RADIUS_PX, LANDING_ALTITUDE_M,
-    LANDING_PITCH_RAD, OVERVIEW_ALTITUDE_RADII,
+    landing, visible_markers, wheel_zoom_factor, Click, ClickTracker, GlobeSession, GlobeView, Marker, Viewport, CLICK_SLOP_PX,
+    HIT_RADIUS_PX, LANDING_ALTITUDE_M, LANDING_PITCH_RAD, OVERVIEW_ALTITUDE_RADII,
 };
 use planet_frame::pick::PickLimits;
 
@@ -107,4 +107,44 @@ fn a_drag_and_the_wheel_move_the_view_when_nothing_flies_and_the_click_constants
     s.zoom(0.5);
     assert!(angle(s.view.center, c0) > 1e-4 && (s.view.altitude_m - 0.5 * a0).abs() < 1e-6);
     assert_eq!((HIT_RADIUS_PX, CLICK_SLOP_PX), (12.0, 4.0));
+}
+
+// spec: VIEW-013
+#[test]
+fn a_press_released_within_four_pixels_is_a_click_and_any_other_is_a_drag_and_a_stale_press_can_be_cancelled() {
+    let mut t = ClickTracker::default();
+    assert!(!t.pressed() && !t.moved_by(5.0), "nothing held: a motion is no drag");
+    assert!(!t.release(), "a release without a press is no click");
+    // A click: a press, a little motion, a release.
+    t.press();
+    assert!(t.pressed() && t.moved_by(1.5) && t.moved_by(1.5));
+    assert!(t.release() && !t.pressed());
+    // A drag: the motion adds up past the slop.
+    t.press();
+    assert!(t.moved_by(3.0) && t.moved_by(3.0));
+    assert!(!t.release(), "6 px is a drag");
+    // Exactly the slop is a drag; just under it is a click.
+    t.press();
+    t.moved_by(CLICK_SLOP_PX);
+    assert!(!t.release());
+    t.press();
+    t.moved_by(CLICK_SLOP_PX - 0.01);
+    assert!(t.release());
+    // A cancelled press (the overview toggled, the focus lost, a release not seen): the next motion drags nothing and the next release is no click.
+    t.press();
+    t.cancel();
+    assert!(!t.moved_by(10.0) && !t.release() && !t.pressed());
+}
+
+// spec: VIEW-013
+#[test]
+fn each_wheel_line_brings_the_camera_ten_percent_nearer() {
+    assert_eq!(wheel_zoom_factor(0.0), 1.0);
+    assert!((wheel_zoom_factor(1.0) - 0.9).abs() < 1e-15);
+    assert!((wheel_zoom_factor(-1.0) - 1.0 / 0.9).abs() < 1e-12, "a line the other way goes farther");
+    assert!((wheel_zoom_factor(3.0) - 0.729).abs() < 1e-12);
+    let mut s = GlobeSession::enter(dir(0.0, 0.0) * (R + 1.0), R);
+    let a0 = s.view.altitude_m;
+    s.zoom(wheel_zoom_factor(2.0));
+    assert!((s.view.altitude_m - 0.81 * a0).abs() < 1e-6);
 }

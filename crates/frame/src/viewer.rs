@@ -1252,6 +1252,33 @@ mod tests {
         assert!(KEYS_HELP.contains("globe overview"), "{KEYS_HELP}");
     }
 
+    // spec: VIEW-013
+    #[test]
+    fn g_during_a_click_flight_abandons_it_and_leaves_the_camera_mode_as_it_was() {
+        use crate::globe::{Marker, Viewport};
+        use crate::pick::PickLimits;
+        const R: f64 = 6_371_000.0;
+        let c = camera_for_tests();
+        let cameras = [c];
+        let params = ControllerParams::for_radius(R);
+        let (height, ground) = (|_: planet_core::PlanetFixed| 1.0e6, |_: planet_core::PlanetFixed| R);
+        let mut v = ViewerState::new(0, 3, 0, true).with_lit(true).with_radius_m(R);
+        v.command(Command::ToggleGlobe, 10, &c);
+        let marker = Marker { id: 1, dir: v.globe.unwrap().view.center, radius_m: 2_000.0 };
+        let viewport = Viewport { width_px: 1600.0, height_px: 900.0 };
+        let cam = v.camera(&cameras, 20, 0.0, &params, &height, &ground);
+        let at = crate::globe::visible_markers(&cam, &[marker], R, viewport)[0].pixel;
+        let flat = |_: planet_core::Vec3| 0.0;
+        v.globe.as_mut().unwrap().click(at, &cam, viewport, &[marker], &PickLimits::new(R, 9_000.0), &flat).unwrap();
+        v.camera(&cameras, 30, 0.2, &params, &height, &ground);
+        assert!(v.globe.unwrap().flying());
+        // G now: the overview is gone, the flight is dropped, the camera mode is the flight's again, the clock was never paused.
+        v.command(Command::ToggleGlobe, 40, &c);
+        assert!(v.globe.is_none() && !v.is_free() && !v.clock.is_paused());
+        v.camera(&cameras, 50, 0.2, &params, &height, &ground);
+        assert!(v.globe.is_none() && !v.is_free(), "no landing happens after the abandoned flight");
+    }
+
     // spec: VIEW-014
     #[test]
     fn a_refused_coarse_plan_falls_back_to_the_base_parameters_once_and_other_failures_are_not_hidden() {
