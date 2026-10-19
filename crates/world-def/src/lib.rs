@@ -481,7 +481,7 @@ impl WorldDefinition {
         let cap = footprint::tile_cap(&planet_core::TangentWarp, tile, halo);
         let level = cells::cell_level(radius);
         // A tile at or below the cell level lies in one cell, so its cap (a few tile edges wide) is within the rings; a coarser
-        // tile covers many cells and its cap and halo are many cells wide, so it scans the body (step 1b replaces the scan).
+        // tile covers many cells and its cap and halo are many cells wide, so it scans the body.
         let rings = footprint::candidate_rings(cap, radius, level);
         let candidates: Vec<u64> = match rings {
             Some(rings) if tile.level() >= level => {

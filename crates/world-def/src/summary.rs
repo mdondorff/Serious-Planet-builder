@@ -15,7 +15,7 @@ use crate::footprint::{self, FootprintItem};
 const CELL_CONTEXT: &str = "planet-builder cell hash v1";
 const NODE_CONTEXT: &str = "planet-builder summary node v1";
 
-/// A tile whose level plus this is at most the cell level covers more than 64 cells and records summary nodes.
+/// A tile whose level plus this is at most the cell level covers 64 cells or more and records summary nodes.
 pub const SUMMARY_LEVEL_GAP: u8 = 3;
 
 /// The most rings of margin cells a summary read looks through; a tile that needs more reads the six face roots.
@@ -64,20 +64,25 @@ pub fn is_coarse(tile: TileId, cell_level: u8) -> bool {
 }
 
 /// Rings of margin cells around a coarse tile's own cells that hold every anchor of an item that can touch the tile and its halo:
-/// the cap's arc less 0.9 of the arc from the tile centre to its nearest edge midpoint (the part inside the tile), plus the
-/// longest reach, over the narrowest cell edge (half the nominal width), plus one. `None` when that is over
+/// the cap's arc less the arc from the tile centre to its nearest edge (the part inside the tile), plus the longest reach, over
+/// the narrowest cell edge (half the nominal width), plus one. The nearest edge is taken as the distance from the centre to
+/// the great circle of each edge (`asin |n . c|`, the edges of a tangent-warp tile being great-circle arcs), which is never
+/// more than the distance to the edge itself, so the margin is never too small. `None` when that is over
 /// [`SUMMARY_MAX_RING`].
 pub fn margin_rings(tile: TileId, halo: f64, radius_m: f64, cell_level: u8) -> Option<u32> {
     let cap = footprint::tile_cap(&TangentWarp, tile, halo);
     let (s0, s1, t0, t1) = tile.bounds();
-    let (sm, tm) = (0.5 * (s0 + s1), 0.5 * (t0 + t1));
-    let inside = [(s0, tm), (s1, tm), (sm, t0), (sm, t1)]
-        .iter()
-        .map(|(s, t)| footprint::angle_between(cap.centre, planet_core::cube::face_to_direction(&TangentWarp, tile.face(), *s, *t)))
+    let corner = |s: f64, t: f64| planet_core::cube::face_to_direction(&TangentWarp, tile.face(), s, t);
+    let corners = [corner(s0, t0), corner(s1, t0), corner(s1, t1), corner(s0, t1)];
+    let inside = (0..4)
+        .map(|i| {
+            let normal = corners[i].cross(corners[(i + 1) % 4]).normalized();
+            libm::asin(normal.dot(cap.centre).abs().min(1.0))
+        })
         .fold(f64::INFINITY, f64::min);
     let nominal_edge_m = core::f64::consts::FRAC_PI_2 * radius_m / f64::from(1u32 << cell_level);
     let narrowest_edge_m = 0.5 * nominal_edge_m.min(crate::cells::CELL_EDGE_M * 1.5);
-    let outside_m = (cap.angle - 0.9 * inside).max(0.0) * radius_m + crate::cells::CELL_EDGE_M;
+    let outside_m = (cap.angle - inside).max(0.0) * radius_m + crate::cells::CELL_EDGE_M;
     let rings = libm::ceil(outside_m / narrowest_edge_m) + 1.0;
     (rings.is_finite() && rings <= f64::from(SUMMARY_MAX_RING)).then_some(rings as u32)
 }

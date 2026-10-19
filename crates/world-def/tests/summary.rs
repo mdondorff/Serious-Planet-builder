@@ -297,6 +297,67 @@ fn the_stored_tree_equals_a_from_scratch_computation_of_the_cell_rows_and_non_em
 
 // spec: WDEF-008
 #[test]
+fn anchors_just_inside_the_edge_of_the_touch_region_in_every_direction_are_under_a_covered_node() {
+    // Aimed at the margin: anchors at 0.99 to 1.0 of the largest distance at which an item of the longest reach can still touch the
+    // tile (the cap's arc plus 40 km), at 120 bearings, for corner, edge and middle tiles of two faces, every coarse level and halo,
+    // and bodies whose cell level rounds up and down.
+    for radius in [R, 9_219_300.0, 4_300_000.0] {
+        let level = cell_level(radius);
+        for aim in [dir(1.0, 1.0, 1.0), dir(1.0, 0.0, 0.0), dir(1.0, 0.99, 0.0), dir(0.3, 0.2, -1.0), dir(-1.0, -0.99, -0.99)] {
+            for tile_level in 1..=level.saturating_sub(3) {
+                let tile = TileId::from_direction(&TangentWarp, aim.normalized(), tile_level);
+                for halo in [0.0, 1.0 / 32.0, 0.25, 0.5, 1.0] {
+                    let d = WorldDefinition::single_planet(radius, 7);
+                    let Some(nodes) = d.summary_cover(BodyId::PLANET, tile, halo).unwrap() else { continue };
+                    if nodes.len() == 6 && nodes.iter().all(|n| n.level() == 0) {
+                        continue; // the six face roots cover every anchor
+                    }
+                    let covered: BTreeSet<u64> = nodes.iter().flat_map(|n| cells_under(*n, level)).map(|c| c.raw()).collect();
+                    let cap = planet_world_def::footprint::tile_cap(&TangentWarp, tile, halo);
+                    let c = cap.centre;
+                    let t1 = if c.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+                    let e1 = (t1 - c * c.dot(t1)).normalized();
+                    let e2 = c.cross(e1);
+                    for k in 0..120 {
+                        let bearing = f64::from(k) * core::f64::consts::TAU / 120.0;
+                        let toward = e1 * libm::cos(bearing) + e2 * libm::sin(bearing);
+                        for scale in [0.99, 0.995, 1.0] {
+                            let angle = (cap.angle + 40_000.0 / radius) * scale;
+                            if angle >= core::f64::consts::PI {
+                                continue;
+                            }
+                            let anchor = (c * libm::cos(angle) + toward * libm::sin(angle)).normalized();
+                            assert!(
+                                covered.contains(&cell_of(radius, anchor).raw()),
+                                "radius {radius}, tile {tile:?}, halo {halo}, bearing {k}, scale {scale}: the anchor's cell is not read"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// spec: WDEF-008
+#[test]
+fn the_children_of_a_node_hash_in_the_order_of_tile_children_and_a_node_with_its_second_child_is_pinned() {
+    let level = 5u8;
+    let parent = TileId::new(planet_core::Face(0), 4, 3, 5).unwrap();
+    let kids = parent.children().unwrap();
+    let empty = empty_hash128(level, level);
+    let cell = [9u8; 16];
+    // Morton order: the second child is (x0, y1).
+    assert_eq!((kids[1].x(), kids[1].y()), (parent.x() * 2, parent.y() * 2 + 1));
+    let second = node_hash128(parent.level(), &[empty, cell, empty, empty]);
+    let third = node_hash128(parent.level(), &[empty, empty, cell, empty]);
+    assert_ne!(second, third, "the order of the children is part of the hash");
+    let hex = |b: [u8; 16]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+    assert_eq!(hex(second), KNOWN_NODE_SECOND_CHILD);
+}
+
+// spec: WDEF-008
+#[test]
 fn layers_have_their_own_trees_and_a_tile_that_needs_too_many_rings_reads_the_six_face_roots() {
     let at = dir(1.0, 0.2, 0.1);
     let mut d = WorldDefinition::single_planet(R, 7);
@@ -323,6 +384,7 @@ fn layers_have_their_own_trees_and_a_tile_that_needs_too_many_rings_reads_the_si
     assert!(nodes.iter().all(|n| n.level() == 0));
 }
 
+const KNOWN_NODE_SECOND_CHILD: &str = "f603665b7f7719e2f249f83692ef5b72";
 const KNOWN_CELL_ONE_ITEM: &str = "028bae5b98a17a280f03ed22aa71621e";
 const KNOWN_NODE_ONE_CELL: &str = "f115d967fcc52b8b3d00f138237701e6";
 const KNOWN_EMPTY_CELL: &str = "bc60602dff5649e21a97e05feaf28b78";
