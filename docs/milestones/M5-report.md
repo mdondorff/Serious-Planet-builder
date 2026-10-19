@@ -138,3 +138,40 @@ The stills in `docs/milestones/M5/` come from the earlier capture (main cc6c9d2)
 ## 7. Open before the verdict
 
 The owner's decisions (section 5), then `/bless` of #275 and its merge, and `accept M5` re-judged under decision 11.
+
+## Process review (housekeeping step 9; sonnet-crusader for opus-planner, 2026-10-19)
+
+Window: M5 start (#191, 2026-10-16 18:17) to the GO (#307, 2026-10-18). Recorded data only; "n/m" marks a figure that was not measured or is no longer recoverable. Previous milestone: M4 (`docs/milestones/M4-report.md`).
+
+| Measure | M4 | M5 | Source |
+|---|---|---|---|
+| `test fast` (whole workspace) | 15.9 s (budget 15 s) | 24.1 s (budget 20 s, owner 2026-10-16) | M4 and M5 reports, automated steps |
+| `test` (tiers A+B, software) | 45.0 s | 81.6 s | same |
+| `test gpu` (tier C, software) | 57.0 s | 117 s (117 of 117 tests) | same |
+| Edit-to-first-test (BUILD-014, 30 s) | n/m | n/m (no series recorded) | none recorded |
+| CI median, `windows (WARP) C` | n/m | **16.9 min, over the 16 min budget** (p90 18.2) | `cargo xtask ci-stats`, last 9 main runs |
+| CI median, `windows (WARP) A+B` | n/m | 13.2 min (p90 14.8) | same |
+| CI median, `linux (lavapipe)` A+B / C | n/m | 8.6 / 8.1 min | same |
+| CI median, `determinism`, `docs` | n/m | 0.4 min each | same |
+| CI failures on main | n/m | 0 of 23 runs | `gh run list --branch main` |
+| CI failures and reruns on PR branches | n/m | n/m: `gh run list` no longer returns the M5 PR runs | none |
+| PRs merged | n/m | 126 (78 code or spec, 48 docs, status, ADR or draft) | `gh pr list`, #191 to #317 |
+| PR lead time (opened to merged) | n/m | median 3 min, p90 0.7 h, max 11.6 h (#275); drafts #303 8.9 h and #302 3.5 h | PR timestamps |
+| Waiting on the owner | n/m | #304 (remove-vertex-render-path) open 20 h in total, of which an 8 h night stall on the owner's merge approval (opus-planner); gate decisions 1-15 took the gate day | PR timestamps, M5 report section 5, planner |
+| Perf windows (M5) | n/m | 5 recorded (7 to 11): 3 gave no `accept` verdict (7 FAIL on the dive and invalid clocks, 8 crash, 9 invalid orbit noise), 2 valid (10, 11) | `docs/perf/window-*.md` |
+| Rework | n/m | cross-adapter golden rule: ADR 0037, 0049, 0052, three tool changes and a reversal (ADR 0061); window-7 figures redone after the clock rule (ADR 0057, 0060); beach flash fixed twice (#275) | log, ADRs, M5 report section 3 |
+| Coordination stalls | n/m | one 8 h night stall (above); unwatched CI before the "watch after every push" rule (2026-10-18); a merge freeze that blocked parallel PRs; long coder sessions (now cleared every 3 to 4 PRs); prepush now catches formatting before CI (BUILD-016) | planner, CLAUDE.md |
+
+Budget lines seen: `BUDGET EXCEEDED: CI median of 'windows (WARP) C' 16.9 min > 16 min` (`ci-stats`, 2026-10-19). It is already a Tracked item in `docs/status.md` ("CI time over budget: `windows (WARP)`", with the step attribution); this review updates its figure.
+
+### Ranked improvements
+
+| # | Improvement | Root cause | Gain / cost | Owner session |
+|---|---|---|---|---|
+| 1 | Let the merge of a green, verified PR happen without a wait: the coder merges (already allowed by CLAUDE.md) and the architect merges only what a coder cannot; a stalled approval is escalated by PushNotification after 1 h | #304 waited 8 h overnight on one approver; PR lead time is otherwise minutes | high / near zero (a rule) | opus-planner |
+| 2 | Cut `windows (WARP)` tier C below 16 min: run tier C's slowest software tests (lit-scene smoke, window smokes) on lavapipe only, or shard the Windows job in two | steps run in sequence in one job; WARP runs 1.6 to 2.3x lavapipe; tier-C test time sum 1,694 s | medium-high / small to medium (workflow change) | sonnet-crusader (support lane) |
+| 3 | Make the perf windows count more often: run the harness's readiness and CPU calibration (ADR 0065) as a preflight before the long scenes, and refuse early | 3 of 5 M5 windows gave no verdict (clock below the floor, a crash, orbit noise), each costing 20 to 50 min of machine time and a planner slot | high / medium | opus-planner with sonnet-explorer |
+| 4 | Measure edit-to-first-test and write it to `target/test-logs/` on every `test fast` so that BUILD-014 has a recorded series | the budget exists but no series: M4 and M5 rows above are n/m | medium / small | sonnet-crusader |
+| 5 | Keep CI-run evidence: have `ci-stats` append each run's per-job times to a file in `docs/perf/` (or the log), and record failure causes of PR runs | `gh run list` forgot the M5 PR runs, so failure causes and reruns cannot be measured afterwards | medium / small | sonnet-crusader |
+
+Items 1 and 3 touch rules and the machine plan (trade-offs): the owner decides item 1's escalation timing. Items 2, 4 and 5 are easy to reverse and go into the M6 queue.
