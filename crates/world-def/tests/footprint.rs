@@ -180,6 +180,70 @@ fn an_item_out_of_reach_of_a_tile_leaves_its_read_unchanged_and_one_in_reach_cha
     assert!(reads(&plain).iter().any(|r| matches!(r, ReadRecord::Footprint { .. })));
 }
 
+// spec: WDEF-007
+#[test]
+fn items_just_inside_the_cap_in_every_direction_are_found_by_the_index_as_by_the_scan() {
+    // The cap is wider than the tile along the diagonals; items placed just inside it (and just outside) at 24 bearings,
+    // with the cell edge narrowest (a body whose cell level rounds up) and the tile at a face edge or corner.
+    for radius in [R, 9_219_300.0, 2_000_000.0] {
+        let level = planet_world_def::cells::cell_level(radius);
+        for dir in [Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 0.99, 0.0), Vec3::new(1.0, 0.99, 0.99), Vec3::new(1.0, 0.3, 0.2)] {
+            for tile_level in [level, level + 1, level + 3] {
+                let tile = TileId::from_direction(&TangentWarp, dir.normalized(), tile_level);
+                for halo in [0.0, 0.5, 1.0] {
+                    let cap = tile_cap(&TangentWarp, tile, halo);
+                    let reach = 39_000.0;
+                    let mut d = WorldDefinition::single_planet(radius, 7);
+                    let mut id = 0u64;
+                    let c = cap.centre;
+                    let t1 = if c.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+                    let e1 = (t1 - c * c.dot(t1)).normalized();
+                    let e2 = c.cross(e1);
+                    for k in 0..24 {
+                        let bearing = f64::from(k) * core::f64::consts::TAU / 24.0;
+                        let toward = e1 * libm::cos(bearing) + e2 * libm::sin(bearing);
+                        for scale in [0.999, 1.001] {
+                            id += 1;
+                            let angle = (cap.angle + reach / radius) * scale;
+                            let at = c * libm::cos(angle) + toward * libm::sin(angle);
+                            d.put_item_spec(BodyId::PLANET, spec(id, at.normalized(), reach)).unwrap();
+                        }
+                    }
+                    let want: Vec<u64> = (1..=id)
+                        .filter(|i| {
+                            let (anchor, r) = d.item_anchor(BodyId::PLANET, *i).unwrap();
+                            touches(cap, anchor, r, radius)
+                        })
+                        .collect();
+                    let mut got: Vec<u64> =
+                        d.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, halo).unwrap().iter().map(|i| i.id).collect();
+                    got.sort_unstable();
+                    assert_eq!(got, want, "radius {radius}, tile {tile:?}, halo {halo}");
+                }
+            }
+        }
+    }
+}
+
+// spec: WDEF-007
+#[test]
+fn a_bad_halo_is_refused_by_the_query_and_a_negative_zero_anchor_is_the_same_item() {
+    let tile = TileId::from_direction(&TangentWarp, Vec3::new(1.0, 0.2, 0.1).normalized(), 12);
+    let d = WorldDefinition::single_planet(R, 7);
+    for bad in [f64::NAN, -0.5, 2.0, f64::INFINITY] {
+        assert!(d.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, bad).is_err(), "halo {bad}");
+    }
+    let hash_of = |y: f64| {
+        let mut w = WorldDefinition::single_planet(R, 7);
+        w.put_item_spec(BodyId::PLANET, spec(1, Vec3::new(1.0, y, 0.0), 100.0)).unwrap();
+        let ctx = GenContext::new(&w);
+        ctx.query_footprint(BodyId::PLANET, DEFAULT_ITEM_LAYER, TileId::from_direction(&TangentWarp, Vec3::new(1.0, 0.0, 0.0), 12), 0.0)
+            .unwrap();
+        (ctx.read_set_hash(), w.hash())
+    };
+    assert_eq!(hash_of(0.0), hash_of(-0.0), "-0.0 and 0.0 are one anchor");
+}
+
 fn rotate_about_z(v: Vec3, angle: f64) -> Vec3 {
     let (s, c) = (libm::sin(angle), libm::cos(angle));
     Vec3::new(v.x * c - v.y * s, v.x * s + v.y * c, v.z)

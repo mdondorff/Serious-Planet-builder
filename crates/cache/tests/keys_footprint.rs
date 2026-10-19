@@ -359,5 +359,5 @@ fn a_field_that_reads_items_has_a_node_set_id_per_tile_that_names_its_reads_and_
 }
 
 const KNOWN_EMPTY_FOOTPRINT: &str = "e99c6b49146b3b01808bed3d94a3bb02";
-const KNOWN_FOOTPRINT_ITEM: &str = "8427423c477d6c8930f354a32ff7466e";
-const KNOWN_FOOTPRINT_RESULT: &str = "6a9a2ce760fc8f78486d0834c8f4ce6c";
+const KNOWN_FOOTPRINT_ITEM: &str = "545f0ddd4f9bf86df105c9727134ea89";
+const KNOWN_FOOTPRINT_RESULT: &str = "0644d35398ab52e3dad17e01a1d97d18";

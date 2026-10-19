@@ -25,7 +25,8 @@ const NODE_CONTEXT: &str = "planet-builder node hash v1";
 const BODY_CONTEXT: &str = "planet-builder body hash v1";
 const QUERY_CONTEXT: &str = "planet-builder query result v1";
 const FOOTPRINT_CONTEXT: &str = "planet-builder footprint result v1";
-const ITEM_CONTEXT: &str = "planet-builder item hash v1";
+/// The footprint item hash is its own domain: the item file's content hash (E2) keeps `planet-builder item hash v1` for its parsed form.
+const ITEM_CONTEXT: &str = "planet-builder footprint item v1";
 
 /// The tag of a key that carries a footprint (kind 3) or a region summary (kind 4) entry (ADR 0066 point 2). Keys without
 /// such an entry keep [`KEY_FORMAT_TAG`] and stay byte for byte what they were, so no stored entry is invalidated; the tag

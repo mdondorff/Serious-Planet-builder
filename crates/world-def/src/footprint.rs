@@ -9,11 +9,21 @@
 use planet_core::cube::{face_to_direction, FaceMapping};
 use planet_core::{TileId, Vec3};
 
-/// Candidate cells for a tile at or below the cell level are the tile's cell plus this many rings. The cap of such a tile
-/// reaches at most 0.9 tile edges past the tile centre, its halo one tile edge and an item's reach one nominal cell edge, and a
-/// cell is no narrower than 0.7 nominal edges (the level rounding) and a little less across the face warp; the margin is
-/// checked against a scan of every item by `tests/footprint.rs`, not assumed.
-pub const FOOTPRINT_MARGIN_RINGS: u32 = 5;
+/// The most rings of cells around a tile's cell the index path will look through; a tile that needs more scans the body.
+pub const FOOTPRINT_MAX_RINGS: u32 = 16;
+
+/// Rings of cells around the cell of a tile at or below the cell level that hold every item the touch test can accept: the
+/// cap's arc plus the longest reach, over the narrowest cell edge, plus one. A cell is no narrower than half the nominal
+/// width of its level (the level rounding, a factor of `1/sqrt 2`, and the face warp at a face edge, a factor of about `0.71`).
+/// `None` when that is more than [`FOOTPRINT_MAX_RINGS`], so the caller scans the body. The result of the index path is then
+/// the set the touch test accepts, the same as the scan's.
+pub fn candidate_rings(cap: Cap, radius_m: f64, cell_level: u8) -> Option<u32> {
+    let nominal_edge_m = core::f64::consts::FRAC_PI_2 * radius_m / f64::from(1u32 << cell_level);
+    let narrowest_edge_m = 0.5 * nominal_edge_m.min(crate::cells::CELL_EDGE_M * 1.5);
+    let reach_m = cap.angle * radius_m + crate::cells::CELL_EDGE_M;
+    let rings = libm::ceil(reach_m / narrowest_edge_m) + 1.0;
+    (rings.is_finite() && rings <= f64::from(FOOTPRINT_MAX_RINGS)).then_some(rings as u32)
+}
 
 /// The limit of cells a covering may have (the cells of one tile at or below the cell level are one).
 pub const FOOTPRINT_MAX_CELLS: usize = 1024;

@@ -315,7 +315,7 @@ impl WorldDefinition {
         self.remove_item(body, id);
         let rec = ItemRec {
             content: spec.content_hash,
-            dir: [unit.x.to_bits(), unit.y.to_bits(), unit.z.to_bits()],
+            dir: [canonical_bits(unit.x), canonical_bits(unit.y), canonical_bits(unit.z)],
             reach_bits: canonical_bits(spec.reach_m),
             max_delta_bits: canonical_bits(spec.max_delta_m),
             layer: spec.layer,
@@ -372,7 +372,7 @@ impl WorldDefinition {
 
     /// The items of `layer` whose reach touches the footprint of `tile` with a halo of `halo` tile edges (WDEF-007), in
     /// application order (priority, then id). The tile must come from the tangent-warp mapping. Candidates are the items
-    /// of the cell of the tile plus [`footprint::FOOTPRINT_MARGIN_RINGS`] rings, or every item of the body for a tile coarser
+    /// of the cell of the tile plus [`footprint::candidate_rings`] rings, or every item of the body for a tile coarser
     /// than the cell level; the touch test decides, and a test checks that both ways give the same set.
     pub fn footprint_items(
         &self,
@@ -381,20 +381,25 @@ impl WorldDefinition {
         tile: TileId,
         halo: f64,
     ) -> Result<Vec<footprint::FootprintItem>, MissingNode> {
+        if !(halo.is_finite() && (0.0..=1.0).contains(&halo)) {
+            return Err(MissingNode(format!("a footprint halo in [0, 1] (got {halo})")));
+        }
         let radius = self.usable_radius(body)?;
         let cap = footprint::tile_cap(&planet_core::TangentWarp, tile, halo);
         let level = cells::cell_level(radius);
         // A tile at or below the cell level lies in one cell, so its cap (a few tile edges wide) is within the rings; a coarser
         // tile covers many cells and its cap and halo are many cells wide, so it scans the body (step 1b replaces the scan).
-        let candidates: Vec<u64> = if tile.level() >= level {
-            let covering = cells::cells_covering(tile, level, footprint::FOOTPRINT_MAX_CELLS).expect("one cell");
-            cells::with_margin(&covering, footprint::FOOTPRINT_MARGIN_RINGS)
-                .iter()
-                .filter_map(|c| self.cells.get(&(body, c.raw())))
-                .flat_map(|ids| ids.iter().copied())
-                .collect()
-        } else {
-            self.body_item_ids(body)
+        let rings = footprint::candidate_rings(cap, radius, level);
+        let candidates: Vec<u64> = match rings {
+            Some(rings) if tile.level() >= level => {
+                let covering = cells::cells_covering(tile, level, footprint::FOOTPRINT_MAX_CELLS).expect("one cell");
+                cells::with_margin(&covering, rings)
+                    .iter()
+                    .filter_map(|c| self.cells.get(&(body, c.raw())))
+                    .flat_map(|ids| ids.iter().copied())
+                    .collect()
+            }
+            _ => self.body_item_ids(body),
         };
         let mut out: Vec<footprint::FootprintItem> = candidates
             .into_iter()
