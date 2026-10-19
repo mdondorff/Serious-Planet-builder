@@ -164,13 +164,16 @@ pub fn query_result_hash128(items: &[ItemEntry]) -> [u8; 16] {
     let mut sorted: Vec<&ItemEntry> = items.iter().collect();
     sorted.sort_unstable();
     let mut m = Vec::with_capacity(sorted.len() * 48);
-    for (id, content, dir) in sorted {
-        m.extend_from_slice(&id.to_le_bytes());
-        m.extend_from_slice(&content.to_le_bytes());
+    // Rows of 40 bytes: the low 8 bytes of the id and of the content hash (the whole of them for values below `2^64`, so those keys are
+    // what they were when both were 64 bits) and the direction bits; the high bytes of wider values follow in a tail.
+    for (id, content, dir) in &sorted {
+        m.extend_from_slice(&planet_world_def::item_id::lo(*id).to_le_bytes());
+        m.extend_from_slice(&planet_world_def::item_id::lo(*content).to_le_bytes());
         for d in dir {
             m.extend_from_slice(&d.to_le_bytes());
         }
     }
+    m.extend(planet_world_def::item_id::wide_tail_bytes(sorted.iter().map(|(id, content, _)| (*id, *content))));
     derive(QUERY_CONTEXT, &m)
 }
 
@@ -180,9 +183,8 @@ pub fn footprint_item_hash128(item: &FootprintItem) -> [u8; 16] {
     planet_world_def::footprint::item_hash128(item)
 }
 
-/// The 16-byte id of an item: its `u64` zero-extended, big-endian, so the byte order is the numeric order and a later
-/// 128-bit id changes a type and not this encoding.
-pub fn footprint_id_bytes(id: u64) -> [u8; 16] {
+/// The 16-byte id of an item, big-endian, so the byte order is the numeric order (an id below `2^64` is zero-extended).
+pub fn footprint_id_bytes(id: planet_world_def::ItemId) -> [u8; 16] {
     planet_world_def::footprint::id_bytes(id)
 }
 

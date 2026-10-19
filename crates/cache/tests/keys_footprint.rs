@@ -75,7 +75,7 @@ impl HeightField for Footprinted<'_> {
     }
 }
 
-fn stamp(id: u64, at: Vec3, reach_m: f64) -> ItemSpec {
+fn stamp(id: u128, at: Vec3, reach_m: f64) -> ItemSpec {
     ItemSpec { id, layer: "items".into(), priority: 0, dir: at, content_hash: 5, reach_m, max_delta_m: 20.0 }
 }
 
@@ -174,7 +174,7 @@ fn a_key_without_a_footprint_entry_keeps_tag_2_byte_for_byte_and_one_with_it_sta
 // spec: STRM-003, WDEF-007
 #[test]
 fn the_footprint_result_is_in_application_order_with_sixteen_byte_ids_and_pinned_hashes() {
-    let item = |id: u64, priority: i32| FootprintItem {
+    let item = |id: u128, priority: i32| FootprintItem {
         id,
         priority,
         content: 5,
@@ -207,7 +207,7 @@ fn the_footprint_result_is_in_application_order_with_sixteen_byte_ids_and_pinned
 struct Stamps<'a> {
     inner: Reference,
     def: &'a WorldDefinition,
-    touched: std::sync::Mutex<std::collections::BTreeSet<u64>>,
+    touched: std::sync::Mutex<std::collections::BTreeSet<u128>>,
 }
 
 impl Stamps<'_> {
@@ -263,7 +263,7 @@ fn every_item_a_stamp_generator_touches_in_a_tile_is_in_the_footprint_the_tile_d
     // Items scattered around three tiles, some far, some just out of reach, with reaches from 10 m to the limit.
     let centre = dir(1.0, 0.2, 0.1);
     let mut def = WorldDefinition::single_planet(R, 7);
-    let mut id = 0u64;
+    let mut id = 0u128;
     for (i, along_m) in [0.0, 10.0, 60.0, 200.0, 900.0, 4_000.0, 20_000.0, 39_000.0, 80_000.0].into_iter().enumerate() {
         for (j, reach_m) in [10.0, 150.0, 2_000.0, 40_000.0].into_iter().enumerate() {
             id += 1;
@@ -279,7 +279,7 @@ fn every_item_a_stamp_generator_touches_in_a_tile_is_in_the_footprint_the_tile_d
     for level in [10u8, 13, 16] {
         let tile = TileId::from_direction(&TangentWarp, centre, level);
         let f = Stamps { inner: Reference(7), def: &def, touched: Default::default() };
-        let declared: Vec<u64> = def.footprint_items(BodyId::PLANET, "items", tile, 0.25).unwrap().iter().map(|i| i.id).collect();
+        let declared: Vec<u128> = def.footprint_items(BodyId::PLANET, "items", tile, 0.25).unwrap().iter().map(|i| i.id).collect();
         // Sample the tile and its 0.25-edge halo (a tile samples its border and a halo for normals).
         let (s0, s1, t0, t1) = tile.bounds();
         let (hs, ht) = (0.25 * (s1 - s0), 0.25 * (t1 - t0));
@@ -301,12 +301,12 @@ fn every_item_a_stamp_generator_touches_in_a_tile_is_in_the_footprint_the_tile_d
     }
     assert!(seen > 10, "the setup must have items that act in the tiles, {seen}");
     // Beyond the reach nothing changes, within it the change is at most max_delta_m.
-    let without = |skip: u64| {
+    let without = |skip: u128| {
         let mut d = def.clone();
         assert!(d.remove_item(BodyId::PLANET, skip));
         d
     };
-    for skip in [1u64, 12, 20, 33] {
+    for skip in [1u128, 12, 20, 33] {
         let (anchor, reach_m) = def.item_anchor(BodyId::PLANET, skip).unwrap();
         let max_delta = def.item_max_delta(BodyId::PLANET, skip).unwrap();
         let (with_f, without_def) = (Stamps { inner: Reference(7), def: &def, touched: Default::default() }, without(skip));
@@ -332,7 +332,7 @@ fn a_tile_generated_alone_equals_the_same_samples_cut_from_its_parents_grid_for_
     let at = dir(1.0, 0.2, 0.1);
     let mut def = WorldDefinition::single_planet(R, 7);
     for (id, (along_m, reach_m)) in [(0.0, 3_000.0), (700.0, 900.0), (5_000.0, 40_000.0), (-2_500.0, 600.0)].into_iter().enumerate() {
-        def.put_item_spec(BodyId::PLANET, stamp(id as u64 + 1, dir(1.0, 0.2 + along_m / R, 0.1), reach_m)).unwrap();
+        def.put_item_spec(BodyId::PLANET, stamp(id as u128 + 1, dir(1.0, 0.2 + along_m / R, 0.1), reach_m)).unwrap();
     }
     let f = Stamps { inner: Reference(7), def: &def, touched: Default::default() };
     let parent = TileId::from_direction(&TangentWarp, at, 14);

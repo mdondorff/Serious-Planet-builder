@@ -9,7 +9,7 @@ use planet_world_def::{BodyId, GenContext, ItemSpec, ReadRecord, WorldDefinition
 
 const R: f64 = 6_371_000.0;
 
-fn spec(id: u64, dir: Vec3, reach_m: f64) -> ItemSpec {
+fn spec(id: u128, dir: Vec3, reach_m: f64) -> ItemSpec {
     ItemSpec { id, layer: DEFAULT_ITEM_LAYER.into(), priority: 0, dir, content_hash: id * 7 + 1, reach_m, max_delta_m: 10.0 }
 }
 
@@ -149,10 +149,10 @@ fn an_edit_rewrites_one_node_per_level_and_every_node_equals_a_rebuild_from_the_
 
     // Any sequence of puts, moves and removes ends in the tree a rebuild from the final items gives.
     let mut rng = Rng(21);
-    let mut live: std::collections::BTreeMap<u64, (Vec3, f64)> = Default::default();
+    let mut live: std::collections::BTreeMap<u128, (Vec3, f64)> = Default::default();
     let mut w = WorldDefinition::single_planet(R, 7);
     for step in 0..400u64 {
-        let id = rng.next() % 40;
+        let id = u128::from(rng.next() % 40);
         if rng.next().is_multiple_of(4) {
             w.remove_item(BodyId::PLANET, id);
             live.remove(&id);
@@ -244,7 +244,7 @@ fn the_stored_tree_equals_a_from_scratch_computation_of_the_cell_rows_and_non_em
     let level = cell_level(R);
     let mut rng = Rng(5);
     let mut d = WorldDefinition::single_planet(R, 7);
-    for id in 1..=30u64 {
+    for id in 1..=30u128 {
         d.put_item_spec(BodyId::PLANET, spec(id, rng.dir(), rng.unit() * 40_000.0)).unwrap();
     }
     // Independent of `refresh_summary`: group the items by cell, hash the cells, then fold the quadtree upwards level by level.

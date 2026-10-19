@@ -12,6 +12,8 @@ mod hilbert_crc;
 mod keys;
 #[path = "keys_footprint.rs"]
 mod keys_footprint;
+#[path = "keys_wide_ids.rs"]
+mod keys_wide_ids;
 #[path = "meshpack.rs"]
 mod meshpack;
 #[path = "pack.rs"]
