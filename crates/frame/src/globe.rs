@@ -20,8 +20,13 @@ pub struct Marker {
     pub radius_m: f64,
 }
 
+/// How close to a pole the overview's centre may come (radians, 1 degree): north stays up and the east axis stays well defined, so
+/// a drag over the pole slides along the edge of the cap and a flight over it bends round it.
+pub const POLE_MARGIN_RAD: f64 = 0.017_453_292_519_943_295;
+
 /// The overview's camera: over `center` at `altitude_m` above the sphere of radius `radius_m`, looking at the planet's centre with
-/// north up.
+/// north up. Build one with [`GlobeView::new`], which keeps the centre a unit vector outside the polar caps and the altitude a finite
+/// number of at least `MIN_ALTITUDE_M`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GlobeView {
     /// The unit direction of the point under the camera.
@@ -30,31 +35,83 @@ pub struct GlobeView {
     pub altitude_m: f64,
 }
 
-fn north_or_fallback(center: Vec3) -> Vec3 {
-    let north = Vec3::new(0.0, 0.0, 1.0);
-    if north.cross(center).length() < 1e-9 {
-        Vec3::new(0.0, 1.0, 0.0)
+/// A unit vector, or +x for a zero or non-finite one.
+fn unit_or_x(v: Vec3) -> Vec3 {
+    let len = v.length();
+    if len.is_finite() && len > 0.0 {
+        v * (1.0 / len)
     } else {
-        north
+        Vec3::new(1.0, 0.0, 0.0)
     }
 }
 
-/// The unit tangent vectors (east, north) of the sphere at `center`.
+/// The point on the edge of a polar cap at the longitude of `(x, y)` (longitude 0 for the zero vector), north or south.
+fn cap_edge(x: f64, y: f64, north: bool) -> Vec3 {
+    let rho = libm::hypot(x, y);
+    let (cx, cy) = if rho > 0.0 { (x / rho, y / rho) } else { (1.0, 0.0) };
+    let ring = libm::sin(POLE_MARGIN_RAD);
+    let z = libm::cos(POLE_MARGIN_RAD);
+    Vec3::new(cx * ring, cy * ring, if north { z } else { -z })
+}
+
+/// `center` moved out of the polar caps (to the edge of the cap, keeping its longitude; longitude 0 at an exact pole).
+fn outside_caps(center: Vec3) -> Vec3 {
+    let c = unit_or_x(center);
+    let colatitude = libm::atan2(libm::hypot(c.x, c.y), c.z);
+    if (POLE_MARGIN_RAD..=core::f64::consts::PI - POLE_MARGIN_RAD).contains(&colatitude) {
+        c
+    } else {
+        cap_edge(c.x, c.y, c.z >= 0.0)
+    }
+}
+
+/// The cap (north is true) the great-circle path from `from` toward the tangent `toward` over `theta` radians enters, if any. The
+/// height along the path is `A cos(phi - phi0)`, whose extremes are at the ends of the path and at `phi0` and `phi0 + pi`.
+fn cap_entered(from: Vec3, toward: Vec3, theta: f64) -> Option<bool> {
+    let height = |phi: f64| from.z * libm::cos(phi) + toward.z * libm::sin(phi);
+    let phi0 = libm::atan2(toward.z, from.z);
+    let pi = core::f64::consts::PI;
+    let mut candidates = vec![0.0, theta];
+    for extreme in [phi0, phi0 + pi, phi0 - pi, phi0 + 2.0 * pi, phi0 - 2.0 * pi] {
+        if extreme > 0.0 && extreme < theta {
+            candidates.push(extreme);
+        }
+    }
+    let edge = libm::cos(POLE_MARGIN_RAD);
+    let (mut highest, mut lowest) = (f64::MIN, f64::MAX);
+    for phi in candidates {
+        let z = height(phi);
+        highest = highest.max(z);
+        lowest = lowest.min(z);
+    }
+    if highest > edge && from.z >= 0.0 {
+        Some(true)
+    } else if lowest < -edge && from.z < 0.0 {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// The unit tangent vectors (east, north) of the sphere at `center` (outside the caps).
 fn tangents(center: Vec3) -> (Vec3, Vec3) {
-    let east = north_or_fallback(center).cross(center).normalized();
+    let east = Vec3::new(0.0, 0.0, 1.0).cross(center).normalized();
     let north = center.cross(east).normalized();
     (east, north)
 }
 
 impl GlobeView {
+    /// A view over `center` (made a unit vector and kept out of the polar caps; a zero or non-finite vector gives +x) at `altitude_m`
+    /// (at least `MIN_ALTITUDE_M`; a non-finite value gives the minimum).
     pub fn new(center: Vec3, altitude_m: f64) -> GlobeView {
-        GlobeView { center: center.normalized(), altitude_m }
+        let altitude_m = if altitude_m.is_finite() { altitude_m.max(MIN_ALTITUDE_M) } else { MIN_ALTITUDE_M };
+        GlobeView { center: outside_caps(center), altitude_m }
     }
 
     /// The camera of this view.
     pub fn camera(&self, radius_m: f64, fov_y_rad: f64, aspect: f64, near_m: f64) -> Camera {
         let position = PlanetFixed(self.center * (radius_m + self.altitude_m));
-        Camera::looking_at_centre(position, north_or_fallback(self.center), fov_y_rad, aspect, near_m)
+        Camera::looking_at_centre(position, Vec3::new(0.0, 0.0, 1.0), fov_y_rad, aspect, near_m)
     }
 
     /// The ground angle (radians) one pixel of a `height_px` viewport spans at the centre of the view.
@@ -64,20 +121,38 @@ impl GlobeView {
     }
 
     /// Drag the globe by `(dx_px, dy_px)` pixels: the surface follows the cursor (dragging right brings the western side into view).
+    /// The centre turns by exactly the angle the pixels span at the centre, along the great circle in the drag's direction, and stays
+    /// outside the polar caps. A viewport without height, or a value that is not finite, changes nothing.
     pub fn drag(&mut self, dx_px: f64, dy_px: f64, radius_m: f64, fov_y_rad: f64, height_px: f64) {
         let k = self.radians_per_pixel(radius_m, fov_y_rad, height_px);
+        let pixels = libm::hypot(dx_px, dy_px);
+        if !(height_px > 0.0 && k.is_finite() && k > 0.0 && pixels.is_finite()) || pixels == 0.0 {
+            return;
+        }
         let (east, north) = tangents(self.center);
-        self.center = (self.center - east * (dx_px * k) + north * (dy_px * k)).normalized();
+        let toward = (north * dy_px - east * dx_px) * (1.0 / pixels);
+        let theta = k * pixels;
+        let moved = self.center * libm::cos(theta) + toward * libm::sin(theta);
+        // A drag whose path enters a polar cap stops at the cap's edge on the side it came from (a drag never flips the view).
+        self.center = match cap_entered(self.center, toward, theta) {
+            Some(north) => cap_edge(self.center.x, self.center.y, north),
+            None => outside_caps(moved),
+        };
     }
 
-    /// Zoom by `factor` (greater than 1 goes farther): the altitude stays in `[MIN_ALTITUDE_M, MAX_ALTITUDE_RADII * radius_m]`.
+    /// Zoom by `factor` (greater than 1 goes farther): the altitude stays in `[MIN_ALTITUDE_M, MAX_ALTITUDE_RADII * radius_m]`. A
+    /// factor that is not positive and finite changes nothing.
     pub fn zoom(&mut self, factor: f64, radius_m: f64) {
-        self.altitude_m = (self.altitude_m * factor).clamp(MIN_ALTITUDE_M, MAX_ALTITUDE_RADII * radius_m);
+        if !(factor.is_finite() && factor > 0.0) {
+            return;
+        }
+        let ceiling = (MAX_ALTITUDE_RADII * radius_m).max(MIN_ALTITUDE_M);
+        self.altitude_m = (self.altitude_m * factor).clamp(MIN_ALTITUDE_M, ceiling);
     }
 
     /// The view that shows a marker closely: over its centre, four footprint radii up (never below `MIN_ALTITUDE_M`).
     pub fn closing_on(marker: &Marker) -> GlobeView {
-        GlobeView { center: marker.dir, altitude_m: (4.0 * marker.radius_m).max(MIN_ALTITUDE_M) }
+        GlobeView::new(marker.dir, 4.0 * marker.radius_m)
     }
 }
 
@@ -162,16 +237,27 @@ fn smootherstep(s: f64) -> f64 {
 }
 
 impl GlobeFlight {
+    /// The flight between two views (made valid by [`GlobeView::new`]) on a planet of radius `radius_m`.
     pub fn new(from: GlobeView, to: GlobeView, radius_m: f64) -> GlobeFlight {
+        let (from, to) = (GlobeView::new(from.center, from.altitude_m), GlobeView::new(to.center, to.altitude_m));
         let angle_rad = libm::atan2(from.center.cross(to.center).length(), from.center.dot(to.center));
+        let radius_m = if radius_m.is_finite() && radius_m > 0.0 { radius_m } else { 0.0 };
         GlobeFlight { from, to, angle_rad, duration_s: MIN_FLIGHT_S + SECONDS_PER_RADIAN * angle_rad, radius_m }
     }
 
-    /// The view `t_s` seconds into the flight (clamped to the flight).
+    /// The view `t_s` seconds into the flight (clamped to the flight; a time that is not a number is the start). The start and the end
+    /// are the two views exactly; in between the centre stays outside the polar caps, so a flight over a pole bends round it.
     pub fn at(&self, t_s: f64) -> GlobeView {
-        let s = smootherstep((t_s / self.duration_s).clamp(0.0, 1.0));
-        // The centre: spherical interpolation, by the angle travelled (a straight blend when the two coincide or are opposite is
-        // not needed: opposite centres take the great circle through `tangents` of the start).
+        let t = if t_s.is_nan() { 0.0 } else { t_s };
+        let s = smootherstep((t / self.duration_s).clamp(0.0, 1.0));
+        if s <= 0.0 {
+            return self.from;
+        }
+        if s >= 1.0 {
+            return self.to;
+        }
+        // The centre: spherical interpolation, by the angle travelled (opposite centres take the great circle through the east axis
+        // of the start).
         let center = if self.angle_rad < 1e-12 {
             self.to.center
         } else if self.angle_rad > core::f64::consts::PI - 1e-9 {
@@ -185,16 +271,9 @@ impl GlobeFlight {
         };
         // The altitude: geometric interpolation between the two, plus a rise that peaks at the middle of the trip at 1.5 planet radii
         // times the arc's share of a half circle (so a trip over a quarter of the planet is seen from 0.75 radii up).
-        let altitude_m = if s <= 0.0 {
-            self.from.altitude_m
-        } else if s >= 1.0 {
-            self.to.altitude_m
-        } else {
-            let log_alt = (1.0 - s) * libm::log(self.from.altitude_m) + s * libm::log(self.to.altitude_m);
-            let rise = 1.5 * self.radius_m * (self.angle_rad / core::f64::consts::PI) * libm::sin(core::f64::consts::PI * s);
-            libm::exp(log_alt) + rise
-        };
-        GlobeView { center, altitude_m }
+        let log_alt = (1.0 - s) * libm::log(self.from.altitude_m) + s * libm::log(self.to.altitude_m);
+        let rise = 1.5 * self.radius_m * (self.angle_rad / core::f64::consts::PI) * libm::sin(core::f64::consts::PI * s);
+        GlobeView { center: outside_caps(center), altitude_m: libm::exp(log_alt) + rise }
     }
 
     pub fn is_done(&self, t_s: f64) -> bool {
