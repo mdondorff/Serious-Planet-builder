@@ -118,6 +118,22 @@ pub fn draw_markers(ui: &mut egui::Ui, markers: &[planet_frame::globe::ScreenMar
     }
 }
 
+/// The events that let go of every pointer button, far from `pos` (the last place of the pointer). While the pointer is captured egui is given no pointer event, so a button it
+/// saw go down (the right button that started a look-around) would stay down for it: no hover, no click, until some later event. They are
+/// sent when the capture starts and when it ends (VIEW-022).
+pub fn release_all_buttons(pos: egui::Pos2) -> Vec<egui::Event> {
+    // Far from where the button went down, so that egui does not take the release for a click (a press and a release at one place are one).
+    let away = pos + egui::vec2(10_000.0, 10_000.0);
+    // The move is what tells egui the pointer left the click: it counts it from the move events, not from the position of the release.
+    let mut events = vec![egui::Event::PointerMoved(away)];
+    events.extend(
+        [egui::PointerButton::Primary, egui::PointerButton::Secondary, egui::PointerButton::Middle]
+            .into_iter()
+            .map(|button| egui::Event::PointerButton { pos: away, button, pressed: false, modifiers: egui::Modifiers::NONE }),
+    );
+    events
+}
+
 /// The egui side of the editor window.
 pub struct EditorUi {
     pub ctx: egui::Context,
@@ -152,6 +168,12 @@ impl EditorUi {
             world_pointer: 0,
             ui_pointer: 0,
         }
+    }
+
+    /// Let go of every pointer button egui thinks is down (see [`release_all_buttons`]): the next pass has them up.
+    pub fn release_buttons(&mut self) {
+        let pos = self.ctx.pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+        self.winit.egui_input_mut().events.extend(release_all_buttons(pos));
     }
 
     /// Hand a window event to egui. Returns what the camera may do with it: `true` when the world gets it (egui did not consume it
@@ -378,5 +400,47 @@ mod tests {
         assert_eq!(router.key(&ctx), Target::Ui, "a click on the text field focuses it");
         run(vec![Event::Text("w".into())], 0.2);
         assert_eq!(text, "w", "the key typed into the field is not a camera key");
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn a_button_egui_saw_go_down_is_let_go_by_the_release_events_and_a_release_of_a_button_never_pressed_does_nothing() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(fonts());
+        let mut st = Shell::default();
+        let mut run = |events: Vec<Event>, t: f64| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0))),
+                time: Some(t),
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| shell(ui, &mut st));
+            out.textures_delta.clear();
+        };
+        let away = Pos2::new(600.0, 400.0);
+        let secondary =
+            |down| Event::PointerButton { pos: away, button: PointerButton::Secondary, pressed: down, modifiers: Default::default() };
+        run(vec![moved(away)], 0.1);
+        // The right button goes down (the start of a look-around); then the pointer is captured and egui sees nothing more.
+        run(vec![secondary(true)], 0.12);
+        assert!(ctx.input(|i| i.pointer.secondary_down()), "egui saw the press");
+        for t in 3..8 {
+            run(vec![], f64::from(t) * 0.05);
+        }
+        assert!(ctx.input(|i| i.pointer.secondary_down()), "and without an event it stays down");
+        // The release events let it go, without a click.
+        run(release_all_buttons(away), 0.5);
+        assert!(!ctx.input(|i| i.pointer.any_down()));
+        assert!(!ctx.input(|i| i.pointer.button_clicked(PointerButton::Secondary)), "letting go is no click");
+        // With nothing down they do nothing either.
+        run(release_all_buttons(away), 0.6);
+        assert!(!ctx.input(|i| i.pointer.any_down()
+            || i.pointer.button_clicked(PointerButton::Primary)
+            || i.pointer.button_clicked(PointerButton::Secondary)));
+        let evs = release_all_buttons(away);
+        assert_eq!(evs.len(), 4, "a move away, then the three buttons up");
+        assert!(matches!(evs[0], Event::PointerMoved(p) if p.x > 5_000.0));
+        assert!(evs[1..].iter().all(|e| matches!(e, Event::PointerButton { pressed: false, .. })));
     }
 }

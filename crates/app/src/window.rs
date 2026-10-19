@@ -1036,7 +1036,14 @@ impl ApplicationHandler for App<'_> {
 /// Apply the grab change the mouse look asked for (VIEW-010): a capture grabs the pointer, `Locked` first and `Confined` when the platform
 /// refuses it, and hides the cursor; a release shows it and lets it go. A capture neither mode allows is released again.
 fn apply_grab(st: &mut Running) {
-    match st.viewer.mouse.take_grab_change() {
+    let change = st.viewer.mouse.take_grab_change();
+    // egui gets no pointer events while the pointer is captured: it is told the buttons are up when the capture starts and when it ends.
+    if change.is_some() {
+        if let Some(ui) = st.ui.as_mut() {
+            ui.release_buttons();
+        }
+    }
+    match change {
         Some(GrabChange::Capture) => {
             let mode = |g: &Grab| match g {
                 Grab::Locked => CursorGrabMode::Locked,

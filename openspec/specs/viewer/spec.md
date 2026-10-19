@@ -550,6 +550,7 @@ Source: owner (M6 step U3: map first, list, search, inspector bound to the comma
 - The right button held looks around (VIEW-010); it waits while the left button holds a handle.
 - Esc abandons a drag, else leaves the stamp tool, else deselects, and does not quit while the mode is on (VIEW-003).
 - Keys go to a text field with the focus.
+- While the pointer is captured egui is given no pointer event, so when a capture starts and when it ends every button is let go for egui (a move far from the cursor, then the buttons up: no click, no button left down).
 - Turning the mode off abandons a drag; its places are still named for the refresh.
 - The mode finds the shown edits every frame by the footprint find over the tiles the plan wants (VIEW-015), draws their outlines, names and handles (VIEW-020), lists them (VIEW-016), and names the resident tiles to refresh after each command (VIEW-019).
 - Before the frame plans, a changed definition is handed to the generator (`WorldTerrain::set_definition`, STRM-028) and then the named tiles are refreshed (`ManagedLoop::edit`), so the terrain follows the edits; a definition the generator refuses is a refused count and a status line. Items loaded at the start refresh every resident tile.
@@ -597,6 +598,10 @@ Source: owner (M6 step U3, 2026-10-19), VIEW-003, VIEW-010, VIEW-011, VIEW-017, 
 #### Scenario: Files and search
 - **WHEN** a stamp is placed and a value typed with `--items`, and the directory is opened again; and a search for an edit out of view
 - **THEN** one file named for the edit's id holds it, the reopened session has the same definition hash, and the search finds the far edit while the nearby list holds only the shown ones
+
+#### Scenario: A look-around leaves no button down
+- **WHEN** egui sees the right button go down, no event follows for a while, and then the release events of a capture are given, twice
+- **THEN** the button stays down for egui until the release events, which let it go without a click, and given again they do nothing
 
 #### Scenario: The options
 - **WHEN** `--edit` is given with `--no-ui`
