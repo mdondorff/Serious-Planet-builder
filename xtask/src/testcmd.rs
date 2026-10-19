@@ -61,8 +61,10 @@ pub fn all_packages() -> Vec<String> {
 
 /// Crates whose tests `test fast` runs: the changed crates and every crate above them in the chain (BUILD-003, BUILD-021).
 /// With nothing changed at all, or a change to the workspace (a manifest, the lock file, `.cargo/`, `.config/`) or to `testkit` or
-/// `perf`, everything runs. A change with no crate path (`docs/`, `openspec/`, `.claude/`, `spikes/`, root `*.md`, goldens, tool
-/// configuration) selects no crate: no tier-A test reads it. `xtask/` and `.github/` (which the repository check test reads) select `xtask`.
+/// `perf`, everything runs. The files that a tier-A test reads select that test's crate: `xtask/`, `.github/`, `deny.toml`,
+/// `openspec/changes/` (the unarchived-change check), `tests/goldens/` (the driver and pending lists) and any script file select `xtask`;
+/// `clippy.toml` selects `core`; `spikes/mouse-look/` (replayed traces) selects `frame`. Any other change (`docs/`, the rest of
+/// `openspec/`, `.claude/`, other `spikes/`, root `*.md`, other tool configuration) selects no crate: no tier-A test reads it.
 pub fn packages_for_changes(changed_paths: &[String]) -> Vec<String> {
     let all = all_packages;
     let mut lowest: Option<usize> = None;
@@ -77,8 +79,21 @@ pub fn packages_for_changes(changed_paths: &[String]) -> Vec<String> {
                 // Used by tests of every crate that depends on them: run everything.
                 return all();
             }
-        } else if p.starts_with("xtask/") || p.starts_with(".github/") {
+        } else if p.starts_with("xtask/")
+            || p.starts_with(".github/")
+            || p == "deny.toml"
+            || p.starts_with("openspec/changes/")
+            || p.starts_with("tests/goldens/")
+            || [".sh", ".ps1", ".bat", ".cmd"].iter().any(|e| p.ends_with(e))
+        {
+            // Read by the repository check tests (no scripts, deny.toml, the CI workflow, unarchived changes, the golden driver lists).
             extra.insert("xtask".into());
+        } else if p == "clippy.toml" || p.starts_with("spikes/mouse-look/") {
+            // Read by a test of `core` (no platform math) and by the replay of the mouse-look traces in `frame`.
+            let dir = if p == "clippy.toml" { "core" } else { "frame" };
+            if let Some(i) = CHAIN.iter().position(|c| *c == dir) {
+                lowest = Some(lowest.map_or(i, |l| l.min(i)));
+            }
         } else if p == "Cargo.toml" || p == "Cargo.lock" || p.starts_with(".cargo/") || p.starts_with(".config/") {
             return all();
         }
@@ -1041,8 +1056,7 @@ mod tests {
             &["openspec/specs/viewer/spec.md", "docs/log.d/2026-10-19-x.md"],
             &["spikes/spike-15/results/summary.md"],
             &[".claude/skills/golden-review/SKILL.md", "CLAUDE.md", "README.md"],
-            &["tests/goldens/software/lit_orbit.png"],
-            &["deny.toml", "rustfmt.toml", "clippy.toml", ".gitignore"],
+            &["rustfmt.toml", ".gitignore", "openspec/specs/viewer/spec.md"],
         ] {
             assert!(packages_for_changes(&s(paths)).is_empty(), "{paths:?}");
         }
@@ -1057,6 +1071,19 @@ mod tests {
             "the workflow is read by the repository check test"
         );
         assert_eq!(packages_for_changes(&s(&[r"crates\frame\src\a.rs"]))[0], "planet-frame", "backslashes");
+        // The files a tier-A test reads select that test's crate, so a change to them is not skipped.
+        for (path, first) in [
+            ("deny.toml", "xtask"),
+            ("openspec/changes/x/tasks.md", "xtask"),
+            ("tests/goldens/software/lit_orbit.png", "xtask"),
+            ("tests/goldens/pending.txt", "xtask"),
+            ("spikes/foo/run.ps1", "xtask"),
+            ("docs/tools/make.sh", "xtask"),
+            ("clippy.toml", "planet-core"),
+            ("spikes/mouse-look/results/traces/a.txt", "planet-frame"),
+        ] {
+            assert_eq!(packages_for_changes(&s(&[path]))[0], first, "{path}");
+        }
     }
 
     // spec: BUILD-003

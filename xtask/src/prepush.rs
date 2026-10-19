@@ -148,7 +148,11 @@ mod tests {
     #[test]
     fn a_diff_with_no_crate_path_runs_only_spec_lint_and_nothing_at_all_is_the_whole_workspace() {
         assert!(no_crate_changed(&paths(&["docs/status.md", "openspec/specs/viewer/spec.md", "spikes/x/results/a.md"])));
-        assert!(no_crate_changed(&paths(&["tests/goldens/software/a.png"])), "goldens alone: no crate, but test gpu still runs");
+        assert!(
+            !no_crate_changed(&paths(&["tests/goldens/software/a.png"])),
+            "goldens are read by the xtask checks, and test gpu runs too"
+        );
+        assert!(!no_crate_changed(&paths(&["openspec/changes/x/tasks.md"])), "the unarchived-change check reads it");
         assert!(!no_crate_changed(&paths(&["docs/status.md", "crates/frame/src/a.rs"])));
         assert!(!no_crate_changed(&paths(&["Cargo.lock"])));
         assert!(!no_crate_changed(&paths(&["xtask/src/main.rs"])));
