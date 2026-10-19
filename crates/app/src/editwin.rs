@@ -759,7 +759,7 @@ mod tests {
         assert!(!e.take_affected().is_empty());
         // A typed value, a refused one, and the status that says why.
         e.apply(vec![Event::Param { key: "radius_m".into(), text: "1.2 km".into() }]);
-        assert_eq!((e.stats.typed, e.session.item(id).unwrap().params["radius_m"]), (1, 1_200.0));
+        assert_eq!((e.stats.typed, e.session.item(id).unwrap().reach_m), (1, 1_200.0));
         e.apply(vec![Event::Param { key: "radius_m".into(), text: "9 km".into() }]);
         assert_eq!(e.stats.refused, 1);
         assert!(e.session.status().contains("Radius must be between"), "{}", e.session.status());
@@ -847,7 +847,7 @@ mod tests {
         e.session
             .editor_mut()
             .change(hill, |it| {
-                it.params.insert("radius_m".into(), 50.0);
+                it.reach_m = 50.0;
             })
             .unwrap();
         let p = e.fly_pose(hill, &|_| 0.0).unwrap();
