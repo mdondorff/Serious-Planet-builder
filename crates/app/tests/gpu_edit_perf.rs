@@ -8,7 +8,7 @@ fn run(args: &[&str]) -> Result<String, String> {
     planet::run(&args, &mut buf).map(|_| String::from_utf8(buf).unwrap())
 }
 
-// spec: TEST-019
+// spec: TEST-019, TEST-041
 #[test]
 fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
     let logs = std::env::temp_dir().join(format!("planet-edit-perf-{}", std::process::id()));
@@ -41,4 +41,15 @@ fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
     assert!(cells[5] != "-", "the exact frame happened: {row}");
     let table = std::fs::read_to_string(logs.join("edit-latency.md")).unwrap();
     assert!(table.contains("| 200 m | 50 m |"), "{table}");
+    // The stages table follows the budget table (TEST-041): the durations and the frame median are numbers.
+    assert!(
+        out.contains("| altitude | stamp radius | set_definition call | edit call | preview call | plan delivered (worker ms)"),
+        "{out}"
+    );
+    let stages = out.lines().filter(|l| l.starts_with("| 200 m | 50 m |")).nth(1).unwrap_or_else(|| panic!("no stages row: {out}"));
+    let cells: Vec<&str> = stages.split('|').map(str::trim).collect();
+    for i in [3, 4, 5, 14] {
+        assert!(cells[i].parse::<f64>().is_ok(), "column {i} of the stages row is a number: {stages}");
+    }
+    assert!(table.contains("set_definition call"), "edit-latency.md holds both tables: {table}");
 }

@@ -96,6 +96,35 @@ pub struct CaseRun {
     pub refreshed: usize,
     pub previewed_nodes_max: usize,
     pub frames: usize,
+    /// Where the time of the run went (the attribution of the preview and the exact time, M6 plan E1/E3).
+    pub stages: Stages,
+}
+
+/// The stages of one run, each in milliseconds from the call of `set_definition` unless it says it is a duration: the instants are taken
+/// at the end of the frame that first shows the stage (before the GPU wait), so they are exact to one frame. `None`: the stage did not
+/// happen in the run.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Stages {
+    /// Durations of the three calls of the edit, in the editor's order: `set_definition`, `ManagedLoop::edit`, `set_preview` with the
+    /// `preview_delta` that makes its argument.
+    pub set_definition_ms: f64,
+    pub edit_ms: f64,
+    pub preview_call_ms: f64,
+    /// The first frame after the edit that delivered a plan: its instant, and the worker's own time for it (a duration).
+    pub plan_delivered_ms: Option<f64>,
+    pub plan_worker_ms: Option<f64>,
+    /// The first frame after the edit that delivered the residency set R.
+    pub residency_delivered_ms: Option<f64>,
+    /// The first frame in which a tile job had been handed to the spawner since the edit.
+    pub first_dispatch_ms: Option<f64>,
+    /// The frame in which half of the refresh requests, and all of them, had completed (the streamer's `refreshed` counter), if the
+    /// count reached them (a refresh whose job was cancelled and loaded again counts when it completes).
+    pub half_refreshed_ms: Option<f64>,
+    pub all_refreshed_ms: Option<f64>,
+    /// The first frame in which nothing waited for an upload (the new tiles were written).
+    pub uploaded_ms: Option<f64>,
+    /// The median wall time of the frames of the run (a duration): the pacing and the frame cost inside every instant above.
+    pub frame_median_ms: f64,
 }
 
 /// One row of the report: a case with its repeats.
@@ -154,6 +183,38 @@ pub fn table(rows: &[CaseRow]) -> String {
             r.runs.iter().map(|x| x.previewed_nodes_max).max().unwrap_or(0),
             r.runs.len(),
             r.verdict()
+        );
+    }
+    s
+}
+
+/// The attribution table (markdown): per case the median over the repeats of every stage, in milliseconds from `set_definition` (the
+/// three calls and the frame median are durations).
+pub fn stages_table(rows: &[CaseRow]) -> String {
+    let mut s = String::from(
+        "| altitude | stamp radius | set_definition call | edit call | preview call | plan delivered (worker ms) | R delivered | first job dispatched | half refreshed | all refreshed | uploaded | preview | exact | frame median |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
+    );
+    let cell = |v: Option<f64>| v.map_or("-".to_string(), |x| format!("{x:.1}"));
+    for r in rows {
+        let pick = |f: &dyn Fn(&CaseRun) -> Option<f64>| median(r.runs.iter().filter_map(f).collect());
+        let (plan, worker) = (pick(&|x| x.stages.plan_delivered_ms), pick(&|x| x.stages.plan_worker_ms));
+        s += &format!(
+            "| {} m | {} m | {} | {} | {} | {} ({}) | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            r.altitude_m,
+            r.radius_m,
+            cell(pick(&|x| Some(x.stages.set_definition_ms))),
+            cell(pick(&|x| Some(x.stages.edit_ms))),
+            cell(pick(&|x| Some(x.stages.preview_call_ms))),
+            cell(plan),
+            cell(worker),
+            cell(pick(&|x| x.stages.residency_delivered_ms)),
+            cell(pick(&|x| x.stages.first_dispatch_ms)),
+            cell(pick(&|x| x.stages.half_refreshed_ms)),
+            cell(pick(&|x| x.stages.all_refreshed_ms)),
+            cell(pick(&|x| x.stages.uploaded_ms)),
+            cell(r.preview_median()),
+            cell(r.exact_median()),
+            cell(pick(&|x| Some(x.stages.frame_median_ms))),
         );
     }
     s
@@ -246,17 +307,56 @@ fn run_once(
     edited.put_item_spec(BodyId::PLANET, stamp.clone()).map_err(|e| format!("the case's stamp: {e:?}"))?;
     let edited = Arc::new(edited);
     let mut out = CaseRun { resident: h.rig.managed.resident().len(), ..Default::default() };
+    let before_stats = h.rig.managed.manager().streamer().stats();
     let sampler_started = Instant::now();
+    let ms = |t: Instant| t.elapsed().as_secs_f64() * 1000.0;
     // The edit as the editor does it: swap the definition, name the edited tiles, set the preview.
+    let call = Instant::now();
     world.set_definition(Arc::clone(&edited))?;
+    out.stages.set_definition_ms = ms(call);
+    let call = Instant::now();
     let tiles = found_tiles(&edited, h.rig.managed.resident().keys().copied());
     out.refreshed = h.rig.managed.edit(&tiles);
+    out.stages.edit_ms = ms(call);
+    let call = Instant::now();
     let list = preview_delta(&items_near(&before_def, stamp.dir), &items_near(&edited, stamp.dir), req.camera.position.0);
     h.rig.managed.set_preview(list.stamps);
+    out.stages.preview_call_ms = ms(call);
     let mut waiting_for_exact = false;
+    let mut frame_ms: Vec<f64> = Vec::new();
     loop {
+        let frame_started = Instant::now();
         let frame = h.step(req)?;
+        frame_ms.push(ms(frame_started));
         out.frames += 1;
+        let at = ms(sampler_started);
+        let stats = h.rig.managed.manager().streamer().stats();
+        if out.stages.plan_delivered_ms.is_none() {
+            if let Some((_, worker_ms)) = frame.pipeline.delivered {
+                out.stages.plan_delivered_ms = Some(at);
+                out.stages.plan_worker_ms = Some(worker_ms);
+            }
+        }
+        if out.stages.residency_delivered_ms.is_none() && frame.pipeline.residency_delivered.is_some() {
+            out.stages.residency_delivered_ms = Some(at);
+        }
+        if out.stages.first_dispatch_ms.is_none() && stats.dispatched > before_stats.dispatched {
+            out.stages.first_dispatch_ms = Some(at);
+        }
+        let refreshed = stats.refreshed - before_stats.refreshed;
+        if out.stages.half_refreshed_ms.is_none() && out.refreshed > 0 && refreshed * 2 >= out.refreshed as u64 {
+            out.stages.half_refreshed_ms = Some(at);
+        }
+        if out.stages.all_refreshed_ms.is_none() && out.refreshed > 0 && refreshed >= out.refreshed as u64 {
+            out.stages.all_refreshed_ms = Some(at);
+        }
+        if out.stages.uploaded_ms.is_none()
+            && out.stages.first_dispatch_ms.is_some()
+            && h.rig.managed.pending().is_empty()
+            && stats.in_flight == 0
+        {
+            out.stages.uploaded_ms = Some(at);
+        }
         let previewed = frame.pipeline.draw.plan.nodes.iter().filter(|n| n.preview).count();
         out.previewed_nodes_max = out.previewed_nodes_max.max(previewed);
         if out.preview_ms.is_none() && previewed > 0 {
@@ -267,6 +367,7 @@ fn run_once(
         if h.idle(&frame) && (out.frames > 1 || waiting_for_exact) {
             h.rig.fi.retire_to(h.rig.renderer.wait_oldest(h.ctx));
             out.exact_ms = Some(sampler_started.elapsed().as_secs_f64() * 1000.0);
+            out.stages.frame_median_ms = median(frame_ms.clone()).unwrap_or(0.0);
             break;
         }
         waiting_for_exact = true;
@@ -377,10 +478,11 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         }
     }
     let table = table(&rows);
-    writeln!(out, "\n{table}").map_err(err)?;
+    let stages = stages_table(&rows);
+    writeln!(out, "\n{table}\nstages (ms from set_definition; the calls and the frame median are durations):\n\n{stages}").map_err(err)?;
     if let Some(dir) = &o.out {
         let path = crate::streamperf::out_log_path(dir, "edit-latency.md")?;
-        std::fs::write(&path, &table).map_err(|e| format!("{}: {e}", path.display()))?;
+        std::fs::write(&path, format!("{table}\n{stages}")).map_err(|e| format!("{}: {e}", path.display()))?;
         writeln!(out, "table written to {}", path.display()).map_err(err)?;
     }
     if smoke && rows.iter().any(|r| r.runs.iter().any(|x| x.exact_ms.is_none())) {
