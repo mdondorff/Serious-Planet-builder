@@ -69,6 +69,38 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
     })
 }
 
+/// What a mouse button does in the editor mode (VIEW-022).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditMouse {
+    /// The left button went down in the world: press.
+    Press,
+    /// The left button went up, wherever: release.
+    Release,
+    /// The right button went down: look around while it is held.
+    StartLook,
+    /// The right button went up: stop looking.
+    EndLook,
+}
+
+/// The decision for a mouse button in the editor mode. `world` says the event is the world's (not a panel's), `captured` that the pointer is
+/// captured (looking around), `holding` that the left button holds an edit.
+pub fn edit_mouse_action(button: MouseButton, state: ElementState, world: bool, captured: bool, holding: bool) -> Option<EditMouse> {
+    match (button, state) {
+        // A press while the pointer is captured is not at the cursor the window last saw: it does nothing.
+        (MouseButton::Left, ElementState::Pressed) if world && !captured => Some(EditMouse::Press),
+        (MouseButton::Left, ElementState::Released) => Some(EditMouse::Release),
+        // Looking around waits for the left button: a handle held is not let go of by a second button.
+        (MouseButton::Right, ElementState::Pressed) if world && !holding => Some(EditMouse::StartLook),
+        (MouseButton::Right, ElementState::Released) => Some(EditMouse::EndLook),
+        _ => None,
+    }
+}
+
+/// The viewer commands the editor mode does not take: it edits from the free camera with no overview (VIEW-022).
+pub fn editor_mode_blocks(cmd: Command) -> bool {
+    matches!(cmd, Command::ToggleCamera | Command::ToggleGlobe)
+}
+
 /// The key of the editor mode a key press asks for, if any (VIEW-022).
 ///
 /// Undo and redo are the keys *labelled* Z and Y, whatever the layout (`logical` is the character of the key; on a QWERTZ keyboard the
@@ -601,16 +633,15 @@ impl App<'_> {
         let limits = PickLimits::new(self.cfg.radius_m, self.cfg.lod.max_height_m);
         let field = self.field;
         let Some(st) = self.state.as_mut() else { return };
-        match (button, state) {
-            // A press while the pointer is captured (looking around) is not at the cursor the window last saw: it does nothing.
-            (MouseButton::Left, ElementState::Pressed) if world && !st.viewer.mouse.captured() => {
+        match edit_mouse_action(button, state, world, st.viewer.mouse.captured(), st.edit_down) {
+            Some(EditMouse::Press) => {
                 let camera = st.last_camera;
                 if let Some(e) = st.edit.as_mut() {
                     e.press(&camera, viewport, st.cursor, &limits, field);
                     st.edit_down = true;
                 }
             }
-            (MouseButton::Left, ElementState::Released) => {
+            Some(EditMouse::Release) => {
                 if st.edit_down {
                     if let Some(e) = st.edit.as_mut() {
                         e.release();
@@ -618,17 +649,16 @@ impl App<'_> {
                 }
                 st.edit_down = false;
             }
-            // Looking around waits for the left button: a handle held is not let go of by a second button.
-            (MouseButton::Right, ElementState::Pressed) if world && !st.edit_down => {
+            Some(EditMouse::StartLook) => {
                 let free = st.viewer.is_free();
                 st.viewer.mouse.click(free);
                 apply_grab(st);
             }
-            (MouseButton::Right, ElementState::Released) => {
+            Some(EditMouse::EndLook) => {
                 st.viewer.mouse.release();
                 apply_grab(st);
             }
-            _ => {}
+            None => {}
         }
     }
 
@@ -865,6 +895,9 @@ impl ApplicationHandler for App<'_> {
                 }
                 if down && !event.repeat {
                     if let Some(cmd) = key_command(code) {
+                        if self.edit_on() && editor_mode_blocks(cmd) {
+                            return;
+                        }
                         if self.command(cmd) {
                             el.exit();
                         }
@@ -1324,5 +1357,51 @@ mod tests {
         ] {
             assert_eq!(k(code, None, false, false), None, "{code:?}");
         }
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn the_mouse_in_the_editor_mode_presses_in_the_world_releases_anywhere_and_looks_with_the_right_button() {
+        use EditMouse::*;
+        use ElementState::{Pressed, Released};
+        let a = edit_mouse_action;
+        // The left button: a press in the world edits, one over a panel or while the pointer is captured does nothing, any release releases.
+        assert_eq!(a(MouseButton::Left, Pressed, true, false, false), Some(Press));
+        assert_eq!(a(MouseButton::Left, Pressed, false, false, false), None, "over a panel");
+        assert_eq!(a(MouseButton::Left, Pressed, true, true, false), None, "the pointer is captured: the cursor is stale");
+        for (world, captured, holding) in [(true, false, true), (false, false, true), (true, true, false), (false, true, false)] {
+            assert_eq!(a(MouseButton::Left, Released, world, captured, holding), Some(Release), "released wherever it lands");
+        }
+        // The right button: held, it looks around; it waits while the left button holds an edit; its release always ends the look.
+        assert_eq!(a(MouseButton::Right, Pressed, true, false, false), Some(StartLook));
+        assert_eq!(a(MouseButton::Right, Pressed, true, false, true), None, "a handle is held");
+        assert_eq!(a(MouseButton::Right, Pressed, false, false, false), None, "over a panel");
+        for holding in [false, true] {
+            assert_eq!(a(MouseButton::Right, Released, false, true, holding), Some(EndLook));
+        }
+        // Other buttons are not the editor's.
+        assert_eq!(a(MouseButton::Middle, Pressed, true, false, false), None);
+        assert_eq!(a(MouseButton::Back, Released, true, false, false), None);
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn the_editor_mode_leaves_the_camera_and_the_overview_alone() {
+        assert!(editor_mode_blocks(Command::ToggleCamera) && editor_mode_blocks(Command::ToggleGlobe));
+        for cmd in [
+            Command::TogglePause,
+            Command::Restart,
+            Command::NextView,
+            Command::ToggleLit,
+            Command::ToggleVsync,
+            Command::CycleOverlay,
+            Command::ToggleCoarseLod,
+        ] {
+            assert!(!editor_mode_blocks(cmd), "{cmd:?}");
+        }
+        // The keys that reach them: C and G map to those commands, and Esc to quit (which the editor's Esc takes first).
+        assert_eq!(key_command(KeyCode::KeyC), Some(Command::ToggleCamera));
+        assert_eq!(key_command(KeyCode::KeyG), Some(Command::ToggleGlobe));
+        assert_eq!(edit_key(KeyCode::Escape, None, false, false), Some(EditKey::Escape));
     }
 }
