@@ -215,7 +215,7 @@ mod tests {
     }
 
     // spec: VIEW-024
-    // spec: VIEW-025
+    // spec: VIEW-026
     #[test]
     fn a_pose_rebuilds_its_camera_with_the_lens_it_is_given_and_f9_names_what_it_wrote() {
         let mut log = PathLog::new();
