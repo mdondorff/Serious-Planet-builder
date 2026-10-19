@@ -16,7 +16,8 @@ B and C are one scene, `edit-latency`.
 
 - Main at the head of the window; `cargo build --release` of that tree; the 16384 store of the earlier windows (`target/accept/global16384` or the path in `docs/perf/window-12.md`).
 - Owner's go through opus-planner; mains power confirmed; no other work on the machine (no builds, no `test gpu`); `cargo xtask perf` readiness gate decides (`--machine-ready` is the owner's only).
-- Record in the report: top-5 CPU processes at the start, the power plan, the GPU clock and temperature at the start of each part.
+- First step of the window: `cargo xtask perf preflight --out <dir>` (TEST-040, about 70 s): it refuses with the causes when the gate or the CPU calibration fails; do not start the window on a refusal. Its report (`preflight.md`) is the record of the top-5 CPU processes, the AC state and the power plan at the start.
+- Record in the report: the GPU clock and temperature at the start of each part.
 - Smoke runs first (no measurement, may run before the window): `cargo xtask perf stream edit-latency --smoke` and `cargo xtask perf m5 --smoke`.
 
 ## Commands
