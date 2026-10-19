@@ -1,0 +1,1 @@
+- 2026-10-19 **Stamp editing (owner):** dragging handles is the primary mode, typed metric values the fallback; brushes take metric radius and strength.

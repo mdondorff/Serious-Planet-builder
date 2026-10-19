@@ -8,7 +8,9 @@
 
 pub mod cells;
 pub mod footprint;
+pub mod item;
 pub mod item_id;
+pub mod item_store;
 pub mod revision;
 pub mod stamp;
 pub mod summary;
