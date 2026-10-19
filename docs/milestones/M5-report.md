@@ -154,8 +154,8 @@ Window: M5 start (#191, 2026-10-16 18:17) to the GO (#307, 2026-10-18). Recorded
 | CI median, `windows (WARP) A+B` | n/m | 13.2 min (p90 14.8) | same |
 | CI median, `linux (lavapipe)` A+B / C | n/m | 8.6 / 8.1 min | same |
 | CI median, `determinism`, `docs` | n/m | 0.4 min each | same |
-| CI failures on main | n/m | 3 of 78 runs from 2026-10-17 19:43Z to the GO (commits 5505509, 6a1f209, cfa59bd); 1 more after it (3368777) | `gh run list --branch main --limit 300` |
-| CI failures and reruns on PR branches | n/m | n/m: `gh run list` no longer returns the M5 PR runs | none |
+| CI failures on pushes (2026-10-16 to 2026-10-18, all branches) | n/m | 43 of 654 runs had a failed job (3 of the 78 main runs from 2026-10-17 19:43Z to the GO: commits 5505509, 6a1f209, cfa59bd) | `docs/perf/ci-history.tsv` (`ci-stats --record`, BUILD-020); `gh run list --branch main` |
+| CI failures on pull-request runs (same days) | n/m | 22 of 376 runs had a failed job; failed steps of the 65 failed runs, by job: `check (fmt, clippy, layering)` 55 job failures (28 Windows, 27 Linux), `test gpu (tier C, software adapter)` 52 (26 and 26), `test (tiers A+B)` 12 (11 Windows), the rest 2 (determinism manifest, manifest diff); reruns are not recorded | same file |
 | PRs merged | n/m | 126 (78 code or spec, 48 docs, status, ADR or draft) | `gh pr list`, #191 to #317 |
 | PR lead time (opened to merged) | n/m | median 3 min, p90 0.7 h, max 11.6 h (#275); drafts #303 8.9 h and #302 3.5 h | PR timestamps |
 | Waiting on the owner | n/m | (planner's account for the 8 h stall and the gate day) #304 (remove-vertex-render-path) open 20 h in total, of which an 8 h night stall on the owner's merge approval (opus-planner); gate decisions 1-15 took the gate day | PR timestamps, M5 report section 5, planner |
@@ -176,3 +176,5 @@ Budget lines seen: `BUDGET EXCEEDED: CI median of 'windows (WARP) C' 16.9 min > 
 | 5 | Keep CI-run evidence: have `ci-stats` append each run's per-job times to a file in `docs/perf/` (or the log), and record failure causes of PR runs | `gh run list` forgot the M5 PR runs, so failure causes and reruns cannot be measured afterwards | medium / small | sonnet-crusader |
 
 Items 1 and 3 touch rules and the machine plan (trade-offs): the owner decides item 1's escalation timing. Items 2, 4 and 5 are easy to reverse and go into the M6 queue.
+
+Status 2026-10-19: improvement 2 is BUILD-018 (#389, first CI run: halves 7.5 to 11.7 min), improvement 4 is BUILD-019 (#390), improvement 5 is BUILD-020 (this change; the M5 CI rows above come from `docs/perf/ci-history.tsv`); improvement 3 is with sonnet-explorer (window13-scenes); improvement 1 is with the owner.

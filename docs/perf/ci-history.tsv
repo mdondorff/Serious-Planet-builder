@@ -1,0 +1,1849 @@
+run	created	event	branch	job	conclusion	seconds	failed_steps
+39177824509	2026-10-18T23:45:13Z	pull_request	change/calibration-wiring-test	docs (spec-lint)	success	27	
+39177824523	2026-10-18T23:45:13Z	pull_request	change/calibration-wiring-test	windows (WARP) A+B	success	739	
+39177824523	2026-10-18T23:45:13Z	pull_request	change/calibration-wiring-test	windows (WARP) C	success	918	
+39177824523	2026-10-18T23:45:13Z	pull_request	change/calibration-wiring-test	linux (lavapipe) C	success	494	
+39177824523	2026-10-18T23:45:13Z	pull_request	change/calibration-wiring-test	linux (lavapipe) A+B	success	367	
+39177824523	2026-10-18T23:45:13Z	pull_request	change/calibration-wiring-test	determinism (Windows vs Linux)	success	23	
+39177815318	2026-10-18T23:45:06Z	push	change/calibration-wiring-test	docs (spec-lint)	success	27	
+39177815297	2026-10-18T23:45:06Z	push	change/calibration-wiring-test	windows (WARP) A+B	success	695	
+39177815297	2026-10-18T23:45:06Z	push	change/calibration-wiring-test	linux (lavapipe) C	success	487	
+39177815297	2026-10-18T23:45:06Z	push	change/calibration-wiring-test	windows (WARP) C	success	660	
+39177815297	2026-10-18T23:45:06Z	push	change/calibration-wiring-test	linux (lavapipe) A+B	success	428	
+39177815297	2026-10-18T23:45:06Z	push	change/calibration-wiring-test	determinism (Windows vs Linux)	success	25	
+39177774669	2026-10-18T23:44:30Z	push	main	docs (spec-lint)	success	21	
+39177774645	2026-10-18T23:44:30Z	push	main	linux (lavapipe) A+B	success	431	
+39177774645	2026-10-18T23:44:30Z	push	main	linux (lavapipe) C	success	482	
+39177774645	2026-10-18T23:44:30Z	push	main	windows (WARP) A+B	success	692	
+39177774645	2026-10-18T23:44:30Z	push	main	windows (WARP) C	success	880	
+39177774645	2026-10-18T23:44:30Z	push	main	determinism (Windows vs Linux)	success	23	
+39177119968	2026-10-18T23:34:56Z	pull_request	change/e0-editor-adr	docs (spec-lint)	success	27	
+39177108940	2026-10-18T23:34:47Z	push	change/e0-editor-adr	docs (spec-lint)	success	27	
+39176852537	2026-10-18T23:31:06Z	push	main	docs (spec-lint)	success	27	
+39176791973	2026-10-18T23:30:19Z	pull_request	planner/m6-editor-plan	docs (spec-lint)	success	26	
+39176781016	2026-10-18T23:30:11Z	push	planner/m6-editor-plan	docs (spec-lint)	success	27	
+39176710518	2026-10-18T23:29:10Z	pull_request	change/cpu-calibration-rule	windows (WARP) C	success	723	
+39176710518	2026-10-18T23:29:10Z	pull_request	change/cpu-calibration-rule	windows (WARP) A+B	success	728	
+39176710518	2026-10-18T23:29:10Z	pull_request	change/cpu-calibration-rule	linux (lavapipe) C	success	480	
+39176710518	2026-10-18T23:29:10Z	pull_request	change/cpu-calibration-rule	linux (lavapipe) A+B	success	434	
+39176710518	2026-10-18T23:29:10Z	pull_request	change/cpu-calibration-rule	determinism (Windows vs Linux)	success	23	
+39176710521	2026-10-18T23:29:10Z	pull_request	change/cpu-calibration-rule	docs (spec-lint)	success	28	
+39176701214	2026-10-18T23:29:02Z	push	change/cpu-calibration-rule	windows (WARP) C	success	910	
+39176701214	2026-10-18T23:29:02Z	push	change/cpu-calibration-rule	linux (lavapipe) C	success	334	
+39176701214	2026-10-18T23:29:02Z	push	change/cpu-calibration-rule	linux (lavapipe) A+B	success	443	
+39176701214	2026-10-18T23:29:02Z	push	change/cpu-calibration-rule	windows (WARP) A+B	success	693	
+39176701214	2026-10-18T23:29:02Z	push	change/cpu-calibration-rule	determinism (Windows vs Linux)	success	26	
+39176701009	2026-10-18T23:29:01Z	push	change/cpu-calibration-rule	docs (spec-lint)	success	23	
+39176417924	2026-10-18T23:24:58Z	push	main	windows (WARP) A+B	success	637	
+39176417924	2026-10-18T23:24:58Z	push	main	windows (WARP) C	success	941	
+39176417924	2026-10-18T23:24:58Z	push	main	linux (lavapipe) C	success	473	
+39176417924	2026-10-18T23:24:58Z	push	main	linux (lavapipe) A+B	success	433	
+39176417924	2026-10-18T23:24:58Z	push	main	determinism (Windows vs Linux)	success	21	
+39176053203	2026-10-18T23:19:51Z	push	main	docs (spec-lint)	success	25	
+39175994641	2026-10-18T23:19:00Z	pull_request	planner/adr-0065	docs (spec-lint)	success	22	
+39175990992	2026-10-18T23:18:57Z	push	planner/adr-0065	docs (spec-lint)	success	25	
+39175292015	2026-10-18T23:09:09Z	pull_request	change/floor3-smoke-frames	windows (WARP) A+B	success	700	
+39175292015	2026-10-18T23:09:09Z	pull_request	change/floor3-smoke-frames	linux (lavapipe) A+B	success	310	
+39175292015	2026-10-18T23:09:09Z	pull_request	change/floor3-smoke-frames	linux (lavapipe) C	success	336	
+39175292015	2026-10-18T23:09:09Z	pull_request	change/floor3-smoke-frames	windows (WARP) C	success	904	
+39175292015	2026-10-18T23:09:09Z	pull_request	change/floor3-smoke-frames	determinism (Windows vs Linux)	success	22	
+39175288918	2026-10-18T23:09:06Z	push	change/floor3-smoke-frames	windows (WARP) A+B	success	711	
+39175288918	2026-10-18T23:09:06Z	push	change/floor3-smoke-frames	linux (lavapipe) C	success	478	
+39175288918	2026-10-18T23:09:06Z	push	change/floor3-smoke-frames	windows (WARP) C	success	895	
+39175288918	2026-10-18T23:09:06Z	push	change/floor3-smoke-frames	linux (lavapipe) A+B	success	447	
+39175288918	2026-10-18T23:09:06Z	push	change/floor3-smoke-frames	determinism (Windows vs Linux)	success	25	
+39175228562	2026-10-18T23:08:15Z	push	main	docs (spec-lint)	success	20	
+39175228474	2026-10-18T23:08:15Z	push	main	linux (lavapipe) A+B	success	427	
+39175228474	2026-10-18T23:08:15Z	push	main	linux (lavapipe) C	success	318	
+39175228474	2026-10-18T23:08:15Z	push	main	windows (WARP) C	success	650	
+39175228474	2026-10-18T23:08:15Z	push	main	windows (WARP) A+B	success	633	
+39175228474	2026-10-18T23:08:15Z	push	main	determinism (Windows vs Linux)	success	24	
+39174137432	2026-10-18T22:52:53Z	pull_request	change/ci-time	windows (WARP) C	success	624	
+39174137432	2026-10-18T22:52:53Z	pull_request	change/ci-time	linux (lavapipe) C	success	505	
+39174137432	2026-10-18T22:52:53Z	pull_request	change/ci-time	linux (lavapipe) A+B	success	437	
+39174137432	2026-10-18T22:52:53Z	pull_request	change/ci-time	windows (WARP) A+B	success	710	
+39174137432	2026-10-18T22:52:53Z	pull_request	change/ci-time	determinism (Windows vs Linux)	success	25	
+39174137451	2026-10-18T22:52:53Z	pull_request	change/ci-time	docs (spec-lint)	success	22	
+39174134281	2026-10-18T22:52:50Z	push	change/ci-time	linux (lavapipe) A+B	success	430	
+39174134281	2026-10-18T22:52:50Z	push	change/ci-time	windows (WARP) C	success	891	
+39174134281	2026-10-18T22:52:50Z	push	change/ci-time	linux (lavapipe) C	success	478	
+39174134281	2026-10-18T22:52:50Z	push	change/ci-time	windows (WARP) A+B	success	693	
+39174134281	2026-10-18T22:52:50Z	push	change/ci-time	determinism (Windows vs Linux)	success	18	
+39174134252	2026-10-18T22:52:50Z	push	change/ci-time	docs (spec-lint)	success	24	
+39174032724	2026-10-18T22:51:20Z	pull_request	change/ci-time	windows (WARP)	success	881	
+39174032724	2026-10-18T22:51:20Z	pull_request	change/ci-time	linux (lavapipe)	success	771	
+39174032724	2026-10-18T22:51:20Z	pull_request	change/ci-time	determinism (Windows vs Linux)	success	29	
+39174032732	2026-10-18T22:51:20Z	pull_request	change/ci-time	docs (spec-lint)	success	26	
+39174020086	2026-10-18T22:51:10Z	push	change/ci-time	windows (WARP)	success	1274	
+39174020086	2026-10-18T22:51:10Z	push	change/ci-time	linux (lavapipe)	success	769	
+39174020086	2026-10-18T22:51:10Z	push	change/ci-time	determinism (Windows vs Linux)	success	22	
+39174020109	2026-10-18T22:51:10Z	push	change/ci-time	docs (spec-lint)	success	23	
+39173762514	2026-10-18T22:47:34Z	push	main	linux (lavapipe)	success	764	
+39173762514	2026-10-18T22:47:34Z	push	main	windows (WARP)	success	1291	
+39173762514	2026-10-18T22:47:34Z	push	main	determinism (Windows vs Linux)	success	24	
+39173762397	2026-10-18T22:47:34Z	push	main	docs (spec-lint)	success	21	
+39172123048	2026-10-18T22:25:01Z	pull_request	change/free-camera-mouse	linux (lavapipe)	success	767	
+39172123048	2026-10-18T22:25:01Z	pull_request	change/free-camera-mouse	windows (WARP)	success	1267	
+39172123048	2026-10-18T22:25:01Z	pull_request	change/free-camera-mouse	determinism (Windows vs Linux)	success	24	
+39172123024	2026-10-18T22:25:01Z	pull_request	change/free-camera-mouse	docs (spec-lint)	success	23	
+39172110974	2026-10-18T22:24:49Z	push	change/free-camera-mouse	windows (WARP)	success	1311	
+39172110974	2026-10-18T22:24:49Z	push	change/free-camera-mouse	linux (lavapipe)	success	628	
+39172110974	2026-10-18T22:24:49Z	push	change/free-camera-mouse	determinism (Windows vs Linux)	success	24	
+39172110905	2026-10-18T22:24:49Z	push	change/free-camera-mouse	docs (spec-lint)	success	23	
+39172072298	2026-10-18T22:24:18Z	push	change/water-motion-gap	windows (WARP)	success	1316	
+39172072298	2026-10-18T22:24:18Z	push	change/water-motion-gap	linux (lavapipe)	success	754	
+39172072298	2026-10-18T22:24:18Z	push	change/water-motion-gap	determinism (Windows vs Linux)	success	26	
+39171779207	2026-10-18T22:20:16Z	push	change/water-motion-gap	linux (lavapipe)	success	638	
+39171779207	2026-10-18T22:20:16Z	push	change/water-motion-gap	windows (WARP)	success	1244	
+39171779207	2026-10-18T22:20:16Z	push	change/water-motion-gap	determinism (Windows vs Linux)	success	21	
+39171647720	2026-10-18T22:18:28Z	push	change/water-motion-gap	windows (WARP)	success	1292	
+39171647720	2026-10-18T22:18:28Z	push	change/water-motion-gap	linux (lavapipe)	success	508	
+39171647720	2026-10-18T22:18:28Z	push	change/water-motion-gap	determinism (Windows vs Linux)	success	25	
+39171647757	2026-10-18T22:18:28Z	push	change/water-motion-gap	docs (spec-lint)	success	27	
+39171174306	2026-10-18T22:11:59Z	push	main	linux (lavapipe)	success	771	
+39171174306	2026-10-18T22:11:59Z	push	main	windows (WARP)	success	1108	
+39171174306	2026-10-18T22:11:59Z	push	main	determinism (Windows vs Linux)	success	24	
+39171174602	2026-10-18T22:11:59Z	push	main	docs (spec-lint)	success	26	
+39169475882	2026-10-18T21:48:46Z	pull_request	change/test-binaries-generators	windows (WARP)	success	1160	
+39169475882	2026-10-18T21:48:46Z	pull_request	change/test-binaries-generators	linux (lavapipe)	success	517	
+39169475882	2026-10-18T21:48:46Z	pull_request	change/test-binaries-generators	determinism (Windows vs Linux)	success	26	
+39169475880	2026-10-18T21:48:46Z	pull_request	change/test-binaries-generators	docs (spec-lint)	success	32	
+39169473733	2026-10-18T21:48:44Z	push	change/test-binaries-generators	docs (spec-lint)	success	28	
+39169473737	2026-10-18T21:48:44Z	push	change/test-binaries-generators	linux (lavapipe)	success	642	
+39169473737	2026-10-18T21:48:44Z	push	change/test-binaries-generators	windows (WARP)	success	1349	
+39169473737	2026-10-18T21:48:44Z	push	change/test-binaries-generators	determinism (Windows vs Linux)	success	22	
+39167913208	2026-10-18T21:27:24Z	pull_request	change/test-binaries-generators	docs (spec-lint)	success	27	
+39167913161	2026-10-18T21:27:24Z	pull_request	change/test-binaries-generators	linux (lavapipe)	success	649	
+39167913161	2026-10-18T21:27:24Z	pull_request	change/test-binaries-generators	windows (WARP)	success	1053	
+39167913161	2026-10-18T21:27:24Z	pull_request	change/test-binaries-generators	determinism (Windows vs Linux)	success	22	
+39167901238	2026-10-18T21:27:14Z	push	change/test-binaries-generators	windows (WARP)	success	1284	
+39167901238	2026-10-18T21:27:14Z	push	change/test-binaries-generators	linux (lavapipe)	success	740	
+39167901238	2026-10-18T21:27:14Z	push	change/test-binaries-generators	determinism (Windows vs Linux)	success	25	
+39167901369	2026-10-18T21:27:14Z	push	change/test-binaries-generators	docs (spec-lint)	success	28	
+39165188962	2026-10-18T20:51:04Z	push	main	docs (spec-lint)	success	25	
+39165146926	2026-10-18T20:50:31Z	pull_request	planner/bug-water-motion	docs (spec-lint)	success	20	
+39165132489	2026-10-18T20:50:20Z	push	planner/bug-water-motion	docs (spec-lint)	success	27	
+39163738481	2026-10-18T20:32:02Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	29	
+39163738114	2026-10-18T20:32:01Z	pull_request	change/remove-vertex-render-path	windows (WARP)	success	1272	
+39163738114	2026-10-18T20:32:01Z	pull_request	change/remove-vertex-render-path	linux (lavapipe)	success	744	
+39163738114	2026-10-18T20:32:01Z	pull_request	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	27	
+39163734725	2026-10-18T20:31:59Z	push	change/remove-vertex-render-path	windows (WARP)	success	1279	
+39163734725	2026-10-18T20:31:59Z	push	change/remove-vertex-render-path	linux (lavapipe)	success	758	
+39163734725	2026-10-18T20:31:59Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	23	
+39162645161	2026-10-18T20:17:42Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	24	
+39162645077	2026-10-18T20:17:42Z	pull_request	change/remove-vertex-render-path	windows (WARP)	success	995	
+39162645077	2026-10-18T20:17:42Z	pull_request	change/remove-vertex-render-path	linux (lavapipe)	success	637	
+39162645077	2026-10-18T20:17:42Z	pull_request	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	25	
+39162642795	2026-10-18T20:17:40Z	push	change/remove-vertex-render-path	docs (spec-lint)	success	24	
+39162642798	2026-10-18T20:17:40Z	push	change/remove-vertex-render-path	windows (WARP)	failure	524	test (tiers A+B)
+39162642798	2026-10-18T20:17:40Z	push	change/remove-vertex-render-path	linux (lavapipe)	success	591	
+39162642798	2026-10-18T20:17:40Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	23	
+39162339429	2026-10-18T20:13:44Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	33	
+39162339432	2026-10-18T20:13:44Z	pull_request	change/remove-vertex-render-path	windows (WARP)	success	889	
+39162339432	2026-10-18T20:13:44Z	pull_request	change/remove-vertex-render-path	linux (lavapipe)	success	701	
+39162339432	2026-10-18T20:13:44Z	pull_request	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	24	
+39162337160	2026-10-18T20:13:42Z	push	change/remove-vertex-render-path	windows (WARP)	success	870	
+39162337160	2026-10-18T20:13:42Z	push	change/remove-vertex-render-path	linux (lavapipe)	success	645	
+39162337160	2026-10-18T20:13:42Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	25	
+39162337104	2026-10-18T20:13:42Z	push	change/remove-vertex-render-path	docs (spec-lint)	success	32	
+39161822711	2026-10-18T20:06:52Z	push	main	docs (spec-lint)	success	29	
+39161761303	2026-10-18T20:06:03Z	pull_request	planner/spike-11-closed	docs (spec-lint)	success	29	
+39161733628	2026-10-18T20:05:42Z	push	planner/spike-11-closed	docs (spec-lint)	success	20	
+39161671994	2026-10-18T20:04:58Z	push	main	docs (spec-lint)	success	28	
+39161606012	2026-10-18T20:04:07Z	pull_request	docs/spike-11-close	docs (spec-lint)	success	23	
+39161602655	2026-10-18T20:04:05Z	push	docs/spike-11-close	docs (spec-lint)	success	22	
+39160275750	2026-10-18T19:46:17Z	push	main	docs (spec-lint)	success	28	
+39160275758	2026-10-18T19:46:17Z	push	main	windows (WARP)	success	1111	
+39160275758	2026-10-18T19:46:17Z	push	main	linux (lavapipe)	success	627	
+39160275758	2026-10-18T19:46:17Z	push	main	determinism (Windows vs Linux)	success	24	
+39158578626	2026-10-18T19:23:52Z	pull_request	change/process-budgets	windows (WARP)	success	1271	
+39158578626	2026-10-18T19:23:52Z	pull_request	change/process-budgets	linux (lavapipe)	success	739	
+39158578626	2026-10-18T19:23:52Z	pull_request	change/process-budgets	determinism (Windows vs Linux)	success	25	
+39158578604	2026-10-18T19:23:52Z	pull_request	change/process-budgets	docs (spec-lint)	success	23	
+39158575264	2026-10-18T19:23:49Z	push	change/process-budgets	linux (lavapipe)	success	748	
+39158575264	2026-10-18T19:23:49Z	push	change/process-budgets	windows (WARP)	success	1272	
+39158575264	2026-10-18T19:23:49Z	push	change/process-budgets	determinism (Windows vs Linux)	success	27	
+39158575277	2026-10-18T19:23:49Z	push	change/process-budgets	docs (spec-lint)	success	20	
+39158514211	2026-10-18T19:23:03Z	push	main	windows (WARP)	success	1261	
+39158514211	2026-10-18T19:23:03Z	push	main	linux (lavapipe)	success	616	
+39158514211	2026-10-18T19:23:03Z	push	main	determinism (Windows vs Linux)	success	22	
+39158514197	2026-10-18T19:23:03Z	push	main	docs (spec-lint)	success	26	
+39157344550	2026-10-18T19:07:56Z	pull_request	change/process-budgets	docs (spec-lint)	success	26	
+39157344503	2026-10-18T19:07:56Z	pull_request	change/process-budgets	linux (lavapipe)	success	737	
+39157344503	2026-10-18T19:07:56Z	pull_request	change/process-budgets	windows (WARP)	success	1260	
+39157344503	2026-10-18T19:07:56Z	pull_request	change/process-budgets	determinism (Windows vs Linux)	success	26	
+39157336396	2026-10-18T19:07:49Z	push	change/process-budgets	docs (spec-lint)	success	31	
+39157336567	2026-10-18T19:07:49Z	push	change/process-budgets	linux (lavapipe)	success	743	
+39157336567	2026-10-18T19:07:49Z	push	change/process-budgets	windows (WARP)	success	1264	
+39157336567	2026-10-18T19:07:49Z	push	change/process-budgets	determinism (Windows vs Linux)	success	19	
+39157052331	2026-10-18T19:04:12Z	pull_request	change/bless-apply	docs (spec-lint)	success	27	
+39157052319	2026-10-18T19:04:12Z	pull_request	change/bless-apply	windows (WARP)	success	1082	
+39157052319	2026-10-18T19:04:12Z	pull_request	change/bless-apply	linux (lavapipe)	success	761	
+39157052319	2026-10-18T19:04:12Z	pull_request	change/bless-apply	determinism (Windows vs Linux)	success	22	
+39157049651	2026-10-18T19:04:10Z	push	change/bless-apply	docs (spec-lint)	success	26	
+39157049675	2026-10-18T19:04:10Z	push	change/bless-apply	linux (lavapipe)	success	613	
+39157049675	2026-10-18T19:04:10Z	push	change/bless-apply	windows (WARP)	success	1064	
+39157049675	2026-10-18T19:04:10Z	push	change/bless-apply	determinism (Windows vs Linux)	success	24	
+39157008209	2026-10-18T19:03:40Z	pull_request	change/bless-apply	docs (spec-lint)	success	26	
+39157008214	2026-10-18T19:03:40Z	pull_request	change/bless-apply	windows (WARP)	success	1261	
+39157008214	2026-10-18T19:03:40Z	pull_request	change/bless-apply	linux (lavapipe)	success	739	
+39157008214	2026-10-18T19:03:40Z	pull_request	change/bless-apply	determinism (Windows vs Linux)	success	24	
+39156999987	2026-10-18T19:03:34Z	push	change/bless-apply	docs (spec-lint)	success	24	
+39156999996	2026-10-18T19:03:34Z	push	change/bless-apply	linux (lavapipe)	success	702	
+39156999996	2026-10-18T19:03:34Z	push	change/bless-apply	windows (WARP)	success	1272	
+39156999996	2026-10-18T19:03:34Z	push	change/bless-apply	determinism (Windows vs Linux)	success	25	
+39156746177	2026-10-18T19:00:23Z	push	main	docs (spec-lint)	success	20	
+39156746196	2026-10-18T19:00:23Z	push	main	linux (lavapipe)	success	521	
+39156746196	2026-10-18T19:00:23Z	push	main	windows (WARP)	success	1200	
+39156746196	2026-10-18T19:00:23Z	push	main	determinism (Windows vs Linux)	success	25	
+39156237053	2026-10-18T18:53:30Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	27	
+39156237047	2026-10-18T18:53:30Z	pull_request	change/remove-vertex-render-path	windows (WARP)	failure	129	check (fmt, clippy, layering)
+39156237047	2026-10-18T18:53:30Z	pull_request	change/remove-vertex-render-path	linux (lavapipe)	failure	70	check (fmt, clippy, layering)
+39156237047	2026-10-18T18:53:30Z	pull_request	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	23	
+39156233578	2026-10-18T18:53:27Z	push	change/remove-vertex-render-path	linux (lavapipe)	failure	74	check (fmt, clippy, layering)
+39156233578	2026-10-18T18:53:27Z	push	change/remove-vertex-render-path	windows (WARP)	failure	138	check (fmt, clippy, layering)
+39156233578	2026-10-18T18:53:27Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	21	
+39155031947	2026-10-18T18:37:52Z	pull_request	change/test-logs	docs (spec-lint)	success	27	
+39155031841	2026-10-18T18:37:51Z	pull_request	change/test-logs	windows (WARP)	success	1272	
+39155031841	2026-10-18T18:37:51Z	pull_request	change/test-logs	linux (lavapipe)	success	745	
+39155031841	2026-10-18T18:37:51Z	pull_request	change/test-logs	determinism (Windows vs Linux)	success	24	
+39155024732	2026-10-18T18:37:46Z	push	change/test-logs	docs (spec-lint)	success	25	
+39155024647	2026-10-18T18:37:46Z	push	change/test-logs	windows (WARP)	success	1272	
+39155024647	2026-10-18T18:37:46Z	push	change/test-logs	linux (lavapipe)	success	505	
+39155024647	2026-10-18T18:37:46Z	push	change/test-logs	determinism (Windows vs Linux)	success	25	
+39154792917	2026-10-18T18:34:44Z	push	main	docs (spec-lint)	success	21	
+39154734528	2026-10-18T18:34:00Z	pull_request	change/gpu-window-flake-verdict	docs (spec-lint)	success	22	
+39154727148	2026-10-18T18:33:54Z	push	change/gpu-window-flake-verdict	docs (spec-lint)	success	24	
+39154534067	2026-10-18T18:31:24Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	26	
+39154534085	2026-10-18T18:31:24Z	pull_request	change/remove-vertex-render-path	windows (WARP)	failure	131	check (fmt, clippy, layering)
+39154534085	2026-10-18T18:31:24Z	pull_request	change/remove-vertex-render-path	linux (lavapipe)	failure	73	check (fmt, clippy, layering)
+39154534085	2026-10-18T18:31:24Z	pull_request	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	27	
+39154531217	2026-10-18T18:31:21Z	push	change/remove-vertex-render-path	docs (spec-lint)	success	27	
+39154515622	2026-10-18T18:31:07Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	27	
+39154515582	2026-10-18T18:31:07Z	pull_request	change/remove-vertex-render-path	linux (lavapipe)	failure	68	check (fmt, clippy, layering)
+39154515582	2026-10-18T18:31:07Z	pull_request	change/remove-vertex-render-path	windows (WARP)	failure	149	check (fmt, clippy, layering)
+39154515582	2026-10-18T18:31:07Z	pull_request	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	22	
+39154514394	2026-10-18T18:31:06Z	push	change/remove-vertex-render-path	windows (WARP)	failure	136	check (fmt, clippy, layering)
+39154514394	2026-10-18T18:31:06Z	push	change/remove-vertex-render-path	linux (lavapipe)	failure	75	check (fmt, clippy, layering)
+39154514394	2026-10-18T18:31:06Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	24	
+39154339868	2026-10-18T18:28:56Z	push	main	linux (lavapipe)	success	739	
+39154339868	2026-10-18T18:28:56Z	push	main	windows (WARP)	success	1286	
+39154339868	2026-10-18T18:28:56Z	push	main	determinism (Windows vs Linux)	success	21	
+39153405442	2026-10-18T18:16:28Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	27	
+39153405445	2026-10-18T18:16:28Z	pull_request	change/remove-vertex-render-path	windows (WARP)	failure	112	check (fmt, clippy, layering)
+39153405445	2026-10-18T18:16:28Z	pull_request	change/remove-vertex-render-path	linux (lavapipe)	failure	68	check (fmt, clippy, layering)
+39153405445	2026-10-18T18:16:28Z	pull_request	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	22	
+39153402457	2026-10-18T18:16:26Z	push	change/remove-vertex-render-path	windows (WARP)	failure	112	check (fmt, clippy, layering)
+39153402457	2026-10-18T18:16:26Z	push	change/remove-vertex-render-path	linux (lavapipe)	failure	69	check (fmt, clippy, layering)
+39153402457	2026-10-18T18:16:26Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	19	
+39152881704	2026-10-18T18:09:43Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	23	
+39152881752	2026-10-18T18:09:43Z	pull_request	change/remove-vertex-render-path	linux (lavapipe)	failure	70	check (fmt, clippy, layering)
+39152881752	2026-10-18T18:09:43Z	pull_request	change/remove-vertex-render-path	windows (WARP)	failure	101	check (fmt, clippy, layering)
+39152881752	2026-10-18T18:09:43Z	pull_request	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	22	
+39152880618	2026-10-18T18:09:43Z	push	change/remove-vertex-render-path	linux (lavapipe)	failure	86	check (fmt, clippy, layering)
+39152880618	2026-10-18T18:09:43Z	push	change/remove-vertex-render-path	windows (WARP)	failure	126	check (fmt, clippy, layering)
+39152880618	2026-10-18T18:09:43Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	22	
+39152624206	2026-10-18T18:06:19Z	pull_request	change/golden-review-zoom-files	windows (WARP)	success	1094	
+39152624206	2026-10-18T18:06:19Z	pull_request	change/golden-review-zoom-files	linux (lavapipe)	success	740	
+39152624206	2026-10-18T18:06:19Z	pull_request	change/golden-review-zoom-files	determinism (Windows vs Linux)	success	18	
+39152615246	2026-10-18T18:06:12Z	push	change/golden-review-zoom-files	windows (WARP)	success	1297	
+39152615246	2026-10-18T18:06:12Z	push	change/golden-review-zoom-files	linux (lavapipe)	success	613	
+39152615246	2026-10-18T18:06:12Z	push	change/golden-review-zoom-files	determinism (Windows vs Linux)	success	23	
+39152529885	2026-10-18T18:05:06Z	push	main	docs (spec-lint)	success	23	
+39152529855	2026-10-18T18:05:06Z	push	main	windows (WARP)	success	1303	
+39152529855	2026-10-18T18:05:06Z	push	main	linux (lavapipe)	success	745	
+39152529855	2026-10-18T18:05:06Z	push	main	determinism (Windows vs Linux)	success	24	
+39152141816	2026-10-18T18:00:19Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	23	
+39152141811	2026-10-18T18:00:19Z	pull_request	change/remove-vertex-render-path	windows (WARP)	failure	122	check (fmt, clippy, layering)
+39152141811	2026-10-18T18:00:19Z	pull_request	change/remove-vertex-render-path	linux (lavapipe)	failure	74	check (fmt, clippy, layering)
+39152141811	2026-10-18T18:00:19Z	pull_request	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	23	
+39152140047	2026-10-18T18:00:17Z	push	change/remove-vertex-render-path	windows (WARP)	failure	133	check (fmt, clippy, layering)
+39152140047	2026-10-18T18:00:17Z	push	change/remove-vertex-render-path	linux (lavapipe)	failure	67	check (fmt, clippy, layering)
+39152140047	2026-10-18T18:00:17Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	24	
+39152054493	2026-10-18T17:59:11Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	26	
+39152054501	2026-10-18T17:59:11Z	pull_request	change/remove-vertex-render-path	windows (WARP)	failure	100	check (fmt, clippy, layering)
+39152054501	2026-10-18T17:59:11Z	pull_request	change/remove-vertex-render-path	linux (lavapipe)	failure	67	check (fmt, clippy, layering)
+39152054501	2026-10-18T17:59:11Z	pull_request	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	25	
+39152052753	2026-10-18T17:59:10Z	push	change/remove-vertex-render-path	windows (WARP)	failure	134	check (fmt, clippy, layering)
+39152052753	2026-10-18T17:59:10Z	push	change/remove-vertex-render-path	linux (lavapipe)	failure	62	check (fmt, clippy, layering)
+39152052753	2026-10-18T17:59:10Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	22	
+39151969568	2026-10-18T17:57:59Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	19	
+39151969576	2026-10-18T17:57:59Z	pull_request	change/remove-vertex-render-path	windows (WARP)	failure	120	check (fmt, clippy, layering)
+39151969576	2026-10-18T17:57:59Z	pull_request	change/remove-vertex-render-path	linux (lavapipe)	failure	74	check (fmt, clippy, layering)
+39151969576	2026-10-18T17:57:59Z	pull_request	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	19	
+39151968037	2026-10-18T17:57:57Z	push	change/remove-vertex-render-path	docs (spec-lint)	success	24	
+39151968026	2026-10-18T17:57:57Z	push	change/remove-vertex-render-path	linux (lavapipe)	failure	77	check (fmt, clippy, layering)
+39151968026	2026-10-18T17:57:57Z	push	change/remove-vertex-render-path	windows (WARP)	failure	113	check (fmt, clippy, layering)
+39151968026	2026-10-18T17:57:57Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	22	
+39151810914	2026-10-18T17:55:45Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	31	
+39151810895	2026-10-18T17:55:45Z	pull_request	change/remove-vertex-render-path	linux (lavapipe)	failure	72	check (fmt, clippy, layering)
+39151810895	2026-10-18T17:55:45Z	pull_request	change/remove-vertex-render-path	windows (WARP)	failure	131	check (fmt, clippy, layering)
+39151810895	2026-10-18T17:55:45Z	pull_request	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	22	
+39151806510	2026-10-18T17:55:41Z	push	change/remove-vertex-render-path	docs (spec-lint)	success	25	
+39151806494	2026-10-18T17:55:41Z	push	change/remove-vertex-render-path	linux (lavapipe)	failure	76	check (fmt, clippy, layering)
+39151806494	2026-10-18T17:55:41Z	push	change/remove-vertex-render-path	windows (WARP)	failure	112	check (fmt, clippy, layering)
+39151806494	2026-10-18T17:55:41Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	21	
+39151662239	2026-10-18T17:53:43Z	pull_request	change/remove-vertex-render-path	windows (WARP)	failure	135	check (fmt, clippy, layering)
+39151662239	2026-10-18T17:53:43Z	pull_request	change/remove-vertex-render-path	linux (lavapipe)	failure	81	check (fmt, clippy, layering)
+39151662239	2026-10-18T17:53:43Z	pull_request	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	26	
+39151662228	2026-10-18T17:53:43Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	25	
+39151659642	2026-10-18T17:53:41Z	push	change/remove-vertex-render-path	linux (lavapipe)	failure	78	check (fmt, clippy, layering)
+39151659642	2026-10-18T17:53:41Z	push	change/remove-vertex-render-path	windows (WARP)	failure	134	check (fmt, clippy, layering)
+39151659642	2026-10-18T17:53:41Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	25	
+39151652828	2026-10-18T17:53:35Z	pull_request	change/remove-vertex-render-path	linux (lavapipe)	failure	71	check (fmt, clippy, layering)
+39151652828	2026-10-18T17:53:35Z	pull_request	change/remove-vertex-render-path	windows (WARP)	failure	124	check (fmt, clippy, layering)
+39151652828	2026-10-18T17:53:35Z	pull_request	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	21	
+39151652847	2026-10-18T17:53:35Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	27	
+39151651038	2026-10-18T17:53:33Z	push	change/remove-vertex-render-path	linux (lavapipe)	failure	70	check (fmt, clippy, layering)
+39151651038	2026-10-18T17:53:33Z	push	change/remove-vertex-render-path	windows (WARP)	failure	111	check (fmt, clippy, layering)
+39151651038	2026-10-18T17:53:33Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	22	
+39151651022	2026-10-18T17:53:33Z	push	change/remove-vertex-render-path	docs (spec-lint)	success	26	
+39151231187	2026-10-18T17:48:01Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	26	
+39151228764	2026-10-18T17:47:59Z	push	change/remove-vertex-render-path	docs (spec-lint)	success	25	
+39151186053	2026-10-18T17:47:22Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	21	
+39151184112	2026-10-18T17:47:20Z	push	change/remove-vertex-render-path	docs (spec-lint)	success	26	
+39150833853	2026-10-18T17:42:38Z	pull_request	change/golden-review-zoom	docs (spec-lint)	success	20	
+39150833862	2026-10-18T17:42:38Z	pull_request	change/golden-review-zoom	windows (WARP)	success	1269	
+39150833862	2026-10-18T17:42:38Z	pull_request	change/golden-review-zoom	linux (lavapipe)	success	625	
+39150833862	2026-10-18T17:42:38Z	pull_request	change/golden-review-zoom	determinism (Windows vs Linux)	success	21	
+39150826310	2026-10-18T17:42:32Z	push	change/golden-review-zoom	docs (spec-lint)	success	23	
+39150826355	2026-10-18T17:42:32Z	push	change/golden-review-zoom	linux (lavapipe)	success	740	
+39150826355	2026-10-18T17:42:32Z	push	change/golden-review-zoom	windows (WARP)	success	1288	
+39150826355	2026-10-18T17:42:32Z	push	change/golden-review-zoom	determinism (Windows vs Linux)	success	18	
+39150517554	2026-10-18T17:38:26Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	19	
+39150515954	2026-10-18T17:38:25Z	push	change/remove-vertex-render-path	linux (lavapipe)	success	748	
+39150515954	2026-10-18T17:38:25Z	push	change/remove-vertex-render-path	windows (WARP)	success	893	
+39150515954	2026-10-18T17:38:25Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	21	
+39150515850	2026-10-18T17:38:24Z	push	change/remove-vertex-render-path	docs (spec-lint)	success	22	
+39150406220	2026-10-18T17:36:57Z	push	main	docs (spec-lint)	success	27	
+39150406140	2026-10-18T17:36:57Z	push	main	linux (lavapipe)	success	738	
+39150406140	2026-10-18T17:36:57Z	push	main	windows (WARP)	success	928	
+39150406140	2026-10-18T17:36:57Z	push	main	determinism (Windows vs Linux)	success	22	
+39148678665	2026-10-18T17:14:48Z	pull_request	change/render-floor-3	docs (spec-lint)	success	23	
+39148678703	2026-10-18T17:14:48Z	pull_request	change/render-floor-3	linux (lavapipe)	success	500	
+39148678703	2026-10-18T17:14:48Z	pull_request	change/render-floor-3	windows (WARP)	success	1093	
+39148678703	2026-10-18T17:14:48Z	pull_request	change/render-floor-3	determinism (Windows vs Linux)	success	22	
+39148676469	2026-10-18T17:14:46Z	push	change/render-floor-3	docs (spec-lint)	success	25	
+39148676472	2026-10-18T17:14:46Z	push	change/render-floor-3	linux (lavapipe)	success	734	
+39148676472	2026-10-18T17:14:46Z	push	change/render-floor-3	windows (WARP)	success	1251	
+39148676472	2026-10-18T17:14:46Z	push	change/render-floor-3	determinism (Windows vs Linux)	success	19	
+39148658864	2026-10-18T17:14:32Z	push	crusader/render-floor-3	docs (spec-lint)	success	23	
+39148658762	2026-10-18T17:14:32Z	push	crusader/render-floor-3	linux (lavapipe)	success	752	
+39148658762	2026-10-18T17:14:32Z	push	crusader/render-floor-3	windows (WARP)	success	1095	
+39148658762	2026-10-18T17:14:32Z	push	crusader/render-floor-3	determinism (Windows vs Linux)	success	24	
+39148107631	2026-10-18T17:07:16Z	push	main	docs (spec-lint)	success	28	
+39148045323	2026-10-18T17:06:28Z	pull_request	planner/bless-summary	docs (spec-lint)	success	28	
+39148034703	2026-10-18T17:06:20Z	push	planner/bless-summary	docs (spec-lint)	success	27	
+39144009662	2026-10-18T16:13:16Z	push	main	docs (spec-lint)	success	27	
+39143955350	2026-10-18T16:12:34Z	pull_request	docs/perf-smoke-desktop-app	docs (spec-lint)	success	28	
+39143952961	2026-10-18T16:12:32Z	push	docs/perf-smoke-desktop-app	docs (spec-lint)	success	24	
+39143657239	2026-10-18T16:08:32Z	pull_request	docs/perf-smoke-desktop-app	docs (spec-lint)	success	19	
+39143650353	2026-10-18T16:08:26Z	push	docs/perf-smoke-desktop-app	docs (spec-lint)	success	24	
+39143619380	2026-10-18T16:08:02Z	push	docs/perf-smoke-desktop-app	docs (spec-lint)	success	25	
+39142823881	2026-10-18T15:57:42Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	20	
+39142820836	2026-10-18T15:57:40Z	push	change/remove-vertex-render-path	docs (spec-lint)	success	25	
+39142820834	2026-10-18T15:57:40Z	push	change/remove-vertex-render-path	linux (lavapipe)	success	692	
+39142820834	2026-10-18T15:57:40Z	push	change/remove-vertex-render-path	windows (WARP)	success	1108	
+39142820834	2026-10-18T15:57:40Z	push	change/remove-vertex-render-path	determinism (Windows vs Linux)	success	24	
+39138730685	2026-10-18T15:03:13Z	pull_request	change/render-floor-3	windows (WARP)	failure	1050	test gpu (tier C, software adapter)
+39138730685	2026-10-18T15:03:13Z	pull_request	change/render-floor-3	linux (lavapipe)	failure	687	test gpu (tier C, software adapter)
+39138730685	2026-10-18T15:03:13Z	pull_request	change/render-floor-3	determinism (Windows vs Linux)	success	24	
+39138730693	2026-10-18T15:03:13Z	pull_request	change/render-floor-3	docs (spec-lint)	success	23	
+39138725963	2026-10-18T15:03:09Z	push	change/render-floor-3	linux (lavapipe)	failure	727	test gpu (tier C, software adapter)
+39138725963	2026-10-18T15:03:09Z	push	change/render-floor-3	windows (WARP)	failure	1058	test gpu (tier C, software adapter)
+39138725963	2026-10-18T15:03:09Z	push	change/render-floor-3	determinism (Windows vs Linux)	success	26	
+39138725949	2026-10-18T15:03:09Z	push	change/render-floor-3	docs (spec-lint)	success	22	
+39138528945	2026-10-18T15:00:37Z	push	main	docs (spec-lint)	success	23	
+39138460134	2026-10-18T14:59:48Z	pull_request	planner/adr-0064	docs (spec-lint)	success	26	
+39138450501	2026-10-18T14:59:40Z	push	planner/adr-0064	docs (spec-lint)	success	27	
+39137814633	2026-10-18T14:50:45Z	push	change/render-floor-3	linux (lavapipe)	failure	616	test gpu (tier C, software adapter)
+39137814633	2026-10-18T14:50:45Z	push	change/render-floor-3	windows (WARP)	failure	516	test (tiers A+B)
+39137814633	2026-10-18T14:50:45Z	push	change/render-floor-3	determinism (Windows vs Linux)	success	21	
+39137814684	2026-10-18T14:50:45Z	push	change/render-floor-3	docs (spec-lint)	success	26	
+39134328317	2026-10-18T14:04:10Z	push	main	docs (spec-lint)	success	22	
+39134275692	2026-10-18T14:03:28Z	pull_request	docs/status-flight-clock	docs (spec-lint)	success	26	
+39134271395	2026-10-18T14:03:25Z	push	docs/status-flight-clock	docs (spec-lint)	success	21	
+39134044129	2026-10-18T14:00:29Z	push	main	docs (spec-lint)	success	22	
+39133988137	2026-10-18T13:59:48Z	pull_request	docs/perf-window-11	docs (spec-lint)	success	24	
+39133984830	2026-10-18T13:59:46Z	push	docs/perf-window-11	docs (spec-lint)	success	27	
+39131972317	2026-10-18T13:32:10Z	push	main	docs (spec-lint)	success	18	
+39131908314	2026-10-18T13:31:20Z	pull_request	planner/editor-mvp-scope	docs (spec-lint)	success	23	
+39131899109	2026-10-18T13:31:12Z	push	planner/editor-mvp-scope	docs (spec-lint)	success	22	
+39131415188	2026-10-18T13:24:36Z	push	main	windows (WARP)	success	1413	
+39131415188	2026-10-18T13:24:36Z	push	main	linux (lavapipe)	success	685	
+39131415188	2026-10-18T13:24:36Z	push	main	determinism (Windows vs Linux)	success	18	
+39131415184	2026-10-18T13:24:36Z	push	main	docs (spec-lint)	success	26	
+39129922035	2026-10-18T13:04:00Z	push	main	windows (WARP)	success	1449	
+39129922035	2026-10-18T13:04:00Z	push	main	linux (lavapipe)	success	654	
+39129922035	2026-10-18T13:04:00Z	push	main	determinism (Windows vs Linux)	success	25	
+39129921982	2026-10-18T13:04:00Z	push	main	docs (spec-lint)	success	31	
+39129742135	2026-10-18T13:01:29Z	pull_request	change/shore-ramp-width	docs (spec-lint)	success	30	
+39129742147	2026-10-18T13:01:29Z	pull_request	change/shore-ramp-width	linux (lavapipe)	success	763	
+39129742147	2026-10-18T13:01:29Z	pull_request	change/shore-ramp-width	windows (WARP)	success	1327	
+39129742147	2026-10-18T13:01:29Z	pull_request	change/shore-ramp-width	determinism (Windows vs Linux)	success	24	
+39129738428	2026-10-18T13:01:26Z	push	change/shore-ramp-width	linux (lavapipe)	success	636	
+39129738428	2026-10-18T13:01:26Z	push	change/shore-ramp-width	windows (WARP)	success	1311	
+39129738428	2026-10-18T13:01:26Z	push	change/shore-ramp-width	determinism (Windows vs Linux)	success	23	
+39129500656	2026-10-18T12:58:08Z	pull_request	change/shore-ramp-width	docs (spec-lint)	success	23	
+39129500693	2026-10-18T12:58:08Z	pull_request	change/shore-ramp-width	windows (WARP)	success	1348	
+39129500693	2026-10-18T12:58:08Z	pull_request	change/shore-ramp-width	linux (lavapipe)	success	753	
+39129500693	2026-10-18T12:58:08Z	pull_request	change/shore-ramp-width	determinism (Windows vs Linux)	success	27	
+39129497484	2026-10-18T12:58:06Z	push	change/shore-ramp-width	docs (spec-lint)	success	28	
+39129497528	2026-10-18T12:58:06Z	push	change/shore-ramp-width	windows (WARP)	success	1354	
+39129497528	2026-10-18T12:58:06Z	push	change/shore-ramp-width	linux (lavapipe)	success	797	
+39129497528	2026-10-18T12:58:06Z	push	change/shore-ramp-width	determinism (Windows vs Linux)	success	21	
+39128882771	2026-10-18T12:49:14Z	push	main	docs (spec-lint)	success	28	
+39128826821	2026-10-18T12:48:25Z	pull_request	planner/process-review	docs (spec-lint)	success	24	
+39128818051	2026-10-18T12:48:17Z	push	planner/process-review	docs (spec-lint)	success	29	
+39128338381	2026-10-18T12:41:26Z	pull_request	change/build-speed-link-debug	docs (spec-lint)	success	23	
+39128338367	2026-10-18T12:41:26Z	pull_request	change/build-speed-link-debug	windows (WARP)	success	1156	
+39128338367	2026-10-18T12:41:26Z	pull_request	change/build-speed-link-debug	linux (lavapipe)	success	812	
+39128338367	2026-10-18T12:41:26Z	pull_request	change/build-speed-link-debug	determinism (Windows vs Linux)	success	25	
+39128334499	2026-10-18T12:41:23Z	push	change/build-speed-link-debug	linux (lavapipe)	success	649	
+39128334499	2026-10-18T12:41:23Z	push	change/build-speed-link-debug	windows (WARP)	success	1317	
+39128334499	2026-10-18T12:41:23Z	push	change/build-speed-link-debug	determinism (Windows vs Linux)	success	25	
+39128334452	2026-10-18T12:41:23Z	push	change/build-speed-link-debug	docs (spec-lint)	success	27	
+39127508276	2026-10-18T12:29:46Z	pull_request	change/shore-ramp-width	linux (lavapipe)	failure	764	test gpu (tier C, software adapter)
+39127508276	2026-10-18T12:29:46Z	pull_request	change/shore-ramp-width	windows (WARP)	failure	1326	test gpu (tier C, software adapter)
+39127508276	2026-10-18T12:29:46Z	pull_request	change/shore-ramp-width	determinism (Windows vs Linux)	success	22	
+39127508282	2026-10-18T12:29:46Z	pull_request	change/shore-ramp-width	docs (spec-lint)	success	29	
+39127505760	2026-10-18T12:29:44Z	push	change/shore-ramp-width	docs (spec-lint)	success	21	
+39127505783	2026-10-18T12:29:44Z	push	change/shore-ramp-width	windows (WARP)	failure	957	test gpu (tier C, software adapter)
+39127505783	2026-10-18T12:29:44Z	push	change/shore-ramp-width	linux (lavapipe)	failure	696	test gpu (tier C, software adapter)
+39127505783	2026-10-18T12:29:44Z	push	change/shore-ramp-width	determinism (Windows vs Linux)	success	24	
+39127052306	2026-10-18T12:23:05Z	push	main	docs (spec-lint)	success	25	
+39126985764	2026-10-18T12:22:07Z	pull_request	planner/ci-watch	docs (spec-lint)	success	22	
+39126980995	2026-10-18T12:22:03Z	push	planner/ci-watch	docs (spec-lint)	success	30	
+39126799307	2026-10-18T12:19:26Z	push	main	docs (spec-lint)	success	25	
+39126707680	2026-10-18T12:18:04Z	pull_request	docs/spike-15-build-speed	docs (spec-lint)	success	26	
+39126700957	2026-10-18T12:17:58Z	push	docs/spike-15-build-speed	docs (spec-lint)	success	25	
+39126691281	2026-10-18T12:17:49Z	push	main	docs (spec-lint)	success	27	
+39126576006	2026-10-18T12:16:05Z	pull_request	docs/prefill-v2-log	docs (spec-lint)	success	26	
+39126572457	2026-10-18T12:16:02Z	push	docs/prefill-v2-log	docs (spec-lint)	success	25	
+39126572550	2026-10-18T12:16:02Z	push	spike/spike-15-build-speed	linux (lavapipe)	failure	181	check (fmt, clippy, layering)
+39126572550	2026-10-18T12:16:02Z	push	spike/spike-15-build-speed	windows (WARP)	failure	326	check (fmt, clippy, layering)
+39126572550	2026-10-18T12:16:02Z	push	spike/spike-15-build-speed	determinism (Windows vs Linux)	success	22	
+39126280307	2026-10-18T12:11:46Z	push	main	docs (spec-lint)	success	28	
+39126280326	2026-10-18T12:11:46Z	push	main	windows (WARP)	success	1100	
+39126280326	2026-10-18T12:11:46Z	push	main	linux (lavapipe)	success	765	
+39126280326	2026-10-18T12:11:46Z	push	main	determinism (Windows vs Linux)	success	25	
+39124740181	2026-10-18T11:48:48Z	pull_request	change/compact-slot-v2	docs (spec-lint)	success	29	
+39124740116	2026-10-18T11:48:48Z	pull_request	change/compact-slot-v2	windows (WARP)	success	1310	
+39124740116	2026-10-18T11:48:48Z	pull_request	change/compact-slot-v2	linux (lavapipe)	success	762	
+39124740116	2026-10-18T11:48:48Z	pull_request	change/compact-slot-v2	determinism (Windows vs Linux)	success	27	
+39124735310	2026-10-18T11:48:44Z	push	change/compact-slot-v2	docs (spec-lint)	success	21	
+39124735289	2026-10-18T11:48:43Z	push	change/compact-slot-v2	linux (lavapipe)	success	756	
+39124735289	2026-10-18T11:48:43Z	push	change/compact-slot-v2	windows (WARP)	success	941	
+39124735289	2026-10-18T11:48:43Z	push	change/compact-slot-v2	determinism (Windows vs Linux)	success	22	
+39123591799	2026-10-18T11:31:37Z	pull_request	change/shore-ramp-width	linux (lavapipe)	success	764	
+39123591799	2026-10-18T11:31:37Z	pull_request	change/shore-ramp-width	windows (WARP)	success	1307	
+39123591799	2026-10-18T11:31:37Z	pull_request	change/shore-ramp-width	determinism (Windows vs Linux)	success	23	
+39123591787	2026-10-18T11:31:37Z	pull_request	change/shore-ramp-width	docs (spec-lint)	success	24	
+39123588375	2026-10-18T11:31:34Z	push	change/shore-ramp-width	linux (lavapipe)	success	554	
+39123588375	2026-10-18T11:31:34Z	push	change/shore-ramp-width	windows (WARP)	failure	594	test (tiers A+B)
+39123588375	2026-10-18T11:31:34Z	push	change/shore-ramp-width	determinism (Windows vs Linux)	success	20	
+39123170186	2026-10-18T11:25:22Z	push	change/compact-slot-v2	docs (spec-lint)	success	29	
+39123170133	2026-10-18T11:25:22Z	push	change/compact-slot-v2	windows (WARP)	success	1298	
+39123170133	2026-10-18T11:25:22Z	push	change/compact-slot-v2	linux (lavapipe)	success	760	
+39123170133	2026-10-18T11:25:22Z	push	change/compact-slot-v2	determinism (Windows vs Linux)	success	22	
+39121867729	2026-10-18T11:05:59Z	push	main	docs (spec-lint)	success	20	
+39121804259	2026-10-18T11:05:04Z	pull_request	planner/status-0062	docs (spec-lint)	success	28	
+39121800818	2026-10-18T11:05:02Z	push	planner/status-0062	docs (spec-lint)	success	22	
+39121713326	2026-10-18T11:03:44Z	push	main	docs (spec-lint)	success	29	
+39121662673	2026-10-18T11:02:59Z	pull_request	planner/brief-spike-15	docs (spec-lint)	success	27	
+39121659759	2026-10-18T11:02:56Z	push	planner/brief-spike-15	docs (spec-lint)	success	24	
+39121292470	2026-10-18T10:57:31Z	push	change/compact-slot-v2	windows (WARP)	failure	1103	test gpu (tier C, software adapter)
+39121292470	2026-10-18T10:57:31Z	push	change/compact-slot-v2	linux (lavapipe)	failure	794	test gpu (tier C, software adapter)
+39121292470	2026-10-18T10:57:31Z	push	change/compact-slot-v2	determinism (Windows vs Linux)	success	23	
+39121292438	2026-10-18T10:57:31Z	push	change/compact-slot-v2	docs (spec-lint)	success	21	
+39119983397	2026-10-18T10:37:24Z	push	change/compact-slot-v2	docs (spec-lint)	success	26	
+39119983444	2026-10-18T10:37:24Z	push	change/compact-slot-v2	windows (WARP)	failure	1113	test gpu (tier C, software adapter)
+39119983444	2026-10-18T10:37:24Z	push	change/compact-slot-v2	linux (lavapipe)	failure	754	test gpu (tier C, software adapter)
+39119983444	2026-10-18T10:37:24Z	push	change/compact-slot-v2	determinism (Windows vs Linux)	success	26	
+39119814540	2026-10-18T10:34:51Z	push	change/compact-slot-v2	docs (spec-lint)	success	21	
+39119814524	2026-10-18T10:34:51Z	push	change/compact-slot-v2	windows (WARP)	failure	1296	test gpu (tier C, software adapter)
+39119814524	2026-10-18T10:34:51Z	push	change/compact-slot-v2	linux (lavapipe)	failure	528	test gpu (tier C, software adapter)
+39119814524	2026-10-18T10:34:51Z	push	change/compact-slot-v2	determinism (Windows vs Linux)	success	22	
+39119095837	2026-10-18T10:24:02Z	push	main	docs (spec-lint)	success	24	
+39119046957	2026-10-18T10:23:17Z	pull_request	planner/status-0039-0049	docs (spec-lint)	success	26	
+39119043803	2026-10-18T10:23:15Z	push	planner/status-0039-0049	docs (spec-lint)	success	22	
+39117984498	2026-10-18T10:07:02Z	push	change/compact-slot-v2	linux (lavapipe)	failure	753	test gpu (tier C, software adapter)
+39117984498	2026-10-18T10:07:02Z	push	change/compact-slot-v2	windows (WARP)	failure	1345	test gpu (tier C, software adapter)
+39117984498	2026-10-18T10:07:02Z	push	change/compact-slot-v2	determinism (Windows vs Linux)	success	24	
+39116911667	2026-10-18T09:50:24Z	push	change/compact-slot-v2	linux (lavapipe)	failure	754	test gpu (tier C, software adapter)
+39116911667	2026-10-18T09:50:24Z	push	change/compact-slot-v2	windows (WARP)	failure	1312	test gpu (tier C, software adapter)
+39116911667	2026-10-18T09:50:24Z	push	change/compact-slot-v2	determinism (Windows vs Linux)	success	23	
+39116911620	2026-10-18T09:50:23Z	push	change/compact-slot-v2	docs (spec-lint)	success	28	
+39116690768	2026-10-18T09:46:57Z	pull_request	change/compact-slot-v2	docs (spec-lint)	success	34	
+39116690696	2026-10-18T09:46:56Z	pull_request	change/compact-slot-v2	linux (lavapipe)	failure	540	test gpu (tier C, software adapter)
+39116690696	2026-10-18T09:46:56Z	pull_request	change/compact-slot-v2	windows (WARP)	failure	1125	test gpu (tier C, software adapter)
+39116690696	2026-10-18T09:46:56Z	pull_request	change/compact-slot-v2	determinism (Windows vs Linux)	success	27	
+39116688402	2026-10-18T09:46:54Z	push	change/compact-slot-v2	docs (spec-lint)	success	27	
+39116688372	2026-10-18T09:46:54Z	push	change/compact-slot-v2	linux (lavapipe)	failure	771	test gpu (tier C, software adapter)
+39116688372	2026-10-18T09:46:54Z	push	change/compact-slot-v2	windows (WARP)	failure	1108	test gpu (tier C, software adapter)
+39116688372	2026-10-18T09:46:54Z	push	change/compact-slot-v2	determinism (Windows vs Linux)	success	25	
+39115645700	2026-10-18T09:31:04Z	pull_request	change/shore-ramp-width	docs (spec-lint)	success	29	
+39115645697	2026-10-18T09:31:04Z	pull_request	change/shore-ramp-width	linux (lavapipe)	failure	769	test gpu (tier C, software adapter)
+39115645697	2026-10-18T09:31:04Z	pull_request	change/shore-ramp-width	windows (WARP)	failure	1299	test gpu (tier C, software adapter)
+39115645697	2026-10-18T09:31:04Z	pull_request	change/shore-ramp-width	determinism (Windows vs Linux)	success	30	
+39115642649	2026-10-18T09:31:02Z	push	change/shore-ramp-width	linux (lavapipe)	failure	692	test gpu (tier C, software adapter)
+39115642649	2026-10-18T09:31:02Z	push	change/shore-ramp-width	windows (WARP)	failure	915	test gpu (tier C, software adapter)
+39115642649	2026-10-18T09:31:02Z	push	change/shore-ramp-width	determinism (Windows vs Linux)	success	25	
+39115642765	2026-10-18T09:31:02Z	push	change/shore-ramp-width	docs (spec-lint)	success	26	
+39114626030	2026-10-18T09:15:34Z	push	main	docs (spec-lint)	success	28	
+39114568681	2026-10-18T09:14:45Z	pull_request	planner/m5-gate	docs (spec-lint)	success	26	
+39114569317	2026-10-18T09:14:45Z	push	main	docs (spec-lint)	success	28	
+39114569282	2026-10-18T09:14:45Z	push	main	windows (WARP)	success	1146	
+39114569282	2026-10-18T09:14:45Z	push	main	linux (lavapipe)	success	599	
+39114569282	2026-10-18T09:14:45Z	push	main	determinism (Windows vs Linux)	success	25	
+39114565233	2026-10-18T09:14:41Z	push	planner/m5-gate	docs (spec-lint)	success	28	
+39114541413	2026-10-18T09:14:19Z	pull_request	change/shore-ramp-width	docs (spec-lint)	success	29	
+39114541229	2026-10-18T09:14:18Z	pull_request	change/shore-ramp-width	windows (WARP)	failure	1318	test gpu (tier C, software adapter)
+39114541229	2026-10-18T09:14:18Z	pull_request	change/shore-ramp-width	linux (lavapipe)	failure	776	test gpu (tier C, software adapter)
+39114541229	2026-10-18T09:14:18Z	pull_request	change/shore-ramp-width	determinism (Windows vs Linux)	success	18	
+39114538071	2026-10-18T09:14:16Z	push	change/shore-ramp-width	docs (spec-lint)	success	33	
+39114538099	2026-10-18T09:14:16Z	push	change/shore-ramp-width	linux (lavapipe)	failure	749	test gpu (tier C, software adapter)
+39114538099	2026-10-18T09:14:16Z	push	change/shore-ramp-width	windows (WARP)	failure	1332	test gpu (tier C, software adapter)
+39114538099	2026-10-18T09:14:16Z	push	change/shore-ramp-width	determinism (Windows vs Linux)	success	23	
+39113254384	2026-10-18T08:54:24Z	pull_request	change/render-floor-3	docs (spec-lint)	success	20	
+39113252295	2026-10-18T08:54:22Z	pull_request	change/compact-slot-v2	docs (spec-lint)	success	25	
+39113251258	2026-10-18T08:54:21Z	push	change/render-floor-3	docs (spec-lint)	success	25	
+39113248737	2026-10-18T08:54:18Z	push	change/compact-slot-v2	docs (spec-lint)	success	28	
+39113111160	2026-10-18T08:52:10Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	22	
+39113107089	2026-10-18T08:52:07Z	pull_request	change/render-floor-3	docs (spec-lint)	success	28	
+39113107152	2026-10-18T08:52:07Z	push	change/remove-vertex-render-path	docs (spec-lint)	success	25	
+39113104304	2026-10-18T08:52:04Z	push	change/render-floor-3	docs (spec-lint)	success	26	
+39113091640	2026-10-18T08:51:53Z	pull_request	change/stream-smoke-liveness	docs (spec-lint)	success	27	
+39113091659	2026-10-18T08:51:53Z	pull_request	change/stream-smoke-liveness	linux (lavapipe)	success	500	
+39113091659	2026-10-18T08:51:53Z	pull_request	change/stream-smoke-liveness	windows (WARP)	success	1306	
+39113091659	2026-10-18T08:51:53Z	pull_request	change/stream-smoke-liveness	determinism (Windows vs Linux)	success	24	
+39113088628	2026-10-18T08:51:51Z	push	change/stream-smoke-liveness	docs (spec-lint)	success	26	
+39113058939	2026-10-18T08:51:23Z	pull_request	change/render-floor-3	docs (spec-lint)	success	25	
+39113056594	2026-10-18T08:51:21Z	push	change/render-floor-3	docs (spec-lint)	success	26	
+39113037258	2026-10-18T08:51:03Z	pull_request	change/compact-slot-v2	docs (spec-lint)	success	29	
+39113034873	2026-10-18T08:51:01Z	push	change/compact-slot-v2	docs (spec-lint)	success	29	
+39112927871	2026-10-18T08:49:22Z	pull_request	change/stream-smoke-liveness	docs (spec-lint)	success	30	
+39112927874	2026-10-18T08:49:22Z	pull_request	change/stream-smoke-liveness	windows (WARP)	success	1175	
+39112927874	2026-10-18T08:49:22Z	pull_request	change/stream-smoke-liveness	linux (lavapipe)	success	764	
+39112927874	2026-10-18T08:49:22Z	pull_request	change/stream-smoke-liveness	determinism (Windows vs Linux)	success	25	
+39112924900	2026-10-18T08:49:19Z	push	change/stream-smoke-liveness	docs (spec-lint)	success	25	
+39112924875	2026-10-18T08:49:19Z	push	change/stream-smoke-liveness	linux (lavapipe)	success	771	
+39112924875	2026-10-18T08:49:19Z	push	change/stream-smoke-liveness	windows (WARP)	success	1340	
+39112924875	2026-10-18T08:49:19Z	push	change/stream-smoke-liveness	determinism (Windows vs Linux)	success	20	
+39112750366	2026-10-18T08:46:32Z	push	main	windows (WARP)	success	1310	
+39112750366	2026-10-18T08:46:32Z	push	main	linux (lavapipe)	success	753	
+39112750366	2026-10-18T08:46:32Z	push	main	determinism (Windows vs Linux)	success	21	
+39112750389	2026-10-18T08:46:32Z	push	main	docs (spec-lint)	success	29	
+39112661251	2026-10-18T08:45:11Z	push	main	docs (spec-lint)	success	29	
+39112621928	2026-10-18T08:44:38Z	pull_request	planner/adr-0063	docs (spec-lint)	success	24	
+39112619424	2026-10-18T08:44:35Z	push	planner/adr-0063	docs (spec-lint)	success	24	
+39112535521	2026-10-18T08:43:17Z	pull_request	change/remove-vertex-render-path	docs (spec-lint)	success	27	
+39112533212	2026-10-18T08:43:15Z	push	change/remove-vertex-render-path	docs (spec-lint)	success	25	
+39112531531	2026-10-18T08:43:13Z	pull_request	change/render-floor-3	docs (spec-lint)	success	26	
+39112527596	2026-10-18T08:43:10Z	push	change/render-floor-3	docs (spec-lint)	success	20	
+39112525734	2026-10-18T08:43:08Z	pull_request	change/compact-slot-v2	docs (spec-lint)	success	28	
+39112522619	2026-10-18T08:43:05Z	push	change/compact-slot-v2	docs (spec-lint)	success	26	
+39111731970	2026-10-18T08:30:49Z	push	main	docs (spec-lint)	success	25	
+39111676235	2026-10-18T08:30:04Z	pull_request	planner/adr-0062	docs (spec-lint)	success	26	
+39111673478	2026-10-18T08:30:02Z	push	planner/adr-0062	docs (spec-lint)	success	24	
+39110429224	2026-10-18T08:10:31Z	pull_request	change/bound-tests-enforced	docs (spec-lint)	success	22	
+39110429233	2026-10-18T08:10:31Z	pull_request	change/bound-tests-enforced	windows (WARP)	success	895	
+39110429233	2026-10-18T08:10:31Z	pull_request	change/bound-tests-enforced	linux (lavapipe)	success	531	
+39110429233	2026-10-18T08:10:31Z	pull_request	change/bound-tests-enforced	determinism (Windows vs Linux)	success	22	
+39110426741	2026-10-18T08:10:28Z	push	change/bound-tests-enforced	docs (spec-lint)	success	25	
+39110426720	2026-10-18T08:10:28Z	push	change/bound-tests-enforced	linux (lavapipe)	success	527	
+39110426720	2026-10-18T08:10:28Z	push	change/bound-tests-enforced	windows (WARP)	success	1142	
+39110426720	2026-10-18T08:10:28Z	push	change/bound-tests-enforced	determinism (Windows vs Linux)	success	24	
+39110329636	2026-10-18T08:08:59Z	push	main	docs (spec-lint)	success	26	
+39110285638	2026-10-18T08:08:14Z	pull_request	planner/adr-0061-docs	docs (spec-lint)	success	28	
+39110282389	2026-10-18T08:08:12Z	push	planner/adr-0061-docs	docs (spec-lint)	success	20	
+39110241620	2026-10-18T08:07:33Z	push	main	docs (spec-lint)	success	25	
+39110241581	2026-10-18T08:07:33Z	push	main	linux (lavapipe)	success	691	
+39110241581	2026-10-18T08:07:33Z	push	main	windows (WARP)	success	1308	
+39110241581	2026-10-18T08:07:33Z	push	main	determinism (Windows vs Linux)	success	24	
+39109379573	2026-10-18T07:53:50Z	push	main	docs (spec-lint)	success	26	
+39109379539	2026-10-18T07:53:50Z	push	main	windows (WARP)	success	1331	
+39109379539	2026-10-18T07:53:50Z	push	main	linux (lavapipe)	success	647	
+39109379539	2026-10-18T07:53:50Z	push	main	determinism (Windows vs Linux)	success	23	
+39109289916	2026-10-18T07:52:19Z	push	main	linux (lavapipe)	success	761	
+39109289916	2026-10-18T07:52:19Z	push	main	windows (WARP)	failure	578	test (tiers A+B)
+39109289916	2026-10-18T07:52:19Z	push	main	determinism (Windows vs Linux)	success	22	
+39109289876	2026-10-18T07:52:19Z	push	main	docs (spec-lint)	success	24	
+39109210423	2026-10-18T07:51:02Z	pull_request	change/goldens-after-m5	linux (lavapipe)	success	773	
+39109210423	2026-10-18T07:51:02Z	pull_request	change/goldens-after-m5	windows (WARP)	success	916	
+39109210423	2026-10-18T07:51:02Z	pull_request	change/goldens-after-m5	determinism (Windows vs Linux)	success	28	
+39109209814	2026-10-18T07:51:01Z	pull_request	change/goldens-after-m5	docs (spec-lint)	success	23	
+39109206982	2026-10-18T07:50:58Z	push	change/goldens-after-m5	docs (spec-lint)	success	27	
+39109056237	2026-10-18T07:48:31Z	pull_request	change/goldens-after-m5	docs (spec-lint)	success	26	
+39109056270	2026-10-18T07:48:31Z	pull_request	change/goldens-after-m5	windows (WARP)	success	1335	
+39109056270	2026-10-18T07:48:31Z	pull_request	change/goldens-after-m5	linux (lavapipe)	success	781	
+39109056270	2026-10-18T07:48:31Z	pull_request	change/goldens-after-m5	determinism (Windows vs Linux)	success	26	
+39109053407	2026-10-18T07:48:28Z	push	change/goldens-after-m5	docs (spec-lint)	success	27	
+39109053436	2026-10-18T07:48:28Z	push	change/goldens-after-m5	linux (lavapipe)	success	758	
+39109053436	2026-10-18T07:48:28Z	push	change/goldens-after-m5	windows (WARP)	success	1324	
+39109053436	2026-10-18T07:48:28Z	push	change/goldens-after-m5	determinism (Windows vs Linux)	success	23	
+39108753120	2026-10-18T07:43:45Z	push	main	docs (spec-lint)	success	30	
+39108706189	2026-10-18T07:42:59Z	pull_request	planner/adr-0061	docs (spec-lint)	success	28	
+39108703713	2026-10-18T07:42:56Z	push	planner/adr-0061	docs (spec-lint)	success	21	
+39107957117	2026-10-18T07:31:02Z	pull_request	change/water-exact-cut-flight-log	windows (WARP)	success	1316	
+39107957117	2026-10-18T07:31:02Z	pull_request	change/water-exact-cut-flight-log	linux (lavapipe)	success	768	
+39107957117	2026-10-18T07:31:02Z	pull_request	change/water-exact-cut-flight-log	determinism (Windows vs Linux)	success	20	
+39107957163	2026-10-18T07:31:02Z	pull_request	change/water-exact-cut-flight-log	docs (spec-lint)	success	29	
+39107954458	2026-10-18T07:30:59Z	push	change/water-exact-cut-flight-log	linux (lavapipe)	success	702	
+39107954458	2026-10-18T07:30:59Z	push	change/water-exact-cut-flight-log	windows (WARP)	success	936	
+39107954458	2026-10-18T07:30:59Z	push	change/water-exact-cut-flight-log	determinism (Windows vs Linux)	success	21	
+39107954443	2026-10-18T07:30:59Z	push	change/water-exact-cut-flight-log	docs (spec-lint)	success	25	
+39107844511	2026-10-18T07:29:25Z	pull_request	change/gpu-test-timeout	windows (WARP)	success	1328	
+39107844511	2026-10-18T07:29:25Z	pull_request	change/gpu-test-timeout	linux (lavapipe)	success	539	
+39107844511	2026-10-18T07:29:25Z	pull_request	change/gpu-test-timeout	determinism (Windows vs Linux)	success	25	
+39107844550	2026-10-18T07:29:25Z	pull_request	change/gpu-test-timeout	docs (spec-lint)	success	25	
+39107841422	2026-10-18T07:29:22Z	push	change/gpu-test-timeout	windows (WARP)	success	1302	
+39107841422	2026-10-18T07:29:22Z	push	change/gpu-test-timeout	linux (lavapipe)	success	787	
+39107841422	2026-10-18T07:29:22Z	push	change/gpu-test-timeout	determinism (Windows vs Linux)	success	23	
+39107841503	2026-10-18T07:29:22Z	push	change/gpu-test-timeout	docs (spec-lint)	success	26	
+39107499390	2026-10-18T07:23:47Z	push	main	linux (lavapipe)	success	628	
+39107499390	2026-10-18T07:23:47Z	push	main	windows (WARP)	success	1339	
+39107499390	2026-10-18T07:23:47Z	push	main	determinism (Windows vs Linux)	success	20	
+39107499387	2026-10-18T07:23:47Z	push	main	docs (spec-lint)	success	24	
+39106718864	2026-10-18T07:11:11Z	push	main	docs (spec-lint)	success	29	
+39106686340	2026-10-18T07:10:39Z	pull_request	planner/m5-verdict	docs (spec-lint)	success	21	
+39106667927	2026-10-18T07:10:21Z	push	planner/m5-verdict	docs (spec-lint)	success	28	
+39106245977	2026-10-18T07:03:22Z	push	main	windows (WARP)	failure	575	test (tiers A+B)
+39106245977	2026-10-18T07:03:22Z	push	main	linux (lavapipe)	success	637	
+39106245977	2026-10-18T07:03:22Z	push	main	determinism (Windows vs Linux)	success	25	
+39106245897	2026-10-18T07:03:22Z	push	main	docs (spec-lint)	success	26	
+39106116172	2026-10-18T07:01:14Z	pull_request	change/water-exact-cut-lit-paths	docs (spec-lint)	success	20	
+39106116208	2026-10-18T07:01:14Z	pull_request	change/water-exact-cut-lit-paths	linux (lavapipe)	success	765	
+39106116208	2026-10-18T07:01:14Z	pull_request	change/water-exact-cut-lit-paths	windows (WARP)	success	1301	
+39106116208	2026-10-18T07:01:14Z	pull_request	change/water-exact-cut-lit-paths	determinism (Windows vs Linux)	success	22	
+39106102567	2026-10-18T07:01:02Z	push	change/water-exact-cut-lit-paths	docs (spec-lint)	success	28	
+39106102584	2026-10-18T07:01:02Z	push	change/water-exact-cut-lit-paths	windows (WARP)	success	1095	
+39106102584	2026-10-18T07:01:02Z	push	change/water-exact-cut-lit-paths	linux (lavapipe)	success	620	
+39106102584	2026-10-18T07:01:02Z	push	change/water-exact-cut-lit-paths	determinism (Windows vs Linux)	success	24	
+39104899145	2026-10-18T06:40:52Z	pull_request	change/power-capped-clock	windows (WARP)	success	1305	
+39104899145	2026-10-18T06:40:52Z	pull_request	change/power-capped-clock	linux (lavapipe)	success	764	
+39104899145	2026-10-18T06:40:52Z	pull_request	change/power-capped-clock	determinism (Windows vs Linux)	success	21	
+39104899110	2026-10-18T06:40:52Z	pull_request	change/power-capped-clock	docs (spec-lint)	success	31	
+39104897143	2026-10-18T06:40:50Z	push	change/power-capped-clock	linux (lavapipe)	success	501	
+39104897143	2026-10-18T06:40:50Z	push	change/power-capped-clock	windows (WARP)	success	1001	
+39104897143	2026-10-18T06:40:50Z	push	change/power-capped-clock	determinism (Windows vs Linux)	success	23	
+39104654546	2026-10-18T06:36:43Z	push	main	docs (spec-lint)	success	24	
+39104634588	2026-10-18T06:36:21Z	push	main	windows (WARP)	success	1303	
+39104634588	2026-10-18T06:36:21Z	push	main	linux (lavapipe)	success	767	
+39104634588	2026-10-18T06:36:21Z	push	main	determinism (Windows vs Linux)	success	29	
+39104634589	2026-10-18T06:36:21Z	push	main	docs (spec-lint)	success	24	
+39104589925	2026-10-18T06:35:37Z	pull_request	docs/perf-window-10	docs (spec-lint)	success	29	
+39104587231	2026-10-18T06:35:34Z	push	docs/perf-window-10	docs (spec-lint)	success	25	
+39104577751	2026-10-18T06:35:25Z	pull_request	docs/perf-window-10	docs (spec-lint)	success	22	
+39104574636	2026-10-18T06:35:22Z	push	docs/perf-window-10	docs (spec-lint)	success	31	
+39103857371	2026-10-18T06:23:20Z	push	main	windows (WARP)	failure	573	test (tiers A+B)
+39103857371	2026-10-18T06:23:20Z	push	main	linux (lavapipe)	success	747	
+39103857371	2026-10-18T06:23:20Z	push	main	determinism (Windows vs Linux)	success	26	
+39103857370	2026-10-18T06:23:20Z	push	main	docs (spec-lint)	success	28	
+39103224330	2026-10-18T06:12:33Z	pull_request	change/power-capped-clock	docs (spec-lint)	success	30	
+39103224386	2026-10-18T06:12:33Z	pull_request	change/power-capped-clock	windows (WARP)	success	1328	
+39103224386	2026-10-18T06:12:33Z	pull_request	change/power-capped-clock	linux (lavapipe)	success	760	
+39103224386	2026-10-18T06:12:33Z	pull_request	change/power-capped-clock	determinism (Windows vs Linux)	success	25	
+39103221481	2026-10-18T06:12:31Z	push	change/power-capped-clock	windows (WARP)	success	1276	
+39103221481	2026-10-18T06:12:31Z	push	change/power-capped-clock	linux (lavapipe)	success	742	
+39103221481	2026-10-18T06:12:31Z	push	change/power-capped-clock	determinism (Windows vs Linux)	success	26	
+39103221486	2026-10-18T06:12:31Z	push	change/power-capped-clock	docs (spec-lint)	success	29	
+39102868959	2026-10-18T06:06:32Z	pull_request	change/shore-capture-pr	windows (WARP)	success	975	
+39102868959	2026-10-18T06:06:32Z	pull_request	change/shore-capture-pr	linux (lavapipe)	success	752	
+39102868959	2026-10-18T06:06:32Z	pull_request	change/shore-capture-pr	determinism (Windows vs Linux)	success	23	
+39102868911	2026-10-18T06:06:32Z	pull_request	change/shore-capture-pr	docs (spec-lint)	success	26	
+39102866103	2026-10-18T06:06:29Z	push	change/shore-capture-pr	windows (WARP)	success	931	
+39102866103	2026-10-18T06:06:29Z	push	change/shore-capture-pr	linux (lavapipe)	success	779	
+39102866103	2026-10-18T06:06:29Z	push	change/shore-capture-pr	determinism (Windows vs Linux)	success	22	
+39102866086	2026-10-18T06:06:29Z	push	change/shore-capture-pr	docs (spec-lint)	success	25	
+39102704869	2026-10-18T06:03:49Z	push	main	docs (spec-lint)	success	25	
+39102662162	2026-10-18T06:03:06Z	pull_request	planner/adr-0060	docs (spec-lint)	success	30	
+39102651948	2026-10-18T06:02:56Z	push	planner/adr-0060	docs (spec-lint)	success	25	
+39102484266	2026-10-18T06:00:17Z	pull_request	change/water-exact-dry-tile-tests	docs (spec-lint)	success	25	
+39102484164	2026-10-18T06:00:16Z	pull_request	change/water-exact-dry-tile-tests	windows (WARP)	success	1327	
+39102484164	2026-10-18T06:00:16Z	pull_request	change/water-exact-dry-tile-tests	linux (lavapipe)	success	680	
+39102484164	2026-10-18T06:00:16Z	pull_request	change/water-exact-dry-tile-tests	determinism (Windows vs Linux)	success	20	
+39102475112	2026-10-18T06:00:08Z	push	change/water-exact-dry-tile-tests	windows (WARP)	success	1287	
+39102475112	2026-10-18T06:00:08Z	push	change/water-exact-dry-tile-tests	linux (lavapipe)	success	754	
+39102475112	2026-10-18T06:00:08Z	push	change/water-exact-dry-tile-tests	determinism (Windows vs Linux)	success	26	
+39102475083	2026-10-18T06:00:08Z	push	change/water-exact-dry-tile-tests	docs (spec-lint)	success	24	
+39102272300	2026-10-18T05:56:28Z	push	main	linux (lavapipe)	success	758	
+39102272300	2026-10-18T05:56:28Z	push	main	windows (WARP)	success	1272	
+39102272300	2026-10-18T05:56:28Z	push	main	determinism (Windows vs Linux)	success	24	
+39102272096	2026-10-18T05:56:28Z	push	main	docs (spec-lint)	success	31	
+39100969596	2026-10-18T05:33:39Z	pull_request	change/water-exact-dry-tile	linux (lavapipe)	success	754	
+39100969596	2026-10-18T05:33:39Z	pull_request	change/water-exact-dry-tile	windows (WARP)	success	1289	
+39100969596	2026-10-18T05:33:39Z	pull_request	change/water-exact-dry-tile	determinism (Windows vs Linux)	success	49	
+39100969611	2026-10-18T05:33:39Z	pull_request	change/water-exact-dry-tile	docs (spec-lint)	success	28	
+39100967506	2026-10-18T05:33:36Z	push	change/water-exact-dry-tile	windows (WARP)	success	1282	
+39100967506	2026-10-18T05:33:36Z	push	change/water-exact-dry-tile	linux (lavapipe)	success	748	
+39100967506	2026-10-18T05:33:36Z	push	change/water-exact-dry-tile	determinism (Windows vs Linux)	success	26	
+39100845405	2026-10-18T05:31:27Z	push	main	docs (spec-lint)	success	26	
+39100789613	2026-10-18T05:30:33Z	pull_request	change/shore-ramp-bless-agenda-2	docs (spec-lint)	success	30	
+39100786414	2026-10-18T05:30:30Z	push	change/shore-ramp-bless-agenda-2	docs (spec-lint)	success	30	
+39100769286	2026-10-18T05:30:16Z	pull_request	change/shore-ramp-width	linux (lavapipe)	failure	529	test gpu (tier C, software adapter)
+39100769286	2026-10-18T05:30:16Z	pull_request	change/shore-ramp-width	windows (WARP)	failure	1031	test gpu (tier C, software adapter)
+39100769286	2026-10-18T05:30:16Z	pull_request	change/shore-ramp-width	determinism (Windows vs Linux)	success	21	
+39100769296	2026-10-18T05:30:16Z	pull_request	change/shore-ramp-width	docs (spec-lint)	success	25	
+39100766282	2026-10-18T05:30:13Z	push	change/shore-ramp-width	linux (lavapipe)	failure	689	test gpu (tier C, software adapter)
+39100766282	2026-10-18T05:30:13Z	push	change/shore-ramp-width	windows (WARP)	failure	1056	test gpu (tier C, software adapter)
+39100766282	2026-10-18T05:30:13Z	push	change/shore-ramp-width	determinism (Windows vs Linux)	success	26	
+39100766288	2026-10-18T05:30:13Z	push	change/shore-ramp-width	docs (spec-lint)	success	24	
+39099804728	2026-10-18T05:13:17Z	pull_request	change/water-exact-dry-tile	linux (lavapipe)	success	724	
+39099804728	2026-10-18T05:13:17Z	pull_request	change/water-exact-dry-tile	windows (WARP)	success	1074	
+39099804728	2026-10-18T05:13:17Z	pull_request	change/water-exact-dry-tile	determinism (Windows vs Linux)	success	24	
+39099804706	2026-10-18T05:13:17Z	pull_request	change/water-exact-dry-tile	docs (spec-lint)	success	24	
+39099801738	2026-10-18T05:13:14Z	push	change/water-exact-dry-tile	windows (WARP)	failure	1107	test gpu (tier C, software adapter)
+39099801738	2026-10-18T05:13:14Z	push	change/water-exact-dry-tile	linux (lavapipe)	success	501	
+39099801738	2026-10-18T05:13:14Z	push	change/water-exact-dry-tile	determinism (Windows vs Linux)	success	25	
+39099801735	2026-10-18T05:13:14Z	push	change/water-exact-dry-tile	docs (spec-lint)	success	24	
+39099050248	2026-10-18T05:00:33Z	pull_request	change/shore-ramp-width	docs (spec-lint)	success	23	
+39099050211	2026-10-18T05:00:33Z	pull_request	change/shore-ramp-width	linux (lavapipe)	failure	699	test gpu (tier C, software adapter)
+39099050211	2026-10-18T05:00:33Z	pull_request	change/shore-ramp-width	windows (WARP)	failure	1301	test gpu (tier C, software adapter)
+39099050211	2026-10-18T05:00:33Z	pull_request	change/shore-ramp-width	determinism (Windows vs Linux)	success	24	
+39099045300	2026-10-18T05:00:29Z	push	change/shore-ramp-width	docs (spec-lint)	success	24	
+39099045244	2026-10-18T05:00:29Z	push	change/shore-ramp-width	windows (WARP)	failure	667	test gpu (tier C, software adapter)
+39099045244	2026-10-18T05:00:29Z	push	change/shore-ramp-width	linux (lavapipe)	failure	371	test gpu (tier C, software adapter)
+39099045244	2026-10-18T05:00:29Z	push	change/shore-ramp-width	determinism (Windows vs Linux)	success	20	
+39099018614	2026-10-18T05:00:07Z	push	main	docs (spec-lint)	success	23	
+39099018601	2026-10-18T05:00:07Z	push	main	windows (WARP)	success	1227	
+39099018601	2026-10-18T05:00:07Z	push	main	linux (lavapipe)	success	689	
+39099018601	2026-10-18T05:00:07Z	push	main	determinism (Windows vs Linux)	success	23	
+39098468924	2026-10-18T04:50:11Z	push	main	docs (spec-lint)	success	30	
+39098425719	2026-10-18T04:49:28Z	pull_request	change/archive-drop-design-tasks	docs (spec-lint)	success	24	
+39098421802	2026-10-18T04:49:24Z	push	change/archive-drop-design-tasks	docs (spec-lint)	success	23	
+39097803929	2026-10-18T04:38:39Z	pull_request	change/gpu-tier-no-fail-fast	linux (lavapipe)	success	582	
+39097803929	2026-10-18T04:38:39Z	pull_request	change/gpu-tier-no-fail-fast	windows (WARP)	success	1227	
+39097803929	2026-10-18T04:38:39Z	pull_request	change/gpu-tier-no-fail-fast	determinism (Windows vs Linux)	success	26	
+39097803949	2026-10-18T04:38:39Z	pull_request	change/gpu-tier-no-fail-fast	docs (spec-lint)	success	29	
+39097801064	2026-10-18T04:38:36Z	push	change/gpu-tier-no-fail-fast	linux (lavapipe)	success	587	
+39097801064	2026-10-18T04:38:36Z	push	change/gpu-tier-no-fail-fast	windows (WARP)	success	1221	
+39097801064	2026-10-18T04:38:36Z	push	change/gpu-tier-no-fail-fast	determinism (Windows vs Linux)	success	28	
+39097801106	2026-10-18T04:38:36Z	push	change/gpu-tier-no-fail-fast	docs (spec-lint)	success	29	
+39097724793	2026-10-18T04:37:14Z	push	main	docs (spec-lint)	success	29	
+39097680596	2026-10-18T04:36:29Z	pull_request	change/shore-ramp-bless-agenda	docs (spec-lint)	success	23	
+39097678554	2026-10-18T04:36:26Z	push	change/shore-ramp-bless-agenda	docs (spec-lint)	success	24	
+39097402446	2026-10-18T04:31:38Z	push	main	windows (WARP)	success	1213	
+39097402446	2026-10-18T04:31:38Z	push	main	linux (lavapipe)	success	710	
+39097402446	2026-10-18T04:31:38Z	push	main	determinism (Windows vs Linux)	success	28	
+39097402454	2026-10-18T04:31:38Z	push	main	docs (spec-lint)	success	27	
+39096129719	2026-10-18T04:09:44Z	pull_request	change/real-gpu-parallelism-cap	docs (spec-lint)	success	29	
+39096129728	2026-10-18T04:09:44Z	pull_request	change/real-gpu-parallelism-cap	linux (lavapipe)	success	571	
+39096129728	2026-10-18T04:09:44Z	pull_request	change/real-gpu-parallelism-cap	windows (WARP)	success	1264	
+39096129728	2026-10-18T04:09:44Z	pull_request	change/real-gpu-parallelism-cap	determinism (Windows vs Linux)	success	26	
+39096126903	2026-10-18T04:09:41Z	push	change/real-gpu-parallelism-cap	linux (lavapipe)	success	680	
+39096126903	2026-10-18T04:09:41Z	push	change/real-gpu-parallelism-cap	windows (WARP)	success	882	
+39096126903	2026-10-18T04:09:41Z	push	change/real-gpu-parallelism-cap	determinism (Windows vs Linux)	success	23	
+39096095507	2026-10-18T04:09:10Z	push	main	docs (spec-lint)	success	29	
+39096013787	2026-10-18T04:07:41Z	push	change/real-gpu-parallelism-cap	docs (spec-lint)	success	24	
+39096013781	2026-10-18T04:07:41Z	push	change/real-gpu-parallelism-cap	windows (WARP)	success	1224	
+39096013781	2026-10-18T04:07:41Z	push	change/real-gpu-parallelism-cap	linux (lavapipe)	success	706	
+39096013781	2026-10-18T04:07:41Z	push	change/real-gpu-parallelism-cap	determinism (Windows vs Linux)	success	20	
+39095488140	2026-10-18T03:58:44Z	pull_request	change/m5-gate-report	docs (spec-lint)	success	25	
+39095485500	2026-10-18T03:58:41Z	push	change/m5-gate-report	docs (spec-lint)	success	26	
+39095485547	2026-10-18T03:58:41Z	push	change/m5-gate-report	linux (lavapipe)	success	684	
+39095485547	2026-10-18T03:58:41Z	push	change/m5-gate-report	windows (WARP)	success	944	
+39095485547	2026-10-18T03:58:41Z	push	change/m5-gate-report	determinism (Windows vs Linux)	success	22	
+39094949838	2026-10-18T03:49:12Z	pull_request	change/shore-ramp-width	windows (WARP)	failure	966	test gpu (tier C, software adapter)
+39094949838	2026-10-18T03:49:12Z	pull_request	change/shore-ramp-width	linux (lavapipe)	failure	447	test gpu (tier C, software adapter)
+39094949838	2026-10-18T03:49:12Z	pull_request	change/shore-ramp-width	determinism (Windows vs Linux)	success	27	
+39094949864	2026-10-18T03:49:12Z	pull_request	change/shore-ramp-width	docs (spec-lint)	success	24	
+39094947506	2026-10-18T03:49:09Z	push	change/shore-ramp-width	windows (WARP)	failure	659	test gpu (tier C, software adapter)
+39094947506	2026-10-18T03:49:09Z	push	change/shore-ramp-width	linux (lavapipe)	failure	532	test gpu (tier C, software adapter)
+39094947506	2026-10-18T03:49:09Z	push	change/shore-ramp-width	determinism (Windows vs Linux)	success	23	
+39094947511	2026-10-18T03:49:09Z	push	change/shore-ramp-width	docs (spec-lint)	success	24	
+39093947996	2026-10-18T03:31:49Z	push	main	docs (spec-lint)	success	26	
+39093874045	2026-10-18T03:30:36Z	push	main	docs (spec-lint)	success	29	
+39093874027	2026-10-18T03:30:36Z	push	main	linux (lavapipe)	success	482	
+39093874027	2026-10-18T03:30:36Z	push	main	windows (WARP)	success	1042	
+39093874027	2026-10-18T03:30:36Z	push	main	determinism (Windows vs Linux)	success	27	
+39093567459	2026-10-18T03:25:28Z	pull_request	docs/water-occlusion-estimate	docs (spec-lint)	success	24	
+39093565547	2026-10-18T03:25:26Z	push	docs/water-occlusion-estimate	docs (spec-lint)	success	29	
+39092913001	2026-10-18T03:14:27Z	push	main	docs (spec-lint)	success	29	
+39092868965	2026-10-18T03:13:40Z	pull_request	planner/gate-agenda-2	docs (spec-lint)	success	28	
+39092864367	2026-10-18T03:13:35Z	push	planner/gate-agenda-2	docs (spec-lint)	success	28	
+39092788819	2026-10-18T03:12:16Z	pull_request	change/accept-rederives-verdicts	windows (WARP)	success	1018	
+39092788819	2026-10-18T03:12:16Z	pull_request	change/accept-rederives-verdicts	linux (lavapipe)	success	688	
+39092788819	2026-10-18T03:12:16Z	pull_request	change/accept-rederives-verdicts	determinism (Windows vs Linux)	success	27	
+39092789050	2026-10-18T03:12:16Z	pull_request	change/accept-rederives-verdicts	docs (spec-lint)	success	24	
+39092785419	2026-10-18T03:12:13Z	push	change/accept-rederives-verdicts	windows (WARP)	success	1038	
+39092785419	2026-10-18T03:12:13Z	push	change/accept-rederives-verdicts	linux (lavapipe)	success	651	
+39092785419	2026-10-18T03:12:13Z	push	change/accept-rederives-verdicts	determinism (Windows vs Linux)	success	26	
+39092785387	2026-10-18T03:12:13Z	push	change/accept-rederives-verdicts	docs (spec-lint)	success	27	
+39092705880	2026-10-18T03:10:52Z	push	main	linux (lavapipe)	success	681	
+39092705880	2026-10-18T03:10:52Z	push	main	windows (WARP)	success	1031	
+39092705880	2026-10-18T03:10:52Z	push	main	determinism (Windows vs Linux)	success	27	
+39092705799	2026-10-18T03:10:52Z	push	main	docs (spec-lint)	success	26	
+39091418549	2026-10-18T02:49:01Z	pull_request	change/noise-floor	docs (spec-lint)	success	30	
+39091418145	2026-10-18T02:49:00Z	pull_request	change/noise-floor	windows (WARP)	success	1260	
+39091418145	2026-10-18T02:49:00Z	pull_request	change/noise-floor	linux (lavapipe)	success	692	
+39091418145	2026-10-18T02:49:00Z	pull_request	change/noise-floor	determinism (Windows vs Linux)	success	22	
+39091413625	2026-10-18T02:48:56Z	push	change/noise-floor	docs (spec-lint)	success	20	
+39091413642	2026-10-18T02:48:56Z	push	change/noise-floor	linux (lavapipe)	success	694	
+39091413642	2026-10-18T02:48:56Z	push	change/noise-floor	windows (WARP)	success	874	
+39091413642	2026-10-18T02:48:56Z	push	change/noise-floor	determinism (Windows vs Linux)	success	23	
+39091019982	2026-10-18T02:42:00Z	push	main	docs (spec-lint)	success	32	
+39090981951	2026-10-18T02:41:22Z	pull_request	docs/perf-window-9	docs (spec-lint)	success	20	
+39090979721	2026-10-18T02:41:19Z	push	docs/perf-window-9	docs (spec-lint)	success	25	
+39089006928	2026-10-18T02:08:22Z	push	main	docs (spec-lint)	success	26	
+39088967530	2026-10-18T02:07:43Z	pull_request	docs/device-loss-update	docs (spec-lint)	success	21	
+39088955897	2026-10-18T02:07:30Z	push	docs/device-loss-update	docs (spec-lint)	success	22	
+39088059139	2026-10-18T01:52:45Z	push	main	docs (spec-lint)	success	24	
+39088059134	2026-10-18T01:52:45Z	push	main	windows (WARP)	success	1051	
+39088059134	2026-10-18T01:52:45Z	push	main	linux (lavapipe)	success	690	
+39088059134	2026-10-18T01:52:45Z	push	main	determinism (Windows vs Linux)	success	22	
+39087877354	2026-10-18T01:49:42Z	pull_request	change/shore-ramp-width	docs (spec-lint)	success	28	
+39087877352	2026-10-18T01:49:42Z	pull_request	change/shore-ramp-width	linux (lavapipe)	failure	500	test gpu (tier C, software adapter)
+39087877352	2026-10-18T01:49:42Z	pull_request	change/shore-ramp-width	windows (WARP)	failure	928	test gpu (tier C, software adapter)
+39087877352	2026-10-18T01:49:42Z	pull_request	change/shore-ramp-width	determinism (Windows vs Linux)	success	23	
+39087874525	2026-10-18T01:49:39Z	push	change/shore-ramp-width	docs (spec-lint)	success	21	
+39087874300	2026-10-18T01:49:38Z	push	change/shore-ramp-width	linux (lavapipe)	failure	525	test gpu (tier C, software adapter)
+39087874300	2026-10-18T01:49:38Z	push	change/shore-ramp-width	windows (WARP)	failure	677	test gpu (tier C, software adapter)
+39087874300	2026-10-18T01:49:38Z	push	change/shore-ramp-width	determinism (Windows vs Linux)	success	26	
+39086812297	2026-10-18T01:31:35Z	pull_request	change/water-horizon-cut	docs (spec-lint)	success	25	
+39086812228	2026-10-18T01:31:35Z	pull_request	change/water-horizon-cut	windows (WARP)	success	1213	
+39086812228	2026-10-18T01:31:35Z	pull_request	change/water-horizon-cut	linux (lavapipe)	success	689	
+39086812228	2026-10-18T01:31:35Z	pull_request	change/water-horizon-cut	determinism (Windows vs Linux)	success	19	
+39086809700	2026-10-18T01:31:33Z	push	change/water-horizon-cut	docs (spec-lint)	success	27	
+39086809716	2026-10-18T01:31:33Z	push	change/water-horizon-cut	windows (WARP)	success	1226	
+39086809716	2026-10-18T01:31:33Z	push	change/water-horizon-cut	linux (lavapipe)	success	478	
+39086809716	2026-10-18T01:31:33Z	push	change/water-horizon-cut	determinism (Windows vs Linux)	success	24	
+39086328477	2026-10-18T01:23:48Z	push	main	docs (spec-lint)	success	25	
+39086298671	2026-10-18T01:23:18Z	pull_request	docs/spike-14-egui	docs (spec-lint)	success	21	
+39086295446	2026-10-18T01:23:15Z	push	docs/spike-14-egui	docs (spec-lint)	success	24	
+39086174768	2026-10-18T01:21:18Z	push	spike/spike-14-egui	linux (lavapipe)	failure	164	check (fmt, clippy, layering)
+39086174768	2026-10-18T01:21:18Z	push	spike/spike-14-egui	windows (WARP)	failure	261	check (fmt, clippy, layering)
+39086174768	2026-10-18T01:21:18Z	push	spike/spike-14-egui	determinism (Windows vs Linux)	success	24	
+39085551369	2026-10-18T01:11:09Z	push	main	docs (spec-lint)	success	22	
+39085512595	2026-10-18T01:10:34Z	pull_request	docs/spike-13-edit-latency	docs (spec-lint)	success	24	
+39085509481	2026-10-18T01:10:31Z	push	docs/spike-13-edit-latency	docs (spec-lint)	success	27	
+39085505639	2026-10-18T01:10:28Z	push	change/water-horizon-cut	windows (WARP)	success	1143	
+39085505639	2026-10-18T01:10:28Z	push	change/water-horizon-cut	linux (lavapipe)	success	691	
+39085505639	2026-10-18T01:10:28Z	push	change/water-horizon-cut	determinism (Windows vs Linux)	success	24	
+39085505588	2026-10-18T01:10:28Z	push	change/water-horizon-cut	docs (spec-lint)	success	26	
+39085455550	2026-10-18T01:09:42Z	push	spike/spike-13-edit-latency	windows (WARP)	failure	159	check (fmt, clippy, layering)
+39085455550	2026-10-18T01:09:42Z	push	spike/spike-13-edit-latency	linux (lavapipe)	failure	69	check (fmt, clippy, layering)
+39085455550	2026-10-18T01:09:42Z	push	spike/spike-13-edit-latency	determinism (Windows vs Linux)	success	24	
+39085106495	2026-10-18T01:04:04Z	push	main	docs (spec-lint)	success	29	
+39085106494	2026-10-18T01:04:04Z	push	main	linux (lavapipe)	success	699	
+39085106494	2026-10-18T01:04:04Z	push	main	windows (WARP)	success	851	
+39085106494	2026-10-18T01:04:04Z	push	main	determinism (Windows vs Linux)	success	23	
+39083754267	2026-10-18T00:42:32Z	pull_request	change/stream-no-warmup	linux (lavapipe)	success	679	
+39083754267	2026-10-18T00:42:32Z	pull_request	change/stream-no-warmup	windows (WARP)	success	1221	
+39083754267	2026-10-18T00:42:32Z	pull_request	change/stream-no-warmup	determinism (Windows vs Linux)	success	26	
+39083754247	2026-10-18T00:42:32Z	pull_request	change/stream-no-warmup	docs (spec-lint)	success	25	
+39083751294	2026-10-18T00:42:29Z	push	change/stream-no-warmup	linux (lavapipe)	success	689	
+39083751294	2026-10-18T00:42:29Z	push	change/stream-no-warmup	windows (WARP)	success	1210	
+39083751294	2026-10-18T00:42:29Z	push	change/stream-no-warmup	determinism (Windows vs Linux)	success	23	
+39083751283	2026-10-18T00:42:29Z	push	change/stream-no-warmup	docs (spec-lint)	success	31	
+39083094087	2026-10-18T00:31:49Z	push	main	docs (spec-lint)	success	27	
+39083094110	2026-10-18T00:31:49Z	push	main	linux (lavapipe)	success	468	
+39083094110	2026-10-18T00:31:49Z	push	main	windows (WARP)	success	1199	
+39083094110	2026-10-18T00:31:49Z	push	main	determinism (Windows vs Linux)	success	19	
+39081821607	2026-10-18T00:11:07Z	pull_request	change/stream-warmup	windows (WARP)	success	1190	
+39081821607	2026-10-18T00:11:07Z	pull_request	change/stream-warmup	linux (lavapipe)	success	684	
+39081821607	2026-10-18T00:11:07Z	pull_request	change/stream-warmup	determinism (Windows vs Linux)	success	25	
+39081821634	2026-10-18T00:11:07Z	pull_request	change/stream-warmup	docs (spec-lint)	success	27	
+39081819104	2026-10-18T00:11:04Z	push	change/stream-warmup	linux (lavapipe)	success	469	
+39081819104	2026-10-18T00:11:04Z	push	change/stream-warmup	windows (WARP)	success	1195	
+39081819104	2026-10-18T00:11:04Z	push	change/stream-warmup	determinism (Windows vs Linux)	success	23	
+39081819084	2026-10-18T00:11:04Z	push	change/stream-warmup	docs (spec-lint)	success	27	
+39081596030	2026-10-18T00:07:25Z	pull_request	change/m5-gate-report	docs (spec-lint)	success	25	
+39081592921	2026-10-18T00:07:22Z	push	change/m5-gate-report	docs (spec-lint)	success	24	
+39081396867	2026-10-18T00:04:15Z	push	main	docs (spec-lint)	success	27	
+39081391855	2026-10-18T00:04:09Z	pull_request	change/water-attribution-cpu	docs (spec-lint)	success	28	
+39081389174	2026-10-18T00:04:07Z	push	change/water-attribution-cpu	docs (spec-lint)	success	26	
+39081221846	2026-10-18T00:01:30Z	pull_request	change/water-attribution-cpu	docs (spec-lint)	success	31	
+39081218879	2026-10-18T00:01:27Z	push	change/water-attribution-cpu	docs (spec-lint)	success	28	
+39080860744	2026-10-17T23:55:40Z	push	main	docs (spec-lint)	success	21	
+39080819011	2026-10-17T23:55:01Z	pull_request	docs/tracked-dive-crash	docs (spec-lint)	success	29	
+39080816199	2026-10-17T23:54:58Z	push	docs/tracked-dive-crash	docs (spec-lint)	success	23	
+39080224443	2026-10-17T23:45:19Z	push	main	linux (lavapipe)	success	475	
+39080224443	2026-10-17T23:45:19Z	push	main	windows (WARP)	success	883	
+39080224443	2026-10-17T23:45:19Z	push	main	determinism (Windows vs Linux)	success	25	
+39080224537	2026-10-17T23:45:19Z	push	main	docs (spec-lint)	success	24	
+39079081863	2026-10-17T23:27:14Z	push	main	docs (spec-lint)	success	22	
+39079081866	2026-10-17T23:27:14Z	push	main	linux (lavapipe)	success	710	
+39079081866	2026-10-17T23:27:14Z	push	main	windows (WARP)	success	846	
+39079081866	2026-10-17T23:27:14Z	push	main	determinism (Windows vs Linux)	success	22	
+39078887838	2026-10-17T23:24:14Z	pull_request	change/device-diagnostics	docs (spec-lint)	success	25	
+39078887868	2026-10-17T23:24:14Z	pull_request	change/device-diagnostics	windows (WARP)	success	1203	
+39078887868	2026-10-17T23:24:14Z	pull_request	change/device-diagnostics	linux (lavapipe)	success	680	
+39078887868	2026-10-17T23:24:14Z	pull_request	change/device-diagnostics	determinism (Windows vs Linux)	success	24	
+39078884569	2026-10-17T23:24:12Z	push	change/device-diagnostics	docs (spec-lint)	success	24	
+39078884554	2026-10-17T23:24:12Z	push	change/device-diagnostics	windows (WARP)	success	1123	
+39078884554	2026-10-17T23:24:12Z	push	change/device-diagnostics	linux (lavapipe)	success	680	
+39078884554	2026-10-17T23:24:12Z	push	change/device-diagnostics	determinism (Windows vs Linux)	success	25	
+39077880093	2026-10-17T23:08:55Z	pull_request	change/accept-test-fast-reading	docs (spec-lint)	success	24	
+39077879918	2026-10-17T23:08:55Z	pull_request	change/accept-test-fast-reading	windows (WARP)	success	1039	
+39077879918	2026-10-17T23:08:55Z	pull_request	change/accept-test-fast-reading	linux (lavapipe)	success	574	
+39077879918	2026-10-17T23:08:55Z	pull_request	change/accept-test-fast-reading	determinism (Windows vs Linux)	success	21	
+39077876664	2026-10-17T23:08:52Z	push	change/accept-test-fast-reading	docs (spec-lint)	success	25	
+39077876683	2026-10-17T23:08:52Z	push	change/accept-test-fast-reading	windows (WARP)	success	1061	
+39077876683	2026-10-17T23:08:52Z	push	change/accept-test-fast-reading	linux (lavapipe)	success	679	
+39077876683	2026-10-17T23:08:52Z	push	change/accept-test-fast-reading	determinism (Windows vs Linux)	success	25	
+39077721821	2026-10-17T23:06:30Z	push	main	docs (spec-lint)	success	24	
+39077721789	2026-10-17T23:06:30Z	push	main	linux (lavapipe)	success	670	
+39077721789	2026-10-17T23:06:30Z	push	main	windows (WARP)	success	1008	
+39077721789	2026-10-17T23:06:30Z	push	main	determinism (Windows vs Linux)	success	30	
+39077440949	2026-10-17T23:02:13Z	push	main	docs (spec-lint)	success	27	
+39077397598	2026-10-17T23:01:33Z	pull_request	docs/perf-window-8	docs (spec-lint)	success	28	
+39077394006	2026-10-17T23:01:30Z	push	docs/perf-window-8	docs (spec-lint)	success	27	
+39075245214	2026-10-17T22:28:57Z	pull_request	change/free-camera-keyboard	docs (spec-lint)	success	25	
+39075245204	2026-10-17T22:28:57Z	pull_request	change/free-camera-keyboard	windows (WARP)	success	876	
+39075245204	2026-10-17T22:28:57Z	pull_request	change/free-camera-keyboard	linux (lavapipe)	success	679	
+39075245204	2026-10-17T22:28:57Z	pull_request	change/free-camera-keyboard	determinism (Windows vs Linux)	success	21	
+39075242439	2026-10-17T22:28:54Z	push	change/free-camera-keyboard	docs (spec-lint)	success	24	
+39075242448	2026-10-17T22:28:54Z	push	change/free-camera-keyboard	linux (lavapipe)	success	465	
+39075242448	2026-10-17T22:28:54Z	push	change/free-camera-keyboard	windows (WARP)	success	1246	
+39075242448	2026-10-17T22:28:54Z	push	change/free-camera-keyboard	determinism (Windows vs Linux)	success	25	
+39075100706	2026-10-17T22:26:47Z	push	main	docs (spec-lint)	success	29	
+39075100707	2026-10-17T22:26:47Z	push	main	linux (lavapipe)	success	620	
+39075100707	2026-10-17T22:26:47Z	push	main	windows (WARP)	success	1200	
+39075100707	2026-10-17T22:26:47Z	push	main	determinism (Windows vs Linux)	success	25	
+39074992482	2026-10-17T22:25:12Z	push	main	docs (spec-lint)	success	29	
+39074992492	2026-10-17T22:25:12Z	push	main	windows (WARP)	success	1201	
+39074992492	2026-10-17T22:25:12Z	push	main	linux (lavapipe)	success	666	
+39074992492	2026-10-17T22:25:12Z	push	main	determinism (Windows vs Linux)	success	25	
+39073667609	2026-10-17T22:05:59Z	pull_request	change/coarse-water-summary	linux (lavapipe)	success	532	
+39073667609	2026-10-17T22:05:59Z	pull_request	change/coarse-water-summary	windows (WARP)	success	1187	
+39073667609	2026-10-17T22:05:59Z	pull_request	change/coarse-water-summary	determinism (Windows vs Linux)	success	29	
+39073667610	2026-10-17T22:05:59Z	pull_request	change/coarse-water-summary	docs (spec-lint)	success	28	
+39073664977	2026-10-17T22:05:57Z	push	change/coarse-water-summary	linux (lavapipe)	success	682	
+39073664977	2026-10-17T22:05:57Z	push	change/coarse-water-summary	windows (WARP)	success	1207	
+39073664977	2026-10-17T22:05:57Z	push	change/coarse-water-summary	determinism (Windows vs Linux)	success	24	
+39073664966	2026-10-17T22:05:57Z	push	change/coarse-water-summary	docs (spec-lint)	success	28	
+39073460278	2026-10-17T22:02:59Z	pull_request	change/golden-review-adr-0037-point-2	docs (spec-lint)	success	26	
+39073460304	2026-10-17T22:02:59Z	pull_request	change/golden-review-adr-0037-point-2	linux (lavapipe)	success	664	
+39073460304	2026-10-17T22:02:59Z	pull_request	change/golden-review-adr-0037-point-2	windows (WARP)	success	1193	
+39073460304	2026-10-17T22:02:59Z	pull_request	change/golden-review-adr-0037-point-2	determinism (Windows vs Linux)	success	24	
+39073456565	2026-10-17T22:02:55Z	push	change/golden-review-adr-0037-point-2	docs (spec-lint)	success	27	
+39073456587	2026-10-17T22:02:55Z	push	change/golden-review-adr-0037-point-2	linux (lavapipe)	success	571	
+39073456587	2026-10-17T22:02:55Z	push	change/golden-review-adr-0037-point-2	windows (WARP)	success	1176	
+39073456587	2026-10-17T22:02:55Z	push	change/golden-review-adr-0037-point-2	determinism (Windows vs Linux)	success	26	
+39073064842	2026-10-17T21:57:17Z	pull_request	change/golden-review-adr-0037-point-2	docs (spec-lint)	success	29	
+39073064836	2026-10-17T21:57:17Z	pull_request	change/golden-review-adr-0037-point-2	windows (WARP)	success	1006	
+39073064836	2026-10-17T21:57:17Z	pull_request	change/golden-review-adr-0037-point-2	linux (lavapipe)	success	691	
+39073064836	2026-10-17T21:57:17Z	pull_request	change/golden-review-adr-0037-point-2	determinism (Windows vs Linux)	success	29	
+39073061882	2026-10-17T21:57:14Z	push	change/golden-review-adr-0037-point-2	linux (lavapipe)	success	670	
+39073061882	2026-10-17T21:57:14Z	push	change/golden-review-adr-0037-point-2	windows (WARP)	success	1179	
+39073061882	2026-10-17T21:57:14Z	push	change/golden-review-adr-0037-point-2	determinism (Windows vs Linux)	success	27	
+39073061873	2026-10-17T21:57:14Z	push	change/golden-review-adr-0037-point-2	docs (spec-lint)	success	29	
+39072751119	2026-10-17T21:52:28Z	push	main	docs (spec-lint)	success	23	
+39072751060	2026-10-17T21:52:28Z	push	main	linux (lavapipe)	success	470	
+39072751060	2026-10-17T21:52:28Z	push	main	windows (WARP)	success	1175	
+39072751060	2026-10-17T21:52:28Z	push	main	determinism (Windows vs Linux)	success	25	
+39072376230	2026-10-17T21:46:56Z	pull_request	change/coarse-water-summary	docs (spec-lint)	success	29	
+39072376294	2026-10-17T21:46:56Z	pull_request	change/coarse-water-summary	windows (WARP)	success	1199	
+39072376294	2026-10-17T21:46:56Z	pull_request	change/coarse-water-summary	linux (lavapipe)	success	665	
+39072376294	2026-10-17T21:46:56Z	pull_request	change/coarse-water-summary	determinism (Windows vs Linux)	success	26	
+39072372725	2026-10-17T21:46:52Z	push	change/coarse-water-summary	docs (spec-lint)	success	29	
+39072372655	2026-10-17T21:46:52Z	push	change/coarse-water-summary	windows (WARP)	success	1024	
+39072372655	2026-10-17T21:46:52Z	push	change/coarse-water-summary	linux (lavapipe)	success	474	
+39072372655	2026-10-17T21:46:52Z	push	change/coarse-water-summary	determinism (Windows vs Linux)	success	24	
+39071351120	2026-10-17T21:32:09Z	pull_request	change/tier-b-perf-smoke	docs (spec-lint)	success	30	
+39071351119	2026-10-17T21:32:09Z	pull_request	change/tier-b-perf-smoke	windows (WARP)	success	902	
+39071351119	2026-10-17T21:32:09Z	pull_request	change/tier-b-perf-smoke	linux (lavapipe)	success	460	
+39071351119	2026-10-17T21:32:09Z	pull_request	change/tier-b-perf-smoke	determinism (Windows vs Linux)	success	25	
+39071347110	2026-10-17T21:32:06Z	push	change/tier-b-perf-smoke	docs (spec-lint)	success	24	
+39071347097	2026-10-17T21:32:06Z	push	change/tier-b-perf-smoke	linux (lavapipe)	success	671	
+39071347097	2026-10-17T21:32:06Z	push	change/tier-b-perf-smoke	windows (WARP)	success	1174	
+39071347097	2026-10-17T21:32:06Z	push	change/tier-b-perf-smoke	determinism (Windows vs Linux)	success	26	
+39070764236	2026-10-17T21:23:52Z	push	change/coarse-water-summary	linux (lavapipe)	success	499	
+39070764236	2026-10-17T21:23:52Z	push	change/coarse-water-summary	windows (WARP)	success	1183	
+39070764236	2026-10-17T21:23:52Z	push	change/coarse-water-summary	determinism (Windows vs Linux)	success	25	
+39070764197	2026-10-17T21:23:52Z	push	change/coarse-water-summary	docs (spec-lint)	success	27	
+39070689830	2026-10-17T21:22:50Z	push	main	docs (spec-lint)	success	20	
+39070631390	2026-10-17T21:21:59Z	pull_request	planner/gate-agenda	docs (spec-lint)	success	30	
+39070621423	2026-10-17T21:21:51Z	push	planner/gate-agenda	docs (spec-lint)	success	28	
+39070516055	2026-10-17T21:20:22Z	pull_request	change/tier-b-perf-smoke	linux (lavapipe)	success	613	
+39070516055	2026-10-17T21:20:22Z	pull_request	change/tier-b-perf-smoke	windows (WARP)	failure	521	test (tiers A+B)
+39070516055	2026-10-17T21:20:22Z	pull_request	change/tier-b-perf-smoke	determinism (Windows vs Linux)	success	26	
+39070515940	2026-10-17T21:20:22Z	pull_request	change/tier-b-perf-smoke	docs (spec-lint)	success	22	
+39070511818	2026-10-17T21:20:19Z	push	change/tier-b-perf-smoke	linux (lavapipe)	success	471	
+39070511818	2026-10-17T21:20:19Z	push	change/tier-b-perf-smoke	windows (WARP)	failure	534	test (tiers A+B)
+39070511818	2026-10-17T21:20:19Z	push	change/tier-b-perf-smoke	determinism (Windows vs Linux)	success	25	
+39070511815	2026-10-17T21:20:19Z	push	change/tier-b-perf-smoke	docs (spec-lint)	success	24	
+39070141707	2026-10-17T21:15:06Z	push	main	windows (WARP)	success	806	
+39070141707	2026-10-17T21:15:06Z	push	main	linux (lavapipe)	success	459	
+39070141707	2026-10-17T21:15:06Z	push	main	determinism (Windows vs Linux)	success	22	
+39070141705	2026-10-17T21:15:06Z	push	main	docs (spec-lint)	success	21	
+39068682627	2026-10-17T20:54:22Z	pull_request	change/gpu-clock-rule	docs (spec-lint)	success	27	
+39068682543	2026-10-17T20:54:22Z	pull_request	change/gpu-clock-rule	linux (lavapipe)	success	668	
+39068682543	2026-10-17T20:54:22Z	pull_request	change/gpu-clock-rule	windows (WARP)	success	1203	
+39068682543	2026-10-17T20:54:22Z	pull_request	change/gpu-clock-rule	determinism (Windows vs Linux)	success	23	
+39068679456	2026-10-17T20:54:19Z	push	change/gpu-clock-rule	docs (spec-lint)	success	26	
+39067872355	2026-10-17T20:42:45Z	pull_request	change/gpu-clock-rule	docs (spec-lint)	success	25	
+39067872360	2026-10-17T20:42:45Z	pull_request	change/gpu-clock-rule	linux (lavapipe)	success	652	
+39067872360	2026-10-17T20:42:45Z	pull_request	change/gpu-clock-rule	windows (WARP)	success	1195	
+39067872360	2026-10-17T20:42:45Z	pull_request	change/gpu-clock-rule	determinism (Windows vs Linux)	success	25	
+39067857027	2026-10-17T20:42:32Z	push	change/gpu-clock-rule	docs (spec-lint)	success	24	
+39067856945	2026-10-17T20:42:32Z	push	change/gpu-clock-rule	linux (lavapipe)	success	669	
+39067856945	2026-10-17T20:42:32Z	push	change/gpu-clock-rule	windows (WARP)	success	1043	
+39067856945	2026-10-17T20:42:32Z	push	change/gpu-clock-rule	determinism (Windows vs Linux)	success	26	
+39067552418	2026-10-17T20:38:14Z	push	main	docs (spec-lint)	success	28	
+39067552306	2026-10-17T20:38:13Z	push	main	linux (lavapipe)	success	671	
+39067552306	2026-10-17T20:38:13Z	push	main	windows (WARP)	success	1185	
+39067552306	2026-10-17T20:38:13Z	push	main	determinism (Windows vs Linux)	success	21	
+39066093689	2026-10-17T20:17:39Z	pull_request	change/perf-clock-validity	windows (WARP)	success	1189	
+39066093689	2026-10-17T20:17:39Z	pull_request	change/perf-clock-validity	linux (lavapipe)	success	437	
+39066093689	2026-10-17T20:17:39Z	pull_request	change/perf-clock-validity	determinism (Windows vs Linux)	success	29	
+39066093673	2026-10-17T20:17:39Z	pull_request	change/perf-clock-validity	docs (spec-lint)	success	29	
+39066091066	2026-10-17T20:17:37Z	push	change/perf-clock-validity	linux (lavapipe)	success	669	
+39066091066	2026-10-17T20:17:37Z	push	change/perf-clock-validity	windows (WARP)	success	1171	
+39066091066	2026-10-17T20:17:37Z	push	change/perf-clock-validity	determinism (Windows vs Linux)	success	27	
+39066090982	2026-10-17T20:17:37Z	push	change/perf-clock-validity	docs (spec-lint)	success	23	
+39065907170	2026-10-17T20:15:03Z	push	main	windows (WARP)	success	1024	
+39065907170	2026-10-17T20:15:03Z	push	main	linux (lavapipe)	success	546	
+39065907170	2026-10-17T20:15:03Z	push	main	determinism (Windows vs Linux)	success	26	
+39065907227	2026-10-17T20:15:03Z	push	main	docs (spec-lint)	success	26	
+39065796016	2026-10-17T20:13:26Z	push	main	docs (spec-lint)	success	27	
+39065746005	2026-10-17T20:12:43Z	pull_request	docs/9a3-handover	docs (spec-lint)	success	25	
+39065742606	2026-10-17T20:12:40Z	push	docs/9a3-handover	docs (spec-lint)	success	26	
+39065625090	2026-10-17T20:10:58Z	push	main	windows (WARP)	success	1170	
+39065625090	2026-10-17T20:10:58Z	push	main	linux (lavapipe)	success	596	
+39065625090	2026-10-17T20:10:58Z	push	main	determinism (Windows vs Linux)	success	23	
+39065625070	2026-10-17T20:10:58Z	push	main	docs (spec-lint)	success	21	
+39064464638	2026-10-17T19:54:30Z	pull_request	change/test-fast-selection	docs (spec-lint)	success	28	
+39064464609	2026-10-17T19:54:30Z	pull_request	change/test-fast-selection	windows (WARP)	success	1189	
+39064464609	2026-10-17T19:54:30Z	pull_request	change/test-fast-selection	linux (lavapipe)	success	657	
+39064464609	2026-10-17T19:54:30Z	pull_request	change/test-fast-selection	determinism (Windows vs Linux)	success	25	
+39064461322	2026-10-17T19:54:27Z	push	change/test-fast-selection	docs (spec-lint)	success	25	
+39064461407	2026-10-17T19:54:27Z	push	change/test-fast-selection	windows (WARP)	success	1045	
+39064461407	2026-10-17T19:54:27Z	push	change/test-fast-selection	linux (lavapipe)	success	606	
+39064461407	2026-10-17T19:54:27Z	push	change/test-fast-selection	determinism (Windows vs Linux)	success	25	
+39064357001	2026-10-17T19:52:59Z	pull_request	change/test-fast-selection	docs (spec-lint)	success	26	
+39064356991	2026-10-17T19:52:59Z	pull_request	change/test-fast-selection	linux (lavapipe)	success	457	
+39064356991	2026-10-17T19:52:59Z	pull_request	change/test-fast-selection	windows (WARP)	success	1167	
+39064356991	2026-10-17T19:52:59Z	pull_request	change/test-fast-selection	determinism (Windows vs Linux)	success	23	
+39064353378	2026-10-17T19:52:55Z	push	change/test-fast-selection	docs (spec-lint)	success	28	
+39064353305	2026-10-17T19:52:55Z	push	change/test-fast-selection	windows (WARP)	success	1186	
+39064353305	2026-10-17T19:52:55Z	push	change/test-fast-selection	linux (lavapipe)	success	556	
+39064353305	2026-10-17T19:52:55Z	push	change/test-fast-selection	determinism (Windows vs Linux)	success	25	
+39064205180	2026-10-17T19:50:49Z	pull_request	change/dive-lit-lag	docs (spec-lint)	success	25	
+39064205308	2026-10-17T19:50:49Z	pull_request	change/dive-lit-lag	linux (lavapipe)	success	461	
+39064205308	2026-10-17T19:50:49Z	pull_request	change/dive-lit-lag	windows (WARP)	success	1170	
+39064205308	2026-10-17T19:50:49Z	pull_request	change/dive-lit-lag	determinism (Windows vs Linux)	success	23	
+39063761115	2026-10-17T19:44:35Z	push	change/dive-lit-lag	docs (spec-lint)	success	28	
+39063761108	2026-10-17T19:44:35Z	push	change/dive-lit-lag	linux (lavapipe)	success	683	
+39063761108	2026-10-17T19:44:35Z	push	change/dive-lit-lag	windows (WARP)	success	792	
+39063761108	2026-10-17T19:44:35Z	push	change/dive-lit-lag	determinism (Windows vs Linux)	success	21	
+39063710814	2026-10-17T19:43:50Z	push	main	docs (spec-lint)	success	23	
+39063710789	2026-10-17T19:43:50Z	push	main	windows (WARP)	success	822	
+39063710789	2026-10-17T19:43:50Z	push	main	linux (lavapipe)	success	650	
+39063710789	2026-10-17T19:43:50Z	push	main	determinism (Windows vs Linux)	success	26	
+39062228056	2026-10-17T19:23:02Z	pull_request	change/water-test-parallel	docs (spec-lint)	success	27	
+39062228052	2026-10-17T19:23:02Z	pull_request	change/water-test-parallel	linux (lavapipe)	success	432	
+39062228052	2026-10-17T19:23:02Z	pull_request	change/water-test-parallel	windows (WARP)	success	1185	
+39062228052	2026-10-17T19:23:02Z	pull_request	change/water-test-parallel	determinism (Windows vs Linux)	success	24	
+39062224832	2026-10-17T19:23:00Z	push	change/water-test-parallel	docs (spec-lint)	success	24	
+39062224907	2026-10-17T19:23:00Z	push	change/water-test-parallel	windows (WARP)	success	1204	
+39062224907	2026-10-17T19:23:00Z	push	change/water-test-parallel	linux (lavapipe)	success	671	
+39062224907	2026-10-17T19:23:00Z	push	change/water-test-parallel	determinism (Windows vs Linux)	success	21	
+39061881353	2026-10-17T19:18:22Z	push	main	docs (spec-lint)	success	28	
+39061833175	2026-10-17T19:17:41Z	pull_request	docs/m5-gate-blocked	docs (spec-lint)	success	23	
+39061829278	2026-10-17T19:17:38Z	push	docs/m5-gate-blocked	docs (spec-lint)	success	25	
+39061674882	2026-10-17T19:15:30Z	push	main	docs (spec-lint)	success	27	
+39061583512	2026-10-17T19:14:18Z	pull_request	perf/window-7	docs (spec-lint)	success	28	
+39061576051	2026-10-17T19:14:12Z	push	perf/window-7	docs (spec-lint)	success	44	
+39058624668	2026-10-17T18:33:32Z	push	main	linux (lavapipe)	success	656	
+39058624668	2026-10-17T18:33:32Z	push	main	windows (WARP)	success	814	
+39058624668	2026-10-17T18:33:32Z	push	main	determinism (Windows vs Linux)	success	20	
+39058624685	2026-10-17T18:33:32Z	push	main	docs (spec-lint)	success	27	
+39057149793	2026-10-17T18:13:27Z	push	main	docs (spec-lint)	success	28	
+39057149669	2026-10-17T18:13:27Z	push	main	linux (lavapipe)	success	467	
+39057149669	2026-10-17T18:13:27Z	push	main	windows (WARP)	success	825	
+39057149669	2026-10-17T18:13:27Z	push	main	determinism (Windows vs Linux)	success	26	
+39057091333	2026-10-17T18:12:37Z	pull_request	change/resident-peak	docs (spec-lint)	success	27	
+39057091353	2026-10-17T18:12:37Z	pull_request	change/resident-peak	windows (WARP)	success	1194	
+39057091353	2026-10-17T18:12:37Z	pull_request	change/resident-peak	linux (lavapipe)	success	646	
+39057091353	2026-10-17T18:12:37Z	pull_request	change/resident-peak	determinism (Windows vs Linux)	success	23	
+39057088775	2026-10-17T18:12:35Z	push	change/resident-peak	docs (spec-lint)	success	27	
+39057088793	2026-10-17T18:12:35Z	push	change/resident-peak	windows (WARP)	success	830	
+39057088793	2026-10-17T18:12:35Z	push	change/resident-peak	linux (lavapipe)	success	649	
+39057088793	2026-10-17T18:12:35Z	push	change/resident-peak	determinism (Windows vs Linux)	success	24	
+39057011536	2026-10-17T18:11:32Z	pull_request	change/resident-peak	docs (spec-lint)	success	29	
+39057011500	2026-10-17T18:11:32Z	pull_request	change/resident-peak	windows (WARP)	success	1169	
+39057011500	2026-10-17T18:11:32Z	pull_request	change/resident-peak	linux (lavapipe)	success	539	
+39057011500	2026-10-17T18:11:32Z	pull_request	change/resident-peak	determinism (Windows vs Linux)	success	26	
+39057008402	2026-10-17T18:11:29Z	push	change/resident-peak	docs (spec-lint)	success	28	
+39057008389	2026-10-17T18:11:29Z	push	change/resident-peak	windows (WARP)	success	794	
+39057008389	2026-10-17T18:11:29Z	push	change/resident-peak	linux (lavapipe)	success	434	
+39057008389	2026-10-17T18:11:29Z	push	change/resident-peak	determinism (Windows vs Linux)	success	20	
+39056742585	2026-10-17T18:07:48Z	push	main	docs (spec-lint)	success	27	
+39056742528	2026-10-17T18:07:48Z	push	main	windows (WARP)	success	966	
+39056742528	2026-10-17T18:07:48Z	push	main	linux (lavapipe)	success	438	
+39056742528	2026-10-17T18:07:48Z	push	main	determinism (Windows vs Linux)	success	26	
+39055677021	2026-10-17T17:52:56Z	pull_request	change/lit-water-coast-band	windows (WARP)	success	1157	
+39055677021	2026-10-17T17:52:56Z	pull_request	change/lit-water-coast-band	linux (lavapipe)	success	670	
+39055677021	2026-10-17T17:52:56Z	pull_request	change/lit-water-coast-band	determinism (Windows vs Linux)	success	25	
+39055677025	2026-10-17T17:52:56Z	pull_request	change/lit-water-coast-band	docs (spec-lint)	success	26	
+39055674078	2026-10-17T17:52:53Z	push	change/lit-water-coast-band	docs (spec-lint)	success	24	
+39055330790	2026-10-17T17:48:06Z	pull_request	change/test-fast-budget-2	linux (lavapipe)	success	640	
+39055330790	2026-10-17T17:48:06Z	pull_request	change/test-fast-budget-2	windows (WARP)	success	1141	
+39055330790	2026-10-17T17:48:06Z	pull_request	change/test-fast-budget-2	determinism (Windows vs Linux)	success	20	
+39055330980	2026-10-17T17:48:06Z	pull_request	change/test-fast-budget-2	docs (spec-lint)	success	25	
+39055326773	2026-10-17T17:48:03Z	push	change/test-fast-budget-2	windows (WARP)	success	839	
+39055326773	2026-10-17T17:48:03Z	push	change/test-fast-budget-2	linux (lavapipe)	success	633	
+39055326773	2026-10-17T17:48:03Z	push	change/test-fast-budget-2	determinism (Windows vs Linux)	success	29	
+39055326705	2026-10-17T17:48:03Z	push	change/test-fast-budget-2	docs (spec-lint)	success	20	
+39054960553	2026-10-17T17:42:54Z	pull_request	change/lit-water-coast-band	windows (WARP)	success	818	
+39054960553	2026-10-17T17:42:54Z	pull_request	change/lit-water-coast-band	linux (lavapipe)	success	445	
+39054960553	2026-10-17T17:42:54Z	pull_request	change/lit-water-coast-band	determinism (Windows vs Linux)	success	24	
+39054960563	2026-10-17T17:42:54Z	pull_request	change/lit-water-coast-band	docs (spec-lint)	success	20	
+39054953779	2026-10-17T17:42:48Z	push	change/lit-water-coast-band	windows (WARP)	success	1170	
+39054953779	2026-10-17T17:42:48Z	push	change/lit-water-coast-band	linux (lavapipe)	success	672	
+39054953779	2026-10-17T17:42:48Z	push	change/lit-water-coast-band	determinism (Windows vs Linux)	success	18	
+39054953786	2026-10-17T17:42:48Z	push	change/lit-water-coast-band	docs (spec-lint)	success	24	
+39053520713	2026-10-17T17:23:08Z	push	main	windows (WARP)	success	951	
+39053520713	2026-10-17T17:23:08Z	push	main	linux (lavapipe)	success	437	
+39053520713	2026-10-17T17:23:08Z	push	main	determinism (Windows vs Linux)	success	28	
+39053520696	2026-10-17T17:23:08Z	push	main	docs (spec-lint)	success	26	
+39052076752	2026-10-17T17:03:23Z	pull_request	change/log-fragments	windows (WARP)	success	1140	
+39052076752	2026-10-17T17:03:23Z	pull_request	change/log-fragments	linux (lavapipe)	success	441	
+39052076752	2026-10-17T17:03:23Z	pull_request	change/log-fragments	determinism (Windows vs Linux)	success	25	
+39052076747	2026-10-17T17:03:23Z	pull_request	change/log-fragments	docs (spec-lint)	success	27	
+39052069139	2026-10-17T17:03:16Z	push	change/log-fragments	windows (WARP)	success	1138	
+39052069139	2026-10-17T17:03:16Z	push	change/log-fragments	linux (lavapipe)	success	580	
+39052069139	2026-10-17T17:03:16Z	push	change/log-fragments	determinism (Windows vs Linux)	success	24	
+39052069137	2026-10-17T17:03:16Z	push	change/log-fragments	docs (spec-lint)	success	24	
+39050505738	2026-10-17T16:41:27Z	push	main	linux (lavapipe)	success	626	
+39050505738	2026-10-17T16:41:27Z	push	main	windows (WARP)	success	1172	
+39050505738	2026-10-17T16:41:27Z	push	main	determinism (Windows vs Linux)	success	27	
+39050505749	2026-10-17T16:41:27Z	push	main	docs (spec-lint)	success	24	
+39050481223	2026-10-17T16:41:06Z	push	main	docs (spec-lint)	success	25	
+39050433810	2026-10-17T16:40:25Z	pull_request	planner/brief-crusader	docs (spec-lint)	success	24	
+39050418186	2026-10-17T16:40:14Z	push	planner/brief-crusader	docs (spec-lint)	success	23	
+39050027444	2026-10-17T16:34:49Z	push	main	docs (spec-lint)	success	27	
+39049987141	2026-10-17T16:34:13Z	pull_request	planner/brief-m6-spikes	docs (spec-lint)	success	26	
+39049979568	2026-10-17T16:34:07Z	push	planner/brief-m6-spikes	docs (spec-lint)	success	28	
+39049065519	2026-10-17T16:21:40Z	pull_request	change/perf-m5-harness	docs (spec-lint)	success	23	
+39049065421	2026-10-17T16:21:40Z	pull_request	change/perf-m5-harness	windows (WARP)	success	1138	
+39049065421	2026-10-17T16:21:40Z	pull_request	change/perf-m5-harness	linux (lavapipe)	success	637	
+39049065421	2026-10-17T16:21:40Z	pull_request	change/perf-m5-harness	determinism (Windows vs Linux)	success	24	
+39049061616	2026-10-17T16:21:37Z	push	change/perf-m5-harness	docs (spec-lint)	success	24	
+39049061599	2026-10-17T16:21:37Z	push	change/perf-m5-harness	linux (lavapipe)	success	438	
+39049061599	2026-10-17T16:21:37Z	push	change/perf-m5-harness	windows (WARP)	success	772	
+39049061599	2026-10-17T16:21:37Z	push	change/perf-m5-harness	determinism (Windows vs Linux)	success	27	
+39046935029	2026-10-17T15:52:08Z	push	main	docs (spec-lint)	success	22	
+39046889195	2026-10-17T15:51:31Z	pull_request	planner/documentation-model	docs (spec-lint)	success	24	
+39046882990	2026-10-17T15:51:26Z	push	planner/documentation-model	docs (spec-lint)	success	27	
+39043827986	2026-10-17T15:09:44Z	push	main	docs (spec-lint)	success	28	
+39043828094	2026-10-17T15:09:44Z	push	main	linux (lavapipe)	success	592	
+39043828094	2026-10-17T15:09:44Z	push	main	windows (WARP)	success	824	
+39043828094	2026-10-17T15:09:44Z	push	main	determinism (Windows vs Linux)	success	26	
+39042577895	2026-10-17T14:52:08Z	pull_request	change/accept-m5	linux (lavapipe)	success	637	
+39042577895	2026-10-17T14:52:08Z	pull_request	change/accept-m5	windows (WARP)	success	1006	
+39042577895	2026-10-17T14:52:08Z	pull_request	change/accept-m5	determinism (Windows vs Linux)	success	26	
+39042577916	2026-10-17T14:52:08Z	pull_request	change/accept-m5	docs (spec-lint)	success	29	
+39042574328	2026-10-17T14:52:05Z	push	change/accept-m5	linux (lavapipe)	success	416	
+39042574328	2026-10-17T14:52:05Z	push	change/accept-m5	windows (WARP)	success	791	
+39042574328	2026-10-17T14:52:05Z	push	change/accept-m5	determinism (Windows vs Linux)	success	23	
+39042574357	2026-10-17T14:52:05Z	push	change/accept-m5	docs (spec-lint)	success	24	
+39042478581	2026-10-17T14:50:43Z	push	main	windows (WARP)	success	1150	
+39042478581	2026-10-17T14:50:43Z	push	main	linux (lavapipe)	success	439	
+39042478581	2026-10-17T14:50:43Z	push	main	determinism (Windows vs Linux)	success	19	
+39042478803	2026-10-17T14:50:43Z	push	main	docs (spec-lint)	success	28	
+39040949512	2026-10-17T14:29:11Z	pull_request	change/m5-perf-scenes	linux (lavapipe)	success	535	
+39040949512	2026-10-17T14:29:11Z	pull_request	change/m5-perf-scenes	windows (WARP)	success	1152	
+39040949512	2026-10-17T14:29:11Z	pull_request	change/m5-perf-scenes	determinism (Windows vs Linux)	success	21	
+39040949454	2026-10-17T14:29:11Z	pull_request	change/m5-perf-scenes	docs (spec-lint)	success	27	
+39040945709	2026-10-17T14:29:08Z	push	change/m5-perf-scenes	docs (spec-lint)	success	27	
+39040945756	2026-10-17T14:29:08Z	push	change/m5-perf-scenes	windows (WARP)	success	794	
+39040945756	2026-10-17T14:29:08Z	push	change/m5-perf-scenes	linux (lavapipe)	success	431	
+39040945756	2026-10-17T14:29:08Z	push	change/m5-perf-scenes	determinism (Windows vs Linux)	success	24	
+39039481883	2026-10-17T14:08:33Z	push	main	docs (spec-lint)	success	24	
+39039481888	2026-10-17T14:08:33Z	push	main	windows (WARP)	success	1119	
+39039481888	2026-10-17T14:08:33Z	push	main	linux (lavapipe)	success	597	
+39039481888	2026-10-17T14:08:33Z	push	main	determinism (Windows vs Linux)	success	22	
+39037440862	2026-10-17T13:39:12Z	pull_request	change/perf-host-load	docs (spec-lint)	success	30	
+39037440874	2026-10-17T13:39:12Z	pull_request	change/perf-host-load	linux (lavapipe)	success	598	
+39037440874	2026-10-17T13:39:12Z	pull_request	change/perf-host-load	windows (WARP)	success	782	
+39037440874	2026-10-17T13:39:12Z	pull_request	change/perf-host-load	determinism (Windows vs Linux)	success	22	
+39037437355	2026-10-17T13:39:09Z	push	change/perf-host-load	docs (spec-lint)	success	30	
+39037437356	2026-10-17T13:39:09Z	push	change/perf-host-load	windows (WARP)	success	1140	
+39037437356	2026-10-17T13:39:09Z	push	change/perf-host-load	linux (lavapipe)	success	519	
+39037437356	2026-10-17T13:39:09Z	push	change/perf-host-load	determinism (Windows vs Linux)	success	24	
+39035342255	2026-10-17T13:08:33Z	push	main	windows (WARP)	success	744	
+39035342255	2026-10-17T13:08:33Z	push	main	linux (lavapipe)	success	398	
+39035342255	2026-10-17T13:08:33Z	push	main	determinism (Windows vs Linux)	success	18	
+39035342260	2026-10-17T13:08:33Z	push	main	docs (spec-lint)	success	22	
+39034256354	2026-10-17T12:52:25Z	pull_request	change/adr-0052-as-written	docs (spec-lint)	success	22	
+39034256374	2026-10-17T12:52:25Z	pull_request	change/adr-0052-as-written	windows (WARP)	success	914	
+39034256374	2026-10-17T12:52:25Z	pull_request	change/adr-0052-as-written	linux (lavapipe)	success	576	
+39034256374	2026-10-17T12:52:25Z	pull_request	change/adr-0052-as-written	determinism (Windows vs Linux)	success	26	
+39033971911	2026-10-17T12:48:08Z	push	change/adr-0052-as-written	docs (spec-lint)	success	21	
+39033971747	2026-10-17T12:48:08Z	push	change/adr-0052-as-written	windows (WARP)	success	1064	
+39033971747	2026-10-17T12:48:08Z	push	change/adr-0052-as-written	linux (lavapipe)	success	484	
+39033971747	2026-10-17T12:48:08Z	push	change/adr-0052-as-written	determinism (Windows vs Linux)	success	18	
+39033561769	2026-10-17T12:42:00Z	push	main	docs (spec-lint)	success	21	
+39033561774	2026-10-17T12:42:00Z	push	main	linux (lavapipe)	success	484	
+39033561774	2026-10-17T12:42:00Z	push	main	windows (WARP)	success	911	
+39033561774	2026-10-17T12:42:00Z	push	main	determinism (Windows vs Linux)	success	26	
+39032314780	2026-10-17T12:23:15Z	pull_request	change/m5-golden-review-pass	windows (WARP)	success	1083	
+39032314780	2026-10-17T12:23:15Z	pull_request	change/m5-golden-review-pass	linux (lavapipe)	success	578	
+39032314780	2026-10-17T12:23:15Z	pull_request	change/m5-golden-review-pass	determinism (Windows vs Linux)	success	23	
+39032314765	2026-10-17T12:23:15Z	pull_request	change/m5-golden-review-pass	docs (spec-lint)	success	19	
+39032311895	2026-10-17T12:23:12Z	push	change/m5-golden-review-pass	linux (lavapipe)	success	588	
+39032311895	2026-10-17T12:23:12Z	push	change/m5-golden-review-pass	windows (WARP)	success	1067	
+39032311895	2026-10-17T12:23:12Z	push	change/m5-golden-review-pass	determinism (Windows vs Linux)	success	21	
+39032311904	2026-10-17T12:23:12Z	push	change/m5-golden-review-pass	docs (spec-lint)	success	25	
+39031695082	2026-10-17T12:13:45Z	push	main	docs (spec-lint)	success	26	
+39031695078	2026-10-17T12:13:45Z	push	main	linux (lavapipe)	success	604	
+39031695078	2026-10-17T12:13:45Z	push	main	windows (WARP)	success	815	
+39031695078	2026-10-17T12:13:45Z	push	main	determinism (Windows vs Linux)	success	18	
+39030488876	2026-10-17T11:54:52Z	pull_request	change/gpu-skeleton-deterministic	linux (lavapipe)	success	578	
+39030488876	2026-10-17T11:54:52Z	pull_request	change/gpu-skeleton-deterministic	windows (WARP)	success	926	
+39030488876	2026-10-17T11:54:52Z	pull_request	change/gpu-skeleton-deterministic	determinism (Windows vs Linux)	success	21	
+39030488880	2026-10-17T11:54:52Z	pull_request	change/gpu-skeleton-deterministic	docs (spec-lint)	success	23	
+39030486007	2026-10-17T11:54:49Z	push	change/gpu-skeleton-deterministic	docs (spec-lint)	success	23	
+39030486014	2026-10-17T11:54:49Z	push	change/gpu-skeleton-deterministic	linux (lavapipe)	success	601	
+39030486014	2026-10-17T11:54:49Z	push	change/gpu-skeleton-deterministic	windows (WARP)	success	1075	
+39030486014	2026-10-17T11:54:49Z	push	change/gpu-skeleton-deterministic	determinism (Windows vs Linux)	success	21	
+39029009545	2026-10-17T11:31:12Z	push	main	linux (lavapipe)	success	408	
+39029009545	2026-10-17T11:31:12Z	push	main	windows (WARP)	success	1070	
+39029009545	2026-10-17T11:31:12Z	push	main	determinism (Windows vs Linux)	success	20	
+39029009537	2026-10-17T11:31:12Z	push	main	docs (spec-lint)	success	21	
+39027819907	2026-10-17T11:12:39Z	pull_request	change/golden-review-adr-0052	windows (WARP)	success	1063	
+39027819907	2026-10-17T11:12:39Z	pull_request	change/golden-review-adr-0052	linux (lavapipe)	success	541	
+39027819907	2026-10-17T11:12:39Z	pull_request	change/golden-review-adr-0052	determinism (Windows vs Linux)	success	23	
+39027819909	2026-10-17T11:12:39Z	pull_request	change/golden-review-adr-0052	docs (spec-lint)	success	22	
+39027816443	2026-10-17T11:12:36Z	push	change/golden-review-adr-0052	linux (lavapipe)	success	380	
+39027816443	2026-10-17T11:12:36Z	push	change/golden-review-adr-0052	windows (WARP)	success	921	
+39027816443	2026-10-17T11:12:36Z	push	change/golden-review-adr-0052	determinism (Windows vs Linux)	success	23	
+39027816444	2026-10-17T11:12:36Z	push	change/golden-review-adr-0052	docs (spec-lint)	success	21	
+39026410611	2026-10-17T10:50:14Z	pull_request	change/golden-review-adr-0052	docs (spec-lint)	success	21	
+39026410597	2026-10-17T10:50:14Z	pull_request	change/golden-review-adr-0052	windows (WARP)	success	1058	
+39026410597	2026-10-17T10:50:14Z	pull_request	change/golden-review-adr-0052	linux (lavapipe)	success	590	
+39026410597	2026-10-17T10:50:14Z	pull_request	change/golden-review-adr-0052	determinism (Windows vs Linux)	success	26	
+39026407161	2026-10-17T10:50:11Z	push	change/golden-review-adr-0052	docs (spec-lint)	success	26	
+39026407155	2026-10-17T10:50:11Z	push	change/golden-review-adr-0052	windows (WARP)	success	1096	
+39026407155	2026-10-17T10:50:11Z	push	change/golden-review-adr-0052	linux (lavapipe)	success	385	
+39026407155	2026-10-17T10:50:11Z	push	change/golden-review-adr-0052	determinism (Windows vs Linux)	success	22	
+39025973205	2026-10-17T10:43:15Z	push	main	docs (spec-lint)	success	24	
+39025973341	2026-10-17T10:43:15Z	push	main	linux (lavapipe)	success	589	
+39025973341	2026-10-17T10:43:15Z	push	main	windows (WARP)	success	896	
+39025973341	2026-10-17T10:43:15Z	push	main	determinism (Windows vs Linux)	success	23	
+39024739680	2026-10-17T10:23:57Z	pull_request	change/spec-lint-conflict-markers	docs (spec-lint)	success	22	
+39024739684	2026-10-17T10:23:57Z	pull_request	change/spec-lint-conflict-markers	linux (lavapipe)	success	577	
+39024739684	2026-10-17T10:23:57Z	pull_request	change/spec-lint-conflict-markers	windows (WARP)	success	1113	
+39024739684	2026-10-17T10:23:57Z	pull_request	change/spec-lint-conflict-markers	determinism (Windows vs Linux)	success	21	
+39024736846	2026-10-17T10:23:54Z	push	change/spec-lint-conflict-markers	docs (spec-lint)	success	26	
+39024736940	2026-10-17T10:23:54Z	push	change/spec-lint-conflict-markers	linux (lavapipe)	success	589	
+39024736940	2026-10-17T10:23:54Z	push	change/spec-lint-conflict-markers	windows (WARP)	success	1067	
+39024736940	2026-10-17T10:23:54Z	push	change/spec-lint-conflict-markers	determinism (Windows vs Linux)	success	23	
+39024431821	2026-10-17T10:19:04Z	push	main	docs (spec-lint)	success	26	
+39024431830	2026-10-17T10:19:04Z	push	main	linux (lavapipe)	success	595	
+39024431830	2026-10-17T10:19:04Z	push	main	windows (WARP)	success	1088	
+39024431830	2026-10-17T10:19:04Z	push	main	determinism (Windows vs Linux)	success	20	
+39023242278	2026-10-17T10:00:23Z	pull_request	change/compact-storage-buffers	docs (spec-lint)	success	23	
+39023242244	2026-10-17T10:00:23Z	pull_request	change/compact-storage-buffers	windows (WARP)	success	1077	
+39023242244	2026-10-17T10:00:23Z	pull_request	change/compact-storage-buffers	linux (lavapipe)	success	581	
+39023242244	2026-10-17T10:00:23Z	pull_request	change/compact-storage-buffers	determinism (Windows vs Linux)	success	25	
+39023239340	2026-10-17T10:00:20Z	push	change/compact-storage-buffers	docs (spec-lint)	success	26	
+39022013794	2026-10-17T09:40:21Z	push	main	docs (spec-lint)	success	27	
+39021974961	2026-10-17T09:39:45Z	pull_request	change/compact-storage-buffers	linux (lavapipe)	success	581	
+39021974961	2026-10-17T09:39:45Z	pull_request	change/compact-storage-buffers	windows (WARP)	success	751	
+39021974961	2026-10-17T09:39:45Z	pull_request	change/compact-storage-buffers	determinism (Windows vs Linux)	success	19	
+39021974981	2026-10-17T09:39:45Z	pull_request	change/compact-storage-buffers	docs (spec-lint)	success	21	
+39021974509	2026-10-17T09:39:44Z	pull_request	planner/spike12-gate	docs (spec-lint)	success	22	
+39021972681	2026-10-17T09:39:43Z	push	change/compact-storage-buffers	docs (spec-lint)	success	19	
+39021969003	2026-10-17T09:39:39Z	push	planner/spike12-gate	docs (spec-lint)	success	22	
+39021948012	2026-10-17T09:39:19Z	push	main	docs (spec-lint)	success	19	
+39021914398	2026-10-17T09:38:43Z	pull_request	docs/spike-12-vertex-retirement	docs (spec-lint)	success	21	
+39021911514	2026-10-17T09:38:40Z	push	docs/spike-12-vertex-retirement	docs (spec-lint)	success	23	
+39021850597	2026-10-17T09:37:42Z	push	spike/spike-12-vertex-retirement	docs (spec-lint)	success	22	
+39021850567	2026-10-17T09:37:42Z	push	spike/spike-12-vertex-retirement	windows (WARP)	failure	137	check (fmt, clippy, layering)
+39021850567	2026-10-17T09:37:42Z	push	spike/spike-12-vertex-retirement	linux (lavapipe)	failure	75	check (fmt, clippy, layering)
+39021850567	2026-10-17T09:37:42Z	push	spike/spike-12-vertex-retirement	determinism (Windows vs Linux)	success	22	
+39020772266	2026-10-17T09:20:48Z	pull_request	change/compact-storage-buffers	docs (spec-lint)	success	26	
+39020772239	2026-10-17T09:20:48Z	pull_request	change/compact-storage-buffers	linux (lavapipe)	success	489	
+39020772239	2026-10-17T09:20:48Z	pull_request	change/compact-storage-buffers	windows (WARP)	success	1059	
+39020772239	2026-10-17T09:20:48Z	pull_request	change/compact-storage-buffers	determinism (Windows vs Linux)	success	22	
+39020768675	2026-10-17T09:20:45Z	push	change/compact-storage-buffers	docs (spec-lint)	success	24	
+39020294767	2026-10-17T09:13:20Z	push	main	docs (spec-lint)	success	23	
+39020256426	2026-10-17T09:12:43Z	pull_request	planner/fix-conflict-markers	docs (spec-lint)	success	22	
+39020250491	2026-10-17T09:12:37Z	push	planner/fix-conflict-markers	docs (spec-lint)	success	24	
+39019878170	2026-10-17T09:06:40Z	push	main	docs (spec-lint)	success	24	
+39019837977	2026-10-17T09:06:02Z	pull_request	planner/spike-output-rule	docs (spec-lint)	success	25	
+39019832833	2026-10-17T09:05:57Z	push	planner/spike-output-rule	docs (spec-lint)	success	23	
+39019512279	2026-10-17T09:00:55Z	pull_request	change/compact-storage-buffers	windows (WARP)	success	1093	
+39019512279	2026-10-17T09:00:55Z	pull_request	change/compact-storage-buffers	linux (lavapipe)	success	488	
+39019512279	2026-10-17T09:00:55Z	pull_request	change/compact-storage-buffers	determinism (Windows vs Linux)	success	26	
+39019512302	2026-10-17T09:00:55Z	pull_request	change/compact-storage-buffers	docs (spec-lint)	success	24	
+39019508822	2026-10-17T09:00:52Z	push	change/compact-storage-buffers	linux (lavapipe)	success	587	
+39019508822	2026-10-17T09:00:52Z	push	change/compact-storage-buffers	windows (WARP)	success	1073	
+39019508822	2026-10-17T09:00:52Z	push	change/compact-storage-buffers	determinism (Windows vs Linux)	success	22	
+39019508771	2026-10-17T09:00:52Z	push	change/compact-storage-buffers	docs (spec-lint)	success	26	
+39019103778	2026-10-17T08:54:11Z	push	main	docs (spec-lint)	success	21	
+39019063768	2026-10-17T08:53:32Z	pull_request	planner/brief-vertex-retirement	docs (spec-lint)	success	22	
+39019058758	2026-10-17T08:53:27Z	push	planner/brief-vertex-retirement	docs (spec-lint)	success	24	
+39016518043	2026-10-17T08:12:53Z	push	main	docs (spec-lint)	success	27	
+39016479924	2026-10-17T08:12:16Z	pull_request	planner/adr-0053-accept	docs (spec-lint)	success	26	
+39016473943	2026-10-17T08:12:11Z	push	planner/adr-0053-accept	docs (spec-lint)	success	25	
+39016413117	2026-10-17T08:11:12Z	push	main	docs (spec-lint)	success	25	
+39016413116	2026-10-17T08:11:12Z	push	main	windows (WARP)	success	1076	
+39016413116	2026-10-17T08:11:12Z	push	main	linux (lavapipe)	success	398	
+39016413116	2026-10-17T08:11:12Z	push	main	determinism (Windows vs Linux)	success	19	
+39015089530	2026-10-17T07:49:46Z	pull_request	change/water-pass	docs (spec-lint)	success	22	
+39015089544	2026-10-17T07:49:46Z	pull_request	change/water-pass	windows (WARP)	success	1048	
+39015089544	2026-10-17T07:49:46Z	pull_request	change/water-pass	linux (lavapipe)	success	572	
+39015089544	2026-10-17T07:49:46Z	pull_request	change/water-pass	determinism (Windows vs Linux)	success	18	
+39015087077	2026-10-17T07:49:43Z	push	change/water-pass	docs (spec-lint)	success	22	
+39015087097	2026-10-17T07:49:43Z	push	change/water-pass	windows (WARP)	success	846	
+39015087097	2026-10-17T07:49:43Z	push	change/water-pass	linux (lavapipe)	success	561	
+39015087097	2026-10-17T07:49:43Z	push	change/water-pass	determinism (Windows vs Linux)	success	26	
+39014527445	2026-10-17T07:40:44Z	push	main	docs (spec-lint)	success	23	
+39014480932	2026-10-17T07:40:02Z	pull_request	planner/adr-0054-vertex-only	docs (spec-lint)	success	19	
+39014472449	2026-10-17T07:39:55Z	push	planner/adr-0054-vertex-only	docs (spec-lint)	success	33	
+39014420070	2026-10-17T07:39:02Z	push	change/water-pass	docs (spec-lint)	success	19	
+39014419991	2026-10-17T07:39:02Z	push	change/water-pass	linux (lavapipe)	success	486	
+39014419991	2026-10-17T07:39:02Z	push	change/water-pass	windows (WARP)	success	884	
+39014419991	2026-10-17T07:39:02Z	push	change/water-pass	determinism (Windows vs Linux)	success	21	
+39013712901	2026-10-17T07:27:43Z	push	main	docs (spec-lint)	success	24	
+39013675629	2026-10-17T07:27:06Z	pull_request	planner/storage-buffer-gate	docs (spec-lint)	success	24	
+39013667291	2026-10-17T07:26:57Z	push	planner/storage-buffer-gate	docs (spec-lint)	success	20	
+39013649223	2026-10-17T07:26:39Z	push	main	docs (spec-lint)	success	23	
+39013608634	2026-10-17T07:26:02Z	pull_request	docs/compact-storage-buffer	docs (spec-lint)	success	28	
+39013604688	2026-10-17T07:25:58Z	push	docs/compact-storage-buffer	docs (spec-lint)	success	27	
+39013581279	2026-10-17T07:25:34Z	push	explore/compact-storage-buffer	windows (WARP)	failure	135	check (fmt, clippy, layering)
+39013581279	2026-10-17T07:25:34Z	push	explore/compact-storage-buffer	linux (lavapipe)	failure	81	check (fmt, clippy, layering)
+39013581279	2026-10-17T07:25:34Z	push	explore/compact-storage-buffer	determinism (Windows vs Linux)	success	24	
+39013581261	2026-10-17T07:25:34Z	push	explore/compact-storage-buffer	docs (spec-lint)	success	21	
+39013151422	2026-10-17T07:18:38Z	push	main	docs (spec-lint)	success	21	
+39013108813	2026-10-17T07:17:54Z	pull_request	docs/spike-11-interim	docs (spec-lint)	success	27	
+39013105985	2026-10-17T07:17:51Z	push	docs/spike-11-interim	docs (spec-lint)	success	23	
+39012950650	2026-10-17T07:15:20Z	pull_request	docs/spike-11-interim	docs (spec-lint)	success	26	
+39012947879	2026-10-17T07:15:18Z	push	docs/spike-11-interim	docs (spec-lint)	success	23	
+39012846808	2026-10-17T07:13:42Z	push	main	docs (spec-lint)	success	25	
+39012806881	2026-10-17T07:13:05Z	pull_request	planner/spike11-remote	docs (spec-lint)	success	27	
+39012802157	2026-10-17T07:13:00Z	push	planner/spike11-remote	docs (spec-lint)	success	22	
+39012534317	2026-10-17T07:08:44Z	pull_request	change/water-pass	docs (spec-lint)	success	29	
+39012534327	2026-10-17T07:08:44Z	pull_request	change/water-pass	windows (WARP)	success	733	
+39012534327	2026-10-17T07:08:44Z	pull_request	change/water-pass	linux (lavapipe)	success	548	
+39012534327	2026-10-17T07:08:44Z	pull_request	change/water-pass	determinism (Windows vs Linux)	success	20	
+39012532030	2026-10-17T07:08:42Z	push	change/water-pass	linux (lavapipe)	success	558	
+39012532030	2026-10-17T07:08:42Z	push	change/water-pass	windows (WARP)	success	1048	
+39012532030	2026-10-17T07:08:42Z	push	change/water-pass	determinism (Windows vs Linux)	success	24	
+39011349041	2026-10-17T06:49:48Z	pull_request	change/water-pass	linux (lavapipe)	failure	546	test gpu (tier C, software adapter)
+39011349041	2026-10-17T06:49:48Z	pull_request	change/water-pass	windows (WARP)	failure	996	test gpu (tier C, software adapter)
+39011349041	2026-10-17T06:49:48Z	pull_request	change/water-pass	determinism (Windows vs Linux)	success	19	
+39011349022	2026-10-17T06:49:48Z	pull_request	change/water-pass	docs (spec-lint)	success	25	
+39011337709	2026-10-17T06:49:37Z	push	change/water-pass	linux (lavapipe)	failure	548	test gpu (tier C, software adapter)
+39011337709	2026-10-17T06:49:37Z	push	change/water-pass	windows (WARP)	failure	1000	test gpu (tier C, software adapter)
+39011337709	2026-10-17T06:49:37Z	push	change/water-pass	determinism (Windows vs Linux)	success	21	
+39011337710	2026-10-17T06:49:37Z	push	change/water-pass	docs (spec-lint)	success	26	
+39011113721	2026-10-17T06:45:50Z	push	main	docs (spec-lint)	success	21	
+39011082925	2026-10-17T06:45:22Z	push	explore/compact-storage-buffer	windows (WARP)	failure	171	check (fmt, clippy, layering)
+39011082925	2026-10-17T06:45:22Z	push	explore/compact-storage-buffer	linux (lavapipe)	failure	70	check (fmt, clippy, layering)
+39011082925	2026-10-17T06:45:22Z	push	explore/compact-storage-buffer	determinism (Windows vs Linux)	success	22	
+39011076763	2026-10-17T06:45:16Z	pull_request	planner/dev-screenshots-fix	docs (spec-lint)	success	24	
+39011055829	2026-10-17T06:44:59Z	push	planner/dev-screenshots-fix	docs (spec-lint)	success	25	
+39010948290	2026-10-17T06:43:11Z	push	main	docs (spec-lint)	success	22	
+39010900471	2026-10-17T06:42:24Z	pull_request	planner/dev-screenshots	docs (spec-lint)	success	20	
+39010886103	2026-10-17T06:42:10Z	push	planner/dev-screenshots	docs (spec-lint)	success	26	
+39009174095	2026-10-17T06:14:32Z	push	main	docs (spec-lint)	success	22	
+39009135071	2026-10-17T06:13:57Z	pull_request	planner/tile-format-gate	docs (spec-lint)	success	26	
+39009132272	2026-10-17T06:13:53Z	push	planner/tile-format-gate	docs (spec-lint)	success	25	
+39009114730	2026-10-17T06:13:33Z	push	main	docs (spec-lint)	success	22	
+39009082144	2026-10-17T06:12:59Z	pull_request	docs/tile-format-duality	docs (spec-lint)	success	25	
+39009079019	2026-10-17T06:12:56Z	push	docs/tile-format-duality	docs (spec-lint)	success	23	
+39009064437	2026-10-17T06:12:41Z	push	explore/tile-format-duality	docs (spec-lint)	success	25	
+39009064473	2026-10-17T06:12:41Z	push	explore/tile-format-duality	linux (lavapipe)	success	506	
+39009064473	2026-10-17T06:12:41Z	push	explore/tile-format-duality	windows (WARP)	success	901	
+39009064473	2026-10-17T06:12:41Z	push	explore/tile-format-duality	determinism (Windows vs Linux)	success	24	
+39007836683	2026-10-17T05:52:20Z	push	main	docs (spec-lint)	success	20	
+39007802871	2026-10-17T05:51:46Z	pull_request	planner/adr-0052	docs (spec-lint)	success	21	
+39007799188	2026-10-17T05:51:42Z	push	planner/adr-0052	docs (spec-lint)	success	23	
+39007788390	2026-10-17T05:51:30Z	push	planner/adr-0052	docs (spec-lint)	success	24	
+39006838274	2026-10-17T05:35:48Z	push	main	docs (spec-lint)	success	19	
+39006802294	2026-10-17T05:35:13Z	pull_request	planner/adr-0051	docs (spec-lint)	success	22	
+39006796390	2026-10-17T05:35:08Z	push	planner/adr-0051	docs (spec-lint)	success	24	
+39006711609	2026-10-17T05:33:46Z	push	main	docs (spec-lint)	success	24	
+39006711651	2026-10-17T05:33:46Z	push	main	linux (lavapipe)	success	500	
+39006711651	2026-10-17T05:33:46Z	push	main	windows (WARP)	success	754	
+39006711651	2026-10-17T05:33:46Z	push	main	determinism (Windows vs Linux)	success	25	
+39004837237	2026-10-17T05:03:07Z	pull_request	change/ocean-bake-water-level	windows (WARP)	success	912	
+39004837237	2026-10-17T05:03:07Z	pull_request	change/ocean-bake-water-level	linux (lavapipe)	success	498	
+39004837237	2026-10-17T05:03:07Z	pull_request	change/ocean-bake-water-level	determinism (Windows vs Linux)	success	25	
+39004837243	2026-10-17T05:03:07Z	pull_request	change/ocean-bake-water-level	docs (spec-lint)	success	26	
+39004834394	2026-10-17T05:03:04Z	push	change/ocean-bake-water-level	docs (spec-lint)	success	21	
+39003814504	2026-10-17T04:46:20Z	push	change/ocean-bake-water-level	docs (spec-lint)	success	23	
+39003814561	2026-10-17T04:46:20Z	push	change/ocean-bake-water-level	linux (lavapipe)	success	496	
+39003814561	2026-10-17T04:46:20Z	push	change/ocean-bake-water-level	windows (WARP)	success	915	
+39003814561	2026-10-17T04:46:20Z	push	change/ocean-bake-water-level	determinism (Windows vs Linux)	success	22	
+39000006043	2026-10-17T03:45:33Z	push	main	docs (spec-lint)	success	21	
+38999963842	2026-10-17T03:44:59Z	pull_request	planner/status-trim	docs (spec-lint)	success	22	
+38999960656	2026-10-17T03:44:55Z	push	planner/status-trim	docs (spec-lint)	success	23	
+38999911655	2026-10-17T03:44:08Z	push	main	windows (WARP)	success	854	
+38999911655	2026-10-17T03:44:08Z	push	main	linux (lavapipe)	success	504	
+38999911655	2026-10-17T03:44:08Z	push	main	determinism (Windows vs Linux)	success	20	
+38999911719	2026-10-17T03:44:08Z	push	main	docs (spec-lint)	success	21	
+38998922455	2026-10-17T03:28:40Z	pull_request	change/slow-ci-tests	docs (spec-lint)	success	22	
+38998922459	2026-10-17T03:28:40Z	pull_request	change/slow-ci-tests	linux (lavapipe)	success	481	
+38998922459	2026-10-17T03:28:40Z	pull_request	change/slow-ci-tests	windows (WARP)	success	890	
+38998922459	2026-10-17T03:28:40Z	pull_request	change/slow-ci-tests	determinism (Windows vs Linux)	success	21	
+38998919331	2026-10-17T03:28:37Z	push	change/slow-ci-tests	docs (spec-lint)	success	25	
+38998196486	2026-10-17T03:17:13Z	push	main	docs (spec-lint)	success	27	
+38998165386	2026-10-17T03:16:43Z	pull_request	planner/warp-removal	docs (spec-lint)	success	21	
+38998161793	2026-10-17T03:16:39Z	push	planner/warp-removal	docs (spec-lint)	success	23	
+38998143448	2026-10-17T03:16:22Z	push	main	docs (spec-lint)	success	21	
+38998110821	2026-10-17T03:15:51Z	pull_request	docs/warp-compact-atmosphere-removal	docs (spec-lint)	success	22	
+38998106163	2026-10-17T03:15:46Z	push	docs/warp-compact-atmosphere-removal	docs (spec-lint)	success	26	
+38998063798	2026-10-17T03:15:09Z	push	explore/warp-compact-atmosphere-removal	linux (lavapipe)	failure	62	determinism manifest (GEN-003)
+38998063798	2026-10-17T03:15:09Z	push	explore/warp-compact-atmosphere-removal	windows (WARP)	failure	161	check (fmt, clippy, layering)
+38998063798	2026-10-17T03:15:09Z	push	explore/warp-compact-atmosphere-removal	determinism (Windows vs Linux)	failure	24	diff manifests
+38997688016	2026-10-17T03:09:19Z	pull_request	change/slow-ci-tests	linux (lavapipe)	success	500	
+38997688016	2026-10-17T03:09:19Z	pull_request	change/slow-ci-tests	windows (WARP)	success	1092	
+38997688016	2026-10-17T03:09:19Z	pull_request	change/slow-ci-tests	determinism (Windows vs Linux)	success	21	
+38997688014	2026-10-17T03:09:19Z	pull_request	change/slow-ci-tests	docs (spec-lint)	success	21	
+38997684346	2026-10-17T03:09:15Z	push	change/slow-ci-tests	linux (lavapipe)	success	474	
+38997684346	2026-10-17T03:09:15Z	push	change/slow-ci-tests	windows (WARP)	success	889	
+38997684346	2026-10-17T03:09:15Z	push	change/slow-ci-tests	determinism (Windows vs Linux)	success	29	
+38997684356	2026-10-17T03:09:15Z	push	change/slow-ci-tests	docs (spec-lint)	success	28	
+38996423620	2026-10-17T02:49:33Z	push	main	docs (spec-lint)	success	19	
+38996423616	2026-10-17T02:49:33Z	push	main	linux (lavapipe)	success	392	
+38996423616	2026-10-17T02:49:33Z	push	main	windows (WARP)	success	958	
+38996423616	2026-10-17T02:49:33Z	push	main	determinism (Windows vs Linux)	success	19	
+38994803820	2026-10-17T02:24:37Z	pull_request	change/viewer-lit	windows (WARP)	success	794	
+38994803820	2026-10-17T02:24:37Z	pull_request	change/viewer-lit	linux (lavapipe)	success	545	
+38994803820	2026-10-17T02:24:37Z	pull_request	change/viewer-lit	determinism (Windows vs Linux)	success	18	
+38994803835	2026-10-17T02:24:37Z	pull_request	change/viewer-lit	docs (spec-lint)	success	18	
+38994795483	2026-10-17T02:24:30Z	push	change/viewer-lit	docs (spec-lint)	success	27	
+38994795369	2026-10-17T02:24:30Z	push	change/viewer-lit	windows (WARP)	failure	692	test (tiers A+B)
+38994795369	2026-10-17T02:24:30Z	push	change/viewer-lit	linux (lavapipe)	success	402	
+38994795369	2026-10-17T02:24:30Z	push	change/viewer-lit	determinism (Windows vs Linux)	success	23	
+38991016048	2026-10-17T01:28:38Z	push	main	docs (spec-lint)	success	20	
+38991016042	2026-10-17T01:28:38Z	push	main	linux (lavapipe)	success	580	
+38991016042	2026-10-17T01:28:38Z	push	main	windows (WARP)	success	910	
+38991016042	2026-10-17T01:28:38Z	push	main	determinism (Windows vs Linux)	success	24	
+38990206795	2026-10-17T01:17:16Z	pull_request	change/climate-latitude-axis	linux (lavapipe)	success	548	
+38990206795	2026-10-17T01:17:16Z	pull_request	change/climate-latitude-axis	windows (WARP)	success	641	
+38990206795	2026-10-17T01:17:16Z	pull_request	change/climate-latitude-axis	determinism (Windows vs Linux)	success	22	
+38990206728	2026-10-17T01:17:16Z	pull_request	change/climate-latitude-axis	docs (spec-lint)	success	28	
+38990202968	2026-10-17T01:17:13Z	push	change/climate-latitude-axis	docs (spec-lint)	success	26	
+38988069760	2026-10-17T00:48:39Z	push	change/climate-latitude-axis	windows (WARP)	success	923	
+38988069760	2026-10-17T00:48:39Z	push	change/climate-latitude-axis	linux (lavapipe)	success	551	
+38988069760	2026-10-17T00:48:39Z	push	change/climate-latitude-axis	determinism (Windows vs Linux)	success	25	
+38988069763	2026-10-17T00:48:39Z	push	change/climate-latitude-axis	docs (spec-lint)	success	23	
+38985369800	2026-10-17T00:13:32Z	push	main	docs (spec-lint)	success	26	
+38985314964	2026-10-17T00:12:50Z	pull_request	planner/adr-0050	docs (spec-lint)	success	26	
+38985309731	2026-10-17T00:12:47Z	push	planner/adr-0050	docs (spec-lint)	success	24	
+38985212413	2026-10-17T00:11:33Z	push	main	docs (spec-lint)	success	24	
+38985212381	2026-10-17T00:11:33Z	push	main	windows (WARP)	failure	680	test (tiers A+B)
+38985212381	2026-10-17T00:11:33Z	push	main	linux (lavapipe)	success	452	
+38985212381	2026-10-17T00:11:33Z	push	main	determinism (Windows vs Linux)	success	20	
+38983901681	2026-10-16T23:55:19Z	pull_request	change/atmosphere-passes	docs (spec-lint)	success	26	
+38983901643	2026-10-16T23:55:19Z	pull_request	change/atmosphere-passes	windows (WARP)	success	919	
+38983901643	2026-10-16T23:55:19Z	pull_request	change/atmosphere-passes	linux (lavapipe)	success	428	
+38983901643	2026-10-16T23:55:19Z	pull_request	change/atmosphere-passes	determinism (Windows vs Linux)	success	21	
+38983897603	2026-10-16T23:55:16Z	push	change/atmosphere-passes	docs (spec-lint)	success	23	
+38983846498	2026-10-16T23:54:39Z	push	change/atmosphere-passes	linux (lavapipe)	failure	401	test (tiers A+B)
+38983846498	2026-10-16T23:54:39Z	push	change/atmosphere-passes	windows (WARP)	failure	593	test (tiers A+B)
+38983846498	2026-10-16T23:54:39Z	push	change/atmosphere-passes	determinism (Windows vs Linux)	success	24	
+38983846429	2026-10-16T23:54:39Z	push	change/atmosphere-passes	docs (spec-lint)	success	22	
+38983775641	2026-10-16T23:53:45Z	push	main	windows (WARP)	success	636	
+38983775641	2026-10-16T23:53:45Z	push	main	linux (lavapipe)	success	521	
+38983775641	2026-10-16T23:53:45Z	push	main	determinism (Windows vs Linux)	success	23	
+38983775640	2026-10-16T23:53:45Z	push	main	docs (spec-lint)	success	25	
+38982193630	2026-10-16T23:34:58Z	pull_request	change/atmosphere-reference	docs (spec-lint)	success	25	
+38982193606	2026-10-16T23:34:58Z	pull_request	change/atmosphere-reference	linux (lavapipe)	success	523	
+38982193606	2026-10-16T23:34:58Z	pull_request	change/atmosphere-reference	windows (WARP)	success	830	
+38982193606	2026-10-16T23:34:58Z	pull_request	change/atmosphere-reference	determinism (Windows vs Linux)	success	25	
+38982188527	2026-10-16T23:34:55Z	push	change/atmosphere-reference	docs (spec-lint)	success	25	
+38980053815	2026-10-16T23:11:16Z	push	change/atmosphere-reference	docs (spec-lint)	success	26	
+38980053782	2026-10-16T23:11:16Z	push	change/atmosphere-reference	windows (WARP)	success	856	
+38980053782	2026-10-16T23:11:16Z	push	change/atmosphere-reference	linux (lavapipe)	success	369	
+38980053782	2026-10-16T23:11:16Z	push	change/atmosphere-reference	determinism (Windows vs Linux)	success	23	
+38976715722	2026-10-16T22:36:01Z	push	main	docs (spec-lint)	success	26	
+38976645833	2026-10-16T22:35:20Z	pull_request	planner/adr-0049	docs (spec-lint)	success	31	
+38976639507	2026-10-16T22:35:16Z	push	planner/adr-0049	docs (spec-lint)	success	23	
+38976498509	2026-10-16T22:33:51Z	push	main	linux (lavapipe)	success	532	
+38976498509	2026-10-16T22:33:51Z	push	main	windows (WARP)	success	777	
+38976498509	2026-10-16T22:33:51Z	push	main	determinism (Windows vs Linux)	success	24	
+38976498538	2026-10-16T22:33:51Z	push	main	docs (spec-lint)	success	24	
+38975095486	2026-10-16T22:19:56Z	pull_request	change/sun-and-base-shading	docs (spec-lint)	success	30	
+38975095489	2026-10-16T22:19:56Z	pull_request	change/sun-and-base-shading	windows (WARP)	success	793	
+38975095489	2026-10-16T22:19:56Z	pull_request	change/sun-and-base-shading	linux (lavapipe)	success	429	
+38975095489	2026-10-16T22:19:56Z	pull_request	change/sun-and-base-shading	determinism (Windows vs Linux)	success	20	
+38975091342	2026-10-16T22:19:54Z	push	change/sun-and-base-shading	docs (spec-lint)	success	23	
+38973481617	2026-10-16T22:04:13Z	pull_request	change/sun-and-base-shading	windows (WARP)	success	595	
+38973481617	2026-10-16T22:04:13Z	pull_request	change/sun-and-base-shading	linux (lavapipe)	success	528	
+38973481617	2026-10-16T22:04:13Z	pull_request	change/sun-and-base-shading	determinism (Windows vs Linux)	success	24	
+38973481575	2026-10-16T22:04:13Z	pull_request	change/sun-and-base-shading	docs (spec-lint)	success	25	
+38973453804	2026-10-16T22:03:57Z	push	change/sun-and-base-shading	windows (WARP)	success	823	
+38973453804	2026-10-16T22:03:57Z	push	change/sun-and-base-shading	linux (lavapipe)	success	516	
+38973453804	2026-10-16T22:03:57Z	push	change/sun-and-base-shading	determinism (Windows vs Linux)	success	23	
+38973453364	2026-10-16T22:03:57Z	push	change/sun-and-base-shading	docs (spec-lint)	success	21	
+38964573916	2026-10-16T20:45:47Z	push	main	docs (spec-lint)	success	26	
+38964573910	2026-10-16T20:45:47Z	push	main	linux (lavapipe)	success	320	
+38964573910	2026-10-16T20:45:47Z	push	main	windows (WARP)	success	781	
+38964573910	2026-10-16T20:45:47Z	push	main	determinism (Windows vs Linux)	success	27	
+38962901202	2026-10-16T20:31:50Z	pull_request	change/look-file	docs (spec-lint)	success	26	
+38962901208	2026-10-16T20:31:50Z	pull_request	change/look-file	windows (WARP)	success	778	
+38962901208	2026-10-16T20:31:50Z	pull_request	change/look-file	linux (lavapipe)	success	471	
+38962901208	2026-10-16T20:31:50Z	pull_request	change/look-file	determinism (Windows vs Linux)	success	21	
+38962894476	2026-10-16T20:31:47Z	push	change/look-file	docs (spec-lint)	success	28	
+38962894510	2026-10-16T20:31:47Z	push	change/look-file	linux (lavapipe)	success	473	
+38962894510	2026-10-16T20:31:47Z	push	change/look-file	windows (WARP)	success	651	
+38962894510	2026-10-16T20:31:47Z	push	change/look-file	determinism (Windows vs Linux)	success	28	
+38961124871	2026-10-16T20:17:08Z	push	main	docs (spec-lint)	success	26	
+38961044630	2026-10-16T20:16:28Z	pull_request	planner/band-view-question	docs (spec-lint)	success	26	
+38961036946	2026-10-16T20:16:24Z	push	planner/band-view-question	docs (spec-lint)	success	22	
+38959578086	2026-10-16T20:04:34Z	push	main	windows (WARP)	success	557	
+38959578086	2026-10-16T20:04:34Z	push	main	linux (lavapipe)	success	385	
+38959578086	2026-10-16T20:04:34Z	push	main	determinism (Windows vs Linux)	success	26	
+38959577983	2026-10-16T20:04:34Z	push	main	docs (spec-lint)	success	26	
+38957906885	2026-10-16T19:50:48Z	pull_request	change/golden-review-adr-0037	linux (lavapipe)	success	460	
+38957906885	2026-10-16T19:50:48Z	pull_request	change/golden-review-adr-0037	windows (WARP)	success	766	
+38957906885	2026-10-16T19:50:48Z	pull_request	change/golden-review-adr-0037	determinism (Windows vs Linux)	success	25	
+38957906913	2026-10-16T19:50:48Z	pull_request	change/golden-review-adr-0037	docs (spec-lint)	success	31	
+38957901434	2026-10-16T19:50:46Z	push	change/golden-review-adr-0037	docs (spec-lint)	success	17	
+38952380571	2026-10-16T19:06:01Z	push	change/golden-review-adr-0037	linux (lavapipe)	success	450	
+38952380571	2026-10-16T19:06:01Z	push	change/golden-review-adr-0037	windows (WARP)	success	747	
+38952380571	2026-10-16T19:06:01Z	push	change/golden-review-adr-0037	determinism (Windows vs Linux)	success	22	
+38952380529	2026-10-16T19:06:01Z	push	change/golden-review-adr-0037	docs (spec-lint)	success	22	
+38950738893	2026-10-16T18:53:02Z	push	main	docs (spec-lint)	success	24	
+38950653494	2026-10-16T18:52:23Z	pull_request	planner/adr-0048	docs (spec-lint)	success	27	
+38950642655	2026-10-16T18:52:18Z	push	planner/adr-0048	docs (spec-lint)	success	25	
+38950509393	2026-10-16T18:51:15Z	push	main	docs (spec-lint)	success	23	
+38950509426	2026-10-16T18:51:15Z	push	main	windows (WARP)	success	762	
+38950509426	2026-10-16T18:51:15Z	push	main	linux (lavapipe)	success	391	
+38950509426	2026-10-16T18:51:15Z	push	main	determinism (Windows vs Linux)	success	26	
+38948769341	2026-10-16T18:37:32Z	pull_request	change/render-graph-hdr	linux (lavapipe)	success	308	
+38948769341	2026-10-16T18:37:32Z	pull_request	change/render-graph-hdr	windows (WARP)	success	766	
+38948769341	2026-10-16T18:37:32Z	pull_request	change/render-graph-hdr	determinism (Windows vs Linux)	success	21	
+38948769298	2026-10-16T18:37:32Z	pull_request	change/render-graph-hdr	docs (spec-lint)	success	23	
+38948762298	2026-10-16T18:37:29Z	push	change/render-graph-hdr	docs (spec-lint)	success	26	
+38947070389	2026-10-16T18:24:16Z	push	change/render-graph-hdr	docs (spec-lint)	success	27	
+38947070197	2026-10-16T18:24:16Z	push	change/render-graph-hdr	linux (lavapipe)	success	386	
+38947070197	2026-10-16T18:24:16Z	push	change/render-graph-hdr	windows (WARP)	success	740	
+38947070197	2026-10-16T18:24:16Z	push	change/render-graph-hdr	determinism (Windows vs Linux)	success	23	
+38942263385	2026-10-16T17:46:31Z	push	main	docs (spec-lint)	success	28	
+38942167798	2026-10-16T17:45:47Z	pull_request	planner/adr-0047	docs (spec-lint)	success	27	
+38942157593	2026-10-16T17:45:42Z	push	planner/adr-0047	docs (spec-lint)	success	26	
+38942013218	2026-10-16T17:44:35Z	push	main	windows (WARP)	success	855	
+38942013218	2026-10-16T17:44:35Z	push	main	linux (lavapipe)	success	535	
+38942013218	2026-10-16T17:44:35Z	push	main	determinism (Windows vs Linux)	success	23	
+38942013021	2026-10-16T17:44:35Z	push	main	docs (spec-lint)	success	32	
+38940141009	2026-10-16T17:29:57Z	pull_request	change/viewer-window	linux (lavapipe)	success	440	
+38940141009	2026-10-16T17:29:57Z	pull_request	change/viewer-window	windows (WARP)	success	819	
+38940141009	2026-10-16T17:29:57Z	pull_request	change/viewer-window	determinism (Windows vs Linux)	success	22	
+38940140953	2026-10-16T17:29:57Z	pull_request	change/viewer-window	docs (spec-lint)	success	26	
+38940110374	2026-10-16T17:29:43Z	push	change/viewer-window	windows (WARP)	success	714	
+38940110374	2026-10-16T17:29:43Z	push	change/viewer-window	linux (lavapipe)	success	547	
+38940110374	2026-10-16T17:29:43Z	push	change/viewer-window	determinism (Windows vs Linux)	success	18	
+38940110488	2026-10-16T17:29:43Z	push	change/viewer-window	docs (spec-lint)	success	30	
+38939319449	2026-10-16T17:23:29Z	push	spike/spike-11-mouse-look	linux (lavapipe)	success	297	
+38939319449	2026-10-16T17:23:29Z	push	spike/spike-11-mouse-look	windows (WARP)	success	698	
+38939319449	2026-10-16T17:23:29Z	push	spike/spike-11-mouse-look	determinism (Windows vs Linux)	success	24	
+38938496761	2026-10-16T17:17:05Z	push	main	docs (spec-lint)	success	24	
+38938423828	2026-10-16T17:16:31Z	pull_request	planner/warp-closed	docs (spec-lint)	success	24	
+38938416254	2026-10-16T17:16:28Z	push	planner/warp-closed	docs (spec-lint)	success	24	
+38938344556	2026-10-16T17:15:54Z	push	main	docs (spec-lint)	success	26	
+38938222057	2026-10-16T17:14:59Z	pull_request	docs/warp-parallel-crash	docs (spec-lint)	success	21	
+38938211612	2026-10-16T17:14:54Z	push	docs/warp-parallel-crash	docs (spec-lint)	success	24	
+38938164236	2026-10-16T17:14:32Z	push	explore/warp-parallel-crash	linux (lavapipe)	success	354	
+38938164236	2026-10-16T17:14:32Z	push	explore/warp-parallel-crash	windows (WARP)	success	452	
+38938164236	2026-10-16T17:14:32Z	push	explore/warp-parallel-crash	determinism (Windows vs Linux)	success	23	
+38935438987	2026-10-16T16:53:25Z	push	main	docs (spec-lint)	success	21	
+38935368365	2026-10-16T16:52:52Z	pull_request	planner/mouse-look-spike	docs (spec-lint)	success	21	
+38935340822	2026-10-16T16:52:39Z	push	planner/mouse-look-spike	docs (spec-lint)	success	24	
+38935175049	2026-10-16T16:51:20Z	push	main	docs (spec-lint)	success	25	
+38935175030	2026-10-16T16:51:20Z	push	main	linux (lavapipe)	success	479	
+38935175030	2026-10-16T16:51:20Z	push	main	windows (WARP)	success	703	
+38935175030	2026-10-16T16:51:20Z	push	main	determinism (Windows vs Linux)	success	22	
+38933582428	2026-10-16T16:38:49Z	pull_request	change/test-fast-budget-20	linux (lavapipe)	success	307	
+38933582428	2026-10-16T16:38:49Z	pull_request	change/test-fast-budget-20	windows (WARP)	success	706	
+38933582428	2026-10-16T16:38:49Z	pull_request	change/test-fast-budget-20	determinism (Windows vs Linux)	success	19	
+38933582386	2026-10-16T16:38:49Z	pull_request	change/test-fast-budget-20	docs (spec-lint)	success	26	
+38933575260	2026-10-16T16:38:45Z	push	change/test-fast-budget-20	linux (lavapipe)	success	432	
+38933575260	2026-10-16T16:38:45Z	push	change/test-fast-budget-20	windows (WARP)	success	688	
+38933575260	2026-10-16T16:38:45Z	push	change/test-fast-budget-20	determinism (Windows vs Linux)	success	23	
+38933575176	2026-10-16T16:38:45Z	push	change/test-fast-budget-20	docs (spec-lint)	success	25	
+38933310246	2026-10-16T16:36:42Z	push	main	docs (spec-lint)	success	24	
+38933310242	2026-10-16T16:36:42Z	push	main	windows (WARP)	success	574	
+38933310242	2026-10-16T16:36:42Z	push	main	linux (lavapipe)	success	362	
+38933310242	2026-10-16T16:36:42Z	push	main	determinism (Windows vs Linux)	success	25	
+38931665458	2026-10-16T16:24:12Z	pull_request	change/housekeeping-mechanical	linux (lavapipe)	success	294	
+38931665458	2026-10-16T16:24:12Z	pull_request	change/housekeeping-mechanical	windows (WARP)	success	485	
+38931665458	2026-10-16T16:24:12Z	pull_request	change/housekeeping-mechanical	determinism (Windows vs Linux)	success	22	
+38931665224	2026-10-16T16:24:12Z	pull_request	change/housekeeping-mechanical	docs (spec-lint)	success	22	
+38931658958	2026-10-16T16:24:09Z	push	change/housekeeping-mechanical	docs (spec-lint)	success	29	
+38931658885	2026-10-16T16:24:09Z	push	change/housekeeping-mechanical	windows (WARP)	success	702	
+38931658885	2026-10-16T16:24:09Z	push	change/housekeeping-mechanical	linux (lavapipe)	success	343	
+38931658885	2026-10-16T16:24:09Z	push	change/housekeeping-mechanical	determinism (Windows vs Linux)	success	22	
+38930737565	2026-10-16T16:17:11Z	push	main	docs (spec-lint)	success	22	
+38930613893	2026-10-16T16:16:15Z	pull_request	change/m5-start	docs (spec-lint)	success	25	
+38930598105	2026-10-16T16:16:09Z	push	change/m5-start	docs (spec-lint)	success	21	
+38925923495	2026-10-16T15:41:03Z	push	main	docs (spec-lint)	success	24	
+38925821595	2026-10-16T15:40:17Z	pull_request	change/housekeeping-m4	docs (spec-lint)	success	23	
+38925799198	2026-10-16T15:40:07Z	push	change/housekeeping-m4	docs (spec-lint)	success	22	
+38922808216	2026-10-16T15:18:10Z	push	main	docs (spec-lint)	success	19	
+38922683899	2026-10-16T15:17:14Z	pull_request	change/m4-report	docs (spec-lint)	success	26	
+38922666963	2026-10-16T15:17:07Z	push	change/m4-report	docs (spec-lint)	success	23	
+38889900319	2026-10-16T10:50:48Z	push	main	docs (spec-lint)	success	23	
+38889811910	2026-10-16T10:50:01Z	pull_request	change/m4-window-4	docs (spec-lint)	success	20	
+38889798862	2026-10-16T10:49:53Z	push	change/m4-window-4	docs (spec-lint)	success	21	
+38888334916	2026-10-16T10:36:23Z	push	main	docs (spec-lint)	success	22	
+38888334938	2026-10-16T10:36:23Z	push	main	linux (lavapipe)	success	297	
+38888334938	2026-10-16T10:36:23Z	push	main	windows (WARP)	success	723	
+38888334938	2026-10-16T10:36:23Z	push	main	determinism (Windows vs Linux)	success	24	
+38885748151	2026-10-16T10:13:03Z	pull_request	change/gen-throughput-load	windows (WARP)	success	709	
+38885748151	2026-10-16T10:13:03Z	pull_request	change/gen-throughput-load	linux (lavapipe)	success	294	
+38885748151	2026-10-16T10:13:03Z	pull_request	change/gen-throughput-load	determinism (Windows vs Linux)	success	21	
+38885748141	2026-10-16T10:13:03Z	pull_request	change/gen-throughput-load	docs (spec-lint)	success	22	
+38885739078	2026-10-16T10:12:58Z	push	change/gen-throughput-load	docs (spec-lint)	success	20	
+38884507223	2026-10-16T10:02:04Z	push	change/gen-throughput-load	docs (spec-lint)	success	25	
+38884507214	2026-10-16T10:02:04Z	push	change/gen-throughput-load	linux (lavapipe)	success	429	
+38884507214	2026-10-16T10:02:04Z	push	change/gen-throughput-load	windows (WARP)	success	599	
+38884507214	2026-10-16T10:02:04Z	push	change/gen-throughput-load	determinism (Windows vs Linux)	success	27	
+38876748662	2026-10-16T08:53:48Z	push	main	docs (spec-lint)	success	26	
+38876680660	2026-10-16T08:53:12Z	pull_request	change/accept-adr-0046	docs (spec-lint)	success	21	
+38876668260	2026-10-16T08:53:05Z	push	change/accept-adr-0046	docs (spec-lint)	success	19	
+38876561792	2026-10-16T08:52:08Z	push	main	docs (spec-lint)	success	23	
+38876561808	2026-10-16T08:52:08Z	push	main	windows (WARP)	success	691	
+38876561808	2026-10-16T08:52:08Z	push	main	linux (lavapipe)	success	329	
+38876561808	2026-10-16T08:52:08Z	push	main	determinism (Windows vs Linux)	success	21	
+38875169733	2026-10-16T08:39:42Z	pull_request	change/frame-thread-priority	docs (spec-lint)	success	21	
+38875169696	2026-10-16T08:39:42Z	pull_request	change/frame-thread-priority	windows (WARP)	success	707	
+38875169696	2026-10-16T08:39:42Z	pull_request	change/frame-thread-priority	linux (lavapipe)	success	355	
+38875169696	2026-10-16T08:39:42Z	pull_request	change/frame-thread-priority	determinism (Windows vs Linux)	success	23	
+38875162300	2026-10-16T08:39:38Z	push	change/frame-thread-priority	docs (spec-lint)	success	22	
+38874954567	2026-10-16T08:37:44Z	push	change/frame-thread-priority	docs (spec-lint)	success	25	
+38874256108	2026-10-16T08:31:24Z	push	main	docs (spec-lint)	success	25	
+38874179104	2026-10-16T08:30:44Z	pull_request	change/discrete-gpu-target	docs (spec-lint)	success	22	
+38874166290	2026-10-16T08:30:38Z	push	change/discrete-gpu-target	docs (spec-lint)	success	22	
+38873812990	2026-10-16T08:27:29Z	pull_request	change/frame-thread-priority	docs (spec-lint)	success	21	
+38873812984	2026-10-16T08:27:29Z	pull_request	change/frame-thread-priority	windows (WARP)	success	675	
+38873812984	2026-10-16T08:27:29Z	pull_request	change/frame-thread-priority	linux (lavapipe)	success	437	
+38873812984	2026-10-16T08:27:29Z	pull_request	change/frame-thread-priority	determinism (Windows vs Linux)	success	22	
+38873806290	2026-10-16T08:27:25Z	push	change/frame-thread-priority	docs (spec-lint)	success	21	
+38873806379	2026-10-16T08:27:25Z	push	change/frame-thread-priority	linux (lavapipe)	success	367	
+38873806379	2026-10-16T08:27:25Z	push	change/frame-thread-priority	windows (WARP)	success	700	
+38873806379	2026-10-16T08:27:25Z	push	change/frame-thread-priority	determinism (Windows vs Linux)	success	23	
+38868064756	2026-10-16T07:34:19Z	push	main	docs (spec-lint)	success	21	
+38867978078	2026-10-16T07:33:31Z	pull_request	change/m4-window-3	docs (spec-lint)	success	22	
+38867968606	2026-10-16T07:33:26Z	push	change/m4-window-3	docs (spec-lint)	success	29	
+38866771189	2026-10-16T07:22:10Z	push	main	docs (spec-lint)	success	22	
+38866676874	2026-10-16T07:21:19Z	pull_request	change/prefill-store-run	docs (spec-lint)	success	26	
+38866671824	2026-10-16T07:21:16Z	push	change/prefill-store-run	docs (spec-lint)	success	23	
+38866471604	2026-10-16T07:19:23Z	push	main	docs (spec-lint)	success	25	
+38866471480	2026-10-16T07:19:23Z	push	main	linux (lavapipe)	success	428	
+38866471480	2026-10-16T07:19:23Z	push	main	windows (WARP)	success	565	
+38866471480	2026-10-16T07:19:23Z	push	main	determinism (Windows vs Linux)	success	19	
+38865263569	2026-10-16T07:07:49Z	push	main	docs (spec-lint)	success	22	
+38865263541	2026-10-16T07:07:49Z	push	main	linux (lavapipe)	success	421	
+38865263541	2026-10-16T07:07:49Z	push	main	windows (WARP)	success	704	
+38865263541	2026-10-16T07:07:49Z	push	main	determinism (Windows vs Linux)	success	24	
+38865214521	2026-10-16T07:07:21Z	pull_request	change/coarse-prefill	docs (spec-lint)	success	25	
+38865214522	2026-10-16T07:07:21Z	pull_request	change/coarse-prefill	linux (lavapipe)	success	352	
+38865214522	2026-10-16T07:07:21Z	pull_request	change/coarse-prefill	windows (WARP)	success	681	
+38865214522	2026-10-16T07:07:21Z	pull_request	change/coarse-prefill	determinism (Windows vs Linux)	success	21	
+38865208137	2026-10-16T07:07:17Z	push	change/coarse-prefill	docs (spec-lint)	success	29	
+38864578544	2026-10-16T07:01:16Z	push	main	docs (spec-lint)	success	19	
+38864507561	2026-10-16T07:00:37Z	pull_request	change/architect-memory	docs (spec-lint)	success	23	
+38864496384	2026-10-16T07:00:32Z	push	change/architect-memory	docs (spec-lint)	success	21	
+38864097060	2026-10-16T06:56:28Z	push	main	docs (spec-lint)	success	23	
+38864031352	2026-10-16T06:55:50Z	pull_request	change/accept-adr-0041	docs (spec-lint)	success	24	
+38864025280	2026-10-16T06:55:46Z	push	change/accept-adr-0041	docs (spec-lint)	success	21	
+38863976347	2026-10-16T06:55:17Z	pull_request	docs/spike-08-ocean-connectivity	linux (lavapipe)	success	431	
+38863976347	2026-10-16T06:55:17Z	pull_request	docs/spike-08-ocean-connectivity	windows (WARP)	success	693	
+38863976347	2026-10-16T06:55:17Z	pull_request	docs/spike-08-ocean-connectivity	determinism (Windows vs Linux)	success	20	
+38863976237	2026-10-16T06:55:17Z	pull_request	docs/spike-08-ocean-connectivity	docs (spec-lint)	success	22	
+38863970453	2026-10-16T06:55:14Z	push	docs/spike-08-ocean-connectivity	linux (lavapipe)	success	370	
+38863970453	2026-10-16T06:55:14Z	push	docs/spike-08-ocean-connectivity	windows (WARP)	success	700	
+38863970453	2026-10-16T06:55:14Z	push	docs/spike-08-ocean-connectivity	determinism (Windows vs Linux)	success	24	
+38863970232	2026-10-16T06:55:13Z	push	docs/spike-08-ocean-connectivity	docs (spec-lint)	success	23	
+38863889126	2026-10-16T06:54:26Z	push	spike/spike-08-ocean-connectivity	linux (lavapipe)	success	423	
+38863889126	2026-10-16T06:54:26Z	push	spike/spike-08-ocean-connectivity	windows (WARP)	success	471	
+38863889126	2026-10-16T06:54:26Z	push	spike/spike-08-ocean-connectivity	determinism (Windows vs Linux)	success	26	
+38863879607	2026-10-16T06:54:20Z	pull_request	change/coarse-prefill	windows (WARP)	success	705	
+38863879607	2026-10-16T06:54:20Z	pull_request	change/coarse-prefill	linux (lavapipe)	success	423	
+38863879607	2026-10-16T06:54:20Z	pull_request	change/coarse-prefill	determinism (Windows vs Linux)	success	25	
+38863879687	2026-10-16T06:54:20Z	pull_request	change/coarse-prefill	docs (spec-lint)	success	25	
+38863853426	2026-10-16T06:54:05Z	push	change/coarse-prefill	windows (WARP)	success	737	
+38863853426	2026-10-16T06:54:05Z	push	change/coarse-prefill	linux (lavapipe)	success	311	
+38863853426	2026-10-16T06:54:05Z	push	change/coarse-prefill	determinism (Windows vs Linux)	success	23	
+38863853547	2026-10-16T06:54:05Z	push	change/coarse-prefill	docs (spec-lint)	success	21	
+38863479330	2026-10-16T06:50:16Z	push	main	windows (WARP)	success	685	
+38863479330	2026-10-16T06:50:16Z	push	main	linux (lavapipe)	success	298	
+38863479330	2026-10-16T06:50:16Z	push	main	determinism (Windows vs Linux)	success	24	
+38863479541	2026-10-16T06:50:16Z	push	main	docs (spec-lint)	success	23	
+38862400914	2026-10-16T06:38:56Z	push	main	docs (spec-lint)	success	24	
+38862338365	2026-10-16T06:38:16Z	pull_request	change/accept-adr-0040	docs (spec-lint)	success	20	
+38862333901	2026-10-16T06:38:13Z	push	change/accept-adr-0040	docs (spec-lint)	success	22	
+38862279401	2026-10-16T06:37:37Z	pull_request	docs/spike-09-atmosphere-f32	linux (lavapipe)	success	428	
+38862279401	2026-10-16T06:37:37Z	pull_request	docs/spike-09-atmosphere-f32	windows (WARP)	success	699	
+38862279401	2026-10-16T06:37:37Z	pull_request	docs/spike-09-atmosphere-f32	determinism (Windows vs Linux)	success	20	
+38862279342	2026-10-16T06:37:37Z	pull_request	docs/spike-09-atmosphere-f32	docs (spec-lint)	success	21	
+38862273990	2026-10-16T06:37:33Z	push	spike/spike-09-atmosphere-f32	linux (lavapipe)	success	289	
+38862273990	2026-10-16T06:37:33Z	push	spike/spike-09-atmosphere-f32	windows (WARP)	success	713	
+38862273990	2026-10-16T06:37:33Z	push	spike/spike-09-atmosphere-f32	determinism (Windows vs Linux)	success	25	
+38862271471	2026-10-16T06:37:32Z	push	docs/spike-09-atmosphere-f32	windows (WARP)	success	709	
+38862271471	2026-10-16T06:37:32Z	push	docs/spike-09-atmosphere-f32	linux (lavapipe)	success	346	
+38862271471	2026-10-16T06:37:32Z	push	docs/spike-09-atmosphere-f32	determinism (Windows vs Linux)	success	25	
+38862271389	2026-10-16T06:37:32Z	push	docs/spike-09-atmosphere-f32	docs (spec-lint)	success	24	
+38861501484	2026-10-16T06:29:32Z	push	main	docs (spec-lint)	success	22	
+38861501385	2026-10-16T06:29:32Z	push	main	linux (lavapipe)	success	297	
+38861501385	2026-10-16T06:29:32Z	push	main	windows (WARP)	success	469	
+38861501385	2026-10-16T06:29:32Z	push	main	determinism (Windows vs Linux)	success	23	
+38860832893	2026-10-16T06:22:25Z	push	main	windows (WARP)	success	686	
+38860832893	2026-10-16T06:22:25Z	push	main	linux (lavapipe)	success	438	
+38860832893	2026-10-16T06:22:25Z	push	main	determinism (Windows vs Linux)	success	24	
+38860665054	2026-10-16T06:20:36Z	push	main	linux (lavapipe)	success	353	
+38860665054	2026-10-16T06:20:36Z	push	main	windows (WARP)	success	715	
+38860665054	2026-10-16T06:20:36Z	push	main	determinism (Windows vs Linux)	success	21	
+38860275385	2026-10-16T06:16:25Z	pull_request	change/light-docs-ci	windows (WARP)	success	725	
+38860275385	2026-10-16T06:16:25Z	pull_request	change/light-docs-ci	linux (lavapipe)	success	425	
+38860275385	2026-10-16T06:16:25Z	pull_request	change/light-docs-ci	determinism (Windows vs Linux)	success	24	
+38860275308	2026-10-16T06:16:25Z	pull_request	change/light-docs-ci	docs (spec-lint)	success	25	
+38860269992	2026-10-16T06:16:21Z	push	change/light-docs-ci	linux (lavapipe)	success	425	
+38860269992	2026-10-16T06:16:21Z	push	change/light-docs-ci	windows (WARP)	success	448	
+38860269992	2026-10-16T06:16:21Z	push	change/light-docs-ci	determinism (Windows vs Linux)	success	21	
+38860255603	2026-10-16T06:16:12Z	pull_request	change/light-docs-ci	linux (lavapipe)	success	357	
+38860255603	2026-10-16T06:16:12Z	pull_request	change/light-docs-ci	windows (WARP)	success	698	
+38860255603	2026-10-16T06:16:12Z	pull_request	change/light-docs-ci	determinism (Windows vs Linux)	success	20	
+38860255679	2026-10-16T06:16:12Z	pull_request	change/light-docs-ci	docs (spec-lint)	success	26	
+38860250700	2026-10-16T06:16:09Z	push	change/light-docs-ci	linux (lavapipe)	success	391	
+38860250700	2026-10-16T06:16:09Z	push	change/light-docs-ci	windows (WARP)	success	692	
+38860250700	2026-10-16T06:16:09Z	push	change/light-docs-ci	determinism (Windows vs Linux)	success	20	
+38860250708	2026-10-16T06:16:09Z	push	change/light-docs-ci	docs (spec-lint)	success	19	
+38859766237	2026-10-16T06:10:58Z	push	main	windows (WARP)	success	446	
+38859766237	2026-10-16T06:10:58Z	push	main	linux (lavapipe)	success	440	
+38859766237	2026-10-16T06:10:58Z	push	main	determinism (Windows vs Linux)	success	21	
+38859629031	2026-10-16T06:09:33Z	pull_request	change/test-fast-budget	linux (lavapipe)	success	426	
+38859629031	2026-10-16T06:09:33Z	pull_request	change/test-fast-budget	windows (WARP)	success	728	
+38859629031	2026-10-16T06:09:33Z	pull_request	change/test-fast-budget	determinism (Windows vs Linux)	success	25	
+38859625227	2026-10-16T06:09:31Z	push	change/test-fast-budget	windows (WARP)	success	700	
+38859625227	2026-10-16T06:09:31Z	push	change/test-fast-budget	linux (lavapipe)	success	420	
+38859625227	2026-10-16T06:09:31Z	push	change/test-fast-budget	determinism (Windows vs Linux)	success	23	
+38859610078	2026-10-16T06:09:21Z	pull_request	change/spikes-briefing	windows (WARP)	success	633	
+38859610078	2026-10-16T06:09:21Z	pull_request	change/spikes-briefing	linux (lavapipe)	success	408	
+38859610078	2026-10-16T06:09:21Z	pull_request	change/spikes-briefing	determinism (Windows vs Linux)	success	20	
+38859606128	2026-10-16T06:09:18Z	push	change/spikes-briefing	linux (lavapipe)	success	409	
+38859606128	2026-10-16T06:09:18Z	push	change/spikes-briefing	windows (WARP)	success	558	
+38859606128	2026-10-16T06:09:18Z	push	change/spikes-briefing	determinism (Windows vs Linux)	success	24	
+38859008648	2026-10-16T06:02:55Z	push	main	linux (lavapipe)	success	416	
+38859008648	2026-10-16T06:02:55Z	push	main	windows (WARP)	success	463	
+38859008648	2026-10-16T06:02:55Z	push	main	determinism (Windows vs Linux)	success	20	
+38858610039	2026-10-16T05:58:38Z	pull_request	change/housekeeping-skill	windows (WARP)	success	697	
+38858610039	2026-10-16T05:58:38Z	pull_request	change/housekeeping-skill	linux (lavapipe)	success	363	
+38858610039	2026-10-16T05:58:38Z	pull_request	change/housekeeping-skill	determinism (Windows vs Linux)	success	21	
+38858606181	2026-10-16T05:58:35Z	push	change/housekeeping-skill	windows (WARP)	success	452	
+38858606181	2026-10-16T05:58:35Z	push	change/housekeeping-skill	linux (lavapipe)	success	280	
+38858606181	2026-10-16T05:58:35Z	push	change/housekeeping-skill	determinism (Windows vs Linux)	success	32	
+38858428206	2026-10-16T05:56:31Z	pull_request	change/test-fast-budget	linux (lavapipe)	success	435	
+38858428206	2026-10-16T05:56:31Z	pull_request	change/test-fast-budget	windows (WARP)	success	704	
+38858428206	2026-10-16T05:56:31Z	pull_request	change/test-fast-budget	determinism (Windows vs Linux)	success	26	
+38858425018	2026-10-16T05:56:29Z	push	change/test-fast-budget	linux (lavapipe)	success	417	
+38858425018	2026-10-16T05:56:29Z	push	change/test-fast-budget	windows (WARP)	success	479	
+38858425018	2026-10-16T05:56:29Z	push	change/test-fast-budget	determinism (Windows vs Linux)	success	22	
+38857973401	2026-10-16T05:51:28Z	pull_request	change/test-fast-budget	windows (WARP)	success	680	
+38857973401	2026-10-16T05:51:28Z	pull_request	change/test-fast-budget	linux (lavapipe)	success	428	
+38857973401	2026-10-16T05:51:28Z	pull_request	change/test-fast-budget	determinism (Windows vs Linux)	success	16	
+38857963247	2026-10-16T05:51:22Z	push	change/test-fast-budget	linux (lavapipe)	success	417	
+38857963247	2026-10-16T05:51:22Z	push	change/test-fast-budget	windows (WARP)	success	698	
+38857963247	2026-10-16T05:51:22Z	push	change/test-fast-budget	determinism (Windows vs Linux)	success	20	
+38857876792	2026-10-16T05:50:24Z	pull_request	change/adr-0045-and-dive-decision	linux (lavapipe)	success	434	
+38857876792	2026-10-16T05:50:24Z	pull_request	change/adr-0045-and-dive-decision	windows (WARP)	success	700	
+38857876792	2026-10-16T05:50:24Z	pull_request	change/adr-0045-and-dive-decision	determinism (Windows vs Linux)	success	21	
+38857871677	2026-10-16T05:50:21Z	push	change/adr-0045-and-dive-decision	windows (WARP)	success	576	
+38857871677	2026-10-16T05:50:21Z	push	change/adr-0045-and-dive-decision	linux (lavapipe)	success	421	
+38857871677	2026-10-16T05:50:21Z	push	change/adr-0045-and-dive-decision	determinism (Windows vs Linux)	success	21	
+38857592074	2026-10-16T05:47:12Z	push	main	windows (WARP)	success	583	
+38857592074	2026-10-16T05:47:12Z	push	main	linux (lavapipe)	success	426	
+38857592074	2026-10-16T05:47:12Z	push	main	determinism (Windows vs Linux)	success	19	
+38856544768	2026-10-16T05:35:12Z	pull_request	change/warp-golden-flake-rate	windows (WARP)	success	678	
+38856544768	2026-10-16T05:35:12Z	pull_request	change/warp-golden-flake-rate	linux (lavapipe)	success	361	
+38856544768	2026-10-16T05:35:12Z	pull_request	change/warp-golden-flake-rate	determinism (Windows vs Linux)	success	22	
+38856539152	2026-10-16T05:35:08Z	push	change/warp-golden-flake-rate	windows (WARP)	success	616	
+38856539152	2026-10-16T05:35:08Z	push	change/warp-golden-flake-rate	linux (lavapipe)	success	453	
+38856539152	2026-10-16T05:35:08Z	push	change/warp-golden-flake-rate	determinism (Windows vs Linux)	success	24	
+38856237025	2026-10-16T05:31:37Z	push	main	linux (lavapipe)	success	426	
+38856237025	2026-10-16T05:31:37Z	push	main	windows (WARP)	success	684	
+38856237025	2026-10-16T05:31:37Z	push	main	determinism (Windows vs Linux)	success	18	
+38855673882	2026-10-16T05:25:10Z	pull_request	change/adr-0045-and-dive-decision	linux (lavapipe)	success	419	
+38855673882	2026-10-16T05:25:10Z	pull_request	change/adr-0045-and-dive-decision	windows (WARP)	success	690	
+38855673882	2026-10-16T05:25:10Z	pull_request	change/adr-0045-and-dive-decision	determinism (Windows vs Linux)	success	23	
+38855668635	2026-10-16T05:25:07Z	push	change/adr-0045-and-dive-decision	linux (lavapipe)	success	429	
+38855668635	2026-10-16T05:25:07Z	push	change/adr-0045-and-dive-decision	windows (WARP)	success	689	
+38855668635	2026-10-16T05:25:07Z	push	change/adr-0045-and-dive-decision	determinism (Windows vs Linux)	success	21	
+38855158497	2026-10-16T05:19:17Z	pull_request	change/early-frame-gpu-wait	windows (WARP)	success	700	
+38855158497	2026-10-16T05:19:17Z	pull_request	change/early-frame-gpu-wait	linux (lavapipe)	success	424	
+38855158497	2026-10-16T05:19:17Z	pull_request	change/early-frame-gpu-wait	determinism (Windows vs Linux)	success	23	
+38855153626	2026-10-16T05:19:14Z	push	change/early-frame-gpu-wait	windows (WARP)	success	694	
+38855153626	2026-10-16T05:19:14Z	push	change/early-frame-gpu-wait	linux (lavapipe)	success	286	
+38855153626	2026-10-16T05:19:14Z	push	change/early-frame-gpu-wait	determinism (Windows vs Linux)	success	20	
+38854303169	2026-10-16T05:09:25Z	push	main	windows (WARP)	success	639	
+38854303169	2026-10-16T05:09:25Z	push	main	linux (lavapipe)	success	358	
+38854303169	2026-10-16T05:09:25Z	push	main	determinism (Windows vs Linux)	success	20	
+38853212801	2026-10-16T04:56:46Z	pull_request	change/upload-time-variance	windows (WARP)	success	607	
+38853212801	2026-10-16T04:56:46Z	pull_request	change/upload-time-variance	linux (lavapipe)	success	278	
+38853212801	2026-10-16T04:56:46Z	pull_request	change/upload-time-variance	determinism (Windows vs Linux)	success	19	
+38853208751	2026-10-16T04:56:43Z	push	change/upload-time-variance	windows (WARP)	success	698	
+38853208751	2026-10-16T04:56:43Z	push	change/upload-time-variance	linux (lavapipe)	success	336	
+38853208751	2026-10-16T04:56:43Z	push	change/upload-time-variance	determinism (Windows vs Linux)	success	23	
+38847009469	2026-10-16T03:44:22Z	push	main	linux (lavapipe)	success	420	
+38847009469	2026-10-16T03:44:22Z	push	main	windows (WARP)	success	694	
+38847009469	2026-10-16T03:44:22Z	push	main	determinism (Windows vs Linux)	success	23	
+38845964971	2026-10-16T03:31:44Z	pull_request	change/dispatch-throughput	windows (WARP)	success	689	
+38845964971	2026-10-16T03:31:44Z	pull_request	change/dispatch-throughput	linux (lavapipe)	success	412	
+38845964971	2026-10-16T03:31:44Z	pull_request	change/dispatch-throughput	determinism (Windows vs Linux)	success	29	
+38845959484	2026-10-16T03:31:40Z	push	change/dispatch-throughput	linux (lavapipe)	success	408	
+38845959484	2026-10-16T03:31:40Z	push	change/dispatch-throughput	windows (WARP)	success	480	
+38845959484	2026-10-16T03:31:40Z	push	change/dispatch-throughput	determinism (Windows vs Linux)	success	24	
+38844273588	2026-10-16T03:11:32Z	push	main	linux (lavapipe)	success	370	
+38844273588	2026-10-16T03:11:32Z	push	main	windows (WARP)	success	703	
+38844273588	2026-10-16T03:11:32Z	push	main	determinism (Windows vs Linux)	success	25	
+38843215416	2026-10-16T02:59:13Z	pull_request	change/m4-window-2	linux (lavapipe)	success	361	
+38843215416	2026-10-16T02:59:13Z	pull_request	change/m4-window-2	windows (WARP)	success	676	
+38843215416	2026-10-16T02:59:13Z	pull_request	change/m4-window-2	determinism (Windows vs Linux)	success	20	
+38843210559	2026-10-16T02:59:10Z	push	change/m4-window-2	linux (lavapipe)	success	280	
+38843210559	2026-10-16T02:59:10Z	push	change/m4-window-2	windows (WARP)	success	678	
+38843210559	2026-10-16T02:59:10Z	push	change/m4-window-2	determinism (Windows vs Linux)	success	22	
+38841928203	2026-10-16T02:43:58Z	push	main	linux (lavapipe)	success	408	
+38841928203	2026-10-16T02:43:58Z	push	main	windows (WARP)	success	679	
+38841928203	2026-10-16T02:43:58Z	push	main	determinism (Windows vs Linux)	success	22	
+38840889102	2026-10-16T02:31:43Z	pull_request	change/upload-batching	windows (WARP)	success	613	
+38840889102	2026-10-16T02:31:43Z	pull_request	change/upload-batching	linux (lavapipe)	success	409	
+38840889102	2026-10-16T02:31:43Z	pull_request	change/upload-batching	determinism (Windows vs Linux)	success	23	
+38840878292	2026-10-16T02:31:36Z	push	change/upload-batching	windows (WARP)	success	683	
+38840878292	2026-10-16T02:31:36Z	push	change/upload-batching	linux (lavapipe)	success	429	
+38840878292	2026-10-16T02:31:36Z	push	change/upload-batching	determinism (Windows vs Linux)	success	22	
+38838634178	2026-10-16T02:05:37Z	push	main	linux (lavapipe)	success	292	
+38838634178	2026-10-16T02:05:37Z	push	main	windows (WARP)	success	434	
+38838634178	2026-10-16T02:05:37Z	push	main	determinism (Windows vs Linux)	success	21	
+38837586465	2026-10-16T01:53:58Z	pull_request	change/first-frame-warmup	windows (WARP)	success	663	
+38837586465	2026-10-16T01:53:58Z	pull_request	change/first-frame-warmup	linux (lavapipe)	success	412	
+38837586465	2026-10-16T01:53:58Z	pull_request	change/first-frame-warmup	determinism (Windows vs Linux)	success	19	
+38837581567	2026-10-16T01:53:55Z	push	change/first-frame-warmup	windows (WARP)	success	570	
+38837581567	2026-10-16T01:53:55Z	push	change/first-frame-warmup	linux (lavapipe)	success	392	
+38837581567	2026-10-16T01:53:55Z	push	change/first-frame-warmup	determinism (Windows vs Linux)	success	20	
+38837319935	2026-10-16T01:51:01Z	push	main	windows (WARP)	success	671	
+38837319935	2026-10-16T01:51:01Z	push	main	linux (lavapipe)	success	405	
+38837319935	2026-10-16T01:51:01Z	push	main	determinism (Windows vs Linux)	success	26	
+38836271210	2026-10-16T01:39:12Z	pull_request	change/owner-dive-cold-start	windows (WARP)	success	597	
+38836271210	2026-10-16T01:39:12Z	pull_request	change/owner-dive-cold-start	linux (lavapipe)	success	272	
+38836271210	2026-10-16T01:39:12Z	pull_request	change/owner-dive-cold-start	determinism (Windows vs Linux)	success	18	
+38836266311	2026-10-16T01:39:09Z	push	change/owner-dive-cold-start	windows (WARP)	success	670	
+38836266311	2026-10-16T01:39:09Z	push	change/owner-dive-cold-start	linux (lavapipe)	success	398	
+38836266311	2026-10-16T01:39:09Z	push	change/owner-dive-cold-start	determinism (Windows vs Linux)	success	22	
+38836147065	2026-10-16T01:37:47Z	push	main	windows (WARP)	success	661	
+38836147065	2026-10-16T01:37:47Z	push	main	linux (lavapipe)	success	404	
+38836147065	2026-10-16T01:37:47Z	push	main	determinism (Windows vs Linux)	success	24	
+38835201519	2026-10-16T01:27:19Z	pull_request	change/cold-plan-origin-heights	windows (WARP)	success	583	
+38835201519	2026-10-16T01:27:19Z	pull_request	change/cold-plan-origin-heights	linux (lavapipe)	success	359	
+38835201519	2026-10-16T01:27:19Z	pull_request	change/cold-plan-origin-heights	determinism (Windows vs Linux)	success	24	
+38835196447	2026-10-16T01:27:16Z	push	change/cold-plan-origin-heights	linux (lavapipe)	success	296	
+38835196447	2026-10-16T01:27:16Z	push	change/cold-plan-origin-heights	windows (WARP)	success	447	
+38835196447	2026-10-16T01:27:16Z	push	change/cold-plan-origin-heights	determinism (Windows vs Linux)	success	20	
+38831664358	2026-10-16T00:49:20Z	push	main	windows (WARP)	success	674	
+38831664358	2026-10-16T00:49:20Z	push	main	linux (lavapipe)	success	399	
+38831664358	2026-10-16T00:49:20Z	push	main	determinism (Windows vs Linux)	success	16	
+38830503632	2026-10-16T00:37:15Z	pull_request	change/scheduler-incremental	windows (WARP)	success	681	
+38830503632	2026-10-16T00:37:15Z	pull_request	change/scheduler-incremental	linux (lavapipe)	success	420	
+38830503632	2026-10-16T00:37:15Z	pull_request	change/scheduler-incremental	determinism (Windows vs Linux)	success	22	
+38830489520	2026-10-16T00:37:06Z	push	change/scheduler-incremental	windows (WARP)	success	663	
+38830489520	2026-10-16T00:37:06Z	push	change/scheduler-incremental	linux (lavapipe)	success	393	
+38830489520	2026-10-16T00:37:06Z	push	change/scheduler-incremental	determinism (Windows vs Linux)	success	21	

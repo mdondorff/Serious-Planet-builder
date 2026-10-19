@@ -84,16 +84,125 @@ pub fn group(lines: &[String]) -> BTreeMap<String, Vec<f64>> {
     out
 }
 
+/// Where `--record` keeps the per-job CI evidence (BUILD-020), relative to the repository root.
+pub const HISTORY: &str = "docs/perf/ci-history.tsv";
+/// The most runs one `gh run list` call returns for `--record`; a range that reaches it is cut off and the tool says so.
+const RECORD_LIMIT: usize = 1000;
+const HISTORY_HEADER: &str = "run\tcreated\tevent\tbranch\tjob\tconclusion\tseconds\tfailed_steps";
+
+/// The history rows of one run: one per job line `name<TAB>start<TAB>end<TAB>conclusion<TAB>failed steps` that ran to a verdict.
+pub fn history_rows(run: &str, created: &str, event: &str, branch: &str, job_lines: &[String]) -> Vec<String> {
+    job_lines
+        .iter()
+        .filter_map(|l| {
+            let (name, secs) = job_seconds(l)?;
+            let mut f = l.split('\t').skip(3);
+            let conclusion = f.next()?.trim();
+            let failed = f.next().unwrap_or("").trim();
+            Some(format!("{run}\t{created}\t{event}\t{branch}\t{name}\t{conclusion}\t{secs:.0}\t{failed}"))
+        })
+        .collect()
+}
+
+/// The run ids already in a history file (its first column, without the header).
+pub fn recorded_runs(text: &str) -> std::collections::HashSet<String> {
+    text.lines().skip(1).filter_map(|l| l.split('\t').next()).filter(|id| !id.is_empty()).map(String::from).collect()
+}
+
+/// The ids of `ids` that are not recorded yet, in order.
+pub fn new_runs(known: &std::collections::HashSet<String>, ids: &[String]) -> Vec<String> {
+    ids.iter().filter(|id| !known.contains(*id)).cloned().collect()
+}
+
+/// `cargo xtask ci-stats --record --since D [--until D]`: appends the jobs of every completed run created in the range to [`HISTORY`].
+fn record(root: &Path, since: &str, until: Option<&str>) -> Res {
+    if parse_iso(&format!("{since}T00:00:00Z")).is_none() || until.is_some_and(|u| parse_iso(&format!("{u}T00:00:00Z")).is_none()) {
+        return Err("--since and --until take a date YYYY-MM-DD".into());
+    }
+    let created = format!("{since}..{}", until.unwrap_or("*"));
+    let list = capture(
+        root,
+        "gh",
+        &[
+            "run",
+            "list",
+            "--status",
+            "completed",
+            "--created",
+            &created,
+            "--limit",
+            &RECORD_LIMIT.to_string(),
+            "--json",
+            "databaseId,createdAt,event,headBranch",
+            "--jq",
+            ".[] | [.databaseId, .createdAt, .event, .headBranch] | @tsv",
+        ],
+    )?;
+    let path = root.join(HISTORY);
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let known = recorded_runs(&existing);
+    let runs: Vec<Vec<&str>> = list.lines().map(|l| l.split('\t').collect()).filter(|f: &Vec<&str>| f.len() == 4).collect();
+    let ids: Vec<String> = runs.iter().map(|f| f[0].to_string()).collect();
+    let fresh = new_runs(&known, &ids);
+    let mut out = if existing.is_empty() { format!("{HISTORY_HEADER}\n") } else { existing };
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    let mut rows = 0;
+    for f in runs.iter().filter(|f| fresh.iter().any(|i| i == f[0])) {
+        let tsv = capture(
+            root,
+            "gh",
+            &[
+                "run",
+                "view",
+                f[0],
+                "--json",
+                "jobs",
+                "--jq",
+                ".jobs[] | [.name, .startedAt, .completedAt, .conclusion, ([.steps[] | select(.conclusion == \"failure\") | .name] | join(\"+\"))] | @tsv",
+            ],
+        )?;
+        let jobs: Vec<String> = tsv.lines().map(String::from).collect();
+        for row in history_rows(f[0], f[1], f[2], f[3], &jobs) {
+            out.push_str(&row);
+            out.push('\n');
+            rows += 1;
+        }
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    std::fs::write(&path, out).map_err(|e| format!("{}: {e}", path.display()))?;
+    if ids.len() >= RECORD_LIMIT {
+        eprintln!("warning: gh returned {RECORD_LIMIT} runs, its limit: the range is cut off; record it again in shorter ranges (--since D --until D)");
+    }
+    println!("ci-stats --record: {} runs in range, {} new, {rows} job rows added to {HISTORY}", ids.len(), fresh.len());
+    Ok(())
+}
+
 pub fn run(root: &Path, args: &[String]) -> Res {
     let mut runs = DEFAULT_RUNS;
+    let (mut recording, mut since, mut until): (bool, Option<String>, Option<String>) = (false, None, None);
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--runs" => {
                 runs = it.next().and_then(|v| v.parse().ok()).filter(|n| *n > 0).ok_or("--runs needs a positive number")?;
             }
-            other => return Err(format!("unknown ci-stats argument '{other}'\n(usage: cargo xtask ci-stats [--runs N])")),
+            "--record" => recording = true,
+            "--since" => since = Some(it.next().ok_or("--since needs a date YYYY-MM-DD")?.clone()),
+            "--until" => until = Some(it.next().ok_or("--until needs a date YYYY-MM-DD")?.clone()),
+            other => {
+                return Err(format!(
+                    "unknown ci-stats argument '{other}'\n(usage: cargo xtask ci-stats [--runs N] | ci-stats --record --since YYYY-MM-DD [--until YYYY-MM-DD])"
+                ))
+            }
         }
+    }
+    if recording {
+        let since = since.ok_or("ci-stats --record needs --since YYYY-MM-DD")?;
+        return record(root, &since, until.as_deref());
     }
     let limit = runs.to_string();
     let ids = capture(
@@ -137,6 +246,31 @@ mod tests {
         assert_eq!(job_seconds("x\t2026-10-18T17:00:00Z\t2026-10-18T17:00:05Z\tcancelled"), None);
         assert_eq!(job_seconds("x\t2026-10-18T17:00:00Z\t2026-10-18T17:00:05Z\tskipped"), None);
         assert_eq!(job_seconds("x\t\t\tsuccess"), None, "a job with no times");
+    }
+
+    // spec: BUILD-020
+    #[test]
+    fn a_run_gives_one_row_per_job_with_a_verdict_and_a_recorded_run_is_skipped() {
+        let jobs: Vec<String> = [
+            "linux (lavapipe) A+B\t2026-10-19T10:00:00Z\t2026-10-19T10:05:00Z\tsuccess\t",
+            "windows (WARP) C 1/2\t2026-10-19T10:00:00Z\t2026-10-19T10:01:00Z\tfailure\ttest gpu (tier C, software adapter)",
+            "docs (spec-lint)\t2026-10-19T10:00:00Z\t2026-10-19T10:00:00Z\tskipped\t",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let rows = history_rows("101", "2026-10-19T09:59:00Z", "pull_request", "change/x", &jobs);
+        assert_eq!(
+            rows,
+            [
+                "101\t2026-10-19T09:59:00Z\tpull_request\tchange/x\tlinux (lavapipe) A+B\tsuccess\t300\t",
+                "101\t2026-10-19T09:59:00Z\tpull_request\tchange/x\twindows (WARP) C 1/2\tfailure\t60\ttest gpu (tier C, software adapter)",
+            ]
+        );
+        let file = format!("{HISTORY_HEADER}\n99\t2026-10-18T09:00:00Z\tpush\tmain\tdocs\tsuccess\t30\t\n");
+        let known = recorded_runs(&file);
+        assert!(known.contains("99") && !known.contains("run") && !known.contains("101"), "{known:?}");
+        assert_eq!(new_runs(&known, &["99".to_string(), "101".to_string()]), ["101"], "run 99 is skipped");
     }
 
     // spec: BUILD-014
