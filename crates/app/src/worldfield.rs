@@ -625,11 +625,19 @@ fn with_stamps<'a>(base: Box<dyn HeightField + 'a>, def: &Arc<WorldDefinition>) 
         StampStage::new(field, items, BodyId::PLANET, layer, index as u32, STAMP_STAGE_VERSION)
             .ok_or_else(|| "the definition has stamps but no usable radius".to_string())
     };
+    // The index of a stage is its layer's place in the stack of ADR 0007 (a layer outside it follows the known ones, in name order), not
+    // its place among the layers that hold stamps: a first stamp in a lower layer re-keys nothing above it.
+    let unknown: Vec<&String> = layers.iter().filter(|l| !planet_world_def::LAYER_STACK.contains(&l.as_str())).collect();
+    let index_of = |layer: &str| {
+        planet_world_def::LAYER_STACK.iter().position(|s| *s == layer).unwrap_or_else(|| {
+            planet_world_def::LAYER_STACK.len() + unknown.iter().position(|u| u.as_str() == layer).expect("a layer of the list")
+        })
+    };
     let mut field: Arc<dyn HeightField + 'a> = Arc::from(base);
-    for (k, layer) in below.iter().enumerate() {
-        field = Arc::new(stage(field, layer, k)?);
+    for layer in below {
+        field = Arc::new(stage(field, layer, index_of(layer))?);
     }
-    Ok(Box::new(stage(field, top, below.len())?))
+    Ok(Box::new(stage(field, top, index_of(top))?))
 }
 
 /// Reject what a world-selected terrain run cannot do, before any GPU work (GEN-018). `--world` and `--global-res` belong to

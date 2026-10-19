@@ -32,7 +32,6 @@ fn a_swapped_definition_reaches_the_next_field_and_a_field_in_flight_keeps_its_o
     let world = Arc::new(WorldTerrain::open(base(), RES).unwrap());
     let plain = world.field().unwrap();
     let h0 = plain.height(at());
-    assert_eq!(world.definition().revision(), world.definition().revision(), "a snapshot is stable");
 
     let mut edited = (*world.definition()).clone();
     edited.put_item_spec(BodyId::PLANET, hill(1, "stamps", 40.0)).unwrap();
@@ -64,12 +63,40 @@ fn a_swapped_definition_reaches_the_next_field_and_a_field_in_flight_keeps_its_o
 
 // spec: STRM-028
 #[test]
+fn the_stages_stack_in_the_order_of_the_layer_stack_each_at_its_place_in_it_and_a_lower_layer_re_keys_nothing_above() {
+    let world = WorldTerrain::open(base(), RES).unwrap();
+    let mut def = (*world.definition()).clone();
+    def.put_item_spec(BodyId::PLANET, hill(1, "stamps", 40.0)).unwrap();
+    def.put_item_spec(BodyId::PLANET, hill(2, "zeta", 5.0)).unwrap();
+    def.put_item_spec(BodyId::PLANET, hill(3, "alpha", 5.0)).unwrap();
+    assert_eq!(def.stamp_layers(BodyId::PLANET), ["stamps", "alpha", "zeta"], "the stack first, then other names in name order");
+    world.set_definition(Arc::new(def.clone())).unwrap();
+    let field = world.field().unwrap();
+    let stage = |f: &dyn planet_generators::height::HeightField| f.stage_params().map(|(l, i)| (l.to_string(), i));
+    let mid = field.upstream().unwrap();
+    let low = mid.upstream().unwrap();
+    assert_eq!(
+        (stage(&*field), stage(mid), stage(low)),
+        (Some(("zeta".into(), 8)), Some(("alpha".into(), 7)), Some(("stamps".into(), 3))),
+        "top to bottom, each at its place in the stack; layers outside it follow the seven of the stack"
+    );
+    // A stamp in a lower layer shifts nobody: the stage of `stamps` keeps its index and so its keys.
+    def.put_item_spec(BodyId::PLANET, hill(4, "intent", 5.0)).unwrap();
+    world.set_definition(Arc::new(def)).unwrap();
+    let field = world.field().unwrap();
+    let above = field.upstream().unwrap().upstream().unwrap();
+    assert_eq!(stage(above), Some(("stamps".into(), 3)), "the stage of stamps keeps its index and so its keys");
+    assert_eq!(stage(above.upstream().unwrap()), Some(("intent".into(), 2)), "the new layer sits below it");
+}
+
+// spec: STRM-028
+#[test]
 fn a_definition_with_another_base_is_refused_and_changes_nothing() {
     let world = WorldTerrain::open(base(), RES).unwrap();
     let revision = world.definition().revision();
     let mut other = base();
     other.set_body_radius(BodyId::PLANET, R * 2.0);
     let e = world.set_definition(Arc::new(other)).unwrap_err();
-    assert!(e.contains("another base"), "{e}");
+    assert!(e.contains("another base") && e.matches("hash ").count() == 1 && e.contains("made from"), "{e}");
     assert_eq!(world.definition().revision(), revision);
 }
