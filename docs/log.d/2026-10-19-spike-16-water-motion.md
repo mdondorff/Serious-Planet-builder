@@ -1,0 +1,1 @@
+- 2026-10-19 **SPIKE-16 water-motion diagnosis (sonnet-spikes, #346):** the dark sea patches in motion are terrain albedo, not missing water; the REND-030 shore ramp depends on the drawn node's level; fix `shore-ramp-level-free` queued in the main lane.
