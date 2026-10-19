@@ -690,3 +690,45 @@ fn the_orbit_march_starts_on_the_atmosphere_and_the_gpu_word_layout_is_pinned() 
     assert_eq!((w[35], w[36], w[37], w[38]), (0.1, 3.5, 0.0, AP_MAX_DISTANCE_M as f32));
     assert_eq!(w[39].to_bits(), 5);
 }
+
+// spec: ATMO-006
+#[test]
+fn terrain_beyond_the_aerial_perspective_range_is_hazed_the_same_just_inside_and_just_outside_the_top() {
+    // SPIKE-17 (atmosphere colour jump): geometry farther than AP_MAX_DISTANCE_M along its ray (the far land at the horizon of a
+    // camera near the top of the atmosphere). Inside the top the frame composites it with the last slice of the aerial-perspective
+    // volume (a 256 km march); outside the top with the orbit march to the geometry. One camera crossing H must not change the
+    // colour of the same terrain pixel.
+    let (atm, luts) = earth();
+    let top = atm.top_m();
+    let inside = frame_at(atm, top - 1000.0, 0.7);
+    let outside = frame_at(atm, top + 1000.0, 0.7);
+    let land = [0.010, 0.012, 0.006]; // the lit radiance of green land, scene units
+    let mut worst = (0.0f64, String::new());
+    let mut checked = 0;
+    for iy in 16..AP_H {
+        let v = inside.froxel_ray(16, iy);
+        let l = libm::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        let dir = [v[0] / l, v[1] / l, v[2] / l];
+        let (mu, cos_vs) = inside.view_cosines(dir);
+        let Some(t_ground) = distance_to_ground(inside.r * mu, inside.c) else { continue };
+        if t_ground <= AP_MAX_DISTANCE_M * 1.2 {
+            continue;
+        }
+        let ap = inside.ap_texel(atm, luts, 16, iy, AP_D - 1);
+        let t_ap = ap[3];
+        let a: Vec<f64> = (0..3).map(|k| land[k] * t_ap + ap[k]).collect();
+        let (mu_o, cos_o) = outside.view_cosines(dir);
+        let o = outside.orbit_ray_cosines(atm, luts, mu_o, cos_o, Some(t_ground));
+        let b: Vec<f64> = (0..3).map(|k| land[k] * o.transmittance[k] + o.radiance[k]).collect();
+        let _ = cos_vs;
+        for k in 0..3 {
+            let rel = (a[k] - b[k]).abs() / b[k].abs().max(1e-9);
+            if rel > worst.0 {
+                worst = (rel, format!("row {iy} t_ground {:.0} km channel {k}: inside {:.5} vs outside {:.5}", t_ground / 1000.0, a[k], b[k]));
+            }
+        }
+        checked += 1;
+    }
+    assert!(checked >= 3, "{checked} far-terrain rays compared");
+    assert!(worst.0 <= 0.10, "far terrain jumps by {:.1} % across the top of the atmosphere: {}", worst.0 * 100.0, worst.1);
+}
