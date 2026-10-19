@@ -59,8 +59,10 @@ pub fn all_packages() -> Vec<String> {
     v
 }
 
-/// Crates whose tests `test fast` runs: the changed crates and every crate above them in the chain.
-/// With nothing changed, or a change outside `crates/`, everything runs.
+/// Crates whose tests `test fast` runs: the changed crates and every crate above them in the chain (BUILD-003, BUILD-021).
+/// With nothing changed at all, or a change to the workspace (a manifest, the lock file, `.cargo/`, `.config/`) or to `testkit` or
+/// `perf`, everything runs. A change with no crate path (`docs/`, `openspec/`, `.claude/`, `spikes/`, root `*.md`, goldens, tool
+/// configuration) selects no crate: no tier-A test reads it. `xtask/` and `.github/` (which the repository check test reads) select `xtask`.
 pub fn packages_for_changes(changed_paths: &[String]) -> Vec<String> {
     let all = all_packages;
     let mut lowest: Option<usize> = None;
@@ -75,15 +77,13 @@ pub fn packages_for_changes(changed_paths: &[String]) -> Vec<String> {
                 // Used by tests of every crate that depends on them: run everything.
                 return all();
             }
-        } else if let Some(rest) = p.strip_prefix("xtask/") {
-            if !rest.is_empty() {
-                extra.insert("xtask".into());
-            }
-        } else if p == "Cargo.toml" || p == "Cargo.lock" || p.starts_with(".cargo/") {
+        } else if p.starts_with("xtask/") || p.starts_with(".github/") {
+            extra.insert("xtask".into());
+        } else if p == "Cargo.toml" || p == "Cargo.lock" || p.starts_with(".cargo/") || p.starts_with(".config/") {
             return all();
         }
     }
-    if lowest.is_none() && extra.is_empty() {
+    if changed_paths.is_empty() {
         return all();
     }
     let mut v: Vec<String> = lowest.map(|i| CHAIN[i..].iter().map(|d| package(d)).collect()).unwrap_or_default();
@@ -234,6 +234,10 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
     let mut fast_crates: Vec<String> = Vec::new();
     if sub == Some("fast") {
         let pkgs = if all { all_packages() } else { packages_for_changes(&changed_paths(root)) };
+        if pkgs.is_empty() {
+            eprintln!("test fast: no crate changed (the change touches no crate path), so there is nothing to run (BUILD-021)");
+            return Ok(TestTiming { test_secs: 0.0, whole: false });
+        }
         whole = pkgs == all_packages();
         eprintln!("test fast: {}", if whole { "every crate".to_string() } else { pkgs.join(", ") });
         for p in pkgs {
@@ -1013,11 +1017,46 @@ mod tests {
 
     // spec: BUILD-003
     #[test]
-    fn fast_runs_everything_for_shared_or_unknown_changes() {
-        for paths in [&["crates/testkit/src/lib.rs"][..], &["Cargo.toml"], &["docs/status.md"], &[]] {
+    fn fast_runs_everything_for_shared_changes_or_when_nothing_changed() {
+        for paths in [
+            &["crates/testkit/src/lib.rs"][..],
+            &["crates/perf/src/load.rs"],
+            &["Cargo.toml"],
+            &["Cargo.lock"],
+            &[".cargo/config.toml"],
+            &[".config/nextest.toml"],
+            &["docs/status.md", "Cargo.lock"],
+            &[],
+        ] {
             assert!(packages_for_changes(&s(paths)).len() >= 12, "{paths:?}");
         }
         assert_eq!(packages_for_changes(&s(&["xtask/src/main.rs"])), ["xtask"]);
+    }
+
+    // spec: BUILD-021
+    #[test]
+    fn a_change_with_no_crate_path_selects_no_crate_and_a_crate_path_selects_that_crate() {
+        for paths in [
+            &["docs/status.md"][..],
+            &["openspec/specs/viewer/spec.md", "docs/log.d/2026-10-19-x.md"],
+            &["spikes/spike-15/results/summary.md"],
+            &[".claude/skills/golden-review/SKILL.md", "CLAUDE.md", "README.md"],
+            &["tests/goldens/software/lit_orbit.png"],
+            &["deny.toml", "rustfmt.toml", "clippy.toml", ".gitignore"],
+        ] {
+            assert!(packages_for_changes(&s(paths)).is_empty(), "{paths:?}");
+        }
+        assert_eq!(
+            packages_for_changes(&s(&["docs/status.md", "crates/streaming/src/lib.rs"]))[0],
+            "planet-streaming",
+            "docs beside a crate path"
+        );
+        assert_eq!(
+            packages_for_changes(&s(&[".github/workflows/ci.yml", "docs/a.md"])),
+            ["xtask"],
+            "the workflow is read by the repository check test"
+        );
+        assert_eq!(packages_for_changes(&s(&[r"crates\frame\src\a.rs"]))[0], "planet-frame", "backslashes");
     }
 
     // spec: BUILD-003
@@ -1037,6 +1076,7 @@ mod tests {
         assert_eq!(budget_verdict(5.0, true), Budget::Within);
         assert_eq!(packages_for_changes(&[]), all_packages());
         assert_ne!(packages_for_changes(&s(&["crates/app/src/lib.rs"])), all_packages());
+        assert!(packages_for_changes(&s(&["docs/status.md"])).is_empty(), "a docs-only change is not a whole-workspace run (BUILD-021)");
     }
 
     // spec: BUILD-003

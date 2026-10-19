@@ -48,8 +48,15 @@ pub fn verdict_line(steps: &[Step], skipped_gpu: bool) -> String {
     }
 }
 
+/// True when the changed paths hold no crate path: `test fast` would select no crate (BUILD-021), so the code checks have nothing to
+/// look at and the run is `spec-lint` (and `test gpu` when a golden changed). An empty list is the whole workspace, not this case.
+pub fn no_crate_changed(changed: &[String]) -> bool {
+    !changed.is_empty() && testcmd::packages_for_changes(changed).is_empty()
+}
+
 pub fn run(root: &Path) -> Res {
     let changed = testcmd::changed_paths(root);
+    let docs_only = no_crate_changed(&changed);
     let triggers = golden_triggers(&changed);
     let with_gpu = !triggers.is_empty();
     if with_gpu {
@@ -60,8 +67,12 @@ pub fn run(root: &Path) -> Res {
     }
     let mut steps: Vec<Step> = Vec::new();
     type Action<'a> = Box<dyn Fn() -> Res + 'a>;
-    let mut plan: Vec<(&str, Action)> =
-        vec![("check", Box::new(|| testcmd::check(root))), ("test fast", Box::new(|| testcmd::test(root, &["fast".to_string()])))];
+    let mut plan: Vec<(&str, Action)> = if docs_only {
+        eprintln!("prepush: no crate path changed, so check and test fast are skipped; spec-lint runs");
+        vec![("spec-lint", Box::new(|| crate::speclint::run(root)))]
+    } else {
+        vec![("check", Box::new(|| testcmd::check(root))), ("test fast", Box::new(|| testcmd::test(root, &["fast".to_string()])))]
+    };
     if with_gpu {
         plan.push(("test gpu", Box::new(|| testcmd::test(root, &["gpu".to_string()]))));
     }
@@ -131,6 +142,18 @@ mod tests {
         assert_eq!(golden_triggers(&changed), ["crates/frame/src/pick.rs", "crates/render/src/ui.rs"]);
         assert!(golden_triggers(&paths(&["docs/status.md", "xtask/src/main.rs"])).is_empty());
         assert!(golden_triggers(&[]).is_empty());
+    }
+
+    // spec: BUILD-021
+    #[test]
+    fn a_diff_with_no_crate_path_runs_only_spec_lint_and_nothing_at_all_is_the_whole_workspace() {
+        assert!(no_crate_changed(&paths(&["docs/status.md", "openspec/specs/viewer/spec.md", "spikes/x/results/a.md"])));
+        assert!(no_crate_changed(&paths(&["tests/goldens/software/a.png"])), "goldens alone: no crate, but test gpu still runs");
+        assert!(!no_crate_changed(&paths(&["docs/status.md", "crates/frame/src/a.rs"])));
+        assert!(!no_crate_changed(&paths(&["Cargo.lock"])));
+        assert!(!no_crate_changed(&paths(&["xtask/src/main.rs"])));
+        assert!(!no_crate_changed(&paths(&[".github/workflows/ci.yml"])));
+        assert!(!no_crate_changed(&[]), "nothing changed is the whole workspace (BUILD-003)");
     }
 
     // spec: BUILD-016
