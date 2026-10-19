@@ -1,5 +1,5 @@
 //! STRM-026: a resident tile whose inputs changed is requested again without being dropped, replaced in place when the new version
-//! arrives, and its old slot goes back. Fake clock, manual spawner: counts and payloads only.
+//! arrives, and its old slot goes back; no tile keeps a version made before the edit. Fake clock, manual spawner: counts and payloads only.
 
 use planet_core::{Face, TileId};
 use planet_streaming::{FakeClock, ManualSpawner, Spawner, StreamConfig, Streamer, TileSource};
@@ -14,10 +14,15 @@ fn id(f: u8, l: u8, x: u32, y: u32) -> TileId {
 #[derive(Default)]
 struct RevSource {
     rev: AtomicU64,
+    /// The next loads fail (an injected failure).
+    fail: std::sync::atomic::AtomicBool,
 }
 
 impl TileSource<(u64, u64)> for RevSource {
     fn load(&self, tile: TileId) -> Result<(u64, u64), String> {
+        if self.fail.load(Ordering::SeqCst) {
+            return Err(format!("injected failure for {tile:?}"));
+        }
         Ok((tile.raw(), self.rev.load(Ordering::SeqCst)))
     }
 }
@@ -25,17 +30,19 @@ impl TileSource<(u64, u64)> for RevSource {
 type Fixture = (Streamer<(u64, u64)>, Arc<ManualSpawner>, Arc<RevSource>);
 
 fn fixture(max_in_flight: usize) -> Fixture {
+    let (s, spawner, source, _) = fixture_with_clock(max_in_flight);
+    (s, spawner, source)
+}
+
+fn fixture_with_clock(max_in_flight: usize) -> (Streamer<(u64, u64)>, Arc<ManualSpawner>, Arc<RevSource>, Arc<FakeClock>) {
     let spawner = Arc::new(ManualSpawner::default());
     let source = Arc::new(RevSource::default());
-    let config = StreamConfig { max_in_flight, record_dispatches: true, record_changes: true, ..Default::default() };
-    let mut s = Streamer::new(
-        Arc::clone(&source) as Arc<dyn TileSource<(u64, u64)>>,
-        spawner.clone() as Arc<dyn Spawner>,
-        Arc::new(FakeClock::default()),
-        config,
-    );
+    let clock = Arc::new(FakeClock::default());
+    let config = StreamConfig { max_in_flight, record_dispatches: true, record_changes: true, retry_after_ms: 100, ..Default::default() };
+    let mut s =
+        Streamer::new(Arc::clone(&source) as Arc<dyn TileSource<(u64, u64)>>, spawner.clone() as Arc<dyn Spawner>, clock.clone(), config);
     s.load_roots_blocking().unwrap();
-    (s, spawner, source)
+    (s, spawner, source, clock)
 }
 
 /// Frames with `wants` until `tile` is resident.
@@ -130,6 +137,92 @@ fn a_job_running_when_the_refresh_comes_is_dropped_and_the_tile_is_loaded_again_
     settle(&mut s, &sp, &wants, t);
     assert_eq!(s.get(t).as_deref(), Some(&(t.raw(), 3)), "the last field wins");
     assert!(s.stats().cancelled >= 1, "the running jobs were told to stop");
+}
+
+// spec: STRM-026
+#[test]
+fn a_refresh_job_that_failed_is_tried_again_after_the_delay_and_the_old_version_is_served_meanwhile() {
+    let (mut s, sp, source, clock) = fixture_with_clock(2);
+    let t = id(2, 3, 1, 2);
+    let wants = [(t, 1.0)];
+    settle(&mut s, &sp, &wants, t);
+    source.rev.store(1, Ordering::SeqCst);
+    source.fail.store(true, Ordering::SeqCst);
+    assert_eq!(s.refresh(&[t]), 1);
+    for _ in 0..3 {
+        s.begin_frame(&wants);
+        sp.run(4);
+    }
+    s.begin_frame(&wants);
+    assert!(s.stats().failed >= 1, "the refresh job failed");
+    assert_eq!(s.get(t).as_deref(), Some(&(t.raw(), 0)), "the old version is still served");
+    source.fail.store(false, Ordering::SeqCst);
+    for _ in 0..12 {
+        clock.advance(50);
+        s.begin_frame(&wants);
+        sp.run(4);
+    }
+    s.begin_frame(&wants);
+    assert_eq!(s.get(t).as_deref(), Some(&(t.raw(), 1)), "the failed refresh was retried, not forgotten");
+    assert_eq!(s.stats().refreshed, 1);
+}
+
+// spec: STRM-026
+#[test]
+fn a_tile_that_lost_every_class_while_its_refresh_ran_is_evicted_by_the_next_refresh_and_loads_new_when_wanted() {
+    let (mut s, sp, source) = fixture(2);
+    let t = id(2, 3, 1, 2);
+    let wants = [(t, 1.0)];
+    settle(&mut s, &sp, &wants, t);
+    source.rev.store(1, Ordering::SeqCst);
+    assert_eq!(s.refresh(&[t]), 1);
+    s.begin_frame(&wants);
+    assert_eq!(s.stats().in_flight, 1);
+    // Nothing wants it any more and a second edit comes: its running job is dropped and the old version is evicted at once.
+    s.begin_frame(&[]);
+    source.rev.store(2, Ordering::SeqCst);
+    assert_eq!(s.refresh(&[t]), 0);
+    assert!(!s.is_resident(t), "a stale version nothing wants is not kept");
+    sp.run(4);
+    s.begin_frame(&[]);
+    assert!(!s.is_resident(t), "and its dropped job does not bring it back");
+    settle(&mut s, &sp, &wants, t);
+    assert_eq!(s.get(t).as_deref(), Some(&(t.raw(), 2)), "wanted again, it loads from the field as it is now");
+}
+
+// spec: STRM-026, STRM-019
+#[test]
+fn a_frame_with_nothing_to_refresh_does_no_work_and_a_refresh_counts_only_what_it_queues() {
+    let (mut s, sp, source) = fixture(2);
+    let t = id(2, 3, 1, 2);
+    let wants = [(t, 1.0)];
+    settle(&mut s, &sp, &wants, t);
+    for _ in 0..8 {
+        s.begin_frame(&wants);
+    }
+    let quiet = |s: &mut Streamer<(u64, u64)>| {
+        let before = s.work();
+        s.step();
+        let after = s.work();
+        (after.scanned - before.scanned, after.updated - before.updated)
+    };
+    assert_eq!(quiet(&mut s), (0, 0), "a settled frame touches nothing");
+    assert_eq!(s.refresh(&[]), 0);
+    let before = s.work();
+    assert_eq!(s.refresh(&[id(4, 3, 0, 0), id(5, 3, 1, 1)]), 0, "tiles that are not resident queue nothing");
+    assert_eq!(s.work().updated - before.updated, 0, "and cost nothing");
+    source.rev.store(1, Ordering::SeqCst);
+    let before = s.work();
+    assert_eq!(s.refresh(&[t]), 1);
+    assert_eq!(s.work().updated - before.updated, 1, "one request queued, one unit of work");
+    for _ in 0..6 {
+        s.begin_frame(&wants);
+        sp.run(4);
+    }
+    for _ in 0..8 {
+        s.begin_frame(&wants);
+    }
+    assert_eq!(quiet(&mut s), (0, 0), "after the replacement the loop is quiet again");
 }
 
 // spec: STRM-026, STRM-005

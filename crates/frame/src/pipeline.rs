@@ -140,7 +140,8 @@ pub enum DrawKind {
 pub struct DrawPlan {
     pub plan: TerrainPlan,
     pub kind: DrawKind,
-    /// Plan nodes drawn as an ancestor instead (their tile or its key was not resident).
+    /// Plan nodes drawn as an ancestor instead (their tile was not resident), and nodes drawn from a resident version of another key
+    /// (stale while revalidating, REND-032).
     pub substituted: usize,
     /// Plan nodes with nothing resident to show, not even a root: zero whenever the roots are resident (STRM-002).
     pub blank: usize,
@@ -193,7 +194,8 @@ pub fn draw_plan(
 /// usable; `resident` is what the renderer holds; `bounds` the tile bounds of the newest residency set (the cover reads them
 /// instead of evaluating a field). A pure function of its arguments, and no height field is evaluated:
 /// - with a `base` made for exactly `req` and all its nodes resident, the result is that plan unchanged;
-/// - with a `base`, each node whose tile (with its mesh key) is not resident is replaced by its deepest resident ancestor
+/// - with a `base`, each node whose tile is resident with another mesh key is drawn from that resident version (REND-032, an edit's
+///   refresh is on the way) and each node whose tile is not resident is replaced by its deepest resident ancestor
 ///   (the coarser tile wins over any resident descendant it covers, so no two drawn tiles overlap) and the camera of `req` is
 ///   put in (origins and matrix), so the plan's nodes follow the camera; a `base` made for another camera is drawn only if it
 ///   covers the frame's view ([`plan_covers_view`]: every tile of the frame's own cover is drawn by it, or filled by finer
