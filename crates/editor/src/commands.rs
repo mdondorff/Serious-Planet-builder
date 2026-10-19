@@ -258,6 +258,11 @@ impl<S: ItemStore> Editor<S> {
             stage_version: self.stage_version,
             name: new.name,
             notes: new.notes,
+            // Lines and regions come with the editor's point-list commands (ADR 0069); `NewItem` has no points yet.
+            points: Vec::new(),
+            group: None,
+            part: None,
+            mask_layer: None,
         }
         .canonical();
         item.validate()?;

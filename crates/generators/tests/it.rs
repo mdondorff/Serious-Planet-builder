@@ -32,6 +32,8 @@ mod ocean;
 mod pipeline;
 #[path = "stages.rs"]
 mod stages;
+#[path = "stamp_lines_inert.rs"]
+mod stamp_lines_inert;
 #[path = "stamp_stage.rs"]
 mod stamp_stage;
 #[path = "stamp_stage_eroded.rs"]

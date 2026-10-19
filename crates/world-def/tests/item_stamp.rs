@@ -25,6 +25,10 @@ fn item(kind: &str, params: &[(&str, f64)]) -> Item {
         stage_version: 1,
         name: Some("a name".into()),
         notes: None,
+        points: Vec::new(),
+        group: None,
+        part: None,
+        mask_layer: None,
     }
 }
 
@@ -37,18 +41,18 @@ fn a_stamp_survives_the_file_unchanged_and_its_hash_is_stable() {
         (StampKind::Crater, "depth_m", 24.0),
         (StampKind::Plateau, "target_m", 450.0),
     ] {
-        assert_eq!(kind.param_key(), key);
+        assert_eq!(kind.param_keys(), [key]);
         let stamp = Stamp::new(kind, [value, 0.0, 0.0]);
         // Stamp -> file spelling -> Stamp.
         let (name, params) = stamp.to_file();
-        assert_eq!(Stamp::from_file(name, &params), Ok(Some(stamp)), "{name} {value}");
+        assert_eq!(Stamp::from_file(name, &params), Ok(Some(stamp.clone())), "{name} {value}");
         // The item as a file: text, parsed again, the same item, the same spec, the same stamp and hash.
         let it = item(name, &[(key, value)]);
         let text = it.to_toml().unwrap();
         let back = Item::from_toml(&text).unwrap();
         assert_eq!(back, it);
         let spec = back.spec();
-        assert_eq!(spec.stamp, Some(stamp));
+        assert_eq!(spec.stamp, Some(stamp.clone()));
         assert_eq!(spec.content_hash, stamp.content_hash(), "the content hash is the stamp's");
         assert_eq!(spec, it.spec(), "the spec of the parsed file is the spec of the item");
         // The definition takes it.

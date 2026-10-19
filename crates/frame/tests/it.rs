@@ -58,6 +58,8 @@ mod plan_reuse;
 mod prefetch;
 #[path = "preview.rs"]
 mod preview;
+#[path = "preview_lines.rs"]
+mod preview_lines;
 #[path = "residency.rs"]
 mod residency;
 #[path = "scheduler_equivalence.rs"]
