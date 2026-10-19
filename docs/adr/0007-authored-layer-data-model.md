@@ -1,5 +1,5 @@
 # 0007 Authored-layer data model
-Status: accepted
+Status: accepted; amended by ADR 0066, 2026-10-19 (the item footprint, not the cell, is the invalidation unit; the command log is not persisted)
 Date: 2026-10-10
 Source: background report §6; constitution CON-09, CON-10
 

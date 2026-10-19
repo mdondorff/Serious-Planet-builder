@@ -1,5 +1,5 @@
 # 0023 Clarifications to the persistent key encoding (ADR 0018)
-Status: accepted (owner's delegation of 2026-10-12: the architect accepts ADRs that reviewers find sound and unambiguous; accepted by opus-planner after the spec-guardian and numerics reviews and their text fixes)
+Status: accepted (owner's delegation of 2026-10-12: the architect accepts ADRs that reviewers find sound and unambiguous; accepted by opus-planner after the spec-guardian and numerics reviews and their text fixes; points 2 and 3 amended by ADR 0066, 2026-10-19)
 Date: 2026-10-11
 Source: spec-guardian and numerics reviews of m3-cache-keys (2026-10-11); ADR 0018 (accepted, never edited: CON-23), ADR 0006, ADR 0021; constitution CON-05, CON-14
 
