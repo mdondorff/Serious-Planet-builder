@@ -336,3 +336,51 @@ fn a_point_on_the_near_side_of_the_planet_but_past_the_horizon_is_not_on_the_scr
     let lone = planet_frame::globe::project(&camera, unit(3.0, 0.0) * R, v.viewport);
     assert!(lone.is_some(), "the projection alone would draw it: {lone:?}");
 }
+
+// spec: VIEW-019
+#[test]
+fn the_coarse_to_fine_find_is_the_set_a_scan_of_every_resident_tile_finds() {
+    use planet_world_def::footprint::{tile_cap, touches};
+    let map = TangentWarp;
+    // A resident set shaped like a plan around a point: from level 3 to 21, a block of tiles around the point at every level.
+    let centre = unit(20.0, 30.0);
+    let mut resident: Vec<TileId> = Vec::new();
+    for level in 3..=21u8 {
+        let edge_m = std::f64::consts::FRAC_PI_2 * R / f64::from(1u32 << level);
+        for i in -4..=4 {
+            for j in -4..=4 {
+                let p = shape::point_at(shape::point_at(centre, 90.0, f64::from(i) * edge_m, R), 0.0, f64::from(j) * edge_m, R);
+                resident.push(TileId::from_direction(&map, p, level));
+            }
+        }
+    }
+    resident.sort_by_key(|t| t.raw());
+    resident.dedup();
+    let scan = |aff: &[Affected]| -> Vec<TileId> {
+        resident
+            .iter()
+            .copied()
+            .filter(|t| {
+                let cap = tile_cap(&map, *t, REFRESH_HALO);
+                aff.iter().any(|a| touches(cap, a.dir, a.reach_m, R))
+            })
+            .collect()
+    };
+    let mut checked = 0;
+    for (k, reach_m) in [10.0f64, 50.0, 150.0, 500.0, 3_000.0, 20_000.0, 40_000.0].into_iter().enumerate() {
+        for step in 0..24 {
+            let off = f64::from(step) * 0.7 * reach_m.min(300.0) * f64::from(k as u32 % 3 + 1);
+            let dir = shape::point_at(centre, f64::from(step) * 15.0, off, R);
+            let aff = [Affected { body: BodyId::PLANET, dir, reach_m }];
+            assert_eq!(edited_tiles(&aff, BodyId::PLANET, &resident, R, &map), scan(&aff), "reach {reach_m} m, step {step}");
+            checked += 1;
+        }
+    }
+    // Two places at once, one far.
+    let two = [
+        Affected { body: BodyId::PLANET, dir: centre, reach_m: 500.0 },
+        Affected { body: BodyId::PLANET, dir: unit(-40.0, 100.0), reach_m: 500.0 },
+    ];
+    assert_eq!(edited_tiles(&two, BodyId::PLANET, &resident, R, &map), scan(&two));
+    assert!(checked == 7 * 24);
+}
