@@ -16,6 +16,7 @@ pub mod spike_compact;
 #[cfg(feature = "spike07")]
 pub mod spike_detail;
 pub mod terrain;
+pub mod ui;
 pub mod water;
 pub mod water_gpu;
 pub mod window;
@@ -29,6 +30,7 @@ pub use terrain::{
     execute_terrain, execute_terrain_tiles, DrawMode, FirstUse, FrameTiming, InitCounts, ResidentFormat, TerrainRenderer, TerrainStats,
     UploadCounters, UploadMode, UploadTimes, RING_SETS, TERRAIN_SHADERS, WARM_NODES,
 };
+pub use ui::{UiFrame, UiPainter};
 pub use water::water_shaders;
 pub use water_gpu::{probe_surface, probe_waves, SurfaceProbe, WaveProbe};
 pub use window::{Presented, WindowHandles, WindowSurface, WINDOW_SHADERS};
