@@ -58,7 +58,9 @@ Mock: https://claude.ai/artifact/Srj3NGEYUkGQsfhne7kdCs (private to the owner).
 | Managing edits | map first: select on the planet, outline and name on hover, search, list of edits near the camera; layer list and graph as secondary views of the same items (ADR 0007 stack) |
 | Relevance (owner, 2026-10-19) | the camera decides which edits are shown, in markers, outlines and the list alike: an edit is shown when its footprint meets the visible area and its reach covers at least a minimum on screen (a spec value in pixels), so near the ground small stamps show with the larger edits around them, and from high up small stamps drop out; search is planet-wide, its results sorted by distance from the camera; the selected edit always shows |
 | Views | 3D free camera, globe overview |
-| Surface type | stored on the region; a debug overlay tints regions by type; materials are drawn later |
+| Surface type | stored on the region; a debug overlay tints regions by type; materials are drawn later; first table (data, extensible; owner, 2026-10-19): rock, sand, grass, snow, forest, ice, desert, wetland, urban |
+| Line storage (owner, 2026-10-19) | one item per line holding its list of points; a line longer than one item's reach limit is split automatically into a few linked items; the item file gains a points list (nothing is stored yet) |
+| Region mask (owner, 2026-10-19) | a region clips a chosen layer's edits: they apply only inside (or only outside) it, like a layer mask |
 | History | plain undo/redo (1,000 operations, M6 exit criterion) |
 | Input | mouse and keyboard |
 
