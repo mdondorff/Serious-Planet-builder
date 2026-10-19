@@ -709,7 +709,7 @@ fn terrain_beyond_the_aerial_perspective_range_is_hazed_the_same_just_inside_and
         let v = inside.froxel_ray(16, iy);
         let l = libm::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
         let dir = [v[0] / l, v[1] / l, v[2] / l];
-        let (mu, cos_vs) = inside.view_cosines(dir);
+        let (mu, _) = inside.view_cosines(dir);
         let Some(t_ground) = distance_to_ground(inside.r * mu, inside.c) else { continue };
         if t_ground <= AP_MAX_DISTANCE_M * 1.2 {
             continue;
