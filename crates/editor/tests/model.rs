@@ -699,11 +699,29 @@ fn heading_zero_at_a_pole_is_the_limit_along_longitude_zero_and_does_not_jump() 
         let next = shape::tangent_frame(unit(near, 0.0)).0;
         assert!(at.dot(next) > 0.999_999, "lat {lat}: {at:?} vs {next:?}");
     }
+    assert!(shape::tangent_frame(unit(90.0, 0.0)).0.dot(Vec3::new(-1.0, 0.0, 0.0)) > 1.0 - 1e-12, "north at the north pole is -x");
+    assert!(shape::tangent_frame(unit(-90.0, 0.0)).0.dot(Vec3::new(1.0, 0.0, 0.0)) > 1.0 - 1e-12, "north at the south pole is +x");
     let (north, east) = shape::tangent_frame(unit(89.999_999_99, 137.0));
     assert!(north.dot(unit(89.999_999_99, 137.0)).abs() < 1e-9 && east.dot(north).abs() < 1e-9, "a frame, a hair from the pole");
 }
 
 // ---- VIEW-018: the layout as data ------------------------------------------------------------------------------------------------
+
+// spec: VIEW-018
+#[test]
+fn the_ends_of_every_range_are_taken_and_a_hair_beyond_them_is_refused() {
+    for (key, lo, hi) in
+        [("rail_width", 0.0, 200.0), ("left_width", 120.0, 800.0), ("inspector_width", 120.0, 800.0), ("handle_hit_px", 3.0, 60.0)]
+    {
+        for v in [lo, hi] {
+            assert!(Layout::from_toml(&format!("{key} = {v}\n")).is_ok(), "{key} = {v}");
+        }
+        for v in [lo - 0.001, hi + 0.001] {
+            assert_eq!(Layout::from_toml(&format!("{key} = {v}\n")).unwrap_err().key, key, "{key} = {v}");
+        }
+    }
+    assert_eq!(Layout::from_toml("rail_width = 0\n").unwrap().rail_width, 0.0, "0 hides the rail");
+}
 
 // spec: VIEW-018
 #[test]
