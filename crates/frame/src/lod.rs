@@ -58,7 +58,7 @@ pub fn check_explicit_floor(floor: u8, max_level: u8) -> Result<(), String> {
     Ok(())
 }
 
-/// How many of the parent's sample spacings the shore ramp must span at least ([`LodParams::shore_ramp_min_m`], REND-030).
+/// How many of the selection's screen-space tolerances the shore ramp must span at least ([`LodParams::shore_ramp_per_m`], REND-030).
 pub const SHORE_RAMP_K: f64 = 2.0;
 
 /// The tallest ramp the tolerance asks for (m), REND-030: the water pass absorbs 0.5 per metre of depth by default, so below 8 m
@@ -66,15 +66,12 @@ pub const SHORE_RAMP_K: f64 = 2.0;
 /// 3 m. Above it the ramp would only turn the colour of the deep seabed into the beach's in terrain-only views.
 pub const SHORE_RAMP_MAX_M: f64 = 8.0;
 
-/// The ramp height at a vertex of a node whose least ramp is `ramp_min_m` and whose morph factor is `morph` (0 at full detail, 1 on
-/// the parent's grid), REND-030: `mix(ramp_min, parent's ramp_min, morph)`, where the parent's is `min(2 * ramp_min, cap)` (the sample
-/// spacing halves per level, so the parent's uncapped ramp is twice the node's, and the cap is common). The morph reaches 1 where the
-/// node meets a node of the coarser level, whose own factor is 0 there, so the ramp is continuous across every level border (a
-/// width that was constant per node stepped at each border: a dark tile-shaped patch in the foreground water of a descent). The WGSL
-/// `shore_ramp_at` is the same function.
-pub fn shore_ramp_at(ramp_min_m: f64, morph: f64) -> f64 {
-    let parent = (2.0 * ramp_min_m).min(SHORE_RAMP_MAX_M);
-    ramp_min_m + (parent - ramp_min_m) * morph
+/// The ramp height at a fragment `distance_m` from the camera, REND-030: `per_m * distance_m` capped at [`SHORE_RAMP_MAX_M`], where `per_m` is
+/// [`LodParams::shore_ramp_per_m`] (carried in the plan). It depends on the fragment's distance and on nothing about the node that draws it,
+/// so one ground point gets one ramp whichever level of tile is drawn there (the cover, stale plans and prefetched tiles draw tiles the
+/// exact plan would not). The WGSL `shore_ramp_at` is the same function.
+pub fn shore_ramp_at(per_m: f64, distance_m: f64) -> f64 {
+    (per_m * distance_m).clamp(0.0, SHORE_RAMP_MAX_M)
 }
 
 /// log2 of the cells per face edge at the production finest level: a face edge is `2^level` tiles of `cells` cells, and the
@@ -151,20 +148,16 @@ impl LodParams {
         Ok(())
     }
 
-    /// The least height range (metres) over which the albedo may change from the seabed to the shore at a node of `level` (REND-030,
-    /// ATMO-020). The albedo's ramp is `max(shore_blend_m, this)`.
-    ///
-    /// A node of `level >= 1` is drawn only closer than its parent's split distance, where the parent's sample spacing `s(level - 1)`
-    /// projects to `tau_px` pixels: `tau_px * pixel_angle * split(level - 1) = s(level - 1)`, whatever the field of view, the viewport
-    /// and `tau_px` are. That is the world size of the screen-space tolerance of the selection at the farthest distance the node is
-    /// drawn, and the height at one ground point differs between the node's mesh, its parent's mesh and the morph between them by a
-    /// fraction of it. The factor is [`SHORE_RAMP_K`] (REND-030: measured on the coastal flights, k = 1 leaves 4.3 % of the shore
-    /// pixels of the glide flashing, k = 1.5, 2 and 3 none; 2 is taken). A ramp narrower than this makes the seabed-to-shore albedo,
-    /// which differs by a factor of eight in luminance, flash with decimetre height changes between frames. Near the camera
-    /// `s(level - 1)` is centimetres and the ramp stays at the look's `shore_blend_m`. The value is capped at [`SHORE_RAMP_MAX_M`]: far
-    /// from the camera the tolerance is kilometres, and a ramp that tall would paint the deep seabed with the beach's colour.
-    pub fn shore_ramp_min_m(&self, level: u8) -> f64 {
-        (SHORE_RAMP_K * self.sample_spacing(level.saturating_sub(1))).min(SHORE_RAMP_MAX_M)
+    /// The growth of the shore ramp with the distance from the camera, in metres per metre (REND-030, ATMO-020): `SHORE_RAMP_K` times the world
+    /// size of one pixel of the selection's screen-space tolerance per metre of distance, `tau_px * pixel_angle`, with `pixel_angle =
+    /// 2 tan(fov_y / 2) / viewport_h_px` (the same quantity [`split_distance`](LodParams::split_distance) divides by). A node is drawn only
+    /// where its mesh's error is below that tolerance, so at a fragment `d` metres away the height of one ground point differs between a
+    /// mesh, its parent's and the morph between them by a fraction of `tau_px * pixel_angle * d`. The ramp is `SHORE_RAMP_K` times it ([`shore_ramp_at`]):
+    /// k = 1 left 4.3 % of the shore pixels of the glide flashing, k = 1.5, 2 and 3 none; 2 is taken. A ramp narrower than the error makes the
+    /// seabed-to-shore albedo, which differs by a factor of eight in luminance, flash with decimetre height changes between frames. Near
+    /// the camera the product is centimetres and the ramp stays at the look's `shore_blend_m`; it is capped at [`SHORE_RAMP_MAX_M`].
+    pub fn shore_ramp_per_m(&self) -> f64 {
+        SHORE_RAMP_K * self.tau_px * 2.0 * libm::tan(self.fov_y_rad / 2.0) / self.viewport_h_px
     }
 
     /// Worst-case sample spacing on the sphere at `level`, metres (face centre, tangent warp).

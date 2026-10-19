@@ -734,10 +734,10 @@ pub struct LitProbe {
     pub temperature_c: f32,
     pub precipitation_mm: f32,
     pub height_above_water_m: f32,
-    /// The node's least ramp height (`TerrainDraw::shore_ramp_min_m`, REND-030); 0 for a node that ramps by the look's blend alone.
-    pub shore_ramp_min_m: f32,
-    /// The vertex's morph factor (0 at full detail, 1 on the parent's grid): the ramp is `shore_ramp_at(shore_ramp_min_m, shore_morph)`.
-    pub shore_morph: f32,
+    /// The growth of the ramp with the distance from the camera (`TerrainPlan::shore_ramp_per_m`, REND-030); 0 ramps by the look's blend alone.
+    pub shore_ramp_per_m: f32,
+    /// The fragment's distance from the camera in metres: the ramp is `shore_ramp_at(shore_ramp_per_m, distance_m)`.
+    pub distance_m: f32,
     pub sun: [f32; 3],
     pub factor: f32,
     /// `AlbedoParams::to_words`.
@@ -852,7 +852,7 @@ pub fn probe_lit_radiance(ctx: &GpuContext, probes: &[LitProbe]) -> Vec<[f32; 3]
         input.extend([p.up[0], p.up[1], p.up[2], p.view as f32]);
         input.extend([p.temperature_c, p.precipitation_mm, 0.0, 0.0]);
         input.extend([p.sun[0], p.sun[1], p.sun[2], 0.0]);
-        input.extend([p.factor, p.shore_ramp_min_m, p.shore_morph, 0.0]);
+        input.extend([p.factor, p.shore_ramp_per_m, p.distance_m, 0.0]);
         input.extend(p.table);
     }
     run_probe(ctx, "probe", &input, probes.len()).into_iter().map(|r| [r[0], r[1], r[2]]).collect()

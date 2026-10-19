@@ -552,7 +552,6 @@ mod tests {
             morph: 0.0,
             morph_start_m: 0.0,
             morph_end_m: 0.0,
-            shore_ramp_min_m: 0.0,
             color: [0; 4],
             mesh_key: 0,
         }
@@ -567,6 +566,7 @@ mod tests {
             clear_color: [0; 4],
             height_range: [0.0, 1.0],
             cells: 16,
+            shore_ramp_per_m: 0.0,
             nodes: tiles.iter().map(|t| draw(*t, &camera)).collect(),
             lit: None,
             water: None,

@@ -38,7 +38,7 @@ fn assert_same_tiles_and_fields_above_the_floor(what: &str, at_floor: &TerrainPl
             assert_eq!(a, b, "{what}: {:?} above the floor", a.tile);
         } else {
             assert_eq!((a.morph, a.morph_start_m, a.morph_end_m), (0.0, 1.0e30, 1.0e30), "{what}: {:?} at the floor", a.tile);
-            assert_eq!((a.origin, a.mesh_key, a.shore_ramp_min_m), (b.origin, b.mesh_key, b.shore_ramp_min_m), "{what}: {:?}", a.tile);
+            assert_eq!((a.origin, a.mesh_key), (b.origin, b.mesh_key), "{what}: {:?}", a.tile);
         }
     }
 }

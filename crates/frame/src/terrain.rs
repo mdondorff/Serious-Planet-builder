@@ -72,9 +72,6 @@ pub struct TerrainDraw {
     /// Vertex distances (metres) between which a vertex morphs to the parent grid.
     pub morph_start_m: f32,
     pub morph_end_m: f32,
-    /// The least height range (m) of the albedo's seabed-to-shore ramp at this node: `LodParams::shore_ramp_min_m(level)`, decided
-    /// here and read by the lit shader as `max(shore_blend_m, this)` (REND-030).
-    pub shore_ramp_min_m: f32,
     /// Flat colour of the face, tile-id and level views.
     pub color: [u8; 4],
     /// Key of the mesh this draw expects ([`planet_generators::mesh::mesh_key`]): a resident buffer with another key is
@@ -92,6 +89,10 @@ pub struct TerrainPlan {
     pub clear_color: [u8; 4],
     pub height_range: [f32; 2],
     pub cells: u32,
+    /// The growth of the albedo's seabed-to-shore ramp with the distance of the fragment from the camera, `LodParams::shore_ramp_per_m()`
+    /// (REND-030): the lit shader's ramp at a fragment is `max(shore_blend_m, min(this * distance, 8 m))`, whichever node draws it. Lit
+    /// plans only carry it in the text; a recorded plan without it ramps by the look's blend alone.
+    pub shore_ramp_per_m: f32,
     pub nodes: Vec<TerrainDraw>,
     /// The lit path of this frame (ADR 0042 points 1 and 3): `None` keeps the debug path, whose goldens do not change.
     pub lit: Option<crate::look::LitPlan>,
@@ -265,7 +266,6 @@ pub(crate) fn plan_terrain_keyed(
                 morph: n.morph,
                 morph_start_m: n.morph_start_m as f32,
                 morph_end_m: n.morph_end_m as f32,
-                shore_ramp_min_m: req.lod.shore_ramp_min_m(n.tile.level()) as f32,
                 color,
                 mesh_key: if reuse {
                     cache.mesh_key(n.tile, req.lod.cells, req.lod.max_level, || derive_key(n.tile))
@@ -283,6 +283,7 @@ pub(crate) fn plan_terrain_keyed(
         clear_color: CLEAR_COLOR,
         height_range: HEIGHT_RANGE,
         cells: req.lod.cells,
+        shore_ramp_per_m: req.lod.shore_ramp_per_m() as f32,
         nodes,
         lit: None,
         water: None,

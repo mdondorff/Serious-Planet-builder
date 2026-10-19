@@ -47,7 +47,8 @@ struct Globals {
     view_proj: mat4x4<f32>,
     range: vec4<f32>,
     mode: vec4<u32>,
-    // Lit path only: x = the water level W in metres (ADR 0041); the other lanes are reserved.
+    // Lit path only: x = the water level W in metres (ADR 0041); y = the growth of the shore ramp with the distance from the camera
+    // (REND-030, the plan's `shore_ramp_per_m`); the other lanes are reserved.
     extra: vec4<f32>,
     // Lit path only: the albedo table of the look (ADR 0039 point 3): eight colours with a threshold in the fourth lane, then
     // (snow_c_full, snow_c_none, snow_cos_none, snow_cos_full) and (beach_height, beach_fade, shore_blend, 0).
@@ -56,9 +57,8 @@ struct Globals {
 struct Node {
     origin_rel: vec4<f32>,
     color: vec4<f32>,
-    // x, y: vertex distances between which a vertex morphs to the parent grid; z: the least height range of the albedo's seabed-to-shore
-    // ramp at this node (REND-030: the plan's `shore_ramp_min_m`); w: padding (the plan's node-level `morph` is a diagnostic of the CPU
-    // selection and is not read by the shader).
+    // x, y: vertex distances between which a vertex morphs to the parent grid; z, w: padding (the plan's node-level `morph` is a diagnostic
+    // of the CPU selection and is not read by the shader; the shore ramp follows the fragment's distance, REND-030, and is in the globals).
     morph: vec4<f32>,
     // Per grid decade (1 cm .. 1,000 km) the fractional part of (planet-fixed tile origin / spacing), xyz, taken in f64 on
     // the CPU: they anchor the relief grid to the world instead of to this tile, so neighbouring tiles and LOD splits draw
@@ -230,10 +230,16 @@ fn albedo_of(tab: array<vec4<f32>, 10>, t: f32, p: f32, cs: f32, h: f32, ramp_mi
     return mix(tab[7].xyz, shore, land_w);
 }
 
-// The ramp height at a vertex of a node of least ramp `z` and morph factor `m` (REND-030, `planet_frame::lod::shore_ramp_at`): `z` at
-// full detail, the parent's `min(2 z, 8)` on the parent's grid, so the ramp is continuous across a level border.
-fn shore_ramp_at(z: f32, m: f32) -> f32 {
-    return mix(z, min(2.0 * z, 8.0), m);
+// The ramp height at a fragment `d` metres from the camera (REND-030, `planet_frame::lod::shore_ramp_at`): `per_m * d` capped at 8 m. It
+// depends on the distance only, so a ground point has one ramp whichever level of tile is drawn there.
+fn shore_ramp_at(per_m: f32, d: f32) -> f32 {
+    return min(per_m * d, 8.0);
+}
+
+// The fragment's distance from the camera: the node's camera-relative origin plus the fragment's tile-local position (camera-relative f32,
+// no planet-radius value, CON-11).
+fn camera_distance(node_origin_rel: vec4<f32>, local: vec3<f32>) -> f32 {
+    return length(node_origin_rel.xyz + local);
 }
 
 // The false colour of a climate channel (the debug views): temperature blue to red over -30..40 C, precipitation sand to blue over
@@ -288,7 +294,7 @@ fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
-    return vec4<f32>(shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(nodes[in.node_index].morph.z, in.morph), sun, g.range.z), 1.0);
+    return vec4<f32>(shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.y, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z), 1.0);
 }
 "#;
 
@@ -307,7 +313,7 @@ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
     for (i, d) in plan.nodes.iter().enumerate() {
         let r = d.camera_relative_origin;
         let c = d.color.map(|v| f32::from(v) / 255.0);
-        let mut floats = vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, d.shore_ramp_min_m, 0.0];
+        let mut floats = vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, 0.0, 0.0];
         for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
             floats.extend([p[0], p[1], p[2], 0.0]);
         }
@@ -1551,7 +1557,7 @@ impl TerrainRenderer {
                         .iter()
                         .flat_map(|v: &u32| v.to_le_bytes()),
                 );
-                globals.extend(f32_bytes(&[lit.water_level_m, 0.0, 0.0, 0.0]));
+                globals.extend(f32_bytes(&[lit.water_level_m, plan.shore_ramp_per_m, 0.0, 0.0]));
                 globals.extend(f32_bytes(&lit.albedo.to_words()));
             }
             None => {
@@ -1846,14 +1852,14 @@ mod one_shot_tests {
     // spec: REND-030
     #[test]
     fn the_shaders_ramp_function_is_the_references_with_the_same_cap() {
-        let cap = format!("min(2.0 * z, {:.1})", planet_frame::lod::SHORE_RAMP_MAX_M);
+        let cap = format!("min(per_m * d, {:.1})", planet_frame::lod::SHORE_RAMP_MAX_M);
         assert!(
-            SHADER_TAIL.contains("fn shore_ramp_at(z: f32, m: f32) -> f32") && SHADER_TAIL.contains(&cap),
+            SHADER_TAIL.contains("fn shore_ramp_at(per_m: f32, d: f32) -> f32") && SHADER_TAIL.contains(&cap),
             "the cap of the WGSL is the reference's"
         );
         assert!(
-            SHADER_TAIL.contains("shore_ramp_at(nodes[in.node_index].morph.z, in.morph)"),
-            "the lit fragment ramps with the vertex's morph"
+            SHADER_TAIL.contains("shore_ramp_at(g.extra.y, camera_distance(nodes[in.node_index].origin_rel, in.local))"),
+            "the lit fragment ramps with its own distance from the camera"
         );
     }
 

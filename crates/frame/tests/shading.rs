@@ -17,46 +17,40 @@ fn close3(a: [f64; 3], b: [f64; 3], tol: f64, what: &str) {
 
 // spec: REND-030
 #[test]
-fn the_ramp_and_the_albedo_agree_at_the_border_between_two_levels() {
-    use planet_frame::lod::{shore_ramp_at, LodParams, SHORE_RAMP_MAX_M};
+fn the_same_seabed_point_has_the_same_albedo_whichever_level_of_tile_draws_it() {
+    use planet_frame::lod::{shore_ramp_at, LodParams, SHORE_RAMP_K, SHORE_RAMP_MAX_M};
     let lod = LodParams::earth_1080p();
-    let morph_at = |level: u8, d: f64| {
-        let (start, end) = lod.morph_interval(level);
-        ((d - start) / (end - start)).clamp(0.0, 1.0)
-    };
-    for level in 2..=22u8 {
-        // The border between a node of `level` and its parent's level: the fine node is fully morphed onto the parent's grid at the
-        // distance where the parent stops splitting, and the coarse neighbour has not started to morph there (the crack-free rule of
-        // `morph_interval`). A ramp constant per node stepped here (a dark tile-shaped patch in the foreground water of the descent).
-        let d = lod.morph_interval(level).1;
-        let (fine, coarse) = (lod.shore_ramp_min_m(level), lod.shore_ramp_min_m(level - 1));
-        let (rf, rc) = (shore_ramp_at(fine, morph_at(level, d)), shore_ramp_at(coarse, morph_at(level - 1, d)));
-        assert!((rf - rc).abs() <= 1e-9 * rc.max(1.0), "level {level}: ramp {rf} on the fine side, {rc} on the coarse side");
-        for h in [-12.0, -6.0, -3.0, -1.0, -0.2, 0.0, 1.0] {
-            let (af, ac) = (E.albedo_with_ramp(20.0, 50.0, 1.0, h, rf), E.albedo_with_ramp(20.0, 50.0, 1.0, h, rc));
-            assert_eq!(af, ac, "level {level}, h {h}");
-        }
-        // And along the node's own morph the ramp moves smoothly from its width to the parent's, never beyond the cap.
-        let mut last = fine;
-        for k in 0..=20 {
-            let r = shore_ramp_at(fine, f64::from(k) / 20.0);
-            assert!(
-                r >= last - 1e-12 && r <= SHORE_RAMP_MAX_M + 1e-12 && r - last <= 0.5 * fine.max(0.01) + 1e-12,
-                "level {level}, step {k}: {r}"
-            );
-            last = r;
+    let per_m = lod.shore_ramp_per_m();
+    // The old rule, kept here only to show what the test discriminates: the ramp of the drawn node's level, `min(K s(level - 1), 8)`.
+    let by_level = |level: u8| (SHORE_RAMP_K * lod.sample_spacing(level - 1)).min(SHORE_RAMP_MAX_M);
+    let luminance = |c: [f64; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    let at = |ramp: f64, h: f64| luminance(E.albedo_with_ramp(20.0, 50.0, 1.0, h, ramp));
+    // A fragment 2 km from the camera, a seabed point 2.5 m under the water, drawn by a node of any level the cover or a stale plan
+    // can put there (L16 to L22): the ramp is a function of the fragment's distance, and nothing about the node, so the albedo is one.
+    for d in [5.0, 80.0, 400.0, 2_000.0, 20_000.0] {
+        let want = at(shore_ramp_at(per_m, d), -2.5);
+        for level in 16..=22u8 {
+            // The renderer has no level to hand to the ramp: it takes the distance.
+            let got = at(shore_ramp_at(per_m, d), -2.5);
+            assert_eq!(got, want, "distance {d}, level {level}");
         }
     }
-    assert_eq!(shore_ramp_at(3.0, 0.0), 3.0);
-    assert_eq!(shore_ramp_at(3.0, 1.0), 6.0, "the parent's ramp is twice the node's below the cap");
-    assert_eq!(shore_ramp_at(5.0, 1.0), SHORE_RAMP_MAX_M, "and the cap above it");
-    assert_eq!(shore_ramp_at(8.0, 0.5), 8.0);
+    // The failure this replaces (SPIKE-16): under the old rule the same point is 4.9 times brighter under L17 than under L19.
+    let (old17, old19) = (at(by_level(17), -2.5), at(by_level(19), -2.5));
+    assert!(old17 / old19 > 4.0, "the per-level ramp gave {old17} under L17 and {old19} under L19");
+    // Adjacent distances give adjacent ramps: no step anywhere along the ground.
+    let mut last = shore_ramp_at(per_m, 0.0);
+    for k in 1..=2000 {
+        let r = shore_ramp_at(per_m, f64::from(k) * 5.0);
+        assert!(r >= last && r - last <= per_m * 5.0 + 1e-12, "distance {}: {r} after {last}", f64::from(k) * 5.0);
+        last = r;
+    }
 }
 
 // spec: REND-030
 #[test]
-fn the_shore_ramp_is_the_looks_blend_where_the_mesh_is_fine_and_follows_the_tolerance_where_it_is_not() {
-    use planet_frame::lod::{LodParams, SHORE_RAMP_K, SHORE_RAMP_MAX_M};
+fn the_shore_ramp_is_the_looks_blend_where_the_mesh_is_fine_and_follows_the_tolerance_at_the_fragments_distance() {
+    use planet_frame::lod::{shore_ramp_at, LodParams, SHORE_RAMP_K, SHORE_RAMP_MAX_M};
     let lod = LodParams::earth_1080p();
     // The width: the blend where the tolerance is small, the tolerance where it is larger, monotone, never below the blend.
     assert_eq!(E.shore_ramp_m(0.0), E.shore_blend_m);
@@ -69,33 +63,25 @@ fn the_shore_ramp_is_the_looks_blend_where_the_mesh_is_fine_and_follows_the_tole
         assert!(w >= last && w >= E.shore_blend_m, "{x}: {w}");
         last = w;
     }
-    // The node's tolerance: the parent's sample spacing times k, the same whatever the fov, viewport and tau (the selection splits a node
-    // at the distance where the spacing projects to tau pixels), monotone in the level, and centimetres at the finest level.
+    // The growth per metre: `K * tau_px * pixel_angle`, and tau pixels at the far end of a node's drawing range are the parent's spacing, so at
+    // that distance the ramp is what the per-node rule measured on the coastal flights (k = 2): `K s(level - 1)` up to the cap.
+    let pixel_angle = 2.0 * libm::tan(lod.fov_y_rad / 2.0) / lod.viewport_h_px;
+    assert_eq!(lod.shore_ramp_per_m(), SHORE_RAMP_K * lod.tau_px * pixel_angle);
     for level in 1..=22u8 {
-        let want = (SHORE_RAMP_K * lod.sample_spacing(level - 1)).min(SHORE_RAMP_MAX_M);
-        assert_eq!(lod.shore_ramp_min_m(level), want, "level {level}");
         let (_, end) = lod.morph_interval(level);
-        let footprint = lod.tau_px * 2.0 * libm::tan(lod.fov_y_rad / 2.0) / lod.viewport_h_px * end;
-        assert!(
-            (footprint - lod.sample_spacing(level - 1)).abs() <= 1e-9 * footprint,
-            "level {level}: tau pixels at the node's far end are the parent's spacing"
-        );
-        if level > 1 {
-            assert!(lod.shore_ramp_min_m(level - 1) >= lod.shore_ramp_min_m(level), "coarser nodes tolerate at least as much");
-        }
+        let want = (SHORE_RAMP_K * lod.sample_spacing(level - 1)).min(SHORE_RAMP_MAX_M);
+        let got = shore_ramp_at(lod.shore_ramp_per_m(), end);
+        assert!((got - want).abs() <= 1e-9 * want, "level {level}: {got} against {want}");
     }
-    // The cap: the coarse nodes of an orbit view would otherwise ask for kilometres of ramp (and paint the deep seabed with the beach).
-    assert_eq!(lod.shore_ramp_min_m(0), SHORE_RAMP_MAX_M);
-    assert_eq!(lod.shore_ramp_min_m(6), SHORE_RAMP_MAX_M);
-    assert_eq!(lod.shore_ramp_min_m(18), SHORE_RAMP_K * lod.sample_spacing(17), "below the cap the width is the tolerance itself");
+    // The cap and the nearest ground: the coarse view of an orbit asks for kilometres and gets 8 m; at the camera the ramp is nothing.
+    assert_eq!(shore_ramp_at(lod.shore_ramp_per_m(), 1.0e7), SHORE_RAMP_MAX_M);
+    assert_eq!(shore_ramp_at(lod.shore_ramp_per_m(), 0.0), 0.0);
+    assert!(shore_ramp_at(lod.shore_ramp_per_m(), 40.0) < E.shore_blend_m, "near the camera the ramp stays the look's 1 m");
+    assert!(shore_ramp_at(lod.shore_ramp_per_m(), 2_000.0) > E.shore_blend_m, "far enough, the tolerance widens it");
+    // It does not depend on the node's level, and follows tau, the viewport and the fov through the pixel angle only.
     let other = LodParams { tau_px: 3.0, viewport_h_px: 1440.0, fov_y_rad: 1.0, ..lod.clone() };
-    assert_eq!(other.shore_ramp_min_m(18), lod.shore_ramp_min_m(18), "the tolerance does not depend on tau, the viewport or the fov");
-    assert!(
-        lod.shore_ramp_min_m(22) < E.shore_blend_m,
-        "at the production finest level the ramp stays the look's 1 m: {}",
-        lod.shore_ramp_min_m(22)
-    );
-    assert!(lod.shore_ramp_min_m(18) > E.shore_blend_m, "a node that tolerates more than the blend widens the ramp");
+    let other_pixel = 2.0 * libm::tan(other.fov_y_rad / 2.0) / other.viewport_h_px;
+    assert_eq!(other.shore_ramp_per_m(), SHORE_RAMP_K * other.tau_px * other_pixel);
     // The reference albedo: with no least height it is the albedo; a wider ramp spreads the transition, not the ends.
     for h in [-20.0, -1.0, -0.4, 0.0, 2.0] {
         assert_eq!(E.albedo_with_ramp(20.0, 50.0, 1.0, h, 0.0), E.albedo(20.0, 50.0, 1.0, h), "h {h}");

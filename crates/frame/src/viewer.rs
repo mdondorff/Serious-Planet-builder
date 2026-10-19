@@ -496,6 +496,7 @@ pub fn lit_warm_plan(camera: crate::camera::Camera, size: (u32, u32), cells: u32
         clear_color: [0, 0, 0, 255],
         height_range: [0.0, 1.0],
         cells,
+        shore_ramp_per_m: 0.0,
         nodes: Vec::new(),
         lit: Some(lit),
         water: None,
