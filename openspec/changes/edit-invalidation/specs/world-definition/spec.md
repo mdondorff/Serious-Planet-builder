@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: WDEF-005 Incremental invalidation
-Authored items SHALL be indexed by spatial cell, a `TileId` of the tangent-warp mapping at a level per body chosen so a cell is about 40 km wide (level 8 at Earth's radius, computed with `libm` from the body's radius), re-filed whenever the body's radius changes, and each item SHALL keep its unit direction so a move inside a cell is a change. The cell is the lookup index and no longer the invalidation unit: a generator SHALL read the items of a layer for a tile only through a footprint query (WDEF-007) that records the items whose reach touches the tile, so a read is never silently stale; a tile that touches more cells than a limit scans the items of the body for the same result. A cell query that records the hash of one cell, an empty cell included, remains for readers of a whole cell. A field that queries items SHALL say so (`reads_cells`) and report the read set of each tile (`inputs_hash_for`, given the mapping, which must be the tangent warp), so that adding, moving, editing or removing an item changes the keys of exactly the tiles its reach touches and no others, and editing a node no generator read changes no key. The definition hash SHALL cover the items, the base hash (ADR 0007) the nodes only, and a definition with items SHALL NOT be written to a TOML file that cannot carry them.
+Authored items SHALL be indexed by spatial cell, a `TileId` of the tangent-warp mapping at a level per body chosen so a cell is about 40 km wide (level 8 at Earth's radius, computed with `libm` from the body's radius), re-filed whenever the body's radius changes, and each item SHALL keep its unit direction so a move inside a cell is a change. The cell is the lookup index and no longer the invalidation unit: a generator SHALL read the items of a layer for a tile only through a footprint query (WDEF-007) that records the items whose reach touches the tile, so a read is never silently stale; a tile coarser than the cell level, or one whose candidate cells exceed a limit, scans the items of the body, and the result is the same set whichever way the candidates are found. A cell query that records the hash of one cell, an empty cell included, remains for readers of a whole cell. A field that queries items SHALL say so (`reads_cells`) and report the read set of each tile (`inputs_hash_for`, given the mapping, which must be the tangent warp), so that adding, moving, editing or removing an item changes the keys of exactly the tiles its reach touches and no others, and editing a node no generator read changes no key. The definition hash SHALL cover the items, the base hash (ADR 0007) the nodes only, and a definition with items SHALL NOT be written to a TOML file that cannot carry them.
 
 Verify: A
 Status: active
@@ -43,6 +43,10 @@ Source: ADR 0066 points 1 and 2, SPIKE-13
 #### Scenario: Result material
 - **WHEN** the same items are inserted in any order, or an item changes its direction, reach, bound, layer or priority
 - **THEN** the result hash is equal for equal content in application order and changes with each of those fields, and an empty result is the pinned hash of empty input
+
+#### Scenario: Tile alone
+- **WHEN** a stage that reads items generates a tile alone, and the same samples are cut from its parent's grid or generated after its neighbours
+- **THEN** the samples are bit-identical, whatever the order of generation
 
 #### Scenario: Declared against recorded reads
 - **WHEN** a generator samples items while a recording context observes it

@@ -372,8 +372,8 @@ impl WorldDefinition {
 
     /// The items of `layer` whose reach touches the footprint of `tile` with a halo of `halo` tile edges (WDEF-007), in
     /// application order (priority, then id). The tile must come from the tangent-warp mapping. Candidates are the items
-    /// of the cells that cover the tile plus [`footprint::FOOTPRINT_MARGIN_RINGS`] rings, or every item of the body for a
-    /// tile over [`footprint::FOOTPRINT_MAX_CELLS`] cells; the touch test decides, so both give the same result.
+    /// of the cell of the tile plus [`footprint::FOOTPRINT_MARGIN_RINGS`] rings, or every item of the body for a tile coarser
+    /// than the cell level; the touch test decides, and a test checks that both ways give the same set.
     pub fn footprint_items(
         &self,
         body: BodyId,
@@ -384,19 +384,17 @@ impl WorldDefinition {
         let radius = self.usable_radius(body)?;
         let cap = footprint::tile_cap(&planet_core::TangentWarp, tile, halo);
         let level = cells::cell_level(radius);
-        let candidates: Vec<u64> = match cells::cells_covering(tile, level, footprint::FOOTPRINT_MAX_CELLS) {
-            Some(covering) => {
-                // The halo of a tile coarser than the cell level is that many cells wide; it comes on top of the fixed rings.
-                let halo_cells = if tile.level() < level { halo * f64::from(1u32 << (level - tile.level())) } else { 0.0 };
-                let rings = footprint::FOOTPRINT_MARGIN_RINGS + libm::ceil(halo_cells) as u32;
-                let wanted = if rings > 16 { Vec::new() } else { cells::with_margin(&covering, rings) };
-                if !wanted.is_empty() && wanted.len() <= footprint::FOOTPRINT_MAX_CELLS {
-                    wanted.iter().filter_map(|c| self.cells.get(&(body, c.raw()))).flat_map(|ids| ids.iter().copied()).collect()
-                } else {
-                    self.body_item_ids(body)
-                }
-            }
-            None => self.body_item_ids(body),
+        // A tile at or below the cell level lies in one cell, so its cap (a few tile edges wide) is within the rings; a coarser
+        // tile covers many cells and its cap and halo are many cells wide, so it scans the body (step 1b replaces the scan).
+        let candidates: Vec<u64> = if tile.level() >= level {
+            let covering = cells::cells_covering(tile, level, footprint::FOOTPRINT_MAX_CELLS).expect("one cell");
+            cells::with_margin(&covering, footprint::FOOTPRINT_MARGIN_RINGS)
+                .iter()
+                .filter_map(|c| self.cells.get(&(body, c.raw())))
+                .flat_map(|ids| ids.iter().copied())
+                .collect()
+        } else {
+            self.body_item_ids(body)
         };
         let mut out: Vec<footprint::FootprintItem> = candidates
             .into_iter()
@@ -482,8 +480,11 @@ pub fn footprint_query_path(body: BodyId, layer: &str, tile: TileId, halo_bits: 
 
 /// The 64-bit hash of a footprint result: the items in application order with everything that can change an output.
 pub fn footprint_hash(items: &[footprint::FootprintItem]) -> u64 {
+    // Application order whatever order a hand-built record was given in, as the 128-bit path does.
+    let mut sorted: Vec<&footprint::FootprintItem> = items.iter().collect();
+    sorted.sort_by_key(|i| (i.priority, i.id));
     let mut v = vec![u64::from(HASH_VERSION), items.len() as u64];
-    for i in items {
+    for i in sorted {
         v.extend([i.id, u64::from(i.priority as u32), i.content, i.dir[0], i.dir[1], i.dir[2], i.reach_bits, i.max_delta_bits]);
         v.push(hash_u64s(3, &path_words(&i.layer)));
     }

@@ -237,7 +237,6 @@ fn every_item_a_stamp_generator_touches_in_a_tile_is_in_the_footprint_the_tile_d
             .unwrap();
         }
     }
-    let items = def.item_ids(BodyId::PLANET);
     let mut seen = 0;
     for level in [10u8, 13, 16] {
         let tile = TileId::from_direction(&TangentWarp, centre, level);
@@ -264,7 +263,6 @@ fn every_item_a_stamp_generator_touches_in_a_tile_is_in_the_footprint_the_tile_d
     }
     assert!(seen > 10, "the setup must have items that act in the tiles, {seen}");
     // Beyond the reach nothing changes, within it the change is at most max_delta_m.
-    let _ = &items;
     let without = |skip: u64| {
         let mut d = def.clone();
         assert!(d.remove_item(BodyId::PLANET, skip));
@@ -289,7 +287,7 @@ fn every_item_a_stamp_generator_touches_in_a_tile_is_in_the_footprint_the_tile_d
     }
 }
 
-// spec: GEN-017, WDEF-007
+// spec: WDEF-007
 #[test]
 fn a_tile_generated_alone_equals_the_same_samples_cut_from_its_parents_grid_for_a_stage_that_reads_items() {
     use planet_generators::height::generate_tile_field;

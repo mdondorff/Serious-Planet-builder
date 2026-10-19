@@ -35,16 +35,6 @@ fn spec(id: u64, dir: Vec3, reach_m: f64) -> ItemSpec {
     ItemSpec { id, layer: DEFAULT_ITEM_LAYER.into(), priority: 0, dir, content_hash: id * 7 + 1, reach_m, max_delta_m: 10.0 }
 }
 
-fn world_with(n: u64, seed: u64) -> WorldDefinition {
-    let mut d = WorldDefinition::single_planet(R, 7);
-    let mut rng = Rng(seed);
-    for id in 1..=n {
-        let reach = rng.unit() * 40_000.0;
-        d.put_item_spec(BodyId::PLANET, spec(id, rng.dir(), reach)).unwrap();
-    }
-    d
-}
-
 /// The footprint of `tile` and its halo as sample points on the tile grid, ignoring the cap: independent of `tile_cap`.
 fn halo_samples(tile: TileId, halo: f64) -> Vec<Vec3> {
     let (s0, s1, t0, t1) = tile.bounds();
@@ -120,24 +110,47 @@ fn item_anchor_and_reach(d: &WorldDefinition, id: u64) -> (Vec3, f64) {
 // spec: WDEF-007
 #[test]
 fn the_result_is_the_same_by_the_cell_index_and_by_a_scan_of_every_item() {
-    let d = world_with(400, 3);
+    // Items around every tile (up to 250 km out, reaches up to the limit), tiles from the coarse levels, through the cell level
+    // (8), to fine ones, in the middle of faces and at corners and edges; every halo.
     let mut rng = Rng(9);
-    for level in [8u8, 10, 13] {
+    let mut tiles = Vec::new();
+    for level in 3u8..=14 {
+        for _ in 0..3 {
+            tiles.push(TileId::from_direction(&TangentWarp, rng.dir(), level));
+        }
+        for corner in [Vec3::new(1.0, 1.0, 1.0), Vec3::new(1.0, 1.0, 0.0), Vec3::new(1.0, 0.0, 0.0)] {
+            tiles.push(TileId::from_direction(&TangentWarp, corner.normalized(), level));
+        }
+    }
+    let mut d = WorldDefinition::single_planet(R, 7);
+    let mut count = 0u64;
+    for tile in &tiles {
+        let c = tile.center_direction(&TangentWarp);
         for _ in 0..10 {
-            let tile = TileId::from_direction(&TangentWarp, rng.dir(), level);
-            let cap = tile_cap(&TangentWarp, tile, 0.25);
-            let want: Vec<u64> = (1..=400u64)
+            count += 1;
+            let offset = rng.dir() * (250_000.0 * rng.unit() / R);
+            let at = (c + offset - c * c.dot(offset)).normalized();
+            d.put_item_spec(BodyId::PLANET, spec(count, at, rng.unit() * 40_000.0)).unwrap();
+        }
+    }
+    let mut positives = 0;
+    for tile in tiles {
+        for halo in [0.0, 0.25, 1.0] {
+            let cap = tile_cap(&TangentWarp, tile, halo);
+            let want: Vec<u64> = (1..=count)
                 .filter(|id| {
                     let (anchor, reach) = item_anchor_and_reach(&d, *id);
                     touches(cap, anchor, reach, R)
                 })
                 .collect();
             let mut got: Vec<u64> =
-                d.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, 0.25).unwrap().iter().map(|i| i.id).collect();
+                d.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, halo).unwrap().iter().map(|i| i.id).collect();
             got.sort_unstable();
-            assert_eq!(got, want, "tile {tile:?}");
+            positives += want.len();
+            assert_eq!(got, want, "tile {tile:?}, halo {halo}: the index and the scan of every item must give one set");
         }
     }
+    assert!(positives > 500, "the setup must return items, {positives}");
 }
 
 // spec: WDEF-007

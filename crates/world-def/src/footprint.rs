@@ -9,12 +9,13 @@
 use planet_core::cube::{face_to_direction, FaceMapping};
 use planet_core::{TileId, Vec3};
 
-/// Candidate cells are those covering the tile plus this many rings: an item sits at most one cell edge plus a halo of one
-/// tile edge from the tile, and cell edges differ from the nominal width by the level rounding (a factor of at most 1.5)
-/// and the face warp.
-pub const FOOTPRINT_MARGIN_RINGS: u32 = 4;
+/// Candidate cells for a tile at or below the cell level are the tile's cell plus this many rings. The cap of such a tile
+/// reaches at most 0.9 tile edges past the tile centre, its halo one tile edge and an item's reach one nominal cell edge, and a
+/// cell is no narrower than 0.7 nominal edges (the level rounding) and a little less across the face warp; the margin is
+/// checked against a scan of every item by `tests/footprint.rs`, not assumed.
+pub const FOOTPRINT_MARGIN_RINGS: u32 = 5;
 
-/// A tile that covers more cells than this scans every item of the body instead (the result is the same).
+/// The limit of cells a covering may have (the cells of one tile at or below the cell level are one).
 pub const FOOTPRINT_MAX_CELLS: usize = 1024;
 
 /// Relative margin on the touch test (`2^-20`).
