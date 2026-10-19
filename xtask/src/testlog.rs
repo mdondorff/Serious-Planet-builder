@@ -33,6 +33,32 @@ pub fn log_name(command: &str, secs: u64) -> String {
     format!("{command}-{y:04}{m:02}{d:02}-{:02}{:02}{:02}.log", rest / 3600, rest % 3600 / 60, rest % 60)
 }
 
+/// The file in [`DIR`] that `test fast` appends one line per run to (BUILD-019).
+pub const SERIES: &str = "test-fast-series.tsv";
+
+/// One tab-separated line of the `test fast` series: UTC time, selection, build s, tests s, their sum, verdict (BUILD-019).
+pub fn series_line(secs: u64, crates: &[String], whole: bool, build_secs: f64, test_secs: f64, passed: bool) -> String {
+    let (days, rest) = ((secs / 86_400) as i64, secs % 86_400);
+    let (y, m, d) = civil(days);
+    let selection = if whole || crates.is_empty() { "every crate".to_string() } else { crates.join("+") };
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z\t{selection}\t{build_secs:.1}\t{test_secs:.1}\t{:.1}\t{}",
+        rest / 3600,
+        rest % 3600 / 60,
+        rest % 60,
+        build_secs + test_secs,
+        if passed { "pass" } else { "fail" }
+    )
+}
+
+/// Appends `line` to the series file in `dir`, creating it when it is missing.
+pub fn append_series(dir: &Path, line: &str) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = dir.join(SERIES);
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    writeln!(f, "{line}").map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// The command key of a `test` run: `test`, `test-fast`, `test-gpu` or `test-gpu-real`.
 pub fn command_key(sub: Option<&str>, real: bool) -> String {
     match (sub, real) {
@@ -141,6 +167,25 @@ mod tests {
         let (a, b) = (new_log(&dir, "test", 1_792_355_415).unwrap(), new_log(&dir, "test", 1_792_355_415).unwrap());
         assert_eq!(a.file_name().unwrap(), "test-20261018-203015.log");
         assert_eq!(b.file_name().unwrap(), "test-20261018-203015-2.log");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: BUILD-019
+    #[test]
+    fn every_test_fast_run_appends_one_series_line_and_the_log_rotation_leaves_the_file_alone() {
+        let dir = temp("series");
+        let first = series_line(1_792_430_738, &["planet-frame".to_string(), "planet-render".to_string()], false, 12.0, 9.5, true);
+        assert_eq!(first, "2026-10-19T17:25:38Z\tplanet-frame+planet-render\t12.0\t9.5\t21.5\tpass");
+        let second = series_line(1_792_430_900, &[], true, 1.3, 35.1, false);
+        assert_eq!(second, "2026-10-19T17:28:20Z\tevery crate\t1.3\t35.1\t36.4\tfail");
+        append_series(&dir, &first).unwrap();
+        append_series(&dir, &second).unwrap();
+        for i in 0..25u64 {
+            std::fs::write(dir.join(log_name("test-fast", 1_792_000_000 + i)), "x").unwrap();
+        }
+        new_log(&dir, "test-fast", 1_792_100_000).unwrap();
+        let text = std::fs::read_to_string(dir.join(SERIES)).unwrap();
+        assert_eq!(text, format!("{first}\n{second}\n"), "one line per run, appended, untouched by the rotation");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
