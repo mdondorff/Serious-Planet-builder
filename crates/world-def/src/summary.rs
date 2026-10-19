@@ -142,7 +142,7 @@ pub fn cover(tile: TileId, cell_level: u8, rings: Option<u32>) -> Vec<TileId> {
 }
 
 /// Most entries the cover memo holds before it starts over.
-const COVER_MEMO_MAX: usize = 4096;
+const COVER_MEMO_MAX: usize = 256;
 
 type CoverMemo = Mutex<HashMap<(u64, u64, u64), Arc<Vec<TileId>>>>;
 
@@ -151,7 +151,7 @@ static COVER_MEMO: OnceLock<CoverMemo> = OnceLock::new();
 /// [`cover`] for a tile read with `halo` on a body of `radius_m` (the margin rings follow from them), memoised: the node set of a tile
 /// is a pure function of the tile, the halo, the radius and the cell level (which the radius fixes), so a process-wide memo changes
 /// no result and no key, and a plan that reads the same coarse tiles every frame builds each cover once (about 20,000 cells for a
-/// level-4 tile at the Earth's cell level with 64 rings). The memo starts over past [`COVER_MEMO_MAX`] entries. `halo` is canonical
+/// level-4 tile at the Earth's cell level with 64 rings). The memo starts over past [`COVER_MEMO_MAX`] entries (256: a cover is up to about 20,000 tile ids, so the memo stays within tens of MB). `halo` is canonical
 /// (`-0.0` read as `0.0`).
 pub fn cover_cached(tile: TileId, halo: f64, radius_m: f64, cell_level: u8) -> Arc<Vec<TileId>> {
     let halo = if halo == 0.0 { 0.0 } else { halo };
