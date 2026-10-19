@@ -135,6 +135,13 @@ impl LodParams {
 
     /// Reject parameters for which crack-free morphing is impossible (the morph interval would vanish at some level).
     pub fn validate(&self) -> Result<(), String> {
+        let per_m = self.shore_ramp_per_m();
+        if !(per_m.is_finite() && per_m > 0.0) {
+            return Err(format!(
+                "tau {} px, viewport {} px and field of view {} rad give a shore ramp growth of {per_m} per metre; all three must be finite and positive",
+                self.tau_px, self.viewport_h_px, self.fov_y_rad
+            ));
+        }
         for level in 1..=self.max_level {
             let (start, end) = self.morph_interval(level);
             if end - start < 0.05 * end {
@@ -153,7 +160,7 @@ impl LodParams {
     /// 2 tan(fov_y / 2) / viewport_h_px` (the same quantity [`split_distance`](LodParams::split_distance) divides by). A node is drawn only
     /// where its mesh's error is below that tolerance, so at a fragment `d` metres away the height of one ground point differs between a
     /// mesh, its parent's and the morph between them by a fraction of `tau_px * pixel_angle * d`. The ramp is `SHORE_RAMP_K` times it ([`shore_ramp_at`]):
-    /// k = 1 left 4.3 % of the shore pixels of the glide flashing, k = 1.5, 2 and 3 none; 2 is taken. A ramp narrower than the error makes the
+    /// k = 1 left 4.3 % of the shore pixels of the glide flashing, k = 1.5, 2 and 3 none; 2 is taken (measured with the former per-node rule, which is about 1.4 to 2 times this one; the distance rule is checked by the same flights, REND-030). A ramp narrower than the error makes the
     /// seabed-to-shore albedo, which differs by a factor of eight in luminance, flash with decimetre height changes between frames. Near
     /// the camera the product is centimetres and the ramp stays at the look's `shore_blend_m`; it is capped at [`SHORE_RAMP_MAX_M`].
     pub fn shore_ramp_per_m(&self) -> f64 {

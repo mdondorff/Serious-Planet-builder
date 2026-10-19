@@ -359,7 +359,7 @@ fn the_plan_carries_the_shore_ramps_growth_with_distance_for_every_node_and_the_
     // One value for the whole plan, whatever levels its nodes are: a coarser plan of the same request has the same growth.
     let other = plan_of(6, TerrainView::Level, 1);
     assert_eq!(other.shore_ramp_per_m, p.shore_ramp_per_m);
-    // A debug plan's text has no ramp at all; a lit plan's has the growth, the round trip keeps it.
+    // The text carries the growth as a plan-level line (a debug plan too, when it is not zero); the round trip keeps it.
     assert!(p.to_text().lines().any(|l| l.starts_with("shore_ramp_per_m ")));
     p.lit = Some(planet_frame::look::LitPlan::fixed(0.0));
     let text = p.to_text();

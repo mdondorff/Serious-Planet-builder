@@ -24,10 +24,11 @@ struct Case {
     t: f64,
     p: f64,
     h: f64,
-    /// The ramp height wanted at a distance of 100 m (REND-030); the probe gets `per_m = ramp / 100` and the distance below, so the ramp
-    /// is `shore_ramp_at(ramp / 100, 100 (0.25 + 1.5 morph))` and reaches the 8 m cap; 0 ramps by the table's blend alone.
+    /// The ramp height wanted at a distance of 100 m (REND-030); the probe gets `per_m = ramp / 100` and a fragment at the distance below,
+    /// so the ramp is `shore_ramp_at(ramp / 100, 100 (0.25 + 1.5 morph))` and reaches the 8 m cap; 0 ramps by the table's blend alone.
     ramp: f64,
-    /// Scales the fragment's distance from 25 m (0) to 175 m (1).
+    /// Scales the fragment's distance from 25 m (0) to 175 m (1); the fragment is placed as a node origin 700 m away plus a tile-local
+    /// offset that brings the sum to that distance, so the shader's `camera_distance` is exercised with an origin and a local position.
     morph: f64,
     sun: [f64; 3],
     pre_ev: f64,
@@ -164,7 +165,9 @@ fn the_lit_radiance_matches_the_f64_reference_within_its_declared_bound() {
             height_above_water_m: c.h as f32,
             // The case's ramp and morph give the growth per metre and a distance, so the ramp sweeps 0 to 12 m and meets the 8 m cap.
             shore_ramp_per_m: (c.ramp / 100.0) as f32,
-            distance_m: (100.0 * (0.25 + 1.5 * c.morph)) as f32,
+            origin_rel: [700.0, 0.0, 0.0],
+            // origin_rel + local = (0.6 d, 0.8 d, 0), whose length is d.
+            local: [(0.6 * 100.0 * (0.25 + 1.5 * c.morph) - 700.0) as f32, (0.8 * 100.0 * (0.25 + 1.5 * c.morph)) as f32, 0.0],
             sun: c.sun.map(|v| v as f32),
             factor: look::pre_exposure_factor(c.pre_ev) as f32,
             table: c.table.to_words(),
@@ -183,7 +186,10 @@ fn the_lit_radiance_matches_the_f64_reference_within_its_declared_bound() {
             f64::from(p.temperature_c),
             f64::from(p.precipitation_mm),
             f64::from(p.height_above_water_m),
-            planet_frame::lod::shore_ramp_at(f64::from(p.shore_ramp_per_m), f64::from(p.distance_m)),
+            planet_frame::lod::shore_ramp_at(
+                f64::from(p.shore_ramp_per_m),
+                ((0..3).map(|k| (f64::from(p.origin_rel[k]) + f64::from(p.local[k])).powi(2)).sum::<f64>()).sqrt(),
+            ),
             p.sun.map(f64::from),
         );
         let want = look::written_value(radiance, c.pre_ev);

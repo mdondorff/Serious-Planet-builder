@@ -57,9 +57,10 @@ fn the_shore_ramp_is_the_looks_blend_where_the_mesh_is_fine_and_follows_the_tole
         last = w;
     }
     // The growth per metre: `K * tau_px * pixel_angle`, and tau pixels at the far end of a node's drawing range are the parent's spacing, so at
-    // that distance the ramp is what the per-node rule measured on the coastal flights (k = 2): `K s(level - 1)` up to the cap.
+    // that distance the ramp is `K s(level - 1)` up to the cap: the former per-node rule's value at morph 0 (it rose to twice that across the
+    // morph, so the new rule is not equal to the old one pointwise; the coastal flights are the evidence, REND-030).
     let pixel_angle = 2.0 * libm::tan(lod.fov_y_rad / 2.0) / lod.viewport_h_px;
-    assert_eq!(lod.shore_ramp_per_m(), SHORE_RAMP_K * lod.tau_px * pixel_angle);
+    assert!((lod.shore_ramp_per_m() - SHORE_RAMP_K * lod.tau_px * pixel_angle).abs() <= 1e-15 * lod.shore_ramp_per_m());
     for level in 1..=22u8 {
         let (_, end) = lod.morph_interval(level);
         let want = (SHORE_RAMP_K * lod.sample_spacing(level - 1)).min(SHORE_RAMP_MAX_M);
@@ -71,10 +72,14 @@ fn the_shore_ramp_is_the_looks_blend_where_the_mesh_is_fine_and_follows_the_tole
     assert_eq!(shore_ramp_at(lod.shore_ramp_per_m(), 0.0), 0.0);
     assert!(shore_ramp_at(lod.shore_ramp_per_m(), 40.0) < E.shore_blend_m, "near the camera the ramp stays the look's 1 m");
     assert!(shore_ramp_at(lod.shore_ramp_per_m(), 2_000.0) > E.shore_blend_m, "far enough, the tolerance widens it");
+    // A growth that is not finite and positive is refused by the parameters' check.
+    for bad in [LodParams { viewport_h_px: 0.0, ..lod.clone() }, LodParams { tau_px: 0.0, ..lod.clone() }] {
+        assert!(bad.validate().is_err(), "{bad:?}");
+    }
     // It does not depend on the node's level, and follows tau, the viewport and the fov through the pixel angle only.
     let other = LodParams { tau_px: 3.0, viewport_h_px: 1440.0, fov_y_rad: 1.0, ..lod.clone() };
     let other_pixel = 2.0 * libm::tan(other.fov_y_rad / 2.0) / other.viewport_h_px;
-    assert_eq!(other.shore_ramp_per_m(), SHORE_RAMP_K * other.tau_px * other_pixel);
+    assert!((other.shore_ramp_per_m() - SHORE_RAMP_K * other.tau_px * other_pixel).abs() <= 1e-15 * other.shore_ramp_per_m());
     // The reference albedo: with no least height it is the albedo; a wider ramp spreads the transition, not the ends.
     for h in [-20.0, -1.0, -0.4, 0.0, 2.0] {
         assert_eq!(E.albedo_with_ramp(20.0, 50.0, 1.0, h, 0.0), E.albedo(20.0, 50.0, 1.0, h), "h {h}");
