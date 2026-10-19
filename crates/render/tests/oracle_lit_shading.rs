@@ -24,9 +24,10 @@ struct Case {
     t: f64,
     p: f64,
     h: f64,
-    /// The node's least height range of the seabed-to-shore ramp (REND-030); 0 ramps by the table's blend alone.
+    /// The ramp height wanted at a distance of 100 m (REND-030); the probe gets `per_m = ramp / 100` and the distance below, so the ramp
+    /// is `shore_ramp_at(ramp / 100, 100 (0.25 + 1.5 morph))` and reaches the 8 m cap; 0 ramps by the table's blend alone.
     ramp: f64,
-    /// A scale of the fragment's distance: the ramp is `shore_ramp_at(ramp / 100, 100 (0.25 + 1.5 morph))`.
+    /// Scales the fragment's distance from 25 m (0) to 175 m (1).
     morph: f64,
     sun: [f64; 3],
     pre_ev: f64,

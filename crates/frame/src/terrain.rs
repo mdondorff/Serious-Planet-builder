@@ -90,8 +90,8 @@ pub struct TerrainPlan {
     pub height_range: [f32; 2],
     pub cells: u32,
     /// The growth of the albedo's seabed-to-shore ramp with the distance of the fragment from the camera, `LodParams::shore_ramp_per_m()`
-    /// (REND-030): the lit shader's ramp at a fragment is `max(shore_blend_m, min(this * distance, 8 m))`, whichever node draws it. Lit
-    /// plans only carry it in the text; a recorded plan without it ramps by the look's blend alone.
+    /// (REND-030): the lit shader's ramp at a fragment is `max(shore_blend_m, min(this * distance, 8 m))`, whichever node draws it. The text
+    /// form carries it as a plan-level line when it is not zero; a recorded plan without it ramps by the look's blend alone.
     pub shore_ramp_per_m: f32,
     pub nodes: Vec<TerrainDraw>,
     /// The lit path of this frame (ADR 0042 points 1 and 3): `None` keeps the debug path, whose goldens do not change.

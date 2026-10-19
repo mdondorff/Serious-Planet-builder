@@ -1863,6 +1863,47 @@ mod one_shot_tests {
         );
     }
 
+    // spec: REND-030
+    #[test]
+    fn the_node_record_carries_no_ramp_so_the_same_ground_point_ramps_alike_under_a_tile_of_any_level() {
+        use planet_core::{PlanetFixed, TileId, Vec3};
+        let node = |tile: TileId| planet_frame::TerrainDraw {
+            tile,
+            level: tile.level(),
+            origin: PlanetFixed(Vec3::new(1.0, 2.0, 3.0)),
+            camera_relative_origin: [1.0, 2.0, 3.0],
+            morph: 0.5,
+            morph_start_m: 10.0,
+            morph_end_m: 20.0,
+            color: [1, 2, 3, 255],
+            mesh_key: 7,
+        };
+        let (coarse, fine) = (TileId::new(planet_core::Face(0), 17, 1, 1).unwrap(), TileId::new(planet_core::Face(0), 20, 8, 8).unwrap());
+        let mut plan = planet_frame::viewer::lit_warm_plan(
+            planet_frame::camera::Camera::looking_at_centre(
+                PlanetFixed(Vec3::new(0.0, 0.0, 7.0e6)),
+                Vec3::new(0.0, 1.0, 0.0),
+                1.0,
+                1.0,
+                1.0,
+            ),
+            (64, 64),
+            32,
+            planet_frame::look::LitPlan::fixed(0.0),
+        );
+        plan.shore_ramp_per_m = 0.01;
+        plan.nodes = vec![node(coarse), node(fine)];
+        let bytes = node_record_bytes(&plan);
+        let word = |record: usize, w: usize| {
+            let at = record * NODE_BYTES as usize + 4 * w;
+            f32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
+        };
+        for record in 0..2 {
+            assert_eq!((word(record, 10), word(record, 11)), (0.0, 0.0), "record {record}: words 10 and 11 are padding");
+            assert_eq!((word(record, 8), word(record, 9)), (10.0, 20.0), "the morph interval is still there");
+        }
+    }
+
     // spec: REND-016
     #[test]
     fn a_one_shot_plan_larger_than_a_block_spans_several_blocks_instead_of_failing() {

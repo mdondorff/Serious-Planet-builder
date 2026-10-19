@@ -86,7 +86,7 @@ impl TerrainPlan {
         if self.shore_ramp_per_m != 0.0 {
             s += &format!("shore_ramp_per_m {}\n", h32(self.shore_ramp_per_m));
         }
-        // The lit path's line exists only for a lit plan, so the text (and the hash) of every debug-path plan is unchanged.
+        // The lit path's line exists only for a lit plan.
         if let Some(lit) = &self.lit {
             s += &lit.to_text();
             s.push('\n');

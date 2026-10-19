@@ -8,7 +8,9 @@ SPIKE-16 (`spikes/water-motion-gap/results/results.md`) diagnosed the owner's "d
 - Plan text: the per-node `shore_ramp <h32>` token is gone (read and ignored); a plan-level line `shore_ramp_per_m <h32>` appears when the value is not zero. The plan snapshots in `crates/frame/tests/data` and the floor-0 plan hashes change by that (node counts equal), a declared change.
 
 ## Impact
+- Plan text: `TERRAIN_PLAN_FORMAT_VERSION` stays 1 (the reader accepts old node tokens). A plan or repro bundle recorded before this change loads and ramps by the look's blend alone, but its recorded `plan_hash` no longer equals the hash of the re-serialised plan, so it does not replay hash-identical.
+- API: `TerrainDraw::shore_ramp_min_m` and `LodParams::shore_ramp_min_m` are removed; `TerrainPlan::shore_ramp_per_m` and `lod::shore_ramp_at(per_m, distance)` are new.
 - Spec: REND-030 (MODIFIED).
-- Tests: tier A `the_same_seabed_point_has_the_same_albedo_whichever_level_of_tile_draws_it` (fails under the per-level rule: 0.374 against 0.076, ratio 4.9), the ramp function and its continuity with the old rule at the far end of each level, the plan text; tier B `oracle_lit_shading` (shader against reference); tier C `gpu_water` flicker budget (TEST-027, 0.5 % of shore-band pixels) re-run on the coastal flights.
+- Tests: tier A `the_ramp_is_a_function_of_the_fragments_distance_and_the_per_level_rule_it_replaces_gave_a_factor_of_five_between_adjacent_levels` (the old rule: 0.374 against 0.076 between L17 and L19), the ramp function and its equality with the old rule at the far end of each level, the plan text and the node record without a ramp (render unit test); tier B `oracle_lit_shading` (shader against reference); tier C `gpu_water` coastal-flight flicker (REND-030 scenario "No flash on the coastal flights", 0.5 % of shore-band pixels; ATMO-017) re-run on both adapters.
 - Goldens: lit and water views where the seabed is within the ramp move; they go through `golden-review`, lit views escalate to the owner's `/bless`.
 - numerics-reviewer: the shader (distance from camera-relative f32, CON-11).

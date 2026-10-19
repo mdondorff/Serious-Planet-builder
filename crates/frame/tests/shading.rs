@@ -17,7 +17,7 @@ fn close3(a: [f64; 3], b: [f64; 3], tol: f64, what: &str) {
 
 // spec: REND-030
 #[test]
-fn the_same_seabed_point_has_the_same_albedo_whichever_level_of_tile_draws_it() {
+fn the_ramp_is_a_function_of_the_fragments_distance_and_the_per_level_rule_it_replaces_gave_a_factor_of_five_between_adjacent_levels() {
     use planet_frame::lod::{shore_ramp_at, LodParams, SHORE_RAMP_K, SHORE_RAMP_MAX_M};
     let lod = LodParams::earth_1080p();
     let per_m = lod.shore_ramp_per_m();
@@ -25,16 +25,9 @@ fn the_same_seabed_point_has_the_same_albedo_whichever_level_of_tile_draws_it() 
     let by_level = |level: u8| (SHORE_RAMP_K * lod.sample_spacing(level - 1)).min(SHORE_RAMP_MAX_M);
     let luminance = |c: [f64; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
     let at = |ramp: f64, h: f64| luminance(E.albedo_with_ramp(20.0, 50.0, 1.0, h, ramp));
-    // A fragment 2 km from the camera, a seabed point 2.5 m under the water, drawn by a node of any level the cover or a stale plan
-    // can put there (L16 to L22): the ramp is a function of the fragment's distance, and nothing about the node, so the albedo is one.
-    for d in [5.0, 80.0, 400.0, 2_000.0, 20_000.0] {
-        let want = at(shore_ramp_at(per_m, d), -2.5);
-        for level in 16..=22u8 {
-            // The renderer has no level to hand to the ramp: it takes the distance.
-            let got = at(shore_ramp_at(per_m, d), -2.5);
-            assert_eq!(got, want, "distance {d}, level {level}");
-        }
-    }
+    // The ramp takes the plan's growth and the fragment's distance and nothing else (`shore_ramp_at(per_m, d)` has no level argument; the
+    // plan carries one growth for all nodes and the node record no ramp: `node_record_bytes`, a test in the render crate), so a seabed point
+    // 2.5 m under the water has the albedo its distance gives, whichever tile draws it.
     // The failure this replaces (SPIKE-16): under the old rule the same point is 4.9 times brighter under L17 than under L19.
     let (old17, old19) = (at(by_level(17), -2.5), at(by_level(19), -2.5));
     assert!(old17 / old19 > 4.0, "the per-level ramp gave {old17} under L17 and {old19} under L19");
