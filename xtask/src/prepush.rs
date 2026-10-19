@@ -54,9 +54,18 @@ pub fn no_crate_changed(changed: &[String]) -> bool {
     !changed.is_empty() && testcmd::packages_for_changes(changed).is_empty()
 }
 
+/// The steps `prepush` runs for a diff, in order (BUILD-016, BUILD-021): `spec-lint` alone when no changed path is a crate path, else
+/// `check` and `test fast`; `test gpu` after them when a golden-producing path changed.
+pub fn plan_steps(changed: &[String]) -> Vec<&'static str> {
+    let mut steps = if no_crate_changed(changed) { vec!["spec-lint"] } else { vec!["check", "test fast"] };
+    if !golden_triggers(changed).is_empty() {
+        steps.push("test gpu");
+    }
+    steps
+}
+
 pub fn run(root: &Path) -> Res {
     let changed = testcmd::changed_paths(root);
-    let docs_only = no_crate_changed(&changed);
     let triggers = golden_triggers(&changed);
     let with_gpu = !triggers.is_empty();
     if with_gpu {
@@ -67,14 +76,18 @@ pub fn run(root: &Path) -> Res {
     }
     let mut steps: Vec<Step> = Vec::new();
     type Action<'a> = Box<dyn Fn() -> Res + 'a>;
-    let mut plan: Vec<(&str, Action)> = if docs_only {
-        eprintln!("prepush: no crate path changed, so check and test fast are skipped; spec-lint runs");
-        vec![("spec-lint", Box::new(|| crate::speclint::run(root)))]
-    } else {
-        vec![("check", Box::new(|| testcmd::check(root))), ("test fast", Box::new(|| testcmd::test(root, &["fast".to_string()])))]
-    };
-    if with_gpu {
-        plan.push(("test gpu", Box::new(|| testcmd::test(root, &["gpu".to_string()]))));
+    let mut plan: Vec<(&str, Action)> = Vec::new();
+    for name in plan_steps(&changed) {
+        let action: Action = match name {
+            "spec-lint" => {
+                eprintln!("prepush: no crate path changed, so check and test fast are skipped; spec-lint runs");
+                Box::new(|| crate::speclint::run(root))
+            }
+            "check" => Box::new(|| testcmd::check(root)),
+            "test fast" => Box::new(|| testcmd::test(root, &["fast".to_string()])),
+            _ => Box::new(|| testcmd::test(root, &["gpu".to_string()])),
+        };
+        plan.push((name, action));
     }
     for (name, step) in plan {
         eprintln!("prepush: {name} ...");
@@ -96,6 +109,21 @@ mod tests {
 
     fn paths(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
+    }
+
+    // spec: BUILD-016
+    // spec: BUILD-021
+    #[test]
+    fn the_plan_of_a_diff_is_spec_lint_alone_for_docs_and_the_gpu_tier_follows_a_golden_path() {
+        assert_eq!(plan_steps(&paths(&["docs/status.md"])), ["spec-lint"]);
+        assert_eq!(plan_steps(&paths(&["docs/status.md", "crates/editor/src/lib.rs"])), ["check", "test fast"]);
+        assert_eq!(plan_steps(&paths(&["crates/render/src/terrain.rs"])), ["check", "test fast", "test gpu"]);
+        assert_eq!(
+            plan_steps(&paths(&["spikes/x/shader.wgsl", "docs/a.md"])),
+            ["spec-lint", "test gpu"],
+            "a golden path outside the crates"
+        );
+        assert_eq!(plan_steps(&[]), ["check", "test fast"], "nothing changed is the whole workspace");
     }
 
     // spec: BUILD-016
