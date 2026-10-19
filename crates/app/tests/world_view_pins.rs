@@ -12,7 +12,7 @@ const R: f64 = 6_371_000.0;
 const PIN_BAKE_RES: u32 = 256;
 
 /// Nodes per standard view, the default world (eroded field over a 256-cell bake), cells 32, tau 6 px, 1440p. The other counts
-/// follow from it (2,304 triangles and 1,221 x 48 GPU vertex bytes per tile). Pinned 2026-10-15 by `world-field-everywhere` (the
+/// follow from it (2,304 triangles and one 9,168 B compact slot per tile). Pinned 2026-10-15 by `world-field-everywhere` (the
 /// default world is the eroded field); raising a pin is a decision: say why in the change that does it (CON-20).
 /// Re-pinned 2026-10-15 by `finest-level-cap` (LOD-010, declared: finest level 22): the views are planned at the production finest
 /// level 22 (cells 32); only ground-1m reaches it: 2,936 to 2,409 nodes (-17.9 %), every other view is unchanged. The level-26
@@ -66,7 +66,7 @@ fn every_standard_view_of_the_default_world_stays_within_its_own_pinned_counts()
         let c = plan.counts();
         assert_eq!(c.draw_calls as usize, plan.nodes.len(), "{name}");
         assert_eq!(c.triangles, plan.nodes.len() as u64 * 2_304, "{name}");
-        assert_eq!(c.upload_bytes, u64::from(c.resident_tiles) * 1_221 * 48, "{name}");
+        assert_eq!(c.upload_bytes, u64::from(c.resident_tiles) * planet_generators::compact::slot_bytes(32), "{name}");
         assert_eq!(c.resident_tiles as usize, plan.nodes.len(), "{name}: every node of a plan is a distinct tile");
         c.check(&CountBudget::REFERENCE_1440P).unwrap_or_else(|e| panic!("{name}: {e}"));
         report.push(format!("(\"{name}\", {}),", plan.nodes.len()));
@@ -74,7 +74,7 @@ fn every_standard_view_of_the_default_world_stays_within_its_own_pinned_counts()
             max_draw_calls: pin,
             max_triangles: u64::from(pin) * 2_304,
             max_resident_tiles: pin,
-            max_upload_bytes: u64::from(pin) * 1_221 * 48,
+            max_upload_bytes: u64::from(pin) * planet_generators::compact::slot_bytes(32),
         };
         if let Err(e) = c.check(&budget) {
             failures.push(format!("{name}: {e} (nodes {} against pin {pin})", plan.nodes.len()));
@@ -104,11 +104,11 @@ fn every_standard_view_of_the_default_world_stays_within_its_own_pinned_counts()
 
 // spec: GEN-019, TEST-011, LOD-010
 #[test]
-fn the_finest_tiles_of_the_standard_views_never_fall_back_to_the_vertex_format() {
-    // ADR 0033 point 5: zero CON-13 fallbacks on the standard views. The finest level (the LOD cap, 22) is drawn at the ground views;
+fn the_finest_tiles_of_the_standard_views_keep_the_one_millimetre_height_step() {
+    // CON-13 on the standard views (the vertex fallback of ADR 0033 point 5 is gone, ADR 0062). The finest level (the LOD cap, 22) is drawn at the ground views;
     // every finest draw tile of each view is built in the compact format and must keep a
     // height step of at most 1 mm.
-    use planet_generators::compact::{compact_tile_field, vertex_reason};
+    use planet_generators::compact::{compact_tile_field, WIDE_RELIEF_1MM_M};
     let world = WorldTerrain::open(WorldDefinition::single_planet(R, 1), PIN_BAKE_RES).unwrap();
     let field = world.field().unwrap();
     let size = (2560u32, 1440u32);
@@ -149,13 +149,12 @@ fn the_finest_tiles_of_the_standard_views_never_fall_back_to_the_vertex_format()
     let mut worst_relief = 0f64;
     for ((name, tile), relief) in tiles.iter().zip(&reliefs) {
         worst_relief = worst_relief.max(*relief);
-        assert_eq!(
-            vertex_reason(lod.max_level, lod.max_level, *relief),
-            None,
-            "{name}: {tile:?} has {relief} m of relief at the finest level"
+        assert!(
+            *relief < WIDE_RELIEF_1MM_M,
+            "{name}: {tile:?} has {relief} m of relief at the finest level, more than the {WIDE_RELIEF_1MM_M} m one tile holds at 1 mm"
         );
     }
     let finest = tiles.len();
-    println!("{finest} finest tiles sampled, largest relief {worst_relief:.3} m (limit 65.535 m)");
+    println!("{finest} finest tiles sampled, largest relief {worst_relief:.3} m (limit {WIDE_RELIEF_1MM_M:.0} m)");
     assert!(finest >= 50, "the sample must reach the finest level: {finest} tiles");
 }

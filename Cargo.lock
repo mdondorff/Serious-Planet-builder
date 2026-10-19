@@ -1498,6 +1498,7 @@ dependencies = [
  "planet-core",
  "planet-frame",
  "planet-generators",
+ "planet-render",
  "planet-streaming",
  "planet-testkit",
  "planet-world-def",

@@ -12,7 +12,7 @@ use planet_frame::pipeline::{
     residency_of, DrawKind, FrameColumns, FramesInFlight, PlanField, PlanPipeline, PlanWorker, MAX_FRAMES_IN_FLIGHT,
 };
 use planet_frame::{plan_terrain_threaded, PlanError, ResidencySet, SelectionCache, TerrainPlan, TerrainRequest};
-use planet_generators::compact::RenderTile;
+use planet_generators::compact::CompactTile;
 use planet_render::{GpuContext, RgbaFrame, TerrainRenderer};
 use planet_streaming::{ResidencyManager, SlotRef, StreamConfig, Streamer, SystemClock, ThreadPool};
 use std::io::Write;
@@ -60,11 +60,11 @@ pub(crate) struct RendererSink<'a> {
 }
 
 impl TileSink for RendererSink<'_> {
-    fn upload_at(&mut self, tile: &RenderTile, slot: SlotRef) -> Result<(), String> {
+    fn upload_at(&mut self, tile: &CompactTile, slot: SlotRef) -> Result<(), String> {
         self.renderer.upload_tile_at(self.ctx, tile, slot).map_err(|e| e.to_string())
     }
 
-    fn upload_batch(&mut self, tiles: &[(&RenderTile, SlotRef)]) -> Result<UploadStats, String> {
+    fn upload_batch(&mut self, tiles: &[(&CompactTile, SlotRef)]) -> Result<UploadStats, String> {
         let before = self.renderer.upload_counters();
         self.renderer.upload_tiles_at(self.ctx, tiles).map_err(|e| format!("placing a batch of {} tiles: {e}", tiles.len()))?;
         let after = self.renderer.upload_counters();
@@ -109,7 +109,7 @@ impl Rig {
         gen: planet_streaming::GenWorkers,
         progress: &mut dyn FnMut(usize, usize),
     ) -> Result<Rig, String> {
-        let mut renderer = TerrainRenderer::for_context(ctx, first.size, first.lod.cells, u64::from(MAX_FRAMES_IN_FLIGHT));
+        let mut renderer = TerrainRenderer::with_frames_in_flight(ctx, first.size, first.lod.cells, u64::from(MAX_FRAMES_IN_FLIGHT));
         // REND-013: the pools' first block, the ring and every pipeline's first draw happen here, before frame 0 (frame 0 stays
         // a measured frame, ADR 0032).
         renderer.warm_up(ctx);
@@ -120,18 +120,12 @@ impl Rig {
         let pool = *renderer.pool_config();
         let clock: Arc<dyn planet_streaming::Clock> = Arc::new(SystemClock::new());
         let mut streamer = Streamer::new(
-            Arc::new(MeshSource {
-                world: Arc::clone(world),
-                format: ctx.default_tile_format(),
-                max_level: first.lod.max_level,
-                cells: first.lod.cells,
-            }),
+            Arc::new(MeshSource { world: Arc::clone(world), max_level: first.lod.max_level, cells: first.lod.cells }),
             // The tile threads and the jobs running at once are one number (STRM-020).
             gen.pool(),
             Arc::clone(&clock),
             gen.apply(StreamConfig {
                 capacity: pool.main_slots() as usize,
-                vertex_pool_slots: pool.managed_vertex_slots() as usize,
                 retire_frames: u64::from(MAX_FRAMES_IN_FLIGHT),
                 retry_after_ms: 1000,
                 floor: first.lod.floor_level(),
@@ -174,10 +168,7 @@ pub fn run_script(
     out: &mut dyn Write,
 ) -> Result<(RgbaFrame, Vec<FrameLog>), String> {
     let first = requests.first().ok_or("an empty script")?;
-    // One tile size and one finest level per script: the pools are sized for the first request's cells, and the streamer's source
-    // builds its tiles for the first request's finest level. The mesh key carries the finest-level class of a tile (LOD-010,
-    // `finest_class_key`), so the CON-13 format decision is a function of what the key identifies and a tile built for another
-    // class is never taken for the planned one (it would show as a stale mesh, not as a wrong format); the streamer does not
+    // One tile size and one finest level per script: the pools are sized for the first request's cells, and the streamer does not
     // re-fetch resident tiles when the cap changes, so a script that changes it is refused.
     if let Some(r) = requests.iter().find(|r| r.lod.cells != first.lod.cells || r.lod.max_level != first.lod.max_level) {
         return Err(format!(

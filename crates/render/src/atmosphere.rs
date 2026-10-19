@@ -607,7 +607,7 @@ fn fs_lit_atmo(in: VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
-/// The text appended to the terrain shader (vertex or compact) for the frames that have an atmosphere.
+/// The text appended to the compact terrain shader for the frames that have an atmosphere.
 pub fn terrain_atmosphere_source() -> String {
     format!("{TERRAIN}{DECLS}{LIGHTING}{TERRAIN_MAIN}")
 }
@@ -636,7 +636,6 @@ pub fn atmosphere_shaders() -> Vec<(&'static str, String)> {
         ("atmosphere-sky-view", sky_view_shader()),
         ("atmosphere-aerial-perspective", aerial_perspective_shader()),
         ("atmosphere-composite", composite_shader()),
-        ("atmosphere-terrain-vertex", format!("{}{}", crate::terrain::TERRAIN_SHADERS[0].1, terrain_atmosphere_source())),
         ("atmosphere-terrain-compact", format!("{}{}", crate::compact_terrain_shader(32), terrain_atmosphere_source())),
     ]
 }

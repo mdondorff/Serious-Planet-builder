@@ -597,7 +597,7 @@ fn generate_store(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     .map_err(err)
 }
 
-use planet_generators::compact::RenderTile;
+use planet_generators::compact::CompactTile;
 
 const TERRAIN_SIZE: (u32, u32) = (256, 192);
 const TERRAIN_CELLS: u32 = 16;
@@ -665,18 +665,14 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
     }
     let mut cache = planet_frame::SelectionCache::new();
     let plan = planet_frame::plan_terrain_cached(&request, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
-    let format = ctx.default_tile_format();
-    let meshes: Vec<std::sync::Arc<RenderTile>> = if o.stream {
+    let meshes: Vec<std::sync::Arc<CompactTile>> = if o.stream {
         // R is selected on the plan's cache (its tile geometry and height volumes are hits), from the position only.
         let residency = planet_frame::pipeline::residency_of(&request, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
-        streamed_meshes(&world, &plan, &residency, format, request.lod.max_level, request.lod.floor_level())?
+        streamed_meshes(&world, &plan, &residency, request.lod.max_level, request.lod.floor_level())?
     } else {
-        plan.nodes
-            .iter()
-            .map(|n| std::sync::Arc::new(tile_for(format, field.as_ref(), n.tile, TERRAIN_CELLS, radius_m, request.lod.max_level)))
-            .collect()
+        plan.nodes.iter().map(|n| std::sync::Arc::new(tile_for(field.as_ref(), n.tile, TERRAIN_CELLS, radius_m))).collect()
     };
-    let refs: Vec<&RenderTile> = meshes.iter().map(|m| m.as_ref()).collect();
+    let refs: Vec<&CompactTile> = meshes.iter().map(|m| m.as_ref()).collect();
     let (frame, stats) = planet_render::execute_terrain_tiles(ctx, &plan, &refs).map_err(|e| e.to_string())?;
     writeln!(
         out,
@@ -767,18 +763,16 @@ fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>,
     let map = planet_frame::plan::face_mapping_by_id(&b.request.face_mapping)
         .ok_or_else(|| format!("unknown face mapping '{}'", b.request.face_mapping))?;
     let (seed, cells, radius) = (b.request.seed, b.request.lod.cells, b.request.lod.radius_m);
-    let format = ctx.default_tile_format();
-    let max_level = b.request.lod.max_level;
     let reference = planet_generators::height::Reference(seed);
-    let meshes: Vec<RenderTile> = rebuilt
+    let meshes: Vec<CompactTile> = rebuilt
         .nodes
         .iter()
         .map(|n| match &field {
-            Some(f) => tile_with(format, f.as_ref(), map.as_ref(), n.tile, cells, radius, max_level),
-            None => tile_with(format, &reference, map.as_ref(), n.tile, cells, radius, max_level),
+            Some(f) => planet_generators::compact::compact_tile_field(f.as_ref(), map.as_ref(), n.tile, cells, radius),
+            None => planet_generators::compact::compact_tile_field(&reference, map.as_ref(), n.tile, cells, radius),
         })
         .collect();
-    let refs: Vec<&RenderTile> = meshes.iter().collect();
+    let refs: Vec<&CompactTile> = meshes.iter().collect();
     let (frame, stats) = planet_render::execute_terrain_tiles(ctx, &rebuilt, &refs).map_err(|e| e.to_string())?;
     writeln!(out, "replay: {} draw calls, {} triangles", stats.draw_calls, stats.triangles).map_err(err)?;
     if let Some(p) = png {
@@ -818,21 +812,20 @@ fn world_of_bundle(w: &planet_frame::BundleWorld, b: &planet_frame::TerrainBundl
 /// bake by reference), so the source owns the world and no borrowed field has to outlive the streamer's workers.
 pub(crate) struct MeshSource {
     pub(crate) world: std::sync::Arc<WorldTerrain>,
-    pub(crate) format: planet_render::TileFormat,
     pub(crate) max_level: u8,
     /// Cells per tile edge: the run's tile size (the product 32, LOD-010; the reference views 16).
     pub(crate) cells: u32,
 }
 
-impl planet_streaming::TileSource<RenderTile> for MeshSource {
-    fn load(&self, tile: TileId) -> Result<RenderTile, String> {
+impl planet_streaming::TileSource<CompactTile> for MeshSource {
+    fn load(&self, tile: TileId) -> Result<CompactTile, String> {
         let field = self.world.field()?;
         // A pre-filled coarse tile is read from the pack instead of generated (STRM-021): the same tile, bit for bit.
-        if let Some(t) = self.world.prefilled_tile(field.as_ref(), tile, self.cells, self.max_level, self.format) {
+        if let Some(t) = self.world.prefilled_tile(field.as_ref(), tile, self.cells, self.max_level) {
             self.world.fill_water(tile, &t);
             return Ok(t);
         }
-        let made = tile_for(self.format, field.as_ref(), tile, self.cells, self.world.radius_m(), self.max_level);
+        let made = tile_for(field.as_ref(), tile, self.cells, self.world.radius_m());
         self.world.fill_water(tile, &made);
         Ok(made)
     }
@@ -840,7 +833,7 @@ impl planet_streaming::TileSource<RenderTile> for MeshSource {
     /// The stage boundary of a tile is every height sample: once the token is set the field answers 0 without reading the
     /// store, so the generation runs out in microseconds and the garbage tile is dropped, never returned (STRM-005: a job
     /// stops at its next stage boundary; a teardown or a teleport does not wait for a cold tile to read its blocks).
-    fn load_staged(&self, tile: TileId, cancel: &planet_streaming::CancelToken) -> Result<Option<RenderTile>, String> {
+    fn load_staged(&self, tile: TileId, cancel: &planet_streaming::CancelToken) -> Result<Option<CompactTile>, String> {
         if cancel.is_cancelled() {
             return Ok(None);
         }
@@ -849,16 +842,16 @@ impl planet_streaming::TileSource<RenderTile> for MeshSource {
 }
 
 impl MeshSource {
-    fn load_staged_timed(&self, tile: TileId, cancel: &planet_streaming::CancelToken) -> Result<Option<RenderTile>, String> {
+    fn load_staged_timed(&self, tile: TileId, cancel: &planet_streaming::CancelToken) -> Result<Option<CompactTile>, String> {
         let field = self.world.field()?;
-        if let Some(t) = self.world.prefilled_tile(field.as_ref(), tile, self.cells, self.max_level, self.format) {
+        if let Some(t) = self.world.prefilled_tile(field.as_ref(), tile, self.cells, self.max_level) {
             if !cancel.is_cancelled() {
                 self.world.fill_water(tile, &t);
             }
             return Ok(Some(t));
         }
         let guarded = CancelGuarded { inner: field.as_ref(), cancel };
-        let made = tile_for(self.format, &guarded, tile, self.cells, self.world.radius_m(), self.max_level);
+        let made = tile_for(&guarded, tile, self.cells, self.world.radius_m());
         if cancel.is_cancelled() {
             return Ok(None);
         }
@@ -949,34 +942,9 @@ impl planet_generators::height::HeightField for CancelGuarded<'_> {
     }
 }
 
-/// The tile in the format the run uses: the compact format for levels 3 and finer with the vertex fallback (GEN-019), or the
-/// vertex format for every tile (`--tile-format vertex`, the reference).
-pub(crate) fn tile_for(
-    format: planet_render::TileFormat,
-    field: &dyn planet_generators::height::HeightField,
-    tile: TileId,
-    cells: u32,
-    radius_m: f64,
-    max_level: u8,
-) -> RenderTile {
-    tile_with(format, field, &TangentWarp, tile, cells, radius_m, max_level)
-}
-
-fn tile_with(
-    format: planet_render::TileFormat,
-    field: &dyn planet_generators::height::HeightField,
-    map: &dyn planet_core::cube::FaceMapping,
-    tile: TileId,
-    cells: u32,
-    radius_m: f64,
-    max_level: u8,
-) -> RenderTile {
-    match format {
-        planet_render::TileFormat::Compact => planet_generators::compact::tile_data_field(field, map, tile, cells, radius_m, max_level),
-        planet_render::TileFormat::Vertex => {
-            RenderTile::Vertex(planet_generators::compact::vertex_tile_field(field, map, tile, cells, radius_m, max_level))
-        }
-    }
+/// The tile of the run: the compact tile (GEN-019, GEN-025), the only format.
+pub(crate) fn tile_for(field: &dyn planet_generators::height::HeightField, tile: TileId, cells: u32, radius_m: f64) -> CompactTile {
+    planet_generators::compact::compact_tile_field(field, &TangentWarp, tile, cells, radius_m)
 }
 
 /// Generate the plan's tile meshes through the asynchronous streaming path and wait, frame by frame, until every wanted tile
@@ -988,28 +956,23 @@ fn streamed_meshes(
     world: &std::sync::Arc<WorldTerrain>,
     plan: &planet_frame::TerrainPlan,
     residency: &planet_frame::ResidencySet,
-    format: planet_render::TileFormat,
     max_level: u8,
     floor: u8,
-) -> Result<Vec<std::sync::Arc<RenderTile>>, String> {
+) -> Result<Vec<std::sync::Arc<CompactTile>>, String> {
     use planet_streaming::{ResidencyManager, StreamConfig, Streamer, SystemClock, Tier, Wants};
     // Four tile threads and four queued behind them (STRM-020): the pool size and the limit are one number.
     let gen = planet_streaming::GenWorkers::new(4);
     let pool = gen.pool();
-    let share = match format {
-        planet_render::TileFormat::Compact => planet_frame::pool::tier_compact_pool(Tier::Mid, TERRAIN_CELLS, 1)?,
-        planet_render::TileFormat::Vertex => planet_frame::pool::tier_pool(Tier::Mid, TERRAIN_CELLS, 1)?,
-    };
+    let share = planet_frame::pool::tier_compact_pool(Tier::Mid, TERRAIN_CELLS, 1)?;
     let config = gen.apply(StreamConfig {
         capacity: share.main_slots() as usize,
-        vertex_pool_slots: share.managed_vertex_slots() as usize,
         retry_after_ms: 1000,
         floor,
         record_dispatches: false,
         ..Default::default()
     });
     let mut streamer = Streamer::new(
-        std::sync::Arc::new(MeshSource { world: std::sync::Arc::clone(world), format, max_level, cells: TERRAIN_CELLS }),
+        std::sync::Arc::new(MeshSource { world: std::sync::Arc::clone(world), max_level, cells: TERRAIN_CELLS }),
         pool,
         std::sync::Arc::new(SystemClock::new()),
         config,
@@ -1047,20 +1010,18 @@ pub(crate) fn upload_missing_meshes(
     field: &dyn planet_generators::height::HeightField,
     radius_m: f64,
     cells: u32,
-    max_level: u8,
 ) -> Result<usize, String> {
-    let format = ctx.default_tile_format();
     let missing: Vec<TileId> = plan.nodes.iter().filter(|n| !renderer.has_mesh(n.tile, n.mesh_key)).map(|n| n.tile).collect();
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());
     let chunk = missing.len().div_ceil(threads).max(1);
-    let meshes: Vec<RenderTile> = std::thread::scope(|s| {
+    let meshes: Vec<CompactTile> = std::thread::scope(|s| {
         let handles: Vec<_> = missing
             .chunks(chunk)
             .map(|part| {
                 s.spawn(move || {
                     part.iter()
                         .map(|&t| {
-                            let made = tile_for(format, field, t, cells, radius_m, max_level);
+                            let made = tile_for(field, t, cells, radius_m);
                             if let Some(w) = world {
                                 w.fill_water(t, &made);
                             }
@@ -1123,7 +1084,7 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, o.tau))?;
     std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
     let cameras = flight_path_field(radius_m, f64::from(size.0) / f64::from(size.1), field.as_ref(), frames);
-    let mut renderer = TerrainRenderer::for_context(ctx, size, o.cells, 1);
+    let mut renderer = TerrainRenderer::with_frames_in_flight(ctx, size, o.cells, 1);
     let mut index = String::from("# frame altitude_above_terrain_m nodes plan_hash finest_level\n");
     let on_sheet = crate::sheet::sheet_indices(frames, SHEET_FRAMES);
     let mut sheet = Vec::new();
@@ -1132,9 +1093,9 @@ pub fn render_flight(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Resu
         let plan = plan_terrain_field(&req, field.as_ref()).map_err(|e| format!("frame {i}: {e}"))?;
         let missing = plan.nodes.iter().filter(|n| !renderer.has_mesh(n.tile, n.mesh_key)).count();
         if renderer.resident_tiles() > 0 && renderer.resident_tiles() + missing > FLIGHT_RESIDENT_CAP {
-            renderer = TerrainRenderer::for_context(ctx, size, o.cells, 1);
+            renderer = TerrainRenderer::with_frames_in_flight(ctx, size, o.cells, 1);
         }
-        upload_missing_meshes(ctx, None, &mut renderer, &plan, field.as_ref(), radius_m, o.cells, lod.max_level)?;
+        upload_missing_meshes(ctx, None, &mut renderer, &plan, field.as_ref(), radius_m, o.cells)?;
         renderer.render(ctx, &plan, false).map_err(|e| format!("frame {i}: {e}"))?;
         let path = dir.join(format!("frame_{i:04}.png"));
         let image = renderer.read_color(ctx);
@@ -1210,7 +1171,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         ..Protocol::default()
     };
     let views = scripted_views_field(radius_m, f64::from(size.0) / f64::from(size.1), field.as_ref());
-    let mut renderer = TerrainRenderer::for_context(ctx, size, o.cells, 1);
+    let mut renderer = TerrainRenderer::with_frames_in_flight(ctx, size, o.cells, 1);
     let mut reports: Vec<RunReport> = Vec::new();
     let mut budget_lines = Vec::new();
     let mut plan_lines: Vec<(&str, f64)> = Vec::new();
@@ -1262,7 +1223,7 @@ pub fn perf_terrain(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
         }
         let plan = planet_frame::plan_terrain_cached(&req, field.as_ref(), &mut cache).map_err(|e| e.to_string())?;
         let started = Instant::now();
-        let new_meshes = upload_missing_meshes(ctx, None, &mut renderer, &plan, field.as_ref(), radius_m, o.cells, lod.max_level)?;
+        let new_meshes = upload_missing_meshes(ctx, None, &mut renderer, &plan, field.as_ref(), radius_m, o.cells)?;
         let plan_median = summarize(&plan_samples, 0).map_or(f64::NAN, |s| s.median);
         plan_lines.push((name, plan_median));
         writeln!(
@@ -1461,7 +1422,7 @@ mod tests {
         use planet_streaming::{CancelToken, TileSource};
         let world =
             std::sync::Arc::new(WorldTerrain::open(crate::worldfield::legacy_world(5, RADIUS_M), 8).expect("a small in-memory world"));
-        let source = MeshSource { world, format: planet_render::TileFormat::Compact, max_level: 22, cells: 16 };
+        let source = MeshSource { world, max_level: 22, cells: 16 };
         let tile = TileId::new(Face(2), 5, 3, 4).unwrap();
         assert!(source.load_staged(tile, &CancelToken::cancelled()).unwrap().is_none(), "cancelled before it starts: no tile");
         let live = source.load_staged(tile, &CancelToken::never()).unwrap().expect("a live job returns its tile");
@@ -1478,8 +1439,7 @@ mod tests {
                 .expect("a small in-memory world")
                 .bounding_water(),
         );
-        let source =
-            MeshSource { world: std::sync::Arc::clone(&world), format: planet_render::TileFormat::Vertex, max_level: 22, cells: 16 };
+        let source = MeshSource { world: std::sync::Arc::clone(&world), max_level: 22, cells: 16 };
         let tiles: Vec<TileId> =
             (0..6u8).flat_map(|f| [TileId::new(Face(f), 2, 1, 2).unwrap(), TileId::new(Face(f), 4, 7, 9).unwrap()]).collect();
         // A cancelled job leaves nothing; the jobs of the live tiles fill the book.
@@ -1514,9 +1474,7 @@ mod tests {
         // A world without the lit path computes no water in its jobs (the debug path pays nothing).
         let debug =
             std::sync::Arc::new(WorldTerrain::open(planet_world_def::WorldDefinition::single_planet(RADIUS_M, 5), 128).expect("world"));
-        MeshSource { world: std::sync::Arc::clone(&debug), format: planet_render::TileFormat::Vertex, max_level: 22, cells: 16 }
-            .load(tiles[1])
-            .unwrap();
+        MeshSource { world: std::sync::Arc::clone(&debug), max_level: 22, cells: 16 }.load(tiles[1]).unwrap();
         assert_eq!(debug.water_book().filled(), 0);
     }
 
@@ -1532,40 +1490,28 @@ mod tests {
         let tiles: Vec<TileId> =
             (0..6u8).flat_map(|f| [TileId::new(Face(f), 2, 1, 2).unwrap(), TileId::new(Face(f), 4, 7, 9).unwrap()]).collect();
         let (mut wet_seen, mut dry_seen) = (0, 0);
-        for format in [planet_render::TileFormat::Vertex, planet_render::TileFormat::Compact] {
-            let world = if format == planet_render::TileFormat::Vertex {
-                std::sync::Arc::clone(&world)
+        let source = MeshSource { world: std::sync::Arc::clone(&world), max_level: 22, cells: 16 };
+        assert!(source.load_staged(tiles[0], &CancelToken::cancelled()).unwrap().is_none());
+        assert_eq!(world.water_book().min_height(tiles[0]), None, "a cancelled job keeps no minimum");
+        let field = world.field().unwrap();
+        for t in &tiles {
+            let built = source.load_staged(*t, &CancelToken::never()).unwrap().unwrap();
+            let book = world.water_book();
+            // The minimum recomputed from the tile as the shader shades it: every lattice vertex's height, skirts excluded.
+            let n = (built.cells() as usize + 1) * (built.cells() as usize + 1);
+            let recomputed = built.shade_all()[..n].iter().map(|v| v.height).fold(f32::INFINITY, f32::min);
+            if book.get(*t).flatten().is_some() {
+                wet_seen += 1;
+                assert_eq!(book.min_height(*t), Some(recomputed), "{t:?}: the job's minimum is the mesh's");
+                // And the field's own minimum over the lattice, up to the 16-bit quantisation (0.5 mm at most) and f32 rounding.
+                let m = (0..=16u32)
+                    .flat_map(|j| (0..=16u32).map(move |i| (i, j)))
+                    .map(|(i, j)| field.height(t.sample_direction(&TangentWarp, 16, i, j)))
+                    .fold(f64::INFINITY, f64::min);
+                assert!((f64::from(recomputed) - m).abs() <= 2.0e-3 + 1.0e-6 * m.abs(), "{t:?}: {recomputed} against {m}");
             } else {
-                std::sync::Arc::new(
-                    WorldTerrain::open(planet_world_def::WorldDefinition::single_planet(RADIUS_M, 5), 128).unwrap().bounding_water(),
-                )
-            };
-            let source = MeshSource { world: std::sync::Arc::clone(&world), format, max_level: 22, cells: 16 };
-            assert!(source.load_staged(tiles[0], &CancelToken::cancelled()).unwrap().is_none());
-            assert_eq!(world.water_book().min_height(tiles[0]), None, "a cancelled job keeps no minimum");
-            let field = world.field().unwrap();
-            for t in &tiles {
-                let built = source.load_staged(*t, &CancelToken::never()).unwrap().unwrap();
-                let book = world.water_book();
-                // The minimum recomputed from the tile as the shader shades it: every lattice vertex's height, skirts excluded.
-                let n = (built.cells() as usize + 1) * (built.cells() as usize + 1);
-                let recomputed = match &built {
-                    RenderTile::Vertex(m) => m.vertices[..n].iter().map(|v| v.height).fold(f32::INFINITY, f32::min),
-                    RenderTile::Compact(c) => c.shade_all()[..n].iter().map(|v| v.height).fold(f32::INFINITY, f32::min),
-                };
-                if book.get(*t).flatten().is_some() {
-                    wet_seen += 1;
-                    assert_eq!(book.min_height(*t), Some(recomputed), "{t:?} {format:?}: the job's minimum is the mesh's");
-                    // And the field's own minimum over the lattice, up to the 16-bit quantisation (0.5 mm at most) and f32 rounding.
-                    let m = (0..=16u32)
-                        .flat_map(|j| (0..=16u32).map(move |i| (i, j)))
-                        .map(|(i, j)| field.height(t.sample_direction(&TangentWarp, 16, i, j)))
-                        .fold(f64::INFINITY, f64::min);
-                    assert!((f64::from(recomputed) - m).abs() <= 2.0e-3 + 1.0e-6 * m.abs(), "{t:?} {format:?}: {recomputed} against {m}");
-                } else {
-                    dry_seen += 1;
-                    assert_eq!(book.min_height(*t), None, "{t:?}: a dry tile keeps no minimum");
-                }
+                dry_seen += 1;
+                assert_eq!(book.min_height(*t), None, "{t:?}: a dry tile keeps no minimum");
             }
         }
         assert!(wet_seen > 0 && dry_seen > 0, "the tiles are a mix of sea and land");
@@ -1602,23 +1548,21 @@ mod tests {
         use planet_generators::height::HeightField;
         use std::sync::atomic::{AtomicUsize, Ordering};
         let tile = TileId::new(Face(1), 6, 5, 9).unwrap();
-        for format in [planet_render::TileFormat::Compact, planet_render::TileFormat::Vertex] {
-            let (live_calls, cancelled_calls, direct_calls) = (AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0));
-            fn make(calls: &AtomicUsize) -> Sampled<'_> {
-                Sampled { inner: planet_generators::height::Reference(7), calls }
-            }
-            let direct = tile_for(format, &make(&direct_calls), tile, 16, RADIUS_M, 22);
-            let (inner, never) = (make(&live_calls), planet_streaming::CancelToken::never());
-            let guarded = CancelGuarded { inner: &inner, cancel: &never };
-            assert_eq!(tile_for(format, &guarded, tile, 16, RADIUS_M, 22), direct, "{format:?}: the guard changes nothing while live");
-            assert_eq!(live_calls.load(Ordering::SeqCst), direct_calls.load(Ordering::SeqCst));
-            assert_eq!(guarded.inputs_hash(), inner.inputs_hash(), "keys are the inner field's");
-            let (inner, cancelled) = (make(&cancelled_calls), planet_streaming::CancelToken::cancelled());
-            let guarded = CancelGuarded { inner: &inner, cancel: &cancelled };
-            let _ = tile_for(format, &guarded, tile, 16, RADIUS_M, 22);
-            assert_eq!(cancelled_calls.load(Ordering::SeqCst), 0, "{format:?}: a cancelled job reads nothing more");
-            assert!(direct_calls.load(Ordering::SeqCst) > 100, "the tile does read the field");
+        let (live_calls, cancelled_calls, direct_calls) = (AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0));
+        fn make(calls: &AtomicUsize) -> Sampled<'_> {
+            Sampled { inner: planet_generators::height::Reference(7), calls }
         }
+        let direct = tile_for(&make(&direct_calls), tile, 16, RADIUS_M);
+        let (inner, never) = (make(&live_calls), planet_streaming::CancelToken::never());
+        let guarded = CancelGuarded { inner: &inner, cancel: &never };
+        assert_eq!(tile_for(&guarded, tile, 16, RADIUS_M), direct, "the guard changes nothing while live");
+        assert_eq!(live_calls.load(Ordering::SeqCst), direct_calls.load(Ordering::SeqCst));
+        assert_eq!(guarded.inputs_hash(), inner.inputs_hash(), "keys are the inner field's");
+        let (inner, cancelled) = (make(&cancelled_calls), planet_streaming::CancelToken::cancelled());
+        let guarded = CancelGuarded { inner: &inner, cancel: &cancelled };
+        let _ = tile_for(&guarded, tile, 16, RADIUS_M);
+        assert_eq!(cancelled_calls.load(Ordering::SeqCst), 0, "a cancelled job reads nothing more");
+        assert!(direct_calls.load(Ordering::SeqCst) > 100, "the tile does read the field");
     }
 
     // spec: GEN-021, STRM-021
@@ -1644,10 +1588,8 @@ mod tests {
             let guarded = CancelGuarded { inner, cancel: &never };
             assert_eq!(guarded.climate_version_word(), inner.climate_version_word(), "{name}");
             assert_eq!(guarded.climate(&TangentWarp, tile), inner.climate(&TangentWarp, tile), "{name}");
-            for format in [planet_render::TileFormat::Compact, planet_render::TileFormat::Vertex] {
-                let (a, b) = (tile_for(format, &guarded, tile, 16, RADIUS_M, 22), tile_for(format, inner, tile, 16, RADIUS_M, 22));
-                assert_eq!(a, b, "{name} {format:?}: the guard changes nothing, the key and the climate included");
-            }
+            let (a, b) = (tile_for(&guarded, tile, 16, RADIUS_M), tile_for(inner, tile, 16, RADIUS_M));
+            assert_eq!(a, b, "{name}: the guard changes nothing, the key and the climate included");
             assert_ne!(inner.climate(&TangentWarp, tile), analytic_climate(7, &TangentWarp, tile), "{name}: it is the bake's climate");
         }
     }

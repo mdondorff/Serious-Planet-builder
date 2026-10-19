@@ -103,6 +103,39 @@ pub fn check_graphics_isolation(dir: &str, manifest: &str) -> Vec<String> {
     errors
 }
 
+/// The `render` feature that builds the test-only reference renderer (REND-031).
+const REFERENCE_FEATURE: &str = "reference-renderer";
+
+/// Errors when a manifest enables the reference renderer outside `[dev-dependencies]`: any line of a `[dependencies]`,
+/// `[build-dependencies]` or `[target.*.dependencies]` section (also the table form) that names the feature, or a `[features]` entry
+/// other than render's own definition of it (a `default` list or a forwarding feature). Comments are ignored.
+pub fn check_reference_feature(dir: &str, manifest: &str) -> Vec<String> {
+    let mut errors = Vec::new();
+    let mut section = String::new();
+    for (n, line) in manifest.lines().enumerate() {
+        let t = line.trim();
+        if t.starts_with('[') {
+            section = t.trim_start_matches('[').trim_end_matches(']').to_string();
+            continue;
+        }
+        if t.starts_with('#') || !t.contains(REFERENCE_FEATURE) {
+            continue;
+        }
+        let key = t.split(|c: char| c == '=' || c.is_whitespace()).next().unwrap_or("").trim_matches('"');
+        let product_dependency = section.contains("dependencies") && !section.contains("dev-dependencies");
+        // In `[features]`: the `default` list, or another crate's feature forwarding to it (`planet-render/reference-renderer`). A feature of
+        // render itself that turns it on (`spike07 = ["reference-renderer"]`) is off by default and fine.
+        let feature_entry = section == "features" && key != REFERENCE_FEATURE && (key == "default" || t.contains("/reference-renderer"));
+        if product_dependency || feature_entry {
+            errors.push(format!(
+                "crates/{dir}/Cargo.toml:{}: '{dir}' enables the test-only feature '{REFERENCE_FEATURE}' of render outside [dev-dependencies] (REND-031, BUILD-001)",
+                n + 1
+            ));
+        }
+    }
+    errors
+}
+
 /// Public items of render's sources whose signature or field type names a wgpu type: render's public API must not
 /// expose the graphics API (ADR 0004). `(line, text)`; `pub(crate)` and friends are fine.
 pub fn wgpu_in_public_api(source: &str) -> Vec<(usize, String)> {
@@ -172,6 +205,7 @@ pub fn run(root: &Path) -> Res {
     for (dir, path) in members {
         if let Ok(manifest) = std::fs::read_to_string(&path) {
             errors.extend(check_graphics_isolation(&dir, &manifest));
+            errors.extend(check_reference_feature(&dir, &manifest));
         }
     }
     if errors.is_empty() {
@@ -207,6 +241,37 @@ pub fn e() { let _ = wgpu::Instance::new(); }
 ";
         let hits: Vec<usize> = wgpu_in_public_api(src).iter().map(|h| h.0).collect();
         assert_eq!(hits, [1, 6, 10], "{hits:?}");
+    }
+
+    // spec: BUILD-001
+    #[test]
+    fn the_reference_renderer_feature_is_enabled_by_dev_dependencies_only() {
+        // render's own definition, its self dev-dependency and a comment are fine.
+        let render = "# the reference-renderer feature
+[dev-dependencies]
+planet-render = { workspace = true, features = [\"reference-renderer\"] }
+[features]
+reference-renderer = []
+spike07 = [\"reference-renderer\"]
+";
+        assert!(check_reference_feature("render", render).is_empty());
+        for (what, manifest) in [
+            ("inline", "[dependencies]\nplanet-render = { workspace = true, features = [\"reference-renderer\"] }\n"),
+            ("build", "[build-dependencies]\nplanet-render = { workspace = true, features = [\"reference-renderer\"] }\n"),
+            ("target", "[target.'cfg(windows)'.dependencies]\nplanet-render = { workspace = true, features = [\"reference-renderer\"] }\n"),
+            ("table", "[dependencies.planet-render]\nworkspace = true\nfeatures = [\"reference-renderer\"]\n"),
+            ("default", "[features]\ndefault = [\"planet-render/reference-renderer\"]\n"),
+            ("forwarded", "[features]\ntests = [\"planet-render/reference-renderer\"]\n"),
+        ] {
+            let e = check_reference_feature("app", manifest);
+            assert_eq!(e.len(), 1, "{what}: {e:?}");
+            assert!(e[0].contains("outside [dev-dependencies]"), "{what}: {e:?}");
+        }
+        let e = check_reference_feature(
+            "app",
+            "[dev-dependencies]\nplanet-render = { workspace = true, features = [\"reference-renderer\"] }\n",
+        );
+        assert!(e.is_empty(), "{e:?}");
     }
 
     // spec: BUILD-001

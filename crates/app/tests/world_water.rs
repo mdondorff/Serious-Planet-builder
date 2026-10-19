@@ -123,12 +123,11 @@ fn a_store_check_names_every_problem_of_a_store_and_passes_a_complete_one() {
         levels: 4,
         ocean: Some((288, 140)),
         compact: (1920, 1920),
-        vertex: (0, 1920),
     };
-    assert!(good.problems().is_empty(), "the vertex form is information only: {:?}", good.problems());
+    assert!(good.problems().is_empty(), "{:?}", good.problems());
     let text = good.lines().join("\n");
     assert!(text.contains("ocean channel: present, 288 directions read, 140 sea and 148 land"), "{text}");
-    assert!(text.contains("levels 3-4: compact form 1920 of 1920 present") && text.contains("vertex form 0 of 1920"), "{text}");
+    assert!(text.contains("levels 3-4: compact form 1920 of 1920 present"), "{text}");
     assert!(
         text.contains(&format!("GLOBAL_VERSION {}", planet_generators::global::GLOBAL_VERSION))
             && text.contains(&format!("MESH_VERSION {}", planet_generators::mesh::MESH_VERSION)),

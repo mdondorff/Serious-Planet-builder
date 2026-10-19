@@ -12,8 +12,7 @@ use planet_frame::managed::{ManagedLoop, TileSink};
 use planet_frame::pipeline::{residency_of, PlanField, PlanPipeline, PlanWorker, ResidentRecords};
 use planet_frame::scenes::{build_script, StreamScene, LOOK_SEED};
 use planet_frame::{plan_terrain_threaded, LodParams, PlanError, ResidencySet, SelectionCache, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::RenderTile;
-use planet_generators::mesh::TileMesh;
+use planet_generators::compact::CompactTile;
 use planet_streaming::{ResidencyManager, SlotRef, StreamConfig, Streamer, SystemClock, ThreadPool, TileSource};
 use planet_world_def::WorldDefinition;
 use std::sync::Arc;
@@ -46,29 +45,36 @@ struct Source {
     lod: LodParams,
 }
 
-impl TileSource<RenderTile> for Source {
-    fn load(&self, tile: TileId) -> Result<RenderTile, String> {
+impl TileSource<CompactTile> for Source {
+    fn load(&self, tile: TileId) -> Result<CompactTile, String> {
         let field = self.world.field()?;
         let rec = ResidentRecords::new(field.as_ref(), &TangentWarp, &self.lod).record(tile);
-        Ok(RenderTile::Vertex(TileMesh {
+        Ok(CompactTile {
             id: tile,
             cells: self.lod.cells,
             key: rec.mesh_key,
             origin: rec.origin,
-            vertices: Vec::new(),
-            climate: Default::default(),
-        }))
+            ctrl: [[0.0; 3]; 9],
+            h_origin: 0.0,
+            hr_min: 0.0,
+            hr_step: 1.0,
+            skirt_depth: 0.0,
+            flip: false,
+            relief_m: 0.0,
+            climate_words: [0; planet_generators::climate::CLIMATE_TEXELS],
+            texels: Vec::new(),
+        })
     }
 }
 
 struct Sink;
 
 impl TileSink for Sink {
-    fn upload_at(&mut self, _tile: &RenderTile, _slot: SlotRef) -> Result<(), String> {
+    fn upload_at(&mut self, _tile: &CompactTile, _slot: SlotRef) -> Result<(), String> {
         Ok(())
     }
 
-    fn upload_bytes(&self, _tile: &RenderTile) -> u64 {
+    fn upload_bytes(&self, _tile: &CompactTile) -> u64 {
         planet_generators::compact::slot_bytes(32)
     }
 
@@ -117,7 +123,6 @@ fn main() -> Result<(), String> {
             max_in_flight: 8,
             queue_ahead: 0,
             capacity: 230_640,
-            vertex_pool_slots: 256,
             retire_frames: 2,
             retry_after_ms: 1000,
             floor: lod.floor_level(),

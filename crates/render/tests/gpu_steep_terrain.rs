@@ -7,7 +7,7 @@ use planet_frame::{plan_terrain_field, scripted_views_field, LodParams, TerrainP
 use planet_generators::height::HeightField;
 use planet_generators::mesh::TileMesh;
 use planet_generators::stress::Steep;
-use planet_render::{execute_terrain, AdapterPolicy, GpuContext};
+use planet_render::{AdapterPolicy, GpuContext};
 use planet_testkit::Image;
 
 const R: f64 = 6_371_000.0;
@@ -66,7 +66,7 @@ fn ten_scripted_views_on_steep_terrain_have_no_holes() {
                 .map(|part| {
                     s.spawn(move || {
                         part.iter()
-                            .map(|n| planet_generators::compact::vertex_tile_field(&STEEP, &TangentWarp, n.tile, CELLS, R, lod.max_level))
+                            .map(|n| planet_generators::mesh::tile_mesh_field(&STEEP, &TangentWarp, n.tile, CELLS, R))
                             .collect::<Vec<_>>()
                     })
                 })
@@ -75,7 +75,7 @@ fn ten_scripted_views_on_steep_terrain_have_no_holes() {
         });
         let t_mesh = t0.elapsed();
         let refs: Vec<&TileMesh> = meshes.iter().collect();
-        let (frame, _) = execute_terrain(&ctx, &plan, &refs).unwrap();
+        let frame = planet_render::reference::execute_reference(&ctx, &plan, &refs).unwrap();
         eprintln!("{name}: {} nodes, plan {t_plan:?}, meshes {:?}, render {:?}", plan.nodes.len(), t_mesh - t_plan, t0.elapsed() - t_mesh);
         let img = Image::new(frame.width, frame.height, frame.rgba);
         // Every view is written for review (not a golden): target/review/steep/<adapter>/<view>.png.

@@ -9,9 +9,8 @@ use planet_frame::pipeline::{PlanPipeline, PlanWorker, ResidentRecords};
 use planet_frame::prefetch::PrefetchConfig;
 use planet_frame::upload::UploadBudget;
 use planet_frame::{Camera, LodParams, TerrainRequest, TerrainView};
-use planet_generators::compact::RenderTile;
+use planet_generators::compact::CompactTile;
 use planet_generators::height::{HeightField, Reference};
-use planet_generators::mesh::TileMesh;
 use planet_streaming::{FakeClock, ManualSpawner, ResidencyManager, SlotRef, Spawner, StreamConfig, Streamer, TileSource};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -96,18 +95,25 @@ pub struct Source {
     pub lod: LodParams,
 }
 
-impl TileSource<RenderTile> for Source {
-    fn load(&self, tile: TileId) -> Result<RenderTile, String> {
+impl TileSource<CompactTile> for Source {
+    fn load(&self, tile: TileId) -> Result<CompactTile, String> {
         let field = Reference(1);
         let rec = ResidentRecords::new(&field, &TangentWarp, &self.lod).record(tile);
-        Ok(RenderTile::Vertex(TileMesh {
+        Ok(CompactTile {
             id: tile,
             cells: CELLS,
             key: rec.mesh_key,
             origin: rec.origin,
-            vertices: Vec::new(),
-            climate: Default::default(),
-        }))
+            ctrl: [[0.0; 3]; 9],
+            h_origin: 0.0,
+            hr_min: 0.0,
+            hr_step: 1.0,
+            skirt_depth: 0.0,
+            flip: false,
+            relief_m: 0.0,
+            climate_words: [0; planet_generators::climate::CLIMATE_TEXELS],
+            texels: Vec::new(),
+        })
     }
 }
 
@@ -119,11 +125,11 @@ pub struct CountingSink {
 }
 
 impl TileSink for CountingSink {
-    fn upload_bytes(&self, _tile: &RenderTile) -> u64 {
+    fn upload_bytes(&self, _tile: &CompactTile) -> u64 {
         self.bytes
     }
 
-    fn upload_at(&mut self, tile: &RenderTile, _slot: SlotRef) -> Result<(), String> {
+    fn upload_at(&mut self, tile: &CompactTile, _slot: SlotRef) -> Result<(), String> {
         self.order.push(tile.id());
         Ok(())
     }

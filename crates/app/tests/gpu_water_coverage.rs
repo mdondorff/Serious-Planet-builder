@@ -10,13 +10,13 @@ use planet_frame::litscenes::{coast_camera, Coast};
 use planet_frame::look::file::LookParams;
 use planet_frame::look::water::{ClassMap, WaterClass};
 use planet_frame::look::LitPlan;
-use planet_frame::pool::vertex_slot_bytes;
+use planet_frame::pool::compact_format_pool_with;
 use planet_frame::water::{plan_water, WaterPlan, WaterRequest, WaterTileCache, WaterView};
 use planet_frame::{plan_terrain_field, Camera, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::vertex_tile_field;
+use planet_generators::compact::compact_tile_field;
 use planet_generators::height::HeightField;
-use planet_generators::mesh::grid_indices;
 use planet_render::{AdapterPolicy, GpuContext, TerrainRenderer};
+use planet_streaming::budget::FIXED_RESERVE_BYTES;
 use planet_streaming::PoolConfig;
 use planet_world_def::WorldDefinition;
 
@@ -38,19 +38,9 @@ fn lod_for(size: (u32, u32)) -> LodParams {
     }
 }
 
-fn vertex_pool() -> PoolConfig {
-    let slot = vertex_slot_bytes(CELLS);
-    PoolConfig {
-        slot_bytes: slot,
-        block_slots: 1024,
-        main_blocks: 8,
-        vertex_slot_bytes: slot,
-        vertex_slots: 64,
-        index_bytes: grid_indices(CELLS).len() as u64 * 4,
-        node_record_bytes: 4096 * 512,
-        frames_in_flight: 1,
-        fallback_slots: 0,
-    }
+/// Compact pools: 8 blocks of 1,024 slots.
+fn compact_pool() -> PoolConfig {
+    compact_format_pool_with(FIXED_RESERVE_BYTES + 8 * 1024 * planet_generators::compact::slot_bytes(CELLS), CELLS, 1024, 1).unwrap()
 }
 
 /// The first edge of the exact sea (the bake's sea by the water field) whose land side is a plain below the level: the mean terrain
@@ -225,13 +215,13 @@ fn coverage(views: &[&str]) {
             &bounded,
         )
         .unwrap();
-        let mut r = TerrainRenderer::with_pools(&ctx, size, CELLS, vertex_pool());
+        let mut r = TerrainRenderer::with_pools(&ctx, size, CELLS, compact_pool());
         r.enable_lit(&ctx);
         for n in &plan.nodes {
             if r.slot_of(n.tile).is_none() {
-                let mesh = vertex_tile_field(field.as_ref(), &TangentWarp, n.tile, CELLS, R, FINEST);
-                r.upload(&ctx, &mesh).unwrap();
-                world.fill_water(n.tile, &planet_generators::compact::RenderTile::Vertex(mesh));
+                let tile = compact_tile_field(field.as_ref(), &TangentWarp, n.tile, CELLS, R);
+                r.upload_tile(&ctx, &tile).unwrap();
+                world.fill_water(n.tile, &tile);
             }
         }
         r.enable_water(&ctx);

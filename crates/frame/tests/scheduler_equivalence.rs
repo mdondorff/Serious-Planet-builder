@@ -49,14 +49,13 @@ struct StreamRig {
     clock: Arc<FakeClock>,
 }
 
-fn stream_rig(capacity: usize, vertex_pool: usize, max_in_flight: usize, flaky_modulus: u64) -> StreamRig {
+fn stream_rig(capacity: usize, max_in_flight: usize, flaky_modulus: u64) -> StreamRig {
     let sp = Arc::new(ManualSpawner::default());
     let clock = Arc::new(FakeClock::default());
     let config = StreamConfig {
         max_in_flight,
         queue_ahead: 0,
         capacity,
-        vertex_pool_slots: vertex_pool,
         retire_frames: 2,
         retry_after_ms: 100,
         // The equivalence is that of the loop that starts at the six face tiles (floor 0): the scheduler's behaviour is the same at any
@@ -175,8 +174,8 @@ fn streamer_wants() -> Vec<Wants> {
 }
 
 /// The script on the streamer alone; a few tiles fail twice.
-fn streamer_script(wants: &[Wants], capacity: usize, vertex_pool: usize, max_in_flight: usize, flaky_modulus: u64, jobs: usize) -> u64 {
-    let mut rig = stream_rig(capacity, vertex_pool, max_in_flight, flaky_modulus);
+fn streamer_script(wants: &[Wants], capacity: usize, max_in_flight: usize, flaky_modulus: u64, jobs: usize) -> u64 {
+    let mut rig = stream_rig(capacity, max_in_flight, flaky_modulus);
     let mut d = Digest::new();
     for w in wants {
         stream_frame(&mut rig, w, jobs, &mut d);
@@ -230,10 +229,9 @@ fn loop_script(capacity: usize, prefetch: bool, tile_bytes: u64, budget: UploadB
 #[test]
 fn the_streamer_alone_requests_cancels_and_evicts_exactly_as_before() {
     // Pools smaller than R (eviction by class; degradation is the manager's), failures with retries, an in-flight limit that
-    // leaves a queue, a vertex pool for levels 0-2, prefetch sets while travelling.
+    // leaves a queue, prefetch sets while travelling.
     let w = streamer_wants();
-    let digests =
-        [streamer_script(&w, 700, 0, 16, 0, 1000), streamer_script(&w, 300, 0, 8, 11, 1000), streamer_script(&w, 250, 64, 8, 0, 100)];
+    let digests = [streamer_script(&w, 700, 16, 0, 1000), streamer_script(&w, 300, 8, 11, 1000), streamer_script(&w, 250, 8, 0, 100)];
     eprintln!("streamer digests: {digests:?}");
     assert_eq!(digests, STREAMER_DIGESTS);
 }
@@ -251,8 +249,10 @@ fn the_managed_loop_requests_cancels_evicts_and_uploads_exactly_as_before() {
     assert_eq!(digests, LOOP_DIGESTS);
 }
 
-const STREAMER_DIGESTS: [u64; 3] = [15300534013828900970, 689671829587726302, 5616887668897300662];
-// Re-recorded with the compact slot of 9,168 B (the sink counts compact tiles at 9,168 B, GEN-025; the first and third digests moved, the second uses no budget). Before: MESH_VERSION 7: the vertex tiles the loop uploads are 58,608 B (the climate of each vertex, ADR 0039 point 2) and the keys name the climate version. The streamer digests above did not move.
+// Re-recorded by `remove-vertex-render-path` (ADR 0062): the third script (cap 250, 8 in flight, jobs 100) ran with a small vertex pool of 64 slots for
+// levels 0-2 before; there is one pool now, so its digest moved from 5616887668897300662. The first two scripts (no vertex pool) are unchanged.
+const STREAMER_DIGESTS: [u64; 3] = [15300534013828900970, 689671829587726302, 10625407479935128016];
+// Re-recorded with the compact slot of 9,168 B (the sink counts compact tiles at 9,168 B, GEN-025; the first and third digests moved, the second uses no budget). Before: the loop uploaded 58,608 B vertex tiles. The streamer digests above did not move.
 // Re-pinned by render-floor-3 (STRM-001): the start-up load of the roots is exempt from the upload cap, so frame 0 writes the six roots
 // without spending its allowance on them; the first and third digests (the two that run under the 40,000 B cap) moved, the second (the
 // default cap and 0-byte tiles) is unchanged; the totals of the counters in the log (resident, uploads, evicted) did not move.

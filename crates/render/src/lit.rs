@@ -785,7 +785,7 @@ fn run_probe(ctx: &GpuContext, entry: &str, input: &[f32], count: usize) -> Vec<
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
-    let source = format!("{}\n{PROBE_SOURCE}", crate::terrain::TERRAIN_SHADERS[0].1);
+    let source = format!("{}\n{PROBE_SOURCE}", crate::compact_terrain_shader(32));
     let module = device
         .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("lit-probe"), source: wgpu::ShaderSource::Wgsl(source.into()) });
     let entry_layout = |binding, read_only| wgpu::BindGroupLayoutEntry {

@@ -7,7 +7,7 @@ use planet_core::Vec3;
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainRequest, TerrainView};
 use planet_generators::mesh::{tile_mesh, TileMesh};
 use planet_render::spike_detail::{detail_shader, gpu_gradients, reference_gradient, DetailRenderer, NodeDetail, DETAIL_OCTAVES};
-use planet_render::{execute_terrain, AdapterPolicy, GpuContext};
+use planet_render::{AdapterPolicy, GpuContext};
 
 const R: f64 = 6_371_000.0;
 
@@ -152,7 +152,7 @@ fn with_the_term_off_the_detail_renderer_equals_the_product_and_with_it_on_only_
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let (plan, meshes) = ground_plan();
     let refs: Vec<&TileMesh> = meshes.iter().collect();
-    let (product, _) = execute_terrain(&ctx, &plan, &refs).expect("product");
+    let product = planet_render::reference::execute_reference(&ctx, &plan, &refs).expect("product");
     let mut r = DetailRenderer::new(&ctx, SIZE, CELLS, R);
     for m in &meshes {
         r.upload(&ctx, m).expect("upload");

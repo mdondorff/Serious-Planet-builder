@@ -4,7 +4,7 @@
 //! from the texels of the tile and of its neighbours (the exact morph target). The renderer executes the placement; it decides
 //! nothing (CON-03).
 //!
-//! How a draw names its slot: the draw list groups consecutive nodes of one block into a run (`DrawBuffer::Compact`), the run's bind
+//! How a draw names its slot: the draw list groups consecutive nodes of one block into a run (`DrawBuffer`), the run's bind
 //! group (group 2) holds that block, and the node's *tile reference* (a 16-byte entry of a per-frame storage buffer indexed by the
 //! instance index, which is `first_instance` = the node index) holds the index of the slot's first word in the block and the slot
 //! index. No binding arrays or texture-index-per-draw features are needed, so the same path runs on WARP, lavapipe and the discrete
@@ -12,27 +12,23 @@
 //! settled view in one or two. A block is at most 128 MiB, the `max_storage_buffer_binding_size` every adapter offers (VIEW-001
 //! requires it by name).
 
-use crate::terrain::TERRAIN_SHADERS;
+use crate::terrain::{SHADER_HEAD, SHADER_TAIL};
 use planet_generators::compact::{NORMAL_SCALE, SLOT_CLIMATE_OFFSET, SLOT_TEXEL_OFFSET};
-use planet_streaming::SlotPool;
 
 /// Bytes of one tile reference: the slot's first texel in its block, reserved, slot index, reserved.
 pub const REF_BYTES: u64 = 16;
 
-/// The compact pipeline's shader for tiles of `cells`: the product shader's header, fragment stage and helpers unchanged (spliced
-/// at build time so the two pipelines cannot drift apart there), the vertex stage replaced by vertex pulling from the block.
+/// The compact pipeline's shader for tiles of `cells`: the product shader's header, fragment stage and helpers (shared with the
+/// reference renderer so the two cannot drift apart there) around the vertex stage that pulls vertices from the block.
 pub fn compact_terrain_shader(cells: u32) -> String {
-    let src = TERRAIN_SHADERS[0].1;
-    let vs_at = src.find("fn terrain_vertex(").expect("product shader has a vertex stage");
-    let tail_at = src.find("// Distance in pixels to the nearest integer").expect("product shader helper marker");
-    let head = &src[..vs_at];
+    let (head, tail) = (SHADER_HEAD, SHADER_TAIL);
     assert!(head.contains("@group(0) @binding(1) var<storage, read> nodes: array<Node>;"), "product node binding changed");
     let vertex = COMPACT_VERTEX
         .replace("{CELLS}", &cells.to_string())
         .replace("{CLIMATE_WORD}", &(SLOT_CLIMATE_OFFSET / 4).to_string())
         .replace("{TEXEL_WORD}", &(SLOT_TEXEL_OFFSET / 4).to_string())
         .replace("{NORMAL_SCALE}", &format!("{NORMAL_SCALE:?}"));
-    format!("{head}{vertex}{}", &src[tail_at..])
+    format!("{head}{vertex}{tail}")
 }
 
 const COMPACT_VERTEX: &str = r#"
@@ -271,10 +267,6 @@ pub(crate) struct CompactGpu {
     pub(crate) blocks: Vec<Option<Block>>,
     /// Bytes of one block: `block_slots * slot_bytes`.
     pub(crate) block_bytes: u64,
-    /// Placement of the tiles that fell back to the vertex format (the top of the small vertex pool).
-    pub(crate) fallback: SlotPool,
-    /// First vertex-pool slot of the fallback region.
-    pub(crate) fallback_base: u32,
 }
 
 impl CompactGpu {

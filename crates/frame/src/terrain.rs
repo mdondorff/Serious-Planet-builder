@@ -241,8 +241,7 @@ pub(crate) fn plan_terrain_keyed(
         )));
     }
     let heights = origin_heights(&selection, map.as_ref(), field, cache, threads);
-    let keyer =
-        planet_generators::mesh::MeshKeyer::new(field, map.as_ref(), req.lod.cells, req.lod.radius_m).at_finest_level(req.lod.max_level);
+    let keyer = planet_generators::mesh::MeshKeyer::new(field, map.as_ref(), req.lod.cells, req.lod.radius_m);
     let derive_key = |tile: TileId| key_override.map_or_else(|| keyer.key(tile), |f| f(tile));
     let nodes = selection
         .nodes
@@ -298,7 +297,7 @@ pub struct PlanCounts {
     pub triangles: u64,
     /// Distinct tiles that must be resident to draw the plan.
     pub resident_tiles: u32,
-    /// Vertex bytes uploaded to draw the plan from a cold start (one buffer per resident tile).
+    /// Slot bytes uploaded to draw the plan from a cold start (one compact slot per resident tile, GEN-025; 9,168 B at cells 32).
     pub upload_bytes: u64,
 }
 
@@ -319,7 +318,7 @@ impl CountBudget {
         max_draw_calls: 10_000,
         max_triangles: 10_000 * 2_304,
         max_resident_tiles: 10_000,
-        max_upload_bytes: 10_000 * 1_221 * 48,
+        max_upload_bytes: 10_000 * planet_generators::compact::slot_bytes(32),
     };
 }
 
@@ -353,12 +352,11 @@ impl TerrainPlan {
     pub fn counts(&self) -> PlanCounts {
         let per_tile_triangles = (planet_generators::mesh::grid_indices(self.cells).len() / 3) as u64;
         let tiles: std::collections::BTreeSet<_> = self.nodes.iter().map(|n| n.tile).collect();
-        let vertex_bytes = planet_generators::mesh::vertex_count(self.cells) as u64 * planet_generators::mesh::MeshVertex::GPU_STRIDE;
         PlanCounts {
             draw_calls: self.nodes.len() as u32,
             triangles: self.nodes.len() as u64 * per_tile_triangles,
             resident_tiles: tiles.len() as u32,
-            upload_bytes: tiles.len() as u64 * vertex_bytes,
+            upload_bytes: tiles.len() as u64 * planet_generators::compact::slot_bytes(self.cells),
         }
     }
 

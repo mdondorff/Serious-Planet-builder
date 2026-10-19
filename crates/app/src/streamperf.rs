@@ -576,11 +576,8 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     let field = world.field()?;
     writeln!(out, "world opened in {:.1} s", opened.elapsed().as_secs_f64()).map_err(err)?;
     let radius_m = world.radius_m();
-    let measured_field = if o.lit {
-        format!("{}; lit path (atmosphere, water), {} tiles", world.describe(), ctx.default_tile_format().name())
-    } else {
-        world.describe()
-    };
+    let measured_field =
+        if o.lit { format!("{}; lit path (atmosphere, water), compact tiles", world.describe()) } else { world.describe() };
     let source = source_label(&world, from_store);
     let production = from_store;
     let mut owner_override: Vec<String> = Vec::new();
@@ -589,10 +586,9 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     // gate so a store without them is refused at once; every other scene records what the pack held.
     let pack_levels = o.prefill_levels.unwrap_or(planet_perf::prefill::GATED_PREFILL_LEVELS);
     let pack_floor = o.floor_for(o.cells);
-    let tile_format = ctx.default_tile_format();
     if from_store && !smoke {
         for scene in scenes.iter().filter(|s| needs_prefilled_pack(**s)) {
-            let (present, total) = world.prefill_present(pack_floor, pack_levels, o.cells, o.finest_level_for(o.cells), tile_format)?;
+            let (present, total) = world.prefill_present(pack_floor, pack_levels, o.cells, o.finest_level_for(o.cells))?;
             require_prefilled(scene.name(), present, total, pack_floor, pack_levels, world.source())?;
         }
     }
@@ -672,7 +668,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         let marker = if scene == StreamScene::DiveCold {
             Some(planet_perf::prefill::COLD_MARKER.to_string())
         } else if from_store {
-            let (present, total) = scene_world.prefill_present(pack_floor, pack_levels, o.cells, lod.max_level, tile_format)?;
+            let (present, total) = scene_world.prefill_present(pack_floor, pack_levels, o.cells, lod.max_level)?;
             if needs_prefilled_pack(scene) && !smoke {
                 require_prefilled(scene.name(), present, total, pack_floor, pack_levels, &source)?;
             }

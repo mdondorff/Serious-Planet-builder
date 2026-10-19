@@ -2,16 +2,14 @@
 
 use crate::atmosphere::AtmospherePath;
 use crate::terrain::{DEPTH_COMPARE, DEPTH_FORMAT};
-use crate::water::{water_compact_source, water_vertex_source, WATER_MATH};
+use crate::water::{water_compact_source, WATER_MATH};
 use crate::GpuContext;
 use planet_frame::look::water::{LiquidAppearance, LIQUID_VEC4S, WAVES};
-use planet_generators::mesh::MeshVertex;
 
-/// One lighting flavour of the water pass: its group 3 and its pipelines.
+/// One lighting flavour of the water pass: its group 3 and its pipeline.
 pub(crate) struct WaterFlavour {
     pub(crate) bind: wgpu::BindGroup,
-    pub(crate) vertex: wgpu::RenderPipeline,
-    pub(crate) compact: Option<wgpu::RenderPipeline>,
+    pub(crate) compact: wgpu::RenderPipeline,
 }
 
 /// The water pass's long-lived GPU objects (made once by `enable_water`, so no frame creates one, REND-017).
@@ -47,13 +45,13 @@ pub(crate) struct CompactLayouts<'a> {
     pub(crate) cells: u32,
 }
 
-fn pipelines(
+fn pipeline(
     device: &wgpu::Device,
     bgl0: &wgpu::BindGroupLayout,
     g3: &wgpu::BindGroupLayout,
-    compact: Option<&CompactLayouts<'_>>,
+    c: &CompactLayouts<'_>,
     atmosphere: bool,
-) -> (wgpu::RenderPipeline, Option<wgpu::RenderPipeline>) {
+) -> wgpu::RenderPipeline {
     let targets = [Some(wgpu::ColorTargetState { format: crate::lit::HDR_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL })];
     let depth = wgpu::DepthStencilState {
         format: DEPTH_FORMAT,
@@ -62,69 +60,37 @@ fn pipelines(
         stencil: Default::default(),
         bias: Default::default(),
     };
-    let attr = |format, k: usize, loc| wgpu::VertexAttribute { format, offset: 4 * MeshVertex::OFFSETS[k] as u64, shader_location: loc };
-    let attrs = [
-        attr(wgpu::VertexFormat::Float32x3, 0, 0),
-        attr(wgpu::VertexFormat::Float32x3, 1, 1),
-        attr(wgpu::VertexFormat::Float32x3, 2, 2),
-        attr(wgpu::VertexFormat::Float32, 3, 3),
-        attr(wgpu::VertexFormat::Float32, 4, 4),
-        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float16x2, offset: MeshVertex::STRIDE, shader_location: 5 },
-    ];
-    let make = |label: &str, source: String, layout: &wgpu::PipelineLayout, buffers: &[Option<wgpu::VertexBufferLayout>]| {
-        let module = device
-            .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(label), source: wgpu::ShaderSource::Wgsl(source.into()) });
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some(label),
-            layout: Some(layout),
-            vertex: wgpu::VertexState { module: &module, entry_point: Some("vs_water"), compilation_options: Default::default(), buffers },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs_water"),
-                compilation_options: Default::default(),
-                targets: &targets,
-            }),
-            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
-            depth_stencil: Some(depth.clone()),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        })
-    };
-    let vertex_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("water-layout"),
-        bind_group_layouts: &[Some(bgl0), None, None, Some(g3)],
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("water-compact-layout"),
+        bind_group_layouts: &[Some(bgl0), Some(c.frame), Some(c.block), Some(g3)],
         immediate_size: 0,
     });
-    let vertex = make(
-        "water-pipeline",
-        water_vertex_source(atmosphere),
-        &vertex_layout,
-        &[Some(wgpu::VertexBufferLayout {
-            array_stride: MeshVertex::GPU_STRIDE,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &attrs,
-        })],
-    );
-    let compact = compact.map(|c| {
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("water-compact-layout"),
-            bind_group_layouts: &[Some(bgl0), Some(c.frame), Some(c.block), Some(g3)],
-            immediate_size: 0,
-        });
-        make("water-compact-pipeline", water_compact_source(c.cells, atmosphere), &layout, &[])
+    let label = "water-compact-pipeline";
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(label),
+        source: wgpu::ShaderSource::Wgsl(water_compact_source(c.cells, atmosphere).into()),
     });
-    (vertex, compact)
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState { module: &module, entry_point: Some("vs_water"), compilation_options: Default::default(), buffers: &[] },
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some("fs_water"),
+            compilation_options: Default::default(),
+            targets: &targets,
+        }),
+        primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+        depth_stencil: Some(depth),
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 impl WaterGpu {
-    /// The copy target, the plain flavour's group 3 and pipelines (the lit path without an atmosphere).
-    pub(crate) fn new(
-        device: &wgpu::Device,
-        size: (u32, u32),
-        bgl0: &wgpu::BindGroupLayout,
-        compact: Option<&CompactLayouts<'_>>,
-    ) -> WaterGpu {
+    /// The copy target, the plain flavour's group 3 and pipeline (the lit path without an atmosphere).
+    pub(crate) fn new(device: &wgpu::Device, size: (u32, u32), bgl0: &wgpu::BindGroupLayout, compact: &CompactLayouts<'_>) -> WaterGpu {
         let copy = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("water-scene-copy"),
             size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
@@ -143,11 +109,11 @@ impl WaterGpu {
             layout: &g3,
             entries: &[wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&copy_view) }],
         });
-        let (vertex, compact_pipeline) = pipelines(device, bgl0, &g3, compact, false);
-        // The copy, the bind group and the pipelines.
-        let objects = 1 + 1 + 1 + u32::from(compact_pipeline.is_some());
+        let compact_pipeline = pipeline(device, bgl0, &g3, compact, false);
+        // The copy, the bind group and the pipeline.
+        let objects = 1 + 1 + 1;
         let copy_bytes = u64::from(size.0) * u64::from(size.1) * crate::graph::HDR_BYTES_PER_PIXEL;
-        WaterGpu { copy, copy_view, copy_bytes, plain: WaterFlavour { bind, vertex, compact: compact_pipeline }, atmosphere: None, objects }
+        WaterGpu { copy, copy_view, copy_bytes, plain: WaterFlavour { bind, compact: compact_pipeline }, atmosphere: None, objects }
     }
 
     /// The atmosphere flavour: group 3 holds the atmosphere's block, tables and sky-view table beside the copy.
@@ -155,16 +121,16 @@ impl WaterGpu {
         &mut self,
         device: &wgpu::Device,
         bgl0: &wgpu::BindGroupLayout,
-        compact: Option<&CompactLayouts<'_>>,
+        compact: &CompactLayouts<'_>,
         atmosphere: &AtmospherePath,
     ) {
         if self.atmosphere.is_some() {
             return;
         }
         let (layout, bind) = atmosphere.water_group(device, &self.copy_view);
-        let (vertex, compact_pipeline) = pipelines(device, bgl0, &layout, compact, true);
-        self.objects += 1 + 1 + u32::from(compact_pipeline.is_some());
-        self.atmosphere = Some(WaterFlavour { bind, vertex, compact: compact_pipeline });
+        let compact_pipeline = pipeline(device, bgl0, &layout, compact, true);
+        self.objects += 1 + 1;
+        self.atmosphere = Some(WaterFlavour { bind, compact: compact_pipeline });
     }
 }
 
