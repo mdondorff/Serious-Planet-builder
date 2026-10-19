@@ -6,6 +6,7 @@ mod cistats;
 mod detdiff;
 mod layering;
 mod logcmd;
+mod prepush;
 mod repocheck;
 mod speclint;
 mod testcmd;
@@ -20,6 +21,7 @@ const USAGE: &str = "cargo xtask <command>
   test                 tiers A + B on the software adapter
   test gpu             tier C goldens and debug views (software adapter; --real for the GPU, which also runs the tier-B oracles)
   check                rustfmt --check, clippy -D warnings, layering
+  prepush              before every push to a PR branch: check, test fast, and test gpu when the diff against origin/main touches a golden-producing path (render, frame, shaders, generators, ...); prints each step's time and one verdict line (BUILD-016)
   layering             crate layering and GPU-free dependency check (CON-02)
   spec-lint            trace IDs, tiers, requirement coverage (CON-16)
   log [--since YYYY-MM-DD] [--limit N]   the project log: fragments of docs/log.d/ and the entries of docs/log.md, newest first (BUILD-010)
@@ -48,6 +50,7 @@ fn main() -> ExitCode {
     let result = match args.first().map(String::as_str) {
         Some("test") => testcmd::test(&root, &args[1..]),
         Some("check") => testcmd::check(&root),
+        Some("prepush") => prepush::run(&root),
         Some("layering") => layering::run(&root),
         Some("spec-lint") => speclint::run(&root),
         Some("log") => logcmd::run(&root, &args[1..]),

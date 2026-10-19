@@ -91,7 +91,7 @@ pub fn packages_for_changes(changed_paths: &[String]) -> Vec<String> {
     v
 }
 
-fn changed_paths(root: &Path) -> Vec<String> {
+pub(crate) fn changed_paths(root: &Path) -> Vec<String> {
     let mut paths = Vec::new();
     if let Ok(s) = capture(root, "git", &["status", "--porcelain", "--untracked-files=all"]) {
         paths.extend(s.lines().filter(|l| l.len() > 3).map(|l| l[3..].trim().trim_matches('"').to_string()));

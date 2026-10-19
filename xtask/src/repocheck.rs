@@ -59,6 +59,28 @@ mod tests {
         assert!(!w.contains("ubuntu-latest"), "ci.yml must pin the Linux runner image (ubuntu-24.04), not ubuntu-latest");
     }
 
+    // spec: BUILD-017
+    #[test]
+    fn every_tool_install_in_ci_gets_one_automatic_second_attempt() {
+        let w = workflow();
+        let lines: Vec<&str> = w.lines().collect();
+        let installs: Vec<usize> =
+            lines.iter().enumerate().filter(|(_, l)| l.trim() == "- uses: taiki-e/install-action@v2").map(|(i, _)| i).collect();
+        assert!(!installs.is_empty(), "ci.yml installs its tools with taiki-e/install-action");
+        // Each job's installs come in pairs: the first one (id `install`, allowed to fail) and the retry (only after that failure),
+        // with the same `tool:` list.
+        assert_eq!(installs.len() % 2, 0, "install steps come in pairs (first attempt, retry)");
+        let block = |start: usize| -> String { lines[start..(start + 6).min(lines.len())].join("\n") };
+        for pair in installs.chunks(2) {
+            let (first, retry) = (block(pair[0]), block(pair[1]));
+            assert!(first.contains("id: install") && first.contains("continue-on-error: true"), "first attempt may fail:\n{first}");
+            assert!(retry.contains("if: steps.install.outcome == 'failure'"), "the retry runs only after a failure:\n{retry}");
+            let tool = |b: &str| b.lines().find(|l| l.trim_start().starts_with("tool:")).map(str::trim).map(String::from);
+            assert_eq!(tool(&first), tool(&retry), "the retry installs the same tools");
+            assert!(tool(&retry).is_some());
+        }
+    }
+
     // spec: BUILD-006
     #[test]
     fn licence_policy_is_present_and_enforced_in_ci() {
