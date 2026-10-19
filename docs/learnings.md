@@ -465,3 +465,10 @@ Assumption it changes: VIEW-003 and VIEW-004 bind keys by physical code (right f
 Proposed follow-up: new shortcut letters go through `edit_key` (logical character first, physical key as the fallback) and its tier-A test with a QWERTZ case.
 Obsolete when: all key bindings are read from a settings file with a layout-aware default.
 
+
+## 2026-10-19 Bounding a tile by the declared maximum of a stamp leaves a fine tile no room to morph (stamp-stage)
+Scope: GEN-026, LOD-008, height bounds of authored stages
+What happened: the stage widened a tile's bounds by the sum of the items' `max_delta_m`; a 60 m hill with a 3 km reach made the plan refuse tiles of level 19 (about 20 m wide) with an empty morph interval, although the hill is nearly flat under them.
+Assumption it changes: a bound from the declared maximum is good enough for planning; the extent of a tile must grow by what the stamp varies across it, not by what it can reach at its top.
+Proposed follow-up: none; the stage bounds each item by its delta range over the cap (GEN-026), and a new stamp kind needs a monotone profile or a rule of its own.
+Obsolete when: stamps are replaced by a stage that reports exact per-tile ranges.

@@ -71,6 +71,47 @@ pub fn stamp_delta(stamp: &Stamp, m: f64, h: f64, x: f64) -> f64 {
     }
 }
 
+/// The range `(lo, hi)` of the delta `item` can add at any point of `cap` (GEN-026), widened outward by a few ulps. The profiles are
+/// monotone in `x` (the hill, the bowl, the plateau weight), so the range comes from the nearest and the farthest distance of the cap
+/// from the anchor; a crater whose cap reaches its rim takes the rim's maximum, and a plateau is bounded by its weight at the nearest
+/// distance times the item's bound. An item that is no stamp adds nothing.
+fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
+    let Some(stamp) = item.stamp else { return (0.0, 0.0) };
+    let m = f64::from_bits(item.max_delta_bits);
+    let reach = f64::from_bits(item.reach_bits);
+    let d = angle_between(anchor_of(item), cap.centre);
+    let to_x = |angle: f64| angle * radius_m / reach;
+    // The angles widen outward by a few ulps of a radian (an angle from `atan2` is wrong by about that much however short the reach),
+    // then the distances by a relative 1e-9: the profile argument is rounded.
+    let slack = 16.0 * f64::EPSILON;
+    let x_min = (to_x((d - cap.angle - slack).max(0.0)) * (1.0 - 1e-9)).max(0.0);
+    let x_max = (to_x(d + cap.angle + slack) * (1.0 + 1e-9)).min(1.0);
+    let a = stamp.params()[0];
+    let (lo, hi) = match stamp.kind {
+        StampKind::Hill => {
+            let (u, v) = (hill_delta(a, x_min), hill_delta(a, x_max));
+            (u.min(v), u.max(v))
+        }
+        StampKind::Crater => {
+            let (u, v) = (crater_delta(a, x_min), crater_delta(a, x_max));
+            if x_max < 0.7 {
+                (u.min(v), u.max(v))
+            } else {
+                // The rim adds at most 0.2 of the depth; the bowl is at its deepest at the nearest distance.
+                let bowl = -a * (1.0 - smooth((x_min / 0.8).min(1.0)));
+                let rim = 0.2 * a;
+                (bowl.min(rim), bowl.max(rim))
+            }
+        }
+        StampKind::Plateau => {
+            let w = plateau_weight(x_min) * m;
+            (-w, w)
+        }
+    };
+    let grow = |x: f64| x.abs() * 8.0 * f64::EPSILON;
+    ((lo - grow(lo)).max(-m - grow(m)), (hi + grow(hi)).min(m + grow(m)))
+}
+
 /// The unit direction of an item's anchor.
 fn anchor_of(item: &FootprintItem) -> Vec3 {
     Vec3::new(f64::from_bits(item.dir[0]), f64::from_bits(item.dir[1]), f64::from_bits(item.dir[2]))
@@ -101,6 +142,8 @@ pub trait ItemReader: Send + Sync {
     fn max_delta_sum(&self, body: BodyId, layer: &str) -> f64;
     /// The reads a tile declares for its items, with the stage's halo (WDEF-007, WDEF-008): the footprint or summary entries.
     fn tile_reads(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> Vec<ReadRecord>;
+    /// The revision of the items (never 0): differs after every change and between definitions (STRM-027).
+    fn revision(&self) -> u64;
 }
 
 impl ItemReader for WorldDefinition {
@@ -125,6 +168,9 @@ impl ItemReader for WorldDefinition {
         ctx.query_footprint(body, layer, tile, halo).expect("a stage declares the items of a body that has a radius");
         ctx.read_records()
     }
+    fn revision(&self) -> u64 {
+        WorldDefinition::revision(self)
+    }
 }
 
 /// A definition shared between the editor and the stage: the stage reads whatever it holds at the moment of a batch.
@@ -140,6 +186,9 @@ impl ItemReader for RwLock<WorldDefinition> {
     }
     fn tile_reads(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> Vec<ReadRecord> {
         self.read().expect("definition lock").tile_reads(body, layer, tile, halo)
+    }
+    fn revision(&self) -> u64 {
+        self.read().expect("definition lock").revision()
     }
 }
 
@@ -289,13 +338,20 @@ impl HeightField for StampStage {
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         let (lo, hi) = self.base.height_bounds(centre, angular_radius);
         let cap = Cap { centre, angle: angular_radius };
-        let widen: f64 = self.items.items(self.body, &self.layer, cap).iter().map(|i| f64::from_bits(i.max_delta_bits)).sum();
-        // Rounded up: the sum is exact enough for a bound, and the next float above it cannot be below the exact one.
-        let touching = self.items.items(self.body, &self.layer, cap).len() as f64;
-        let widen = widen * (1.0 + 4.0 * f64::EPSILON);
+        let radius_m = self.items.radius_m(self.body).expect("a stage reads a body that has a radius");
+        let items = self.items.items(self.body, &self.layer, cap);
+        // The deltas the stamps can add inside the cap, not their declared maxima: a cap on the flat top of a hill moves up as a whole and
+        // keeps its extent, which is what the morph interval of a fine tile needs (GEN-026).
+        let (mut dlo, mut dhi, mut mag) = (0.0f64, 0.0f64, 0.0f64);
+        for item in &items {
+            let (a, b) = delta_range(item, cap, radius_m);
+            dlo += a;
+            dhi += b;
+            mag += a.abs().max(b.abs());
+        }
         // Each addition of the running height rounds by at most one ulp of the largest magnitude involved.
-        let widen = widen + touching * (lo.abs().max(hi.abs()) + widen) * f64::EPSILON * 2.0;
-        (lo - widen, hi + widen)
+        let slack = items.len() as f64 * (lo.abs().max(hi.abs()) + mag) * f64::EPSILON * 2.0 + (dlo.abs() + dhi.abs()) * 8.0 * f64::EPSILON;
+        (lo + dlo - slack, hi + dhi + slack)
     }
 
     fn water_cull_level(&self) -> Option<f64> {
@@ -312,6 +368,9 @@ impl HeightField for StampStage {
 
     fn stage_params(&self) -> Option<(&str, u32)> {
         Some((&self.layer, self.stack_index))
+    }
+    fn item_revision(&self) -> u64 {
+        planet_core::hash::hash_u64s(0x0072_6576, &[self.base.item_revision(), self.items.revision()]) | 1
     }
 }
 

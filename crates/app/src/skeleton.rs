@@ -925,6 +925,9 @@ impl planet_generators::height::HeightField for CancelGuarded<'_> {
     fn stage_params(&self) -> Option<(&str, u32)> {
         self.inner.stage_params()
     }
+    fn item_revision(&self) -> u64 {
+        self.inner.item_revision()
+    }
     fn surface_id(&self) -> &'static str {
         self.inner.surface_id()
     }

@@ -316,13 +316,20 @@ pub trait HeightField: Send + Sync {
     }
     /// The field this one is a stage over (STRM-027): the height key of a tile of an authored stage chains the key of the same tile of
     /// this field, so a change of the base re-keys the stage. A field that wraps another and forwards its keying methods forwards this
-    /// one too, or the chain is lost.
+    /// one too, or the chain is lost; likewise [`item_revision`](HeightField::item_revision).
     fn upstream(&self) -> Option<&dyn HeightField> {
         None
     }
     /// The layer name and the layer's index in the stack (ADR 0007) of an authored stage (STRM-027): output parameters of its keys.
     fn stage_params(&self) -> Option<(&str, u32)> {
         None
+    }
+    /// The revision of the authored items this field reads (STRM-027): 0 when it reads none, else a number that differs after every
+    /// edit of them and between any two definitions of the process. A cache that memoises per-tile results of the field
+    /// ([`inputs_hash_for`](HeightField::inputs_hash_for)) checks them again when it changes. The default is the upstream's, which a wrapper
+    /// does not get right (its upstream is the stage's base): every wrapper forwards this method itself.
+    fn item_revision(&self) -> u64 {
+        self.upstream().map_or(0, |u| u.item_revision())
     }
     /// Id of the reference surface of this field's body (CON-15); part of every height and mesh key.
     fn surface_id(&self) -> &'static str {
@@ -556,6 +563,9 @@ impl<F: HeightField> HeightField for Bound<F> {
     }
     fn stage_params(&self) -> Option<(&str, u32)> {
         self.field.stage_params()
+    }
+    fn item_revision(&self) -> u64 {
+        self.field.item_revision()
     }
     fn surface_id(&self) -> &'static str {
         self.field.surface_id()

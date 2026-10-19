@@ -360,7 +360,9 @@ fn an_item_goes_into_the_definition_with_its_hash_and_its_anchor_direction() {
     let before = d.hash();
     let cell = it.put_into(&mut d).unwrap();
     assert_ne!(d.hash(), before);
-    assert_eq!(d.items_in_cell(BodyId::PLANET, cell), vec![(it.id, it.hash())]);
+    // A stamp kind (the fixture is a crater) enters the index under the stamp's hash, not the file's (WDEF-010).
+    assert_eq!(d.items_in_cell(BodyId::PLANET, cell), vec![(it.id, it.spec().content_hash)]);
+    assert_ne!(it.spec().content_hash, it.hash());
     let (anchor, reach) = d.item_anchor(BodyId::PLANET, it.id).unwrap();
     assert!((anchor.length() - 1.0).abs() < 1e-12 && reach == 900.0);
     let geo = Sphere { radius_m: 1.0 }.planet_fixed_to_geo(planet_core::PlanetFixed(anchor));
@@ -572,6 +574,8 @@ fn floats_are_written_in_the_text_of_the_current_formatter_pinned_so_a_toolchain
 #[test]
 fn negative_zero_is_zero_in_every_number_of_an_item() {
     let mut a = item(9);
+    // A plain item: a reach of 0 is a stamp's refusal (WDEF-010) and this test is about the sign of zero.
+    a.kind = "marker".into();
     a.anchor.latitude_deg = 0.0;
     a.anchor.longitude_deg = 0.0;
     a.anchor.height_m = 0.0;
@@ -660,6 +664,8 @@ radius_m = 750.5
 #[test]
 fn a_file_without_a_params_table_has_no_parameters_and_an_unknown_surface_is_refused() {
     let mut it = item(make_ulid(1_760_000_000_000, [9; 10]));
+    // A plain item: a crater without its parameter is refused (WDEF-010).
+    it.kind = "marker".into();
     it.params.clear();
     let text = it.to_toml().unwrap();
     let without = text.replace("\n[params]\n", "");

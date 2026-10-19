@@ -545,6 +545,8 @@ fn a_whole_drag_of_a_handle_is_one_undo_step_and_a_cancelled_drag_is_none() {
     assert!(s.end_drag().is_err() && s.cancel_drag().is_err() && s.drag_surface(c).is_err() && s.drag_height(1.0).is_err());
     s.editor_mut()
         .change(id, |it| {
+            // A hill without its height is refused (WDEF-010): the edit becomes a plain item, which has no height parameter.
+            it.kind = "marker".into();
             it.params.remove("height_m");
         })
         .unwrap();
@@ -557,7 +559,8 @@ fn a_whole_drag_of_a_handle_is_one_undo_step_and_a_cancelled_drag_is_none() {
 #[test]
 fn delete_and_undo_and_the_handles_of_the_selected_edit() {
     let mut s = session(11);
-    s.place("plateau", unit(47.2, 8.55)).unwrap();
+    // A hill: the plateau's parameter is an absolute target (WDEF-010) and has no height handle.
+    s.place("hill", unit(47.2, 8.55)).unwrap();
     let id = s.selected().unwrap();
     let hs = s.handles(0.0);
     assert_eq!(hs.iter().map(|(h, _)| *h).collect::<Vec<_>>(), [Handle::Move, Handle::Radius, Handle::Height]);

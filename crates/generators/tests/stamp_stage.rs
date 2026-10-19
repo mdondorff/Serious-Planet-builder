@@ -172,19 +172,28 @@ fn the_bounds_widen_by_the_bounds_of_the_items_in_reach_and_hold_for_every_sampl
         item(2, 1, at_distance(at, dir(0.0, 1.0, 0.0), 800.0), 1_500.0, 40.0, Stamp::new(StampKind::Crater, [25.0, 0.0, 0.0])),
     ]));
     let base = Reference(1);
-    let widened = |centre: Vec3, angle: f64| {
+    // The growth of the extent: what the stamps can add inside the cap, not their declared bounds.
+    let growth = |centre: Vec3, angle: f64| {
         let (lo, hi) = s.height_bounds(centre, angle);
         let (blo, bhi) = base.height_bounds(centre, angle);
-        (blo - lo, hi - bhi)
+        (hi - lo) - (bhi - blo)
     };
-    // A cap on the stamps: both bounds count. A cap far away: none.
-    let (a, b) = widened(at, 100.0 / R);
-    assert!((a - 100.0).abs() < 1e-9 && (b - 100.0).abs() < 1e-9, "both items touch: 60 + 40 on each side, got {a} and {b}");
-    let (a, b) = widened(dir(-1.0, 0.0, 0.0), 100.0 / R);
-    assert_eq!((a, b), (0.0, 0.0), "no item in reach, no widening");
-    // The only-first-item cap.
-    let (a, _) = widened(at_distance(at, dir(0.0, -1.0, 0.0), 2_500.0), 100.0 / R);
-    assert!((a - 60.0).abs() < 1e-9, "only the first item reaches 2.5 km on the far side: {a}");
+    // A cap on the stamps: the hill is nearly flat under it (a few centimetres), the crater's bowl varies by metres; far below the
+    // declared 60 + 40 on each side that a bound by `max_delta_m` would add (a fine tile would have no room to morph).
+    let g = growth(at, 100.0 / R);
+    assert!(g > 0.0 && g < 12.0, "a cap on the top of the hill and the slope of a crater: {g}");
+    assert_eq!(growth(dir(-1.0, 0.0, 0.0), 100.0 / R), 0.0, "no item in reach, no widening");
+    // The only-first-item cap, on the slope of the hill at 2.5 km of 3 km.
+    let g = growth(at_distance(at, dir(0.0, -1.0, 0.0), 2_500.0), 100.0 / R);
+    assert!(g > 0.0 && g < 3.0, "only the hill reaches 2.5 km on the far side, on its slope: {g}");
+    // A cap on the top of a hill alone: the extent grows by less than a tenth of the bound.
+    let hill_only = stage(world(vec![item(1, 0, at, 3_000.0, 60.0, Stamp::new(StampKind::Hill, [30.0, 0.0, 0.0]))]));
+    let (lo, hi) = hill_only.height_bounds(at, 100.0 / R);
+    let (blo, bhi) = base.height_bounds(at, 100.0 / R);
+    assert!((hi - lo) - (bhi - blo) < 6.0, "a cap on the top of a hill grows by less than M / 10: {}", (hi - lo) - (bhi - blo));
+    // Never wider than the declared bounds say.
+    let g = growth(at, 4_000.0 / R);
+    assert!(g <= 200.0 + 1e-6, "no wider than the sum of both sides of both declared bounds: {g}");
     // Every height in the cap lies within the bounds.
     for (centre, angle) in [(at, 4_000.0 / R), (at_distance(at, dir(0.0, 1.0, 0.0), 700.0), 1_000.0 / R)] {
         let (lo, hi) = s.height_bounds(centre, angle);
@@ -196,6 +205,29 @@ fn the_bounds_widen_by_the_bounds_of_the_items_in_reach_and_hold_for_every_sampl
         }
     }
     assert!(s.max_abs_height_m() >= base.max_abs_height_m() + 100.0, "the field-wide bound adds every item's bound");
+}
+
+// spec: GEN-026
+#[test]
+fn the_bounds_hold_at_the_rim_of_the_cap_for_a_reach_of_a_metre() {
+    let at = dir(1.0, 0.2, 0.1);
+    for (kind, params) in [(StampKind::Hill, [60.0, 0.0, 0.0]), (StampKind::Crater, [40.0, 0.0, 0.0])] {
+        let s = stage(world(vec![item(1, 0, at, 1.0, 60.0, Stamp::new(kind, params))]));
+        for k in 0..64 {
+            // Caps whose rim cuts the slope: centre 0.2 to 1.2 m from the anchor, radius 0.1 to 0.7 m.
+            let centre = at_distance(at, dir(0.0, 1.0, 0.0), 0.2 + f64::from(k % 8) * 0.125);
+            let angle = (0.1 + f64::from(k / 8) * 0.085) / R;
+            let (lo, hi) = s.height_bounds(centre, angle);
+            for j in 0..72 {
+                let t = f64::from(j) / 72.0 * core::f64::consts::TAU;
+                // Exactly at the rim, and just inside it.
+                for r in [angle, angle * (1.0 - 1e-9), angle * 0.5] {
+                    let h = s.height(at_distance_around(centre, t, r));
+                    assert!(h >= lo && h <= hi, "{kind:?} cap {k} bearing {j} r {r}: {h} outside [{lo}, {hi}]");
+                }
+            }
+        }
+    }
 }
 
 /// The point at angle `r` from `centre` on the bearing `t`.
@@ -226,6 +258,9 @@ impl ItemReader for Recording {
     }
     fn tile_reads(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> Vec<ReadRecord> {
         self.inner.tile_reads(body, layer, tile, halo)
+    }
+    fn revision(&self) -> u64 {
+        self.inner.revision()
     }
 }
 
