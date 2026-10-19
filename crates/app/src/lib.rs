@@ -11,6 +11,7 @@ pub mod prefill;
 pub mod sheet;
 pub mod skeleton;
 pub mod streamperf;
+pub mod watergap;
 pub mod window;
 pub mod worldfield;
 

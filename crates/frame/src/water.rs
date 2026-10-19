@@ -300,6 +300,20 @@ pub struct WaterTileCache {
     pub no_minimum: u64,
     /// The extent and the lowest terrain bound of the tiles the cut has looked at (pure functions of the tile and the height field).
     extents: HashMap<TileId, (TileExtent, Option<f64>)>,
+    /// SPIKE (water-motion-gap): per node of the last plan, why it has or has no water node (set `diag_on`).
+    pub diag_on: bool,
+    pub diag: Vec<NodeDiag>,
+}
+
+/// SPIKE (water-motion-gap): the verdict of the water plan for one node of the terrain plan.
+#[derive(Clone, Debug)]
+pub struct NodeDiag {
+    pub node: u32,
+    pub tile: TileId,
+    pub reason: &'static str,
+    pub level_m: f64,
+    pub lowest_bound: f64,
+    pub exact_min: Option<f32>,
 }
 
 impl WaterTileCache {
@@ -495,9 +509,15 @@ pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &
     let mut liquids: Vec<LiquidAppearance> = Vec::new();
     let mut nodes = Vec::new();
     (cache.cut_horizon, cache.cut_height, cache.cut_exact, cache.no_minimum) = (0, 0, 0, 0);
+    cache.diag.clear();
     let camera = terrain.camera.position.0;
     for (i, n) in terrain.nodes.iter().enumerate() {
-        let Some(w) = cache.tile_water(req.source, req.map, n.tile, req.lod.radius_m)? else { continue };
+        let Some(w) = cache.tile_water(req.source, req.map, n.tile, req.lod.radius_m)? else {
+            if cache.diag_on {
+                cache.diag.push(NodeDiag { node: i as u32, tile: n.tile, reason: "no-water-answer", level_m: f64::NAN, lowest_bound: f64::NAN, exact_min: None });
+            }
+            continue;
+        };
         if !w.level_m.is_finite() || w.level_m.abs() > 1.0e5 {
             return Err(WaterError::BadLevel { tile: n.tile, level_m: w.level_m });
         }
@@ -523,6 +543,9 @@ pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &
             let sag = surface_sag_m(req.lod.radius_m + level, req.lod.sample_spacing(n.level));
             if tile_beyond_horizon(camera, extent.dir, extent.chord_radius_m, req.lod.radius_m, level, rise, shift, sag) {
                 cache.cut_horizon += 1;
+                if cache.diag_on {
+                    cache.diag.push(NodeDiag { node: i as u32, tile: n.tile, reason: "cut-horizon", level_m: level, lowest_bound: f64::NAN, exact_min: None });
+                }
                 continue;
             }
             let lowest = match lowest {
@@ -537,6 +560,9 @@ pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &
             };
             if tile_above_water(lowest, level, rise) {
                 cache.cut_height += 1;
+                if cache.diag_on {
+                    cache.diag.push(NodeDiag { node: i as u32, tile: n.tile, reason: "cut-height-loose", level_m: level, lowest_bound: lowest, exact_min: None });
+                }
                 continue;
             }
             // The exact minimum of the tile's own mesh vertices, when its job left one (a tile with none keeps the loose bound's
@@ -547,7 +573,13 @@ pub fn plan_water(req: &WaterRequest<'_>, cache: &mut WaterTileCache, terrain: &
             if exact.is_some_and(|m| tile_above_water(f64::from(m), level, rise)) {
                 cache.cut_height += 1;
                 cache.cut_exact += 1;
+                if cache.diag_on {
+                    cache.diag.push(NodeDiag { node: i as u32, tile: n.tile, reason: "cut-height-exact", level_m: level, lowest_bound: lowest, exact_min: exact });
+                }
                 continue;
+            }
+            if cache.diag_on {
+                cache.diag.push(NodeDiag { node: i as u32, tile: n.tile, reason: "kept", level_m: level, lowest_bound: lowest, exact_min: exact });
             }
         }
         let o = n.origin.0;
