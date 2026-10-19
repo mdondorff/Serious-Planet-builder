@@ -13,12 +13,12 @@
 - [ ] 1b.3 Implement; numerics-reviewer on the hash encodings; spec-guardian, verifier; PR
 
 ## 2. edit-invalidation-refresh
-- [ ] 2.1 Design from SPIKE-13 variant D (`spike/spike-13-edit-latency`: `Streamer::refresh`, `force_replan`, stale draw); spec deltas STRM-005, STRM-015, STRM-019
-- [ ] 2.2 Failing tests: a changed planned key refreshes the resident tile and the old one is drawn until the new one is uploaded; an edit event forces a plan while the camera is still; edited tiles are dispatched before the rest of R
-- [ ] 2.3 Implement; keep the key memo per tile invalidated by the item revision counter
+- [x] 2.1 Design from SPIKE-13 variant D (`spike/spike-13-edit-latency`: `Streamer::refresh`, `force_replan`, stale draw); spec deltas STRM-005, STRM-015, STRM-019
+- [x] 2.2 Failing tests: a changed planned key refreshes the resident tile and the old one is drawn until the new one is uploaded; an edit event forces a plan while the camera is still; edited tiles are dispatched before the rest of R
+- [x] 2.3 Implement: the plan cache forgets the edited tiles explicitly (`SelectionCache::invalidate_tiles` from `ManagedLoop::edit`); there is no revision counter yet (the `summary::cover` memo that would use one is open)
 - [ ] 2.4 Reviewers; PR; indicative edit-to-exact numbers from `test gpu --real` (a measured window comes from the planner)
 
 ## 3. edit-invalidation-bounds
-- [ ] 3.1 Spec deltas LOD (bounds by reach) and the `SelectionCache` key
-- [ ] 3.2 Failing tests: bounds widen by the sum of `max_delta_m` of the returned items; an edit invalidates bounds and volumes of the found tiles only; the steep field at levels 16 to 18 plans without an empty morph interval
+- [ ] 3.1 Spec deltas LOD (the `SelectionCache` key; the widening of tile bounds by `max_delta_m` is done by the authored stage itself, GEN-026 in `stamp-stage`, and only there)
+- [ ] 3.2 Failing tests: the `SelectionCache` key includes the footprint result hash of the tile; an edit invalidates bounds and volumes of the found tiles only; the steep field at levels 16 to 18 plans without an empty morph interval (with the stamp stage, once it exists)
 - [ ] 3.3 Implement; reviewers; PR

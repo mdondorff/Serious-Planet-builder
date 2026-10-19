@@ -487,6 +487,8 @@ pub struct StreamStats {
     /// Jobs that finished after they were cancelled; their tiles were not made resident.
     pub dropped: u64,
     pub evicted: u64,
+    /// Resident tiles replaced in place by a refresh (STRM-026): the new version arrived and the old slot went back.
+    pub refreshed: u64,
     /// Queued requests by class: draw, residency, prefetch.
     pub queued_by_class: [usize; 3],
     /// Jobs handed to the spawner.
@@ -696,6 +698,10 @@ pub struct Streamer<T: Send + Sync + 'static> {
     pending: [Option<Vec<(TileId, f64)>>; 3],
     /// Tiles that may need a request: wanted, and not resident, running or waiting out a failure when last looked at.
     missing: FxSet<TileId>,
+    /// Resident tiles whose version predates an edit and that have not been replaced yet (STRM-026): they are requested again whenever
+    /// nothing is running for them and something wants them (a job that ended without replacing them, a failure after its delay, a
+    /// tile wanted again after it lost every class), and leave the set when the new version replaces them or they are evicted.
+    stale: FxSet<TileId>,
     /// Resident tiles in no class or in prefetch only (level 0 excluded), per pool, least recently used first: the victims
     /// of [`Streamer::make_room`]'s first tier.
     victims: [BTreeSet<(u64, TileId)>; 2],
@@ -766,6 +772,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             layers: [Layer::new(true, config.floor), Layer::new(false, config.floor), Layer::new(false, config.floor)],
             pending: [None, None, None],
             missing: FxSet::default(),
+            stale: FxSet::default(),
             victims: [BTreeSet::new(), BTreeSet::new()],
             rescan: false,
             work: SchedWork::default(),
@@ -775,6 +782,43 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             job_log: Arc::default(),
             sent: Arc::default(),
         }
+    }
+
+    /// Refresh the tiles of `tiles` after an edit changed what they read (STRM-026): a resident tile is requested again without being
+    /// dropped, so it keeps being drawn from its slot until the new version is resident; the new version takes a second slot, replaces the
+    /// old one when its job completes and gives the old slot back. The request is of the tile's class (draw before residency before
+    /// prefetch) and, in the residency and prefetch classes, ahead of every other request of it (the draw class has no rank to go ahead of).
+    /// A resident tile in no class is evicted instead (nothing wants it, and the next time it is wanted it loads from the new field). A tile
+    /// whose job is running is told to stop and its result is dropped; a resident one stays marked stale and is requested again as soon as
+    /// the job has ended and something wants it, a non-resident one loads again from the new field; a queued request stays queued (it loads
+    /// from the new field). Returns the number of refresh requests queued now.
+    pub fn refresh(&mut self, tiles: &[TileId]) -> usize {
+        let mut queued = 0;
+        for &t in tiles {
+            let resident = self.resident.contains_key(&t);
+            if resident && self.class_of(t).is_none() && t.level() > self.config.floor {
+                if let Some(f) = self.in_flight.get(&t) {
+                    f.token.store(true, Ordering::SeqCst);
+                }
+                self.evict(t);
+                continue;
+            }
+            if resident {
+                self.stale.insert(t);
+            }
+            if let Some(f) = self.in_flight.get(&t) {
+                // Its result may have been made from the field as it was: it is dropped, whatever it was.
+                if !f.token.swap(true, Ordering::SeqCst) {
+                    self.stats.cancelled += 1;
+                    self.stats.cancelled_prefetch += u64::from(f.class == RequestClass::Prefetch);
+                }
+                continue;
+            }
+            if resident && self.request_ahead(t) {
+                queued += 1;
+            }
+        }
+        queued
     }
 
     /// Cancel everything that is not resident: the queued requests are dropped and never reach the spawner, the dispatched
@@ -1064,6 +1108,9 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                     self.stats.dropped += 1;
                     self.pools.release(flight.slot, self.frame);
                     self.missing.insert(tile);
+                    if self.stale.contains(&tile) {
+                        self.request_ahead(tile);
+                    }
                 }
                 Outcome::Done(data) => {
                     self.stats.completed += 1;
@@ -1071,8 +1118,18 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                         self.retry_due.remove(&(at, tile));
                     }
                     self.last_error.remove(&tile);
-                    self.resident
+                    let old = self
+                        .resident
                         .insert(tile, Resident { data: Arc::new(data), inserted: self.frame, last_used: self.frame, slot: flight.slot });
+                    if let Some(old) = old {
+                        // A refresh (STRM-026): the old version's slot goes back (reusable after the frames in flight retire).
+                        self.stats.refreshed += 1;
+                        self.stale.remove(&tile);
+                        self.pools.release(old.slot, self.frame);
+                        if tile.level() > self.config.floor {
+                            self.victims[self.pools.kind_of(tile) as usize].remove(&(old.last_used, tile));
+                        }
+                    }
                     if tile.level() > self.config.floor && !self.is_active(tile) {
                         self.victims[self.pools.kind_of(tile) as usize].insert((self.frame, tile));
                         self.work.updated += 1;
@@ -1082,6 +1139,9 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 Outcome::Cancelled => {
                     self.pools.release(flight.slot, self.frame);
                     self.missing.insert(tile);
+                    if self.stale.contains(&tile) {
+                        self.request_ahead(tile);
+                    }
                 }
                 Outcome::Failed(message) => {
                     self.last_error.insert(tile, message);
@@ -1151,6 +1211,10 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                     self.victims[kind].remove(&(r.last_used, t));
                 }
             }
+            // A version that predates an edit is refreshed as soon as the tile is wanted again (STRM-026).
+            if new.is_some() && self.stale.contains(&t) && !self.in_flight.contains_key(&t) {
+                self.request_ahead(t);
+            }
             return;
         }
         if let Some(f) = self.in_flight.get(&t) {
@@ -1173,6 +1237,17 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 self.missing.insert(t);
             }
         }
+    }
+
+    /// [`request`](Streamer::request) for a refresh: rank 0 in whatever class the tile has, so it starts ahead of the rest of that class
+    /// (in the residency class the rank is otherwise the level, coarse first).
+    fn request_ahead(&mut self, t: TileId) -> bool {
+        let Some(class) = self.class_of(t) else { return false };
+        let queued = self.queue.insert(t, class as u8, 0, self.pools.kind_of(t) as usize);
+        if queued {
+            self.work.updated += 1;
+        }
+        queued
     }
 
     /// Queue `t` under its class and rank (draw: 0; residency and prefetch: level, coarse first); its place among the requests of
@@ -1208,13 +1283,17 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         let missing = std::mem::take(&mut self.missing);
         self.work.scanned += missing.len() as u64;
         for t in missing {
-            if self.resident.contains_key(&t) || self.in_flight.contains_key(&t) {
+            if self.in_flight.contains_key(&t) || (self.resident.contains_key(&t) && !self.stale.contains(&t)) {
                 continue;
             }
             if self.failed_at.get(&t).is_some_and(|at| now.saturating_sub(*at) < self.config.retry_after_ms) {
                 continue;
             }
-            self.request(t);
+            if self.stale.contains(&t) {
+                self.request_ahead(t);
+            } else {
+                self.request(t);
+            }
         }
     }
 
@@ -1366,6 +1445,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
     }
 
     fn evict(&mut self, tile: TileId) {
+        self.stale.remove(&tile);
         if let Some(r) = self.resident.remove(&tile) {
             self.pools.release(r.slot, self.frame);
             self.stats.evicted += 1;

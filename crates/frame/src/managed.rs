@@ -320,6 +320,18 @@ impl ManagedLoop {
         &self.manager
     }
 
+    /// An item edit changed what `tiles` read (STRM-026, E1): the plan cache forgets them, the resident ones are refreshed (drawn from
+    /// their old version until the new one is uploaded, REND-032), and a new plan is asked for at the next frame although the camera
+    /// did not move. `tiles` is the footprint find of the edit (WDEF-007). Returns the refresh requests queued.
+    pub fn edit(&mut self, tiles: &[TileId]) -> usize {
+        self.pipe.worker().invalidate_cache(Some(tiles));
+        let queued = self.manager.streamer_mut().refresh(tiles);
+        self.pipe.force_replan();
+        self.classes_stale = true;
+        self.prefetch_closure_stale = true;
+        queued
+    }
+
     /// The tiles the sink holds (what a frame may draw).
     pub fn resident(&self) -> &HashMap<TileId, ResidentTile> {
         &self.resident
