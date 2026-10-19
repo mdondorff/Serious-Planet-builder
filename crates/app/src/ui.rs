@@ -98,12 +98,21 @@ pub fn shell(ui: &mut egui::Ui, st: &mut Shell) {
     st.panel_rect = r.map_or(egui::Rect::NOTHING, |r| r.response.rect);
 }
 
+/// The markers of the globe overview for one frame: where they are on the screen, the one under the cursor, and the label of those that
+/// have one (the edits are labelled by name, the others by their number).
+pub struct MarkerLayer<'a> {
+    pub markers: &'a [planet_frame::globe::ScreenMarker],
+    pub hover: Option<u64>,
+    pub labels: &'a std::collections::HashMap<u64, String>,
+}
+
 /// The item markers of the globe overview (VIEW-013), drawn over the scene: a dot at each pixel (window pixels, origin top-left) with the
 /// item's id beside it, the one under the cursor larger and brighter.
-pub fn draw_markers(ui: &mut egui::Ui, markers: &[planet_frame::globe::ScreenMarker], hover: Option<u64>) {
+pub fn draw_markers(ui: &mut egui::Ui, layer: &MarkerLayer) {
     let ppp = ui.ctx().pixels_per_point();
     let painter = ui.painter();
-    for m in markers {
+    let hover = layer.hover;
+    for m in layer.markers {
         let at = egui::pos2(m.pixel[0] as f32 / ppp, m.pixel[1] as f32 / ppp);
         let hot = hover == Some(m.id);
         let (radius, fill) = if hot { (8.0, egui::Color32::from_rgb(255, 220, 60)) } else { (5.0, egui::Color32::from_rgb(255, 120, 40)) };
@@ -111,7 +120,7 @@ pub fn draw_markers(ui: &mut egui::Ui, markers: &[planet_frame::globe::ScreenMar
         painter.text(
             at + egui::vec2(radius + 3.0, -radius - 3.0),
             egui::Align2::LEFT_BOTTOM,
-            format!("#{}", m.id),
+            layer.labels.get(&m.id).cloned().unwrap_or_else(|| format!("#{}", m.id)),
             egui::FontId::proportional(13.0),
             egui::Color32::WHITE,
         );
@@ -193,8 +202,7 @@ impl EditorUi {
         &mut self,
         window: &winit::window::Window,
         status: &str,
-        markers: &[planet_frame::globe::ScreenMarker],
-        hover: Option<u64>,
+        markers: &MarkerLayer,
         extra: Option<&mut dyn FnMut(&mut egui::Ui)>,
     ) -> UiFrame {
         let started = std::time::Instant::now();
@@ -209,7 +217,7 @@ impl EditorUi {
                 Some(draw) => draw(ui),
                 None => shell(ui, shell_state),
             }
-            draw_markers(ui, markers, hover);
+            draw_markers(ui, markers);
         });
         self.winit.handle_platform_output(window, out.platform_output);
         self.pending.append(out.textures_delta);
