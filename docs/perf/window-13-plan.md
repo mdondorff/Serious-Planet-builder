@@ -84,6 +84,5 @@ Budgets: preview 16 ms; exact 300 ms for a radius up to 150 m (above 1 m altitud
 ## What can go wrong
 
 - A rig that does not settle (900 s limit) or an edit that does not become exact (600 s limit) is an error that names the frame state (kind, substituted nodes, jobs, pending): read it before re-running.
-- The first edit of a world without the edit-layer stage re-keys every tile (STRM-028): the scene uses the editor's world; a run over a plain world would measure a full reload, not an edit.
-- A pre-filled pack of the plain world does not serve the editing world (other keys): the first descent over the store generates the coarse tiles. The scene settles before the first edit, so this is in the settle time, not the edit.
+- The scene runs over a plain world; a stage with an empty footprint keeps its source key (GEN-027), so the first edit re-keys only the tiles it touches and the plain world's pre-filled pack serves the scene.
 - The preview and exact times include the GPU wait of the frame that shows them (the loop waits for it); the pacing sleeps of 1 ms between frames are in them.

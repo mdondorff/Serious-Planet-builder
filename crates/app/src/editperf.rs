@@ -292,7 +292,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     let smoke = o.perf_smoke;
     crate::streamperf::check_options(o)?;
     let opened = Instant::now();
-    // The editor's world: the stage of the stamp layer exists from the start, so the stamp re-keys only the tiles it touches.
+    // The editor's world is a plain `WorldTerrain`: a stage with an empty footprint passes its key through (GEN-027, ADR 0068).
     let world = Arc::new(crate::streamperf::open_world(o, false)?);
     writeln!(out, "world opened in {:.1} s", opened.elapsed().as_secs_f64()).map_err(err)?;
     let radius_m = world.radius_m();
