@@ -6,6 +6,7 @@
 use crate::camera::Camera;
 use crate::controller::{CameraInput, ControllerParams};
 use crate::freecam::{free_step, keep_clearance, FreeInput, FreePose};
+use crate::globe::{landing, GlobeSession};
 use crate::lod::LodParams;
 use crate::look::Overlay;
 use crate::mouselook::MouseLook;
@@ -114,6 +115,8 @@ pub enum Command {
     CycleOverlay,
     /// F4: the coarse-LOD inspection view, the error bound times four (VIEW-014).
     ToggleCoarseLod,
+    /// G: the globe overview over the point under the camera, or back (VIEW-013).
+    ToggleGlobe,
     Quit,
 }
 
@@ -169,6 +172,21 @@ pub fn effective_lod(base: &LodParams, coarse: bool) -> LodParams {
     }
 }
 
+/// Plan a frame with `attempt(coarse)`, `coarse` being the state of the coarse-LOD view (VIEW-014). When the coarse view is on and the
+/// attempt fails (the coarser error bound does not fit the terrain here: a steep neighbourhood leaves no morph room), the switch is
+/// turned off, the refusal is counted and the attempt is made again with the base parameters, so the window does not stop for it.
+/// A failure with the coarse view off, or the second one, is returned as it is.
+pub fn with_coarse_fallback<T, E>(coarse: &mut bool, refusals: &mut u64, mut attempt: impl FnMut(bool) -> Result<T, E>) -> Result<T, E> {
+    match attempt(*coarse) {
+        Err(_) if *coarse => {
+            *coarse = false;
+            *refusals += 1;
+            attempt(false)
+        }
+        other => other,
+    }
+}
+
 /// The corner label of the editor: the active overlay and the LOD error-bound factor (1 off, [`LodParams::coarse_factor`] on), e.g.
 /// `Overlay: Mesh, LOD x4` or `Overlay: Tiles, LOD x2.6` (VIEW-014).
 pub fn overlay_status(overlay: Overlay, lod_factor: f64) -> String {
@@ -186,7 +204,7 @@ pub fn overlay_status(overlay: Overlay, lod_factor: f64) -> String {
 }
 
 /// The key bindings, as text for the usage message and the log.
-pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, F3 cycles the overlay (off, tiles, mesh; lit path), F4 coarse LOD (error bound x4), V next debug view (debug path), T vsync on/off, C flight or free camera, \
+pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), F3 cycles the overlay (off, tiles, mesh; lit path), F4 coarse LOD (error bound x4), V next debug view (debug path), T vsync on/off, C flight or free camera, \
      free camera: WASD move, Q/E down/up, arrows look, click captures the mouse to look (Esc releases it), Shift boost; Esc quits";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -216,6 +234,10 @@ pub struct ViewerState {
     /// The coarse-LOD inspection view (VIEW-014): the plan's error bound times [`COARSE_LOD_FACTOR`](crate::lod::COARSE_LOD_FACTOR); off at
     /// the start. It changes the view, not the data.
     pub coarse_lod: bool,
+    /// The globe overview while it is shown (VIEW-013): its view is the camera, and a click's flight ends in the free camera.
+    pub globe: Option<GlobeSession>,
+    /// The planet radius the overview is built on, metres.
+    pub radius_m: f64,
     /// The next lit frame snaps the exposure (a first lit frame, a return to the lit path, a restart of the flight).
     exposure_reset: bool,
     /// The user paused the flight (as against the free camera holding the clock).
@@ -236,9 +258,17 @@ impl ViewerState {
             lit: false,
             overlay: Overlay::None,
             coarse_lod: false,
+            globe: None,
+            radius_m: 6_371_000.0,
             exposure_reset: true,
             user_paused: false,
         }
+    }
+
+    /// A viewer on a planet of `radius_m` (the globe overview's sphere).
+    pub fn with_radius_m(mut self, radius_m: f64) -> Self {
+        self.radius_m = radius_m;
+        self
     }
 
     /// A viewer that starts on the lit path (the editor window) or on the debug path.
@@ -287,6 +317,20 @@ impl ViewerState {
             }
             Command::CycleOverlay => self.overlay = self.overlay.next(),
             Command::ToggleCoarseLod => self.coarse_lod = !self.coarse_lod,
+            Command::ToggleGlobe => {
+                self.globe = match self.globe {
+                    Some(_) => None,
+                    None => {
+                        // Over the point under the camera now: the free camera's, or the flight's.
+                        let from = match &self.mode {
+                            CameraMode::Free(pose) => pose.position.0,
+                            CameraMode::Flight => flight_camera.position.0,
+                        };
+                        self.mouse.release();
+                        Some(GlobeSession::enter(from, self.radius_m))
+                    }
+                };
+            }
             Command::ToggleVsync => self.vsync = !self.vsync,
             Command::ToggleCamera => match self.mode {
                 CameraMode::Flight => {
@@ -324,6 +368,23 @@ impl ViewerState {
         height_m: &dyn Fn(PlanetFixed) -> f64,
         ground_radius_m: &dyn Fn(PlanetFixed) -> f64,
     ) -> Camera {
+        if let Some(globe) = &mut self.globe {
+            // The overview is the camera; the frame a click's flight ends the free camera takes over where it landed.
+            let shape = cameras[0];
+            match globe.step(dt_s) {
+                Some(end) => {
+                    let (position, heading, pitch) = landing(&end, globe.radius_m);
+                    let pose = FreePose::new(position, heading, pitch);
+                    self.globe = None;
+                    if !self.is_free() {
+                        self.clock.pause(now_ms);
+                    }
+                    self.mode = CameraMode::Free(pose);
+                    return pose.camera(shape.fov_y_rad, shape.aspect, shape.near_m);
+                }
+                None => return globe.view.camera(globe.radius_m, shape.fov_y_rad, shape.aspect, shape.near_m),
+            }
+        }
         match &mut self.mode {
             CameraMode::Flight => camera_at(cameras, self.clock.time_s(now_ms)),
             CameraMode::Free(pose) => {
@@ -1136,6 +1197,99 @@ mod tests {
         for word in ["F3", "tiles", "mesh", "F4", "coarse LOD"] {
             assert!(KEYS_HELP.contains(word), "the help names {word}: {KEYS_HELP}");
         }
+    }
+
+    // spec: VIEW-013
+    #[test]
+    fn g_toggles_the_globe_overview_which_is_the_camera_and_a_click_flight_lands_in_the_free_camera() {
+        use crate::globe::{Click, Marker, Viewport};
+        use crate::pick::PickLimits;
+        const R: f64 = 6_371_000.0;
+        let c = camera_for_tests();
+        let cameras = [c];
+        let params = ControllerParams::for_radius(R);
+        let (height, ground) = (|_: planet_core::PlanetFixed| 1.0e6, |_: planet_core::PlanetFixed| R);
+        let mut v = ViewerState::new(0, 3, 0, true).with_lit(true).with_radius_m(R);
+        assert!(v.globe.is_none(), "off at the start");
+        assert!(!v.command(Command::ToggleGlobe, 10, &c));
+        let session = v.globe.expect("G shows the overview");
+        assert!((session.view.altitude_m - 1.5 * R).abs() < 1e-6);
+        // The overview is the camera: 1.5 radii above the sphere, looking at the centre.
+        let cam = v.camera(&cameras, 20, 0.0, &params, &height, &ground);
+        assert!((cam.position.0.length() - 2.5 * R).abs() < 1e-3);
+        assert!(!v.is_free(), "the overview does not change the camera mode");
+        // G again: back to the flight.
+        v.command(Command::ToggleGlobe, 30, &c);
+        assert!(v.globe.is_none());
+        // A click on a marker starts the flight; when it ends the free camera takes over over the marker.
+        v.command(Command::ToggleGlobe, 40, &c);
+        let marker = Marker { id: 9, dir: v.globe.unwrap().view.center, radius_m: 2_000.0 };
+        let viewport = Viewport { width_px: 1600.0, height_px: 900.0 };
+        let cam = v.camera(&cameras, 50, 0.0, &params, &height, &ground);
+        let at = crate::globe::visible_markers(&cam, &[marker], R, viewport)[0].pixel;
+        let limits = PickLimits::new(R, 9_000.0);
+        let flat = |_: planet_core::Vec3| 0.0;
+        let click = v.globe.as_mut().unwrap().click(at, &cam, viewport, &[marker], &limits, &flat);
+        assert_eq!(click, Some(Click::Marker(9)));
+        let mut now = 60;
+        let mut landed = None;
+        for _ in 0..1_000 {
+            let cam = v.camera(&cameras, now, 0.05, &params, &height, &ground);
+            now += 50;
+            if v.globe.is_none() {
+                landed = Some(cam);
+                break;
+            }
+        }
+        let cam = landed.expect("the flight ends");
+        assert!(v.is_free(), "the free camera took over");
+        assert!(v.clock.is_paused(), "the flight clock waits while the free camera flies");
+        assert!((cam.position.0.length() - (R + 8_000.0)).abs() < 1.0, "{}", cam.position.0.length() - R);
+        assert!(cam.position.0.normalized().dot(marker.dir) > 1.0 - 1e-9, "over the marker");
+        // G in the free camera shows the overview over the free camera's point and leaves the free mode alone.
+        v.command(Command::ToggleGlobe, 90_000, &c);
+        assert!(v.globe.is_some() && v.is_free());
+        assert!(KEYS_HELP.contains("globe overview"), "{KEYS_HELP}");
+    }
+
+    // spec: VIEW-014
+    #[test]
+    fn a_refused_coarse_plan_falls_back_to_the_base_parameters_once_and_other_failures_are_not_hidden() {
+        let (mut coarse, mut refusals) = (true, 0u64);
+        let mut calls = Vec::new();
+        // The coarse attempt fails, the base one works: the result is the base one, the switch is off, the refusal counted.
+        let r: Result<&str, String> = with_coarse_fallback(&mut coarse, &mut refusals, |c| {
+            calls.push(c);
+            if c {
+                Err("morph interval is empty".to_string())
+            } else {
+                Ok("base plan")
+            }
+        });
+        assert_eq!(r, Ok("base plan"));
+        assert_eq!((coarse, refusals), (false, 1));
+        assert_eq!(calls, [true, false]);
+        // Coarse off: an error is returned at once, with no second attempt and no refusal.
+        calls.clear();
+        let r: Result<(), String> = with_coarse_fallback(&mut coarse, &mut refusals, |c| {
+            calls.push(c);
+            Err("a real failure".to_string())
+        });
+        assert_eq!(r, Err("a real failure".to_string()));
+        assert_eq!((coarse, refusals, calls.as_slice()), (false, 1, &[false][..]));
+        // Coarse on and both attempts fail: the second error comes back, the refusal is counted once.
+        let (mut coarse, mut refusals) = (true, 0u64);
+        let mut n = 0;
+        let r: Result<(), String> = with_coarse_fallback(&mut coarse, &mut refusals, |_| {
+            n += 1;
+            Err(format!("failure {n}"))
+        });
+        assert_eq!(r, Err("failure 2".to_string()));
+        assert_eq!((coarse, refusals), (false, 1));
+        // Coarse on and the attempt works: nothing changes.
+        let (mut coarse, mut refusals) = (true, 0u64);
+        let r: Result<u32, String> = with_coarse_fallback(&mut coarse, &mut refusals, |_| Ok(7));
+        assert_eq!((r, coarse, refusals), (Ok(7), true, 0));
     }
 
     // spec: VIEW-014

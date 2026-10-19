@@ -22,6 +22,8 @@ mod floor_loop;
 mod frustum_cut;
 #[path = "globe.rs"]
 mod globe;
+#[path = "globe_session.rs"]
+mod globe_session;
 #[path = "height_aware.rs"]
 mod height_aware;
 #[path = "lod.rs"]
