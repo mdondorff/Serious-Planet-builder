@@ -74,16 +74,50 @@ pub fn merged_spec_lint(root: &Path) -> Res {
         eprintln!("prepush: the branch holds origin/main, so the merged tree is the branch (its spec-lint is the next step)");
         return Ok(());
     }
-    let merged = capture(root, "git", &["merge-tree", "--write-tree", "HEAD", "origin/main"]).map_err(|e| {
-        format!("the branch does not merge cleanly onto origin/main: merge origin/main into it first ({})", e.lines().next().unwrap_or(""))
-    })?;
+    // `merge-tree` names the conflicting files on stdout (exit 1), which `capture` would drop.
+    let out = std::process::Command::new("git")
+        .args(["merge-tree", "--write-tree", "HEAD", "origin/main"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("cannot start `git merge-tree`: {e}"))?;
+    let merged = String::from_utf8_lossy(&out.stdout).into_owned();
+    if !out.status.success() {
+        let shown: Vec<&str> = merged.lines().skip(1).filter(|l| !l.trim().is_empty()).take(8).collect();
+        return Err(format!(
+            "the branch does not merge cleanly onto origin/main: merge origin/main into it first\n  {}",
+            if shown.is_empty() { String::from_utf8_lossy(&out.stderr).trim().to_string() } else { shown.join("\n  ") }
+        ));
+    }
     let tree = tree_id(&merged).ok_or_else(|| format!("git merge-tree printed no tree id: {merged}"))?;
+    sweep_stale_worktrees(root);
     let tmp = std::env::temp_dir().join(format!("planet-prepush-merged-{}", std::process::id()));
     let tmp_s = tmp.to_string_lossy().into_owned();
-    capture(root, "git", &["worktree", "add", "--detach", "--quiet", &tmp_s, "HEAD"])?;
+    capture(root, "git", &["worktree", "add", "--detach", "--no-checkout", "--quiet", &tmp_s, "HEAD"])?;
     let result = capture(&tmp, "git", &["read-tree", "-u", "--reset", &tree]).and_then(|_| crate::speclint::run(&tmp));
-    let _ = capture(root, "git", &["worktree", "remove", "--force", &tmp_s]);
+    if let Err(e) = capture(root, "git", &["worktree", "remove", "--force", &tmp_s]) {
+        eprintln!(
+            "prepush: the temporary worktree {tmp_s} was not removed ({}); delete it and run `git worktree prune`",
+            e.lines().next().unwrap_or("")
+        );
+    }
     result.map_err(|e| format!("spec-lint of the branch merged onto origin/main: {e}"))
+}
+
+/// Removes the temporary worktrees of merged-tree runs that were killed: `planet-prepush-merged-*` directories in the temp directory not
+/// touched for an hour (a live run, even of another session, is younger).
+fn sweep_stale_worktrees(root: &Path) {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else { return };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let stale = name.starts_with("planet-prepush-merged-")
+            && e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age.as_secs() > 3600);
+        if stale {
+            let path = e.path().to_string_lossy().into_owned();
+            let _ = capture(root, "git", &["worktree", "remove", "--force", &path]);
+            let _ = std::fs::remove_dir_all(e.path());
+            let _ = capture(root, "git", &["worktree", "prune"]);
+        }
+    }
 }
 
 /// The steps `prepush` runs for a diff, in order (BUILD-016, BUILD-021): `spec-lint` alone when no changed path is a crate path, else
