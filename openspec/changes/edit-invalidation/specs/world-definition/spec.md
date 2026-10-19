@@ -26,10 +26,10 @@ Source: report §5, ADR 0006, ADR 0007, ADR 0066
 ## ADDED Requirements
 
 ### Requirement: WDEF-007 Item reach and the footprint query
-An authored item SHALL carry `reach_m` (the distance from its anchor beyond which it changes no output of any stage) and `max_delta_m` (a bound on the height change anywhere in its reach), both finite and at least 0, a layer name and an integer priority. An item whose `reach_m` is over one cell edge SHALL be refused, naming the item and the limit; a radius edit that would leave an item over the limit SHALL be refused the same way and change nothing. A footprint query (query kind 3) SHALL take the body, the layer, a tile of the tangent-warp mapping and a halo (a fraction of the tile edge, finite and in `[0, 1]`, `-0.0` read as `0.0`) and SHALL return the items of the layer whose anchor lies within the tile's bounding cap enlarged by the halo and the item's reach, tested in f64 with `libm` with a fixed relative margin, so a false positive can change a key and never an output and a false negative is a defect. Its entry in a read set SHALL be the parameters `body u32 | layer (u32 length + UTF-8) | tile raw id u64 | halo f64 bits` and the 128-bit hash of the result: the items in application order (priority, then id big-endian), each as a 16-byte id and a 128-bit content hash under `planet-builder item hash v1`, hashed under `planet-builder footprint result v1`; an empty result is that hash over empty input. An item whose reach touches no tile of a read SHALL leave that read's key unchanged when it is added, moved, edited or removed.
+An authored item SHALL carry `reach_m` (the distance from its anchor beyond which it changes no output of any stage) and `max_delta_m` (a bound on the height change anywhere in its reach), both finite and at least 0, a layer name and an integer priority. An item whose `reach_m` is over one nominal cell edge (40 km, independent of the body's radius, so a radius edit cannot leave an item over it) or whose numbers are not finite SHALL be refused, naming the item and the limit, and the definition SHALL be unchanged. A footprint query (query kind 3) SHALL take the body, the layer, a tile of the tangent-warp mapping and a halo (a fraction of the tile edge, finite and in `[0, 1]`, `-0.0` read as `0.0`) and SHALL return the items of the layer whose anchor lies within the tile's bounding cap enlarged by the halo and the item's reach, tested in f64 with `libm` with a fixed relative margin, so a false positive can change a key and never an output and a false negative is a defect. Its entry in a read set SHALL be the parameters `body u32 | layer (u32 length + UTF-8) | tile raw id u64 | halo f64 bits` and the 128-bit hash of the result: the items in application order (priority, then id big-endian), each as a 16-byte id and a 128-bit content hash under `planet-builder item hash v1`, hashed under `planet-builder footprint result v1`; an empty result is that hash over empty input. An item whose reach touches no tile of a read SHALL leave that read's key unchanged when it is added, moved, edited or removed.
 
 Verify: A
-Status: planned
+Status: active
 Source: ADR 0066 points 1 and 2, SPIKE-13
 
 #### Scenario: Reach limits the re-key
@@ -37,8 +37,8 @@ Source: ADR 0066 points 1 and 2, SPIKE-13
 - **THEN** exactly the tiles whose bounding cap enlarged by the halo is within 150 m of the anchor, up to the margin, change their key, and removing the item restores every key
 
 #### Scenario: Reach over the limit
-- **WHEN** an item is put with a reach over one cell edge, or a radius edit would leave one over it
-- **THEN** the call is refused with the item id and the limit and the definition is unchanged
+- **WHEN** an item is put with a reach over one cell edge, a negative or non-finite reach or bound, or an empty layer name
+- **THEN** the call is refused with the item id and the limit and the definition is unchanged, an item of the same id staying where it was
 
 #### Scenario: Result material
 - **WHEN** the same items are inserted in any order, or an item changes its direction, reach, bound, layer or priority

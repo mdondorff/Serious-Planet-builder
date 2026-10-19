@@ -214,8 +214,24 @@ pub fn render_key(field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, 
 /// The id stored in every record of a field's tiles: BLAKE3-128 (context `planet-builder node set v1`) of the sorted,
 /// deduplicated, length-prefixed paths of the field's reads and of the body's radius node (ADR 0025 point 3), as for height tiles.
 pub fn node_set_id_of(field: &dyn HeightField) -> [u8; 16] {
-    let mut paths: Vec<String> = field.read_records().iter().map(ReadRecord::path).collect();
-    paths.push(body_radius_path(field.body()));
+    node_set_id_of_reads(field.body(), &field.read_records())
+}
+
+/// The node set id of one tile (STRM-010, ADR 0025 point 3). A field that reads no items has one id for the world
+/// ([`node_set_id_of`]); a field that reads items (`reads_cells`) has one per tile: the paths of the tile's own reads, which name
+/// each item query by kind, body, layer, tile and halo and never by what it found, so the id depends on which reads the tile makes
+/// and not on the items. `map` is the mapping the tile id was made with.
+pub fn node_set_id_of_tile(field: &dyn HeightField, tile: TileId, map: &dyn FaceMapping) -> [u8; 16] {
+    if field.reads_cells() {
+        node_set_id_of_reads(field.body(), &field.read_records_for(tile, map))
+    } else {
+        node_set_id_of(field)
+    }
+}
+
+fn node_set_id_of_reads(body: planet_world_def::BodyId, records: &[ReadRecord]) -> [u8; 16] {
+    let mut paths: Vec<String> = records.iter().map(ReadRecord::path).collect();
+    paths.push(body_radius_path(body));
     paths.sort();
     paths.dedup();
     let mut material = Vec::new();

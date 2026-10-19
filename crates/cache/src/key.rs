@@ -13,6 +13,7 @@ use planet_core::{FaceMapping, TileId};
 use planet_generators::height::HeightField;
 use planet_generators::mesh::{MESH_VERSION, SKIRT_FRACTION};
 use planet_world_def::cells::ItemEntry;
+use planet_world_def::footprint::FootprintItem;
 use planet_world_def::{BodyId, NodeValue, ReadRecord};
 
 /// Version of the encoding. Changing the encoding bumps this and invalidates every stored entry; it never aliases one.
@@ -23,6 +24,13 @@ const KEY_CONTEXT: &str = "planet-builder cache key v1";
 const NODE_CONTEXT: &str = "planet-builder node hash v1";
 const BODY_CONTEXT: &str = "planet-builder body hash v1";
 const QUERY_CONTEXT: &str = "planet-builder query result v1";
+const FOOTPRINT_CONTEXT: &str = "planet-builder footprint result v1";
+const ITEM_CONTEXT: &str = "planet-builder item hash v1";
+
+/// The tag of a key that carries a footprint (kind 3) or a region summary (kind 4) entry (ADR 0066 point 2). Keys without
+/// such an entry keep [`KEY_FORMAT_TAG`] and stay byte for byte what they were, so no stored entry is invalidated; the tag
+/// byte differs, so the two layouts never alias.
+pub const KEY_FORMAT_TAG_FOOTPRINT: u8 = 3;
 
 /// A 128-bit content key, written as 32 lowercase hex characters in file names and logs.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -85,6 +93,10 @@ pub enum ReadEntry {
 /// Query kinds. A cell query is parameterised by body and cell; a whole-body read by the body alone.
 pub const QUERY_CELL: u8 = 1;
 pub const QUERY_BODY: u8 = 2;
+/// The items of one layer whose reach touches a tile (WDEF-007): body, layer, tile and halo.
+pub const QUERY_FOOTPRINT: u8 = 3;
+/// Region summary nodes (ADR 0066 point 3, a later step): a key carrying one has [`KEY_FORMAT_TAG_FOOTPRINT`] too.
+pub const QUERY_SUMMARY: u8 = 4;
 
 /// Everything a key covers (ADR 0018).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -162,6 +174,50 @@ pub fn query_result_hash128(items: &[ItemEntry]) -> [u8; 16] {
     derive(QUERY_CONTEXT, &m)
 }
 
+/// 128-bit hash of one footprint item (`planet-builder item hash v1`): the layer, the priority, the content hash, the exact
+/// bits of the anchor, the reach and the height bound. The anchor is inside it, so the result needs no separate direction.
+pub fn footprint_item_hash128(item: &FootprintItem) -> [u8; 16] {
+    let mut m = Vec::with_capacity(96);
+    put_str(&mut m, &item.layer);
+    m.extend_from_slice(&item.priority.to_le_bytes());
+    m.extend_from_slice(&item.content.to_le_bytes());
+    for d in item.dir {
+        m.extend_from_slice(&d.to_le_bytes());
+    }
+    m.extend_from_slice(&item.reach_bits.to_le_bytes());
+    m.extend_from_slice(&item.max_delta_bits.to_le_bytes());
+    derive(ITEM_CONTEXT, &m)
+}
+
+/// The 16-byte id of an item: its `u64` zero-extended, big-endian, so the byte order is the numeric order and a later
+/// 128-bit id changes a type and not this encoding.
+pub fn footprint_id_bytes(id: u64) -> [u8; 16] {
+    (u128::from(id)).to_be_bytes()
+}
+
+/// 128-bit hash of a footprint result: the items in application order (priority, then id big-endian), each as its 16-byte id
+/// and its 128-bit item hash. An empty result is the hash of the empty input.
+pub fn footprint_result_hash128(items: &[FootprintItem]) -> [u8; 16] {
+    let mut sorted: Vec<&FootprintItem> = items.iter().collect();
+    sorted.sort_by_key(|i| (i.priority, footprint_id_bytes(i.id)));
+    let mut m = Vec::with_capacity(sorted.len() * 32);
+    for i in sorted {
+        m.extend_from_slice(&footprint_id_bytes(i.id));
+        m.extend_from_slice(&footprint_item_hash128(i));
+    }
+    derive(FOOTPRINT_CONTEXT, &m)
+}
+
+/// The canonical parameters of a footprint query: `body u32 | layer (u32 length + UTF-8) | tile raw id u64 | halo bits`.
+pub fn footprint_params(body: BodyId, layer: &str, tile: TileId, halo_bits: u64) -> Vec<u8> {
+    let mut p = Vec::with_capacity(24 + layer.len());
+    p.extend_from_slice(&body.0.to_le_bytes());
+    put_str(&mut p, layer);
+    p.extend_from_slice(&tile.raw().to_le_bytes());
+    p.extend_from_slice(&halo_bits.to_le_bytes());
+    p
+}
+
 /// The 128-bit entry for one recorded read.
 pub fn read_entry(record: &ReadRecord) -> ReadEntry {
     match record {
@@ -175,12 +231,18 @@ pub fn read_entry(record: &ReadRecord) -> ReadEntry {
         ReadRecord::Body { body, items } => {
             ReadEntry::Query { kind: QUERY_BODY, params: body.0.to_le_bytes().to_vec(), result: query_result_hash128(items) }
         }
+        ReadRecord::Footprint { body, layer, tile, halo_bits, items } => ReadEntry::Query {
+            kind: QUERY_FOOTPRINT,
+            params: footprint_params(*body, layer, *tile, *halo_bits),
+            result: footprint_result_hash128(items),
+        },
     }
 }
 
 /// The canonical bytes of a key's inputs (what the key is a hash of).
 pub fn encode(inputs: &KeyInputs) -> Vec<u8> {
-    let mut out = vec![KEY_FORMAT_TAG, inputs.kind as u8];
+    let footprint = inputs.reads.iter().any(|r| matches!(r, ReadEntry::Query { kind: QUERY_FOOTPRINT | QUERY_SUMMARY, .. }));
+    let mut out = vec![if footprint { KEY_FORMAT_TAG_FOOTPRINT } else { KEY_FORMAT_TAG }, inputs.kind as u8];
     out.extend_from_slice(&inputs.hash_version.to_le_bytes());
     out.extend_from_slice(&inputs.generator_version.to_le_bytes());
     put_str(&mut out, &inputs.implementation_id);
