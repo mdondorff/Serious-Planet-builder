@@ -167,26 +167,60 @@ impl core::fmt::Display for ItemError {
 
 /// Why a stamp is refused, if it is (WDEF-010): no reach, a parameter that is not finite or out of range, a content hash that is not the
 /// one its kind and parameters give.
-fn stamp_refusal(spec: &ItemSpec, stamp: stamp::Stamp) -> Option<String> {
-    let [p0, p1, p2] = stamp.params();
+fn stamp_refusal(spec: &ItemSpec, stamp: &stamp::Stamp, radius_m: f64) -> Option<String> {
+    let p = stamp.params();
+    let name = stamp.kind.name();
     if spec.reach_m <= 0.0 {
-        return Some(format!("a {} needs a reach above 0, got {} m", stamp.kind.name(), spec.reach_m));
+        return Some(format!("a {name} needs a reach above 0, got {} m", spec.reach_m));
     }
-    if ![p0, p1, p2].iter().all(|p| p.is_finite()) {
-        return Some(format!("a {} parameter is not finite: {:?}", stamp.kind.name(), stamp.params()));
+    if !p.iter().all(|v| v.is_finite()) {
+        return Some(format!("a {name} parameter is not finite: {:?}", stamp.params()));
     }
-    if (p1, p2) != (0.0, 0.0) {
-        return Some(format!("the two reserved parameters of a {} must be 0, got {p1} and {p2}", stamp.kind.name()));
+    let used = stamp.kind.param_keys().len();
+    if p[used..].iter().any(|v| *v != 0.0) {
+        return Some(format!("the reserved parameters of a {name} must be 0, got {:?}", &p[used..]));
+    }
+    let points = stamp.points();
+    if stamp.kind.is_line() {
+        let [amount, width, _] = p;
+        if !(2..=stamp::MAX_POINTS).contains(&points.len()) {
+            return Some(format!("a {name} has 2 to {} points, got {}", stamp::MAX_POINTS, points.len()));
+        }
+        if amount < 0.0 || amount > spec.max_delta_m {
+            return Some(format!("a {name} amount of {amount} m must be between 0 and its bound of {} m", spec.max_delta_m));
+        }
+        if width < 1.0 {
+            return Some(format!("a {name} width of {width} m must be at least 1 m"));
+        }
+        let anchor = spec.dir.normalized();
+        if points.iter().any(|q| !(q.x.is_finite() && q.y.is_finite() && q.z.is_finite()) || (q.length() - 1.0).abs() > 1e-9) {
+            return Some(format!("the points of a {name} must be unit directions"));
+        }
+        if footprint::angle_between(anchor, points[0]) > 1e-9 {
+            return Some(format!("the first point of a {name} must be the item's anchor"));
+        }
+        if points.windows(2).any(|w| w[0] == w[1]) {
+            return Some(format!("two consecutive points of a {name} coincide"));
+        }
+        let far = points.iter().map(|q| footprint::angle_between(anchor, *q) * radius_m).fold(0.0f64, f64::max);
+        if far + width > spec.reach_m {
+            return Some(format!(
+                "a {name} reaches {far} m from its anchor plus a width of {width} m, above its reach of {} m",
+                spec.reach_m
+            ));
+        }
+    } else if !points.is_empty() {
+        return Some(format!("a {name} takes no points"));
     }
     match stamp.kind {
-        stamp::StampKind::Hill if p0.abs() > spec.max_delta_m => {
-            Some(format!("a hill of {p0} m is above its bound of {} m", spec.max_delta_m))
+        stamp::StampKind::Hill if p[0].abs() > spec.max_delta_m => {
+            Some(format!("a hill of {} m is above its bound of {} m", p[0], spec.max_delta_m))
         }
-        stamp::StampKind::Crater if p0 < 0.0 || p0 > spec.max_delta_m => {
-            Some(format!("a crater depth of {p0} m must be between 0 and its bound of {} m", spec.max_delta_m))
+        stamp::StampKind::Crater if p[0] < 0.0 || p[0] > spec.max_delta_m => {
+            Some(format!("a crater depth of {} m must be between 0 and its bound of {} m", p[0], spec.max_delta_m))
         }
         _ if spec.content_hash != stamp.content_hash() => {
-            Some("the content hash is not the one the stamp's kind and parameters give".to_string())
+            Some("the content hash is not the one the stamp's kind, parameters and points give".to_string())
         }
         _ => None,
     }
@@ -397,8 +431,8 @@ impl WorldDefinition {
         if spec.layer.is_empty() {
             return Err(ItemError::Layer { id: spec.id });
         }
-        if let Some(stamp) = spec.stamp {
-            if let Some(reason) = stamp_refusal(&spec, stamp) {
+        if let Some(stamp) = &spec.stamp {
+            if let Some(reason) = stamp_refusal(&spec, stamp, radius) {
                 return Err(ItemError::Stamp { id: spec.id, reason });
             }
         }
@@ -469,7 +503,7 @@ impl WorldDefinition {
             reach_bits: rec.reach_bits,
             max_delta_bits: rec.max_delta_bits,
             layer: rec.layer.clone(),
-            stamp: rec.stamp,
+            stamp: rec.stamp.clone(),
         }
     }
 

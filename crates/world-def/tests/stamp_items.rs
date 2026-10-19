@@ -76,7 +76,7 @@ fn the_content_hash_of_a_stamp_is_derived_from_its_kind_and_parameters_and_reach
         Stamp::new(StampKind::Crater, [10.0, 0.0, 0.0]),
         Stamp::new(StampKind::Plateau, [10.0, 0.0, 0.0]),
     ] {
-        let o = make(other);
+        let o = make(other.clone());
         assert_ne!(base.0, o.0, "the definition hash follows kind and parameters: {other:?}");
         assert_ne!(base.1, o.1, "the read set follows them");
         assert_ne!(base.2, o.2, "the 64-bit footprint hash follows them");

@@ -27,6 +27,10 @@ fn item(id: u128) -> Item {
         stage_version: 2,
         name: Some("Marienplatz crater".into()),
         notes: None,
+        points: Vec::new(),
+        group: None,
+        part: None,
+        mask_layer: None,
     }
 }
 
@@ -627,6 +631,10 @@ fn a_pinned_item_has_a_pinned_canonical_text_and_content_hash() {
         stage_version: 1,
         name: Some("A hill".into()),
         notes: Some("pinned".into()),
+        points: Vec::new(),
+        group: None,
+        part: None,
+        mask_layer: None,
     };
     let text = it.to_toml().unwrap();
     assert_eq!(
