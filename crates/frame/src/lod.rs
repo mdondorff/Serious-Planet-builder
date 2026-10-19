@@ -36,6 +36,40 @@ pub struct LodParams {
     pub cull_horizon: bool,
 }
 
+/// The factor of the editor's coarse-LOD inspection switch (VIEW-014): the error bound `tau_px` times this, so the mesh edges are about
+/// four times longer on the screen, where the parameters allow it (see [`LodParams::coarse`]).
+pub const COARSE_LOD_FACTOR: f64 = 4.0;
+
+impl LodParams {
+    /// These parameters with the error bound multiplied by [`COARSE_LOD_FACTOR`], or by the largest factor below it that still
+    /// satisfies [`validate`](LodParams::validate) (the morph interval of every level must stay non-empty, which needs `viewport_h_px /
+    /// tau_px` above about twice the cells: the production 1080p parameters, error bound 6 px and 32 cells, allow about 2.6): a view for
+    /// inspecting the real triangles, not a change of the data. Decided here, in the plan's inputs, never in a shader. The result
+    /// is valid whenever `self` is.
+    pub fn coarse(&self) -> LodParams {
+        let at = |factor: f64| LodParams { tau_px: self.tau_px * factor, ..self.clone() };
+        if at(COARSE_LOD_FACTOR).validate().is_ok() {
+            return at(COARSE_LOD_FACTOR);
+        }
+        // The largest valid factor in [1, 4): the validity is monotone in the error bound, so a bisection finds it.
+        let (mut ok, mut bad) = (1.0, COARSE_LOD_FACTOR);
+        for _ in 0..40 {
+            let mid = 0.5 * (ok + bad);
+            if at(mid).validate().is_ok() {
+                ok = mid;
+            } else {
+                bad = mid;
+            }
+        }
+        at(ok)
+    }
+
+    /// The factor [`coarse`](LodParams::coarse) applies to the error bound for these parameters (1 when nothing can be coarser).
+    pub fn coarse_factor(&self) -> f64 {
+        self.coarse().tau_px / self.tau_px
+    }
+}
+
 /// The production render floor (LOD-011, ADR 0062 point 3): levels 0 to 2 are not drawn, the 384 tiles of level 3 are the roots.
 pub const DEFAULT_RENDER_FLOOR: u8 = 3;
 

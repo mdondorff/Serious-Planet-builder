@@ -213,6 +213,57 @@ pub struct LitPlan {
     /// The atmosphere of this frame (ADR 0040): `None` draws none, and the plan's text and hash are what they were before the
     /// atmosphere existed. The body's radius comes from the world definition, the coefficients from the look.
     pub atmosphere: Option<AtmospherePlan>,
+    /// The debug overlay of this frame (editor mode only): `None` draws none, and the plan's text and hash are what they were before.
+    pub overlay: Overlay,
+}
+
+/// A debug overlay drawn over the lit terrain (CON-18): chosen as data in the plan, never as a renderer branch (CON-03). The bigger
+/// overlays of the editor (maps, authored regions, surface type) plug into this enum.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Overlay {
+    /// Nothing is drawn over the terrain: the plan's text and hash are what they were before overlays existed.
+    #[default]
+    None,
+    /// The tile outlines and a tint of each tile's level colour (colour per level of detail, dimmed with the morph factor).
+    Tiles,
+    /// The tile outlines and the tint, and every grid edge and the diagonal of every cell as a fixed line of about a pixel (no fade-out,
+    /// however fine the mesh is).
+    Mesh,
+}
+
+impl Overlay {
+    pub fn name(self) -> &'static str {
+        match self {
+            Overlay::None => "none",
+            Overlay::Tiles => "tiles",
+            Overlay::Mesh => "mesh",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Overlay> {
+        Overlay::ALL.into_iter().find(|o| o.name() == s)
+    }
+
+    /// Every overlay, in the order F3 cycles through them.
+    pub const ALL: [Overlay; 3] = [Overlay::None, Overlay::Tiles, Overlay::Mesh];
+
+    /// The next one in the cycle (off, tiles, mesh, off).
+    pub fn next(self) -> Overlay {
+        match self {
+            Overlay::None => Overlay::Tiles,
+            Overlay::Tiles => Overlay::Mesh,
+            Overlay::Mesh => Overlay::None,
+        }
+    }
+
+    /// The code the lit shader reads (the globals' `extra.y`): 0 none, 1 tiles, 2 mesh.
+    pub fn shader_code(self) -> f32 {
+        match self {
+            Overlay::None => 0.0,
+            Overlay::Tiles => 1.0,
+            Overlay::Mesh => 2.0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -260,6 +311,7 @@ impl LitPlan {
             water_level_m: 0.0,
             view: ShadeView::Lit,
             atmosphere: None,
+            overlay: Overlay::None,
         }
     }
 
@@ -277,6 +329,12 @@ impl LitPlan {
     pub fn with_water_level(mut self, level_m: f64) -> LitPlan {
         // -0.0 is the default level too: it must not change the plan text.
         self.water_level_m = if level_m == 0.0 { 0.0 } else { level_m as f32 };
+        self
+    }
+
+    /// This plan with a debug overlay drawn over the terrain.
+    pub fn with_overlay(mut self, overlay: Overlay) -> LitPlan {
+        self.overlay = overlay;
         self
     }
 
@@ -329,6 +387,9 @@ impl LitPlan {
                 look.push_str(&t);
             }
         }
+        if self.overlay != Overlay::None {
+            look.push_str(&format!(" overlay {}", self.overlay.name()));
+        }
         format!(
             "lit {mode} dt {} sun {} {} {} reset {} tonemap {}{look}",
             h(self.dt_s),
@@ -360,7 +421,7 @@ impl LitPlan {
             }
             u64::from_str_radix(s, 16).map(f64::from_bits).map_err(|e| format!("bad f64 bits '{s}': {e}"))
         };
-        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..' and 'atmosphere ..' in this order)";
+        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..', 'atmosphere ..' and 'overlay ..' in this order)";
         let ["dt", dt, "sun", sx, sy, sz, "reset", reset, "tonemap", tm, tail @ ..] = rest else {
             return Err(usage.into());
         };
@@ -380,6 +441,7 @@ impl LitPlan {
             water_level_m: 0.0,
             view: ShadeView::Lit,
             atmosphere: None,
+            overlay: Overlay::None,
         };
         // The optional tokens, each at most once and in the order the text writes them.
         let mut rest = tail;
@@ -391,6 +453,7 @@ impl LitPlan {
                 "water" => (3, 1),
                 "view" => (4, 1),
                 "atmosphere" => (5, 24),
+                "overlay" => (6, 1),
                 _ => return Err(usage.into()),
             };
             if rank <= stage || more.len() < arity {
@@ -418,7 +481,8 @@ impl LitPlan {
                 }
                 3 => plan.water_level_m = f(args[0])?,
                 4 => plan.view = ShadeView::parse(args[0]).ok_or_else(|| format!("unknown lit view '{}'", args[0]))?,
-                _ => plan.atmosphere = Some(AtmospherePlan::from_tokens(args)?),
+                5 => plan.atmosphere = Some(AtmospherePlan::from_tokens(args)?),
+                _ => plan.overlay = Overlay::parse(args[0]).ok_or_else(|| format!("unknown overlay '{}'", args[0]))?,
             }
             rest = after;
         }

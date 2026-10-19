@@ -76,11 +76,13 @@ pub fn fonts() -> egui::FontDefinitions {
 pub struct Shell {
     /// The screen rectangle the panel covered in the last pass, in points.
     pub panel_rect: egui::Rect,
+    /// The line under the title: the active debug overlay and LOD view, e.g. `Overlay: Mesh, LOD x4` (VIEW-014).
+    pub status: String,
 }
 
 impl Default for Shell {
     fn default() -> Self {
-        Shell { panel_rect: egui::Rect::NOTHING }
+        Shell { panel_rect: egui::Rect::NOTHING, status: String::new() }
     }
 }
 
@@ -89,6 +91,9 @@ impl Default for Shell {
 pub fn shell(ui: &mut egui::Ui, st: &mut Shell) {
     let r = egui::Window::new("Planet editor").default_pos(egui::pos2(12.0, 12.0)).resizable(false).show(ui.ctx(), |ui| {
         ui.label("Planet editor");
+        if !st.status.is_empty() {
+            ui.label(&st.status);
+        }
     });
     st.panel_rect = r.map_or(egui::Rect::NOTHING, |r| r.response.rect);
 }
@@ -164,8 +169,10 @@ impl EditorUi {
     }
 
     /// Run one egui pass and tessellate it: the frame to paint after the scene.
-    pub fn frame(&mut self, window: &winit::window::Window) -> UiFrame {
+    pub fn frame(&mut self, window: &winit::window::Window, status: &str) -> UiFrame {
         let started = std::time::Instant::now();
+        self.shell.status.clear();
+        self.shell.status.push_str(status);
         let raw = self.winit.take_egui_input(window);
         let shell_state = &mut self.shell;
         let out = self.ctx.run_ui(raw, |ui| shell(ui, shell_state));

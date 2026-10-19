@@ -47,8 +47,8 @@ struct Globals {
     view_proj: mat4x4<f32>,
     range: vec4<f32>,
     mode: vec4<u32>,
-    // Lit path only: x = the water level W in metres (ADR 0041); y = the growth of the shore ramp with the distance from the camera
-    // (REND-030, the plan's `shore_ramp_per_m`); the other lanes are reserved.
+    // Lit path only: x = the water level W in metres (ADR 0041); y = the debug overlay (VIEW-014: 0 none, 1 tiles, 2 mesh); z = the growth of
+    // the shore ramp with the distance from the camera (REND-030, the plan's `shore_ramp_per_m`); w is reserved.
     extra: vec4<f32>,
     // Lit path only: the albedo table of the look (ADR 0039 point 3): eight colours with a threshold in the fourth lane, then
     // (snow_c_full, snow_c_none, snow_cos_none, snow_cos_full) and (beach_height, beach_fade, shore_blend, 0).
@@ -57,8 +57,9 @@ struct Globals {
 struct Node {
     origin_rel: vec4<f32>,
     color: vec4<f32>,
-    // x, y: vertex distances between which a vertex morphs to the parent grid; z, w: padding (the plan's node-level `morph` is a diagnostic
-    // of the CPU selection and is not read by the shader; the shore ramp follows the fragment's distance, REND-030, and is in the globals).
+    // x, y: vertex distances between which a vertex morphs to the parent grid; z: padding (the shore ramp follows the fragment's distance,
+    // REND-030, and is in the globals); w: the tile's level of detail (the wireframe overlay's colour, VIEW-014; the plan's node-level
+    // `morph` is a diagnostic of the CPU selection and is not read by the shader).
     morph: vec4<f32>,
     // Per grid decade (1 cm .. 1,000 km) the fractional part of (planet-fixed tile origin / spacing), xyz, taken in f64 on
     // the CPU: they anchor the relief grid to the world instead of to this tile, so neighbouring tiles and LOD splits draw
@@ -294,7 +295,11 @@ fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
-    return vec4<f32>(shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.y, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z), 1.0);
+    var rgb = shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z);
+    if (g.extra.y > 0.5) {
+        rgb = overlay_wire(in, rgb, g.range.z, g.extra.y);
+    }
+    return vec4<f32>(rgb, 1.0);
 }
 "#;
 
@@ -313,7 +318,7 @@ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
     for (i, d) in plan.nodes.iter().enumerate() {
         let r = d.camera_relative_origin;
         let c = d.color.map(|v| f32::from(v) / 255.0);
-        let mut floats = vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, 0.0, 0.0];
+        let mut floats = vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, 0.0, f32::from(d.level)];
         for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
             floats.extend([p[0], p[1], p[2], 0.0]);
         }
@@ -1557,7 +1562,7 @@ impl TerrainRenderer {
                         .iter()
                         .flat_map(|v: &u32| v.to_le_bytes()),
                 );
-                globals.extend(f32_bytes(&[lit.water_level_m, plan.shore_ramp_per_m, 0.0, 0.0]));
+                globals.extend(f32_bytes(&[lit.water_level_m, lit.overlay.shader_code(), plan.shore_ramp_per_m, 0.0]));
                 globals.extend(f32_bytes(&lit.albedo.to_words()));
             }
             None => {
@@ -1858,7 +1863,7 @@ mod one_shot_tests {
             "the cap of the WGSL is the reference's"
         );
         assert!(
-            SHADER_TAIL.contains("shore_ramp_at(g.extra.y, camera_distance(nodes[in.node_index].origin_rel, in.local))"),
+            SHADER_TAIL.contains("shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local))"),
             "the lit fragment ramps with its own distance from the camera"
         );
     }
@@ -1899,7 +1904,8 @@ mod one_shot_tests {
             f32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
         };
         for record in 0..2 {
-            assert_eq!((word(record, 10), word(record, 11)), (0.0, 0.0), "record {record}: words 10 and 11 are padding");
+            assert_eq!(word(record, 10), 0.0, "record {record}: word 10 is padding");
+            assert_eq!(word(record, 11), [17.0, 20.0][record], "record {record}: word 11 is the tile's level (the overlay's)");
             assert_eq!((word(record, 8), word(record, 9)), (10.0, 20.0), "the morph interval is still there");
         }
     }

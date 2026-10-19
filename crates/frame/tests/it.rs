@@ -40,6 +40,8 @@ mod manager_real;
 mod morph;
 #[path = "mouselook_replay.rs"]
 mod mouselook_replay;
+#[path = "overlay.rs"]
+mod overlay;
 #[path = "pick.rs"]
 mod pick;
 #[path = "pipeline.rs"]

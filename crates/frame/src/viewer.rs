@@ -6,6 +6,8 @@
 use crate::camera::Camera;
 use crate::controller::{CameraInput, ControllerParams};
 use crate::freecam::{free_step, keep_clearance, FreeInput, FreePose};
+use crate::lod::LodParams;
+use crate::look::Overlay;
 use crate::mouselook::MouseLook;
 use crate::scenes::{DrawnSet, FRAME_STEP_S};
 use planet_core::{PlanetFixed, TileId};
@@ -108,6 +110,10 @@ pub enum Command {
     ToggleCamera,
     /// L: the lit path with the atmosphere, or the debug path (VIEW-007).
     ToggleLit,
+    /// F3: the next debug overlay over the lit terrain: off, tiles, mesh (VIEW-014).
+    CycleOverlay,
+    /// F4: the coarse-LOD inspection view, the error bound times four (VIEW-014).
+    ToggleCoarseLod,
     Quit,
 }
 
@@ -153,8 +159,34 @@ impl Held {
     }
 }
 
+/// The LOD parameters a frame is planned with: the base ones, or with the error bound times four in the coarse-LOD inspection view
+/// (VIEW-014).
+pub fn effective_lod(base: &LodParams, coarse: bool) -> LodParams {
+    if coarse {
+        base.coarse()
+    } else {
+        base.clone()
+    }
+}
+
+/// The corner label of the editor: the active overlay and the LOD error-bound factor (1 off, [`LodParams::coarse_factor`] on), e.g.
+/// `Overlay: Mesh, LOD x4` or `Overlay: Tiles, LOD x2.6` (VIEW-014).
+pub fn overlay_status(overlay: Overlay, lod_factor: f64) -> String {
+    let overlay = match overlay {
+        Overlay::None => "off",
+        Overlay::Tiles => "Tiles",
+        Overlay::Mesh => "Mesh",
+    };
+    let lod = if (lod_factor - lod_factor.round()).abs() < 0.05 {
+        format!("LOD x{}", lod_factor.round())
+    } else {
+        format!("LOD x{lod_factor:.1}")
+    };
+    format!("Overlay: {overlay}, {lod}")
+}
+
 /// The key bindings, as text for the usage message and the log.
-pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, V next debug view (debug path), T vsync on/off, C flight or free camera, \
+pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, F3 cycles the overlay (off, tiles, mesh; lit path), F4 coarse LOD (error bound x4), V next debug view (debug path), T vsync on/off, C flight or free camera, \
      free camera: WASD move, Q/E down/up, arrows look, click captures the mouse to look (Esc releases it), Shift boost; Esc quits";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -179,6 +211,11 @@ pub struct ViewerState {
     pub mouse: MouseLook,
     /// The lit path is shown (VIEW-007); the debug path otherwise.
     pub lit: bool,
+    /// The debug overlay drawn over the lit terrain (VIEW-014); off at the start.
+    pub overlay: Overlay,
+    /// The coarse-LOD inspection view (VIEW-014): the plan's error bound times [`COARSE_LOD_FACTOR`](crate::lod::COARSE_LOD_FACTOR); off at
+    /// the start. It changes the view, not the data.
+    pub coarse_lod: bool,
     /// The next lit frame snaps the exposure (a first lit frame, a return to the lit path, a restart of the flight).
     exposure_reset: bool,
     /// The user paused the flight (as against the free camera holding the clock).
@@ -197,6 +234,8 @@ impl ViewerState {
             held: Held::default(),
             mouse: MouseLook::new(),
             lit: false,
+            overlay: Overlay::None,
+            coarse_lod: false,
             exposure_reset: true,
             user_paused: false,
         }
@@ -246,6 +285,8 @@ impl ViewerState {
                 self.lit = !self.lit;
                 self.exposure_reset |= self.lit;
             }
+            Command::CycleOverlay => self.overlay = self.overlay.next(),
+            Command::ToggleCoarseLod => self.coarse_lod = !self.coarse_lod,
             Command::ToggleVsync => self.vsync = !self.vsync,
             Command::ToggleCamera => match self.mode {
                 CameraMode::Flight => {
@@ -550,6 +591,14 @@ pub struct SmokeCounts {
     /// never see water leave both at zero: the verdict does not require them, the summary reports them).
     pub water_frames: u64,
     pub renderer_ran_water: bool,
+    /// Lit frames drawn with a debug overlay, and with the mesh overlay among them (VIEW-014).
+    pub overlay_frames: u64,
+    pub mesh_overlay_frames: u64,
+    /// Frames planned with the coarse-LOD inspection view (VIEW-014).
+    pub coarse_lod_frames: u64,
+    /// Times the coarse view was refused because the plan could not be made with it (a steep neighbourhood leaves no morph room) and the
+    /// frame fell back to the base parameters.
+    pub coarse_lod_refusals: u64,
 }
 
 /// Frames a smoke run must have drawn lit.
@@ -1060,7 +1109,69 @@ mod tests {
             renderer_ran_atmosphere: true,
             water_frames: 0,
             renderer_ran_water: false,
+            overlay_frames: 0,
+            mesh_overlay_frames: 0,
+            coarse_lod_frames: 0,
+            coarse_lod_refusals: 0,
         }
+    }
+
+    // spec: VIEW-014
+    #[test]
+    fn f3_cycles_the_overlay_off_tiles_mesh_off_and_f4_toggles_the_coarse_lod_both_off_at_the_start() {
+        let c = camera_for_tests();
+        let mut v = ViewerState::new(0, 3, 0, true).with_lit(true);
+        assert_eq!((v.overlay, v.coarse_lod), (Overlay::None, false), "off at the start");
+        assert!(!v.command(Command::CycleOverlay, 10, &c));
+        assert_eq!(v.overlay, Overlay::Tiles);
+        v.command(Command::ToggleLit, 20, &c);
+        assert_eq!(v.overlay, Overlay::Tiles, "leaving the lit path keeps the choice, the debug path draws no overlay");
+        v.command(Command::CycleOverlay, 30, &c);
+        assert_eq!(v.overlay, Overlay::Mesh);
+        v.command(Command::CycleOverlay, 40, &c);
+        assert_eq!(v.overlay, Overlay::None, "the third press is back to off");
+        assert!(!v.command(Command::ToggleCoarseLod, 50, &c) && v.coarse_lod);
+        assert_eq!(v.overlay, Overlay::None, "the two switches are independent");
+        v.command(Command::ToggleCoarseLod, 60, &c);
+        assert!(!v.coarse_lod);
+        for word in ["F3", "tiles", "mesh", "F4", "coarse LOD"] {
+            assert!(KEYS_HELP.contains(word), "the help names {word}: {KEYS_HELP}");
+        }
+    }
+
+    // spec: VIEW-014
+    #[test]
+    fn the_coarse_lod_multiplies_only_the_error_bound_and_the_corner_label_says_what_is_active() {
+        let base = LodParams::earth_1080p();
+        let same = effective_lod(&base, false);
+        assert_eq!(same, base, "off: the parameters are the base ones");
+        assert_eq!(crate::lod::COARSE_LOD_FACTOR, 4.0);
+        // The production 1080p parameters (error bound 6 px, 32 cells) cannot take four times the bound (viewport / tau would be 45,
+        // under 64): the factor is the largest the morph intervals allow, between 2 and 4, and the result is valid.
+        let coarse = effective_lod(&base, true);
+        assert!(coarse.tau_px > 2.0 * base.tau_px && coarse.tau_px < 4.0 * base.tau_px, "{}", coarse.tau_px);
+        assert_eq!(LodParams { tau_px: base.tau_px, ..coarse.clone() }, base, "nothing else changes");
+        coarse.validate().expect("the coarse parameters are valid at 1080p");
+        assert!(LodParams { tau_px: coarse.tau_px * 1.05, ..base.clone() }.validate().is_err(), "it is the largest that is valid");
+        assert!((base.coarse_factor() - coarse.tau_px / base.tau_px).abs() < 1e-12);
+        // Parameters with room (2.5 px, the golden tolerance) get exactly four times.
+        let fine = LodParams { tau_px: 2.5, ..base.clone() };
+        assert_eq!(effective_lod(&fine, true).tau_px, 10.0);
+        assert_eq!(fine.coarse_factor(), 4.0);
+        assert_eq!(overlay_status(Overlay::None, 1.0), "Overlay: off, LOD x1");
+        assert_eq!(overlay_status(Overlay::Tiles, 1.0), "Overlay: Tiles, LOD x1");
+        assert_eq!(overlay_status(Overlay::Mesh, 4.0), "Overlay: Mesh, LOD x4");
+        assert_eq!(overlay_status(Overlay::Tiles, 2.63), "Overlay: Tiles, LOD x2.6");
+    }
+
+    fn camera_for_tests() -> Camera {
+        Camera::looking_at_centre(
+            planet_core::PlanetFixed(planet_core::Vec3::new(0.0, 0.0, 2.0e7)),
+            planet_core::Vec3::new(0.0, 1.0, 0.0),
+            1.0,
+            1.6,
+            1.0,
+        )
     }
 
     // spec: VIEW-005
