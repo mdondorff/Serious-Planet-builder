@@ -31,6 +31,10 @@ Source: SPIKE-13 variant D, ADR 0066, ADR 0021 point 2, M6 plan row E1, window 1
 - **WHEN** nothing is stale and the wants did not change
 - **THEN** a frame scans and updates nothing, also after a refresh has completed, and a refresh counts one unit of work per request it queues (STRM-019)
 
+#### Scenario: The edit event
+- **WHEN** an edit event names the resident tiles it changed while the camera stands still
+- **THEN** a new plan is delivered although the request did not change, the old tiles are drawn until their refreshes finish, and the frame is the synchronous frame of the new field again afterwards, with every requested refresh counted as a replacement
+
 #### Scenario: The tile leaves every class
 - **WHEN** a refresh is queued for a resident tile of a residency set made from a selection (closed under its ancestors) and the wants then change so that the tile is in no class before the request starts
 - **THEN** no job starts, the request is dropped and counted as cancelled, the tile stays resident with its old payload, and when it is wanted again the new version replaces it
