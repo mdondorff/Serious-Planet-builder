@@ -60,9 +60,9 @@ pub fn all_packages() -> Vec<String> {
 }
 
 /// Crates whose tests `test fast` runs: the changed crates and every crate above them in the chain (BUILD-003, BUILD-021).
-/// With nothing changed at all, or a change to the workspace (a manifest, the lock file, `.cargo/`, `.config/`) or to `testkit` or
-/// `perf`, everything runs. The files that a tier-A test reads select that test's crate: `xtask/`, `.github/`, `deny.toml`,
-/// `openspec/changes/` (the unarchived-change check), `tests/goldens/` (the driver and pending lists) and any script file select `xtask`;
+/// With nothing changed at all, or a change to the workspace (a manifest, the lock file, `.cargo/`, `.config/`) or to `testkit`,
+/// `perf` or a directory under `crates/` that is not in the chain, everything runs. The files that a tier-A test reads select that test's crate: `xtask/`, `.github/`, `deny.toml`,
+/// `openspec/changes/` (the unarchived-change check), `tests/goldens/` (the driver and pending lists) and any script file (`.sh`, `.ps1`, `.bat`, `.cmd`, in any letter case) select `xtask`;
 /// `clippy.toml` selects `core`; `spikes/mouse-look/` (replayed traces) selects `frame`. Any other change (`docs/`, the rest of
 /// `openspec/`, `.claude/`, other `spikes/`, root `*.md`, other tool configuration) selects no crate: no tier-A test reads it.
 pub fn packages_for_changes(changed_paths: &[String]) -> Vec<String> {
