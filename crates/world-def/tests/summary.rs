@@ -10,7 +10,7 @@ use planet_world_def::{BodyId, GenContext, ItemSpec, ReadRecord, WorldDefinition
 const R: f64 = 6_371_000.0;
 
 fn spec(id: u128, dir: Vec3, reach_m: f64) -> ItemSpec {
-    ItemSpec { id, layer: DEFAULT_ITEM_LAYER.into(), priority: 0, dir, content_hash: id * 7 + 1, reach_m, max_delta_m: 10.0 }
+    ItemSpec { id, layer: DEFAULT_ITEM_LAYER.into(), priority: 0, dir, content_hash: id * 7 + 1, reach_m, max_delta_m: 10.0, stamp: None }
 }
 
 fn dir(x: f64, y: f64, z: f64) -> Vec3 {
@@ -259,6 +259,7 @@ fn the_stored_tree_equals_a_from_scratch_computation_of_the_cell_rows_and_non_em
             reach_bits: reach.to_bits(),
             max_delta_bits: 10.0f64.to_bits(),
             layer: DEFAULT_ITEM_LAYER.into(),
+            stamp: None,
         };
         rows.entry(cell_of(R, anchor).raw()).or_default().push(item);
     }
@@ -287,6 +288,7 @@ fn the_stored_tree_equals_a_from_scratch_computation_of_the_cell_rows_and_non_em
         reach_bits: 150.0f64.to_bits(),
         max_delta_bits: 20.0f64.to_bits(),
         layer: "items".into(),
+        stamp: None,
     };
     let hex = |b: [u8; 16]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
     let cell = cell_hash128(std::slice::from_ref(&item));
