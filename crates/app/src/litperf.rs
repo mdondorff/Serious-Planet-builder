@@ -72,6 +72,21 @@ fn cut_text(c: [u64; 4]) -> String {
 }
 
 impl LitSetup {
+    /// SPIKE (water-motion-gap): the albedo ramp of every node as if its level were at most `max_level`.
+    pub(crate) fn clamp_ramp(&self, plan: &mut TerrainPlan, max_level: u8) {
+        for n in &mut plan.nodes {
+            n.shore_ramp_min_m = self.lod.shore_ramp_min_m(n.level.min(max_level)) as f32;
+        }
+    }
+
+    pub(crate) fn diag_enable(&mut self) {
+        self.cache.diag_on = true;
+    }
+
+    pub(crate) fn diag(&self) -> &[planet_frame::water::NodeDiag] {
+        &self.cache.diag
+    }
+
     /// What the water plan cache has counted so far (the streaming scenes log each frame's share).
     pub(crate) fn water_counters(&self) -> planet_frame::water::WaterCounters {
         self.cache.counters()

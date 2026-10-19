@@ -195,6 +195,8 @@ struct Driver<'a> {
     cut_field: Option<Box<dyn planet_generators::height::HeightField + 'a>>,
     /// Frames ticked, for the clock of the waves and the exposure's first frame.
     ticks: u64,
+    /// SPIKE (water-motion-gap): the per-frame gap log.
+    gap: Option<crate::watergap::GapLog>,
 }
 
 impl Driver<'_> {
@@ -223,16 +225,57 @@ impl Driver<'_> {
                     FRAME_STEP_S as f32,
                     self.ticks == 0,
                 )?;
+                let mut plan = plan;
+                if let Some(l) = std::env::var("WATER_GAP_RAMP_LEVEL").ok().and_then(|v| v.parse::<u8>().ok()) {
+                    setup.clamp_ramp(&mut plan, l);
+                }
                 (Some(plan), setup.water_counters().since(before))
             }
             None => (None, planet_frame::water::WaterCounters::default()),
         };
         let lit_plan_ms = lit_started.elapsed().as_secs_f64() * 1000.0;
+        // SPIKE (water-motion-gap)
+        let mut gap_count = 0usize;
+        if let (Some(g), Some((setup, _)), Some(field), Some(lp)) = (self.gap.as_mut(), self.lit.as_ref(), self.cut_field.as_deref(), lit_plan.as_ref()) {
+            let f = &frame.pipeline;
+            gap_count = g.frame(
+                self.ticks,
+                &format!("{:?}", f.draw.kind),
+                f.draw.substituted,
+                f.draw.blank,
+                f.base_seq,
+                f.frame,
+                &req.camera,
+                lp,
+                setup.diag(),
+                field,
+                setup.level_m,
+            );
+        }
         self.ticks += 1;
         self.rig.renderer.set_preview_of(&frame.pipeline.draw);
         let (timing, _) =
             self.rig.renderer.submit(ctx, lit_plan.as_ref().unwrap_or(&frame.pipeline.draw.plan)).map_err(|e| e.to_string())?;
         self.rig.fi.submit();
+        if let Some(g) = self.gap.as_mut() {
+            if (gap_count > 0 && g.shots < 12 && self.ticks % 15 == 0) || (g.shots < 80 && self.ticks % 40 == 1) {
+                g.shots += 1;
+                let image = self.rig.renderer.read_color(self.ctx);
+                let _ = image.write_png(&g.dir.join(format!("frame_{:05}_gaps{}.png", self.ticks, gap_count)));
+                if let Some(lp) = lit_plan.as_ref() {
+                    let mut p2 = lp.clone();
+                    if let Some(w) = p2.water.as_mut() {
+                        w.view = planet_frame::water::WaterView::Class;
+                    }
+                    let _ = self.rig.renderer.render(self.ctx, &p2, false);
+                    let _ = self.rig.renderer.read_color(self.ctx).write_png(&g.dir.join(format!("frame_{:05}_class.png", self.ticks)));
+                    let mut p3 = lp.clone();
+                    p3.water = None;
+                    let _ = self.rig.renderer.render(self.ctx, &p3, false);
+                    let _ = self.rig.renderer.read_color(self.ctx).write_png(&g.dir.join(format!("frame_{:05}_nowater.png", self.ticks)));
+                }
+            }
+        }
         let wall_ms = started.elapsed().as_secs_f64() * 1000.0;
         // Bookkeeping, outside the frame's time: the drawn tile ids (the lag is judged after the case, against the fresh plan of
         // this frame's camera: TEST-020), the blank check and the counts.
@@ -385,7 +428,13 @@ fn run_case(
             .map_err(|e| format!("warming the lit path: {e}"))?;
     }
     let cut_field = if lit.is_some() { Some(world.field()?) } else { None };
-    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), cut_field, ticks: 0 };
+    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), cut_field, ticks: 0, gap: None };
+    if crate::watergap::enabled() {
+        d.gap = crate::watergap::GapLog::open();
+        if let Some((setup, _)) = d.lit.as_mut() {
+            setup.diag_enable();
+        }
+    }
     // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022:
     // recorded only, never judged; the per-tile times of the log read against it). Nothing of the case runs yet.
     let calib_threads = gen.workers;
@@ -683,7 +732,13 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         }
         let built = Instant::now();
         let scene_field = scene_world.field()?;
-        let script = build_script(scene, radius_m, aspect, scene_field.as_ref(), LOOK_SEED);
+        let script = if crate::watergap::enabled() {
+            let is_sea = |d: planet_core::Vec3| crate::litperf::carries_sea(&scene_world, d);
+            let level = scene_world.definition().sea(planet_world_def::BodyId::PLANET).map_err(|e| e.to_string())?.level_m;
+            crate::watergap::script(radius_m, aspect, scene_field.as_ref(), level, &is_sea, scene)?
+        } else {
+            build_script(scene, radius_m, aspect, scene_field.as_ref(), LOOK_SEED)
+        };
         drop(scene_field);
         let shown = if smoke { script.cameras.len().min(smoke_frames) } else { script.cameras.len() };
         writeln!(
