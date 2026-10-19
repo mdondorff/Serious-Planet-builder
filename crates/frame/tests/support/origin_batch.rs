@@ -155,6 +155,12 @@ impl HeightField for Probe<'_> {
     fn source_key(&self) -> Option<[u8; 16]> {
         self.inner.source_key()
     }
+    fn upstream(&self) -> Option<&dyn planet_generators::height::HeightField> {
+        self.inner.upstream()
+    }
+    fn stage_params(&self) -> Option<(&str, u32)> {
+        self.inner.stage_params()
+    }
     fn height_bounds(&self, centre: Vec3, r: f64) -> (f64, f64) {
         self.inner.height_bounds(centre, r)
     }

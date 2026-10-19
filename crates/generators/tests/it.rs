@@ -32,6 +32,10 @@ mod ocean;
 mod pipeline;
 #[path = "stages.rs"]
 mod stages;
+#[path = "stamp_stage.rs"]
+mod stamp_stage;
+#[path = "stamp_stage_eroded.rs"]
+mod stamp_stage_eroded;
 #[path = "steep.rs"]
 mod steep;
 #[path = "terrain.rs"]

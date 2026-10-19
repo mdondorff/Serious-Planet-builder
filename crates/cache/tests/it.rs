@@ -20,6 +20,8 @@ mod meshpack;
 mod pack;
 #[path = "stage_keys.rs"]
 mod stage_keys;
+#[path = "stamp_keys.rs"]
+mod stamp_keys;
 #[path = "tiles.rs"]
 mod tiles;
 #[path = "water_store.rs"]
