@@ -89,6 +89,9 @@ pub fn script(
     scene: StreamScene,
 ) -> Result<SceneScript, String> {
     let coast = lit_coast(radius_m, field, level_m, is_sea)?;
+    if std::env::var("COARSEN_APPROACH").is_ok() {
+        return Ok(approach_script(radius_m, aspect, level_m, &coast, scene));
+    }
     if std::env::var("WATER_GAP_DESCENT").is_ok() {
         return Ok(descent_script(radius_m, aspect, level_m, &coast, scene));
     }
@@ -208,4 +211,42 @@ impl GapLog {
         }
         gaps.len()
     }
+}
+
+/// SPIKE-18: where the approach looks (read by the coarsening detector to add probes around it).
+pub static TARGET: std::sync::Mutex<Option<Vec3>> = std::sync::Mutex::new(None);
+
+/// SPIKE-18: a slow approach from orbit straight down to the coast point: the altitude falls by e^(-k t) (k `COARSEN_RATE`, default
+/// 0.08 per second) from `COARSEN_START_KM` (20,000) to `COARSEN_END_M` (3,000), the camera looking `COARSEN_PITCH` degrees down
+/// (default -75) along the coast's heading, then 3 s of hold.
+pub fn approach_script(radius_m: f64, aspect: f64, level_m: f64, c: &Coast, scene: StreamScene) -> SceneScript {
+    let env = |k: &str, d: f64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+    let k = env("COARSEN_RATE", 0.08);
+    let (mut alt, end) = (env("COARSEN_START_KM", 20_000.0) * 1000.0, env("COARSEN_END_M", 3_000.0));
+    let pitch = env("COARSEN_PITCH", 75.0).abs();
+    let yaw_rate = env("COARSEN_YAW", 0.0);
+    let mut yaw = 0.0f64;
+    *TARGET.lock().unwrap() = Some(c.dir);
+    let mut cameras = Vec::new();
+    let dt = 1.0 / 60.0;
+    for _ in 0..60 {
+        cameras.push(cam_at(c, radius_m, level_m, alt, 0.0, pitch, aspect));
+    }
+    while alt > end {
+        alt *= libm::exp(-k * dt);
+        cameras.push(cam_yawed(c, radius_m, level_m, alt, { yaw += yaw_rate * dt; yaw }, pitch, aspect));
+    }
+    for _ in 0..180 {
+        cameras.push(cam_at(c, radius_m, level_m, alt, 0.0, pitch, aspect));
+    }
+    let prelude = Some(cameras[0]);
+    SceneScript { scene, prelude, cameras, descent_frames: 0 }
+}
+
+fn cam_yawed(c: &Coast, radius_m: f64, level_m: f64, alt_m: f64, yaw_deg: f64, pitch_deg: f64, aspect: f64) -> Camera {
+    let up = c.dir;
+    let east = c.heading.cross(up).normalized();
+    let y = yaw_deg.to_radians();
+    let heading = c.heading * libm::cos(y) + east * libm::sin(y);
+    Camera::at_surface_point(PlanetFixed(up * (radius_m + level_m + alt_m)), heading, pitch_deg.to_radians(), FOV_DEG.to_radians(), aspect, 0.1)
 }

@@ -219,3 +219,178 @@ fn the_coverage_test_wants_every_tile_of_the_view_at_its_level_or_finer_and_noth
     let finer: BTreeSet<TileId> = all.iter().flat_map(|t| if *t == gone { gone.children().unwrap().to_vec() } else { vec![*t] }).collect();
     assert!(check(&finer));
 }
+
+/// The level of the drawn node covering `dir`, none when nothing covers it.
+fn drawn_level(nodes: &BTreeSet<TileId>, dir: Vec3) -> Option<(u8, TileId)> {
+    (0..=22u8).find_map(|l| {
+        let t = TileId::from_direction(&TangentWarp, dir, l);
+        nodes.contains(&t).then_some((l, t))
+    })
+}
+
+// spec: STRM-016, LOD-007, TEST-018
+#[test]
+fn an_approaching_turning_camera_over_a_lagging_plan_and_residency_never_draws_a_coarser_level_than_the_frame_before() {
+    // SPIKE-18: the plan worker and the streamer run `PLAN_LAG` and `R_LAG` frames behind (a starved machine); everything the lagging
+    // residency set names is resident. Each frame draws what `draw_plan_with` draws from the newest plan (when usable) and the resident
+    // set; no point of the planet that stays in view and nears the camera may be drawn coarser than in the frame before.
+    const PLAN_LAG: usize = 6;
+    const R_LAG: usize = 10;
+    let dir = Vec3::new(0.3, 0.5, 0.8).normalized();
+    let steps: Vec<Camera> = (0..140)
+        .map(|k| {
+            let alt = 3_000_000.0 * libm::pow(0.99, f64::from(k));
+            turned(PlanetFixed(dir * (R + alt)), f64::from(k) * 0.5f64.to_radians(), -1.2)
+        })
+        .collect();
+    let field = Reference(1);
+    let records = ResidentRecords::new(&field, &TangentWarp, &lod());
+    let plans: Vec<_> = steps.iter().map(|c| plan_terrain_field(&request(*c), &field).unwrap()).collect();
+    let sets: Vec<_> = steps.iter().map(|c| residency_set_field(&TangentWarp, c.position, &field, &lod(), &mut SelectionCache::new())).collect();
+    let probes: Vec<Vec3> = (0..2000)
+        .map(|i| {
+            let (u, a) = ((f64::from(i) + 0.5) / 2000.0, 2.399_963_229_728_653 * f64::from(i));
+            let theta = 0.45 * libm::sqrt(u);
+            let helper = Vec3::new(0.0, 0.0, 1.0);
+            let east = dir.cross(helper).normalized();
+            let north = dir.cross(east).normalized();
+            (dir * libm::cos(theta) + (east * libm::cos(a) + north * libm::sin(a)) * libm::sin(theta)).normalized()
+        })
+        .collect();
+    let mut prev: Vec<Option<(u8, TileId, f64)>> = vec![None; probes.len()];
+    let mut worst = (0usize, String::new());
+    let mut kinds = (0, 0, 0);
+    for t in 0..steps.len() {
+        let req = request(steps[t]);
+        let plan_t = t.saturating_sub(PLAN_LAG);
+        let set_t = t.saturating_sub(R_LAG);
+        // What the streamer has built by now: D first (the nodes of the plans up to `R_LAG` frames old, with their ancestors); the
+        // rest of R (the tiles out of view) is not built yet.
+        let mut resident: HashMap<TileId, ResidentTile> = HashMap::new();
+        for plan in &plans[..=set_t] {
+            for n in &plan.nodes {
+                let mut up = Some(n.tile);
+                while let Some(a) = up {
+                    resident.entry(a).or_insert_with(|| records.record(a));
+                    up = a.parent();
+                }
+            }
+        }
+        let base_req = request(steps[plan_t]);
+        let base = planet_frame::pipeline::plan_usable(&plans[plan_t], &req).then_some((&base_req, &plans[plan_t]));
+        let d = draw_plan_with(&req, base, &resident, &sets[set_t].bounds).unwrap();
+        match d.kind {
+            DrawKind::Exact => kinds.0 += 1,
+            DrawKind::Stale => kinds.1 += 1,
+            DrawKind::Cover => kinds.2 += 1,
+        }
+        let nodes: BTreeSet<TileId> = d.plan.nodes.iter().map(|n| n.tile).collect();
+        let mut bad = 0;
+        let mut first = String::new();
+        for (i, p) in probes.iter().enumerate() {
+            let cur = drawn_level(&nodes, *p).map(|(l, tl)| (l, tl, (steps[t].position.0 - *p * R).length()));
+            if let (Some((l0, t0, d0)), Some((l1, t1, d1))) = (prev[i], cur) {
+                if l1 < l0 && d1 < d0 - 1.0 {
+                    bad += 1;
+                    if first.is_empty() {
+                        first = format!("frame {t} ({:?}): probe {i} L{l0} {t0:?} -> L{l1} {t1:?}", d.kind);
+                    }
+                }
+            }
+            prev[i] = cur;
+        }
+        if bad > worst.0 {
+            worst = (bad, first);
+        }
+    }
+    eprintln!("kinds exact/stale/cover {kinds:?}; worst frame {} probes coarser: {}", worst.0, worst.1);
+    assert_eq!(worst.0, 0, "the drawn level got coarser while the camera neared: {}", worst.1);
+}
+
+// spec: STRM-016, LOD-007, TEST-018
+#[test]
+fn a_turn_over_what_the_first_view_made_resident_never_draws_a_point_coarser_than_the_view_before() {
+    // SPIKE-18: only the tiles of the first view's plan (D) and their ancestors are resident, the rest of R still streams. A camera
+    // that turns a little (same position, so no point gets farther) may leave tiles missing where the view is new, but a point drawn at
+    // level L in the first view and in view in the second may not be drawn at a level below L: a missing sibling that came into view
+    // must not undo the finer tiles that are resident (the cover splits a tile only if every child in view is resident).
+    for alt in [4_700_000.0f64, 1_600_000.0, 300_000.0, 60_000.0, 20_000.0, 2_000.0] {
+        let name = format!("altitude {alt} m");
+        let position = PlanetFixed(Vec3::new(0.3, 0.5, 0.8).normalized() * (R + alt));
+        let a = turned(position, 0.0, -1.2);
+        let plan_a = plan_terrain_field(&request(a), &Reference(1)).unwrap();
+        let records = ResidentRecords::new(&Reference(1), &TangentWarp, &lod());
+        let mut resident: HashMap<TileId, ResidentTile> = HashMap::new();
+        for n in &plan_a.nodes {
+            let mut up = Some(n.tile);
+            while let Some(t) = up {
+                resident.entry(t).or_insert_with(|| records.record(t));
+                up = t.parent();
+            }
+        }
+        let bounds = TileBounds::default();
+        let first: BTreeSet<TileId> = cover_of(&a, &resident, &bounds).into_iter().collect();
+        let probes: Vec<Vec3> = plan_a.nodes.iter().flat_map(|n| (0..8u32).map(move |i| n.tile.sample_direction(&TangentWarp, 8, i, (i * 3) % 9))).collect();
+        let mut worst = (0usize, String::new());
+        for (step_deg, zoom) in [(0.5f64, 1.0f64), (1.0, 1.0), (2.0, 0.98), (5.0, 0.98), (10.0, 0.95), (2.0, 0.9), (5.0, 0.9)] {
+            let up = position.0.normalized();
+            let alt = position.0.length() - R;
+            let moved = PlanetFixed(up * (R + alt * zoom));
+            let b = turned(moved, step_deg.to_radians(), -1.2);
+            let second: BTreeSet<TileId> = cover_of(&b, &resident, &bounds).into_iter().collect();
+            let (mut bad, mut ex) = (0, String::new());
+            for p in &probes {
+                if let (Some((l0, t0)), Some((l1, t1))) = (drawn_level(&first, *p), drawn_level(&second, *p)) {
+                    let (d0, d1) = ((a.position.0 - *p * R).length(), (b.position.0 - *p * R).length());
+                    if l1 < l0 && d1 <= d0 {
+                        bad += 1;
+                        if ex.is_empty() {
+                            ex = format!("{name}, turn {step_deg} degrees, altitude x{zoom}: L{l0} {t0:?} -> L{l1} {t1:?}");
+                        }
+                    }
+                }
+            }
+            eprintln!("{name}: turn {step_deg} degrees, altitude x{zoom}: {bad} probes coarser");
+            if bad > worst.0 {
+                worst = (bad, ex);
+            }
+        }
+        assert_eq!(worst.0, 0, "{} probes drawn coarser after a turn: {}", worst.0, worst.1);
+    }
+}
+
+// spec: STRM-002, STRM-016, LOD-007
+#[test]
+fn one_missing_in_view_tile_does_not_take_its_resident_siblings_back_to_their_parent() {
+    // SPIKE-18 (the owner's "coarser for a moment"): the cover draws a tile's children only if every child in view is resident, else
+    // the parent. With R resident but one leaf `s` (not yet streamed in), the three resident siblings of `s` are drawn as their parent,
+    // a level coarser over their whole area, and the resident finer tiles disappear for as long as `s` is missing. Measured in the
+    // harness under CPU load: every violation was a one-level drop, previous tile still resident, a sibling of the new tile never
+    // resident (`target/coarsen-ever.log` of SPIKE-18). The frame must keep drawing the resident siblings.
+    for name in ["aerial-20km", "low-2km", "ground-200m"] {
+        let camera = view(name);
+        let (full, bounds) = resident_r(camera.position);
+        let leaves = cover_of(&camera, &full, &bounds);
+        let mut checked = 0;
+        for s in leaves.iter().copied().filter(|t| t.level() >= 3).take(40) {
+            let Some(parent) = s.parent() else { continue };
+            let siblings: Vec<TileId> = parent.children().unwrap().into_iter().filter(|c| *c != s && leaves.contains(c)).collect();
+            if siblings.is_empty() {
+                continue;
+            }
+            // `s` has not streamed in: neither it nor anything under it is resident.
+            let partial: HashMap<TileId, ResidentTile> = full
+                .iter()
+                .filter(|(t, _)| !std::iter::successors(Some(**t), |a| a.parent()).any(|a| a == s))
+                .map(|(t, r)| (*t, *r))
+                .collect();
+            let drawn: BTreeSet<TileId> = cover_of(&camera, &partial, &bounds).into_iter().collect();
+            for sib in siblings {
+                let kept = drawn.iter().any(|d| std::iter::successors(Some(*d), |a| a.parent()).any(|a| a == sib));
+                assert!(kept, "{name}: with {s:?} (level {}) missing, its resident sibling {sib:?} is drawn as {:?}, a level coarser", s.level(), parent);
+            }
+            checked += 1;
+        }
+        assert!(checked > 0, "{name}: no leaf with a leaf sibling to remove");
+    }
+}

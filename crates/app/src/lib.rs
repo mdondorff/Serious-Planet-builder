@@ -16,6 +16,7 @@ pub mod sheet;
 pub mod skeleton;
 pub mod streamperf;
 pub mod ui;
+pub mod coarsen;
 pub mod watergap;
 pub mod window;
 pub mod worldfield;

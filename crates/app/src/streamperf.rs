@@ -197,6 +197,7 @@ struct Driver<'a> {
     ticks: u64,
     /// SPIKE (water-motion-gap): the per-frame gap log.
     gap: Option<crate::watergap::GapLog>,
+    coarsen: Option<crate::coarsen::Detector>,
 }
 
 impl Driver<'_> {
@@ -206,6 +207,11 @@ impl Driver<'_> {
         let started = Instant::now();
         let ctx = self.ctx;
         let frame = self.rig.managed.begin_frame(req, &mut RendererSink { ctx, renderer: &mut self.rig.renderer })?;
+        if let Some(mut c) = self.coarsen.take() {
+            let f = &frame.pipeline;
+            c.frame(self.ticks, &format!("{:?}", f.draw.kind), f.draw.substituted, f.draw.blank, req.camera.position.0, &f.draw.plan, &|t| self.rig.renderer.slot_of(t).is_some());
+            self.coarsen = Some(c);
+        }
         self.rig.fi.retire_to(self.rig.renderer.retired_frames(ctx));
         while self.rig.fi.is_full() {
             self.rig.fi.note_wait();
@@ -424,7 +430,13 @@ fn run_case(
             .map_err(|e| format!("warming the lit path: {e}"))?;
     }
     let cut_field = if lit.is_some() { Some(world.field()?) } else { None };
-    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), cut_field, ticks: 0, gap: None };
+    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), cut_field, ticks: 0, gap: None, coarsen: None };
+    if crate::coarsen::enabled() {
+        d.coarsen = crate::coarsen::Detector::open(6_371_000.0);
+        if let (Some(c), Some(t)) = (d.coarsen.as_mut(), *crate::watergap::TARGET.lock().unwrap()) {
+            c.densify(t, 0.35, 3000);
+        }
+    }
     if crate::watergap::enabled() {
         d.gap = crate::watergap::GapLog::open();
         if let Some((setup, _)) = d.lit.as_mut() {
@@ -728,7 +740,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         }
         let built = Instant::now();
         let scene_field = scene_world.field()?;
-        let script = if crate::watergap::enabled() && std::env::var("WATER_GAP_KEEP").is_err() {
+        let script = if (crate::watergap::enabled() || std::env::var("COARSEN_APPROACH").is_ok()) && std::env::var("WATER_GAP_KEEP").is_err() {
             let is_sea = |d: planet_core::Vec3| crate::litperf::carries_sea(&scene_world, d);
             let level = scene_world.definition().sea(planet_world_def::BodyId::PLANET).map_err(|e| e.to_string())?.level_m;
             crate::watergap::script(radius_m, aspect, scene_field.as_ref(), level, &is_sea, scene)?
