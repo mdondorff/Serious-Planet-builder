@@ -262,6 +262,8 @@ struct Running {
     /// The last minute of camera poses at 10 Hz and the files F9 has written (VIEW-024).
     path: PathLog,
     repro_files: u64,
+    /// The notice the title shows after F9 and the clock time it is shown until.
+    notice: Option<(String, u64)>,
     press: ClickTracker,
     globe_stats: GlobeStats,
 }
@@ -280,6 +282,9 @@ struct App<'w> {
     error: Option<String>,
     summary: Option<String>,
 }
+
+/// How long the title keeps the notice of an F9 capture, milliseconds (VIEW-026).
+const NOTICE_MS: u64 = 8_000;
 
 /// Where F9 writes its files: `PLANET_REPRO_DIR`, else `target/review` (VIEW-024).
 fn repro_dir() -> PathBuf {
@@ -315,7 +320,7 @@ impl App<'_> {
         let (bundle_path, path_path) = (dir.join(format!("frame-{n}.bundle")), dir.join(format!("frame-{n}-path.txt")));
         std::fs::write(&bundle_path, bundle.to_text()).map_err(|e| format!("writing {}: {e}", bundle_path.display()))?;
         std::fs::write(&path_path, st.path.to_text()).map_err(|e| format!("writing {}: {e}", path_path.display()))?;
-        Ok(format!("F9: wrote {} and {} ({} poses)", bundle_path.display(), path_path.display(), st.path.len()))
+        Ok(st.path.saved_notice(n, &dir.display().to_string()))
     }
 
     fn fail(&mut self, el: &ActiveEventLoop, e: String) {
@@ -409,6 +414,7 @@ impl App<'_> {
             last_camera: self.cameras[0],
             path: PathLog::new(),
             repro_files: 0,
+            notice: None,
             press: ClickTracker::default(),
             globe_stats: GlobeStats::default(),
         });
@@ -570,9 +576,20 @@ impl App<'_> {
                 match self.save_repro(&st, camera, view) {
                     Ok(text) => {
                         st.repro_files += 1;
-                        eprintln!("{text}");
+                        eprintln!(
+                            "{text}
+{}",
+                            st.path.summary()
+                        );
+                        st.window.set_title(&format!("planet | {text}"));
+                        st.notice = Some((text, now_ms + NOTICE_MS));
                     }
-                    Err(e) => eprintln!("F9: the repro files were not written: {e}"),
+                    Err(e) => {
+                        eprintln!("F9: the repro files were not written: {e}");
+                        let text = format!("F9: the repro files were not written: {e}");
+                        st.window.set_title(&format!("planet | {text}"));
+                        st.notice = Some((text, now_ms + NOTICE_MS));
+                    }
                 }
             }
             st.last_wanted = frame.pipeline.wanted.iter().map(|w| w.0).collect();
@@ -893,7 +910,10 @@ fn title_text(st: &Running, now_ms: u64) -> String {
         exposure: st.exposure.filter(|_| st.viewer.lit),
         readiness: st.readiness,
     };
-    title(&info)
+    match &st.notice {
+        Some((text, until)) if now_ms < *until => format!("{} | {text}", title(&info)),
+        _ => title(&info),
+    }
 }
 
 /// The keys the smoke run presses, by frame: the view cycle, vsync off and on, pause and resume, the free camera with W held,
