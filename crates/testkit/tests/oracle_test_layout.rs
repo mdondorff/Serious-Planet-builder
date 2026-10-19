@@ -10,6 +10,27 @@ fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
+/// The identifiers a macro invocation `NAME! { ident: ...; ident: ...; }` defines: each line of the block that starts with
+/// `ident:`.
+fn macro_invocation_names(text: &str, name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut inside = false;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with(&format!("{name}! {{")) {
+            inside = true;
+        } else if inside && line.starts_with('}') {
+            inside = false;
+        } else if inside {
+            if let Some((ident, _)) = line.split_once(':') {
+                if !ident.is_empty() && ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    out.push(ident.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
 /// `<file>::<function>` of every `#[test]` of the test files of `krate` that is not `#[ignore]`d.
 fn declared_tests(krate: &Path) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
@@ -18,16 +39,31 @@ fn declared_tests(krate: &Path) -> BTreeSet<String> {
         let name = entry.file_name().to_string_lossy().to_string();
         let Some(stem) = name.strip_suffix(".rs").filter(|s| !aggregators.contains(s)) else { continue };
         let text = std::fs::read_to_string(entry.path()).unwrap();
+        // A file compiled only with a feature (`#![cfg(feature = "...")]`, the SPIKE-07 checks) lists nothing without it.
+        if text.lines().any(|l| l.trim_start().starts_with("#![cfg(feature")) {
+            continue;
+        }
         let (mut pending, mut ignored) = (false, false);
+        let mut macro_name = String::new();
         for line in text.lines().map(str::trim) {
+            if let Some(rest) = line.strip_prefix("macro_rules! ") {
+                macro_name = rest.split_whitespace().next().unwrap_or("").to_string();
+            }
             if line == "#[test]" {
                 (pending, ignored) = (true, false);
             } else if pending && line.starts_with("#[") {
                 ignored |= line.starts_with("#[ignore");
             } else if pending && !line.starts_with("//") {
                 if let Some(rest) = line.strip_prefix("fn ") {
-                    if !ignored {
-                        out.insert(format!("{stem}::{}", rest.split('(').next().unwrap().trim()));
+                    let name = rest.split('(').next().unwrap().trim();
+                    if ignored {
+                    } else if name.starts_with('$') {
+                        // A test defined by a macro (`fn $name()`): its names are the `name:` entries of the macro's invocation.
+                        for generated in macro_invocation_names(&text, &macro_name) {
+                            out.insert(format!("{stem}::{generated}"));
+                        }
+                    } else {
+                        out.insert(format!("{stem}::{name}"));
                     }
                 }
                 pending = false;

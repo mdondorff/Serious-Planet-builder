@@ -6,6 +6,22 @@ license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
+# One test binary per tier (SPIKE-15 step 3, BUILD-015): `it` (tier A), `oracle_all` (tier B) and `gpu_all` (tier C) include the test
+# files as modules. A new test file is added to the aggregator of its tier (a file in `tests/` that no aggregator names is never compiled).
+autotests = false
+
+[[test]]
+name = "it"
+path = "tests/it.rs"
+
+[[test]]
+name = "oracle_all"
+path = "tests/oracle_all.rs"
+
+[[test]]
+name = "gpu_all"
+path = "tests/gpu_all.rs"
+
 [dependencies]
 planet-core.workspace = true
 planet-frame.workspace = true
