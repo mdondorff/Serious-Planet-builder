@@ -13,7 +13,7 @@ Policy and thresholds: `docs/adr/0017-golden-review-policy.md`; goldens after M5
 2. **Collect candidates for every adapter that has the golden.** Start from an empty `target/review/candidates/`
    (delete it first) so nothing from an earlier run is reviewed.
    - WARP: `cargo xtask test gpu` (writes `target/review/candidates/dx12-microsoft-basic-render-driver/`). Or download
-     CI's `review-Windows` artifact when the machine's WARP version is not the recorded one (the driver gate escalates it).
+     CI's `review-Windows-1` and `review-Windows-2` artifacts (tier C runs in two halves, BUILD-018; one `--extra` directory each) when the machine's WARP version is not the recorded one (the driver gate escalates it).
    - NVIDIA (Rasierklinge): `cargo xtask test gpu --real`.
    - llvmpipe: push the branch, then `gh run download <run> -n review-Linux -D target/review/ci-linux`.
    Golden tests report every mismatch of a run (`GoldenChecks`), and `test gpu` runs every test (`--no-fail-fast`), so one run per adapter is enough.

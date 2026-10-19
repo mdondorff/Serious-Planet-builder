@@ -59,6 +59,24 @@ mod tests {
         assert!(!w.contains("ubuntu-latest"), "ci.yml must pin the Linux runner image (ubuntu-24.04), not ubuntu-latest");
     }
 
+    // spec: BUILD-018
+    #[test]
+    fn tier_c_runs_on_windows_in_two_halves_with_their_own_artifact_names() {
+        let w = workflow();
+        let gpu = w.split("\n  gpu:\n").nth(1).expect("ci.yml has a `gpu` job").split("\n  determinism:").next().unwrap();
+        for needle in [
+            "part: 1",
+            "part: 2",
+            "--partition count:{0}/2",
+            "test-logs-${{ runner.os }}-gpu${{ matrix.part",
+            "review-${{ runner.os }}${{ matrix.part",
+        ] {
+            assert!(gpu.contains(needle), "the gpu job is missing `{needle}`");
+        }
+        assert_eq!(gpu.matches("os: windows-latest").count(), 2, "two Windows entries, one per half");
+        assert_eq!(gpu.matches("os: ubuntu-24.04").count(), 1, "the Linux leg runs whole");
+    }
+
     // spec: BUILD-017
     #[test]
     fn every_tool_install_in_ci_gets_one_automatic_second_attempt() {
