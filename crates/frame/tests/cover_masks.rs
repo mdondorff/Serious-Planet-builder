@@ -98,4 +98,112 @@ fn a_node_drawn_over_some_quadrants_writes_and_reads_back_with_them_and_a_whole_
     assert!(d.plan.nodes.iter().any(|n| n.quadrants != ALL_QUADRANTS));
     assert_ne!(d.plan.plan_hash(), whole.plan.plan_hash());
     assert!(TerrainPlan::from_text(&text.replacen(" quadrants ", " quadrants 9", 1)).is_err(), "a mask above 14 is refused");
+    // The bounds: 0 and 15 are not written (a node drawn over nothing is not drawn, a whole node has no token), and a legacy
+    // `shore_ramp` token before the mask still reads.
+    let masked = text.lines().find(|l| l.contains(" quadrants ")).unwrap().to_string();
+    let stem = masked.split(" quadrants ").next().unwrap();
+    for bad in ["0", "15", "-1", "x"] {
+        let line = text.replacen(&masked, &format!("{stem} quadrants {bad}"), 1);
+        assert!(TerrainPlan::from_text(&line).is_err(), "quadrants {bad} is refused");
+    }
+    let legacy = text.replacen(&masked, &format!("{stem} shore_ramp 3f800000 quadrants {}", masked.rsplit(' ').next().unwrap()), 1);
+    assert_eq!(pairs(&TerrainPlan::from_text(&legacy).unwrap()), pairs(&d.plan));
+}
+
+fn turned(camera: Camera, angle_rad: f64) -> Camera {
+    let up = camera.up.normalized();
+    let f = camera.forward.normalized();
+    Camera { forward: f * libm::cos(angle_rad) + up.cross(f) * libm::sin(angle_rad), ..camera }
+}
+
+// spec: STRM-016, STRM-002
+#[test]
+fn a_stale_plan_with_a_tile_drawn_over_some_quadrants_leaves_no_hole_where_the_camera_turned_to() {
+    use planet_frame::plan_terrain_field;
+    let field = Reference(1);
+    let request = |camera: Camera| TerrainRequest {
+        camera,
+        size: SIZE,
+        view: TerrainView::Level,
+        lod: lod(),
+        face_mapping: TangentWarp.id().to_string(),
+        seed: 1,
+    };
+    let mut frames_with_masks = 0;
+    for name in ["low-2km", "ground-200m"] {
+        let a = view(name);
+        let (full, bounds) = resident_r(a.position);
+        let plan_a = plan_terrain_field(&request(a), &field).unwrap();
+        for turn in [0.0f64, 0.05, 0.12, 0.3, 0.8] {
+            let b = turned(a, turn);
+            let plan_b = plan_terrain_field(&request(b), &field).unwrap();
+            // A tile of A's plan missing with everything under it: the stand-ins draw their quadrants.
+            for gone in plan_a.nodes.iter().map(|n| n.tile).filter(|t| t.level() >= 3).step_by(7).take(12) {
+                let set = without(&full, gone);
+                let d = draw_plan_with(&request(b), Some((&request(a), &plan_a)), &set, &bounds).unwrap();
+                frames_with_masks += usize::from(d.plan.nodes.iter().any(|n| n.quadrants != ALL_QUADRANTS));
+                let drawn: BTreeMap<TileId, u8> = d.plan.nodes.iter().map(|n| (n.tile, n.quadrants)).collect();
+                for m in &plan_b.nodes {
+                    // Something draws the node's tile: itself whole, an ancestor over the quadrant that holds it, or finer tiles under it.
+                    let above = std::iter::successors(Some(m.tile), |t| t.parent()).any(|t| {
+                        drawn.get(&t).is_some_and(|mask| {
+                            if t == m.tile {
+                                *mask == ALL_QUADRANTS
+                            } else {
+                                mask & quadrant_bit(child_index_toward(t, m.tile)) != 0
+                            }
+                        })
+                    });
+                    let below = drawn.keys().any(|d| std::iter::successors(Some(*d), |t| t.parent()).any(|t| t == m.tile));
+                    assert!(
+                        above || below,
+                        "{name}, turn {turn}, without {gone:?}: the plan's node {:?} has nothing drawn over it",
+                        m.tile
+                    );
+                }
+            }
+        }
+    }
+    assert!(frames_with_masks > 0, "some frame must draw a stand-in over some quadrants");
+}
+
+// spec: STRM-016, STRM-002
+#[test]
+fn a_stale_plan_is_not_taken_for_a_tile_it_draws_over_some_quadrants_whose_other_quadrants_the_frame_sees() {
+    use planet_frame::plan_terrain_field;
+    let field = Reference(1);
+    let request = |camera: Camera| TerrainRequest {
+        camera,
+        size: SIZE,
+        view: TerrainView::Level,
+        lod: lod(),
+        face_mapping: TangentWarp.id().to_string(),
+        seed: 1,
+    };
+    let a = view("low-2km");
+    let (full, bounds) = resident_r(a.position);
+    let plan_a = plan_terrain_field(&request(a), &field).unwrap();
+    let nodes: Vec<TileId> = plan_a.nodes.iter().map(|n| n.tile).collect();
+    // A parent whose four children are all nodes of the plan: the plan draws the first two and the stale plan does not hold the others (the
+    // camera that made it had them out of its frustum); the first child is the tile that has not streamed in.
+    let x = nodes
+        .iter()
+        .filter_map(|t| t.parent())
+        .find(|p| p.children().is_some_and(|c| c.iter().all(|k| nodes.contains(k))))
+        .expect("a parent with four children in the plan");
+    let kids = x.children().unwrap();
+    let stale =
+        TerrainPlan { nodes: plan_a.nodes.iter().filter(|n| n.tile != kids[2] && n.tile != kids[3]).cloned().collect(), ..plan_a.clone() };
+    let b = turned(a, 0.002);
+    // Only the second child is resident: the cover draws the parent over the other three quadrants, the stale plan over the first only.
+    let set = without(&without(&without(&full, kids[0]), kids[2]), kids[3]);
+    let d = draw_plan_with(&request(b), Some((&request(a), &stale)), &set, &bounds).unwrap();
+    let drawn: BTreeMap<TileId, u8> = d.plan.nodes.iter().map(|n| (n.tile, n.quadrants)).collect();
+    for k in [kids[2], kids[3]] {
+        let covered = drawn.contains_key(&k)
+            || std::iter::successors(k.parent(), |t| t.parent())
+                .any(|t| drawn.get(&t).is_some_and(|mask| mask & quadrant_bit(child_index_toward(t, k)) != 0))
+            || drawn.keys().any(|d| std::iter::successors(Some(*d), |t| t.parent()).any(|t| t == k));
+        assert!(covered, "the frame sees {k:?}, which the stale plan did not draw and its stand-in does not cover");
+    }
 }

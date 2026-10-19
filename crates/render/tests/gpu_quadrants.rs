@@ -49,6 +49,31 @@ fn lit_pixels(ctx: &GpuContext, data: &planet_generators::compact::CompactTile, 
         .collect()
 }
 
+// spec: STRM-016
+#[test]
+fn every_terrain_and_water_fragment_entry_cuts_the_quadrants_a_node_leaves_out() {
+    // The debug, lit, atmosphere-lit and water fragment stages all read the node record; each takes the cut, or a node drawn over some
+    // quadrants would be drawn whole by the one that does not. (The pixels are checked below through the debug stage.)
+    let terrain = planet_render::compact_terrain_shader(32);
+    let mut sources: Vec<(String, String)> = vec![
+        ("terrain".into(), terrain.clone()),
+        ("terrain-atmosphere".into(), format!("{terrain}{}", planet_render::atmosphere::terrain_atmosphere_source())),
+    ];
+    sources.extend(planet_render::water_shaders().into_iter().filter(|(n, _)| n.starts_with("water-compact")).map(|(n, s)| (n.to_string(), s)));
+    let mut entries = 0;
+    for (name, source) in &sources {
+        for chunk in source.split("@fragment").skip(1) {
+            let body = chunk.split("\n}\n").next().unwrap();
+            let header = body.lines().find(|l| l.contains("fn ")).unwrap();
+            if header.contains("VsOut") || header.contains("WOut") {
+                assert!(body.contains("quadrant_cut"), "{name}: the fragment entry `{}` does not cut the quadrants", header.trim());
+                entries += 1;
+            }
+        }
+    }
+    assert!(entries >= 6, "fs, fs_lit, fs_lit_atmo and the water entries were found: {entries}");
+}
+
 // spec: STRM-016, REND-016
 #[test]
 fn a_node_drawn_over_some_quadrants_covers_exactly_those_quadrants_of_its_tile() {

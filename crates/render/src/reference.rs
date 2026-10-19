@@ -61,6 +61,10 @@ pub fn execute_reference(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[&TileMe
     if plan.lit.is_some() {
         return Err(ExecError::LitNotEnabled);
     }
+    // The vertex stage here writes no tile coordinates, so a node drawn over some quadrants only would be drawn whole or not at all.
+    if let Some(n) = plan.nodes.iter().find(|n| n.quadrants != 0b1111) {
+        return Err(ExecError::PartialNode(n.tile));
+    }
     let [lo, hi] = plan.height_range;
     if !(lo.is_finite() && hi.is_finite() && lo < hi) {
         return Err(ExecError::BadHeightRange { lo, hi });

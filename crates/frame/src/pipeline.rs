@@ -314,7 +314,19 @@ pub fn draw_plan_edited(
         let serves = base_req == req || {
             let c = cover.insert(view_cover(req, map.as_ref(), resident, bounds));
             let tiles: Vec<TileId> = c.iter().map(|(t, _)| *t).collect();
-            blank == 0 && plan_covers_view(map.as_ref(), &req.camera, &req.lod, bounds, &tiles, &shown.keys().copied().collect())
+            // A tile drawn over some quadrants only draws those children, not the whole tile (STRM-016): the test sees its children.
+            let drawn: BTreeSet<TileId> = shown
+                .iter()
+                .flat_map(|(t, n)| {
+                    if n.quadrants == ALL_QUADRANTS {
+                        vec![*t]
+                    } else {
+                        let kids = t.children().expect("a tile drawn over some quadrants has children");
+                        (0..4).filter(|k| n.quadrants & quadrant_bit(*k) != 0).map(|k| kids[k]).collect()
+                    }
+                })
+                .collect();
+            blank == 0 && plan_covers_view(map.as_ref(), &req.camera, &req.lod, bounds, &tiles, &drawn)
         };
         if serves {
             kind = if base_req == req && substituted == 0 && blank == 0 { DrawKind::Exact } else { DrawKind::Stale };
