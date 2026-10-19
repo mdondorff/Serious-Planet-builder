@@ -195,6 +195,11 @@ impl<S: ItemStore> Editor<S> {
     }
 
     /// The ids of the items, in id order.
+    /// Every item the editor knows, in id order.
+    pub fn items(&self) -> impl Iterator<Item = &Item> {
+        self.items.values()
+    }
+
     pub fn item_ids(&self) -> Vec<ItemId> {
         self.items.keys().copied().collect()
     }
