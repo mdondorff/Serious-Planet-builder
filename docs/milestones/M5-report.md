@@ -145,7 +145,8 @@ Window: M5 start (#191, 2026-10-16 18:17) to the GO (#307, 2026-10-18). Recorded
 
 | Measure | M4 | M5 | Source |
 |---|---|---|---|
-| `test fast` (whole workspace) | 15.9 s (budget 15 s) | 24.1 s (budget 20 s, owner 2026-10-16) | M4 and M5 reports, automated steps |
+| `test fast` (whole workspace, reported) | 15.9 s | 24.1 s; 34 to 37 s on 2026-10-19 with 1,423 tests (serial run 122 s; 20 tests over 1 s make 44 s of it, the other ~1,400 about 56 ms each, mostly one process per test) | M4 and M5 reports, automated steps; `cargo xtask test fast` runs of 2026-10-19 |
+| `test fast` budget (CLAUDE.md, BUILD-003) | 15 s for the changed crates | 20 s for the changed crates (owner 2026-10-16); a whole-workspace run is reported, not gated, so none of these figures breaches it; selection times are not recorded yet (improvement 4) | BUILD-003 |
 | `test` (tiers A+B, software) | 45.0 s | 81.6 s | same |
 | `test gpu` (tier C, software) | 57.0 s | 117 s (117 of 117 tests) | same |
 | Edit-to-first-test (BUILD-014, 30 s) | n/m | n/m (no series recorded) | none recorded |
