@@ -40,7 +40,7 @@ Source: report §8, ADR 0040, ADR 0042 point 2
 - **THEN** the sky is lit where there was black, the terrain differs, and distant pixels are bluer and brighter in the blue channel than near ones
 
 #### Scenario: Both tile formats
-- **WHEN** the orbit, 20 km and 1 m views are drawn in the vertex and compact formats
+- **WHEN** the orbit, 20 km and 1 m views are drawn from compact tiles (the only tile format since ADR 0062)
 - **THEN** the terrain covers the same pixels with and without the atmosphere and every value is finite and inside the clamp
 
 ### Requirement: ATMO-003 HDR and exposure
@@ -56,7 +56,7 @@ Source: report §8
 - **THEN** exposure adapts without clipping or banding visible on the contact sheet
 
 ### Requirement: ATMO-004 Ocean and shoreline
-The water SHALL render as the terrain's own grid drawn again at the water level (ADR 0041 point 4): a water vertex is the terrain vertex's tile-local position plus `up x (W - h_morph)` plus the wave displacement, `h_morph` the height the terrain shader morphs to, so that water and terrain agree across LOD, with the terrain's skirts closing the cracks; the pass draws where `W - h_morph > 0` and its class per pixel (wet film, foam, shallow, mid, deep water) comes from that interpolated vertical depth, never from a depth test between two meshes (ATMO-015). The shoreline SHALL NOT flicker as the terrain's level of detail changes or the camera moves (ATMO-017), in the lit path with the atmosphere and without it, in both tile formats. Every water view has a debug view (CON-18): the class view is a set of discrete bands (the golden `water_class_*` views), the wave and normal views are inspection views.
+The water SHALL render as the terrain's own grid drawn again at the water level (ADR 0041 point 4): a water vertex is the terrain vertex's tile-local position plus `up x (W - h_morph)` plus the wave displacement, `h_morph` the height the terrain shader morphs to, so that water and terrain agree across LOD, with the terrain's skirts closing the cracks; the pass draws where `W - h_morph > 0` and its class per pixel (wet film, foam, shallow, mid, deep water) comes from that interpolated vertical depth, never from a depth test between two meshes (ATMO-015). The shoreline SHALL NOT flicker as the terrain's level of detail changes or the camera moves (ATMO-017), in the lit path with the atmosphere and without it. Every water view has a debug view (CON-18): the class view is a set of discrete bands (the golden `water_class_*` views), the wave and normal views are inspection views.
 
 Class and bound (ADR 0035): the water level W, the water body and the liquid kind are fields (GEN-023, item `ocean-bake-and-water-level`); the surface (waves, absorption, glint, foam, emission) is presentation data (ATMO-013 to ATMO-015).
 
@@ -65,8 +65,8 @@ Status: active
 Source: report §14, §17 item 13, ADR 0041 points 4 to 6, ADR 0042 point 2, ADR 0053
 
 #### Scenario: The class view follows the depth under the water
-- **WHEN** the class view of a coastal scene is drawn at 2 km and at 3 m in both tile formats and every water pixel's class is compared with the class of the CPU's depth at the point its ray meets the water
-- **THEN** every water pixel is a palette colour, none is off the oracle by more than the mesh's own interpolation near a band edge (measured: 0 of 19,669 and 0 of 21,759), the two formats differ on at most 0.5 % of the frame (measured 0), and the classes along the middle column only grow towards the sea
+- **WHEN** the class view of a coastal scene is drawn at 2 km and at 3 m and every water pixel's class is compared with the class of the CPU's depth at the point its ray meets the water
+- **THEN** every water pixel is a palette colour, none is off the oracle by more than the mesh's own interpolation near a band edge (measured: 0 of 19,669 and 0 of 21,759), and the classes along the middle column only grow towards the sea
 
 #### Scenario: Coastal flight
 - **WHEN** a scripted coastal flight (a 6 m glide towards the coast and a descent from 300 m to 4 m, over a beach of 1:50) is drawn in the class view with the level of detail changing under it
@@ -184,7 +184,7 @@ Source: ADR 0042 points 1-2 and 5, ADR 0048 point 1, ADR 0040 point 9, CON-18
 - **THEN** no object is created, the tables are uploaded once, the graph is compiled once per change of shape, the renderer's targets equal the graph's count, and a plan with an atmosphere on a renderer without one is refused naming `enable_atmosphere`
 
 #### Scenario: Lit is albedo times lighting
-- **WHEN** the lit, albedo and lighting views of the same terrain frame are drawn with an atmosphere (the scene target before the composite) in both tile formats
+- **WHEN** the lit, albedo and lighting views of the same terrain frame are drawn with an atmosphere (the scene target before the composite)
 - **THEN** every terrain pixel of the lit view equals the albedo view times pi times the lighting view over the pre-exposure within 3e-3
 
 #### Scenario: Goldens
@@ -319,7 +319,7 @@ Status: active
 Source: ADR 0041 point 7, owner's M5 constraints 3 to 5
 
 #### Scenario: The lava lake
-- **WHEN** a lake of lava in a bowl of the terrain is drawn with the sea's plan machinery in both tile formats
+- **WHEN** a lake of lava in a bowl of the terrain is drawn with the sea's plan machinery
 - **THEN** the lake's nodes carry its level and the lava slot, nothing new is created, its pixels glow red, the wave view is one level on it, and the class view has at least three bands
 
 ### Requirement: ATMO-019 The coastal band: the sea covers the terrain below the level that the ocean reaches
@@ -356,7 +356,7 @@ Definitions (f64, `libm`, CON-11, CON-14):
 - `R`: the body's radius; `W`: the tile's level rounded to f32; `A`: the sum of the wave amplitudes of the node's liquid; `S = A (1 + choppy)`.
 - `s = (2 d)^2 / (8 (R + W))`, `d` the sample spacing of the node's level: the sag of the drawn surface under the sphere.
 - `c`: the chord radius of the tile's bounding sphere on the sphere `R`; `q`: the tile's centre direction times `R + W`.
-- `m`: the lowest height of the tile's own `(cells + 1)^2` mesh vertices (f32, as the vertex stage forms it from the tile's texels or vertices), the exact minimum of the drawn terrain: the mesh is linear between its vertices, the morph targets are averages of own vertices (heights inside `[m, max]`), and a skirt vertex repeats its border vertex's height, so no drawn height is below `m`.
+- `m`: the lowest height of the tile's own `(cells + 1)^2` mesh vertices (f32, as the vertex stage forms it from the tile's texels), the exact minimum of the drawn terrain: the mesh is linear between its vertices, the morph targets are averages of own vertices (heights inside `[m, max]`), and a skirt vertex repeats its border vertex's height, so no drawn height is below `m`.
 Horizon:
 - `h = |camera| - (R + W)`; with `h` not above 0 (camera at or under the level, a lake above the camera) the node SHALL be kept.
 - Otherwise the node SHALL be cut when `|camera - q| - c (R + W) / R - S > sqrt(2 (R + W - s) (h + s) + (h + s)^2) + sqrt(2 (R + W - s) (A + s) + (A + s)^2)`.
@@ -364,7 +364,7 @@ Height:
 - The node SHALL be cut when the lower height bound of its tile is at or above `W + A + 4 eps_f32 max(1, |W|, |bound|)`.
 - The bound is `HeightField::height_bounds` at the tile's centre direction and angular radius, the values of the frustum cut; the morph's heights lie inside it.
 - The node SHALL also be cut when `m` is at or above `W + A + 4 eps_f32 max(1, |W|, |m|)`.
-- `m` SHALL be computed in the tile's worker job from the mesh it built (the vertex format's vertices, the compact format's lowest texel; a pre-filled tile's likewise) and kept in the `WaterBook` beside a wet entry of the tile (an f32 of RAM, not stored, `MESH_VERSION` and every key unchanged); it is a pure function of the tile, the field and the tile's format (CON-14; the compact format's differs from the vertex format's by at most one height step). A cancelled job and a tile whose job did not run (a root, a tile not yet loaded) hold none, and the plan SHALL read it from the book without computing it and keep the node by the loose bound's verdict until the book holds it.
+- `m` SHALL be computed in the tile's worker job from the mesh it built (the compact tile's lowest texel; a pre-filled tile's likewise) and kept in the `WaterBook` beside a wet entry of the tile (an f32 of RAM, not stored, `MESH_VERSION` and every key unchanged); it is a pure function of the tile and the field (CON-14). A cancelled job and a tile whose job did not run (a root, a tile not yet loaded) hold none, and the plan SHALL read it from the book without computing it and keep the node by the loose bound's verdict until the book holds it.
 Result:
 - The cut SHALL be a pure function of the camera, the tile, `W`, the look and the book's content: the same for every thread count, cache state and order of questions.
 - The kept nodes SHALL be the uncut plan's nodes bit for bit, in the same order; a plan whose nodes are all cut is a water plan with no node.
@@ -372,7 +372,7 @@ Result:
 - The cache SHALL count the nodes cut by the horizon (`cut_horizon`), by the height tests (`cut_height`) and, of those, by `m` (`cut_exact`), and the nodes kept with no minimum in the book (`no_minimum`); recorded only. Every path that plans water SHALL leave the tile's minimum where its tiles are built: the streamer's jobs (the viewer, the streaming scenes), and the held views and flights of the lit perf scenes, which build their meshes beside the plan and fill the water of each as a job does. Those scenes SHALL log the counters on each held view's line and, summed over its plans, on each flight's line.
 
 Class (ADR 0035): plan data (no GPU twin, no stored data). Bound: exact; `m` is the minimum of the f32 heights the vertex stage reads, so the f32 rounding of the vertex stage's `h_origin + hr` and of the water pass's `W - h` is inside the 4 eps margin.
-Known limit: the blocking surface is the sphere `R + W` less `s`, so dry ground below `W` between the camera and the tile (a valley under a lake, a dry basin below the sea) can hide nothing and the tile is cut where it is visible; the waves' troughs are taken to be hidden by their crests; skirts add `skirt depth^2 / (2 c)` to a tile's reach when `S` is 0. The terrain between the mesh's vertices is the mesh's, not the field's: a field detail below the lattice spacing that dips under `W` between dry vertices is not drawn and not covered. A node's minimum is read from the book on every plan, never memoised (a lock shared with the jobs, no computation): a tile rebuilt in another tile format is cut by that format's minimum, and a node whose tile has none keeps the loose verdict. Reduced coverage: the tier B scenario of the four coast views samples frames 0, 120 and 239 of the glide and of the descent (not 0, 60, 120, 180 and 239), to keep the test near 16 s; the tier C pictures cover the exact cut at four views only.
+Known limit: the blocking surface is the sphere `R + W` less `s`, so dry ground below `W` between the camera and the tile (a valley under a lake, a dry basin below the sea) can hide nothing and the tile is cut where it is visible; the waves' troughs are taken to be hidden by their crests; skirts add `skirt depth^2 / (2 c)` to a tile's reach when `S` is 0. The terrain between the mesh's vertices is the mesh's, not the field's: a field detail below the lattice spacing that dips under `W` between dry vertices is not drawn and not covered. A node's minimum is read from the book on every plan, never memoised (a lock shared with the jobs, no computation): a tile rebuilt is cut by the minimum of its rebuilt mesh, and a node whose tile has none keeps the loose verdict. Reduced coverage: the tier B scenario of the four coast views samples frames 0, 120 and 239 of the glide and of the descent (not 0, 60, 120, 180 and 239), to keep the test near 16 s; the tier C pictures cover the exact cut at four views only.
 
 Verify: A, B, C
 Status: active
@@ -403,8 +403,8 @@ Source: ADR 0056, ADR 0058, ATMO-012, ATMO-016, ATMO-019, docs/perf/water-attrib
 - **THEN** the node is cut at the bound and kept one f32 below it, every other node of the plan is the loose cut's bit for bit, and `cut_exact` counts the cut
 
 #### Scenario: Minimum from a real job
-- **WHEN** the jobs of wet and dry tiles run in both tile formats over a world with water
-- **THEN** a wet tile's minimum equals the minimum recomputed from the mesh it built, a dry or cancelled tile has none, and the minimum of tiles of levels 3 to 20 bounds every vertex height, morphed height and skirt vertex height of the tile, in the vertex and compact formats over the reference and the steep field
+- **WHEN** the jobs of wet and dry tiles run over a world with water
+- **THEN** a wet tile's minimum equals the minimum recomputed from the mesh it built, a dry or cancelled tile has none, and the minimum of tiles of levels 3 to 20 bounds every vertex height, morphed height and skirt vertex height of the tile, over the reference and the steep field
 
 #### Scenario: Pictures
 - **WHEN** an aerial, a low, a beach and an inland view of the 1,024-cell world are drawn in the class view and the lit view with the full selection and with the exact cut
@@ -417,4 +417,3 @@ Source: ADR 0056, ADR 0058, ATMO-012, ATMO-016, ATMO-019, docs/perf/water-attrib
 #### Scenario: Held views of the lit scenes
 - **WHEN** the lit scene runs its held views coast-2km and coast-3m and its two flights (each also with the shore filter off) in smoke mode
 - **THEN** each line reports a nonzero number of nodes cut by the exact minimum and 0 kept with no minimum
-
