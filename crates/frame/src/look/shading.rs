@@ -220,14 +220,15 @@ impl AlbedoParams {
         self.albedo_with_ramp(temperature_c, precipitation_mm, cos_slope, height_above_water_m, 0.0)
     }
 
-    /// The width of the seabed-to-shore ramp at a node whose mesh cannot hold less than `ramp_min_m` of height (REND-030): the look's
-    /// `shore_blend_m`, or `ramp_min_m` where that is larger. Monotone in `ramp_min_m`, equal to `shore_blend_m` where it is small.
+    /// The width of the seabed-to-shore ramp at a fragment whose selection tolerance is `ramp_min_m` of height (REND-030, `lod::shore_ramp_at`
+    /// of its distance from the camera): the look's `shore_blend_m`, or `ramp_min_m` where that is larger. Monotone in `ramp_min_m`, equal to
+    /// `shore_blend_m` where it is small.
     pub fn shore_ramp_m(&self, ramp_min_m: f64) -> f64 {
         self.shore_blend_m.max(if ramp_min_m.is_finite() { ramp_min_m } else { 0.0 })
     }
 
-    /// [`albedo`](AlbedoParams::albedo) with the node's least ramp height (`TerrainDraw::shore_ramp_min_m`): the CPU reference of the
-    /// shader's `albedo_of`. With `ramp_min_m` 0 it is `albedo`.
+    /// [`albedo`](AlbedoParams::albedo) with the ramp height of the fragment (`lod::shore_ramp_at(plan.shore_ramp_per_m, distance)`): the CPU
+    /// reference of the shader's `albedo_of`. With `ramp_min_m` 0 it is `albedo`.
     pub fn albedo_with_ramp(
         &self,
         temperature_c: f64,

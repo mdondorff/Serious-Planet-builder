@@ -351,24 +351,32 @@ fn terrain_plans_match_the_committed_snapshots() {
 
 // spec: REND-030
 #[test]
-fn every_node_carries_the_least_shore_ramp_of_its_level_and_the_text_form_keeps_it() {
-    let p = plan_of(4, TerrainView::Level, 1);
+fn the_plan_carries_the_shore_ramps_growth_with_distance_for_every_node_and_the_text_form_keeps_it_for_a_lit_plan() {
+    let mut p = plan_of(4, TerrainView::Level, 1);
     assert!(!p.nodes.is_empty());
     let lod = lod();
-    for n in &p.nodes {
-        assert_eq!(n.shore_ramp_min_m, lod.shore_ramp_min_m(n.level) as f32, "level {}", n.level);
-    }
-    // The text carries it (`shore_ramp`), the round trip keeps it, and a recorded plan without the token reads as 0.
+    assert_eq!(p.shore_ramp_per_m, lod.shore_ramp_per_m() as f32);
+    // One value for the whole plan, whatever levels its nodes are: a coarser plan of the same request has the same growth.
+    let other = plan_of(6, TerrainView::Level, 1);
+    assert_eq!(other.shore_ramp_per_m, p.shore_ramp_per_m);
+    // The text carries the growth as a plan-level line (a debug plan too, when it is not zero); the round trip keeps it.
+    assert!(p.to_text().lines().any(|l| l.starts_with("shore_ramp_per_m ")));
+    p.lit = Some(planet_frame::look::LitPlan::fixed(0.0));
     let text = p.to_text();
-    assert!(text.lines().filter(|l| l.starts_with("node ")).all(|l| l.contains(" shore_ramp ")));
+    assert!(text.lines().any(|l| l.starts_with("shore_ramp_per_m ")));
+    assert!(!text.lines().filter(|l| l.starts_with("node ")).any(|l| l.contains("shore_ramp")), "no node carries a ramp");
     assert_eq!(planet_frame::TerrainPlan::from_text(&text).unwrap(), p);
+    // A plan recorded while every node carried its own ramp (`shore_ramp <h32>` at the end of a node line, no plan-level line) loads, the
+    // node tokens ignored, and ramps by the look's blend alone.
     let old: String = text
         .lines()
-        .map(|l| if l.starts_with("node ") { l.split(" shore_ramp ").next().unwrap().to_string() } else { l.to_string() })
+        .filter(|l| !l.starts_with("shore_ramp_per_m "))
+        .map(|l| if l.starts_with("node ") { format!("{l} shore_ramp 3f800000") } else { l.to_string() })
         .collect::<Vec<_>>()
         .join("\n");
     let parsed = planet_frame::TerrainPlan::from_text(&old).unwrap();
-    assert!(parsed.nodes.iter().all(|n| n.shore_ramp_min_m == 0.0), "a plan recorded before the field ramps by the look's blend alone");
+    assert_eq!(parsed.shore_ramp_per_m, 0.0);
+    assert_eq!(parsed.nodes, p.nodes);
 }
 
 // spec: TEST-009, TEST-008

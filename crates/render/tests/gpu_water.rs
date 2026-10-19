@@ -245,8 +245,8 @@ fn the_lit_water_and_atmosphere_frames_over_compact_blocks_are_the_recorded_pixe
     // water without and with the atmosphere), as the atlas textures drew them (recorded by the differential of ADR 0054's change,
     // byte-identical to the buffer blocks on WARP and on the RTX; re-recorded by the pixel-footprint fade of the waves, ADR 0056). A driver not in the table prints its hash and records nothing.
     const KNOWN: [(&str, u64); 2] = [
-        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0xcb6b_6c6e_2739_010e),
-        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '591.86'", 0x1e73_f182_7758_74fa),
+        ("Microsoft Basic Render Driver | Dx12 | Cpu | driver '10.0.26100.9711' ''", 0x089f_3f75_fa7c_fd77),
+        ("NVIDIA GeForce RTX 3080 Ti Laptop GPU | Vulkan | DiscreteGpu | driver 'NVIDIA' '591.86'", 0xa678_7a98_e2dc_b4a3),
     ];
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
     let field = Reference(1);

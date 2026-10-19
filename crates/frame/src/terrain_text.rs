@@ -53,6 +53,7 @@ impl TerrainPlan {
             clear_color: _,
             height_range: _,
             cells: _,
+            shore_ramp_per_m: _,
             nodes: _,
             lit: _,
             water: _,
@@ -81,7 +82,11 @@ impl TerrainPlan {
             h32(self.height_range[0]),
             h32(self.height_range[1])
         );
-        // The lit path's line exists only for a lit plan, so the text (and the hash) of every debug-path plan is unchanged.
+        // The ramp's growth with distance (REND-030); a plan without one (zero) has no line and reads as zero.
+        if self.shore_ramp_per_m != 0.0 {
+            s += &format!("shore_ramp_per_m {}\n", h32(self.shore_ramp_per_m));
+        }
+        // The lit path's line exists only for a lit plan.
         if let Some(lit) = &self.lit {
             s += &lit.to_text();
             s.push('\n');
@@ -100,13 +105,12 @@ impl TerrainPlan {
                 morph: _,
                 morph_start_m: _,
                 morph_end_m: _,
-                shore_ramp_min_m: _,
                 color: _,
                 mesh_key: _,
             } = n;
             let r = n.camera_relative_origin;
             s += &format!(
-                "node {:016x} level {} origin {} rel {} {} {} morph {} {} {} color {} {} {} {} mesh_key {:016x} shore_ramp {}\n",
+                "node {:016x} level {} origin {} rel {} {} {} morph {} {} {} color {} {} {} {} mesh_key {:016x}\n",
                 n.tile.raw(),
                 n.level,
                 vec3(n.origin.0),
@@ -120,8 +124,7 @@ impl TerrainPlan {
                 n.color[1],
                 n.color[2],
                 n.color[3],
-                n.mesh_key,
-                h32(n.shore_ramp_min_m)
+                n.mesh_key
             );
         }
         s
@@ -138,6 +141,7 @@ impl TerrainPlan {
         let (mut size, mut view, mut cells, mut camera, mut vp, mut clear, mut range) = (None, None, None, None, None, None, None);
         let mut nodes = Vec::new();
         let mut lit = None;
+        let mut shore_ramp_per_m = 0.0f32;
         let mut water_lines: Vec<Vec<&str>> = Vec::new();
         for line in lines.filter(|l| !l.trim().is_empty()) {
             let t: Vec<&str> = line.split_whitespace().collect();
@@ -163,16 +167,16 @@ impl TerrainPlan {
                 }
                 ["clear", r, g, b, a] => clear = Some([byte(r)?, byte(g)?, byte(b)?, byte(a)?]),
                 ["height_range", a, b] => range = Some([p32(a)?, p32(b)?]),
+                ["shore_ramp_per_m", v] => shore_ramp_per_m = p32(v)?,
                 ["lit", rest @ ..] => lit = Some(crate::look::LitPlan::from_tokens(rest)?),
                 ["water", ..] | ["liquid", ..] | ["wnode", ..] => water_lines.push(t.clone()),
                 ["node", id, "level", level, "origin", ox, oy, oz, "rel", rx, ry, rz, "morph", m, ms, me, "color", r, g, b, a, "mesh_key", key, tail @ ..] =>
                 {
-                    // `shore_ramp <h32>` ends a node line since REND-030; a recorded plan without it ramps by the look's blend alone.
-                    let shore_ramp_min_m = match tail {
-                        [] => 0.0,
-                        ["shore_ramp", v] => p32(v)?,
-                        _ => return Err(format!("cannot parse terrain plan line '{line}'")),
-                    };
+                    // `shore_ramp <h32>` ended a node line from the first REND-030 until the ramp followed the fragment's distance: read
+                    // and ignored, so a plan recorded then still loads (and ramps by the look's blend alone).
+                    if !matches!(tail, [] | ["shore_ramp", _]) {
+                        return Err(format!("cannot parse terrain plan line '{line}'"));
+                    }
                     let raw = u64::from_str_radix(id, 16).map_err(|e| format!("bad tile id '{id}': {e}"))?;
                     nodes.push(TerrainDraw {
                         tile: TileId::from_raw(raw).ok_or(format!("invalid tile id {raw:#x}"))?,
@@ -182,7 +186,6 @@ impl TerrainPlan {
                         morph: p32(m)?,
                         morph_start_m: p32(ms)?,
                         morph_end_m: p32(me)?,
-                        shore_ramp_min_m,
                         color: [byte(r)?, byte(g)?, byte(b)?, byte(a)?],
                         mesh_key: u64::from_str_radix(key, 16).map_err(|e| format!("bad mesh key '{key}': {e}"))?,
                     });
@@ -198,6 +201,7 @@ impl TerrainPlan {
             clear_color: clear.ok_or("plan has no clear colour")?,
             height_range: range.ok_or("plan has no height range")?,
             cells: cells.ok_or("plan has no cells")?,
+            shore_ramp_per_m,
             nodes,
             lit,
             water: if water_lines.is_empty() { None } else { Some(crate::water::WaterPlan::from_lines(&water_lines)?) },

@@ -47,7 +47,8 @@ struct Globals {
     view_proj: mat4x4<f32>,
     range: vec4<f32>,
     mode: vec4<u32>,
-    // Lit path only: x = the water level W in metres (ADR 0041); y = the debug overlay (VIEW-014: 0 none, 1 tiles, 2 mesh); the other lanes are reserved.
+    // Lit path only: x = the water level W in metres (ADR 0041); y = the debug overlay (VIEW-014: 0 none, 1 tiles, 2 mesh); z = the growth of
+    // the shore ramp with the distance from the camera (REND-030, the plan's `shore_ramp_per_m`); w is reserved.
     extra: vec4<f32>,
     // Lit path only: the albedo table of the look (ADR 0039 point 3): eight colours with a threshold in the fourth lane, then
     // (snow_c_full, snow_c_none, snow_cos_none, snow_cos_full) and (beach_height, beach_fade, shore_blend, 0).
@@ -56,9 +57,9 @@ struct Globals {
 struct Node {
     origin_rel: vec4<f32>,
     color: vec4<f32>,
-    // x, y: vertex distances between which a vertex morphs to the parent grid; z: the least height range of the albedo's seabed-to-shore
-    // ramp at this node (REND-030: the plan's `shore_ramp_min_m`); w: the tile's level of detail (the wireframe overlay's colour, VIEW-014;
-    // the plan's node-level `morph` is a diagnostic of the CPU selection and is not read by the shader).
+    // x, y: vertex distances between which a vertex morphs to the parent grid; z: padding (the shore ramp follows the fragment's distance,
+    // REND-030, and is in the globals); w: the tile's level of detail (the wireframe overlay's colour, VIEW-014; the plan's node-level
+    // `morph` is a diagnostic of the CPU selection and is not read by the shader).
     morph: vec4<f32>,
     // Per grid decade (1 cm .. 1,000 km) the fractional part of (planet-fixed tile origin / spacing), xyz, taken in f64 on
     // the CPU: they anchor the relief grid to the world instead of to this tile, so neighbouring tiles and LOD splits draw
@@ -230,10 +231,16 @@ fn albedo_of(tab: array<vec4<f32>, 10>, t: f32, p: f32, cs: f32, h: f32, ramp_mi
     return mix(tab[7].xyz, shore, land_w);
 }
 
-// The ramp height at a vertex of a node of least ramp `z` and morph factor `m` (REND-030, `planet_frame::lod::shore_ramp_at`): `z` at
-// full detail, the parent's `min(2 z, 8)` on the parent's grid, so the ramp is continuous across a level border.
-fn shore_ramp_at(z: f32, m: f32) -> f32 {
-    return mix(z, min(2.0 * z, 8.0), m);
+// The ramp height at a fragment `d` metres from the camera (REND-030, `planet_frame::lod::shore_ramp_at`): `per_m * d` capped at 8 m. It
+// depends on the distance only, so a ground point has one ramp whichever level of tile is drawn there.
+fn shore_ramp_at(per_m: f32, d: f32) -> f32 {
+    return min(per_m * d, 8.0);
+}
+
+// The fragment's distance from the camera: the node's camera-relative origin plus the fragment's tile-local position (camera-relative f32,
+// no planet-radius value, CON-11).
+fn camera_distance(node_origin_rel: vec4<f32>, local: vec3<f32>) -> f32 {
+    return length(node_origin_rel.xyz + local);
 }
 
 // The false colour of a climate channel (the debug views): temperature blue to red over -30..40 C, precipitation sand to blue over
@@ -288,7 +295,7 @@ fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
-    var rgb = shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(nodes[in.node_index].morph.z, in.morph), sun, g.range.z);
+    var rgb = shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z);
     if (g.extra.y > 0.5) {
         rgb = overlay_wire(in, rgb, g.range.z, g.extra.y);
     }
@@ -311,8 +318,7 @@ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
     for (i, d) in plan.nodes.iter().enumerate() {
         let r = d.camera_relative_origin;
         let c = d.color.map(|v| f32::from(v) / 255.0);
-        let mut floats =
-            vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, d.shore_ramp_min_m, f32::from(d.level)];
+        let mut floats = vec![r[0], r[1], r[2], 0.0, c[0], c[1], c[2], c[3], d.morph_start_m, d.morph_end_m, 0.0, f32::from(d.level)];
         for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
             floats.extend([p[0], p[1], p[2], 0.0]);
         }
@@ -1556,7 +1562,7 @@ impl TerrainRenderer {
                         .iter()
                         .flat_map(|v: &u32| v.to_le_bytes()),
                 );
-                globals.extend(f32_bytes(&[lit.water_level_m, lit.overlay.shader_code(), 0.0, 0.0]));
+                globals.extend(f32_bytes(&[lit.water_level_m, lit.overlay.shader_code(), plan.shore_ramp_per_m, 0.0]));
                 globals.extend(f32_bytes(&lit.albedo.to_words()));
             }
             None => {
@@ -1851,15 +1857,57 @@ mod one_shot_tests {
     // spec: REND-030
     #[test]
     fn the_shaders_ramp_function_is_the_references_with_the_same_cap() {
-        let cap = format!("min(2.0 * z, {:.1})", planet_frame::lod::SHORE_RAMP_MAX_M);
+        let cap = format!("min(per_m * d, {:.1})", planet_frame::lod::SHORE_RAMP_MAX_M);
         assert!(
-            SHADER_TAIL.contains("fn shore_ramp_at(z: f32, m: f32) -> f32") && SHADER_TAIL.contains(&cap),
+            SHADER_TAIL.contains("fn shore_ramp_at(per_m: f32, d: f32) -> f32") && SHADER_TAIL.contains(&cap),
             "the cap of the WGSL is the reference's"
         );
         assert!(
-            SHADER_TAIL.contains("shore_ramp_at(nodes[in.node_index].morph.z, in.morph)"),
-            "the lit fragment ramps with the vertex's morph"
+            SHADER_TAIL.contains("shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local))"),
+            "the lit fragment ramps with its own distance from the camera"
         );
+    }
+
+    // spec: REND-030
+    #[test]
+    fn the_node_record_carries_no_ramp_so_the_same_ground_point_ramps_alike_under_a_tile_of_any_level() {
+        use planet_core::{PlanetFixed, TileId, Vec3};
+        let node = |tile: TileId| planet_frame::TerrainDraw {
+            tile,
+            level: tile.level(),
+            origin: PlanetFixed(Vec3::new(1.0, 2.0, 3.0)),
+            camera_relative_origin: [1.0, 2.0, 3.0],
+            morph: 0.5,
+            morph_start_m: 10.0,
+            morph_end_m: 20.0,
+            color: [1, 2, 3, 255],
+            mesh_key: 7,
+        };
+        let (coarse, fine) = (TileId::new(planet_core::Face(0), 17, 1, 1).unwrap(), TileId::new(planet_core::Face(0), 20, 8, 8).unwrap());
+        let mut plan = planet_frame::viewer::lit_warm_plan(
+            planet_frame::camera::Camera::looking_at_centre(
+                PlanetFixed(Vec3::new(0.0, 0.0, 7.0e6)),
+                Vec3::new(0.0, 1.0, 0.0),
+                1.0,
+                1.0,
+                1.0,
+            ),
+            (64, 64),
+            32,
+            planet_frame::look::LitPlan::fixed(0.0),
+        );
+        plan.shore_ramp_per_m = 0.01;
+        plan.nodes = vec![node(coarse), node(fine)];
+        let bytes = node_record_bytes(&plan);
+        let word = |record: usize, w: usize| {
+            let at = record * NODE_BYTES as usize + 4 * w;
+            f32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
+        };
+        for record in 0..2 {
+            assert_eq!(word(record, 10), 0.0, "record {record}: word 10 is padding");
+            assert_eq!(word(record, 11), [17.0, 20.0][record], "record {record}: word 11 is the tile's level (the overlay's)");
+            assert_eq!((word(record, 8), word(record, 9)), (10.0, 20.0), "the morph interval is still there");
+        }
     }
 
     // spec: REND-016

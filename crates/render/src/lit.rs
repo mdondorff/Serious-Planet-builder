@@ -734,10 +734,13 @@ pub struct LitProbe {
     pub temperature_c: f32,
     pub precipitation_mm: f32,
     pub height_above_water_m: f32,
-    /// The node's least ramp height (`TerrainDraw::shore_ramp_min_m`, REND-030); 0 for a node that ramps by the look's blend alone.
-    pub shore_ramp_min_m: f32,
-    /// The vertex's morph factor (0 at full detail, 1 on the parent's grid): the ramp is `shore_ramp_at(shore_ramp_min_m, shore_morph)`.
-    pub shore_morph: f32,
+    /// The growth of the ramp with the distance from the camera (`TerrainPlan::shore_ramp_per_m`, REND-030); 0 ramps by the look's blend alone.
+    pub shore_ramp_per_m: f32,
+    /// The node's camera-relative origin and the fragment's tile-local position (`TerrainDraw::camera_relative_origin` and the vertex
+    /// output `local`): the fragment's distance from the camera is the length of their sum (the shader's `camera_distance`) and the ramp
+    /// is `shore_ramp_at(shore_ramp_per_m, distance)`.
+    pub origin_rel: [f32; 3],
+    pub local: [f32; 3],
     pub sun: [f32; 3],
     pub factor: f32,
     /// `AlbedoParams::to_words`.
@@ -747,14 +750,14 @@ pub struct LitProbe {
 /// The WGSL entries of the probes. They call the shader's own functions: `shade_lit` (what `fs_lit` writes) and `up_at` (what it
 /// forms the slope's up vector with).
 const PROBE_SOURCE: &str = r#"
-struct Probe { n: vec4<f32>, up: vec4<f32>, cl: vec4<f32>, sun: vec4<f32>, scale: vec4<f32>, tab: array<vec4<f32>, 10> };
+struct Probe { n: vec4<f32>, up: vec4<f32>, cl: vec4<f32>, sun: vec4<f32>, scale: vec4<f32>, rel: vec4<f32>, loc: vec4<f32>, tab: array<vec4<f32>, 10> };
 @group(0) @binding(8) var<storage, read> probes: array<Probe>;
 @group(0) @binding(9) var<storage, read_write> results: array<vec4<f32>>;
 
 @compute @workgroup_size(1)
 fn probe(@builtin(global_invocation_id) id: vec3<u32>) {
     let p = probes[id.x];
-    results[id.x] = vec4<f32>(shade_lit(u32(p.up.w), p.tab, p.n.xyz, p.up.xyz, p.cl.x, p.cl.y, p.n.w, shore_ramp_at(p.scale.y, p.scale.z), p.sun.xyz, p.scale.x), 1.0);
+    results[id.x] = vec4<f32>(shade_lit(u32(p.up.w), p.tab, p.n.xyz, p.up.xyz, p.cl.x, p.cl.y, p.n.w, shore_ramp_at(p.scale.y, camera_distance(p.rel, p.loc.xyz)), p.sun.xyz, p.scale.x), 1.0);
 }
 
 struct UpProbe { node_up: vec4<f32>, local: vec4<f32> };
@@ -852,7 +855,9 @@ pub fn probe_lit_radiance(ctx: &GpuContext, probes: &[LitProbe]) -> Vec<[f32; 3]
         input.extend([p.up[0], p.up[1], p.up[2], p.view as f32]);
         input.extend([p.temperature_c, p.precipitation_mm, 0.0, 0.0]);
         input.extend([p.sun[0], p.sun[1], p.sun[2], 0.0]);
-        input.extend([p.factor, p.shore_ramp_min_m, p.shore_morph, 0.0]);
+        input.extend([p.factor, p.shore_ramp_per_m, 0.0, 0.0]);
+        input.extend([p.origin_rel[0], p.origin_rel[1], p.origin_rel[2], 0.0]);
+        input.extend([p.local[0], p.local[1], p.local[2], 0.0]);
         input.extend(p.table);
     }
     run_probe(ctx, "probe", &input, probes.len()).into_iter().map(|r| [r[0], r[1], r[2]]).collect()
