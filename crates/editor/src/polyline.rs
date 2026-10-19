@@ -13,6 +13,9 @@ pub const MAX_POINTS: usize = 64;
 /// The fewest points of a line and of a region.
 pub const MIN_LINE_POINTS: usize = 2;
 pub const MIN_REGION_POINTS: usize = 3;
+/// Metres added to the reach of an item made from a point list, so that it covers its points however the distance is rounded; a line
+/// fits one item when its extent, width and this margin are within one cell edge.
+pub const REACH_SLACK_M: f64 = 1.0;
 /// The share of the reach limit a part of a split line may use, so an edit of a part has room before it must split again.
 pub const SPLIT_FRACTION: f64 = 0.8;
 
@@ -177,7 +180,7 @@ pub fn extent_m(points: &[GeoPoint], radius_m: f64) -> f64 {
 
 /// Whether a line of `width_m` fits the reach of one item: its extent plus the width within one cell edge.
 pub fn line_fits_one_item(points: &[GeoPoint], width_m: f64, radius_m: f64) -> bool {
-    points.len() <= MAX_POINTS && extent_m(points, radius_m) + width_m <= CELL_EDGE_M
+    points.len() <= MAX_POINTS && extent_m(points, radius_m) + width_m + REACH_SLACK_M <= CELL_EDGE_M
 }
 
 /// Splits a line into the parts of the linked items it becomes (ADR 0069 point 3): a line that fits one item stays whole; a longer one
