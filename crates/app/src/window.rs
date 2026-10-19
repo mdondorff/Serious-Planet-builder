@@ -11,6 +11,7 @@ use crate::editwin::{EditKey, EditRuntime, Pointer, EDIT_KEYS_HELP, SMOKE_EDIT_F
 use crate::pipelined::{RendererSink, Rig};
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
+use planet_core::TileId;
 use planet_editor::layout::Layout;
 use planet_frame::globe::{marker_at, visible_markers, wheel_zoom_factor, ClickTracker, Marker, ScreenMarker, Viewport, HIT_RADIUS_PX};
 use planet_frame::look::file::LookParams;
@@ -26,6 +27,7 @@ use planet_frame::{Camera, ControllerParams, LodParams, TerrainRequest, TerrainV
 use planet_generators::height::HeightField;
 use planet_render::{AdapterPolicy, GpuContext, Presented, WindowSurface};
 use planet_streaming::{Clock, SystemClock};
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -96,9 +98,18 @@ pub fn edit_mouse_action(button: MouseButton, state: ElementState, world: bool, 
     }
 }
 
-/// The viewer commands the editor mode does not take: it edits from the free camera with no overview (VIEW-022).
+/// What the editor mode does to the camera and the overview this frame (VIEW-022), as (end the overview, take the free camera): turning
+/// the mode on ends the overview once (`end_overview` is that one request, taken by the caller), and while the mode is on and no overview
+/// is shown the camera is the free one. The overview shown later with G stays.
+pub fn mode_camera_steps(end_overview: bool, edit_on: bool, globe: bool, free: bool) -> (bool, bool) {
+    let end_globe = end_overview && globe;
+    let globe_after = globe && !end_globe;
+    (end_globe, edit_on && !globe_after && !free)
+}
+
+/// The viewer commands the editor mode does not take: it edits from the free camera (VIEW-022); the overview (G) is shown as before.
 pub fn editor_mode_blocks(cmd: Command) -> bool {
-    matches!(cmd, Command::ToggleCamera | Command::ToggleGlobe)
+    matches!(cmd, Command::ToggleCamera)
 }
 
 /// The key of the editor mode a key press asks for, if any (VIEW-022).
@@ -205,6 +216,13 @@ struct Running {
     shift: bool,
     /// The primary button is down in the world in the editor mode.
     edit_down: bool,
+    /// The markers of the edits on the overview this frame, and their labels (VIEW-022).
+    edit_markers: Vec<Marker>,
+    marker_labels: HashMap<u64, String>,
+    /// The tiles the last plan wanted: what the overview's markers are found over.
+    last_wanted: Vec<TileId>,
+    /// Turning the mode on ends the overview, once.
+    end_overview: bool,
     window: Arc<Window>,
     ctx: GpuContext,
     surface: WindowSurface,
@@ -317,6 +335,10 @@ impl App<'_> {
             ctrl: false,
             shift: false,
             edit_down: false,
+            edit_markers: Vec::new(),
+            marker_labels: HashMap::new(),
+            last_wanted: Vec::new(),
+            end_overview: false,
             window,
             ctx,
             surface,
@@ -358,8 +380,15 @@ impl App<'_> {
         let field = self.field.as_ref();
         let height = |d: planet_core::Vec3| field.height(d);
         if let Some(g) = st.viewer.globe.as_mut() {
-            if g.click(st.cursor, &st.last_camera, viewport, &st.markers, &limits, &height).is_some() {
+            let all: Vec<Marker> = st.markers.iter().chain(st.edit_markers.iter()).copied().collect();
+            if let Some(click) = g.click(st.cursor, &st.last_camera, viewport, &all, &limits, &height) {
                 st.globe_stats.flights += 1;
+                // A marker of an edit selects the edit as the flight to it starts.
+                if let planet_frame::globe::Click::Marker(id) = click {
+                    if let Some(e) = st.edit.as_mut() {
+                        e.select_marker(id);
+                    }
+                }
             }
         }
     }
@@ -422,13 +451,16 @@ impl App<'_> {
             if cfg.smoke {
                 quit |= smoke_keys(&mut st, self.cameras, now_ms)?;
             }
-            // The editor mode edits from the free camera, with no overview over it.
-            if st.edit.as_ref().is_some_and(|e| e.on) {
+            // The editor mode edits from the free camera: turning it on ended the overview once (G may show it again).
+            {
                 let flight = planet_frame::viewer::camera_at(self.cameras, st.viewer.clock.time_s(now_ms));
-                if st.viewer.globe.is_some() {
+                let on = st.edit.as_ref().is_some_and(|e| e.on);
+                let (end_globe, to_free) =
+                    mode_camera_steps(std::mem::take(&mut st.end_overview), on, st.viewer.globe.is_some(), st.viewer.is_free());
+                if end_globe {
                     st.viewer.command(Command::ToggleGlobe, now_ms, &flight);
                 }
-                if !st.viewer.is_free() {
+                if to_free {
                     st.viewer.command(Command::ToggleCamera, now_ms, &flight);
                 }
             }
@@ -452,7 +484,13 @@ impl App<'_> {
             // The globe overview: the markers it shows (render pixels to window pixels) and the one under the cursor.
             let viewport = Viewport { width_px: f64::from(cfg.size.0), height_px: f64::from(cfg.size.1) };
             if st.viewer.globe.is_some() {
-                let seen = visible_markers(&camera, &st.markers, radius, viewport);
+                // The edits the camera shows are markers too (VIEW-022), found over the tiles the last plan wanted.
+                if let Some(e) = st.edit.as_mut() {
+                    st.edit_markers = e.globe_markers(&camera, viewport, &st.last_wanted);
+                    st.marker_labels = e.marker_labels();
+                }
+                let all: Vec<Marker> = st.markers.iter().chain(st.edit_markers.iter()).copied().collect();
+                let seen = visible_markers(&camera, &all, radius, viewport);
                 st.hover = marker_at(&seen, st.cursor, HIT_RADIUS_PX);
                 st.globe_stats.frames += 1;
                 st.globe_stats.markers_shown_max = st.globe_stats.markers_shown_max.max(seen.len());
@@ -464,6 +502,8 @@ impl App<'_> {
                 }
             } else {
                 st.screen_markers.clear();
+                st.edit_markers.clear();
+                st.marker_labels.clear();
                 st.hover = None;
             }
             st.altitude_m = height(camera.position);
@@ -477,10 +517,11 @@ impl App<'_> {
                     st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer })
                 })?;
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
+            st.last_wanted = frame.pipeline.wanted.iter().map(|w| w.0).collect();
             // The editor mode: what the camera shows of the edits, their outlines and handles, the hover, the lists; the resident tiles the
             // edits of the last frame can touch (the footprint find).
             if let Some(e) = st.edit.as_mut().filter(|e| e.on) {
-                let wanted: Vec<_> = frame.pipeline.wanted.iter().map(|w| w.0).collect();
+                let wanted = st.last_wanted.clone();
                 let limits = PickLimits::new(radius, lod_max_height_m);
                 let over_ui = st.ui.as_ref().is_some_and(|u| u.ctx.is_pointer_over_egui());
                 e.update(&camera, viewport, &wanted, field, &limits, Pointer { cursor: st.cursor, over_ui });
@@ -583,13 +624,14 @@ impl App<'_> {
                 let status = planet_frame::viewer::overlay_status(st.viewer.overlay, factor);
                 let inner = st.window.inner_size();
                 let scale = [f64::from(inner.width) / viewport.width_px, f64::from(inner.height) / viewport.height_px];
+                let layer = crate::ui::MarkerLayer { markers: &st.screen_markers, hover: st.hover, labels: &st.marker_labels };
                 let mut frame_ui = match st.edit.as_mut().filter(|e| e.on) {
                     Some(e) => {
                         let view_status = format!("{} · {status}", crate::editwin::mode_status(e));
                         let mut draw = |ui: &mut egui::Ui| panel_events = e.draw(ui, &view_status, scale);
-                        ui.frame(&st.window, &status, &st.screen_markers, st.hover, Some(&mut draw))
+                        ui.frame(&st.window, &status, &layer, Some(&mut draw))
                     }
-                    None => ui.frame(&st.window, &status, &st.screen_markers, st.hover, None),
+                    None => ui.frame(&st.window, &status, &layer, None),
                 };
                 let shown = st.surface.present_with_ui(ctx, &st.rig.renderer, Some((ui.painter(), &mut frame_ui)));
                 ui.reclaim(frame_ui);
@@ -906,6 +948,7 @@ impl ApplicationHandler for App<'_> {
                             if let Some(e) = st.edit.as_mut() {
                                 e.toggle();
                                 st.edit_down = false;
+                                st.end_overview = e.on;
                             }
                             return;
                         }
@@ -1419,7 +1462,10 @@ mod tests {
     // spec: VIEW-022
     #[test]
     fn the_editor_mode_leaves_the_camera_and_the_overview_alone() {
-        assert!(editor_mode_blocks(Command::ToggleCamera) && editor_mode_blocks(Command::ToggleGlobe));
+        assert!(
+            editor_mode_blocks(Command::ToggleCamera) && !editor_mode_blocks(Command::ToggleGlobe),
+            "C is the editor mode's, G shows the overview"
+        );
         for cmd in [
             Command::TogglePause,
             Command::Restart,
@@ -1435,5 +1481,25 @@ mod tests {
         assert_eq!(key_command(KeyCode::KeyC), Some(Command::ToggleCamera));
         assert_eq!(key_command(KeyCode::KeyG), Some(Command::ToggleGlobe));
         assert_eq!(edit_key(KeyCode::Escape, None, false, false), Some(EditKey::Escape));
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn turning_the_mode_on_ends_the_overview_once_and_takes_the_free_camera_and_g_shows_the_overview_again() {
+        // (end_overview, edit_on, globe, free) -> (end the overview, take the free camera)
+        assert_eq!(mode_camera_steps(true, true, true, false), (true, true), "Tab with the overview up: it ends and the free camera comes");
+        assert_eq!(mode_camera_steps(true, true, true, true), (true, false), "already free: only the overview ends");
+        assert_eq!(mode_camera_steps(true, true, false, false), (false, true), "no overview to end");
+        // Later frames: no request any more. The overview shown with G stays and the camera is its own.
+        assert_eq!(mode_camera_steps(false, true, true, false), (false, false), "G in the mode: the overview stays");
+        assert_eq!(mode_camera_steps(false, true, true, true), (false, false));
+        assert_eq!(mode_camera_steps(false, true, false, false), (false, true), "the overview gone: the free camera again");
+        assert_eq!(mode_camera_steps(false, true, false, true), (false, false));
+        // The mode off leaves the camera alone.
+        for globe in [false, true] {
+            for free in [false, true] {
+                assert_eq!(mode_camera_steps(false, false, globe, free), (false, false));
+            }
+        }
     }
 }
