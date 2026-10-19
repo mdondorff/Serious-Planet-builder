@@ -38,7 +38,7 @@ const CRATER: [ParamDef; 3] = [
 const HILL: [ParamDef; 2] = [m("radius_m", "Radius", 50.0, 2_000.0, 10.0, 400.0), m("height_m", "Height", 5.0, 400.0, 5.0, 80.0)];
 const PLATEAU: [ParamDef; 3] = [
     m("radius_m", "Radius", 1_000.0, 40_000.0, 500.0, 15_000.0),
-    m("height_m", "Height", 20.0, 1_500.0, 10.0, 300.0),
+    m("target_m", "Target height", -500.0, 9_000.0, 10.0, 300.0),
     ParamDef { key: "softness_pct", label: "Edge softness", unit: Unit::Percent, min: 0.0, max: 100.0, step: 1.0, default: 40.0 },
 ];
 
