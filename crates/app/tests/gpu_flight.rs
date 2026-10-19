@@ -193,42 +193,71 @@ fn a_flight_writes_a_labelled_contact_sheet_and_the_finest_level_per_frame() {
 
 // spec: REND-016, TEST-013
 #[test]
-fn the_flight_from_compact_tiles_matches_the_vertex_reference_frame_by_frame() {
-    let (compact, vertex) = (dir("compact"), dir("vertex"));
-    for (out, format) in [(&compact, "compact"), (&vertex, "vertex")] {
-        let log = run(&[
-            "test-render",
-            "--scene",
-            "terrain",
-            "--flight",
-            "12",
-            "--out-dir",
-            out.to_str().unwrap(),
-            "--size",
-            "320x240",
-            "--cells",
-            "16",
-            "--view",
-            "relief",
-            "--tile-format",
-            format,
-        ])
-        .unwrap();
-        assert!(log.contains(&format!("tile format: {format}")), "{log}");
-    }
-    assert_eq!(
-        std::fs::read_to_string(compact.join("flight.txt")).unwrap(),
-        std::fs::read_to_string(vertex.join("flight.txt")).unwrap(),
-        "the plans do not depend on the tile format"
-    );
+fn the_flight_from_compact_tiles_matches_the_reference_renderer_frame_by_frame() {
+    // The independent reference of the flight is the test-only reference renderer (REND-031) drawing the same plans from the CPU meshes;
+    // until `remove-vertex-render-path` it was the vertex-format renderer behind `--tile-format vertex`.
+    use planet_core::cube::{FaceMapping, TangentWarp};
+    use planet_frame::{flight_path_field, plan_terrain_field, LodParams, TerrainRequest, TerrainView};
+    use planet_generators::mesh::tile_mesh_field;
+    use planet_render::{AdapterPolicy, GpuContext};
+    const R: f64 = 6_371_000.0;
+    let args = [
+        "test-render",
+        "--scene",
+        "terrain",
+        "--flight",
+        "12",
+        "--out-dir",
+        "<dir>",
+        "--size",
+        "320x240",
+        "--cells",
+        "16",
+        "--view",
+        "relief",
+    ];
+    let compact = dir("compact");
+    let mut run_args = args;
+    run_args[6] = compact.to_str().unwrap();
+    let log = run(&run_args).unwrap();
+    assert!(log.contains("tile format: compact"), "{log}");
+    // The same frames from the reference renderer: the flight's world, cameras, level of detail and view, planned the same way.
+    let o = planet::parse_args(&args.map(String::from)).unwrap();
+    let world = planet::worldfield::WorldTerrain::of_options(&o, R).unwrap();
+    let field = world.field().unwrap();
+    let size = (320u32, 240u32);
+    let lod = LodParams {
+        cells: o.cells,
+        viewport_h_px: f64::from(size.1),
+        tau_px: o.tau,
+        max_level: o.finest_level_for(o.cells),
+        min_level: o.min_level(),
+        radius_m: R,
+        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
+        ..LodParams::earth_1080p()
+    };
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let cameras = flight_path_field(R, f64::from(size.0) / f64::from(size.1), field.as_ref(), 12);
     let (mut worst, mut worst_shaded) = (0f64, 0f64);
-    for i in 0..12 {
-        let name = format!("frame_{i:04}.png");
-        let (a, b) = (read_png(&compact.join(&name)).unwrap(), read_png(&vertex.join(&name)).unwrap());
+    for (i, camera) in cameras.into_iter().enumerate() {
+        let req = TerrainRequest {
+            camera,
+            size,
+            view: TerrainView::Relief,
+            lod: lod.clone(),
+            face_mapping: TangentWarp.id().to_string(),
+            seed: field.seed(),
+        };
+        let plan = plan_terrain_field(&req, field.as_ref()).unwrap();
+        let meshes: Vec<_> = plan.nodes.iter().map(|n| tile_mesh_field(field.as_ref(), &TangentWarp, n.tile, o.cells, R)).collect();
+        let refs: Vec<_> = meshes.iter().collect();
+        let frame = planet_render::reference::execute_reference(&ctx, &plan, &refs).unwrap();
+        let reference = Image::new(frame.width, frame.height, frame.rgba);
+        let a = read_png(&compact.join(format!("frame_{i:04}.png"))).unwrap();
         let (mut wrong, mut shaded) = (0usize, 0usize);
         for y in 0..a.height {
             for x in 0..a.width {
-                let (p, q) = (a.pixel(x, y), b.pixel(x, y));
+                let (p, q) = (a.pixel(x, y), reference.pixel(x, y));
                 if (0..3).any(|c| p[c].abs_diff(q[c]) > 12) {
                     wrong += 1;
                 }
@@ -241,11 +270,9 @@ fn the_flight_from_compact_tiles_matches_the_vertex_reference_frame_by_frame() {
         worst = worst.max(wrong as f64 / f64::from(a.width * a.height));
         worst_shaded = worst_shaded.max(shaded as f64 / f64::from(a.width * a.height));
     }
-    println!("flight, compact against vertex: worst fraction of pixels over 12 levels {worst:.5}");
-    println!("flight, compact against vertex: worst fraction over 3 levels {worst_shaded:.5}");
-    assert!(worst <= 0.001, "{worst} of a flight frame's pixels differ between the compact and the vertex format");
+    println!("flight, compact against the reference renderer: worst fraction of pixels over 12 levels {worst:.5}");
+    println!("flight, compact against the reference renderer: worst fraction over 3 levels {worst_shaded:.5}");
+    assert!(worst <= 0.001, "{worst} of a flight frame's pixels differ between the compact tiles and the reference renderer");
     assert!(worst_shaded <= 0.002, "{worst_shaded} of a flight frame's pixels differ by more than 3 levels: a normal decode error?");
-    for d in [compact, vertex] {
-        let _ = std::fs::remove_dir_all(d);
-    }
+    let _ = std::fs::remove_dir_all(compact);
 }

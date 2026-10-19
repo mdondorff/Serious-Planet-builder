@@ -4,9 +4,9 @@
 use planet_core::cube::TangentWarp;
 use planet_core::TileId;
 use planet_frame::managed::TileSink;
-use planet_generators::compact::{compact_tile_field, slot_bytes, RenderTile};
+use planet_generators::compact::{compact_tile_field, slot_bytes, CompactTile};
 use planet_generators::height::Reference;
-use planet_generators::mesh::{tile_mesh_field, MeshVertex};
+
 use planet_streaming::SlotRef;
 
 const CELLS: u32 = 32;
@@ -16,7 +16,7 @@ const RADIUS_M: f64 = 6_371_000.0;
 struct DefaultSink;
 
 impl TileSink for DefaultSink {
-    fn upload_at(&mut self, _tile: &RenderTile, _slot: SlotRef) -> Result<(), String> {
+    fn upload_at(&mut self, _tile: &CompactTile, _slot: SlotRef) -> Result<(), String> {
         Ok(())
     }
     fn forget(&mut self, _tile: TileId) {}
@@ -28,18 +28,13 @@ fn tile_id() -> TileId {
 
 // spec: STRM-006, TEST-011, TEST-012
 #[test]
-fn a_compact_tile_counts_at_its_slot_size_and_a_vertex_fallback_tile_at_its_vertex_size() {
+fn a_compact_tile_counts_at_its_slot_size() {
     let field = Reference(1);
-    let compact = RenderTile::Compact(compact_tile_field(&field, &TangentWarp, tile_id(), CELLS, RADIUS_M));
-    let mesh = tile_mesh_field(&field, &TangentWarp, tile_id(), CELLS, RADIUS_M);
-    let vertex_bytes = mesh.vertices.len() as u64 * MeshVertex::GPU_STRIDE;
-    let vertex = RenderTile::Vertex(mesh);
+    let compact = compact_tile_field(&field, &TangentWarp, tile_id(), CELLS, RADIUS_M);
     let sink = DefaultSink;
 
     assert_eq!(sink.upload_bytes(&compact), slot_bytes(CELLS), "a compact tile counts at its slot (GEN-025)");
     assert_eq!(sink.upload_bytes(&compact), 9_168, "9,168 B at cells 32");
-    assert_eq!(sink.upload_bytes(&vertex), vertex_bytes, "a vertex tile counts at its vertex size");
-    assert!(vertex_bytes > 5 * 9_168, "the two sizes differ by about 6x, which is what a wrong count would cost: {vertex_bytes}");
     // Whole tiles under the cap: 114 compact tiles of 9,168 B in 1 MiB (the learnings entry of the upload budget).
     assert_eq!((1u64 << 20) / sink.upload_bytes(&compact), 114);
 }

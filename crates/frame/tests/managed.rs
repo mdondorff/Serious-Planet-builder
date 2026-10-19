@@ -12,9 +12,8 @@ use planet_frame::upload::{UploadBudget, DEFAULT_TILE_BYTES_PER_FRAME};
 use planet_frame::{
     plan_terrain_field, plan_terrain_threaded, residency_set_field, Camera, LodParams, SelectionCache, TerrainRequest, TerrainView,
 };
-use planet_generators::compact::RenderTile;
+use planet_generators::compact::CompactTile;
 use planet_generators::height::{HeightField, Reference};
-use planet_generators::mesh::TileMesh;
 use planet_streaming::{FakeClock, ManualSpawner, ResidencyManager, SlotRef, Spawner, StreamConfig, Streamer, ThreadPool, TileSource};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -70,18 +69,25 @@ struct Source {
     lod: LodParams,
 }
 
-impl TileSource<RenderTile> for Source {
-    fn load(&self, tile: TileId) -> Result<RenderTile, String> {
+impl TileSource<CompactTile> for Source {
+    fn load(&self, tile: TileId) -> Result<CompactTile, String> {
         let field = Reference(1);
         let rec = ResidentRecords::new(&field, &TangentWarp, &self.lod).record(tile);
-        Ok(RenderTile::Vertex(TileMesh {
+        Ok(CompactTile {
             id: tile,
             cells: CELLS,
             key: rec.mesh_key,
             origin: rec.origin,
-            vertices: Vec::new(),
-            climate: Default::default(),
-        }))
+            ctrl: [[0.0; 3]; 9],
+            h_origin: 0.0,
+            hr_min: 0.0,
+            hr_step: 1.0,
+            skirt_depth: 0.0,
+            flip: false,
+            relief_m: 0.0,
+            climate_words: [0; planet_generators::climate::CLIMATE_TEXELS],
+            texels: Vec::new(),
+        })
     }
 }
 
@@ -154,11 +160,11 @@ struct CountingSink {
 }
 
 impl TileSink for CountingSink {
-    fn upload_bytes(&self, _tile: &RenderTile) -> u64 {
+    fn upload_bytes(&self, _tile: &CompactTile) -> u64 {
         self.bytes
     }
 
-    fn upload_at(&mut self, tile: &RenderTile, slot: SlotRef) -> Result<(), String> {
+    fn upload_at(&mut self, tile: &CompactTile, slot: SlotRef) -> Result<(), String> {
         let id = tile.id();
         if let Some(other) = self.owner.get(&slot) {
             if *other != id {
@@ -175,7 +181,7 @@ impl TileSink for CountingSink {
         Ok(())
     }
 
-    fn upload_batch(&mut self, tiles: &[(&RenderTile, SlotRef)]) -> Result<UploadStats, String> {
+    fn upload_batch(&mut self, tiles: &[(&CompactTile, SlotRef)]) -> Result<UploadStats, String> {
         self.batches.push(tiles.len());
         let mut stats = UploadStats::default();
         for (tile, slot) in tiles {
@@ -883,8 +889,9 @@ fn the_prefetch_set_is_computed_on_the_worker_and_never_on_the_frame() {
 
 // ---- the per-frame upload budget (STRM-006 upload cap) ----
 
-/// Bytes of one vertex-format tile at cells 32 (what the renderer uploads today).
-const VERTEX_TILE_BYTES: u64 = 58_608;
+/// A tile of 58,608 B, the size of the former vertex tile at cells 32: the cap logic does not depend on the format, and tiles this big make
+/// the scripts of these tests reach the 1 MiB cap (compact tiles of 9,168 B, `COMPACT_TILE_BYTES`, do not: the dive peaks at 586,752 B).
+const FAT_TILE_BYTES: u64 = 58_608;
 
 /// Rank of a tile in the upload order, by the wants the frame started with, worked out here from first principles: the draw
 /// set with its ancestors and the roots, then R with its ancestors, then the prefetch set, then the rest; coarse before fine.
@@ -964,10 +971,9 @@ fn run_budgeted(rig: &mut Rig, frames: usize, script: &dyn Fn(usize) -> PlanetFi
 // spec: STRM-006, STRM-017, STRM-002
 #[test]
 fn on_the_dive_and_a_teleport_the_upload_cap_holds_in_every_frame_in_class_order_and_no_frame_is_blank() {
-    let mut rig = Rig::budgeted(1_000_000, true, VERTEX_TILE_BYTES, UploadBudget::default());
+    let mut rig = Rig::budgeted(1_000_000, true, FAT_TILE_BYTES, UploadBudget::default());
     let cap = DEFAULT_TILE_BYTES_PER_FRAME;
     assert_eq!(cap, 1 << 20);
-    assert_eq!(VERTEX_TILE_BYTES, planet_generators::mesh::vertex_count(32) as u64 * planet_generators::mesh::MeshVertex::GPU_STRIDE);
     let c = FrameCounts { upload_bytes: 7, deferred: 8, node_bytes: 9, uploaded: 3, ..Default::default() };
     assert_eq!(FrameCounts::NAMES.len(), c.values().len());
     assert_eq!(&c.values()[7..12], &[3, 0, 7, 8, 9]);
@@ -983,7 +989,7 @@ fn on_the_dive_and_a_teleport_the_upload_cap_holds_in_every_frame_in_class_order
     let peak = dive.iter().chain(&teleport).map(|f| f.bytes).max().unwrap();
     eprintln!("dive+teleport: {deferring} frames deferred tiles, peak {peak} B of {cap} B");
     assert!(deferring > 5, "the scripts must hit the cap, or the test proves nothing: {deferring}");
-    assert!(peak <= cap && peak > cap - VERTEX_TILE_BYTES, "full frames fill the cap to within one tile: {peak}");
+    assert!(peak <= cap && peak > cap - FAT_TILE_BYTES, "full frames fill the cap to within one tile: {peak}");
     // The teleport fill drains, and once it has the frame is the synchronous frame.
     let mut last = None;
     for _ in 0..200 {
@@ -1002,7 +1008,7 @@ fn on_the_dive_and_a_teleport_the_upload_cap_holds_in_every_frame_in_class_order
 #[test]
 fn a_tile_larger_than_the_cap_is_still_written_one_a_frame_and_nothing_starves() {
     let mut rig =
-        Rig::budgeted(1_000_000, false, VERTEX_TILE_BYTES, UploadBudget { tile_bytes_per_frame: 10_000, node_records_in_cap: false });
+        Rig::budgeted(1_000_000, false, FAT_TILE_BYTES, UploadBudget { tile_bytes_per_frame: 10_000, node_records_in_cap: false });
     // The six roots are the start-up load: all written in frame 0 whatever their bytes (STRM-001, exempt from the cap); every tile
     // after them is a steady one and goes one a frame, though each is over the cap.
     let frames = run_budgeted(&mut rig, 40, &|_| here(), false);
@@ -1020,7 +1026,7 @@ fn a_tile_larger_than_the_cap_is_still_written_one_a_frame_and_nothing_starves()
 fn node_records_are_their_own_line_and_count_inside_the_cap_only_when_asked() {
     let own = UploadBudget { tile_bytes_per_frame: 400_000, node_records_in_cap: false };
     let inside = UploadBudget { node_records_in_cap: true, ..own };
-    let mut rigs = [Rig::budgeted(1_000_000, false, VERTEX_TILE_BYTES, own), Rig::budgeted(1_000_000, false, VERTEX_TILE_BYTES, inside)];
+    let mut rigs = [Rig::budgeted(1_000_000, false, FAT_TILE_BYTES, own), Rig::budgeted(1_000_000, false, FAT_TILE_BYTES, inside)];
     let mut prev = [0u64; 2];
     let mut shrunk = false;
     for k in 0..60 {
@@ -1049,7 +1055,7 @@ fn the_upload_order_and_what_is_written_each_frame_are_the_same_on_1_2_and_8_thr
     let mut runs = Vec::new();
     for threads in [1usize, 2, 8] {
         let mut rig =
-            Rig::budgeted(1_000_000, true, VERTEX_TILE_BYTES, UploadBudget { tile_bytes_per_frame: 300_000, node_records_in_cap: false });
+            Rig::budgeted(1_000_000, true, FAT_TILE_BYTES, UploadBudget { tile_bytes_per_frame: 300_000, node_records_in_cap: false });
         rig.tile_spawner.threads.store(threads, Ordering::SeqCst);
         runs.push(run_budgeted(&mut rig, 60, &script, true));
     }
@@ -1062,13 +1068,13 @@ fn the_upload_order_and_what_is_written_each_frame_are_the_same_on_1_2_and_8_thr
 #[test]
 fn a_full_fill_at_the_cap_takes_the_frames_the_cap_allows_and_defers_only_full_frames() {
     // Ground view from a cold start, every tile finishing within the frame it is asked for: the cap alone paces the fill.
-    let mut rig = Rig::budgeted(1_000_000, false, VERTEX_TILE_BYTES, UploadBudget::default());
+    let mut rig = Rig::budgeted(1_000_000, false, FAT_TILE_BYTES, UploadBudget::default());
     let ground = track(0.0, 2.0);
     let frames = run_budgeted(&mut rig, 120, &|_| ground, true);
     let total: u64 = frames.iter().map(|f| f.written.len() as u64).sum();
-    let per_frame = (DEFAULT_TILE_BYTES_PER_FRAME / VERTEX_TILE_BYTES) as usize;
+    let per_frame = (DEFAULT_TILE_BYTES_PER_FRAME / FAT_TILE_BYTES) as usize;
     let busy = frames.iter().filter(|f| f.bytes > 0).count();
-    eprintln!("ground fill: {total} tiles in {busy} upload frames at {per_frame} tiles of {VERTEX_TILE_BYTES} B a frame");
+    eprintln!("ground fill: {total} tiles in {busy} upload frames at {per_frame} tiles of {FAT_TILE_BYTES} B a frame");
     assert!(total > 400, "the fill must be large enough to span many frames: {total}");
     assert!(rig.lp.pending().is_empty(), "the fill drained within the script");
     assert!(busy >= total.div_ceil(per_frame as u64) as usize, "never faster than the cap allows");
@@ -1080,8 +1086,8 @@ fn a_full_fill_at_the_cap_takes_the_frames_the_cap_allows_and_defers_only_full_f
 #[test]
 fn a_frame_that_uploads_under_unchanged_wants_builds_no_set_over_the_wants() {
     // Two tiles a frame against a fill of hundreds: tiles wait for many frames, the camera stays, the wants settle.
-    let cap = 2 * VERTEX_TILE_BYTES;
-    let mut rig = Rig::budgeted(1_000_000, true, VERTEX_TILE_BYTES, UploadBudget { tile_bytes_per_frame: cap, node_records_in_cap: false });
+    let cap = 2 * FAT_TILE_BYTES;
+    let mut rig = Rig::budgeted(1_000_000, true, FAT_TILE_BYTES, UploadBudget { tile_bytes_per_frame: cap, node_records_in_cap: false });
     let ground = track(0.0, 2.0);
     let (mut uploading, mut draw_changes, mut prefetch_changes) = (0u64, 0u64, 0u64);
     let mut draw_after_last_change = 0u64;
@@ -1154,8 +1160,8 @@ struct CountedSource {
     loads: Arc<AtomicUsize>,
 }
 
-impl TileSource<RenderTile> for CountedSource {
-    fn load(&self, tile: TileId) -> Result<RenderTile, String> {
+impl TileSource<CompactTile> for CountedSource {
+    fn load(&self, tile: TileId) -> Result<CompactTile, String> {
         self.loads.fetch_add(1, Ordering::SeqCst);
         self.inner.load(tile)
     }

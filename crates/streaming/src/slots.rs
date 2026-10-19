@@ -6,16 +6,13 @@
 use planet_core::TileId;
 use std::collections::{BTreeSet, VecDeque};
 
-/// Tiles of level 0 to this level live in the small vertex pool (ADR 0033 point 3: at most 126 tiles).
-pub const VERTEX_POOL_MAX_LEVEL: u8 = 2;
-
-/// Which pool a slot belongs to.
+/// Which pool a slot belongs to. There is one pool, of compact slots (the vertex pool of levels 0-2 and fallback tiles went with
+/// the vertex format, ADR 0062); the type stays so that `SlotRef` keeps its shape if a second pool is ever added (GEN-025: a later
+/// per-tile block).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PoolKind {
-    /// Levels 3 and finer: the large pool (compact blocks or vertex blocks, whatever the tile format of the day).
+    /// The pool of compact blocks, levels 3 and finer.
     Main,
-    /// Levels 0-2 and the CON-13 fallback tiles: a small pool of the vertex format, fixed capacity.
-    Vertex,
 }
 
 /// A slot: pool and index within it.
@@ -136,41 +133,31 @@ impl SlotPool {
     }
 }
 
-/// The two pools of a streamer. With `vertex_slots == 0` there is one pool and every tile uses it.
+/// The pool of a streamer (one pool of compact slots; see [`PoolKind`]).
 #[derive(Clone, Debug)]
 pub struct SlotPools {
     pub main: SlotPool,
-    pub vertex: Option<SlotPool>,
 }
 
 impl SlotPools {
-    pub fn new(main_slots: u32, vertex_slots: u32, retire_frames: u64) -> Self {
-        Self {
-            main: SlotPool::new(main_slots, retire_frames),
-            vertex: (vertex_slots > 0).then(|| SlotPool::new(vertex_slots, retire_frames)),
-        }
+    pub fn new(main_slots: u32, retire_frames: u64) -> Self {
+        Self { main: SlotPool::new(main_slots, retire_frames) }
     }
 
-    /// The pool a tile of `tile`'s level lives in.
-    pub fn kind_of(&self, tile: TileId) -> PoolKind {
-        if self.vertex.is_some() && tile.level() <= VERTEX_POOL_MAX_LEVEL {
-            PoolKind::Vertex
-        } else {
-            PoolKind::Main
-        }
+    /// The pool a tile lives in.
+    pub fn kind_of(&self, _tile: TileId) -> PoolKind {
+        PoolKind::Main
     }
 
     pub fn pool(&self, kind: PoolKind) -> &SlotPool {
         match kind {
             PoolKind::Main => &self.main,
-            PoolKind::Vertex => self.vertex.as_ref().unwrap_or(&self.main),
         }
     }
 
     pub fn pool_mut(&mut self, kind: PoolKind) -> &mut SlotPool {
         match kind {
             PoolKind::Main => &mut self.main,
-            PoolKind::Vertex => self.vertex.as_mut().unwrap_or(&mut self.main),
         }
     }
 
@@ -183,7 +170,6 @@ impl SlotPools {
     }
 
     pub fn check(&self) -> Result<(), String> {
-        self.main.check()?;
-        self.vertex.as_ref().map_or(Ok(()), SlotPool::check)
+        self.main.check()
     }
 }

@@ -89,7 +89,7 @@ fn a_share_that_holds_r_changes_nothing() {
     let d = view(&r, &leaves, 4.0);
     let all_roots: BTreeSet<TileId> = roots().into_iter().collect();
     let n = r.len() + all_roots.iter().filter(|t| !r.contains_key(t)).count();
-    let out = degrade(&d, &residency_list(&r), n, false, 0);
+    let out = degrade(&d, &residency_list(&r), n, 0);
     assert!(!out.report.degraded() && !out.report.budget_failure);
     assert_eq!(out.report.r_full, n);
     assert_eq!(out.residency.len(), n);
@@ -105,7 +105,7 @@ fn a_small_share_coarsens_the_surroundings_and_keeps_the_view_and_the_roots() {
     let full = r.len() + 5;
     assert!(pinned.len() + 12 < full, "the fixture has surroundings to lose ({} pinned, {full} in R)", pinned.len());
     for capacity in (pinned.len()..full).step_by(7).chain([pinned.len(), full - 1]) {
-        let out = degrade(&d, &residency_list(&r), capacity, false, 0);
+        let out = degrade(&d, &residency_list(&r), capacity, 0);
         let set: BTreeSet<TileId> = out.residency.iter().map(|(t, _)| *t).collect();
         assert!(set.len() <= capacity, "capacity {capacity}: {} slots", set.len());
         assert!(out.report.degraded() && !out.report.budget_failure, "capacity {capacity}: {:?}", out.report);
@@ -139,7 +139,7 @@ fn the_farthest_group_goes_first_and_the_result_is_nested_in_the_capacity() {
     let full = r.len() + 5;
     let list = residency_list(&r);
     // One slot too few: exactly one sibling group is merged, the one whose nearest member is farthest (finest among equals).
-    let out = degrade(&d, &list, full - 1, false, 0);
+    let out = degrade(&d, &list, full - 1, 0);
     let set: BTreeSet<TileId> = out.residency.iter().map(|(t, _)| *t).collect();
     let dropped: Vec<TileId> = r.keys().filter(|t| !set.contains(t)).copied().collect();
     assert!(!dropped.is_empty() && dropped.len() <= 4, "one group: {dropped:?}");
@@ -164,7 +164,7 @@ fn the_farthest_group_goes_first_and_the_result_is_nested_in_the_capacity() {
     // Nested: a smaller capacity only removes more.
     let mut previous: Option<BTreeSet<TileId>> = None;
     for capacity in (20..=full).rev().step_by(3) {
-        let set: BTreeSet<TileId> = degrade(&d, &list, capacity, false, 0).residency.iter().map(|(t, _)| *t).collect();
+        let set: BTreeSet<TileId> = degrade(&d, &list, capacity, 0).residency.iter().map(|(t, _)| *t).collect();
         if let Some(p) = &previous {
             assert!(set.is_subset(p), "capacity {capacity}: the set is not nested in the one for a larger capacity");
         }
@@ -178,7 +178,7 @@ fn the_degradation_is_a_pure_function_of_the_sets_and_the_capacity() {
     let (r, leaves) = region(21.5, 4.2);
     let d = view(&r, &leaves, 3.0);
     let list = residency_list(&r);
-    let reference = degrade(&d, &list, 60, false, 0);
+    let reference = degrade(&d, &list, 60, 0);
     let mut rev_list = list.clone();
     rev_list.reverse();
     let mut rev_d = d.clone();
@@ -186,7 +186,7 @@ fn the_degradation_is_a_pure_function_of_the_sets_and_the_capacity() {
     let mut rotated = list.clone();
     rotated.rotate_left(17);
     for l in [rev_list, rotated] {
-        let again = degrade(&rev_d, &l, 60, false, 0);
+        let again = degrade(&rev_d, &l, 60, 0);
         assert_eq!(again.residency, reference.residency);
         assert_eq!(again.report, reference.report);
     }
@@ -199,7 +199,7 @@ fn a_draw_set_that_does_not_fit_is_replaced_by_ancestors_as_a_declared_exception
     let d = view(&r, &leaves, 6.0);
     let pinned = closure(d.iter().map(|(t, _)| *t).chain(roots()));
     let capacity = pinned.len() - 10;
-    let out = degrade(&d, &residency_list(&r), capacity, false, 0);
+    let out = degrade(&d, &residency_list(&r), capacity, 0);
     let set: BTreeSet<TileId> = out.residency.iter().map(|(t, _)| *t).collect();
     assert!(out.report.budget_failure, "the pinned tiles ({}) exceed the capacity {capacity}", pinned.len());
     assert_eq!(out.report.pinned, pinned.len());
@@ -224,18 +224,20 @@ fn a_draw_set_that_does_not_fit_is_replaced_by_ancestors_as_a_declared_exception
 
 // spec: STRM-006
 #[test]
-fn levels_zero_to_two_live_in_the_vertex_pool_and_are_never_counted_or_merged() {
+fn every_tile_counts_against_the_capacity_there_is_no_pool_of_levels_zero_to_two() {
+    // Replaces the vertex-pool test (`remove-vertex-render-path`, ADR 0062): levels 0-2 once lived in a small pool that did not count
+    // against the capacity and were never merged away. One pool serves every level now: all tiles of R count, and the shrinking to a
+    // smaller capacity merges by distance whatever the level (the roots of the floor stay, LOD-011).
     let (r, leaves) = region(13.3, 9.7);
     let d = view(&r, &leaves, 4.0);
-    let counted = |s: &BTreeSet<TileId>| s.iter().filter(|t| t.level() > 2).count();
-    let full = degrade(&d, &residency_list(&r), usize::MAX / 2, true, 0);
+    let full = degrade(&d, &residency_list(&r), usize::MAX / 2, 0);
     let full_set: BTreeSet<TileId> = full.residency.iter().map(|(t, _)| *t).collect();
-    let capacity = counted(&full_set) - 15;
-    let out = degrade(&d, &residency_list(&r), capacity, true, 0);
+    assert_eq!(full.report.r_full, full_set.len(), "every tile of R is counted");
+    let capacity = full_set.len() - 15;
+    let out = degrade(&d, &residency_list(&r), capacity, 0);
     let set: BTreeSet<TileId> = out.residency.iter().map(|(t, _)| *t).collect();
-    assert!(counted(&set) <= capacity);
-    assert!(full_set.iter().filter(|t| t.level() <= 2).all(|t| set.contains(t)), "levels 0-2 are never merged away");
-    assert_eq!(out.report.r_full, counted(&full_set));
+    assert!(set.len() <= capacity, "{} tiles against a capacity of {capacity}", set.len());
+    assert_eq!(out.report.r_full, full_set.len());
 }
 
 struct Echo;
@@ -288,9 +290,9 @@ fn small_share_on_fakes_the_view_is_exact_the_surroundings_are_coarser_and_the_s
     }
     assert!(st.resident <= capacity);
     // The allocated total (blocks touched) stays inside the share.
-    let c = PoolConfig::fit_share(2 * GIB, 53_724, 16, 53_724, 25_000, 16 << 20, 2).unwrap();
+    let c = PoolConfig::fit_share(2 * GIB, 9_168, 16, 25_000, 16 << 20, 2).unwrap();
     let blocks = c.blocks_for(m.streamer().pools().main.high_water());
-    assert!(c.allocated_bytes_with(blocks, true) <= 2 * GIB);
+    assert!(c.allocated_bytes_with(blocks) <= 2 * GIB);
 }
 
 // spec: STRM-006, STRM-007

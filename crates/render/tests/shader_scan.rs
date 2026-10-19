@@ -2,7 +2,7 @@
 //! atmosphere's shaders (presentation shading, CON-11 v1.4) may hold the radius in their uniform block but carry no planet-scale
 //! literal or radius-like name, and no vertex stage may touch that block.
 
-use planet_render::{compact_terrain_shader, lit_post_shaders, EXEC_SHADERS, SHADERS, TERRAIN_SHADERS};
+use planet_render::{compact_terrain_shader, lit_post_shaders, EXEC_SHADERS, SHADERS};
 
 /// Violations in one WGSL source: numeric literals of planet-radius magnitude (>= 1e6) and radius-like identifiers.
 fn scan(source: &str) -> Vec<String> {
@@ -42,7 +42,7 @@ fn the_scanner_flags_planet_scale_constants_and_names() {
 #[test]
 fn shipped_shaders_contain_no_planet_scale_values() {
     let mut all = Vec::new();
-    for (name, src) in SHADERS.iter().chain(EXEC_SHADERS).chain(TERRAIN_SHADERS) {
+    for (name, src) in SHADERS.iter().chain(EXEC_SHADERS) {
         for h in scan(src) {
             all.push(format!("{name}: {h}"));
         }
@@ -51,6 +51,9 @@ fn shipped_shaders_contain_no_planet_scale_values() {
         for h in scan(&src) {
             all.push(format!("{name}: {h}"));
         }
+    }
+    for h in scan(&planet_render::reference::reference_shader()) {
+        all.push(format!("terrain-reference: {h}"));
     }
     // The atmosphere's shaders are presentation shading (CON-11 v1.4, ADR 0043): they hold the body's radius as a value of their
     // uniform block, decided in f64 on the CPU, so the radius-uniform rule does not apply; they carry no planet-scale literal and

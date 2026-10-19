@@ -11,8 +11,8 @@ pub mod gate;
 pub mod gpu_timing;
 pub mod graph;
 pub mod lit;
-#[cfg(feature = "spike06")]
-pub mod spike_compact;
+#[cfg(feature = "reference-renderer")]
+pub mod reference;
 #[cfg(feature = "spike07")]
 pub mod spike_detail;
 pub mod terrain;
@@ -27,38 +27,13 @@ pub use gate::requirements as adapter_requirements;
 pub use gpu_timing::{GpuPass, PassTimes};
 pub use lit::{lit_post_shaders, ExposureState, LitPath};
 pub use terrain::{
-    execute_terrain, execute_terrain_tiles, DrawMode, FirstUse, FrameTiming, InitCounts, ResidentFormat, TerrainRenderer, TerrainStats,
-    UploadCounters, UploadMode, UploadTimes, RING_SETS, TERRAIN_SHADERS, WARM_NODES,
+    execute_terrain_tiles, DrawMode, FirstUse, FrameTiming, InitCounts, TerrainRenderer, TerrainStats, UploadCounters, UploadMode,
+    UploadTimes, RING_SETS, WARM_NODES,
 };
 pub use ui::{UiFrame, UiPainter};
 pub use water::water_shaders;
 pub use water_gpu::{probe_surface, probe_waves, SurfaceProbe, WaveProbe};
 pub use window::{Presented, WindowHandles, WindowSurface, WINDOW_SHADERS};
-
-/// How terrain tiles are held and drawn (ADR 0033): the compact format for levels 3 and finer (default) or the 44-byte vertex format
-/// for every tile (the reference).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TileFormat {
-    Vertex,
-    Compact,
-}
-
-impl TileFormat {
-    pub fn name(self) -> &'static str {
-        match self {
-            TileFormat::Vertex => "vertex",
-            TileFormat::Compact => "compact",
-        }
-    }
-
-    pub fn parse(s: &str) -> Result<Self, String> {
-        match s {
-            "vertex" => Ok(TileFormat::Vertex),
-            "compact" => Ok(TileFormat::Compact),
-            other => Err(format!("unknown tile format '{other}' (vertex or compact)")),
-        }
-    }
-}
 
 /// Which adapter the process wants.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -115,8 +90,6 @@ pub struct GpuContext {
     pub(crate) indirect: bool,
     /// The draw mode new terrain renderers start in: 0 = the default (indirect where supported), 1 = per-draw, 2 = indirect.
     pub(crate) draw_preference: std::sync::atomic::AtomicU8,
-    /// The tile format new terrain paths use: 0 = the default (compact), 1 = vertex, 2 = compact.
-    pub(crate) format_preference: std::sync::atomic::AtomicU8,
     /// How terrain renderers write tiles: 0 = the default (batched), 1 = per slot, 2 = batched.
     pub(crate) upload_preference: std::sync::atomic::AtomicU8,
     /// What the device reported about itself (REND-029).
@@ -164,16 +137,7 @@ impl GpuContext {
             .map_err(|e| GpuError::Device(e.to_string()))?;
         let diagnostics = Arc::new(Diagnostics::default());
         install_diagnostics(&device, &diagnostics);
-        Ok(Self {
-            device,
-            queue,
-            info,
-            indirect,
-            draw_preference: Default::default(),
-            format_preference: Default::default(),
-            upload_preference: Default::default(),
-            diagnostics,
-        })
+        Ok(Self { device, queue, info, indirect, draw_preference: Default::default(), upload_preference: Default::default(), diagnostics })
     }
 
     /// The first wgpu error the device reported outside any error scope, with its description (REND-029).
@@ -226,24 +190,6 @@ impl GpuContext {
             2 => DrawMode::PerDraw,
             _ if self.indirect => DrawMode::Indirect,
             _ => DrawMode::PerDraw,
-        }
-    }
-
-    /// Choose the tile format the product paths (`test-render`, the pipelined loop, `--stream`, `--flight`, `--perf`) build and draw
-    /// (`--tile-format`); the default is compact (ADR 0033). The vertex format is the reference and stays selectable.
-    pub fn prefer_tile_format(&self, format: TileFormat) {
-        let v = match format {
-            TileFormat::Vertex => 1,
-            TileFormat::Compact => 2,
-        };
-        self.format_preference.store(v, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    /// The tile format product paths use now.
-    pub fn default_tile_format(&self) -> TileFormat {
-        match self.format_preference.load(std::sync::atomic::Ordering::SeqCst) {
-            1 => TileFormat::Vertex,
-            _ => TileFormat::Compact,
         }
     }
 

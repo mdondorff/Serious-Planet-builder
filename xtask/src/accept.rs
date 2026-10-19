@@ -96,7 +96,7 @@ fn read_m4_logs(dir: &Path) -> Vec<SceneFiles> {
 }
 
 /// The M5 window's files, read from `dir` (a missing file is `None`; judging is the library's job, TEST-026): `lit.json`,
-/// `lit-formats.json`, and for each streaming scene `<scene>-lit.json` with `<scene>-lit.frames.txt`.
+/// `lit-formats.json` (only the logs of windows 1 to 11 have one, report-only), and for each streaming scene `<scene>-lit.json` with `<scene>-lit.frames.txt`.
 fn read_m5_logs(dir: &Path) -> planet_perf::accept_m5::WindowFiles {
     planet_perf::accept_m5::WindowFiles {
         lit: std::fs::read(dir.join("lit.json")).ok(),

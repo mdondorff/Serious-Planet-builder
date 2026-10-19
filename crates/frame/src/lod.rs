@@ -313,8 +313,8 @@ pub struct SelectionCache {
     volumes: IdMap<Volume>,
     /// Field height at each tile's centre direction (the plan's tile origin), computed on first use by the plan builder.
     origin_heights: IdMap<f64>,
-    /// Mesh key of each tile for the grid size and finest level `mesh_key_params` (the key chains the cell count and the
-    /// finest-level class of the tile, `finest_class_key`; a change of either starts it over).
+    /// Mesh key of each tile for the grid size and finest level `mesh_key_params` (the key chains the cell count; a change of
+    /// either parameter starts it over).
     mesh_keys: IdMap<u64>,
     mesh_key_params: (u32, u8),
 }

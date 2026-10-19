@@ -276,13 +276,6 @@ fn water_light(n: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<f32>, refl: ve
 }
 "#;
 
-const ENTRY_VERTEX: &str = r#"
-@vertex
-fn vs_water(@builtin(instance_index) inst: u32, @location(0) pos: vec3<f32>, @location(1) coarse: vec3<f32>, @location(2) normal: vec3<f32>, @location(3) height: f32, @location(4) coarse_height: f32, @location(5) climate: vec2<f32>) -> WOut {
-    return water_vertex(terrain_vertex(inst, pos, coarse, normal, height, coarse_height, climate));
-}
-"#;
-
 const ENTRY_COMPACT: &str = r#"
 @vertex
 fn vs_water(@builtin(instance_index) inst: u32, @builtin(vertex_index) vi: u32) -> WOut {
@@ -297,12 +290,7 @@ fn class_table() -> String {
     format!("const WATER_CLASS_COLOURS = array<vec3<f32>, 6>(\n    {}\n);\n", c.join(",\n    "))
 }
 
-/// The water module for the vertex format; with `atmosphere` the lighting reads the atmosphere's tables.
-pub fn water_vertex_source(atmosphere: bool) -> String {
-    assemble(crate::terrain::TERRAIN_SHADERS[0].1.to_string(), ENTRY_VERTEX, atmosphere)
-}
-
-/// The water module for the compact format of tiles of `cells`.
+/// The water module for the compact format of tiles of `cells`; with `atmosphere` the lighting reads the atmosphere's tables.
 pub fn water_compact_source(cells: u32, atmosphere: bool) -> String {
     assemble(crate::compact::compact_terrain_shader(cells), ENTRY_COMPACT, atmosphere)
 }
@@ -320,8 +308,6 @@ fn assemble(terrain: String, entry: &str, atmosphere: bool) -> String {
 pub fn water_shaders() -> Vec<(&'static str, String)> {
     vec![
         ("water-math", format!("{WATER_MATH}\n@compute @workgroup_size(1) fn noop() {{}}")),
-        ("water-vertex", water_vertex_source(false)),
-        ("water-vertex-atmosphere", water_vertex_source(true)),
         ("water-compact", water_compact_source(32, false)),
         ("water-compact-atmosphere", water_compact_source(32, true)),
     ]

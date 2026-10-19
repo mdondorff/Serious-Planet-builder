@@ -17,15 +17,11 @@
 //! control points are `shell * dir - origin` rounded once from f64.
 //!
 //! CON-13: the height step is `relief / 16,777,215` (2^24 - 1 levels in the 32-bit field): every level is an integer an f32 holds
-//! exactly, so CPU and GPU form the same `f32(q)`, and the step is at most 1 mm up to [`WIDE_RELIEF_1MM_M`] (16.7 km) of relief in one tile; the reconstruction error stays within 1 mm up to 8,192 m (the f32 sum, GEN-019). The relief guard
-//! (a finest tile with more than [`FALLBACK_RELIEF_M`] falls back to the vertex format, [`tile_data_field`]) stays until the vertex
-//! format is removed; [`tile_data_field_guarded`] with `false` turns it off for the CON-13 tests.
+//! exactly, so CPU and GPU form the same `f32(q)`, and the step is at most 1 mm up to [`WIDE_RELIEF_1MM_M`] (16.7 km) of relief in one tile; the reconstruction error stays within 1 mm up to 8,192 m (the f32 sum, GEN-019). There is no relief guard and no fallback format: a tile with more relief has a larger step, documented in GEN-019.
 
 use crate::climate::{ClimateTexture, CLIMATE_BYTES, CLIMATE_MIN_COMPACT_CELLS, CLIMATE_TEXELS};
 use crate::height::HeightField;
-use crate::mesh::{
-    finest_class_key, mesh_key_field, normal_from_stencil, normal_stencil, skirt_depth, tile_mesh_field, vertex_count, MeshVertex, TileMesh,
-};
+use crate::mesh::{mesh_key_field, normal_from_stencil, normal_stencil, skirt_depth, vertex_count, MeshVertex};
 use planet_core::cube::FaceMapping;
 use planet_core::hash::hash_u64s;
 use planet_core::{PlanetFixed, TileId, Vec3};
@@ -62,28 +58,21 @@ pub const HEIGHT_STEPS: f64 = 16_777_215.0;
 /// Relief (metres) up to which one tile's height step is at most [`MAX_FINEST_STEP_M`]: 1 mm x [`HEIGHT_STEPS`] = 16,777 m.
 pub const WIDE_RELIEF_1MM_M: f64 = MAX_FINEST_STEP_M * HEIGHT_STEPS;
 
-/// The 16-bit levels of the former texel: the relief guard of GEN-019 stays at the relief where that step passed 1 mm.
-const GUARD_STEPS: f64 = 65_535.0;
-
 /// CON-13: tile-vertex quantisation at the finest level at most this many metres.
 pub const MAX_FINEST_STEP_M: f64 = 1.0e-3;
 
-/// Relief (metres) above which the former 16-bit height step exceeded [`MAX_FINEST_STEP_M`]: the guard that sends such a finest tile
-/// to the vertex format stays at this relief until `remove-vertex-render-path` (GEN-019).
-pub const FALLBACK_RELIEF_M: f64 = MAX_FINEST_STEP_M * GUARD_STEPS;
-
 /// Texels of a slot at `cells`: `(cells + 1)^2`.
-pub fn texel_count(cells: u32) -> usize {
+pub const fn texel_count(cells: u32) -> usize {
     ((cells + 1) * (cells + 1)) as usize
 }
 
 /// Bytes of the texels of a slot at `cells` (texels only).
-pub fn slot_texel_bytes(cells: u32) -> u64 {
+pub const fn slot_texel_bytes(cells: u32) -> u64 {
     texel_count(cells) as u64 * TEXEL_BYTES
 }
 
 /// The stride of a slot at `cells`: `456 + 8 (cells + 1)^2` (GEN-025: 2,768, 9,168 and 34,256 B at cells 16, 32 and 64).
-pub fn slot_bytes(cells: u32) -> u64 {
+pub const fn slot_bytes(cells: u32) -> u64 {
     SLOT_TEXEL_OFFSET + slot_texel_bytes(cells)
 }
 
@@ -259,6 +248,26 @@ impl CompactTile {
         self.h_origin + (self.hr_min + q as f32 * self.hr_step)
     }
 
+    /// The tile's id (the field `id`, as a method for the code that took it from the former `RenderTile`).
+    pub fn id(&self) -> TileId {
+        self.id
+    }
+
+    /// The tile's mesh key (the field `key`).
+    pub fn key(&self) -> u64 {
+        self.key
+    }
+
+    /// Cells per tile edge (the field `cells`).
+    pub fn cells(&self) -> u32 {
+        self.cells
+    }
+
+    /// Tile centre at its terrain height, planet-fixed f64 (the field `origin`; the origin of the plan's camera-relative offsets).
+    pub fn origin(&self) -> PlanetFixed {
+        self.origin
+    }
+
     /// Whether the CON-13 step bound (1 mm) holds for this tile.
     pub fn step_within_con13(&self) -> bool {
         f64::from(self.hr_step) <= MAX_FINEST_STEP_M * (1.0 + 1.0e-6)
@@ -276,77 +285,6 @@ impl CompactTile {
         ];
         v.extend(self.slot_data().chunks(4).map(|c| u64::from(u32::from_le_bytes(c.try_into().expect("a slot is a multiple of 4 bytes")))));
         hash_u64s(0x0063_706b, &v)
-    }
-}
-
-/// A tile as the renderer takes it: the vertex format (levels 0-2, and fallback tiles) or the compact format.
-#[derive(Clone, Debug, PartialEq)]
-pub enum RenderTile {
-    Vertex(TileMesh),
-    Compact(CompactTile),
-}
-
-impl RenderTile {
-    /// The lowest height of the tile's own lattice vertices ([`CompactTile::min_height_m`], [`TileMesh::min_height_m`]).
-    pub fn min_height_m(&self) -> f32 {
-        match self {
-            RenderTile::Vertex(m) => m.min_height_m(),
-            RenderTile::Compact(c) => c.min_height_m(),
-        }
-    }
-
-    pub fn id(&self) -> TileId {
-        match self {
-            RenderTile::Vertex(m) => m.id,
-            RenderTile::Compact(c) => c.id,
-        }
-    }
-
-    pub fn key(&self) -> u64 {
-        match self {
-            RenderTile::Vertex(m) => m.key,
-            RenderTile::Compact(c) => c.key,
-        }
-    }
-
-    pub fn cells(&self) -> u32 {
-        match self {
-            RenderTile::Vertex(m) => m.cells,
-            RenderTile::Compact(c) => c.cells,
-        }
-    }
-
-    /// Tile centre at its terrain height, planet-fixed f64 (the origin of the plan's camera-relative offsets).
-    pub fn origin(&self) -> PlanetFixed {
-        match self {
-            RenderTile::Vertex(m) => m.origin,
-            RenderTile::Compact(c) => c.origin,
-        }
-    }
-
-    pub fn is_compact(&self) -> bool {
-        matches!(self, RenderTile::Compact(_))
-    }
-}
-
-/// Why a tile is in the vertex format.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum VertexReason {
-    /// Levels 0-2: the base surface model error is too large.
-    CoarseLevel,
-    /// A finest tile whose relief makes the 16-bit step exceed 1 mm (CON-13, ADR 0033 point 5).
-    Relief,
-}
-
-/// The format decision of a tile, from its level and relief alone (pure; CON-03). `relief_m` is only read at the finest level.
-/// `finest_level` is the LOD parameter `max_level`.
-pub fn vertex_reason(level: u8, finest_level: u8, relief_m: f64) -> Option<VertexReason> {
-    if level < COMPACT_MIN_LEVEL {
-        Some(VertexReason::CoarseLevel)
-    } else if level >= finest_level && relief_m / GUARD_STEPS > MAX_FINEST_STEP_M {
-        Some(VertexReason::Relief)
-    } else {
-        None
     }
 }
 
@@ -486,61 +424,6 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
     tile
 }
 
-/// The vertex-format mesh of a tile for a view whose finest level is `finest_level`: [`tile_mesh_field`] with the key of its
-/// class ([`finest_class_key`]), so a vertex tile and a compact tile of the same view carry the keys the plan expects.
-pub fn vertex_tile_field(
-    field: &dyn HeightField,
-    map: &dyn FaceMapping,
-    id: TileId,
-    cells: u32,
-    radius_m: f64,
-    finest_level: u8,
-) -> TileMesh {
-    let mut mesh = tile_mesh_field(field, map, id, cells, radius_m);
-    mesh.key = finest_class_key(mesh.key, id, finest_level);
-    mesh
-}
-
-/// The tile as the renderer will hold it: the vertex format for levels 0-2 and for a finest tile whose relief breaks CON-13's
-/// 1 mm (the fallback, ADR 0033 point 5), the compact format otherwise. `finest_level` is the LOD parameter `max_level`. The
-/// tile carries the key of its tile and class ([`finest_class_key`]): the format decision is a function of that key (tile, field,
-/// "at or deeper than the cap") and the tile's own relief, so a resident tile reused by its key was decided for the same class.
-pub fn tile_data_field(
-    field: &dyn HeightField,
-    map: &dyn FaceMapping,
-    id: TileId,
-    cells: u32,
-    radius_m: f64,
-    finest_level: u8,
-) -> RenderTile {
-    tile_data_field_guarded(field, map, id, cells, radius_m, finest_level, true)
-}
-
-/// [`tile_data_field`] with the relief guard switchable: `relief_guard = false` builds a finest tile of any relief compact (the
-/// CON-13 tests of the wide texel, GEN-019); levels 0-2 stay in the vertex format. The guard goes with the vertex format.
-pub fn tile_data_field_guarded(
-    field: &dyn HeightField,
-    map: &dyn FaceMapping,
-    id: TileId,
-    cells: u32,
-    radius_m: f64,
-    finest_level: u8,
-    relief_guard: bool,
-) -> RenderTile {
-    let vertex = || RenderTile::Vertex(vertex_tile_field(field, map, id, cells, radius_m, finest_level));
-    if vertex_reason(id.level(), finest_level, 0.0).is_some() {
-        return vertex();
-    }
-    let mut tile = compact_tile_field(field, map, id, cells, radius_m);
-    match vertex_reason(id.level(), finest_level, if relief_guard { tile.relief_m } else { 0.0 }) {
-        Some(_) => vertex(),
-        None => {
-            tile.key = finest_class_key(tile.key, id, finest_level);
-            RenderTile::Compact(tile)
-        }
-    }
-}
-
 // ---- CPU mirror of the vertex shader (f32; same operations, but the shader may fuse multiply-adds, so it is not bit-exact with the GPU) ----
 
 type V = [f32; 3];
@@ -657,14 +540,5 @@ impl CompactTile {
     /// Every vertex as the shader computes it, in the vertex format's order.
     pub fn shade_all(&self) -> Vec<MeshVertex> {
         (0..vertex_count(self.cells)).map(|vi| self.shade_vertex(vi)).collect()
-    }
-}
-
-impl CompactTile {
-    /// Whether this tile may be drawn as a tile of a view whose finest level is `finest_level`: the format decision depends on that
-    /// LOD parameter. Keys from [`tile_data_field`] carry the class ([`finest_class_key`]), so a resident tile is never reused across
-    /// classes; this check is for a tile built with [`compact_tile_field`] (class-free key) that a consumer holds across views.
-    pub fn allowed_at_finest_level(&self, finest_level: u8) -> bool {
-        vertex_reason(self.id.level(), finest_level, self.relief_m).is_none()
     }
 }

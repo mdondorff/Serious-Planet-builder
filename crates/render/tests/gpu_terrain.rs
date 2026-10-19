@@ -5,11 +5,11 @@ use planet_core::cube::TangentWarp;
 use planet_core::{PlanetFixed, Vec3};
 use planet_frame::Camera;
 use planet_frame::{level_color, plan_terrain, scripted_views, LodParams, TerrainPlan, TerrainRequest, TerrainView};
-use planet_generators::compact::{tile_data_field, RenderTile};
+use planet_generators::compact::{compact_tile_field, CompactTile};
 use planet_generators::dump::FACE_COLORS;
 use planet_generators::height::Reference;
 use planet_generators::mesh::{grid_indices, TileMesh};
-use planet_render::{execute_terrain, execute_terrain_tiles, AdapterPolicy, GpuContext};
+use planet_render::{execute_terrain_tiles, AdapterPolicy, GpuContext};
 use planet_testkit::{GoldenChecks, Image, Tolerance};
 
 const R: f64 = 6_371_000.0;
@@ -33,37 +33,29 @@ fn plan_for(name_index: usize, view: TerrainView) -> (&'static str, TerrainPlan)
 }
 
 /// The tiles of the plan in the product's format: compact for levels 3 and finer, the vertex format below (REND-016).
-fn meshes_for(plan: &TerrainPlan) -> Vec<RenderTile> {
+fn meshes_for(plan: &TerrainPlan) -> Vec<CompactTile> {
     tiles_with(plan, CELLS)
 }
 
-fn tiles_with(plan: &TerrainPlan, cells: u32) -> Vec<RenderTile> {
-    plan.nodes.iter().map(|n| tile_data_field(&Reference(SEED), &TangentWarp, n.tile, cells, R, plan_finest(plan))).collect()
+fn tiles_with(plan: &TerrainPlan, cells: u32) -> Vec<CompactTile> {
+    plan.nodes.iter().map(|n| compact_tile_field(&Reference(SEED), &TangentWarp, n.tile, cells, R)).collect()
 }
 
-/// The finest level the test plans allow (`lod().max_level`).
-fn plan_finest(_plan: &TerrainPlan) -> u8 {
-    lod().max_level
-}
-
-fn render(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[RenderTile]) -> (Image, planet_render::TerrainStats) {
-    let refs: Vec<&RenderTile> = tiles.iter().collect();
+fn render(ctx: &GpuContext, plan: &TerrainPlan, tiles: &[CompactTile]) -> (Image, planet_render::TerrainStats) {
+    let refs: Vec<&CompactTile> = tiles.iter().collect();
     let (frame, stats) = execute_terrain_tiles(ctx, plan, &refs).unwrap();
     (Image::new(frame.width, frame.height, frame.rgba), stats)
 }
 
 /// The vertex-format meshes of the plan: the reference path, for the tests that read vertices on the CPU.
 fn vertex_meshes_for(plan: &TerrainPlan) -> Vec<TileMesh> {
-    plan.nodes
-        .iter()
-        .map(|n| planet_generators::compact::vertex_tile_field(&Reference(SEED), &TangentWarp, n.tile, CELLS, R, plan_finest(plan)))
-        .collect()
+    plan.nodes.iter().map(|n| planet_generators::mesh::tile_mesh_field(&Reference(SEED), &TangentWarp, n.tile, CELLS, R)).collect()
 }
 
-fn render_vertex(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[TileMesh]) -> (Image, planet_render::TerrainStats) {
+fn render_reference(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[TileMesh]) -> Image {
     let refs: Vec<&TileMesh> = meshes.iter().collect();
-    let (frame, stats) = execute_terrain(ctx, plan, &refs).unwrap();
-    (Image::new(frame.width, frame.height, frame.rgba), stats)
+    let frame = planet_render::reference::execute_reference(ctx, plan, &refs).unwrap();
+    Image::new(frame.width, frame.height, frame.rgba)
 }
 
 /// Pixels whose view ray hits the sphere just below the lowest terrain: they must show terrain, never the background.
@@ -111,19 +103,12 @@ fn ten_scripted_views_have_no_holes_and_exact_draw_counts() {
         // checks that what the GPU path did equals them.
         let counts = plan.counts();
         assert_eq!((stats.draw_calls, stats.triangles), (counts.draw_calls, counts.triangles), "{name}");
-        // The plan's upload bytes are the vertex-format tiles (the reference count); the product uploads each tile in its own format:
-        // texels and record for a compact tile, vertices for levels 0-2 and fallbacks.
-        let expected: u64 = meshes
-            .iter()
-            .map(|t| match t {
-                RenderTile::Compact(c) => c.resident_bytes(),
-                RenderTile::Vertex(m) => m.vertices.len() as u64 * planet_generators::mesh::MeshVertex::GPU_STRIDE,
-            })
-            .sum();
+        // The plan's upload bytes are the compact slots of its tiles, and the renderer wrote exactly them.
+        let expected: u64 = meshes.iter().map(CompactTile::resident_bytes).sum();
         assert_eq!(stats.vertex_bytes, expected, "{name}: bytes uploaded");
-        assert!(stats.vertex_bytes <= counts.upload_bytes, "{name}: the compact format never uploads more than the vertex format");
-        // The vertex format is the reference: the product's compact image equals it up to edge pixels.
-        let (reference, _) = render_vertex(&ctx, &plan, &vertex_meshes_for(&plan));
+        assert_eq!(stats.vertex_bytes, counts.upload_bytes, "{name}: the bytes uploaded equal the plan's count");
+        // The reference renderer draws the CPU meshes: the product's compact image equals it up to edge pixels.
+        let reference = render_reference(&ctx, &plan, &vertex_meshes_for(&plan));
         let wrong = img.pixels().zip(reference.pixels()).filter(|(p, q)| (0..3).any(|c| p[c].abs_diff(q[c]) > 12)).count();
         assert!(wrong * 1000 <= (img.width * img.height) as usize, "{name}: {wrong} pixels differ from the vertex-format image");
         let h = holes(&plan, &img);

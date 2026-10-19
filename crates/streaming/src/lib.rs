@@ -28,7 +28,7 @@ pub use budget::{PoolConfig, Tier};
 pub use layer::SchedWork;
 pub use manager::{degrade, DegradationReport, Degraded, ManagerFrame, ResidencyManager};
 pub use priority::Priority;
-pub use slots::{PoolKind, SlotPool, SlotPools, SlotRef, VERTEX_POOL_MAX_LEVEL};
+pub use slots::{PoolKind, SlotPool, SlotPools, SlotRef};
 
 use layer::{normalized, parent_in, Layer};
 use planet_core::{TileId, Vec3};
@@ -511,8 +511,6 @@ pub struct StreamConfig {
     /// Slots of the main pool (resident tiles plus jobs in flight never exceed it; roots and the draw set with its ancestors
     /// are never evicted, so a draw set that does not fit is a budget failure the manager reports).
     pub capacity: usize,
-    /// Slots of the small vertex pool for levels 0-2 (ADR 0033 point 3); 0: one pool, every tile in `capacity`.
-    pub vertex_pool_slots: usize,
     /// A given-back slot is reusable this many frames later (frames in flight; 0 for a renderer that finishes a frame before
     /// the next begins).
     pub retire_frames: u64,
@@ -535,7 +533,6 @@ impl Default for StreamConfig {
             max_in_flight: 4,
             queue_ahead: 0,
             capacity: 4096,
-            vertex_pool_slots: 0,
             retire_frames: 0,
             retry_after_ms: 1000,
             floor: 0,
@@ -764,11 +761,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             rx,
             frame: 0,
             stats: StreamStats::default(),
-            pools: SlotPools::new(
-                u32::try_from(config.capacity).expect("capacity in slots fits u32"),
-                u32::try_from(config.vertex_pool_slots).expect("vertex pool slots fit u32"),
-                config.retire_frames,
-            ),
+            pools: SlotPools::new(u32::try_from(config.capacity).expect("capacity in slots fits u32"), config.retire_frames),
             changes: Vec::new(),
             layers: [Layer::new(true, config.floor), Layer::new(false, config.floor), Layer::new(false, config.floor)],
             pending: [None, None, None],
@@ -960,11 +953,6 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         self.config.capacity
     }
 
-    /// Whether levels 0-2 have their own small pool (their tiles do not count against [`main_capacity`](Streamer::main_capacity)).
-    pub fn has_vertex_pool(&self) -> bool {
-        self.pools.vertex.is_some()
-    }
-
     /// The slot a resident tile occupies: where the renderer finds (and put) its data.
     pub fn slot_of(&self, tile: TileId) -> Option<SlotRef> {
         self.resident.get(&tile).map(|r| r.slot)
@@ -1035,10 +1023,9 @@ impl<T: Send + Sync + 'static> Streamer<T> {
     /// residency class, with the roots, that count against the pool; and the counted tiles of the draw set's closure with
     /// the roots.
     pub fn closure_numbers(&self) -> (usize, usize) {
-        let counted = |t: TileId| !self.has_vertex_pool() || t.level() > VERTEX_POOL_MAX_LEVEL;
         let roots: Vec<TileId> = self.config.roots();
-        let root_outside_draw = roots.iter().filter(|&&r| counted(r) && !self.layers[0].has(r)).count();
-        let root_outside_active = roots.iter().filter(|&&r| counted(r) && !self.is_active(r)).count();
+        let root_outside_draw = roots.iter().filter(|&&r| !self.layers[0].has(r)).count();
+        let root_outside_active = roots.iter().filter(|&&r| !self.is_active(r)).count();
         (self.active_counted + root_outside_active, self.draw_counted + root_outside_draw)
     }
 
@@ -1122,7 +1109,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 self.queue.mark_stale(class as u8);
             }
             for (t, was) in diff.flipped {
-                if class == 0 && (!self.has_vertex_pool() || t.level() > VERTEX_POOL_MAX_LEVEL) {
+                if class == 0 {
                     if was {
                         self.draw_counted -= 1;
                     } else {
@@ -1145,7 +1132,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
     /// A tile's best class changed from `old` to `new` (`None`: in no class).
     fn class_changed(&mut self, t: TileId, old: Option<RequestClass>, new: Option<RequestClass>) {
         let active = |c: Option<RequestClass>| matches!(c, Some(RequestClass::Draw | RequestClass::Residency));
-        if active(old) != active(new) && (!self.has_vertex_pool() || t.level() > VERTEX_POOL_MAX_LEVEL) {
+        if active(old) != active(new) {
             if active(new) {
                 self.active_counted += 1;
             } else {
@@ -1342,10 +1329,11 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             demand[self.pools.kind_of(k.3) as usize][usize::from(k.0 == RequestClass::Residency as u8)] += 1;
             cursor = Some(k);
         }
-        for kind in [PoolKind::Main, PoolKind::Vertex] {
+        {
+            let kind = PoolKind::Main;
             let [draw, res] = demand[kind as usize];
             if draw + res == 0 {
-                continue;
+                return;
             }
             // Slots that are free or will be reusable within the retire delay.
             let coming = |s: &Self| s.pools.pool(kind).free() as usize + s.pools.pool(kind).retiring() as usize;

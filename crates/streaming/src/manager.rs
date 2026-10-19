@@ -13,7 +13,6 @@
 //! The result is a pure function of `(R, D, capacity)`: the same inputs in any order give the same sets.
 
 use crate::layer::{normalized, parent_in, parents_listed};
-use crate::slots::VERTEX_POOL_MAX_LEVEL;
 use crate::{priority_key, Resolved, Streamer, Wants};
 use planet_core::TileId;
 use std::cmp::Reverse;
@@ -146,11 +145,11 @@ fn merge(
 }
 
 /// Fit R to `capacity` slots (see the module docs). `draw` and `residency` carry `(tile, priority)` as in [`Wants`]; only the
-/// residency priorities (distances) are read; a draw tile outside R (ADR 0031 keeps D inside R) or a root R lacks is taken at distance 0. `vertex_split`: tiles of level 0 to [`VERTEX_POOL_MAX_LEVEL`] live in the small
-/// vertex pool and do not count against `capacity` (nor are they ever merged away). `floor`: the render floor (LOD-011): the roots
+/// residency priorities (distances) are read; a draw tile outside R (ADR 0031 keeps D inside R) or a root R lacks is taken at distance 0. `floor`: the render floor (LOD-011): the roots
 /// are the tiles of that level, and no ancestor above it is ever added to a set.
-pub fn degrade(draw: &[(TileId, f64)], residency: &[(TileId, f64)], capacity: usize, vertex_split: bool, floor: u8) -> Degraded {
-    let counted = move |t: TileId| !vertex_split || t.level() > VERTEX_POOL_MAX_LEVEL;
+pub fn degrade(draw: &[(TileId, f64)], residency: &[(TileId, f64)], capacity: usize, floor: u8) -> Degraded {
+    // Every tile counts against the pool: levels 0-2 had a pool of their own until the vertex format went (ADR 0062).
+    let counted = |_t: TileId| true;
     // The set: R, the draw set with all ancestors, the roots. Distance of a tile: the smallest given (ancestors of R are in R).
     let mut set: BTreeMap<TileId, f64> = BTreeMap::new();
     for &(t, d) in residency {
@@ -186,17 +185,15 @@ pub fn degrade(draw: &[(TileId, f64)], residency: &[(TileId, f64)], capacity: us
     let mut report = DegradationReport { capacity, r_full: count(&set), pinned: pinned_count, ..Default::default() };
     let mut draw_out = draw.to_vec();
     if report.r_full > capacity {
-        // Tiles that never leave: the pinned ones and the ones that live in the vertex pool.
-        let mut keep: BTreeSet<TileId> = pinned.clone();
-        keep.extend(set.keys().copied().filter(|t| !counted(*t)));
+        // Tiles that never leave: the pinned ones.
+        let keep: BTreeSet<TileId> = pinned.clone();
         let (g, d) = merge(&mut set, &keep, &counted, capacity, floor);
         report.merged_groups += g;
         report.dropped += d;
         if count(&set) > capacity {
             // Last resort (ADR 0031 point 4c): the draw set with its ancestors alone exceed the pool.
             report.budget_failure = true;
-            let mut keep: BTreeSet<TileId> = roots(floor).into_iter().collect();
-            keep.extend(set.keys().copied().filter(|t| !counted(*t)));
+            let keep: BTreeSet<TileId> = roots(floor).into_iter().collect();
             let (g, d) = merge(&mut set, &keep, &counted, capacity, floor);
             report.merged_groups += g;
             report.dropped += d;
@@ -283,8 +280,7 @@ impl<T: Send + Sync + 'static> ResidencyManager<T> {
     /// One frame: fit the wants to the pool ([`degrade`]), hand them to the streamer, answer what to show for the caller's
     /// draw set (a draw tile replaced by the exception still resolves, to its nearest resident ancestor).
     pub fn begin_frame(&mut self, wants: &Wants) -> ManagerFrame {
-        let fitted =
-            degrade(&wants.draw, &wants.residency, self.streamer.main_capacity(), self.streamer.has_vertex_pool(), self.streamer.floor());
+        let fitted = degrade(&wants.draw, &wants.residency, self.streamer.main_capacity(), self.streamer.floor());
         let effective = Wants { draw: fitted.draw, residency: fitted.residency, prefetch: wants.prefetch.clone() };
         self.streamer.begin_frame_wants(&effective);
         self.last = fitted.report.clone();
@@ -342,7 +338,7 @@ impl<T: Send + Sync + 'static> ResidencyManager<T> {
                 self.fitted = false;
             } else {
                 self.fitted = true;
-                let fitted = degrade(&self.raw_draw, &self.raw_residency, capacity, self.streamer.has_vertex_pool(), self.streamer.floor());
+                let fitted = degrade(&self.raw_draw, &self.raw_residency, capacity, self.streamer.floor());
                 self.streamer.set_draw(&fitted.draw);
                 self.streamer.set_residency(&fitted.residency);
                 self.last = fitted.report;

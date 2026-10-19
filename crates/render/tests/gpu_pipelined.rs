@@ -1,11 +1,12 @@
 //! STRM-016: the renderer can submit a frame without waiting for it, reports how many frames the GPU has finished, and waits
 //! only when asked to (the loop's bound on frames in flight). The image of frames submitted without waiting equals the image of
-//! frames rendered with the wait. WARP and hardware alike.
+//! frames rendered with the wait. WARP and hardware alike. Compact tiles (task 2.2 of `remove-vertex-render-path`).
 
 use planet_core::cube::TangentWarp;
 use planet_frame::pipeline::{FramesInFlight, MAX_FRAMES_IN_FLIGHT};
 use planet_frame::{plan_terrain, scripted_views, LodParams, TerrainRequest, TerrainView};
-use planet_generators::mesh::{tile_mesh, TileMesh};
+use planet_generators::compact::{compact_tile_field, CompactTile};
+use planet_generators::height::Reference;
 use planet_render::{AdapterPolicy, GpuContext, TerrainRenderer};
 
 const R: f64 = 6_371_000.0;
@@ -27,9 +28,9 @@ fn frames_submitted_without_waiting_are_counted_bounded_and_draw_the_same_image(
     let mut reference = TerrainRenderer::new(&ctx, SIZE, CELLS);
     for p in &plans {
         for n in &p.nodes {
-            let m: TileMesh = tile_mesh(1, &TangentWarp, n.tile, CELLS, R);
-            renderer.upload(&ctx, &m).unwrap();
-            reference.upload(&ctx, &m).unwrap();
+            let m: CompactTile = compact_tile_field(&Reference(1), &TangentWarp, n.tile, CELLS, R);
+            renderer.upload_tile(&ctx, &m).unwrap();
+            reference.upload_tile(&ctx, &m).unwrap();
         }
     }
     let mut fi = FramesInFlight::new(MAX_FRAMES_IN_FLIGHT);
