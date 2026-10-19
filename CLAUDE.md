@@ -49,6 +49,7 @@ Specs, ADRs and working files are read by agents and the owner. Write definition
 ## Git
 - One branch per OpenSpec change (`change/<id>`). Small commits with clear messages.
 - Push the branch and open a PR with `gh pr create`. Merge it yourself (squash) only when CI is green on Windows and Linux and the verifier passed. A docs-only PR (only `docs/`, `openspec/`, `.claude/`, root `*.md`, `spikes/**/results/**`) runs the light `docs` check (spec-lint) instead and needs only that to be green (owner, 2026-10-16).
+- Before every push to a PR branch run `cargo xtask prepush` (check, test fast, and test gpu when the diff touches render, shaders or another golden-producing crate), while waiting is cheap. Lavapipe-only golden differences stay CI's job (owner, 2026-10-19).
 - After every push to a PR, start `gh pr checks <n> --watch` as a background command and act on its result (fix a failure, or verify and merge). Never end a turn with CI pending and no such watch running (owner, 2026-10-18).
 - Never force-push, never rewrite `main`'s history, never commit secrets or large binaries (goldens are small PNGs; anything over 1 MB needs an ADR).
 
