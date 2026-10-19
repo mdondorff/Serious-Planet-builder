@@ -164,6 +164,9 @@ impl HeightField for Probe<'_> {
     fn item_revision(&self) -> u64 {
         self.inner.item_revision()
     }
+    fn passes_through(&self, tile: planet_core::TileId, map: &dyn planet_core::FaceMapping) -> bool {
+        self.inner.passes_through(tile, map)
+    }
     fn height_bounds(&self, centre: Vec3, r: f64) -> (f64, f64) {
         self.inner.height_bounds(centre, r)
     }

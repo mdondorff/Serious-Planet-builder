@@ -153,7 +153,64 @@ fn a_stage_over_a_shared_definition_reads_the_bound_of_the_moment() {
     assert!(stage.max_abs_height_m() >= empty_bound + 40.0, "the bound grows with the item added through the lock");
 }
 
-// spec: STRM-027
+// spec: STRM-029
+#[test]
+fn a_stage_that_passes_a_tile_through_keys_as_its_source_in_both_key_domains_whatever_wraps_or_stacks_it() {
+    use planet_generators::height::cache_key_field;
+    use planet_generators::mesh::{mesh_key_field, MeshKeyer};
+    use planet_generators::water::WaterBounded;
+
+    let at = dir(1.0, 0.2, 0.1);
+    let (near, far) = (near_tile(at), near_tile(dir(-1.0, -0.3, -0.2)));
+    let coarse_far = TileId::from_direction(&TangentWarp, dir(-1.0, -0.3, -0.2), 4);
+    let coarse_near = TileId::from_direction(&TangentWarp, at, 4);
+    let def = world(&[hill(1, DEFAULT_ITEM_LAYER, at, 3_000.0)]);
+    let base: Arc<dyn HeightField> = Arc::new(Reference(7));
+    let one = stage_over(base.clone(), &def, DEFAULT_ITEM_LAYER, 0, 1);
+    // A second layer above, with an item of its own near the first: a far tile passes through both.
+    let def2 = world(&[hill(1, DEFAULT_ITEM_LAYER, at, 3_000.0), hill(2, "upper", at, 1_000.0)]);
+    let lower = Arc::new(stage_over(base.clone(), &def2, DEFAULT_ITEM_LAYER, 0, 1));
+    let two = StampStage::new(lower.clone(), def2.clone(), BodyId::PLANET, "upper", 1, 1).unwrap();
+    let plain = Reference(7);
+    let wrapped = WaterBounded::borrowed(&one, 0.0);
+    let keyer_one = MeshKeyer::new(&one, &TangentWarp, 32, R);
+    let keyer_plain = MeshKeyer::new(&plain, &TangentWarp, 32, R);
+    for (what, tile) in [("a far tile", far), ("a coarse far tile", coarse_far)] {
+        for (name, f) in [("one stage", &one as &dyn HeightField), ("two stages", &two), ("wrapped", &wrapped)] {
+            assert_eq!(
+                height_key(f, &TangentWarp, tile, 32, R),
+                height_key(&plain, &TangentWarp, tile, 32, R),
+                "{what}, {name}: height key"
+            );
+            assert_eq!(mesh_key(f, &TangentWarp, tile, 32, R), mesh_key(&plain, &TangentWarp, tile, 32, R), "{what}, {name}: mesh key");
+            assert_eq!(
+                cache_key_field(f, &TangentWarp, tile, 32),
+                cache_key_field(&plain, &TangentWarp, tile, 32),
+                "{what}, {name}: 64-bit"
+            );
+            assert_eq!(
+                mesh_key_field(f, &TangentWarp, tile, 32, R),
+                mesh_key_field(&plain, &TangentWarp, tile, 32, R),
+                "{what}, {name}: 64-bit mesh"
+            );
+        }
+        assert_eq!(keyer_one.key(tile), keyer_plain.key(tile), "{what}: the batch keyer");
+    }
+    // A tile the stamp touches is keyed by the stage, in every form.
+    for (what, tile) in [("the near tile", near), ("a coarse tile over the stamp", coarse_near)] {
+        assert_ne!(height_key(&one, &TangentWarp, tile, 32, R), height_key(&plain, &TangentWarp, tile, 32, R), "{what}: height key");
+        assert_ne!(mesh_key(&one, &TangentWarp, tile, 32, R), mesh_key(&plain, &TangentWarp, tile, 32, R), "{what}: mesh key");
+        assert_ne!(cache_key_field(&one, &TangentWarp, tile, 32), cache_key_field(&plain, &TangentWarp, tile, 32), "{what}: 64-bit");
+        assert_ne!(keyer_one.key(tile), keyer_plain.key(tile), "{what}: the batch keyer");
+    }
+    // An empty layer keys every tile as the base does.
+    let empty = stage_over(base.clone(), &world(&[]), DEFAULT_ITEM_LAYER, 0, 1);
+    for tile in [near, far, coarse_near, coarse_far] {
+        assert_eq!(height_key(&empty, &TangentWarp, tile, 32, R), height_key(&plain, &TangentWarp, tile, 32, R));
+    }
+}
+
+// spec: STRM-027, STRM-029
 #[test]
 fn a_key_without_a_stage_is_what_it_was_and_every_wrapper_that_forwards_the_source_key_forwards_the_chain() {
     let tile = TileId::new(Face(2), 5, 3, 7).unwrap();
@@ -191,8 +248,9 @@ fn a_key_without_a_stage_is_what_it_was_and_every_wrapper_that_forwards_the_sour
                 assert!(
                     text.contains("fn upstream(&self)")
                         && text.contains("fn stage_params(&self)")
-                        && text.contains("fn item_revision(&self)"),
-                    "{} forwards source_key but not upstream, stage_params and item_revision",
+                        && text.contains("fn item_revision(&self)")
+                        && text.contains("fn passes_through(&self"),
+                    "{} forwards source_key but not upstream, stage_params, item_revision and passes_through",
                     f.display()
                 );
             }

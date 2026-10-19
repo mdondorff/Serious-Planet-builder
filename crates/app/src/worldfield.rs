@@ -626,7 +626,7 @@ fn with_stamps<'a>(base: Box<dyn HeightField + 'a>, def: &Arc<WorldDefinition>) 
             .ok_or_else(|| "the definition has stamps but no usable radius".to_string())
     };
     // The index of a stage is its layer's place in the stack of ADR 0007 (a layer outside it follows the known ones, in name order), not
-    // its place among the layers that hold stamps: a first stamp in a lower layer re-keys nothing above it.
+    // its place among the layers that hold stamps: a layer added below shifts no index above it.
     let unknown: Vec<&String> = layers.iter().filter(|l| !planet_world_def::LAYER_STACK.contains(&l.as_str())).collect();
     let index_of = |layer: &str| {
         planet_world_def::LAYER_STACK.iter().position(|s| *s == layer).unwrap_or_else(|| {

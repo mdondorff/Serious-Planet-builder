@@ -324,6 +324,12 @@ pub trait HeightField: Send + Sync {
     fn stage_params(&self) -> Option<(&str, u32)> {
         None
     }
+    /// Whether this stage is the identity on its source for `tile` (STRM-029, GEN-027): no item touches the tile, so its output is the
+    /// source's bit for bit and its keys are the source's. Only an authored stage that reads nothing else than its items may say yes; the
+    /// default is no. A wrapper forwards it with [`upstream`](HeightField::upstream).
+    fn passes_through(&self, _tile: TileId, _map: &dyn FaceMapping) -> bool {
+        false
+    }
     /// The revision of the authored items this field reads (STRM-027): 0 when it reads none, else a number that differs after every
     /// edit of them and between any two definitions of the process. A cache that memoises per-tile results of the field
     /// ([`inputs_hash_for`](HeightField::inputs_hash_for)) checks them again when it changes. The default is the upstream's, which a wrapper
@@ -485,9 +491,23 @@ pub fn cache_key(map: &dyn FaceMapping, seed: u64, id: TileId, res: u32) -> u64 
     cache_key_field(&Reference(seed), map, id, res)
 }
 
+/// The field whose keys stand for `field` at `tile`: `field` itself, or, while a stage passes the tile through (it is the identity on its
+/// source there, STRM-029), the stage below. A key is the key of this field.
+pub fn key_source<'a>(field: &'a dyn HeightField, tile: TileId, map: &dyn FaceMapping) -> &'a dyn HeightField {
+    let mut f = field;
+    while f.passes_through(tile, map) {
+        match f.upstream() {
+            Some(below) => f = below,
+            None => break,
+        }
+    }
+    f
+}
+
 /// [`cache_key`] for any height field: its version, implementation id and input hash take the place of the
 /// reference generator's, so [`Reference`] gives exactly [`cache_key`].
 pub fn cache_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, res: u32) -> u64 {
+    let field = key_source(field, id, map);
     let mut v = vec![u64::from(field.version()), u64::from(HASH_VERSION), field.inputs_hash_for(id, map), id.raw(), u64::from(res)];
     v.push(hash_u64s(1, &fold_str(field.implementation_id())));
     v.push(hash_u64s(2, &fold_str(map.id())));
@@ -508,7 +528,8 @@ pub(crate) fn body_key_words(field: &dyn HeightField) -> [u64; 3] {
 /// A field together with the read set of the context it was built from (see [`HeightGenerator`]). Its keys follow the
 /// read set, so a body other than the planet keys differently from a field built directly from the same seed with
 /// `Reference(seed)` (which stands for the planet): plans for other bodies must take their field from the generator
-/// (multi-body seams, next change).
+/// (multi-body seams, next change). It wraps base fields only: it overrides the read set and the body, so it does not forward
+/// [`HeightField::passes_through`], and a stage inside it would not be passed through.
 pub struct Bound<F: HeightField> {
     field: F,
     inputs: u64,

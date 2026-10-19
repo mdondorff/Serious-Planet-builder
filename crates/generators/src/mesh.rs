@@ -112,6 +112,7 @@ fn mesh_key_chain(height_key: u64, cells: u32, body_params: u64, version: u32, s
 /// [`mesh_key`] for a height field: it chains the field's height key ([`cache_key_field`]), so [`Reference`] gives
 /// exactly [`mesh_key`] and any other field (other implementation id or version) gets other keys (ADR 0006).
 pub fn mesh_key_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileId, cells: u32, radius_m: f64) -> u64 {
+    let field = crate::height::key_source(field, id, map);
     mesh_key_chain(
         cache_key_field(field, map, id, cells),
         cells,
@@ -137,6 +138,8 @@ pub struct MeshKeyer<'a> {
     climate_word: u64,
     implementation_hash: u64,
     mapping_hash: u64,
+    /// The keyer of the stage below, for the tiles this field passes through (STRM-029).
+    below: Option<Box<MeshKeyer<'a>>>,
 }
 
 impl<'a> MeshKeyer<'a> {
@@ -152,10 +155,16 @@ impl<'a> MeshKeyer<'a> {
             climate_word: field.climate_version_word(),
             implementation_hash: hash_u64s(1, &crate::height::fold_str(field.implementation_id())),
             mapping_hash: hash_u64s(2, &crate::height::fold_str(map.id())),
+            below: field.upstream().map(|u| Box::new(MeshKeyer::new(u, map, cells, radius_m))),
         }
     }
 
     pub fn key(&self, id: TileId) -> u64 {
+        if let Some(below) = &self.below {
+            if self.field.passes_through(id, self.map) {
+                return below.key(id);
+            }
+        }
         let height_key = hash_u64s(
             0x006b_6579,
             &[

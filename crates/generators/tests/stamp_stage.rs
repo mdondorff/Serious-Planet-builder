@@ -132,6 +132,134 @@ fn stamps_apply_in_application_order_and_a_plateau_flattens_what_is_under_it() {
     }
 }
 
+// spec: GEN-027
+#[test]
+fn a_stage_with_no_item_in_reach_of_a_tile_is_the_identity_on_its_source_there_bit_for_bit_and_says_so() {
+    let at = dir(1.0, 0.2, 0.1);
+    let s = stage(world(vec![item(1, 0, at, 1_500.0, 60.0, Stamp::new(StampKind::Hill, [30.0, 0.0, 0.0]))]));
+    let base = Reference(1);
+    let map = &TangentWarp;
+    let far = TileId::from_direction(map, dir(-1.0, -0.4, 0.3), 12);
+    let near = TileId::from_direction(map, at, 12);
+    assert!(HeightField::passes_through(&s, far, map), "no item touches a tile on the other side");
+    assert!(!HeightField::passes_through(&s, near, map), "the tile under the stamp does not pass through");
+    // The tile's data, its samples, its bounds and its climate are the source's, bit for bit.
+    assert_eq!(generate_tile_field(&s, map, far, 16), generate_tile_field(&base, map, far, 16));
+    let (centre, angle) = (far.center_direction(map), 1.0e-3);
+    assert_eq!(s.height_bounds(centre, angle), base.height_bounds(centre, angle));
+    assert_eq!(s.climate(map, far), base.climate(map, far));
+    // Coarse tiles: the whole planet is one tile at level 0: the stamp is in it. A coarse tile away from the stamp passes through.
+    let coarse_far = TileId::from_direction(map, dir(-1.0, -0.4, 0.3), 3);
+    assert!(HeightField::passes_through(&s, coarse_far, map));
+    assert!(!HeightField::passes_through(&s, TileId::from_direction(map, at, 3), map));
+    // With the stamp removed from the definition's reach (an empty layer) every tile passes through.
+    let empty = stage(world(vec![]));
+    assert!(
+        HeightField::passes_through(&empty, near, map)
+            && HeightField::passes_through(&empty, TileId::new(planet_core::Face(0), 1, 0, 0).unwrap(), map)
+    );
+}
+
+/// A field that records every direction it is asked for, to compare them with the footprint a stage declares.
+struct Spy {
+    inner: Reference,
+    dirs: std::sync::Mutex<Vec<Vec3>>,
+}
+
+impl HeightField for Spy {
+    fn height(&self, d: Vec3) -> f64 {
+        self.dirs.lock().unwrap().push(d);
+        self.inner.height(d)
+    }
+    fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
+        self.dirs.lock().unwrap().extend_from_slice(dirs);
+        self.inner.heights_until(dirs, stop)
+    }
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
+        self.dirs.lock().unwrap().extend_from_slice(dirs);
+        self.inner.heights_threaded_until(dirs, stop, threads)
+    }
+    fn seed(&self) -> u64 {
+        self.inner.seed()
+    }
+    fn implementation_id(&self) -> &'static str {
+        self.inner.implementation_id()
+    }
+    fn version(&self) -> u32 {
+        self.inner.version()
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        self.inner.max_abs_height_m()
+    }
+}
+
+// spec: GEN-027
+#[test]
+fn every_point_a_tile_samples_lies_inside_the_footprint_the_stage_declares_so_passing_a_tile_through_is_sound() {
+    use planet_generators::compact::compact_tile_field;
+    use planet_generators::mesh::tile_mesh_field;
+    use planet_generators::stamp::STAGE_HALO;
+    use planet_world_def::footprint::{angle_between, tile_cap};
+
+    let map = &TangentWarp;
+    // Tiles at a face centre, on a face edge, at a cube corner; at coarse and fine levels.
+    let places = [dir(1.0, 0.0, 0.0), dir(1.0, 0.999_999, 0.0), dir(1.0, 1.0, 1.0), dir(0.3, -0.6, 0.7)];
+    for place in places {
+        for level in [1u8, 3, 12] {
+            let tile = TileId::from_direction(map, place, level);
+            let cap = tile_cap(map, tile, STAGE_HALO);
+            let check = |what: &str, dirs: Vec<Vec3>| {
+                assert!(!dirs.is_empty(), "{what}: the tile sampled something");
+                for d in dirs {
+                    let a = angle_between(cap.centre, d);
+                    assert!(
+                        a <= cap.angle,
+                        "{what}, level {level} place {place:?}: a sample is {a:.5} rad from the centre, the footprint reaches {:.5}",
+                        cap.angle
+                    );
+                }
+            };
+            let spy = Spy { inner: Reference(1), dirs: Default::default() };
+            let _ = generate_tile_field(&spy, map, tile, 16);
+            check("generate_tile_field 16", spy.dirs.lock().unwrap().clone());
+            for cells in [4u32, 16, 32] {
+                let spy = Spy { inner: Reference(1), dirs: Default::default() };
+                let _ = tile_mesh_field(&spy, map, tile, cells, R);
+                check(&format!("tile_mesh_field {cells}"), spy.dirs.lock().unwrap().clone());
+            }
+            for cells in [16u32, 32] {
+                let spy = Spy { inner: Reference(1), dirs: Default::default() };
+                let _ = compact_tile_field(&spy, map, tile, cells, R);
+                check(&format!("compact_tile_field {cells}"), spy.dirs.lock().unwrap().clone());
+            }
+        }
+    }
+}
+
+// spec: GEN-027
+#[test]
+fn a_stage_passes_nothing_through_on_a_mapping_other_than_the_cell_grids() {
+    struct OtherWarp;
+    impl planet_core::cube::FaceMapping for OtherWarp {
+        fn id(&self) -> &'static str {
+            "other"
+        }
+        fn face_to_plane(&self, s: f64) -> f64 {
+            s
+        }
+        fn plane_to_face(&self, u: f64) -> f64 {
+            u
+        }
+    }
+    let s = stage(world(vec![item(1, 0, dir(1.0, 0.2, 0.1), 1_500.0, 60.0, Stamp::new(StampKind::Hill, [30.0, 0.0, 0.0]))]));
+    let far = TileId::from_direction(&TangentWarp, dir(-1.0, -0.4, 0.3), 12);
+    assert!(HeightField::passes_through(&s, far, &TangentWarp));
+    assert!(!HeightField::passes_through(&s, far, &OtherWarp), "the same id is another place on another mapping: no claim");
+    // A root tile is never passed through: the stencil of a coarse mesh reaches past its declared cap.
+    let root = TileId::new(planet_core::Face(0), 0, 0, 0).unwrap();
+    assert!(!HeightField::passes_through(&stage(world(vec![])), root, &TangentWarp));
+}
+
 // spec: GEN-026
 #[test]
 fn the_heights_of_a_tile_are_bit_identical_at_any_thread_count_batch_order_and_batch_size() {
@@ -261,6 +389,9 @@ impl ItemReader for Recording {
     }
     fn revision(&self) -> u64 {
         self.inner.revision()
+    }
+    fn footprint_empty(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> bool {
+        self.inner.footprint_empty(body, layer, tile, halo)
     }
 }
 

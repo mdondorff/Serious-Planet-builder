@@ -303,7 +303,8 @@ impl<'a> TileSpec<'a> {
             key: self.key_of(tile.id),
             kind: KIND_MESH,
             tile: tile.id,
-            generator_version: self.field.version(),
+            // The version of the field whose key this is: a tile a stage passes through is the base's (STRM-029).
+            generator_version: planet_generators::height::key_source(self.field, tile.id, &TangentWarp).version(),
             hash_version: HASH_VERSION,
             node_set_id: *self.node_set_id.get_or_init(|| node_set_id_of(self.field)),
             payload: encode_render_tile(tile)?,
