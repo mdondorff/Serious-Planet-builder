@@ -504,13 +504,13 @@ impl WorldDefinition {
 
     /// The summary nodes a coarse tile reads (WDEF-008): `None` for a tile that records the footprint result instead. `halo`
     /// as for [`footprint_items`](WorldDefinition::footprint_items).
-    pub fn summary_cover(&self, body: BodyId, tile: TileId, halo: f64) -> Result<Option<Vec<TileId>>, MissingNode> {
+    pub fn summary_cover(&self, body: BodyId, tile: TileId, halo: f64) -> Result<Option<std::sync::Arc<Vec<TileId>>>, MissingNode> {
         let radius = self.usable_radius(body)?;
         let level = cells::cell_level(radius);
         if !summary::is_coarse(tile, level) {
             return Ok(None);
         }
-        Ok(Some(summary::cover(tile, level, summary::margin_rings(tile, halo, radius, level))))
+        Ok(Some(summary::cover_cached(tile, halo, radius, level)))
     }
 
     /// The items of one cell, `(id, content hash)` in id order.
@@ -885,7 +885,7 @@ impl<'a> GenContext<'a> {
         self.body_radius_m(body)?;
         let items = self.def.footprint_items(body, layer, tile, halo)?;
         if let Some(nodes) = self.def.summary_cover(body, tile, halo)? {
-            for node in nodes {
+            for &node in nodes.iter() {
                 let hash = self.def.summary_hash(body, layer, node)?;
                 let record = ReadRecord::SummaryNode { body, layer: layer.to_string(), node, hash };
                 self.record(record.path(), record);
