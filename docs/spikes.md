@@ -11,6 +11,7 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 |---|---|---|---|
 | SPIKE-08 | Ocean connectivity at 16384 | closed 2026-10-16 | `spikes/ocean-connectivity/results/` |
 | SPIKE-09 | Atmosphere f32 forms | closed | `spikes/atmosphere-f32/results/` |
+| SPIKE-16 | Dark patches over the sea while the camera moves (water-motion-gap; diagnosis) | closed 2026-10-19 (cause: the shore ramp depends on the drawn node's level) | `spikes/water-motion-gap/results/` |
 | SPIKE-11 | Mouse look plumbing | closed 2026-10-18 (recommendation: raw events, Locked then Confined) | `spikes/mouse-look/results/` |
 | SPIKE-15 | Edit-to-test build time | closed 2026-10-18 | `spikes/build-speed/results/` |
 | SPIKE-14 | egui in the frame | closed 2026-10-18 | `spikes/egui/results/` |
@@ -22,6 +23,19 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | exploration | Compact tiles in storage buffers (PR #225; ADR 0054) | closed | `spikes/compact-storage-buffer/results/` |
 
 The explorations before 2026-10-17 had no register entry; from now on every exploration gets a `SPIKE-NN` entry.
+
+## SPIKE-16 Dark patches over the sea while the camera moves (water-motion-gap)
+Status: closed
+Opened: 2026-10-19
+Closed: 2026-10-19
+Question: Why do dark patches with triangle edges appear on the sea near the camera at about 80 m over a shallow coast while the camera moves or rotates (owner, 2026-10-18)? Diagnosis only.
+Why it matters: the M5 gate's look review; the bug sits in the lit path (water pass or terrain shading) and blocked #304.
+Time box: about 4 hours of agent work.
+Success criteria: a scripted repro without the owner, the root cause with plan and camera facts and node counts, a proposed fix and the test that would catch it.
+Fallback if it fails: report what is known.
+Code location: spikes/water-motion-gap/ (results only; the diagnostic code is on branch `spike/water-motion-gap`, never merged).
+Result: reproduced with an 80 m coast path at 200 m/s in the pipelined lit loop (2,532 frames): the water is not missing (0 gap nodes, the water class view is complete, the drawn plan's camera equals the request's in every frame); the dark patches are terrain albedo: `shore_ramp_min_m(level)` makes a seabed point 2.5 m under the sea 4.9 times brighter under L17 tiles than under L19 and finer; still frames draw L16 to L19 near tiles, cover plans (moving, rotating) L19 to L20. Clamping the ramp's level at 18 removes the patch. See `spikes/water-motion-gap/results/results.md`.
+Recommendation: make the albedo ramp a function of the fragment's camera distance and the screen-space tolerance (a world-space quantity), not of the drawn node's level; test: the same seabed point gives the same albedo under adjacent levels; goldens through `golden-review`.
 
 ## SPIKE-15 Edit-to-test build time
 Status: closed
