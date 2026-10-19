@@ -45,7 +45,8 @@ Mock: https://claude.ai/artifact/Srj3NGEYUkGQsfhne7kdCs (private to the owner).
 |---|---|
 | Edits | stamps (shapes with handles, editable later), lines (ridge, carved channel, region outline), regions (mask other edits, surface type, name) |
 | Scale | local (1-500 m, exact result <= 1 s) and regional (1-50 km, preview at once, exact in seconds) |
-| Brush | raise, lower, smooth, flatten; after stamps |
+| Brush | raise, lower, smooth, flatten; after stamps; radius and strength set as metric values |
+| Editing a stamp (owner, 2026-10-19) | primary: drag its handles on the planet (position, radius, height); the inspector shows the metric values and accepts typed input as the fallback |
 | Managing edits | map first: select on the planet, outline and name on hover, search, list of edits near the camera; layer list and graph as secondary views of the same items (ADR 0007 stack) |
 | Relevance (owner, 2026-10-19) | the camera decides which edits are shown, in markers, outlines and the list alike: an edit is shown when its footprint meets the visible area and its reach covers at least a minimum on screen (a spec value in pixels), so near the ground small stamps show with the larger edits around them, and from high up small stamps drop out; search is planet-wide, its results sorted by distance from the camera; the selected edit always shows |
 | Views | 3D free camera, globe overview |
