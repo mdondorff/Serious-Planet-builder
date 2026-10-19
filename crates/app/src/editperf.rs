@@ -20,6 +20,7 @@ use planet_render::GpuContext;
 use planet_world_def::footprint::Cap;
 use planet_world_def::stamp::{Stamp, StampKind};
 use planet_world_def::{BodyId, ItemSpec, WorldDefinition, DEFAULT_ITEM_LAYER};
+use std::collections::{BTreeMap, HashSet};
 use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -98,6 +99,59 @@ pub struct CaseRun {
     pub frames: usize,
     /// Where the time of the run went (the attribution of the preview and the exact time, M6 plan E1/E3).
     pub stages: Stages,
+    /// The refreshed set by level: how many of the tiles the edit named the plan drew, and at how many levels the stamp's largest change
+    /// is below the sample spacing (the change cannot show there).
+    pub levels: Vec<LevelRow>,
+}
+
+/// The tiles the edit named at one level (the refreshed set's breakdown, M6 plan E1).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LevelRow {
+    pub level: u8,
+    pub found: usize,
+    /// Of `found`, the tiles the plan drawn before the edit contains (the rest were resident only).
+    pub drawn: usize,
+    /// The worst-case sample spacing of the level, metres (`LodParams::sample_spacing`).
+    pub spacing_m: f64,
+    /// Of `found`, the tiles at a level whose spacing is above the stamp's `max_delta_m`.
+    pub below_spacing: usize,
+}
+
+/// The breakdown of the edit's find by level, against the tiles of the plan that was drawn and the stamp's largest change.
+pub fn level_rows(found: &[TileId], drawn: &HashSet<TileId>, lod: &LodParams, max_delta_m: f64) -> Vec<LevelRow> {
+    let mut by: BTreeMap<u8, LevelRow> = BTreeMap::new();
+    for t in found {
+        let level = t.level();
+        let row = by.entry(level).or_insert_with(|| LevelRow { level, spacing_m: lod.sample_spacing(level), ..Default::default() });
+        row.found += 1;
+        row.drawn += usize::from(drawn.contains(t));
+        row.below_spacing += usize::from(row.spacing_m > max_delta_m);
+    }
+    by.into_values().collect()
+}
+
+/// The refreshed set of the first run of each case: per case and level, the tiles named, drawn, resident only and below the spacing.
+pub fn levels_table(rows: &[CaseRow]) -> String {
+    let mut s = String::from(
+        "| altitude | stamp radius | level | spacing m | named | drawn | resident only | change below spacing |\n|---|---|---|---|---|---|---|---|\n",
+    );
+    for r in rows {
+        let Some(run) = r.runs.first() else { continue };
+        for l in &run.levels {
+            s += &format!(
+                "| {} m | {} m | {} | {:.3} | {} | {} | {} | {} |\n",
+                r.altitude_m,
+                r.radius_m,
+                l.level,
+                l.spacing_m,
+                l.found,
+                l.drawn,
+                l.found - l.drawn,
+                l.below_spacing
+            );
+        }
+    }
+    s
 }
 
 /// The stages of one run, each in milliseconds from the call of `set_definition` unless it says it is a duration: the instants are taken
@@ -224,6 +278,8 @@ struct Harness<'a> {
     ctx: &'a GpuContext,
     rig: Rig,
     iteration: u64,
+    /// The tiles the last frame's plan drew.
+    drawn: HashSet<TileId>,
     /// How long a settle may take before it is an error (a smoke run is short, so a hang names itself instead of waiting for the runner).
     settle_limit: Duration,
 }
@@ -240,6 +296,7 @@ impl Harness<'_> {
             rig.fi.note_wait();
             rig.fi.retire_to(rig.renderer.wait_oldest(ctx));
         }
+        self.drawn = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
         rig.renderer.set_preview_of(&frame.pipeline.draw);
         rig.renderer.submit(ctx, &frame.pipeline.draw.plan).map_err(|e| format!("frame {}: {e}", self.iteration))?;
         rig.fi.submit();
@@ -316,6 +373,7 @@ fn run_once(
     out.stages.set_definition_ms = ms(call);
     let call = Instant::now();
     let tiles = found_tiles(&edited, h.rig.managed.resident().keys().copied());
+    out.levels = level_rows(&tiles, &h.drawn, &req.lod, stamp.max_delta_m);
     out.refreshed = h.rig.managed.edit(&tiles);
     out.stages.edit_ms = ms(call);
     let call = Instant::now();
@@ -463,7 +521,13 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         let rho = (1.5 * radii[0]).max(altitude);
         let first = req_of(camera_for(first_stamp.dir, &ground, radius_m, rho, altitude, aspect));
         let rig = Rig::new(ctx, &world, &first, o.gen_workers())?;
-        let mut h = Harness { ctx, rig, iteration: 0, settle_limit: if smoke { Duration::from_secs(120) } else { SETTLE_LIMIT } };
+        let mut h = Harness {
+            ctx,
+            rig,
+            iteration: 0,
+            drawn: HashSet::new(),
+            settle_limit: if smoke { Duration::from_secs(120) } else { SETTLE_LIMIT },
+        };
         for &r in &radii {
             let stamp = case_stamp(r);
             let rho = (1.5 * r).max(altitude);
@@ -479,10 +543,12 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     }
     let table = table(&rows);
     let stages = stages_table(&rows);
+    let levels = levels_table(&rows);
     writeln!(out, "\n{table}\nstages (ms from set_definition; the calls and the frame median are durations):\n\n{stages}").map_err(err)?;
+    writeln!(out, "\nthe refreshed set by level (first run of each case):\n\n{levels}").map_err(err)?;
     if let Some(dir) = &o.out {
         let path = crate::streamperf::out_log_path(dir, "edit-latency.md")?;
-        std::fs::write(&path, format!("{table}\n{stages}")).map_err(|e| format!("{}: {e}", path.display()))?;
+        std::fs::write(&path, format!("{table}\n{stages}\n{levels}")).map_err(|e| format!("{}: {e}", path.display()))?;
         writeln!(out, "table written to {}", path.display()).map_err(err)?;
     }
     if smoke && rows.iter().any(|r| r.runs.iter().any(|x| x.exact_ms.is_none())) {

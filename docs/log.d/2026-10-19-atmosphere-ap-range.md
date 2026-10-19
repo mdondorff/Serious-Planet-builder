@@ -1,0 +1,1 @@
+- 2026-10-19 atmosphere-ap-range: the aerial-perspective range is 256 km up to 5 km altitude and the horizon distance above it, so terrain beyond 256 km is hazed the same just inside and outside the top of the atmosphere (ATMO-021; SPIKE-17 bug 1); sky_aerial20km_ev15 blessed by the owner.

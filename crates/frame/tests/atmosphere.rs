@@ -433,7 +433,7 @@ fn the_sky_view_march_is_within_the_bound_of_the_converged_march() {
 fn the_aerial_perspective_march_is_within_the_bound_of_the_converged_march() {
     let (atm, luts) = earth();
     let mut worst = (0.0f64, String::new());
-    for h in [1.0, 2000.0, 20_000.0] {
+    for h in [1.0, 2000.0, 20_000.0, 60_000.0, 99_000.0] {
         for mu_sun in [0.8, -0.08] {
             let f = frame_at(atm, h, mu_sun);
             for (ix, iy) in [(16, 16), (3, 20), (28, 9), (16, 30)] {
@@ -451,7 +451,7 @@ fn the_aerial_perspective_march_is_within_the_bound_of_the_converged_march() {
                         luts,
                         &o,
                         cos_vs,
-                        ap_slice_distance(iz).min(limit),
+                        f.ap_slice_distance(iz).min(limit),
                         StepLayout::Uniform(4096),
                         Scatter::Physical { cos_gamma: cos_vs },
                     );
@@ -689,4 +689,88 @@ fn the_orbit_march_starts_on_the_atmosphere_and_the_gpu_word_layout_is_pinned() 
     assert_eq!((w[11], w[15]), (f.mu_sun as f32, f.sin_sun as f32));
     assert_eq!((w[35], w[36], w[37], w[38]), (0.1, 3.5, 0.0, AP_MAX_DISTANCE_M as f32));
     assert_eq!(w[39].to_bits(), 5);
+}
+
+// spec: ATMO-021
+#[test]
+fn terrain_beyond_the_aerial_perspective_range_is_hazed_the_same_just_inside_and_just_outside_the_top() {
+    // SPIKE-17 (atmosphere colour jump): geometry farther than AP_MAX_DISTANCE_M along its ray (the far land at the horizon of a
+    // camera near the top of the atmosphere). Inside the top the frame composites it with the last slice of the aerial-perspective
+    // volume (a 256 km march); outside the top with the orbit march to the geometry. One camera crossing H must not change the
+    // colour of the same terrain pixel.
+    let (atm, luts) = earth();
+    let top = atm.top_m();
+    let inside = frame_at(atm, top - 1000.0, 0.7);
+    let outside = frame_at(atm, top + 1000.0, 0.7);
+    let land = [0.010, 0.012, 0.006]; // the lit radiance of green land, scene units
+    let mut worst = (0.0f64, String::new());
+    let mut checked = 0;
+    for iy in 16..AP_H {
+        let v = inside.froxel_ray(16, iy);
+        let l = libm::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        let dir = [v[0] / l, v[1] / l, v[2] / l];
+        let (mu, _) = inside.view_cosines(dir);
+        let Some(t_ground) = distance_to_ground(inside.r * mu, inside.c) else { continue };
+        if t_ground <= AP_MAX_DISTANCE_M * 1.2 {
+            continue;
+        }
+        // The volume read at the ground's distance, as the composite reads it: linear between the two slices around it (the last slice
+        // beyond the frame's range).
+        let pz = (libm::sqrt(t_ground / inside.ap_range) * AP_D as f64 - 1.0).clamp(0.0, (AP_D - 1) as f64);
+        let z0 = libm::floor(pz) as usize;
+        let (a, b) = (inside.ap_texel(atm, luts, 16, iy, z0), inside.ap_texel(atm, luts, 16, iy, (z0 + 1).min(AP_D - 1)));
+        let fz = pz - z0 as f64;
+        let ap: Vec<f64> = (0..4).map(|k| a[k] + (b[k] - a[k]) * fz).collect();
+        let t_ap = ap[3];
+        let a: Vec<f64> = (0..3).map(|k| land[k] * t_ap + ap[k]).collect();
+        let (mu_o, cos_o) = outside.view_cosines(dir);
+        // The outside camera is 2 km higher on the same axis: it sees the same terrain pixel at its own distance (the numerics review of
+        // the change found the inside distance used here stopping the march short of the ground by 7 to 34 km).
+        let t_outside = distance_to_ground(outside.r * mu_o, outside.c).expect("the same ray reaches the ground from 2 km higher");
+        let o = outside.orbit_ray_cosines(atm, luts, mu_o, cos_o, Some(t_outside));
+        let b: Vec<f64> = (0..3).map(|k| land[k] * o.transmittance[k] + o.radiance[k]).collect();
+        eprintln!(
+            "row {iy}: ground {:.0} km, inside rgb {:.5} {:.5} {:.5}, outside rgb {:.5} {:.5} {:.5}",
+            t_ground / 1000.0,
+            a[0],
+            a[1],
+            a[2],
+            b[0],
+            b[1],
+            b[2]
+        );
+        for k in 0..3 {
+            let rel = (a[k] - b[k]).abs() / b[k].abs().max(1e-9);
+            if rel > worst.0 {
+                worst =
+                    (rel, format!("row {iy} t_ground {:.0} km channel {k}: inside {:.5} vs outside {:.5}", t_ground / 1000.0, a[k], b[k]));
+            }
+        }
+        checked += 1;
+    }
+    assert!(checked >= 3, "{checked} far-terrain rays compared");
+    // 10 %: the measured worst is 7.2 % (32 slices, quadratic to the frame range, about 70 km apart near 300 km); the jump was 95 % with
+    // the 256 km clamp.
+    assert!(worst.0 <= 0.10, "far terrain jumps by {:.1} % across the top of the atmosphere: {}", worst.0 * 100.0, worst.1);
+}
+
+// spec: ATMO-021, ATMO-007
+#[test]
+fn the_aerial_perspective_range_is_256_km_up_to_5_km_altitude_the_horizon_distance_above_it_and_reaches_the_gpu_words() {
+    let (atm, _) = earth();
+    for h in [0.0, 1.0, 2000.0, 5000.0] {
+        assert_eq!(frame_at(atm, h, 0.5).ap_range, AP_MAX_DISTANCE_M, "h {h}: the near-ground volume is the one it always was");
+    }
+    let f = frame_at(atm, 20_000.0, 0.5);
+    assert_eq!(f.ap_range, f.rho, "above 5 km the last slice is at the horizon");
+    assert!(f.ap_range > AP_MAX_DISTANCE_M);
+    let top = frame_at(atm, atm.top_m() - 1000.0, 0.5);
+    assert!(top.ap_range > 1.1e6 && top.ap_range < 1.2e6, "about 1,130 km at the top: {}", top.ap_range);
+    assert_eq!(frame_at(atm, atm.top_m() + 1000.0, 0.5).ap_range, AP_MAX_DISTANCE_M, "outside the atmosphere the volume is not used");
+    // The slices are quadratic in the frame's range, the last at the range itself; the GPU receives the range.
+    assert_eq!(top.ap_slice_distance(AP_D - 1), top.ap_range);
+    assert!((top.ap_slice_distance(0) - top.ap_range / (AP_D * AP_D) as f64).abs() < 1e-6);
+    assert_eq!(ap_slice_distance(AP_D - 1), AP_MAX_DISTANCE_M, "the base-range function is unchanged");
+    assert_eq!(top.words(1.0, 0)[38], top.ap_range as f32);
+    assert_eq!(frame_at(atm, 1000.0, 0.5).words(1.0, 0)[38], AP_MAX_DISTANCE_M as f32);
 }
