@@ -1882,6 +1882,7 @@ mod one_shot_tests {
             morph_end_m: 20.0,
             color: [1, 2, 3, 255],
             mesh_key: 7,
+            preview: false,
         };
         let (coarse, fine) = (TileId::new(planet_core::Face(0), 17, 1, 1).unwrap(), TileId::new(planet_core::Face(0), 20, 8, 8).unwrap());
         let mut plan = planet_frame::viewer::lit_warm_plan(
