@@ -73,7 +73,7 @@ fn sphere_interval(ray: &Ray, radius: f64) -> Option<(f64, f64)> {
     let closest = ray.origin + ray.dir * tc;
     let d2 = closest.dot(closest);
     let r2 = radius * radius;
-    if !(d2 <= r2) {
+    if d2.is_nan() || d2 > r2 {
         return None;
     }
     let half = libm::sqrt((radius - libm::sqrt(d2)) * (radius + libm::sqrt(d2)));
@@ -99,7 +99,8 @@ pub fn pick_surface(ray: &Ray, limits: &PickLimits, height_m: &dyn Fn(Vec3) -> f
     }
     let ray = &Ray { origin: ray.origin, dir: ray.dir * (1.0 / len) };
     let inner = limits.radius_m - limits.max_height_m;
-    if !(ray.origin.length() >= inner) {
+    let origin_len = ray.origin.length();
+    if origin_len.is_nan() || origin_len < inner {
         return None;
     }
     let (t_in, t_out) = sphere_interval(ray, limits.radius_m + limits.max_height_m)?;
@@ -194,7 +195,7 @@ pub fn pick_footprint(hit: &SurfaceHit, footprints: &[Footprint], radius_m: f64)
             continue;
         }
         let d = surface_distance_m(hit.dir, f.dir, radius_m);
-        if !(d <= f.radius_m) {
+        if d.is_nan() || d > f.radius_m {
             continue;
         }
         let key = (if f.radius_m > 0.0 { d / f.radius_m } else { 0.0 }, f.radius_m, f.id);

@@ -156,7 +156,8 @@ fn hit_at(dir: Vec3) -> planet_frame::pick::SurfaceHit {
 fn the_surface_distance_is_exact_at_small_angles() {
     for arc in [0.001, 0.5, 40.0, 5_000.0, 2_000_000.0] {
         let d = surface_distance_m(Vec3::new(0.0, 0.0, 1.0), dir_at(arc, 0.7), R);
-        assert!((d - arc).abs() < 1e-9, "{d} vs {arc}");    }
+        assert!((d - arc).abs() < 1e-9, "{d} vs {arc}");
+    }
 }
 
 // spec: VIEW-012
@@ -206,7 +207,8 @@ fn a_ray_entering_the_shell_onto_a_surface_at_its_bound_hits_at_the_entry() {
         let ray = cursor_ray(&from_orbit, x, y, W, H);
         let hit = pick_surface(&ray, &bare, &flat).unwrap_or_else(|| panic!("a bound of 0 m on a bare sphere: pixel ({x},{y})"));
         assert!((hit.distance_m - analytic_sphere_hit(&ray, R)).abs() < 2e-4);
-        let hit = pick_surface(&ray, &PickLimits::new(R, 4_000.0), &plateau).unwrap_or_else(|| panic!("a plateau at the bound: pixel ({x},{y})"));
+        let hit =
+            pick_surface(&ray, &PickLimits::new(R, 4_000.0), &plateau).unwrap_or_else(|| panic!("a plateau at the bound: pixel ({x},{y})"));
         assert!((hit.distance_m - analytic_sphere_hit(&ray, R + 4_000.0)).abs() < 2e-4);
     }
 }
