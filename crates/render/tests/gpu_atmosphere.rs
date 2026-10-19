@@ -211,7 +211,7 @@ fn sun_at(p: &TerrainPlan, elevation: f64) -> [f32; 3] {
     [0, 1, 2].map(|k| (c * east[k] + s * up[k]) as f32)
 }
 
-// spec: ATMO-011, TEST-010
+// spec: ATMO-011, ATMO-021, TEST-010
 #[test]
 fn sky_frames_match_the_adapters_goldens() {
     let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");

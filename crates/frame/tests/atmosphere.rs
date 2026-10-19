@@ -729,7 +729,6 @@ fn terrain_beyond_the_aerial_perspective_range_is_hazed_the_same_just_inside_and
         let t_outside = distance_to_ground(outside.r * mu_o, outside.c).expect("the same ray reaches the ground from 2 km higher");
         let o = outside.orbit_ray_cosines(atm, luts, mu_o, cos_o, Some(t_outside));
         let b: Vec<f64> = (0..3).map(|k| land[k] * o.transmittance[k] + o.radiance[k]).collect();
-        let _ = cos_vs;
         eprintln!(
             "row {iy}: ground {:.0} km, inside rgb {:.5} {:.5} {:.5}, outside rgb {:.5} {:.5} {:.5}",
             t_ground / 1000.0,
