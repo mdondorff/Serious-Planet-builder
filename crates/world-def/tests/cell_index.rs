@@ -229,6 +229,43 @@ fn moving_an_item_inside_its_cell_changes_the_definition_hash_and_the_cell_hash(
 
 // spec: WDEF-005
 #[test]
+fn the_margin_by_grid_coordinates_equals_the_margin_by_walking_the_neighbours_for_every_cell_and_margin() {
+    use planet_world_def::cells::with_margin_walk;
+    let level = 8u8;
+    let n = 1u32 << level;
+    let mut cases = 0;
+    // Every face, cells in the interior, on the edges one and two cells in, at the corners, and bundles of several cells.
+    for face in 0..6u8 {
+        let xs = [0, 1, 2, 3, 5, n / 2, n - 4, n - 3, n - 2, n - 1];
+        for &x in &xs {
+            for &y in &xs {
+                let c = TileId::new(Face(face), level, x, y).unwrap();
+                for margin in 0..=6 {
+                    assert_eq!(with_margin(&[c], margin), with_margin_walk(&[c], margin), "face {face} cell ({x}, {y}) margin {margin}");
+                    cases += 1;
+                }
+            }
+        }
+        let bundle: Vec<TileId> =
+            (0..4).flat_map(|i| (0..4).map(move |j| TileId::new(Face(face), level, n / 2 + i, n / 3 + j).unwrap())).collect();
+        let edge_bundle: Vec<TileId> = (0..3).map(|i| TileId::new(Face(face), level, n - 2 + (i % 2), 5 + i).unwrap()).collect();
+        for margin in 0..=5 {
+            assert_eq!(with_margin(&bundle, margin), with_margin_walk(&bundle, margin), "bundle, face {face} margin {margin}");
+            assert_eq!(
+                with_margin(&edge_bundle, margin),
+                with_margin_walk(&edge_bundle, margin),
+                "edge bundle, face {face} margin {margin}"
+            );
+        }
+    }
+    // Cells of two levels: the walk decides.
+    let mixed = [TileId::new(Face(0), 8, 100, 100).unwrap(), TileId::new(Face(0), 7, 50, 20).unwrap()];
+    assert_eq!(with_margin(&mixed, 2), with_margin_walk(&mixed, 2));
+    assert!(cases > 3000);
+}
+
+// spec: WDEF-005
+#[test]
 fn the_margin_ring_reaches_across_face_edges_and_cube_corners() {
     let interior = cell_of(R, dir(1.0, 0.2, 0.1));
     let ring = with_margin(&[interior], 1);
