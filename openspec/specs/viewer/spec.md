@@ -600,6 +600,10 @@ Source: owner (M6 step U3, 2026-10-19), VIEW-003, VIEW-010, VIEW-011, VIEW-017, 
 - **WHEN** a stamp is placed and a value typed with `--items`, and the directory is opened again; and a search for an edit out of view
 - **THEN** one file named for the edit's id holds it, the reopened session has the same definition hash, and the search finds the far edit while the nearby list holds only the shown ones
 
+#### Scenario: The overview and the mode
+- **WHEN** the mode is turned on with the overview shown and with none, and G shows the overview in the mode
+- **THEN** the overview ends once on the turn-on and the free camera is taken, and the overview shown with G stays
+
 #### Scenario: The overview
 - **WHEN** a plateau of reach 15 km and a hill of 400 m are seen from 200 km up, the hill is selected, nothing is in view, the plateau is hidden, a marker is clicked and a number that is no edit's is clicked, with the mode off
 - **THEN** only the plateau is a marker, then the selected hill too (the markers follow the order of the ids and carry the names), a hidden edit is none unless selected, the click selects the edit, the other number changes nothing, and the markers come with the mode off

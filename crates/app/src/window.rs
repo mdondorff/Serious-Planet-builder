@@ -98,6 +98,15 @@ pub fn edit_mouse_action(button: MouseButton, state: ElementState, world: bool, 
     }
 }
 
+/// What the editor mode does to the camera and the overview this frame (VIEW-022), as (end the overview, take the free camera): turning
+/// the mode on ends the overview once (`end_overview` is that one request, taken by the caller), and while the mode is on and no overview
+/// is shown the camera is the free one. The overview shown later with G stays.
+pub fn mode_camera_steps(end_overview: bool, edit_on: bool, globe: bool, free: bool) -> (bool, bool) {
+    let end_globe = end_overview && globe;
+    let globe_after = globe && !end_globe;
+    (end_globe, edit_on && !globe_after && !free)
+}
+
 /// The viewer commands the editor mode does not take: it edits from the free camera (VIEW-022); the overview (G) is shown as before.
 pub fn editor_mode_blocks(cmd: Command) -> bool {
     matches!(cmd, Command::ToggleCamera)
@@ -445,10 +454,13 @@ impl App<'_> {
             // The editor mode edits from the free camera: turning it on ended the overview once (G may show it again).
             {
                 let flight = planet_frame::viewer::camera_at(self.cameras, st.viewer.clock.time_s(now_ms));
-                if std::mem::take(&mut st.end_overview) && st.viewer.globe.is_some() {
+                let on = st.edit.as_ref().is_some_and(|e| e.on);
+                let (end_globe, to_free) =
+                    mode_camera_steps(std::mem::take(&mut st.end_overview), on, st.viewer.globe.is_some(), st.viewer.is_free());
+                if end_globe {
                     st.viewer.command(Command::ToggleGlobe, now_ms, &flight);
                 }
-                if st.edit.as_ref().is_some_and(|e| e.on) && st.viewer.globe.is_none() && !st.viewer.is_free() {
+                if to_free {
                     st.viewer.command(Command::ToggleCamera, now_ms, &flight);
                 }
             }
@@ -1469,5 +1481,25 @@ mod tests {
         assert_eq!(key_command(KeyCode::KeyC), Some(Command::ToggleCamera));
         assert_eq!(key_command(KeyCode::KeyG), Some(Command::ToggleGlobe));
         assert_eq!(edit_key(KeyCode::Escape, None, false, false), Some(EditKey::Escape));
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn turning_the_mode_on_ends_the_overview_once_and_takes_the_free_camera_and_g_shows_the_overview_again() {
+        // (end_overview, edit_on, globe, free) -> (end the overview, take the free camera)
+        assert_eq!(mode_camera_steps(true, true, true, false), (true, true), "Tab with the overview up: it ends and the free camera comes");
+        assert_eq!(mode_camera_steps(true, true, true, true), (true, false), "already free: only the overview ends");
+        assert_eq!(mode_camera_steps(true, true, false, false), (false, true), "no overview to end");
+        // Later frames: no request any more. The overview shown with G stays and the camera is its own.
+        assert_eq!(mode_camera_steps(false, true, true, false), (false, false), "G in the mode: the overview stays");
+        assert_eq!(mode_camera_steps(false, true, true, true), (false, false));
+        assert_eq!(mode_camera_steps(false, true, false, false), (false, true), "the overview gone: the free camera again");
+        assert_eq!(mode_camera_steps(false, true, false, true), (false, false));
+        // The mode off leaves the camera alone.
+        for globe in [false, true] {
+            for free in [false, true] {
+                assert_eq!(mode_camera_steps(false, false, globe, free), (false, false));
+            }
+        }
     }
 }
