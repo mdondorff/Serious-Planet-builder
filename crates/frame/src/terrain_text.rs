@@ -109,6 +109,8 @@ impl TerrainPlan {
                 mesh_key: _,
                 // A runtime flag of the draw plan (REND-033), not part of a recorded plan.
                 preview: _,
+                // Written only when it is not the whole tile (below), so the text of a plan without masks is what it was.
+                quadrants: _,
             } = n;
             let r = n.camera_relative_origin;
             s += &format!(
@@ -128,6 +130,10 @@ impl TerrainPlan {
                 n.color[3],
                 n.mesh_key
             );
+            if n.quadrants != crate::lod::ALL_QUADRANTS {
+                s.pop();
+                s += &format!(" quadrants {}\n", n.quadrants);
+            }
         }
         s
     }
@@ -176,9 +182,14 @@ impl TerrainPlan {
                 {
                     // `shore_ramp <h32>` ended a node line from the first REND-030 until the ramp followed the fragment's distance: read
                     // and ignored, so a plan recorded then still loads (and ramps by the look's blend alone).
-                    if !matches!(tail, [] | ["shore_ramp", _]) {
-                        return Err(format!("cannot parse terrain plan line '{line}'"));
-                    }
+                    let quadrants = match tail {
+                        [] | ["shore_ramp", _] => crate::lod::ALL_QUADRANTS,
+                        ["quadrants", q] | ["shore_ramp", _, "quadrants", q] => match q.parse::<u8>() {
+                            Ok(m) if (1..crate::lod::ALL_QUADRANTS).contains(&m) => m,
+                            _ => return Err(format!("bad quadrants '{q}' in '{line}' (1 to 14)")),
+                        },
+                        _ => return Err(format!("cannot parse terrain plan line '{line}'")),
+                    };
                     let raw = u64::from_str_radix(id, 16).map_err(|e| format!("bad tile id '{id}': {e}"))?;
                     nodes.push(TerrainDraw {
                         tile: TileId::from_raw(raw).ok_or(format!("invalid tile id {raw:#x}"))?,
@@ -191,6 +202,7 @@ impl TerrainPlan {
                         color: [byte(r)?, byte(g)?, byte(b)?, byte(a)?],
                         mesh_key: u64::from_str_radix(key, 16).map_err(|e| format!("bad mesh key '{key}': {e}"))?,
                         preview: false,
+                        quadrants,
                     });
                 }
                 _ => return Err(format!("cannot parse terrain plan line '{line}'")),

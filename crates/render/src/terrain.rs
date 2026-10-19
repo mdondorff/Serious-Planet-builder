@@ -161,8 +161,34 @@ fn relief(in: VsOut) -> vec4<f32> {
     return vec4<f32>(c, 1.0);
 }
 
+// A node drawn over some quadrants of its tile only (STRM-016, SPIKE-18): its record's `origin_rel.w` holds the quadrants it leaves out as
+// bits, bit k for child k of the tile's `children()` = 2 * (x half) + (y half), the halves of the tile coordinates (`aux` is the lattice
+// position over the tile, i along x and j along y). A node drawn whole has 0 there and never takes the branch. The caller discards after
+// its derivatives, in uniform control flow.
+fn quadrant_cut_at(node_index: u32, aux: vec2<f32>) -> bool {
+    let left_out = u32(nodes[node_index].origin_rel.w + 0.5);
+    if (left_out == 0u) {
+        return false;
+    }
+    let q = select(0u, 2u, aux.x >= 0.5) + select(0u, 1u, aux.y >= 0.5);
+    return ((left_out >> q) & 1u) != 0u;
+}
+
+fn quadrant_cut(in: VsOut) -> bool {
+    return quadrant_cut_at(in.node_index, in.aux);
+}
+
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
+    // The derivatives of the inner function come first; a node drawn over some quadrants discards the rest after them (STRM-016).
+    let c = fs_view(in);
+    if (quadrant_cut(in)) {
+        discard;
+    }
+    return c;
+}
+
+fn fs_view(in: VsOut) -> vec4<f32> {
     let mode = g.mode.x;
     // Derivatives are taken before any branch (uniform control flow).
     // Contours every 10 m, 100 m, 1 km and 10 km. Each decade fades out continuously once its lines would be closer
@@ -295,7 +321,15 @@ fn shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f
 // tile-local position: no planet-radius value reaches this stage.
 @fragment
 fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
-    let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
+    let c = fs_lit_view(in);
+    if (quadrant_cut(in)) {
+        discard;
+    }
+    return c;
+}
+
+fn fs_lit_view(in: VsOut) -> vec4<f32> {
+    let sun =vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
     var rgb = shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z);
@@ -325,7 +359,8 @@ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
             r[0],
             r[1],
             r[2],
-            0.0,
+            // The quadrants of the tile the node leaves out, as bits (STRM-016): 0 for a node drawn whole, so its record is what it was.
+            f32::from(!d.quadrants & 0b1111),
             c[0],
             c[1],
             c[2],
@@ -1982,6 +2017,7 @@ mod one_shot_tests {
             color: [1, 2, 3, 255],
             mesh_key: 7,
             preview: false,
+            quadrants: 0b1111,
         };
         let (coarse, fine) = (TileId::new(planet_core::Face(0), 17, 1, 1).unwrap(), TileId::new(planet_core::Face(0), 20, 8, 8).unwrap());
         let mut plan = planet_frame::viewer::lit_warm_plan(
