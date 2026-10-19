@@ -79,9 +79,9 @@ fn near_the_ground_small_stamps_show_with_the_large_ones_and_from_high_up_the_sm
     let near = s.shown(&tiles, &view(camera_above(dir, 2_000.0))).unwrap();
     assert_eq!(near, vec![hill.min(plateau), hill.max(plateau)], "both at 2 km");
     let high = s.shown(&tiles, &view(camera_above(dir, 100_000.0))).unwrap();
-    assert_eq!(high, vec![plateau], "the hill covers {:.1} px at 100 km", reach_px(&view(camera_above(dir, 100_000.0)), dir, 500.0));
+    assert_eq!(high, vec![plateau], "the hill covers {:.1} px at 100 km", reach_px(&view(camera_above(dir, 100_000.0)), dir, 400.0));
     // The edge: the hill (reach 500 m) is shown while it covers 8 px and not below.
-    let at_edge = 500.0 / MIN_REACH_PX * 0.5 * 1000.0 / libm::tan(FOV / 2.0);
+    let at_edge = 400.0 / MIN_REACH_PX * 0.5 * 1000.0 / libm::tan(FOV / 2.0);
     assert!(s.shown(&tiles, &view(camera_above(dir, at_edge * 0.99))).unwrap().contains(&hill));
     assert!(!s.shown(&tiles, &view(camera_above(dir, at_edge * 1.01))).unwrap().contains(&hill));
 }
@@ -232,8 +232,9 @@ fn the_layers_list_follows_the_layer_stack_and_within_a_layer_the_order_the_edit
 
 // ---- VIEW-017: selection, handles, drags, typed values ---------------------------------------------------------------------------
 
+/// A hill as the stamp stage spells it: its radius is the file's `reach_m`, its amount `height_m`, its bound the amount.
 fn item_at(lat: f64, lon: f64, radius_m: f64, height_m: Option<f64>, heading: f64) -> Item {
-    let mut params = BTreeMap::from([("radius_m".to_string(), radius_m)]);
+    let mut params = BTreeMap::new();
     if let Some(h) = height_m {
         params.insert("height_m".to_string(), h);
     }
@@ -245,8 +246,8 @@ fn item_at(lat: f64, lon: f64, radius_m: f64, height_m: Option<f64>, heading: f6
         priority: 0,
         kind: "hill".into(),
         anchor: Anchor { latitude_deg: lat, longitude_deg: lon, height_m: 0.0, heading_deg: heading },
-        reach_m: radius_m * 1.25,
-        max_delta_m: height_m.unwrap_or(0.0),
+        reach_m: radius_m,
+        max_delta_m: height_m.unwrap_or(0.0).abs(),
         params,
         base_hash: 0,
         generator_version: 4,
@@ -256,28 +257,55 @@ fn item_at(lat: f64, lon: f64, radius_m: f64, height_m: Option<f64>, heading: f6
     }
 }
 
+/// An item of a kind the table does not know: its radius is a `radius_m` parameter and its reach holds it with a margin.
+fn mesa_at(lat: f64, lon: f64, radius_m: f64, height_m: Option<f64>, heading: f64) -> Item {
+    let mut it = item_at(lat, lon, radius_m, height_m, heading);
+    it.kind = "mesa".into();
+    it.params.insert("radius_m".into(), radius_m);
+    it.reach_m = radius_m * 1.25;
+    it
+}
+
 // spec: VIEW-017
 #[test]
-fn the_outline_is_the_radius_parameter_or_the_reach_and_the_handles_follow_the_parameters() {
-    let it = item_at(10.0, 20.0, 400.0, Some(80.0), 0.0);
-    assert_eq!(shape::outline_radius_m(&it), 400.0);
-    assert_eq!(shape::handles_of(&it), [Handle::Move, Handle::Radius, Handle::Height]);
-    let mut crater = it.clone();
-    crater.params.remove("height_m");
-    assert_eq!(shape::handles_of(&crater), [Handle::Move, Handle::Radius], "no height parameter, no height handle");
-    let mut bare = crater.clone();
+fn the_outline_is_the_reach_of_a_stamp_or_the_radius_parameter_of_another_kind_and_the_handles_follow_the_parameters() {
+    // A stamp: its radius is the reach; the amount decides the height handle (height_m, depth_m, target_m).
+    let hill = item_at(10.0, 20.0, 400.0, Some(80.0), 0.0);
+    assert_eq!(shape::outline_radius_m(&hill), 400.0);
+    assert_eq!(shape::handles_of(&hill), [Handle::Move, Handle::Radius, Handle::Height]);
+    let mut crater = hill.clone();
+    crater.kind = "crater".into();
+    crater.params = BTreeMap::from([("depth_m".to_string(), 250.0)]);
+    assert_eq!(shape::handles_of(&crater), [Handle::Move, Handle::Radius, Handle::Height]);
+    let mut plateau = hill.clone();
+    plateau.kind = "plateau".into();
+    plateau.params = BTreeMap::from([("target_m".to_string(), 300.0)]);
+    assert_eq!(shape::handles_of(&plateau), [Handle::Move, Handle::Radius, Handle::Height]);
+    let mut no_amount = hill.clone();
+    no_amount.params.clear();
+    assert_eq!(shape::handles_of(&no_amount), [Handle::Move, Handle::Radius], "no amount, no height handle");
+    // The old spelling's key is no stamp's: a `radius_m` parameter of a stamp is ignored, as the stamp stage ignores it.
+    let mut stray = hill.clone();
+    stray.params.insert("radius_m".into(), 9.0);
+    assert_eq!(shape::outline_radius_m(&stray), 400.0);
+    // Another kind: the `radius_m` parameter when positive, else the reach; the height handle follows `height_m`.
+    let mesa = mesa_at(10.0, 20.0, 400.0, Some(80.0), 0.0);
+    assert_eq!((shape::outline_radius_m(&mesa), mesa.reach_m), (400.0, 500.0));
+    assert_eq!(shape::handles_of(&mesa), [Handle::Move, Handle::Radius, Handle::Height]);
+    let mut bare = mesa.clone();
     bare.params.clear();
     assert_eq!(shape::outline_radius_m(&bare), bare.reach_m, "without a radius the reach is the outline");
+    assert_eq!(shape::handles_of(&bare), [Handle::Move, Handle::Radius]);
     bare.reach_m = 0.0;
     assert_eq!(shape::handles_of(&bare), [Handle::Move], "a point has only its anchor");
-    let mut bad = it.clone();
+    let mut bad = mesa.clone();
     bad.params.insert("radius_m".into(), -3.0);
     assert_eq!(shape::outline_radius_m(&bad), bad.reach_m, "a radius that is not positive is not an outline");
 }
 
 // spec: VIEW-017
 #[test]
-fn the_handles_sit_on_the_anchor_on_the_outline_along_the_heading_and_above_by_the_height() {
+fn the_handles_sit_on_the_anchor_on_the_outline_along_the_heading_and_at_the_amount_of_the_stamp() {
     for heading in [0.0, 90.0, 217.0] {
         let it = item_at(47.2, 8.55, 400.0, Some(80.0), heading);
         let centre = it.direction();
@@ -286,8 +314,20 @@ fn the_handles_sit_on_the_anchor_on_the_outline_along_the_heading_and_above_by_t
         let rad = shape::handle_point(&it, Handle::Radius, R, 12.0);
         let arc = R * libm::atan2(centre.cross(rad.normalized()).length(), centre.dot(rad.normalized()));
         assert!((arc - 400.0).abs() < 1e-3, "heading {heading}: arc {arc}");
+        // A hill: the height above the ground.
         let h = shape::handle_point(&it, Handle::Height, R, 12.0);
         assert!((h.length() - (R + 12.0 + 80.0)).abs() < 1e-6);
+    }
+    // A crater: the bottom of the bowl, the depth below the ground. A plateau: its absolute target, whatever the ground.
+    let mut crater = item_at(47.2, 8.55, 2_000.0, None, 0.0);
+    crater.kind = "crater".into();
+    crater.params = BTreeMap::from([("depth_m".to_string(), 250.0)]);
+    assert!((shape::handle_point(&crater, Handle::Height, R, 12.0).length() - (R + 12.0 - 250.0)).abs() < 1e-6);
+    let mut plateau = item_at(47.2, 8.55, 15_000.0, None, 0.0);
+    plateau.kind = "plateau".into();
+    plateau.params = BTreeMap::from([("target_m".to_string(), 300.0)]);
+    for ground in [0.0, 12.0, 900.0] {
+        assert!((shape::handle_point(&plateau, Handle::Height, R, ground).length() - (R + 300.0)).abs() < 1e-6, "ground {ground}");
     }
     // Heading 0 is north (latitude grows), 90 east (longitude grows).
     let it = item_at(0.0, 0.0, 1_000.0, None, 0.0);
@@ -325,28 +365,53 @@ fn a_handle_drag_makes_the_item_the_pointer_says_and_keeps_the_bounds_true() {
     let moved = shape::moved(&it, p);
     assert!(moved.direction().dot(p) > 1.0 - 1e-14);
     assert_eq!((moved.params.clone(), moved.reach_m, moved.anchor.heading_deg), (it.params.clone(), it.reach_m, it.anchor.heading_deg));
-    // Resize (a hill: 50 m to 2 km): the radius is the arc to the pointer; the reach grows to hold it with its margin and does not shrink.
-    let out = shape::point_at(it.direction(), 33.0, 1_500.0, R);
-    let big = shape::resized(&it, out, R);
-    assert!((big.params["radius_m"] - 1_500.0).abs() < 1e-3);
-    assert!((big.reach_m - big.params["radius_m"] * shape::REACH_FACTOR).abs() < 1e-9, "the reach holds the outline with the margin");
+    // Resize a hill (50 m to 2 km): the radius, the reach, is the arc to the pointer, up or down; no parameter is added.
+    let big = shape::resized(&it, shape::point_at(it.direction(), 33.0, 1_500.0, R), R);
+    assert!((big.reach_m - 1_500.0).abs() < 1e-3);
+    assert_eq!(big.params, it.params, "the radius is not a parameter of a stamp");
     let small = shape::resized(&it, shape::point_at(it.direction(), 33.0, 100.0, R), R);
-    assert!((small.params["radius_m"] - 100.0).abs() < 1e-3 && small.reach_m == it.reach_m, "a smaller outline keeps the reach");
-    let none = shape::resized(&it, it.direction(), R);
-    assert_eq!(none.params["radius_m"], 50.0, "never below the kind's least radius");
+    assert!((small.reach_m - 100.0).abs() < 1e-3, "a smaller outline is a smaller reach");
+    assert_eq!(shape::resized(&it, it.direction(), R).reach_m, 50.0, "never below the kind's least radius");
     let huge = shape::resized(&it, shape::point_at(it.direction(), 0.0, 90_000.0, R), R);
-    assert_eq!(huge.params["radius_m"], 2_000.0, "never beyond the kind's greatest radius, the range a typed value is held to");
-    assert!(huge.reach_m >= huge.params["radius_m"]);
-    // Raise (a hill: 5 m to 400 m): the height stays in the range and the bound on the change holds it, never shrinking.
+    assert_eq!(huge.reach_m, 2_000.0, "never beyond the kind's greatest radius, the range a typed value is held to");
+    // Raise a hill (-400 m to 400 m): the height stays in the range and the bound is the height.
     let up = shape::raised(&it, 40.0);
     assert_eq!((up.params["height_m"], up.max_delta_m), (120.0, 120.0));
     let down = shape::raised(&it, -200.0);
-    assert_eq!((down.params["height_m"], down.max_delta_m), (5.0, 80.0), "the least height of the kind; the bound does not shrink");
+    assert_eq!((down.params["height_m"], down.max_delta_m), (-120.0, 120.0), "a hill may be a hollow; its bound is its amount");
     let top = shape::raised(&it, 1.0e9);
     assert_eq!((top.params["height_m"], top.max_delta_m), (400.0, 400.0));
-    // A kind the table does not know: 1 m to one cell edge, and a height within the limit on the change, whose bound holds it.
-    let mut mesa = it.clone();
-    mesa.kind = "mesa".into();
+    assert_eq!(shape::raised(&it, -1.0e9).params["height_m"], -400.0);
+    // A crater: raising the handle (the bottom of the bowl) makes it shallower, to the least depth of the kind; the bound is the depth.
+    let mut crater = item_at(47.2, 8.55, 2_000.0, None, 0.0);
+    crater.kind = "crater".into();
+    crater.params = BTreeMap::from([("depth_m".to_string(), 250.0)]);
+    crater.max_delta_m = 250.0;
+    let shallow = shape::raised(&crater, 100.0);
+    assert_eq!((shallow.params["depth_m"], shallow.max_delta_m), (150.0, 150.0));
+    let deep = shape::raised(&crater, -2_000.0);
+    assert_eq!((deep.params["depth_m"], deep.max_delta_m), (800.0, 800.0), "at most the greatest depth");
+    assert_eq!(shape::raised(&crater, 1.0e9).params["depth_m"], 10.0, "at least the least depth");
+    // A plateau: its absolute target follows the pointer; its bound (how hard it flattens) is its own and does not move.
+    let mut plateau = item_at(47.2, 8.55, 15_000.0, None, 0.0);
+    plateau.kind = "plateau".into();
+    plateau.params = BTreeMap::from([("target_m".to_string(), 300.0)]);
+    plateau.max_delta_m = 1_000.0;
+    let lifted = shape::raised(&plateau, 250.0);
+    assert_eq!((lifted.params["target_m"], lifted.max_delta_m), (550.0, 1_000.0));
+    assert_eq!(shape::raised(&plateau, 1.0e9).params["target_m"], 9_000.0);
+    assert_eq!(shape::raised(&plateau, -1.0e9).params["target_m"], -500.0);
+    for stamp in [&up, &down, &shallow, &lifted, &big, &small] {
+        stamp.validate().unwrap();
+    }
+    // A kind the table does not know keeps the radius parameter with a reach that holds it, 1 m to one cell edge, and a height within the
+    // limit on the change, whose bound holds it.
+    let mesa = mesa_at(47.2, 8.55, 400.0, Some(80.0), 0.0);
+    let big = shape::resized(&mesa, shape::point_at(mesa.direction(), 33.0, 1_500.0, R), R);
+    assert!((big.params["radius_m"] - 1_500.0).abs() < 1e-3);
+    assert!((big.reach_m - big.params["radius_m"] * shape::REACH_FACTOR).abs() < 1e-9, "the reach holds the outline with the margin");
+    let small = shape::resized(&mesa, shape::point_at(mesa.direction(), 33.0, 100.0, R), R);
+    assert!((small.params["radius_m"] - 100.0).abs() < 1e-3 && small.reach_m == mesa.reach_m, "a smaller outline keeps the reach");
     let huge = shape::resized(&mesa, shape::point_at(mesa.direction(), 0.0, 90_000.0, R), R);
     assert_eq!((huge.params["radius_m"], huge.reach_m), (CELL_EDGE_M, CELL_EDGE_M));
     assert_eq!(shape::resized(&mesa, mesa.direction(), R).params["radius_m"], shape::MIN_RADIUS_M);
@@ -409,10 +474,9 @@ fn placing_a_stamp_makes_one_selected_command_with_the_kinds_defaults_and_undo_t
     assert_eq!(s.tool(), &Tool::Select, "the tool goes back to select");
     let it = s.item(id).unwrap().clone();
     assert_eq!((it.kind.as_str(), it.layer.as_str()), ("crater", "stamps"));
-    assert_eq!(it.params["radius_m"], 2_000.0);
-    assert_eq!((it.params["depth_m"], it.params["rim_m"]), (250.0, 40.0));
-    assert_eq!(it.reach_m, 2_500.0, "the reach holds the outline with a margin");
-    assert_eq!(it.max_delta_m, 250.0, "the bound holds the deepest parameter");
+    assert_eq!(it.reach_m, 2_000.0, "the radius of a stamp is its reach");
+    assert_eq!(it.params, BTreeMap::from([("depth_m".to_string(), 250.0)]), "a crater's only parameter is its depth");
+    assert_eq!(it.max_delta_m, 250.0, "the bound of a crater is its depth");
     assert_eq!(it.name.as_deref(), Some("Crater 1"));
     assert!(it.direction().dot(dir) > 1.0 - 1e-14);
     assert_eq!(s.editor().store().get(BodyId::PLANET, id).unwrap(), Some(it.clone()), "written through");
@@ -437,8 +501,8 @@ fn a_typed_value_is_one_command_in_its_unit_and_a_value_out_of_range_or_not_a_nu
     let h0 = s.editor().hash();
     let depth0 = s.editor().undo_depth();
     s.set_param_text("radius_m", "3.5 km").unwrap();
-    assert_eq!(s.item(id).unwrap().params["radius_m"], 3_500.0);
-    assert!(s.item(id).unwrap().reach_m >= 3_500.0, "the reach follows the radius");
+    assert_eq!(s.item(id).unwrap().reach_m, 3_500.0, "the radius typed is the reach");
+    assert!(!s.item(id).unwrap().params.contains_key("radius_m"));
     s.set_param_text("depth_m", "300").unwrap();
     assert_eq!(s.item(id).unwrap().params["depth_m"], 300.0, "a bare number is in the unit shown");
     assert_eq!(s.item(id).unwrap().max_delta_m, 300.0);
@@ -475,7 +539,12 @@ fn a_typed_value_is_one_command_in_its_unit_and_a_value_out_of_range_or_not_a_nu
     s.set_param_text("wobble", "7.5").unwrap();
     assert_eq!(s.item(id).unwrap().params["wobble"], 7.5);
     // The limits of the item file hold where the table has no range: the outline within one cell edge, a change within the bound.
-    s.editor_mut().change(id, |it| it.kind = "mesa".into()).unwrap();
+    s.editor_mut()
+        .change(id, |it| {
+            it.kind = "mesa".into();
+            it.params.insert("radius_m".into(), 2_000.0);
+        })
+        .unwrap();
     for (key, text) in [("radius_m", "100 km"), ("radius_m", "0"), ("radius_m", "-3"), ("wobble_m", "1")] {
         let r = s.set_param_text(key, text);
         assert!(matches!(r, Err(SessionError::Refused(_))), "{key}={text}: {r:?}");
@@ -523,7 +592,7 @@ fn a_whole_drag_of_a_handle_is_one_undo_step_and_a_cancelled_drag_is_none() {
     s.drag_surface(shape::point_at(c, 10.0, 700.0, R)).unwrap();
     s.drag_surface(shape::point_at(c, 10.0, 900.0, R)).unwrap();
     s.end_drag().unwrap();
-    assert!((s.item(id).unwrap().params["radius_m"] - 900.0).abs() < 1e-3);
+    assert!((s.item(id).unwrap().reach_m - 900.0).abs() < 1e-3);
     s.begin_drag(Handle::Height).unwrap();
     assert!(s.drag_surface(c).is_err(), "the height handle does not follow the surface");
     s.drag_height(10.0).unwrap();
@@ -603,7 +672,7 @@ fn the_inspector_shows_the_selected_edit_in_metric_values_with_the_ranges_of_its
     assert_eq!(i.longitude, "8.55000° E");
     assert_eq!(i.distance, "2.4 km");
     assert_eq!(i.order, "1 of 2 in its layer");
-    assert_eq!(i.reach, "500 m");
+    assert_eq!(i.reach, "400 m");
     let rows: Vec<(&str, &str)> = i.params.iter().map(|p| (p.key.as_str(), p.text.as_str())).collect();
     assert_eq!(
         rows,

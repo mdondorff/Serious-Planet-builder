@@ -320,7 +320,7 @@ Source: owner (M6 step U3, relevance rule 2026-10-19; hiding is the layer list's
 - **THEN** the sizes are `0.1 * 500 / tan(30 degrees)` pixels, half of that, twice that, and infinity
 
 #### Scenario: Near the ground and from high up
-- **WHEN** a hill (reach 500 m) and a plateau (reach 18.75 km) at one place are seen from 2 km, from 100 km, and from the heights where the hill covers 7.9 and 8.1 pixels
+- **WHEN** a hill (reach 400 m) and a plateau (reach 15 km) at one place are seen from 2 km, from 100 km, and from the heights where the hill covers 7.9 and 8.1 pixels
 - **THEN** both show at 2 km, only the plateau at 100 km, and the hill shows at 8.1 pixels and not at 7.9
 
 #### Scenario: The footprint and the selection
@@ -360,29 +360,30 @@ Source: owner (M6 step U3, search planet-wide sorted by distance from the camera
 The editor SHALL select, place, delete, drag and type values through one session over the E4 commands (`planet_editor::session`, with `shape` and `params`; GPU-free, f64 on the CPU, `libm` only), so the flows are tested without a window.
 
 Shape and handles:
-- The outline of an edit is its `radius_m` parameter when positive, else its reach.
-- The handles are the anchor (always), the radius (when it has an outline) and the height (when it has a finite `height_m`).
-- A handle sits on the anchor, on the outline along the item's heading (0 north, 90 east), or above the anchor by the height.
+- The radius of a stamp (hill, crater, plateau) is the file's `reach_m` (WDEF-010), and so is its outline; the outline of another kind is its `radius_m` parameter when positive, else its reach.
+- The amount of a stamp is its one parameter: `height_m` of a hill (signed), `depth_m` of a crater, `target_m` of a plateau (an absolute height); the height handle edits it. Another kind has a height handle when it has `height_m`.
+- The handles are the anchor (always), the radius (when it has an outline) and the height (when it has its amount).
+- A handle sits on the anchor, on the outline along the item's heading (0 north, 90 east), or at the height: above the anchor by a hill's height, below it by a crater's depth, at a plateau's absolute target whatever the ground.
 - At a pole, north is the limit along longitude 0: -x at the north pole, +x at the south pole.
 - A direction becomes latitude and longitude in the spelling the item file takes: longitude in (-180, 180], 0 at a pole; latitude by `atan2` of the height over the distance from the axis.
 
 Drags (each result is a valid item and the bounds hold it):
 - move puts the anchor under the pointer;
-- resize sets `radius_m` to the arc from the anchor to the pointer and grows the reach to 1.25 times the radius (at most one cell edge; the reach never shrinks);
-- raise adds to `height_m` and grows the bound on the change to hold it (never shrinks, at most `MAX_DELTA_LIMIT_M`);
+- resize sets a stamp's `reach_m` to the arc from the anchor to the pointer, so it follows the pointer in and out; another kind's `radius_m` becomes the arc and its reach grows to 1.25 times it (at most one cell edge, never shrinking);
+- raise adds to a hill's `height_m` and a plateau's `target_m` and subtracts from a crater's `depth_m` (the handle is the bottom of the bowl); the bound of a hill or a crater is exactly its amount, a plateau's bound is its own parameter and does not move, and another kind's bound grows to hold its `height_m` (never shrinking, at most `MAX_DELTA_LIMIT_M`);
 - the radius and the height stay in the kind's range from the parameter table, the range a typed value is held to; a kind the table does not know keeps the radius within 1 m and one cell edge and the height within the limit on the change;
 - a pixel is `2 d tan(fov_y / 2) / height_px` metres at a point whose depth along the view axis is `d` (at least 1 m), and a drag up raises.
 
 Commands, each one E4 command:
 - a whole drag, `begin_drag` to `end_drag`, whatever the number of pointer moves; `cancel_drag` records nothing; while a handle is held no other command, undo, redo or change of selection runs;
-- placing a stamp (the kind's defaults from the table, in the layer `stamps`, reach 1.25 times the radius, the bound the largest metric parameter other than the radius), deleting, renaming and a typed value;
+- placing a stamp (the kind's defaults from the table, in the layer `stamps`: the reach is the radius, the bound is the amount of a hill or a crater and the table's default for a plateau), deleting, renaming and a typed value;
 - a place that is not a finite non-zero direction is refused.
 
 Typed values:
 - the text is read in the parameter's unit (`450`, `2.4 km`, `40 %`);
 - a value out of the kind's range, not a number, in another unit, or of an unknown parameter changes nothing and says why;
 - where the table has no range the item file's limits hold: a radius within 0 and one cell edge, any other metric parameter within the limit on the change;
-- the reach and the bound only grow to hold the value.
+- the radius of a stamp typed is its reach, and the amount of a hill or a crater typed is its bound; a plateau's flattening limit is its `max_delta_m`; for another kind the reach and the bound only grow to hold the value.
 
 Picking and inspection:
 - the item under the pointer is the nearest in units of its own outline radius among the shown ones (`pick_footprint`); an item that is not shown cannot be picked;
@@ -395,7 +396,7 @@ Source: owner (M6 step U3: handles on the planet are the primary way to edit a s
 
 #### Scenario: Outline and handles
 - **WHEN** an item with a radius and a height, one without a height, one with neither and no reach, and one with a radius that is not positive are examined, and the handles are placed at headings 0, 90 and 217
-- **THEN** the handle lists are move, radius, height; move, radius; move; the outline falls back to the reach, the radius handle is 400 m from the anchor within 1 mm along the heading, the height handle is the height above the anchor, and heading 90 is east
+- **THEN** the handle lists are move, radius, height; move, radius; move; the outline falls back to the reach, the radius handle is 400 m from the anchor within 1 mm along the heading, the height handle is above the anchor by a hill's height, below it by a crater's depth and at a plateau's absolute target, and heading 90 is east
 
 #### Scenario: One spelling and the poles
 - **WHEN** directions at ordinary places, 89.9999 degrees north, the poles, the antimeridian and negative zero are turned into latitude and longitude, put through `Item::validate`, and the north of a pole is compared with the north a micro-degree away
@@ -403,7 +404,7 @@ Source: owner (M6 step U3: handles on the planet are the primary way to edit a s
 
 #### Scenario: Drag arithmetic
 - **WHEN** a hill is moved, resized to 1,500 m, 100 m, 0 m and 90 km, raised by 40 m, -200 m and a billion metres, and a kind the table does not know is resized and raised the same way
-- **THEN** the anchor is under the pointer, the radius is the arc within 1 mm and the reach is 1.25 times it without shrinking, the hill stays within 50 m to 2 km and 5 m to 400 m with its bound growing, the unknown kind stays within 1 m to one cell edge and within the limit with its bound holding the height, a pixel at 1 km is `2 d tan(fov_y / 2) / height_px` metres, and a drag up raises
+- **THEN** the anchor is under the pointer, the reach is the arc within 1 mm and follows it down as well as up, the hill stays within 50 m to 2 km and -400 m to 400 m with its bound equal to its height, a crater's depth stays within 10 m to 800 m (raising makes it shallower) with its bound equal to it, a plateau's target stays within -500 m to 9,000 m and its bound does not move, the unknown kind stays within 1 m to one cell edge and within the limit with its bound holding the height, a pixel at 1 km is `2 d tan(fov_y / 2) / height_px` metres, and a drag up raises
 
 #### Scenario: Picking
 - **WHEN** a small hill lies inside a large plateau, the pointer is on the hill's centre, 5 km away, far away, and the hill or both are left out of the shown set or an id has no item

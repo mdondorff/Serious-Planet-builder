@@ -151,7 +151,7 @@ fn a_press_on_a_handle_holds_it_and_the_moves_make_one_command_on_release() {
     let c = s.item(a).unwrap().direction();
     ix.moved(&mut s, &view([200.0, 100.0], Some(shape::point_at(c, 0.0, 1_000.0, R)), &shown, &HANDLES)).unwrap();
     ix.release(&mut s).unwrap();
-    assert!((s.item(a).unwrap().params["radius_m"] - 1_000.0).abs() < 1e-3);
+    assert!((s.item(a).unwrap().reach_m - 1_000.0).abs() < 1e-3);
     assert_eq!(s.editor().undo_depth(), depth + 3);
     for _ in 0..3 {
         s.undo().unwrap().unwrap();

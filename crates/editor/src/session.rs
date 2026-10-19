@@ -78,9 +78,14 @@ fn is_direction(dir: Vec3) -> bool {
     dir.x.is_finite() && dir.y.is_finite() && dir.z.is_finite() && dir.length() > 0.0
 }
 
-/// Keep the bounds of an item true to its parameters.
+/// Keep the bounds of an item true to its parameters: a stamp's bound is its amount (a plateau's is its own parameter), another kind's
+/// reach holds its outline and its bound its largest metric parameter.
 fn fit_bounds(it: &mut Item) {
-    (it.reach_m, it.max_delta_m) = bounds(&it.params, it.reach_m, it.max_delta_m);
+    if params::is_stamp_kind(&it.kind) {
+        params::fit_stamp_bound(it);
+    } else {
+        (it.reach_m, it.max_delta_m) = bounds(&it.params, it.reach_m, it.max_delta_m);
+    }
 }
 
 /// The editing session over a body.
@@ -264,9 +269,12 @@ impl<S: ItemStore> Session<S> {
             return refused("that is not a place on the planet");
         }
         let (lat, lon) = shape::lat_lon_of(dir);
-        let params: BTreeMap<String, f64> = defs.iter().map(|d| (d.key.to_string(), d.default)).collect();
+        // A stamp keeps its radius in `reach_m`, its amount in `[params]` and (a plateau) its limit in `max_delta_m`.
+        let params: BTreeMap<String, f64> =
+            defs.iter().filter(|d| d.stored == params::Stored::Param).map(|d| (d.key.to_string(), d.default)).collect();
         let count = self.editor.items().filter(|i| i.kind == kind).count() + 1;
-        let (reach_m, max_delta_m) = bounds(&params, 0.0, 0.0);
+        let reach_m = defs.iter().find(|d| d.stored == params::Stored::Reach).map_or(0.0, |d| d.default);
+        let max_delta_m = params::bound_for(kind, &params);
         let new = NewItem {
             body: self.body,
             surface: planet_world_def::item::DEFAULT_SURFACE.to_string(),
@@ -335,7 +343,12 @@ impl<S: ItemStore> Session<S> {
             }
         }
         let affected = self.editor.change(id, |it| {
-            it.params.insert(key.to_string(), v);
+            match def {
+                Some(d) => params::set_param_value(it, d, v),
+                None => {
+                    it.params.insert(key.to_string(), v);
+                }
+            }
             fit_bounds(it);
         })?;
         self.status = format!("{} {} set to {}", self.named(id), key, params::format_value(v, unit));
