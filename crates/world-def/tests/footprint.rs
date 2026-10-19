@@ -32,7 +32,7 @@ impl Rng {
 }
 
 fn spec(id: u128, dir: Vec3, reach_m: f64) -> ItemSpec {
-    ItemSpec { id, layer: DEFAULT_ITEM_LAYER.into(), priority: 0, dir, content_hash: id * 7 + 1, reach_m, max_delta_m: 10.0 }
+    ItemSpec { id, layer: DEFAULT_ITEM_LAYER.into(), priority: 0, dir, content_hash: id * 7 + 1, reach_m, max_delta_m: 10.0, stamp: None }
 }
 
 /// The footprint of `tile` and its halo as sample points on the tile grid, ignoring the cap: independent of `tile_cap`.
