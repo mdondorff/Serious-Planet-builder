@@ -8,6 +8,7 @@ pub mod litperf;
 pub mod lookload;
 pub mod manifest;
 pub mod panels;
+pub mod pathreplay;
 pub mod pipelined;
 mod plancheck;
 pub mod prefill;
@@ -104,6 +105,9 @@ pub struct Options {
     pub res: u32,
     pub bundle_out: Option<PathBuf>,
     pub repro: Option<PathBuf>,
+    /// `--replay-path F`: with `--repro`, drive the bundle's terrain through the camera path file F (VIEW-025); `--replay-every N` renders every Nth pose.
+    pub replay_path: Option<PathBuf>,
+    pub replay_every: usize,
     pub face_net: Option<PathBuf>,
     pub manifest: Option<PathBuf>,
     /// A definition file (TOML, WDEF-002) instead of the default single planet with `--seed`.
@@ -263,6 +267,8 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         res: 16,
         bundle_out: None,
         repro: None,
+        replay_path: None,
+        replay_every: 0,
         face_net: None,
         manifest: None,
         world: None,
@@ -375,6 +381,10 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             }
             "--bundle" => o.bundle_out = Some(PathBuf::from(it.next().ok_or("--bundle needs a path")?)),
             "--repro" => o.repro = Some(PathBuf::from(it.next().ok_or("--repro needs a path")?)),
+            "--replay-path" => o.replay_path = Some(PathBuf::from(it.next().ok_or("--replay-path needs a camera path file")?)),
+            "--replay-every" => {
+                o.replay_every = it.next().ok_or("--replay-every needs a count")?.parse().map_err(|e| format!("--replay-every: {e}"))?
+            }
             "--world" => o.world = Some(PathBuf::from(it.next().ok_or("--world needs a path to a definition file")?)),
             "--look" => o.look = Some(PathBuf::from(it.next().ok_or("--look needs a path to a look file")?)),
             "--cache-dir" => o.cache_dir = Some(PathBuf::from(it.next().ok_or("--cache-dir needs a directory")?)),
@@ -512,10 +522,20 @@ fn check_flight_options(o: &Options) -> Result<(), String> {
         if o.out_dir.is_none() {
             return Err("--flight needs --out-dir".into());
         }
-    } else if let Some(f) =
-        FLIGHT_ONLY.iter().find(|f| o.given.contains(**f) && !(o.pipelined && **f == "--out-dir") && !litperf::is_capture_scene(&o.scene))
-    {
+    } else if let Some(f) = FLIGHT_ONLY.iter().find(|f| {
+        o.given.contains(**f) && !((o.pipelined || o.replay_path.is_some()) && **f == "--out-dir") && !litperf::is_capture_scene(&o.scene)
+    }) {
         return Err(format!("{f} only applies to --flight"));
+    }
+    if o.replay_path.is_some() {
+        if o.repro.is_none() {
+            return Err("--replay-path needs --repro BUNDLE (the terrain bundle F9 wrote beside the path file)".into());
+        }
+        if o.out_dir.is_none() {
+            return Err("--replay-path needs --out-dir".into());
+        }
+    } else if o.given.contains("--replay-every") {
+        return Err("--replay-every only applies to --replay-path".into());
     }
     if o.lockstep && !o.pipelined {
         return Err("--lockstep only applies to --pipelined".into());
@@ -754,6 +774,9 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         };
     }
     if let Some(bundle) = &o.repro {
+        if o.replay_path.is_some() {
+            return pathreplay::replay_path(&ctx, o, bundle, out);
+        }
         return skeleton::replay(&ctx, bundle, o.out.as_deref(), out);
     }
     match o.scene.as_str() {
