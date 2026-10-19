@@ -1,0 +1,1 @@
+- 2026-10-19 **Editor relevance rule (owner):** the camera decides which edits the editor shows (footprint meets the view, reach above a screen-size minimum); search is planet-wide, sorted by distance.
