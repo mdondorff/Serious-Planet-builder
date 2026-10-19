@@ -50,7 +50,14 @@ fn off_centre_pixels_hit_where_the_analytic_sphere_says_at_orbit_and_near_the_gr
         let cam = camera(Vec3::new(0.0, 0.0, R + altitude), forward, Vec3::new(0.0, 1.0, 0.0));
         for (x, y) in [(10.0, 10.0), (800.0, 450.0), (1590.0, 890.0), (300.0, 700.0), (1200.0, 120.0)] {
             let ray = cursor_ray(&cam, x, y, W, H);
-            let Some(hit) = pick_surface(&ray, &limits, &flat) else { continue };
+            let b = ray.origin.dot(ray.dir);
+            let discriminant = b * b - (ray.origin.dot(ray.origin) - R * R);
+            let hit = pick_surface(&ray, &limits, &flat);
+            if discriminant < 0.0 {
+                assert!(hit.is_none(), "altitude {altitude} pixel ({x},{y}) misses the sphere");
+                continue;
+            }
+            let hit = hit.unwrap_or_else(|| panic!("altitude {altitude} pixel ({x},{y}) hits the sphere"));
             let want = analytic_sphere_hit(&ray, R);
             assert!((hit.distance_m - want).abs() < 2e-3, "altitude {altitude} pixel ({x},{y}): {} vs {want}", hit.distance_m);
         }
@@ -148,7 +155,7 @@ fn hit_at(dir: Vec3) -> planet_frame::pick::SurfaceHit {
 fn the_surface_distance_is_exact_at_small_angles() {
     for arc in [0.001, 0.5, 40.0, 5_000.0, 2_000_000.0] {
         let d = surface_distance_m(Vec3::new(0.0, 0.0, 1.0), dir_at(arc, 0.7), R);
-        assert!((d - arc).abs() < arc * 1e-12 + 1e-9, "{d} vs {arc}");
+        assert!((d - arc).abs() < arc * 1e-12, "{d} vs {arc}");
     }
 }
 
@@ -187,4 +194,68 @@ fn equal_candidates_resolve_to_the_smaller_radius_then_the_lower_id() {
     ];
     assert_eq!(pick_footprint(&hit_at(d), &items, R), Some(2), "all at distance 0: the smallest radius, then the lowest id");
     assert_eq!(pick_footprint(&hit_at(d), &[], R), None);
+}
+
+// spec: VIEW-012
+#[test]
+fn a_ray_entering_the_shell_onto_a_surface_at_its_bound_hits_at_the_entry() {
+    let from_orbit = camera(Vec3::new(0.0, 0.0, 2.0 * R), Vec3::new(0.0, 0.0, -1.0), Vec3::new(0.0, 1.0, 0.0));
+    let bare = PickLimits::new(R, 0.0);
+    let plateau = |_: Vec3| 4_000.0;
+    for (x, y) in [(800.0, 450.0), (900.0, 500.0), (700.0, 400.0), (810.0, 440.0)] {
+        let ray = cursor_ray(&from_orbit, x, y, W, H);
+        let hit = pick_surface(&ray, &bare, &flat).unwrap_or_else(|| panic!("a bound of 0 m on a bare sphere: pixel ({x},{y})"));
+        assert!((hit.distance_m - analytic_sphere_hit(&ray, R)).abs() < 2e-3);
+        let hit = pick_surface(&ray, &PickLimits::new(R, 4_000.0), &plateau).unwrap_or_else(|| panic!("a plateau at the bound: pixel ({x},{y})"));
+        assert!((hit.distance_m - analytic_sphere_hit(&ray, R + 4_000.0)).abs() < 2e-3);
+    }
+}
+
+// spec: VIEW-012
+#[test]
+fn rays_that_graze_the_surface_hit_or_miss_with_the_sphere() {
+    let limits = PickLimits::new(R, 10_000.0);
+    // Straight down at a distance `x` from the axis through the centre: the closest approach to the centre is `x`.
+    let down = |x: f64| Ray { origin: Vec3::new(x, 0.0, 1.5 * R), dir: Vec3::new(0.0, 0.0, -1.0) };
+    let inside = down(R - 1_000.0);
+    let hit = pick_surface(&inside, &limits, &flat).expect("a ray 1 km inside the limb hits");
+    assert!((hit.distance_m - analytic_sphere_hit(&inside, R)).abs() < 2e-3, "{}", hit.distance_m);
+    assert!(pick_surface(&down(R + 1.0), &limits, &flat).is_none(), "a ray 1 m outside the limb enters the shell and misses");
+}
+
+// spec: VIEW-012
+#[test]
+fn degenerate_inputs_are_misses_and_never_hang() {
+    let limits = PickLimits::new(R, 4_000.0);
+    let centre = Ray { origin: Vec3::new(0.0, 0.0, 0.0), dir: Vec3::new(0.0, 0.0, 1.0) };
+    assert!(pick_surface(&centre, &limits, &hill).is_none(), "a camera at the centre is below the surface");
+    let from_orbit = Ray { origin: Vec3::new(0.0, 0.0, 2.0 * R), dir: Vec3::new(0.0, 0.0, -1.0) };
+    for bad in [Vec3::new(0.0, 0.0, 0.0), Vec3::new(f64::NAN, 0.0, 1.0)] {
+        assert!(pick_surface(&Ray { dir: bad, ..from_orbit }, &limits, &flat).is_none());
+    }
+    let unnormalised = Ray { dir: Vec3::new(0.0, 0.0, -2.0), ..from_orbit };
+    let hit = pick_surface(&unnormalised, &limits, &flat).expect("a direction is normalised");
+    assert!((hit.distance_m - R).abs() < 1e-3);
+    let no_tolerance = PickLimits { tolerance_m: 0.0, ..limits };
+    let hit = pick_surface(&from_orbit, &no_tolerance, &flat).expect("a zero tolerance still ends");
+    assert!((hit.distance_m - R).abs() < 1e-3);
+    let nan_field = |_: Vec3| f64::NAN;
+    assert!(pick_surface(&from_orbit, &limits, &nan_field).is_none());
+    let cam = camera(Vec3::new(0.0, 0.0, 2.0 * R), Vec3::new(0.0, 0.0, -1.0), Vec3::new(0.0, 1.0, 0.0));
+    let flat_viewport = cursor_ray(&cam, 0.0, 0.0, 0.0, 0.0);
+    assert!(flat_viewport.dir.length().is_finite() && (flat_viewport.dir.z + 1.0).abs() < 1e-12, "a viewport without area gives the axis");
+}
+
+// spec: VIEW-012
+#[test]
+fn a_footprint_without_a_direction_or_a_radius_contains_nothing() {
+    let real = Footprint { id: 4, dir: dir_at(0.0, 0.0), radius_m: 100.0 };
+    let hit = hit_at(dir_at(5_000.0, 0.0));
+    let zero = Footprint { id: 1, dir: Vec3::new(0.0, 0.0, 0.0), radius_m: 1.0e9 };
+    let nan_dir = Footprint { id: 2, dir: Vec3::new(f64::NAN, 0.0, 1.0), radius_m: 1.0e9 };
+    let nan_radius = Footprint { id: 3, dir: dir_at(5_000.0, 0.0), radius_m: f64::NAN };
+    for order in [[zero, nan_dir, nan_radius, real], [real, nan_radius, nan_dir, zero]] {
+        assert_eq!(pick_footprint(&hit, &order, R), None, "far from the real item, the broken ones contain nothing");
+        assert_eq!(pick_footprint(&hit_at(dir_at(10.0, 0.0)), &order, R), Some(4));
+    }
 }
