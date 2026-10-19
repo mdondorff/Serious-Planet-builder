@@ -396,6 +396,34 @@ fn a_field_that_reads_items_has_a_node_set_id_per_tile_that_names_its_reads_and_
     assert_eq!(id(&seed_only, a), id(&seed_only, b));
 }
 
+// spec: STRM-010, WDEF-008
+#[test]
+fn a_coarse_tiles_node_set_id_names_its_summary_nodes_and_not_their_hashes() {
+    use planet_cache::meshpack::node_set_id_of_tile;
+    let at = dir(1.0, 0.2, 0.1);
+    let coarse = TileId::from_direction(&TangentWarp, at, 4);
+    let other = TileId::from_direction(&TangentWarp, dir(-1.0, 0.3, 0.2), 4);
+    let plain = WorldDefinition::single_planet(R, 7);
+    let mut edited = plain.clone();
+    edited.put_item_spec(BodyId::PLANET, stamp(1, at, 150.0)).unwrap();
+    let (fp, fe) = (Footprinted { inner: Reference(7), def: &plain }, Footprinted { inner: Reference(7), def: &edited });
+    let id = |f: &dyn HeightField, t: TileId| node_set_id_of_tile(f, t, &TangentWarp);
+    assert_ne!(id(&fp, coarse), id(&fp, other), "two coarse tiles read different nodes");
+    assert_eq!(id(&fp, coarse), id(&fe, coarse), "an edit changes the node hashes, never which nodes the tile reads");
+    // By hand: the sorted, length-prefixed paths of the field-wide reads, the radius node and the summary nodes of the tile.
+    let mut paths = vec!["world.seed".to_string(), "derived.body.0.seed".to_string(), "body.0.radius_m".to_string()];
+    for node in plain.summary_cover(BodyId::PLANET, coarse, 0.25).unwrap().expect("a coarse tile") {
+        paths.push(planet_world_def::summary_node_path(BodyId::PLANET, "items", node));
+    }
+    paths.sort();
+    let mut material = Vec::new();
+    for p in &paths {
+        material.extend_from_slice(&(p.len() as u32).to_le_bytes());
+        material.extend_from_slice(p.as_bytes());
+    }
+    assert_eq!(id(&fp, coarse)[..], blake3::derive_key("planet-builder node set v1", &material)[..16]);
+}
+
 const KNOWN_SUMMARY_KEY: &str = "f2d4549a1167e3bdcde6c7c25d0bef81";
 const KNOWN_EMPTY_FOOTPRINT: &str = "e99c6b49146b3b01808bed3d94a3bb02";
 const KNOWN_FOOTPRINT_ITEM: &str = "545f0ddd4f9bf86df105c9727134ea89";
