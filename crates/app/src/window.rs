@@ -16,6 +16,7 @@ use planet_editor::layout::Layout;
 use planet_frame::globe::{marker_at, visible_markers, wheel_zoom_factor, ClickTracker, Marker, ScreenMarker, Viewport, HIT_RADIUS_PX};
 use planet_frame::look::file::LookParams;
 use planet_frame::mouselook::{Grab, GrabChange, GRAB_ORDER};
+use planet_frame::pathlog::PathLog;
 use planet_frame::pick::PickLimits;
 use planet_frame::scenes::{build_script, DrawnSet, StreamScene};
 use planet_frame::viewer::{
@@ -66,6 +67,7 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
         KeyCode::KeyG => Command::ToggleGlobe,
         KeyCode::F3 => Command::CycleOverlay,
         KeyCode::F4 => Command::ToggleCoarseLod,
+        KeyCode::F9 => Command::SaveRepro,
         KeyCode::Escape => Command::Quit,
         _ => return None,
     })
@@ -257,6 +259,9 @@ struct Running {
     /// The cursor in render pixels, the camera of the last frame (what a click on the overview is traced through) and a press in progress.
     cursor: [f64; 2],
     last_camera: Camera,
+    /// The last minute of camera poses at 10 Hz and the files F9 has written (VIEW-024).
+    path: PathLog,
+    repro_files: u64,
     press: ClickTracker,
     globe_stats: GlobeStats,
 }
@@ -276,7 +281,43 @@ struct App<'w> {
     summary: Option<String>,
 }
 
+/// Where F9 writes its files: `PLANET_REPRO_DIR`, else `target/review` (VIEW-024).
+fn repro_dir() -> PathBuf {
+    std::env::var_os("PLANET_REPRO_DIR").map_or_else(|| PathBuf::from("target/review"), PathBuf::from)
+}
+
 impl App<'_> {
+    /// F9 (VIEW-024): `frame-<n>-path.txt` (the camera path of the last minute) and `frame-<n>.bundle` (the terrain repro bundle of this
+    /// frame's request over the world as the window holds it, edits included) in [`repro_dir`]; `cargo xtask repro` replays the bundle.
+    fn save_repro(&self, st: &Running, camera: Camera, view: TerrainView) -> Result<String, String> {
+        let dir = repro_dir();
+        std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+        let n = st.frames;
+        let request = self.request(camera, view, st.viewer.coarse_lod);
+        let plan = planet_frame::plan_terrain_cached(&request, self.field.as_ref(), &mut planet_frame::SelectionCache::new())
+            .map_err(|e| format!("planning the frame for the bundle: {e}"))?;
+        let definition = self.world.definition();
+        let toml = planet_world_def::toml_io::to_toml(&definition).map_err(|e| format!("recording the world: {e}"))?;
+        let bundle = planet_frame::TerrainBundle {
+            generator_version: planet_generators::GENERATOR_VERSION,
+            implementation_id: planet_generators::IMPLEMENTATION_ID.to_string(),
+            mesh_version: planet_generators::mesh::MESH_VERSION,
+            definition_hash: definition.hash(),
+            adapter: st.ctx.adapter_key(),
+            world: Some(planet_frame::BundleWorld {
+                height_field: self.world.id().to_string(),
+                global_res: self.world.global_res(),
+                definition_toml: toml,
+            }),
+            request,
+            plan,
+        };
+        let (bundle_path, path_path) = (dir.join(format!("frame-{n}.bundle")), dir.join(format!("frame-{n}-path.txt")));
+        std::fs::write(&bundle_path, bundle.to_text()).map_err(|e| format!("writing {}: {e}", bundle_path.display()))?;
+        std::fs::write(&path_path, st.path.to_text()).map_err(|e| format!("writing {}: {e}", path_path.display()))?;
+        Ok(format!("F9: wrote {} and {} ({} poses)", bundle_path.display(), path_path.display(), st.path.len()))
+    }
+
     fn fail(&mut self, el: &ActiveEventLoop, e: String) {
         if self.error.is_none() {
             self.error = Some(e);
@@ -366,6 +407,8 @@ impl App<'_> {
             hover: None,
             cursor: [0.0, 0.0],
             last_camera: self.cameras[0],
+            path: PathLog::new(),
+            repro_files: 0,
             press: ClickTracker::default(),
             globe_stats: GlobeStats::default(),
         });
@@ -511,6 +554,7 @@ impl App<'_> {
                 st.hover = None;
             }
             st.altitude_m = height(camera.position);
+            st.path.record(now_ms, &camera, st.altitude_m, dt * 1000.0);
             let view = TerrainView::ALL[st.viewer.view_index];
             let ctx = &st.ctx;
             // The coarse view's error bound may not fit the terrain here (a steep neighbourhood leaves no morph room, the plan worker
@@ -521,6 +565,16 @@ impl App<'_> {
                     st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer })
                 })?;
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
+            // F9: the camera path of the last minute and the repro bundle of this frame (VIEW-024).
+            if st.viewer.take_repro_request() {
+                match self.save_repro(&st, camera, view) {
+                    Ok(text) => {
+                        st.repro_files += 1;
+                        eprintln!("{text}");
+                    }
+                    Err(e) => eprintln!("F9: the repro files were not written: {e}"),
+                }
+            }
             st.last_wanted = frame.pipeline.wanted.iter().map(|w| w.0).collect();
             // The preview ends when the exact tiles are in (VIEW-023).
             if let Some(e) = st.edit.as_mut() {
@@ -886,6 +940,8 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
         31 => press(st, Command::CycleOverlay),
         34 => press(st, Command::ToggleCoarseLod),
         36 => press(st, Command::Restart),
+        // F9 writes files: the run presses it only where a directory for them was named.
+        40 if std::env::var_os("PLANET_REPRO_DIR").is_some() => press(st, Command::SaveRepro),
         _ => {}
     }
     Ok(false)
@@ -1137,6 +1193,18 @@ fn smoke_summary(st: &Running) -> String {
             if e.on { "mode on" } else { "mode off" }
         )
     });
+    // The F9 files of the run, when the script pressed it (`PLANET_REPRO_DIR` set).
+    let repro = if st.repro_files > 0 {
+        format!(
+            "
+  repro: {} F9 write(s) to {}, the camera path holds {} poses",
+            st.repro_files,
+            repro_dir().display(),
+            st.path.len()
+        )
+    } else {
+        String::new()
+    };
     let globe = format!(
         "
   globe: {} frames of the overview, up to {} markers shown, {} flights started, {} landings",
@@ -1165,6 +1233,7 @@ fn smoke_summary(st: &Running) -> String {
     ) + &ui
         + &edit
         + &globe
+        + &repro
 }
 
 /// `planet editor`: open the window and run the flight until it is closed (or, for `--smoke`, for a few dozen frames).
@@ -1348,6 +1417,7 @@ mod tests {
             (KeyCode::KeyL, Command::ToggleLit),
             (KeyCode::F3, Command::CycleOverlay),
             (KeyCode::F4, Command::ToggleCoarseLod),
+            (KeyCode::F9, Command::SaveRepro),
             (KeyCode::KeyG, Command::ToggleGlobe),
             (KeyCode::Escape, Command::Quit),
         ] {
@@ -1493,6 +1563,7 @@ mod tests {
             Command::ToggleVsync,
             Command::CycleOverlay,
             Command::ToggleCoarseLod,
+            Command::SaveRepro,
         ] {
             assert!(!editor_mode_blocks(cmd), "{cmd:?}");
         }
