@@ -1,0 +1,1 @@
+- 2026-10-19 **test-fast-series** (sonnet-crusader, improvement 4 of the M5 process review; BUILD-019): every `test fast` run appends its time, selection, build, tests and verdict to `target/test-logs/test-fast-series.tsv`, so edit-to-first-test of a changed-crate selection (the figure the 20 s budget is about) has a series.

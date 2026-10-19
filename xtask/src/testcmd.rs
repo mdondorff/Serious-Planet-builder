@@ -231,11 +231,13 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
     let mut cmd: Vec<String> = vec!["nextest".into(), "run".into(), "--no-tests=pass".into()];
     let mut whole = sub != Some("fast");
     let mut selection: Vec<String> = Vec::new();
+    let mut fast_crates: Vec<String> = Vec::new();
     if sub == Some("fast") {
         let pkgs = if all { all_packages() } else { packages_for_changes(&changed_paths(root)) };
         whole = pkgs == all_packages();
         eprintln!("test fast: {}", if whole { "every crate".to_string() } else { pkgs.join(", ") });
         for p in pkgs {
+            fast_crates.push(p.clone());
             selection.extend(["-p".into(), p]);
         }
     } else {
@@ -285,6 +287,11 @@ pub fn test_timed(root: &Path, args: &[String]) -> Result<TestTiming, String> {
     eprintln!("elapsed {secs:.1}s (tests; build {build_secs:.1}s)");
     if sub == Some("fast") {
         eprintln!("{}", edit_to_first_test_line(build_secs, secs).0);
+        // The series of these times (BUILD-019): a warning when it cannot be written, never a failure.
+        let line = testlog::series_line(secs_now, &fast_crates, whole, build_secs, secs, result.is_ok());
+        if let Err(e) = testlog::append_series(&root.join(testlog::DIR), &line) {
+            eprintln!("warning: the test fast series was not written ({e})");
+        }
     }
     if sub == Some("fast") {
         match budget_verdict(secs, whole) {
