@@ -928,6 +928,9 @@ impl planet_generators::height::HeightField for CancelGuarded<'_> {
     fn item_revision(&self) -> u64 {
         self.inner.item_revision()
     }
+    fn passes_through(&self, tile: planet_core::TileId, map: &dyn planet_core::FaceMapping) -> bool {
+        self.inner.passes_through(tile, map)
+    }
     fn surface_id(&self) -> &'static str {
         self.inner.surface_id()
     }

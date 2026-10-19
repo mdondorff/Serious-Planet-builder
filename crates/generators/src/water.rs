@@ -378,6 +378,9 @@ impl crate::height::HeightField for WaterBounded<'_> {
     fn item_revision(&self) -> u64 {
         self.f().item_revision()
     }
+    fn passes_through(&self, tile: planet_core::TileId, map: &dyn FaceMapping) -> bool {
+        self.f().passes_through(tile, map)
+    }
     fn surface_id(&self) -> &'static str {
         self.f().surface_id()
     }

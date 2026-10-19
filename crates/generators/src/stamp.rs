@@ -144,6 +144,8 @@ pub trait ItemReader: Send + Sync {
     fn tile_reads(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> Vec<ReadRecord>;
     /// The revision of the items (never 0): differs after every change and between definitions (STRM-027).
     fn revision(&self) -> u64;
+    /// Whether no item of `layer` touches `tile` with `halo` (WDEF-007): the footprint the tile declares is empty.
+    fn footprint_empty(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> bool;
 }
 
 impl ItemReader for WorldDefinition {
@@ -171,6 +173,9 @@ impl ItemReader for WorldDefinition {
     fn revision(&self) -> u64 {
         WorldDefinition::revision(self)
     }
+    fn footprint_empty(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> bool {
+        self.footprint_items(body, layer, tile, halo).is_ok_and(|v| v.is_empty())
+    }
 }
 
 /// A definition shared between the editor and the stage: the stage reads whatever it holds at the moment of a batch.
@@ -189,6 +194,9 @@ impl ItemReader for RwLock<WorldDefinition> {
     }
     fn revision(&self) -> u64 {
         self.read().expect("definition lock").revision()
+    }
+    fn footprint_empty(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> bool {
+        self.read().expect("definition lock").footprint_empty(body, layer, tile, halo)
     }
 }
 
@@ -374,6 +382,12 @@ impl HeightField for StampStage<'_> {
     }
     fn item_revision(&self) -> u64 {
         planet_core::hash::hash_u64s(0x0072_6576, &[self.base.item_revision(), self.items.revision()]) | 1
+    }
+
+    /// No item of the layer touches the tile (the footprint it declares is empty): the stage adds nothing there, so its heights, climate
+    /// and bounds are the base's bit for bit and its keys are the base's (STRM-029, GEN-027).
+    fn passes_through(&self, tile: TileId, _map: &dyn FaceMapping) -> bool {
+        self.items.footprint_empty(self.body, &self.layer, tile, STAGE_HALO)
     }
 }
 

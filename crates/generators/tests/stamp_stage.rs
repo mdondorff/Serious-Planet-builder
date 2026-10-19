@@ -132,6 +132,34 @@ fn stamps_apply_in_application_order_and_a_plateau_flattens_what_is_under_it() {
     }
 }
 
+// spec: GEN-027
+#[test]
+fn a_stage_with_no_item_in_reach_of_a_tile_is_the_identity_on_its_source_there_bit_for_bit_and_says_so() {
+    let at = dir(1.0, 0.2, 0.1);
+    let s = stage(world(vec![item(1, 0, at, 1_500.0, 60.0, Stamp::new(StampKind::Hill, [30.0, 0.0, 0.0]))]));
+    let base = Reference(1);
+    let map = &TangentWarp;
+    let far = TileId::from_direction(map, dir(-1.0, -0.4, 0.3), 12);
+    let near = TileId::from_direction(map, at, 12);
+    assert!(HeightField::passes_through(&s, far, map), "no item touches a tile on the other side");
+    assert!(!HeightField::passes_through(&s, near, map), "the tile under the stamp does not pass through");
+    // The tile's data, its samples, its bounds and its climate are the source's, bit for bit.
+    assert_eq!(generate_tile_field(&s, map, far, 16), generate_tile_field(&base, map, far, 16));
+    let (centre, angle) = (far.center_direction(map), 1.0e-3);
+    assert_eq!(s.height_bounds(centre, angle), base.height_bounds(centre, angle));
+    assert_eq!(s.climate(map, far), base.climate(map, far));
+    // Coarse tiles: the whole planet is one tile at level 0: the stamp is in it. A coarse tile away from the stamp passes through.
+    let coarse_far = TileId::from_direction(map, dir(-1.0, -0.4, 0.3), 3);
+    assert!(HeightField::passes_through(&s, coarse_far, map));
+    assert!(!HeightField::passes_through(&s, TileId::from_direction(map, at, 3), map));
+    // With the stamp removed from the definition's reach (an empty layer) every tile passes through.
+    let empty = stage(world(vec![]));
+    assert!(
+        HeightField::passes_through(&empty, near, map)
+            && HeightField::passes_through(&empty, TileId::new(planet_core::Face(0), 0, 0, 0).unwrap(), map)
+    );
+}
+
 // spec: GEN-026
 #[test]
 fn the_heights_of_a_tile_are_bit_identical_at_any_thread_count_batch_order_and_batch_size() {
@@ -261,6 +289,9 @@ impl ItemReader for Recording {
     }
     fn revision(&self) -> u64 {
         self.inner.revision()
+    }
+    fn footprint_empty(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> bool {
+        self.inner.footprint_empty(body, layer, tile, halo)
     }
 }
 
