@@ -70,15 +70,25 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
 }
 
 /// The key of the editor mode a key press asks for, if any (VIEW-022).
-pub fn edit_key(code: KeyCode, ctrl: bool, shift: bool) -> Option<EditKey> {
+///
+/// Undo and redo are the keys *labelled* Z and Y, whatever the layout (`logical` is the character of the key; on a QWERTZ keyboard the
+/// physical key `KeyZ` is labelled Y); without a character the physical keys of a QWERTY keyboard stand in. The rest are physical keys.
+pub fn edit_key(code: KeyCode, logical: Option<&str>, ctrl: bool, shift: bool) -> Option<EditKey> {
+    let (z, y) = match logical {
+        Some(c) => (c.eq_ignore_ascii_case("z"), c.eq_ignore_ascii_case("y")),
+        None => (code == KeyCode::KeyZ, code == KeyCode::KeyY),
+    };
+    if ctrl && z {
+        return Some(if shift { EditKey::Redo } else { EditKey::Undo });
+    }
+    if ctrl && y {
+        return Some(EditKey::Redo);
+    }
     Some(match code {
         KeyCode::Digit1 => EditKey::Tool(1),
         KeyCode::Digit2 => EditKey::Tool(2),
         KeyCode::Digit3 => EditKey::Tool(3),
         KeyCode::Digit4 => EditKey::Tool(4),
-        KeyCode::KeyZ if ctrl && shift => EditKey::Redo,
-        KeyCode::KeyZ if ctrl => EditKey::Undo,
-        KeyCode::KeyY if ctrl => EditKey::Redo,
         KeyCode::Delete | KeyCode::Backspace => EditKey::Delete,
         KeyCode::Escape => EditKey::Escape,
         _ => return None,
@@ -592,7 +602,8 @@ impl App<'_> {
         let field = self.field;
         let Some(st) = self.state.as_mut() else { return };
         match (button, state) {
-            (MouseButton::Left, ElementState::Pressed) if world => {
+            // A press while the pointer is captured (looking around) is not at the cursor the window last saw: it does nothing.
+            (MouseButton::Left, ElementState::Pressed) if world && !st.viewer.mouse.captured() => {
                 let camera = st.last_camera;
                 if let Some(e) = st.edit.as_mut() {
                     e.press(&camera, viewport, st.cursor, &limits, field);
@@ -607,7 +618,8 @@ impl App<'_> {
                 }
                 st.edit_down = false;
             }
-            (MouseButton::Right, ElementState::Pressed) if world => {
+            // Looking around waits for the left button: a handle held is not let go of by a second button.
+            (MouseButton::Right, ElementState::Pressed) if world && !st.edit_down => {
                 let free = st.viewer.is_free();
                 st.viewer.mouse.click(free);
                 apply_grab(st);
@@ -836,7 +848,13 @@ impl ApplicationHandler for App<'_> {
                             }
                             return;
                         }
-                        if let (Some(e), Some(k)) = (st.edit.as_mut().filter(|e| e.on), edit_key(code, st.ctrl, st.shift)) {
+                        let logical = match &event.logical_key {
+                            winit::keyboard::Key::Character(c) => Some(c.to_string()),
+                            _ => None,
+                        };
+                        if let (Some(e), Some(k)) =
+                            (st.edit.as_mut().filter(|e| e.on), edit_key(code, logical.as_deref(), st.ctrl, st.shift))
+                        {
                             e.key(k);
                             return;
                         }
@@ -1268,5 +1286,43 @@ mod tests {
         assert!(!h.forward);
         assert!(!set_held(&mut h, KeyCode::KeyP, true), "P is a command, not a held key");
         assert!(!set_held(&mut h, KeyCode::Space, true));
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn the_keys_of_the_editor_mode_are_the_numbers_ctrl_z_and_y_delete_and_escape_by_the_letter_on_the_key() {
+        use EditKey::*;
+        let k = |code, logical: Option<&str>, ctrl, shift| edit_key(code, logical, ctrl, shift);
+        assert_eq!(k(KeyCode::Digit1, None, false, false), Some(Tool(1)));
+        assert_eq!(k(KeyCode::Digit4, None, false, false), Some(Tool(4)));
+        assert_eq!(k(KeyCode::Delete, None, false, false), Some(Delete));
+        assert_eq!(k(KeyCode::Backspace, None, false, false), Some(Delete));
+        assert_eq!(k(KeyCode::Escape, None, false, false), Some(Escape));
+        // QWERTY: the physical Z key is labelled z.
+        assert_eq!(k(KeyCode::KeyZ, Some("z"), true, false), Some(Undo));
+        assert_eq!(k(KeyCode::KeyZ, Some("Z"), true, true), Some(Redo));
+        assert_eq!(k(KeyCode::KeyY, Some("y"), true, false), Some(Redo));
+        // QWERTZ: the key labelled Z is the physical KeyY, and the key labelled Y is KeyZ.
+        assert_eq!(k(KeyCode::KeyY, Some("z"), true, false), Some(Undo), "Ctrl+Z undoes on a German keyboard");
+        assert_eq!(k(KeyCode::KeyZ, Some("y"), true, false), Some(Redo), "Ctrl+Y redoes on a German keyboard");
+        // Without a character the QWERTY keys stand in; without Ctrl neither letter is a command.
+        assert_eq!(k(KeyCode::KeyZ, None, true, false), Some(Undo));
+        assert_eq!(k(KeyCode::KeyY, None, true, false), Some(Redo));
+        assert_eq!(k(KeyCode::KeyZ, Some("z"), false, false), None);
+        assert_eq!(k(KeyCode::KeyY, Some("y"), false, true), None);
+        // The fly keys are not the editor's: W, S and the rest stay the camera's.
+        for code in [
+            KeyCode::KeyW,
+            KeyCode::KeyA,
+            KeyCode::KeyS,
+            KeyCode::KeyD,
+            KeyCode::KeyQ,
+            KeyCode::KeyE,
+            KeyCode::Space,
+            KeyCode::KeyG,
+            KeyCode::KeyC,
+        ] {
+            assert_eq!(k(code, None, false, false), None, "{code:?}");
+        }
     }
 }

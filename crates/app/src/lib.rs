@@ -847,6 +847,10 @@ mod tests {
             assert!(parse_args(&["editor".to_string(), flag.to_string()]).is_err(), "{flag} needs a value");
         }
         assert!(USAGE.contains("--edit") && USAGE.contains("--items") && USAGE.contains("--editor-layout"));
+        // The editor mode needs the UI: the run says so before it opens anything.
+        let o = args(&["editor", "--edit", "--no-ui"]);
+        let e = crate::window::run_window(&o, &mut std::io::sink()).unwrap_err();
+        assert!(e.contains("--edit needs the editor UI"), "{e}");
     }
 
     // spec: VIEW-011

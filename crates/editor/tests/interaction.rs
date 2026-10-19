@@ -272,7 +272,8 @@ fn the_outline_of_a_shown_edit_is_a_ring_of_pixels_at_its_radius_around_its_cent
     let px = overlay::handle_pixels(&items);
     assert_eq!(px.len(), 3);
     assert!(libm::hypot(px[0].1[0] - c[0], px[0].1[1] - c[1]) < 1e-6, "the move handle is on the centre");
-    assert!(libm::hypot(px[1].1[0] - c[0], px[1].1[1] - c[1]) > 0.9 * want, "the radius handle is on the outline");
+    let rd = libm::hypot(px[1].1[0] - c[0], px[1].1[1] - c[1]);
+    assert!((rd - want).abs() < 0.01 * want, "the radius handle is on the outline: {rd} vs {want}");
     assert!(libm::hypot(px[2].1[0] - c[0], px[2].1[1] - c[1]) < 1e-6, "straight down the height handle is behind the move handle");
     // From an oblique view (2 km south of it and 2 km up, looking north-down) the height handle is above the centre on the screen.
     let south = shape::point_at(at, 180.0, 2_000.0, R);
@@ -312,4 +313,26 @@ fn points_behind_the_camera_or_off_the_screen_are_none_and_an_unknown_id_is_skip
     assert!(far[0].centre.is_none() && far[0].outline.iter().all(|p| p.is_none()));
     assert!(overlay::handle_pixels(&far).is_empty());
     assert!(overlay::build(&s, &[], &view_above(at, 2_000.0), &|_| 0.0).is_empty());
+}
+
+// spec: VIEW-020
+#[test]
+fn a_point_on_the_near_side_of_the_planet_but_past_the_horizon_is_not_on_the_screen() {
+    let mut s = session(7);
+    let here = unit(0.0, 0.0);
+    let (near, _) = s.place("hill", unit(1.0, 0.0)).unwrap();
+    let (far, _) = s.place("hill", unit(3.0, 0.0)).unwrap();
+    // 2 km up, looking north along the horizon: the horizon is 160 km away, 1 degree is 111 km and 3 degrees are 333 km.
+    let camera =
+        Camera::at_surface_point(PlanetFixed(here * (R + 2_000.0)), Vec3::new(0.0, 0.0, 1.0), 0.0, std::f64::consts::FRAC_PI_3, 1.0, 1.0);
+    let v = ViewState { camera, viewport: Viewport { width_px: 1000.0, height_px: 1000.0 }, radius_m: R };
+    let items = overlay::build(&s, &[near, far], &v, &|_| 0.0);
+    let by = |id| items.iter().find(|o| o.id == id).unwrap();
+    assert!(by(near).centre.is_some(), "1 degree north is in front of the horizon");
+    assert!(
+        by(far).centre.is_none() && by(far).outline.iter().all(|p| p.is_none()),
+        "3 degrees north is behind it, though the projection alone puts it in the viewport"
+    );
+    let lone = planet_frame::globe::project(&camera, unit(3.0, 0.0) * R, v.viewport);
+    assert!(lone.is_some(), "the projection alone would draw it: {lone:?}");
 }

@@ -144,8 +144,18 @@ fn open_store(dir: Option<&Path>) -> (EditStore, String) {
 impl EditRuntime {
     /// The editor mode over a copy of the world's definition. With a directory the items in it are loaded and every command writes its file.
     pub fn new(def: WorldDefinition, radius_m: f64, items: Option<&PathBuf>, layout: Layout) -> Result<EditRuntime, String> {
+        EditRuntime::with_ids(def, radius_m, items, layout, IdMaker::system())
+    }
+
+    /// [`new`](EditRuntime::new) with the clock and entropy of the ids given (tests).
+    pub fn with_ids(
+        def: WorldDefinition,
+        radius_m: f64,
+        items: Option<&PathBuf>,
+        layout: Layout,
+        ids: IdMaker,
+    ) -> Result<EditRuntime, String> {
         let (store, saved) = open_store(items.map(PathBuf::as_path));
-        let ids = IdMaker::system();
         let mut editor = Editor::new(def, store, ids, planet_generators::GENERATOR_VERSION, EDIT_STAGE_VERSION);
         let loaded = editor.load(BodyId::PLANET).map_err(|e| format!("loading the items: {e}"))?;
         let mut session = Session::new(editor, BodyId::PLANET, radius_m);
@@ -177,7 +187,8 @@ impl EditRuntime {
     pub fn toggle(&mut self) {
         self.on = !self.on;
         if !self.on {
-            let _ = self.interaction.cancel(&mut self.session);
+            // The edit of an abandoned drag goes back, and its places are still to refresh.
+            self.cancel_drag();
             self.session.set_hover(None);
         }
     }
@@ -258,7 +269,13 @@ impl EditRuntime {
         self.stats.frames += 1;
         self.camera_position = camera.position.0;
         let view = self.view(camera, viewport);
-        self.shown = self.session.shown(wanted, &view).unwrap_or_default();
+        self.shown = match self.session.shown(wanted, &view) {
+            Ok(ids) => ids,
+            Err(e) => {
+                self.session.set_status(format!("the edits in view could not be found: {e}"));
+                Vec::new()
+            }
+        };
         self.stats.shown_max = self.stats.shown_max.max(self.shown.len());
         self.overlay = overlay::build(&self.session, &self.shown, &view, &|d| field.height(d));
         self.handles = overlay::handle_pixels(&self.overlay);
@@ -624,7 +641,8 @@ mod tests {
     }
 
     fn runtime(items: Option<&PathBuf>) -> EditRuntime {
-        EditRuntime::new(WorldDefinition::single_planet(R, 7), R, items, Layout::default()).unwrap()
+        let ids = IdMaker::new(Box::new(planet_editor::ids::FixedClock(1_760_000_000_000)), Box::new(planet_editor::ids::SeededEntropy(5)));
+        EditRuntime::with_ids(WorldDefinition::single_planet(R, 7), R, items, Layout::default(), ids).unwrap()
     }
 
     const CENTRE: [f64; 2] = [500.0, 500.0];
@@ -667,6 +685,7 @@ mod tests {
         assert!(!e.on && e.session.dragging().is_none(), "leaving the mode abandons the drag");
         assert_ne!(e.session.editor().hash(), before, "and the edit goes back");
         assert_eq!(e.session.editor().undo_depth(), 1, "only the placement is recorded");
+        assert!(!e.take_affected().is_empty(), "the places of the abandoned drag are still to refresh");
     }
 
     // spec: VIEW-022

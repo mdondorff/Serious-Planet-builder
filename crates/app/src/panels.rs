@@ -331,6 +331,11 @@ fn inspector(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec
     });
 }
 
+/// The right-hand text of the status bar: the count of edits, the undo depth, where the edits are saved and the window's own status.
+pub fn counts_line(d: &PanelData) -> String {
+    format!("{} edits · undo {} · {} · {}", d.edit_count, d.undo_depth, d.saved, d.view_status)
+}
+
 fn status_bar(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
     ui.horizontal(|ui| {
         let r = ui.add_enabled(d.can_undo, egui::Button::new("Undo  Ctrl+Z"));
@@ -346,7 +351,7 @@ fn status_bar(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
         ui.separator();
         ui.label(if d.status.is_empty() { "Ready" } else { d.status });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.weak(format!("{} edits · undo {} · {} · {}", d.edit_count, d.undo_depth, d.saved, d.view_status));
+            ui.weak(counts_line(d));
         });
     });
 }
@@ -789,5 +794,31 @@ mod tests {
         assert!(count(&items, 1.0) >= 8, "outlines, names, handles");
         assert_eq!(count(&items[3..], 1.0), 0, "an edit with nothing on the screen draws nothing");
         assert!(count(&items[..1], 1.0) > 0 && count(&items, 1.5) >= 8, "at another scale too");
+    }
+
+    // spec: VIEW-021
+    #[test]
+    fn a_name_typed_in_the_inspector_is_asked_for_when_the_field_is_left_and_the_counts_line_says_where_things_are() {
+        let f = fixture();
+        let layout = Layout::default();
+        let h = held(&f, layout.clone());
+        let mut rig = Rig::new(&layout);
+        rig.settle(&data(&h));
+        let field = rig.mark("name");
+        rig.click(&data(&h), field);
+        let all = Modifiers { ctrl: true, command: true, ..Modifiers::NONE };
+        rig.pass(&data(&h), vec![key(egui::Key::A, all)]);
+        rig.pass(&data(&h), vec![Raw::Text("Old Man".into())]);
+        let mut got = rig.pass(&data(&h), vec![key(egui::Key::Enter, Modifiers::NONE)]);
+        got.extend(rig.pass(&data(&h), vec![]));
+        assert!(got.contains(&Event::Rename("Old Man".into())), "{got:?}");
+        // Left unchanged it asks for nothing.
+        rig.click(&data(&h), field);
+        let ev = rig.click(&data(&h), Pos2::new(SIZE.0 / 2.0, SIZE.1 / 2.0));
+        assert!(!ev.iter().any(|e| matches!(e, Event::Rename(_))), "{ev:?}");
+        let d = data(&h);
+        assert_eq!(counts_line(&d), "2 edits · undo 2 · not saved · ");
+        let d = PanelData { saved: "saved in edits", view_status: "Place Hill", edit_count: 7, undo_depth: 12, ..data(&h) };
+        assert_eq!(counts_line(&d), "7 edits · undo 12 · saved in edits · Place Hill");
     }
 }
