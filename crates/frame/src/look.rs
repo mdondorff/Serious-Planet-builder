@@ -224,20 +224,45 @@ pub enum Overlay {
     /// Nothing is drawn over the terrain: the plan's text and hash are what they were before overlays existed.
     #[default]
     None,
-    /// The mesh edges and the diagonal of each grid cell, coloured by level of detail and dimmed with the morph factor.
-    Wireframe,
+    /// The tile outlines and a tint of each tile's level colour (colour per level of detail, dimmed with the morph factor).
+    Tiles,
+    /// The tile outlines and the tint, and every grid edge and the diagonal of every cell as a fixed line of about a pixel (no fade-out,
+    /// however fine the mesh is).
+    Mesh,
 }
 
 impl Overlay {
     pub fn name(self) -> &'static str {
         match self {
             Overlay::None => "none",
-            Overlay::Wireframe => "wireframe",
+            Overlay::Tiles => "tiles",
+            Overlay::Mesh => "mesh",
         }
     }
 
     pub fn parse(s: &str) -> Option<Overlay> {
-        [Overlay::None, Overlay::Wireframe].into_iter().find(|o| o.name() == s)
+        Overlay::ALL.into_iter().find(|o| o.name() == s)
+    }
+
+    /// Every overlay, in the order F3 cycles through them.
+    pub const ALL: [Overlay; 3] = [Overlay::None, Overlay::Tiles, Overlay::Mesh];
+
+    /// The next one in the cycle (off, tiles, mesh, off).
+    pub fn next(self) -> Overlay {
+        match self {
+            Overlay::None => Overlay::Tiles,
+            Overlay::Tiles => Overlay::Mesh,
+            Overlay::Mesh => Overlay::None,
+        }
+    }
+
+    /// The code the lit shader reads (the globals' `extra.y`): 0 none, 1 tiles, 2 mesh.
+    pub fn shader_code(self) -> f32 {
+        match self {
+            Overlay::None => 0.0,
+            Overlay::Tiles => 1.0,
+            Overlay::Mesh => 2.0,
+        }
     }
 }
 

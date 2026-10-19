@@ -605,7 +605,7 @@ fn fs_lit_atmo(in: VsOut) -> @location(0) vec4<f32> {
     let climate = tile_climate(in);
     var rgb = atm_shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(nodes[in.node_index].morph.z, in.morph), in.height, sun, g.range.z);
     if (g.extra.y > 0.5) {
-        rgb = overlay_wire(in, rgb, g.range.z);
+        rgb = overlay_wire(in, rgb, g.range.z, g.extra.y);
     }
     return vec4<f32>(rgb, 1.0);
 }

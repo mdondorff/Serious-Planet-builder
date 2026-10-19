@@ -222,16 +222,16 @@ fn vs(@builtin(instance_index) inst: u32, @builtin(vertex_index) vi: u32) -> VsO
     return terrain_vertex(inst, vi);
 }
 
-// The wireframe overlay (VIEW-014), three parts, all coloured by the tile's level of detail (eight colours, wrapping) and dimmed with
-// the morph factor (a vertex at full detail is bright, fully morphed onto the parent grid dim):
+// The debug overlay (VIEW-014), `mode` 1 (tiles) or 2 (mesh), all coloured by the tile's level of detail (eight colours, wrapping) and
+// dimmed with the morph factor (a vertex at full detail is bright, fully morphed onto the parent grid dim):
 //  - a faint tint of the level's colour over the whole tile, so the levels show even where the mesh is finer than a pixel;
 //  - the outline of the tile (u or v at 0 or 1), always drawn;
-//  - a line where the fragment is within about a pixel of a grid edge or of the diagonal of the grid's triangulation (a, c of each cell:
-//    from (i, j) to (i + 1, j + 1), `planet_generators::mesh::grid_indices`), thinned and faded out where the cells are only a few
-//    pixels wide (the real mesh is often that fine: the LOD keeps an edge about 2.5 px long).
+//  - mode 2 only: a line where the fragment is within about a pixel of a grid edge or of the diagonal of the grid's triangulation (a, c of
+//    each cell: from (i, j) to (i + 1, j + 1), `planet_generators::mesh::grid_indices`), a fixed line of about a pixel that does not fade
+//    out however fine the mesh is (the LOD keeps an edge about 2.5 px long; the coarse-LOD view makes them about 10 px).
 // The lines are radiance in the scene units of the frame (`factor` is its pre-exposure), so they stay visible at any exposure. Needs
-// derivatives: the caller takes it in uniform control flow (the overlay flag is a uniform).
-fn overlay_wire(in: VsOut, rgb: vec3<f32>, factor: f32) -> vec3<f32> {
+// derivatives: the caller takes it in uniform control flow (the overlay code is a uniform).
+fn overlay_wire(in: VsOut, rgb: vec3<f32>, factor: f32, mode: f32) -> vec3<f32> {
     let gx = in.aux.x * f32(CELLS);
     let gy = in.aux.y * f32(CELLS);
     let wx = max(fwidth(gx), 1e-6);
@@ -243,11 +243,7 @@ fn overlay_wire(in: VsOut, rgb: vec3<f32>, factor: f32) -> vec3<f32> {
     let dy = min(fy, 1.0 - fy) / wy;
     let dd = abs(fx - fy) / wd;
     let d = min(min(dx, dy), dd);
-    // The line is about a pixel wide, thinner when the cells are only a few pixels wide (so the lines stay lines), and it fades out where
-    // the cells are closer than about a pixel and a quarter: the real mesh is often that fine (the LOD keeps an edge about 2.5 px long).
-    let cell_px = 1.0 / max(max(wx, wy), 1e-6);
-    let line_px = clamp(0.3 * cell_px, 0.4, 1.0);
-    let cell_line = (1.0 - smoothstep(0.0, line_px, d)) * (1.0 - smoothstep(0.75, 0.95, max(wx, wy)));
+    let cell_line = select(0.0, 1.0 - smoothstep(0.3, 1.0, d), mode > 1.5);
     let ux = in.aux.x;
     let uy = in.aux.y;
     let tile_d = min(min(ux, 1.0 - ux) / max(fwidth(ux), 1e-9), min(uy, 1.0 - uy) / max(fwidth(uy), 1e-9));

@@ -34,7 +34,7 @@ fn terrain_vertex(inst: u32, pos: vec3<f32>, coarse: vec3<f32>, normal: vec3<f32
 }
 
 // The reference renderer draws no overlay (it draws no lit view); the lit fragment stages call this.
-fn overlay_wire(in: VsOut, rgb: vec3<f32>, factor: f32) -> vec3<f32> {
+fn overlay_wire(in: VsOut, rgb: vec3<f32>, factor: f32, mode: f32) -> vec3<f32> {
     return rgb;
 }
 

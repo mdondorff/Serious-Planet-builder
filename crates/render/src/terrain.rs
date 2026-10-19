@@ -47,7 +47,7 @@ struct Globals {
     view_proj: mat4x4<f32>,
     range: vec4<f32>,
     mode: vec4<u32>,
-    // Lit path only: x = the water level W in metres (ADR 0041); y = 1 draws the wireframe overlay (VIEW-014); the other lanes are reserved.
+    // Lit path only: x = the water level W in metres (ADR 0041); y = the debug overlay (VIEW-014: 0 none, 1 tiles, 2 mesh); the other lanes are reserved.
     extra: vec4<f32>,
     // Lit path only: the albedo table of the look (ADR 0039 point 3): eight colours with a threshold in the fourth lane, then
     // (snow_c_full, snow_c_none, snow_cos_none, snow_cos_full) and (beach_height, beach_fade, shore_blend, 0).
@@ -290,7 +290,7 @@ fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
     let climate = tile_climate(in);
     var rgb = shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(nodes[in.node_index].morph.z, in.morph), sun, g.range.z);
     if (g.extra.y > 0.5) {
-        rgb = overlay_wire(in, rgb, g.range.z);
+        rgb = overlay_wire(in, rgb, g.range.z, g.extra.y);
     }
     return vec4<f32>(rgb, 1.0);
 }
@@ -1556,12 +1556,7 @@ impl TerrainRenderer {
                         .iter()
                         .flat_map(|v: &u32| v.to_le_bytes()),
                 );
-                globals.extend(f32_bytes(&[
-                    lit.water_level_m,
-                    f32::from(u8::from(lit.overlay == planet_frame::look::Overlay::Wireframe)),
-                    0.0,
-                    0.0,
-                ]));
+                globals.extend(f32_bytes(&[lit.water_level_m, lit.overlay.shader_code(), 0.0, 0.0]));
                 globals.extend(f32_bytes(&lit.albedo.to_words()));
             }
             None => {
