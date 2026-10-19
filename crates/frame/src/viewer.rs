@@ -117,6 +117,9 @@ pub enum Command {
     ToggleCoarseLod,
     /// G: the globe overview over the point under the camera, or back (VIEW-013).
     ToggleGlobe,
+    /// F9: write the camera path of the last minute and the repro bundle of this frame (VIEW-024). Changes nothing in the viewer; the window
+    /// takes the request with [`ViewerState::take_repro_request`].
+    SaveRepro,
     Quit,
 }
 
@@ -204,7 +207,7 @@ pub fn overlay_status(overlay: Overlay, lod_factor: f64) -> String {
 }
 
 /// The key bindings, as text for the usage message and the log.
-pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), F3 cycles the overlay (off, tiles, mesh; lit path), F4 coarse LOD (error bound x4), V next debug view (debug path), T vsync on/off, C flight or free camera, \
+pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), F3 cycles the overlay (off, tiles, mesh; lit path), F4 coarse LOD (error bound x4), F9 writes the camera path of the last minute and a repro bundle (target/review), V next debug view (debug path), T vsync on/off, C flight or free camera, \
      free camera: WASD move, Q/E down/up, arrows look, click captures the mouse to look (Esc releases it), Shift boost; Esc quits";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -240,6 +243,7 @@ pub struct ViewerState {
     pub radius_m: f64,
     /// The next lit frame snaps the exposure (a first lit frame, a return to the lit path, a restart of the flight).
     exposure_reset: bool,
+    repro_requested: bool,
     /// The user paused the flight (as against the free camera holding the clock).
     user_paused: bool,
 }
@@ -261,6 +265,7 @@ impl ViewerState {
             globe: None,
             radius_m: 6_371_000.0,
             exposure_reset: true,
+            repro_requested: false,
             user_paused: false,
         }
     }
@@ -281,6 +286,11 @@ impl ViewerState {
     /// switched back on and after a restart of the flight (a cut).
     pub fn take_exposure_reset(&mut self) -> bool {
         std::mem::take(&mut self.exposure_reset)
+    }
+
+    /// True once after F9 was pressed (VIEW-024).
+    pub fn take_repro_request(&mut self) -> bool {
+        std::mem::take(&mut self.repro_requested)
     }
 
     pub fn is_free(&self) -> bool {
@@ -316,6 +326,7 @@ impl ViewerState {
                 self.exposure_reset |= self.lit;
             }
             Command::CycleOverlay => self.overlay = self.overlay.next(),
+            Command::SaveRepro => self.repro_requested = true,
             Command::ToggleCoarseLod => self.coarse_lod = !self.coarse_lod,
             Command::ToggleGlobe => {
                 self.globe = match self.globe {
@@ -1196,6 +1207,22 @@ mod tests {
         v.command(Command::ToggleCoarseLod, 60, &c);
         assert!(!v.coarse_lod);
         for word in ["F3", "tiles", "mesh", "F4", "coarse LOD"] {
+            assert!(KEYS_HELP.contains(word), "the help names {word}: {KEYS_HELP}");
+        }
+    }
+
+    // spec: VIEW-024
+    #[test]
+    fn f9_asks_once_for_the_repro_files_and_changes_nothing_in_the_viewer() {
+        let c = camera_for_tests();
+        let mut v = ViewerState::new(0, 3, 0, true).with_lit(true);
+        let (lit, mode, overlay, paused) = (v.lit, v.mode, v.overlay, v.user_paused);
+        assert!(!v.take_repro_request(), "nobody asked yet");
+        assert!(!v.command(Command::SaveRepro, 10, &c), "F9 does not quit");
+        assert!(v.take_repro_request(), "the window takes the request");
+        assert!(!v.take_repro_request(), "once");
+        assert_eq!((v.lit, v.mode, v.overlay, v.user_paused), (lit, mode, overlay, paused), "the viewer is as it was");
+        for word in ["F9", "camera path", "repro bundle"] {
             assert!(KEYS_HELP.contains(word), "the help names {word}: {KEYS_HELP}");
         }
     }

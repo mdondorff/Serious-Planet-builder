@@ -13,6 +13,7 @@ pub mod lod;
 pub mod look;
 pub mod managed;
 pub mod mouselook;
+pub mod pathlog;
 pub mod pick;
 pub mod pipeline;
 pub mod plan;
