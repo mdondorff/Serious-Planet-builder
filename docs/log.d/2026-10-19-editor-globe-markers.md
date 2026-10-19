@@ -1,0 +1,1 @@
+- 2026-10-19 **editor-globe-markers archived (VIEW-022 modified):** the globe overview (G) shows the edits the camera shows as markers labelled by name and a click selects the edit and flies there, with the editor mode on or off; the mode ends the overview once on Tab and leaves G working (sonnet-crusader).

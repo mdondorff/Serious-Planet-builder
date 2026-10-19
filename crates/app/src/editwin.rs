@@ -15,14 +15,19 @@ use planet_editor::relevance::ViewState;
 use planet_editor::session::{Session, SessionError, Tool};
 use planet_editor::shape::{self, Handle};
 use planet_frame::freecam::FreePose;
-use planet_frame::globe::Viewport;
+use planet_frame::globe::{Marker, Viewport};
 use planet_frame::pick::{cursor_ray, pick_surface, PickLimits, SurfaceHit};
 use planet_frame::Camera;
 use planet_generators::height::HeightField;
 use planet_world_def::item::Item;
 use planet_world_def::item_store::{ItemStore, LooseFileStore, MemoryStore, StoreError};
 use planet_world_def::{BodyId, ItemId, WorldDefinition};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+/// The first id of the markers the edits have on the globe overview; the markers of `--marker` are numbered from 1 and the smoke run's
+/// own is 1000.
+pub const EDIT_MARKER_BASE: u64 = 1_000_000;
 
 /// The stage version new edits are authored against (the stamp stage of the generators takes it from the item).
 pub const EDIT_STAGE_VERSION: u32 = 1;
@@ -138,6 +143,8 @@ pub struct EditRuntime {
     published: u64,
     /// The next refresh is every resident tile (the definition changed with no command: items loaded at the start).
     refresh_all: bool,
+    /// The edits the last [`globe_markers`](EditRuntime::globe_markers) made markers of, by marker number minus [`EDIT_MARKER_BASE`].
+    marker_ids: Vec<ItemId>,
 }
 
 fn open_store(dir: Option<&Path>) -> (EditStore, String) {
@@ -186,6 +193,7 @@ impl EditRuntime {
             affected: Vec::new(),
             published,
             refresh_all: false,
+            marker_ids: Vec::new(),
         })
     }
 
@@ -255,6 +263,40 @@ impl EditRuntime {
         let tiles = planet_editor::feed::edited_tiles(&affected, BodyId::PLANET, resident, self.radius_m, &planet_core::cube::TangentWarp);
         self.stats.refresh_tiles += tiles.len() as u64;
         tiles
+    }
+
+    /// The markers of the edits the camera shows (VIEW-015: the footprint find over the `wanted` tiles and the size of the reach on the
+    /// screen, the selected edit always) for the globe overview, numbered from [`EDIT_MARKER_BASE`], sized by the outline radius. The edits
+    /// do not have to be in the editor mode for this.
+    pub fn globe_markers(&mut self, camera: &Camera, viewport: Viewport, wanted: &[TileId]) -> Vec<Marker> {
+        let view = self.view(camera, viewport);
+        let shown = self.session.shown(wanted, &view).unwrap_or_default();
+        self.marker_ids = shown.iter().copied().filter(|id| self.session.item(*id).is_some()).collect();
+        self.marker_ids
+            .iter()
+            .enumerate()
+            .filter_map(|(k, id)| {
+                let it = self.session.item(*id)?;
+                Some(Marker { id: EDIT_MARKER_BASE + k as u64, dir: it.direction(), radius_m: shape::outline_radius_m(it).max(1.0) })
+            })
+            .collect()
+    }
+
+    /// The labels of the markers of the last [`globe_markers`](EditRuntime::globe_markers): the names of the edits.
+    pub fn marker_labels(&self) -> HashMap<u64, String> {
+        self.marker_ids
+            .iter()
+            .enumerate()
+            .filter_map(|(k, id)| Some((EDIT_MARKER_BASE + k as u64, planet_editor::lists::label_of(self.session.item(*id)?))))
+            .collect()
+    }
+
+    /// A click on the marker `marker`: the edit it stands for is selected. `false` for a marker that is not an edit's.
+    pub fn select_marker(&mut self, marker: u64) -> bool {
+        let Some(id) = marker.checked_sub(EDIT_MARKER_BASE).and_then(|k| self.marker_ids.get(k as usize)).copied() else { return false };
+        self.session.select(id);
+        self.stats.selected += 1;
+        true
     }
 
     /// The edit the camera is to fly to, once.
@@ -1003,5 +1045,56 @@ mod tests {
         assert!(again.refresh_tiles(&[near, far]).is_empty(), "once");
         assert!(again.take_changed_definition().is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn the_edits_the_camera_shows_are_markers_of_the_overview_labelled_by_name_and_a_click_on_one_selects_it() {
+        let at = unit(47.2, 8.55);
+        let there = unit(47.25, 8.6);
+        let low = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.toggle();
+        e.key(EditKey::Tool(4));
+        e.press(&low, VIEWPORT, CENTRE, &limits(), &Flat);
+        let plateau = e.session.selected().unwrap();
+        let (hill, _) = e.session.place("hill", there).unwrap();
+        e.session.deselect();
+        let tiles = [TileId::from_direction(&TangentWarp, at, 8), TileId::from_direction(&TangentWarp, there, 8)];
+        // From 200 km up the plateau (15 km, about 65 pixels) is a marker and the hill (400 m, under 2 pixels) is not.
+        let high = above(at, 200_000.0);
+        let markers = e.globe_markers(&high, VIEWPORT, &tiles);
+        assert_eq!(markers.len(), 1);
+        assert_eq!((markers[0].id, markers[0].radius_m), (EDIT_MARKER_BASE, 15_000.0));
+        assert!(markers[0].dir.dot(at) > 1.0 - 1e-9);
+        assert_eq!(e.marker_labels(), HashMap::from([(EDIT_MARKER_BASE, "Plateau 1".to_string())]));
+        // The selected edit is a marker whatever its size, and the markers follow the order of the ids.
+        e.session.select(hill);
+        let markers = e.globe_markers(&high, VIEWPORT, &tiles);
+        assert_eq!(markers.iter().map(|m| m.id).collect::<Vec<_>>(), [EDIT_MARKER_BASE, EDIT_MARKER_BASE + 1]);
+        assert_eq!(e.marker_labels()[&(EDIT_MARKER_BASE + 1)], "Hill 1");
+        // Nothing in the view, no marker; a hidden edit is none unless it is the selected one.
+        assert!(
+            e.globe_markers(&high, VIEWPORT, &[]).iter().map(|m| m.id).eq([EDIT_MARKER_BASE]),
+            "only the selected hill, outside every tile"
+        );
+        e.session.toggle_hidden(plateau);
+        assert_eq!(e.globe_markers(&high, VIEWPORT, &tiles).len(), 1);
+        e.session.toggle_hidden(plateau);
+        // A click on a marker selects its edit; a number that is no edit's changes nothing.
+        let markers = e.globe_markers(&high, VIEWPORT, &tiles);
+        assert_eq!(markers.len(), 2);
+        assert!(e.select_marker(EDIT_MARKER_BASE));
+        assert_eq!(e.session.selected(), Some(plateau));
+        assert!(e.select_marker(EDIT_MARKER_BASE + 1));
+        assert_eq!(e.session.selected(), Some(hill));
+        for not_an_edit in [0, 1, 1000, EDIT_MARKER_BASE - 1, EDIT_MARKER_BASE + 2, u64::MAX] {
+            assert!(!e.select_marker(not_an_edit), "{not_an_edit}");
+        }
+        assert_eq!(e.session.selected(), Some(hill));
+        // The markers do not need the editor mode.
+        e.toggle();
+        assert!(!e.on);
+        assert_eq!(e.globe_markers(&high, VIEWPORT, &tiles).len(), 2);
     }
 }
