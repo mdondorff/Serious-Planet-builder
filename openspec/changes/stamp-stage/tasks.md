@@ -11,4 +11,4 @@
 - [x] 1.10 Bounds by the delta range of each item over the cap (the sum of `max_delta_m` left no morph room at level 19); GEN-026
 - [x] 1.11 Item file map: `hill`/`height_m`, `crater`/`depth_m`, `plateau`/`target_m`, round trip, derived content hash; WDEF-010; the editor test fixtures use the spelling
 - [ ] 1.12 Memoised key cost per plan on WARP and the RTX in a correctness run (above about 1 ms: numbers to opus-planner)
-- [ ] 1.13 Tier C scene (1.7) as the follow-up `stamp-stage 3b`, with GEN-026 set active there
+- [ ] 1.13 Tier C scene (1.7) and a plan test of a steep base with stamps at levels 16 to 18 (1.6) as the follow-up `stamp-stage 3b`, with GEN-026 set active there

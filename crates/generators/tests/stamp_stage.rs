@@ -186,6 +186,11 @@ fn the_bounds_widen_by_the_bounds_of_the_items_in_reach_and_hold_for_every_sampl
     // The only-first-item cap, on the slope of the hill at 2.5 km of 3 km.
     let g = growth(at_distance(at, dir(0.0, -1.0, 0.0), 2_500.0), 100.0 / R);
     assert!(g > 0.0 && g < 3.0, "only the hill reaches 2.5 km on the far side, on its slope: {g}");
+    // A cap on the top of a hill alone: the extent grows by less than a tenth of the bound.
+    let hill_only = stage(world(vec![item(1, 0, at, 3_000.0, 60.0, Stamp::new(StampKind::Hill, [30.0, 0.0, 0.0]))]));
+    let (lo, hi) = hill_only.height_bounds(at, 100.0 / R);
+    let (blo, bhi) = base.height_bounds(at, 100.0 / R);
+    assert!((hi - lo) - (bhi - blo) < 6.0, "a cap on the top of a hill grows by less than M / 10: {}", (hi - lo) - (bhi - blo));
     // Never wider than the declared bounds say.
     let g = growth(at, 4_000.0 / R);
     assert!(g <= 200.0 + 1e-6, "no wider than the sum of both sides of both declared bounds: {g}");

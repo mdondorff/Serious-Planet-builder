@@ -24,8 +24,8 @@ Source: ADR 0066 points 1, 4 and 5, ADR 0021 point 7, SPIKE-13, M6 plan row E2
 - **THEN** the heights are bit-identical
 
 #### Scenario: Bounds
-- **WHEN** a base field with stamps of bound 60 m is planned down to level 19 and every height of caps over the stamps is sampled
-- **THEN** no morph interval is empty, every sampled height lies within the stage's bounds, and a cap on the top of a hill grows the bounds' extent by less than a tenth of `M`
+- **WHEN** every height of caps over stamps is sampled, and a field with a stamp of bound 60 m is planned with tiles down to level 19 under the camera
+- **THEN** every sampled height lies within the stage's bounds, a cap on the top of a hill grows the bounds' extent by less than a tenth of `M`, and the plan finds no empty morph interval
 
 #### Scenario: Declared against recorded reads
 - **WHEN** the stage generates a tile with a recording reader
