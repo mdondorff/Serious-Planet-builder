@@ -1,0 +1,1 @@
+- 2026-10-19 **Editor mock archived (owner):** `docs/explorations/2026-10-18-editor-mock/`, a non-binding exploration next to the dev screenshots.
