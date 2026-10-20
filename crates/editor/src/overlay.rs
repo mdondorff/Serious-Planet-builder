@@ -94,7 +94,23 @@ fn path_pixels(
     ground_m: &dyn Fn(Vec3) -> f64,
     see: &dyn Fn(Vec3) -> Option<[f64; 2]>,
 ) -> Vec<Option<[f64; 2]>> {
-    polyline::sample_path(points, closed, PATH_PIECES).into_iter().map(|d| see(d * (view.radius_m + ground_m(d)))).collect()
+    // The ground is read once at each point and interpolated along the segment: a 640-point line is 640 reads a frame, not 5,000.
+    let n = points.len();
+    let ground: Vec<f64> = points.iter().map(|p| ground_m(p.dir())).collect();
+    let segments = if closed { n } else { n.saturating_sub(1) };
+    polyline::sample_path(points, closed, PATH_PIECES)
+        .into_iter()
+        .enumerate()
+        .map(|(j, d)| {
+            let g = if segments == 0 || j >= segments * PATH_PIECES {
+                ground[if closed { 0 } else { n - 1 }]
+            } else {
+                let (s, t) = (j / PATH_PIECES, (j % PATH_PIECES) as f64 / PATH_PIECES as f64);
+                ground[s] + (ground[(s + 1) % n] - ground[s]) * t
+            };
+            see(d * (view.radius_m + g))
+        })
+        .collect()
 }
 
 /// The line or region being drawn, on the screen.

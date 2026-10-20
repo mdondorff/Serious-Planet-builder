@@ -529,12 +529,16 @@ impl EditRuntime {
         let hit = Self::hit_at(camera, viewport, cursor, limits, field);
         if mods.shift != mods.ctrl {
             if mods.shift {
-                if let Some(h) = hit {
-                    let tolerance = planet_editor::session::LINE_PICK_FRACTION * h.distance_m.max(1.0);
-                    match self.session.insert_point_at(h.dir, tolerance) {
-                        Ok((_, affected)) => self.affected.extend(affected),
-                        Err(e) => self.note(Err(e)),
+                match (hit, self.session.selected()) {
+                    (Some(h), Some(id)) => {
+                        let tolerance = self.session.outline_tolerance_m(id, h.distance_m);
+                        match self.session.insert_point_at(h.dir, tolerance) {
+                            Ok((_, affected)) => self.affected.extend(affected),
+                            Err(e) => self.note(Err(e)),
+                        }
                     }
+                    (None, _) => self.session.set_status("that is not a place on the planet"),
+                    (_, None) => self.session.set_status("select a line or a region first"),
                 }
                 return;
             }
@@ -547,6 +551,9 @@ impl EditRuntime {
                 }
                 return;
             }
+            // A Ctrl press that finds no handle does nothing: it must not place a stamp or add a point by accident.
+            self.session.set_status("no point here to remove");
+            return;
         }
         // The view borrows the lists and the interaction needs the session mutably: it works on copies.
         let (shown, handles, mpp) = (self.shown.clone(), self.handles.clone(), self.height_mpp(camera, viewport));
@@ -952,6 +959,21 @@ mod tests {
         e.press_with(&cam, VIEWPORT, [CENTRE[0] - 300.0, CENTRE[1] + 300.0], &limits(), &Flat, Mods { shift: true, ctrl: false });
         assert_eq!(e.session.item(id).unwrap().points.len(), 3);
         assert!(e.session.status().contains("not on the outline"), "{}", e.session.status());
+        // A Ctrl press that finds no handle does nothing; with the ridge tool on it adds no draft point either.
+        e.key(EditKey::Tool(5));
+        e.press_with(&cam, VIEWPORT, [CENTRE[0] - 300.0, CENTRE[1] - 300.0], &limits(), &Flat, Mods { shift: false, ctrl: true });
+        assert_eq!((e.session.draft().len(), e.session.item(id).unwrap().points.len()), (0, 3));
+        assert!(e.session.status().contains("no point here"), "{}", e.session.status());
+        // Shift with nothing selected says so; Shift and Ctrl together are a plain press (a draft point with the tool on).
+        e.session.deselect();
+        frame(&mut e, &cam, false);
+        e.press_with(&cam, VIEWPORT, on_segment, &limits(), &Flat, Mods { shift: true, ctrl: false });
+        assert!(e.session.status().contains("select a line or a region first"), "{}", e.session.status());
+        e.press_with(&cam, VIEWPORT, on_segment, &limits(), &Flat, Mods { shift: true, ctrl: true });
+        assert_eq!(e.session.draft().len(), 1, "tool {:?}, status {}", e.session.tool(), e.session.status());
+        e.key(EditKey::Escape);
+        e.key(EditKey::Escape);
+        e.session.select(id);
         // A plain press on a point handle starts the drag as before.
         frame(&mut e, &cam, false);
         let h0 = e.handles[0].1;

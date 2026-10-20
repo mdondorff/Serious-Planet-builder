@@ -397,6 +397,34 @@ fn a_click_picks_a_line_within_its_width_or_a_few_pixels_a_region_inside_it_and_
 
 // spec: VIEW-031
 #[test]
+fn the_ground_is_read_once_per_point_however_the_path_is_cut_and_a_click_tolerance_follows_the_width() {
+    use planet_editor::overlay;
+    use std::cell::Cell;
+    let mut s = session(8);
+    s.set_tool(Tool::Line("ridge".into()));
+    for k in 0..40 {
+        s.add_draft_point(unit(0.0, lon(250.0 * f64::from(k)))).unwrap();
+    }
+    let (id, _) = s.finish_draft().unwrap();
+    let points = s.drawn_points(id).len();
+    let view = high_view(0.0, 0.05, 20_000.0);
+    let calls = Cell::new(0usize);
+    let ground = |d: Vec3| {
+        calls.set(calls.get() + 1);
+        d.x * 100.0
+    };
+    let items = overlay::build(&s, &[id], &view, &ground);
+    assert_eq!(items[0].outline.len(), (points - 1) * overlay::PATH_PIECES + 1);
+    // One read for the anchor (the label's place) and one for each point, not one for each of the many samples.
+    assert!(calls.get() <= points + 2, "{} reads for {points} points", calls.get());
+    // The tolerance: the half-width of a line, or 1.5 % of the distance, the larger, at least a metre.
+    assert_eq!(s.outline_tolerance_m(id, 100.0), 200.0);
+    assert!((s.outline_tolerance_m(id, 100_000.0) - 1_500.0).abs() < 1e-9);
+    assert_eq!(s.outline_tolerance_m(id, 0.0), 200.0);
+}
+
+// spec: VIEW-031
+#[test]
 fn picking_a_line_tool_says_how_to_use_it_and_the_overlay_draws_lines_open_regions_closed_and_the_draft_with_its_rubber_band() {
     use planet_editor::overlay;
     let mut s = session(7);

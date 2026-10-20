@@ -688,6 +688,13 @@ impl<S: ItemStore> Session<S> {
         Ok((id, affected))
     }
 
+    /// How far from the outline of `id` a click still counts as on it, metres: its half-width (a line) or 1.5 % of `distance_m`, the larger
+    /// (what [`pick`](Session::pick) uses), at least a metre.
+    pub fn outline_tolerance_m(&self, id: ItemId, distance_m: f64) -> f64 {
+        let width = self.editor.item(id).and_then(|i| i.params.get("width_m").copied()).unwrap_or(0.0);
+        width.max(LINE_PICK_FRACTION * distance_m).max(1.0)
+    }
+
     /// A click on the outline of the selected line or region at `dir`, within `max_arc_m` metres of it: a point is added there, one
     /// command. Returns the index of the new point.
     pub fn insert_point_at(&mut self, dir: Vec3, max_arc_m: f64) -> Result<(usize, Vec<Affected>), SessionError> {

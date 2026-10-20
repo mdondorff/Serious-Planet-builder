@@ -59,7 +59,7 @@ pub const HELP_KEYS: [(&str, &str); 16] = [
     ("Backspace", "take the last point back (drawing), else delete"),
     ("Esc", "cancel the drag, the draft, the tool, the selection"),
     ("drag a handle", "move a point, the radius, the height"),
-    ("Shift + click", "add a point on the outline of the selected line"),
+    ("Shift + click", "add a point on the outline of the selected line or region"),
     ("Ctrl + click", "remove the point under the cursor"),
     ("Delete", "delete the selected edit"),
     ("Ctrl+Z  Ctrl+Y", "undo / redo"),
