@@ -13,7 +13,7 @@ use planet_streaming::{PoolConfig, Tier};
 pub const MAX_PLAN_NODES: u64 = 32_768;
 
 /// The per-node bytes the share reserves for node records (the renderer needs 2 x (192 B record + 20 B argument record) plus
-/// 2 x 96 B of globals; 512 leaves room).
+/// 2 x 6,048 B of globals; 512 leaves room).
 pub const NODE_RECORD_STRIDE_MAX: u64 = 512;
 
 /// Bytes of one block of the main pool: the largest storage-buffer binding every adapter offers (ADR 0054 point 1,

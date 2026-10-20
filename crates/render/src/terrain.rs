@@ -53,9 +53,9 @@ struct Globals {
     // Lit path only: the albedo table of the look (ADR 0039 point 3): eight colours with a threshold in the fourth lane, then
     // (snow_c_full, snow_c_none, snow_cos_none, snow_cos_full) and (beach_height, beach_fade, shore_blend, 0).
     albedo: array<vec4<f32>, 10>,
-    // The edit preview (REND-033), read only for a previewed node and only when extra.w (the count, at most 8) is above 0: per stamp two
+    // The edit preview (REND-033), read only for a previewed node and only when extra.w (the count in the low 6 bits, at most 32, and 64 times the number of stamps of the delta above them) is above 0: per stamp two
     // entries, (anchor relative to the camera, reach in metres) and (amount in metres, kind 1 hill / 2 crater / 3 plateau, sign, bound).
-    preview: array<vec4<f32>, 16>,
+    preview: array<vec4<f32>, 64>,
     // The region overlay (VIEW-030), read only when extra.y is 3: the count in the first entry's x, then per polygon 37 entries: five of
     // header (anchor relative to the camera and the point count; e1 and the red of the tint; e2 and the green; the unit up and the blue;
     // the square of the reach and the band), then 32 of points, two per entry (x, y metres in the anchor's tangent plane).
@@ -422,7 +422,13 @@ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
             c[3],
             d.morph_start_m,
             d.morph_end_m,
-            if d.preview { 1.0 } else { 0.0 },
+            if d.preview && d.transient_only {
+                2.0
+            } else if d.preview {
+                1.0
+            } else {
+                0.0
+            },
             f32::from(d.level),
         ];
         for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
@@ -668,6 +674,8 @@ pub struct FrameTiming {
 pub struct TerrainRenderer {
     /// The preview stamps of the edit in flight and the body's radius (REND-033), written into the globals of each frame.
     preview: (Vec<planet_frame::preview::PreviewStamp>, f64),
+    /// How many of the first stamps of `preview` are the delta of an edit in flight; the rest are the transient preview (VIEW-036).
+    preview_delta_len: usize,
     /// The region polygons of the overlay (VIEW-030), written into the globals of the frames that show it.
     regions: planet_frame::regions::RegionList,
     size: (u32, u32),
@@ -801,12 +809,15 @@ impl TerrainRenderer {
     /// [`TerrainRenderer::set_preview`] for the preview of a frame's draw plan (REND-033): call before submitting it.
     pub fn set_preview_of(&mut self, draw: &planet_frame::pipeline::DrawPlan) {
         self.set_preview(&draw.preview, draw.preview_radius_m);
+        self.preview_delta_len = draw.preview_delta_len.min(self.preview.0.len());
     }
 
     /// Set the preview stamps drawn on the nodes flagged `preview` (REND-033; `DrawPlan::preview`) and the radius of the body they lie on. An
     /// empty list ends the preview: the vertex stage is then not entered and the frame is the frame of a build without it.
     pub fn set_preview(&mut self, stamps: &[planet_frame::preview::PreviewStamp], radius_m: f64) {
         self.preview = (stamps.iter().copied().take(planet_frame::preview::MAX_PREVIEW_STAMPS).collect(), radius_m);
+        // All of them are the delta's (no node is transient-only without a draw plan that says so).
+        self.preview_delta_len = self.preview.0.len();
     }
 
     /// Set the region polygons the regions overlay tints the terrain with (VIEW-030; `planet_frame::regions::region_list`, decided by the
@@ -914,6 +925,7 @@ impl TerrainRenderer {
         });
         Self {
             preview: (Vec::new(), 0.0),
+            preview_delta_len: 0,
             regions: planet_frame::regions::RegionList::default(),
             size,
             cells,
@@ -1797,7 +1809,9 @@ impl TerrainRenderer {
             globals.extend(vec![0u8; PREVIEW_BYTES as usize]);
         } else {
             globals.extend(preview_table(&self.preview.0, plan.camera.position.0, self.preview.1));
-            globals[108..112].copy_from_slice(&(self.preview.0.len() as f32).to_le_bytes());
+            // extra.w packs the active count (low 6 bits) and the number of the delta's stamps above it: a transient-only node starts after them.
+            let packed = self.preview.0.len() + 64 * self.preview_delta_len;
+            globals[108..112].copy_from_slice(&(packed as f32).to_le_bytes());
         }
         // The region table at the end, read by the fragment stage of the regions overlay only (VIEW-030): zeros unless the plan shows it.
         let show_regions = plan.lit.is_some_and(|l| l.overlay == planet_frame::look::Overlay::Regions);
@@ -2118,11 +2132,25 @@ pub fn execute_terrain_tiles_preview(
     stamps: &[planet_frame::preview::PreviewStamp],
     radius_m: f64,
 ) -> Result<(RgbaFrame, TerrainStats), ExecError> {
+    execute_terrain_tiles_preview_split(ctx, plan, tiles, stamps, stamps.len(), radius_m)
+}
+
+/// [`execute_terrain_tiles_preview`] where only the first `delta_len` of `stamps` are the delta of an edit in flight and the rest are the
+/// transient preview (VIEW-036): a node flagged `transient_only` applies only the latter.
+pub fn execute_terrain_tiles_preview_split(
+    ctx: &GpuContext,
+    plan: &TerrainPlan,
+    tiles: &[&CompactTile],
+    stamps: &[planet_frame::preview::PreviewStamp],
+    delta_len: usize,
+    radius_m: f64,
+) -> Result<(RgbaFrame, TerrainStats), ExecError> {
     let lookup: HashMap<_, _> = tiles.iter().map(|t| (t.id(), *t)).collect();
     let cells = plan.cells;
     let pool = one_shot_pool(plan.nodes.len(), cells).map_err(ExecError::BadPool)?;
     let mut renderer = TerrainRenderer::with_pools(ctx, plan.size, cells, pool);
     renderer.set_preview(stamps, radius_m);
+    renderer.preview_delta_len = delta_len.min(renderer.preview.0.len());
     for d in &plan.nodes {
         let t = lookup.get(&d.tile).ok_or(ExecError::MissingTile(d.tile))?;
         renderer.upload_tile(ctx, t)?;
@@ -2135,6 +2163,18 @@ pub fn execute_terrain_tiles_preview(
 #[cfg(test)]
 mod one_shot_tests {
     use super::*;
+
+    // spec: REND-033
+    #[test]
+    fn the_shaders_preview_table_holds_the_cap_of_stamps_and_the_globals_fit_the_uniform_limit() {
+        let max = planet_frame::preview::MAX_PREVIEW_STAMPS;
+        // Two vec4 per stamp: the WGSL array, the bytes of the table and the globals follow the one constant.
+        assert!(SHADER_HEAD.contains(&format!("preview: array<vec4<f32>, {}>", 2 * max)), "the WGSL table is {} vec4s", 2 * max);
+        assert_eq!(PREVIEW_BYTES, 32 * max as u64);
+        // The count and the number of the delta's stamps share extra.w: 6 bits for the count, which the cap must fit.
+        assert!(max < 64, "the active count must fit the low 6 bits of extra.w");
+        const { assert!(GLOBALS_BYTES <= 65_536, "the globals fit the default uniform binding limit") };
+    }
 
     // spec: REND-030
     #[test]
@@ -2195,6 +2235,7 @@ mod one_shot_tests {
             color: [1, 2, 3, 255],
             mesh_key: 7,
             preview: false,
+            transient_only: false,
             quadrants: 0b1111,
         };
         let (coarse, fine) = (TileId::new(planet_core::Face(0), 17, 1, 1).unwrap(), TileId::new(planet_core::Face(0), 20, 8, 8).unwrap());

@@ -243,7 +243,7 @@ fn the_radius_and_the_strength_are_metres_within_their_ranges_and_a_refused_valu
     s.begin_stroke(east(100.0), 0.0).unwrap();
     s.set_brush_radius(50.0).unwrap();
     s.extend_stroke(east(300.0));
-    assert_eq!(s.stroke_in_progress().unwrap().1, 5_000.0);
+    assert_eq!(s.stroke_in_progress().unwrap().radius_m, 5_000.0);
     s.end_stroke().unwrap();
     // (A 5 km brush fills its item's reach, so the second stroke is in another item.)
     let radii: Vec<f64> = brushes(&s).iter().flat_map(|i| i.strokes.iter().map(|st| st.radius_m)).collect();
@@ -266,7 +266,7 @@ fn the_pointer_paints_with_a_brush_tool_a_press_off_the_planet_starts_nothing_an
     ix.moved(&mut s, &view(Some(100.0))).unwrap();
     ix.moved(&mut s, &view(None)).unwrap();
     ix.moved(&mut s, &view(Some(200.0))).unwrap();
-    assert_eq!(s.stroke_in_progress().unwrap().0.len(), 3);
+    assert_eq!(s.stroke_in_progress().unwrap().points.len(), 3);
     let affected = ix.release(&mut s).unwrap().expect("the release ends the stroke");
     assert!(!affected.is_empty());
     assert_eq!(s.editor().undo_depth(), 1);

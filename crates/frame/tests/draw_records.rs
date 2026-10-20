@@ -64,8 +64,8 @@ fn draw_records_equal_the_plan_nodes_and_their_bytes_are_counted_per_standard_vi
 #[test]
 fn the_shares_node_record_bytes_hold_a_ring_for_the_largest_plan() {
     use planet_frame::pool::{tier_compact_pool, MAX_PLAN_NODES};
-    // The renderer keeps two sets (node records, argument records, 96 B of globals) and refuses plans over MAX_PLAN_NODES.
-    let need = 2 * (MAX_PLAN_NODES * (NODE_RECORD_BYTES + DRAW_RECORD_BYTES) + 96);
+    // The renderer keeps two sets (node records, argument records, the globals: 6,048 B with the 32-stamp preview table and the regions table, GLOBALS_BYTES of the renderer) and refuses plans over MAX_PLAN_NODES.
+    let need = 2 * (MAX_PLAN_NODES * (NODE_RECORD_BYTES + DRAW_RECORD_BYTES) + 6_048);
     let pool = tier_compact_pool(planet_streaming::Tier::Mid, 32, 2).unwrap();
     assert!(pool.node_record_bytes >= need, "{} B reserved, {need} B needed", pool.node_record_bytes);
 }

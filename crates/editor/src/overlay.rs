@@ -164,10 +164,10 @@ pub fn brush<S: ItemStore>(s: &Session<S>, view: &ViewState, ground_m: &dyn Fn(V
         faces_camera(view.camera.position.0, p.normalized(), view.radius_m).then(|| project(&view.camera, p, view.viewport)).flatten()
     };
     let path = match stroke {
-        Some((points, _)) if points.len() >= 2 => path_pixels(points, false, view, ground_m, &see),
+        Some(st) if st.points.len() >= 2 => path_pixels(&st.points, false, view, ground_m, &see),
         _ => Vec::new(),
     };
-    let radius = stroke.map_or(s.brush_settings().radius_m, |(_, r)| r);
+    let radius = stroke.map_or(s.brush_settings().radius_m, |st| st.radius_m);
     let ring = at
         .map(|dir| {
             let dir = dir.normalized();

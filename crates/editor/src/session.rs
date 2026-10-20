@@ -845,9 +845,10 @@ impl<S: ItemStore> Session<S> {
         Ok(())
     }
 
-    /// The stroke being painted, if any: its places in order (for the overlay) and its radius in metres.
-    pub fn stroke_in_progress(&self) -> Option<(&[GeoPoint], f64)> {
-        self.stroke.as_ref().map(|d| (d.stroke.points.as_slice(), d.stroke.radius_m))
+    /// The stroke being painted, if any: its kind and numbers as it started with them and the places of the pointer so far (for the overlay
+    /// and the transient preview).
+    pub fn stroke_in_progress(&self) -> Option<&BrushStroke> {
+        self.stroke.as_ref().map(|d| &d.stroke)
     }
 
     /// The button went down with a brush tool on: a stroke starts at `dir`, whose terrain is `ground_m` above the reference surface (a

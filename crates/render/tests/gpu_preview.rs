@@ -207,3 +207,127 @@ fn close_to_exact(view: TerrainView, grey: u8, scale: f64, tag: &str) {
         }
     }
 }
+
+// spec: VIEW-036
+#[test]
+fn a_raise_stroke_as_a_chain_of_hills_is_close_to_the_exact_tiles_of_the_world_with_the_brush_and_32_stamps_are_drawn() {
+    use planet_frame::preview::{brush_chain, MAX_PREVIEW_STAMPS};
+    use planet_generators::stamp::{StampStage, STAMP_STAGE_VERSION};
+    use planet_world_def::stamp::{BrushKind, Stamp, Stroke};
+    use planet_world_def::{BodyId, WorldDefinition};
+    use std::sync::Arc;
+
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let view = TerrainView::Height;
+    let mut plan = plan_for(8, view);
+    let cam = plan.camera.position.0.normalized();
+    let near = plan.nodes.iter().map(|n| n.tile).max_by(|a, b| {
+        a.center_direction(&TangentWarp).dot(cam).total_cmp(&b.center_direction(&TangentWarp).dot(cam)).then(b.level().cmp(&a.level()))
+    });
+    let at = near.unwrap().center_direction(&TangentWarp);
+    // A raise stroke of 1.5 km, centred on the tile, at a radius of 600 m and a strength of 80 m.
+    let east = Vec3::new(0.0, 0.0, 1.0).cross(at).normalized();
+    let points: Vec<Vec3> = (0..7)
+        .map(|k| {
+            let a = (f64::from(k) - 3.0) * 700.0 / R;
+            (at * libm::cos(a) + east * libm::sin(a)).normalized()
+        })
+        .collect();
+    let stroke = Stroke { kind: BrushKind::Raise, radius_m: 2_500.0, strength_m: 120.0, target_m: None, points: points.clone() };
+    let mut def = WorldDefinition::single_planet(R, SEED);
+    let spec = planet_world_def::ItemSpec {
+        id: 1,
+        layer: "brush".into(),
+        priority: 0,
+        dir: points[0],
+        content_hash: 0,
+        reach_m: 4_200.0 + 2_500.0 + 2.0,
+        max_delta_m: 120.0,
+        stamp: None,
+    }
+    .with_stamp(Stamp::new(StampKind::Brush, [0.0; 3]).with_strokes(std::slice::from_ref(&stroke)));
+    def.put_item_spec(BodyId::PLANET, spec).unwrap();
+    let base: Arc<dyn planet_generators::height::HeightField> = Arc::new(Reference(SEED));
+    let stage = StampStage::new(base, Arc::new(def), BodyId::PLANET, "brush", 0, STAMP_STAGE_VERSION).unwrap();
+    let exact_plan = planet_frame::plan_terrain_field(&request_for(8, view), &stage).unwrap();
+    let exact_tiles: Vec<CompactTile> =
+        exact_plan.nodes.iter().map(|n| compact_tile_field(&stage, &TangentWarp, n.tile, CELLS, R)).collect();
+    let refs: Vec<&CompactTile> = exact_tiles.iter().collect();
+    let exact = execute_terrain_tiles_preview(&ctx, &exact_plan, &refs, &[], R).unwrap().0.rgba;
+    for n in &mut plan.nodes {
+        n.preview = false;
+    }
+    let plain = frame(&ctx, &plan, &[]);
+    for n in &mut plan.nodes {
+        n.preview = true;
+    }
+    let chain = brush_chain(&stroke, 1, R);
+    let previewed = frame(&ctx, &plan, &chain);
+    let max_diff = |a: &[u8], b: &[u8]| {
+        a.chunks(4).zip(b.chunks(4)).map(|(x, y)| (0..3).map(|c| x[c].abs_diff(y[c])).max().unwrap()).collect::<Vec<u8>>()
+    };
+    let grey = 3u8;
+    let (unedited, off) = (max_diff(&plain, &exact), max_diff(&previewed, &exact));
+    let count = |d: &[u8], t: u8| d.iter().filter(|v| **v > t).count();
+    println!(
+        "brush chain of {}: pixels off the exact frame by > {grey}: stale {} -> preview {}",
+        chain.len(),
+        count(&unedited, grey),
+        count(&off, grey)
+    );
+    write_ppm("brush-raise-exact", &exact);
+    write_ppm("brush-raise-preview", &previewed);
+    write_ppm("brush-raise-stale", &plain);
+    assert!(count(&unedited, grey) > 50, "the stroke is seen in the exact frame");
+    // The Height view of a stroke seen across a coarse mesh is dominated by silhouette pixels, which move by a pixel with any height error, so
+    // this is the loose check (the preview takes at least a third of the pixels off the difference); the fidelity of the chain itself is
+    // measured on the heights in `tests/preview_brush.rs`.
+    assert!(count(&off, grey) * 3 <= count(&unedited, grey) * 2, "the chain removes part of the difference to the exact frame");
+
+    // 32 active stamps (the cap) are drawn and the count beyond is ignored: the frame of 40 stamps is the frame of the first 32.
+    let many: Vec<PreviewStamp> = (0..40).map(|k| hill(at, 5.0 + f64::from(k), 800.0, 1)).collect();
+    assert_eq!(frame(&ctx, &plan, &many), frame(&ctx, &plan, &many[..MAX_PREVIEW_STAMPS]), "stamps beyond the cap are not drawn");
+    assert_ne!(
+        frame(&ctx, &plan, &many[..MAX_PREVIEW_STAMPS]),
+        frame(&ctx, &plan, &many[..MAX_PREVIEW_STAMPS - 1]),
+        "the 32nd stamp is drawn"
+    );
+}
+
+// spec: VIEW-036
+#[test]
+fn an_exact_node_takes_only_the_transient_stamps_and_the_deltas_stamps_are_not_applied_to_it_twice() {
+    use planet_render::execute_terrain_tiles_preview_split;
+
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let mut plan = plan_for(6, TerrainView::Height);
+    let cam = plan.camera.position.0.normalized();
+    let near = plan.nodes.iter().map(|n| n.tile).max_by(|a, b| {
+        a.center_direction(&TangentWarp).dot(cam).total_cmp(&b.center_direction(&TangentWarp).dot(cam)).then(b.level().cmp(&a.level()))
+    });
+    let at = near.unwrap().center_direction(&TangentWarp);
+    let tiles: Vec<CompactTile> = plan.nodes.iter().map(|n| compact_tile_field(&Reference(SEED), &TangentWarp, n.tile, CELLS, R)).collect();
+    let refs: Vec<&CompactTile> = tiles.iter().collect();
+    let split = |plan: &TerrainPlan, stamps: &[PreviewStamp], delta_len: usize| {
+        execute_terrain_tiles_preview_split(&ctx, plan, &refs, stamps, delta_len, R).unwrap().0.rgba
+    };
+    // The delta is a hill the exact tiles already hold; the transient stamp is another hill beside it.
+    let delta = hill(at, 300.0, 3_000.0, 1);
+    let transient = hill(at, 200.0, 1_500.0, 1);
+    for n in &mut plan.nodes {
+        n.preview = true;
+        n.transient_only = true;
+    }
+    // Exact nodes (transient-only): the frame with [delta, transient] is the frame with the transient stamp alone.
+    let only = split(&plan, &[transient], 0);
+    let with_delta = split(&plan, &[delta, transient], 1);
+    assert_eq!(with_delta, only, "an exact node does not apply the delta's stamps again");
+    // A node that is not transient-only applies both: the frame differs.
+    for n in &mut plan.nodes {
+        n.transient_only = false;
+    }
+    let both = split(&plan, &[delta, transient], 1);
+    assert_ne!(both, only, "a stale node applies the delta's stamps and the transient ones");
+    // And no split (all stamps are the delta's, as `set_preview` has it) is the same as before.
+    assert_eq!(split(&plan, &[delta, transient], 2), both);
+}
