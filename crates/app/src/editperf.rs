@@ -44,6 +44,8 @@ pub const RADII_M: [f64; 3] = [50.0, 150.0, 500.0];
 pub const BRUSH_RADII_M: [f64; 2] = [150.0, 1000.0];
 pub const BRUSH_ALTITUDES_M: [f64; 2] = [200.0, 2000.0];
 pub const BRUSH_POINTS: usize = 20;
+/// The numbers of active preview stamps the preview cost is measured with (TEST-042): none, a few and the cap.
+pub const PREVIEW_COST_COUNTS: [usize; 3] = [0, 8, planet_frame::preview::MAX_PREVIEW_STAMPS];
 /// The layer of the brush cases' item.
 pub const BRUSH_LAYER: &str = "brush";
 /// Repeats of each case (the median is reported).
@@ -118,6 +120,98 @@ pub fn case_brush(radius_m: f64, planet_radius_m: f64) -> (ItemSpec, Vec3) {
     }
     .with_stamp(Stamp::new(StampKind::Brush, [0.0; 3]).with_strokes(&[stroke]));
     (spec, at)
+}
+
+/// What the preview costs a frame with `stamps` active stamps (TEST-042): the nodes they flag, the median GPU time of the frame from the
+/// timestamp queries when the device has them, the median wall time until the GPU finished it, and how many renders were timed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreviewCost {
+    pub altitude_m: f64,
+    pub stamps: usize,
+    pub flagged_nodes: usize,
+    pub nodes: usize,
+    pub gpu_ms: Option<f64>,
+    pub wall_ms: f64,
+    pub renders: usize,
+}
+
+/// The preview cost table (markdown): per altitude and number of active stamps, the flagged nodes of the plan, the GPU time and the wall time.
+pub fn preview_cost_table(rows: &[PreviewCost]) -> String {
+    let mut s = String::from(
+        "| altitude | active stamps | flagged nodes / nodes | GPU ms (median) | wall ms (median) | renders |\n|---|---|---|---|---|---|\n",
+    );
+    for r in rows {
+        s += &format!(
+            "| {} m | {} | {} / {} | {} | {:.2} | {} |\n",
+            r.altitude_m,
+            r.stamps,
+            r.flagged_nodes,
+            r.nodes,
+            r.gpu_ms.map_or("-".to_string(), |g| format!("{g:.3}")),
+            r.wall_ms,
+            r.renders
+        );
+    }
+    s
+}
+
+/// `count` hill preview stamps of reach `reach_m` in a row east of `at`, a third of a reach apart: a worst case for the vertex stage, which
+/// evaluates every active stamp at every vertex of every flagged node.
+pub fn cost_stamps(at: Vec3, count: usize, reach_m: f64, planet_radius_m: f64) -> Vec<planet_frame::preview::PreviewStamp> {
+    let east = Vec3::new(0.0, 0.0, 1.0).cross(at).normalized();
+    (0..count)
+        .map(|k| {
+            let along = (k as f64 - 0.5 * count as f64) * reach_m / 3.0 / planet_radius_m;
+            planet_frame::preview::PreviewStamp {
+                sign: 1,
+                kind: StampKind::Hill,
+                amount_m: 20.0,
+                dir: (at * libm::cos(along) + east * libm::sin(along)).normalized(),
+                reach_m,
+                max_delta_m: 20.0,
+            }
+        })
+        .collect()
+}
+
+/// The preview cost on the settled rig for the view `req` looking at `at`: for each of [`PREVIEW_COST_COUNTS`] stamps the transient preview
+/// is set, the frame is planned and drawn, and the plan is rendered `renders` times with the GPU waited for (`TerrainRenderer::render`, timed).
+fn measure_preview_cost(
+    h: &mut Harness<'_>,
+    req: &TerrainRequest,
+    at: Vec3,
+    planet_radius_m: f64,
+    altitude_m: f64,
+    renders: usize,
+) -> Result<Vec<PreviewCost>, String> {
+    let mut rows = Vec::new();
+    for &count in &PREVIEW_COST_COUNTS {
+        h.rig.managed.set_transient_preview(cost_stamps(at, count, 400.0, planet_radius_m));
+        let mut frame = h.step(req)?;
+        for _ in 0..3 {
+            frame = h.step(req)?;
+        }
+        h.rig.fi.retire_to(h.rig.renderer.wait_oldest(h.ctx));
+        let plan = frame.pipeline.draw.plan.clone();
+        let (mut gpu, mut wall) = (Vec::new(), Vec::new());
+        for _ in 0..renders {
+            let (timing, _) = h.rig.renderer.render(h.ctx, &plan, true).map_err(|e| format!("preview cost render: {e:?}"))?;
+            gpu.extend(timing.gpu_ms);
+            wall.push(timing.total_ms);
+        }
+        rows.push(PreviewCost {
+            altitude_m,
+            stamps: count,
+            flagged_nodes: plan.nodes.iter().filter(|n| n.preview).count(),
+            nodes: plan.nodes.len(),
+            gpu_ms: median(gpu),
+            wall_ms: median(wall).unwrap_or(0.0),
+            renders,
+        });
+    }
+    h.rig.managed.set_transient_preview(Vec::new());
+    h.settle(req, 5)?;
+    Ok(rows)
 }
 
 /// The angle in radians between two unit directions.
@@ -619,7 +713,9 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         seed,
     };
     let mut rows = Vec::new();
+    let mut costs: Vec<PreviewCost> = Vec::new();
     for &altitude in &altitudes {
+        let mut focus: Option<(TerrainRequest, Vec3)> = None;
         // One rig per altitude, built for the first case's camera and settled from empty; every case then edits and reverts on it.
         let first_stamp = case_stamp(radii[0]);
         let rho = (1.5 * radii[0]).max(altitude);
@@ -646,12 +742,10 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
                 runs.push(run_once(&mut h, &world, &req, &stamp, limit)?);
             }
             rows.push(CaseRow { kind: CaseKind::Stamp, altitude_m: altitude, radius_m: r, runs });
+            focus = Some((req, stamp.dir));
         }
         // The brush cases (TEST-042): one raise stroke of 20 points, at the altitudes the brush is measured at.
-        if !BRUSH_ALTITUDES_M.contains(&altitude) {
-            continue;
-        }
-        for &r in &brush_radii {
+        for &r in brush_radii.iter().filter(|_| BRUSH_ALTITUDES_M.contains(&altitude)) {
             let (stroke, centre) = case_brush(r, radius_m);
             let rho = (1.5 * r).max(altitude);
             let req = req_of(camera_for(centre, &ground, radius_m, rho, altitude, aspect));
@@ -662,6 +756,11 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
                 runs.push(run_once(&mut h, &world, &req, &stroke, limit)?);
             }
             rows.push(CaseRow { kind: CaseKind::Brush, altitude_m: altitude, radius_m: r, runs });
+            focus = Some((req, centre));
+        }
+        // The cost of the preview with the cap of active stamps (TEST-042), on the last view of the altitude.
+        if let Some((req, at)) = focus {
+            costs.extend(measure_preview_cost(&mut h, &req, at, radius_m, altitude, if smoke { 3 } else { 20 })?);
         }
     }
     let table = table(&rows);
@@ -669,9 +768,16 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     let levels = levels_table(&rows);
     writeln!(out, "\n{table}\nstages (ms from set_definition; the calls and the frame median are durations):\n\n{stages}").map_err(err)?;
     writeln!(out, "\nthe refreshed set by level (first run of each case):\n\n{levels}").map_err(err)?;
+    let cost = preview_cost_table(&costs);
+    writeln!(
+        out,
+        "\nthe cost of the preview with 0, 8 and {} active stamps on every flagged node:\n\n{cost}",
+        planet_frame::preview::MAX_PREVIEW_STAMPS
+    )
+    .map_err(err)?;
     if let Some(dir) = &o.out {
         let path = crate::streamperf::out_log_path(dir, "edit-latency.md")?;
-        std::fs::write(&path, format!("{table}\n{stages}\n{levels}")).map_err(|e| format!("{}: {e}", path.display()))?;
+        std::fs::write(&path, format!("{table}\n{stages}\n{levels}\n{cost}")).map_err(|e| format!("{}: {e}", path.display()))?;
         writeln!(out, "table written to {}", path.display()).map_err(err)?;
     }
     if smoke && rows.iter().any(|r| r.runs.iter().any(|x| x.exact_ms.is_none())) {
@@ -712,6 +818,24 @@ mod tests {
             let mut def = WorldDefinition::single_planet(R, 7);
             def.put_item_spec(BodyId::PLANET, spec).unwrap_or_else(|e| panic!("radius {radius}: {e:?}"));
         }
+    }
+
+    // spec: TEST-043
+    #[test]
+    fn the_preview_cost_stamps_are_a_row_of_hills_at_the_cap_and_the_table_prints_the_counts_and_the_times() {
+        let at = case_centre();
+        for count in PREVIEW_COST_COUNTS {
+            let stamps = cost_stamps(at, count, 400.0, R);
+            assert_eq!(stamps.len(), count);
+            assert!(stamps.iter().all(|s| s.kind == StampKind::Hill && s.sign == 1 && (s.dir.length() - 1.0).abs() < 1e-12));
+        }
+        assert_eq!(PREVIEW_COST_COUNTS, [0, 8, planet_frame::preview::MAX_PREVIEW_STAMPS]);
+        let rows = [
+            PreviewCost { altitude_m: 200.0, stamps: 32, flagged_nodes: 5, nodes: 40, gpu_ms: Some(1.25), wall_ms: 3.5, renders: 20 },
+            PreviewCost { altitude_m: 200.0, stamps: 0, flagged_nodes: 0, nodes: 40, gpu_ms: None, wall_ms: 2.0, renders: 20 },
+        ];
+        let t = preview_cost_table(&rows);
+        assert!(t.contains("| 200 m | 32 | 5 / 40 | 1.250 | 3.50 | 20 |") && t.contains("| 200 m | 0 | 0 / 40 | - | 2.00 | 20 |"), "{t}");
     }
 
     // spec: TEST-042

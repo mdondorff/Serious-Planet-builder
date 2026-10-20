@@ -8,7 +8,7 @@ fn run(args: &[&str]) -> Result<String, String> {
     planet::run(&args, &mut buf).map(|_| String::from_utf8(buf).unwrap())
 }
 
-// spec: TEST-019, TEST-041, TEST-042
+// spec: TEST-019, TEST-041, TEST-042, TEST-043
 #[test]
 fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
     let logs = std::env::temp_dir().join(format!("planet-edit-perf-{}", std::process::id()));
@@ -83,6 +83,20 @@ fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
         assert!(cells[i].parse::<f64>().is_ok(), "column {i} of the brush stages row is a number: {stages}");
     }
     assert!(table.contains("| 200 m | 150 m brush |"), "edit-latency.md holds the brush row: {table}");
+    // The preview cost (VIEW-036, TEST-042): 0, 8 and 32 active stamps on the last view of the altitude, the flagged nodes and the times.
+    assert!(out.contains("| altitude | active stamps | flagged nodes / nodes | GPU ms (median) | wall ms (median) | renders |"), "{out}");
+    let cost: Vec<Vec<&str>> = out
+        .lines()
+        .filter(|l| l.starts_with("| 200 m | ") && l.contains(" / ") && l.split('|').count() == 8)
+        .map(|l| l.split('|').map(str::trim).collect())
+        .collect();
+    assert_eq!(cost.iter().map(|c| c[2]).collect::<Vec<_>>(), ["0", "8", "32"], "{out}");
+    for c in &cost {
+        assert!(c[5].parse::<f64>().is_ok_and(|w| w > 0.0), "the wall time is a number: {c:?}");
+    }
+    let flagged = |c: &Vec<&str>| c[3].split(" / ").next().unwrap().parse::<usize>().unwrap();
+    assert_eq!(flagged(&cost[0]), 0, "no stamps, no flagged node");
+    assert!(flagged(&cost[2]) > 0, "32 stamps flag the nodes around the view's focus: {cost:?}");
     // The brush has no preview (the preview does not show a brush); the refreshed set by level has rows for it.
     assert!(
         out.lines().any(|l| l.starts_with("| 200 m | 150 m brush | ") && l.split('|').count() == 10),

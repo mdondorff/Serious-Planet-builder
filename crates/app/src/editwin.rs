@@ -1498,6 +1498,46 @@ mod tests {
         assert_eq!(e.stats.previews, 2, "the previews set with a stamp are counted");
     }
 
+    // spec: VIEW-036
+    #[test]
+    fn a_brush_stroke_is_previewed_while_it_is_painted_and_by_the_delta_of_the_put_stroke_after_it() {
+        use planet_world_def::stamp::BrushKind;
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.toggle();
+        e.key(EditKey::Tool(8));
+        assert!(e.transient_preview().is_none(), "no stroke, nothing to give the loop");
+        e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+        e.moved(&cam, VIEWPORT, [CENTRE[0] + 100.0, CENTRE[1]], &limits(), &Flat);
+        e.moved(&cam, VIEWPORT, [CENTRE[0] + 200.0, CENTRE[1]], &limits(), &Flat);
+        // While the button is down the stroke so far is a chain of hills.
+        let live = e.transient_preview().expect("a stroke is being painted");
+        assert!(live.len() > 2 && live.iter().all(|s| s.kind == planet_world_def::stamp::StampKind::Hill && s.sign == 1), "{live:?}");
+        let (reach, amount) = (live[0].reach_m, live[0].amount_m);
+        assert!(reach > e.session.brush_settings().radius_m && amount > 0.0 && amount <= e.session.brush_settings().strength_m);
+        // The release puts the stroke: the live chain is cleared once, and the delta of the put stroke is the same kind of chain.
+        e.release();
+        assert_eq!(e.transient_preview(), Some(Vec::new()), "the transient preview ends, once");
+        assert!(e.transient_preview().is_none());
+        let def = hand_over(&mut e);
+        let stamps = e.preview_stamps(cam.position.0);
+        assert!(
+            !stamps.is_empty() && stamps.iter().all(|s| s.kind == planet_world_def::stamp::StampKind::Hill && s.sign == 1),
+            "{stamps:?}"
+        );
+        let item = e.session.editor().items().find(|i| i.kind == "brush").unwrap().clone();
+        assert_eq!(item.strokes[0].kind, BrushKind::Raise);
+        let _ = def;
+        // A smooth is not previewed, live or put.
+        e.preview_end();
+        e.key(EditKey::Tool(10));
+        e.press(&cam, VIEWPORT, [CENTRE[0], CENTRE[1] + 80.0], &limits(), &Flat);
+        e.moved(&cam, VIEWPORT, [CENTRE[0] + 150.0, CENTRE[1] + 80.0], &limits(), &Flat);
+        assert_eq!(e.transient_preview(), Some(Vec::new()), "a smooth has no chain");
+        e.key(EditKey::Escape);
+    }
+
     // spec: VIEW-023
     #[test]
     fn the_preview_ends_when_the_exact_tiles_are_in_and_the_next_edit_starts_from_the_definition_it_replaces() {
