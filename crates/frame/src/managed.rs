@@ -352,6 +352,12 @@ impl ManagedLoop {
         self.pipe.set_preview(stamps);
     }
 
+    /// Set the transient preview (VIEW-036, REND-033): the stamps of something being made, such as a brush stroke under the pointer, shown on
+    /// every node they touch although no tile is stale. An empty list ends it.
+    pub fn set_transient_preview(&mut self, stamps: Vec<crate::preview::PreviewStamp>) {
+        self.pipe.set_transient_preview(stamps);
+    }
+
     /// The tiles the sink holds (what a frame may draw).
     pub fn resident(&self) -> &HashMap<TileId, ResidentTile> {
         &self.resident

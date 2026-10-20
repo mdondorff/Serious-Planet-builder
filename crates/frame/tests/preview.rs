@@ -70,16 +70,18 @@ fn an_edit_is_the_removals_and_additions_that_differ_in_application_order_and_no
 
 // spec: REND-033
 #[test]
-fn a_list_beyond_eight_keeps_the_eight_nearest_to_the_camera_and_counts_the_rest() {
+fn a_list_beyond_the_cap_keeps_the_nearest_to_the_camera_and_counts_the_rest() {
     let cam = dir(1.0, 0.0, 0.0);
-    let items: Vec<ItemSpec> =
-        (0..11u128).map(|k| spec(k + 1, 0, dir(1.0, 0.02 * (k as f64 + 1.0), 0.0), StampKind::Hill, 10.0 + k as f64)).collect();
+    let extra = 3;
+    let items: Vec<ItemSpec> = (0..(MAX_PREVIEW_STAMPS + extra) as u128)
+        .map(|k| spec(k + 1, 0, dir(1.0, 0.002 * (k as f64 + 1.0), 0.0), StampKind::Hill, 10.0 + k as f64))
+        .collect();
     let list = preview_delta(&[], &all(&world(&items)), cam);
     assert_eq!(list.stamps.len(), MAX_PREVIEW_STAMPS);
-    assert_eq!(list.dropped, 3);
-    // The nearest are ids 1 to 8 (the anchors drift away from the camera as the id grows); the list is in application order.
+    assert_eq!(list.dropped, extra);
+    // The nearest are the first ids (the anchors drift away from the camera as the id grows); the list is in application order.
     let amounts: Vec<f64> = list.stamps.iter().map(|s| s.amount_m).collect();
-    assert_eq!(amounts, (0..8).map(|k| 10.0 + f64::from(k)).collect::<Vec<_>>());
+    assert_eq!(amounts, (0..MAX_PREVIEW_STAMPS).map(|k| 10.0 + k as f64).collect::<Vec<_>>());
 }
 
 // spec: REND-033
@@ -154,19 +156,25 @@ fn a_removed_plateau_is_not_previewed_whole_items_are_kept_or_dropped_and_a_drag
     let flatter = spec(3, 0, dir(1.0, 0.02, 0.0), StampKind::Plateau, 150.0);
     assert!(preview_delta(&all(&world(std::slice::from_ref(&flat))), &[], cam).stamps.is_empty());
     assert_eq!(signs(&preview_delta(&all(&world(&[flat])), &all(&world(&[flatter])), cam).stamps), [(1, StampKind::Plateau, 150.0)]);
-    // One addition and four resized hills, the addition nearest: 9 entries, 8 fit; the farthest changed item goes whole, never half.
+    // One addition and resized hills, the addition nearest: one entry too many for the cap; the farthest changed item goes whole, never half.
+    let changed = MAX_PREVIEW_STAMPS / 2 + 1;
     let mut before = Vec::new();
     let mut after = vec![spec(100, 0, dir(1.0, 0.0, 0.001), StampKind::Hill, 5.0)];
-    for k in 0..4u128 {
-        let at = dir(1.0, 0.01 * (k as f64 + 2.0), 0.0);
+    for k in 0..changed as u128 {
+        let at = dir(1.0, 0.004 * (k as f64 + 2.0), 0.0);
         before.push(spec(k + 1, 0, at, StampKind::Hill, 20.0));
         after.push(spec(k + 1, 0, at, StampKind::Hill, 40.0));
     }
     let list = preview_delta(&all(&world(&before)), &all(&world(&after)), cam);
-    assert_eq!(list.stamps.len(), 7, "the addition (1) and three changed items (2 each); the farthest item is out whole");
-    assert_eq!(list.dropped, 2);
-    assert_eq!(list.stamps.iter().filter(|s| s.sign < 0).count(), 3);
-    assert_eq!(list.stamps.iter().filter(|s| s.sign > 0).count(), 4);
+    let kept = (MAX_PREVIEW_STAMPS - 1) / 2;
+    assert_eq!(
+        list.stamps.len(),
+        1 + 2 * kept,
+        "the addition (1) and the changed items that fit whole (2 each); the farthest ones are out whole"
+    );
+    assert_eq!(list.dropped, 2 * (changed - kept));
+    assert_eq!(list.stamps.iter().filter(|s| s.sign < 0).count(), kept);
+    assert_eq!(list.stamps.iter().filter(|s| s.sign > 0).count(), kept + 1);
     // A drag A -> B -> C is the delta from A to C, not the sum of two steps: a tile still at state A shows the hill at C and none at B.
     let (a, b, c) = (dir(1.0, 0.03, 0.0), dir(1.0, 0.05, 0.0), dir(1.0, 0.07, 0.0));
     let state = |at: Vec3| all(&world(&[spec(1, 0, at, StampKind::Hill, 40.0)]));

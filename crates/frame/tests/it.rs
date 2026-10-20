@@ -60,6 +60,8 @@ mod plan_reuse;
 mod prefetch;
 #[path = "preview.rs"]
 mod preview;
+#[path = "preview_brush.rs"]
+mod preview_brush;
 #[path = "preview_lines.rs"]
 mod preview_lines;
 #[path = "regions.rs"]

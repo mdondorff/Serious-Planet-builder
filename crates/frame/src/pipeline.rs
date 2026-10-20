@@ -246,6 +246,28 @@ pub fn draw_plan_edited(
     preview: &[PreviewStamp],
     edited: &BTreeSet<TileId>,
 ) -> Result<DrawPlan, PlanError> {
+    draw_plan_transient(req, base, resident, bounds, preview, edited, &[])
+}
+
+/// [`draw_plan_edited`] with a transient preview (VIEW-036): stamps that are not the delta of an edit in flight but something being made
+/// (a brush stroke under the pointer), so that no tile is stale for them. Every node drawn from a resident tile, stale or exact, whose
+/// cap a transient stamp touches is flagged `preview`, and the draw plan carries the delta's stamps and then the transient ones, at most
+/// [`crate::preview::MAX_PREVIEW_STAMPS`] (the transient ones are kept first). The frame's kind is not changed by them: its tiles are what
+/// they were. An empty transient list is [`draw_plan_edited`] exactly.
+pub fn draw_plan_transient(
+    req: &TerrainRequest,
+    base: Option<(&TerrainRequest, &TerrainPlan)>,
+    resident: &dyn ResidentSet,
+    bounds: &TileBounds,
+    preview: &[PreviewStamp],
+    edited: &BTreeSet<TileId>,
+    transient: &[PreviewStamp],
+) -> Result<DrawPlan, PlanError> {
+    let max = crate::preview::MAX_PREVIEW_STAMPS;
+    let transient = &transient[..transient.len().min(max)];
+    let preview = &preview[..preview.len().min(max - transient.len())];
+    let all: Vec<PreviewStamp> = preview.iter().chain(transient).copied().collect();
+    let mut transient_flags = false;
     let map = face_mapping_by_id(&req.face_mapping).ok_or_else(|| PlanError::UnknownFaceMapping(req.face_mapping.clone()))?;
     let mut shown: BTreeMap<TileId, TerrainDraw> = BTreeMap::new();
     let (mut substituted, mut blank) = (0usize, 0usize);
@@ -257,7 +279,12 @@ pub fn draw_plan_edited(
         for d in &plan.nodes {
             if resident.resident(d.tile).is_some_and(|r| r.mesh_key == d.mesh_key) && !edited.contains(&d.tile) {
                 let rel = d.origin.0 - req.camera.position.0;
-                shown.insert(d.tile, TerrainDraw { camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32], ..*d });
+                let flagged = previewed(transient, map.as_ref(), d.tile, req.lod.radius_m);
+                transient_flags |= flagged;
+                shown.insert(
+                    d.tile,
+                    TerrainDraw { camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32], preview: flagged, ..*d },
+                );
                 continue;
             }
             // Stale while revalidating (REND-032): a resident tile of another version (an edit changed what it reads and its refresh is
@@ -265,7 +292,8 @@ pub fn draw_plan_edited(
             if let Some(r) = resident.resident(d.tile) {
                 substituted += 1;
                 let mut node = draw_of(req, d.tile, r);
-                node.preview = previewed(preview, map.as_ref(), d.tile, req.lod.radius_m);
+                node.preview = previewed(&all, map.as_ref(), d.tile, req.lod.radius_m);
+                transient_flags |= node.preview && previewed(transient, map.as_ref(), d.tile, req.lod.radius_m);
                 shown.insert(d.tile, node);
                 continue;
             }
@@ -344,7 +372,7 @@ pub fn draw_plan_edited(
     let nodes: Vec<TerrainDraw> = shown.into_values().collect();
     let plan = match (kind, base) {
         // The synchronous frame's plan, untouched (and so equal to it bit for bit).
-        (DrawKind::Exact, Some((_, p))) => p.clone(),
+        (DrawKind::Exact, Some((_, p))) if !transient_flags => p.clone(),
         _ => TerrainPlan {
             size: req.size,
             view: req.view,
@@ -359,7 +387,7 @@ pub fn draw_plan_edited(
             water: None,
         },
     };
-    Ok(DrawPlan { plan, kind, substituted, blank, preview: preview.to_vec(), preview_radius_m: req.lod.radius_m })
+    Ok(DrawPlan { plan, kind, substituted, blank, preview: all, preview_radius_m: req.lod.radius_m })
 }
 
 /// Whether the reach of a preview stamp touches the cap of `tile` (REND-033), with the halo the stamp stage declares its items with.
@@ -718,6 +746,8 @@ pub struct PlanPipeline {
     frame: u64,
     /// The preview of the edit in flight (REND-033); empty when there is none.
     preview: Vec<PreviewStamp>,
+    /// The transient preview of something being made (VIEW-036); empty when there is none.
+    transient: Vec<PreviewStamp>,
     /// The tiles named by the edits since the last plan made after one was delivered, and the request number of the first plan that is
     /// made after the latest edit (a plan with a lower number predates it).
     edited: BTreeSet<TileId>,
@@ -736,6 +766,7 @@ impl PlanPipeline {
             last_predicted: None,
             frame: 0,
             preview: Vec::new(),
+            transient: Vec::new(),
             edited: BTreeSet::new(),
             edit_seq: 0,
             dropped_plan_errors: 0,
@@ -760,6 +791,12 @@ impl PlanPipeline {
     /// tiles are resident.
     pub fn set_preview(&mut self, preview: Vec<PreviewStamp>) {
         self.preview = preview;
+    }
+
+    /// Set the transient preview (VIEW-036): stamps of something being made, flagged on every node they touch whether or not its tile is
+    /// stale. An empty list ends it.
+    pub fn set_transient_preview(&mut self, stamps: Vec<PreviewStamp>) {
+        self.transient = stamps;
     }
 
     /// An edit changed what the world draws: ask for a new plan at the next frame although the camera did not move (STRM-026).
@@ -837,8 +874,16 @@ impl PlanPipeline {
         let base = self.current.as_ref().filter(|c| c.request == *req || plan_usable(&c.plan, req));
         let empty = TileBounds::default();
         let bounds = self.residency.as_ref().map_or(&empty, |r| &r.residency.bounds);
-        let draw = draw_plan_edited(req, base.map(|c| (&c.request, c.plan.as_ref())), resident, bounds, &self.preview, &self.edited)
-            .map_err(|e| e.to_string())?;
+        let draw = draw_plan_transient(
+            req,
+            base.map(|c| (&c.request, c.plan.as_ref())),
+            resident,
+            bounds,
+            &self.preview,
+            &self.edited,
+            &self.transient,
+        )
+        .map_err(|e| e.to_string())?;
         let wanted =
             self.current.as_ref().map(|c| c.plan.nodes.iter().enumerate().map(|(i, n)| (n.tile, i as f64)).collect()).unwrap_or_default();
         Ok(PipelineFrame { frame: self.frame, base_seq: base.map(|c| c.seq), draw, delivered, residency_delivered, requested, wanted })

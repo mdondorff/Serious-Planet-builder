@@ -509,6 +509,12 @@ impl App<'_> {
                 }
             }
         }
+        // The brush stroke under the pointer is previewed as it is painted (VIEW-036); when it ends the put stroke's delta takes over.
+        if let Some(st) = self.state.as_mut() {
+            if let Some(stamps) = st.edit.as_mut().and_then(|e| e.transient_preview()) {
+                st.rig.managed.set_transient_preview(stamps);
+            }
+        }
         if republished {
             let world = self.world;
             self.field = world.field()?;

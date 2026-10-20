@@ -17,7 +17,7 @@ use planet_editor::shape::{self, Handle};
 use planet_frame::freecam::FreePose;
 use planet_frame::globe::{Marker, Viewport};
 use planet_frame::pick::{cursor_ray, pick_surface, PickLimits, SurfaceHit};
-use planet_frame::preview::{preview_delta, PreviewStamp};
+use planet_frame::preview::{brush_chain, preview_delta_on, PreviewStamp};
 use planet_frame::Camera;
 use planet_generators::height::HeightField;
 use planet_world_def::footprint::{Cap, FootprintItem};
@@ -175,6 +175,8 @@ pub struct EditRuntime {
     feed: PreviewFeed,
     /// The next refresh is every resident tile (the definition changed with no command: items loaded at the start).
     refresh_all: bool,
+    /// The transient preview of a brush stroke was given to the loop and has not been cleared since.
+    transient_shown: bool,
     /// The edits the last [`globe_markers`](EditRuntime::globe_markers) made markers of, by marker number minus [`EDIT_MARKER_BASE`].
     marker_ids: Vec<ItemId>,
 }
@@ -261,6 +263,7 @@ impl EditRuntime {
             overlay: Vec::new(),
             draft: DraftOverlay::default(),
             brush: BrushOverlay::default(),
+            transient_shown: false,
             handles: Vec::new(),
             lists: Lists::default(),
             camera_position: Vec3::new(radius_m, 0.0, 0.0),
@@ -342,9 +345,28 @@ impl EditRuntime {
     /// The stamps to give `ManagedLoop::set_preview` for the camera at `camera` (planet-fixed); empty when no edit is in flight. Counted.
     pub fn preview_stamps(&mut self, camera: Vec3) -> Vec<PreviewStamp> {
         let Some(oldest) = &self.feed.oldest else { return Vec::new() };
-        let stamps = preview_delta(oldest, &self.feed.current, camera).stamps;
+        let stamps = preview_delta_on(oldest, &self.feed.current, camera, self.radius_m).stamps;
         self.stats.previews += u64::from(!stamps.is_empty());
         stamps
+    }
+
+    /// The transient preview of the brush stroke under the pointer (VIEW-036), for `ManagedLoop::set_transient_preview`: the chain of the
+    /// stroke so far while it is painted; once, an empty list when it has ended (the delta of the put stroke takes over); else `None`.
+    pub fn transient_preview(&mut self) -> Option<Vec<PreviewStamp>> {
+        match self.session.stroke_in_progress() {
+            Some(s) => {
+                let stroke = planet_world_def::stamp::Stroke {
+                    kind: s.kind,
+                    radius_m: s.radius_m,
+                    strength_m: s.strength_m,
+                    target_m: s.target_m,
+                    points: s.points.iter().map(|p| p.dir()).collect(),
+                };
+                self.transient_shown = true;
+                Some(brush_chain(&stroke, 1, self.radius_m))
+            }
+            None => std::mem::take(&mut self.transient_shown).then(Vec::new),
+        }
     }
 
     /// True while an edit is in flight: the preview is set and the exact tiles are not all in.
@@ -1470,7 +1492,7 @@ mod tests {
         e.session.set_param_text("radius_m", "1234").unwrap();
         let last = hand_over(&mut e);
         let three = e.preview_stamps(cam.position.0);
-        let from_first = preview_delta(&body_items(&base), &body_items(&last), cam.position.0).stamps;
+        let from_first = preview_delta_on(&body_items(&base), &body_items(&last), cam.position.0, R).stamps;
         assert_eq!(three, from_first, "the delta runs from the state before the first hand-over to the last");
         assert_eq!(three.len(), 1, "one stamp, at its final size, nothing removed that the first step added");
         assert_eq!(e.stats.previews, 2, "the previews set with a stamp are counted");
@@ -1492,7 +1514,7 @@ mod tests {
         e.session.set_param_text("radius_m", "777").unwrap();
         let second = hand_over(&mut e);
         let stamps = e.preview_stamps(cam.position.0);
-        let from_replaced = preview_delta(&body_items(&first), &body_items(&second), cam.position.0).stamps;
+        let from_replaced = preview_delta_on(&body_items(&first), &body_items(&second), cam.position.0, R).stamps;
         assert_eq!(stamps, from_replaced, "the delta runs from the definition the second hand-over replaced, not from the empty world");
         assert_eq!(stamps.len(), 2, "the old size is taken out and the new one put in");
     }

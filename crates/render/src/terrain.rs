@@ -53,9 +53,9 @@ struct Globals {
     // Lit path only: the albedo table of the look (ADR 0039 point 3): eight colours with a threshold in the fourth lane, then
     // (snow_c_full, snow_c_none, snow_cos_none, snow_cos_full) and (beach_height, beach_fade, shore_blend, 0).
     albedo: array<vec4<f32>, 10>,
-    // The edit preview (REND-033), read only for a previewed node and only when extra.w (the count, at most 8) is above 0: per stamp two
+    // The edit preview (REND-033), read only for a previewed node and only when extra.w (the count, at most 32) is above 0: per stamp two
     // entries, (anchor relative to the camera, reach in metres) and (amount in metres, kind 1 hill / 2 crater / 3 plateau, sign, bound).
-    preview: array<vec4<f32>, 16>,
+    preview: array<vec4<f32>, 64>,
     // The region overlay (VIEW-030), read only when extra.y is 3: the count in the first entry's x, then per polygon 37 entries: five of
     // header (anchor relative to the camera and the point count; e1 and the red of the tint; e2 and the green; the unit up and the blue;
     // the square of the reach and the band), then 32 of points, two per entry (x, y metres in the anchor's tangent plane).
