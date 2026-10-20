@@ -444,6 +444,8 @@ impl<S: ItemStore> Editor<S> {
             group: new.group,
             part: new.part,
             mask_layer: new.mask_layer,
+            // The editor's brush tool (E6, support lane) adds the strokes to a new item; until then a new item has none (ADR 0070).
+            strokes: Vec::new(),
         }
         .canonical()
     }

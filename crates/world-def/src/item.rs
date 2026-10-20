@@ -18,6 +18,9 @@ pub const ITEM_SCHEMA_VERSION: u32 = 1;
 /// The version of the item file layout of an item with a points list (AUTH-005, ADR 0069).
 pub const ITEM_SCHEMA_VERSION_POINTS: u32 = 2;
 
+/// The version of the item file layout of a brush item with a strokes list (AUTH-005, ADR 0070).
+pub const ITEM_SCHEMA_VERSION_STROKES: u32 = 3;
+
 /// The blake3 context of the content hash.
 pub const ITEM_HASH_CONTEXT: &str = "planet-builder item hash v1";
 
@@ -74,6 +77,20 @@ pub struct Item {
     pub part: Option<u32>,
     /// The layer a region clips (WDEF-012); only for the kind `region`.
     pub mask_layer: Option<String>,
+    /// The strokes of a brush in application order (WDEF-013, ADR 0070); empty for every other item. An item with strokes is a schema-3 file.
+    pub strokes: Vec<ItemStroke>,
+}
+
+/// A brush stroke as the item file holds it: its kind, radius and strength in metres, the target height of a flatten and its points as
+/// latitude and longitude in degrees, in order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ItemStroke {
+    pub kind: crate::stamp::BrushKind,
+    pub radius_m: f64,
+    pub strength_m: f64,
+    /// The height a flatten levels towards; `Some` for a flatten and only for it.
+    pub target_m: Option<f64>,
+    pub points: Vec<(f64, f64)>,
 }
 
 /// The most points an item may carry.
@@ -222,16 +239,44 @@ impl Item {
         for p in &mut self.points {
             *p = (canonical(p.0), canonical(p.1));
         }
+        for s in &mut self.strokes {
+            s.radius_m = canonical(s.radius_m);
+            s.strength_m = canonical(s.strength_m);
+            s.target_m = s.target_m.map(canonical);
+            for p in &mut s.points {
+                *p = (canonical(p.0), canonical(p.1));
+            }
+        }
         self
     }
 
-    /// The version of the file this item is written as: 2 with a points list, else 1.
+    /// The version of the file this item is written as: 3 with strokes, 2 with a points list, else 1.
     pub fn schema_version(&self) -> u32 {
-        if self.points.is_empty() {
+        if !self.strokes.is_empty() {
+            ITEM_SCHEMA_VERSION_STROKES
+        } else if self.points.is_empty() {
             ITEM_SCHEMA_VERSION
         } else {
             ITEM_SCHEMA_VERSION_POINTS
         }
+    }
+
+    /// The strokes as stamp strokes: the points as unit directions (the sphere conversion, `libm`).
+    pub fn stroke_directions(&self) -> Vec<crate::stamp::Stroke> {
+        self.strokes
+            .iter()
+            .map(|s| crate::stamp::Stroke {
+                kind: s.kind,
+                radius_m: canonical(s.radius_m),
+                strength_m: canonical(s.strength_m),
+                target_m: s.target_m.map(canonical),
+                points: s
+                    .points
+                    .iter()
+                    .map(|(la, lo)| Sphere { radius_m: 1.0 }.geo_to_planet_fixed(Geo::new(canonical(*la), canonical(*lo), 0.0)).0)
+                    .collect(),
+            })
+            .collect()
     }
 
     /// The unit directions of the points (the sphere conversion, `libm`).
@@ -297,6 +342,26 @@ impl Item {
 
     /// The rules of the points list, the group, the part and the mask layer (AUTH-005, WDEF-011).
     fn validate_points(&self) -> Result<(), ItemFileError> {
+        let brush = self.kind == "brush";
+        if !brush && !self.strokes.is_empty() {
+            return Err(err("strokes", format!("a {} takes no strokes", self.kind)));
+        }
+        if brush {
+            if !self.points.is_empty() {
+                return Err(err("points", "a brush takes strokes, not points"));
+            }
+            if self.mask_layer.is_some() {
+                return Err(err("mask_layer", "a brush has no mask layer"));
+            }
+            if let Some(key) = self.params.keys().next() {
+                return Err(err(&format!("params.{key}"), "a brush takes no parameters"));
+            }
+            self.validate_strokes()?;
+            if self.group.is_some() != self.part.is_some() {
+                return Err(err("group", "a group and a part come together"));
+            }
+            return Ok(());
+        }
         let line = crate::stamp::StampKind::from_name(&self.kind).is_some_and(crate::stamp::StampKind::is_line);
         let region = self.kind == "region";
         if self.points.is_empty() {
@@ -315,19 +380,7 @@ impl Item {
                 return Err(err("points", format!("{what} has {lo} to {MAX_POINTS} points, got {}", self.points.len())));
             }
             for (i, (la, lo)) in self.points.iter().enumerate() {
-                let at = format!("points[{i}]");
-                if !(la.is_finite() && lo.is_finite()) {
-                    return Err(err(&at, "latitude and longitude must be finite"));
-                }
-                if !(-90.0..=90.0).contains(la) {
-                    return Err(err(&format!("{at}.latitude"), format!("{la} is outside -90..90 degrees")));
-                }
-                if !(*lo > -180.0 && *lo <= 180.0) {
-                    return Err(err(&format!("{at}.longitude"), format!("{lo} is outside (-180, 180] degrees")));
-                }
-                if la.abs() == 90.0 && *lo != 0.0 {
-                    return Err(err(&format!("{at}.longitude"), format!("must be 0 at the pole (latitude {la}), got {lo}")));
-                }
+                check_place(&format!("points[{i}]"), *la, *lo)?;
             }
             if self.points[0] != (canonical(self.anchor.latitude_deg), canonical(self.anchor.longitude_deg)) {
                 return Err(err("points[0]", "the first point must be the anchor's latitude and longitude"));
@@ -355,6 +408,63 @@ impl Item {
             if mode == 0.0 && self.mask_layer.is_some() {
                 return Err(err("mask_layer", "a region with mask_mode 0 clips nothing and has no mask layer"));
             }
+        }
+        Ok(())
+    }
+
+    /// The rules of the strokes list of a brush item (AUTH-005, WDEF-013): the caps, the numbers, the target of a flatten, the places, the
+    /// first point at the anchor, no two consecutive points equal in a stroke, and a height bound that holds the sum of the strengths.
+    fn validate_strokes(&self) -> Result<(), ItemFileError> {
+        use crate::stamp::{BrushKind, MAX_BRUSH_POINTS, MAX_STROKES};
+        if self.strokes.is_empty() || self.strokes.len() > MAX_STROKES {
+            return Err(err("strokes", format!("a brush has 1 to {MAX_STROKES} strokes, got {}", self.strokes.len())));
+        }
+        let total: usize = self.strokes.iter().map(|s| s.points.len()).sum();
+        if total > MAX_BRUSH_POINTS {
+            return Err(err("strokes", format!("a brush has at most {MAX_BRUSH_POINTS} points in all, got {total}")));
+        }
+        let mut strengths = 0.0f64;
+        for (i, s) in self.strokes.iter().enumerate() {
+            let at = format!("strokes[{i}]");
+            for (key, v) in [("radius_m", s.radius_m), ("strength_m", s.strength_m)] {
+                if !v.is_finite() {
+                    return Err(err(&format!("{at}.{key}"), format!("{v} is not a finite number")));
+                }
+            }
+            if !(1.0..=crate::cells::CELL_EDGE_M).contains(&s.radius_m) {
+                return Err(err(
+                    &format!("{at}.radius_m"),
+                    format!("{} m is outside 1..{} m (one cell edge)", s.radius_m, crate::cells::CELL_EDGE_M),
+                ));
+            }
+            if s.strength_m <= 0.0 {
+                return Err(err(&format!("{at}.strength_m"), format!("{} m is not above 0", s.strength_m)));
+            }
+            match (s.kind == BrushKind::Flatten, s.target_m) {
+                (true, None) => return Err(err(&format!("{at}.target_m"), "a flatten needs the height it levels towards")),
+                (true, Some(t)) if !t.is_finite() => return Err(err(&format!("{at}.target_m"), format!("{t} is not a finite number"))),
+                (false, Some(_)) => {
+                    return Err(err(&format!("{at}.target_m"), format!("a {} has no target", s.kind.name())));
+                }
+                _ => {}
+            }
+            if !(1..=MAX_POINTS).contains(&s.points.len()) {
+                return Err(err(&format!("{at}.points"), format!("a stroke has 1 to {MAX_POINTS} points, got {}", s.points.len())));
+            }
+            for (j, (la, lo)) in s.points.iter().enumerate() {
+                check_place(&format!("{at}.points[{j}]"), *la, *lo)?;
+            }
+            if let Some(j) = s.points.windows(2).position(|w| w[0] == w[1]) {
+                return Err(err(&format!("{at}.points[{}]", j + 1), "repeats the point before it"));
+            }
+            strengths += s.strength_m;
+        }
+        let first = self.strokes[0].points[0];
+        if first != (canonical(self.anchor.latitude_deg), canonical(self.anchor.longitude_deg)) {
+            return Err(err("strokes[0].points[0]", "the first point must be the anchor's latitude and longitude"));
+        }
+        if self.max_delta_m < strengths * (1.0 - 1e-12) {
+            return Err(err("max_delta_m", format!("{} m is below the sum of the strokes' strengths, {strengths} m", self.max_delta_m)));
         }
         Ok(())
     }
@@ -389,7 +499,7 @@ impl Item {
         m.extend_from_slice(&self.generator_version.to_le_bytes());
         m.extend_from_slice(&self.stage_version.to_le_bytes());
         // A schema-2 item (one with points) appends its group, part, mask layer and points; a schema-1 item hashes as it always did.
-        if !self.points.is_empty() {
+        if !self.points.is_empty() || !self.strokes.is_empty() {
             match self.group {
                 Some(g) => {
                     m.push(1);
@@ -409,6 +519,22 @@ impl Item {
             for (la, lo) in &self.points {
                 m.extend_from_slice(&bits(*la).to_le_bytes());
                 m.extend_from_slice(&bits(*lo).to_le_bytes());
+            }
+        }
+        // A schema-3 item (a brush) appends its strokes (AUTH-005): the count, then per stroke the kind code, the radius, strength and target
+        // bits (target 0 when absent) and the points.
+        if !self.strokes.is_empty() {
+            m.extend_from_slice(&u32::try_from(self.strokes.len()).expect("at most 64 strokes").to_le_bytes());
+            for s in &self.strokes {
+                m.push(s.kind as u8);
+                for v in [s.radius_m, s.strength_m, s.target_m.unwrap_or(0.0)] {
+                    m.extend_from_slice(&bits(v).to_le_bytes());
+                }
+                m.extend_from_slice(&u32::try_from(s.points.len()).expect("at most 64 points").to_le_bytes());
+                for (la, lo) in &s.points {
+                    m.extend_from_slice(&bits(*la).to_le_bytes());
+                    m.extend_from_slice(&bits(*lo).to_le_bytes());
+                }
             }
         }
         let full = blake3::derive_key(ITEM_HASH_CONTEXT, &m);
@@ -446,7 +572,7 @@ impl Item {
                         spec.layer = layer.clone();
                     }
                 }
-                spec.with_stamp(stamp.with_points(&self.point_directions()))
+                spec.with_stamp(stamp.with_points(&self.point_directions()).with_strokes(&self.stroke_directions()))
             }
             _ => spec,
         }
@@ -544,6 +670,20 @@ impl Item {
             line(&mut out, "latitude", float(*la));
             line(&mut out, "longitude", float(*lo));
         }
+        for s in &item.strokes {
+            out.push_str("\n[[strokes]]\n");
+            line(&mut out, "kind", quote(s.kind.name()));
+            line(&mut out, "radius_m", float(s.radius_m));
+            line(&mut out, "strength_m", float(s.strength_m));
+            if let Some(t) = s.target_m {
+                line(&mut out, "target_m", float(t));
+            }
+            for (la, lo) in &s.points {
+                out.push_str("\n[[strokes.points]]\n");
+                line(&mut out, "latitude", float(*la));
+                line(&mut out, "longitude", float(*lo));
+            }
+        }
         Ok(out)
     }
 
@@ -557,11 +697,11 @@ impl Item {
             Some(_) => return Err(err("schema_version", "must be an integer")),
             None => return Err(err("schema_version", "is required")),
         };
-        if version != i64::from(ITEM_SCHEMA_VERSION) && version != i64::from(ITEM_SCHEMA_VERSION_POINTS) {
+        if ![ITEM_SCHEMA_VERSION, ITEM_SCHEMA_VERSION_POINTS, ITEM_SCHEMA_VERSION_STROKES].iter().any(|v| i64::from(*v) == version) {
             return Err(err(
                 "schema_version",
                 format!(
-                    "is {version}; this build reads item files of versions {ITEM_SCHEMA_VERSION} and {ITEM_SCHEMA_VERSION_POINTS} (a newer file needs a newer build)"
+                    "is {version}; this build reads item files of versions {ITEM_SCHEMA_VERSION} to {ITEM_SCHEMA_VERSION_STROKES} (a newer file needs a newer build)"
                 ),
             ));
         }
@@ -585,7 +725,7 @@ impl Item {
             "mask_layer",
         ];
         for key in table.keys() {
-            if !TOP.contains(&key.as_str()) && key != "anchor" && key != "params" && key != "points" {
+            if !TOP.contains(&key.as_str()) && key != "anchor" && key != "params" && key != "points" && key != "strokes" {
                 return Err(err(key, "is not a key of an item file"));
             }
         }
@@ -651,30 +791,75 @@ impl Item {
             Some(_) => return Err(err("params", "must be a table")),
             None => {}
         }
-        let mut points: Vec<(f64, f64)> = Vec::new();
-        match table.get("points") {
+        // The points of a table array (`[[points]]` at the top, `[[strokes.points]]` in a stroke): `latitude` and `longitude` each.
+        let place_list = |value: Option<&toml::Value>, name: &str| -> Result<Vec<(f64, f64)>, ItemFileError> {
+            let mut out: Vec<(f64, f64)> = Vec::new();
+            match value {
+                Some(toml::Value::Array(rows)) => {
+                    for (i, row) in rows.iter().enumerate() {
+                        let at = format!("{name}[{i}]");
+                        let toml::Value::Table(t) = row else { return Err(err(&at, "must be a table")) };
+                        for key in t.keys() {
+                            if !["latitude", "longitude"].contains(&key.as_str()) {
+                                return Err(err(&format!("{at}.{key}"), "is not a key of a point"));
+                            }
+                        }
+                        out.push((number(t, &at, "latitude")?, number(t, &at, "longitude")?));
+                    }
+                }
+                Some(_) => return Err(err(name, "must be an array of tables")),
+                None => {}
+            }
+            Ok(out)
+        };
+        let points = place_list(table.get("points"), "points")?;
+        let mut strokes: Vec<ItemStroke> = Vec::new();
+        match table.get("strokes") {
             Some(toml::Value::Array(rows)) => {
                 for (i, row) in rows.iter().enumerate() {
-                    let toml::Value::Table(t) = row else { return Err(err(&format!("points[{i}]"), "must be a table")) };
-                    let at = format!("points[{i}]");
+                    let at = format!("strokes[{i}]");
+                    let toml::Value::Table(t) = row else { return Err(err(&at, "must be a table")) };
                     for key in t.keys() {
-                        if !["latitude", "longitude"].contains(&key.as_str()) {
-                            return Err(err(&format!("{at}.{key}"), "is not a key of a point"));
+                        if !["kind", "radius_m", "strength_m", "target_m", "points"].contains(&key.as_str()) {
+                            return Err(err(&format!("{at}.{key}"), "is not a key of a stroke"));
                         }
                     }
-                    points.push((number(t, &at, "latitude")?, number(t, &at, "longitude")?));
+                    let kind = match t.get("kind") {
+                        Some(toml::Value::String(s)) => crate::stamp::BrushKind::from_name(s).ok_or_else(|| {
+                            err(&format!("{at}.kind"), format!("'{s}' is not a stroke kind (raise, lower, smooth, flatten)"))
+                        })?,
+                        Some(_) => return Err(err(&format!("{at}.kind"), "must be a string")),
+                        None => return Err(err(&format!("{at}.kind"), "is required")),
+                    };
+                    let target_m = if t.contains_key("target_m") { Some(number(t, &at, "target_m")?) } else { None };
+                    strokes.push(ItemStroke {
+                        kind,
+                        radius_m: number(t, &at, "radius_m")?,
+                        strength_m: number(t, &at, "strength_m")?,
+                        target_m,
+                        points: place_list(t.get("points"), &format!("{at}.points"))?,
+                    });
                 }
             }
-            Some(_) => return Err(err("points", "must be an array of tables")),
+            Some(_) => return Err(err("strokes", "must be an array of tables")),
             None => {}
         }
-        if points.is_empty() != (version == i64::from(ITEM_SCHEMA_VERSION)) {
+        let expected = if !strokes.is_empty() {
+            ITEM_SCHEMA_VERSION_STROKES
+        } else if !points.is_empty() {
+            ITEM_SCHEMA_VERSION_POINTS
+        } else {
+            ITEM_SCHEMA_VERSION
+        };
+        if version != i64::from(expected) {
             return Err(err(
                 "schema_version",
-                if points.is_empty() {
-                    "is 2 but the file has no [[points]]; an item without points is version 1"
-                } else {
-                    "is 1 but the file has [[points]]; an item with points is version 2"
+                match expected {
+                    ITEM_SCHEMA_VERSION => {
+                        format!("is {version} but the file has neither [[points]] nor [[strokes]]; such an item is version 1")
+                    }
+                    ITEM_SCHEMA_VERSION_POINTS => format!("is {version} but the file has [[points]]; an item with points is version 2"),
+                    _ => format!("is {version} but the file has [[strokes]]; an item with strokes is version 3"),
                 },
             ));
         }
@@ -710,10 +895,28 @@ impl Item {
             group,
             part,
             mask_layer: optional_string("mask_layer")?,
+            strokes,
         };
         item.validate()?;
         Ok(item)
     }
+}
+
+/// A place of the file has one spelling: finite, latitude in -90..90, longitude in (-180, 180] and 0 at a pole.
+fn check_place(at: &str, la: f64, lo: f64) -> Result<(), ItemFileError> {
+    if !(la.is_finite() && lo.is_finite()) {
+        return Err(err(at, "latitude and longitude must be finite"));
+    }
+    if !(-90.0..=90.0).contains(&la) {
+        return Err(err(&format!("{at}.latitude"), format!("{la} is outside -90..90 degrees")));
+    }
+    if !(lo > -180.0 && lo <= 180.0) {
+        return Err(err(&format!("{at}.longitude"), format!("{lo} is outside (-180, 180] degrees")));
+    }
+    if la.abs() == 90.0 && lo != 0.0 {
+        return Err(err(&format!("{at}.longitude"), format!("must be 0 at the pole (latitude {la}), got {lo}")));
+    }
+    Ok(())
 }
 
 /// One `key = value` line.

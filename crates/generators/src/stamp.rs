@@ -123,7 +123,7 @@ pub fn stamp_delta(stamp: &Stamp, m: f64, h: f64, x: f64) -> f64 {
         StampKind::Crater => crater_delta(p[0], x),
         StampKind::Plateau => plateau_delta(p[0], h, m, x),
         // The lines are applied over their polyline and the regions only cut (apply_stamps), not by this radial profile.
-        StampKind::Ridge | StampKind::Channel | StampKind::Region => 0.0,
+        StampKind::Ridge | StampKind::Channel | StampKind::Region | StampKind::Brush => 0.0,
     }
 }
 
@@ -133,7 +133,7 @@ pub fn stamp_delta(stamp: &Stamp, m: f64, h: f64, x: f64) -> f64 {
 /// distance times the item's bound. An item that is no stamp adds nothing.
 fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
     let Some(stamp) = &item.stamp else { return (0.0, 0.0) };
-    if stamp.kind.is_region() {
+    if stamp.kind.is_region() || stamp.kind.is_brush() {
         // A region changes no height itself: it only cuts the deltas of the other items (GEN-029), and the cut stays inside their range.
         return (0.0, 0.0);
     }
@@ -183,7 +183,9 @@ fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
             let w = plateau_weight(x_min) * m;
             (-w, w)
         }
-        StampKind::Ridge | StampKind::Channel | StampKind::Region => unreachable!("the lines and the regions returned above"),
+        StampKind::Ridge | StampKind::Channel | StampKind::Region | StampKind::Brush => {
+            unreachable!("the lines, the regions and the brushes returned above")
+        }
     };
     ((lo - grow(lo)).max(-m - grow(m)), (hi + grow(hi)).min(m + grow(m)))
 }

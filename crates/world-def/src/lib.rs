@@ -214,8 +214,15 @@ fn stamp_refusal(spec: &ItemSpec, stamp: &stamp::Stamp, radius_m: f64) -> Option
         if let Some(why) = region_refusal(spec, &p, &points, radius_m) {
             return Some(why);
         }
+    } else if stamp.kind.is_brush() {
+        if let Some(why) = brush_refusal(spec, stamp, radius_m) {
+            return Some(why);
+        }
     } else if !points.is_empty() {
         return Some(format!("a {name} takes no points"));
+    }
+    if !stamp.kind.is_brush() && !stamp.strokes().is_empty() {
+        return Some(format!("a {name} takes no strokes"));
     }
     match stamp.kind {
         stamp::StampKind::Hill if p[0].abs() > spec.max_delta_m => {
@@ -229,6 +236,65 @@ fn stamp_refusal(spec: &ItemSpec, stamp: &stamp::Stamp, radius_m: f64) -> Option
         }
         _ => None,
     }
+}
+
+/// Why a brush is refused, if it is (WDEF-013): the strokes, their numbers, their points, the reach and the height bound. The file-level
+/// rules ([`item::Item::validate`]) are checked again on the stamp's directions, since the index takes any stamp a caller builds.
+fn brush_refusal(spec: &ItemSpec, stamp: &stamp::Stamp, radius_m: f64) -> Option<String> {
+    let strokes = stamp.strokes();
+    if strokes.is_empty() || strokes.len() > stamp::MAX_STROKES {
+        return Some(format!("a brush has 1 to {} strokes, got {}", stamp::MAX_STROKES, strokes.len()));
+    }
+    let total: usize = strokes.iter().map(|s| s.points_bits().len()).sum();
+    if total > stamp::MAX_BRUSH_POINTS {
+        return Some(format!("a brush has at most {} points in all, got {total}", stamp::MAX_BRUSH_POINTS));
+    }
+    let anchor = spec.dir.normalized();
+    let mut strengths = 0.0f64;
+    let mut radius_max = 0.0f64;
+    let mut far = 0.0f64;
+    for (i, s) in strokes.iter().enumerate() {
+        let (radius, strength, target) = (s.radius_m(), s.strength_m(), s.target_m());
+        if !(radius.is_finite() && strength.is_finite() && target.is_finite()) {
+            return Some(format!("stroke {i} has a number that is not finite"));
+        }
+        if !(1.0..=cells::CELL_EDGE_M).contains(&radius) {
+            return Some(format!("stroke {i} has a radius of {radius} m outside 1..{} m", cells::CELL_EDGE_M));
+        }
+        if strength <= 0.0 {
+            return Some(format!("stroke {i} has a strength of {strength} m, not above 0"));
+        }
+        let flatten = s.kind == stamp::BrushKind::Flatten;
+        if !flatten && s.target_m() != 0.0 {
+            return Some(format!("stroke {i} is a {} and has a target", s.kind.name()));
+        }
+        let points = s.to_stroke().points;
+        if !(1..=stamp::MAX_POINTS).contains(&points.len()) {
+            return Some(format!("stroke {i} has 1 to {} points, got {}", stamp::MAX_POINTS, points.len()));
+        }
+        if points.iter().any(|q| !(q.x.is_finite() && q.y.is_finite() && q.z.is_finite()) || (q.length() - 1.0).abs() > 1e-9) {
+            return Some(format!("the points of stroke {i} must be unit directions"));
+        }
+        if points.windows(2).any(|w| w[0] == w[1]) {
+            return Some(format!("two consecutive points of stroke {i} coincide"));
+        }
+        if i == 0 && footprint::angle_between(anchor, points[0]) > 1e-9 {
+            return Some("the first point of a brush must be the item's anchor".to_string());
+        }
+        strengths += strength;
+        radius_max = radius_max.max(radius);
+        far = points.iter().map(|q| footprint::angle_between(anchor, *q) * radius_m).fold(far, f64::max);
+    }
+    if far + radius_max > spec.reach_m {
+        return Some(format!(
+            "a brush reaches {far} m from its anchor plus a radius of {radius_max} m, above its reach of {} m",
+            spec.reach_m
+        ));
+    }
+    if spec.max_delta_m < strengths * (1.0 - 1e-12) {
+        return Some(format!("a brush bound of {} m is below the sum of its strengths, {strengths} m", spec.max_delta_m));
+    }
+    None
 }
 
 /// Why a region is refused, if it is (WDEF-012): the points, the polygon, the reach, the surface type and the mask mode. The content hash is
