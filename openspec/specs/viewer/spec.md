@@ -873,3 +873,14 @@ Source: opus-planner (2026-10-20), VIEW-024, VIEW-026, VIEW-032
 #### Scenario: A report
 - **WHEN** a report is written after a log line was noted
 - **THEN** the file holds the message, location, backtrace, commit, command line, path text and the log line, and a second request in the same run writes nothing
+
+### Requirement: VIEW-038 A refused plan makes a measured run invalid
+A run that measures or checks (the perf scenes of editperf, streamperf and litperf, the pipelined loop of test-render, the scheduler ablation) SHALL begin its frames with `ManagedLoop::begin_frame_strict`: from the first frame after the plan worker refused a plan for the frame's own request it returns the error `run invalid: the plan was refused N time(s); first refusal: <message>`, which ends the scene with a non-zero exit. The window's loop keeps `begin_frame` and degrades (VIEW-032).
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-20), VIEW-032, VIEW-037
+
+#### Scenario: A refusal in a measured run
+- **WHEN** the plan of a frame's own request is refused by the worker and the next frame is begun strictly
+- **THEN** the call returns the error naming the count and the refusal, while `begin_frame` of the same loop returns the frame

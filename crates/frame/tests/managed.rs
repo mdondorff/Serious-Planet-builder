@@ -1731,3 +1731,35 @@ fn without_the_pre_frame_call_the_first_frame_uploads_the_roots_as_it_always_did
     let first = t.lp.begin_frame(&request(here(), 0.0, -0.4), &mut sink).unwrap();
     assert_eq!(first.counts.uploaded, 6, "the exemption of the cap (ADR 0064) is unchanged for a caller that does not call upload_roots");
 }
+
+// spec: VIEW-038
+#[test]
+fn a_refused_plan_makes_a_measured_run_invalid_and_the_window_loop_degrades() {
+    let mut rig = Rig::new(1_000_000);
+    let good = request(here(), 0.0, -0.4);
+    rig.settle(&good);
+    let mut bad = good.clone();
+    // Far too coarse for 16 cells: the morph interval is empty and the worker refuses the plan.
+    bad.lod.tau_px = 200.0;
+    assert!(plan_terrain_field(&bad, &Reference(1)).is_err());
+    // The window's loop goes on and counts it.
+    rig.lp.begin_frame(&bad, &mut rig.sink).unwrap();
+    rig.finish();
+    rig.lp.begin_frame(&bad, &mut rig.sink).expect("the window's loop degrades");
+    assert_eq!(rig.lp.pipeline().refused_plans(), 1);
+    // A measured run is invalid at the next frame, naming the count and the first refusal.
+    let e = rig.lp.begin_frame_strict(&bad, &mut rig.sink).unwrap_err();
+    assert!(e.starts_with("run invalid: the plan was refused 1 time(s)") && e.contains("invalid LOD parameters"), "{e}");
+}
+
+// spec: VIEW-038
+#[test]
+fn a_run_without_a_refusal_is_not_invalid() {
+    let mut rig = Rig::new(1_000_000);
+    let good = request(here(), 0.0, -0.4);
+    for _ in 0..4 {
+        rig.clock.advance(FRAME_MS);
+        rig.lp.begin_frame_strict(&good, &mut rig.sink).expect("no refusal, no invalid run");
+        rig.finish();
+    }
+}

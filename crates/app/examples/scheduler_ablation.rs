@@ -145,7 +145,7 @@ fn main() -> Result<(), String> {
         let req = req_of(prelude);
         let started = Instant::now();
         loop {
-            let f = lp.begin_frame(&req, &mut sink)?;
+            let f = lp.begin_frame_strict(&req, &mut sink)?;
             if f.counts.queued == 0 && f.counts.in_flight == 0 && f.pipeline.draw.kind == planet_frame::pipeline::DrawKind::Exact {
                 break;
             }
@@ -166,7 +166,7 @@ fn main() -> Result<(), String> {
     let slow_ms: f64 = arg("--trace-slow-ms").map_or(f64::INFINITY, |v| v.parse().expect("ms"));
     for (k, cam) in script.cameras.iter().take(frames).enumerate() {
         let before = lp.manager().streamer().work();
-        let f = lp.begin_frame(&req_of(*cam), &mut sink)?;
+        let f = lp.begin_frame_strict(&req_of(*cam), &mut sink)?;
         if f.scheduler_ms > slow_ms {
             let w = lp.manager().streamer().work().since(&before);
             println!(
