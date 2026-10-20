@@ -12,6 +12,11 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | SPIKE-08 | Ocean connectivity at 16384 | closed 2026-10-16 | `spikes/ocean-connectivity/results/` |
 | SPIKE-09 | Atmosphere f32 forms | closed | `spikes/atmosphere-f32/results/` |
 | SPIKE-21 | The wet floor of ADR 0071: cost and memory of the three passes | open | `spikes/wet-floor/results/` |
+| SPIKE-17 | Two bugs of the owner's descent video: the atmosphere top, the sea edge (diagnosis) | closed 2026-10-20 (causes: far terrain hazed differently inside and outside the top, fixed in #404; the 100 km reach of the coastal band, see SPIKE-20 results) | `spikes/descent-video-bugs/results/`, `spikes/owner-captures-2026-10-20/results/` |
+| SPIKE-18 | The drawn tiles go coarser for a moment during a slow approach (diagnosis) | closed 2026-10-20 (cause: the cover splits a tile only if every in-view child is resident) | `spikes/tile-coarsening/results/` |
+| SPIKE-19 | The window aborts on a refused morph interval (diagnosis) | closed 2026-10-20 (cause: the coarse LOD factor sits at the validate limit, the plan adds the height extent) | `spikes/morph-refusal/results/` |
+| SPIKE-20 | The atmosphere still banded after the AP range fix (diagnosis) | closed 2026-10-20 (cause: the 32 x 32 x 32 volume is 21 to 23 % off between texels at 60 to 97.5 km) | `spikes/owner-captures-2026-10-20/results/` |
+| SPIKE-22 | Is the base LOD refused in the real eroded world? (diagnosis) | closed 2026-10-20 (no: 0 refusals in 45,800 poses; the finding holds for fields with only a global bound) | `spikes/base-lod-refusal/results/` |
 | SPIKE-16 | Dark patches over the sea while the camera moves (water-motion-gap; diagnosis) | closed 2026-10-19 (cause: the shore ramp depends on the drawn node's level) | `spikes/water-motion-gap/results/` |
 | SPIKE-11 | Mouse look plumbing | closed 2026-10-18 (recommendation: raw events, Locked then Confined) | `spikes/mouse-look/results/` |
 | SPIKE-15 | Edit-to-test build time | closed 2026-10-18 | `spikes/build-speed/results/` |
