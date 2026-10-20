@@ -7,7 +7,7 @@
 //!
 //! Three passes over the blocks of a bake, all in integers (so ties, order and the stored and in-memory paths are exact):
 //! 1. per block, [`analyse_floor_block`]: a union-find in increasing code that emits an edge whenever two components holding terminals
-//!    (the block's border vertices, which blocks share, and one virtual ocean node) merge: at most `4 cells + 1` edges per block;
+//!    (the block's border vertices, which blocks share, and one virtual ocean node) merge: at most about `8 cells` edges per block (the merges, and one per border ocean vertex);
 //! 2. [`merge_floor_edges`]: one serial Kruskal-style pass over every block's edges, giving the floor of each border vertex the ocean reaches;
 //! 3. per block, [`floor_block`]: a bucketed priority flood seeded with those border floors and the block's ocean vertices.
 //!
@@ -43,14 +43,14 @@ pub fn code_of(e: f32) -> u16 {
 }
 
 /// The code of the conduction bound `bound_m` (metres), rounded down like [`code_of`]: a vertex is wet at the bound when its floor is at most
-/// this. Monotone in the bound (a larger bound never makes a vertex dry). A bound that is NaN, or below the lowest code, gives the lowest code
-/// (nothing but the ocean is wet); a bound above the range gives the highest finite code.
+/// this. Monotone in the bound (a larger bound never makes a vertex dry). A NaN bound gives 0 (nothing but the ocean is wet); a bound below the lowest code gives that code
+/// (1, as [`code_of`] clamps), so the wet set stays a superset; a bound above the range gives the highest finite code.
 pub fn bound_code(bound_m: f64) -> u16 {
     if bound_m.is_nan() {
         return 0;
     }
     let c = libm::floor(bound_m * 2.0) + f64::from(CODE_ZERO);
-    c.clamp(0.0, 65_534.0) as u16
+    c.clamp(1.0, 65_534.0) as u16
 }
 
 /// The floors of one block (`(cells + 1)^2`, `k` fastest) or of a whole grid, read as a lattice by the water code.

@@ -191,6 +191,8 @@ fn the_codes_round_down_clamp_and_keep_the_sentinels() {
     // The bound: rounded down like the codes, monotone, a NaN bound dries everything but the ocean.
     assert_eq!(bound_code(64.0) as i32, CODE_ZERO + 128);
     assert_eq!(bound_code(f64::NAN), 0);
+    assert_eq!(bound_code(-20_000.0), 1, "below the range: the lowest finite code, as code_of clamps, so the wet set stays a superset");
+    assert!(code_of(-20_000.0) <= bound_code(-15_000.0));
     let mut prev = 0u16;
     for k in -2000..2000 {
         let b = bound_code(f64::from(k) * 0.37);

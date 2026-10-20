@@ -906,7 +906,7 @@ Source: ADR 0071 point 3, STRM-025, STRM-014
 
 #### Scenario: Build and read
 - **WHEN** a 32-cell bake is built on one and on three threads and read through `StoreWetFloorSource`, then built again, then built for another threshold
-- **THEN** every vertex equals the in-memory floor, the second build writes no block of any kind, and the other threshold adds only its floor blocks
+- **THEN** every vertex equals the in-memory floor, the second build writes no block of any kind, and the other threshold adds only its ocean and floor blocks
 
 #### Scenario: Missing and verified
 - **WHEN** a store is read for a threshold whose floor blocks it does not hold, and a fresh store is verified

@@ -136,7 +136,7 @@ fn a_build_writes_the_floor_blocks_once_they_equal_the_in_memory_floors_and_do_n
     // Another threshold has another channel, added without baking again.
     let other = world(7).with_ocean_area_fraction(0.0);
     let r = build_global(one.path(), &other, res, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
-    assert_eq!((r.written, r.floor_written), (0, 6 * 64));
+    assert_eq!((r.written, r.ocean_written, r.floor_written), (0, 6 * 64, 6 * 64));
 }
 
 // spec: STRM-032
