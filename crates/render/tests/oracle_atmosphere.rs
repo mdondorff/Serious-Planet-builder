@@ -432,9 +432,27 @@ fn composite_inside_at(altitude: f64, mu_sun: f64, terrain_m: f64) {
                     let a = g.ap_lookup(&ap, [(px as f64 + 0.5) / w as f64, (py as f64 + 0.5) / h as f64], terrain_m * len);
                     [0, 1, 2].map(|k| f64::from(colour[k]) * a[3] + a[k])
                 };
+                // The march of the pixel above 10 km is the upsample of the half-resolution haze: the texels at the even pixels around it, each
+                // marched to its own distance, weighed by the bilinear weight and the distance (the shader's `atm_haze_lookup`).
                 let march = || {
                     let (mu, cos_vs) = g.view_cosines(dir);
-                    let c = g.camera_ray_cosines(&round_atm, &round_luts, mu, cos_vs, terrain_m * len);
+                    let own = g.camera_ray_cosines(&round_atm, &round_luts, mu, cos_vs, terrain_m * len);
+                    let (lp, fx, fy) = ((px / 2, py / 2), if px % 2 == 1 { 0.5 } else { 0.0 }, if py % 2 == 1 { 0.5 } else { 0.0 });
+                    let texels: Vec<(f64, f64, planet_frame::look::atmosphere::CameraRay)> = (0..4)
+                        .map(|k| {
+                            let (dx, dy) = (k & 1, k >> 1);
+                            let wb = (if dx == 1 { fx } else { 1.0 - fx }) * (if dy == 1 { fy } else { 1.0 - fy });
+                            let (tx, ty) = ((lp.0 + dx).min(w.div_ceil(2) - 1) * 2, (lp.1 + dy).min(h.div_ceil(2) - 1) * 2);
+                            if tx < w / 2 {
+                                return (wb, -1.0, own);
+                            }
+                            let (tdir, tlen) = unit(pixel_ray(&g, tx, ty, w, h));
+                            let (tmu, tcos) = g.view_cosines(tdir);
+                            let t = terrain_m * tlen;
+                            (wb, t, g.camera_ray_cosines(&round_atm, &round_luts, tmu, tcos, t))
+                        })
+                        .collect();
+                    let c = planet_frame::look::atmosphere::haze_upsample(&texels, terrain_m * len).unwrap_or(own);
                     [0, 1, 2].map(|k| f64::from(colour[k]) * c.transmittance[k] + c.radiance[k])
                 };
                 if wm <= 0.0 {

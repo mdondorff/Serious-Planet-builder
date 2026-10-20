@@ -175,9 +175,13 @@ fn the_atmosphere_adds_its_targets_to_the_frame_target_share_and_stays_inside_it
     assert_eq!(bytes("hdr-scene"), 29_491_200, "a second HDR-sized target");
     assert_eq!(bytes("sky-view-lut"), 192 * 108 * 8);
     assert_eq!(bytes("aerial-perspective-volume"), 32 * 32 * 32 * 8);
-    assert_eq!(c.persistent, [("exposure-state", 16), ("multiscatter-lut", 16_384), ("transmittance-lut", 262_144)]);
+    // The half-resolution haze of the camera march (ATMO-021): two Rgba16Float targets of 1280 x 720.
+    assert_eq!(
+        c.persistent,
+        [("exposure-state", 16), ("haze-lowres", 14_745_600), ("multiscatter-lut", 16_384), ("transmittance-lut", 262_144)]
+    );
     let extra = c.frame_target_bytes() - plain.frame_target_bytes();
-    assert_eq!(extra, 29_491_200 + 165_888 + 262_144 + 262_144 + 16_384);
+    assert_eq!(extra, 29_491_200 + 165_888 + 262_144 + 262_144 + 16_384 + 14_745_600);
     assert!(c.frame_target_bytes() <= frame_target_share_bytes(P1440), "{} B over the share", c.frame_target_bytes());
     for size in [(64, 64), (128, 96), (1920, 1080), (3840, 2160)] {
         let (_, c) = compile_atmosphere(size, true);

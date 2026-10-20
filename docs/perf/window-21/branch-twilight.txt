@@ -1,0 +1,54 @@
+look: target/perf21/twilight.look.toml (--look; schema 4; bodies 0)
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+readiness gate: sampling the machine for 10 s ...
+readiness gate: ok
+lit perf: 2560x1440, cells 32, tau 6 px, finest level 22, timestamps true, tile format compact, height field cpu-erosion-v1 over a 16384-cell bake; lit path (atmosphere, water); source: store target/accept/global16384, 16384 cells
+  GPU time per pass from timestamps of waited frames of the lit path (terrain, water + scene copy, sky view, aerial perspective, composite, exposure histogram and adapt, tone map); the atmosphere row is the sum of its three passes; the LUT upload is a queue write on a body's load, not a pass of a steady frame
+lit/ground-1m: 2417 nodes (2417 new meshes in 2.1 s), 0 with water (cut 22 horizon + 0 height (0 by the exact minimum), 0 kept with no minimum)
+cool-down lit/ground-1m: 60 C -> 60 C after 0 s (target 60 C)
+lit/aerial-20km: 913 nodes (273 new meshes in 0.3 s), 48 with water (cut 86 horizon + 16 height (16 by the exact minimum), 0 kept with no minimum)
+cool-down lit/aerial-20km: 64 C -> 60 C after 10 s (target 60 C)
+lit/orbit: 182 nodes (182 new meshes in 10.3 s), 156 with water (cut 8 horizon + 2 height (2 by the exact minimum), 0 kept with no minimum)
+cool-down lit/orbit: 65 C -> 60 C after 20 s (target 60 C)
+SESSION INVALID for budgets: frame verdicts: NO; GPU verdicts: NO; the verdicts below do not count
+  INVALID SESSION: no verdict: CPU calibration of 'lit/ground-1m' outside the limits (ADR 0065): before single 54,211 us over 52,000 us
+warm-up lit/ground-1m: P0 1492 MHz (floor 1400 MHz, held 3 readings) after 3.2 s (3 chunks)
+lit/ground-1m: frame (waited) median 3.079 / p99 3.806 / max 4.406 ms [clock state P0/P2 1484 MHz (63-64 C, up to 88 W)]
+  lit/ground-1m: terrain pass median 1.292 ms (budget 8 ms) ok
+  lit/ground-1m: atmosphere (sky view + aerial perspective + composite) median 0.229 ms (budget 1 ms) ok
+  lit/ground-1m: water (pass + scene copy) median n/a (budget 2 ms) not in view (no water node in the view)
+  lit/ground-1m: GPU span of the lit frame (reported; the frame median is the streaming --lit scenes') median 1.703 ms reported
+  lit/ground-1m: frame (waited) p99 3.806 ms (budget 20 ms) ok
+  lit/ground-1m: GPU ms per pass (median / p99 / max): terrain 1.292/1.357/1.632, water -, sky-view 0.039/0.041/0.042, aerial-perspective 0.068/0.071/0.072, sky-composite 0.124/0.130/0.131, exposure-histogram 0.069/0.074/0.077, exposure-adapt 0.016/0.023/0.026, tonemap 0.039/0.042/0.046, scene-copy -
+  lit/ground-1m: frames behind the sums: atmosphere 900 of 900, water 0 of 900
+  lit/ground-1m: host load (1 samples, recorded not judged): system mean 3.8 % max 3.8 %; harness 2.3 %; competing mean 1.5 % max 1.5 %; top competitors: System 0.4 % (max 0.4), NVDisplay.Container 0.2 % (max 0.2), svchost 0.2 % (max 0.2), claude 0.2 % (max 0.2), MsMpEng 0.1 % (max 0.1)
+  lit/ground-1m: atmosphere run-to-run noise 0.016 (0.004 ms): above 10 %: no; above 10 % and the 0.1 ms floor (ADR 0059): no
+warm-up lit/aerial-20km: still P0 1387 MHz, below the 1400 MHz floor, after 30.5 s (29 chunks, cap 30 s)
+lit/aerial-20km: frame (waited) median 4.001 / p99 5.414 / max 10.077 ms [GPU below the floor: P2 1252 MHz, below the 1400 MHz floor (71-72 C, up to 97 W)]
+  lit/aerial-20km: terrain pass median 0.909 ms (budget 8 ms) ok at a low clock (P2 1252 MHz, below the 1400 MHz floor: a slower clock only overstates the time)
+  lit/aerial-20km: atmosphere (sky view + aerial perspective + composite) median 1.654 ms (budget 1 ms) NOT VALID for GPU budgets (over budget at a clock below the floor, inconclusive: P2 1252 MHz, below the 1400 MHz floor)
+  lit/aerial-20km: water (pass + scene copy) median 0.141 ms (budget 2 ms) ok at a low clock (P2 1252 MHz, below the 1400 MHz floor: a slower clock only overstates the time)
+  lit/aerial-20km: GPU span of the lit frame (reported; the frame median is the streaming --lit scenes') median 2.907 ms reported
+  lit/aerial-20km: frame (waited) p99 5.414 ms (budget 20 ms) ok
+  lit/aerial-20km: GPU ms per pass (median / p99 / max): terrain 0.909/0.992/1.303, water 0.053/0.058/0.066, sky-view 0.044/0.047/0.047, aerial-perspective 0.080/0.087/0.089, sky-composite 1.531/1.678/1.937, exposure-histogram 0.077/0.084/0.089, exposure-adapt 0.018/0.026/0.028, tonemap 0.048/0.051/0.054, scene-copy 0.089/0.093/0.097
+  lit/aerial-20km: frames behind the sums: atmosphere 900 of 900, water 900 of 900
+  lit/aerial-20km: host load (1 samples, recorded not judged): system mean 2.3 % max 2.3 %; harness 1.2 %; competing mean 1.1 % max 1.1 %; top competitors: svchost 0.3 % (max 0.3), MsMpEng 0.3 % (max 0.3), System 0.2 % (max 0.2), dwm 0.1 % (max 0.1), NVDisplay.Container 0.1 % (max 0.1)
+  lit/aerial-20km: atmosphere run-to-run noise 0.055 (0.092 ms): above 10 %: no; above 10 % and the 0.1 ms floor (ADR 0059): no
+  lit/aerial-20km: water run-to-run noise 0.086 (0.012 ms): above 10 %: no; above 10 % and the 0.1 ms floor (ADR 0059): no
+warm-up lit/orbit: P2 1455 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+lit/orbit: frame (waited) median 1.922 / p99 2.716 / max 7.204 ms [GPU below the floor: P0 1387 MHz, below the 1400 MHz floor (63-64 C, up to 91 W)]
+  lit/orbit: terrain pass median 0.141 ms (budget 8 ms) ok at a low clock (P0 1387 MHz, below the 1400 MHz floor: a slower clock only overstates the time)
+  lit/orbit: atmosphere (sky view + aerial perspective + composite) median 0.676 ms (budget 1 ms) ok at a low clock (P0 1387 MHz, below the 1400 MHz floor: a slower clock only overstates the time)
+  lit/orbit: water (pass + scene copy) median 0.286 ms (budget 2 ms) ok at a low clock (P0 1387 MHz, below the 1400 MHz floor: a slower clock only overstates the time)
+  lit/orbit: GPU span of the lit frame (reported; the frame median is the streaming --lit scenes') median 1.246 ms reported
+  lit/orbit: frame (waited) p99 2.716 ms (budget 20 ms) ok
+  lit/orbit: GPU ms per pass (median / p99 / max): terrain 0.141/0.154/0.157, water 0.218/0.233/0.546, sky-view 0.036/0.039/0.039, aerial-perspective 0.062/0.067/0.068, sky-composite 0.579/0.630/0.903, exposure-histogram 0.042/0.050/0.053, exposure-adapt 0.014/0.022/0.023, tonemap 0.035/0.038/0.043, scene-copy 0.067/0.073/0.081
+  lit/orbit: frames behind the sums: atmosphere 900 of 900, water 900 of 900
+  lit/orbit: host load (1 samples, recorded not judged): system mean 4.1 % max 4.1 %; harness 1.5 %; competing mean 2.6 % max 2.6 %; top competitors: System 0.6 % (max 0.6), svchost 0.4 % (max 0.4), MsMpEng 0.4 % (max 0.4), NVDisplay.Container 0.3 % (max 0.3), claude 0.3 % (max 0.3)
+  lit/orbit: atmosphere run-to-run noise 0.066 (0.044 ms): above 10 %: no; above 10 % and the 0.1 ms floor (ADR 0059): no
+  lit/orbit: water run-to-run noise 0.067 (0.019 ms): above 10 %: no; above 10 % and the 0.1 ms floor (ADR 0059): no
+regression check skipped: this session is not valid for budgets, so it is neither compared nor kept as the baseline
+--views: a partial log, not kept as a baseline
+wrote target/perf21/branch-twilight.json
+0 gated measure(s) over budget (the session does not count)

@@ -239,6 +239,12 @@ pub const MULTISCATTER_LUT_BYTES: u64 = 32 * 32 * 16;
 pub const SKY_VIEW_BYTES: u64 = 192 * 108 * 8;
 pub const AERIAL_PERSPECTIVE_BYTES: u64 = 32 * 32 * 32 * 8;
 
+/// Bytes of the half-resolution haze of the camera march (two `Rgba16Float` targets of half the frame's width and height, rounded up;
+/// ATMO-021).
+pub fn haze_lowres_bytes(size: (u32, u32)) -> u64 {
+    2 * u64::from(size.0.div_ceil(2)) * u64::from(size.1.div_ceil(2)) * 8
+}
+
 /// What the lit frame's passes depend on. The graph is compiled when the shape changes (a new size, the exposure mode or the
 /// atmosphere), not every frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -270,7 +276,8 @@ pub fn lit_frame_graph(shape: &LitShape) -> RenderGraph {
             .describe_sized("sky-view-lut", "rgba16float-sky-view", SKY_VIEW_BYTES)
             .describe_sized("aerial-perspective-volume", "rgba16float-aerial-perspective", AERIAL_PERSPECTIVE_BYTES)
             .persistent("transmittance-lut", TRANSMITTANCE_LUT_BYTES)
-            .persistent("multiscatter-lut", MULTISCATTER_LUT_BYTES);
+            .persistent("multiscatter-lut", MULTISCATTER_LUT_BYTES)
+            .persistent("haze-lowres", haze_lowres_bytes(shape.size));
         // Uploaded when the body's tables change (body load, a look change), a no-op marker on the frames between.
         g.add_pass("atmosphere-luts", &[], &["transmittance-lut", "multiscatter-lut"], false);
         g.add_pass("sky-view", &["transmittance-lut", "multiscatter-lut"], &["sky-view-lut"], false);
@@ -290,7 +297,7 @@ pub fn lit_frame_graph(shape: &LitShape) -> RenderGraph {
         }
         g.add_pass(
             "sky-composite",
-            &["hdr-scene", "depth", "sky-view-lut", "aerial-perspective-volume", "transmittance-lut", "multiscatter-lut"],
+            &["hdr-scene", "depth", "sky-view-lut", "aerial-perspective-volume", "transmittance-lut", "multiscatter-lut", "haze-lowres"],
             &["hdr"],
             false,
         );

@@ -77,6 +77,12 @@ pub const CAMERA_MARCH_BLEND_TO_M: f64 = 10_000.0;
 /// the up is at least [`CAMERA_MARCH_TWILIGHT_MU`], [`CAMERA_MARCH_STEPS_TWILIGHT`] below it, where the light crosses the planet's shadow
 /// along the ray and fewer steps leave the 5 % of ATMO-007 (the sweep over suns and azimuths, `tests/atmosphere.rs`). The GPU declares
 /// the same values (`CAM_MARCH_STEPS_DAY`, `CAM_MARCH_STEPS_TWILIGHT`, `CAM_MARCH_TWILIGHT_MU`).
+/// The half-resolution haze (ATMO-021): one texel per 2 x 2 pixels, a pixel weighs the texels around it by the bilinear weight and
+/// `exp(-(dt / tol)^2)` with `tol = HAZE_DEPTH_TOL_REL t + HAZE_DEPTH_TOL_ABS` (`dt` the texel's distance minus the pixel's), and marches
+/// itself when the weights sum to less than `HAZE_MIN_WEIGHT`. The GPU declares the same values (`HAZE_DEPTH_TOL_REL`, ...).
+pub const HAZE_DEPTH_TOL_REL: f64 = 0.02;
+pub const HAZE_DEPTH_TOL_ABS_M: f64 = 20.0;
+pub const HAZE_MIN_WEIGHT: f64 = 0.1;
 pub const CAMERA_MARCH_STEPS_DAY: usize = 8;
 pub const CAMERA_MARCH_STEPS_TWILIGHT: usize = 12;
 pub const CAMERA_MARCH_TWILIGHT_MU: f64 = 0.1;
@@ -1357,6 +1363,30 @@ impl FrameGeometry {
             atm.march(luts, &o, cos_vs, s_end, StepLayout::EndDense(self.camera_march_steps()), Scatter::Physical { cos_gamma: cos_vs });
         CameraRay { radiance: m.radiance, transmittance: m.transmittance }
     }
+}
+
+/// The haze of a geometry pixel at distance `t_geo` from the half-resolution texels around it (ATMO-021): `texels` holds, for each of the
+/// four, its bilinear weight, its distance (not above 0: no geometry) and its camera ray. Each is weighed by its bilinear weight and
+/// `exp(-(dt / tol)^2)`; `None` when the weights sum to less than [`HAZE_MIN_WEIGHT`] (the pixel marches itself).
+pub fn haze_upsample(texels: &[(f64, f64, CameraRay)], t_geo: f64) -> Option<CameraRay> {
+    let tol = HAZE_DEPTH_TOL_REL * t_geo + HAZE_DEPTH_TOL_ABS_M;
+    let (mut radiance, mut transmittance, mut wsum) = ([0.0f64; 3], [0.0f64; 3], 0.0f64);
+    for (wb, t, ray) in texels {
+        if *t <= 0.0 {
+            continue;
+        }
+        let r = (t - t_geo) / tol;
+        let w = wb * libm::exp(-r * r);
+        for k in 0..3 {
+            radiance[k] += w * ray.radiance[k];
+            transmittance[k] += w * ray.transmittance[k];
+        }
+        wsum += w;
+    }
+    if wsum < HAZE_MIN_WEIGHT {
+        return None;
+    }
+    Some(CameraRay { radiance: radiance.map(|v| v / wsum), transmittance: transmittance.map(|v| v / wsum) })
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
