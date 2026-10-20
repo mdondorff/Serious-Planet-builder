@@ -40,7 +40,7 @@ impl WaterSource for Stub {
     fn wet_at(&self, dir: Vec3) -> Result<bool, ReadError> {
         // The land rises with z, so the floor of a vertex is its own elevation (the path from the coast climbs): wet when at most the
         // band elevation, and not behind the ridge.
-        let reached = self.ridge_z.map_or(true, |z| dir.z <= z);
+        let reached = self.ridge_z.is_none_or(|z| dir.z <= z);
         Ok(self.ocean && reached && dir.z * 20_000.0 <= coast_band_elevation_m(self.level))
     }
 }
