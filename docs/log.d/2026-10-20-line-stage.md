@@ -1,0 +1,1 @@
+- 2026-10-20 line-stage: a ridge and a channel have their height output in the stamp stage: the distance to the polyline gives the profile, and after the point stamps the stage adds the largest ridge and the smallest channel at the point (GEN-028; the bounds over a cap come from the nearest and farthest distance to the polyline).

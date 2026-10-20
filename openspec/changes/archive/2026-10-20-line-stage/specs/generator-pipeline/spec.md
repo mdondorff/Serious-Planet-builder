@@ -3,8 +3,8 @@
 ### Requirement: GEN-028 The line stage
 The stamp stage (GEN-026) SHALL also apply the line items `ridge` and `channel` (WDEF-011) of its layer. Let `d` be the distance in metres, on a sphere of the body's radius, from a point to the polyline of the item: the minimum over its segments of the great-circle distance to the segment (to the arc where the point's foot lies on it, else to the nearer endpoint), computed in f64 with `libm` from unit vectors, and `x = d / width_m`. The delta of a ridge SHALL be `amount_m (1 - x^2)^2` and that of a channel `-amount_m` for `x <= 0.3` and `-amount_m (1 - s((x - 0.3) / 0.7))` beyond, with `s(t) = t^2 (3 - 2t)`, both 0 for `x >= 1`; both are monotone in `x`. The stage SHALL apply the hills, craters and plateaus in application order and then add to the height `max(0, the largest ridge delta) + min(0, the smallest channel delta)` over the line items whose reach contains the point, so the result does not depend on the order of the line items and overlapping parts of a line or crossing lines do not double. The delta range of a line item over a cap (the bounds of GEN-026, ADR 0067 point 4) SHALL come from the nearest and farthest distance of the cap to the polyline, `max(0, D - R a)` and `D + R a` for the distance `D` of its centre and its angle `a`, widened outward by the slack of the stamps, and SHALL enclose every delta the item adds at any sampled point of the cap. The stage's pass-through, key chain and footprint declaration are those of the stamps; a tile out of every line's reach is bit-identical to its source.
 
-Verify: A, C
-Status: planned
+Verify: A
+Status: active
 Source: ADR 0069, ADR 0067, GEN-026, M6 plan row E5, owner (2026-10-19)
 
 #### Scenario: Profiles
