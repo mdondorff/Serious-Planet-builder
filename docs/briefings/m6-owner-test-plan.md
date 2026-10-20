@@ -77,6 +77,15 @@ Time: about 45 minutes. Each block takes 5 to 10 minutes; skip any block.
 A line per block: ok, or what was wrong (with the F9 frame number). Screenshots worth keeping go to `docs/dev_screenshots/`.
 
 
+## Retest after the P1 fixes (2026-10-21)
+Pull main first (#483 to #489). Crashes now write `target/review/crashes/<time>.txt`; F9 also saves `frame-<n>.png`.
+- [ ] P1-1 (#489): fly to "Plateau 7" and the other plateaus: no "too steep" lines in the console and no "plans refused" in the title.
+- [ ] P1-2 (#489): smooth over an area several times (and brush 23): it smooths, never sharpens.
+- [ ] P1-3 (#486): Tab toggles the editor (unless typing in a field); Alt+Tab into the window does not; right-button look works in the editor mode.
+- [ ] Keys after G (#486): G, G, then WASD, after clicking a panel button.
+- [ ] P1-5 (#487, #489): with no coder building, does editing still lag?
+- [ ] P1-4: if tiles flash while moving, press F9 right after the flash and note the frame number.
+
 ## Crashes
 
 ### CRSH-0001
