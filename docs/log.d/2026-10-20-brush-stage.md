@@ -1,0 +1,1 @@
+- 2026-10-20 brush-stage: the brush stage (GEN-030): raise, lower, flatten and smooth strokes in file order with the (1-x^2)^2 weight, smooth towards the mean of the procedural base on an eight-point ring (converging, never reading a lower authored layer), bounds per stroke, per-stroke disc prefilter; 12 tests; ADR 0070 accepted.

@@ -10,7 +10,7 @@ use std::sync::{Arc, RwLock};
 
 use planet_core::{FaceMapping, TileId, Vec3};
 use planet_world_def::footprint::{angle_between, Cap, FootprintItem};
-use planet_world_def::stamp::{Stamp, StampKind};
+use planet_world_def::stamp::{BrushKind, Stamp, StampKind};
 use planet_world_def::{BodyId, GenContext, ReadRecord, WorldDefinition};
 
 use crate::height::HeightField;
@@ -114,6 +114,110 @@ pub fn polyline_angle(points: &[[u64; 3]], p: Vec3) -> f64 {
     points.windows(2).map(|w| arc_angle(point_of(&w[0]), point_of(&w[1]), p)).fold(f64::INFINITY, f64::min)
 }
 
+/// The weight of a brush stroke at `x = distance / radius` from its polyline (GEN-030): the profile of a ridge, 1 on the line, 0 from `x = 1`,
+/// smooth to the second order at the edge, non-increasing in `x`.
+pub fn stroke_weight(x: f64) -> f64 {
+    if x >= 1.0 {
+        return 0.0;
+    }
+    let u = 1.0 - x * x;
+    u * u
+}
+
+/// The angle in radians between the unit vector `p` and a brush stroke's polyline (bits of unit vectors, at least one): the angle to the point
+/// for a one-point stroke (a dab), else the minimum over its arcs.
+fn stroke_angle(points: &[[u64; 3]], p: Vec3) -> f64 {
+    match points {
+        [only] => angle_between(point_of(only), p),
+        _ => polyline_angle(points, p),
+    }
+}
+
+/// The eight directions at the angle `angle` from the unit vector `dir`, on the bearings 0, 45, ... 315 degrees from the local east axis
+/// (GEN-030). East is `z x dir` (the y axis near a pole, where it is undefined); `libm` sine and cosine, f64 (CON-14).
+fn ring(dir: Vec3, angle: f64) -> [Vec3; 8] {
+    let east = Vec3::new(0.0, 0.0, 1.0).cross(dir);
+    let east = if east.length() > 1e-9 { east.normalized() } else { Vec3::new(0.0, 1.0, 0.0) };
+    let north = dir.cross(east);
+    let (sa, ca) = (libm::sin(angle), libm::cos(angle));
+    let mut out = [dir; 8];
+    for (k, q) in out.iter_mut().enumerate() {
+        let bearing = k as f64 * core::f64::consts::FRAC_PI_4;
+        let (sb, cb) = (libm::sin(bearing), libm::cos(bearing));
+        *q = (dir * ca + (east * cb + north * sb) * sa).normalized();
+    }
+    out
+}
+
+/// The running height after the strokes of a brush `stamp` (GEN-030) at `dir`, from `h`; `base_at` reads the procedural base (the field below
+/// every authored layer: its key is field-wide, ADR 0066 point 4) at the point and on a smooth's ring. A stroke the point is beyond changes
+/// nothing, bits included.
+fn apply_brush(stamp: &Stamp, radius_m: f64, dir: Vec3, mut h: f64, base_at: &dyn Fn(Vec3) -> f64) -> f64 {
+    // The smooth part of the item so far (the sum of the deltas of its smooth strokes) and the means of the rings already read at this point,
+    // by radius: strokes of one radius share their ring.
+    let mut smoothed = 0.0f64;
+    let mut rings: Vec<(u64, f64)> = Vec::new();
+    let mut b: Option<f64> = None;
+    for s in stamp.strokes() {
+        let (radius, strength) = (s.radius_m(), s.strength_m());
+        // The stroke's disc first: a point beyond its first point's spread plus its radius is beyond the stroke (one angle, not one per arc). An arc
+        // between two points within `spread` of the first stays within it (caps under 90 degrees; an item is one cell edge across, WDEF-007).
+        let reach = s.spread_angle() + radius / radius_m;
+        if angle_between(point_of(&s.points_bits()[0]), dir) > reach * (1.0 + 1e-9) + 1e-12 {
+            continue;
+        }
+        let x = radius_m * stroke_angle(s.points_bits(), dir) / radius;
+        if x >= 1.0 {
+            continue;
+        }
+        let w = stroke_weight(x);
+        // A delta of 0 leaves the bits of the running height alone (a height of -0.0 stays -0.0).
+        let delta = match s.kind {
+            BrushKind::Raise => strength * w,
+            BrushKind::Lower => -(strength * w),
+            BrushKind::Flatten => w * (s.target_m() - h).clamp(-strength, strength),
+            BrushKind::Smooth => {
+                let bits = s.radius_m().to_bits();
+                let mean = match rings.iter().find(|r| r.0 == bits) {
+                    Some(r) => r.1,
+                    None => {
+                        let m = ring(dir, radius / (2.0 * radius_m)).iter().map(|q| base_at(*q)).sum::<f64>() / 8.0;
+                        rings.push((bits, m));
+                        m
+                    }
+                };
+                let here = *b.get_or_insert_with(|| base_at(dir));
+                // Towards the mean of the base round the point by at most the strength, and not past it: what the item's earlier smooth strokes
+                // moved is taken off the distance, so repeated passes converge on the mean instead of piling up.
+                let d = w * ((mean - here) - smoothed).clamp(-strength, strength);
+                smoothed += d;
+                d
+            }
+        };
+        if delta != 0.0 {
+            h += delta;
+        }
+    }
+    h
+}
+
+/// The range of the delta a brush stroke adds at any point of `cap` (GEN-030): the weight is non-increasing in the distance, so the nearest
+/// and the farthest distance of the cap from the stroke bound it. Widened as the lines' are.
+fn stroke_range(s: &planet_world_def::stamp::StrokeBits, cap: Cap, radius_m: f64) -> (f64, f64) {
+    let slack = 16.0 * f64::EPSILON;
+    let d = stroke_angle(s.points_bits(), cap.centre);
+    let radius = s.radius_m();
+    let x_near = ((d - cap.angle - slack).max(0.0) * radius_m / radius * (1.0 - 1e-9)).max(0.0);
+    let x_far = (d + cap.angle + slack) * radius_m / radius * (1.0 + 1e-9);
+    let (w_near, w_far) = (stroke_weight(x_near), stroke_weight(x_far));
+    let strength = s.strength_m();
+    match s.kind {
+        BrushKind::Raise => (strength * w_far, strength * w_near),
+        BrushKind::Lower => (-strength * w_near, -strength * w_far),
+        BrushKind::Smooth | BrushKind::Flatten => (-strength * w_near, strength * w_near),
+    }
+}
+
 /// The delta of `stamp` at `x` for the running height `h` and the item's bound `m`. The lines are not applied here: their distance is
 /// to a polyline, not an anchor ([`apply_stamps`]).
 pub fn stamp_delta(stamp: &Stamp, m: f64, h: f64, x: f64) -> f64 {
@@ -133,12 +237,22 @@ pub fn stamp_delta(stamp: &Stamp, m: f64, h: f64, x: f64) -> f64 {
 /// distance times the item's bound. An item that is no stamp adds nothing.
 fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
     let Some(stamp) = &item.stamp else { return (0.0, 0.0) };
-    if stamp.kind.is_region() || stamp.kind.is_brush() {
+    if stamp.kind.is_region() {
         // A region changes no height itself: it only cuts the deltas of the other items (GEN-029), and the cut stays inside their range.
         return (0.0, 0.0);
     }
     let m = f64::from_bits(item.max_delta_bits);
     let grow = |x: f64| x.abs() * 8.0 * f64::EPSILON;
+    if stamp.kind.is_brush() {
+        // The sum over the strokes of the range each can add (GEN-030), widened as the radial stamps' are.
+        let (mut lo, mut hi) = (0.0f64, 0.0f64);
+        for s in stamp.strokes() {
+            let (a, b) = stroke_range(s, cap, radius_m);
+            lo += a;
+            hi += b;
+        }
+        return ((lo - grow(lo)).max(-m - grow(m)), (hi + grow(hi)).min(m + grow(m)));
+    }
     if stamp.kind.is_line() {
         // The profile is monotone in the distance to the polyline: the nearest and the farthest distance of the cap bound the range
         // (GEN-028), widened as the radial stamps' are.
@@ -197,6 +311,12 @@ fn anchor_of(item: &FootprintItem) -> Vec3 {
 
 /// The running height at `dir` after the stamps of `items` (application order, the caller's) were added to `base`, on a body of `radius_m`.
 pub fn apply_stamps(items: &[FootprintItem], radius_m: f64, dir: Vec3, base: f64) -> f64 {
+    apply_stamps_with(items, radius_m, dir, base, &|_| base)
+}
+
+/// [`apply_stamps`] with `base_at`, the stage input (the layers below) at any direction: the brush strokes of a smooth read it on a ring round the
+/// point (GEN-030). `base` is `base_at(dir)`. [`apply_stamps`] gives a constant input, on which a smooth changes nothing.
+pub fn apply_stamps_with(items: &[FootprintItem], radius_m: f64, dir: Vec3, base: f64, base_at: &dyn Fn(Vec3) -> f64) -> f64 {
     // A region of mode 2 (clip inside) that contains the point cuts every delta of the layer, whatever the order of the items (GEN-029):
     // the height there is the base's. The polygon lies within the item's reach of its anchor (WDEF-012), so a point beyond it is outside.
     for item in items {
@@ -230,6 +350,8 @@ pub fn apply_stamps(items: &[FootprintItem], radius_m: f64, dir: Vec3, base: f64
             } else {
                 channel = channel.min(channel_delta(amount, xl));
             }
+        } else if stamp.kind.is_brush() {
+            h = apply_brush(stamp, radius_m, dir, h, base_at);
         } else {
             h += stamp_delta(stamp, f64::from_bits(item.max_delta_bits), h, x);
         }
@@ -497,7 +619,8 @@ impl HeightField for StampStage<'_> {
             dhi = dhi.max(0.0);
         }
         // Each addition of the running height rounds by at most one ulp of the largest magnitude involved.
-        let slack = items.len() as f64 * (lo.abs().max(hi.abs()) + mag) * f64::EPSILON * 2.0 + (dlo.abs() + dhi.abs()) * 8.0 * f64::EPSILON;
+        let ops: usize = items.iter().map(|i| 1 + i.stamp.as_ref().map_or(0, |s| s.strokes().len())).sum();
+        let slack = ops as f64 * (lo.abs().max(hi.abs()) + mag) * f64::EPSILON * 2.0 + (dlo.abs() + dhi.abs()) * 8.0 * f64::EPSILON;
         (lo + dlo - slack, hi + dhi + slack)
     }
 
@@ -538,6 +661,13 @@ impl StampStage<'_> {
     fn add_stamps(&self, dirs: &[Vec3], base: Vec<f64>, stop: &dyn Fn() -> bool) -> Vec<f64> {
         let items = self.items_for(dirs);
         let radius_m = self.items.radius_m(self.body).expect("a stage reads a body that has a radius");
-        dirs.iter().zip(base).map(|(&d, b)| if stop() { 0.0 } else { apply_stamps(&items, radius_m, d, b) }).collect()
+        // A smooth reads the procedural base, the field below every authored layer: its key is field-wide, so reading it off the tile's footprint
+        // cannot leave a persisted tile stale (ADR 0066 point 4, GEN-030).
+        let mut bottom: &dyn HeightField = self.base.as_ref();
+        while let Some(up) = bottom.upstream() {
+            bottom = up;
+        }
+        let below = |q: Vec3| bottom.height(q);
+        dirs.iter().zip(base).map(|(&d, b)| if stop() { 0.0 } else { apply_stamps_with(&items, radius_m, d, b, &below) }).collect()
     }
 }

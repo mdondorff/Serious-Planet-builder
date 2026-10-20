@@ -291,7 +291,7 @@ fn brush_refusal(spec: &ItemSpec, stamp: &stamp::Stamp, radius_m: f64) -> Option
             spec.reach_m
         ));
     }
-    if spec.max_delta_m < strengths * (1.0 - 1e-12) {
+    if spec.max_delta_m < strengths {
         return Some(format!("a brush bound of {} m is below the sum of its strengths, {strengths} m", spec.max_delta_m));
     }
     None

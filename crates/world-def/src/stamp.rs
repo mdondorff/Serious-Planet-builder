@@ -143,6 +143,8 @@ pub struct StrokeBits {
     /// 0 bits when the stroke has no target.
     target_bits: u64,
     points: Vec<[u64; 3]>,
+    /// The largest angle in radians of a point from the first one (bits): with the radius it bounds the stroke's disc, derived and never given.
+    spread_bits: u64,
 }
 
 impl StrokeBits {
@@ -162,6 +164,12 @@ impl StrokeBits {
     /// The bits of the points' directions, in order.
     pub fn points_bits(&self) -> &[[u64; 3]] {
         &self.points
+    }
+
+    /// The largest angle in radians of a point from the first one: a point farther than this plus `radius_m / R` from the first point is
+    /// beyond the stroke's radius.
+    pub fn spread_angle(&self) -> f64 {
+        f64::from_bits(self.spread_bits)
     }
 
     /// The stroke as the callers give it (a target for a flatten only).
@@ -213,6 +221,7 @@ impl Stamp {
                     strength_bits: canonical_bits(s.strength_m),
                     target_bits: canonical_bits(s.target_m.unwrap_or(0.0)),
                     points: s.points.iter().map(|p| [p.x, p.y, p.z].map(canonical_bits)).collect(),
+                    spread_bits: s.points.iter().map(|p| crate::footprint::angle_between(s.points[0], *p)).fold(0.0f64, f64::max).to_bits(),
                 })
                 .collect()
         });
