@@ -147,6 +147,11 @@ pub fn edit_key(code: KeyCode, logical: Option<&str>, ctrl: bool, shift: bool) -
         KeyCode::Digit5 => EditKey::Tool(5),
         KeyCode::Digit6 => EditKey::Tool(6),
         KeyCode::Digit7 => EditKey::Tool(7),
+        // The brushes: raise, lower, smooth, flatten (VIEW-035).
+        KeyCode::Digit8 => EditKey::Tool(8),
+        KeyCode::Digit9 => EditKey::Tool(9),
+        KeyCode::Digit0 => EditKey::Tool(10),
+        KeyCode::Minus => EditKey::Tool(11),
         KeyCode::Delete => EditKey::Delete,
         KeyCode::Backspace => EditKey::Back,
         KeyCode::Enter | KeyCode::NumpadEnter => EditKey::Finish,
@@ -1551,6 +1556,11 @@ mod tests {
         // The line and region tools, finishing, and the key list (VIEW-031).
         assert_eq!(k(KeyCode::Digit5, None, false, false), Some(Tool(5)));
         assert_eq!(k(KeyCode::Digit7, None, false, false), Some(Tool(7)));
+        // spec: VIEW-035
+        assert_eq!(
+            [KeyCode::Digit8, KeyCode::Digit9, KeyCode::Digit0, KeyCode::Minus].map(|c| k(c, None, false, false)),
+            [Some(Tool(8)), Some(Tool(9)), Some(Tool(10)), Some(Tool(11))]
+        );
         assert_eq!(k(KeyCode::Enter, None, false, false), Some(Finish));
         assert_eq!(k(KeyCode::NumpadEnter, None, false, false), Some(Finish));
         assert_eq!(k(KeyCode::F1, None, false, false), Some(Help));

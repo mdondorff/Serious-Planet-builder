@@ -8,7 +8,7 @@
 use crate::ids::IdMaker;
 use crate::polyline::{self, GeoPoint, PolylineError};
 use planet_core::Vec3;
-use planet_world_def::item::{ActiveVersions, Anchor, Item, ItemFileError, PutError};
+use planet_world_def::item::{ActiveVersions, Anchor, Item, ItemFileError, ItemStroke, PutError};
 use planet_world_def::item_store::{ItemStore, StoreError};
 use planet_world_def::{BodyId, ItemError, ItemId, WorldDefinition};
 use std::collections::BTreeMap;
@@ -38,6 +38,8 @@ pub struct NewItem {
     pub part: Option<u32>,
     /// The layer a region clips (regions only).
     pub mask_layer: Option<String>,
+    /// The strokes of a brush in application order (brush items only, ADR 0070); empty for every other item.
+    pub strokes: Vec<ItemStroke>,
 }
 
 /// The kinds that are lines (ADR 0069): an open point list with a width.
@@ -47,6 +49,28 @@ fn is_line_kind(kind: &str) -> bool {
 
 fn not_a_line(kind: &str) -> EditError {
     EditError::Invalid(ItemFileError { key: "kind".into(), why: format!("a {kind} is not a line (a ridge or a channel)") })
+}
+
+/// The content of an item as a new item's fields (everything but the id and the versions).
+fn new_of(item: &Item) -> NewItem {
+    NewItem {
+        body: item.body,
+        surface: item.surface.clone(),
+        layer: item.layer.clone(),
+        priority: item.priority,
+        kind: item.kind.clone(),
+        anchor: item.anchor,
+        reach_m: item.reach_m,
+        max_delta_m: item.max_delta_m,
+        params: item.params.clone(),
+        name: item.name.clone(),
+        notes: item.notes.clone(),
+        points: item.points.clone(),
+        group: item.group,
+        part: item.part,
+        mask_layer: item.mask_layer.clone(),
+        strokes: item.strokes.clone(),
+    }
 }
 
 /// One step of a group command (VIEW-028): put a new item, replace the content of an item (its id, body and versions stay), or delete one.
@@ -444,8 +468,7 @@ impl<S: ItemStore> Editor<S> {
             group: new.group,
             part: new.part,
             mask_layer: new.mask_layer,
-            // The editor's brush tool (E6, support lane) adds the strokes to a new item; until then a new item has none (ADR 0070).
-            strokes: Vec::new(),
+            strokes: new.strokes,
         }
         .canonical()
     }
@@ -489,6 +512,7 @@ impl<S: ItemStore> Editor<S> {
                         group: new.group,
                         part: new.part,
                         mask_layer: new.mask_layer,
+                        strokes: new.strokes,
                         ..before.clone()
                     }
                     .canonical();
@@ -664,6 +688,7 @@ impl<S: ItemStore> Editor<S> {
             group: None,
             part: None,
             mask_layer: None,
+            strokes: Vec::new(),
         };
         let news = self.line_news(&template, points, group)?;
         let mut steps = Vec::new();
@@ -688,6 +713,107 @@ impl<S: ItemStore> Editor<S> {
         }
         let steps = self.line_items(id)?.into_iter().map(GroupStep::Delete).collect();
         self.group(steps).map(|(_, affected)| affected)
+    }
+
+    // ----- the brush (ADR 0070 point 3, VIEW-035)
+
+    /// Add a brush stroke as one command. The stroke is resampled and cut into strokes of at most 64 points ([`crate::brush::split`]);
+    /// each piece joins the first of the brush items in `open` (the items this session painted into) that is in the layer of `template`
+    /// and has room and reach for it, else starts a new item anchored at its first point. The items the command puts share one group
+    /// (consecutive parts) when there are several; the items it extends keep theirs. A new item's bound on the change is the exact sum of
+    /// its strengths, an extended item's is raised to hold the sum. `template` gives the body, surface, layer and priority. Returns the ids of
+    /// the items the command put or changed, and the places to refresh.
+    pub fn add_stroke(
+        &mut self,
+        template: NewItem,
+        stroke: &crate::brush::BrushStroke,
+        open: &[ItemId],
+    ) -> Result<(Vec<ItemId>, Vec<Affected>), EditError> {
+        use crate::brush;
+        self.no_open_edit()?;
+        let radius = self.radius_of(template.body)?;
+        let pieces = brush::split(stroke, radius);
+        if pieces.is_empty() {
+            return Err(EditError::Geometry(PolylineError::Count { need_min: 1, got: 0 }));
+        }
+        // The working copies: the open items of the layer first (as they are), then the items this command starts.
+        struct Work {
+            existing: Option<ItemId>,
+            item: NewItem,
+            changed: bool,
+            /// What the item holds now, kept up to date as pieces join it (so a long drag does not read every point again for each piece).
+            fill: brush::Fill,
+        }
+        let mut work: Vec<Work> = Vec::new();
+        for id in open {
+            if let Some(item) =
+                self.items.get(id).filter(|i| i.kind == brush::BRUSH_KIND && i.layer == template.layer && i.body == template.body)
+            {
+                if work.iter().all(|w| w.existing != Some(*id)) {
+                    let anchor = (item.anchor.latitude_deg, item.anchor.longitude_deg);
+                    let fill = brush::Fill::of(&item.strokes, anchor, radius);
+                    work.push(Work { existing: Some(*id), item: new_of(item), changed: false, fill });
+                }
+            }
+        }
+        for piece in &pieces {
+            let part = brush::to_item_stroke(piece);
+            let anchor_of = |n: &NewItem| (n.anchor.latitude_deg, n.anchor.longitude_deg);
+            let joined = |w: &Work| {
+                let with = w.fill.with(&part, anchor_of(&w.item), radius);
+                (!w.item.strokes.is_empty() && with.fits(w.item.reach_m)).then_some(with)
+            };
+            if let Some((w, with)) = work.iter_mut().find_map(|w| joined(w).map(|f| (w, f))) {
+                w.fill = with;
+                w.item.strokes.push(part);
+                w.item.max_delta_m =
+                    w.item.max_delta_m.max(brush::strength_sum(&w.item.strokes)).min(planet_world_def::item::MAX_DELTA_LIMIT_M);
+                w.changed = true;
+                continue;
+            }
+            // A new item: anchored at the piece's first point, as the file spells it.
+            let first = piece.points[0].canonical();
+            let anchor = Anchor { latitude_deg: first.lat_deg, longitude_deg: first.lon_deg, ..template.anchor };
+            let (far, radius_max) = brush::extent(first.dir(), std::slice::from_ref(&part), radius);
+            let item = NewItem {
+                anchor,
+                reach_m: brush::new_reach_m(far, radius_max),
+                max_delta_m: part.strength_m,
+                params: BTreeMap::new(),
+                kind: brush::BRUSH_KIND.to_string(),
+                points: Vec::new(),
+                group: None,
+                part: None,
+                mask_layer: None,
+                strokes: vec![part],
+                ..template.clone()
+            };
+            let fill = brush::Fill::of(&item.strokes, (item.anchor.latitude_deg, item.anchor.longitude_deg), radius);
+            work.push(Work { existing: None, item, changed: true, fill });
+        }
+        let new_count = work.iter().filter(|w| w.existing.is_none()).count();
+        let group = (new_count > 1).then(|| self.ids.next_id());
+        let mut steps = Vec::new();
+        let mut touched_existing = Vec::new();
+        let mut part_index = 0u32;
+        for w in work {
+            match w.existing {
+                Some(id) if w.changed => {
+                    touched_existing.push(id);
+                    steps.push(GroupStep::Change(id, w.item));
+                }
+                Some(_) => {}
+                None => {
+                    let part = group.map(|_| part_index);
+                    part_index += 1;
+                    steps.push(GroupStep::Put(NewItem { group, part, ..w.item }));
+                }
+            }
+        }
+        let (put, affected) = self.group(steps)?;
+        let mut touched = touched_existing;
+        touched.extend(put);
+        Ok((touched, affected))
     }
 
     /// Put a region (a `region` made like `template`, with its surface type and mask in the parameters and `mask_layer`) over `points`.
@@ -718,6 +844,7 @@ impl<S: ItemStore> Editor<S> {
             group: None,
             part: None,
             mask_layer: item.mask_layer.clone(),
+            strokes: Vec::new(),
         };
         let new = self.region_new(&template, points)?;
         self.change(id, |i| {

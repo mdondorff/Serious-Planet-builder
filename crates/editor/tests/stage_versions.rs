@@ -40,6 +40,7 @@ fn new_item(i: u64) -> NewItem {
         group: None,
         part: None,
         mask_layer: None,
+        strokes: Vec::new(),
     }
 }
 

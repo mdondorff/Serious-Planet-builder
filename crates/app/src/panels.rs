@@ -10,6 +10,7 @@ use planet_editor::params::{format_metres, Inspector, STAMP_KINDS};
 use planet_editor::session::Tool;
 use planet_editor::session::LINE_KINDS;
 use planet_editor::shape::Handle;
+use planet_world_def::stamp::BrushKind;
 use planet_world_def::ItemId;
 use std::collections::BTreeMap;
 
@@ -45,6 +46,10 @@ pub enum Event {
     ToggleHidden(ItemId),
     /// The `?` button or the help key: show or hide the list of keys.
     ToggleHelp,
+    /// The brush radius, strength or flatten height was typed (metres; the flatten height may be empty or "auto").
+    BrushRadius(String),
+    BrushStrength(String),
+    BrushTarget(String),
     /// The surface type of the selected region was picked (an index of the table).
     SurfaceType(usize),
     /// The mask of the selected region was set: clip `layer` inside its outline, or (not `inside`) only label.
@@ -55,12 +60,14 @@ pub enum Event {
 }
 
 /// The keys of the editor mode as the help window lists them: the key, what it does.
-pub const HELP_KEYS: [(&str, &str); 16] = [
+pub const HELP_KEYS: [(&str, &str); 18] = [
     ("Tab", "editor on / off"),
     ("1", "select"),
     ("2  3  4", "place a crater / hill / plateau"),
     ("5  6", "draw a ridge / a channel"),
     ("7", "draw a region"),
+    ("8  9  0  -", "brush: raise / lower / smooth / flatten"),
+    ("drag (brush)", "paint a stroke; the release puts it, one undo takes it back"),
     ("click", "add a point (line and region tools), else select"),
     ("Enter", "finish the line or region"),
     ("Backspace", "take the last point back (drawing)"),
@@ -89,6 +96,8 @@ pub struct PanelState {
     pub covered: Vec<egui::Rect>,
     /// The list of keys is shown.
     pub help: bool,
+    /// The text of the brush fields while they are edited, by field name.
+    brush_text: BTreeMap<&'static str, String>,
 }
 
 impl PanelState {
@@ -102,6 +111,7 @@ impl PanelState {
             marks: Vec::new(),
             covered: Vec::new(),
             help: false,
+            brush_text: BTreeMap::new(),
         }
     }
 
@@ -120,6 +130,8 @@ impl PanelState {
 pub struct PanelData<'a> {
     pub layout: &'a Layout,
     pub tool: &'a Tool,
+    /// The brush's numbers while a brush tool is on.
+    pub brush: Option<planet_editor::session::BrushSettings>,
     pub selected: Option<ItemId>,
     /// The edits the camera shows, nearest first.
     pub near: &'a [Row],
@@ -163,6 +175,11 @@ pub fn tool_label(tool: &Tool) -> String {
             format!("{} (draw)  [{n}]", planet_editor::params::kind_title(k))
         }
         Tool::Region => format!("Region (draw)  [{}]", 2 + STAMP_KINDS.len() + LINE_KINDS.len()),
+        Tool::Brush(k) => {
+            let at = BrushKind::ALL.iter().position(|b| b == k).unwrap_or(0);
+            let key = ["8", "9", "0", "-"][at];
+            format!("{} brush  [{key}]", planet_editor::params::kind_title(k.name()))
+        }
     }
 }
 
@@ -188,6 +205,7 @@ fn rail(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Even
     tools.extend(STAMP_KINDS.iter().map(|k| Tool::Stamp((*k).to_string())));
     tools.extend(LINE_KINDS.iter().map(|k| Tool::Line((*k).to_string())));
     tools.push(Tool::Region);
+    tools.extend(BrushKind::ALL.iter().map(|k| Tool::Brush(*k)));
     for t in tools {
         let on = d.tool == &t;
         let r = ui.add(egui::Button::new(tool_label(&t)).selected(on));
@@ -196,8 +214,40 @@ fn rail(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Even
             ev.push(Event::Tool(t));
         }
     }
+}
+
+/// The brush's numbers: the radius and the strength in metres (typed like any value) and, for a flatten, the height it levels towards
+/// ("auto": the terrain height under the start of the stroke).
+fn brush_section(ui: &mut egui::Ui, st: &mut PanelState, b: &planet_editor::session::BrushSettings, flatten: bool, ev: &mut Vec<Event>) {
+    ui.weak("Brush");
+    type Field<'a> = (&'static str, &'a str, String, fn(String) -> Event);
+    let fields: [Field; 3] = [
+        ("brush-radius", "Radius", format_metres(b.radius_m), Event::BrushRadius),
+        ("brush-strength", "Strength", format_metres(b.strength_m), Event::BrushStrength),
+        ("brush-target", "Flatten height", b.target_m.map_or("auto".to_string(), format_metres), Event::BrushTarget),
+    ];
+    egui::Grid::new("brush-fields").num_columns(2).show(ui, |ui| {
+        for (name, label, current, make) in fields {
+            if name == "brush-target" && !flatten {
+                continue;
+            }
+            ui.label(label);
+            let buf = st.brush_text.entry(name).or_insert_with(|| current.clone());
+            let r = ui.add(egui::TextEdit::singleline(buf).desired_width(110.0));
+            st.marks.push((name.to_string(), r.rect));
+            if r.lost_focus() {
+                if buf.trim() != current {
+                    ev.push(make(buf.trim().to_string()));
+                }
+                st.brush_text.remove(name);
+            } else if !r.has_focus() {
+                *buf = current;
+            }
+            ui.end_row();
+        }
+    });
+    ui.small("Metres; the strength is the largest height change at the stroke's centre line.");
     ui.separator();
-    ui.add_enabled(false, egui::Button::new("Brush (later)"));
 }
 
 fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
@@ -336,6 +386,9 @@ fn region_rows(ui: &mut egui::Ui, st: &mut PanelState, r: &planet_editor::params
 }
 
 fn inspector(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
+    if let (Some(b), Tool::Brush(kind)) = (&d.brush, d.tool) {
+        brush_section(ui, st, b, *kind == BrushKind::Flatten, ev);
+    }
     let Some(i) = d.inspector else {
         ui.weak("Inspector");
         ui.label("Nothing selected. Click an edit on the planet or pick one from the list. Choose a stamp tool on the left and click the planet to place one.");
@@ -526,6 +579,22 @@ pub fn draw_draft(ui: &egui::Ui, draft: &planet_editor::overlay::DraftOverlay, t
     }
 }
 
+/// Draw the brush tool: the stroke being painted and the ring of the radius under the cursor.
+pub fn draw_brush(ui: &egui::Ui, brush: &planet_editor::overlay::BrushOverlay, to_points: impl Fn([f64; 2]) -> egui::Pos2) {
+    let painter = ui.painter();
+    for w in brush.path.windows(2) {
+        if let (Some(a), Some(b)) = (w[0], w[1]) {
+            painter.line_segment([to_points(a), to_points(b)], egui::Stroke::new(2.5, AMBER));
+        }
+    }
+    let n = brush.ring.len();
+    for k in 0..n {
+        if let (Some(a), Some(b)) = (brush.ring[k], brush.ring[(k + 1) % n]) {
+            painter.line_segment([to_points(a), to_points(b)], egui::Stroke::new(1.5, LIGHT));
+        }
+    }
+}
+
 /// Draw the outlines, the names and the handles over the planet. `to_points` turns the overlay's pixels into points (the window's scale).
 pub fn draw_overlay(ui: &egui::Ui, items: &[OverlayItem], to_points: impl Fn([f64; 2]) -> egui::Pos2) {
     let painter = ui.painter();
@@ -684,6 +753,7 @@ mod tests {
         inspector: Option<Inspector>,
         selected: Option<ItemId>,
         can_undo: bool,
+        brush: Option<planet_editor::session::BrushSettings>,
     }
 
     fn held(f: &Fixture, layout: Layout) -> Held {
@@ -697,6 +767,7 @@ mod tests {
             inspector: f.s.inspector(f.cam),
             selected: f.s.selected(),
             can_undo: true,
+            brush: None,
         }
     }
 
@@ -704,6 +775,7 @@ mod tests {
         PanelData {
             layout: &h.layout,
             tool: &h.tool,
+            brush: h.brush,
             selected: h.selected,
             near: &h.near,
             found: &h.found,
@@ -834,7 +906,7 @@ mod tests {
         rig.st.help = true;
         rig.settle(&data(&h));
         assert_eq!(rig.st.covered.len(), covered + 1, "the key list covers part of the window");
-        assert_eq!(HELP_KEYS.len(), 16);
+        assert_eq!(HELP_KEYS.len(), 18);
         assert!(HELP_KEYS.iter().any(|(k, w)| *k == "Enter" && w.contains("finish")));
         assert!(HELP_KEYS.iter().any(|(k, _)| *k == "Shift + click") && HELP_KEYS.iter().any(|(k, _)| *k == "Ctrl + click"));
     }
@@ -948,6 +1020,58 @@ mod tests {
         rig.settle(&data(&h2));
         rig.settle(&data(&h2));
         assert_eq!(rig.st.typed.get(&(f.ids[0], "radius_m".into())).map(String::as_str), Some("777 m"));
+    }
+
+    // spec: VIEW-035
+    #[test]
+    fn the_rail_has_the_four_brushes_and_their_radius_strength_and_flatten_height_are_typed_in_metres() {
+        use planet_editor::session::BrushSettings;
+        use planet_world_def::stamp::BrushKind;
+        let f = fixture();
+        let layout = Layout::default();
+        let mut h = held(&f, layout.clone());
+        let mut rig = Rig::new(&layout);
+        rig.settle(&data(&h));
+        assert!(rig.st.mark("brush-radius").is_none(), "no brush fields while no brush is on");
+        for (label, kind) in [
+            ("Raise brush  [8]", BrushKind::Raise),
+            ("Lower brush  [9]", BrushKind::Lower),
+            ("Smooth brush  [0]", BrushKind::Smooth),
+            ("Flatten brush  [-]", BrushKind::Flatten),
+        ] {
+            let p = rig.mark(&format!("tool:{label}"));
+            assert_eq!(rig.click(&data(&h), p), vec![Event::Tool(Tool::Brush(kind))], "{label}");
+        }
+        // A raise shows the radius and the strength; a flatten also the height it levels towards.
+        h.tool = Tool::Brush(BrushKind::Raise);
+        h.brush = Some(BrushSettings::default());
+        rig.settle(&data(&h));
+        assert!(rig.st.mark("brush-radius").is_some() && rig.st.mark("brush-strength").is_some());
+        assert!(rig.st.mark("brush-target").is_none());
+        h.tool = Tool::Brush(BrushKind::Flatten);
+        rig.settle(&data(&h));
+        assert!(rig.st.mark("brush-target").is_some());
+        // Typing 250 in the radius field and leaving it asks for it; leaving it unchanged asks for nothing.
+        let field = rig.mark("brush-radius");
+        let ev = {
+            rig.click(&data(&h), field);
+            rig.click(&data(&h), Pos2::new(SIZE.0 / 2.0, SIZE.1 / 2.0))
+        };
+        assert!(!ev.iter().any(|e| matches!(e, Event::BrushRadius(_))), "{ev:?}");
+        rig.click(&data(&h), field);
+        let all = Modifiers { ctrl: true, command: true, ..Modifiers::NONE };
+        rig.pass(&data(&h), vec![key(egui::Key::A, all)]);
+        rig.pass(&data(&h), vec![Raw::Text("250".into())]);
+        let mut got = rig.pass(&data(&h), vec![key(egui::Key::Enter, Modifiers::NONE)]);
+        got.extend(rig.pass(&data(&h), vec![]));
+        assert!(got.contains(&Event::BrushRadius("250".into())), "{got:?}");
+        // The fields show the settings in metres, the flatten height "auto" until one is typed.
+        h.brush = Some(BrushSettings { radius_m: 250.0, strength_m: 7.5, target_m: Some(1_200.0) });
+        rig.settle(&data(&h));
+        rig.settle(&data(&h));
+        assert_eq!(rig.st.brush_text.get("brush-radius").map(String::as_str), Some("250 m"));
+        assert_eq!(rig.st.brush_text.get("brush-target").map(String::as_str), Some("1.2 km"));
+        assert_eq!(rig.st.brush_text.get("brush-strength").map(String::as_str), Some("7.5 m"));
     }
 
     // spec: VIEW-021

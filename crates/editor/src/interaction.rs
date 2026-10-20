@@ -41,6 +41,8 @@ pub enum Pressed {
     Cleared,
     /// A point of the line or region tool's draft was added (the number of points now).
     DraftPoint(usize),
+    /// A brush stroke started at the cursor (VIEW-035); the release puts it.
+    Stroke,
     /// Nothing: a placing tool was on and the cursor was off the planet.
     Nothing,
 }
@@ -86,6 +88,16 @@ impl Interaction {
 
     /// The primary button went down.
     pub fn press<S: ItemStore>(&mut self, s: &mut Session<S>, v: &PointerView) -> Result<(Pressed, Vec<Affected>), SessionError> {
+        // A brush paints: it takes no handle, and a press off the planet starts nothing.
+        if matches!(s.tool(), Tool::Brush(_)) {
+            return match v.hit {
+                Some(hit) => {
+                    s.begin_stroke(hit.dir, hit.height_m)?;
+                    Ok((Pressed::Stroke, Vec::new()))
+                }
+                None => Ok((Pressed::Nothing, Vec::new())),
+            };
+        }
         if let Some(h) = self.handle_under(v) {
             s.begin_drag(h)?;
             self.last_cursor = Some(v.cursor);
@@ -119,6 +131,12 @@ impl Interaction {
     /// The pointer moved with the button down: a held handle follows it. Without a surface hit a position or radius handle stays where
     /// it is.
     pub fn moved<S: ItemStore>(&mut self, s: &mut Session<S>, v: &PointerView) -> Result<Vec<Affected>, SessionError> {
+        if s.stroke_in_progress().is_some() {
+            if let Some(hit) = v.hit {
+                s.extend_stroke(hit.dir);
+            }
+            return Ok(Vec::new());
+        }
         let Some(handle) = s.dragging() else { return Ok(Vec::new()) };
         let last = self.last_cursor.replace(v.cursor).unwrap_or(v.cursor);
         match handle {
@@ -140,6 +158,9 @@ impl Interaction {
     /// The button went up: a held handle is let go and the drag becomes one command. `None` when no handle was held.
     pub fn release<S: ItemStore>(&mut self, s: &mut Session<S>) -> Result<Option<Vec<Affected>>, SessionError> {
         self.last_cursor = None;
+        if s.stroke_in_progress().is_some() {
+            return s.end_stroke().map(Some);
+        }
         if s.dragging().is_none() {
             return Ok(None);
         }
@@ -149,6 +170,10 @@ impl Interaction {
     /// The drag was abandoned (Esc, the window lost the focus): the edit goes back.
     pub fn cancel<S: ItemStore>(&mut self, s: &mut Session<S>) -> Result<Option<Vec<Affected>>, SessionError> {
         self.last_cursor = None;
+        if s.stroke_in_progress().is_some() {
+            s.cancel_stroke();
+            return Ok(Some(Vec::new()));
+        }
         if s.dragging().is_none() {
             return Ok(None);
         }
