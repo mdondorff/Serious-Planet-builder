@@ -783,7 +783,11 @@ impl RefusalReporter {
         }
         let more = std::mem::take(&mut entry.1);
         entry.0 = Some(now_ms);
-        Some(if more == 0 { message.to_string() } else { format!("{message}\n  ({more} more refusals of this cause [{cause}] since the last line)") })
+        Some(if more == 0 {
+            message.to_string()
+        } else {
+            format!("{message}\n  ({more} more refusals of this cause [{cause}] since the last line)")
+        })
     }
 }
 

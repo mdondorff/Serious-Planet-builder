@@ -884,3 +884,14 @@ Source: opus-planner (2026-10-20), VIEW-032, VIEW-037
 #### Scenario: A refusal in a measured run
 - **WHEN** the plan of a frame's own request is refused by the worker and the next frame is begun strictly
 - **THEN** the call returns the error naming the count and the refusal, while `begin_frame` of the same loop returns the frame
+
+### Requirement: VIEW-040 A flight over ground the plan refuses prints a few lines, not one per frame
+The window SHALL print, write a crash report for (`crash::snapshot`) and name in the title notice a plan refusal at most once per cause in `REFUSAL_REPORT_PERIOD_MS` (5 s), a cause being the kind of the refusal and the level of the tile it names (`refusal_cause`; not the tile, the distances or the frame); the line says how many refusals of the cause came in between (`RefusalReporter`). The title SHALL show the count of all refused plans (`plans refused xN`, `PlanPipeline::refused_plans`). A refused frame SHALL cost no more than a frame whose plan was made: the request is repeated only when the camera or the definition changed, and the commit of the report is asked of git once per run.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-20), owner finding on PR 483, VIEW-032, VIEW-037
+
+#### Scenario: A hundred refused frames
+- **WHEN** a camera moving 16 ms a frame over ground the worker refuses gets 100 refusals, each naming another tile and distance
+- **THEN** at most three lines are printed, the same cause is due again after 5 s with the number in between, and another level is another cause
