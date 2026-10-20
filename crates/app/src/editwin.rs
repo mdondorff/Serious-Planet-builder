@@ -740,6 +740,8 @@ pub fn mode_status(e: &EditRuntime) -> String {
     match e.session.tool() {
         Tool::Select => "Select".to_string(),
         Tool::Stamp(k) => format!("Place {}", kind_title(k)),
+        Tool::Line(k) => format!("Draw {}", kind_title(k)),
+        Tool::Region => "Draw region".to_string(),
     }
 }
 

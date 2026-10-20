@@ -39,7 +39,9 @@ pub enum Pressed {
     Selected(ItemId),
     /// The selection was cleared (the press was on nothing).
     Cleared,
-    /// Nothing: the stamp tool was on and the cursor was off the planet.
+    /// A point of the line or region tool's draft was added (the number of points now).
+    DraftPoint(usize),
+    /// Nothing: a placing tool was on and the cursor was off the planet.
     Nothing,
 }
 
@@ -93,6 +95,12 @@ impl Interaction {
             let (id, affected) = s.place(&kind, hit.dir)?;
             return Ok((Pressed::Placed(id), affected));
         }
+        if matches!(s.tool(), Tool::Line(_) | Tool::Region) {
+            return match v.hit {
+                Some(hit) => Ok((Pressed::DraftPoint(s.add_draft_point(hit.dir)?), Vec::new())),
+                None => Ok((Pressed::Nothing, Vec::new())),
+            };
+        }
         if matches!(s.tool(), Tool::Stamp(_)) {
             return Ok((Pressed::Nothing, Vec::new()));
         }
@@ -114,7 +122,7 @@ impl Interaction {
         let Some(handle) = s.dragging() else { return Ok(Vec::new()) };
         let last = self.last_cursor.replace(v.cursor).unwrap_or(v.cursor);
         match handle {
-            Handle::Move | Handle::Radius => match v.hit {
+            Handle::Move | Handle::Radius | Handle::Point(_) => match v.hit {
                 Some(hit) => s.drag_surface(hit.dir),
                 None => Ok(Vec::new()),
             },

@@ -28,6 +28,8 @@ pub enum Handle {
     Radius,
     /// The height of the change.
     Height,
+    /// Point `i` of a line or a region (counted over the whole line, however many items it is split into).
+    Point(usize),
 }
 
 /// The radius of the outline of an item, metres: the reach of a stamp (its radius is the file's `reach_m`), else the `radius_m` parameter
@@ -52,6 +54,12 @@ fn height_key(item: &Item) -> Option<&'static str> {
 
 /// The handles an item has: the anchor always, the radius when it has an outline, the height when it has the parameter the handle edits.
 pub fn handles_of(item: &Item) -> Vec<Handle> {
+    // An item with points is a line or a region: one handle per point of THIS item and nothing else (ADR 0069). A line split into
+    // linked items has handles over all its parts, counted line-wide: `Session::handles` builds those from the joined points; this
+    // function and `handle_point(Point(i))` see only the item's own, part-local points.
+    if !item.points.is_empty() {
+        return (0..item.points.len()).map(Handle::Point).collect();
+    }
     let mut v = vec![Handle::Move];
     if outline_radius_m(item) > 0.0 {
         v.push(Handle::Radius);
@@ -91,6 +99,7 @@ pub fn handle_point(item: &Item, handle: Handle, radius_m: f64, ground_m: f64) -
     let r = radius_m + ground_m;
     match handle {
         Handle::Move => dir * r,
+        Handle::Point(i) => item.point_directions().get(i).map_or(dir, |d| *d) * r,
         Handle::Radius => point_at(dir, item.anchor.heading_deg, outline_radius_m(item), radius_m) * r,
         Handle::Height => {
             let amount = height_key(item).and_then(|k| item.params.get(k)).copied().unwrap_or(0.0);
