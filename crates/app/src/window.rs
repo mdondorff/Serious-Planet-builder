@@ -374,6 +374,10 @@ impl App<'_> {
             })
             .map_err(|e| format!("warming the lit path: {e}"))?;
         let now = self.clock.now_ms();
+        // The editor holds a re-keyed tile's refresh until its edits have been quiet for a moment (STRM-031, ADR 0072).
+        if cfg.ui {
+            rig.managed.set_refresh_settle(crate::editwin::REFRESH_SETTLE_MS);
+        }
         let viewer = ViewerState::new(now, TerrainView::ALL.len(), cfg.initial_view, cfg.vsync).with_lit(true).with_radius_m(cfg.radius_m);
         let ui = cfg.ui.then(|| crate::ui::EditorUi::new(&window, surface.ui_painter(&ctx)));
         let edit = if cfg.ui {

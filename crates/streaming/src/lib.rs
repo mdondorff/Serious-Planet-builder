@@ -34,7 +34,7 @@ use layer::{normalized, parent_in, Layer};
 use planet_core::{TileId, Vec3};
 use queue::RequestQueue;
 use std::cmp::Reverse;
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -489,6 +489,13 @@ pub struct StreamStats {
     pub evicted: u64,
     /// Resident tiles replaced in place by a refresh (STRM-026): the new version arrived and the old slot went back.
     pub refreshed: u64,
+    /// Refreshes that found the tile's refresh already waiting (queued, held by the settle window, or its running job already told to stop) and
+    /// so stayed one entry (STRM-031).
+    pub refresh_coalesced: u64,
+    /// Running jobs a refresh told to stop because a newer edit re-keyed their tile (STRM-031).
+    pub refresh_cancelled: u64,
+    /// Results of jobs a refresh had stopped that arrived and were dropped before the tile was made resident or uploaded (STRM-031).
+    pub refresh_dropped: u64,
     /// Queued requests by class: draw, residency, prefetch.
     pub queued_by_class: [usize; 3],
     /// Jobs handed to the spawner.
@@ -702,6 +709,12 @@ pub struct Streamer<T: Send + Sync + 'static> {
     /// nothing is running for them and something wants them (a job that ended without replacing them, a failure after its delay, a
     /// tile wanted again after it lost every class), and leave the set when the new version replaces them or they are evicted.
     stale: FxSet<TileId>,
+    /// The settle window of the refresh pre-emption (STRM-031), milliseconds of the injected clock; 0: nothing is held.
+    refresh_settle_ms: u64,
+    /// Stale tiles whose next refresh request waits for the settle window: tile, clock time at which it is due.
+    held: BTreeMap<TileId, u64>,
+    /// Tiles whose running job a refresh told to stop: their result, if it arrives, is dropped and counted as a refresh drop.
+    refresh_stopped: FxSet<TileId>,
     /// Resident tiles in no class or in prefetch only (level 0 excluded), per pool, least recently used first: the victims
     /// of [`Streamer::make_room`]'s first tier.
     victims: [BTreeSet<(u64, TileId)>; 2],
@@ -773,6 +786,9 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             pending: [None, None, None],
             missing: FxSet::default(),
             stale: FxSet::default(),
+            refresh_settle_ms: 0,
+            held: BTreeMap::new(),
+            refresh_stopped: FxSet::default(),
             victims: [BTreeSet::new(), BTreeSet::new()],
             rescan: false,
             work: SchedWork::default(),
@@ -792,7 +808,13 @@ impl<T: Send + Sync + 'static> Streamer<T> {
     /// whose job is running is told to stop and its result is dropped; a resident one stays marked stale and is requested again as soon as
     /// the job has ended and something wants it, a non-resident one loads again from the new field; a queued request stays queued (it loads
     /// from the new field). Returns the number of refresh requests queued now.
+    ///
+    /// Refresh work made stale by a newer edit is not computed (STRM-031, ADR 0072): a refresh that finds the tile's refresh waiting (queued,
+    /// held, or its running job already told to stop) leaves one entry and is counted; a running job is told to stop and counted; its
+    /// result is dropped and counted when it arrives. With a settle window ([`Streamer::set_refresh_settle`]) a resident tile's request is
+    /// held until the window has passed since the latest refresh that named it.
     pub fn refresh(&mut self, tiles: &[TileId]) -> usize {
+        let now = self.clock.now_ms();
         let mut queued = 0;
         for &t in tiles {
             let resident = self.resident.contains_key(&t);
@@ -806,19 +828,77 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             if resident {
                 self.stale.insert(t);
             }
+            // A refresh of this tile is already waiting (held, or its stopped job's re-request): this one joins it. Counted once per call.
+            let mut waiting = false;
+            if self.refresh_settle_ms > 0 && resident {
+                // The window restarts at every edit that names the tile: the request is made after the last one.
+                waiting = self.held.insert(t, now.saturating_add(self.refresh_settle_ms)).is_some();
+            }
             if let Some(f) = self.in_flight.get(&t) {
                 // Its result may have been made from the field as it was: it is dropped, whatever it was.
                 if !f.token.swap(true, Ordering::SeqCst) {
                     self.stats.cancelled += 1;
                     self.stats.cancelled_prefetch += u64::from(f.class == RequestClass::Prefetch);
+                    self.stats.refresh_cancelled += 1;
+                    self.refresh_stopped.insert(t);
+                } else {
+                    // Already told to stop by an earlier edit: its re-request is the entry that waits.
+                    waiting = true;
                 }
+                self.stats.refresh_coalesced += u64::from(waiting);
                 continue;
             }
-            if resident && self.request_ahead(t) {
-                queued += 1;
+            self.stats.refresh_coalesced += u64::from(waiting);
+            if resident && self.refresh_settle_ms == 0 {
+                if self.request_ahead(t) {
+                    queued += 1;
+                } else if self.class_of(t).is_some() {
+                    // Not queued again: the entry that waits already is this tile's refresh.
+                    self.stats.refresh_coalesced += 1;
+                }
             }
         }
         queued
+    }
+
+    /// The stale tiles whose refresh request still waits for the settle window (STRM-031): a loop is not idle while there are any.
+    pub fn held_refreshes(&self) -> usize {
+        self.held.len()
+    }
+
+    /// Set the settle window of the refresh pre-emption (STRM-031, ADR 0072) in milliseconds of the injected clock: a resident tile a
+    /// refresh named is requested only after the window has passed since the latest refresh that named it, so a quick sequence of edits
+    /// starts one job after the last. 0, the default, holds nothing.
+    pub fn set_refresh_settle(&mut self, ms: u64) {
+        self.refresh_settle_ms = ms;
+        if ms == 0 {
+            // Release what was held at the next step.
+            for due in self.held.values_mut() {
+                *due = 0;
+            }
+        }
+    }
+
+    /// A stale tile's request, unless the settle window still holds it (then the release in [`Streamer::step`] makes it).
+    fn request_refresh(&mut self, t: TileId) -> bool {
+        if self.refresh_settle_ms > 0 && self.held.get(&t).is_some_and(|due| *due > self.clock.now_ms()) {
+            return false;
+        }
+        self.request_ahead(t)
+    }
+
+    /// Step 1b: the stale tiles whose settle window has ended are requested.
+    fn release_held(&mut self, now: u64) {
+        if self.held.is_empty() {
+            return;
+        }
+        let due: Vec<TileId> = self.held.iter().filter(|(_, d)| **d <= now).map(|(t, _)| *t).collect();
+        for t in due {
+            self.held.remove(&t);
+            if self.resident.contains_key(&t) && self.stale.contains(&t) && !self.in_flight.contains_key(&t) {
+                self.request_ahead(t);
+            }
+        }
     }
 
     /// Cancel everything that is not resident: the queued requests are dropped and never reach the spawner, the dispatched
@@ -1090,6 +1170,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
         self.frame += 1;
         let now = self.clock.now_ms();
         self.collect(now);
+        self.release_held(now);
         self.apply_wants();
         self.request_missing(now);
         self.make_room();
@@ -1106,13 +1187,17 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             match result {
                 Outcome::Done(_) if was_cancelled => {
                     self.stats.dropped += 1;
+                    if self.refresh_stopped.remove(&tile) {
+                        self.stats.refresh_dropped += 1;
+                    }
                     self.pools.release(flight.slot, self.frame);
                     self.missing.insert(tile);
                     if self.stale.contains(&tile) {
-                        self.request_ahead(tile);
+                        self.request_refresh(tile);
                     }
                 }
                 Outcome::Done(data) => {
+                    self.refresh_stopped.remove(&tile);
                     self.stats.completed += 1;
                     if let Some(at) = self.failed_at.remove(&tile) {
                         self.retry_due.remove(&(at, tile));
@@ -1137,13 +1222,15 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                     self.note(ResidentChange::Added(tile));
                 }
                 Outcome::Cancelled => {
+                    self.refresh_stopped.remove(&tile);
                     self.pools.release(flight.slot, self.frame);
                     self.missing.insert(tile);
                     if self.stale.contains(&tile) {
-                        self.request_ahead(tile);
+                        self.request_refresh(tile);
                     }
                 }
                 Outcome::Failed(message) => {
+                    self.refresh_stopped.remove(&tile);
                     self.last_error.insert(tile, message);
                     self.stats.failed += 1;
                     if let Some(old) = self.failed_at.insert(tile, now) {
@@ -1215,7 +1302,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             // for a tile that left every class is dropped and counted: the class it was queued under no longer lists the tile, and the
             // tile stays marked stale, so the request is made again when something wants it.
             if new.is_some() && self.stale.contains(&t) && !self.in_flight.contains_key(&t) {
-                self.request_ahead(t);
+                self.request_refresh(t);
             } else if new.is_none() {
                 if let Some(class) = self.queue.remove(t) {
                     self.stats.cancelled += 1;
@@ -1297,7 +1384,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
                 continue;
             }
             if self.stale.contains(&t) {
-                self.request_ahead(t);
+                self.request_refresh(t);
             } else {
                 self.request(t);
             }

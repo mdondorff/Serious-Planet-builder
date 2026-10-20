@@ -184,6 +184,12 @@ pub struct Stages {
     /// The first frame after the edit whose draw plan is exact (`DrawKind::Exact`: every drawn tile has the plan's key), which may come
     /// before the idle frame `exact_ms` waits for (the refreshes of tiles nothing draws).
     pub drawn_exact_ms: Option<f64>,
+    /// The refresh settle window of the run in milliseconds (ADR 0072) and the pre-emption counts of the run (STRM-031): refreshes that found
+    /// theirs waiting, running jobs a refresh stopped, results dropped before they were made resident.
+    pub settle_ms: u64,
+    pub coalesced: u64,
+    pub cancelled: u64,
+    pub dropped: u64,
 }
 
 /// One row of the report: a case with its repeats.
@@ -212,9 +218,14 @@ impl CaseRow {
         median(self.runs.iter().filter_map(|r| r.exact_ms).collect())
     }
 
+    /// The edit to the first frame whose draw plan is exact: "exact" of the M6 criterion (ADR 0072: every tile the plan draws is exact).
+    pub fn drawn_exact_median(&self) -> Option<f64> {
+        median(self.runs.iter().filter_map(|r| r.stages.drawn_exact_ms).collect())
+    }
+
     /// `ok` or `OVER` against the budgets, `no result` when a run produced none.
     pub fn verdict(&self) -> &'static str {
-        match (self.preview_median(), self.exact_median()) {
+        match (self.preview_median(), self.drawn_exact_median()) {
             (Some(p), Some(e)) if p <= PREVIEW_BUDGET_MS && e <= exact_budget_ms(self.radius_m, self.altitude_m) => "ok",
             (Some(_), Some(_)) => "OVER",
             _ => "no result",
@@ -225,7 +236,7 @@ impl CaseRow {
 /// The report table (markdown): one row per case, medians over the repeats, budgets named.
 pub fn table(rows: &[CaseRow]) -> String {
     let mut s = String::from(
-        "| altitude | stamp radius | preview ms (budget 16) | exact ms (budget) | tiles refreshed / resident | previewed nodes (max) | repeats | verdict |\n|---|---|---|---|---|---|---|---|\n",
+        "| altitude | stamp radius | preview ms (budget 16) | drawn exact ms (budget) | tiles refreshed / resident | previewed nodes (max) | repeats | verdict |\n|---|---|---|---|---|---|---|---|\n",
     );
     let cell = |v: Option<f64>| v.map_or("-".to_string(), |x| format!("{x:.1}"));
     for r in rows {
@@ -235,7 +246,7 @@ pub fn table(rows: &[CaseRow]) -> String {
             r.altitude_m,
             r.radius_m,
             cell(r.preview_median()),
-            cell(r.exact_median()),
+            cell(r.drawn_exact_median()),
             exact_budget_ms(r.radius_m, r.altitude_m),
             last.refreshed,
             last.resident,
@@ -251,14 +262,14 @@ pub fn table(rows: &[CaseRow]) -> String {
 /// three calls and the frame median are durations).
 pub fn stages_table(rows: &[CaseRow]) -> String {
     let mut s = String::from(
-        "| altitude | stamp radius | set_definition call | edit call | preview call | plan delivered (worker ms) | R delivered | first job dispatched | half refreshed | all refreshed | uploaded | preview | exact | frame median | find call | drawn exact |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
+        "| altitude | stamp radius | set_definition call | edit call | preview call | plan delivered (worker ms) | R delivered | first job dispatched | half refreshed | all refreshed | uploaded | preview | all exact | frame median | find call | drawn exact | settle ms | coalesced | cancelled | dropped |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
     );
     let cell = |v: Option<f64>| v.map_or("-".to_string(), |x| format!("{x:.1}"));
     for r in rows {
         let pick = |f: &dyn Fn(&CaseRun) -> Option<f64>| median(r.runs.iter().filter_map(f).collect());
         let (plan, worker) = (pick(&|x| x.stages.plan_delivered_ms), pick(&|x| x.stages.plan_worker_ms));
         s += &format!(
-            "| {} m | {} m | {} | {} | {} | {} ({}) | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| {} m | {} m | {} | {} | {} | {} ({}) | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             r.altitude_m,
             r.radius_m,
             cell(pick(&|x| Some(x.stages.set_definition_ms))),
@@ -276,6 +287,10 @@ pub fn stages_table(rows: &[CaseRow]) -> String {
             cell(pick(&|x| Some(x.stages.frame_median_ms))),
             cell(pick(&|x| Some(x.stages.find_ms))),
             cell(pick(&|x| x.stages.drawn_exact_ms)),
+            pick(&|x| Some(x.stages.settle_ms as f64)).map_or("-".to_string(), |v| format!("{v:.0}")),
+            pick(&|x| Some(x.stages.coalesced as f64)).map_or("-".to_string(), |v| format!("{v:.0}")),
+            pick(&|x| Some(x.stages.cancelled as f64)).map_or("-".to_string(), |v| format!("{v:.0}")),
+            pick(&|x| Some(x.stages.dropped as f64)).map_or("-".to_string(), |v| format!("{v:.0}")),
         );
     }
     s
@@ -289,6 +304,8 @@ struct Harness<'a> {
     drawn: HashSet<TileId>,
     /// How long a settle may take before it is an error (a smoke run is short, so a hang names itself instead of waiting for the runner).
     settle_limit: Duration,
+    /// The refresh settle window of the run (ADR 0072), for the report.
+    settle_ms: u64,
 }
 
 impl Harness<'_> {
@@ -437,6 +454,11 @@ fn run_once(
             h.rig.fi.retire_to(h.rig.renderer.wait_oldest(h.ctx));
             out.exact_ms = Some(sampler_started.elapsed().as_secs_f64() * 1000.0);
             out.stages.frame_median_ms = median(frame_ms.clone()).unwrap_or(0.0);
+            let end = h.rig.managed.manager().streamer().stats();
+            out.stages.settle_ms = h.settle_ms;
+            out.stages.coalesced = end.refresh_coalesced - before_stats.refresh_coalesced;
+            out.stages.cancelled = end.refresh_cancelled - before_stats.refresh_cancelled;
+            out.stages.dropped = end.refresh_dropped - before_stats.refresh_dropped;
             break;
         }
         waiting_for_exact = true;
@@ -531,13 +553,16 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         let first_stamp = case_stamp(radii[0]);
         let rho = (1.5 * radii[0]).max(altitude);
         let first = req_of(camera_for(first_stamp.dir, &ground, radius_m, rho, altitude, aspect));
-        let rig = Rig::new(ctx, &world, &first, o.gen_workers())?;
+        let mut rig = Rig::new(ctx, &world, &first, o.gen_workers())?;
+        // The editor's refresh settle window, or the one the run names (ADR 0072): a run at 0 and a run at 40 show its share of a case.
+        rig.managed.set_refresh_settle(o.settle_ms);
         let mut h = Harness {
             ctx,
             rig,
             iteration: 0,
             drawn: HashSet::new(),
             settle_limit: if smoke { Duration::from_secs(120) } else { SETTLE_LIMIT },
+            settle_ms: o.settle_ms,
         };
         for &r in &radii {
             let stamp = case_stamp(r);

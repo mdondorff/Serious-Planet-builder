@@ -341,6 +341,12 @@ impl ManagedLoop {
         queued
     }
 
+    /// Set the settle window of the refresh pre-emption in milliseconds of the injected clock (STRM-031, ADR 0072): a tile that edits keep
+    /// re-keying is refreshed once, after the last of them has been quiet for this long. 0 (the default) holds nothing.
+    pub fn set_refresh_settle(&mut self, ms: u64) {
+        self.manager.streamer_mut().set_refresh_settle(ms);
+    }
+
     /// Set the preview of the edit in flight (REND-033, from `preview_delta`); an empty list ends it. Call after [`ManagedLoop::edit`].
     pub fn set_preview(&mut self, stamps: Vec<crate::preview::PreviewStamp>) {
         self.pipe.set_preview(stamps);

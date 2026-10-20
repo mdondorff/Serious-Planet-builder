@@ -31,7 +31,7 @@ fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
     ])
     .unwrap();
     assert!(out.contains("SMOKE RUN") && out.contains("not a measurement"), "{out}");
-    assert!(out.contains("| altitude | stamp radius | preview ms (budget 16) | exact ms (budget)"), "{out}");
+    assert!(out.contains("| altitude | stamp radius | preview ms (budget 16) | drawn exact ms (budget)"), "{out}");
     // One altitude, one radius, one run: a row with a preview and an exact time.
     let row = out.lines().find(|l| l.starts_with("| 200 m | 50 m |")).unwrap_or_else(|| panic!("no row: {out}"));
     // The preview column may read `-` on a slow adapter: the refreshed tiles can arrive within one frame, so no frame draws a stale tile
@@ -48,9 +48,12 @@ fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
     );
     let stages = out.lines().filter(|l| l.starts_with("| 200 m | 50 m |")).nth(1).unwrap_or_else(|| panic!("no stages row: {out}"));
     let cells: Vec<&str> = stages.split('|').map(str::trim).collect();
-    for i in [3, 4, 5, 14, 15] {
+    for i in [3, 4, 5, 14, 15, 16, 17, 18, 19, 20] {
         assert!(cells[i].parse::<f64>().is_ok(), "column {i} of the stages row is a number: {stages}");
     }
+    // ADR 0072: the settle window (the editor's 40 ms by default) and the three pre-emption counts are in the row.
+    assert!(out.contains("| settle ms | coalesced | cancelled | dropped |"), "{out}");
+    assert_eq!(cells[17], "40", "the default settle window: {stages}");
     assert!(table.contains("set_definition call"), "edit-latency.md holds both tables: {table}");
     // The refreshed set by level (TEST-041): at least one row of the case, named = drawn + resident only.
     assert!(
