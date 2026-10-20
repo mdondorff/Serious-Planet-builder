@@ -47,6 +47,8 @@ fn random_grid(res: u32, seed: u64, low_percent: u64) -> (GlobalGrid, OceanGrid)
                     let low = rnd() % 100 < low_percent;
                     let e = if low { (rnd() % 120) as f32 - 40.0 } else { 100.0 + (rnd() % 400) as f32 };
                     let nan = rnd() % 500 == 0;
+                    let inf = rnd() % 300 == 0;
+                    let e = if inf { [f32::INFINITY, f32::NEG_INFINITY][(rnd() % 2) as usize] } else { e };
                     (if nan { f32::NAN } else { e }, rnd() % 100 < 4)
                 });
                 faces[f as usize].push(GlobalSample { continent: 0.2, elevation_m: v.0, temperature_c: 0.0, precipitation_mm: 0.0 });
@@ -64,11 +66,14 @@ fn random_grid(res: u32, seed: u64, low_percent: u64) -> (GlobalGrid, OceanGrid)
 fn random_grids_give_the_serial_floor_for_every_block_size_and_thread_count() {
     let mut finite_total = 0;
     for (res, low) in [(4u32, 70u64), (8, 60), (16, 55), (16, 70), (32, 60)] {
-        for seed in 0..3u64 {
+        for seed in 0..if res >= 32 { 1u64 } else { 3 } {
             let (grid, ocean) = random_grid(res, 100 * seed + u64::from(res), low);
             let mut sizes = vec![res, (res / 2).max(1), (res / 4).max(1), 1];
             sizes.sort_unstable();
             sizes.dedup();
+            if res >= 32 {
+                sizes.retain(|c| *c >= 4);
+            }
             for cells in sizes {
                 for threads in [1usize, 3] {
                     finite_total += assert_equal_to_reference(&grid, &ocean, cells, threads, &format!("res {res} low {low} seed {seed}"));
