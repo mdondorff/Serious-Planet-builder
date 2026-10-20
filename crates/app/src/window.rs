@@ -789,7 +789,9 @@ impl App<'_> {
             }
             st.frames += 1;
             if cfg.smoke {
-                if st.frames >= cfg.smoke_frames.max(SMOKE_FRAMES) && st.presented > 0 {
+                // The editing script starts once the camera rests, so the run waits for it (at most until the give-up frame).
+                let editing_done = !cfg.edit || st.edit.as_ref().is_none_or(|e| e.smoke_finished()) || st.frames >= SMOKE_GIVE_UP;
+                if st.frames >= cfg.smoke_frames.max(SMOKE_FRAMES) && st.presented > 0 && editing_done {
                     // The verdict is on counts: lit frames with the atmosphere drawn and presented, the debug path too, an exposure
                     // reading, and the renderer's own account that the passes ran. No wall-clock (VIEW-005).
                     smoke_verdict(&st.counts, cfg.atmosphere)?;
