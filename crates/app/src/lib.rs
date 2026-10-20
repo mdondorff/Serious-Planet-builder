@@ -162,6 +162,8 @@ pub struct Options {
     pub tau: f64,
     pub frames: usize,
     pub perf_smoke: bool,
+    /// `--settle-ms N`: the refresh settle window of the `edit-latency` scene in milliseconds (ADR 0072, STRM-031); the default is the editor's.
+    pub settle_ms: u64,
     /// `--lit`: the streaming perf scenes draw the lit path with the atmosphere and the water (TEST-025).
     pub lit: bool,
     /// `--flight-frames N`: frames of each coastal flight of the lit perf scenes.
@@ -300,6 +302,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         tau: 6.0,
         frames: 300,
         perf_smoke: false,
+        settle_ms: editwin::REFRESH_SETTLE_MS,
         lit: false,
         flight_frames: 240,
         views: None,
@@ -331,6 +334,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--lockstep" => o.lockstep = true,
             "--then" => o.then = Some(it.next().ok_or("--then needs a script index or name")?.clone()),
             "--perf-smoke" => o.perf_smoke = true,
+            "--settle-ms" => {
+                o.settle_ms = it.next().ok_or("--settle-ms needs a value")?.parse().map_err(|e| format!("--settle-ms: {e}"))?
+            }
             "--lit" => o.lit = true,
             "--no-ui" => o.no_ui = true,
             "--edit" => o.edit = true,

@@ -10,6 +10,8 @@ mod manager;
 mod priority;
 #[path = "refresh.rs"]
 mod refresh;
+#[path = "refresh_preempt.rs"]
+mod refresh_preempt;
 #[path = "roots.rs"]
 mod roots;
 #[path = "scheduler.rs"]

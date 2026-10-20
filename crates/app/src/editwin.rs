@@ -35,6 +35,10 @@ pub const EDIT_MARKER_BASE: u64 = 1_000_000;
 /// The stage version new edits are authored against (the stamp stage of the generators takes it from the item).
 pub const EDIT_STAGE_VERSION: u32 = planet_generators::stamp::STAMP_STAGE_VERSION;
 
+/// The refresh settle window of the editor in milliseconds (STRM-031, ADR 0072): a tile that edits keep re-keying is refreshed once, after the
+/// edits have been quiet for this long.
+pub const REFRESH_SETTLE_MS: u64 = 40;
+
 /// Where the items go: memory (lost with the window) or one file each in a directory.
 pub enum EditStore {
     Memory(MemoryStore),
@@ -202,6 +206,7 @@ pub fn exact_and_idle(managed: &planet_frame::managed::ManagedLoop, frame: &plan
     frame.pipeline.draw.kind == planet_frame::pipeline::DrawKind::Exact
         && frame.pipeline.draw.substituted == 0
         && managed.manager().streamer().unfinished_jobs() == 0
+        && managed.manager().streamer().held_refreshes() == 0
         && !managed.pipeline().worker().busy()
         && managed.pending().is_empty()
 }

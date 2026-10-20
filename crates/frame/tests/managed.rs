@@ -1631,6 +1631,39 @@ fn an_edit_refreshes_the_tiles_it_touches_while_their_old_versions_stay_drawn_an
     assert!(rig.sink.uploads > sink_uploads, "the new versions were uploaded");
 }
 
+// spec: STRM-031, STRM-026
+#[test]
+fn twenty_quick_edits_of_the_same_tiles_start_at_most_two_refresh_jobs_for_each_through_the_managed_loop_and_the_last_edit_wins() {
+    let rev = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let req = request(here(), 0.0, -0.4);
+    let region = TileId::from_direction(&TangentWarp, here().0.normalized(), 6);
+    let field = Arc::new(EditField { inner: Reference(1), rev: Arc::clone(&rev), region });
+    let mut rig = Rig::build_edited(1_000_000, false, 0, UploadBudget::default(), 64, Some(Arc::clone(&field)));
+    rig.settle(&req);
+    let affected: Vec<TileId> = rig.lp.resident().keys().filter(|t| field.touches(**t)).copied().collect();
+    assert!(affected.len() > 3);
+    // The editor's setting: a frame is 33 ms here, so 20 edits one frame apart are quicker than the 40 ms window.
+    rig.lp.set_refresh_settle(40);
+    let mark = rig.lp.manager().streamer().dispatch_log.len();
+    for edit in 1..=20u64 {
+        rev.store(edit, Ordering::SeqCst);
+        rig.lp.edit(&affected);
+        rig.step(&req);
+    }
+    rig.settle_view(&req);
+    let stats = rig.lp.manager().streamer().stats();
+    let log = &rig.lp.manager().streamer().dispatch_log[mark..];
+    for t in &affected {
+        let jobs = log.iter().filter(|x| *x == t).count();
+        assert!(jobs <= 2, "{t:?}: {jobs} refresh jobs for 20 edits");
+    }
+    assert!(stats.refresh_coalesced >= 19, "the edits that found a refresh waiting are counted: {stats:?}");
+    assert_eq!(rig.lp.manager().streamer().held_refreshes(), 0, "nothing is left waiting for the window");
+    let f = rig.step(&req);
+    assert_eq!(f.pipeline.draw.kind, DrawKind::Exact);
+    assert_eq!(f.pipeline.draw.plan, plan_terrain_field(&req, field.as_ref()).unwrap(), "the frame is the one of the last edit's field");
+}
+
 // spec: REND-033, STRM-026
 #[test]
 fn the_edited_tiles_are_previewed_in_the_frame_after_the_edit_before_any_new_plan_and_the_exact_tiles_end_it() {
