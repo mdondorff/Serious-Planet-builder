@@ -8,7 +8,7 @@ fn run(args: &[&str]) -> Result<String, String> {
     planet::run(&args, &mut buf).map(|_| String::from_utf8(buf).unwrap())
 }
 
-// spec: TEST-019, TEST-041, TEST-042, TEST-043
+// spec: TEST-019, TEST-041, TEST-042, TEST-043, TEST-044
 #[test]
 fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
     let logs = std::env::temp_dir().join(format!("planet-edit-perf-{}", std::process::id()));
@@ -83,6 +83,14 @@ fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
         assert!(cells[i].parse::<f64>().is_ok(), "column {i} of the brush stages row is a number: {stages}");
     }
     assert!(table.contains("| 200 m | 150 m brush |"), "edit-latency.md holds the brush row: {table}");
+    // The regional stamp, the ridge and the region (TEST-044): rows with an exact time, recorded and not gated.
+    for label in ["| 200 m | 5000 m |", "| 200 m | 5000 m ridge |", "| 200 m | 2000 m region |"] {
+        let row = out.lines().find(|l| l.starts_with(label)).unwrap_or_else(|| panic!("no row {label}: {out}"));
+        let cells: Vec<&str> = row.split('|').map(str::trim).collect();
+        assert!(cells[5] != "-", "the edit became exact: {row}");
+        assert!(row.contains("recorded"), "recorded, not gated: {row}");
+        assert!(table.contains(label), "edit-latency.md holds {label}: {table}");
+    }
     // The preview cost (VIEW-036, TEST-042): 0, 8 and 32 active stamps on the last view of the altitude, the flagged nodes and the times.
     assert!(out.contains("| altitude | active stamps | flagged nodes / nodes | GPU ms (median) | wall ms (median) | renders |"), "{out}");
     let cost: Vec<Vec<&str>> = out

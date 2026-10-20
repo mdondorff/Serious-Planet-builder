@@ -46,6 +46,17 @@ pub const BRUSH_ALTITUDES_M: [f64; 2] = [200.0, 2000.0];
 pub const BRUSH_POINTS: usize = 20;
 /// The numbers of active preview stamps the preview cost is measured with (TEST-042): none, a few and the cap.
 pub const PREVIEW_COST_COUNTS: [usize; 3] = [0, 8, planet_frame::preview::MAX_PREVIEW_STAMPS];
+/// The regional cases (TEST-044): a stamp of these radii seen from these altitudes. 50 km is the owner's regional scale, but an item reaches
+/// one cell edge at most (`CELL_EDGE_M`, 40 km), so the largest stamp is the largest an item can be. A smoke run takes the smaller at 200 m.
+pub const REGIONAL_RADII_M: [f64; 2] = [5_000.0, planet_world_def::cells::CELL_EDGE_M];
+pub const REGIONAL_ALTITUDES_M: [f64; 2] = [2_000.0, 20_000.0];
+/// The line and region cases (TEST-044): a ridge of this length and a region of this side, at these altitudes.
+pub const LINE_LENGTH_M: f64 = 5_000.0;
+pub const REGION_SIDE_M: f64 = 2_000.0;
+pub const LINE_ALTITUDES_M: [f64; 2] = [200.0, 2_000.0];
+/// The surface types of the region case: `from` is in the world before the edit, `to` is the edit (rock to forest).
+const REGION_TYPE_FROM: f64 = 0.0;
+const REGION_TYPE_TO: f64 = 4.0;
 /// The layer of the brush cases' item.
 pub const BRUSH_LAYER: &str = "brush";
 /// Repeats of each case (the median is reported).
@@ -214,6 +225,70 @@ fn measure_preview_cost(
     Ok(rows)
 }
 
+/// An item of the case view for the scene: at `centre_deg` (latitude, longitude), in `layer`, with its points in degrees.
+fn case_item(
+    id: u128,
+    layer: &str,
+    kind: &str,
+    params: &[(&str, f64)],
+    points: Vec<(f64, f64)>,
+    reach_m: f64,
+) -> planet_world_def::item::Item {
+    planet_world_def::item::Item {
+        id,
+        body: BodyId::PLANET,
+        surface: planet_world_def::item::DEFAULT_SURFACE.to_string(),
+        layer: layer.to_string(),
+        priority: 0,
+        kind: kind.to_string(),
+        anchor: planet_world_def::item::Anchor { latitude_deg: points[0].0, longitude_deg: points[0].1, height_m: 0.0, heading_deg: 0.0 },
+        reach_m,
+        max_delta_m: params.iter().find(|(k, _)| *k == "amount_m").map_or(0.0, |(_, v)| 1.5 * v),
+        params: params.iter().map(|(k, v)| ((*k).to_string(), *v)).collect(),
+        base_hash: 0,
+        generator_version: 0,
+        stage_version: 0,
+        name: None,
+        notes: None,
+        points,
+        group: None,
+        part: None,
+        mask_layer: None,
+        strokes: Vec::new(),
+    }
+}
+
+/// Degrees of longitude and latitude that are `east_m` and `north_m` metres at the view's place (latitude 20, longitude 30).
+fn view_degrees(east_m: f64, north_m: f64, planet_radius_m: f64) -> (f64, f64) {
+    let lat = 20.0f64;
+    (lat + (north_m / planet_radius_m).to_degrees(), 30.0 + (east_m / (planet_radius_m * lat.to_radians().cos())).to_degrees())
+}
+
+/// The ridge case: one straight ridge of [`LINE_LENGTH_M`] running east, centred on the place the views look at (17 points, so a point
+/// every 312.5 m), 30 m high and 200 m of half-width. Returns the item's spec and the centre the camera looks at.
+pub fn case_ridge(planet_radius_m: f64) -> (ItemSpec, Vec3) {
+    let points: Vec<(f64, f64)> =
+        (0..17).map(|k| view_degrees((f64::from(k) - 8.0) * LINE_LENGTH_M / 16.0, 0.0, planet_radius_m)).collect();
+    let item = case_item(3, "stamps", "ridge", &[("amount_m", 30.0), ("width_m", 200.0)], points, LINE_LENGTH_M + 200.0 + 2.0);
+    (item.spec(), case_centre())
+}
+
+/// The region case: a square of [`REGION_SIDE_M`] centred on the place the views look at, in the layer `regions`, labelling only (mode 0) and
+/// of surface type `surface_type`. The case puts the rock one in the world first and edits it to the forest one. Returns the spec and the centre.
+pub fn case_region(surface_type: f64, planet_radius_m: f64) -> (ItemSpec, Vec3) {
+    let h = REGION_SIDE_M / 2.0;
+    let points: Vec<(f64, f64)> = [(-h, -h), (h, -h), (h, h), (-h, h)].iter().map(|(e, n)| view_degrees(*e, *n, planet_radius_m)).collect();
+    let item = case_item(
+        4,
+        "regions",
+        "region",
+        &[("surface_type", surface_type), ("mask_mode", 0.0)],
+        points,
+        REGION_SIDE_M * std::f64::consts::SQRT_2 + 2.0,
+    );
+    (item.spec(), case_centre())
+}
+
 /// The angle in radians between two unit directions.
 fn planet_frame_angle(a: Vec3, b: Vec3) -> f64 {
     libm::atan2(a.cross(b).length(), a.dot(b))
@@ -341,6 +416,10 @@ pub struct Stages {
 pub enum CaseKind {
     Stamp,
     Brush,
+    /// One ridge of [`LINE_LENGTH_M`] (TEST-044).
+    Line,
+    /// One region of [`REGION_SIDE_M`] whose surface type changes (TEST-044).
+    Region,
 }
 
 /// One row of the report: a case with its repeats.
@@ -367,7 +446,15 @@ impl CaseRow {
         match self.kind {
             CaseKind::Stamp => format!("{} m", self.radius_m),
             CaseKind::Brush => format!("{} m brush", self.radius_m),
+            CaseKind::Line => format!("{} m ridge", self.radius_m),
+            CaseKind::Region => format!("{} m region", self.radius_m),
         }
+    }
+
+    /// Whether the verdict reads the budgets: the regional stamps (over 500 m), the ridge and the region are only recorded (the owner sets a
+    /// number after measuring, TEST-044).
+    pub fn gated(&self) -> bool {
+        matches!(self.kind, CaseKind::Stamp | CaseKind::Brush) && self.radius_m <= 1_000.0
     }
 
     pub fn preview_median(&self) -> Option<f64> {
@@ -385,6 +472,9 @@ impl CaseRow {
 
     /// `ok` or `OVER` against the budgets, `no result` when a run produced none.
     pub fn verdict(&self) -> &'static str {
+        if !self.gated() {
+            return "recorded";
+        }
         match (self.preview_median(), self.drawn_exact_median()) {
             (Some(p), Some(e)) if p <= PREVIEW_BUDGET_MS && e <= exact_budget_ms(self.radius_m, self.altitude_m) => "ok",
             (Some(_), Some(_)) => "OVER",
@@ -407,7 +497,7 @@ pub fn table(rows: &[CaseRow]) -> String {
             r.radius_label(),
             cell(r.preview_median()),
             cell(r.drawn_exact_median()),
-            exact_budget_ms(r.radius_m, r.altitude_m),
+            if r.gated() { format!("{}", exact_budget_ms(r.radius_m, r.altitude_m)) } else { "recorded".to_string() },
             last.refreshed,
             last.resident,
             r.runs.iter().map(|x| x.previewed_nodes_max).max().unwrap_or(0),
@@ -651,6 +741,69 @@ fn run_once(
     Ok(out)
 }
 
+/// One case of the scene: what is edited, how big it is (the radius, the length or the side), where the camera looks, and the item that
+/// is in the world before the edit, if any.
+pub struct Case {
+    pub kind: CaseKind,
+    pub name: String,
+    pub size_m: f64,
+    pub spec: ItemSpec,
+    pub centre: Vec3,
+    pub base: Option<ItemSpec>,
+}
+
+/// The cases of an altitude, in the order they run (a smoke run has one altitude, 200 m, and the smallest of each family): the hill
+/// stamps, the regional stamps (TEST-044), the brush strokes (TEST-042), then the ridge and the region (TEST-044).
+pub fn cases_at(altitude_m: f64, smoke: bool, planet_radius_m: f64) -> Vec<Case> {
+    let stamp = |r: f64| Case {
+        kind: CaseKind::Stamp,
+        name: format!("stamp radius {r} m"),
+        size_m: r,
+        spec: case_stamp(r),
+        centre: case_centre(),
+        base: None,
+    };
+    let mut v = Vec::new();
+    let hill_radii: Vec<f64> = if smoke {
+        vec![RADII_M[0]]
+    } else if ALTITUDES_M.contains(&altitude_m) {
+        RADII_M.to_vec()
+    } else {
+        Vec::new()
+    };
+    v.extend(hill_radii.into_iter().map(stamp));
+    let regional: Vec<f64> = if smoke {
+        vec![REGIONAL_RADII_M[0]]
+    } else if REGIONAL_ALTITUDES_M.contains(&altitude_m) {
+        REGIONAL_RADII_M.to_vec()
+    } else {
+        Vec::new()
+    };
+    v.extend(regional.into_iter().map(stamp));
+    if BRUSH_ALTITUDES_M.contains(&altitude_m) || smoke {
+        let brush_radii: Vec<f64> = if smoke { vec![BRUSH_RADII_M[0]] } else { BRUSH_RADII_M.to_vec() };
+        for r in brush_radii {
+            let (spec, centre) = case_brush(r, planet_radius_m);
+            v.push(Case { kind: CaseKind::Brush, name: format!("brush stroke radius {r} m"), size_m: r, spec, centre, base: None });
+        }
+    }
+    if LINE_ALTITUDES_M.contains(&altitude_m) || smoke {
+        let (spec, centre) = case_ridge(planet_radius_m);
+        v.push(Case { kind: CaseKind::Line, name: format!("ridge of {LINE_LENGTH_M} m"), size_m: LINE_LENGTH_M, spec, centre, base: None });
+        let (base, _) = case_region(REGION_TYPE_FROM, planet_radius_m);
+        let (spec, centre) = case_region(REGION_TYPE_TO, planet_radius_m);
+        v.push(Case {
+            kind: CaseKind::Region,
+            name: format!("region of {REGION_SIDE_M} m, surface type changed"),
+            size_m: REGION_SIDE_M,
+            spec,
+            centre,
+            base: Some(base),
+        });
+    }
+    v
+}
+
 /// The scene: `test-render --perf --scene edit-latency [--store DIR]`, or `--perf-smoke` for a run of the path.
 pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
     let smoke = o.perf_smoke;
@@ -680,9 +833,13 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
     let aspect = f64::from(size.0) / f64::from(size.1);
     let seed = field.seed();
-    let altitudes: Vec<f64> = if smoke { vec![200.0] } else { ALTITUDES_M.to_vec() };
-    let radii: Vec<f64> = if smoke { vec![RADII_M[0]] } else { RADII_M.to_vec() };
-    let brush_radii: Vec<f64> = if smoke { vec![BRUSH_RADII_M[0]] } else { BRUSH_RADII_M.to_vec() };
+    let altitudes: Vec<f64> = if smoke {
+        vec![200.0]
+    } else {
+        let mut v = ALTITUDES_M.to_vec();
+        v.extend(REGIONAL_ALTITUDES_M.iter().filter(|a| !v.contains(a)).copied().collect::<Vec<_>>());
+        v
+    };
     let repeats = if smoke { 1 } else { REPEATS };
     let limit = Duration::from_secs(if smoke { 40 } else { 600 });
     if smoke {
@@ -715,12 +872,16 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     let mut rows = Vec::new();
     let mut costs: Vec<PreviewCost> = Vec::new();
     for &altitude in &altitudes {
+        let cases = cases_at(altitude, smoke, radius_m);
+        if cases.is_empty() {
+            continue;
+        }
         let mut focus: Option<(TerrainRequest, Vec3)> = None;
         // One rig per altitude, built for the first case's camera and settled from empty; every case then edits and reverts on it.
-        let first_stamp = case_stamp(radii[0]);
-        let rho = (1.5 * radii[0]).max(altitude);
-        let first = req_of(camera_for(first_stamp.dir, &ground, radius_m, rho, altitude, aspect));
-        let mut rig = Rig::new(ctx, &world, &first, o.gen_workers())?;
+        let first = &cases[0];
+        let rho = (1.5 * first.size_m).max(altitude);
+        let first_req = req_of(camera_for(first.centre, &ground, radius_m, rho, altitude, aspect));
+        let mut rig = Rig::new(ctx, &world, &first_req, o.gen_workers())?;
         // The editor's refresh settle window, or the one the run names (ADR 0072): a run at 0 and a run at 40 show its share of a case.
         rig.managed.set_refresh_settle(o.settle_ms);
         let mut h = Harness {
@@ -731,34 +892,34 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             settle_limit: if smoke { Duration::from_secs(120) } else { SETTLE_LIMIT },
             settle_ms: o.settle_ms,
         };
-        for &r in &radii {
-            let stamp = case_stamp(r);
-            let rho = (1.5 * r).max(altitude);
-            let req = req_of(camera_for(stamp.dir, &ground, radius_m, rho, altitude, aspect));
+        for case in &cases {
+            let rho = (1.5 * case.size_m).max(altitude);
+            let req = req_of(camera_for(case.centre, &ground, radius_m, rho, altitude, aspect));
+            // A case that edits an item already in the world (the region's surface type) puts the earlier state in first.
+            let original = world.definition();
+            if let Some(base) = &case.base {
+                let mut with_base = (*original).clone();
+                with_base.put_item_spec(BodyId::PLANET, base.clone()).map_err(|e| format!("the case's earlier state: {e:?}"))?;
+                world.set_definition(Arc::new(with_base))?;
+                // The tiles the earlier state touches are refreshed, as an edit's are, so that the frames settle on the world as it is.
+                let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
+                h.rig.managed.edit(&found_tiles(base, &resident, radius_m));
+            }
             let settle = h.settle(&req, 20)?;
-            writeln!(out, "  altitude {altitude} m, stamp radius {r} m: settled in {settle:.1} s").map_err(err)?;
+            writeln!(out, "  altitude {altitude} m, {}: settled in {settle:.1} s", case.name).map_err(err)?;
             let mut runs = Vec::new();
             for _ in 0..repeats {
-                runs.push(run_once(&mut h, &world, &req, &stamp, limit)?);
+                runs.push(run_once(&mut h, &world, &req, &case.spec, limit)?);
             }
-            rows.push(CaseRow { kind: CaseKind::Stamp, altitude_m: altitude, radius_m: r, runs });
-            focus = Some((req, stamp.dir));
-        }
-        // The brush cases (TEST-042): one raise stroke of 20 points, at the altitudes the brush is measured at.
-        for &r in brush_radii.iter().filter(|_| BRUSH_ALTITUDES_M.contains(&altitude)) {
-            let (stroke, centre) = case_brush(r, radius_m);
-            let rho = (1.5 * r).max(altitude);
-            let req = req_of(camera_for(centre, &ground, radius_m, rho, altitude, aspect));
-            let settle = h.settle(&req, 20)?;
-            writeln!(out, "  altitude {altitude} m, brush stroke radius {r} m: settled in {settle:.1} s").map_err(err)?;
-            let mut runs = Vec::new();
-            for _ in 0..repeats {
-                runs.push(run_once(&mut h, &world, &req, &stroke, limit)?);
+            world.set_definition(original)?;
+            if let Some(base) = &case.base {
+                let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
+                h.rig.managed.edit(&found_tiles(base, &resident, radius_m));
             }
-            rows.push(CaseRow { kind: CaseKind::Brush, altitude_m: altitude, radius_m: r, runs });
-            focus = Some((req, centre));
+            rows.push(CaseRow { kind: case.kind, altitude_m: altitude, radius_m: case.size_m, runs });
+            focus = Some((req, case.centre));
         }
-        // The cost of the preview with the cap of active stamps (TEST-042), on the last view of the altitude.
+        // The cost of the preview with the cap of active stamps (TEST-043), on the last view of the altitude.
         if let Some((req, at)) = focus {
             costs.extend(measure_preview_cost(&mut h, &req, at, radius_m, altitude, if smoke { 3 } else { 20 })?);
         }
@@ -818,6 +979,73 @@ mod tests {
             let mut def = WorldDefinition::single_planet(R, 7);
             def.put_item_spec(BodyId::PLANET, spec).unwrap_or_else(|e| panic!("radius {radius}: {e:?}"));
         }
+    }
+
+    // spec: TEST-044
+    #[test]
+    fn the_ridge_and_the_region_cases_are_items_the_index_accepts_and_the_region_case_changes_only_its_surface_type() {
+        let (ridge, centre) = case_ridge(R);
+        let stamp = ridge.stamp.as_ref().expect("a stamp");
+        assert_eq!((stamp.kind, stamp.points().len()), (StampKind::Ridge, 17));
+        let pts = stamp.points();
+        let length = R * planet_frame_angle(pts[0], pts[16]);
+        assert!((length - LINE_LENGTH_M).abs() < 1.0, "{length}");
+        assert!(ridge.reach_m >= length + 200.0, "the reach holds the line and its half-width");
+        let mid = (pts[7] + pts[9]).normalized();
+        assert!(R * planet_frame_angle(mid, centre) < 1.0, "centred on the place the views look at");
+        let (from, c1) = case_region(REGION_TYPE_FROM, R);
+        let (to, c2) = case_region(REGION_TYPE_TO, R);
+        assert_eq!((c1, from.layer.as_str(), to.layer.as_str()), (c2, "regions", "regions"));
+        assert_eq!((from.id, from.dir, from.reach_m), (to.id, to.dir, to.reach_m), "the same region, edited in place");
+        assert_ne!(from.content_hash, to.content_hash, "only the surface type differs: the content hash does");
+        let (fp, tp) = (from.stamp.as_ref().unwrap(), to.stamp.as_ref().unwrap());
+        assert_eq!(
+            (fp.kind, fp.points(), fp.params()[0], tp.params()[0]),
+            (StampKind::Region, tp.points(), REGION_TYPE_FROM, REGION_TYPE_TO)
+        );
+        let side = R * planet_frame_angle(fp.points()[0], fp.points()[1]);
+        assert!((side - REGION_SIDE_M).abs() < 1.0, "{side}");
+        // The index takes them all, the earlier region first and then its edit in place.
+        let mut def = WorldDefinition::single_planet(R, 7);
+        def.put_item_spec(BodyId::PLANET, ridge).unwrap();
+        def.put_item_spec(BodyId::PLANET, from).unwrap();
+        def.put_item_spec(BodyId::PLANET, to).unwrap();
+        assert_eq!(def.footprint_items_cap(BodyId::PLANET, "regions", Cap { centre: case_centre(), angle: 1.0 }).unwrap().len(), 1);
+    }
+
+    // spec: TEST-044
+    #[test]
+    fn the_cases_of_an_altitude_are_the_hills_the_regional_stamps_the_brush_the_ridge_and_the_region_where_they_are_measured() {
+        let names = |alt: f64, smoke: bool| -> Vec<String> { cases_at(alt, smoke, R).into_iter().map(|c| c.name).collect() };
+        // 1 m: the hills only. 200 m: hills, brush, ridge and region. 2 km: hills, 5 km and 40 km stamps, brush, ridge, region. 20 km: the regional stamps.
+        assert_eq!(names(1.0, false).len(), 3);
+        assert_eq!(names(200.0, false).len(), 3 + 2 + 2);
+        assert_eq!(names(2_000.0, false).len(), 3 + 2 + 2 + 2);
+        assert_eq!(names(20_000.0, false), ["stamp radius 5000 m", "stamp radius 40000 m"]);
+        assert!(REGIONAL_RADII_M[1] <= planet_world_def::cells::CELL_EDGE_M, "the largest stamp an item can be");
+        // A smoke run: one altitude, the smallest of every family.
+        assert_eq!(names(200.0, true).len(), 1 + 1 + 1 + 2);
+        let kinds: Vec<CaseKind> = cases_at(200.0, true, R).iter().map(|c| c.kind).collect();
+        assert_eq!(kinds, [CaseKind::Stamp, CaseKind::Stamp, CaseKind::Brush, CaseKind::Line, CaseKind::Region]);
+        // Only the region case has an earlier state.
+        assert!(cases_at(2_000.0, false, R).iter().all(|c| c.base.is_some() == (c.kind == CaseKind::Region)));
+    }
+
+    // spec: TEST-044
+    #[test]
+    fn the_regional_stamp_the_ridge_and_the_region_are_recorded_not_gated_and_say_what_they_are() {
+        let run =
+            CaseRun { levels: vec![LevelRow { level: 12, found: 3, drawn: 2, spacing_m: 1.0, below_spacing: 0 }], ..Default::default() };
+        let row = |kind, size| CaseRow { kind, altitude_m: 2_000.0, radius_m: size, runs: vec![run.clone()] };
+        let rows =
+            [row(CaseKind::Stamp, 150.0), row(CaseKind::Stamp, 5_000.0), row(CaseKind::Line, 5_000.0), row(CaseKind::Region, 2_000.0)];
+        assert_eq!(rows.iter().map(CaseRow::gated).collect::<Vec<_>>(), [true, false, false, false]);
+        assert!(rows.iter().skip(1).all(|r| r.verdict() == "recorded"));
+        let t = table(&rows);
+        for label in ["| 2000 m | 150 m |", "| 2000 m | 5000 m |", "| 2000 m | 5000 m ridge |", "| 2000 m | 2000 m region |"] {
+            assert!(t.contains(label), "{label} in {t}");
+        }
+        assert_eq!(t.matches("recorded").count(), 6, "the budget cell and the verdict of the three recorded rows: {t}");
     }
 
     // spec: TEST-043
