@@ -66,7 +66,7 @@ pub const SKIRT_FRACTION: f64 = 0.08;
 /// keys differ) and the coarse pre-fill of a pack must be written again.
 /// 8 = the compact tile is the slot of GEN-025 (ADR 0062): a 32-bit height step count and two 15-bit octahedral normal components per
 /// texel, the climate block and the header inside the slot; every compact key changes, vertex tiles are unchanged.
-pub const MESH_VERSION: u32 = 8;
+pub const MESH_VERSION: u32 = 9;
 
 /// Key of a mesh: the height key of the tile (generator, seed, mapping, tile; resolution = `cells`), the grid size, the
 /// radius bits, the skirt fraction bits and [`MESH_VERSION`].
@@ -240,21 +240,12 @@ pub fn tile_mesh_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
     // World position and height of lattice point (i, j), 0 <= i, j <= cells.
     let mut world = vec![Vec3::ZERO; width * width];
     let mut heights = vec![0.0f64; width * width];
-    // Every direction the tile needs, evaluated by one batch call (GEN-020): the lattice points, the four normal-stencil
-    // points of each, and the tile centre. Each height is a pure function of its direction, so the order the field uses
-    // inside the call cannot change a bit.
-    let eps = core::f64::consts::FRAC_PI_2 / f64::from(1u32 << id.level()) / f64::from(cells);
+    // Every direction the tile needs, evaluated by one batch call (GEN-020): the lattice points, the one-sample ring around them
+    // without its corners (ADR 0073), and the tile centre. Each height is a pure function of its direction, so the order the field
+    // uses inside the call cannot change a bit.
     let count = width * width;
-    let mut dirs = Vec::with_capacity(count * 5 + 1);
-    for j in 0..=n {
-        for i in 0..=n {
-            dirs.push(id.sample_direction(map, cells, i as u32, j as u32));
-        }
-    }
-    for k in 0..count {
-        let st = normal_stencil(dirs[k], eps);
-        dirs.extend(st);
-    }
+    let mut dirs = crate::normals::lattice_directions(map, id, cells);
+    let extra = dirs.len();
     let centre_dir = id.center_direction(map);
     dirs.push(centre_dir);
     let (all, climate) = field.heights_and_climate(map, id, &dirs, &|| false);
@@ -265,19 +256,18 @@ pub fn tile_mesh_field(field: &dyn HeightField, map: &dyn FaceMapping, id: TileI
     let at = |i: i64, j: i64| world[j as usize * width + i as usize];
     // The origin sits at the tile centre including its terrain height, so tile-local offsets and the camera-relative
     // origin stay small (a few tile sizes), never terrain-height sized.
-    let origin = PlanetFixed(centre_dir * (radius_m + all[count * 5]));
+    let origin = PlanetFixed(centre_dir * (radius_m + all[extra]));
     let local = |p: Vec3| {
         let d = p - origin.0;
         [d.x as f32, d.y as f32, d.z as f32]
     };
 
+    let normals = crate::normals::lattice_normals(id, cells, radius_m, &dirs, &all);
     let mut vertices = Vec::with_capacity(vertex_count(cells));
     for j in 0..=n {
         for i in 0..=n {
             let k = j as usize * width + i as usize;
-            let (s0, h0) = (count + 4 * k, count + 4 * k);
-            let st = [dirs[s0], dirs[s0 + 1], dirs[s0 + 2], dirs[s0 + 3]];
-            let normal = normal_from_stencil(&st, &[all[h0], all[h0 + 1], all[h0 + 2], all[h0 + 3]], radius_m);
+            let normal = normals[k];
             // Geomorph target on the parent grid (diagonal (i-1,j-1)-(i+1,j+1) matches the triangulation).
             let coarse = match (i % 2, j % 2) {
                 (0, 0) => at(i, j),
@@ -354,48 +344,4 @@ impl MeshVertex {
         let (p, c, n) = (self.pos, self.coarse, self.normal);
         [p[0], p[1], p[2], c[0], c[1], c[2], n[0], n[1], n[2], self.height, self.coarse_height]
     }
-}
-
-/// Outward surface normal at the unit direction `dir`, from central differences of the height field in a tangent frame
-/// that is a pure function of `dir` (not of any tile's lattice). Border vertices shared by tiles of the same level, also
-/// across cube faces, have bit-identical directions and the same `eps`, so they get bit-identical normals (ADR 0003).
-pub fn surface_normal(seed: u64, dir: Vec3, eps: f64, radius_m: f64) -> Vec3 {
-    surface_normal_field(&Reference(seed), dir, eps, radius_m)
-}
-
-/// [`surface_normal`] over any height field.
-pub fn surface_normal_field(field: &dyn HeightField, dir: Vec3, eps: f64, radius_m: f64) -> Vec3 {
-    let st = normal_stencil(dir, eps);
-    let h = field.heights(&st);
-    normal_from_stencil(&st, &[h[0], h[1], h[2], h[3]], radius_m)
-}
-
-/// The tangent frame of [`surface_normal`] at `dir`.
-fn tangent_frame(dir: Vec3) -> (Vec3, Vec3) {
-    // Tangent frame from `dir` alone: the world axis least aligned with it seeds t1; t2 = dir x t1, so t1 x t2 = dir.
-    let (ax, ay, az) = (dir.x.abs(), dir.y.abs(), dir.z.abs());
-    let axis = if ax <= ay && ax <= az {
-        Vec3::new(1.0, 0.0, 0.0)
-    } else if ay <= az {
-        Vec3::new(0.0, 1.0, 0.0)
-    } else {
-        Vec3::new(0.0, 0.0, 1.0)
-    };
-    let t1 = (axis - dir * axis.dot(dir)).normalized();
-    (t1, dir.cross(t1))
-}
-
-/// The four directions whose heights give the normal at `dir`: `+t1`, `-t1`, `+t2`, `-t2` at the angular step `eps`. Batch
-/// builders evaluate them together with the other samples of a tile (GEN-020) and combine them with [`normal_from_stencil`].
-pub fn normal_stencil(dir: Vec3, eps: f64) -> [Vec3; 4] {
-    let (t1, t2) = tangent_frame(dir);
-    let p = |t: Vec3, sign: f64| (dir + t * (sign * eps)).normalized();
-    [p(t1, 1.0), p(t1, -1.0), p(t2, 1.0), p(t2, -1.0)]
-}
-
-/// The outward normal from the heights `h` at the stencil directions `st` ([`normal_stencil`]): the same arithmetic as
-/// [`surface_normal_field`].
-pub fn normal_from_stencil(st: &[Vec3; 4], h: &[f64; 4], radius_m: f64) -> Vec3 {
-    let q = |k: usize| st[k] * (radius_m + h[k]);
-    (q(0) - q(1)).cross(q(2) - q(3)).normalized()
 }
