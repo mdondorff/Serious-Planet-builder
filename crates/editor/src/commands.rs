@@ -265,22 +265,41 @@ impl<S: ItemStore> Editor<S> {
     }
 
     /// Forget what the editor holds of `body` and read its items from the store again: the way out of [`EditError::RollbackFailed`]. The
-    /// undo and redo stacks and an open drag are dropped (they describe a state that is gone). Returns the number of items loaded; a store
-    /// that refuses leaves the editor as it was.
+    /// items are read, checked against the active versions and put into a copy of the definition first; only if all of that works do they
+    /// replace the editor's items (so a store that refuses, an item authored against other versions or an item the index refuses leaves
+    /// the editor exactly as it was, still refusing commands). The undo and redo stacks and an open drag are dropped (they describe a
+    /// state that is gone), and so are the inconsistent items of this body. Returns the number of items loaded.
     pub fn reload(&mut self, body: BodyId) -> Result<usize, EditError> {
         let from_store = self.store.load_all(body)?;
-        let ids: Vec<ItemId> = self.items.values().filter(|i| i.body == body).map(|i| i.id).collect();
-        for id in ids {
-            self.def.remove_item(body, id);
-            self.items.remove(&id);
+        let versions = ActiveVersions {
+            generator_version: self.generator_version,
+            stage_version: self.stage_version,
+            base_hash: self.def.base_hash(),
+        };
+        for item in &from_store {
+            item.check_versions(&versions).map_err(|m| EditError::Invalid(ItemFileError { key: "versions".into(), why: m.to_string() }))?;
+        }
+        let old: Vec<ItemId> = self.items.values().filter(|i| i.body == body).map(|i| i.id).collect();
+        let mut trial = self.def.clone();
+        for id in &old {
+            trial.remove_item(body, *id);
+        }
+        for item in &from_store {
+            item.put_into(&mut trial).map_err(EditError::from)?;
+        }
+        self.def = trial;
+        for id in &old {
+            self.items.remove(id);
+        }
+        for item in &from_store {
+            self.items.insert(item.id, item.clone().canonical());
         }
         self.undo.clear();
         self.redo.clear();
         self.open = None;
-        self.inconsistent.clear();
+        self.inconsistent.retain(|id| !old.contains(id));
         self.revision += 1;
-        let _ = from_store;
-        self.load(body)
+        Ok(from_store.len())
     }
 
     /// The definition as the commands have left it.
@@ -775,19 +794,25 @@ impl<S: ItemStore> Editor<S> {
         self.revision += 1;
         for (k, step) in command.steps.iter().enumerate() {
             if let Err(e) = self.run_step(step) {
-                // Take back the steps already done; one that cannot be taken back is named, never swallowed.
-                let mut left: Vec<ItemId> = Vec::new();
+                // Take back the steps already done; one that cannot be taken back is named, never swallowed. So is the failing step
+                // itself when it could not even restore its own item.
+                let (cause, mut left) = match &e {
+                    EditError::RollbackFailed { cause, ids } => (cause.clone(), ids.clone()),
+                    other => (other.to_string(), Vec::new()),
+                };
+                let mut earlier: Vec<ItemId> = Vec::new();
                 for done in command.steps[..k].iter().rev() {
                     if self.run_step(&done.inverse()).is_err() {
-                        left.push(done.id());
+                        earlier.push(done.id());
                     }
                 }
+                earlier.reverse();
+                left.splice(0..0, earlier);
                 if left.is_empty() {
                     return Err(e);
                 }
-                left.reverse();
                 self.inconsistent = left.clone();
-                return Err(EditError::RollbackFailed { cause: e.to_string(), ids: left });
+                return Err(EditError::RollbackFailed { cause, ids: left });
             }
         }
         Ok(command.affected())
@@ -802,7 +827,14 @@ impl<S: ItemStore> Editor<S> {
                 if let Err(e) = self.store.put(after) {
                     match &current {
                         Some(item) => {
-                            let _ = item.put_into(&mut self.def);
+                            // Putting the item back is refused only if the index changed meanwhile; then it is the item left on the
+                            // after side, and the caller is told so.
+                            if let Err(restore) = item.put_into(&mut self.def) {
+                                return Err(EditError::RollbackFailed {
+                                    cause: format!("{e}; putting the item back in the definition was refused: {restore:?}"),
+                                    ids: vec![id],
+                                });
+                            }
                         }
                         None => {
                             self.def.remove_item(after.body, id);

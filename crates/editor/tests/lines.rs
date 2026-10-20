@@ -375,6 +375,7 @@ fn a_rollback_that_fails_is_named_and_the_editor_refuses_commands_until_the_item
     struct Failing {
         inner: MemoryStore,
         puts_left: Rc<Cell<u32>>,
+        load_fails: Rc<Cell<bool>>,
     }
     impl ItemStore for Failing {
         fn put(&mut self, item: &Item) -> Result<(), StoreError> {
@@ -391,11 +392,15 @@ fn a_rollback_that_fails_is_named_and_the_editor_refuses_commands_until_the_item
             self.inner.get(body, id)
         }
         fn load_all(&self, body: BodyId) -> Result<Vec<Item>, StoreError> {
+            if self.load_fails.get() {
+                return Err(StoreError::Io { what: "reading", path: PathBuf::from("items"), message: "unreadable".into() });
+            }
             self.inner.load_all(body)
         }
     }
     let left = Rc::new(Cell::new(1_000));
-    let mut ed = editor(Failing { inner: MemoryStore::new(), puts_left: left.clone() });
+    let load_fails = Rc::new(Cell::new(false));
+    let mut ed = editor(Failing { inner: MemoryStore::new(), puts_left: left.clone(), load_fails: load_fails.clone() });
     let (ids, _) = ed.put_line(ridge(), &long_line()).unwrap();
     let mut moved = ed.line_points(ids[0]).unwrap();
     moved[1] = GeoPoint::new(0.02, moved[1].lon_deg);
@@ -426,6 +431,13 @@ fn a_rollback_that_fails_is_named_and_the_editor_refuses_commands_until_the_item
     }
     assert_eq!(ed.hash(), hash);
 
+    // A reload the store refuses leaves the editor as it was: still refusing commands, the same items named.
+    load_fails.set(true);
+    assert!(matches!(ed.reload(BodyId::PLANET), Err(EditError::Store(_))));
+    assert!(matches!(ed.put_line(ridge(), &[east(0.0), east(10.0)]), Err(EditError::Inconsistent { .. })));
+    assert_eq!(ed.hash(), hash);
+    load_fails.set(false);
+
     // Reloading from the store makes the editor what the files are, and it takes commands again; the undo stack is gone.
     let n = ed.reload(BodyId::PLANET).unwrap();
     assert_eq!(n, ids.len());
@@ -433,4 +445,47 @@ fn a_rollback_that_fails_is_named_and_the_editor_refuses_commands_until_the_item
     assert_eq!(ed.undo_depth(), 0, "the stack described a state that is gone (was {depth})");
     ed.put_line(ridge(), &[GeoPoint::new(30.0, 0.0), GeoPoint::new(30.0, 0.01)]).unwrap();
     assert_eq!(ed.undo_depth(), 1);
+}
+
+// spec: VIEW-028
+#[test]
+fn an_undo_whose_rollback_fails_is_named_and_a_reload_recovers() {
+    struct Failing {
+        inner: MemoryStore,
+        puts_left: Rc<Cell<u32>>,
+    }
+    impl ItemStore for Failing {
+        fn put(&mut self, item: &Item) -> Result<(), StoreError> {
+            if self.puts_left.get() == 0 {
+                return Err(StoreError::Io { what: "writing", path: PathBuf::from("items/x.toml"), message: "disk full".into() });
+            }
+            self.puts_left.set(self.puts_left.get() - 1);
+            self.inner.put(item)
+        }
+        fn delete(&mut self, body: BodyId, id: ItemId) -> Result<bool, StoreError> {
+            self.inner.delete(body, id)
+        }
+        fn get(&self, body: BodyId, id: ItemId) -> Result<Option<Item>, StoreError> {
+            self.inner.get(body, id)
+        }
+        fn load_all(&self, body: BodyId) -> Result<Vec<Item>, StoreError> {
+            self.inner.load_all(body)
+        }
+    }
+    let left = Rc::new(Cell::new(1_000));
+    let mut ed = editor(Failing { inner: MemoryStore::new(), puts_left: left.clone() });
+    let (ids, _) = ed.put_line(ridge(), &long_line()).unwrap();
+    let mut moved = ed.line_points(ids[0]).unwrap();
+    moved[1] = GeoPoint::new(0.02, moved[1].lon_deg);
+    moved[9] = GeoPoint::new(0.02, moved[9].lon_deg);
+    ed.set_line_points(ids[0], &moved).unwrap();
+    // The undo writes the old parts back: one write works, the next fails, and the one written cannot be written back.
+    left.set(1);
+    let e = ed.undo().unwrap_err();
+    assert!(matches!(&e, EditError::RollbackFailed { ids, .. } if !ids.is_empty()), "{e:?}");
+    assert!(matches!(ed.redo(), Err(EditError::Inconsistent { .. })), "redo is refused too");
+    left.set(1_000);
+    assert_eq!(ed.reload(BodyId::PLANET).unwrap(), ids.len());
+    assert_store_matches(&ed, "after the reload");
+    assert_eq!((ed.can_undo(), ed.can_redo()), (false, false));
 }
