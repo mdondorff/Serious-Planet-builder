@@ -1,6 +1,7 @@
 //! The single binary's run modes (CON-01): `editor` (interactive viewer), `generate` (headless CLI)
 //! and `test-render` (headless harness). M0 only wires them up; real work arrives with M1+.
 
+pub mod crash;
 pub mod editperf;
 pub mod editwin;
 pub mod globalperf;

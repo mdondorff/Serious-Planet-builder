@@ -862,3 +862,14 @@ Source: opus-planner (2026-10-20), VIEW-035, REND-033, GEN-030
 #### Scenario: A flatten and a lower in one item
 - **WHEN** a brush item holds a flatten and then a lower
 - **THEN** the delta lists the flatten's plateaus before the lower's hills
+
+### Requirement: VIEW-037 A failure that ends the window leaves a crash report, and F9 saves the frame
+A panic, an error that ends the editor run, and a lost GPU device SHALL write `target/review/crashes/<UTC time>.txt` (`PLANET_CRASH_DIR` overrides the directory; `crash::report`, once per run) holding the message, the location, the backtrace, the build commit, the command line, the camera path of the last minute (the F9 path file, refreshed about once a second) and the last 200 log lines, and print its path. A plan refusal the window degrades from (VIEW-032) SHALL write the same report (`crash::snapshot`, every time, without using up the once-per-run report) and name it in the title notice. F9 SHALL also write `frame-<n>.png` beside the bundle and the path file: the renderer's last submitted colour target, the final tone-mapped scene without the egui panels; the F9 notice names it.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-20), VIEW-024, VIEW-026, VIEW-032
+
+#### Scenario: A report
+- **WHEN** a report is written after a log line was noted
+- **THEN** the file holds the message, location, backtrace, commit, command line, path text and the log line, and a second request in the same run writes nothing

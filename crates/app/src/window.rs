@@ -341,7 +341,14 @@ impl App<'_> {
         let (bundle_path, path_path) = (dir.join(format!("frame-{n}.bundle")), dir.join(format!("frame-{n}-path.txt")));
         std::fs::write(&bundle_path, bundle.to_text()).map_err(|e| format!("writing {}: {e}", bundle_path.display()))?;
         std::fs::write(&path_path, st.path.to_text()).map_err(|e| format!("writing {}: {e}", path_path.display()))?;
-        Ok(st.path.saved_notice(n, &dir.display().to_string()))
+        // The last frame the renderer submitted, as the final tone-mapped colour target: without the egui panels (they are painted on the
+        // swapchain image only). A failed write is said in the notice, it does not lose the bundle.
+        let png_path = dir.join(format!("frame-{n}.png"));
+        let png = match st.rig.renderer.read_color(&st.ctx).write_png(&png_path) {
+            Ok(()) => format!("; frame-{n}.png (the scene without the panels)"),
+            Err(e) => format!("; the screenshot was not written: {e}"),
+        };
+        Ok(format!("{}{png}", st.path.saved_notice(n, &dir.display().to_string())))
     }
 
     fn fail(&mut self, el: &ActiveEventLoop, e: String) {
@@ -604,7 +611,22 @@ impl App<'_> {
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             if let Some(why) = st.rig.managed.take_plan_refusal() {
-                eprintln!("warning: {why}\n  the window keeps the last plan and goes on");
+                crate::crash::note(&format!("warning: {why}\n  the window keeps the last plan and goes on"));
+                crate::crash::set_path_text(st.path.to_text());
+                let report = crate::crash::snapshot("plan refusal (the window went on)", &why);
+                let text = report.map_or_else(|| why.clone(), |p| format!("plan refused, report {}", p.display()));
+                st.window.set_title(&format!("planet | {text}"));
+                st.notice = Some((text, now_ms + NOTICE_MS));
+            }
+            // A lost GPU device cannot be drawn on again: report it and end the run with the reason.
+            if let Some(lost) = st.ctx.device_lost() {
+                crate::crash::set_path_text(st.path.to_text());
+                crate::crash::report("GPU device lost", &lost, "wgpu device-lost callback", "");
+                return Err(lost);
+            }
+            // The path the report carries, refreshed about once a second.
+            if st.frames % 60 == 0 {
+                crate::crash::set_path_text(st.path.to_text());
             }
             // F9: the camera path of the last minute and the repro bundle of this frame (VIEW-024).
             if st.viewer.take_repro_request() {
