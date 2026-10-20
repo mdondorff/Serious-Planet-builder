@@ -1365,6 +1365,7 @@ mod tests {
         coarse.validate().expect("the coarse parameters are valid at 1080p");
         // It is the largest the plan accepts wherever it accepts the base ones, with the margin kept: a little more is invalid by the node
         // radius alone or leaves a level the base meets (with the neighbourhood's height extent added) over the limit.
+        assert!((base.coarse_factor() - 1.737).abs() < 0.02, "the production 1080p coarse factor is about 1.7: {}", base.coarse_factor());
         let bigger = LodParams { tau_px: coarse.tau_px * 1.05, ..base.clone() };
         let too_much = bigger.validate().is_err()
             || base.worst_case_levels().into_iter().any(|l| {
