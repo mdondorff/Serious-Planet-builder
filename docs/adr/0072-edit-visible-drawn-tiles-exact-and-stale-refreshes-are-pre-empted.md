@@ -1,5 +1,5 @@
 # 0072 Edit visible: the drawn tiles are exact, drawn tiles refresh first, stale refreshes are pre-empted
-Status: proposed (sonnet-explorer, 2026-10-20; the substance is the owner's decision of 2026-10-20 relayed by opus-planner, who accepts it). Reads the M6 exit criterion "edit visible" (SPIKE-13, SPIKE-14); extends STRM-026 (refresh of resident tiles).
+Status: accepted (owner decision 2026-10-20; opus-planner, 2026-10-20; drafted by sonnet-explorer). Reads the M6 exit criterion "edit visible" (SPIKE-13, SPIKE-14); extends STRM-026 (refresh of resident tiles).
 Date: 2026-10-20
 Source: owner (2026-10-20, `docs/status.md`); windows 13 to 16 (`docs/perf/`, `docs/perf/window-16-17.md`); STRM-026; TEST-041; ADR 0066 point 7
 
