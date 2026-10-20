@@ -108,7 +108,7 @@ pub enum EditKey {
     Escape,
     /// Enter: finish the line or region being drawn.
     Finish,
-    /// Backspace: take back the last point of the draft. It never deletes an edit (Delete does, owner decision 2020-10-20 via opus-planner).
+    /// Backspace: take back the last point of the draft. It never deletes an edit (Delete does, opus-planner 2026-10-20, easy to reverse).
     Back,
     /// F1 or `?`: show or hide the list of keys.
     Help,
@@ -978,6 +978,12 @@ mod tests {
         e.press(&cam, VIEWPORT, h0, &limits(), &Flat);
         assert!(matches!(e.session.dragging(), Some(Handle::Point(_))));
         e.key(EditKey::Escape);
+
+        // Backspace with no draft deletes nothing: the line is still there and the status says what Delete is for.
+        let before = e.edit_count();
+        e.key(EditKey::Back);
+        assert_eq!(e.edit_count(), before);
+        assert!(e.session.status().contains("Delete deletes"), "{}", e.session.status());
 
         // The region tool (7), and a click that selects the line by its outline.
         e.key(EditKey::Tool(7));

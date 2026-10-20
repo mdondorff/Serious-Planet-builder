@@ -353,3 +353,68 @@ fn the_coarse_lod_the_window_derives_is_never_refused_by_the_plan_it_makes() {
         refused.first()
     );
 }
+
+// spec: VIEW-032
+#[test]
+fn the_coarse_lod_is_refused_at_almost_no_pose_the_base_lod_is_accepted_at_from_20_km_to_orbit() {
+    // The SPIKE-19 review: the first test starts at 300 km; the refusals the verifier found sat at 25 to 190 km (levels 8 and 9, where a
+    // field with only a global bound has volumes as tall as they are wide). Both parameter sets are the window's, over a field of zero
+    // height whose bound is the eroded world's.
+    let field = Bound9735;
+    let cases = [
+        (
+            planet_frame::LodParams {
+                cells: 32,
+                viewport_h_px: 200.0,
+                tau_px: 6.0 * 200.0 / 1440.0,
+                max_height_m: 9735.0,
+                ..planet_frame::LodParams::earth_1080p()
+            },
+            (320u32, 200u32),
+        ),
+        (planet_frame::LodParams { max_height_m: 9735.0, ..planet_frame::LodParams::earth_1080p() }, (1920, 1080)),
+    ];
+    let mut compared = 0;
+    let mut refused_only_coarse = Vec::new();
+    for (base, size) in cases {
+        base.validate().unwrap();
+        let coarse = base.coarse();
+        assert!(coarse.tau_px > 1.5 * base.tau_px, "the coarse view is a real one: factor {}", coarse.tau_px / base.tau_px);
+        for k in 0..16 {
+            let alt = 2.0e4 * libm::pow(1.45, f64::from(k)); // 20 km to about 4,000 km
+            for pitch in [0.4, 1.2] {
+                let dir = planet_core::Vec3::new(1.0, 0.0, 0.0);
+                let camera = planet_frame::Camera::at_surface_point(
+                    planet_core::PlanetFixed(dir * (6_371_000.0 + alt)),
+                    planet_core::Vec3::new(0.0, 1.0, 0.0),
+                    pitch,
+                    60f64.to_radians(),
+                    f64::from(size.0) / f64::from(size.1),
+                    0.1,
+                );
+                let request = |lod: &planet_frame::LodParams| planet_frame::TerrainRequest {
+                    camera,
+                    size,
+                    view: planet_frame::TerrainView::Level,
+                    lod: lod.clone(),
+                    face_mapping: "tangent-v1".into(),
+                    seed: 5,
+                };
+                if planet_frame::plan_terrain_field(&request(&base), &field).is_ok() {
+                    compared += 1;
+                    if let Err(e) = planet_frame::plan_terrain_field(&request(&coarse), &field) {
+                        refused_only_coarse.push(format!("{}x{} alt {alt:.0} m pitch {pitch}: {e}", size.0, size.1));
+                    }
+                }
+            }
+        }
+    }
+    assert!(compared >= 40, "the sweep compared {compared} poses");
+    // At most one in fifty may be refused (a level the check does not take, whose tiles the plan bounds from above).
+    assert!(
+        refused_only_coarse.len() * 50 <= compared,
+        "{} of {compared} poses refused for the coarse LOD only: {:?}",
+        refused_only_coarse.len(),
+        refused_only_coarse.first()
+    );
+}

@@ -1355,9 +1355,9 @@ mod tests {
         assert_eq!(same, base, "off: the parameters are the base ones");
         assert_eq!(crate::lod::COARSE_LOD_FACTOR, 4.0);
         // The production 1080p parameters (error bound 6 px, 32 cells) cannot take four times the bound (viewport / tau would be 45,
-        // under 64): the factor is the largest the morph intervals allow, between 2 and 4, and the result is valid.
+        // under 64): the factor is the largest the morph intervals allow (and the plan accepts at the large levels, about 1.7), between 1.5 and 4, and the result is valid.
         let coarse = effective_lod(&base, true);
-        assert!(coarse.tau_px > 2.0 * base.tau_px && coarse.tau_px < 4.0 * base.tau_px, "{}", coarse.tau_px);
+        assert!(coarse.tau_px > 1.5 * base.tau_px && coarse.tau_px < 4.0 * base.tau_px, "{}", coarse.tau_px);
         assert_eq!(LodParams { tau_px: base.tau_px, ..coarse.clone() }, base, "nothing else changes");
         coarse.validate().expect("the coarse parameters are valid at 1080p");
         // It is the largest the plan accepts wherever it accepts the base ones, with the margin kept: a little more is invalid by the node

@@ -44,8 +44,12 @@ pub const COARSE_MARGIN: f64 = 0.01;
 /// The levels [`LodParams::coarse`] checks against the plan's own start are those whose node radius is at least this many times the
 /// body's greatest height: there a tile is large against the heights, the volume of its neighbourhood is bounded by the field's global
 /// range (the only bound a field has for tiles that big), and the plan's start is the worst case the check takes. At finer levels the plan
-/// reads the tile's own height bounds, far below the global one, and the check by the node radius alone is the one that matters.
-pub const COARSE_WORST_CASE_RADIUS_FACTOR: f64 = 4.0;
+/// reads the tile's own height bounds, far below the global one, and the check by the node radius alone is the one that matters. Measured
+/// on the production 1080p parameters (the coarse factor is 2.59 at 4, 2.28 at 1, 1.74 at 0.5 and 1.06 at 0.25 or less) and on a sweep of
+/// poses from 20 km up over a field with only a global bound (SPIKE-19 review): at 4 and at 1 the plan still refused the coarse view at
+/// levels 8 to 10; 0.5 includes them and keeps a coarse view of about 1.7 times the error bound. A refusal that remains falls back to
+/// the base parameters (VIEW-014) and no longer ends the window.
+pub const COARSE_WORST_CASE_RADIUS_FACTOR: f64 = 0.5;
 
 /// The factor of the editor's coarse-LOD inspection switch (VIEW-014): the error bound `tau_px` times this, so the mesh edges are about
 /// four times longer on the screen, where the parameters allow it (see [`LodParams::coarse`]).

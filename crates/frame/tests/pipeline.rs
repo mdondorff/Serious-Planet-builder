@@ -434,13 +434,18 @@ fn a_plan_refusal_for_other_lod_parameters_than_the_frames_is_dropped_and_counte
     let f = pipe.begin_frame(&good, &everything).expect("a refusal for other parameters does not end the frame");
     assert!(!f.draw.plan.nodes.is_empty());
     assert_eq!(pipe.dropped_plan_errors(), 1);
+    // Another one, the same way: counted again.
+    pipe.begin_frame(&bad, &everything).unwrap();
+    spawner.run(2);
+    pipe.begin_frame(&good, &everything).expect("a second refusal for other parameters does not end the frame either");
+    assert_eq!(pipe.dropped_plan_errors(), 2);
 
     // A refusal for the frame's own parameters is still returned (it is the frame's error).
     pipe.begin_frame(&bad, &everything).unwrap();
     spawner.run(2);
     let e = pipe.begin_frame(&bad, &everything).unwrap_err();
     assert!(e.starts_with("plan for frame") && e.contains("invalid LOD parameters"), "{e}");
-    assert_eq!(pipe.dropped_plan_errors(), 1, "that one was returned, not dropped");
+    assert_eq!(pipe.dropped_plan_errors(), 2, "that one was returned, not dropped");
 }
 
 // spec: STRM-016
