@@ -324,7 +324,54 @@ fn points_are_written_in_the_item_file_spelling_and_a_line_command_refuses_what_
 
 // spec: VIEW-028
 #[test]
-fn a_group_of_changes_and_deletes_that_fails_halfway_is_taken_back_step_by_step() {
+fn a_group_of_changes_that_fails_once_halfway_is_taken_back_step_by_step_to_the_exact_state() {
+    /// Fails the write number `fail_at` (counting from 1) once; every other write works, the rollback's too.
+    struct FailsOnce {
+        inner: MemoryStore,
+        writes: Rc<Cell<u32>>,
+        fail_at: Rc<Cell<u32>>,
+    }
+    impl ItemStore for FailsOnce {
+        fn put(&mut self, item: &Item) -> Result<(), StoreError> {
+            self.writes.set(self.writes.get() + 1);
+            if self.writes.get() == self.fail_at.get() {
+                return Err(StoreError::Io { what: "writing", path: PathBuf::from("items/x.toml"), message: "disk full".into() });
+            }
+            self.inner.put(item)
+        }
+        fn delete(&mut self, body: BodyId, id: ItemId) -> Result<bool, StoreError> {
+            self.inner.delete(body, id)
+        }
+        fn get(&self, body: BodyId, id: ItemId) -> Result<Option<Item>, StoreError> {
+            self.inner.get(body, id)
+        }
+        fn load_all(&self, body: BodyId) -> Result<Vec<Item>, StoreError> {
+            self.inner.load_all(body)
+        }
+    }
+    let (writes, fail_at) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+    let mut ed = editor(FailsOnce { inner: MemoryStore::new(), writes: writes.clone(), fail_at: fail_at.clone() });
+    let (ids, _) = ed.put_line(ridge(), &long_line()).unwrap();
+    let (hash, depth, files) = (ed.hash(), ed.undo_depth(), ed.store().load_all(BodyId::PLANET).unwrap());
+    let mut moved = ed.line_points(ids[0]).unwrap();
+    moved[1] = GeoPoint::new(0.02, moved[1].lon_deg);
+    moved[9] = GeoPoint::new(0.02, moved[9].lon_deg);
+    // The parts that change are written in order; the third write fails, the two before it are written back.
+    fail_at.set(writes.get() + 3);
+    let e = ed.set_line_points(ids[0], &moved).unwrap_err();
+    assert!(matches!(e, EditError::Store(_)), "a rollback that worked says only what failed: {e:?}");
+    assert_eq!((ed.hash(), ed.undo_depth()), (hash, depth), "the definition and the stack are as they were");
+    assert_eq!(ed.store().load_all(BodyId::PLANET).unwrap(), files, "so are the files");
+    assert_store_matches(&ed, "after the rollback");
+    // The editor takes commands as before.
+    ed.set_line_points(ids[0], &moved).unwrap();
+    ed.undo().unwrap();
+    assert_eq!(ed.hash(), hash);
+}
+
+// spec: VIEW-028
+#[test]
+fn a_rollback_that_fails_is_named_and_the_editor_refuses_commands_until_the_items_are_reloaded() {
     struct Failing {
         inner: MemoryStore,
         puts_left: Rc<Cell<u32>>,
@@ -350,23 +397,40 @@ fn a_group_of_changes_and_deletes_that_fails_halfway_is_taken_back_step_by_step(
     let left = Rc::new(Cell::new(1_000));
     let mut ed = editor(Failing { inner: MemoryStore::new(), puts_left: left.clone() });
     let (ids, _) = ed.put_line(ridge(), &long_line()).unwrap();
-    let (hash, depth) = (ed.hash(), ed.undo_depth());
-    let files = ed.store().load_all(BodyId::PLANET).unwrap();
-    // Move a point: the first parts are changed, the write of a later one fails, the first changes are taken back (a change is undone by
-    // writing the old item again, which has to succeed: two writes are left for the changes, then the third fails, then one for the rollback).
     let mut moved = ed.line_points(ids[0]).unwrap();
     moved[1] = GeoPoint::new(0.02, moved[1].lon_deg);
     moved[9] = GeoPoint::new(0.02, moved[9].lon_deg);
+    let depth = ed.undo_depth();
+
+    // Two parts are written, the third write fails, and the disk stays full: the two writes cannot be taken back.
     left.set(2);
-    let e = ed.set_line_points(ids[0], &moved);
+    let e = ed.set_line_points(ids[0], &moved).unwrap_err();
+    let EditError::RollbackFailed { ids: left_ids, .. } = &e else { panic!("{e:?}") };
+    assert!(!left_ids.is_empty() && left_ids.iter().all(|id| ids.contains(id)), "the items left on the after side are named: {left_ids:?}");
+    let text = e.to_string();
+    assert!(text.contains("disk full") && text.contains("reload the items from the store"), "{text}");
+    for id in left_ids {
+        assert!(text.contains(&planet_world_def::item::ulid_text(*id)), "{text}");
+    }
+
+    // Every command is refused, naming the same items, and nothing changes.
+    let hash = ed.hash();
     left.set(1_000);
-    assert!(matches!(e, Err(EditError::Store(_))), "{e:?}");
-    // Rollback needed writes too and the budget was spent: only what the editor can say is that the stack is untouched; with the budget back
-    // a fresh attempt works from a consistent state.
-    assert_eq!(ed.undo_depth(), depth, "no command was recorded");
-    let _ = (hash, files);
-    ed.set_line_points(ids[0], &moved).unwrap();
-    assert_eq!(ed.undo_depth(), depth + 1);
-    ed.undo().unwrap();
-    assert_eq!(ed.undo_depth(), depth);
+    for e in [
+        ed.put(NewItem { points: Vec::new(), ..region() }).map(|_| ()).unwrap_err(),
+        ed.delete(ids[0]).map(|_| ()).unwrap_err(),
+        ed.undo().map(|_| ()).unwrap_err(),
+        ed.put_line(ridge(), &[east(0.0), east(10.0)]).map(|_| ()).unwrap_err(),
+    ] {
+        assert!(matches!(&e, EditError::Inconsistent { ids } if ids == left_ids), "{e:?}");
+    }
+    assert_eq!(ed.hash(), hash);
+
+    // Reloading from the store makes the editor what the files are, and it takes commands again; the undo stack is gone.
+    let n = ed.reload(BodyId::PLANET).unwrap();
+    assert_eq!(n, ids.len());
+    assert_store_matches(&ed, "after the reload");
+    assert_eq!(ed.undo_depth(), 0, "the stack described a state that is gone (was {depth})");
+    ed.put_line(ridge(), &[GeoPoint::new(30.0, 0.0), GeoPoint::new(30.0, 0.01)]).unwrap();
+    assert_eq!(ed.undo_depth(), 1);
 }
