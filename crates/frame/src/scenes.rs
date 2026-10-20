@@ -555,6 +555,7 @@ mod tests {
             color: [0; 4],
             mesh_key: 0,
             preview: false,
+            transient_only: false,
             quadrants: 0b1111,
         }
     }

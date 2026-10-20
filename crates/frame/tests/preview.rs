@@ -1,7 +1,7 @@
 //! REND-033: the preview list of an edit, from the footprint items before and after it.
 
 use planet_core::Vec3;
-use planet_frame::preview::{preview_delta, PreviewStamp, MAX_PREVIEW_STAMPS};
+use planet_frame::preview::{preview_delta, PreviewStamp, MAX_DELTA_STAMPS};
 use planet_world_def::footprint::{Cap, FootprintItem};
 use planet_world_def::stamp::{Stamp, StampKind};
 use planet_world_def::{BodyId, ItemSpec, WorldDefinition, DEFAULT_ITEM_LAYER};
@@ -73,15 +73,15 @@ fn an_edit_is_the_removals_and_additions_that_differ_in_application_order_and_no
 fn a_list_beyond_the_cap_keeps_the_nearest_to_the_camera_and_counts_the_rest() {
     let cam = dir(1.0, 0.0, 0.0);
     let extra = 3;
-    let items: Vec<ItemSpec> = (0..(MAX_PREVIEW_STAMPS + extra) as u128)
+    let items: Vec<ItemSpec> = (0..(MAX_DELTA_STAMPS + extra) as u128)
         .map(|k| spec(k + 1, 0, dir(1.0, 0.002 * (k as f64 + 1.0), 0.0), StampKind::Hill, 10.0 + k as f64))
         .collect();
     let list = preview_delta(&[], &all(&world(&items)), cam);
-    assert_eq!(list.stamps.len(), MAX_PREVIEW_STAMPS);
+    assert_eq!(list.stamps.len(), MAX_DELTA_STAMPS);
     assert_eq!(list.dropped, extra);
     // The nearest are the first ids (the anchors drift away from the camera as the id grows); the list is in application order.
     let amounts: Vec<f64> = list.stamps.iter().map(|s| s.amount_m).collect();
-    assert_eq!(amounts, (0..MAX_PREVIEW_STAMPS).map(|k| 10.0 + k as f64).collect::<Vec<_>>());
+    assert_eq!(amounts, (0..MAX_DELTA_STAMPS).map(|k| 10.0 + k as f64).collect::<Vec<_>>());
 }
 
 // spec: REND-033
@@ -157,7 +157,7 @@ fn a_removed_plateau_is_not_previewed_whole_items_are_kept_or_dropped_and_a_drag
     assert!(preview_delta(&all(&world(std::slice::from_ref(&flat))), &[], cam).stamps.is_empty());
     assert_eq!(signs(&preview_delta(&all(&world(&[flat])), &all(&world(&[flatter])), cam).stamps), [(1, StampKind::Plateau, 150.0)]);
     // One addition and resized hills, the addition nearest: one entry too many for the cap; the farthest changed item goes whole, never half.
-    let changed = MAX_PREVIEW_STAMPS / 2 + 1;
+    let changed = MAX_DELTA_STAMPS / 2 + 1;
     let mut before = Vec::new();
     let mut after = vec![spec(100, 0, dir(1.0, 0.0, 0.001), StampKind::Hill, 5.0)];
     for k in 0..changed as u128 {
@@ -166,7 +166,7 @@ fn a_removed_plateau_is_not_previewed_whole_items_are_kept_or_dropped_and_a_drag
         after.push(spec(k + 1, 0, at, StampKind::Hill, 40.0));
     }
     let list = preview_delta(&all(&world(&before)), &all(&world(&after)), cam);
-    let kept = (MAX_PREVIEW_STAMPS - 1) / 2;
+    let kept = (MAX_DELTA_STAMPS - 1) / 2;
     assert_eq!(
         list.stamps.len(),
         1 + 2 * kept,

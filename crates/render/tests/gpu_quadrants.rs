@@ -103,6 +103,7 @@ fn a_node_drawn_over_some_quadrants_covers_exactly_those_quadrants_of_its_tile()
         color: [200, 60, 60, 255],
         mesh_key: data.key,
         preview: false,
+        transient_only: false,
         quadrants,
     };
     let plan = |quadrants: u8| TerrainPlan {

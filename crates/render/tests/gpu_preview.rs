@@ -293,3 +293,41 @@ fn a_raise_stroke_as_a_chain_of_hills_is_close_to_the_exact_tiles_of_the_world_w
         "the 32nd stamp is drawn"
     );
 }
+
+// spec: VIEW-036
+#[test]
+fn an_exact_node_takes_only_the_transient_stamps_and_the_deltas_stamps_are_not_applied_to_it_twice() {
+    use planet_render::execute_terrain_tiles_preview_split;
+
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let mut plan = plan_for(6, TerrainView::Height);
+    let cam = plan.camera.position.0.normalized();
+    let near = plan.nodes.iter().map(|n| n.tile).max_by(|a, b| {
+        a.center_direction(&TangentWarp).dot(cam).total_cmp(&b.center_direction(&TangentWarp).dot(cam)).then(b.level().cmp(&a.level()))
+    });
+    let at = near.unwrap().center_direction(&TangentWarp);
+    let tiles: Vec<CompactTile> = plan.nodes.iter().map(|n| compact_tile_field(&Reference(SEED), &TangentWarp, n.tile, CELLS, R)).collect();
+    let refs: Vec<&CompactTile> = tiles.iter().collect();
+    let split = |plan: &TerrainPlan, stamps: &[PreviewStamp], delta_len: usize| {
+        execute_terrain_tiles_preview_split(&ctx, plan, &refs, stamps, delta_len, R).unwrap().0.rgba
+    };
+    // The delta is a hill the exact tiles already hold; the transient stamp is another hill beside it.
+    let delta = hill(at, 300.0, 3_000.0, 1);
+    let transient = hill(at, 200.0, 1_500.0, 1);
+    for n in &mut plan.nodes {
+        n.preview = true;
+        n.transient_only = true;
+    }
+    // Exact nodes (transient-only): the frame with [delta, transient] is the frame with the transient stamp alone.
+    let only = split(&plan, &[transient], 0);
+    let with_delta = split(&plan, &[delta, transient], 1);
+    assert_eq!(with_delta, only, "an exact node does not apply the delta's stamps again");
+    // A node that is not transient-only applies both: the frame differs.
+    for n in &mut plan.nodes {
+        n.transient_only = false;
+    }
+    let both = split(&plan, &[delta, transient], 1);
+    assert_ne!(both, only, "a stale node applies the delta's stamps and the transient ones");
+    // And no split (all stamps are the delta's, as `set_preview` has it) is the same as before.
+    assert_eq!(split(&plan, &[delta, transient], 2), both);
+}

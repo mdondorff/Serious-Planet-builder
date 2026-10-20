@@ -187,12 +187,14 @@ struct Bump {
 // The summed signed delta of the preview stamps at a point (camera-relative `p_rel`, the radial up `up` AT the point, height `h0` above the
 // sphere), the gradient of the delta along the ground and how flat a plateau makes the ground there (0 none, 1 fully). The distance is
 // measured in the tangent plane of the point's own up, so two tiles that share a border vertex agree on it (CON-11: no planet radius).
-fn preview_bump(p_rel: vec3<f32>, up: vec3<f32>, h0: f32) -> Bump {
+fn preview_bump(p_rel: vec3<f32>, up: vec3<f32>, h0: f32, k0: u32) -> Bump {
     var total = 0.0;
     var grad = vec3<f32>(0.0);
     var flat_w = 0.0;
-    let n = u32(g.extra.w);
-    for (var k = 0u; k < n; k = k + 1u) {
+    // extra.w packs the active count (low 6 bits) and 64 times the number of stamps of the edit's delta, which come first in the table: a
+    // node an exact tile holds the edit for starts after them (`k0`).
+    let n = u32(g.extra.w) & 63u;
+    for (var k = k0; k < n; k = k + 1u) {
         let a = g.preview[2u * k];
         let b = g.preview[2u * k + 1u];
         let d3 = p_rel - a.xyz;
@@ -216,18 +218,18 @@ fn preview_bump(p_rel: vec3<f32>, up: vec3<f32>, h0: f32) -> Bump {
 
 // A lattice vertex placed with the preview's delta along its own radial up (the position and, in w, the height with the delta), so the
 // parent-grid target built from displaced neighbours is the displaced parent grid.
-fn preview_place(o_rel: vec3<f32>, nup: vec4<f32>, i: i32, j: i32, hr: f32) -> vec4<f32> {
+fn preview_place(o_rel: vec3<f32>, nup: vec4<f32>, i: i32, j: i32, hr: f32, k0: u32) -> vec4<f32> {
     let p = place(i, j, hr);
     let up = normalize(nup.xyz + p.xyz * nup.w);
-    let b = preview_bump(o_rel + p.xyz, up, h_origin + p.w);
+    let b = preview_bump(o_rel + p.xyz, up, h_origin + p.w, k0);
     return vec4<f32>(p.xyz + up * b.delta, p.w + b.delta);
 }
 
 // A neighbour for the parent-grid target: the preview's displaced vertex for a previewed node, the plain one otherwise.
-fn cplace(previewed: bool, o_rel: vec3<f32>, nup: vec4<f32>, i: i32, j: i32) -> vec4<f32> {
+fn cplace(previewed: bool, o_rel: vec3<f32>, nup: vec4<f32>, i: i32, j: i32, k0: u32) -> vec4<f32> {
     let hr = rel_height(texel(i, j));
     if (previewed) {
-        return preview_place(o_rel, nup, i, j, hr);
+        return preview_place(o_rel, nup, i, j, hr, k0);
     }
     return place(i, j, hr);
 }
@@ -264,13 +266,15 @@ fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
     let own_t = texel(i, j);
     // A previewed node (REND-033) shows the edit's delta over its stale tile; every other node, and every frame without a preview, skips this.
     let previewed = g.extra.w > 0.5 && node.morph.z > 0.5;
+    // 2 marks a node only the transient stamps (after the delta's) apply to (VIEW-036).
+    let k0 = select(0u, u32(g.extra.w) >> 6u, node.morph.z > 1.5);
     var own = place(i, j, rel_height(own_t));
     var grad = vec3<f32>(0.0);
     var flat_w = 0.0;
     var vup = vec3<f32>(0.0);
     if (previewed) {
         vup = normalize(node.up.xyz + own.xyz * node.up.w);
-        let b0 = preview_bump(node.origin_rel.xyz + own.xyz, vup, h_origin + own.w);
+        let b0 = preview_bump(node.origin_rel.xyz + own.xyz, vup, h_origin + own.w, k0);
         grad = b0.grad;
         flat_w = b0.flat_w;
         own = vec4<f32>(own.xyz + vup * b0.delta, own.w + b0.delta);
@@ -280,11 +284,11 @@ fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
     let odd_i = (i & 1) == 1;
     let odd_j = (j & 1) == 1;
     if (odd_i && !odd_j) {
-        coarse = 0.5 * (cplace(previewed, node.origin_rel.xyz, node.up, i - 1, j) + cplace(previewed, node.origin_rel.xyz, node.up, i + 1, j));
+        coarse = 0.5 * (cplace(previewed, node.origin_rel.xyz, node.up, i - 1, j, k0) + cplace(previewed, node.origin_rel.xyz, node.up, i + 1, j, k0));
     } else if (!odd_i && odd_j) {
-        coarse = 0.5 * (cplace(previewed, node.origin_rel.xyz, node.up, i, j - 1) + cplace(previewed, node.origin_rel.xyz, node.up, i, j + 1));
+        coarse = 0.5 * (cplace(previewed, node.origin_rel.xyz, node.up, i, j - 1, k0) + cplace(previewed, node.origin_rel.xyz, node.up, i, j + 1, k0));
     } else if (odd_i && odd_j) {
-        coarse = 0.5 * (cplace(previewed, node.origin_rel.xyz, node.up, i - 1, j - 1) + cplace(previewed, node.origin_rel.xyz, node.up, i + 1, j + 1));
+        coarse = 0.5 * (cplace(previewed, node.origin_rel.xyz, node.up, i - 1, j - 1, k0) + cplace(previewed, node.origin_rel.xyz, node.up, i + 1, j + 1, k0));
     }
     var pos = own.xyz;
     var cpos = coarse.xyz;

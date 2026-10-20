@@ -109,6 +109,7 @@ impl TerrainPlan {
                 mesh_key: _,
                 // A runtime flag of the draw plan (REND-033), not part of a recorded plan.
                 preview: _,
+                transient_only: _,
                 // Written only when it is not the whole tile (below), so the text of a plan without masks is what it was.
                 quadrants: _,
             } = n;
@@ -202,6 +203,7 @@ impl TerrainPlan {
                         color: [byte(r)?, byte(g)?, byte(b)?, byte(a)?],
                         mesh_key: u64::from_str_radix(key, 16).map_err(|e| format!("bad mesh key '{key}': {e}"))?,
                         preview: false,
+                        transient_only: false,
                         quadrants,
                     });
                 }

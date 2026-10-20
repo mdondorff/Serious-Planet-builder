@@ -151,6 +151,8 @@ pub struct DrawPlan {
     /// The preview stamps the frame draws (REND-033): the list given to [`draw_plan_preview`], which the renderer evaluates on the nodes
     /// flagged `preview`. Empty for a frame without an edit in flight.
     pub preview: Vec<PreviewStamp>,
+    /// How many of the first stamps of `preview` are the delta of the edit in flight; the rest are the transient preview (VIEW-036).
+    pub preview_delta_len: usize,
     /// The radius of the body the preview stamps lie on (the request's), for the renderer to place their anchors.
     pub preview_radius_m: f64,
 }
@@ -169,6 +171,7 @@ fn draw_of(req: &TerrainRequest, tile: TileId, r: ResidentTile) -> TerrainDraw {
         color: node_color(req.view, tile),
         mesh_key: r.mesh_key,
         preview: false,
+        transient_only: false,
         quadrants: ALL_QUADRANTS,
     }
 }
@@ -263,6 +266,8 @@ pub fn draw_plan_transient(
     edited: &BTreeSet<TileId>,
     transient: &[PreviewStamp],
 ) -> Result<DrawPlan, PlanError> {
+    // The delta's stamps are at most `MAX_DELTA_STAMPS` (`preview_delta` keeps whole units to that) and a transient preview at most
+    // `BRUSH_CHAIN_STAMPS`, so both fit the table whole; a longer list from another caller is cut at the end, the transient ones kept.
     let max = crate::preview::MAX_PREVIEW_STAMPS;
     let transient = &transient[..transient.len().min(max)];
     let preview = &preview[..preview.len().min(max - transient.len())];
@@ -281,9 +286,15 @@ pub fn draw_plan_transient(
                 let rel = d.origin.0 - req.camera.position.0;
                 let flagged = previewed(transient, map.as_ref(), d.tile, req.lod.radius_m);
                 transient_flags |= flagged;
+                // An exact tile already holds the edit in flight: only the transient stamps are applied to it.
                 shown.insert(
                     d.tile,
-                    TerrainDraw { camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32], preview: flagged, ..*d },
+                    TerrainDraw {
+                        camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32],
+                        preview: flagged,
+                        transient_only: flagged,
+                        ..*d
+                    },
                 );
                 continue;
             }
@@ -292,8 +303,12 @@ pub fn draw_plan_transient(
             if let Some(r) = resident.resident(d.tile) {
                 substituted += 1;
                 let mut node = draw_of(req, d.tile, r);
-                node.preview = previewed(&all, map.as_ref(), d.tile, req.lod.radius_m);
-                transient_flags |= node.preview && previewed(transient, map.as_ref(), d.tile, req.lod.radius_m);
+                let by_delta = previewed(preview, map.as_ref(), d.tile, req.lod.radius_m);
+                let by_transient = previewed(transient, map.as_ref(), d.tile, req.lod.radius_m);
+                node.preview = by_delta || by_transient;
+                // A stale tile under both gets the delta's stamps and the transient ones; under the transient ones alone, only those.
+                node.transient_only = by_transient && !by_delta;
+                transient_flags |= by_transient;
                 shown.insert(d.tile, node);
                 continue;
             }
@@ -387,7 +402,7 @@ pub fn draw_plan_transient(
             water: None,
         },
     };
-    Ok(DrawPlan { plan, kind, substituted, blank, preview: all, preview_radius_m: req.lod.radius_m })
+    Ok(DrawPlan { plan, kind, substituted, blank, preview: all, preview_delta_len: preview.len(), preview_radius_m: req.lod.radius_m })
 }
 
 /// Whether the reach of a preview stamp touches the cap of `tile` (REND-033), with the halo the stamp stage declares its items with.

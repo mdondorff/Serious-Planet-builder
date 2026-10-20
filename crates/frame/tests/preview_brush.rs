@@ -3,7 +3,9 @@
 //! nodes it touches whether or not their tiles are stale.
 
 use planet_core::Vec3;
-use planet_frame::preview::{brush_chain, preview_delta, preview_delta_on, PreviewStamp, BRUSH_CHAIN_STAMPS, MAX_PREVIEW_STAMPS};
+use planet_frame::preview::{
+    brush_chain, preview_delta, preview_delta_on, PreviewStamp, BRUSH_CHAIN_STAMPS, MAX_DELTA_STAMPS, MAX_PREVIEW_STAMPS,
+};
 use planet_world_def::footprint::{Cap, FootprintItem};
 use planet_world_def::stamp::{BrushKind, Stamp, StampKind, Stroke};
 use planet_world_def::{BodyId, ItemSpec, WorldDefinition};
@@ -99,7 +101,12 @@ fn a_chain_adds_up_to_the_strength_on_the_line_and_a_long_stroke_gets_a_wider_sp
         assert!((arc(w[0].dir, w[1].dir) - 50.0).abs() < 1e-3);
     }
     assert!(chain[..13].iter().all(|s| s.reach_m > radius), "the chain's bumps reach further than the radius");
-    assert_eq!((chain[13].amount_m, chain[13].reach_m, chain[14].amount_m), (0.5 * strength, radius, 0.5 * strength));
+    // Each dab makes up what the chain falls short of the strength at its end point.
+    for (cap, end) in [(&chain[13], east(0.0)), (&chain[14], east(600.0))] {
+        assert_eq!(cap.reach_m, radius);
+        let short = strength - delta_at(&chain[..13], end);
+        assert!((cap.amount_m - short).abs() < 1e-9 && cap.amount_m > 0.0, "{} against {short}", cap.amount_m);
+    }
     assert!(arc(chain[13].dir, east(0.0)) < 1e-3 && arc(chain[14].dir, east(600.0)) < 1e-3);
     // Along the middle of the line the sum is the strength within a fifth (the ripple of the spacing), its mean within 3 %.
     let samples: Vec<f64> = (0..400).map(|k| delta_at(&chain, east(100.0 + 400.0 * f64::from(k) / 399.0))).collect();
@@ -147,10 +154,12 @@ fn a_brush_item_added_is_its_chains_removed_the_same_turned_and_one_that_gained_
     let back = preview_delta_on(&two, &one, cam, R);
     assert_eq!(back.stamps, brush_chain(&second, -1, R));
     assert!(back.stamps.iter().all(|s| s.sign == 1), "the lower's hills turned back");
-    // Changed otherwise (the first stroke's strength): the old state taken away and the new one added.
-    let stronger = items(&[brush_spec(1, &[Stroke { strength_m: 9.0, ..first.clone() }])]);
-    let changed = preview_delta_on(&one, &stronger, cam, R);
-    assert_eq!(changed.stamps.len(), 2 * brush_chain(&first, 1, R).len());
+    // Changed otherwise (a stroke's strength): the old state taken away and the new one added, as one unit of the cap.
+    let dab = stroke(BrushKind::Raise, 100.0, 5.0, None, &[0.0]);
+    let (dab_a, dab_b) =
+        (items(&[brush_spec(1, std::slice::from_ref(&dab))]), items(&[brush_spec(1, &[Stroke { strength_m: 9.0, ..dab.clone() }])]));
+    let changed = preview_delta_on(&dab_a, &dab_b, cam, R);
+    assert_eq!(changed.stamps.iter().map(|s| (s.sign, s.amount_m)).collect::<Vec<_>>(), [(-1, 5.0), (1, 9.0)]);
     // The plain delta (no radius) leaves brushes out, as before.
     assert!(preview_delta(&none, &one, cam).stamps.is_empty());
     // An unchanged item is absent.
@@ -168,10 +177,10 @@ fn brush_chains_beyond_the_cap_keep_whole_items_nearest_the_camera() {
     let list = preview_delta_on(&[], &all, cam, R);
     let per = brush_chain(&stroke(BrushKind::Raise, 100.0, 5.0, None, &[0.0, 450.0]), 1, R).len();
     assert_eq!(per, 12);
-    let kept = MAX_PREVIEW_STAMPS / per;
+    let kept = MAX_DELTA_STAMPS / per;
     assert_eq!(list.stamps.len(), kept * per, "{} of {} entries", list.stamps.len(), 4 * per);
     assert_eq!(list.dropped, (4 - kept) * per);
-    assert!(list.stamps.len() <= MAX_PREVIEW_STAMPS);
+    assert!(list.stamps.len() <= MAX_DELTA_STAMPS);
     // The farthest items are the ones left out.
     assert!(list.stamps.iter().all(|s| arc(s.dir, cam) < 3_000.0));
 }
@@ -219,18 +228,69 @@ fn a_transient_stamp_flags_every_node_it_touches_stale_or_exact_and_nothing_else
     assert!(plain.plan.nodes.iter().all(|n| !n.preview));
     // An empty transient list is the same draw plan.
     assert_eq!(draw_plan_transient(&req, base, &exact, &bounds, &[], &none, &[]).unwrap(), plain);
-    // With a transient stamp the nodes under it are flagged although every tile is exact, and the frame is still exact.
+    // With a transient stamp the nodes under it are flagged although every tile is exact, and the frame is still exact. An exact tile
+    // already holds the edit in flight, so the node takes only the transient stamps.
     let d = draw_plan_transient(&req, base, &exact, &bounds, &[], &none, &[stamp]).unwrap();
     let flagged: Vec<_> = d.plan.nodes.iter().filter(|n| n.preview).map(|n| n.tile).collect();
     assert!(flagged.contains(&near) && flagged.len() < d.plan.nodes.len(), "{} of {}", flagged.len(), d.plan.nodes.len());
+    assert!(d.plan.nodes.iter().filter(|n| n.preview).all(|n| n.transient_only));
     assert_eq!((d.kind, d.substituted, d.blank), (plain.kind, 0, 0));
-    assert_eq!(d.preview, vec![stamp]);
-    // The delta's stamps come first, the transient ones after, and the transient ones are kept when the cap is reached.
-    let delta: Vec<PreviewStamp> = (0..MAX_PREVIEW_STAMPS).map(|k| PreviewStamp { amount_m: k as f64, sign: -1, ..stamp }).collect();
-    let d = draw_plan_transient(&req, base, &exact, &bounds, &delta, &none, &[stamp]).unwrap();
-    assert_eq!(d.preview.len(), MAX_PREVIEW_STAMPS);
-    assert_eq!(*d.preview.last().unwrap(), stamp);
-    assert_eq!(d.preview[0].amount_m, 0.0);
+    assert_eq!((d.preview.clone(), d.preview_delta_len), (vec![stamp], 0));
+    // A delta stamp over the same exact tile does not change what the exact node applies: it is still transient-only, after the delta's.
+    let hill = PreviewStamp { amount_m: 30.0, ..stamp };
+    let d = draw_plan_transient(&req, base, &exact, &bounds, &[hill], &none, &[stamp]).unwrap();
+    assert_eq!((d.preview.clone(), d.preview_delta_len), (vec![hill, stamp], 1));
+    assert!(
+        d.plan.nodes.iter().find(|n| n.tile == near).is_some_and(|n| n.preview && n.transient_only),
+        "exact: the delta is not applied twice"
+    );
+    // A stale tile under both gets both; a stale tile under the transient stamp alone only that one; a stale tile under the delta alone is
+    // not transient-only.
+    let stale_near: HashMap<_, _> = plan
+        .nodes
+        .iter()
+        .map(|n| (n.tile, ResidentTile { mesh_key: if n.tile == near { n.mesh_key ^ 1 } else { n.mesh_key }, origin: n.origin }))
+        .collect();
+    let node = |d: &planet_frame::pipeline::DrawPlan| d.plan.nodes.iter().find(|n| n.tile == near).copied().unwrap();
+    let both = draw_plan_transient(&req, base, &stale_near, &bounds, &[hill], &none, &[stamp]).unwrap();
+    assert!(node(&both).preview && !node(&both).transient_only, "stale under both: all the stamps");
+    let transient_alone = draw_plan_transient(&req, base, &stale_near, &bounds, &[], &none, &[stamp]).unwrap();
+    assert!(node(&transient_alone).preview && node(&transient_alone).transient_only);
+    let delta_alone = draw_plan_transient(&req, base, &stale_near, &bounds, &[hill], &none, &[]).unwrap();
+    assert!(node(&delta_alone).preview && !node(&delta_alone).transient_only);
+    // The delta's stamps (at most MAX_DELTA_STAMPS) and a transient preview (at most BRUSH_CHAIN_STAMPS) fit the table whole, none cut.
+    let delta: Vec<PreviewStamp> = (0..MAX_DELTA_STAMPS).map(|k| PreviewStamp { amount_m: k as f64, ..stamp }).collect();
+    let chain: Vec<PreviewStamp> = (0..BRUSH_CHAIN_STAMPS).map(|k| PreviewStamp { amount_m: 100.0 + k as f64, ..stamp }).collect();
+    let d = draw_plan_transient(&req, base, &exact, &bounds, &delta, &none, &chain).unwrap();
+    assert_eq!((d.preview.len(), d.preview_delta_len), (MAX_PREVIEW_STAMPS, MAX_DELTA_STAMPS));
+    assert_eq!(d.preview, delta.iter().chain(&chain).copied().collect::<Vec<_>>());
+}
+
+// spec: VIEW-036
+#[test]
+fn a_brush_items_strokes_keep_their_order_and_one_large_item_is_kept_stroke_by_stroke_under_the_cap() {
+    let cam = east(0.0);
+    // Order: a flatten and then a lower in one item are applied in that order (a plateau reads the running height).
+    let flatten = stroke(BrushKind::Flatten, 100.0, 10.0, Some(0.0), &[0.0, 200.0]);
+    let lower = stroke(BrushKind::Lower, 100.0, 5.0, None, &[0.0, 200.0]);
+    let item = items(&[brush_spec(1, &[flatten.clone(), lower.clone()])]);
+    let list = preview_delta_on(&[], &item, cam, R);
+    let kinds: Vec<StampKind> = list.stamps.iter().map(|s| s.kind).collect();
+    let last_plateau = kinds.iter().rposition(|k| *k == StampKind::Plateau).unwrap();
+    let first_hill = kinds.iter().position(|k| *k == StampKind::Hill).unwrap();
+    assert!(last_plateau < first_hill, "the flatten's plateaus come before the lower's hills: {kinds:?}");
+    // The other way round keeps the other order.
+    let swapped = preview_delta_on(&[], &items(&[brush_spec(1, &[lower, flatten])]), cam, R);
+    assert_eq!(swapped.stamps[0].kind, StampKind::Hill);
+    // One item with three strokes of 11 stamps (33 entries, over the cap): whole strokes are kept, nearest first, not nothing.
+    let strokes: Vec<Stroke> =
+        (0..3).map(|k| stroke(BrushKind::Raise, 100.0, 5.0, None, &[1_000.0 * f64::from(k), 1_000.0 * f64::from(k) + 400.0])).collect();
+    let per = brush_chain(&strokes[0], 1, R).len();
+    let list = preview_delta_on(&[], &items(&[brush_spec(1, &strokes)]), cam, R);
+    let kept = MAX_DELTA_STAMPS / per;
+    assert!(kept >= 1 && !list.stamps.is_empty(), "{} stamps", list.stamps.len());
+    assert_eq!((list.stamps.len(), list.dropped), (kept * per, (3 - kept) * per));
+    assert!(list.stamps.iter().all(|s| arc(s.dir, cam) < 1_000.0 * kept as f64), "the nearest strokes");
 }
 
 // spec: VIEW-036
@@ -280,6 +340,91 @@ fn the_chain_of_a_raise_is_close_to_the_stage_s_delta_along_and_across_the_strok
         sum_abs / n,
         sum_exact / n
     );
-    assert!(worst <= 0.35 * strokes.strength_m, "worst error {worst}");
+    assert!(worst <= strokes.strength_m / 3.0, "worst error {worst}");
     assert!(sum_abs / n <= 0.1 * strokes.strength_m, "mean error {}", sum_abs / n);
+}
+
+/// The summed delta of `stamps` at `p` as the vertex stage adds it (hills and plateaus; `h0` the height there before the preview).
+fn shape_at(stamps: &[PreviewStamp], p: Vec3, h0: f64) -> f64 {
+    let smooth01 = |t: f64| t * t * (3.0 - 2.0 * t);
+    let mut total = 0.0;
+    for s in stamps {
+        let x = arc(s.dir, p) / s.reach_m;
+        if x >= 1.0 {
+            continue;
+        }
+        let profile = match s.kind {
+            StampKind::Hill => s.amount_m * (1.0 - x * x) * (1.0 - x * x),
+            StampKind::Plateau => {
+                (1.0 - smooth01(((x - 0.7) / 0.3).clamp(0.0, 1.0))) * (s.amount_m - (h0 + total)).clamp(-s.max_delta_m, s.max_delta_m)
+            }
+            StampKind::Crater => unreachable!("a brush chain has no crater"),
+            _ => 0.0,
+        };
+        total += f64::from(s.sign) * profile;
+    }
+    total
+}
+
+/// Compare a chain with the stage over a grid around a stroke: the worst and the mean error in metres over the points either moves.
+fn fidelity(stroke: &Stroke, metres: &[(f64, f64)], span: (f64, f64)) -> (f64, f64, f64) {
+    use planet_generators::height::{HeightField, Reference};
+    use planet_generators::stamp::{StampStage, STAMP_STAGE_VERSION};
+    use std::sync::Arc;
+
+    let at = |e: f64, n: f64| -> Vec3 { (east(e) + Vec3::new(0.0, 0.0, 1.0) * (n / R)).normalized() };
+    let _ = metres;
+    let mut def = WorldDefinition::single_planet(R, 1);
+    def.put_item_spec(BodyId::PLANET, brush_spec(1, std::slice::from_ref(stroke))).unwrap();
+    let base: Arc<dyn HeightField> = Arc::new(Reference(1));
+    let stage = StampStage::new(Arc::clone(&base), Arc::new(def), BodyId::PLANET, "brush", 0, STAMP_STAGE_VERSION).unwrap();
+    let chain = brush_chain(stroke, 1, R);
+    let (mut worst, mut sum, mut n) = (0.0f64, 0.0f64, 0.0f64);
+    for i in 0..70 {
+        for j in 0..70 {
+            let p = at(span.0 + (span.1 - span.0) * f64::from(i) / 69.0, span.0 + (span.1 - span.0) * f64::from(j) / 69.0);
+            let h = base.height(p);
+            let exact = stage.height(p) - h;
+            let preview = shape_at(&chain, p, h);
+            if exact.abs() > 1e-9 || preview.abs() > 0.5 {
+                worst = worst.max((exact - preview).abs());
+                sum += (exact - preview).abs();
+                n += 1.0;
+            }
+        }
+    }
+    (worst, sum / n, n)
+}
+
+// spec: VIEW-036
+#[test]
+fn the_chain_of_a_flatten_stays_within_the_strength_of_the_stage_s_and_does_not_stack_its_bound() {
+    use planet_generators::height::{HeightField, Reference};
+    let strength = 10.0;
+    let ground = Reference(1).height(east(0.0));
+    // A target far above the ground (more than the strength) and one within the strength.
+    for (label, target) in [("far", ground + 40.0), ("near", ground + 6.0)] {
+        let line =
+            Stroke { target_m: Some(target), ..stroke(BrushKind::Flatten, 300.0, strength, Some(target), &[0.0, 400.0, 800.0, 1_200.0]) };
+        let (worst, mean, n) = fidelity(&line, &[], (-400.0, 1_600.0));
+        println!("FLATTEN {label}: worst {worst:.2} m, mean {mean:.2} m over {n} points");
+        assert!(worst <= strength, "{label}: the preview is within the strength of the stage's delta everywhere (worst {worst})");
+        // On the line itself the plateaus do not pile up: the preview moves the ground by at most the strength, as the stage does.
+        let on_line = |m: f64| shape_at(&brush_chain(&line, 1, R), east(m), ground);
+        for m in [200.0, 600.0, 1_000.0] {
+            assert!(on_line(m).abs() <= strength * 1.05, "{label}: at {m} m the preview moves the ground by {}", on_line(m));
+        }
+    }
+}
+
+// spec: VIEW-036
+#[test]
+fn a_stroke_of_the_longest_length_the_tool_records_is_within_a_third_of_the_strength_of_the_stage() {
+    // 64 points a quarter of the radius apart: about 16 radii.
+    let radius = 100.0;
+    let line = stroke(BrushKind::Raise, radius, 40.0, None, &[0.0, 63.0 * radius / 4.0]);
+    let (worst, mean, n) = fidelity(&line, &[], (-300.0, 1_900.0));
+    println!("LONG: worst {worst:.2} m, mean {mean:.2} m over {n} points");
+    assert!(worst <= 40.0 / 3.0, "worst error {worst}");
+    assert!(mean <= 40.0 * 0.1, "mean error {mean}");
 }
