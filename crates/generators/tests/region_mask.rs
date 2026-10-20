@@ -112,7 +112,11 @@ fn a_region_of_mode_zero_and_a_region_of_another_layer_change_nothing() {
     // The clipped layer itself: the other layer's stage cuts its own items inside the region, the stamps layer's stage does not.
     let in_other = world(&[hill(4, "other", unit(20.0, 30.0), 6_000.0, 50.0), region(5, "other", 2.0, &square())]);
     assert_eq!(stage(&in_other, "other").height(unit(20.0, 30.0)).to_bits(), Reference(1).height(unit(20.0, 30.0)).to_bits());
-    assert_ne!(stage(&in_other, LAYER).height(unit(20.0, 30.0)).to_bits(), 0, "the stamps layer reads nothing of it");
+    assert_eq!(
+        stage(&in_other, LAYER).height(unit(20.0, 30.0)).to_bits(),
+        Reference(1).height(unit(20.0, 30.0)).to_bits(),
+        "the stamps layer reads nothing of it"
+    );
 }
 
 // spec: GEN-029
@@ -158,4 +162,35 @@ fn a_region_rekeys_the_tiles_of_its_layer_it_touches_and_no_others() {
     assert_ne!(key(&with, LAYER, under), key(&moved, LAYER, under), "moving a point of it does");
     assert_eq!(key(&without, LAYER, far), key(&with, LAYER, far), "a tile away from it keeps its key");
     assert_eq!(key(&without, "other", under), key(&with, "other", under), "so does the same tile in another layer");
+}
+
+/// The footprint items around `p` of the world, as the stage reads them.
+fn items_at(def: &Arc<WorldDefinition>, layer: &str, p: Vec3) -> Vec<planet_world_def::footprint::FootprintItem> {
+    def.footprint_items_cap(BodyId::PLANET, layer, planet_world_def::footprint::Cap { centre: p, angle: 1e-6 }).unwrap()
+}
+
+// spec: GEN-029
+#[test]
+fn a_region_that_does_not_cut_leaves_the_bits_of_the_height_and_the_edge_of_its_reach_is_cut() {
+    use planet_generators::stamp::apply_stamps;
+    // A point inside the reach of the region but outside its polygon, a base of -0.0: nothing may touch the sign, for a clip and a label.
+    for (layer, mode) in [(LAYER, 2.0), (LAYER, 0.0)] {
+        let def = world(&[region(1, layer, mode, &square())]);
+        let p = at_distance(unit(20.0, 30.0), unit(20.5, 30.0), 2_450.0); // north of the square's 2.2 km half side, inside the reach
+        let items = items_at(&def, layer, p);
+        assert_eq!(items.len(), 1, "the region is read at the point");
+        assert_eq!(apply_stamps(&items, R, p, -0.0).to_bits(), (-0.0f64).to_bits(), "mode {mode}: the sign of the base is kept");
+        assert_eq!(apply_stamps(&items, R, p, 12.5), 12.5);
+    }
+    // A region whose reach is exactly the distance to its farthest vertex cuts at that vertex (the reach is inclusive).
+    let dirs: Vec<Vec3> = square().iter().map(|(la, lo)| unit(*la, *lo)).collect();
+    let far = dirs.iter().map(|d| angle_between(dirs[0], *d) * R).fold(0.0f64, f64::max);
+    let vertex = dirs.iter().copied().max_by(|a, b| angle_between(dirs[0], *a).total_cmp(&angle_between(dirs[0], *b))).unwrap();
+    let exact =
+        ItemSpec { id: 1, layer: LAYER.into(), priority: 0, dir: dirs[0], content_hash: 0, reach_m: far, max_delta_m: 0.0, stamp: None }
+            .with_stamp(Stamp::new(StampKind::Region, [2.0, 2.0, 0.0]).with_points(&dirs));
+    let def = world(&[exact, hill(2, LAYER, vertex, 3_000.0, 40.0)]);
+    let items = items_at(&def, LAYER, vertex);
+    assert_eq!(items.len(), 2);
+    assert_eq!(apply_stamps(&items, R, vertex, 7.0), 7.0, "the farthest vertex is inside the region and its hill is cut");
 }

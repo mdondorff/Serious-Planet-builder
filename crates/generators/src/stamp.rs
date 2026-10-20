@@ -201,8 +201,8 @@ pub fn apply_stamps(items: &[FootprintItem], radius_m: f64, dir: Vec3, base: f64
         let Some(stamp) = &item.stamp else { continue };
         if stamp.kind.is_region()
             && stamp.params()[1] == 2.0
-            && radius_m * angle_between(anchor_of(item), dir) < f64::from_bits(item.reach_bits)
-            && planet_world_def::region::polygon_contains(&stamp.points(), dir)
+            && radius_m * angle_between(anchor_of(item), dir) <= f64::from_bits(item.reach_bits)
+            && planet_world_def::region::polygon_contains_bits(stamp.points_bits(), dir)
         {
             return base;
         }
@@ -215,8 +215,9 @@ pub fn apply_stamps(items: &[FootprintItem], radius_m: f64, dir: Vec3, base: f64
         let Some(stamp) = &item.stamp else { continue };
         let reach = f64::from_bits(item.reach_bits);
         let x = radius_m * angle_between(anchor_of(item), dir) / reach;
-        if x >= 1.0 {
-            // Out of the item's reach: the reach holds the polyline and its width (WDEF-011), so the item adds nothing here.
+        if x >= 1.0 || stamp.kind.is_region() {
+            // Out of the item's reach: the reach holds the polyline and its width (WDEF-011), so the item adds nothing here. A region
+            // adds no height (it only cuts, above): it must not touch the bits of the running height either (a base of -0.0 stays).
             continue;
         }
         if stamp.kind.is_line() {

@@ -113,6 +113,16 @@ fn a_polygon_that_crosses_itself_is_found_and_a_simple_one_is_not() {
     assert!(polygon_self_intersects(&poly(&[(19.98, 29.98), (19.98, 30.02), (20.02, 30.0), (19.98, 30.0), (20.02, 29.98)])));
     let l = poly(&[(20.0, 30.0), (20.0, 30.02), (20.01, 30.02), (20.01, 30.01), (20.02, 30.01), (20.02, 30.0)]);
     assert!(!polygon_self_intersects(&l), "a concave L is simple");
+    // A figure 8 through a repeated vertex that is not a neighbour is found, whatever vertex it starts at.
+    let eight = [(19.98, 29.98), (20.02, 30.02), (20.02, 29.98), (19.98, 30.0), (20.02, 30.02), (19.98, 30.02)];
+    for k in 0..eight.len() {
+        let rotated: Vec<(f64, f64)> = eight[k..].iter().chain(eight[..k].iter()).copied().collect();
+        assert!(polygon_self_intersects(&poly(&rotated)), "figure 8 from {k}");
+    }
+    // A polygon with no area is no region: collinear points on one great circle, and a spike doubling back along an edge.
+    let (a, b) = (unit(20.0, 30.0), unit(20.0, 30.02));
+    let mid = (a + b).normalized();
+    assert!(polygon_self_intersects(&[a, mid, b]), "three points on one great circle");
 }
 
 fn refused(item: &Item, want: &str) {
