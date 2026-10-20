@@ -63,7 +63,7 @@ Mock: https://claude.ai/artifact/Srj3NGEYUkGQsfhne7kdCs (private to the owner).
 | Views | 3D free camera, globe overview |
 | Surface type | stored on the region; a debug overlay tints regions by type; materials are drawn later; first table (data, extensible; owner, 2026-10-19): rock, sand, grass, snow, forest, ice, desert, wetland, urban |
 | Line storage (owner, 2026-10-19) | one item per line holding its list of points; a line longer than one item's reach limit is split automatically into a few linked items; the item file gains a points list (nothing is stored yet) |
-| Region mask (owner, 2026-10-19) | a region clips a chosen layer's edits: they apply only inside (or only outside) it, like a layer mask |
+| Region mask (owner, 2026-10-19) | a region clips a chosen layer's edits: they apply only inside (or only outside) it, like a layer mask; M6 builds clip inside only, clip outside is deferred (owner, 2026-10-20: it behaves more like a freeze mode, its usefulness to be revisited; design kept in openspec/changes/region-mode1) |
 | History | plain undo/redo (1,000 operations, M6 exit criterion) |
 | Input | mouse and keyboard |
 

@@ -1,0 +1,1 @@
+- 2026-10-20 **Region clip outside deferred (owner):** M6 builds clip inside only; clip outside looks more like a freeze mode, its usefulness to be revisited later.
