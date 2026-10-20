@@ -149,6 +149,12 @@ pub fn check_options(o: &Options) -> Result<(), String> {
 /// The world a perf scene reads: the stored production bake (`--store`) or the in-memory bake of `--global-res` cells; `cold` ignores
 /// the tile pack's pre-filled tiles (`dive-cold`).
 pub(crate) fn open_world(o: &Options, cold: bool) -> Result<WorldTerrain, String> {
+    let w = open_world_plain(o, cold)?;
+    crate::coarsen::stamp_world(&w)?;
+    Ok(w)
+}
+
+fn open_world_plain(o: &Options, cold: bool) -> Result<WorldTerrain, String> {
     match &o.store {
         Some(dir) => {
             let res = if o.given.contains("--global-res") { o.global_res } else { PRODUCTION_BAKE_RES };
@@ -195,6 +201,7 @@ struct Driver<'a> {
     cut_field: Option<Box<dyn planet_generators::height::HeightField + 'a>>,
     /// Frames ticked, for the clock of the waves and the exposure's first frame.
     ticks: u64,
+    coarsen: Option<crate::coarsen::Detector>,
 }
 
 impl Driver<'_> {
@@ -204,6 +211,11 @@ impl Driver<'_> {
         let started = Instant::now();
         let ctx = self.ctx;
         let frame = self.rig.managed.begin_frame(req, &mut RendererSink { ctx, renderer: &mut self.rig.renderer })?;
+        if let Some(mut c) = self.coarsen.take() {
+            let f = &frame.pipeline;
+            c.frame(self.rig.managed.pipeline().refused_plans(), self.ticks, &format!("{:?}", f.draw.kind), f.draw.substituted, f.draw.blank, req.camera.position.0, &f.draw.plan, &|t| self.rig.renderer.slot_of(t).is_some());
+            self.coarsen = Some(c);
+        }
         self.rig.fi.retire_to(self.rig.renderer.retired_frames(ctx));
         while self.rig.fi.is_full() {
             self.rig.fi.note_wait();
@@ -385,7 +397,10 @@ fn run_case(
             .map_err(|e| format!("warming the lit path: {e}"))?;
     }
     let cut_field = if lit.is_some() { Some(world.field()?) } else { None };
-    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), cut_field, ticks: 0 };
+    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), cut_field, ticks: 0, coarsen: None };
+    if crate::coarsen::enabled() {
+        d.coarsen = crate::coarsen::Detector::open(6_371_000.0, script);
+    }
     // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022:
     // recorded only, never judged; the per-tile times of the log read against it). Nothing of the case runs yet.
     let calib_threads = gen.workers;
@@ -408,7 +423,7 @@ fn run_case(
             let t = d.tick(&r)?;
             frames += 1;
             quiet = if t.settled { quiet + 1 } else { 0 };
-            if smoke && frames >= 12 || quiet >= need {
+            if (smoke && frames >= 12 && std::env::var("COARSEN_SETTLE").is_err()) || quiet >= need {
                 break;
             }
             if started.elapsed().as_secs_f64() > SETTLE_LIMIT_S {
@@ -490,6 +505,9 @@ fn run_case(
     }
     let host_load = load_sampler.map_or_else(planet_perf::load::CaseLoad::not_measured, planet_perf::load::LoadSampler::stop);
     let cpu_after = (!smoke).then(planet_perf::host::query_cpu_clock).flatten();
+    if let Some(c) = d.coarsen.as_mut() {
+        c.summary();
+    }
     let pool = d.rig.pool;
     let torn = Instant::now();
     drop(d);
@@ -683,7 +701,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
         }
         let built = Instant::now();
         let scene_field = scene_world.field()?;
-        let script = build_script(scene, radius_m, aspect, scene_field.as_ref(), LOOK_SEED);
+        let script = if crate::coarsen::fly_enabled() { crate::coarsen::fly_script(radius_m, aspect) } else { build_script(scene, radius_m, aspect, scene_field.as_ref(), LOOK_SEED) };
         drop(scene_field);
         let shown = if smoke { script.cameras.len().min(smoke_frames) } else { script.cameras.len() };
         writeln!(

@@ -609,6 +609,7 @@ impl App<'_> {
                     st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer })
                 })?;
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
+            crate::coarsen::window_frame(st.rig.managed.pipeline().refused_plans(), st.frames, &format!("{:?}", frame.pipeline.draw.kind), frame.pipeline.draw.substituted, frame.pipeline.draw.blank, camera.position.0, &frame.pipeline.draw.plan);
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             if let Some(why) = st.rig.managed.take_plan_refusal() {
                 crate::crash::note(&format!("warning: {why}\n  the window keeps the last plan and goes on"));
@@ -1376,6 +1377,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     };
     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
     let script = build_script(StreamScene::Dive, radius_m, f64::from(size.0) / f64::from(size.1), field.as_ref(), field.seed());
+    crate::coarsen::window_open(radius_m, &script.cameras);
     let views: Vec<&str> = TerrainView::ALL.iter().map(|v| v.name()).collect();
     // A flight shows the relief view unless `--view` says otherwise (the flat-colour views are one colour at 1 m).
     let view_name = if o.given.contains("--view") { o.view.as_str() } else { "relief" };
@@ -1458,6 +1460,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         summary: None,
     };
     event_loop.run_app(&mut app).map_err(|e| format!("{NO_DISPLAY}the event loop failed: {e}"))?;
+    crate::coarsen::window_close();
     if let Some(e) = app.error {
         return Err(e);
     }
