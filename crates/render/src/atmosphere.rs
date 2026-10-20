@@ -613,7 +613,9 @@ fn fs_lit_atmo_view(in: VsOut) -> vec4<f32> {
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
     var rgb = atm_shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, g.range.z);
-    if (g.extra.y > 0.5) {
+    if (g.extra.y > 2.5) {
+        rgb = region_tint(nodes[in.node_index].origin_rel.xyz + in.local, rgb, g.range.z);
+    } else if (g.extra.y > 0.5) {
         rgb = overlay_wire(in, rgb, g.range.z, g.extra.y);
     }
     return vec4<f32>(rgb, 1.0);

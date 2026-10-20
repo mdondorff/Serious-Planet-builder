@@ -61,17 +61,30 @@ fn the_overlay_names_are_stable_and_parse_back() {
     assert_eq!(Overlay::parse("maps"), None);
 }
 
-// spec: VIEW-014
+// spec: VIEW-014, VIEW-030
 #[test]
-fn the_overlays_cycle_off_tiles_mesh_off_and_each_has_its_own_shader_code() {
-    assert_eq!(Overlay::ALL, [Overlay::None, Overlay::Tiles, Overlay::Mesh]);
+fn the_overlays_cycle_off_tiles_mesh_regions_off_and_each_has_its_own_shader_code() {
+    assert_eq!(Overlay::ALL, [Overlay::None, Overlay::Tiles, Overlay::Mesh, Overlay::Regions]);
     let mut o = Overlay::None;
     let mut seen = Vec::new();
-    for _ in 0..4 {
+    for _ in 0..5 {
         o = o.next();
         seen.push(o);
     }
-    assert_eq!(seen, [Overlay::Tiles, Overlay::Mesh, Overlay::None, Overlay::Tiles]);
+    assert_eq!(seen, [Overlay::Tiles, Overlay::Mesh, Overlay::Regions, Overlay::None, Overlay::Tiles]);
     let codes: Vec<f32> = Overlay::ALL.iter().map(|o| o.shader_code()).collect();
-    assert_eq!(codes, [0.0, 1.0, 2.0]);
+    assert_eq!(codes, [0.0, 1.0, 2.0, 3.0]);
+    assert_eq!(Overlay::Regions.name(), "regions");
+    assert_eq!(planet_frame::viewer::overlay_status(Overlay::Regions, 1.0), "Overlay: Regions, LOD x1");
+}
+
+// spec: VIEW-030
+#[test]
+fn the_regions_overlay_is_one_plan_token_and_round_trips() {
+    let plan = LitPlan::fixed(11.0);
+    let base = plan.to_text();
+    assert_eq!(plan.with_overlay(Overlay::Regions).to_text(), format!("{base} overlay regions"));
+    let text = plan.with_overlay(Overlay::Regions).to_text();
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    assert_eq!(LitPlan::from_tokens(&tokens[1..]).unwrap().overlay, Overlay::Regions);
 }

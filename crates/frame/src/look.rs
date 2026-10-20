@@ -229,6 +229,9 @@ pub enum Overlay {
     /// The tile outlines and the tint, and every grid edge and the diagonal of every cell as a fixed line of about a pixel (no fade-out,
     /// however fine the mesh is).
     Mesh,
+    /// The surface-type tint of the regions (VIEW-030): the lit colour mixed with the tint of the region over each fragment. The polygons
+    /// come from the app per frame ([`RegionList`](crate::regions::RegionList)), not from the lit plan.
+    Regions,
 }
 
 impl Overlay {
@@ -237,6 +240,7 @@ impl Overlay {
             Overlay::None => "none",
             Overlay::Tiles => "tiles",
             Overlay::Mesh => "mesh",
+            Overlay::Regions => "regions",
         }
     }
 
@@ -245,23 +249,25 @@ impl Overlay {
     }
 
     /// Every overlay, in the order F3 cycles through them.
-    pub const ALL: [Overlay; 3] = [Overlay::None, Overlay::Tiles, Overlay::Mesh];
+    pub const ALL: [Overlay; 4] = [Overlay::None, Overlay::Tiles, Overlay::Mesh, Overlay::Regions];
 
-    /// The next one in the cycle (off, tiles, mesh, off).
+    /// The next one in the cycle (off, tiles, mesh, regions, off).
     pub fn next(self) -> Overlay {
         match self {
             Overlay::None => Overlay::Tiles,
             Overlay::Tiles => Overlay::Mesh,
-            Overlay::Mesh => Overlay::None,
+            Overlay::Mesh => Overlay::Regions,
+            Overlay::Regions => Overlay::None,
         }
     }
 
-    /// The code the lit shader reads (the globals' `extra.y`): 0 none, 1 tiles, 2 mesh.
+    /// The code the lit shader reads (the globals' `extra.y`): 0 none, 1 tiles, 2 mesh, 3 regions.
     pub fn shader_code(self) -> f32 {
         match self {
             Overlay::None => 0.0,
             Overlay::Tiles => 1.0,
             Overlay::Mesh => 2.0,
+            Overlay::Regions => 3.0,
         }
     }
 }

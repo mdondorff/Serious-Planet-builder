@@ -56,6 +56,10 @@ struct Globals {
     // The edit preview (REND-033), read only for a previewed node and only when extra.w (the count, at most 8) is above 0: per stamp two
     // entries, (anchor relative to the camera, reach in metres) and (amount in metres, kind 1 hill / 2 crater / 3 plateau, sign, bound).
     preview: array<vec4<f32>, 16>,
+    // The region overlay (VIEW-030), read only when extra.y is 3: the count in the first entry's x, then per polygon 37 entries: five of
+    // header (anchor relative to the camera and the point count; e1 and the red of the tint; e2 and the green; the unit up and the blue;
+    // the square of the reach and the band), then 32 of points, two per entry (x, y metres in the anchor's tangent plane).
+    regions: array<vec4<f32>, 297>,
 };
 struct Node {
     origin_rel: vec4<f32>,
@@ -337,10 +341,57 @@ fn fs_lit_view(in: VsOut) -> vec4<f32> {
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
     var rgb = shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z);
-    if (g.extra.y > 0.5) {
+    if (g.extra.y > 2.5) {
+        rgb = region_tint(nodes[in.node_index].origin_rel.xyz + in.local, rgb, g.range.z);
+    } else if (g.extra.y > 0.5) {
         rgb = overlay_wire(in, rgb, g.range.z, g.extra.y);
     }
     return vec4<f32>(rgb, 1.0);
+}
+
+// The region tint (VIEW-030): the lit colour mixed with the tint of the nearest region polygon the fragment lies in. Plain arithmetic on
+// the fragment's position relative to the camera; no derivative, no planet-radius value (CON-11).
+// The even-odd test of the point `q` (metres in the anchor's plane) against the `n` points of the polygon whose points start at entry
+// `first` of the globals' region table: a point on the polygon's boundary is decided by the crossing rule alone (a debug tint).
+fn region_inside(first: u32, n: u32, q: vec2<f32>) -> bool {
+    var inside = false;
+    var j = n - 1u;
+    for (var i = 0u; i < n; i = i + 1u) {
+        let vi = g.regions[first + i / 2u];
+        let vj = g.regions[first + j / 2u];
+        let pi = select(vi.xy, vi.zw, (i & 1u) == 1u);
+        let pj = select(vj.xy, vj.zw, (j & 1u) == 1u);
+        if ((pi.y > q.y) != (pj.y > q.y)) && (q.x < (pj.x - pi.x) * (q.y - pi.y) / (pj.y - pi.y) + pi.x) {
+            inside = !inside;
+        }
+        j = i;
+    }
+    return inside;
+}
+
+// `rel` is the fragment's position relative to the camera (the node's origin plus the tile-local position), `factor` the pre-exposure.
+fn region_tint(rel: vec3<f32>, rgb: vec3<f32>, factor: f32) -> vec3<f32> {
+    let count = min(u32(g.regions[0].x + 0.5), 8u);
+    for (var k = 0u; k < count; k = k + 1u) {
+        let base = 1u + k * 37u;
+        let h0 = g.regions[base];
+        let h1 = g.regions[base + 1u];
+        let h2 = g.regions[base + 2u];
+        let h3 = g.regions[base + 3u];
+        let h4 = g.regions[base + 4u];
+        let d = rel - h0.xyz;
+        if (abs(dot(d, h3.xyz)) > h4.y) {
+            continue;
+        }
+        let q = vec2<f32>(dot(d, h1.xyz), dot(d, h2.xyz));
+        if (dot(q, q) > h4.x) {
+            continue;
+        }
+        if (region_inside(base + 5u, min(u32(h0.w + 0.5), 64u), q)) {
+            return mix(rgb, vec3<f32>(h1.w, h2.w, h3.w) * (0.8 * factor), 0.45);
+        }
+    }
+    return rgb;
 }
 "#;
 
@@ -439,7 +490,37 @@ impl DrawMode {
 const RING: usize = 2;
 
 /// Bytes of the globals uniform (view-projection, height range, view mode, the shading extras and the albedo table).
-pub(crate) const GLOBALS_BYTES: u64 = 96 + 16 + 16 * planet_frame::look::shading::ALBEDO_VEC4S as u64 + PREVIEW_BYTES;
+pub(crate) const GLOBALS_BYTES: u64 = 96 + 16 + 16 * planet_frame::look::shading::ALBEDO_VEC4S as u64 + PREVIEW_BYTES + REGION_BYTES;
+
+/// Entries (vec4s) of one polygon of the region table (VIEW-030): five of header, then [`planet_frame::regions::MAX_REGION_POINTS`] points
+/// two to an entry.
+const REGION_ENTRIES: usize = 5 + planet_frame::regions::MAX_REGION_POINTS / 2;
+
+/// Bytes of the region table at the very end of the globals: a count entry, then [`planet_frame::regions::MAX_REGIONS`] polygons.
+pub(crate) const REGION_BYTES: u64 = 16 * (1 + (REGION_ENTRIES * planet_frame::regions::MAX_REGIONS) as u64);
+
+/// The region table of the globals (VIEW-030) for `list`: zeros (count 0) when the list is empty. The layout is the one `Globals::regions`
+/// of the shader documents.
+pub(crate) fn region_table(list: &planet_frame::regions::RegionList) -> Vec<u8> {
+    let mut rows: Vec<u8> = Vec::with_capacity(REGION_BYTES as usize);
+    let polys = &list.polys[..list.polys.len().min(planet_frame::regions::MAX_REGIONS)];
+    rows.extend(f32_bytes(&[polys.len() as f32, 0.0, 0.0, 0.0]));
+    for p in polys {
+        let n = p.points.len().min(planet_frame::regions::MAX_REGION_POINTS);
+        rows.extend(f32_bytes(&[p.anchor[0], p.anchor[1], p.anchor[2], n as f32]));
+        rows.extend(f32_bytes(&[p.e1[0], p.e1[1], p.e1[2], p.tint[0]]));
+        rows.extend(f32_bytes(&[p.e2[0], p.e2[1], p.e2[2], p.tint[1]]));
+        rows.extend(f32_bytes(&[p.up[0], p.up[1], p.up[2], p.tint[2]]));
+        rows.extend(f32_bytes(&[p.reach_sq, p.band_m, 0.0, 0.0]));
+        let start = rows.len();
+        for q in &p.points[..n] {
+            rows.extend(f32_bytes(q));
+        }
+        rows.resize(start + 16 * (REGION_ENTRIES - 5), 0);
+    }
+    rows.resize(REGION_BYTES as usize, 0);
+    rows
+}
 
 /// Bytes of the preview table at the end of the globals: [`planet_frame::preview::MAX_PREVIEW_STAMPS`] stamps of two vec4s.
 pub(crate) const PREVIEW_BYTES: u64 = 32 * planet_frame::preview::MAX_PREVIEW_STAMPS as u64;
@@ -587,6 +668,8 @@ pub struct FrameTiming {
 pub struct TerrainRenderer {
     /// The preview stamps of the edit in flight and the body's radius (REND-033), written into the globals of each frame.
     preview: (Vec<planet_frame::preview::PreviewStamp>, f64),
+    /// The region polygons of the overlay (VIEW-030), written into the globals of the frames that show it.
+    regions: planet_frame::regions::RegionList,
     size: (u32, u32),
     cells: u32,
     bgl: wgpu::BindGroupLayout,
@@ -726,6 +809,12 @@ impl TerrainRenderer {
         self.preview = (stamps.iter().copied().take(planet_frame::preview::MAX_PREVIEW_STAMPS).collect(), radius_m);
     }
 
+    /// Set the region polygons the regions overlay tints the terrain with (VIEW-030; `planet_frame::regions::region_list`, decided by the
+    /// app for this frame's camera). They are read only by a frame whose lit plan has the overlay `Regions`.
+    pub fn set_regions(&mut self, regions: &planet_frame::regions::RegionList) {
+        self.regions = regions.clone();
+    }
+
     /// A renderer with the mid tier's terrain share (ADR 0033: 2 GiB, a ceiling counted in slots: 15 blocks, 219,585 slots at cells
     /// 32). Slots are reusable one frame after their release (the renderer finishes a frame before it returns).
     pub fn new(ctx: &GpuContext, size: (u32, u32), cells: u32) -> Self {
@@ -825,6 +914,7 @@ impl TerrainRenderer {
         });
         Self {
             preview: (Vec::new(), 0.0),
+            regions: planet_frame::regions::RegionList::default(),
             size,
             cells,
             bgl,
@@ -1698,16 +1788,23 @@ impl TerrainRenderer {
             None => {
                 globals.extend(f32_bytes(&[lo, hi, 0.0, 0.0]));
                 globals.extend([view_index(plan.view), 0, 0, 0].iter().flat_map(|v: &u32| v.to_le_bytes()));
-                globals.extend(vec![0u8; GLOBALS_BYTES as usize - PREVIEW_BYTES as usize - globals.len()]);
+                globals.extend(vec![0u8; GLOBALS_BYTES as usize - PREVIEW_BYTES as usize - REGION_BYTES as usize - globals.len()]);
             }
         }
         // The preview table after the albedo table, its count in extra.w (REND-033); zeros when there is no preview.
-        globals.resize(GLOBALS_BYTES as usize - PREVIEW_BYTES as usize, 0);
+        globals.resize(GLOBALS_BYTES as usize - PREVIEW_BYTES as usize - REGION_BYTES as usize, 0);
         if self.preview.0.is_empty() {
             globals.extend(vec![0u8; PREVIEW_BYTES as usize]);
         } else {
             globals.extend(preview_table(&self.preview.0, plan.camera.position.0, self.preview.1));
             globals[108..112].copy_from_slice(&(self.preview.0.len() as f32).to_le_bytes());
+        }
+        // The region table at the end, read by the fragment stage of the regions overlay only (VIEW-030): zeros unless the plan shows it.
+        let show_regions = plan.lit.is_some_and(|l| l.overlay == planet_frame::look::Overlay::Regions);
+        if show_regions {
+            globals.extend(region_table(&self.regions));
+        } else {
+            globals.extend(vec![0u8; REGION_BYTES as usize]);
         }
         debug_assert_eq!(globals.len() as u64, GLOBALS_BYTES);
         // Each frame writes its own set of the ring, so a frame still in flight keeps the records it reads.

@@ -344,6 +344,12 @@ impl EditRuntime {
         tiles
     }
 
+    /// The region polygons the regions overlay tints with (VIEW-030): the region items of the editor's definition (every layer) nearest
+    /// `camera_position`, at most [`planet_frame::regions::MAX_REGIONS`].
+    pub fn region_list(&self, camera_position: Vec3) -> planet_frame::regions::RegionList {
+        planet_frame::regions::region_list(&body_items(self.session.editor().definition()), camera_position, self.radius_m)
+    }
+
     /// The markers of the edits the camera shows (VIEW-015: the footprint find over the `wanted` tiles and the size of the reach on the
     /// screen, the selected edit always) for the globe overview, numbered from [`EDIT_MARKER_BASE`], sized by the outline radius. The edits
     /// do not have to be in the editor mode for this.

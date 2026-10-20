@@ -111,7 +111,7 @@ pub enum Command {
     ToggleCamera,
     /// L: the lit path with the atmosphere, or the debug path (VIEW-007).
     ToggleLit,
-    /// F3: the next debug overlay over the lit terrain: off, tiles, mesh (VIEW-014).
+    /// F3: the next debug overlay over the lit terrain: off, tiles, mesh, regions (VIEW-014, VIEW-030).
     CycleOverlay,
     /// F4: the coarse-LOD inspection view, the error bound times four (VIEW-014).
     ToggleCoarseLod,
@@ -197,6 +197,7 @@ pub fn overlay_status(overlay: Overlay, lod_factor: f64) -> String {
         Overlay::None => "off",
         Overlay::Tiles => "Tiles",
         Overlay::Mesh => "Mesh",
+        Overlay::Regions => "Regions",
     };
     let lod = if (lod_factor - lod_factor.round()).abs() < 0.05 {
         format!("LOD x{}", lod_factor.round())
@@ -207,7 +208,7 @@ pub fn overlay_status(overlay: Overlay, lod_factor: f64) -> String {
 }
 
 /// The key bindings, as text for the usage message and the log.
-pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), F3 cycles the overlay (off, tiles, mesh; lit path), F4 coarse LOD (error bound x4), F9 writes the camera path of the last minute and a repro bundle (target/review), V next debug view (debug path), T vsync on/off, C flight or free camera, \
+pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), F3 cycles the overlay (off, tiles, mesh, regions; lit path), F4 coarse LOD (error bound x4), F9 writes the camera path of the last minute and a repro bundle (target/review), V next debug view (debug path), T vsync on/off, C flight or free camera, \
      free camera: WASD move, Q/E down/up, arrows look, click captures the mouse to look (Esc releases it), Shift boost; Esc quits";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1201,12 +1202,14 @@ mod tests {
         v.command(Command::CycleOverlay, 30, &c);
         assert_eq!(v.overlay, Overlay::Mesh);
         v.command(Command::CycleOverlay, 40, &c);
-        assert_eq!(v.overlay, Overlay::None, "the third press is back to off");
+        assert_eq!(v.overlay, Overlay::Regions, "the third press shows the regions (VIEW-030)");
+        v.command(Command::CycleOverlay, 45, &c);
+        assert_eq!(v.overlay, Overlay::None, "the fourth press is back to off");
         assert!(!v.command(Command::ToggleCoarseLod, 50, &c) && v.coarse_lod);
         assert_eq!(v.overlay, Overlay::None, "the two switches are independent");
         v.command(Command::ToggleCoarseLod, 60, &c);
         assert!(!v.coarse_lod);
-        for word in ["F3", "tiles", "mesh", "F4", "coarse LOD"] {
+        for word in ["F3", "tiles", "mesh", "regions", "F4", "coarse LOD"] {
             assert!(KEYS_HELP.contains(word), "the help names {word}: {KEYS_HELP}");
         }
     }

@@ -62,6 +62,8 @@ mod prefetch;
 mod preview;
 #[path = "preview_lines.rs"]
 mod preview_lines;
+#[path = "regions.rs"]
+mod regions;
 #[path = "residency.rs"]
 mod residency;
 #[path = "scheduler_equivalence.rs"]
