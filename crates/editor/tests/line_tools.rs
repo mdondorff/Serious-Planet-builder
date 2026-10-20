@@ -217,6 +217,88 @@ fn a_long_line_has_handles_over_all_its_parts_and_a_drag_in_a_later_part_re_spli
 
 // spec: VIEW-029
 #[test]
+fn drafts_have_limits_names_count_lines_not_parts_and_history_or_a_new_tool_closes_a_held_point_drag() {
+    // 640 points on a line draft, 64 on a region draft; each 3 m from the last.
+    let mut s = session(4);
+    s.set_tool(Tool::Line("ridge".into()));
+    for k in 0..640 {
+        s.add_draft_point(unit(0.0, lon(3.0 * f64::from(k)))).unwrap();
+    }
+    let e = s.add_draft_point(unit(0.0, lon(3.0 * 640.0))).unwrap_err();
+    assert!(e.to_string().contains("at most 640"), "{e}");
+    s.set_tool(Tool::Region);
+    assert!(s.draft().is_empty());
+    for k in 0..64 {
+        s.add_draft_point(unit(0.0, lon(3.0 * f64::from(k)))).unwrap();
+    }
+    assert!(s.add_draft_point(unit(0.0, lon(3.0 * 64.0))).unwrap_err().to_string().contains("at most 64"));
+    s.cancel_draft();
+
+    // A 150 km ridge is several items but one line: the next ridge is Ridge 2.
+    let metres: Vec<f64> = (0..=15).map(|k| f64::from(k) * 10_000.0).collect();
+    let (mut s, id) = line_session(&metres);
+    assert!(s.editor().line_items(id).unwrap().len() >= 4);
+    assert_eq!(s.item(id).unwrap().name.as_deref(), Some("Ridge 1"));
+    s.set_tool(Tool::Line("ridge".into()));
+    s.add_draft_point(unit(20.0, 0.0)).unwrap();
+    s.add_draft_point(unit(20.0, 0.05)).unwrap();
+    let (second, _) = s.finish_draft().unwrap();
+    assert_eq!(s.item(second).unwrap().name.as_deref(), Some("Ridge 2"));
+
+    // Undo, delete, a deselect or another tool while a point is held close the drag: the held points never reach another state.
+    for how in 0..4 {
+        s.select(second);
+        s.begin_drag(Handle::Point(0)).unwrap();
+        s.drag_surface(unit(21.0, 0.0)).unwrap();
+        match how {
+            0 => drop(s.undo().unwrap()),
+            1 => drop(s.delete_selected().unwrap()),
+            2 => s.deselect(),
+            _ => s.set_tool(Tool::Region),
+        }
+        assert_eq!(s.dragging(), None, "case {how}");
+        assert!(s.end_drag().is_err(), "no drag is left to end (case {how})");
+        s.set_tool(Tool::Select);
+        // Bring the second line back for the next case.
+        if how < 2 {
+            s.redo().ok();
+            if s.item(second).is_none() {
+                s.undo().ok();
+            }
+        }
+        if s.item(second).is_none() {
+            break;
+        }
+    }
+}
+
+// spec: VIEW-029
+#[test]
+fn a_region_point_drag_the_item_refuses_is_closed_and_a_click_on_an_existing_point_adds_nothing() {
+    let mut s = session(6);
+    let mut ix = Interaction::new(10.0);
+    s.set_tool(Tool::Region);
+    let d = |m: f64| m / R * 180.0 / std::f64::consts::PI;
+    let none: [ItemId; 0] = [];
+    for (n, e) in [(0.0, 0.0), (0.0, 10_000.0), (10_000.0, 10_000.0)] {
+        ix.press(&mut s, &view(Some(unit(d(n), lon(e))), &none, &[])).unwrap();
+    }
+    let (id, _) = s.finish_draft().unwrap();
+    let stored = s.item(id).unwrap().clone();
+    // Point 1 dragged beyond the reach of one item (50 km away): refused at the release, the region as it was.
+    s.begin_drag(Handle::Point(1)).unwrap();
+    s.drag_surface(unit(0.0, lon(50_000.0))).unwrap();
+    let e = s.end_drag().unwrap_err();
+    assert!(e.to_string().contains("40 km"), "{e}");
+    assert_eq!((s.item(id).unwrap(), s.dragging()), (&stored, None));
+    // A click on a point of the outline is not a new point.
+    let e = s.insert_point_at(unit(0.0, lon(10_000.0)), 200.0).unwrap_err();
+    assert!(e.to_string().contains("point here already"), "{e}");
+    assert_eq!(s.item(id).unwrap().points.len(), 3);
+}
+
+// spec: VIEW-029
+#[test]
 fn a_point_is_added_on_the_outline_and_removed_each_as_one_command_and_a_region_keeps_three() {
     let (mut s, id) = line_session(&[0.0, 10_000.0]);
     let depth = s.editor().undo_depth();

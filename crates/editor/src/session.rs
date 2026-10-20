@@ -169,6 +169,7 @@ impl<S: ItemStore> Session<S> {
     pub fn set_tool(&mut self, tool: Tool) {
         if tool != self.tool {
             self.draft.clear();
+            self.drop_point_drag();
         }
         self.tool = tool;
     }
@@ -201,7 +202,17 @@ impl<S: ItemStore> Session<S> {
     }
 
     pub fn deselect(&mut self) {
+        self.drop_point_drag();
         self.selection = None;
+    }
+
+    /// Close a held point drag without telling the editor (the points belonged to a selection that is going away or to a state that
+    /// history is about to change). A height, move or radius drag is an open edit in the editor, which refuses history itself.
+    fn drop_point_drag(&mut self) {
+        if matches!(self.drag, Some(Handle::Point(_))) {
+            self.drag = None;
+            self.drag_points = None;
+        }
     }
 
     pub fn set_hover(&mut self, id: Option<ItemId>) {
@@ -335,6 +346,7 @@ impl<S: ItemStore> Session<S> {
     /// Delete the selected edit.
     pub fn delete_selected(&mut self) -> Result<Vec<Affected>, SessionError> {
         let Some(id) = self.selection else { return refused("nothing is selected") };
+        self.drop_point_drag();
         let name = self.named(id);
         let affected = self.editor.delete(id)?;
         self.selection = None;
@@ -602,7 +614,8 @@ impl<S: ItemStore> Session<S> {
         if self.draft.len() < least {
             return refused(format!("a {kind} needs at least {least} points, there are {}", self.draft.len()));
         }
-        let count = self.editor.items().filter(|i| i.kind == kind).count() + 1;
+        // A line counts once, however many items it is split into.
+        let count = self.editor.items().filter(|i| i.kind == kind && i.part.is_none_or(|p| p == 0)).count() + 1;
         let first = self.draft[0];
         let template = NewItem {
             body: self.body,
@@ -654,6 +667,10 @@ impl<S: ItemStore> Session<S> {
             return refused("that is not on the outline");
         }
         let (lat, lon) = (hit.foot.lat_deg, hit.foot.lon_deg);
+        let foot = hit.foot.dir();
+        if points.iter().any(|p| polyline::arc_m(p.dir(), foot, self.radius_m) < MIN_POINT_SPACING_M) {
+            return refused("there is a point here already");
+        }
         let new = polyline::insert_point(&points, hit.segment, GeoPoint::new(lat, lon)).map_err(EditError::from)?;
         let affected = self.set_points(id, &new)?;
         self.status = "point added".to_string();
@@ -687,6 +704,7 @@ impl<S: ItemStore> Session<S> {
 
     /// Take back the last command; `None` when there is none.
     pub fn undo(&mut self) -> Result<Option<Vec<Affected>>, SessionError> {
+        self.drop_point_drag();
         let r = self.editor.undo()?;
         if r.is_some() {
             self.after_history("undone");
@@ -696,6 +714,7 @@ impl<S: ItemStore> Session<S> {
 
     /// Do again the last command taken back; `None` when there is none.
     pub fn redo(&mut self) -> Result<Option<Vec<Affected>>, SessionError> {
+        self.drop_point_drag();
         let r = self.editor.redo()?;
         if r.is_some() {
             self.after_history("redone");
