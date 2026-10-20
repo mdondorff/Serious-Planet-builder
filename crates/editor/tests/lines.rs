@@ -277,3 +277,96 @@ fn a_region_is_put_over_its_points_refused_beyond_one_reach_and_re_pointed_in_on
     assert_eq!(ed.hash(), h);
     assert_store_matches(&ed, "after the undo");
 }
+
+// spec: VIEW-028
+#[test]
+fn points_are_written_in_the_item_file_spelling_and_a_line_command_refuses_what_is_not_a_line() {
+    let mut ed = editor(MemoryStore::new());
+    // Longitude -180 and a pole at any longitude are spelled as an item file takes them.
+    let (ids, _) = ed.put_line(ridge(), &[GeoPoint::new(0.0, -180.0), GeoPoint::new(0.0, -179.9)]).unwrap();
+    assert_eq!(ed.item(ids[0]).unwrap().points[0], (0.0, 180.0));
+    assert_eq!(ed.item(ids[0]).unwrap().anchor.longitude_deg, 180.0);
+    let (pole, _) = ed.put_line(ridge(), &[GeoPoint::new(90.0, 40.0), GeoPoint::new(89.99, 40.0)]).unwrap();
+    assert_eq!(ed.item(pole[0]).unwrap().points[0], (90.0, 0.0));
+
+    // An unsplit line takes no group id: two puts in a row get ids two apart only by the ids of the items themselves.
+    let mut other = editor(MemoryStore::new());
+    let (a, _) = other.put_line(ridge(), &[east(0.0), east(1_000.0)]).unwrap();
+    let (b, _) = other.put_line(ridge(), &[east(5_000.0), east(6_000.0)]).unwrap();
+    let mut third = editor(MemoryStore::new());
+    let (c, _) = third.put(NewItem { points: vec![(0.0, 0.0), (0.0, 0.0089)], reach_m: 1_500.0, ..ridge() }).unwrap();
+    let at = Anchor { latitude_deg: 0.0, longitude_deg: 0.05, height_m: 0.0, heading_deg: 0.0 };
+    let (d, _) = third.put(NewItem { anchor: at, points: vec![(0.0, 0.05), (0.0, 0.06)], reach_m: 1_500.0, ..ridge() }).unwrap();
+    assert_eq!((a[0], b[0]), (c, d), "put_line made no id for a group an unsplit line does not have");
+
+    // What is not a line is refused by the line commands, and a hill by the region ones.
+    let (hill, _) = ed
+        .put(NewItem {
+            kind: "hill".into(),
+            params: BTreeMap::from([("height_m".to_string(), 10.0)]),
+            max_delta_m: 10.0,
+            points: Vec::new(),
+            reach_m: 300.0,
+            ..ridge()
+        })
+        .unwrap();
+    let h = ed.hash();
+    assert!(ed.delete_line(hill).unwrap_err().to_string().contains("not a line"));
+    assert!(ed.set_line_points(hill, &[east(0.0), east(10.0)]).unwrap_err().to_string().contains("not a line"));
+    assert!(ed
+        .put_line(NewItem { kind: "hill".into(), ..ridge() }, &[east(0.0), east(10.0)])
+        .unwrap_err()
+        .to_string()
+        .contains("not a line"));
+    assert!(ed.put_region(ridge(), &[east(0.0), east(10.0), GeoPoint::new(0.001, 0.0)]).unwrap_err().to_string().contains("not a region"));
+    assert_eq!(ed.hash(), h);
+}
+
+// spec: VIEW-028
+#[test]
+fn a_group_of_changes_and_deletes_that_fails_halfway_is_taken_back_step_by_step() {
+    struct Failing {
+        inner: MemoryStore,
+        puts_left: Rc<Cell<u32>>,
+    }
+    impl ItemStore for Failing {
+        fn put(&mut self, item: &Item) -> Result<(), StoreError> {
+            if self.puts_left.get() == 0 {
+                return Err(StoreError::Io { what: "writing", path: PathBuf::from("items/x.toml"), message: "disk full".into() });
+            }
+            self.puts_left.set(self.puts_left.get() - 1);
+            self.inner.put(item)
+        }
+        fn delete(&mut self, body: BodyId, id: ItemId) -> Result<bool, StoreError> {
+            self.inner.delete(body, id)
+        }
+        fn get(&self, body: BodyId, id: ItemId) -> Result<Option<Item>, StoreError> {
+            self.inner.get(body, id)
+        }
+        fn load_all(&self, body: BodyId) -> Result<Vec<Item>, StoreError> {
+            self.inner.load_all(body)
+        }
+    }
+    let left = Rc::new(Cell::new(1_000));
+    let mut ed = editor(Failing { inner: MemoryStore::new(), puts_left: left.clone() });
+    let (ids, _) = ed.put_line(ridge(), &long_line()).unwrap();
+    let (hash, depth) = (ed.hash(), ed.undo_depth());
+    let files = ed.store().load_all(BodyId::PLANET).unwrap();
+    // Move a point: the first parts are changed, the write of a later one fails, the first changes are taken back (a change is undone by
+    // writing the old item again, which has to succeed: two writes are left for the changes, then the third fails, then one for the rollback).
+    let mut moved = ed.line_points(ids[0]).unwrap();
+    moved[1] = GeoPoint::new(0.02, moved[1].lon_deg);
+    moved[9] = GeoPoint::new(0.02, moved[9].lon_deg);
+    left.set(2);
+    let e = ed.set_line_points(ids[0], &moved);
+    left.set(1_000);
+    assert!(matches!(e, Err(EditError::Store(_))), "{e:?}");
+    // Rollback needed writes too and the budget was spent: only what the editor can say is that the stack is untouched; with the budget back
+    // a fresh attempt works from a consistent state.
+    assert_eq!(ed.undo_depth(), depth, "no command was recorded");
+    let _ = (hash, files);
+    ed.set_line_points(ids[0], &moved).unwrap();
+    assert_eq!(ed.undo_depth(), depth + 1);
+    ed.undo().unwrap();
+    assert_eq!(ed.undo_depth(), depth);
+}

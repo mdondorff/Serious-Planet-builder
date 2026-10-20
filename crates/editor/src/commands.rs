@@ -40,6 +40,15 @@ pub struct NewItem {
     pub mask_layer: Option<String>,
 }
 
+/// The kinds that are lines (ADR 0069): an open point list with a width.
+fn is_line_kind(kind: &str) -> bool {
+    matches!(kind, "ridge" | "channel")
+}
+
+fn not_a_line(kind: &str) -> EditError {
+    EditError::Invalid(ItemFileError { key: "kind".into(), why: format!("a {kind} is not a line (a ridge or a channel)") })
+}
+
 /// One step of a group command (VIEW-028): put a new item, replace the content of an item (its id, body and versions stay), or delete one.
 #[derive(Clone, Debug, PartialEq)]
 pub enum GroupStep {
@@ -437,13 +446,18 @@ impl<S: ItemStore> Editor<S> {
     /// The group steps of a line of `points` made like `template` (its kind, layer, priority, parameters, name; `width_m` in its
     /// parameters is the line's half-width): one item when the line fits the reach of one, else the linked parts of
     /// [`polyline::split_line`] sharing one group, each anchored at its first point with a reach that covers its points and its width.
-    fn line_news(&self, template: &NewItem, points: &[GeoPoint], group: ItemId) -> Result<Vec<NewItem>, EditError> {
+    fn line_news(&mut self, template: &NewItem, points: &[GeoPoint], group: Option<ItemId>) -> Result<Vec<NewItem>, EditError> {
         let radius = self.radius_of(template.body)?;
+        // The spelling an item file takes (longitude in (-180, 180], 0 at a pole), so what the tool draws is what the file holds.
+        let points: Vec<GeoPoint> = points.iter().map(|p| p.canonical()).collect();
+        let points = points.as_slice();
         let width = *template.params.get("width_m").ok_or_else(|| {
             EditError::Invalid(ItemFileError { key: "width_m".into(), why: format!("a {} needs a width_m parameter", template.kind) })
         })?;
         let parts = polyline::split_line(points, width, radius)?;
         let split = parts.len() > 1;
+        // A group id is made only for a line that splits (and only once the parts are known to be valid).
+        let group = if split { Some(group.unwrap_or_else(|| self.ids.next_id())) } else { None };
         Ok(parts
             .iter()
             .enumerate()
@@ -451,7 +465,7 @@ impl<S: ItemStore> Editor<S> {
                 anchor: Anchor { latitude_deg: part[0].lat_deg, longitude_deg: part[0].lon_deg, ..template.anchor },
                 reach_m: polyline::extent_m(part, radius) + width + polyline::REACH_SLACK_M,
                 points: part.iter().map(|p| (p.lat_deg, p.lon_deg)).collect(),
-                group: split.then_some(group),
+                group,
                 part: split.then_some(u32::try_from(k).expect("a part index")),
                 mask_layer: None,
                 ..template.clone()
@@ -463,8 +477,10 @@ impl<S: ItemStore> Editor<S> {
     /// split into linked parts when it is longer than one item reaches: one command, one undo. Returns the ids of the parts in order.
     pub fn put_line(&mut self, template: NewItem, points: &[GeoPoint]) -> Result<(Vec<ItemId>, Vec<Affected>), EditError> {
         self.no_open_edit()?;
-        let group = self.ids.next_id();
-        let news = self.line_news(&template, points, group)?;
+        if !is_line_kind(&template.kind) {
+            return Err(not_a_line(&template.kind));
+        }
+        let news = self.line_news(&template, points, None)?;
         self.group(news.into_iter().map(GroupStep::Put).collect())
     }
 
@@ -499,7 +515,10 @@ impl<S: ItemStore> Editor<S> {
         self.no_open_edit()?;
         let members = self.line_items(id)?;
         let first = self.items[&members[0]].clone();
-        let group = first.group.unwrap_or_else(|| self.ids.next_id());
+        if !is_line_kind(&first.kind) {
+            return Err(not_a_line(&first.kind));
+        }
+        let group = first.group;
         let template = NewItem {
             body: first.body,
             surface: first.surface.clone(),
@@ -534,6 +553,10 @@ impl<S: ItemStore> Editor<S> {
     /// Delete the line `id` belongs to, all its parts, as one command.
     pub fn delete_line(&mut self, id: ItemId) -> Result<Vec<Affected>, EditError> {
         self.no_open_edit()?;
+        let kind = &self.items.get(&id).ok_or(EditError::NoSuchItem(id))?.kind;
+        if !is_line_kind(kind) {
+            return Err(not_a_line(kind));
+        }
         let steps = self.line_items(id)?.into_iter().map(GroupStep::Delete).collect();
         self.group(steps).map(|(_, affected)| affected)
     }
@@ -577,6 +600,11 @@ impl<S: ItemStore> Editor<S> {
 
     fn region_new(&self, template: &NewItem, points: &[GeoPoint]) -> Result<NewItem, EditError> {
         let radius = self.radius_of(template.body)?;
+        if template.kind != "region" {
+            return Err(EditError::Invalid(ItemFileError { key: "kind".into(), why: format!("a {} is not a region", template.kind) }));
+        }
+        let points: Vec<GeoPoint> = points.iter().map(|p| p.canonical()).collect();
+        let points = points.as_slice();
         polyline::validate_region(points, radius)?;
         Ok(NewItem {
             anchor: Anchor { latitude_deg: points[0].lat_deg, longitude_deg: points[0].lon_deg, ..template.anchor },

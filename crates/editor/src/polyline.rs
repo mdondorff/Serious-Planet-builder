@@ -34,6 +34,22 @@ impl GeoPoint {
         GeoPoint { lat_deg, lon_deg }
     }
 
+    /// The point in the spelling an item file takes: longitude in (-180, 180] (so -180 is 180) and 0 at a pole.
+    pub fn canonical(self) -> GeoPoint {
+        let lat_deg = if self.lat_deg == 0.0 { 0.0 } else { self.lat_deg };
+        if lat_deg.abs() == 90.0 {
+            return GeoPoint { lat_deg, lon_deg: 0.0 };
+        }
+        let lon_deg = if self.lon_deg == -180.0 {
+            180.0
+        } else if self.lon_deg == 0.0 {
+            0.0
+        } else {
+            self.lon_deg
+        };
+        GeoPoint { lat_deg, lon_deg }
+    }
+
     /// The unit direction of the point.
     pub fn dir(self) -> Vec3 {
         let (lat, lon) = (self.lat_deg * DEG_TO_RAD, self.lon_deg * DEG_TO_RAD);
@@ -582,6 +598,16 @@ mod tests {
         assert_eq!(insert_point(&line, 3, line[0]), Err(PolylineError::NoSuchPoint { index: 3, len: 3 }));
         // The input is untouched.
         assert_eq!(line.len(), 3);
+    }
+
+    // spec: VIEW-028
+    #[test]
+    fn a_point_takes_the_spelling_of_an_item_file() {
+        assert_eq!(GeoPoint::new(10.0, -180.0).canonical(), GeoPoint::new(10.0, 180.0));
+        assert_eq!(GeoPoint::new(90.0, 33.0).canonical(), GeoPoint::new(90.0, 0.0));
+        assert_eq!(GeoPoint::new(-90.0, -180.0).canonical(), GeoPoint::new(-90.0, 0.0));
+        assert_eq!(GeoPoint::new(-0.0, -0.0).canonical().lat_deg.to_bits(), 0.0f64.to_bits());
+        assert_eq!(GeoPoint::new(-5.5, 120.25).canonical(), GeoPoint::new(-5.5, 120.25));
     }
 
     // spec: VIEW-027
