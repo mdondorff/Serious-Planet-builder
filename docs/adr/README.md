@@ -81,3 +81,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0069 | [Lines and regions are point-list items; a long line splits into linked items](0069-lines-and-regions-are-point-list-items.md) | accepted | extends 0066 point 6 and 0067; mode 1 pending (region-mode1) |
 | 0070 | [Brush strokes stay in the item file; the blob store is specified and deferred](0070-brush-strokes-stay-in-the-item-file-no-blob-store-in-the-mvp.md) | accepted | extends 0066 point 6 and 0069; decides the blob ADR of 0007 |
 | 0071 | [Coastal water by connectivity through low ground, not by a reach](0071-coastal-water-by-connectivity-through-band-ground.md) | proposed | amends 0056 points 1 to 3 and the coarse rule of 0058 |
+| 0072 | [Edit visible: the drawn tiles are exact, drawn tiles refresh first, stale refreshes are pre-empted](0072-edit-visible-drawn-tiles-exact-and-stale-refreshes-are-pre-empted.md) | accepted | reads the M6 criterion; extends STRM-026 |
