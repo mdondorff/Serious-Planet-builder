@@ -11,6 +11,7 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 |---|---|---|---|
 | SPIKE-08 | Ocean connectivity at 16384 | closed 2026-10-16 | `spikes/ocean-connectivity/results/` |
 | SPIKE-09 | Atmosphere f32 forms | closed | `spikes/atmosphere-f32/results/` |
+| SPIKE-21 | The wet floor of ADR 0071: cost and memory of the three passes | open | `spikes/wet-floor/results/` |
 | SPIKE-16 | Dark patches over the sea while the camera moves (water-motion-gap; diagnosis) | closed 2026-10-19 (cause: the shore ramp depends on the drawn node's level) | `spikes/water-motion-gap/results/` |
 | SPIKE-11 | Mouse look plumbing | closed 2026-10-18 (recommendation: raw events, Locked then Confined) | `spikes/mouse-look/results/` |
 | SPIKE-15 | Edit-to-test build time | closed 2026-10-18 | `spikes/build-speed/results/` |
@@ -23,6 +24,17 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | exploration | Compact tiles in storage buffers (PR #225; ADR 0054) | closed | `spikes/compact-storage-buffer/results/` |
 
 The explorations before 2026-10-17 had no register entry; from now on every exploration gets a `SPIKE-NN` entry.
+
+## SPIKE-21 The wet floor of ADR 0071: cost and memory of the three passes
+Status: open
+Opened: 2026-10-20
+Question: Do the three passes of ADR 0071 point 3 (per-block union-find with border minimum-spanning edges, one global pass, per-block bucketed priority flood) fit the budget on the 256-cell and the 16384-cell bake: the time on 20 threads, the merger memory (edges per block against the 4,097 bound), the stored size with LZ4, and the equality with a serial priority flood?
+Why it matters: ADR 0071 point 3 is provisional on it; if the memory or the time is out of reach the fallback is option B (one bit per vertex, keyed by the bound).
+Time box: 1 day of agent work.
+Success criteria: the three passes bit-equal to the serial flood on the 256-cell bake and on a 1024-cell bake at several block sizes and thread counts; measured wall time and peak memory of each pass at 16384 cells (a timing measurement, not `cargo xtask perf`); the edges per block at most 4,097; the stored kind-6 size.
+Fallback if it fails: option B of ADR 0071 (a bit per vertex keyed by the bound).
+Code location: branch `spike/wet-floor` (results in spikes/wet-floor/results/); the production code is the change that implements ADR 0071.
+Result: (open)
 
 ## SPIKE-16 Dark patches over the sea while the camera moves (water-motion-gap)
 Status: closed
