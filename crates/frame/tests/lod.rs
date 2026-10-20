@@ -414,7 +414,7 @@ fn the_coarse_lod_is_refused_at_almost_no_pose_the_base_lod_is_accepted_at_from_
         }
     }
     assert!(compared >= 150, "the sweep compared {compared} poses");
-    // Measured on a denser sweep (70 altitudes, 4 pitches, 5 directions): 0 % for the 320x200 case, 1.6 to 2.7 % for the production ones,
+    // Measured on a denser sweep (70 altitudes, 4 pitches, 5 directions): 0 % for the 320x200 case, 1.4 to 2.7 % for the production ones,
     // all at level 11 between 31 and 39 km (a level the check does not take, whose tiles the plan bounds from above).
     assert!(
         refused_only_coarse.len() * 25 <= compared,
