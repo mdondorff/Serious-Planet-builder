@@ -785,10 +785,13 @@ impl EditRuntime {
 /// The keys of the editor mode, for the usage text and the log.
 pub const EDIT_KEYS_HELP: &str = "editor mode: Tab on/off (the panels, the outlines of the edits the camera shows, the planet is for editing: the pointer is free), \
      1 select, 2 crater, 3 hill, 4 plateau then click the planet to place it, 5 ridge, 6 channel, 7 region then click the planet to add points (Enter finishes, \
-     Backspace takes the last point back), click an edit to select it (double-click in a list to fly there), drag its handles \
+     Backspace takes the last point back), 8 raise, 9 lower, 0 smooth, - flatten: a brush, drag on the planet to paint a stroke (the release puts it, one undo \
+     takes it back; the brush's radius and strength are in the inspector), click an edit to select it (double-click in a list to fly there), drag its handles \
      (circle: move, square: radius, light circle: height, amber dots: the points of a line or region) or type values in the inspector, Shift+click on a line or \
      region adds a point, Ctrl+click on a point removes it, Ctrl+Z undo, Ctrl+Y or Ctrl+Shift+Z redo, Delete deletes, F1 or ? lists the keys, Esc steps back \
-     (drag, draft, tool, selection) and does not quit; hold the right mouse button to look around, WASD/QE move";
+     (drag, draft, tool, selection) and does not quit; hold the right mouse button to look around, WASD/QE move, Shift boosts, arrows look; \
+     the viewer's keys work too: G globe overview, F3 cycles the overlay, F4 coarse LOD, F9 writes a repro bundle, L lit or debug path, V next debug view, \
+     T vsync, P or Space pause, R restart (C, flight or free camera, does nothing while the editor is on)";
 
 /// The first frame of the smoke run's editing script.
 pub const SMOKE_FIRST_FRAME: u64 = 60;

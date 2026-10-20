@@ -1468,6 +1468,133 @@ mod tests {
         }
     }
 
+    /// Whether `help` names `label` as a word of its own (not as part of a longer word or number such as `F1` inside `F12`).
+    fn names_key(help: &str, label: &str) -> bool {
+        let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric());
+        help.match_indices(label).any(|(i, _)| {
+            let after = help[i + label.len()..].chars().next();
+            let before = help[..i].chars().next_back();
+            // A one-character label is a key where it stands apart: `8 raise`, `- flatten`, `Q/E`, not the 8 of `1280`.
+            !(word(before) && label.chars().next().is_some_and(char::is_alphanumeric))
+                && !(word(after) && label.chars().last().is_some_and(char::is_alphanumeric))
+        })
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn the_help_text_of_the_editor_names_every_key_the_window_binds() {
+        // Every key code the window can bind, with the label the help names it by; a key that binds and has no label here fails the test
+        // (add it, and name it in `EDIT_KEYS_HELP`).
+        let labels: &[(KeyCode, &str)] = &[
+            (KeyCode::Digit1, "1"),
+            (KeyCode::Digit2, "2"),
+            (KeyCode::Digit3, "3"),
+            (KeyCode::Digit4, "4"),
+            (KeyCode::Digit5, "5"),
+            (KeyCode::Digit6, "6"),
+            (KeyCode::Digit7, "7"),
+            (KeyCode::Digit8, "8"),
+            (KeyCode::Digit9, "9"),
+            (KeyCode::Digit0, "0"),
+            (KeyCode::Minus, "-"),
+            (KeyCode::Delete, "Delete"),
+            (KeyCode::Backspace, "Backspace"),
+            (KeyCode::Enter, "Enter"),
+            (KeyCode::NumpadEnter, "Enter"),
+            (KeyCode::F1, "F1"),
+            (KeyCode::F3, "F3"),
+            (KeyCode::F4, "F4"),
+            (KeyCode::F9, "F9"),
+            (KeyCode::Escape, "Esc"),
+            (KeyCode::Tab, "Tab"),
+            (KeyCode::KeyP, "P"),
+            (KeyCode::Space, "Space"),
+            (KeyCode::KeyR, "R"),
+            (KeyCode::KeyV, "V"),
+            (KeyCode::KeyT, "T"),
+            (KeyCode::KeyC, "C"),
+            (KeyCode::KeyL, "L"),
+            (KeyCode::KeyG, "G"),
+            (KeyCode::KeyW, "WASD"),
+            (KeyCode::KeyA, "WASD"),
+            (KeyCode::KeyS, "WASD"),
+            (KeyCode::KeyD, "WASD"),
+            (KeyCode::KeyQ, "WASD/QE"),
+            (KeyCode::KeyE, "WASD/QE"),
+            (KeyCode::ArrowLeft, "arrows"),
+            (KeyCode::ArrowRight, "arrows"),
+            (KeyCode::ArrowUp, "arrows"),
+            (KeyCode::ArrowDown, "arrows"),
+            (KeyCode::ShiftLeft, "Shift"),
+            (KeyCode::ShiftRight, "Shift"),
+        ];
+        // The codes the window might bind: the labelled ones and every letter, digit and function key, so a new binding cannot hide.
+        let others = [
+            KeyCode::KeyB,
+            KeyCode::KeyF,
+            KeyCode::KeyH,
+            KeyCode::KeyI,
+            KeyCode::KeyJ,
+            KeyCode::KeyK,
+            KeyCode::KeyM,
+            KeyCode::KeyN,
+            KeyCode::KeyO,
+            KeyCode::KeyU,
+            KeyCode::KeyX,
+            KeyCode::KeyY,
+            KeyCode::KeyZ,
+            KeyCode::F2,
+            KeyCode::F5,
+            KeyCode::F6,
+            KeyCode::F7,
+            KeyCode::F8,
+            KeyCode::F10,
+            KeyCode::F11,
+            KeyCode::F12,
+            KeyCode::Equal,
+            KeyCode::Slash,
+            KeyCode::Insert,
+            KeyCode::Home,
+            KeyCode::End,
+            KeyCode::PageUp,
+            KeyCode::PageDown,
+            KeyCode::BracketLeft,
+            KeyCode::BracketRight,
+            KeyCode::Comma,
+            KeyCode::Period,
+        ];
+        let bound = |code: KeyCode| {
+            edit_key(code, None, false, false).is_some()
+                || key_command(code).is_some()
+                || set_held(&mut Held::default(), code, true)
+                || code == KeyCode::Tab
+        };
+        for code in others {
+            assert!(!bound(code), "{code:?} is bound but has no label in this test (add it, and name it in EDIT_KEYS_HELP)");
+        }
+        for (code, label) in labels {
+            assert!(bound(*code), "{code:?} is labelled {label} but the window does not bind it");
+            assert!(names_key(EDIT_KEYS_HELP, label), "EDIT_KEYS_HELP does not name {label} ({code:?}): {EDIT_KEYS_HELP}");
+        }
+        // The chords and the mouse, which have no key code of their own.
+        for word in [
+            "Ctrl+Z",
+            "Ctrl+Y",
+            "Ctrl+Shift+Z",
+            "Shift+click",
+            "Ctrl+click",
+            "right mouse button",
+            "?",
+            "radius",
+            "strength",
+            "inspector",
+            "flatten",
+        ] {
+            assert!(EDIT_KEYS_HELP.contains(word), "EDIT_KEYS_HELP does not name {word}");
+        }
+        assert!(!names_key("the 1280 pixels", "8") && names_key("8 raise", "8") && names_key("- flatten", "-"));
+    }
+
     // spec: VIEW-003
     #[test]
     fn every_documented_key_is_bound_and_nothing_else_is() {
