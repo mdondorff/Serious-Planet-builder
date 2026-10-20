@@ -400,6 +400,8 @@ pub(crate) struct Block {
 /// GPU state of the compact format.
 pub(crate) struct CompactGpu {
     pub(crate) pipeline: wgpu::RenderPipeline,
+    /// The same shader with the quadrant cut on, for the nodes drawn over some quadrants (STRM-016).
+    pub(crate) pipeline_cut: wgpu::RenderPipeline,
     /// Group 1: the frame's tile references.
     pub(crate) bgl_frame: wgpu::BindGroupLayout,
     /// Group 2: one block.

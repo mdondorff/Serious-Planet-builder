@@ -22,6 +22,8 @@ mod gpu_pipelined;
 mod gpu_pools;
 #[path = "gpu_preview.rs"]
 mod gpu_preview;
+#[path = "gpu_quadrants.rs"]
+mod gpu_quadrants;
 #[path = "gpu_reference.rs"]
 mod gpu_reference;
 #[path = "gpu_renderer.rs"]

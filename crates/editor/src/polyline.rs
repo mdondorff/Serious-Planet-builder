@@ -13,6 +13,9 @@ pub const MAX_POINTS: usize = 64;
 /// The fewest points of a line and of a region.
 pub const MIN_LINE_POINTS: usize = 2;
 pub const MIN_REGION_POINTS: usize = 3;
+/// Metres added to the reach of an item made from a point list, so that it covers its points however the distance is rounded; a line
+/// fits one item when its extent, width and this margin are within one cell edge.
+pub const REACH_SLACK_M: f64 = 1.0;
 /// The share of the reach limit a part of a split line may use, so an edit of a part has room before it must split again.
 pub const SPLIT_FRACTION: f64 = 0.8;
 
@@ -28,6 +31,22 @@ pub struct GeoPoint {
 
 impl GeoPoint {
     pub const fn new(lat_deg: f64, lon_deg: f64) -> GeoPoint {
+        GeoPoint { lat_deg, lon_deg }
+    }
+
+    /// The point in the spelling an item file takes: longitude in (-180, 180] (so -180 is 180) and 0 at a pole.
+    pub fn canonical(self) -> GeoPoint {
+        let lat_deg = if self.lat_deg == 0.0 { 0.0 } else { self.lat_deg };
+        if lat_deg.abs() == 90.0 {
+            return GeoPoint { lat_deg, lon_deg: 0.0 };
+        }
+        let lon_deg = if self.lon_deg == -180.0 {
+            180.0
+        } else if self.lon_deg == 0.0 {
+            0.0
+        } else {
+            self.lon_deg
+        };
         GeoPoint { lat_deg, lon_deg }
     }
 
@@ -177,7 +196,7 @@ pub fn extent_m(points: &[GeoPoint], radius_m: f64) -> f64 {
 
 /// Whether a line of `width_m` fits the reach of one item: its extent plus the width within one cell edge.
 pub fn line_fits_one_item(points: &[GeoPoint], width_m: f64, radius_m: f64) -> bool {
-    points.len() <= MAX_POINTS && extent_m(points, radius_m) + width_m <= CELL_EDGE_M
+    points.len() <= MAX_POINTS && extent_m(points, radius_m) + width_m + REACH_SLACK_M <= CELL_EDGE_M
 }
 
 /// Splits a line into the parts of the linked items it becomes (ADR 0069 point 3): a line that fits one item stays whole; a longer one
@@ -579,6 +598,16 @@ mod tests {
         assert_eq!(insert_point(&line, 3, line[0]), Err(PolylineError::NoSuchPoint { index: 3, len: 3 }));
         // The input is untouched.
         assert_eq!(line.len(), 3);
+    }
+
+    // spec: VIEW-028
+    #[test]
+    fn a_point_takes_the_spelling_of_an_item_file() {
+        assert_eq!(GeoPoint::new(10.0, -180.0).canonical(), GeoPoint::new(10.0, 180.0));
+        assert_eq!(GeoPoint::new(90.0, 33.0).canonical(), GeoPoint::new(90.0, 0.0));
+        assert_eq!(GeoPoint::new(-90.0, -180.0).canonical(), GeoPoint::new(-90.0, 0.0));
+        assert_eq!(GeoPoint::new(-0.0, -0.0).canonical().lat_deg.to_bits(), 0.0f64.to_bits());
+        assert_eq!(GeoPoint::new(-5.5, 120.25).canonical(), GeoPoint::new(-5.5, 120.25));
     }
 
     // spec: VIEW-027

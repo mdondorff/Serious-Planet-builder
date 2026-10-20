@@ -161,8 +161,38 @@ fn relief(in: VsOut) -> vec4<f32> {
     return vec4<f32>(c, 1.0);
 }
 
+// The fragment entries take the quadrant cut only in the pipelines made for nodes drawn over some quadrants (`CUT_QUADRANTS` is set to 1
+// at their creation); the pipelines of whole nodes have it false, so their fragment stages hold no `discard` and keep early depth writes.
+override CUT_QUADRANTS: bool = false;
+
+// A node drawn over some quadrants of its tile only (STRM-016, SPIKE-18): its record's `origin_rel.w` holds the quadrants it leaves out as
+// bits, bit k for child k of the tile's `children()` = 2 * (x half) + (y half), the halves of the tile coordinates (`aux` is the lattice
+// position over the tile, i along x and j along y). A node drawn whole has 0 there and never takes the branch. The caller discards after
+// its derivatives, in uniform control flow.
+fn quadrant_cut_at(node_index: u32, aux: vec2<f32>) -> bool {
+    let left_out = u32(nodes[node_index].origin_rel.w + 0.5);
+    if (left_out == 0u) {
+        return false;
+    }
+    let q = select(0u, 2u, aux.x >= 0.5) + select(0u, 1u, aux.y >= 0.5);
+    return ((left_out >> q) & 1u) != 0u;
+}
+
+fn quadrant_cut(in: VsOut) -> bool {
+    return quadrant_cut_at(in.node_index, in.aux);
+}
+
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
+    // The derivatives of the inner function come first; a node drawn over some quadrants discards the rest after them (STRM-016).
+    let c = fs_view(in);
+    if (CUT_QUADRANTS && quadrant_cut(in)) {
+        discard;
+    }
+    return c;
+}
+
+fn fs_view(in: VsOut) -> vec4<f32> {
     let mode = g.mode.x;
     // Derivatives are taken before any branch (uniform control flow).
     // Contours every 10 m, 100 m, 1 km and 10 km. Each decade fades out continuously once its lines would be closer
@@ -295,6 +325,14 @@ fn shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: vec3<f
 // tile-local position: no planet-radius value reaches this stage.
 @fragment
 fn fs_lit(in: VsOut) -> @location(0) vec4<f32> {
+    let c = fs_lit_view(in);
+    if (CUT_QUADRANTS && quadrant_cut(in)) {
+        discard;
+    }
+    return c;
+}
+
+fn fs_lit_view(in: VsOut) -> vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
@@ -325,7 +363,8 @@ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
             r[0],
             r[1],
             r[2],
-            0.0,
+            // The quadrants of the tile the node leaves out, as bits (STRM-016): 0 for a node drawn whole, so its record is what it was.
+            f32::from(!d.quadrants & 0b1111),
             c[0],
             c[1],
             c[2],
@@ -603,8 +642,18 @@ pub struct TerrainRenderer {
 struct LitGpu {
     path: LitPath,
     pipeline: wgpu::RenderPipeline,
+    /// The same for the nodes drawn over some quadrants (STRM-016): the cut is on.
+    pipeline_cut: wgpu::RenderPipeline,
     /// The terrain pipeline of the frames that have an atmosphere (`fs_lit_atmo`, the tables in group 3).
     atmosphere_pipeline: Option<wgpu::RenderPipeline>,
+    atmosphere_pipeline_cut: Option<wgpu::RenderPipeline>,
+}
+
+/// The pipeline-overridable constants of the fragment stage of the pipelines made for nodes drawn over some quadrants.
+const CUT_CONSTANTS: [(&str, f64); 1] = [("CUT_QUADRANTS", 1.0)];
+
+fn fragment_options(cut: bool) -> wgpu::PipelineCompilationOptions<'static> {
+    wgpu::PipelineCompilationOptions { constants: if cut { &CUT_CONSTANTS } else { &[] }, ..Default::default() }
 }
 
 /// How often the renderer created its long-lived GPU objects (REND-013, REND-016): after construction and
@@ -850,30 +899,46 @@ impl TerrainRenderer {
             bind_group_layouts: &[Some(bgl0), Some(&bgl_frame), Some(&bgl_block)],
             immediate_size: 0,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("compact-pipeline"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
-            }),
-            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
-            // Reversed-Z (ADR 0002): near = 1, far = 0, so the test is Greater and the clear value 0.
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(DEPTH_COMPARE),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-        CompactGpu { pipeline, bgl_frame, bgl_block, blocks: Vec::new(), block_bytes: pool.slot_bytes * u64::from(pool.block_slots) }
+        // The pipeline of the whole nodes, and the one of the nodes drawn over some quadrants (STRM-016): the same shader with the cut on.
+        let make = |cut: bool| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(if cut { "compact-pipeline-cut" } else { "compact-pipeline" }),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs"),
+                    compilation_options: fragment_options(cut),
+                    targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                }),
+                primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+                // Reversed-Z (ADR 0002): near = 1, far = 0, so the test is Greater and the clear value 0.
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(DEPTH_COMPARE),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let (pipeline, pipeline_cut) = (make(false), make(true));
+        CompactGpu {
+            pipeline,
+            pipeline_cut,
+            bgl_frame,
+            bgl_block,
+            blocks: Vec::new(),
+            block_bytes: pool.slot_bytes * u64::from(pool.block_slots),
+        }
     }
 
     /// The ring of per-frame buffers for plans of up to `capacity` nodes.
@@ -945,26 +1010,34 @@ impl TerrainRenderer {
             bind_group_layouts: &[Some(&self.bgl), Some(&c.bgl_frame), Some(&c.bgl_block)],
             immediate_size: 0,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("compact-lit-pipeline"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs_lit"),
-                compilation_options: Default::default(),
-                targets: &targets,
-            }),
-            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
-            depth_stencil: Some(depth),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let make = |cut: bool| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(if cut { "compact-lit-pipeline-cut" } else { "compact-lit-pipeline" }),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_lit"),
+                    compilation_options: fragment_options(cut),
+                    targets: &targets,
+                }),
+                primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+                depth_stencil: Some(depth.clone()),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let (pipeline, pipeline_cut) = (make(false), make(true));
         let path = LitPath::new(ctx, self.size);
-        // The scene target, the exposure buffers, three post pipelines and the terrain pipeline.
-        self.lit_objects = 1 + 3 + 1;
-        self.lit = Some(LitGpu { path, pipeline, atmosphere_pipeline: None });
+        // The scene target, the exposure buffers, three post pipelines and the terrain pipelines (whole nodes, nodes over some quadrants).
+        self.lit_objects = 1 + 3 + 2;
+        self.lit = Some(LitGpu { path, pipeline, pipeline_cut, atmosphere_pipeline: None, atmosphere_pipeline_cut: None });
     }
 
     /// Enable the atmosphere (ADR 0040, ADR 0042 point 2) for the body `atmosphere`: its static tables are computed on the CPU in f64
@@ -1000,27 +1073,36 @@ impl TerrainRenderer {
             bind_group_layouts: &[Some(&self.bgl), Some(&c.bgl_frame), Some(&c.bgl_block), Some(atmo_bgl)],
             immediate_size: 0,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("compact-lit-atmosphere-pipeline"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs_lit_atmo"),
-                compilation_options: Default::default(),
-                targets: &targets,
-            }),
-            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
-            depth_stencil: Some(depth),
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let make = |cut: bool| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(if cut { "compact-lit-atmosphere-pipeline-cut" } else { "compact-lit-atmosphere-pipeline" }),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_lit_atmo"),
+                    compilation_options: fragment_options(cut),
+                    targets: &targets,
+                }),
+                primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+                depth_stencil: Some(depth.clone()),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let (pipeline, pipeline_cut) = (make(false), make(true));
         // Counted by declaration: the atmosphere path's scene target, two tables, two products, the uniform buffer and three
-        // pipelines (sky view, aerial perspective, composite) beside the terrain pipeline made here.
+        // pipelines (sky view, aerial perspective, composite) beside the two terrain pipelines made here.
         const ATMOSPHERE_PATH_OBJECTS: u32 = 9;
-        self.lit_objects += 1 + ATMOSPHERE_PATH_OBJECTS - 3;
+        self.lit_objects += 2 + ATMOSPHERE_PATH_OBJECTS - 3;
         lit.atmosphere_pipeline = Some(pipeline);
+        lit.atmosphere_pipeline_cut = Some(pipeline_cut);
         if let Some(w) = self.water.as_mut() {
             let layouts = CompactLayouts { frame: &self.compact.bgl_frame, block: &self.compact.bgl_block, cells: self.cells };
             let before = w.objects;
@@ -1685,13 +1767,18 @@ impl TerrainRenderer {
         }
         let lit_gpu = plan.lit.as_ref().and(self.lit.as_ref());
         let atmosphere_frame = plan.lit.as_ref().is_some_and(|l| l.atmosphere.is_some());
-        let (color_target, pipeline) = match (lit_gpu, plan.lit.as_ref()) {
-            (Some(l), Some(lit)) if atmosphere_frame => {
-                (l.path.terrain_target(lit), l.atmosphere_pipeline.as_ref().expect("atmosphere enabled"))
-            }
-            (Some(l), _) => (l.path.hdr_view(), &l.pipeline),
-            _ => (&self.color_view, &self.compact.pipeline),
+        let (color_target, pipeline, pipeline_cut) = match (lit_gpu, plan.lit.as_ref()) {
+            (Some(l), Some(lit)) if atmosphere_frame => (
+                l.path.terrain_target(lit),
+                l.atmosphere_pipeline.as_ref().expect("atmosphere enabled"),
+                l.atmosphere_pipeline_cut.as_ref().expect("atmosphere enabled"),
+            ),
+            (Some(l), _) => (l.path.hdr_view(), &l.pipeline, &l.pipeline_cut),
+            _ => (&self.color_view, &self.compact.pipeline, &self.compact.pipeline_cut),
         };
+        // The nodes drawn over some quadrants (STRM-016) go in their own draws after the whole ones, through the pipeline with the cut on.
+        let masked: Vec<bool> = plan.nodes.iter().map(|d| d.quadrants != planet_frame::ALL_QUADRANTS).collect();
+        let any_masked = masked.iter().any(|m| *m);
         {
             let [r, g, b, a] = if lit_gpu.is_some() { [0.0; 4] } else { plan.clear_color.map(|v| f64::from(v) / 255.0) };
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1725,28 +1812,57 @@ impl TerrainRenderer {
             // The block bound to group 2: a node of another block rebinds it (the lowest-slot-first free list keeps a settled view in
             // one or two blocks).
             let mut bound: Option<u32> = None;
-            match &indirect {
-                Some(list) => {
-                    // One multi-draw per run of consecutive nodes in one block; the node index is the first instance.
-                    for run in &list.runs {
-                        let b = run.buffer.0;
-                        if bound != Some(b) {
-                            pass.set_bind_group(2, &self.compact.blocks[b as usize].as_ref().expect("block of a resident tile").bind, &[]);
-                            bound = Some(b);
-                        }
-                        pass.multi_draw_indexed_indirect(&set.args, u64::from(run.first) * DRAW_RECORD_BYTES, run.count);
-                        stats.encoded_draws += 1;
+            // The whole nodes, then (if there are any) the nodes drawn over some quadrants with the cut pipeline: the layouts are the
+            // same, so the bind groups stay bound across the switch.
+            for class in [false, true] {
+                if class {
+                    if !any_masked {
+                        break;
                     }
+                    pass.set_pipeline(pipeline_cut);
                 }
-                None => {
-                    for (i, d) in plan.nodes.iter().enumerate() {
-                        let b = block_of(&self.tiles[&d.tile]).0;
-                        if bound != Some(b) {
-                            pass.set_bind_group(2, &self.compact.blocks[b as usize].as_ref().expect("block of a resident tile").bind, &[]);
-                            bound = Some(b);
+                match &indirect {
+                    Some(list) => {
+                        // One multi-draw per run of consecutive nodes of one class in one block; the node index is the first instance.
+                        for run in &list.runs {
+                            let b = run.buffer.0;
+                            let (mut i, end) = (run.first as usize, (run.first + run.count) as usize);
+                            while i < end {
+                                if masked[i] != class {
+                                    i += 1;
+                                    continue;
+                                }
+                                let from = i;
+                                while i < end && masked[i] == class {
+                                    i += 1;
+                                }
+                                if bound != Some(b) {
+                                    pass.set_bind_group(
+                                        2,
+                                        &self.compact.blocks[b as usize].as_ref().expect("block of a resident tile").bind,
+                                        &[],
+                                    );
+                                    bound = Some(b);
+                                }
+                                pass.multi_draw_indexed_indirect(&set.args, from as u64 * DRAW_RECORD_BYTES, (i - from) as u32);
+                                stats.encoded_draws += 1;
+                            }
                         }
-                        pass.draw_indexed(0..self.index_count, 0, i as u32..i as u32 + 1);
-                        stats.encoded_draws += 1;
+                    }
+                    None => {
+                        for (i, d) in plan.nodes.iter().enumerate().filter(|(i, _)| masked[*i] == class) {
+                            let b = block_of(&self.tiles[&d.tile]).0;
+                            if bound != Some(b) {
+                                pass.set_bind_group(
+                                    2,
+                                    &self.compact.blocks[b as usize].as_ref().expect("block of a resident tile").bind,
+                                    &[],
+                                );
+                                bound = Some(b);
+                            }
+                            pass.draw_indexed(0..self.index_count, 0, i as u32..i as u32 + 1);
+                            stats.encoded_draws += 1;
+                        }
                     }
                 }
             }
@@ -1982,6 +2098,7 @@ mod one_shot_tests {
             color: [1, 2, 3, 255],
             mesh_key: 7,
             preview: false,
+            quadrants: 0b1111,
         };
         let (coarse, fine) = (TileId::new(planet_core::Face(0), 17, 1, 1).unwrap(), TileId::new(planet_core::Face(0), 20, 8, 8).unwrap());
         let mut plan = planet_frame::viewer::lit_warm_plan(

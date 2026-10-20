@@ -80,6 +80,10 @@ pub struct TerrainDraw {
     /// The node is drawn from a stale resident tile that a preview stamp touches (REND-033): the vertex stage adds the preview's delta.
     /// A runtime flag of the draw plan; the recorded text form does not carry it.
     pub preview: bool,
+    /// The quadrants of the tile that are drawn (STRM-016): bit `k` is the child `k` of [`planet_core::TileId::children`], `0b1111` the
+    /// whole tile. A tile that stands in for children that are not resident is drawn over their quadrants only; the fragment stage
+    /// discards the rest. The text form carries it only when it is not the whole tile.
+    pub quadrants: u8,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -278,6 +282,7 @@ pub(crate) fn plan_terrain_keyed(
                     derive_key(n.tile)
                 },
                 preview: false,
+                quadrants: crate::lod::ALL_QUADRANTS,
             }
         })
         .collect();

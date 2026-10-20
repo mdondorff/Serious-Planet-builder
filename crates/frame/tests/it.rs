@@ -6,6 +6,8 @@ mod compact_pool;
 mod controller;
 #[path = "cover.rs"]
 mod cover;
+#[path = "cover_masks.rs"]
+mod cover_masks;
 #[path = "dive.rs"]
 mod dive;
 #[path = "draw_records.rs"]
