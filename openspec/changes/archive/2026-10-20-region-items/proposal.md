@@ -5,7 +5,7 @@ M6 plan row E5, third part: regions. Owner answers (2026-10-19): a region is a c
 - **Surface type table** (WDEF-012): nine entries (name, debug tint) in a fixed order; a region stores the index.
 - **Kind `region`** (WDEF-012): a closed polygon of 3 to 64 points, parameters `surface_type` and `mask_mode` (0 none, 2 clip inside), `mask_layer` for mode 2; validation at the put (non-self-crossing, within one reach, indexes in range); a mode-2 region is filed in the layer it clips.
 - **Mask stage** (GEN-029): the stamp stage of that layer leaves the base where a mode-2 region contains the point (all deltas of the layer cut, a hard edge).
-- **Mode 1 (clip outside) is refused** with a message: it needs the region in the read set of every tile of the layer, which the footprint and the summaries do not do; the design note lays out what that takes, for the owner's decision.
+- **Mode 1 (clip outside) is refused** with a message: it needs the region in the read set of every tile of the layer, which the footprint and the summaries do not do; `openspec/changes/region-mode1/design.md` lays out what that takes, for the owner's decision.
 - **Not in this change**: mode 1, the overlay (VIEW-030, `region-stage`), a feathered edge, regions over 40 km, the editor's region tools (crusader).
 
 ## Impact
