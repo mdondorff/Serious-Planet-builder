@@ -120,6 +120,10 @@ impl From<EditError> for SessionError {
     }
 }
 
+fn group_delete(id: ItemId) -> crate::commands::GroupStep {
+    crate::commands::GroupStep::Delete(id)
+}
+
 fn refused<T>(why: impl Into<String>) -> Result<T, SessionError> {
     Err(SessionError::Refused(why.into()))
 }
@@ -286,9 +290,16 @@ impl<S: ItemStore> Session<S> {
     }
 
     /// Show or hide an edit in the views (not in the world): the layer list's checkbox.
+    /// A line or a brush drag split into linked items is one row of the layer list, so the whole group is shown or hidden.
     pub fn toggle_hidden(&mut self, id: ItemId) {
-        if !self.hidden.remove(&id) {
-            self.hidden.insert(id);
+        let members = self.editor.line_items(id).unwrap_or_else(|_| vec![id]);
+        let hide = !self.hidden.contains(&id);
+        for m in members {
+            if hide {
+                self.hidden.insert(m);
+            } else {
+                self.hidden.remove(&m);
+            }
         }
     }
 
@@ -448,12 +459,17 @@ impl<S: ItemStore> Session<S> {
         Ok((id, affected))
     }
 
-    /// Delete the selected edit.
+    /// Delete the selected edit; a line or a brush drag split into linked items goes whole, as one command.
     pub fn delete_selected(&mut self) -> Result<Vec<Affected>, SessionError> {
         let Some(id) = self.selection else { return refused("nothing is selected") };
         self.drop_point_drag();
         let name = self.named(id);
-        let affected = self.editor.delete(id)?;
+        let members = self.editor.line_items(id).map_err(SessionError::Edit)?;
+        let affected = if members.len() > 1 {
+            self.editor.group(members.into_iter().map(group_delete).collect())?.1
+        } else {
+            self.editor.delete(id)?
+        };
         self.selection = None;
         self.hover = self.hover.filter(|h| *h != id);
         self.status = format!("{name} deleted; undo brings it back");

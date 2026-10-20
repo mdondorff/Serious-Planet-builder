@@ -20,6 +20,7 @@ const LIGHT: egui::Color32 = egui::Color32::from_rgb(232, 230, 225);
 const ORANGE: egui::Color32 = egui::Color32::from_rgb(214, 126, 60);
 const TEAL: egui::Color32 = egui::Color32::from_rgb(70, 170, 200);
 const GREEN: egui::Color32 = egui::Color32::from_rgb(110, 190, 100);
+const BRUSH_COLOUR: egui::Color32 = egui::Color32::from_rgb(200, 130, 220);
 
 /// What the panels ask for.
 #[derive(Clone, Debug, PartialEq)]
@@ -158,6 +159,7 @@ fn kind_color(kind: &str) -> egui::Color32 {
         "ridge" => ORANGE,
         "channel" => TEAL,
         "region" => GREEN,
+        "brush" => BRUSH_COLOUR,
         _ => BLUE,
     }
 }
@@ -183,6 +185,16 @@ pub fn tool_label(tool: &Tool) -> String {
     }
 }
 
+/// The text of a row: the label, the kind and, when the row has one, its detail (the parts of a split line, the strokes of a brush, the
+/// points of a line or a region, VIEW-016).
+pub fn row_text(row: &Row) -> String {
+    let kind = planet_editor::params::kind_title(&row.kind);
+    match row.detail() {
+        d if d.is_empty() => format!("{}  ({kind})", row.label),
+        d => format!("{}  ({kind}) · {d}", row.label),
+    }
+}
+
 fn row_button(ui: &mut egui::Ui, st: &mut PanelState, ev: &mut Vec<Event>, row: &Row, selected: bool, name: &str) {
     ui.horizontal(|ui| {
         ui.colored_label(kind_color(&row.kind), "●");
@@ -197,7 +209,9 @@ fn row_button(ui: &mut egui::Ui, st: &mut PanelState, ev: &mut Vec<Event>, row: 
             ui.weak(format_metres(row.distance_m));
         });
     });
-    ui.small(format!("{} · reach {}", planet_editor::params::kind_title(&row.kind), format_metres(row.reach_m)));
+    let detail = row.detail();
+    let detail = if detail.is_empty() { String::new() } else { format!(" · {detail}") };
+    ui.small(format!("{} · reach {}{detail}", planet_editor::params::kind_title(&row.kind), format_metres(row.reach_m)));
 }
 
 fn rail(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
@@ -331,7 +345,7 @@ fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
 }
 
 fn row_button_inline(ui: &mut egui::Ui, st: &mut PanelState, ev: &mut Vec<Event>, row: &Row, selected: bool) {
-    let r = ui.selectable_label(selected, format!("{}  ({})", row.label, planet_editor::params::kind_title(&row.kind)));
+    let r = ui.selectable_label(selected, row_text(row));
     st.marks.push((format!("layer-row:{}", row.label), r.rect));
     if r.double_clicked() {
         ev.push(Event::FlyTo(row.id));
@@ -934,6 +948,58 @@ mod tests {
         assert!(rig.st.mark("chain:Hill 1").is_some() && rig.st.mark("chain:Crater 1").is_some());
         rig.click(&data(&h), rig.mark("tab:near"));
         assert_eq!(rig.st.tab, Tab::Near);
+    }
+
+    // spec: VIEW-016
+    #[test]
+    fn the_layers_tab_has_a_row_for_a_split_line_a_region_and_a_brush_with_their_details_and_the_row_selects_and_hides_the_item() {
+        use planet_editor::session::Tool as T;
+        use planet_world_def::stamp::BrushKind;
+        let mut f = fixture();
+        let (la, lo) = (47.2f64.to_radians(), 8.55f64.to_radians());
+        let at = |m_east: f64, m_north: f64| {
+            let (dla, dlo) = (m_north / R, m_east / R / libm::cos(la));
+            Vec3::new(libm::cos(la + dla) * libm::cos(lo + dlo), libm::cos(la + dla) * libm::sin(lo + dlo), libm::sin(la + dla))
+        };
+        // A ridge of 150 km (split into parts), a region and a brush stroke.
+        f.s.set_tool(T::Line("ridge".into()));
+        for k in 0..=16 {
+            f.s.add_draft_point(at(f64::from(k) * 9_000.0, 20_000.0)).unwrap();
+        }
+        let (ridge, _) = f.s.finish_draft().unwrap();
+        f.s.set_tool(T::Region);
+        for (e, n) in [(0.0, 40_000.0), (8_000.0, 40_000.0), (4_000.0, 46_000.0)] {
+            f.s.add_draft_point(at(e, n)).unwrap();
+        }
+        f.s.finish_draft().unwrap();
+        f.s.set_tool(T::Brush(BrushKind::Raise));
+        f.s.begin_stroke(at(0.0, -20_000.0), 0.0).unwrap();
+        f.s.extend_stroke(at(300.0, -20_000.0));
+        f.s.end_stroke().unwrap();
+        f.s.set_tool(T::Select);
+        let layout = Layout::default();
+        let mut h = held(&f, layout.clone());
+        h.groups = f.s.layer_groups(f.cam);
+        let rows: Vec<planet_editor::lists::Row> = h.groups.iter().flat_map(|g| g.rows.clone()).collect();
+        let by_kind = |k: &str| rows.iter().find(|r| r.kind == k).unwrap_or_else(|| panic!("no {k} row")).clone();
+        let (r_ridge, r_region, r_brush) = (by_kind("ridge"), by_kind("region"), by_kind("brush"));
+        assert_eq!(rows.iter().filter(|r| r.kind == "ridge").count(), 1, "a split line is one row");
+        assert!(row_text(&r_ridge).contains(" parts") && row_text(&r_ridge).starts_with(&r_ridge.label), "{}", row_text(&r_ridge));
+        assert_eq!(row_text(&r_region), format!("{}  (Region) · 3 points", r_region.label));
+        assert_eq!(row_text(&r_brush), format!("{}  (Brush) · 1 stroke", r_brush.label));
+        assert_eq!(r_ridge.id, f.s.editor().line_items(ridge).unwrap()[0], "the row is the first part");
+        let mut rig = Rig::new(&layout);
+        rig.settle(&data(&h));
+        rig.click(&data(&h), rig.mark("tab:layers"));
+        for row in [&r_ridge, &r_region, &r_brush] {
+            assert!(rig.st.mark(&format!("layer-row:{}", row.label)).is_some(), "a layers row for {}", row.label);
+            assert!(rig.st.mark(&format!("show:{}", row.label)).is_some(), "a show box for {}", row.label);
+        }
+        // A click selects the item of the row; the check box hides it (the session hides the whole group).
+        let p = rig.mark(&format!("layer-row:{}", r_brush.label));
+        assert_eq!(rig.click(&data(&h), p), vec![Event::Select(r_brush.id)]);
+        let p = rig.mark(&format!("show:{}", r_ridge.label));
+        assert_eq!(rig.click(&data(&h), p), vec![Event::ToggleHidden(r_ridge.id)]);
     }
 
     // spec: VIEW-021
