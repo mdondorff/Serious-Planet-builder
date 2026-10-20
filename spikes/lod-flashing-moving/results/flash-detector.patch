@@ -1,0 +1,413 @@
+diff --git a/crates/app/examples/spike25_def.rs b/crates/app/examples/spike25_def.rs
+new file mode 100644
+index 00000000..d2071408
+--- /dev/null
++++ b/crates/app/examples/spike25_def.rs
+@@ -0,0 +1,5 @@
++fn main() {
++    let out = std::env::args().nth(1).expect("path");
++    let def = planet::worldfield::legacy_world(1, 6_371_000.0);
++    std::fs::write(&out, planet_world_def::toml_io::to_toml(&def).expect("toml")).expect("write");
++}
+diff --git a/crates/app/src/coarsen.rs b/crates/app/src/coarsen.rs
+new file mode 100644
+index 00000000..e3d8263d
+--- /dev/null
++++ b/crates/app/src/coarsen.rs
+@@ -0,0 +1,279 @@
++//! SPIKE-25 (spike branch only): a per-frame detector of the drawn tiles getting coarser while the camera gets nearer, and a scripted
++//! moving-camera flight to run it over (`FLY_*` environment variables, `COARSEN_LOG` the log file).
++use planet_core::cube::TangentWarp;
++use planet_core::{TileId, Vec3};
++use planet_frame::scenes::{SceneScript, StreamScene};
++use planet_core::PlanetFixed;
++use planet_frame::{Camera, TerrainPlan};
++use std::collections::{BTreeMap, HashSet};
++use std::io::Write;
++
++pub fn enabled() -> bool {
++    std::env::var("COARSEN_LOG").is_ok()
++}
++
++fn env(k: &str, d: f64) -> f64 {
++    std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d)
++}
++
++pub fn fly_enabled() -> bool {
++    std::env::var("FLY_SPEED").is_ok()
++}
++
++/// The flight: a great circle from the scene's site at `FLY_ALT_M` (default 500) above the sphere, `FLY_SPEED` m/s, turning at
++/// `FLY_YAW` deg/s, looking `FLY_PITCH` degrees down, for `FLY_SECONDS`; the altitude moves to `FLY_ALT_END_M` linearly.
++/// Returns the script and the corridor probes (centre, half width).
++pub fn fly_script(radius_m: f64, aspect: f64) -> SceneScript {
++    let alt0 = env("FLY_ALT_M", 500.0);
++    let alt1 = env("FLY_ALT_END_M", alt0);
++    let speed = env("FLY_SPEED", 300.0);
++    let yaw_rate = env("FLY_YAW", 0.0).to_radians();
++    let pitch = env("FLY_PITCH", 10.0).to_radians();
++    let secs = env("FLY_SECONDS", 30.0);
++    let lat = env("FLY_LAT", 20.0).to_radians();
++    let lon = env("FLY_LON", 30.0).to_radians();
++    let dir0 = Vec3::new(libm::cos(lat) * libm::cos(lon), libm::cos(lat) * libm::sin(lon), libm::sin(lat));
++    let north = Vec3::new(0.0, 0.0, 1.0);
++    let mut h0 = (north - dir0 * north.dot(dir0)).normalized();
++    let east0 = h0.cross(dir0).normalized();
++    let b = env("FLY_BEARING", 0.0).to_radians();
++    h0 = (h0 * libm::cos(b) + east0 * libm::sin(b)).normalized();
++    let dt = 1.0 / 60.0;
++    let n = (secs / dt) as usize;
++    let mut cameras = Vec::new();
++    let mut yaw = 0.0;
++    for k in 0..n {
++        let t = k as f64 * dt;
++        let s = speed * t / radius_m;
++        let dir = dir0 * libm::cos(s) + h0 * libm::sin(s);
++        let fwd = h0 * libm::cos(s) - dir0 * libm::sin(s);
++        let right = fwd.cross(dir).normalized();
++        yaw += yaw_rate * dt;
++        let heading = fwd * libm::cos(yaw) + right * libm::sin(yaw);
++        let alt = alt0 + (alt1 - alt0) * (t / secs);
++        cameras.push(Camera::at_surface_point(PlanetFixed(dir * (radius_m + alt)), heading, pitch, 60f64.to_radians(), aspect, 0.1));
++    }
++    let prelude = Some(cameras[0]);
++    SceneScript { scene: StreamScene::Look2km, prelude, cameras, descent_frames: 0 }
++}
++
++pub struct Detector {
++    probes: Vec<Vec3>,
++    prev: Vec<Option<(u8, f64)>>,
++    out: std::fs::File,
++    radius: f64,
++    pub violations: u64,
++    pub frames_with: u64,
++    pub pairs: u64,
++    pub finer: u64,
++    by_kind: BTreeMap<String, (u64, u64)>,
++    last_kind: String,
++    by_pair: BTreeMap<String, u64>,
++    ever_level: HashSet<u64>,
++    csv: Option<std::fs::File>,
++}
++
++impl Detector {
++    pub fn open(radius: f64, script: &SceneScript) -> Option<Detector> {
++        Self::open_cams(radius, &script.cameras)
++    }
++
++    pub fn open_cams(radius: f64, cameras: &[Camera]) -> Option<Detector> {
++        let p = std::env::var("COARSEN_LOG").ok()?;
++        let mut probes = Vec::new();
++        // Probes in a corridor around the camera path: uniform along the path and across by `FLY_WIDTH_M` (default six altitudes).
++        let width = env("FLY_WIDTH_M", 6.0 * env("FLY_ALT_M", 500.0).max(300.0));
++        let n = env("COARSEN_PROBES", 6000.0) as usize;
++        let cams = cameras;
++        let mut r = 0x9E37_79B9_7F4A_7C15u64;
++        let mut next = || {
++            r ^= r << 13;
++            r ^= r >> 7;
++            r ^= r << 17;
++            (r >> 11) as f64 / (1u64 << 53) as f64
++        };
++        for _ in 0..n {
++            let c = &cams[((next() * cams.len() as f64) as usize).min(cams.len() - 1)];
++            let pos = c.position.0.normalized();
++            let fwd = c.forward.normalized();
++            let right = fwd.cross(pos).normalized();
++            let ahead = (next() * 2.0 - 0.2) * width * 3.0;
++            let side = (next() * 2.0 - 1.0) * width;
++            probes.push((pos + (fwd * ahead + right * side) * (1.0 / radius)).normalized());
++        }
++        Some(Detector {
++            prev: vec![None; probes.len()],
++            probes,
++            out: std::fs::File::create(p).ok()?,
++            radius,
++            violations: 0,
++            frames_with: 0,
++            pairs: 0,
++            finer: 0,
++            by_kind: BTreeMap::new(),
++            last_kind: String::new(),
++            by_pair: BTreeMap::new(),
++            ever_level: HashSet::new(),
++            csv: std::env::var("COARSEN_CSV").ok().and_then(|p| std::fs::File::create(p).ok()),
++        })
++    }
++
++    pub fn frame(&mut self, refused: u64, k: u64, kind: &str, subst: usize, blank: usize, cam: Vec3, plan: &TerrainPlan, resident: &dyn Fn(TileId) -> bool) {
++        let set: std::collections::HashMap<u64, u8> = plan.nodes.iter().map(|n| (n.tile.raw(), n.quadrants)).collect();
++        let _ = &self.ever_level;
++        let alt = cam.length() - self.radius;
++        let map = TangentWarp;
++        let maxl = plan.nodes.iter().map(|n| n.level).max().unwrap_or(0);
++        let mut found = 0;
++        let (mut lsum, mut lcnt) = (0u64, 0u64);
++        let mut overlaps = 0usize;
++        for n in &plan.nodes {
++            let mut child = n.tile;
++            while let Some(a) = child.parent() {
++                if let Some(mask) = set.get(&a.raw()) {
++                    if mask & planet_frame::lod::quadrant_bit(planet_frame::lod::child_index_toward(a, n.tile)) != 0 {
++                        overlaps += 1;
++                        break;
++                    }
++                }
++                child = a;
++            }
++        }
++        if overlaps > 0 {
++            *self.by_pair.entry(format!("OVERLAP frames kind {kind}")).or_insert(0) += 1;
++            if overlaps > 0 && k % 50 == 0 {
++                let _ = writeln!(self.out, "overlap frame {k} kind {kind}: {overlaps} nodes lie under a drawn ancestor");
++            }
++        }
++        let entry = self.by_kind.entry(kind.to_string()).or_insert((0, 0));
++        entry.0 += 1;
++        for (i, p) in self.probes.iter().enumerate() {
++            let mut cur = None;
++            for l in 0..=maxl {
++                let t = TileId::from_direction(&map, *p, l);
++                if let Some(mask) = set.get(&t.raw()) {
++                    // A node drawn over some quadrants only draws the probe if its mask holds the quadrant the probe is in.
++                    let covers = *mask == planet_frame::lod::ALL_QUADRANTS || {
++                        let child = TileId::from_direction(&map, *p, l + 1);
++                        mask & planet_frame::lod::quadrant_bit(planet_frame::lod::child_index_toward(t, child)) != 0
++                    };
++                    if covers {
++                        cur = Some((l, (cam - *p * self.radius).length()));
++                        break;
++                    }
++                }
++            }
++            if let (Some((l0, d0)), Some((l1, d1))) = (self.prev[i], cur) {
++                self.pairs += 1;
++                if l1 > l0 {
++                    self.finer += 1;
++                }
++                if l1 < l0 && d1 < d0 - 0.5 {
++                    found += 1;
++                    self.violations += 1;
++                    *self.by_pair.entry(format!("{}->{}", self.last_kind, kind)).or_insert(0) += 1;
++                    if found <= 2 {
++                        let _ = writeln!(self.out, "VIOLATION frame {k} alt {alt:.0} kind {} -> {kind} subst {subst} blank {blank}: probe {i} L{l0}->L{l1} dist {d0:.0}->{d1:.0}", self.last_kind);
++                    }
++                }
++            }
++            if let Some((l, _)) = cur {
++                lsum += u64::from(l);
++                lcnt += 1;
++            }
++            self.prev[i] = cur;
++        }
++        if let Some(f) = self.csv.as_mut() {
++            let _ = writeln!(f, "{k},{kind},{},{subst},{:.4},{alt:.0},{overlaps},{refused}", plan.nodes.len(), lsum as f64 / lcnt.max(1) as f64);
++        }
++        let _ = resident;
++        if found > 0 {
++            self.frames_with += 1;
++            self.by_kind.get_mut(kind).unwrap().1 += 1;
++            let _ = writeln!(self.out, "  frame {k}: {found} probes got coarser");
++        }
++        if k < 40 || (found > 0) {
++            let _ = writeln!(self.out, "trace frame {k} kind {kind} nodes {} maxL {maxl} subst {subst} blank {blank} found {found}", plan.nodes.len());
++        }
++        self.last_kind = kind.to_string();
++        if k % 300 == 0 {
++            let _ = writeln!(self.out, "frame {k} alt {alt:.0} kind {kind} nodes {} maxL {maxl} subst {subst} violations {} pairs {} finer {}", plan.nodes.len(), self.violations, self.pairs, self.finer);
++        }
++    }
++
++    pub fn summary(&mut self) {
++        let _ = writeln!(self.out, "SUMMARY violations {} in {} frames; pairs {} finer {}", self.violations, self.frames_with, self.pairs, self.finer);
++        for (k, (frames, with)) in &self.by_kind {
++            let _ = writeln!(self.out, "  kind {k}: {frames} frames, {with} with violations");
++        }
++        for (k, n) in &self.by_pair {
++            let _ = writeln!(self.out, "  violations by previous->this kind {k}: {n}");
++        }
++    }
++}
++
++/// `STAMPS=N` (`STAMP_SPREAD_KM`, default 1500): N hills and plateaus of 2 to 40 km reach around the flights' site, put into the world.
++pub fn stamp_world(world: &crate::worldfield::WorldTerrain) -> Result<(), String> {
++    use planet_world_def::stamp::{Stamp, StampKind};
++    use planet_world_def::{BodyId, ItemSpec, DEFAULT_ITEM_LAYER};
++    let n = env("STAMPS", 0.0) as usize;
++    if n == 0 {
++        return Ok(());
++    }
++    let spread_km = env("STAMP_SPREAD_KM", 1500.0);
++    let radius = world.radius_m();
++    let mut def = (*world.definition()).clone();
++    let (la, lo) = (env("FLY_LAT", 20.0).to_radians(), env("FLY_LON", 30.0).to_radians());
++    let at = Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la));
++    let east = Vec3::new(0.0, 0.0, 1.0).cross(at).normalized();
++    let nrm = at.cross(east).normalized();
++    let mut s = 0x1234_5678_9ABC_DEF0u64;
++    let mut next = || {
++        s ^= s << 13;
++        s ^= s >> 7;
++        s ^= s << 17;
++        (s >> 11) as f64 / (1u64 << 53) as f64
++    };
++    for i in 0..n {
++        let (x, y) = ((next() * 2.0 - 1.0) * spread_km * 1000.0 / radius, (next() * 2.0 - 1.0) * spread_km * 1000.0 / radius);
++        let dir = (at + east * x + nrm * y).normalized();
++        let reach = 2_000.0 + next() * 38_000.0;
++        let height = 50.0 + next() * 400.0;
++        let kind = if i % 3 == 0 { StampKind::Plateau } else { StampKind::Hill };
++        let params = if kind == StampKind::Plateau { [300.0, 0.0, 0.0] } else { [height, 0.0, 0.0] };
++        let spec = ItemSpec {
++            id: (i + 1) as u128,
++            layer: DEFAULT_ITEM_LAYER.into(),
++            priority: 0,
++            dir,
++            content_hash: 0,
++            reach_m: reach,
++            max_delta_m: height * 1.5 + 400.0,
++            stamp: None,
++        }
++        .with_stamp(Stamp::new(kind, params));
++        def.put_item_spec(BodyId::PLANET, spec).map_err(|e| e.to_string())?;
++    }
++    world.set_definition(std::sync::Arc::new(def))
++}
++
++/// The window's detector (the editor's own frame loop).
++pub static WINDOW: std::sync::Mutex<Option<Detector>> = std::sync::Mutex::new(None);
++
++pub fn window_open(radius: f64, cameras: &[Camera]) {
++    if enabled() {
++        *WINDOW.lock().unwrap() = Detector::open_cams(radius, cameras);
++    }
++}
++
++pub fn window_frame(refused: u64, k: u64, kind: &str, subst: usize, blank: usize, cam: Vec3, plan: &TerrainPlan) {
++    if let Some(d) = WINDOW.lock().unwrap().as_mut() {
++        d.frame(refused, k, kind, subst, blank, cam, plan, &|_| true);
++    }
++}
++
++pub fn window_close() {
++    if let Some(d) = WINDOW.lock().unwrap().as_mut() {
++        d.summary();
++    }
++}
+diff --git a/crates/app/src/lib.rs b/crates/app/src/lib.rs
+index b190d49d..66a5c3f4 100644
+--- a/crates/app/src/lib.rs
++++ b/crates/app/src/lib.rs
+@@ -1,6 +1,7 @@
+ //! The single binary's run modes (CON-01): `editor` (interactive viewer), `generate` (headless CLI)
+ //! and `test-render` (headless harness). M0 only wires them up; real work arrives with M1+.
+ 
++pub mod coarsen;
+ pub mod crash;
+ pub mod editperf;
+ pub mod editwin;
+diff --git a/crates/app/src/streamperf.rs b/crates/app/src/streamperf.rs
+index 55dd7b4a..3f6c2e18 100644
+--- a/crates/app/src/streamperf.rs
++++ b/crates/app/src/streamperf.rs
+@@ -149,6 +149,12 @@ pub fn check_options(o: &Options) -> Result<(), String> {
+ /// The world a perf scene reads: the stored production bake (`--store`) or the in-memory bake of `--global-res` cells; `cold` ignores
+ /// the tile pack's pre-filled tiles (`dive-cold`).
+ pub(crate) fn open_world(o: &Options, cold: bool) -> Result<WorldTerrain, String> {
++    let w = open_world_plain(o, cold)?;
++    crate::coarsen::stamp_world(&w)?;
++    Ok(w)
++}
++
++fn open_world_plain(o: &Options, cold: bool) -> Result<WorldTerrain, String> {
+     match &o.store {
+         Some(dir) => {
+             let res = if o.given.contains("--global-res") { o.global_res } else { PRODUCTION_BAKE_RES };
+@@ -195,6 +201,7 @@ struct Driver<'a> {
+     cut_field: Option<Box<dyn planet_generators::height::HeightField + 'a>>,
+     /// Frames ticked, for the clock of the waves and the exposure's first frame.
+     ticks: u64,
++    coarsen: Option<crate::coarsen::Detector>,
+ }
+ 
+ impl Driver<'_> {
+@@ -204,6 +211,11 @@ impl Driver<'_> {
+         let started = Instant::now();
+         let ctx = self.ctx;
+         let frame = self.rig.managed.begin_frame(req, &mut RendererSink { ctx, renderer: &mut self.rig.renderer })?;
++        if let Some(mut c) = self.coarsen.take() {
++            let f = &frame.pipeline;
++            c.frame(self.rig.managed.pipeline().refused_plans(), self.ticks, &format!("{:?}", f.draw.kind), f.draw.substituted, f.draw.blank, req.camera.position.0, &f.draw.plan, &|t| self.rig.renderer.slot_of(t).is_some());
++            self.coarsen = Some(c);
++        }
+         self.rig.fi.retire_to(self.rig.renderer.retired_frames(ctx));
+         while self.rig.fi.is_full() {
+             self.rig.fi.note_wait();
+@@ -385,7 +397,10 @@ fn run_case(
+             .map_err(|e| format!("warming the lit path: {e}"))?;
+     }
+     let cut_field = if lit.is_some() { Some(world.field()?) } else { None };
+-    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), cut_field, ticks: 0 };
++    let mut d = Driver { ctx, rig, next_deadline: Instant::now(), lit: lit.map(|s| (s, Arc::clone(world))), cut_field, ticks: 0, coarsen: None };
++    if crate::coarsen::enabled() {
++        d.coarsen = crate::coarsen::Detector::open(6_371_000.0, script);
++    }
+     // The machine's state as a fixed job sees it, alone and with the pool's thread count at once, before and after the case (STRM-022:
+     // recorded only, never judged; the per-tile times of the log read against it). Nothing of the case runs yet.
+     let calib_threads = gen.workers;
+@@ -408,7 +423,7 @@ fn run_case(
+             let t = d.tick(&r)?;
+             frames += 1;
+             quiet = if t.settled { quiet + 1 } else { 0 };
+-            if smoke && frames >= 12 || quiet >= need {
++            if (smoke && frames >= 12 && std::env::var("COARSEN_SETTLE").is_err()) || quiet >= need {
+                 break;
+             }
+             if started.elapsed().as_secs_f64() > SETTLE_LIMIT_S {
+@@ -490,6 +505,9 @@ fn run_case(
+     }
+     let host_load = load_sampler.map_or_else(planet_perf::load::CaseLoad::not_measured, planet_perf::load::LoadSampler::stop);
+     let cpu_after = (!smoke).then(planet_perf::host::query_cpu_clock).flatten();
++    if let Some(c) = d.coarsen.as_mut() {
++        c.summary();
++    }
+     let pool = d.rig.pool;
+     let torn = Instant::now();
+     drop(d);
+@@ -683,7 +701,7 @@ pub fn perf_streaming(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
+         }
+         let built = Instant::now();
+         let scene_field = scene_world.field()?;
+-        let script = build_script(scene, radius_m, aspect, scene_field.as_ref(), LOOK_SEED);
++        let script = if crate::coarsen::fly_enabled() { crate::coarsen::fly_script(radius_m, aspect) } else { build_script(scene, radius_m, aspect, scene_field.as_ref(), LOOK_SEED) };
+         drop(scene_field);
+         let shown = if smoke { script.cameras.len().min(smoke_frames) } else { script.cameras.len() };
+         writeln!(
+diff --git a/crates/app/src/window.rs b/crates/app/src/window.rs
+index 928c967b..13e64ea3 100644
+--- a/crates/app/src/window.rs
++++ b/crates/app/src/window.rs
+@@ -609,6 +609,7 @@ impl App<'_> {
+                     st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer })
+                 })?;
+             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
++            crate::coarsen::window_frame(st.rig.managed.pipeline().refused_plans(), st.frames, &format!("{:?}", frame.pipeline.draw.kind), frame.pipeline.draw.substituted, frame.pipeline.draw.blank, camera.position.0, &frame.pipeline.draw.plan);
+             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
+             if let Some(why) = st.rig.managed.take_plan_refusal() {
+                 crate::crash::note(&format!("warning: {why}\n  the window keeps the last plan and goes on"));
+@@ -1376,6 +1377,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+     };
+     lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
+     let script = build_script(StreamScene::Dive, radius_m, f64::from(size.0) / f64::from(size.1), field.as_ref(), field.seed());
++    crate::coarsen::window_open(radius_m, &script.cameras);
+     let views: Vec<&str> = TerrainView::ALL.iter().map(|v| v.name()).collect();
+     // A flight shows the relief view unless `--view` says otherwise (the flat-colour views are one colour at 1 m).
+     let view_name = if o.given.contains("--view") { o.view.as_str() } else { "relief" };
+@@ -1458,6 +1460,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
+         summary: None,
+     };
+     event_loop.run_app(&mut app).map_err(|e| format!("{NO_DISPLAY}the event loop failed: {e}"))?;
++    crate::coarsen::window_close();
+     if let Some(e) = app.error {
+         return Err(e);
+     }

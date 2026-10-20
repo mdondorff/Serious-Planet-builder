@@ -17,6 +17,7 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | SPIKE-19 | The window aborts on a refused morph interval (diagnosis) | closed 2026-10-20 (cause: the coarse LOD factor sits at the validate limit, the plan adds the height extent) | `spikes/morph-refusal/results/` |
 | SPIKE-20 | The atmosphere still banded after the AP range fix (diagnosis) | closed 2026-10-20 (cause: the 32 x 32 x 32 volume is 21 to 23 % off between texels at 60 to 97.5 km; fixed in `atmosphere-camera-march`) | `spikes/owner-captures-2026-10-20/results/` |
 | SPIKE-22 | Is the base LOD refused in the real eroded world? (diagnosis) | closed 2026-10-20 (no: 0 refusals in 45,800 poses; the finding holds for fields with only a global bound) | `spikes/base-lod-refusal/results/` |
+| SPIKE-25 | Tiles flash to a coarser level while the camera moves (P1-4; diagnosis) | closed 2026-10-20 (not reproduced: 0 level drops in 14 scripted flights and the editor window loop; SPIKE-18's fix holds; the video's bursts are overlay brightness, unchecked) | `spikes/lod-flashing-moving/results/` |
 | SPIKE-23 | Why the edit-latency case at 200 m with a 150 m stamp takes 508 ms to drawn-exact (diagnosis) | closed 2026-10-20 (cause: tile generation throughput, 40 ms a tile of which the stamp is under 1 %) | `spikes/edit-refresh/results/` |
 | SPIKE-24 | Normals from the tile height lattice: errors, seams, pictures (evidence of ADR 0073) | closed 2026-10-20 | `spikes/lattice-normals/results/` |
 | SPIKE-16 | Dark patches over the sea while the camera moves (water-motion-gap; diagnosis) | closed 2026-10-19 (cause: the shore ramp depends on the drawn node's level) | `spikes/water-motion-gap/results/` |
@@ -31,6 +32,19 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | exploration | Compact tiles in storage buffers (PR #225; ADR 0054) | closed | `spikes/compact-storage-buffer/results/` |
 
 The explorations before 2026-10-17 had no register entry; from now on every exploration gets a `SPIKE-NN` entry.
+
+## SPIKE-25 Tiles flash to a coarser level while the camera moves (lod-flashing-moving)
+Status: closed
+Opened: 2026-10-20
+Closed: 2026-10-20
+Question: Why do tiles flash to a coarser level while the camera moves, especially near sea level and in the F3 debug views, and not while standing still (owner video, 2026-10-20)? Do plan refusals near stamps or the coarse LOD (F4, SPIKE-19) take part? Diagnosis only.
+Why it matters: the M6 gate's look review; P1-4 of the iteration plan; the tracked entry "Coarser LOD while slowly approaching from orbit".
+Time box: about 1 day of agent work.
+Success criteria: the fastest failing test (a scripted moving camera with a per-frame check that the drawn level never coarsens while the distance shrinks, or a residency race), the root cause, a proposed fix.
+Fallback if it fails: report what was ruled out and what capture would settle it.
+Code location: branch `spike/lod-flashing-moving` (never merged; results and the patch in spikes/lod-flashing-moving/results/).
+Result: not reproduced. A quadrant-aware per-frame detector over 14 scripted flights (500 m to 800 km, 20 m to 600 m/s, turns, 0 to 150 stamps, one generation worker) and 2,085 frames of the editor window loop found 8 one-level steps in 3 frames of 8,000 (starved, turning) and none otherwise; 0 refused plans; the SPIKE-18 approach gives 0 violations with the fix. The owner's video shows the F3 grid's line brightness bursting every 15 to 17 frames, not its cell sizes; the exposure adaptation is the unchecked lead.
+Recommendation: ask the owner for an F9 capture right after a flash and replay it (`--replay-path`, `level_drops`); keep the detector as the base of a tier-C moving-camera test. Details: spikes/lod-flashing-moving/results/results.md.
 
 ## SPIKE-21 The wet floor of ADR 0071: cost and memory of the three passes
 Status: closed
