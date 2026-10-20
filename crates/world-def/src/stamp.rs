@@ -23,11 +23,15 @@ pub enum StampKind {
     Ridge = 4,
     /// An open polyline cutting a bed of depth `amount_m` with banks out to `width_m` from the line (WDEF-011, GEN-028).
     Channel = 5,
+    /// A closed polygon of 3 to 64 points with a surface type and a mask mode (WDEF-012, GEN-029): no height of its own; in mode 2 it cuts the
+    /// deltas of its layer inside it.
+    Region = 6,
 }
 
 impl StampKind {
     /// Every kind.
-    pub const ALL: [StampKind; 5] = [StampKind::Hill, StampKind::Crater, StampKind::Plateau, StampKind::Ridge, StampKind::Channel];
+    pub const ALL: [StampKind; 6] =
+        [StampKind::Hill, StampKind::Crater, StampKind::Plateau, StampKind::Ridge, StampKind::Channel, StampKind::Region];
 
     /// The kind spelled as an item file spells it (`kind = "hill"`), if it is one.
     pub fn from_name(name: &str) -> Option<StampKind> {
@@ -43,6 +47,7 @@ impl StampKind {
             StampKind::Crater => &["depth_m"],
             StampKind::Plateau => &["target_m"],
             StampKind::Ridge | StampKind::Channel => &["amount_m", "width_m"],
+            StampKind::Region => &["surface_type", "mask_mode"],
         }
     }
 
@@ -59,12 +64,18 @@ impl StampKind {
             StampKind::Plateau => "plateau",
             StampKind::Ridge => "ridge",
             StampKind::Channel => "channel",
+            StampKind::Region => "region",
         }
     }
 
     /// Whether the kind is a line: an open polyline with a points list.
     pub fn is_line(self) -> bool {
         matches!(self, StampKind::Ridge | StampKind::Channel)
+    }
+
+    /// Whether the kind is a region: a closed polygon with a surface type and a mask mode.
+    pub fn is_region(self) -> bool {
+        self == StampKind::Region
     }
 }
 

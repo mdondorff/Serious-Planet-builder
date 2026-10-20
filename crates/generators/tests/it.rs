@@ -32,6 +32,8 @@ mod mesh;
 mod ocean;
 #[path = "pipeline.rs"]
 mod pipeline;
+#[path = "region_mask.rs"]
+mod region_mask;
 #[path = "stages.rs"]
 mod stages;
 #[path = "stamp_stage.rs"]

@@ -122,7 +122,8 @@ pub fn stamp_delta(stamp: &Stamp, m: f64, h: f64, x: f64) -> f64 {
         StampKind::Hill => hill_delta(p[0], x),
         StampKind::Crater => crater_delta(p[0], x),
         StampKind::Plateau => plateau_delta(p[0], h, m, x),
-        StampKind::Ridge | StampKind::Channel => 0.0,
+        // The lines are applied over their polyline and the regions only cut (apply_stamps), not by this radial profile.
+        StampKind::Ridge | StampKind::Channel | StampKind::Region => 0.0,
     }
 }
 
@@ -132,6 +133,10 @@ pub fn stamp_delta(stamp: &Stamp, m: f64, h: f64, x: f64) -> f64 {
 /// distance times the item's bound. An item that is no stamp adds nothing.
 fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
     let Some(stamp) = &item.stamp else { return (0.0, 0.0) };
+    if stamp.kind.is_region() {
+        // A region changes no height itself: it only cuts the deltas of the other items (GEN-029), and the cut stays inside their range.
+        return (0.0, 0.0);
+    }
     let m = f64::from_bits(item.max_delta_bits);
     let grow = |x: f64| x.abs() * 8.0 * f64::EPSILON;
     if stamp.kind.is_line() {
@@ -178,7 +183,7 @@ fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
             let w = plateau_weight(x_min) * m;
             (-w, w)
         }
-        StampKind::Ridge | StampKind::Channel => unreachable!("the lines returned above"),
+        StampKind::Ridge | StampKind::Channel | StampKind::Region => unreachable!("the lines and the regions returned above"),
     };
     ((lo - grow(lo)).max(-m - grow(m)), (hi + grow(hi)).min(m + grow(m)))
 }
@@ -190,6 +195,18 @@ fn anchor_of(item: &FootprintItem) -> Vec3 {
 
 /// The running height at `dir` after the stamps of `items` (application order, the caller's) were added to `base`, on a body of `radius_m`.
 pub fn apply_stamps(items: &[FootprintItem], radius_m: f64, dir: Vec3, base: f64) -> f64 {
+    // A region of mode 2 (clip inside) that contains the point cuts every delta of the layer, whatever the order of the items (GEN-029):
+    // the height there is the base's. The polygon lies within the item's reach of its anchor (WDEF-012), so a point beyond it is outside.
+    for item in items {
+        let Some(stamp) = &item.stamp else { continue };
+        if stamp.kind.is_region()
+            && stamp.params()[1] == 2.0
+            && radius_m * angle_between(anchor_of(item), dir) < f64::from_bits(item.reach_bits)
+            && planet_world_def::region::polygon_contains(&stamp.points(), dir)
+        {
+            return base;
+        }
+    }
     let mut h = base;
     // The lines are combined after the point stamps: the largest ridge and the smallest channel at the point (GEN-028), so the result does
     // not depend on the order of the lines and overlapping parts of a line do not add up.
@@ -305,7 +322,7 @@ pub struct StampStage<'a> {
 }
 
 /// The version of the stamp stage (bumped whenever its output changes, ADR 0006): part of the key of every stamped tile.
-pub const STAMP_STAGE_VERSION: u32 = 2;
+pub const STAMP_STAGE_VERSION: u32 = 3;
 
 /// The implementation id of the stamp stage in height keys.
 pub const STAMP_STAGE_ID: &str = "stamp-stage";
@@ -470,6 +487,12 @@ impl HeightField for StampStage<'_> {
         }
         dlo += ridge_lo + channel_lo;
         dhi += ridge_hi + channel_hi;
+        // A region of mode 2 among the items may cut every delta of the layer at a point of the cap (GEN-029): the height there has no delta
+        // at all, so the range holds 0 as well.
+        if items.iter().any(|i| i.stamp.as_ref().is_some_and(|s| s.kind.is_region() && s.params()[1] == 2.0)) {
+            dlo = dlo.min(0.0);
+            dhi = dhi.max(0.0);
+        }
         // Each addition of the running height rounds by at most one ulp of the largest magnitude involved.
         let slack = items.len() as f64 * (lo.abs().max(hi.abs()) + mag) * f64::EPSILON * 2.0 + (dlo.abs() + dhi.abs()) * 8.0 * f64::EPSILON;
         (lo + dlo - slack, hi + dhi + slack)

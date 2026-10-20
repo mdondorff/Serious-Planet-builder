@@ -130,9 +130,12 @@ fn a_region_needs_three_points_takes_a_mask_layer_and_hashes_it() {
     // The mask layer is in the hash; the name is not.
     assert_ne!(region(tri.clone(), Some("splines")).hash(), ok.hash());
     assert_ne!(region(tri.clone(), None).hash(), ok.hash());
-    // A region is no stamp: it keeps the file hash, which covers its points.
-    assert_eq!(ok.spec().stamp, None);
-    assert_eq!(ok.spec().content_hash, ok.hash());
+    // A region is a stamp of its own kind (WDEF-012): its content hash is the stamp's, which covers its parameters and its points, and a
+    // region that clips is filed in the layer it clips.
+    let spec = ok.spec();
+    assert_eq!(spec.stamp.as_ref().map(|s| s.kind), Some(StampKind::Region));
+    assert_eq!(spec.content_hash, spec.stamp.as_ref().unwrap().content_hash());
+    assert_eq!(spec.layer, "stamps");
     let mut moved = tri;
     moved[2].1 = 30.02;
     assert_ne!(region(moved, Some("stamps")).spec().content_hash, ok.spec().content_hash);
