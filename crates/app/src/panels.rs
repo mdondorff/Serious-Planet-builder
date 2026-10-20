@@ -8,6 +8,7 @@ use planet_editor::lists::{LayerGroup, Row};
 use planet_editor::overlay::OverlayItem;
 use planet_editor::params::{format_metres, Inspector, STAMP_KINDS};
 use planet_editor::session::Tool;
+use planet_editor::session::LINE_KINDS;
 use planet_editor::shape::Handle;
 use planet_world_def::ItemId;
 use std::collections::BTreeMap;
@@ -15,6 +16,9 @@ use std::collections::BTreeMap;
 const AMBER: egui::Color32 = egui::Color32::from_rgb(240, 169, 59);
 const BLUE: egui::Color32 = egui::Color32::from_rgb(76, 141, 246);
 const LIGHT: egui::Color32 = egui::Color32::from_rgb(232, 230, 225);
+const ORANGE: egui::Color32 = egui::Color32::from_rgb(214, 126, 60);
+const TEAL: egui::Color32 = egui::Color32::from_rgb(70, 170, 200);
+const GREEN: egui::Color32 = egui::Color32::from_rgb(110, 190, 100);
 
 /// What the panels ask for.
 #[derive(Clone, Debug, PartialEq)]
@@ -39,7 +43,29 @@ pub enum Event {
     Rename(String),
     /// The checkbox of an edit in the layer list.
     ToggleHidden(ItemId),
+    /// The `?` button or the help key: show or hide the list of keys.
+    ToggleHelp,
 }
+
+/// The keys of the editor mode as the help window lists them: the key, what it does.
+pub const HELP_KEYS: [(&str, &str); 16] = [
+    ("Tab", "editor on / off"),
+    ("1", "select"),
+    ("2  3  4", "place a crater / hill / plateau"),
+    ("5  6", "draw a ridge / a channel"),
+    ("7", "draw a region"),
+    ("click", "add a point (line and region tools), else select"),
+    ("Enter", "finish the line or region"),
+    ("Backspace", "take the last point back (drawing), else delete"),
+    ("Esc", "cancel the drag, the draft, the tool, the selection"),
+    ("drag a handle", "move a point, the radius, the height"),
+    ("Shift + click", "add a point on the outline of the selected line"),
+    ("Ctrl + click", "remove the point under the cursor"),
+    ("Delete", "delete the selected edit"),
+    ("Ctrl+Z  Ctrl+Y", "undo / redo"),
+    ("right mouse, WASD QE", "look around and fly"),
+    ("F1  ?", "this list"),
+];
 
 /// What the panels remember between frames.
 pub struct PanelState {
@@ -54,6 +80,8 @@ pub struct PanelState {
     pub marks: Vec<(String, egui::Rect)>,
     /// The rectangles the panels cover in the last pass, in points.
     pub covered: Vec<egui::Rect>,
+    /// The list of keys is shown.
+    pub help: bool,
 }
 
 impl PanelState {
@@ -66,6 +94,7 @@ impl PanelState {
             name: None,
             marks: Vec::new(),
             covered: Vec::new(),
+            help: false,
         }
     }
 
@@ -107,6 +136,9 @@ pub struct PanelData<'a> {
 fn kind_color(kind: &str) -> egui::Color32 {
     match kind {
         "crater" | "hill" | "plateau" => AMBER,
+        "ridge" => ORANGE,
+        "channel" => TEAL,
+        "region" => GREEN,
         _ => BLUE,
     }
 }
@@ -119,8 +151,11 @@ pub fn tool_label(tool: &Tool) -> String {
             let n = STAMP_KINDS.iter().position(|s| s == k).map_or(0, |i| i + 2);
             format!("{}  [{n}]", planet_editor::params::kind_title(k))
         }
-        Tool::Line(k) => format!("{} (draw)", planet_editor::params::kind_title(k)),
-        Tool::Region => "Region (draw)".to_string(),
+        Tool::Line(k) => {
+            let n = 2 + STAMP_KINDS.len() + LINE_KINDS.iter().position(|s| s == k).unwrap_or(0);
+            format!("{} (draw)  [{n}]", planet_editor::params::kind_title(k))
+        }
+        Tool::Region => format!("Region (draw)  [{}]", 2 + STAMP_KINDS.len() + LINE_KINDS.len()),
     }
 }
 
@@ -144,6 +179,8 @@ fn row_button(ui: &mut egui::Ui, st: &mut PanelState, ev: &mut Vec<Event>, row: 
 fn rail(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
     let mut tools = vec![Tool::Select];
     tools.extend(STAMP_KINDS.iter().map(|k| Tool::Stamp((*k).to_string())));
+    tools.extend(LINE_KINDS.iter().map(|k| Tool::Line((*k).to_string())));
+    tools.push(Tool::Region);
     for t in tools {
         let on = d.tool == &t;
         let r = ui.add(egui::Button::new(tool_label(&t)).selected(on));
@@ -153,9 +190,7 @@ fn rail(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Even
         }
     }
     ui.separator();
-    for later in ["Brush (later)", "Line (later)", "Region (later)"] {
-        ui.add_enabled(false, egui::Button::new(later));
-    }
+    ui.add_enabled(false, egui::Button::new("Brush (later)"));
 }
 
 fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
@@ -350,6 +385,11 @@ fn status_bar(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
         if r.clicked() {
             ev.push(Event::Redo);
         }
+        let r = ui.add(egui::Button::new("?").selected(st.help));
+        st.marks.push(("help".to_string(), r.rect));
+        if r.clicked() {
+            ev.push(Event::ToggleHelp);
+        }
         ui.separator();
         ui.label(if d.status.is_empty() { "Ready" } else { d.status });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -383,6 +423,23 @@ pub fn show(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData) -> Vec<Event>
     }
     let r = egui::Panel::left("editor-left").exact_size(l.left_width).resizable(false).show(ui, |ui| left_panel(ui, st, d, &mut ev));
     st.covered.push(r.response.rect);
+    if st.help {
+        let r = egui::Window::new("Editor keys").collapsible(false).resizable(false).show(ui.ctx(), |ui| {
+            egui::Grid::new("editor-keys").num_columns(2).spacing([16.0, 3.0]).show(ui, |ui| {
+                for (key, what) in HELP_KEYS {
+                    ui.strong(key);
+                    ui.label(what);
+                    ui.end_row();
+                }
+            });
+            if ui.button("Close  (F1)").clicked() {
+                ev.push(Event::ToggleHelp);
+            }
+        });
+        if let Some(r) = r {
+            st.covered.push(r.response.rect);
+        }
+    }
     if l.inspector_side == Side::Right {
         let r = egui::Panel::right("editor-inspector")
             .exact_size(l.inspector_width)
@@ -391,6 +448,26 @@ pub fn show(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData) -> Vec<Event>
         st.covered.push(r.response.rect);
     }
     ev
+}
+
+/// Draw the line or region being drawn: the path through its points, the points, and a thin line to the cursor where the next goes.
+pub fn draw_draft(ui: &egui::Ui, draft: &planet_editor::overlay::DraftOverlay, to_points: impl Fn([f64; 2]) -> egui::Pos2) {
+    if draft.points.is_empty() {
+        return;
+    }
+    let painter = ui.painter();
+    let stroke = egui::Stroke::new(2.5, LIGHT);
+    for w in draft.path.windows(2) {
+        if let (Some(a), Some(b)) = (w[0], w[1]) {
+            painter.line_segment([to_points(a), to_points(b)], stroke);
+        }
+    }
+    if let (Some(Some(last)), Some(cursor)) = (draft.points.last(), draft.rubber) {
+        painter.line_segment([to_points(*last), to_points(cursor)], egui::Stroke::new(1.0, LIGHT.gamma_multiply(0.6)));
+    }
+    for p in draft.points.iter().flatten() {
+        painter.circle(to_points(*p), 5.0, AMBER, egui::Stroke::new(1.5, egui::Color32::BLACK));
+    }
 }
 
 /// Draw the outlines, the names and the handles over the planet. `to_points` turns the overlay's pixels into points (the window's scale).
@@ -407,11 +484,14 @@ pub fn draw_overlay(ui: &egui::Ui, items: &[OverlayItem], to_points: impl Fn([f6
         };
         let stroke = egui::Stroke::new(width, colour.gamma_multiply(strength));
         let pts: Vec<Option<egui::Pos2>> = o.outline.iter().map(|p| p.map(&to_points)).collect();
-        if pts.iter().all(Option::is_some) && o.selected {
+        // A ring around a stamp is convex and filled when selected; a line or a region is a path (a region may be concave: no fill).
+        let is_path = matches!(o.kind.as_str(), "ridge" | "channel" | "region");
+        if pts.iter().all(Option::is_some) && o.selected && !is_path {
             let ring: Vec<egui::Pos2> = pts.iter().flatten().copied().collect();
             painter.add(egui::Shape::convex_polygon(ring, colour.gamma_multiply(0.18), stroke));
         } else {
-            for k in 0..pts.len() {
+            let segments = if o.closed { pts.len() } else { pts.len().saturating_sub(1) };
+            for k in 0..segments {
                 if let (Some(a), Some(b)) = (pts[k], pts[(k + 1) % pts.len()]) {
                     painter.line_segment([a, b], stroke);
                 }
@@ -614,6 +694,35 @@ mod tests {
         assert!(rig2.st.mark("tab:near").is_none());
     }
 
+    // spec: VIEW-031
+    #[test]
+    fn the_rail_has_the_line_and_region_tools_and_the_question_mark_opens_the_list_of_keys() {
+        let f = fixture();
+        let layout = Layout::default();
+        let h = held(&f, layout.clone());
+        let mut rig = Rig::new(&layout);
+        rig.settle(&data(&h));
+        // The rail: ridge [5], channel [6], region [7] pick their tools.
+        for (label, tool) in [
+            ("tool:Ridge (draw)  [5]", Tool::Line("ridge".into())),
+            ("tool:Channel (draw)  [6]", Tool::Line("channel".into())),
+            ("tool:Region (draw)  [7]", Tool::Region),
+        ] {
+            let p = rig.mark(label);
+            assert_eq!(rig.click(&data(&h), p), vec![Event::Tool(tool)], "{label}");
+        }
+        // The question mark asks for the list; shown, it covers a rectangle and its close button asks to hide it.
+        let covered = rig.st.covered.len();
+        let p = rig.mark("help");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::ToggleHelp]);
+        rig.st.help = true;
+        rig.settle(&data(&h));
+        assert_eq!(rig.st.covered.len(), covered + 1, "the key list covers part of the window");
+        assert_eq!(HELP_KEYS.len(), 16);
+        assert!(HELP_KEYS.iter().any(|(k, w)| *k == "Enter" && w.contains("finish")));
+        assert!(HELP_KEYS.iter().any(|(k, _)| *k == "Shift + click") && HELP_KEYS.iter().any(|(k, _)| *k == "Ctrl + click"));
+    }
+
     // spec: VIEW-021
     #[test]
     fn the_rail_picks_a_tool_and_the_tabs_switch_without_asking_for_anything() {
@@ -765,6 +874,7 @@ mod tests {
             selected,
             hovered,
             outline,
+            closed: true,
             centre,
             handles,
         };

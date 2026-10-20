@@ -339,3 +339,101 @@ fn a_point_is_added_on_the_outline_and_removed_each_as_one_command_and_a_region_
     assert!(e.to_string().contains("at least 3"), "{e}");
     assert_eq!(r.item(rid).unwrap().points.len(), 3);
 }
+
+fn high_view(lat: f64, lon_deg: f64, altitude_m: f64) -> planet_editor::relevance::ViewState {
+    let camera = planet_frame::Camera::at_surface_point(
+        planet_core::PlanetFixed(unit(lat, lon_deg) * (R + altitude_m)),
+        Vec3::new(0.0, 0.0, 1.0),
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::FRAC_PI_3,
+        1.0,
+        1.0,
+    );
+    planet_editor::relevance::ViewState {
+        camera,
+        viewport: planet_frame::globe::Viewport { width_px: 1000.0, height_px: 1000.0 },
+        radius_m: R,
+    }
+}
+
+// spec: VIEW-031
+#[test]
+fn a_click_picks_a_line_within_its_width_or_a_few_pixels_a_region_inside_it_and_a_stamp_before_both() {
+    let (mut s, line) = line_session(&[0.0, 10_000.0]);
+    let none: [ItemId; 0] = [];
+    let near = |m_east: f64, m_north: f64, distance: f64| SurfaceHit {
+        point: Vec3::ZERO,
+        dir: unit(m_north / R * 180.0 / std::f64::consts::PI, lon(m_east)),
+        height_m: 0.0,
+        distance_m: distance,
+    };
+    let shown = [line];
+    // 150 m beside the line from 1 km up: 1.5 % of 1 km is 15 m, the half-width 200 m wins.
+    assert_eq!(s.pick(&near(5_000.0, 150.0, 1_000.0), &shown), Some(line));
+    assert_eq!(s.pick(&near(5_000.0, 350.0, 1_000.0), &shown), None, "beyond the half-width");
+    // From 40 km up the tolerance is 600 m.
+    assert_eq!(s.pick(&near(5_000.0, 500.0, 40_000.0), &shown), Some(line));
+    assert_eq!(s.pick(&near(5_000.0, 500.0, 1_000.0), &none), None, "only the shown ones");
+
+    // A region: inside picks it, outside does not, and a line over it wins.
+    s.set_tool(Tool::Region);
+    let d = |m: f64| m / R * 180.0 / std::f64::consts::PI;
+    for (n, e) in [(-5_000.0, 0.0), (-5_000.0, 10_000.0), (5_000.0, 10_000.0), (5_000.0, 0.0)] {
+        s.add_draft_point(unit(d(n), lon(e))).unwrap();
+    }
+    let (region, _) = s.finish_draft().unwrap();
+    let shown = [line, region];
+    assert_eq!(s.pick(&near(5_000.0, -3_000.0, 1_000.0), &shown), Some(region), "inside the region, away from the line");
+    assert_eq!(s.pick(&near(5_000.0, 100.0, 1_000.0), &shown), Some(line), "on the line, which lies over the region");
+    assert_eq!(s.pick(&near(15_000.0, -3_000.0, 1_000.0), &shown), None, "outside both");
+    assert_eq!(s.pick(&near(10_050.0, -3_000.0, 1_000.0), &shown), None, "50 m outside the edge, tolerance 15 m");
+
+    // A stamp over them comes first.
+    s.set_tool(Tool::Stamp("hill".into()));
+    let (hill, _) = s.place("hill", unit(d(-3_000.0), lon(5_000.0))).unwrap();
+    let shown = [line, region, hill];
+    assert_eq!(s.pick(&near(5_000.0, -3_000.0, 1_000.0), &shown), Some(hill));
+}
+
+// spec: VIEW-031
+#[test]
+fn picking_a_line_tool_says_how_to_use_it_and_the_overlay_draws_lines_open_regions_closed_and_the_draft_with_its_rubber_band() {
+    use planet_editor::overlay;
+    let mut s = session(7);
+    s.set_tool(Tool::Line("channel".into()));
+    assert!(s.status().contains("Enter finishes") && s.status().contains("Esc cancels"), "{}", s.status());
+    s.set_tool(Tool::Select);
+    let view = high_view(0.0, 0.05, 20_000.0);
+    let ground = |_d: Vec3| 0.0;
+
+    // The draft: two points, a path through them, the cursor as the rubber band.
+    s.set_tool(Tool::Line("ridge".into()));
+    assert_eq!(overlay::draft(&s, &view, &ground, Some([1.0, 2.0])), overlay::DraftOverlay::default(), "no draft, nothing drawn");
+    s.add_draft_point(unit(0.0, lon(0.0))).unwrap();
+    s.add_draft_point(unit(0.0, lon(10_000.0))).unwrap();
+    let draft = overlay::draft(&s, &view, &ground, Some([1.0, 2.0]));
+    assert_eq!((draft.points.len(), draft.path.len(), draft.rubber), (2, overlay::PATH_PIECES + 1, Some([1.0, 2.0])));
+    assert!(draft.points.iter().all(Option::is_some) && draft.path.iter().all(Option::is_some));
+    let (line, _) = s.finish_draft().unwrap();
+
+    // A region of three points.
+    s.set_tool(Tool::Region);
+    let d = |m: f64| m / R * 180.0 / std::f64::consts::PI;
+    for (n, e) in [(2_000.0, 0.0), (2_000.0, 8_000.0), (9_000.0, 4_000.0)] {
+        s.add_draft_point(unit(d(n), lon(e))).unwrap();
+    }
+    let (region, _) = s.finish_draft().unwrap();
+    let items = overlay::build(&s, &[line, region], &view, &ground);
+    let of = |id| items.iter().find(|o| o.id == id).unwrap();
+    assert!(!of(line).closed && of(region).closed);
+    assert_eq!(of(line).outline.len(), overlay::PATH_PIECES + 1, "one segment in pieces, open");
+    assert_eq!(of(region).outline.len(), 3 * overlay::PATH_PIECES + 1, "three segments in pieces and the first point again");
+    assert!(of(line).outline.iter().all(Option::is_some));
+    // The selected region's handles are its points, drawn where the session holds them during a drag.
+    assert_eq!(of(region).handles.len(), 3);
+    let before = of(region).outline[0];
+    s.begin_drag(Handle::Point(0)).unwrap();
+    s.drag_surface(unit(d(3_000.0), lon(0.0))).unwrap();
+    let moved = overlay::build(&s, &[line, region], &view, &ground);
+    assert_ne!(moved.iter().find(|o| o.id == region).unwrap().outline[0], before, "the held point is drawn where it is now");
+}

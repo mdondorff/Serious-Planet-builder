@@ -324,6 +324,62 @@ pub fn validate_region(points: &[GeoPoint], radius_m: f64) -> Result<(), Polylin
     }
 }
 
+/// Whether the unit direction `dir` is inside the closed outline `points` (even-odd, in the tangent plane at the mean direction). A
+/// region fits one item, so the projection is faithful; a direction on the far side of the mean, or a degenerate list, is not inside.
+pub fn contains(points: &[GeoPoint], dir: Vec3) -> bool {
+    if points.len() < MIN_REGION_POINTS {
+        return false;
+    }
+    let dirs: Vec<Vec3> = points.iter().map(|p| p.dir()).collect();
+    let centre = dirs.iter().fold(Vec3::ZERO, |s, d| s + *d);
+    if centre.length() < 1e-9 || !(dir.x.is_finite() && dir.y.is_finite() && dir.z.is_finite()) {
+        return false;
+    }
+    let c = centre.normalized();
+    let k = dir.dot(c);
+    if k <= 1e-9 {
+        return false;
+    }
+    let helper = if c.z.abs() < 0.9 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(1.0, 0.0, 0.0) };
+    let e1 = helper.cross(c).normalized();
+    let e2 = c.cross(e1);
+    let flat = |d: Vec3| {
+        let k = d.dot(c);
+        (d.dot(e1) / k, d.dot(e2) / k)
+    };
+    let (px, py) = flat(dir);
+    let poly: Vec<(f64, f64)> = dirs.iter().map(|d| flat(*d)).collect();
+    let mut inside = false;
+    let mut j = poly.len() - 1;
+    for i in 0..poly.len() {
+        let ((xi, yi), (xj, yj)) = (poly[i], poly[j]);
+        if (yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// The points of the path through `points` (closed: back to the first) with every segment cut into `pieces` along its great circle, so
+/// that a path drawn on the sphere follows it. The original points are kept.
+pub fn sample_path(points: &[GeoPoint], closed: bool, pieces: usize) -> Vec<Vec3> {
+    let n = points.len();
+    let mut out = Vec::new();
+    if n == 0 {
+        return out;
+    }
+    let segments = if closed { n } else { n.saturating_sub(1) };
+    for s in 0..segments {
+        let (a, b) = (points[s].dir(), points[(s + 1) % n].dir());
+        for k in 0..pieces.max(1) {
+            out.push(slerp(a, b, k as f64 / pieces.max(1) as f64));
+        }
+    }
+    out.push(points[if closed { 0 } else { n - 1 }].dir());
+    out
+}
+
 /// The index of the point nearest to `hit` (a unit direction) within `max_arc_m`, if any.
 pub fn nearest_point(points: &[GeoPoint], hit: Vec3, radius_m: f64, max_arc_m: f64) -> Option<usize> {
     if !(hit.x.is_finite() && hit.y.is_finite() && hit.z.is_finite()) {
@@ -608,6 +664,40 @@ mod tests {
         assert_eq!(GeoPoint::new(-90.0, -180.0).canonical(), GeoPoint::new(-90.0, 0.0));
         assert_eq!(GeoPoint::new(-0.0, -0.0).canonical().lat_deg.to_bits(), 0.0f64.to_bits());
         assert_eq!(GeoPoint::new(-5.5, 120.25).canonical(), GeoPoint::new(-5.5, 120.25));
+    }
+
+    // spec: VIEW-031
+    #[test]
+    fn a_direction_is_inside_a_region_by_the_even_odd_rule_and_a_path_is_sampled_along_its_great_circles() {
+        let d = |m: f64| m / R * 180.0 / std::f64::consts::PI;
+        let sq = vec![
+            GeoPoint::new(0.0, 0.0),
+            GeoPoint::new(0.0, d(10_000.0)),
+            GeoPoint::new(d(10_000.0), d(10_000.0)),
+            GeoPoint::new(d(10_000.0), 0.0),
+        ];
+        assert!(contains(&sq, GeoPoint::new(d(5_000.0), d(5_000.0)).dir()));
+        assert!(!contains(&sq, GeoPoint::new(d(5_000.0), d(15_000.0)).dir()));
+        assert!(!contains(&sq, GeoPoint::new(d(-1.0), d(5_000.0)).dir()), "just south of the south edge");
+        assert!(!contains(&sq, GeoPoint::new(0.0, 180.0).dir()), "the far side");
+        // A concave arrow: the notch is outside.
+        let arrow = vec![
+            GeoPoint::new(0.0, 0.0),
+            GeoPoint::new(0.0, d(10_000.0)),
+            GeoPoint::new(d(10_000.0), d(10_000.0)),
+            GeoPoint::new(d(5_000.0), d(4_000.0)),
+            GeoPoint::new(d(10_000.0), 0.0),
+        ];
+        assert!(!contains(&arrow, GeoPoint::new(d(8_000.0), d(2_000.0)).dir()), "in the notch");
+        assert!(contains(&arrow, GeoPoint::new(d(1_000.0), d(2_000.0)).dir()));
+        assert!(!contains(&sq[..2], sq[0].dir()), "two points enclose nothing");
+
+        let line = vec![GeoPoint::new(0.0, 0.0), GeoPoint::new(0.0, d(10_000.0))];
+        let path = sample_path(&line, false, 4);
+        assert_eq!(path.len(), 5);
+        assert!((arc_m(path[0], path[4], R) - 10_000.0).abs() < 1e-3 && (arc_m(path[0], path[2], R) - 5_000.0).abs() < 1e-3);
+        assert_eq!(sample_path(&sq, true, 2).len(), 9, "four segments in two pieces and the first point again");
+        assert!(sample_path(&[], false, 4).is_empty());
     }
 
     // spec: VIEW-027

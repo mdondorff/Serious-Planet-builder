@@ -36,6 +36,11 @@ pub enum Tool {
     Region,
 }
 
+/// What the status line says when a line or region tool is picked.
+pub const DRAW_HINT: &str = "Click the planet to add points · Enter finishes · Backspace takes the last point back · Esc cancels";
+/// How far from a line a click still picks it, as a share of the distance to the surface it hit (about 15 pixels of a typical view).
+pub const LINE_PICK_FRACTION: f64 = 0.015;
+
 /// The kinds the line tool draws, in the order of its palette.
 pub const LINE_KINDS: [&str; 2] = ["ridge", "channel"];
 /// The layer new regions go into.
@@ -170,6 +175,9 @@ impl<S: ItemStore> Session<S> {
         if tool != self.tool {
             self.draft.clear();
             self.drop_point_drag();
+            if matches!(tool, Tool::Line(_) | Tool::Region) {
+                self.status = DRAW_HINT.to_string();
+            }
         }
         self.tool = tool;
     }
@@ -247,7 +255,39 @@ impl<S: ItemStore> Session<S> {
 
     /// The item under a surface hit among the `shown` ones: the nearest centre in units of its own outline radius (`pick_footprint`).
     pub fn pick(&self, hit: &SurfaceHit, shown: &[ItemId]) -> Option<ItemId> {
-        let ids: Vec<ItemId> = shown.iter().copied().filter(|id| self.editor.item(*id).is_some()).collect();
+        // Stamps first, by their outline; then lines by the distance to the line, then regions (inside, or near the edge) (VIEW-031).
+        self.pick_stamp(hit, shown).or_else(|| self.pick_outline(hit, shown))
+    }
+
+    /// The line or region whose outline a click is on: a line within its half-width or [`LINE_PICK_FRACTION`] of the distance, the
+    /// nearest first; else a region the click is inside or near the edge of. Ties go to the lower id.
+    fn pick_outline(&self, hit: &SurfaceHit, shown: &[ItemId]) -> Option<ItemId> {
+        let tolerance = LINE_PICK_FRACTION * hit.distance_m.max(1.0);
+        let mut line: Option<(f64, ItemId)> = None;
+        let mut region: Option<(f64, ItemId)> = None;
+        for id in shown {
+            let Some(item) = self.editor.item(*id).filter(|i| !i.points.is_empty()) else { continue };
+            let points = self.stored_points(*id);
+            let closed = item.kind == "region";
+            let Some(near) = polyline::nearest_segment(&points, closed, hit.dir.normalized(), self.radius_m) else { continue };
+            if closed {
+                let inside = polyline::contains(&points, hit.dir.normalized());
+                let d = if inside { 0.0 } else { near.distance_m };
+                if (inside || d <= tolerance) && region.is_none_or(|(best, _)| d < best) {
+                    region = Some((d, *id));
+                }
+            } else {
+                let reach = item.params.get("width_m").copied().unwrap_or(0.0).max(tolerance);
+                if near.distance_m <= reach && line.is_none_or(|(best, _)| near.distance_m < best) {
+                    line = Some((near.distance_m, *id));
+                }
+            }
+        }
+        line.or(region).map(|(_, id)| id)
+    }
+
+    fn pick_stamp(&self, hit: &SurfaceHit, shown: &[ItemId]) -> Option<ItemId> {
+        let ids: Vec<ItemId> = shown.iter().copied().filter(|id| self.editor.item(*id).is_some_and(|i| i.points.is_empty())).collect();
         let footprints: Vec<Footprint> = ids
             .iter()
             .enumerate()
