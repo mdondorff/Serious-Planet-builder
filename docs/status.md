@@ -8,6 +8,17 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
   - B. "Exact" = every tile drawn by the plan is exact; drawn tiles refresh first, the rest in the background. Estimated to pass every case except 200 m with a 150 m stamp (about 300 ms, borderline). Needs an ADR and a spec change of the criterion's reading.
   - C. B plus skipping (or deferring) refreshes of tiles whose sample spacing exceeds the stamp's height change (re-keyed, visually equal within the tile's own error); saves about 100 ms per edit. A correctness trade-off: those tiles keep an old mesh until evicted or refreshed later.
   - Planner's recommendation: B now (it measures what the user sees, and the background refresh keeps every tile correct), C only if B misses after the next window.
+  - **Window 16 (2026-10-20), measured:** the preview now passes in all nine cases (2.8-10.7 ms, budget 16). "Drawn exact" (first frame whose drawn tiles are all exact) against "all exact":
+
+    | Camera | Stamp | Drawn exact | All exact | Budget | B passes |
+    |---|---|---|---|---|---|
+    | 1 m | 50 / 150 / 500 m | 890 / 948 / 956 ms | 1,144 / 1,286 / 1,290 ms | 1,000 | yes |
+    | 200 m | 50 m | 188 ms | 509 ms | 300 | yes |
+    | 200 m | 150 m | 525 ms | 824 ms | 300 | no |
+    | 200 m | 500 m | 886 ms | 1,210 ms | 1,000 | yes |
+    | 2 km | 50 / 150 / 500 m | 93 / 93 / 159 ms | 398 / 371 / 440 ms | 300 / 300 / 1,000 | yes |
+
+    Under A, five of nine cases fail; under B, one (200 m with a 150 m stamp, 525 ms against 300).
 - **compact-slot-v2 (#302) goldens: blessed by the owner (2026-10-18)**: lit_aerial20km_ev15, lit_aerial20km_albedo_ev15, sky_aerial20km_ev15, sky_ground1m_sunset_ev11 (WARP only), water_class_coast_aerial2km, water_class_lava_lake (WARP and llvmpipe). Auto-blessed under policy: terrain_aerial200km_height, terrain_ground1m_depth, terrain_cube_corner_normals. Tracking entry: the RTX known-answer hashes in `gpu_compact_blocks.rs` and `gpu_water.rs` were removed (stale under MESH_VERSION 8) and need a `test gpu --real` re-record.
 - **`/bless` of render-floor-3 (#303), 21 candidates** (ADR 0062 point 3, declared): the orbit view drawn from the 181 level-3 tiles instead of 52 level-2 tiles, on WARP, llvmpipe and the RTX: `lit_orbit_ev15` (638-643 px), `lit_orbit_ev_bands` (113-115), `lit_orbit_lighting_ev15` (207-212), `lit_orbit_precipitation_ev15` (731-737), `lit_orbit_temperature_ev15` (767-772), `sky_orbit_ev15` (688-696), `water_class_orbit` (836-847); each is a lit, sky or water view, which always escalates (ADR 0017). Auto-blessed under policy: `terrain_orbit_tile_id` (AUTO-E, 1,352 px, bound tests green), `terrain_cube_corner_normals` (AUTO-R, delta 1). The owner types `/bless` in the sonnet-crusader session; the report is `target/review/golden-review/report.md` in its worktree.
 - **M5 gate passed (owner, 2026-10-18): GO for M6.** Look approved ("shore rendering looking reasonable"); hardware criteria PASS (window 10, ADR 0060); report `docs/milestones/M5-report.md`.
