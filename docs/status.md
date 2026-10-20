@@ -49,6 +49,29 @@ Dormant (no near trigger; not asked now):
 - **Parked option: coarse-first refinement of an edit** (owner, 2026-10-20): after the instant preview, the re-keyed area is regenerated one or two levels coarser (a quarter of the tiles per level) and drawn before the exact tiles, like a progressive renderer; the latency budgets stay as they are. Not built: lattice normals (ADR 0073, SPIKE-23) bring the stamp cases within budget. Revisit trigger: a brush case in the edit-latency scene (after the brush tool) that misses its budget.
 
 
+## M6 iteration after the owner's test (owner, 2026-10-20; notes in `docs/briefings/m6-owner-test-plan.md`)
+The gate waits for P1. The owner's first ask: stability.
+
+| # | Item | Owner's note | Lane |
+|---|---|---|---|
+| P1-1 | Plan refusals near stamps (CRSH-0001 to 0004: plateau and crater, levels 12 to 19; CRSH-0002 and 0004 repeat by flying to "Plateau 7" in the owner's items) | test plan, Crashes | explorer |
+| P1-2 | Smooth brush sharpens after several strokes (brush 23) | block 4 | explorer |
+| P1-3 | Editor mode toggle and mouse capture: Tab cycles UI focus, Alt+Tab toggles the editor, capture fails in the editor mode | Start | crusader |
+| P1-4 | Tiles flash to a coarser level while moving, near the sea and in debug views (video `2026-10-20-bug-tile-lod-flashing-on-movement.mp4`) | block 6 | spikes (diagnosis) |
+| P1-5 | Editing frame rate degraded (seen while a coder was building); check on a quiet machine | FLAG | owner retest, then planner |
+| P2-1 | Region clip inverted: the clipped layer is removed inside, hard edges | block 3 | later, tracked |
+| P2-2 | Inspector: focus stays after Enter; Up/Down step the value, Shift x10 | block 2 | later |
+| P2-3 | Brush: wheel sets the radius, Shift+wheel the strength | block 4 | later |
+| P2-4 | Picking an edit under another (a hill inside a plateau) | block 5 | later |
+| P2-5 | Editing light: a sun fixed relative to the camera, so no side is black | notes | later |
+| P2-6 | A faint colour shift for under 1 s after fast surface-to-orbit moves (adaptive exposure, to confirm) | notes | later |
+| P2-7 | A tiny colour step between 95 and 100 km | block 6 | later |
+| P2-8 | Missing tiles during an edit's refresh (video `2026-10-20-edit-latency-tile-refresh.mp4`) | block 2 | later, with P1-4 |
+| P2-9 | Globe click-to-fly: when it is active is unclear at orbital altitude | block 1 | later |
+| Post-M6 | Updating the generated world (the generator editor) with global-scale authoring and AUTH-003 | block 7 | M7 planning |
+
+The videos are in the owner's upload folder (over 1 MB, not committed).
+
 ## Queued for M6 (owner GO, 2026-10-18)
 1. **compact-slot-v2** (#302, sonnet-m4): ADR 0062 and 0063; wide texel, climate in the slot, 9,168 B.
 3. **remove-vertex-render-path** (#304) and one perf window.

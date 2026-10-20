@@ -1,0 +1,1 @@
+- 2026-10-20 **M6 owner test done:** notes in the test plan; the iteration (P1 stability: plan refusals near stamps, smooth sharpening, editor toggle and capture, tile flashing) is queued in `docs/status.md`.
