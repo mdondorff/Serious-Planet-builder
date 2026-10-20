@@ -14,6 +14,7 @@ Expected golden changes:
 - terrain_cube_corner_normals: the normal colours of the cube-corner view, 272 pixels on WARP, max delta 1 (the lattice normal differs from the stencil normal by a mean of at most 0.05 degrees)
 - lit_orbit_lighting_ev15: the lighting view of the orbit, 1 pixel on WARP, max delta 1
 - lit_orbit_ev15: the lit orbit, 14 pixels on WARP, max delta 1
+- lit_orbit_ev_bands: the lit orbit with the exposure bands, on lavapipe only
 - lit_aerial20km_ev15: the lit view at 20 km, on the discrete GPU only
 - sky_orbit_ev15: the orbit with the sky, 6 pixels on WARP, max delta 1
 - water_class_orbit: the water classes of the orbit, 12 pixels on WARP, max delta 1
@@ -23,6 +24,7 @@ Bound tests:
 - terrain_cube_corner_normals: mesh::border_normals_match_across_every_cube_edge_and_within_faces, lattice_normals::tiles_sharing_a_vertex_compute_bit_identical_normals_inside_a_face_across_the_cube_edges_and_at_the_cube_corners_on_one_and_three_threads, compact::a_tiles_stored_normals_equal_the_cpu_normal_within_the_bound
 - lit_orbit_lighting_ev15: lattice_normals::the_lattice_normal_equals_a_converged_normal_on_a_smooth_field_inside_a_face_and_at_the_edges_within_their_own_bound, compact::a_tiles_stored_normals_equal_the_cpu_normal_within_the_bound
 - lit_orbit_ev15: oracle_lit_shading::the_lit_radiance_matches_the_f64_reference_within_its_declared_bound, lattice_normals::the_lattice_normal_equals_a_converged_normal_on_a_smooth_field_inside_a_face_and_at_the_edges_within_their_own_bound
+- lit_orbit_ev_bands: oracle_lit_shading::the_lit_radiance_matches_the_f64_reference_within_its_declared_bound, lattice_normals::the_lattice_normal_equals_a_converged_normal_on_a_smooth_field_inside_a_face_and_at_the_edges_within_their_own_bound
 - lit_aerial20km_ev15: oracle_lit_shading::the_lit_radiance_matches_the_f64_reference_within_its_declared_bound, lattice_normals::the_lattice_normal_equals_a_converged_normal_on_a_smooth_field_inside_a_face_and_at_the_edges_within_their_own_bound
 - sky_orbit_ev15: oracle_lit_shading::the_lit_radiance_matches_the_f64_reference_within_its_declared_bound
 - water_class_orbit: lattice_normals::the_lattice_normal_equals_a_converged_normal_on_a_smooth_field_inside_a_face_and_at_the_edges_within_their_own_bound
