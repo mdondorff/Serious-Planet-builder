@@ -1,0 +1,1 @@
+- 2026-10-20 **Edit latency decided (owner):** "exact" means the drawn tiles exact (option B), drawn tiles first, and refresh work made stale by a newer edit is dropped or cancelled.
