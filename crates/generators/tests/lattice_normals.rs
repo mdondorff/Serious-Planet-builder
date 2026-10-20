@@ -113,17 +113,33 @@ fn angle_deg(a: Vec3, b: Vec3) -> f64 {
     libm::atan2(a.cross(b).length(), a.dot(b)).to_degrees()
 }
 
+/// Bounds of the accuracy test at a face edge and at a cube corner: twice the measured error (0.0073 and 0.0070 degrees), far below the signal (the wave tilts the
+/// normals by 1.8 degrees, so a normal that ignored the height would fail).
+const EDGE_BOUND_DEG: f64 = 0.015;
+const CORNER_BOUND_DEG: f64 = 0.015;
+
 // spec: GEN-019
 #[test]
 fn the_lattice_normal_equals_a_converged_normal_on_a_smooth_field_inside_a_face_and_at_the_edges_within_their_own_bound() {
     let m = &TangentWarp;
     let cells = 32u32;
     let mut worst_inside: f64 = 0.0;
-    // Vertices on a face edge, cube corners included, are the "edge" vertices of this test.
+    // The vertices on a face edge (a ring point across the edge bends the path) and at a cube corner (a plane through three edge points).
     let mut worst_edge: f64 = 0.0;
+    let mut worst_corner: f64 = 0.0;
     let mut tilted: f64 = 0.0;
-    for t in [id(0, 12, 2000, 1500), id(2, 12, 100, 3000), id(4, 14, 6000, 9000), id(1, 12, 0, 2048), id(3, 12, 4095, 77), id(5, 13, 10, 0)]
-    {
+    for t in [
+        id(0, 12, 2000, 1500),
+        id(2, 12, 100, 3000),
+        id(4, 14, 6000, 9000),
+        id(1, 12, 0, 2048),
+        id(3, 12, 4095, 77),
+        id(5, 13, 10, 0),
+        id(0, 12, 0, 0),
+        id(3, 12, 4095, 4095),
+        id(5, 13, 8191, 0),
+        id(2, 12, 0, 4095),
+    ] {
         let dirs = lattice_directions(m, t, cells);
         let heights = Wave.heights(&dirs);
         let normals = lattice_normals(t, cells, R, &dirs, &heights);
@@ -134,12 +150,13 @@ fn the_lattice_normal_equals_a_converged_normal_on_a_smooth_field_inside_a_face_
                 let want = converged_normal(&Wave, d);
                 let got = normals[l * w + k];
                 let err = angle_deg(got, want);
-                let on_face_edge = {
-                    let n = 1i64 << t.level();
-                    let (gi, gj) = (i64::from(t.x()) * i64::from(cells) + k as i64, i64::from(t.y()) * i64::from(cells) + l as i64);
-                    gi == 0 || gj == 0 || gi == n * i64::from(cells) || gj == n * i64::from(cells)
-                };
-                if on_face_edge {
+                let n = (1i64 << t.level()) * i64::from(cells);
+                let (gi, gj) = (i64::from(t.x()) * i64::from(cells) + k as i64, i64::from(t.y()) * i64::from(cells) + l as i64);
+                let on_face_edge = gi == 0 || gj == 0 || gi == n || gj == n;
+                let at_corner = (gi == 0 || gi == n) && (gj == 0 || gj == n);
+                if at_corner {
+                    worst_corner = worst_corner.max(err);
+                } else if on_face_edge {
                     worst_edge = worst_edge.max(err);
                 } else {
                     worst_inside = worst_inside.max(err);
@@ -150,9 +167,11 @@ fn the_lattice_normal_equals_a_converged_normal_on_a_smooth_field_inside_a_face_
     }
     assert!(tilted > 1.0, "the field must tilt the normals for this test to mean anything: {tilted} degrees");
     // Inside a face the truncation error of a two-cell baseline on a wave of 20 km at spacing 76 m is of order (k dx)^2 / 6 of the slope.
-    assert!(worst_inside < 0.005, "inside a face the lattice normal is {worst_inside} degrees off the converged one");
-    // At a face edge the neighbour path bends: first order. The bound is its own (measured, then kept with margin).
-    assert!(worst_edge < 3.0, "at a face edge the lattice normal is {worst_edge} degrees off");
+    assert!(worst_inside < 0.0002, "inside a face the lattice normal is {worst_inside} degrees off the converged one");
+    // At a face edge the ring point comes from the neighbour face: first order in the cell size, measured 0.0073 degrees.
+    println!("worst errors: inside {worst_inside}, edge {worst_edge}, corner {worst_corner} degrees (the field tilts by {tilted})");
+    assert!(worst_edge < EDGE_BOUND_DEG, "at a face edge the lattice normal is {worst_edge} degrees off");
+    assert!(worst_corner < CORNER_BOUND_DEG, "at a cube corner the lattice normal is {worst_corner} degrees off");
 }
 
 /// One tile's normals as the compact words, the CPU mesh bits and the f64 normals of `lattice_normals`.

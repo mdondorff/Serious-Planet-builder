@@ -55,7 +55,7 @@ Source: ADR 0033 points 4 and 5, SPIKE-06, CON-11, CON-13, CON-14, LOD-010, GEN-
 
 #### Scenario: The lattice normal
 - **WHEN** the lattice normals of tiles over a smooth wave of 20 km are compared with a converged normal (centred differences of 1 m in a tangent frame), inside a face and at the face edges, and a flat field is drawn
-- **THEN** inside a face they agree within 0.005 degrees, at a face edge (where the neighbour's path bends) within 3 degrees, and a sphere's normals are radial within 0.01 degrees
+- **THEN** inside a face they agree within 0.0002 degrees, at a face edge (the ring point comes from the neighbour face) and at a cube corner within 0.015 degrees, and a sphere's normals are radial within 0.01 degrees
 
 #### Scenario: Seams
 - **WHEN** the tiles at the four corners of every face, and tiles on every face edge with their four neighbours, at levels 3, 12 and 22, are built on one and on three threads over the eroded and the steep field
