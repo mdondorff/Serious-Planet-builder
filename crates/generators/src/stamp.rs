@@ -1,8 +1,10 @@
 //! The stamp stage (GEN-026): the authored items of one layer added to a base height field.
 //!
 //! A stamp is a delta of the height around its anchor (a hill, a crater, a plateau); the stage adds the stamps whose reach contains a
-//! point to the base height there, in application order. It reads items once per batch through an [`ItemReader`] (so a contract test can
-//! record what it read), reads the base only as a height field at points, and chains its tile keys to the base's (STRM-027).
+//! point to the base height there, in application order, and then the lines (a ridge and a channel, GEN-028: a delta of the distance to
+//! a polyline, combined by the largest ridge and the smallest channel). It reads items once per batch through an [`ItemReader`] (so a
+//! contract test can record what it read), reads the base only as a height field at points, and chains its tile keys to the base's
+//! (STRM-027).
 
 use std::sync::{Arc, RwLock};
 
@@ -61,14 +63,65 @@ pub fn plateau_delta(target: f64, h: f64, m: f64, x: f64) -> f64 {
     plateau_weight(x) * (target - h).clamp(-m, m)
 }
 
-/// The delta of `stamp` at `x` for the running height `h` and the item's bound `m`.
+/// The delta of a ridge of height `amount` (at least 0) at `x = distance / width` from its polyline (GEN-028): the profile of a hill.
+pub fn ridge_delta(amount: f64, x: f64) -> f64 {
+    hill_delta(amount, x)
+}
+
+/// The delta of a channel of depth `amount` (at least 0) at `x = distance / width` from its polyline (GEN-028): a flat bed out to 0.3 of the
+/// width, then a smooth rise to the ground at the width; at most 0, non-decreasing in `x`.
+pub fn channel_delta(amount: f64, x: f64) -> f64 {
+    if x >= 1.0 {
+        return 0.0;
+    }
+    let bed = if x <= 0.3 { 1.0 } else { 1.0 - smooth((x - 0.3) / 0.7) };
+    -amount * bed
+}
+
+/// The angle in radians between the unit vector `p` and the great-circle arc `a..b` (unit vectors): the distance to the arc where the foot
+/// of `p` on its great circle lies on it, else to the nearer end. `libm` for the transcendental, f64 throughout (CON-14).
+fn arc_angle(a: Vec3, b: Vec3, p: Vec3) -> f64 {
+    let ends = || angle_between(p, a).min(angle_between(p, b));
+    // The normal of the arc's great circle as `(a + b) x (b - a) / 2` (the same vector as `a x b`): `b - a` is exact, so the error is
+    // relative to the arc's length, not to 1e-16 of a unit, and a one-centimetre arc keeps its great circle to a nanometre.
+    let c = (a + b).cross(b - a) * 0.5;
+    let cl = c.length();
+    if cl.is_nan() || cl <= 1e-12 {
+        return ends();
+    }
+    let n = c * (1.0 / cl);
+    let s = p.dot(n);
+    let f = p - n * s;
+    let fl = f.length();
+    if fl.is_nan() || fl <= 1e-12 {
+        return ends();
+    }
+    let f = f * (1.0 / fl);
+    if a.cross(f).dot(n) >= 0.0 && f.cross(b).dot(n) >= 0.0 {
+        libm::atan2(s.abs(), fl)
+    } else {
+        ends()
+    }
+}
+
+fn point_of(bits: &[u64; 3]) -> Vec3 {
+    Vec3::new(f64::from_bits(bits[0]), f64::from_bits(bits[1]), f64::from_bits(bits[2]))
+}
+
+/// The angle in radians between the unit vector `p` and the polyline through `points` (bits of unit vectors, at least two): the minimum
+/// over its arcs (GEN-028).
+pub fn polyline_angle(points: &[[u64; 3]], p: Vec3) -> f64 {
+    points.windows(2).map(|w| arc_angle(point_of(&w[0]), point_of(&w[1]), p)).fold(f64::INFINITY, f64::min)
+}
+
+/// The delta of `stamp` at `x` for the running height `h` and the item's bound `m`. The lines are not applied here: their distance is
+/// to a polyline, not an anchor ([`apply_stamps`]).
 pub fn stamp_delta(stamp: &Stamp, m: f64, h: f64, x: f64) -> f64 {
     let p = stamp.params();
     match stamp.kind {
         StampKind::Hill => hill_delta(p[0], x),
         StampKind::Crater => crater_delta(p[0], x),
         StampKind::Plateau => plateau_delta(p[0], h, m, x),
-        // The lines are applied by the line stage over their polyline (GEN-028, the next change), not by this radial profile.
         StampKind::Ridge | StampKind::Channel => 0.0,
     }
 }
@@ -79,10 +132,23 @@ pub fn stamp_delta(stamp: &Stamp, m: f64, h: f64, x: f64) -> f64 {
 /// distance times the item's bound. An item that is no stamp adds nothing.
 fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
     let Some(stamp) = &item.stamp else { return (0.0, 0.0) };
-    if stamp.kind.is_line() {
-        return (0.0, 0.0);
-    }
     let m = f64::from_bits(item.max_delta_bits);
+    let grow = |x: f64| x.abs() * 8.0 * f64::EPSILON;
+    if stamp.kind.is_line() {
+        // The profile is monotone in the distance to the polyline: the nearest and the farthest distance of the cap bound the range
+        // (GEN-028), widened as the radial stamps' are.
+        let [amount, width, _] = stamp.params();
+        let slack = 16.0 * f64::EPSILON;
+        let d = polyline_angle(stamp.points_bits(), cap.centre);
+        let x_near = ((d - cap.angle - slack).max(0.0) * radius_m / width * (1.0 - 1e-9)).max(0.0);
+        let x_far = ((d + cap.angle + slack) * radius_m / width * (1.0 + 1e-9)).min(1.0);
+        let (lo, hi) = if stamp.kind == StampKind::Ridge {
+            (ridge_delta(amount, x_far), ridge_delta(amount, x_near))
+        } else {
+            (channel_delta(amount, x_near), channel_delta(amount, x_far))
+        };
+        return ((lo - grow(lo)).max(-m - grow(m)), (hi + grow(hi)).min(m + grow(m)));
+    }
     let reach = f64::from_bits(item.reach_bits);
     let d = angle_between(anchor_of(item), cap.centre);
     let to_x = |angle: f64| angle * radius_m / reach;
@@ -112,9 +178,8 @@ fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
             let w = plateau_weight(x_min) * m;
             (-w, w)
         }
-        StampKind::Ridge | StampKind::Channel => (0.0, 0.0),
+        StampKind::Ridge | StampKind::Channel => unreachable!("the lines returned above"),
     };
-    let grow = |x: f64| x.abs() * 8.0 * f64::EPSILON;
     ((lo - grow(lo)).max(-m - grow(m)), (hi + grow(hi)).min(m + grow(m)))
 }
 
@@ -126,13 +191,35 @@ fn anchor_of(item: &FootprintItem) -> Vec3 {
 /// The running height at `dir` after the stamps of `items` (application order, the caller's) were added to `base`, on a body of `radius_m`.
 pub fn apply_stamps(items: &[FootprintItem], radius_m: f64, dir: Vec3, base: f64) -> f64 {
     let mut h = base;
+    // The lines are combined after the point stamps: the largest ridge and the smallest channel at the point (GEN-028), so the result does
+    // not depend on the order of the lines and overlapping parts of a line do not add up.
+    let (mut ridge, mut channel) = (0.0f64, 0.0f64);
     for item in items {
         let Some(stamp) = &item.stamp else { continue };
         let reach = f64::from_bits(item.reach_bits);
         let x = radius_m * angle_between(anchor_of(item), dir) / reach;
-        if x < 1.0 {
+        if x >= 1.0 {
+            // Out of the item's reach: the reach holds the polyline and its width (WDEF-011), so the item adds nothing here.
+            continue;
+        }
+        if stamp.kind.is_line() {
+            let [amount, width, _] = stamp.params();
+            let xl = radius_m * polyline_angle(stamp.points_bits(), dir) / width;
+            if stamp.kind == StampKind::Ridge {
+                ridge = ridge.max(ridge_delta(amount, xl));
+            } else {
+                channel = channel.min(channel_delta(amount, xl));
+            }
+        } else {
             h += stamp_delta(stamp, f64::from_bits(item.max_delta_bits), h, x);
         }
+    }
+    // Only a line that is there changes the bits of the running height (a base of -0.0 stays -0.0 without one).
+    if ridge != 0.0 {
+        h += ridge;
+    }
+    if channel != 0.0 {
+        h += channel;
     }
     h
 }
@@ -218,7 +305,7 @@ pub struct StampStage<'a> {
 }
 
 /// The version of the stamp stage (bumped whenever its output changes, ADR 0006): part of the key of every stamped tile.
-pub const STAMP_STAGE_VERSION: u32 = 1;
+pub const STAMP_STAGE_VERSION: u32 = 2;
 
 /// The implementation id of the stamp stage in height keys.
 pub const STAMP_STAGE_ID: &str = "stamp-stage";
@@ -360,12 +447,29 @@ impl HeightField for StampStage<'_> {
         // The deltas the stamps can add inside the cap, not their declared maxima: a cap on the flat top of a hill moves up as a whole and
         // keeps its extent, which is what the morph interval of a fine tile needs (GEN-026).
         let (mut dlo, mut dhi, mut mag) = (0.0f64, 0.0f64, 0.0f64);
+        // The lines are not summed: the stage adds the largest ridge and the smallest channel (GEN-028), so the ridges' range is the
+        // largest of their lows and highs (floored at 0) and the channels' the smallest (capped at 0).
+        let (mut ridge_lo, mut ridge_hi, mut channel_lo, mut channel_hi) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
         for item in &items {
             let (a, b) = delta_range(item, cap, radius_m);
-            dlo += a;
-            dhi += b;
+            match item.stamp.as_ref().map(|s| s.kind) {
+                Some(StampKind::Ridge) => {
+                    ridge_lo = ridge_lo.max(a);
+                    ridge_hi = ridge_hi.max(b);
+                }
+                Some(StampKind::Channel) => {
+                    channel_lo = channel_lo.min(a);
+                    channel_hi = channel_hi.min(b);
+                }
+                _ => {
+                    dlo += a;
+                    dhi += b;
+                }
+            }
             mag += a.abs().max(b.abs());
         }
+        dlo += ridge_lo + channel_lo;
+        dhi += ridge_hi + channel_hi;
         // Each addition of the running height rounds by at most one ulp of the largest magnitude involved.
         let slack = items.len() as f64 * (lo.abs().max(hi.abs()) + mag) * f64::EPSILON * 2.0 + (dlo.abs() + dhi.abs()) * 8.0 * f64::EPSILON;
         (lo + dlo - slack, hi + dhi + slack)

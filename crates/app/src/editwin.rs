@@ -33,7 +33,7 @@ use std::sync::Arc;
 pub const EDIT_MARKER_BASE: u64 = 1_000_000;
 
 /// The stage version new edits are authored against (the stamp stage of the generators takes it from the item).
-pub const EDIT_STAGE_VERSION: u32 = 1;
+pub const EDIT_STAGE_VERSION: u32 = planet_generators::stamp::STAMP_STAGE_VERSION;
 
 /// Where the items go: memory (lost with the window) or one file each in a directory.
 pub enum EditStore {
