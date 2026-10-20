@@ -42,6 +42,7 @@ fn ridge() -> NewItem {
         group: None,
         part: None,
         mask_layer: None,
+        strokes: Vec::new(),
     }
 }
 

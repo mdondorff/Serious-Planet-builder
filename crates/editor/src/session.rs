@@ -5,6 +5,7 @@
 //! Each handle drag is one E4 command (`begin_edit` to `end_edit`), however many pointer moves it takes; a typed value, a placement and a
 //! delete are one command each; undo and redo are the E4 ones.
 
+use crate::brush::{self, BrushStroke};
 use crate::commands::{Affected, EditError, Editor, NewItem};
 use crate::lists::{self, LayerGroup, Row};
 use crate::params::{self, Inspector, Unit};
@@ -16,6 +17,7 @@ use planet_frame::pick::{pick_footprint, Footprint, SurfaceHit};
 use planet_world_def::cells::CELL_EDGE_M;
 use planet_world_def::item::{Anchor, Item, MAX_DELTA_LIMIT_M};
 use planet_world_def::item_store::ItemStore;
+use planet_world_def::stamp::BrushKind;
 use planet_world_def::{BodyId, ItemId, MissingNode};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -34,7 +36,34 @@ pub enum Tool {
     Line(String),
     /// Clicks on the planet add the points of a region outline to the draft; finishing puts the region.
     Region,
+    /// Dragging over the planet paints a brush stroke of this kind (raise, lower, smooth, flatten); the release puts it (VIEW-035).
+    Brush(BrushKind),
 }
+
+/// The brush the tool paints with: the radius and the strength in metres, typed by the user, and the height a flatten levels towards
+/// (`None`: the terrain height under the start of the stroke).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BrushSettings {
+    pub radius_m: f64,
+    pub strength_m: f64,
+    pub target_m: Option<f64>,
+}
+
+impl Default for BrushSettings {
+    fn default() -> Self {
+        BrushSettings { radius_m: brush::DEFAULT_RADIUS_M, strength_m: brush::DEFAULT_STRENGTH_M, target_m: None }
+    }
+}
+
+/// A stroke being painted: the kind and numbers it started with (a change of the settings during the drag does not change it), the
+/// height a flatten levels towards and the places the pointer passed.
+#[derive(Clone, Debug, PartialEq)]
+struct StrokeDraft {
+    stroke: BrushStroke,
+}
+
+/// The most places one drag records; a longer drag ends there (the stroke still paints what was recorded).
+pub const MAX_STROKE_SAMPLES: usize = 20_000;
 
 /// What the status line says when a line or region tool is picked.
 pub const DRAW_HINT: &str = "Click the planet to add points · Enter finishes · Backspace takes the last point back · Esc cancels";
@@ -53,6 +82,17 @@ pub const LINE_BOUND_M: f64 = 60.0;
 pub const MAX_DRAFT_LINE_POINTS: usize = 640;
 /// A point closer than this to the last one of a draft is a double click, not a new point, metres.
 pub const MIN_POINT_SPACING_M: f64 = 0.5;
+
+/// What the status line says when a brush tool is picked.
+fn brush_hint(kind: BrushKind) -> String {
+    let what = match kind {
+        BrushKind::Raise => "raises the ground by up to the strength at the centre line",
+        BrushKind::Lower => "lowers the ground by up to the strength at the centre line",
+        BrushKind::Smooth => "moves the ground towards the mean of its surroundings, never past it",
+        BrushKind::Flatten => "moves the ground towards the height under where the stroke starts, by up to the strength",
+    };
+    format!("Drag over the planet to paint: the {} brush {what} · one stroke is one undo · Esc cancels", kind.name())
+}
 
 /// Why a session action did not happen. Nothing has changed.
 #[derive(Debug)]
@@ -126,6 +166,13 @@ pub struct Session<S: ItemStore> {
     draft: Vec<GeoPoint>,
     /// While a point handle is held: the points of the line as they are now, the editor not yet told (one command at the release).
     drag_points: Option<Vec<GeoPoint>>,
+    /// The brush's radius, strength and target (the tool's settings).
+    brush: BrushSettings,
+    /// The stroke being painted, while the button is down.
+    stroke: Option<StrokeDraft>,
+    /// The brush items this session painted into: a new stroke joins one of these when it fits (ADR 0070: not an item someone else's
+    /// session changed last).
+    brush_open: Vec<ItemId>,
 }
 
 impl<S: ItemStore> Session<S> {
@@ -143,6 +190,9 @@ impl<S: ItemStore> Session<S> {
             drag: None,
             draft: Vec::new(),
             drag_points: None,
+            brush: BrushSettings::default(),
+            stroke: None,
+            brush_open: Vec::new(),
         }
     }
 
@@ -175,8 +225,12 @@ impl<S: ItemStore> Session<S> {
         if tool != self.tool {
             self.draft.clear();
             self.drop_point_drag();
+            self.stroke = None;
             if matches!(tool, Tool::Line(_) | Tool::Region) {
                 self.status = DRAW_HINT.to_string();
+            }
+            if let Tool::Brush(kind) = tool {
+                self.status = brush_hint(kind);
             }
         }
         self.tool = tool;
@@ -287,7 +341,11 @@ impl<S: ItemStore> Session<S> {
     }
 
     fn pick_stamp(&self, hit: &SurfaceHit, shown: &[ItemId]) -> Option<ItemId> {
-        let ids: Vec<ItemId> = shown.iter().copied().filter(|id| self.editor.item(*id).is_some_and(|i| i.points.is_empty())).collect();
+        let ids: Vec<ItemId> = shown
+            .iter()
+            .copied()
+            .filter(|id| self.editor.item(*id).is_some_and(|i| i.points.is_empty() && i.kind != brush::BRUSH_KIND))
+            .collect();
         let footprints: Vec<Footprint> = ids
             .iter()
             .enumerate()
@@ -381,6 +439,7 @@ impl<S: ItemStore> Session<S> {
             group: None,
             part: None,
             mask_layer: None,
+            strokes: Vec::new(),
         };
         let (id, affected) = self.editor.put(new)?;
         self.selection = Some(id);
@@ -734,6 +793,7 @@ impl<S: ItemStore> Session<S> {
             group: None,
             part: None,
             mask_layer: None,
+            strokes: Vec::new(),
         };
         let draft = self.draft.clone();
         let (id, affected) = if kind == "region" {
@@ -747,6 +807,133 @@ impl<S: ItemStore> Session<S> {
         self.tool = Tool::Select;
         self.status = format!("{} placed", self.named(id));
         Ok((id, affected))
+    }
+
+    // ----- the brush (VIEW-035)
+
+    pub fn brush_settings(&self) -> BrushSettings {
+        self.brush
+    }
+
+    /// Set the brush radius in metres, within [`brush::RADIUS_RANGE_M`]. A stroke being painted keeps the radius it started with.
+    pub fn set_brush_radius(&mut self, radius_m: f64) -> Result<(), SessionError> {
+        let (lo, hi) = brush::RADIUS_RANGE_M;
+        if !(radius_m.is_finite() && (lo..=hi).contains(&radius_m)) {
+            return refused(format!("The brush radius must be between {lo} m and {} km", hi / 1000.0));
+        }
+        self.brush.radius_m = radius_m;
+        Ok(())
+    }
+
+    /// Set the strength of a stroke in metres, within [`brush::STRENGTH_RANGE_M`]: the largest height change at the stroke's centre line.
+    pub fn set_brush_strength(&mut self, strength_m: f64) -> Result<(), SessionError> {
+        let (lo, hi) = brush::STRENGTH_RANGE_M;
+        if !(strength_m.is_finite() && (lo..=hi).contains(&strength_m)) {
+            return refused(format!("The brush strength must be between {lo} m and {hi} m"));
+        }
+        self.brush.strength_m = strength_m;
+        Ok(())
+    }
+
+    /// Set the height a flatten levels towards (metres above the reference surface), or `None` for the terrain height under the start of
+    /// each stroke.
+    pub fn set_brush_target(&mut self, target_m: Option<f64>) -> Result<(), SessionError> {
+        if target_m.is_some_and(|t| !t.is_finite()) {
+            return refused("The flatten height must be a finite number");
+        }
+        self.brush.target_m = target_m;
+        Ok(())
+    }
+
+    /// The stroke being painted, if any: its places in order (for the overlay) and its radius in metres.
+    pub fn stroke_in_progress(&self) -> Option<(&[GeoPoint], f64)> {
+        self.stroke.as_ref().map(|d| (d.stroke.points.as_slice(), d.stroke.radius_m))
+    }
+
+    /// The button went down with a brush tool on: a stroke starts at `dir`, whose terrain is `ground_m` above the reference surface (a
+    /// flatten without a typed height levels towards it). Nothing happens, and the reason is returned, when no brush tool is on or a
+    /// stroke is already being painted.
+    pub fn begin_stroke(&mut self, dir: Vec3, ground_m: f64) -> Result<(), SessionError> {
+        let Tool::Brush(kind) = self.tool else { return refused("no brush tool is on") };
+        if self.stroke.is_some() {
+            return refused("a stroke is being painted");
+        }
+        if self.drag.is_some() {
+            return refused("a handle is held");
+        }
+        if !is_direction(dir) {
+            return refused("that is not a place on the planet");
+        }
+        let target_m = (kind == BrushKind::Flatten).then(|| self.brush.target_m.unwrap_or(ground_m));
+        if target_m.is_some_and(|t| !t.is_finite()) {
+            return refused("the terrain height here is not a number");
+        }
+        let at = shape::lat_lon_of(dir);
+        self.stroke = Some(StrokeDraft {
+            stroke: BrushStroke {
+                kind,
+                radius_m: self.brush.radius_m,
+                strength_m: self.brush.strength_m,
+                target_m,
+                points: vec![GeoPoint::new(at.0, at.1)],
+            },
+        });
+        Ok(())
+    }
+
+    /// The pointer moved over the planet while the button is down: `dir` is added to the stroke when it is further than
+    /// [`MIN_POINT_SPACING_M`] from the last place. Without a stroke it does nothing.
+    pub fn extend_stroke(&mut self, dir: Vec3) {
+        let radius = self.radius_m;
+        let Some(draft) = self.stroke.as_mut() else { return };
+        if !is_direction(dir) || draft.stroke.points.len() >= MAX_STROKE_SAMPLES {
+            return;
+        }
+        let at = shape::lat_lon_of(dir);
+        let p = GeoPoint::new(at.0, at.1);
+        let last = draft.stroke.points.last().expect("a stroke has a place");
+        if polyline::arc_m(last.dir(), p.dir(), radius) >= MIN_POINT_SPACING_M {
+            draft.stroke.points.push(p);
+        }
+    }
+
+    /// The button went up: the stroke is put as one command (it joins a brush item of this session or starts one, see
+    /// [`Editor::add_stroke`]). Returns the places to refresh; `Ok` with none when no stroke was being painted.
+    pub fn end_stroke(&mut self) -> Result<Vec<Affected>, SessionError> {
+        let Some(draft) = self.stroke.take() else { return Ok(Vec::new()) };
+        let count = self.editor.items().filter(|i| i.kind == brush::BRUSH_KIND).count() + 1;
+        let template = NewItem {
+            body: self.body,
+            surface: planet_world_def::item::DEFAULT_SURFACE.to_string(),
+            layer: brush::BRUSH_LAYER.to_string(),
+            priority: 0,
+            kind: brush::BRUSH_KIND.to_string(),
+            anchor: Anchor { latitude_deg: 0.0, longitude_deg: 0.0, height_m: 0.0, heading_deg: 0.0 },
+            reach_m: 1.0,
+            max_delta_m: 0.0,
+            params: BTreeMap::new(),
+            name: Some(format!("Brush {count}")),
+            notes: None,
+            points: Vec::new(),
+            group: None,
+            part: None,
+            mask_layer: None,
+            strokes: Vec::new(),
+        };
+        let (touched, affected) = self.editor.add_stroke(template, &draft.stroke, &self.brush_open)?;
+        for id in touched {
+            if !self.brush_open.contains(&id) {
+                self.brush_open.push(id);
+            }
+        }
+        let what = draft.stroke.kind.name();
+        self.status = format!("{what} stroke painted; undo takes it back");
+        Ok(affected)
+    }
+
+    /// The stroke is abandoned (Esc, the window lost the focus): nothing is put.
+    pub fn cancel_stroke(&mut self) {
+        self.stroke = None;
     }
 
     /// How far from the outline of `id` a click still counts as on it, metres: its half-width (a line) or 1.5 % of `distance_m`, the larger

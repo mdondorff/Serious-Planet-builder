@@ -45,6 +45,10 @@ pub fn build<S: ItemStore>(s: &Session<S>, shown: &[ItemId], view: &ViewState, g
         .iter()
         .filter_map(|id| {
             let it = s.item(*id)?;
+            // A brush is its strokes, which are painted as they are made; its reach is not an outline to draw.
+            if it.kind == crate::brush::BRUSH_KIND {
+                return None;
+            }
             let dir = it.direction();
             let ground = ground_m(dir);
             let r = view.radius_m + ground;
@@ -138,6 +142,42 @@ pub fn draft<S: ItemStore>(s: &Session<S>, view: &ViewState, ground_m: &dyn Fn(V
         points: points.iter().map(|p| see(p.dir() * (view.radius_m + ground_m(p.dir())))).collect(),
         rubber: cursor,
     }
+}
+
+/// The brush tool on the screen: the stroke being painted as a path, and a ring of the brush's radius under the cursor.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BrushOverlay {
+    /// The path of the stroke so far (empty before the second place).
+    pub path: Vec<Option<[f64; 2]>>,
+    /// The ring of the radius around `at`, a closed ring of [`OUTLINE_SEGMENTS`] points.
+    pub ring: Vec<Option<[f64; 2]>>,
+}
+
+/// The brush tool's overlay: empty unless a brush tool is on or a stroke is being painted. `at` is the direction under the cursor, the
+/// centre of the ring (the radius is the stroke's while painting, else the brush's now).
+pub fn brush<S: ItemStore>(s: &Session<S>, view: &ViewState, ground_m: &dyn Fn(Vec3) -> f64, at: Option<Vec3>) -> BrushOverlay {
+    let stroke = s.stroke_in_progress();
+    if stroke.is_none() && !matches!(s.tool(), crate::session::Tool::Brush(_)) {
+        return BrushOverlay::default();
+    }
+    let see = |p: Vec3| -> Option<[f64; 2]> {
+        faces_camera(view.camera.position.0, p.normalized(), view.radius_m).then(|| project(&view.camera, p, view.viewport)).flatten()
+    };
+    let path = match stroke {
+        Some((points, _)) if points.len() >= 2 => path_pixels(points, false, view, ground_m, &see),
+        _ => Vec::new(),
+    };
+    let radius = stroke.map_or(s.brush_settings().radius_m, |(_, r)| r);
+    let ring = at
+        .map(|dir| {
+            let dir = dir.normalized();
+            let r = view.radius_m + ground_m(dir);
+            (0..OUTLINE_SEGMENTS)
+                .map(|k| see(shape::point_at(dir, k as f64 * 360.0 / OUTLINE_SEGMENTS as f64, radius, view.radius_m) * r))
+                .collect()
+        })
+        .unwrap_or_default();
+    BrushOverlay { path, ring }
 }
 
 /// The handles of the selected edit that are on the screen, for the pointer.

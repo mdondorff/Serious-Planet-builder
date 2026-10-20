@@ -9,7 +9,7 @@ use planet_editor::ids::IdMaker;
 use planet_editor::interaction::{Interaction, PointerView, Pressed};
 use planet_editor::layout::Layout;
 use planet_editor::lists::{LayerGroup, Row};
-use planet_editor::overlay::{self, DraftOverlay, OverlayItem};
+use planet_editor::overlay::{self, BrushOverlay, DraftOverlay, OverlayItem};
 use planet_editor::params::{kind_title, Inspector, STAMP_KINDS};
 use planet_editor::relevance::ViewState;
 use planet_editor::session::{Session, SessionError, Tool, LINE_KINDS};
@@ -23,6 +23,7 @@ use planet_generators::height::HeightField;
 use planet_world_def::footprint::{Cap, FootprintItem};
 use planet_world_def::item::Item;
 use planet_world_def::item_store::{ItemStore, LooseFileStore, MemoryStore, StoreError};
+use planet_world_def::stamp::BrushKind;
 use planet_world_def::{BodyId, ItemId, WorldDefinition};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -159,6 +160,8 @@ pub struct EditRuntime {
     overlay: Vec<OverlayItem>,
     /// The line or region being drawn, on the screen.
     draft: DraftOverlay,
+    /// The brush tool on the screen: the stroke being painted and the ring under the cursor.
+    brush: BrushOverlay,
     handles: Vec<(Handle, [f64; 2])>,
     lists: Lists,
     camera_position: Vec3,
@@ -257,6 +260,7 @@ impl EditRuntime {
             shown: Vec::new(),
             overlay: Vec::new(),
             draft: DraftOverlay::default(),
+            brush: BrushOverlay::default(),
             handles: Vec::new(),
             lists: Lists::default(),
             camera_position: Vec3::new(radius_m, 0.0, 0.0),
@@ -302,6 +306,7 @@ impl EditRuntime {
         let to_points = |p: [f64; 2]| egui::pos2((p[0] * scale[0] / ppp) as f32, (p[1] * scale[1] / ppp) as f32);
         crate::panels::draw_overlay(ui, &self.overlay, to_points);
         crate::panels::draw_draft(ui, &self.draft, to_points);
+        crate::panels::draw_brush(ui, &self.brush, to_points);
         // The panels read the lists and write their own state: take the state out for the call.
         let mut panels = std::mem::replace(&mut self.panels, PanelState::new(&self.layout));
         let events = crate::panels::show(ui, &mut panels, &self.panel_data(view_status));
@@ -458,8 +463,9 @@ impl EditRuntime {
         self.overlay = overlay::build(&self.session, &self.shown, &view, &|d| field.height(d));
         self.handles = overlay::handle_pixels(&self.overlay);
         self.draft = overlay::draft(&self.session, &view, &|d| field.height(d), (!over_ui).then_some(cursor));
+        let hit = if over_ui { None } else { Self::hit_at(camera, viewport, cursor, limits, field) };
+        self.brush = overlay::brush(&self.session, &view, &|d| field.height(d), hit.map(|h| h.dir));
         if !over_ui {
-            let hit = Self::hit_at(camera, viewport, cursor, limits, field);
             let mpp = self.height_mpp(camera, viewport);
             let v = PointerView { cursor, hit, shown: &self.shown, handles: &self.handles, metres_per_pixel: mpp };
             self.interaction.hover(&mut self.session, &v);
@@ -501,6 +507,7 @@ impl EditRuntime {
         PanelData {
             layout: &self.layout,
             tool: s.tool(),
+            brush: matches!(s.tool(), Tool::Brush(_)).then(|| s.brush_settings()),
             selected: s.selected(),
             near: &self.lists.near,
             found: &self.lists.found,
@@ -582,7 +589,7 @@ impl EditRuntime {
 
     /// The pointer moved with the primary button down.
     pub fn moved(&mut self, camera: &Camera, viewport: Viewport, cursor: [f64; 2], limits: &PickLimits, field: &dyn HeightField) {
-        if !self.on || self.session.dragging().is_none() {
+        if !self.on || (self.session.dragging().is_none() && self.session.stroke_in_progress().is_none()) {
             return;
         }
         let hit = Self::hit_at(camera, viewport, cursor, limits, field);
@@ -639,7 +646,7 @@ impl EditRuntime {
                 }
             }
             EditKey::Escape => {
-                if self.session.dragging().is_some() {
+                if self.session.dragging().is_some() || self.session.stroke_in_progress().is_some() {
                     self.cancel_drag();
                 } else if !self.session.draft().is_empty() {
                     self.session.cancel_draft();
@@ -702,6 +709,21 @@ impl EditRuntime {
                 },
                 Event::ToggleHidden(id) => self.session.toggle_hidden(id),
                 Event::ToggleHelp => self.panels.help = !self.panels.help,
+                Event::BrushRadius(text) => {
+                    let r = parse_metres(&text).and_then(|v| self.session.set_brush_radius(v).map_err(|e| e.to_string()));
+                    self.note(r.map_err(SessionError::Refused));
+                }
+                Event::BrushStrength(text) => {
+                    let r = parse_metres(&text).and_then(|v| self.session.set_brush_strength(v).map_err(|e| e.to_string()));
+                    self.note(r.map_err(SessionError::Refused));
+                }
+                // Empty or "auto": the terrain height under the start of each stroke.
+                Event::BrushTarget(text) => {
+                    let t = text.trim();
+                    let value = if t.is_empty() || t.eq_ignore_ascii_case("auto") { Ok(None) } else { parse_metres(t).map(Some) };
+                    let r = value.and_then(|v| self.session.set_brush_target(v).map_err(|e| e.to_string()));
+                    self.note(r.map_err(SessionError::Refused));
+                }
                 Event::SurfaceType(index) => match self.session.set_surface_type(index) {
                     Ok(a) => self.affected.extend(a),
                     Err(e) => self.note(Err(e)),
@@ -835,6 +857,10 @@ pub fn tool_number(n: usize) -> Tool {
         n if n < 2 + stamps => Tool::Stamp(STAMP_KINDS[n - 2].to_string()),
         n if n < 2 + stamps + LINE_KINDS.len() => Tool::Line(LINE_KINDS[n - 2 - stamps].to_string()),
         n if n == 2 + stamps + LINE_KINDS.len() => Tool::Region,
+        // The brushes follow the region: raise, lower, smooth, flatten.
+        n if (3 + stamps + LINE_KINDS.len()..3 + stamps + LINE_KINDS.len() + BrushKind::ALL.len()).contains(&n) => {
+            Tool::Brush(BrushKind::ALL[n - 3 - stamps - LINE_KINDS.len()])
+        }
         _ => Tool::Select,
     }
 }
@@ -846,7 +872,13 @@ pub fn mode_status(e: &EditRuntime) -> String {
         Tool::Stamp(k) => format!("Place {}", kind_title(k)),
         Tool::Line(k) => format!("Draw {}", kind_title(k)),
         Tool::Region => "Draw region".to_string(),
+        Tool::Brush(k) => format!("Brush: {}", k.name()),
     }
+}
+
+/// A length typed in metres (`250`, `1.2 km`) for the brush fields.
+fn parse_metres(text: &str) -> Result<f64, String> {
+    planet_editor::params::parse_value(text, planet_editor::params::Unit::Metres)
 }
 
 #[cfg(test)]
@@ -915,6 +947,51 @@ mod tests {
         let d = std::env::temp_dir().join(format!("planet-editwin-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    // spec: VIEW-035
+    #[test]
+    fn a_brush_is_picked_with_the_keys_paints_with_the_pointer_and_takes_its_numbers_from_the_panel() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.toggle();
+        // 8 9 0 - are the brushes, in the order of the rail.
+        for (key, name) in [(8, "raise"), (9, "lower"), (10, "smooth"), (11, "flatten")] {
+            e.key(EditKey::Tool(key));
+            assert_eq!(mode_status(&e), format!("Brush: {name}"));
+        }
+        // The numbers come from the panel's events, in metres; a bad one is said in the status line and changes nothing.
+        e.apply(vec![Event::BrushRadius("250".into()), Event::BrushStrength("1.5 m".into()), Event::BrushTarget("900".into())]);
+        let b = e.session.brush_settings();
+        assert_eq!((b.radius_m, b.strength_m, b.target_m), (250.0, 1.5, Some(900.0)));
+        let refused = e.stats.refused;
+        e.apply(vec![Event::BrushRadius("9 km".into())]);
+        assert_eq!((e.stats.refused, e.session.brush_settings().radius_m), (refused + 1, 250.0));
+        e.apply(vec![Event::BrushTarget("auto".into())]);
+        assert_eq!(e.session.brush_settings().target_m, None);
+        assert!(e.panel_data("").brush.is_some(), "the panel shows the brush fields while a brush is on");
+        // A drag paints: press, move, release is one stroke, one undo; Esc in the middle puts nothing.
+        let drag = |e: &mut EditRuntime, to: [f64; 2]| {
+            e.press(&cam, VIEWPORT, CENTRE, &limits(), &Flat);
+            e.moved(&cam, VIEWPORT, [(CENTRE[0] + to[0]) / 2.0, (CENTRE[1] + to[1]) / 2.0], &limits(), &Flat);
+            e.moved(&cam, VIEWPORT, to, &limits(), &Flat);
+        };
+        let target = [CENTRE[0] + 120.0, CENTRE[1]];
+        drag(&mut e, target);
+        assert!(e.session.stroke_in_progress().is_some());
+        e.key(EditKey::Escape);
+        assert!(e.session.stroke_in_progress().is_none() && e.session.editor().items().count() == 0);
+        assert_eq!(e.session.tool(), &Tool::Brush(BrushKind::Flatten), "Esc ended the stroke, not the tool");
+        drag(&mut e, target);
+        e.release();
+        let items: Vec<_> = e.session.editor().items().filter(|i| i.kind == "brush").collect();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].strokes.len(), 1);
+        assert_eq!(items[0].strokes[0].target_m, Some(f64::from(0.0f32)), "the typed height was cleared: the flat ground under the start");
+        assert!(!e.take_affected().is_empty(), "the tiles around the stroke are refreshed");
+        e.key(EditKey::Undo);
+        assert_eq!(e.session.editor().items().count(), 0);
     }
 
     // spec: VIEW-033
@@ -1193,7 +1270,9 @@ mod tests {
         assert_eq!(tool_number(5), Tool::Line("ridge".into()));
         assert_eq!(tool_number(6), Tool::Line("channel".into()));
         assert_eq!(tool_number(7), Tool::Region);
-        assert_eq!(tool_number(9), Tool::Select);
+        assert_eq!(tool_number(8), Tool::Brush(BrushKind::Raise));
+        assert_eq!(tool_number(11), Tool::Brush(BrushKind::Flatten));
+        assert_eq!(tool_number(12), Tool::Select);
     }
 
     // spec: VIEW-022

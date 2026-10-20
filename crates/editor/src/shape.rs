@@ -54,6 +54,10 @@ fn height_key(item: &Item) -> Option<&'static str> {
 
 /// The handles an item has: the anchor always, the radius when it has an outline, the height when it has the parameter the handle edits.
 pub fn handles_of(item: &Item) -> Vec<Handle> {
+    // A brush has no handle: its strokes start at its anchor, which therefore cannot move (VIEW-035).
+    if item.kind == crate::brush::BRUSH_KIND {
+        return Vec::new();
+    }
     // An item with points is a line or a region: one handle per point of THIS item and nothing else (ADR 0069). A line split into
     // linked items has handles over all its parts, counted line-wide: `Session::handles` builds those from the joined points; this
     // function and `handle_point(Point(i))` see only the item's own, part-local points.
