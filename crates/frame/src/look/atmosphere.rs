@@ -65,6 +65,27 @@ pub const ORBIT_STEPS: usize = 40;
 pub const AP_MAX_STEPS: usize = 64;
 /// The distance along the ray of the last aerial-perspective slice; slice `k` is at `AP_MAX_DISTANCE_M * ((k + 1) / 32)^2`.
 pub const AP_MAX_DISTANCE_M: f64 = 256_000.0;
+/// From this camera altitude (metres) a pixel with geometry is hazed by a march from the camera to the geometry, mixed in with the
+/// aerial-perspective volume up to [`CAMERA_MARCH_BLEND_TO_M`], and not by the volume above it: the volume's 32 slices and 32 rows are
+/// too coarse for the rays that end hundreds of kilometres away (ATMO-021, SPIKE-20).
+pub const CAMERA_MARCH_BLEND_FROM_M: f64 = 6_000.0;
+/// Above this altitude the march alone hazes the geometry; between the two the march and the volume are mixed by the smoothstep of the
+/// altitude, so the haze does not step when the camera crosses (the volume is 7 to 19 % off the march there). The GPU declares the same
+/// values (`CAM_MARCH_BLEND_FROM`, `CAM_MARCH_BLEND_TO`).
+pub const CAMERA_MARCH_BLEND_TO_M: f64 = 10_000.0;
+/// Steps of that march, dense towards the geometry's end (where the air is thickest): [`CAMERA_MARCH_STEPS_DAY`] while the sun's cosine to
+/// the up is at least [`CAMERA_MARCH_TWILIGHT_MU`], [`CAMERA_MARCH_STEPS_TWILIGHT`] below it, where the light crosses the planet's shadow
+/// along the ray and fewer steps leave the 5 % of ATMO-007 (the sweep over suns and azimuths, `tests/atmosphere.rs`). The GPU declares
+/// the same values (`CAM_MARCH_STEPS_DAY`, `CAM_MARCH_STEPS_TWILIGHT`, `CAM_MARCH_TWILIGHT_MU`).
+/// The half-resolution haze (ATMO-021): one texel per 2 x 2 pixels, a pixel weighs the texels around it by the bilinear weight and
+/// `exp(-(dt / tol)^2)` with `tol = HAZE_DEPTH_TOL_REL t + HAZE_DEPTH_TOL_ABS` (`dt` the texel's distance minus the pixel's), and marches
+/// itself when the weights sum to less than `HAZE_MIN_WEIGHT`. The GPU declares the same values (`HAZE_DEPTH_TOL_REL`, ...).
+pub const HAZE_DEPTH_TOL_REL: f64 = 0.02;
+pub const HAZE_DEPTH_TOL_ABS_M: f64 = 20.0;
+pub const HAZE_MIN_WEIGHT: f64 = 0.1;
+pub const CAMERA_MARCH_STEPS_DAY: usize = 8;
+pub const CAMERA_MARCH_STEPS_TWILIGHT: usize = 12;
+pub const CAMERA_MARCH_TWILIGHT_MU: f64 = 0.1;
 
 /// Valid ranges of the look values (the spec LOOK-001 states them).
 pub const COEFFICIENT_LIMITS: (f64, f64) = (0.0, 1.0e-3);
@@ -649,12 +670,14 @@ pub enum StepLayout {
     Uniform(usize),
     /// `n` steps whose boundaries are `s_end (i / n)^2`: dense near the origin.
     Quadratic(usize),
+    /// `n` steps whose boundaries are `s_end (1 - (1 - i / n)^2)`: dense near the far end of the march.
+    EndDense(usize),
 }
 
 impl StepLayout {
     pub fn count(self) -> usize {
         match self {
-            StepLayout::Uniform(n) | StepLayout::Quadratic(n) => n,
+            StepLayout::Uniform(n) | StepLayout::Quadratic(n) | StepLayout::EndDense(n) => n,
         }
     }
 
@@ -666,6 +689,13 @@ impl StepLayout {
                 let f = |k: usize| {
                     let x = k as f64 / n as f64;
                     s_end * x * x
+                };
+                (f(i), f(i + 1))
+            }
+            StepLayout::EndDense(n) => {
+                let f = |k: usize| {
+                    let x = 1.0 - k as f64 / n as f64;
+                    s_end * (1.0 - x * x)
                 };
                 (f(i), f(i + 1))
             }
@@ -1287,6 +1317,76 @@ impl FrameGeometry {
         let ground_mu_sun = ((o.r_musun + s_end * cos_vs) / big_r).clamp(-1.0, 1.0);
         OrbitRay { radiance: m.radiance, transmittance: m.transmittance, reaches_ground, ground_mu_sun, enters: true }
     }
+}
+
+/// What the march of one ray from a camera inside the atmosphere returns (radiance and transmittance up to the geometry or the exit).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CameraRay {
+    pub radiance: [f64; 3],
+    pub transmittance: [f64; 3],
+}
+
+impl FrameGeometry {
+    /// Whether a pixel with geometry is hazed by [`FrameGeometry::camera_ray_cosines`] and not by the volume (ATMO-021): the camera is
+    /// inside the atmosphere from [`CAMERA_MARCH_BLEND_FROM_M`].
+    pub fn uses_camera_march(&self) -> bool {
+        self.camera_march_weight() > 0.0
+    }
+
+    /// The weight of the camera march in the haze of a pixel with geometry: 0 up to [`CAMERA_MARCH_BLEND_FROM_M`], 1 from
+    /// [`CAMERA_MARCH_BLEND_TO_M`], the smoothstep of the altitude between. The haze is `(1 - w) volume + w march`.
+    pub fn camera_march_weight(&self) -> f64 {
+        let t = ((self.h - CAMERA_MARCH_BLEND_FROM_M) / (CAMERA_MARCH_BLEND_TO_M - CAMERA_MARCH_BLEND_FROM_M)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    }
+
+    /// The steps of [`FrameGeometry::camera_ray_cosines`] in this frame (by the sun's height).
+    pub fn camera_march_steps(&self) -> usize {
+        if self.mu_sun >= CAMERA_MARCH_TWILIGHT_MU {
+            CAMERA_MARCH_STEPS_DAY
+        } else {
+            CAMERA_MARCH_STEPS_TWILIGHT
+        }
+    }
+
+    /// The haze of geometry at distance `t_geo` along a ray from the camera inside the atmosphere with the given cosines to the up and to
+    /// the sun: [`FrameGeometry::camera_march_steps`] steps from the camera to the geometry, dense towards its end, cut where the ray
+    /// leaves the atmosphere.
+    pub fn camera_ray_cosines(&self, atm: &Atmosphere, luts: &StaticLuts, mu: f64, cos_vs: f64, t_geo: f64) -> CameraRay {
+        let limit = distance_to_top(self.r * mu, self.c_top);
+        let s_end = t_geo.min(limit);
+        if s_end <= 0.0 {
+            return CameraRay { radiance: [0.0; 3], transmittance: [1.0; 3] };
+        }
+        let o = self.origin(mu);
+        let m =
+            atm.march(luts, &o, cos_vs, s_end, StepLayout::EndDense(self.camera_march_steps()), Scatter::Physical { cos_gamma: cos_vs });
+        CameraRay { radiance: m.radiance, transmittance: m.transmittance }
+    }
+}
+
+/// The haze of a geometry pixel at distance `t_geo` from the half-resolution texels around it (ATMO-021): `texels` holds, for each of the
+/// four, its bilinear weight, its distance (not above 0: no geometry) and its camera ray. Each is weighed by its bilinear weight and
+/// `exp(-(dt / tol)^2)`; `None` when the weights sum to less than [`HAZE_MIN_WEIGHT`] (the pixel marches itself).
+pub fn haze_upsample(texels: &[(f64, f64, CameraRay)], t_geo: f64) -> Option<CameraRay> {
+    let tol = HAZE_DEPTH_TOL_REL * t_geo + HAZE_DEPTH_TOL_ABS_M;
+    let (mut radiance, mut transmittance, mut wsum) = ([0.0f64; 3], [0.0f64; 3], 0.0f64);
+    for (wb, t, ray) in texels {
+        if *t <= 0.0 {
+            continue;
+        }
+        let r = (t - t_geo) / tol;
+        let w = wb * libm::exp(-r * r);
+        for k in 0..3 {
+            radiance[k] += w * ray.radiance[k];
+            transmittance[k] += w * ray.transmittance[k];
+        }
+        wsum += w;
+    }
+    if wsum < HAZE_MIN_WEIGHT {
+        return None;
+    }
+    Some(CameraRay { radiance: radiance.map(|v| v / wsum), transmittance: transmittance.map(|v| v / wsum) })
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------

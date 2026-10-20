@@ -1,0 +1,75 @@
+schema_version = 4
+kind = "look"
+
+[body.0.units]
+solar_illuminance_lux = 126600.0
+
+[body.0.exposure]
+min_ev100 = -2.0
+max_ev100 = 16.0
+speed_up = 3.0
+speed_down = 1.0
+
+[body.0.histogram]
+ev_min = -10.0
+ev_max = 20.0
+band_low = 0.4
+band_high = 0.9
+
+[body.0.tone_map]
+curve = "aces"
+
+[body.0.sun]
+direction = [-0.4753610189117246, 0.8797309939399717, 0.01026060429977006]
+
+[body.0.albedo]
+rock = [0.3, 0.27, 0.24]
+snow = [0.85, 0.87, 0.9]
+grass = [0.14, 0.19, 0.06]
+forest = [0.045, 0.075, 0.03]
+desert = [0.42, 0.33, 0.22]
+tundra = [0.2, 0.19, 0.15]
+beach = [0.52, 0.46, 0.34]
+seabed = [0.06, 0.08, 0.09]
+dry_mm = 250.0
+wet_mm = 900.0
+forest_mm_lo = 1000.0
+forest_mm_hi = 2200.0
+tundra_c_lo = -3.0
+tundra_c_hi = 5.0
+rock_cos_full = 0.62
+rock_cos_none = 0.86
+snow_c_full = -8.0
+snow_c_none = -1.0
+snow_cos_none = 0.55
+snow_cos_full = 0.8
+beach_height_m = 3.0
+beach_fade_m = 5.0
+shore_blend_m = 1.0
+
+[body.0.atmosphere]
+rayleigh_scattering = [5.802e-6, 1.3558e-5, 3.31e-5]
+mie_scattering = [3.996e-6, 3.996e-6, 3.996e-6]
+mie_absorption = [4.44e-7, 4.44e-7, 4.44e-7]
+ozone_absorption = [6.5e-7, 1.881e-6, 8.5e-8]
+ground_albedo = [0.3, 0.3, 0.3]
+rayleigh_scale_height_m = 8000.0
+mie_scale_height_m = 1200.0
+mie_g = 0.8
+ozone_center_m = 25000.0
+ozone_half_width_m = 15000.0
+top_height_m = 100000.0
+sun_angular_radius_rad = 0.004675
+
+[body.0.water]
+absorption_per_m = 0.5
+fresnel_f0 = 0.02
+glint_roughness = 0.08
+shore_fade_m = 0.05
+foam_width_m = 0.4
+foam_strength = 0.8
+choppy = 0.8
+gravity_m_s2 = 9.81
+wave_scale = 1.0
+shore_filter = 0.0
+

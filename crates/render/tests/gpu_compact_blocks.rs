@@ -126,5 +126,5 @@ fn persistent_renderers_per_slot_and_batched_and_the_lit_atmosphere_frame_are_th
         frames += 3;
     }
     println!("persistent: {frames} frames, hash {all:016x}");
-    expect(&ctx, "persistent", all, &[(WARP, 0x2a6a_66e0_68ba_06c5), (RTX, 0x594f_b79d_9ca2_035d)]);
+    expect(&ctx, "persistent", all, &[(WARP, 0x50c8_4abd_21f3_804b), (RTX, 0x213e_4a0a_bbc7_3f53)]);
 }

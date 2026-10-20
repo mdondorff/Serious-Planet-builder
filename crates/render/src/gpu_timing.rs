@@ -139,6 +139,26 @@ impl<'a> Stamps<'a> {
         }
     }
 
+    /// The beginning of `p` only (a compute pass that the render pass of `p` ends: the haze pass and the composite are one timed span).
+    pub(crate) fn compute_begin(&self, p: GpuPass) -> wgpu::ComputePassTimestampWrites<'a> {
+        self.mark(p);
+        wgpu::ComputePassTimestampWrites {
+            query_set: self.set,
+            beginning_of_pass_write_index: Some(p.first_query()),
+            end_of_pass_write_index: None,
+        }
+    }
+
+    /// The end of `p` only (the render pass that ends a span a compute pass began).
+    pub(crate) fn render_end(&self, p: GpuPass) -> wgpu::RenderPassTimestampWrites<'a> {
+        self.mark(p);
+        wgpu::RenderPassTimestampWrites {
+            query_set: self.set,
+            beginning_of_pass_write_index: None,
+            end_of_pass_write_index: Some(p.first_query() + 1),
+        }
+    }
+
     /// Bit `k` set for each pass that took its writes.
     pub(crate) fn written(&self) -> u16 {
         self.written.get()
@@ -148,6 +168,14 @@ impl<'a> Stamps<'a> {
 /// The optional timestamp writes of a pass of a frame that may not be timed.
 pub(crate) fn render_writes<'a>(s: Option<&Stamps<'a>>, p: GpuPass) -> Option<wgpu::RenderPassTimestampWrites<'a>> {
     s.map(|s| s.render(p))
+}
+
+pub(crate) fn compute_begin_writes<'a>(s: Option<&Stamps<'a>>, p: GpuPass) -> Option<wgpu::ComputePassTimestampWrites<'a>> {
+    s.map(|s| s.compute_begin(p))
+}
+
+pub(crate) fn render_end_writes<'a>(s: Option<&Stamps<'a>>, p: GpuPass) -> Option<wgpu::RenderPassTimestampWrites<'a>> {
+    s.map(|s| s.render_end(p))
 }
 
 pub(crate) fn compute_writes<'a>(s: Option<&Stamps<'a>>, p: GpuPass) -> Option<wgpu::ComputePassTimestampWrites<'a>> {

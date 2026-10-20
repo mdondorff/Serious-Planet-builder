@@ -1,0 +1,52 @@
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+readiness gate: sampling the machine for 10 s ...
+readiness gate: ok
+lit perf: 2560x1440, cells 32, tau 6 px, finest level 22, timestamps true, tile format compact, height field cpu-erosion-v1 over a 16384-cell bake; lit path (atmosphere, water); source: store target/accept/global16384, 16384 cells
+  GPU time per pass from timestamps of waited frames of the lit path (terrain, water + scene copy, sky view, aerial perspective, composite, exposure histogram and adapt, tone map); the atmosphere row is the sum of its three passes; the LUT upload is a queue write on a body's load, not a pass of a steady frame
+lit/ground-1m: 2417 nodes (2417 new meshes in 2.2 s), 0 with water (cut 22 horizon + 0 height (0 by the exact minimum), 0 kept with no minimum)
+cool-down lit/ground-1m: 60 C -> 60 C after 0 s (target 60 C)
+lit/aerial-20km: 913 nodes (273 new meshes in 0.3 s), 48 with water (cut 86 horizon + 16 height (16 by the exact minimum), 0 kept with no minimum)
+cool-down lit/aerial-20km: 63 C -> 59 C after 10 s (target 60 C)
+lit/orbit: 182 nodes (182 new meshes in 10.3 s), 156 with water (cut 8 horizon + 2 height (2 by the exact minimum), 0 kept with no minimum)
+cool-down lit/orbit: 60 C -> 60 C after 0 s (target 60 C)
+SESSION VALID for budgets: frame verdicts: yes; GPU verdicts: yes (each view judged against the 1400 MHz clock floor)
+warm-up lit/ground-1m: P0 1725 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+lit/ground-1m: frame (waited) median 3.194 / p99 3.730 / max 5.194 ms [clock state P0 1515 MHz (63-64 C, up to 86 W)]
+  lit/ground-1m: terrain pass median 1.274 ms (budget 8 ms) ok
+  lit/ground-1m: atmosphere (sky view + aerial perspective + composite) median 0.213 ms (budget 1 ms) ok
+  lit/ground-1m: water (pass + scene copy) median n/a (budget 2 ms) not in view (no water node in the view)
+  lit/ground-1m: GPU span of the lit frame (reported; the frame median is the streaming --lit scenes') median 1.660 ms reported
+  lit/ground-1m: frame (waited) p99 3.730 ms (budget 20 ms) ok
+  lit/ground-1m: GPU ms per pass (median / p99 / max): terrain 1.274/1.350/1.409, water -, sky-view 0.035/0.037/0.048, aerial-perspective 0.062/0.067/0.085, sky-composite 0.116/0.121/0.294, exposure-histogram 0.068/0.075/0.254, exposure-adapt 0.015/0.023/0.026, tonemap 0.038/0.040/0.051, scene-copy -
+  lit/ground-1m: frames behind the sums: atmosphere 900 of 900, water 0 of 900
+  lit/ground-1m: host load (1 samples, recorded not judged): system mean 3.3 % max 3.3 %; harness 2.2 %; competing mean 1.2 % max 1.2 %; top competitors: System 0.3 % (max 0.3), MsMpEng 0.2 % (max 0.2), svchost 0.2 % (max 0.2), NVDisplay.Container 0.1 % (max 0.1), claude 0.1 % (max 0.1)
+  lit/ground-1m: atmosphere run-to-run noise 0.022 (0.005 ms): above 10 %: no; above 10 % and the 0.1 ms floor (ADR 0059): no
+warm-up lit/aerial-20km: P0 1507 MHz (floor 1400 MHz, held 3 readings) after 3.1 s (3 chunks)
+lit/aerial-20km: frame (waited) median 2.269 / p99 3.050 / max 12.453 ms [clock state P0 1402 MHz (63-64 C, up to 89 W)]
+  lit/aerial-20km: terrain pass median 0.855 ms (budget 8 ms) ok
+  lit/aerial-20km: atmosphere (sky view + aerial perspective + composite) median 0.249 ms (budget 1 ms) ok
+  lit/aerial-20km: water (pass + scene copy) median 0.120 ms (budget 2 ms) ok
+  lit/aerial-20km: GPU span of the lit frame (reported; the frame median is the streaming --lit scenes') median 1.411 ms reported
+  lit/aerial-20km: frame (waited) p99 3.050 ms (budget 20 ms) ok
+  lit/aerial-20km: GPU ms per pass (median / p99 / max): terrain 0.855/0.910/1.150, water 0.050/0.053/0.054, sky-view 0.038/0.041/0.054, aerial-perspective 0.067/0.072/0.073, sky-composite 0.143/0.153/0.153, exposure-histogram 0.074/0.078/0.079, exposure-adapt 0.017/0.018/0.020, tonemap 0.041/0.043/0.044, scene-copy 0.070/0.075/0.081
+  lit/aerial-20km: frames behind the sums: atmosphere 900 of 900, water 900 of 900
+  lit/aerial-20km: host load (1 samples, recorded not judged): system mean 3.6 % max 3.6 %; harness 1.6 %; competing mean 1.9 % max 1.9 %; top competitors: System 0.4 % (max 0.4), svchost 0.3 % (max 0.3), MsMpEng 0.2 % (max 0.2), claude 0.2 % (max 0.2), NVDisplay.Container 0.2 % (max 0.2)
+  lit/aerial-20km: atmosphere run-to-run noise 0.054 (0.013 ms): above 10 %: no; above 10 % and the 0.1 ms floor (ADR 0059): no
+  lit/aerial-20km: water run-to-run noise 0.061 (0.007 ms): above 10 %: no; above 10 % and the 0.1 ms floor (ADR 0059): no
+warm-up lit/orbit: P0 1552 MHz (floor 1400 MHz, held 3 readings) after 5.2 s (5 chunks)
+lit/orbit: frame (waited) median 1.837 / p99 2.418 / max 13.408 ms [clock state P0 1462 MHz (63-65 C, up to 102 W)]
+  lit/orbit: terrain pass median 0.142 ms (budget 8 ms) ok
+  lit/orbit: atmosphere (sky view + aerial perspective + composite) median 0.688 ms (budget 1 ms) ok
+  lit/orbit: water (pass + scene copy) median 0.289 ms (budget 2 ms) ok
+  lit/orbit: GPU span of the lit frame (reported; the frame median is the streaming --lit scenes') median 1.273 ms reported
+  lit/orbit: frame (waited) p99 2.418 ms (budget 20 ms) ok
+  lit/orbit: GPU ms per pass (median / p99 / max): terrain 0.142/0.151/0.152, water 0.221/0.236/0.542, sky-view 0.034/0.037/0.038, aerial-perspective 0.062/0.067/0.089, sky-composite 0.592/0.637/0.648, exposure-histogram 0.043/0.053/0.367, exposure-adapt 0.014/0.022/0.023, tonemap 0.036/0.038/0.043, scene-copy 0.069/0.075/0.084
+  lit/orbit: frames behind the sums: atmosphere 900 of 900, water 900 of 900
+  lit/orbit: host load (1 samples, recorded not judged): system mean 4.3 % max 4.3 %; harness 1.9 %; competing mean 2.5 % max 2.5 %; top competitors: MsMpEng 0.4 % (max 0.4), System 0.4 % (max 0.4), svchost 0.4 % (max 0.4), NVDisplay.Container 0.3 % (max 0.3), claude 0.2 % (max 0.2)
+  lit/orbit: atmosphere run-to-run noise 0.065 (0.044 ms): above 10 %: no; above 10 % and the 0.1 ms floor (ADR 0059): no
+  lit/orbit: water run-to-run noise 0.065 (0.018 ms): above 10 %: no; above 10 % and the 0.1 ms floor (ADR 0059): no
+regression check: no earlier valid log for this scene; this session becomes the baseline
+--views: a partial log, not kept as a baseline
+wrote target/perf21/main-day2.json
+0 gated measure(s) over budget

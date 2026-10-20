@@ -508,3 +508,10 @@ What happened: the four-point stencil was exactly radial on a flat sphere; the c
 Assumption it changes: a lattice stencil across a cube edge is a function of integers, not of the warp; a flat-sphere test of a lattice normal needs a bound of its own (0.01 degrees), not the old exact radial one.
 Proposed follow-up: none.
 Obsolete when: the face mapping gives equal spacing on both sides of every vertex, or the normal no longer reads the lattice.
+
+## 2026-10-20 A bound checked at texel centres and one sun hid 10 to 23 % errors of the aerial-perspective volume
+Scope: atmosphere (ATMO-007, ATMO-021), frame::look::atmosphere
+What happened: ATMO-007 checked the volume only at texel centres and the marches at one sun. Between its texels the volume is 10 % off at 14 km, 18 to 23 % at 60 to 99.5 km (the owner's bands), and 17 to 18 % at 2 km with a low sun; its transmittance is one mean over the channels, which alone is 7 % off per channel. A test over one sun and the centre column is blind to the rays that look away from the sun: the camera march passed at 0.7 and was 17 % off at the sun -0.05.
+Assumption it changes: ATMO-007 (the sun "high, low and below the horizon" must be swept, towards the sun and away from it, and a texel table must be read between its texels).
+Proposed follow-up: a half-resolution haze buffer or a better volume parameterisation for the cost (the march costs 1.3 to 1.9 ms at 1440p); the volume below 8 km at a low sun is still 17 to 18 % off.
+Obsolete when: the volume is replaced or parameterised by the view angle and tested between its texels at several suns.

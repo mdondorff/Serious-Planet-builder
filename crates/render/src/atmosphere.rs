@@ -42,6 +42,20 @@ const AP_D: i32 = 32;
 const SKY_STEPS: i32 = 32;
 const ORBIT_STEPS: i32 = 40;
 const AP_MAX_STEPS: i32 = 64;
+// Above this camera altitude (metres) geometry is hazed by a march from the camera, not by the volume (ATMO-021); the CPU values are
+// `CAMERA_MARCH_BLEND_FROM_M`, `CAMERA_MARCH_BLEND_TO_M`, `CAMERA_MARCH_STEPS_DAY`, `CAMERA_MARCH_STEPS_TWILIGHT` and `CAMERA_MARCH_TWILIGHT_MU`.
+const CAM_MARCH_BLEND_FROM: f32 = 6000.0;
+const CAM_MARCH_BLEND_TO: f32 = 10000.0;
+// The half-resolution haze (ATMO-021): the distance of a texel is stored as t * HAZE_T_SCALE; an upsampled pixel weighs a texel by its
+// bilinear weight and exp(-(dt / tol)^2) with tol = HAZE_DEPTH_TOL_REL * t + HAZE_DEPTH_TOL_ABS, and marches itself when the weights
+// sum to less than HAZE_MIN_WEIGHT (a depth edge). The CPU values are `HAZE_*` of `planet_frame::look::atmosphere`.
+const HAZE_T_SCALE: f32 = 0.00001;
+const HAZE_DEPTH_TOL_REL: f32 = 0.02;
+const HAZE_DEPTH_TOL_ABS: f32 = 20.0;
+const HAZE_MIN_WEIGHT: f32 = 0.1;
+const CAM_MARCH_STEPS_DAY: i32 = 8;
+const CAM_MARCH_STEPS_TWILIGHT: i32 = 12;
+const CAM_MARCH_TWILIGHT_MU: f32 = 0.1;
 
 // Atmosphere::static_words (6 vec4) then FrameGeometry::words (10 vec4).
 struct AtmoBlock {
@@ -170,9 +184,13 @@ fn atm_cs_phase(g: f32, c: f32) -> f32 {
     return k * (1.0 + c * c) / (d * sqrt(d));
 }
 
-// The start of step i of n: lay 0 uniform, 1 quadratic.
+// The start of step i of n: lay 0 uniform, 1 quadratic (dense near the origin), 2 dense towards the end.
 fn atm_step_at(lay: i32, s_end: f32, i: i32, n: i32) -> f32 {
     let x = f32(i) / f32(n);
+    if (lay == 2) {
+        let y = 1.0 - x;
+        return s_end * (1.0 - y * y);
+    }
     return select(s_end * f32(i) / f32(n), s_end * x * x, lay == 1);
 }
 
@@ -319,6 +337,29 @@ fn atm_ap_texel(ix: i32, iy: i32, iz: i32) -> vec4<f32> {
     return vec4<f32>(m.radiance, (m.transmittance.x + m.transmittance.y + m.transmittance.z) / 3.0);
 }
 
+// The weight of the camera march in the haze of geometry: 0 up to CAM_MARCH_BLEND_FROM, 1 from CAM_MARCH_BLEND_TO, the smoothstep between.
+fn atm_camera_blend() -> f32 {
+    let u = clamp((A.cam.x - CAM_MARCH_BLEND_FROM) / (CAM_MARCH_BLEND_TO - CAM_MARCH_BLEND_FROM), 0.0, 1.0);
+    return u * u * (3.0 - 2.0 * u);
+}
+
+// A ray from the camera inside the atmosphere to geometry at t_geo (>= 0): CAM_MARCH_STEPS_DAY or _TWILIGHT steps from the camera, cut where the
+// ray leaves the atmosphere, dense towards the geometry (ATMO-021; the volume cannot hold the haze of rays that end hundreds
+// of kilometres away).
+fn atm_camera_ray(dir: vec3<f32>, t_geo: f32) -> AtmoMarch {
+    let mu = clamp(dot(dir, A.up.xyz), -1.0, 1.0);
+    let cos_vs = clamp(dot(dir, A.sun.xyz), -1.0, 1.0);
+    let s_end = min(t_geo, atm_dist_to_top(A.cam.y * mu, A.cam.w));
+    if (s_end <= 0.0) {
+        var none: AtmoMarch;
+        none.radiance = vec3<f32>(0.0);
+        none.transmittance = vec3<f32>(1.0);
+        return none;
+    }
+    let steps = select(CAM_MARCH_STEPS_TWILIGHT, CAM_MARCH_STEPS_DAY, A.up.w >= CAM_MARCH_TWILIGHT_MU);
+    return atm_march(atm_cam_origin(mu), cos_vs, s_end, 2, steps);
+}
+
 // A ray from a camera outside the atmosphere: radiance and transmittance up to the geometry (t_geo >= 0), the ground or the exit;
 // flags.x: reaches the ground, flags.y: crosses the atmosphere. The march starts at the entry point (altitude H, r mu = -sqrt(D_top)).
 struct AtmoOrbit { radiance: vec3<f32>, transmittance: vec3<f32>, flags: vec2<f32>, ground_mu: f32 };
@@ -418,6 +459,45 @@ const COMPOSITE: &str = r#"
 @group(0) @binding(4) var ap_vol: texture_3d<f32>;
 @group(0) @binding(5) var scene: texture_2d<f32>;
 @group(0) @binding(6) var scene_depth: texture_2d<f32>;
+@group(0) @binding(7) var haze_a: texture_2d<f32>;
+@group(0) @binding(8) var haze_b: texture_2d<f32>;
+"#;
+
+const HAZE: &str = r#"
+@group(0) @binding(0) var<uniform> A: AtmoBlock;
+@group(0) @binding(1) var tr_lut: texture_2d<f32>;
+@group(0) @binding(2) var ms_lut: texture_2d<f32>;
+@group(0) @binding(3) var scene_depth: texture_2d<f32>;
+@group(0) @binding(4) var haze_a: texture_storage_2d<rgba16float, write>;
+@group(0) @binding(5) var haze_b: texture_storage_2d<rgba16float, write>;
+"#;
+
+// The camera march at half the resolution (ATMO-021): one texel per 2 x 2 pixels, marched along the ray of the pixel at its corner, to
+// the geometry's own distance. a = radiance and the red transmittance, b = the green and blue transmittance and the distance (< 0: none).
+const HAZE_MAIN: &str = r#"
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    let full = vec2<i32>(textureDimensions(scene_depth));
+    let low = (full + vec2<i32>(1)) / 2;
+    if (i32(id.x) >= low.x || i32(id.y) >= low.y) { return; }
+    var a = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    var b = vec4<f32>(1.0, 1.0, 0.0, 0.0);
+    let px = min(vec2<i32>(id.xy) * 2, full - vec2<i32>(1));
+    let z = textureLoad(scene_depth, px, 0).x;
+    if (A.misc.y > 0.5 && atm_camera_blend() > 0.0 && z > 0.0) {
+        let size = vec2<f32>(full);
+        let ax = 2.0 * (f32(px.x) + 0.5) / size.x - 1.0;
+        let by = 1.0 - 2.0 * (f32(px.y) + 0.5) / size.y;
+        let ray = A.fwd.xyz + A.right.xyz * ax + A.upv.xyz * by;
+        let len = length(ray);
+        let t_geo = A.fwd.w / max(z, 1.0e-30) * len;
+        let m = atm_camera_ray(ray / len, t_geo);
+        a = vec4<f32>(m.radiance, m.transmittance.x);
+        b = vec4<f32>(m.transmittance.y, m.transmittance.z, t_geo * HAZE_T_SCALE, 0.0);
+    }
+    textureStore(haze_a, vec2<i32>(id.xy), a);
+    textureStore(haze_b, vec2<i32>(id.xy), b);
+}
 "#;
 
 const COMPOSITE_MAIN: &str = r#"
@@ -464,6 +544,41 @@ fn atm_ap_lookup(uv: vec2<f32>, t: f32) -> vec4<f32> {
     return mix(a, b, fz);
 }
 
+// The haze of the geometry pixel px at distance t_geo from the half-resolution texels around it: weighted by the bilinear weight and by
+// how near the texel's distance is to the pixel's; the pixel marches itself when no texel has a similar distance (a depth edge).
+fn atm_haze_lookup(px: vec2<i32>, dir: vec3<f32>, t_geo: f32) -> AtmoMarch {
+    let low = vec2<i32>(textureDimensions(haze_a));
+    let lp = vec2<f32>(px) * 0.5;
+    let i0 = vec2<i32>(floor(lp));
+    let f = lp - floor(lp);
+    let tol = HAZE_DEPTH_TOL_REL * t_geo + HAZE_DEPTH_TOL_ABS;
+    var radiance = vec3<f32>(0.0);
+    var trans = vec3<f32>(0.0);
+    var wsum = 0.0;
+    for (var k = 0; k < 4; k = k + 1) {
+        let dx = k & 1;
+        let dy = k >> 1;
+        let c = min(i0 + vec2<i32>(dx, dy), low - vec2<i32>(1));
+        let b = textureLoad(haze_b, c, 0);
+        let tl = b.z / HAZE_T_SCALE;
+        if (tl <= 0.0) { continue; }
+        let wb = select(1.0 - f.x, f.x, dx == 1) * select(1.0 - f.y, f.y, dy == 1);
+        let r = (tl - t_geo) / tol;
+        let w = wb * exp(-r * r);
+        let a = textureLoad(haze_a, c, 0);
+        radiance = radiance + w * a.xyz;
+        trans = trans + w * vec3<f32>(a.w, b.x, b.y);
+        wsum = wsum + w;
+    }
+    if (wsum < HAZE_MIN_WEIGHT) {
+        return atm_camera_ray(dir, t_geo);
+    }
+    var out: AtmoMarch;
+    out.radiance = radiance / wsum;
+    out.transmittance = trans / wsum;
+    return out;
+}
+
 // Debug views (CON-18): eight discrete levels of a value, so a view of a static table is identical on every adapter.
 fn atm_levels(v: vec3<f32>) -> vec3<f32> {
     return floor(clamp(v, vec3<f32>(0.0), vec3<f32>(0.999))  * 8.0) / 8.0 * 0.8;
@@ -493,9 +608,22 @@ fn fs(v: V) -> @location(0) vec4<f32> {
     var ap = vec4<f32>(0.0, 0.0, 0.0, 1.0);
     if (inside) {
         if (geometry) {
-            ap = atm_ap_lookup(uv, t_geo);
-            rgb = color.xyz * ap.w + ap.xyz * factor;
-            view_t = vec3<f32>(ap.w);
+            // The volume up to CAM_MARCH_BLEND_FROM, the camera march from CAM_MARCH_BLEND_TO, the smoothstep mix between (ATMO-021).
+            let wm = atm_camera_blend();
+            var rgb_v = color.xyz;
+            var t_v = vec3<f32>(1.0);
+            if (wm < 1.0) {
+                ap = atm_ap_lookup(uv, t_geo);
+                rgb_v = color.xyz * ap.w + ap.xyz * factor;
+                t_v = vec3<f32>(ap.w);
+            }
+            rgb = rgb_v;
+            view_t = t_v;
+            if (wm > 0.0) {
+                let m = atm_haze_lookup(px, dir, t_geo);
+                rgb = mix(rgb_v, color.xyz * m.transmittance + m.radiance * factor, wm);
+                view_t = mix(t_v, m.transmittance, wm);
+            }
         } else {
             var l = atm_sky_lookup(dir);
             if (mu > A.cam2.y) {
@@ -637,6 +765,11 @@ pub fn sky_view_shader() -> String {
     format!("{SKY_VIEW}{DECLS}{MARCH}{SKY_VIEW_MAIN}")
 }
 
+/// The half-resolution haze compute shader of the camera march.
+pub fn haze_shader() -> String {
+    format!("{HAZE}{DECLS}{MARCH}{HAZE_MAIN}")
+}
+
 pub fn aerial_perspective_shader() -> String {
     format!("{AERIAL}{DECLS}{MARCH}{AERIAL_MAIN}")
 }
@@ -650,6 +783,7 @@ pub fn atmosphere_shaders() -> Vec<(&'static str, String)> {
     vec![
         ("atmosphere-sky-view", sky_view_shader()),
         ("atmosphere-aerial-perspective", aerial_perspective_shader()),
+        ("atmosphere-haze", haze_shader()),
         ("atmosphere-composite", composite_shader()),
         ("atmosphere-terrain-compact", format!("{}{}", crate::compact_terrain_shader(32), terrain_atmosphere_source())),
     ]
@@ -685,6 +819,16 @@ pub struct AtmospherePath {
     ms_lut: wgpu::Texture,
     sky_view: wgpu::Texture,
     ap_volume: wgpu::Texture,
+    /// The half-resolution haze of the camera march (two targets, ATMO-021).
+    #[allow(dead_code)] // kept alive with its view: the bind groups hold views of them
+    haze_a: wgpu::Texture,
+    #[allow(dead_code)]
+    haze_b: wgpu::Texture,
+    haze_pipeline: wgpu::ComputePipeline,
+    haze_bind: wgpu::BindGroup,
+    /// Whether the frame written last reads the haze (the camera inside the atmosphere from the blend band up): the haze pass is
+    /// recorded for its timed span either way, and dispatches only then.
+    haze_active: std::cell::Cell<bool>,
     scene: wgpu::Texture,
     scene_view: wgpu::TextureView,
     sky_pipeline: wgpu::ComputePipeline,
@@ -738,6 +882,10 @@ impl AtmospherePath {
             usage: product_usage,
             view_formats: &[],
         });
+        let low = (size.0.div_ceil(2), size.1.div_ceil(2));
+        let haze_a = texture_2d(device, "atmosphere-haze-a", low, PRODUCT_FORMAT, product_usage);
+        let haze_b = texture_2d(device, "atmosphere-haze-b", low, PRODUCT_FORMAT, product_usage);
+        let (haze_a_view, haze_b_view) = (haze_a.create_view(&Default::default()), haze_b.create_view(&Default::default()));
         let scene = texture_2d(
             device,
             "atmosphere-scene",
@@ -851,6 +999,41 @@ impl AtmospherePath {
                 wgpu::BindingResource::TextureView(&ap_tex_view),
             ],
         );
+        let haze_storage = |binding| {
+            entry(
+                binding,
+                c,
+                wgpu::BindingType::StorageTexture {
+                    access: wgpu::StorageTextureAccess::WriteOnly,
+                    format: PRODUCT_FORMAT,
+                    view_dimension: d2,
+                },
+            )
+        };
+        let (haze_bgl, haze_pl) = layout(
+            "atmosphere-haze",
+            &[uniform_entry(c), tex_entry(1, c, d2), tex_entry(2, c, d2), tex_entry(3, c, d2), haze_storage(4), haze_storage(5)],
+        );
+        let haze_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("atmosphere-haze"),
+            layout: Some(&haze_pl),
+            module: &module("atmosphere-haze", haze_shader()),
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let haze_bind = bind(
+            "atmosphere-haze",
+            &haze_bgl,
+            vec![
+                uniform.as_entire_binding(),
+                wgpu::BindingResource::TextureView(&tr_view),
+                wgpu::BindingResource::TextureView(&ms_view),
+                wgpu::BindingResource::TextureView(depth_view),
+                wgpu::BindingResource::TextureView(&haze_a_view),
+                wgpu::BindingResource::TextureView(&haze_b_view),
+            ],
+        );
         let (comp_bgl, comp_pl) = layout(
             "atmosphere-composite",
             &[
@@ -861,6 +1044,8 @@ impl AtmospherePath {
                 tex_entry(4, f, d3),
                 tex_entry(5, f, d2),
                 tex_entry(6, f, d2),
+                tex_entry(7, f, d2),
+                tex_entry(8, f, d2),
             ],
         );
         let comp_module = module("atmosphere-composite", composite_shader());
@@ -896,6 +1081,8 @@ impl AtmospherePath {
                 wgpu::BindingResource::TextureView(&ap_tex_view),
                 wgpu::BindingResource::TextureView(&scene_view),
                 wgpu::BindingResource::TextureView(depth_view),
+                wgpu::BindingResource::TextureView(&haze_a_view),
+                wgpu::BindingResource::TextureView(&haze_b_view),
             ],
         );
         let terrain_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -914,7 +1101,8 @@ impl AtmospherePath {
             + sizes::TRANSMITTANCE_LUT_BYTES
             + sizes::MULTISCATTER_LUT_BYTES
             + sizes::SKY_VIEW_BYTES
-            + sizes::AERIAL_PERSPECTIVE_BYTES;
+            + sizes::AERIAL_PERSPECTIVE_BYTES
+            + crate::graph::haze_lowres_bytes(size);
         if depth.is_none() {
             allocated += pixels * 4;
         }
@@ -927,6 +1115,11 @@ impl AtmospherePath {
             ms_lut,
             sky_view,
             ap_volume,
+            haze_a,
+            haze_b,
+            haze_pipeline,
+            haze_bind,
+            haze_active: std::cell::Cell::new(true),
             scene,
             scene_view,
             sky_pipeline,
@@ -1069,6 +1262,7 @@ impl AtmospherePath {
         pre_exposure_factor: f32,
         view: AtmosphereView,
     ) {
+        self.haze_active.set(geometry.inside && geometry.uses_camera_march());
         let mut words = [0f32; 64];
         words[..24].copy_from_slice(&atm.static_words());
         words[24..].copy_from_slice(&geometry.words(pre_exposure_factor, view.index()));
@@ -1097,13 +1291,25 @@ impl AtmospherePath {
         pass.dispatch_workgroups((AP_W as u32).div_ceil(8), (AP_H as u32).div_ceil(8), AP_D as u32);
     }
 
-    /// Record the composite into `target` (the final scene target of the lit path).
+    /// Record the half-resolution haze (compute) and the composite into `target` (the final scene target of the lit path). The timed span
+    /// of the composite pass is both: the haze pass begins it and the composite ends it.
     pub(crate) fn record_composite(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         stamps: Option<&crate::gpu_timing::Stamps<'_>>,
     ) {
+        {
+            let mut haze = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("atmosphere-haze"),
+                timestamp_writes: crate::gpu_timing::compute_begin_writes(stamps, crate::gpu_timing::GpuPass::SkyComposite),
+            });
+            if self.haze_active.get() {
+                haze.set_pipeline(&self.haze_pipeline);
+                haze.set_bind_group(0, &self.haze_bind, &[]);
+                haze.dispatch_workgroups(self.size.0.div_ceil(2).div_ceil(8), self.size.1.div_ceil(2).div_ceil(8), 1);
+            }
+        }
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sky-composite"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1113,7 +1319,7 @@ impl AtmospherePath {
                 ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
             })],
             depth_stencil_attachment: None,
-            timestamp_writes: crate::gpu_timing::render_writes(stamps, crate::gpu_timing::GpuPass::SkyComposite),
+            timestamp_writes: crate::gpu_timing::render_end_writes(stamps, crate::gpu_timing::GpuPass::SkyComposite),
             occlusion_query_set: None,
             multiview_mask: None,
         });

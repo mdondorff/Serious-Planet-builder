@@ -382,6 +382,17 @@ fn the_composite_applies_the_sky_and_the_aerial_perspective_as_the_reference_doe
     }
 }
 
+// spec: ATMO-001, ATMO-021
+#[test]
+fn above_6_km_the_composite_marches_from_the_camera_to_the_terrain_and_mixes_it_with_the_volume_as_the_reference_does() {
+    // Terrain 300 and 600 km along the view axis: far beyond what the volume holds between its texels (SPIKE-20).
+    for (h, mu_sun, terrain_m) in
+        [(8_000.0, 0.5, 120_000.0), (6_500.0, 0.3, 90_000.0), (60_000.0, 0.7, 300_000.0), (97_500.0, 0.7, 600_000.0)]
+    {
+        composite_inside_at(h, mu_sun, terrain_m);
+    }
+}
+
 fn composite_inside(altitude: f64, mu_sun: f64) {
     composite_inside_at(altitude, mu_sun, 8000.0);
 }
@@ -403,6 +414,7 @@ fn composite_inside_at(altitude: f64, mu_sun: f64, terrain_m: f64) {
     r.path.upload_scene(&r.ctx, &scene);
     r.path.upload_depth(&r.ctx, &depth);
     let out = r.path.composite_to_image(&r.ctx);
+    let (round_atm, round_luts) = r.rounded();
     let (mut worst, mut seen_sky, mut seen_geo) = (0.0f64, 0, 0);
     for py in 0..h {
         for px in 0..w {
@@ -410,8 +422,43 @@ fn composite_inside_at(altitude: f64, mu_sun: f64, terrain_m: f64) {
             let got = out[py * w + px];
             let want: [f64; 3] = if px >= w / 2 {
                 seen_geo += 1;
-                let a = g.ap_lookup(&ap, [(px as f64 + 0.5) / w as f64, (py as f64 + 0.5) / h as f64], terrain_m * len);
-                [0, 1, 2].map(|k| f64::from(colour[k]) * a[3] + a[k])
+                // The volume up to 6 km, the camera march from 10 km, the smoothstep mix between (ATMO-021).
+                let wm = g.camera_march_weight();
+                let volume = || {
+                    let a = g.ap_lookup(&ap, [(px as f64 + 0.5) / w as f64, (py as f64 + 0.5) / h as f64], terrain_m * len);
+                    [0, 1, 2].map(|k| f64::from(colour[k]) * a[3] + a[k])
+                };
+                // The march of the pixel above 10 km is the upsample of the half-resolution haze: the texels at the even pixels around it, each
+                // marched to its own distance, weighed by the bilinear weight and the distance (the shader's `atm_haze_lookup`).
+                let march = || {
+                    let (mu, cos_vs) = g.view_cosines(dir);
+                    let own = g.camera_ray_cosines(&round_atm, &round_luts, mu, cos_vs, terrain_m * len);
+                    let (lp, fx, fy) = ((px / 2, py / 2), if px % 2 == 1 { 0.5 } else { 0.0 }, if py % 2 == 1 { 0.5 } else { 0.0 });
+                    let texels: Vec<(f64, f64, planet_frame::look::atmosphere::CameraRay)> = (0..4)
+                        .map(|k| {
+                            let (dx, dy) = (k & 1, k >> 1);
+                            let wb = (if dx == 1 { fx } else { 1.0 - fx }) * (if dy == 1 { fy } else { 1.0 - fy });
+                            let (tx, ty) = ((lp.0 + dx).min(w.div_ceil(2) - 1) * 2, (lp.1 + dy).min(h.div_ceil(2) - 1) * 2);
+                            if tx < w / 2 {
+                                return (wb, -1.0, own);
+                            }
+                            let (tdir, tlen) = unit(pixel_ray(&g, tx, ty, w, h));
+                            let (tmu, tcos) = g.view_cosines(tdir);
+                            let t = terrain_m * tlen;
+                            (wb, t, g.camera_ray_cosines(&round_atm, &round_luts, tmu, tcos, t))
+                        })
+                        .collect();
+                    let c = planet_frame::look::atmosphere::haze_upsample(&texels, terrain_m * len).unwrap_or(own);
+                    [0, 1, 2].map(|k| f64::from(colour[k]) * c.transmittance[k] + c.radiance[k])
+                };
+                if wm <= 0.0 {
+                    volume()
+                } else if wm >= 1.0 {
+                    march()
+                } else {
+                    let (v, m) = (volume(), march());
+                    [0, 1, 2].map(|k| v[k] + (m[k] - v[k]) * wm)
+                }
             } else {
                 seen_sky += 1;
                 g.sky_view_lookup(&sky, dir)
@@ -552,4 +599,74 @@ fn adhoc_cost_of_the_atmosphere_passes_at_1440p() {
 
 fn pollster_wait(ctx: &GpuContext) {
     ctx.wait_idle();
+}
+
+// spec: ATMO-021
+#[test]
+fn the_half_resolution_haze_of_an_odd_frame_with_depth_edges_is_what_the_reference_upsample_makes_of_it() {
+    use planet_frame::look::atmosphere::{haze_upsample, CameraRay};
+    // 63 x 47 pixels, terrain from the odd column 33 on in columns alternating between 120 km and 300 km: texels beside a depth edge and
+    // at the right and bottom borders, some pixels with no texel at their distance (their own march), at 20 km altitude by day.
+    let r = rig();
+    let (w, h) = (63usize, 47usize);
+    let mut path = AtmospherePath::standalone(&r.ctx, (w as u32, h as u32));
+    path.upload_tables(&r.ctx, &r.atm, &r.luts);
+    let cam = camera(20_000.0);
+    let geometry = frame(&r.atm, &cam, 0.7);
+    path.write_frame(&r.ctx, &r.atm, &geometry, 1.0, AtmosphereView::Composite);
+    path.run_products(&r.ctx);
+    let g = geometry.rounded_f32();
+    let (atm, luts) = r.rounded();
+    let colour = [0.2f32, 0.1, 0.05, 1.0];
+    let dist = |px: usize| if px.is_multiple_of(2) { 120_000.0 } else { 300_000.0 };
+    let scene: Vec<[f32; 4]> = (0..w * h).map(|i| if i % w >= 33 { colour } else { [0.0; 4] }).collect();
+    let depth: Vec<f32> = (0..w * h).map(|i| if i % w >= 33 { (0.1 / dist(i % w)) as f32 } else { 0.0 }).collect();
+    path.upload_scene(&r.ctx, &scene);
+    path.upload_depth(&r.ctx, &depth);
+    let out = path.composite_to_image(&r.ctx);
+    let ray_of = |px: usize, py: usize| -> CameraRay {
+        let (dir, len) = unit(pixel_ray(&g, px, py, w, h));
+        let (mu, cos_vs) = g.view_cosines(dir);
+        g.camera_ray_cosines(&atm, &luts, mu, cos_vs, dist(px) * len)
+    };
+    let (mut worst, mut own, mut upsampled) = (0.0f64, 0, 0);
+    for py in 0..h {
+        for px in 33..w {
+            let (dir, len) = unit(pixel_ray(&g, px, py, w, h));
+            let (lx, ly, fx, fy) = (px / 2, py / 2, if px % 2 == 1 { 0.5 } else { 0.0 }, if py % 2 == 1 { 0.5 } else { 0.0 });
+            let texels: Vec<(f64, f64, CameraRay)> = (0..4)
+                .map(|k| {
+                    let (dx, dy) = (k & 1, k >> 1);
+                    let wb = (if dx == 1 { fx } else { 1.0 - fx }) * (if dy == 1 { fy } else { 1.0 - fy });
+                    let (tx, ty) = ((lx + dx).min(w.div_ceil(2) - 1) * 2, (ly + dy).min(h.div_ceil(2) - 1) * 2);
+                    if tx < 33 {
+                        return (wb, -1.0, ray_of(px, py));
+                    }
+                    let (_, tlen) = unit(pixel_ray(&g, tx, ty, w, h));
+                    (wb, dist(tx) * tlen, ray_of(tx, ty))
+                })
+                .collect();
+            let t = dist(px) * len;
+            let c = match haze_upsample(&texels, t) {
+                Some(c) => {
+                    upsampled += 1;
+                    c
+                }
+                None => {
+                    own += 1;
+                    let (mu, cos_vs) = g.view_cosines(dir);
+                    g.camera_ray_cosines(&atm, &luts, mu, cos_vs, t)
+                }
+            };
+            let got = out[py * w + px];
+            for k in 0..3 {
+                let want = f64::from(colour[k]) * c.transmittance[k] + c.radiance[k];
+                let excess = (f64::from(got[k]) - want).abs() / (REL * want.abs() + ABS);
+                worst = worst.max(excess);
+                assert!(excess <= 1.0, "pixel ({px},{py}) channel {k}: {} vs {want}", got[k]);
+            }
+        }
+    }
+    eprintln!("haze edges: {upsampled} pixels upsampled, {own} marched themselves, worst {worst:.3} of the bound");
+    assert!(own > 20 && upsampled > 200, "both paths are exercised: {own} own, {upsampled} upsampled");
 }

@@ -52,7 +52,7 @@ fn without_an_atmosphere_the_water_draws_over_the_hdr_target_and_a_frame_without
     let (g, c) = compile(false, true, true);
     assert_eq!(names(&g, &c), ["terrain", "scene-copy", "water", "exposure-histogram", "exposure-adapt", "tonemap"]);
     // The frames without water are the graphs of before the water pass: same passes, same bytes.
-    for (atmosphere, passes, bytes) in [(false, 4usize, 44_237_072u64), (true, 8, 74_434_832)] {
+    for (atmosphere, passes, bytes) in [(false, 4usize, 44_237_072u64), (true, 8, 74_434_832 + 14_745_600)] {
         let (g, c) = compile(atmosphere, true, false);
         assert_eq!(names(&g, &c).len(), passes);
         assert_eq!(c.frame_target_bytes(), bytes, "atmosphere {atmosphere}");
@@ -78,7 +78,11 @@ fn the_water_pass_adds_one_hdr_sized_copy_and_the_frame_stays_inside_the_share_a
     let bytes = |c: &CompiledGraph, r: &str| c.lifetimes.iter().find(|l| l.resource == r).unwrap().bytes;
     assert_eq!(bytes(&with, "scene-copy"), 29_491_200, "an HDR-sized copy of the scene target (Rgba16Float)");
     assert_eq!(with.frame_target_bytes() - without.frame_target_bytes(), 29_491_200);
-    assert_eq!(with.frame_target_bytes(), 103_926_032, "the atmosphere frame with water at 1440p");
+    assert_eq!(
+        with.frame_target_bytes(),
+        118_671_632,
+        "the atmosphere frame with water at 1440p (the half-resolution haze of the camera march included, 14,745,600 B)"
+    );
     let share = frame_target_share_bytes(P1440);
     assert!(with.frame_target_bytes() <= share, "{} B against the share of {share} B", with.frame_target_bytes());
     // The plain lit frame with water too.
