@@ -9,10 +9,10 @@ use planet_editor::ids::IdMaker;
 use planet_editor::interaction::{Interaction, PointerView, Pressed};
 use planet_editor::layout::Layout;
 use planet_editor::lists::{LayerGroup, Row};
-use planet_editor::overlay::{self, OverlayItem};
+use planet_editor::overlay::{self, DraftOverlay, OverlayItem};
 use planet_editor::params::{kind_title, Inspector, STAMP_KINDS};
 use planet_editor::relevance::ViewState;
-use planet_editor::session::{Session, SessionError, Tool};
+use planet_editor::session::{Session, SessionError, Tool, LINE_KINDS};
 use planet_editor::shape::{self, Handle};
 use planet_frame::freecam::FreePose;
 use planet_frame::globe::{Marker, Viewport};
@@ -104,8 +104,22 @@ pub enum EditKey {
     Undo,
     Redo,
     Delete,
-    /// Esc: abandon a drag, else leave the stamp tool, else deselect.
+    /// Esc: abandon a drag, else drop the draft of a line or region, else leave the tool, else deselect.
     Escape,
+    /// Enter: finish the line or region being drawn.
+    Finish,
+    /// Backspace: take back the last point of the draft; with no draft, delete the selected edit.
+    Back,
+    /// F1 or `?`: show or hide the list of keys.
+    Help,
+}
+
+/// The modifier keys held at a press: Shift adds a point on the outline of the selected line or region, Ctrl removes the point whose
+/// handle is under the cursor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Mods {
+    pub shift: bool,
+    pub ctrl: bool,
 }
 
 /// The lists the panels show this frame.
@@ -139,6 +153,8 @@ pub struct EditRuntime {
     radius_m: f64,
     shown: Vec<ItemId>,
     overlay: Vec<OverlayItem>,
+    /// The line or region being drawn, on the screen.
+    draft: DraftOverlay,
     handles: Vec<(Handle, [f64; 2])>,
     lists: Lists,
     camera_position: Vec3,
@@ -235,6 +251,7 @@ impl EditRuntime {
             radius_m,
             shown: Vec::new(),
             overlay: Vec::new(),
+            draft: DraftOverlay::default(),
             handles: Vec::new(),
             lists: Lists::default(),
             camera_position: Vec3::new(radius_m, 0.0, 0.0),
@@ -277,7 +294,9 @@ impl EditRuntime {
     /// render pixel on each axis (the overlay is projected in render pixels).
     pub fn draw(&mut self, ui: &mut egui::Ui, view_status: &str, scale: [f64; 2]) -> Vec<Event> {
         let ppp = f64::from(ui.ctx().pixels_per_point());
-        crate::panels::draw_overlay(ui, &self.overlay, |p| egui::pos2((p[0] * scale[0] / ppp) as f32, (p[1] * scale[1] / ppp) as f32));
+        let to_points = |p: [f64; 2]| egui::pos2((p[0] * scale[0] / ppp) as f32, (p[1] * scale[1] / ppp) as f32);
+        crate::panels::draw_overlay(ui, &self.overlay, to_points);
+        crate::panels::draw_draft(ui, &self.draft, to_points);
         // The panels read the lists and write their own state: take the state out for the call.
         let mut panels = std::mem::replace(&mut self.panels, PanelState::new(&self.layout));
         let events = crate::panels::show(ui, &mut panels, &self.panel_data(view_status));
@@ -427,6 +446,7 @@ impl EditRuntime {
         self.stats.shown_max = self.stats.shown_max.max(self.shown.len());
         self.overlay = overlay::build(&self.session, &self.shown, &view, &|d| field.height(d));
         self.handles = overlay::handle_pixels(&self.overlay);
+        self.draft = overlay::draft(&self.session, &view, &|d| field.height(d), (!over_ui).then_some(cursor));
         if !over_ui {
             let hit = Self::hit_at(camera, viewport, cursor, limits, field);
             let mpp = self.height_mpp(camera, viewport);
@@ -489,10 +509,52 @@ impl EditRuntime {
 
     /// The primary button went down in the world at `cursor`.
     pub fn press(&mut self, camera: &Camera, viewport: Viewport, cursor: [f64; 2], limits: &PickLimits, field: &dyn HeightField) {
+        self.press_with(camera, viewport, cursor, limits, field, Mods::default());
+    }
+
+    /// The primary button went down with `mods` held: Shift on the outline of the selected line or region adds a point there; Ctrl on one
+    /// of its point handles removes that point; otherwise it is a plain press.
+    pub fn press_with(
+        &mut self,
+        camera: &Camera,
+        viewport: Viewport,
+        cursor: [f64; 2],
+        limits: &PickLimits,
+        field: &dyn HeightField,
+        mods: Mods,
+    ) {
         if !self.on {
             return;
         }
         let hit = Self::hit_at(camera, viewport, cursor, limits, field);
+        if mods.shift != mods.ctrl {
+            if mods.shift {
+                match (hit, self.session.selected()) {
+                    (Some(h), Some(id)) => {
+                        let tolerance = self.session.outline_tolerance_m(id, h.distance_m);
+                        match self.session.insert_point_at(h.dir, tolerance) {
+                            Ok((_, affected)) => self.affected.extend(affected),
+                            Err(e) => self.note(Err(e)),
+                        }
+                    }
+                    (None, _) => self.session.set_status("that is not a place on the planet"),
+                    (_, None) => self.session.set_status("select a line or a region first"),
+                }
+                return;
+            }
+            let (shown, handles) = (self.shown.clone(), self.handles.clone());
+            let v = PointerView { cursor, hit, shown: &shown, handles: &handles, metres_per_pixel: 1.0 };
+            if let Some(Handle::Point(i)) = self.interaction.handle_under(&v) {
+                match self.session.remove_point(i) {
+                    Ok(affected) => self.affected.extend(affected),
+                    Err(e) => self.note(Err(e)),
+                }
+                return;
+            }
+            // A Ctrl press that finds no handle does nothing: it must not place a stamp or add a point by accident.
+            self.session.set_status("no point here to remove");
+            return;
+        }
         // The view borrows the lists and the interaction needs the session mutably: it works on copies.
         let (shown, handles, mpp) = (self.shown.clone(), self.handles.clone(), self.height_mpp(camera, viewport));
         let v = PointerView { cursor, hit, shown: &shown, handles: &handles, metres_per_pixel: mpp };
@@ -552,9 +614,26 @@ impl EditRuntime {
             EditKey::Undo => self.apply(vec![Event::Undo]),
             EditKey::Redo => self.apply(vec![Event::Redo]),
             EditKey::Delete => self.apply(vec![Event::Delete]),
+            EditKey::Help => self.apply(vec![Event::ToggleHelp]),
+            EditKey::Finish => match self.session.finish_draft() {
+                Ok((_, affected)) => {
+                    self.stats.placed += 1;
+                    self.affected.extend(affected);
+                }
+                Err(e) => self.note(Err(e)),
+            },
+            EditKey::Back => {
+                if self.session.draft().is_empty() {
+                    self.apply(vec![Event::Delete]);
+                } else {
+                    let _ = self.session.undo_draft_point();
+                }
+            }
             EditKey::Escape => {
                 if self.session.dragging().is_some() {
                     self.cancel_drag();
+                } else if !self.session.draft().is_empty() {
+                    self.session.cancel_draft();
                 } else if self.session.tool() != &Tool::Select {
                     self.session.set_tool(Tool::Select);
                 } else {
@@ -613,6 +692,7 @@ impl EditRuntime {
                     Err(e) => self.note(Err(e)),
                 },
                 Event::ToggleHidden(id) => self.session.toggle_hidden(id),
+                Event::ToggleHelp => self.panels.help = !self.panels.help,
             }
         }
     }
@@ -633,9 +713,11 @@ impl EditRuntime {
 
 /// The keys of the editor mode, for the usage text and the log.
 pub const EDIT_KEYS_HELP: &str = "editor mode: Tab on/off (the panels, the outlines of the edits the camera shows, the planet is for editing: the pointer is free), \
-     1 select, 2 crater, 3 hill, 4 plateau then click the planet to place it, click an edit to select it (double-click in a list to fly there), drag its handles \
-     (circle: move, square: radius, light circle: height) or type values in the inspector, Ctrl+Z undo, Ctrl+Y or Ctrl+Shift+Z redo, Delete deletes, Esc steps back \
-     (drag, tool, selection) and does not quit; hold the right mouse button to look around, WASD/QE move";
+     1 select, 2 crater, 3 hill, 4 plateau then click the planet to place it, 5 ridge, 6 channel, 7 region then click the planet to add points (Enter finishes, \
+     Backspace takes the last point back), click an edit to select it (double-click in a list to fly there), drag its handles \
+     (circle: move, square: radius, light circle: height, amber dots: the points of a line or region) or type values in the inspector, Shift+click on a line or \
+     region adds a point, Ctrl+click on a point removes it, Ctrl+Z undo, Ctrl+Y or Ctrl+Shift+Z redo, Delete deletes, F1 or ? lists the keys, Esc steps back \
+     (drag, draft, tool, selection) and does not quit; hold the right mouse button to look around, WASD/QE move";
 
 /// The first frame of the smoke run's editing script.
 pub const SMOKE_FIRST_FRAME: u64 = 60;
@@ -727,11 +809,16 @@ impl EditRuntime {
     }
 }
 
-/// The tool a number key picks: 1 select, then the stamp kinds in the order of the rail.
+/// The tool a number key picks: 1 select, then the stamp kinds in the order of the rail (2 to 4), the line kinds (5 ridge, 6 channel)
+/// and the region (7).
 pub fn tool_number(n: usize) -> Tool {
+    let stamps = STAMP_KINDS.len();
     match n {
         0 | 1 => Tool::Select,
-        n => STAMP_KINDS.get(n - 2).map_or(Tool::Select, |k| Tool::Stamp((*k).to_string())),
+        n if n < 2 + stamps => Tool::Stamp(STAMP_KINDS[n - 2].to_string()),
+        n if n < 2 + stamps + LINE_KINDS.len() => Tool::Line(LINE_KINDS[n - 2 - stamps].to_string()),
+        n if n == 2 + stamps + LINE_KINDS.len() => Tool::Region,
+        _ => Tool::Select,
     }
 }
 
@@ -811,6 +898,105 @@ mod tests {
         let d = std::env::temp_dir().join(format!("planet-editwin-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    // spec: VIEW-031
+    #[test]
+    fn a_line_is_drawn_with_the_keys_and_the_pointer_edited_with_shift_and_ctrl_and_the_key_list_toggles() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.toggle();
+        // The ridge tool (5): three clicks, 100 px apart, the draft is on the screen with the cursor as its rubber band.
+        e.key(EditKey::Tool(5));
+        assert_eq!(e.session.tool(), &Tool::Line("ridge".into()));
+        assert!(e.session.status().contains("Enter finishes"), "{}", e.session.status());
+        for p in [CENTRE, [CENTRE[0] + 100.0, CENTRE[1]], [CENTRE[0] + 100.0, CENTRE[1] + 100.0]] {
+            e.press(&cam, VIEWPORT, p, &limits(), &Flat);
+            e.release();
+        }
+        assert_eq!(e.session.draft().len(), 3);
+        frame(&mut e, &cam, false);
+        assert_eq!((e.draft.points.len(), e.draft.rubber), (3, Some(CENTRE)));
+        assert!(e.draft.path.len() > 3 && e.draft.path.iter().all(Option::is_some));
+        // Backspace takes the last point back; with no draft it deletes (nothing selected here, so a refusal, not a crash).
+        e.key(EditKey::Back);
+        assert_eq!(e.session.draft().len(), 2);
+        e.press(&cam, VIEWPORT, [CENTRE[0] + 100.0, CENTRE[1] + 100.0], &limits(), &Flat);
+        e.release();
+        // Esc drops the draft first and keeps the tool; the second Esc leaves the tool.
+        e.key(EditKey::Escape);
+        assert_eq!((e.session.draft().len(), e.session.tool().clone()), (0, Tool::Line("ridge".into())));
+        e.key(EditKey::Escape);
+        assert_eq!(e.session.tool(), &Tool::Select);
+
+        // Draw again and finish with Enter: one command, the line is selected, its handles are its points.
+        e.key(EditKey::Tool(5));
+        for p in [CENTRE, [CENTRE[0] + 100.0, CENTRE[1]], [CENTRE[0] + 100.0, CENTRE[1] + 100.0]] {
+            e.press(&cam, VIEWPORT, p, &limits(), &Flat);
+            e.release();
+        }
+        let depth = e.session.editor().undo_depth();
+        e.key(EditKey::Finish);
+        let id = e.session.selected().expect("the line is selected");
+        assert_eq!((e.session.editor().undo_depth(), e.stats.placed, e.edit_count()), (depth + 1, 1, 1));
+        assert!(!e.take_affected().is_empty());
+        frame(&mut e, &cam, false);
+        let line = e.overlay().iter().find(|o| o.id == id).unwrap();
+        assert!(!line.closed && line.outline.len() > 3, "an open path, not a ring");
+        assert_eq!(e.handles.iter().filter(|(h, _)| matches!(h, Handle::Point(_))).count(), 3);
+
+        // Shift + click on the outline between points 0 and 1 adds a point; Ctrl + click on a point's handle removes it.
+        let on_segment = [CENTRE[0] + 50.0, CENTRE[1]];
+        e.press_with(&cam, VIEWPORT, on_segment, &limits(), &Flat, Mods { shift: true, ctrl: false });
+        assert_eq!(e.session.item(id).unwrap().points.len(), 4);
+        frame(&mut e, &cam, false);
+        let h1 = e.handles.iter().find(|(h, _)| *h == Handle::Point(1)).unwrap().1;
+        e.press_with(&cam, VIEWPORT, h1, &limits(), &Flat, Mods { shift: false, ctrl: true });
+        assert_eq!(e.session.item(id).unwrap().points.len(), 3);
+        assert_eq!(e.session.dragging(), None, "a Ctrl press removes, it does not start a drag");
+        // Shift off the outline adds nothing and says so.
+        e.press_with(&cam, VIEWPORT, [CENTRE[0] - 300.0, CENTRE[1] + 300.0], &limits(), &Flat, Mods { shift: true, ctrl: false });
+        assert_eq!(e.session.item(id).unwrap().points.len(), 3);
+        assert!(e.session.status().contains("not on the outline"), "{}", e.session.status());
+        // A Ctrl press that finds no handle does nothing; with the ridge tool on it adds no draft point either.
+        e.key(EditKey::Tool(5));
+        e.press_with(&cam, VIEWPORT, [CENTRE[0] - 300.0, CENTRE[1] - 300.0], &limits(), &Flat, Mods { shift: false, ctrl: true });
+        assert_eq!((e.session.draft().len(), e.session.item(id).unwrap().points.len()), (0, 3));
+        assert!(e.session.status().contains("no point here"), "{}", e.session.status());
+        // Shift with nothing selected says so; Shift and Ctrl together are a plain press (a draft point with the tool on).
+        e.session.deselect();
+        frame(&mut e, &cam, false);
+        e.press_with(&cam, VIEWPORT, on_segment, &limits(), &Flat, Mods { shift: true, ctrl: false });
+        assert!(e.session.status().contains("select a line or a region first"), "{}", e.session.status());
+        e.press_with(&cam, VIEWPORT, on_segment, &limits(), &Flat, Mods { shift: true, ctrl: true });
+        assert_eq!(e.session.draft().len(), 1, "tool {:?}, status {}", e.session.tool(), e.session.status());
+        e.key(EditKey::Escape);
+        e.key(EditKey::Escape);
+        e.session.select(id);
+        // A plain press on a point handle starts the drag as before.
+        frame(&mut e, &cam, false);
+        let h0 = e.handles[0].1;
+        e.press(&cam, VIEWPORT, h0, &limits(), &Flat);
+        assert!(matches!(e.session.dragging(), Some(Handle::Point(_))));
+        e.key(EditKey::Escape);
+
+        // The region tool (7), and a click that selects the line by its outline.
+        e.key(EditKey::Tool(7));
+        assert_eq!(e.session.tool(), &Tool::Region);
+        e.key(EditKey::Escape);
+        e.session.deselect();
+        frame(&mut e, &cam, false);
+        e.press(&cam, VIEWPORT, [CENTRE[0] + 100.0, CENTRE[1] + 50.0], &limits(), &Flat);
+        e.release();
+        assert_eq!(e.session.selected(), Some(id), "a click on the line selects it");
+
+        // The key list.
+        assert!(!e.panels.help);
+        e.key(EditKey::Help);
+        assert!(e.panels.help);
+        e.key(EditKey::Help);
+        assert!(!e.panels.help);
     }
 
     // spec: VIEW-022
@@ -937,6 +1123,9 @@ mod tests {
         assert_eq!(tool_number(1), Tool::Select);
         assert_eq!(tool_number(2), Tool::Stamp("crater".into()));
         assert_eq!(tool_number(4), Tool::Stamp("plateau".into()));
+        assert_eq!(tool_number(5), Tool::Line("ridge".into()));
+        assert_eq!(tool_number(6), Tool::Line("channel".into()));
+        assert_eq!(tool_number(7), Tool::Region);
         assert_eq!(tool_number(9), Tool::Select);
     }
 
