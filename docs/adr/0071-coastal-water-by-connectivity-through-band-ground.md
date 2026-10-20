@@ -1,5 +1,5 @@
 # 0071 Coastal water by connectivity through low ground, not by a reach
-Status: proposed (sonnet-explorer, 2026-10-20, third draft after two rounds of spec-guardian and numerics reviews; direction approved by opus-planner, who accepts it when the reviews are clean). Amends ADR 0056 points 1 to 3 (the reach, the probe grid) and the coarse-tile rule of ADR 0058 that follows them. Point 3 (the algorithm, its sizes and times) is provisional until SPIKE-21 closes.
+Status: accepted (opus-planner, 2026-10-20; drafted by sonnet-explorer, third draft after two rounds of spec-guardian and numerics reviews). Amends ADR 0056 points 1 to 3 (the reach, the probe grid) and the coarse-tile rule of ADR 0058 that follows them. Point 3 (the algorithm, its sizes and times) is provisional until SPIKE-21 closes.
 Date: 2026-10-20
 Source: SPIKE-17 bug 2 (`spikes/owner-captures-2026-10-20/results/results.md`); ADR 0056; ADR 0058; ADR 0051 option 3; ATMO-019; GEN-022, GEN-024
 
