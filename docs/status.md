@@ -74,7 +74,7 @@ Mock: https://claude.ai/artifact/Srj3NGEYUkGQsfhne7kdCs (private to the owner).
 | History | plain undo/redo (1,000 operations, M6 exit criterion) |
 | Input | mouse and keyboard |
 
-Out of the MVP, its own later step (owner, 2026-10-18): **global-scale authoring**: continental edits (100+ km), the global re-bake they need, and a generator editor UI (changing the procedural generator's parameters, Houdini-style). Both change the global bake, so they are designed together.
+Out of the MVP, its own later step (owner, 2026-10-18): **global-scale authoring**: continental edits (100+ km), the global re-bake they need, and a generator editor UI (changing the procedural generator's parameters, Houdini-style). Both change the global bake, so they are designed together. AUTH-003 (version pinning, freeze and bake a region) goes with that step (owner, 2026-10-20).
 
 ## M5 Atmosphere & ocean: design constraints (owner, 2026-10-15)
 Scope as in the architecture report (Hillaire atmosphere, aerial perspective, HDR and exposure, ocean surface and shoreline; gate after M5). These constraints keep later work possible without rework:
