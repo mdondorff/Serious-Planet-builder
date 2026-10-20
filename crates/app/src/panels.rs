@@ -765,12 +765,8 @@ mod tests {
         let p = rig.mark("name");
         rig.click(&data(&h), p);
         assert!(rig.ctx.egui_wants_keyboard_input(), "a text field keeps the focus after the click");
-        // What the window does when the pointer is captured for looking around (`Ui::release_keyboard_focus`).
-        rig.ctx.memory_mut(|m| {
-            if let Some(id) = m.focused() {
-                m.surrender_focus(id);
-            }
-        });
+        // What the window does when the pointer is captured for looking around (`Ui::release_keyboard_focus` calls this).
+        crate::ui::release_focus(&rig.ctx);
         rig.settle(&data(&h));
         assert!(!rig.ctx.egui_wants_keyboard_input(), "the focus is gone: the movement keys are the camera's");
     }
