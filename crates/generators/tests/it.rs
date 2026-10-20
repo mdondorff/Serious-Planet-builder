@@ -52,3 +52,5 @@ mod tile_min_height;
 mod water;
 #[path = "water_summary.rs"]
 mod water_summary;
+#[path = "wet_floor.rs"]
+mod wet_floor;

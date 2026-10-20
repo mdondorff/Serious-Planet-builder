@@ -1420,6 +1420,7 @@ dependencies = [
  "egui",
  "egui-winit",
  "libm",
+ "lz4_flex",
  "planet-cache",
  "planet-core",
  "planet-editor",
