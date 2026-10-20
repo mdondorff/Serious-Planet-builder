@@ -47,7 +47,7 @@ pub const BRUSH_POINTS: usize = 20;
 /// The numbers of active preview stamps the preview cost is measured with (TEST-042): none, a few and the cap.
 pub const PREVIEW_COST_COUNTS: [usize; 3] = [0, 8, planet_frame::preview::MAX_PREVIEW_STAMPS];
 /// The regional cases (TEST-044): a stamp of these radii seen from these altitudes. 50 km is the owner's regional scale, but an item reaches
-/// one cell edge at most (`CELL_EDGE_M`, 40 km), so the largest stamp is the largest an item can be. A smoke run takes the smaller at 200 m.
+/// one cell edge at most (`CELL_EDGE_M`, 40 km), so the largest stamp is the largest an item can be. A smoke run leaves them out.
 pub const REGIONAL_RADII_M: [f64; 2] = [5_000.0, planet_world_def::cells::CELL_EDGE_M];
 pub const REGIONAL_ALTITUDES_M: [f64; 2] = [2_000.0, 20_000.0];
 /// The line and region cases (TEST-044): a ridge of this length and a region of this side, at these altitudes.
@@ -779,7 +779,7 @@ pub struct Case {
     pub base: Option<ItemSpec>,
 }
 
-/// The cases of an altitude, in the order they run (a smoke run has one altitude, 200 m, and the smallest of each family): the hill
+/// The cases of an altitude, in the order they run (a smoke run has one altitude, 200 m, the small hill, the brush and the region only): the hill
 /// stamps, the regional stamps (TEST-044), the brush strokes (TEST-042), then the ridge and the region (TEST-044).
 pub fn cases_at(altitude_m: f64, smoke: bool, planet_radius_m: f64) -> Vec<Case> {
     let stamp = |r: f64| Case {
@@ -799,8 +799,10 @@ pub fn cases_at(altitude_m: f64, smoke: bool, planet_radius_m: f64) -> Vec<Case>
         Vec::new()
     };
     v.extend(hill_radii.into_iter().map(stamp));
+    // A smoke run leaves out the regional stamps and the ridge (5 km and more: the most tiles to generate and draw on the software adapter);
+    // their construction is tested at tier A and the measured scene runs them.
     let regional: Vec<f64> = if smoke {
-        vec![REGIONAL_RADII_M[0]]
+        Vec::new()
     } else if REGIONAL_ALTITUDES_M.contains(&altitude_m) {
         REGIONAL_RADII_M.to_vec()
     } else {
@@ -815,8 +817,17 @@ pub fn cases_at(altitude_m: f64, smoke: bool, planet_radius_m: f64) -> Vec<Case>
         }
     }
     if LINE_ALTITUDES_M.contains(&altitude_m) || smoke {
-        let (spec, centre) = case_ridge(planet_radius_m);
-        v.push(Case { kind: CaseKind::Line, name: format!("ridge of {LINE_LENGTH_M} m"), size_m: LINE_LENGTH_M, spec, centre, base: None });
+        if !smoke {
+            let (spec, centre) = case_ridge(planet_radius_m);
+            v.push(Case {
+                kind: CaseKind::Line,
+                name: format!("ridge of {LINE_LENGTH_M} m"),
+                size_m: LINE_LENGTH_M,
+                spec,
+                centre,
+                base: None,
+            });
+        }
         let (base, _) = case_region(REGION_TYPE_FROM, planet_radius_m);
         let (spec, centre) = case_region(REGION_TYPE_TO, planet_radius_m);
         v.push(Case {
@@ -1050,10 +1061,9 @@ mod tests {
         assert_eq!(names(2_000.0, false).len(), 3 + 2 + 2 + 2);
         assert_eq!(names(20_000.0, false), ["stamp radius 5000 m", "stamp radius 40000 m"]);
         const { assert!(REGIONAL_RADII_M[1] <= planet_world_def::cells::CELL_EDGE_M, "the largest stamp an item can be") };
-        // A smoke run: one altitude, the smallest of every family.
-        assert_eq!(names(200.0, true).len(), 1 + 1 + 1 + 2);
+        // A smoke run: one altitude, the small hill, the brush and the region (the regional stamps and the ridge are measured-only).
         let kinds: Vec<CaseKind> = cases_at(200.0, true, R).iter().map(|c| c.kind).collect();
-        assert_eq!(kinds, [CaseKind::Stamp, CaseKind::Stamp, CaseKind::Brush, CaseKind::Line, CaseKind::Region]);
+        assert_eq!(kinds, [CaseKind::Stamp, CaseKind::Brush, CaseKind::Region]);
         // Only the region case has an earlier state.
         assert!(cases_at(2_000.0, false, R).iter().all(|c| c.base.is_some() == (c.kind == CaseKind::Region)));
     }

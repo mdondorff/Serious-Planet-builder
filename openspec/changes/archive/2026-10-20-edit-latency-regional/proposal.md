@@ -5,7 +5,7 @@ The M6 gate evidence list (docs/briefings/m6-gate-evidence.md, G2 and G3) found 
 - The edit-latency scene gets regional stamps (5 km and 40 km, from 2 km and 20 km altitude), one ridge of 5 km (30 m high, 200 m half-width, 17 points) and one region of 2 km whose surface type is changed in place (rock to forest), the last two from 200 m and 2 km (TEST-044). The largest regional stamp is 40 km, not 50 km: an item reaches one cell edge at most (`CELL_EDGE_M`, WDEF-007).
 - The three kinds are labelled in the tables (`5000 m ridge`, `2000 m region`) and their verdict reads `recorded`: the budget is set with the owner after measuring, so the regional stamps (over 1 km), the ridge and the region are not gated.
 - A case may have an earlier state that is in the world before the edit (the region); the scene puts it in, settles, runs the repeats and takes it out again.
-- A smoke run adds the 5 km stamp, the ridge and the region at 200 m.
+- A smoke run adds the region at 200 m; the regional stamps and the ridge are measured-only (their construction is tier A), to fit the runner's time limit.
 - Tier-A tests of the cases and the labels; the software-adapter smoke checks the three rows. No measurement: the next perf window reads them with the brush cases and the preview cost.
 
 ## Classes and bounds (ADR 0035)

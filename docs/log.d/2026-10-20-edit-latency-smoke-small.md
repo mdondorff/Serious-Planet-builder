@@ -1,0 +1,1 @@
+- 2026-10-20 **edit-latency-smoke-small** (sonnet-crusader, opus-planner): the edit-latency smoke run leaves out the 5 km regional stamp and the 5 km ridge (measured-only; tier A covers their construction) after the Windows tier-C smoke took 274 s of 300 s; TEST-044 now says the smoke adds the region only, and the `edit-latency-regional` change is archived into the testing spec.
