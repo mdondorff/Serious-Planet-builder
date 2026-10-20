@@ -79,3 +79,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0067 | [Stamp key hash and height bounds by delta range](0067-stamp-key-hash-and-delta-range-bounds.md) | accepted | amends 0066 points 2, 5 and the key role of 6 |
 | 0068 | [An authored stage with an empty footprint passes its source key through](0068-empty-authored-stage-passes-the-key-through.md) | accepted | amends 0066 point 4 |
 | 0069 | [Lines and regions are point-list items; a long line splits into linked items](0069-lines-and-regions-are-point-list-items.md) | accepted | extends 0066 point 6 and 0067; mode 1 pending (region-mode1) |
+| 0070 | [Brush strokes stay in the item file; the blob store is specified and deferred](0070-brush-strokes-stay-in-the-item-file-no-blob-store-in-the-mvp.md) | proposed | extends 0066 point 6 and 0069; decides the blob ADR of 0007 |
