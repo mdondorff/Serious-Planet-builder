@@ -78,14 +78,14 @@ fn reference_field_meshes_and_keys_are_unchanged_and_steep_keys_never_alias() {
 }
 
 /// Committed known answer of one stress mesh, tied to the stress field's version (ADR 0006 version guard).
-const KNOWN_STEEP_MESH: u64 = 17227332134659575040;
+const KNOWN_STEEP_MESH: u64 = 10611333974132247449;
 
 // spec: TEST-015
 #[test]
 fn the_stress_field_has_a_version_guarded_known_answer() {
     assert_eq!(
         (STEEP_VERSION, planet_generators::mesh::MESH_VERSION),
-        (1, 8),
+        (1, 9),
         "bump KNOWN_STEEP_MESH together with STEEP_VERSION or MESH_VERSION"
     );
     let h = tile_mesh_field(&STEEP, &TangentWarp, id(4, 12, 1000, 2000), CELLS, R).content_hash();

@@ -13,6 +13,7 @@ pub mod height;
 pub mod height_fields;
 pub mod manifest;
 pub mod mesh;
+pub mod normals;
 pub mod ocean;
 pub mod stage;
 pub mod stamp;

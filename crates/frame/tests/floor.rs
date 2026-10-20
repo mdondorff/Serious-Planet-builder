@@ -215,6 +215,9 @@ fn floor_zero_reproduces_the_plans_recorded_before_the_floor() {
             &format!("{} [{}]: {} nodes, plan {:016x}\n", scripted_views(R, 4.0 / 3.0, 1)[i].0, view.name(), p.nodes.len(), p.plan_hash());
     }
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/terrain_plans_floor0.txt");
+    if std::env::var("PLANET_UPDATE_SNAPSHOTS").as_deref() == Ok("1") {
+        std::fs::write(&path, &summary).unwrap();
+    }
     let expected = std::fs::read_to_string(&path).expect("the floor-0 record of the plans");
     assert_eq!(summary, expected, "a plan at floor 0 differs from the plan recorded before the floor existed");
 }

@@ -21,7 +21,7 @@
 
 use crate::climate::{ClimateTexture, CLIMATE_BYTES, CLIMATE_MIN_COMPACT_CELLS, CLIMATE_TEXELS};
 use crate::height::HeightField;
-use crate::mesh::{mesh_key_field, normal_from_stencil, normal_stencil, skirt_depth, vertex_count, MeshVertex};
+use crate::mesh::{mesh_key_field, skirt_depth, vertex_count, MeshVertex};
 use planet_core::cube::FaceMapping;
 use planet_core::hash::hash_u64s;
 use planet_core::{PlanetFixed, TileId, Vec3};
@@ -354,20 +354,11 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
     );
     let w = (cells + 1) as usize;
     let centre = id.center_direction(map);
-    // One batch call for every height the tile needs (GEN-020): the origin, the lattice points and the normal stencils.
-    let eps = core::f64::consts::FRAC_PI_2 / f64::from(1u32 << id.level()) / f64::from(cells);
+    // One batch call for every height the tile needs (GEN-020): the origin, the lattice points and their ring (ADR 0073).
     let count = w * w;
-    let mut dirs = Vec::with_capacity(1 + count * 5);
+    let mut dirs = Vec::with_capacity(1 + crate::normals::lattice_direction_count(cells));
     dirs.push(centre);
-    for j in 0..=cells {
-        for i in 0..=cells {
-            dirs.push(id.sample_direction(map, cells, i, j));
-        }
-    }
-    for k in 0..count {
-        let st = normal_stencil(dirs[1 + k], eps);
-        dirs.extend(st);
-    }
+    dirs.extend(crate::normals::lattice_directions(map, id, cells));
     let (all, climate) = field.heights_and_climate(map, id, &dirs, &|| false);
     let h_origin = all[0];
     let origin = PlanetFixed(centre * (radius_m + h_origin));
@@ -382,12 +373,11 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
         }
     }
     let mut hr = vec![0f64; count];
+    let lattice_normals = crate::normals::lattice_normals(id, cells, radius_m, &dirs[1..], &all[1..]);
     let mut normals = vec![0u32; count];
     for k in 0..count {
         hr[k] = all[1 + k] - h_origin;
-        let s0 = 1 + count + 4 * k;
-        let st = [dirs[s0], dirs[s0 + 1], dirs[s0 + 2], dirs[s0 + 3]];
-        normals[k] = pack_normal(oct_encode(normal_from_stencil(&st, &[all[s0], all[s0 + 1], all[s0 + 2], all[s0 + 3]], radius_m)));
+        normals[k] = pack_normal(oct_encode(lattice_normals[k]));
     }
     let lo = hr.iter().copied().fold(f64::INFINITY, f64::min);
     let hi = hr.iter().copied().fold(f64::NEG_INFINITY, f64::max);

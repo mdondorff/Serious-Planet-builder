@@ -245,3 +245,96 @@ impl TileId {
         found
     }
 }
+
+// ---- The lattice normal stencil (ADR 0073) ----
+
+fn int_axes(face: Face) -> ([i64; 3], [i64; 3], [i64; 3]) {
+    let r = |v: Vec3| [v.x as i64, v.y as i64, v.z as i64];
+    (r(face.normal()), r(face.u_axis()), r(face.v_axis()))
+}
+
+/// The faces holding the cube point `p` (in units of half a cell, `n` cells per face edge: a face holds it when its normal coordinate
+/// is `n`), smallest first, with the lattice indices of the point on each.
+fn faces_of_point(p: [i64; 3], n: i64) -> Vec<(Face, i64, i64)> {
+    let mut out = Vec::with_capacity(3);
+    for g in Face::ALL {
+        let (gn, gu, gv) = int_axes(g);
+        let dot = |a: [i64; 3]| p[0] * a[0] + p[1] * a[1] + p[2] * a[2];
+        if dot(gn) == n {
+            out.push((g, (dot(gu) + n) / 2, (dot(gv) + n) / 2));
+        }
+    }
+    out
+}
+
+/// The exact integer cube point (half-cell units) of the lattice point `(i, j)` of `face`, for one coordinate at most one step outside
+/// `0..=n` (the other inside): the point itself inside the face; beyond a face edge the point on the shared edge moved one cell back
+/// against the face's normal, which is the neighbour face's own lattice point one cell inside it, on the row that continues the shared
+/// edge (never found by projecting the extended plane back).
+fn lattice_cube_point(face: Face, n: i64, i: i64, j: i64) -> [i64; 3] {
+    let inside = |a: i64| (0..=n).contains(&a);
+    assert!(inside(i) || inside(j), "a ring point beyond a face edge has the other coordinate inside the face");
+    assert!((-1..=n + 1).contains(&i) && (-1..=n + 1).contains(&j), "ring of one sample only");
+    let (nrm, u, v) = int_axes(face);
+    let (ci, cj) = (i.clamp(0, n), j.clamp(0, n));
+    let back = if inside(i) && inside(j) { 0 } else { 2 };
+    [0, 1, 2].map(|k| (n - back) * nrm[k] + (2 * ci - n) * u[k] + (2 * cj - n) * v[k])
+}
+
+impl TileId {
+    /// Direction of the lattice point `(k, l)` of the tile's `res`-cell grid for `k`, `l` from -1 to `res + 1`, one at most outside
+    /// `0..=res` (ADR 0073): the point itself inside the tile and across a tile edge inside a face (the same lattice integers), and
+    /// beyond a face edge the neighbour tile's own lattice direction one cell inside it. On a cube edge both faces hold the point and
+    /// the smaller face is used. Bit-identical to the direction any other tile reads for the same point (COORD-007).
+    pub fn ring_direction(self, map: &dyn FaceMapping, res: u32, k: i64, l: i64) -> Vec3 {
+        assert!(res.is_power_of_two(), "sample grid must be a power of two");
+        assert!(
+            u32::from(self.level()) + res.trailing_zeros() <= 52,
+            "level + log2(res) must be <= 52 so lattice indices stay exact in f64"
+        );
+        let n = (1i64 << self.level()) * i64::from(res);
+        let (gi, gj) = (i64::from(self.x()) * i64::from(res) + k, i64::from(self.y()) * i64::from(res) + l);
+        if (0..=n).contains(&gi) && (0..=n).contains(&gj) {
+            // Inside the face: the tile's own halo expression.
+            return self.sample_direction_ext(map, res, k, l);
+        }
+        let p = lattice_cube_point(self.face(), n, gi, gj);
+        let (face, i, j) = faces_of_point(p, n)[0];
+        let nf = n as f64;
+        face_to_direction(map, face, 2.0 * (i as f64) / nf - 1.0, 2.0 * (j as f64) / nf - 1.0)
+    }
+
+    /// For a vertex `(k, l)` of the tile that is one of the eight cube corners: the three of its four stencil neighbours (slots 0 = east
+    /// `(k + 1, l)`, 1 = west `(k - 1, l)`, 2 = north `(k, l + 1)`, 3 = south `(k, l - 1)`) that are three different points, in the
+    /// canonical order of the cube edges they lie on (by the pair of faces holding the point), so that the three tiles at a corner
+    /// form `(p1 - p0) x (p2 - p0)` from the same operands (ADR 0073 point 3). `None` for any other vertex.
+    pub fn corner_stencil(self, res: u32, k: u32, l: u32) -> Option<[u8; 3]> {
+        let n = (1i64 << self.level()) * i64::from(res);
+        let (gi, gj) = (i64::from(self.x()) * i64::from(res) + i64::from(k), i64::from(self.y()) * i64::from(res) + i64::from(l));
+        if !((gi == 0 || gi == n) && (gj == 0 || gj == n)) {
+            return None;
+        }
+        // The two neighbours along the face's own edges, and one of the two that point outside (they are the same cube point).
+        let along_i: u8 = if gi == 0 { 0 } else { 1 };
+        let along_j: u8 = if gj == 0 { 2 } else { 3 };
+        let outside: u8 = if gi == 0 { 1 } else { 0 };
+        let point = |slot: u8| -> (i64, i64) {
+            match slot {
+                0 => (gi + 1, gj),
+                1 => (gi - 1, gj),
+                2 => (gi, gj + 1),
+                _ => (gi, gj - 1),
+            }
+        };
+        let key = |slot: u8| -> (u8, u8) {
+            let (i, j) = point(slot);
+            let held = faces_of_point(lattice_cube_point(self.face(), n, i, j), n);
+            // A point strictly inside a cube edge is held by two faces; the pair orders the three edges of the corner.
+            assert!(held.len() >= 2, "the neighbour of a cube corner lies on a cube edge");
+            (held[0].0 .0, held[1].0 .0)
+        };
+        let mut ordered = [along_i, along_j, outside];
+        ordered.sort_by_key(|s| key(*s));
+        Some(ordered)
+    }
+}

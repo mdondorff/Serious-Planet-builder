@@ -320,12 +320,12 @@ fn compact_tiles_are_bit_identical_across_thread_counts_and_match_the_known_answ
     let one = tile_hashes(1);
     assert_eq!(one, tile_hashes(4), "thread count changed a tile");
     assert_eq!(one, tile_hashes(2));
-    // Known answers (CI runs this test on Windows and Linux): recorded with MESH_VERSION 7 (the climate in the fourth channel), re-recorded with MESH_VERSION 8 (the slot of GEN-025: wide texel, climate block and header in the slot), earlier re-recorded with GLOBAL_VERSION 3 (the climate values moved with the latitude axis; the geometry bits did not) and again with GLOBAL_VERSION 4 (the ocean channel changes no sample, but the version word is in the tile's key and its content hash).
+    // Known answers (CI runs this test on Windows and Linux): recorded with MESH_VERSION 7 (the climate in the fourth channel), re-recorded with MESH_VERSION 9 (the lattice normals of ADR 0073; vertex heights and positions unchanged), earlier with MESH_VERSION 8 (the slot of GEN-025: wide texel, climate block and header in the slot), earlier re-recorded with GLOBAL_VERSION 3 (the climate values moved with the latitude axis; the geometry bits did not) and again with GLOBAL_VERSION 4 (the ocean channel changes no sample, but the version word is in the tile's key and its content hash).
     // A change of the construction bumps MESH_VERSION and re-records these.
     assert_eq!(one, KNOWN_ANSWERS, "compact tile content hashes changed: {one:016x?}");
 }
 
-const KNOWN_ANSWERS: [u64; 4] = [2175441651109346958, 4429028654179405316, 7060940787204524714, 7402522155882393221];
+const KNOWN_ANSWERS: [u64; 4] = [15411737039317913611, 6806280629819287682, 8300742143674622222, 7880713930198373391];
 
 // spec: GEN-019, CON-13, CON-14
 #[test]
