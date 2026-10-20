@@ -45,8 +45,9 @@ pub struct PreviewList {
 
 fn entry(item: &FootprintItem, sign: i8) -> Option<(i32, ItemId, PreviewStamp)> {
     let stamp = item.stamp.as_ref()?;
-    // The preview shader draws the radial stamps; a line shows when its exact tiles arrive (GEN-028, M6 plan E3).
-    if stamp.kind.is_line() {
+    // The preview shader draws the radial stamps; a line and a brush show when their exact tiles arrive (GEN-028, GEN-030, M6
+    // plan E3).
+    if stamp.kind.is_line() || stamp.kind.is_brush() {
         return None;
     }
     let dir = Vec3::new(f64::from_bits(item.dir[0]), f64::from_bits(item.dir[1]), f64::from_bits(item.dir[2]));

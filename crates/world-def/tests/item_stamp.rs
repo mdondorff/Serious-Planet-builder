@@ -29,6 +29,7 @@ fn item(kind: &str, params: &[(&str, f64)]) -> Item {
         group: None,
         part: None,
         mask_layer: None,
+        strokes: Vec::new(),
     }
 }
 

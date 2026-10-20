@@ -40,6 +40,7 @@ fn region(points: &[(f64, f64)], surface: f64, mode: f64, mask_layer: Option<&st
         group: None,
         part: None,
         mask_layer: mask_layer.map(str::to_string),
+        strokes: Vec::new(),
     }
 }
 

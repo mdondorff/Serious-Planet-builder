@@ -258,6 +258,7 @@ fn item_at(lat: f64, lon: f64, radius_m: f64, height_m: Option<f64>, heading: f6
         group: None,
         part: None,
         mask_layer: None,
+        strokes: Vec::new(),
     }
 }
 

@@ -31,6 +31,7 @@ fn line_item(kind: &str, points: &[(f64, f64)]) -> Item {
         group: Some(GROUP),
         part: Some(2),
         mask_layer: None,
+        strokes: Vec::new(),
     }
 }
 
@@ -138,7 +139,7 @@ fn the_points_file_refuses_what_the_writer_refuses_naming_the_key() {
         .key
         .contains("schema_version"));
     assert!(Item::from_toml(&text.replace("[[points]]\nlatitude", "[[points]]\nlat")).unwrap_err().key.contains("points[0]"));
-    assert!(Item::from_toml(&text.replace("schema_version = 2", "schema_version = 3")).unwrap_err().why.contains("newer"));
+    assert!(Item::from_toml(&text.replace("schema_version = 2", "schema_version = 4")).unwrap_err().why.contains("newer"));
 }
 
 // spec: AUTH-005
