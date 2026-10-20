@@ -37,7 +37,7 @@ pub const EDIT_STAGE_VERSION: u32 = planet_generators::stamp::STAMP_STAGE_VERSIO
 
 /// The refresh settle window of the editor in milliseconds (STRM-031, ADR 0072): a tile that edits keep re-keying is refreshed once, after the
 /// edits have been quiet for this long.
-pub const REFRESH_SETTLE_MS: u64 = 40;
+pub const REFRESH_SETTLE_MS: u64 = 25;
 
 /// Where the items go: memory (lost with the window) or one file each in a directory.
 pub enum EditStore {

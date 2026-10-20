@@ -807,7 +807,7 @@ impl<T: Send + Sync + 'static> Streamer<T> {
     /// A resident tile in no class is evicted instead (nothing wants it, and the next time it is wanted it loads from the new field). A tile
     /// whose job is running is told to stop and its result is dropped; a resident one stays marked stale and is requested again as soon as
     /// the job has ended and something wants it, a non-resident one loads again from the new field; a queued request stays queued (it loads
-    /// from the new field). Returns the number of refresh requests queued now.
+    /// from the new field). Returns the number of refresh requests queued now, or held by the settle window (STRM-031) to be queued when it ends.
     ///
     /// Refresh work made stale by a newer edit is not computed (STRM-031, ADR 0072): a refresh that finds the tile's refresh waiting (queued,
     /// held, or its running job already told to stop) leaves one entry and is counted; a running job is told to stop and counted; its
@@ -833,6 +833,10 @@ impl<T: Send + Sync + 'static> Streamer<T> {
             if self.refresh_settle_ms > 0 && resident {
                 // The window restarts at every edit that names the tile: the request is made after the last one.
                 waiting = self.held.insert(t, now.saturating_add(self.refresh_settle_ms)).is_some();
+                // A refresh the window holds is a refresh queued for the caller's count (it is made when the window ends).
+                if !waiting && !self.in_flight.contains_key(&t) && self.class_of(t).is_some() {
+                    queued += 1;
+                }
             }
             if let Some(f) = self.in_flight.get(&t) {
                 // Its result may have been made from the field as it was: it is dropped, whatever it was.
