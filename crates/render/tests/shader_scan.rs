@@ -125,12 +125,14 @@ fn the_compact_shader_takes_the_slot_offsets_and_the_normal_scale_from_the_gener
 #[test]
 fn the_composite_declares_the_altitude_and_the_steps_of_the_cameras_march_from_the_references_constants() {
     use planet_frame::look::atmosphere::{
-        CAMERA_MARCH_MIN_ALTITUDE_M, CAMERA_MARCH_STEPS_DAY, CAMERA_MARCH_STEPS_TWILIGHT, CAMERA_MARCH_TWILIGHT_MU,
+        CAMERA_MARCH_BLEND_FROM_M, CAMERA_MARCH_BLEND_TO_M, CAMERA_MARCH_STEPS_DAY, CAMERA_MARCH_STEPS_TWILIGHT, CAMERA_MARCH_TWILIGHT_MU,
     };
     let source = planet_render::atmosphere::composite_shader();
-    let alt = format!("const CAM_MARCH_ALT: f32 = {CAMERA_MARCH_MIN_ALTITUDE_M:.1};");
+    let alt = format!("const CAM_MARCH_BLEND_FROM: f32 = {CAMERA_MARCH_BLEND_FROM_M:.1};");
+    let to = format!("const CAM_MARCH_BLEND_TO: f32 = {CAMERA_MARCH_BLEND_TO_M:.1};");
     let declared = [
         alt,
+        to,
         format!("const CAM_MARCH_STEPS_DAY: i32 = {CAMERA_MARCH_STEPS_DAY};"),
         format!("const CAM_MARCH_STEPS_TWILIGHT: i32 = {CAMERA_MARCH_STEPS_TWILIGHT};"),
         format!("const CAM_MARCH_TWILIGHT_MU: f32 = {CAMERA_MARCH_TWILIGHT_MU:.1};"),

@@ -384,11 +384,15 @@ fn the_composite_applies_the_sky_and_the_aerial_perspective_as_the_reference_doe
 
 // spec: ATMO-001, ATMO-021
 #[test]
-fn above_8_km_the_composite_marches_from_the_camera_to_the_terrain_as_the_reference_does() {
+fn above_6_km_the_composite_marches_from_the_camera_to_the_terrain_and_mixes_it_with_the_volume_as_the_reference_does() {
     // Terrain 300 and 600 km along the view axis: far beyond what the volume holds between its texels (SPIKE-20).
-    for (h, mu_sun, terrain_m) in
-        [(8_500.0, 0.5, 120_000.0), (60_000.0, 0.7, 300_000.0), (97_500.0, 0.7, 600_000.0), (97_500.0, 0.2, 300_000.0)]
-    {
+    for (h, mu_sun, terrain_m) in [
+        (8_000.0, 0.5, 120_000.0),
+        (6_500.0, 0.3, 90_000.0),
+        (60_000.0, 0.7, 300_000.0),
+        (97_500.0, 0.7, 600_000.0),
+        (97_500.0, 0.2, 300_000.0),
+    ] {
         composite_inside_at(h, mu_sun, terrain_m);
     }
 }
@@ -422,14 +426,24 @@ fn composite_inside_at(altitude: f64, mu_sun: f64, terrain_m: f64) {
             let got = out[py * w + px];
             let want: [f64; 3] = if px >= w / 2 {
                 seen_geo += 1;
-                if g.uses_camera_march() {
-                    // Above 8 km the composite marches from the camera to the terrain (ATMO-021).
+                // The volume up to 6 km, the camera march from 10 km, the smoothstep mix between (ATMO-021).
+                let wm = g.camera_march_weight();
+                let volume = || {
+                    let a = g.ap_lookup(&ap, [(px as f64 + 0.5) / w as f64, (py as f64 + 0.5) / h as f64], terrain_m * len);
+                    [0, 1, 2].map(|k| f64::from(colour[k]) * a[3] + a[k])
+                };
+                let march = || {
                     let (mu, cos_vs) = g.view_cosines(dir);
                     let c = g.camera_ray_cosines(&round_atm, &round_luts, mu, cos_vs, terrain_m * len);
                     [0, 1, 2].map(|k| f64::from(colour[k]) * c.transmittance[k] + c.radiance[k])
+                };
+                if wm <= 0.0 {
+                    volume()
+                } else if wm >= 1.0 {
+                    march()
                 } else {
-                    let a = g.ap_lookup(&ap, [(px as f64 + 0.5) / w as f64, (py as f64 + 0.5) / h as f64], terrain_m * len);
-                    [0, 1, 2].map(|k| f64::from(colour[k]) * a[3] + a[k])
+                    let (v, m) = (volume(), march());
+                    [0, 1, 2].map(|k| v[k] + (m[k] - v[k]) * wm)
                 }
             } else {
                 seen_sky += 1;

@@ -65,10 +65,14 @@ pub const ORBIT_STEPS: usize = 40;
 pub const AP_MAX_STEPS: usize = 64;
 /// The distance along the ray of the last aerial-perspective slice; slice `k` is at `AP_MAX_DISTANCE_M * ((k + 1) / 32)^2`.
 pub const AP_MAX_DISTANCE_M: f64 = 256_000.0;
-/// Above this camera altitude (metres) a pixel with geometry is hazed by a march from the camera to the geometry, not by the
-/// aerial-perspective volume: the volume's 32 slices and 32 rows are too coarse for the rays that end hundreds of kilometres away
-/// (ATMO-021, SPIKE-20). The GPU declares the same value (`CAM_MARCH_ALT`).
-pub const CAMERA_MARCH_MIN_ALTITUDE_M: f64 = 8_000.0;
+/// From this camera altitude (metres) a pixel with geometry is hazed by a march from the camera to the geometry, mixed in with the
+/// aerial-perspective volume up to [`CAMERA_MARCH_BLEND_TO_M`], and not by the volume above it: the volume's 32 slices and 32 rows are
+/// too coarse for the rays that end hundreds of kilometres away (ATMO-021, SPIKE-20).
+pub const CAMERA_MARCH_BLEND_FROM_M: f64 = 6_000.0;
+/// Above this altitude the march alone hazes the geometry; between the two the march and the volume are mixed by the smoothstep of the
+/// altitude, so the haze does not step when the camera crosses (the volume is 7 to 19 % off the march there). The GPU declares the same
+/// values (`CAM_MARCH_BLEND_FROM`, `CAM_MARCH_BLEND_TO`).
+pub const CAMERA_MARCH_BLEND_TO_M: f64 = 10_000.0;
 /// Steps of that march, dense towards the geometry's end (where the air is thickest): [`CAMERA_MARCH_STEPS_DAY`] while the sun's cosine to
 /// the up is at least [`CAMERA_MARCH_TWILIGHT_MU`], [`CAMERA_MARCH_STEPS_TWILIGHT`] below it, where the light crosses the planet's shadow
 /// along the ray and fewer steps leave the 5 % of ATMO-007 (the sweep over suns and azimuths, `tests/atmosphere.rs`). The GPU declares
@@ -1318,9 +1322,16 @@ pub struct CameraRay {
 
 impl FrameGeometry {
     /// Whether a pixel with geometry is hazed by [`FrameGeometry::camera_ray_cosines`] and not by the volume (ATMO-021): the camera is
-    /// inside the atmosphere above [`CAMERA_MARCH_MIN_ALTITUDE_M`].
+    /// inside the atmosphere from [`CAMERA_MARCH_BLEND_FROM_M`].
     pub fn uses_camera_march(&self) -> bool {
-        self.h > CAMERA_MARCH_MIN_ALTITUDE_M
+        self.camera_march_weight() > 0.0
+    }
+
+    /// The weight of the camera march in the haze of a pixel with geometry: 0 up to [`CAMERA_MARCH_BLEND_FROM_M`], 1 from
+    /// [`CAMERA_MARCH_BLEND_TO_M`], the smoothstep of the altitude between. The haze is `(1 - w) volume + w march`.
+    pub fn camera_march_weight(&self) -> f64 {
+        let t = ((self.h - CAMERA_MARCH_BLEND_FROM_M) / (CAMERA_MARCH_BLEND_TO_M - CAMERA_MARCH_BLEND_FROM_M)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
     }
 
     /// The steps of [`FrameGeometry::camera_ray_cosines`] in this frame (by the sun's height).

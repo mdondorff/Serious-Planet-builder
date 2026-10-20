@@ -43,8 +43,9 @@ const SKY_STEPS: i32 = 32;
 const ORBIT_STEPS: i32 = 40;
 const AP_MAX_STEPS: i32 = 64;
 // Above this camera altitude (metres) geometry is hazed by a march from the camera, not by the volume (ATMO-021); the CPU values are
-// `CAMERA_MARCH_MIN_ALTITUDE_M`, `CAMERA_MARCH_STEPS_DAY`, `CAMERA_MARCH_STEPS_TWILIGHT` and `CAMERA_MARCH_TWILIGHT_MU`.
-const CAM_MARCH_ALT: f32 = 8000.0;
+// `CAMERA_MARCH_BLEND_FROM_M`, `CAMERA_MARCH_BLEND_TO_M`, `CAMERA_MARCH_STEPS_DAY`, `CAMERA_MARCH_STEPS_TWILIGHT` and `CAMERA_MARCH_TWILIGHT_MU`.
+const CAM_MARCH_BLEND_FROM: f32 = 6000.0;
+const CAM_MARCH_BLEND_TO: f32 = 10000.0;
 const CAM_MARCH_STEPS_DAY: i32 = 8;
 const CAM_MARCH_STEPS_TWILIGHT: i32 = 12;
 const CAM_MARCH_TWILIGHT_MU: f32 = 0.1;
@@ -520,14 +521,22 @@ fn fs(v: V) -> @location(0) vec4<f32> {
     var ap = vec4<f32>(0.0, 0.0, 0.0, 1.0);
     if (inside) {
         if (geometry) {
-            if (A.cam.x > CAM_MARCH_ALT) {
-                let m = atm_camera_ray(dir, t_geo);
-                rgb = color.xyz * m.transmittance + m.radiance * factor;
-                view_t = m.transmittance;
-            } else {
+            // The volume up to CAM_MARCH_BLEND_FROM, the camera march from CAM_MARCH_BLEND_TO, the smoothstep mix between (ATMO-021).
+            let u = clamp((A.cam.x - CAM_MARCH_BLEND_FROM) / (CAM_MARCH_BLEND_TO - CAM_MARCH_BLEND_FROM), 0.0, 1.0);
+            let wm = u * u * (3.0 - 2.0 * u);
+            var rgb_v = color.xyz;
+            var t_v = vec3<f32>(1.0);
+            if (wm < 1.0) {
                 ap = atm_ap_lookup(uv, t_geo);
-                rgb = color.xyz * ap.w + ap.xyz * factor;
-                view_t = vec3<f32>(ap.w);
+                rgb_v = color.xyz * ap.w + ap.xyz * factor;
+                t_v = vec3<f32>(ap.w);
+            }
+            rgb = rgb_v;
+            view_t = t_v;
+            if (wm > 0.0) {
+                let m = atm_camera_ray(dir, t_geo);
+                rgb = mix(rgb_v, color.xyz * m.transmittance + m.radiance * factor, wm);
+                view_t = mix(t_v, m.transmittance, wm);
             }
         } else {
             var l = atm_sky_lookup(dir);

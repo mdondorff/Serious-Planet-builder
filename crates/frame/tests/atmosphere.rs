@@ -905,7 +905,7 @@ fn up_to_8_km_the_volume_between_its_texels_is_within_its_bound_of_the_converged
     let (atm, luts) = earth();
     let mut report = String::new();
     let mut worst = 0.0f64;
-    for h in [1.0f64, 2_000.0, 5_000.0, 8_000.0] {
+    for h in [1.0f64, 2_000.0, 5_000.0, 6_000.0] {
         let f = frame_at(atm, h, 0.7);
         assert!(!f.uses_camera_march(), "{h} m uses the volume");
         let table = ap_table(atm, luts, &f);
@@ -922,4 +922,67 @@ fn up_to_8_km_the_volume_between_its_texels_is_within_its_bound_of_the_converged
         "the volume differs from the converged march by up to {:.1} % at or below 8 km:\n{report}",
         worst * 100.0
     );
+}
+
+// spec: ATMO-021
+#[test]
+fn the_haze_of_far_terrain_is_continuous_across_the_blend_band_between_the_volume_and_the_camera_march() {
+    // The review of the change (the owner's colour jump on a descent): the volume is 7 to 19 % off the march between 6 and 10 km, so a
+    // hard switch would step the haze when the camera crosses. The composite mixes the two by the smoothstep of the altitude. For a fixed
+    // screen position the haze is compared with the converged march of the same ray at heights 250 m apart; the error against it
+    // (the volume's, then the mix's, then the march's) may change by at most `STEP` per 100 m of altitude, for a high sun and a low one.
+    const STEP: f64 = 0.01;
+    let (atm, luts) = earth();
+    let land = [0.010, 0.012, 0.006];
+    let heights: Vec<f64> = (0..19).map(|i| 5_750.0 + 250.0 * f64::from(i)).collect();
+    for mu_sun in [0.7f64, 0.05] {
+        // err[k][h] per channel: relative error of the mixed haze against the converged march at height index h, ray index k.
+        let mut err: Vec<Vec<Option<[f64; 3]>>> = vec![vec![None; heights.len()]; 40];
+        for (hi, &h) in heights.iter().enumerate() {
+            let f = frame_at(atm, h, mu_sun);
+            let table = ap_table(atm, luts, &f);
+            let w = f.camera_march_weight();
+            for (k, slot) in err.iter_mut().enumerate() {
+                let b = 0.9 - 1.0 * (k as f64) / 39.0;
+                let v = [f.fwd[0] + f.upv[0] * b, f.fwd[1] + f.upv[1] * b, f.fwd[2] + f.upv[2] * b];
+                let l = libm::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+                let (mu, cos_vs) = f.view_cosines([v[0] / l, v[1] / l, v[2] / l]);
+                let Some(t_g) = distance_to_ground(f.r * mu, f.c) else { continue };
+                let o = RayOrigin { h: f.h, r: f.r, c: f.c, rmu: f.r * mu, r_musun: f.r * f.mu_sun };
+                let end = t_g.min(distance_to_top(f.r * mu, f.c_top));
+                let truth = atm.march(luts, &o, cos_vs, end, StepLayout::Uniform(2048), Scatter::Physical { cos_gamma: cos_vs });
+                let a = f.ap_lookup(&table, [0.5, (1.0 - b) / 2.0], t_g);
+                let r = f.camera_ray_cosines(atm, luts, mu, cos_vs, t_g);
+                let mut e = [0.0; 3];
+                for c in 0..3 {
+                    let vol = land[c] * a[3] + a[c];
+                    let mar = land[c] * r.transmittance[c] + r.radiance[c];
+                    let want = land[c] * truth.transmittance[c] + truth.radiance[c];
+                    e[c] = ((1.0 - w) * vol + w * mar - want) / want.abs().max(1e-4);
+                }
+                slot[hi] = Some(e);
+            }
+        }
+        let (mut worst, mut at) = (0.0f64, String::new());
+        for (k, row) in err.iter().enumerate() {
+            for hi in 1..heights.len() {
+                let (Some(a), Some(b)) = (row[hi - 1], row[hi]) else { continue };
+                for c in 0..3 {
+                    let per_100_m = (b[c] - a[c]).abs() / ((heights[hi] - heights[hi - 1]) / 100.0);
+                    if per_100_m > worst {
+                        worst = per_100_m;
+                        at = format!(
+                            "sun {mu_sun}, ray {k}, {} to {} m, channel {c}: {:.2} % to {:.2} %",
+                            heights[hi - 1],
+                            heights[hi],
+                            a[c] * 100.0,
+                            b[c] * 100.0
+                        );
+                    }
+                }
+            }
+        }
+        eprintln!("sun {mu_sun}: the largest change of the error per 100 m is {:.2} %: {at}", worst * 100.0);
+        assert!(worst <= STEP, "the haze steps by {:.2} % per 100 m across the blend band (sun {mu_sun}): {at}", worst * 100.0);
+    }
 }
