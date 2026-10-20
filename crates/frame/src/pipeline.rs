@@ -455,6 +455,20 @@ pub struct PlanOutcome {
     pub plan_ms: f64,
 }
 
+/// A plan the worker could not make: why, and the request it was asked for (so a failure of an older request than the frame's can be told
+/// from one of the frame's own).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlanFailure {
+    pub request: TerrainRequest,
+    pub message: String,
+}
+
+impl std::fmt::Display for PlanFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
 #[derive(Default)]
 struct WorkerState {
     running: bool,
@@ -462,7 +476,7 @@ struct WorkerState {
     /// residency set, its prefetch set or the next pending plan (STRM-005: teardown waits only for the job in flight).
     closed: bool,
     pending: Option<(u64, TerrainRequest, Option<PlanetFixed>)>,
-    done: Option<Result<PlanOutcome, String>>,
+    done: Option<Result<PlanOutcome, PlanFailure>>,
     /// The newest R, delivered after the plan of the same job (or with it when the position did not change).
     residency_done: Option<Result<ResidencyOutcome, String>>,
     last_residency: Option<(ResidencyKey, Arc<ResidencySet>)>,
@@ -561,7 +575,9 @@ impl PlanWorker {
             .unwrap_or_else(|_| Err(PlanError::HeightField("the plan job panicked".into())));
             let plan_ms = started.elapsed().as_secs_f64() * 1000.0;
             let planned = result.is_ok();
-            let outcome = result.map(|p| PlanOutcome { seq, request: req.clone(), plan: Arc::new(p), plan_ms }).map_err(|e| e.to_string());
+            let outcome = result
+                .map(|p| PlanOutcome { seq, request: req.clone(), plan: Arc::new(p), plan_ms })
+                .map_err(|e| PlanFailure { request: req.clone(), message: e.to_string() });
             {
                 let mut s = state.lock().expect("worker state");
                 s.completed += 1;
@@ -643,7 +659,7 @@ impl PlanWorker {
     }
 
     /// The newest plan completed since the last call, if any.
-    pub fn take(&self) -> Option<Result<PlanOutcome, String>> {
+    pub fn take(&self) -> Option<Result<PlanOutcome, PlanFailure>> {
         self.state.lock().expect("worker state").done.take()
     }
 
@@ -706,6 +722,8 @@ pub struct PlanPipeline {
     /// made after the latest edit (a plan with a lower number predates it).
     edited: BTreeSet<TileId>,
     edit_seq: u64,
+    /// The plan failures dropped because the request they were made for carried other LOD parameters than the frame's.
+    dropped_plan_errors: u64,
 }
 
 impl PlanPipeline {
@@ -720,7 +738,14 @@ impl PlanPipeline {
             preview: Vec::new(),
             edited: BTreeSet::new(),
             edit_seq: 0,
+            dropped_plan_errors: 0,
         }
+    }
+
+    /// How many plan failures were dropped, not returned, because they were for a request with other LOD parameters than the frame
+    /// that received them (the coarse view switched off while its plan was made).
+    pub fn dropped_plan_errors(&self) -> u64 {
+        self.dropped_plan_errors
     }
 
     /// An edit named `tiles` (the footprint find, WDEF-007): until a plan made after it is delivered, the frames draw them as stale and
@@ -786,7 +811,10 @@ impl PlanPipeline {
                     self.current = Some(o);
                 }
             }
-            Some(Err(e)) => return Err(format!("plan for frame {}: {e}", self.frame)),
+            // A refusal of a request made with other LOD parameters than this frame's (the coarse view was switched off while its plan was
+            // being made) is of no use to this frame: it is dropped and counted, not returned. The frame's own refusal is returned.
+            Some(Err(f)) if f.request.lod != req.lod => self.dropped_plan_errors += 1,
+            Some(Err(f)) => return Err(format!("plan for frame {}: {f}", self.frame)),
             None => {}
         }
         let mut residency_delivered = None;

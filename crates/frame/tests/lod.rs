@@ -279,3 +279,147 @@ fn balancing_equals_the_reference_algorithm_on_random_partitions() {
     }
     assert!(needed_splits >= 30, "only {needed_splits} of 60 random trees needed balancing: the test would prove little");
 }
+
+/// A field of zero height whose global bound is the eroded 128-bake world's (9,735 m): the plan reads only the bound for the volumes of
+/// the coarse tiles, so this is the plan the window makes over that world.
+struct Bound9735;
+
+impl planet_generators::height::HeightField for Bound9735 {
+    fn height(&self, _: planet_core::Vec3) -> f64 {
+        0.0
+    }
+    fn seed(&self) -> u64 {
+        5
+    }
+    fn implementation_id(&self) -> &'static str {
+        "bound-9735"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        9735.0
+    }
+}
+
+// spec: LOD-003, LOD-011, VIEW-014, VIEW-032
+#[test]
+fn the_coarse_lod_the_window_derives_is_never_refused_by_the_plan_it_makes() {
+    // SPIKE-19: `LodParams::coarse` picks the largest factor `validate` accepts (the morph interval of every level at least 5 % of its
+    // end, from the node radius alone: zero margin at the edge, ratio 0.950000 at level 4), but the plan adds the height extent of the
+    // neighbourhood to the start (`split + 2 rho`, rho from the volume's height range) and refuses start > 0.95 end. With heights up to
+    // 9,735 m the level-4 start is 2,167,273.1 against 0.95 x 2,279,496.0 = 2,165,521.2: the plan refuses the F4 coarse view of the
+    // window at a quarter of all orbital poses, and a refusal that arrives after F4 was pressed again aborts the window.
+    let size = (320u32, 200u32);
+    let field = Bound9735;
+    let base = planet_frame::LodParams {
+        cells: 32,
+        viewport_h_px: f64::from(size.1),
+        tau_px: 6.0 * f64::from(size.1) / 1440.0,
+        max_height_m: 9735.0,
+        ..planet_frame::LodParams::earth_1080p()
+    };
+    base.validate().unwrap();
+    let coarse = base.coarse();
+    let mut refused = Vec::new();
+    for alt in [3.0e5, 6.0e5, 1.2e6, 1.8e6, 2.4e6] {
+        let dir = planet_core::Vec3::new(1.0, 0.0, 0.0);
+        let camera = planet_frame::Camera::at_surface_point(
+            planet_core::PlanetFixed(dir * (6_371_000.0 + alt)),
+            planet_core::Vec3::new(0.0, 1.0, 0.0),
+            1.2,
+            60f64.to_radians(),
+            f64::from(size.0) / f64::from(size.1),
+            0.1,
+        );
+        let req = planet_frame::TerrainRequest {
+            camera,
+            size,
+            view: planet_frame::TerrainView::Level,
+            lod: coarse.clone(),
+            face_mapping: "tangent-v1".into(),
+            seed: 5,
+        };
+        if let Err(e) = planet_frame::plan_terrain_field(&req, &field) {
+            refused.push(format!("alt {alt} m: {e}"));
+        }
+    }
+    assert!(
+        refused.is_empty(),
+        "the plan refuses the coarse LOD {} (factor {:.4}) at {} of 5 poses: {:?}",
+        "of the window",
+        base.coarse_factor(),
+        refused.len(),
+        refused.first()
+    );
+}
+
+// spec: VIEW-032
+#[test]
+fn the_coarse_lod_is_refused_at_almost_no_pose_the_base_lod_is_accepted_at_from_20_km_to_orbit() {
+    // The SPIKE-19 review: the first test starts at 300 km; the refusals the verifier found sat at 25 to 190 km (levels 8 and 9, where a
+    // field with only a global bound has volumes as tall as they are wide). Both parameter sets are the window's, over a field of zero
+    // height whose bound is the eroded world's.
+    let field = Bound9735;
+    let cases = [
+        (
+            planet_frame::LodParams {
+                cells: 32,
+                viewport_h_px: 200.0,
+                tau_px: 6.0 * 200.0 / 1440.0,
+                max_height_m: 9735.0,
+                ..planet_frame::LodParams::earth_1080p()
+            },
+            (320u32, 200u32),
+        ),
+        (planet_frame::LodParams { max_height_m: 9735.0, ..planet_frame::LodParams::earth_1080p() }, (1920, 1080)),
+    ];
+    let mut compared = 0;
+    let mut refused_only_coarse = Vec::new();
+    for (base, size) in cases {
+        base.validate().unwrap();
+        let coarse = base.coarse();
+        assert!(coarse.tau_px > 1.5 * base.tau_px, "the coarse view is a real one: factor {}", coarse.tau_px / base.tau_px);
+        for k in 0..40 {
+            // 20 km to about 3,400 km in steps of 14 %, so the band of 31 to 39 km is hit; a face centre, a cube corner and a generic direction.
+            let alt = 2.0e4 * libm::pow(1.14, f64::from(k));
+            for (pitch, dir) in [
+                (0.4, planet_core::Vec3::new(1.0, 0.0, 0.0)),
+                (1.2, planet_core::Vec3::new(1.0, 1.0, 1.0).normalized()),
+                (0.8, planet_core::Vec3::new(0.3, -1.0, 0.5).normalized()),
+            ] {
+                let camera = planet_frame::Camera::at_surface_point(
+                    planet_core::PlanetFixed(dir * (6_371_000.0 + alt)),
+                    planet_core::Vec3::new(0.0, 1.0, 0.0),
+                    pitch,
+                    60f64.to_radians(),
+                    f64::from(size.0) / f64::from(size.1),
+                    0.1,
+                );
+                let request = |lod: &planet_frame::LodParams| planet_frame::TerrainRequest {
+                    camera,
+                    size,
+                    view: planet_frame::TerrainView::Level,
+                    lod: lod.clone(),
+                    face_mapping: "tangent-v1".into(),
+                    seed: 5,
+                };
+                if planet_frame::plan_terrain_field(&request(&base), &field).is_ok() {
+                    compared += 1;
+                    if let Err(e) = planet_frame::plan_terrain_field(&request(&coarse), &field) {
+                        refused_only_coarse.push(format!("{}x{} alt {alt:.0} m pitch {pitch}: {e}", size.0, size.1));
+                    }
+                }
+            }
+        }
+    }
+    assert!(compared >= 150, "the sweep compared {compared} poses");
+    // Measured on a denser sweep (70 altitudes, 4 pitches, 5 directions): 0 % for the 320x200 case, 1.6 to 2.7 % for the production ones,
+    // all at level 11 between 31 and 39 km (a level the check does not take, whose tiles the plan bounds from above).
+    assert!(
+        refused_only_coarse.len() * 25 <= compared,
+        "{} of {compared} poses refused for the coarse LOD only: {:?}",
+        refused_only_coarse.len(),
+        refused_only_coarse.first()
+    );
+}
