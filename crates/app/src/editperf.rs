@@ -451,7 +451,7 @@ impl CaseRow {
         }
     }
 
-    /// Whether the verdict reads the budgets: the regional stamps (over 500 m), the ridge and the region are only recorded (the owner sets a
+    /// Whether the verdict reads the budgets: the regional stamps (over 1 km), the ridge and the region are only recorded (the owner sets a
     /// number after measuring, TEST-044).
     pub fn gated(&self) -> bool {
         matches!(self.kind, CaseKind::Stamp | CaseKind::Brush) && self.radius_m <= 1_000.0
