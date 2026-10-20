@@ -409,7 +409,7 @@ fn a_jump_draws_a_cover_at_frame_zero_and_the_full_plan_arrives_later() {
     assert_eq!(f3.draw.plan, plan_b);
 }
 
-// spec: STRM-016, VIEW-014
+// spec: STRM-016, VIEW-014, VIEW-032
 #[test]
 fn a_plan_refusal_for_other_lod_parameters_than_the_frames_is_dropped_and_counted_not_returned() {
     // SPIKE-19: the coarse view's plan is refused while the worker is busy; by the time the refusal arrives the frame asks for the base

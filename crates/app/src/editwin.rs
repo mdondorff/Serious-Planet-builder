@@ -108,7 +108,7 @@ pub enum EditKey {
     Escape,
     /// Enter: finish the line or region being drawn.
     Finish,
-    /// Backspace: take back the last point of the draft; with no draft, delete the selected edit.
+    /// Backspace: take back the last point of the draft. It never deletes an edit (Delete does, owner decision 2020-10-20 via opus-planner).
     Back,
     /// F1 or `?`: show or hide the list of keys.
     Help,
@@ -623,10 +623,8 @@ impl EditRuntime {
                 Err(e) => self.note(Err(e)),
             },
             EditKey::Back => {
-                if self.session.draft().is_empty() {
-                    self.apply(vec![Event::Delete]);
-                } else {
-                    let _ = self.session.undo_draft_point();
+                if self.session.undo_draft_point().is_err() {
+                    self.session.set_status("no point to take back (Delete deletes the selected edit)");
                 }
             }
             EditKey::Escape => {
@@ -919,7 +917,7 @@ mod tests {
         frame(&mut e, &cam, false);
         assert_eq!((e.draft.points.len(), e.draft.rubber), (3, Some(CENTRE)));
         assert!(e.draft.path.len() > 3 && e.draft.path.iter().all(Option::is_some));
-        // Backspace takes the last point back; with no draft it deletes (nothing selected here, so a refusal, not a crash).
+        // Backspace takes the last point back; with no draft it does nothing (Delete deletes).
         e.key(EditKey::Back);
         assert_eq!(e.session.draft().len(), 2);
         e.press(&cam, VIEWPORT, [CENTRE[0] + 100.0, CENTRE[1] + 100.0], &limits(), &Flat);

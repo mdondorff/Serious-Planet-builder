@@ -302,7 +302,7 @@ impl planet_generators::height::HeightField for Bound9735 {
     }
 }
 
-// spec: LOD-003, LOD-011, VIEW-014
+// spec: LOD-003, LOD-011, VIEW-014, VIEW-032
 #[test]
 fn the_coarse_lod_the_window_derives_is_never_refused_by_the_plan_it_makes() {
     // SPIKE-19: `LodParams::coarse` picks the largest factor `validate` accepts (the morph interval of every level at least 5 % of its
