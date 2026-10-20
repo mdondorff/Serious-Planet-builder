@@ -257,16 +257,27 @@ impl WaterSummary {
 }
 
 /// The summary of an in-memory bake and its ocean channel, in blocks of `block_cells` (the summary a stored bake of that layout
-/// has): the reference of the tests and what a run over an in-memory bake would hold.
+/// has): the reference of the tests. The floors are computed here; a caller that holds them uses [`summary_of_floors`].
 pub fn summary_of_grid(
     grid: &crate::global::GlobalGrid,
     ocean: &crate::ocean::OceanGrid,
     block_cells: u32,
     threads: usize,
 ) -> Result<WaterSummary, SummaryError> {
+    let floors = crate::wet_floor::tiled_floors(grid, ocean, block_cells, threads).map_err(|e| SummaryError::Block(format!("{e:?}")))?;
+    summary_of_floors(grid, &floors, block_cells, threads)
+}
+
+/// The summary of an in-memory bake from its wet floors, in blocks of `block_cells`: what a run over an in-memory bake holds, made
+/// from the same [`FloorGrid`](crate::wet_floor::FloorGrid) the producer reads, so the two cannot disagree.
+pub fn summary_of_floors(
+    grid: &crate::global::GlobalGrid,
+    floors: &crate::wet_floor::FloorGrid,
+    block_cells: u32,
+    threads: usize,
+) -> Result<WaterSummary, SummaryError> {
     let tiles = crate::ocean::block_tiles(grid.res, block_cells).map_err(|e| SummaryError::Block(format!("{e:?}")))?;
     let mut summary = WaterSummary::new(grid.res, block_cells)?;
-    let floors = crate::wet_floor::tiled_floors(grid, ocean, block_cells, threads).map_err(|e| SummaryError::Block(format!("{e:?}")))?;
     let blocks = crate::ocean::parallel_map(&tiles, threads, &|t| {
         let samples = crate::ocean::grid_block(grid, *t, block_cells);
         let n = block_cells + 1;

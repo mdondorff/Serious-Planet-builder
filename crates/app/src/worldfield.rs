@@ -251,13 +251,13 @@ impl WorldTerrain {
                 .map_err(|e| format!("the ocean channel of the in-memory bake: {e:?}"))?;
             // The coarse level of W from the same fields, in the store's block layout (blocks of at most 1024 cells), so a run over an
             // in-memory bake selects water by the rule of the stored one (ADR 0058).
-            let summary = planet_generators::water_summary::summary_of_grid(&grid, &grid_ocean, global_res.min(1024), threads)
+            // The floors are made once: the producer's point query and the summary read the same grid.
+            let floors = planet_generators::wet_floor::tiled_floors(&grid, &grid_ocean, block, threads)
+                .map_err(|e| format!("the wet floor of the in-memory bake: {e:?}"))?;
+            let summary = planet_generators::water_summary::summary_of_floors(&grid, &floors, global_res.min(1024), threads)
                 .map_err(|e| format!("the water summary of the in-memory bake: {e}"))?;
             summary_owned = Some(Box::leak(Box::new(summary)) as &'static planet_generators::water_summary::WaterSummary);
-            floor = Some(Box::new(
-                planet_generators::wet_floor::tiled_floors(&grid, &grid_ocean, block, threads)
-                    .map_err(|e| format!("the wet floor of the in-memory bake: {e:?}"))?,
-            ));
+            floor = Some(Box::new(floors));
             ocean = Some(Box::new(OwnedOcean(grid_ocean)));
             (Box::new(OwnedBake(grid)), world.stage_key(global_res).0)
         } else {
@@ -613,12 +613,13 @@ impl WorldTerrain {
             .sea(BodyId::PLANET)
             .ok()
             .map(|sea| planet_generators::wet_floor::bound_code(planet_generators::water::coast_band_elevation_m(sea.level_m)));
-        let wet_vertex = ocean_vertex
-            || self
-                .floor
-                .as_deref()
-                .zip(bound)
-                .is_some_and(|(floor, bound)| v[..n].iter().any(|&(i, j)| floor.floor(q.face, i, j).is_ok_and(|f| f <= bound)));
+        // A floor that cannot be read is no probe (a read error must not leave pixels out of an oracle's denominator quietly).
+        let mut wet_vertex = ocean_vertex;
+        if let (Some(floor), Some(bound)) = (self.floor.as_deref(), bound) {
+            for &(i, j) in &v[..n] {
+                wet_vertex |= floor.floor(q.face, i, j).ok()? <= bound;
+            }
+        }
         Some(BakeProbe { continent: g.continent, elevation_m: g.elevation_m, ocean_vertex, wet_vertex })
     }
 
