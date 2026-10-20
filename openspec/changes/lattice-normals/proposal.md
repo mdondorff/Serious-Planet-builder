@@ -8,6 +8,8 @@ ADR 0073 (accepted 2026-10-20): a tile's vertex normals came from four extra hei
 - Specs: GEN-010 (version 9), GEN-019 (the canonical normal, three scenarios), GEN-020 (the 1,222 directions), GEN-025 and the renderer's pixel-hash scenario (version 9). ADR 0033's status line gets "point 4 refined by ADR 0073".
 - Tests (tier A): the ring and the corner stencils against the neighbour tiles' lattices (`core/tests/lattice_ring.rs`); the evaluation count; the lattice normal against a converged normal on a smooth field (inside a face 0.005 degrees, at a face edge its own bound of 3 degrees); the shared vertices bit for bit (compact words, CPU mesh and f64 bits) inside a face, across the twelve cube edges and at the eight corners at levels 3, 12 and 22, on one and three threads, over the eroded and the steep field; the outward orientation as an assertion.
 
+The lit, sky and water goldens that move (`lit_*`, `sky_*`, `water_class_*`) are not blessed by the tool: they go to the owner's `/bless` with the hillshades of SPIKE-24 as evidence (ADR 0073 consequences, ADR 0017). The debug golden `terrain_cube_corner_normals` and the shading golden `lit_orbit_lighting_ev15` are declared changes. A pre-filled pack and the 16384-cell store's tiles are made again with `generate --prefill-dir` (STRM-021, tracked in `docs/status.md`). The saving (about 4.5 times fewer evaluations per tile) is an estimate until a perf window.
+
 Expected golden changes:
 - terrain_cube_corner_normals: the normal colours of the cube-corner view, 272 pixels on WARP, max delta 1 (the lattice normal differs from the stencil normal by a mean of at most 0.05 degrees)
 - lit_orbit_lighting_ev15: the lighting view of the orbit, 1 pixel on WARP, max delta 1

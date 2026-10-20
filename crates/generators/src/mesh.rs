@@ -66,6 +66,9 @@ pub const SKIRT_FRACTION: f64 = 0.08;
 /// keys differ) and the coarse pre-fill of a pack must be written again.
 /// 8 = the compact tile is the slot of GEN-025 (ADR 0062): a 32-bit height step count and two 15-bit octahedral normal components per
 /// texel, the climate block and the header inside the slot; every compact key changes, vertex tiles are unchanged.
+/// 9 = the canonical normal is the lattice normal (ADR 0073, GEN-019): the cross product of the centred differences of the lattice
+/// neighbours' positions, the ring of a tile read across tile and face edges; every key changes, heights and positions are unchanged,
+/// a pre-filled pack is written again.
 pub const MESH_VERSION: u32 = 9;
 
 /// Key of a mesh: the height key of the tile (generator, seed, mapping, tile; resolution = `cells`), the grid size, the

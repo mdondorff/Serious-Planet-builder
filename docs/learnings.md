@@ -501,3 +501,10 @@ What happened: SPIKE-17 bug 2 and SPIKE-21 showed that the sea reaches ground co
 Assumption it changes: the band elevation B(W) is a bound for flat ground only; a path over a steep pass that the erosion cuts below the level at a higher bake elevation does not conduct, and the plain behind it is dry (accepted in ADR 0071 point 2). Raising the bound needs a slope-aware rule, not a larger constant.
 Proposed follow-up: none while the steep-pass regression is acceptable; if it is not, a per-vertex slope term in the floor codes.
 Obsolete when: the coastal band is decided by the eroded terrain itself instead of by the bake elevation.
+
+## 2026-10-20 The lattice normal is not exactly radial on a sphere, and the extended plane lands off the vertex's row (ADR 0073)
+Scope: generators::normals, core::tile (ring_direction)
+What happened: the four-point stencil was exactly radial on a flat sphere; the centred differences along the lattice axes are radial only to a few thousandths of a degree (0.003 at level 6 and 16 cells) because the tangent warp makes the spacing uneven around a vertex. The ring point beyond a face edge cannot come from re-projecting the extended cube plane: it lands off the vertex's row by up to a cell at the corner. It comes from the exact integer cube point (the edge point moved one cell back against the face normal), which lands on the neighbour's own lattice.
+Assumption it changes: a lattice stencil across a cube edge is a function of integers, not of the warp; a flat-sphere test of a lattice normal needs a bound of its own (0.01 degrees), not the old exact radial one.
+Proposed follow-up: none.
+Obsolete when: the face mapping gives equal spacing on both sides of every vertex, or the normal no longer reads the lattice.

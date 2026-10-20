@@ -119,6 +119,7 @@ fn the_lattice_normal_equals_a_converged_normal_on_a_smooth_field_inside_a_face_
     let m = &TangentWarp;
     let cells = 32u32;
     let mut worst_inside: f64 = 0.0;
+    // Vertices on a face edge, cube corners included, are the "edge" vertices of this test.
     let mut worst_edge: f64 = 0.0;
     let mut tilted: f64 = 0.0;
     for t in [id(0, 12, 2000, 1500), id(2, 12, 100, 3000), id(4, 14, 6000, 9000), id(1, 12, 0, 2048), id(3, 12, 4095, 77), id(5, 13, 10, 0)]
@@ -248,11 +249,12 @@ fn assert_shared_vertices_agree(tiles: &[TileId], normals: &[Normals], cells: u3
 }
 
 // spec: GEN-019
-// spec: COORD-007
+// spec: REND-009
 #[test]
 fn tiles_sharing_a_vertex_compute_bit_identical_normals_inside_a_face_across_the_cube_edges_and_at_the_cube_corners_on_one_and_three_threads(
 ) {
     let cells = 16u32;
+    // The reference field with its relief; the steep field has its own test below.
     let eroded = Reference(3);
     for level in [3u8, 12, 22] {
         let tiles = seam_tiles(level);
@@ -270,7 +272,7 @@ fn a_steep_field_gives_outward_normals_everywhere_and_the_same_seam_agreement() 
     use planet_generators::stress::Steep;
     let cells = 16u32;
     let steep = Steep(1);
-    for level in [9u8, 12] {
+    for level in [3u8, 12, 22] {
         let tiles = seam_tiles(level);
         // `lattice_normals` asserts n.d > 0 at every vertex that is not a cube corner: building the tiles is the check.
         let normals = all_normals(&steep, &tiles, cells, 3);

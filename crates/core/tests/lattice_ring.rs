@@ -101,6 +101,7 @@ fn a_ring_point_beyond_a_face_edge_is_the_neighbours_lattice_point_one_cell_insi
 }
 
 // spec: COORD-007
+// spec: GEN-019
 #[test]
 fn the_three_tiles_at_every_cube_corner_read_the_same_three_points_in_the_same_order() {
     let m = &TangentWarp;
