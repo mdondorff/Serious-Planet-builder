@@ -45,6 +45,13 @@ pub enum Event {
     ToggleHidden(ItemId),
     /// The `?` button or the help key: show or hide the list of keys.
     ToggleHelp,
+    /// The surface type of the selected region was picked (an index of the table).
+    SurfaceType(usize),
+    /// The mask of the selected region was set: clip `layer` inside its outline, or (not `inside`) only label.
+    Mask {
+        inside: bool,
+        layer: Option<String>,
+    },
 }
 
 /// The keys of the editor mode as the help window lists them: the key, what it does.
@@ -283,6 +290,51 @@ fn row_button_inline(ui: &mut egui::Ui, st: &mut PanelState, ev: &mut Vec<Event>
     }
 }
 
+/// The rows of a region: its surface type (a combo box over the table) and its mask (does it clip another layer inside its outline, and
+/// which one). The mask mode "outside" is not offered (the world definition refuses it for now).
+fn region_rows(ui: &mut egui::Ui, st: &mut PanelState, r: &planet_editor::params::RegionRows, ev: &mut Vec<Event>) {
+    egui::Grid::new("region-rows").num_columns(2).show(ui, |ui| {
+        ui.label("Surface type");
+        let current = r.surface_names.get(r.surface_type).copied().unwrap_or("?");
+        let combo = egui::ComboBox::from_id_salt("surface-type").selected_text(current).show_ui(ui, |ui| {
+            for (index, name) in r.surface_names.iter().enumerate() {
+                let resp = ui.selectable_label(index == r.surface_type, *name);
+                st.marks.push((format!("surface:{name}"), resp.rect));
+                if resp.clicked() {
+                    ev.push(Event::SurfaceType(index));
+                }
+            }
+        });
+        st.marks.push(("surface-type".to_string(), combo.response.rect));
+        ui.end_row();
+        ui.label("Clips");
+        let mut inside = r.clips_inside;
+        let check = ui.checkbox(&mut inside, "another layer, inside the outline");
+        st.marks.push(("mask-inside".to_string(), check.rect));
+        if check.changed() {
+            // Switching it on picks the layer it had, else the first other layer; with none to choose the session says so.
+            let layer = r.mask_layer.clone().or_else(|| r.layers.first().cloned());
+            ev.push(Event::Mask { inside, layer });
+        }
+        ui.end_row();
+        if r.clips_inside {
+            ui.label("Layer");
+            let shown = r.mask_layer.clone().unwrap_or_default();
+            let combo = egui::ComboBox::from_id_salt("mask-layer").selected_text(shown.clone()).show_ui(ui, |ui| {
+                for layer in &r.layers {
+                    let resp = ui.selectable_label(*layer == shown, layer);
+                    st.marks.push((format!("layer:{layer}"), resp.rect));
+                    if resp.clicked() {
+                        ev.push(Event::Mask { inside: true, layer: Some(layer.clone()) });
+                    }
+                }
+            });
+            st.marks.push(("mask-layer".to_string(), combo.response.rect));
+            ui.end_row();
+        }
+    });
+}
+
 fn inspector(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
     let Some(i) = d.inspector else {
         ui.weak("Inspector");
@@ -348,6 +400,10 @@ fn inspector(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec
             ui.end_row();
         }
     });
+    if let Some(r) = &i.region {
+        ui.add_space(6.0);
+        region_rows(ui, st, r, ev);
+    }
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         let r = ui.button("Fly to");
@@ -692,6 +748,45 @@ mod tests {
         assert!(rig2.st.covered.iter().all(|r| r.max.x < 800.0), "nothing on the right");
         assert_eq!(rig2.st.tab, Tab::Graph, "the first tab of the layout");
         assert!(rig2.st.mark("tab:near").is_none());
+    }
+
+    // spec: VIEW-033
+    #[test]
+    fn a_region_in_the_inspector_has_a_surface_type_and_a_mask_and_the_mask_asks_for_a_layer_to_clip() {
+        let f = fixture();
+        let layout = Layout::default();
+        let mut h = held(&f, layout.clone());
+        let rows = |clips: bool, layer: Option<&str>| planet_editor::params::RegionRows {
+            surface_names: vec!["rock", "sand", "grass"],
+            surface_type: 1,
+            clips_inside: clips,
+            mask_layer: layer.map(String::from),
+            layers: vec!["stamps".to_string(), "water".to_string()],
+        };
+        h.inspector.as_mut().unwrap().region = Some(rows(false, None));
+        let mut rig = Rig::new(&layout);
+        rig.settle(&data(&h));
+        assert!(rig.st.mark("surface-type").is_some() && rig.st.mark("mask-inside").is_some());
+        assert!(rig.st.mark("mask-layer").is_none(), "no layer to choose while it clips nothing");
+        // Switching the mask on picks the first other layer.
+        let p = rig.mark("mask-inside");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::Mask { inside: true, layer: Some("stamps".into()) }]);
+        // Clipping: the layer chooser shows, and switching it off asks for labelling only.
+        h.inspector.as_mut().unwrap().region = Some(rows(true, Some("water")));
+        rig.settle(&data(&h));
+        assert!(rig.st.mark("mask-layer").is_some());
+        let p = rig.mark("mask-inside");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::Mask { inside: false, layer: Some("water".into()) }]);
+        // The surface type combo opens on a click and offers every type.
+        let p = rig.mark("surface-type");
+        rig.click(&data(&h), p);
+        assert!(
+            ["rock", "sand", "grass"].iter().all(|n| rig.st.mark(&format!("surface:{n}")).is_some()),
+            "{:?}",
+            rig.st.marks.iter().map(|m| &m.0).collect::<Vec<_>>()
+        );
+        let p = rig.mark("surface:grass");
+        assert_eq!(rig.click(&data(&h), p), vec![Event::SurfaceType(2)]);
     }
 
     // spec: VIEW-031

@@ -597,13 +597,55 @@ impl<S: ItemStore> Editor<S> {
     /// Give the line `id` belongs to new points: its parts are made again (more, fewer or as many as before) and the items of the line
     /// are changed, put or deleted to match, as one command; the line keeps its kind, layer, parameters, name and ids where it can.
     pub fn set_line_points(&mut self, id: ItemId, points: &[GeoPoint]) -> Result<(Vec<ItemId>, Vec<Affected>), EditError> {
+        self.remake_line(id, Some(points), None, None)
+    }
+
+    /// Give the line `id` belongs to a new `amount_m` (the crest height of a ridge, the bed depth of a channel) and/or a new `width_m` (its
+    /// half-width): every part of the line changes, as one command. The reach of each part is made again (a wider line can need more parts,
+    /// and is split again), and the bound on the change is raised to hold the amount.
+    pub fn set_line_params(
+        &mut self,
+        id: ItemId,
+        amount_m: Option<f64>,
+        width_m: Option<f64>,
+    ) -> Result<(Vec<ItemId>, Vec<Affected>), EditError> {
+        self.remake_line(id, None, amount_m, width_m)
+    }
+
+    /// The line `id` belongs to made again from `points` (its own, joined, when `None`), with `amount_m` and `width_m` where given.
+    fn remake_line(
+        &mut self,
+        id: ItemId,
+        points: Option<&[GeoPoint]>,
+        amount_m: Option<f64>,
+        width_m: Option<f64>,
+    ) -> Result<(Vec<ItemId>, Vec<Affected>), EditError> {
         self.no_open_edit()?;
         let members = self.line_items(id)?;
         let first = self.items[&members[0]].clone();
         if !is_line_kind(&first.kind) {
             return Err(not_a_line(&first.kind));
         }
+        let joined;
+        let points = match points {
+            Some(p) => p,
+            None => {
+                joined = self.line_points(id)?;
+                &joined
+            }
+        };
         let group = first.group;
+        let mut params = first.params.clone();
+        let mut max_delta_m = first.max_delta_m;
+        if let Some(a) = amount_m {
+            params.insert("amount_m".into(), a);
+            if a.is_finite() {
+                max_delta_m = max_delta_m.max(a).min(planet_world_def::item::MAX_DELTA_LIMIT_M);
+            }
+        }
+        if let Some(w) = width_m {
+            params.insert("width_m".into(), w);
+        }
         let template = NewItem {
             body: first.body,
             surface: first.surface.clone(),
@@ -612,8 +654,8 @@ impl<S: ItemStore> Editor<S> {
             kind: first.kind.clone(),
             anchor: first.anchor,
             reach_m: first.reach_m,
-            max_delta_m: first.max_delta_m,
-            params: first.params.clone(),
+            max_delta_m,
+            params,
             name: first.name.clone(),
             notes: first.notes.clone(),
             points: Vec::new(),
