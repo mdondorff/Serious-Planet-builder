@@ -261,7 +261,7 @@ fn case_item(
 /// Degrees of longitude and latitude that are `east_m` and `north_m` metres at the view's place (latitude 20, longitude 30).
 fn view_degrees(east_m: f64, north_m: f64, planet_radius_m: f64) -> (f64, f64) {
     let lat = 20.0f64;
-    (lat + (north_m / planet_radius_m).to_degrees(), 30.0 + (east_m / (planet_radius_m * lat.to_radians().cos())).to_degrees())
+    (lat + (north_m / planet_radius_m).to_degrees(), 30.0 + (east_m / (planet_radius_m * libm::cos(lat.to_radians()))).to_degrees())
 }
 
 /// The ridge case: one straight ridge of [`LINE_LENGTH_M`] running east, centred on the place the views look at (17 points, so a point
@@ -1022,7 +1022,7 @@ mod tests {
         assert_eq!(names(200.0, false).len(), 3 + 2 + 2);
         assert_eq!(names(2_000.0, false).len(), 3 + 2 + 2 + 2);
         assert_eq!(names(20_000.0, false), ["stamp radius 5000 m", "stamp radius 40000 m"]);
-        assert!(REGIONAL_RADII_M[1] <= planet_world_def::cells::CELL_EDGE_M, "the largest stamp an item can be");
+        const { assert!(REGIONAL_RADII_M[1] <= planet_world_def::cells::CELL_EDGE_M, "the largest stamp an item can be") };
         // A smoke run: one altitude, the smallest of every family.
         assert_eq!(names(200.0, true).len(), 1 + 1 + 1 + 2);
         let kinds: Vec<CaseKind> = cases_at(200.0, true, R).iter().map(|c| c.kind).collect();
