@@ -769,6 +769,10 @@ pub struct PlanPipeline {
     edit_seq: u64,
     /// The plan failures dropped because the request they were made for carried other LOD parameters than the frame's.
     dropped_plan_errors: u64,
+    /// The plans refused for the frame's own request, the reason of the last one, and the message not yet taken.
+    refused_plans: u64,
+    refusal_text: Option<String>,
+    fresh_refusal: Option<String>,
 }
 
 impl PlanPipeline {
@@ -785,6 +789,9 @@ impl PlanPipeline {
             edited: BTreeSet::new(),
             edit_seq: 0,
             dropped_plan_errors: 0,
+            refused_plans: 0,
+            refusal_text: None,
+            fresh_refusal: None,
         }
     }
 
@@ -792,6 +799,16 @@ impl PlanPipeline {
     /// that received them (the coarse view switched off while its plan was made).
     pub fn dropped_plan_errors(&self) -> u64 {
         self.dropped_plan_errors
+    }
+
+    /// How many plans the worker refused for the frame's own request; each left the frame on the newest plan in hand.
+    pub fn refused_plans(&self) -> u64 {
+        self.refused_plans
+    }
+
+    /// The message of a refusal not reported yet, once (the same refusal again is counted, not reported again).
+    pub fn take_refusal(&mut self) -> Option<String> {
+        self.fresh_refusal.take()
     }
 
     /// An edit named `tiles` (the footprint find, WDEF-007): until a plan made after it is delivered, the frames draw them as stale and
@@ -856,6 +873,8 @@ impl PlanPipeline {
         match self.worker.take() {
             Some(Ok(o)) => {
                 delivered = Some((o.seq, o.plan_ms));
+                // A plan made again ends the refusal: the same reason after it is a new refusal and is reported.
+                self.refusal_text = None;
                 if o.seq >= self.edit_seq {
                     self.edited.clear();
                 }
@@ -866,7 +885,16 @@ impl PlanPipeline {
             // A refusal of a request made with other LOD parameters than this frame's (the coarse view was switched off while its plan was
             // being made) is of no use to this frame: it is dropped and counted, not returned. The frame's own refusal is returned.
             Some(Err(f)) if f.request.lod != req.lod => self.dropped_plan_errors += 1,
-            Some(Err(f)) => return Err(format!("plan for frame {}: {f}", self.frame)),
+            // The frame's own refusal degrades the frame (the newest plan in hand is kept and drawn as stale, or the cover when there is none)
+            // and is reported once through `take_refusal`: a plan the worker refuses never ends the window.
+            Some(Err(f)) => {
+                self.refused_plans += 1;
+                let reason = f.to_string();
+                if self.refusal_text.as_deref() != Some(reason.as_str()) {
+                    self.fresh_refusal = Some(format!("plan for frame {}: {reason}", self.frame));
+                    self.refusal_text = Some(reason);
+                }
+            }
             None => {}
         }
         let mut residency_delivered = None;
