@@ -471,7 +471,8 @@ impl<S: ItemStore> Session<S> {
             self.editor.delete(id)?
         };
         self.selection = None;
-        self.hover = self.hover.filter(|h| *h != id);
+        // Any part of a line that went with it, not only the selected one.
+        self.hover = self.hover.filter(|h| self.editor.item(*h).is_some());
         self.status = format!("{name} deleted; undo brings it back");
         Ok(affected)
     }

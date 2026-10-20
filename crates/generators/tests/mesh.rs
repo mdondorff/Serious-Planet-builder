@@ -352,15 +352,15 @@ fn normals_follow_the_terrain_and_agree_with_the_lattice_slope() {
     assert!(max_tilt > 0.05, "the terrain must tilt the normals measurably for this test to mean anything, got {max_tilt} degrees");
 }
 
-/// Committed known answers (mesh version 7, unchanged vertex output since 4 (the key carries the finest-level class and, since 7, the climate version; the climate is not part of this hash), generator version 2, hash version 1): identical on every platform.
+/// Committed known answers (mesh version 9, since ADR 0073 the normals are the lattice normals; vertex output unchanged since 4 (the key carries the finest-level class and, since 7, the climate version; the climate is not part of this hash), generator version 2, hash version 1): identical on every platform.
 const KNOWN_MESH_HASHES: [((u8, u8, u32, u32), u64); 3] =
-    [((0, 0, 0, 0), 4309492847019539682), ((3, 3, 5, 2), 10016309921869509435), ((5, 12, 1000, 77), 12398387814155396584)];
+    [((0, 0, 0, 0), 9172535564577792395), ((3, 3, 5, 2), 24513289909878101), ((5, 12, 1000, 77), 15006092268449450062)];
 
 // spec: GEN-010
 #[test]
 fn mesh_hashes_match_the_committed_known_answers() {
     // The table belongs to these versions: bumping either must come with new answers.
-    assert_eq!((planet_generators::mesh::MESH_VERSION, planet_generators::height::GENERATOR_VERSION), (8, 2));
+    assert_eq!((planet_generators::mesh::MESH_VERSION, planet_generators::height::GENERATOR_VERSION), (9, 2));
     for ((f, l, x, y), want) in KNOWN_MESH_HASHES {
         let got = tile_mesh(1, &TangentWarp, id(f, l, x, y), CELLS, R).content_hash();
         assert_eq!(got, want, "mesh ({f},{l},{x},{y}) changed: if intended, bump MESH_VERSION and update the table (got {got})");

@@ -1,0 +1,1 @@
+- 2026-10-20 **m6-evidence-c-gap** (sonnet-crusader, opus-planner): the M6 gate evidence list records G2 and G3 (the regional cases, #468), G8 and G9 (#470) as closed, G6 (the reads contract test and the tile-level GEN-017 test, scope cut by quota) as an open gap, and AUTH-003 as unimplemented, proposed out of M6, owner decides at the gate.

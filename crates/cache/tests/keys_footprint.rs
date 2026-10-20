@@ -301,6 +301,10 @@ fn every_item_a_stamp_generator_touches_in_a_tile_is_in_the_footprint_the_tile_d
                 let _ = f.height(p);
             }
         }
+        // The lattice normal reads the lattice and its one-sample ring (ADR 0073): both lie inside the halo, so the read set is unchanged.
+        for p in planet_generators::normals::lattice_directions(&TangentWarp, tile, 32) {
+            let _ = f.height(p);
+        }
         for touched in f.touched.lock().unwrap().iter() {
             seen += 1;
             assert!(
