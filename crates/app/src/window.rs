@@ -129,12 +129,21 @@ pub fn edit_key(code: KeyCode, logical: Option<&str>, ctrl: bool, shift: bool) -
     if ctrl && y {
         return Some(EditKey::Redo);
     }
+    if logical == Some("?") {
+        return Some(EditKey::Help);
+    }
     Some(match code {
         KeyCode::Digit1 => EditKey::Tool(1),
         KeyCode::Digit2 => EditKey::Tool(2),
         KeyCode::Digit3 => EditKey::Tool(3),
         KeyCode::Digit4 => EditKey::Tool(4),
-        KeyCode::Delete | KeyCode::Backspace => EditKey::Delete,
+        KeyCode::Digit5 => EditKey::Tool(5),
+        KeyCode::Digit6 => EditKey::Tool(6),
+        KeyCode::Digit7 => EditKey::Tool(7),
+        KeyCode::Delete => EditKey::Delete,
+        KeyCode::Backspace => EditKey::Back,
+        KeyCode::Enter | KeyCode::NumpadEnter => EditKey::Finish,
+        KeyCode::F1 => EditKey::Help,
         KeyCode::Escape => EditKey::Escape,
         _ => return None,
     })
@@ -793,7 +802,8 @@ impl App<'_> {
             Some(EditMouse::Press) => {
                 let camera = st.last_camera;
                 if let Some(e) = st.edit.as_mut() {
-                    e.press(&camera, viewport, st.cursor, &limits, field);
+                    let mods = crate::editwin::Mods { shift: st.shift, ctrl: st.ctrl };
+                    e.press_with(&camera, viewport, st.cursor, &limits, field, mods);
                     st.edit_down = true;
                 }
             }
@@ -1513,8 +1523,16 @@ mod tests {
         assert_eq!(k(KeyCode::Digit1, None, false, false), Some(Tool(1)));
         assert_eq!(k(KeyCode::Digit4, None, false, false), Some(Tool(4)));
         assert_eq!(k(KeyCode::Delete, None, false, false), Some(Delete));
-        assert_eq!(k(KeyCode::Backspace, None, false, false), Some(Delete));
+        // Backspace takes the last point of a line being drawn back, else deletes (the editor decides which).
+        assert_eq!(k(KeyCode::Backspace, None, false, false), Some(Back));
         assert_eq!(k(KeyCode::Escape, None, false, false), Some(Escape));
+        // The line and region tools, finishing, and the key list (VIEW-031).
+        assert_eq!(k(KeyCode::Digit5, None, false, false), Some(Tool(5)));
+        assert_eq!(k(KeyCode::Digit7, None, false, false), Some(Tool(7)));
+        assert_eq!(k(KeyCode::Enter, None, false, false), Some(Finish));
+        assert_eq!(k(KeyCode::NumpadEnter, None, false, false), Some(Finish));
+        assert_eq!(k(KeyCode::F1, None, false, false), Some(Help));
+        assert_eq!(k(KeyCode::Slash, Some("?"), false, true), Some(Help), "the key that types a question mark, on any layout");
         // QWERTY: the physical Z key is labelled z.
         assert_eq!(k(KeyCode::KeyZ, Some("z"), true, false), Some(Undo));
         assert_eq!(k(KeyCode::KeyZ, Some("Z"), true, true), Some(Redo));
