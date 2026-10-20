@@ -179,6 +179,14 @@ struct OpenEdit {
     now: Item,
 }
 
+/// What a load did: how many items it put into the definition, and which of them were authored against an older stage version and
+/// were re-keyed under the active one (AUTH-002).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LoadReport {
+    pub loaded: usize,
+    pub restaged: Vec<ItemId>,
+}
+
 /// The editor's state over a definition and a store.
 pub struct Editor<S: ItemStore> {
     def: WorldDefinition,
@@ -215,8 +223,14 @@ impl<S: ItemStore> Editor<S> {
     }
 
     /// Load the items of a body from the store into the definition. An item authored against other versions than the active ones is
-    /// refused with the message of `check_versions` (AUTH-002), and so is any file the store refuses; nothing is loaded then.
+    /// refused with the message of `check_versions` (AUTH-002), and so is any file the store refuses; nothing is loaded then. An item of
+    /// an older stage version is not refused: it is re-keyed under the active one and written back ([`Editor::load_report`] names them).
     pub fn load(&mut self, body: BodyId) -> Result<usize, EditError> {
+        self.load_report(body).map(|r| r.loaded)
+    }
+
+    /// [`load`](Editor::load), saying which items were re-keyed under the active stage version (AUTH-002).
+    pub fn load_report(&mut self, body: BodyId) -> Result<LoadReport, EditError> {
         self.no_open_edit()?;
         let items = self.store.load_all(body)?;
         let versions = ActiveVersions {
@@ -224,24 +238,37 @@ impl<S: ItemStore> Editor<S> {
             stage_version: self.stage_version,
             base_hash: self.def.base_hash(),
         };
-        for item in &items {
+        let mut restaged = Vec::new();
+        let mut loaded_items = Vec::with_capacity(items.len());
+        for item in items {
             item.check_versions(&versions).map_err(|m| EditError::Invalid(ItemFileError { key: "versions".into(), why: m.to_string() }))?;
             if self.items.contains_key(&item.id) {
                 return Err(EditError::Duplicate(item.id));
             }
+            if item.is_older_stage(&versions) {
+                restaged.push(item.id);
+                loaded_items.push(item.restaged(&versions));
+            } else {
+                loaded_items.push(item);
+            }
         }
         // Into a copy first, so a refused item leaves the definition as it was.
         let mut trial = self.def.clone();
-        for item in &items {
+        for item in &loaded_items {
             item.put_into(&mut trial).map_err(EditError::from)?;
+        }
+        // The re-keyed items go back to their files before the definition changes, so a store that refuses leaves everything as it was.
+        for item in loaded_items.iter().filter(|i| restaged.contains(&i.id)) {
+            self.store.put(item)?;
         }
         self.def = trial;
         // A load that finds nothing leaves the definition as it was.
-        self.revision += u64::from(!items.is_empty());
-        for item in &items {
-            self.items.insert(item.id, item.clone().canonical());
+        self.revision += u64::from(!loaded_items.is_empty());
+        let loaded = loaded_items.len();
+        for item in loaded_items {
+            self.items.insert(item.id, item.canonical());
         }
-        Ok(items.len())
+        Ok(LoadReport { loaded, restaged })
     }
 
     /// The definition as the commands have left it.

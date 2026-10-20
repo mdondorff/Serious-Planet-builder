@@ -1,0 +1,1 @@
+- 2026-10-20 stage-version-load: an item authored against an older stage version loads, is re-keyed under the active one, written back and reported (`Editor::load_report`); only a newer stage version is refused, so a stage bump no longer makes saved items unloadable (AUTH-002).

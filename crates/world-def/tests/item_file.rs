@@ -487,12 +487,20 @@ fn an_item_authored_against_other_versions_is_refused_naming_both_and_the_option
     assert!(text.contains("generator version 4 (active 5)"), "{text}");
     assert!(text.contains("pin") && text.contains("freeze") && text.contains("re-author"), "{text}");
     assert!(text.contains(&ulid_text(it.id)), "{text}");
-    let e = it.check_versions(&ActiveVersions { stage_version: 3, ..active }).unwrap_err();
-    assert!(e.to_string().contains("stage version 2 (active 3)"));
+    // An older stage version is not a mismatch: the item loads and is re-keyed (AUTH-002, `restaged`); only a newer one is refused.
+    let newer_stage = ActiveVersions { stage_version: 3, ..active };
+    assert_eq!(it.check_versions(&newer_stage), Ok(()), "an item of an older stage loads");
+    assert!(it.is_older_stage(&newer_stage) && !it.is_older_stage(&active));
+    let re = it.clone().restaged(&newer_stage);
+    assert_eq!(re.stage_version, 3);
+    assert_ne!(re.hash(), it.hash(), "the recorded version is in the item hash");
+    assert_eq!(re.spec().content_hash, it.spec().content_hash, "the stamp it makes does not change");
+    let e = it.check_versions(&ActiveVersions { stage_version: 1, ..active }).unwrap_err();
+    assert!(e.to_string().contains("stage version 2 (active 1") && e.to_string().contains("newer"), "{e}");
     let e = it.check_versions(&ActiveVersions { base_hash: 0xfeed, ..active }).unwrap_err();
     assert!(e.to_string().contains("base hash 0123456789abcdef (active 000000000000feed)"), "{e}");
     // Every difference is named.
-    let e = it.check_versions(&ActiveVersions { generator_version: 9, stage_version: 9, base_hash: 1 }).unwrap_err();
+    let e = it.check_versions(&ActiveVersions { generator_version: 9, stage_version: 1, base_hash: 1 }).unwrap_err();
     assert_eq!(e.differences.len(), 3);
 }
 
