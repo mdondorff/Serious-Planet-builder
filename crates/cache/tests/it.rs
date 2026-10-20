@@ -28,3 +28,5 @@ mod tiles;
 mod water_store;
 #[path = "water_summary_store.rs"]
 mod water_summary_store;
+#[path = "wet_floor_store.rs"]
+mod wet_floor_store;
