@@ -1,0 +1,139 @@
+diff --git a/crates/frame/tests/atmosphere.rs b/crates/frame/tests/atmosphere.rs
+index 6eb9194..945ec48 100644
+--- a/crates/frame/tests/atmosphere.rs
++++ b/crates/frame/tests/atmosphere.rs
+@@ -774,3 +774,134 @@ fn the_aerial_perspective_range_is_256_km_up_to_5_km_altitude_the_horizon_distan
+     assert_eq!(top.words(1.0, 0)[38], top.ap_range as f32);
+     assert_eq!(frame_at(atm, 1000.0, 0.5).words(1.0, 0)[38], AP_MAX_DISTANCE_M as f32);
+ }
++
++// spec: ATMO-007
++#[test]
++fn between_its_texels_the_aerial_perspective_volume_is_within_the_bound_of_the_converged_march_near_the_top_of_the_atmosphere() {
++    // SPIKE-20: the owner sees rings and bands at 97.5 km (just inside the top). The march is checked at texel centres (ATMO-007); the
++    // picture is made between them (32 rows over the field of view, 32 slices over the range, trilinear). Sweep the rays of the centre
++    // column below the horizon with ground at the end, compare the trilinear volume with the converged march of the same ray.
++    let (atm, luts) = earth();
++    let land = [0.010, 0.012, 0.006];
++    let mut worst_overall = 0.0f64;
++    let mut report = String::new();
++    for h in [20_000.0f64, 60_000.0, 97_500.0] {
++        let f = frame_at(atm, h, 0.7);
++        let mut table = vec![[0.0f64; 4]; AP_W * AP_H * AP_D];
++        for iz in 0..AP_D {
++            for iy in 0..AP_H {
++                for ix in 0..AP_W {
++                    table[(iz * AP_H + iy) * AP_W + ix] = f.ap_texel(atm, luts, ix, iy, iz);
++                }
++            }
++        }
++        let (mut worst, mut at) = (0.0f64, String::new());
++        let mut prev_err = 0.0f64;
++        let mut sign_changes = 0;
++        for k in 0..600 {
++            let b = 0.95 - 1.9 * f64::from(k) / 599.0;
++            let v = [f.fwd[0] + f.upv[0] * b, f.fwd[1] + f.upv[1] * b, f.fwd[2] + f.upv[2] * b];
++            let l = libm::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
++            let dir = [v[0] / l, v[1] / l, v[2] / l];
++            let (mu, cos_vs) = f.view_cosines(dir);
++            let Some(t_g) = distance_to_ground(f.r * mu, f.c) else { continue };
++            let o = RayOrigin { h: f.h, r: f.r, c: f.c, rmu: f.r * mu, r_musun: f.r * f.mu_sun };
++            let limit = distance_to_top(f.r * mu, f.c_top);
++            let m = atm.march(luts, &o, cos_vs, t_g.min(limit), StepLayout::Uniform(2048), Scatter::Physical { cos_gamma: cos_vs });
++            let uv = [0.5, (1.0 - b) / 2.0];
++            let ap = f.ap_lookup(&table, uv, t_g);
++            let tm = (m.transmittance[0] + m.transmittance[1] + m.transmittance[2]) / 3.0;
++            let mut err = 0.0f64;
++            for c in 0..3 {
++                let exact = land[c] * tm + m.radiance[c];
++                let got = land[c] * ap[3] + ap[c];
++                err = err.max((got - exact).abs() / exact.abs().max(1e-6));
++            }
++            if err > worst {
++                worst = err;
++                at = format!("b {b:.3} ground {:.0} km: error {:.1} %", t_g / 1000.0, err * 100.0);
++            }
++            if (err - prev_err) * prev_err < 0.0 && err > 0.005 {
++                sign_changes += 1;
++            }
++            prev_err = err;
++        }
++        report += &format!("h {h}: worst {:.2} % at {at}; error slope changes {sign_changes}\n", worst * 100.0);
++        worst_overall = worst_overall.max(worst);
++    }
++    eprintln!("{report}");
++    assert!(worst_overall <= MARCH_REL, "the trilinear aerial-perspective volume differs from the converged march by up to {:.1} %:\n{report}", worst_overall * 100.0);
++}
++
++#[test]
++#[ignore]
++fn spike20_error_split() {
++    let (atm, luts) = earth();
++    let land = [0.010, 0.012, 0.006];
++    for h in [20_000.0f64, 60_000.0, 97_500.0] {
++        let f = frame_at(atm, h, 0.7);
++        let mut table = vec![[0.0f64; 4]; AP_W * AP_H * AP_D];
++        for iz in 0..AP_D { for iy in 0..AP_H { for ix in 0..AP_W { table[(iz * AP_H + iy) * AP_W + ix] = f.ap_texel(atm, luts, ix, iy, iz); } } }
++        let err_at = |b: f64| -> Option<f64> {
++            let v = [f.fwd[0] + f.upv[0] * b, f.fwd[1] + f.upv[1] * b, f.fwd[2] + f.upv[2] * b];
++            let l = libm::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
++            let dir = [v[0] / l, v[1] / l, v[2] / l];
++            let (mu, cos_vs) = f.view_cosines(dir);
++            let t_g = distance_to_ground(f.r * mu, f.c)?;
++            let o = RayOrigin { h: f.h, r: f.r, c: f.c, rmu: f.r * mu, r_musun: f.r * f.mu_sun };
++            let limit = distance_to_top(f.r * mu, f.c_top);
++            let m = atm.march(luts, &o, cos_vs, t_g.min(limit), StepLayout::Uniform(2048), Scatter::Physical { cos_gamma: cos_vs });
++            let ap = f.ap_lookup(&table, [0.5, (1.0 - b) / 2.0], t_g);
++            let tm = (m.transmittance[0] + m.transmittance[1] + m.transmittance[2]) / 3.0;
++            Some((0..3).map(|c| ((land[c] * ap[3] + ap[c]) - (land[c] * tm + m.radiance[c])).abs() / (land[c] * tm + m.radiance[c]).abs().max(1e-6)).fold(0.0, f64::max))
++        };
++        // rows exactly (y exact, z interpolated) and halfway between rows (y interpolated too)
++        let (mut at_rows, mut between) = (0.0f64, 0.0f64);
++        for iy in 0..AP_H - 1 {
++            let b0 = 1.0 - 2.0 * (iy as f64 + 0.5) / AP_H as f64;
++            let b1 = 1.0 - 2.0 * (iy as f64 + 1.5) / AP_H as f64;
++            if let Some(e) = err_at(b0) { at_rows = at_rows.max(e); }
++            if let Some(e) = err_at(0.5 * (b0 + b1)) { between = between.max(e); }
++        }
++        eprintln!("h {h}: worst error at row centres (distance interpolation only) {:.1} %, between rows {:.1} %", at_rows * 100.0, between * 100.0);
++    }
++}
++
++#[test]
++#[ignore]
++fn spike20_orbit_error() {
++    let (atm, luts) = earth();
++    let land = [0.010, 0.012, 0.006];
++    for h in [101_000.0f64, 114_000.0, 200_000.0, 1_000_000.0] {
++        let f = frame_at(atm, h, 0.7);
++        let (big_r, top) = (atm.radius_m, atm.top_m());
++        let (mut worst, mut at) = (0.0f64, String::new());
++        let (mut changes, mut prev) = (0, 0.0f64);
++        for k in 0..800 {
++            let b = 0.95 - 1.9 * f64::from(k) / 799.0;
++            let v = [f.fwd[0] + f.upv[0] * b, f.fwd[1] + f.upv[1] * b, f.fwd[2] + f.upv[2] * b];
++            let l = libm::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
++            let dir = [v[0] / l, v[1] / l, v[2] / l];
++            let (mu, cos_vs) = f.view_cosines(dir);
++            let Some(t_g) = distance_to_ground(f.r * mu, f.c) else { continue };
++            let got = f.orbit_ray_cosines(atm, luts, mu, cos_vs, Some(t_g));
++            if !got.enters { continue; }
++            // the converged version of the same march
++            let rmu = f.r * mu;
++            let sq = libm::sqrt((rmu - f.q_top) * (rmu + f.q_top));
++            let t0 = f.c_top / (-rmu + sq);
++            let o = RayOrigin { h: top, r: big_r + top, c: atm.rho_top * atm.rho_top, rmu: -sq, r_musun: f.r * f.mu_sun + t0 * cos_vs };
++            let m = atm.march(luts, &o, cos_vs, t_g - t0, StepLayout::Uniform(4096), Scatter::Physical { cos_gamma: cos_vs });
++            let mut err = 0.0f64;
++            for c in 0..3 {
++                let a = land[c] * got.transmittance[c] + got.radiance[c];
++                let e = land[c] * m.transmittance[c] + m.radiance[c];
++                err = err.max((a - e).abs() / e.abs().max(1e-6));
++            }
++            if err > worst { worst = err; at = format!("b {b:.3} ground {:.0} km", t_g / 1000.0); }
++            if (err - prev) * prev < 0.0 && err > 0.005 { changes += 1; }
++            prev = err;
++        }
++        eprintln!("h {h}: orbit march (40 steps) worst {:.2} % at {at}; slope changes {changes}", worst * 100.0);
++    }
++}
