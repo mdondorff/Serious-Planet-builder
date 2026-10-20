@@ -1,5 +1,5 @@
 # 0070 Brush strokes stay in the item file; the blob store is specified and deferred
-Status: proposed (sonnet-explorer, 2026-10-20, for the owner via opus-planner; the blob format is the hard-to-reverse part and is not built). Extends ADR 0066 point 6 (grouped brush strokes, item files) and ADR 0069 (point lists); decides the "blob store" ADR that ADR 0007 deferred to M6, for the MVP.
+Status: accepted (owner, 2026-10-20: inline TOML strokes now, the blob store kept for a later extension; drafted by sonnet-explorer). Extends ADR 0066 point 6 (grouped brush strokes, item files) and ADR 0069 (point lists); decides the "blob store" ADR that ADR 0007 deferred to M6, for the MVP.
 Date: 2026-10-20
 Source: M6 plan row E6; ADR 0007 (storage: binary payloads in content-addressed blobs outside git); ADR 0066 point 6; ADR 0069; CLAUDE.md (no binary over 1 MB without an ADR); WDEF-003, WDEF-010, AUTH-005
 
