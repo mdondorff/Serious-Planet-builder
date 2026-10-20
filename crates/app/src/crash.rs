@@ -197,7 +197,8 @@ mod tests {
             log: &log,
             secs: 1_792_518_541,
         });
-        for want in ["plan refusal", "too steep", "pipeline.rs:869", "0: frame", "abc123", "editor --smoke", "a line", "planet-camera-path"] {
+        for want in ["plan refusal", "too steep", "pipeline.rs:869", "0: frame", "abc123", "editor --smoke", "a line", "planet-camera-path"]
+        {
             assert!(text.contains(want), "missing {want}: {text}");
         }
     }
