@@ -1360,7 +1360,16 @@ mod tests {
         assert!(coarse.tau_px > 2.0 * base.tau_px && coarse.tau_px < 4.0 * base.tau_px, "{}", coarse.tau_px);
         assert_eq!(LodParams { tau_px: base.tau_px, ..coarse.clone() }, base, "nothing else changes");
         coarse.validate().expect("the coarse parameters are valid at 1080p");
-        assert!(LodParams { tau_px: coarse.tau_px * 1.05, ..base.clone() }.validate().is_err(), "it is the largest that is valid");
+        // It is the largest the plan accepts wherever it accepts the base ones, with the margin kept: a little more is invalid by the node
+        // radius alone or leaves a level the base meets (with the neighbourhood's height extent added) over the limit.
+        let bigger = LodParams { tau_px: coarse.tau_px * 1.05, ..base.clone() };
+        let too_much = bigger.validate().is_err()
+            || base.worst_case_levels().into_iter().any(|l| {
+                let (bs, be) = base.morph_interval_worst(l);
+                let (cs, ce) = bigger.morph_interval_worst(l);
+                be - bs >= 0.05 * be && ce - cs < 0.05 * ce
+            });
+        assert!(too_much, "it is the largest that keeps the plan from refusing it");
         assert!((base.coarse_factor() - coarse.tau_px / base.tau_px).abs() < 1e-12);
         // Parameters with room (2.5 px, the golden tolerance) get exactly four times.
         let fine = LodParams { tau_px: 2.5, ..base.clone() };

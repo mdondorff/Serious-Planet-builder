@@ -409,6 +409,40 @@ fn a_jump_draws_a_cover_at_frame_zero_and_the_full_plan_arrives_later() {
     assert_eq!(f3.draw.plan, plan_b);
 }
 
+// spec: STRM-016, VIEW-014
+#[test]
+fn a_plan_refusal_for_other_lod_parameters_than_the_frames_is_dropped_and_counted_not_returned() {
+    // SPIKE-19: the coarse view's plan is refused while the worker is busy; by the time the refusal arrives the frame asks for the base
+    // parameters again (F4 pressed twice). That refusal is of no use to the frame: it must not end the window.
+    let spawner = Arc::new(ManualSpawner::default());
+    let mut pipe = PlanPipeline::new(worker(spawner.clone(), 1));
+    let everything = Everything::new();
+    let good = request(camera_at(300.0, 0.0));
+    let mut bad = good.clone();
+    // Far too coarse for 16 cells: the morph interval of some level is empty and the plan is refused.
+    bad.lod.tau_px = 200.0;
+    assert!(bad.lod.validate().is_err() && good.lod.validate().is_ok());
+    assert!(plan_terrain_field(&bad, &Reference(7)).is_err(), "the plan refuses the coarse parameters");
+
+    // A plan of the good parameters is in hand, then the frame asks for the bad ones and the worker refuses them.
+    pipe.begin_frame(&good, &everything).unwrap();
+    spawner.run(2);
+    pipe.begin_frame(&good, &everything).unwrap();
+    pipe.begin_frame(&bad, &everything).unwrap();
+    spawner.run(2);
+    // The refusal arrives at a frame that asks for the good parameters again: dropped, counted, the frame draws.
+    let f = pipe.begin_frame(&good, &everything).expect("a refusal for other parameters does not end the frame");
+    assert!(!f.draw.plan.nodes.is_empty());
+    assert_eq!(pipe.dropped_plan_errors(), 1);
+
+    // A refusal for the frame's own parameters is still returned (it is the frame's error).
+    pipe.begin_frame(&bad, &everything).unwrap();
+    spawner.run(2);
+    let e = pipe.begin_frame(&bad, &everything).unwrap_err();
+    assert!(e.starts_with("plan for frame") && e.contains("invalid LOD parameters"), "{e}");
+    assert_eq!(pipe.dropped_plan_errors(), 1, "that one was returned, not dropped");
+}
+
 // spec: STRM-016
 #[test]
 fn the_stale_plan_rule_follows_translation_rotation_and_the_frame_setup() {

@@ -279,3 +279,77 @@ fn balancing_equals_the_reference_algorithm_on_random_partitions() {
     }
     assert!(needed_splits >= 30, "only {needed_splits} of 60 random trees needed balancing: the test would prove little");
 }
+
+/// A field of zero height whose global bound is the eroded 128-bake world's (9,735 m): the plan reads only the bound for the volumes of
+/// the coarse tiles, so this is the plan the window makes over that world.
+struct Bound9735;
+
+impl planet_generators::height::HeightField for Bound9735 {
+    fn height(&self, _: planet_core::Vec3) -> f64 {
+        0.0
+    }
+    fn seed(&self) -> u64 {
+        5
+    }
+    fn implementation_id(&self) -> &'static str {
+        "bound-9735"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        9735.0
+    }
+}
+
+// spec: LOD-003, LOD-011, VIEW-014
+#[test]
+fn the_coarse_lod_the_window_derives_is_never_refused_by_the_plan_it_makes() {
+    // SPIKE-19: `LodParams::coarse` picks the largest factor `validate` accepts (the morph interval of every level at least 5 % of its
+    // end, from the node radius alone: zero margin at the edge, ratio 0.950000 at level 4), but the plan adds the height extent of the
+    // neighbourhood to the start (`split + 2 rho`, rho from the volume's height range) and refuses start > 0.95 end. With heights up to
+    // 9,735 m the level-4 start is 2,167,273.1 against 0.95 x 2,279,496.0 = 2,165,521.2: the plan refuses the F4 coarse view of the
+    // window at a quarter of all orbital poses, and a refusal that arrives after F4 was pressed again aborts the window.
+    let size = (320u32, 200u32);
+    let field = Bound9735;
+    let base = planet_frame::LodParams {
+        cells: 32,
+        viewport_h_px: f64::from(size.1),
+        tau_px: 6.0 * f64::from(size.1) / 1440.0,
+        max_height_m: 9735.0,
+        ..planet_frame::LodParams::earth_1080p()
+    };
+    base.validate().unwrap();
+    let coarse = base.coarse();
+    let mut refused = Vec::new();
+    for alt in [3.0e5, 6.0e5, 1.2e6, 1.8e6, 2.4e6] {
+        let dir = planet_core::Vec3::new(1.0, 0.0, 0.0);
+        let camera = planet_frame::Camera::at_surface_point(
+            planet_core::PlanetFixed(dir * (6_371_000.0 + alt)),
+            planet_core::Vec3::new(0.0, 1.0, 0.0),
+            1.2,
+            60f64.to_radians(),
+            f64::from(size.0) / f64::from(size.1),
+            0.1,
+        );
+        let req = planet_frame::TerrainRequest {
+            camera,
+            size,
+            view: planet_frame::TerrainView::Level,
+            lod: coarse.clone(),
+            face_mapping: "tangent-v1".into(),
+            seed: 5,
+        };
+        if let Err(e) = planet_frame::plan_terrain_field(&req, &field) {
+            refused.push(format!("alt {alt} m: {e}"));
+        }
+    }
+    assert!(
+        refused.is_empty(),
+        "the plan refuses the coarse LOD {} (factor {:.4}) at {} of 5 poses: {:?}",
+        "of the window",
+        base.coarse_factor(),
+        refused.len(),
+        refused.first()
+    );
+}
