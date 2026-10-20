@@ -1,0 +1,47 @@
+# M6 gate evidence (sonnet-crusader, 2026-10-20)
+
+Scope: for each M6 exit criterion (`docs/briefings/m6-editor-plan.md`) and each row of "Editor MVP requirements" (`docs/status.md`), the tests that prove it, or `gap: <what>`. A test is `file::name` (names shortened to the first words; `spec-lint` ties each to its requirement ID). Tier: A = CPU, B = oracle, C = software adapter or GPU, D = owner. Measurements are perf windows (`docs/perf/`), not tests. Gaps are listed, not fixed.
+
+## Exit criteria
+
+| Criterion | Evidence | Gap |
+|---|---|---|
+| Edit visible: preview <= 16 ms | Measured: window 18 (`docs/perf/window-18.md`), 2.7 to 6.7 ms in all 9 cases. Tests: `frame/tests/preview.rs`, `frame/tests/managed.rs::the_edited_tiles_are_previewed_in_the_frame_after_the_edit...`, `render/tests/gpu_preview.rs` (REND-033, tiers A and C); the scene itself: `app/tests/gpu_edit_perf.rs` (smoke only, TEST-019/041/042/043) | none for stamps; brush, lines and regions are not measured (see G3) |
+| Edit visible: drawn exact <= 300 ms (stamp up to 150 m) / <= 1 s (up to 500 m, or at 1 m altitude) | Window 18: 8 of 9 cases ok at settle 0 and 40; ADR 0072 reads "exact" as the drawn tiles; tests STRM-031 (`streaming/tests/refresh_preempt.rs`, `frame/tests/managed.rs::twenty_quick_edits...`), REND-032 (`frame/tests/managed.rs::an_edit_refreshes_the_tiles_it_touches...`) | **G1: 200 m altitude with a 150 m stamp is OVER (508 ms at settle 0, 544 ms at settle 40, against 300).** Open owner item; coarse-first refinement parked (`docs/status.md`) |
+| Undo/redo over 1,000 operations | `editor/tests/commands.rs::a_thousand_commands_undo_to_the_exact_starting_hash_and_redo...` and `::a_thousand_commands_undo_and_redo_through_files_that_are_written_through...` (AUTH-004); the UI keys: `app/src/editwin.rs::a_stamp_is_placed_dragged_typed_undone_redone_and_deleted...` | none |
+| Item files merge cleanly in git | `editor/tests/commands.rs::two_additions_made_on_two_branches_merge_in_git_without_a_conflict_and_load_as_one_definition` (AUTH-001); fixed key order and bit-exact round trip: `world-def/tests/item_file.rs::an_item_file_has_a_fixed_key_order_and_round_trips_bit_for_bit` | a merge conflict inside one brush item (two sessions adding strokes) is not tested; ADR 0070 says it is a TOML hunk and the editor appends only to its own session's items |
+
+## Editor MVP rows
+
+| Row | Evidence | Gap |
+|---|---|---|
+| Edits: stamps | `world-def/tests/item_stamp.rs`, `stamp_items.rs` (WDEF-010); `generators/tests/stamp_stage.rs`, `stamp_stage_eroded.rs`, `render/tests/gpu_stamps.rs` (GEN-026); `editor/tests/model.rs` handles and drags, `editor/tests/interaction.rs` (VIEW-017, 019) | none |
+| Edits: lines (ridge, channel) | `world-def/tests/line_items.rs`, `line_items_put.rs` (WDEF-011, AUTH-005 schema 2); `generators/tests/line_stage.rs` (GEN-028); `editor/tests/lines.rs` (VIEW-028), `editor/tests/line_tools.rs` (VIEW-029), `editor/src/polyline.rs` (VIEW-027), `app/src/editwin.rs::a_line_is_drawn_with_the_keys...` (VIEW-031), `editor/tests/inspector_lines.rs` (VIEW-033) | the look of the drawn path and handles is tier D |
+| Edits: regions (mask, surface type, name) | `world-def/tests/regions.rs` (WDEF-012); `generators/tests/region_mask.rs` (GEN-029); `frame/tests/regions.rs`; inspector surface type and mask: `editor/tests/inspector_lines.rs::a_region_takes_a_surface_type_and_a_mask...`, `app/src/panels.rs::a_region_in_the_inspector...`; rename: `app/src/editwin.rs` rename event (VIEW-017) | none |
+| Scale: local (1 to 500 m, exact <= 1 s) | Window 18 (see above) | **G1** (the 150 m stamp at 200 m) |
+| Scale: regional (1 to 50 km, preview at once, exact in seconds) | none | **G2: the edit-latency scene measures stamps up to 500 m only; no test or window covers a 1 to 50 km edit (a stamp, a line or a region of that size)** |
+| Brush: raise, lower, smooth, flatten; after stamps; metric radius and strength | `world-def/tests/brush_items.rs` (WDEF-013, AUTH-005 schema 3); `generators/tests/brush_stage.rs` (GEN-030, 13 tests); `editor/tests/brush.rs` (VIEW-035: ranges in metres, filing, join, undo), `app/src/editwin.rs::a_brush_is_picked_with_the_keys...`, `app/src/panels.rs::the_rail_has_the_four_brushes...`; preview: `frame/tests/preview_brush.rs`, `render/tests/gpu_preview.rs` (VIEW-036) | **G3: brush edit latency is unmeasured** (TEST-042/043 scenes exist, no window yet). **G8: "after stamps" holds by the layer rule (`brush` is outside the stack, so it follows `stamps`; `app/tests/live_definition.rs::the_stages_stack_in_the_order_of_the_layer_stack...`), with no end-to-end test of a brush over a stamp.** Smooth is not previewed (known limit). No per-stroke editing |
+| Editing a stamp: handles on the planet, typed values | `editor/tests/model.rs` (VIEW-017), `editor/tests/interaction.rs` (VIEW-019), `app/src/editwin.rs::a_stamp_is_placed_dragged_typed...`, `app/src/panels.rs::a_typed_value_is_asked_for_when_the_field_is_left...` | none |
+| Managing edits: map first (hover outline and name, select), search, nearby list, layer list, graph | `editor/tests/interaction.rs` (VIEW-019, 020), `editor/tests/model.rs` (VIEW-015, 016), `editor/tests/layer_rows.rs` (VIEW-016 rows), `app/src/panels.rs` (VIEW-021) | the look of the panels is tier D |
+| Relevance (the camera decides what is shown) | `editor/tests/model.rs::near_the_ground_small_stamps_show_with_the_large_ones_and_from_high_up`, `::the_reach_on_the_screen_is_...`, `::an_edit_shows_only_...` (VIEW-015) | none |
+| Views: 3D free camera, globe overview | free camera and mouse look: `frame/src/mouselook.rs`, `frame/tests/mouselook_replay.rs` (VIEW-010); globe: `frame/tests/globe.rs`, `globe_session.rs`, `frame/src/viewer.rs::g_toggles_the_globe_overview...` (VIEW-013) | **G5: the keyboard bug (movement keys dead after G, owner 2026-10-20): root cause open** (`docs/status.md`); the viewer is cleared by `frame/src/viewer.rs::the_movement_keys_move_the_free_camera_after_the_overview...`, the title readout exists |
+| Surface type: stored on the region, table, debug overlay tints by type | `world-def/tests/regions.rs::the_table_has_the_nine_surface_types...` (WDEF-012); overlay: `frame/tests/overlay.rs`, `render/tests/gpu_overlay.rs::the_regions_overlay_mixes_the_tint...` (VIEW-030) | materials are drawn later (out of the MVP) |
+| Line storage: one item per line, split into linked items, points list in the file | `world-def/tests/line_items.rs` (AUTH-005 schema 2), `editor/tests/lines.rs::a_line_longer_than_one_reach_is_put_as_linked_parts_in_one_command...` (VIEW-028), `editor/src/polyline.rs::a_line_that_fits_one_item_stays_whole...` (VIEW-027), `editor/tests/layer_rows.rs` (one row per split line) | none |
+| Region mask: clip inside; outside deferred (owner) | `generators/tests/region_mask.rs::inside_a_region_that_clips_the_height_is_the_bases...` (GEN-029), `generators/tests/brush_stage.rs::a_region_of_mode_2_over_the_point_cuts_a_brush...`, `world-def/tests/regions.rs` | clip outside is deferred by the owner (2026-10-20, `openspec/changes/region-mode1`): not a gap |
+| History: plain undo/redo, 1,000 operations | see the exit criterion | none |
+| Input: mouse and keyboard | `app/src/window.rs::the_keys_of_the_editor_mode_are_the_numbers_ctrl_z_and_y_delete_and_es...`, `::the_mouse_in_the_editor_mode_presses_in_the_world...` (VIEW-022); `app/tests/gpu_window.rs::the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window...` (tier C, software adapter) | 1000 Hz mice and DPI scaling were never tested (`docs/status.md`): a manual check at the laptop |
+
+## Gaps in one list
+
+| # | Gap | Where it stands |
+|---|---|---|
+| G1 | 200 m altitude, 150 m stamp: drawn exact 508 to 544 ms against 300 ms | window 18; open owner item; coarse-first refinement parked |
+| G2 | Regional scale (1 to 50 km) has no test and no measurement | edit-latency radii stop at 500 m; a regional case needs a decision on what "preview at once, exact in seconds" is measured against |
+| G3 | Brush edit latency and the preview cost at 0, 8 and 32 stamps are unmeasured; lines and regions have no edit-latency case | TEST-042/043 scenes are in main with smoke only; a perf window reads them |
+| G4 | The look of the editor (panels, overlays, the brush ring and the live stroke, the layer rows) | tier D: the owner's review at the gate |
+| G5 | Keyboard movement dead after G: root cause not found | `docs/status.md` Tracked; the owner reads the title readout when it recurs |
+| G6 | M3 gate condition 2 (per-tile node set id, the declared-versus-recorded reads contract test, a tile-level GEN-017 test) | `docs/status.md` Tracked, trigger "before the first regional field is stored"; the plan put it in E1: not built |
+| G7 | AUTH-003 (version pinning, freeze and bake) has no test that cites it | spec-lint passes because the requirement is not tiered to a test; not an M6 criterion |
+| G8 | No end-to-end test that a brush item applies after a stamp it overlaps | the layer rule is tested, the stage per layer is tested; the combination is not |
+| G9 | Verifier minor gaps left in the editor: `Editor::set_line_params` does not enforce the inspector ranges (the UI path does); `WidthTooLarge` at the part budget is untested; hover can dangle after a group delete; redo after a group delete is untested | `docs/status.md` Tracked, "Editor follow-ups" |
+| G10 | 1000 Hz mouse and DPI scaling of the raw mouse look | manual check at the laptop |

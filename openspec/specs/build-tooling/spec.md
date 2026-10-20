@@ -332,3 +332,66 @@ Source: opus-planner (2026-10-19), actions/partner-runner-images#169
 #### Scenario: The install is paired
 - **WHEN** `ci.yml` is read
 - **THEN** every install step has its retry with the same tools right after it, the first with `continue-on-error`, the retry with the failure condition
+
+### Requirement: BUILD-018 Tier C on Windows runs in two halves
+The CI job that runs tier C SHALL run its Windows leg as two jobs, `windows (WARP) C 1/2` and `windows (WARP) C 2/2`, each `cargo xtask test gpu -- --partition count:N/2`, so that every tier-C test runs in exactly one half and each half's job time stays under the 16 min budget of BUILD-014. The Linux leg SHALL run whole. The artifacts of a half SHALL carry its number (`review-Windows-N`, `test-logs-Windows-gpu-N`).
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-19), BUILD-005, BUILD-014
+
+#### Scenario: Two halves
+- **WHEN** the repository check test reads the workflow file
+- **THEN** the tier-C matrix holds a Windows entry for part 1 and one for part 2, the test command takes `--partition count:{part}/2`, and the artifact names carry the part
+
+### Requirement: BUILD-019 Test fast keeps a series of its times
+After every `cargo xtask test fast` run whose build succeeded, the command SHALL append one tab-separated line to `target/test-logs/test-fast-series.tsv`: the UTC time (`YYYY-MM-DDTHH:MM:SSZ`), the selection (`every crate` or the selected crate names joined by `+`), the build seconds, the test seconds, their sum (one decimal each) and `pass` or `fail`. A file that cannot be written SHALL be a warning, not a failure. The log rotation of BUILD-012 SHALL leave the file alone.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-19), BUILD-014, BUILD-012, BUILD-003
+
+#### Scenario: One line per run
+- **WHEN** a run of the crates `planet-frame` and `planet-render` builds for 12.0 s, tests for 9.5 s and passes at 2026-10-19 17:25:38 UTC, and a later run of every crate builds for 1.3 s, tests for 35.1 s and fails
+- **THEN** the series file holds `2026-10-19T17:25:38Z`, `planet-frame+planet-render`, `12.0`, `9.5`, `21.5`, `pass` and then a line with `every crate`, `1.3`, `35.1`, `36.4`, `fail`, and rotating the logs of `test-fast` removes neither
+
+### Requirement: BUILD-020 CI evidence is recorded per job
+`cargo xtask ci-stats --record --since YYYY-MM-DD [--until YYYY-MM-DD]` SHALL read, with `gh`, every completed run created in the range (pull requests and pushes, every branch) and append one tab-separated row per job that ended `success` or `failure` to `docs/perf/ci-history.tsv`: the run id, the creation time, the event, the branch, the job name, the conclusion, the duration in seconds and the names of the job's failed steps joined by `+` (empty for a success). A run whose id is already in the file SHALL be skipped, so that a repeated call adds nothing. The file SHALL start with a header row. A missing `--since` SHALL be an error.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-19), BUILD-014
+
+#### Scenario: Rows and the skip
+- **WHEN** run 101 (a pull request on `change/x`) has the jobs `linux (lavapipe) A+B` (success, 300 s) and `windows (WARP) C 1/2` (failure, 60 s, failed step `test gpu (tier C, software adapter)`) and a skipped job, and the file already holds run 99
+- **THEN** two rows for run 101 are appended, the failed one ending in `test gpu (tier C, software adapter)`, the skipped job has none, and recording run 101 and run 99 again adds no row
+
+### Requirement: BUILD-021 A change with no crate path selects no crate
+`cargo xtask test fast` SHALL select the tier-A tests of the crates the changed files name and every crate above them (BUILD-003), of `xtask` for a file under `xtask/` or `.github/`, and of every crate when the list of changed files is empty (nothing changed) or holds a Cargo manifest, `Cargo.lock`, a file under `.cargo/` or `.config/`, or a file of `crates/testkit`, `crates/perf` or any other directory under `crates/` that is not in the crate chain (a crate added without being placed in it has no known crate above it). A file that a tier-A test reads selects that test's crate: `deny.toml`, `openspec/changes/`, `tests/goldens/` and any `.sh`, `.ps1`, `.bat` or `.cmd` file (in any letter case) select `xtask`, `clippy.toml` selects `core`, and `spikes/mouse-look/` selects `frame`. A list of changed files none of which is any of these (for example only files under `docs/`, the rest of `openspec/`, `.claude/`, other `spikes/`, root `*.md` files or other tool configuration) SHALL select no crate: `test fast` SHALL say so and succeed without building, and `cargo xtask prepush` SHALL run `spec-lint` instead of `check` and `test fast` (and `test gpu` when the diff holds a golden-producing path, BUILD-016).
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-19), BUILD-003, BUILD-016, CLAUDE.md (docs-only changes)
+
+#### Scenario: Docs only
+- **WHEN** the changed files are `docs/status.md` and `openspec/specs/viewer/spec.md`
+- **THEN** no crate is selected, `test fast` runs nothing, and `prepush` runs only `spec-lint`
+
+#### Scenario: A crate path, the workspace, nothing
+- **WHEN** the changed files are `docs/a.md` and `crates/streaming/src/lib.rs`, or `docs/a.md` and `Cargo.lock`, or none
+- **THEN** the first selects `planet-streaming` and the crates above it, the second and the third every crate
+
+### Requirement: BUILD-022 Prepush lints the branch merged onto main
+`cargo xtask prepush` SHALL run, before its other steps, `spec-lint` on the tree that merging `HEAD` with the fetched `origin/main` makes (`git merge-tree --write-tree`, checked out in a temporary worktree that is removed afterwards), so that a requirement ID, a spec or a change that another PR added meanwhile collides in prepush and not on main. The branch, its index and its working tree SHALL NOT be changed. A branch that already holds `origin/main` SHALL pass this step without a merge; a fetch that fails SHALL print that the step is skipped and pass; a branch that does not merge cleanly SHALL fail naming `origin/main` and the merge to make first. The step SHALL be in every prepush plan, docs-only ones included.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-20), BUILD-016, BUILD-021
+
+#### Scenario: The plan
+- **WHEN** the plan of a docs-only diff, of a crate diff and of a diff with a golden path is listed
+- **THEN** each starts with `merged spec-lint`, followed by the steps BUILD-016 and BUILD-021 name
+
+#### Scenario: The tree id
+- **WHEN** the first line of `git merge-tree --write-tree` is a 40 or 64 digit hexadecimal id, and when it is a conflict message or empty
+- **THEN** the first is taken as the tree and the others are not

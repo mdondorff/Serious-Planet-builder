@@ -254,7 +254,7 @@ Source: owner (M6 step U2), ADR 0001, SPIKE-14, VIEW-011
 - **THEN** the nearest in its own radius wins (a small item near its centre inside a large one), equal keys go to the smaller radius then the lower id, a hit outside every footprint gives none, and small arcs of 1 mm to 2,000 km measure within 1 nm
 
 ### Requirement: VIEW-014 Debug overlay and coarse LOD view
-The editor window SHALL be able to draw a debug overlay over the lit terrain so that the real mesh density and the levels of detail are visible, and to show the mesh at a coarser level of detail for inspection. F3 cycles the overlay (off, tiles, mesh, regions, off; the regions overlay is VIEW-030) and F4 toggles the coarse LOD; both are off at the start; both act only in `planet editor` and on the lit path (the headless modes, `test-render` and the golden paths never set them, so no golden moves). The overlay is plan data (CON-03): `planet_frame::look::Overlay` (`None`, `Tiles`, `Mesh`, `Regions`; further debug overlays plug into the same enum; `ALL` and `next` give the cycle, `shader_code` 0, 1, 2, 3) is a field of `LitPlan` (`overlay`), `LitPlan::with_overlay` sets it, and the plan text and hash carry it only when it is not `None` (` overlay tiles`, ` overlay mesh` or ` overlay regions` after the other tokens, parsed back and validated). The renderer does not branch on a mode of its own: the plan's value reaches the lit fragment stages through the globals (`extra.y`) and the node record (`morph.w` carries the tile's level). The fragment form needs no wgpu feature, so it runs on WARP, lavapipe and the discrete GPU: from the compact tile's grid coordinates it draws, in `Tiles`, a faint tint of the level's colour and the tile's outline, and in `Mesh` also a line where the fragment is within about a pixel of a grid edge or of the diagonal of the grid's triangulation (the cell's `a` to `c`, as `grid_indices`), a fixed line that does not fade out however fine the mesh is. The colour is one of eight per level, wrapping; the brightness falls with the vertex morph factor (full detail bright, fully morphed on the parent grid 0.3). The lines are radiance in scene units (the pre-exposure factor of the frame times 0.8), so they show at any exposure. With the overlay `None` the frame is the lit frame bit for bit. The coarse LOD multiplies the LOD error bound `tau_px` by 4 (`COARSE_LOD_FACTOR`), or by the largest factor below 4 that keeps `LodParams::validate` satisfied (`LodParams::coarse`, `coarse_factor`; the production 1080p parameters, 6 px and 32 cells, allow about 2.6), in the request the frame is planned with (`effective_lod`; terrain and water alike), so the mesh edges are about that many times longer on the screen: it changes the view, not the data, and is decided in the GPU-free plan, never in a shader. The coarser bound can fail on steep terrain (the plan worker reports a tile whose morph interval has no room): the frame then falls back to the base parameters, the switch turns itself off (F4 asks again) and the smoke summary counts the refusal; the window never stops for it. The editor's corner label shows the state (`overlay_status`: `Overlay: Mesh, LOD x4`, `Overlay: Tiles, LOD x2.6`, `Overlay: Regions, LOD x1`, `Overlay: off, LOD x1`; the factor is the one the plan uses).
+The editor window SHALL be able to draw a debug overlay over the lit terrain so that the real mesh density and the levels of detail are visible, and to show the mesh at a coarser level of detail for inspection. F3 cycles the overlay (off, tiles, mesh, regions, off; the regions overlay is VIEW-030) and F4 toggles the coarse LOD; both are off at the start; both act only in `planet editor` and on the lit path (the headless modes, `test-render` and the golden paths never set them, so no golden moves). The overlay is plan data (CON-03): `planet_frame::look::Overlay` (`None`, `Tiles`, `Mesh`, `Regions`; further debug overlays plug into the same enum; `ALL` and `next` give the cycle, `shader_code` 0, 1, 2, 3) is a field of `LitPlan` (`overlay`), `LitPlan::with_overlay` sets it, and the plan text and hash carry it only when it is not `None` (` overlay tiles`, ` overlay mesh` or ` overlay regions` after the other tokens, parsed back and validated). The renderer does not branch on a mode of its own: the plan's value reaches the lit fragment stages through the globals (`extra.y`) and the node record (`morph.w` carries the tile's level). The fragment form needs no wgpu feature, so it runs on WARP, lavapipe and the discrete GPU: from the compact tile's grid coordinates it draws, in `Tiles`, a faint tint of the level's colour and the tile's outline, and in `Mesh` also a line where the fragment is within about a pixel of a grid edge or of the diagonal of the grid's triangulation (the cell's `a` to `c`, as `grid_indices`), a fixed line that does not fade out however fine the mesh is. The colour is one of eight per level, wrapping; the brightness falls with the vertex morph factor (full detail bright, fully morphed on the parent grid 0.3). The lines are radiance in scene units (the pre-exposure factor of the frame times 0.8), so they show at any exposure. With the overlay `None` the frame is the lit frame bit for bit. The coarse LOD multiplies the LOD error bound `tau_px` by 4 (`COARSE_LOD_FACTOR`), or by the largest factor below 4 that keeps `LodParams::validate` satisfied (`LodParams::coarse`, `coarse_factor`; the production 1080p parameters, 6 px and 32 cells, allow about 1.7, VIEW-032), in the request the frame is planned with (`effective_lod`; terrain and water alike), so the mesh edges are about that many times longer on the screen: it changes the view, not the data, and is decided in the GPU-free plan, never in a shader. The coarser bound can fail on steep terrain (the plan worker reports a tile whose morph interval has no room): the frame then falls back to the base parameters, the switch turns itself off (F4 asks again) and the smoke summary counts the refusal; the window never stops for it. The editor's corner label shows the state (`overlay_status`: `Overlay: Mesh, LOD x4`, `Overlay: Tiles, LOD x1.7`, `Overlay: Regions, LOD x1`, `Overlay: off, LOD x1`; the factor is the one the plan uses).
 
 Verify: A, C
 Status: active
@@ -266,7 +266,7 @@ Source: owner (2026-10-19, via opus-planner), CON-03, CON-18, VIEW-011, VIEW-030
 
 #### Scenario: F3 and F4
 - **WHEN** F3 is pressed four times and F4 twice in the editor, in the lit and debug paths
-- **THEN** the overlay goes tiles, mesh, regions, off (off at the start, kept when the debug path is shown), the coarse LOD turns on and off independently, the keys help names both, the coarse parameters are the base ones with only `tau_px` changed, times 4 where that is valid and else the largest valid factor (always valid, the production 1080p ones about 2.6), the corner label reads `Overlay: Mesh, LOD x4`, `Overlay: Regions, LOD x1` or `Overlay: off, LOD x1`, and the window smoke counts lit frames drawn with an overlay, with the mesh, and frames planned with the coarse LOD
+- **THEN** the overlay goes tiles, mesh, regions, off (off at the start, kept when the debug path is shown), the coarse LOD turns on and off independently, the keys help names both, the coarse parameters are the base ones with only `tau_px` changed, times 4 where that is valid and else the largest valid factor (always valid, the production 1080p ones about 1.7), the corner label reads `Overlay: Mesh, LOD x4`, `Overlay: Regions, LOD x1` or `Overlay: off, LOD x1`, and the window smoke counts lit frames drawn with an overlay, with the mesh, and frames planned with the coarse LOD
 
 #### Scenario: A refused coarse plan
 - **WHEN** the plan with the coarse LOD fails and the base one works, when the coarse view is off and the plan fails, when both fail, and when the coarse plan works
@@ -332,13 +332,15 @@ Source: owner (M6 step U3, relevance rule 2026-10-19; hiding is the layer list's
 - **THEN** none of them shows, so the tiles and not the pixel test kept them out
 
 ### Requirement: VIEW-016 Lists and search of the edits
-The editor SHALL list the edits as plain data (`planet_editor::lists`, GPU-free); a row holds the id, a label, kind, layer, distance from the camera and reach.
+The editor SHALL list the edits as plain data (`planet_editor::lists`, GPU-free); a row holds the id, a label, kind, layer, distance from the camera, reach, and for lines, regions and brushes the numbers of its detail: the parts of its group (1 when it is not split), which part it is, its points and its strokes.
 - The label of an edit is its name, trimmed, else its kind and the last six characters of its id.
 - The distance is that from the camera to the anchor's point on the sphere.
 - The nearby list holds the edits the camera shows (VIEW-015), nearest first, ties by id.
 - The search runs over every edit of the body, not only the shown ones: every word of the query is part of the label, kind, layer or id text, in any case; an empty query matches all; a kind filter restricts to one kind; the rows are nearest first, ties by id.
 - The order the edits apply in is the layer's place in the layer stack, then priority, then id (ADR 0007, ADR 0066 point 4); the stack bottom to top is `base`, `imported`, `intent`, `stamps`, `splines`, `placed`, `frozen`, and a layer outside it applies after these, by name.
 - The layers list groups by layer in stack order, each group in the order the edits apply; the chain is all edits in that order.
+- A line or a brush drag that was split into linked items (a group, VIEW-028, VIEW-035) is one row of the layers list, the row of its first part, with the number of its parts and, for a brush, the strokes of all of them; the nearby list, the search and the chain keep every item, and a part says which one it is. The detail of a row (`Row::detail`) is, for a brush, its strokes (`1 stroke`, `3 strokes`, with `N parts, ` before when it has several items), for a split line its parts (`N parts`), for a part `part K`, for a line or region its points (`17 points`), and nothing for a stamp. The panels show it after the kind in the layers list and the other lists, and a brush has a colour of its own.
+- Selecting a row selects its item (a double click flies to it, as the Fly to button does); hiding a row hides, and deleting the selected item deletes, the whole group it belongs to, as one command, so that a brush, which has no handle, is found and deleted by its row and no part of a line or a brush drag is left behind.
 
 Verify: A
 Status: active
@@ -351,6 +353,10 @@ Source: owner (M6 step U3, search planet-wide sorted by distance from the camera
 #### Scenario: Search
 - **WHEN** the query is `hill`, `HILL far`, empty, a kind filter, a text that matches nothing, and the last six characters of an unnamed edit's id, and a name with spaces around it
 - **THEN** the far hill is found after the near one, every word must match in any case, all edits are listed for the empty query, the filter keeps one kind, nothing matches the unknown text, the unnamed edit is found with the label `kind` plus those characters, and the padded name is shown trimmed
+
+#### Scenario: Lines, regions and brushes
+- **WHEN** a ridge of 150 km (split into parts), a short channel, a region of three points and a brush with two strokes are in the layers list, and a brush drag of 12 km made several items
+- **THEN** the ridge is one row saying `N parts`, the channel `17 points`, the region `3 points`, the brush `2 strokes`, the long brush drag one row saying `N parts, S strokes`, the search lists every part of the ridge, and hiding or deleting the ridge's row takes all its parts (the delete is one command that one undo takes back)
 
 #### Scenario: Layers and order
 - **WHEN** two edits of priorities 5 and -1 in `stamps`, one in `splines` (also at priority -100) and one in a layer outside the stack are listed
@@ -565,9 +571,13 @@ The keys of the mode, taken by the letter on the key where a letter is meant (so
 |---|---|
 | `1` | select tool |
 | `2`, `3`, `4` | crater, hill, plateau tool |
+| `5`, `6`, `7` | ridge, channel, region tool (VIEW-029, VIEW-031) |
+| Enter | finish the line or region being drawn |
+| Backspace | take the last point of the line or region being drawn back; it never deletes an edit |
 | Ctrl+Z | undo |
 | Ctrl+Y, Ctrl+Shift+Z | redo |
-| Delete, Backspace | delete the selected edit |
+| Delete | delete the selected edit |
+| F1, `?` | the list of keys |
 | Esc | step back (above) |
 
 Fly to puts the free camera south of the edit looking at it, pitched down:
@@ -651,3 +661,202 @@ Source: ADR 0069, owner (2026-10-19), VIEW-014
 #### Scenario: The tint lands where the polygon is
 - **WHEN** an L-shaped polygon is put under the ground the view shows and the pixels of a grid of ground points far from its edges are looked up through the camera
 - **THEN** a pixel is tinted exactly when its ground point is inside the L, with points on both sides in view (a mirrored or swapped plane, or a missing edge, fails)
+
+### Requirement: VIEW-023 The editor mode previews an edit in flight
+After the editor mode hands a changed definition to the generator and names the tiles to refresh (VIEW-022), the window SHALL call `ManagedLoop::set_preview` with `preview_delta(oldest, current, camera)` (REND-033), where `current` is the footprint items of the whole body (`footprint_items_cap` over the full sphere) of the definition just handed over, `camera` is the camera's planet-fixed position, and `oldest` is the footprint items of the oldest definition any resident tile was built from: the definition replaced by the first hand-over since the preview last ended, kept unchanged by further hand-overs, so that a drag in many steps previews as one delta from its first state. The preview SHALL end (`set_preview` with an empty list, `oldest` forgotten) at the first frame whose plan is exact with no substituted node, no unfinished tile job, no busy plan worker and no pending upload. The editor world SHALL be a plain `WorldTerrain` (ADR 0068).
+
+Verify: A, C
+Status: active
+Source: owner (M6 step U4, 2026-10-19), REND-033, ADR 0066 points 3 and 5, ADR 0068
+
+#### Scenario: A drag is one delta from its first state
+- **WHEN** a stamp is placed (hand-over 1), then moved twice (hand-overs 2 and 3) before any frame settles
+- **THEN** the preview after hand-over 3 is `preview_delta` from the items before hand-over 1 to the items of hand-over 3, which removes nothing the placement added and adds the stamp once at its final place; it is not the delta from hand-over 2 to 3
+
+#### Scenario: The preview ends when the exact tiles are in
+- **WHEN** a hand-over has set a preview and a frame is exact with nothing substituted, no unfinished job, no busy worker and nothing pending, and another hand-over then follows
+- **THEN** the first sets the empty list and forgets `oldest`, and the next preview is the delta from the definition the second hand-over replaced
+
+#### Scenario: The real window previews
+- **WHEN** the real window on the software adapter places and drags a stamp with the editor mode (`--smoke --edit`)
+- **THEN** at least one preview was set, and the run still ends exact
+
+### Requirement: VIEW-024 The window keeps the camera's last minute and F9 writes it
+The window SHALL keep a rolling log of the camera path (`planet_frame::pathlog::PathLog`): a pose recorded at most every 100 ms of the window's clock (the first always), each with the time, the position, the view direction and the up vector in f64, the altitude above the terrain and the frame time, and nothing older than 60 s before the newest; in the viewer and in the editor mode alike. F9 (`Command::SaveRepro`, which changes nothing in the viewer and is never blocked by the editor mode) SHALL write `frame-<n>-path.txt` (the log) and `frame-<n>.bundle` (a terrain repro bundle, TEST-008, of that frame's request over the world as the window holds it, edits included) with `<n>` the frame count, to `target/review` or to the directory `PLANET_REPRO_DIR` names, and print their names. A path file is `planet-path 1`, the window and period, the sample count and one line per sample, with floats in the shortest round-trip form so that reading restores them bit for bit; an unknown header, a wrong count, a malformed line or a time that goes back SHALL be refused with the line. The `--smoke` script SHALL press F9 once where `PLANET_REPRO_DIR` is set and the summary SHALL report the writes.
+
+Verify: A, C
+Status: active
+Source: opus-planner (2026-10-19), TEST-008, VIEW-022
+
+#### Scenario: Ten poses a second, one minute
+- **WHEN** frames come every 7 ms for 3 minutes, and again 50 ms, 99 ms and 100 ms after a recorded pose
+- **THEN** the log holds about 10 poses a second over the last 60 s and no more than 601, and the 50 ms and 99 ms poses are not recorded while the 100 ms one is
+
+#### Scenario: A path file round trip
+- **WHEN** a log is written to text and read back, and damaged texts are read
+- **THEN** every float restores bit for bit, and each damaged text is refused naming the problem (header, count, line, time going back)
+
+#### Scenario: F9 in the real window
+- **WHEN** the editor smoke runs with `PLANET_REPRO_DIR` set
+- **THEN** one F9 write is reported, the directory holds `frame-<n>-path.txt` with at least two poses and `frame-<n>.bundle` that starts `planet-terrain-repro` and records the world
+
+### Requirement: VIEW-026 A camera path replays through the plan and F9 says it wrote
+`cargo xtask repro <frame-n-path.txt>` SHALL replay the path with its bundle: `test-render --repro BUNDLE --replay-path PATH --out-dir DIR [--replay-every N]` SHALL plan the terrain of a terrain repro bundle (a world, or the seed-only field) once per pose of the path file, in the logged order, with the bundle's lens, view and LOD parameters, and SHALL write `DIR/replay.txt` (`t_ms altitude_m nodes plan_hash finest_level plan_ms logged_frame_ms`, one line per pose) and, with `--replay-every N`, `DIR/pose_NNNN.png` for poses 0, N, 2N and so on. A pose the plan refuses (a terrain too steep for the bundle's LOD parameters at that camera) SHALL be written as a `REFUSED` line with the reason and the replay SHALL go on. It SHALL print the number of poses (refused ones included, with their reasons), the least and most nodes, the finest level, the slowest plan, and the poses where the finest level fell while the altitude fell, each with its time and altitude. `--replay-path` without `--repro` or `--out-dir`, a path file that does not parse (VIEW-024) or holds no pose, and a bundle that is not a terrain bundle SHALL be refused naming the problem. `cargo xtask repro <bundle>` SHALL name the `frame-<n>-path.txt` beside it when there is one. F9 SHALL show what it wrote (the two file names, the pose count and the span, the directory) in the window title for 8 s and print it with `PathLog::summary()`, and SHALL show a failed write the same way.
+
+Verify: A, C
+Status: active
+Source: opus-planner (2026-10-19), VIEW-024, TEST-008
+
+#### Scenario: A level that drops on approach
+- **WHEN** the finest level falls from 19 to 17 while the altitude falls from 800 m to 700 m, and falls from 17 to 16 while the altitude rises
+- **THEN** the first pose is listed as a drop with its time and altitude, and the second is not
+
+#### Scenario: Files name each other
+- **WHEN** `repro` is given `target/review/frame-120-path.txt` or `target/review/frame-120.bundle`
+- **THEN** the bundle is `frame-120.bundle` and the path file `frame-120-path.txt` in the same directory
+
+#### Scenario: Replay of what the real window wrote
+- **WHEN** the editor smoke wrote `frame-<n>.bundle` and `frame-<n>-path.txt` and the path is replayed against the bundle
+- **THEN** `replay.txt` holds one line per pose and the summary names that many poses
+
+### Requirement: VIEW-027 Point lists of lines and regions
+`planet_editor::polyline` SHALL hold the geometry of the line and region tools on points given as latitude and longitude in degrees, in f64 with `libm`, without a window, a GPU or an item. A line SHALL have 2 to 64 points, each finite and within 90 degrees of latitude and 180 of longitude, no two consecutive points at the same place (the same direction, not the same spelling: longitude 180 and -180 are one place). A region SHALL have 3 to 64 such points, every point within one cell edge (WDEF-007, 40 km) of the first, and an outline that does not cross itself (a touch counts), has an area, does not run back over itself along one line, and does not repeat its first point as its last; a region beyond the reach SHALL be refused with the limit in the message, and one that crosses itself or folds back with the two edges. A width that is not finite or is negative, and a radius that is not finite and positive, SHALL be refused. A line whose extent from its first point plus its width fits one cell edge, with at most 64 points, SHALL stay one part; a longer one SHALL be split into parts that each reach, width included, at most 80 % of the cell edge from their first point, hold at most 64 points, and share their boundary point exactly (the last point of a part is the first of the next), with a segment longer than half a part cut at great-circle points; a width that leaves no room SHALL be refused. A click, given as a unit direction, SHALL pick the nearest point within a distance, and the nearest segment (open, or closed for a region) with the foot of the click on it, an end point when the click is beyond the segment. Inserting, moving and removing a point SHALL return a new list and leave the input unchanged; removing SHALL be refused when fewer than the kind's minimum would remain.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-19), ADR 0069, docs/status.md "Editor MVP requirements"
+
+#### Scenario: A long line
+- **WHEN** a line of 150 km with points every 10 km and a width of 200 m is split
+- **THEN** it becomes at least four parts, each of 2 to 64 points reaching at most 32 km, each sharing its first point with the last of the one before, and every original point is a point of some part
+
+#### Scenario: A region too large, and a bow tie
+- **WHEN** a square region of 50 km sides and a square with two corners swapped are checked
+- **THEN** the first is refused naming the 40 km limit and the second naming the two edges that cross
+
+#### Scenario: A click
+- **WHEN** a click lands 300 m beside the middle of the second segment of a line, and another lands beyond its last point
+- **THEN** the first picks that segment with a foot on the line 300 m away, the second picks the last segment with its end point as the foot
+
+### Requirement: VIEW-028 Lines and regions in the command layer
+The command layer SHALL apply a group of steps (put a new item, replace the content of an item with its id, body and versions kept, delete an item) as one command: all steps happen or none does (a step that fails takes back those before it, the files included; a step that cannot be taken back SHALL be reported, never swallowed: the error names the items left as the command made them, and the editor then refuses every command, naming them, until `Editor::reload` reads the items of the body from the store again, which drops the undo and redo stacks), one undo takes all of them back to the exact previous definition hash, one redo does them again, and two steps on one item are refused. A group whose steps change nothing SHALL NOT be a command. A new item SHALL carry its points, group, part and mask layer (ADR 0069). A line (`ridge` or `channel` with `width_m` in its parameters) SHALL be put through a point list as one item when it fits the reach of one (VIEW-027), else as the linked parts of the split (one group, consecutive parts, each anchored at its first point with a reach that covers its points and its width), as one command; its points SHALL be changed by making the parts again, changing the items of the line in place, putting the extra and deleting the surplus ones, as one command, a line that becomes one part losing its group; and it SHALL be deleted whole as one command. The line commands SHALL refuse an item that is not a ridge or a channel, naming the kind, and a region put SHALL refuse a template that is not a region; points SHALL be written in the spelling of an item file (longitude 180 for -180, longitude 0 at a pole), so that what the point list accepts the item accepts; and a group id SHALL be made only for a line that splits. A region SHALL be put or re-pointed as one item, refused with the reason (the 40 km limit, the crossing edges) when its outline is not valid (VIEW-027); a refusal changes nothing.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-19), ADR 0069, AUTH-004, VIEW-027
+
+#### Scenario: A split line
+- **WHEN** a line of 150 km is put and then undone and redone
+- **THEN** it is four or more parts in one group, one undo removes all and restores the starting hash, one redo restores the end hash
+
+#### Scenario: Re-splitting
+- **WHEN** a point of the line moves, the line is shortened to two points, and then lengthened
+- **THEN** each is one command; the parts keep their ids where they can, the surplus parts are deleted or the extra ones put, and one undo restores the exact previous hash
+
+#### Scenario: A failure halfway
+- **WHEN** the store fails on the third part of a split line, or a step is invalid, or two steps name one item
+- **THEN** the definition, the files and the undo stack are as they were
+
+### Requirement: VIEW-029 The line and region tools
+With the line tool (`ridge` or `channel`) or the region tool on, a press on the planet SHALL add a point to a draft; a point within 0.5 m of the last one SHALL be refused as the same click again, a line draft SHALL hold at most 640 points and a region draft 64, a press off the planet SHALL do nothing, and changing the tool SHALL drop the draft. Finishing SHALL put the line (parameters `amount_m` 30 m and `width_m` 200 m, bound 60 m, layer `stamps`, name `Ridge 1`, `Channel 1`) or the region (parameters `surface_type` 0 and `mask_mode` 0, layer `regions`) as one command, select it and return to the select tool; fewer points than the kind needs (2 and 3), or a region the command layer refuses (VIEW-028), SHALL be refused with the reason and leave the draft. A line or region SHALL have one point handle per point, a line counting the points of all its parts joined, positioned on its points; while one is held the points SHALL be kept in the session (drawn from there, the editor told nothing) and the release SHALL make the one command that sets the points; Esc SHALL drop them with nothing recorded; a point list the item refuses SHALL leave the item as it was and the drag closed; undo, redo, delete, deselecting and changing the tool SHALL close a held point drag without telling the editor; a line SHALL count once in the numbering of its name however many items it is split into. A press on the outline of the selected line or region within a distance SHALL add a point at the foot, one command, the closing segment included for a region; a click on an existing point SHALL add nothing; a point SHALL be removed in one command and refused when fewer than the kind's minimum would be left.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-19), ADR 0069, VIEW-017, VIEW-019, VIEW-027, VIEW-028
+
+#### Scenario: Draw a line
+- **WHEN** the line tool is on and three places are clicked, the last again at once, and Enter finishes
+- **THEN** the draft holds three points, the same place twice is refused, and finishing makes one command whose undo removes the line
+
+#### Scenario: A point drag
+- **WHEN** point 1 of a line is dragged over several moves and released
+- **THEN** the editor holds the old points until the release, the handle follows the pointer meanwhile, the release is one command and one undo restores the old points
+
+#### Scenario: A long line
+- **WHEN** a point of the later part of a 150 km line is dragged
+- **THEN** every point of every part has a handle, and the release is one command for the whole line
+
+### Requirement: VIEW-031 Drawing lines and regions in the window
+In the editor mode the rail SHALL offer the ridge, channel and region tools after the stamp tools, and the number keys 5, 6 and 7 SHALL pick them; picking one SHALL put the way to use it in the status line. Enter SHALL finish the line or region being drawn; Backspace SHALL take the last point of the draft back and never delete an edit (Delete does); Esc SHALL step back one thing at a time: a drag, then the draft, then the tool, then the selection. A press with Shift held on the outline of the selected line or region SHALL add a point there (refused, with the reason in the status line, when not on the outline) and a press with Ctrl held on one of its point handles SHALL remove that point (a Ctrl press that finds no handle does nothing but say so); neither starts a drag, and the distance from the outline that counts as on it is the one a click uses to pick (the half-width of a line or 1.5 % of the distance, the larger). F1, the key that types a question mark and a button in the status bar SHALL show and hide a window that lists the keys. A click SHALL pick a line whose distance to the click is within its half-width or 1.5 % of the distance to the surface, the nearest first, else a region the click is inside or within that tolerance of the edge; a stamp whose outline holds the click comes before both. The overlay SHALL give a line as an open path and a region as a closed one, each segment cut into 8 pieces along its great circle, a selected line or region as the session holds it (a held point already moved), and the draft as its path, its points and the cursor for a rubber band, reading the height of the ground once at each point and not at each piece; the window SHALL draw them.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-20), VIEW-017, VIEW-019, VIEW-020, VIEW-029
+
+#### Scenario: Draw and finish a line
+- **WHEN** the ridge tool is picked with 5, three places are clicked, the last point is taken back with Backspace and put again, and Enter finishes
+- **THEN** the draft is shown with a line to the cursor, one command puts the line, it is selected, and its point handles are on the screen
+
+#### Scenario: Shift and Ctrl
+- **WHEN** Shift is held on a click between two points of the selected line, and Ctrl on the handle of a point
+- **THEN** the first adds a point on the line, the second removes the point, and neither starts a drag
+
+#### Scenario: Picking
+- **WHEN** a click lands 150 m beside a line of half-width 200 m, 350 m beside it, and inside a region the line crosses but away from the line
+- **THEN** the first picks the line, the second nothing, the third the region
+
+### Requirement: VIEW-032 The coarse view keeps clear of the plan's refusal at the large levels, and a late refusal does not end the window
+`LodParams::coarse` SHALL return the base parameters with a larger `tau_px` such that the morph interval of every level keeps its 5 % of the end distance plus a margin of 1 % (the node-radius rule, as `LodParams::validate` has it), and such that at every level whose node radius is at least half of `max_height_m` (`COARSE_WORST_CASE_RADIUS_FACTOR`) where the base parameters meet the plan's own start (`split(l) + 2 x extent(r (1 + H / R), H)`, `LodParams::morph_interval_worst`) the coarse ones meet it too with the same margin. Over a field that has only a global height bound this leaves the coarse view refused, where the base view is accepted, at no more than one pose in twenty-five of a sweep from 20 km altitude up (measured 0 % for the window's 320x200 and the 16-cell parameters, 1.4 to 2.7 % for the production 1080p parameters, all at level 11 between 31 and 39 km); a refusal that remains falls back to the base parameters as VIEW-014 says. `LodParams::validate` SHALL stay the node-radius rule. The production 1080p coarse factor is about 1.7 times the error bound (the window's 320x200 parameters about 2.2). A plan failure whose request carried other LOD parameters than the frame that receives it SHALL be dropped and counted (`PlanPipeline::dropped_plan_errors`), not returned; a failure of the frame's own request SHALL be returned as before.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-20), SPIKE-19, VIEW-014, LOD-003, LOD-011
+
+#### Scenario: The window's coarse view over the eroded world's bound
+- **WHEN** the window's LOD at 320x200 over a field whose global height bound is 9,735 m is made coarse and planned from five orbital poses, and again from 40 altitudes between 20 km and 3,400 km at three poses (a face centre, a cube corner and a generic direction) at 320x200 and at 1920x1080
+- **THEN** the plan accepts the five orbital poses (it refused them all with the former rule), and refuses the coarse LOD at no more than one pose in twenty-five among those where it accepts the base LOD
+
+#### Scenario: A late refusal
+- **WHEN** the plan of parameters too coarse for 16 cells is asked for and the frame then asks again with the base parameters, and later asks for the coarse parameters themselves
+- **THEN** the first refusal is dropped and counted while the frame draws, and the refusal of the frame's own parameters is returned
+
+### Requirement: VIEW-033 The inspector of a line and of a region
+The inspector SHALL show a ridge's and a channel's `amount_m` (labelled Height and Depth; 0 to 1,000 m and 0 to 500 m) and `width_m` (Half-width; 1 m to 5 km) as typed rows with their ranges. A typed `amount_m` or `width_m` SHALL change every part of the line the selected item belongs to as one command (`Editor::set_line_params`): the parts are made again from the joined points of the line, so their reach covers the new width (a line that must have more parts is split again), the bound on the change is raised to at least the amount, and a value out of its range, a number that cannot be read, or a width that leaves no room (`WidthTooLarge`) is refused with the reason and changes nothing. For a region the inspector SHALL show a surface type (a choice among the names of `SURFACE_TYPES`, stored as the index) and whether it clips another layer inside its outline with the layer it clips (any other layer name; its own is refused): picking a surface type SHALL be one command, and setting the mask SHALL change the mask mode (2 or 0) and the mask layer (set or none) together in one command, so that no state in between reaches the world definition; clipping without a layer SHALL be refused with "choose the layer the region clips". The mask mode outside (1) SHALL NOT be offered. The line kinds SHALL NOT be placed as stamps.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-20), ADR 0069, VIEW-017, WDEF-011, WDEF-012, VIEW-028
+
+#### Scenario: A typed width on a split line
+- **WHEN** a 150 km ridge of four or more parts is selected at its third part and a half-width of 800 m is typed, and then undone
+- **THEN** every part has the half-width 800 m and a reach that covers it, it is one command, and one undo restores the former line exactly
+
+#### Scenario: The mask of a region
+- **WHEN** a region is set to clip the layer "stamps" and then to label only
+- **THEN** the first change sets the mode 2 and the layer together, the second sets the mode 0 and removes the layer, and clipping with no layer or with the region's own layer is refused and changes nothing
+
+### Requirement: VIEW-035 The brush tool
+The editor mode SHALL have four brush tools (raise, lower, smooth, flatten; keys 8, 9, 0 and the minus key; rail buttons). With one on, a press over the planet starts a stroke, moving the pointer with the button down records its places, and the release puts the stroke as one command (one undo); Esc during the drag, a tool change and a lost focus put nothing. The recorded places SHALL be resampled along the great circles to a spacing of a quarter of the radius, cut into strokes of at most 64 points that stay within one item's reach (a cell edge less the radius), consecutive strokes sharing the point where they are cut, and filed by `Editor::add_stroke`: a stroke joins the first of the brush items this session painted into that is in the layer `brush` and has room (under 64 strokes and 4,096 points, the sum of the strengths within the limit) and reach (its extent from the item's anchor plus the largest radius), else it starts a brush item (kind `brush`, no parameters, no points) anchored at its first point with a reach of its extent plus the radius, at least 1 km and at most a cell edge, and a bound on the change of the exact sum of the strengths; the bound of an item a stroke joins is raised to hold the sum. The items one command starts SHALL share one group (consecutive parts) when there are several. The brush radius SHALL be 1 m to 5 km and the strength 0.01 m to 100 m, typed in metres in the inspector panel, a value outside is refused with the range and changes nothing, and a stroke keeps the numbers it started with. A flatten SHALL level towards the typed height, else the terrain height under the start of the stroke; the other kinds have no target. A brush item SHALL have no handle and SHALL NOT be picked from the planet. The stroke being painted and a ring of the brush radius under the cursor SHALL be drawn.
+
+Verify: A
+Status: active
+Source: owner (E6: raise, lower, smooth, flatten with metric radius and strength), opus-planner (2026-10-20), ADR 0070, WDEF-013, AUTH-005, GEN-030, VIEW-022
+
+#### Scenario: A drag, then another stroke of the same area
+- **WHEN** a raise stroke is dragged over 300 m and a lower stroke is dragged 100 m away, then the second is undone
+- **THEN** the first is one brush item with one stroke, the second joined it (two strokes, bound 10 m), and the undo leaves the item with its first stroke exactly
+
+#### Scenario: A long drag
+- **WHEN** a 12 km stroke is dragged with a 200 m brush
+- **THEN** it becomes linked brush items of one group in one command, no stroke over 64 points, each stroke starting at the point where the one before ended, and one undo removes them all
+
+### Requirement: VIEW-036 The brush preview
+A brush stroke SHALL be previewed (REND-033) as a chain of preview stamps along its line (`preview::brush_chain`). A raise SHALL be hill stamps and a lower the same with the sign turned, of the profile of the brush (`(1 - x^2)^2`), with a reach of 1.118 times the radius, both ends of the line included, a spacing of half the radius (wider when the stroke would need more than 14 stamps), and the amplitude that makes their sum the strength on the line, plus a dab of the radius at each end of the amount the chain falls short of the strength there (the stage's distance to the polyline is to the end point). A flatten SHALL be plateau stamps at the stroke's target with a reach of 0.8 of the radius and, as their bound, the strength shared over the plateaus that cover a point of the line, so that a row of them moves the ground by the strength and not by the strength times their number. A stroke of one point SHALL be one stamp of the whole strength. A stroke SHALL have at most 16 stamps. A smooth stroke SHALL NOT be previewed (a known limit: it moves the ground towards the mean of what is around it, which the stale tile cannot give; it shows when the exact tile arrives), nor a removed flatten (as a removed plateau is not). The chain SHALL stay within a third of the strength of the stage's delta, and within a tenth on average, along and across a bent stroke and along the longest stroke the tool records (64 points a quarter of the radius apart, 16 radii); a flatten SHALL stay within the strength.
+
+While the pointer paints a stroke, the editor SHALL give the loop the chain of the stroke so far every frame as a transient preview, and when the stroke ends an empty list once; the put stroke is then previewed by the delta of the footprint items (`preview_delta_on`): a brush item added is the chains of its strokes (sign +1), one removed the same with the signs turned, one that gained strokes at the end only the chains of the new strokes, and one that lost strokes from the end only those strokes' chains with the signs turned. The stamps of a brush item SHALL keep the order of its strokes (a plateau reads the running height). The delta SHALL have at most 16 stamps (`MAX_DELTA_STAMPS`), kept in whole units, nearest the camera first, a unit being a plain stamp's entries or one stroke of a brush item (so that one large brush item is kept stroke by stroke, not dropped whole), and the transient preview at most 16 (`BRUSH_CHAIN_STAMPS`), so that both fit the 32 of REND-033 whole.
+
+Verify: A, C
+Status: active
+Source: opus-planner (2026-10-20), VIEW-035, REND-033, GEN-030
+
+#### Scenario: The stroke under the pointer
+- **WHEN** a raise stroke is dragged and then released
+- **THEN** each frame of the drag gives the loop the chain of the stroke so far as a transient preview, the release gives an empty list once, and the delta of the put stroke is a chain of hills of the same kind
+
+#### Scenario: A stroke added to an item, and taken off
+- **WHEN** a brush item gains a stroke at the end, and then loses it again
+- **THEN** the first delta holds only the new stroke's stamps and the second only the same stamps with the signs turned
+
+#### Scenario: A flatten and a lower in one item
+- **WHEN** a brush item holds a flatten and then a lower
+- **THEN** the delta lists the flatten's plateaus before the lower's hills
