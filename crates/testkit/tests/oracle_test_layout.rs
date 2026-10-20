@@ -78,7 +78,15 @@ fn declared_tests(krate: &Path) -> BTreeSet<String> {
 /// the CI runners, the 180 s timeout of the default profile, the CI runs of 2026-10-19 to 20), and `--workspace` is the resolution of the run that built the binaries.
 fn listed_tests() -> std::collections::BTreeMap<String, BTreeSet<String>> {
     let out = Command::new("cargo")
-        .args(["nextest", "list", "--workspace", "-E", "binary(it) or binary(oracle_all) or binary(gpu_all)", "--message-format", "oneline"])
+        .args([
+            "nextest",
+            "list",
+            "--workspace",
+            "-E",
+            "binary(it) or binary(oracle_all) or binary(gpu_all)",
+            "--message-format",
+            "oneline",
+        ])
         .current_dir(repo_root())
         .output()
         .expect("cargo nextest list");
