@@ -194,12 +194,13 @@ fn measure_preview_cost(
     planet_radius_m: f64,
     altitude_m: f64,
     renders: usize,
+    smoke: bool,
 ) -> Result<Vec<PreviewCost>, String> {
     let mut rows = Vec::new();
     for &count in &PREVIEW_COST_COUNTS {
         h.rig.managed.set_transient_preview(cost_stamps(at, count, 400.0, planet_radius_m));
         let mut frame = h.step(req)?;
-        for _ in 0..3 {
+        for _ in 0..if smoke { 1 } else { 3 } {
             frame = h.step(req)?;
         }
         h.rig.fi.retire_to(h.rig.renderer.wait_oldest(h.ctx));
@@ -221,7 +222,7 @@ fn measure_preview_cost(
         });
     }
     h.rig.managed.set_transient_preview(Vec::new());
-    h.settle(req, 5)?;
+    h.settle(req, if smoke { 2 } else { 5 })?;
     Ok(rows)
 }
 
@@ -931,7 +932,8 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
                 let resident: Vec<TileId> = h.rig.managed.resident().keys().copied().collect();
                 h.rig.managed.edit(&found_tiles(base, &resident, radius_m));
             }
-            let settle = h.settle(&req, 20)?;
+            // A smoke run needs the frames to be exact once, not a long calm: every frame is slow on the software adapter.
+            let settle = h.settle(&req, if smoke { 3 } else { 20 })?;
             writeln!(out, "  altitude {altitude} m, {}: settled in {settle:.1} s", case.name).map_err(err)?;
             let mut runs = Vec::new();
             for _ in 0..repeats {
@@ -947,7 +949,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         }
         // The cost of the preview with the cap of active stamps (TEST-043), on the last view of the altitude.
         if let Some((req, at)) = focus {
-            costs.extend(measure_preview_cost(&mut h, &req, at, radius_m, altitude, if smoke { 3 } else { 20 })?);
+            costs.extend(measure_preview_cost(&mut h, &req, at, radius_m, altitude, if smoke { 1 } else { 20 }, smoke)?);
         }
     }
     let table = table(&rows);
