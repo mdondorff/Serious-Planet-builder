@@ -111,7 +111,7 @@ fn a_stamped_scene_in_the_relief_view_is_the_recorded_frame_of_the_adapter_famil
     let hash = fnv(fnv(FNV0, &plain_frame), &stamped_frame);
     println!("stamped scene: {changed} pixels differ, hash {hash:016x} on {}", ctx.driver_string());
     let driver = ctx.driver_string();
-    let known: &[(&str, u64)] = &[(WARP, 0xdf2d_dd32_30b6_1bc0), (RTX, 0xd293_6b68_0697_c6da)];
+    let known: &[(&str, u64)] = &[(WARP, 0xe32d_6690_7031_8913), (RTX, 0x5335_ae65_a642_b13c)];
     match known.iter().find(|(d, _)| *d == driver) {
         Some((_, want)) => assert_eq!(hash, *want, "the stamped scene changed on {driver}"),
         None => println!("KNOWN-ANSWER stamped scene: no hash recorded for '{driver}' (WARP {WARP}, RTX {RTX}); got {hash:016x}"),

@@ -562,3 +562,148 @@ fn every_height_a_brush_changes_lies_in_a_tile_that_declares_the_brush() {
     }
     assert!(changed > 100, "the setup must change heights, got {changed}");
 }
+
+// spec: GEN-030
+#[test]
+fn overlapping_smooth_items_converge_on_the_mean_together_and_never_pass_it() {
+    // One drag is one item: the owner's smoothing was a number of items over the same ground, each of which pulled the point towards the mean of
+    // the procedural base again, so two items gave `2 * mean - base`, a sharper ground than before. The smoothed part is counted over the items
+    // of the stage, so the items together do what one item of all their strokes does.
+    let at = unit(20.0, 30.0);
+    let peak = cone(at);
+    let mean = {
+        let one = world(&[brush(1, &[stroke(BrushKind::Smooth, 100.0, 1e6, None, &[(20.0, 30.0)])])]);
+        apply_stamps_with(&footprint(&one, at, 1e-6), R, at, peak(at), &peak)
+    };
+    assert!(mean < peak(at) && mean > 0.0, "the mean of the ring is below the peak: {mean}");
+    for n in 1..=8u128 {
+        let items: Vec<ItemSpec> = (1..=n).map(|i| brush(i, &[stroke(BrushKind::Smooth, 100.0, 7.0, None, &[(20.0, 30.0)])])).collect();
+        let together = apply_stamps_with(&footprint(&world(&items), at, 1e-6), R, at, peak(at), &peak);
+        assert!(together >= mean - 1e-9 && together <= peak(at), "{n} items: {together} between the mean {mean} and the peak {}", peak(at));
+        // The same strokes in one item.
+        let strokes: Vec<Stroke> = (0..n).map(|_| stroke(BrushKind::Smooth, 100.0, 7.0, None, &[(20.0, 30.0)])).collect();
+        let one_item = apply_stamps_with(&footprint(&world(&[brush(1, &strokes)]), at, 1e-6), R, at, peak(at), &peak);
+        assert_eq!(together.to_bits(), one_item.to_bits(), "{n} items are {n} strokes of one item");
+    }
+}
+
+// spec: GEN-030
+#[test]
+fn the_bounds_of_smooth_and_flatten_strokes_hold_for_random_caps_over_other_strokes_and_a_steep_base_and_stay_tight_on_a_fine_tile() {
+    use planet_core::hash::SplitMix64;
+    use planet_generators::stress::Steep;
+    let at = unit(20.0, 30.0);
+    let mut rng = SplitMix64(11);
+    let line = [(20.0, 30.0), (20.02, 30.02)];
+    for steep in [false, true] {
+        let base: Arc<dyn HeightField> = if steep { Arc::new(Steep(5)) } else { Arc::new(Reference(1)) };
+        let items = [
+            brush(
+                1,
+                &[
+                    stroke(BrushKind::Raise, 300.0, 6.0, None, &line),
+                    stroke(BrushKind::Smooth, 400.0, 9.0, None, &line),
+                    stroke(BrushKind::Flatten, 250.0, 8.0, Some(120.0), &line),
+                ],
+            ),
+            brush(2, &[stroke(BrushKind::Smooth, 500.0, 12.0, None, &line), stroke(BrushKind::Lower, 200.0, 5.0, None, &line)]),
+            brush(3, &[stroke(BrushKind::Smooth, 350.0, 7.0, None, &[(20.01, 30.0)])]),
+        ];
+        let s = StampStage::new(Arc::clone(&base), world(&items), BodyId::PLANET, LAYER, 0, 1).unwrap();
+        for k in 0..40 {
+            let centre = at_distance(at, east_of(at), rng.next_f64() * 2_500.0);
+            let angle = (5.0 + rng.next_f64() * 400.0) / R;
+            let (lo, hi) = s.height_bounds(centre, angle);
+            for j in 0..200 {
+                let t = f64::from(j) / 200.0 * core::f64::consts::TAU;
+                let r = angle * f64::from(j % 5) / 4.0;
+                let e1 = (Vec3::new(0.0, 0.0, 1.0) - centre * centre.z).normalized();
+                let e2 = centre.cross(e1);
+                let q = (centre * libm::cos(r) + (e1 * libm::cos(t) + e2 * libm::sin(t)) * libm::sin(r)).normalized();
+                let h = s.height(q);
+                assert!(h >= lo && h <= hi, "steep {steep}, cap {k}: {h} outside [{lo}, {hi}]");
+            }
+        }
+    }
+    // A fine tile on the reference: the strokes grow the extent by little, not by the sum of their strengths (the owner's 32 smooth items).
+    let base = Reference(1);
+    let many: Vec<ItemSpec> = (1..=32u128)
+        .map(|i| brush(i, &[stroke(BrushKind::Smooth, 600.0, 40.0, None, &[(20.0, 30.0), (20.01 + 1e-4 * i as f64, 30.01)])]))
+        .collect();
+    let s = StampStage::new(Arc::new(base), world(&many), BodyId::PLANET, LAYER, 0, 1).unwrap();
+    let (lo, hi) = s.height_bounds(at, 150.0 / R);
+    let (blo, bhi) = Reference(1).height_bounds(at, 150.0 / R);
+    assert!(
+        (hi - lo) - (bhi - blo) < 2.0 * (bhi - blo) + 40.0,
+        "32 smooth items of 40 m strength grow the extent of a fine tile by {} m over a base extent of {} m",
+        (hi - lo) - (bhi - blo),
+        bhi - blo
+    );
+}
+
+/// A field of `inner` within 50 m of `c` and `inner + 50` outside, with exact bounds: a ring of a smooth outside the disc sees a step of 50 m.
+struct Step {
+    c: Vec3,
+    inner: f64,
+}
+
+impl HeightField for Step {
+    fn height(&self, d: Vec3) -> f64 {
+        if angle_between(self.c, d) <= 50.0 / R {
+            self.inner
+        } else {
+            self.inner + 50.0
+        }
+    }
+    fn seed(&self) -> u64 {
+        1
+    }
+    fn implementation_id(&self) -> &'static str {
+        "step"
+    }
+    fn version(&self) -> u32 {
+        1
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        self.inner.abs() + 50.0
+    }
+    fn height_bounds(&self, centre: Vec3, a: f64) -> (f64, f64) {
+        if angle_between(self.c, centre) + a + 1e-12 <= 50.0 / R {
+            (self.inner, self.inner)
+        } else {
+            (self.inner, self.inner + 50.0)
+        }
+    }
+    fn inputs_hash(&self) -> u64 {
+        2
+    }
+}
+
+// spec: GEN-030
+#[test]
+fn the_bounds_allow_the_rounding_of_every_smooth_stroke_of_a_run_over_a_base_with_exact_bounds() {
+    // Each smooth stroke rounds once when it is added to the height, so a run of 64 strokes (or of many items) rounds 64 times: the bound must
+    // allow for every one of them, not for the run as one addition.
+    let c = unit(20.0, 30.0);
+    for inner in [1000.0, 1234.5678, 4000.123, 8191.9, 2047.99] {
+        for s in [0.01, 0.0123, 0.037, 0.003, 0.07] {
+            for (items, per_item) in [(1usize, 64usize), (20, 64)] {
+                let specs: Vec<ItemSpec> = (0..items)
+                    .map(|i| {
+                        let strokes: Vec<Stroke> =
+                            (0..per_item).map(|_| stroke(BrushKind::Smooth, 400.0, s, None, &[(20.0, 30.0)])).collect();
+                        brush(i as u128 + 1, &strokes)
+                    })
+                    .collect();
+                let stage = StampStage::new(Arc::new(Step { c, inner }), world(&specs), BodyId::PLANET, LAYER, 0, 1).unwrap();
+                let (lo, hi) = stage.height_bounds(c, 1.0 / R);
+                let h = stage.height(c);
+                assert!(
+                    h >= lo && h <= hi,
+                    "inner {inner}, strength {s}, {items} items: {h} outside [{lo}, {hi}] by {:e}",
+                    (h - hi).max(lo - h)
+                );
+            }
+        }
+    }
+}
