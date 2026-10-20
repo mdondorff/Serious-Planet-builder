@@ -82,3 +82,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0070 | [Brush strokes stay in the item file; the blob store is specified and deferred](0070-brush-strokes-stay-in-the-item-file-no-blob-store-in-the-mvp.md) | accepted | extends 0066 point 6 and 0069; decides the blob ADR of 0007 |
 | 0071 | [Coastal water by connectivity through low ground, not by a reach](0071-coastal-water-by-connectivity-through-band-ground.md) | accepted | amends 0056 points 1 to 3 and the coarse rule of 0058 |
 | 0072 | [Edit visible: the drawn tiles are exact, drawn tiles refresh first, stale refreshes are pre-empted](0072-edit-visible-drawn-tiles-exact-and-stale-refreshes-are-pre-empted.md) | accepted | reads the M6 criterion; extends STRM-026 |
+| 0073 | [Normals from the tile's height lattice](0073-normals-from-the-tile-height-lattice.md) | proposed | amends GEN-019 and GEN-010; extends 0033 point 4 |
