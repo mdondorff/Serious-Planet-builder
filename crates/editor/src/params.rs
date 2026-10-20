@@ -66,6 +66,9 @@ const PLATEAU: [ParamDef; 3] = [
     },
 ];
 
+const RIDGE: [ParamDef; 2] = [p("amount_m", "Height", 0.0, 1_000.0, 5.0, 30.0), p("width_m", "Half-width", 1.0, 5_000.0, 10.0, 200.0)];
+const CHANNEL: [ParamDef; 2] = [p("amount_m", "Depth", 0.0, 500.0, 5.0, 30.0), p("width_m", "Half-width", 1.0, 5_000.0, 10.0, 200.0)];
+
 /// The kinds the stamp tool places, in the order of its palette.
 pub const STAMP_KINDS: [&str; 3] = ["crater", "hill", "plateau"];
 
@@ -75,6 +78,8 @@ pub fn defs_for(kind: &str) -> &'static [ParamDef] {
         "crater" => &CRATER,
         "hill" => &HILL,
         "plateau" => &PLATEAU,
+        "ridge" => &RIDGE,
+        "channel" => &CHANNEL,
         _ => &[],
     }
 }
@@ -206,6 +211,34 @@ pub struct ParamRow {
     pub step: f64,
 }
 
+/// What the inspector adds for a region (VIEW-033): its surface type, whether it clips another layer, and the layers it could clip.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RegionRows {
+    /// The names of the surface types, in table order (the index is what the item stores).
+    pub surface_names: Vec<&'static str>,
+    pub surface_type: usize,
+    /// The region clips the layer it names, inside its outline (`mask_mode` 2); else it only labels (0).
+    pub clips_inside: bool,
+    pub mask_layer: Option<String>,
+    /// The layers of the other edits, which a region could clip.
+    pub layers: Vec<String>,
+}
+
+/// The region rows of `item` (none for another kind); `layers` are the layer names of all edits.
+pub fn region_rows(item: &Item, layers: &[String]) -> Option<RegionRows> {
+    if item.kind != "region" {
+        return None;
+    }
+    let surface_type = item.params.get("surface_type").copied().unwrap_or(0.0).max(0.0) as usize;
+    Some(RegionRows {
+        surface_names: planet_world_def::region::SURFACE_TYPES.iter().map(|s| s.name).collect(),
+        surface_type: surface_type.min(planet_world_def::region::SURFACE_TYPES.len() - 1),
+        clips_inside: item.params.get("mask_mode").copied().unwrap_or(0.0) == 2.0,
+        mask_layer: item.mask_layer.clone(),
+        layers: layers.iter().filter(|l| **l != item.layer).cloned().collect(),
+    })
+}
+
 /// An edit as the inspector shows it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Inspector {
@@ -222,6 +255,8 @@ pub struct Inspector {
     pub order: String,
     pub reach: String,
     pub params: Vec<ParamRow>,
+    /// The surface type and the mask of a region (VIEW-033); none for another kind.
+    pub region: Option<RegionRows>,
 }
 
 fn degrees(v: f64, pos: char, neg: char) -> String {
@@ -273,5 +308,6 @@ pub fn inspector_of(item: &Item, position: (usize, usize), distance_m: f64) -> I
         order: format!("{} of {} in its layer", position.0, position.1),
         reach: format_metres(item.reach_m),
         params,
+        region: None,
     }
 }

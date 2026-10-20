@@ -697,6 +697,14 @@ impl EditRuntime {
                 },
                 Event::ToggleHidden(id) => self.session.toggle_hidden(id),
                 Event::ToggleHelp => self.panels.help = !self.panels.help,
+                Event::SurfaceType(index) => match self.session.set_surface_type(index) {
+                    Ok(a) => self.affected.extend(a),
+                    Err(e) => self.note(Err(e)),
+                },
+                Event::Mask { inside, layer } => match self.session.set_mask(inside, layer.as_deref()) {
+                    Ok(a) => self.affected.extend(a),
+                    Err(e) => self.note(Err(e)),
+                },
             }
         }
     }
@@ -902,6 +910,50 @@ mod tests {
         let d = std::env::temp_dir().join(format!("planet-editwin-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    // spec: VIEW-033
+    #[test]
+    fn the_surface_type_and_the_mask_of_a_region_and_the_width_of_a_line_come_from_the_panels_as_events() {
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.toggle();
+        let draw = |e: &mut EditRuntime, tool: usize, pixels: &[[f64; 2]]| {
+            e.key(EditKey::Tool(tool));
+            for p in pixels {
+                e.press(&cam, VIEWPORT, *p, &limits(), &Flat);
+                e.release();
+            }
+            e.key(EditKey::Finish);
+            e.session.selected().expect("drawn and selected")
+        };
+        let line = draw(&mut e, 5, &[CENTRE, [CENTRE[0] + 150.0, CENTRE[1]]]);
+        let region = draw(
+            &mut e,
+            7,
+            &[[CENTRE[0], CENTRE[1] + 100.0], [CENTRE[0] + 150.0, CENTRE[1] + 100.0], [CENTRE[0] + 75.0, CENTRE[1] + 200.0]],
+        );
+        assert_eq!(e.session.item(region).unwrap().kind, "region");
+        // The panels' events reach the session: surface type, then the mask (inside, a layer that exists), then labelling again.
+        e.apply(vec![Event::SurfaceType(4)]);
+        assert_eq!(e.session.item(region).unwrap().params["surface_type"], 4.0);
+        e.apply(vec![Event::Mask { inside: true, layer: Some("stamps".into()) }]);
+        assert_eq!(e.session.item(region).unwrap().mask_layer.as_deref(), Some("stamps"));
+        frame(&mut e, &cam, false);
+        let d = e.panel_data("");
+        assert!(d.inspector.unwrap().region.as_ref().unwrap().clips_inside);
+        e.apply(vec![Event::Mask { inside: false, layer: None }]);
+        assert_eq!(e.session.item(region).unwrap().mask_layer, None);
+        // A refusal (no layer chosen) is said in the status line and changes nothing.
+        let refused = e.stats.refused;
+        e.apply(vec![Event::Mask { inside: true, layer: None }]);
+        assert_eq!(e.stats.refused, refused + 1);
+        assert!(e.session.status().contains("choose the layer"), "{}", e.session.status());
+        // The typed half-width of the line is a parameter event like any other and reaches the line.
+        e.session.select(line);
+        e.apply(vec![Event::Param { key: "width_m".into(), text: "350".into() }]);
+        assert_eq!(e.session.item(line).unwrap().params["width_m"], 350.0);
     }
 
     // spec: VIEW-031

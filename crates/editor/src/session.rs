@@ -324,7 +324,13 @@ impl<S: ItemStore> Session<S> {
         let mut same: Vec<(i32, ItemId)> = self.editor.items().filter(|i| i.layer == it.layer).map(|i| (i.priority, i.id)).collect();
         same.sort();
         let place = same.iter().position(|(_, id)| *id == it.id).map_or(1, |p| p + 1);
-        Some(params::inspector_of(it, (place, same.len()), lists::distance_m(camera_position, it, self.radius_m)))
+        let mut inspector = params::inspector_of(it, (place, same.len()), lists::distance_m(camera_position, it, self.radius_m));
+        inspector.region = params::region_rows(it, &self.layers());
+        if inspector.region.is_some() {
+            // The surface type and the mask have their own controls; a typed number would bypass them (and print the refusal raw).
+            inspector.params.retain(|p| p.key != "surface_type" && p.key != "mask_mode");
+        }
+        Some(inspector)
     }
 
     /// The handles of the selected edit with their places in `PlanetFixed` (`ground_m` above the sphere at the edit).
@@ -346,7 +352,7 @@ impl<S: ItemStore> Session<S> {
     /// defaults.
     pub fn place(&mut self, kind: &str, dir: Vec3) -> Result<(ItemId, Vec<Affected>), SessionError> {
         let defs = params::defs_for(kind);
-        if defs.is_empty() {
+        if defs.is_empty() || LINE_KINDS.contains(&kind) {
             return refused(format!("'{kind}' is not a kind of stamp"));
         }
         if !is_direction(dir) {
@@ -431,6 +437,13 @@ impl<S: ItemStore> Session<S> {
                 return refused(format!("{key} must be within {}", params::format_metres(MAX_DELTA_LIMIT_M)));
             }
         }
+        // The amount and the width of a line belong to all its parts (and the width to their reach): one command for the line (VIEW-033).
+        if (key == "amount_m" || key == "width_m") && LINE_KINDS.contains(&self.editor.item(id).map_or("", |i| i.kind.as_str())) {
+            let (amount, width) = if key == "amount_m" { (Some(v), None) } else { (None, Some(v)) };
+            let (_, affected) = self.editor.set_line_params(id, amount, width)?;
+            self.status = format!("{} {} set to {}", self.named(id), key, params::format_value(v, unit));
+            return Ok(affected);
+        }
         let affected = self.editor.change(id, |it| {
             match def {
                 Some(d) => params::set_param_value(it, d, v),
@@ -442,6 +455,54 @@ impl<S: ItemStore> Session<S> {
         })?;
         self.status = format!("{} {} set to {}", self.named(id), key, params::format_value(v, unit));
         Ok(affected)
+    }
+
+    /// Set the surface type of the selected region (an index of [`planet_world_def::region::SURFACE_TYPES`]): one command.
+    pub fn set_surface_type(&mut self, index: usize) -> Result<Vec<Affected>, SessionError> {
+        let Some(id) = self.selection else { return refused("nothing is selected") };
+        if self.editor.item(id).is_none_or(|i| i.kind != "region") {
+            return refused("the selected edit is not a region");
+        }
+        let Some(kind) = planet_world_def::region::SURFACE_TYPES.get(index) else {
+            return refused(format!("there is no surface type {index} (0 to {})", planet_world_def::region::SURFACE_TYPES.len() - 1));
+        };
+        let affected = self.editor.change(id, |it| {
+            it.params.insert("surface_type".to_string(), index as f64);
+        })?;
+        self.status = format!("{} is {}", self.named(id), kind.name);
+        Ok(affected)
+    }
+
+    /// Make the selected region clip `layer` inside its outline (`inside`; the mask mode 2 and the layer name) or only label (mode 0, no
+    /// layer): one change, so the item is never in between (the world definition refuses a clipping region without a layer and a labelling
+    /// one with a layer). The layer may be any other layer name.
+    pub fn set_mask(&mut self, inside: bool, layer: Option<&str>) -> Result<Vec<Affected>, SessionError> {
+        let Some(id) = self.selection else { return refused("nothing is selected") };
+        let Some(item) = self.editor.item(id).filter(|i| i.kind == "region") else {
+            return refused("the selected edit is not a region");
+        };
+        if inside {
+            let Some(layer) = layer.map(str::trim).filter(|l| !l.is_empty()) else {
+                return refused("choose the layer the region clips");
+            };
+            if layer == item.layer {
+                return refused("a region cannot clip its own layer");
+            }
+            let layer = layer.to_string();
+            let affected = self.editor.change(id, |it| {
+                it.params.insert("mask_mode".to_string(), 2.0);
+                it.mask_layer = Some(layer);
+            })?;
+            self.status = format!("{} clips the layer inside its outline", self.named(id));
+            Ok(affected)
+        } else {
+            let affected = self.editor.change(id, |it| {
+                it.params.insert("mask_mode".to_string(), 0.0);
+                it.mask_layer = None;
+            })?;
+            self.status = format!("{} only labels", self.named(id));
+            Ok(affected)
+        }
     }
 
     /// Rename the selected edit: one command.
