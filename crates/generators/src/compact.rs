@@ -357,16 +357,22 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
     // One batch call for every height the tile needs (GEN-020): the origin, the lattice points and the normal stencils.
     let eps = core::f64::consts::FRAC_PI_2 / f64::from(1u32 << id.level()) / f64::from(cells);
     let count = w * w;
+    // SPIKE (lattice-normals): normals from the lattice and a one-sample ring instead of four more evaluations per vertex.
+    let lattice = std::env::var_os("PLANET_LATTICE_NORMALS").is_some();
     let mut dirs = Vec::with_capacity(1 + count * 5);
     dirs.push(centre);
-    for j in 0..=cells {
-        for i in 0..=cells {
-            dirs.push(id.sample_direction(map, cells, i, j));
+    if lattice {
+        dirs.extend(ring_directions(map, id, cells));
+    } else {
+        for j in 0..=cells {
+            for i in 0..=cells {
+                dirs.push(id.sample_direction(map, cells, i, j));
+            }
         }
-    }
-    for k in 0..count {
-        let st = normal_stencil(dirs[1 + k], eps);
-        dirs.extend(st);
+        for k in 0..count {
+            let st = normal_stencil(dirs[1 + k], eps);
+            dirs.extend(st);
+        }
     }
     let (all, climate) = field.heights_and_climate(map, id, &dirs, &|| false);
     let h_origin = all[0];
@@ -383,11 +389,22 @@ pub fn compact_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: Ti
     }
     let mut hr = vec![0f64; count];
     let mut normals = vec![0u32; count];
-    for k in 0..count {
-        hr[k] = all[1 + k] - h_origin;
-        let s0 = 1 + count + 4 * k;
-        let st = [dirs[s0], dirs[s0 + 1], dirs[s0 + 2], dirs[s0 + 3]];
-        normals[k] = pack_normal(oct_encode(normal_from_stencil(&st, &[all[s0], all[s0 + 1], all[s0 + 2], all[s0 + 3]], radius_m)));
+    if lattice {
+        let ns = lattice_normals(&dirs[1..], &all[1..], cells, radius_m);
+        let rw = w + 2;
+        for j in 0..w {
+            for i in 0..w {
+                hr[j * w + i] = all[1 + (j + 1) * rw + (i + 1)] - h_origin;
+                normals[j * w + i] = pack_normal(oct_encode(ns[j * w + i]));
+            }
+        }
+    } else {
+        for k in 0..count {
+            hr[k] = all[1 + k] - h_origin;
+            let s0 = 1 + count + 4 * k;
+            let st = [dirs[s0], dirs[s0 + 1], dirs[s0 + 2], dirs[s0 + 3]];
+            normals[k] = pack_normal(oct_encode(normal_from_stencil(&st, &[all[s0], all[s0 + 1], all[s0 + 2], all[s0 + 3]], radius_m)));
+        }
     }
     let lo = hr.iter().copied().fold(f64::INFINITY, f64::min);
     let hi = hr.iter().copied().fold(f64::NEG_INFINITY, f64::max);
@@ -541,4 +558,33 @@ impl CompactTile {
     pub fn shade_all(&self) -> Vec<MeshVertex> {
         (0..vertex_count(self.cells)).map(|vi| self.shade_vertex(vi)).collect()
     }
+}
+
+/// SPIKE (lattice-normals): the directions of the `(cells + 3)^2` lattice points of a tile with its one-sample ring (indices -1 to
+/// `cells + 1`), row by row (`j` slow). The ring beyond a face edge continues on the extended cube plane (`sample_direction_ext`).
+pub fn ring_directions(map: &dyn FaceMapping, id: TileId, cells: u32) -> Vec<Vec3> {
+    let mut out = Vec::with_capacity(((cells + 3) * (cells + 3)) as usize);
+    for j in -1..=i64::from(cells) + 1 {
+        for i in -1..=i64::from(cells) + 1 {
+            out.push(id.sample_direction_ext(map, cells, i, j));
+        }
+    }
+    out
+}
+
+/// SPIKE (lattice-normals): the outward normals at the `(cells + 1)^2` lattice vertices from the heights `h` at the ring directions `d`
+/// ([`ring_directions`]): the cross product of the centred differences of the positions `d (R + h)` along the lattice axes.
+pub fn lattice_normals(d: &[Vec3], h: &[f64], cells: u32, radius_m: f64) -> Vec<Vec3> {
+    let w = (cells + 1) as usize;
+    let rw = w + 2;
+    let q = |i: usize, j: usize| d[j * rw + i] * (radius_m + h[j * rw + i]);
+    let mut out = Vec::with_capacity(w * w);
+    for j in 0..w {
+        for i in 0..w {
+            let (a, b) = (i + 1, j + 1);
+            let n = (q(a + 1, b) - q(a - 1, b)).cross(q(a, b + 1) - q(a, b - 1)).normalized();
+            out.push(if n.dot(d[b * rw + a]) < 0.0 { n * -1.0 } else { n });
+        }
+    }
+    out
 }

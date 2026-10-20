@@ -827,6 +827,46 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
     )
     .map_err(err)?;
     std::fs::create_dir_all(&dir).map_err(err)?;
+    if std::env::var_os("CAPTURE_STILLS").is_some() {
+        // SPIKE (lattice-normals): one lit frame of each static view.
+        let first = views[0].cameras[0];
+        let mut r = new_renderer(&rig, &setup, first)?;
+        std::fs::create_dir_all(&dir).map_err(err)?;
+        for view in views.iter().filter(|v| v.kind == ViewKind::Static) {
+            let mut cache = SelectionCache::new();
+            let camera = view.cameras[0];
+            let plan = planet_frame::plan_terrain_cached(&request(&rig, camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
+            crate::skeleton::upload_missing_meshes(ctx, Some(rig.world), &mut r, &plan, rig.field, radius_m, o.cells)?;
+            let lit = setup.plan(&world, rig.field, &plan, WATER_T0, 1.0 / 60.0, true)?;
+            r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
+            r.read_color(ctx).write_png(&dir.join(format!("still-{}.png", view.name))).map_err(|e| e.to_string())?;
+            writeln!(out, "still {}", view.name).map_err(err)?;
+        }
+        if let Ok(spec) = std::env::var("CAPTURE_AT") {
+            // x,y,z,altitude_m,pitch_rad: a camera over the ground at that direction, looking along the local east.
+            let v: Vec<f64> = spec.split(',').map(|s| s.trim().parse().unwrap_or(0.0)).collect();
+            let at = planet_core::Vec3::new(v[0], v[1], v[2]).normalized();
+            let ground = rig.field.height(at);
+            let east = planet_core::Vec3::new(0.0, 0.0, 1.0).cross(at).normalized();
+            let camera = planet_frame::Camera::at_surface_point(
+                planet_core::PlanetFixed(at * (radius_m + ground + v[3])),
+                east,
+                v[4],
+                60f64.to_radians(),
+                aspect,
+                0.1,
+            );
+            let mut cache = SelectionCache::new();
+            let mut r = new_renderer(&rig, &setup, camera)?;
+            let plan = planet_frame::plan_terrain_cached(&request(&rig, camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
+            crate::skeleton::upload_missing_meshes(ctx, Some(rig.world), &mut r, &plan, rig.field, radius_m, o.cells)?;
+            let lit = setup.plan(&world, rig.field, &plan, WATER_T0, 1.0 / 60.0, true)?;
+            r.render(ctx, &lit, false).map_err(|e| e.to_string())?;
+            r.read_color(ctx).write_png(&dir.join("still-at.png")).map_err(|e| e.to_string())?;
+            writeln!(out, "still at {spec}").map_err(err)?;
+        }
+        return Ok(());
+    }
     let clamp_note = "the one-frame stills (still-*) set the camera directly, below the viewer's 1 m ground clamp (VIEW-004): the viewer itself does not go this low";
     writeln!(out, "capture-flights: {clamp_note}").map_err(err)?;
     let mut index = format!("# directory frames width height shore_filter\n# {clamp_note}\n");
