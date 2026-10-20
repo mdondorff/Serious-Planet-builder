@@ -884,3 +884,14 @@ Source: opus-planner (2026-10-20), VIEW-032, VIEW-037
 #### Scenario: A refusal in a measured run
 - **WHEN** the plan of a frame's own request is refused by the worker and the next frame is begun strictly
 - **THEN** the call returns the error naming the count and the refusal, while `begin_frame` of the same loop returns the frame
+
+### Requirement: VIEW-039 The keys of the editor and the camera are never taken by a panel's focus, and a focus gain presses nothing
+Only a text field being edited (`Context::text_edit_focused`) SHALL take the keys from the camera, the commands and the editor mode; any other widget that holds the keyboard focus lets it go at the next key (`Router::key` is the UI's only while a text field is edited). Tab outside a text field SHALL reach the editor toggle and never egui (no focus traversal over the panels). A key press that winit makes up when the window gains the focus (`is_synthetic`, Alt+Tab back in holds Tab) SHALL do nothing; a release always counts. A capture SHALL forget the pointer target latched at the last press (egui gets no pointer events while the pointer is captured).
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-20), owner test P1-3, VIEW-022, VIEW-034
+
+#### Scenario: A button holds the focus
+- **WHEN** a panel button holds the keyboard focus, as after a Tab through the panels, and a key arrives
+- **THEN** the key is the world's, the focus is let go, and Tab is the editor toggle's
