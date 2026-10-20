@@ -132,22 +132,54 @@ pub fn new_reach_m(far_m: f64, radius_m: f64) -> f64 {
     ((far_m + radius_m).max(MIN_AREA_M) + polyline::REACH_SLACK_M).min(CELL_EDGE_M)
 }
 
-/// Whether `piece` can be added to a brush item with `strokes`, anchored at `anchor` (latitude and longitude in degrees) and reaching
-/// `reach_m`: there is room for the stroke and its points, the bound on the change can hold the strengths, and every point of every stroke
-/// with the largest radius stays inside the reach.
+/// What a brush item holds, kept as the item grows so that deciding whether a stroke joins it does not read every point again: the
+/// number of strokes and points, the sum of the strengths, how far its farthest point is from its anchor and its largest radius.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fill {
+    pub strokes: usize,
+    pub points: usize,
+    pub strength_m: f64,
+    pub far_m: f64,
+    pub radius_m: f64,
+}
+
+impl Fill {
+    /// What `strokes` of an item anchored at `anchor` (latitude and longitude in degrees) hold.
+    pub fn of(strokes: &[ItemStroke], anchor: (f64, f64), planet_radius_m: f64) -> Fill {
+        let (far_m, radius_m) = extent(GeoPoint::new(anchor.0, anchor.1).dir(), strokes, planet_radius_m);
+        Fill {
+            strokes: strokes.len(),
+            points: strokes.iter().map(|s| s.points.len()).sum(),
+            strength_m: strength_sum(strokes),
+            far_m,
+            radius_m,
+        }
+    }
+
+    /// What it holds with `piece` added.
+    pub fn with(&self, piece: &ItemStroke, anchor: (f64, f64), planet_radius_m: f64) -> Fill {
+        let (far_m, radius_m) = extent(GeoPoint::new(anchor.0, anchor.1).dir(), std::slice::from_ref(piece), planet_radius_m);
+        Fill {
+            strokes: self.strokes + 1,
+            points: self.points + piece.points.len(),
+            strength_m: self.strength_m + piece.strength_m,
+            far_m: self.far_m.max(far_m),
+            radius_m: self.radius_m.max(radius_m),
+        }
+    }
+
+    /// Whether an item reaching `reach_m` can hold this much: not over the caps of strokes and points, a bound on the change within the
+    /// limit, and every point with the largest radius inside the reach.
+    pub fn fits(&self, reach_m: f64) -> bool {
+        self.strokes <= MAX_STROKES
+            && self.points <= MAX_BRUSH_POINTS
+            && self.strength_m <= planet_world_def::item::MAX_DELTA_LIMIT_M
+            && self.far_m + self.radius_m + JOIN_MARGIN_M <= reach_m
+    }
+}
+
+/// Whether `piece` can be added to a brush item with `strokes`, anchored at `anchor` and reaching `reach_m` (see [`Fill::fits`]); an item
+/// with no strokes takes none.
 pub fn fits(strokes: &[ItemStroke], anchor: (f64, f64), reach_m: f64, piece: &ItemStroke, planet_radius_m: f64) -> bool {
-    if strokes.is_empty() {
-        return false;
-    }
-    let points: usize = strokes.iter().map(|s| s.points.len()).sum::<usize>() + piece.points.len();
-    if strokes.len() + 1 > MAX_STROKES || points > MAX_BRUSH_POINTS {
-        return false;
-    }
-    if strength_sum(strokes) + piece.strength_m > planet_world_def::item::MAX_DELTA_LIMIT_M {
-        return false;
-    }
-    let mut all = strokes.to_vec();
-    all.push(piece.clone());
-    let (far, radius) = extent(GeoPoint::new(anchor.0, anchor.1).dir(), &all, planet_radius_m);
-    far + radius + JOIN_MARGIN_M <= reach_m
+    !strokes.is_empty() && Fill::of(strokes, anchor, planet_radius_m).with(piece, anchor, planet_radius_m).fits(reach_m)
 }

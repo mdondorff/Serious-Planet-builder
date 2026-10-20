@@ -294,3 +294,35 @@ fn a_brush_item_is_no_stamp_to_pick_and_has_no_handle() {
     s.select(id);
     assert!(s.handles(0.0).is_empty(), "the anchor of a brush cannot move");
 }
+
+// spec: VIEW-035
+#[test]
+fn what_an_item_holds_is_kept_incrementally_and_equals_what_reading_every_point_gives() {
+    let stroke = |m: f64, radius: f64, strength: f64| {
+        brush::to_item_stroke(&BrushStroke {
+            kind: BrushKind::Raise,
+            radius_m: radius,
+            strength_m: strength,
+            target_m: None,
+            points: vec![GeoPoint::new(0.0, lon(m)), GeoPoint::new(0.0, lon(m + 40.0))],
+        })
+    };
+    let anchor = (0.0, lon(0.0));
+    let mut strokes = vec![stroke(0.0, 100.0, 5.0)];
+    let mut fill = brush::Fill::of(&strokes, anchor, R);
+    for (m, radius, strength) in [(300.0, 50.0, 2.0), (900.0, 400.0, 7.5), (100.0, 1.0, 0.5)] {
+        let piece = stroke(m, radius, strength);
+        fill = fill.with(&piece, anchor, R);
+        strokes.push(piece);
+        let again = brush::Fill::of(&strokes, anchor, R);
+        assert_eq!((fill.strokes, fill.points), (again.strokes, again.points));
+        for (a, b) in [(fill.strength_m, again.strength_m), (fill.far_m, again.far_m), (fill.radius_m, again.radius_m)] {
+            assert!((a - b).abs() < 1e-9, "{a} {b}");
+        }
+    }
+    // The decision is the same as `fits` over the strokes.
+    let piece = stroke(1_200.0, 100.0, 1.0);
+    for reach in [500.0, 1_000.0, 1_341.0, 1_342.0, 5_000.0] {
+        assert_eq!(fill.with(&piece, anchor, R).fits(reach), brush::fits(&strokes, anchor, reach, &piece, R), "reach {reach}");
+    }
+}

@@ -741,6 +741,8 @@ impl<S: ItemStore> Editor<S> {
             existing: Option<ItemId>,
             item: NewItem,
             changed: bool,
+            /// What the item holds now, kept up to date as pieces join it (so a long drag does not read every point again for each piece).
+            fill: brush::Fill,
         }
         let mut work: Vec<Work> = Vec::new();
         for id in open {
@@ -748,14 +750,21 @@ impl<S: ItemStore> Editor<S> {
                 self.items.get(id).filter(|i| i.kind == brush::BRUSH_KIND && i.layer == template.layer && i.body == template.body)
             {
                 if work.iter().all(|w| w.existing != Some(*id)) {
-                    work.push(Work { existing: Some(*id), item: new_of(item), changed: false });
+                    let anchor = (item.anchor.latitude_deg, item.anchor.longitude_deg);
+                    let fill = brush::Fill::of(&item.strokes, anchor, radius);
+                    work.push(Work { existing: Some(*id), item: new_of(item), changed: false, fill });
                 }
             }
         }
         for piece in &pieces {
             let part = brush::to_item_stroke(piece);
             let anchor_of = |n: &NewItem| (n.anchor.latitude_deg, n.anchor.longitude_deg);
-            if let Some(w) = work.iter_mut().find(|w| brush::fits(&w.item.strokes, anchor_of(&w.item), w.item.reach_m, &part, radius)) {
+            let joined = |w: &Work| {
+                let with = w.fill.with(&part, anchor_of(&w.item), radius);
+                (!w.item.strokes.is_empty() && with.fits(w.item.reach_m)).then_some(with)
+            };
+            if let Some((w, with)) = work.iter_mut().find_map(|w| joined(w).map(|f| (w, f))) {
+                w.fill = with;
                 w.item.strokes.push(part);
                 w.item.max_delta_m =
                     w.item.max_delta_m.max(brush::strength_sum(&w.item.strokes)).min(planet_world_def::item::MAX_DELTA_LIMIT_M);
@@ -779,7 +788,8 @@ impl<S: ItemStore> Editor<S> {
                 strokes: vec![part],
                 ..template.clone()
             };
-            work.push(Work { existing: None, item, changed: true });
+            let fill = brush::Fill::of(&item.strokes, (item.anchor.latitude_deg, item.anchor.longitude_deg), radius);
+            work.push(Work { existing: None, item, changed: true, fill });
         }
         let new_count = work.iter().filter(|w| w.existing.is_none()).count();
         let group = (new_count > 1).then(|| self.ids.next_id());
