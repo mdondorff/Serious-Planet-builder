@@ -775,7 +775,12 @@ impl WorldDefinition {
             .into_iter()
             .filter(|id| {
                 let rec = &self.items[&(body, *id)];
-                rec.layer == layer && footprint::touches(cap, rec.unit(), f64::from_bits(rec.reach_bits), radius)
+                rec.layer == layer
+                    && footprint::touches(cap, rec.unit(), f64::from_bits(rec.reach_bits), radius)
+                    && rec
+                        .stamp
+                        .as_ref()
+                        .is_none_or(|s| !s.kind.is_brush() || s.strokes().is_empty() || footprint::strokes_touch(cap, s.strokes(), radius))
             })
             .map(|id| self.footprint_item(body, id))
             .collect();

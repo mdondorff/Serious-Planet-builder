@@ -9,7 +9,8 @@
 use std::sync::{Arc, RwLock};
 
 use planet_core::{FaceMapping, TileId, Vec3};
-use planet_world_def::footprint::{angle_between, Cap, FootprintItem};
+pub use planet_world_def::footprint::polyline_angle;
+use planet_world_def::footprint::{angle_between, point_of, stroke_angle, Cap, FootprintItem};
 use planet_world_def::stamp::{BrushKind, Stamp, StampKind};
 use planet_world_def::{BodyId, GenContext, ReadRecord, WorldDefinition};
 
@@ -78,42 +79,6 @@ pub fn channel_delta(amount: f64, x: f64) -> f64 {
     -amount * bed
 }
 
-/// The angle in radians between the unit vector `p` and the great-circle arc `a..b` (unit vectors): the distance to the arc where the foot
-/// of `p` on its great circle lies on it, else to the nearer end. `libm` for the transcendental, f64 throughout (CON-14).
-fn arc_angle(a: Vec3, b: Vec3, p: Vec3) -> f64 {
-    let ends = || angle_between(p, a).min(angle_between(p, b));
-    // The normal of the arc's great circle as `(a + b) x (b - a) / 2` (the same vector as `a x b`): `b - a` is exact, so the error is
-    // relative to the arc's length, not to 1e-16 of a unit, and a one-centimetre arc keeps its great circle to a nanometre.
-    let c = (a + b).cross(b - a) * 0.5;
-    let cl = c.length();
-    if cl.is_nan() || cl <= 1e-12 {
-        return ends();
-    }
-    let n = c * (1.0 / cl);
-    let s = p.dot(n);
-    let f = p - n * s;
-    let fl = f.length();
-    if fl.is_nan() || fl <= 1e-12 {
-        return ends();
-    }
-    let f = f * (1.0 / fl);
-    if a.cross(f).dot(n) >= 0.0 && f.cross(b).dot(n) >= 0.0 {
-        libm::atan2(s.abs(), fl)
-    } else {
-        ends()
-    }
-}
-
-fn point_of(bits: &[u64; 3]) -> Vec3 {
-    Vec3::new(f64::from_bits(bits[0]), f64::from_bits(bits[1]), f64::from_bits(bits[2]))
-}
-
-/// The angle in radians between the unit vector `p` and the polyline through `points` (bits of unit vectors, at least two): the minimum
-/// over its arcs (GEN-028).
-pub fn polyline_angle(points: &[[u64; 3]], p: Vec3) -> f64 {
-    points.windows(2).map(|w| arc_angle(point_of(&w[0]), point_of(&w[1]), p)).fold(f64::INFINITY, f64::min)
-}
-
 /// The weight of a brush stroke at `x = distance / radius` from its polyline (GEN-030): the profile of a ridge, 1 on the line, 0 from `x = 1`,
 /// smooth to the second order at the edge, non-increasing in `x`.
 pub fn stroke_weight(x: f64) -> f64 {
@@ -122,15 +87,6 @@ pub fn stroke_weight(x: f64) -> f64 {
     }
     let u = 1.0 - x * x;
     u * u
-}
-
-/// The angle in radians between the unit vector `p` and a brush stroke's polyline (bits of unit vectors, at least one): the angle to the point
-/// for a one-point stroke (a dab), else the minimum over its arcs.
-fn stroke_angle(points: &[[u64; 3]], p: Vec3) -> f64 {
-    match points {
-        [only] => angle_between(point_of(only), p),
-        _ => polyline_angle(points, p),
-    }
 }
 
 /// The eight directions at the angle `angle` from the unit vector `dir`, on the bearings 0, 45, ... 315 degrees from the local east axis

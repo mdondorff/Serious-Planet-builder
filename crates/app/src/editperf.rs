@@ -14,7 +14,7 @@ use crate::worldfield::WorldTerrain;
 use crate::{err, Options};
 use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::{PlanetFixed, TileId, Vec3};
-use planet_frame::preview::preview_delta;
+use planet_frame::preview::{preview_delta_on, PreviewStamp};
 use planet_frame::{Camera, LodParams, TerrainRequest, TerrainView};
 use planet_render::GpuContext;
 use planet_world_def::footprint::Cap;
@@ -470,7 +470,8 @@ impl CaseRow {
         median(self.runs.iter().filter_map(|r| r.stages.drawn_exact_ms).collect())
     }
 
-    /// `ok` or `OVER` against the budgets, `no result` when a run produced none.
+    /// `ok` or `OVER` against the budgets; a row with no frame that showed the preview is judged on the exact time alone and says
+    /// `(no preview)`; `no result` when a run produced no exact frame.
     pub fn verdict(&self) -> &'static str {
         if !self.gated() {
             return "recorded";
@@ -478,6 +479,8 @@ impl CaseRow {
         match (self.preview_median(), self.drawn_exact_median()) {
             (Some(p), Some(e)) if p <= PREVIEW_BUDGET_MS && e <= exact_budget_ms(self.radius_m, self.altitude_m) => "ok",
             (Some(_), Some(_)) => "OVER",
+            (None, Some(e)) if e <= exact_budget_ms(self.radius_m, self.altitude_m) => "ok (no preview)",
+            (None, Some(_)) => "OVER (no preview)",
             _ => "no result",
         }
     }
@@ -614,13 +617,41 @@ impl Harness<'_> {
 /// The resident tiles the stamp's reach touches: the edit's find as the editor makes it (`planet_editor::feed::edited_tiles`), what
 /// `ManagedLoop::edit` is given.
 fn found_tiles(stamp: &ItemSpec, resident: &[TileId], radius_m: f64) -> Vec<TileId> {
-    let affected = [planet_editor::commands::Affected { body: BodyId::PLANET, dir: stamp.dir, reach_m: stamp.reach_m }];
+    let affected = [planet_editor::commands::Affected {
+        body: BodyId::PLANET,
+        dir: stamp.dir,
+        reach_m: stamp.reach_m,
+        brush: stamp.stamp.clone().map(std::sync::Arc::new),
+    }];
     planet_editor::feed::edited_tiles(&affected, BodyId::PLANET, resident, radius_m, &TangentWarp)
 }
 
 /// Items of `layer` near the stamp, for the preview delta (the whole body would be the same list: only stamps that differ count).
 fn items_near(def: &WorldDefinition, layer: &str, at: Vec3) -> Vec<planet_world_def::footprint::FootprintItem> {
     def.footprint_items_cap(BodyId::PLANET, layer, Cap { centre: at, angle: core::f64::consts::PI }).unwrap_or_default()
+}
+
+/// The preview stamps the editor sets for the edit of `stamp` from `before` to `edited`, seen from `camera` on a body of `planet_radius_m`:
+/// the footprint delta with the brushes (VIEW-036), so a brush stroke is previewed as its chain of stamps as in the editor.
+fn case_preview(
+    before: &WorldDefinition,
+    edited: &WorldDefinition,
+    stamp: &ItemSpec,
+    camera: Vec3,
+    planet_radius_m: f64,
+) -> Vec<PreviewStamp> {
+    preview_delta_on(&items_near(before, &stamp.layer, stamp.dir), &items_near(edited, &stamp.layer, stamp.dir), camera, planet_radius_m)
+        .stamps
+}
+
+/// Writes the report as `edit-latency.md` under `out` (or at `out` when it names a `.json` file), creating the directory that is missing.
+fn write_report(out: &std::path::Path, text: &str) -> Result<std::path::PathBuf, String> {
+    let path = crate::streamperf::out_log_path(out, "edit-latency.md")?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(path)
 }
 
 /// One run of a case on a settled harness: edit, time the preview and the exact frame, take the edit back and settle.
@@ -652,12 +683,7 @@ fn run_once(
     out.refreshed = h.rig.managed.edit(&tiles);
     out.stages.edit_ms = ms(call);
     let call = Instant::now();
-    let list = preview_delta(
-        &items_near(&before_def, &stamp.layer, stamp.dir),
-        &items_near(&edited, &stamp.layer, stamp.dir),
-        req.camera.position.0,
-    );
-    h.rig.managed.set_preview(list.stamps);
+    h.rig.managed.set_preview(case_preview(&before_def, &edited, stamp, req.camera.position.0, world.radius_m()));
     out.stages.preview_call_ms = ms(call);
     let mut waiting_for_exact = false;
     let mut frame_ms: Vec<f64> = Vec::new();
@@ -937,8 +963,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     )
     .map_err(err)?;
     if let Some(dir) = &o.out {
-        let path = crate::streamperf::out_log_path(dir, "edit-latency.md")?;
-        std::fs::write(&path, format!("{table}\n{stages}\n{levels}\n{cost}")).map_err(|e| format!("{}: {e}", path.display()))?;
+        let path = write_report(dir, &format!("{table}\n{stages}\n{levels}\n{cost}"))?;
         writeln!(out, "table written to {}", path.display()).map_err(err)?;
     }
     if smoke && rows.iter().any(|r| r.runs.iter().any(|x| x.exact_ms.is_none())) {
@@ -1080,5 +1105,44 @@ mod tests {
         }
         assert_eq!(rows[1].radius_label(), "150 m brush");
         assert_eq!(exact_budget_ms(1000.0, 2000.0), EXACT_BUDGET_LARGE_MS, "a 1 km brush has the large budget");
+    }
+
+    // spec: TEST-042
+    #[test]
+    fn a_brush_case_is_previewed_as_its_chain_of_stamps_as_the_editor_does() {
+        let before = WorldDefinition::single_planet(R, 7);
+        for radius in BRUSH_RADII_M {
+            let (spec, centre) = case_brush(radius, R);
+            let mut edited = before.clone();
+            edited.put_item_spec(BodyId::PLANET, spec.clone()).unwrap();
+            let stamps = case_preview(&before, &edited, &spec, centre, R);
+            assert!(!stamps.is_empty(), "the {radius} m brush is previewed: the chain of its stroke");
+            assert!(stamps.len() <= planet_frame::preview::MAX_PREVIEW_STAMPS, "{} stamps over the cap", stamps.len());
+        }
+    }
+
+    // spec: TEST-042
+    #[test]
+    fn a_row_without_a_preview_frame_is_judged_on_its_exact_time_alone() {
+        let run = |exact: f64| CaseRun {
+            stages: Stages { drawn_exact_ms: Some(exact), ..Default::default() },
+            exact_ms: Some(exact),
+            ..Default::default()
+        };
+        let row = |exact| CaseRow { kind: CaseKind::Brush, altitude_m: 200.0, radius_m: 150.0, runs: vec![run(exact)] };
+        assert_eq!(row(200.0).verdict(), "ok (no preview)");
+        assert_eq!(row(400.0).verdict(), "OVER (no preview)");
+        let none = CaseRow { kind: CaseKind::Brush, altitude_m: 200.0, radius_m: 150.0, runs: vec![CaseRun::default()] };
+        assert_eq!(none.verdict(), "no result", "no exact frame at all");
+    }
+
+    // spec: TEST-041
+    #[test]
+    fn the_report_is_written_into_an_output_directory_that_does_not_exist_yet() {
+        let dir = std::env::temp_dir().join(format!("planet-editperf-{}", std::process::id())).join("a").join("b");
+        let path = write_report(&dir, "table").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "table");
+        assert!(path.ends_with("edit-latency.md"));
+        std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap()).unwrap();
     }
 }

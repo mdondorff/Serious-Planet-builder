@@ -519,3 +519,46 @@ fn a_brush_over_a_stamp_acts_on_the_stamped_height_and_a_flatten_ends_at_its_tar
     let (low, up) = stack(250.0, &[stroke(BrushKind::Flatten, 200.0, 3.0, Some(target), &line)]);
     close(up.height(on) - low.height(on), 3.0, "a small flatten steps from the stamped height towards the target");
 }
+
+// spec: GEN-030, WDEF-007
+#[test]
+fn every_height_a_brush_changes_lies_in_a_tile_that_declares_the_brush() {
+    // A brush of a long raise stroke, a dab and a smooth stroke far from the first: the footprint of a tile holds the item only where a
+    // stroke reaches the tile and its halo, so a sample the stage changes must lie in a tile whose footprint holds the item.
+    use planet_core::{TangentWarp, TileId};
+    use planet_generators::stamp::{ItemReader, STAGE_HALO};
+    let long: Vec<(f64, f64)> = (0..12).map(|k| (20.0, 30.0 + 0.0008 * f64::from(k))).collect();
+    let items = [brush(
+        1,
+        &[
+            stroke(BrushKind::Raise, 40.0, 7.0, None, &long),
+            stroke(BrushKind::Lower, 60.0, 5.0, None, &[(20.002, 30.004)]),
+            stroke(BrushKind::Smooth, 30.0, 3.0, None, &[(19.9985, 30.012), (19.9985, 30.0135)]),
+        ],
+    )];
+    let def = world(&items);
+    let stage = StampStage::new(Arc::new(Reference(1)), Arc::clone(&def) as Arc<dyn ItemReader>, BodyId::PLANET, LAYER, 0, 1).unwrap();
+    let mut changed = 0;
+    for level in [15u8, 17] {
+        let mut tiles = std::collections::BTreeSet::new();
+        for i in 0..60 {
+            for j in 0..60 {
+                let p = unit(19.9975 + 0.00009 * f64::from(i), 29.9985 + 0.00032 * f64::from(j));
+                tiles.insert(TileId::from_direction(&TangentWarp, p, level));
+            }
+        }
+        for tile in tiles {
+            let declared = !def.footprint_items(BodyId::PLANET, LAYER, tile, STAGE_HALO).unwrap().is_empty();
+            for l in 0..=8i64 {
+                for k in 0..=8i64 {
+                    let d = tile.sample_direction_ext(&TangentWarp, 8, k, l);
+                    if stage.height(d) != Reference(1).height(d) {
+                        changed += 1;
+                        assert!(declared, "level {level}: {tile:?} has a changed sample but does not declare the brush");
+                    }
+                }
+            }
+        }
+    }
+    assert!(changed > 100, "the setup must change heights, got {changed}");
+}
