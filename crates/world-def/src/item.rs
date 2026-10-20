@@ -463,7 +463,7 @@ impl Item {
         if first != (canonical(self.anchor.latitude_deg), canonical(self.anchor.longitude_deg)) {
             return Err(err("strokes[0].points[0]", "the first point must be the anchor's latitude and longitude"));
         }
-        if self.max_delta_m < strengths * (1.0 - 1e-12) {
+        if self.max_delta_m < strengths {
             return Err(err("max_delta_m", format!("{} m is below the sum of the strokes' strengths, {strengths} m", self.max_delta_m)));
         }
         Ok(())
