@@ -1,5 +1,5 @@
 # 0073 Normals from the tile's height lattice
-Status: proposed (sonnet-spikes, 2026-10-20, at opus-planner's request, who chose it after SPIKE-23; the owner decides). Refines the canonical normal named in ADR 0033 point 4; touches GEN-019, GEN-010.
+Status: accepted (opus-planner, 2026-10-20, after SPIKE-23 and SPIKE-24 and clean numerics and spec-guardian reviews; drafted by sonnet-spikes; moved lit goldens go to the owner's /bless). Refines the canonical normal named in ADR 0033 point 4; touches GEN-019, GEN-010.
 Date: 2026-10-20
 Source: SPIKE-23 (`spikes/edit-refresh/results/results.md`); evidence `spikes/lattice-normals/results/results.md` (SPIKE-24); ADR 0003 and ADR 0028 point 4 (the stencil as a function of the direction); GEN-019, GEN-020, COORD-007, WDEF-007
 

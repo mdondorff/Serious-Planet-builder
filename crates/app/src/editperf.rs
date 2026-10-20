@@ -18,7 +18,7 @@ use planet_frame::preview::preview_delta;
 use planet_frame::{Camera, LodParams, TerrainRequest, TerrainView};
 use planet_render::GpuContext;
 use planet_world_def::footprint::Cap;
-use planet_world_def::stamp::{Stamp, StampKind};
+use planet_world_def::stamp::{BrushKind, Stamp, StampKind, Stroke};
 use planet_world_def::{BodyId, ItemSpec, WorldDefinition, DEFAULT_ITEM_LAYER};
 use std::collections::{BTreeMap, HashSet};
 use std::io::Write;
@@ -39,6 +39,13 @@ pub const EXACT_BUDGET_LARGE_MS: f64 = 1000.0;
 /// The altitudes above the ground and the stamp radii of a measured run; a smoke run takes the first radius at 200 m.
 pub const ALTITUDES_M: [f64; 3] = [1.0, 200.0, 2000.0];
 pub const RADII_M: [f64; 3] = [50.0, 150.0, 500.0];
+/// The brush cases (TEST-042, the revisit trigger of the parked coarse-first refinement): one raise stroke of [`BRUSH_POINTS`] points at these
+/// radii and altitudes. A smoke run takes the first radius at 200 m.
+pub const BRUSH_RADII_M: [f64; 2] = [150.0, 1000.0];
+pub const BRUSH_ALTITUDES_M: [f64; 2] = [200.0, 2000.0];
+pub const BRUSH_POINTS: usize = 20;
+/// The layer of the brush cases' item.
+pub const BRUSH_LAYER: &str = "brush";
 /// Repeats of each case (the median is reported).
 pub const REPEATS: usize = 3;
 
@@ -73,6 +80,49 @@ pub fn case_stamp(radius_m: f64) -> ItemSpec {
         stamp: None,
     }
     .with_stamp(Stamp::new(StampKind::Hill, [height, 0.0, 0.0]))
+}
+
+/// The place the scripted views look at (latitude 20, longitude 30).
+fn case_centre() -> Vec3 {
+    let (la, lo) = (20f64.to_radians(), 30f64.to_radians());
+    Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la))
+}
+
+/// The brush case of radius `radius_m` on a planet of `planet_radius_m`: one raise stroke of [`BRUSH_POINTS`] points a quarter of the radius
+/// apart (what a drag is resampled to), running east and centred on the place the views look at, as one brush item in [`BRUSH_LAYER`]: the
+/// anchor is the first point, the reach holds the stroke and its radius, the bound is the strength (a fifth of the radius up to 100 m, the
+/// height of the hill case). Returns the item and the centre of the stroke, which the camera looks at.
+pub fn case_brush(radius_m: f64, planet_radius_m: f64) -> (ItemSpec, Vec3) {
+    let at = case_centre();
+    let north = Vec3::new(0.0, 0.0, 1.0);
+    let east = north.cross(at).normalized();
+    let spacing = 0.25 * radius_m;
+    let points: Vec<Vec3> = (0..BRUSH_POINTS)
+        .map(|k| {
+            let along = (k as f64 - 0.5 * (BRUSH_POINTS - 1) as f64) * spacing / planet_radius_m;
+            (at * libm::cos(along) + east * libm::sin(along)).normalized()
+        })
+        .collect();
+    let strength = (0.2 * radius_m).min(100.0);
+    let far = planet_radius_m * planet_frame_angle(points[0], points[BRUSH_POINTS - 1]);
+    let stroke = Stroke { kind: BrushKind::Raise, radius_m, strength_m: strength, target_m: None, points: points.clone() };
+    let spec = ItemSpec {
+        id: 1,
+        layer: BRUSH_LAYER.into(),
+        priority: 0,
+        dir: points[0],
+        content_hash: 0,
+        reach_m: far + radius_m + 2.0,
+        max_delta_m: strength,
+        stamp: None,
+    }
+    .with_stamp(Stamp::new(StampKind::Brush, [0.0; 3]).with_strokes(&[stroke]));
+    (spec, at)
+}
+
+/// The angle in radians between two unit directions.
+fn planet_frame_angle(a: Vec3, b: Vec3) -> f64 {
+    libm::atan2(a.cross(b).length(), a.dot(b))
 }
 
 /// A camera `altitude_m` above the ground at ground distance `rho_m` from `at`, looking at the stamp's centre.
@@ -139,9 +189,9 @@ pub fn levels_table(rows: &[CaseRow]) -> String {
         let Some(run) = r.runs.first() else { continue };
         for l in &run.levels {
             s += &format!(
-                "| {} m | {} m | {} | {:.3} | {} | {} | {} | {} |\n",
+                "| {} m | {} | {} | {:.3} | {} | {} | {} | {} |\n",
                 r.altitude_m,
-                r.radius_m,
+                r.radius_label(),
                 l.level,
                 l.spacing_m,
                 l.found,
@@ -192,9 +242,17 @@ pub struct Stages {
     pub dropped: u64,
 }
 
+/// What a case edits: a hill stamp, or a brush stroke (TEST-042).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaseKind {
+    Stamp,
+    Brush,
+}
+
 /// One row of the report: a case with its repeats.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CaseRow {
+    pub kind: CaseKind,
     pub altitude_m: f64,
     pub radius_m: f64,
     pub runs: Vec<CaseRun>,
@@ -210,6 +268,14 @@ pub fn median(mut v: Vec<f64>) -> Option<f64> {
 }
 
 impl CaseRow {
+    /// The radius as the tables print it: `150 m` for a stamp, `150 m brush` for a brush stroke.
+    pub fn radius_label(&self) -> String {
+        match self.kind {
+            CaseKind::Stamp => format!("{} m", self.radius_m),
+            CaseKind::Brush => format!("{} m brush", self.radius_m),
+        }
+    }
+
     pub fn preview_median(&self) -> Option<f64> {
         median(self.runs.iter().filter_map(|r| r.preview_ms).collect())
     }
@@ -242,9 +308,9 @@ pub fn table(rows: &[CaseRow]) -> String {
     for r in rows {
         let last = r.runs.last().cloned().unwrap_or_default();
         s += &format!(
-            "| {} m | {} m | {} | {} ({}) | {} / {} | {} | {} | {} |\n",
+            "| {} m | {} | {} | {} ({}) | {} / {} | {} | {} | {} |\n",
             r.altitude_m,
-            r.radius_m,
+            r.radius_label(),
             cell(r.preview_median()),
             cell(r.drawn_exact_median()),
             exact_budget_ms(r.radius_m, r.altitude_m),
@@ -269,9 +335,9 @@ pub fn stages_table(rows: &[CaseRow]) -> String {
         let pick = |f: &dyn Fn(&CaseRun) -> Option<f64>| median(r.runs.iter().filter_map(f).collect());
         let (plan, worker) = (pick(&|x| x.stages.plan_delivered_ms), pick(&|x| x.stages.plan_worker_ms));
         s += &format!(
-            "| {} m | {} m | {} | {} | {} | {} ({}) | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| {} m | {} | {} | {} | {} | {} ({}) | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             r.altitude_m,
-            r.radius_m,
+            r.radius_label(),
             cell(pick(&|x| Some(x.stages.set_definition_ms))),
             cell(pick(&|x| Some(x.stages.edit_ms))),
             cell(pick(&|x| Some(x.stages.preview_call_ms))),
@@ -368,9 +434,9 @@ fn found_tiles(stamp: &ItemSpec, resident: &[TileId], radius_m: f64) -> Vec<Tile
     planet_editor::feed::edited_tiles(&affected, BodyId::PLANET, resident, radius_m, &TangentWarp)
 }
 
-/// Items near the stamp, for the preview delta (the whole body would be the same list: only stamps that differ count).
-fn items_near(def: &WorldDefinition, at: Vec3) -> Vec<planet_world_def::footprint::FootprintItem> {
-    def.footprint_items_cap(BodyId::PLANET, DEFAULT_ITEM_LAYER, Cap { centre: at, angle: core::f64::consts::PI }).unwrap_or_default()
+/// Items of `layer` near the stamp, for the preview delta (the whole body would be the same list: only stamps that differ count).
+fn items_near(def: &WorldDefinition, layer: &str, at: Vec3) -> Vec<planet_world_def::footprint::FootprintItem> {
+    def.footprint_items_cap(BodyId::PLANET, layer, Cap { centre: at, angle: core::f64::consts::PI }).unwrap_or_default()
 }
 
 /// One run of a case on a settled harness: edit, time the preview and the exact frame, take the edit back and settle.
@@ -402,7 +468,11 @@ fn run_once(
     out.refreshed = h.rig.managed.edit(&tiles);
     out.stages.edit_ms = ms(call);
     let call = Instant::now();
-    let list = preview_delta(&items_near(&before_def, stamp.dir), &items_near(&edited, stamp.dir), req.camera.position.0);
+    let list = preview_delta(
+        &items_near(&before_def, &stamp.layer, stamp.dir),
+        &items_near(&edited, &stamp.layer, stamp.dir),
+        req.camera.position.0,
+    );
     h.rig.managed.set_preview(list.stamps);
     out.stages.preview_call_ms = ms(call);
     let mut waiting_for_exact = false;
@@ -518,6 +588,7 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     let seed = field.seed();
     let altitudes: Vec<f64> = if smoke { vec![200.0] } else { ALTITUDES_M.to_vec() };
     let radii: Vec<f64> = if smoke { vec![RADII_M[0]] } else { RADII_M.to_vec() };
+    let brush_radii: Vec<f64> = if smoke { vec![BRUSH_RADII_M[0]] } else { BRUSH_RADII_M.to_vec() };
     let repeats = if smoke { 1 } else { REPEATS };
     let limit = Duration::from_secs(if smoke { 40 } else { 600 });
     if smoke {
@@ -574,7 +645,23 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
             for _ in 0..repeats {
                 runs.push(run_once(&mut h, &world, &req, &stamp, limit)?);
             }
-            rows.push(CaseRow { altitude_m: altitude, radius_m: r, runs });
+            rows.push(CaseRow { kind: CaseKind::Stamp, altitude_m: altitude, radius_m: r, runs });
+        }
+        // The brush cases (TEST-042): one raise stroke of 20 points, at the altitudes the brush is measured at.
+        if !BRUSH_ALTITUDES_M.contains(&altitude) {
+            continue;
+        }
+        for &r in &brush_radii {
+            let (stroke, centre) = case_brush(r, radius_m);
+            let rho = (1.5 * r).max(altitude);
+            let req = req_of(camera_for(centre, &ground, radius_m, rho, altitude, aspect));
+            let settle = h.settle(&req, 20)?;
+            writeln!(out, "  altitude {altitude} m, brush stroke radius {r} m: settled in {settle:.1} s").map_err(err)?;
+            let mut runs = Vec::new();
+            for _ in 0..repeats {
+                runs.push(run_once(&mut h, &world, &req, &stroke, limit)?);
+            }
+            rows.push(CaseRow { kind: CaseKind::Brush, altitude_m: altitude, radius_m: r, runs });
         }
     }
     let table = table(&rows);
@@ -591,4 +678,55 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
         return Err("the smoke run's edit never became exact".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const R: f64 = 6_371_000.0;
+
+    // spec: TEST-042
+    #[test]
+    fn the_brush_case_is_one_raise_stroke_of_twenty_points_a_quarter_radius_apart_that_the_definition_accepts() {
+        for radius in BRUSH_RADII_M {
+            let (spec, centre) = case_brush(radius, R);
+            let stamp = spec.stamp.as_ref().expect("a stamp");
+            assert_eq!(stamp.kind, StampKind::Brush);
+            let strokes = stamp.strokes();
+            assert_eq!(strokes.len(), 1);
+            assert_eq!((strokes[0].kind, strokes[0].radius_m()), (BrushKind::Raise, radius));
+            let points = strokes[0].to_stroke().points;
+            assert_eq!(points.len(), BRUSH_POINTS);
+            for w in points.windows(2) {
+                let d = R * planet_frame_angle(w[0], w[1]);
+                assert!((d - 0.25 * radius).abs() < 1e-3, "{d} for radius {radius}");
+            }
+            assert!(R * planet_frame_angle(points[0], points[BRUSH_POINTS - 1]) + radius <= spec.reach_m, "the reach holds the stroke");
+            assert_eq!(spec.layer, BRUSH_LAYER);
+            assert!(spec.max_delta_m >= strokes[0].strength_m());
+            // The stroke is centred on the place the views look at.
+            let mid = (points[BRUSH_POINTS / 2 - 1] + points[BRUSH_POINTS / 2]).normalized();
+            assert!(R * planet_frame_angle(mid, centre) < 1.0, "centred");
+            // The index takes it (the first point is the anchor, the reach and the bound hold).
+            let mut def = WorldDefinition::single_planet(R, 7);
+            def.put_item_spec(BodyId::PLANET, spec).unwrap_or_else(|e| panic!("radius {radius}: {e:?}"));
+        }
+    }
+
+    // spec: TEST-042
+    #[test]
+    fn a_brush_row_says_so_in_the_radius_column_of_all_three_tables() {
+        let run =
+            CaseRun { levels: vec![LevelRow { level: 12, found: 3, drawn: 2, spacing_m: 1.0, below_spacing: 0 }], ..Default::default() };
+        let rows = [
+            CaseRow { kind: CaseKind::Stamp, altitude_m: 200.0, radius_m: 150.0, runs: vec![run.clone()] },
+            CaseRow { kind: CaseKind::Brush, altitude_m: 200.0, radius_m: 150.0, runs: vec![run] },
+        ];
+        for t in [table(&rows), stages_table(&rows), levels_table(&rows)] {
+            assert!(t.contains("| 200 m | 150 m |") && t.contains("| 200 m | 150 m brush |"), "{t}");
+        }
+        assert_eq!(rows[1].radius_label(), "150 m brush");
+        assert_eq!(exact_budget_ms(1000.0, 2000.0), EXACT_BUDGET_LARGE_MS, "a 1 km brush has the large budget");
+    }
 }
