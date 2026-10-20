@@ -62,6 +62,12 @@ pub fn key_goes_to_world(world: bool, captured: bool) -> bool {
     world || captured
 }
 
+/// Whether a key event is the user's: a release always is (it lets go of a held key), a press only when winit did not make it up on a
+/// focus gain (VIEW-022).
+pub fn key_press_counts(down: bool, synthetic: bool) -> bool {
+    !(down && synthetic)
+}
+
 /// The command a key press asks for, if any.
 pub fn key_command(code: KeyCode) -> Option<Command> {
     Some(match code {
@@ -1092,9 +1098,14 @@ impl ApplicationHandler for App<'_> {
                     st.surface.resize(&st.ctx, (size.width, size.height));
                 }
             }
-            WindowEvent::KeyboardInput { event, .. } if !self.cfg.smoke => {
+            WindowEvent::KeyboardInput { event, is_synthetic, .. } if !self.cfg.smoke => {
                 let PhysicalKey::Code(code) = event.physical_key else { return };
                 let down = event.state == ElementState::Pressed;
+                // A press winit makes up when the window gains the focus for a key that is still down (Alt+Tab back in holds Tab) is no
+                // key press of the user: it toggles nothing and commands nothing (VIEW-022).
+                if !key_press_counts(down, is_synthetic) {
+                    return;
+                }
                 if let Some(st) = self.state.as_mut() {
                     // A key the UI took (a text field has the focus): the camera and the commands get no press. A release still lets go
                     // of a held key, so none stays down. Esc with the mouse captured is the camera's.
@@ -1817,6 +1828,14 @@ mod tests {
             [true, true, true, false]
         );
         assert_eq!(edit_key(KeyCode::Escape, None, false, false), Some(EditKey::Escape));
+    }
+
+    // spec: VIEW-039
+    #[test]
+    fn a_press_winit_makes_up_on_a_focus_gain_is_no_key_press_but_a_release_always_counts() {
+        assert!(key_press_counts(true, false), "the user's press");
+        assert!(!key_press_counts(true, true), "Alt+Tab back in: Tab is still down, winit repeats its press");
+        assert!(key_press_counts(false, true) && key_press_counts(false, false), "a release lets go of the key either way");
     }
 
     // spec: VIEW-022

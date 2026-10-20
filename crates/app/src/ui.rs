@@ -22,6 +22,11 @@ pub struct Router {
     latched: Option<Target>,
 }
 
+/// Tab outside a text field belongs to the editor toggle, never to the focus traversal of the panels.
+pub fn tab_is_the_worlds(key: winit::keyboard::PhysicalKey) -> bool {
+    key == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Tab)
+}
+
 /// Take the keyboard focus from the widget that has it, if any.
 pub fn release_focus(ctx: &egui::Context) {
     ctx.memory_mut(|m| {
@@ -57,9 +62,15 @@ impl Router {
         self.latched.take()
     }
 
-    /// A key: to the UI while a text field has the focus.
+    /// The pointer was captured (looking around): egui gets no more pointer events, so the target latched at a press is stale.
+    pub fn reset(&mut self) {
+        self.latched = None;
+    }
+
+    /// A key: to the UI only while a text field is being edited. Any other widget that holds the focus (a button Tab moved onto) does not
+    /// take the keys of the camera and the commands (VIEW-022).
     pub fn key(&self, ctx: &egui::Context) -> Target {
-        if ctx.egui_wants_keyboard_input() {
+        if ctx.text_edit_focused() {
             Target::Ui
         } else {
             Target::World
@@ -193,6 +204,7 @@ impl EditorUi {
     pub fn release_buttons(&mut self) {
         let pos = self.ctx.pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
         self.winit.egui_input_mut().events.extend(release_all_buttons(pos));
+        self.router.reset();
     }
 
     /// Take the keyboard focus from the widget that has it (a text field the user clicked into): the keys are the camera's again.
@@ -204,6 +216,16 @@ impl EditorUi {
     /// and the router says world). A key is the world's unless egui consumed it or a text field has the focus.
     pub fn window_event(&mut self, window: &winit::window::Window, event: &winit::event::WindowEvent) -> bool {
         use winit::event::{ElementState, WindowEvent};
+        // A key outside a text field is the world's alone (VIEW-022): a widget holding the focus lets go of it, and Tab never reaches egui,
+        // which would move the focus around the panels instead of leaving it to the editor toggle.
+        if let WindowEvent::KeyboardInput { event: key, .. } = event {
+            if !self.ctx.text_edit_focused() {
+                release_focus(&self.ctx);
+                if tab_is_the_worlds(key.physical_key) {
+                    return true;
+                }
+            }
+        }
         let resp = self.winit.on_window_event(window, event);
         match event {
             WindowEvent::MouseInput { state, .. } => {
@@ -229,7 +251,7 @@ impl EditorUi {
                 }
                 world
             }
-            WindowEvent::KeyboardInput { .. } => !(resp.consumed || self.router.key(&self.ctx) == Target::Ui),
+            WindowEvent::KeyboardInput { .. } => self.router.key(&self.ctx) == Target::World,
             _ => true,
         }
     }
@@ -423,6 +445,47 @@ mod tests {
         assert_eq!(router.key(&ctx), Target::Ui, "a click on the text field focuses it");
         run(vec![Event::Text("w".into())], 0.2);
         assert_eq!(text, "w", "the key typed into the field is not a camera key");
+    }
+
+    // spec: VIEW-039
+    #[test]
+    fn a_widget_that_tab_gave_the_focus_does_not_take_the_keys_and_tab_is_the_worlds() {
+        use winit::keyboard::{KeyCode, PhysicalKey};
+        let ctx = egui::Context::default();
+        ctx.set_fonts(fonts());
+        let id = std::cell::Cell::new(None);
+        let run = |t: f64| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                time: Some(t),
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                id.set(Some(ui.button("a panel button").id));
+            });
+            out.textures_delta.clear();
+        };
+        run(0.0);
+        ctx.memory_mut(|m| m.request_focus(id.get().unwrap()));
+        run(0.1);
+        assert!(ctx.egui_wants_keyboard_input(), "the button holds the focus, as after a Tab through the panels");
+        assert!(!ctx.text_edit_focused());
+        assert_eq!(Router::default().key(&ctx), Target::World, "a focused button is no text field: the keys are the world's");
+        release_focus(&ctx);
+        run(0.2);
+        assert!(!ctx.egui_wants_keyboard_input(), "a key outside a text field lets the focus go");
+        assert!(tab_is_the_worlds(PhysicalKey::Code(KeyCode::Tab)) && !tab_is_the_worlds(PhysicalKey::Code(KeyCode::KeyW)));
+    }
+
+    // spec: VIEW-039
+    #[test]
+    fn a_capture_forgets_the_target_latched_at_the_last_press() {
+        let ctx = egui::Context::default();
+        let mut router = Router::default();
+        router.pointer_press(&ctx);
+        assert!(router.latched.is_some());
+        router.reset();
+        assert!(router.pointer_release().is_none(), "no release is owed after the capture, egui got none");
     }
 
     // spec: VIEW-022
