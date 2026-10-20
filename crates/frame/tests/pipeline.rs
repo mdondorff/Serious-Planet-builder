@@ -469,6 +469,40 @@ fn a_refusal_with_no_plan_in_hand_still_draws_and_the_same_refusal_is_reported_o
     assert!(pipe.take_refusal().is_none());
 }
 
+// spec: VIEW-040
+#[test]
+fn a_hundred_refused_frames_print_a_few_lines_one_per_cause_and_period_and_the_count_is_all_of_them() {
+    use planet_frame::pipeline::{refusal_cause, RefusalReporter, REFUSAL_REPORT_PERIOD_MS};
+    let spawner = Arc::new(ManualSpawner::default());
+    let mut pipe = PlanPipeline::new(worker(spawner.clone(), 1));
+    let everything = Everything::new();
+    let mut reporter = RefusalReporter::default();
+    let mut lines = Vec::new();
+    // A flight over ground too steep for the parameters: the camera moves every frame, so the worker refuses a different tile at a
+    // different distance each time, 16 ms apart.
+    for k in 0..100u64 {
+        let mut bad = request(camera_at(300.0 + k as f64, 0.0));
+        bad.lod.tau_px = 200.0;
+        pipe.begin_frame(&bad, &everything).expect("a refused frame draws");
+        spawner.run(2);
+        pipe.begin_frame(&bad, &everything).expect("a refused frame draws");
+        if let Some(why) = pipe.take_refusal() {
+            lines.extend(reporter.observe(&why, k * 16));
+        }
+    }
+    assert!(pipe.refused_plans() >= 90, "nearly every frame was refused: {}", pipe.refused_plans());
+    assert!(lines.len() <= 3, "{} lines for {} refusals: {lines:?}", lines.len(), pipe.refused_plans());
+    // The same cause is due again after the period, with the number that came in between.
+    let why = "plan for frame 9: invalid LOD parameters: tile TileId(7) (level 15): morph interval [1.0, 0.5] m is empty";
+    let mut r = RefusalReporter::default();
+    assert!(r.observe(why, 0).is_some() && r.observe(why, 100).is_none() && r.observe(why, 200).is_none());
+    let again = r.observe(&why.replace("TileId(7)", "TileId(8)"), REFUSAL_REPORT_PERIOD_MS + 1).expect("due again");
+    assert!(again.contains("2 more refusals"), "{again}");
+    // Another level is another cause.
+    assert!(r.observe(&why.replace("level 15", "level 16"), 300).is_some());
+    assert_eq!(refusal_cause(why), "invalid LOD parameters / level 15");
+}
+
 // spec: STRM-016
 #[test]
 fn the_stale_plan_rule_follows_translation_rotation_and_the_frame_setup() {

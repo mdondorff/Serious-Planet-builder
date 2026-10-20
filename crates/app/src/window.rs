@@ -289,6 +289,8 @@ struct Running {
     /// The last minute of camera poses at 10 Hz and the files F9 has written (VIEW-024).
     path: PathLog,
     repro_files: u64,
+    /// What the console and the crash directory get of the plan refusals (VIEW-040).
+    refusals: planet_frame::pipeline::RefusalReporter,
     /// The notice the title shows after F9 and the clock time it is shown until.
     notice: Option<(String, u64)>,
     press: ClickTracker,
@@ -452,6 +454,7 @@ impl App<'_> {
             last_camera: self.cameras[0],
             path: PathLog::new(),
             repro_files: 0,
+            refusals: Default::default(),
             notice: None,
             press: ClickTracker::default(),
             globe_stats: GlobeStats::default(),
@@ -616,13 +619,15 @@ impl App<'_> {
                 })?;
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
+            // One line, one report file and one title notice per cause (kind and level) in 5 s; the title counts all of them.
             if let Some(why) = st.rig.managed.take_plan_refusal() {
-                crate::crash::note(&format!("warning: {why}\n  the window keeps the last plan and goes on"));
-                crate::crash::set_path_text(st.path.to_text());
-                let report = crate::crash::snapshot("plan refusal (the window went on)", &why);
-                let text = report.map_or_else(|| why.clone(), |p| format!("plan refused, report {}", p.display()));
-                st.window.set_title(&format!("planet | {text}"));
-                st.notice = Some((text, now_ms + NOTICE_MS));
+                if let Some(line) = st.refusals.observe(&why, now_ms) {
+                    crate::crash::note(&format!("warning: {line}\n  the window keeps the last plan and goes on"));
+                    crate::crash::set_path_text(st.path.to_text());
+                    let report = crate::crash::snapshot("plan refusal (the window went on)", &line);
+                    let text = report.map_or_else(|| why.clone(), |p| format!("plan refused, report {}", p.display()));
+                    st.notice = Some((text, now_ms + NOTICE_MS));
+                }
             }
             // A lost GPU device cannot be drawn on again: report it and end the run with the reason.
             if let Some(lost) = st.ctx.device_lost() {
@@ -981,7 +986,11 @@ fn title_text(st: &Running, now_ms: u64) -> String {
         exposure: st.exposure.filter(|_| st.viewer.lit),
         readiness: st.readiness,
     };
-    let input = planet_frame::viewer::input_text(&st.viewer.held, st.viewer.mouse.captured(), st.viewer.globe.is_some());
+    let mut input = planet_frame::viewer::input_text(&st.viewer.held, st.viewer.mouse.captured(), st.viewer.globe.is_some());
+    let refused = st.rig.managed.pipeline().refused_plans();
+    if refused > 0 {
+        input += &format!(" | plans refused x{refused}");
+    }
     match &st.notice {
         Some((text, until)) if now_ms < *until => format!("{} | {input} | {text}", title(&info)),
         _ => format!("{} | {input}", title(&info)),

@@ -100,12 +100,18 @@ fn write_report(kind: &str, message: &str, location: &str, backtrace: &str, once
 
 /// The build commit: `git rev-parse HEAD` of the working directory, best effort.
 fn commit() -> String {
-    std::process::Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map_or_else(|| "unknown".to_string(), |o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    // Asked once per run: a flight over steep ground writes many reports, and each must not start a process.
+    static COMMIT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    COMMIT
+        .get_or_init(|| {
+            std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map_or_else(|| "unknown".to_string(), |o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        })
+        .clone()
 }
 
 pub struct Input<'a> {

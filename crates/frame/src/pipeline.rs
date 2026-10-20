@@ -751,6 +751,46 @@ pub struct PipelineFrame {
     pub wanted: Vec<(TileId, f64)>,
 }
 
+/// How long a refusal cause stays quiet after it was reported, milliseconds (VIEW-040).
+pub const REFUSAL_REPORT_PERIOD_MS: u64 = 5_000;
+
+/// The cause of a refusal message: its kind and the level of the tile it names, not the tile, the distances or the frame (those change
+/// with every frame of a flight over the same steep ground): `invalid LOD parameters / level 15`.
+pub fn refusal_cause(message: &str) -> String {
+    let body = message.split_once(": ").map_or(message, |(_, rest)| rest);
+    let kind = body.split(':').next().unwrap_or(body);
+    let level = body.split_once("(level ").and_then(|(_, r)| r.split(')').next()).unwrap_or("-");
+    format!("{kind} / level {level}")
+}
+
+/// What a flight over steep ground prints of its plan refusals (VIEW-040): a line for a cause at most once in
+/// [`REFUSAL_REPORT_PERIOD_MS`], saying how many of that cause came in between. The count of all of them is the pipeline's
+/// [`PlanPipeline::refused_plans`] (the title shows it).
+#[derive(Default)]
+pub struct RefusalReporter {
+    /// Per cause: when it was last printed and how many came since.
+    causes: HashMap<String, (Option<u64>, u64)>,
+}
+
+impl RefusalReporter {
+    /// A refusal at `now_ms`: the line to print for it, if its cause is due.
+    pub fn observe(&mut self, message: &str, now_ms: u64) -> Option<String> {
+        let cause = refusal_cause(message);
+        let entry = self.causes.entry(cause.clone()).or_insert((None, 0));
+        if entry.0.is_some_and(|last| now_ms.saturating_sub(last) < REFUSAL_REPORT_PERIOD_MS) {
+            entry.1 += 1;
+            return None;
+        }
+        let more = std::mem::take(&mut entry.1);
+        entry.0 = Some(now_ms);
+        Some(if more == 0 {
+            message.to_string()
+        } else {
+            format!("{message}\n  ({more} more refusals of this cause [{cause}] since the last line)")
+        })
+    }
+}
+
 /// The per-frame glue (STRM-016): deliver what the worker finished, ask for the plan of this camera, decide what to draw.
 pub struct PlanPipeline {
     worker: PlanWorker,
@@ -771,7 +811,6 @@ pub struct PlanPipeline {
     dropped_plan_errors: u64,
     /// The plans refused for the frame's own request, the reason of the last one, and the message not yet taken.
     refused_plans: u64,
-    refusal_text: Option<String>,
     fresh_refusal: Option<String>,
 }
 
@@ -790,7 +829,6 @@ impl PlanPipeline {
             edit_seq: 0,
             dropped_plan_errors: 0,
             refused_plans: 0,
-            refusal_text: None,
             fresh_refusal: None,
         }
     }
@@ -806,7 +844,8 @@ impl PlanPipeline {
         self.refused_plans
     }
 
-    /// The message of a refusal not reported yet, once (the same refusal again is counted, not reported again).
+    /// The message of the newest refusal not taken yet, once (a refusal that came between two takes is counted by [`PlanPipeline::refused_plans`]
+    /// only; [`RefusalReporter`] decides what is printed).
     pub fn take_refusal(&mut self) -> Option<String> {
         self.fresh_refusal.take()
     }
@@ -873,8 +912,6 @@ impl PlanPipeline {
         match self.worker.take() {
             Some(Ok(o)) => {
                 delivered = Some((o.seq, o.plan_ms));
-                // A plan made again ends the refusal: the same reason after it is a new refusal and is reported.
-                self.refusal_text = None;
                 if o.seq >= self.edit_seq {
                     self.edited.clear();
                 }
@@ -889,11 +926,8 @@ impl PlanPipeline {
             // and is reported once through `take_refusal`: a plan the worker refuses never ends the window.
             Some(Err(f)) => {
                 self.refused_plans += 1;
-                let reason = f.to_string();
-                if self.refusal_text.as_deref() != Some(reason.as_str()) {
-                    self.fresh_refusal = Some(format!("plan for frame {}: {reason}", self.frame));
-                    self.refusal_text = Some(reason);
-                }
+                // The newest refusal waits for `take_refusal`; what to print of them is the caller's (`RefusalReporter`).
+                self.fresh_refusal = Some(format!("plan for frame {}: {f}", self.frame));
             }
             None => {}
         }
