@@ -24,6 +24,34 @@ pub struct Row {
     /// Metres from the camera to the edit's anchor on the sphere.
     pub distance_m: f64,
     pub reach_m: f64,
+    /// The items of the line or the brush drag the edit is a part of, itself included: 1 for an edit that is not split. In the layers list a
+    /// split edit is one row (its first part) and this is the number of its parts.
+    pub parts: usize,
+    /// Which part of its group the edit is (counting from 0), when it is one.
+    pub part: Option<u32>,
+    /// The points of a line or region (of this item), and the strokes of a brush (of all the items of the row in the layers list).
+    pub points: usize,
+    pub strokes: usize,
+}
+
+impl Row {
+    /// What the row says besides its label and kind (VIEW-016): the strokes of a brush (with its parts when a drag made several items),
+    /// the parts of a split line, the points of a line or region, which part a part is; nothing for a stamp.
+    pub fn detail(&self) -> String {
+        let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+        if self.kind == "brush" {
+            let strokes = plural(self.strokes, "stroke", "strokes");
+            return if self.parts > 1 { format!("{} parts, {strokes}", self.parts) } else { strokes };
+        }
+        if self.parts > 1 {
+            return format!("{} parts", self.parts);
+        }
+        match (self.part, self.points) {
+            (Some(p), _) => format!("part {}", p + 1),
+            (None, n) if n > 0 => plural(n, "point", "points"),
+            _ => String::new(),
+        }
+    }
 }
 
 /// The name of an edit for people: its name, else its kind and the last six characters of its id.
@@ -50,6 +78,10 @@ fn row_of(item: &Item, camera_position: Vec3, radius_m: f64) -> Row {
         layer: item.layer.clone(),
         distance_m: distance_m(camera_position, item, radius_m),
         reach_m: item.reach_m,
+        parts: 1,
+        part: item.part,
+        points: item.points.len(),
+        strokes: item.strokes.len(),
     }
 }
 
@@ -102,13 +134,32 @@ pub struct LayerGroup {
 /// The edits by layer: the layers in stack order, the rows of each in the order they apply.
 pub fn layer_groups<'a>(items: impl IntoIterator<Item = &'a Item>, camera_position: Vec3, radius_m: f64) -> Vec<LayerGroup> {
     let all: Vec<&Item> = items.into_iter().collect();
+    // A line or a brush drag split into linked items is one row, the first part's, with the number of the parts and all the strokes.
+    let mut groups: std::collections::BTreeMap<ItemId, (usize, usize)> = std::collections::BTreeMap::new();
+    for i in &all {
+        if let Some(g) = i.group {
+            let e = groups.entry(g).or_default();
+            e.0 += 1;
+            e.1 += i.strokes.len();
+        }
+    }
     let mut layers: Vec<&str> = all.iter().map(|i| i.layer.as_str()).collect::<BTreeSet<_>>().into_iter().collect();
     layers.sort_by_key(|l| layer_rank(l));
     layers
         .into_iter()
         .map(|layer| LayerGroup {
             layer: layer.to_string(),
-            rows: apply_order(all.iter().copied().filter(|i| i.layer == layer), camera_position, radius_m),
+            rows: {
+                // Only the first part of a split item has a row.
+                let first_parts = all.iter().copied().filter(|i| i.layer == layer && i.part.is_none_or(|p| p == 0));
+                let mut rows = apply_order(first_parts, camera_position, radius_m);
+                for row in &mut rows {
+                    if let Some(g) = all.iter().find(|i| i.id == row.id).and_then(|i| i.group) {
+                        (row.parts, row.strokes) = groups[&g];
+                    }
+                }
+                rows
+            },
         })
         .collect()
 }

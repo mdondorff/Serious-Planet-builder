@@ -1,0 +1,1 @@
+- 2026-10-20 **layer-rows** (sonnet-crusader, opus-planner: item 3; VIEW-016): the layers list has one row for a split line or a brush drag (the first part) with the parts and strokes (`Row::detail`), the points of a line or region, a colour for the brush; hiding and deleting the row take the whole group as one command (deleting a part of a line used to leave the others).
