@@ -73,27 +73,39 @@ fn declared_tests(krate: &Path) -> BTreeSet<String> {
     out
 }
 
-/// The tests `cargo nextest list` reports for the per-tier binaries of package `pkg`, as `<file>::<function>`.
-fn listed_tests(pkg: &str) -> BTreeSet<String> {
+/// The tests `cargo nextest list` reports for the per-tier binaries of every package, as `<file>::<function>` per package. One call for
+/// the whole workspace: a call per package costs 6 to 25 s of cargo start-up and binary listing each (six converted crates: 100 to 180 s on
+/// the CI runners, the 180 s timeout of the default profile, the CI runs of 2026-10-19 to 20), and `--workspace` is the resolution of the run that built the binaries.
+fn listed_tests() -> std::collections::BTreeMap<String, BTreeSet<String>> {
     let out = Command::new("cargo")
-        .args(["nextest", "list", "-p", pkg, "-E", "binary(it) or binary(oracle_all) or binary(gpu_all)", "--message-format", "oneline"])
+        .args([
+            "nextest",
+            "list",
+            "--workspace",
+            "-E",
+            "binary(it) or binary(oracle_all) or binary(gpu_all)",
+            "--message-format",
+            "oneline",
+        ])
         .current_dir(repo_root())
         .output()
         .expect("cargo nextest list");
-    assert!(out.status.success(), "cargo nextest list -p {pkg}: {}", String::from_utf8_lossy(&out.stderr));
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|l| {
-            let (binary, test) = l.split_once(' ')?;
-            let (_, bin) = binary.split_once("::")?;
-            ["it", "oracle_all", "gpu_all"].contains(&bin).then(|| test.trim().to_string())
-        })
-        .collect()
+    assert!(out.status.success(), "cargo nextest list --workspace: {}", String::from_utf8_lossy(&out.stderr));
+    let mut by_package: std::collections::BTreeMap<String, BTreeSet<String>> = std::collections::BTreeMap::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let Some((binary, test)) = line.split_once(' ') else { continue };
+        let Some((pkg, bin)) = binary.split_once("::") else { continue };
+        if ["it", "oracle_all", "gpu_all"].contains(&bin) {
+            by_package.entry(pkg.to_string()).or_default().insert(test.trim().to_string());
+        }
+    }
+    by_package
 }
 
 // spec: BUILD-015
 #[test]
 fn a_crate_with_one_test_binary_per_tier_lists_exactly_the_test_functions_of_its_test_files() {
+    let listed_all = listed_tests();
     let mut checked = Vec::new();
     for krate in std::fs::read_dir(repo_root().join("crates")).unwrap().flatten() {
         let manifest = std::fs::read_to_string(krate.path().join("Cargo.toml")).unwrap_or_default();
@@ -101,7 +113,7 @@ fn a_crate_with_one_test_binary_per_tier_lists_exactly_the_test_functions_of_its
             continue;
         }
         let pkg = manifest.lines().find_map(|l| l.strip_prefix("name = \"")).and_then(|r| r.split('"').next()).unwrap().to_string();
-        let (declared, listed) = (declared_tests(&krate.path()), listed_tests(&pkg));
+        let (declared, listed) = (declared_tests(&krate.path()), listed_all.get(&pkg).cloned().unwrap_or_default());
         let missing: Vec<_> = declared.difference(&listed).collect();
         let extra: Vec<_> = listed.difference(&declared).collect();
         assert!(

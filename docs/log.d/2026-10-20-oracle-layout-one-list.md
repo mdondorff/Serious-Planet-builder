@@ -1,0 +1,1 @@
+- 2026-10-20 **oracle-layout-one-list** (sonnet-spikes; BUILD-015): `oracle_test_layout` lists the per-tier tests of every converted crate with one `cargo nextest list --workspace` instead of one call per crate: 26 to 34 s to 6 to 7 s locally, the CI tail (118 s Linux, 104 to 180 s Windows, three 180 s timeouts in 30 runs) to be re-read after merge.
