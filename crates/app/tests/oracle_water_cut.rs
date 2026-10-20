@@ -78,13 +78,13 @@ fn the_cut_water_nodes_cover_the_same_sea_pixels_as_the_full_selection_in_the_fo
     let views = lit_views(R, aspect, field.as_ref(), 0.0, &is_sea, 240).expect("the world has a beach");
     let look = LookParams::default();
     let table = world.definition().liquids().unwrap();
-    // Per view: the share of the full water nodes the cut keeps, in percent (min, max over the sampled frames), pinned from the runs.
+    // Per view: the share of the full water nodes the cut keeps, in percent (min, max over the sampled frames), pinned from the runs (re-pinned for ADR 0071, which makes the whole connected plain a water node: the cut keeps 40 to 50 %, the exact minimum 19 to 41 %).
     let mut jobs: HashSet<TileId> = HashSet::new();
     let ranges: [(&str, f64, f64, (f64, f64)); 4] = [
-        ("coast-2km", 70.0, 95.0, (45.0, 75.0)),
-        ("coast-3m", 35.0, 65.0, (25.0, 50.0)),
-        ("coast-glide", 40.0, 70.0, (30.0, 60.0)),
-        ("coast-descent", 50.0, 80.0, (35.0, 65.0)),
+        ("coast-2km", 35.0, 65.0, (10.0, 35.0)),
+        ("coast-3m", 30.0, 55.0, (22.0, 45.0)),
+        ("coast-glide", 30.0, 55.0, (22.0, 50.0)),
+        ("coast-descent", 30.0, 60.0, (15.0, 50.0)),
     ];
     for (name, lo, hi, exact_range) in ranges {
         let view = views.iter().find(|v| v.name == name).expect("view");

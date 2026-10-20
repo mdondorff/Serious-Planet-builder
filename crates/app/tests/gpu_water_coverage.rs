@@ -24,8 +24,6 @@ const R: f64 = 6_371_000.0;
 const CELLS: u32 = 16;
 const FINEST: u8 = 26;
 const EV: f32 = 14.0;
-/// The reach of the oracle's own connectivity test: an ocean vertex within this distance of the point (ADR 0056).
-const CONNECT_M: f64 = 100_000.0;
 
 fn lod_for(size: (u32, u32)) -> LodParams {
     LodParams {
@@ -118,41 +116,15 @@ fn sea_point(cam: &Camera, size: (u32, u32), x: u32, y: u32) -> Option<Vec3> {
     (t > 0.0).then(|| (from + dir * t).normalized())
 }
 
-/// The oracle's connectivity: an ocean vertex of the bake within [`CONNECT_M`] of `p` (probed on a 5 km grid of tangent offsets),
-/// memoised per 10 km cell.
+/// The oracle's connectivity (ADR 0071): a vertex that weighs in the point's interpolation is wet, that is ocean or reached by the sea
+/// through ground at most the conduction bound high. The oracle reads the bake's floor itself, not the plan's tiles.
 struct Connected<'a> {
     world: &'a WorldTerrain,
-    memo: std::collections::HashMap<(i64, i64, i64), bool>,
 }
 
 impl Connected<'_> {
     fn at(&mut self, p: Vec3) -> bool {
-        let key = ((p.x * R / 10_000.0).round() as i64, (p.y * R / 10_000.0).round() as i64, (p.z * R / 10_000.0).round() as i64);
-        if let Some(v) = self.memo.get(&key) {
-            return *v;
-        }
-        let centre = Vec3::new(key.0 as f64, key.1 as f64, key.2 as f64) * (10_000.0 / R);
-        let centre = centre.normalized();
-        let helper = if centre.z.abs() < 0.9 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(1.0, 0.0, 0.0) };
-        let east = centre.cross(helper).normalized();
-        let north = centre.cross(east).normalized();
-        let n = (CONNECT_M / 5_000.0) as i32;
-        let mut found = false;
-        'scan: for j in -n..=n {
-            for i in -n..=n {
-                let (dx, dy) = (f64::from(i) * 5_000.0, f64::from(j) * 5_000.0);
-                if dx * dx + dy * dy > CONNECT_M * CONNECT_M {
-                    continue;
-                }
-                let d = (centre + east * (dx / R) + north * (dy / R)).normalized();
-                if self.world.bake_probe(d).is_some_and(|b| b.ocean_vertex) {
-                    found = true;
-                    break 'scan;
-                }
-            }
-        }
-        self.memo.insert(key, found);
-        found
+        self.world.bake_probe(p).is_some_and(|b| b.wet_vertex)
     }
 }
 
@@ -204,7 +176,7 @@ fn coverage(views: &[&str]) {
         ("aerial", coast, 2000.0, 3000.0, 2.0),
         ("low", coast, 30.0, 600.0, 0.5),
         ("beach", beach, 2000.0, 3000.0, 25.0),
-        ("inland", beach, 600.0, -4000.0, 10.0),
+        ("inland", coast, 600.0, -4000.0, 10.0),
     ];
     let mut exact_cut = 0;
     for (name, coast, alt, back, pitch) in cases.into_iter().filter(|c| views.contains(&c.0)) {
@@ -258,7 +230,7 @@ fn coverage(views: &[&str]) {
         }
         assert!(wp.nodes.len() <= full.nodes.len());
         assert!(with == with_full, "{name}: the cut ({} nodes of {}) changes pixels of the picture", wp.nodes.len(), full.nodes.len());
-        let mut connected = Connected { world: &world, memo: Default::default() };
+        let mut connected = Connected { world: &world };
         let (mut expected, mut missing, mut dry_checked, mut flooded) = (0u32, 0u32, 0u32, 0u32);
         let mut first_missing = None;
         for y in (0..size.1).step_by(2) {

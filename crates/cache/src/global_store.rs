@@ -69,8 +69,8 @@ pub const FLOOR_CODEC_VERSION: u8 = 1;
 pub const KIND_GLOBAL_WATER_SUMMARY: u8 = Kind::GlobalWaterSummary as u8;
 
 /// Version of the summary payload layout. History: 1 = one flag byte per cell, then the band elevations as a byte-shuffled `f32`
-/// plane, LZ4 block.
-pub const SUMMARY_CODEC_VERSION: u8 = 1;
+/// plane, LZ4 block. 2 (ADR 0071) = the same, then the lowest wet floor of each cell as a low-byte plane and a high-byte plane.
+pub const SUMMARY_CODEC_VERSION: u8 = 2;
 
 const HEADER_LEN: usize = 9;
 /// `codec version (u8) | resolution (u32 LE) | cells per block edge (u32 LE) | raw length (u32 LE)`.
@@ -324,10 +324,13 @@ pub fn decode_floor_block(bytes: &[u8]) -> Result<(u32, Vec<u16>), BlockCodecErr
 pub fn encode_summary(summary: &WaterSummary) -> Result<Vec<u8>, BlockCodecError> {
     let cells = summary.cells();
     let n = cells.len();
-    let mut raw = Vec::with_capacity(5 * n);
+    let mut raw = Vec::with_capacity(7 * n);
     raw.extend(cells.iter().map(|c| c.flags));
     for b in 0..4 {
         raw.extend(cells.iter().map(|c| c.band_elevation_m.to_le_bytes()[b]));
+    }
+    for b in 0..2 {
+        raw.extend(cells.iter().map(|c| c.floor.to_le_bytes()[b]));
     }
     let mut out = Vec::with_capacity(SUMMARY_HEADER_LEN + raw.len() / 4);
     out.push(SUMMARY_CODEC_VERSION);
@@ -357,7 +360,7 @@ pub fn decode_summary(bytes: &[u8]) -> Result<WaterSummary, BlockCodecError> {
     let n = planet_generators::water_summary::summary_cell_count(res, cells).ok_or_else(|| {
         BlockCodecError::Summary(format!("a bake of {res} cells in blocks of {cells} makes no summary (or too many cells)"))
     })? as usize;
-    let expected = 5 * n as u64;
+    let expected = 7 * n as u64;
     if u64::from(claimed) != expected {
         return Err(BlockCodecError::RawLength { claimed, expected });
     }
@@ -369,6 +372,7 @@ pub fn decode_summary(bytes: &[u8]) -> Result<WaterSummary, BlockCodecError> {
         .map(|i| SummaryCell {
             flags: raw[i],
             band_elevation_m: f32::from_le_bytes([raw[n + i], raw[2 * n + i], raw[3 * n + i], raw[4 * n + i]]),
+            floor: u16::from_le_bytes([raw[5 * n + i], raw[6 * n + i]]),
         })
         .collect();
     let out = WaterSummary::from_cells(res, cells, decoded)?;
@@ -625,7 +629,7 @@ impl GlobalWorld {
             hash_version: HASH_VERSION,
             generator_version: GLOBAL_VERSION,
             // A function of the ocean bits too: renaming the ocean channel's implementation renames the summary.
-            implementation_id: format!("{SUMMARY_IMPLEMENTATION_ID}+{OCEAN_IMPLEMENTATION_ID}"),
+            implementation_id: format!("{SUMMARY_IMPLEMENTATION_ID}+{OCEAN_IMPLEMENTATION_ID}+{WET_FLOOR_IMPLEMENTATION_ID}"),
             face_mapping_id: TangentWarp.id().to_string(),
             body: self.body,
             body_params: self.body_params(),
@@ -1293,6 +1297,21 @@ fn stored_ocean(store: &TileStore, world: &GlobalWorld, tile: TileId, cells: u32
     Ok(bits)
 }
 
+/// The stored wet-floor block of `tile`, decoded: an error naming the block when it is missing, damaged or of other cells.
+fn stored_floor_codes(store: &TileStore, world: &GlobalWorld, tile: TileId, cells: u32) -> Result<Vec<u16>, GlobalBuildError> {
+    let key = world.floor_key(tile, cells);
+    let what = |why: String| GlobalBuildError::MissingBlock(format!("wet-floor block {:#018x} key {key}: {why}", tile.raw()));
+    let rec = store
+        .get(KIND_GLOBAL_WET_FLOOR, tile, key)
+        .map_err(|e| what(e.to_string()))?
+        .ok_or_else(|| what("not stored under the current key".into()))?;
+    let (c, codes) = decode_floor_block(&rec.payload).map_err(|e| what(e.to_string()))?;
+    if c != cells {
+        return Err(what(format!("its payload has {c} cells per edge, the layout says {cells}")));
+    }
+    Ok(codes)
+}
+
 /// The codes of the stored block `tile` (the ocean vertices 0, the others their elevation's code), read from the stored sample and
 /// ocean blocks.
 fn stored_codes(store: &TileStore, world: &GlobalWorld, tile: TileId, cells: u32) -> Result<Vec<u16>, GlobalBuildError> {
@@ -1400,14 +1419,8 @@ pub fn water_summary_of_store(store: &TileStore, world: &GlobalWorld, res: u32, 
         }
         let results = parallel_map(&batch, threads.min(batch_n), &|t| -> Result<Vec<SummaryCell>, GlobalBuildError> {
             let samples = stored_block(store, world, *t, cells)?;
-            let key = world.ocean_key(*t, cells);
-            let what = |why: String| GlobalBuildError::MissingBlock(format!("ocean block {:#018x} key {key}: {why}", t.raw()));
-            let rec = store
-                .get(KIND_GLOBAL_OCEAN, *t, key)
-                .map_err(|e| what(e.to_string()))?
-                .ok_or_else(|| what("not stored under the current key".into()))?;
-            let bits = decode_ocean_block(&rec.payload).map_err(|e| what(e.to_string()))?;
-            Ok(summarize_block(cells, &samples, &bits)?)
+            let floors = stored_floor_codes(store, world, *t, cells)?;
+            Ok(summarize_block(cells, &samples, &floors)?)
         });
         for (t, r) in batch.iter().zip(results) {
             summary.set_block(*t, &r?)?;
@@ -1926,7 +1939,7 @@ fn verify_summary_record(store: &TileStore, world: &GlobalWorld, stored: &crate:
         Ok(fresh) => {
             let differ = |i: &usize| {
                 let (a, b) = (fresh.cells()[*i], kept.cells()[*i]);
-                a.flags != b.flags || a.band_elevation_m.to_bits() != b.band_elevation_m.to_bits()
+                a.flags != b.flags || a.floor != b.floor || a.band_elevation_m.to_bits() != b.band_elevation_m.to_bits()
             };
             match (0..fresh.cells().len()).find(differ) {
                 None => report.matching += 1,

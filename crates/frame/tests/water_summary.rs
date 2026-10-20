@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use planet_cache::global_store::{build_global, load_water_summary, GlobalWorld, StoreOceanSource, StoreSource};
+use planet_cache::global_store::{build_global, load_water_summary, GlobalWorld, StoreOceanSource, StoreSource, StoreWetFloorSource};
 use planet_cache::pack::{TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId};
@@ -14,6 +14,7 @@ use planet_generators::global::{bake, GridSource};
 use planet_generators::ocean::{tiled_ocean, EARTH_OCEAN_MIN_AREA_FRACTION};
 use planet_generators::water::{SeaProducer, WaterField};
 use planet_generators::water_summary::summary_of_grid;
+use planet_generators::wet_floor::tiled_floors;
 use planet_world_def::{LiquidKindId, SeaParams, WorldDefinition};
 
 const R: f64 = 6_371_000.0;
@@ -56,11 +57,12 @@ fn a_coarse_answer_is_a_superset_of_the_point_query_a_parent_is_wet_where_its_ch
         let grid = bake(seed, &TangentWarp, res, 4).unwrap();
         let (_, ocean) = tiled_ocean(&grid, &TangentWarp, block, 4, EARTH_OCEAN_MIN_AREA_FRACTION).unwrap();
         let summary = summary_of_grid(&grid, &ocean, block, 4).unwrap();
+        let floors = tiled_floors(&grid, &ocean, block, 4).unwrap();
         assert_eq!(summary.block_level(), 3);
         let src = GridSource(&grid);
-        let exact_sea = SeaProducer::new(&ocean, sea());
+        let exact_sea = SeaProducer::new(&ocean, sea()).with_floor(&floors);
         let exact_field = WaterField::new(&TangentWarp, &src, vec![&exact_sea]);
-        let coarse_sea = SeaProducer::new(&ocean, sea()).with_summary(&summary);
+        let coarse_sea = SeaProducer::new(&ocean, sea()).with_summary(&summary).with_floor(&floors);
         let coarse_field = WaterField::new(&TangentWarp, &src, vec![&coarse_sea]);
         let (mut exact, mut coarse) = (WaterTileCache::new(), WaterTileCache::new());
         let mut answers = std::collections::HashMap::new();
@@ -106,7 +108,8 @@ fn a_tile_job_of_a_coarse_tile_reads_no_block_and_one_of_a_fine_tile_at_most_fou
     let run = |threads: usize| {
         let bake_src = StoreSource::new(&store, &world, res).unwrap();
         let ocean_src = StoreOceanSource::new(&store, &world, res).unwrap();
-        let producer = SeaProducer::new(&ocean_src, world.sea()).with_summary(&summary);
+        let floor_src = StoreWetFloorSource::new(&store, &world, res).unwrap();
+        let producer = SeaProducer::new(&ocean_src, world.sea()).with_summary(&summary).with_floor(&floor_src);
         let field = WaterField::new(&TangentWarp, &bake_src, vec![&producer]);
         let coarse: Vec<TileId> = (0..=3).flat_map(tiles_of_level).collect();
         let book = WaterBook::new();
@@ -121,12 +124,13 @@ fn a_tile_job_of_a_coarse_tile_reads_no_block_and_one_of_a_fine_tile_at_most_fou
             }
         });
         assert_eq!(
-            (bake_src.stats().decodes, ocean_src.decodes()),
-            (0, 0),
-            "{} coarse tiles of levels 0 to 3 read {} sample blocks and {} ocean blocks",
+            (bake_src.stats().decodes, ocean_src.decodes(), floor_src.decodes()),
+            (0, 0, 0),
+            "{} coarse tiles of levels 0 to 3 read {} sample blocks, {} ocean blocks and {} floor blocks",
             coarse.len(),
             bake_src.stats().decodes,
-            ocean_src.decodes()
+            ocean_src.decodes(),
+            floor_src.decodes()
         );
         assert_eq!(book.filled(), coarse.len() as u64);
         let answers: Vec<_> = coarse.iter().map(|t| book.get(*t).unwrap()).collect();

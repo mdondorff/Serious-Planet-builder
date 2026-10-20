@@ -141,6 +141,8 @@ pub struct BakeProbe {
     pub continent: f32,
     pub elevation_m: f32,
     pub ocean_vertex: bool,
+    /// Whether a vertex of its cell is wet (ADR 0071): ocean, or reached by the sea through ground at most the conduction bound high.
+    pub wet_vertex: bool,
 }
 
 /// A world's terrain: the definition, the field it selects and the bake the field reads.
@@ -173,6 +175,8 @@ pub struct WorldTerrain {
     /// The ocean channel of the bake (ADR 0041 point 2): the sea of the water field W. `None` for a field that reads no bake (no
     /// bake, no ocean, no water) and for a store without the channel.
     ocean: Option<Box<dyn OceanLattice + Send + Sync>>,
+    /// The wet floor of the bake (ADR 0071): with the ocean channel, the coastal water of the water field. `None` exactly when `ocean` is.
+    floor: Option<Box<dyn planet_generators::wet_floor::FloorLattice + Send + Sync>>,
     /// The coarse level of W (ADR 0058): the summary of the stored bake, which answers the tiles that span more than one block.
     /// Made from the bake's own fields for an in-memory bake; `None` for a world without water.
     summary: Option<&'static planet_generators::water_summary::WaterSummary>,
@@ -196,6 +200,19 @@ impl OceanLattice for SharedOcean {
     }
 }
 
+/// The wet floor of a stored bake as the water field's lattice.
+struct SharedFloor(&'static planet_cache::global_store::StoreWetFloorSource<'static>);
+
+impl planet_generators::wet_floor::FloorLattice for SharedFloor {
+    fn res(&self) -> u32 {
+        self.0.res()
+    }
+
+    fn floor(&self, face: Face, i: u32, j: u32) -> Result<u16, ReadError> {
+        self.0.floor(face, i, j)
+    }
+}
+
 /// The in-memory ocean channel.
 struct OwnedOcean(planet_generators::ocean::OceanGrid);
 
@@ -216,6 +233,7 @@ impl WorldTerrain {
         let radius_m =
             GenContext::new(&def).body_radius_m(BodyId::PLANET).map_err(|e| format!("the definition cannot be generated: {e}"))?;
         let mut ocean: Option<Box<dyn OceanLattice + Send + Sync>> = None;
+        let mut floor: Option<Box<dyn planet_generators::wet_floor::FloorLattice + Send + Sync>> = None;
         let mut summary_owned: Option<&'static planet_generators::water_summary::WaterSummary> = None;
         let (src, bake_key): (Box<dyn LatticeSource + Send>, [u8; 16]) = if kind.needs_bake() {
             if global_res > MAX_RUN_BAKE_RES {
@@ -233,9 +251,13 @@ impl WorldTerrain {
                 .map_err(|e| format!("the ocean channel of the in-memory bake: {e:?}"))?;
             // The coarse level of W from the same fields, in the store's block layout (blocks of at most 1024 cells), so a run over an
             // in-memory bake selects water by the rule of the stored one (ADR 0058).
-            let summary = planet_generators::water_summary::summary_of_grid(&grid, &grid_ocean, global_res.min(1024), threads)
+            // The floors are made once: the producer's point query and the summary read the same grid.
+            let floors = planet_generators::wet_floor::tiled_floors(&grid, &grid_ocean, block, threads)
+                .map_err(|e| format!("the wet floor of the in-memory bake: {e:?}"))?;
+            let summary = planet_generators::water_summary::summary_of_floors(&grid, &floors, global_res.min(1024), threads)
                 .map_err(|e| format!("the water summary of the in-memory bake: {e}"))?;
             summary_owned = Some(Box::leak(Box::new(summary)) as &'static planet_generators::water_summary::WaterSummary);
+            floor = Some(Box::new(floors));
             ocean = Some(Box::new(OwnedOcean(grid_ocean)));
             (Box::new(OwnedBake(grid)), world.stage_key(global_res).0)
         } else {
@@ -263,6 +285,7 @@ impl WorldTerrain {
             field_ns: Default::default(),
             store_source: None,
             ocean,
+            floor,
             summary: summary_owned,
             bound_water: false,
             water_book: Default::default(),
@@ -297,6 +320,17 @@ impl WorldTerrain {
         let ocean: Option<Box<dyn OceanLattice + Send + Sync>> = planet_cache::global_store::StoreOceanSource::new(store, world, res)
             .ok()
             .map(|o| Box::new(SharedOcean(Box::leak(Box::new(o)))) as Box<dyn OceanLattice + Send + Sync>);
+        // The wet floor (ADR 0071): a store with the ocean channel and without it is refused, naming the command that adds it.
+        let floor: Option<Box<dyn planet_generators::wet_floor::FloorLattice + Send + Sync>> = match &ocean {
+            Some(_) => {
+                let f = planet_cache::global_store::StoreWetFloorSource::new(store, world, res)
+                    .map_err(|e| format!("{}: a bake of {res} cells: {e}", dir.display()))?;
+                // Every block is read when the water asks; one now names a store without the channel at once.
+                planet_generators::wet_floor::FloorLattice::floor(&f, Face(0), 0, 0).map_err(|e| format!("{}: {e}", dir.display()))?;
+                Some(Box::new(SharedFloor(Box::leak(Box::new(f)))))
+            }
+            None => None,
+        };
         // The coarse level of W (ADR 0058): a store with the ocean channel and without the summary is refused, because every coarse tile
         // would then read up to 25 blocks and the dive would lag; the message names the command that adds it.
         let summary = match &ocean {
@@ -327,6 +361,7 @@ impl WorldTerrain {
             field_ns: Default::default(),
             store_source: Some(src),
             ocean,
+            floor,
             summary,
             bound_water: false,
             water_book: Default::default(),
@@ -573,7 +608,19 @@ impl WorldTerrain {
         let q = planet_generators::global::locate_direction(self.src.res(), &TangentWarp, dir).ok()?;
         let (v, n) = q.weighted_vertices(q.res);
         let ocean_vertex = v[..n].iter().any(|&(i, j)| ocean.is_ocean(q.face, i, j).unwrap_or(false));
-        Some(BakeProbe { continent: g.continent, elevation_m: g.elevation_m, ocean_vertex })
+        let bound = self
+            .definition()
+            .sea(BodyId::PLANET)
+            .ok()
+            .map(|sea| planet_generators::wet_floor::bound_code(planet_generators::water::coast_band_elevation_m(sea.level_m)));
+        // A floor that cannot be read is no probe (a read error must not leave pixels out of an oracle's denominator quietly).
+        let mut wet_vertex = ocean_vertex;
+        if let (Some(floor), Some(bound)) = (self.floor.as_deref(), bound) {
+            for &(i, j) in &v[..n] {
+                wet_vertex |= floor.floor(q.face, i, j).ok()? <= bound;
+            }
+        }
+        Some(BakeProbe { continent: g.continent, elevation_m: g.elevation_m, ocean_vertex, wet_vertex })
     }
 
     pub fn has_water(&self) -> bool {
@@ -585,10 +632,13 @@ impl WorldTerrain {
     pub fn with_water<R>(&self, f: impl FnOnce(&WaterField<'_>) -> R) -> Result<Option<R>, String> {
         let Some(ocean) = self.ocean.as_deref() else { return Ok(None) };
         let sea = self.definition().sea(BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?;
-        let producer = match self.summary {
-            Some(summary) => SeaProducer::new(ocean, sea).with_summary(summary),
-            None => SeaProducer::new(ocean, sea),
-        };
+        let mut producer = SeaProducer::new(ocean, sea);
+        if let Some(summary) = self.summary {
+            producer = producer.with_summary(summary);
+        }
+        if let Some(floor) = self.floor.as_deref() {
+            producer = producer.with_floor(floor);
+        }
         let field = WaterField::new(&TangentWarp, self.src.as_ref(), vec![&producer]);
         Ok(Some(f(&field)))
     }

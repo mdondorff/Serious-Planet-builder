@@ -29,7 +29,7 @@ use planet_core::cube::FaceMapping;
 use planet_core::{TileId, Vec3};
 use planet_generators::global::ReadError;
 use planet_generators::height::HeightField;
-use planet_generators::water::{WaterBodyId, WaterField, WaterSample, COAST_REACH_M};
+use planet_generators::water::{WaterBodyId, WaterField, WaterSample};
 use planet_world_def::{LiquidKindId, LiquidTable};
 use std::collections::HashMap;
 
@@ -150,8 +150,9 @@ pub trait WaterSource: Sync {
         Ok(None)
     }
 
-    /// Whether the ocean channel marks a vertex at `dir`'s cell (ADR 0056); a source without one never does.
-    fn ocean_bit_at(&self, _dir: Vec3) -> Result<bool, ReadError> {
+    /// Whether a vertex that weighs in the interpolation at `dir` is wet (ADR 0071): ocean, or reached by the sea through low ground. A
+    /// source without a sea never says so.
+    fn wet_at(&self, _dir: Vec3) -> Result<bool, ReadError> {
         Ok(false)
     }
 
@@ -171,8 +172,8 @@ impl WaterSource for WaterField<'_> {
         WaterField::band_at(self, dir)
     }
 
-    fn ocean_bit_at(&self, dir: Vec3) -> Result<bool, ReadError> {
-        WaterField::ocean_bit_at(self, dir)
+    fn wet_at(&self, dir: Vec3) -> Result<bool, ReadError> {
+        WaterField::wet_at(self, dir)
     }
 
     fn coarse_tile_water(&self, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> Result<Option<Option<WaterSample>>, ReadError> {
@@ -375,49 +376,26 @@ impl WaterTileCache {
     }
 }
 
-/// Probes of the connectivity test per axis at most (a grid of `2 * N + 1` squared over the reach).
-const REACH_PROBES: i32 = 25;
-
 impl WaterTileCache {
-    /// The sea of the coastal band for a tile with no water of its own (ADR 0056): a sample of the tile is band and an ocean vertex of the
-    /// bake lies within [`COAST_REACH_M`] of the tile (of its centre plus half its diagonal). The band sample's level and body.
+    /// The sea of the coastal band for a tile with no water of its own (ADR 0071): a sample of the tile is band (`band_at`) and a vertex
+    /// that weighs in its interpolation is wet, so the tile carries the sea of the first such sample. Connectivity decides, not distance.
     fn band_water(
         &mut self,
         src: &dyn WaterSource,
         map: &dyn FaceMapping,
         tile: TileId,
-        radius_m: f64,
+        _radius_m: f64,
     ) -> Result<Option<WaterSample>, WaterError> {
         let n = TILE_SAMPLES;
-        let mut band = None;
-        'samples: for l in 0..=n {
+        for l in 0..=n {
             for k in 0..=n {
                 self.band_queries += 1;
-                if let Some(w) = src.band_at(tile.sample_direction(map, n, k, l))? {
-                    band = Some(w);
-                    break 'samples;
-                }
-            }
-        }
-        let Some(band) = band else { return Ok(None) };
-        let edge_m = core::f64::consts::FRAC_PI_2 * radius_m / f64::from(1u32 << tile.level().min(30));
-        // The reach counts from the nearest point of the tile, not from its centre: a tile is wet when any point of it is within the reach, so
-        // a parent is wet wherever its children are (no water vanishes as the tiles refine).
-        let reach_m = COAST_REACH_M + 0.71 * edge_m;
-        let centre = tile.center_direction(map);
-        let helper = if centre.z.abs() < 0.9 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(1.0, 0.0, 0.0) };
-        let east = centre.cross(helper).normalized();
-        let north = centre.cross(east).normalized();
-        let step = reach_m / f64::from(REACH_PROBES) / radius_m;
-        for j in -REACH_PROBES..=REACH_PROBES {
-            for i in -REACH_PROBES..=REACH_PROBES {
-                if i * i + j * j > REACH_PROBES * REACH_PROBES {
-                    continue;
-                }
-                self.band_queries += 1;
-                let d = (centre + east * (f64::from(i) * step) + north * (f64::from(j) * step)).normalized();
-                if src.ocean_bit_at(d)? {
-                    return Ok(Some(band));
+                let dir = tile.sample_direction(map, n, k, l);
+                if let Some(w) = src.band_at(dir)? {
+                    self.band_queries += 1;
+                    if src.wet_at(dir)? {
+                        return Ok(Some(w));
+                    }
                 }
             }
         }
