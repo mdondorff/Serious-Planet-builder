@@ -901,7 +901,7 @@ const VOLUME_BETWEEN_TEXELS_REL: f64 = 0.06;
 
 // spec: ATMO-007, ATMO-021
 #[test]
-fn up_to_8_km_the_volume_between_its_texels_is_within_its_bound_of_the_converged_march() {
+fn up_to_6_km_the_volume_between_its_texels_is_within_its_bound_of_the_converged_march() {
     let (atm, luts) = earth();
     let mut report = String::new();
     let mut worst = 0.0f64;
@@ -985,4 +985,28 @@ fn the_haze_of_far_terrain_is_continuous_across_the_blend_band_between_the_volum
         eprintln!("sun {mu_sun}: the largest change of the error per 100 m is {:.2} %: {at}", worst * 100.0);
         assert!(worst <= STEP, "the haze steps by {:.2} % per 100 m across the blend band (sun {mu_sun}): {at}", worst * 100.0);
     }
+}
+
+// spec: ATMO-021
+#[test]
+fn the_haze_upsample_weighs_texels_by_distance_and_gives_way_to_the_pixels_own_march_at_a_depth_edge() {
+    let ray = |v: f64| CameraRay { radiance: [v, 2.0 * v, 3.0 * v], transmittance: [0.9, 0.8, 0.7] };
+    let t = 100_000.0;
+    let tol = HAZE_DEPTH_TOL_REL * t + HAZE_DEPTH_TOL_ABS_M;
+    // No texel with geometry: the pixel marches itself.
+    assert_eq!(haze_upsample(&[(0.5, -1.0, ray(1.0)), (0.5, 0.0, ray(2.0))], t), None);
+    // One texel on the pixel's own sample: exactly its ray.
+    assert_eq!(haze_upsample(&[(1.0, t, ray(1.0)), (0.0, t, ray(5.0))], t), Some(ray(1.0)));
+    // Bilinear weights alone: the mean of two equal-distance texels.
+    let mid = haze_upsample(&[(0.5, t, ray(1.0)), (0.5, t, ray(3.0))], t).unwrap();
+    assert!((mid.radiance[0] - 2.0).abs() < 1e-12 && (mid.transmittance[0] - 0.9).abs() < 1e-12);
+    // A texel 3 tolerances away has no say; one of the same weight at the pixel's distance has all of it.
+    let edge = haze_upsample(&[(0.5, t, ray(1.0)), (0.5, t + 3.0 * tol, ray(2.0))], t).unwrap();
+    assert!((edge.radiance[0] - 1.0).abs() < 1e-3, "{edge:?}");
+    // Four texels at 1.6 tolerances (weight exp(-2.56) = 0.077 each, 0.31 in all with the bilinear weights 0.25 -> 0.019 in all): marches itself.
+    let far: Vec<_> = (0..4).map(|_| (0.25, t + 1.6 * tol, ray(1.0))).collect();
+    assert_eq!(haze_upsample(&far, t), None, "the weights sum below {HAZE_MIN_WEIGHT}");
+    // At 1.4 tolerances the weights sum to 4 x 0.25 x exp(-1.96) = 0.14: the average is used.
+    let near: Vec<_> = (0..4).map(|_| (0.25, t + 1.4 * tol, ray(1.0))).collect();
+    assert_eq!(haze_upsample(&near, t), Some(ray(1.0)));
 }

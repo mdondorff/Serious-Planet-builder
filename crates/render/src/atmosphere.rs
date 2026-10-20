@@ -826,6 +826,9 @@ pub struct AtmospherePath {
     haze_b: wgpu::Texture,
     haze_pipeline: wgpu::ComputePipeline,
     haze_bind: wgpu::BindGroup,
+    /// Whether the frame written last reads the haze (the camera inside the atmosphere from the blend band up): the haze pass is
+    /// recorded for its timed span either way, and dispatches only then.
+    haze_active: std::cell::Cell<bool>,
     scene: wgpu::Texture,
     scene_view: wgpu::TextureView,
     sky_pipeline: wgpu::ComputePipeline,
@@ -1116,6 +1119,7 @@ impl AtmospherePath {
             haze_b,
             haze_pipeline,
             haze_bind,
+            haze_active: std::cell::Cell::new(true),
             scene,
             scene_view,
             sky_pipeline,
@@ -1258,6 +1262,7 @@ impl AtmospherePath {
         pre_exposure_factor: f32,
         view: AtmosphereView,
     ) {
+        self.haze_active.set(geometry.inside && geometry.uses_camera_march());
         let mut words = [0f32; 64];
         words[..24].copy_from_slice(&atm.static_words());
         words[24..].copy_from_slice(&geometry.words(pre_exposure_factor, view.index()));
@@ -1299,9 +1304,11 @@ impl AtmospherePath {
                 label: Some("atmosphere-haze"),
                 timestamp_writes: crate::gpu_timing::compute_begin_writes(stamps, crate::gpu_timing::GpuPass::SkyComposite),
             });
-            haze.set_pipeline(&self.haze_pipeline);
-            haze.set_bind_group(0, &self.haze_bind, &[]);
-            haze.dispatch_workgroups(self.size.0.div_ceil(2).div_ceil(8), self.size.1.div_ceil(2).div_ceil(8), 1);
+            if self.haze_active.get() {
+                haze.set_pipeline(&self.haze_pipeline);
+                haze.set_bind_group(0, &self.haze_bind, &[]);
+                haze.dispatch_workgroups(self.size.0.div_ceil(2).div_ceil(8), self.size.1.div_ceil(2).div_ceil(8), 1);
+            }
         }
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sky-composite"),

@@ -19,3 +19,4 @@ Bound tests:
 The sky goldens are not blessed by the tool: they go to the owner's `/bless`. The render graph test expectations carry the haze's 14,745,600 B at 1440p. The pixel-hash tables of `gpu_compact_blocks` (the lit atmosphere frame) are re-recorded for WARP and RTX.
 
 Not covered: terrain past the tangent point (up to 6 % by day, 24 to 39 % in twilight off the converged march), and the volume's own error at a low sun below 8 km (17 to 18 % at 2 km), which the march does not replace; 
+Also not covered: the haze radiance is stored in `Rgba16Float` like the volume and the sky-view table (in deep twilight the values near 1e-6 carry a few percent of quantisation); a pixel whose texels sit about 1.5 tolerances from its distance switches from the average to its own march (the haze steps by a few percent of its transmittance there).
