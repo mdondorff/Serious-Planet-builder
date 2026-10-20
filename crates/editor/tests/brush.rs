@@ -326,3 +326,29 @@ fn what_an_item_holds_is_kept_incrementally_and_equals_what_reading_every_point_
         assert_eq!(fill.with(&piece, anchor, R).fits(reach), brush::fits(&strokes, anchor, reach, &piece, R), "reach {reach}");
     }
 }
+
+// spec: VIEW-019
+#[test]
+fn the_places_a_stroke_sends_to_refresh_carry_the_strokes_of_the_item_before_and_after() {
+    let mut s = session(5);
+    let stroke = |s: &mut Session<MemoryStore>, from: f64, through: &[f64]| {
+        s.set_tool(Tool::Brush(BrushKind::Raise));
+        s.begin_stroke(east(from), 0.0).unwrap();
+        for m in through {
+            s.extend_stroke(east(*m));
+        }
+        s.end_stroke().unwrap()
+    };
+    // The first stroke starts the item: only an after state, with its stroke.
+    let first = stroke(&mut s, 0.0, &[300.0]);
+    assert_eq!(first.len(), 1);
+    let item = brushes(&s)[0].clone();
+    let held = first[0].brush.as_ref().expect("a brush item's place carries its brush");
+    assert_eq!(held.strokes().len(), 1);
+    assert_eq!(held.strokes()[0].radius_m(), item.strokes[0].radius_m);
+    assert_eq!(first[0].reach_m, item.reach_m);
+    // A stroke that joins it: the place before (one stroke) and after (two strokes), so both capsules are refreshed.
+    let join = stroke(&mut s, 100.0, &[200.0, 400.0]);
+    let counts: Vec<usize> = join.iter().map(|a| a.brush.as_ref().map_or(0, |b| b.strokes().len())).collect();
+    assert_eq!(counts, [1, 2], "the item before and after the join");
+}
