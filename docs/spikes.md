@@ -18,6 +18,7 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | SPIKE-20 | The atmosphere still banded after the AP range fix (diagnosis) | closed 2026-10-20 (cause: the 32 x 32 x 32 volume is 21 to 23 % off between texels at 60 to 97.5 km) | `spikes/owner-captures-2026-10-20/results/` |
 | SPIKE-22 | Is the base LOD refused in the real eroded world? (diagnosis) | closed 2026-10-20 (no: 0 refusals in 45,800 poses; the finding holds for fields with only a global bound) | `spikes/base-lod-refusal/results/` |
 | SPIKE-23 | Why the edit-latency case at 200 m with a 150 m stamp takes 508 ms to drawn-exact (diagnosis) | closed 2026-10-20 (cause: tile generation throughput, 40 ms a tile of which the stamp is under 1 %) | `spikes/edit-refresh/results/` |
+| exploration | Normals from the tile height lattice: errors, seams, pictures (evidence of ADR 0073) | closed 2026-10-20 | `spikes/lattice-normals/results/` |
 | SPIKE-16 | Dark patches over the sea while the camera moves (water-motion-gap; diagnosis) | closed 2026-10-19 (cause: the shore ramp depends on the drawn node's level) | `spikes/water-motion-gap/results/` |
 | SPIKE-11 | Mouse look plumbing | closed 2026-10-18 (recommendation: raw events, Locked then Confined) | `spikes/mouse-look/results/` |
 | SPIKE-15 | Edit-to-test build time | closed 2026-10-18 | `spikes/build-speed/results/` |
