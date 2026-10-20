@@ -568,7 +568,7 @@ impl Harness<'_> {
         self.iteration += 1;
         let ctx = self.ctx;
         let rig = &mut self.rig;
-        let frame = rig.managed.begin_frame(req, &mut RendererSink { ctx, renderer: &mut rig.renderer })?;
+        let frame = rig.managed.begin_frame_strict(req, &mut RendererSink { ctx, renderer: &mut rig.renderer })?;
         rig.fi.retire_to(rig.renderer.retired_frames(ctx));
         while rig.fi.is_full() {
             rig.fi.note_wait();

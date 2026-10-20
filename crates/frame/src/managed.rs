@@ -324,6 +324,19 @@ impl ManagedLoop {
         &self.pipe
     }
 
+    /// [`ManagedLoop::begin_frame`] for a measured or checked run, which a refused plan makes invalid: the first frame after the worker
+    /// refused the plan returns an error naming the count and the refusal, so the scene ends with it (VIEW-038). The window uses
+    /// [`ManagedLoop::begin_frame`], which degrades instead (VIEW-032).
+    pub fn begin_frame_strict(&mut self, req: &TerrainRequest, sink: &mut dyn TileSink) -> Result<ManagedFrame, String> {
+        let frame = self.begin_frame(req, sink)?;
+        let refused = self.pipe.refused_plans();
+        if refused > 0 {
+            let first = self.pipe.take_refusal().unwrap_or_else(|| "(reported before)".to_string());
+            return Err(format!("run invalid: the plan was refused {refused} time(s); first refusal: {first}"));
+        }
+        Ok(frame)
+    }
+
     /// A refusal of the plan not reported yet, once (see [`PlanPipeline::take_refusal`]).
     pub fn take_plan_refusal(&mut self) -> Option<String> {
         self.pipe.take_refusal()

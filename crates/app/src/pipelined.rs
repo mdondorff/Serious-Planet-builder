@@ -206,7 +206,7 @@ pub fn run_script(
             let wall = Instant::now();
             // Scheduler and upload: the manager requests, evicts and collects; the renderer receives what became resident in
             // the slot chosen for it. The plan for this camera is asked for, never waited for; the frame draws what it can.
-            let frame = managed.begin_frame(req, &mut RendererSink { ctx, renderer: &mut renderer })?;
+            let frame = managed.begin_frame_strict(req, &mut RendererSink { ctx, renderer: &mut renderer })?;
             plan_ms_carry += frame.pipeline.delivered.map_or(0.0, |d| d.1);
             if n == 0 && log.is_empty() {
                 first_cover = frame.pipeline.draw.plan.nodes.len();

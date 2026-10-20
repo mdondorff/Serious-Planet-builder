@@ -203,7 +203,7 @@ impl Driver<'_> {
     fn tick(&mut self, req: &TerrainRequest) -> Result<Tick, String> {
         let started = Instant::now();
         let ctx = self.ctx;
-        let frame = self.rig.managed.begin_frame(req, &mut RendererSink { ctx, renderer: &mut self.rig.renderer })?;
+        let frame = self.rig.managed.begin_frame_strict(req, &mut RendererSink { ctx, renderer: &mut self.rig.renderer })?;
         self.rig.fi.retire_to(self.rig.renderer.retired_frames(ctx));
         while self.rig.fi.is_full() {
             self.rig.fi.note_wait();
