@@ -24,7 +24,7 @@ pub const MAX_REGION_POINTS: usize = planet_world_def::stamp::MAX_POINTS;
 pub struct RegionPoly {
     /// The surface type's tint, linear.
     pub tint: [f32; 3],
-    /// The anchor (the first point) relative to the camera, metres.
+    /// The item's anchor direction (its first point) relative to the camera, metres.
     pub anchor: [f32; 3],
     /// The tangent plane's basis at the anchor, and its unit up.
     pub e1: [f32; 3],

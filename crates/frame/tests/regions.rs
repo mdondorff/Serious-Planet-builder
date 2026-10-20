@@ -74,6 +74,21 @@ fn a_frame_carries_the_eight_nearest_regions_and_counts_the_rest() {
 
 // spec: VIEW-030
 #[test]
+fn regions_at_the_same_distance_go_by_item_id_whatever_the_order_they_were_put_in() {
+    // Two regions on the same anchor, the higher id put first.
+    let items = items_of(&[square(10, 20.0, 30.0, 4.0), square(9, 20.0, 30.0, 6.0)]);
+    let list = region_list(&items, unit(20.0, 30.0) * (R + 100.0), R);
+    assert_eq!(list.polys.len(), 2);
+    let lin = |c: u8| {
+        let c = f64::from(c) / 255.0;
+        (if c <= 0.04045 { c / 12.92 } else { libm::pow((c + 0.055) / 1.055, 2.4) }) as f32
+    };
+    let first = SURFACE_TYPES[6].tint;
+    assert_eq!(list.polys[0].tint, [lin(first[0]), lin(first[1]), lin(first[2])], "id 9 (surface 6) comes before id 10");
+}
+
+// spec: VIEW-030
+#[test]
 fn the_list_round_trips_through_its_text_and_malformed_text_is_an_error() {
     let regions = [square(1, 20.0, 30.0, 2.0), square(2, 20.0, 30.05, 5.0), square(3, 20.0, 30.1, 8.0)];
     let list = region_list(&items_of(&regions), unit(20.0, 30.0) * (R + 100.0), R);

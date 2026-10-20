@@ -1189,9 +1189,9 @@ mod tests {
         }
     }
 
-    // spec: VIEW-014
+    // spec: VIEW-014, VIEW-030
     #[test]
-    fn f3_cycles_the_overlay_off_tiles_mesh_off_and_f4_toggles_the_coarse_lod_both_off_at_the_start() {
+    fn f3_cycles_the_overlay_off_tiles_mesh_regions_off_and_f4_toggles_the_coarse_lod_both_off_at_the_start() {
         let c = camera_for_tests();
         let mut v = ViewerState::new(0, 3, 0, true).with_lit(true);
         assert_eq!((v.overlay, v.coarse_lod), (Overlay::None, false), "off at the start");

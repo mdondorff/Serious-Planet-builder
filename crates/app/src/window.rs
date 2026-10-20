@@ -950,7 +950,7 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
             st.viewer.held = Held::default();
             press(st, Command::ToggleCamera);
         }
-        // The overlay cycles off, tiles, mesh, regions, off; the coarse LOD is on while the mesh shows.
+        // The overlay cycles off, tiles, mesh, regions, off; the coarse LOD is on from key 29 to key 34, over the mesh, regions and off frames.
         // The globe overview: G shows it over the point under the camera with a marker there (the frame loop drags, zooms and clicks it), G
         // again at the end of the run.
         38 => {

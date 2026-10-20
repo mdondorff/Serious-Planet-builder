@@ -112,7 +112,7 @@ fn the_window_runs_lit_with_the_atmosphere(stdout: &str) {
     assert!(count_before(stdout, " debug)") > 0, "the L key must have drawn the debug path too: {stdout}");
     assert!(count_before(stdout, " exposure reading") > 0, "{stdout}");
     assert!(stdout.contains("view: the lit path with the atmosphere"), "{stdout}");
-    // VIEW-014: the smoke script cycles the overlay (tiles, mesh, off) and turns the coarse LOD on while the mesh shows, so some lit frames
+    // VIEW-014: the smoke script cycles the overlay (tiles, mesh, regions, off) and turns the coarse LOD on while the mesh shows, so some lit frames
     // were drawn with an overlay, some with the mesh, some planned with the coarse LOD (and the shader that has them ran with the atmosphere).
     assert!(count_before(stdout, " with an overlay") > 0, "F3 must have turned an overlay on for some frames: {stdout}");
     assert!(count_before(stdout, " the mesh)") > 0, "the second F3 shows the mesh: {stdout}");
