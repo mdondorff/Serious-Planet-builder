@@ -20,6 +20,7 @@ pub mod plan;
 pub mod pool;
 pub mod prefetch;
 pub mod preview;
+pub mod regions;
 pub mod repro;
 pub mod residency;
 pub mod scenes;

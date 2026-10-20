@@ -663,6 +663,11 @@ impl App<'_> {
             };
             let plan = lit_plan.as_ref().unwrap_or(&draw.plan);
             st.rig.renderer.set_preview_of(draw);
+            // The regions overlay (VIEW-030): the region items of the editor's definition nearest the camera, decided here, drawn by the renderer.
+            if plan.lit.is_some_and(|l| l.overlay == planet_frame::look::Overlay::Regions) {
+                let list = st.edit.as_ref().map(|e| e.region_list(plan.camera.position.0)).unwrap_or_default();
+                st.rig.renderer.set_regions(&list);
+            }
             // One frame a second is timed on the GPU, which waits for it: the title's GPU time (meaningful with vsync off).
             let timed = ctx.timestamps_supported() && st.last_gpu_sample.elapsed() >= GPU_SAMPLE_PERIOD;
             let (timing, _) = if timed {
@@ -955,7 +960,7 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
             st.viewer.held = Held::default();
             press(st, Command::ToggleCamera);
         }
-        // The overlay cycles off, tiles, mesh, off; the coarse LOD is on while the mesh shows.
+        // The overlay cycles off, tiles, mesh, regions, off; the coarse LOD is on from key 29 to key 34, over the mesh, regions and off frames.
         // The globe overview: G shows it over the point under the camera with a marker there (the frame loop drags, zooms and clicks it), G
         // again at the end of the run.
         38 => {
@@ -968,6 +973,7 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
         28 => press(st, Command::CycleOverlay),
         29 => press(st, Command::ToggleCoarseLod),
         31 => press(st, Command::CycleOverlay),
+        33 => press(st, Command::CycleOverlay),
         34 => press(st, Command::ToggleCoarseLod),
         36 => press(st, Command::Restart),
         // F9 writes files: the run presses it only where a directory for them was named.
