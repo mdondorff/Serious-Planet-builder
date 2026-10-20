@@ -305,7 +305,7 @@ Source: owner (M6 step U4; MVP scope 2026-10-18: 3D and globe views), VIEW-011, 
 
 ### Requirement: VIEW-015 What the camera shows of the edits
 The editor SHALL decide which edits it shows in markers, outlines and the list of nearby edits from the camera (`planet_editor::relevance`, GPU-free, f64 on the CPU, `libm` only; CON-03, CON-11, CON-14):
-- an edit is shown when its footprint meets the visible area and its reach covers at least `MIN_REACH_PX` = 8 pixels on the screen;
+- an edit is shown when its footprint meets the visible area and its reach covers at least `MIN_REACH_PX` = 8 pixels on the screen; the footprint of a brush holding strokes is where a stroke reaches (WDEF-007), its size the reach disc's;
 - the selected edit is always shown, whatever its size or place;
 - an edit the user hid is left out unless it is selected.
 
@@ -472,7 +472,7 @@ The editor SHALL turn the pointer into session calls in one place (`planet_edito
 - While a handle is held a move makes the item the pointer says (position and radius follow the surface hit and stay put without one; the height follows the vertical move of the cursor in pixels times the metres per pixel at the handle, up raises); the release ends the drag as one command; an abandoned drag goes back and records nothing.
 - The hover is the shown edit under the cursor; it is none over a handle and does not change while a handle is held.
 
-The tiles an edit sends to refresh are the resident tiles whose area with a halo of 0.25 tile edges a reach of the places the commands changed can touch (`planet_editor::feed`, the footprint touch test with its margins: false positives only cost a refresh); they come in tile order without repeats, and the places of another body count for none.
+The tiles an edit sends to refresh are the resident tiles whose area with a halo of 0.25 tile edges a reach of the places the commands changed can touch (`planet_editor::feed`, the footprint touch test with its margins: false positives only cost a refresh); a place that is a brush item holding strokes touches a tile only when one of its strokes does as well (WDEF-007), so a stroke names the tiles along it and not the reach disc round its first point; they come in tile order without repeats, and the places of another body count for none.
 
 Verify: A
 Status: active
@@ -492,7 +492,7 @@ Source: owner (M6 step U3: handles on the planet are the primary way to edit a s
 
 #### Scenario: The tiles to refresh
 - **WHEN** a 5 km reach at one place is sent over all level-8 tiles, the place before and after of a move, another body, a larger reach, and empty lists
-- **THEN** a handful of tiles are found including those of points 4.9 km away in every direction and the tile of the centre, none far away, both places count, another body counts for none, a larger reach finds more, and empty lists find nothing
+- **THEN** a handful of tiles are found including those of points 4.9 km away in every direction and the tile of the centre, none far away, both places count, another body counts for none, a larger reach finds more, and empty lists find nothing; a brush stroke 712 m long names the tiles along it and fewer than half the tiles of its reach disc at level 17
 
 ### Requirement: VIEW-020 The edits on the screen
 The editor SHALL turn the shown edits into plain data for the egui layer (`planet_editor::overlay`, GPU-free, the camera's f64 projection): for each edit the label, kind, selected and hovered flags, the anchor in pixels, and an outline of `OUTLINE_SEGMENTS` = 64 points on the ground at the outline radius, closed; the selected edit carries its handles in pixels and is last in the list (drawn on top).

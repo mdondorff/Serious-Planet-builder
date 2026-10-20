@@ -2,7 +2,7 @@
 
 use planet_core::cube::face_to_direction;
 use planet_core::{TangentWarp, TileId, Vec3};
-use planet_world_def::footprint::{angle_between, tile_cap, touches};
+use planet_world_def::footprint::{angle_between, polyline_angle, tile_cap, touches};
 use planet_world_def::{BodyId, GenContext, ItemError, ItemSpec, ReadRecord, WorldDefinition, DEFAULT_ITEM_LAYER};
 
 const R: f64 = 6_371_000.0;
@@ -314,4 +314,105 @@ fn the_result_is_in_application_order_and_every_field_of_an_item_is_in_the_read(
     let mut other = a.clone();
     other.put_item_spec(BodyId::PLANET, ItemSpec { layer: "other".into(), ..spec(3, dir, 500.0) }).unwrap();
     assert_eq!(read(&a), read(&other), "an item of another layer is not in this layer's read");
+}
+
+/// The brush of the edit-latency case (`editperf::case_brush`): one raise stroke of 20 points a quarter of `radius_m` apart running east
+/// and centred on latitude 20, longitude 30, as an item anchored at its first point with the reach that holds the stroke and its radius.
+fn brush_item(id: u128, radius_m: f64) -> ItemSpec {
+    use planet_world_def::stamp::{BrushKind, Stamp, StampKind, Stroke};
+    let (la, lo) = (20f64.to_radians(), 30f64.to_radians());
+    let at = Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la));
+    let east = Vec3::new(0.0, 0.0, 1.0).cross(at).normalized();
+    let points: Vec<Vec3> = (0..20)
+        .map(|k| {
+            let along = (f64::from(k) - 9.5) * 0.25 * radius_m / R;
+            (at * libm::cos(along) + east * libm::sin(along)).normalized()
+        })
+        .collect();
+    let far = R * angle_between(points[0], points[19]);
+    let stroke = Stroke { kind: BrushKind::Raise, radius_m, strength_m: 10.0, target_m: None, points: points.clone() };
+    ItemSpec {
+        id,
+        layer: DEFAULT_ITEM_LAYER.into(),
+        priority: 0,
+        dir: points[0],
+        content_hash: 0,
+        reach_m: far + radius_m + 2.0,
+        max_delta_m: 10.0,
+        stamp: None,
+    }
+    .with_stamp(Stamp::new(StampKind::Brush, [0.0; 3]).with_strokes(&[stroke]))
+}
+
+/// The tiles of `level` within `span` tiles of the one under `at`, with their halo-0.25 samples.
+fn tiles_round(at: Vec3, level: u8, span: i64) -> Vec<TileId> {
+    let centre = TileId::from_direction(&TangentWarp, at, level);
+    let mut out = Vec::new();
+    for dx in -span..=span {
+        for dy in -span..=span {
+            let (x, y) = (i64::from(centre.x()) + dx, i64::from(centre.y()) + dy);
+            if x >= 0 && y >= 0 && x < (1i64 << level) && y < (1i64 << level) {
+                out.extend(TileId::new(centre.face(), level, x as u32, y as u32));
+            }
+        }
+    }
+    out
+}
+
+// spec: WDEF-007
+#[test]
+fn a_brush_item_is_returned_for_the_tiles_its_strokes_reach_and_not_for_the_rest_of_its_reach_disc() {
+    // The reach of a brush item is a disc round the stroke's first point that holds the whole stroke, about eight times the stroke's own area
+    // (150 m radius, 712 m long). The query returns the item only for a tile with a sample within a stroke radius of the polyline (no false
+    // negative, judged on samples of the tile and its halo that do not use the cap), and for far fewer tiles than the disc held.
+    for (radius, levels) in [(150.0, [13u8, 15, 17]), (1000.0, [11u8, 13, 14])] {
+        let mut d = WorldDefinition::single_planet(R, 7);
+        let spec = brush_item(1, radius);
+        let (anchor, reach) = (spec.dir, spec.reach_m);
+        let stamp = spec.stamp.clone().unwrap();
+        d.put_item_spec(BodyId::PLANET, spec).unwrap();
+        let bits = stamp.strokes()[0].points_bits().to_vec();
+        let (mut disc_total, mut got_total) = (0usize, 0usize);
+        for level in levels {
+            let edge_m = R * core::f64::consts::FRAC_PI_2 / 2.0 / f64::from(1u32 << level);
+            let span = ((reach + 4.0 * edge_m) / edge_m) as i64 + 2;
+            let (mut disc, mut got_n) = (0usize, 0usize);
+            for tile in tiles_round(anchor, level, span) {
+                let halo = 0.25;
+                let got = !d.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, halo).unwrap().is_empty();
+                let samples = halo_samples(tile, halo);
+                let reached = samples.iter().any(|p| R * polyline_angle(&bits, *p) <= radius);
+                if reached {
+                    assert!(got, "radius {radius}: a sample of {tile:?} is within the stroke's radius but the query missed the item");
+                }
+                if touches(tile_cap(&TangentWarp, tile, halo), anchor, reach, R) {
+                    disc += 1;
+                }
+                got_n += usize::from(got);
+            }
+            assert!(got_n <= disc, "the stroke test only narrows the disc test: {got_n} against {disc} at level {level}");
+            if disc >= 100 {
+                assert!(
+                    got_n * 3 <= disc * 2,
+                    "radius {radius}, level {level}: {got_n} tiles of {disc} in the disc, the capsule is a third of it"
+                );
+                disc_total += disc;
+                got_total += got_n;
+            }
+        }
+        assert!(got_total * 2 < disc_total, "radius {radius}: {got_total} of {disc_total}");
+    }
+}
+
+// spec: WDEF-007
+#[test]
+fn a_hill_keeps_the_reach_disc_as_its_footprint() {
+    use planet_world_def::stamp::{Stamp, StampKind};
+    let mut d = WorldDefinition::single_planet(R, 7);
+    let at = Vec3::new(1.0, 0.0, 0.0);
+    let hill = spec(1, at, 500.0).with_stamp(Stamp::new(StampKind::Hill, [5.0, 0.0, 0.0]));
+    d.put_item_spec(BodyId::PLANET, hill).unwrap();
+    let tile = TileId::from_direction(&TangentWarp, at, 14);
+    let got = d.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, 0.25).unwrap();
+    assert_eq!(got.len(), 1, "a hill is returned where its reach disc is");
 }

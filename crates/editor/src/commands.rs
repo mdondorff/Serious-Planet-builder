@@ -83,12 +83,15 @@ pub enum GroupStep {
 
 /// A place whose tiles an edit may have changed: the anchor of an item before or after the edit and its reach. The caller turns these
 /// into the tiles to refresh (the footprint find, `ManagedLoop::edit`).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Affected {
     pub body: BodyId,
     /// The unit direction of the anchor.
     pub dir: Vec3,
     pub reach_m: f64,
+    /// The brush stamp of the item in that state: its strokes bound the change inside the reach disc (WDEF-007), so only the tiles a
+    /// stroke can touch are named. `None`: the whole disc.
+    pub brush: Option<std::sync::Arc<planet_world_def::stamp::Stamp>>,
 }
 
 /// Why a command did not happen. When a command fails nothing has changed: not the definition, not the files, not the stack.
@@ -211,7 +214,13 @@ impl Command {
 }
 
 fn affected_of(item: &Item) -> Affected {
-    Affected { body: item.body, dir: item.direction(), reach_m: item.reach_m }
+    let brush = (!item.strokes.is_empty()).then(|| {
+        std::sync::Arc::new(
+            planet_world_def::stamp::Stamp::new(planet_world_def::stamp::StampKind::Brush, [0.0; 3])
+                .with_strokes(&item.stroke_directions()),
+        )
+    });
+    Affected { body: item.body, dir: item.direction(), reach_m: item.reach_m, brush }
 }
 
 /// A drag in progress: the item as it was, and as it is now (in the definition, not yet in its file).

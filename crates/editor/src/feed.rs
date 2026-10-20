@@ -5,7 +5,7 @@
 use crate::commands::Affected;
 use planet_core::cube::FaceMapping;
 use planet_core::TileId;
-use planet_world_def::footprint::{tile_cap, touches, Cap};
+use planet_world_def::footprint::{strokes_touch, tile_cap, touches, Cap};
 use planet_world_def::BodyId;
 use std::collections::HashSet;
 
@@ -16,6 +16,12 @@ const DESCENDANT_CAP_FACTOR: f64 = 3.0;
 
 /// The halo, in tile edges, around a tile in which an edit still changes the tile's data (a stage reads its neighbourhood).
 pub const REFRESH_HALO: f64 = 0.25;
+
+/// Whether the place can change something in `cap`: the reach disc touches it and, for a brush, a stroke does (WDEF-007).
+fn reaches(a: &Affected, cap: Cap, radius_m: f64) -> bool {
+    touches(cap, a.dir, a.reach_m, radius_m)
+        && a.brush.as_ref().is_none_or(|b| b.strokes().is_empty() || strokes_touch(cap, b.strokes(), radius_m))
+}
 
 /// The `resident` tiles of `body` whose area plus [`REFRESH_HALO`] a reach in `affected` can touch, without repeats, in tile order.
 pub fn edited_tiles(affected: &[Affected], body: BodyId, resident: &[TileId], radius_m: f64, map: &dyn FaceMapping) -> Vec<TileId> {
@@ -36,12 +42,12 @@ pub fn edited_tiles(affected: &[Affected], body: BodyId, resident: &[TileId], ra
             continue;
         }
         let cap = tile_cap(map, tile, REFRESH_HALO);
-        if mine.iter().any(|a| touches(cap, a.dir, a.reach_m, radius_m)) {
+        if mine.iter().any(|a| reaches(a, cap, radius_m)) {
             out.push(tile);
             continue;
         }
         let wide = Cap { centre: cap.centre, angle: (DESCENDANT_CAP_FACTOR * cap.angle).min(core::f64::consts::PI) };
-        if !mine.iter().any(|a| touches(wide, a.dir, a.reach_m, radius_m)) {
+        if !mine.iter().any(|a| reaches(a, wide, radius_m)) {
             skipped.insert(tile);
         }
     }

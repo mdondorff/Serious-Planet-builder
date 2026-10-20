@@ -120,3 +120,60 @@ pub fn item_hash128(item: &FootprintItem) -> [u8; 16] {
     let full = blake3::derive_key("planet-builder footprint item v1", &m);
     full[..16].try_into().expect("16 of 32 bytes")
 }
+
+/// The angle in radians between the unit vector `p` and the great-circle arc `a..b` (unit vectors): the distance to the arc where the foot
+/// of `p` on its great circle lies on it, else to the nearer end. `libm` for the transcendental, f64 throughout (CON-14).
+pub fn arc_angle(a: Vec3, b: Vec3, p: Vec3) -> f64 {
+    let ends = || angle_between(p, a).min(angle_between(p, b));
+    // The normal of the arc's great circle as `(a + b) x (b - a) / 2` (the same vector as `a x b`): `b - a` is exact, so the error is
+    // relative to the arc's length, not to 1e-16 of a unit, and a one-centimetre arc keeps its great circle to a nanometre.
+    let c = (a + b).cross(b - a) * 0.5;
+    let cl = c.length();
+    if cl.is_nan() || cl <= 1e-12 {
+        return ends();
+    }
+    let n = c * (1.0 / cl);
+    let s = p.dot(n);
+    let f = p - n * s;
+    let fl = f.length();
+    if fl.is_nan() || fl <= 1e-12 {
+        return ends();
+    }
+    let f = f * (1.0 / fl);
+    if a.cross(f).dot(n) >= 0.0 && f.cross(b).dot(n) >= 0.0 {
+        libm::atan2(s.abs(), fl)
+    } else {
+        ends()
+    }
+}
+
+/// The unit vector of the bits of a stored direction.
+pub fn point_of(bits: &[u64; 3]) -> Vec3 {
+    Vec3::new(f64::from_bits(bits[0]), f64::from_bits(bits[1]), f64::from_bits(bits[2]))
+}
+
+/// The angle in radians between the unit vector `p` and the polyline through `points` (bits of unit vectors, at least two): the minimum
+/// over its arcs (GEN-028).
+pub fn polyline_angle(points: &[[u64; 3]], p: Vec3) -> f64 {
+    points.windows(2).map(|w| arc_angle(point_of(&w[0]), point_of(&w[1]), p)).fold(f64::INFINITY, f64::min)
+}
+
+/// The angle in radians between the unit vector `p` and a brush stroke's polyline (bits of unit vectors, at least one): the angle to the point
+/// for a one-point stroke (a dab), else the minimum over its arcs.
+pub fn stroke_angle(points: &[[u64; 3]], p: Vec3) -> f64 {
+    match points {
+        [only] => angle_between(point_of(only), p),
+        _ => polyline_angle(points, p),
+    }
+}
+
+/// Whether a brush's `strokes` can change an output inside `cap` on a body of `radius_m` (WDEF-007, GEN-030): a stroke changes a point only
+/// within its radius of its polyline, and the distance to a polyline changes by at most the distance moved, so a stroke touches the cap when
+/// its polyline is within the stroke's radius plus the cap's angle of the cap's centre. The stroke's radius, not the item's reach, bounds it:
+/// the reach is a disc round the first point that holds the whole stroke, several times the stroke's own area. Margins only widen the test.
+pub fn strokes_touch(cap: Cap, strokes: &[crate::stamp::StrokeBits], radius_m: f64) -> bool {
+    strokes.iter().any(|s| {
+        let limit = cap.angle + s.radius_m() / radius_m;
+        stroke_angle(s.points_bits(), cap.centre) <= limit * (1.0 + FOOTPRINT_REL_MARGIN) + FOOTPRINT_ABS_MARGIN_RAD
+    })
+}

@@ -198,7 +198,7 @@ fn the_tiles_an_edit_sends_to_refresh_are_those_its_reach_can_touch() {
     let level = 8;
     let tiles = all_tiles(level);
     let at = unit(47.2, 8.55);
-    let aff = [Affected { body: BodyId::PLANET, dir: at, reach_m: 5_000.0 }];
+    let aff = [Affected { body: BodyId::PLANET, dir: at, reach_m: 5_000.0, brush: None }];
     let found = edited_tiles(&aff, BodyId::PLANET, &tiles, R, &map);
     assert!(!found.is_empty() && found.len() < 40, "a 5 km reach touches a handful of level-8 tiles, got {}", found.len());
     // No false negative: every tile that holds a point of the disc is in.
@@ -213,12 +213,12 @@ fn the_tiles_an_edit_sends_to_refresh_are_those_its_reach_can_touch() {
     assert!(!found.contains(&far));
     assert!(found.windows(2).all(|w| w[0].raw() < w[1].raw()));
     // The place before and the place after of a move both count.
-    let moved = [aff[0], Affected { body: BodyId::PLANET, dir: unit(-40.0, 100.0), reach_m: 5_000.0 }];
+    let moved = [aff[0].clone(), Affected { body: BodyId::PLANET, dir: unit(-40.0, 100.0), reach_m: 5_000.0, brush: None }];
     let both = edited_tiles(&moved, BodyId::PLANET, &tiles, R, &map);
     assert!(both.contains(&far) && both.contains(&TileId::from_direction(&map, at, level)));
     // Another body's places do not count; a bigger reach touches more; an empty list finds nothing.
     assert!(edited_tiles(&aff, BodyId(1), &tiles, R, &map).is_empty());
-    let big = [Affected { reach_m: 40_000.0, ..aff[0] }];
+    let big = [Affected { reach_m: 40_000.0, ..aff[0].clone() }];
     assert!(edited_tiles(&big, BodyId::PLANET, &tiles, R, &map).len() > found.len());
     assert!(edited_tiles(&[], BodyId::PLANET, &tiles, R, &map).is_empty());
     assert!(edited_tiles(&aff, BodyId::PLANET, &[], R, &map).is_empty());
@@ -371,17 +371,70 @@ fn the_coarse_to_fine_find_is_the_set_a_scan_of_every_resident_tile_finds() {
             for step in 0..24 {
                 let off = f64::from(step) * 0.7 * reach_m.min(300.0) * f64::from(k as u32 % 3 + 1);
                 let dir = shape::point_at(centre, f64::from(step) * 15.0, off, R);
-                let aff = [Affected { body: BodyId::PLANET, dir, reach_m }];
+                let aff = [Affected { body: BodyId::PLANET, dir, reach_m, brush: None }];
                 assert_eq!(edited_tiles(&aff, BodyId::PLANET, &resident, R, &map), scan(&aff), "reach {reach_m} m, step {step}");
                 checked += 1;
             }
         }
         // Two places at once, one far.
         let two = [
-            Affected { body: BodyId::PLANET, dir: centre, reach_m: 500.0 },
-            Affected { body: BodyId::PLANET, dir: unit(-40.0, 100.0), reach_m: 500.0 },
+            Affected { body: BodyId::PLANET, dir: centre, reach_m: 500.0, brush: None },
+            Affected { body: BodyId::PLANET, dir: unit(-40.0, 100.0), reach_m: 500.0, brush: None },
         ];
         assert_eq!(edited_tiles(&two, BodyId::PLANET, &resident, R, &map), scan(&two));
         assert!(checked == 7 * 24);
+    }
+}
+
+// spec: VIEW-019
+#[test]
+fn a_brush_edit_sends_the_tiles_along_its_stroke_to_refresh_not_the_whole_reach_disc() {
+    use planet_world_def::footprint::{angle_between, polyline_angle, tile_cap};
+    use planet_world_def::stamp::{BrushKind, Stamp, StampKind, Stroke};
+    // The edit-latency brush: 20 points a quarter of the radius apart (712 m for 150 m), anchored at the first point, the reach holding the
+    // stroke and its radius.
+    let map = TangentWarp;
+    let radius = 150.0;
+    let at = unit(20.0, 30.0);
+    let east = Vec3::new(0.0, 0.0, 1.0).cross(at).normalized();
+    let points: Vec<Vec3> = (0..20)
+        .map(|k| {
+            let along = (f64::from(k) - 9.5) * 0.25 * radius / R;
+            (at * libm::cos(along) + east * libm::sin(along)).normalized()
+        })
+        .collect();
+    let far = R * angle_between(points[0], points[19]);
+    let stamp = Stamp::new(StampKind::Brush, [0.0; 3]).with_strokes(&[Stroke {
+        kind: BrushKind::Raise,
+        radius_m: radius,
+        strength_m: 10.0,
+        target_m: None,
+        points: points.clone(),
+    }]);
+    let disc = [Affected { body: BodyId::PLANET, dir: points[0], reach_m: far + radius + 2.0, brush: None }];
+    let brush = [Affected { brush: Some(std::sync::Arc::new(stamp.clone())), ..disc[0].clone() }];
+    let bits = stamp.strokes()[0].points_bits().to_vec();
+    for level in [15u8, 17] {
+        let centre = TileId::from_direction(&map, at, level);
+        let span = if level == 15 { 20i64 } else { 70 };
+        let mut resident = Vec::new();
+        for dx in -span..=span {
+            for dy in -span..=span {
+                let (x, y) = (i64::from(centre.x()) + dx, i64::from(centre.y()) + dy);
+                resident.extend(TileId::new(centre.face(), level, x as u32, y as u32));
+            }
+        }
+        let all = edited_tiles(&disc, BodyId::PLANET, &resident, R, &map);
+        let found = edited_tiles(&brush, BodyId::PLANET, &resident, R, &map);
+        assert!(found.iter().all(|t| all.contains(t)), "the stroke test only narrows the disc's set");
+        // No false negative: every tile whose cap centre is within the stroke's radius of the polyline is named.
+        for t in &resident {
+            let cap = tile_cap(&map, *t, REFRESH_HALO);
+            if R * polyline_angle(&bits, cap.centre) <= radius {
+                assert!(found.contains(t), "{t:?} holds stroke and is not refreshed");
+            }
+        }
+        let at_most = if level == 15 { all.len() - 1 } else { all.len() / 2 };
+        assert!(found.len() <= at_most, "level {level}: {} of {} tiles", found.len(), all.len());
     }
 }

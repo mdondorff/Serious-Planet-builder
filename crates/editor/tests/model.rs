@@ -919,3 +919,46 @@ fn a_plateaus_limit_and_target_a_hills_negative_height_and_a_craters_depth_go_to
     assert!(matches!(s.set_param_text("depth_m", "0"), Err(SessionError::Refused(_))));
     assert!(matches!(s.set_param_text("depth_m", "2 km"), Err(SessionError::Refused(_))));
 }
+
+// spec: VIEW-015
+#[test]
+fn a_brush_is_shown_for_the_tiles_its_strokes_reach_and_not_for_the_rest_of_its_reach_disc() {
+    use planet_core::cube::TangentWarp;
+    use planet_world_def::stamp::{BrushKind, Stamp, StampKind, Stroke};
+    use planet_world_def::{ItemSpec, DEFAULT_ITEM_LAYER};
+    // The edit-latency brush (`editperf::case_brush`): 20 points a quarter of the radius (150 m) apart, anchored at the first point, the
+    // reach (about 864 m) holding the stroke and its radius.
+    let radius = 150.0;
+    let at = unit(20.0, 30.0);
+    let east = Vec3::new(0.0, 0.0, 1.0).cross(at).normalized();
+    let along = |m: f64| (at * libm::cos(m / R) + east * libm::sin(m / R)).normalized();
+    let points: Vec<Vec3> = (0..20).map(|k| along((f64::from(k) - 9.5) * 0.25 * radius)).collect();
+    let far = R * planet_world_def::footprint::angle_between(points[0], points[19]);
+    let spec = ItemSpec {
+        id: 1,
+        layer: DEFAULT_ITEM_LAYER.into(),
+        priority: 0,
+        dir: points[0],
+        content_hash: 0,
+        reach_m: far + radius + 2.0,
+        max_delta_m: 10.0,
+        stamp: None,
+    }
+    .with_stamp(Stamp::new(StampKind::Brush, [0.0; 3]).with_strokes(&[Stroke {
+        kind: BrushKind::Raise,
+        radius_m: radius,
+        strength_m: 10.0,
+        target_m: None,
+        points,
+    }]));
+    let mut def = WorldDefinition::single_planet(R, 7);
+    def.put_item_spec(BodyId::PLANET, spec).unwrap();
+    let v = view(camera_above(at, 3_000.0));
+    let shown = |place: Vec3| {
+        relevant_items(&def, BodyId::PLANET, &[DEFAULT_ITEM_LAYER], &[TileId::from_direction(&TangentWarp, place, 17)], &v, 0.0, None)
+            .unwrap()
+    };
+    assert_eq!(shown(at), vec![1], "a tile under the stroke");
+    assert_eq!(shown(along(-340.0)), vec![1], "a tile under the stroke's first point");
+    assert!(shown(along(-700.0)).is_empty(), "a tile in the reach disc beyond the stroke's end is not under the stroke");
+}

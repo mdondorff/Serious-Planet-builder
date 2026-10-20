@@ -419,7 +419,7 @@ fn the_places_to_refresh_are_the_anchors_before_and_after_with_their_reach() {
     let (id, put) = ed.put(new_item(1)).unwrap();
     assert_eq!(put.len(), 1, "a put has an after only");
     let item = ed.item(id).unwrap().clone();
-    assert_eq!(put[0], Affected { body: BodyId::PLANET, dir: item.direction(), reach_m: item.reach_m });
+    assert_eq!(put[0], Affected { body: BodyId::PLANET, dir: item.direction(), reach_m: item.reach_m, brush: None });
     let moved = ed.change(id, |it| it.anchor.longitude_deg += 10.0).unwrap();
     assert_eq!(moved.len(), 2, "a change has the old place and the new one");
     assert_eq!(moved[0].dir, item.direction());
