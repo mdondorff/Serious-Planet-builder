@@ -1,0 +1,29 @@
+//! Tier A (CPU only): the sea of the coastal band is the ground connected to the ocean through band ground, not the ground within a fixed
+//! reach of an ocean vertex (ATMO-019, ADR 0056). SPIKE-17: the owner's three F9 captures of the editor's default world (single planet of
+//! seed 1, 256-cell bake) show the sea ending at a straight edge over a plain that lies under the sea level and is connected to the ocean
+//! through band ground for 120 to 132 km (and up to 289 km): the tiles beyond the 100 km reach of `COAST_REACH_M` answer dry.
+
+use planet::worldfield::WorldTerrain;
+use planet_core::cube::TangentWarp;
+use planet_core::TileId;
+use planet_frame::water::WaterTileCache;
+use planet_world_def::WorldDefinition;
+
+const R: f64 = 6_371_000.0;
+
+// spec: ATMO-019
+#[test]
+fn a_plain_under_the_sea_level_and_connected_to_the_ocean_through_band_ground_is_wet_beyond_the_100_km_reach() {
+    let world = WorldTerrain::open(WorldDefinition::single_planet(R, 1), 256).expect("the world opens").bounding_water();
+    // The nodes next to the camera of frames 5161 (level 19, terrain -6.8 m), 6193 (level 21, -0.8 m) and 13883 (level 22, -10.0 m).
+    let tiles = [1_369_094_539_962_817_300u64, 1_513_213_526_671_984_627, 1_585_283_220_693_825_378];
+    let mut dry = Vec::new();
+    for raw in tiles {
+        let tile = TileId::from_raw(raw).unwrap();
+        let wet = world.with_water(|f| WaterTileCache::new().tile_water(f, &TangentWarp, tile, R)).unwrap().unwrap().unwrap().is_some();
+        if !wet {
+            dry.push(format!("{tile:?} (level {})", tile.level()));
+        }
+    }
+    assert!(dry.is_empty(), "tiles of a plain under the sea level, connected to the ocean through band ground, answer dry: {dry:?}");
+}
