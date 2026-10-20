@@ -31,7 +31,7 @@ Time: about 45 minutes. Each block takes 5 to 10 minutes; skip any block.
 - [ ] Paint a stroke with each. Raise, lower and flatten preview while you drag; smooth shows when exact (a known limit).
 - [ ] Type a radius and a strength in metres. Flatten starts at the ground height under the stroke.
 - [ ] Ctrl+Z takes back one stroke.
-- [ ] Note: the brush keys are missing from the F1 key list (a known doc gap).
+- [ ] F1 lists every key, the brush keys included.
 
 ## 5. Managing edits
 - [ ] Hover shows the outline and the name; click selects.
