@@ -958,3 +958,25 @@ Source: window 13 (2026-10-19), window 14 (2026-10-19), window 15 (2026-10-20), 
 #### Scenario: The refreshed set by level
 - **WHEN** the scene runs in smoke mode
 - **THEN** it prints the refreshed-set table with at least one row for the case, the named tiles are the sum of the drawn and the resident-only ones, and `edit-latency.md` holds the table
+
+### Requirement: TEST-042 The brush cases of the edit-latency scene
+The `edit-latency` scene (TEST-019, TEST-041) SHALL run, after the hill cases of each altitude it is measured at 200 m and 2 km, brush cases: one brush item in the layer `brush` holding one raise stroke of 20 points a quarter of the radius apart, running east and centred on the place the views look at, with a strength of a fifth of the radius up to 100 m, a reach that holds the stroke and its radius and a bound on the change equal to the strength, at the radii 150 m and 1 km (`editperf::case_brush`). The case SHALL be edited and taken back as a hill case is (the same sequence and stages; the footprint find from the item's anchor and reach; the preview delta over the items of the item's layer, which has no brush preview, so the preview column reads `-`), and its rows in the budget table, the stages table and the refreshed-set table SHALL print the radius as `<r> m brush` so that no brush row is read as a stamp. A smoke run SHALL add the 150 m case at 200 m, and fail when the brush edit never becomes exact. The brush rows are read against the same exact budgets by radius and altitude as the hill rows.
+
+Verify: C
+Status: active
+Source: opus-planner (2026-10-20), TEST-019, TEST-041, VIEW-035, docs/status.md (coarse-first refinement parked)
+
+#### Scenario: The smoke run
+- **WHEN** the scene runs in smoke mode on the software adapter
+- **THEN** it prints a `200 m | 150 m brush` row in each of the three tables, the budget row has an exact time, the stages row has its durations, the settle window and the three pre-emption counts as numbers, and `edit-latency.md` holds the rows
+
+### Requirement: TEST-043 The preview cost of the edit-latency scene
+The `edit-latency` scene (TEST-019, TEST-041, TEST-042) SHALL print, after its other tables and write to `edit-latency.md`, a preview cost table: for each altitude, on the last view of that altitude, the frame planned and drawn with 0, 8 and 32 (`MAX_PREVIEW_STAMPS`) active preview stamps (a row of hill stamps of reach 400 m, a third of a reach apart, set as the transient preview, so that every flagged node evaluates all of them), the number of flagged nodes against the nodes of the plan, the median GPU time of the frame from the timestamp queries when the device has them (`-` when not), the median wall time until the GPU finished it, and the number of timed renders (20; 3 in a smoke run). The numbers are for the perf window to read; a smoke run only checks that the table is printed with 0, 8 and 32 stamps, that the wall times are numbers, and that no stamp flags no node and 32 stamps flag some.
+
+Verify: C
+Status: active
+Source: opus-planner (2026-10-20), REND-033, VIEW-036, TEST-041, TEST-042
+
+#### Scenario: The smoke run
+- **WHEN** the scene runs in smoke mode on the software adapter
+- **THEN** it prints the preview cost table with the rows 0, 8 and 32 for the altitude, the wall times are numbers, 0 stamps flag 0 nodes and 32 stamps flag at least one

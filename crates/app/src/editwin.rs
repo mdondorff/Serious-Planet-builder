@@ -163,6 +163,12 @@ pub struct EditRuntime {
     /// The brush tool on the screen: the stroke being painted and the ring under the cursor.
     brush: BrushOverlay,
     handles: Vec<(Handle, [f64; 2])>,
+    /// The smoke script: the camera of the last step, how many steps in a row it has not moved, and the frame the script started at (it
+    /// starts once the camera has rested, never before `SMOKE_FIRST_FRAME`: the flight and the globe flight run on the wall clock).
+    smoke_last: Option<Vec3>,
+    smoke_rest: u32,
+    smoke_start: Option<u64>,
+    smoke_done: bool,
     lists: Lists,
     camera_position: Vec3,
     /// An edit the camera is to fly to (set by a double click or Fly to; the window takes it).
@@ -265,6 +271,10 @@ impl EditRuntime {
             brush: BrushOverlay::default(),
             transient_shown: false,
             handles: Vec::new(),
+            smoke_last: None,
+            smoke_rest: 0,
+            smoke_start: None,
+            smoke_done: false,
             lists: Lists::default(),
             camera_position: Vec3::new(radius_m, 0.0, 0.0),
             fly: None,
@@ -784,6 +794,8 @@ pub const EDIT_KEYS_HELP: &str = "editor mode: Tab on/off (the panels, the outli
 pub const SMOKE_FIRST_FRAME: u64 = 60;
 /// The frames a smoke run with the editing script drives.
 pub const SMOKE_EDIT_FRAMES: u64 = 90;
+/// The steps in a row the camera must not have moved before the editing script starts.
+pub const SMOKE_REST_FRAMES: u32 = 3;
 
 impl EditRuntime {
     /// A pixel on the vertical line through the middle of the view where the mouse ray meets the surface, from the lower part up.
@@ -805,6 +817,16 @@ impl EditRuntime {
         limits: &PickLimits,
         field: &dyn HeightField,
     ) -> Result<(), String> {
+        // The script starts once the camera has stood still for `SMOKE_REST_FRAMES` steps: on a fast adapter the wall-clock flight (a globe
+        // flight that lands the free camera) is still moving at frame `SMOKE_FIRST_FRAME`, and a stamp placed in one view is off the next.
+        self.smoke_rest = if self.smoke_last == Some(camera.position.0) { self.smoke_rest + 1 } else { 0 };
+        self.smoke_last = Some(camera.position.0);
+        if self.smoke_start.is_none() && frame >= SMOKE_FIRST_FRAME && self.smoke_rest >= SMOKE_REST_FRAMES {
+            self.smoke_start = Some(frame);
+        }
+        let Some(start) = self.smoke_start else { return Ok(()) };
+        // The script's own frame number: `SMOKE_FIRST_FRAME` at its start.
+        let frame = frame - start + SMOKE_FIRST_FRAME;
         match frame {
             f if f == SMOKE_FIRST_FRAME => {
                 if !self.on {
@@ -821,12 +843,28 @@ impl EditRuntime {
                 }
             }
             f if f == SMOKE_FIRST_FRAME + 4 => {
+                let dbg = || {
+                    let sel = self
+                        .overlay
+                        .iter()
+                        .filter(|o| o.selected)
+                        .map(|o| format!("{} handles {:?} centre {:?}", o.label, o.handles, o.centre))
+                        .collect::<Vec<_>>();
+                    format!(
+                        "shown {} overlay {} selected {:?} camera alt {:.0} m, session selected {:?}",
+                        self.shown.len(),
+                        self.overlay.len(),
+                        sel,
+                        camera.position.0.length() - 6_371_000.0,
+                        self.session.selected()
+                    )
+                };
                 let h = self
                     .handles
                     .iter()
                     .find(|(k, _)| *k == Handle::Move)
                     .map(|(_, p)| *p)
-                    .ok_or("edit smoke: the placed stamp has no move handle on the screen")?;
+                    .ok_or_else(|| format!("edit smoke: the placed stamp has no move handle on the screen: {}", dbg()))?;
                 self.press(camera, viewport, h, limits, field);
                 self.moved(camera, viewport, [h[0] + 12.0, h[1]], limits, field);
             }
@@ -835,10 +873,18 @@ impl EditRuntime {
             f if f == SMOKE_FIRST_FRAME + 10 => self.key(EditKey::Undo),
             f if f == SMOKE_FIRST_FRAME + 12 => self.key(EditKey::Redo),
             f if f == SMOKE_FIRST_FRAME + 14 => self.key(EditKey::Delete),
-            f if f == SMOKE_FIRST_FRAME + 16 => self.key(EditKey::Undo),
+            f if f == SMOKE_FIRST_FRAME + 16 => {
+                self.key(EditKey::Undo);
+                self.smoke_done = true;
+            }
             _ => {}
         }
         Ok(())
+    }
+
+    /// Whether the editing script has driven its last step (it starts only once the camera rests, so the run waits for it).
+    pub fn smoke_finished(&self) -> bool {
+        self.smoke_done
     }
 
     /// The verdict of the editing script: everything it drove happened and nothing was refused.
@@ -1416,9 +1462,36 @@ mod tests {
         );
         let away = Camera { forward: sky.forward * -1.0, ..sky };
         let mut e2 = runtime(None);
-        e2.smoke_step(SMOKE_FIRST_FRAME, &away, VIEWPORT, &limits(), &Flat).unwrap();
-        let err = e2.smoke_step(SMOKE_FIRST_FRAME + 2, &away, VIEWPORT, &limits(), &Flat).unwrap_err();
+        // (The script starts once the camera has rested for `SMOKE_REST_FRAMES` steps.)
+        let err =
+            (SMOKE_FIRST_FRAME..SMOKE_FIRST_FRAME + 8).find_map(|f| e2.smoke_step(f, &away, VIEWPORT, &limits(), &Flat).err()).unwrap();
         assert!(err.contains("no pixel"), "{err}");
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn the_smoke_script_waits_for_a_camera_that_is_still_flying_and_edits_once_it_rests() {
+        // SPIKE (editor smoke on the discrete GPU): frames are fast there, the flight clock is wall-clock, so the camera still moves (a globe
+        // flight lands the free camera) when the script starts at frame 60: placed at a pixel of one view, the stamp is off the next view and
+        // "the placed stamp has no move handle on the screen". The script starts only when the camera has stood still for a few frames.
+        let cam_of = |f: u64| -> Camera {
+            // frames 0 to 54: over one place; 55 to 70: moving away every frame (the script must not start); from 71: at rest over another place
+            match f {
+                0..=54 => above(unit(47.2, 8.55), 3_000.0),
+                55..=70 => above(unit(47.2, 8.55 + 5.0 * (f - 54) as f64), 3_000.0 + 1_000.0 * (f - 54) as f64),
+                _ => above(unit(10.0, 120.0), 3_000.0),
+            }
+        };
+        let mut e = runtime(None);
+        for f in 0..(SMOKE_EDIT_FRAMES + 60) {
+            if e.take_changed_definition().is_some() {
+                let _ = e.refresh_tiles(&[]);
+            }
+            let cam = cam_of(f);
+            e.smoke_step(f, &cam, VIEWPORT, &limits(), &Flat).unwrap_or_else(|why| panic!("frame {f}: {why}"));
+            frame(&mut e, &cam, false);
+        }
+        e.smoke_verdict().unwrap();
     }
 
     // spec: VIEW-022
