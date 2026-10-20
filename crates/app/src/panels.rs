@@ -119,6 +119,8 @@ pub fn tool_label(tool: &Tool) -> String {
             let n = STAMP_KINDS.iter().position(|s| s == k).map_or(0, |i| i + 2);
             format!("{}  [{n}]", planet_editor::params::kind_title(k))
         }
+        Tool::Line(k) => format!("{} (draw)", planet_editor::params::kind_title(k)),
+        Tool::Region => "Region (draw)".to_string(),
     }
 }
 
@@ -439,6 +441,9 @@ pub fn draw_overlay(ui: &egui::Ui, items: &[OverlayItem], to_points: impl Fn([f6
                     }
                     Handle::Height => {
                         painter.circle(p, 5.5, LIGHT, egui::Stroke::new(1.5, egui::Color32::BLACK));
+                    }
+                    Handle::Point(_) => {
+                        painter.circle(p, 5.0, AMBER, egui::Stroke::new(1.5, egui::Color32::BLACK));
                     }
                 }
             }

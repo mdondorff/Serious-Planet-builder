@@ -8,6 +8,7 @@
 use crate::commands::{Affected, EditError, Editor, NewItem};
 use crate::lists::{self, LayerGroup, Row};
 use crate::params::{self, Inspector, Unit};
+use crate::polyline::{self, GeoPoint};
 use crate::relevance::{relevant_items, ViewState, MIN_REACH_PX};
 use crate::shape::{self, Handle, RADIUS_KEY, REACH_FACTOR};
 use planet_core::{TileId, Vec3};
@@ -29,7 +30,24 @@ pub enum Tool {
     Select,
     /// A click on the planet places a stamp of this kind.
     Stamp(String),
+    /// Clicks on the planet add the points of a line of this kind (`ridge` or `channel`) to the draft; finishing puts the line.
+    Line(String),
+    /// Clicks on the planet add the points of a region outline to the draft; finishing puts the region.
+    Region,
 }
+
+/// The kinds the line tool draws, in the order of its palette.
+pub const LINE_KINDS: [&str; 2] = ["ridge", "channel"];
+/// The layer new regions go into.
+pub const REGION_LAYER: &str = "regions";
+/// What a new line starts with: the crest height or bed depth and the half-width, metres; the bound on its change.
+pub const LINE_AMOUNT_M: f64 = 30.0;
+pub const LINE_WIDTH_M: f64 = 200.0;
+pub const LINE_BOUND_M: f64 = 60.0;
+/// The most points a draft holds: a region is one item (64), a line is split into items when it is long.
+pub const MAX_DRAFT_LINE_POINTS: usize = 640;
+/// A point closer than this to the last one of a draft is a double click, not a new point, metres.
+pub const MIN_POINT_SPACING_M: f64 = 0.5;
 
 /// Why a session action did not happen. Nothing has changed.
 #[derive(Debug)]
@@ -99,6 +117,10 @@ pub struct Session<S: ItemStore> {
     tool: Tool,
     status: String,
     drag: Option<Handle>,
+    /// The points a line or region tool has collected, in order.
+    draft: Vec<GeoPoint>,
+    /// While a point handle is held: the points of the line as they are now, the editor not yet told (one command at the release).
+    drag_points: Option<Vec<GeoPoint>>,
 }
 
 impl<S: ItemStore> Session<S> {
@@ -114,6 +136,8 @@ impl<S: ItemStore> Session<S> {
             tool: Tool::Select,
             status: String::new(),
             drag: None,
+            draft: Vec::new(),
+            drag_points: None,
         }
     }
 
@@ -141,7 +165,11 @@ impl<S: ItemStore> Session<S> {
         &self.tool
     }
 
+    /// Switch the tool; a draft of a line or region that is not finished is dropped.
     pub fn set_tool(&mut self, tool: Tool) {
+        if tool != self.tool {
+            self.draft.clear();
+        }
         self.tool = tool;
     }
 
@@ -251,6 +279,11 @@ impl<S: ItemStore> Session<S> {
     /// The handles of the selected edit with their places in `PlanetFixed` (`ground_m` above the sphere at the edit).
     pub fn handles(&self, ground_m: f64) -> Vec<(Handle, Vec3)> {
         let Some(it) = self.selected_item() else { return Vec::new() };
+        // A line or a region has one handle per point of the whole line, following a drag in progress.
+        if !it.points.is_empty() {
+            let r = self.radius_m + ground_m;
+            return self.drawn_points(it.id).iter().enumerate().map(|(i, p)| (Handle::Point(i), p.dir() * r)).collect();
+        }
         shape::handles_of(it).into_iter().map(|h| (h, shape::handle_point(it, h, self.radius_m, ground_m))).collect()
     }
 
@@ -372,6 +405,16 @@ impl<S: ItemStore> Session<S> {
     pub fn begin_drag(&mut self, handle: Handle) -> Result<(), SessionError> {
         let Some(id) = self.selection else { return refused("nothing is selected") };
         let Some(item) = self.editor.item(id) else { return refused("the selected edit is gone") };
+        if let Handle::Point(i) = handle {
+            // The points are held here until the release: the editor hears of the whole drag as one command (VIEW-029).
+            let points = self.stored_points(id);
+            if i >= points.len() {
+                return refused(format!("this edit has no point {i}"));
+            }
+            self.drag = Some(handle);
+            self.drag_points = Some(points);
+            return Ok(());
+        }
         if !shape::handles_of(item).contains(&handle) {
             return refused(format!("this edit has no {handle:?} handle"));
         }
@@ -387,6 +430,13 @@ impl<S: ItemStore> Session<S> {
         }
         let radius_m = self.radius_m;
         match self.drag {
+            Some(Handle::Point(i)) => {
+                let (lat, lon) = shape::lat_lon_of(dir);
+                if let Some(p) = self.drag_points.as_mut().and_then(|v| v.get_mut(i)) {
+                    *p = GeoPoint::new(lat, lon);
+                }
+                Ok(Vec::new())
+            }
             Some(Handle::Move) => Ok(self.editor.edit(|it| *it = shape::moved(it, dir))?),
             Some(Handle::Radius) => Ok(self.editor.edit(|it| *it = shape::resized(it, dir, radius_m))?),
             Some(Handle::Height) => refused("the height handle follows the pointer's height, not the surface"),
@@ -406,6 +456,13 @@ impl<S: ItemStore> Session<S> {
     /// The button went up: the drag becomes one command.
     pub fn end_drag(&mut self) -> Result<Vec<Affected>, SessionError> {
         let Some(handle) = self.drag.take() else { return refused("no handle is held") };
+        if let Handle::Point(_) = handle {
+            let points = self.drag_points.take().unwrap_or_default();
+            let Some(id) = self.selection else { return refused("nothing is selected") };
+            let affected = self.set_points(id, &points)?;
+            self.status = format!("{} point moved", self.named(self.selection.unwrap_or(id)));
+            return Ok(affected);
+        }
         let affected = self.editor.end_edit()?;
         self.status = format!(
             "{} {}",
@@ -414,6 +471,7 @@ impl<S: ItemStore> Session<S> {
                 Handle::Move => "moved",
                 Handle::Radius => "resized",
                 Handle::Height => "raised",
+                Handle::Point(_) => "point moved",
             }
         );
         Ok(affected)
@@ -421,11 +479,199 @@ impl<S: ItemStore> Session<S> {
 
     /// The drag was abandoned (Esc, focus lost): the edit goes back and nothing is recorded.
     pub fn cancel_drag(&mut self) -> Result<Vec<Affected>, SessionError> {
-        if self.drag.take().is_none() {
-            return refused("no handle is held");
+        let Some(handle) = self.drag.take() else { return refused("no handle is held") };
+        if let Handle::Point(_) = handle {
+            // Nothing was told to the editor: dropping the held points is all there is to take back.
+            self.drag_points = None;
+            self.status = "drag cancelled".to_string();
+            return Ok(Vec::new());
         }
         let affected = self.editor.cancel_edit()?;
         self.status = "drag cancelled".to_string();
+        Ok(affected)
+    }
+
+    // ----- lines and regions (VIEW-029)
+
+    /// The points of a line (all its parts, joined) or a region as the editor holds them; empty for an item without points.
+    fn stored_points(&self, id: ItemId) -> Vec<GeoPoint> {
+        let Some(item) = self.editor.item(id) else { return Vec::new() };
+        if item.points.is_empty() {
+            return Vec::new();
+        }
+        if item.kind == "region" {
+            item.points.iter().map(|(la, lo)| GeoPoint::new(*la, *lo)).collect()
+        } else {
+            self.editor.line_points(id).unwrap_or_default()
+        }
+    }
+
+    /// The points of `id` as they are drawn: while one of its point handles is held, the held points; else the stored ones.
+    pub fn drawn_points(&self, id: ItemId) -> Vec<GeoPoint> {
+        match (&self.drag_points, self.selection) {
+            (Some(held), Some(sel)) if sel == id => held.clone(),
+            _ => self.stored_points(id),
+        }
+    }
+
+    /// The points the line or region tool has collected so far.
+    pub fn draft(&self) -> &[GeoPoint] {
+        &self.draft
+    }
+
+    /// Give the line or region `id` these points: one command. The selection stays on a part that is still there, else goes to the first.
+    fn set_points(&mut self, id: ItemId, points: &[GeoPoint]) -> Result<Vec<Affected>, SessionError> {
+        let Some(item) = self.editor.item(id) else { return refused("the edit is gone") };
+        if item.points.is_empty() {
+            return refused("this edit has no points");
+        }
+        let members = if item.kind == "region" { vec![id] } else { self.editor.line_items(id)? };
+        let affected =
+            if item.kind == "region" { self.editor.set_region_points(id, points)? } else { self.editor.set_line_points(id, points)?.1 };
+        if self.selection.is_some_and(|s| self.editor.item(s).is_none()) {
+            self.selection = members.first().copied().filter(|m| self.editor.item(*m).is_some());
+        }
+        Ok(affected)
+    }
+
+    /// A click of the line or region tool at the unit direction `dir`: the point joins the draft. Returns the number of points now. A
+    /// point within [`MIN_POINT_SPACING_M`] of the last one, and a point beyond what the tool holds, is refused.
+    pub fn add_draft_point(&mut self, dir: Vec3) -> Result<usize, SessionError> {
+        let limit = match self.tool {
+            Tool::Line(_) => MAX_DRAFT_LINE_POINTS,
+            Tool::Region => polyline::MAX_POINTS,
+            _ => return refused("no line or region tool is on"),
+        };
+        if !is_direction(dir) {
+            return refused("that is not a place on the planet");
+        }
+        let (lat, lon) = shape::lat_lon_of(dir);
+        let point = GeoPoint::new(lat, lon);
+        if let Some(last) = self.draft.last() {
+            if polyline::arc_m(last.dir(), point.dir(), self.radius_m) < MIN_POINT_SPACING_M {
+                return refused("that is the last point again");
+            }
+        }
+        if self.draft.len() >= limit {
+            return refused(format!("at most {limit} points; finish it"));
+        }
+        self.draft.push(point);
+        self.status = format!("{} point(s); Enter finishes, Esc cancels", self.draft.len());
+        Ok(self.draft.len())
+    }
+
+    /// Take back the last point of the draft.
+    pub fn undo_draft_point(&mut self) -> Result<usize, SessionError> {
+        if self.draft.pop().is_none() {
+            return refused("no point to take back");
+        }
+        self.status = format!("{} point(s)", self.draft.len());
+        Ok(self.draft.len())
+    }
+
+    /// Drop the draft; the tool stays on.
+    pub fn cancel_draft(&mut self) {
+        if !self.draft.is_empty() {
+            self.status = "draft dropped".to_string();
+        }
+        self.draft.clear();
+    }
+
+    /// Put the line or region of the draft: one command (a line longer than one item reaches is linked parts, still one command). It is
+    /// selected afterwards and the tool goes back to select. A refusal (too few points, a region too large or crossing itself) leaves the
+    /// draft as it is, so the user can take points back and finish again.
+    pub fn finish_draft(&mut self) -> Result<(ItemId, Vec<Affected>), SessionError> {
+        let (kind, layer, params, bound, least) = match &self.tool {
+            Tool::Line(kind) if LINE_KINDS.contains(&kind.as_str()) => (
+                kind.clone(),
+                STAMP_LAYER,
+                BTreeMap::from([("amount_m".to_string(), LINE_AMOUNT_M), ("width_m".to_string(), LINE_WIDTH_M)]),
+                LINE_BOUND_M,
+                polyline::MIN_LINE_POINTS,
+            ),
+            Tool::Line(kind) => return refused(format!("'{kind}' is not a kind of line")),
+            Tool::Region => (
+                "region".to_string(),
+                REGION_LAYER,
+                BTreeMap::from([("surface_type".to_string(), 0.0), ("mask_mode".to_string(), 0.0)]),
+                0.0,
+                polyline::MIN_REGION_POINTS,
+            ),
+            _ => return refused("no line or region tool is on"),
+        };
+        if self.draft.len() < least {
+            return refused(format!("a {kind} needs at least {least} points, there are {}", self.draft.len()));
+        }
+        let count = self.editor.items().filter(|i| i.kind == kind).count() + 1;
+        let first = self.draft[0];
+        let template = NewItem {
+            body: self.body,
+            surface: planet_world_def::item::DEFAULT_SURFACE.to_string(),
+            layer: layer.to_string(),
+            priority: 0,
+            kind: kind.clone(),
+            anchor: Anchor { latitude_deg: first.lat_deg, longitude_deg: first.lon_deg, height_m: 0.0, heading_deg: 0.0 },
+            reach_m: 1.0,
+            max_delta_m: bound,
+            params,
+            name: Some(format!("{} {count}", params::kind_title(&kind))),
+            notes: None,
+            points: Vec::new(),
+            group: None,
+            part: None,
+            mask_layer: None,
+        };
+        let draft = self.draft.clone();
+        let (id, affected) = if kind == "region" {
+            self.editor.put_region(template, &draft)?
+        } else {
+            let (ids, affected) = self.editor.put_line(template, &draft)?;
+            (ids[0], affected)
+        };
+        self.draft.clear();
+        self.selection = Some(id);
+        self.tool = Tool::Select;
+        self.status = format!("{} placed", self.named(id));
+        Ok((id, affected))
+    }
+
+    /// A click on the outline of the selected line or region at `dir`, within `max_arc_m` metres of it: a point is added there, one
+    /// command. Returns the index of the new point.
+    pub fn insert_point_at(&mut self, dir: Vec3, max_arc_m: f64) -> Result<(usize, Vec<Affected>), SessionError> {
+        let Some(id) = self.selection else { return refused("nothing is selected") };
+        let points = self.stored_points(id);
+        if points.is_empty() {
+            return refused("the selected edit has no points");
+        }
+        if !is_direction(dir) {
+            return refused("that is not a place on the planet");
+        }
+        let closed = self.editor.item(id).is_some_and(|i| i.kind == "region");
+        let Some(hit) = polyline::nearest_segment(&points, closed, dir.normalized(), self.radius_m) else {
+            return refused("the selected edit has no outline");
+        };
+        if hit.distance_m > max_arc_m {
+            return refused("that is not on the outline");
+        }
+        let (lat, lon) = (hit.foot.lat_deg, hit.foot.lon_deg);
+        let new = polyline::insert_point(&points, hit.segment, GeoPoint::new(lat, lon)).map_err(EditError::from)?;
+        let affected = self.set_points(id, &new)?;
+        self.status = "point added".to_string();
+        Ok((hit.segment + 1, affected))
+    }
+
+    /// Remove point `index` of the selected line or region: one command; refused when fewer than the kind needs would be left.
+    pub fn remove_point(&mut self, index: usize) -> Result<Vec<Affected>, SessionError> {
+        let Some(id) = self.selection else { return refused("nothing is selected") };
+        let points = self.stored_points(id);
+        if points.is_empty() {
+            return refused("the selected edit has no points");
+        }
+        let least =
+            if self.editor.item(id).is_some_and(|i| i.kind == "region") { polyline::MIN_REGION_POINTS } else { polyline::MIN_LINE_POINTS };
+        let new = polyline::remove_point(&points, index, least).map_err(EditError::from)?;
+        let affected = self.set_points(id, &new)?;
+        self.status = "point removed".to_string();
         Ok(affected)
     }
 
