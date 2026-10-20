@@ -375,3 +375,118 @@ fn a_short_arc_keeps_its_great_circle_so_the_distance_and_the_bounds_hold_to_a_n
         }
     }
 }
+
+/// A reader that records every item the stage asked for (the recording context of ADR 0021 point 7).
+struct Recording {
+    inner: Arc<WorldDefinition>,
+    seen: std::sync::Mutex<Vec<u128>>,
+}
+
+impl planet_generators::stamp::ItemReader for Recording {
+    fn radius_m(&self, body: BodyId) -> Option<f64> {
+        self.inner.radius_m(body)
+    }
+    fn items(&self, body: BodyId, layer: &str, cap: Cap) -> Vec<FootprintItem> {
+        let items = self.inner.items(body, layer, cap);
+        self.seen.lock().unwrap().extend(items.iter().map(|i| i.id));
+        items
+    }
+    fn max_delta_sum(&self, body: BodyId, layer: &str) -> f64 {
+        self.inner.max_delta_sum(body, layer)
+    }
+    fn tile_reads(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> Vec<planet_world_def::ReadRecord> {
+        self.inner.tile_reads(body, layer, tile, halo)
+    }
+    fn revision(&self) -> u64 {
+        self.inner.revision()
+    }
+    fn footprint_empty(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> bool {
+        self.inner.footprint_empty(body, layer, tile, halo)
+    }
+}
+
+// spec: GEN-028, WDEF-007
+#[test]
+fn every_line_the_stage_reads_over_a_tile_is_in_the_footprint_the_tile_declared_and_its_key_follows_the_line() {
+    use planet_generators::stamp::{ItemReader, STAGE_HALO};
+    let items = vec![
+        line(1, StampKind::Ridge, 60.0, 400.0, &[(20.0, 30.0), (20.004, 30.003), (20.0, 30.006)]),
+        line(2, StampKind::Channel, 30.0, 300.0, &[(19.998, 29.999), (19.998, 30.01)]),
+        line(3, StampKind::Ridge, 50.0, 500.0, &[(25.0, 40.0), (25.01, 40.0)]), // far away
+    ];
+    let def = world(&items);
+    let at = unit(20.0, 30.003);
+    for level in [13u8, 15, 17] {
+        let tile = TileId::from_direction(&TangentWarp, at, level);
+        let reader = Arc::new(Recording { inner: Arc::clone(&def), seen: std::sync::Mutex::default() });
+        let s = StampStage::new(Arc::new(Reference(1)), reader.clone() as Arc<dyn ItemReader>, BodyId::PLANET, DEFAULT_ITEM_LAYER, 0, 1)
+            .unwrap();
+        let mut dirs = Vec::new();
+        for l in -1..=17i64 {
+            for k in -1..=17i64 {
+                dirs.push(tile.sample_direction_ext(&TangentWarp, 16, k, l));
+            }
+        }
+        let _ = s.heights(&dirs);
+        let declared: Vec<u128> =
+            def.footprint_items(BodyId::PLANET, DEFAULT_ITEM_LAYER, tile, STAGE_HALO).unwrap().iter().map(|i| i.id).collect();
+        let seen = reader.seen.lock().unwrap().clone();
+        assert!(!seen.is_empty(), "level {level}: the lines under the tile are read");
+        for id in &seen {
+            assert!(declared.contains(id), "level {level}: line {id} was read but the tile did not declare it (declared {declared:?})");
+        }
+        for (k, d) in dirs.iter().enumerate() {
+            if s.height(*d) != Reference(1).height(*d) {
+                assert!(!declared.is_empty() && !seen.is_empty(), "level {level} sample {k}: the height changed with no line read");
+            }
+        }
+        assert!(!declared.contains(&3), "level {level}: the far line is not declared");
+    }
+    // The key of a tile follows the line: a moved point re-keys the tile under it, a far tile keeps its key, and a new stage version re-keys.
+    let key = |def: &Arc<WorldDefinition>, version: u32, tile: TileId| {
+        StampStage::new(Arc::new(Reference(1)), Arc::clone(def) as Arc<dyn ItemReader>, BodyId::PLANET, DEFAULT_ITEM_LAYER, 0, version)
+            .unwrap()
+            .inputs_hash_for(tile, &TangentWarp)
+    };
+    let under = TileId::from_direction(&TangentWarp, at, 14);
+    let far = TileId::from_direction(&TangentWarp, unit(-30.0, 200.0), 14);
+    let mut moved_items = items.clone();
+    moved_items[0] = line(1, StampKind::Ridge, 60.0, 400.0, &[(20.0, 30.0), (20.004, 30.004), (20.0, 30.006)]);
+    let moved = world(&moved_items);
+    assert_ne!(key(&def, 2, under), key(&moved, 2, under), "a moved point re-keys the tile under the line");
+    assert_eq!(key(&def, 2, far), key(&moved, 2, far), "a tile away from it keeps its key");
+    assert_ne!(key(&def, 1, under), key(&def, 2, under), "a new stage version re-keys");
+}
+
+// spec: GEN-028
+#[test]
+fn a_sharp_bend_has_the_height_of_its_nearest_arc_and_the_bounds_are_not_wider_than_the_declared_deltas_allow() {
+    // A polyline that doubles back on itself at 170 degrees: the height is the profile of the distance to the nearer arc.
+    let pl = [(20.0, 30.0), (20.0, 30.05), (20.001, 30.0)];
+    let pts: Vec<Vec3> = pl.iter().map(|(la, lo)| unit(*la, *lo)).collect();
+    let def = world(&[line(1, StampKind::Ridge, 40.0, 1_500.0, &pl)]);
+    let mut worst = 0.0f64;
+    for k in 0..60 {
+        let p = at_distance(unit(20.0005, 30.02), unit(20.5, 30.03), f64::from(k) * 40.0 - 600.0);
+        let (d, _) = sampled_angle(&pts, p);
+        let want = ridge_delta(40.0, d * R / 1_500.0);
+        worst = worst.max((height(&def, p) - want).abs());
+    }
+    assert!(worst < 5e-3, "the height follows the nearest arc at the bend: worst {worst} m");
+    // The bounds over a cap are as wide as the base's plus what the declared deltas allow (twice the largest delta of each line item).
+    let stage = stage_over(&[
+        line(1, StampKind::Ridge, 80.0, 4_000.0, &[(20.0, 30.0), (20.04, 30.02)]),
+        line(2, StampKind::Channel, 60.0, 3_000.0, &[(20.02, 29.98), (20.02, 30.06)]),
+    ]);
+    let centre = unit(20.02, 30.01);
+    for angle_m in [10.0, 500.0, 4_000.0] {
+        let (lo, hi) = stage.height_bounds(centre, angle_m / R);
+        let (blo, bhi) = Reference(1).height_bounds(centre, angle_m / R);
+        assert!(
+            hi - lo <= (bhi - blo) + 80.0 + 60.0 + 1e-6,
+            "cap {angle_m} m: width {} against the base's {} plus 140",
+            hi - lo,
+            bhi - blo
+        );
+    }
+}

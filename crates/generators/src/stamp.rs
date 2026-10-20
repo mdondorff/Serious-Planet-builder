@@ -1,8 +1,10 @@
 //! The stamp stage (GEN-026): the authored items of one layer added to a base height field.
 //!
 //! A stamp is a delta of the height around its anchor (a hill, a crater, a plateau); the stage adds the stamps whose reach contains a
-//! point to the base height there, in application order. It reads items once per batch through an [`ItemReader`] (so a contract test can
-//! record what it read), reads the base only as a height field at points, and chains its tile keys to the base's (STRM-027).
+//! point to the base height there, in application order, and then the lines (a ridge and a channel, GEN-028: a delta of the distance to
+//! a polyline, combined by the largest ridge and the smallest channel). It reads items once per batch through an [`ItemReader`] (so a
+//! contract test can record what it read), reads the base only as a height field at points, and chains its tile keys to the base's
+//! (STRM-027).
 
 use std::sync::{Arc, RwLock};
 
