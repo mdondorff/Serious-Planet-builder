@@ -391,6 +391,13 @@ fn generate_global(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         writeln!(out, "global ocean channel: {} blocks already stored under their current key, nothing recomputed", report.ocean_reused)
             .map_err(err)?;
     }
+    // The wet floor (ADR 0071, STRM-032) is part of the bake.
+    if report.floor_written > 0 {
+        writeln!(out, "global wet floor: {} blocks written, {:.1} s from the stored blocks", report.floor_written, report.floor_seconds)
+            .map_err(err)?;
+    } else {
+        writeln!(out, "global wet floor: already stored under its current key, nothing recomputed").map_err(err)?;
+    }
     // The coarse level of the water field (ADR 0058, STRM-025) is part of the bake.
     if report.summary_written {
         writeln!(

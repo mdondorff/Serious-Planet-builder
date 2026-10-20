@@ -200,7 +200,7 @@ fn a_store_with_the_blocks_and_the_ocean_channel_but_no_summary_gains_only_the_s
             }
         }
         writer.finish().unwrap();
-        assert_eq!(copied, 2 * 6 * 64, "the sample blocks and the ocean blocks of 6 faces of 8 x 8 blocks");
+        assert_eq!(copied, 3 * 6 * 64, "the sample, ocean and wet-floor blocks of 6 faces of 8 x 8 blocks");
     }
     let store = TileStore::open(old.path(), w.params()).unwrap();
     let e = load_water_summary(&store, &w, res).unwrap_err().to_string();

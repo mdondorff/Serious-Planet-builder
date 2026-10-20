@@ -22,5 +22,6 @@ pub mod stress;
 pub mod terrain;
 pub mod water;
 pub mod water_summary;
+pub mod wet_floor;
 
 pub use height::{cache_key, generate_region, generate_tile, TileData, GENERATOR_VERSION, IMPLEMENTATION_ID};

@@ -26,11 +26,14 @@ use planet_generators::global::{
     IMPLEMENTATION_ID, MAX_BATCH_BYTES, MAX_BLOCK_CELLS, MAX_TILED_RES,
 };
 use planet_generators::ocean::{
-    analyse_block, ocean_bits, parallel_map, BlockAnalysis, OceanBits, OceanError, OceanLattice, OceanMerger, OceanTable,
+    analyse_block, ocean_bits, parallel_map, BlockAnalysis, CubeIndex, OceanBits, OceanError, OceanLattice, OceanMerger, OceanTable,
     OCEAN_IMPLEMENTATION_ID,
 };
 use planet_generators::stage::{FieldGraph, FieldSpec, Scope, Stage};
 use planet_generators::water_summary::{summarize_block, SummaryCell, SummaryError, WaterSummary, SUMMARY_IMPLEMENTATION_ID};
+use planet_generators::wet_floor::{
+    analyse_floor_block, block_codes, floor_block, merge_floor_edges, FloorEdges, FloorLattice, WET_FLOOR_IMPLEMENTATION_ID,
+};
 use planet_world_def::{
     body_radius_path, body_seed_path, BodyId, GenContext, MissingNode, NodeValue, SeaParams, WorldDefinition, SPHERE_SURFACE_ID,
 };
@@ -55,6 +58,12 @@ pub const KIND_GLOBAL_OCEAN: u8 = Kind::GlobalOcean as u8;
 
 /// Version of the ocean block payload layout. History: 1 = `(B + 1)^2` bits, LSB first, as an LZ4 block.
 pub const OCEAN_CODEC_VERSION: u8 = 1;
+
+/// The kind byte of a block of the wet-floor channel (ADR 0071 point 3).
+pub const KIND_GLOBAL_WET_FLOOR: u8 = Kind::GlobalWetFloor as u8;
+
+/// Version of the floor block payload layout. History: 1 = `(B + 1)^2` `u16` codes as a low-byte plane then a high-byte plane, LZ4 block.
+pub const FLOOR_CODEC_VERSION: u8 = 1;
 
 /// The kind byte of the water summary of the global bake (ADR 0058): the coarse level of the water field.
 pub const KIND_GLOBAL_WATER_SUMMARY: u8 = Kind::GlobalWaterSummary as u8;
@@ -96,6 +105,8 @@ pub enum BlockCodecError {
     OceanBits,
     /// An ocean block of another codec version.
     OceanVersion(u8),
+    /// A floor block of another codec version.
+    FloorVersion(u8),
     /// A water summary of another codec version.
     SummaryVersion(u8),
     /// A water summary that makes no grid, or whose cells are not what this version writes.
@@ -117,6 +128,7 @@ impl std::fmt::Display for BlockCodecError {
             BlockCodecError::Grid { level, cells } => write!(f, "{cells} cells per block at level {level} is not a grid this build bakes"),
             BlockCodecError::OceanBits => write!(f, "the ocean block has a bit set beyond its last vertex"),
             BlockCodecError::OceanVersion(v) => write!(f, "ocean block codec version {v}, this build reads {OCEAN_CODEC_VERSION}"),
+            BlockCodecError::FloorVersion(v) => write!(f, "floor block codec version {v}, this build reads {FLOOR_CODEC_VERSION}"),
             BlockCodecError::SummaryVersion(v) => write!(f, "water summary codec version {v}, this build reads {SUMMARY_CODEC_VERSION}"),
             BlockCodecError::Summary(why) => write!(f, "the water summary is not valid: {why}"),
         }
@@ -253,6 +265,57 @@ pub fn decode_ocean_block(bytes: &[u8]) -> Result<OceanBits, BlockCodecError> {
         return Err(BlockCodecError::Truncated { got: raw.len(), expected });
     }
     OceanBits::from_bytes(cells, &raw).ok_or(BlockCodecError::OceanBits)
+}
+
+fn floor_raw_len(cells: u32) -> u64 {
+    2 * (u64::from(cells) + 1) * (u64::from(cells) + 1)
+}
+
+/// Encode a floor block: `codec version (u8) | cells per block edge B (u32 LE) | raw length (u32 LE) | LZ4 block` of the `(B + 1)^2`
+/// codes, row-major (`k` fastest), as the plane of their low bytes followed by the plane of their high bytes.
+pub fn encode_floor_block(cells: u32, codes: &[u16]) -> Result<Vec<u8>, BlockCodecError> {
+    if !valid_cells(cells) {
+        return Err(BlockCodecError::Cells(cells));
+    }
+    let n = (u64::from(cells) + 1) * (u64::from(cells) + 1);
+    if codes.len() as u64 != n {
+        return Err(BlockCodecError::Samples { got: codes.len(), expected: n });
+    }
+    let mut raw = Vec::with_capacity(codes.len() * 2);
+    raw.extend(codes.iter().map(|c| (*c & 0xFF) as u8));
+    raw.extend(codes.iter().map(|c| (*c >> 8) as u8));
+    let mut out = Vec::with_capacity(HEADER_LEN + raw.len() / 4);
+    out.push(FLOOR_CODEC_VERSION);
+    out.extend_from_slice(&cells.to_le_bytes());
+    out.extend_from_slice(&u32::try_from(raw.len()).expect("at most 2 * 1025^2 bytes").to_le_bytes());
+    out.extend_from_slice(&lz4_flex::compress(&raw));
+    Ok(out)
+}
+
+/// Decode a floor block payload: its cells and codes. It refuses what [`encode_floor_block`] would not write, without allocating more
+/// than `B` allows.
+pub fn decode_floor_block(bytes: &[u8]) -> Result<(u32, Vec<u16>), BlockCodecError> {
+    if bytes.len() < HEADER_LEN {
+        return Err(BlockCodecError::Short);
+    }
+    if bytes[0] != FLOOR_CODEC_VERSION {
+        return Err(BlockCodecError::FloorVersion(bytes[0]));
+    }
+    let cells = u32::from_le_bytes(bytes[1..5].try_into().expect("4 bytes"));
+    if !valid_cells(cells) {
+        return Err(BlockCodecError::Cells(cells));
+    }
+    let claimed = u32::from_le_bytes(bytes[5..9].try_into().expect("4 bytes"));
+    let expected = floor_raw_len(cells);
+    if u64::from(claimed) != expected {
+        return Err(BlockCodecError::RawLength { claimed, expected });
+    }
+    let raw = lz4_flex::decompress(&bytes[HEADER_LEN..], claimed as usize).map_err(|e| BlockCodecError::Lz4(e.to_string()))?;
+    if raw.len() as u64 != expected {
+        return Err(BlockCodecError::Truncated { got: raw.len(), expected });
+    }
+    let n = raw.len() / 2;
+    Ok((cells, (0..n).map(|i| u16::from(raw[i]) | (u16::from(raw[n + i]) << 8)).collect()))
 }
 
 /// Encode the water summary: `codec version (u8) | res (u32 LE) | B (u32 LE) | raw length (u32 LE) | LZ4 block` of the `6 g^2` flag
@@ -511,6 +574,37 @@ impl GlobalWorld {
         cache_key(&self.ocean_key_inputs(tile, cells))
     }
 
+    /// The inputs of the content key of one block of the wet-floor channel: kind 6, the block's tile, the bake's stage key as its
+    /// source, `B`, `res` and the area threshold of the ocean channel it is computed from as output parameters, an empty read set. The
+    /// implementation id names the floor rule and the ocean rule (the floor is a function of the ocean bits): renaming either renames it.
+    pub fn floor_key_inputs(&self, tile: TileId, cells: u32) -> KeyInputs {
+        let mut inputs = self.ocean_key_inputs(tile, cells);
+        inputs.kind = Kind::GlobalWetFloor;
+        inputs.implementation_id = format!("{WET_FLOOR_IMPLEMENTATION_ID}+{OCEAN_IMPLEMENTATION_ID}");
+        inputs
+    }
+
+    pub fn floor_key(&self, tile: TileId, cells: u32) -> CacheKey {
+        cache_key(&self.floor_key_inputs(tile, cells))
+    }
+
+    /// The record of a block of floor codes.
+    pub fn floor_record(&self, tile: TileId, cells: u32, codes: &[u16]) -> Result<Record, BlockCodecError> {
+        let res = grid_res(tile, cells).ok_or(BlockCodecError::Grid { level: tile.level(), cells })?;
+        if self.layout(res).ok() != Some((tile.level(), cells)) {
+            return Err(BlockCodecError::Grid { level: tile.level(), cells });
+        }
+        Ok(Record {
+            key: self.floor_key(tile, cells),
+            kind: KIND_GLOBAL_WET_FLOOR,
+            tile,
+            generator_version: GLOBAL_VERSION,
+            hash_version: HASH_VERSION,
+            node_set_id: self.node_set_id,
+            payload: encode_floor_block(cells, codes)?,
+        })
+    }
+
     /// The tile the summary record is filed under (the record covers the whole bake): face 0 at level 0.
     pub fn summary_tile() -> TileId {
         TileId::new(Face(0), 0, 0, 0).expect("the root tile of a face")
@@ -584,7 +678,10 @@ impl GlobalWorld {
     /// Whether a stored global block (of the bake or of its ocean channel) is still current for this world: its generator version,
     /// hash version and node set id equal the world's (STRM-013). Other kinds are not this world's to judge: `true`.
     pub fn is_live(&self, record: &Record) -> bool {
-        (record.kind != KIND_GLOBAL_BLOCK && record.kind != KIND_GLOBAL_OCEAN && record.kind != KIND_GLOBAL_WATER_SUMMARY)
+        (record.kind != KIND_GLOBAL_BLOCK
+            && record.kind != KIND_GLOBAL_OCEAN
+            && record.kind != KIND_GLOBAL_WET_FLOOR
+            && record.kind != KIND_GLOBAL_WATER_SUMMARY)
             || (record.generator_version == GLOBAL_VERSION && record.hash_version == HASH_VERSION && record.node_set_id == self.node_set_id)
     }
 
@@ -957,6 +1054,9 @@ pub struct GlobalBuildReport {
     pub summary_written: bool,
     pub summary_seconds: f64,
     pub summary_bytes: usize,
+    /// Floor blocks (the wet-floor channel, ADR 0071) written by this run, and the seconds the channel took.
+    pub floor_written: usize,
+    pub floor_seconds: f64,
 }
 
 /// Bytes per vertex of a block alive in the ocean passes beyond the bake's own 16: a block read back from the store holds its payload,
@@ -964,6 +1064,8 @@ pub struct GlobalBuildReport {
 const OCEAN_READ_BYTES_PER_VERTEX: u64 = 48;
 /// The same while a baked block is analysed on its worker: 16 B of samples and about 10 B of analysis.
 const OCEAN_BAKE_BYTES_PER_VERTEX: u64 = 26;
+/// The same while a floor pass holds a block: the stored samples, the ocean bits, the codes (2 B), the floors (2 B) and the 64 k buckets.
+const FLOOR_READ_BYTES_PER_VERTEX: u64 = 56;
 
 /// How many blocks of `cells` cells an ocean pass keeps alive at once: the thread count, at most [`MAX_BATCH_BYTES`] of blocks at
 /// `bytes_per_vertex` each (so the 1 GiB bound of the bake holds with the ocean pass included), and at least one.
@@ -1131,8 +1233,11 @@ pub fn build_global(
         summary_written: false,
         summary_seconds: 0.0,
         summary_bytes: 0,
+        floor_written: 0,
+        floor_seconds: 0.0,
     };
     let Some(mut merger) = merger else {
+        write_floors_if_missing(dir, world, res, threads, &mut writer, &mut report)?;
         write_summary_if_missing(dir, world, res, threads, &mut writer, &mut report)?;
         writer.finish()?;
         return Ok(report);
@@ -1167,9 +1272,116 @@ pub fn build_global(
         }
     }
     report.ocean_seconds = started.elapsed().as_secs_f64();
+    write_floors_if_missing(dir, world, res, threads, &mut writer, &mut report)?;
     write_summary_if_missing(dir, world, res, threads, &mut writer, &mut report)?;
     writer.finish()?;
     Ok(report)
+}
+
+/// The stored ocean block of `tile`, decoded: an error naming the block when it is missing, damaged or of other cells.
+fn stored_ocean(store: &TileStore, world: &GlobalWorld, tile: TileId, cells: u32) -> Result<OceanBits, GlobalBuildError> {
+    let key = world.ocean_key(tile, cells);
+    let what = |why: String| GlobalBuildError::MissingBlock(format!("ocean block {:#018x} key {key}: {why}", tile.raw()));
+    let rec = store
+        .get(KIND_GLOBAL_OCEAN, tile, key)
+        .map_err(|e| what(e.to_string()))?
+        .ok_or_else(|| what("not stored under the current key".into()))?;
+    let bits = decode_ocean_block(&rec.payload).map_err(|e| what(e.to_string()))?;
+    if bits.cells != cells {
+        return Err(what(format!("its payload has {} cells per edge, the layout says {cells}", bits.cells)));
+    }
+    Ok(bits)
+}
+
+/// The codes of the stored block `tile` (the ocean vertices 0, the others their elevation's code), read from the stored sample and
+/// ocean blocks.
+fn stored_codes(store: &TileStore, world: &GlobalWorld, tile: TileId, cells: u32) -> Result<Vec<u16>, GlobalBuildError> {
+    let samples = stored_block(store, world, tile, cells)?;
+    let bits = stored_ocean(store, world, tile, cells)?;
+    Ok(block_codes(cells, &samples, &bits))
+}
+
+/// The floors of the border nodes of a stored bake (passes 1 and 2 of ADR 0071 point 3): the edges of every block, merged. A pure
+/// function of the stored blocks, so the thread count changes nothing.
+pub fn floor_border_of_store(
+    store: &TileStore,
+    world: &GlobalWorld,
+    res: u32,
+    threads: usize,
+) -> Result<std::collections::HashMap<u64, u16>, GlobalBuildError> {
+    let (level, cells) = world.layout(res)?;
+    let total = 6usize << (2 * u32::from(level));
+    let index = CubeIndex::new(res);
+    let batch_n = batch_blocks_of(cells, threads, FLOOR_READ_BYTES_PER_VERTEX);
+    let mut edges: Vec<FloorEdges> = Vec::new();
+    let mut tiles = (0..total).map(|i| tile_at(level, i));
+    loop {
+        let batch: Vec<TileId> = tiles.by_ref().take(batch_n).collect();
+        if batch.is_empty() {
+            break;
+        }
+        let results = parallel_map(&batch, threads.min(batch_n), &|t| -> Result<FloorEdges, GlobalBuildError> {
+            let codes = stored_codes(store, world, *t, cells)?;
+            Ok(analyse_floor_block(index, *t, cells, &codes))
+        });
+        for r in results {
+            edges.push(r?);
+        }
+    }
+    Ok(merge_floor_edges(&edges))
+}
+
+/// The floor codes of the stored block `tile` given the border floors (pass 3).
+fn stored_floor(
+    store: &TileStore,
+    world: &GlobalWorld,
+    res: u32,
+    tile: TileId,
+    cells: u32,
+    border: &std::collections::HashMap<u64, u16>,
+) -> Result<Vec<u16>, GlobalBuildError> {
+    let codes = stored_codes(store, world, tile, cells)?;
+    Ok(floor_block(CubeIndex::new(res), tile, cells, &codes, border))
+}
+
+/// Write the floor blocks the store lacks (ADR 0071 point 3) from the stored sample and ocean blocks, after putting the blocks this run
+/// wrote on disk. A bake whose floor blocks are all stored under their current keys recomputes nothing.
+fn write_floors_if_missing(
+    dir: &Path,
+    world: &GlobalWorld,
+    res: u32,
+    threads: usize,
+    writer: &mut PackWriter,
+    report: &mut GlobalBuildReport,
+) -> Result<(), GlobalBuildError> {
+    let (level, cells) = world.layout(res)?;
+    let total = 6usize << (2 * u32::from(level));
+    writer.write_index()?;
+    let store = TileStore::open(dir, world.params())?;
+    let have = |tile: TileId| matches!(store.get(KIND_GLOBAL_WET_FLOOR, tile, world.floor_key(tile, cells)), Ok(Some(r)) if matches!(decode_floor_block(&r.payload), Ok((c, _)) if c == cells));
+    let mut todo = (0..total).map(|i| tile_at(level, i)).filter(|t| !have(*t)).peekable();
+    if todo.peek().is_none() {
+        return Ok(());
+    }
+    let started = Instant::now();
+    let border = floor_border_of_store(&store, world, res, threads)?;
+    let batch_n = batch_blocks_of(cells, threads, FLOOR_READ_BYTES_PER_VERTEX);
+    loop {
+        let batch: Vec<TileId> = todo.by_ref().take(batch_n).collect();
+        if batch.is_empty() {
+            break;
+        }
+        let records = parallel_map(&batch, threads.min(batch_n), &|t| -> Result<Record, GlobalBuildError> {
+            let codes = stored_floor(&store, world, res, *t, cells, &border)?;
+            Ok(world.floor_record(*t, cells, &codes)?)
+        });
+        for r in records {
+            writer.append(&r?)?;
+            report.floor_written += 1;
+        }
+    }
+    report.floor_seconds = started.elapsed().as_secs_f64();
+    Ok(())
 }
 
 /// The water summary of a stored bake, computed from its stored sample blocks and ocean blocks (ADR 0058): the known answer of a
@@ -1381,6 +1593,217 @@ impl OceanLattice for StoreOceanSource<'_> {
     }
 }
 
+/// The wet-floor channel of a stored bake as a [`FloorLattice`] (ADR 0071): it finds the block that holds a vertex through the canonical
+/// layout, decodes it once and keeps the most recent ones (a block is `2 (B + 1)^2` bytes, 2 MB at 1024 cells). A block that is missing
+/// or damaged is an error naming the block, its key and the command that writes it, never a default (dry or wet).
+pub struct StoreWetFloorSource<'a> {
+    store: &'a TileStore,
+    world: &'a GlobalWorld,
+    res: u32,
+    level: u8,
+    cells: u32,
+    budget_blocks: usize,
+    decodes: AtomicU64,
+    shared: Mutex<Vec<(TileId, Arc<FloorSlot>)>>,
+}
+
+/// One block of the floor cache: filled once by the first thread that wants it.
+struct FloorSlot {
+    block: OnceLock<Result<Arc<Vec<u16>>, ReadError>>,
+}
+
+/// Default number of decoded floor blocks a [`StoreWetFloorSource`] keeps: 32 (64 MB at 1024 cells).
+pub const FLOOR_SOURCE_BLOCKS: usize = 32;
+
+impl<'a> StoreWetFloorSource<'a> {
+    pub fn new(store: &'a TileStore, world: &'a GlobalWorld, res: u32) -> Result<StoreWetFloorSource<'a>, BakeError> {
+        StoreWetFloorSource::with_budget(store, world, res, FLOOR_SOURCE_BLOCKS)
+    }
+
+    /// The same keeping at most `budget_blocks` decoded blocks (at least one).
+    pub fn with_budget(
+        store: &'a TileStore,
+        world: &'a GlobalWorld,
+        res: u32,
+        budget_blocks: usize,
+    ) -> Result<StoreWetFloorSource<'a>, BakeError> {
+        let (level, cells) = world.layout(res)?;
+        Ok(StoreWetFloorSource {
+            store,
+            world,
+            res,
+            level,
+            cells,
+            budget_blocks: budget_blocks.max(1),
+            decodes: AtomicU64::new(0),
+            shared: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// Blocks decoded so far (a block evicted and wanted again counts again).
+    pub fn decodes(&self) -> u64 {
+        self.decodes.load(Ordering::Relaxed)
+    }
+
+    /// Blocks in the cache now.
+    pub fn resident_blocks(&self) -> usize {
+        self.shared.lock().expect("floor cache mutex").len()
+    }
+
+    fn load(&self, tile: TileId) -> Result<Arc<Vec<u16>>, ReadError> {
+        let key = self.world.floor_key(tile, self.cells);
+        let what = |why: String| {
+            ReadError::Source(format!(
+                "wet-floor block {:#018x} (face {} level {} x {} y {}) key {key}: {why}",
+                tile.raw(),
+                tile.face().0,
+                tile.level(),
+                tile.x(),
+                tile.y()
+            ))
+        };
+        let rec = self.store.get(KIND_GLOBAL_WET_FLOOR, tile, key).map_err(|e| what(e.to_string()))?.ok_or_else(|| {
+            what(format!(
+                "not stored under the current key (add it with `generate --global-dir DIR --global-res {}`, which writes only what is missing)",
+                self.res
+            ))
+        })?;
+        let (cells, codes) = decode_floor_block(&rec.payload).map_err(|e| what(e.to_string()))?;
+        if cells != self.cells {
+            return Err(what(format!("its payload has {cells} cells per edge, the layout says {}", self.cells)));
+        }
+        self.decodes.fetch_add(1, Ordering::Relaxed);
+        Ok(Arc::new(codes))
+    }
+
+    fn block(&self, tile: TileId) -> Result<Arc<Vec<u16>>, ReadError> {
+        let slot = {
+            let mut shared = self.shared.lock().expect("floor cache mutex");
+            if let Some(at) = shared.iter().position(|(t, _)| *t == tile) {
+                let entry = shared.remove(at);
+                let slot = Arc::clone(&entry.1);
+                shared.push(entry);
+                slot
+            } else {
+                let slot = Arc::new(FloorSlot { block: OnceLock::new() });
+                shared.push((tile, Arc::clone(&slot)));
+                if shared.len() > self.budget_blocks {
+                    shared.remove(0);
+                }
+                slot
+            }
+        };
+        match slot.block.get_or_init(|| self.load(tile)) {
+            Ok(b) => Ok(Arc::clone(b)),
+            Err(e) => {
+                // Not kept: the next reader reads again.
+                let mut shared = self.shared.lock().expect("floor cache mutex");
+                if let Some(at) = shared.iter().position(|(t, s)| *t == tile && Arc::ptr_eq(s, &slot)) {
+                    shared.remove(at);
+                }
+                Err(e.clone())
+            }
+        }
+    }
+}
+
+impl FloorLattice for StoreWetFloorSource<'_> {
+    fn res(&self) -> u32 {
+        self.res
+    }
+
+    fn floor(&self, face: Face, i: u32, j: u32) -> Result<u16, ReadError> {
+        if i > self.res || j > self.res {
+            return Err(ReadError::Source(format!("vertex ({i}, {j}) of a {}-cell grid", self.res)));
+        }
+        let side = 1u32 << self.level;
+        let shift = self.cells.trailing_zeros();
+        let (bx, by) = ((i >> shift).min(side - 1), (j >> shift).min(side - 1));
+        let tile = TileId::new(face, self.level, bx, by).expect("a tile of the grid");
+        let n = self.cells + 1;
+        Ok(self.block(tile)?[((j - by * self.cells) * n + (i - bx * self.cells)) as usize])
+    }
+}
+
+/// One floor block of the store against the channel recomputed from the stored sample and ocean blocks: decode first, a record under
+/// another key stale, a record under the world's key equal code for code.
+fn verify_floor_record(
+    store: &TileStore,
+    world: &GlobalWorld,
+    stored: &crate::pack::Stored,
+    reference: &mut Option<Result<std::collections::HashMap<u64, u16>, String>>,
+    report: &mut VerifyReport,
+) {
+    let r = &stored.record;
+    let where_ = format!("{}: wet-floor block {:#018x} key {} at offset {}", stored.pack, r.tile.raw(), r.key, stored.offset);
+    let (cells, kept) = match decode_floor_block(&r.payload) {
+        Ok(b) => b,
+        Err(e) => {
+            report.unreadable.push(format!("{where_}: {e}"));
+            return;
+        }
+    };
+    let Some(res) = grid_res(r.tile, cells) else {
+        report.unreadable.push(format!("{where_}: {cells} cells per block at level {} is not a grid this build bakes", r.tile.level()));
+        return;
+    };
+    if world.layout(res).ok() != Some((r.tile.level(), cells)) {
+        report.unreadable.push(format!(
+            "{where_}: {cells} cells per block at level {} is not the canonical layout of a {res}-cell grid",
+            r.tile.level()
+        ));
+        return;
+    }
+    let metadata_current = r.generator_version == GLOBAL_VERSION && r.hash_version == HASH_VERSION && r.node_set_id == world.node_set_id;
+    if world.floor_key(r.tile, cells) != r.key {
+        if metadata_current {
+            report.unexplained_stale += 1;
+        } else {
+            report.stale += 1;
+        }
+        return;
+    }
+    let mismatch = |detail: String| Mismatch { tile: r.tile, key: r.key, pack: stored.pack.clone(), offset: stored.offset, detail };
+    if !metadata_current {
+        report.mismatches.push(mismatch(
+            "the key is the world's but the record disagrees with it in its versions or node set id: the record was written wrongly".into(),
+        ));
+        return;
+    }
+    let border = reference.get_or_insert_with(|| {
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+        floor_border_of_store(store, world, res, threads).map_err(|e| e.to_string())
+    });
+    let border = match border {
+        Ok(b) => b,
+        Err(e) => {
+            // Said once, at the first floor block; the others cannot be compared for the same reason.
+            if !e.is_empty() {
+                report.unreadable.push(format!("{where_}: the wet floor cannot be recomputed from the stored blocks: {e}"));
+                *reference = Some(Err(String::new()));
+            }
+            return;
+        }
+    };
+    match stored_floor(store, world, res, r.tile, cells, border) {
+        Err(e) => report.unreadable.push(format!("{where_}: {e}")),
+        Ok(fresh) if fresh == kept => report.matching += 1,
+        Ok(fresh) => {
+            let n = cells + 1;
+            let first = (0..fresh.len()).find(|i| fresh[*i] != kept[*i]).unwrap_or(0);
+            let count = (0..fresh.len()).filter(|i| fresh[*i] != kept[*i]).count();
+            report.mismatches.push(mismatch(format!(
+                "vertex ({}, {}): stored {}, recomputed {}; {count} of {} vertices differ: an input of the wet floor is missing from its key",
+                first as u32 % n,
+                first as u32 / n,
+                kept[first],
+                fresh[first],
+                fresh.len()
+            )));
+        }
+    }
+}
+
 /// One ocean block of the store against the channel recomputed from the stored sample blocks (the sample blocks themselves are
 /// compared with regeneration by [`verify_global`]): the same rules as for sample blocks, decode first, a record under another key
 /// stale, a record under the world's key equal bit for bit.
@@ -1530,6 +1953,7 @@ pub fn verify_global(store: &TileStore, world: &GlobalWorld, sample: usize) -> V
     report.unreadable.extend(store.damaged().iter().map(ToString::to_string));
     // The ocean table of the stored bake, computed once when the first ocean block is checked.
     let mut ocean_reference: Option<Result<OceanTable, String>> = None;
+    let mut floor_reference: Option<Result<std::collections::HashMap<u64, u16>, String>> = None;
     for item in store.sample_records(sample) {
         report.checked += 1;
         let stored = match item {
@@ -1542,6 +1966,10 @@ pub fn verify_global(store: &TileStore, world: &GlobalWorld, sample: usize) -> V
         let r = &stored.record;
         if r.kind == KIND_GLOBAL_OCEAN {
             verify_ocean_record(store, world, &stored, &mut ocean_reference, &mut report);
+            continue;
+        }
+        if r.kind == KIND_GLOBAL_WET_FLOOR {
+            verify_floor_record(store, world, &stored, &mut floor_reference, &mut report);
             continue;
         }
         if r.kind == KIND_GLOBAL_WATER_SUMMARY {

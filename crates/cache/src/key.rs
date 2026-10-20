@@ -78,6 +78,8 @@ pub enum Kind {
     GlobalOcean = 4,
     /// The coarse level of the water field: the summary of a global bake (ADR 0058), one record per bake.
     GlobalWaterSummary = 5,
+    /// A block of the wet-floor channel of the global bake (ADR 0071 point 3): one `u16` code per vertex.
+    GlobalWetFloor = 6,
 }
 
 /// One entry of a read set, in its 128-bit form (ADR 0018).
