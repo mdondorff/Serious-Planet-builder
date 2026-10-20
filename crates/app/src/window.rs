@@ -932,9 +932,10 @@ fn title_text(st: &Running, now_ms: u64) -> String {
         exposure: st.exposure.filter(|_| st.viewer.lit),
         readiness: st.readiness,
     };
+    let input = planet_frame::viewer::input_text(&st.viewer.held, st.viewer.mouse.captured(), st.viewer.globe.is_some());
     match &st.notice {
-        Some((text, until)) if now_ms < *until => format!("{} | {text}", title(&info)),
-        _ => title(&info),
+        Some((text, until)) if now_ms < *until => format!("{} | {input} | {text}", title(&info)),
+        _ => format!("{} | {input}", title(&info)),
     }
 }
 

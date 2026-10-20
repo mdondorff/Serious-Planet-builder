@@ -524,6 +524,35 @@ impl FrameStats {
     }
 }
 
+/// The input state the title ends with, so that a camera that does not answer the keys can be told apart from keys that do not arrive:
+/// the keys the viewer holds down (`W` `A` `S` `D` `Q` `E`, arrows as `<` `>` `^` `v`, `+` for the boost; `-` when none), whether the
+/// pointer is captured for looking around and whether the globe overview is shown.
+pub fn input_text(held: &Held, captured: bool, globe: bool) -> String {
+    let keys: String = [
+        (held.forward, 'W'),
+        (held.left, 'A'),
+        (held.back, 'S'),
+        (held.right, 'D'),
+        (held.down, 'Q'),
+        (held.up, 'E'),
+        (held.look_left, '<'),
+        (held.look_right, '>'),
+        (held.look_up, '^'),
+        (held.look_down, 'v'),
+        (held.boost, '+'),
+    ]
+    .iter()
+    .filter(|(on, _)| *on)
+    .map(|(_, c)| *c)
+    .collect();
+    format!(
+        "keys {} | pointer {}{}",
+        if keys.is_empty() { "-".to_string() } else { keys },
+        if captured { "captured" } else { "free" },
+        if globe { " | overview" } else { "" }
+    )
+}
+
 /// What the title shows.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TitleInfo {
@@ -1281,6 +1310,14 @@ mod tests {
         v.command(Command::ToggleGlobe, 90_000, &c);
         assert!(v.globe.is_some() && v.is_free());
         assert!(KEYS_HELP.contains("globe overview"), "{KEYS_HELP}");
+    }
+
+    // spec: VIEW-034
+    #[test]
+    fn the_title_tells_the_held_keys_the_pointer_and_the_overview() {
+        assert_eq!(input_text(&Held::default(), false, false), "keys - | pointer free");
+        let held = Held { forward: true, left: true, boost: true, look_up: true, ..Held::default() };
+        assert_eq!(input_text(&held, true, true), "keys WA^+ | pointer captured | overview");
     }
 
     // spec: VIEW-034

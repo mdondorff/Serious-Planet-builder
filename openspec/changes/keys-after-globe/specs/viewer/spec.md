@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: VIEW-034 The movement keys are the camera's while the pointer looks around
-While the pointer is captured for looking around, the window SHALL give every key press to the camera and the commands, whether or not a text field of the editor UI has the keyboard focus (`window::key_goes_to_world`), and starting a capture SHALL take the keyboard focus from the widget that has it (`Ui::release_keyboard_focus`), so that a field the user clicked into earlier does not swallow W, A, S, D, Q and E. With the pointer free a key is the camera's unless a text field has the focus, as before. The free camera SHALL move with the movement keys after the overview was shown and left (G and G), with a key held across the overview, and after a click flight landed.
+While the pointer is captured for looking around, the window SHALL give every key press to the camera and the commands, whether or not a text field of the editor UI has the keyboard focus (`window::key_goes_to_world`), and starting a capture SHALL take the keyboard focus from the widget that has it (`Ui::release_keyboard_focus`), so that a field the user clicked into earlier does not swallow W, A, S, D, Q and E. With the pointer free a key is the camera's unless a text field has the focus, as before. The window title SHALL end with the input state (`viewer::input_text`: the keys held, whether the pointer is captured, whether the overview is shown), so that keys that do not arrive can be told from a camera that does not move. The free camera SHALL move with the movement keys after the overview was shown and left (G and G), with a key held across the overview, and after a click flight landed.
 
 Verify: A
 Status: active
