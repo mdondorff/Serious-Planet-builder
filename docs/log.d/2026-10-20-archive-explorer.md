@@ -1,0 +1,1 @@
+- 2026-10-20 **archive-explorer** (sonnet-explorer, opus-planner): `stage-pass-through` archived with `openspec archive` (GEN-027 and STRM-029 enter the main specs: the code was on main, its spec deltas were not) and `shore-ramp-width` archived without a delta (REND-030 and the shore ramp are on main).
