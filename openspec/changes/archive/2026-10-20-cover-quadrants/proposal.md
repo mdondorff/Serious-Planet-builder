@@ -1,0 +1,12 @@
+## Why
+SPIKE-18 (2026-10-19, `spikes/tile-coarsening/results/results.md`): during a slow approach with a turning camera under load, the drawn tiles went one level coarser over a whole area for a few frames. The cause is the cover's split rule: a tile is split only if every child in view is resident, so a tile that was split a frame ago because its sibling was culled is taken back to its parent, one level coarser, the moment the sibling comes into view before it has streamed in (21 of 21 violations: the finer tile still resident, the sibling never resident). The stale-plan path has the same rule in its stand-in: the coarser ancestor covers all finer tiles under it. opus-planner approved the quadrant-mask design (2026-10-20): the parent is drawn over the missing child's quadrant only.
+
+## What Changes
+- **STRM-016 modified**: the cover splits a tile when at least one child in view is resident; the parent stands in over the quadrants of the missing children. A stand-in in the stale-plan path likewise draws only the quadrant that holds the missing node. No part is drawn twice. A node carries a 4-bit quadrant mask (default whole); the terrain and water fragment stages discard the fragments of the quadrants the mask leaves out; the plan text carries the mask only when it is not the whole tile.
+- **Code**: `lod.rs` (`cover_selection_masked`, `quadrant_bit`, `child_index_toward`, `ALL_QUADRANTS`; `cover_selection_bounded` is its tile list), `pipeline.rs` (both draw paths), `terrain.rs` and `terrain_text.rs` (`TerrainDraw.quadrants`), `render` (node record word `origin_rel.w` holds the left-out quadrants, 0 when drawn whole, the cut in `fs`, `fs_lit` and `fs_water`).
+
+## Impact
+- Spec: STRM-016 (modified, streaming-cache). Tests: the failing test of the spike (`one_missing_in_view_tile_does_not_take_its_resident_siblings_back_to_their_parent`), the masks of the cover and the text form (`cover_masks.rs`), the stand-in oracle of the plan path (`pipeline.rs`, updated from the deepest-resident-ancestor rule), the pixels of the quadrants on the screen (`gpu_quadrants.rs`).
+- Goldens: none moves (a node drawn whole has 0 in the record word and takes no branch; every golden frame has every tile whole).
+- The managed loop digest of `scheduler_equivalence` is re-pinned: it hashes the number of nodes of the drawn plan, which now includes a stand-in parent beside its resident children.
+- numerics-reviewer on the shader cut and the 2:1 seams; spec-guardian before archive.

@@ -73,6 +73,8 @@ pub enum ExecError {
     },
     /// The plan asks for the lit path but `TerrainRenderer::enable_lit` was not called.
     LitNotEnabled,
+    /// The test-only reference renderer draws whole tiles; the plan has a node drawn over some quadrants only (STRM-016).
+    PartialNode(planet_core::TileId),
     /// The plan's lit part has values the renderer cannot use (the message names them).
     BadLitPlan(String),
     /// The plan carries an atmosphere but `TerrainRenderer::enable_atmosphere` was not called.
@@ -123,6 +125,9 @@ impl fmt::Display for ExecError {
             }
             ExecError::LitNotEnabled => {
                 write!(f, "the plan carries a lit path but the renderer was not given one; call TerrainRenderer::enable_lit first")
+            }
+            ExecError::PartialNode(id) => {
+                write!(f, "the reference renderer draws whole tiles only, but the plan draws {id:?} over some quadrants")
             }
             ExecError::MissingTile(id) => write!(f, "the plan draws tile {id:?} but no resource for it was supplied"),
             ExecError::BadResource { id, expected, got } => write!(f, "tile {id:?}: expected {expected} height samples, got {got}"),

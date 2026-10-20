@@ -256,4 +256,9 @@ const STREAMER_DIGESTS: [u64; 3] = [15300534013828900970, 689671829587726302, 10
 // Re-pinned by render-floor-3 (STRM-001): the start-up load of the roots is exempt from the upload cap, so frame 0 writes the six roots
 // without spending its allowance on them; the first and third digests (the two that run under the 40,000 B cap) moved, the second (the
 // default cap and 0-byte tiles) is unchanged; the totals of the counters in the log (resident, uploads, evicted) did not move.
-const LOOP_DIGESTS: [u64; 3] = [2897014506584985599, 7816254472082388215, 14080069575126698503];
+// Re-pinned by cover-quadrants (STRM-016): the digest folds the number of nodes of the drawn plan and the node-record bytes of the frame
+// (`node_bytes`, which follows the node count), and the drawn plan now holds a stand-in parent beside its resident children where a tile had
+// not streamed in. The three scripts run with `node_records_in_cap` off, so the node count does not enter the upload allowance; the counters
+// of the log (resident, completed, cancelled, dispatched, uploads, forgets, pending) are the ones they were in all three scripts, checked
+// against the run of the commit before.
+const LOOP_DIGESTS: [u64; 3] = [10745694339025068552, 6922536190839580767, 12789508043266771936];

@@ -20,7 +20,9 @@
 //! Once the camera has been still for as long as a plan takes, the frame draws the synchronous frame's plan, node for
 //! node.
 
-use crate::lod::{cover_selection_bounded, plan_covers_view, LodParams, SelectionCache, TileBounds};
+use crate::lod::{
+    child_index_toward, cover_selection_masked, plan_covers_view, quadrant_bit, LodParams, SelectionCache, TileBounds, ALL_QUADRANTS,
+};
 use crate::plan::{face_mapping_by_id, PlanError, CLEAR_COLOR, HEIGHT_RANGE};
 use crate::prefetch::prefetch_set;
 use crate::preview::PreviewStamp;
@@ -167,6 +169,7 @@ fn draw_of(req: &TerrainRequest, tile: TileId, r: ResidentTile) -> TerrainDraw {
         color: node_color(req.view, tile),
         mesh_key: r.mesh_key,
         preview: false,
+        quadrants: ALL_QUADRANTS,
     }
 }
 
@@ -247,7 +250,9 @@ pub fn draw_plan_edited(
     let mut shown: BTreeMap<TileId, TerrainDraw> = BTreeMap::new();
     let (mut substituted, mut blank) = (0usize, 0usize);
     let mut kind = DrawKind::Cover;
-    let mut cover: Option<Vec<TileId>> = None;
+    let mut cover: Option<Vec<(TileId, u8)>> = None;
+    // The quadrants each stand-in ancestor draws, from the plan nodes it stands in for.
+    let mut stand_in: BTreeMap<TileId, u8> = BTreeMap::new();
     if let Some((base_req, plan)) = base {
         for d in &plan.nodes {
             if resident.resident(d.tile).is_some_and(|r| r.mesh_key == d.mesh_key) && !edited.contains(&d.tile) {
@@ -278,16 +283,27 @@ pub fn draw_plan_edited(
                 Some((a, r)) => {
                     substituted += 1;
                     shown.insert(a, draw_of(req, a, r));
+                    // The stand-in draws the quadrant that holds the missing node (STRM-016): the resident nodes beside it stay.
+                    *stand_in.entry(a).or_insert(0) |= quadrant_bit(child_index_toward(a, d.tile));
                 }
                 None => blank += 1,
             }
         }
-        // The coarser stand-in covers whatever finer tiles of the plan lie under it.
+        // A coarser stand-in covers the finer tiles of the plan that lie under the quadrants it draws.
+        for (a, mask) in &stand_in {
+            if let Some(node) = shown.get_mut(a) {
+                node.quadrants = *mask;
+            }
+        }
         let tiles: Vec<TileId> = shown.keys().copied().collect();
         for t in tiles {
             let mut up = t.parent();
             while let Some(a) = up {
-                if shown.contains_key(&a) {
+                let covers = match stand_in.get(&a) {
+                    Some(mask) => shown.contains_key(&a) && mask & quadrant_bit(child_index_toward(a, t)) != 0,
+                    None => shown.contains_key(&a),
+                };
+                if covers {
                     shown.remove(&t);
                     break;
                 }
@@ -297,7 +313,20 @@ pub fn draw_plan_edited(
         // The plan of exactly this camera serves it by construction; a plan of another camera must cover the frame's view.
         let serves = base_req == req || {
             let c = cover.insert(view_cover(req, map.as_ref(), resident, bounds));
-            blank == 0 && plan_covers_view(map.as_ref(), &req.camera, &req.lod, bounds, c, &shown.keys().copied().collect())
+            let tiles: Vec<TileId> = c.iter().map(|(t, _)| *t).collect();
+            // A tile drawn over some quadrants only draws those children, not the whole tile (STRM-016): the test sees its children.
+            let drawn: BTreeSet<TileId> = shown
+                .iter()
+                .flat_map(|(t, n)| {
+                    if n.quadrants == ALL_QUADRANTS {
+                        vec![*t]
+                    } else {
+                        let kids = t.children().expect("a tile drawn over some quadrants has children");
+                        (0..4).filter(|k| n.quadrants & quadrant_bit(*k) != 0).map(|k| kids[k]).collect()
+                    }
+                })
+                .collect();
+            blank == 0 && plan_covers_view(map.as_ref(), &req.camera, &req.lod, bounds, &tiles, &drawn)
         };
         if serves {
             kind = if base_req == req && substituted == 0 && blank == 0 { DrawKind::Exact } else { DrawKind::Stale };
@@ -307,9 +336,9 @@ pub fn draw_plan_edited(
         }
     }
     if kind == DrawKind::Cover {
-        for t in cover.unwrap_or_else(|| view_cover(req, map.as_ref(), resident, bounds)) {
+        for (t, quadrants) in cover.unwrap_or_else(|| view_cover(req, map.as_ref(), resident, bounds)) {
             let r = resident.resident(t).expect("the cover holds resident tiles only");
-            shown.insert(t, draw_of(req, t, r));
+            shown.insert(t, TerrainDraw { quadrants, ..draw_of(req, t, r) });
         }
     }
     let nodes: Vec<TerrainDraw> = shown.into_values().collect();
@@ -343,8 +372,8 @@ fn previewed(preview: &[PreviewStamp], map: &dyn FaceMapping, tile: TileId, radi
 }
 
 /// The cover of the frame's view over the resident set (the tiles of [`cover_selection_bounded`]).
-fn view_cover(req: &TerrainRequest, map: &dyn FaceMapping, resident: &dyn ResidentSet, bounds: &TileBounds) -> Vec<TileId> {
-    cover_selection_bounded(map, &req.camera, &req.lod, &|t| resident.resident(t).map(|r| r.origin), bounds)
+fn view_cover(req: &TerrainRequest, map: &dyn FaceMapping, resident: &dyn ResidentSet, bounds: &TileBounds) -> Vec<(TileId, u8)> {
+    cover_selection_masked(map, &req.camera, &req.lod, &|t| resident.resident(t).map(|r| r.origin), bounds)
 }
 
 /// What a worker plans over: a height field that is `Send + Sync + 'static`, or anything that can build one inside the job

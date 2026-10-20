@@ -9,7 +9,7 @@ use crate::camera::{Camera, Frustum};
 use planet_core::cube::FaceMapping;
 use planet_core::{Face, PlanetFixed, Side, TileId, Vec3};
 use planet_generators::height::HeightField;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LodParams {
@@ -880,14 +880,13 @@ pub fn cover_selection(
 /// The cover of a view: the plan's own selection with "resident" as the condition for descending, a pure function of the
 /// camera, the LOD parameters, the resident set and the cached tile bounds that evaluates no height field. Walk down from the
 /// resident roots; a tile is split while the plan's LOD test says so (the distance to its volume, below the level's split
-/// distance) and every child that is in view is resident, otherwise it is drawn itself. In view means what the plan means: not
-/// beyond the horizon, not outside the frustum (the padded sphere), not outside the tight cut (the tile's height-bounds
-/// volume, LOD-007/008). A child that the horizon, the frustum or the tight cut culls never stops its parent's descent. The
-/// leaves are then balanced as the plan balances them (the 2:1 rule), where the tiles of the split are resident; a split with a
-/// tile missing is undone. With every tile of the residency set resident the cover equals the plan of the camera, node for node
-/// (the bounds hold the tiles the plan visits). Always a subset of the resident tiles, in ascending tile-id order, with no tile
-/// an ancestor of another. Tiles that `bounds` does not hold are judged by their geometry alone (a looser cull, the
-/// origin-based distance).
+/// distance) and a child that is in view is resident (see [`cover_selection_masked`]: the tile then stands in over the quadrants of
+/// the children that are not), otherwise it is drawn itself. In view means what the plan means: not beyond the horizon, not
+/// outside the frustum (the padded sphere), not outside the tight cut (the tile's height-bounds volume, LOD-007/008). A child that
+/// the horizon, the frustum or the tight cut culls never stops its parent's descent. With every tile of the residency set resident
+/// the cover equals the plan of the camera, node for node (the bounds hold the tiles the plan visits). Always a subset of the
+/// resident tiles, in ascending tile-id order; a tile may lie under another only beside the quadrants the other draws. Tiles that
+/// `bounds` does not hold are judged by their geometry alone (a looser cull, the origin-based distance).
 pub fn cover_selection_bounded(
     map: &dyn FaceMapping,
     camera: &Camera,
@@ -895,6 +894,41 @@ pub fn cover_selection_bounded(
     resident: &dyn Fn(TileId) -> Option<PlanetFixed>,
     bounds: &TileBounds,
 ) -> Vec<TileId> {
+    cover_selection_masked(map, camera, p, resident, bounds).into_iter().map(|(t, _)| t).collect()
+}
+
+/// The bit of child `child_index` (the index in [`TileId::children`]) in a quadrant mask; `ALL_QUADRANTS` is all four.
+pub const fn quadrant_bit(child_index: usize) -> u8 {
+    1 << child_index
+}
+
+/// The mask of a tile drawn whole.
+pub const ALL_QUADRANTS: u8 = 0b1111;
+
+/// The index in [`TileId::children`] of the child of `ancestor` that is `tile` or holds it.
+pub fn child_index_toward(ancestor: TileId, tile: TileId) -> usize {
+    let mut c = tile;
+    while c.parent() != Some(ancestor) {
+        c = c.parent().expect("`ancestor` is an ancestor of `tile`");
+    }
+    ancestor.children().expect("an ancestor has children").iter().position(|x| *x == c).expect("a child of its parent")
+}
+
+/// The cover of a view (STRM-016) as the tiles to draw, each with the quadrants of it to draw ([`ALL_QUADRANTS`] for a tile drawn whole).
+/// As [`cover_selection_bounded`] said before a missing tile no longer took its resident siblings back to their parent: a tile that the
+/// plan's LOD test splits is split when at least one of its children in view is resident; the resident children go on down the walk and
+/// the parent stands in for the in-view children that are not resident, drawn only over their quadrants (its other quadrants are the
+/// children's). A tile with no resident child in view is drawn whole, as before. The leaves, the missing children among them, are
+/// balanced as the plan balances them; a leaf that is not resident is drawn by its nearest resident ancestor over the quadrant that holds
+/// it, and a resident tile under a quadrant an ancestor covers is not drawn (no two drawn parts overlap). With every tile of the
+/// residency set resident every mask is whole and the result is the plan, node for node. Sorted by tile id.
+pub fn cover_selection_masked(
+    map: &dyn FaceMapping,
+    camera: &Camera,
+    p: &LodParams,
+    resident: &dyn Fn(TileId) -> Option<PlanetFixed>,
+    bounds: &TileBounds,
+) -> Vec<(TileId, u8)> {
     let mut view = ViewTest::new(map, camera, p, bounds);
     let mut leaves: BTreeSet<TileId> = BTreeSet::new();
     let mut stack: Vec<TileId> = Vec::new();
@@ -907,39 +941,52 @@ pub fn cover_selection_bounded(
         let origin = resident(t).expect("the walk visits resident tiles only");
         if t.level() < p.max_level && view.distance(t, origin) < p.split_distance(t.level()) {
             let seen: Vec<TileId> = children_of(t).into_iter().filter(|&c| !view.culled(c)).collect();
-            if seen.iter().all(|&c| resident(c).is_some()) {
+            let (here, missing): (Vec<TileId>, Vec<TileId>) = seen.iter().partition(|&&c| resident(c).is_some());
+            if missing.is_empty() {
                 // With every child out of view nothing of the tile can be seen, and the plan draws nothing there either.
                 stack.extend(seen);
+                continue;
+            }
+            if !here.is_empty() {
+                // Some of the children are here: they go on, and the ones that are not stand for themselves as leaves the parent covers.
+                stack.extend(here);
+                leaves.extend(missing);
                 continue;
             }
         }
         leaves.insert(t);
     }
     balance_leaves(map, &mut leaves);
-    // A balancing split whose tiles are not all resident is undone: the nearest resident ancestor stands in (it is a leaf of
-    // the walk or an ancestor of one), and a stand-in covers the finer tiles under it.
-    let mut stand_ins: BTreeSet<TileId> = BTreeSet::new();
+    // A leaf that is not resident (a missing child, or a balancing split) is drawn by the nearest resident ancestor over the quadrant
+    // that holds it (that ancestor is a leaf of the walk or an ancestor of one); a leaf that is resident is drawn whole.
+    let mut drawn: BTreeMap<TileId, u8> = BTreeMap::new();
     for leaf in leaves {
+        if resident(leaf).is_some() {
+            drawn.insert(leaf, ALL_QUADRANTS);
+            continue;
+        }
         let mut x = leaf;
         while resident(x).is_none() {
             x = x.parent().expect("a root of the walk is resident");
         }
-        stand_ins.insert(x);
+        // The ancestor is a standing-in tile that is not itself a leaf: a leaf it was split from by the balancing is a stand-in over all
+        // four quadrants through its four children.
+        *drawn.entry(x).or_insert(0) |= quadrant_bit(child_index_toward(x, leaf));
     }
-    stand_ins
-        .iter()
-        .copied()
-        .filter(|t| {
-            let mut up = t.parent();
-            while let Some(a) = up {
-                if stand_ins.contains(&a) {
-                    return false;
+    // A tile under a quadrant that an ancestor draws is covered by it.
+    let covered = |t: TileId| {
+        let mut up = t.parent();
+        while let Some(a) = up {
+            if let Some(mask) = drawn.get(&a) {
+                if mask & quadrant_bit(child_index_toward(a, t)) != 0 {
+                    return true;
                 }
-                up = a.parent();
             }
-            true
-        })
-        .collect()
+            up = a.parent();
+        }
+        false
+    };
+    drawn.iter().filter(|(t, _)| !covered(**t)).map(|(t, m)| (*t, *m)).collect()
 }
 
 /// Whether a plan that draws `drawn` serves the view of `camera` (STRM-016): it draws every tile of the view's own cover

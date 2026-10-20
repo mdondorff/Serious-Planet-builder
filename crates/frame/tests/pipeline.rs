@@ -5,10 +5,13 @@
 use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::{PlanetFixed, TileId, Vec3};
 use planet_frame::pipeline::*;
-use planet_frame::{cover_selection, plan_terrain_field, scripted_views, Camera, LodParams, TerrainRequest, TerrainView};
+use planet_frame::{
+    child_index_toward, cover_selection, cover_selection_masked, plan_terrain_field, quadrant_bit, scripted_views, Camera, LodParams,
+    TerrainRequest, TerrainView, ALL_QUADRANTS,
+};
 use planet_generators::height::{HeightField, Reference};
 use planet_streaming::{ManualSpawner, Spawner, ThreadPool};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -255,15 +258,24 @@ fn a_plan_node_that_is_not_resident_is_drawn_by_its_deepest_resident_ancestor() 
     let plan_far = plan_terrain_field(&far, &Reference(7)).unwrap();
     let d = draw_plan(&far, Some((&far, &plan_far)), &set).unwrap();
     assert_eq!(d.blank, 0, "roots are resident, so nothing is blank");
-    let drawn: BTreeSet<TileId> = d.plan.nodes.iter().map(|n| n.tile).collect();
-    // Oracle: the set of deepest resident ancestors of the plan's nodes, minus tiles that have an ancestor in the set.
-    let mut expect: BTreeSet<TileId> = BTreeSet::new();
+    let drawn: BTreeMap<TileId, u8> = d.plan.nodes.iter().map(|n| (n.tile, n.quadrants)).collect();
+    // Oracle (STRM-016): a node that is resident with its key is drawn whole; one that is not is drawn by its deepest resident ancestor
+    // over the quadrant that holds it; a tile under a quadrant an ancestor draws is not drawn.
+    let mut expect: BTreeMap<TileId, u8> = BTreeMap::new();
     for n in &plan_far.nodes {
         let resident_exact = set.get(&n.tile).is_some_and(|r| r.mesh_key == n.mesh_key);
-        expect.insert(if resident_exact { n.tile } else { deepest_resident(&set, n.tile).unwrap() });
+        if resident_exact {
+            *expect.entry(n.tile).or_insert(0) |= ALL_QUADRANTS;
+        } else {
+            let a = deepest_resident(&set, n.tile).unwrap();
+            *expect.entry(a).or_insert(0) |= quadrant_bit(child_index_toward(a, n.tile));
+        }
     }
-    let expect: BTreeSet<TileId> =
-        expect.iter().copied().filter(|t| !std::iter::successors(t.parent(), |a| a.parent()).any(|a| expect.contains(&a))).collect();
+    let covered = |t: TileId, m: &BTreeMap<TileId, u8>| {
+        std::iter::successors(t.parent(), |a| a.parent())
+            .any(|a| m.get(&a).is_some_and(|mask| mask & quadrant_bit(child_index_toward(a, t)) != 0))
+    };
+    let expect: BTreeMap<TileId, u8> = expect.iter().filter(|(t, _)| !covered(**t, &expect)).map(|(t, m)| (*t, *m)).collect();
     assert_eq!(drawn, expect);
     assert!(d.substituted > 0 && d.kind == DrawKind::Stale);
     assert!(d.plan.nodes.windows(2).all(|w| w[0].tile < w[1].tile), "ascending tile-id order like every plan");
@@ -293,8 +305,14 @@ fn the_cover_is_the_deepest_resident_tiles_of_the_view_and_never_blank() {
     assert!(cover.iter().all(|t| set.contains_key(t)), "only resident tiles");
     assert!(cover.windows(2).all(|w| w[0] < w[1]));
     let cover_set: BTreeSet<TileId> = cover.iter().copied().collect();
+    // No part is drawn twice: a tile lies under another only beside the quadrants the other draws (STRM-016).
+    let masks: BTreeMap<TileId, u8> =
+        cover_selection_masked(&map, &req.camera, &req.lod, &|t| set.get(&t).map(|r| r.origin), &Default::default()).into_iter().collect();
+    assert_eq!(masks.keys().copied().collect::<Vec<_>>(), cover);
     for t in &cover {
-        assert!(!std::iter::successors(t.parent(), |a| a.parent()).any(|a| cover_set.contains(&a)), "{t:?} lies under another cover tile");
+        let covered = std::iter::successors(t.parent(), |a| a.parent())
+            .any(|a| masks.get(&a).is_some_and(|m| m & quadrant_bit(child_index_toward(a, *t)) != 0));
+        assert!(!covered, "{t:?} lies under a quadrant another cover tile draws");
     }
     // Every node of the full plan is served: by a cover tile above it (or itself) or by cover tiles below it.
     for n in &full.nodes {

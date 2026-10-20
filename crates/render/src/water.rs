@@ -161,6 +161,8 @@ struct WOut {
     @location(2) @interpolate(flat) node_index: u32,
     // The vertex's effective grid spacing (tile spacing times one plus the morph), interpolated: the waves' resolution weight.
     @location(3) spacing: f32,
+    // The position over the tile (the lattice over the tile edge, 0 to 1): the quadrants a node leaves out are cut by it (STRM-016).
+    @location(4) aux: vec2<f32>,
 };
 
 // A water vertex from the terrain vertex: the same grid, LOD and morph; the height is the terrain's morphed height, so water and
@@ -179,6 +181,7 @@ fn water_vertex(t: VsOut) -> WOut {
     out.local = base;
     out.depth = depth;
     out.spacing = spacing;
+    out.aux = t.aux;
     out.node_index = t.node_index;
     return out;
 }
@@ -194,7 +197,7 @@ fn fs_water(in: WOut) -> @location(0) vec4<f32> {
     // The derivative first, in uniform control flow (before the discard).
     let depth_width = WG.b.z * fwidth(in.depth);
     let footprint = max(length(dpdx(in.local)), length(dpdy(in.local)));
-    if (in.depth <= 0.0) {
+    if (in.depth <= 0.0 || quadrant_cut_at(in.node_index, in.aux)) {
         discard;
     }
     let node = nodes[in.node_index];

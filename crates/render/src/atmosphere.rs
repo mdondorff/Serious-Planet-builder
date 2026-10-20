@@ -600,6 +600,15 @@ fn atm_shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: ve
 
 @fragment
 fn fs_lit_atmo(in: VsOut) -> @location(0) vec4<f32> {
+    // The derivatives of the inner function come first; a node drawn over some quadrants discards the rest after them (STRM-016).
+    let c = fs_lit_atmo_view(in);
+    if (CUT_QUADRANTS && quadrant_cut(in)) {
+        discard;
+    }
+    return c;
+}
+
+fn fs_lit_atmo_view(in: VsOut) -> vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
