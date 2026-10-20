@@ -382,6 +382,17 @@ fn the_composite_applies_the_sky_and_the_aerial_perspective_as_the_reference_doe
     }
 }
 
+// spec: ATMO-001, ATMO-021
+#[test]
+fn above_8_km_the_composite_marches_from_the_camera_to_the_terrain_as_the_reference_does() {
+    // Terrain 300 and 600 km along the view axis: far beyond what the volume holds between its texels (SPIKE-20).
+    for (h, mu_sun, terrain_m) in
+        [(8_500.0, 0.5, 120_000.0), (60_000.0, 0.7, 300_000.0), (97_500.0, 0.7, 600_000.0), (97_500.0, 0.2, 300_000.0)]
+    {
+        composite_inside_at(h, mu_sun, terrain_m);
+    }
+}
+
 fn composite_inside(altitude: f64, mu_sun: f64) {
     composite_inside_at(altitude, mu_sun, 8000.0);
 }
@@ -403,6 +414,7 @@ fn composite_inside_at(altitude: f64, mu_sun: f64, terrain_m: f64) {
     r.path.upload_scene(&r.ctx, &scene);
     r.path.upload_depth(&r.ctx, &depth);
     let out = r.path.composite_to_image(&r.ctx);
+    let (round_atm, round_luts) = r.rounded();
     let (mut worst, mut seen_sky, mut seen_geo) = (0.0f64, 0, 0);
     for py in 0..h {
         for px in 0..w {
@@ -410,8 +422,15 @@ fn composite_inside_at(altitude: f64, mu_sun: f64, terrain_m: f64) {
             let got = out[py * w + px];
             let want: [f64; 3] = if px >= w / 2 {
                 seen_geo += 1;
-                let a = g.ap_lookup(&ap, [(px as f64 + 0.5) / w as f64, (py as f64 + 0.5) / h as f64], terrain_m * len);
-                [0, 1, 2].map(|k| f64::from(colour[k]) * a[3] + a[k])
+                if g.uses_camera_march() {
+                    // Above 8 km the composite marches from the camera to the terrain (ATMO-021).
+                    let (mu, cos_vs) = g.view_cosines(dir);
+                    let c = g.camera_ray_cosines(&round_atm, &round_luts, mu, cos_vs, terrain_m * len);
+                    [0, 1, 2].map(|k| f64::from(colour[k]) * c.transmittance[k] + c.radiance[k])
+                } else {
+                    let a = g.ap_lookup(&ap, [(px as f64 + 0.5) / w as f64, (py as f64 + 0.5) / h as f64], terrain_m * len);
+                    [0, 1, 2].map(|k| f64::from(colour[k]) * a[3] + a[k])
+                }
             } else {
                 seen_sky += 1;
                 g.sky_view_lookup(&sky, dir)

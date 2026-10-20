@@ -695,8 +695,8 @@ fn the_orbit_march_starts_on_the_atmosphere_and_the_gpu_word_layout_is_pinned() 
 #[test]
 fn terrain_beyond_the_aerial_perspective_range_is_hazed_the_same_just_inside_and_just_outside_the_top() {
     // SPIKE-17 (atmosphere colour jump): geometry farther than AP_MAX_DISTANCE_M along its ray (the far land at the horizon of a
-    // camera near the top of the atmosphere). Inside the top the frame composites it with the last slice of the aerial-perspective
-    // volume (a 256 km march); outside the top with the orbit march to the geometry. One camera crossing H must not change the
+    // camera near the top of the atmosphere). Inside the top the frame composites it with the march from the camera to the geometry
+    // (above 8 km); outside the top with the orbit march to the geometry. One camera crossing H must not change the
     // colour of the same terrain pixel.
     let (atm, luts) = earth();
     let top = atm.top_m();
@@ -714,15 +714,11 @@ fn terrain_beyond_the_aerial_perspective_range_is_hazed_the_same_just_inside_and
         if t_ground <= AP_MAX_DISTANCE_M * 1.2 {
             continue;
         }
-        // The volume read at the ground's distance, as the composite reads it: linear between the two slices around it (the last slice
-        // beyond the frame's range).
-        let pz = (libm::sqrt(t_ground / inside.ap_range) * AP_D as f64 - 1.0).clamp(0.0, (AP_D - 1) as f64);
-        let z0 = libm::floor(pz) as usize;
-        let (a, b) = (inside.ap_texel(atm, luts, 16, iy, z0), inside.ap_texel(atm, luts, 16, iy, (z0 + 1).min(AP_D - 1)));
-        let fz = pz - z0 as f64;
-        let ap: Vec<f64> = (0..4).map(|k| a[k] + (b[k] - a[k]) * fz).collect();
-        let t_ap = ap[3];
-        let a: Vec<f64> = (0..3).map(|k| land[k] * t_ap + ap[k]).collect();
+        // The camera 1 km inside the top is above 8 km: the composite marches from it to the ground (ATMO-021).
+        assert!(inside.uses_camera_march());
+        let (mu_i, cos_i) = inside.view_cosines(dir);
+        let c = inside.camera_ray_cosines(atm, luts, mu_i, cos_i, t_ground);
+        let a: Vec<f64> = (0..3).map(|k| land[k] * c.transmittance[k] + c.radiance[k]).collect();
         let (mu_o, cos_o) = outside.view_cosines(dir);
         // The outside camera is 2 km higher on the same axis: it sees the same terrain pixel at its own distance (the numerics review of
         // the change found the inside distance used here stopping the march short of the ground by 7 to 34 km).
@@ -749,9 +745,9 @@ fn terrain_beyond_the_aerial_perspective_range_is_hazed_the_same_just_inside_and
         checked += 1;
     }
     assert!(checked >= 3, "{checked} far-terrain rays compared");
-    // 10 %: the measured worst is 7.2 % (32 slices, quadratic to the frame range, about 70 km apart near 300 km); the jump was 95 % with
-    // the 256 km clamp.
-    assert!(worst.0 <= 0.10, "far terrain jumps by {:.1} % across the top of the atmosphere: {}", worst.0 * 100.0, worst.1);
+    // 5 %: the measured worst is 3.5 % (the two cameras are 2 km apart; the difference of the haze itself); it was 7.2 % with the volume
+    // (32 slices, quadratic to the frame range, about 70 km apart near 300 km) and the jump 95 % with the 256 km clamp.
+    assert!(worst.0 <= 0.05, "far terrain jumps by {:.1} % across the top of the atmosphere: {}", worst.0 * 100.0, worst.1);
 }
 
 // spec: ATMO-021, ATMO-007
@@ -773,4 +769,157 @@ fn the_aerial_perspective_range_is_256_km_up_to_5_km_altitude_the_horizon_distan
     assert_eq!(ap_slice_distance(AP_D - 1), AP_MAX_DISTANCE_M, "the base-range function is unchanged");
     assert_eq!(top.words(1.0, 0)[38], top.ap_range as f32);
     assert_eq!(frame_at(atm, 1000.0, 0.5).words(1.0, 0)[38], AP_MAX_DISTANCE_M as f32);
+}
+
+/// A pixel's haze for a ray with the given cosines to the up and to the sun, ground distance and screen position: radiance and
+/// transmittance per channel.
+type Haze<'a> = dyn Fn(f64, f64, f64, [f64; 2]) -> ([f64; 3], [f64; 3]) + 'a;
+
+/// The worst relative error over the rays of the centre column that end on the ground (600 rays from 0.95 to -0.95 of the half
+/// height), of the pixel's haze by `haze(frame, mu, cos_vs, ground distance, uv)` against the converged march of the same ray, for
+/// land of radiance (0.010, 0.012, 0.006) at the ground distance, with the transmittance of the channel or, for the volume (which stores
+/// one mean transmittance), the mean. Returns the worst error and where it is.
+fn worst_haze_error(atm: &Atmosphere, luts: &StaticLuts, f: &FrameGeometry, mean_transmittance: bool, haze: &Haze) -> (f64, String) {
+    let land = [0.010, 0.012, 0.006];
+    let (mut worst, mut at) = (0.0f64, String::new());
+    for k in 0..600 {
+        let b = 0.95 - 1.9 * f64::from(k) / 599.0;
+        let v = [f.fwd[0] + f.upv[0] * b, f.fwd[1] + f.upv[1] * b, f.fwd[2] + f.upv[2] * b];
+        let l = libm::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        let (mu, cos_vs) = f.view_cosines([v[0] / l, v[1] / l, v[2] / l]);
+        let Some(t_g) = distance_to_ground(f.r * mu, f.c) else { continue };
+        let o = RayOrigin { h: f.h, r: f.r, c: f.c, rmu: f.r * mu, r_musun: f.r * f.mu_sun };
+        let limit = distance_to_top(f.r * mu, f.c_top);
+        let m = atm.march(luts, &o, cos_vs, t_g.min(limit), StepLayout::Uniform(2048), Scatter::Physical { cos_gamma: cos_vs });
+        let tm = (m.transmittance[0] + m.transmittance[1] + m.transmittance[2]) / 3.0;
+        let (radiance, trans) = haze(mu, cos_vs, t_g, [0.5, (1.0 - b) / 2.0]);
+        let mut err = 0.0f64;
+        for c in 0..3 {
+            let exact = land[c] * (if mean_transmittance { tm } else { m.transmittance[c] }) + m.radiance[c];
+            let got = land[c] * trans[c] + radiance[c];
+            err = err.max((got - exact).abs() / exact.abs().max(1e-6));
+        }
+        if err > worst {
+            worst = err;
+            at = format!("b {b:.3} ground {:.0} km: {:.2} %", t_g / 1000.0, err * 100.0);
+        }
+    }
+    (worst, at)
+}
+
+fn ap_table(atm: &Atmosphere, luts: &StaticLuts, f: &FrameGeometry) -> Vec<[f64; 4]> {
+    let mut table = vec![[0.0f64; 4]; AP_W * AP_H * AP_D];
+    for iz in 0..AP_D {
+        for iy in 0..AP_H {
+            for ix in 0..AP_W {
+                table[(iz * AP_H + iy) * AP_W + ix] = f.ap_texel(atm, luts, ix, iy, iz);
+            }
+        }
+    }
+    table
+}
+
+// spec: ATMO-007, ATMO-021
+#[test]
+fn above_8_km_the_camera_march_is_within_the_bound_of_the_converged_march_for_every_sun_and_side() {
+    // SPIKE-20: the volume is 18 to 23 % off between its texels at 60 and 97.5 km, 10 % at 14 km. The march from the camera to the geometry
+    // (8 steps by day, 12 in twilight, dense towards the end) is within the bound of ATMO-007 (5 % + 1e-4 per channel) of the converged
+    // march for the sun high, low and below the horizon, towards the sun and away from it (the review of the change: at one sun the
+    // centre column only looks towards it).
+    let (atm, luts) = earth();
+    let land = [0.010, 0.012, 0.006];
+    let mut worst = (0.0f64, String::new());
+    for h in [8_001.0f64, 14_000.0, 20_000.0, 40_000.0, 60_000.0, 97_500.0, 99_500.0] {
+        for mu_sun in [0.7f64, 0.2, 0.1, 0.05, -0.05, -0.08] {
+            for away in [false, true] {
+                let sun = [libm::sqrt(1.0 - mu_sun * mu_sun) * if away { -1.0 } else { 1.0 }, 0.0, mu_sun];
+                let cam = Camera::at_surface_point(
+                    PlanetFixed(Vec3::new(0.0, 0.0, atm.radius_m + h)),
+                    Vec3::new(1.0, 0.0, 0.0),
+                    0.0,
+                    1.0,
+                    1.0,
+                    0.1,
+                );
+                let f = FrameGeometry::new(atm, &cam, sun);
+                assert!(f.uses_camera_march(), "{h} m is above the altitude of the march");
+                assert_eq!(
+                    f.camera_march_steps(),
+                    if mu_sun >= CAMERA_MARCH_TWILIGHT_MU { CAMERA_MARCH_STEPS_DAY } else { CAMERA_MARCH_STEPS_TWILIGHT }
+                );
+                for k in 0..300 {
+                    let b = 0.95 - 1.9 * f64::from(k) / 299.0;
+                    let v = [f.fwd[0] + f.upv[0] * b, f.fwd[1] + f.upv[1] * b, f.fwd[2] + f.upv[2] * b];
+                    let l = libm::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+                    let (mu, cos_vs) = f.view_cosines([v[0] / l, v[1] / l, v[2] / l]);
+                    let Some(t_g) = distance_to_ground(f.r * mu, f.c) else { continue };
+                    let o = RayOrigin { h: f.h, r: f.r, c: f.c, rmu: f.r * mu, r_musun: f.r * f.mu_sun };
+                    let end = t_g.min(distance_to_top(f.r * mu, f.c_top));
+                    let m = atm.march(luts, &o, cos_vs, end, StepLayout::Uniform(2048), Scatter::Physical { cos_gamma: cos_vs });
+                    let r = f.camera_ray_cosines(atm, luts, mu, cos_vs, t_g);
+                    for c in 0..3 {
+                        let want = land[c] * m.transmittance[c] + m.radiance[c];
+                        let got = land[c] * r.transmittance[c] + r.radiance[c];
+                        let excess = (got - want).abs() / (MARCH_REL * want.abs() + 1e-4);
+                        if excess > worst.0 {
+                            worst = (
+                                excess,
+                                format!(
+                                    "h {h}, sun {mu_sun}{}, ground {:.0} km, channel {c}: {got:.5} against {want:.5}",
+                                    if away { " (away)" } else { "" },
+                                    t_g / 1000.0
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    eprintln!("camera march worst excess over the bound {:.2}: {}", worst.0, worst.1);
+    assert!(worst.0 <= 1.0, "the camera march is outside the bound ({:.2} of it): {}", worst.0, worst.1);
+}
+
+// spec: ATMO-007, ATMO-021
+#[test]
+fn above_60_km_the_volume_between_its_texels_is_outside_the_bound_the_camera_march_replaces_it() {
+    let (atm, luts) = earth();
+    for h in [60_000.0f64, 97_500.0, 99_500.0] {
+        let f = frame_at(atm, h, 0.7);
+        let table = ap_table(atm, luts, &f);
+        let (ev, at) = worst_haze_error(atm, luts, &f, true, &|_, _, t, uv| {
+            let a = f.ap_lookup(&table, uv, t);
+            ([a[0], a[1], a[2]], [a[3]; 3])
+        });
+        assert!(ev > MARCH_REL, "{h} m: the volume is within the bound after all ({at}): the march is not needed there");
+    }
+}
+
+/// The bound of the volume between its texels up to 8 km altitude at the high sun (0.7): measured worst 5.63 % (2 km), 3.9 % to 3.0 % elsewhere.
+/// At a low sun it is not within it (17 to 18 % at 2 km with the sun at 0.2 and 0.05; the volume's own weakness, not this change's).
+const VOLUME_BETWEEN_TEXELS_REL: f64 = 0.06;
+
+// spec: ATMO-007, ATMO-021
+#[test]
+fn up_to_8_km_the_volume_between_its_texels_is_within_its_bound_of_the_converged_march() {
+    let (atm, luts) = earth();
+    let mut report = String::new();
+    let mut worst = 0.0f64;
+    for h in [1.0f64, 2_000.0, 5_000.0, 8_000.0] {
+        let f = frame_at(atm, h, 0.7);
+        assert!(!f.uses_camera_march(), "{h} m uses the volume");
+        let table = ap_table(atm, luts, &f);
+        let (e, at) = worst_haze_error(atm, luts, &f, true, &|_, _, t, uv| {
+            let a = f.ap_lookup(&table, uv, t);
+            ([a[0], a[1], a[2]], [a[3]; 3])
+        });
+        report += &format!("h {h}: volume worst {at}\n");
+        worst = worst.max(e);
+    }
+    eprintln!("{report}");
+    assert!(
+        worst <= VOLUME_BETWEEN_TEXELS_REL,
+        "the volume differs from the converged march by up to {:.1} % at or below 8 km:\n{report}",
+        worst * 100.0
+    );
 }

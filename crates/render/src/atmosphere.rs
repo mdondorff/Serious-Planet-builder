@@ -42,6 +42,12 @@ const AP_D: i32 = 32;
 const SKY_STEPS: i32 = 32;
 const ORBIT_STEPS: i32 = 40;
 const AP_MAX_STEPS: i32 = 64;
+// Above this camera altitude (metres) geometry is hazed by a march from the camera, not by the volume (ATMO-021); the CPU values are
+// `CAMERA_MARCH_MIN_ALTITUDE_M`, `CAMERA_MARCH_STEPS_DAY`, `CAMERA_MARCH_STEPS_TWILIGHT` and `CAMERA_MARCH_TWILIGHT_MU`.
+const CAM_MARCH_ALT: f32 = 8000.0;
+const CAM_MARCH_STEPS_DAY: i32 = 8;
+const CAM_MARCH_STEPS_TWILIGHT: i32 = 12;
+const CAM_MARCH_TWILIGHT_MU: f32 = 0.1;
 
 // Atmosphere::static_words (6 vec4) then FrameGeometry::words (10 vec4).
 struct AtmoBlock {
@@ -170,9 +176,13 @@ fn atm_cs_phase(g: f32, c: f32) -> f32 {
     return k * (1.0 + c * c) / (d * sqrt(d));
 }
 
-// The start of step i of n: lay 0 uniform, 1 quadratic.
+// The start of step i of n: lay 0 uniform, 1 quadratic (dense near the origin), 2 dense towards the end.
 fn atm_step_at(lay: i32, s_end: f32, i: i32, n: i32) -> f32 {
     let x = f32(i) / f32(n);
+    if (lay == 2) {
+        let y = 1.0 - x;
+        return s_end * (1.0 - y * y);
+    }
     return select(s_end * f32(i) / f32(n), s_end * x * x, lay == 1);
 }
 
@@ -317,6 +327,23 @@ fn atm_ap_texel(ix: i32, iy: i32, iz: i32) -> vec4<f32> {
     let steps = clamp(2 * (iz + 1), 1, AP_MAX_STEPS);
     let m = atm_march(atm_cam_origin(mu), cos_vs, s_end, 0, steps);
     return vec4<f32>(m.radiance, (m.transmittance.x + m.transmittance.y + m.transmittance.z) / 3.0);
+}
+
+// A ray from the camera inside the atmosphere to geometry at t_geo (>= 0): CAM_MARCH_STEPS_DAY or _TWILIGHT steps from the camera, cut where the
+// ray leaves the atmosphere, dense towards the geometry (ATMO-021; the volume cannot hold the haze of rays that end hundreds
+// of kilometres away).
+fn atm_camera_ray(dir: vec3<f32>, t_geo: f32) -> AtmoMarch {
+    let mu = clamp(dot(dir, A.up.xyz), -1.0, 1.0);
+    let cos_vs = clamp(dot(dir, A.sun.xyz), -1.0, 1.0);
+    let s_end = min(t_geo, atm_dist_to_top(A.cam.y * mu, A.cam.w));
+    if (s_end <= 0.0) {
+        var none: AtmoMarch;
+        none.radiance = vec3<f32>(0.0);
+        none.transmittance = vec3<f32>(1.0);
+        return none;
+    }
+    let steps = select(CAM_MARCH_STEPS_TWILIGHT, CAM_MARCH_STEPS_DAY, A.up.w >= CAM_MARCH_TWILIGHT_MU);
+    return atm_march(atm_cam_origin(mu), cos_vs, s_end, 2, steps);
 }
 
 // A ray from a camera outside the atmosphere: radiance and transmittance up to the geometry (t_geo >= 0), the ground or the exit;
@@ -493,9 +520,15 @@ fn fs(v: V) -> @location(0) vec4<f32> {
     var ap = vec4<f32>(0.0, 0.0, 0.0, 1.0);
     if (inside) {
         if (geometry) {
-            ap = atm_ap_lookup(uv, t_geo);
-            rgb = color.xyz * ap.w + ap.xyz * factor;
-            view_t = vec3<f32>(ap.w);
+            if (A.cam.x > CAM_MARCH_ALT) {
+                let m = atm_camera_ray(dir, t_geo);
+                rgb = color.xyz * m.transmittance + m.radiance * factor;
+                view_t = m.transmittance;
+            } else {
+                ap = atm_ap_lookup(uv, t_geo);
+                rgb = color.xyz * ap.w + ap.xyz * factor;
+                view_t = vec3<f32>(ap.w);
+            }
         } else {
             var l = atm_sky_lookup(dir);
             if (mu > A.cam2.y) {

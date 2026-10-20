@@ -120,3 +120,22 @@ fn the_compact_shader_takes_the_slot_offsets_and_the_normal_scale_from_the_gener
     }
     assert_eq!((SLOT_CLIMATE_OFFSET % 4, SLOT_TEXEL_OFFSET % 4), (0, 0), "offsets are whole words");
 }
+
+// spec: ATMO-021
+#[test]
+fn the_composite_declares_the_altitude_and_the_steps_of_the_cameras_march_from_the_references_constants() {
+    use planet_frame::look::atmosphere::{
+        CAMERA_MARCH_MIN_ALTITUDE_M, CAMERA_MARCH_STEPS_DAY, CAMERA_MARCH_STEPS_TWILIGHT, CAMERA_MARCH_TWILIGHT_MU,
+    };
+    let source = planet_render::atmosphere::composite_shader();
+    let alt = format!("const CAM_MARCH_ALT: f32 = {CAMERA_MARCH_MIN_ALTITUDE_M:.1};");
+    let declared = [
+        alt,
+        format!("const CAM_MARCH_STEPS_DAY: i32 = {CAMERA_MARCH_STEPS_DAY};"),
+        format!("const CAM_MARCH_STEPS_TWILIGHT: i32 = {CAMERA_MARCH_STEPS_TWILIGHT};"),
+        format!("const CAM_MARCH_TWILIGHT_MU: f32 = {CAMERA_MARCH_TWILIGHT_MU:.1};"),
+    ];
+    for line in declared {
+        assert!(source.contains(&line), "the composite declares `{line}`");
+    }
+}

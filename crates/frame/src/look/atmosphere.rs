@@ -65,6 +65,17 @@ pub const ORBIT_STEPS: usize = 40;
 pub const AP_MAX_STEPS: usize = 64;
 /// The distance along the ray of the last aerial-perspective slice; slice `k` is at `AP_MAX_DISTANCE_M * ((k + 1) / 32)^2`.
 pub const AP_MAX_DISTANCE_M: f64 = 256_000.0;
+/// Above this camera altitude (metres) a pixel with geometry is hazed by a march from the camera to the geometry, not by the
+/// aerial-perspective volume: the volume's 32 slices and 32 rows are too coarse for the rays that end hundreds of kilometres away
+/// (ATMO-021, SPIKE-20). The GPU declares the same value (`CAM_MARCH_ALT`).
+pub const CAMERA_MARCH_MIN_ALTITUDE_M: f64 = 8_000.0;
+/// Steps of that march, dense towards the geometry's end (where the air is thickest): [`CAMERA_MARCH_STEPS_DAY`] while the sun's cosine to
+/// the up is at least [`CAMERA_MARCH_TWILIGHT_MU`], [`CAMERA_MARCH_STEPS_TWILIGHT`] below it, where the light crosses the planet's shadow
+/// along the ray and fewer steps leave the 5 % of ATMO-007 (the sweep over suns and azimuths, `tests/atmosphere.rs`). The GPU declares
+/// the same values (`CAM_MARCH_STEPS_DAY`, `CAM_MARCH_STEPS_TWILIGHT`, `CAM_MARCH_TWILIGHT_MU`).
+pub const CAMERA_MARCH_STEPS_DAY: usize = 8;
+pub const CAMERA_MARCH_STEPS_TWILIGHT: usize = 12;
+pub const CAMERA_MARCH_TWILIGHT_MU: f64 = 0.1;
 
 /// Valid ranges of the look values (the spec LOOK-001 states them).
 pub const COEFFICIENT_LIMITS: (f64, f64) = (0.0, 1.0e-3);
@@ -649,12 +660,14 @@ pub enum StepLayout {
     Uniform(usize),
     /// `n` steps whose boundaries are `s_end (i / n)^2`: dense near the origin.
     Quadratic(usize),
+    /// `n` steps whose boundaries are `s_end (1 - (1 - i / n)^2)`: dense near the far end of the march.
+    EndDense(usize),
 }
 
 impl StepLayout {
     pub fn count(self) -> usize {
         match self {
-            StepLayout::Uniform(n) | StepLayout::Quadratic(n) => n,
+            StepLayout::Uniform(n) | StepLayout::Quadratic(n) | StepLayout::EndDense(n) => n,
         }
     }
 
@@ -666,6 +679,13 @@ impl StepLayout {
                 let f = |k: usize| {
                     let x = k as f64 / n as f64;
                     s_end * x * x
+                };
+                (f(i), f(i + 1))
+            }
+            StepLayout::EndDense(n) => {
+                let f = |k: usize| {
+                    let x = 1.0 - k as f64 / n as f64;
+                    s_end * (1.0 - x * x)
                 };
                 (f(i), f(i + 1))
             }
@@ -1286,6 +1306,45 @@ impl FrameGeometry {
         let m = atm.march(luts, &o, cos_vs, s_end, StepLayout::Uniform(ORBIT_STEPS), Scatter::Physical { cos_gamma: cos_vs });
         let ground_mu_sun = ((o.r_musun + s_end * cos_vs) / big_r).clamp(-1.0, 1.0);
         OrbitRay { radiance: m.radiance, transmittance: m.transmittance, reaches_ground, ground_mu_sun, enters: true }
+    }
+}
+
+/// What the march of one ray from a camera inside the atmosphere returns (radiance and transmittance up to the geometry or the exit).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CameraRay {
+    pub radiance: [f64; 3],
+    pub transmittance: [f64; 3],
+}
+
+impl FrameGeometry {
+    /// Whether a pixel with geometry is hazed by [`FrameGeometry::camera_ray_cosines`] and not by the volume (ATMO-021): the camera is
+    /// inside the atmosphere above [`CAMERA_MARCH_MIN_ALTITUDE_M`].
+    pub fn uses_camera_march(&self) -> bool {
+        self.h > CAMERA_MARCH_MIN_ALTITUDE_M
+    }
+
+    /// The steps of [`FrameGeometry::camera_ray_cosines`] in this frame (by the sun's height).
+    pub fn camera_march_steps(&self) -> usize {
+        if self.mu_sun >= CAMERA_MARCH_TWILIGHT_MU {
+            CAMERA_MARCH_STEPS_DAY
+        } else {
+            CAMERA_MARCH_STEPS_TWILIGHT
+        }
+    }
+
+    /// The haze of geometry at distance `t_geo` along a ray from the camera inside the atmosphere with the given cosines to the up and to
+    /// the sun: [`FrameGeometry::camera_march_steps`] steps from the camera to the geometry, dense towards its end, cut where the ray
+    /// leaves the atmosphere.
+    pub fn camera_ray_cosines(&self, atm: &Atmosphere, luts: &StaticLuts, mu: f64, cos_vs: f64, t_geo: f64) -> CameraRay {
+        let limit = distance_to_top(self.r * mu, self.c_top);
+        let s_end = t_geo.min(limit);
+        if s_end <= 0.0 {
+            return CameraRay { radiance: [0.0; 3], transmittance: [1.0; 3] };
+        }
+        let o = self.origin(mu);
+        let m =
+            atm.march(luts, &o, cos_vs, s_end, StepLayout::EndDense(self.camera_march_steps()), Scatter::Physical { cos_gamma: cos_vs });
+        CameraRay { radiance: m.radiance, transmittance: m.transmittance }
     }
 }
 
