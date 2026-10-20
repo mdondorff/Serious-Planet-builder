@@ -11,6 +11,7 @@ pub mod footprint;
 pub mod item;
 pub mod item_id;
 pub mod item_store;
+pub mod region;
 pub mod revision;
 pub mod stamp;
 pub mod summary;
@@ -209,6 +210,10 @@ fn stamp_refusal(spec: &ItemSpec, stamp: &stamp::Stamp, radius_m: f64) -> Option
                 spec.reach_m
             ));
         }
+    } else if stamp.kind.is_region() {
+        if let Some(why) = region_refusal(spec, &p, &points, radius_m) {
+            return Some(why);
+        }
     } else if !points.is_empty() {
         return Some(format!("a {name} takes no points"));
     }
@@ -224,6 +229,54 @@ fn stamp_refusal(spec: &ItemSpec, stamp: &stamp::Stamp, radius_m: f64) -> Option
         }
         _ => None,
     }
+}
+
+/// Why a region is refused, if it is (WDEF-012): the points, the polygon, the reach, the surface type and the mask mode. The content hash is
+/// not checked here ([`stamp_refusal`] does that for a region too: a region has no height rule beyond these).
+fn region_refusal(spec: &ItemSpec, p: &[f64; 3], points: &[Vec3], radius_m: f64) -> Option<String> {
+    if !(3..=stamp::MAX_POINTS).contains(&points.len()) {
+        return Some(format!("a region has 3 to {} points, got {}", stamp::MAX_POINTS, points.len()));
+    }
+    let anchor = spec.dir.normalized();
+    if points.iter().any(|q| !(q.x.is_finite() && q.y.is_finite() && q.z.is_finite()) || (q.length() - 1.0).abs() > 1e-9) {
+        return Some("the points of a region must be unit directions".to_string());
+    }
+    if footprint::angle_between(anchor, points[0]) > 1e-9 {
+        return Some("the first point of a region must be the item's anchor".to_string());
+    }
+    let n = points.len();
+    if (0..n).any(|i| points[i] == points[(i + 1) % n]) {
+        return Some("two consecutive points of a region coincide".to_string());
+    }
+    let far = points.iter().map(|q| footprint::angle_between(anchor, *q) * radius_m).fold(0.0f64, f64::max);
+    if far > spec.reach_m {
+        return Some(format!(
+            "a region reaches {far} m from its anchor, above its reach of {} m (a region is limited to one reach, {} m)",
+            spec.reach_m,
+            cells::CELL_EDGE_M
+        ));
+    }
+    let whole = |v: f64| v.fract() == 0.0;
+    if !(whole(p[0]) && p[0] >= 0.0 && (p[0] as usize) < region::SURFACE_TYPES.len()) {
+        return Some(format!(
+            "the surface type {} of a region is not an index of the table (0 to {})",
+            p[0],
+            region::SURFACE_TYPES.len() - 1
+        ));
+    }
+    if !whole(p[1]) || !(0.0..=2.0).contains(&p[1]) {
+        return Some(format!("the mask mode {} of a region is not 0 (none) or 2 (clip inside)", p[1]));
+    }
+    if p[1] == 1.0 {
+        return Some(
+            "the mask mode 1 (clip outside) is not available: it needs the region in the read set of every tile of its layer, which the footprint does not give yet"
+                .to_string(),
+        );
+    }
+    if region::polygon_self_intersects(points) {
+        return Some("the polygon of a region crosses itself".to_string());
+    }
+    None
 }
 
 /// `-0.0` read as `0.0`, as bits (WDEF-003).

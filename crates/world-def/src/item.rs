@@ -346,6 +346,16 @@ impl Item {
             }
             _ => {}
         }
+        // The layer a region clips: required for the mode 2 (clip inside) and not given for the mode 0 (WDEF-012).
+        if region {
+            let mode = self.params.get("mask_mode").copied().unwrap_or(0.0);
+            if mode == 2.0 && self.mask_layer.is_none() {
+                return Err(err("mask_layer", "a region that clips (mask_mode 2) needs the layer it clips"));
+            }
+            if mode == 0.0 && self.mask_layer.is_some() {
+                return Err(err("mask_layer", "a region with mask_mode 0 clips nothing and has no mask layer"));
+            }
+        }
         Ok(())
     }
 
@@ -428,7 +438,16 @@ impl Item {
         // field that changes no output (the name, the versions recorded) re-keys nothing. Any other kind has no height output of its own
         // and keeps the file hash.
         match crate::stamp::Stamp::from_file(&self.kind, &self.params) {
-            Ok(Some(stamp)) => spec.with_stamp(stamp.with_points(&self.point_directions())),
+            Ok(Some(stamp)) => {
+                let mut spec = spec;
+                // A region that clips (mode 2) is filed in the layer it clips, so the footprint of that layer's tiles returns it (WDEF-012).
+                if stamp.kind.is_region() && stamp.params()[1] == 2.0 {
+                    if let Some(layer) = &self.mask_layer {
+                        spec.layer = layer.clone();
+                    }
+                }
+                spec.with_stamp(stamp.with_points(&self.point_directions()))
+            }
             _ => spec,
         }
     }
