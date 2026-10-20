@@ -105,15 +105,21 @@ fn ring(dir: Vec3, angle: f64) -> [Vec3; 8] {
     out
 }
 
+/// What the smooth strokes of a layer have done at one point, over all its brush items (GEN-030): the sum of their deltas, the means of the
+/// rings already read by radius (strokes of one radius share their ring), and the base at the point. One drag of the editor is one item, so
+/// the count runs over the items: each pulls towards the mean of the procedural base, and what an earlier item moved is not moved again.
+#[derive(Default)]
+struct SmoothState {
+    smoothed: f64,
+    rings: Vec<(u64, f64)>,
+    b: Option<f64>,
+}
+
 /// The running height after the strokes of a brush `stamp` (GEN-030) at `dir`, from `h`; `base_at` reads the procedural base (the field below
 /// every authored layer: its key is field-wide, ADR 0066 point 4) at the point and on a smooth's ring. A stroke the point is beyond changes
 /// nothing, bits included.
-fn apply_brush(stamp: &Stamp, radius_m: f64, dir: Vec3, mut h: f64, base_at: &dyn Fn(Vec3) -> f64) -> f64 {
-    // The smooth part of the item so far (the sum of the deltas of its smooth strokes) and the means of the rings already read at this point,
-    // by radius: strokes of one radius share their ring.
-    let mut smoothed = 0.0f64;
-    let mut rings: Vec<(u64, f64)> = Vec::new();
-    let mut b: Option<f64> = None;
+fn apply_brush(stamp: &Stamp, radius_m: f64, dir: Vec3, mut h: f64, base_at: &dyn Fn(Vec3) -> f64, smooth: &mut SmoothState) -> f64 {
+    let SmoothState { smoothed, rings, b } = smooth;
     for s in stamp.strokes() {
         let (radius, strength) = (s.radius_m(), s.strength_m());
         // The stroke's disc first: a point beyond its first point's spread plus its radius is beyond the stroke (one angle, not one per arc). An arc
@@ -145,8 +151,8 @@ fn apply_brush(stamp: &Stamp, radius_m: f64, dir: Vec3, mut h: f64, base_at: &dy
                 let here = *b.get_or_insert_with(|| base_at(dir));
                 // Towards the mean of the base round the point by at most the strength, and not past it: what the item's earlier smooth strokes
                 // moved is taken off the distance, so repeated passes converge on the mean instead of piling up.
-                let d = w * ((mean - here) - smoothed).clamp(-strength, strength);
-                smoothed += d;
+                let d = w * ((mean - here) - *smoothed).clamp(-strength, strength);
+                *smoothed += d;
                 d
             }
         };
@@ -157,21 +163,14 @@ fn apply_brush(stamp: &Stamp, radius_m: f64, dir: Vec3, mut h: f64, base_at: &dy
     h
 }
 
-/// The range of the delta a brush stroke adds at any point of `cap` (GEN-030): the weight is non-increasing in the distance, so the nearest
-/// and the farthest distance of the cap from the stroke bound it. Widened as the lines' are.
-fn stroke_range(s: &planet_world_def::stamp::StrokeBits, cap: Cap, radius_m: f64) -> (f64, f64) {
+/// The weight of a stroke at its nearest and at its farthest point of `cap` (the weight is non-increasing in the distance, so these bound it).
+fn stroke_weights(s: &planet_world_def::stamp::StrokeBits, cap: Cap, radius_m: f64) -> (f64, f64) {
     let slack = 16.0 * f64::EPSILON;
     let d = stroke_angle(s.points_bits(), cap.centre);
     let radius = s.radius_m();
     let x_near = ((d - cap.angle - slack).max(0.0) * radius_m / radius * (1.0 - 1e-9)).max(0.0);
     let x_far = (d + cap.angle + slack) * radius_m / radius * (1.0 + 1e-9);
-    let (w_near, w_far) = (stroke_weight(x_near), stroke_weight(x_far));
-    let strength = s.strength_m();
-    match s.kind {
-        BrushKind::Raise => (strength * w_far, strength * w_near),
-        BrushKind::Lower => (-strength * w_near, -strength * w_far),
-        BrushKind::Smooth | BrushKind::Flatten => (-strength * w_near, strength * w_near),
-    }
+    (stroke_weight(x_near), stroke_weight(x_far))
 }
 
 /// The delta of `stamp` at `x` for the running height `h` and the item's bound `m`. The lines are not applied here: their distance is
@@ -187,10 +186,21 @@ pub fn stamp_delta(stamp: &Stamp, m: f64, h: f64, x: f64) -> f64 {
     }
 }
 
-/// The range `(lo, hi)` of the delta `item` can add at any point of `cap` (GEN-026), widened outward by a few ulps. The profiles are
-/// monotone in `x` (the hill, the bowl, the plateau weight), so the range comes from the nearest and the farthest distance of the cap
-/// from the anchor; a crater whose cap reaches its rim takes the rim's maximum, and a plateau is bounded by its weight at the nearest
-/// distance times the item's bound. An item that is no stamp adds nothing.
+/// The nearest and the farthest `x = distance / reach` of `cap` from the anchor of a radial `item`: the angles widen outward by a few ulps of
+/// a radian (an angle from `atan2` is wrong by about that much however short the reach), then the distances by a relative 1e-9: the profile
+/// argument is rounded.
+fn radial_x(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
+    let reach = f64::from_bits(item.reach_bits);
+    let d = angle_between(anchor_of(item), cap.centre);
+    let to_x = |angle: f64| angle * radius_m / reach;
+    let slack = 16.0 * f64::EPSILON;
+    ((to_x((d - cap.angle - slack).max(0.0)) * (1.0 - 1e-9)).max(0.0), (to_x(d + cap.angle + slack) * (1.0 + 1e-9)).min(1.0))
+}
+
+/// The range `(lo, hi)` of the delta a hill, a crater or a line `item` can add at any point of `cap` (GEN-026), widened outward by a few
+/// ulps. The profiles are monotone in `x` (the hill, the bowl, the line's profile), so the range comes from the nearest and the farthest
+/// distance of the cap from the anchor or the polyline; a crater whose cap reaches its rim takes the rim's maximum. An item that is no stamp
+/// adds nothing; a plateau and a brush map the running height instead and are not ranged here (`HeightRange`).
 fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
     let Some(stamp) = &item.stamp else { return (0.0, 0.0) };
     if stamp.kind.is_region() {
@@ -199,16 +209,6 @@ fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
     }
     let m = f64::from_bits(item.max_delta_bits);
     let grow = |x: f64| x.abs() * 8.0 * f64::EPSILON;
-    if stamp.kind.is_brush() {
-        // The sum over the strokes of the range each can add (GEN-030), widened as the radial stamps' are.
-        let (mut lo, mut hi) = (0.0f64, 0.0f64);
-        for s in stamp.strokes() {
-            let (a, b) = stroke_range(s, cap, radius_m);
-            lo += a;
-            hi += b;
-        }
-        return ((lo - grow(lo)).max(-m - grow(m)), (hi + grow(hi)).min(m + grow(m)));
-    }
     if stamp.kind.is_line() {
         // The profile is monotone in the distance to the polyline: the nearest and the farthest distance of the cap bound the range
         // (GEN-028), widened as the radial stamps' are.
@@ -224,14 +224,7 @@ fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
         };
         return ((lo - grow(lo)).max(-m - grow(m)), (hi + grow(hi)).min(m + grow(m)));
     }
-    let reach = f64::from_bits(item.reach_bits);
-    let d = angle_between(anchor_of(item), cap.centre);
-    let to_x = |angle: f64| angle * radius_m / reach;
-    // The angles widen outward by a few ulps of a radian (an angle from `atan2` is wrong by about that much however short the reach),
-    // then the distances by a relative 1e-9: the profile argument is rounded.
-    let slack = 16.0 * f64::EPSILON;
-    let x_min = (to_x((d - cap.angle - slack).max(0.0)) * (1.0 - 1e-9)).max(0.0);
-    let x_max = (to_x(d + cap.angle + slack) * (1.0 + 1e-9)).min(1.0);
+    let (x_min, x_max) = radial_x(item, cap, radius_m);
     let a = stamp.params()[0];
     let (lo, hi) = match stamp.kind {
         StampKind::Hill => {
@@ -249,12 +242,8 @@ fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
                 (bowl.min(rim), bowl.max(rim))
             }
         }
-        StampKind::Plateau => {
-            let w = plateau_weight(x_min) * m;
-            (-w, w)
-        }
-        StampKind::Ridge | StampKind::Channel | StampKind::Region | StampKind::Brush => {
-            unreachable!("the lines, the regions and the brushes returned above")
+        StampKind::Plateau | StampKind::Ridge | StampKind::Channel | StampKind::Region | StampKind::Brush => {
+            unreachable!("the plateaus and the brushes map the running height (`HeightRange`), the lines and the regions returned above")
         }
     };
     ((lo - grow(lo)).max(-m - grow(m)), (hi + grow(hi)).min(m + grow(m)))
@@ -286,6 +275,7 @@ pub fn apply_stamps_with(items: &[FootprintItem], radius_m: f64, dir: Vec3, base
         }
     }
     let mut h = base;
+    let mut smooth = SmoothState::default();
     // The lines are combined after the point stamps: the largest ridge and the smallest channel at the point (GEN-028), so the result does
     // not depend on the order of the lines and overlapping parts of a line do not add up.
     let (mut ridge, mut channel) = (0.0f64, 0.0f64);
@@ -307,7 +297,7 @@ pub fn apply_stamps_with(items: &[FootprintItem], radius_m: f64, dir: Vec3, base
                 channel = channel.min(channel_delta(amount, xl));
             }
         } else if stamp.kind.is_brush() {
-            h = apply_brush(stamp, radius_m, dir, h, base_at);
+            h = apply_brush(stamp, radius_m, dir, h, base_at, &mut smooth);
         } else {
             h += stamp_delta(stamp, f64::from_bits(item.max_delta_bits), h, x);
         }
@@ -337,6 +327,49 @@ pub trait ItemReader: Send + Sync {
     fn revision(&self) -> u64;
     /// Whether no item of `layer` touches `tile` with `halo` (WDEF-007): the footprint the tile declares is empty.
     fn footprint_empty(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> bool;
+}
+
+/// The range of the running height of a stage at the points of a cap, carried through the items in the order the stage applies them
+/// (GEN-026): an item that adds a delta independent of the height widens it by the delta's range; an item that pulls the height towards a
+/// target (a plateau, a flatten stroke) maps it, and its map is monotone in the height, so the images of the ends are the ends of the image.
+/// `mag` is the largest magnitude met on the way (the rounding of the stage's additions is a few ulps of it).
+struct HeightRange {
+    lo: f64,
+    hi: f64,
+    mag: f64,
+    ops: usize,
+}
+
+impl HeightRange {
+    fn new(lo: f64, hi: f64) -> HeightRange {
+        HeightRange { lo, hi, mag: lo.abs().max(hi.abs()), ops: 0 }
+    }
+
+    /// The height plus a delta in `[a, b]`.
+    fn add(&mut self, a: f64, b: f64) {
+        // A delta of 0 leaves the bits alone: with no item in reach the range is the base's, exactly.
+        if a == 0.0 && b == 0.0 {
+            return;
+        }
+        self.lo += a;
+        self.hi += b;
+        self.touch(a.abs().max(b.abs()));
+    }
+
+    /// The height after `h + w * clamp(target - h, -m, m)` for a weight `w` in `[w_lo, w_hi]`: for a fixed `w` the map is non-decreasing in
+    /// `h` (its slope is `1 - w` or 1), and for a fixed `h` it is linear in `w`, so the range comes from the ends of both.
+    fn seek(&mut self, target: f64, m: f64, w_lo: f64, w_hi: f64) {
+        let f = |w: f64, h: f64| h + w * (target - h).clamp(-m, m);
+        let (lo, hi) = (f(w_lo, self.lo).min(f(w_hi, self.lo)), f(w_lo, self.hi).max(f(w_hi, self.hi)));
+        self.touch(target.abs().max((target - self.lo).abs()).max((target - self.hi).abs()));
+        self.lo = lo;
+        self.hi = hi;
+    }
+
+    fn touch(&mut self, m: f64) {
+        self.ops += 1;
+        self.mag = self.mag.max(self.lo.abs()).max(self.hi.abs()).max(m);
+    }
 }
 
 impl ItemReader for WorldDefinition {
@@ -403,7 +436,7 @@ pub struct StampStage<'a> {
 }
 
 /// The version of the stamp stage (bumped whenever its output changes, ADR 0006): part of the key of every stamped tile.
-pub const STAMP_STAGE_VERSION: u32 = 3;
+pub const STAMP_STAGE_VERSION: u32 = 4;
 
 /// The implementation id of the stamp stage in height keys.
 pub const STAMP_STAGE_ID: &str = "stamp-stage";
@@ -542,42 +575,95 @@ impl HeightField for StampStage<'_> {
         let cap = Cap { centre, angle: angular_radius };
         let radius_m = self.items.radius_m(self.body).expect("a stage reads a body that has a radius");
         let items = self.items.items(self.body, &self.layer, cap);
-        // The deltas the stamps can add inside the cap, not their declared maxima: a cap on the flat top of a hill moves up as a whole and
-        // keeps its extent, which is what the morph interval of a fine tile needs (GEN-026).
-        let (mut dlo, mut dhi, mut mag) = (0.0f64, 0.0f64, 0.0f64);
+        // The range of the running height through the items in their order, not the sum of what each can add and not their declared maxima:
+        // a plateau adds the gap between its target and the ground, which is nearly one number over a fine tile whatever its bound (a cap on the
+        // flat top of a hill moves up as a whole and keeps its extent, which is what the morph interval of a fine tile needs, GEN-026).
+        let mut run = HeightRange::new(lo, hi);
         // The lines are not summed: the stage adds the largest ridge and the smallest channel (GEN-028), so the ridges' range is the
         // largest of their lows and highs (floored at 0) and the channels' the smallest (capped at 0).
         let (mut ridge_lo, mut ridge_hi, mut channel_lo, mut channel_hi) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+        // The smooth strokes of a run (no pulling item in between) add at most what their strengths and weights allow and at most the width of
+        // the range their count can take, `smooth_width` (below): what the strokes of the layer moved never passes the mean of the base.
+        let smooth_width = {
+            let widest = items
+                .iter()
+                .filter_map(|i| i.stamp.as_ref())
+                .flat_map(|s| s.strokes().iter())
+                .filter(|s| s.kind == planet_world_def::stamp::BrushKind::Smooth)
+                .map(|s| s.radius_m())
+                .fold(0.0f64, f64::max);
+            (widest > 0.0).then(|| self.smooth_width(cap, radius_m, widest))
+        };
+        let (mut run_lo, mut run_hi) = (0.0f64, 0.0f64);
+        let flush = |run: &mut HeightRange, run_lo: &mut f64, run_hi: &mut f64| {
+            if let Some(w) = smooth_width {
+                run.add((*run_lo).max(-w), (*run_hi).min(w));
+            }
+            (*run_lo, *run_hi) = (0.0, 0.0);
+        };
         for item in &items {
-            let (a, b) = delta_range(item, cap, radius_m);
-            match item.stamp.as_ref().map(|s| s.kind) {
-                Some(StampKind::Ridge) => {
-                    ridge_lo = ridge_lo.max(a);
-                    ridge_hi = ridge_hi.max(b);
+            let Some(stamp) = item.stamp.as_ref() else { continue };
+            match stamp.kind {
+                StampKind::Ridge | StampKind::Channel => {
+                    let (a, b) = delta_range(item, cap, radius_m);
+                    if stamp.kind == StampKind::Ridge {
+                        ridge_lo = ridge_lo.max(a);
+                        ridge_hi = ridge_hi.max(b);
+                    } else {
+                        channel_lo = channel_lo.min(a);
+                        channel_hi = channel_hi.min(b);
+                    }
                 }
-                Some(StampKind::Channel) => {
-                    channel_lo = channel_lo.min(a);
-                    channel_hi = channel_hi.min(b);
+                StampKind::Region => {}
+                StampKind::Hill | StampKind::Crater => {
+                    let (a, b) = delta_range(item, cap, radius_m);
+                    run.add(a, b);
                 }
-                _ => {
-                    dlo += a;
-                    dhi += b;
+                StampKind::Plateau => {
+                    flush(&mut run, &mut run_lo, &mut run_hi);
+                    let (x_min, x_max) = radial_x(item, cap, radius_m);
+                    let m = f64::from_bits(item.max_delta_bits);
+                    run.seek(stamp.params()[0], m, plateau_weight(x_max), plateau_weight(x_min));
+                }
+                StampKind::Brush => {
+                    use planet_world_def::stamp::BrushKind;
+                    for st in stamp.strokes() {
+                        let (w_near, w_far) = stroke_weights(st, cap, radius_m);
+                        let strength = st.strength_m();
+                        match st.kind {
+                            BrushKind::Raise => run.add(strength * w_far, strength * w_near),
+                            BrushKind::Lower => run.add(-strength * w_near, -strength * w_far),
+                            BrushKind::Smooth => {
+                                // Each stroke of the run rounds once when the stage adds it, whatever the run is added as here.
+                                run.ops += 1;
+                                run_lo -= strength * w_near;
+                                run_hi += strength * w_near;
+                            }
+                            BrushKind::Flatten => {
+                                flush(&mut run, &mut run_lo, &mut run_hi);
+                                run.seek(st.target_m(), strength, w_far, w_near);
+                            }
+                        }
+                    }
                 }
             }
-            mag += a.abs().max(b.abs());
         }
-        dlo += ridge_lo + channel_lo;
-        dhi += ridge_hi + channel_hi;
-        // A region of mode 2 among the items may cut every delta of the layer at a point of the cap (GEN-029): the height there has no delta
-        // at all, so the range holds 0 as well.
+        flush(&mut run, &mut run_lo, &mut run_hi);
+        // The ridge and the channel are two additions in the stage.
+        if ridge_lo + channel_lo != 0.0 || ridge_hi + channel_hi != 0.0 {
+            run.ops += 1;
+        }
+        run.add(ridge_lo + channel_lo, ridge_hi + channel_hi);
+        let (mut out_lo, mut out_hi) = (run.lo, run.hi);
+        // A region of mode 2 among the items may cut every delta of the layer at a point of the cap (GEN-029): the height there is the base's,
+        // so the range holds the base's as well.
         if items.iter().any(|i| i.stamp.as_ref().is_some_and(|s| s.kind.is_region() && s.params()[1] == 2.0)) {
-            dlo = dlo.min(0.0);
-            dhi = dhi.max(0.0);
+            out_lo = out_lo.min(lo);
+            out_hi = out_hi.max(hi);
         }
-        // Each addition of the running height rounds by at most one ulp of the largest magnitude involved.
-        let ops: usize = items.iter().map(|i| 1 + i.stamp.as_ref().map_or(0, |s| s.strokes().len())).sum();
-        let slack = ops as f64 * (lo.abs().max(hi.abs()) + mag) * f64::EPSILON * 2.0 + (dlo.abs() + dhi.abs()) * 8.0 * f64::EPSILON;
-        (lo + dlo - slack, hi + dhi + slack)
+        // Each step of the running height rounds by at most a few ulps of the largest magnitude involved.
+        let slack = run.ops as f64 * run.mag * f64::EPSILON * 4.0 + ((out_lo - lo).abs() + (out_hi - hi).abs()) * 8.0 * f64::EPSILON;
+        (out_lo - slack, out_hi + slack)
     }
 
     fn water_cull_level(&self) -> Option<f64> {
@@ -613,6 +699,23 @@ impl HeightField for StampStage<'_> {
 }
 
 impl StampStage<'_> {
+    /// The width of the range that the deltas of a run of smooth strokes can sum to over `cap` (GEN-030): a smooth moves the point towards the
+    /// mean of the procedural base on a ring (`widest_m` the largest radius) and never past it, and what the strokes of the layer moved together
+    /// stays between 0 and the distance `d` to that mean, so a run adds at most `max(0, d_hi) - min(0, d_lo)`, with `d` from the bounds of the
+    /// base over the cap and over the cap widened by the ring.
+    fn smooth_width(&self, cap: Cap, radius_m: f64, widest_m: f64) -> f64 {
+        let mut bottom: &dyn HeightField = self.base.as_ref();
+        while let Some(up) = bottom.upstream() {
+            bottom = up;
+        }
+        let (here_lo, here_hi) = bottom.height_bounds(cap.centre, cap.angle);
+        let (ring_lo, ring_hi) =
+            bottom.height_bounds(cap.centre, cap.angle + widest_m / (2.0 * radius_m) * (1.0 + 1e-9) + 16.0 * f64::EPSILON);
+        let (d_lo, d_hi) = (ring_lo - here_hi, ring_hi - here_lo);
+        let grow = (here_lo.abs() + here_hi.abs() + ring_lo.abs() + ring_hi.abs()) * 16.0 * f64::EPSILON;
+        d_hi.max(0.0) - d_lo.min(0.0) + grow
+    }
+
     /// The base heights of `dirs` with the stamps added; elements after `stop` turned true are 0.0 (GEN-020).
     fn add_stamps(&self, dirs: &[Vec3], base: Vec<f64>, stop: &dyn Fn() -> bool) -> Vec<f64> {
         let items = self.items_for(dirs);

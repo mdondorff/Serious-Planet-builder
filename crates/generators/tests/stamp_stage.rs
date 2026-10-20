@@ -464,3 +464,76 @@ fn every_item_the_stage_reads_over_a_tile_is_in_the_footprint_the_tile_declared_
         }
     }
 }
+
+/// What the bounds of `s` add to the extent of the base over a cap: the growth in metres.
+fn growth_of(s: &StampStage<'_>, base: &dyn HeightField, centre: Vec3, angle: f64) -> f64 {
+    let (lo, hi) = s.height_bounds(centre, angle);
+    let (blo, bhi) = base.height_bounds(centre, angle);
+    (hi - lo) - (bhi - blo)
+}
+
+/// Every height of a ring of samples of the cap lies within the bounds.
+fn assert_sampled_within(s: &StampStage<'_>, centre: Vec3, angle: f64, what: &str) {
+    let (lo, hi) = s.height_bounds(centre, angle);
+    for k in 0..300 {
+        let t = f64::from(k) / 300.0 * core::f64::consts::TAU;
+        let r = angle * f64::from(k % 7) / 6.0;
+        let h = s.height(at_distance_around(centre, t, r.min(angle)));
+        assert!(h >= lo && h <= hi, "{what}: {h} outside [{lo}, {hi}]");
+    }
+}
+
+// spec: GEN-026
+#[test]
+fn a_plateau_of_a_large_declared_bound_adds_little_to_the_extent_of_a_fine_tile_whatever_its_target() {
+    // The owner's Plateau 7: 15 km reach, a target of 300 m, a declared bound of 5 km. A plateau pulls the running height to its target, so
+    // inside its flat part a tile of 300 m gets what the gap to the target varies by over the tile, a few metres, not the 5 km of the bound
+    // (the plan was refused at levels 12 to 19: the morph interval of the tile was empty).
+    let at = dir(1.0, 0.2, 0.1);
+    let base = Reference(1);
+    for target in [300.0, -2_000.0, 4_000.0] {
+        let s = stage(world(vec![item(1, 0, at, 15_000.0, 5_000.0, Stamp::new(StampKind::Plateau, [target, 0.0, 0.0]))]));
+        for (d, angle_m) in [(0.0, 150.0), (3_000.0, 150.0), (9_000.0, 150.0), (3_000.0, 2_000.0)] {
+            let centre = at_distance(at, dir(0.0, 1.0, 0.0), d);
+            let g = growth_of(&s, &base, centre, angle_m / R);
+            let (blo, bhi) = base.height_bounds(centre, angle_m / R);
+            // Within the flat part the heights are the target: the growth is at most the extent of the base there.
+            assert!(
+                g < (bhi - blo) + 1.0,
+                "target {target}, {d} m from the anchor, cap {angle_m} m: growth {g} m of a base extent {}",
+                bhi - blo
+            );
+            assert_sampled_within(&s, centre, angle_m / R, "a plateau over the reference");
+        }
+    }
+    // Over the feathered edge (0.7 to 1 of the reach) the heights still lie within the bounds.
+    let s = stage(world(vec![item(1, 0, at, 15_000.0, 5_000.0, Stamp::new(StampKind::Plateau, [300.0, 0.0, 0.0]))]));
+    for d in [10_600.0, 12_000.0, 14_000.0, 14_990.0] {
+        assert_sampled_within(&s, at_distance(at, dir(0.0, 1.0, 0.0), d), 400.0 / R, "the edge of a plateau");
+    }
+}
+
+// spec: GEN-026
+#[test]
+fn the_bounds_of_plateaus_over_other_stamps_and_a_steep_base_hold_for_random_caps() {
+    use planet_core::hash::SplitMix64;
+    use planet_generators::stress::Steep;
+    let at = dir(1.0, 0.2, 0.1);
+    let mut rng = SplitMix64(7);
+    let mut unit = move || rng.next_f64();
+    for base_is_steep in [false, true] {
+        let base: Arc<dyn HeightField> = if base_is_steep { Arc::new(Steep(3)) } else { Arc::new(Reference(1)) };
+        let items = vec![
+            item(1, 0, at, 6_000.0, 5_000.0, Stamp::new(StampKind::Plateau, [300.0, 0.0, 0.0])),
+            item(2, 1, at_distance(at, dir(0.0, 1.0, 0.0), 700.0), 2_000.0, 50.0, Stamp::new(StampKind::Hill, [40.0, 0.0, 0.0])),
+            item(3, 2, at_distance(at, dir(0.0, -1.0, 0.0), 1_500.0), 4_000.0, 80.0, Stamp::new(StampKind::Plateau, [-150.0, 0.0, 0.0])),
+            item(4, 3, at_distance(at, dir(1.0, 0.0, -1.0), 400.0), 1_000.0, 60.0, Stamp::new(StampKind::Crater, [60.0, 0.0, 0.0])),
+        ];
+        let s = StampStage::new(Arc::clone(&base), world(items), BodyId::PLANET, DEFAULT_ITEM_LAYER, 0, 1).unwrap();
+        for _ in 0..40 {
+            let centre = at_distance(at, dir(unit() - 0.5, unit() - 0.5, unit() - 0.5), unit() * 6_500.0);
+            let angle = (10.0 + unit() * 1_500.0) / R;
+            assert_sampled_within(&s, centre, angle, if base_is_steep { "over a steep base" } else { "over the reference" });
+        }
+    }
+}

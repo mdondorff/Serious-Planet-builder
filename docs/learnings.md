@@ -515,3 +515,10 @@ What happened: ATMO-007 checked the volume only at texel centres and the marches
 Assumption it changes: ATMO-007 (the sun "high, low and below the horizon" must be swept, towards the sun and away from it, and a texel table must be read between its texels).
 Proposed follow-up: a half-resolution haze buffer or a better volume parameterisation for the cost (the march costs 1.3 to 1.9 ms at 1440p); the volume below 8 km at a low sun is still 17 to 18 % off.
 Obsolete when: the volume is replaced or parameterised by the view angle and tested between its texels at several suns.
+
+## 2026-10-20 A stamp bound summed per item was loose for every item that maps the running height, and a per-item counter broke across items
+Scope: generators::stamp (GEN-026, GEN-030)
+What happened: a plateau's bound over a cap was its weight times its declared `max_delta_m`, on both sides, whatever the ground; the owner's plateaus (5 km) gave a fine tile a 10 km extent and the plan was refused four times (levels 12 to 19). A smooth's counter of what it had moved was per item, and one drag of the editor is one item, so overlapping items each pulled to the base mean again (`2 mean - base`, sharper). The reviewer also found that a run of smooth strokes was allowed the rounding of one addition: 64 strokes overshot the bound by 1e-12 m over a base with exact bounds; the random-cap tests did not see it because the bases' bounds are loose.
+Assumption it changes: the bounds of a stage are the range of the running height carried through the items in order (an item that pulls the height to a target maps it, monotone in the height), not the sum of what each item can add; a test of rounding needs a base with exact bounds; a count that belongs to a point belongs to the layer, not to one item.
+Proposed follow-up: none.
+Obsolete when: the stamp stage stops combining items by running height.
