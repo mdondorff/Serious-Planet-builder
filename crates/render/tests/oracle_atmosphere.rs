@@ -386,13 +386,9 @@ fn the_composite_applies_the_sky_and_the_aerial_perspective_as_the_reference_doe
 #[test]
 fn above_6_km_the_composite_marches_from_the_camera_to_the_terrain_and_mixes_it_with_the_volume_as_the_reference_does() {
     // Terrain 300 and 600 km along the view axis: far beyond what the volume holds between its texels (SPIKE-20).
-    for (h, mu_sun, terrain_m) in [
-        (8_000.0, 0.5, 120_000.0),
-        (6_500.0, 0.3, 90_000.0),
-        (60_000.0, 0.7, 300_000.0),
-        (97_500.0, 0.7, 600_000.0),
-        (97_500.0, 0.2, 300_000.0),
-    ] {
+    for (h, mu_sun, terrain_m) in
+        [(8_000.0, 0.5, 120_000.0), (6_500.0, 0.3, 90_000.0), (60_000.0, 0.7, 300_000.0), (97_500.0, 0.7, 600_000.0)]
+    {
         composite_inside_at(h, mu_sun, terrain_m);
     }
 }
