@@ -750,6 +750,31 @@ mod tests {
         assert!(rig2.st.mark("tab:near").is_none());
     }
 
+    // spec: VIEW-034
+    #[test]
+    fn a_text_field_keeps_the_keyboard_until_it_is_let_go_of_and_then_the_keys_are_the_cameras() {
+        let f = fixture();
+        let layout = Layout::default();
+        let h = held(&f, layout.clone());
+        let mut rig = Rig::new(&layout);
+        rig.settle(&data(&h));
+        // A click into the name field gives it the keyboard; a button does not.
+        let p = rig.mark("fly");
+        rig.click(&data(&h), p);
+        assert!(!rig.ctx.egui_wants_keyboard_input(), "a button takes no keyboard focus");
+        let p = rig.mark("name");
+        rig.click(&data(&h), p);
+        assert!(rig.ctx.egui_wants_keyboard_input(), "a text field keeps the focus after the click");
+        // What the window does when the pointer is captured for looking around (`Ui::release_keyboard_focus`).
+        rig.ctx.memory_mut(|m| {
+            if let Some(id) = m.focused() {
+                m.surrender_focus(id);
+            }
+        });
+        rig.settle(&data(&h));
+        assert!(!rig.ctx.egui_wants_keyboard_input(), "the focus is gone: the movement keys are the camera's");
+    }
+
     // spec: VIEW-033
     #[test]
     fn a_region_in_the_inspector_has_a_surface_type_and_a_mask_and_the_mask_asks_for_a_layer_to_clip() {

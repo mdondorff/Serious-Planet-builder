@@ -186,6 +186,15 @@ impl EditorUi {
         self.winit.egui_input_mut().events.extend(release_all_buttons(pos));
     }
 
+    /// Take the keyboard focus from the widget that has it (a text field the user clicked into): the keys are the camera's again.
+    pub fn release_keyboard_focus(&mut self) {
+        self.ctx.memory_mut(|m| {
+            if let Some(id) = m.focused() {
+                m.surrender_focus(id);
+            }
+        });
+    }
+
     /// Hand a window event to egui. Returns what the camera may do with it: `true` when the world gets it (egui did not consume it
     /// and the router says world). A key is the world's unless egui consumed it or a text field has the focus.
     pub fn window_event(&mut self, window: &winit::window::Window, event: &winit::event::WindowEvent) -> bool {
