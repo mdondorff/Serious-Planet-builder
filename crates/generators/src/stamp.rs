@@ -80,7 +80,9 @@ pub fn channel_delta(amount: f64, x: f64) -> f64 {
 /// of `p` on its great circle lies on it, else to the nearer end. `libm` for the transcendental, f64 throughout (CON-14).
 fn arc_angle(a: Vec3, b: Vec3, p: Vec3) -> f64 {
     let ends = || angle_between(p, a).min(angle_between(p, b));
-    let c = a.cross(b);
+    // The normal of the arc's great circle as `(a + b) x (b - a) / 2` (the same vector as `a x b`): `b - a` is exact, so the error is
+    // relative to the arc's length, not to 1e-16 of a unit, and a one-centimetre arc keeps its great circle to a nanometre.
+    let c = (a + b).cross(b - a) * 0.5;
     let cl = c.length();
     if cl.is_nan() || cl <= 1e-12 {
         return ends();
@@ -210,7 +212,14 @@ pub fn apply_stamps(items: &[FootprintItem], radius_m: f64, dir: Vec3, base: f64
             h += stamp_delta(stamp, f64::from_bits(item.max_delta_bits), h, x);
         }
     }
-    h + ridge + channel
+    // Only a line that is there changes the bits of the running height (a base of -0.0 stays -0.0 without one).
+    if ridge != 0.0 {
+        h += ridge;
+    }
+    if channel != 0.0 {
+        h += channel;
+    }
+    h
 }
 
 /// Where a stage reads its items: the footprint of a cap, the sum of the bounds of a layer, and the reads a tile declares. The world
@@ -294,7 +303,7 @@ pub struct StampStage<'a> {
 }
 
 /// The version of the stamp stage (bumped whenever its output changes, ADR 0006): part of the key of every stamped tile.
-pub const STAMP_STAGE_VERSION: u32 = 1;
+pub const STAMP_STAGE_VERSION: u32 = 2;
 
 /// The implementation id of the stamp stage in height keys.
 pub const STAMP_STAGE_ID: &str = "stamp-stage";
@@ -436,12 +445,29 @@ impl HeightField for StampStage<'_> {
         // The deltas the stamps can add inside the cap, not their declared maxima: a cap on the flat top of a hill moves up as a whole and
         // keeps its extent, which is what the morph interval of a fine tile needs (GEN-026).
         let (mut dlo, mut dhi, mut mag) = (0.0f64, 0.0f64, 0.0f64);
+        // The lines are not summed: the stage adds the largest ridge and the smallest channel (GEN-028), so the ridges' range is the
+        // largest of their lows and highs (floored at 0) and the channels' the smallest (capped at 0).
+        let (mut ridge_lo, mut ridge_hi, mut channel_lo, mut channel_hi) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
         for item in &items {
             let (a, b) = delta_range(item, cap, radius_m);
-            dlo += a;
-            dhi += b;
+            match item.stamp.as_ref().map(|s| s.kind) {
+                Some(StampKind::Ridge) => {
+                    ridge_lo = ridge_lo.max(a);
+                    ridge_hi = ridge_hi.max(b);
+                }
+                Some(StampKind::Channel) => {
+                    channel_lo = channel_lo.min(a);
+                    channel_hi = channel_hi.min(b);
+                }
+                _ => {
+                    dlo += a;
+                    dhi += b;
+                }
+            }
             mag += a.abs().max(b.abs());
         }
+        dlo += ridge_lo + channel_lo;
+        dhi += ridge_hi + channel_hi;
         // Each addition of the running height rounds by at most one ulp of the largest magnitude involved.
         let slack = items.len() as f64 * (lo.abs().max(hi.abs()) + mag) * f64::EPSILON * 2.0 + (dlo.abs() + dhi.abs()) * 8.0 * f64::EPSILON;
         (lo + dlo - slack, hi + dhi + slack)

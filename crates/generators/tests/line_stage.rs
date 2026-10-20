@@ -282,3 +282,96 @@ fn nothing_changes_beyond_the_reach_a_line_stays_within_its_bound_and_a_tile_awa
     let under = TileId::from_direction(&TangentWarp, unit(20.0, 30.03), 12);
     assert!(!stage.passes_through(under, &TangentWarp));
 }
+
+fn stage_over(items: &[ItemSpec]) -> StampStage<'static> {
+    let def = world(items);
+    StampStage::new(Arc::new(Reference(1)), def as Arc<dyn planet_generators::stamp::ItemReader>, BodyId::PLANET, DEFAULT_ITEM_LAYER, 0, 1)
+        .unwrap()
+}
+
+// spec: GEN-028
+#[test]
+fn the_bounds_hold_at_the_joint_of_two_ridges_or_two_channels_and_at_crossings() {
+    // Two parts of one line share a point; two ridges (or two channels) overlap there and the stage applies the larger (the smaller), so the
+    // bounds may not add their ranges.
+    let (a, b) = ([(20.0, 30.0), (20.0, 30.05)], [(20.0, 30.05), (20.0, 30.1)]);
+    let cross = [(19.95, 30.05), (20.05, 30.05)];
+    let sets: [Vec<ItemSpec>; 4] = [
+        vec![line(1, StampKind::Ridge, 40.0, 3_000.0, &a), line(2, StampKind::Ridge, 40.0, 3_000.0, &b)],
+        vec![line(1, StampKind::Channel, 40.0, 3_000.0, &a), line(2, StampKind::Channel, 40.0, 3_000.0, &b)],
+        vec![line(1, StampKind::Ridge, 40.0, 3_000.0, &a), line(2, StampKind::Ridge, 25.0, 3_000.0, &cross)],
+        vec![
+            line(1, StampKind::Ridge, 40.0, 3_000.0, &a),
+            line(2, StampKind::Channel, 30.0, 3_000.0, &cross),
+            line(3, StampKind::Ridge, 40.0, 3_000.0, &b),
+        ],
+    ];
+    for (k, items) in sets.iter().enumerate() {
+        let stage = stage_over(items);
+        let joint = unit(20.0, 30.05);
+        for angle_m in [1.0, 20.0, 100.0, 2_500.0] {
+            let (lo, hi) = stage.height_bounds(joint, angle_m / R);
+            for s in 0..30 {
+                let p = at_distance(joint, unit(20.0 + 0.01 * f64::from(s), 30.05 + 0.007 * f64::from(s)), f64::from(s) / 30.0 * angle_m);
+                let h = stage.height(p);
+                assert!(h >= lo && h <= hi, "set {k}, cap {angle_m} m, sample {s}: {h} outside [{lo}, {hi}]");
+            }
+            let h = stage.height(joint);
+            assert!(h >= lo && h <= hi, "set {k}, cap {angle_m} m, the joint: {h} outside [{lo}, {hi}]");
+        }
+    }
+}
+
+// spec: GEN-028
+#[test]
+fn a_short_arc_keeps_its_great_circle_so_the_distance_and_the_bounds_hold_to_a_nanometre() {
+    for len_m in [0.01, 0.1, 1.0, 10.0, 40_000.0] {
+        let p0 = unit(35.0, 20.0);
+        let p1 = at_distance(p0, unit(35.5, 20.2), len_m);
+        let bits: Vec<[u64; 3]> = [p0, p1].iter().map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]).collect();
+        let mid = (p0 + p1).normalized();
+        let d_mid = polyline_angle(&bits, mid) * R;
+        assert!(d_mid < 1e-6, "{len_m} m arc: the middle of the arc is {d_mid} m from it");
+        // Off the arc by a known amount, abeam of the middle.
+        let side = (p0 - p1).cross(mid).normalized();
+        let off = (mid * libm::cos(0.5 / R) + side * libm::sin(0.5 / R)).normalized();
+        let d_off = polyline_angle(&bits, off) * R;
+        // Abeam of the middle of an arc the nearest point is the middle: 0.5 m (within the arc's half length for the shortest arcs, whose
+        // ends are as near).
+        assert!((d_off - 0.5).abs() <= 1e-3 + len_m / 2.0, "{len_m} m arc: {d_off} against 0.5");
+    }
+    // The bounds of a ridge on a 1 cm and a 10 cm arc, width 1 m, over caps of 10 cm.
+    for len_m in [0.01, 0.1, 1.0] {
+        let p0 = unit(35.0, 20.0);
+        let p1 = at_distance(p0, unit(35.5, 20.2), len_m);
+        let item = {
+            let dirs = [p0, p1];
+            ItemSpec {
+                id: 1,
+                layer: DEFAULT_ITEM_LAYER.into(),
+                priority: 0,
+                dir: p0,
+                content_hash: 0,
+                reach_m: len_m + 1.5,
+                max_delta_m: 100.0,
+                stamp: None,
+            }
+            .with_stamp(Stamp::new(StampKind::Ridge, [100.0, 1.0, 0.0]).with_points(&dirs))
+        };
+        let stage = stage_over(std::slice::from_ref(&item));
+        let mut seed = 99u64;
+        let mut rnd = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for k in 0..80 {
+            let c = at_distance(p0, Vec3::new(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).normalized(), rnd() * (len_m + 1.0));
+            let (lo, hi) = stage.height_bounds(c, 0.1 / R);
+            for _ in 0..40 {
+                let p = at_distance(c, Vec3::new(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).normalized(), rnd() * 0.1);
+                let h = stage.height(p);
+                assert!(h >= lo && h <= hi, "{len_m} m arc, cap {k}: {h} outside [{lo}, {hi}]");
+            }
+        }
+    }
+}
