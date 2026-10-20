@@ -873,6 +873,8 @@ impl PlanPipeline {
         match self.worker.take() {
             Some(Ok(o)) => {
                 delivered = Some((o.seq, o.plan_ms));
+                // A plan made again ends the refusal: the same reason after it is a new refusal and is reported.
+                self.refusal_text = None;
                 if o.seq >= self.edit_seq {
                     self.edited.clear();
                 }
