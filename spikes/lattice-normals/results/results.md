@@ -1,4 +1,4 @@
-# Evidence for ADR 0073: normals from the tile's height lattice (lattice-normals)
+# SPIKE-24 evidence for ADR 0073: normals from the tile's height lattice (lattice-normals)
 
 Spike code: branch `spike/lattice-normals` (never merged): `crates/generators/src/compact.rs` (an env switch `PLANET_LATTICE_NORMALS`, `ring_directions`, `lattice_normals`), `crates/app/examples/spike_normals.rs` (errors and seams), `spike_hillshade.rs` (the pictures), `crates/app/src/litperf.rs` (`CAPTURE_STILLS`: the lit stills of the static views). Worlds: the editor's default (single planet, seed 1, eroded field) over the 256-cell in-memory bake and over the 16384-cell store (`sonnet-m4/target/accept/global16384`, read-only). No perf run; the stills ran on the software adapter.
 
@@ -26,7 +26,7 @@ Largest angle between the normals two neighbouring tiles of one level compute fo
 |---|---|---|---|
 | same face, levels 8, 12, 16, 20 (6 pairs each) | 0.00000 | 0.00000 | 0.00000 (same four points) |
 | across a cube edge, levels 8 to 22 (chosen tiles, 4 sides each) | 0.00000 | 0.00000 to 0.2 degrees (level 22 south side 0.1995; most under 0.06) | 0 by construction (the shared vertex reads the same four points from both tiles): to implement and test |
-A cube corner (three faces) needs the ring point of the tile in the diagonal direction beyond the corner: the corner vertex's four neighbours are two inside the own face and two on the two neighbouring faces; the normal at a cube corner is the one the three tiles must agree on: define it as the normal of the lowest face index's lattice with the extended ring (a tolerance of 0.2 degrees on the 8 corner vertices of the planet at each level) or leave the ring corner cases to the implementation's choice with a test (an open point for the implementation).
+A cube corner (three faces): with the rule of the ADR (each tile takes the ring point beyond a face edge from the neighbour tile's own lattice, one cell inside it, on the row that continues the shared edge) the three tiles at a corner read the same three points and compute `(a - c) x (b - c)`, cyclically invariant: the normals agree to f64 rounding, not bit for bit (to be implemented and tested at all eight corners at levels 3, 12 and 22 against the renderer's 1e-6 degrees seam scenario; the spike did not implement it).
 
 ## The effect on shading
 - Lit stills (software adapter, 1280x720, the five static views of the lit scenes, one frame each, both normals, same tiles and sun): the root-mean-square difference is 1.4e-5 (coast-3m) to 3.5e-4 (aerial-20km) of full scale; at a 1 % fuzz no pixel differs. The same for the coastal flights (24 frames of each of four flights: RMSE 1e-5 to 9e-5). `images/lit-ground-1m.png` and `images/lit-aerial-20km.png`: current | lattice | difference x 32 (black). These worlds' lit views are plains and haze; they cannot show a difference.
@@ -40,3 +40,14 @@ Evaluations per 32-cell tile: 1 + 1,089 + 132 = 1,222 against 5,446 (4.46 times 
 - The ring through the neighbour's lattice (and the cube corners) is not implemented in the spike; it needs a function in `planet_core::tile` beside `sample_direction_ext`.
 - The measured tile time with the path: one line in a window.
 - The CPU mesh builder (`mesh.rs`, the canonical mesh and its known-answer hashes) takes the same change; the spike changed only the compact tile.
+
+## For the change's proposal (the spec guardian's list; a task list, not part of the decision)
+Spec text that states the version or the canonical normal and changes with ADR 0073:
+- GEN-010 (`generator-pipeline/spec.md:128`): add "version 9 defines the canonical normal as the lattice normal (GEN-019): every key changes, the vertex heights and positions are unchanged, the committed mesh hashes are re-recorded".
+- GEN-019 (`:311`, scenario `:319`): the lattice-normal definition as a normative sentence (the formula, the ring, the seam rule at an edge and at a corner), `MESH_VERSION` 9 in the scenario; the 0.01 degrees stored-versus-canonical bound unchanged.
+- GEN-025 (`:503`, scenario `:519`): "`MESH_VERSION` SHALL be 9", the known answers re-recorded; the layout unchanged.
+- GEN-003 (`:31`): the determinism manifest's mesh hashes (committed tiles, every face, the cube corners) and the version it records.
+- Renderer (`renderer/spec.md:143`, "Seam normals": every level-2 tile, coincident border vertices within 1e-6 degrees across the twelve cube edges; corner vertices included) holds with the ring rule; the pixel-hash scenario at `renderer/spec.md:294` names `MESH_VERSION` 8 and is re-recorded.
+- STRM-021 (`streaming-cache/spec.md:619, 654`): the pre-filled pack is made again (`generate --prefill-dir`, 1,920 tiles; payload version 3 stays); the store check of `testing/spec.md:602/614` re-run.
+New tests (tier A): lattice normal against a converged analytic normal on a smooth field (bound to be set by the change: within twice the lattice truncation error) (GEN-019); same-face, cube-edge and all eight cube-corner seams at levels 3, 12 and 22 with 1e-6 degrees (renderer seam scenario, COORD-007); the evaluation count of a tile (GEN-020); the existing footprint-halo test over the ring's directions (WDEF-007); known answers of the committed meshes and the manifest (GEN-010, GEN-003). `surface_normal` and `surface_normal_field` (`mesh.rs`) have no caller outside `mesh.rs` and `compact.rs`: the change removes them or keeps them as non-canonical.
+Goldens to name in Expected golden changes with their bound tests: the debug `normals` golden `terrain_cube_corner_normals` and any shaded or debug view that shows normals or lighting (measured by the change); the lit, sky and water goldens that move escalate. On acceptance ADR 0033's status line gets "point 4 refined by 0073" (CON-23).
