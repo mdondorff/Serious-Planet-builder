@@ -22,6 +22,8 @@ mod global_contract;
 mod global_reader;
 #[path = "height_fields.rs"]
 mod height_fields;
+#[path = "line_stage.rs"]
+mod line_stage;
 #[path = "manifest.rs"]
 mod manifest;
 #[path = "mesh.rs"]
@@ -32,8 +34,6 @@ mod ocean;
 mod pipeline;
 #[path = "stages.rs"]
 mod stages;
-#[path = "stamp_lines_inert.rs"]
-mod stamp_lines_inert;
 #[path = "stamp_stage.rs"]
 mod stamp_stage;
 #[path = "stamp_stage_eroded.rs"]
