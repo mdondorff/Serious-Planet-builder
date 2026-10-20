@@ -487,3 +487,10 @@ What happened: the real-window editor test took 67 s alone and 100 to 220 s besi
 Assumption it changes: a window smoke test needs the default window size; the counts the editor test asserts come from the script and not from the pixels, so it runs at 480x270 (34 s alone).
 Proposed follow-up: a new window smoke passes `--size` unless it checks pixels; the start-up share (14 s) is the next cost if the tier needs trimming.
 Obsolete when: the software adapter draws the lit frame in a few tens of milliseconds, or the smokes no longer run on it.
+
+## 2026-10-20 The cover took a whole area one level coarser when one sibling had not streamed in (SPIKE-18)
+Scope: STRM-016, the cover and the stale-plan stand-in
+What happened: the cover split a tile only when every child in view was resident, so a tile that was split a frame ago because its sibling was culled went back to its parent the moment the sibling came into view, before it had streamed in; on a starved machine the drawn level dropped over the parent's whole area for a few frames. A first idea (keep last frame's leaves) would have left a hole where the sibling came into view, because nothing but the parent is resident there.
+Assumption it changes: a stand-in has to cover the whole of the tile it replaces; it need only cover the quadrants that nothing finer covers, drawn through a mask. The mask costs a `discard`, which on the RTX cost 5 to 8 % of the frame in the heavy scenes when every node's pipeline had it; an override constant keeps it to the pipelines of the masked nodes.
+Proposed follow-up: hairline cracks along the cut line and a level gap above 2:1 across it remain until the missing tile arrives (STRM-016 names them); a skirt on the cut for masked nodes would close the cracks.
+Obsolete when: the cover is replaced by a scheme in which a missing tile never leaves a resident sibling's neighbour coarser.

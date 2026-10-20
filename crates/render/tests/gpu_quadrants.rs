@@ -26,7 +26,7 @@ fn project(plan: &TerrainPlan, p: Vec3) -> Option<(f64, f64)> {
     (w > 0.0).then(|| ((x / w * 0.5 + 0.5) * f64::from(SIZE.0), (1.0 - (y / w * 0.5 + 0.5)) * f64::from(SIZE.1)))
 }
 
-fn lit_pixels(ctx: &GpuContext, data: &planet_generators::compact::CompactTile, plan: &TerrainPlan) -> BTreeSet<(u32, u32)> {
+fn lit_pixels(ctx: &GpuContext, datas: &[&planet_generators::compact::CompactTile], plan: &TerrainPlan) -> BTreeSet<(u32, u32)> {
     let block_slots = 8 * 8;
     let pool = compact_format_pool_with(
         (128 << 20) + 40 * u64::from(block_slots) * planet_generators::compact::slot_bytes(CELLS),
@@ -36,7 +36,9 @@ fn lit_pixels(ctx: &GpuContext, data: &planet_generators::compact::CompactTile, 
     )
     .unwrap();
     let mut r = TerrainRenderer::with_pools(ctx, SIZE, CELLS, pool);
-    r.upload_tile(ctx, data).unwrap();
+    for data in datas {
+        r.upload_tile(ctx, data).unwrap();
+    }
     r.render(ctx, plan, false).unwrap();
     let image = r.read_color(ctx);
     let clear = plan.clear_color;
@@ -59,7 +61,9 @@ fn every_terrain_and_water_fragment_entry_cuts_the_quadrants_a_node_leaves_out()
         ("terrain".into(), terrain.clone()),
         ("terrain-atmosphere".into(), format!("{terrain}{}", planet_render::atmosphere::terrain_atmosphere_source())),
     ];
-    sources.extend(planet_render::water_shaders().into_iter().filter(|(n, _)| n.starts_with("water-compact")).map(|(n, s)| (n.to_string(), s)));
+    sources.extend(
+        planet_render::water_shaders().into_iter().filter(|(n, _)| n.starts_with("water-compact")).map(|(n, s)| (n.to_string(), s)),
+    );
     let mut entries = 0;
     for (name, source) in &sources {
         for chunk in source.split("@fragment").skip(1) {
@@ -114,7 +118,7 @@ fn a_node_drawn_over_some_quadrants_covers_exactly_those_quadrants_of_its_tile()
         lit: None,
         water: None,
     };
-    let lit = |quadrants: u8| lit_pixels(&ctx, &data, &plan(quadrants));
+    let lit = |quadrants: u8| lit_pixels(&ctx, &[&data], &plan(quadrants));
     let whole = lit(0b1111);
     assert!(whole.len() > 2_000, "the tile fills a good part of the picture: {} px", whole.len());
     let single: Vec<BTreeSet<(u32, u32)>> = (0..4).map(|k| lit(1 << k)).collect();
@@ -140,4 +144,28 @@ fn a_node_drawn_over_some_quadrants_covers_exactly_those_quadrants_of_its_tile()
     }
     // Two quadrants are the union of their sets.
     assert_eq!(lit(0b0101), single[0].union(&single[2]).copied().collect::<BTreeSet<_>>());
+
+    // Whole nodes and nodes over some quadrants in one plan, in either order, draw the union of what each draws alone: the whole ones go
+    // through the pipeline without the cut, the others through the one with it (STRM-016).
+    let east = tile.neighbor(&TangentWarp, planet_core::tile::Side::East);
+    let east_data = compact_tile_field(&field, &TangentWarp, east, CELLS, R);
+    let rel_east = east_data.origin.0 - camera.position.0;
+    let east_node = TerrainDraw {
+        tile: east,
+        level: east.level(),
+        origin: east_data.origin,
+        camera_relative_origin: [rel_east.x as f32, rel_east.y as f32, rel_east.z as f32],
+        mesh_key: east_data.key,
+        color: [60, 200, 60, 255],
+        ..node(0b1111)
+    };
+    let with_nodes = |nodes: Vec<TerrainDraw>| TerrainPlan { nodes, ..plan(0b1111) };
+    let alone_masked = lit(0b0110);
+    let east_alone = lit_pixels(&ctx, &[&data, &east_data], &with_nodes(vec![east_node.clone()]));
+    let expect: BTreeSet<(u32, u32)> = alone_masked.union(&east_alone).copied().collect();
+    for nodes in [vec![node(0b0110), east_node.clone()], vec![east_node.clone(), node(0b0110)]] {
+        let mixed = lit_pixels(&ctx, &[&data, &east_data], &with_nodes(nodes));
+        assert!(!east_alone.is_empty() && !alone_masked.is_empty());
+        assert_eq!(mixed, expect, "the whole node and the masked node together draw what each draws alone");
+    }
 }

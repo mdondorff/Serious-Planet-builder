@@ -602,7 +602,7 @@ fn atm_shade_lit(view: u32, tab: array<vec4<f32>, 10>, normal: vec3<f32>, up: ve
 fn fs_lit_atmo(in: VsOut) -> @location(0) vec4<f32> {
     // The derivatives of the inner function come first; a node drawn over some quadrants discards the rest after them (STRM-016).
     let c = fs_lit_atmo_view(in);
-    if (quadrant_cut(in)) {
+    if (CUT_QUADRANTS && quadrant_cut(in)) {
         discard;
     }
     return c;

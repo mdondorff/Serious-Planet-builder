@@ -162,7 +162,7 @@ Source: CON-19, ADR 0006, M4 item 7d, LOD-011, ADR 0062
 - **THEN** the replayed plan equals the recorded one, and the bundle without `min_level` replays as floor 0 (the plan it recorded)
 
 ### Requirement: TEST-009 FramePlan snapshots
-A FramePlan and a TerrainPlan SHALL each be serialisable to a stable text form that can be snapshot-tested, diffed between versions and stored in a repro bundle; the terrain text form SHALL carry every field of the plan (size, view, cells, the f64 camera, view-projection, clear colour, height range and per node tile, level, origin, camera-relative origin, morph values, colour and mesh key) so that a change to any one of them changes the text and its hash.
+A FramePlan and a TerrainPlan SHALL each be serialisable to a stable text form that can be snapshot-tested, diffed between versions and stored in a repro bundle; the terrain text form SHALL carry every field of the plan (size, view, cells, the f64 camera, view-projection, clear colour, height range and per node tile, level, origin, camera-relative origin, morph values, colour and mesh key, and, for a node drawn over some quadrants only, the quadrant mask, STRM-016) so that a change to any one of them changes the text and its hash.
 
 Verify: A
 Status: active
