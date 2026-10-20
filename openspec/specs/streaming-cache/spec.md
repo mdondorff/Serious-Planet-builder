@@ -817,15 +817,15 @@ Source: ADR 0066 points 4 and 5, M6 plan (live definition)
 - **THEN** the call is refused and the definition and its revision are unchanged
 
 ### Requirement: STRM-027 Authored stage keys
-The height key of a tile of an authored stage SHALL chain the stage below (ADR 0066 point 4; the chained height key is the stage key of that point, and `stage_key` of STRM-011 is not used because a stamped tile is a `Kind::Height` record that the mesh key and the tile store chain on): its source SHALL be the key of the same tile, at the same resolution, of the stage it reads (the base first, preferred over a field-wide source key), its generator version SHALL be the stage version, its implementation id the stage's, its output parameters SHALL include the layer name (tag 8) and the layer's index in the stack of ADR 0007 (tag 9, not its priority), and its reads SHALL be the layer's footprint or region summary entries of the tile (WDEF-007, WDEF-008) plus the nodes the stage reads. The mesh key of the tile SHALL chain the stage's height key as it chains any height key. A change of the base SHALL re-key every tile of the stage; a change of the stage version, the layer name or its index SHALL re-key the tiles of that layer and of the layers above it; an edit of an item SHALL re-key the tiles whose footprint or summary entries change (at least those its reach touches, none beyond the margin of the query). Inserting a layer into the stack SHALL bump the stage version of every layer above it. A layer name outside the stack of ADR 0007 SHALL take the index after the stack's last, in name order among such layers (the app's field stacks its stages so). Every wrapper of a height field SHALL forward the chain (`upstream`, `stage_params`) with its other keying methods. A key without a stage SHALL be byte for byte what it was. The plan cache SHALL hold the origin height, mesh key and volume of a tile of a stamped field under the tile's footprint hash (the field's `inputs_hash_for`), taken again only when the field's item revision changes (a number that differs after every edit of the definition and between any two definitions of the process, a clone included), so a persistent cache plans what a fresh one plans after any put, change, delete, undo or reload, whoever made the edit; the explicit invalidation of the edited tiles stays as the fast path.
+The height key of a tile of an authored stage SHALL chain the stage below (ADR 0066 point 4; the chained height key is the stage key of that point, and `stage_key` of STRM-011 is not used because a stamped tile is a `Kind::Height` record that the mesh key and the tile store chain on): its source SHALL be the key of the same tile, at the same resolution, of the stage it reads (the base first, preferred over a field-wide source key), its generator version SHALL be the stage version, its implementation id the stage's, its output parameters SHALL include the layer name (tag 8) and the layer's index in the stack of ADR 0007 (tag 9, not its priority), and its reads SHALL be the layer's footprint or region summary entries of the tile (WDEF-007, WDEF-008) plus the nodes the stage reads. The mesh key of the tile SHALL chain the stage's height key as it chains any height key. A change of the base SHALL re-key every tile of the stage; a change of the stage version, the layer name or its index SHALL re-key the tiles of that layer and of the layers above it that the stage acts on (a tile it passes through is keyed as the stage below, STRM-029); an edit of an item SHALL re-key the tiles whose footprint or summary entries change (at least those its reach touches, none beyond the margin of the query). Inserting a layer into the stack SHALL bump the stage version of every layer above it. A layer name outside the stack of ADR 0007 SHALL take the index after the stack's last, in name order among such layers (the app's field stacks its stages so). Every wrapper of a height field SHALL forward the chain (`upstream`, `stage_params`, `item_revision`, `passes_through`) with its other keying methods. A key without a stage SHALL be byte for byte what it was. The plan cache SHALL hold the origin height, mesh key and volume of a tile of a stamped field under the tile's footprint hash (the field's `inputs_hash_for`), taken again only when the field's item revision changes (a number that differs after every edit of the definition and between any two definitions of the process, a clone included), so a persistent cache plans what a fresh one plans after any put, change, delete, undo or reload, whoever made the edit; the explicit invalidation of the edited tiles stays as the fast path.
 
 Verify: A
 Status: active
-Source: ADR 0066 point 4, ADR 0006, CON-08
+Source: ADR 0066 point 4, ADR 0068, ADR 0006, CON-08
 
 #### Scenario: Chain
 - **WHEN** the base seed, the stage version, the layer name or the stack index changes, and when a stamp far from the tile changes
-- **THEN** the stage's tile key changes in the first four cases and not in the last, and the mesh key follows the height key
+- **THEN** the stage's tile key, for a tile the stage acts on, changes in the first four cases and not in the last, and the mesh key follows the height key
 
 #### Scenario: Edit locality
 - **WHEN** a stamp is added, moved, edited or removed
@@ -837,7 +837,7 @@ Source: ADR 0066 point 4, ADR 0006, CON-08
 
 #### Scenario: Wrappers
 - **WHEN** the source files of the code base are scanned for wrappers that forward `source_key`
-- **THEN** each also forwards `upstream` and `stage_params`
+- **THEN** each also forwards `upstream`, `stage_params`, `item_revision` and `passes_through`
 
 #### Scenario: Plan cache
 - **WHEN** a stamp is put, changed, deleted and put back through a shared definition, or the definition is replaced by another with the same number of edits, between plans of one persistent cache
@@ -911,3 +911,18 @@ Source: ADR 0071 point 3, STRM-025, STRM-014
 #### Scenario: Missing and verified
 - **WHEN** a store is read for a threshold whose floor blocks it does not hold, and a fresh store is verified
 - **THEN** the error names the block, its key and the command, and the verification finds no mismatch and some matching records
+
+### Requirement: STRM-029 A tile a stage passes through keys as its source
+By exception to STRM-027, a tile a stage passes through (GEN-027) SHALL have the keys of the stage below it, in both key domains (the 128-bit persistent height and mesh keys and the 64-bit height and mesh keys of the plan, the batch keyer included), whatever the number of stages and whatever wraps them; a tile the stage acts on SHALL be keyed as STRM-027 says. So the first stamp of a world, in any layer, re-keys only the tiles its footprint touches, the tiles out of its reach keep the keys they had without the stage, and the pre-filled tiles of the plain world serve them.
+
+Verify: A
+Status: active
+Source: ADR 0068, ADR 0066 point 4
+
+#### Scenario: Both domains
+- **WHEN** a stamp stage with an item near one tile is keyed at a far tile and a coarse far tile, alone, under a second stage, and wrapped in the water bound, and at the tile under the stamp
+- **THEN** the far tiles' height, mesh and 64-bit keys and the batch keyer's equal the plain field's in every form, and the tile under the stamp differs in every form
+
+#### Scenario: First stamp of a world
+- **WHEN** the first stamp is put into the definition of a world through `set_definition`, and then a stamp in a second layer
+- **THEN** a tile out of reach keeps the key it had in the plain world, and the tile under the stamp is re-keyed
