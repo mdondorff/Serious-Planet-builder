@@ -1190,6 +1190,26 @@ mod tests {
         let e = WorldTerrain::open_store(def(), &old, 8).err().unwrap();
         assert!(e.contains("water summary") && e.contains("generate --global-dir"), "{e}");
         let _ = std::fs::remove_dir_all(&old);
+        // spec: STRM-032
+        // A store without the wet-floor blocks (every record but kind 6) is refused too, with the block, its key and the command.
+        let old = std::env::temp_dir().join(format!("planet-no-floor-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&old);
+        {
+            let world = planet_cache::global_store::GlobalWorld::from_definition(&def()).unwrap();
+            let src = planet_cache::pack::TileStore::open(&dir, world.params()).unwrap();
+            let mut writer =
+                planet_cache::pack::PackWriter::open(&old, world.params(), planet_cache::pack::DEFAULT_MAX_PACK_BYTES).unwrap();
+            for item in src.sample_records(0) {
+                let rec = item.unwrap().record;
+                if rec.kind != planet_cache::global_store::KIND_GLOBAL_WET_FLOOR {
+                    writer.append(&rec).unwrap();
+                }
+            }
+            writer.finish().unwrap();
+        }
+        let e = WorldTerrain::open_store(def(), &old, 8).err().unwrap();
+        assert!(e.contains("wet-floor block") && e.contains("generate --global-dir"), "{e}");
+        let _ = std::fs::remove_dir_all(&old);
         // An in-memory bake is labelled and the label is what the log records in `protocol.source`.
         let mem = WorldTerrain::open(def(), 8).unwrap();
         let label = source_label(&mem, false);

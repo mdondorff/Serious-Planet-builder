@@ -595,10 +595,10 @@ fn a_wrong_or_damaged_ocean_block_is_reported_by_verify_with_its_vertex() {
     let store = TileStore::open(d.path(), w.params()).unwrap();
     let r = verify_global(&store, &w, 0);
     assert_eq!(r.mismatches.len(), 1, "{r:?}");
-    // The damaged ocean block also keeps the water summary and the wet floor (once) from being recomputed: unreadable, naming the ocean block.
-    assert_eq!(r.unreadable.len(), 3, "{r:?}");
+    // The damaged ocean block also keeps the wet floor (once) from being recomputed (the summary reads the floor blocks, not the ocean ones): unreadable, naming the ocean block.
+    assert_eq!(r.unreadable.len(), 2, "{r:?}");
     assert!(
-        r.unreadable[1].contains("water summary") && r.unreadable[1].contains("ocean block") && r.unreadable[1].contains("version 9"),
+        r.unreadable[1].contains("wet floor") && r.unreadable[1].contains("ocean block") && r.unreadable[1].contains("version 9"),
         "{}",
         r.unreadable[1]
     );

@@ -320,7 +320,7 @@ fn the_field_is_a_function_of_the_direction_alone_and_reads_a_bake_of_the_resolu
 // spec: GEN-023
 #[test]
 fn known_answers_of_the_field_are_pinned() {
-    assert_eq!((WATER_VERSION, WATER_IMPLEMENTATION_ID), (1, "cpu-water-level-v1"));
+    assert_eq!((WATER_VERSION, WATER_IMPLEMENTATION_ID), (2, "cpu-water-level-v2"));
     let (grid, ocean) = world_bake();
     let src = GridSource(&grid);
     let sea = SeaProducer::new(&ocean, SeaParams::EARTH);
@@ -387,4 +387,48 @@ fn the_coastal_band_edge_is_the_highest_elevation_where_flat_ground_can_still_be
         assert!(edge > last, "the edge rises with the level");
         last = edge;
     }
+}
+
+// spec: GEN-023
+#[test]
+fn a_producer_with_the_wet_floor_finds_a_superset_of_the_ocean_only_one_that_only_grows_with_the_level_and_names_a_floor_of_another_bake() {
+    use planet_generators::wet_floor::tiled_floors;
+    let (grid, ocean) = world_bake();
+    let floors = tiled_floors(&grid, &ocean, 32, 3).unwrap();
+    let src = GridSource(&grid);
+    let dirs = directions(6000);
+    let wet_dirs = |level_m: f64, with_floor: bool| -> Vec<bool> {
+        let params = SeaParams { level_m, ..SeaParams::EARTH };
+        let sea = if with_floor { SeaProducer::new(&ocean, params).with_floor(&floors) } else { SeaProducer::new(&ocean, params) };
+        let field = WaterField::new(&TangentWarp, &src, vec![&sea]);
+        dirs.iter().map(|d| field.water_at(*d).unwrap().is_some()).collect()
+    };
+    let (plain, with) = (wet_dirs(0.0, false), wet_dirs(0.0, true));
+    assert!(plain.iter().zip(&with).all(|(p, w)| !p || *w), "the wet floor only adds water");
+    assert!(with.iter().filter(|w| **w).count() > 100);
+    // A higher level conducts through higher ground: no point dries as the level rises.
+    let mut last = with;
+    for level in [10.0, 30.0, 60.0, 120.0] {
+        let now = wet_dirs(level, true);
+        assert!(last.iter().zip(&now).all(|(a, b)| !a || *b), "level {level}: a point dried when the level rose");
+        last = now;
+    }
+    // `wet_at` is the vertex rule alone: it holds wherever the water does, and also on land beside the sea.
+    let sea = SeaProducer::new(&ocean, SeaParams::EARTH).with_floor(&floors);
+    let field = WaterField::new(&TangentWarp, &src, vec![&sea]);
+    let (mut water_without_wet, mut wet_on_land) = (0, 0);
+    for d in &dirs {
+        let (w, wet) = (field.water_at(*d).unwrap().is_some(), field.wet_at(*d).unwrap());
+        water_without_wet += usize::from(w && !wet);
+        wet_on_land += usize::from(wet && !w);
+    }
+    assert_eq!(water_without_wet, 0);
+    assert!(wet_on_land > 0, "a wet vertex weighs in some land points beside the sea");
+    // A floor of another resolution is an error naming both.
+    let coarse_grid = bake(SEED, &TangentWarp, 64, 2).unwrap();
+    let (_, coarse_ocean) = tiled_ocean(&coarse_grid, &TangentWarp, 32, 1, EARTH_OCEAN_MIN_AREA_FRACTION).unwrap();
+    let coarse_floors = tiled_floors(&coarse_grid, &coarse_ocean, 32, 1).unwrap();
+    let wrong = SeaProducer::new(&ocean, SeaParams::EARTH).with_floor(&coarse_floors);
+    let e = WaterField::new(&TangentWarp, &src, vec![&wrong]).water_at(dirs[0]).unwrap_err().to_string();
+    assert!(e.contains("64-cell") && e.contains("128-cell"), "{e}");
 }

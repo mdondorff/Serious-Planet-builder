@@ -494,3 +494,10 @@ What happened: the cover split a tile only when every child in view was resident
 Assumption it changes: a stand-in has to cover the whole of the tile it replaces; it need only cover the quadrants that nothing finer covers, drawn through a mask. The mask costs a `discard`, which on the RTX cost 5 to 8 % of the frame in the heavy scenes when every node's pipeline had it; an override constant keeps it to the pipelines of the masked nodes.
 Proposed follow-up: hairline cracks along the cut line and a level gap above 2:1 across it remain until the missing tile arrives (STRM-016 names them); a skirt on the cut for masked nodes would close the cracks.
 Obsolete when: the cover is replaced by a scheme in which a missing tile never leaves a resident sibling's neighbour coarser.
+
+## 2026-10-20 B(W) bounds the incision of flat ground only (ADR 0071)
+Scope: ATMO-019, GEN-031, the conduction bound of the wet floor
+What happened: SPIKE-17 bug 2 and SPIKE-21 showed that the sea reaches ground connected to the ocean through band ground over any distance, so the 100 km reach (a distance test) floored basins behind ridges and dried connected plains beyond it. The conduction bound is B(W), the highest bake elevation at which flat ground can be cut under the level W; steep ground is cut deeper (up to 0.75 A(E)), so B(W) is not an upper bound on where the sea can lie.
+Assumption it changes: the band elevation B(W) is a bound for flat ground only; a path over a steep pass that the erosion cuts below the level at a higher bake elevation does not conduct, and the plain behind it is dry (accepted in ADR 0071 point 2). Raising the bound needs a slope-aware rule, not a larger constant.
+Proposed follow-up: none while the steep-pass regression is acceptable; if it is not, a per-vertex slope term in the floor codes.
+Obsolete when: the coastal band is decided by the eroded terrain itself instead of by the bake elevation.

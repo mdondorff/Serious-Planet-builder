@@ -27,11 +27,12 @@ use planet_world_def::{LiquidKindId, SeaParams};
 use crate::global::{locate_direction, read_direction, GlobalSample, LatticePos, LatticeSource, ReadError, SEA_LEVEL_C};
 use crate::ocean::OceanLattice;
 use crate::water_summary::WaterSummary;
+use crate::wet_floor::{bound_code, FloorLattice};
 
 /// Bump whenever any answer of this module changes (ADR 0006).
-pub const WATER_VERSION: u32 = 1;
+pub const WATER_VERSION: u32 = 2;
 /// Names this implementation in cache keys (CON-07).
-pub const WATER_IMPLEMENTATION_ID: &str = "cpu-water-level-v1";
+pub const WATER_IMPLEMENTATION_ID: &str = "cpu-water-level-v2";
 
 /// Identifies a water body. The sea of a body is [`WaterBodyId::SEA`]; producers hand out further ids (a lake of hydrology will
 /// take `LABEL_BIT | label`, the label being the component's smallest node id, ADR 0041 point 2: ids with that bit set are reserved
@@ -80,8 +81,9 @@ pub trait WaterProducer: Sync {
         Ok(None)
     }
 
-    /// Whether the ocean channel marks a vertex that weighs in the interpolation at the query (ADR 0041 point 2).
-    fn ocean_bit_at(&self, _q: &WaterQuery) -> Result<bool, ReadError> {
+    /// Whether a vertex that weighs in the interpolation at the query is wet (ADR 0071): an ocean vertex, or one the sea reaches through
+    /// ground at most the conduction bound high.
+    fn wet_at(&self, _q: &WaterQuery) -> Result<bool, ReadError> {
         Ok(false)
     }
 
@@ -102,11 +104,42 @@ pub struct SeaProducer<'a> {
     ocean: &'a dyn OceanLattice,
     sea: SeaParams,
     summary: Option<&'a WaterSummary>,
+    floor: Option<&'a dyn FloorLattice>,
+    /// The code of the conduction bound `C(W)` (ADR 0071 point 2): a vertex is wet when its floor is at most this.
+    bound_code: u16,
 }
 
 impl<'a> SeaProducer<'a> {
     pub fn new(ocean: &'a dyn OceanLattice, sea: SeaParams) -> SeaProducer<'a> {
-        SeaProducer { ocean, sea, summary: None }
+        SeaProducer { ocean, sea, summary: None, floor: None, bound_code: bound_code(coast_band_elevation_m(sea.level_m)) }
+    }
+
+    /// The same with the wet floor (ADR 0071): a vertex is wet when it is ocean or its floor is at most the code of the conduction bound.
+    /// Without a floor only the ocean vertices are wet.
+    pub fn with_floor(mut self, floor: &'a dyn FloorLattice) -> SeaProducer<'a> {
+        self.floor = Some(floor);
+        self
+    }
+
+    /// Whether lattice vertex `(i, j)` of `face` is wet (ADR 0071 point 2). The one comparison of the point query; the summary makes the
+    /// same one on the lowest floor of a cell.
+    fn vertex_wet(&self, face: planet_core::Face, i: u32, j: u32) -> Result<bool, ReadError> {
+        if self.ocean.is_ocean(face, i, j)? {
+            return Ok(true);
+        }
+        match self.floor {
+            Some(f) => Ok(f.floor(face, i, j)? <= self.bound_code),
+            None => Ok(false),
+        }
+    }
+
+    fn check_floor_shape(&self, res: u32) -> Result<(), ReadError> {
+        match self.floor {
+            Some(f) if f.res() != res => {
+                Err(ReadError::Shape(format!("the wet floor is of a {}-cell bake and the water field reads a {res}-cell bake", f.res())))
+            }
+            _ => Ok(()),
+        }
     }
 
     /// The same with the coarse level of W (ADR 0058): tiles at or above the bake's block level are answered from `summary`.
@@ -133,9 +166,10 @@ impl WaterProducer for SeaProducer<'_> {
         if f64::from(q.ground.continent) > SEA_LEVEL_C {
             return Ok(None);
         }
+        self.check_floor_shape(q.pos.res)?;
         let (vertices, n) = q.pos.weighted_vertices(q.pos.res);
         for &(i, j) in &vertices[..n] {
-            if self.ocean.is_ocean(q.pos.face, i, j)? {
+            if self.vertex_wet(q.pos.face, i, j)? {
                 return Ok(Some(WaterSample { level_m: self.sea.level_m, body: WaterBodyId::SEA, kind: self.sea.liquid }));
             }
         }
@@ -169,7 +203,7 @@ impl WaterProducer for SeaProducer<'_> {
         Ok(summary.tile_water(map, tile, radius_m, &self.sea))
     }
 
-    fn ocean_bit_at(&self, q: &WaterQuery) -> Result<bool, ReadError> {
+    fn wet_at(&self, q: &WaterQuery) -> Result<bool, ReadError> {
         if self.ocean.res() != q.pos.res {
             return Err(ReadError::Shape(format!(
                 "the ocean channel is of a {}-cell bake and the water field reads a {}-cell bake",
@@ -177,19 +211,16 @@ impl WaterProducer for SeaProducer<'_> {
                 q.pos.res
             )));
         }
+        self.check_floor_shape(q.pos.res)?;
         let (vertices, n) = q.pos.weighted_vertices(q.pos.res);
         for &(i, j) in &vertices[..n] {
-            if self.ocean.is_ocean(q.pos.face, i, j)? {
+            if self.vertex_wet(q.pos.face, i, j)? {
                 return Ok(true);
             }
         }
         Ok(false)
     }
 }
-
-/// How far the sea reaches over the coastal band from an ocean vertex of the bake (ADR 0056), metres: a tile of the band carries the
-/// sea when an ocean vertex lies within this distance of it, or within two of its own edges when it is larger.
-pub const COAST_REACH_M: f64 = 100_000.0;
 
 /// The highest bake elevation (m) at which a point of the coastal band can still lie below the sea level `level_m` (ADR 0056): the
 /// fixed point of `E = level + the deepest flat-ground cut at E` ([`crate::erosion::flat_ground_band_elevation_m`], about 64 m at level 0).
@@ -265,14 +296,14 @@ impl<'a> WaterField<'a> {
         Ok(Some(found))
     }
 
-    /// Whether the ocean channel has a vertex at `dir`'s cell.
-    pub fn ocean_bit_at(&self, dir: Vec3) -> Result<bool, ReadError> {
+    /// Whether a vertex that weighs in the interpolation at `dir` is wet (ADR 0071).
+    pub fn wet_at(&self, dir: Vec3) -> Result<bool, ReadError> {
         let pos = locate_direction(self.bake.res(), self.map, dir)?;
         // Only the lattice position decides: the bake is not read.
         let ground = GlobalSample { continent: 0.0, elevation_m: 0.0, temperature_c: 0.0, precipitation_mm: 0.0 };
         let q = WaterQuery { dir, pos, ground };
         for p in &self.producers {
-            if p.ocean_bit_at(&q)? {
+            if p.wet_at(&q)? {
                 return Ok(true);
             }
         }

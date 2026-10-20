@@ -14,7 +14,7 @@ use planet_cache::pack::{PackWriter, TileStore, DEFAULT_MAX_PACK_BYTES};
 use planet_core::cube::TangentWarp;
 use planet_generators::global::{bake, GLOBAL_VERSION};
 use planet_generators::ocean::{tiled_ocean, EARTH_OCEAN_MIN_AREA_FRACTION};
-use planet_generators::water_summary::{summary_of_grid, SummaryCell, WaterSummary, FLAG_OCEAN, FLAG_WET, SUMMARY_IMPLEMENTATION_ID};
+use planet_generators::water_summary::{summary_of_grid, SummaryCell, WaterSummary, FLAG_SEA, SUMMARY_IMPLEMENTATION_ID};
 use planet_world_def::{BodyId, LiquidKindId, SeaParams, WorldDefinition};
 
 const R: f64 = 6_371_000.0;
@@ -51,7 +51,8 @@ fn a_summary() -> WaterSummary {
     // 32 cells in blocks of 4: summary cells of 4, g = 8.
     let mut cells = vec![SummaryCell::EMPTY; 6 * 64];
     for (i, c) in cells.iter_mut().enumerate() {
-        c.flags = [0, FLAG_OCEAN, FLAG_OCEAN | FLAG_WET][i % 3];
+        c.flags = [0, FLAG_SEA, 0][i % 3];
+        c.floor = [0xFFFF, 0, 24_100][i % 3];
         if i % 5 == 0 {
             c.band_elevation_m = i as f32 * 0.5 - 40.0;
         }
@@ -67,19 +68,19 @@ fn the_summary_payload_round_trips_and_a_hostile_payload_is_refused_without_allo
     assert_eq!(bytes[0], SUMMARY_CODEC_VERSION);
     assert_eq!(u32::from_le_bytes(bytes[1..5].try_into().unwrap()), 32);
     assert_eq!(u32::from_le_bytes(bytes[5..9].try_into().unwrap()), 4);
-    assert_eq!(u32::from_le_bytes(bytes[9..13].try_into().unwrap()), 5 * 6 * 64);
+    assert_eq!(u32::from_le_bytes(bytes[9..13].try_into().unwrap()), 7 * 6 * 64);
     let back = decode_summary(&bytes).unwrap();
     assert_eq!((back.res(), back.block_cells()), (32, 4));
     assert_eq!(
-        back.cells().iter().map(|c| (c.flags, c.band_elevation_m.to_bits())).collect::<Vec<_>>(),
-        s.cells().iter().map(|c| (c.flags, c.band_elevation_m.to_bits())).collect::<Vec<_>>(),
-        "every flag and every elevation, infinities included, bit for bit"
+        back.cells().iter().map(|c| (c.flags, c.band_elevation_m.to_bits(), c.floor)).collect::<Vec<_>>(),
+        s.cells().iter().map(|c| (c.flags, c.band_elevation_m.to_bits(), c.floor)).collect::<Vec<_>>(),
+        "every flag, every elevation (infinities included) and every floor, bit for bit"
     );
 
     assert!(matches!(decode_summary(&bytes[..9]), Err(BlockCodecError::Short)));
     let mut v = bytes.clone();
-    v[0] = 2;
-    assert_eq!(decode_summary(&v).unwrap_err(), BlockCodecError::SummaryVersion(2));
+    v[0] = 1;
+    assert_eq!(decode_summary(&v).unwrap_err(), BlockCodecError::SummaryVersion(1), "the summary of ADR 0058 has no floor plane");
     // A hostile resolution or block size is refused from the header, before any allocation.
     for (res, cells) in [(0u32, 4u32), (31, 4), (u32::MAX, 4), (1 << 20, 4), (32, 0), (32, 3), (32, 2048), (2, 4), (65536, 1), (65536, 2)] {
         let mut h = bytes.clone();
@@ -93,13 +94,13 @@ fn the_summary_payload_round_trips_and_a_hostile_payload_is_refused_without_allo
     assert!(decode_summary(&bytes[..bytes.len() - 1]).is_err(), "a cut LZ4 block");
     // A flag bit this version does not know.
     let mut forged = Vec::from(&bytes[..13]);
-    let mut planes = vec![0u8; 5 * 6 * 64];
+    let mut planes = vec![0u8; 7 * 6 * 64];
     planes[3] = 0x80;
     forged.extend(lz4_flex::compress(&planes));
     assert!(matches!(decode_summary(&forged).unwrap_err(), BlockCodecError::Summary(m) if m.contains("flag")));
 }
 
-const KNOWN_SUMMARY_KEY: &str = "1162f2bb92e005af8ade819a1b9bf017";
+const KNOWN_SUMMARY_KEY: &str = "ee33f67f1a06c2e8f9ebaf6b20f05d90";
 
 // spec: STRM-025
 #[test]
@@ -118,7 +119,14 @@ fn the_summary_key_covers_the_bake_the_grid_the_threshold_and_not_the_sea_level(
     );
     let inputs = w.summary_key_inputs(res, cells);
     assert_eq!(inputs.kind, Kind::GlobalWaterSummary);
-    assert_eq!(inputs.implementation_id, format!("{SUMMARY_IMPLEMENTATION_ID}+{}", planet_generators::ocean::OCEAN_IMPLEMENTATION_ID));
+    assert_eq!(
+        inputs.implementation_id,
+        format!(
+            "{SUMMARY_IMPLEMENTATION_ID}+{}+{}",
+            planet_generators::ocean::OCEAN_IMPLEMENTATION_ID,
+            planet_generators::wet_floor::WET_FLOOR_IMPLEMENTATION_ID
+        )
+    );
     assert_eq!(inputs.tile, GlobalWorld::summary_tile());
     assert_eq!(inputs.source, Some(w.stage_key(res)));
     assert_eq!(inputs.output_params.get(&PARAM_RESOLUTION), Some(&cells.to_le_bytes().to_vec()));
@@ -166,7 +174,7 @@ fn a_build_writes_the_summary_once_it_equals_the_in_memory_one_and_does_not_depe
     let (_, ocean) = tiled_ocean(&grid, &TangentWarp, 4, 2, EARTH_OCEAN_MIN_AREA_FRACTION).unwrap();
     let mem = summary_of_grid(&grid, &ocean, 4, 2).unwrap();
     assert_eq!(a.cells(), mem.cells());
-    assert!(a.cells().iter().any(|c| c.flags & FLAG_WET != 0) && a.cells().iter().any(|c| c.flags & FLAG_OCEAN == 0));
+    assert!(a.cells().iter().any(|c| c.floor == 0) && a.cells().iter().any(|c| c.flags & FLAG_SEA == 0));
     assert_eq!(water_summary_of_store(&s1, &w, res, 2).unwrap().cells(), a.cells());
     // A second build writes nothing: no block, no ocean block, no summary.
     let again = build_global(one.path(), &w, res, 2, DEFAULT_MAX_PACK_BYTES).unwrap();
@@ -228,7 +236,7 @@ fn verify_names_the_cell_of_a_wrong_summary_a_damaged_one_and_the_stale_one() {
     let good = load_water_summary(&store, &w, res).unwrap();
     // One cell wrong under the right key and metadata (appended after the good record: the later record of a key wins).
     let mut cells = good.cells().to_vec();
-    cells[10].flags ^= FLAG_WET;
+    cells[10].flags ^= FLAG_SEA;
     let wrong = w.summary_record(&WaterSummary::from_cells(res, 4, cells).unwrap()).unwrap();
     let mut writer = PackWriter::open(d.path(), w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
     writer.append(&wrong).unwrap();
