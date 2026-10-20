@@ -465,3 +465,57 @@ fn a_region_of_mode_2_over_the_point_cuts_a_brush_like_every_item_of_its_layer()
     let outside = at_distance(unit(20.0, 30.0), unit(19.5, 30.0), 100.0);
     assert!(height_over(&cut, outside, 50.0) > 50.0, "and outside it the raise acts");
 }
+
+// spec: GEN-030
+#[test]
+fn a_brush_over_a_stamp_acts_on_the_stamped_height_and_a_flatten_ends_at_its_target_whatever_the_hill_below() {
+    // The stamp stage under the brush stage, as the editor stacks them: a hill in "stamps", a brush in "brush" above it.
+    let hill = |amount: f64| {
+        ItemSpec {
+            id: 9,
+            layer: "stamps".into(),
+            priority: 0,
+            dir: unit(20.01, 30.0),
+            content_hash: 0,
+            reach_m: 3_000.0,
+            max_delta_m: amount.abs(),
+            stamp: None,
+        }
+        .with_stamp(Stamp::new(StampKind::Hill, [amount, 0.0, 0.0]))
+    };
+    let line = [(20.0, 30.0), (20.02, 30.0)];
+    let stack = |hill_m: f64, strokes: &[Stroke]| {
+        let def = world(&[hill(hill_m), brush(1, strokes)]);
+        let reader = Arc::clone(&def) as Arc<dyn planet_generators::stamp::ItemReader>;
+        let lower = Arc::new(StampStage::new(Arc::new(Reference(1)), Arc::clone(&reader), BodyId::PLANET, "stamps", 0, 1).unwrap());
+        let upper = StampStage::new(Arc::clone(&lower) as Arc<dyn HeightField>, reader, BodyId::PLANET, LAYER, 1, 1).unwrap();
+        (lower, upper)
+    };
+    let on = unit(20.01, 30.0);
+    let beside = at_distance(on, east_of(on), 100.0);
+    let far = at_distance(on, east_of(on), 1_500.0);
+
+    // A raise adds its strength on the line and its weight beside it, over the stamped height, whatever the hill.
+    for hill_m in [-80.0, 0.0, 40.0, 250.0] {
+        let (low, up) = stack(hill_m, &[stroke(BrushKind::Raise, 200.0, 8.0, None, &line)]);
+        close(up.height(on) - low.height(on), 8.0, "on the line");
+        close(up.height(beside) - low.height(beside), 8.0 * 0.5625, "beside the line");
+        assert_eq!(up.height(far).to_bits(), low.height(far).to_bits(), "beyond the brush's radius the stack is the stamp's");
+    }
+    // The stamp is really there under the brush: a hill of 250 m is higher at its middle than one of -80 m by their difference.
+    let (low_hi, up_hi) = stack(250.0, &[stroke(BrushKind::Raise, 200.0, 8.0, None, &line)]);
+    let (low_lo, up_lo) = stack(-80.0, &[stroke(BrushKind::Raise, 200.0, 8.0, None, &line)]);
+    close(low_hi.height(on) - low_lo.height(on), 330.0, "the hill's own height difference at its middle");
+    close(up_hi.height(on) - up_lo.height(on), 330.0, "kept through the brush, which adds the same to both");
+
+    // A flatten with a strength above the gap lands on its target on the line, from above or from below the hill.
+    let target = 1_000.0;
+    for hill_m in [-80.0, 250.0] {
+        let (low, up) = stack(hill_m, &[stroke(BrushKind::Flatten, 200.0, 10_000.0, Some(target), &line)]);
+        close(up.height(on), target, "the flatten reaches its target on the line");
+        assert!((low.height(on) - target).abs() > 1.0, "and the stamp stage alone does not ({})", low.height(on));
+    }
+    // A small strength moves from the stamped height by exactly that much towards the target.
+    let (low, up) = stack(250.0, &[stroke(BrushKind::Flatten, 200.0, 3.0, Some(target), &line)]);
+    close(up.height(on) - low.height(on), 3.0, "a small flatten steps from the stamped height towards the target");
+}
