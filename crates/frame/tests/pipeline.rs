@@ -440,12 +440,33 @@ fn a_plan_refusal_for_other_lod_parameters_than_the_frames_is_dropped_and_counte
     pipe.begin_frame(&good, &everything).expect("a second refusal for other parameters does not end the frame either");
     assert_eq!(pipe.dropped_plan_errors(), 2);
 
-    // A refusal for the frame's own parameters is still returned (it is the frame's error).
+    // A refusal for the frame's own parameters degrades the frame: it keeps the plan in hand, is counted and reported once, never an error.
     pipe.begin_frame(&bad, &everything).unwrap();
     spawner.run(2);
-    let e = pipe.begin_frame(&bad, &everything).unwrap_err();
-    assert!(e.starts_with("plan for frame") && e.contains("invalid LOD parameters"), "{e}");
-    assert_eq!(pipe.dropped_plan_errors(), 2, "that one was returned, not dropped");
+    let f = pipe.begin_frame(&bad, &everything).expect("the frame's own refusal does not end the window");
+    assert!(!f.draw.plan.nodes.is_empty(), "the frame still draws");
+    let said = pipe.take_refusal().expect("the refusal is reported");
+    assert!(said.starts_with("plan for frame") && said.contains("invalid LOD parameters"), "{said}");
+    assert_eq!((pipe.refused_plans(), pipe.dropped_plan_errors()), (1, 2), "counted as refused, not dropped");
+    assert!(pipe.take_refusal().is_none(), "reported once");
+}
+
+// spec: VIEW-032
+#[test]
+fn a_refusal_with_no_plan_in_hand_still_draws_and_the_same_refusal_is_reported_once() {
+    let spawner = Arc::new(ManualSpawner::default());
+    let mut pipe = PlanPipeline::new(worker(spawner.clone(), 1));
+    let everything = Everything::new();
+    let mut bad = request(camera_at(300.0, 0.0));
+    bad.lod.tau_px = 200.0;
+    pipe.begin_frame(&bad, &everything).unwrap();
+    spawner.run(2);
+    for _ in 0..3 {
+        pipe.begin_frame(&bad, &everything).expect("a refusal with nothing in hand does not end the window");
+    }
+    assert!(pipe.refused_plans() >= 1);
+    assert!(pipe.take_refusal().is_some());
+    assert!(pipe.take_refusal().is_none());
 }
 
 // spec: STRM-016

@@ -602,6 +602,10 @@ impl App<'_> {
                     st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer })
                 })?;
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
+            // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
+            if let Some(why) = st.rig.managed.take_plan_refusal() {
+                eprintln!("warning: {why}\n  the window keeps the last plan and goes on");
+            }
             // F9: the camera path of the last minute and the repro bundle of this frame (VIEW-024).
             if st.viewer.take_repro_request() {
                 match self.save_repro(&st, camera, view) {

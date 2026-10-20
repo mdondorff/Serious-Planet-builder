@@ -324,6 +324,11 @@ impl ManagedLoop {
         &self.pipe
     }
 
+    /// A refusal of the plan not reported yet, once (see [`PlanPipeline::take_refusal`]).
+    pub fn take_plan_refusal(&mut self) -> Option<String> {
+        self.pipe.take_refusal()
+    }
+
     pub fn manager(&self) -> &ResidencyManager<CompactTile> {
         &self.manager
     }
