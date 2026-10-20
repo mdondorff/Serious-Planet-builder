@@ -216,9 +216,14 @@ impl EditRuntime {
         // What the generator has is the definition as it was given, before the items of the directory are loaded into the editor's copy.
         let published = editor.revision();
         let feed = PreviewFeed::new(Arc::new(editor.definition().clone()));
-        let loaded = editor.load(BodyId::PLANET).map_err(|e| format!("loading the items: {e}"))?;
+        let report = editor.load_report(BodyId::PLANET).map_err(|e| format!("loading the items: {e}"))?;
+        let loaded = report.loaded;
         let mut session = Session::new(editor, BodyId::PLANET, radius_m);
-        session.set_status(if loaded > 0 { format!("{loaded} edits loaded") } else { String::new() });
+        session.set_status(match (loaded, report.restaged.len()) {
+            (0, _) => String::new(),
+            (n, 0) => format!("{n} edits loaded"),
+            (n, k) => format!("{n} edits loaded, {k} re-keyed under the current stage version"),
+        });
         Ok(EditRuntime {
             interaction: Interaction::new(layout.handle_hit_px),
             panels: PanelState::new(&layout),

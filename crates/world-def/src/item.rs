@@ -447,8 +447,11 @@ impl Item {
         if self.generator_version != active.generator_version {
             differences.push(format!("generator version {} (active {})", self.generator_version, active.generator_version));
         }
-        if self.stage_version != active.stage_version {
-            differences.push(format!("stage version {} (active {})", self.stage_version, active.stage_version));
+        // An item authored against an older stage loads and is re-keyed under the active one ([`Item::restaged`]); a newer stage than the
+        // build knows is refused.
+        if self.stage_version > active.stage_version {
+            differences
+                .push(format!("stage version {} (active {}; a newer stage cannot be loaded)", self.stage_version, active.stage_version));
         }
         if self.base_hash != active.base_hash {
             differences.push(format!("base hash {:016x} (active {:016x})", self.base_hash, active.base_hash));
@@ -458,6 +461,18 @@ impl Item {
         } else {
             Err(VersionMismatch { id: self.id, differences })
         }
+    }
+
+    /// Whether the item was authored against an older stage version than the active one (AUTH-002): it loads, re-keyed.
+    pub fn is_older_stage(&self, active: &ActiveVersions) -> bool {
+        self.stage_version < active.stage_version
+    }
+
+    /// The item re-keyed under the active stage version: its recorded stage version is the active one (its content hash changes, the
+    /// stamp it makes does not).
+    pub fn restaged(mut self, active: &ActiveVersions) -> Item {
+        self.stage_version = active.stage_version;
+        self
     }
 
     // ----- the file
