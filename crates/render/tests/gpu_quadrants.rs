@@ -161,9 +161,9 @@ fn a_node_drawn_over_some_quadrants_covers_exactly_those_quadrants_of_its_tile()
     };
     let with_nodes = |nodes: Vec<TerrainDraw>| TerrainPlan { nodes, ..plan(0b1111) };
     let alone_masked = lit(0b0110);
-    let east_alone = lit_pixels(&ctx, &[&data, &east_data], &with_nodes(vec![east_node.clone()]));
+    let east_alone = lit_pixels(&ctx, &[&data, &east_data], &with_nodes(vec![east_node]));
     let expect: BTreeSet<(u32, u32)> = alone_masked.union(&east_alone).copied().collect();
-    for nodes in [vec![node(0b0110), east_node.clone()], vec![east_node.clone(), node(0b0110)]] {
+    for nodes in [vec![node(0b0110), east_node], vec![east_node, node(0b0110)]] {
         let mixed = lit_pixels(&ctx, &[&data, &east_data], &with_nodes(nodes));
         assert!(!east_alone.is_empty() && !alone_masked.is_empty());
         assert_eq!(mixed, expect, "the whole node and the masked node together draw what each draws alone");
