@@ -11,7 +11,7 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 |---|---|---|---|
 | SPIKE-08 | Ocean connectivity at 16384 | closed 2026-10-16 | `spikes/ocean-connectivity/results/` |
 | SPIKE-09 | Atmosphere f32 forms | closed | `spikes/atmosphere-f32/results/` |
-| SPIKE-21 | The wet floor of ADR 0071: cost and memory of the three passes | open | `spikes/wet-floor/results/` |
+| SPIKE-21 | The wet floor of ADR 0071: cost and memory of the three passes | closed 2026-10-20 (recommendation: implement option C) | `spikes/wet-floor/results/` |
 | SPIKE-17 | Two bugs of the owner's descent video: the atmosphere top, the sea edge (diagnosis) | closed 2026-10-20 (causes: far terrain hazed differently inside and outside the top, fixed in #404; the 100 km reach of the coastal band, see SPIKE-20 results) | `spikes/descent-video-bugs/results/`, `spikes/owner-captures-2026-10-20/results/` |
 | SPIKE-18 | The drawn tiles go coarser for a moment during a slow approach (diagnosis) | closed 2026-10-20 (cause: the cover splits a tile only if every in-view child is resident) | `spikes/tile-coarsening/results/` |
 | SPIKE-19 | The window aborts on a refused morph interval (diagnosis) | closed 2026-10-20 (cause: the coarse LOD factor sits at the validate limit, the plan adds the height extent) | `spikes/morph-refusal/results/` |
@@ -31,15 +31,17 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 The explorations before 2026-10-17 had no register entry; from now on every exploration gets a `SPIKE-NN` entry.
 
 ## SPIKE-21 The wet floor of ADR 0071: cost and memory of the three passes
-Status: open
+Status: closed
 Opened: 2026-10-20
+Closed: 2026-10-20
 Question: Do the three passes of ADR 0071 point 3 (per-block union-find with border minimum-spanning edges, one global pass, per-block bucketed priority flood) fit the budget on the 256-cell and the 16384-cell bake: the time on 20 threads, the merger memory (edges per block against the 4,097 bound), the stored size with LZ4, and the equality with a serial priority flood?
 Why it matters: ADR 0071 point 3 is provisional on it; if the memory or the time is out of reach the fallback is option B (one bit per vertex, keyed by the bound).
 Time box: 1 day of agent work.
 Success criteria: the three passes bit-equal to the serial flood on the 256-cell bake and on a 1024-cell bake at several block sizes and thread counts; measured wall time and peak memory of each pass at 16384 cells (a timing measurement, not `cargo xtask perf`); the edges per block at most 4,097; the stored kind-6 size.
 Fallback if it fails: option B of ADR 0071 (a bit per vertex keyed by the bound).
 Code location: branch `spike/wet-floor` (results in spikes/wet-floor/results/); the production code is the change that implements ADR 0071.
-Result: (open)
+Result: the three passes equal the serial priority flood (random grids with NaN, real bakes, block sizes 1 to the whole face, 1 and 3 threads; 0 mismatches at 256 and 1024 cells). On the stored 16384-cell bake, 20 threads: 29.7 to 32.0 s in all (pass a 17.3 to 17.8, b 1.2 to 1.4, c 11.2 to 12.8), 6,291,155 border edges (at most 4,096 per block, bound 4,097), 151 MB held, peak working set 654 MB; the u16 floors are 0.19 GB with LZ4 (3.2 GB raw). The ADR estimates were pessimistic on time (3 to 5 minutes) and right on memory.
+Recommendation: implement ADR 0071 as decided (option C); option B is not needed. Details: spikes/wet-floor/results/results.md.
 
 ## SPIKE-16 Dark patches over the sea while the camera moves (water-motion-gap)
 Status: closed
