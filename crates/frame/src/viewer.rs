@@ -524,6 +524,35 @@ impl FrameStats {
     }
 }
 
+/// The input state the title ends with, so that a camera that does not answer the keys can be told apart from keys that do not arrive:
+/// the keys the viewer holds down (`W` `A` `S` `D` `Q` `E`, arrows as `<` `>` `^` `v`, `+` for the boost; `-` when none), whether the
+/// pointer is captured for looking around and whether the globe overview is shown.
+pub fn input_text(held: &Held, captured: bool, globe: bool) -> String {
+    let keys: String = [
+        (held.forward, 'W'),
+        (held.left, 'A'),
+        (held.back, 'S'),
+        (held.right, 'D'),
+        (held.down, 'Q'),
+        (held.up, 'E'),
+        (held.look_left, '<'),
+        (held.look_right, '>'),
+        (held.look_up, '^'),
+        (held.look_down, 'v'),
+        (held.boost, '+'),
+    ]
+    .iter()
+    .filter(|(on, _)| *on)
+    .map(|(_, c)| *c)
+    .collect();
+    format!(
+        "keys {} | pointer {}{}",
+        if keys.is_empty() { "-".to_string() } else { keys },
+        if captured { "captured" } else { "free" },
+        if globe { " | overview" } else { "" }
+    )
+}
+
 /// What the title shows.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TitleInfo {
@@ -1281,6 +1310,65 @@ mod tests {
         v.command(Command::ToggleGlobe, 90_000, &c);
         assert!(v.globe.is_some() && v.is_free());
         assert!(KEYS_HELP.contains("globe overview"), "{KEYS_HELP}");
+    }
+
+    // spec: VIEW-034
+    #[test]
+    fn the_title_tells_the_held_keys_the_pointer_and_the_overview() {
+        assert_eq!(input_text(&Held::default(), false, false), "keys - | pointer free");
+        let held = Held { forward: true, left: true, boost: true, look_up: true, ..Held::default() };
+        assert_eq!(input_text(&held, true, true), "keys WA^+ | pointer captured | overview");
+    }
+
+    // spec: VIEW-034
+    #[test]
+    fn the_movement_keys_move_the_free_camera_after_the_overview_was_shown_and_left_or_flown_into() {
+        use crate::globe::{Marker, Viewport};
+        use crate::pick::PickLimits;
+        const R: f64 = 6_371_000.0;
+        let c = camera_for_tests();
+        let cameras = [c];
+        let params = ControllerParams::for_radius(R);
+        let (height, ground) = (|p: planet_core::PlanetFixed| p.0.length() - R, |_: planet_core::PlanetFixed| R);
+        let mut v = ViewerState::new(0, 3, 0, true).with_lit(true).with_radius_m(R);
+        let step = |v: &mut ViewerState, now: u64| v.camera(&cameras, now, 0.1, &params, &height, &ground);
+        let moved = |v: &mut ViewerState, now: u64| {
+            v.held.forward = true;
+            let before = step(v, now).position.0;
+            let after = step(v, now + 100).position.0;
+            v.held.forward = false;
+            (after - before).length()
+        };
+        v.command(Command::ToggleCamera, 5, &c);
+        assert!(moved(&mut v, 10) > 0.0, "W moves the free camera");
+        // G and G again: the free camera is as it was and W moves it.
+        v.command(Command::ToggleGlobe, 200, &c);
+        v.command(Command::ToggleGlobe, 210, &c);
+        assert!(v.globe.is_none() && v.is_free());
+        assert!(moved(&mut v, 300) > 0.0, "W moves the free camera after G and G");
+        // A key held through the overview is still held after it.
+        v.held.forward = true;
+        v.command(Command::ToggleGlobe, 400, &c);
+        step(&mut v, 410);
+        v.command(Command::ToggleGlobe, 420, &c);
+        let (a, b) = (step(&mut v, 430).position.0, step(&mut v, 530).position.0);
+        assert!((b - a).length() > 0.0, "a key held across the overview keeps moving the camera");
+        v.held.forward = false;
+        // The overview, a click flight on a marker, and the landing: W moves the camera that landed.
+        v.command(Command::ToggleGlobe, 600, &c);
+        let marker = Marker { id: 9, dir: v.globe.unwrap().view.center, radius_m: 2_000.0 };
+        let viewport = Viewport { width_px: 1600.0, height_px: 900.0 };
+        let cam = step(&mut v, 610);
+        let at = crate::globe::visible_markers(&cam, &[marker], R, viewport)[0].pixel;
+        let flat = |_: planet_core::Vec3| 0.0;
+        v.globe.as_mut().unwrap().click(at, &cam, viewport, &[marker], &PickLimits::new(R, 9_000.0), &flat).unwrap();
+        let mut now = 700;
+        while v.globe.is_some() && now < 100_000 {
+            v.camera(&cameras, now, 0.05, &params, &height, &ground);
+            now += 50;
+        }
+        assert!(v.globe.is_none() && v.is_free(), "the flight landed");
+        assert!(moved(&mut v, now + 100) > 0.0, "W moves the camera that landed");
     }
 
     // spec: VIEW-013

@@ -55,6 +55,13 @@ const GPU_SAMPLE_PERIOD: Duration = Duration::from_secs(1);
 /// The pre-fill levels the readiness report counts (ADR 0045 point 3 default).
 const READINESS_PREFILL_LEVELS: u8 = 4;
 
+/// Whether a key press is the camera's and the commands': it is when the world gets it (no text field has the focus), and always while the
+/// pointer is captured (looking around: the cursor is hidden and cannot have clicked into a field, so a focus left over from before the
+/// capture must not swallow the movement keys).
+pub fn key_goes_to_world(world: bool, captured: bool) -> bool {
+    world || captured
+}
+
 /// The command a key press asks for, if any.
 pub fn key_command(code: KeyCode) -> Option<Command> {
     Some(match code {
@@ -929,9 +936,10 @@ fn title_text(st: &Running, now_ms: u64) -> String {
         exposure: st.exposure.filter(|_| st.viewer.lit),
         readiness: st.readiness,
     };
+    let input = planet_frame::viewer::input_text(&st.viewer.held, st.viewer.mouse.captured(), st.viewer.globe.is_some());
     match &st.notice {
-        Some((text, until)) if now_ms < *until => format!("{} | {text}", title(&info)),
-        _ => title(&info),
+        Some((text, until)) if now_ms < *until => format!("{} | {input} | {text}", title(&info)),
+        _ => format!("{} | {input}", title(&info)),
     }
 }
 
@@ -1042,7 +1050,7 @@ impl ApplicationHandler for App<'_> {
                 if let Some(st) = self.state.as_mut() {
                     // A key the UI took (a text field has the focus): the camera and the commands get no press. A release still lets go
                     // of a held key, so none stays down. Esc with the mouse captured is the camera's.
-                    if !world && down && !(code == KeyCode::Escape && st.viewer.mouse.captured()) {
+                    if !key_goes_to_world(world, st.viewer.mouse.captured()) && down {
                         return;
                     }
                     // Esc with the mouse captured releases it and does not quit (VIEW-010).
@@ -1196,6 +1204,10 @@ fn apply_grab(st: &mut Running) {
     }
     match change {
         Some(GrabChange::Capture) => {
+            // A field that kept the focus would take the movement keys of the look that starts now.
+            if let Some(ui) = st.ui.as_mut() {
+                ui.release_keyboard_focus();
+            }
             let mode = |g: &Grab| match g {
                 Grab::Locked => CursorGrabMode::Locked,
                 Grab::Confined => CursorGrabMode::Confined,
@@ -1618,6 +1630,12 @@ mod tests {
         // The keys that reach them: C and G map to those commands, and Esc to quit (which the editor's Esc takes first).
         assert_eq!(key_command(KeyCode::KeyC), Some(Command::ToggleCamera));
         assert_eq!(key_command(KeyCode::KeyG), Some(Command::ToggleGlobe));
+        // spec: VIEW-034
+        // A key goes to the camera when no text field has the focus, and always while the pointer is captured for looking around.
+        assert_eq!(
+            [(true, false), (true, true), (false, true), (false, false)].map(|(world, captured)| key_goes_to_world(world, captured)),
+            [true, true, true, false]
+        );
         assert_eq!(edit_key(KeyCode::Escape, None, false, false), Some(EditKey::Escape));
     }
 

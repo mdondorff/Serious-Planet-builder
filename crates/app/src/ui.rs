@@ -22,6 +22,15 @@ pub struct Router {
     latched: Option<Target>,
 }
 
+/// Take the keyboard focus from the widget that has it, if any.
+pub fn release_focus(ctx: &egui::Context) {
+    ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+}
+
 fn over_ui(ctx: &egui::Context) -> Target {
     if ctx.egui_wants_pointer_input() || ctx.is_pointer_over_egui() {
         Target::Ui
@@ -184,6 +193,11 @@ impl EditorUi {
     pub fn release_buttons(&mut self) {
         let pos = self.ctx.pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
         self.winit.egui_input_mut().events.extend(release_all_buttons(pos));
+    }
+
+    /// Take the keyboard focus from the widget that has it (a text field the user clicked into): the keys are the camera's again.
+    pub fn release_keyboard_focus(&mut self) {
+        release_focus(&self.ctx);
     }
 
     /// Hand a window event to egui. Returns what the camera may do with it: `true` when the world gets it (egui did not consume it

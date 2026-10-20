@@ -1,0 +1,1 @@
+- 2026-10-20 **keys-after-globe** (sonnet-crusader, owner-reported; VIEW-034): while the pointer is captured for looking around every key is the camera's and starting the capture takes the keyboard focus from a text field that kept it (the movement keys were dropped as the field's); the viewer itself was fine after G (tier A).
