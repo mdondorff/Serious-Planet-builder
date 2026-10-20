@@ -8,7 +8,7 @@ fn run(args: &[&str]) -> Result<String, String> {
     planet::run(&args, &mut buf).map(|_| String::from_utf8(buf).unwrap())
 }
 
-// spec: TEST-019, TEST-041
+// spec: TEST-019, TEST-041, TEST-042
 #[test]
 fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
     let logs = std::env::temp_dir().join(format!("planet-edit-perf-{}", std::process::id()));
@@ -69,4 +69,23 @@ fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
         assert_eq!(n(5), n(6) + n(7), "named = drawn + resident only: {c:?}");
     }
     assert!(table.contains("change below spacing"), "edit-latency.md holds the refreshed-set table: {table}");
+
+    // The brush case (TEST-042): one raise stroke of 20 points at 150 m and 200 m altitude, after the hill case on the same rig. The scene
+    // completed (it errors when an edit never became exact), the budget table has its row with an exact time, and the stages table prints
+    // its numbers and the pre-emption counts.
+    let brush = out.lines().find(|l| l.starts_with("| 200 m | 150 m brush |")).unwrap_or_else(|| panic!("no brush row: {out}"));
+    let cells: Vec<&str> = brush.split('|').map(str::trim).collect();
+    assert!(cells[5] != "-", "the brush edit became exact: {brush}");
+    let stages =
+        out.lines().filter(|l| l.starts_with("| 200 m | 150 m brush |")).nth(1).unwrap_or_else(|| panic!("no brush stages row: {out}"));
+    let cells: Vec<&str> = stages.split('|').map(str::trim).collect();
+    for i in [3, 4, 5, 14, 15, 16, 17, 18, 19, 20] {
+        assert!(cells[i].parse::<f64>().is_ok(), "column {i} of the brush stages row is a number: {stages}");
+    }
+    assert!(table.contains("| 200 m | 150 m brush |"), "edit-latency.md holds the brush row: {table}");
+    // The brush has no preview (the preview does not show a brush); the refreshed set by level has rows for it.
+    assert!(
+        out.lines().any(|l| l.starts_with("| 200 m | 150 m brush | ") && l.split('|').count() == 10),
+        "a refreshed-set row of the brush: {out}"
+    );
 }
