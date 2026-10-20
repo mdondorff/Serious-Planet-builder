@@ -775,14 +775,14 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
         match a.as_str() {
             "--smoke" => smoke = true,
             "--machine-ready" | "--allow-memory-bake" | "--lit" => tail.push(a.clone()),
-            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" => {
+            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());
             }
             other => {
                 return Err(format!(
-                    "unknown perf stream option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out, --upload per-slot|batched, --prefill-levels N, --lit (the lit path with the atmosphere and water, TEST-025), --gen-workers N, --gen-ahead N, --gen-reserve N, --gen-priority below-normal|normal, --smoke, --machine-ready, the owner's override of a failed readiness gate)"
+                    "unknown perf stream option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out, --upload per-slot|batched, --prefill-levels N, --lit (the lit path with the atmosphere and water, TEST-025), --gen-workers N, --gen-ahead N, --gen-reserve N, --gen-priority below-normal|normal, --settle-ms N (the refresh settle window of the edit-latency scene, default 25), --smoke, --machine-ready, the owner's override of a failed readiness gate)"
                 ))
             }
         }
@@ -1003,6 +1003,9 @@ mod tests {
         let at = a.iter().position(|x| x == "--scene").unwrap();
         assert_eq!(a[at + 1], "edit-latency");
         assert!(a.contains(&"--perf".to_string()) && a.contains(&"hardware".to_string()) && a.contains(&"D:/bake".to_string()));
+        let settled = perf_stream_args(&s(&["edit-latency", "--store", "D:/bake", "--settle-ms", "0"])).unwrap();
+        let at = settled.iter().position(|x| x == "--settle-ms").unwrap();
+        assert_eq!(settled[at + 1], "0", "the settle window of the edit-latency scene is passed on (ADR 0072)");
         let smoke = perf_stream_args(&s(&["edit-latency", "--smoke"])).unwrap();
         assert!(smoke.contains(&"--perf-smoke".to_string()) && smoke.contains(&"software".to_string()));
         assert!(!STREAM_SCENES.contains(&EDIT_SCENE), "`perf stream all` does not run it");

@@ -213,6 +213,22 @@ fn the_refreshes_of_drawn_tiles_are_dispatched_before_those_of_the_other_classes
 
 // spec: STRM-031
 #[test]
+fn a_refresh_the_window_holds_counts_as_queued_for_the_caller_once() {
+    let (mut s, sp, _, _) = fixture(2);
+    let t = id(2, 3, 1, 2);
+    let wants = [(t, 1.0)];
+    settle(&mut s, &sp, &wants, t);
+    for _ in 0..4 {
+        s.begin_frame(&wants);
+    }
+    s.set_refresh_settle(40);
+    assert_eq!(s.refresh(&[t]), 1, "held counts as queued: the caller's refreshed-tiles figure is not 0");
+    assert_eq!(s.refresh(&[t]), 0, "the second finds it held");
+    assert_eq!(s.held_refreshes(), 1);
+}
+
+// spec: STRM-031
+#[test]
 fn a_refresh_that_finds_a_held_entry_and_a_stopped_job_is_one_coalesced_refresh() {
     let (mut s, sp, source, clock) = fixture(2);
     let t = id(2, 3, 1, 2);

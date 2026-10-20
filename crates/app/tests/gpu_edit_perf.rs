@@ -51,9 +51,9 @@ fn the_edit_latency_scene_runs_end_to_end_in_smoke_mode_and_prints_its_table() {
     for i in [3, 4, 5, 14, 15, 16, 17, 18, 19, 20] {
         assert!(cells[i].parse::<f64>().is_ok(), "column {i} of the stages row is a number: {stages}");
     }
-    // ADR 0072: the settle window (the editor's 40 ms by default) and the three pre-emption counts are in the row.
+    // ADR 0072: the settle window (the editor's 25 ms by default) and the three pre-emption counts are in the row.
     assert!(out.contains("| settle ms | coalesced | cancelled | dropped |"), "{out}");
-    assert_eq!(cells[17], "40", "the default settle window: {stages}");
+    assert_eq!(cells[17], "25", "the default settle window: {stages}");
     assert!(table.contains("set_definition call"), "edit-latency.md holds both tables: {table}");
     // The refreshed set by level (TEST-041): at least one row of the case, named = drawn + resident only.
     assert!(
