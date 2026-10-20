@@ -572,12 +572,14 @@ The keys of the mode, taken by the letter on the key where a letter is meant (so
 | `1` | select tool |
 | `2`, `3`, `4` | crater, hill, plateau tool |
 | `5`, `6`, `7` | ridge, channel, region tool (VIEW-029, VIEW-031) |
+| `8`, `9`, `0`, `-` | brush: raise, lower, smooth, flatten (VIEW-035) |
 | Enter | finish the line or region being drawn |
 | Backspace | take the last point of the line or region being drawn back; it never deletes an edit |
 | Ctrl+Z | undo |
 | Ctrl+Y, Ctrl+Shift+Z | redo |
 | Delete | delete the selected edit |
 | F1, `?` | the list of keys |
+| every key above, the viewer's keys (VIEW-003) and the free camera's | named in `EDIT_KEYS_HELP`, the usage text of the mode; a test over the key tables fails when a bound key is not named |
 | Esc | step back (above) |
 
 Fly to puts the free camera south of the edit looking at it, pitched down:
