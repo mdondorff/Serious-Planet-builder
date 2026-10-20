@@ -44,6 +44,10 @@ fn new_item(i: u64) -> NewItem {
         ]),
         name: (i.is_multiple_of(3)).then(|| format!("item {i}")),
         notes: None,
+        points: Vec::new(),
+        group: None,
+        part: None,
+        mask_layer: None,
     }
 }
 

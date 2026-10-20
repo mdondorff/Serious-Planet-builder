@@ -287,6 +287,10 @@ impl<S: ItemStore> Session<S> {
             params,
             name: Some(format!("{} {count}", params::kind_title(kind))),
             notes: None,
+            points: Vec::new(),
+            group: None,
+            part: None,
+            mask_layer: None,
         };
         let (id, affected) = self.editor.put(new)?;
         self.selection = Some(id);
