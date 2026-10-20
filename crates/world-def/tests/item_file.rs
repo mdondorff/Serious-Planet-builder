@@ -31,6 +31,7 @@ fn item(id: u128) -> Item {
         group: None,
         part: None,
         mask_layer: None,
+        strokes: Vec::new(),
     }
 }
 
@@ -643,6 +644,7 @@ fn a_pinned_item_has_a_pinned_canonical_text_and_content_hash() {
         group: None,
         part: None,
         mask_layer: None,
+        strokes: Vec::new(),
     };
     let text = it.to_toml().unwrap();
     assert_eq!(

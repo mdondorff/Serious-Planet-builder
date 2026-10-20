@@ -1529,7 +1529,7 @@ mod tests {
         assert_eq!(k(KeyCode::Digit1, None, false, false), Some(Tool(1)));
         assert_eq!(k(KeyCode::Digit4, None, false, false), Some(Tool(4)));
         assert_eq!(k(KeyCode::Delete, None, false, false), Some(Delete));
-        // Backspace takes the last point of a line being drawn back, else deletes (the editor decides which).
+        // Backspace takes the last point of a line being drawn back and never deletes an edit; Delete does.
         assert_eq!(k(KeyCode::Backspace, None, false, false), Some(Back));
         assert_eq!(k(KeyCode::Escape, None, false, false), Some(Escape));
         // The line and region tools, finishing, and the key list (VIEW-031).

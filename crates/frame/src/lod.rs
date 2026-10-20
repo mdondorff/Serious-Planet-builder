@@ -36,6 +36,21 @@ pub struct LodParams {
     pub cull_horizon: bool,
 }
 
+/// How much of the morph interval of every level [`LodParams::coarse`] keeps beyond what [`LodParams::validate`] needs, as a share of the
+/// level's end distance: the plan adds the height extent of a tile's neighbours to the interval's start, and a coarse view that sat exactly
+/// on the limit was refused by it (SPIKE-19).
+pub const COARSE_MARGIN: f64 = 0.01;
+
+/// The levels [`LodParams::coarse`] checks against the plan's own start are those whose node radius is at least this many times the
+/// body's greatest height: there a tile is large against the heights, the volume of its neighbourhood is bounded by the field's global
+/// range (the only bound a field has for tiles that big), and the plan's start is the worst case the check takes. At finer levels the plan
+/// reads the tile's own height bounds, far below the global one, and the check by the node radius alone is the one that matters. Measured
+/// on the production 1080p parameters (the coarse factor is 2.59 at 4, 2.28 at 1, 1.74 at 0.5 and 1.06 at 0.25 or less) and on a sweep of
+/// poses from 20 km up over a field with only a global bound (SPIKE-19 review): at 4 and at 1 the plan still refused the coarse view at
+/// levels 8 to 10; 0.5 includes them and keeps a coarse view of about 1.7 times the error bound. A refusal that remains falls back to
+/// the base parameters (VIEW-014) and no longer ends the window.
+pub const COARSE_WORST_CASE_RADIUS_FACTOR: f64 = 0.5;
+
 /// The factor of the editor's coarse-LOD inspection switch (VIEW-014): the error bound `tau_px` times this, so the mesh edges are about
 /// four times longer on the screen, where the parameters allow it (see [`LodParams::coarse`]).
 pub const COARSE_LOD_FACTOR: f64 = 4.0;
@@ -48,20 +63,44 @@ impl LodParams {
     /// is valid whenever `self` is.
     pub fn coarse(&self) -> LodParams {
         let at = |factor: f64| LodParams { tau_px: self.tau_px * factor, ..self.clone() };
-        if at(COARSE_LOD_FACTOR).validate().is_ok() {
+        let valid = |p: &LodParams| self.coarse_keeps_the_plan_valid(p);
+        if valid(&at(COARSE_LOD_FACTOR)) {
             return at(COARSE_LOD_FACTOR);
         }
         // The largest valid factor in [1, 4): the validity is monotone in the error bound, so a bisection finds it.
         let (mut ok, mut bad) = (1.0, COARSE_LOD_FACTOR);
         for _ in 0..40 {
             let mid = 0.5 * (ok + bad);
-            if at(mid).validate().is_ok() {
+            if valid(&at(mid)) {
                 ok = mid;
             } else {
                 bad = mid;
             }
         }
         at(ok)
+    }
+
+    /// The levels at which the plan's start with the neighbourhood's height extent is the one that matters ([`COARSE_WORST_CASE_RADIUS_FACTOR`]).
+    pub fn worst_case_levels(&self) -> Vec<u8> {
+        (1..=self.max_level).filter(|l| self.node_radius_bound(*l) >= COARSE_WORST_CASE_RADIUS_FACTOR * self.max_height_m).collect()
+    }
+
+    /// Whether `coarse` (these parameters with a larger error bound) is one the plan accepts wherever it accepts these (SPIKE-19): the
+    /// morph interval of every level stays non-empty with [`COARSE_MARGIN`] to spare ([`validate`](LodParams::validate)'s rule), and at every
+    /// large level ([`COARSE_WORST_CASE_RADIUS_FACTOR`]) where these parameters meet the plan's own start (the neighbourhood's height extent
+    /// added, [`morph_interval_worst`](LodParams::morph_interval_worst)) `coarse` meets it too, with the margin.
+    fn coarse_keeps_the_plan_valid(&self, coarse: &LodParams) -> bool {
+        if coarse.check(COARSE_MARGIN).is_err() {
+            return false;
+        }
+        self.worst_case_levels().into_iter().all(|level| {
+            let (s, e) = self.morph_interval_worst(level);
+            if e - s < 0.05 * e {
+                return true;
+            }
+            let (s, e) = coarse.morph_interval_worst(level);
+            e - s >= (0.05 + COARSE_MARGIN) * e
+        })
     }
 
     /// The factor [`coarse`](LodParams::coarse) applies to the error bound for these parameters (1 when nothing can be coarser).
@@ -167,8 +206,28 @@ impl LodParams {
         (start, end)
     }
 
-    /// Reject parameters for which crack-free morphing is impossible (the morph interval would vanish at some level).
+    /// The morph interval the plan makes at worst for a node of `level >= 1` on a body whose height is at most `max_height_m`
+    /// (`morph_interval_for`): the start also clears the volume of the node's neighbours, whose radius is at most the node radius bound
+    /// grown by the heights (`extent(r (1 + H / R), H)`, the largest the plan ever takes). [`LodParams::morph_interval`] is the same
+    /// without that term.
+    pub fn morph_interval_worst(&self, level: u8) -> (f64, f64) {
+        let h = self.max_height_m;
+        let rho = extent(self.node_radius_bound(level) * (1.0 + h / self.radius_m), h);
+        let end = self.split_distance(level - 1);
+        let start = ((1.0 - self.morph_band) * end).max(self.split_distance(level) + 2.0 * rho);
+        (start, end)
+    }
+
+    /// Reject parameters for which crack-free morphing is impossible (the morph interval would vanish at some level), by the node radius
+    /// alone. The plan adds the height extent of a tile's neighbours to the start where the tile's height bounds are wide (the coarse
+    /// levels over a body with a global bound), so it can still refuse parameters accepted here; [`coarse`](LodParams::coarse) keeps
+    /// that out of the view it derives.
     pub fn validate(&self) -> Result<(), String> {
+        self.check(0.0)
+    }
+
+    /// [`validate`](LodParams::validate) with `margin` (a share of each level's end distance) kept in addition to the 5 % the interval needs.
+    fn check(&self, margin: f64) -> Result<(), String> {
         let per_m = self.shore_ramp_per_m();
         if !(per_m.is_finite() && per_m > 0.0) {
             return Err(format!(
@@ -178,7 +237,7 @@ impl LodParams {
         }
         for level in 1..=self.max_level {
             let (start, end) = self.morph_interval(level);
-            if end - start < 0.05 * end {
+            if end - start < (0.05 + margin) * end {
                 return Err(format!(
                     "level {level}: morph interval [{start:.1}, {end:.1}] m is empty; increase viewport_h_px / tau_px or reduce cells (need viewport_h_px / tau_px > about {:.0} for {} cells)",
                     2.0 * self.cells as f64,

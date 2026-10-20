@@ -63,7 +63,7 @@ pub const HELP_KEYS: [(&str, &str); 16] = [
     ("7", "draw a region"),
     ("click", "add a point (line and region tools), else select"),
     ("Enter", "finish the line or region"),
-    ("Backspace", "take the last point back (drawing), else delete"),
+    ("Backspace", "take the last point back (drawing)"),
     ("Esc", "cancel the drag, the draft, the tool, the selection"),
     ("drag a handle", "move a point, the radius, the height"),
     ("Shift + click", "add a point on the outline of the selected line or region"),

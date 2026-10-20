@@ -111,6 +111,7 @@ fn region(points: Vec<(f64, f64)>, mask_layer: Option<&str>) -> Item {
         group: None,
         part: None,
         mask_layer: mask_layer.map(str::to_string),
+        strokes: Vec::new(),
     }
 }
 

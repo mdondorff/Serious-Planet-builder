@@ -39,6 +39,7 @@ fn square(id: u128, lat: f64, lon: f64, surface: f64) -> Item {
         group: None,
         part: None,
         mask_layer: None,
+        strokes: Vec::new(),
     }
 }
 

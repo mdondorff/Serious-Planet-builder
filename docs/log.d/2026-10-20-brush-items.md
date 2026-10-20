@@ -1,0 +1,1 @@
+- 2026-10-20 brush-items: the brush item (WDEF-013, AUTH-005 schema 3): kind brush with capped inline strokes (raise, lower, smooth, flatten), item hash and stamp hash over the strokes, put refusals, footprint with the strokes; no height output yet (brush-stage, GEN-030); ADR 0070 proposed (owner).
