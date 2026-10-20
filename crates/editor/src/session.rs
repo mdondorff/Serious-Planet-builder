@@ -326,6 +326,10 @@ impl<S: ItemStore> Session<S> {
         let place = same.iter().position(|(_, id)| *id == it.id).map_or(1, |p| p + 1);
         let mut inspector = params::inspector_of(it, (place, same.len()), lists::distance_m(camera_position, it, self.radius_m));
         inspector.region = params::region_rows(it, &self.layers());
+        if inspector.region.is_some() {
+            // The surface type and the mask have their own controls; a typed number would bypass them (and print the refusal raw).
+            inspector.params.retain(|p| p.key != "surface_type" && p.key != "mask_mode");
+        }
         Some(inspector)
     }
 

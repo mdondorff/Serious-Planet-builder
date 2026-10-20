@@ -67,6 +67,8 @@ fn a_line_shows_its_amount_and_half_width_with_their_ranges_and_a_region_its_sur
     assert_eq!(r.surface_names, vec!["rock", "sand", "grass", "snow", "forest", "ice", "desert", "wetland", "urban"]);
     assert_eq!((r.surface_type, r.clips_inside, r.mask_layer.clone()), (0, false, None));
     assert_eq!(r.layers, vec!["stamps".to_string()], "the region's own layer is not offered");
+    let i = s.inspector(Vec3::new(1.0, 0.0, 0.0) * R).unwrap();
+    assert!(i.params.iter().all(|p| p.key != "surface_type" && p.key != "mask_mode"), "no second, unchecked control for them");
     assert_eq!(s.selected(), Some(region));
 }
 
