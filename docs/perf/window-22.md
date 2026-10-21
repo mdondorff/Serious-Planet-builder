@@ -33,7 +33,7 @@ Frame median / p99 are equal in every build (4.6 to 5.0 / 8.0 to 9.3 ms). The ma
 | Hill 7 (first) | 103 | 95 | 401 |
 | Hill 7 (second) | 467 | 655 | 1388 |
 
-Round 1 agrees (C 510, 1568, 431, 969). R's job is the same size in all builds. The frame p50 and p95 of the sweep sit at the 250 ms cap during arrival and are not used to rank builds. At the 200 m and 30 m stops A and B refuse the plan, so only C has plan samples there (C: 255 to 1275 ms).
+Round 1 agrees (C 510, 1568, 431, 969). R's job is the same size in all builds. The frame p50 and p95 of the sweep sit at the 250 ms cap during arrival and are not used to rank builds. A and B refuse the plan at 6 of 12 stops, so only C has plan samples at those; C's range at the 200 m and 30 m stops is 455 to 1275 ms.
 
 ## Not measured
 
