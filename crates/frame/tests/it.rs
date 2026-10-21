@@ -32,6 +32,8 @@ mod height_aware;
 mod lod;
 #[path = "lod_capping.rs"]
 mod lod_capping;
+#[path = "lod_prune.rs"]
+mod lod_prune;
 #[path = "look.rs"]
 mod look;
 #[path = "look_independence.rs"]

@@ -111,6 +111,9 @@ impl HeightField for Counting<'_> {
         self.bounds.fetch_add(1, Relaxed);
         self.f().height_bounds(c, r)
     }
+    fn bounds_monotone(&self) -> bool {
+        self.f().bounds_monotone()
+    }
 }
 
 fn ms(t: Instant) -> f64 {

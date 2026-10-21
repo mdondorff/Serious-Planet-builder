@@ -573,6 +573,10 @@ impl HeightField for StampStage<'_> {
         (self.add_stamps(dirs, base, stop), climate)
     }
 
+    fn bounds_monotone(&self) -> bool {
+        self.base.bounds_monotone()
+    }
+
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         let (lo, hi) = self.base.height_bounds(centre, angular_radius);
         let cap = Cap { centre, angle: angular_radius };
