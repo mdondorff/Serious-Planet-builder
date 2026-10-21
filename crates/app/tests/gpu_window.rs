@@ -117,6 +117,8 @@ fn the_window_runs_lit_with_the_atmosphere(stdout: &str) {
     assert!(count_before(stdout, " with an overlay") > 0, "F3 must have turned an overlay on for some frames: {stdout}");
     assert!(count_before(stdout, " the mesh)") > 0, "the second F3 shows the mesh: {stdout}");
     assert!(count_before(stdout, " coarse LOD,") > 0, "F4 must have planned some frames with the coarse LOD: {stdout}");
+    // VIEW-042: H switched the editing light on for a few lit frames, and the renderer drew them (the run's verdict wants them too).
+    assert!(count_before(stdout, " editing light)") > 0, "H must have drawn some lit frames with the editing light: {stdout}");
     // VIEW-013: the smoke script shows the globe overview with a marker under the camera, drags and zooms it and clicks the marker: some
     // frames were the overview, it showed the marker, and a click started a flight.
     assert!(count_before(stdout, " frames of the overview") > 0, "G must have shown the globe overview: {stdout}");

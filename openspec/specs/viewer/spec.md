@@ -917,3 +917,14 @@ Source: opus-planner (2026-10-21), owner test P2-2, P2-3, P2-4, VIEW-022, VIEW-0
 #### Scenario: A hill inside a plateau
 - **WHEN** a plateau, a hill and a crater are placed over one spot and the select tool presses there four times
 - **THEN** the edits are selected smallest footprint first and then round again, the hover label names "(1 of 3)" before the first press, and a press 60 px away starts at the smallest again
+
+### Requirement: VIEW-042 The editing light: a sun fixed in camera space
+H SHALL switch the editing light on and off (`Command::ToggleEditingLight`; off at the start, so the look's sun and every golden stay; not taken by the editor mode). While it is on, every lit frame SHALL take `editing_sun_dir(camera)` for `LitPlan::sun_dir`, one sun for the terrain shading, the atmosphere and the sky (the plan has a single sun direction): the unit vector `EDITING_SUN_ELEVATION_DEG` (35) above the horizon of the viewer's place and `EDITING_SUN_AZIMUTH_DEG` (40) to the right of the direction behind the viewer, so the view is lit from behind and over the right shoulder and no slope it shows faces away; for a view straight up or down the camera's up stands for the heading. It is a pure function of the camera, converted every frame. The title SHALL name it (`editing light`). The smoke run SHALL switch it on for a few lit frames and its verdict SHALL want them (`SmokeCounts::editing_light_frames`).
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-21), owner test P2-5, VIEW-007
+
+#### Scenario: The sun follows the view
+- **WHEN** the camera looks along a heading and then a quarter circle to the right, from the same place
+- **THEN** the sun is 35 degrees above the horizon both times, behind the viewer and to the right of the heading, and at the same angles to the new heading

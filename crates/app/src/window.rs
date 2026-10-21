@@ -80,6 +80,7 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
         KeyCode::KeyG => Command::ToggleGlobe,
         KeyCode::F3 => Command::CycleOverlay,
         KeyCode::F4 => Command::ToggleCoarseLod,
+        KeyCode::KeyH => Command::ToggleEditingLight,
         KeyCode::F9 => Command::SaveRepro,
         KeyCode::Escape => Command::Quit,
         _ => return None,
@@ -687,9 +688,13 @@ impl App<'_> {
             // the pipelined loop decided; the debug path draws the plan as it is (VIEW-007).
             let lit_plan = if st.viewer.lit {
                 let reset = st.viewer.take_exposure_reset();
-                let lit = viewer_lit_plan(&cfg.look, cfg.radius_m, dt as f32, reset, cfg.atmosphere)?
+                let mut lit = viewer_lit_plan(&cfg.look, cfg.radius_m, dt as f32, reset, cfg.atmosphere)?
                     .with_water_level(cfg.water_level_m)
                     .with_overlay(st.viewer.overlay);
+                // The editing light (VIEW-042): one sun for the terrain shading, the atmosphere and the sky, fixed in camera space.
+                if st.viewer.editing_light {
+                    lit.sun_dir = planet_frame::viewer::editing_sun_dir(&draw.plan.camera);
+                }
                 st.counts.overlay_frames += u64::from(lit.overlay != planet_frame::look::Overlay::None);
                 st.counts.mesh_overlay_frames += u64::from(lit.overlay == planet_frame::look::Overlay::Mesh);
                 let mut plan = draw.plan.clone();
@@ -742,6 +747,7 @@ impl App<'_> {
             let drew_lit = lit_plan.is_some();
             if drew_lit {
                 st.counts.lit_frames += 1;
+                st.counts.editing_light_frames += u64::from(st.viewer.editing_light);
                 st.counts.atmosphere_frames += u64::from(plan.lit.is_some_and(|l| l.atmosphere.is_some()));
                 st.counts.water_frames += u64::from(plan.water.as_ref().is_some_and(|w| !w.nodes.is_empty()));
                 if cfg.smoke {
@@ -991,6 +997,9 @@ fn title_text(st: &Running, now_ms: u64) -> String {
     if refused > 0 {
         input += &format!(" | plans refused x{refused}");
     }
+    if st.viewer.editing_light {
+        input += " | editing light";
+    }
     match &st.notice {
         Some((text, until)) if now_ms < *until => format!("{} | {input} | {text}", title(&info)),
         _ => format!("{} | {input}", title(&info)),
@@ -1042,6 +1051,9 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
         33 => press(st, Command::CycleOverlay),
         34 => press(st, Command::ToggleCoarseLod),
         36 => press(st, Command::Restart),
+        // The editing light is on from key 41 to key 45, over lit frames of the restarted flight (VIEW-042).
+        41 => press(st, Command::ToggleEditingLight),
+        45 => press(st, Command::ToggleEditingLight),
         // F9 writes files: the run presses it only where a directory for them was named.
         40 if std::env::var_os("PLANET_REPRO_DIR").is_some() => press(st, Command::SaveRepro),
         _ => {}
@@ -1328,7 +1340,7 @@ fn smoke_summary(st: &Running) -> String {
         st.globe_stats.frames, st.globe_stats.markers_shown_max, st.globe_stats.flights, st.globe_stats.landings
     );
     format!(
-        "{} frames drawn ({} lit, {} with the atmosphere, {} with water, {} debug, {} with an overlay ({} the mesh), {} coarse LOD, {} refused), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
+        "{} frames drawn ({} lit, {} with the atmosphere, {} with water, {} debug, {} with an overlay ({} the mesh), {} coarse LOD, {} refused, {} editing light), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
   last title: {}",
         st.frames,
         st.counts.lit_frames,
@@ -1339,6 +1351,7 @@ fn smoke_summary(st: &Running) -> String {
         st.counts.mesh_overlay_frames,
         st.counts.coarse_lod_frames,
         st.counts.coarse_lod_refusals,
+        st.counts.editing_light_frames,
         st.presented,
         st.counts.lit_presented,
         st.counts.debug_presented,
@@ -1567,6 +1580,7 @@ mod tests {
             (KeyCode::KeyC, "C"),
             (KeyCode::KeyL, "L"),
             (KeyCode::KeyG, "G"),
+            (KeyCode::KeyH, "H"),
             (KeyCode::KeyW, "WASD"),
             (KeyCode::KeyA, "WASD"),
             (KeyCode::KeyS, "WASD"),
@@ -1584,7 +1598,6 @@ mod tests {
         let others = [
             KeyCode::KeyB,
             KeyCode::KeyF,
-            KeyCode::KeyH,
             KeyCode::KeyI,
             KeyCode::KeyJ,
             KeyCode::KeyK,
@@ -1661,6 +1674,7 @@ mod tests {
             (KeyCode::KeyL, Command::ToggleLit),
             (KeyCode::F3, Command::CycleOverlay),
             (KeyCode::F4, Command::ToggleCoarseLod),
+            (KeyCode::KeyH, Command::ToggleEditingLight),
             (KeyCode::F9, Command::SaveRepro),
             (KeyCode::KeyG, Command::ToggleGlobe),
             (KeyCode::Escape, Command::Quit),
@@ -1820,6 +1834,7 @@ mod tests {
             Command::ToggleVsync,
             Command::CycleOverlay,
             Command::ToggleCoarseLod,
+            Command::ToggleEditingLight,
             Command::SaveRepro,
         ] {
             assert!(!editor_mode_blocks(cmd), "{cmd:?}");
