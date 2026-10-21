@@ -233,6 +233,9 @@ fn a_morph_forced_to_the_parent_grid_agrees_so_the_shaders_morph_target_is_the_m
             for n in &mut p.nodes {
                 n.morph_start_m = 0.0;
                 n.morph_end_m = 1.0e-3;
+                // The reference renderer takes no edge masks (LOD-008): a plan with a capped leaf has them, and with every vertex morphed the
+                // stitch is the morph already and the fine edge is not under test here.
+                (n.stitch, n.fine) = (0, 0);
             }
             let reference = reference_render(&ctx, &steep, &p);
             let mut r = compact_renderer(&ctx, &steep, &p, false);

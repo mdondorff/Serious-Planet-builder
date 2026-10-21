@@ -151,7 +151,7 @@ fn the_edge_masks_hold_the_vertices_of_an_edge_to_the_coarse_or_the_own_grid_and
         .collect();
     let n = changed.len() as f64;
     let centre = (changed.iter().map(|p| p.0).sum::<f64>() / n, changed.iter().map(|p| p.1).sum::<f64>() / n);
-    let dist = |q: (f64, f64)| ((q.0 - centre.0).powi(2) + (q.1 - centre.1).powi(2)).sqrt();
+    let dist = |q: (f64, f64)| libm::hypot(q.0 - centre.0, q.1 - centre.1);
     assert!(
         dist(middle(facing)) < dist(middle(opposite)),
         "the stitch changes the facing edge, not the far one: {centre:?} against {:?} and {:?}",
