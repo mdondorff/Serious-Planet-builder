@@ -27,10 +27,26 @@ Status: scope answered by the owner (2026-10-21); exit criteria and the open que
 | A5 | Edit health: a problems list of every flagged edit (too steep to draw fully, tiles capped or refused near it, very many stacked strokes), with fly-to and actions to simplify (merge a stack of strokes into one, reduce its strength, delete) | owner, 2026-10-21: the owner may attempt what the engine does not support; it must not crash, must not cost much performance, and must be findable and fixable |
 | (B) | Editor guard on stacked strokes | done in M6 (#499) |
 
+## Owner's answers, second round (2026-10-21)
+| # | Question | Answer |
+|---|---|---|
+| Q9 | Where do ground textures come from? | Both: CC0 sets and procedural variation. The owner also wants to explore external data as a base (for example an Earth elevation dataset), towards global authoring; the main focus stays on great procedural generation and editing its product. |
+| Q10 | Instancing | Later, but soon: a performance risk expected, so it is to be de-risked early. |
+| Q11 | Ground detail target | Eye height about 1.8 m, and crouching: the near clipping plane must work at a few centimetres. |
+
+## Added steps
+| Step | Content | Notes |
+|---|---|---|
+| G0 | Near plane at a few centimetres: a crouched camera (eye about 0.5 m, near plane about 5 cm) over the finest tiles, with no z-fighting, no clipping into the ground, and the depth precision measured | part of the G exit criterion; reversed-Z is in place since M2 |
+| I1 | Instancing spike: the cost of scattered instances (rocks, grass clumps) over the GPU-driven instance path of M2, at walking height, at 1440p | de-risks the performance before instancing is built (M8) |
+| E1 | External-data spike: an Earth elevation dataset (licence, resolution, size) as the base field under the procedural detail | exploration only, not an M7 commitment |
+
+## Proposed exit criteria (to confirm after G1)
+- At 1.8 m and at 0.5 m eye height, rock, sand and grass are distinguishable at 1 to 10 m, within a ms budget set after G1.
+- The near plane of a few centimetres shows no z-fighting or ground clipping over the finest tiles.
+- Version pinning with a diff, freeze with a blended edge, the generator sliders with a coarse preview, the stale-tile view and the problems list all work as the owner reviews them.
+
 ## Open questions
 | # | Question | Options | Recommendation |
 |---|---|---|---|
-| Q9 | Where do ground textures come from? | procedural only (shader noise, no assets) / CC0 texture sets (for example ambientCG or Poly Haven: albedo, normal, roughness) / both | Both: CC0 sets for the near look, procedural variation to break repetition; licences recorded per asset (the constitution's licence rule). |
-| Q10 | Instancing in M7 | none (textures only) / small scattered rocks and grass clumps near the camera / trees | Textures first; scattered detail only if G1 shows textures alone do not read at walking height. |
-| Q11 | Ground detail target | a first-person view at about 1.8 m eye height reads as ground (rock, sand, grass distinguishable at 1 to 10 m) within a stated ms budget | Agreed as the exit criterion, with the budget set after G1. |
 | Q12 | M6 gate | the owner's retest of the P1 fixes, the look review, the GO | Retest when convenient. M6 stays open meanwhile; M7 design and the ADR 0074 build run alongside. |
