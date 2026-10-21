@@ -230,6 +230,55 @@ fn rail(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Even
     }
 }
 
+/// How Up and Down step a value field (VIEW-041).
+#[derive(Clone, Copy, Debug)]
+pub struct FieldStep {
+    pub value: f64,
+    pub step: f64,
+    pub unit: planet_editor::params::Unit,
+    pub range: Option<(f64, f64)>,
+}
+
+/// A numeric field of the inspector or the brush (VIEW-041): the text is typed and committed on Enter or when the focus leaves, Enter keeps the
+/// focus in the field, and Up and Down (Shift: ten times) step the value and commit it at once. Returns the response and the text to commit now.
+pub fn value_field(ui: &mut egui::Ui, buf: &mut String, current: &str, step: FieldStep) -> (egui::Response, Option<String>) {
+    use planet_editor::params::{format_value, parse_value, stepped};
+    let r = ui.add(egui::TextEdit::singleline(buf).desired_width(110.0));
+    let mut commit = None;
+    if r.has_focus() {
+        // Shift first: egui matches Shift logically, so the plain key would also take the shifted press.
+        let key = |ui: &mut egui::Ui, k: egui::Key| {
+            ui.input_mut(|i| {
+                if i.consume_key(egui::Modifiers::SHIFT, k) {
+                    Some(true)
+                } else if i.consume_key(egui::Modifiers::NONE, k) {
+                    Some(false)
+                } else {
+                    None
+                }
+            })
+        };
+        let pressed = key(ui, egui::Key::ArrowUp).map(|s| (true, s)).or_else(|| key(ui, egui::Key::ArrowDown).map(|s| (false, s)));
+        if let Some((up, shift)) = pressed {
+            let base = if buf.trim() == current { step.value } else { parse_value(buf, step.unit).unwrap_or(step.value) };
+            let text = format_value(stepped(base, step.step, step.range, up, shift), step.unit);
+            *buf = text.clone();
+            commit = Some(text);
+        }
+    }
+    if r.lost_focus() {
+        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if commit.is_none() && buf.trim() != current {
+            commit = Some(buf.trim().to_string());
+        }
+        if enter {
+            // Enter keeps the focus in the field: the next number can be typed or stepped at once.
+            r.request_focus();
+        }
+    }
+    (r, commit)
+}
+
 /// The brush's numbers: the radius and the strength in metres (typed like any value) and, for a flatten, the height it levels towards
 /// ("auto": the terrain height under the start of the stroke).
 fn brush_section(ui: &mut egui::Ui, st: &mut PanelState, b: &planet_editor::session::BrushSettings, flatten: bool, ev: &mut Vec<Event>) {
@@ -247,14 +296,28 @@ fn brush_section(ui: &mut egui::Ui, st: &mut PanelState, b: &planet_editor::sess
             }
             ui.label(label);
             let buf = st.brush_text.entry(name).or_insert_with(|| current.clone());
-            let r = ui.add(egui::TextEdit::singleline(buf).desired_width(110.0));
+            // A brush number is metres; the field steps by 1 % of it, at least a metre.
+            let value = planet_editor::params::parse_value(&current, planet_editor::params::Unit::Metres).unwrap_or(0.0);
+            let range = match name {
+                "brush-radius" => Some(planet_editor::brush::RADIUS_RANGE_M),
+                "brush-strength" => Some(planet_editor::brush::STRENGTH_RANGE_M),
+                _ => None,
+            };
+            let step = FieldStep {
+                value,
+                step: if name == "brush-strength" { 0.1 } else { 1.0 },
+                unit: planet_editor::params::Unit::Metres,
+                range,
+            };
+            let (r, commit) = value_field(ui, buf, &current, step);
             st.marks.push((name.to_string(), r.rect));
-            if r.lost_focus() {
-                if buf.trim() != current {
-                    ev.push(make(buf.trim().to_string()));
-                }
+            if let Some(text) = commit {
+                ev.push(make(text));
+            }
+            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if r.lost_focus() && !enter {
                 st.brush_text.remove(name);
-            } else if !r.has_focus() {
+            } else if !r.has_focus() && !r.lost_focus() {
                 *buf = current;
             }
             ui.end_row();
@@ -447,14 +510,15 @@ fn inspector(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec
             ui.label(&p.label);
             let key = (i.id, p.key.clone());
             let buf = st.typed.entry(key.clone()).or_insert_with(|| p.text.clone());
-            let r = ui.add(egui::TextEdit::singleline(buf).desired_width(110.0));
+            let (r, commit) = value_field(ui, buf, &p.text, FieldStep { value: p.value, step: p.step, unit: p.unit, range: p.range });
             st.marks.push((format!("param:{}", p.key), r.rect));
-            if r.lost_focus() {
-                if buf.trim() != p.text {
-                    ev.push(Event::Param { key: p.key.clone(), text: buf.trim().to_string() });
-                }
+            if let Some(text) = commit {
+                ev.push(Event::Param { key: p.key.clone(), text });
+            }
+            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if r.lost_focus() && !enter {
                 st.typed.remove(&key);
-            } else if !r.has_focus() {
+            } else if !r.has_focus() && !r.lost_focus() {
                 // Not being typed in: follow the value (a drag on the planet changes it).
                 *buf = p.text.clone();
             }
@@ -1139,6 +1203,8 @@ mod tests {
         let mut got = rig.pass(&data(&h), vec![key(egui::Key::Enter, Modifiers::NONE)]);
         got.extend(rig.pass(&data(&h), vec![]));
         assert!(got.contains(&Event::Param { key: "radius_m".into(), text: "1.5 km".into() }), "{got:?}");
+        // Enter keeps the focus in the field (VIEW-041); leaving it ends the typing.
+        rig.click(&data(&h), Pos2::new(SIZE.0 / 2.0, SIZE.1 / 2.0));
         // The fields follow the value when they are not being typed in.
         let mut h2 = held(&f, layout.clone());
         if let Some(i) = h2.inspector.as_mut() {
@@ -1192,6 +1258,8 @@ mod tests {
         let mut got = rig.pass(&data(&h), vec![key(egui::Key::Enter, Modifiers::NONE)]);
         got.extend(rig.pass(&data(&h), vec![]));
         assert!(got.contains(&Event::BrushRadius("250".into())), "{got:?}");
+        // Enter keeps the focus in the field (VIEW-041); leaving it ends the typing.
+        rig.click(&data(&h), Pos2::new(SIZE.0 / 2.0, SIZE.1 / 2.0));
         // The fields show the settings in metres, the flatten height "auto" until one is typed.
         h.brush = Some(BrushSettings { radius_m: 250.0, strength_m: 7.5, target_m: Some(1_200.0) });
         rig.settle(&data(&h));
@@ -1302,5 +1370,50 @@ mod tests {
         assert_eq!(counts_line(&d), "2 edits · undo 2 · not saved · ");
         let d = PanelData { saved: "saved in edits", view_status: "Place Hill", edit_count: 7, undo_depth: 12, ..data(&h) };
         assert_eq!(counts_line(&d), "7 edits · undo 12 · saved in edits · Place Hill");
+    }
+
+    // spec: VIEW-041
+    #[test]
+    fn enter_keeps_the_focus_in_a_value_field_and_up_and_down_step_it_and_shift_steps_ten_times() {
+        use planet_editor::params::Unit;
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::ui::fonts());
+        let step = FieldStep { value: 400.0, step: 10.0, unit: Unit::Metres, range: Some((50.0, 2_000.0)) };
+        let mut buf = String::from("400 m");
+        let mut t = 0.0;
+        let mut id = None;
+        let mut commits = Vec::new();
+        let mut pass = |events: Vec<Raw>, buf: &mut String, id: &mut Option<egui::Id>, commits: &mut Vec<String>| {
+            t += 0.05;
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0))),
+                time: Some(t),
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                let (r, commit) = value_field(ui, buf, "400 m", step);
+                *id = Some(r.id);
+                commits.extend(commit);
+            });
+            out.textures_delta.clear();
+        };
+        let key = |k: egui::Key, mods: Modifiers| Raw::Key { key: k, physical_key: Some(k), pressed: true, repeat: false, modifiers: mods };
+        pass(vec![], &mut buf, &mut id, &mut commits);
+        ctx.memory_mut(|m| m.request_focus(id.unwrap()));
+        pass(vec![], &mut buf, &mut id, &mut commits);
+        assert!(ctx.memory(|m| m.has_focus(id.unwrap())), "the field has the focus");
+        // Up: one step (the larger of 10 m and 1 % of 400 m), committed at once, the focus stays.
+        pass(vec![key(egui::Key::ArrowUp, Modifiers::NONE)], &mut buf, &mut id, &mut commits);
+        assert_eq!((commits.as_slice(), buf.as_str()), (&["410 m".to_string()][..], "410 m"));
+        // Shift+Down from the typed text: ten steps.
+        pass(vec![key(egui::Key::ArrowDown, Modifiers::SHIFT)], &mut buf, &mut id, &mut commits);
+        assert_eq!(commits.last().map(String::as_str), Some("310 m"), "{commits:?}");
+        // Enter commits what was typed and keeps the focus.
+        buf = "500".to_string();
+        pass(vec![key(egui::Key::Enter, Modifiers::NONE)], &mut buf, &mut id, &mut commits);
+        pass(vec![], &mut buf, &mut id, &mut commits);
+        assert_eq!(commits.last().map(String::as_str), Some("500"), "{commits:?}");
+        assert!(ctx.memory(|m| m.has_focus(id.unwrap())), "Enter leaves the focus in the field");
     }
 }

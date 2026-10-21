@@ -300,6 +300,26 @@ impl EditRuntime {
         }
     }
 
+    /// The mouse wheel while a brush tool is on (VIEW-041): `lines` of wheel set the brush radius in geometric steps of 10 % (Shift: the strength,
+    /// the same steps), inside the ranges the brush accepts. Returns whether the wheel was used: with no brush tool, or the mode off, it is
+    /// left to the overview's zoom.
+    pub fn wheel(&mut self, lines: f64, shift: bool) -> bool {
+        if !self.on || !matches!(self.session.tool(), Tool::Brush(_)) || lines == 0.0 || !lines.is_finite() {
+            return false;
+        }
+        let b = self.session.brush_settings();
+        if shift {
+            let v = wheel_value(b.strength_m, lines, planet_editor::brush::STRENGTH_RANGE_M);
+            let r = self.session.set_brush_strength(v);
+            self.note(r);
+        } else {
+            let v = wheel_value(b.radius_m, lines, planet_editor::brush::RADIUS_RANGE_M);
+            let r = self.session.set_brush_radius(v);
+            self.note(r);
+        }
+        true
+    }
+
     fn note(&mut self, r: Result<(), SessionError>) {
         if let Err(e) = r {
             self.stats.refused += 1;
@@ -786,8 +806,10 @@ impl EditRuntime {
 pub const EDIT_KEYS_HELP: &str = "editor mode: Tab on/off (the panels, the outlines of the edits the camera shows, the planet is for editing: the pointer is free), \
      1 select, 2 crater, 3 hill, 4 plateau then click the planet to place it, 5 ridge, 6 channel, 7 region then click the planet to add points (Enter finishes, \
      Backspace takes the last point back), 8 raise, 9 lower, 0 smooth, - flatten: a brush, drag on the planet to paint a stroke (the release puts it, one undo \
-     takes it back; the brush's radius and strength are in the inspector), click an edit to select it (double-click in a list to fly there), drag its handles \
-     (circle: move, square: radius, light circle: height, amber dots: the points of a line or region) or type values in the inspector, Shift+click on a line or \
+     takes it back; the mouse wheel sets the brush radius and Shift+wheel its strength, both are also in the inspector), click an edit to select it (click again \
+     at the same spot to go through the edits under the cursor, smallest first; double-click in a list to fly there), drag its handles \
+     (circle: move, square: radius, light circle: height, amber dots: the points of a line or region) or type values in the inspector (Enter keeps the field, \
+     Up and Down step the value, Shift ten times as much), Shift+click on a line or \
      region adds a point, Ctrl+click on a point removes it, Ctrl+Z undo, Ctrl+Y or Ctrl+Shift+Z redo, Delete deletes, F1 or ? lists the keys, Esc steps back \
      (drag, draft, tool, selection) and does not quit; hold the right mouse button to look around, WASD/QE move, Shift boosts, arrows look; \
      the viewer's keys work too: G globe overview, F3 cycles the overlay, F4 coarse LOD, F9 writes a repro bundle, L lit or debug path, V next debug view, \
@@ -947,6 +969,11 @@ pub fn mode_status(e: &EditRuntime) -> String {
     }
 }
 
+/// A brush number after `lines` of wheel: 10 % a line, geometric, kept inside `range`.
+pub fn wheel_value(current: f64, lines: f64, range: (f64, f64)) -> f64 {
+    (current * libm::pow(1.1, lines)).clamp(range.0, range.1)
+}
+
 /// A length typed in metres (`250`, `1.2 km`) for the brush fields.
 fn parse_metres(text: &str) -> Result<f64, String> {
     planet_editor::params::parse_value(text, planet_editor::params::Unit::Metres)
@@ -1018,6 +1045,31 @@ mod tests {
         let d = std::env::temp_dir().join(format!("planet-editwin-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
         let _ = std::fs::remove_dir_all(&d);
         d
+    }
+
+    // spec: VIEW-041
+    #[test]
+    fn the_wheel_sets_the_brush_radius_in_geometric_steps_shift_the_strength_and_without_a_brush_it_is_left_alone() {
+        let mut e = runtime(None);
+        assert!(!e.wheel(1.0, false), "the mode is off: the wheel is not the editor's");
+        e.toggle();
+        assert!(!e.wheel(1.0, false), "no brush tool: the wheel zooms the overview as before");
+        e.key(EditKey::Tool(8));
+        let (r0, s0) = (e.session.brush_settings().radius_m, e.session.brush_settings().strength_m);
+        assert!(e.wheel(1.0, false) && e.wheel(1.0, false));
+        let b = e.session.brush_settings();
+        assert!((b.radius_m - r0 * 1.21).abs() < 1e-9 && b.strength_m == s0, "two lines up are two steps of 10 %: {b:?}");
+        assert!(e.wheel(-2.0, false));
+        assert!((e.session.brush_settings().radius_m - r0).abs() < 1e-9, "and two lines down undo them");
+        assert!(e.wheel(1.0, true));
+        let b = e.session.brush_settings();
+        assert!((b.strength_m - s0 * 1.1).abs() < 1e-9 && (b.radius_m - r0).abs() < 1e-9, "Shift: the strength");
+        // The ends of the ranges hold; a wheel there is used up but changes nothing past the end.
+        for _ in 0..200 {
+            e.wheel(1.0, false);
+        }
+        assert_eq!(e.session.brush_settings().radius_m, planet_editor::brush::RADIUS_RANGE_M.1);
+        assert_eq!(e.stats.refused, 0, "the wheel never asks for a value the brush refuses");
     }
 
     // spec: VIEW-035

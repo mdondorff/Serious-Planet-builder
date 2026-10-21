@@ -199,6 +199,17 @@ pub fn parse_value(text: &str, unit: Unit) -> Result<f64, String> {
     }
 }
 
+/// The value after an Up (`up`) or Down press in a field (VIEW-041): one step is the larger of the field's own step and 1 % of the value (so a
+/// large value moves in sensible jumps and a small one in its unit), ten steps with Shift, kept inside `range`.
+pub fn stepped(value: f64, step: f64, range: Option<(f64, f64)>, up: bool, shift: bool) -> f64 {
+    let one = step.max(0.01 * value.abs()) * if shift { 10.0 } else { 1.0 };
+    let v = value + if up { one } else { -one };
+    match range {
+        Some((lo, hi)) => v.clamp(lo, hi),
+        None => v,
+    }
+}
+
 /// A parameter as the inspector shows it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ParamRow {
@@ -316,5 +327,21 @@ pub fn inspector_of(item: &Item, position: (usize, usize), distance_m: f64) -> I
         reach: format_metres(item.reach_m),
         params,
         region: None,
+    }
+}
+
+#[cfg(test)]
+mod step_tests {
+    use super::stepped;
+
+    // spec: VIEW-041
+    #[test]
+    fn a_step_is_the_larger_of_the_fields_step_and_one_percent_ten_times_with_shift_inside_the_range() {
+        assert_eq!(stepped(400.0, 10.0, None, true, false), 410.0);
+        assert_eq!(stepped(15_000.0, 500.0, None, true, false), 15_500.0, "the field's step is larger than 1 %");
+        assert_eq!(stepped(100_000.0, 500.0, None, false, false), 99_000.0, "1 % is larger than the step");
+        assert_eq!(stepped(400.0, 10.0, None, false, true), 300.0, "Shift: ten steps");
+        assert_eq!(stepped(1_990.0, 10.0, Some((50.0, 2_000.0)), true, true), 2_000.0, "kept inside the range");
+        assert_eq!(stepped(60.0, 10.0, Some((50.0, 2_000.0)), false, true), 50.0);
     }
 }

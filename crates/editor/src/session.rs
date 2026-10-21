@@ -162,6 +162,7 @@ pub struct Session<S: ItemStore> {
     radius_m: f64,
     selection: Option<ItemId>,
     hover: Option<ItemId>,
+    hover_rank: Option<(usize, usize)>,
     hidden: BTreeSet<ItemId>,
     tool: Tool,
     status: String,
@@ -188,6 +189,7 @@ impl<S: ItemStore> Session<S> {
             radius_m,
             selection: None,
             hover: None,
+            hover_rank: None,
             hidden: BTreeSet::new(),
             tool: Tool::Select,
             status: String::new(),
@@ -283,6 +285,19 @@ impl<S: ItemStore> Session<S> {
 
     pub fn set_hover(&mut self, id: Option<ItemId>) {
         self.hover = id;
+        if id.is_none() {
+            self.hover_rank = None;
+        }
+    }
+
+    /// Where the hovered edit stands among the edits under the cursor, as (its place, how many): a click selects it (VIEW-041). `None` when only
+    /// one edit is under the cursor.
+    pub fn hover_rank(&self) -> Option<(usize, usize)> {
+        self.hover_rank
+    }
+
+    pub fn set_hover_rank(&mut self, rank: Option<(usize, usize)>) {
+        self.hover_rank = rank;
     }
 
     pub fn is_hidden(&self, id: ItemId) -> bool {
@@ -322,6 +337,24 @@ impl<S: ItemStore> Session<S> {
     pub fn pick(&self, hit: &SurfaceHit, shown: &[ItemId]) -> Option<ItemId> {
         // Stamps first, by their outline; then lines by the distance to the line, then regions (inside, or near the edge) (VIEW-031).
         self.pick_stamp(hit, shown).or_else(|| self.pick_outline(hit, shown))
+    }
+
+    /// Every edit under a surface hit among the `shown` ones, for clicking through them (VIEW-041): the stamps whose outline holds the hit, the
+    /// smallest footprint first (then the lower id), then the line or region `pick` would take.
+    pub fn pick_all(&self, hit: &SurfaceHit, shown: &[ItemId]) -> Vec<ItemId> {
+        let mut stamps: Vec<(f64, ItemId)> = shown
+            .iter()
+            .filter_map(|id| {
+                let it = self.editor.item(*id).filter(|i| i.points.is_empty() && i.kind != brush::BRUSH_KIND)?;
+                let radius = shape::outline_radius_m(it);
+                let d = planet_frame::pick::surface_distance_m(hit.dir, it.direction(), self.radius_m);
+                (radius.is_finite() && d <= radius).then_some((radius, *id))
+            })
+            .collect();
+        stamps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let mut out: Vec<ItemId> = stamps.into_iter().map(|(_, id)| id).collect();
+        out.extend(self.pick_outline(hit, shown).filter(|id| !out.contains(id)));
+        out
     }
 
     /// The line or region whose outline a click is on: a line within its half-width or [`LINE_PICK_FRACTION`] of the distance, the
