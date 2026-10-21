@@ -281,7 +281,51 @@ fn lattice_cube_point(face: Face, n: i64, i: i64, j: i64) -> [i64; 3] {
     [0, 1, 2].map(|k| (n - back) * nrm[k] + (2 * ci - n) * u[k] + (2 * cj - n) * v[k])
 }
 
+/// The cell of the neighbour face that the extended cell `(i, j)` of `face` is (`n` cells per face edge, exactly one coordinate one step
+/// outside `0..n`): the cube point of its centre in half-cell units, folded over the shared edge (the cell lies `e` half-cells beyond the
+/// edge on the extended plane, so on the neighbour face it lies `e` below the edge), read on the neighbour face. Integers only.
+fn fold_cell(face: Face, n: i64, i: i64, j: i64) -> (Face, i64, i64) {
+    let (nrm, u, v) = int_axes(face);
+    let (a, b) = (2 * i + 1 - n, 2 * j + 1 - n);
+    let beyond = |c: i64| c.abs() - n;
+    let p: [i64; 3] = if a.abs() > n {
+        let (s, e) = (a.signum(), beyond(a));
+        [0, 1, 2].map(|k| (n - e) * nrm[k] + s * n * u[k] + b * v[k])
+    } else {
+        let (s, e) = (b.signum(), beyond(b));
+        [0, 1, 2].map(|k| (n - e) * nrm[k] + a * u[k] + s * n * v[k])
+    };
+    for g in Face::ALL {
+        let (gn, gu, gv) = int_axes(g);
+        let dot = |w: [i64; 3]| p[0] * w[0] + p[1] * w[1] + p[2] * w[2];
+        if dot(gn) == n {
+            // The centre's coordinates along the face axes are `2 * index + 1 - n`.
+            return (g, (dot(gu) + n - 1) / 2, (dot(gv) + n - 1) / 2);
+        }
+    }
+    unreachable!("a folded cell centre lies on a face")
+}
+
 impl TileId {
+    /// The tiles of the same level that share an edge or a corner with this one, across cube faces, computed with integers only (no
+    /// projection): eight inside a face, and at a cube corner seven, because the diagonal there does not exist. Unsorted.
+    pub fn neighbors8(self) -> Vec<TileId> {
+        let n = 1i64 << self.level();
+        let (x, y) = (i64::from(self.x()), i64::from(self.y()));
+        let mut out = Vec::with_capacity(8);
+        for (dx, dy) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+            let (i, j) = (x + dx, y + dy);
+            let (in_i, in_j) = ((0..n).contains(&i), (0..n).contains(&j));
+            let cell = match (in_i, in_j) {
+                (true, true) => (self.face(), i, j),
+                (false, false) => continue,
+                _ => fold_cell(self.face(), n, i, j),
+            };
+            out.push(TileId::new(cell.0, self.level(), cell.1 as u32, cell.2 as u32).expect("a cell of the face"));
+        }
+        out
+    }
+
     /// Direction of the lattice point `(k, l)` of the tile's `res`-cell grid for `k`, `l` from -1 to `res + 1`, one at most outside
     /// `0..=res` (ADR 0073): the point itself inside the tile and across a tile edge inside a face (the same lattice integers), and
     /// beyond a face edge the neighbour tile's own lattice direction one cell inside it. On a cube edge both faces hold the point and

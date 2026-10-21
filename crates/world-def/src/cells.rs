@@ -64,7 +64,27 @@ pub fn cells_covering(tile: TileId, cell_level: u8, max_cells: usize) -> Option<
 /// samples its closed border row and a one-sample halo for normals, and an item reaches beyond the cell it is filed in,
 /// so a reader asks for a margin. Sorted by raw id, without duplicates.
 pub fn with_margin(cells: &[TileId], margin: u32) -> Vec<TileId> {
-    with_margin_interior(cells, margin).unwrap_or_else(|| with_margin_walk(cells, margin))
+    with_margin_interior(cells, margin).unwrap_or_else(|| with_margin_seam(cells, margin))
+}
+
+/// [`with_margin_walk`] with the neighbours of [`TileId::neighbors8`] (integers, no projection) and sorted vectors in place of a tree:
+/// the form for a square that reaches a face edge, which a point query of the editor's picking field asks for many times a frame (the
+/// geometric walk costs 3 to 80 microseconds there, VIEW-022). The same set as the walk.
+fn with_margin_seam(cells: &[TileId], margin: u32) -> Vec<TileId> {
+    let mut all: Vec<u64> = cells.iter().map(|c| c.raw()).collect();
+    all.sort_unstable();
+    all.dedup();
+    let mut frontier: Vec<TileId> = cells.to_vec();
+    for _ in 0..margin {
+        let mut found: Vec<u64> = frontier.iter().flat_map(|c| c.neighbors8()).map(|t| t.raw()).collect();
+        found.sort_unstable();
+        found.dedup();
+        found.retain(|raw| all.binary_search(raw).is_err());
+        frontier = found.iter().map(|raw| TileId::from_raw(*raw).expect("a raw id taken from a tile")).collect();
+        all.extend(found);
+        all.sort_unstable();
+    }
+    all.into_iter().map(|raw| TileId::from_raw(raw).expect("a raw id taken from a tile")).collect()
 }
 
 /// [`with_margin`] by the square of grid coordinates around each cell, when every cell is of one level and its square stays on its own
