@@ -4,7 +4,7 @@
 //! (a low glide towards the shore, a descent from 300 m to 4 m) with as many frames as the caller asks for.
 
 use crate::camera::Camera;
-use crate::terrain::scripted_views_field;
+use crate::terrain::{above_terrain, scripted_views_field};
 use planet_core::{PlanetFixed, Vec3};
 use planet_generators::height::HeightField;
 
@@ -361,6 +361,27 @@ pub fn lit_views(
             kind: ViewKind::Flight,
         },
     ])
+}
+
+/// The ground at the eye of a standing and of a crouching viewer (M7 G2: the ground detail's budget is measured here), 5 cm near plane. Not
+/// part of [`lit_views`] (the M5 acceptance judges that set): `perf lit --views ground-1.8m,ground-0.5m` adds them.
+pub fn ground_views(radius_m: f64, aspect: f64, field: &dyn HeightField) -> Vec<LitView> {
+    vec![
+        LitView { name: "ground-1.8m", cameras: vec![ground_camera(radius_m, field, 1.8, 6.0, aspect)], kind: ViewKind::Static },
+        LitView { name: "ground-0.5m", cameras: vec![ground_camera(radius_m, field, 0.5, 25.0, aspect)], kind: ViewKind::Static },
+    ]
+}
+
+/// The camera of the ground views: `eye_m` above the terrain at 20 N 30 E, looking north pitched down by `pitch_deg`, near plane 5 cm.
+fn ground_camera(radius_m: f64, field: &dyn HeightField, eye_m: f64, pitch_deg: f64, aspect: f64) -> Camera {
+    Camera::at_surface_point(
+        above_terrain(radius_m, field, 20.0, 30.0, eye_m),
+        Vec3::new(0.0, 0.0, 1.0),
+        pitch_deg.to_radians(),
+        60f64.to_radians(),
+        aspect,
+        0.05,
+    )
 }
 
 #[cfg(test)]
