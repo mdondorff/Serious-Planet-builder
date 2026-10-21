@@ -233,14 +233,14 @@ pub fn state_title(c: [usize; 5]) -> String {
     s
 }
 
-/// The legend of the overlay: a colour and what it says, in state order (capped marked as reserved while no tile is ever capped).
+/// The legend of the overlay: a colour and what it says, in state order.
 pub fn state_legend() -> Vec<([u8; 3], String)> {
     let words = [
         "exact: resident with the current key",
         "stale: an old version, its refresh is pending",
         "stand-in: a coarser tile covers a missing one",
         "previewed: a preview stamp displaces it",
-        "capped: slope limit (reserved)",
+        "capped: held back, the ground is too steep to morph",
     ];
     STATE_COLOURS.iter().copied().zip(words.map(String::from)).collect()
 }
@@ -1633,7 +1633,7 @@ mod tests {
             assert_eq!(*rgb, STATE_COLOURS[i]);
             assert!(words.starts_with(TileState::ALL[i].name()), "{words}");
         }
-        assert!(legend[4].1.contains("reserved"), "the capped colour is reserved for ADR 0074");
+        assert!(legend[4].1.contains("steep"), "the capped colour says why (ADR 0074)");
         // The codes are the node record's and the shader's (state 0 exact ... 4 capped).
         assert_eq!(TileState::ALL.map(TileState::code), [0, 1, 2, 3, 4]);
     }

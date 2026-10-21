@@ -341,3 +341,31 @@ fn the_stale_tile_overlay_tints_each_node_by_its_state_and_changes_nothing_when_
     assert!(stand_in[0] > 1.5 * stand_in[1] && stand_in[0] > 1.5 * stand_in[2], "a stand-in is red: {stand_in:?}");
     assert!(previewed[2] > previewed[1] && previewed[0] > previewed[1], "previewed is violet: {previewed:?}");
 }
+
+// spec: VIEW-014, VIEW-044
+#[test]
+fn a_capped_tile_has_its_own_colour_in_the_tiles_and_mesh_overlays_and_only_there() {
+    use planet_frame::TileState;
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let p = plan(3, SIZE, 2.5);
+    let mut r = renderer(&ctx, &p);
+    let with_state = |state: TileState| {
+        let mut q = p.clone();
+        for n in &mut q.nodes {
+            n.state = state;
+        }
+        q
+    };
+    let mut image = |state: TileState, overlay: Overlay| frame(&mut r, &ctx, &with_state(state), overlay);
+    // Off, the state is not read; on, a capped tile is not drawn in its level's colour, and a stale one is (the tiles and mesh overlays colour by level).
+    let off_exact = image(TileState::Exact, Overlay::None);
+    let off_capped = image(TileState::Capped, Overlay::None);
+    assert!(off_capped.pixels().eq(off_exact.pixels()), "with the overlay off a capped tile changes nothing");
+    for overlay in [Overlay::Tiles, Overlay::Mesh] {
+        let exact = image(TileState::Exact, overlay);
+        let stale = image(TileState::Stale, overlay);
+        let capped = image(TileState::Capped, overlay);
+        assert!(stale.pixels().eq(exact.pixels()), "{overlay:?}: a stale tile keeps its level's colour");
+        assert!(!capped.pixels().eq(exact.pixels()), "{overlay:?}: a capped tile is drawn in its own colour");
+    }
+}

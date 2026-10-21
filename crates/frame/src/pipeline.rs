@@ -297,7 +297,7 @@ pub fn draw_plan_transient(
                         camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32],
                         preview: flagged,
                         transient_only: flagged,
-                        state: if flagged { TileState::Previewed } else { TileState::Exact },
+                        state: if flagged { TileState::Previewed } else { d.state },
                         ..*d
                     },
                 );
@@ -765,6 +765,24 @@ pub struct PipelineFrame {
 
 /// How long a refusal cause stays quiet after it was reported, milliseconds (VIEW-040).
 pub const REFUSAL_REPORT_PERIOD_MS: u64 = 5_000;
+
+/// What a flight over ground with tiles too steep to morph prints of them (ADR 0074, VIEW-040): one line, at most once in
+/// [`REFUSAL_REPORT_PERIOD_MS`], saying how many tiles of the plan are held back; nothing while none is, and no crash report.
+#[derive(Default)]
+pub struct CappedReporter {
+    last_ms: Option<u64>,
+}
+
+impl CappedReporter {
+    /// The plan of the frame at `now_ms` holds back `capped` tiles: the line to print, if one is due.
+    pub fn observe(&mut self, capped: usize, now_ms: u64) -> Option<String> {
+        if capped == 0 || self.last_ms.is_some_and(|last| now_ms.saturating_sub(last) < REFUSAL_REPORT_PERIOD_MS) {
+            return None;
+        }
+        self.last_ms = Some(now_ms);
+        Some(format!("{capped} tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)"))
+    }
+}
 
 /// The cause of a refusal message: its kind and the level of the tile it names, not the tile, the distances or the frame (those change
 /// with every frame of a flight over the same steep ground): `invalid LOD parameters / level 15`.

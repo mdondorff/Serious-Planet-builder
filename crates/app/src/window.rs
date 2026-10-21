@@ -296,6 +296,8 @@ struct Running {
     repro_files: u64,
     /// What the console and the crash directory get of the plan refusals (VIEW-040).
     refusals: planet_frame::pipeline::RefusalReporter,
+    /// What the console gets of the tiles held back from refinement (ADR 0074, VIEW-040).
+    capped_log: planet_frame::pipeline::CappedReporter,
     /// How many drawn nodes are in each tile state in the last frame drawn with the stale-tile overlay (VIEW-044), for the title.
     tile_states: [usize; 5],
     /// The notice the title shows after F9 and the clock time it is shown until.
@@ -479,6 +481,7 @@ impl App<'_> {
             path: PathLog::new(),
             repro_files: 0,
             refusals: Default::default(),
+            capped_log: Default::default(),
             tile_states: [0; 5],
             notice: None,
             press: ClickTracker::default(),
@@ -682,6 +685,10 @@ impl App<'_> {
                     let text = report.map_or_else(|| why.clone(), |p| format!("plan refused, report {}", p.display()));
                     st.notice = Some((text, now_ms + NOTICE_MS));
                 }
+            }
+            let capped = frame.pipeline.draw.plan.nodes.iter().filter(|n| n.capped).count();
+            if let Some(line) = st.capped_log.observe(capped, now_ms) {
+                crate::crash::note(&line);
             }
             if let Some(sw) = st.sweep.as_mut() {
                 sw.frame(
