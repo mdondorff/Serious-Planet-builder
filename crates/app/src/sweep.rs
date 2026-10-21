@@ -322,6 +322,23 @@ mod tests {
     }
 
     // spec: VIEW-022
+    // spec: VIEW-022
+    #[test]
+    fn a_drift_moves_the_camera_east_by_that_many_metres_a_frame_and_none_leaves_it_where_it_was() {
+        let flat = |_: Vec3| 0.0;
+        let mut s = Sweep::new(vec![item("a", 20.0)], vec![200.0], 100, "x".into()).unwrap();
+        let first = s.camera(&flat, 6_371_000.0, 16.0 / 9.0).position;
+        for _ in 0..10 {
+            s.frame(1.0, None, None, 0, None);
+        }
+        assert_eq!(s.camera(&flat, 6_371_000.0, 16.0 / 9.0).position, first, "without a drift the camera stays");
+        s.drift_m = 5.0;
+        let moved = s.camera(&flat, 6_371_000.0, 16.0 / 9.0).position;
+        let d = (moved.0 - first.0).length();
+        assert!((d - 50.0).abs() < 0.5, "10 frames at 5 m a frame: {d} m");
+    }
+
+    // spec: VIEW-022
     #[test]
     fn a_drift_moves_the_camera_east_by_that_many_metres_a_frame_and_none_leaves_it_where_it_was() {
         let flat = |_: Vec3| 0.0;

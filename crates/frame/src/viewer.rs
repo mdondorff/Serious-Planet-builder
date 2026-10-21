@@ -5,7 +5,7 @@
 
 use crate::camera::Camera;
 use crate::controller::{CameraInput, ControllerParams};
-use crate::freecam::{free_step, keep_clearance, FreeInput, FreePose};
+use crate::freecam::{free_step, keep_clearance, FreeInput, FreePose, FREE_EYE_CLEARANCE_M, FREE_NEAR_M};
 use crate::globe::{landing, GlobeSession};
 use crate::lod::LodParams;
 use crate::look::Overlay;
@@ -435,7 +435,7 @@ impl ViewerState {
                         self.clock.pause(now_ms);
                     }
                     self.mode = CameraMode::Free(pose);
-                    return pose.camera(shape.fov_y_rad, shape.aspect, shape.near_m);
+                    return pose.camera(shape.fov_y_rad, shape.aspect, FREE_NEAR_M);
                 }
                 None => return globe.view.camera(globe.radius_m, shape.fov_y_rad, shape.aspect, shape.near_m),
             }
@@ -447,8 +447,8 @@ impl ViewerState {
                 // The mouse's turn of this frame rides on the held keys' input: counts x sensitivity, not scaled by `dt_s`.
                 let input = FreeInput { look_delta_rad: self.mouse.take_delta(), ..self.held.input() };
                 let moved = free_step(*pose, &input, dt_s, height_m(pose.position), params);
-                *pose = keep_clearance(moved, ground_radius_m(moved.position), params.min_clearance_m);
-                pose.camera(shape.fov_y_rad, shape.aspect, shape.near_m)
+                *pose = keep_clearance(moved, ground_radius_m(moved.position), FREE_EYE_CLEARANCE_M);
+                pose.camera(shape.fov_y_rad, shape.aspect, FREE_NEAR_M)
             }
         }
     }
