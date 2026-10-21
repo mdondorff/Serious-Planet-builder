@@ -80,6 +80,7 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
         KeyCode::KeyG => Command::ToggleGlobe,
         KeyCode::F3 => Command::CycleOverlay,
         KeyCode::F4 => Command::ToggleCoarseLod,
+        KeyCode::F6 => Command::CycleGroundDetail,
         KeyCode::KeyH => Command::ToggleEditingLight,
         KeyCode::F9 => Command::SaveRepro,
         KeyCode::Escape => Command::Quit,
@@ -767,7 +768,8 @@ impl App<'_> {
                 let reset = st.viewer.take_exposure_reset();
                 let mut lit = viewer_lit_plan(&cfg.look, cfg.radius_m, dt as f32, reset, cfg.atmosphere)?
                     .with_water_level(cfg.water_level_m)
-                    .with_overlay(st.viewer.overlay);
+                    .with_overlay(st.viewer.overlay)
+                    .with_ground_detail(st.viewer.ground_detail.strength());
                 // The editing light (VIEW-042): one sun for the terrain shading, the atmosphere and the sky, fixed in camera space.
                 if st.viewer.editing_light {
                     lit.sun_dir = planet_frame::viewer::editing_sun_dir(&draw.plan.camera);
@@ -1084,6 +1086,7 @@ fn title_text(st: &Running, now_ms: u64) -> String {
     if st.viewer.editing_light {
         input += " | editing light";
     }
+    input += &format!(" | detail {}", st.viewer.ground_detail.name());
     // The hover hint of the overview: only where a click acts (VIEW-045).
     if let Some(hint) = st.click_target.and_then(planet_frame::globe::ClickTarget::hint) {
         input += &format!(" | {hint}");
@@ -1670,6 +1673,7 @@ mod tests {
             (KeyCode::F1, "F1"),
             (KeyCode::F3, "F3"),
             (KeyCode::F4, "F4"),
+            (KeyCode::F6, "F6"),
             (KeyCode::F9, "F9"),
             (KeyCode::Escape, "Esc"),
             (KeyCode::Tab, "Tab"),
@@ -1711,7 +1715,6 @@ mod tests {
             KeyCode::KeyZ,
             KeyCode::F2,
             KeyCode::F5,
-            KeyCode::F6,
             KeyCode::F7,
             KeyCode::F8,
             KeyCode::F10,
@@ -1775,6 +1778,7 @@ mod tests {
             (KeyCode::KeyL, Command::ToggleLit),
             (KeyCode::F3, Command::CycleOverlay),
             (KeyCode::F4, Command::ToggleCoarseLod),
+            (KeyCode::F6, Command::CycleGroundDetail),
             (KeyCode::KeyH, Command::ToggleEditingLight),
             (KeyCode::F9, Command::SaveRepro),
             (KeyCode::KeyG, Command::ToggleGlobe),
@@ -1797,6 +1801,7 @@ mod tests {
             "atmosphere",
             "overlay",
             "coarse LOD",
+            "ground detail",
             "globe overview",
         ] {
             assert!(KEYS_HELP.to_lowercase().contains(&ch.to_lowercase()), "the help names {ch}: {KEYS_HELP}");
@@ -1935,6 +1940,7 @@ mod tests {
             Command::ToggleVsync,
             Command::CycleOverlay,
             Command::ToggleCoarseLod,
+            Command::CycleGroundDetail,
             Command::ToggleEditingLight,
             Command::SaveRepro,
         ] {

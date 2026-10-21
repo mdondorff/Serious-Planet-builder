@@ -210,6 +210,8 @@ pub struct LitPlan {
     pub materials: materials::MaterialParams,
     /// The strength of the procedural ground detail (M7 G2a, LOOK-009): 0 off (the default, the picture is what it was), 1 full.
     pub ground_detail: f64,
+    /// The specular term of the ground that goes with the detail (M7 G2b, LOOK-010): roughness per material and modifier, and the base reflectance.
+    pub gloss: materials::GlossParams,
     /// The water level W in metres above the reference surface (ADR 0041; until the water-level field exists the sea's constant
     /// level, 0): the beach band and the seabed are measured from it, never from a hard-coded sea level.
     pub water_level_m: f32,
@@ -327,6 +329,7 @@ impl LitPlan {
             albedo: look.albedo,
             materials: materials::MaterialParams::EARTH,
             ground_detail: 0.0,
+            gloss: materials::GlossParams::EARTH,
             water_level_m: 0.0,
             view: ShadeView::Lit,
             atmosphere: None,
@@ -348,6 +351,12 @@ impl LitPlan {
     pub fn with_water_level(mut self, level_m: f64) -> LitPlan {
         // -0.0 is the default level too: it must not change the plan text.
         self.water_level_m = if level_m == 0.0 { 0.0 } else { level_m as f32 };
+        self
+    }
+
+    /// This plan with the ground detail at `strength` (0 off, 1 full; LOOK-009).
+    pub fn with_ground_detail(mut self, strength: f64) -> LitPlan {
+        self.ground_detail = strength;
         self
     }
 
@@ -418,6 +427,12 @@ impl LitPlan {
         if self.ground_detail != 0.0 {
             look.push_str(&format!(" detail {:016x}", self.ground_detail.to_bits()));
         }
+        if self.gloss != materials::GlossParams::EARTH {
+            look.push_str(" gloss");
+            for b in self.gloss.bits() {
+                look.push_str(&format!(" {b:016x}"));
+            }
+        }
         format!(
             "lit {mode} dt {} sun {} {} {} reset {} tonemap {}{look}",
             h(self.dt_s),
@@ -449,7 +464,7 @@ impl LitPlan {
             }
             u64::from_str_radix(s, 16).map(f64::from_bits).map_err(|e| format!("bad f64 bits '{s}': {e}"))
         };
-        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..', 'atmosphere ..', 'overlay ..', 'materials ..' and 'detail ..' in this order)";
+        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..', 'atmosphere ..', 'overlay ..', 'materials ..', 'detail ..' and 'gloss ..' in this order)";
         let ["dt", dt, "sun", sx, sy, sz, "reset", reset, "tonemap", tm, tail @ ..] = rest else {
             return Err(usage.into());
         };
@@ -468,6 +483,7 @@ impl LitPlan {
             albedo: AlbedoParams::EARTH,
             materials: materials::MaterialParams::EARTH,
             ground_detail: 0.0,
+            gloss: materials::GlossParams::EARTH,
             water_level_m: 0.0,
             view: ShadeView::Lit,
             atmosphere: None,
@@ -486,6 +502,7 @@ impl LitPlan {
                 "overlay" => (6, 1),
                 "materials" => (7, materials::MATERIALS * materials::INPUTS * 2),
                 "detail" => (8, 1),
+                "gloss" => (9, materials::GLOSS_VALUES),
                 _ => return Err(usage.into()),
             };
             if rank <= stage || more.len() < arity {
@@ -522,6 +539,13 @@ impl LitPlan {
                     plan.materials = materials::MaterialParams::from_bits(&bits);
                 }
                 8 => plan.ground_detail = f64_of(args[0])?,
+                9 => {
+                    let mut bits = [0u64; materials::GLOSS_VALUES];
+                    for (b, a) in bits.iter_mut().zip(args) {
+                        *b = f64_of(a)?.to_bits();
+                    }
+                    plan.gloss = materials::GlossParams::from_bits(&bits);
+                }
                 _ => plan.overlay = Overlay::parse(args[0]).ok_or_else(|| format!("unknown overlay '{}'", args[0]))?,
             }
             rest = after;
@@ -558,6 +582,7 @@ impl LitPlan {
         }
         self.albedo.validate().map_err(|(k, v, why)| format!("lit plan: `{k}` = {v}: {why}"))?;
         self.materials.validate().map_err(|(k, v, why)| format!("lit plan: `{k}` = {v}: {why}"))?;
+        self.gloss.validate().map_err(|(k, v, why)| format!("lit plan: `{k}` = {v}: {why}"))?;
         if self.ground_detail != 0.0 && !(1.0e-6..=1.0).contains(&self.ground_detail) {
             return Err(format!("lit plan: `ground_detail` = {}: the strength must be 0 or a number from 1e-6 to 1", self.ground_detail));
         }

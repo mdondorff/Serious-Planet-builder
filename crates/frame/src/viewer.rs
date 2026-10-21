@@ -115,6 +115,8 @@ pub enum Command {
     CycleOverlay,
     /// F4: the coarse-LOD inspection view, the error bound times four (VIEW-014).
     ToggleCoarseLod,
+    /// F6: the strength of the procedural ground detail: natural, full, off (VIEW-046).
+    CycleGroundDetail,
     /// H: the editing light, a sun fixed in camera space over the viewer's shoulder, or back to the look's sun (VIEW-042).
     ToggleEditingLight,
     /// G: the globe overview over the point under the camera, or back (VIEW-013).
@@ -246,7 +248,7 @@ pub fn state_legend() -> Vec<([u8; 3], String)> {
 }
 
 /// The key bindings, as text for the usage message and the log.
-pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), F3 cycles the overlay (off, tiles, mesh, regions, stale tiles; lit path), F4 coarse LOD (error bound x4), F9 writes the camera path of the last minute and a repro bundle (target/review), V next debug view (debug path), T vsync on/off, C flight or free camera, \
+pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), F3 cycles the overlay (off, tiles, mesh, regions, stale tiles; lit path), F4 coarse LOD (error bound x4), F6 ground detail (natural, full, off; the procedural detail and gloss of the ground, on at the start), F9 writes the camera path of the last minute and a repro bundle (target/review), V next debug view (debug path), T vsync on/off, C flight or free camera, \
      H editing light (a sun fixed over your shoulder, 35 degrees up, so no slope is black; off by default), \
      free camera: WASD move, Q/E down/up, arrows look, click captures the mouse to look (Esc releases it), Shift boost; Esc quits";
 
@@ -279,6 +281,8 @@ pub struct ViewerState {
     pub coarse_lod: bool,
     /// The editing light (VIEW-042): the lit frames take [`editing_sun_dir`] for the sun; off at the start, so the look's sun and every golden stay.
     pub editing_light: bool,
+    /// The strength of the ground detail the lit frames take (VIEW-046): natural at the start; F6 cycles it. Not part of the headless modes.
+    pub ground_detail: crate::look::materials::GroundDetailMode,
     /// The globe overview while it is shown (VIEW-013): its view is the camera, and a click's flight ends in the free camera.
     pub globe: Option<GlobeSession>,
     /// The planet radius the overview is built on, metres.
@@ -305,6 +309,7 @@ impl ViewerState {
             overlay: Overlay::None,
             coarse_lod: false,
             editing_light: false,
+            ground_detail: crate::look::materials::GroundDetailMode::default(),
             globe: None,
             radius_m: 6_371_000.0,
             exposure_reset: true,
@@ -372,6 +377,7 @@ impl ViewerState {
             Command::SaveRepro => self.repro_requested = true,
             Command::ToggleCoarseLod => self.coarse_lod = !self.coarse_lod,
             Command::ToggleEditingLight => self.editing_light = !self.editing_light,
+            Command::CycleGroundDetail => self.ground_detail = self.ground_detail.next(),
             Command::ToggleGlobe => {
                 self.globe = match self.globe {
                     Some(_) => None,
@@ -1327,6 +1333,37 @@ mod tests {
         v.command(Command::ToggleCoarseLod, 60, &c);
         assert!(!v.coarse_lod);
         for word in ["F3", "tiles", "mesh", "regions", "F4", "coarse LOD"] {
+            assert!(KEYS_HELP.contains(word), "the help names {word}: {KEYS_HELP}");
+        }
+    }
+
+    // spec: VIEW-046
+    #[test]
+    fn f6_cycles_the_ground_detail_natural_full_off_and_the_window_starts_on_natural() {
+        use crate::look::materials::{GroundDetailMode, NATURAL_STRENGTH};
+        let c = camera_for_tests();
+        let mut v = ViewerState::new(0, 3, 0, true).with_lit(true);
+        assert_eq!(v.ground_detail, GroundDetailMode::Natural, "on at the start");
+        assert_eq!(v.ground_detail.strength(), NATURAL_STRENGTH);
+        const { assert!(NATURAL_STRENGTH > 0.0 && NATURAL_STRENGTH < 1.0) };
+        let (lit, overlay, coarse) = (v.lit, v.overlay, v.coarse_lod);
+        let seen: Vec<GroundDetailMode> = (0..4)
+            .map(|i| {
+                assert!(!v.command(Command::CycleGroundDetail, 10 * i, &c), "F6 does not quit");
+                v.ground_detail
+            })
+            .collect();
+        assert_eq!(seen, [GroundDetailMode::Full, GroundDetailMode::Off, GroundDetailMode::Natural, GroundDetailMode::Full]);
+        assert_eq!(
+            [GroundDetailMode::Off, GroundDetailMode::Natural, GroundDetailMode::Full].map(GroundDetailMode::strength),
+            [0.0, NATURAL_STRENGTH, 1.0]
+        );
+        assert_eq!(
+            [GroundDetailMode::Off, GroundDetailMode::Natural, GroundDetailMode::Full].map(GroundDetailMode::name),
+            ["off", "natural", "full"]
+        );
+        assert_eq!((v.lit, v.overlay, v.coarse_lod), (lit, overlay, coarse), "the other switches are as they were");
+        for word in ["F6", "ground detail"] {
             assert!(KEYS_HELP.contains(word), "the help names {word}: {KEYS_HELP}");
         }
     }

@@ -700,6 +700,14 @@ fn atm_terrain_lighting(normal: vec3<f32>, up: vec3<f32>, h_alt: f32, sun: vec3<
     let hemi = 0.5 + 0.5 * clamp(dot(n, up), -1.0, 1.0);
     return t * (shadow * ndl * 0.31830988618) + ms * hemi;
 }
+
+// The sun's illuminance that reaches the surface (the transmittance and the planet's shadow, one unit outside the atmosphere): what the
+// specular term of the ground (LOOK-010) is scaled by.
+fn atm_sun_direct(up: vec3<f32>, h_alt: f32, sun: vec3<f32>) -> vec3<f32> {
+    let mu_s = clamp(dot(up, sun), -1.0, 1.0);
+    let h = clamp(h_alt, 0.0, A.body.y);
+    return atm_transmittance(h, mu_s) * atm_planet_shadow(h, mu_s);
+}
 "#;
 
 const TERRAIN_MAIN: &str = r#"
@@ -742,6 +750,10 @@ fn fs_lit_atmo_view(in: VsOut) -> vec4<f32> {
     let climate = tile_climate(in);
     let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x);
     var rgb = atm_shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, g.range.z) * select(vec3<f32>(1.0), gd.mul, g.mode.x <= 1u);
+    let gloss = ground_gloss(in.node_index, in.local, gd, sun);
+    if (gloss > 0.0) {
+        rgb = min(rgb + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z), vec3<f32>(60000.0));
+    }
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);
     } else if (g.extra.y > 2.5) {
