@@ -1,1 +1,0 @@
-- 2026-10-18 **Bug report (owner):** water missing on near sea tiles while the camera moves or rotates (RTX, #304 branch); screenshot in docs/dev_screenshots, Tracked in status.

@@ -1,1 +1,0 @@
-- 2026-10-19 edit-refresh-levels: the `edit-latency` scene prints a third table, the refreshed set by level (tiles named, drawn by the plan, resident only, change below the level's sample spacing), to find why 58 to 542 tiles are refreshed for one stamp (TEST-041; window 14 attributed the exact time to refresh throughput).

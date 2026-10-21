@@ -1,1 +1,0 @@
-- 2026-10-19 **Pre-push rule (owner):** CLAUDE.md requires `cargo xtask prepush` (BUILD-016, #348) before every push to a PR branch.

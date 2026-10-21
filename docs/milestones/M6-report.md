@@ -1,6 +1,6 @@
 # M6 Editor MVP: report (DRAFT, 2026-10-21)
 
-**DRAFT pending the owner's retest of the P1 fixes.** Drafted by sonnet-explorer for opus-planner from `docs/briefings/m6-gate-evidence.md` (sonnet-crusader, 2026-10-20), `docs/briefings/m6-owner-test-plan.md`, `docs/status.md`, the log fragments of 2026-10-19 to 2026-10-21 and the perf windows 18 to 21. Nothing is archived. "Not checked" marks a figure this draft did not re-derive. The verdict, the owner's decisions and the process review are the planner's.
+Final (opus-planner, 2026-10-21): drafted by sonnet-explorer from the M6 gate evidence, the owner's test plan (both now in `docs/archive/M6/briefings/`), the log and perf windows 18 to 23; verdict, closure and process review by opus-planner. "Not checked" marks a figure the draft did not re-derive.
 
 ## Verdict (opus-planner): GO, M6 closed (2026-10-21)
 
@@ -16,7 +16,7 @@ State at drafting:
 
 ## 1. Exit criteria
 
-Architecture report M6 row (`docs/briefings/m6-editor-plan.md`).
+Architecture report M6 row (`docs/archive/M6/briefings/m6-editor-plan.md`).
 
 | Criterion | Result | Evidence |
 |---|---|---|
@@ -87,7 +87,7 @@ SPIKE-13 (edit latency), 14 (egui), 15 (build speed), 16 (water motion), 17 (the
 
 ## 4. After the owner's test (2026-10-20): the iteration
 
-The owner's notes are in `docs/briefings/m6-owner-test-plan.md`; the queue is the table "M6 iteration" in `docs/status.md`.
+The owner's notes are in `docs/archive/M6/briefings/m6-owner-test-plan.md`; the queue is the table "M6 iteration" in `docs/archive/M6/status-at-m6-close.md`.
 
 | Item | State |
 |---|---|
@@ -132,12 +132,32 @@ Owner decisions open: (1) keep-inside regions now or in M7; (2) the look review 
 
 | What | Where |
 |---|---|
-| Gate evidence per criterion and row, gaps G1 to G10 | `docs/briefings/m6-gate-evidence.md` |
-| The owner's test notes and the iteration plan | `docs/briefings/m6-owner-test-plan.md`, `docs/status.md` ("M6 iteration") |
+| Gate evidence per criterion and row, gaps G1 to G10 | `docs/archive/M6/briefings/m6-gate-evidence.md` |
+| The owner's test notes and the iteration plan | `docs/archive/M6/briefings/m6-owner-test-plan.md`, `docs/archive/M6/status-at-m6-close.md` ("M6 iteration") |
 | Perf windows 18 to 21 | `docs/perf/window-18.md` to `window-21.md` (raw output under `docs/perf/window-18/` to `window-21/`) |
 | The decisions | ADR 0066 to 0073 |
 | The owner's videos and screenshots | the owner's upload folder (over 1 MB, not committed); `docs/dev_screenshots/` |
 
 ## Process review
 
-Not drafted (housekeeping step 9 is the planner's, as for M5).
+opus-planner, 2026-10-21, from recorded data (housekeeping step 9). M5 is the baseline where it was recorded.
+
+| Measure | M5 (2026-10-15 to 17) | M6 (2026-10-18 to 21) | Source |
+|---|---|---|---|
+| PRs merged | 154 | 247 | `gh pr list --search merged:` |
+| PR lead time, median / p90 | 12 / 32 min | 14 / 44 min | PR timestamps |
+| CI slowest job median | `windows (WARP)` 21.4 min (over the 16 min budget) | `windows (WARP)` A+B 12.1 min, C split in two shards of 11.5 and 10.6 min (within budget) | `cargo xtask ci-stats --runs 20` |
+| Perf windows | 7 to 11 | 12 to 23 (12 windows; 22 had a FAIL verdict on the plan job, fixed by #513 and re-measured in 23) | log, `docs/perf/` |
+| `test fast` and edit-to-first-test | not measured in this review | not measured in this review | `target/test-logs/` |
+| Rework | ADR 0052 reading withdrawn | the region "clip" was a wording mismatch (#492); two merged changes (`lod-plan-cost` #513, `keys-after-globe`) left their spec deltas unsynced until this run (LOD-012 and VIEW-034 were missing from the specs) | log, this run |
+| Coordination stalls | lost test output (fixed by the tee logs) | classifier refusals of a mass deletion and a merge in sonnet-crusader's session (escalated to the owner, done in this run); the owner's F9 capture refused because the repro bundle cannot carry authored items | log, `target/review/run-194021.log` |
+| Hot set (ADR 0075 point 5) | not recorded | 171 KB before this run, 35 KB after (about 43k to 9k tokens at 4 bytes per token, an estimate) | `wc -c` |
+
+Improvements, by gain against cost:
+
+| # | Improvement | Session | Where |
+|---|---|---|---|
+| 1 | F9 repro bundles carry the authored items (copy or reference the item files), so the owner's captures work in the editor | sonnet-crusader | M7 queue H0 (now) |
+| 2 | spec-lint checks the ADR 0075 caps, and fails when a test cites a requirement ID that no spec holds (would have caught the two unsynced changes) | sonnet-crusader | M7 queue H1 |
+| 3 | Mass deletions and archive steps run from the planner's session after the owner's go, not from a coder session (classifier refusals cost a day) | opus-planner | practice |
+| 4 | The ADR 0055 consolidation left from the M5 housekeeping | sonnet-crusader | M7 queue H2 |

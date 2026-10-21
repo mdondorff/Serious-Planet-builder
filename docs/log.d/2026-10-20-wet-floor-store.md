@@ -1,1 +1,0 @@
-- 2026-10-20 wet-floor-store: the wet floor (GEN-031) and its kind-6 store blocks (STRM-032, ADR 0071 point 3): three passes equal to the serial flood, `StoreWetFloorSource`, `build_global` and `verify_global` extended; no consumer reads it yet (`wet-water` follows).

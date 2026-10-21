@@ -1,5 +1,5 @@
 # 0055 Documentation model: specs hold current rules, ADRs record why
-Status: accepted (owner, 2026-10-17, opus-planner session)
+Status: accepted (owner, 2026-10-17, opus-planner session); point 5 amended by ADR 0075 (archived changes are deleted at milestone close)
 Date: 2026-10-17
 Source: owner's review of the side documentation (2026-10-17); word counts on main at 4d4c54c+
 

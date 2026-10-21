@@ -1,1 +1,0 @@
-- 2026-10-18 **SPIKE-11 closed (owner's local check, #328):** raw mouse motion with Locked or Confined capture and no recentring is the first camera interface for editor and viewer; queued as M6 item 4c (free-camera-mouse).

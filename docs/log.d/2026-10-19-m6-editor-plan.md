@@ -1,1 +1,0 @@
-- 2026-10-19 **M6 editor plan (opus-planner):** two lanes, main E0-E6 (authored-items ADR, edit invalidation, stamp stage, preview, commands, lines and regions, brush) and support U1-U4 (UI shell, picking, panels, globe view); `docs/briefings/m6-editor-plan.md`.

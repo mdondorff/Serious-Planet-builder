@@ -1,1 +1,0 @@
-- 2026-10-20 **edit-keys-help** (sonnet-explorer, opus-planner): the usage text of the editor mode names the brush keys (8 raise, 9 lower, 0 smooth, - flatten; radius and strength in the inspector) and the viewer keys (G, F3, F4, F9, L, V, T, P, R; C does nothing in the mode); a tier A test fails when a bound key is not named (VIEW-022).

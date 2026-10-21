@@ -1,1 +1,0 @@
-- 2026-10-20 **edit-latency-smoke** (sonnet-crusader, opus-planner): the edit-latency smoke run settles after 3 calm frames per case and renders the preview cost once (the measured run is unchanged), so the tier-C test takes about 20 s locally instead of about 32 s and fits the 300 s limit on Windows CI.

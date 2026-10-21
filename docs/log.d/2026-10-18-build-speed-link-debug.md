@@ -1,1 +1,0 @@
-- 2026-10-18 **build-speed-link-debug** (sonnet): `rust-lld` on Windows and line-tables-only debug info in the dev profile (SPIKE-15 steps 2 and 4a); one-line edit build, median of 3: frame 89 to 49 s, app 31 to 15 s; BUILD-011 added.

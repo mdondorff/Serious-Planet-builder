@@ -1,1 +1,0 @@
-- 2026-10-20 **refusal-log-throttle** (sonnet-crusader, opus-planner; VIEW-040): a plan refusal is printed, reported to target/review/crashes and named in the title at most once per cause (kind and level) per 5 s, with the count in between; the title shows `plans refused xN`; the commit for a report is asked of git once per run.

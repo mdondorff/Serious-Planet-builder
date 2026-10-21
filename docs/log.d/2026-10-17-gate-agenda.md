@@ -1,1 +1,0 @@
-- 2026-10-17 **M5 gate agenda:** planner decisions to confirm (ADR 0056, ADR 0057, the coarse water summary, the test fast budget reading) listed in docs/status.md.

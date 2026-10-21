@@ -1,1 +1,0 @@
-- 2026-10-19 edit-latency-stages: the `edit-latency` scene records and prints, per run, the durations of the three edit calls and the instants of the plan, R, the first job, half and all refreshes, the upload and the frame median (TEST-041); the attribution of window 13's preview (74 to 247 ms) and exact (385 to 1283 ms) times needs a window with it.

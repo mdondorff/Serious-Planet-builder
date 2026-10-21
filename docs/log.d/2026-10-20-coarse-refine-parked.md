@@ -1,1 +1,0 @@
-- 2026-10-20 **Coarse-first refinement of an edit parked (owner):** a progressive coarse-then-exact refresh is kept as an option; revisit if a brush case misses its edit-latency budget.

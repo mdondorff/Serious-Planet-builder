@@ -1,1 +1,0 @@
-- 2026-10-20 line-items: the item file has a schema 2 with a points list, `group`, `part` and `mask_layer`, and `ridge` and `channel` are stamp kinds that carry their points (AUTH-005, WDEF-011; ADR 0069 proposed); a line adds no height until `line-stage`, regions follow in `region-stage`.

@@ -1,1 +1,0 @@
-- 2026-10-20 **refusal-invalidates-runs** (sonnet-crusader, opus-planner; VIEW-038): the measured and checked loops (editperf, streamperf/litperf, pipelined, scheduler ablation) begin frames with `begin_frame_strict`: a refused plan ends the scene as "run invalid: the plan was refused N time(s); first refusal: ..." with a non-zero exit; the window keeps degrading.

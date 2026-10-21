@@ -1,1 +1,0 @@
-- 2026-10-19 **editor-test-time** (sonnet-crusader): the real-window editor test (67 s alone, 100 to 220 s in a full tier-C run, limit 300 s) was bound by the software adapter drawing 90 lit frames at 1280x720; it runs at 480x270 now (34 s alone), assertions unchanged; learning 2026-10-19.
