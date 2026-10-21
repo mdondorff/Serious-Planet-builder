@@ -21,7 +21,7 @@
 //! node.
 
 use crate::lod::{
-    child_index_toward, cover_selection_masked, plan_covers_view, quadrant_bit, LodParams, SelectionCache, TileBounds, ALL_QUADRANTS,
+    child_index_toward, cover_selection_exact, plan_covers_view, quadrant_bit, LodParams, SelectionCache, TileBounds, ALL_QUADRANTS,
 };
 use crate::plan::{face_mapping_by_id, PlanError, CLEAR_COLOR, HEIGHT_RANGE};
 use crate::prefetch::prefetch_set;
@@ -279,7 +279,7 @@ pub fn draw_plan_transient(
     let mut shown: BTreeMap<TileId, TerrainDraw> = BTreeMap::new();
     let (mut substituted, mut blank) = (0usize, 0usize);
     let mut kind = DrawKind::Cover;
-    let mut cover: Option<Vec<(TileId, u8)>> = None;
+    let mut cover: Option<Vec<(TileId, u8, bool)>> = None;
     // The quadrants each stand-in ancestor draws, from the plan nodes it stands in for.
     let mut stand_in: BTreeMap<TileId, u8> = BTreeMap::new();
     if let Some((base_req, plan)) = base {
@@ -360,7 +360,7 @@ pub fn draw_plan_transient(
         // The plan of exactly this camera serves it by construction; a plan of another camera must cover the frame's view.
         let serves = base_req == req || {
             let c = cover.insert(view_cover(req, map.as_ref(), resident, bounds));
-            let tiles: Vec<TileId> = c.iter().map(|(t, _)| *t).collect();
+            let tiles: Vec<TileId> = c.iter().map(|(t, _, _)| *t).collect();
             // A tile drawn over some quadrants only draws those children, not the whole tile (STRM-016): the test sees its children.
             let drawn: BTreeSet<TileId> = shown
                 .iter()
@@ -383,10 +383,12 @@ pub fn draw_plan_transient(
         }
     }
     if kind == DrawKind::Cover {
-        for (t, quadrants) in cover.unwrap_or_else(|| view_cover(req, map.as_ref(), resident, bounds)) {
+        for (t, quadrants, exact) in cover.unwrap_or_else(|| view_cover(req, map.as_ref(), resident, bounds)) {
             let r = resident.resident(t).expect("the cover holds resident tiles only");
-            // The cover is what is resident for the view while the plan is not served: coarser than the plan, so a stand-in.
-            shown.insert(t, TerrainDraw { quadrants, state: TileState::StandIn, ..draw_of(req, t, r) });
+            // The cover is the plan of this camera over what is resident: a tile at the plan's level is exact, and only what stands in for a
+            // tile that is not resident (a coarser tile, or a part of one) is a stand-in.
+            let state = if exact { TileState::Exact } else { TileState::StandIn };
+            shown.insert(t, TerrainDraw { quadrants, state, ..draw_of(req, t, r) });
         }
     }
     let nodes: Vec<TerrainDraw> = shown.into_values().collect();
@@ -420,8 +422,8 @@ fn previewed(preview: &[PreviewStamp], map: &dyn FaceMapping, tile: TileId, radi
 }
 
 /// The cover of the frame's view over the resident set (the tiles of [`cover_selection_bounded`]).
-fn view_cover(req: &TerrainRequest, map: &dyn FaceMapping, resident: &dyn ResidentSet, bounds: &TileBounds) -> Vec<(TileId, u8)> {
-    cover_selection_masked(map, &req.camera, &req.lod, &|t| resident.resident(t).map(|r| r.origin), bounds)
+fn view_cover(req: &TerrainRequest, map: &dyn FaceMapping, resident: &dyn ResidentSet, bounds: &TileBounds) -> Vec<(TileId, u8, bool)> {
+    cover_selection_exact(map, &req.camera, &req.lod, &|t| resident.resident(t).map(|r| r.origin), bounds)
 }
 
 /// What a worker plans over: a height field that is `Send + Sync + 'static`, or anything that can build one inside the job

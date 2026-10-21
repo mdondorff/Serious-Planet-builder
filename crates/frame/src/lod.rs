@@ -1107,7 +1107,22 @@ pub fn cover_selection_masked(
     resident: &dyn Fn(TileId) -> Option<PlanetFixed>,
     bounds: &TileBounds,
 ) -> Vec<(TileId, u8)> {
+    cover_selection_exact(map, camera, p, resident, bounds).into_iter().map(|(t, m, _)| (t, m)).collect()
+}
+
+/// [`cover_selection_masked`] with, for each drawn tile, whether it is exact: a tile the plan of the camera would draw itself (resident, drawn
+/// whole, not standing in for a child of the plan that is missing). A tile that is not exact is a stand-in: the plan wants finer tiles under
+/// it, and the quadrants it draws belong to children that are not resident. With every tile of the residency set resident every tile is exact.
+pub fn cover_selection_exact(
+    map: &dyn FaceMapping,
+    camera: &Camera,
+    p: &LodParams,
+    resident: &dyn Fn(TileId) -> Option<PlanetFixed>,
+    bounds: &TileBounds,
+) -> Vec<(TileId, u8, bool)> {
     let mut view = ViewTest::new(map, camera, p, bounds);
+    // Tiles the walk drew whole although the plan splits them (no child in view is resident).
+    let mut standing: BTreeSet<TileId> = BTreeSet::new();
     let mut leaves: BTreeSet<TileId> = BTreeSet::new();
     let mut stack: Vec<TileId> = Vec::new();
     for root in floor_tiles(p) {
@@ -1119,7 +1134,8 @@ pub fn cover_selection_masked(
         let origin = resident(t).expect("the walk visits resident tiles only");
         // A tile whose children the ceiling forbids is a leaf (ADR 0074): the residency set does not hold them, and the walk would find nothing to draw.
         let forbidden = bounds.ceiling.forbids_split(t);
-        if t.level() < p.max_level && !forbidden && view.distance(t, origin) < p.split_distance(t.level()) {
+        let split = t.level() < p.max_level && !forbidden && view.distance(t, origin) < p.split_distance(t.level());
+        if split {
             let seen: Vec<TileId> = children_of(t).into_iter().filter(|&c| !view.culled(c)).collect();
             let (here, missing): (Vec<TileId>, Vec<TileId>) = seen.iter().partition(|&&c| resident(c).is_some());
             if missing.is_empty() {
@@ -1133,6 +1149,7 @@ pub fn cover_selection_masked(
                 leaves.extend(missing);
                 continue;
             }
+            standing.insert(t);
         }
         leaves.insert(t);
     }
@@ -1144,9 +1161,15 @@ pub fn cover_selection_masked(
     // A leaf that is not resident (a missing child, or a balancing split) is drawn by the nearest resident ancestor over the quadrant
     // that holds it (that ancestor is a leaf of the walk or an ancestor of one); a leaf that is resident is drawn whole.
     let mut drawn: BTreeMap<TileId, u8> = BTreeMap::new();
+    // The tiles that stand in for a tile that is not resident, or for finer ones the walk could not draw.
+    let mut standing_in: BTreeSet<TileId> = standing.clone();
     for leaf in leaves {
         if resident(leaf).is_some() {
             drawn.insert(leaf, ALL_QUADRANTS);
+            // A tile the balancing made by splitting a tile that stands in is part of the stand-in (it may lie outside the view the plan draws).
+            if std::iter::successors(leaf.parent(), |a| a.parent()).any(|a| standing.contains(&a)) {
+                standing_in.insert(leaf);
+            }
             continue;
         }
         let mut x = leaf;
@@ -1156,6 +1179,7 @@ pub fn cover_selection_masked(
         // The ancestor is a standing-in tile that is not itself a leaf: a leaf it was split from by the balancing is a stand-in over all
         // four quadrants through its four children.
         *drawn.entry(x).or_insert(0) |= quadrant_bit(child_index_toward(x, leaf));
+        standing_in.insert(x);
     }
     // A tile under a quadrant that an ancestor draws is covered by it.
     let covered = |t: TileId| {
@@ -1170,7 +1194,7 @@ pub fn cover_selection_masked(
         }
         false
     };
-    drawn.iter().filter(|(t, _)| !covered(**t)).map(|(t, m)| (*t, *m)).collect()
+    drawn.iter().filter(|(t, _)| !covered(**t)).map(|(t, m)| (*t, *m, *m == ALL_QUADRANTS && !standing_in.contains(t))).collect()
 }
 
 /// Whether a plan that draws `drawn` serves the view of `camera` (STRM-016): it draws every tile of the view's own cover

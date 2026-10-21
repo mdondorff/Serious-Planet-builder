@@ -6,6 +6,7 @@
 use planet_core::cube::{FaceMapping, TangentWarp};
 use planet_core::{Face, PlanetFixed, TileId, Vec3};
 use planet_frame::pipeline::{draw_plan_with, DrawKind, DrawPlan, ResidentRecords, ResidentTile};
+use planet_frame::TileState;
 use planet_frame::{
     child_index_toward, cover_selection_bounded, cover_selection_masked, plan_covers_view, plan_terrain_field, quadrant_bit,
     residency_set_field, scripted_views_field, Camera, LodParams, SelectionCache, TerrainRequest, TerrainView, TileBounds,
@@ -203,6 +204,36 @@ fn a_plan_of_an_earlier_camera_is_drawn_where_it_covers_the_frame_and_the_cover_
         }
     }
     assert!(stale > 0 && cover_frames > 0, "the fixture must draw the plan on some frames and the cover on others: {stale}/{cover_frames}");
+}
+
+// spec: STRM-033, STRM-016
+#[test]
+fn while_the_camera_only_turns_the_cover_tiles_at_the_plans_level_are_exact_and_only_what_stands_in_for_a_missing_tile_is_a_stand_in() {
+    // The owner saw every tile turn "stand-in" in the F3 overlay while the camera only turned: the frame draws the cover when the plan of an
+    // earlier camera no longer serves the view, and the cover is the plan of the frame's camera over what is resident.
+    let position = view("ground-200m").position;
+    let from = turned(position, 0.0, -0.4);
+    let away = turned(position, 3.0, -0.4);
+    let plan = plan_levels(away);
+    // Every tile of R resident: the cover is the plan node for node, so nothing stands in for anything.
+    let (set, bounds) = resident_r(position);
+    let d = draw_from(&from, &away, &set, &bounds);
+    assert_eq!(d.kind, DrawKind::Cover);
+    assert_eq!(levels(d.plan.nodes.iter().map(|n| n.tile)), plan);
+    let stand_ins: Vec<TileId> = d.plan.nodes.iter().filter(|n| n.state != TileState::Exact).map(|n| n.tile).collect();
+    assert!(stand_ins.is_empty(), "with R resident no cover tile stands in: {} of {} do", stand_ins.len(), d.plan.nodes.len());
+    // Tiles missing: a tile of the plan that is resident is exact, a tile drawn for one that is not (a coarser one, or a part of one) is a
+    // stand-in, and both kinds occur.
+    let partial = partial_residency(position);
+    let d = draw_from(&from, &away, &partial, &bounds);
+    assert_eq!(d.kind, DrawKind::Cover);
+    let (mut exact, mut stand_in) = (0, 0);
+    for n in &d.plan.nodes {
+        let at_plan_level = plan.contains_key(&n.tile) && n.quadrants == planet_frame::ALL_QUADRANTS;
+        assert_eq!(n.state == TileState::Exact, at_plan_level, "{:?} (level {}) is {:?}", n.tile, n.tile.level(), n.state);
+        (exact, stand_in) = (exact + usize::from(at_plan_level), stand_in + usize::from(!at_plan_level));
+    }
+    assert!(exact > 0 && stand_in > 0, "the fixture has both kinds: {exact} exact, {stand_in} stand-in");
 }
 
 // spec: STRM-016
