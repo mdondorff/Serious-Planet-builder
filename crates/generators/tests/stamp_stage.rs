@@ -537,3 +537,41 @@ fn the_bounds_of_plateaus_over_other_stamps_and_a_steep_base_hold_for_random_cap
         }
     }
 }
+
+// spec: GEN-026
+#[test]
+fn the_bounds_of_a_crater_are_exact_over_a_small_cap_at_its_rim_and_hold_for_random_caps() {
+    // The owner's craters (Crater 6: 250 m deep, 2 km reach; Platonmax: 672 m deep, 200 m reach). The profile rises to the rim crest at
+    // `x = 0.85` and falls after it, so a cap that reaches the rim has the range of its end values and, if it holds the crest, the crest's: not
+    // the whole span from the bowl to the crest (50 m of bound for 2 m of relief over a cap of 28 m, which emptied the morph interval).
+    use planet_core::hash::SplitMix64;
+    let at = dir(1.0, 0.2, 0.1);
+    let base = Reference(1);
+    let mut rng = SplitMix64(21);
+    for (depth, reach) in [(250.0, 2_000.0), (672.0, 200.0), (40.0, 500.0)] {
+        let s = stage(world(vec![item(1, 0, at, reach, depth, Stamp::new(StampKind::Crater, [depth, 0.0, 0.0]))]));
+        let mut worst = 0.0f64;
+        for _ in 0..300 {
+            let centre = at_distance(at, dir(0.0, 1.0, 0.0), rng.next_f64() * reach);
+            let angle = (4.0 + rng.next_f64() * 36.0) / R;
+            let (lo, hi) = s.height_bounds(centre, angle);
+            let (blo, bhi) = base.height_bounds(centre, angle);
+            let (mut slo, mut shi) = (f64::MAX, f64::MIN);
+            for k in 0..120 {
+                let t = f64::from(k) / 120.0 * core::f64::consts::TAU;
+                for rr in [0.0, 0.5, 1.0] {
+                    let q = at_distance_around(centre, t, angle * rr);
+                    let h = s.height(q);
+                    assert!(h >= lo && h <= hi, "depth {depth}: {h} outside [{lo}, {hi}]");
+                    slo = slo.min(h - base.height(q));
+                    shi = shi.max(h - base.height(q));
+                }
+            }
+            // The growth of the extent over the base's is within a few per cent of the crater's own relief over the cap (the base's extent and
+            // the sampling of a ring leave a little).
+            let growth = (hi - lo) - (bhi - blo);
+            worst = worst.max(growth - 1.1 * (shi - slo));
+        }
+        assert!(worst < 0.5, "depth {depth}, reach {reach}: the bounds grow the extent by up to {worst} m more than 1.1 times the relief");
+    }
+}

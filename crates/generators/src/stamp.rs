@@ -35,6 +35,9 @@ pub fn hill_delta(amount: f64, x: f64) -> f64 {
     amount * q * q
 }
 
+/// The `x = distance / reach` of a crater's rim crest, where its delta is greatest.
+const CRATER_CREST_X: f64 = 0.85;
+
 /// The delta of a crater of depth `depth` (at least 0) at `x = distance / reach`: a bowl with a low rim.
 pub fn crater_delta(depth: f64, x: f64) -> f64 {
     if x >= 1.0 {
@@ -232,15 +235,15 @@ fn delta_range(item: &FootprintItem, cap: Cap, radius_m: f64) -> (f64, f64) {
             (u.min(v), u.max(v))
         }
         StampKind::Crater => {
+            // The profile rises to the rim's crest at `x = 0.85` (the bowl is non-decreasing to 0.8 and the rim's bump up to its crest) and
+            // falls after it: its range over `[x_min, x_max]` is that of the end values and, where the crest is inside, the crest's.
             let (u, v) = (crater_delta(a, x_min), crater_delta(a, x_max));
-            if x_max < 0.7 {
-                (u.min(v), u.max(v))
-            } else {
-                // The rim adds at most 0.2 of the depth; the bowl is at its deepest at the nearest distance.
-                let bowl = -a * (1.0 - smooth((x_min / 0.8).min(1.0)));
-                let rim = 0.2 * a;
-                (bowl.min(rim), bowl.max(rim))
+            let (mut lo, mut hi) = (u.min(v), u.max(v));
+            if x_min <= CRATER_CREST_X && CRATER_CREST_X <= x_max {
+                let crest = crater_delta(a, CRATER_CREST_X);
+                (lo, hi) = (lo.min(crest), hi.max(crest));
             }
+            (lo, hi)
         }
         StampKind::Plateau | StampKind::Ridge | StampKind::Channel | StampKind::Region | StampKind::Brush => {
             unreachable!("the plateaus and the brushes map the running height (`HeightRange`), the lines and the regions returned above")
