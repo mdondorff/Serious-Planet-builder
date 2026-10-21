@@ -141,3 +141,66 @@ fn the_strength_of_the_ground_detail_enters_the_plans_text_only_when_set_round_t
         assert!(err.contains("ground_detail"), "{err}");
     }
 }
+
+// spec: LOOK-010
+#[test]
+fn the_gloss_enters_the_plans_text_only_when_not_the_default_round_trips_is_refused_when_unusable_and_the_roughness_follows_the_weights() {
+    use planet_frame::look::materials::GlossParams;
+    let plan = LitPlan::fixed(13.0);
+    assert!(!plan.to_text().contains("gloss"), "{}", plan.to_text());
+    let mut gloss = GlossParams::EARTH;
+    gloss.roughness[0] = 0.5;
+    gloss.f0 = 0.08;
+    let set = LitPlan { gloss, ..plan.with_ground_detail(0.6) };
+    let text = set.to_text();
+    assert!(text.contains(" gloss ") && text.contains(" detail "), "{text}");
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    let parsed = LitPlan::from_tokens(&tokens[1..]).unwrap();
+    assert_eq!(parsed, set);
+    assert_eq!(parsed.to_text(), text);
+    // Refused: a roughness of 0 (a mirror the model cannot draw), a modifier on an input that does not exist, a factor of 0, f0 above 1, a
+    // curve that differs below f32 only.
+    let mut bad = [GlossParams::EARTH; 6];
+    bad[0].roughness[1] = 0.0;
+    bad[1].modifiers[0][0] = 9.0;
+    bad[2].modifiers[1][3] = 0.0;
+    bad[3].f0 = 1.5;
+    bad[4].modifiers[1][1] = 5.0;
+    bad[4].modifiers[1][2] = 5.0 + 1e-12;
+    bad[5].modifiers[1][1] = -1e39;
+    bad[5].modifiers[1][2] = 1e39;
+    for (b, key) in bad.iter().zip([
+        "gloss.roughness.sand",
+        "gloss.modifier0.input",
+        "gloss.modifier1.factor",
+        "gloss.f0",
+        "gloss.modifier1.curve",
+        "gloss.modifier1.value",
+    ]) {
+        let err = LitPlan { gloss: *b, ..plan }.validate().unwrap_err();
+        assert!(err.contains(key), "{key}: {err}");
+    }
+    // The roughness of a point: the weights' mean of the materials', then the modifiers; no material, none.
+    let (m, g) = (MaterialParams::EARTH, GlossParams::EARTH);
+    let mut inputs = at(1.0, 50.0);
+    inputs[Input::Temperature as usize] = 20.0;
+    let w = m.weights(&inputs);
+    assert!((g.roughness_at(&w, &inputs).unwrap() - g.roughness[1]).abs() < 1e-9, "dry flat ground is sand: its roughness");
+    inputs[Input::Temperature as usize] = -10.0;
+    assert!(
+        (g.roughness_at(&w, &inputs).unwrap() - g.roughness[1] * g.modifiers[1][3]).abs() < 1e-9,
+        "icy ground is glossier by the factor"
+    );
+    inputs[Input::Moisture as usize] = 5.0;
+    assert!(
+        (g.roughness_at(&w, &inputs).unwrap() - g.roughness[1] * g.modifiers[1][3]).abs() < 1e-9,
+        "the wet modifier is out in the default"
+    );
+    let mut wet = g;
+    wet.modifiers[0] = [Input::Moisture as usize as f64, 0.0, 1.0, 0.25];
+    assert!(
+        (wet.roughness_at(&w, &inputs).unwrap() - g.roughness[1] * g.modifiers[1][3] * 0.25).abs() < 1e-9,
+        "wet ground is glossier still"
+    );
+    assert_eq!(g.roughness_at(&[0.0; MATERIALS], &inputs), None);
+}

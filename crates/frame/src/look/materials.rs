@@ -159,11 +159,11 @@ impl MaterialParams {
             ["slope_cos", "height", "temperature", "precipitation", "surface_type", "soil_depth", "moisture", "insolation"];
         for (material, row) in MATERIAL_NAMES.iter().zip(&self.curves) {
             for (input, pair) in INPUT_NAMES.iter().zip(row) {
-                if !(pair[0].is_finite() && pair[1].is_finite()) {
+                if !(pair[0].is_finite() && pair[1].is_finite() && (pair[0] as f32).is_finite() && (pair[1] as f32).is_finite()) {
                     return Err((
                         format!("materials.{material}.{input}"),
                         format!("{pair:?}"),
-                        "both values of a response curve must be finite numbers".into(),
+                        "both values of a response curve must be finite numbers that fit f32".into(),
                     ));
                 }
                 // The shader decides "left out" on the f32 words: a pair that differs only below f32 would be an interval here and none there.
@@ -177,5 +177,155 @@ impl MaterialParams {
             }
         }
         Ok(())
+    }
+}
+
+/// The strength of the ground detail the window starts with and F6 calls "natural" (the owner's tuning pass sets it; 1 is full).
+pub const NATURAL_STRENGTH: f64 = 0.6;
+
+/// Number of roughness modifiers (the wet and the icy ground).
+pub const GLOSS_MODIFIERS: usize = 2;
+/// Number of values of [`GlossParams`]: the roughness of each material, four per modifier, and `f0`.
+pub const GLOSS_VALUES: usize = MATERIALS + 4 * GLOSS_MODIFIERS + 1;
+/// Number of `vec4<f32>` words the roughness table occupies: the roughness of the materials, then one per modifier.
+pub const GLOSS_VEC4S: usize = 1 + GLOSS_MODIFIERS;
+
+/// The specular term of the ground (M7 G2b, LOOK-010): a GGX highlight of the sun with a Schlick Fresnel of the base reflectance `f0`. The
+/// roughness of a point is the weights' mean of the materials' roughness (rock and soil rough, sand and grass less so), scaled by the
+/// modifiers: each is `[input, lo, hi, factor]`, the roughness is multiplied by `mix(1, factor, s)` for the smoothstep response `s` of the input
+/// between `lo` and `hi` (`lo == hi` leaves the modifier out). The wet ground (the reserved moisture input, until a driver map exists it reads 0
+/// and the modifier is out) and the icy ground (temperature falling from 0 to -5 C) are glossy this way.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GlossParams {
+    pub roughness: [f64; MATERIALS],
+    pub modifiers: [[f64; 4]; GLOSS_MODIFIERS],
+    pub f0: f64,
+}
+
+impl GlossParams {
+    pub const EARTH: GlossParams = GlossParams {
+        roughness: [0.85, 0.65, 0.75, 0.80],
+        modifiers: [[Input::Moisture as usize as f64, 0.0, 0.0, 0.3], [Input::Temperature as usize as f64, 0.0, -5.0, 0.4]],
+        f0: 0.04,
+    };
+
+    /// The roughness at a ground point with the material `weights` (summing to 1, or all 0) and the `inputs`; `None` when there is no material.
+    pub fn roughness_at(&self, weights: &[f64; MATERIALS], inputs: &MaterialInputs) -> Option<f64> {
+        let sum: f64 = weights.iter().sum();
+        if sum <= 0.0 {
+            return None;
+        }
+        let mut r: f64 = weights.iter().zip(&self.roughness).map(|(w, r)| w * r).sum::<f64>() / sum;
+        for m in &self.modifiers {
+            if m[1] != m[2] {
+                let s = super::shading::smoothstep(m[1], m[2], inputs[m[0] as usize]);
+                r *= 1.0 + (m[3] - 1.0) * s;
+            }
+        }
+        Some(r)
+    }
+
+    /// The table as the shader holds it: [`GLOSS_VEC4S`] words of `vec4<f32>` (the roughness of the materials, then each modifier), each value
+    /// rounded once. `f0` goes with the strength.
+    pub fn to_words(&self) -> [f32; GLOSS_VEC4S * 4] {
+        let mut w = [0f32; GLOSS_VEC4S * 4];
+        for (i, r) in self.roughness.iter().enumerate() {
+            w[i] = *r as f32;
+        }
+        for (j, m) in self.modifiers.iter().enumerate() {
+            for (k, v) in m.iter().enumerate() {
+                w[4 * (1 + j) + k] = *v as f32;
+            }
+        }
+        w
+    }
+
+    pub fn bits(&self) -> [u64; GLOSS_VALUES] {
+        let mut out = [0u64; GLOSS_VALUES];
+        for (i, v) in self.roughness.iter().chain(self.modifiers.iter().flatten()).chain([&self.f0]).enumerate() {
+            out[i] = v.to_bits();
+        }
+        out
+    }
+
+    pub fn from_bits(b: &[u64; GLOSS_VALUES]) -> GlossParams {
+        let f = |i: usize| f64::from_bits(b[i]);
+        GlossParams {
+            roughness: [0, 1, 2, 3].map(f),
+            modifiers: [0, 1].map(|j| [0, 1, 2, 3].map(|k| f(MATERIALS + 4 * j + k))),
+            f0: f(GLOSS_VALUES - 1),
+        }
+    }
+
+    /// Every value must be finite, the roughness in `(0, 1]`, a modifier's input one of the [`INPUTS`], its factor in `(0, 1]` and `f0` in `[0, 1]`;
+    /// a modifier pair that differs only below `f32` is refused (the shader decides on the `f32` words). The first violation names the key.
+    pub fn validate(&self) -> Result<(), (String, String, String)> {
+        let bad = |key: String, v: String, why: &str| Err((key, v, why.to_string()));
+        for (name, r) in MATERIAL_NAMES.iter().zip(&self.roughness) {
+            if !(*r > 0.0 && *r <= 1.0) {
+                return bad(format!("gloss.roughness.{name}"), format!("{r}"), "the roughness must be a number above 0 and up to 1");
+            }
+        }
+        for (j, m) in self.modifiers.iter().enumerate() {
+            let key = |what: &str| format!("gloss.modifier{j}.{what}");
+            if !m.iter().all(|v| v.is_finite() && (*v as f32).is_finite()) {
+                return bad(key("value"), format!("{m:?}"), "every value of a modifier must be a finite number that fits f32");
+            }
+            if m[0].fract() != 0.0 || !(0.0..INPUTS as f64).contains(&m[0]) {
+                return bad(key("input"), format!("{}", m[0]), "the input must be the index of one of the inputs");
+            }
+            if m[1] != m[2] && (m[1] as f32) == (m[2] as f32) {
+                return bad(
+                    key("curve"),
+                    format!("{:?}", [m[1], m[2]]),
+                    "the two values of a curve must differ as f32 numbers, or be equal (the modifier is out)",
+                );
+            }
+            if !(m[3] > 0.0 && m[3] <= 1.0) {
+                return bad(key("factor"), format!("{}", m[3]), "the factor must be a number above 0 and up to 1");
+            }
+        }
+        if !(0.0..=1.0).contains(&self.f0) {
+            return bad("gloss.f0".into(), format!("{}", self.f0), "the base reflectance must be a number from 0 to 1");
+        }
+        Ok(())
+    }
+}
+
+/// The strength of the ground detail the editor window shows (VIEW-046): F6 cycles it. The window starts at `Natural`; `test-render` and the
+/// goldens never set it (the plan's strength is 0 there).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GroundDetailMode {
+    Off,
+    #[default]
+    Natural,
+    Full,
+}
+
+impl GroundDetailMode {
+    /// The next one in the cycle (natural, full, off, natural).
+    pub fn next(self) -> GroundDetailMode {
+        match self {
+            GroundDetailMode::Natural => GroundDetailMode::Full,
+            GroundDetailMode::Full => GroundDetailMode::Off,
+            GroundDetailMode::Off => GroundDetailMode::Natural,
+        }
+    }
+
+    /// The strength of the lit plan (LOOK-009).
+    pub fn strength(self) -> f64 {
+        match self {
+            GroundDetailMode::Off => 0.0,
+            GroundDetailMode::Natural => NATURAL_STRENGTH,
+            GroundDetailMode::Full => 1.0,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            GroundDetailMode::Off => "off",
+            GroundDetailMode::Natural => "natural",
+            GroundDetailMode::Full => "full",
+        }
     }
 }

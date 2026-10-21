@@ -53,10 +53,12 @@ struct Globals {
     // Lit path only: the albedo table of the look (ADR 0039 point 3): eight colours with a threshold in the fourth lane, then
     // (snow_c_full, snow_c_none, snow_cos_none, snow_cos_full) and (beach_height, beach_fade, shore_blend, 0).
     albedo: array<vec4<f32>, 10>,
-    // Lit path only: x = the strength of the ground detail (LOOK-009; 0 off); then the response curves of the ground materials (LOOK-008): per
+    // Lit path only: x = the strength of the ground detail (LOOK-009; 0 off), y = the base reflectance f0 of the specular term (LOOK-010); then the response curves of the ground materials (LOOK-008): per
     // material four vec4s of two (lo, hi) pairs each, one pair per input.
     detail: vec4<f32>,
     materials: array<vec4<f32>, 16>,
+    // The specular term of the ground (LOOK-010): the roughness of the four materials, then two roughness modifiers (input, lo, hi, factor).
+    gloss: array<vec4<f32>, 3>,
     // The edit preview (REND-033), read only for a previewed node and only when extra.w (the count in the low 6 bits, at most 32, and 64 times the number of stamps of the delta above them) is above 0: per stamp two
     // entries, (anchor relative to the camera, reach in metres) and (amount in metres, kind 1 hill / 2 crater / 3 plateau, sign, bound).
     preview: array<vec4<f32>, 64>,
@@ -319,6 +321,8 @@ fn material_weights(inp: array<f32, 8>) -> vec4<f32> {
 struct GroundDetail {
     mul: vec3<f32>,
     normal: vec3<f32>,
+    // The roughness of the specular term (LOOK-010), or -1 where there is none (the detail is off, or no material is there).
+    rough: f32,
 };
 
 // The detail of a fragment: the albedo multiplier (mean near 1) and the shading normal. `t`, `p`, `h`, `cs` are the temperature, the precipitation,
@@ -333,6 +337,7 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
     out.mul = vec3<f32>(1.0);
     // Off, the normal goes through as it came (not normalised again), so the picture is what it was bit for bit.
     out.normal = normal;
+    out.rough = -1.0;
     // The derivative first (uniform control flow): the footprint of a pixel in metres.
     let foot = max(abs(fwidth(local.x)), max(abs(fwidth(local.y)), abs(fwidth(local.z))));
     let strength = g.detail.x;
@@ -341,7 +346,8 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
     }
     let n = normalize(normal);
     let cs = clamp(dot(n, up), 0.0, 1.0);
-    let w = material_weights(array<f32, 8>(cs, h, t, p, 0.0, 0.0, 0.0, 0.0));
+    var inp = array<f32, 8>(cs, h, t, p, 0.0, 0.0, 0.0, 0.0);
+    let w = material_weights(inp);
     if (w.x + w.y + w.z + w.w <= 0.0) {
         return out;
     }
@@ -382,9 +388,57 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
     let sum = w.x + w.y + w.z + w.w;
     let mul = (rock_mul * w.x + sand_mul * w.y + grass_mul * w.z + soil_mul * w.w) / sum;
     let slope = (rock_g * w.x + sand_g * w.y + grass_g * w.z + soil_g * w.w) / sum;
+    // The roughness: the weights' mean of the materials', scaled by the modifiers (the wet and the icy ground are glossy).
+    var rough = dot(w, g.gloss[0]) / sum;
+    for (var j = 1u; j < 3u; j = j + 1u) {
+        let m = g.gloss[j];
+        if (m.y != m.z) {
+            let s = clamp((inp[u32(m.x)] - m.y) / (m.z - m.y), 0.0, 1.0);
+            rough = rough * mix(1.0, m.w, s * s * (3.0 - 2.0 * s));
+        }
+    }
+    out.rough = rough;
     out.mul = mix(vec3<f32>(1.0), mul, strength);
     out.normal = normalize(n - strength * (slope - dot(slope, n) * n));
     return out;
+}
+
+// The sun's specular reflection off the ground (M7 G2b, LOOK-010): GGX with the Smith-Schlick visibility and a Schlick Fresnel, times the
+// cosine, for the sun's illuminance of one unit (the diffuse term is `albedo * ndl / pi` in the same unit). `n` the shading normal, `v` the unit
+// vector to the eye, `l` the unit vector to the sun.
+fn ground_specular(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, rough: f32, f0: f32) -> f32 {
+    let nn = normalize(n);
+    let ndl = dot(nn, l);
+    if (ndl <= 0.0) {
+        return 0.0;
+    }
+    // A shading normal that faces away from the eye reflects nothing to it (and v = -l has no half vector).
+    if (dot(nn, v) <= 0.0) {
+        return 0.0;
+    }
+    let ndv = max(dot(nn, v), 1e-3);
+    let hv = normalize(v + l);
+    let ndh = max(dot(nn, hv), 0.0);
+    let vdh = max(dot(v, hv), 0.0);
+    let a = max(rough * rough, 0.02);
+    let a2 = a * a;
+    let dd = ndh * ndh * (a2 - 1.0) + 1.0;
+    let d = a2 / (3.14159265 * dd * dd);
+    let k = a * 0.5;
+    let vis = 0.25 / ((ndl * (1.0 - k) + k) * (ndv * (1.0 - k) + k));
+    let c = 1.0 - vdh;
+    let c2 = c * c;
+    let f = f0 + (1.0 - f0) * (c2 * c2 * c);
+    return min(d * vis * f * ndl, 16.0);
+}
+
+// The specular term of a fragment's detail, scaled by the strength: 0 where there is none (no detail, no material, or not the lit view).
+fn ground_gloss(node_index: u32, local: vec3<f32>, gd: GroundDetail, sun: vec3<f32>) -> f32 {
+    if (gd.rough < 0.0 || g.mode.x != 0u) {
+        return 0.0;
+    }
+    let v = normalize(-(nodes[node_index].origin_rel.xyz + local));
+    return ground_specular(gd.normal, v, sun, gd.rough, g.detail.y) * g.detail.x;
 }
 
 // The albedo of the surface (ADR 0039 point 3, REND-026): ground from the climate (desert, grass, forest, tundra), bare rock on
@@ -485,6 +539,8 @@ fn fs_lit_view(in: VsOut) -> vec4<f32> {
     let climate = tile_climate(in);
     let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x);
     var rgb = shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * select(vec3<f32>(1.0), gd.mul, g.mode.x <= 1u);
+    // The sum is clamped like the rest of the lit radiance: the scene target is f16.
+    rgb = min(rgb + vec3<f32>(ground_gloss(in.node_index, in.local, gd, sun) * g.range.z), vec3<f32>(60000.0));
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);
     } else if (g.extra.y > 2.5) {
@@ -660,7 +716,8 @@ pub(crate) const GLOBALS_BYTES: u64 =
     96 + 16 + 16 * planet_frame::look::shading::ALBEDO_VEC4S as u64 + DETAIL_BYTES + PREVIEW_BYTES + REGION_BYTES;
 
 /// Bytes of the ground detail block of the globals after the albedo table: the strength (one vec4) and the material curve table (LOOK-008).
-pub(crate) const DETAIL_BYTES: u64 = 16 + 16 * planet_frame::look::materials::MATERIAL_VEC4S as u64;
+pub(crate) const DETAIL_BYTES: u64 =
+    16 + 16 * (planet_frame::look::materials::MATERIAL_VEC4S + planet_frame::look::materials::GLOSS_VEC4S) as u64;
 
 /// Entries (vec4s) of one polygon of the region table (VIEW-030): five of header, then [`planet_frame::regions::MAX_REGION_POINTS`] points
 /// two to an entry.
@@ -1960,8 +2017,9 @@ impl TerrainRenderer {
                 );
                 globals.extend(f32_bytes(&[lit.water_level_m, lit.overlay.shader_code(), plan.shore_ramp_per_m, 0.0]));
                 globals.extend(f32_bytes(&lit.albedo.to_words()));
-                globals.extend(f32_bytes(&[lit.ground_detail as f32, 0.0, 0.0, 0.0]));
+                globals.extend(f32_bytes(&[lit.ground_detail as f32, lit.gloss.f0 as f32, 0.0, 0.0]));
                 globals.extend(f32_bytes(&lit.materials.to_words()));
+                globals.extend(f32_bytes(&lit.gloss.to_words()));
             }
             None => {
                 globals.extend(f32_bytes(&[lo, hi, 0.0, 0.0]));

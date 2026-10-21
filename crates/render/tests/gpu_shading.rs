@@ -346,3 +346,52 @@ fn the_ground_detail_is_inert_when_off_changes_the_lit_picture_when_on_and_leave
     let mut scattered = renderer_scattered(&ctx, &p);
     assert!(hdr_of(&mut scattered, &ctx, &p, detail_plan(ShadeView::Lit, 1.0)) == on, "the detail depends on where the tiles sit");
 }
+
+// spec: REND-035, LOOK-010
+#[test]
+fn the_sun_adds_a_highlight_to_the_detailed_ground_that_follows_the_gloss_table_and_the_detail_strength() {
+    use planet_frame::look::materials::GlossParams;
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    // Looking at the ground 1 m above it from the scripted view 6; the sun is the look's.
+    let (p, _) = plan(6);
+    let mut r = renderer(&ctx, &p);
+    // With f0 0 only the Fresnel's grazing rise is left: the term is monotone in f0, so the picture with the default f0 is nowhere darker.
+    let mut no_f0 = detail_plan(ShadeView::Lit, 1.0);
+    no_f0.gloss.f0 = 0.0;
+    let base = hdr_of(&mut r, &ctx, &p, no_f0);
+    let covered = base.iter().filter(|px| px[3] > 0.0).count();
+    assert!(covered > 1000);
+    // The highlight only adds light, and adds some.
+    let shiny = hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 1.0));
+    let (mut darker, mut brighter) = (0, 0);
+    for (a, b) in base.iter().zip(&shiny).filter(|(a, _)| a[3] > 0.0) {
+        for c in 0..3 {
+            darker += usize::from(b[c] < a[c]);
+        }
+        brighter += usize::from(luminance(b) > luminance(a) * 1.001);
+    }
+    assert_eq!(darker, 0, "the specular term never darkens");
+    assert!(brighter > 0, "the specular term shows nowhere ({covered} pixels)");
+    // The table drives it: a smoother ground gives another picture, a rougher one another still; the total light differs.
+    let mut table = |rough: f64| {
+        let mut l = detail_plan(ShadeView::Lit, 1.0);
+        l.gloss = GlossParams { roughness: [rough; 4], ..GlossParams::EARTH };
+        hdr_of(&mut r, &ctx, &p, l)
+    };
+    let (smooth, rough) = (table(0.2), table(1.0));
+    assert!(smooth != rough && smooth != shiny, "the roughness table does not reach the picture");
+    // A dark exposure with the smoothest ground multiplies the highlight by a large factor: every pixel stays finite and under the clamp.
+    let mut dark = detail_plan(ShadeView::Lit, 1.0);
+    dark.exposure = planet_frame::look::ExposureMode::Fixed { ev100: -2.0 };
+    dark.gloss = GlossParams { roughness: [0.2; 4], f0: 1.0, ..GlossParams::EARTH };
+    for px in hdr_of(&mut r, &ctx, &p, dark).iter().filter(|px| px[3] > 0.0) {
+        assert!((0..3).all(|c| px[c].is_finite() && px[c] <= 60000.0), "{px:?}");
+    }
+    // Strength 0 has no highlight whatever the gloss; the albedo and climate views have none.
+    let mut shiny_off = detail_plan(ShadeView::Lit, 0.0);
+    shiny_off.gloss.f0 = 1.0;
+    assert!(hdr_of(&mut r, &ctx, &p, shiny_off) == hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 0.0)), "gloss without detail");
+    let mut albedo = detail_plan(ShadeView::Albedo, 1.0);
+    albedo.gloss.f0 = 1.0;
+    assert!(hdr_of(&mut r, &ctx, &p, albedo) == hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Albedo, 1.0)), "gloss in the albedo view");
+}

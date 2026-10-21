@@ -34,11 +34,12 @@ fn main() {
     let out = std::path::Path::new("target/review/ground-detail");
     std::fs::create_dir_all(out).expect("output directory");
     let field = Reference(1);
-    // The scripted ground site (20 N, 30 E), the sun 40 degrees above the horizon towards the east.
+    // The scripted ground site (20 N, 30 E), the sun 30 degrees above the horizon ahead of the camera (so the highlight shows).
     let (lat, lon) = (20f64.to_radians(), 30f64.to_radians());
     let up = Vec3::new(libm::cos(lat) * libm::cos(lon), libm::cos(lat) * libm::sin(lon), libm::sin(lat));
     let east = Vec3::new(0.0, 0.0, 1.0).cross(up).normalized();
-    let sun = (up * libm::sin(40f64.to_radians()) + east * libm::cos(40f64.to_radians())).normalized();
+    let north = up.cross(east).normalized();
+    let sun = (up * libm::sin(30f64.to_radians()) + north * libm::cos(30f64.to_radians())).normalized();
     let ground = field.height(up);
     let aspect = f64::from(SIZE.0) / f64::from(SIZE.1);
     for (eye, pitch_deg) in [(1.8, 6.0), (0.5, 25.0)] {
