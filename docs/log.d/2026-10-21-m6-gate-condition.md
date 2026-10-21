@@ -1,0 +1,1 @@
+- 2026-10-21 **M6 gate condition (owner):** M6 closes without the owner's retest once the ADR 0074 plan-job cost is back within +10 %; then housekeeping and M7.

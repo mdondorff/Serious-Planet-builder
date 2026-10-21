@@ -51,7 +51,7 @@ Dormant (no near trigger; not asked now):
 
 
 ## M6 iteration after the owner's test (owner, 2026-10-20; notes in `docs/briefings/m6-owner-test-plan.md`)
-The gate waits for P1. The owner's first ask: stability.
+**Gate condition (owner, 2026-10-21): M6 closes without the owner's retest once the ADR 0074 plan-job cost is back within +10 % (window 22: +125 %), measured in a perf window. The retest list stays as optional checks after the close; P1-3 and keys-after-G stay tracked.** The owner's first ask: stability.
 
 | # | Item | Owner's note | Lane |
 |---|---|---|---|
