@@ -433,6 +433,9 @@ impl crate::height::HeightField for WaterBounded<'_> {
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         self.f().height_bounds(centre, angular_radius)
     }
+    fn bounds_monotone(&self) -> bool {
+        self.f().bounds_monotone()
+    }
     fn water_cull_level(&self) -> Option<f64> {
         Some(self.level_m)
     }

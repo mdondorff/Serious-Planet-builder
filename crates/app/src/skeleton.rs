@@ -951,6 +951,9 @@ impl planet_generators::height::HeightField for CancelGuarded<'_> {
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         self.inner.height_bounds(centre, angular_radius)
     }
+    fn bounds_monotone(&self) -> bool {
+        self.inner.bounds_monotone()
+    }
     fn climate(&self, map: &dyn FaceMapping, id: TileId) -> planet_generators::climate::ClimateTexture {
         self.inner.climate(map, id)
     }

@@ -4,6 +4,8 @@ mod block_order;
 mod body_keys;
 #[path = "bounds.rs"]
 mod bounds;
+#[path = "bounds_monotone.rs"]
+mod bounds_monotone;
 #[path = "brush_stage.rs"]
 mod brush_stage;
 #[path = "cell_keys.rs"]

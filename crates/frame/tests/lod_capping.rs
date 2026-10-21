@@ -18,10 +18,10 @@ const SIZE: (u32, u32) = (1280, 720);
 
 /// One hill of `height_m` over `radius_m` of ground: the profile `h (1 - x^2)^2`, whose bounds over a cap are exact (it is monotone in the
 /// distance from `at`).
-struct Spike {
-    at: Vec3,
-    height_m: f64,
-    radius_m: f64,
+pub(crate) struct Spike {
+    pub(crate) at: Vec3,
+    pub(crate) height_m: f64,
+    pub(crate) radius_m: f64,
 }
 
 impl Spike {
@@ -64,6 +64,10 @@ impl HeightField for Spike {
         let near = self.x((d - angular_radius).max(0.0)) * (1.0 - 1e-9);
         let far = self.x(d + angular_radius) * (1.0 + 1e-9);
         (self.height_m * weight(far.min(1.0)) - 1e-9, self.height_m * weight(near) + 1e-9)
+    }
+    fn bounds_monotone(&self) -> bool {
+        // Exact over a profile that falls with the distance from `at`: a cap inside another has a range inside its range.
+        true
     }
     fn inputs_hash(&self) -> u64 {
         7

@@ -12,6 +12,9 @@ use planet_world_def::{
     records_hash64, single_planet_seed_read_hash, single_planet_seed_records, GenContext, MissingNode, ReadRecord, SPHERE_SURFACE_ID,
 };
 
+/// The slack of [`HeightField::bounds_monotone`], metres: the rounding margins of the bounds of two caps differ by this much at most.
+pub const MONOTONE_SLACK_M: f64 = 0.01;
+
 /// Bump whenever any output of this module changes (ADR 0006).
 pub const GENERATOR_VERSION: u32 = 2;
 /// Names this implementation in cache keys: CPU reference, hash version, and the face-mapping id is added by callers.
@@ -370,6 +373,14 @@ pub trait HeightField: Send + Sync {
         let m = self.max_abs_height_m();
         (-m, m)
     }
+    /// Whether [`height_bounds`](HeightField::height_bounds) is monotone in the cap: for caps `a` inside `b` (the angle between the centres
+    /// plus `a`'s radius at most `b`'s), the bounds of `a` lie inside the bounds of `b` widened by [`MONOTONE_SLACK_M`] on each side. Only
+    /// where this is true may the node selection skip a whole subtree of tiles on the bounds of a cap that covers them (ADR 0074, LOD-012);
+    /// the default is no, and a wrapper says yes only when the field below it does and its own addition keeps it so. A field that says yes
+    /// has a contract test over random nested caps (`tests/bounds_monotone.rs`).
+    fn bounds_monotone(&self) -> bool {
+        false
+    }
     /// The water level the frustum cut of the node selection must keep in view, if any (ADR 0053): a tile whose terrain lies below it
     /// is culled by a volume that reaches up to the level, so the water above a seabed the view does not see is not culled with the
     /// seabed. Only the frustum cut reads it; heights, bounds, distances and morph intervals are unchanged.
@@ -410,6 +421,9 @@ impl HeightField for Reference {
         }
         // Rounding margin: the sum above is evaluated in the same order as `height_at` but with different operands.
         ((AMPLITUDE_M * lo / norm - 1e-6).max(-AMPLITUDE_M), (AMPLITUDE_M * hi / norm + 1e-6).min(AMPLITUDE_M))
+    }
+    fn bounds_monotone(&self) -> bool {
+        true
     }
 }
 
@@ -608,6 +622,9 @@ impl<F: HeightField> HeightField for Bound<F> {
     }
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
         self.field.height_bounds(centre, angular_radius)
+    }
+    fn bounds_monotone(&self) -> bool {
+        self.field.bounds_monotone()
     }
 }
 

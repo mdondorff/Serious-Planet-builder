@@ -214,6 +214,12 @@ impl HeightField for TerrainField<'_> {
         Some(self.bake_key)
     }
 
+    /// The bounds of nested caps nest (LOD-012; `tests/bounds_monotone.rs`): the scan range and the noise bounds are monotone in the cap, and
+    /// a cap that leaves its face or covers too many cells takes the global range, which contains every other.
+    fn bounds_monotone(&self) -> bool {
+        true
+    }
+
     /// Bounds over a cap (ADR 0028 point 3): the minimum and maximum bake elevation over the lattice cells the cap can read,
     /// widened by one cell, plus and minus the largest detail. A cap that leaves its face, or covers more than
     /// [`MAX_BOUNDS_CELLS`] cells, takes the global range.

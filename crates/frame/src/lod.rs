@@ -450,6 +450,12 @@ pub struct SelectionCache {
     mesh_key_params: (u32, u8),
     /// The content keys of the tiles of a field that reads authored items (STRM-027).
     hashes: TileHashes,
+    /// Whether the subtree of a tile holds no tile too steep to morph (`certified`), by tile; valid for `certs_stamp` only: the parameters it
+    /// was judged with and the field's item revision (an edit starts it over, so nothing stale survives one).
+    certs: IdMap<bool>,
+    /// The bounds of the field over the cap of each tile that [`none_steep`] covered with (`cap_of`), valid for `certs_stamp` like `certs`.
+    caps: IdMap<(f64, f64)>,
+    certs_stamp: Option<(LodParams, u64)>,
 }
 
 /// The content key of each tile the cache holds values of, for a field whose tiles read authored items: the field's hash of the tile's
@@ -507,6 +513,8 @@ impl SelectionCache {
             self.mesh_keys.remove(t);
             self.volumes.remove(t);
         }
+        self.certs.clear();
+        self.caps.clear();
         dropped
     }
 
@@ -517,6 +525,9 @@ impl SelectionCache {
         self.mesh_keys.clear();
         self.hashes.seen.clear();
         self.hashes.stale.clear();
+        self.certs.clear();
+        self.caps.clear();
+        self.certs_stamp = None;
     }
 
     /// Whether the cache tracks the items the prepared field reads (it has a revision to check): the origin heights and mesh keys of
@@ -618,6 +629,11 @@ impl SelectionCache {
             self.clear();
             self.key = key;
         }
+        if !matches!(&self.certs_stamp, Some((q, r)) if q == p && *r == self.hashes.revision) {
+            self.certs.clear();
+            self.caps.clear();
+            self.certs_stamp = Some((p.clone(), self.hashes.revision));
+        }
     }
 }
 
@@ -630,6 +646,8 @@ struct GeomCache<'a> {
     volumes: &'a mut IdMap<Volume>,
     misses: &'a mut u64,
     hashes: &'a mut TileHashes,
+    certs: &'a mut IdMap<bool>,
+    caps: &'a mut IdMap<(f64, f64)>,
 }
 
 impl GeomCache<'_> {
@@ -702,6 +720,9 @@ impl HeightField for Flat {
     }
     fn height_bounds(&self, _: Vec3, _: f64) -> (f64, f64) {
         (0.0, 0.0)
+    }
+    fn bounds_monotone(&self) -> bool {
+        true
     }
 }
 
@@ -780,14 +801,16 @@ fn select_impl(
     cache: &mut SelectionCache,
 ) -> NodeSelection {
     cache.prepare(map, field, p);
-    let SelectionCache { tiles, volumes, misses, hashes, .. } = cache;
-    let mut geoms = GeomCache { map, field, p, tiles, volumes, misses, hashes };
+    let SelectionCache { tiles, volumes, misses, hashes, certs, caps, .. } = cache;
+    let mut geoms = GeomCache { map, field, p, tiles, volumes, misses, hashes, certs, caps };
     let floor = p.floor_level();
     // ADR 0074: tiles whose neighbourhood is too steep to morph are not leaves; the ceiling they set is found on the position-only selection
     // (no frustum), so the residency set and the plan of any view agree on it and the draw set stays inside R.
     let mut ceiling = Ceiling::default();
     let mut uncapped: Option<BTreeSet<TileId>> = None;
-    if steep_possible(field, p) {
+    // Where the field's bounds nest, a position-only walk that meets only certified subtrees (`certified`) proves that no tile is too steep
+    // without balancing or judging the tiles of the selection: the ceiling is empty and the walk below is the only one.
+    if steep_possible(field, p) && !(field.bounds_monotone() && none_steep(&mut geoms, camera)) {
         let position_leaves = walk_leaves(&mut geoms, camera, None, &Ceiling::default()).0;
         ceiling = Ceiling::of_unmorphable(&mut geoms, &position_leaves);
         if ceiling.is_empty() && frustum.is_none() {
@@ -945,8 +968,8 @@ impl SelectionCache {
         p: &LodParams,
     ) -> TileBounds {
         self.prepare(map, field, p);
-        let SelectionCache { tiles: geom_memo, volumes, misses, hashes, .. } = self;
-        let mut geoms = GeomCache { map, field, p, tiles: geom_memo, volumes, misses, hashes };
+        let SelectionCache { tiles: geom_memo, volumes, misses, hashes, certs, caps, .. } = self;
+        let mut geoms = GeomCache { map, field, p, tiles: geom_memo, volumes, misses, hashes, certs, caps };
         let mut out = TileBounds { for_view: Some((position, p.clone())), tiles: IdMap::default(), ceiling: Default::default() };
         for t in tiles {
             let v = geoms.volume(t);
@@ -1228,6 +1251,190 @@ fn morph_interval_for(geoms: &mut GeomCache, tile: TileId) -> (f64, f64) {
     (base.max(split + 2.0 * rho), end)
 }
 
+/// Whether no tile of the subtree of `a` (`a` included, at any level from `a`'s down to the finest, and whatever balancing adds) is too steep to
+/// morph, from one bounds query on a cap that covers the subtree and the same-level neighbours its morph intervals read. Only for a field whose
+/// bounds nest ([`HeightField::bounds_monotone`], LOD-012); `false` is always safe (the caller then judges the tiles).
+///
+/// The cap is centred on `a` with the angle to the farthest of `a`'s side neighbours `s` plus three of their angular radii (and three of
+/// `a`'s own): a tile `n` of a level at or below `a`'s that a descendant of `a` reads as a neighbour lies in `a` or in a side neighbour of `a`;
+/// its centre is within the angular radius of that tile's centre, and its own cap (the argument of its volume, radius at most twice that of
+/// the tile it lies in, since a tile's angular radius is at most its diameter, which is at most twice the angular radius of a tile that holds
+/// it) reaches no further. So every volume `morph_interval_for` reads in the subtree comes from bounds inside those of the cap (up to the
+/// slack of the contract), whose range is therefore no smaller than any of theirs and whose upper bound is no lower: their radius bound
+/// (`radius_bound`, increasing in the half range and in the upper bound) is at most the one computed from the cap's, and so is the start of
+/// the interval, at every level; the check is then the interval's own test at each level that reads bounds.
+fn certified(geoms: &mut GeomCache<'_>, a: TileId) -> bool {
+    if let Some(&c) = geoms.certs.get(&a) {
+        return c;
+    }
+    let c = certify(geoms, a);
+    geoms.certs.insert(a, c);
+    c
+}
+
+fn certify(geoms: &mut GeomCache<'_>, a: TileId) -> bool {
+    let (map, p, field) = (geoms.map, geoms.p, geoms.field);
+    let h = field.max_abs_height_m();
+    let ga = geoms.get(a);
+    let mut pad = 3.0 * ga.angular_radius;
+    for side in Side::ALL {
+        let gs = geoms.get(a.neighbor(map, side));
+        let between = libm::atan2(ga.dir.cross(gs.dir).length(), ga.dir.dot(gs.dir));
+        pad = pad.max(between + 3.0 * gs.angular_radius);
+    }
+    let pad = pad * 1.05 + 1e-9;
+    let (lo, hi) = field.height_bounds(ga.dir, pad);
+    if !(lo.is_finite() && hi.is_finite() && lo <= hi && pad.is_finite()) {
+        return false;
+    }
+    let (lo, hi) = (lo - planet_generators::height::MONOTONE_SLACK_M, hi + planet_generators::height::MONOTONE_SLACK_M);
+    let half = 0.5 * (hi - lo);
+    for level in a.level().max(1)..=p.max_level {
+        if !reads_bounds(p, level, h) {
+            continue;
+        }
+        let end = p.split_distance(level - 1);
+        let rho = extent(p.node_radius_bound(level) * (1.0 + hi.max(0.0) / p.radius_m), half);
+        let start = ((1.0 - p.morph_band) * end).max(p.split_distance(level) + 2.0 * rho);
+        if !morph_room(start, end, 0.0) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Whether no tile of the position-only selection (the balanced walk of `walk_leaves` without a frustum or a ceiling) can be too steep to
+/// morph, for a field whose bounds nest, from the cached bounds of the tiles round the camera and no walk or balancing. `false` means "not
+/// proved" (the caller then takes the full path, which is exact).
+///
+/// A tile `x` of level `k` above the floor is in the selection only if its parent was split by distance (`geoms.distance(parent) <
+/// split(k - 1)`), or balancing made it: a leaf `y` at least a level finer than `x` lies within a chain of tiles of shrinking sizes next to
+/// it (the chain runs through balance-split tiles of shrinking sizes, at most `7 r` from `x`'s centre to the centre of the tile distance split;
+/// `r` the largest angular radius of a tile of level `k`), and that tile (level `k` or finer) was split by distance, `< split(k)`, which is half
+/// of `split(k - 1)`; a level that passes `morph_room` has `split(k)` of at least `2.2 nrb(k)`, which is the slack the `7 r` needs. Either way the volume sphere of a tile that was split by distance has a point
+/// within `split(k - 1)` of the camera, and the sphere's radius is at most `extent(node_radius_bound (1 + h/R), h)`, so its centre, on the
+/// direction of the tile at a norm of at least `R - h`, is within `D = split(k - 1) + that radius` of the camera (the half range and the upper
+/// bound of the sphere being those of the covering caps of level `k - 1`, whose tiles' volumes they hold, or `h` where that level reads none), and so the direction of
+/// `x` is within `2 asin(D / (2 m))` of the camera's (`m = min(|camera|, R - h)`; the chord is at least `m` times the angle's chord) plus
+/// the `7 r` of the chain. The tiles `morph_interval_for` reads for such a tile are `x`'s four side neighbours, whose centres are within
+/// `2.2 r` of its centre and whose caps (the argument of their volumes) have radius at most `1.01 r`. Each such cap has its centre in a tile
+/// `a` of a level at most `k - 1` (`a`'s centre within `r_a` of it), so it lies inside the cap of `a` of `cap_of` (`r_a` plus the radius
+/// bound of the level below `a`'s, which is at least `1.01 r`); the bounds of that cap, cached by tile, hold the bounds of every volume read,
+/// up to the slack of the contract.
+/// The interval of the level is tested on them exactly as `morph_interval_for` would (`radius_bound` and the start are increasing in the half
+/// range and in the upper bound). The tiles `a` are those within `D' + r_a` of the camera, `D'` the angle above plus `7.5 r` (found by a
+/// flood from the camera's tile, which keeps going `3.5 r_a` beyond so that it cannot miss a tile), first at level `k - 3`; a tile whose cap
+/// has bounds too wide for the interval is replaced by its children, down to level `k - 1`, where it fails the test. A level where no tile can be within
+/// `D` of the camera (the altitude above the highest ground is more than `D`) has none, and nor has any finer level.
+fn none_steep(geoms: &mut GeomCache<'_>, camera: PlanetFixed) -> bool {
+    /// Tiles one call may look at before it gives up (the cover of a level is a few dozen tiles where it works).
+    const MAX_VISITS: u32 = 4_000;
+    let (map, p, field) = (geoms.map, geoms.p, geoms.field);
+    let h = field.max_abs_height_m();
+    let floor = p.floor_level();
+    let (norm, dir) = (camera.0.length(), camera.0.normalized());
+    let altitude = norm - (p.radius_m + h);
+    let m = norm.min(p.radius_m - h);
+    if !(norm.is_finite() && m > 0.0) {
+        return false;
+    }
+    let angle_to = |v: Vec3| libm::atan2(dir.cross(v).length(), dir.dot(v));
+    // The half range and the upper bound the previous level's covering caps allowed (the volumes of its tiles, the parents of this level's,
+    // lie inside them), or the field's global bound where that level read no bounds.
+    let mut previous: Option<(f64, f64)> = None;
+    let mut visits = 0u32;
+    for k in (floor + 1).max(1)..=p.max_level {
+        if !reads_bounds(p, k, h) {
+            previous = None;
+            continue;
+        }
+        let end = p.split_distance(k - 1);
+        let (parent_half, parent_hi) = previous.unwrap_or((h, h));
+        let parent_radius = extent(p.node_radius_bound(k - 1) * (1.0 + parent_hi.max(0.0) / p.radius_m), parent_half);
+        let (mut level_half, mut level_hi) = (0.0f64, f64::NEG_INFINITY);
+        let d = end + parent_radius;
+        // No tile of this level is within reach of the camera, nor is any of the finer levels (their reach is shorter).
+        if altitude > d {
+            break;
+        }
+        let r = 1.02 * p.node_radius_bound(k) / p.radius_m;
+        let theta = if d >= 2.0 * m { std::f64::consts::PI } else { 2.0 * libm::asin(d / (2.0 * m)) };
+        let reach = (theta + 7.5 * r) * 1.0001 + 1e-9;
+        if reach >= 0.5 {
+            return false;
+        }
+        // The tiles round the camera at level `k - 3`, each halved where the bounds of its cap are too wide, down to level `k - 1`.
+        let j = k.saturating_sub(3);
+        let start = TileId::from_direction(map, dir, j);
+        let mut seen: IdSet = IdSet::default();
+        seen.insert(start);
+        let mut flood = vec![start];
+        let mut covering: Vec<TileId> = Vec::new();
+        while let Some(a) = flood.pop() {
+            visits += 1;
+            if visits > MAX_VISITS {
+                return false;
+            }
+            let ga = geoms.get(a);
+            let between = angle_to(ga.dir);
+            if between <= reach + ga.angular_radius {
+                covering.push(a);
+            }
+            if between <= reach + 3.5 * ga.angular_radius {
+                for side in Side::ALL {
+                    let n = a.neighbor(map, side);
+                    if seen.insert(n) {
+                        flood.push(n);
+                    }
+                }
+            }
+        }
+        while let Some(a) = covering.pop() {
+            visits += 1;
+            if visits > MAX_VISITS {
+                return false;
+            }
+            let (lo, hi) = cap_of(geoms, a);
+            let ok = lo.is_finite() && hi.is_finite() && lo <= hi && {
+                let (lo, hi) = (lo - planet_generators::height::MONOTONE_SLACK_M, hi + planet_generators::height::MONOTONE_SLACK_M);
+                let rho = extent(p.node_radius_bound(k) * (1.0 + hi.max(0.0) / p.radius_m), 0.5 * (hi - lo));
+                morph_room(((1.0 - p.morph_band) * end).max(p.split_distance(k) + 2.0 * rho), end, 0.0)
+            };
+            if ok {
+                level_half = level_half.max(0.5 * (hi - lo) + planet_generators::height::MONOTONE_SLACK_M);
+                level_hi = level_hi.max(hi + planet_generators::height::MONOTONE_SLACK_M);
+                continue;
+            }
+            // Halve it: the children serve this level while they are no finer than `k - 1`.
+            if a.level() + 1 >= k {
+                return false;
+            }
+            for c in children_of(a) {
+                let gc = geoms.get(c);
+                if angle_to(gc.dir) <= reach + gc.angular_radius {
+                    covering.push(c);
+                }
+            }
+        }
+        previous = Some((level_half, level_hi));
+    }
+    true
+}
+
+/// The bounds of the field over the cap round the centre of `a` of radius its angular radius plus 1.1 of the angular radius bound of a tile one
+/// level finer (the caps of the volumes of tiles of that level and finer, whose centres lie in `a`, are inside it), cached by tile (valid while
+/// the cache's field and parameters are those it was filled for).
+fn cap_of(geoms: &mut GeomCache<'_>, a: TileId) -> (f64, f64) {
+    if let Some(&b) = geoms.caps.get(&a) {
+        return b;
+    }
+    let g = geoms.get(a);
+    let small = 1.1 * 1.02 * geoms.p.node_radius_bound((a.level() + 1).min(geoms.p.max_level)) / geoms.p.radius_m;
+    let b = geoms.field.height_bounds(g.dir, g.angular_radius + small);
+    geoms.caps.insert(a, b);
+    b
+}
+
 /// Hasher for tile ids (already well-mixed bit patterns): one multiply, no SipHash.
 #[derive(Default)]
 struct IdHasher(u64);
@@ -1426,6 +1633,7 @@ impl Ceiling {
         tree.sort_unstable_by_key(|t| (t.level(), *t));
         // A level whose intervals read no bounds needs no look at its tiles.
         let always = |level: u8| !reads_bounds(p, level, h);
+        let monotone = geoms.field.bounds_monotone();
         let mut dead: IdSet = IdSet::default();
         let mut unmorphable: Vec<TileId> = Vec::new();
         for t in tree {
@@ -1435,6 +1643,11 @@ impl Ceiling {
                 continue;
             }
             if always(t.level()) {
+                continue;
+            }
+            // A certified subtree holds no unmorphable tile: neither it nor anything below it is judged.
+            if monotone && certified(geoms, t) {
+                dead.insert(t);
                 continue;
             }
             let (start, end) = morph_interval_for(geoms, t);

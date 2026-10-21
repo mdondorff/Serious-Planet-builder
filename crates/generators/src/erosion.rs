@@ -285,6 +285,12 @@ impl HeightField for ErosionField<'_> {
         Some(self.bake_key)
     }
 
+    /// The bounds of nested caps nest (LOD-012; `tests/bounds_monotone.rs`): the scan range, the slope and amplitude intervals and the noise
+    /// bounds are each monotone in the cap, and a cap too wide takes the global range, which contains every other.
+    fn bounds_monotone(&self) -> bool {
+        true
+    }
+
     /// Bounds over a cap (GEN-017). The bake's range over the cap is the terrain field's. The slope at a cap point differs
     /// from the slope at the centre by at most `delta_g` (below), so the slope factor lies in an interval, the amplitude in
     /// another (it grows with the elevation and the slope factor), the crease sum in a third (from the per-octave noise
