@@ -527,6 +527,7 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     crate::streamperf::check_options(o)?;
     let from_store = o.store.is_some();
     let world = crate::streamperf::open_world(o, false)?.bounding_water();
+    ground_crater(&world)?;
     if !world.has_water() {
         return Err("the lit scenes measure the water pass, but this world has no ocean channel (a store made before GLOBAL_VERSION 4?): regenerate it with `generate --global-dir`".into());
     }
@@ -833,6 +834,9 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
     let default = setup.look.water.shore_filter;
     let first = views[0].cameras[0];
     let mut r = new_renderer(&rig, &setup, first)?;
+    if std::env::var_os("CAPTURE_GROUND").is_some() {
+        return capture_ground(&rig, &mut setup, &mut r, &world, &is_sea, &dir, out);
+    }
     for view in views.iter().filter(|v| v.kind == ViewKind::Flight) {
         for filter in [default, if default == 0.0 { 1.0 } else { 0.0 }] {
             setup.look.water.shore_filter = filter;
@@ -860,6 +864,142 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
     setup.look.water.shore_filter = default;
     std::fs::write(dir.join("capture.txt"), index).map_err(err)?;
     writeln!(out, "wrote {} (frames of each flight and shore filter, and capture.txt)", dir.display()).map_err(err)
+}
+
+
+/// SPIKE G1: `GROUND_CRATER=lat,lon,reach_m,depth_m` puts a crater into the world (a steep slope to look at: the bake has none at 300 m).
+fn ground_crater(world: &WorldTerrain) -> Result<(), String> {
+    let Ok(v) = std::env::var("GROUND_CRATER") else { return Ok(()) };
+    let p: Vec<f64> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+    if p.len() != 4 {
+        return Err("GROUND_CRATER=lat,lon,reach_m,depth_m".into());
+    }
+    let (la, lo) = (p[0].to_radians(), p[1].to_radians());
+    let dir = planet_core::Vec3::new(la.cos() * lo.cos(), la.cos() * lo.sin(), la.sin());
+    let mut def = (*world.definition()).clone();
+    let spec = planet_world_def::ItemSpec {
+        id: 1,
+        layer: "stamps".into(),
+        priority: 0,
+        dir,
+        content_hash: 0,
+        reach_m: p[2],
+        max_delta_m: p[3] * 1.5,
+        stamp: None,
+    }
+    .with_stamp(planet_world_def::stamp::Stamp::new(planet_world_def::stamp::StampKind::Crater, [p[3], 0.0, 0.0]));
+    def.put_item_spec(planet_world_def::BodyId::PLANET, spec).map_err(|e| e.to_string())?;
+    world.set_definition(std::sync::Arc::new(def))
+}
+
+/// SPIKE G1 (spike branch only): `CAPTURE_GROUND=1 test-render --scene capture-flights ...`: stills at the ground: for `GROUND_SITES` (6) land
+/// sites spread over the sphere and flat enough, eye heights 1.8 m, 0.5 m (crouched) and 20 m, written to `dir` as PNG with the tag
+/// `GROUND_TAG`; the near plane is `GROUND_NEAR_M` (default 0.1, the viewer's). The first still is also timed (100 frames).
+fn capture_ground(
+    rig: &Rig<'_>,
+    setup: &mut LitSetup,
+    r: &mut TerrainRenderer,
+    world: &WorldTerrain,
+    is_sea: &dyn Fn(planet_core::Vec3) -> bool,
+    dir: &std::path::Path,
+    out: &mut dyn Write,
+) -> Result<(), String> {
+    let env = |k: &str, d: f64| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+    let near = env("GROUND_NEAR_M", 0.1);
+    let n_sites = env("GROUND_SITES", 6.0) as usize;
+    let tag = std::env::var("GROUND_TAG").unwrap_or_else(|_| "plain".into());
+    let aspect = f64::from(rig.size.0) / f64::from(rig.size.1);
+    let radius = rig.radius_m;
+    let level = setup.level_m;
+    let flat = |d: planet_core::Vec3| -> f64 {
+        // The steepest height change over 300 m in four directions, metres per 300 m.
+        let helper = if d.z.abs() < 0.9 { planet_core::Vec3::new(0.0, 0.0, 1.0) } else { planet_core::Vec3::new(1.0, 0.0, 0.0) };
+        let east = d.cross(helper).normalized();
+        let north = d.cross(east).normalized();
+        let h0 = rig.field.height(d);
+        [east, north, east * -1.0, north * -1.0]
+            .iter()
+            .map(|v| (rig.field.height((d + *v * (300.0 / radius)).normalized()) - h0).abs())
+            .fold(0.0, f64::max)
+    };
+    let mut sites: Vec<planet_core::Vec3> = Vec::new();
+    let n = 20000usize;
+    for i in 0..n {
+        if sites.len() >= n_sites {
+            break;
+        }
+        let z = 1.0 - 2.0 * (i as f64 + 0.5) / n as f64;
+        let rr = (1.0 - z * z).sqrt();
+        let a = std::f64::consts::PI * (3.0 - 5f64.sqrt()) * i as f64;
+        let d = planet_core::Vec3::new(rr * a.cos(), rr * a.sin(), z);
+        if is_sea(d) || rig.field.height(d) < level + 60.0 || flat(d) > env("GROUND_FLAT_MAX", 25.0) || flat(d) < env("GROUND_FLAT_MIN", 0.0) {
+            continue;
+        }
+        if sites.iter().any(|s| s.dot(d) > 0.9) {
+            continue;
+        }
+        sites.push(d);
+    }
+    if let Ok(v) = std::env::var("GROUND_CRATER") {
+        // The crater's slope: a site on the inner slope half way to the rim, looking across.
+        let p: Vec<f64> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+        let (la, lo) = (p[0].to_radians(), p[1].to_radians());
+        let c = planet_core::Vec3::new(la.cos() * lo.cos(), la.cos() * lo.sin(), la.sin());
+        let east = c.cross(planet_core::Vec3::new(0.0, 0.0, 1.0)).normalized();
+        sites.clear();
+        sites.push((c + east * (0.6 * p[2] / radius)).normalized());
+    }
+    writeln!(out, "capture-ground: tag {tag}, near plane {near} m, {} sites of {n_sites} asked", sites.len()).map_err(err)?;
+    let mut cache = SelectionCache::new();
+    let mut first_timed = false;
+    for (si, d) in sites.iter().enumerate() {
+        let helper = planet_core::Vec3::new(0.0, 0.0, 1.0);
+        let east = if std::env::var_os("GROUND_CRATER").is_some() { d.cross(helper).normalized() * -1.0 } else { d.cross(helper).normalized() };
+        let ground = rig.field.height(*d);
+        let (lat, lon) = (d.z.asin().to_degrees(), d.y.atan2(d.x).to_degrees());
+        let poses: Vec<(f64, f64)> = std::env::var("GROUND_POSES")
+            .ok()
+            .map(|v| v.split(',').filter_map(|p| p.split_once(':').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))).collect())
+            .unwrap_or_else(|| vec![(1.8, 6.0), (0.5, 6.0), (20.0, 12.0)]);
+        for (eye, pitch_deg) in poses {
+            let pos = planet_core::PlanetFixed(*d * (radius + ground + eye));
+            let camera = Camera::at_surface_point(pos, east, f64::to_radians(pitch_deg), f64::to_radians(60.0), aspect, near);
+            let plan = planet_frame::plan_terrain_cached(&request(rig, camera), rig.field, &mut cache).map_err(|e| e.to_string())?;
+            crate::skeleton::upload_missing_meshes(rig.ctx, Some(rig.world), r, &plan, rig.field, radius, rig.cells)?;
+            let lit = setup.plan(world, rig.field, &plan, WATER_T0, 1.0 / 60.0, true)?;
+            for _ in 0..3 {
+                r.render(rig.ctx, &lit, false).map_err(|e| e.to_string())?;
+            }
+            let image = r.read_color(rig.ctx);
+            let name = format!("site{si}_lat{lat:.2}_lon{lon:.2}_eye{eye}_{tag}.png");
+            image.write_png(&dir.join(&name)).map_err(|e| format!("writing {name}: {e}"))?;
+            writeln!(out, "  {name}: ground {ground:.1} m, {} nodes, finest level {}", plan.nodes.len(), plan.nodes.iter().map(|x| x.level).max().unwrap_or(0))
+                .map_err(err)?;
+            if !first_timed {
+                first_timed = true;
+                let mut gpu = Vec::new();
+                let mut total = Vec::new();
+                for _ in 0..100 {
+                    let (t, _) = r.render(rig.ctx, &lit, true).map_err(|e| e.to_string())?;
+                    gpu.push(t.gpu_ms.unwrap_or(f64::NAN));
+                    total.push(t.total_ms);
+                }
+                gpu.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                total.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                writeln!(
+                    out,
+                    "  timing (site {si}, eye 1.8 m, {}x{}, 100 frames, indicative): gpu median {:.3} ms (p95 {:.3}), wall median {:.3} ms",
+                    rig.size.0,
+                    rig.size.1,
+                    gpu[50],
+                    gpu[95],
+                    total[50]
+                )
+                .map_err(err)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

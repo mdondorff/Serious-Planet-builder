@@ -18,7 +18,7 @@ pub const GRID_SPACINGS_M: [f64; 9] = [0.01, 0.1, 1.0, 10.0, 100.0, 1.0e3, 1.0e4
 
 /// Bytes of one node record (origin, colour, morph interval, one grid phase per decade) in the storage buffer the shader
 /// indexes with the instance index.
-pub(crate) const NODE_BYTES: u64 = 48 + 16 * GRID_SPACINGS_M.len() as u64 + 16;
+pub(crate) const NODE_BYTES: u64 = 48 + 16 * GRID_SPACINGS_M.len() as u64 + 16 + planet_frame::draw::GROUND_DETAIL_BYTES;
 const _: () = assert!(NODE_BYTES == planet_frame::draw::NODE_RECORD_BYTES, "the frame crate counts the same record size");
 
 /// The relief grid's anchors for a tile origin (planet-fixed, f64): for each decade the fractional part of
@@ -75,6 +75,9 @@ struct Node {
     // The unit up vector of the tile origin (planet-fixed axes) and the inverse of the origin's distance from the planet centre:
     // up at a point `local` metres from the origin is normalize(xyz + local * w), formed from tile-local numbers only (CON-11).
     up: vec4<f32>,
+    // SPIKE G1: four detail lattices (cell of the tile origin as integers, w of the first: 1 when the detail is on; fraction and cells per metre).
+    dbase: array<vec4<i32>, 4>,
+    dfrac: array<vec4<f32>, 4>,
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -244,6 +247,108 @@ fn fs_view(in: VsOut) -> vec4<f32> {
     return vec4<f32>(v * k, v * k, v * k, 1.0);
 }
 
+
+// SPIKE G1 (spike branch only): the ground detail term of the lit path. Four absolute noise lattices (cells of 2 m, 0.5 m, 12.5 cm and
+// 3 cm) anchored to the world through the node record (integer cell of the tile origin from f64 on the CPU, fraction and cells per
+// metre), so neighbouring tiles and LOD levels read the same noise and no planet-radius value reaches the shader (CON-11). Value noise
+// with analytic gradients; per material (rock, sand, grass by the albedo's own slope and precipitation weights) it modulates the albedo
+// and tilts the shading normal. Fades with the pixel footprint (an octave resolves while a pixel covers under 0.4 of a cell).
+fn gd_hash(c: vec3<i32>, k: u32) -> f32 {
+    var h = (bitcast<u32>(c.x) * 0x8da6b343u) ^ (bitcast<u32>(c.y) * 0xd8163841u) ^ (bitcast<u32>(c.z) * 0xcb1ab31fu) ^ ((k + 1u) * 0x9e3779b1u);
+    h = h ^ (h >> 16u);
+    h = h * 0x85ebca6bu;
+    h = h ^ (h >> 13u);
+    h = h * 0xc2b2ae35u;
+    h = h ^ (h >> 16u);
+    return f32(h >> 8u) * 1.1920929e-7 - 1.0;
+}
+
+// Smoothstep value noise: xyz gradient with respect to q (lattice units), w value in [-1, 1].
+fn gd_noise(base: vec3<i32>, q: vec3<f32>, k: u32) -> vec4<f32> {
+    let fl = floor(q);
+    let u = q - fl;
+    let c = base + vec3<i32>(fl);
+    let t = u * u * (3.0 - 2.0 * u);
+    let dt = 6.0 * u * (1.0 - u);
+    let c000 = gd_hash(c, k);
+    let c100 = gd_hash(c + vec3<i32>(1, 0, 0), k);
+    let c010 = gd_hash(c + vec3<i32>(0, 1, 0), k);
+    let c110 = gd_hash(c + vec3<i32>(1, 1, 0), k);
+    let c001 = gd_hash(c + vec3<i32>(0, 0, 1), k);
+    let c101 = gd_hash(c + vec3<i32>(1, 0, 1), k);
+    let c011 = gd_hash(c + vec3<i32>(0, 1, 1), k);
+    let c111 = gd_hash(c + vec3<i32>(1, 1, 1), k);
+    let x00 = mix(c000, c100, t.x);
+    let x10 = mix(c010, c110, t.x);
+    let x01 = mix(c001, c101, t.x);
+    let x11 = mix(c011, c111, t.x);
+    let value = mix(mix(x00, x10, t.y), mix(x01, x11, t.y), t.z);
+    let gx = dt.x * mix(mix(c100 - c000, c110 - c010, t.y), mix(c101 - c001, c111 - c011, t.y), t.z);
+    let gy = dt.y * mix(mix(c010 - c000, c110 - c100, t.x), mix(c011 - c001, c111 - c101, t.x), t.z);
+    let gz = dt.z * mix(mix(c001 - c000, c101 - c100, t.x), mix(c011 - c010, c111 - c110, t.x), t.y);
+    return vec4<f32>(gx, gy, gz, value);
+}
+
+// The detail of a fragment: xyz the albedo multiplier (mean about 1), the normal returned through `n_out`. `tab` is the look's albedo
+// table (its slope and precipitation thresholds decide the material), `p` the precipitation, `cs` the cosine of the slope.
+struct GroundDetail {
+    mul: vec3<f32>,
+    normal: vec3<f32>,
+};
+
+fn ground_detail(node_index: u32, local: vec3<f32>, n: vec3<f32>, tab: array<vec4<f32>, 10>, p: f32, cs: f32) -> GroundDetail {
+    var out: GroundDetail;
+    out.mul = vec3<f32>(1.0);
+    out.normal = n;
+    // The derivative first (uniform control flow): the footprint of a pixel in metres.
+    let foot = max(abs(fwidth(local.x)), max(abs(fwidth(local.y)), abs(fwidth(local.z))));
+    let node = nodes[node_index];
+    if (node.dbase[0].w == 0) {
+        return out;
+    }
+    let wet = smoothstep(tab[0].w, tab[1].w, p);
+    var rock_w = 1.0 - smoothstep(tab[6].w, tab[7].w, cs);
+    var grass_w = wet * (1.0 - rock_w);
+    var sand_w = (1.0 - wet) * (1.0 - rock_w);
+    let forced = node.dbase[1].w;
+    if (forced != 0) {
+        rock_w = select(0.0, 1.0, forced == 1);
+        sand_w = select(0.0, 1.0, forced == 2);
+        grass_w = select(0.0, 1.0, forced == 3);
+    }
+    var val = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
+    var grad = array<vec3<f32>, 4>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
+    var fade = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
+    for (var k = 0u; k < 4u; k = k + 1u) {
+        let inv = node.dfrac[k].w;
+        fade[k] = 1.0 - smoothstep(0.1, 0.4, foot * inv);
+        if (fade[k] > 0.0) {
+            let q = node.dfrac[k].xyz + local * inv;
+            var base = node.dbase[k].xyz;
+            let nz = gd_noise(base, q, k);
+            val[k] = nz.w * fade[k];
+            // The height of an octave is its amplitude times the cell size, so the slope is the lattice gradient times the amplitude.
+            grad[k] = nz.xyz * fade[k];
+        }
+    }
+    // Rock: cracked ridges (the ridged value of the 2 m and 0.5 m octaves) and a mottled albedo, strong normals.
+    let r_ridge = (1.0 - abs(val[0])) * (1.0 - abs(val[1]));
+    let rock_mul = (0.78 + 0.30 * val[1] + 0.18 * val[2] - 0.45 * smoothstep(0.80, 1.0, 1.0 - abs(val[1])) * fade[1]) * vec3<f32>(1.0, 0.98, 0.95);
+    let rock_g = 0.55 * grad[1] + 0.45 * grad[2] + 0.30 * grad[3];
+    // Sand: fine grain and low ripples.
+    let sand_mul = (1.0 + 0.10 * val[3] + 0.06 * val[2]) * vec3<f32>(1.0, 1.0, 0.98);
+    let sand_g = 0.12 * grad[0] + 0.10 * grad[2] + 0.18 * grad[3];
+    // Grass: blade-scale patches, darker and greener, strong small-scale normals.
+    let grass_t = 0.5 + 0.5 * val[2];
+    let grass_mul = mix(vec3<f32>(0.62, 0.72, 0.52), vec3<f32>(1.12, 1.18, 0.95), grass_t) * (1.0 + 0.18 * val[3]);
+    let grass_g = 0.35 * grad[3] + 0.20 * grad[2];
+    let wsum = max(rock_w + sand_w + grass_w, 1e-4);
+    out.mul = (rock_mul * rock_w + sand_mul * sand_w + grass_mul * grass_w) / wsum;
+    let g = (rock_g * rock_w + sand_g * sand_w + grass_g * grass_w) / wsum;
+    out.normal = normalize(n - (g - dot(g, n) * n));
+    return out;
+}
+
 // The albedo of the surface (ADR 0039 point 3, REND-026): ground from the climate (desert, grass, forest, tundra), bare rock on
 // steep ground, snow by temperature and slope, a beach band above the water and the seabed below it. `t` is the temperature in
 // degrees C, `p` the precipitation in mm, `cs` the cosine of the slope and `h` the height above the water level. The same function
@@ -340,7 +445,9 @@ fn fs_lit_view(in: VsOut) -> vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
-    var rgb = shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z);
+    let nrm0 = normalize(in.normal);
+    let gd = ground_detail(in.node_index, in.local, nrm0, g.albedo, climate.y, clamp(dot(nrm0, up), 0.0, 1.0));
+    var rgb = shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * gd.mul;
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);
     } else if (g.extra.y > 2.5) {
@@ -405,6 +512,23 @@ pub(crate) fn view_index(v: TerrainView) -> u32 {
     TerrainView::ALL.iter().position(|x| *x == v).expect("known view") as u32
 }
 
+/// SPIKE G1: the ground detail is on when `GROUND_DETAIL` is set in the environment (read once).
+fn ground_detail_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("GROUND_DETAIL").is_some())
+}
+
+/// SPIKE G1: `GROUND_MATERIAL=rock|sand|grass` forces the material weights of the detail (for the material sheet): 1, 2, 3; 0 none.
+fn ground_material_forced() -> i32 {
+    static M: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
+    *M.get_or_init(|| match std::env::var("GROUND_MATERIAL").as_deref() {
+        Ok("rock") => 1,
+        Ok("sand") => 2,
+        Ok("grass") => 3,
+        _ => 0,
+    })
+}
+
 /// The node records of a plan, `NODE_BYTES` each (at least one record's worth, zero-filled when the plan has no nodes), as the shader
 /// indexes them with the instance index.
 pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
@@ -442,7 +566,23 @@ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
         let o = d.origin.0;
         let len = (o.x * o.x + o.y * o.y + o.z * o.z).sqrt();
         floats.extend([(o.x / len) as f32, (o.y / len) as f32, (o.z / len) as f32, (1.0 / len) as f32]);
-        let b = f32_bytes(&floats);
+        let mut b = f32_bytes(&floats);
+        // SPIKE G1: the detail lattices (scales 2 m, 0.5 m, 12.5 cm, 3 cm), decided in f64 (CON-11): the integer cell of the tile origin
+        // and its fraction, so the noise is anchored to the world and no planet-radius value reaches the shader.
+        let on = ground_detail_on();
+        let scales = [2.0f64, 0.5, 0.125, 0.03125];
+        let mut cells = Vec::new();
+        let mut fracs = Vec::new();
+        for (k, s) in scales.iter().enumerate() {
+            let c = [o.x, o.y, o.z].map(|v| (v / s).floor());
+            let f = [o.x, o.y, o.z].map(|v| ((v / s) - (v / s).floor()) as f32);
+            cells.extend([c[0] as i64 as i32, c[1] as i64 as i32, c[2] as i64 as i32, if k == 0 && on { 1 } else if k == 1 { ground_material_forced() } else { 0 }]);
+            fracs.extend([f[0].min(0.999_999), f[1].min(0.999_999), f[2].min(0.999_999), (1.0 / s) as f32]);
+        }
+        for c in cells {
+            b.extend(c.to_le_bytes());
+        }
+        b.extend(f32_bytes(&fracs));
         nodes[i * NODE_BYTES as usize..(i + 1) * NODE_BYTES as usize].copy_from_slice(&b);
     }
     nodes

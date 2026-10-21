@@ -14,7 +14,10 @@ pub const DRAW_RECORD_BYTES: u64 = 20;
 
 /// Bytes of one node record in the storage buffer the shader indexes with the instance index (origin, colour, morph interval
 /// nine grid phases and the up vector with the inverse radius of the tile origin, 16-byte aligned).
-pub const NODE_RECORD_BYTES: u64 = 48 + 16 * 9 + 16;
+pub const NODE_RECORD_BYTES: u64 = 48 + 16 * 9 + 16 + GROUND_DETAIL_BYTES;
+
+/// SPIKE G1: the ground detail block of a node record (four lattices: integer cell of the tile origin, fraction and cells per metre).
+pub const GROUND_DETAIL_BYTES: u64 = 128;
 
 /// Bytes written per frame for `nodes` planned nodes on the indirect path: node records plus argument records.
 pub fn indirect_frame_bytes(nodes: usize) -> u64 {
