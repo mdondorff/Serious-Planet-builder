@@ -46,6 +46,8 @@ mod lookfile;
 mod managed;
 #[path = "manager_real.rs"]
 mod manager_real;
+#[path = "materials.rs"]
+mod materials;
 #[path = "morph.rs"]
 mod morph;
 #[path = "mouselook_replay.rs"]
