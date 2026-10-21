@@ -53,6 +53,10 @@ struct Globals {
     // Lit path only: the albedo table of the look (ADR 0039 point 3): eight colours with a threshold in the fourth lane, then
     // (snow_c_full, snow_c_none, snow_cos_none, snow_cos_full) and (beach_height, beach_fade, shore_blend, 0).
     albedo: array<vec4<f32>, 10>,
+    // Lit path only: x = the strength of the ground detail (LOOK-009; 0 off); then the response curves of the ground materials (LOOK-008): per
+    // material four vec4s of two (lo, hi) pairs each, one pair per input.
+    detail: vec4<f32>,
+    materials: array<vec4<f32>, 16>,
     // The edit preview (REND-033), read only for a previewed node and only when extra.w (the count in the low 6 bits, at most 32, and 64 times the number of stamps of the delta above them) is above 0: per stamp two
     // entries, (anchor relative to the camera, reach in metres) and (amount in metres, kind 1 hill / 2 crater / 3 plateau, sign, bound).
     preview: array<vec4<f32>, 64>,
@@ -71,6 +75,9 @@ struct Node {
     // Per grid decade (1 cm .. 1,000 km) the fractional part of (planet-fixed tile origin / spacing), xyz, taken in f64 on
     // the CPU: they anchor the relief grid to the world instead of to this tile, so neighbouring tiles and LOD splits draw
     // the same lines, and keep the line coordinates small.
+    // The fourth lanes of the first six phases carry the ground detail anchor (LOOK-009), so the record does not grow: lanes 0 to 2 the integer
+    // cell of the tile origin at 1/32 m (floor of origin * 32, from f64 on the CPU) as bits of an i32, lanes 3 to 5 the fraction of origin * 32 in cells. The
+    // noise octaves are anchored to the world by it; the cell is an exact integer used only for shifts and hashing, no planet-radius float is formed (CON-11).
     phase: array<vec4<f32>, 9>,
     // The unit up vector of the tile origin (planet-fixed axes) and the inverse of the origin's distance from the planet centre:
     // up at a point `local` metres from the origin is normalize(xyz + local * w), formed from tile-local numbers only (CON-11).
@@ -244,6 +251,142 @@ fn fs_view(in: VsOut) -> vec4<f32> {
     return vec4<f32>(v * k, v * k, v * k, 1.0);
 }
 
+// The ground detail of the lit path (M7 G2a, LOOK-009, SPIKE-27): six noise octaves (cells of 32 m, 8 m, 2 m, 0.5 m, 12.5 cm, 3 cm) anchored to the
+// world. The node record holds the integer cell of the tile origin at 1/32 m (from f64 on the CPU) and its fraction; an octave's cell is that
+// integer shifted right by two bits per octave (an arithmetic shift is the floor), its remainder and the fraction are the offset inside the cell,
+// so neighbouring tiles and levels of detail read the same noise and no planet-radius value reaches the shader (CON-11). Value noise with analytic
+// gradients. An octave fades out while a pixel covers more than 0.1 to 0.4 of its cell. Presentation only: heights, collision and picking are
+// untouched (ADR 0028).
+fn gd_hash(c: vec3<i32>, k: u32) -> f32 {
+    var h = (bitcast<u32>(c.x) * 0x8da6b343u) ^ (bitcast<u32>(c.y) * 0xd8163841u) ^ (bitcast<u32>(c.z) * 0xcb1ab31fu) ^ ((k + 1u) * 0x9e3779b1u);
+    h = h ^ (h >> 16u);
+    h = h * 0x85ebca6bu;
+    h = h ^ (h >> 13u);
+    h = h * 0xc2b2ae35u;
+    h = h ^ (h >> 16u);
+    return f32(h >> 8u) * 1.1920929e-7 - 1.0;
+}
+
+// Smoothstep value noise: xyz the gradient with respect to q (lattice units), w the value in [-1, 1].
+fn gd_noise(base: vec3<i32>, q: vec3<f32>, k: u32) -> vec4<f32> {
+    let fl = floor(q);
+    let u = q - fl;
+    let c = base + vec3<i32>(fl);
+    let t = u * u * (3.0 - 2.0 * u);
+    let dt = 6.0 * u * (1.0 - u);
+    let c000 = gd_hash(c, k);
+    let c100 = gd_hash(c + vec3<i32>(1, 0, 0), k);
+    let c010 = gd_hash(c + vec3<i32>(0, 1, 0), k);
+    let c110 = gd_hash(c + vec3<i32>(1, 1, 0), k);
+    let c001 = gd_hash(c + vec3<i32>(0, 0, 1), k);
+    let c101 = gd_hash(c + vec3<i32>(1, 0, 1), k);
+    let c011 = gd_hash(c + vec3<i32>(0, 1, 1), k);
+    let c111 = gd_hash(c + vec3<i32>(1, 1, 1), k);
+    let x00 = mix(c000, c100, t.x);
+    let x10 = mix(c010, c110, t.x);
+    let x01 = mix(c001, c101, t.x);
+    let x11 = mix(c011, c111, t.x);
+    let value = mix(mix(x00, x10, t.y), mix(x01, x11, t.y), t.z);
+    let gx = dt.x * mix(mix(c100 - c000, c110 - c010, t.y), mix(c101 - c001, c111 - c011, t.y), t.z);
+    let gy = dt.y * mix(mix(c010 - c000, c110 - c100, t.x), mix(c011 - c001, c111 - c101, t.x), t.z);
+    let gz = dt.z * mix(mix(c001 - c000, c101 - c100, t.x), mix(c011 - c010, c111 - c110, t.x), t.y);
+    return vec4<f32>(gx, gy, gz, value);
+}
+
+// The material weights (LOOK-008, `MaterialParams::weights`): the product over the eight inputs of the smoothstep response of each (lo, hi) pair of
+// the look's curve table (`g.materials`: per material four vec4s of two pairs each), normalised to sum to 1; a pair with lo == hi leaves the input
+// out, a material with no pair is off. The smoothstep is written out because a falling pair (lo > hi) is not defined for the built-in.
+fn material_weights(inp: array<f32, 8>) -> vec4<f32> {
+    var w = vec4<f32>(0.0);
+    for (var m = 0u; m < 4u; m = m + 1u) {
+        var on = false;
+        var prod = 1.0;
+        for (var k = 0u; k < 8u; k = k + 1u) {
+            let v = g.materials[m * 4u + k / 2u];
+            let pr = select(v.xy, v.zw, (k & 1u) == 1u);
+            if (pr.x != pr.y) {
+                on = true;
+                let s = clamp((inp[k] - pr.x) / (pr.y - pr.x), 0.0, 1.0);
+                prod = prod * (s * s * (3.0 - 2.0 * s));
+            }
+        }
+        w[m] = select(0.0, prod, on);
+    }
+    let sum = w.x + w.y + w.z + w.w;
+    return select(vec4<f32>(0.0), w / sum, sum > 0.0);
+}
+
+struct GroundDetail {
+    mul: vec3<f32>,
+    normal: vec3<f32>,
+};
+
+// The detail of a fragment: the albedo multiplier (mean near 1) and the shading normal. `t`, `p`, `h`, `cs` are the temperature, the precipitation,
+// the height above the water and the cosine of the slope: the inputs of the weights (the fifth, the region's surface type, and the three reserved
+// for driver maps read 0 until their sources exist). `g.detail.x` is the strength: 0 returns the inputs unchanged (the default).
+//
+// SEAM for the photo layer (owner, 2026-10-21): per material the procedural term below is one source of `mul` and the gradient `g`. A texture
+// source for a material (CC0 sets from the asset cache, close range only) returns the same two things from the node's decade phases and is
+// blended in by a distance weight before the weights combine them; neither the weights function nor the node record changes.
+fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<f32>, t: f32, p: f32, h: f32) -> GroundDetail {
+    var out: GroundDetail;
+    out.mul = vec3<f32>(1.0);
+    // Off, the normal goes through as it came (not normalised again), so the picture is what it was bit for bit.
+    out.normal = normal;
+    // The derivative first (uniform control flow): the footprint of a pixel in metres.
+    let foot = max(abs(fwidth(local.x)), max(abs(fwidth(local.y)), abs(fwidth(local.z))));
+    let strength = g.detail.x;
+    if (strength <= 0.0) {
+        return out;
+    }
+    let n = normalize(normal);
+    let cs = clamp(dot(n, up), 0.0, 1.0);
+    let w = material_weights(array<f32, 8>(cs, h, t, p, 0.0, 0.0, 0.0, 0.0));
+    if (w.x + w.y + w.z + w.w <= 0.0) {
+        return out;
+    }
+    let cell = vec3<i32>(bitcast<i32>(nodes[node_index].phase[0].w), bitcast<i32>(nodes[node_index].phase[1].w), bitcast<i32>(nodes[node_index].phase[2].w));
+    let frac = vec3<f32>(nodes[node_index].phase[3].w, nodes[node_index].phase[4].w, nodes[node_index].phase[5].w);
+    var val = array<f32, 6>(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    var grad = array<vec3<f32>, 6>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
+    var fade = array<f32, 6>(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    for (var k = 0u; k < 6u; k = k + 1u) {
+        let inv = 0.03125 * f32(1u << (2u * k));
+        let f = 1.0 - smoothstep(0.1, 0.4, foot * inv);
+        fade[k] = f;
+        if (f > 0.0) {
+            let shift = 2u * (5u - k);
+            let base = cell >> vec3<u32>(shift);
+            let rem = cell - (base << vec3<u32>(shift));
+            let q = (vec3<f32>(rem) + frac) * (1.0 / f32(1u << shift)) + local * inv;
+            let nz = gd_noise(base, q, k);
+            val[k] = nz.w * f;
+            // The height of an octave is its amplitude times the cell size, so the slope is the lattice gradient times the amplitude.
+            grad[k] = nz.xyz * f;
+        }
+    }
+    // Rock: cracked ridges and a mottled albedo, strong normals.
+    let crack = smoothstep(0.80, 1.0, 1.0 - abs(val[3])) * fade[3];
+    let rock_mul = max(0.80 + 0.08 * val[0] + 0.07 * val[1] + 0.20 * val[3] + 0.12 * val[4] - 0.30 * crack, 0.2) * vec3<f32>(1.0, 0.98, 0.95);
+    let rock_g = 0.05 * grad[2] + 0.18 * grad[3] + 0.15 * grad[4] + 0.10 * grad[5];
+    // Sand: patches, fine grain and low ripples.
+    let sand_mul = (1.0 + 0.08 * val[0] + 0.06 * val[1] + 0.05 * val[2] + 0.05 * val[4] + 0.08 * val[5]) * vec3<f32>(1.0, 1.0, 0.98);
+    let sand_g = 0.03 * grad[2] + 0.05 * grad[4] + 0.08 * grad[5];
+    // Grass: patches, blade-scale tufts, darker and greener, strong small normals.
+    let tuft = 0.5 + 0.5 * val[4];
+    let grass_mul = mix(vec3<f32>(0.62, 0.72, 0.52), vec3<f32>(1.12, 1.18, 0.95), tuft) * (1.0 + 0.14 * val[5]) * (1.0 + 0.10 * val[1] + 0.08 * val[2]);
+    let grass_g = 0.03 * grad[3] + 0.10 * grad[4] + 0.15 * grad[5];
+    // Soil: dark, clumpy, fine crumbs.
+    let soil_mul = (0.82 + 0.06 * val[1] + 0.14 * val[3] + 0.10 * val[4] + 0.06 * val[5]) * vec3<f32>(1.0, 0.95, 0.90);
+    let soil_g = 0.08 * grad[3] + 0.10 * grad[4] + 0.06 * grad[5];
+    let sum = w.x + w.y + w.z + w.w;
+    let mul = (rock_mul * w.x + sand_mul * w.y + grass_mul * w.z + soil_mul * w.w) / sum;
+    let slope = (rock_g * w.x + sand_g * w.y + grass_g * w.z + soil_g * w.w) / sum;
+    out.mul = mix(vec3<f32>(1.0), mul, strength);
+    out.normal = normalize(n - strength * (slope - dot(slope, n) * n));
+    return out;
+}
+
 // The albedo of the surface (ADR 0039 point 3, REND-026): ground from the climate (desert, grass, forest, tundra), bare rock on
 // steep ground, snow by temperature and slope, a beach band above the water and the seabed below it. `t` is the temperature in
 // degrees C, `p` the precipitation in mm, `cs` the cosine of the slope and `h` the height above the water level. The same function
@@ -340,7 +483,8 @@ fn fs_lit_view(in: VsOut) -> vec4<f32> {
     let sun = vec3<f32>(bitcast<f32>(g.mode.y), bitcast<f32>(g.mode.z), bitcast<f32>(g.mode.w));
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
-    var rgb = shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z);
+    let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x);
+    var rgb = shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * select(vec3<f32>(1.0), gd.mul, g.mode.x <= 1u);
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);
     } else if (g.extra.y > 2.5) {
@@ -436,8 +580,19 @@ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
             // what it was). Exact in f32 (under 2^24).
             f32::from(d.level) + 32.0 * d.state.code() as f32 + 256.0 * f32::from(d.stitch | (d.fine << 4)),
         ];
-        for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
-            floats.extend([p[0], p[1], p[2], 0.0]);
+        // The ground detail anchor (LOOK-009), decided in f64 and rounded once: the integer cell of the tile origin at 1/32 m and the fraction, in the
+        // otherwise unused fourth lanes of the first six grid phases (the record does not grow).
+        let scaled = [d.origin.0.x, d.origin.0.y, d.origin.0.z].map(|v| v * 32.0);
+        // The cell range is +-6.7e7 m (2^31 cells of 1/32 m); beyond it the cell saturates (a body that large needs a wider cell).
+        let cell = scaled.map(|v| v.floor().clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32);
+        let frac = scaled.map(|v| (v - v.floor()).min(0.999_999) as f32);
+        for (k, p) in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]).into_iter().enumerate() {
+            let lane = match k {
+                0..=2 => f32::from_bits(cell[k] as u32),
+                3..=5 => frac[k - 3],
+                _ => 0.0,
+            };
+            floats.extend([p[0], p[1], p[2], lane]);
         }
         // The unit up vector of the tile origin and the inverse of its distance from the planet centre (decided in f64, rounded
         // once): the shader forms up at a fragment as normalize(up + local * inv_r), which is tile-local arithmetic (CON-11).
@@ -501,7 +656,11 @@ impl DrawMode {
 const RING: usize = 2;
 
 /// Bytes of the globals uniform (view-projection, height range, view mode, the shading extras and the albedo table).
-pub(crate) const GLOBALS_BYTES: u64 = 96 + 16 + 16 * planet_frame::look::shading::ALBEDO_VEC4S as u64 + PREVIEW_BYTES + REGION_BYTES;
+pub(crate) const GLOBALS_BYTES: u64 =
+    96 + 16 + 16 * planet_frame::look::shading::ALBEDO_VEC4S as u64 + DETAIL_BYTES + PREVIEW_BYTES + REGION_BYTES;
+
+/// Bytes of the ground detail block of the globals after the albedo table: the strength (one vec4) and the material curve table (LOOK-008).
+pub(crate) const DETAIL_BYTES: u64 = 16 + 16 * planet_frame::look::materials::MATERIAL_VEC4S as u64;
 
 /// Entries (vec4s) of one polygon of the region table (VIEW-030): five of header, then [`planet_frame::regions::MAX_REGION_POINTS`] points
 /// two to an entry.
@@ -1801,6 +1960,8 @@ impl TerrainRenderer {
                 );
                 globals.extend(f32_bytes(&[lit.water_level_m, lit.overlay.shader_code(), plan.shore_ramp_per_m, 0.0]));
                 globals.extend(f32_bytes(&lit.albedo.to_words()));
+                globals.extend(f32_bytes(&[lit.ground_detail as f32, 0.0, 0.0, 0.0]));
+                globals.extend(f32_bytes(&lit.materials.to_words()));
             }
             None => {
                 globals.extend(f32_bytes(&[lo, hi, 0.0, 0.0]));
@@ -2271,6 +2432,69 @@ mod one_shot_tests {
             assert_eq!(word(record, 10), 0.0, "record {record}: word 10 is padding");
             assert_eq!(word(record, 11), [17.0, 20.0][record], "record {record}: word 11 is the tile's level (the overlay's)");
             assert_eq!((word(record, 8), word(record, 9)), (10.0, 20.0), "the morph interval is still there");
+        }
+    }
+
+    // spec: REND-034
+    #[test]
+    fn the_ground_detail_anchor_of_a_node_is_the_cell_of_its_origin_at_a_thirty_second_of_a_metre_so_tiles_agree_on_every_octave() {
+        use planet_core::{PlanetFixed, TileId, Vec3};
+        let tile = TileId::new(planet_core::Face(0), 17, 1, 1).unwrap();
+        let node = |o: Vec3| planet_frame::TerrainDraw {
+            tile,
+            level: tile.level(),
+            origin: PlanetFixed(o),
+            camera_relative_origin: [1.0, 2.0, 3.0],
+            morph: 0.5,
+            morph_start_m: 10.0,
+            morph_end_m: 20.0,
+            color: [1, 2, 3, 255],
+            mesh_key: 7,
+            preview: false,
+            transient_only: false,
+            capped: false,
+            stitch: 0,
+            fine: 0,
+            quadrants: 0b1111,
+            state: planet_frame::TileState::default(),
+        };
+        let mut plan = planet_frame::viewer::lit_warm_plan(
+            planet_frame::camera::Camera::looking_at_centre(
+                PlanetFixed(Vec3::new(0.0, 0.0, 7.0e6)),
+                Vec3::new(0.0, 1.0, 0.0),
+                1.0,
+                1.0,
+                1.0,
+            ),
+            (64, 64),
+            32,
+            planet_frame::look::LitPlan::fixed(0.0),
+        );
+        // Two origins 64 m apart on x (a whole cell of every octave up to 32 m), one of them negative, one at a planet's radius.
+        let a = Vec3::new(-6_371_000.4, 0.09375, -3.0);
+        let b = Vec3::new(a.x + 64.0, a.y, a.z);
+        plan.nodes = vec![node(a), node(b)];
+        let bytes = node_record_bytes(&plan);
+        // The fourth lane of grid phase k (the record: 48 bytes, then 16 per phase).
+        let lane = |record: usize, k: usize| -> [u8; 4] {
+            let o = record * NODE_BYTES as usize + 48 + 16 * k + 12;
+            bytes[o..o + 4].try_into().unwrap()
+        };
+        let cell = |record: usize| -> [i32; 3] { [0, 1, 2].map(|k| i32::from_le_bytes(lane(record, k))) };
+        let frac = |record: usize| -> [f32; 3] { [3, 4, 5].map(|k| f32::from_le_bytes(lane(record, k))) };
+        // The cell is floor(origin * 32) and the fraction the rest: the origin is recovered to f64 precision, 64 m is 2048 cells.
+        for (record, o) in [a, b].into_iter().enumerate() {
+            for (k, v) in [o.x, o.y, o.z].into_iter().enumerate() {
+                let back = (f64::from(cell(record)[k]) + f64::from(frac(record)[k])) / 32.0;
+                assert!((back - v).abs() < 1e-6, "record {record} axis {k}: {back} against {v}");
+                assert!((0.0..1.0).contains(&frac(record)[k]));
+            }
+        }
+        assert_eq!(cell(1)[0] - cell(0)[0], 2048);
+        assert_eq!(frac(0), frac(1), "the fractions agree: the same ground reads the same noise in both tiles");
+        // The shader takes an octave's cell as the arithmetic shift of the cell by two bits per octave: for 32 m, 8 m, 2 m, 0.5 m, 12.5 cm, 3 cm.
+        for shift in [10u32, 8, 6, 4, 2, 0] {
+            assert_eq!((cell(1)[0] >> shift) - (cell(0)[0] >> shift), 2048 >> shift, "shift {shift}");
         }
     }
 

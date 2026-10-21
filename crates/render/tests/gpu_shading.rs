@@ -284,3 +284,65 @@ fn the_shading_debug_views_match_the_adapters_goldens() {
     }
     goldens.finish();
 }
+
+fn detail_plan(view: ShadeView, strength: f64) -> LitPlan {
+    let mut l = view_plan(view);
+    l.ground_detail = strength;
+    l
+}
+
+fn luminance(px: &[f32; 4]) -> f64 {
+    0.2126 * f64::from(px[0]) + 0.7152 * f64::from(px[1]) + 0.0722 * f64::from(px[2])
+}
+
+// spec: REND-034, LOOK-009
+#[test]
+fn the_ground_detail_is_inert_when_off_changes_the_lit_picture_when_on_and_leaves_the_climate_views_alone() {
+    use planet_frame::look::materials::{Input, MaterialParams, INPUTS, MATERIALS};
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    // The ground at 1 m above the terrain (the scripted view 6): the finest tiles fill the picture.
+    let (p, _) = plan(6);
+    let mut r = renderer(&ctx, &p);
+    let off = hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 0.0));
+    let covered = off.iter().filter(|px| px[3] > 0.0).count();
+    assert!(covered > 1000, "{covered} covered pixels");
+    // Off: whatever the material table says, the picture is the same bit for bit (the strength 0 returns before the weights).
+    let mut odd = detail_plan(ShadeView::Lit, 0.0);
+    odd.materials = MaterialParams { curves: [[[0.0, 0.0]; INPUTS]; MATERIALS] };
+    assert!(hdr_of(&mut r, &ctx, &p, odd) == off, "the strength 0 is not inert");
+    // On: the picture differs on most of the ground, is deterministic, and keeps its mean brightness within a factor of two.
+    let on = hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 1.0));
+    assert!(on == hdr_of(&mut r, &ctx, &p, detail_plan(ShadeView::Lit, 1.0)), "two renders of the same plan differ");
+    let changed =
+        off.iter().zip(&on).filter(|(a, b)| a[3] > 0.0 && (luminance(a) - luminance(b)).abs() > 0.02 * luminance(a).max(1e-6)).count();
+    assert!(changed * 5 > covered, "the detail changed {changed} of {covered} pixels by more than 2 %");
+    let mean = |img: &[[f32; 4]]| img.iter().filter(|px| px[3] > 0.0).map(luminance).sum::<f64>() / covered as f64;
+    let ratio = mean(&on) / mean(&off);
+    assert!((0.5..2.0).contains(&ratio), "mean brightness ratio {ratio}");
+    // The table drives the picture: with every material off the detail does nothing; a table of soil alone differs from one of rock alone.
+    let table = |m: usize| {
+        let mut curves = [[[0.0, 0.0]; INPUTS]; MATERIALS];
+        // A response of 1 for the reserved soil-depth input (it reads 0, the curve rises from -1 to 0): the material is on everywhere.
+        curves[m][Input::SoilDepth as usize] = [-1.0, 0.0];
+        MaterialParams { curves }
+    };
+    let mut none = detail_plan(ShadeView::Lit, 1.0);
+    none.materials = MaterialParams { curves: [[[0.0, 0.0]; INPUTS]; MATERIALS] };
+    assert!(hdr_of(&mut r, &ctx, &p, none) == off, "no material, no detail");
+    let (mut rock, mut soil) = (detail_plan(ShadeView::Lit, 1.0), detail_plan(ShadeView::Lit, 1.0));
+    rock.materials = table(0);
+    soil.materials = table(3);
+    let (a, b) = (hdr_of(&mut r, &ctx, &p, rock), hdr_of(&mut r, &ctx, &p, soil));
+    let apart = a.iter().zip(&b).filter(|(x, y)| x[3] > 0.0 && (luminance(x) - luminance(y)).abs() > 0.02 * luminance(x).max(1e-6)).count();
+    assert!(apart * 5 > covered, "rock alone and soil alone differ on {apart} of {covered} pixels only");
+    // The climate views show the climate, not the detail.
+    for view in [ShadeView::Temperature, ShadeView::Precipitation] {
+        assert!(
+            hdr_of(&mut r, &ctx, &p, detail_plan(view, 1.0)) == hdr_of(&mut r, &ctx, &p, detail_plan(view, 0.0)),
+            "{view:?} shows the detail"
+        );
+    }
+    // Placement: the same bytes in other slots give the same detail (the anchor is in the node record, not in the slot).
+    let mut scattered = renderer_scattered(&ctx, &p);
+    assert!(hdr_of(&mut scattered, &ctx, &p, detail_plan(ShadeView::Lit, 1.0)) == on, "the detail depends on where the tiles sit");
+}

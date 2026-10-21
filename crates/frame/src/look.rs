@@ -208,6 +208,8 @@ pub struct LitPlan {
     pub albedo: AlbedoParams,
     /// The response curves of the ground materials (M7 G2): which material the ground detail shows where (look data, [`materials`]).
     pub materials: materials::MaterialParams,
+    /// The strength of the procedural ground detail (M7 G2a, LOOK-009): 0 off (the default, the picture is what it was), 1 full.
+    pub ground_detail: f64,
     /// The water level W in metres above the reference surface (ADR 0041; until the water-level field exists the sea's constant
     /// level, 0): the beach band and the seabed are measured from it, never from a hard-coded sea level.
     pub water_level_m: f32,
@@ -324,6 +326,7 @@ impl LitPlan {
             histogram: look.histogram,
             albedo: look.albedo,
             materials: materials::MaterialParams::EARTH,
+            ground_detail: 0.0,
             water_level_m: 0.0,
             view: ShadeView::Lit,
             atmosphere: None,
@@ -412,6 +415,9 @@ impl LitPlan {
                 look.push_str(&format!(" {b:016x}"));
             }
         }
+        if self.ground_detail != 0.0 {
+            look.push_str(&format!(" detail {:016x}", self.ground_detail.to_bits()));
+        }
         format!(
             "lit {mode} dt {} sun {} {} {} reset {} tonemap {}{look}",
             h(self.dt_s),
@@ -443,7 +449,7 @@ impl LitPlan {
             }
             u64::from_str_radix(s, 16).map(f64::from_bits).map_err(|e| format!("bad f64 bits '{s}': {e}"))
         };
-        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..', 'atmosphere ..', 'overlay ..' and 'materials ..' in this order)";
+        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..', 'atmosphere ..', 'overlay ..', 'materials ..' and 'detail ..' in this order)";
         let ["dt", dt, "sun", sx, sy, sz, "reset", reset, "tonemap", tm, tail @ ..] = rest else {
             return Err(usage.into());
         };
@@ -461,6 +467,7 @@ impl LitPlan {
             histogram: HistogramParams::EARTH,
             albedo: AlbedoParams::EARTH,
             materials: materials::MaterialParams::EARTH,
+            ground_detail: 0.0,
             water_level_m: 0.0,
             view: ShadeView::Lit,
             atmosphere: None,
@@ -478,6 +485,7 @@ impl LitPlan {
                 "atmosphere" => (5, 24),
                 "overlay" => (6, 1),
                 "materials" => (7, materials::MATERIALS * materials::INPUTS * 2),
+                "detail" => (8, 1),
                 _ => return Err(usage.into()),
             };
             if rank <= stage || more.len() < arity {
@@ -513,6 +521,7 @@ impl LitPlan {
                     }
                     plan.materials = materials::MaterialParams::from_bits(&bits);
                 }
+                8 => plan.ground_detail = f64_of(args[0])?,
                 _ => plan.overlay = Overlay::parse(args[0]).ok_or_else(|| format!("unknown overlay '{}'", args[0]))?,
             }
             rest = after;
@@ -549,6 +558,9 @@ impl LitPlan {
         }
         self.albedo.validate().map_err(|(k, v, why)| format!("lit plan: `{k}` = {v}: {why}"))?;
         self.materials.validate().map_err(|(k, v, why)| format!("lit plan: `{k}` = {v}: {why}"))?;
+        if self.ground_detail != 0.0 && !(1.0e-6..=1.0).contains(&self.ground_detail) {
+            return Err(format!("lit plan: `ground_detail` = {}: the strength must be 0 or a number from 1e-6 to 1", self.ground_detail));
+        }
         if !self.water_level_m.is_finite() {
             return Err(format!("lit plan: water level is {}, not finite", self.water_level_m));
         }
