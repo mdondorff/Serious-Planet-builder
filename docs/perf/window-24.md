@@ -37,7 +37,7 @@ Where the time goes is not measured (no per-term toggles). The candidates, by th
 | Hill 7 200 m | 1,170 | 602 | 62 |
 | Hill 7 30 m | 1,188 | 684 | 62 |
 
-- The still-camera plans of this window are 1.4 to 1.7 times those of window 23 (C: Platonmax 161, Hill 7 95, Ridge 3 1,998 ms at 2 km). Not explained: the plan jobs run on the CPU and the build differs from window 23's C only by the ground detail and the viewer's F6, but the editor window now draws with the detail on (natural) while the worker plans. Not checked: a rerun with `F6` off.
+- The still-camera plans of this window are 1.3 to 1.75 times those of window 23 (C: Platonmax 161, Hill 7 95, Ridge 3 1,998 ms at 2 km). Not explained: the plan jobs run on the CPU and the build differs from window 23's C only by the ground detail and the viewer's F6, but the editor window now draws with the detail on (natural) while the worker plans. Not checked: a rerun with `F6` off.
 - Warm, Ridge 3 at 2 km is 408 ms against 2,673 cold (6.5 times less): the first-plan cost is cold, as tracked. At 200 m and 30 m the warm plan is 648 and 663 ms, the stamp stage's own cost over the ridge item (the editor chain with the stamps), which the dive and the unedited ground do not pay.
 - No plan refused (0 in every stop).
 
