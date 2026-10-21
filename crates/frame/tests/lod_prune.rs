@@ -67,12 +67,17 @@ fn the_selection_over_a_field_with_nested_bounds_equals_the_full_path_node_for_n
         let (height_m, radius_m) = (30.0 + 3_900.0 * rng.next_f64() * rng.next_f64(), 60.0 + 3_000.0 * rng.next_f64());
         let spike = Spike { at, height_m, radius_m };
         // From a metre to forty kilometres up, over the spike and up to a few spike radii away.
-        let altitude = 10f64.powf(rng.next_f64() * 4.6);
+        let altitude = libm::pow(10.0, rng.next_f64() * 4.6);
         let offset = rng.next_f64() * 4.0 * radius_m;
         let pos = position(at, offset, rng.next_f64() * std::f64::consts::TAU, altitude);
         let fast = select_nodes_field(&TangentWarp, pos, &spike, &lod);
         let full = select_nodes_field(&TangentWarp, pos, &Plain(&spike), &lod);
-        assert!(fast == full, "case {k}: spike {height_m:.0} m over {radius_m:.0} m, camera {altitude:.0} m up {offset:.0} m off: {} against {} nodes", fast.nodes.len(), full.nodes.len());
+        assert!(
+            fast == full,
+            "case {k}: spike {height_m:.0} m over {radius_m:.0} m, camera {altitude:.0} m up {offset:.0} m off: {} against {} nodes",
+            fast.nodes.len(),
+            full.nodes.len()
+        );
         cases += 1;
         steep_cases += usize::from(!full.ceiling.is_empty());
     }
@@ -146,7 +151,7 @@ fn the_selection_equals_the_full_path_at_marginal_parameters_over_clusters_of_ta
                 })
                 .collect();
             let field = Many(spikes);
-            let altitude = 10f64.powf(rng.next_f64() * 4.0);
+            let altitude = libm::pow(10.0, rng.next_f64() * 4.0);
             let pos = position(over, rng.next_f64() * 4_000.0, rng.next_f64() * std::f64::consts::TAU, altitude);
             let fast = select_nodes_field(&TangentWarp, pos, &field, &lod);
             let full = select_nodes_field(&TangentWarp, pos, &Plain(&field), &lod);

@@ -36,7 +36,8 @@ fn eroded(kind: HeightFieldKind) -> Box<dyn HeightField> {
 }
 
 fn item(id: u128, priority: i32, at: Vec3, reach_m: f64, max_delta_m: f64, stamp: Stamp) -> ItemSpec {
-    ItemSpec { id, layer: DEFAULT_ITEM_LAYER.into(), priority, dir: at, content_hash: 0, reach_m, max_delta_m, stamp: None }.with_stamp(stamp)
+    ItemSpec { id, layer: DEFAULT_ITEM_LAYER.into(), priority, dir: at, content_hash: 0, reach_m, max_delta_m, stamp: None }
+        .with_stamp(stamp)
 }
 
 /// The worst excess of an inner cap's bounds over its outer cap's, over `n` random nested pairs near `anchor` (radii from 1e-7 to 0.05 rad).
@@ -44,7 +45,7 @@ fn worst_excess(f: &dyn HeightField, anchor: Vec3, seed: u64, n: usize) -> (f64,
     let mut rng = SplitMix64(seed);
     let (mut worst, mut at) = (0.0f64, String::new());
     for _ in 0..n {
-        let theta = 10f64.powf(-7.0 + 5.7 * rng.next_f64());
+        let theta = libm::pow(10.0, -7.0 + 5.7 * rng.next_f64());
         let spread = theta * 50.0 * rng.next_f64();
         let c = around(anchor, rng.next_f64() * std::f64::consts::TAU, spread);
         let inner = theta * rng.next_f64();
