@@ -24,6 +24,7 @@ Status: scope answered by the owner (2026-10-21); exit criteria and the open que
 | A2 | A stale-tile view: which tiles are exact for the current definition and which are stale | general (streaming, edits, re-bake); it carries Q3's "global edit" mode if that stays cheap |
 | A3 | Version pinning with a diff (AUTH-003) | |
 | A4 | Freeze with a blended edge, and a feathered region mask | the feathered edge is "later" in ADR 0069 |
+| A5 | Edit health: a problems list of every flagged edit (too steep to draw fully, tiles capped or refused near it, very many stacked strokes), with fly-to and actions to simplify (merge a stack of strokes into one, reduce its strength, delete) | owner, 2026-10-21: the owner may attempt what the engine does not support; it must not crash, must not cost much performance, and must be findable and fixable |
 | (B) | Editor guard on stacked strokes | done in M6 (#499) |
 
 ## Open questions
