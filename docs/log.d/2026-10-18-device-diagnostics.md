@@ -1,1 +1,0 @@
-- 2026-10-18 **device-diagnostics** (sonnet-m4, REND-029): `GpuContext` installs a device-lost callback and an uncaptured-error handler; a lost device (not a destroy) and the first wgpu error print on stderr and are readable (`device_lost`, `first_error`); the error still panics as before. Found by window 8: a lost device shows only as `Buffer with 'globals' label is invalid`.

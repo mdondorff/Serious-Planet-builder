@@ -1,1 +1,0 @@
-- 2026-10-20 region-stage: the regions overlay (VIEW-030, VIEW-014 modified): Overlay::Regions, the nearest eight region polygons from the app as a RegionList in a globals table, the analytic fragment tint (0.45 mix), F3 cycles tiles, mesh, regions, off; tier C tint, placement and mix tests, no golden.

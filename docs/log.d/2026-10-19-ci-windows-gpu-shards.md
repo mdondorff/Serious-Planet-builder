@@ -1,1 +1,0 @@
-- 2026-10-19 **ci-windows-gpu-shards** (sonnet-crusader, improvement 2 of the M5 process review): tier C on Windows runs in two halves (`--partition count:N/2`, BUILD-018); the test step was about 1,000 s, the job median 16.9 min; the halves' artifacts are `review-Windows-N`.

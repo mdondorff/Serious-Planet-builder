@@ -1,1 +1,0 @@
-- 2026-10-17 **test-fast-budget-reading** (sonnet-crusader, BUILD-003; decided by opus-planner, reversible, for the owner at the gate): the 20 s budget is the test time (nextest run time), `test fast` prints the compile time apart; a run of every crate (no diff, root manifest, or `--all`) reports its time and does not warn; the reviewer agents diff against `origin/main`.

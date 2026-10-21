@@ -1,1 +1,0 @@
-- 2026-10-19 perf-preflight: `cargo xtask perf preflight` (about 70 s: readiness gate, three CPU calibrations against the ADR 0065 limits, top-5 CPU processes, AC state and power plan) refuses a perf window with its causes; decision logic tested at tier A (TEST-040).

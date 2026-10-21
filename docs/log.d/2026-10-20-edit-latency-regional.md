@@ -1,1 +1,0 @@
-- 2026-10-20 **edit-latency-regional** (sonnet-crusader, opus-planner: M6 gate evidence G2 and G3; TEST-044): the edit-latency scene has regional stamps (5 km, 40 km, the largest an item reaches, from 2 km and 20 km), a 5 km ridge and a 2 km region whose surface type changes, recorded not gated; the software smoke checks them; measured in the next perf window.

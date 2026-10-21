@@ -1,1 +1,0 @@
-- 2026-10-19 preview-at-edit: the tiles an edit names are drawn as stale and previewed from the frame after the edit until a plan made after it is delivered, so the preview no longer waits for the plan worker (REND-033; window 14 measured 74 to 247 ms, equal to the plan delivery).

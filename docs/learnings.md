@@ -1,531 +1,86 @@
 # Learnings
 
-Added with `/learning`. Each entry names its scope, the assumption it changes (spec ID, ADR number, constitution rule, or background report section), the proposed follow-up and when it becomes obsolete. The `housekeeping` skill moves milestone learnings to `docs/archive/<M>/learnings.md` and removes obsolete ones at milestone boundaries (archives: `docs/archive/M0-M3/learnings.md`, `docs/archive/M4/learnings.md`).
-
-## 2026-10-10 wgpu 30 headless API differs from older documentation
-Scope: project
-What happened: first compile of the hello triangle against wgpu 30.0.1 failed on API drift: `RequestAdapterOptions` needs `apply_limit_buckets`, `Instance::new` takes `InstanceDescriptor::new_without_display_handle()`, `RenderPipelineDescriptor` has `multiview_mask`, `get_mapped_range` returns a `Result`, error scopes are popped with `scope.pop()`. Fixed from compiler output in `crates/render/src/lib.rs`; the software adapter (`force_fallback_adapter`) selects WARP on Windows (`Dx12 Microsoft Basic Render Driver`, device type Cpu) and rendered correctly.
-Assumption it changes: background report §9/§17 item 18 (wgpu API churn): confirmed, not refuted.
-Proposed follow-up: none beyond ADR 0004's pin-and-upgrade-at-milestones rule; record each upgrade here.
+Added with `/learning`. Each entry names its scope, the assumption it changes, the follow-up and when it becomes obsolete. A learning is promoted (a spec line, a `CLAUDE.md` line or a test that cites it), kept while still active and surprising, or archived with its milestone (ADR 0075). Cap: 20 KB. Archives: `docs/archive/M0-M3/learnings.md`, `docs/archive/M4/learnings.md`, `docs/archive/M6/learnings.md` (M5 and M6, and the full text of the entries below).
 
 ## 2026-10-10 nextest rejects a filterset that matches no binary
-Scope: project
-What happened: `cargo nextest run -E 'not binary(~gpu_) and not binary(~oracle_)'` failed with "operator didn't match any binary names" while no `oracle_*` test binary existed. Tier selection by binary-name prefix therefore needs at least one binary per tier at all times.
-Assumption it changes: ADR 0009 (tier naming convention): refined, not refuted.
-Proposed follow-up: `crates/render/tests/oracle_shader_validation.rs` (REND-002) is the standing tier-B binary; if it is ever removed, another tier-B test must replace it (noted in the M0 design).
-
-## 2026-10-10 Bit-identical directions do not give crack-free coarse tiles
-Scope: project
-What happened: numerics review of `core` (m1-coordinates). Face-edge directions are bit-identical from both faces (tested exhaustively to level 3, randomly to level 28 at res 32), but f32 tile-local offsets meet 1 mm only down to level 9 (measured, `coarse_tiles_need_more_than_f32_tile_local_offsets`); at level 0 offsets reach about 3.7e6 m and a shared border vertex quantises differently per tile (about 0.1 to 0.2 m).
-Assumption it changes: ADR 0001 / CON-08 (seam work): identical directions are necessary, not sufficient.
-Proposed follow-up: the M2 terrain change must rebuild border positions from shared data (or use skirts/morphing), and the lattice exactness needs `level + log2(res) <= 52` (now asserted in `sample_direction`). Float known answers now pin libm bits; libm is pinned to `=0.2.16`; hash has no domain separation yet (add a tag before HASH_VERSION 1 is used for real cache keys).
-
-## 2026-10-10 Fragment `@builtin(position)` ignores the viewport origin assumption
-Scope: project
-What happened: the debug-view shader derives texel indices from `@builtin(position)` (framebuffer coordinates) minus the draw rectangle origin; this is correct because the viewport and scissor equal the rectangle, and passes on WARP with GPU == CPU twin. It is not verified on other adapters.
-Assumption it changes: ADR 0004 (wgpu fit): confirmed on WARP only.
-Proposed follow-up: run `cargo xtask test` on lavapipe (CI) and `--real` on Rasierklinge.
-
-## 2026-10-10 A hole test can pass while the geometry is garbage
-Scope: project
-What happened: adding the `ref_pos` attribute without serialising it misaligned every vertex on the GPU. The tile-id hole test still passed in nine of ten views and only a 24-pixel hole at orbit exposed it; the orbit image showed ragged blobs instead of a disc. Fixed by single-sourcing the vertex layout and adding an oracle test that checks where nodes project.
-Assumption it changes: ADR 0009 (tier C metrics): hole counts alone do not prove correct geometry; pair them with a CPU projection oracle.
-Proposed follow-up: every GPU-fed buffer layout gets one serialisation function and a test; new visual features get a CPU-projection oracle, not only a coverage metric.
-
-## 2026-10-10 Tile origins on the reference sphere cost precision
-Scope: project
-What happened: with origins on the reference sphere the f32 jitter test gave 0.22 px at 2.5 km terrain (budget 0.25) because offsets and camera-relative origins both carry the terrain height. Placing the origin at the tile centre height gives 0.0002 px.
-Assumption it changes: ADR 0001 (TileLocal origin = tile centre): refined; the centre includes terrain height.
-Proposed follow-up: none; M3 per-node height bounds will also fix LOD distance near mountains.
-
-## 2026-10-10: one-pixel rasteriser difference at a tile border (lavapipe)
-Scope: project
-terrain_aerial20km_level differs between lavapipe and WARP/NVIDIA in a single pixel (86,89): it sits on the diagonal border of two tiles of different levels and takes the neighbour's colour. Two independent CI runs produced byte-identical Linux images, so it is deterministic per adapter (CON-20), not flakiness; WARP and NVIDIA agree. Cause: edge-tie rasterisation of a shared border differs by implementation. Consequence: goldens stay per adapter, and tile-border pixels must never be compared across adapters.
-
-## 2026-10-10 The tier-B oracles hold on the real NVIDIA GPU with the software-adapter tolerances
-Scope: project
-What happened: with the oracles following `PLANET_ADAPTER`, `cargo xtask test gpu --real` ran `oracle_debug_views` (face and tile-id exact, height within 1 at rounding boundaries) and `oracle_shader_validation` on the RTX 3080 Ti (Vulkan) and both passed unchanged; all NVIDIA goldens matched in the same run (27 tests).
-Assumption it changes: ADR 0009 (tier B on the software adapter): the CPU twins and their tolerances also hold on the reference GPU, so tier B is not WARP-specific.
-Proposed follow-up: none; keep running `test gpu --real` at milestone gates.
-
-## 2026-10-11 Per-leaf morph starts open cracks between same-level neighbours; the level's radius bound was 9 % short near cube corners
-Scope: project
-What happened: the numerics review of m3-lod-height-aware measured gaps of up to 1.07 m on the steep field (57,862 of 99,790 same-level pairs at ground-1m) because each leaf took its own start from its own neighbours, so a shared border vertex morphed by different amounts in the two tiles; the existing steep tests only compared a leaf with coarser or finer leaves. Also `node_radius_bound` (0.75 of the edge) was exceeded by tangent-warp tiles away from the face centre (chord radius up to 1.088 times it).
-Assumption it changes: "a per-node quantity that only depends on static geometry is safe": any quantity two tiles evaluate for a shared vertex must be equal on both sides. Tests must cover the same-level case, not only level transitions.
-Proposed follow-up: selection now equalises the start per level (test `same_level_neighbours_share_one_morph_interval_on_rugged_terrain`), radius bound 0.82 (tested on random tiles); per-edge starts later (ADR 0016 follow-ups). Correction to the entry above: the 6,000-draw budget came from the m2-plan-counts change, not ADR 0013.
-
-## 2026-10-11 Contour-line goldens are not comparable across adapters, and golden tests hid later mismatches
-Scope: project
-What happened: for PR #43 (LOD-008) `terrain_ground1m_depth` changed about 940 pixels on WARP and NVIDIA but 7 on llvmpipe; every difference sat on derivative-drawn (`fwidth`) contour lines, which lavapipe rasterises differently. Separately, the golden test stopped at its first mismatch, so llvmpipe produced one candidate per CI run (five rounds for five goldens).
-Assumption it changes: ADR 0009 (debug views compare exactly and alike on every adapter): views with derivative-drawn lines are exact per adapter only; they are classed shaded in `tests/goldens/classes.txt` and skip the cross-adapter check of ADR 0017.
-Proposed follow-up: none beyond ADR 0017 and `GoldenChecks`; new views with screen-space derivatives start as shaded.
-
-## 2026-10-11 Full-depth steep GPU views exceed the test time limit on WARP
-Scope: project
-What happened: `gpu_steep_terrain` at ground-1m planned about 51k nodes (cells 4, ratio 77, max level 26); WARP costs about 0.2 ms per draw call, so the test ran over the 180 s nextest limit. a45ddb2 capped the leaf level at 19 (25k nodes, 40 s). The spec-guardian review of PR #43 noted the cap leaves levels 20-26 on the steep field unrasterised.
-Assumption it changes: "a tier-C test may use the production depth": GPU views on the software adapter are bounded by draw calls, not by pixels. Deep-level behaviour on steep terrain is covered on the CPU (tier A, max level 26), not by pixels.
-Proposed follow-up: TEST-015 now states the cap. Revisit with a slow-test group, instanced or merged draws, or the real GPU (`test gpu --real`) if deep-level pixel coverage is wanted.
+Scope: project (ADR 0009)
+- `-E 'not binary(~gpu_) and not binary(~oracle_)'` fails when no `oracle_*` binary exists.
+- Tier selection by binary-name prefix needs at least one binary per tier; `crates/render/tests/oracle_shader_validation.rs` is the standing tier-B binary.
 
 ## 2026-10-11 Harness queries must not depend on the Windows UI language
-Scope: project
-What happened: the spec-guardian review of m3-perf-gate noticed that `Get-Counter '\Processor(_Total)\% Processor Time'` fails on a German Windows (checked on Rasierklinge: culture de-DE, "Das angegebene Objekt wurde nicht auf dem Computer gefunden"), so the gate's CPU-load query would have failed on every run and refused it. The CIM class `Win32_PerfFormattedData_PerfOS_Processor` works. Separately, a unit test caught the process-tree rule exempting siblings of the harness's ancestors (descendants were grown from the whole ancestor set).
-Assumption it changes: "a platform query that works in CI-like English environments works on the reference machine": queries are checked on Rasierklinge's locale; unreadable values refuse, so the failure was loud but would have blocked every autonomous run.
-Proposed follow-up: the first real gate run (architect) should check that the software-power-cap throttle bit (0x4) does not invalidate every laptop session; if it does, the owner decides whether it counts (measurement protocol).
+Scope: project (perf harness)
+- `Get-Counter '\Processor(_Total)\% Processor Time'` fails on Rasierklinge's de-DE Windows; the CIM class `Win32_PerfFormattedData_PerfOS_Processor` works.
+- Check every platform query on Rasierklinge's locale; an unreadable value refuses loudly.
 
-## 2026-10-11 Number spelling is part of a node's type; the digit-string u64 form dies when strings arrive
-Scope: project
-What happened: the reviews of m3-wdef-toml found that `radius_m = 6371000` (no `.0`) loaded as an integer node with another hash and failed only later as "not a number", and that the decimal-string spelling of a `u64` (needed because TOML integers are `i64`) is unambiguous only while string nodes are banned.
-Assumption it changes: "a hash from the parsed form is formatting-independent": it is independent of layout, not of the literal's type. Known program-read paths are now typed (an exact integer literal for a float node is accepted); unknown paths keep their literal's type.
-Proposed follow-up: the change that adds string nodes (authored items, ADR 0007) must re-encode large `u64` values (for example a tagged inline table), bump `SCHEMA_VERSION` and add the migration; the structural fixture test (`every_schema_version_has_a_frozen_fixture_and_exactly_one_migration`) will demand the fixture and the step.
+## 2026-10-11 An f32 remainder in metres added to a local offset rounds to centimetres
+Scope: project (CON-11, overlays and shaders)
+- A world-anchored grid added a 1,000 km remainder to an f32 tile-local offset: f32 near 5e5 steps by 3 cm, so lines became 40 px plateaus.
+- Carry f64 fractional phases per period (cells, not metres); fade a decade out when its resolution exceeds the pixel step.
+- Bisect a visual defect by switching components off before fixing; the first plausible diagnosis was wrong.
 
-## 2026-10-11 A tile's declared read set is not a recorded one, and tiles read past their cell
-Scope: project
-What happened: the reviews of m3-cell-index found that `inputs_hash_for` declares a tile's reads at plan time while `height(dir)` has no context to record against (a generator reading more than it declares would key wrongly), that tiles sample a closed border row and a one-sample halo for normals so they depend on the neighbouring cell, that an index filed once at put time strands items when the body's radius crosses a cell-level boundary, and that a per-tile hook added to the hot key path (`MeshKeyer`) quietly re-ran an allocation per tile.
-Assumption it changes: "the cell a tile sits in is what it reads": a tile reads its footprint plus a margin; "an index is state": it is derived and rebuilt from the items and the radius.
-Proposed follow-up: proposed ADR 0021 lists the open design points; before the first spatial generator ships, a contract test must run generation under a recording context and assert the reads are within the declared ones; measure plan time with the owner's next perf window (the keyer now computes the field-wide hash once).
+## 2026-10-12 A threshold that decides a stored flag and a derived value must use the stored number
+Scope: project (multi-channel fields)
+- Land was decided from the stored f32 continentalness, elevation from the f64: values within 1e-9 of sea level disagreed (a "land" sample at -200 m).
+- Round to the stored precision before any decision two outputs must agree on; apply to every field that gains thresholds.
 
-## 2026-10-11 Adding an f32 remainder in metres to a local offset rounds to centimetres: the "ragged band" was the relief grid, not the unmorphed height
-Scope: project
-What happened: a ragged dark band in the relief flight's 1 m frames was first diagnosed as the vertex height not being geomorphed (true as a defect, fixed with `coarse_height`, but it moves heights by millimetres at 1 m). Switching relief components off one at a time showed the band survived without contours, shading and the morph of the local position and vanished with the grid (y-axis only). The grid added a 1,000 km remainder in metres to the f32 tile-local offset: an f32 near 5e5 steps by 3 cm, so the 10 m decade's coordinate became plateaus about 40 px wide and a whole plateau counted as "on a line". The numerics review then found the same mechanism in the 1 m height contours (an absolute f32 height steps by 0.24 mm at a few km).
-Assumption it changes: "a world-anchored overlay only needs its phase modulo the largest period" and "the first plausible diagnosis of a visual defect is the cause". Carry f64 fractional phases per period (cells, not metres) so the f32 sum stays small, fade a decade out when the coordinate's own resolution exceeds the pixel step, and bisect a visual defect by switching components off before fixing.
-Proposed follow-up: none beyond morph-height (tier-A grid tests that model the shader's f32 arithmetic with a negative control for the old scheme, a mutation-checked tier-C thin-lines check, a committed image of the defect as the detector's fixture). Normals are still not geomorphed.
+## 2026-10-15 GPU milliseconds depend on how long the GPU has been loaded
+Scope: project (perf comparisons)
+- The same renderer measured 2.85 to 6.0 ms at ground-1m across 14 processes, by GPU clock state; same-process ratios were stable.
+- Compare in the same process (A/B), or record the GPU clock per run.
 
-## 2026-10-11 Two entry points for one read set drift; a persistent key needs the typed reads
-Scope: project
-What happened: the reviews of m3-cache-keys found that `inputs_hash_for` (64-bit) and `read_records_for` (typed, for the 128-bit key) were two separate override points with only a doc comment tying them, so a field overriding one would key correctly in memory and wrongly on disk; `GenContext` also kept two parallel maps; and a missing source key and an all-zero one encoded alike.
-Assumption it changes: "a second view of the same data can be maintained beside the first": the context has one map and one `record` method, a cell-reading field overrides only `read_records_for` and derives its 64-bit hash from it, and the encoding has no byte that means two things.
-Proposed follow-up: the same single-source rule applies to the staged pipeline when its keys become persistent (ADR 0021 point 7, ADR 0022); the persistent known answers should join the determinism manifest when it is written from `app` (ADR 0023 point 9).
-
-## 2026-10-11 Pack files: the Windows lock is mandatory, zero is a valid record, and tests find platform facts
-Scope: project
-What happened: building the tile pack (STRM-008) found, by tests and review, that (a) the Windows `LockFileEx` lock is mandatory, so the locked file cannot be read by the refused writer that wants to name the holder: the note lives in its own file; (b) `TileId::from_raw(0)` is a real tile and `crc32c("") == 0`, so a zero-filled tail left by a crash decoded as valid empty records until the record header got its own CRC; (c) the "canonical file name" rule written as exactly eight digits ignored sequence numbers above 99,999,999 (a test with the last sequence number found it); (d) libtest with `--nocapture` prints `test name ... ` without a newline, so a marker line printed by a child test process arrives mid-line; (e) a scan that treated the first bad payload as the end of the pack would let a writer truncate thousands of good records after one flipped bit.
-Assumption it changes: "a file format needs a payload CRC": it needs a header CRC, a damage policy that separates a torn tail (truncate) from damage in the middle (skip or leave alone), and tests that kill a real process; and "the index is trusted if its header matches": its entries must be checked against the data too.
-Proposed follow-up: compaction (rewrites live records, removes damage and dead hash versions) is the remedy for what the pack only skips; it needs its own requirement. The streamer reaches the store through an injected interface (CON-04).
-
-## 2026-10-12 cache-verify finds a missing key input only when that input changes between build and verify
-Scope: project
-What happened: the reviews of m3-cache-verify found that regenerating a sample from the same definition and the same generator that built it can only see nondeterminism, damage and wrongly written records; a generator that reads a node behind the context's back is invisible until that node differs between building and verifying. A run in which every entry was stale also passed, and damage found by the pack scan (a flipped byte in the last 4 KiB) printed a warning and exited 0.
-Assumption it changes: "verify passes means the keys are complete": it means the stored tiles are what this definition and binary produce. The tests now include a generator with a leaky read and a store-level item-edit test, and compared-nothing fails.
-Proposed follow-up: ADR 0021 point 7 (a contract test that a generator's recorded reads stay within its declared ones) is the real defence; run cache-verify across a definition edit in CI when the field pipeline exists.
-
-## 2026-10-12 A threshold that decides a stored flag and a derived value must use the stored (rounded) number
-Scope: project
-What happened: the global-coarse field decided land from the `f32` continentalness it stores but shaped the elevation from the `f64` it computed first. For `f64` values within 1e-9 below the sea level the two rounded to opposite sides: a "land" sample at -200 m. The numerics review found it by reading; at 4e8 samples per bake it would have shown a few times per bake (and in a random test seed), never in the small tests.
-Assumption it changes: "a tolerance-free comparison is safe because the test grids are small": rounding to the stored precision happens before any decision that two outputs must agree on. `sample` now rounds continentalness to `f32` first, and a 60 000-direction test checks land against the sign of the elevation.
-Proposed follow-up: none; apply to every multi-channel field (temperature bands, biome classes) when they gain thresholds.
-
-## 2026-10-14 Tier A sweep tests should share a warm SelectionCache
-Scope: project
-What happened: the morph sweeps in `planet-frame` (many cameras over the same tree) built a cold per-tile selection cache for every camera, which was most of the time of `cargo xtask test fast`. Sharing one warm `SelectionCache` across a sweep (#108, test-fast-budget) brought the command from about 9 s to 6-7 s with no assertion changed.
-Assumption it changes: "a tier A sweep gets its cost from the number of cameras": it comes from cold per-tile work repeated for each, and the planner's own warm path (6-7 ms at ground-1m against a cold 25+ ms) is the one to test through (CLAUDE.md "< 10 s").
-Proposed follow-up: new tier A tests that plan many views over one tree take a shared warm cache by default; a test that needs the cold path says so in a comment.
-
-## 2026-10-15 The goldens depend on the seed-only reference field, not on `cpu-terrain-v1`
-Scope: project
-What happened: the M4 queue text (item 0) said existing goldens and plan snapshots that depend on `cpu-terrain-v1` keep it explicitly. In the code, the app and `test-render` build the seed-only reference field (`cpu-ref-height-v2`) everywhere; `cpu-terrain-v1` and `cpu-erosion-v1` are built directly only by tier A/B tests in generators and frame and by `generate --plan-check`. The world-height-field change therefore keeps the seed-only runs on the reference field, named explicitly (`legacy_world`), and routes only `--world` runs through the world's resolution.
-Assumption it changes: "the production render path already uses the terrain field". It does not; `--stream`, `--bundle`, `--repro` and `--perf` terrain paths are still reference-only and refuse `--world`, so M4's perf scenes and streaming need a field-aware mesh source before they measure the eroded field. The world file also gained a string key (`world.height_field`) without a `schema_version` bump (old files load unchanged; older builds reject a file with the key).
-Proposed follow-up: M4 item 7 (scheduler, residency, perf scenes) takes the world's field through `WorldTerrain`.
-
-## 2026-10-15 GPU milliseconds of the terrain scene depend on how long the GPU has been loaded
-Scope: project
-What happened: SPIKE-06's A/B ran the unchanged product renderer at ground-1m in 14 processes: `gpu_ms` median 2.85 ms after a short burst, 3.4-4.4 ms in most runs, 5.1-6.0 ms after a 4 s warm-up (sustained clocks near 1.05 GHz; the frame is CPU-bound, so the GPU idles half the time). Same-process ratios between two formats were stable (0.8x, 0.65x), the absolute numbers were not.
-Assumption it changes: the ground-1m A/B in the first M4 perf window (ADR 0020); the 3.0 to 4.2 ms rise of 2026-10-11 to 2026-10-12 may be this effect and not #65. Perf comparisons should be same-process A/B or record the GPU clock per run (the harness already records clocks before and after).
-Proposed follow-up: the architect checks the recorded clocks of the 2026-10-11 and 2026-10-12 sessions before blaming the vertex format.
-
-## 2026-10-15 The ground-1m GPU rise of 2026-10-11 to 2026-10-13 was mostly GPU clock state
-Scope: project
-What happened: the architect read the recorded clocks of the kept perf logs (the 2026-10-12 log was overwritten and is gone). Owner's run 2026-10-11 (`perf/logs/terrain.json` in the main checkout): ground-1m `gpu_ms` 2.89-3.01 ms with the GPU at 1372-1432 MHz in P0. M3 gate window 2026-10-13 (`terrain.last-valid.json`): 4.08-4.24 ms at 1125-1170 MHz in P2/P3. The clock ratio (about 1.22) explains more than half of the 1.39x time ratio; the rest is not isolated (the 44-byte vertex and the larger shader of #65 remain candidates, SPIKE-06's same-process ratios bound them). The readiness gate (ADR 0020) checks power, load, temperature and throttle reasons but not the P-state, and a CPU-bound frame (6 ms encode, GPU waiting) lets the driver clock down.
-Assumption it changes: "a valid perf session makes GPU milliseconds comparable across sessions": only at equal clock state. The regression report's 15 % rule can fire, or stay silent, on clock state alone.
-Proposed follow-up: queued as M4 item 6b (perf-gpu-clock): the harness records and gates the GPU clock state per view, and the regression report compares GPU medians only at equal clock state.
-
-## 2026-10-15 Pins and perf baselines now depend on the bake (world-field-everywhere)
-Scope: project
-What happened: with the eroded field the per-view node counts (TEST-011) depend on the bake size the field reads (its height bounds and slopes), unlike the reference field. The default-world pins therefore name their bake (256 cells) and a perf log records field and bake (`protocol.field`); a 16384 store gives other counts. Also: a `target/` copied between worktrees keeps test binaries with the old `CARGO_MANIFEST_DIR` baked in (tests that read repo files fail with "path not found"); `touch` the test source to rebuild.
-Consequence: compare counts only between runs of the same field and bake.
-
-## 2026-10-15 indirect multi-draw: wgpu 30 has no MULTI_DRAW_INDIRECT feature, and the encode saving is small next to the node-record packing
-Scope: project
-What happened: `multi_draw_indexed_indirect` is core in wgpu 30 (it needs the downlevel `INDIRECT_EXECUTION` flag; only `MULTI_DRAW_INDIRECT_COUNT` is still a feature); an indirect draw with a non-zero `first_instance` needs `INDIRECT_FIRST_INSTANCE`, which both WARP (Dx12) and the RTX 3080 Ti Laptop (Vulkan) offer. The pooled vertex buffers are separate `wgpu::Buffer`s (blocks and the small pool), so a multi-draw can only span draws that share one buffer: the renderer makes one per run of consecutive nodes in one buffer (ground-1m, free-list placement: 12 multi-draws for 2,897 nodes; low-2km: 5 for 1,279), keeping the plan's order so images are bit-identical to the per-draw loop. Indicative CPU time of `TerrainRenderer::render` (record plus submit, node-record packing included, ad hoc in one process, 60 frames, median, NOT a perf measurement, run while the machine was not idle-prepared): RTX ground-1m 1.30 ms per-draw (0.45 us/draw) vs 1.06 ms indirect (0.37 us/draw); low-2km 0.57 vs 0.57 ms; WARP ground-1m about 23-35 ms vs 26-27 ms (the software adapter's submit dominates, no gain). Most of the remaining 1 ms at ground-1m is not the draw commands: the per-node record packing (27 f64 divisions plus small Vec allocations per node) and the 600 KB `write_buffer`s are common to both paths. The architect's first M4 perf window should record the per-draw baseline (`--draw per-draw`) and the indirect figure at ground-1m before any conclusion.
-Assumption it changes: review item C's expectation of a large CPU saving: inconclusive until the perf window (indicatively about 0.25 ms at ground-1m on the RTX). ADR 0033 point 3 (pooled slots) is unaffected.
-Proposed follow-up: pack node records without per-node allocations (a separate small change), then re-measure in the perf window; consider a stable sort of nodes by block only if a scattered residency shows many runs in `encoded_draws`.
-
-## 2026-10-15 16-bit octahedral normals: 0.0037 degrees measured, not 0.002
-Scope: project
-What happened: ADR 0033 point 4 gave "about 0.002 degrees by calculation" for two snorm16 octahedral components and asked a tier-B test to confirm it. The test (`crates/generators/tests/compact.rs`, 212,006 directions: random, axes, the fold at z = 0 and 1e-4) measures a worst of 0.0037 degrees (tiles of the reference, eroded and steep fields: 0.0035 to 0.0036). Still a factor 2.7 under CON-14's 0.01. A first run read 0.032 degrees: the angle came from `acos` of a dot product, which loses half the digits near 1 (f32 inputs give about 4e-4 rad); the tests now take `atan2(|a x b|, a . b)`. Any angle test in the repo that uses `acos(dot)` for tolerances under 0.05 degrees measures f32 rounding, not the quantity.
-Assumption it changes: ADR 0033's 0.002 figure (the format still meets CON-14 under any reading; the figure in the ADR is superseded by 0.0037).
-Proposed follow-up: none.
-
-## 2026-10-15 the format of a finest tile must be a function of its mesh key (sonnet-explorer)
-Scope: project
-What happened: CON-13's guard (a finest tile with more than 65.535 m of relief falls back to the vertex format) is decided when the tile is built, from the LOD cap. A resident tile is reused by its mesh key, and the key did not say which cap the decision was made for, so a tile decided under one cap could be reused under another (the app refused scripts that changed the cap for that reason). The key now carries the finest-level class of the tile (`finest_class_key`, MESH_VERSION 6): the same tile has another key as a finest tile than below the cap, and a tile built for the wrong class shows as a stale mesh, never as a wrong format. With the production cap (22 at cells 32) the guard sees no fallback on the standard views (224 finest tiles, largest relief 0.146 m against the 65.535 m limit; 102 tiles and 4 mm at cap 26).
-Assumption it changes: the compact-tile-switchover note that a tile has one key whichever format and cap it is drawn under.
-Proposed follow-up: a streamer that re-fetches resident tiles when a running session changes its cap (not needed today: a cap change is a new session).
-
-## 2026-10-15 a cover needs to know which tiles the plan can never need, and balanced leaves hide a parent with all children culled (sonnet-explorer)
-Scope: project
-What happened: cover-selection-resident (the fix for the coarse cover while turning, above). Making `cover_selection` follow the plan's culling (horizon, padded frustum sphere, tight cut from cached volumes, volume-based LOD distance) was not enough for "cover = plan with R resident": (1) a tile can be in view and not in R because every one of its children is beyond the horizon (the plan splits it and draws nothing under it, so R, which holds leaves and their ancestors, never holds it); such a child is not resident and stopped its parent's descent; (2) a parent whose in-view children are all culled draws nothing in the plan, so the cover must not draw the parent either; (3) the plan's leaves are balanced 2:1 on the in-view set, so the cover needs the same balance (undoing a split whose tiles are not all resident). The first needs knowledge the frame path does not have, unless R carries it: `TileBounds` (R's tiles with their geometry and volume, plus the position and LOD parameters they are complete for) rides with `ResidencySet`; for exactly that position a tile outside R is one the plan never needs. For another position (a moving camera) the old behaviour stands, a non-resident child that is not culled blocks the descent (coarse, never blank).
-Measured on the fakes (settled at one position, pitch -0.4, mean of the per-frame lag against a fresh plan of each frame's camera): before, 0.2 degrees a frame 0.009 (worst node 14 levels, 7 uncovered nodes in 40 frames), 3 degrees 4.47, 10 degrees 6.13, 15 degrees 5.05 (worst node 10 levels); after: 0 and nothing uncovered at every rate, with and without pitch changes. The 0.5-degree stale-plan rule is kept for drawing: a plan of another camera is drawn only where `plan_covers_view` (every tile of the frame's own cover drawn at its level or finer) holds, else the frame draws the cover.
-Assumption it changes: the learning above that the stale rule might have to be widened; it need not be. Uncovered nodes are now blank tiles (gated, ADR 0032's hard measure).
-Open: the cover (and the coverage test) run on every frame whose plan is stale; their cost on the real machine is for the architect's perf window to show. The cover has no morph, so a turn near the stale limit can alternate plan (morphing) and cover (not morphing) frames.
-
-## 2026-10-15 The CPU's effective clock is readable through a locale-independent WMI class; the counter path and CurrentClockSpeed are not
-Scope: project
-What happened: for the `cpu_clock_before/after` log fields (perf-process-per-scene) the performance counter `\Processor Information(_Total)\% Processor Performance` failed on the German Windows of Rasierklinge (localised counter path), and `Win32_Processor.CurrentClockSpeed` returned the base clock (2400) whatever the load. `Win32_PerfFormattedData_Counters_ProcessorInformation` (`Name='_Total'`: `PercentProcessorPerformance` 147, `ProcessorFrequency` 2160) works in any locale, in about 1.5 s; effective clock = frequency x percentage / 100 (3.2 GHz idle). `powercfg /getactivescheme` prints the plan name in the OEM code page, so a non-ASCII name (Hoechstleistung) reaches the log with a replacement character; the GUID is exact.
-Assumption it changes: the first M4 perf window recorded no CPU clock, so its compact-vs-vertex plan-time difference cannot be attributed to the CPU; from this change on every streaming case logs it (recorded, never judged).
-Proposed follow-up: none; read `cpu_clock_before_mhz`/`after` beside any plan-time difference between windows.
-
-## 2026-10-15 A tile gathers its lattice footprint and reads it block by block: decodes equal distinct blocks (block-order-sampling, GEN-020)
-Scope: project
-What happened: the cold root load (#153: 103 s with six roots in parallel) was cache thrash from scattered reads, not decode speed. Sorting the samples of a tile by the block of their primary cell (tried first, Z order) cut the decodes of a root from 1,937 to 470 for 320 distinct blocks, but a sample near a block border also reads its neighbour, and with the roughly five blocks per root that 31 shared slots give six parallel roots, six roots still needed 5,258 decodes (30.1 s). A bake simulation with the product's ratio (16384 cells, blocks of 1024, an LRU of 1 to 31 blocks) reproduced the real counts exactly and showed that no block order (row, snake, Z, Hilbert) gets below 1.4x the distinct blocks. The fix is two-pass: `eval_gathered` collects the cells every direction of the batch will read (a footprint pass over a recording source), reads the distinct cells from the real source grouped by block (a block is decoded once however small the cache), and evaluates from that in-memory table in the caller's order. Every value is the source's own sample, so the tile is bit-identical to raster order (all pinned hashes unchanged). Measured on the real 16384 store (release, Rasierklinge, Windows file cache warm from earlier passes in the same session; not measured with a cold file cache), cells 32, erosion field, raster order (before) to gathered block order (after): six roots on 6 threads 102.9 s (18,110 decodes) to 10.4-10.9 s (1,883 decodes for 1,536 distinct blocks); the same on 1 thread 39.5 s after (237 s before, #153); one root alone 38.5 s (1,937 decodes) to 6.4 s (320 decodes = distinct blocks). One tile, cold cache, one thread, before to after: level 1 4.0 s (201 decodes) to 2.0 s (99 = distinct); level 2 1.29 s (64) to 0.72 s (35 = distinct); level 3 0.32 s to 0.33 s (15 = 15); level 4 0.16 s to 0.19 s (8 = 8). Tiles of one level on 6 threads over one cold shared source (16 tiles from level 2, 4 at level 1), wall: level 1 25.4 s to 2.45 s, level 2 24.3 s to 2.82 s, level 3 3.92 s to 1.00 s, level 4 0.44 s to 0.49 s. What remains is the decode itself, about 20 ms per 16.8 MB block (a root alone: 320 x 20 ms = 6.4 s), so the six-root load is 10.4-10.9 s, marginally above the 10 s the planner named (1,883 decodes instead of 1,536 because neighbouring roots evict each other's shared border blocks, and six parallel decoders run at about 63 % of the solo rate), and a level-2 tile is 0.72 s (below the 1 s threshold), level 1 is 2.0 s, the root 6.4 s. Lattice footprint (recorded with `store_blocks --part cells`): a tile reads 114,000-138,000 distinct lattice cells (about 94 per vertex: the bilinear 2 x 2 of the vertex, of the four normal-stencil points and of the six slope-stencil points of each of them) at every level 0 to 4; only 1,089-1,145 of them (the vertices) lie on the tile's own sample-spacing grid and about 72 % have an odd index. The heights are interpolations and slope stencils over scattered neighbourhoods, so a coarse summary is not a pure vertex subset of the lattice: a re-layout cannot give bit-identical heights; it has to be a stored result (heights and normals per tile vertex, a pyramid of outputs) or a filter.
-Assumption it changes: the planner's decision of 2026-10-15 named "sorted by the block of the primary cell" as the evaluation order; that alone is not enough under a shared 31-block cache (5,258 decodes for six roots); STRM-014's "a root re-decodes about 7.5x" is now 1.0x.
-Proposed follow-up: a coarse summary (the planner drafts the ADR) is needed only to go below the decode floor (20 ms per block, 320 blocks per root, 99 per level-1 tile); the cross-root eviction (1,883 against 1,536 decodes) could be removed by sharing one block between roots that need it at the same time, worth about 1-2 s of the six-root load.
-
-## 2026-10-16 Frame 0 paid for the first draw through each pipeline and the first use of every pool; the pipelines themselves were already built in the constructor (first-frame-warmup, F4, REND-013, REND-017, TEST-018)
-Scope: project
-What happened: perf window 1 recorded the dive's first frame in 58 ms (dive-fast 45.6 ms, both over the 40 ms cap, frame 0 stays measured: ADR 0032). The assumption "pipelines are created lazily in frame 0" was wrong: `TerrainRenderer::build` creates the shader modules, bind group layouts and both render pipelines in the constructor. What lands inside a measured frame is the first use of things that exist. Measured before any fix (release, software adapter/WARP, `crates/render/tests/gpu_warmup.rs` and `cargo xtask perf stream dive --smoke --allow-memory-bake --global-res 256 --out`; ad hoc, one run each, the RTX cannot be measured here):
-
-| one-time cost | where it lands | software ms |
-|---|---|---|
-| shader modules + both pipelines (compact renderer, first in the process) | constructor, outside the loop | 259 (3.5 for the next renderer) |
-| first draw through each pipeline (state, resource initialisation), compact, 261-node plan | frame 0 `record` | 9.4 against a median of 5.7 (vertex format: 2.6 against 6.2, noise level) |
-| smoke dive, frame 0 `record` (6 root nodes) | frame 0 | 2.64 against a median of 0.64 |
-| first atlas (compact) in the smoke dive: allocated by the first level 3+ upload at frame 15 | upload, then the first draw reading it, frame 15 `record` | 5.2 against 0.6 |
-| vertex pool, 512 slots, allocated whole by the first level 0-2 upload | upload column of the first frame | inside the 1.2 ms of frame 0's upload |
-| ring growth from 256 nodes (plans above that) | `record` of the first large plan | small (1 MiB of buffers); not separable from noise |
-| `warm_up` itself (outside the loop) | rig setup | compact 127 ms, vertex format 417 ms (block 0 cleared) |
-
-After (same smoke run): frame 0 `record` 0.25 ms, record column max 1.01 ms against 6.19 (median 0.65 against 0.64), the frame-15 spike gone. On the RTX the dominant part of 58 ms is probably the driver's first-use work (pipeline state, shader JIT of the first draw), which WARP does not show; the warm-up draw goes through the same pipelines, bind groups, buffers and atlas as real frames in the active draw mode and is the fix for it; perf window 2 verifies.
-Assumption it changes: "the constructor builds the pipeline, so frame 0 is warm" (REND-013 said the pipeline, uniform buffers and targets are created once, but a pool block, an atlas, a ring and the first draw are first-use). Guarded now by `InitCounts` and `live_pools` equal before and after frames 0-2 (tier C on the software adapter), and a loose wall-clock probe.
-Proposed follow-up: if window 2 still shows a frame-0 spike, the cause is a first-use cost warm-up does not touch (a second atlas block reached later by demand, or an indirect-buffer growth); the counters name which.
-
-## 2026-10-16 Upload time is mostly byte conversion and small-write calls, not the bytes (M4 fix F5)
-Scope: project
-What happened: perf window 1 showed upload p99 4.00 ms for at most 0.31 MiB a frame. Measured first (software adapter, release; `crates/render/examples/upload_bench.rs` for the queue, the smoke scenes for the loop). (1) The CPU conversion of a tile to bytes went through byte-wise `flat_map` iterators: 0.109-0.116 ms per vertex tile (1,221 vertices) against 0.012 ms with `extend_from_slice`, about 9x (19 vertex tiles at the 1 MiB cap: 2.1 ms of conversion alone; a compact tile's 8,712 texel bytes about 0.02 ms, 118 of them 2 ms). That alone is most of the 4 ms at 0.3 MiB. (2) Calls: a compact tile cost two (`write_texture` plus the 128-byte record), 236 at the cap. Queue micro-benchmark, CPU time of the writes plus the submit, median / p99 over 300 iterations: 118 compact tiles in adjacent slots, per slot (236 calls) 0.74 / 1.05 ms on WARP and 0.40 / 0.47 ms on the RTX (Vulkan; the example's instance picks Vulkan there); batched (9 calls: one rectangle per atlas row, one record run) 0.12 / 0.20 ms WARP and 0.18 / 0.23 ms RTX. 10 tiles: 0.085 against 0.034 ms WARP, 0.048 against 0.029 ms RTX. Vertex tiles (53,724 B): per slot 19 calls 0.12 ms against one concatenated call 0.27 ms on WARP (0.14 against 0.15 on the RTX): the call is not the cost there, the concatenation adds a pass, so vertex tiles stay one call each. Indicative only (GPU clock state uncontrolled, never a budget).
-In the loop (smoke scenes, cells 16, software, 24 frames each, two runs): calls per frame 5.7 -> 3.6 (dive), 10.4 -> 3.3 (teleport-1m), 9.5-11 -> 3.2-3.6 (teleport-2km); upload_ms median/p99 before the change (old conversion, per slot) dive 0.68/4.01, teleport-1m 0.90/2.51, teleport-2km 0.75/1.68; after (batched, new conversion) dive 0.19-0.20/0.81-0.95, teleport-1m 0.35-0.38/1.75-2.44, teleport-2km 0.40-0.45/1.69-2.70 (the smoke p99 is one or two frames of 24). With the old conversion and the new calls only the dive p99 stays high, so the conversion is the larger share. The manager's slots are close to adjacent: 118 tiles in a frame form about 22 runs (fakes, ground fill). Per-call overhead on DX12/NVIDIA cannot be seen on WARP or Vulkan; window 2 verifies against the 2 ms target.
-Assumption it changes: ADR 0033 point 9 (1 MiB for 2 ms): the bytes were never the cost; the cap stays provisional until window 2 reads `upload_ms` with `upload_calls`.
-Proposed follow-up: none beyond window 2. If the RTX p99 is still over, look at a first-use atlas allocation inside a frame (REND-017 warms block 0 only) and at `write_texture`'s row repacking to 256 bytes (264-byte rows).
-Deviation from F5's wording: the vertex pool is not coalesced. Measured 19 vertex tiles at the cap: 19 calls 0.12 ms, one concatenated call 0.27 ms on WARP (RTX 0.14 against 0.15 ms); the call carries 53,724 bytes, so concatenating only adds a pass. The compact atlas batching is the fix, plus the conversion.
-
-## 2026-10-16: the F4 warm-up frame was not representative of the measured frames (early-frame-gpu-wait, F9)
-Scope: project
-What happened: window 2 still showed a 41 ms GPU wait at dive frame 2 (CPU columns under 1 ms) after the warm-up of first-frame-warmup. Reading the code against the frames: the warm-up submitted one throwaway frame with ring set 0 only (a measured frame uses `frame % 2`, so the first one is set 1), without the timed pass, with a one-record multi-draw, and nothing counted what it touched, so the gap was invisible to the count-based test. An ad hoc probe on the RTX 3080 Ti (2560 x 1440, compact, indirect, 553 nodes, waited frames; no perf run) gave a cold first frame of 3.1-3.8 ms against 0.6-0.9 later, and 2.9-3.0 ms for frame 0 with the F4 warm-up as well as with the F9 one: that residual is the 553 tiles' upload data riding on the first submission; the 41 ms of the dive is not reproducible with one plan on a probe.
-Consequence: `FirstUse` counts the ring sets, pipelines, timestamp passes and draw modes a submission has used; the warm-up now uses all of them in its one waited submission and frames 0..3 add none (REND-017). A second atlas or block still allocates and is first used on demand. Window 3 must show frames 0-3 of the dive and dive-fast without a GPU wait; if one remains, the next suspects are the first use of a second atlas (128 MiB zeroing) and the first big upload batch, and the check is a per-frame GPU timestamp (the pipelined loop does not time its frames).
-
-## 2026-10-16: `selected_views_match_the_adapters_goldens` on WARP did not recur in 46 runs (warp-golden-flake-rate)
-Scope: project
-What happened: the test had shown a one-pixel delta of 1 once on the software adapter (WARP), and failed identically on a prior HEAD in one local run but not in the verifier's. Question: is that nondeterminism, ours or WARP's?
-Method (HEAD f45eb6b = main with #169, Windows, `PLANET_ADAPTER=software PLANET_GOLDEN_STRICT=0`, the environment `cargo xtask test gpu` sets; `cargo nextest run -p planet-render --test gpu_terrain`, one process per test): (a) the test alone, 10 runs in sequence: 10 pass; (b) under load, 12 runs of the test, each started while two full `gpu_terrain` binaries (12 tests each, default threads) were running at the same time and were themselves repeated 12 times (24 full-binary executions, each containing the test): all 12 targeted runs pass and all 24 full-binary executions pass 12/12. Total 46 executions of the test, 0 failures, no candidate written.
-Result: failure rate 0 of 46; no delta (pixel, channel, view) to record because none occurred. Not reproduced, so not attributed. Neither load nor concurrent WARP devices (up to 3 processes) changed an output byte at Tolerance::Exact.
-Assumption it changes: none. The earlier delta of 1 stays unexplained; if it recurs, keep the candidate and diff image from that run (`target/review/`) before anything else, since it names the view and pixel, and compare with the committed golden of the adapter key (the first suspect is the machine's WARP/driver version at that moment, e.g. a Windows update between runs, not our inputs; the plan, meshes and camera of each view are pure functions of the index).
-
-## 2026-10-16: the stored 16384 bake has five sea components and no dry basin next to the ocean (SPIKE-08)
-Scope: project
-What happened: ADR 0041 point 2 expected small enclosed basins, including one a single cell from the ocean, and sized the connectivity work for them. Over the stored seed-1 bake the sea (`continent <= SEA_LEVEL_F32`, 4-connectivity, shared face-edge vertices as one node) has exactly 5 components: the ocean (99.93 % of the sea area) and four enclosed basins of 11,816 to 144,702 km^2; none is under 100 km^2 and the nearest is 55 vertices (about 33 km) from the ocean. Ten seeds at 2048 cells show the same: 4 to 11 components, none under 100 km^2, enclosed seas up to 4.1e6 km^2, and the stored seed at 2048 reproduces the 16384 areas within 0.4 %.
-Assumption it changes: ADR 0041 point 2 ("a dry basin can sit one cell from the ocean"): not observed in the bake, kept as a hand-drawn fixture. The area threshold is a design choice, not a gap in the data (4.07e6 km^2 against 5.03e6 km^2 across seeds).
-Proposed follow-up: ADR 0041 takes the threshold as body data (Earth default 1e6 km^2); pond-sized water comes from finer producers (lakes), not from the global bake. Details in SPIKE-08.
-
-## 2026-10-16 The coarse pre-fill at 16384 cells: 69 s, 22.5 MB, 2,046 tiles
-Scope: project
-`generate --prefill-dir` over the production store (20 threads, shared machine): 69.4 s wall for levels 0-4, 22,514,059 payload bytes (packs grew 22,638,865), second run a 0.1 s no-op. The streamer did not read the pack at all before this change; pre-filled tiles are now kind-2 records (the exact RenderTile bits) under the ADR 0018 mesh key plus the tile form. Stale tiles after a MESH_VERSION or field change are misses and `cache-compact` does not drop kind-2 records; re-running the pre-fill adds the current ones. Not a perf measurement.
-
-## 2026-10-16 Generation workers at below-normal priority: a smaller tail, no measured cost; window 3's slowdown did not reproduce (frame-thread-priority, M4 fix F10, STRM-020, ADR 0046)
-Scope: project
-What happened: window 3 (RTX, 16384 store pre-filled, 18 workers) failed the dive on contention: record median 0.36 -> 6.2 ms with generation load, p99 27.24 ms, lag mean 1.38, about 6 tiles dispatched a frame with 36 in flight. Question: does priority (or a larger reserve) give the frame thread its core back?
-Method: the perf harness binary, ad hoc (`target/release/planet.exe test-render --perf --scene dive|dive-fast --adapter hardware --store <16384 store> --global-res 16384 --machine-ready`; not `cargo xtask perf`), same binary and flags as the window (main 373ace2 plus the option), one process per run, 2,400 frames at 2560x1440, GPU in P8 at the start as in the window. One run at a time on a quiet machine (CPU load before each run 0.3-4.4 %, AC power, high-performance plan, other sessions idle; a first batch in which two series overlapped by my mistake was discarded). Whole-run columns in ms (median / p99); lag over the 1,800 descent frames.
-
-| scene | variant | record | upload | wall | wall max | lag mean / worst |
-|---|---|---|---|---|---|---|
-| dive | baseline (reserve 2), five runs | 1.43-1.47 / 3.6-5.1 | 0.22-0.23 / 0.78-0.85 | 4.80-4.95 / 12.1, 15.9, 16.2, 17.2, 20.3 | 20, 30, 34, 29, 44 | 0.24 / 2.66-2.72 |
-| dive | reserve 6 | 1.42 / 4.01 | 0.24 / 0.72 | 4.85 / 12.9 | 14.8 | 0.31 / 2.74 |
-| dive | reserve 10 | 1.41 / 3.89 | 0.26 / 0.69 | 4.85 / 12.2 | 15.2 | 0.56 / 2.72 |
-| dive | workers below normal, three runs | 1.43-1.44 / 3.6-4.2 | 0.23 / 0.77-0.80 | 4.83-4.90 / 13.2, 11.4, 12.6 | 14.5, 19.2, 14.5 | 0.24-0.25 / 2.72 |
-| dive | frame thread above normal, one run | 1.44 / 3.50 | 0.23 / 0.79 | 4.79 / 11.3 | 15.1 | 0.25 / 2.72 |
-| dive | both, two runs | 1.42 / 4.13, 3.55 | 0.22-0.23 / 0.77-0.81 | 4.71-4.75 / 13.3, 11.2 | 13.8, 14.2 | 0.24-0.26 / 2.72-2.74 |
-| dive-fast | baseline, two runs | 1.50-1.56 / 4.7, 8.9 | 0.31 / 0.83-0.88 | 4.84-4.93 / 15.1, 25.8 | 24, 43 | 0.24 / 2.66-2.72 |
-| dive-fast | workers below normal, two runs | 1.55-1.57 / 4.6-4.7 | 0.28 / 0.82 | 4.94-4.95 / 14.2, 14.4 | 16, 19 | 0.24-0.25 / 2.72 |
-| dive-fast | both, one run | 1.53 / 4.65 | 0.28 / 0.84 | 4.97 / 14.6 | 18.6 | 0.24 / 2.72 |
-
-Dispatch per frame between frames 300 and 1500: 10.3-10.6 at baseline, 10.1-10.5 below normal, 8.9 (reserve 6) and 7.4 (reserve 10).
-Reading. (1) The window-3 failure did not reproduce at all: with the same binary, store, flags and 18 workers the baseline dive has record median 1.4 ms (6.2 in the window), 10-11 dispatched per frame (6), wall p99 12-20 ms (27), upload p99 0.8 ms (3.7), lag 0.24 (1.38). The window's generation ran about 2x slower per job; something outside the frame thread slowed the cores or the store reads (the CPU clock before the window's run was 2,722 MHz against 3,024 here; the page cache for the 11 GB store; background load at that moment). Not identified, and an ablation on a quiet machine cannot say whether priority would have cured it. (2) Run-to-run noise of the baseline is large in the tail (wall p99 12.1-20.3 ms, max 20-44 ms over five dives) and nil in the medians (4.80-4.95 ms). (3) With the workers below normal alone (three dives) wall p99 was 11.4-13.2 ms and max 14.5-19.2 ms, and with the frame thread raised as well (two dives) 11.2-13.3 and 13.8-14.2; of the five baselines four are above every one of these and one (12.1) sits among them. Small samples, indicative only. dive-fast is consistent (n=2 each: 14.2, 14.4 against 15.1, 25.8). Medians, lag and dispatch rate did not move: no cost measured. (4) The frame thread above normal alone (one run) and both together cannot be told from the workers' lower priority alone. (5) A larger reserve cuts the tail too but costs lag (0.31, 0.56) and dispatch (8.9, 7.4 a frame): it pays for the frame thread's core by idling workers all the time, a priority only when the frame thread wants the core.
-Not done: a synthetic competing load (extra busy processes on the shared machine) was refused by the session's permission policy and is not substituted; with it the effect would be expected to be larger.
-Assumption it changes: F8's "reserve cores; lower priority is the next step if window 3 shows a tail". The tail is already present on an idle box, and the reserve alone does not remove it. `GEN_RESERVE` stays 2.
-Fix chosen: the workers run below normal priority by default (`--gen-priority normal` undoes it), recorded in `protocol.gen`; ADR 0046 proposed. No frame-thread priority.
-Proposed follow-up: window 4 reads the dive against window 3 (p99, upload p99, lag, dispatch per frame) with `protocol.gen.priority` recorded; if window 3's 2x slower generation recurs, record the CPU clock, the running processes and a repeat in the same state; if the tail is still over budget with the workers below normal, the next lever is the build of the ranking classes on the plan worker (F8's follow-up).
-
-## 2026-10-16 Per-tile generation time grows 2.2x from 1 to 18 workers, on the CPU and not in our caches; window 3's further 1.8x did not reproduce (gen-throughput-load, M4 fix F11, STRM-020, STRM-022)
-Scope: project
-What happened: window 3 (RTX, 16384 store pre-filled, 18 workers + 18 queued ahead) showed 36 jobs in flight and about 6 dispatched a frame (about 370 tiles/s) against 1,000-1,190 tiles/s standalone. Question: where does a tile's time go under load: contention between workers, the 31-block cache at 36 concurrent tiles, or the pack read the pre-fill added?
-Method: new recorded-only counters (STRM-022, listed below) read in the perf binary, ad hoc, not `cargo xtask perf`: `target/release/planet.exe test-render --perf --scene dive --adapter hardware --store <16384 store> --global-res 16384 --machine-ready [--gen-workers N --gen-ahead M]`, one dive (2,400 frames, 2560x1440, GPU in P8 as in the window) per row, one process at a time, CPU load 0-6 % before each (other sessions idle), the store read-only. The counters cover the measured frames (the settling is excluded). The load time of a tile is the source's `load_staged` as the worker measured it; dispatch per frame is over frames 300-1500.
-
-| workers + ahead | in flight (mean) | dispatched / frame | tiles / s | tile load median / mean ms | block wait / tile ms | compute / tile ms | vs 1 worker | lag mean |
-|---|---|---|---|---|---|---|---|---|
-| 1 + 1 | 2 | 1.23 | 74 | 12.5 / 12.1 | 0.15 | 11.9 | 1.00 | 3.56 |
-| 4 + 4 | 8 | 4.32 | 259 | 15.6 / 15.7 | 0.36 | 15.3 | 1.29 | 1.68 |
-| 8 + 0 | 8 | 5.06 | 304 | 17.5 / 18.6 | 0.57 | 18.0 | 1.51 | 1.43 |
-| 8 + 8 | 16 | 6.23 | 374 | 21.6 / 21.4 | 0.60 | 20.8 | 1.75 | 0.88 |
-| 12 + 12 | 24 | 8.14 | 488 | 23.6 / 24.4 | 1.04 | 23.4 | 1.97 | 0.40 |
-| 18 + 0 | 18 | 8.33 | 500 | 27.7 / 28.8 | 1.51 | 27.2 | 2.29 | 0.36 |
-| 18 + 18 (default), 3 dives | 36 | 10.6, 10.0, 10.0 | 636, 597, 600 | 25.7-27.9 / 27.9-29.8 | 1.8 | 26.0-28.0 | 2.2-2.35 | 0.24-0.27 |
-
-Reading. (1) The rate is workers divided by the load time of a tile, and the load time of a tile rises with the number of loads running beside it: 12.5 ms alone, 17.5 ms at 8, 27.7 ms at 18. The 36 in flight of the default are 18 running and 18 waiting in the pool's queue: the same 26-28 ms a tile as 18 + 0, with 10 instead of 8.3 dispatched a frame because no worker waits for the frame. The block-wait part of a tile is 0.15 to 1.8 ms; the rest, 11.9 to 26-28 ms, is the tile's own computation and grows 2.2x. Level bands (18 + 18): median 31 ms for levels 0-8 (2,855 tiles), 25.8 ms for 9-14 (4,680), 24-26 ms for 15-18 (3,116), 24-30 ms for 19 and up (3,556); the dive asks for about 14,200 tiles, with the same 4,680 / 3,116 / 3,556 in the three bands above level 8 in every run of 12 or more workers (a slower pool has not finished by then); the CPU is an i7-12800H. (2) The cause is the machine, not our code: a fixed ALU kernel (`load_calib_*`, 34 ms alone) run by the pool's thread count at once, before and after the case, takes 47-55 ms at 8 threads (x1.4-1.6) and 75-87 ms at 18 (x2.2-2.6), the factors the tiles show (x1.5 and x2.3), with nothing of ours in the loop (an i7-12800H: 6 performance cores with hyperthreads and 8 efficiency cores, 20 logical CPUs). The standalone tile rate scales alike: `store_blocks --part rate`, 320 tiles, 85.6 tiles/s on 1 thread, 292 on 4, 697 on 20 (x8.1 from 20 threads; the dive gets x8.1-8.6 from 18 workers). The 1,000-1,217 tiles/s of ADR 0032 and window 3 is that bench's warm rate on its own tile set (152 tiles/s on one thread, 6.6 ms a tile, against 12 ms for the dive's mix with its coarse levels), not a rate the dive's tiles can reach: 18 workers at 27 ms is about 650 tiles/s, which the 18 + 18 dives reach (600-636). Window 3's 6 a frame is 50 ms a tile, 1.8x slower than any of these dives; that did not reproduce (F10 found the same).
-
-Candidate 2, the block cache at 36 concurrent tiles: not the cause. Per tile 0.09 block decodes (1,302-1,328 decodes for 14,200 tiles), 9,017 shared lookups of which 86 % hit, 1,273 evictions, 500-533 reads that waited for another thread's decode, 1.0 s of lock wait in the whole dive (0.3 % of the 396-424 s the jobs ran), and the jobs' own time in the shared cache (lock, waits, their decodes) 26-27 s, 6.6 % of their time. A block costs 34 ms to fetch and 31 ms to decode with 20 loads beside it, 8.8 and 15.5 ms when one thread reads. Budget ablation (18 + 18, one dive each, a temporary env patch, reverted): 7 blocks (128 MiB) 2,095 decodes, the jobs' block time 78 s (17 %), job p99 233 ms, 8.7 dispatched a frame; 31 blocks (512 MiB, today) 1,302 decodes, 26 s (6.6 %), p99 111-121 ms, 10.0-10.6; 127 blocks (2 GiB) 1,071 decodes, 6.7 s (1.7 %), p99 59 ms, 10.8 (+2-3 %). The size stays. Who decodes: 309 of the 1,328 decodes (23 %) are done by tile jobs, 1,019 (77 %) for the plan worker, whose cold plans at altitude read their origin heights on up to 20 scoped threads (38 runnable threads beside the 18 workers, on 20 logical CPUs). With the plan on 1 thread (temporary env patch, reverted) the dive needs 456 decodes instead of 1,322, the jobs' block time is 7.3 s, their mean tile time 26.6 ms against 29.9 (-11 %), job p99 50 ms against 121; but the first plan takes 3.9 s instead of 1.5 and the lag mean is 1.15 instead of 0.25; with 4 plan threads 1,021 decodes, 27.5 ms, lag 0.52. So the planner's parallel block reads thrash the 31-block cache (3x the decodes; its 144-188 distinct blocks at altitude, ADR 0033 point 6) and cost the generators about a tenth of their time: a real but small cost that the pre-filled coarse summary (ADR 0045) would remove better than a thread cap. No change made.
-
-Candidate 3, the pack read the pre-fill added: not the cause, and not a lock or IO cost. A lookup reaches the pack only for a tile of level 8 or less; the dive's 14,200 loads made 2,862 lookups (2,410 misses at levels 5-8, answered from the in-RAM index, and 452 hits at levels 0-4) and 11,352 skips, and all lookups together took 0.2-0.8 s (at most 0.2 % of the jobs' time). `TileStore::get` takes no lock but a short mutex on the list of dropped entries and reads at an offset. Page cache cold or warm: all dives here ran with the store's hot blocks in the page cache; I could not evict it (clearing the standby list needs rights, and memory pressure on a shared 16 GB machine is not something to apply). A direct unbuffered probe of the pack file read 8 MiB in 1-6 ms, so a cold block costs at most about 6 ms on top of the 9-34 ms a fetch takes today, 8 s of thread time over the dive: it cannot explain a factor of two. The fetch time per block is the counter that tells in window 4.
-
-Instrumentation cost: dive wall median 4.7-4.9 ms and p99 11.0-13.5 ms, record 1.4 ms, as F10's baseline (4.80-4.95 and 12.1-20.3).
-Assumption it changes: ADR 0032's 1,217 tiles/s was read as a rate for the dive (it is the bench's, warm, for its tile set); STRM-020's "at least 80 % of workers divided by the job duration" holds with the job duration measured under load (27 ms at 18), which is 2.2x the duration alone. Ten tiles dispatched a frame at 18 workers is this machine's limit, not a defect.
-New log fields (recorded only, never compared; `load_` counts in each streaming log): `load_jobs`, `load_jobs_not_done`, `load_run_us_{median,p99,max,sum}`, `load_wait_us_{median,p99,sum}`, `load_running_{median,max}`, `load_run_us_median_running_{1_4,5_9,10_14,15_up}` with `load_jobs_running_*`, `load_run_us_median_level_{0_8,9_14,15_18,19_up}` with `load_jobs_level_*`, `load_block_{decodes,lookups,hits,evictions,decode_waits,lock_wait_us,fetch_us,decode_us,resident,budget}`, `load_block_{decodes,lookups}_per_1000_tiles`, `load_job_block_wait_us`, `load_job_block_decodes`, `load_pack_{gets,found,get_us}`, `load_prefill_{lookups,found,skipped,us}`, `load_field_{builds,us}`, `load_calib_{before,after}_{threads,single_us,parallel_median_us,parallel_max_us}` (not in smoke runs).
-Proposed follow-up: window 4 reads the dive's 18 + 18 default against this table. `load_run_us_median_running_15_up` (26-28 ms here) together with `load_calib_*` (parallel median / single, 2.2-2.6 here) says whether the machine is as fast as it was: a tile time of 50 ms with a calibration ratio near 2.4 would point at ours (then `load_block_fetch_us` / `load_block_decodes` over 34 ms or `load_block_evictions` over 1,400 mean the store or the cache, `load_prefill_us` over 2 s the pack, `load_job_block_wait_us` over 10 % of `load_run_us_sum` the cache); a calibration ratio near 4 or a tile time that doubles with the ratio is the machine (record the CPU clock fields and the process list). A cap on the planner's parallel block reads, or the pre-filled coarse summary, is the one measured lever on our side, worth about a tenth of the generators' time.
-
-## 2026-10-16 WARP crashes in its own code when several devices run in one process (gpu_skeleton, gpu_warmup)
-Scope: project
-What happened: plain `cargo test -p planet-render --test gpu_warmup` (5 tests, each its own software device, run in parallel in one process) ends in STATUS_ACCESS_VIOLATION in about 1 of 3 runs at 5 test threads (0 of 36 at 1 to 3 threads); `--test-threads=1` and nextest (one process per test) never crash. The Windows event log and an in-process exception handler put every crash inside `d3d10warp.dll` (system WARP 10.0.26100.9711; offsets 0xa89b3 and 0xa842f), none in our code or in a wgpu crate: on a WARP worker thread whose stack is entirely WARP (a read or write of an unmapped address, no test had finished, so not teardown), and in a standalone wgpu-only program (`spikes/warp-crash`, no project code) on the submitting thread in `wgpu_hal::dx12::Queue::submit -> D3D12Core -> d3d10warp.dll` (null-based read). The standalone program crashes 1 in 10 to 1 in 30 runs with 6 threads each creating its own WARP device and drawing with a vertex shader that reads a storage buffer and `textureLoad`s a `texture_2d<u32>` atlas (the compact tile path); never with 1 or 2 threads (0 of 30 each), never with compute-only or plain render passes, never on the RTX (DX12 or Vulkan, 6 devices, 0 of 30 each). In the real test the compact tile path crashes far more often (15 of 20) than the vertex path (4 of 20). A process-wide mutex around `GpuContext::new` removed the crashes in the real test (0 of 50), a mutex around renderer construction did not (9 of 20), and waiting for the GPU before dropping the renderers did not (14 of 20); but the standalone crash also happens with devices created in lock-step and then used, so the creation overlap makes it likelier and is not the whole cause. Cause: a thread-safety fault inside Windows' WARP when more than about 4 devices execute at once in one process (suspect: shared state of its command execution or shader JIT, not identified: no symbols for d3d10warp, no debugger installed); not our setup code (no shared statics or lazily created adapters are involved) and not a known wgpu issue (the tracker and general search showed no matching report; WARP package notes mention "free-threaded DDI failures" fixes in 1.0.20, not tried). Details and tables: `spikes/warp-crash/results/results.md`. Also seen while on the SPIKE-09 harness: the Intel Iris Xe (DX12) adapter crashes with a segmentation fault at device or pipeline creation (the app refuses integrated GPUs, owner 2026-10-16).
-Assumption it changes: none in the specs; refines the F6 tracking line: tests that create devices are safe only per process (nextest, xtask and CI do that) and test-only crashes under plain `cargo test` are expected.
-Proposed follow-up: accepted as test-only; keep nextest isolation (no code fix possible on our side). For a developer who runs plain `cargo test`, run it with `--test-threads=2` or less, or take `cargo xtask test`. Optionally try the newer WARP package (Microsoft.Direct3D.WARP 1.0.20) if the crash ever shows in nextest or a product run (the product does not use WARP).
-Obsolete when: Windows ships a WARP that passes `spikes/warp-crash` level 7 with 6 threads in 100 runs, or the test binaries stop creating several software devices in one process.
+## 2026-10-16 WARP crashes in its own code with several devices in one process
+Scope: project (tests on the software adapter)
+- About 1 in 3 plain `cargo test` runs with 5 WARP devices end in an access violation inside `d3d10warp.dll`; never under nextest (one process per test) or on the RTX. Details: `spikes/warp-crash/results/results.md`.
+- Keep nextest isolation; plain `cargo test` needs `--test-threads=2` or less; share one device per test binary.
+- Obsolete when: a Windows WARP passes `spikes/warp-crash` level 7 with 6 threads in 100 runs.
 
 ## 2026-10-16 Reviewing goldens needs CI's WARP, and nextest overwrites its JUnit report
-Scope: project
-What happened: the local WARP (10.0.26100.9711) differs from the recorded and CI one (.33438), so local WARP candidates escalate by the driver gate; the review must take WARP candidates from CI's `review-Windows` artifact. `golden-review --tests` (ADR 0037 bound tests) needs the JUnit reports of this run, and each `cargo xtask test*` run overwrites `target/nextest/default/junit.xml`, so they are copied aside after each run. A band-colour debug view differed by 1 px with max delta 95 between llvmpipe and WARP/RTX, which ADR 0017's rounding rule (delta 1) cannot absorb.
-Assumption it changes: that a new debug view agrees across adapters trivially; colour-band views flip whole pixels at band edges.
-Proposed follow-up: planner decides whether such a view may differ by a few pixels of any delta (status.md).
-Obsolete when: the CI WARP and the local WARP agree, or ADR 0017/0037 define agreement for new views.
+Scope: project (golden-review)
+- The local WARP (10.0.26100.9711) differs from CI's (.33438): WARP candidates come from CI's `review-Windows` artifact.
+- Each `cargo xtask test*` run overwrites `target/nextest/default/junit.xml`; copy it aside before the next run when `golden-review --tests` needs it.
+- Obsolete when: the local and CI WARP agree.
 
-## 2026-10-16 A new HeightField trait method with a default body is silently wrong in every wrapper and every second implementation
-Scope: project
-What happened: the climate field (GEN-021) added `climate`, `climate_version_word` and `heights_and_climate` with analytic defaults. `ErosionField` (the default world) and the streamer's `CancelGuarded` did not override or delegate them, so the product would have stored the analytic climate and keyed streamed tiles differently from pre-filled ones; no test noticed because the tests used `Reference`, whose default is right. The numerics and spec reviews found it. A second trap: a separate gather for the climate reads decoded every block of a coarse tile twice with a small cache (GEN-020 caught it); the climate joins the heights' gather now. f16 cannot meet an absolute 0.01 degrees or 0.1 mm bound; CON-14 compares two implementations of one field (ADR 0049).
-Assumption it changes: that defaults on a trait are safe; a default is a second implementation for every type that forgets it.
-Proposed follow-up: a test per new trait method that every field over a bake (terrain, eroded) and every wrapper answers it as the inner field does (done for the climate in `climate.rs` and `skeleton.rs`).
-Obsolete when: `HeightField` has no default-bodied methods that depend on the field's inputs.
-
-- 2026-10-17 (atmosphere-reference): store the transmittance table as optical depth and interpolate that: the worst error against the converged integral is 2.2 % of T; the 32 x 32 multiple-scattering table is coarse across the terminator (absolute error up to 6e-4 where the value is 1e-3), so its bound has a larger absolute term. `cos(azimuth)` near the sun cannot be resolved in f32 (1 - phi^2/2): take the azimuth with atan2 from two plain dot products, and the sun disc's angle from the chord, not from `1 - cos`.
-
-- 2026-10-17 (atmosphere-passes): at 20,000 km the f32 discriminant `(r mu)^2 - c` is the limiting arithmetic of the orbit march: 1.04 of the bound at the ground limb minus 1e-6 rad; the factored form with double-single `r`, `rho`, `sqrt(c_top)` and an `fma`-split `r mu` brings it to 0.92 on WARP (no fused fma) and 0.02 on the RTX. WARP's `asin` is accurate to about 1 % at 0.005 rad: use its series for small angles. Several WARP devices in one test process crash it (access violation): share one device per test binary.
-
-- 2026-10-17 (climate-latitude-axis): the global-coarse climate took its latitude from `d.y` while COORD puts the pole at +z; every other consumer (sun, camera, surface conversions) followed COORD, and no test pinned the field at the poles, so the quarter-turn rotation lived from the first bake until M5 item 4 noticed it. A convention shared across crates needs one helper (`sin_latitude`) and a known-answer test at +z, -z, +x and +y. Fixed with GLOBAL_VERSION 3.
-
-- 2026-10-17 (viewer-lit): on the WARP adapter the compact tile format with the atmosphere removes the device (`DXGI_ERROR_DEVICE_REMOVED`, "Unknown") when a buffer is copied and mapped after a frame: `read_exposure` or the timestamp readback, from the second or later frame, in the window and in a renderer-level loop (compact pools, atmosphere, one `read_exposure` per frame, 128x96: fails every run). Not with the vertex format (6 of 6 smoke runs), not without the atmosphere, not with `render` and no buffer readback (120 frames), and not on the discrete GPU (Vulkan, 3 of 3 smoke runs and the earlier ones). Undiagnosed: wgpu reports no validation error and the D3D12 reason is not surfaced. The software smoke runs the vertex format; `gpu_atmosphere`'s compact tests pass because they read textures after `render` and never a buffer. Worth a spike if a Windows user without a discrete GPU matters, or if the discrete GPU ever shows a silent loss.
-
-## 2026-10-17 WARP device removal with the compact format and the atmosphere: WARP-specific, not our shaders or bounds (exploration)
-Scope: project
-What happened: the removal tracked in docs/status.md (`planet editor --smoke --tile-format compact` on WARP) reproduces every run with the window smoke (not with the renderer-level test loops, whose 408 and 4096 texel atlases and static plans never mix vertex and compact tiles). The device is removed by a lit frame with the atmosphere whose draw list mixes vertex-format and compact atlas runs (frame 11 of the scripted smoke at 160x90; the same at larger sizes); the readback only shows it (`GetDeviceRemovedReason` is 0x887A0005, no finer reason; a check after every frame finds the device healthy through frame 10). Bisect, each still removed: no sky-view and aerial-perspective passes; no exposure passes; no post pass at all; no tonemap; no per-frame atmosphere uniform write; per-draw instead of multi-draw indirect; every terrain draw skipped; only vertex-format or only compact draws; the atmosphere's bind group set again after each pipeline switch; ring set 0 only; per-slot uploads; atlas side 1024. So no particular draw, shader access or atmosphere pass is needed, which rules out an out-of-bounds read or write in the compact or atmosphere shaders as the trigger; what is needed is the compact format (atlases written by `write_texture`) together with atmosphere-enabled lit frames. Splitting the frame into three submissions with a wait and a removed-check after each makes it vanish (0 removals in 38+ frames); splitting only before the post passes leaves 1 of 5. The same compact smoke passes on the RTX 3080 Ti on Vulkan and on DX12 (48 frames, 12 exposure readings), i.e. through the same wgpu DX12 code path as WARP, and the vertex format passes on WARP. Not available here: the D3D12 debug layer and GPU-based validation (Graphics Tools needs administrator rights), and DRED gives nothing on WARP (no breadcrumb nodes, no page fault). Together with the WARP parallel-device crash (2026-10-16), which is also inside `d3d10warp.dll`, WARP 10.0.26100.9711 is unreliable for several compact-format combinations. Not shown: that wgpu's barriers are valid on every driver (no debug layer to check), or the exact WARP operation. Details and tables: `spikes/warp-compact-atmosphere/results/results.md`; probe code on branch `explore/warp-compact-atmosphere-removal`.
-Assumption it changes: none in the specs; confirms VIEW-005's choice (the software window smoke runs the vertex format) and keeps this out of the product code.
-Proposed follow-up: test-only, accepted: keep the vertex-format software smoke and the discrete-GPU compact smoke (Vulkan and DX12 both pass). Re-test the software compact smoke when WARP, wgpu or the Windows build changes (`PLANET_ADAPTER=software planet editor --smoke --tile-format compact`). If a user ever reports a silent device loss on a discrete GPU with the compact format, install the Graphics Tools and run the smoke with the debug layer and GPU-based validation first.
-Obsolete when: the software compact smoke passes on a newer WARP (then VIEW-005's vertex-format workaround can go), or the compact format is replaced.
-
-## 2026-10-17 The coast is continentalness, the water level is a height; liquid appearance had two homes
-Scope: ADR 0041, ADR 0051 (proposed), GEN-023, WDEF-006
-What happened: building the water-level field showed that the sea producer decides where water is from the bake (interpolated continentalness against `SEA_LEVEL_C` and the ocean bit of a weighted vertex), while `body.<n>.sea.level_m` is only the height of the surface where that holds; a level other than 0 therefore leaves land that is below the level dry. Separately, the owner's constraint 3 (a liquid table with colour, emission, viscosity and waves in the definition) and ADR 0041 point 3 / ADR 0042 point 6 (appearance is look data, outside the hash) overlap on three attributes; the table was built as the owner wrote it, as presentation parameters held as definition nodes, which costs a definition-hash change per colour edit (CON-09).
-Assumption it changes: ADR 0041 point 3 (amended by the proposed ADR 0051 point 1); ADR 0041 point 1 (the level does not move the coast).
-Proposed follow-up: item 7 decides the coast for a level other than 0 and the per-tile storage of W; the planner decides ADR 0051.
-Obsolete when: hydrology produces lake levels from heights, or the look file gains liquid appearance and the definition keeps only viscosity.
-
-## 2026-10-17 The vertex tile format survives for two shallow reasons; measured (exploration)
-Scope: project
-What happened: opus-planner asked whether keeping two tile formats spreads special cases and whether the vertex format can retire from rendering (`spikes/tile-format-duality/results/results.md`). Measured on the CPU (no GPU, no perf): (1) levels 0-2 are vertex format only because the compact tile's biquadratic base surface is too coarse for tiles that large: error against the canonical mesh 3.6 px at level 0, 1.2 px at level 1, 0.51 px at level 2 with 3 x 3 control points, 0.18 / 0.017 / 0.0016 px with 5 x 5, 4e-4 px at level 0 with 9 x 9; the 16-bit height range is never the limit there (step 0.083 m at level 0 against a 52 km pixel); (2) levels 0-2 are drawn in one of the ten standard views (orbit, 52 of 11,713 nodes, all level 2), every other view draws level 4 and finer; (3) the other reason is the CON-13 relief guard (more than about 65 m of relief in a finest tile); a 32-bit height with two 15-bit normals still fits the 8 B texel, and 16-bit normals measure 0.0037 degrees (ADR 0033 said about 0.002), 15 bit 0.0074, 14 bit 0.0148 (over CON-14's 0.01); (4) the duality is about 750 vertex-only and 900 compact-only production lines (1.6 % and 2 % of 45,100), 145 explicit uses of the format enums, and roughly 40 of 805 integration tests. Climate already exists in two implementations (per-vertex f16 attribute against a 9 x 9 texture in the spare texel channel), and `VsOut.aux` means climate in one pipeline and tile coordinates in the other.
-Assumption it changes: ADR 0033 point 4 (about 0.002 degrees for 16-bit normals: 0.0037 measured, still inside CON-14) and its reading of why levels 0-2 stay in the vertex format (the base surface, not the height encoding).
-Proposed follow-up: the owner decides at the M5 gate whether to retire the vertex format from rendering (about 5-7 coder days: texel layout v2 with 32-bit height and 15-bit normals and the climate in a 324 B per-tile block, a render floor at level 3, then deleting the vertex path), preferably before item 7's water mask.
-Obsolete when: the vertex format has been retired from rendering, or the compact format changes (re-measure the base-surface error then).
-
-## 2026-10-17 Compact tiles in a storage buffer draw the same pixels at the same GPU cost; the WARP removal is not the texture path (exploration)
-Scope: project
-What happened: prototype of the compact blocks as 128 MiB storage buffers read by index instead of `Rgba16Uint` atlases (`spikes/compact-storage-buffer/results/results.md`, branch `explore/compact-storage-buffer`, never merged). Images are byte-identical on WARP and on the RTX (90 one-shot debug-view frames, persistent renderers with batched and per-slot uploads, the lit atmosphere frame). RTX GPU time at ground-1m, 2378 compact nodes: atlas 1.888 ms, buffer 1.898 ms (ratio 1.005; other views 1.001-1.011; indicative, 2026-10-17 09:20-09:21, no other GPU work of ours running). Per-slot writes 10.05 us/tile (atlas) against 6.73 us (buffer); batched writes equal (4.74 / 4.79 us) in 2 calls instead of 21. Nothing in ADR 0033 or SPIKE-06 records why a texture: the ADR weighed the atlas only against the vertex format's vertex buffers; the 4096 x 4096 x 8 B atlas block equals the 128 MiB default `max_storage_buffer_binding_size`, so a buffer needs the same 15 (mid) or 23 (high) blocks. Correction of the learning "WARP device removal with the compact format and the atmosphere" (2026-10-17): it named the compact format's atlases written by `write_texture` as part of what is needed; with the tiles in buffers (no atlas texture at all) the WARP window smoke still removes the device (0 of 5 completed, the atlas baseline 0 of 3), so the texture path is not the trigger; what remains needed is the compact pipeline (vertex stage pulling from storage, no vertex buffers, four bind groups) together with the atmosphere. WARP only: `write_buffer` executes at a constant 13.7 MB/s from 256 KB to 21 MB whatever the buffer (size, usage flags), `write_texture` at about 100 MB/s, so a software test that uploads thousands of tiles gets 6x slower with buffers.
-Assumption it changes: the learning of 2026-10-17 on the WARP removal (the texture path as part of the trigger); ADR 0033 point 3 (the atlas as the pool for compact tiles: not forced by a limit).
-Proposed follow-up: at the M5 gate, together with the vertex-format decision: move the compact blocks to storage buffers (about 1-1.5 coder days, no golden change), preferably as the first step of the layout v2 of the retirement plan; the free slot layout is the gain (per-tile data and a 12-16 B texel without a second texture or a spare channel).
-Obsolete when: the compact blocks are buffers or the compact format is replaced.
-
-## 2026-10-17 The water pass: four first readings were wrong
-Scope: project
-What happened: building `water-pass` (ADR 0053) (1) a per-tile tangent projection of the wave vector (ADR 0041 point 5) opens a seam of about half a radian at every tile border, so the waves are planet-fixed and weighted by their tangent share at the point; (2) a wave fade by camera distance, as first built, is wrong over deep water because the grid is spaced for the distance to the seabed (the numerics review found it), so the fade follows the vertex spacing times one plus the morph factor; (3) the exact-class share of a coastal flight is 0.2 % to 2 % noise because bands thinner than a pixel come and go by sampling, so the metric counts coverage (water or not) and reports the class count; a lit-luminance measure of the shore on the same flights is dominated by the terrain's own shading at those pixels (6 % and 37 % of them flash without any water), so it is taken on lit over terrain, and the `fwidth` filter then helps the descent (41 % to 7 %) and hurts the glide (6 % to 16 %); (4) the frustum cut culled the seabed tile and the water above it, leaving a band of seabed along the bottom of a low view (found by the flight itself); raising the tile height bounds instead breaks the morph intervals, so only the frustum sphere reaches up to the water level.
-Assumption it changes: ADR 0041 points 5 and 6 as written (ADR 0053 records the readings).
-Proposed follow-up: the planner accepts ADR 0053 (point 2 decided: coverage budget normative, lit shore flash reported only, `shore_filter` default 1, the owner judges the shore in motion at the gate); a line-crawl count for the metric.
-Obsolete when: ADR 0053 is accepted, or hydrology replaces the tile-granular water selection.
-
-## 2026-10-17 A 128 MiB block holds 15,406 compact slots, not 15,405; ADR 0054's buffer path needed no limit the gate lacked
-Scope: project
-What happened: building `compact-storage-buffers` (ADR 0054): 134,217,728 / 8,712 B = 15,406.9, so a block holds 15,406 slots (ADR text and the exploration said 15,405); 15 blocks (mid) and 23 (high) still fit the shares (231,090 and 354,338 slots). The gate already required `max_storage_buffer_binding_size`, `max_buffer_size` and `max_storage_buffers_per_shader_stage` by name; the compact stages use at most four storage buffers. The image differential against the atlas path was byte-identical on WARP and the RTX in every view; the batched upload now makes one call per run of adjacent slots in a block (the atlas cut runs at row ends). The WARP device removal with the compact format and the atmosphere persists (0 of 5 window smokes).
-Assumption it changes: ADR 0054's slot count (15,405).
-Proposed follow-up: none; the hashes of the atlas path are the known answers of `gpu_compact_blocks` and `gpu_water`, keyed by driver build.
-Obsolete when: the compact format or its block layout changes.
-## 2026-10-17 A bigger compact record eats ADR 0033's fixed reserve, not the slot count you expect (SPIKE-12)
-Scope: ADR 0033 point 3, `streaming::budget::fit_share_with`
-What happened: `fit_share_with` counts the per-slot record buffer among the fixed items of the 128 MiB reserve. With the records of the retirement layout (644 B instead of 128 B: climate block and the 5x5 control points) the reserve check removes whole 128 MiB blocks: the mid share falls from 230,640 to 123,008 slots (8 blocks) and the high share to the same, although the bytes per slot grow only 5.9 %. Charged per slot (the record inside the slot, stride 9,360 B) the counts are 215,085 mid and 329,797 high (-6.7 %).
-Assumption it changes: ADR 0033's "8.8 KB per tile, 230,640 slots at the mid share" assumes the 128 B record fits the reserve at any slot count.
-Proposed follow-up: any change of the compact slot (the retirement, item 7's per-tile blocks) moves the record into the slot's cost and re-cuts the reserve; run `t9_share_arithmetic` (`spikes/vertex-retirement`) first.
-Obsolete when: the slot layout of the retirement (or another) is built and ADR 0033's share table is amended.
-
-## 2026-10-17 A 5x5 base surface is 10 to 48 % of vertex time on every tile; a render floor is free outside orbit (SPIKE-12)
-Scope: compact tile format (ADR 0033 point 4), terrain-lod
-What happened: a quartic base surface through 25 control points removes the level 0-2 error (0.46 px to 0.0018 px at orbit) but `place` evaluates the surface and its normal up to five times per vertex: GPU time +9.8 % at aerial-200km, +47.6 % at ground-1m, +35.6 % on the steep field (RTX, indicative). A floor at level 3 changes only the orbit view (52 to 181 nodes, +0.15 ms). A floor leaf must not morph: its parent is never drawn, so the first prototype morphed every vertex beyond 11,380 km to an undrawn grid, and the plan builder refused the root-like interval until floor leaves were exempted like roots.
-Assumption it changes: the duality exploration's "5 x 5 base or a floor, either removes the blocker" (equal in cost): the 5x5 base is the expensive one.
-Proposed follow-up: the retirement uses the floor; the terrain-lod spec states that a leaf at the floor has no parent to morph to.
-Obsolete when: the retirement is decided (accepted or dropped).
-
-## 2026-10-17 Hardware against software adapters differ by one level across whole debug views
-Scope: golden-review, ADR 0052 path
-What happened: the review pass of the 18 pending M5 goldens showed RTX against WARP and llvmpipe differing at delta 1 in 36 to 3,448 pixels per view (never WARP against llvmpipe), while the pixels beyond delta 1 stayed at most 24 (cap 64). A 32-pixel delta-1 cap added to ADR 0052 point 1 by a reading blocked 11 goldens and was withdrawn.
-Assumption it changes: ADR 0017 rounding noise (32 px at delta 1) as a cross-adapter bound: it holds for candidate against golden on one adapter, not for hardware against software.
-Proposed follow-up: none; ADR 0052 as written (at most 64 pixels beyond delta 1, any number at delta 1) stands, the bound tests guard the values.
-Obsolete when: the ADR 0037 window ends at the M5 gate.
-
-## 2026-10-17 The coastal plain below the level, and water queries on the frame thread
-Scope: water selection (ADR 0053), erosion, streaming lit scenes
-What happened: window 6's 8 s frames were `plan_water` reading 25 store blocks (about 20 ms each) per new tile of level 0 to 3 on the frame thread (394 loads, 7.7 s, in frame 5 of the dive); first lit plans cost 0.5 to 3 s. Separately, the bake's land (continentalness above 0.1) of elevation up to about 64 m lies below the level after erosion (mean -17 m over plains 200 to 400 km wide), so the selection left a flat dry seabed to the horizon behind a staircase of water.
-Assumption it changes: ADR 0053's "the coast is a function of the terrain and the level on every LOD" held only where the bake says sea; and "a tile query is cheap" held only over an in-memory bake.
-Proposed follow-up: ADR 0056 (band, tile water in the job, pixel-footprint fade); a per-vertex sea mask (ADR 0051 option 3) if the reach approximation shows.
-Obsolete when: ADR 0056 is accepted and the housekeeping folds it into the specs.
-
-## 2026-10-17 The dive's detail lag is the coarse tiles' water fill; its frame spikes were threads of normal priority
-Scope: streaming lit scenes, tile jobs (ADR 0056, STRM-020, STRM-024)
-What happened: window 7's lit dive had lag mean 1.70 and frames of 53-61 ms. Non-measured smokes on the RTX (700 frames, 16384 store, `--frames 700`): the frame thread made 0 field queries, 0 tile misses and 0 band queries over all frames (the water plan costs 12.6 ms in 700 frames), so the book fallback was not the cause. The first 36 jobs are coarse tiles; each `WaterBook::fill` reads up to 25 store blocks through the 31-block cache (decodes 2,456 against 1,302 in the debug dive, evictions equal decodes; one job 7.5 s), so no tile is resident before frame ~430 and the lag climbs to 8.2. Ablations: no fill for levels 0-4 gives lag mean 0.18 but the frame thread then computes the coarse water (frames of 0.3-8 s); block cache x8 gives first tile at frame 105, lag 2.07; coarse fills serialised gives first tile at frame 156 and lag 5.4 (workers wait on the lock). The frame spikes (record 54-67 ms in `submit`, nothing else changing) came from the 8 scoped threads per fill, which start at normal priority under below-normal workers; with the helpers at the job's priority the dive's wall max is 4.8 ms and the spikes are gone.
-Assumption it changes: STRM-020's "workers run below normal" covered only the pool's own threads; and "tile water in the job" (window 6 fix) moved the cost from the frame to the first wave.
-Proposed follow-up: coarse tile water from a precomputed summary or off the tile's critical path (decision for the planner, status.md item 9a.1).
-Obsolete when: the coarse-water decision is built and a dive window reads lag under 1.
-
-## 2026-10-17 The coarse water summary removes the first wave of the dive's lag; the later plan latency and the descent's lag are not the water
-Scope: milestone M5
-What happened: with the summary of ADR 0058 in the 16384 store, non-measured RTX smokes of `dive --lit` (`perf-smoke`, same store, same machine state, old build = main at 7978e79): 700 frames: descent lag mean 6.31 to 0.89, worst 9.97 to 2.80, the first tile beyond the six roots resident at frame 601 to 51; 2400 frames: mean 2.48 to 1.38, worst 8.17 to 4.65, block decodes by the job threads 751 to 148 (all decodes 2,336 to 1,194). By 200-frame bins the lag of frames 0 to 600 falls from 3.26, 5.67, 4.62 to 1.58, 1.02, 0.25; frames 1000 to 2000 are the same before and after (1.09, 1.51, 3.57, 2.97 against 2.38). What is left: the first plan takes 0.8 s in both builds and the next two 1.9 s and 1.1 s with no job in flight, so tiles arrive in steps (frames 51, 168, 233); the water plan on the frame thread costs 0.01 to 0.02 ms and makes no field query. The descent's later lag is generation-bound (36 jobs in flight, up to 2,700 queued). A smoke is not paced like the window, so absolute lags differ from window 7's 1.70.
-Assumption it changes: item 9a.1's "the first wave of coarse fills is the cause" holds for the first 600 frames and not for the rest of the descent.
-Proposed follow-up: window 8 reads the lag; if it is over 1, attribute the plan worker's 0.8 to 1.9 s (block reads of the planner's height bounds, as M4 F3 found for a cold plan) before anything else.
-Obsolete when: a dive window reads lag under 1.
-
-## 2026-10-18 One edited item re-keys most resident tiles; reach and key-aware refresh are M6 work (SPIKE-13)
-Scope: ADR 0021 points 2, 5, 8; streaming, frame
-| Observation | Number |
-|---|---|
-| Tiles re-keyed by one stamp (cell and margin ring), 150 m radius | 3,788 of 6,445 resident (2 km); 12,110 of 14,543 (1 m) |
-| Tiles that touch the stamp | 36-2,812 |
-| Streamer re-fetch of a resident tile with a changed key | none; `draw_plan` substitutes ancestors |
-| Plan after an edit with a still camera | not requested; forced in the prototype |
-| Keys of a cell-reading field per plan | recomputed (`reuse = !reads_cells`): worker 21-134 ms |
-| Item-dependent bounds as a constant over-estimate (+120 m) | planning fails at 200 m and 1 m (empty morph interval, levels 16-18) |
-| Find by key / cell grid / footprint | 260-820 / 34-91 / 0.6-3.7 ms |
-Proposed follow-up: decide ADR 0021 points 2, 5, 8 before the first authored stage; M6 build list in `spikes/edit-latency/results/results.md`.
-Obsolete when: the authored-layer change with reach and refresh is accepted.
-
-## 2026-10-18 egui fits wgpu 30 and winit 0.30; two traps: bundled fonts and dropped texture deltas (SPIKE-14)
-Scope: ADR 0015, ADR 0042, `deny.toml` (CON-27)
-| Observation | Value |
-|---|---|
-| egui, egui-wgpu, egui-winit 0.36.2 and 0.37.0 | require wgpu ^30, winit ^0.30.13; 0.35 and older require wgpu 29 |
-| `default-features = false` without `default_fonts` | no font; labels blank |
-| `default_fonts` | OFL-1.1 and Ubuntu-font-1.0 fail `cargo deny check licenses` |
-| Texture deltas of earlier passes dropped | glyph atlas never uploaded; text blank |
-| Typical panel at 1080p on the RTX | egui 0.175 ms CPU, UI pass 0.12 ms |
-Proposed follow-up: the owner decides the font licences before the editor UI change; the editor accumulates every pass's `textures_delta` until painted.
-Obsolete when: the editor UI change lands.
-
-## 2026-10-18 SPIKE-12 baselines that differ from the specs (retire-vertex-format drafts)
-Scope: ADR 0062, ADR 0063, SPIKE-12 results, STRM-006, STRM-021, GEN-025
-What happened: drafting `compact-slot-v2` and `render-floor-3` from SPIKE-12 and ADR 0062 found five numbers that do not match the specs or the arithmetic. The spec-lint-green drafts use the corrected ones.
-| SPIKE-12 / ADR 0062 | Spec or arithmetic |
-|---|---|
-| Today's mid share 230,640 slots (atlas model), "-6.7 %" | 231,090 slots (15 blocks of 15,406); the 9,168 B slot gives 219,585, -5.0 % |
-| Vertex pool and fallback region 27.5 MB | 512 slots x 58,608 B = about 30 MB |
-| Pre-fill of levels 3..=4: 2,040 tiles | 6 x (64 + 256) = 1,920 tiles (2,046 - 126) |
-| Slot 9,360 B (ADR 0062 point 4) | included 192 B reserved for the 5x5 base that point 5 rejects; ADR 0063 sets 9,168 B (stride 456 + 8 (cells + 1)^2), 14,639 slots per block, 219,585 and 336,697 slots |
-| Floor removes levels 0-2 | the vertex pool's 256 manager slots for levels 0-2 stay allocated and unused after `render-floor-3` until `remove-vertex-render-path` |
-Assumption it changes: the "-6.7 %", "2,040" and "27.5 MB" figures quoted in ADR 0062, the spike and the earlier learning "A bigger compact record eats ADR 0033's fixed reserve". The roots' exemption from the upload cap (STRM-001, render-floor-3) is a clarification of ADR 0033 point 9: the cap governs steady frames, not the load of a body's roots.
-Proposed follow-up: specs state the corrected numbers; no change to the frozen spike results or the accepted ADR.
-Obsolete when: `remove-vertex-render-path` is archived.
-
-## 2026-10-18 A 32-bit height step count is only exact in f32 up to 2^24, so the wide texel uses 2^24 - 1 levels (compact-slot-v2)
-ADR 0062 and SPIKE-12 assumed a 32-bit count (4,294,967,295 levels) gave 1 mm up to about 30 km of relief. An f32 holds integers exactly only up to 2^24, and WGSL leaves the rounding of `f32(u32)` above that open, so CPU and GPU could form different heights, and the precision was relief / 2^24 anyway. GEN-019 now uses 16,777,215 levels in the 32-bit field: the step is at most 1 mm up to 16.7 km of relief; the reconstruction error of `hr_min + f32(q) * hr_step` stays within 1 mm up to 8,192 m (f32 spacing of the sum). Nothing reaches this while the relief guard (65.5 m) stays; the removal change decides what a tile above 8 km does. ADR 0062's "about 30 km" is superseded by the spec's numbers.
-
-## 2026-10-18 Edit-to-test build time is the number of linked test binaries, not compilation (SPIKE-15)
-Scope: `Cargo.toml` profiles, `.cargo/config.toml`, test layout of frame, render, generators, cache, app, `.config/nextest.toml`
-| Observation | Value |
-|---|---|
-| Frame edit, `cargo xtask test fast` | 120 s wall: build 102.9 s, tests 14.1 s |
-| Frame edit, `--timings` | 107 units, about 100 test and example binaries of 1-17 s each; the edited library compiles in 2.3 s |
-| Frame edit, build only: baseline / lld / per-tier binaries / line-tables-only debug info | 88.8 / 78.6 / 41.6 / 23.2 s |
-| Workspace `opt-level = 0` | slower build (32 s) and 34 % slower tests |
-Proposed follow-up: an OpenSpec change applying the debug-info and linker settings, then per-tier test binaries; results `spikes/build-speed/results/results.md`.
-Obsolete when: the build-speed change is archived.
-
-## 2026-10-18 A floor leaf is not the floor-0 node of the same tile: it has no parent to morph to (render-floor-3)
-Scope: LOD-011, LOD-004, the plan snapshots, the loop tests that start at level 0
-What happened: the draft of LOD-011 said nine of the ten standard views have "identical plans node for node" at floor 3 and at floor 0, and that a scene with a finest level of 2 "equals the floor-0 plan". The tiles and mesh keys are equal, but every node at the floor differs in its morph (0 and the interval `[1e30, 1e30]` against the parent's interval at floor 0), so the plans are equal only above the floor; the 128 x 96 snapshot view high-2000km also changes (73 to 71 nodes: three level-2 nodes at its edge whose children are all outside the view become one level-3 node). The orbit view is 52 to 181 nodes over the reference field and 182 over the default world's eroded field. R and D drop their levels 0-2 ancestors in every view (4 to 34 slots), and the 6 roots of floor 0 are now also exempt from the upload cap, which moved two scheduler digests (the two that run under a 40,000 B cap) and made the old "roots go one a frame under a tiny cap" test a statement of the opposite rule.
-Assumption it changes: the draft numbers ("plans equal", 11,661 nodes as plans) in the LOD-011 delta; the spec now says same tiles, equal above the floor, no morph at the floor.
-Proposed follow-up: none; `floor_zero_reproduces_the_plans_recorded_before_the_floor` keeps the earlier plans as the floor-0 record (`terrain_plans_floor0.txt`).
-Obsolete when: the vertex render path is removed and the floor is the only start of the tree.
-
-## 2026-10-18 A failing test's output was lost twice in a day: xtask printed what nextest printed and nothing else
-Scope: BUILD-003, BUILD-012
-What happened: `cargo xtask test` passed nextest's output through to the terminal and kept nothing, so a failure that scrolled away, or was seen only as a summary, could not be read again without another long run (the `gpu_window` failure of 2026-10-18 on the RTX was the second case). Runs on the shared RTX cannot be repeated freely. Each run now tees its build and nextest output into `target/test-logs/<command>-<UTC time>.log` and prints the path last.
-Assumption it changes: the console is enough evidence of a test run: it is not; a run's output is its record.
-Proposed follow-up: none; `perf` and `accept` keep their own logs.
-Obsolete when: nextest or CI keeps every run's output where the agents can read it.
+## 2026-10-16 A new trait method with a default body is silently wrong in every wrapper
+Scope: project (`HeightField` and its wrappers)
+- The climate methods' defaults were not overridden by `ErosionField` or delegated by `CancelGuarded`; tests on `Reference` (whose default is right) saw nothing.
+- Every new `HeightField` method (for example `bounds_monotone`, LOD-012) needs a test that every field over a bake and every wrapper answers it as the inner field does.
+- Obsolete when: `HeightField` has no default-bodied methods that depend on the field's inputs.
 
 ## 2026-10-19 Shortcut letters are logical keys, movement keys are physical keys
 Scope: project (editor input)
-What happened: the editor mode binds Ctrl+Z and Ctrl+Y. winit's `KeyCode::KeyZ` and `KeyCode::KeyY` are physical positions, so on a QWERTZ keyboard (Germany, Switzerland) the key labelled Z is `KeyCode::KeyY` and undo and redo would have swapped. The spec-guardian found it before it shipped; WASD and the number row are positions and stay physical.
-Assumption it changes: VIEW-003 and VIEW-004 bind keys by physical code (right for movement); VIEW-022 binds undo and redo by the character on the key.
-Proposed follow-up: new shortcut letters go through `edit_key` (logical character first, physical key as the fallback) and its tier-A test with a QWERTZ case.
-Obsolete when: all key bindings are read from a settings file with a layout-aware default.
+- On QWERTZ the key labelled Z is `KeyCode::KeyY`: undo and redo would swap.
+- New shortcut letters go through `edit_key` (logical first, physical fallback) with a QWERTZ test; WASD and the number row stay physical.
+- Obsolete when: bindings come from a settings file with a layout-aware default.
 
-
-## 2026-10-19 Bounding a tile by the declared maximum of a stamp leaves a fine tile no room to morph (stamp-stage)
-Scope: GEN-026, LOD-008, height bounds of authored stages
-What happened: the stage widened a tile's bounds by the sum of the items' `max_delta_m`; a 60 m hill with a 3 km reach made the plan refuse tiles of level 19 (about 20 m wide) with an empty morph interval, although the hill is nearly flat under them.
-Assumption it changes: a bound from the declared maximum is good enough for planning; the extent of a tile must grow by what the stamp varies across it, not by what it can reach at its top.
-Proposed follow-up: none; the stage bounds each item by its delta range over the cap (GEN-026), and a new stamp kind needs a monotone profile or a rule of its own.
-Obsolete when: stamps are replaced by a stage that reports exact per-tile ranges.
-
-## 2026-10-19 A provisional hand table of another stage's keys drifts (editor parameters)
+## 2026-10-19 A provisional hand table of another stage's keys drifts
 Scope: project (editor model, stamp stage)
-What happened: the editor shipped a parameter table of its own guess (`radius_m` as a parameter, a reach of 1.25 radii, `rim_m`, `softness_pct`). The stamp stage then fixed the item-file spelling (the radius is `reach_m`, one parameter per kind) and the editor's outlines disagreed with the terrain by a quarter and offered parameters the stage ignores.
-Assumption it changes: VIEW-017 (editor parameters) now follows WDEF-010; the editor's table names the keys of `StampKind::param_key` and a tier-A test asserts it for every kind.
-Proposed follow-up: a new stamp kind is added to the stage and to the editor's table together; the test fails if the keys differ.
-Obsolete when: the editor takes its parameter list from the stamp stage's kinds directly.
+- The editor's guessed parameter table (`radius_m`, `rim_m`) disagreed with the stamp stage's spelling (`reach_m`); outlines were off by a quarter.
+- A new stamp kind goes into the stage and the editor's table together; a tier-A test asserts `StampKind::param_key`.
 
-
-## 2026-10-19 A software-adapter window smoke costs its pixels (the editor test took 67 to 220 s)
+## 2026-10-19 A software-adapter window smoke costs its pixels
 Scope: project (window smokes on WARP and lavapipe)
-What happened: the real-window editor test took 67 s alone and 100 to 220 s beside the other tier-C processes, against the 300 s limit. Per-frame timing of `planet editor --smoke --edit` on WARP showed about 14 s of start-up (the 256-cell bake and the root tiles) and 90 lit frames at 0.6 s each: the software adapter draws the lit path with the atmosphere and water, and the frame time follows the window size (1280x720: 67 s, 640x360: 40 s, 320x180: 32 s). The CPU side (pre-frame work, the field rebuild after a hand-over, planning) was under 1 s in total. `--tau 4` and `--finest-level 12` or `10` changed nothing.
-Assumption it changes: a window smoke test needs the default window size; the counts the editor test asserts come from the script and not from the pixels, so it runs at 480x270 (34 s alone).
-Proposed follow-up: a new window smoke passes `--size` unless it checks pixels; the start-up share (14 s) is the next cost if the tier needs trimming.
-Obsolete when: the software adapter draws the lit frame in a few tens of milliseconds, or the smokes no longer run on it.
+- The editor smoke took 67 s alone, up to 220 s under load (limit 300 s): 0.6 s per lit frame at 1280x720, 14 s start-up; CPU work under 1 s.
+- A window smoke passes `--size` (for example 480x270) unless it checks pixels.
 
-## 2026-10-20 The cover took a whole area one level coarser when one sibling had not streamed in (SPIKE-18)
-Scope: STRM-016, the cover and the stale-plan stand-in
-What happened: the cover split a tile only when every child in view was resident, so a tile that was split a frame ago because its sibling was culled went back to its parent the moment the sibling came into view, before it had streamed in; on a starved machine the drawn level dropped over the parent's whole area for a few frames. A first idea (keep last frame's leaves) would have left a hole where the sibling came into view, because nothing but the parent is resident there.
-Assumption it changes: a stand-in has to cover the whole of the tile it replaces; it need only cover the quadrants that nothing finer covers, drawn through a mask. The mask costs a `discard`, which on the RTX cost 5 to 8 % of the frame in the heavy scenes when every node's pipeline had it; an override constant keeps it to the pipelines of the masked nodes.
-Proposed follow-up: hairline cracks along the cut line and a level gap above 2:1 across it remain until the missing tile arrives (STRM-016 names them); a skirt on the cut for masked nodes would close the cracks.
-Obsolete when: the cover is replaced by a scheme in which a missing tile never leaves a resident sibling's neighbour coarser.
-
-## 2026-10-20 B(W) bounds the incision of flat ground only (ADR 0071)
-Scope: ATMO-019, GEN-031, the conduction bound of the wet floor
-What happened: SPIKE-17 bug 2 and SPIKE-21 showed that the sea reaches ground connected to the ocean through band ground over any distance, so the 100 km reach (a distance test) floored basins behind ridges and dried connected plains beyond it. The conduction bound is B(W), the highest bake elevation at which flat ground can be cut under the level W; steep ground is cut deeper (up to 0.75 A(E)), so B(W) is not an upper bound on where the sea can lie.
-Assumption it changes: the band elevation B(W) is a bound for flat ground only; a path over a steep pass that the erosion cuts below the level at a higher bake elevation does not conduct, and the plain behind it is dry (accepted in ADR 0071 point 2). Raising the bound needs a slope-aware rule, not a larger constant.
-Proposed follow-up: none while the steep-pass regression is acceptable; if it is not, a per-vertex slope term in the floor codes.
-Obsolete when: the coastal band is decided by the eroded terrain itself instead of by the bake elevation.
-
-## 2026-10-20 The lattice normal is not exactly radial on a sphere, and the extended plane lands off the vertex's row (ADR 0073)
-Scope: generators::normals, core::tile (ring_direction)
-What happened: the four-point stencil was exactly radial on a flat sphere; the centred differences along the lattice axes are radial only to a few thousandths of a degree (0.003 at level 6 and 16 cells) because the tangent warp makes the spacing uneven around a vertex. The ring point beyond a face edge cannot come from re-projecting the extended cube plane: it lands off the vertex's row by up to a cell at the corner. It comes from the exact integer cube point (the edge point moved one cell back against the face normal), which lands on the neighbour's own lattice.
-Assumption it changes: a lattice stencil across a cube edge is a function of integers, not of the warp; a flat-sphere test of a lattice normal needs a bound of its own (0.01 degrees), not the old exact radial one.
-Proposed follow-up: none.
-Obsolete when: the face mapping gives equal spacing on both sides of every vertex, or the normal no longer reads the lattice.
+## 2026-10-20 The lattice normal is not exactly radial on a sphere (ADR 0073)
+Scope: generators::normals, core::tile
+- Centred lattice differences are radial only to about 0.003 degrees (uneven spacing from the tangent warp); a flat-sphere test needs a 0.01 degree bound.
+- Across a cube edge the ring point comes from the exact integer cube point, not from re-projecting the extended plane (off by up to a cell at the corner).
 
 ## 2026-10-20 A bound checked at texel centres and one sun hid 10 to 23 % errors of the aerial-perspective volume
-Scope: atmosphere (ATMO-007, ATMO-021), frame::look::atmosphere
-What happened: ATMO-007 checked the volume only at texel centres and the marches at one sun. Between its texels the volume is 10 % off at 14 km, 18 to 23 % at 60 to 99.5 km (the owner's bands), and 17 to 18 % at 2 km with a low sun; its transmittance is one mean over the channels, which alone is 7 % off per channel. A test over one sun and the centre column is blind to the rays that look away from the sun: the camera march passed at 0.7 and was 17 % off at the sun -0.05.
-Assumption it changes: ATMO-007 (the sun "high, low and below the horizon" must be swept, towards the sun and away from it, and a texel table must be read between its texels).
-Proposed follow-up: a half-resolution haze buffer or a better volume parameterisation for the cost (the march costs 1.3 to 1.9 ms at 1440p); the volume below 8 km at a low sun is still 17 to 18 % off.
-Obsolete when: the volume is replaced or parameterised by the view angle and tested between its texels at several suns.
+Scope: atmosphere (ATMO-007, ATMO-021)
+- Between texels the volume was 10 to 23 % off (14 to 99.5 km), 17 to 18 % at 2 km with a low sun.
+- Sweep the sun high, low and below the horizon, towards and away from it, and read a table between its texels.
+- Open: the volume below 8 km at a low sun is still 17 to 18 % off (half-resolution haze buffer or a better parameterisation).
 
-## 2026-10-20 A stamp bound summed per item was loose for every item that maps the running height, and a per-item counter broke across items
+## 2026-10-20 Stamp bounds: the range of the running height, not the sum of each item's maximum
 Scope: generators::stamp (GEN-026, GEN-030)
-What happened: a plateau's bound over a cap was its weight times its declared `max_delta_m`, on both sides, whatever the ground; the owner's plateaus (5 km) gave a fine tile a 10 km extent and the plan was refused four times (levels 12 to 19). A smooth's counter of what it had moved was per item, and one drag of the editor is one item, so overlapping items each pulled to the base mean again (`2 mean - base`, sharper). The reviewer also found that a run of smooth strokes was allowed the rounding of one addition: 64 strokes overshot the bound by 1e-12 m over a base with exact bounds; the random-cap tests did not see it because the bases' bounds are loose.
-Assumption it changes: the bounds of a stage are the range of the running height carried through the items in order (an item that pulls the height to a target maps it, monotone in the height), not the sum of what each item can add; a test of rounding needs a base with exact bounds; a count that belongs to a point belongs to the layer, not to one item.
-Proposed follow-up: none.
-Obsolete when: the stamp stage stops combining items by running height.
+- Summing declared maxima gave a fine tile a 10 km extent under a 5 km plateau and the plan refused it; a smooth's per-item counter re-sharpened overlapping strokes.
+- Bound a stage by the running height carried through the items in order; test rounding over a base with exact bounds; a per-point count belongs to the layer.
+- A new stamp kind needs a monotone profile or a bound rule of its own.
 
-## 2026-10-21 Plan refusals at brush stacks were real steepness, not loose bounds; the editor can keep new strokes drawable
+## 2026-10-21 Plan refusals at brush stacks were real steepness, not loose bounds
 Scope: editor::slope, frame::lod (LOD-008), generators::stamp
-What happened: SPIKE-26 found 45 of 231 stops of the owner's items refusing a base-LOD plan. Measured against sampled heights, the bounds of the raise-stroke stacks (44 strokes of 5 m on 100 m) were exact to 1 mm: the ground is a 220 m spike of about 73 degrees, steeper than the plan can morph (2.5 at the defaults, `LodParams::drawable_slope`, one number for all levels). Only the crater rim had a loose bound (a span from the bowl to the crest where the profile is unimodal). A flatten and a smooth are not height-free (a flatten onto a far target makes a step of its strength at its edge), and the pieces of a long drag share their cut point at full weight, so a drag counts its gradient twice there.
-Assumption it changes: a refusal that names an empty morph interval is not evidence of a loose bound; measure the bound against sampled heights before tightening it. A guard against steep ground belongs where the ground is made (the brush) as well as in the plan (ADR 0074).
-Proposed follow-up: ADR 0074 (a tile too steep to morph is not refined) for items that already exist.
-Obsolete when: the plan draws ground of any slope (ADR 0074 built) and the guard is reduced to a warning.
+- SPIKE-26: 44 raise strokes of 5 m made a 73 degree spike; the bounds were exact to 1 mm, the ground was steeper than the plan can morph (`LodParams::drawable_slope`, 2.5).
+- Measure a bound against sampled heights before tightening it; guard steepness where the ground is made (the brush) and in the plan (ADR 0074).
+- Obsolete when: the plan draws ground of any slope and the guard is a warning (M7 A5).

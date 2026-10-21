@@ -1,1 +1,0 @@
-- 2026-10-21 **editing-light** (sonnet-crusader, opus-planner; VIEW-042, owner P2-5): H switches an editing light on: one sun for terrain, atmosphere and sky, fixed in camera space over the right shoulder 35 degrees up (editing_sun_dir), off by default so no golden moves; the title names it; the smoke run switches it on for a few lit frames.

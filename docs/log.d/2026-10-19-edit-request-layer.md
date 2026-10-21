@@ -1,1 +1,0 @@
-- 2026-10-19 edit-request-layer: window 13 part B panicked in the scheduler ("a member of a closed layer is listed"): a refresh request queued for a resident tile that then left every class stayed in its old class's bucket; it is dropped and counted now (STRM-026).

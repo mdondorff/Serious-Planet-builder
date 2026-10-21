@@ -1,1 +1,0 @@
-- 2026-10-18 **Process review at milestone closure (owner):** the `housekeeping` skill gains step 9 (a measured process table in the milestone report and three to five ranked improvements); process costs get budgets that their tools report (queue item 4b); the first review runs for M5 with item 4.

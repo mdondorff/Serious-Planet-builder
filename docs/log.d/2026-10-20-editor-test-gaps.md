@@ -1,1 +1,0 @@
-- 2026-10-20 **editor-test-gaps** (sonnet-crusader, opus-planner: M6 gate evidence G8, G9): tests for `set_line_params` refusals, `split_line` at the part budget, hover and redo after a split line is deleted whole, and a brush over a stamp (heights); fixes the hover left on a deleted part of a deleted line; AUTH-003 stays unimplemented (reported).

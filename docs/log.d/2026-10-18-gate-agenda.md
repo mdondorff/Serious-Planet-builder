@@ -1,1 +1,0 @@
-- 2026-10-18 **M5 gate agenda:** owner decisions open (clock rule under the power cap, coast-3m water 2.175 ms, beach flash goldens, egui fonts, GPU driver) and M6 inputs from SPIKE-13 and SPIKE-14 listed in docs/status.md.

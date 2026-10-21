@@ -64,7 +64,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0052 | [First M5 goldens: an edge tolerance for the cross-adapter debug-view check](0052-m5-debug-view-edge-tolerance.md) | superseded by 0061 |  |
 | 0053 | [The water pass: implementation readings of ADR 0041 points 4 to 9](0053-water-pass-readings-of-adr-0041.md) | accepted | owner judges `shore_filter` at the M5 gate |
 | 0054 | [Compact tiles in storage buffers instead of texture atlases (amends ADR 0033 point 3)](0054-compact-tiles-in-storage-buffers.md) | accepted | slot layout amended by 0062 |
-| 0055 | [Documentation model: specs hold current rules, ADRs record why](0055-documentation-model.md) | accepted | point 6: consolidation in the M5 housekeeping (queue item 10b) |
+| 0055 | [Documentation model: specs hold current rules, ADRs record why](0055-documentation-model.md) | accepted | point 5 amended by 0075; point 6 consolidation open except its point 4 (M7 queue H2) |
 | 0056 | [Water selection: the coastal band, tile water in the tile job, a pixel-footprint wave fade](0056-coastal-band-water-selection.md) | accepted | amends 0053 points 4 and 5 |
 | 0057 | [GPU figures below the clock floor: a cool start, and a pass is a pass](0057-gpu-clock-below-the-floor.md) | accepted | amends 0036 point 2 |
 | 0058 | [A coarse level of the water field: a summary the bake writes once](0058-coarse-level-of-the-water-field.md) | accepted | amends 0053 points 4, 5 and 0056 points 1, 4 for coarse tiles; for the owner at the M5 gate |
@@ -78,10 +78,10 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0066 | [Authored items: reach, region summaries, stages, selection bounds, item files, command log](0066-authored-items-reach-summaries-stages-and-files.md) | accepted | decides 0021 points 2, 5, 6, 8; amends 0007, 0018, 0023 |
 | 0067 | [Stamp key hash and height bounds by delta range](0067-stamp-key-hash-and-delta-range-bounds.md) | accepted | amends 0066 points 2, 5 and the key role of 6 |
 | 0068 | [An authored stage with an empty footprint passes its source key through](0068-empty-authored-stage-passes-the-key-through.md) | accepted | amends 0066 point 4 |
-| 0069 | [Lines and regions are point-list items; a long line splits into linked items](0069-lines-and-regions-are-point-list-items.md) | accepted | extends 0066 point 6 and 0067; mode 1 pending (region-mode1) |
+| 0069 | [Lines and regions are point-list items; a long line splits into linked items](0069-lines-and-regions-are-point-list-items.md) | accepted | extends 0066 point 6 and 0067; mode 1 dormant until Cities (soft influence, owner Q8) |
 | 0070 | [Brush strokes stay in the item file; the blob store is specified and deferred](0070-brush-strokes-stay-in-the-item-file-no-blob-store-in-the-mvp.md) | accepted | extends 0066 point 6 and 0069; decides the blob ADR of 0007 |
 | 0071 | [Coastal water by connectivity through low ground, not by a reach](0071-coastal-water-by-connectivity-through-band-ground.md) | accepted | amends 0056 points 1 to 3 and the coarse rule of 0058 |
 | 0072 | [Edit visible: the drawn tiles are exact, drawn tiles refresh first, stale refreshes are pre-empted](0072-edit-visible-drawn-tiles-exact-and-stale-refreshes-are-pre-empted.md) | accepted | reads the M6 criterion; extends STRM-026 |
 | 0073 | [Normals from the tile's height lattice](0073-normals-from-the-tile-height-lattice.md) | accepted | amends GEN-019 and GEN-010; extends 0033 point 4 |
-| 0074 | [A tile too steep to morph is not refined; the plan degrades locally](0074-a-tile-too-steep-to-morph-is-not-refined.md) | accepted | amends LOD-008; extends 0016 and 0014 |
+| 0074 | [A tile too steep to morph is not refined; the plan degrades locally](0074-a-tile-too-steep-to-morph-is-not-refined.md) | accepted | amends LOD-008; extends 0016 and 0014; changes 2 and 3 in M7 step R |
 | 0075 | [Documentation budget: the hot files stay small and current](0075-documentation-budget.md) | accepted (opus-planner; owner approved) | amends 0055 point 5 |

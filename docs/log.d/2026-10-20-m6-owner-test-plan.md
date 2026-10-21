@@ -1,1 +1,0 @@
-- 2026-10-20 **M6 owner test plan written; AUTH-003 deferred (owner):** `docs/briefings/m6-owner-test-plan.md`; version pinning and freeze/bake go with global-scale authoring.

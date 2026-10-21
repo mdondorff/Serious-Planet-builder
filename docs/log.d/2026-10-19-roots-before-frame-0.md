@@ -1,1 +1,0 @@
-- 2026-10-19 roots-before-frame-0: window 13 found the dive's frame 0 writing the 384 roots (3.357 MiB, a 70 ms frame) in a valid session; the perf rig now writes them to the GPU before frame 0 (`ManagedLoop::upload_roots`, STRM-030), the metric and the cap unchanged.

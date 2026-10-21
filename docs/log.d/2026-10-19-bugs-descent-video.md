@@ -1,1 +1,0 @@
-- 2026-10-19 **Two bugs from the owner's descent video:** the atmosphere colour jumps for about a second during a descent, and the sea ends at a straight edge near the camera; tracked, sonnet-spikes diagnoses with the fastest failing test.

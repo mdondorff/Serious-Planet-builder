@@ -1,1 +1,0 @@
-- 2026-10-20 prefill-mesh-9 (sonnet-explorer): `target/accept/global16384` is pre-filled again under `MESH_VERSION` 9 (`generate --prefill-dir ... --global-res 16384`, levels 3 to 4: 1,920 compact tiles written in 42.9 s on 20 threads); the tracked item of ADR 0073 is closed.

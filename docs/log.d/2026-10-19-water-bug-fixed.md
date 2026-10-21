@@ -1,1 +1,0 @@
-- 2026-10-19 **Water-motion patches fixed (#356, shore-ramp-level-free):** the REND-030 shore ramp follows camera distance, not node level; lit coast hashes re-recorded under the owner's approval; the Tracked entry is removed.
