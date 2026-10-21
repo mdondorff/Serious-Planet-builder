@@ -11,7 +11,7 @@ use crate::lod::LodParams;
 use crate::look::Overlay;
 use crate::mouselook::MouseLook;
 use crate::scenes::{DrawnSet, FRAME_STEP_S};
-use planet_core::{PlanetFixed, TileId};
+use planet_core::{PlanetFixed, TileId, Vec3};
 
 // -------------------------------------------------------------------------------------------------------------------------
 // The flight clock
@@ -115,6 +115,8 @@ pub enum Command {
     CycleOverlay,
     /// F4: the coarse-LOD inspection view, the error bound times four (VIEW-014).
     ToggleCoarseLod,
+    /// H: the editing light, a sun fixed in camera space over the viewer's shoulder, or back to the look's sun (VIEW-042).
+    ToggleEditingLight,
     /// G: the globe overview over the point under the camera, or back (VIEW-013).
     ToggleGlobe,
     /// F9: write the camera path of the last minute and the repro bundle of this frame (VIEW-024). Changes nothing in the viewer; the window
@@ -209,6 +211,7 @@ pub fn overlay_status(overlay: Overlay, lod_factor: f64) -> String {
 
 /// The key bindings, as text for the usage message and the log.
 pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), F3 cycles the overlay (off, tiles, mesh, regions; lit path), F4 coarse LOD (error bound x4), F9 writes the camera path of the last minute and a repro bundle (target/review), V next debug view (debug path), T vsync on/off, C flight or free camera, \
+     H editing light (a sun fixed over your shoulder, 35 degrees up, so no slope is black; off by default), \
      free camera: WASD move, Q/E down/up, arrows look, click captures the mouse to look (Esc releases it), Shift boost; Esc quits";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -238,6 +241,8 @@ pub struct ViewerState {
     /// The coarse-LOD inspection view (VIEW-014): the plan's error bound times [`COARSE_LOD_FACTOR`](crate::lod::COARSE_LOD_FACTOR); off at
     /// the start. It changes the view, not the data.
     pub coarse_lod: bool,
+    /// The editing light (VIEW-042): the lit frames take [`editing_sun_dir`] for the sun; off at the start, so the look's sun and every golden stay.
+    pub editing_light: bool,
     /// The globe overview while it is shown (VIEW-013): its view is the camera, and a click's flight ends in the free camera.
     pub globe: Option<GlobeSession>,
     /// The planet radius the overview is built on, metres.
@@ -263,6 +268,7 @@ impl ViewerState {
             lit: false,
             overlay: Overlay::None,
             coarse_lod: false,
+            editing_light: false,
             globe: None,
             radius_m: 6_371_000.0,
             exposure_reset: true,
@@ -329,6 +335,7 @@ impl ViewerState {
             Command::CycleOverlay => self.overlay = self.overlay.next(),
             Command::SaveRepro => self.repro_requested = true,
             Command::ToggleCoarseLod => self.coarse_lod = !self.coarse_lod,
+            Command::ToggleEditingLight => self.editing_light = !self.editing_light,
             Command::ToggleGlobe => {
                 self.globe = match self.globe {
                     Some(_) => None,
@@ -615,6 +622,37 @@ pub fn viewer_pre_ev100(look: &LookParams) -> f32 {
     VIEWER_PRE_EV100 + libm::log2(lux / SOLAR_ILLUMINANCE_LUX) as f32
 }
 
+/// The elevation of the editing sun above the horizon of the viewer's place, and its azimuth off the direction behind the viewer (to the
+/// right), degrees (VIEW-042).
+pub const EDITING_SUN_ELEVATION_DEG: f64 = 35.0;
+pub const EDITING_SUN_AZIMUTH_DEG: f64 = 40.0;
+
+/// The unit vector towards the editing sun in planet-fixed axes (VIEW-042): a sun fixed in camera space over the viewer's shoulder, so the
+/// view is lit from behind and a little to the right, high enough to give slopes a shade, and no part of what the camera sees faces away
+/// from it. At the viewer's place: up is the direction from the planet's centre; the heading is the view direction along the ground (the
+/// camera's up when the view is straight up or down); the sun is `EDITING_SUN_ELEVATION_DEG` above the horizon, `EDITING_SUN_AZIMUTH_DEG`
+/// to the right of the direction behind the viewer. A pure function of the camera.
+pub fn editing_sun_dir(camera: &crate::camera::Camera) -> [f32; 3] {
+    let up = camera.position.0.normalized();
+    let flat = |v: Vec3| v - up * v.dot(up);
+    let mut heading = flat(camera.forward);
+    if heading.length() < 1e-6 {
+        heading = flat(camera.up);
+    }
+    if heading.length() < 1e-6 || !heading.length().is_finite() {
+        // A degenerate camera (at the centre, or up parallel to everything): any horizontal direction.
+        heading = flat(if up.z.abs() < 0.9 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(1.0, 0.0, 0.0) });
+    }
+    let heading = heading.normalized();
+    let right = heading.cross(up).normalized();
+    let back = heading * -1.0;
+    let (el, az) = (EDITING_SUN_ELEVATION_DEG.to_radians(), EDITING_SUN_AZIMUTH_DEG.to_radians());
+    let horizontal = back * libm::cos(az) + right * libm::sin(az);
+    let sun = horizontal * libm::cos(el) + up * libm::sin(el);
+    let s = sun.normalized();
+    [s.x as f32, s.y as f32, s.z as f32]
+}
+
 /// The lit plan of one viewer frame: the body's look (sun, tone curve, units, histogram, albedo), the adaptive exposure with `dt_s`
 /// seconds of the frame clock and, when `atmosphere` is set, the atmosphere of a body of `radius_m`. A pure function of its
 /// arguments, so the exposure a run reaches is decided by the plans alone (CON-04). `reset` snaps the exposure (see
@@ -701,6 +739,8 @@ pub struct SmokeCounts {
     /// Times the coarse view was refused because the plan could not be made with it (a steep neighbourhood leaves no morph room) and the
     /// frame fell back to the base parameters.
     pub coarse_lod_refusals: u64,
+    /// Lit frames drawn with the editing light (VIEW-042); the smoke run switches it on for a few frames and the verdict wants them.
+    pub editing_light_frames: u64,
 }
 
 /// Frames a smoke run must have drawn lit.
@@ -732,6 +772,9 @@ pub fn smoke_verdict(c: &SmokeCounts, atmosphere_wanted: bool) -> Result<(), Str
     }
     if c.exposure_readings == 0 {
         return short("exposure readings", "0".into(), "at least 1");
+    }
+    if c.editing_light_frames == 0 {
+        return short("lit frames with the editing light", "0".into(), "at least 1 (the H key must switch it on)");
     }
     if !c.renderer_ran_lit || (atmosphere_wanted && !c.renderer_ran_atmosphere) {
         return Err(format!(
@@ -1215,6 +1258,7 @@ mod tests {
             mesh_overlay_frames: 0,
             coarse_lod_frames: 0,
             coarse_lod_refusals: 0,
+            editing_light_frames: 4,
         }
     }
 
@@ -1507,5 +1551,52 @@ mod tests {
         c.renderer_ran_atmosphere = false;
         smoke_verdict(&c, false).unwrap();
         assert!(smoke_verdict(&good_counts(), false).is_err());
+    }
+
+    // spec: VIEW-042
+    #[test]
+    fn the_editing_sun_is_fixed_in_camera_space_over_the_right_shoulder_35_degrees_up_and_follows_the_view() {
+        let r = 6_371_000.0;
+        let place = PlanetFixed(Vec3::new(0.3, 0.5, 0.8).normalized() * (r + 1_500.0));
+        let up = place.0.normalized();
+        let cam = |hint: Vec3, pitch: f64| crate::camera::Camera::at_surface_point(place, hint, pitch, 1.0, 16.0 / 9.0, 0.1);
+        let sun = |c: &crate::camera::Camera| {
+            let s = editing_sun_dir(c);
+            Vec3::new(f64::from(s[0]), f64::from(s[1]), f64::from(s[2]))
+        };
+        let a = cam(Vec3::new(0.0, 0.0, 1.0), -0.3);
+        let s = sun(&a);
+        assert!((s.length() - 1.0).abs() < 1e-6, "a unit vector: {}", s.length());
+        assert!((s.dot(up) - libm::sin(35f64.to_radians())).abs() < 1e-6, "35 degrees above the horizon of the viewer's place");
+        let heading = (a.forward - up * a.forward.dot(up)).normalized();
+        let right = heading.cross(up).normalized();
+        assert!(s.dot(heading) < -0.5, "behind the viewer: the view is lit from the front side of what it sees");
+        assert!(s.dot(right) > 0.2, "over the right shoulder, so slopes have a shade");
+        assert!((s.dot(heading) / s.dot(right)) < 0.0, "behind and to the right");
+        // The view turned a quarter circle turns the sun with it: the same angles to the new heading.
+        let b = cam(right, -0.3);
+        let (hb, rb) = {
+            let h = (b.forward - up * b.forward.dot(up)).normalized();
+            (h, h.cross(up).normalized())
+        };
+        let sb = sun(&b);
+        assert!(
+            (sb.dot(hb) - s.dot(heading)).abs() < 1e-6 && (sb.dot(rb) - s.dot(right)).abs() < 1e-6 && (sb.dot(up) - s.dot(up)).abs() < 1e-6
+        );
+        // Looking straight down or up still gives a sun above the horizon, from the camera's up; the same camera gives the same sun.
+        for pitch in [-core::f64::consts::FRAC_PI_2, core::f64::consts::FRAC_PI_2] {
+            let c = cam(Vec3::new(0.0, 0.0, 1.0), pitch);
+            let s = sun(&c);
+            assert!(s.dot(up) > 0.5 && (s.length() - 1.0).abs() < 1e-6, "pitch {pitch}: {s:?}");
+            assert_eq!(editing_sun_dir(&c), editing_sun_dir(&c));
+        }
+        // Off at the start; the command toggles it and changes nothing else.
+        let mut v = ViewerState::new(0, 3, 0, true);
+        assert!(!v.editing_light);
+        let c = a;
+        v.command(Command::ToggleEditingLight, 10, &c);
+        assert!(v.editing_light);
+        v.command(Command::ToggleEditingLight, 20, &c);
+        assert!(!v.editing_light);
     }
 }
