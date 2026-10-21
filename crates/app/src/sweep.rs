@@ -5,7 +5,7 @@
 //! fails when a plan was refused. A pure state machine over frames (no window): `camera` and `frame` are what the loop calls.
 //!
 //! Environment: `PLANET_SWEEP` (the report path, switches the sweep on), `PLANET_SWEEP_ALTS` (comma-separated metres, default
-//! `2000,200,30`), `PLANET_SWEEP_HOLD` (frames per stop, default 90), `PLANET_SWEEP_ONLY` (comma-separated item names: only the items
+//! `2000,200,30`), `PLANET_SWEEP_HOLD` (frames per stop, default 90), `PLANET_SWEEP_DRIFT_M` (metres east per frame, default 0: with a drift each stop is a slow flight past the item, so its plans are warm ones), `PLANET_SWEEP_ONLY` (comma-separated item names: only the items
 //! with exactly these names are visited, for example `Platonmax,Hill 7,Ridge 3`).
 
 use planet_core::{PlanetFixed, Vec3};
@@ -68,6 +68,9 @@ pub struct Sweep {
     records: Vec<StopRecord>,
     refused_seen: u64,
     report_path: String,
+    /// Metres the camera moves east per frame of a stop (`PLANET_SWEEP_DRIFT_M`, default 0: a still camera, one cold plan per stop). With a drift the
+    /// stop is a slow flight past the item: many plans, the caches warm after the first, which is what a flight in the editor costs.
+    drift_m: f64,
 }
 
 /// The items of `dir` (`dir/<body>/<id>.toml`, one file each), in file-name order; a file without a name, kind or anchor is an error.
@@ -144,7 +147,9 @@ impl Sweep {
         if let Ok(only) = std::env::var("PLANET_SWEEP_ONLY") {
             items = keep_only(items, &only).map_err(|e| format!("{e} in {}", dir.display()))?;
         }
-        Sweep::new(items, altitudes, hold, report_path).map(Some)
+        let mut sweep = Sweep::new(items, altitudes, hold, report_path)?;
+        sweep.drift_m = std::env::var("PLANET_SWEEP_DRIFT_M").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        Ok(Some(sweep))
     }
 
     pub fn new(items: Vec<SweepItem>, altitudes: Vec<f64>, hold: u64, report_path: String) -> Result<Sweep, String> {
@@ -152,7 +157,17 @@ impl Sweep {
             return Err("sweep: no items, no altitudes or an empty hold".into());
         }
         let stops = items.len() * altitudes.len();
-        Ok(Sweep { items, altitudes, hold, stop: 0, in_stop: 0, records: vec![StopRecord::default(); stops], refused_seen: 0, report_path })
+        Ok(Sweep {
+            items,
+            altitudes,
+            hold,
+            stop: 0,
+            in_stop: 0,
+            records: vec![StopRecord::default(); stops],
+            refused_seen: 0,
+            report_path,
+            drift_m: 0.0,
+        })
     }
 
     pub fn stops(&self) -> usize {
@@ -179,7 +194,12 @@ impl Sweep {
         };
         let h_anchor = height(dir);
         let back = BACK_OFF * alt;
-        let behind = (dir * (radius_m + h_anchor) - north * back).normalized();
+        let mut behind = (dir * (radius_m + h_anchor) - north * back).normalized();
+        if self.drift_m != 0.0 {
+            // East of the first pose by the frames spent at this stop: a slow flight past the item.
+            let east = Vec3::new(0.0, 0.0, 1.0).cross(behind).normalized();
+            behind = (behind + east * (self.drift_m * self.in_stop as f64 / radius_m)).normalized();
+        }
         let h_here = height(behind);
         let position = PlanetFixed(behind * (radius_m + h_here + alt));
         let pitch = libm::atan2(alt + h_here - h_anchor, back);
@@ -299,6 +319,23 @@ mod tests {
         // The plan jobs delivered during the stop: frames 3, 4, 5 of the run, k = 3 is the only one in it (k % 3 == 0): 5 ms, a lone sample.
         assert!(second.contains(" 1 5.00 5.00 0.00 0.00 "), "{second}");
         assert!(text.lines().nth(1).unwrap().ends_with(" 0 -"), "{text}");
+    }
+
+    // spec: VIEW-022
+    // spec: VIEW-022
+    #[test]
+    fn a_drift_moves_the_camera_east_by_that_many_metres_a_frame_and_none_leaves_it_where_it_was() {
+        let flat = |_: Vec3| 0.0;
+        let mut s = Sweep::new(vec![item("a", 20.0)], vec![200.0], 100, "x".into()).unwrap();
+        let first = s.camera(&flat, 6_371_000.0, 16.0 / 9.0).position;
+        for _ in 0..10 {
+            s.frame(1.0, None, None, 0, None);
+        }
+        assert_eq!(s.camera(&flat, 6_371_000.0, 16.0 / 9.0).position, first, "without a drift the camera stays");
+        s.drift_m = 5.0;
+        let moved = s.camera(&flat, 6_371_000.0, 16.0 / 9.0).position;
+        let d = (moved.0 - first.0).length();
+        assert!((d - 50.0).abs() < 0.5, "10 frames at 5 m a frame: {d} m");
     }
 
     // spec: VIEW-022
