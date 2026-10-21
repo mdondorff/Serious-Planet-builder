@@ -1,0 +1,1 @@
+- 2026-10-21 **ground-detail** (explorer, M7 G2a): the lit shader draws procedural ground detail (six world-anchored octaves from 32 m to 3 cm, per-material albedo and normal tilt for rock, sand, grass and soil) from the material weights; no growth of the node record, strength 0 (off) by default so no golden moves; a seam for a close-range photo layer (REND-034, LOOK-009).

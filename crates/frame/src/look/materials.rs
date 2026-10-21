@@ -13,7 +13,7 @@
 //! weights are normalised to sum to 1 when any is positive; with none positive they are all 0 (no material, no detail).
 //!
 //! Class (ADR 0035): **presentation data**, nothing here is stored, keyed or read back. The shader evaluates the same function on the same f32
-//! words ([`MaterialParams::to_words`]); the declared bound of the GPU weights is `1e-5` per weight against this module on the same words.
+//! words ([`MaterialParams::to_words`]); a GPU test shows that the table drives the picture (REND-034).
 
 use super::shading::smoothstep;
 
@@ -164,6 +164,14 @@ impl MaterialParams {
                         format!("materials.{material}.{input}"),
                         format!("{pair:?}"),
                         "both values of a response curve must be finite numbers".into(),
+                    ));
+                }
+                // The shader decides "left out" on the f32 words: a pair that differs only below f32 would be an interval here and none there.
+                if pair[0] != pair[1] && (pair[0] as f32) == (pair[1] as f32) {
+                    return Err((
+                        format!("materials.{material}.{input}"),
+                        format!("{pair:?}"),
+                        "the two values of a response curve must differ as f32 numbers, or be equal (the input is left out)".into(),
                     ));
                 }
             }

@@ -115,3 +115,29 @@ fn the_curves_enter_the_lit_plans_text_only_when_they_are_not_the_default_and_ro
     broken.materials.curves[0][0][0] = f64::INFINITY;
     assert!(broken.validate().unwrap_err().contains("materials.rock.slope_cos"));
 }
+
+// spec: LOOK-009
+#[test]
+fn the_strength_of_the_ground_detail_enters_the_plans_text_only_when_set_round_trips_and_is_refused_outside_zero_to_one() {
+    let plan = LitPlan::fixed(13.0);
+    assert_eq!(plan.ground_detail, 0.0, "off by default");
+    assert!(!plan.to_text().contains("detail"), "{}", plan.to_text());
+    let set = LitPlan { ground_detail: 0.5, ..plan };
+    let text = set.to_text();
+    assert!(text.contains(" detail "), "{text}");
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    let parsed = LitPlan::from_tokens(&tokens[1..]).unwrap();
+    assert_eq!(parsed, set);
+    assert_eq!(parsed.to_text(), text);
+    // Together with the curves, in the written order.
+    let mut curves = MaterialParams::EARTH.curves;
+    curves[2][Input::Precipitation as usize] = [400.0, 1200.0];
+    let both = LitPlan { materials: MaterialParams { curves }, ..set };
+    let tokens: Vec<String> = both.to_text().split_whitespace().map(String::from).collect();
+    let refs: Vec<&str> = tokens.iter().map(String::as_str).collect();
+    assert_eq!(LitPlan::from_tokens(&refs[1..]).unwrap(), both);
+    for bad in [1.5, -0.1, f64::NAN] {
+        let err = LitPlan { ground_detail: bad, ..plan }.validate().unwrap_err();
+        assert!(err.contains("ground_detail"), "{err}");
+    }
+}
