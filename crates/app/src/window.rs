@@ -1376,7 +1376,7 @@ fn smoke_summary(st: &Running) -> String {
         st.globe_stats.frames, st.globe_stats.markers_shown_max, st.globe_stats.flights, st.globe_stats.landings
     );
     format!(
-        "{} frames drawn ({} lit, {} with the atmosphere, {} with water, {} debug, {} with an overlay ({} the mesh), {} coarse LOD, {} refused, {} editing light, {} stale-tile overlay), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
+        "{} frames drawn ({} lit, {} with the atmosphere, {} with water, {} debug, {} with an overlay ({} the mesh), {} coarse LOD, {} refused, {} stale-tile overlay, {} editing light), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
   last title: {}",
         st.frames,
         st.counts.lit_frames,
@@ -1387,8 +1387,8 @@ fn smoke_summary(st: &Running) -> String {
         st.counts.mesh_overlay_frames,
         st.counts.coarse_lod_frames,
         st.counts.coarse_lod_refusals,
-        st.counts.editing_light_frames,
         st.counts.stale_overlay_frames,
+        st.counts.editing_light_frames,
         st.presented,
         st.counts.lit_presented,
         st.counts.debug_presented,
