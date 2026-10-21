@@ -275,6 +275,8 @@ pub struct Inspector {
     pub params: Vec<ParamRow>,
     /// The surface type and the mask of a region (VIEW-033); none for another kind.
     pub region: Option<RegionRows>,
+    /// A warning about the edit: a brush item over the slope limit says `slope::WARNING` (VIEW-043).
+    pub warning: Option<String>,
 }
 
 fn degrees(v: f64, pos: char, neg: char) -> String {
@@ -327,6 +329,7 @@ pub fn inspector_of(item: &Item, position: (usize, usize), distance_m: f64) -> I
         reach: format_metres(item.reach_m),
         params,
         region: None,
+        warning: None,
     }
 }
 

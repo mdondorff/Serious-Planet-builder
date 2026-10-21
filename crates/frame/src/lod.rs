@@ -260,6 +260,22 @@ impl LodParams {
         SHORE_RAMP_K * self.tau_px * 2.0 * libm::tan(self.fov_y_rad / 2.0) / self.viewport_h_px
     }
 
+    /// The steepest slope (rise over run) that the ground of a tile's neighbourhood can have and still leave the leaf a morph interval
+    /// (LOD-008): the interval's start is `split(L) + 2 rho` with `rho = hypot(r, H)` for the node radius bound `r` and the half range `H`
+    /// of a neighbour's height bounds, and it must stay within 95 % of the end `split(L - 1)`. Solving for `H`, the neighbour's extent `2 H`
+    /// over its cap's diameter `2 r` gives `H / r`. Every term scales with the sample spacing, so one slope serves all levels; 0 for
+    /// parameters that leave no room even on flat ground. The editor's brush guard reads it (VIEW-043).
+    pub fn drawable_slope(&self) -> f64 {
+        let level = self.max_level.max(1);
+        let (split, end) = (self.split_distance(level), self.split_distance(level - 1));
+        let rho_max = (0.95 * end - split) / 2.0;
+        let r = self.node_radius_bound(level);
+        if !(rho_max.is_finite() && r.is_finite() && r > 0.0) || rho_max <= r {
+            return 0.0;
+        }
+        (rho_max * rho_max - r * r).sqrt() / r
+    }
+
     /// Worst-case sample spacing on the sphere at `level`, metres (face centre, tangent warp).
     pub fn sample_spacing(&self, level: u8) -> f64 {
         // A face spans 2R·(π/4)·(2/1) ≈ R·π/2 along the middle; level L divides it into 2^L tiles of `cells` cells.
@@ -1244,6 +1260,24 @@ pub fn angular_radius(map: &dyn FaceMapping, tile: TileId) -> f64 {
 #[cfg(test)]
 mod reuse_tests {
     use super::*;
+
+    // spec: VIEW-043
+    #[test]
+    fn the_drawable_slope_is_the_neighbourhood_extent_at_which_the_morph_interval_has_no_room_and_is_one_number_for_all_levels() {
+        let p = LodParams::earth_1080p();
+        let slope = p.drawable_slope();
+        assert!((2.3..2.7).contains(&slope), "about 68 degrees at the defaults: {slope}");
+        for level in [10u8, 16, 19, 22] {
+            let (a, end) = (p.node_radius_bound(level), p.split_distance(level - 1));
+            // A neighbour of half range `slope * r` (the extent 2 H over the diameter 2 r) leaves the interval its 5 %; a little more does not.
+            let start_at = |h: f64| p.split_distance(level) + 2.0 * (a * a + h * h).sqrt();
+            assert!(start_at(slope * a * 0.999) <= 0.95 * end, "level {level}");
+            assert!(start_at(slope * a * 1.001) > 0.95 * end, "level {level}");
+        }
+        // A tighter tolerance leaves room for less; parameters with no room give 0.
+        assert!(LodParams { tau_px: 3.0, ..p }.drawable_slope() > slope);
+        assert_eq!(LodParams { tau_px: 60.0, ..p }.drawable_slope(), 0.0);
+    }
 
     // spec: LOD-009
     #[test]
