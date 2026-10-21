@@ -569,7 +569,7 @@ impl<S: ItemStore> Session<S> {
                 it.params.insert("mask_mode".to_string(), 2.0);
                 it.mask_layer = Some(layer);
             })?;
-            self.status = format!("{} clips the layer inside its outline", self.named(id));
+            self.status = format!("{} removes the layer's edits inside its outline", self.named(id));
             Ok(affected)
         } else {
             let affected = self.editor.change(id, |it| {

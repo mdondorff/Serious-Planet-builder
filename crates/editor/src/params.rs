@@ -211,13 +211,20 @@ pub struct ParamRow {
     pub step: f64,
 }
 
-/// What the inspector adds for a region (VIEW-033): its surface type, whether it clips another layer, and the layers it could clip.
+/// What the inspector says of a region's mask (`mask_mode` 2, GEN-029): the layer's edits are removed inside the outline and stay outside it.
+/// The label and the hint are the one place the wording lives; a test holds them to the stage's behaviour.
+pub const MASK_CUT_LABEL: &str = "Removes the edits of a layer inside the outline";
+/// The tooltip of the mask: a hard edge, and keeping the edits only inside is a mode the world definition does not take yet.
+pub const MASK_CUT_HINT: &str =
+    "The chosen layer's edits are cut away inside this region, with a hard edge; they stay outside it. Keeping them only inside is not offered yet.";
+
+/// What the inspector adds for a region (VIEW-033): its surface type, whether it cuts the edits of another layer, and the layers it could cut.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RegionRows {
     /// The names of the surface types, in table order (the index is what the item stores).
     pub surface_names: Vec<&'static str>,
     pub surface_type: usize,
-    /// The region clips the layer it names, inside its outline (`mask_mode` 2); else it only labels (0).
+    /// The region cuts the edits of the layer it names inside its outline (`mask_mode` 2); else it only labels (0).
     pub clips_inside: bool,
     pub mask_layer: Option<String>,
     /// The layers of the other edits, which a region could clip.

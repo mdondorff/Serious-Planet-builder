@@ -1,5 +1,5 @@
 # 0069 Lines and regions are point-list items; a long line splits into linked items
-Status: accepted (opus-planner, 2026-10-20: points 1 to 7 follow the owner's E5 answers of 2026-10-19, which approved the points list in the item file; mask mode 1, clip outside, is refused at put until the owner decides openspec/changes/region-mode1; drafted by sonnet-explorer). Extends ADR 0066 point 6 (item files) and ADR 0067 (monotone profiles) to the M6 plan row E5. Replaces the first draft (chains of segment items).
+Status: accepted (opus-planner, 2026-10-20: points 1 to 7 follow the owner's E5 answers of 2026-10-19, which approved the points list in the item file; mask mode 1, clip outside, is refused at put until the owner decides openspec/changes/region-mode1; drafted by sonnet-explorer). Extends ADR 0066 point 6 (item files) and ADR 0067 (monotone profiles) to the M6 plan row E5. Replaces the first draft (chains of segment items). Wording clarified 2026-10-21 (region-cut-label): mode 2, "clip inside", removes the layer's edits inside the outline (what the owner saw in the M6 test); keeping them only inside is mode 1, "clip outside".
 Date: 2026-10-19
 Source: M6 plan row E5; docs/status.md "Editor MVP requirements" (lines, regions; owner answers 2026-10-19); ADR 0066; ADR 0067; WDEF-007; WDEF-010; GEN-026
 
