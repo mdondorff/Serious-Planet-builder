@@ -23,9 +23,15 @@ fn smoke(extra: &[&str]) -> Option<String> {
 
 /// [`smoke`] with more environment variables for the run.
 fn smoke_in(extra: &[&str], envs: &[(&str, &str)]) -> Option<String> {
+    run_editor(&["--smoke"], extra, envs)
+}
+
+/// Run `planet editor <flags> <extra>` with the run's adapter; `None` is the declared skip, a failure panics.
+fn run_editor(flags: &[&str], extra: &[&str], envs: &[(&str, &str)]) -> Option<String> {
     let adapter = adapter();
     let out = Command::new(env!("CARGO_BIN_EXE_planet"))
-        .args(["editor", "--smoke"])
+        .arg("editor")
+        .args(flags)
         .args(extra)
         .env("PLANET_ADAPTER", &adapter)
         .envs(envs.iter().copied())
@@ -47,7 +53,7 @@ fn smoke_in(extra: &[&str], envs: &[(&str, &str)]) -> Option<String> {
                 ),
             }
         }
-        panic!("planet editor --smoke {extra:?} failed ({}):\n{stdout}\n{stderr}", out.status);
+        panic!("planet editor {flags:?} {extra:?} failed ({}):\n{stdout}\n{stderr}", out.status);
     }
     Some(stdout)
 }
@@ -258,4 +264,64 @@ fn the_editor_mode_places_drags_types_undoes_and_deletes_in_the_real_window_and_
     assert_eq!(files.len(), 1, "{files:?}");
     assert!(files[0].to_string_lossy().ends_with(".toml"));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// One synthetic item file (the editor's own format, `schema_version = 1`): a plateau or a crater with a large reach.
+fn synthetic_item(n: usize, kind: &str, lat: f64, lon: f64) -> String {
+    let (params, max_delta) = if kind == "plateau" { ("target_m = 300.0", 1000.0) } else { ("depth_m = 800.0", 800.0) };
+    format!(
+        "schema_version = 1
+id = \"01M5D8EZ581MFKT87R9R1M{n:04}\"
+body = 0
+surface = \"sphere\"
+layer = \"stamps\"
+priority = 0
+kind = \"{kind}\"
+         reach_m = 15000.0
+max_delta_m = {max_delta}
+base_hash = \"58100a60bf321ffe\"
+generator_version = 2
+stage_version = 3
+         name = \"{kind} {n}\"
+
+[anchor]
+latitude = {lat}
+longitude = {lon}
+height = 0.0
+heading = 0.0
+
+[params]
+{params}
+"
+    )
+}
+
+// spec: VIEW-040
+#[test]
+fn the_item_sweep_visits_ten_large_plateaus_and_craters_at_three_altitudes_without_a_refused_plan() {
+    let dir = std::env::temp_dir().join(format!("planet-sweep-items-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("0")).unwrap();
+    let report = std::env::temp_dir().join(format!("planet-sweep-report-{}.txt", std::process::id()));
+    let _ = std::fs::remove_file(&report);
+    for n in 1..=10usize {
+        let kind = if n % 2 == 1 { "plateau" } else { "crater" };
+        let (lat, lon) = (-60.0 + 13.0 * n as f64, -170.0 + 33.0 * n as f64);
+        std::fs::write(dir.join("0").join(format!("01M5D8EZ581MFKT87R9R1M{n:04}.toml")), synthetic_item(n, kind, lat, lon)).unwrap();
+    }
+    let Some(stdout) = run_editor(
+        &[],
+        &["--edit", "--size", "480x270", "--items", dir.to_str().unwrap()],
+        &[("PLANET_SWEEP", report.to_str().unwrap()), ("PLANET_SWEEP_HOLD", "4")],
+    ) else {
+        return;
+    };
+    assert!(stdout.contains("[sweep ok]: 30 stops, 10 items x 3 altitudes, 0 stops with a refused plan"), "{stdout}");
+    let text = std::fs::read_to_string(&report).expect("the sweep wrote its report");
+    for n in 1..=10 {
+        let kind = if n % 2 == 1 { "plateau" } else { "crater" };
+        for alt in ["2000", "200", "30"] {
+            assert!(text.lines().any(|l| l.contains(&format!(" {kind}_{n} {kind} {alt} 4 "))), "no stop for {kind} {n} at {alt} m: {text}");
+        }
+    }
 }

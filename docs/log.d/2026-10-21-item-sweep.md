@@ -1,0 +1,1 @@
+- 2026-10-21 item-sweep (SPIKE-26): `PLANET_SWEEP` drives the real editor window to every item of `--items` at 2 km, 200 m and 30 m and reports refusals and frame times; the owner's 77 items: 45 of 231 stops refused a base-LOD plan, the synthetic plateau and crater test is clean (tier C).

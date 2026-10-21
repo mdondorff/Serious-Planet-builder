@@ -17,6 +17,7 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | SPIKE-19 | The window aborts on a refused morph interval (diagnosis) | closed 2026-10-20 (cause: the coarse LOD factor sits at the validate limit, the plan adds the height extent) | `spikes/morph-refusal/results/` |
 | SPIKE-20 | The atmosphere still banded after the AP range fix (diagnosis) | closed 2026-10-20 (cause: the 32 x 32 x 32 volume is 21 to 23 % off between texels at 60 to 97.5 km; fixed in `atmosphere-camera-march`) | `spikes/owner-captures-2026-10-20/results/` |
 | SPIKE-22 | Is the base LOD refused in the real eroded world? (diagnosis) | closed 2026-10-20 (no: 0 refusals in 45,800 poses; the finding holds for fields with only a global bound) | `spikes/base-lod-refusal/results/` |
+| SPIKE-26 | The item sweep: the owner's 77 items visited in the real editor window at 2 km, 200 m and 30 m (automated P1 retest) | closed 2026-10-21 (45 of 231 stops refused a base-LOD plan, 22 items, mostly brushes; Plateau 7 clean; no crash or panic) | `spikes/owner-items-sweep/results/` |
 | SPIKE-25 | Tiles flash to a coarser level while the camera moves (P1-4; diagnosis) | closed 2026-10-20 (not reproduced: 0 level drops in 14 scripted flights and the editor window loop; SPIKE-18's fix holds; the video's bursts are overlay brightness, unchecked) | `spikes/lod-flashing-moving/results/` |
 | SPIKE-23 | Why the edit-latency case at 200 m with a 150 m stamp takes 508 ms to drawn-exact (diagnosis) | closed 2026-10-20 (cause: tile generation throughput, 40 ms a tile of which the stamp is under 1 %) | `spikes/edit-refresh/results/` |
 | SPIKE-24 | Normals from the tile height lattice: errors, seams, pictures (evidence of ADR 0073) | closed 2026-10-20 | `spikes/lattice-normals/results/` |
@@ -32,6 +33,19 @@ Closed spikes of earlier milestones: `docs/archive/M0-M3/spikes.md` (SPIKE-01 to
 | exploration | Compact tiles in storage buffers (PR #225; ADR 0054) | closed | `spikes/compact-storage-buffer/results/` |
 
 The explorations before 2026-10-17 had no register entry; from now on every exploration gets a `SPIKE-NN` entry.
+
+## SPIKE-26 The item sweep (owner-items-sweep)
+Status: closed
+Opened: 2026-10-21
+Closed: 2026-10-21
+Question: Does the editor window run the owner's items (`target/owner-items`, 77 items) at 2 km, 200 m and 30 m above each anchor with no refused plan, no crash report, no panic, and what are the frame times? Plateau 7 included.
+Why it matters: the M6 gate's owner retest after the P1 fixes; the owner may not retest today.
+Time box: about half a day of agent work.
+Success criteria: per item and altitude the refusals with the first text, the frame p50 and p95, the crash reports and panics; a reusable test over a synthetic set.
+Fallback if it fails: the headless plan path with the same poses.
+Code location: `crates/app/src/sweep.rs` and its hooks in `window.rs` (`PLANET_SWEEP`), the tier-C test in `crates/app/tests/gpu_window.rs`; the report and the results in spikes/owner-items-sweep/results/.
+Result: 45 of 231 stops refused at least one plan (4 at 2 km, 18 at 200 m, 23 at 30 m), 22 items (37 of 126 brush stops, ridge 3, "Platonmax", crater 6, plateau 10, hill 7), all "morph interval is empty" at levels 16 to 22; Plateau 7 and every channel and region are clean; 39 plan-refusal reports, 0 panics. The synthetic 10 plateaus and craters pass (RTX 4.7 s, software 15 s).
+Recommendation: look at the stamp-stage bound over brush items (a tile near its LOD limit is refused by a few metres); keep the sweep test. Details: spikes/owner-items-sweep/results/results.md.
 
 ## SPIKE-25 Tiles flash to a coarser level while the camera moves (lod-flashing-moving)
 Status: closed
