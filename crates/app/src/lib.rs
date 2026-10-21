@@ -14,6 +14,7 @@ pub mod pipelined;
 mod plancheck;
 pub mod prefill;
 pub mod preflightperf;
+pub mod reproworld;
 pub mod sheet;
 pub mod skeleton;
 pub mod streamperf;

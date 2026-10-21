@@ -699,8 +699,12 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
         // from the bundle alone. The seed-only run records none and means the reference field of its seed.
         let (definition_hash, world_section) = if o.world.is_some() {
             let toml = planet_world_def::toml_io::to_toml(&world.definition()).map_err(|e| format!("recording the world: {e}"))?;
-            let section =
-                planet_frame::BundleWorld { height_field: world.id().to_string(), global_res: world.global_res(), definition_toml: toml };
+            let section = planet_frame::BundleWorld {
+                height_field: world.id().to_string(),
+                global_res: world.global_res(),
+                definition_toml: toml,
+                items: Vec::new(),
+            };
             (world.definition().hash(), Some(section))
         } else {
             (definition_hash(request.seed, request.lod.radius_m), None)
@@ -799,8 +803,7 @@ fn replay_terrain(ctx: &GpuContext, text: &str, path: &Path, png: Option<&Path>,
 /// radius, and bake the field's input again at the recorded size. Everything is refused with the recorded and the rebuilt
 /// values, before any replanning (CON-19).
 fn world_of_bundle(w: &planet_frame::BundleWorld, b: &planet_frame::TerrainBundle) -> Result<WorldTerrain, String> {
-    let def = planet_world_def::toml_io::parse_definition(&w.definition_toml)
-        .map_err(|e| format!("the world recorded in the bundle cannot be read: {e}"))?;
+    let def = crate::reproworld::rebuild_world(&w.definition_toml, &w.items)?;
     if def.hash() != b.definition_hash {
         return Err(format!(
             "bundle records definition hash {:016x}, but its recorded world hashes to {:016x}: the bundle was edited or its world was written by another build",
@@ -1646,7 +1649,7 @@ mod tests {
         let request =
             TerrainRequest { camera, size: (256, 192), view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 5 };
         let plan = plan_terrain(&request).unwrap();
-        let world = BundleWorld { height_field: "cpu-erosion-v1".into(), global_res: 8, definition_toml: toml };
+        let world = BundleWorld { height_field: "cpu-erosion-v1".into(), global_res: 8, definition_toml: toml, items: Vec::new() };
         let bundle = TerrainBundle {
             generator_version: 2,
             implementation_id: "x".into(),
