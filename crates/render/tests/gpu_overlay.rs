@@ -305,3 +305,39 @@ fn the_tint_lands_where_the_polygon_is_not_mirrored_not_swapped_and_with_every_e
     eprintln!("L polygon: {seen_in} points inside and {seen_out} outside seen");
     assert!(seen_in >= 4 && seen_out >= 4, "the view shows both sides ({seen_in} inside, {seen_out} outside)");
 }
+
+// spec: VIEW-044
+#[test]
+fn the_stale_tile_overlay_tints_each_node_by_its_state_and_changes_nothing_when_it_is_off() {
+    use planet_frame::TileState;
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let p = plan(3, SIZE, 2.5);
+    let mut r = renderer(&ctx, &p);
+    let with_state = |state: TileState| {
+        let mut q = p.clone();
+        for n in &mut q.nodes {
+            n.state = state;
+        }
+        q
+    };
+    // Off: the states are in the node records but nothing reads them, the frame is the plain lit frame.
+    let plain = frame(&mut r, &ctx, &p, Overlay::None);
+    let off = frame(&mut r, &ctx, &with_state(TileState::Stale), Overlay::None);
+    assert!(off.pixels().eq(plain.pixels()), "with the overlay off a node's state changes nothing");
+    // On: the mean colour of the terrain pixels follows the state's colour (exact green, stale amber, stand-in red, previewed violet).
+    let mut mean = |state: TileState| {
+        frame(&mut r, &ctx, &with_state(state), Overlay::Stale);
+        let hdr = r.lit_path().unwrap().read_hdr(&ctx);
+        let terrain: Vec<&[f32; 4]> = hdr.iter().filter(|px| px[3] > 0.0).collect();
+        assert!(terrain.len() > 200, "{state:?}: the view shows terrain ({} pixels)", terrain.len());
+        let n = terrain.len() as f32;
+        [0, 1, 2].map(|c| terrain.iter().map(|px| px[c]).sum::<f32>() / n)
+    };
+    let (exact, stale, stand_in, previewed) =
+        (mean(TileState::Exact), mean(TileState::Stale), mean(TileState::StandIn), mean(TileState::Previewed));
+    eprintln!("stale overlay means: exact {exact:?} stale {stale:?} stand-in {stand_in:?} previewed {previewed:?}");
+    assert!(exact[1] > exact[0] && exact[1] > exact[2], "exact is green: {exact:?}");
+    assert!(stale[0] > stale[1] && stale[1] > stale[2], "stale is amber: {stale:?}");
+    assert!(stand_in[0] > 1.5 * stand_in[1] && stand_in[0] > 1.5 * stand_in[2], "a stand-in is red: {stand_in:?}");
+    assert!(previewed[2] > previewed[1] && previewed[0] > previewed[1], "previewed is violet: {previewed:?}");
+}

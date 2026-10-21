@@ -292,6 +292,8 @@ struct Running {
     repro_files: u64,
     /// What the console and the crash directory get of the plan refusals (VIEW-040).
     refusals: planet_frame::pipeline::RefusalReporter,
+    /// How many drawn nodes are in each tile state in the last frame drawn with the stale-tile overlay (VIEW-044), for the title.
+    tile_states: [usize; 5],
     /// The notice the title shows after F9 and the clock time it is shown until.
     notice: Option<(String, u64)>,
     press: ClickTracker,
@@ -460,6 +462,7 @@ impl App<'_> {
             path: PathLog::new(),
             repro_files: 0,
             refusals: Default::default(),
+            tile_states: [0; 5],
             notice: None,
             press: ClickTracker::default(),
             globe_stats: GlobeStats::default(),
@@ -718,6 +721,10 @@ impl App<'_> {
                 }
                 st.counts.overlay_frames += u64::from(lit.overlay != planet_frame::look::Overlay::None);
                 st.counts.mesh_overlay_frames += u64::from(lit.overlay == planet_frame::look::Overlay::Mesh);
+                if lit.overlay == planet_frame::look::Overlay::Stale {
+                    st.counts.stale_overlay_frames += 1;
+                    st.tile_states = planet_frame::viewer::state_counts(&draw.plan.nodes);
+                }
                 let mut plan = draw.plan.clone();
                 plan.lit = Some(lit);
                 // The water of the frame (ADR 0041, ADR 0051 point 6): the nodes that carry water, decided by one query of the field W
@@ -808,6 +815,9 @@ impl App<'_> {
                 let inner = st.window.inner_size();
                 let scale = [f64::from(inner.width) / viewport.width_px, f64::from(inner.height) / viewport.height_px];
                 let layer = crate::ui::MarkerLayer { markers: &st.screen_markers, hover: st.hover, labels: &st.marker_labels };
+                // The legend of the stale-tile overlay (VIEW-044) in the corner while it is on.
+                ui.legend =
+                    if st.viewer.overlay == planet_frame::look::Overlay::Stale { planet_frame::viewer::state_legend() } else { Vec::new() };
                 let mut frame_ui = match st.edit.as_mut().filter(|e| e.on) {
                     Some(e) => {
                         let view_status = format!("{} · {status}", crate::editwin::mode_status(e));
@@ -1021,6 +1031,9 @@ fn title_text(st: &Running, now_ms: u64) -> String {
     if st.viewer.editing_light {
         input += " | editing light";
     }
+    if st.viewer.overlay == planet_frame::look::Overlay::Stale {
+        input += &format!(" | {}", planet_frame::viewer::state_title(st.tile_states));
+    }
     match &st.notice {
         Some((text, until)) if now_ms < *until => format!("{} | {input} | {text}", title(&info)),
         _ => format!("{} | {input}", title(&info)),
@@ -1071,6 +1084,8 @@ fn smoke_keys(st: &mut Running, cameras: &[Camera], now_ms: u64) -> Result<bool,
         31 => press(st, Command::CycleOverlay),
         33 => press(st, Command::CycleOverlay),
         34 => press(st, Command::ToggleCoarseLod),
+        // The fourth F3 press (key 33) showed the stale-tile overlay (VIEW-044); this one is back to off.
+        35 => press(st, Command::CycleOverlay),
         36 => press(st, Command::Restart),
         // The editing light is on from key 41 to key 45, over lit frames of the restarted flight (VIEW-042).
         41 => press(st, Command::ToggleEditingLight),
@@ -1361,7 +1376,7 @@ fn smoke_summary(st: &Running) -> String {
         st.globe_stats.frames, st.globe_stats.markers_shown_max, st.globe_stats.flights, st.globe_stats.landings
     );
     format!(
-        "{} frames drawn ({} lit, {} with the atmosphere, {} with water, {} debug, {} with an overlay ({} the mesh), {} coarse LOD, {} refused, {} editing light), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
+        "{} frames drawn ({} lit, {} with the atmosphere, {} with water, {} debug, {} with an overlay ({} the mesh), {} coarse LOD, {} refused, {} stale-tile overlay, {} editing light), {} presented ({} lit, {} debug), {} exposure reading(s), {} view change(s), present mode {}, {}
   last title: {}",
         st.frames,
         st.counts.lit_frames,
@@ -1372,6 +1387,7 @@ fn smoke_summary(st: &Running) -> String {
         st.counts.mesh_overlay_frames,
         st.counts.coarse_lod_frames,
         st.counts.coarse_lod_refusals,
+        st.counts.stale_overlay_frames,
         st.counts.editing_light_frames,
         st.presented,
         st.counts.lit_presented,

@@ -341,7 +341,9 @@ fn fs_lit_view(in: VsOut) -> vec4<f32> {
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
     var rgb = shade_lit(g.mode.x, g.albedo, in.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z);
-    if (g.extra.y > 2.5) {
+    if (g.extra.y > 3.5) {
+        rgb = stale_tint(in, rgb, g.range.z);
+    } else if (g.extra.y > 2.5) {
         rgb = region_tint(nodes[in.node_index].origin_rel.xyz + in.local, rgb, g.range.z);
     } else if (g.extra.y > 0.5) {
         rgb = overlay_wire(in, rgb, g.range.z, g.extra.y);
@@ -429,7 +431,8 @@ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
             } else {
                 0.0
             },
-            f32::from(d.level),
+            // The level, and for the stale-tile overlay (VIEW-044) 32 times the node's state on top of it (the level is under 32).
+            f32::from(d.level) + 32.0 * d.state.code() as f32,
         ];
         for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
             floats.extend([p[0], p[1], p[2], 0.0]);
@@ -2237,6 +2240,7 @@ mod one_shot_tests {
             preview: false,
             transient_only: false,
             quadrants: 0b1111,
+            state: planet_frame::TileState::default(),
         };
         let (coarse, fine) = (TileId::new(planet_core::Face(0), 17, 1, 1).unwrap(), TileId::new(planet_core::Face(0), 20, 8, 8).unwrap());
         let mut plan = planet_frame::viewer::lit_warm_plan(

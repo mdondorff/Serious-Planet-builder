@@ -690,3 +690,75 @@ fn every_frame_around_a_jump_serves_every_node_of_the_new_view() {
     let f = pipe.begin_frame(&b, &resident).unwrap();
     assert_served(&plan_b, &f.draw.plan, "settled");
 }
+
+// spec: VIEW-044
+#[test]
+fn every_drawn_node_has_the_state_it_stands_in_against_the_current_definition() {
+    use planet_frame::preview::PreviewStamp;
+    use planet_frame::{TileBounds, TileState};
+    let req = request(camera_at(300.0, 0.0));
+    let full = plan_terrain_field(&req, &Reference(7)).unwrap();
+    assert!(full.nodes.len() > 12, "the view must be non-trivial: {}", full.nodes.len());
+    assert!(full.nodes.iter().all(|n| n.state == TileState::Exact), "a plan from the planner is exact");
+    let set = with_ancestors(full.nodes.iter().map(|n| n.tile));
+    let (bounds, none) = (TileBounds::default(), BTreeSet::new());
+    let draw = |resident: &dyn ResidentSet, edited: &BTreeSet<TileId>, preview: &[PreviewStamp]| {
+        draw_plan_transient(&req, Some((&req, &full)), resident, &bounds, preview, edited, &[]).unwrap()
+    };
+    let states = |d: &DrawPlan| d.plan.nodes.iter().map(|n| (n.tile, n.state)).collect::<BTreeMap<_, _>>();
+    // Everything resident with the plan's keys: every node exact.
+    let d = draw(&set, &none, &[]);
+    assert!(d.plan.nodes.iter().all(|n| n.state == TileState::Exact) && d.kind == DrawKind::Exact);
+
+    // An edit names three tiles: they are drawn as they are, stale; the rest stay exact.
+    let edited: BTreeSet<TileId> = full.nodes.iter().take(3).map(|n| n.tile).collect();
+    let s = states(&draw(&set, &edited, &[]));
+    for (t, state) in &s {
+        assert_eq!(*state, if edited.contains(t) { TileState::Stale } else { TileState::Exact }, "{t:?}");
+    }
+    // A resident tile of another version (its key is not the plan's) is stale too.
+    let victim = full.nodes[5].tile;
+    let mut other_key = set.clone();
+    other_key.get_mut(&victim).unwrap().mesh_key ^= 1;
+    let s = states(&draw(&other_key, &none, &[]));
+    assert_eq!(s[&victim], TileState::Stale);
+    assert_eq!(s.values().filter(|st| **st == TileState::Stale).count(), 1);
+
+    // A node whose tile is not resident yet is covered by the nearest resident ancestor, a stand-in; the missing tile is not drawn.
+    let missing = full.nodes.iter().find(|n| n.level >= 2).unwrap().tile;
+    let mut without = set.clone();
+    without.remove(&missing);
+    let d = draw(&without, &none, &[]);
+    let s = states(&d);
+    assert!(!s.contains_key(&missing));
+    let parent = missing.parent().unwrap();
+    assert_eq!(s.get(&parent).copied(), Some(TileState::StandIn), "the ancestor stands in");
+    assert!(s.iter().filter(|(t, _)| **t != parent).all(|(_, st)| *st == TileState::Exact));
+
+    // A preview stamp over the camera's place: the nodes it touches are previewed, the others keep their state.
+    let at = full.camera.position.0.normalized();
+    let stamp = PreviewStamp {
+        sign: 1,
+        kind: planet_world_def::stamp::StampKind::Hill,
+        amount_m: 50.0,
+        dir: at,
+        reach_m: 2_000.0,
+        max_delta_m: 60.0,
+    };
+    // The edit's delta shows over the stale tiles it names (an exact tile already holds the edit) ...
+    let under: BTreeSet<TileId> = full.nodes.iter().map(|n| n.tile).collect();
+    let d = draw(&set, &under, &[stamp]);
+    let previewed = d.plan.nodes.iter().filter(|n| n.state == TileState::Previewed).count();
+    assert!(previewed > 0, "the delta displaces the stale tiles under it");
+    assert!(d.plan.nodes.iter().all(|n| (n.state == TileState::Previewed) == n.preview), "previewed exactly where the node is flagged");
+    assert!(d.plan.nodes.iter().any(|n| n.state == TileState::Stale), "stale tiles away from the stamp stay stale");
+    // ... and a transient stamp (a brush stroke under the pointer) displaces exact tiles too.
+    let d = draw_plan_transient(&req, Some((&req, &full)), &set, &bounds, &[], &none, &[stamp]).unwrap();
+    assert!(d.plan.nodes.iter().any(|n| n.state == TileState::Previewed), "the transient stamp displaces the tiles under it");
+    assert!(d.plan.nodes.iter().any(|n| n.state == TileState::Exact), "tiles away from the stamp stay exact");
+    assert!(d.plan.nodes.iter().all(|n| n.state != TileState::Capped), "the capped colour is reserved (ADR 0074)");
+
+    // The cover (no plan in hand) is a stand-in for the plan it cannot serve.
+    let c = draw_plan(&req, None, &roots()).unwrap();
+    assert!(c.plan.nodes.iter().all(|n| n.state == TileState::StandIn));
+}

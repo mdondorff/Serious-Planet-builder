@@ -232,6 +232,9 @@ pub enum Overlay {
     /// The surface-type tint of the regions (VIEW-030): the lit colour mixed with the tint of the region over each fragment. The polygons
     /// come from the app per frame ([`RegionList`](crate::regions::RegionList)), not from the lit plan.
     Regions,
+    /// The state of each drawn tile against the current definition (VIEW-044): exact, stale, a stand-in, displaced by a preview, capped.
+    /// The state of a node comes in the node record ([`TileState`](crate::terrain::TileState)), not from the lit plan.
+    Stale,
 }
 
 impl Overlay {
@@ -241,6 +244,7 @@ impl Overlay {
             Overlay::Tiles => "tiles",
             Overlay::Mesh => "mesh",
             Overlay::Regions => "regions",
+            Overlay::Stale => "stale",
         }
     }
 
@@ -249,25 +253,27 @@ impl Overlay {
     }
 
     /// Every overlay, in the order F3 cycles through them.
-    pub const ALL: [Overlay; 4] = [Overlay::None, Overlay::Tiles, Overlay::Mesh, Overlay::Regions];
+    pub const ALL: [Overlay; 5] = [Overlay::None, Overlay::Tiles, Overlay::Mesh, Overlay::Regions, Overlay::Stale];
 
-    /// The next one in the cycle (off, tiles, mesh, regions, off).
+    /// The next one in the cycle (off, tiles, mesh, regions, stale, off).
     pub fn next(self) -> Overlay {
         match self {
             Overlay::None => Overlay::Tiles,
             Overlay::Tiles => Overlay::Mesh,
             Overlay::Mesh => Overlay::Regions,
-            Overlay::Regions => Overlay::None,
+            Overlay::Regions => Overlay::Stale,
+            Overlay::Stale => Overlay::None,
         }
     }
 
-    /// The code the lit shader reads (the globals' `extra.y`): 0 none, 1 tiles, 2 mesh, 3 regions.
+    /// The code the lit shader reads (the globals' `extra.y`): 0 none, 1 tiles, 2 mesh, 3 regions, 4 stale.
     pub fn shader_code(self) -> f32 {
         match self {
             Overlay::None => 0.0,
             Overlay::Tiles => 1.0,
             Overlay::Mesh => 2.0,
             Overlay::Regions => 3.0,
+            Overlay::Stale => 4.0,
         }
     }
 }

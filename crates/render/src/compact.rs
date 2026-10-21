@@ -359,12 +359,34 @@ fn overlay_wire(in: VsOut, rgb: vec3<f32>, factor: f32, mode: f32) -> vec3<f32> 
         vec3<f32>(0.75, 0.3, 1.0),
         vec3<f32>(1.0, 1.0, 1.0),
     );
-    let level = u32(max(nodes[in.node_index].morph.w, 0.0) + 0.5);
+    // The node record's word is the level plus 32 times the node's state (the stale-tile overlay, VIEW-044).
+    let level = u32(max(nodes[in.node_index].morph.w, 0.0) + 0.5) % 32u;
     let hue = palette[level % 8u];
     let brightness = mix(1.0, 0.3, clamp(in.morph, 0.0, 1.0));
     let tinted = mix(rgb, rgb * hue * 1.6, 0.4);
     let line = hue * (brightness * 0.8 * factor);
     return mix(tinted, line, max(cell_line, tile_line));
+}
+
+// The stale-tile overlay (VIEW-044), `mode` 4: a tint of the node's state over the lit colour and the outline of the tile in the state's colour. The
+// state is the node record's word over 32 (0 exact, 1 stale, 2 stand-in, 3 previewed, 4 capped); the colours are the legend's, the same as
+// `STATE_COLOURS` of the app. The outline is radiance in the scene units of the frame (`factor` is its pre-exposure).
+fn stale_tint(in: VsOut, rgb: vec3<f32>, factor: f32) -> vec3<f32> {
+    var palette = array<vec3<f32>, 5>(
+        vec3<f32>(0.15, 0.85, 0.30),
+        vec3<f32>(1.00, 0.60, 0.10),
+        vec3<f32>(0.95, 0.20, 0.20),
+        vec3<f32>(0.70, 0.30, 1.00),
+        vec3<f32>(0.60, 0.60, 0.60),
+    );
+    let state = min(u32(max(nodes[in.node_index].morph.w, 0.0) + 0.5) / 32u, 4u);
+    let hue = palette[state];
+    let ux = in.aux.x;
+    let uy = in.aux.y;
+    let tile_d = min(min(ux, 1.0 - ux) / max(fwidth(ux), 1e-9), min(uy, 1.0 - uy) / max(fwidth(uy), 1e-9));
+    let tile_line = 1.0 - smoothstep(0.5, 1.5, tile_d);
+    let tinted = mix(rgb, rgb * hue * 1.8, 0.55);
+    return mix(tinted, hue * (0.8 * factor), tile_line);
 }
 
 // The climate texel `idx` (row-major over the 9 x 9 texture) of the tile whose slot starts at word `base`: one word of the slot's

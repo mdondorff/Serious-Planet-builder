@@ -557,6 +557,7 @@ mod tests {
             preview: false,
             transient_only: false,
             quadrants: 0b1111,
+            state: crate::terrain::TileState::Exact,
         }
     }
 
