@@ -325,3 +325,153 @@ fn the_item_sweep_visits_ten_large_plateaus_and_craters_at_three_altitudes_witho
         }
     }
 }
+
+/// A tiny deterministic generator (SplitMix64) so the synthetic strokes are the same on every run.
+struct Rng(u64);
+
+impl Rng {
+    fn unit(&mut self) -> f64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        ((z ^ (z >> 31)) >> 11) as f64 / (1u64 << 53) as f64
+    }
+}
+
+/// One brush item of the owner's shape: strokes of 30 points a quarter of the radius apart, each starting within 1.5 km of the centre of
+/// the cluster and wandering, `reach_m` the farthest point from the anchor plus the radius plus a metre, `schema_version = 3`.
+fn synthetic_brush(n: usize, strokes: &[(&str, f64, f64)], max_delta: f64, centre: (f64, f64), rng: &mut Rng) -> String {
+    const M_PER_DEG: f64 = 111_195.0;
+    let mut all: Vec<(&str, f64, f64, Vec<(f64, f64)>)> = Vec::new();
+    for &(kind, radius, strength) in strokes {
+        let mut at = (centre.0 + (rng.unit() - 0.5) * 3000.0 / M_PER_DEG, centre.1 + (rng.unit() - 0.5) * 3000.0 / M_PER_DEG);
+        let mut heading = rng.unit() * std::f64::consts::TAU;
+        let step = radius / 4.0;
+        let mut points = Vec::new();
+        for _ in 0..30 {
+            points.push(at);
+            heading += (rng.unit() - 0.5) * 0.6;
+            at = (at.0 + step * heading.cos() / M_PER_DEG, at.1 + step * heading.sin() / (M_PER_DEG * at.0.to_radians().cos()));
+        }
+        all.push((kind, radius, strength, points));
+    }
+    let anchor = all[0].3[0];
+    let far = all
+        .iter()
+        .flat_map(|(_, r, _, pts)| {
+            pts.iter().map(move |p| {
+                let (dy, dx) = ((p.0 - anchor.0) * M_PER_DEG, (p.1 - anchor.1) * M_PER_DEG * anchor.0.to_radians().cos());
+                (dy * dy + dx * dx).sqrt() + r + 1.0
+            })
+        })
+        .fold(1001.0f64, f64::max)
+        * 1.01;
+    let mut text = format!(
+        "schema_version = 3\nid = \"01M5DB1K8WC4NJMJXX835F{n:04}\"\nbody = 0\nsurface = \"sphere\"\nlayer = \"brush\"\npriority = 0\nkind = \"brush\"\n\
+         reach_m = {far}\nmax_delta_m = {max_delta}\nbase_hash = \"58100a60bf321ffe\"\ngenerator_version = 2\nstage_version = 3\nname = \"Brush {n}\"\n\n\
+         [anchor]\nlatitude = {}\nlongitude = {}\nheight = 0.0\nheading = 0.0\n\n[params]\n",
+        anchor.0, anchor.1
+    );
+    for (kind, radius, strength, points) in &all {
+        text += &format!("\n[[strokes]]\nkind = \"{kind}\"\nradius_m = {radius}\nstrength_m = {strength}\n");
+        if *kind == "flatten" {
+            // The owner's flatten target (an absolute height above the reference sphere, metres).
+            text += "target_m = 3106.363650538702\n";
+        }
+        for p in points {
+            text += &format!("\n[[strokes.points]]\nlatitude = {}\nlongitude = {}\n", p.0, p.1);
+        }
+    }
+    text
+}
+
+/// A one-point stamp file (`schema_version = 1`) of the owner's format.
+#[allow(clippy::too_many_arguments)]
+fn stamp_file(id: &str, kind: &str, reach: f64, max_delta: f64, lat: f64, lon: f64, params: &str, name: &str) -> String {
+    format!(
+        "schema_version = 1\nid = \"{id}\"\nbody = 0\nsurface = \"sphere\"\nlayer = \"stamps\"\npriority = 0\nkind = \"{kind}\"\nreach_m = {reach}\n\
+         max_delta_m = {max_delta}\nbase_hash = \"58100a60bf321ffe\"\ngenerator_version = 2\nstage_version = 4\nname = \"{name}\"\n\n[anchor]\n\
+         latitude = {lat}\nlongitude = {lon}\nheight = 0.0\nheading = 0.0\n\n[params]\n{params}\n"
+    )
+}
+
+// spec: VIEW-040
+// The owner's cluster of brushes 10 to 23 (many overlapping raise, flatten and smooth strokes at about 27.9 S 12.5 W), his ridge 3, hill 7
+// and crater 6 in their sizes, swept at 200 m and 30 m: the sweep of 2026-10-21 refused plans at these stops (SPIKE-26, "morph interval is
+// empty" at levels 16 to 22). Ignored until docs/status.md "Item sweep refusals" is fixed.
+#[test]
+#[ignore = "fails today: the base LOD is refused over dense brush clusters (docs/status.md, Item sweep refusals; SPIKE-26)"]
+fn the_item_sweep_over_a_dense_brush_cluster_a_ridge_a_hill_and_a_crater_has_no_refused_plan() {
+    let dir = std::env::temp_dir().join(format!("planet-sweep-cluster-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("0")).unwrap();
+    let report = std::env::temp_dir().join(format!("planet-sweep-cluster-report-{}.txt", std::process::id()));
+    let _ = std::fs::remove_file(&report);
+    let (centre, mut rng) = ((-27.906, -12.49), Rng(0x5EED));
+    // (kind, radius m, strength m) per stroke and the item's bound, as the owner's brushes 10 to 23.
+    let raise = |n: usize| vec![("raise", 100.0, 5.0); n];
+    let flat_smooth = |flats: usize, smooths: usize| {
+        let mut v = vec![("flatten", 300.0, 5.0); flats];
+        v.extend(vec![("smooth", 300.0, 5.0); smooths]);
+        v
+    };
+    let spec: Vec<(Vec<(&str, f64, f64)>, f64)> = vec![
+        (raise(3), 15.0),
+        (raise(1), 5.0),
+        (raise(5), 25.0),
+        (flat_smooth(4, 1), 25.0),
+        (flat_smooth(1, 10), 100.0),
+        (flat_smooth(3, 0), 15.0),
+        (flat_smooth(1, 2), 15.0),
+        (flat_smooth(2, 0), 10.0),
+        (flat_smooth(0, 1), 5.0),
+        (flat_smooth(0, 4), 20.0),
+        (vec![("smooth", 300.0, 50.0); 2], 100.0),
+        (vec![("smooth", 1500.0, 50.0); 2], 100.0),
+        (vec![("smooth", 1500.0, 50.0); 2], 100.0),
+        (vec![("smooth", 1500.0, 50.0)], 50.0),
+    ];
+    for (i, (strokes, max_delta)) in spec.iter().enumerate() {
+        let n = 10 + i;
+        let file = dir.join("0").join(format!("01M5DB1K8WC4NJMJXX835F{n:04}.toml"));
+        std::fs::write(file, synthetic_brush(n, strokes, *max_delta, centre, &mut rng)).unwrap();
+    }
+    // The owner's ridge 3 (30 m high, 200 m wide, three points), hill 7 (400 m, reach 1.5 km) and crater 6 (800 m deep, reach 465 m).
+    let ridge = "schema_version = 2\nid = \"01M5DAMJQ0C4WKS3C9WM5M0003\"\nbody = 0\nsurface = \"sphere\"\nlayer = \"stamps\"\npriority = 0\nkind = \"ridge\"\n\
+        reach_m = 1500.1857704052918\nmax_delta_m = 60.0\nbase_hash = \"58100a60bf321ffe\"\ngenerator_version = 2\nstage_version = 4\nname = \"Ridge 3\"\n\n\
+        [anchor]\nlatitude = 7.29698279195186\nlongitude = -18.07508354174058\nheight = 0.0\nheading = 0.0\n\n[params]\namount_m = 30.0\nwidth_m = 200.0\n\n\
+        [[points]]\nlatitude = 7.29698279195186\nlongitude = -18.07508354174058\n\n[[points]]\nlatitude = 7.291602889965999\nlongitude = -18.06950703817636\n\n\
+        [[points]]\nlatitude = 7.301005745267928\nlongitude = -18.064024496784953\n";
+    std::fs::write(dir.join("0").join("01M5DAMJQ0C4WKS3C9WM5M0003.toml"), ridge).unwrap();
+    let hill = stamp_file(
+        "01M5DANN8P2VS70C58QJHMBF07",
+        "hill",
+        1521.5549097287067,
+        400.0,
+        7.233915851986685,
+        -18.10671838076562,
+        "height_m = 400.0",
+        "Hill 7",
+    );
+    std::fs::write(dir.join("0").join("01M5DANN8P2VS70C58QJHMBF07.toml"), hill).unwrap();
+    let crater = stamp_file(
+        "01M5DD1QQTS23K7QWHSSMZAM06",
+        "crater",
+        464.6188315875319,
+        800.0,
+        23.771852832388916,
+        -13.864149021381316,
+        "depth_m = 800.0",
+        "Crater 6",
+    );
+    std::fs::write(dir.join("0").join("01M5DD1QQTS23K7QWHSSMZAM06.toml"), crater).unwrap();
+    let Some(stdout) = run_editor(
+        &[],
+        &["--edit", "--size", "480x270", "--items", dir.to_str().unwrap()],
+        &[("PLANET_SWEEP", report.to_str().unwrap()), ("PLANET_SWEEP_ALTS", "200,30"), ("PLANET_SWEEP_HOLD", "40")],
+    ) else {
+        return;
+    };
+    assert!(stdout.contains("[sweep ok]: 34 stops, 17 items x 2 altitudes, 0 stops with a refused plan"), "{stdout}");
+}
