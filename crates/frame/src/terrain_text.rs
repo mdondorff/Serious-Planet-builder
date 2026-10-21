@@ -264,6 +264,8 @@ pub struct BundleWorld {
     pub height_field: String,
     pub global_res: u32,
     pub definition_toml: String,
+    /// The authored items of the world, one item file's TOML each (AUTH-001): the definition text carries none (VIEW-024).
+    pub items: Vec<String>,
 }
 
 /// One line: backslash, newline and carriage return escaped.
@@ -317,6 +319,9 @@ impl TerrainBundle {
         s += &format!("definition_hash {:016x}\nadapter {}\n", self.definition_hash, self.adapter);
         if let Some(w) = &self.world {
             s += &format!("height_field {}\nglobal_res {}\nworld_toml {}\n", w.height_field, w.global_res, escape_line(&w.definition_toml));
+            for item in &w.items {
+                s += &format!("world_item {}\n", escape_line(item));
+            }
         }
         s += &format!("face_mapping {}\nview {}\nsize {} {}\n", r.face_mapping, r.view.name(), r.size.0, r.size.1);
         let c = &r.camera;
@@ -361,6 +366,7 @@ impl TerrainBundle {
             }
         };
         let (mut field_id, mut global_res, mut world_toml) = (None, None, None);
+        let mut world_items = Vec::new();
         let plan = TerrainPlan::from_text(plan_text)?;
         let (mut gv, mut imp, mut mv, mut seed, mut dh, mut adapter) = (None, None, None, None, 0u64, String::new());
         let (mut mapping, mut view, mut size, mut camera, mut lod, mut recorded) = (None, None, None, None, None, None);
@@ -377,6 +383,7 @@ impl TerrainBundle {
                 ["height_field", v] => field_id = Some(v.to_string()),
                 ["global_res", v] => global_res = Some(v.parse::<u32>().map_err(bad)?),
                 ["world_toml", ..] => world_toml = Some(unescape_line(line.strip_prefix("world_toml ").unwrap_or(""))?),
+                ["world_item", ..] => world_items.push(unescape_line(line.strip_prefix("world_item ").unwrap_or(""))?),
                 ["face_mapping", v] => mapping = Some(v.to_string()),
                 ["view", v] => view = Some(TerrainView::parse(v).ok_or(format!("unknown view '{v}'"))?),
                 ["size", w, h] => size = Some((w.parse::<u32>().map_err(bad)?, h.parse::<u32>().map_err(bad)?)),
@@ -418,7 +425,7 @@ impl TerrainBundle {
         let world = match (field_id, global_res, world_toml) {
             (None, None, None) => None,
             (Some(height_field), Some(global_res), Some(definition_toml)) if version >= 2 => {
-                Some(BundleWorld { height_field, global_res, definition_toml })
+                Some(BundleWorld { height_field, global_res, definition_toml, items: world_items })
             }
             (Some(_), Some(_), Some(_)) => {
                 return Err("a version 1 bundle cannot record a world (version 1 is the seed-only reference field)".into())

@@ -13,6 +13,7 @@ pub mod pathreplay;
 pub mod pipelined;
 mod plancheck;
 pub mod prefill;
+pub mod reproworld;
 pub mod preflightperf;
 pub mod sheet;
 pub mod skeleton;

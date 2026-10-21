@@ -336,12 +336,32 @@ impl App<'_> {
         let dir = repro_dir();
         std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
         let n = st.frames;
+        // The camera path of the last minute first: a bundle that cannot be written never loses it.
+        let path_path = dir.join(format!("frame-{n}-path.txt"));
+        std::fs::write(&path_path, st.path.to_text()).map_err(|e| format!("writing {}: {e}", path_path.display()))?;
+        let bundle_path = dir.join(format!("frame-{n}.bundle"));
+        let bundle = self.repro_bundle(st, camera, view).map_err(|e| format!("{e} (the camera path was written to {})", path_path.display()))?;
+        std::fs::write(&bundle_path, bundle.to_text()).map_err(|e| format!("writing {}: {e}", bundle_path.display()))?;
+        // The last frame the renderer submitted, as the final tone-mapped colour target: without the egui panels (they are painted on the
+        // swapchain image only). A failed write is said in the notice, it does not lose the bundle.
+        let png_path = dir.join(format!("frame-{n}.png"));
+        let png = match st.rig.renderer.read_color(&st.ctx).write_png(&png_path) {
+            Ok(()) => format!("; frame-{n}.png (the scene without the panels)"),
+            Err(e) => format!("; the screenshot was not written: {e}"),
+        };
+        Ok(format!("{}{png}", st.path.saved_notice(n, &dir.display().to_string())))
+    }
+
+    /// The terrain repro bundle of this frame's request over the world as the window holds it: the definition text and, with edits, each
+    /// item's file text (VIEW-024).
+    fn repro_bundle(&self, st: &Running, camera: Camera, view: TerrainView) -> Result<planet_frame::TerrainBundle, String> {
         let request = self.request(camera, view, st.viewer.coarse_lod);
         let plan = planet_frame::plan_terrain_cached(&request, self.field.as_ref(), &mut planet_frame::SelectionCache::new())
             .map_err(|e| format!("planning the frame for the bundle: {e}"))?;
         let definition = self.world.definition();
-        let toml = planet_world_def::toml_io::to_toml(&definition).map_err(|e| format!("recording the world: {e}"))?;
-        let bundle = planet_frame::TerrainBundle {
+        let items: Vec<_> = st.edit.as_ref().map(|e| e.session.editor().items().cloned().collect()).unwrap_or_default();
+        let (toml, item_texts) = crate::reproworld::record_world(&definition, &items)?;
+        Ok(planet_frame::TerrainBundle {
             generator_version: planet_generators::GENERATOR_VERSION,
             implementation_id: planet_generators::IMPLEMENTATION_ID.to_string(),
             mesh_version: planet_generators::mesh::MESH_VERSION,
@@ -351,21 +371,11 @@ impl App<'_> {
                 height_field: self.world.id().to_string(),
                 global_res: self.world.global_res(),
                 definition_toml: toml,
+                items: item_texts,
             }),
             request,
             plan,
-        };
-        let (bundle_path, path_path) = (dir.join(format!("frame-{n}.bundle")), dir.join(format!("frame-{n}-path.txt")));
-        std::fs::write(&bundle_path, bundle.to_text()).map_err(|e| format!("writing {}: {e}", bundle_path.display()))?;
-        std::fs::write(&path_path, st.path.to_text()).map_err(|e| format!("writing {}: {e}", path_path.display()))?;
-        // The last frame the renderer submitted, as the final tone-mapped colour target: without the egui panels (they are painted on the
-        // swapchain image only). A failed write is said in the notice, it does not lose the bundle.
-        let png_path = dir.join(format!("frame-{n}.png"));
-        let png = match st.rig.renderer.read_color(&st.ctx).write_png(&png_path) {
-            Ok(()) => format!("; frame-{n}.png (the scene without the panels)"),
-            Err(e) => format!("; the screenshot was not written: {e}"),
-        };
-        Ok(format!("{}{png}", st.path.saved_notice(n, &dir.display().to_string())))
+        })
     }
 
     fn fail(&mut self, el: &ActiveEventLoop, e: String) {

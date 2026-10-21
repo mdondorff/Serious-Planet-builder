@@ -479,6 +479,8 @@ fn a_world_bundle_records_the_definition_and_bake_and_a_version_one_bundle_still
         height_field: "cpu-erosion-v1".into(),
         global_res: 256,
         definition_toml: "schema_version = 1\n[body.0]\nradius_m = 6371000.0\n[world]\nseed = 5\n".into(),
+        // The authored items travel as item-file text, one per line (VIEW-024).
+        items: vec!["id = \"a\"\nname = \"back\\\\slash\"\n".into(), "id = \"b\"\n".into()],
     };
     let bundle = TerrainBundle {
         generator_version: 2,
@@ -494,7 +496,7 @@ fn a_world_bundle_records_the_definition_and_bake_and_a_version_one_bundle_still
     assert!(text.starts_with("planet-terrain-repro 2\n"), "{}", text.lines().next().unwrap());
     assert!(text.contains("height_field cpu-erosion-v1\nglobal_res 256\n"), "{text}");
     let back = TerrainBundle::from_text(&text).unwrap();
-    assert_eq!(back.world.as_ref(), Some(&world), "the definition text survives with its newlines");
+    assert_eq!(back.world.as_ref(), Some(&world), "the definition text and the item texts survive with their newlines");
     assert_eq!(back, bundle);
     // A version-1 bundle (before worlds) is the seed-only reference field: it reads, with no world.
     let seed_only = TerrainBundle { world: None, ..bundle.clone() };
