@@ -84,6 +84,9 @@ pub struct TerrainDraw {
     /// delta touches it: the vertex stage applies only the transient stamps (the ones after the delta's in the table), because an exact
     /// tile already holds the edit the delta stands for. A runtime flag of the draw plan.
     pub transient_only: bool,
+    /// The node is a tile kept from splitting because the tiles under it are too steep to morph (ADR 0074). A runtime flag of the draw plan;
+    /// the recorded text form does not carry it.
+    pub capped: bool,
     /// The quadrants of the tile that are drawn (STRM-016): bit `k` is the child `k` of [`planet_core::TileId::children`], `0b1111` the
     /// whole tile. A tile that stands in for children that are not resident is drawn over their quadrants only; the fragment stage
     /// discards the rest. The text form carries it only when it is not the whole tile.
@@ -209,7 +212,7 @@ pub fn plan_terrain_threaded(
 /// leaves at the render `floor` are roots with the interval `[1e30, 1e30]` and are exempt, and only those (LOD-011): the same interval
 /// on a leaf above the floor is an empty one.
 pub fn first_empty_morph_interval(nodes: &[crate::lod::SelectedNode], floor: u8) -> Option<&crate::lod::SelectedNode> {
-    nodes.iter().find(|n| n.tile.level() > floor && n.morph_start_m > 0.95 * n.morph_end_m)
+    nodes.iter().find(|n| n.tile.level() > floor && !crate::lod::morph_room(n.morph_start_m, n.morph_end_m, 0.0))
 }
 
 /// [`plan_terrain_cached`] with an optional replacement for the per-tile mesh key derivation (`None`: the production
@@ -287,6 +290,7 @@ pub(crate) fn plan_terrain_keyed(
                 },
                 preview: false,
                 transient_only: false,
+                capped: n.capped,
                 quadrants: crate::lod::ALL_QUADRANTS,
             }
         })

@@ -1,5 +1,5 @@
 # 0074 A tile too steep to morph is not refined; the plan degrades locally
-Status: proposed (sonnet-explorer, 2026-10-21, after two rounds of spec-guardian and numerics review; the planner decides). Amends LOD-008 (the rejection of a plan with an empty morph interval); extends ADR 0014 and ADR 0016.
+Status: accepted (opus-planner, 2026-10-21, the owner aligning with the recommendation: M6 closes with the limit documented, the build is M7's first robustness item and starts now; drafted by sonnet-explorer after two rounds of spec-guardian and numerics review). Amends LOD-008 (the rejection of a plan with an empty morph interval); extends ADR 0014 and ADR 0016.
 Date: 2026-10-21
 Source: SPIKE-26 (`spikes/owner-items-sweep/results/results.md`); LOD-004, LOD-007, LOD-008, LOD-011, STRM-015, STRM-016; VIEW-032, VIEW-037; owner test 2026-10-20 (stability first)
 

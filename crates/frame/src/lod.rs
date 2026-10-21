@@ -237,7 +237,7 @@ impl LodParams {
         }
         for level in 1..=self.max_level {
             let (start, end) = self.morph_interval(level);
-            if end - start < (0.05 + margin) * end {
+            if !morph_room(start, end, margin) {
                 return Err(format!(
                     "level {level}: morph interval [{start:.1}, {end:.1}] m is empty; increase viewport_h_px / tau_px or reduce cells (need viewport_h_px / tau_px > about {:.0} for {} cells)",
                     2.0 * self.cells as f64,
@@ -267,13 +267,24 @@ impl LodParams {
     /// parameters that leave no room even on flat ground. The editor's brush guard reads it (VIEW-043).
     pub fn drawable_slope(&self) -> f64 {
         let level = self.max_level.max(1);
+        let r = self.node_radius_bound(level);
+        if !(r.is_finite() && r > 0.0) {
+            return 0.0;
+        }
+        self.drawable_half_range(level) / r
+    }
+
+    /// The largest half range `H` of a neighbour's height bounds that leaves a leaf of `level` its morph interval (the equation of
+    /// [`drawable_slope`](LodParams::drawable_slope) solved for `H`); 0 where there is no room even on flat ground.
+    pub fn drawable_half_range(&self, level: u8) -> f64 {
+        let level = level.max(1);
         let (split, end) = (self.split_distance(level), self.split_distance(level - 1));
         let rho_max = (0.95 * end - split) / 2.0;
         let r = self.node_radius_bound(level);
         if !(rho_max.is_finite() && r.is_finite() && r > 0.0) || rho_max <= r {
             return 0.0;
         }
-        (rho_max * rho_max - r * r).sqrt() / r
+        (rho_max * rho_max - r * r).sqrt()
     }
 
     /// Worst-case sample spacing on the sphere at `level`, metres (face centre, tangent warp).
@@ -294,12 +305,23 @@ pub struct SelectedNode {
     /// [`LodParams::morph_interval`]; the start also clears the height extent of its neighbours).
     pub morph_start_m: f64,
     pub morph_end_m: f64,
+    /// The node is a tile kept from splitting because the tiles under it are too steep to morph (ADR 0074): it is an ancestor of leaves of
+    /// the uncapped selection.
+    pub capped: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NodeSelection {
     /// Leaves in ascending tile-id order (deterministic).
     pub nodes: Vec<SelectedNode>,
+    /// The ceiling of the levels that the steep tiles of the position-only selection set (ADR 0074), empty where nothing is too steep.
+    pub ceiling: std::sync::Arc<Ceiling>,
+}
+
+/// The test a morph interval `[start, end]` must pass to leave a crack-free morph (LOD-008): finite, and starting within `0.95 - margin` of
+/// its end. One predicate for [`LodParams::validate`], the selection's morphable test and the plan's backstop.
+pub fn morph_room(start: f64, end: f64, margin: f64) -> bool {
+    start.is_finite() && end.is_finite() && start <= (0.95 - margin) * end
 }
 
 /// Bounding sphere of a tile on the reference sphere: centre on the surface, radius covering corners and edge midpoints.
@@ -760,37 +782,30 @@ fn select_impl(
     cache.prepare(map, field, p);
     let SelectionCache { tiles, volumes, misses, hashes, .. } = cache;
     let mut geoms = GeomCache { map, field, p, tiles, volumes, misses, hashes };
-    let mut leaves: BTreeSet<TileId> = BTreeSet::new();
     let floor = p.floor_level();
-    let mut stack: Vec<TileId> = Face::ALL.iter().map(|&f| TileId::new(f, 0, 0, 0).expect("root")).collect();
-    while let Some(t) = stack.pop() {
-        let g = geoms.get(t);
-        if p.cull_horizon && below_horizon_at(g.centre, g.angular_radius, camera, p) {
-            continue;
-        }
-        if let Some(fr) = &frustum {
-            // The padded reference sphere rules out most tiles without height bounds; the tile's own volume (LOD-007)
-            // then decides; both add the skirts' depth so that no drawn triangle of the tile can lie outside them.
-            if fr.culls_sphere(g.centre, g.radius + p.max_height_m + skirt_depth(t, p)) {
-                continue;
-            }
-            let v = geoms.volume(t);
-            if fr.culls_sphere(v.cull_centre, v.cull_radius + skirt_depth(t, p)) {
-                continue;
-            }
-        }
-        let split = p.split_distance(t.level());
-        // A tile below the render floor is split whatever the distance (LOD-011); the floor level is never above the finest level.
-        // The bound that needs no height bounds rules most tiles out before the bounds are computed.
-        if t.level() < floor
-            || (t.level() < p.max_level && geoms.distance_lower_bound(t, camera) < split && geoms.distance(t, camera) < split)
-        {
-            stack.extend(children_of(t));
-        } else {
-            leaves.insert(t);
+    // ADR 0074: tiles whose neighbourhood is too steep to morph are not leaves; the ceiling they set is found on the position-only selection
+    // (no frustum), so the residency set and the plan of any view agree on it and the draw set stays inside R.
+    let mut ceiling = Ceiling::default();
+    let mut uncapped: Option<BTreeSet<TileId>> = None;
+    if steep_possible(field, p) {
+        let position_leaves = walk_leaves(&mut geoms, camera, None, &Ceiling::default()).0;
+        ceiling = Ceiling::of_unmorphable(&mut geoms, &position_leaves);
+        if ceiling.is_empty() && frustum.is_none() {
+            uncapped = Some(position_leaves);
         }
     }
-    balance_leaves(map, &mut leaves);
+    let (mut leaves, mut capped) = match uncapped {
+        Some(leaves) => (leaves, BTreeSet::new()),
+        None => walk_leaves(&mut geoms, camera, frustum.as_ref(), &ceiling),
+    };
+    if !ceiling.is_empty() {
+        // The walk keeps the tiles whose children the ceiling forbids and the balance splits what a finer neighbour asks; whatever is still
+        // finer than the ceiling is merged (a safety: the ceiling is 1-Lipschitz, so this changes nothing in the usual case).
+        let (clamped, more) = ceiling.clamp(&leaves);
+        leaves = clamped;
+        capped.extend(more);
+        capped.retain(|t| leaves.contains(t));
+    }
     let mut nodes: Vec<SelectedNode> = leaves
         .iter()
         .map(|&tile| {
@@ -805,7 +820,7 @@ fn select_impl(
                 }
                 _ => (0.0, 1.0e30, 1.0e30),
             };
-            SelectedNode { tile, morph: morph as f32, distance_m, morph_start_m, morph_end_m }
+            SelectedNode { tile, morph: morph as f32, distance_m, morph_start_m, morph_end_m, capped: capped.contains(&tile) }
         })
         .collect();
     // Two leaves of one level share border vertices, which both morph by the shader formula: their intervals must be
@@ -819,7 +834,63 @@ fn select_impl(
     for n in nodes.iter_mut().filter(|n| n.tile.level() > floor) {
         n.morph_start_m = level_start[n.tile.level() as usize];
     }
-    NodeSelection { nodes }
+    NodeSelection { nodes, ceiling: std::sync::Arc::new(ceiling) }
+}
+
+/// The leaves of the selection for `camera`: the walk by distance, culled by the horizon and, when given, the frustum, then balanced.
+///
+/// A tile that the distance says to split but whose children the `ceiling` forbids (ADR 0074) stays a leaf and is returned among the capped
+/// tiles with the leaves.
+fn walk_leaves(
+    geoms: &mut GeomCache<'_>,
+    camera: PlanetFixed,
+    frustum: Option<&Frustum>,
+    ceiling: &Ceiling,
+) -> (BTreeSet<TileId>, BTreeSet<TileId>) {
+    let (map, p) = (geoms.map, geoms.p);
+    let mut leaves: BTreeSet<TileId> = BTreeSet::new();
+    let mut capped: BTreeSet<TileId> = BTreeSet::new();
+    let floor = p.floor_level();
+    let mut stack: Vec<TileId> = Face::ALL.iter().map(|&f| TileId::new(f, 0, 0, 0).expect("root")).collect();
+    while let Some(t) = stack.pop() {
+        let g = geoms.get(t);
+        if p.cull_horizon && below_horizon_at(g.centre, g.angular_radius, camera, p) {
+            continue;
+        }
+        if let Some(fr) = frustum {
+            // The padded reference sphere rules out most tiles without height bounds; the tile's own volume (LOD-007)
+            // then decides; both add the skirts' depth so that no drawn triangle of the tile can lie outside them.
+            if fr.culls_sphere(g.centre, g.radius + p.max_height_m + skirt_depth(t, p)) {
+                continue;
+            }
+            let v = geoms.volume(t);
+            if fr.culls_sphere(v.cull_centre, v.cull_radius + skirt_depth(t, p)) {
+                continue;
+            }
+        }
+        let split = p.split_distance(t.level());
+        // A tile below the render floor is split whatever the distance (LOD-011); the floor level is never above the finest level.
+        // The bound that needs no height bounds rules most tiles out before the bounds are computed.
+        let wanted = t.level() < floor
+            || (t.level() < p.max_level && geoms.distance_lower_bound(t, camera) < split && geoms.distance(t, camera) < split);
+        if wanted && t.level() >= floor && ceiling.forbids_split(t) {
+            leaves.insert(t);
+            capped.insert(t);
+        } else if wanted {
+            stack.extend(children_of(t));
+        } else {
+            leaves.insert(t);
+        }
+    }
+    balance_leaves(map, &mut leaves);
+    capped.retain(|t| leaves.contains(t));
+    (leaves, capped)
+}
+
+/// Whether any tile can be too steep to morph, or have bounds that are not numbers: only where the interval of a leaf of the finest level reads
+/// the bounds of its neighbours ([`reads_bounds`]); where it does not (a flat field) no tile has an interval that depends on them.
+fn steep_possible(field: &dyn HeightField, p: &LodParams) -> bool {
+    reads_bounds(p, p.max_level, field.max_abs_height_m())
 }
 
 /// The per-tile bounds the selection cached for a set of tiles, handed to the frame path (STRM-016): the tile's geometry
@@ -835,9 +906,18 @@ pub struct TileBounds {
     /// The position and parameters R was selected for (`None`: bounds made by hand, complete for nothing).
     for_view: Option<(PlanetFixed, LodParams)>,
     tiles: IdMap<(TileGeom, Volume)>,
+    /// The ceiling R was selected with (ADR 0074): the cover applies it as the plan does, so that with every tile of R resident the two are
+    /// the same nodes.
+    ceiling: std::sync::Arc<Ceiling>,
 }
 
 impl TileBounds {
+    /// These bounds with the ceiling R was selected with (ADR 0074).
+    pub fn with_ceiling(mut self, ceiling: std::sync::Arc<Ceiling>) -> TileBounds {
+        self.ceiling = ceiling;
+        self
+    }
+
     pub fn len(&self) -> usize {
         self.tiles.len()
     }
@@ -867,7 +947,7 @@ impl SelectionCache {
         self.prepare(map, field, p);
         let SelectionCache { tiles: geom_memo, volumes, misses, hashes, .. } = self;
         let mut geoms = GeomCache { map, field, p, tiles: geom_memo, volumes, misses, hashes };
-        let mut out = TileBounds { for_view: Some((position, p.clone())), tiles: IdMap::default() };
+        let mut out = TileBounds { for_view: Some((position, p.clone())), tiles: IdMap::default(), ceiling: Default::default() };
         for t in tiles {
             let v = geoms.volume(t);
             out.tiles.insert(t, (geoms.get(t), v));
@@ -1014,7 +1094,9 @@ pub fn cover_selection_masked(
     }
     while let Some(t) = stack.pop() {
         let origin = resident(t).expect("the walk visits resident tiles only");
-        if t.level() < p.max_level && view.distance(t, origin) < p.split_distance(t.level()) {
+        // A tile whose children the ceiling forbids is a leaf (ADR 0074): the residency set does not hold them, and the walk would find nothing to draw.
+        let forbidden = bounds.ceiling.forbids_split(t);
+        if t.level() < p.max_level && !forbidden && view.distance(t, origin) < p.split_distance(t.level()) {
             let seen: Vec<TileId> = children_of(t).into_iter().filter(|&c| !view.culled(c)).collect();
             let (here, missing): (Vec<TileId>, Vec<TileId>) = seen.iter().partition(|&&c| resident(c).is_some());
             if missing.is_empty() {
@@ -1032,6 +1114,10 @@ pub fn cover_selection_masked(
         leaves.insert(t);
     }
     balance_leaves(map, &mut leaves);
+    // The plan's ceiling (ADR 0074): the cover keeps what the plan keeps, so that with every tile of R resident the two are the same nodes.
+    if !bounds.ceiling.is_empty() {
+        leaves = bounds.ceiling.clamp(&leaves).0;
+    }
     // A leaf that is not resident (a missing child, or a balancing split) is drawn by the nearest resident ancestor over the quadrant
     // that holds it (that ancestor is a leaf of the walk or an ancestor of one); a leaf that is resident is drawn whole.
     let mut drawn: BTreeMap<TileId, u8> = BTreeMap::new();
@@ -1102,6 +1188,18 @@ pub fn plan_covers_view(
     true
 }
 
+/// Whether the morph interval of a leaf of `level` reads the bounds of its neighbours: not where even the largest possible volume radius (the
+/// field's largest height `h` on both sides) leaves the base start in force. The one test of [`morph_interval_for`], of the tiles the
+/// selection looks at for steep ground and of [`steep_possible`], so that every tile whose interval depends on a bound is looked at (a bound
+/// that is not a number is then no room, not a skipped tile).
+fn reads_bounds(p: &LodParams, level: u8, h: f64) -> bool {
+    let end = p.split_distance(level.saturating_sub(1));
+    let base = (1.0 - p.morph_band) * end;
+    let largest = p.split_distance(level) + 2.0 * (p.node_radius_bound(level) * (1.0 + h / p.radius_m) + h);
+    // Not a number is not room: such a field reads its bounds.
+    !matches!(largest.partial_cmp(&base), Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal))
+}
+
 /// The morph interval a leaf needs: [`LodParams::morph_interval`] with the margin for the extent of its four same-level
 /// neighbours taken from their height bounds (the selection then equalises the start over each level). A vertex of the leaf on a border with a finer neighbour is
 /// up to two bounding radii of the neighbour's volume further away than that volume's surface, and must not have started
@@ -1114,13 +1212,18 @@ fn morph_interval_for(geoms: &mut GeomCache, tile: TileId) -> (f64, f64) {
     let split = p.split_distance(level);
     let h = geoms.field.max_abs_height_m();
     // Even the largest possible volume radius leaves the base start in force: no bounds needed.
-    if split + 2.0 * (p.node_radius_bound(level) * (1.0 + h / p.radius_m) + h) <= base {
+    if !reads_bounds(p, level, h) {
         return (base, end);
     }
     let mut rho = 0.0f64;
     for side in Side::ALL {
         let v = geoms.volume(tile.neighbor(geoms.map, side));
-        rho = rho.max(geoms.radius_bound(level, &v));
+        let r = geoms.radius_bound(level, &v);
+        // `f64::max` drops a NaN: a bound that is not a number leaves no room instead of being ignored.
+        if !r.is_finite() {
+            return (f64::INFINITY, end);
+        }
+        rho = rho.max(r);
     }
     (base.max(split + 2.0 * rho), end)
 }
@@ -1205,6 +1308,186 @@ pub fn balance_leaves(map: &dyn FaceMapping, leaves: &mut BTreeSet<TileId>) {
         work.dedup();
     }
     *leaves = set.into_iter().collect();
+}
+
+// ----- tiles too steep to morph (ADR 0074)
+
+/// The ancestor of `tile` at `level` (`tile` itself at its own level).
+fn ancestor_at(tile: TileId, level: u8) -> TileId {
+    let mut a = tile;
+    while a.level() > level {
+        a = a.parent().expect("a tile above the root level has a parent");
+    }
+    a
+}
+
+/// The levels the tiles too steep to morph leave, as a ceiling on the level of a leaf (ADR 0074). `u` is such a tile (its morph interval, from
+/// its four same-level neighbours' volumes, has no room, [`morph_room`]) with no such ancestor, and `c` its parent: `c` stays a leaf, and with
+/// it the siblings of `u`, whatever their own bounds say. A leaf over any area may be no finer than `min over u of (level(c) + d)`, with `d` the
+/// number of tile edges between the level-`level(c)` tiles (the least over the descendants of a coarser tile, that of the ancestor for a finer
+/// one). The ceiling is 1-Lipschitz across edges, so a selection clamped to it stays balanced (2:1), and it is a function of the unmorphable
+/// tiles alone: the selection of any view and the residency set clamp to the same.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Ceiling {
+    /// Per level of an unmorphable tile: the ceiling's value at the tiles within reach of those tiles and at their ancestors.
+    by_level: Vec<(u8, IdMap<u8>)>,
+}
+
+impl Ceiling {
+    /// Whether no tile is too steep to morph.
+    pub fn is_empty(&self) -> bool {
+        self.by_level.is_empty()
+    }
+
+    /// Whether the ceiling forbids splitting `t`: a child would be finer than the ceiling over it.
+    pub fn forbids_split(&self, t: TileId) -> bool {
+        !self.is_empty() && t.children().is_some_and(|kids| kids.iter().any(|c| self.of(*c) < c.level()))
+    }
+
+    /// The finest level a leaf over `tile`'s area may have (`u8::MAX` where nothing limits it).
+    pub fn of(&self, tile: TileId) -> u8 {
+        let mut best = u8::MAX;
+        for (level, caps) in &self.by_level {
+            let key = if tile.level() <= *level { tile } else { ancestor_at(tile, *level) };
+            if let Some(&c) = caps.get(&key) {
+                best = best.min(c);
+            }
+        }
+        best
+    }
+
+    /// The ceiling of the tiles `unmorphable` (the topmost ones, none below another) for leaves down to `max_level`.
+    fn build(map: &dyn FaceMapping, unmorphable: &[TileId], max_level: u8) -> Ceiling {
+        let mut by_level: Vec<(u8, IdMap<u8>)> = Vec::new();
+        for &u in unmorphable {
+            // The parent is the tile that stays a leaf (the siblings of `u` with it), and the distances are between its level's tiles.
+            let Some(c) = u.parent() else { continue };
+            let level = c.level();
+            let caps = match by_level.iter().position(|(l, _)| *l == level) {
+                Some(i) => &mut by_level[i].1,
+                None => {
+                    by_level.push((level, IdMap::default()));
+                    &mut by_level.last_mut().expect("just pushed").1
+                }
+            };
+            // A tile at edge distance `d` from `c` has the ceiling `level + d`, which says nothing from `max_level` on.
+            let reach = max_level.saturating_sub(level + 1);
+            let mut seen: IdSet = IdSet::default();
+            seen.insert(c);
+            let mut frontier = vec![c];
+            for d in 0..=reach {
+                let cap = level + d;
+                let mut next = Vec::new();
+                for &t in &frontier {
+                    // The tile and its ancestors, down the chain while it lowers what they hold.
+                    let mut a = Some(t);
+                    while let Some(x) = a {
+                        let slot = caps.entry(x).or_insert(u8::MAX);
+                        if *slot <= cap {
+                            break;
+                        }
+                        *slot = cap;
+                        a = x.parent();
+                    }
+                    if d < reach {
+                        for side in Side::ALL {
+                            let n = t.neighbor(map, side);
+                            if seen.insert(n) {
+                                next.push(n);
+                            }
+                        }
+                    }
+                }
+                frontier = next;
+            }
+        }
+        by_level.sort_by_key(|(l, _)| *l);
+        Ceiling { by_level }
+    }
+
+    /// The ceiling of the tiles of the selection `leaves` (and their ancestors) that are too steep to morph.
+    fn of_unmorphable(geoms: &mut GeomCache<'_>, leaves: &BTreeSet<TileId>) -> Ceiling {
+        let (map, p) = (geoms.map, geoms.p);
+        let floor = p.floor_level();
+        let h = geoms.field.max_abs_height_m();
+        // Every tile of the selection above the floor, coarsest first.
+        let mut seen: IdSet = IdSet::default();
+        let mut tree: Vec<TileId> = Vec::new();
+        for &leaf in leaves {
+            let mut t = Some(leaf);
+            while let Some(x) = t {
+                if x.level() <= floor || !seen.insert(x) {
+                    break;
+                }
+                tree.push(x);
+                t = x.parent();
+            }
+        }
+        tree.sort_unstable_by_key(|t| (t.level(), *t));
+        // A level whose intervals read no bounds needs no look at its tiles.
+        let always = |level: u8| !reads_bounds(p, level, h);
+        let mut dead: IdSet = IdSet::default();
+        let mut unmorphable: Vec<TileId> = Vec::new();
+        for t in tree {
+            // The parent was judged first: under an unmorphable tile nothing is looked at.
+            if t.parent().is_some_and(|a| dead.contains(&a)) {
+                dead.insert(t);
+                continue;
+            }
+            if always(t.level()) {
+                continue;
+            }
+            let (start, end) = morph_interval_for(geoms, t);
+            if !morph_room(start, end, 0.0) {
+                unmorphable.push(t);
+                dead.insert(t);
+            }
+        }
+        if unmorphable.is_empty() {
+            return Ceiling::default();
+        }
+        Ceiling::build(map, &unmorphable, p.max_level)
+    }
+
+    /// `leaves` clamped to the ceiling: a leaf finer than the ceiling over it is replaced by its ancestor at the ceiling, repeatedly (the ancestor's
+    /// own ceiling is the least over its area), and a tile under another of the set is covered by it. Returns the leaves and the tiles among them
+    /// that replaced finer ones (ADR 0074: the capped tiles).
+    pub fn clamp(&self, leaves: &BTreeSet<TileId>) -> (BTreeSet<TileId>, BTreeSet<TileId>) {
+        let mut cur = leaves.clone();
+        let mut capped: BTreeSet<TileId> = BTreeSet::new();
+        loop {
+            let mut next: BTreeSet<TileId> = BTreeSet::new();
+            let mut changed = false;
+            for &z in &cur {
+                let c = self.of(z);
+                if z.level() > c {
+                    let a = ancestor_at(z, c);
+                    capped.insert(a);
+                    next.insert(a);
+                    changed = true;
+                } else {
+                    next.insert(z);
+                }
+            }
+            if !changed {
+                break;
+            }
+            let all: IdSet = next.iter().copied().collect();
+            next.retain(|t| {
+                let mut up = t.parent();
+                while let Some(a) = up {
+                    if all.contains(&a) {
+                        return false;
+                    }
+                    up = a.parent();
+                }
+                true
+            });
+            cur = next;
+        }
+        capped.retain(|t| cur.contains(t));
+        (cur, capped)
+    }
 }
 
 impl NodeSelection {
@@ -1297,5 +1580,108 @@ mod reuse_tests {
         // A new finest level starts the memo over too (the key carries the finest-level class of the tile).
         assert_eq!(cache.mesh_key(tile, 16, 23, || 7), 7);
         assert_eq!(cache.mesh_key(tile, 16, 23, || unreachable!("served from the memo")), 7);
+    }
+}
+
+#[cfg(test)]
+mod capping_tests {
+    use super::*;
+    use planet_core::cube::TangentWarp;
+    use planet_core::hash::SplitMix64;
+
+    const FINEST: u8 = 5;
+
+    fn tiles_at(level: u8) -> Vec<TileId> {
+        let side = 1u32 << level;
+        let mut out = Vec::new();
+        for f in Face::ALL {
+            for x in 0..side {
+                for y in 0..side {
+                    out.push(TileId::new(f, level, x, y).expect("a tile"));
+                }
+            }
+        }
+        out
+    }
+
+    /// `n` tiles of levels 2 to 4, none under another (the topmost unmorphable tiles).
+    fn some_unmorphable(rng: &mut SplitMix64, n: usize) -> Vec<TileId> {
+        let mut out: Vec<TileId> = Vec::new();
+        while out.len() < n {
+            let level = 2 + (rng.next_u64() % 3) as u8;
+            let all = tiles_at(level);
+            let t = all[(rng.next_u64() % all.len() as u64) as usize];
+            let nested =
+                out.iter().any(|o| ancestor_at(t, o.level().min(t.level())) == *o || ancestor_at(*o, t.level().min(o.level())) == t);
+            if !nested {
+                out.push(t);
+            }
+        }
+        out
+    }
+
+    // spec: LOD-008
+    #[test]
+    fn the_ceiling_of_unmorphable_tiles_gives_the_unique_finest_balanced_partition_in_any_order() {
+        let mut rng = SplitMix64(41);
+        for round in 0..6 {
+            let unmorphable = some_unmorphable(&mut rng, 1 + round % 4);
+            let ceiling = Ceiling::build(&TangentWarp, &unmorphable, FINEST);
+            let all: BTreeSet<TileId> = tiles_at(FINEST).into_iter().collect();
+            let (leaves, capped) = ceiling.clamp(&all);
+            // A partition of the sphere: no leaf under another, the areas add up.
+            let area: u64 = leaves.iter().map(|t| 4u64.pow(u32::from(FINEST - t.level()))).sum();
+            assert_eq!(area, 6 * 4u64.pow(u32::from(FINEST)), "round {round}: the leaves tile the sphere");
+            for t in &leaves {
+                let mut up = t.parent();
+                while let Some(a) = up {
+                    assert!(!leaves.contains(&a), "round {round}: {t:?} lies under {a:?}");
+                    up = a.parent();
+                }
+                assert!(ceiling.of(*t) >= t.level(), "round {round}: {t:?} is finer than its ceiling");
+            }
+            // None of the unmorphable tiles, nor anything under them, is a leaf; their parents are.
+            for u in &unmorphable {
+                assert!(leaves.iter().all(|l| ancestor_at(*l, u.level().min(l.level())) != *u || l.level() < u.level()), "round {round}");
+                assert!(
+                    leaves.contains(&u.parent().unwrap())
+                        || leaves.iter().any(|l| l.level() < u.level() - 1 && ancestor_at(*u, l.level()) == *l)
+                );
+            }
+            // Balanced: the splits of the balance find nothing to do.
+            let mut balanced = leaves.clone();
+            balance_leaves(&TangentWarp, &mut balanced);
+            assert_eq!(balanced, leaves, "round {round}: balanced");
+            // Finest: splitting any coarsened leaf puts a child over its ceiling or breaks the balance.
+            for z in leaves.iter().filter(|z| z.level() < FINEST).step_by(3).take(16) {
+                let kids = children_of(*z);
+                let mut trial = leaves.clone();
+                trial.remove(z);
+                trial.extend(kids);
+                let kids_fit = kids.iter().all(|k| ceiling.of(*k) >= k.level());
+                let mut again = trial.clone();
+                balance_leaves(&TangentWarp, &mut again);
+                assert!(!kids_fit || again != trial, "round {round}: {z:?} could be split: the partition is not the finest");
+            }
+            assert!(capped.iter().all(|c| leaves.contains(c)));
+            // Order and duplication of the unmorphable tiles change nothing.
+            let mut shuffled = unmorphable.clone();
+            shuffled.reverse();
+            shuffled.extend(unmorphable.iter().copied());
+            let (again_leaves, again_capped) = Ceiling::build(&TangentWarp, &shuffled, FINEST).clamp(&all);
+            assert_eq!((again_leaves, again_capped), (leaves, capped), "round {round}: the order does not matter");
+        }
+    }
+
+    // spec: LOD-008
+    #[test]
+    fn one_predicate_decides_the_room_of_an_interval_and_a_bound_that_is_not_a_number_leaves_none() {
+        assert!(morph_room(100.0, 200.0, 0.0));
+        assert!(morph_room(190.0, 200.0, 0.0), "exactly 95 %");
+        assert!(!morph_room(190.000_000_000_000_03, 200.0, 0.0));
+        assert!(!morph_room(f64::NAN, 200.0, 0.0) && !morph_room(100.0, f64::NAN, 0.0));
+        assert!(!morph_room(f64::INFINITY, 200.0, 0.0), "no start is no room");
+        // The margin of `validate` is the same rule with a smaller share.
+        assert!(morph_room(179.0, 200.0, 0.05) && !morph_room(181.0, 200.0, 0.05));
     }
 }

@@ -250,17 +250,34 @@ fn camera_is_above_the_drawn_surface_in_every_scripted_view_on_the_steep_field()
 // spec: LOD-008
 // spec: TEST-015
 #[test]
-fn terrain_too_steep_for_the_parameters_is_a_plan_error_naming_the_fix() {
-    // Production-like parameters (cells 32, 240 pixels of tile detail per ratio) leave the steep field's neighbourhoods no
-    // crack-free morph interval at ground level: the plan must say so, not narrow the interval.
+fn terrain_too_steep_for_the_parameters_is_capped_at_the_finest_level_that_morphs_never_planned_with_a_narrowed_interval() {
+    // Production-like parameters (cells 32, 240 pixels of tile detail per ratio) leave the steep field's neighbourhoods no crack-free morph
+    // interval at ground level (ADR 0074): the tiles over them are kept from splitting, counted, and every leaf of the plan has its interval.
     let field = Steep(1);
     let lod = LodParams { cells: 32, viewport_h_px: 1440.0, tau_px: 6.0, max_level: 26, ..LodParams::earth_1080p() };
     let (name, cam) = scripted_views_field(R, 16.0 / 9.0, &field)[5];
-    let req = TerrainRequest { camera: cam, size: (256, 144), view: TerrainView::Level, lod, face_mapping: "tangent-v1".into(), seed: 1 };
-    let e = plan_terrain_field(&req, &field).expect_err(name).to_string();
-    assert!(e.contains("morph interval") && e.contains("viewport_h_px / tau_px 240") && e.contains("reduce cells"), "{e}");
-    // The reference field plans the same request.
-    assert!(plan_terrain_field(&req, &Reference(1)).is_ok());
+    let req = TerrainRequest {
+        camera: cam,
+        size: (256, 144),
+        view: TerrainView::Level,
+        lod: lod.clone(),
+        face_mapping: "tangent-v1".into(),
+        seed: 1,
+    };
+    let plan = plan_terrain_field(&req, &field).unwrap_or_else(|e| panic!("{name}: {e}"));
+    assert!(plan.nodes.iter().any(|n| n.capped), "{name}: the steep ground is capped");
+    let floor = lod.floor_level();
+    assert!(
+        plan.nodes.iter().filter(|n| n.level > floor).all(|n| planet_frame::lod::morph_room(
+            f64::from(n.morph_start_m),
+            f64::from(n.morph_end_m),
+            1e-6
+        )),
+        "{name}: every leaf has its morph interval"
+    );
+    // The reference field plans the same request with nothing capped.
+    let flat = plan_terrain_field(&req, &Reference(1)).unwrap();
+    assert!(flat.nodes.iter().all(|n| !n.capped));
 }
 
 fn above_terrain(field: &dyn HeightField, h: f64) -> PlanetFixed {
@@ -359,7 +376,9 @@ fn the_chunked_morph_sweep_covers_many_level_changes_from_ground_to_orbit() {
         };
         let levels: Vec<u8> = (0..10).map(|i| level_at(chunk_bounds(i).0)).chain([level_at(chunk_bounds(9).1)]).collect();
         assert!(levels.windows(2).all(|w| w[1] <= w[0]), "levels {levels:?} must not increase while receding");
-        assert!(levels[0] >= levels[10] + 8, "levels {levels:?}: expected at least 8 level changes");
+        // The steep field is capped at the finest level its tiles can morph at (ADR 0074): level 16 at the ground, not the 17 or more it asked for.
+        let want = if field.implementation_id() == Steep(1).implementation_id() { 6 } else { 8 };
+        assert!(levels[0] >= levels[10] + want, "levels {levels:?}: expected at least {want} level changes");
     }
 }
 

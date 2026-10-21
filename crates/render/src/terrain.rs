@@ -2236,6 +2236,7 @@ mod one_shot_tests {
             mesh_key: 7,
             preview: false,
             transient_only: false,
+            capped: false,
             quadrants: 0b1111,
         };
         let (coarse, fine) = (TileId::new(planet_core::Face(0), 17, 1, 1).unwrap(), TileId::new(planet_core::Face(0), 20, 8, 8).unwrap());
