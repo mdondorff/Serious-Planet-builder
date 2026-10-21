@@ -91,6 +91,44 @@ pub struct TerrainDraw {
     /// whole tile. A tile that stands in for children that are not resident is drawn over their quadrants only; the fragment stage
     /// discards the rest. The text form carries it only when it is not the whole tile.
     pub quadrants: u8,
+    /// How the node stands against the current definition (VIEW-044): set by the draw plan, [`TileState::Exact`] in a plan made by the
+    /// planner. The stale-tile overlay colours by it; the text form does not carry it.
+    pub state: TileState,
+}
+
+/// The state of a drawn node against the current definition (VIEW-044).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum TileState {
+    /// A resident tile with the key the plan expects.
+    #[default]
+    Exact,
+    /// A resident tile of another version, drawn while its refresh is pending (an edit changed what it reads).
+    Stale,
+    /// A coarser ancestor drawn over the quadrants of the nodes that are not resident yet.
+    StandIn,
+    /// Drawn with a preview stamp's displacement over it (REND-033, VIEW-036): the shape is not the tile's own.
+    Previewed,
+    /// Capped by the slope the plan can draw (ADR 0074): the colour is reserved, no node is in this state yet.
+    Capped,
+}
+
+impl TileState {
+    pub const ALL: [TileState; 5] = [TileState::Exact, TileState::Stale, TileState::StandIn, TileState::Previewed, TileState::Capped];
+
+    /// The code the node record carries (the tile's level plus 32 times it; the level is under 32).
+    pub fn code(self) -> u32 {
+        self as u32
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            TileState::Exact => "exact",
+            TileState::Stale => "stale",
+            TileState::StandIn => "stand-in",
+            TileState::Previewed => "previewed",
+            TileState::Capped => "capped",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -292,6 +330,7 @@ pub(crate) fn plan_terrain_keyed(
                 transient_only: false,
                 capped: n.capped,
                 quadrants: crate::lod::ALL_QUADRANTS,
+                state: TileState::Exact,
             }
         })
         .collect();

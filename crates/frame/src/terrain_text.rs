@@ -114,6 +114,8 @@ impl TerrainPlan {
                 capped: _,
                 // Written only when it is not the whole tile (below), so the text of a plan without masks is what it was.
                 quadrants: _,
+                // A runtime state of the draw plan (VIEW-044), not part of a recorded plan.
+                state: _,
             } = n;
             let r = n.camera_relative_origin;
             s += &format!(
@@ -208,6 +210,7 @@ impl TerrainPlan {
                         transient_only: false,
                         capped: false,
                         quadrants,
+                        state: crate::terrain::TileState::Exact,
                     });
                 }
                 _ => return Err(format!("cannot parse terrain plan line '{line}'")),

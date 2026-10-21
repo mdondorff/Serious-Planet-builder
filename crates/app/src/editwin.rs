@@ -812,7 +812,7 @@ pub const EDIT_KEYS_HELP: &str = "editor mode: Tab on/off (the panels, the outli
      Up and Down step the value, Shift ten times as much), Shift+click on a line or \
      region adds a point, Ctrl+click on a point removes it, Ctrl+Z undo, Ctrl+Y or Ctrl+Shift+Z redo, Delete deletes, F1 or ? lists the keys, Esc steps back \
      (drag, draft, tool, selection) and does not quit; hold the right mouse button to look around, WASD/QE move, Shift boosts, arrows look; \
-     the viewer's keys work too: G globe overview, F3 cycles the overlay, F4 coarse LOD, F9 writes a repro bundle, H editing light (a sun over your shoulder, so no slope is black), L lit or debug path, V next debug view, \
+     the viewer's keys work too: G globe overview, F3 cycles the overlay (off, tiles, mesh, regions, stale tiles), F4 coarse LOD, F9 writes a repro bundle, H editing light (a sun over your shoulder, so no slope is black), L lit or debug path, V next debug view, \
      T vsync, P or Space pause, R restart (C, flight or free camera, does nothing while the editor is on)";
 
 /// The first frame of the smoke run's editing script.

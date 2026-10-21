@@ -27,7 +27,7 @@ use crate::plan::{face_mapping_by_id, PlanError, CLEAR_COLOR, HEIGHT_RANGE};
 use crate::prefetch::prefetch_set;
 use crate::preview::PreviewStamp;
 use crate::residency::{residency_set_field, ResidencySet};
-use crate::terrain::{node_color, plan_terrain_threaded, TerrainDraw, TerrainPlan, TerrainRequest};
+use crate::terrain::{node_color, plan_terrain_threaded, TerrainDraw, TerrainPlan, TerrainRequest, TileState};
 use planet_core::cube::FaceMapping;
 use planet_core::{PlanetFixed, TileId};
 use planet_generators::height::HeightField;
@@ -174,6 +174,7 @@ fn draw_of(req: &TerrainRequest, tile: TileId, r: ResidentTile) -> TerrainDraw {
         transient_only: false,
         capped: false,
         quadrants: ALL_QUADRANTS,
+        state: TileState::Exact,
     }
 }
 
@@ -294,6 +295,7 @@ pub fn draw_plan_transient(
                         camera_relative_origin: [rel.x as f32, rel.y as f32, rel.z as f32],
                         preview: flagged,
                         transient_only: flagged,
+                        state: if flagged { TileState::Previewed } else { TileState::Exact },
                         ..*d
                     },
                 );
@@ -309,6 +311,7 @@ pub fn draw_plan_transient(
                 node.preview = by_delta || by_transient;
                 // A stale tile under both gets the delta's stamps and the transient ones; under the transient ones alone, only those.
                 node.transient_only = by_transient && !by_delta;
+                node.state = if node.preview { TileState::Previewed } else { TileState::Stale };
                 transient_flags |= by_transient;
                 shown.insert(d.tile, node);
                 continue;
@@ -326,7 +329,7 @@ pub fn draw_plan_transient(
             match found {
                 Some((a, r)) => {
                     substituted += 1;
-                    shown.insert(a, draw_of(req, a, r));
+                    shown.insert(a, TerrainDraw { state: TileState::StandIn, ..draw_of(req, a, r) });
                     // The stand-in draws the quadrant that holds the missing node (STRM-016): the resident nodes beside it stay.
                     *stand_in.entry(a).or_insert(0) |= quadrant_bit(child_index_toward(a, d.tile));
                 }
@@ -382,7 +385,8 @@ pub fn draw_plan_transient(
     if kind == DrawKind::Cover {
         for (t, quadrants) in cover.unwrap_or_else(|| view_cover(req, map.as_ref(), resident, bounds)) {
             let r = resident.resident(t).expect("the cover holds resident tiles only");
-            shown.insert(t, TerrainDraw { quadrants, ..draw_of(req, t, r) });
+            // The cover is what is resident for the view while the plan is not served: coarser than the plan, so a stand-in.
+            shown.insert(t, TerrainDraw { quadrants, state: TileState::StandIn, ..draw_of(req, t, r) });
         }
     }
     let nodes: Vec<TerrainDraw> = shown.into_values().collect();

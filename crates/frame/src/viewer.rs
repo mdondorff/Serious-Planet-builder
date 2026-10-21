@@ -200,6 +200,7 @@ pub fn overlay_status(overlay: Overlay, lod_factor: f64) -> String {
         Overlay::Tiles => "Tiles",
         Overlay::Mesh => "Mesh",
         Overlay::Regions => "Regions",
+        Overlay::Stale => "Stale tiles",
     };
     let lod = if (lod_factor - lod_factor.round()).abs() < 0.05 {
         format!("LOD x{}", lod_factor.round())
@@ -209,8 +210,43 @@ pub fn overlay_status(overlay: Overlay, lod_factor: f64) -> String {
     format!("Overlay: {overlay}, {lod}")
 }
 
+/// The colours of the stale-tile overlay by [`TileState`](crate::terrain::TileState) code (the shader's palette, VIEW-044): exact green, stale
+/// amber, stand-in red, previewed violet, capped grey.
+pub const STATE_COLOURS: [[u8; 3]; 5] = [[38, 217, 77], [255, 153, 26], [242, 51, 51], [179, 77, 255], [153, 153, 153]];
+
+/// How many drawn nodes are in each state, by state code (VIEW-044).
+pub fn state_counts(nodes: &[crate::terrain::TerrainDraw]) -> [usize; 5] {
+    let mut c = [0usize; 5];
+    for n in nodes {
+        c[n.state.code() as usize] += 1;
+    }
+    c
+}
+
+/// The counts for the title while the stale-tile overlay is on, e.g. `tiles 120 exact, 4 stale, 2 stand-in, 1 previewed`; capped is named only
+/// when some tile is (ADR 0074).
+pub fn state_title(c: [usize; 5]) -> String {
+    let mut s = format!("tiles {} exact, {} stale, {} stand-in, {} previewed", c[0], c[1], c[2], c[3]);
+    if c[4] > 0 {
+        s += &format!(", {} capped", c[4]);
+    }
+    s
+}
+
+/// The legend of the overlay: a colour and what it says, in state order (capped marked as reserved while no tile is ever capped).
+pub fn state_legend() -> Vec<([u8; 3], String)> {
+    let words = [
+        "exact: resident with the current key",
+        "stale: an old version, its refresh is pending",
+        "stand-in: a coarser tile covers a missing one",
+        "previewed: a preview stamp displaces it",
+        "capped: slope limit (reserved)",
+    ];
+    STATE_COLOURS.iter().copied().zip(words.map(String::from)).collect()
+}
+
 /// The key bindings, as text for the usage message and the log.
-pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), F3 cycles the overlay (off, tiles, mesh, regions; lit path), F4 coarse LOD (error bound x4), F9 writes the camera path of the last minute and a repro bundle (target/review), V next debug view (debug path), T vsync on/off, C flight or free camera, \
+pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), F3 cycles the overlay (off, tiles, mesh, regions, stale tiles; lit path), F4 coarse LOD (error bound x4), F9 writes the camera path of the last minute and a repro bundle (target/review), V next debug view (debug path), T vsync on/off, C flight or free camera, \
      H editing light (a sun fixed over your shoulder, 35 degrees up, so no slope is black; off by default), \
      free camera: WASD move, Q/E down/up, arrows look, click captures the mouse to look (Esc releases it), Shift boost; Esc quits";
 
@@ -741,6 +777,8 @@ pub struct SmokeCounts {
     pub coarse_lod_refusals: u64,
     /// Lit frames drawn with the editing light (VIEW-042); the smoke run switches it on for a few frames and the verdict wants them.
     pub editing_light_frames: u64,
+    /// Lit frames drawn with the stale-tile overlay (VIEW-044); the smoke run's fifth F3 press shows it and the verdict wants them.
+    pub stale_overlay_frames: u64,
 }
 
 /// Frames a smoke run must have drawn lit.
@@ -772,6 +810,9 @@ pub fn smoke_verdict(c: &SmokeCounts, atmosphere_wanted: bool) -> Result<(), Str
     }
     if c.exposure_readings == 0 {
         return short("exposure readings", "0".into(), "at least 1");
+    }
+    if c.stale_overlay_frames == 0 {
+        return short("lit frames with the stale-tile overlay", "0".into(), "at least 1 (the fourth F3 press must show it)");
     }
     if c.editing_light_frames == 0 {
         return short("lit frames with the editing light", "0".into(), "at least 1 (the H key must switch it on)");
@@ -1259,6 +1300,7 @@ mod tests {
             coarse_lod_frames: 0,
             coarse_lod_refusals: 0,
             editing_light_frames: 4,
+            stale_overlay_frames: 3,
         }
     }
 
@@ -1276,8 +1318,10 @@ mod tests {
         assert_eq!(v.overlay, Overlay::Mesh);
         v.command(Command::CycleOverlay, 40, &c);
         assert_eq!(v.overlay, Overlay::Regions, "the third press shows the regions (VIEW-030)");
+        v.command(Command::CycleOverlay, 44, &c);
+        assert_eq!(v.overlay, Overlay::Stale, "the fourth press shows the state of the tiles (VIEW-044)");
         v.command(Command::CycleOverlay, 45, &c);
-        assert_eq!(v.overlay, Overlay::None, "the fourth press is back to off");
+        assert_eq!(v.overlay, Overlay::None, "the fifth press is back to off");
         assert!(!v.command(Command::ToggleCoarseLod, 50, &c) && v.coarse_lod);
         assert_eq!(v.overlay, Overlay::None, "the two switches are independent");
         v.command(Command::ToggleCoarseLod, 60, &c);
@@ -1551,6 +1595,44 @@ mod tests {
         c.renderer_ran_atmosphere = false;
         smoke_verdict(&c, false).unwrap();
         assert!(smoke_verdict(&good_counts(), false).is_err());
+    }
+
+    // spec: VIEW-044
+    #[test]
+    fn the_states_are_counted_titled_and_listed_in_the_legend_with_the_colours_of_the_shader() {
+        use crate::terrain::{TerrainDraw, TileState};
+        let node = |state: TileState| TerrainDraw {
+            tile: planet_core::TileId::new(planet_core::Face(0), 3, 1, 1).unwrap(),
+            level: 3,
+            origin: PlanetFixed(Vec3::new(1.0, 0.0, 0.0)),
+            camera_relative_origin: [0.0; 3],
+            morph: 0.0,
+            morph_start_m: 0.0,
+            morph_end_m: 0.0,
+            color: [0; 4],
+            mesh_key: 0,
+            preview: false,
+            transient_only: false,
+            quadrants: 0b1111,
+            state,
+        };
+        let nodes: Vec<_> =
+            [TileState::Exact, TileState::Exact, TileState::Stale, TileState::StandIn, TileState::Previewed, TileState::Exact]
+                .map(node)
+                .to_vec();
+        let c = state_counts(&nodes);
+        assert_eq!(c, [3, 1, 1, 1, 0]);
+        assert_eq!(state_title(c), "tiles 3 exact, 1 stale, 1 stand-in, 1 previewed");
+        assert_eq!(state_title([1, 0, 0, 0, 2]), "tiles 1 exact, 0 stale, 0 stand-in, 0 previewed, 2 capped");
+        let legend = state_legend();
+        assert_eq!(legend.len(), TileState::ALL.len());
+        for (i, (rgb, words)) in legend.iter().enumerate() {
+            assert_eq!(*rgb, STATE_COLOURS[i]);
+            assert!(words.starts_with(TileState::ALL[i].name()), "{words}");
+        }
+        assert!(legend[4].1.contains("reserved"), "the capped colour is reserved for ADR 0074");
+        // The codes are the node record's and the shader's (state 0 exact ... 4 capped).
+        assert_eq!(TileState::ALL.map(TileState::code), [0, 1, 2, 3, 4]);
     }
 
     // spec: VIEW-042
