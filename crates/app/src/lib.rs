@@ -17,6 +17,7 @@ pub mod preflightperf;
 pub mod sheet;
 pub mod skeleton;
 pub mod streamperf;
+pub mod sweep;
 pub mod ui;
 pub mod window;
 pub mod worldfield;

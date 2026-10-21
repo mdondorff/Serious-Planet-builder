@@ -296,6 +296,8 @@ struct Running {
     notice: Option<(String, u64)>,
     press: ClickTracker,
     globe_stats: GlobeStats,
+    /// The item sweep (`PLANET_SWEEP`, `crate::sweep`): the camera goes to every item of `--items` and the run ends after the last stop.
+    sweep: Option<crate::sweep::Sweep>,
 }
 
 struct App<'w> {
@@ -459,6 +461,7 @@ impl App<'_> {
             notice: None,
             press: ClickTracker::default(),
             globe_stats: GlobeStats::default(),
+            sweep: crate::sweep::Sweep::from_env(cfg.items.as_deref())?,
         });
         Ok(())
     }
@@ -580,6 +583,10 @@ impl App<'_> {
             let height = |p: planet_core::PlanetFixed| p.0.length() - ground(p);
             let had_globe = st.viewer.globe.is_some();
             let camera = st.viewer.camera(self.cameras, now_ms, dt, &self.params, &height, &ground);
+            let camera = match st.sweep.as_ref() {
+                Some(s) if !s.done() => s.camera(&|d| field.height(d), radius, f64::from(cfg.size.0) / f64::from(cfg.size.1)),
+                _ => camera,
+            };
             st.last_camera = camera;
             st.globe_stats.landings += u64::from(had_globe && st.viewer.globe.is_none() && st.viewer.is_free());
             // The globe overview: the markers it shows (render pixels to window pixels) and the one under the cursor.
@@ -621,13 +628,25 @@ impl App<'_> {
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             // One line, one report file and one title notice per cause (kind and level) in 5 s; the title counts all of them.
-            if let Some(why) = st.rig.managed.take_plan_refusal() {
+            let refusal = st.rig.managed.take_plan_refusal();
+            if let Some(why) = refusal.clone() {
                 if let Some(line) = st.refusals.observe(&why, now_ms) {
                     crate::crash::note(&format!("warning: {line}\n  the window keeps the last plan and goes on"));
                     crate::crash::set_path_text(st.path.to_text());
                     let report = crate::crash::snapshot("plan refusal (the window went on)", &line);
                     let text = report.map_or_else(|| why.clone(), |p| format!("plan refused, report {}", p.display()));
                     st.notice = Some((text, now_ms + NOTICE_MS));
+                }
+            }
+            if let Some(sw) = st.sweep.as_mut() {
+                sw.frame(dt * 1000.0, st.rig.managed.pipeline().refused_plans(), refusal);
+                if sw.done() {
+                    let (text, ok) = sw.finish()?;
+                    println!("{text}");
+                    if !ok {
+                        return Err("the sweep had refused plans (the report above lists the stops)".into());
+                    }
+                    quit = true;
                 }
             }
             // A lost GPU device cannot be drawn on again: report it and end the run with the reason.
@@ -1373,11 +1392,11 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         return Err("--edit needs the editor UI: drop --no-ui".into());
     }
     // The adapter policy: the application runs on a discrete GPU only; the software adapters are the test and CI mode.
-    let policy = if o.smoke {
+    let policy = if o.smoke || std::env::var_os("PLANET_SWEEP").is_some() {
         o.adapter.unwrap_or_else(AdapterPolicy::from_env)
     } else {
         if o.adapter == Some(AdapterPolicy::Software) {
-            return Err("--adapter software is the test and CI mode: the window runs on a discrete GPU (software adapters are used by `editor --smoke` only)".into());
+            return Err("--adapter software is the test and CI mode: the window runs on a discrete GPU (software adapters are used by `editor --smoke` and the `PLANET_SWEEP` run only)".into());
         }
         AdapterPolicy::HighPerformance
     };
