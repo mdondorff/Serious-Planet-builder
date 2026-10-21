@@ -762,3 +762,19 @@ fn every_drawn_node_has_the_state_it_stands_in_against_the_current_definition() 
     let c = draw_plan(&req, None, &roots()).unwrap();
     assert!(c.plan.nodes.iter().all(|n| n.state == TileState::StandIn));
 }
+
+// spec: VIEW-040
+#[test]
+fn the_tiles_held_back_from_refinement_print_one_line_in_five_seconds_and_none_when_there_are_none() {
+    use planet_frame::pipeline::{CappedReporter, REFUSAL_REPORT_PERIOD_MS};
+    let mut r = CappedReporter::default();
+    assert_eq!(r.observe(0, 0), None, "nothing is held back, nothing is said");
+    let first = r.observe(12, 100).expect("the first frame with tiles held back says so");
+    assert!(first.starts_with("12 tiles"), "{first}");
+    for t in (200..100 + REFUSAL_REPORT_PERIOD_MS).step_by(500) {
+        assert_eq!(r.observe(30, t), None, "quiet within the period (at {t} ms)");
+    }
+    let again = r.observe(30, 100 + REFUSAL_REPORT_PERIOD_MS).expect("a line after the period");
+    assert!(again.starts_with("30 tiles"), "{again}");
+    assert_eq!(r.observe(0, 100_000), None);
+}

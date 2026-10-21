@@ -110,6 +110,8 @@ fn a_spike_too_steep_to_morph_is_capped_not_refused_and_every_leaf_of_the_plan_i
         let plan = plan_terrain_field(&request(camera), &spike).unwrap_or_else(|e| panic!("{name}: {e}"));
         let capped = plan.nodes.iter().filter(|n| n.capped).count();
         assert!(capped > 0, "{name}: the tiles over the spike are capped");
+        // The overlays colour them (VIEW-044): a capped leaf is in the capped state, every other leaf exact.
+        assert!(plan.nodes.iter().all(|n| (n.state == planet_frame::TileState::Capped) == n.capped), "{name}: the state follows the flag");
         let floor = lod.floor_level();
         for n in &plan.nodes {
             if n.level > floor {

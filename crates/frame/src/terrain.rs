@@ -115,7 +115,8 @@ pub enum TileState {
     StandIn,
     /// Drawn with a preview stamp's displacement over it (REND-033, VIEW-036): the shape is not the tile's own.
     Previewed,
-    /// Capped by the slope the plan can draw (ADR 0074): the colour is reserved, no node is in this state yet.
+    /// A leaf held back from splitting because the tiles under it are too steep to morph (ADR 0074): set by the planner for a plan node that is
+    /// exact otherwise; a stale, stand-in or previewed node keeps that state.
     Capped,
 }
 
@@ -339,7 +340,8 @@ pub(crate) fn plan_terrain_keyed(
                 stitch: 0,
                 fine: 0,
                 quadrants: crate::lod::ALL_QUADRANTS,
-                state: TileState::Exact,
+                // A leaf held back by a tile too steep to morph (ADR 0074) shows in its own colour in the overlays.
+                state: if n.capped { TileState::Capped } else { TileState::Exact },
             }
         })
         .collect();

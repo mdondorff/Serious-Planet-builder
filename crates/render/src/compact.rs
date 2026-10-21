@@ -375,7 +375,9 @@ fn overlay_wire(in: VsOut, rgb: vec3<f32>, factor: f32, mode: f32) -> vec3<f32> 
     );
     // The node record's word is the level plus 32 times the node's state (the stale-tile overlay, VIEW-044).
     let level = u32(max(nodes[in.node_index].morph.w, 0.0) + 0.5) % 32u;
-    let hue = palette[level % 8u];
+    // A capped tile (state 4, ADR 0074) is grey, the colour of the stale-tile overlay's legend, whatever its level.
+    let capped = ((u32(max(nodes[in.node_index].morph.w, 0.0) + 0.5) / 32u) % 8u) == 4u;
+    let hue = select(palette[level % 8u], vec3<f32>(0.6, 0.6, 0.6), capped);
     let brightness = mix(1.0, 0.3, clamp(in.morph, 0.0, 1.0));
     let tinted = mix(rgb, rgb * hue * 1.6, 0.4);
     let line = hue * (brightness * 0.8 * factor);
