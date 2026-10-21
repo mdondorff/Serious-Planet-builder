@@ -297,7 +297,21 @@ fn terrain_vertex(inst: u32, vi: u32) -> VsOut {
         pos = pos - d;
         cpos = cpos - d;
     }
-    let m = clamp((length(node.origin_rel.xyz + pos) - node.morph.x) / max(node.morph.y - node.morph.x, 1e-6), 0.0, 1.0);
+    var m = clamp((length(node.origin_rel.xyz + pos) - node.morph.x) / max(node.morph.y - node.morph.x, 1e-6), 0.0, 1.0);
+    // The edge masks of a node next to a capped tile (ADR 0074; 0 elsewhere, which leaves `m` as it was): a vertex on a stitched edge (it faces a
+    // capped leaf one level coarser) is fully morphed, on a fine edge (a capped leaf facing finer ones) not at all, whatever the distance. The
+    // skirt vertices carry the grid coordinates of their edge vertex and follow it.
+    let masks = u32(max(node.morph.w, 0.0) + 0.5) >> 8u;
+    var edges = 0u;
+    if (i == CELLS) { edges = edges | 1u; }
+    if (i == 0) { edges = edges | 2u; }
+    if (j == CELLS) { edges = edges | 4u; }
+    if (j == 0) { edges = edges | 8u; }
+    if ((edges & masks & 15u) != 0u) {
+        m = 1.0;
+    } else if ((edges & (masks >> 4u)) != 0u) {
+        m = 0.0;
+    }
     let local = mix(pos, cpos, m);
     let p = node.origin_rel.xyz + local;
     let h = h_origin + own.w;
@@ -379,7 +393,7 @@ fn stale_tint(in: VsOut, rgb: vec3<f32>, factor: f32) -> vec3<f32> {
         vec3<f32>(0.70, 0.30, 1.00),
         vec3<f32>(0.60, 0.60, 0.60),
     );
-    let state = min(u32(max(nodes[in.node_index].morph.w, 0.0) + 0.5) / 32u, 4u);
+    let state = min((u32(max(nodes[in.node_index].morph.w, 0.0) + 0.5) / 32u) % 8u, 4u);
     let hue = palette[state];
     let ux = in.aux.x;
     let uy = in.aux.y;

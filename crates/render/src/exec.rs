@@ -75,6 +75,9 @@ pub enum ExecError {
     LitNotEnabled,
     /// The test-only reference renderer draws whole tiles; the plan has a node drawn over some quadrants only (STRM-016).
     PartialNode(planet_core::TileId),
+    /// The test-only reference renderer morphs by the vertices of a CPU mesh and cannot hold an edge to the grid of a neighbour; the plan has a
+    /// node with edge masks (ADR 0074).
+    MaskedNode(planet_core::TileId),
     /// The plan's lit part has values the renderer cannot use (the message names them).
     BadLitPlan(String),
     /// The plan carries an atmosphere but `TerrainRenderer::enable_atmosphere` was not called.
@@ -128,6 +131,9 @@ impl fmt::Display for ExecError {
             }
             ExecError::PartialNode(id) => {
                 write!(f, "the reference renderer draws whole tiles only, but the plan draws {id:?} over some quadrants")
+            }
+            ExecError::MaskedNode(id) => {
+                write!(f, "the reference renderer cannot stitch edges, but the plan gives {id:?} edge masks (a capped neighbour, ADR 0074)")
             }
             ExecError::MissingTile(id) => write!(f, "the plan draws tile {id:?} but no resource for it was supplied"),
             ExecError::BadResource { id, expected, got } => write!(f, "tile {id:?}: expected {expected} height samples, got {got}"),

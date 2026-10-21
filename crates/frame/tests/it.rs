@@ -34,6 +34,8 @@ mod lod;
 mod lod_capping;
 #[path = "lod_prune.rs"]
 mod lod_prune;
+#[path = "lod_stitch.rs"]
+mod lod_stitch;
 #[path = "look.rs"]
 mod look;
 #[path = "look_independence.rs"]

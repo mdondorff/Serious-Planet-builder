@@ -105,6 +105,8 @@ fn a_node_drawn_over_some_quadrants_covers_exactly_those_quadrants_of_its_tile()
         preview: false,
         transient_only: false,
         capped: false,
+        stitch: 0,
+        fine: 0,
         quadrants,
         state: planet_frame::TileState::default(),
     };

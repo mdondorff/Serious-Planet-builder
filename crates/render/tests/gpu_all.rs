@@ -34,6 +34,8 @@ mod gpu_shading;
 mod gpu_stamps;
 #[path = "gpu_steep_terrain.rs"]
 mod gpu_steep_terrain;
+#[path = "gpu_stitch.rs"]
+mod gpu_stitch;
 #[path = "gpu_terrain.rs"]
 mod gpu_terrain;
 #[path = "gpu_ui.rs"]

@@ -70,6 +70,9 @@ pub fn execute_reference(ctx: &GpuContext, plan: &TerrainPlan, meshes: &[&TileMe
     if let Some(n) = plan.nodes.iter().find(|n| n.quadrants != 0b1111) {
         return Err(ExecError::PartialNode(n.tile));
     }
+    if let Some(n) = plan.nodes.iter().find(|n| n.stitch != 0 || n.fine != 0) {
+        return Err(ExecError::MaskedNode(n.tile));
+    }
     let [lo, hi] = plan.height_range;
     if !(lo.is_finite() && hi.is_finite() && lo < hi) {
         return Err(ExecError::BadHeightRange { lo, hi });

@@ -1614,6 +1614,8 @@ mod tests {
             preview: false,
             transient_only: false,
             capped: false,
+            stitch: 0,
+            fine: 0,
             quadrants: 0b1111,
             state,
         };
