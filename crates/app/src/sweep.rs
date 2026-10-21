@@ -322,7 +322,6 @@ mod tests {
     }
 
     // spec: VIEW-022
-    // spec: VIEW-022
     #[test]
     fn a_drift_moves_the_camera_east_by_that_many_metres_a_frame_and_none_leaves_it_where_it_was() {
         let flat = |_: Vec3| 0.0;

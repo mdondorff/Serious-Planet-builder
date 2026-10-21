@@ -7,7 +7,7 @@ Rasierklinge, RTX 3080 Ti Laptop, release builds. Coordinator opus-planner, run 
 - **`dive`: plan job median 1.38 ms against 1.22 ms (+13 %)**, down from +125 % (2.73 ms) in window 22. Just over the +10 % bound; the cost is the proof itself (`none_steep`, about 0.16 ms per plan job).
 - **Editor chain, 2 km item stops: three of four rows at or below A**; Ridge 3 is 3x.
 - No wrapper of the editor chain blocks the proof (the chain `build_field`, stamp stages, `WaterBounded`, `CancelGuarded` forwards `bounds_monotone`; the eroded base says yes). Ridge 3 fails the proof because tiles near the ridge are really too steep to morph (the tiles ADR 0074 caps); the full path then runs, with the volumes (stamp-stage bounds) of the whole position-only tree computed cold.
-- Tracked: `docs/status.md` (Ridge 3 plan cost); the fix is to limit the full path's volume work to the subtrees the proof could not clear.
+- Tracked: `docs/status.md` (Ridge 3: the first plan at a new place is cold-costly). The probe after the window (a test of the selection, not kept; a 12 km steep ridge item, the stamp stage over the reference field, a camera 2 km up, a fresh `SelectionCache`) gave 211 ms cold against 8 ms over flat ground and 1.3 ms warm (flat 0.9 ms); at 200 m 48 ms cold. The cold time is the stamp stage's height-bounds queries, about 60 µs each: 85 ms for the position-only walk's tiles and 125 ms for judging them (the volumes of their neighbours). The sweep holds the camera still, so each of its plans is a cold one.
 
 ## `dive` (2400 frames), plan job ms (median / p99 / max)
 
