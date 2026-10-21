@@ -142,7 +142,7 @@ fn levels(tiles: impl IntoIterator<Item = TileId>) -> BTreeMap<TileId, u8> {
     tiles.into_iter().map(|t| (t, t.level())).collect()
 }
 
-// spec: STRM-016, LOD-008
+// spec: STRM-015, STRM-016, LOD-008
 #[test]
 fn with_every_tile_of_r_resident_the_cover_equals_the_plan_node_for_node_on_a_spike_field_and_the_draw_set_stays_inside_r() {
     for name in ["ground-1m", "ground-200m"] {
