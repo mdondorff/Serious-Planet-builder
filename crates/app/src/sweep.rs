@@ -113,7 +113,10 @@ impl Sweep {
         let Ok(report_path) = std::env::var("PLANET_SWEEP") else { return Ok(None) };
         let dir = dir.ok_or("PLANET_SWEEP needs --items DIR (the items to visit)")?;
         let altitudes = match std::env::var("PLANET_SWEEP_ALTS") {
-            Ok(v) => v.split(',').map(|s| s.trim().parse::<f64>().map_err(|e| format!("PLANET_SWEEP_ALTS '{s}': {e}"))).collect::<Result<_, _>>()?,
+            Ok(v) => v
+                .split(',')
+                .map(|s| s.trim().parse::<f64>().map_err(|e| format!("PLANET_SWEEP_ALTS '{s}': {e}")))
+                .collect::<Result<_, _>>()?,
             Err(_) => DEFAULT_ALTITUDES_M.to_vec(),
         };
         let hold = std::env::var("PLANET_SWEEP_HOLD").ok().and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_HOLD_FRAMES);
