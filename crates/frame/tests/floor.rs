@@ -129,7 +129,14 @@ fn floor_leaves_do_not_morph_and_the_plan_builder_accepts_their_interval_and_onl
     }
     // The interval [1e30, 1e30] is empty on a leaf above the floor and exempt only at the floor.
     let tile = |level: u8| TileId::new(planet_core::Face::ALL[0], level, 0, 0).unwrap();
-    let leaf = |level: u8| SelectedNode { tile: tile(level), morph: 0.0, distance_m: 1.0, morph_start_m: 1.0e30, morph_end_m: 1.0e30 };
+    let leaf = |level: u8| SelectedNode {
+        tile: tile(level),
+        morph: 0.0,
+        distance_m: 1.0,
+        morph_start_m: 1.0e30,
+        morph_end_m: 1.0e30,
+        capped: false,
+    };
     assert!(first_empty_morph_interval(&[leaf(3)], 3).is_none(), "a leaf at the floor is exempt");
     assert!(first_empty_morph_interval(&[leaf(3), leaf(4)], 3).is_some_and(|n| n.tile.level() == 4), "a leaf above the floor is refused");
     assert!(first_empty_morph_interval(&[leaf(0)], 0).is_none() && first_empty_morph_interval(&[leaf(1)], 0).is_some());

@@ -2239,6 +2239,7 @@ mod one_shot_tests {
             mesh_key: 7,
             preview: false,
             transient_only: false,
+            capped: false,
             quadrants: 0b1111,
             state: planet_frame::TileState::default(),
         };

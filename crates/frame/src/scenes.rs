@@ -556,6 +556,7 @@ mod tests {
             mesh_key: 0,
             preview: false,
             transient_only: false,
+            capped: false,
             quadrants: 0b1111,
             state: crate::terrain::TileState::Exact,
         }

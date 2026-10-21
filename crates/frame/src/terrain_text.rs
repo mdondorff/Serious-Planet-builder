@@ -110,6 +110,8 @@ impl TerrainPlan {
                 // A runtime flag of the draw plan (REND-033), not part of a recorded plan.
                 preview: _,
                 transient_only: _,
+                // A runtime flag of the draw plan (ADR 0074), not part of a recorded plan.
+                capped: _,
                 // Written only when it is not the whole tile (below), so the text of a plan without masks is what it was.
                 quadrants: _,
                 // A runtime state of the draw plan (VIEW-044), not part of a recorded plan.
@@ -206,6 +208,7 @@ impl TerrainPlan {
                         mesh_key: u64::from_str_radix(key, 16).map_err(|e| format!("bad mesh key '{key}': {e}"))?,
                         preview: false,
                         transient_only: false,
+                        capped: false,
                         quadrants,
                         state: crate::terrain::TileState::Exact,
                     });

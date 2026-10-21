@@ -172,6 +172,7 @@ fn draw_of(req: &TerrainRequest, tile: TileId, r: ResidentTile) -> TerrainDraw {
         mesh_key: r.mesh_key,
         preview: false,
         transient_only: false,
+        capped: false,
         quadrants: ALL_QUADRANTS,
         state: TileState::Exact,
     }

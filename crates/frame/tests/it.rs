@@ -30,6 +30,8 @@ mod globe_session;
 mod height_aware;
 #[path = "lod.rs"]
 mod lod;
+#[path = "lod_capping.rs"]
+mod lod_capping;
 #[path = "look.rs"]
 mod look;
 #[path = "look_independence.rs"]

@@ -95,8 +95,10 @@ pub fn residency_set_field(
     p: &LodParams,
     cache: &mut SelectionCache,
 ) -> ResidencySet {
-    let mut r = ResidencySet::from_selection(&select_nodes_field_cached(map, position, field, p, cache), p.floor_level());
-    // Every tile of R was visited by the selection, so its geometry and volume are in the cache: the bounds are lookups.
-    r.bounds = cache.bounds_of(r.tiles.iter().map(|e| e.tile), position, map, field, p);
+    let selection = select_nodes_field_cached(map, position, field, p, cache);
+    let mut r = ResidencySet::from_selection(&selection, p.floor_level());
+    // Every tile of R was visited by the selection, so its geometry and volume are in the cache: the bounds are lookups. They carry the
+    // ceiling the selection was clamped to (ADR 0074), which the cover applies as the plan does.
+    r.bounds = cache.bounds_of(r.tiles.iter().map(|e| e.tile), position, map, field, p).with_ceiling(selection.ceiling.clone());
     r
 }

@@ -636,7 +636,9 @@ fn r_costs_the_plans_cache_no_origin_height_and_a_repeat_or_a_rotation_costs_not
     let r = PlanField::residency(&field, &a, &mut cache).unwrap();
     let (h_r, b_r) = read();
     assert_eq!(h_r, h_plan, "R evaluates no origin height: a resident tile carries its own origin");
-    assert!(b_r > b_plan, "R adds the volumes of the tiles outside the frustum");
+    // The plan of a field that can be too steep to morph walks the position-only selection itself, for the ceiling of its tiles (ADR 0074):
+    // the volumes of the tiles outside the frustum are the plan's, and R adds none.
+    assert_eq!(b_r, b_plan, "R adds no volume: the plan's job has evaluated the position-only selection");
     // The same position again, and a turn at the same position: nothing is evaluated.
     assert_eq!(PlanField::residency(&field, &a, &mut cache).unwrap(), r);
     let turned = request(here(), 2.0, 0.1);
@@ -716,7 +718,11 @@ fn the_worker_runs_r_after_the_plan_on_the_plans_cache_and_a_rotation_evaluates_
     plan_terrain_threaded(&a, &CountingField(alone.clone()), &mut SelectionCache::new(), 1).unwrap();
     let (h, b) = read();
     assert_eq!(h, alone.heights.load(Ordering::SeqCst), "R added no origin height");
-    assert!(b > alone.bounds.load(Ordering::SeqCst), "R added the volumes outside the frustum");
+    assert_eq!(
+        b,
+        alone.bounds.load(Ordering::SeqCst),
+        "R added no volume: the plan's job evaluated the position-only selection (ADR 0074)"
+    );
     assert!(w.take().unwrap().is_ok() && w.take_residency().unwrap().is_ok());
     // A rotation: the plan is new, R is the same set and costs the field nothing.
     w.submit(2, request(here(), 2.0, 0.1));
