@@ -431,8 +431,10 @@ pub(crate) fn node_record_bytes(plan: &TerrainPlan) -> Vec<u8> {
             } else {
                 0.0
             },
-            // The level, and for the stale-tile overlay (VIEW-044) 32 times the node's state on top of it (the level is under 32).
-            f32::from(d.level) + 32.0 * d.state.code() as f32,
+            // The level, for the stale-tile overlay (VIEW-044) 32 times the node's state on top of it (the level is under 32), and 256 times the
+            // edge masks (ADR 0074: the stitched edges in the low four bits, the fine edges above them; 0 for a node with none, so its record is
+            // what it was). Exact in f32 (under 2^24).
+            f32::from(d.level) + 32.0 * d.state.code() as f32 + 256.0 * f32::from(d.stitch | (d.fine << 4)),
         ];
         for p in grid_phases([d.origin.0.x, d.origin.0.y, d.origin.0.z]) {
             floats.extend([p[0], p[1], p[2], 0.0]);
@@ -2240,6 +2242,8 @@ mod one_shot_tests {
             preview: false,
             transient_only: false,
             capped: false,
+            stitch: 0,
+            fine: 0,
             quadrants: 0b1111,
             state: planet_frame::TileState::default(),
         };

@@ -112,6 +112,9 @@ impl TerrainPlan {
                 transient_only: _,
                 // A runtime flag of the draw plan (ADR 0074), not part of a recorded plan.
                 capped: _,
+                // Runtime flags of the draw plan (ADR 0074), not part of a recorded plan.
+                stitch: _,
+                fine: _,
                 // Written only when it is not the whole tile (below), so the text of a plan without masks is what it was.
                 quadrants: _,
                 // A runtime state of the draw plan (VIEW-044), not part of a recorded plan.
@@ -209,6 +212,8 @@ impl TerrainPlan {
                         preview: false,
                         transient_only: false,
                         capped: false,
+                        stitch: 0,
+                        fine: 0,
                         quadrants,
                         state: crate::terrain::TileState::Exact,
                     });

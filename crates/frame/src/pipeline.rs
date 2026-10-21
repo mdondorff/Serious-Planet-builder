@@ -173,6 +173,8 @@ fn draw_of(req: &TerrainRequest, tile: TileId, r: ResidentTile) -> TerrainDraw {
         preview: false,
         transient_only: false,
         capped: false,
+        stitch: 0,
+        fine: 0,
         quadrants: ALL_QUADRANTS,
         state: TileState::Exact,
     }

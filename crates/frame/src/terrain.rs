@@ -87,6 +87,13 @@ pub struct TerrainDraw {
     /// The node is a tile kept from splitting because the tiles under it are too steep to morph (ADR 0074). A runtime flag of the draw plan;
     /// the recorded text form does not carry it.
     pub capped: bool,
+    /// The edges of the tile that face a capped leaf one level coarser (ADR 0074): bit `k` is the side `Side::ALL[k]` (East, West, North,
+    /// South). On the vertices of these edges the vertex stage morphs fully to the parent grid, whatever the distance, so that they lie on the
+    /// capped neighbour's edge. A runtime flag of the draw plan, 0 where no neighbour is capped; the recorded text form does not carry it.
+    pub stitch: u8,
+    /// The edges of a capped tile that face finer leaves (same encoding): the vertex stage keeps them at the tile's own grid, whatever the
+    /// distance, so that the finer neighbour's vertices meet them.
+    pub fine: u8,
     /// The quadrants of the tile that are drawn (STRM-016): bit `k` is the child `k` of [`planet_core::TileId::children`], `0b1111` the
     /// whole tile. A tile that stands in for children that are not resident is drawn over their quadrants only; the fragment stage
     /// discards the rest. The text form carries it only when it is not the whole tile.
@@ -298,7 +305,7 @@ pub(crate) fn plan_terrain_keyed(
     let heights = origin_heights(&selection, map.as_ref(), field, cache, threads);
     let keyer = planet_generators::mesh::MeshKeyer::new(field, map.as_ref(), req.lod.cells, req.lod.radius_m);
     let derive_key = |tile: TileId| key_override.map_or_else(|| keyer.key(tile), |f| f(tile));
-    let nodes = selection
+    let mut nodes: Vec<TerrainDraw> = selection
         .nodes
         .iter()
         .zip(heights)
@@ -329,11 +336,14 @@ pub(crate) fn plan_terrain_keyed(
                 preview: false,
                 transient_only: false,
                 capped: n.capped,
+                stitch: 0,
+                fine: 0,
                 quadrants: crate::lod::ALL_QUADRANTS,
                 state: TileState::Exact,
             }
         })
         .collect();
+    edge_masks(&mut nodes, map.as_ref());
     Ok(TerrainPlan {
         size: req.size,
         view: req.view,
@@ -347,6 +357,44 @@ pub(crate) fn plan_terrain_keyed(
         lit: None,
         water: None,
     })
+}
+
+/// The bit of `side` in the edge masks of a draw ([`TerrainDraw::stitch`], [`TerrainDraw::fine`]): the index in `Side::ALL`.
+pub fn side_bit(side: planet_core::Side) -> u8 {
+    1 << planet_core::Side::ALL.iter().position(|s| *s == side).expect("a side")
+}
+
+/// Set the edge masks of the leaves of a plan (ADR 0074): where a capped leaf has finer leaves across an edge, the capped leaf's edge is `fine`
+/// and the edges of the finer leaves that face it are `stitch`. Both depend on the plan's leaves alone, never on the camera, so a reused plan
+/// stays crack-free; a plan with no capped leaf has no mask. A leaf's neighbour across an edge is one level finer when the neighbour tile of
+/// the leaf's level is split into leaves, and a finer leaf faces the capped leaf when its neighbour tile's parent is the capped leaf.
+pub fn edge_masks(nodes: &mut [TerrainDraw], map: &dyn planet_core::cube::FaceMapping) {
+    if !nodes.iter().any(|n| n.capped) {
+        return;
+    }
+    let index: std::collections::HashMap<TileId, usize> = nodes.iter().enumerate().map(|(i, n)| (n.tile, i)).collect();
+    for i in 0..nodes.len() {
+        let tile = nodes[i].tile;
+        if tile.level() == 0 {
+            continue;
+        }
+        for side in planet_core::Side::ALL {
+            // A neighbour tile of the leaf's level that a capped leaf is the parent of: the leaf is finer than it and faces it.
+            let across = tile.neighbor(map, side);
+            let Some(&j) = across.parent().and_then(|p| index.get(&p)) else { continue };
+            if !nodes[j].capped {
+                continue;
+            }
+            nodes[i].stitch |= side_bit(side);
+            // The capped leaf's own edge that this leaf faces: the side whose neighbour tile (at the capped leaf's level) holds this leaf.
+            let capped_tile = nodes[j].tile;
+            for s2 in planet_core::Side::ALL {
+                if tile.parent() == Some(capped_tile.neighbor(map, s2)) {
+                    nodes[j].fine |= side_bit(s2);
+                }
+            }
+        }
+    }
 }
 
 /// Counts a plan implies, derived from the plan alone so that tier A can assert budgets on any machine and tier C can
