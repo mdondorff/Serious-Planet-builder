@@ -639,7 +639,7 @@ fn a_crouched_eye_with_the_free_cameras_near_plane_stays_above_the_drawn_surface
 
 // spec: VIEW-004
 #[test]
-fn the_free_cameras_near_plane_leaves_the_reversed_z_depth_a_resolution_finer_than_a_tenth_of_a_millimetre_out_to_a_kilometre() {
+fn the_free_cameras_near_plane_leaves_the_reversed_z_depth_a_resolution_finer_than_a_millimetre_out_to_a_kilometre() {
     // The distance one step of the f32 depth value (`ndc.z = near / d`, from the camera's own projection) stands for at `d` metres ahead.
     let camera = planet_frame::Camera::at_surface_point(
         PlanetFixed(Vec3::new(R + 2.0, 0.0, 0.0)),
