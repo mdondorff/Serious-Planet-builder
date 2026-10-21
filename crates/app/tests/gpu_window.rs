@@ -410,10 +410,15 @@ fn stamp_file(id: &str, kind: &str, reach: f64, max_delta: f64, lat: f64, lon: f
 // spec: VIEW-040
 // The owner's cluster of brushes 10 to 23 (many overlapping raise, flatten and smooth strokes at about 27.9 S 12.5 W), his ridge 3, hill 7
 // and crater 6 in their sizes, swept at 200 m and 30 m: the sweep of 2026-10-21 refused plans at these stops (SPIKE-26, "morph interval is
-// empty" at levels 16 to 22). Ignored until docs/status.md "Item sweep refusals" is fixed.
+// empty" at levels 16 to 22). It failed then and was ignored; with ADR 0074's capping (#505) it passes (181 s on the RTX, 2026-10-21).
 #[test]
-#[ignore = "fails today: the base LOD is refused over dense brush clusters (docs/status.md, Item sweep refusals; SPIKE-26)"]
 fn the_item_sweep_over_a_dense_brush_cluster_a_ridge_a_hill_and_a_crater_has_no_refused_plan() {
+    // 34 stops of 40 frames: 181 s on the RTX, about seven minutes on the software adapter, over the tier-C job's limit. It runs in
+    // `cargo xtask test gpu --real`; the software run of the same sweep is the ten-item test above.
+    if adapter() == "software" {
+        eprintln!("SKIPPED on the software adapter (too slow); it runs with PLANET_ADAPTER=hardware (cargo xtask test gpu --real)");
+        return;
+    }
     let dir = std::env::temp_dir().join(format!("planet-sweep-cluster-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("0")).unwrap();
