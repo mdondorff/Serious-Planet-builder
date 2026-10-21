@@ -1206,12 +1206,18 @@ impl ApplicationHandler for App<'_> {
                 self.edit_mouse(state, button, world);
             }
             WindowEvent::MouseWheel { delta, .. } if world => {
-                if let Some(g) = self.state.as_mut().and_then(|st| st.viewer.globe.as_mut()) {
-                    let lines = match delta {
-                        MouseScrollDelta::LineDelta(_, y) => f64::from(y),
-                        MouseScrollDelta::PixelDelta(p) => p.y / 50.0,
-                    };
-                    g.zoom(wheel_zoom_factor(lines));
+                let lines = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => f64::from(y),
+                    MouseScrollDelta::PixelDelta(p) => p.y / 50.0,
+                };
+                if let Some(st) = self.state.as_mut() {
+                    // A brush tool takes the wheel for its radius (Shift: strength); without one the wheel zooms the overview as before (VIEW-041).
+                    if st.viewer.globe.is_none() && st.edit.as_mut().is_some_and(|e| e.wheel(lines, st.shift)) {
+                        return;
+                    }
+                    if let Some(g) = st.viewer.globe.as_mut() {
+                        g.zoom(wheel_zoom_factor(lines));
+                    }
                 }
             }
             WindowEvent::MouseInput { state: ElementState::Pressed, button: MouseButton::Left, .. }

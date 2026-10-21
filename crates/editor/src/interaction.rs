@@ -54,11 +54,34 @@ pub struct Interaction {
     pub handle_hit_px: f64,
     /// The cursor at the last event of a drag, for the height handle.
     last_cursor: Option<[f64; 2]>,
+    /// The cursor and the edits under it at the last selecting press: a press at the same spot goes on to the next of them (VIEW-041).
+    last_pick: Option<([f64; 2], Vec<ItemId>)>,
 }
+
+/// How far (pixels) a press may be from the last one and still count as the same spot.
+pub const SAME_SPOT_PX: f64 = 4.0;
 
 impl Interaction {
     pub fn new(handle_hit_px: f64) -> Interaction {
-        Interaction { handle_hit_px, last_cursor: None }
+        Interaction { handle_hit_px, last_cursor: None, last_pick: None }
+    }
+
+    /// The edit a press at this pointer would select, its place among the edits under the cursor and their number (VIEW-041): the one with the
+    /// smallest footprint, and at the spot of the last press the one after the selected edit in the same list, wrapping round.
+    pub fn candidate<S: ItemStore>(&self, s: &Session<S>, v: &PointerView) -> Option<(ItemId, usize, usize, Vec<ItemId>)> {
+        let list = v.hit.map(|h| s.pick_all(&h, v.shown)).unwrap_or_default();
+        let first = *list.first()?;
+        let place = match (&self.last_pick, s.selected()) {
+            (Some((at, before)), Some(sel))
+                if *before == list && libm::hypot(at[0] - v.cursor[0], at[1] - v.cursor[1]) <= SAME_SPOT_PX && list.len() > 1 =>
+            {
+                list.iter().position(|id| *id == sel).map_or(0, |p| (p + 1) % list.len())
+            }
+            _ => 0,
+        };
+        let id = list.get(place).copied().unwrap_or(first);
+        let of = list.len();
+        Some((id, place + 1, of, list))
     }
 
     /// The handle nearest to the cursor within the hit radius (ties to the earlier one in the list).
@@ -82,8 +105,18 @@ impl Interaction {
             s.set_hover(None);
             return;
         }
-        let under = v.hit.and_then(|h| s.pick(&h, v.shown));
-        s.set_hover(under);
+        match self.candidate(s, v) {
+            Some((id, place, of, _)) => {
+                s.set_hover(Some(id));
+                s.set_hover_rank((of > 1).then_some((place, of)));
+            }
+            None => {
+                // Not a stamp: a line or a region the old single pick finds, or nothing.
+                let under = v.hit.and_then(|h| s.pick(&h, v.shown));
+                s.set_hover(under);
+                s.set_hover_rank(None);
+            }
+        }
     }
 
     /// The primary button went down.
@@ -116,12 +149,14 @@ impl Interaction {
         if matches!(s.tool(), Tool::Stamp(_)) {
             return Ok((Pressed::Nothing, Vec::new()));
         }
-        match v.hit.and_then(|h| s.pick(&h, v.shown)) {
-            Some(id) => {
+        match self.candidate(s, v) {
+            Some((id, _, _, list)) => {
                 s.select(id);
+                self.last_pick = Some((v.cursor, list));
                 Ok((Pressed::Selected(id), Vec::new()))
             }
             None => {
+                self.last_pick = None;
                 s.deselect();
                 Ok((Pressed::Cleared, Vec::new()))
             }

@@ -438,3 +438,39 @@ fn a_brush_edit_sends_the_tiles_along_its_stroke_to_refresh_not_the_whole_reach_
         assert!(found.len() <= at_most, "level {level}: {} of {} tiles", found.len(), all.len());
     }
 }
+
+// spec: VIEW-041
+#[test]
+fn clicking_again_at_the_same_spot_goes_through_the_edits_under_it_smallest_first_and_the_hover_says_which() {
+    let mut s = session(9);
+    let at = unit(47.2, 8.55);
+    // A plateau, a hill inside it and a crater inside that, all over the cursor; the order of placing is not the order of size.
+    let (plateau, _) = s.place("plateau", at).unwrap();
+    let (hill, _) = s.place("hill", at).unwrap();
+    let (crater, _) = s.place("crater", at).unwrap();
+    s.deselect();
+    let radius = |id| shape::outline_radius_m(s.item(id).unwrap());
+    let mut by_size = [plateau, hill, crater];
+    by_size.sort_by(|a, b| radius(*a).partial_cmp(&radius(*b)).unwrap());
+    let shown = [plateau, hill, crater];
+    let mut ix = Interaction::new(10.0);
+    let spot = [500.0, 500.0];
+    // The hover names what a click would select: the smallest first, "1 of 3".
+    ix.hover(&mut s, &view(spot, Some(at), &shown, &[]));
+    assert_eq!((s.hovered(), s.hover_rank()), (Some(by_size[0]), Some((1, 3))));
+    // Each press at the same spot selects the next, wrapping round; the hover then names the one after.
+    for (k, want) in [0usize, 1, 2, 0].into_iter().enumerate() {
+        ix.press(&mut s, &view(spot, Some(at), &shown, &[])).unwrap();
+        assert_eq!(s.selected(), Some(by_size[want]), "press {k}");
+        ix.hover(&mut s, &view(spot, Some(at), &shown, &[]));
+        assert_eq!(s.hover_rank(), Some(((want + 1) % 3 + 1, 3)), "the hover after press {k}");
+    }
+    // A press a few pixels off still counts as the same spot; further away starts again at the smallest.
+    ix.press(&mut s, &view([502.0, 501.0], Some(at), &shown, &[])).unwrap();
+    assert_eq!(s.selected(), Some(by_size[1]));
+    ix.press(&mut s, &view([560.0, 500.0], Some(at), &shown, &[])).unwrap();
+    assert_eq!(s.selected(), Some(by_size[0]), "another spot: back to the smallest");
+    // One edit under the cursor has no rank to show.
+    ix.hover(&mut s, &view(spot, Some(unit(47.2, 8.55 + 0.4)), &shown[..1], &[]));
+    assert!(s.hover_rank().is_none());
+}

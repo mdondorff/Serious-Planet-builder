@@ -906,3 +906,14 @@ Source: opus-planner (2026-10-20), owner test P1-3, VIEW-022, VIEW-034
 #### Scenario: A button holds the focus
 - **WHEN** a panel button holds the keyboard focus, as after a Tab through the panels, and a key arrives
 - **THEN** the key is the world's, the focus is let go, and Tab is the editor toggle's
+
+### Requirement: VIEW-041 The inspector steps values, the wheel sets the brush, and a click again goes through the edits under it
+A numeric field of the inspector and of the brush section SHALL commit on Enter and keep the focus; Up and Down SHALL step its value and commit it at once (`params::stepped`: the larger of the field's own step and 1 % of the value, ten times with Shift, kept inside the field's range; `panels::value_field`). With a brush tool on in the editor mode the mouse wheel SHALL set the brush radius in geometric steps of 10 % a line and Shift+wheel the strength, inside the brush's ranges (`EditRuntime::wheel`); without a brush tool, and with the mode off, the wheel is left to the overview's zoom. A press with the select tool SHALL select the edit with the smallest footprint among those under the cursor (`Session::pick_all`: the stamps whose outline holds the hit, smallest first, then the line or region `pick` takes); a press at the same spot (`SAME_SPOT_PX`, 4 px) while one of them is selected SHALL select the next in the same list, wrapping round. The hover label SHALL name the edit a press would select and its place, `(1 of 3)`, when more than one edit is under the cursor.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-21), owner test P2-2, P2-3, P2-4, VIEW-022, VIEW-033, VIEW-035
+
+#### Scenario: A hill inside a plateau
+- **WHEN** a plateau, a hill and a crater are placed over one spot and the select tool presses there four times
+- **THEN** the edits are selected smallest footprint first and then round again, the hover label names "(1 of 3)" before the first press, and a press 60 px away starts at the smallest again

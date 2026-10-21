@@ -75,7 +75,10 @@ pub fn build<S: ItemStore>(s: &Session<S>, shown: &[ItemId], view: &ViewState, g
             let handles = if selected { s.handles(ground).into_iter().map(|(h, p)| (h, see(p))).collect() } else { Vec::new() };
             Some(OverlayItem {
                 id: *id,
-                label: crate::lists::label_of(it),
+                label: match s.hover_rank().filter(|_| s.hovered() == Some(*id)) {
+                    Some((place, of)) => format!("{} ({place} of {of})", crate::lists::label_of(it)),
+                    None => crate::lists::label_of(it),
+                },
                 kind: it.kind.clone(),
                 selected,
                 hovered: s.hovered() == Some(*id),
