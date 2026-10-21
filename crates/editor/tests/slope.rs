@@ -194,3 +194,86 @@ fn an_item_already_too_steep_wears_the_warning_in_the_inspector_and_the_layer_ro
     assert!(s.inspector(cam).unwrap().warning.is_none());
     assert!(!s.layer_groups(cam).iter().flat_map(|g| g.rows.iter()).any(|r| r.id == other && r.steep));
 }
+
+// spec: VIEW-043
+#[test]
+fn a_long_drag_with_few_raw_points_is_checked_along_its_whole_path_and_its_pieces_count_twice_at_their_joints() {
+    // A stack of three strokes of radius 20 m at 120 m, then a drag from 0 to 500 m given by its two ends: the middle of its raw segment is
+    // 130 m from the stack, so only the resampled path (and its pieces) meets it.
+    let mut s = session();
+    s.set_brush_radius(20.0).unwrap();
+    s.set_brush_strength(5.0).unwrap();
+    for _ in 0..3 {
+        click(&mut s, BrushKind::Raise, 120.0);
+    }
+    assert!(strokes(&s).iter().all(|t| t.strength_m == 5.0), "the stack itself fits");
+    s.set_tool(Tool::Brush(BrushKind::Raise));
+    s.begin_stroke(east(0.0), 0.0).unwrap();
+    s.extend_stroke(east(500.0));
+    s.end_stroke().unwrap();
+    let drag: Vec<_> = strokes(&s).into_iter().skip(3).collect();
+    assert!(
+        !drag.is_empty() && drag.iter().all(|t| t.strength_m < 5.0),
+        "clamped along the path: {:?}",
+        drag.iter().map(|t| t.strength_m).collect::<Vec<_>>()
+    );
+    // On empty ground a stroke of one piece has its whole gradient, a drag of several pieces (cut at 64 points, sharing the cut point at full
+    // weight) twice it: about half the strength.
+    let mut a = session();
+    a.set_brush_radius(20.0).unwrap();
+    a.set_brush_strength(30.0).unwrap();
+    click(&mut a, BrushKind::Raise, 0.0);
+    let one = strokes(&a)[0].strength_m;
+    let mut b = session();
+    b.set_brush_radius(20.0).unwrap();
+    b.set_brush_strength(30.0).unwrap();
+    b.set_tool(Tool::Brush(BrushKind::Raise));
+    b.begin_stroke(east(0.0), 0.0).unwrap();
+    b.extend_stroke(east(600.0));
+    b.end_stroke().unwrap();
+    let long = strokes(&b)[0].strength_m;
+    assert!(one < 30.0 && long < one * 0.55 && long > one * 0.45, "a click gets {one} m, a long drag {long} m");
+}
+
+// spec: VIEW-043
+#[test]
+fn the_warning_is_on_the_rows_of_every_list() {
+    let mut s = session();
+    let template = planet_editor::commands::NewItem {
+        body: BodyId::PLANET,
+        surface: planet_world_def::item::DEFAULT_SURFACE.to_string(),
+        layer: brush::BRUSH_LAYER.to_string(),
+        priority: 0,
+        kind: brush::BRUSH_KIND.to_string(),
+        anchor: planet_world_def::item::Anchor { latitude_deg: 0.0, longitude_deg: 0.0, height_m: 0.0, heading_deg: 0.0 },
+        reach_m: 1.0,
+        max_delta_m: 0.0,
+        params: Default::default(),
+        name: Some("Steep".to_string()),
+        notes: None,
+        points: Vec::new(),
+        group: None,
+        part: None,
+        mask_layer: None,
+        strokes: Vec::new(),
+    };
+    let piece = brush::BrushStroke {
+        kind: BrushKind::Raise,
+        radius_m: 100.0,
+        strength_m: 5.0,
+        target_m: None,
+        points: vec![GeoPoint::new(0.0, 0.0)],
+    };
+    let mut open = Vec::new();
+    for _ in 0..40 {
+        let (touched, _) = s.editor_mut().add_stroke(template.clone(), &piece, &open).unwrap();
+        open = touched;
+    }
+    let id = open[0];
+    let cam = east(0.0) * R;
+    let flagged = |rows: &[planet_editor::lists::Row]| rows.iter().any(|r| r.id == id && r.steep);
+    assert!(flagged(&s.near(&[id], cam)), "the nearby list");
+    assert!(flagged(&s.search("Steep", None, cam)), "the search");
+    assert!(flagged(&s.chain(cam)), "the apply order");
+    assert!(flagged(&s.layer_groups(cam).iter().flat_map(|g| g.rows.clone()).collect::<Vec<_>>()), "the layers");
+}

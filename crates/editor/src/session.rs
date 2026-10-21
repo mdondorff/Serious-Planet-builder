@@ -181,7 +181,8 @@ pub struct Session<S: ItemStore> {
     brush_open: Vec<ItemId>,
     /// The slope the plan can draw (`LodParams::drawable_slope`), from which the brush guard takes its limit (VIEW-043).
     drawable_slope: f64,
-    /// The brush items over the limit, found for one revision of the editor (the scan reads every stroke).
+    /// The brush items over the limit, found for one revision of the editor (the scan reads every stroke). A `RefCell`: the session is for one
+    /// thread (it is not `Sync`).
     steep: std::cell::RefCell<Option<(u64, f64, BTreeSet<ItemId>)>>,
 }
 
@@ -410,21 +411,29 @@ impl<S: ItemStore> Session<S> {
 
     /// The rows of the nearby list: the `shown` edits, nearest first.
     pub fn near(&self, shown: &[ItemId], camera_position: Vec3) -> Vec<Row> {
-        lists::near_rows(self.editor.items(), shown, camera_position, self.radius_m)
+        self.flagged(lists::near_rows(self.editor.items(), shown, camera_position, self.radius_m))
+    }
+
+    /// `rows` with the warning of the brush guard set on those over the limit (VIEW-043).
+    fn flagged(&self, mut rows: Vec<Row>) -> Vec<Row> {
+        let steep = self.steep_items();
+        if !steep.is_empty() {
+            for row in &mut rows {
+                row.steep = self.is_steep(row.id, &steep);
+            }
+        }
+        rows
     }
 
     /// The search rows (VIEW-016): planet-wide, nearest to the camera first.
     pub fn search(&self, query: &str, kind: Option<&str>, camera_position: Vec3) -> Vec<Row> {
-        lists::search_rows(self.editor.items(), query, kind, camera_position, self.radius_m)
+        self.flagged(lists::search_rows(self.editor.items(), query, kind, camera_position, self.radius_m))
     }
 
     pub fn layer_groups(&self, camera_position: Vec3) -> Vec<LayerGroup> {
         let mut groups = lists::layer_groups(self.editor.items(), camera_position, self.radius_m);
-        let steep = self.steep_items();
-        if !steep.is_empty() {
-            for row in groups.iter_mut().flat_map(|g| g.rows.iter_mut()) {
-                row.steep = self.is_steep(row.id, &steep);
-            }
+        for group in &mut groups {
+            group.rows = self.flagged(std::mem::take(&mut group.rows));
         }
         groups
     }
@@ -465,7 +474,7 @@ impl<S: ItemStore> Session<S> {
 
     /// Every edit in the order they apply.
     pub fn chain(&self, camera_position: Vec3) -> Vec<Row> {
-        lists::apply_order(self.editor.items(), camera_position, self.radius_m)
+        self.flagged(lists::apply_order(self.editor.items(), camera_position, self.radius_m))
     }
 
     /// The inspector of the selected edit.
