@@ -285,3 +285,53 @@ fn the_margin_ring_reaches_across_face_edges_and_cube_corners() {
     let corner_faces: std::collections::BTreeSet<u8> = ring.iter().map(|c| c.face().0).collect();
     assert_eq!(corner_faces.len(), 3, "a cube corner ring touches three faces");
 }
+
+// spec: WDEF-005
+#[test]
+fn the_margin_by_integer_seam_folding_equals_the_walk_on_every_cell_of_the_small_levels() {
+    use planet_world_def::cells::with_margin_walk;
+    for level in 0..=3u8 {
+        let n = 1u32 << level;
+        for face in 0..6u8 {
+            for x in 0..n {
+                for y in 0..n {
+                    let c = TileId::new(Face(face), level, x, y).unwrap();
+                    for margin in 0..=3 {
+                        assert_eq!(
+                            with_margin(&[c], margin),
+                            with_margin_walk(&[c], margin),
+                            "level {level} face {face} ({x}, {y}) margin {margin}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+// spec: WDEF-005
+#[test]
+fn the_margin_of_a_cell_on_a_face_edge_or_a_cube_corner_costs_a_small_multiple_of_one_inside_a_face() {
+    // The editor's picking field asks for the margin of its point's cell on every height query (VIEW-022): the walk across a seam cost 50
+    // to 250 times the interior square (78 against 0.3 microseconds at three rings).
+    let level = cell_level(R);
+    let time = |c: TileId| {
+        let _ = with_margin(&[c], 3);
+        let mut best = f64::MAX;
+        for _ in 0..5 {
+            let t = std::time::Instant::now();
+            for _ in 0..400 {
+                std::hint::black_box(with_margin(&[std::hint::black_box(c)], 3));
+            }
+            best = best.min(t.elapsed().as_secs_f64());
+        }
+        best
+    };
+    let centre = time(cell_of(R, dir(1.0, 0.0, 0.0)));
+    let edge = time(cell_of(R, dir(1.0, 1.0, 0.0)));
+    let corner = time(cell_of(R, dir(-1.0, 1.0, 1.0)));
+    assert!(
+        edge < 30.0 * centre && corner < 30.0 * centre,
+        "level {level}: centre {centre:e} s, edge {edge:e} s, corner {corner:e} s per 400 margins"
+    );
+}
