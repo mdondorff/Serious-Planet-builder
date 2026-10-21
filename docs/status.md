@@ -34,6 +34,7 @@ Starts after the quota reset. Exit criteria are confirmed with the owner after G
 Open M6 items carried over (owner test, 2026-10-20): P1-4 tile flashing (Tracked), P1-5 editing frame rate on a quiet machine (owner's retest), P2-6 colour shift after fast surface-to-orbit moves, P2-7 colour step between 95 and 100 km, P2-8 missing tiles during an edit's refresh (with P1-4).
 
 ## Tracked
+- **Editor-mode CPU frame cost** (owner, 2026-10-21, RTX, `target/owner-items`): at about 18 km near "Plateau 7", looking past "Plateau 4" in the direction of travel, CPU over 90 ms, GPU under 4 ms, under 10 fps; editor off: CPU under 2 ms; looking down at Plateau 7: CPU about 14 ms. Hypothesis (planner): per-frame editor work over the edits in view (relevance, outlines, markers, heights sampled through the stamp stage), not the plan job. Next: a profile at that pose (F9 once H0 lands).
 - **Ridge 3 plan cost** (window 23, 2026-10-21): 1,998 ms against 672 ms; dive +13 % (accepted at the M6 close). Fix: the full path's volume work only on the subtrees the LOD-012 proof could not clear. `docs/perf/window-23.md`.
 - **Tiles flash to a coarser level while moving** (owner, 2026-10-19 and 20; P1-4, P2-8): seen near the sea, in debug views and on a slow approach from orbit. Not reproduced; next: the owner's F9 capture, or a scripted approach asserting the drawn level never coarsens.
 - **Keyboard dead after G** (owner, 2026-10-20; VIEW-034, VIEW-039): probable cause (Tab gave a panel the focus) fixed; the title shows the input state. Delete when the owner has not seen it again.
