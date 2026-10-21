@@ -1,0 +1,38 @@
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+world opened in 0.0 s
+readiness gate: sampling the machine for 10 s ...
+readiness gate: ok
+streaming perf: 2560x1440, cells 32, tau 6 px, finest level 22, timestamps true, height field cpu-erosion-v1 over a 16384-cell bake; source: store C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-m4/target/accept/global16384, 16384 cells
+  frame time = the loop's work per frame (plan not waited for; waits for the GPU only at the frames-in-flight bound; the pacing sleep excluded); GPU time is not measured in the pipelined loop (no timestamp readback without a wait), RAM is the peak working set of the process (the scene's own when one scene runs in the process, as in a child of `perf stream all`), driver VRAM is the whole GPU (an upper bound for the scene, shown beside the allocator's slots)
+dive: tile pack at the start: prefilled coarse pack (levels 3-4 present at start)
+dive: 2400 of 2400 frames of 0.0167 s, from an empty cache
+dive: script built in 0.0 s
+dive: rig built in 1.00 s
+dive: start-up load of 384 root tiles took 0.00 s
+cool-down dive: 54 C -> 54 C after 0 s (target 60 C)
+dive: detail lag post-pass over 2400 frames in 19.5 s (20 threads)
+dive: case ran in 62.5 s (teardown 0.02 s)
+dive: cpu_clock_before 2959 MHz, cpu_clock_after 2786 MHz (effective clock at an idle moment before and after the case, recorded not judged); power_plan H�chstleistung (8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c)
+SCENE-MEMORY scene=dive ram_peak_bytes=982298624 vram_used_bytes=793772032 pool_slots=219585 max_resident=14754 share_slots=219585
+SESSION VALID for budgets: frame verdicts: yes; no GPU rows (the pipelined scenes take no GPU time)
+dive: columns (median / p99 / max ms): plan 1.22/43.67/2572.04, scheduler 0.21/0.69/2.49, upload 0.00/0.85/1.22, record 1.38/2.56/4.73, wall 4.77/8.39/13.47 [clock state P8 210 MHz, below the 1400 MHz floor; 15 samples]
+  dive: GPU time: not measured (GPU verdicts: none; frame verdicts stand at any clock state)
+  dive: blank tiles: none in any of the frames ok
+  dive: frame median: 4.77 ms (budget 16.6) ok
+  dive: frame p99: 8.39 ms (budget 20) ok
+  dive: frame max: 13.47 ms at frame 2132 (cap 40); largest column record 3.37 ms (plan 1.40 ms off the path, scheduler 0.69, upload 0.00, record 3.37) ok
+  dive: upload bytes: at most 0.315 MiB per frame (cap 1 MiB) ok
+  dive: upload time: p99 0.85 ms, max 1.22 ms (budget 2 ms on the p99) ok
+  dive: terrain bytes: at most 0.252 GiB allocated, every frame (share 2.0 GiB) ok
+  dive: terrain pool VRAM: 0.252 GiB in the terrain pools (tier cap 8 GiB) ok
+  dive: terrain slots: 219585 slots allocated of 219585 share slots (pool ceiling against the share less its fixed items; at most 14754 resident; share 2.0 GiB) ok
+  dive: driver VRAM: 0.74 GiB in use on the whole GPU after the case, all processes: an upper bound for the scene, beside its 219585 of 219585 share slots (tier cap 8 GiB) ok
+  dive: RAM: 0.91 GiB scene's own peak working set (child process) (budget 8 GiB, CON-21) ok
+  dive: detail lag: descent: mean 0.103 levels (budget 1), worst frame 1.58 (budget 3), over 1800 frames ok
+  dive: detail lag: ground segment: zero for good after 0.08 s (budget 2 s) within (tracked, not gated)
+  dive: uncovered nodes: none in any of the frames ok
+dive: host load (8 samples, recorded not judged): system mean 24.4 % max 69.3 %; harness 21.9 %; competing mean 2.6 % max 7.4 %; top competitors: System 1.3 % (max 5.4), svchost 0.3 % (max 0.5), MsMpEng 0.3 % (max 0.4), claude 0.2 % (max 0.4), Code 0.1 % (max 0.4)
+regression check: no earlier valid log for this scene; this session becomes the baseline
+wrote C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-m4/target/w22/dive-A-r2.json (and C:/DEV/Serious-Planet-Builder/.claude/worktrees/sonnet-m4/target/w22/dive-A-r2.frames.txt)
+0 gated measure(s) over budget
