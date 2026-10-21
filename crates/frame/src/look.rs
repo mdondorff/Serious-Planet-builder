@@ -12,6 +12,7 @@
 
 pub mod atmosphere;
 pub mod file;
+pub mod materials;
 pub mod shading;
 pub mod water;
 
@@ -205,6 +206,8 @@ pub struct LitPlan {
     pub histogram: HistogramParams,
     /// The albedo table of the base shading (look data, ADR 0039 point 3).
     pub albedo: AlbedoParams,
+    /// The response curves of the ground materials (M7 G2): which material the ground detail shows where (look data, [`materials`]).
+    pub materials: materials::MaterialParams,
     /// The water level W in metres above the reference surface (ADR 0041; until the water-level field exists the sea's constant
     /// level, 0): the beach band and the seabed are measured from it, never from a hard-coded sea level.
     pub water_level_m: f32,
@@ -320,6 +323,7 @@ impl LitPlan {
             units: look.units,
             histogram: look.histogram,
             albedo: look.albedo,
+            materials: materials::MaterialParams::EARTH,
             water_level_m: 0.0,
             view: ShadeView::Lit,
             atmosphere: None,
@@ -402,6 +406,12 @@ impl LitPlan {
         if self.overlay != Overlay::None {
             look.push_str(&format!(" overlay {}", self.overlay.name()));
         }
+        if self.materials != materials::MaterialParams::EARTH {
+            look.push_str(" materials");
+            for b in self.materials.bits() {
+                look.push_str(&format!(" {b:016x}"));
+            }
+        }
         format!(
             "lit {mode} dt {} sun {} {} {} reset {} tonemap {}{look}",
             h(self.dt_s),
@@ -433,7 +443,7 @@ impl LitPlan {
             }
             u64::from_str_radix(s, 16).map(f64::from_bits).map_err(|e| format!("bad f64 bits '{s}': {e}"))
         };
-        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..', 'atmosphere ..' and 'overlay ..' in this order)";
+        let usage = "lit line is not 'dt .. sun .. reset .. tonemap ..' (optionally followed by 'units .. hist ..', 'albedo ..', 'water ..', 'view ..', 'atmosphere ..', 'overlay ..' and 'materials ..' in this order)";
         let ["dt", dt, "sun", sx, sy, sz, "reset", reset, "tonemap", tm, tail @ ..] = rest else {
             return Err(usage.into());
         };
@@ -450,6 +460,7 @@ impl LitPlan {
             units: SceneUnits::EARTH,
             histogram: HistogramParams::EARTH,
             albedo: AlbedoParams::EARTH,
+            materials: materials::MaterialParams::EARTH,
             water_level_m: 0.0,
             view: ShadeView::Lit,
             atmosphere: None,
@@ -466,6 +477,7 @@ impl LitPlan {
                 "view" => (4, 1),
                 "atmosphere" => (5, 24),
                 "overlay" => (6, 1),
+                "materials" => (7, materials::MATERIALS * materials::INPUTS * 2),
                 _ => return Err(usage.into()),
             };
             if rank <= stage || more.len() < arity {
@@ -494,6 +506,13 @@ impl LitPlan {
                 3 => plan.water_level_m = f(args[0])?,
                 4 => plan.view = ShadeView::parse(args[0]).ok_or_else(|| format!("unknown lit view '{}'", args[0]))?,
                 5 => plan.atmosphere = Some(AtmospherePlan::from_tokens(args)?),
+                7 => {
+                    let mut bits = [0u64; materials::MATERIALS * materials::INPUTS * 2];
+                    for (b, a) in bits.iter_mut().zip(args) {
+                        *b = f64_of(a)?.to_bits();
+                    }
+                    plan.materials = materials::MaterialParams::from_bits(&bits);
+                }
                 _ => plan.overlay = Overlay::parse(args[0]).ok_or_else(|| format!("unknown overlay '{}'", args[0]))?,
             }
             rest = after;
@@ -529,6 +548,7 @@ impl LitPlan {
             .map_err(|e| format!("lit plan: {e}"))?;
         }
         self.albedo.validate().map_err(|(k, v, why)| format!("lit plan: `{k}` = {v}: {why}"))?;
+        self.materials.validate().map_err(|(k, v, why)| format!("lit plan: `{k}` = {v}: {why}"))?;
         if !self.water_level_m.is_finite() {
             return Err(format!("lit plan: water level is {}, not finite", self.water_level_m));
         }
