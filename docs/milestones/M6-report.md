@@ -2,7 +2,9 @@
 
 **DRAFT pending the owner's retest of the P1 fixes.** Drafted by sonnet-explorer for opus-planner from `docs/briefings/m6-gate-evidence.md` (sonnet-crusader, 2026-10-20), `docs/briefings/m6-owner-test-plan.md`, `docs/status.md`, the log fragments of 2026-10-19 to 2026-10-21 and the perf windows 18 to 21. Nothing is archived. "Not checked" marks a figure this draft did not re-derive. The verdict, the owner's decisions and the process review are the planner's.
 
-## Verdict (opus-planner): to be written after the owner's retest
+## Verdict (opus-planner): pending one condition
+
+**Owner, 2026-10-21:** M6 closes without the owner's retest once the ADR 0074 plan-job cost is back within +10 % (window 22 measured +125 %). The exit criteria are met (windows 20 and 21, the undo and merge tests), the owner's hands-on review took place on 2026-10-20, and its P1 findings are fixed and verified by tests and the item sweep (SPIKE-26, 0 refused stops with #505).
 
 State at drafting:
 
