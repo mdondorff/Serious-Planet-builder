@@ -2276,6 +2276,61 @@ mod one_shot_tests {
 
     // spec: REND-016
     #[test]
+    fn the_edge_masks_ride_in_the_level_lane_above_the_level_and_the_state_and_a_node_without_masks_keeps_its_record() {
+        use planet_core::{PlanetFixed, TileId, Vec3};
+        let tile = TileId::new(planet_core::Face(0), 17, 1, 1).unwrap();
+        let node = |stitch: u8, fine: u8, state: planet_frame::TileState| planet_frame::TerrainDraw {
+            tile,
+            level: tile.level(),
+            origin: PlanetFixed(Vec3::new(1.0, 2.0, 3.0)),
+            camera_relative_origin: [1.0, 2.0, 3.0],
+            morph: 0.5,
+            morph_start_m: 10.0,
+            morph_end_m: 20.0,
+            color: [1, 2, 3, 255],
+            mesh_key: 7,
+            preview: false,
+            transient_only: false,
+            capped: false,
+            stitch,
+            fine,
+            quadrants: 0b1111,
+            state,
+        };
+        let mut plan = planet_frame::viewer::lit_warm_plan(
+            planet_frame::camera::Camera::looking_at_centre(
+                PlanetFixed(Vec3::new(0.0, 0.0, 7.0e6)),
+                Vec3::new(0.0, 1.0, 0.0),
+                1.0,
+                1.0,
+                1.0,
+            ),
+            (64, 64),
+            32,
+            planet_frame::look::LitPlan::fixed(0.0),
+        );
+        use planet_frame::TileState;
+        plan.nodes = vec![node(0, 0, TileState::Exact), node(0b0011, 0b0101, TileState::Stale), node(0b1111, 0b1111, TileState::Previewed)];
+        let bytes = node_record_bytes(&plan);
+        let lane = |record: usize| {
+            let at = record * NODE_BYTES as usize + 4 * 11;
+            f32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
+        };
+        assert_eq!(lane(0), 17.0, "no masks, exact: the level alone, as before");
+        let (stale, previewed) = (TileState::Stale.code() as f32, TileState::Previewed.code() as f32);
+        assert_eq!(lane(1), 17.0 + 32.0 * stale + 256.0 * f32::from(0b0011u8 | (0b0101u8 << 4)));
+        assert_eq!(lane(2), 17.0 + 32.0 * previewed + 256.0 * 255.0);
+        // The shader's decode: the level modulo 32, the state above it modulo 8, the masks above 256 (stitch low, fine high).
+        for record in 0..3 {
+            let word = lane(record) as u32;
+            assert_eq!(word % 32, 17);
+            assert_eq!((word / 32) % 8, [0, stale as u32, previewed as u32][record]);
+            assert_eq!(word >> 8, [0, 0b0011 | (0b0101 << 4), 255][record]);
+        }
+    }
+
+    // spec: REND-016
+    #[test]
     fn a_one_shot_plan_larger_than_a_block_spans_several_blocks_instead_of_failing() {
         for (nodes, cells) in [(1usize, 32u32), (100, 16), (14_639, 32), (14_640, 32), (32_768, 32), (4_000, 64)] {
             let pool = one_shot_pool(nodes, cells).unwrap_or_else(|e| panic!("{nodes} nodes at cells {cells}: {e}"));

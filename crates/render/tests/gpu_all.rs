@@ -24,8 +24,6 @@ mod gpu_pools;
 mod gpu_preview;
 #[path = "gpu_quadrants.rs"]
 mod gpu_quadrants;
-#[path = "gpu_stitch.rs"]
-mod gpu_stitch;
 #[path = "gpu_reference.rs"]
 mod gpu_reference;
 #[path = "gpu_renderer.rs"]
@@ -36,6 +34,8 @@ mod gpu_shading;
 mod gpu_stamps;
 #[path = "gpu_steep_terrain.rs"]
 mod gpu_steep_terrain;
+#[path = "gpu_stitch.rs"]
+mod gpu_stitch;
 #[path = "gpu_terrain.rs"]
 mod gpu_terrain;
 #[path = "gpu_ui.rs"]

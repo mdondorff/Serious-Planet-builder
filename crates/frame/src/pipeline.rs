@@ -308,6 +308,9 @@ pub fn draw_plan_transient(
             if let Some(r) = resident.resident(d.tile) {
                 substituted += 1;
                 let mut node = draw_of(req, d.tile, r);
+                // A stale tile keeps the edge masks of its place in the plan (ADR 0074): next to a capped leaf its edge must still meet the
+                // capped leaf's grid while its refresh is on the way.
+                (node.stitch, node.fine) = (d.stitch, d.fine);
                 let by_delta = previewed(preview, map.as_ref(), d.tile, req.lod.radius_m);
                 let by_transient = previewed(transient, map.as_ref(), d.tile, req.lod.radius_m);
                 node.preview = by_delta || by_transient;

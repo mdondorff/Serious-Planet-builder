@@ -71,7 +71,8 @@ fn ground_camera() -> Camera {
 fn plan_over_a_spike() -> (planet_frame::TerrainPlan, Spike) {
     let camera = ground_camera();
     let spike = Spike { at: camera.position.0.normalized(), height_m: 220.0, radius_m: 100.0 };
-    let req = TerrainRequest { camera, size: SIZE, view: TerrainView::Level, lod: lod(), face_mapping: TangentWarp.id().to_string(), seed: 1 };
+    let req =
+        TerrainRequest { camera, size: SIZE, view: TerrainView::Level, lod: lod(), face_mapping: TangentWarp.id().to_string(), seed: 1 };
     (plan_terrain_field(&req, &spike).unwrap(), spike)
 }
 
@@ -112,7 +113,8 @@ fn a_capped_leaf_has_its_finer_neighbours_stitched_to_it_and_no_other_leaf_has_a
     assert!(stitched > 0 && fines > 0, "the spike's capped tiles have finer neighbours: {stitched} stitched, {fines} fine edges");
     // Nothing is masked on ground with no capped tile.
     let camera = ground_camera();
-    let req = TerrainRequest { camera, size: SIZE, view: TerrainView::Level, lod: lod(), face_mapping: TangentWarp.id().to_string(), seed: 1 };
+    let req =
+        TerrainRequest { camera, size: SIZE, view: TerrainView::Level, lod: lod(), face_mapping: TangentWarp.id().to_string(), seed: 1 };
     let flat = plan_terrain_field(&req, &Reference(1)).unwrap();
     assert!(flat.nodes.iter().all(|n| n.stitch == 0 && n.fine == 0 && !n.capped));
 }
@@ -121,12 +123,12 @@ fn a_capped_leaf_has_its_finer_neighbours_stitched_to_it_and_no_other_leaf_has_a
 #[test]
 fn the_vertices_of_a_finer_leaf_on_a_stitched_edge_morph_onto_the_capped_leafs_edge() {
     // The vertex stage morphs a vertex of a stitched edge to the parent grid (the mesh's `coarse` position): the odd vertices of the edge go to
-    // the middle of their two even neighbours, which are the capped leaf's vertices (the same lattice points, COORD-007). Every such vertex must
-    // then lie on the capped leaf's edge, the polyline of its edge vertices, to a millimetre.
+    // the middle of their two even neighbours, which are the capped leaf's vertices (the same lattice points, COORD-007). Every vertex of the
+    // edge must then lie on the capped leaf's edge, the polyline of its edge vertices, to a millimetre: no vertex is skipped.
     let (plan, spike) = plan_over_a_spike();
     let cells = plan.cells;
     let by_tile: BTreeMap<TileId, &planet_frame::terrain::TerrainDraw> = plan.nodes.iter().map(|n| (n.tile, n)).collect();
-    let mut checked = 0;
+    let (mut edges, mut checked) = (0, 0);
     for f in plan.nodes.iter().filter(|n| n.stitch != 0) {
         let fine = tile_mesh_field(&spike, &TangentWarp, f.tile, cells, R);
         for side in Side::ALL.into_iter().filter(|s| f.stitch & side_bit(*s) != 0) {
@@ -134,40 +136,75 @@ fn the_vertices_of_a_finer_leaf_on_a_stitched_edge_morph_onto_the_capped_leafs_e
             let t = by_tile[&across.parent().unwrap()];
             let coarse = tile_mesh_field(&spike, &TangentWarp, t.tile, cells, R);
             // The grid vertices of an edge, in order along it (the east and west edges run along j, north and south along i).
-            let edge = |mesh: &planet_generators::mesh::TileMesh, side: Side, pick: &dyn Fn(&planet_generators::mesh::MeshVertex) -> [f32; 3]| {
-                let w = (cells + 1) as usize;
-                (0..w)
-                    .map(|k| {
-                        let (i, j) = match side {
-                            Side::East => (w - 1, k),
-                            Side::West => (0, k),
-                            Side::North => (k, w - 1),
-                            Side::South => (k, 0),
-                        };
-                        let v = pick(&mesh.vertices[j * w + i]);
-                        Vec3::new(f64::from(v[0]), f64::from(v[1]), f64::from(v[2])) + mesh.origin.0
-                    })
-                    .collect::<Vec<Vec3>>()
-            };
+            let edge =
+                |mesh: &planet_generators::mesh::TileMesh, side: Side, pick: &dyn Fn(&planet_generators::mesh::MeshVertex) -> [f32; 3]| {
+                    let w = (cells + 1) as usize;
+                    (0..w)
+                        .map(|k| {
+                            let (i, j) = match side {
+                                Side::East => (w - 1, k),
+                                Side::West => (0, k),
+                                Side::North => (k, w - 1),
+                                Side::South => (k, 0),
+                            };
+                            let v = pick(&mesh.vertices[j * w + i]);
+                            Vec3::new(f64::from(v[0]), f64::from(v[1]), f64::from(v[2])) + mesh.origin.0
+                        })
+                        .collect::<Vec<Vec3>>()
+                };
             // The capped leaf's edge facing the finer leaf.
             let facing = Side::ALL.into_iter().find(|s| t.tile.neighbor(&TangentWarp, *s) == f.tile.parent().unwrap()).unwrap();
             let target = edge(&coarse, facing, &|v| v.pos);
             let morphed = edge(&fine, side, &|v| v.coarse);
+            edges += 1;
             for p in &morphed {
                 let d = target.windows(2).map(|s| distance_to_segment(*p, s[0], s[1])).fold(f64::INFINITY, f64::min);
-                // Only the part of the edge that the capped leaf's edge covers: the finer leaf spans half of it.
-                if d < 0.5 {
-                    assert!(d < 1e-3, "{:?} {side:?}: a morphed vertex is {d} m off the capped leaf's edge", f.tile);
-                    checked += 1;
-                }
+                assert!(d < 1e-3, "{:?} {side:?}: a morphed vertex is {d} m off the capped leaf's edge", f.tile);
+                checked += 1;
             }
         }
     }
-    assert!(checked > 20, "the oracle looked at {checked} vertices");
+    assert!(
+        edges > 0 && checked == edges * (cells as usize + 1),
+        "every vertex of every stitched edge was looked at: {checked} of {edges} edges"
+    );
 }
 
 fn distance_to_segment(p: Vec3, a: Vec3, b: Vec3) -> f64 {
     let ab = b - a;
     let t = ((p - a).dot(ab) / ab.dot(ab)).clamp(0.0, 1.0);
     (p - (a + ab * t)).length()
+}
+
+// spec: VIEW-044, LOD-008
+#[test]
+fn a_stale_or_edited_finer_leaf_keeps_the_edge_masks_of_its_place_in_the_plan() {
+    use planet_frame::pipeline::{draw_plan_transient, ResidentRecords, ResidentTile};
+    use planet_frame::{TileBounds, TileState};
+    use std::collections::{BTreeSet, HashMap};
+    let camera = ground_camera();
+    let spike = Spike { at: camera.position.0.normalized(), height_m: 220.0, radius_m: 100.0 };
+    let req =
+        TerrainRequest { camera, size: SIZE, view: TerrainView::Level, lod: lod(), face_mapping: TangentWarp.id().to_string(), seed: 1 };
+    let plan = plan_terrain_field(&req, &spike).unwrap();
+    let records = ResidentRecords::new(&spike, &TangentWarp, &lod());
+    let mut resident: HashMap<TileId, ResidentTile> = HashMap::new();
+    for n in &plan.nodes {
+        let mut up = Some(n.tile);
+        while let Some(t) = up {
+            resident.entry(t).or_insert_with(|| records.record(t));
+            up = t.parent();
+        }
+    }
+    let stitched: BTreeSet<TileId> = plan.nodes.iter().filter(|n| n.stitch != 0).map(|n| n.tile).collect();
+    assert!(!stitched.is_empty());
+    // Every stitched leaf is named by an edit: it is drawn as it is, stale, and keeps its masks (and so does an exact one).
+    let drawn = draw_plan_transient(&req, Some((&req, &plan)), &resident, &TileBounds::default(), &[], &stitched, &[]).unwrap();
+    for n in &drawn.plan.nodes {
+        let planned = plan.nodes.iter().find(|p| p.tile == n.tile).unwrap();
+        assert_eq!((n.stitch, n.fine), (planned.stitch, planned.fine), "{:?}", n.tile);
+        if stitched.contains(&n.tile) {
+            assert_eq!(n.state, TileState::Stale);
+        }
+    }
 }
