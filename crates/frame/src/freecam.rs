@@ -140,6 +140,14 @@ pub fn free_step(pose: FreePose, input: &FreeInput, dt: f64, height_m: f64, p: &
     FreePose { position: PlanetFixed(new_up * r1), heading: new_heading, pitch }
 }
 
+/// The near plane of the free camera, metres (VIEW-004, G0): a crouched eye sees the ground a few centimetres from it. The scripted flight keeps
+/// its 0.1 m (goldens, perf scenes). With the reversed-Z `Depth32Float` one depth step is about 7e-8 m at 1 m, 1.5e-5 m at 100 m and 1e-4 m
+/// at 1 km (the float keeps its relative precision, so the near plane hardly matters; measured in `height_aware.rs`).
+pub const FREE_NEAR_M: f64 = 0.05;
+
+/// The least height of the free camera's eye above the terrain, metres (VIEW-004, G0): a crouch. Ten times the near plane.
+pub const FREE_EYE_CLEARANCE_M: f64 = 0.5;
+
 /// Lift the pose to `min_clearance_m` above a terrain whose surface here is `ground_radius_m` from the centre (sphere radius plus
 /// height), when it is lower: the caller reads the terrain at the pose's direction.
 pub fn keep_clearance(pose: FreePose, ground_radius_m: f64, min_clearance_m: f64) -> FreePose {

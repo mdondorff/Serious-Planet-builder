@@ -1,0 +1,1 @@
+- 2026-10-21 **near-plane** (explorer, M7 G0): the free camera crouches to 0.5 m above the terrain (was 1 m) with a 5 cm near plane (was 10 cm; the scripted flight keeps 0.1 m); the crouched eye stays above the drawn surface on the reference and the steep field, and one f32 reversed-Z depth step is 7e-8 m at 1 m, 1.5e-5 m at 100 m, 1e-4 m at 1 km (VIEW-004).

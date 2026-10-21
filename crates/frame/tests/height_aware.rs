@@ -14,7 +14,6 @@ use planet_generators::mesh::{grid_indices, tile_mesh_field};
 use planet_generators::stress::Steep;
 
 const R: f64 = 6_371_000.0;
-const NEAR: f64 = 0.1;
 
 fn reference_params() -> LodParams {
     LodParams { cells: 16, viewport_h_px: 96.0, tau_px: 2.5, max_level: 26, ..LodParams::earth_1080p() }
@@ -116,6 +115,7 @@ fn drawn_surface_offset(drawn: &[Vec3], cam: PlanetFixed, cells: u32) -> Option<
 
 fn check_view(field: &dyn HeightField, label: &str, params: &LodParams, name: &str, cam: planet_frame::Camera) -> Vec<String> {
     let map = TangentWarp;
+    let near = cam.near_m;
     let mut failures = Vec::new();
     let req = TerrainRequest {
         camera: cam,
@@ -168,15 +168,15 @@ fn check_view(field: &dyn HeightField, label: &str, params: &LodParams, name: &s
     let dir = cam.position.0.normalized();
     let above_terrain = cam.position.0.length() - (R + field.height(dir));
     let spacing = R * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << d.tile.level()) / f64::from(params.cells);
-    let px = spacing * params.viewport_h_px / (2.0 * libm::tan(60f64.to_radians() / 2.0) * above_terrain.max(NEAR));
+    let px = spacing * params.viewport_h_px / (2.0 * libm::tan(60f64.to_radians() / 2.0) * above_terrain.max(near));
     eprintln!(
         "{label} {name}: leaf level {}, drawn surface {:.3} m below the camera, {above_terrain:.1} m above terrain, {px:.2} px",
         d.tile.level(),
         -s
     );
-    if s > -NEAR {
+    if s > -near {
         failures.push(format!(
-            "{label} {name}: camera is {:.3} m above the drawn surface of leaf {:?} (level {}); need at least the near plane {NEAR} m",
+            "{label} {name}: camera is {:.3} m above the drawn surface of leaf {:?} (level {}); need at least the near plane {near} m",
             -s,
             d.tile,
             d.tile.level()
@@ -199,9 +199,9 @@ fn check_view(field: &dyn HeightField, label: &str, params: &LodParams, name: &s
             nearest = nearest.min(distance_to_drawn_surface(&v, params.cells));
         }
     }
-    if nearest < NEAR {
+    if nearest < near {
         failures.push(format!(
-            "{label} {name}: the drawn surface is {nearest:.3} m from the camera, inside the near plane {NEAR} m (leaf {:?}, level {})",
+            "{label} {name}: the drawn surface is {nearest:.3} m from the camera, inside the near plane {near} m (leaf {:?}, level {})",
             d.tile,
             d.tile.level()
         ));
@@ -606,4 +606,63 @@ fn every_part_of_the_selection_cache_key_invalidates_and_warm_frames_reuse() {
         // Back to the first key: also a fresh start, never entries of the other key.
         planet_frame::plan_terrain_cached(&first, &Reference(1), &mut cache).unwrap();
     }
+}
+
+/// The ground-1m view lowered to the crouched eye of the editor's free camera (VIEW-004: `FREE_EYE_CLEARANCE_M` above the terrain) with its
+/// near plane (`FREE_NEAR_M`), turned to the horizon and to the ground.
+fn crouched_views(field: &dyn HeightField) -> Vec<(&'static str, planet_frame::Camera)> {
+    let (_, base) = scripted_views_field(R, 16.0 / 9.0, field).into_iter().find(|(n, _)| *n == "ground-1m").expect("the ground view");
+    let dir = base.position.0.normalized();
+    let position = PlanetFixed(dir * (R + field.height(dir) + planet_frame::freecam::FREE_EYE_CLEARANCE_M));
+    let mut out = Vec::new();
+    for (name, pitch) in [("crouched-horizon", 0.0), ("crouched-down", -1.2)] {
+        let pose = planet_frame::freecam::FreePose::new(position, base.forward, pitch);
+        out.push((name, pose.camera(60f64.to_radians(), 16.0 / 9.0, planet_frame::freecam::FREE_NEAR_M)));
+    }
+    out
+}
+
+// spec: VIEW-004, LOD-008
+#[test]
+fn a_crouched_eye_with_the_free_cameras_near_plane_stays_above_the_drawn_surface_on_the_reference_and_the_steep_field() {
+    const _: () = assert!(planet_frame::freecam::FREE_NEAR_M < 0.1);
+    const _: () = assert!(planet_frame::freecam::FREE_NEAR_M * 5.0 <= planet_frame::freecam::FREE_EYE_CLEARANCE_M);
+    for (label, field, params) in [
+        ("reference", &Reference(1) as &(dyn HeightField + Sync), reference_params()),
+        ("steep", &Steep(1) as &(dyn HeightField + Sync), steep_params()),
+    ] {
+        let failures: Vec<String> =
+            crouched_views(field).into_iter().flat_map(|(name, cam)| check_view(field, label, &params, name, cam)).collect();
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+}
+
+// spec: VIEW-004
+#[test]
+fn the_free_cameras_near_plane_leaves_the_reversed_z_depth_a_resolution_finer_than_a_tenth_of_a_millimetre_out_to_a_kilometre() {
+    // The distance one step of the f32 depth value (`ndc.z = near / d`, from the camera's own projection) stands for at `d` metres ahead.
+    let camera = planet_frame::Camera::at_surface_point(
+        PlanetFixed(Vec3::new(R + 2.0, 0.0, 0.0)),
+        Vec3::new(0.0, 1.0, 0.0),
+        0.0,
+        60f64.to_radians(),
+        16.0 / 9.0,
+        planet_frame::freecam::FREE_NEAR_M,
+    );
+    let m = camera.view_projection();
+    let forward = camera.forward;
+    let ndc_z = |d: f64| -> f32 {
+        let p = [forward.x * d, forward.y * d, forward.z * d, 1.0];
+        let row = |r: usize| (0..4).map(|c| f64::from(m[c * 4 + r]) * p[c]).sum::<f64>();
+        (row(2) / row(3)) as f32
+    };
+    let mut table = Vec::new();
+    for (d, limit_m) in [(1.0, 1e-6), (10.0, 1e-5), (100.0, 1e-4), (1000.0, 1e-3)] {
+        let z = ndc_z(d);
+        let nearer = f32::from_bits(z.to_bits() + 1);
+        let resolution = d - f64::from(camera.near_m as f32) / f64::from(nearer);
+        table.push(format!("{d} m: {resolution:.2e} m"));
+        assert!(resolution > 0.0 && resolution < limit_m, "at {d} m one depth step is {resolution:.3e} m, over {limit_m} m");
+    }
+    eprintln!("depth resolution with the near plane {} m: {}", planet_frame::freecam::FREE_NEAR_M, table.join(", "));
 }
