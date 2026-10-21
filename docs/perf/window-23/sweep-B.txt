@@ -1,0 +1,14 @@
+stop item kind altitude_m frames p50_ms p95_ms max_ms plans plan_p50_ms plan_p95_ms r_p50_ms r_p95_ms refused first_refusal
+0 Platonmax crater 2000 90 250.00 250.00 250.00 1 165.64 165.64 328.30 328.30 0 -
+1 Platonmax crater 200 90 147.00 250.00 250.00 0 0.00 0.00 0.00 0.00 1 plan for frame 92: invalid LOD parameters: tile TileId(1224979112080673376) (level 17): morph interval [1111.8, 991.8] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+2 Platonmax crater 30 90 102.00 250.00 250.00 0 0.00 0.00 0.00 0.00 1 plan for frame 182: invalid LOD parameters: tile TileId(1441152740656060451) (level 20): morph interval [137.6, 124.0] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+3 Ridge_3 ridge 2000 90 250.00 250.00 250.00 1 704.24 704.24 905.46 905.46 0 -
+4 Ridge_3 ridge 200 90 40.00 250.00 250.00 0 0.00 0.00 0.00 0.00 1 plan for frame 365: invalid LOD parameters: tile TileId(1152921506245890461) (level 16): morph interval [2042.0, 1983.7] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+5 Ridge_3 ridge 30 90 46.00 250.00 250.00 0 0.00 0.00 0.00 0.00 1 plan for frame 454: invalid LOD parameters: tile TileId(1224979105200948974) (level 17): morph interval [1302.5, 991.8] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+6 Hill_7 hill 2000 90 250.00 250.00 250.00 1 133.35 133.35 377.13 377.13 0 -
+7 Hill_7 hill 200 90 190.00 250.00 250.00 0 0.00 0.00 0.00 0.00 1 plan for frame 632: invalid LOD parameters: tile TileId(1297036718906982231) (level 18): morph interval [641.6, 495.9] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+8 Hill_7 hill 30 90 46.00 250.00 250.00 0 0.00 0.00 0.00 0.00 2 plan for frame 726: invalid LOD parameters: tile TileId(1297036718906993419) (level 18): morph interval [600.5, 495.9] m is empty because the height extent of its neighbourhood leaves no room; this terrain is too steep for cells 32 and viewport_h_px / tau_px 240: raise viewport_h_px / tau_px or reduce cells
+9 Hill_7 hill 2000 90 250.00 250.00 250.00 1 608.93 608.93 761.19 761.19 0 -
+10 Hill_7 hill 200 90 250.00 250.00 250.00 1 236.52 236.52 508.53 508.53 0 -
+11 Hill_7 hill 30 90 250.00 250.00 250.00 1 278.34 278.34 446.70 446.70 0 -
+[sweep FAIL]: 12 stops, 4 items x 3 altitudes, 6 stops with a refused plan, worst p95 250.00 ms
