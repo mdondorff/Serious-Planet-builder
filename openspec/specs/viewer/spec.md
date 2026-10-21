@@ -397,7 +397,7 @@ Typed values:
 - for another kind the reach and the bound only grow to hold the value.
 
 Picking and inspection:
-- the item under the pointer is the nearest in units of its own outline radius among the shown ones (`pick_footprint`); an item that is not shown cannot be picked;
+- the item under the pointer is the nearest in units of its own outline radius among the shown ones (`pick_footprint`; a select press and the hover take the smallest footprint first and a press again goes on to the next, VIEW-041); an item that is not shown cannot be picked;
 - the inspector is the selected edit's values as plain data: kind, layer, place in the order of its layer, distance, reach and the parameters in the table's order with their ranges, then the others by name without a range;
 - lengths read `450 m` below 1 km (after rounding to a tenth of a metre) and `2.4 km` above.
 
