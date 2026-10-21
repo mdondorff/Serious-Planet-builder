@@ -340,7 +340,8 @@ impl App<'_> {
         let path_path = dir.join(format!("frame-{n}-path.txt"));
         std::fs::write(&path_path, st.path.to_text()).map_err(|e| format!("writing {}: {e}", path_path.display()))?;
         let bundle_path = dir.join(format!("frame-{n}.bundle"));
-        let bundle = self.repro_bundle(st, camera, view).map_err(|e| format!("{e} (the camera path was written to {})", path_path.display()))?;
+        let bundle =
+            self.repro_bundle(st, camera, view).map_err(|e| format!("{e} (the camera path was written to {})", path_path.display()))?;
         std::fs::write(&bundle_path, bundle.to_text()).map_err(|e| format!("writing {}: {e}", bundle_path.display()))?;
         // The last frame the renderer submitted, as the final tone-mapped colour target: without the egui panels (they are painted on the
         // swapchain image only). A failed write is said in the notice, it does not lose the bundle.

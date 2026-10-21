@@ -86,8 +86,13 @@ mod tests {
         hill.anchor.longitude_deg = 0.01;
         ed.put(hill).unwrap();
         ed.put_line(template("ridge", &[("amount_m", 30.0), ("width_m", 200.0)]), &[east(1_000.0), east(3_000.0), east(5_000.0)]).unwrap();
-        let stroke =
-            BrushStroke { kind: BrushKind::Raise, radius_m: 100.0, strength_m: 2.0, target_m: None, points: vec![east(8_000.0), east(8_400.0)] };
+        let stroke = BrushStroke {
+            kind: BrushKind::Raise,
+            radius_m: 100.0,
+            strength_m: 2.0,
+            target_m: None,
+            points: vec![east(8_000.0), east(8_400.0)],
+        };
         ed.add_stroke(template("brush", &[]), &stroke, &[]).unwrap();
         ed
     }
@@ -97,7 +102,11 @@ mod tests {
     fn a_definition_with_stamps_a_line_and_a_brush_stroke_round_trips_through_the_bundle_world_to_an_equal_definition() {
         let ed = editor_with_items();
         let items: Vec<Item> = ed.items().cloned().collect();
-        assert!(items.iter().any(|i| i.kind == "hill") && items.iter().any(|i| i.kind == "ridge") && items.iter().any(|i| !i.strokes.is_empty()));
+        assert!(
+            items.iter().any(|i| i.kind == "hill")
+                && items.iter().any(|i| i.kind == "ridge")
+                && items.iter().any(|i| !i.strokes.is_empty())
+        );
         let (definition_toml, texts) = record_world(ed.definition(), &items).unwrap();
         let rebuilt = rebuild_world(&definition_toml, &texts).unwrap();
         assert_eq!(&rebuilt, ed.definition(), "the replay's definition equals the editor's");

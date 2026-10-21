@@ -699,8 +699,12 @@ pub fn render_terrain(ctx: &GpuContext, o: &Options, out: &mut dyn Write) -> Res
         // from the bundle alone. The seed-only run records none and means the reference field of its seed.
         let (definition_hash, world_section) = if o.world.is_some() {
             let toml = planet_world_def::toml_io::to_toml(&world.definition()).map_err(|e| format!("recording the world: {e}"))?;
-            let section =
-                planet_frame::BundleWorld { height_field: world.id().to_string(), global_res: world.global_res(), definition_toml: toml, items: Vec::new() };
+            let section = planet_frame::BundleWorld {
+                height_field: world.id().to_string(),
+                global_res: world.global_res(),
+                definition_toml: toml,
+                items: Vec::new(),
+            };
             (world.definition().hash(), Some(section))
         } else {
             (definition_hash(request.seed, request.lod.radius_m), None)
