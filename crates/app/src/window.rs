@@ -1324,21 +1324,22 @@ impl ApplicationHandler for App<'_> {
                     apply_grab(st);
                 }
             }
-            WindowEvent::RedrawRequested => match {
+            WindowEvent::RedrawRequested => {
                 self.update_click_target();
-                self.frame()
-            } {
-                Ok(true) => {
-                    self.summary = self.state.as_ref().map(smoke_summary);
-                    el.exit();
-                }
-                Ok(false) => {
-                    if let Some(st) = &self.state {
-                        st.window.request_redraw();
+                let drawn = self.frame();
+                match drawn {
+                    Ok(true) => {
+                        self.summary = self.state.as_ref().map(smoke_summary);
+                        el.exit();
                     }
+                    Ok(false) => {
+                        if let Some(st) = &self.state {
+                            st.window.request_redraw();
+                        }
+                    }
+                    Err(e) => self.fail(el, e),
                 }
-                Err(e) => self.fail(el, e),
-            },
+            }
             _ => {}
         }
     }
