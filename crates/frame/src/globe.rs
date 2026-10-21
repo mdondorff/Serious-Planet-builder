@@ -304,6 +304,42 @@ pub enum Click {
     Surface(Vec3),
 }
 
+/// What a click at the cursor would do in the overview (VIEW-045).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ClickTarget {
+    Marker(u64),
+    Surface(Vec3),
+    /// A flight is running: a click is ignored until it lands.
+    Flying,
+    /// The cursor is over the sky, or past the horizon of the planet: nothing to fly to.
+    Sky,
+}
+
+impl ClickTarget {
+    /// Whether a click here starts a flight (the cursor is a pointer, the hint says so).
+    pub fn acts(self) -> bool {
+        matches!(self, ClickTarget::Marker(_) | ClickTarget::Surface(_))
+    }
+
+    /// The hover hint where a click acts.
+    pub fn hint(self) -> Option<&'static str> {
+        match self {
+            ClickTarget::Marker(_) => Some("click to fly to this item"),
+            ClickTarget::Surface(_) => Some("click to fly here"),
+            ClickTarget::Flying | ClickTarget::Sky => None,
+        }
+    }
+
+    /// The status line for a click that was ignored, and why.
+    pub fn ignored(self) -> Option<&'static str> {
+        match self {
+            ClickTarget::Flying => Some("click ignored: a flight is in progress"),
+            ClickTarget::Sky => Some("click ignored: the cursor is not over the planet"),
+            ClickTarget::Marker(_) | ClickTarget::Surface(_) => None,
+        }
+    }
+}
+
 /// The overview while the editor shows it: the view, the flight a click started, and what to do when the flight ends. GPU-free; the window
 /// feeds it the mouse and the frame time and takes the camera from it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -351,20 +387,38 @@ impl GlobeSession {
         limits: &crate::pick::PickLimits,
         height_m: &dyn Fn(Vec3) -> f64,
     ) -> Option<Click> {
-        if self.flight.is_some() {
-            return None;
-        }
-        let visible = visible_markers(camera, markers, self.radius_m, viewport);
-        let (target, click) = if let Some(id) = marker_at(&visible, cursor, HIT_RADIUS_PX) {
-            let marker = markers.iter().find(|m| m.id == id)?;
-            (GlobeView::closing_on(marker), Click::Marker(id))
-        } else {
-            let ray = crate::pick::cursor_ray(camera, cursor[0], cursor[1], viewport.width_px, viewport.height_px);
-            let hit = crate::pick::pick_surface(&ray, limits, height_m)?;
-            (GlobeView::new(hit.dir, LANDING_ALTITUDE_M), Click::Surface(hit.dir))
+        let (target, click) = match self.click_target(cursor, camera, viewport, markers, limits, height_m) {
+            ClickTarget::Marker(id) => (GlobeView::closing_on(markers.iter().find(|m| m.id == id)?), Click::Marker(id)),
+            ClickTarget::Surface(dir) => (GlobeView::new(dir, LANDING_ALTITUDE_M), Click::Surface(dir)),
+            ClickTarget::Flying | ClickTarget::Sky => return None,
         };
         self.flight = Some((GlobeFlight::new(self.view, target, self.radius_m), 0.0));
         Some(click)
+    }
+
+    /// What a click at `cursor` would do, without doing it (VIEW-045): the marker within [`HIT_RADIUS_PX`], else the surface under the cursor
+    /// at any altitude (orbital too), nothing while a flight runs, nothing over the sky or past the horizon.
+    pub fn click_target(
+        &self,
+        cursor: [f64; 2],
+        camera: &Camera,
+        viewport: Viewport,
+        markers: &[Marker],
+        limits: &crate::pick::PickLimits,
+        height_m: &dyn Fn(Vec3) -> f64,
+    ) -> ClickTarget {
+        if self.flight.is_some() {
+            return ClickTarget::Flying;
+        }
+        let visible = visible_markers(camera, markers, self.radius_m, viewport);
+        if let Some(id) = marker_at(&visible, cursor, HIT_RADIUS_PX) {
+            return ClickTarget::Marker(id);
+        }
+        let ray = crate::pick::cursor_ray(camera, cursor[0], cursor[1], viewport.width_px, viewport.height_px);
+        match crate::pick::pick_surface(&ray, limits, height_m) {
+            Some(hit) => ClickTarget::Surface(hit.dir),
+            None => ClickTarget::Sky,
+        }
     }
 
     /// Advance a running flight by `dt_s` seconds. The frame the flight ends returns the view it ended at: the window leaves the overview

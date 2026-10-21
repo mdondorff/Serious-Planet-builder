@@ -918,6 +918,17 @@ Source: opus-planner (2026-10-21), owner test P2-2, P2-3, P2-4, VIEW-022, VIEW-0
 - **WHEN** a plateau, a hill and a crater are placed over one spot and the select tool presses there four times
 - **THEN** the edits are selected smallest footprint first and then round again, the hover label names "(1 of 3)" before the first press, and a press 60 px away starts at the smallest again
 
+### Requirement: VIEW-045 The overview says where a click acts
+In the globe overview `GlobeSession::click_target` SHALL name what a click at the cursor would do without doing it: a marker within the hit radius, else the surface under the cursor at any altitude (an orbital one too: the flight to the place starts there), `Flying` while a flight runs, `Sky` over the sky or past the horizon. The window SHALL show the pointer cursor only where a click acts (`ClickTarget::acts`) and the arrow elsewhere, SHALL put the hover hint in the title only there (`click to fly here`, `click to fly to this item`), and SHALL say in the title's notice why a click was ignored: `click ignored: a flight is in progress`, `click ignored: the cursor is not over the planet`, `click ignored: the cursor is over a panel`.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-21), owner test P2-9, VIEW-013
+
+#### Scenario: A click at orbital altitude
+- **WHEN** the overview is zoomed out to orbital altitudes and the cursor is over the planet, over a marker, over the sky, or a flight is running
+- **THEN** the targets are the surface, the marker, the sky (with its reason) and the flight (with its reason), and a click on the first two starts a flight
+
 ### Requirement: VIEW-044 The stale-tile overlay: which tiles are current
 `Overlay::Stale` (shader code 4, plan token `overlay stale`; the fifth F3 stop) SHALL tint each drawn tile by its state against the current definition, with the tile's outline in the state's colour: exact green (resident with the plan's key), stale amber (a resident tile of another version, or one an edit named, drawn while its refresh is pending), stand-in red (a coarser ancestor drawn over the quadrants of nodes that are not resident, or the cover when no plan is in hand), previewed violet (a preview stamp or a brush stroke under the pointer displaces it), capped grey (reserved for ADR 0074: the colour exists and no tile is capped yet). The state is `TerrainDraw::state` (`TileState`), set by the draw plan and carried in the node record (the level plus 32 times the state code); it is not in the plan text, so no recorded plan changes. A legend of the five colours SHALL be drawn in the top right corner while the overlay is on, and the title SHALL show the counts (`tiles 120 exact, 4 stale, 2 stand-in, 1 previewed`). The overlay is off at the start and changes no frame when off. The smoke run shows it for some lit frames and its verdict wants them (`SmokeCounts::stale_overlay_frames`).
 

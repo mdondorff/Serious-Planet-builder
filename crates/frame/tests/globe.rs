@@ -249,6 +249,52 @@ fn a_flight_to_the_opposite_side_goes_round_and_stays_valid() {
     assert!(angle(flight.at(flight.duration_s).center, dir(0.0, 180.0)) < 1e-9);
 }
 
+// spec: VIEW-045
+#[test]
+fn a_click_acts_on_the_surface_at_orbital_altitude_and_the_target_says_where_and_why_not() {
+    use planet_frame::globe::{ClickTarget, GlobeSession};
+    use planet_frame::pick::PickLimits;
+    let limits = PickLimits::new(R, 9_000.0);
+    let flat = |_: Vec3| 0.0;
+    let centre = dir(20.0, 30.0);
+    let marker = Marker { id: 7, dir: dir(25.0, 35.0), radius_m: 3_000.0 };
+    // The overview starts at 1.5 radii up; zoom out to orbital altitudes and the surface under the cursor is still a target.
+    for zoom in [1.0, 2.0, 3.5] {
+        let mut s = GlobeSession::enter(centre, R);
+        s.zoom(zoom);
+        let cam = camera(&s.view);
+        let middle = [VP.width_px / 2.0, VP.height_px / 2.0];
+        match s.click_target(middle, &cam, VP, &[], &limits, &flat) {
+            ClickTarget::Surface(d) => assert!(angle(d, centre) < 1e-6, "zoom {zoom}: the centre of the view, not {d:?}"),
+            other => panic!("zoom {zoom}: a click over the planet must act, not {other:?}"),
+        }
+        // The corner of the screen at 3.5 times is past the planet's edge: the sky, with a reason.
+        let corner = s.click_target([2.0, 2.0], &cam, VP, &[], &limits, &flat);
+        if corner == ClickTarget::Sky {
+            assert!(corner.ignored().unwrap().contains("not over the planet") && corner.hint().is_none() && !corner.acts());
+        }
+    }
+    // A marker under the cursor wins over the surface behind it.
+    let s = GlobeSession::enter(marker.dir, R);
+    let cam = camera(&s.view);
+    let seen = visible_markers(&cam, &[marker], R, VP);
+    let at = seen[0].pixel;
+    let t = s.click_target(at, &cam, VP, &[marker], &limits, &flat);
+    assert_eq!(t, ClickTarget::Marker(7));
+    assert!(t.acts() && t.hint().unwrap().contains("fly to this item") && t.ignored().is_none());
+    // The surface says "click to fly here"; a click starts the flight and then every click is ignored with the reason.
+    let mut s = GlobeSession::enter(centre, R);
+    let cam = camera(&s.view);
+    let middle = [VP.width_px / 2.0, VP.height_px / 2.0];
+    let t = s.click_target(middle, &cam, VP, &[], &limits, &flat);
+    assert_eq!(t.hint(), Some("click to fly here"));
+    assert!(s.click(middle, &cam, VP, &[], &limits, &flat).is_some() && s.flying());
+    let t = s.click_target(middle, &cam, VP, &[], &limits, &flat);
+    assert_eq!(t, ClickTarget::Flying);
+    assert!(!t.acts() && t.hint().is_none() && t.ignored().unwrap().contains("flight is in progress"));
+    assert!(s.click(middle, &cam, VP, &[], &limits, &flat).is_none(), "a click while flying does nothing");
+}
+
 // spec: VIEW-013
 #[test]
 fn a_click_on_a_marker_flies_to_a_view_four_footprints_up_and_never_below_the_minimum() {
