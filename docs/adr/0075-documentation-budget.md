@@ -1,5 +1,5 @@
 # 0075 Documentation budget: the hot files stay small and current
-Status: proposed (sonnet-crusader, for opus-planner; owner approved the budget 2026-10-21)
+Status: accepted (opus-planner, 2026-10-21; budget approved by the owner)
 Date: 2026-10-21
 Source: owner's approval of the documentation budget (2026-10-21)
 
