@@ -63,17 +63,18 @@ fn the_overlay_names_are_stable_and_parse_back() {
 
 // spec: VIEW-014, VIEW-030
 #[test]
-fn the_overlays_cycle_off_tiles_mesh_regions_off_and_each_has_its_own_shader_code() {
-    assert_eq!(Overlay::ALL, [Overlay::None, Overlay::Tiles, Overlay::Mesh, Overlay::Regions]);
+fn the_overlays_cycle_off_tiles_mesh_regions_stale_off_and_each_has_its_own_shader_code() {
+    assert_eq!(Overlay::ALL, [Overlay::None, Overlay::Tiles, Overlay::Mesh, Overlay::Regions, Overlay::Stale]);
     let mut o = Overlay::None;
     let mut seen = Vec::new();
-    for _ in 0..5 {
+    for _ in 0..6 {
         o = o.next();
         seen.push(o);
     }
-    assert_eq!(seen, [Overlay::Tiles, Overlay::Mesh, Overlay::Regions, Overlay::None, Overlay::Tiles]);
+    assert_eq!(seen, [Overlay::Tiles, Overlay::Mesh, Overlay::Regions, Overlay::Stale, Overlay::None, Overlay::Tiles]);
     let codes: Vec<f32> = Overlay::ALL.iter().map(|o| o.shader_code()).collect();
-    assert_eq!(codes, [0.0, 1.0, 2.0, 3.0]);
+    assert_eq!(codes, [0.0, 1.0, 2.0, 3.0, 4.0]);
+    assert_eq!(Overlay::parse("stale"), Some(Overlay::Stale));
     assert_eq!(Overlay::Regions.name(), "regions");
     assert_eq!(planet_frame::viewer::overlay_status(Overlay::Regions, 1.0), "Overlay: Regions, LOD x1");
 }

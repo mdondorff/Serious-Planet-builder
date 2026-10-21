@@ -179,6 +179,30 @@ pub struct EditorUi {
     /// Pointer events given to the world and to the UI (the router's choices, for the smoke summary).
     pub world_pointer: u64,
     pub ui_pointer: u64,
+    /// The legend drawn in the top right corner while the stale-tile overlay is on (VIEW-044): a colour and its words; empty draws nothing.
+    pub legend: Vec<([u8; 3], String)>,
+}
+
+/// The legend of the stale-tile overlay in the top right corner: a swatch and a line for each colour.
+pub fn draw_legend(ctx: &egui::Context, legend: &[([u8; 3], String)]) {
+    if legend.is_empty() {
+        return;
+    }
+    egui::Area::new(egui::Id::new("stale-legend")).anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 12.0)).interactable(false).show(
+        ctx,
+        |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.label(egui::RichText::new("Tile state").strong());
+                for (rgb, words) in legend {
+                    ui.horizontal(|ui| {
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                        ui.painter().rect_filled(rect, 2.0, egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]));
+                        ui.label(words);
+                    });
+                }
+            });
+        },
+    );
 }
 
 impl EditorUi {
@@ -197,6 +221,7 @@ impl EditorUi {
             cpu_ms: 0.0,
             world_pointer: 0,
             ui_pointer: 0,
+            legend: Vec::new(),
         }
     }
 
@@ -269,6 +294,7 @@ impl EditorUi {
         self.shell.status.push_str(status);
         let raw = self.winit.take_egui_input(window);
         let shell_state = &mut self.shell;
+        let legend = &self.legend;
         // The editor mode (VIEW-022) draws its panels in place of the shell window.
         let mut extra = extra;
         let out = self.ctx.run_ui(raw, |ui| {
@@ -277,6 +303,7 @@ impl EditorUi {
                 None => shell(ui, shell_state),
             }
             draw_markers(ui, markers);
+            draw_legend(ui.ctx(), legend);
         });
         self.winit.handle_platform_output(window, out.platform_output);
         self.pending.append(out.textures_delta);

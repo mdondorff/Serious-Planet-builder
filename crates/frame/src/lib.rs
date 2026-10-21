@@ -46,6 +46,6 @@ pub use residency::{residency_set, residency_set_field, ResidencyEntry, Residenc
 pub use terrain::{
     first_empty_morph_interval, flight_path, flight_path_field, level_color, plan_terrain, plan_terrain_cached, plan_terrain_field,
     plan_terrain_threaded, scripted_views, scripted_views_field, CountBudget, PlanCounts, TerrainDraw, TerrainPlan, TerrainRequest,
-    TerrainView,
+    TerrainView, TileState,
 };
 pub use terrain_text::{BundleWorld, TerrainBundle};
