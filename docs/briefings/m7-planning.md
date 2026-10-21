@@ -1,28 +1,35 @@
-# M7 planning: open questions for the owner
+# M7 planning
 
-Status: draft (opus-planner, 2026-10-21). Nothing is built until the owner answers Q1.
+Status: scope answered by the owner (2026-10-21); exit criteria and the open questions below still to settle. No M7 code before the M6 GO, except the robustness item ADR 0074.
 
-## Where things stand
-- The roadmap (background report §15) puts **M7 Cities** next: suitability, seeds, roads, parcels, buildings, city HLOD, terrain stamps from roads. Exit: a 10^5-building city at 60 FPS from 2 km altitude, with a seamless approach.
-- Deferred out of M6 and waiting for a home:
-  - global-scale authoring (continental edits, the global re-bake, a generator editor; owner, 2026-10-18);
-  - AUTH-003 (version pinning, freeze and bake; owner, 2026-10-20);
-  - geo-anchored objects (in the roadmap's M6 scope, not built);
-  - region clip outside (parked).
-- The owner's M6 test named "updating the generated world" as the second need after stability.
+## Owner's answers (2026-10-21)
+| # | Question | Answer |
+|---|---|---|
+| Q1 | What is M7? | Not Cities: Cities move to a later milestone. M7 adds **ground detail at the lowest levels** (today the near ground is "a smear of colours"; a first-person walk must read as ground): detail textures and their maps (albedo, normal, roughness and specular, and the like), possibly instancing. Together with the authoring items below. |
+| Q2 | Generator editor depth | Sliders over the generator's parameters; TOML for anything more. A node graph is later. |
+| Q3 | Re-bake time | It may vary. An idea: a "global edit" mode that applies global edits only down to some level of detail, then "back to normal" on demand with generation time. It must be visible which tiles are updated and which are still stale. Only if the architecture supports it in general, not for this one use case. |
+| Q4 | Version pinning | Explicit upgrade, with a diff. |
+| Q5 | Freeze | Important; it must blend visually (the current hard clip is too harsh). |
+| Q6 | Geo-anchored objects | Only if something in M7 depends on them. |
+| Q7 | Coder setup | Keep the current model. |
+| Q8 | Region keep-inside | Not as a hard clip. Regions fit better as soft influence on procedural generation (for example a "park" region inside a generated city that the generator adapts to closely but not normatively). Goes with Cities. |
 
-## Questions
+## Proposed M7 scope: "Ground detail and world authoring 2"
+| Step | Content | Notes |
+|---|---|---|
+| R | ADR 0074: a tile too steep to morph is not refined; the plan degrades locally | robustness; the view no longer freezes near steep ground |
+| G1 | Ground detail spike: detail textures and maps at the lowest levels, driven by the surface (slope, altitude, climate, the region's surface type), tiling without visible repetition, cost at 1440p | decides the approach and the asset question (Q9) |
+| G2 | Ground detail build | the region surface types become visible materials |
+| A1 | Generator editor: sliders over the definition's parameters, a coarse preview, the full bake in the background | |
+| A2 | A stale-tile view: which tiles are exact for the current definition and which are stale | general (streaming, edits, re-bake); it carries Q3's "global edit" mode if that stays cheap |
+| A3 | Version pinning with a diff (AUTH-003) | |
+| A4 | Freeze with a blended edge, and a feathered region mask | the feathered edge is "later" in ADR 0069 |
+| (B) | Editor guard on stacked strokes | done in M6 (#499) |
+
+## Open questions
 | # | Question | Options | Recommendation |
 |---|---|---|---|
-| Q1 | What is M7? | A: Cities, as in the roadmap. B: "World authoring 2": the generator editor, global-scale edits, the re-bake, AUTH-003 pinning and freeze. Cities move to M8. C: B first, small, then Cities in the same milestone. | B. It answers the owner's own ask, the deferred items share one design (all change the global bake), and cities need pinned, freezable terrain and anchored objects underneath. |
-| Q2 | Generator editor depth | parameters of the existing generator (sliders, re-bake) / a node graph (Houdini-like) / both, graph later | Parameters first, graph later: the definition is already a DAG, and a parameter UI over it is the cheap first step. |
-| Q3 | Re-bake time the owner accepts after a global parameter change | seconds (a preview at a coarse resolution) / minutes (a full 16384 bake runs about 6 min plus passes) | A coarse preview within seconds, then a full bake in the background. |
-| Q4 | Version pinning semantics | a world keeps its generator version until the owner upgrades it explicitly / it always follows the newest generator | Explicit upgrade, with a diff view of what changes. |
-| Q5 | Freeze | freeze a region's heights as stored data (immune to generator and lower-layer changes) / freeze only against generator upgrades | Stored heights per frozen region (it also answers clip outside's "freeze mode" feeling). |
-| Q6 | Geo-anchored objects in M7? | yes (markers, simple meshes placed on the surface) / with Cities | With whatever comes first that needs them; in B, a minimal anchor type for the generator editor's previews only. |
-| Q8 | Region mask "keep inside" (a layer's edits apply only inside the region; mode 1 of ADR 0069). M6 built "cut inside" (mode 2), which the owner's test read as inverted; the M6 requirement row was worded as keep-inside. The editor now labels mode 2 as "cut". | build keep-inside now in M6 (about a day: every tile of the layer must read the region) / in M7 with freeze / drop it | In M7 with freeze: both are region-wide rules over a layer, and the owner found the hard clip of limited use for now. |
-| Q7 | Editor process | keep the three lanes / fewer parallel sessions (quota) | Two active lanes plus spikes on demand (the current practice). |
-
-## What happens without answers
-- M6 closure continues: P1 hardening by automated tests, P2 fixes, the M6 report draft.
-- No M7 code. The first M7 step after Q1 is one design ADR and a spike on the re-bake time (Q3).
+| Q9 | Where do ground textures come from? | procedural only (shader noise, no assets) / CC0 texture sets (for example ambientCG or Poly Haven: albedo, normal, roughness) / both | Both: CC0 sets for the near look, procedural variation to break repetition; licences recorded per asset (the constitution's licence rule). |
+| Q10 | Instancing in M7 | none (textures only) / small scattered rocks and grass clumps near the camera / trees | Textures first; scattered detail only if G1 shows textures alone do not read at walking height. |
+| Q11 | Ground detail target | a first-person view at about 1.8 m eye height reads as ground (rock, sand, grass distinguishable at 1 to 10 m) within a stated ms budget | Agreed as the exit criterion, with the budget set after G1. |
+| Q12 | M6 gate | the owner's retest of the P1 fixes, the look review, the GO | Retest when convenient. M6 stays open meanwhile; M7 design and the ADR 0074 build run alongside. |
