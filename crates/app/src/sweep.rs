@@ -1,10 +1,12 @@
 //! The item sweep of the editor window (`PLANET_SWEEP=<report file>`, an automated stand-in for the owner's retest): the real window
 //! loop visits every item of the `--items` directory at 2 km, 200 m and 30 m above its anchor and records, per stop, the frame time
-//! (p50, p95, max), the plans the worker refused and the first refusal's text. The window ends when the last stop is done and the run
+//! (p50, p95, max), the plan jobs the worker delivered and the jobs for R (count and p50, p95 of their worker time: the cost of the
+//! plan, for comparing builds), the plans the worker refused and the first refusal's text. The window ends when the last stop is done and the run
 //! fails when a plan was refused. A pure state machine over frames (no window): `camera` and `frame` are what the loop calls.
 //!
 //! Environment: `PLANET_SWEEP` (the report path, switches the sweep on), `PLANET_SWEEP_ALTS` (comma-separated metres, default
-//! `2000,200,30`), `PLANET_SWEEP_HOLD` (frames per stop, default 90).
+//! `2000,200,30`), `PLANET_SWEEP_HOLD` (frames per stop, default 90), `PLANET_SWEEP_ONLY` (comma-separated item names: only the items
+//! with exactly these names are visited, for example `Platonmax,Hill 7,Ridge 3`).
 
 use planet_core::{PlanetFixed, Vec3};
 use planet_frame::Camera;
@@ -32,19 +34,27 @@ pub struct SweepItem {
 #[derive(Clone, Debug, Default)]
 pub struct StopRecord {
     pub frame_ms: Vec<f64>,
+    /// The worker time of each plan delivered during the stop, and of each residency set (R) delivered, milliseconds.
+    pub plan_ms: Vec<f64>,
+    pub residency_ms: Vec<f64>,
     pub refused: u64,
     pub first_refusal: Option<String>,
+}
+
+/// The `p` quantile (0 to 1) of `values`, nearest rank; 0 for none.
+fn quantile_of(values: &[f64], p: f64) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mut v = values.to_vec();
+    v.sort_by(|a, b| a.partial_cmp(b).expect("times are numbers"));
+    v[((v.len() as f64 * p).ceil() as usize).clamp(1, v.len()) - 1]
 }
 
 impl StopRecord {
     /// The `p` quantile (0 to 1) of the frame times, nearest rank; 0 for a stop with no frames.
     pub fn quantile(&self, p: f64) -> f64 {
-        if self.frame_ms.is_empty() {
-            return 0.0;
-        }
-        let mut v = self.frame_ms.clone();
-        v.sort_by(|a, b| a.partial_cmp(b).expect("frame times are numbers"));
-        v[((v.len() as f64 * p).ceil() as usize).clamp(1, v.len()) - 1]
+        quantile_of(&self.frame_ms, p)
     }
 }
 
@@ -107,6 +117,16 @@ pub fn parse_item(text: &str, file: &Path) -> Result<SweepItem, String> {
     })
 }
 
+/// The items of `items` whose names are in the comma-separated list `only` (exact names, items of one name all kept); an error when none is.
+pub fn keep_only(mut items: Vec<SweepItem>, only: &str) -> Result<Vec<SweepItem>, String> {
+    let names: Vec<&str> = only.split(',').map(str::trim).filter(|n| !n.is_empty()).collect();
+    items.retain(|i| names.contains(&i.name.as_str()));
+    if items.is_empty() {
+        return Err(format!("PLANET_SWEEP_ONLY '{only}' names no item"));
+    }
+    Ok(items)
+}
+
 impl Sweep {
     /// The sweep the environment asks for over the items of `dir` (`None` without `PLANET_SWEEP`).
     pub fn from_env(dir: Option<&Path>) -> Result<Option<Sweep>, String> {
@@ -120,7 +140,11 @@ impl Sweep {
             Err(_) => DEFAULT_ALTITUDES_M.to_vec(),
         };
         let hold = std::env::var("PLANET_SWEEP_HOLD").ok().and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_HOLD_FRAMES);
-        Sweep::new(read_items(dir)?, altitudes, hold, report_path).map(Some)
+        let mut items = read_items(dir)?;
+        if let Ok(only) = std::env::var("PLANET_SWEEP_ONLY") {
+            items = keep_only(items, &only).map_err(|e| format!("{e} in {}", dir.display()))?;
+        }
+        Sweep::new(items, altitudes, hold, report_path).map(Some)
     }
 
     pub fn new(items: Vec<SweepItem>, altitudes: Vec<f64>, hold: u64, report_path: String) -> Result<Sweep, String> {
@@ -162,13 +186,16 @@ impl Sweep {
         Camera::at_surface_point(position, north, pitch, FOV_Y_DEG.to_radians(), aspect, NEAR_M)
     }
 
-    /// One frame at the current stop: its time in milliseconds, the refused plans so far and the refusal text taken this frame.
-    pub fn frame(&mut self, frame_ms: f64, refused_total: u64, refusal: Option<String>) {
+    /// One frame at the current stop: its time in milliseconds, the worker time of the plan and of R delivered this frame (if any), the
+    /// refused plans so far and the refusal text taken this frame.
+    pub fn frame(&mut self, frame_ms: f64, plan_ms: Option<f64>, residency_ms: Option<f64>, refused_total: u64, refusal: Option<String>) {
         if self.done() {
             return;
         }
         let rec = &mut self.records[self.stop];
         rec.frame_ms.push(frame_ms);
+        rec.plan_ms.extend(plan_ms);
+        rec.residency_ms.extend(residency_ms);
         rec.refused += refused_total.saturating_sub(self.refused_seen);
         self.refused_seen = refused_total;
         if rec.first_refusal.is_none() {
@@ -186,20 +213,26 @@ impl Sweep {
         let mut out = String::new();
         let mut refused_stops = 0;
         let mut worst_p95 = 0.0f64;
-        out += "stop item kind altitude_m frames p50_ms p95_ms max_ms refused first_refusal\n";
+        out +=
+            "stop item kind altitude_m frames p50_ms p95_ms max_ms plans plan_p50_ms plan_p95_ms r_p50_ms r_p95_ms refused first_refusal\n";
         for (i, rec) in self.records.iter().enumerate() {
             let (item, alt) = self.item_of(i);
             let p95 = rec.quantile(0.95);
             worst_p95 = worst_p95.max(p95);
             refused_stops += u64::from(rec.refused > 0);
             out += &format!(
-                "{i} {} {} {alt} {} {:.2} {:.2} {:.2} {} {}\n",
+                "{i} {} {} {alt} {} {:.2} {:.2} {:.2} {} {:.2} {:.2} {:.2} {:.2} {} {}\n",
                 item.name.replace(' ', "_"),
                 item.kind,
                 rec.frame_ms.len(),
                 rec.quantile(0.5),
                 p95,
                 rec.frame_ms.iter().copied().fold(0.0, f64::max),
+                rec.plan_ms.len(),
+                quantile_of(&rec.plan_ms, 0.5),
+                quantile_of(&rec.plan_ms, 0.95),
+                quantile_of(&rec.residency_ms, 0.5),
+                quantile_of(&rec.residency_ms, 0.95),
                 rec.refused,
                 rec.first_refusal.as_deref().unwrap_or("-").replace('\n', " | ")
             );
@@ -249,7 +282,13 @@ mod tests {
         for k in 0..12u64 {
             // The second stop (item a, 30 m) is the one where the worker refuses a plan.
             let refused = if k >= 4 { 1 } else { 0 };
-            s.frame(10.0 + k as f64, refused, (k == 4).then(|| "plan for frame 5: refused".to_string()));
+            s.frame(
+                10.0 + k as f64,
+                (k % 3 == 0).then_some(2.0 + k as f64),
+                None,
+                refused,
+                (k == 4).then(|| "plan for frame 5: refused".to_string()),
+            );
         }
         assert!(s.done());
         let (text, ok) = s.report();
@@ -257,6 +296,8 @@ mod tests {
         assert!(text.contains("1 stops with a refused plan"), "{text}");
         let second = text.lines().nth(2).unwrap();
         assert!(second.starts_with("1 a plateau 30 3 ") && second.ends_with("1 plan for frame 5: refused"), "{second}");
+        // The plan jobs delivered during the stop: frames 3, 4, 5 of the run, k = 3 is the only one in it (k % 3 == 0): 5 ms, a lone sample.
+        assert!(second.contains(" 1 5.00 5.00 0.00 0.00 "), "{second}");
         assert!(text.lines().nth(1).unwrap().ends_with(" 0 -"), "{text}");
     }
 
@@ -273,6 +314,18 @@ mod tests {
         let to = (anchor - cam.position.0).normalized();
         assert!(to.dot(cam.forward.normalized()) > 0.999, "the anchor is straight ahead");
         assert!((anchor - cam.position.0).length() > 300.0 && (anchor - cam.position.0).length() < 400.0);
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn only_the_items_of_the_named_list_are_kept_every_item_of_a_name_and_a_list_naming_none_is_an_error() {
+        let items = vec![item("Platonmax", 1.0), item("Hill 7", 2.0), item("Hill 7", 3.0), item("Plateau 7", 4.0)];
+        let kept = keep_only(items.clone(), "Platonmax, Hill 7").unwrap();
+        assert_eq!(
+            kept.iter().map(|i| (i.name.as_str(), i.lat_deg)).collect::<Vec<_>>(),
+            [("Platonmax", 1.0), ("Hill 7", 2.0), ("Hill 7", 3.0)]
+        );
+        assert!(keep_only(items, "Ridge 3").unwrap_err().contains("Ridge 3"));
     }
 
     // spec: VIEW-022

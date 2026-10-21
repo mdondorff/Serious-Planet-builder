@@ -673,7 +673,13 @@ impl App<'_> {
                 }
             }
             if let Some(sw) = st.sweep.as_mut() {
-                sw.frame(dt * 1000.0, st.rig.managed.pipeline().refused_plans(), refusal);
+                sw.frame(
+                    dt * 1000.0,
+                    frame.pipeline.delivered.map(|d| d.1),
+                    frame.pipeline.residency_delivered.map(|d| d.1),
+                    st.rig.managed.pipeline().refused_plans(),
+                    refusal,
+                );
                 if sw.done() {
                     let (text, ok) = sw.finish()?;
                     println!("{text}");
