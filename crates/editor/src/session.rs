@@ -12,6 +12,7 @@ use crate::params::{self, Inspector, Unit};
 use crate::polyline::{self, GeoPoint};
 use crate::relevance::{relevant_items, ViewState, MIN_REACH_PX};
 use crate::shape::{self, Handle, RADIUS_KEY, REACH_FACTOR};
+use crate::slope;
 use planet_core::{TileId, Vec3};
 use planet_frame::pick::{pick_footprint, Footprint, SurfaceHit};
 use planet_world_def::cells::CELL_EDGE_M;
@@ -178,6 +179,11 @@ pub struct Session<S: ItemStore> {
     /// The brush items this session painted into: a new stroke joins one of these when it fits (ADR 0070: not an item someone else's
     /// session changed last).
     brush_open: Vec<ItemId>,
+    /// The slope the plan can draw (`LodParams::drawable_slope`), from which the brush guard takes its limit (VIEW-043).
+    drawable_slope: f64,
+    /// The brush items over the limit, found for one revision of the editor (the scan reads every stroke). A `RefCell`: the session is for one
+    /// thread (it is not `Sync`).
+    steep: std::cell::RefCell<Option<(u64, f64, BTreeSet<ItemId>)>>,
 }
 
 impl<S: ItemStore> Session<S> {
@@ -199,6 +205,8 @@ impl<S: ItemStore> Session<S> {
             brush: BrushSettings::default(),
             stroke: None,
             brush_open: Vec::new(),
+            drawable_slope: planet_frame::LodParams::earth_1080p().drawable_slope(),
+            steep: std::cell::RefCell::new(None),
         }
     }
 
@@ -403,21 +411,70 @@ impl<S: ItemStore> Session<S> {
 
     /// The rows of the nearby list: the `shown` edits, nearest first.
     pub fn near(&self, shown: &[ItemId], camera_position: Vec3) -> Vec<Row> {
-        lists::near_rows(self.editor.items(), shown, camera_position, self.radius_m)
+        self.flagged(lists::near_rows(self.editor.items(), shown, camera_position, self.radius_m))
+    }
+
+    /// `rows` with the warning of the brush guard set on those over the limit (VIEW-043).
+    fn flagged(&self, mut rows: Vec<Row>) -> Vec<Row> {
+        let steep = self.steep_items();
+        if !steep.is_empty() {
+            for row in &mut rows {
+                row.steep = self.is_steep(row.id, &steep);
+            }
+        }
+        rows
     }
 
     /// The search rows (VIEW-016): planet-wide, nearest to the camera first.
     pub fn search(&self, query: &str, kind: Option<&str>, camera_position: Vec3) -> Vec<Row> {
-        lists::search_rows(self.editor.items(), query, kind, camera_position, self.radius_m)
+        self.flagged(lists::search_rows(self.editor.items(), query, kind, camera_position, self.radius_m))
     }
 
     pub fn layer_groups(&self, camera_position: Vec3) -> Vec<LayerGroup> {
-        lists::layer_groups(self.editor.items(), camera_position, self.radius_m)
+        let mut groups = lists::layer_groups(self.editor.items(), camera_position, self.radius_m);
+        for group in &mut groups {
+            group.rows = self.flagged(std::mem::take(&mut group.rows));
+        }
+        groups
+    }
+
+    /// The slope the plan can draw, which the brush guard limits the stack of strokes by (VIEW-043).
+    pub fn drawable_slope(&self) -> f64 {
+        self.drawable_slope
+    }
+
+    /// Set it from the LOD parameters of the window (`LodParams::drawable_slope`).
+    pub fn set_drawable_slope(&mut self, slope: f64) {
+        self.drawable_slope = slope;
+        *self.steep.borrow_mut() = None;
+    }
+
+    /// The brush items whose stacked gradient is over the limit of the guard, "too steep to draw fully" (VIEW-043). Found once per revision
+    /// of the editor.
+    pub fn steep_items(&self) -> BTreeSet<ItemId> {
+        let revision = self.editor.revision();
+        let mut cache = self.steep.borrow_mut();
+        if let Some((r, slope, found)) = cache.as_ref() {
+            if *r == revision && *slope == self.drawable_slope {
+                return found.clone();
+            }
+        }
+        let found = slope::steep_items(self.editor.items(), slope::gradient_limit(self.drawable_slope), self.radius_m);
+        *cache = Some((revision, self.drawable_slope, found.clone()));
+        found
+    }
+
+    /// Whether the brush item `id`, or any item of its group (a long drag is several linked items), is over the limit.
+    fn is_steep(&self, id: ItemId, steep: &BTreeSet<ItemId>) -> bool {
+        match self.editor.item(id).and_then(|i| i.group) {
+            Some(group) => self.editor.items().any(|i| i.group == Some(group) && steep.contains(&i.id)),
+            None => steep.contains(&id),
+        }
     }
 
     /// Every edit in the order they apply.
     pub fn chain(&self, camera_position: Vec3) -> Vec<Row> {
-        lists::apply_order(self.editor.items(), camera_position, self.radius_m)
+        self.flagged(lists::apply_order(self.editor.items(), camera_position, self.radius_m))
     }
 
     /// The inspector of the selected edit.
@@ -428,6 +485,9 @@ impl<S: ItemStore> Session<S> {
         let place = same.iter().position(|(_, id)| *id == it.id).map_or(1, |p| p + 1);
         let mut inspector = params::inspector_of(it, (place, same.len()), lists::distance_m(camera_position, it, self.radius_m));
         inspector.region = params::region_rows(it, &self.layers());
+        if it.kind == brush::BRUSH_KIND && self.is_steep(it.id, &self.steep_items()) {
+            inspector.warning = Some(slope::WARNING.to_string());
+        }
         if inspector.region.is_some() {
             // The surface type and the mask have their own controls; a typed number would bypass them (and print the refusal raw).
             inspector.params.retain(|p| p.key != "surface_type" && p.key != "mask_mode");
@@ -951,7 +1011,26 @@ impl<S: ItemStore> Session<S> {
     /// The button went up: the stroke is put as one command (it joins a brush item of this session or starts one, see
     /// [`Editor::add_stroke`]). Returns the places to refresh; `Ok` with none when no stroke was being painted.
     pub fn end_stroke(&mut self) -> Result<Vec<Affected>, SessionError> {
-        let Some(draft) = self.stroke.take() else { return Ok(Vec::new()) };
+        let Some(mut draft) = self.stroke.take() else { return Ok(Vec::new()) };
+        // The slope guard (VIEW-043): a raise or lower is cut to the strength the stack of strokes it overlaps leaves room for.
+        let mut clamped = None;
+        let painted = draft.stroke.strength_m;
+        {
+            let existing: Vec<&planet_world_def::item::ItemStroke> =
+                self.editor.items().filter(|i| i.kind == brush::BRUSH_KIND).flat_map(|i| i.strokes.iter()).collect();
+            let allowed = slope::allowed_strength(&draft.stroke, &existing, self.radius_m, slope::gradient_limit(self.drawable_slope));
+            if allowed < painted {
+                if allowed < brush::STRENGTH_RANGE_M.0 {
+                    self.status = format!(
+                        "{} stroke not painted: the ground there is already too steep to draw ({painted} m would add to a stack that has no room left)",
+                        draft.stroke.kind.name()
+                    );
+                    return Ok(Vec::new());
+                }
+                clamped = Some(allowed);
+                draft.stroke.strength_m = allowed;
+            }
+        }
         let count = self.editor.items().filter(|i| i.kind == brush::BRUSH_KIND).count() + 1;
         let template = NewItem {
             body: self.body,
@@ -978,7 +1057,12 @@ impl<S: ItemStore> Session<S> {
             }
         }
         let what = draft.stroke.kind.name();
-        self.status = format!("{what} stroke painted; undo takes it back");
+        self.status = match clamped {
+            Some(allowed) => {
+                format!("{what} stroke clamped to {allowed:.2} m: the ground would be too steep to draw ({painted} m was asked)")
+            }
+            None => format!("{what} stroke painted; undo takes it back"),
+        };
         Ok(affected)
     }
 

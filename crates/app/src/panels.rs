@@ -212,6 +212,10 @@ fn row_button(ui: &mut egui::Ui, st: &mut PanelState, ev: &mut Vec<Event>, row: 
     let detail = row.detail();
     let detail = if detail.is_empty() { String::new() } else { format!(" · {detail}") };
     ui.small(format!("{} · reach {}{detail}", planet_editor::params::kind_title(&row.kind), format_metres(row.reach_m)));
+    if row.steep {
+        let r = ui.colored_label(AMBER, format!("⚠ {}", planet_editor::slope::WARNING));
+        st.marks.push((format!("steep:{}", row.label), r.rect));
+    }
 }
 
 fn rail(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
@@ -473,6 +477,10 @@ fn inspector(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec
         return;
     };
     ui.weak(format!("{} · {}", i.kind, i.layer));
+    if let Some(w) = &i.warning {
+        let r = ui.colored_label(AMBER, format!("⚠ {w}"));
+        st.marks.push(("steep-warning".to_string(), r.rect));
+    }
     // The name, edited in place.
     let current = st.name.as_ref().filter(|(id, _)| *id == i.id).map(|(_, s)| s.clone()).unwrap_or_else(|| i.title.clone());
     let mut name = current;
@@ -1019,6 +1027,23 @@ mod tests {
         for wrong in ["only inside the outline", "clips another layer", "keeps the edits inside"] {
             assert!(!label.contains(wrong) && !hint.replace("keeping them only inside is not offered yet", "").contains(wrong), "{wrong}");
         }
+    }
+
+    // spec: VIEW-043
+    #[test]
+    fn an_item_over_the_brush_slope_limit_wears_the_warning_in_its_row_and_in_the_inspector() {
+        let f = fixture();
+        let layout = Layout::default();
+        let mut h = held(&f, layout.clone());
+        let mut rig = Rig::new(&layout);
+        rig.settle(&data(&h));
+        assert!(rig.st.marks.iter().all(|m| !m.0.starts_with("steep")), "no warning on an item within the limit");
+        let label = h.near[0].label.clone();
+        h.near[0].steep = true;
+        h.inspector.as_mut().unwrap().warning = Some(planet_editor::slope::WARNING.to_string());
+        rig.settle(&data(&h));
+        assert!(rig.st.mark(&format!("steep:{label}")).is_some(), "the row carries the warning");
+        assert!(rig.st.mark("steep-warning").is_some(), "the inspector carries it");
     }
 
     // spec: VIEW-031

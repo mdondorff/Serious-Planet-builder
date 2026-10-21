@@ -32,6 +32,8 @@ pub struct Row {
     /// The points of a line or region (of this item), and the strokes of a brush (of all the items of the row in the layers list).
     pub points: usize,
     pub strokes: usize,
+    /// The brush item (or one of the group's items) is over the slope limit of the brush guard (VIEW-043): "too steep to draw fully".
+    pub steep: bool,
 }
 
 impl Row {
@@ -82,6 +84,7 @@ fn row_of(item: &Item, camera_position: Vec3, radius_m: f64) -> Row {
         part: item.part,
         points: item.points.len(),
         strokes: item.strokes.len(),
+        steep: false,
     }
 }
 

@@ -135,12 +135,13 @@ fn a_stroke_is_not_added_to_an_item_the_session_did_not_paint_and_a_full_item_st
     let mut s = session(3);
     s.set_brush_radius(1.0).unwrap();
     s.set_brush_strength(0.5).unwrap();
-    for _ in 0..64 {
-        paint(&mut s, BrushKind::Raise, 0.0, &[], 0.0);
+    // Three metres apart, so that no two overlap and the slope guard (VIEW-043) holds nothing back.
+    for k in 0..64 {
+        paint(&mut s, BrushKind::Raise, 3.0 * f64::from(k), &[], 0.0);
     }
     assert_eq!((brushes(&s).len(), brushes(&s)[0].strokes.len()), (1, 64), "64 strokes fill an item");
     assert_eq!(brushes(&s)[0].max_delta_m, 32.0);
-    paint(&mut s, BrushKind::Raise, 0.0, &[], 0.0);
+    paint(&mut s, BrushKind::Raise, 3.0 * 64.0, &[], 0.0);
     assert_eq!(brushes(&s).len(), 2, "the 65th stroke starts a new item");
     // The command layer joins only what it is told is open.
     let template = {

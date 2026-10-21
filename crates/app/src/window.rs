@@ -414,6 +414,8 @@ impl App<'_> {
             let mut e = EditRuntime::new(self.world.definition().as_ref().clone(), cfg.radius_m, cfg.items.as_ref(), cfg.layout.clone())?;
             // A smoke run turns the mode on itself, at the frame its script says, after the overview phases.
             e.on = cfg.edit && !cfg.smoke;
+            // The brush guard limits the stack of strokes by what these parameters can draw (VIEW-043).
+            e.session.set_drawable_slope(cfg.lod.drawable_slope());
             Some(e)
         } else {
             None

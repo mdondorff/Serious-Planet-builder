@@ -522,3 +522,10 @@ What happened: a plateau's bound over a cap was its weight times its declared `m
 Assumption it changes: the bounds of a stage are the range of the running height carried through the items in order (an item that pulls the height to a target maps it, monotone in the height), not the sum of what each item can add; a test of rounding needs a base with exact bounds; a count that belongs to a point belongs to the layer, not to one item.
 Proposed follow-up: none.
 Obsolete when: the stamp stage stops combining items by running height.
+
+## 2026-10-21 Plan refusals at brush stacks were real steepness, not loose bounds; the editor can keep new strokes drawable
+Scope: editor::slope, frame::lod (LOD-008), generators::stamp
+What happened: SPIKE-26 found 45 of 231 stops of the owner's items refusing a base-LOD plan. Measured against sampled heights, the bounds of the raise-stroke stacks (44 strokes of 5 m on 100 m) were exact to 1 mm: the ground is a 220 m spike of about 73 degrees, steeper than the plan can morph (2.5 at the defaults, `LodParams::drawable_slope`, one number for all levels). Only the crater rim had a loose bound (a span from the bowl to the crest where the profile is unimodal). A flatten and a smooth are not height-free (a flatten onto a far target makes a step of its strength at its edge), and the pieces of a long drag share their cut point at full weight, so a drag counts its gradient twice there.
+Assumption it changes: a refusal that names an empty morph interval is not evidence of a loose bound; measure the bound against sampled heights before tightening it. A guard against steep ground belongs where the ground is made (the brush) as well as in the plan (ADR 0074).
+Proposed follow-up: ADR 0074 (a tile too steep to morph is not refined) for items that already exist.
+Obsolete when: the plan draws ground of any slope (ADR 0074 built) and the guard is reduced to a warning.
