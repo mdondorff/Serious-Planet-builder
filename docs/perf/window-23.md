@@ -15,7 +15,7 @@ Rasierklinge, RTX 3080 Ti Laptop, release builds. Coordinator opus-planner, run 
 |---|---|---|
 | A f2382bd8 | 1.22 / 28.8 / 3198 | 1.22 / 47.9 / 2464 |
 | B 772081f0 | 1.21 / 45.9 / 2537 | 1.22 / 45.0 / 2487 |
-| C main | 2.75 / 51.9 / 2502 (#505) | 1.38 / 46.8 / 2478 (#505 + #513) |
+| C main | 2.75 / 51.8 / 2502 (#505) | 1.38 / 46.8 / 2478 (#505 + #513) |
 
 ## Sweep, 2 km stops (every build delivers a plan), plan p50 ms
 
@@ -26,7 +26,7 @@ Rasierklinge, RTX 3080 Ti Laptop, release builds. Coordinator opus-planner, run 
 | Hill 7 (second) | 610 | 609 | 501 |
 | Ridge 3 | 672 | 704 | 1998 |
 
-Ridge 3 in window 22 (C with #505): 1568 and 1517. A and B refuse the plan at 6 of 12 stops (every 200 m and 30 m stop of Platonmax and Ridge 3, and the first Hill 7); C refuses none. At those stops only C has plan samples: 263 to 1511 ms at 200 m and 30 m. The frame p50 and p95 sit at the 250 ms cap during arrival and are not used to rank builds.
+Ridge 3 in window 22 (C with #505): 1568 and 1517. A and B refuse the plan at 6 of 12 stops (every 200 m and 30 m stop of Platonmax and Ridge 3, and the first Hill 7); C refuses none. At those stops only C has plan samples: 264 to 1511 ms at 200 m and 30 m. The frame p50 and p95 sit at the 250 ms cap during arrival and are not used to rank builds.
 
 ## Selection time without the editor (`plan_ablation`, warm, ms, on the eroded 16384 bake)
 
