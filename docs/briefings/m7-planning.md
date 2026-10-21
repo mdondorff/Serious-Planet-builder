@@ -41,7 +41,14 @@ Status: scope answered by the owner (2026-10-21); exit criteria and the open que
 | I1 | Instancing spike: the cost of scattered instances (rocks, grass clumps) over the GPU-driven instance path of M2, at walking height, at 1440p | de-risks the performance before instancing is built (M8) |
 | E1 | External-data spike: an Earth elevation dataset (licence, resolution, size) as the base field under the procedural detail | exploration only, not an M7 commitment |
 
-## Proposed exit criteria (to confirm after G1)
+## Scope reshuffle (owner, 2026-10-21)
+- **M7: ground detail and edit health.** G0 (done), G2a procedural ground detail, G2b roughness and specular (owner: in M7), A5 edit health, I1 instancing spike, D1 driver-maps design spike. A2 done in M6.
+- **M8: generation principles.** Physical driver maps (insolation, temperature, precipitation, flow accumulation, water table, soil depth, sediment, rock exposure) from pre-bake processes; per-material and per-plant response curves combine them into suitability; materials, instances and later geometry read suitability instead of painted type maps. Scope set after D1.
+- **M9: global authoring.** The generator editor (A1) with rectangular overview maps of the whole planet, sliders over the generator and the driver maps, version pinning with a diff (A3), blended freeze and feathered masks (A4), external data (E1).
+- Ground textures: procedural first; the CC0 photo layer is later and must plug in without changing the material weights or the node record (owner, 2026-10-21).
+- Exit criteria of M7 replace the list below: rock, sand and grass distinguishable at 1.8 m and 0.5 m within 1 to 10 m; ground detail with specular at most 1.0 ms GPU at 1440p; the 5 cm near plane without z-fighting or clipping (done, #526); the problems list finds and fixes flagged edits.
+
+## Proposed exit criteria (to confirm after G1; superseded by the reshuffle above)
 - At 1.8 m and at 0.5 m eye height, rock, sand and grass are distinguishable at 1 to 10 m, within a ms budget set after G1.
 - The near plane of a few centimetres shows no z-fighting or ground clipping over the finest tiles.
 - Version pinning with a diff, freeze with a blended edge, the generator sliders with a coarse preview, the stale-tile view and the problems list all work as the owner reviews them.

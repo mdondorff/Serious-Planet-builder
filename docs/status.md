@@ -13,22 +13,19 @@ Dormant (no near trigger; not asked now):
 - **Region keep-inside** (`openspec/changes/region-mode1`): soft influence for Cities, not a hard clip (owner, 2026-10-21, Q8). Trigger: Cities.
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
-## M7 queue: ground detail and world authoring 2 (plan: `docs/briefings/m7-planning.md`)
-Starts after the quota reset. Exit criteria are confirmed with the owner after G1 (SPIKE-27 done).
+## M7 queue: ground detail and edit health (plan: `docs/briefings/m7-planning.md`; scope reshuffled by the owner, 2026-10-21)
+Global authoring (A1, A3, A4, E1, overview maps) moves to M9; M8 is generation principles (driver maps).
 
 | # | Step | Lane |
 |---|---|---|
-| H0 | F9 in the editor: the repro bundle refuses a definition with authored items ("this file format cannot carry yet"), so the owner's captures fail; the bundle carries the item files, the camera path is written regardless (now, owner's test 2026-10-21) | crusader |
-| H1 | Housekeeping follow-up: spec-lint checks the ADR 0075 caps (status 15 KB, learnings 20 KB, spikes 10 KB, CLAUDE.md 7,514 B, constitution 8,574 B) and fails when a test cites a requirement ID that no spec holds, tier-A tests; plus the coder's mechanical pass (`docs/archive/README.md`, 2026-10-21 run) | crusader |
+| H1 | Housekeeping follow-up: spec-lint checks the ADR 0075 caps (status 15 KB, learnings 20 KB, spikes 10 KB, CLAUDE.md 7,514 B, constitution 8,574 B) and fails when a test cites a requirement ID that no spec holds, tier-A tests; plus the coder's mechanical pass (`docs/archive/README.md`, 2026-10-21 run) | crusader, after the reset |
 | H2 | The ADR 0055 consolidation not done in the M5 housekeeping (item 10b, only its point 4 done): amendment chains into their specs (0033 with 0048 and 0054; 0037 with 0052 and 0061; 0041 with 0051 and 0053), readings ADRs (0027, 0044, 0048, 0050, 0051, 0053) set to superseded, spec-lint's countable style checks; word counts before and after | crusader, after H1 |
-| G0 | Near plane at about 5 cm, eye clamp to about 0.5 m (VIEW-004), depth precision measured | explorer |
-| G2 | Ground detail build on SPIKE-27's approach (+0.85 ms at 1440p in the spike) | explorer |
-| A5 | Edit health: problems list (too steep, capped or refused tiles, stacked strokes), fly-to, simplify actions | crusader |
-| A1 | Generator editor: sliders over the definition, coarse preview, background bake | after R |
-| A3 | Version pinning with a diff (AUTH-003) | after A1 |
-| A4 | Freeze with a blended edge, feathered region mask | after A3 |
-| I1 | Instancing spike at walking height, 1440p | spikes |
-| E1 | External-data spike (Earth elevation as base field) | spikes, exploration |
+| G2a | Ground detail: procedural per-material term (SPIKE-27 option A, tuned, mid-scale octaves 8 m and 32 m, region surface type as selector); material weights from one inputs-to-weights function with data response curves (the M8 driver-map seam); a seam for a later close-range photo layer (owner: later, extensible) | explorer |
+| G2b | Roughness and specular (owner, 2026-10-21: in M7): per-material roughness from the same weights function | explorer, after G2a |
+| PW | Perf window: G2a plus G2b at most 1.0 ms GPU at 1440p in a ground view; the Ridge 3 warm flight near an item | explorer, planner's go |
+| A5 | Edit health: problems list (too steep, capped or refused tiles, stacked strokes), fly-to, simplify actions | crusader, after the reset |
+| I1 | Instancing spike at walking height, 1440p | spikes, after the reset |
+| D1 | Driver-maps design spike for M8: the first maps (physical drivers, process results such as soil depth and moisture), resolution and bake cost, how response curves combine into suitability, what materials and instances read; ends with a proposed ADR | spikes, after I1 |
 
 Open M6 items carried over (owner test, 2026-10-20): P1-4 tile flashing (Tracked), P1-5 editing frame rate on a quiet machine (owner's retest), P2-6 colour shift after fast surface-to-orbit moves, P2-7 colour step between 95 and 100 km, P2-8 missing tiles during an edit's refresh (with P1-4).
 
