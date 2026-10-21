@@ -339,11 +339,15 @@ impl Rng {
     }
 }
 
+/// A stroke as (kind, radius m, strength m) and with its points (latitude, longitude in degrees).
+type StrokeSpec = (&'static str, f64, f64);
+type Stroke = (&'static str, f64, f64, Vec<(f64, f64)>);
+
 /// One brush item of the owner's shape: strokes of 30 points a quarter of the radius apart, each starting within 1.5 km of the centre of
 /// the cluster and wandering, `reach_m` the farthest point from the anchor plus the radius plus a metre, `schema_version = 3`.
-fn synthetic_brush(n: usize, strokes: &[(&str, f64, f64)], max_delta: f64, centre: (f64, f64), rng: &mut Rng) -> String {
+fn synthetic_brush(n: usize, strokes: &[StrokeSpec], max_delta: f64, centre: (f64, f64), rng: &mut Rng) -> String {
     const M_PER_DEG: f64 = 111_195.0;
-    let mut all: Vec<(&str, f64, f64, Vec<(f64, f64)>)> = Vec::new();
+    let mut all: Vec<Stroke> = Vec::new();
     for &(kind, radius, strength) in strokes {
         let mut at = (centre.0 + (rng.unit() - 0.5) * 3000.0 / M_PER_DEG, centre.1 + (rng.unit() - 0.5) * 3000.0 / M_PER_DEG);
         let mut heading = rng.unit() * std::f64::consts::TAU;
@@ -352,7 +356,10 @@ fn synthetic_brush(n: usize, strokes: &[(&str, f64, f64)], max_delta: f64, centr
         for _ in 0..30 {
             points.push(at);
             heading += (rng.unit() - 0.5) * 0.6;
-            at = (at.0 + step * heading.cos() / M_PER_DEG, at.1 + step * heading.sin() / (M_PER_DEG * at.0.to_radians().cos()));
+            at = (
+                at.0 + step * libm::cos(heading) / M_PER_DEG,
+                at.1 + step * libm::sin(heading) / (M_PER_DEG * libm::cos(at.0.to_radians())),
+            );
         }
         all.push((kind, radius, strength, points));
     }
@@ -361,7 +368,7 @@ fn synthetic_brush(n: usize, strokes: &[(&str, f64, f64)], max_delta: f64, centr
         .iter()
         .flat_map(|(_, r, _, pts)| {
             pts.iter().map(move |p| {
-                let (dy, dx) = ((p.0 - anchor.0) * M_PER_DEG, (p.1 - anchor.1) * M_PER_DEG * anchor.0.to_radians().cos());
+                let (dy, dx) = ((p.0 - anchor.0) * M_PER_DEG, (p.1 - anchor.1) * M_PER_DEG * libm::cos(anchor.0.to_radians()));
                 (dy * dy + dx * dx).sqrt() + r + 1.0
             })
         })
@@ -416,7 +423,7 @@ fn the_item_sweep_over_a_dense_brush_cluster_a_ridge_a_hill_and_a_crater_has_no_
         v.extend(vec![("smooth", 300.0, 5.0); smooths]);
         v
     };
-    let spec: Vec<(Vec<(&str, f64, f64)>, f64)> = vec![
+    let spec: Vec<(Vec<StrokeSpec>, f64)> = vec![
         (raise(3), 15.0),
         (raise(1), 5.0),
         (raise(5), 25.0),
