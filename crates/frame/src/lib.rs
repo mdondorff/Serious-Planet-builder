@@ -34,11 +34,11 @@ pub use camera::{Camera, Frustum};
 pub use controller::{CameraController, CameraInput, CameraMode, ControllerParams};
 pub use instances::{camera_relative_positions, cull_instances, indirect_args, IndirectArgs, Instance};
 pub use lod::{
-    balance_leaves, check_explicit_floor, child_index_toward, cover_selection, cover_selection_bounded, cover_selection_masked,
-    effective_floor, floor_tiles, plan_covers_view, production_finest_level, quadrant_bit, select_nodes, select_nodes_cached,
-    select_nodes_field, select_nodes_field_cached, select_nodes_in_view, select_nodes_in_view_cached, select_nodes_in_view_field,
-    LodParams, NodeSelection, SelectedNode, SelectionCache, TileBounds, ALL_QUADRANTS, DEFAULT_RENDER_FLOOR, PRODUCTION_FACE_CELLS_LOG2,
-    REFERENCE_FINEST_LEVEL,
+    balance_leaves, check_explicit_floor, child_index_toward, cover_selection, cover_selection_bounded, cover_selection_exact,
+    cover_selection_masked, effective_floor, floor_tiles, plan_covers_view, production_finest_level, quadrant_bit, select_nodes,
+    select_nodes_cached, select_nodes_field, select_nodes_field_cached, select_nodes_in_view, select_nodes_in_view_cached,
+    select_nodes_in_view_field, LodParams, NodeSelection, SelectedNode, SelectionCache, TileBounds, ALL_QUADRANTS, DEFAULT_RENDER_FLOOR,
+    PRODUCTION_FACE_CELLS_LOG2, REFERENCE_FINEST_LEVEL,
 };
 pub use plan::{plan_tiles, DebugView, FramePlan, PlanError, PlanRequest, TileDraw};
 pub use repro::ReproBundle;
