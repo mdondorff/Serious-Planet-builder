@@ -12,10 +12,10 @@ use planet_world_def::{
     records_hash64, single_planet_seed_read_hash, single_planet_seed_records, GenContext, MissingNode, ReadRecord, SPHERE_SURFACE_ID,
 };
 
-/// Bump whenever any output of this module changes (ADR 0006).
 /// The slack of [`HeightField::bounds_monotone`], metres: the rounding margins of the bounds of two caps differ by this much at most.
 pub const MONOTONE_SLACK_M: f64 = 0.01;
 
+/// Bump whenever any output of this module changes (ADR 0006).
 pub const GENERATOR_VERSION: u32 = 2;
 /// Names this implementation in cache keys: CPU reference, hash version, and the face-mapping id is added by callers.
 pub const IMPLEMENTATION_ID: &str = "cpu-ref-height-v2";
