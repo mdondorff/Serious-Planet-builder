@@ -354,8 +354,9 @@ fn row_button_inline(ui: &mut egui::Ui, st: &mut PanelState, ev: &mut Vec<Event>
     }
 }
 
-/// The rows of a region: its surface type (a combo box over the table) and its mask (does it clip another layer inside its outline, and
-/// which one). The mask mode "outside" is not offered (the world definition refuses it for now).
+/// The rows of a region: its surface type (a combo box over the table) and its mask (does it remove the edits of another layer inside its
+/// outline, and which layer; [`planet_editor::params::MASK_CUT_LABEL`]). Keeping them only inside (the mask mode 1) is not offered: the world
+/// definition refuses it for now.
 fn region_rows(ui: &mut egui::Ui, st: &mut PanelState, r: &planet_editor::params::RegionRows, ev: &mut Vec<Event>) {
     egui::Grid::new("region-rows").num_columns(2).show(ui, |ui| {
         ui.label("Surface type");
@@ -371,9 +372,9 @@ fn region_rows(ui: &mut egui::Ui, st: &mut PanelState, r: &planet_editor::params
         });
         st.marks.push(("surface-type".to_string(), combo.response.rect));
         ui.end_row();
-        ui.label("Clips");
+        ui.label("Mask");
         let mut inside = r.clips_inside;
-        let check = ui.checkbox(&mut inside, "another layer, inside the outline");
+        let check = ui.checkbox(&mut inside, planet_editor::params::MASK_CUT_LABEL).on_hover_text(planet_editor::params::MASK_CUT_HINT);
         st.marks.push(("mask-inside".to_string(), check.rect));
         if check.changed() {
             // Switching it on picks the layer it had, else the first other layer; with none to choose the session says so.
@@ -382,7 +383,7 @@ fn region_rows(ui: &mut egui::Ui, st: &mut PanelState, r: &planet_editor::params
         }
         ui.end_row();
         if r.clips_inside {
-            ui.label("Layer");
+            ui.label("Layer cut");
             let shown = r.mask_layer.clone().unwrap_or_default();
             let combo = egui::ComboBox::from_id_salt("mask-layer").selected_text(shown.clone()).show_ui(ui, |ui| {
                 for layer in &r.layers {
@@ -894,6 +895,66 @@ mod tests {
         );
         let p = rig.mark("surface:grass");
         assert_eq!(rig.click(&data(&h), p), vec![Event::SurfaceType(2)]);
+    }
+
+    // spec: VIEW-033
+    #[test]
+    fn the_mask_label_says_what_the_stage_does_the_edits_are_removed_inside_the_outline_and_stay_outside_it() {
+        use planet_core::Vec3;
+        use planet_generators::height::{HeightField, Reference};
+        use planet_generators::stamp::{ItemReader, StampStage};
+        use planet_world_def::stamp::{Stamp, StampKind};
+        use planet_world_def::{BodyId, ItemSpec, WorldDefinition};
+        const R: f64 = 6_371_000.0;
+        let unit = |lat: f64, lon: f64| {
+            let (la, lo) = (lat.to_radians(), lon.to_radians());
+            Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la))
+        };
+        // A hill of the layer "stamps" reaches across a square region of mode 2 that names "stamps".
+        let centre = unit(20.0, 30.0);
+        let hill = ItemSpec {
+            id: 1,
+            layer: "stamps".into(),
+            priority: 0,
+            dir: centre,
+            content_hash: 0,
+            reach_m: 6_000.0,
+            max_delta_m: 50.0,
+            stamp: None,
+        }
+        .with_stamp(Stamp::new(StampKind::Hill, [50.0, 0.0, 0.0]));
+        let corners: Vec<Vec3> =
+            [(19.98, 29.98), (19.98, 30.02), (20.02, 30.02), (20.02, 29.98)].iter().map(|(a, b)| unit(*a, *b)).collect();
+        let region = ItemSpec {
+            id: 2,
+            layer: "stamps".into(),
+            priority: 0,
+            dir: corners[0],
+            content_hash: 0,
+            reach_m: 8_000.0,
+            max_delta_m: 0.0,
+            stamp: None,
+        }
+        .with_stamp(Stamp::new(StampKind::Region, [2.0, 2.0, 0.0]).with_points(&corners));
+        let mut def = WorldDefinition::single_planet(R, 1);
+        def.put_item_spec(BodyId::PLANET, hill).unwrap();
+        def.put_item_spec(BodyId::PLANET, region).unwrap();
+        let def = std::sync::Arc::new(def);
+        let stage =
+            StampStage::new(std::sync::Arc::new(Reference(1)), def as std::sync::Arc<dyn ItemReader>, BodyId::PLANET, "stamps", 0, 3)
+                .unwrap();
+        let base = Reference(1);
+        let inside = unit(20.0, 30.0);
+        let outside = unit(20.0, 30.04);
+        assert_eq!(stage.height(inside).to_bits(), base.height(inside).to_bits(), "inside the outline the layer's edit is removed");
+        assert!(stage.height(outside) > base.height(outside) + 1.0, "outside it the edit stays");
+        // The words say so: removes, inside, stay, outside; and nothing that reads as keeping the edits inside.
+        let (label, hint) = (planet_editor::params::MASK_CUT_LABEL.to_lowercase(), planet_editor::params::MASK_CUT_HINT.to_lowercase());
+        assert!(label.contains("removes") && label.contains("inside"), "{label}");
+        assert!(hint.contains("cut away inside") && hint.contains("stay outside"), "{hint}");
+        for wrong in ["only inside the outline", "clips another layer", "keeps the edits inside"] {
+            assert!(!label.contains(wrong) && !hint.replace("keeping them only inside is not offered yet", "").contains(wrong), "{wrong}");
+        }
     }
 
     // spec: VIEW-031
