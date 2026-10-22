@@ -426,7 +426,7 @@ impl<S: ItemStore> Session<S> {
 
     /// `rows` with the warning of the brush guard set on those over the limit (VIEW-043).
     fn flagged(&self, mut rows: Vec<Row>) -> Vec<Row> {
-        let health = self.health();
+        let health = self.health_lists();
         if !health.steep().is_empty() {
             for row in &mut rows {
                 row.steep = health.is_steep(row.id, self.editor.item(row.id).and_then(|i| i.group));
@@ -435,8 +435,15 @@ impl<S: ItemStore> Session<S> {
         rows
     }
 
-    /// The edit-health lists, brought up to date with the editor: all the items the first time (or when the change log no longer reaches back,
-    /// or the drawable slope moved), the items changed since otherwise.
+    /// The edit-health lists, true for the items as they are now (the items that may have changed are checked here, once per change).
+    fn health_lists(&self) -> std::cell::RefMut<'_, Health> {
+        let mut h = self.health();
+        h.settle_pending();
+        h
+    }
+
+    /// The index of the edit-health lists, brought up to date with the editor: all the items the first time (or when the change log no longer
+    /// reaches back, or the drawable slope moved), the items changed since otherwise. The answers are not found until asked for.
     fn health(&self) -> std::cell::RefMut<'_, Health> {
         let mut cell = self.health.borrow_mut();
         let seq = self.editor.change_seq();
@@ -452,7 +459,7 @@ impl<S: ItemStore> Session<S> {
 
     /// How many items the last refresh of the edit-health lists checked (the work the last change cost).
     pub fn health_checked(&self) -> usize {
-        let h = self.health();
+        let h = self.health_lists();
         h.last_checked()
     }
 
@@ -483,19 +490,19 @@ impl<S: ItemStore> Session<S> {
     /// The brush items whose stacked gradient is over the limit of the guard, "too steep to draw fully" (VIEW-043). Kept up to date as the
     /// editor changes (VIEW-048).
     pub fn steep_items(&self) -> BTreeSet<ItemId> {
-        self.health().steep().clone()
+        self.health_lists().steep().clone()
     }
 
     /// The brush items listed as stacked with the depth of their stack (VIEW-047). Kept up to date as the editor changes (VIEW-048).
     pub fn stacked_items(&self) -> std::collections::BTreeMap<ItemId, usize> {
-        self.health().stacked().clone()
+        self.health_lists().stacked().clone()
     }
 
     /// The problems list (VIEW-047): every edit too steep to draw fully, stacked, or near tiles the plan holds back (`capped`, the edits the
     /// window found over the capped tiles of the last plan). The steepest and deepest first, then by name.
     pub fn problems(&self, capped: &[ItemId], camera_position: Vec3) -> Vec<Problem> {
         let (steep, stacked) = {
-            let h = self.health();
+            let h = self.health_lists();
             (h.steep().clone(), h.stacked().clone())
         };
         let mut ids: BTreeSet<ItemId> = steep.iter().copied().chain(stacked.keys().copied()).collect();
@@ -606,7 +613,7 @@ impl<S: ItemStore> Session<S> {
         let place = same.iter().position(|(_, id)| *id == it.id).map_or(1, |p| p + 1);
         let mut inspector = params::inspector_of(it, (place, same.len()), lists::distance_m(camera_position, it, self.radius_m));
         inspector.region = params::region_rows(it, &self.layers());
-        if it.kind == brush::BRUSH_KIND && self.health().is_steep(it.id, it.group) {
+        if it.kind == brush::BRUSH_KIND && self.health_lists().is_steep(it.id, it.group) {
             inspector.warning = Some(slope::WARNING.to_string());
         }
         if inspector.region.is_some() {
