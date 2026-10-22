@@ -9,8 +9,8 @@ use planet_editor::problems;
 use planet_editor::session::Session;
 use planet_editor::session::Tool;
 use planet_editor::slope;
-use planet_world_def::item::{Anchor, ItemStroke};
-use planet_world_def::item_store::MemoryStore;
+use planet_world_def::item::{Anchor, Item, ItemStroke};
+use planet_world_def::item_store::{ItemStore, MemoryStore};
 use planet_world_def::stamp::BrushKind;
 use planet_world_def::{BodyId, ItemId, WorldDefinition};
 
@@ -95,6 +95,15 @@ fn the_incremental_lists_equal_the_full_scans_after_every_edit_of_a_random_seque
         ids.push(s.editor_mut().put(new_item(strokes)).unwrap().0);
     }
     assert_equal_to_full_scans(&s, "30 puts");
+    // Two brushes whose strokes run 30 km (past the cells the grid files an item in: these are met by every query), over the areas above.
+    for east_m in [0.0, 100.0] {
+        let wide = ItemStroke {
+            points: vec![(deg(300.0), deg(east_m)), (deg(300.0), deg(east_m + 15_000.0)), (deg(300.0), deg(east_m + 30_000.0))],
+            ..stroke(BrushKind::Raise, 6.0, 150.0, 300.0, east_m)
+        };
+        ids.push(s.editor_mut().put(NewItem { reach_m: 31_000.0, ..new_item(vec![wide]) }).unwrap().0);
+    }
+    assert_equal_to_full_scans(&s, "two wide brushes");
     let mut steps = [0usize; 4];
     for step in 0..60 {
         // Undo may have taken an item away: the ids are those the editor has.
@@ -136,20 +145,39 @@ fn the_incremental_lists_equal_the_full_scans_after_every_edit_of_a_random_seque
 
 // spec: VIEW-048
 #[test]
-fn a_change_re_checks_the_items_near_it_and_no_others_at_5000_items() {
-    let mut s = session();
-    // 5,041 brushes on a grid 1 km apart, each a small raise of 100 m radius: none meets another.
+fn a_change_re_checks_the_items_near_it_and_no_others_whatever_the_number_of_items() {
+    // The same changes cost the same checks at 625 and at 2,500 items (a count that grew with the items would differ).
+    bounded_at(25);
+    bounded_at(50);
+}
+
+fn bounded_at(side: u32) {
+    // side x side brushes on a grid 1 km apart, each a small raise of 100 m radius: none meets another. They are made as an item store holds
+    // them and loaded in one step (the test counts items checked, not time).
+    let mut scratch = session();
+    let (template_id, _) = scratch.editor_mut().put(new_item(vec![stroke(BrushKind::Raise, 2.0, 100.0, 0.0, 0.0)])).unwrap();
+    let template = scratch.editor().item(template_id).unwrap().clone();
+    let mut store = MemoryStore::new();
     let mut ids = Vec::new();
-    for row in 0..71 {
-        for col in 0..71 {
-            let it = new_item(vec![stroke(BrushKind::Raise, 2.0, 100.0, f64::from(row) * 1000.0, f64::from(col) * 1000.0)]);
-            ids.push(s.editor_mut().put(it).unwrap().0);
+    for row in 0..side {
+        for col in 0..side {
+            let id = ItemId::from(row * side + col + 1);
+            let strokes = vec![stroke(BrushKind::Raise, 2.0, 100.0, f64::from(row) * 1000.0, f64::from(col) * 1000.0)];
+            let anchor = Anchor { latitude_deg: strokes[0].points[0].0, longitude_deg: strokes[0].points[0].1, ..template.anchor };
+            store.put(&Item { id, anchor, strokes, ..template.clone() }).unwrap();
+            ids.push(id);
         }
     }
-    let (first, middle) = (ids[0], ids[35 * 71 + 35]);
-    assert!(s.editor().items().count() >= 5000);
+    let idm = IdMaker::new(Box::new(FixedClock(1_760_000_000_000)), Box::new(SeededEntropy(6)));
+    let mut editor = Editor::new(WorldDefinition::single_planet(R, 7), store, idm, 4, 2);
+    editor.load(BodyId::PLANET).unwrap();
+    let mut s = Session::new(editor, BodyId::PLANET, R);
+    let (first, middle) = (ids[0], ids[(side / 2 * side + side / 2) as usize]);
+    let total = (side * side) as usize;
+    assert_eq!(s.editor().items().count(), total);
     assert!(s.steep_items().is_empty());
-    assert_eq!(s.health_checked(), 5041, "the first time, every item");
+    assert_eq!(s.health_checked(), total, "the first time, every item");
+    let pile_at = f64::from(side) * 500.0 + 500.0 * 0.5;
     // Changing one: only itself.
     s.editor_mut().change(middle, |it| it.strokes[0].strength_m = 3.0).unwrap();
     assert!(s.steep_items().is_empty());
@@ -167,17 +195,19 @@ fn a_change_re_checks_the_items_near_it_and_no_others_at_5000_items() {
     s.editor_mut().delete(top).unwrap();
     let _ = s.stacked_items();
     assert_eq!(s.health_checked(), 1, "the one that was covered");
-    // A pile of 40 on one place: a change to one of them re-checks the pile (40 in all), not the 5,000.
+    // A pile of 40 on one place: a change to one of them re-checks the pile (40 in all), not the thousands.
     let mut pile = Vec::new();
     for _ in 0..40 {
-        pile.push(s.editor_mut().put(new_item(vec![stroke(BrushKind::Raise, 5.0, 100.0, 36_500.0, 36_500.0)])).unwrap().0);
+        pile.push(s.editor_mut().put(new_item(vec![stroke(BrushKind::Raise, 5.0, 100.0, pile_at, pile_at)])).unwrap().0);
     }
     let _ = s.steep_items();
     s.editor_mut().change(pile[0], |it| it.strokes[0].strength_m = 6.0).unwrap();
     let _ = s.steep_items();
     assert!(s.health_checked() <= 42, "{}", s.health_checked());
     assert!(s.steep_items().contains(&pile[0]), "forty strokes on a place are too steep");
-    assert_equal_to_full_scans(&s, "the 5,000 item scene");
+    // The full scans are quadratic in the items (seconds at 5,000): the equality is held by the random sequence above; here, what they must find.
+    assert!(s.steep_items().iter().all(|id| pile.contains(id)), "only the pile is steep");
+    assert!(s.stacked_items().keys().all(|id| pile.contains(id)), "only the pile is stacked");
 }
 
 fn piece_copy(p: &planet_editor::brush::BrushStroke) -> planet_editor::brush::BrushStroke {
