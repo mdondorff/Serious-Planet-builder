@@ -60,6 +60,8 @@ mod pick;
 mod pipeline;
 #[path = "plan.rs"]
 mod plan;
+#[path = "plan_keep.rs"]
+mod plan_keep;
 #[path = "plan_origin_batch.rs"]
 mod plan_origin_batch;
 #[path = "plan_reuse.rs"]

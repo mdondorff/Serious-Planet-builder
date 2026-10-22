@@ -1155,6 +1155,31 @@ mod tests {
         }
     }
 
+    // spec: STRM-036
+    #[test]
+    fn a_put_an_undo_and_a_redo_each_hand_over_a_definition_whose_difference_is_the_stamps_place() {
+        let mut e = runtime(None);
+        e.toggle();
+        let mut previous = std::sync::Arc::new(WorldDefinition::single_planet(R, 7));
+        let mut places = |e: &mut EditRuntime| {
+            let def = e.take_changed_definition().expect("the editor handed over a definition");
+            let found: Vec<(u64, u64, u64, u64)> = def
+                .item_changes_from(&previous)
+                .into_iter()
+                .map(|(d, r)| (d.x.to_bits(), d.y.to_bits(), d.z.to_bits(), r.to_bits()))
+                .collect();
+            previous = def;
+            found
+        };
+        e.session.place("hill", unit(30.0, 40.0)).unwrap();
+        let put = places(&mut e);
+        assert_eq!(put.len(), 1, "a put gives the place of the stamp once");
+        e.key(EditKey::Undo);
+        assert_eq!(places(&mut e), put, "the undo gives the same place");
+        e.key(EditKey::Redo);
+        assert_eq!(places(&mut e), put, "the redo gives the same place");
+    }
+
     // spec: VIEW-051
     #[test]
     fn the_outlines_read_the_ground_once_while_the_fields_items_are_the_same() {

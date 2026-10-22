@@ -318,11 +318,13 @@ pub struct Timed<'a> {
     /// Calls and nanoseconds of `height`, `height_bounds`, `inputs_hash_for`, `read_records_for`, `passes_through`, `max_abs_height_m`.
     pub calls: [AtomicU64; 6],
     pub ns: [AtomicU64; 6],
+    /// Calls and nanoseconds of `inputs_hash_for` by the level of the tile.
+    pub hash_levels: [[AtomicU64; 2]; 32],
 }
 
 impl<'a> Timed<'a> {
     pub fn new(inner: &'a dyn HeightField) -> Timed<'a> {
-        Timed { inner, calls: Default::default(), ns: Default::default() }
+        Timed { inner, calls: Default::default(), ns: Default::default(), hash_levels: Default::default() }
     }
 
     fn timed<R>(&self, k: usize, f: impl FnOnce() -> R) -> R {
@@ -331,6 +333,21 @@ impl<'a> Timed<'a> {
         self.calls[k].fetch_add(1, Relaxed);
         self.ns[k].fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
         r
+    }
+
+    /// `inputs_hash_for` calls and milliseconds by tile level, for the levels that were asked.
+    pub fn hash_level_report(&self) -> String {
+        (0..32)
+            .filter(|l| self.hash_levels[*l][0].load(Relaxed) > 0)
+            .map(|l| {
+                format!(
+                    "L{l}: {} calls {:.0} ms",
+                    self.hash_levels[l][0].load(Relaxed),
+                    self.hash_levels[l][1].load(Relaxed) as f64 / 1.0e6
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
     }
 
     pub fn report(&self) -> String {
@@ -372,7 +389,12 @@ impl HeightField for Timed<'_> {
         self.inner.reads_cells()
     }
     fn inputs_hash_for(&self, t: TileId, m: &dyn FaceMapping) -> u64 {
-        self.timed(2, || self.inner.inputs_hash_for(t, m))
+        let start = Instant::now();
+        let h = self.timed(2, || self.inner.inputs_hash_for(t, m));
+        let level = &self.hash_levels[usize::from(t.level()).min(31)];
+        level[0].fetch_add(1, Relaxed);
+        level[1].fetch_add(start.elapsed().as_nanos() as u64, Relaxed);
+        h
     }
     fn body(&self) -> BodyId {
         self.inner.body()
@@ -437,7 +459,7 @@ pub fn run(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         // --- the load
         let ws0 = working_set_bytes();
         let t = Instant::now();
-        let mut rt = EditRuntime::with_ids(base.clone(), radius_m, Some(&set), Layout::default(), ids(seed ^ 0x55))?;
+        let mut rt = EditRuntime::with_ids(base.clone(), radius_m, Some(&set), Layout::default(), ids(seed ^ 0x9E37_79B9_7F4A_7C15))?;
         let load_ms = t.elapsed().as_secs_f64() * 1000.0;
         let ws1 = working_set_bytes();
         let count = rt.session.editor().items().count();
@@ -560,6 +582,7 @@ pub fn run(o: &Options, out: &mut dyn Write) -> Result<(), String> {
 
         // --- the plan job: cold (a fresh field and selection cache, the first plan at a place) and warm (the camera drifting 0.5 m a frame)
         let mut frames = frames_env;
+        let mut edit_counter = 0u128;
         let mut row = format!("| {n} |");
         let mut editor_rows: Vec<String> = Vec::new();
         for (label, at) in [("cluster", centre), ("empty", empty)] {
@@ -616,28 +639,58 @@ pub fn run(o: &Options, out: &mut dyn Write) -> Result<(), String> {
                     )
                     .map_err(err)?;
                 }
-                // The plan right after one edit: a hill is placed at the view, the definition handed to the field, the certificates and cap bounds
-                // cleared (`invalidate_tiles`, which does that whatever tiles it is given; none are named here, so the content keys of the tiles find
-                // what the edit changed, STRM-027), the plan made again.
+                // The plan right after one edit: a hill is put at the view, the definition handed to the field and the change announced to the plan
+                // cache as the window does (STRM-034; `PLANET_SCALE_UNANNOUNCED` leaves it out, so every tile is checked again), no tile named
+                // (`invalidate_tiles(&[])`: the content keys of the tiles find what the edit changed, STRM-027), the plan made again.
                 if std::env::var_os("PLANET_SCALE_NOEDITPLAN").is_none() {
-                    let placed = rt.session.place("hill", at).is_ok();
-                    let def = Arc::new(rt.session.editor().definition().clone());
-                    world.set_definition(def)?;
+                    // A hill of 400 m reach put into a copy of the definition (in memory: the set's files are not touched).
+                    let old_def = world.definition();
+                    let old_revision = fresh.item_revision();
+                    let mut edited = (*old_def).clone();
+                    let spec = planet_world_def::ItemSpec {
+                        id: u128::MAX - edit_counter,
+                        layer: planet_editor::session::STAMP_LAYER.into(),
+                        priority: 0,
+                        dir: at,
+                        content_hash: 0,
+                        reach_m: 400.0,
+                        max_delta_m: 20.0,
+                        stamp: None,
+                    }
+                    .with_stamp(planet_world_def::stamp::Stamp::new(planet_world_def::stamp::StampKind::Hill, [20.0, 0.0, 0.0]));
+                    edit_counter += 1;
+                    let placed = edited
+                        .put_item_spec(planet_world_def::BodyId::PLANET, spec)
+                        .map_or_else(|e| format!("refused: {e:?}"), |_| "yes".to_string());
+                    let def = Arc::new(edited);
+                    world.set_definition(Arc::clone(&def))?;
                     let after = world.field()?;
+                    let changes: Vec<planet_frame::lod::ItemChange> = def
+                        .item_changes_from(&old_def)
+                        .into_iter()
+                        .map(|(dir, reach_m)| planet_frame::lod::ItemChange { dir, reach_m })
+                        .collect();
+                    let announced = changes.len();
+                    if std::env::var_os("PLANET_SCALE_UNANNOUNCED").is_none() {
+                        cache.note_item_change(old_revision, after.item_revision(), changes);
+                    }
                     cache.invalidate_tiles(&[]);
                     let mut cam = base_cam;
                     cam.position =
                         planet_core::PlanetFixed(cam.position.0 + cam.forward.cross(cam.up).normalized() * (0.5 * (frames + 3) as f64));
+                    let timed = Timed::new(&*after);
                     let t = Instant::now();
-                    let _ = plan_terrain_cached(&req_of(cam), &*after, &mut cache).map_err(|e| e.to_string())?;
+                    let _ = plan_terrain_cached(&req_of(cam), &timed, &mut cache).map_err(|e| e.to_string())?;
                     let first_ms = t.elapsed().as_secs_f64() * 1000.0;
+                    writeln!(out, "    where it went (calls into the field): {}", timed.report()).map_err(err)?;
+                    writeln!(out, "    inputs_hash_for by tile level: {}", timed.hash_level_report()).map_err(err)?;
                     cam.position = planet_core::PlanetFixed(cam.position.0 + cam.forward.cross(cam.up).normalized() * 0.5);
                     let t = Instant::now();
                     let _ = plan_terrain_cached(&req_of(cam), &*after, &mut cache).map_err(|e| e.to_string())?;
                     let next_ms = t.elapsed().as_secs_f64() * 1000.0;
                     writeln!(
                         out,
-                        "  the plan right after one hill edit at the {label} (placed: {placed}; certificates and cap bounds cleared, no tile named): {first_ms:.1} ms, the next plan {next_ms:.1} ms"
+                        "  the plan right after one hill edit at the {label} (placed: {placed}; {announced} places in the change, no tile named): {first_ms:.1} ms, the next plan {next_ms:.1} ms"
                     )
                     .map_err(err)?;
                 }

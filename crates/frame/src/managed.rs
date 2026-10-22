@@ -346,6 +346,12 @@ impl ManagedLoop {
         &self.manager
     }
 
+    /// Announce the item change of the next [`ManagedLoop::edit`] to the plan cache (STRM-034): the field's item revision went from `from` to `to`,
+    /// and `changes` is where the items that differ were and are (`WorldDefinition::item_changes_from`). Call it before `edit`.
+    pub fn note_item_change(&mut self, from: u64, to: u64, changes: Vec<crate::lod::ItemChange>) {
+        self.pipe.worker().note_item_change(from, to, changes);
+    }
+
     /// An item edit changed what `tiles` read (STRM-026, E1): the plan cache forgets them, the resident ones are refreshed (drawn from
     /// their old version until the new one is uploaded, REND-032), and a new plan is asked for at the next frame although the camera
     /// did not move. `tiles` is the footprint find of the edit (WDEF-007). Returns the refresh requests queued.

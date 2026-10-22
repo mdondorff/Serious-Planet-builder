@@ -52,10 +52,19 @@ pub fn node_hash128(level: u8, children: &[[u8; 16]; 4]) -> [u8; 16] {
 
 /// The hash of an empty subtree rooted at `level` in a tree whose leaves are at `cell_level`.
 pub fn empty_hash128(level: u8, cell_level: u8) -> [u8; 16] {
+    // A miss of the summary map asks for this once per node of a cover (up to some 20,000 for a coarse tile), and each is a chain of hashes: the
+    // chain of one cell level is made once (SPIKE-29: 19 ms of a 20 ms tile key).
+    type Memo = std::sync::Mutex<std::collections::HashMap<(u8, u8), [u8; 16]>>;
+    static MEMO: std::sync::OnceLock<Memo> = std::sync::OnceLock::new();
+    let memo = MEMO.get_or_init(Default::default);
+    if let Some(h) = memo.lock().expect("empty hash memo").get(&(level, cell_level)) {
+        return *h;
+    }
     let mut h = cell_hash128(&[]);
     for l in (level..cell_level).rev() {
         h = node_hash128(l, &[h; 4]);
     }
+    memo.lock().expect("empty hash memo").insert((level, cell_level), h);
     h
 }
 

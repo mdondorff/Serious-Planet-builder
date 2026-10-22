@@ -583,6 +583,12 @@ impl PlanWorker {
         }
     }
 
+    /// Announce a change of the authored items to the plan cache: the field's item revision went from `from` to `to`, and `changes` is where the
+    /// items that differ were and are (STRM-034). Call it before [`PlanWorker::invalidate_cache`] for the same edit and before the next plan.
+    pub fn note_item_change(&self, from: u64, to: u64, changes: Vec<crate::lod::ItemChange>) {
+        self.cache.lock().expect("selection cache").note_item_change(from, to, changes);
+    }
+
     /// Ask for the plan of `req`. Never blocks and never plans on the calling thread.
     pub fn submit(&self, seq: u64, req: TerrainRequest) {
         self.submit_predicted(seq, req, None);
