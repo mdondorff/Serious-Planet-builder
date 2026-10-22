@@ -1,0 +1,37 @@
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu); 2560x1440, eye 1.8 m, pitch 6 deg, 100 timed frames per row; the rows name the placed count and the field radius
+timestamps: true
+wrote target/spike28/10_k__250_m.png
+wrote target/spike28/100_k__250_m.png
+wrote target/spike28/1_M__250_m.png
+wrote target/spike28/4_M__250_m.png
+wrote target/spike28/1_M__250_m__patches.png
+wrote target/spike28/2_M__80_m_dense.png
+wrote target/spike28/4_M__80_m_dense.png
+
+| Placed | Visible grass | Visible rocks | Triangles | CPU cull ms, all | CPU cull ms, by cells | CPU upload ms (bytes) | GPU draw ms, CPU path | GPU cull ms | GPU draw ms, GPU path | Equal | Diff |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 10 k, 250 m (10000) | 39 | 59 | 4954 | 0.019 | 0.004 | 0.004 (1568) | 0.003 | 0.008 | 0.005 | true | 0 |
+| 100 k, 250 m (100000) | 422 | 707 | 59092 | 0.197 | 0.025 | 0.009 (18064) | 0.047 | 0.010 | 0.047 | true | 0 |
+| 1 M, 250 m (1000000) | 4027 | 7116 | 593442 | 2.455 | 0.469 | 0.056 (178288) | 0.396 | 0.053 | 0.392 | true | 0 |
+| 4 M, 250 m (4000000) | 15983 | 27879 | 2326218 | 10.598 | 1.982 | 0.385 (701792) | 3.178 | 0.219 | 1.451 | true | 0 |
+| 1 M, 250 m, patches (499809) | 2017 | 3573 | 297942 | 1.258 | 0.193 | 0.027 (89440) | 0.145 | 0.035 | 0.138 | true | 0 |
+| 2 M, 80 m dense (2000000) | 138713 | 96618 | 8561718 | 14.317 | 6.967 | 2.307 (3765296) | 7.397 | 0.118 | 3.959 | true | 0 |
+| 4 M, 80 m dense (4000000) | 277130 | 192380 | 17053180 | 28.830 | 14.496 | 4.953 (7512160) | 15.920 | 0.223 | 7.725 | true | 0 |
+
+wall per frame (submit, wait; the CPU path includes the cull and the upload): CPU path / GPU path ms
+  10 k, 250 m: 0.166 / 0.182
+  100 k, 250 m: 0.415 / 0.228
+  1 M, 250 m: 3.288 / 0.750
+  4 M, 250 m: 14.926 / 2.652
+  1 M, 250 m, patches: 1.591 / 0.482
+  2 M, 80 m dense: 24.842 / 5.161
+  4 M, 80 m dense: 51.197 / 8.732
+
+memory: instance 16 B (position 3 x f32, one word of kind, turn, size, thinning byte), unpacked 32 B; GPU path: the whole set + 4 B index per visible instance (allocated worst case 8 B x placed)
+  10 k, 250 m: instances 160000 B, GPU-path worst-case indices 80000 B, CPU-path visible upload 1568 B
+  100 k, 250 m: instances 1600000 B, GPU-path worst-case indices 800000 B, CPU-path visible upload 18064 B
+  1 M, 250 m: instances 16000000 B, GPU-path worst-case indices 8000000 B, CPU-path visible upload 178288 B
+  4 M, 250 m: instances 64000000 B, GPU-path worst-case indices 32000000 B, CPU-path visible upload 701792 B
+  1 M, 250 m, patches: instances 7996944 B, GPU-path worst-case indices 3998472 B, CPU-path visible upload 89440 B
+  2 M, 80 m dense: instances 32000000 B, GPU-path worst-case indices 16000000 B, CPU-path visible upload 3765296 B
+  4 M, 80 m dense: instances 64000000 B, GPU-path worst-case indices 32000000 B, CPU-path visible upload 7512160 B
