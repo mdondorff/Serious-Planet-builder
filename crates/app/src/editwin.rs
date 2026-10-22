@@ -146,10 +146,10 @@ pub struct Pointer {
     pub over_ui: bool,
 }
 
-/// The editor mode.
 /// The most ground heights kept for the outlines before the cache starts over.
 const GROUND_CACHE_MAX: usize = 1 << 16;
 
+/// The editor mode.
 pub struct EditRuntime {
     pub session: Session<EditStore>,
     pub interaction: Interaction,
