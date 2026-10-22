@@ -74,3 +74,8 @@ During the whole warm plan the field was asked nothing (0 `height`, 0 `height_bo
 
 ## Visuals
 None: a cost and scaling spike (no picture was made or needed).
+
+## After edit-health-scale (2026-10-22, fix 2)
+- The steep, stacked and problems lists follow the items incrementally (VIEW-048); the slope guard of a stroke reads only the strokes near it.
+- N = 1000 (513 brushes, 4142 strokes), `run-after-edit-health-scale-1000.txt`: the editor frame at 200 m and 30 m is 49 and 50 ms p50 (p95 50 and 51 ms); it was 55 ms p50 and 19.5 s p95 at 200 m before. At 2 km it is 73 ms p50 and 74 ms p95 (161 edits shown).
+- The plan job did not change (warm 3.6 to 4.8 s): it is not the proof. 99.8 % of it is `StampStage::max_abs_height_m()` (19,000 to 21,800 calls of 0.22 ms each per plan, O(items) each through `max_delta_sum`); the earlier diagnosis did not time that call. Next: cache the sum per item revision.
