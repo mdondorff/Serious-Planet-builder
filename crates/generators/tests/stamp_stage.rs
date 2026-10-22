@@ -575,3 +575,47 @@ fn the_bounds_of_a_crater_are_exact_over_a_small_cap_at_its_rim_and_hold_for_ran
         assert!(worst < 0.5, "depth {depth}, reach {reach}: the bounds grow the extent by up to {worst} m more than 1.1 times the relief");
     }
 }
+
+// spec: GEN-032
+#[test]
+fn the_cached_max_delta_sum_equals_the_walk_after_items_are_added_removed_and_changed() {
+    use std::sync::RwLock;
+    let def = Arc::new(RwLock::new(WorldDefinition::single_planet(R, 1)));
+    let s = StampStage::new(Arc::new(Reference(1)), def.clone(), BodyId::PLANET, DEFAULT_ITEM_LAYER, 0, 1).expect("a body with a radius");
+    let base = Reference(1).max_abs_height_m();
+    // What the stage must answer: the base's bound and the uncached walk over the items now.
+    let check = |what: &str| {
+        let walked = def.read().unwrap().max_delta_sum(BodyId::PLANET, DEFAULT_ITEM_LAYER);
+        assert_eq!(s.max_abs_height_m(), base + walked, "{what}");
+        assert_eq!(s.max_abs_height_m(), base + walked, "{what}, asked again from the cache");
+        walked
+    };
+    assert_eq!(check("no item"), 0.0);
+    let put = |id: u128, layer: &str, max_delta_m: f64| {
+        let spec = ItemSpec {
+            id,
+            layer: layer.into(),
+            priority: 0,
+            dir: dir(1.0, 0.1 * id as f64, 0.0),
+            content_hash: 0,
+            reach_m: 500.0,
+            max_delta_m,
+            stamp: None,
+        }
+        .with_stamp(Stamp::new(StampKind::Hill, [max_delta_m, 0.0, 0.0]));
+        def.write().unwrap().put_item_spec(BodyId::PLANET, spec).unwrap();
+    };
+    put(1, DEFAULT_ITEM_LAYER, 10.0);
+    assert_eq!(check("one item"), 10.0);
+    put(2, DEFAULT_ITEM_LAYER, 5.0);
+    put(3, "other", 100.0);
+    assert_eq!(check("an item of this layer, and one of another layer"), 15.0);
+    put(1, DEFAULT_ITEM_LAYER, 40.0);
+    assert_eq!(check("max_delta changed"), 45.0);
+    put(3, DEFAULT_ITEM_LAYER, 100.0);
+    assert_eq!(check("an item moved into the layer"), 145.0);
+    put(2, "other", 5.0);
+    assert_eq!(check("an item moved out of the layer"), 140.0);
+    assert!(def.write().unwrap().remove_item(BodyId::PLANET, 1));
+    assert_eq!(check("an item removed"), 100.0);
+}

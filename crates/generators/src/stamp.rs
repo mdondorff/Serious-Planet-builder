@@ -436,6 +436,9 @@ pub struct StampStage<'a> {
     stack_index: u32,
     stage_version: u32,
     inputs: u64,
+    /// `items.max_delta_sum` for the item revision it was taken at (it walks every item of the body: a plan asks for the field's bound per tile
+    /// and per level, SPIKE-29). A `Mutex`: the stage is shared by the plan job's threads.
+    max_delta: std::sync::Mutex<Option<(u64, f64)>>,
 }
 
 /// The version of the stamp stage (bumped whenever its output changes, ADR 0006): part of the key of every stamped tile.
@@ -461,7 +464,31 @@ impl<'a> StampStage<'a> {
             0x0073_7467,
             &[base.inputs_hash(), planet_core::hash::hash_u64s(3, &text), u64::from(stack_index), u64::from(stage_version)],
         );
-        Some(StampStage { base, items, body, layer: layer.to_string(), stack_index, stage_version, inputs })
+        Some(StampStage {
+            base,
+            items,
+            body,
+            layer: layer.to_string(),
+            stack_index,
+            stage_version,
+            inputs,
+            max_delta: std::sync::Mutex::new(None),
+        })
+    }
+
+    /// The sum of the `max_delta_m` of the layer's items, walked once per item revision (the revision differs after every change, so the value
+    /// is that of the items as they are now).
+    fn max_delta_sum(&self) -> f64 {
+        let revision = self.items.revision();
+        let mut cached = self.max_delta.lock().expect("max_delta lock");
+        match *cached {
+            Some((r, sum)) if r == revision => sum,
+            _ => {
+                let sum = self.items.max_delta_sum(self.body, &self.layer);
+                *cached = Some((revision, sum));
+                sum
+            }
+        }
     }
 
     /// The items a batch of directions needs: those whose reach touches the smallest cap this stage builds around them.
@@ -502,7 +529,7 @@ impl HeightField for StampStage<'_> {
     }
 
     fn max_abs_height_m(&self) -> f64 {
-        self.base.max_abs_height_m() + self.items.max_delta_sum(self.body, &self.layer)
+        self.base.max_abs_height_m() + self.max_delta_sum()
     }
 
     fn inputs_hash(&self) -> u64 {

@@ -59,6 +59,8 @@ pub struct Health {
     /// How many items the last refresh checked (the work a change costs; tests count it instead of timing).
     last_checked: usize,
     built: bool,
+    /// The items whose answer may have changed and is not found yet (found when a list is asked for: the guard of a stroke needs only the index).
+    pending: BTreeSet<ItemId>,
 }
 
 fn cell_of(lat_deg: f64, lon_deg: f64) -> (i32, i32) {
@@ -84,6 +86,7 @@ impl Health {
             mergeable: BTreeMap::new(),
             last_checked: 0,
             built: false,
+            pending: BTreeSet::new(),
         }
     }
 
@@ -295,17 +298,13 @@ impl Health {
         for item in items.into_iter().filter(|i| i.kind == BRUSH_KIND) {
             self.add(item.id, item);
         }
-        let ids: Vec<ItemId> = self.entries.keys().copied().collect();
-        for id in ids {
-            self.settle(id);
-        }
+        self.pending = self.entries.keys().copied().collect();
         self.seq = seq;
         self.built = true;
     }
 
-    /// Bring the lists up to position `seq` of the change log, given the ids changed since the position they were true for and the items now.
+    /// Bring the index up to position `seq` of the change log, given the ids changed since the position they were true for and the items now.
     pub fn apply<'a>(&mut self, seq: u64, changed: &[ItemId], item: impl Fn(ItemId) -> Option<&'a Item>) {
-        self.last_checked = 0;
         let changed: BTreeSet<ItemId> = changed.iter().copied().collect();
         let mut circles: Vec<(Vec3, f64)> = Vec::new();
         for id in &changed {
@@ -324,9 +323,20 @@ impl Health {
         for (c, r) in circles {
             affected.extend(self.near(c, r));
         }
-        for id in affected {
-            self.settle(id);
-        }
+        self.pending.extend(affected);
         self.seq = seq;
+    }
+
+    /// Find the answers of the items that may have changed since the last time (the lists are true after this).
+    pub fn settle_pending(&mut self) {
+        if self.pending.is_empty() {
+            return;
+        }
+        self.last_checked = 0;
+        for id in std::mem::take(&mut self.pending) {
+            if self.entries.contains_key(&id) {
+                self.settle(id);
+            }
+        }
     }
 }
