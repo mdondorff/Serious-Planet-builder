@@ -253,7 +253,15 @@ pub struct Editor<S: ItemStore> {
     revision: u64,
     /// The items a failed rollback left as the command made them; commands are refused while there are any, until [`Editor::reload`].
     inconsistent: Vec<ItemId>,
+    /// The ids of the items whose copy changed, in order (an id again for every change): the lists that follow the items read the tail they have
+    /// not seen ([`Editor::changes_since`]) instead of all of them. The oldest entries are dropped past `CHANGE_LOG_MAX`.
+    changes: Vec<ItemId>,
+    /// The sequence number of `changes[0]`.
+    changes_base: u64,
 }
+
+/// The entries of the change log kept; a reader further behind than this starts again from all the items.
+const CHANGE_LOG_MAX: usize = 1 << 16;
 
 impl<S: ItemStore> Editor<S> {
     /// An editor over `def` and `store`. `versions` are the generator and stage versions new items are authored against; their base hash
@@ -272,6 +280,28 @@ impl<S: ItemStore> Editor<S> {
             items: BTreeMap::new(),
             revision: 0,
             inconsistent: Vec::new(),
+            changes: Vec::new(),
+            changes_base: 0,
+        }
+    }
+
+    /// The count of item changes made so far: the position in the change log a reader remembers.
+    pub fn change_seq(&self) -> u64 {
+        self.changes_base + self.changes.len() as u64
+    }
+
+    /// The ids changed (added, edited, removed, put back) since position `seq` of the change log, an id again for every change; `None` when the
+    /// log no longer reaches back that far (or `seq` is from another editor): the reader then starts again from all the items.
+    pub fn changes_since(&self, seq: u64) -> Option<&[ItemId]> {
+        let from = seq.checked_sub(self.changes_base)? as usize;
+        self.changes.get(from..)
+    }
+
+    fn note_changed(&mut self, id: ItemId) {
+        self.changes.push(id);
+        if self.changes.len() > 2 * CHANGE_LOG_MAX {
+            self.changes.drain(..CHANGE_LOG_MAX);
+            self.changes_base += CHANGE_LOG_MAX as u64;
         }
     }
 
@@ -319,6 +349,7 @@ impl<S: ItemStore> Editor<S> {
         self.revision += u64::from(!loaded_items.is_empty());
         let loaded = loaded_items.len();
         for item in loaded_items {
+            self.note_changed(item.id);
             self.items.insert(item.id, item.canonical());
         }
         Ok(LoadReport { loaded, restaged })
@@ -349,9 +380,11 @@ impl<S: ItemStore> Editor<S> {
         }
         self.def = trial;
         for id in &old {
+            self.note_changed(*id);
             self.items.remove(id);
         }
         for item in &from_store {
+            self.note_changed(item.id);
             self.items.insert(item.id, item.clone().canonical());
         }
         self.undo.clear();
@@ -904,6 +937,7 @@ impl<S: ItemStore> Editor<S> {
         let affected = vec![affected_of(&open.now), affected_of(&next)];
         next.put_into(&mut self.def).map_err(EditError::from)?;
         self.revision += 1;
+        self.note_changed(next.id);
         self.items.insert(next.id, next.clone());
         self.open.as_mut().expect("open").now = next;
         Ok(affected)
@@ -934,6 +968,7 @@ impl<S: ItemStore> Editor<S> {
         self.revision += 1;
         let open = self.open.take().expect("open");
         let affected = vec![affected_of(&open.now), affected_of(&open.before)];
+        self.note_changed(open.before.id);
         self.items.insert(open.before.id, open.before);
         Ok(affected)
     }
@@ -1049,11 +1084,13 @@ impl<S: ItemStore> Editor<S> {
                     }
                     return Err(e.into());
                 }
+                self.note_changed(id);
                 self.items.insert(id, after.clone());
             }
             (None, Some(item)) => {
                 self.store.delete(item.body, id)?;
                 self.def.remove_item(item.body, id);
+                self.note_changed(id);
                 self.items.remove(&id);
             }
             (None, None) => {}
