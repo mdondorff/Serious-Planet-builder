@@ -451,17 +451,41 @@ fn composite_inside_at(altitude: f64, mu_sun: f64, terrain_m: f64) {
                     let c = planet_frame::look::atmosphere::haze_upsample(&texels, terrain_m * len).unwrap_or(own);
                     [0, 1, 2].map(|k| f64::from(colour[k]) * c.transmittance[k] + c.radiance[k])
                 };
-                if wm <= 0.0 {
+                let hazed = if wm <= 0.0 {
                     volume()
                 } else if wm >= 1.0 {
                     march()
                 } else {
                     let (v, m) = (volume(), march());
                     [0, 1, 2].map(|k| v[k] + (m[k] - v[k]) * wm)
+                };
+                // From 5 km below the top the orbit-style march mixes in (ATMO-023).
+                let wt = g.near_top_weight(&round_atm);
+                if wt > 0.0 {
+                    let (mu, cos_vs) = g.view_cosines(dir);
+                    let o = g.inside_orbit_style_cosines(&round_atm, &round_luts, mu, cos_vs, Some(terrain_m * len));
+                    [0, 1, 2].map(|k| hazed[k] + (f64::from(colour[k]) * o.transmittance[k] + o.radiance[k] - hazed[k]) * wt)
+                } else {
+                    hazed
                 }
             } else {
                 seen_sky += 1;
-                g.sky_view_lookup(&sky, dir)
+                let looked = g.sky_view_lookup(&sky, dir);
+                let wt = g.near_top_weight(&round_atm);
+                if wt > 0.0 {
+                    let (mu, cos_vs) = g.view_cosines(dir);
+                    let o = g.inside_orbit_style_cosines(&round_atm, &round_luts, mu, cos_vs, None);
+                    let mut l = o.radiance;
+                    if o.reaches_ground {
+                        let gr = round_atm.ground_radiance(&round_luts, o.ground_mu_sun);
+                        for k in 0..3 {
+                            l[k] += o.transmittance[k] * gr[k];
+                        }
+                    }
+                    [0, 1, 2].map(|k| looked[k] + (l[k] - looked[k]) * wt)
+                } else {
+                    looked
+                }
             };
             for k in 0..3 {
                 let excess = (f64::from(got[k]) - want[k]).abs() / (REL * want[k].abs() + ABS);
@@ -487,6 +511,35 @@ fn composite_inside_at(altitude: f64, mu_sun: f64, terrain_m: f64) {
     let (near, far) = (hazy(1000.0), hazy(100_000.0));
     assert!(far[2] / far[0] > near[2] / near[0], "the distance shifts the colour towards blue: {near:?} {far:?}");
     assert!(far[2] > near[2], "and brightens the blue channel of this dark terrain: {near:?} {far:?}");
+}
+
+// spec: ATMO-023
+#[test]
+fn the_picture_is_continuous_across_the_top_of_the_atmosphere() {
+    // The same view 2 m below and 2 m above the top (the camera inside, then outside): sky on the left half, terrain 600 km away on the
+    // right. Before the blend the inside frame (the sky table, the camera march) and the orbit frame differed by a few per cent near the limb.
+    let (w, h) = (64usize, 48usize);
+    let frame_at = |altitude: f64| {
+        let r = rig();
+        let geometry = frame(&r.atm, &camera(altitude), 0.7);
+        r.set_frame(&geometry);
+        let colour = [0.2f32, 0.1, 0.05, 1.0];
+        let scene: Vec<[f32; 4]> = (0..w * h).map(|i| if i % w >= w / 2 { colour } else { [0.0; 4] }).collect();
+        let depth: Vec<f32> = (0..w * h).map(|i| if i % w >= w / 2 { (0.1 / 600_000.0) as f32 } else { 0.0 }).collect();
+        r.path.upload_scene(&r.ctx, &scene);
+        r.path.upload_depth(&r.ctx, &depth);
+        r.path.composite_to_image(&r.ctx)
+    };
+    let (below, above) = (frame_at(99_998.0), frame_at(100_002.0));
+    let mut worst = 0.0f64;
+    for (a, b) in below.iter().zip(&above) {
+        for k in 0..3 {
+            let excess = (f64::from(a[k]) - f64::from(b[k])).abs() / (0.005 * f64::from(a[k]).abs() + 2e-4);
+            worst = worst.max(excess);
+        }
+    }
+    eprintln!("across the top: worst {worst:.3} of the bound");
+    assert!(worst <= 1.0, "the picture steps across the top of the atmosphere: {worst:.2} times 0.5 % + 2e-4");
 }
 
 // spec: ATMO-021

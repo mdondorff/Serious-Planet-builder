@@ -473,3 +473,14 @@ Source: SPIKE-17 bug 1, SPIKE-20, ATMO-002, ATMO-006, ATMO-007
 #### Scenario: The march bound
 - **WHEN** the aerial-perspective march is compared with the converged march at altitudes 1 m, 2 km, 20 km, 60 km and 99 km
 - **THEN** it is within the discretisation bound of ATMO-007 at each
+
+### Requirement: ATMO-023 The picture is continuous across the top of the atmosphere
+For a camera inside the atmosphere the composite SHALL mix its result towards the orbit-style march (`ORBIT_STEPS` uniform steps from the camera, as the orbit ray from the top) across the 5 km below the top, by the smoothstep of the altitude (`planet_frame::look::atmosphere::NEAR_TOP_BAND_M`): sky pixels mix the sky table with that march, pixels with geometry mix the haze with it. At the top the weight is 1, so the frame equals the orbit frame there and a climb through the top has no step.
+
+Verify: B
+Status: active
+Source: owner (M6 test, P2-7): a tiny colour step between 95 and 100 km; ATMO-021
+
+#### Scenario: Across the top
+- **WHEN** the same view with sky and far terrain is composited 2 m below and 2 m above the top
+- **THEN** each channel differs by at most 0.5 % plus 2e-4, and the shader's near-top frames equal the reference's within the bound of ATMO-001
