@@ -1,0 +1,18 @@
+edit-scale: height field cpu-erosion-v1 over a 16384-cell bake ; seed 1, counts [1000], the cluster 25 km radius at the edit-latency case centre, 80 % of the items in it
+item sets: reused from target/edit-scale
+
+## N = 1000 (1001 files in target/edit-scale\n1000)
+load: 1001 items in 394 ms; working set 31 MiB before, 42 MiB after (11068 B per item); 513 brush, 38 channel, 119 crater, 149 hill, 83 plateau, 33 region, 66 ridge (4142 strokes in all, at most 64 in an item)
+definition: clone 0.3 ms, set_definition 0.0 ms
+queries over the cluster: height 138.4 us; height_bounds 200 m cap 138.0 us, 2000 m cap 302.2 us, 20000 m cap 2780.2 us; inputs_hash_for (level-12 tile) 172.0 us  [450696 3303841351442987507]
+queries over the empty ground: height 17.5 us; height_bounds 200 m cap 10.7 us, 2000 m cap 14.6 us, 20000 m cap 7.3 us; inputs_hash_for (level-12 tile) 12.0 us  [-6261698 4213569504914144345]
+  one more warm plan through the counting field: 4383.2 ms; height 0 calls 0.0 ms; height_bounds 4 calls 0.6 ms; inputs_hash_for 4 calls 0.7 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms
+plan job over the cluster at 200 m: 527 nodes; cold 13658.1 ms; warm p50 4368.6 ms, p95 4389.6 ms (3 plans)
+editor frame at 200 m: update p50 55.20 ms, p95 19521.60 ms; 31 edits shown, 203 problems
+tile generation (level 19 and one above, 24 tiles in the cluster, 24 over empty ground): cluster p50 3.43 ms, p95 14.34 ms; empty p50 2.65 ms
+  one more warm plan through the counting field: 4695.9 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms
+plan job over the empty at 200 m: 556 nodes; cold 7913.5 ms; warm p50 4632.5 ms, p95 4640.1 ms (3 plans)
+
+| N | cluster 2 km cold / warm p50 / warm p95 ms | cluster 200 m | cluster 30 m | empty 2 km | empty 200 m | empty 30 m | editor frame 2 km p50 / p95 (edits shown) | 200 m | 30 m |
+|---|---|---|---|---|---|---|---|---|---|
+| 1000 | 13658 / 4369 / 4390 | 7914 / 4633 / 4640 | 55.20 / 19521.60 (31) |

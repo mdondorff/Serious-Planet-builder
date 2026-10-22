@@ -3,6 +3,7 @@
 
 pub mod crash;
 pub mod editperf;
+pub mod editscale;
 pub mod editwin;
 pub mod globalperf;
 pub mod litperf;
@@ -722,6 +723,10 @@ pub(crate) fn facts(ctx: &GpuContext) -> AdapterFacts {
 fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     if o.smoke {
         return writeln!(out, "planet test-render [smoke ok]").map_err(err);
+    }
+    // The edit-scale scene is CPU only: it takes no GPU context and no perf flags (SPIKE-29).
+    if editscale::is_scale_scene(&o.scene) {
+        return editscale::run(o, out);
     }
     check_flight_options(o)?;
     worldfield::check_options(o)?;

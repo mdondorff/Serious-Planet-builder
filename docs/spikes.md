@@ -9,6 +9,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 ## Index of M5 spikes and explorations
 | Id | Title | Status | Results |
 |---|---|---|---|
+| SPIKE-29 | Edit scale: how far authored edits scale (100 to 20 k items) and whether the plan job is the bottleneck (the owner, 2026-10-22) | closed 2026-10-22 (the editor's lists break first at about 100 items; the plan job from 1 k items: 4 s warm, 92 s at 20 k, even over empty ground, because the steepness proof fails and the ceiling is recomputed every plan; the editor's frame 94 s at 20 k) | `spikes/edit-scale/results/` |
 | SPIKE-28 | Instancing at walking height: scattered rocks and grass clumps, CPU against GPU culling (M7 I1) | closed 2026-10-22 (about 0.45 to 0.65 ms per million visible triangles at 1440p; the GPU cull is nearly free and equals the CPU reference; recommendation: GPU path, cells on the CPU, triangle budget with LODs, density from the suitability) | `spikes/instancing/results/` |
 | SPIKE-08 | Ocean connectivity at 16384 | closed 2026-10-16 | `spikes/ocean-connectivity/results/` |
 | SPIKE-09 | Atmosphere f32 forms | closed | `spikes/atmosphere-f32/results/` |
