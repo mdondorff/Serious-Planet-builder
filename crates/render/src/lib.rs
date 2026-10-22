@@ -13,6 +13,7 @@ pub mod graph;
 pub mod lit;
 #[cfg(feature = "reference-renderer")]
 pub mod reference;
+pub(crate) mod refs;
 #[cfg(feature = "spike07")]
 pub mod spike_detail;
 pub mod terrain;

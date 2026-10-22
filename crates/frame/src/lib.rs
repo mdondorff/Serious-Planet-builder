@@ -23,6 +23,7 @@ pub mod preview;
 pub mod regions;
 pub mod repro;
 pub mod residency;
+pub mod scalerefs;
 pub mod scenes;
 pub mod terrain;
 pub mod terrain_text;

@@ -56,6 +56,7 @@ cargo run --release -p planet -- test-render --scene terrain --view normals --ou
 | F3 | overlay: off, tiles, mesh, regions, stale tiles (exact green, stale amber, stand-in red, previewed violet, capped grey) |
 | F4 | coarse LOD (error bound x4) |
 | F6 | ground detail: natural, full, off |
+| F7 | scale references: a chair, house, boat, tower and block of boxes of known size, dropped in front of you |
 | F9 | write the camera path of the last minute and a repro bundle to `target/review/` |
 | H | editing light: a sun over your shoulder, so no slope is black |
 | T | vsync on / off |

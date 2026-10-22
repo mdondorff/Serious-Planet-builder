@@ -1078,6 +1078,21 @@ Source: opus-planner (2026-10-22, SPIKE-29 fix 2), VIEW-043, VIEW-047, VIEW-048
 - **WHEN** the problems list, the row warnings and the slope guard are asked for after the edits of the VIEW-048 scenarios
 - **THEN** they equal what the scans over all items give
 
+### Requirement: VIEW-050 F7 drops scale references
+F7 SHALL drop plain boxes of known size on the ground in front of the camera, and take them away when pressed again (`Command::ToggleScaleRefs`, off at the start). `planet_frame::scalerefs::drop_references` decides them from the camera, its heading and the ground height: a chair 0.9 m high, a house 8 m wide, a boat 10 m long, a tower 291 m high and a block of 10 x 10 boxes 100 m apart (1 km across). Each stands ahead of the camera on the lowest ground under its footprint, none overlaps another, and the same camera gives the same drop. The window title names the references while they are dropped; the keys help names F7.
+
+Verify: A
+Status: active
+Source: owner (2026-10-22, via opus-planner): scale references to judge the ground detail by, VIEW-046, REND-036
+
+#### Scenario: The sizes and the places
+- **WHEN** a drop is made at a camera with a flat ground, and at one with a ground that rises ahead
+- **THEN** the boxes have the named sizes, the block has 100 boxes spanning 950 m, each box stands on the lowest ground under its footprint ahead of the camera and none overlaps another, and a camera looking straight down still gets the drop
+
+#### Scenario: The key
+- **WHEN** F7 is pressed twice in a viewer
+- **THEN** the references are asked for, then not, and the help text and the editor's help name F7
+
 ### Requirement: VIEW-051 The shown edits are bounded
 The editor SHALL show at most `MAX_SHOWN` = 400 edits at once, (SPIKE-29). Of the edits VIEW-015 shows it keeps those whose reach disc can be seen (`relevance::in_view`: the cone of the disc, widened by `HEIGHT_MARGIN_M` = 4 km for the ground's height, meets the cone of the camera's view) and, when more than 400 remain, the 400 with the largest reach on the screen (ties by the lower id), and the selected edit besides. The problems list (VIEW-047) is not limited. The footprint find is kept while the definition revision and the tiles stay, and the ground heights of the outlines while the field's item revision stays.
 
