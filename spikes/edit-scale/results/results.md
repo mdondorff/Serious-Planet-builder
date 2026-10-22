@@ -98,11 +98,11 @@ Before the cache, the warm plan was 3.6 to 4.8 s at 1,000 items and grew linearl
 - The 5k and 20k sets have no brushes; brush sets are measured at 100 and 1,000 items only (editor lists), where the lists were the first break and are now incremental.
 
 ## After the editor frame, the query index and the plan cache (2026-10-22, fixes 3 to 5)
-Brush-free sets, release build, other sessions running (indicative); raw runs `run-after-max-delta-cache-no-brushes-1k-5k-20k.txt` and the console lines of the follow-ups in the PR descriptions (#553, #554, #556).
+Brush-free sets, release build, other sessions running (indicative); raw runs `run-after-max-delta-cache-no-brushes-1k-5k-20k.txt` and `run-after-fixes-3-and-4-1k-5k-20k.txt`; the figures of the plan after an edit are from the PR description (#556).
 | What | Before | After | Change |
 |---|---|---|---|
 | Editor frame at 5,000 edits, 2 km | 5,621 ms | 17 to 44 ms | the editor shows at most 400 edits, the ones that can be seen (VIEW-051, #553) |
-| Editor frame at 20,000 edits | 99,904 ms | 0.5 to 1 s measured before the cache of the find; not re-measured with all fixes | same |
+| Editor frame at 20,000 edits, 2 km / 30 m | 99,904 ms | 526 / 821 ms (`run-after-fixes-3-and-4-1k-5k-20k.txt`, before the plan cache) | same |
 | `height` in the cluster, 5k / 20k items | 510 / 2,364 us | 82 / 355 us | an index by reach class (WDEF-014, #554) |
 | Cold plan over the cluster, 5k / 20k | 13.9 / 51 s | 5.3 / 15 s | the same |
 | Plan right after one 400 m hill, cluster 2 km / 30 m, 5k | 3.78 / 4.85 s | 0.90 / 1.45 s | the plan cache told where the items changed (STRM-034, #556) |
