@@ -1,0 +1,1 @@
+- 2026-10-22 **scale-refs** (explorer, M7 SR): F7 drops a chair 0.9 m, a house 8 m, a boat 10 m, a tower 291 m and a 1 km block of boxes on the ground in front of the camera (lit path, a pass inside the terrain pass with the terrain's depth); VIEW-050, REND-036.

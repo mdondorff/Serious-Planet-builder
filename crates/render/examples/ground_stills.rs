@@ -4,6 +4,9 @@
 //! world without an atmosphere at a fixed exposure.
 //!
 //! `cargo run --release -p planet-render --example ground_stills [strength]` (default strength 1).
+//!
+//! With `PLANET_STILLS_REFS=1` the scale references (VIEW-050) are dropped in front of the camera and only the natural materials are drawn, at an
+//! eye height of 1.8 m, 30 m and 400 m: `refs_eye<h>m.png`.
 
 use planet_core::cube::TangentWarp;
 use planet_core::{PlanetFixed, Vec3};
@@ -42,7 +45,9 @@ fn main() {
     let sun = (up * libm::sin(30f64.to_radians()) + north * libm::cos(30f64.to_radians())).normalized();
     let ground = field.height(up);
     let aspect = f64::from(SIZE.0) / f64::from(SIZE.1);
-    for (eye, pitch_deg) in [(1.8, 6.0), (0.5, 25.0)] {
+    let refs = std::env::var_os("PLANET_STILLS_REFS").is_some();
+    let views: &[(f64, f64)] = if refs { &[(1.8, 6.0), (30.0, 8.0), (400.0, 14.0)] } else { &[(1.8, 6.0), (0.5, 25.0)] };
+    for &(eye, pitch_deg) in views {
         let camera = Camera::at_surface_point(
             PlanetFixed(up * (R + ground + eye)),
             Vec3::new(0.0, 0.0, 1.0),
@@ -70,6 +75,10 @@ fn main() {
         for (m, name) in MATERIAL_NAMES.iter().enumerate() {
             variants.push(((*name).to_string(), forced(m), strength));
         }
+        if refs {
+            variants.retain(|v| v.0 == "natural");
+            r.set_scale_refs(&planet_frame::scalerefs::drop_references(camera.position, camera.forward, R, &|d| field.height(d)));
+        }
         for (name, materials, s) in variants {
             let mut lit = LitPlan::fixed(EV);
             lit.sun_dir = [sun.x as f32, sun.y as f32, sun.z as f32];
@@ -80,7 +89,7 @@ fn main() {
             for _ in 0..2 {
                 r.render(&ctx, &p, false).expect("render");
             }
-            let file = out.join(format!("eye{eye}m_{name}.png"));
+            let file = out.join(if refs { format!("refs_eye{eye}m.png") } else { format!("eye{eye}m_{name}.png") });
             r.read_color(&ctx).write_png(&file).expect("png");
             println!("wrote {} ({} nodes)", file.display(), plan.nodes.len());
         }

@@ -117,6 +117,9 @@ pub enum Command {
     ToggleCoarseLod,
     /// F6: the strength of the procedural ground detail: natural, full, off (VIEW-046).
     CycleGroundDetail,
+    /// F7: drop the scale references (a chair, a house, a boat, a tower, a block of boxes) on the ground in front of the camera, or take them away
+    /// (VIEW-050).
+    ToggleScaleRefs,
     /// H: the editing light, a sun fixed in camera space over the viewer's shoulder, or back to the look's sun (VIEW-042).
     ToggleEditingLight,
     /// G: the globe overview over the point under the camera, or back (VIEW-013).
@@ -248,7 +251,7 @@ pub fn state_legend() -> Vec<([u8; 3], String)> {
 }
 
 /// The key bindings, as text for the usage message and the log.
-pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), F3 cycles the overlay (off, tiles, mesh, regions, stale tiles; lit path), F4 coarse LOD (error bound x4), F6 ground detail (natural, full, off; the procedural detail and gloss of the ground, on at the start), F9 writes the camera path of the last minute and a repro bundle (target/review), V next debug view (debug path), T vsync on/off, C flight or free camera, \
+pub const KEYS_HELP: &str = "P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), F3 cycles the overlay (off, tiles, mesh, regions, stale tiles; lit path), F4 coarse LOD (error bound x4), F6 ground detail (natural, full, off; the procedural detail and gloss of the ground, on at the start), F7 scale references (drops a chair 0.9 m, a house 8 m, a boat 10 m, a tower 291 m and a block of boxes 1 km across on the ground in front of you; again takes them away; lit path), F9 writes the camera path of the last minute and a repro bundle (target/review), V next debug view (debug path), T vsync on/off, C flight or free camera, \
      H editing light (a sun fixed over your shoulder, 35 degrees up, so no slope is black; off by default), \
      free camera: WASD move, Q/E down/up, arrows look, click captures the mouse to look (Esc releases it), Shift boost; Esc quits";
 
@@ -283,6 +286,9 @@ pub struct ViewerState {
     pub editing_light: bool,
     /// The strength of the ground detail the lit frames take (VIEW-046): natural at the start; F6 cycles it. Not part of the headless modes.
     pub ground_detail: crate::look::materials::GroundDetailMode,
+    /// The scale references are asked for (VIEW-050): the window drops them where the camera is when this turns on and removes them when it
+    /// turns off. Off at the start.
+    pub scale_refs: bool,
     /// The globe overview while it is shown (VIEW-013): its view is the camera, and a click's flight ends in the free camera.
     pub globe: Option<GlobeSession>,
     /// The planet radius the overview is built on, metres.
@@ -310,6 +316,7 @@ impl ViewerState {
             coarse_lod: false,
             editing_light: false,
             ground_detail: crate::look::materials::GroundDetailMode::default(),
+            scale_refs: false,
             globe: None,
             radius_m: 6_371_000.0,
             exposure_reset: true,
@@ -378,6 +385,7 @@ impl ViewerState {
             Command::ToggleCoarseLod => self.coarse_lod = !self.coarse_lod,
             Command::ToggleEditingLight => self.editing_light = !self.editing_light,
             Command::CycleGroundDetail => self.ground_detail = self.ground_detail.next(),
+            Command::ToggleScaleRefs => self.scale_refs = !self.scale_refs,
             Command::ToggleGlobe => {
                 self.globe = match self.globe {
                     Some(_) => None,
@@ -1333,6 +1341,21 @@ mod tests {
         v.command(Command::ToggleCoarseLod, 60, &c);
         assert!(!v.coarse_lod);
         for word in ["F3", "tiles", "mesh", "regions", "F4", "coarse LOD"] {
+            assert!(KEYS_HELP.contains(word), "the help names {word}: {KEYS_HELP}");
+        }
+    }
+
+    // spec: VIEW-050
+    #[test]
+    fn f7_asks_for_the_scale_references_and_then_takes_them_away() {
+        let c = camera_for_tests();
+        let mut v = ViewerState::new(0, 3, 0, true).with_lit(true);
+        assert!(!v.scale_refs, "none at the start");
+        assert!(!v.command(Command::ToggleScaleRefs, 10, &c), "F7 does not quit");
+        assert!(v.scale_refs);
+        v.command(Command::ToggleScaleRefs, 20, &c);
+        assert!(!v.scale_refs, "the second press takes them away");
+        for word in ["F7", "scale references"] {
             assert!(KEYS_HELP.contains(word), "the help names {word}: {KEYS_HELP}");
         }
     }

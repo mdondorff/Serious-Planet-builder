@@ -236,7 +236,7 @@ fn lit_frames_create_nothing_after_the_lit_path_is_enabled() {
     let p = plan(3);
     let mut r = renderer(&ctx, &[&p], true);
     let (built, objects) = (r.init_counts(), r.lit_objects());
-    assert_eq!(objects, 6, "the scene target, the three post pipelines and the two compact lit pipelines (whole nodes, nodes over some quadrants, STRM-016; the vertex lit pipeline went with the vertex format): {objects}");
+    assert_eq!(objects, 7, "the scene target, the three post pipelines, the scale references pipeline (REND-036) and the two compact lit pipelines (whole nodes, nodes over some quadrants, STRM-016; the vertex lit pipeline went with the vertex format): {objects}");
     for plan in [lit(p.clone(), LitPlan::fixed(EV)), lit(p.clone(), LitPlan::adaptive(EV, 0.016)), lit(p.clone(), LitPlan::fixed(EV))] {
         r.render(&ctx, &plan, false).unwrap();
         assert_eq!(r.lit_objects(), objects);
@@ -301,4 +301,53 @@ fn lit_frames_match_the_adapters_goldens() {
     assert!(shown.len() >= 4, "a lit globe spans several bands, got {}", shown.len());
     goldens.check("lit_orbit_ev_bands", &img, Tolerance::Exact);
     goldens.finish();
+}
+
+// spec: REND-036
+#[test]
+fn scale_references_are_drawn_into_the_lit_frame_with_the_terrains_depth() {
+    use planet_core::{PlanetFixed, Vec3};
+    use planet_frame::scalerefs::RefBox;
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let base = plan(3);
+    let mut r = renderer(&ctx, &[&base], true);
+    let p = lit(base.clone(), LitPlan::fixed(EV));
+    r.render(&ctx, &p, false).unwrap();
+    let plain = r.lit_path().unwrap().read_hdr(&ctx);
+    // Where the view axis meets the planet's surface (the ray-sphere distance), and a red cube on the axis at the given fraction of it.
+    let cam = base.camera.position.0;
+    let fwd = base.camera.forward;
+    let b = cam.dot(fwd);
+    let t = -b - libm::sqrt(b * b - (cam.dot(cam) - R * R));
+    assert!(t.is_finite() && t > 0.0, "the view axis meets the planet: {t}");
+    let cube = |fraction: f64| RefBox {
+        name: "cube",
+        centre: PlanetFixed(cam + fwd * (fraction * t)),
+        axes: [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)],
+        half_m: [(0.05 * t) as f32; 3],
+        colour: [0.9, 0.05, 0.05],
+    };
+    // In front of the ground: some pixels change and the new ones are red.
+    r.set_scale_refs(&[cube(0.5)]);
+    r.render(&ctx, &p, false).unwrap();
+    let with = r.lit_path().unwrap().read_hdr(&ctx);
+    let changed: Vec<usize> = (0..with.len()).filter(|k| with[*k] != plain[*k]).collect();
+    assert!(changed.len() > 50, "the cube covers pixels: {}", changed.len());
+    let red = changed.iter().filter(|k| with[**k][0] > 4.0 * with[**k][1].max(with[**k][2])).count();
+    assert!(red * 10 >= changed.len() * 9, "the changed pixels are the cube's red: {red} of {}", changed.len());
+    // Inside the planet, behind the ground along the axis: the terrain hides it, the frame is the plain one.
+    r.set_scale_refs(&[cube(1.6)]);
+    r.render(&ctx, &p, false).unwrap();
+    assert!(r.lit_path().unwrap().read_hdr(&ctx) == plain, "a cube under the ground is not drawn");
+    // None again: the plain frame.
+    r.set_scale_refs(&[]);
+    r.render(&ctx, &p, false).unwrap();
+    assert!(r.lit_path().unwrap().read_hdr(&ctx) == plain, "no references, no change");
+    // The debug path ignores them.
+    r.set_scale_refs(&[cube(0.5)]);
+    r.render(&ctx, &base, false).unwrap();
+    let debug_with = image(&r, &ctx);
+    r.set_scale_refs(&[]);
+    r.render(&ctx, &base, false).unwrap();
+    assert_eq!(image(&r, &ctx), debug_with, "the debug frame does not draw them");
 }

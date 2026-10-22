@@ -991,6 +991,8 @@ pub struct TerrainRenderer {
     preview_delta_len: usize,
     /// The region polygons of the overlay (VIEW-030), written into the globals of the frames that show it.
     regions: planet_frame::regions::RegionList,
+    /// The scale references of the frames (REND-036): drawn into the terrain pass of the lit frames, with the terrain's depth.
+    scale_refs: Vec<planet_frame::scalerefs::RefBox>,
     size: (u32, u32),
     cells: u32,
     bgl: wgpu::BindGroupLayout,
@@ -1051,6 +1053,8 @@ struct LitGpu {
     /// The terrain pipeline of the frames that have an atmosphere (`fs_lit_atmo`, the tables in group 3).
     atmosphere_pipeline: Option<wgpu::RenderPipeline>,
     atmosphere_pipeline_cut: Option<wgpu::RenderPipeline>,
+    /// The scale references pass (REND-036).
+    refs: crate::refs::RefPass,
 }
 
 /// The pipeline-overridable constants of the fragment stage of the pipelines made for nodes drawn over some quadrants.
@@ -1137,6 +1141,14 @@ impl TerrainRenderer {
     /// app for this frame's camera). They are read only by a frame whose lit plan has the overlay `Regions`.
     pub fn set_regions(&mut self, regions: &planet_frame::regions::RegionList) {
         self.regions = regions.clone();
+    }
+
+    /// Set the scale references (REND-036; `planet_frame::scalerefs::drop_references`, decided by the app) the lit frames draw. An empty list
+    /// draws none.
+    pub fn set_scale_refs(&mut self, boxes: &[planet_frame::scalerefs::RefBox]) {
+        if self.scale_refs != boxes {
+            self.scale_refs = boxes.to_vec();
+        }
     }
 
     /// A renderer with the mid tier's terrain share (ADR 0033: 2 GiB, a ceiling counted in slots: 15 blocks, 219,585 slots at cells
@@ -1240,6 +1252,7 @@ impl TerrainRenderer {
             preview: (Vec::new(), 0.0),
             preview_delta_len: 0,
             regions: planet_frame::regions::RegionList::default(),
+            scale_refs: Vec::new(),
             size,
             cells,
             bgl,
@@ -1451,8 +1464,9 @@ impl TerrainRenderer {
         let (pipeline, pipeline_cut) = (make(false), make(true));
         let path = LitPath::new(ctx, self.size);
         // The scene target, the exposure buffers, three post pipelines and the terrain pipelines (whole nodes, nodes over some quadrants).
-        self.lit_objects = 1 + 3 + 2;
-        self.lit = Some(LitGpu { path, pipeline, pipeline_cut, atmosphere_pipeline: None, atmosphere_pipeline_cut: None });
+        self.lit_objects = 1 + 3 + 2 + 1;
+        let refs = crate::refs::RefPass::new(ctx);
+        self.lit = Some(LitGpu { path, pipeline, pipeline_cut, atmosphere_pipeline: None, atmosphere_pipeline_cut: None, refs });
     }
 
     /// Enable the atmosphere (ADR 0040, ADR 0042 point 2) for the body `atmosphere`: its static tables are computed on the CPU in f64
@@ -2295,6 +2309,15 @@ impl TerrainRenderer {
             }
             stats.draw_calls = plan.nodes.len() as u32;
             stats.triangles = plan.nodes.len() as u64 * u64::from(self.index_count) / 3;
+            // The scale references (REND-036), in the same pass: the terrain's depth decides what they hide and what hides them.
+            if let (Some(l), Some(lit)) = (lit_gpu, plan.lit.as_ref()) {
+                if !self.scale_refs.is_empty() {
+                    let factor = planet_frame::look::pre_exposure_factor_with(&lit.units, f64::from(lit.exposure.pre_ev100())) as f32;
+                    l.refs.upload(ctx, &plan.view_projection, lit.sun_dir, factor, plan.camera.position.0, &self.scale_refs);
+                    l.refs.draw(&mut pass);
+                    stats.draw_calls += 1;
+                }
+            }
         }
         if let (true, Some(w), Some(wp), Some(l), Some(lit)) =
             (water_frame, self.water.as_ref(), plan.water.as_ref(), lit_gpu, plan.lit.as_ref())
