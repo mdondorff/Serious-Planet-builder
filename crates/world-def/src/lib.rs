@@ -11,6 +11,7 @@ pub mod footprint;
 pub mod item;
 pub mod item_id;
 pub mod item_store;
+pub mod reach_index;
 pub mod region;
 pub mod revision;
 pub mod stamp;
@@ -364,6 +365,9 @@ pub struct WorldDefinition {
     /// The index: item ids by `(body, cell)`, at the cell level of the body's current radius. Rebuilt for a body whenever
     /// its radius node changes, so a radius edit across a level boundary never strands items in old cells.
     cells: BTreeMap<(BodyId, u64), BTreeSet<ItemId>>,
+    /// The candidate index of the footprint query (WDEF-014): the items by reach class in cells sized for the class, per body, at the body's current
+    /// radius (rebuilt with the cell index). Derived data: equal items give an equal index.
+    reach: BTreeMap<BodyId, reach_index::ReachIndex>,
     /// The Merkle quadtree of region summaries (WDEF-008) by `(body, layer, level, node raw id)`: the non-empty cells at the
     /// cell level and their ancestors, kept in step with the items (one node per level per edit). Derived data: equal items
     /// give an equal map.
@@ -406,6 +410,7 @@ impl WorldDefinition {
             nodes: BTreeMap::new(),
             items: BTreeMap::new(),
             cells: BTreeMap::new(),
+            reach: BTreeMap::new(),
             summaries: BTreeMap::new(),
             height_field: None,
             revision: revision::Revision::new(),
@@ -555,7 +560,7 @@ impl WorldDefinition {
                 return Err(ItemError::Stamp { id: spec.id, reason });
             }
         }
-        let (id, unit) = (spec.id, spec.dir.normalized());
+        let (id, unit, reach_m) = (spec.id, spec.dir.normalized(), spec.reach_m);
         self.remove_item(body, id);
         let rec = ItemRec {
             content: spec.content_hash,
@@ -571,6 +576,11 @@ impl WorldDefinition {
         self.revision.bump();
         self.items.insert((body, id), rec);
         self.cells.entry((body, cell.raw())).or_default().insert(id);
+        self.reach.entry(body).or_insert_with(|| reach_index::ReachIndex::new(radius)).insert(
+            id,
+            unit,
+            f64::from_bits(canonical_bits(reach_m)),
+        );
         self.refresh_summary(body, &layer, cell);
         Ok(cell)
     }
@@ -581,6 +591,9 @@ impl WorldDefinition {
         self.revision.bump();
         // The item sits in the cell of its direction at the level of the current radius (the index is rebuilt on every
         // radius change, so this is where it was filed).
+        if let Some(index) = self.reach.get_mut(&body) {
+            index.remove(id, rec.unit(), f64::from_bits(rec.reach_bits));
+        }
         if let Ok(radius) = self.usable_radius(body) {
             let cell = cells::cell_of(radius, rec.unit());
             if let Some(ids) = self.cells.get_mut(&(body, cell.raw())) {
@@ -597,8 +610,14 @@ impl WorldDefinition {
     /// Rebuild the cell index and the summaries of one body from its items and its radius.
     fn reindex(&mut self, body: BodyId) {
         self.cells.retain(|(b, _), _| *b != body);
+        self.reach.remove(&body);
         self.summaries.retain(|(b, ..), _| *b != body);
         let Ok(radius) = self.usable_radius(body) else { return };
+        let mut index = reach_index::ReachIndex::new(radius);
+        for ((_, id), rec) in self.items.range((body, 0)..=(body, ItemId::MAX)) {
+            index.insert(*id, rec.unit(), f64::from_bits(rec.reach_bits));
+        }
+        self.reach.insert(body, index);
         let ids: Vec<(ItemId, Vec3)> = self.items.range((body, 0)..=(body, ItemId::MAX)).map(|((_, id), rec)| (*id, rec.unit())).collect();
         let mut touched: BTreeSet<(String, TileId)> = BTreeSet::new();
         for (id, unit) in ids {
@@ -716,22 +735,7 @@ impl WorldDefinition {
         }
         let radius = self.usable_radius(body)?;
         let cap = footprint::tile_cap(&planet_core::TangentWarp, tile, halo);
-        let level = cells::cell_level(radius);
-        // A tile at or below the cell level lies in one cell, so its cap (a few tile edges wide) is within the rings; a coarser
-        // tile covers many cells and its cap and halo are many cells wide, so it scans the body.
-        let rings = footprint::candidate_rings(cap, radius, level);
-        let candidates: Vec<ItemId> = match rings {
-            Some(rings) if tile.level() >= level => {
-                let covering = cells::cells_covering(tile, level, footprint::FOOTPRINT_MAX_CELLS).expect("one cell");
-                cells::with_margin(&covering, rings)
-                    .iter()
-                    .filter_map(|c| self.cells.get(&(body, c.raw())))
-                    .flat_map(|ids| ids.iter().copied())
-                    .collect()
-            }
-            _ => self.body_item_ids(body),
-        };
-        Ok(self.items_touching(body, layer, cap, radius, candidates))
+        Ok(self.items_touching(body, layer, cap, radius, self.candidate_ids(body, cap, None)))
     }
 
     /// The items of `layer` whose reach touches `cap` (WDEF-007), in application order: the footprint of a point or a bundle of points
@@ -747,19 +751,22 @@ impl WorldDefinition {
             return Err(MissingNode(format!("a footprint cap angle in [0, pi] (got {})", cap.angle)));
         }
         let radius = self.usable_radius(body)?;
-        let level = cells::cell_level(radius);
-        let candidates: Vec<ItemId> = match footprint::candidate_rings(cap, radius, level) {
-            Some(rings) => {
-                let centre = cells::cell_of(radius, cap.centre);
-                cells::with_margin(&[centre], rings)
-                    .iter()
-                    .filter_map(|c| self.cells.get(&(body, c.raw())))
-                    .flat_map(|ids| ids.iter().copied())
-                    .collect()
+        Ok(self.items_touching(body, layer, cap, radius, self.candidate_ids(body, cap, None)))
+    }
+
+    /// The ids the footprint query tests against `cap`: from the reach index (the items that can touch it and a few more), or every item of the
+    /// body when the body has no index. `visited` is set to the entries looked at. Public for tests and diagnostics.
+    pub fn candidate_ids(&self, body: BodyId, cap: footprint::Cap, visited: Option<&mut usize>) -> Vec<ItemId> {
+        match self.reach.get(&body) {
+            Some(index) => index.candidates(cap, visited),
+            None => {
+                let all = self.body_item_ids(body);
+                if let Some(v) = visited {
+                    *v = all.len();
+                }
+                all
             }
-            None => self.body_item_ids(body),
-        };
-        Ok(self.items_touching(body, layer, cap, radius, candidates))
+        }
     }
 
     /// The candidates that are items of `layer` and touch `cap`, in application order.
