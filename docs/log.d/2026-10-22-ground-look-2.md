@@ -1,1 +1,1 @@
-ground-look-2: with the ground detail on, land takes its materials' own albedo (REND-037); review stills by the look_stills example.
+- 2026-10-22 **ground-look-2** (sonnet-explorer, opus-planner; REND-037): with the ground detail on, land takes its materials' own albedo (rock grey, grass green, sand pale, soil dark brown) in place of the climate's, so the materials read apart; review stills by the `look_stills` example; owner review pending.
