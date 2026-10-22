@@ -320,3 +320,14 @@ Source: opus-planner (2026-10-22, SPIKE-29: plan-cache-keep), STRM-034
 #### Scenario: The differing items
 - **WHEN** an item is added, one removed, one moved, one given another reach, one another priority and one put again unchanged
 - **THEN** the places are those of the first five, as they were and as they are, and the unchanged one gives none
+
+### Requirement: WDEF-017 The relief scale of a body
+A body MAY set `body.<n>.relief_scale`, a factor from 1 to 4 (default 1), on the elevation of its global field about 0 m (the default world's sea level; below 1 the coast band of the water code, measured on the unscaled bake, would leave dry pits). A value that is not a number or lies outside the range SHALL be an error naming the node. `GenContext::relief_scale` SHALL record the node in the read set when the definition sets it and record nothing when it does not, so a definition that sets none keeps every key it had. The node is a float in the TOML file (`[body.0] relief_scale = 2.5`).
+
+Verify: A
+Status: active
+Source: owner (2026-10-22, via opus-planner): exaggerated heights to judge relief, CON-05, CON-06
+
+#### Scenario: The range and the reads
+- **WHEN** a definition sets 1, 2.5, 3, 4, 0, 0.25, 4.01, NaN, and a plain one is read through a context
+- **THEN** the first four are kept, the rest are refused with the node's path, a plain definition reads 1 and records nothing, and each set value has its own read-set hash and round-trips through the file

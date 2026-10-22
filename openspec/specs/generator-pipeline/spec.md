@@ -702,3 +702,18 @@ Source: opus-planner (2026-10-22, SPIKE-29 fix 1), GEN-026, STRM-027
 #### Scenario: The cache equals the walk
 - **WHEN** items of the layer are added, one of another layer is added, one's `max_delta_m` is changed, items are moved into and out of the layer and one is removed, the stage's bound being asked after each
 - **THEN** every answer, the first and a repeat from the cache, equals the base's bound plus the uncached sum over the items at that moment
+
+### Requirement: GEN-033 The height fields follow the relief scale
+The terrain and the eroded field SHALL read the bake's elevation multiplied by the body's relief scale (WDEF-017), rounded to `f32` once per lattice sample and passed through unchanged at 1 (`ScaledLattice`); continentalness, climate and the ocean channel are the bake's own. Their largest height, their height bounds over any cap, their slope bounds and their `inputs_hash` SHALL follow the scale: every height lies inside the bounds of every cap that holds its direction and inside `max_abs_height_m`, and each scale (and none) has its own key. A bake is not re-made for a changed scale.
+
+Verify: A
+Status: active
+Source: owner (2026-10-22, via opus-planner), WDEF-017, CON-11, GEN-016, GEN-017
+
+#### Scenario: The base elevation
+- **WHEN** the terrain field at scale 2.5 and at 1 are asked the base elevation at 300 random directions
+- **THEN** the first is 2.5 times the second within 5 mm and keeps its sign
+
+#### Scenario: Bounds and keys
+- **WHEN** both fields at no scale, 1.5 and 4 are asked the bounds of random caps and the heights inside them
+- **THEN** every height lies in its cap's bounds and under the field's largest, the largest at 4 exceeds 36 km, the three keys differ and a world without the node keeps the default key

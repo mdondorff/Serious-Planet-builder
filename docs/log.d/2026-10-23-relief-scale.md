@@ -1,0 +1,1 @@
+- 2026-10-23 **relief-scale** (WDEF-017, GEN-033): `body.0.relief_scale` (1 to 4) multiplies the elevation the height fields read, bounds and keys follow, and `cargo xtask store --relief-scale S` bakes an exaggerated world into its own store and prints the editor command

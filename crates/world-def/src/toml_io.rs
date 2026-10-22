@@ -143,7 +143,8 @@ fn expected_kind(path: &str) -> Option<Kind> {
     }
     let rest = path.strip_prefix("body.")?;
     let (index, leaf) = rest.split_once('.')?;
-    (leaf == "radius_m" && !index.is_empty() && index.bytes().all(|b| b.is_ascii_digit())).then_some(Kind::Float)
+    ((leaf == "radius_m" || leaf == "relief_scale") && !index.is_empty() && index.bytes().all(|b| b.is_ascii_digit()))
+        .then_some(Kind::Float)
 }
 
 fn reserved(path: &str) -> bool {
