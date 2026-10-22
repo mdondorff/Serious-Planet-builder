@@ -42,6 +42,7 @@ const AP_D: i32 = 32;
 const SKY_STEPS: i32 = 32;
 const ORBIT_STEPS: i32 = 40;
 const AP_MAX_STEPS: i32 = 64;
+const NEAR_TOP_BAND: f32 = 5000.0;
 // Above this camera altitude (metres) geometry is hazed by a march from the camera, not by the volume (ATMO-021); the CPU values are
 // `CAMERA_MARCH_BLEND_FROM_M`, `CAMERA_MARCH_BLEND_TO_M`, `CAMERA_MARCH_STEPS_DAY`, `CAMERA_MARCH_STEPS_TWILIGHT` and `CAMERA_MARCH_TWILIGHT_MU`.
 const CAM_MARCH_BLEND_FROM: f32 = 6000.0;
@@ -360,6 +361,41 @@ fn atm_camera_ray(dir: vec3<f32>, t_geo: f32) -> AtmoMarch {
     return atm_march(atm_cam_origin(mu), cos_vs, s_end, 2, steps);
 }
 
+// The weight of the orbit-style march in the frame of a camera inside the atmosphere: 0 up to NEAR_TOP_BAND below the top, 1 at the top (P2-7:
+// the sky table and the camera march differ a little from the orbit march, which is what the frame uses from the top up, so the frame
+// crosses the top with a step unless the two are mixed across a band below it).
+fn atm_near_top_weight() -> f32 {
+    let u = clamp((A.cam.x - (A.body.y - NEAR_TOP_BAND)) / NEAR_TOP_BAND, 0.0, 1.0);
+    return u * u * (3.0 - 2.0 * u);
+}
+
+// The orbit-style march (ORBIT_STEPS uniform steps) of a ray that starts at the camera inside the atmosphere: at the top it is the orbit ray.
+// `t_geo` < 0 for a ray without geometry (it then ends at the ground or at the top). Returns the radiance, the transmittance, and in `flags.x`
+// whether the ray reaches the ground.
+fn atm_inside_orbit_style(dir: vec3<f32>, t_geo: f32) -> AtmoOrbit {
+    var out: AtmoOrbit;
+    out.flags = vec2<f32>(0.0);
+    out.ground_mu = 1.0;
+    let mu = clamp(dot(dir, A.up.xyz), -1.0, 1.0);
+    let cos_vs = clamp(dot(dir, A.sun.xyz), -1.0, 1.0);
+    let e = atm_inside_end(mu);
+    var s_end = e.x;
+    var ground = e.y > 0.5;
+    if (t_geo >= 0.0 && t_geo < s_end) { s_end = t_geo; ground = false; }
+    out.flags.x = select(0.0, 1.0, ground);
+    if (s_end <= 0.0) {
+        out.radiance = vec3<f32>(0.0);
+        out.transmittance = vec3<f32>(1.0);
+        return out;
+    }
+    let o = atm_cam_origin(mu);
+    let m = atm_march(o, cos_vs, s_end, 0, ORBIT_STEPS);
+    out.radiance = m.radiance;
+    out.transmittance = m.transmittance;
+    out.ground_mu = clamp((o.r_musun + s_end * cos_vs) / A.body.x, -1.0, 1.0);
+    return out;
+}
+
 // A ray from a camera outside the atmosphere: radiance and transmittance up to the geometry (t_geo >= 0), the ground or the exit;
 // flags.x: reaches the ground, flags.y: crosses the atmosphere. The march starts at the entry point (altitude H, r mu = -sqrt(D_top)).
 struct AtmoOrbit { radiance: vec3<f32>, transmittance: vec3<f32>, flags: vec2<f32>, ground_mu: f32 };
@@ -624,6 +660,12 @@ fn fs(v: V) -> @location(0) vec4<f32> {
                 rgb = mix(rgb_v, color.xyz * m.transmittance + m.radiance * factor, wm);
                 view_t = mix(t_v, m.transmittance, wm);
             }
+            let wt = atm_near_top_weight();
+            if (wt > 0.0) {
+                let o = atm_inside_orbit_style(dir, t_geo);
+                rgb = mix(rgb, color.xyz * o.transmittance + o.radiance * factor, wt);
+                view_t = mix(view_t, o.transmittance, wt);
+            }
         } else {
             var l = atm_sky_lookup(dir);
             if (mu > A.cam2.y) {
@@ -633,7 +675,22 @@ fn fs(v: V) -> @location(0) vec4<f32> {
             } else {
                 view_t = vec3<f32>(0.0);
             }
-            rgb = l * factor;
+            let wt = atm_near_top_weight();
+            if (wt > 0.0) {
+                let o = atm_inside_orbit_style(dir, -1.0);
+                var l2 = o.radiance;
+                var t2 = o.transmittance;
+                if (o.flags.x > 0.5) {
+                    l2 = l2 + o.transmittance * atm_ground_radiance(o.ground_mu);
+                    t2 = vec3<f32>(0.0);
+                } else {
+                    l2 = l2 + o.transmittance * atm_sun_disc(dir);
+                }
+                rgb = mix(l * factor, l2 * factor, wt);
+                view_t = mix(view_t, t2, wt);
+            } else {
+                rgb = l * factor;
+            }
         }
     } else {
         let o = atm_orbit_ray(dir, t_geo);
