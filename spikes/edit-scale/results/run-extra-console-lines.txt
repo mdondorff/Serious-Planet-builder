@@ -1,0 +1,36 @@
+Console lines of runs whose full output was not saved (copied as printed during the spike; each run is `test-render --scene edit-scale --store target/accept/global16384` with the environment named).
+
+PLANET_SCALE_NOPLAN=1, N=100 (the lists, ms; first call then repeat):
+load: 100 items in 25 ms; working set 31 MiB before, 33 MiB after (15933 B per item)
+editor lists (ms): steep_items 49.8 then 0.00; stacked_items 249.3 then 0.00; near(all) 0.1; layer_groups 0.1; chain 0.0; problems 1.4; search 0.0
+
+PLANET_SCALE_NOPLAN=1, N=1000:
+editor lists (ms): steep_items 3637.3 then 0.00; stacked_items 14443.6 then 0.00; near(all) 0.4; layer_groups 0.5; chain 0.2; problems 1473.5; search 0.5
+(the same with a 2 km grid index over the strokes in slope.rs and problems.rs, not kept: N=100 steep 47.2, stacked 234.8; N=1000 steep 2198.3, stacked 8827.1, problems 1480.1)
+
+PLANET_SCALE_COUNTS=1000 PLANET_SCALE_ALTS=200 PLANET_SCALE_FRAMES=2 with a temporary stage timer in select_impl (not kept):
+  selection stages ms: prepare 0 / proof 0 / position walk 2345 / ceiling 1702 / final walk 239 / nodes 119     (cluster)
+  selection alone 4395.3 ms (525 nodes); the whole plan right after 4418.8 ms (525 nodes)
+  selection stages ms: prepare 0 / proof 0 / position walk 2569 / ceiling 1659 / final walk 240 / nodes 124     (empty ground)
+  selection alone 4612.2 ms (556 nodes); the whole plan right after 4584.8 ms (556 nodes)
+
+PLANET_SCALE_DIR=target/edit-scale-nobrush PLANET_SCALE_NOBRUSH=1 PLANET_SCALE_COUNTS=1000 PLANET_SCALE_ALTS=200 PLANET_SCALE_FRAMES=3 (no brush items):
+made 1000 items for the set of 1000 in 47.8 s ... 31.42 ms per item at the end; 119 channel, 181 crater, 221 hill, 175 plateau, 111 region, 193 ridge
+load: 1000 items in 3883 ms; working set 33 MiB before, 35 MiB after (3031 B per item)
+queries over the cluster: height 94.7 us; height_bounds 200 m cap 87.5 us, 2000 m cap 167.0 us, 20000 m cap 168.9 us; inputs_hash_for (level-12 tile) 110.4 us
+  selection alone 2915.7 ms (534 nodes); the whole plan right after 2925.9 ms (534 nodes)
+plan job over the cluster at 200 m: 539 nodes (0 capped); cold 8077.4 ms; warm p50 2917.4 ms, p95 2917.8 ms (3 plans)
+editor frame at 200 m: update p50 39.57 ms, p95 42.55 ms; 51 edits shown, 0 problems
+  selection alone 2929.4 ms (560 nodes); the whole plan right after 2993.9 ms (560 nodes)
+plan job over the empty at 200 m: 561 nodes (0 capped); cold 5745.6 ms; warm p50 2990.0 ms, p95 2997.7 ms (3 plans)
+
+PLANET_EDIT_ITEMS=target/edit-scale/n100 test-render --perf-smoke --scene edit-latency --store target/accept/global16384 --adapter hardware:
+items loaded from target/edit-scale/n100: 100 in 0.0 s
+| 200 m | 50 m | 1.2 | 344.5 (300) | 23 / 703 | 3 | 1 | OVER |
+| 200 m | 150 m brush | 1.4 | 254.4 (300) | 24 / 703 | 3 | 1 | ok |
+| 200 m | 2000 m region | 1.0 | 243.7 (recorded) | 24 / 704 | 3 | 1 | recorded |
+
+PLANET_EDIT_ITEMS=target/edit-scale/n1000 (same command):
+items loaded from target/edit-scale/n1000: 1001 in 0.4 s
+  altitude 200 m, stamp radius 50 m: settled in 4.0 s
+error: the edit did not become exact in 40 s: kind Stale, substituted 1, blank 0, previewed 0, unfinished jobs 0, plan worker busy false, pending 0, refreshed 16 of 722 resident
