@@ -253,69 +253,149 @@ fn fs_view(in: VsOut) -> vec4<f32> {
     return vec4<f32>(v * k, v * k, v * k, 1.0);
 }
 
-// The ground detail of the lit path (M7 G2a, LOOK-009, SPIKE-27): six noise octaves (cells of 32 m, 8 m, 2 m, 0.5 m, 12.5 cm, 3 cm) anchored to the
-// world. The node record holds the integer cell of the tile origin at 1/32 m (from f64 on the CPU) and its fraction; an octave's cell is that
-// integer shifted right by two bits per octave (an arithmetic shift is the floor), its remainder and the fraction are the offset inside the cell,
-// so neighbouring tiles and levels of detail read the same noise and no planet-radius value reaches the shader (CON-11). Value noise with analytic
-// gradients. An octave fades out while a pixel covers more than 0.1 to 0.4 of its cell. Presentation only: heights, collision and picking are
-// untouched (ADR 0028).
-fn gd_hash(c: vec3<i32>, k: u32) -> f32 {
-    var h = (bitcast<u32>(c.x) * 0x8da6b343u) ^ (bitcast<u32>(c.y) * 0xd8163841u) ^ (bitcast<u32>(c.z) * 0xcb1ab31fu) ^ ((k + 1u) * 0x9e3779b1u);
-    h = h ^ (h >> 16u);
-    h = h * 0x85ebca6bu;
-    h = h ^ (h >> 13u);
-    h = h * 0xc2b2ae35u;
-    h = h ^ (h >> 16u);
+// The ground detail of the lit path (M7 G2a, G2c, LOOK-009, SPIKE-27): four noise octaves (cells of 16 m, 2 m, 25 cm, 3 cm) anchored to the world.
+// The node record holds the integer cell of the tile origin at 1/32 m (from f64 on the CPU) and its fraction; an octave's cell is that integer
+// shifted right by the octave's bits, 9, 6, 3 and 0 (an arithmetic shift is the floor), its remainder and the fraction are the offset inside the
+// cell, so neighbouring tiles and levels of detail read the same noise and no planet-radius value reaches the shader (CON-11). The noise is planar
+// value noise with analytic gradients on the plane of the lattice the surface normal lies closest to (two planes blended near their edge), the
+// lattice of every other octave turned by 45 degrees. An octave fades out while a pixel covers 0.06 to 0.25 of its cell. Presentation only: heights,
+// collision and picking are untouched (ADR 0028).
+// The value of one lattice corner from its three products with the axis constants (and the octave's) xored: a short integer finaliser (two
+// xorshifts around one multiplication; the products already mix the cell's coordinates), a number in [-1, 1).
+fn gd_finish(x: u32) -> f32 {
+    var h = x;
+    h = h ^ (h >> 15u);
+    h = h * 0x2c1b3c6du;
+    h = h ^ (h >> 12u);
     return f32(h >> 8u) * 1.1920929e-7 - 1.0;
 }
 
-// Smoothstep value noise: xyz the gradient with respect to q (lattice units), w the value in [-1, 1].
-fn gd_noise(base: vec3<i32>, q: vec3<f32>, k: u32) -> vec4<f32> {
-    let fl = floor(q);
-    let u = q - fl;
-    let c = base + vec3<i32>(fl);
+// The lattice of an octave in the plane: (a, b, c, d) of the integer matrix [a b; c d] the plane's cell and position go through. The even octaves
+// use the lattice turned by 45 degrees (the matrix has determinant 2: squares of 1 / sqrt(2) of the side), the odd ones the plane's own, so
+// neighbouring octaves do not line up their grids. An integer matrix maps a cell to a cell exactly, so the world anchoring stays exact.
+fn gd_shear(k: u32) -> vec4<i32> {
+    return select(vec4<i32>(1, 0, 0, 1), vec4<i32>(1, -1, 1, 1), (k & 1u) == 0u);
+}
+
+// Smoothstep value noise on a plane of the lattice (G2c): the cell and the position inside it are those of the two axes other than `axis` (2: x and
+// y, 1: x and z, 0: y and z), the noise does not change along `axis`. xyz the gradient (0 along `axis`) with respect to the lattice units, w the value
+// in [-1, 1]. The corner of cell (u, v) hashes u * A ^ v * B ^ the octave's and the axis' constant; the neighbour's product is the cell's plus the
+// constant (wrapping), so the four corners need two multiplications.
+fn gd_plane(base: vec3<i32>, q: vec3<f32>, k: u32, axis: u32) -> vec4<f32> {
+    let cell0 = select(select(vec2<i32>(base.x, base.y), vec2<i32>(base.x, base.z), axis == 1u), vec2<i32>(base.y, base.z), axis == 0u);
+    let q0 = select(select(vec2<f32>(q.x, q.y), vec2<f32>(q.x, q.z), axis == 1u), vec2<f32>(q.y, q.z), axis == 0u);
+    // The lattice of an octave goes through an integer matrix (see `gd_shear`): the cell maps to an integer cell exactly, so the world anchoring stays
+    // exact.
+    let m = gd_shear(k);
+    let uv_cell = vec2<i32>(m.x * cell0.x + m.y * cell0.y, m.z * cell0.x + m.w * cell0.y);
+    let uv_q = vec2<f32>(f32(m.x) * q0.x + f32(m.y) * q0.y, f32(m.z) * q0.x + f32(m.w) * q0.y);
+    let fl = floor(uv_q);
+    let u = uv_q - fl;
+    let c = bitcast<vec2<u32>>(uv_cell + vec2<i32>(fl));
     let t = u * u * (3.0 - 2.0 * u);
     let dt = 6.0 * u * (1.0 - u);
-    let c000 = gd_hash(c, k);
-    let c100 = gd_hash(c + vec3<i32>(1, 0, 0), k);
-    let c010 = gd_hash(c + vec3<i32>(0, 1, 0), k);
-    let c110 = gd_hash(c + vec3<i32>(1, 1, 0), k);
-    let c001 = gd_hash(c + vec3<i32>(0, 0, 1), k);
-    let c101 = gd_hash(c + vec3<i32>(1, 0, 1), k);
-    let c011 = gd_hash(c + vec3<i32>(0, 1, 1), k);
-    let c111 = gd_hash(c + vec3<i32>(1, 1, 1), k);
-    let x00 = mix(c000, c100, t.x);
-    let x10 = mix(c010, c110, t.x);
-    let x01 = mix(c001, c101, t.x);
-    let x11 = mix(c011, c111, t.x);
-    let value = mix(mix(x00, x10, t.y), mix(x01, x11, t.y), t.z);
-    let gx = dt.x * mix(mix(c100 - c000, c110 - c010, t.y), mix(c101 - c001, c111 - c011, t.y), t.z);
-    let gy = dt.y * mix(mix(c010 - c000, c110 - c100, t.x), mix(c011 - c001, c111 - c101, t.x), t.z);
-    let gz = dt.z * mix(mix(c001 - c000, c101 - c100, t.x), mix(c011 - c010, c111 - c110, t.x), t.y);
-    return vec4<f32>(gx, gy, gz, value);
+    let kx = ((k + 1u) * 0x9e3779b1u) ^ ((axis + 1u) * 0xcb1ab31fu);
+    let pu0 = c.x * 0x8da6b343u;
+    let pv0 = (c.y * 0xd8163841u) ^ kx;
+    let pu1 = pu0 + 0x8da6b343u;
+    let pv1 = ((c.y * 0xd8163841u) + 0xd8163841u) ^ kx;
+    let c00 = gd_finish(pu0 ^ pv0);
+    let c10 = gd_finish(pu1 ^ pv0);
+    let c01 = gd_finish(pu0 ^ pv1);
+    let c11 = gd_finish(pu1 ^ pv1);
+    let value = mix(mix(c00, c10, t.x), mix(c01, c11, t.x), t.y);
+    let gu = dt.x * mix(c10 - c00, c11 - c01, t.y);
+    let gv = dt.y * mix(c01 - c00, c11 - c10, t.x);
+    // The gradient in the axes of the lattice (the transpose of the shear).
+    // (The turned lattice has determinant 2: the transpose is scaled back by 1 / sqrt(2) so the tilt per octave does not depend on the turn.)
+    let go = select(1.0, 0.70710678, (k & 1u) == 0u) * vec2<f32>(f32(m.x) * gu + f32(m.z) * gv, f32(m.y) * gu + f32(m.w) * gv);
+    let grad = select(select(vec3<f32>(go.x, go.y, 0.0), vec3<f32>(go.x, 0.0, go.y), axis == 1u), vec3<f32>(0.0, go.x, go.y), axis == 0u);
+    return vec4<f32>(grad, value);
 }
 
 // The material weights (LOOK-008, `MaterialParams::weights`): the product over the eight inputs of the smoothstep response of each (lo, hi) pair of
 // the look's curve table (`g.materials`: per material four vec4s of two pairs each), normalised to sum to 1; a pair with lo == hi leaves the input
-// out, a material with no pair is off. The smoothstep is written out because a falling pair (lo > hi) is not defined for the built-in.
-fn material_weights(inp: array<f32, 8>) -> vec4<f32> {
-    var w = vec4<f32>(0.0);
-    for (var m = 0u; m < 4u; m = m + 1u) {
-        var on = false;
-        var prod = 1.0;
-        for (var k = 0u; k < 8u; k = k + 1u) {
-            let v = g.materials[m * 4u + k / 2u];
-            let pr = select(v.xy, v.zw, (k & 1u) == 1u);
-            if (pr.x != pr.y) {
-                on = true;
-                let s = clamp((inp[k] - pr.x) / (pr.y - pr.x), 0.0, 1.0);
-                prod = prod * (s * s * (3.0 - 2.0 * s));
-            }
-        }
-        w[m] = select(0.0, prod, on);
+// out, a material with no pair is off. The inputs are two vec4s (`ia`: slope cosine, height, temperature, precipitation; `ib`: surface type and the
+// three driver slots). The smoothstep is written out because a falling pair (lo > hi) is not defined for the built-in. Every index is a constant
+// and the pairs go two at a time as vec2s, so no array is indexed by a loop counter (G2c: that was +1 ms of GPU time at 1440p).
+fn material_weight(first: u32, ia: vec4<f32>, ib: vec4<f32>) -> f32 {
+    let v0 = g.materials[first];
+    let v1 = g.materials[first + 1u];
+    let v2 = g.materials[first + 2u];
+    let v3 = g.materials[first + 3u];
+    // A word with no interval in either pair is skipped (the table is a uniform: the branch costs nothing, and the default curves use few inputs).
+    let on0 = any(v0.xz != v0.yw);
+    let on1 = any(v1.xz != v1.yw);
+    let on2 = any(v2.xz != v2.yw);
+    let on3 = any(v3.xz != v3.yw);
+    if (!(on0 || on1 || on2 || on3)) {
+        return 0.0;
     }
+    var prod = 1.0;
+    if (on0) {
+        let r = pair_response(v0, ia.xy);
+        prod = prod * r.x * r.y;
+    }
+    if (on1) {
+        let r = pair_response(v1, ia.zw);
+        prod = prod * r.x * r.y;
+    }
+    if (on2) {
+        let r = pair_response(v2, ib.xy);
+        prod = prod * r.x * r.y;
+    }
+    if (on3) {
+        let r = pair_response(v3, ib.zw);
+        prod = prod * r.x * r.y;
+    }
+    return prod;
+}
+
+// The responses of two inputs `x` to the pairs (lo, hi, lo, hi) of `v`: 1 for a pair with lo == hi.
+fn pair_response(v: vec4<f32>, x: vec2<f32>) -> vec2<f32> {
+    let lo = v.xz;
+    let hi = v.yw;
+    let s = clamp((x - lo) / (hi - lo), vec2<f32>(0.0), vec2<f32>(1.0));
+    return select(s * s * (vec2<f32>(3.0) - 2.0 * s), vec2<f32>(1.0), lo == hi);
+}
+
+fn material_weights(ia: vec4<f32>, ib: vec4<f32>) -> vec4<f32> {
+    let w = vec4<f32>(material_weight(0u, ia, ib), material_weight(4u, ia, ib), material_weight(8u, ia, ib), material_weight(12u, ia, ib));
     let sum = w.x + w.y + w.z + w.w;
     return select(vec4<f32>(0.0), w / sum, sum > 0.0);
+}
+
+// One octave of the ground detail: the gradient in xyz and the value in w, both faded by the pixel footprint `foot` (an octave fades out while
+// a pixel covers 0.06 to 0.25 of its cell, and is skipped once it is gone). The cell is 2^`shift` of 1/32 m (`k` salts the hash).
+fn gd_octave(cell: vec3<i32>, frac: vec3<f32>, local: vec3<f32>, foot: f32, shift: u32, k: u32, ax: vec3<f32>) -> vec4<f32> {
+    let inv = 32.0 / f32(1u << shift);
+    // The turned lattice of the even octaves has cells smaller by the square root of 2: the fade takes that into account.
+    let f = 1.0 - smoothstep(0.06, 0.25, foot * inv * select(1.0, 1.4142135, (k & 1u) == 0u));
+    if (f <= 0.0) {
+        return vec4<f32>(0.0);
+    }
+    let base = cell >> vec3<u32>(shift);
+    let rem = cell - (base << vec3<u32>(shift));
+    let q = (vec3<f32>(rem) + frac) * (1.0 / f32(1u << shift)) + local * inv;
+    // The planes that weigh in (`ax`: the weight of the plane that drops axis 0, 1, 2; one of them 1 away from an edge between planes).
+    var nz = vec4<f32>(0.0);
+    if (ax.x > 0.0) {
+        nz = nz + ax.x * gd_plane(base, q, k, 0u);
+    }
+    if (ax.y > 0.0) {
+        nz = nz + ax.y * gd_plane(base, q, k, 1u);
+    }
+    if (ax.z > 0.0) {
+        nz = nz + ax.z * gd_plane(base, q, k, 2u);
+    }
+    // The height of an octave is its amplitude times the cell size, so the slope is the lattice gradient times the amplitude.
+    return vec4<f32>(nz.xyz * f, nz.w * f);
+}
+
+// The albedo coefficient of one octave summed over the materials: `a` holds the rock's, the sand's and the soil's scalar coefficients (x, y, w; z
+// unused) times their tints, `grass` the grass's colour coefficient; `w` the material weights (summing to 1).
+fn gd_tint(w: vec4<f32>, a: vec4<f32>, grass: vec3<f32>) -> vec3<f32> {
+    return (w.x * a.x) * vec3<f32>(1.0, 0.98, 0.95) + (w.y * a.y) * vec3<f32>(1.0, 1.0, 0.98) + w.z * grass + (w.w * a.w) * vec3<f32>(1.0, 0.95, 0.90);
 }
 
 struct GroundDetail {
@@ -346,54 +426,66 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
     }
     let n = normalize(normal);
     let cs = clamp(dot(n, up), 0.0, 1.0);
-    var inp = array<f32, 8>(cs, h, t, p, 0.0, 0.0, 0.0, 0.0);
-    let w = material_weights(inp);
+    let ia = vec4<f32>(cs, h, t, p);
+    let ib = vec4<f32>(0.0);
+    let w = material_weights(ia, ib);
     if (w.x + w.y + w.z + w.w <= 0.0) {
         return out;
     }
     let cell = vec3<i32>(bitcast<i32>(nodes[node_index].phase[0].w), bitcast<i32>(nodes[node_index].phase[1].w), bitcast<i32>(nodes[node_index].phase[2].w));
     let frac = vec3<f32>(nodes[node_index].phase[3].w, nodes[node_index].phase[4].w, nodes[node_index].phase[5].w);
-    var val = array<f32, 6>(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-    var grad = array<vec3<f32>, 6>(vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
-    var fade = array<f32, 6>(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-    for (var k = 0u; k < 6u; k = k + 1u) {
-        let inv = 0.03125 * f32(1u << (2u * k));
-        let f = 1.0 - smoothstep(0.1, 0.4, foot * inv);
-        fade[k] = f;
-        if (f > 0.0) {
-            let shift = 2u * (5u - k);
-            let base = cell >> vec3<u32>(shift);
-            let rem = cell - (base << vec3<u32>(shift));
-            let q = (vec3<f32>(rem) + frac) * (1.0 / f32(1u << shift)) + local * inv;
-            let nz = gd_noise(base, q, k);
-            val[k] = nz.w * f;
-            // The height of an octave is its amplitude times the cell size, so the slope is the lattice gradient times the amplitude.
-            grad[k] = nz.xyz * f;
-        }
+    // The planes of the noise: the plane that drops the lattice axis the normal lies closest to is the main one (the noise is planar on the other two,
+    // so it does not stretch on flat ground whatever the planet's axes are). A plane that drops an axis whose component of the normal is within 0.12
+    // of the largest one weighs in too, by a weight that is continuous in the normal and 0 beyond the band, so no plane swaps in or out abruptly.
+    let an = abs(n);
+    let top = max(an.x, max(an.y, an.z));
+    let axes0 = clamp((an - vec3<f32>(top - 0.12)) / 0.12, vec3<f32>(0.0), vec3<f32>(1.0));
+    let axes = axes0 / (axes0.x + axes0.y + axes0.z);
+    // The detail is a sum over the octaves of the materials' coefficients, weighted by the material weights: the albedo multiplier is linear in
+    // the octaves' values and the shading tilt in their gradients, so each octave is added as soon as it is evaluated and none is kept (G2c: the
+    // results kept for per-material mixes were most of the register pressure of the pass). The octaves are unrolled with constant arguments (a
+    // loop over arrays indexed by its counter puts them in local memory). Four octaves, cells of 16 m, 2 m, 25 cm and 3 cm.
+    // `gd_tint(w, (rock, sand, -, soil), grass)` is the weighted albedo coefficient of one octave; `dot(w, (rock, sand, grass, soil))` the tilt's.
+    let grass_mean = vec3<f32>(0.87, 0.95, 0.735);
+    let grass_half = vec3<f32>(0.25, 0.23, 0.215);
+    var mul = gd_tint(w, vec4<f32>(0.80, 1.0, 0.0, 0.82), grass_mean);
+    var slope = vec3<f32>(0.0);
+    {
+        // 16 m: the patches of the ground.
+        let o = gd_octave(cell, frac, local, foot, 9u, 0u, axes);
+        mul = mul + o.w * gd_tint(w, vec4<f32>(0.10, 0.09, 0.0, 0.06), 0.10 * grass_mean);
     }
-    // Rock: cracked ridges and a mottled albedo, strong normals.
-    let crack = smoothstep(0.80, 1.0, 1.0 - abs(val[3])) * fade[3];
-    let rock_mul = max(0.80 + 0.08 * val[0] + 0.07 * val[1] + 0.20 * val[3] + 0.12 * val[4] - 0.30 * crack, 0.2) * vec3<f32>(1.0, 0.98, 0.95);
-    let rock_g = 0.05 * grad[2] + 0.18 * grad[3] + 0.15 * grad[4] + 0.10 * grad[5];
-    // Sand: patches, fine grain and low ripples.
-    let sand_mul = (1.0 + 0.08 * val[0] + 0.06 * val[1] + 0.05 * val[2] + 0.05 * val[4] + 0.08 * val[5]) * vec3<f32>(1.0, 1.0, 0.98);
-    let sand_g = 0.03 * grad[2] + 0.05 * grad[4] + 0.08 * grad[5];
-    // Grass: patches, blade-scale tufts, darker and greener, strong small normals.
-    let tuft = 0.5 + 0.5 * val[4];
-    let grass_mul = mix(vec3<f32>(0.62, 0.72, 0.52), vec3<f32>(1.12, 1.18, 0.95), tuft) * (1.0 + 0.14 * val[5]) * (1.0 + 0.10 * val[1] + 0.08 * val[2]);
-    let grass_g = 0.03 * grad[3] + 0.10 * grad[4] + 0.15 * grad[5];
-    // Soil: dark, clumpy, fine crumbs.
-    let soil_mul = (0.82 + 0.06 * val[1] + 0.14 * val[3] + 0.10 * val[4] + 0.06 * val[5]) * vec3<f32>(1.0, 0.95, 0.90);
-    let soil_g = 0.08 * grad[3] + 0.10 * grad[4] + 0.06 * grad[5];
-    let sum = w.x + w.y + w.z + w.w;
-    let mul = (rock_mul * w.x + sand_mul * w.y + grass_mul * w.z + soil_mul * w.w) / sum;
-    let slope = (rock_g * w.x + sand_g * w.y + grass_g * w.z + soil_g * w.w) / sum;
+    {
+        // 2 m: the mounds and the clumps.
+        let o = gd_octave(cell, frac, local, foot, 6u, 1u, axes);
+        mul = mul + o.w * gd_tint(w, vec4<f32>(0.0, 0.05, 0.0, 0.0), 0.08 * grass_mean);
+        slope = slope + dot(w, vec4<f32>(0.05, 0.03, 0.0, 0.0)) * o.xyz;
+    }
+    {
+        // 25 cm: the stones, the tufts and the ripples.
+        let o = gd_octave(cell, frac, local, foot, 3u, 2u, axes);
+        // The rock's cracks: dark where the octave is near its crest.
+        // (`o.w` is faded with the octave: the crest is judged on the unfaded value.)
+        let fade3 = 1.0 - smoothstep(0.06, 0.25, foot * 4.0);
+        let crack = smoothstep(0.80, 1.0, 1.0 - abs(o.w / max(fade3, 1.0e-3))) * fade3;
+        mul = mul + o.w * gd_tint(w, vec4<f32>(0.22, 0.05, 0.0, 0.18), grass_half) - (0.30 * crack * w.x) * vec3<f32>(1.0, 0.98, 0.95);
+        slope = slope + dot(w, vec4<f32>(0.20, 0.05, 0.10, 0.12)) * o.xyz;
+    }
+    {
+        // 3 cm: the grain and the blades.
+        let o = gd_octave(cell, frac, local, foot, 0u, 3u, axes);
+        mul = mul + o.w * gd_tint(w, vec4<f32>(0.0, 0.08, 0.0, 0.06), 0.14 * grass_mean);
+        slope = slope + dot(w, vec4<f32>(0.10, 0.08, 0.15, 0.06)) * o.xyz;
+    }
+    mul = max(mul, vec3<f32>(0.2));
     // The roughness: the weights' mean of the materials', scaled by the modifiers (the wet and the icy ground are glossy).
-    var rough = dot(w, g.gloss[0]) / sum;
+    var rough = dot(w, g.gloss[0]);
     for (var j = 1u; j < 3u; j = j + 1u) {
         let m = g.gloss[j];
         if (m.y != m.z) {
-            let s = clamp((inp[u32(m.x)] - m.y) / (m.z - m.y), 0.0, 1.0);
+            let c = u32(m.x);
+            let x = select(ia[c & 3u], ib[c & 3u], c >= 4u);
+            let s = clamp((x - m.y) / (m.z - m.y), 0.0, 1.0);
             rough = rough * mix(1.0, m.w, s * s * (3.0 - 2.0 * s));
         }
     }
@@ -2550,8 +2642,8 @@ mod one_shot_tests {
         }
         assert_eq!(cell(1)[0] - cell(0)[0], 2048);
         assert_eq!(frac(0), frac(1), "the fractions agree: the same ground reads the same noise in both tiles");
-        // The shader takes an octave's cell as the arithmetic shift of the cell by two bits per octave: for 32 m, 8 m, 2 m, 0.5 m, 12.5 cm, 3 cm.
-        for shift in [10u32, 8, 6, 4, 2, 0] {
+        // The shader takes an octave's cell as the arithmetic shift of the cell by the octave's bits: for 16 m, 2 m, 25 cm and 3 cm.
+        for shift in [9u32, 6, 3, 0] {
             assert_eq!((cell(1)[0] >> shift) - (cell(0)[0] >> shift), 2048 >> shift, "shift {shift}");
         }
     }
