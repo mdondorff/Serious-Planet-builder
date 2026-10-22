@@ -84,3 +84,9 @@ Scope: editor::slope, frame::lod (LOD-008), generators::stamp
 - SPIKE-26: 44 raise strokes of 5 m made a 73 degree spike; the bounds were exact to 1 mm, the ground was steeper than the plan can morph (`LodParams::drawable_slope`, 2.5).
 - Measure a bound against sampled heights before tightening it; guard steepness where the ground is made (the brush) and in the plan (ADR 0074).
 - Obsolete when: the plan draws ground of any slope and the guard is a warning (M7 A5).
+
+## 2026-10-22 A plan after an edit is hashing thousands of coarse tiles, not bounds queries
+Scope: project (streaming cache, LOD, authored items; STRM-027, STRM-034)
+- SPIKE-29 assumed the post-edit plan cost was the stamp stage's bounds queries; a timer showed the selection walk re-hashing the reads of every tile it visits when the item revision moves, and a coarse tile's cover is about 20,000 summary nodes (about 10 ms each); the per-tile cost sums over threads, so wall time needs a stage timer, not a call counter.
+- An edit announced with where the items changed lets the cache keep every tile the change cannot reach (`SelectionCache::note_item_change`); the content keys stay the guarantee for anything not announced. Test the reach rule against the real tile hashes, on small bodies too: the touch test's relative margin is a millionth of `reach / R`.
+- Obsolete when the read set of a coarse tile stops listing its cover nodes one by one.

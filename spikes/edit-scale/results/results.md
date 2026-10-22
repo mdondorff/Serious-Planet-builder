@@ -96,3 +96,17 @@ Before the cache, the warm plan was 3.6 to 4.8 s at 1,000 items and grew linearl
 - **Second: the cold plan** (a fresh selection cache: opening a world, a changed render floor) over the cluster: 3 s, 20 s and 60 s (roughly linear in the items, slightly more at 1k to 5k: 6.0 times for 5 times the items, 3.3 times for 4 times); the 20 km cap bounds cost 0.17, 1.0 and 4.8 ms at 1k, 5k and 20k; 0 tiles are capped at 1k, 11 at 5k and 10 to 24 at 20k. The edits clear `certs` and `caps` (`SelectionCache::invalidate_tiles`), so the plan after an edit recomputes the cap bounds it needs; its cost at 5k and 20k items is not measured (the edit-to-visible latency was measured at 100 items only).
 - **Load** is linear (4.4, 4.5 and 4.9 ms per item); 523 to 558 MiB at 20k. Tile generation in the cluster has a p50 under 7 ms (p95 66 ms at 5k, 30 ms at 20k).
 - The 5k and 20k sets have no brushes; brush sets are measured at 100 and 1,000 items only (editor lists), where the lists were the first break and are now incremental.
+
+## After the editor frame, the query index and the plan cache (2026-10-22, fixes 3 to 5)
+Brush-free sets, release build, other sessions running (indicative); raw runs `run-after-max-delta-cache-no-brushes-1k-5k-20k.txt` and `run-after-fixes-3-and-4-1k-5k-20k.txt`; the figures of the plan after an edit are from the PR description (#556).
+| What | Before | After | Change |
+|---|---|---|---|
+| Editor frame at 5,000 edits, 2 km | 5,621 ms | 17 to 44 ms | the editor shows at most 400 edits, the ones that can be seen (VIEW-051, #553) |
+| Editor frame at 20,000 edits, 2 km / 30 m | 99,904 ms | 526 / 821 ms (`run-after-fixes-3-and-4-1k-5k-20k.txt`, before the plan cache) | same |
+| `height` in the cluster, 5k / 20k items | 510 / 2,364 us | 82 / 355 us | an index by reach class (WDEF-014, #554) |
+| Cold plan over the cluster, 5k / 20k | 13.9 / 51 s | 5.3 / 15 s | the same |
+| Plan right after one 400 m hill, cluster 2 km / 30 m, 5k | 3.78 / 4.85 s | 0.90 / 1.45 s | the plan cache told where the items changed (STRM-034, #556) |
+| The same over empty ground, 2 km / 30 m | 2.32 / 2.51 s | 0.15 / 0.24 s | the same |
+- The earlier post-edit figures (3.6 and 2.4 s) were of an edit the editor refused: nothing had changed. The figures above are of a hill put into a copy of the definition, announced or not (`PLANET_SCALE_UNANNOUNCED`).
+- Still open: the cold plan over empty ground that sees the cluster at a coarse level (3.75 s at 5k, 9.4 s at 20k): the bound of a wide cap reads every item in it; a per-cell aggregate would loosen the bounds (a decision).
+- The 20k brush sets and the brush-heavy editor frame were not re-measured after the fixes.
