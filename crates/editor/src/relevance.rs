@@ -19,6 +19,24 @@ pub const MAX_SHOWN: usize = 400;
 /// ground of the bodies this editor edits lies within this of the sphere (an edit nearer than this to the camera is never left out for its place).
 pub const HEIGHT_MARGIN_M: f64 = 4_000.0;
 
+/// The footprint candidates of a find: each item's id with its unit direction and reach.
+pub type Candidates = BTreeMap<ItemId, (Vec3, f64)>;
+
+/// What an edit must cover to be shown and how many are shown.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShownLimits {
+    /// The least reach on the screen, pixels ([`MIN_REACH_PX`]).
+    pub min_px: f64,
+    /// The most edits shown ([`MAX_SHOWN`]).
+    pub max_shown: usize,
+}
+
+impl Default for ShownLimits {
+    fn default() -> Self {
+        ShownLimits { min_px: MIN_REACH_PX, max_shown: MAX_SHOWN }
+    }
+}
+
 /// What the camera sees of the planet.
 #[derive(Clone, Copy, Debug)]
 pub struct ViewState {
@@ -62,12 +80,7 @@ pub fn relevant_items(
 
 /// The items whose footprint meets one of `tiles` in one of `layers`, by id, with the unit direction and the reach of each (read from the
 /// footprint find, so no lookup per item).
-pub fn footprint_candidates(
-    def: &WorldDefinition,
-    body: BodyId,
-    layers: &[&str],
-    tiles: &[TileId],
-) -> Result<BTreeMap<ItemId, (Vec3, f64)>, MissingNode> {
+pub fn footprint_candidates(def: &WorldDefinition, body: BodyId, layers: &[&str], tiles: &[TileId]) -> Result<Candidates, MissingNode> {
     let mut found = BTreeMap::new();
     for layer in layers {
         for &tile in tiles {
@@ -105,25 +118,24 @@ pub fn shown_items(
     layers: &[&str],
     tiles: &[TileId],
     view: &ViewState,
-    min_px: f64,
-    max_shown: usize,
+    limits: ShownLimits,
     selected: Option<ItemId>,
 ) -> Result<Vec<ItemId>, MissingNode> {
     let candidates = footprint_candidates(def, body, layers, tiles)?;
-    Ok(shown_from(&candidates, def, body, view, min_px, max_shown, selected))
+    Ok(shown_from(&candidates, def, body, view, limits, selected))
 }
 
 /// [`shown_items`] from the footprint candidates already found: the find depends on the items and the tiles only, so a frame that changes neither
 /// reuses it and only the screen tests, which are the camera's, are made again.
 pub fn shown_from(
-    candidates: &BTreeMap<ItemId, (Vec3, f64)>,
+    candidates: &Candidates,
     def: &WorldDefinition,
     body: BodyId,
     view: &ViewState,
-    min_px: f64,
-    max_shown: usize,
+    limits: ShownLimits,
     selected: Option<ItemId>,
 ) -> Vec<ItemId> {
+    let ShownLimits { min_px, max_shown } = limits;
     let mut sized: Vec<(f64, ItemId)> = candidates
         .iter()
         .filter(|(_, (dir, reach))| in_view(view, *dir, *reach, HEIGHT_MARGIN_M))

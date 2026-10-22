@@ -2,7 +2,7 @@
 //! largest on the screen first, so a frame of the editor costs the same however many edits the world holds (SPIKE-29).
 
 use planet_core::{PlanetFixed, Vec3};
-use planet_editor::relevance::{in_view, reach_px, relevant_items, shown_items, ViewState, MAX_SHOWN, MIN_REACH_PX};
+use planet_editor::relevance::{in_view, reach_px, relevant_items, shown_items, ShownLimits, ViewState, MAX_SHOWN, MIN_REACH_PX};
 use planet_frame::globe::Viewport;
 use planet_frame::Camera;
 use planet_world_def::cells::cell_of;
@@ -48,7 +48,16 @@ fn view_from(at: Vec3, altitude_m: f64, look: Vec3) -> ViewState {
 }
 
 fn find(def: &WorldDefinition, at: Vec3, v: &ViewState, cap: usize, selected: Option<ItemId>) -> Vec<ItemId> {
-    shown_items(def, BodyId::PLANET, &[DEFAULT_ITEM_LAYER], &[cell_of(R, at)], v, MIN_REACH_PX, cap, selected).unwrap()
+    shown_items(
+        def,
+        BodyId::PLANET,
+        &[DEFAULT_ITEM_LAYER],
+        &[cell_of(R, at)],
+        v,
+        ShownLimits { min_px: MIN_REACH_PX, max_shown: cap },
+        selected,
+    )
+    .unwrap()
 }
 
 // spec: VIEW-051
@@ -124,9 +133,7 @@ fn the_session_reuses_the_footprint_find_while_nothing_is_edited_and_sees_an_edi
     let moved = view_from(unit(30.0, 40.01), 300.0, at * -1.0);
     // The same answer as the function on its own, for two cameras in a row (the second reuses the find) and back again.
     for v in [&near, &moved, &near] {
-        let layers = s.layers();
-        let refs: Vec<&str> = layers.iter().map(String::as_str).collect();
-        let direct = shown_items(s.editor().definition(), BodyId::PLANET, &refs, &tiles, v, MIN_REACH_PX, MAX_SHOWN, None).unwrap();
+        let direct = shown_items(s.editor().definition(), BodyId::PLANET, &["stamps"], &tiles, v, ShownLimits::default(), None).unwrap();
         assert_eq!(s.shown(&tiles, v).unwrap(), direct);
     }
     assert_eq!(s.shown(&tiles, &near).unwrap(), vec![first]);
