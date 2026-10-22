@@ -10,6 +10,7 @@ use crate::commands::{Affected, EditError, Editor, NewItem};
 use crate::lists::{self, LayerGroup, Row};
 use crate::params::{self, Inspector, Unit};
 use crate::polyline::{self, GeoPoint};
+use crate::problems::{self, Issue, Problem};
 use crate::relevance::{relevant_items, ViewState, MIN_REACH_PX};
 use crate::shape::{self, Handle, RADIUS_KEY, REACH_FACTOR};
 use crate::slope;
@@ -184,6 +185,11 @@ pub struct Session<S: ItemStore> {
     /// The brush items over the limit, found for one revision of the editor (the scan reads every stroke). A `RefCell`: the session is for one
     /// thread (it is not `Sync`).
     steep: std::cell::RefCell<Option<(u64, f64, BTreeSet<ItemId>)>>,
+    /// The brush items listed as stacked (VIEW-047) with the depth of their stack, found for one revision of the editor.
+    stacked: std::cell::RefCell<Option<(u64, std::collections::BTreeMap<ItemId, usize>)>>,
+    /// Whether a stack of strokes can be merged in a brush item, for the items of the problems list, found for one revision of the editor (the
+    /// pairwise overlap test of the strokes is not cheap, and the list is drawn every frame).
+    mergeable: std::cell::RefCell<Option<(u64, std::collections::BTreeMap<ItemId, bool>)>>,
 }
 
 impl<S: ItemStore> Session<S> {
@@ -207,6 +213,8 @@ impl<S: ItemStore> Session<S> {
             brush_open: Vec::new(),
             drawable_slope: planet_frame::LodParams::earth_1080p().drawable_slope(),
             steep: std::cell::RefCell::new(None),
+            stacked: std::cell::RefCell::new(None),
+            mergeable: std::cell::RefCell::new(None),
         }
     }
 
@@ -341,6 +349,14 @@ impl<S: ItemStore> Session<S> {
         Ok(ids)
     }
 
+    /// The edits whose footprint overlaps one of `tiles` (the footprint find of [`shown`](Session::shown), without the selected edit and the hidden
+    /// ones left out): the edits over the tiles the plan holds back, for the problems list (VIEW-047).
+    pub fn items_over(&self, tiles: &[TileId], view: &ViewState) -> Result<Vec<ItemId>, MissingNode> {
+        let layers = self.layers();
+        let layer_refs: Vec<&str> = layers.iter().map(String::as_str).collect();
+        relevant_items(self.editor.definition(), self.body, &layer_refs, tiles, view, MIN_REACH_PX, None)
+    }
+
     /// The item under a surface hit among the `shown` ones: the nearest centre in units of its own outline radius (`pick_footprint`).
     pub fn pick(&self, hit: &SurfaceHit, shown: &[ItemId]) -> Option<ItemId> {
         // Stamps first, by their outline; then lines by the distance to the line, then regions (inside, or near the edge) (VIEW-031).
@@ -462,6 +478,123 @@ impl<S: ItemStore> Session<S> {
         let found = slope::steep_items(self.editor.items(), slope::gradient_limit(self.drawable_slope), self.radius_m);
         *cache = Some((revision, self.drawable_slope, found.clone()));
         found
+    }
+
+    /// The brush items listed as stacked with the depth of their stack (VIEW-047). Found once per revision of the editor.
+    pub fn stacked_items(&self) -> std::collections::BTreeMap<ItemId, usize> {
+        let revision = self.editor.revision();
+        let mut cache = self.stacked.borrow_mut();
+        if let Some((r, found)) = cache.as_ref() {
+            if *r == revision {
+                return found.clone();
+            }
+        }
+        let found = problems::stacked_items(self.editor.items(), self.radius_m);
+        *cache = Some((revision, found.clone()));
+        found
+    }
+
+    /// The problems list (VIEW-047): every edit too steep to draw fully, stacked, or near tiles the plan holds back (`capped`, the edits the
+    /// window found over the capped tiles of the last plan). The steepest and deepest first, then by name.
+    pub fn problems(&self, capped: &[ItemId], camera_position: Vec3) -> Vec<Problem> {
+        let steep = self.steep_items();
+        let stacked = self.stacked_items();
+        let mut ids: BTreeSet<ItemId> = steep.iter().copied().chain(stacked.keys().copied()).collect();
+        ids.extend(capped.iter().copied().filter(|id| self.editor.item(*id).is_some()));
+        let ids: Vec<ItemId> = ids.into_iter().collect();
+        let mut rows = self.flagged(lists::near_rows(self.editor.items(), &ids, camera_position, self.radius_m));
+        let mut out: Vec<Problem> = rows
+            .drain(..)
+            .map(|row| {
+                let item = self.editor.item(row.id);
+                let mut issues = Vec::new();
+                if steep.contains(&row.id) {
+                    issues.push(Issue::TooSteep);
+                }
+                if let Some(depth) = stacked.get(&row.id) {
+                    issues.push(Issue::Stacked { depth: *depth, strokes: row.strokes });
+                }
+                if capped.contains(&row.id) {
+                    issues.push(Issue::TilesCapped);
+                }
+                let strokes: &[planet_world_def::item::ItemStroke] = item.map_or(&[], |i| &i.strokes);
+                let can_reduce = strokes
+                    .iter()
+                    .any(|s| matches!(s.kind, planet_world_def::stamp::BrushKind::Raise | planet_world_def::stamp::BrushKind::Lower))
+                    && issues.iter().any(|i| matches!(i, Issue::TooSteep | Issue::Stacked { .. }));
+                let can_merge = self.is_mergeable(row.id, strokes);
+                Problem { row, issues, can_reduce, can_merge }
+            })
+            .collect();
+        out.sort_by(|a, b| {
+            let rank = |p: &Problem| {
+                p.issues
+                    .iter()
+                    .map(|i| match i {
+                        Issue::TooSteep => 0,
+                        Issue::Stacked { .. } => 1,
+                        Issue::TilesCapped => 2,
+                    })
+                    .min()
+            };
+            rank(a).cmp(&rank(b)).then(a.row.distance_m.total_cmp(&b.row.distance_m)).then(a.row.id.cmp(&b.row.id))
+        });
+        out
+    }
+
+    /// Whether `strokes` (of item `id`) have a stack to merge, remembered per revision of the editor.
+    fn is_mergeable(&self, id: ItemId, strokes: &[planet_world_def::item::ItemStroke]) -> bool {
+        let revision = self.editor.revision();
+        let mut cache = self.mergeable.borrow_mut();
+        if cache.as_ref().is_none_or(|(r, _)| *r != revision) {
+            *cache = Some((revision, std::collections::BTreeMap::new()));
+        }
+        let (_, found) = cache.as_mut().expect("just set");
+        *found.entry(id).or_insert_with(|| problems::merge_stack(strokes, self.radius_m).is_some())
+    }
+
+    /// Reduce the brush item `id` (VIEW-047): the strengths of its raises and lowers are cut by the largest factor that makes it no longer too
+    /// steep ([`problems::fit_factor`]); a stacked item that is not too steep is cut by [`problems::REDUCE_STACKED`]. One command. Returns the factor.
+    pub fn reduce_item(&mut self, id: ItemId) -> Result<(f64, Vec<Affected>), SessionError> {
+        let item = self.editor.item(id).ok_or_else(|| SessionError::Refused("no such edit".into()))?;
+        if item.kind != brush::BRUSH_KIND {
+            return Err(SessionError::Refused(format!("a {} has no strokes to reduce", item.kind)));
+        }
+        let limit = slope::gradient_limit(self.drawable_slope);
+        let items: Vec<planet_world_def::item::Item> = self.editor.items().cloned().collect();
+        let factor = match problems::fit_factor(&items, id, limit, self.radius_m) {
+            Some(f) if f < 1.0 => f,
+            Some(_) => problems::REDUCE_STACKED,
+            None => {
+                return Err(SessionError::Refused(
+                    "the other edits make this ground too steep even with a hundredth of its strokes: reduce or delete them".into(),
+                ))
+            }
+        };
+        let affected = self
+            .editor
+            .change(id, |it| {
+                it.strokes = problems::scaled(it, factor);
+                it.max_delta_m = it.strokes.iter().map(|s| s.strength_m).sum::<f64>().max(1.0e-6);
+            })
+            .map_err(SessionError::Edit)?;
+        self.status = format!("strengths reduced to {:.0} %", factor * 100.0);
+        Ok((factor, affected))
+    }
+
+    /// Merge the deepest stack of strokes of one kind in the brush item `id` into one stroke (VIEW-047, [`problems::merge_stack`]). One command.
+    /// Returns how many strokes were merged.
+    pub fn merge_item(&mut self, id: ItemId) -> Result<(usize, Vec<Affected>), SessionError> {
+        let item = self.editor.item(id).ok_or_else(|| SessionError::Refused("no such edit".into()))?;
+        if item.kind != brush::BRUSH_KIND {
+            return Err(SessionError::Refused(format!("a {} has no strokes to merge", item.kind)));
+        }
+        let Some((strokes, merged)) = problems::merge_stack(&item.strokes, self.radius_m) else {
+            return Err(SessionError::Refused("no two strokes of one kind overlap".into()));
+        };
+        let affected = self.editor.change(id, |it| it.strokes = strokes).map_err(SessionError::Edit)?;
+        self.status = format!("{merged} strokes merged into one");
+        Ok((merged, affected))
     }
 
     /// Whether the brush item `id`, or any item of its group (a long drag is several linked items), is over the limit.

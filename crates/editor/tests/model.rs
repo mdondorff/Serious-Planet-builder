@@ -806,7 +806,7 @@ fn the_layout_has_defaults_and_a_file_changes_only_the_keys_it_names() {
     let d = Layout::default();
     assert_eq!((d.rail_width, d.left_width, d.inspector_width), (56.0, 300.0, 320.0));
     assert_eq!((d.inspector_side, d.status_bar, d.handle_hit_px), (Side::Right, true, 10.0));
-    assert_eq!(d.tabs, [Tab::Near, Tab::Layers, Tab::Graph]);
+    assert_eq!(d.tabs, [Tab::Near, Tab::Layers, Tab::Graph, Tab::Problems]);
     assert_eq!(Layout::from_toml("").unwrap(), d);
     let l = Layout::from_toml(
         "left_width = 360\ninspector_side = \"left\"\ntabs = [\"graph\", \"near\"]\nstatus_bar = false\nhandle_hit_px = 14.5\nrail_width = 0\n",
