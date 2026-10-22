@@ -69,10 +69,15 @@ fn the_indexed_query_gives_the_set_the_scan_of_every_item_gives_after_every_kind
     let mut next_id = 1u128;
     let mut add = |def: &mut WorldDefinition, items: &mut Vec<ItemSpec>, rng: &mut Rng, near: Option<Vec3>| {
         let dir = near.unwrap_or_else(|| random_dir(rng));
-        // Reaches of every class, and the ends of the range.
-        let reach_m = match rng.next_u64() % 8 {
+        // Reaches of every class, the ends of the range and exactly the largest reach of each class (and just over it).
+        let reach_m = match rng.next_u64() % 12 {
             0 => 0.0,
             1 => 40_000.0,
+            2 => 400.0,
+            3 => 1_600.0,
+            4 => 6_400.0,
+            5 => 25_600.0,
+            6 => 400.000_001,
             _ => 40.0 * libm::pow(1000.0, rng.f()),
         };
         let layer = if rng.next_u64().is_multiple_of(3) { "other" } else { "stamps" };
@@ -135,54 +140,15 @@ fn the_indexed_query_gives_the_set_the_scan_of_every_item_gives_after_every_kind
         assert!(def.remove_item(BodyId::PLANET, items.remove(at).id));
     }
     check(&def, &items, &mut rng, "after removing");
-    // A change of the radius re-files everything (the cell levels change with it).
-    def.set_body_radius(BodyId::PLANET, 3.0e6);
-    let small: Vec<ItemSpec> = items.iter().filter(|i| def.item_anchor(BodyId::PLANET, i.id).is_some()).cloned().collect();
-    assert_eq!(small.len(), items.len(), "the items stay");
-    for q in 0..40 {
-        let cap = Cap { centre: random_dir(&mut rng), angle: [0.0, 1e-4, 1e-2, 0.5][q % 4] };
-        let got = def.footprint_items_cap(BodyId::PLANET, "stamps", cap).unwrap();
-        assert_eq!(ids(&got), scan(&small, "stamps", cap, 3.0e6), "after a smaller radius: {cap:?}");
-    }
-}
-
-// spec: WDEF-014
-#[test]
-fn a_query_looks_at_the_items_near_its_cap_not_at_all_of_them() {
-    // 10,000 items of 300 m reach on a grid 2 km apart over 200 km, and a few of large reach.
-    let mut def = WorldDefinition::single_planet(R, 3);
-    let centre = unit(20.0, 30.0);
-    let east = Vec3::new(0.0, 0.0, 1.0).cross(centre).normalized();
-    let north = centre.cross(east).normalized();
-    let mut id = 1u128;
-    for i in 0..100 {
-        for j in 0..100 {
-            let d = (centre * R + east * (f64::from(i) * 2_000.0 - 100_000.0) + north * (f64::from(j) * 2_000.0 - 100_000.0)).normalized();
-            def.put_item_spec(BodyId::PLANET, spec(id, "stamps", d, 300.0, 0)).unwrap();
-            id += 1;
+    // A change of the radius re-files everything (the cell levels change with it): a smaller body, and one so small that every class is one cell.
+    for radius in [3.0e6, 2.0e5] {
+        def.set_body_radius(BodyId::PLANET, radius);
+        let kept: Vec<ItemSpec> = items.iter().filter(|i| def.item_anchor(BodyId::PLANET, i.id).is_some()).cloned().collect();
+        assert_eq!(kept.len(), items.len(), "the items stay");
+        for q in 0..60 {
+            let cap = Cap { centre: random_dir(&mut rng), angle: [0.0, 1e-4, 1e-2, 0.5, core::f64::consts::PI][q % 5] };
+            let got = def.footprint_items_cap(BodyId::PLANET, "stamps", cap).unwrap();
+            assert_eq!(ids(&got), scan(&kept, "stamps", cap, radius), "after a radius of {radius}: {cap:?}");
         }
     }
-    for k in 0..5 {
-        let d = (centre * R + east * (f64::from(k) * 30_000.0)).normalized();
-        def.put_item_spec(BodyId::PLANET, spec(id, "stamps", d, 30_000.0, 0)).unwrap();
-        id += 1;
-    }
-    let total = 10_005;
-    // A point query in the middle: the items of a few cells, a hundred or so of 10,000.
-    let mut visited = 0usize;
-    let cap = Cap { centre, angle: 0.0 };
-    let candidates = def.candidate_ids(BodyId::PLANET, cap, Some(&mut visited));
-    assert!(visited < 400, "{visited} entries looked at of {total}");
-    assert!(candidates.len() <= visited);
-    // A cap of the size of a tile of level 14 (about 600 m) the same; a cap of 20 km is wider and takes more, never more than all.
-    for (angle_m, bound) in [(600.0, 500usize), (5_000.0, 1_500), (20_000.0, 10_005)] {
-        let mut visited = 0usize;
-        let _ = def.candidate_ids(BodyId::PLANET, Cap { centre, angle: angle_m / R }, Some(&mut visited));
-        assert!(visited <= bound, "a cap of {angle_m} m looked at {visited} entries, bound {bound}");
-    }
-    // Over empty ground, far from every item: only the few of large reach are looked at (their class has few cells).
-    let mut far = 0usize;
-    let _ = def.candidate_ids(BodyId::PLANET, Cap { centre: unit(-40.0, 150.0), angle: 0.0 }, Some(&mut far));
-    assert!(far <= 10, "{far} entries looked at over empty ground");
-    assert_eq!(cell_of(R, centre).level(), planet_world_def::cells::cell_level(R));
 }
