@@ -152,3 +152,44 @@ fn the_indexed_query_gives_the_set_the_scan_of_every_item_gives_after_every_kind
         }
     }
 }
+
+// spec: WDEF-014
+#[test]
+fn a_query_looks_at_the_items_near_its_cap_not_at_all_of_them() {
+    // 10,000 items of 300 m reach on a grid 2 km apart over 200 km, and a few of large reach.
+    let mut def = WorldDefinition::single_planet(R, 3);
+    let centre = unit(20.0, 30.0);
+    let east = Vec3::new(0.0, 0.0, 1.0).cross(centre).normalized();
+    let north = centre.cross(east).normalized();
+    let mut id = 1u128;
+    for i in 0..100 {
+        for j in 0..100 {
+            let d = (centre * R + east * (f64::from(i) * 2_000.0 - 100_000.0) + north * (f64::from(j) * 2_000.0 - 100_000.0)).normalized();
+            def.put_item_spec(BodyId::PLANET, spec(id, "stamps", d, 300.0, 0)).unwrap();
+            id += 1;
+        }
+    }
+    for k in 0..5 {
+        let d = (centre * R + east * (f64::from(k) * 30_000.0)).normalized();
+        def.put_item_spec(BodyId::PLANET, spec(id, "stamps", d, 30_000.0, 0)).unwrap();
+        id += 1;
+    }
+    let total = 10_005;
+    // A point query in the middle: the items of a few cells, a hundred or so of 10,000.
+    let mut visited = 0usize;
+    let cap = Cap { centre, angle: 0.0 };
+    let candidates = def.candidate_ids(BodyId::PLANET, cap, Some(&mut visited));
+    assert!(visited < 400, "{visited} entries looked at of {total}");
+    assert!(candidates.len() <= visited);
+    // A cap of the size of a tile of level 14 (about 600 m) the same; a cap of 20 km is wider and takes more, never more than all.
+    for (angle_m, bound) in [(600.0, 500usize), (5_000.0, 1_500), (20_000.0, 10_005)] {
+        let mut visited = 0usize;
+        let _ = def.candidate_ids(BodyId::PLANET, Cap { centre, angle: angle_m / R }, Some(&mut visited));
+        assert!(visited <= bound, "a cap of {angle_m} m looked at {visited} entries, bound {bound}");
+    }
+    // Over empty ground, far from every item: only the few of large reach are looked at (their class has few cells).
+    let mut far = 0usize;
+    let _ = def.candidate_ids(BodyId::PLANET, Cap { centre: unit(-40.0, 150.0), angle: 0.0 }, Some(&mut far));
+    assert!(far <= 10, "{far} entries looked at over empty ground");
+    assert_eq!(cell_of(R, centre).level(), planet_world_def::cells::cell_level(R));
+}
