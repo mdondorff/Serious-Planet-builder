@@ -210,6 +210,8 @@ struct Config {
     policy: AdapterPolicy,
     gen: planet_streaming::GenWorkers,
     initial_view: usize,
+    /// Where the terrain comes from, for the title: the store the editor opened, or the in-memory preview bake (VIEW-051).
+    world_label: String,
     /// Pre-fill and bake progress of the world, fixed for the run.
     base_readiness: Readiness,
     radius_m: f64,
@@ -266,6 +268,7 @@ struct Running {
     gpu_ms: Option<f64>,
     report: Option<planet_frame::viewer::StatsReport>,
     readiness: Readiness,
+    world_label: String,
     altitude_m: f64,
     frames: u64,
     presented: u64,
@@ -465,6 +468,7 @@ impl App<'_> {
             gpu_ms: None,
             report: None,
             readiness: cfg.base_readiness,
+            world_label: cfg.world_label.clone(),
             altitude_m: 0.0,
             frames: 0,
             presented: 0,
@@ -1118,6 +1122,7 @@ fn title_text(st: &Running, now_ms: u64) -> String {
         input += " | editing light";
     }
     input += &format!(" | detail {}", st.viewer.ground_detail.name());
+    input += &format!(" | {}", st.world_label);
     if st.viewer.scale_refs {
         input += " | scale references";
     }
@@ -1522,8 +1527,19 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     // The display first: a machine without one is told so before any world is baked.
     let event_loop = EventLoop::new().map_err(|e| format!("{NO_DISPLAY}the event loop could not start: {e}"))?;
 
+    // The production store when one is configured or found (VIEW-051); otherwise the in-memory preview bake, which the title says.
+    let store = match &o.store {
+        Some(dir) => Some(dir.clone()),
+        // A definition of its own or a bake size asked for says what the run wants: the default store holds the default world only.
+        None if o.smoke || o.world.is_some() || o.given.contains("--global-res") => None,
+        None => crate::worldfield::default_store(&std::env::current_dir().map_err(|e| e.to_string())?),
+    };
+    let world_label = match &store {
+        Some(dir) => format!("store {}", dir.display()),
+        None => format!("preview bake {} cells", o.global_res),
+    };
     let world = Arc::new(
-        match &o.store {
+        match &store {
             Some(dir) => {
                 let res = if o.given.contains("--global-res") { o.global_res } else { crate::streamperf::PRODUCTION_BAKE_RES };
                 let def = match &o.world {
@@ -1561,7 +1577,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         .position(|v| *v == view_name)
         .ok_or_else(|| format!("--view must be one of {}, got '{view_name}'", views.join(", ")))?;
     let (bake_done, bake_total) = world.bake_blocks();
-    let (prefill_done, prefill_total) = if o.store.is_some() {
+    let (prefill_done, prefill_total) = if store.is_some() {
         let levels = o.prefill_levels.unwrap_or(READINESS_PREFILL_LEVELS);
         world.prefill_present(o.floor_for(o.cells), levels, o.cells, o.finest_level_for(o.cells)).map(|(p, t)| (p as u64, t as u64))?
     } else {
@@ -1598,6 +1614,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         policy,
         gen: o.gen_workers(),
         initial_view,
+        world_label,
         base_readiness: Readiness { bake_done, bake_total, prefill_done, prefill_total, view: ViewCoverage::default() },
         radius_m,
         water_level_m,
