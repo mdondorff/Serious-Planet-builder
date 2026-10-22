@@ -1,6 +1,6 @@
 # Perf window 25 (PW2: the ground detail after G2c, the plan job), 2026-10-22
 
-Rasierklinge, RTX 3080 Ti Laptop (Vulkan), release build of main at 89e36544 (#533, G2c). Coordinator opus-planner, run by sonnet-explorer. Preflight: the first run refused (single 55.6 ms over 52, right after my release build: its report was overwritten by the rerun), the second OK (`window-25/preflight.md`: single 46.4 to 49.7 ms against 52, parallel median 73.9 to 92.9 ms against 112); no `--machine-ready`. The readiness gate was ok in every run; five of the six `perf lit` runs are valid sessions, `lit-full-r2` is INVALID (CPU calibration of ground-0.5m 52.9 ms over 52, ADR 0065) and is kept for the record, not counted.
+Rasierklinge, RTX 3080 Ti Laptop (Vulkan), release build of main at 89e36544 (#533, G2c). Coordinator opus-planner, run by sonnet-explorer. Preflight: the first run refused (single 55.6 ms over 52, right after my release build: its report was overwritten by the rerun), the second OK (`window-25/preflight.md`: single 46.4 to 49.7 ms against 52, parallel median 73.9 to 92.9 ms against 112); no `--machine-ready`. The readiness gate was ok in every run; five of the six `perf lit` runs are valid sessions (the 1.8 m view of `lit-natural-r1` ran at 1387 MHz, under the 1400 MHz floor: not valid for the GPU budget verdict, kept in the mean because it agrees with its twin to 0.05 ms), `lit-full-r2` is INVALID (CPU calibration of ground-0.5m 52.9 ms over 52, ADR 0065) and is kept for the record, not counted.
 
 ## Verdict
 
@@ -47,7 +47,7 @@ Window 23's build C (48292e52, rebuilt) and main, still camera, 2 km / 200 m / 3
 | Ridge 3 | 2,609 / 1,668 / 901 | 2,673 / 1,703 / 926 |
 | Hill 7 (first, 2 km / 200 m / 30 m) | 166 / 989 / 722 | 137 / 1,170 / 1,188 |
 
-The old build is as slow today as main: no code regression since window 23 (#521 to #533). The 1.3 to 1.75 times against window 23's recorded table is the session (machine state, or the items directory: the sweep reads a copy of the owner's current items). Raw: `window-24/sweep-*`, the old run's report is `target/bisect/old-1.txt` (not kept).
+The old build is as slow today as main: no code regression since window 23 (#521 to #533). The 1.3 to 1.75 times against window 23's recorded table is the session (machine state, or the items directory: the sweep reads a copy of the owner's current items). Raw: `window-24/sweep-*`, the old build's report is `window-25/bisect-48292e52-still.txt`.
 
 ## Not measured
 
