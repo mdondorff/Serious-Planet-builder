@@ -159,7 +159,7 @@ mod tests {
             let low = [corner(-1.0, -1.0), corner(1.0, -1.0), corner(-1.0, 1.0), corner(1.0, 1.0), corner(0.0, 0.0)]
                 .into_iter()
                 .fold(f64::INFINITY, f64::min);
-            assert!((bottom - low).abs() < 0.05, "{}: bottom {bottom} against the lowest ground {low}", b.name);
+            assert!((bottom - low).abs() < 0.005, "{}: bottom {bottom} against the lowest ground {low}", b.name);
         }
         // No two boxes overlap in the ground plane (the circles round their footprints are apart).
         for (i, a) in boxes.iter().enumerate() {
@@ -172,5 +172,25 @@ mod tests {
         // The same camera gives the same drop, and looking straight down still gives one.
         assert_eq!(boxes, drop_references(cam, heading + cam.0.normalized() * 0.4, R, &ground));
         assert_eq!(drop_references(cam, cam.0.normalized() * -1.0, R, &ground).len(), boxes.len());
+    }
+
+    // spec: VIEW-050
+    #[test]
+    fn a_camera_at_a_pole_looking_straight_down_gets_a_finite_orthonormal_drop() {
+        for lat in [90.0, -90.0, 89.999_999] {
+            let cam = camera_at(lat, 10.0, 3.0);
+            let down = cam.0.normalized() * -1.0;
+            let a = drop_references(cam, down, R, &|_| 0.0);
+            assert_eq!(a, drop_references(cam, down, R, &|_| 0.0), "the same place gives the same drop (lat {lat})");
+            for b in &a {
+                assert!(b.centre.0.x.is_finite() && b.centre.0.y.is_finite() && b.centre.0.z.is_finite(), "{} at lat {lat}", b.name);
+                for i in 0..3 {
+                    assert!((b.axes[i].length() - 1.0).abs() < 1e-12, "{}: axis {i} is a unit vector", b.name);
+                    for j in 0..i {
+                        assert!(b.axes[i].dot(b.axes[j]).abs() < 1e-12, "{}: axes {i} and {j} are orthogonal", b.name);
+                    }
+                }
+            }
+        }
     }
 }

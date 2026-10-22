@@ -11,6 +11,9 @@ const INSTANCE_BYTES: u64 = 80;
 const UNIFORM_BYTES: u64 = 96;
 /// The light the sun does not reach: a share of the sun's illuminance every face gets, so a face turned away is dark but not black.
 const AMBIENT: f32 = 0.12;
+/// Boxes farther than this from the camera are not drawn: at planet distances the camera-relative f32 positions have metres of spacing (CON-11),
+/// and a box that far is a pixel or behind the planet anyway.
+pub(crate) const MAX_DISTANCE_M: f64 = 200_000.0;
 
 const SHADER: &str = r#"
 struct U {
@@ -94,6 +97,25 @@ fn cube() -> (Vec<f32>, Vec<u16>) {
         }
     }
     (v, idx)
+}
+
+/// The instance words of the boxes within [`MAX_DISTANCE_M`] of `camera`: per box the centre relative to the camera (the subtraction in f64, then
+/// f32), the three axes scaled by the half sizes and the albedo, 20 floats.
+pub(crate) fn pack_instances(boxes: &[RefBox], camera: planet_core::Vec3) -> Vec<f32> {
+    let mut words: Vec<f32> = Vec::with_capacity(boxes.len() * INSTANCE_BYTES as usize / 4);
+    for b in boxes {
+        let rel = b.centre.0 - camera;
+        if rel.length() > MAX_DISTANCE_M {
+            continue;
+        }
+        words.extend([rel.x as f32, rel.y as f32, rel.z as f32, 0.0]);
+        for k in 0..3 {
+            let a = b.axes[k] * f64::from(b.half_m[k]);
+            words.extend([a.x as f32, a.y as f32, a.z as f32, 0.0]);
+        }
+        words.extend([b.colour[0], b.colour[1], b.colour[2], 1.0]);
+    }
+    words
 }
 
 impl RefPass {
@@ -203,21 +225,11 @@ impl RefPass {
         let mut u: Vec<f32> = view_projection.to_vec();
         u.extend([sun[0], sun[1], sun[2], 0.0, factor, AMBIENT, 0.0, 0.0]);
         ctx.queue.write_buffer(&self.uniform, 0, &u.iter().flat_map(|f| f.to_le_bytes()).collect::<Vec<u8>>());
-        let mut bytes: Vec<u8> = Vec::with_capacity(boxes.len() * INSTANCE_BYTES as usize);
-        for b in boxes {
-            let rel = b.centre.0 - camera;
-            let mut words: Vec<f32> = vec![rel.x as f32, rel.y as f32, rel.z as f32, 0.0];
-            for k in 0..3 {
-                let a = b.axes[k] * f64::from(b.half_m[k]);
-                words.extend([a.x as f32, a.y as f32, a.z as f32, 0.0]);
-            }
-            words.extend([b.colour[0], b.colour[1], b.colour[2], 1.0]);
-            bytes.extend(words.iter().flat_map(|f| f.to_le_bytes()));
+        let words = pack_instances(boxes, camera);
+        if !words.is_empty() {
+            ctx.queue.write_buffer(&self.instances, 0, &words.iter().flat_map(|f| f.to_le_bytes()).collect::<Vec<u8>>());
         }
-        if !bytes.is_empty() {
-            ctx.queue.write_buffer(&self.instances, 0, &bytes);
-        }
-        self.count.set(boxes.len() as u32);
+        self.count.set((words.len() / (INSTANCE_BYTES as usize / 4)) as u32);
     }
 
     /// Draw the instances uploaded by the last [`upload`](RefPass::upload) into `pass` (the terrain pass: same targets, same depth).
@@ -259,6 +271,32 @@ mod tests {
             let height: f32 = (0..3).map(|k| a[k] * n[k]).sum();
             assert_eq!(height, 1.0);
         }
+    }
+
+    // spec: REND-036
+    #[test]
+    fn the_instances_are_relative_to_the_camera_in_f64_and_the_far_ones_are_left_out() {
+        use planet_core::{PlanetFixed, Vec3};
+        let r = 6_371_000.0;
+        let centre = Vec3::new(r, 0.0, 0.0);
+        let make = |at: Vec3| RefBox {
+            name: "b",
+            centre: PlanetFixed(at),
+            axes: [Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 0.0)],
+            half_m: [0.25, 0.5, 1.0],
+            colour: [0.1, 0.2, 0.3],
+        };
+        // A camera a metre away at planet-radius magnitude: an f32 subtraction of the absolute positions would not give 1 m exactly.
+        let words = pack_instances(&[make(centre)], centre + Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(words.len(), 20);
+        assert_eq!(&words[..4], &[-1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(&words[4..8], &[0.0, 0.25, 0.0, 0.0], "an axis scaled by its half size");
+        assert_eq!(&words[16..20], &[0.1, 0.2, 0.3, 1.0]);
+        // 10,000 km away: left out (nothing at planet distance reaches the shader).
+        assert!(pack_instances(&[make(Vec3::new(-r, 0.0, 0.0))], centre).is_empty());
+        let near = make(centre + Vec3::new(0.0, 150_000.0, 0.0));
+        let far = make(centre + Vec3::new(0.0, 250_000.0, 0.0));
+        assert_eq!(pack_instances(&[near, far], centre).len(), 20, "within 200 km kept, beyond it dropped");
     }
 
     fn glam_like(s: &[f32]) -> [f32; 3] {
