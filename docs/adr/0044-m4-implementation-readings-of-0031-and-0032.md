@@ -1,5 +1,5 @@
 # 0044 M4 implementation readings of ADR 0031 (cancellation) and ADR 0032 (dive pitch)
-Status: accepted (opus-planner, 2026-10-15, under the owner's delegation of 2026-10-12; amends ADR 0031 point 3 and ADR 0032 point 1 in part; neither touches M4's exit criteria)
+Status: superseded by 0055 (content in specs); was accepted (opus-planner, 2026-10-15, under the owner's delegation of 2026-10-12; amends ADR 0031 point 3 and ADR 0032 point 1 in part; neither touches M4's exit criteria)
 Date: 2026-10-15
 Source: sonnet-explorer's stop report and questions of 2026-10-15 (#149, #150); spec-guardian findings on #150; ADR 0031 point 3, ADR 0032 point 1, TEST-013
 

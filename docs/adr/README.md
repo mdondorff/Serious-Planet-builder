@@ -53,13 +53,13 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0041 | [Water: level field, ocean connectivity, Gerstner waves, shoreline](0041-water-level-field-ocean-and-shoreline.md) | accepted |  |
 | 0042 | [M5 frame structure, look data and the viewer window](0042-m5-frame-structure-and-viewer-window.md) | accepted | accepted when the M5 queue starts |
 | 0043 | [CON-11: geometry stays strict, presentation shading is judged by a tested bound](0043-con-11-geometry-strict-shading-by-bound.md) | accepted |  |
-| 0044 | [M4 implementation readings of ADR 0031 (cancellation) and ADR 0032 (dive pitch)](0044-m4-implementation-readings-of-0031-and-0032.md) | accepted |  |
+| 0044 | [M4 implementation readings of ADR 0031 (cancellation) and ADR 0032 (dive pitch)](0044-m4-implementation-readings-of-0031-and-0032.md) | superseded by 0055 (content in specs) |  |
 | 0045 | [Bodies, bake resolution and the storage budget](0045-bodies-bake-resolution-and-storage-budget.md) | proposed | all but point 3: multi-body work (point 7 before the editor ships) |
 | 0046 | [Generation workers run below normal priority](0046-generation-workers-run-below-normal-priority.md) | accepted |  |
 | 0047 | [Adapter gate: a discrete GPU, chosen before the device exists](0047-adapter-gate.md) | accepted |  |
 | 0048 | [Frame-target share (amends ADR 0033's remainder) and the lit path's readings of ADR 0038 and ADR 0042](0048-frame-target-share-and-lit-path-readings.md) | superseded by 0055 (content in specs) |  |
 | 0049 | [The climate field's bound and storage (amends ADR 0039 point 2), and the look file's version rule](0049-climate-field-bound-and-storage.md) | accepted | climate storage amended by 0062 |
-| 0050 | [Atmosphere: implementation readings of ADR 0040](0050-atmosphere-implementation-readings.md) | accepted |  |
+| 0050 | [Atmosphere: implementation readings of ADR 0040](0050-atmosphere-implementation-readings.md) | superseded by 0055 (content in specs) |  |
 | 0051 | [Ocean channel, liquid table and the water-level field: implementation readings of ADR 0041](0051-ocean-channel-liquid-table-and-water-field-readings.md) | superseded by 0055 (content in specs) |  |
 | 0052 | [First M5 goldens: an edge tolerance for the cross-adapter debug-view check](0052-m5-debug-view-edge-tolerance.md) | superseded by 0061 |  |
 | 0053 | [The water pass: implementation readings of ADR 0041 points 4 to 9](0053-water-pass-readings-of-adr-0041.md) | superseded by 0055 (content in specs) | |
