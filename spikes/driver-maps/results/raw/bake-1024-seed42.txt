@@ -1,0 +1,2 @@
+BAKE plain n=1024 cells=6291456 threads=1 | topo 0.03s sample 8.12s (1.29 us/cell/thread) flood 0.29s accumulate(MFD) 0.32s derive(slope,twi,soil) 0.17s | land 2985802 (47.5 %) seeds 24311 raised 145755 unreached 0 heap_peak 24404 | peak working set 114 MB
+BAKE-SINGLE-THREAD-EQUIV plain n=1024: flood+accumulate+derive 0.78s = 124.4 ns/cell (all sequential); with sampling 8.91s

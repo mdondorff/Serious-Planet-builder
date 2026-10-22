@@ -24,7 +24,11 @@ Source: owner, 2026-10-21 (generation principles; materials and plants from phys
 - Materials (G2a, G2b) already read an inputs-to-weights function, so they move to the driver vector without a shader interface change.
 - Bake time and storage grow per driver; D1 measures soil depth and flow accumulation at the store's resolution before M8 commits to a list.
 - Placement becomes reproducible and editable by rules: changing a curve re-places plants everywhere it matters, with a diff of the suitability views.
-- Open: the first driver list and resolutions (D1), the number of kinds per class, whether suitability for materials is stored per tile or evaluated per pixel (D1 measures both).
+- Open (SPIKE-30, 2026-10-22, proposals for the owner; numbers in `spikes/driver-maps/results/results.md`):
+  - First driver list: the ten channels of the briefing; only flow accumulation and soil depth are global stored fields; slope, curvature, aspect, insolation, wetness and moisture are made per tile from the tile's heights and the stored fields; lithology is analytic. Proposed grid for the two stored fields: 2048 or 4096 cells per face edge (50 or 201 MB, 3.5 or 18 s), refined per region on demand (a 1.6 M-cell patch of the 16384 grid costs about 1 s); not a 16384 store (about 26 GB in memory, 1.6 GB per channel on disk).
+  - Materials: the driver vector is stored per tile (81 B per channel; 5.5 us to fill, 40 ms per tile generated) rather than read per pixel from a whole-planet texture (blocky at ground scale, 100 MB per four channels); the GPU cost of either is not measured.
+  - LOOK-008 gives one smoothstep pair per input and material; a suitability response (rise and fall on one driver) needs two pairs per input or a quad; the reserved slots (three) and the eight-input vector are narrower than the driver vector of point 3 (at most 12 channels).
+  - Open still: coarse-to-fine consistency of the routing (inflow at patch borders), the across-face-edge ratio of 1.5 in the upstream area, the soil formula and the moisture index (stand-ins), sediment, the number of kinds per class.
 
 ## Licences of adopted code or techniques
 None yet. Response-curve niche models and stream-power routing are published methods; any adopted implementation is recorded here.
