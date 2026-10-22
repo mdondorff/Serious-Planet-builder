@@ -489,7 +489,7 @@ pub fn run(o: &Options, out: &mut dyn Write) -> Result<(), String> {
             max_level: o.finest_level_for(o.cells),
             min_level: o.min_level(),
             radius_m,
-            max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m() + 200.0),
+            max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m() + 5_000.0),
             ..LodParams::earth_1080p()
         };
         lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, o.tau))?;
@@ -613,6 +613,31 @@ pub fn run(o: &Options, out: &mut dyn Write) -> Result<(), String> {
                         "  one more warm plan through the counting field: {:.1} ms; {}",
                         t.elapsed().as_secs_f64() * 1000.0,
                         timed.report()
+                    )
+                    .map_err(err)?;
+                }
+                // The plan right after one edit: a hill is placed at the view, the definition handed to the field, the certificates and cap bounds
+                // cleared (`invalidate_tiles`, which does that whatever tiles it is given; none are named here, so the content keys of the tiles find
+                // what the edit changed, STRM-027), the plan made again.
+                if std::env::var_os("PLANET_SCALE_NOEDITPLAN").is_none() {
+                    let placed = rt.session.place("hill", at).is_ok();
+                    let def = Arc::new(rt.session.editor().definition().clone());
+                    world.set_definition(def)?;
+                    let after = world.field()?;
+                    cache.invalidate_tiles(&[]);
+                    let mut cam = base_cam;
+                    cam.position =
+                        planet_core::PlanetFixed(cam.position.0 + cam.forward.cross(cam.up).normalized() * (0.5 * (frames + 3) as f64));
+                    let t = Instant::now();
+                    let _ = plan_terrain_cached(&req_of(cam), &*after, &mut cache).map_err(|e| e.to_string())?;
+                    let first_ms = t.elapsed().as_secs_f64() * 1000.0;
+                    cam.position = planet_core::PlanetFixed(cam.position.0 + cam.forward.cross(cam.up).normalized() * 0.5);
+                    let t = Instant::now();
+                    let _ = plan_terrain_cached(&req_of(cam), &*after, &mut cache).map_err(|e| e.to_string())?;
+                    let next_ms = t.elapsed().as_secs_f64() * 1000.0;
+                    writeln!(
+                        out,
+                        "  the plan right after one hill edit at the {label} (placed: {placed}; certificates and cap bounds cleared, no tile named): {first_ms:.1} ms, the next plan {next_ms:.1} ms"
                     )
                     .map_err(err)?;
                 }
