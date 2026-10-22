@@ -12,7 +12,7 @@ use crate::lists::{self, LayerGroup, Row};
 use crate::params::{self, Inspector, Unit};
 use crate::polyline::{self, GeoPoint};
 use crate::problems::{self, Issue, Problem};
-use crate::relevance::{relevant_items, ViewState, MIN_REACH_PX};
+use crate::relevance::{footprint_candidates, relevant_items, shown_from, ViewState, MAX_SHOWN, MIN_REACH_PX};
 use crate::shape::{self, Handle, RADIUS_KEY, REACH_FACTOR};
 use crate::slope;
 use planet_core::{TileId, Vec3};
@@ -186,6 +186,9 @@ pub struct Session<S: ItemStore> {
     /// The edit-health lists (steep, stacked, mergeable brushes), kept up to date from the editor's change log: a change re-checks only the
     /// items whose footprint it meets (VIEW-048). A `RefCell`: the session is for one thread (it is not `Sync`).
     health: std::cell::RefCell<Option<Health>>,
+    /// The footprint find of the last [`Session::shown`], for the definition revision and the tiles and layers it was made for: a frame that
+    /// changes neither (the camera moved, nothing was edited) reuses it (VIEW-051).
+    shown_find: std::cell::RefCell<Option<(u64, u64, std::collections::BTreeMap<ItemId, (Vec3, f64)>)>>,
 }
 
 impl<S: ItemStore> Session<S> {
@@ -209,6 +212,7 @@ impl<S: ItemStore> Session<S> {
             brush_open: Vec::new(),
             drawable_slope: planet_frame::LodParams::earth_1080p().drawable_slope(),
             health: std::cell::RefCell::new(None),
+            shown_find: std::cell::RefCell::new(None),
         }
     }
 
@@ -336,9 +340,19 @@ impl<S: ItemStore> Session<S> {
     /// The edits the camera shows (VIEW-015): the footprint find over the visible `tiles`, the screen size of the reach, and the selected
     /// edit always. Hidden edits are left out, except the selected one.
     pub fn shown(&self, tiles: &[TileId], view: &ViewState) -> Result<Vec<ItemId>, MissingNode> {
+        use std::hash::{Hash, Hasher};
         let layers = self.layers();
-        let layer_refs: Vec<&str> = layers.iter().map(String::as_str).collect();
-        let mut ids = relevant_items(self.editor.definition(), self.body, &layer_refs, tiles, view, MIN_REACH_PX, self.selection)?;
+        let def = self.editor.definition();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (tiles, &layers).hash(&mut hasher);
+        let (revision, key) = (def.revision(), hasher.finish());
+        let mut cache = self.shown_find.borrow_mut();
+        if !matches!(cache.as_ref(), Some((r, k, _)) if *r == revision && *k == key) {
+            let layer_refs: Vec<&str> = layers.iter().map(String::as_str).collect();
+            *cache = Some((revision, key, footprint_candidates(def, self.body, &layer_refs, tiles)?));
+        }
+        let (_, _, candidates) = cache.as_ref().expect("just set");
+        let mut ids = shown_from(candidates, def, self.body, view, MIN_REACH_PX, MAX_SHOWN, self.selection);
         ids.retain(|id| !self.hidden.contains(id) || Some(*id) == self.selection);
         Ok(ids)
     }
