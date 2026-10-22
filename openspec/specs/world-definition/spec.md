@@ -322,7 +322,7 @@ Source: opus-planner (2026-10-22, SPIKE-29: plan-cache-keep), STRM-034
 - **THEN** the places are those of the first five, as they were and as they are, and the unchanged one gives none
 
 ### Requirement: WDEF-017 The relief scale of a body
-A body MAY set `body.<n>.relief_scale`, a factor from 1 to 4 (default 1), on the elevation of its global field about 0 m (the sea level of the default world; a smaller factor is not offered because the coast band of the water code is measured on the unscaled bake and would leave dry pits below the sea). A value that is not a number or lies outside the range SHALL be an error naming the node. `GenContext::relief_scale` SHALL record the node in the read set when the definition sets it and record nothing when it does not, so a definition that sets none keeps every key it had. The node is a float in the TOML file (`[body.0] relief_scale = 2.5`).
+A body MAY set `body.<n>.relief_scale`, a factor from 1 to 4 (default 1), on the elevation of its global field about 0 m (the default world's sea level; below 1 the coast band of the water code, measured on the unscaled bake, would leave dry pits). A value that is not a number or lies outside the range SHALL be an error naming the node. `GenContext::relief_scale` SHALL record the node in the read set when the definition sets it and record nothing when it does not, so a definition that sets none keeps every key it had. The node is a float in the TOML file (`[body.0] relief_scale = 2.5`).
 
 Verify: A
 Status: active
