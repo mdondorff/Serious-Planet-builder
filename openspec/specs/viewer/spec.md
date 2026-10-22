@@ -1087,7 +1087,7 @@ Source: owner (2026-10-22, via opus-planner): scale references to judge the grou
 
 #### Scenario: The sizes and the places
 - **WHEN** a drop is made at a camera with a flat ground, and at one with a ground that rises ahead
-- **THEN** the boxes have the named sizes, the block has 100 boxes spanning 950 m, each box stands on its lowest corner's ground ahead of the camera and none overlaps another, and a camera looking straight down still gets the drop
+- **THEN** the boxes have the named sizes, the block has 100 boxes spanning 950 m, each box stands on the lowest ground under its footprint ahead of the camera and none overlaps another, and a camera looking straight down still gets the drop
 
 #### Scenario: The key
 - **WHEN** F7 is pressed twice in a viewer
