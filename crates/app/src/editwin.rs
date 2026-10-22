@@ -940,10 +940,15 @@ impl EditRuntime {
                     .find(|(k, _)| *k == Handle::Move)
                     .map(|(_, p)| *p)
                     .ok_or_else(|| format!("edit smoke: the placed stamp has no move handle on the screen: {}", dbg()))?;
+                // The whole gesture in one step: a window event between two frames (the focus moving to another test's window on a busy CI
+                // runner, `Focused(false)` abandoning the drag) cannot cut it in two.
                 self.press(camera, viewport, h, limits, field);
+                if self.session.dragging().is_none() {
+                    return Err(format!("edit smoke: the press at the move handle {h:?} did not start a drag ({})", self.session.status()));
+                }
                 self.moved(camera, viewport, [h[0] + 12.0, h[1]], limits, field);
+                self.release();
             }
-            f if f == SMOKE_FIRST_FRAME + 6 => self.release(),
             f if f == SMOKE_FIRST_FRAME + 8 => self.apply(vec![Event::Param { key: "radius_m".to_string(), text: "300".to_string() }]),
             f if f == SMOKE_FIRST_FRAME + 10 => self.key(EditKey::Undo),
             f if f == SMOKE_FIRST_FRAME + 12 => self.key(EditKey::Redo),
@@ -1727,6 +1732,29 @@ mod tests {
             frame(&mut e, &cam, false);
         }
         e.smoke_verdict().unwrap();
+    }
+
+    // spec: VIEW-022
+    #[test]
+    fn a_focus_loss_between_any_two_frames_of_the_smoke_script_cannot_cost_it_its_drag() {
+        // CI flake (windows WARP, tier C 2/2): "the script did not complete: 30 frames, 1 placed, 0 selected, 0 dragged". Several test windows
+        // run at once and the focus moves between them; `Focused(false)` calls `cancel_drag` between two frames. The script's drag used to
+        // press in one frame and release two frames later, so the cancel in between left no drag. The gesture is now one step.
+        for cancel_at in SMOKE_FIRST_FRAME..SMOKE_FIRST_FRAME + 20 {
+            let cam = above(unit(47.2, 8.55), 3_000.0);
+            let mut e = runtime(None);
+            for f in 0..SMOKE_EDIT_FRAMES {
+                if e.take_changed_definition().is_some() {
+                    let _ = e.refresh_tiles(&[]);
+                }
+                e.smoke_step(f, &cam, VIEWPORT, &limits(), &Flat).unwrap_or_else(|why| panic!("cancel at {cancel_at}, frame {f}: {why}"));
+                frame(&mut e, &cam, false);
+                if f == cancel_at {
+                    e.cancel_drag();
+                }
+            }
+            e.smoke_verdict().unwrap_or_else(|why| panic!("a focus loss after frame {cancel_at}: {why}"));
+        }
     }
 
     // spec: VIEW-022
