@@ -472,12 +472,21 @@ pub struct ItemChange {
 /// The most announced transitions kept.
 const MAX_TRANSITIONS: usize = 32;
 
+/// An angle widened the way the touch test of the footprint query widens its limit (twice its relative and absolute margins), and by a further
+/// 1e-7 rad: on a body small enough for `reach / R` to be about a radian the relative margin is a millionth of it, more than the slack of a
+/// tile a few centimetres wide.
+fn widened(angle: f64) -> f64 {
+    angle * (1.0 + 2.0 * planet_world_def::footprint::FOOTPRINT_REL_MARGIN)
+        + 2.0 * planet_world_def::footprint::FOOTPRINT_ABS_MARGIN_RAD
+        + 1e-7
+}
+
 /// Whether a change can alter the bounds over the neighbourhood of the tile `geom` (the pads of the steepness proof and the caps of `none_steep`):
 /// the angle from the tile's centre to the change is within eight radii of the tile and the change's reach (an item changes bounds over a cap only
 /// when its reach touches it, so no more is needed).
 fn change_reaches_bounds(geom: &TileGeom, change: &ItemChange, radius_m: f64) -> bool {
     let angle = libm::atan2(geom.dir.cross(change.dir).length(), geom.dir.dot(change.dir));
-    let limit = 8.0 * geom.angular_radius + change.reach_m / radius_m + 1e-7;
+    let limit = widened(8.0 * geom.angular_radius + change.reach_m / radius_m);
     // Not a number counts as reached (the safe side).
     angle.is_nan() || limit.is_nan() || angle <= limit
 }
@@ -505,7 +514,7 @@ fn tile_reads_reach(tile: TileId, geom: &TileGeom, radius_m: f64) -> f64 {
 /// Whether a change can alter what the tile reads, given the angle `reach` from [`tile_reads_reach`].
 fn change_reaches_reads(geom: &TileGeom, change: &ItemChange, reach: f64, radius_m: f64) -> bool {
     let angle = libm::atan2(geom.dir.cross(change.dir).length(), geom.dir.dot(change.dir));
-    let limit = reach + change.reach_m / radius_m + 1e-7;
+    let limit = widened(reach + change.reach_m / radius_m);
     angle.is_nan() || limit.is_nan() || angle <= limit
 }
 

@@ -268,6 +268,52 @@ fn an_item_just_beyond_the_reach_of_a_tile_leaves_the_hash_of_its_reads_alone() 
     assert!(tested > 1_000 && whole_body < tested, "{tested} placements tested, {whole_body} tiles read the whole body");
 }
 
+// spec: STRM-035
+#[test]
+fn on_a_small_body_an_item_at_the_edge_of_the_touch_test_still_reaches_a_deep_tile() {
+    // A body of 25 km and an item of 40 km reach: reach / R is 1.6 rad, so the relative margin of the touch test is a millionth of a radian,
+    // more than the slack of a tile a few centimetres wide.
+    let mut changed = 0usize;
+    for radius in [25_000.0, 100_000.0] {
+        let lod = LodParams { radius_m: radius, ..request(6).lod };
+        let mut base = WorldDefinition::single_planet(radius, 1);
+        base.put_item_spec(BodyId::PLANET, hill(1, Vec3::new(0.3, 0.5, 0.8).normalized(), 5_000.0, 30.0)).unwrap();
+        let shared = |d: &WorldDefinition| Arc::new(RwLock::new(d.clone()));
+        let hash_of = |d: &WorldDefinition, tile: TileId| {
+            let base: Arc<dyn HeightField> = Arc::new(Reference(1));
+            StampStage::new(base, shared(d), BodyId::PLANET, DEFAULT_ITEM_LAYER, 0, 1).unwrap().inputs_hash_for(tile, &TangentWarp)
+        };
+        let reach_m = 40_000.0;
+        for level in [18u8, 20, 21, 22, 23, 24] {
+            let tile = TileId::new(planet_core::Face(2), level, 5 % (1 << level), 7 % (1 << level)).unwrap();
+            let centre = tile.center_direction(&TangentWarp);
+            let helper = if centre.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+            let tangent = centre.cross(helper).normalized();
+            let cap = planet_world_def::footprint::tile_cap(&TangentWarp, tile, 0.25).angle;
+            let rel = 1.0 / 1_048_576.0;
+            // Just inside the limit the touch test of the footprint query accepts: the item is read by the tile.
+            for inside in [1.0 - 1e-13, 1.0 - 1e-9, 1.0 - 1e-6] {
+                let angle = (cap + reach_m / radius) * (1.0 + rel) * inside;
+                if angle >= 3.0 {
+                    continue;
+                }
+                let at = (centre * libm::cos(angle) + tangent * libm::sin(angle)).normalized();
+                let mut edited = base.clone();
+                edited.put_item_spec(BodyId::PLANET, hill(2, at, reach_m, 30.0)).unwrap();
+                let changes = [ItemChange { dir: at, reach_m }];
+                if hash_of(&base, tile) != hash_of(&edited, tile) {
+                    changed += 1;
+                    assert!(
+                        changes_may_alter_tile(&TangentWarp, &lod, tile, &changes),
+                        "radius {radius} level {level}: the hash changed but the cache would spare the tile (item at {inside} of the touch limit)"
+                    );
+                }
+            }
+        }
+    }
+    assert!(changed > 0, "the scenario changes some hashes, or it tests nothing");
+}
+
 /// The hash of what a tile reads from a definition, as the plan cache's check takes it.
 struct StampStageHash;
 

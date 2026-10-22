@@ -20,7 +20,7 @@ Source: opus-planner (2026-10-22, SPIKE-29: the plan after an edit took 70 to 75
 - **THEN** every tile the test spares has the same hash before and after, and it spares at least a third of the tiles
 
 ### Requirement: STRM-035 The reach of a change
-A change at direction `d` with reach `r` can alter the reads of a tile when the angle from the tile's centre to `d` is within `reach(tile) + r / R + 1e-7` rad. `reach(tile)` is the angle of the cap of the tile with halo 1 for a tile finer than the cell level by less than `SUMMARY_LEVEL_GAP`; for a coarser tile, its angular radius plus `(rings + 2) * 1.5` nominal cell edges, `rings` from `summary::margin_rings` at halo 1; infinite when the margin needs more rings than the index allows. A tile so reached SHALL be taken as changed without its hash being made. 
+A change at direction `d` with reach `r` can alter the reads of a tile when the angle from the tile's centre to `d` is within `reach(tile) + r / R` (`R` the definition's radius), widened as WDEF-007's touch test widens its limit (twice its margins) and by 1e-7 rad. `reach(tile)` is the cap of the tile with halo 1 for a fine tile; for a coarser one, its angular radius plus `(rings + 2) * 1.5` nominal cell edges (`summary::margin_rings` at halo 1), infinite when the margin needs more rings than the index allows. A tile so reached SHALL be taken as changed without its hash being made. 
 Verify: A
 Status: active
 Source: opus-planner (2026-10-22, SPIKE-29), STRM-034, LOD-012
@@ -41,7 +41,7 @@ Source: opus-planner (2026-10-22, SPIKE-29), STRM-028, STRM-034
 - **THEN** each gives the same one place (the stamp's), once as it was and once as it is, so the cache is told every change
 
 ### Requirement: STRM-037 The reach of a change on bounds
-Certificates and cap bounds of a tile SHALL be dropped when the angle from its centre to a change is within 8 angular radii of the tile plus `r / R + 1e-7` rad. Certificates SHALL also be dropped when the set of levels that read height bounds (`reads_bounds`) differs, not when the field's largest height does. At most 32 announcements SHALL be kept.
+Certificates and cap bounds of a tile SHALL be dropped when the angle from its centre to a change is within 8 angular radii of the tile plus `r / R`, widened the same way. Certificates SHALL also be dropped when the set of levels that read height bounds (`reads_bounds`) differs, not when the field's largest height does. At most 32 announcements SHALL be kept.
 
 Verify: A
 Status: active
