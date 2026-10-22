@@ -32,6 +32,7 @@ Housekeeping is split (owner, 2026-10-16): the **architect** curates, deciding w
 5. **Briefings.** Replace or delete `docs/briefings/*` for the finished milestone; the next milestone's briefing is written when its queue starts.
 6. **Owner items.** List the dormant ones (an open question with no near trigger) with their trigger in the status file; do not ask the owner about them now.
 7. **Documentation model (ADR 0055).** Check that every current number lives in a spec, not only in an ADR amendment chain; that no new readings ADR appeared; and that archived changes hold only `proposal.md` and spec deltas. Fix the cause in the skill or CLAUDE.md if any of these drifted.
+7b. **README** (owner, 2026-10-22). Refresh `README.md`: the status paragraph (milestones done, the current one), what works today, how to run it, and the complete key list of the viewer and the editor mode, taken from the code (`key_command` in `crates/app/src/window.rs`, `HELP_KEYS` in `crates/app/src/panels.rs`, `EDIT_KEYS_HELP` in `crates/app/src/editwin.rs`), plus the `cargo xtask` table.
 8. **Agent memory.** Update `.claude/agent-memory/architect/MEMORY.md` with the milestone's decisions and delete what the repo now records.
 9. **Process review** (owner, 2026-10-18). One table in `docs/milestones/<M>-report.md` (section "Process review"), each measure against the previous milestone, from recorded data only (no estimates without a mark):
 
