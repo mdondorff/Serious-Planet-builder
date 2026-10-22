@@ -1,0 +1,9 @@
+GLOBAL-GRID in-memory bake 2048 (for the eroded field): 8.9s, 4 threads
+REFINE-BENCH-SAMPLE patch 512x512: global-field height 0.10s, eroded height 0.08s (1.26 us/cell, 4 threads); mean |eroded - base| 27.6 m
+REFINE-BENCH patch 512x512 (262144 cells, 300 km across) n=16384: topo 0.01s sample 0.10s (4 threads) flood 0.02s accumulate 0.02s derive 0.01s | sequential part 182 ns/cell | land 100 % | checksum 22417891
+REFINE-BENCH-SAMPLE patch 1024x1024: global-field height 0.38s, eroded height 0.33s (1.27 us/cell, 4 threads); mean |eroded - base| 27.9 m
+REFINE-BENCH patch 1024x1024 (1048576 cells, 599 km across) n=16384: topo 0.03s sample 0.38s (4 threads) flood 0.07s accumulate 0.09s derive 0.05s | sequential part 200 ns/cell | land 100 % | checksum 85548313
+REFINE-BENCH-SAMPLE patch 1536x1536: global-field height 0.86s, eroded height 0.76s (1.28 us/cell, 4 threads); mean |eroded - base| 28.3 m
+REFINE-BENCH patch 1536x1536 (2359296 cells, 896 km across) n=16384: topo 0.07s sample 0.86s (4 threads) flood 0.16s accumulate 0.20s derive 0.11s | sequential part 202 ns/cell | land 100 % | checksum 202145610
+REFINE-BENCH-SAMPLE patch 2048x2048: global-field height 1.53s, eroded height 1.57s (1.50 us/cell, 4 threads); mean |eroded - base| 28.5 m
+REFINE-BENCH patch 2048x2048 (4194304 cells, 1191 km across) n=16384: topo 0.13s sample 1.53s (4 threads) flood 0.31s accumulate 0.41s derive 0.20s | sequential part 218 ns/cell | land 100 % | checksum 373011015
