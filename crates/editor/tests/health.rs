@@ -4,8 +4,10 @@
 use planet_editor::brush;
 use planet_editor::commands::{Editor, NewItem};
 use planet_editor::ids::{FixedClock, IdMaker, SeededEntropy};
+use planet_editor::polyline::GeoPoint;
 use planet_editor::problems;
 use planet_editor::session::Session;
+use planet_editor::session::Tool;
 use planet_editor::slope;
 use planet_world_def::item::{Anchor, ItemStroke};
 use planet_world_def::item_store::MemoryStore;
@@ -176,4 +178,71 @@ fn a_change_re_checks_the_items_near_it_and_no_others_at_5000_items() {
     assert!(s.health_checked() <= 42, "{}", s.health_checked());
     assert!(s.steep_items().contains(&pile[0]), "forty strokes on a place are too steep");
     assert_equal_to_full_scans(&s, "the 5,000 item scene");
+}
+
+fn piece_copy(p: &planet_editor::brush::BrushStroke) -> planet_editor::brush::BrushStroke {
+    planet_editor::brush::BrushStroke {
+        kind: p.kind,
+        radius_m: p.radius_m,
+        strength_m: p.strength_m,
+        target_m: p.target_m,
+        points: p.points.clone(),
+    }
+}
+
+// spec: VIEW-049
+#[test]
+fn the_problems_list_and_the_slope_guard_give_what_the_scans_over_all_items_give() {
+    let mut s = session();
+    let limit = slope::gradient_limit(s.drawable_slope());
+    // Isolated brushes all round (so that the near-item filter has something to leave out), and a pile of 5 m strokes that fills most of the room.
+    for k in 0..200 {
+        let it = new_item(vec![stroke(BrushKind::Raise, 2.0, 100.0, 3_000.0 + f64::from(k) * 700.0, 20_000.0)]);
+        s.editor_mut().put(it).unwrap();
+    }
+    let one = slope::STROKE_GRADIENT * 5.0 / 100.0;
+    let n = (limit / one).floor() as usize - 1;
+    // One more stroke that leaves room for half of a 5 m stroke.
+    let rest_m = (limit - n as f64 * one - 0.5 * one) * 100.0 / slope::STROKE_GRADIENT;
+    let piece = planet_editor::brush::BrushStroke {
+        kind: BrushKind::Raise,
+        radius_m: 100.0,
+        strength_m: 5.0,
+        target_m: None,
+        points: vec![GeoPoint::new(0.0, deg(500.0))],
+    };
+    let mut open = Vec::new();
+    for _ in 0..n {
+        open = s.editor_mut().add_stroke(new_item(vec![stroke(BrushKind::Raise, 5.0, 100.0, 0.0, 500.0)]), &piece, &open).unwrap().0;
+    }
+    let rest = planet_editor::brush::BrushStroke { strength_m: rest_m, ..piece_copy(&piece) };
+    s.editor_mut().add_stroke(new_item(vec![stroke(BrushKind::Raise, rest_m, 100.0, 0.0, 500.0)]), &rest, &open).unwrap();
+    let camera = GeoPoint::new(0.0, deg(500.0)).dir() * R;
+    // The list holds exactly the steep and the stacked, as the scans find them.
+    let all: Vec<_> = s.editor().items().cloned().collect();
+    let mut want: Vec<ItemId> =
+        slope::steep_items(&all, limit, R).into_iter().chain(problems::stacked_items(&all, R).into_keys()).collect();
+    want.sort();
+    want.dedup();
+    let mut got: Vec<ItemId> = s.problems(&[], camera).iter().map(|p| p.row.id).collect();
+    got.sort();
+    assert_eq!(got, want);
+    // A stroke painted on the pile is cut to what the scan over every stroke allows.
+    let existing: Vec<_> = s.editor().items().flat_map(|i| i.strokes.iter().cloned()).collect();
+    let refs: Vec<&ItemStroke> = existing.iter().collect();
+    let expected = slope::allowed_strength(&piece, &refs, R, limit);
+    assert!(expected < 5.0 && expected >= planet_editor::brush::STRENGTH_RANGE_M.0, "the pile leaves some room: {expected}");
+    s.set_tool(Tool::Brush(BrushKind::Raise));
+    s.set_brush_radius(100.0).unwrap();
+    s.set_brush_strength(5.0).unwrap();
+    s.begin_stroke(GeoPoint::new(0.0, deg(500.0)).dir(), 0.0).unwrap();
+    s.end_stroke().unwrap();
+    let painted = s
+        .editor()
+        .items()
+        .flat_map(|i| i.strokes.iter())
+        .map(|t| t.strength_m)
+        .filter(|m| *m != 5.0 && *m != 2.0 && *m != rest_m)
+        .collect::<Vec<_>>();
+    assert_eq!(painted, vec![expected], "the stroke has the strength the full scan allows");
 }

@@ -1,0 +1,1 @@
+- 2026-10-22 **stamp-max-delta-cache** (explorer, SPIKE-29 fix 1): the stamp stage reads the sum of its items' `max_delta_m` once per item revision instead of walking every item on each `max_abs_height_m` call (99.8 % of a plan job at 1,000 items); GEN-032.
