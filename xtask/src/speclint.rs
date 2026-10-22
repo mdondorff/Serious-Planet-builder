@@ -340,6 +340,39 @@ pub fn lint(specs: &BTreeMap<String, String>, sources: &BTreeMap<PathBuf, String
     Report { errors, summary }
 }
 
+/// The files every session reads at its start and the most bytes each may hold (ADR 0075 point 1, BUILD-023): the status file, the learnings and
+/// the spike register by size (15, 20 and 10 KiB), `CLAUDE.md` and the constitution by the size they had when the ADR was accepted. A cap changes
+/// only by a new ADR.
+pub const HOT_FILE_CAPS: [(&str, usize); 5] = [
+    ("docs/status.md", 15 * 1024),
+    ("docs/learnings.md", 20 * 1024),
+    ("docs/spikes.md", 10 * 1024),
+    ("CLAUDE.md", 7_514),
+    ("docs/constitution.md", 8_574),
+];
+
+/// BUILD-023: one error per hot file over its cap, naming the file, its size and the cap. `sizes` is `(path, bytes)` with a line end counted
+/// as one byte (a checkout with CRLF measures the same as one with LF); a file that is not in the list is not capped, one that is missing is not
+/// an error here (the other checks read them).
+pub fn hot_file_errors(sizes: &[(String, usize)]) -> Vec<String> {
+    HOT_FILE_CAPS
+        .iter()
+        .filter_map(|(path, cap)| {
+            let (_, size) = sizes.iter().find(|(p, _)| p == path)?;
+            (size > cap).then(|| {
+                format!(
+                    "{path}: {size} B is over its cap of {cap} B (ADR 0075): trim it (the housekeeping skill: promote, keep or archive; a Tracked entry is at most three lines)"
+                )
+            })
+        })
+        .collect()
+}
+
+/// The size of a text with every `\r\n` counted as one byte.
+pub fn lf_size(bytes: &[u8]) -> usize {
+    bytes.len() - bytes.windows(2).filter(|w| w == b"\r\n").count()
+}
+
 /// Largest tracked file the conflict-marker scan reads (BUILD-009); bigger files are generated or binary in practice.
 const MARKER_SCAN_MAX_BYTES: usize = 2 * 1024 * 1024;
 
@@ -418,6 +451,10 @@ pub fn run(root: &Path) -> Res {
     let files: Vec<(String, Vec<u8>)> =
         tracked.split('\0').filter(|p| !p.is_empty()).filter_map(|p| Some((p.to_string(), std::fs::read(root.join(p)).ok()?))).collect();
     report.errors.extend(conflict_marker_errors(&files));
+    // BUILD-023: the hot files stay within their caps (ADR 0075).
+    let sizes: Vec<(String, usize)> =
+        HOT_FILE_CAPS.iter().filter_map(|(path, _)| Some((path.to_string(), lf_size(&std::fs::read(root.join(path)).ok()?)))).collect();
+    report.errors.extend(hot_file_errors(&sizes));
     // BUILD-010: every log fragment is one well-formed entry.
     report.errors.extend(crate::logcmd::fragment_errors(&crate::logcmd::read_fragments(root)?));
     eprint!("{}", report.summary);
@@ -440,6 +477,55 @@ mod tests {
     /// A merge-conflict block, built at run time so that no tracked file holds a marker line.
     fn conflict_block() -> String {
         format!("intro\n{} HEAD\nours\n{}\ntheirs\n{} origin/main\noutro\n", marks('<'), marks('='), marks('>'))
+    }
+
+    // spec: BUILD-023
+    #[test]
+    fn a_hot_file_over_its_cap_is_named_with_its_size_and_one_at_or_under_it_passes() {
+        let at = |p: &str, n: usize| (p.to_string(), n);
+        // At the cap and under it: nothing.
+        let ok: Vec<(String, usize)> = HOT_FILE_CAPS.iter().map(|(p, c)| at(p, *c)).collect();
+        assert!(hot_file_errors(&ok).is_empty(), "{:?}", hot_file_errors(&ok));
+        // One byte over: named, with the size and the cap; the others are not.
+        for (path, cap) in HOT_FILE_CAPS {
+            let mut sizes = ok.clone();
+            sizes.iter_mut().find(|(p, _)| p == path).unwrap().1 = cap + 1;
+            let errs = hot_file_errors(&sizes);
+            assert_eq!(errs.len(), 1, "{path}: {errs:?}");
+            assert!(
+                errs[0].starts_with(path) && errs[0].contains(&format!("{} B", cap + 1)) && errs[0].contains(&format!("cap of {cap} B")),
+                "{errs:?}"
+            );
+        }
+        // The caps are those of ADR 0075: 15, 20 and 10 KiB, and the two files at the size they had when it was accepted.
+        let cap = |name: &str| HOT_FILE_CAPS.iter().find(|(p, _)| *p == name).unwrap().1;
+        assert_eq!(
+            [cap("docs/status.md"), cap("docs/learnings.md"), cap("docs/spikes.md"), cap("CLAUDE.md"), cap("docs/constitution.md")],
+            [15_360, 20_480, 10_240, 7_514, 8_574]
+        );
+        // A file that is missing or not capped is no error.
+        assert!(hot_file_errors(&[]).is_empty());
+        assert!(hot_file_errors(&[at("docs/log.md", 10_000_000)]).is_empty());
+    }
+
+    // spec: BUILD-023
+    #[test]
+    fn the_size_counts_a_crlf_line_end_as_one_byte() {
+        assert_eq!(lf_size(b"a\r\nb\r\n"), 4);
+        assert_eq!(lf_size(b"a\nb\n"), 4);
+        assert_eq!(lf_size(b"a\rb"), 3, "a lone carriage return is a byte");
+        assert_eq!(lf_size(b""), 0);
+    }
+
+    // spec: BUILD-023
+    #[test]
+    fn the_hot_files_of_this_repository_are_within_their_caps() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let sizes: Vec<(String, usize)> = HOT_FILE_CAPS
+            .iter()
+            .map(|(p, _)| (p.to_string(), lf_size(&std::fs::read(root.join(p)).unwrap_or_else(|e| panic!("{p}: {e}")))))
+            .collect();
+        assert!(hot_file_errors(&sizes).is_empty(), "{:?}", hot_file_errors(&sizes));
     }
 
     // spec: BUILD-009

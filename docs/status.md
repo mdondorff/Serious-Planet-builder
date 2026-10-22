@@ -18,7 +18,6 @@ Global authoring (A1, A3, A4, E1, overview maps) moves to M9; M8 is generation p
 
 | # | Step | Lane |
 |---|---|---|
-| H1 | Housekeeping follow-up: spec-lint checks the ADR 0075 caps (status 15 KB, learnings 20 KB, spikes 10 KB, CLAUDE.md 7,514 B, constitution 8,574 B) and fails when a test cites a requirement ID that no spec holds, tier-A tests; plus the coder's mechanical pass (`docs/archive/README.md`, 2026-10-21 run) | crusader, after the reset |
 | H2 | The ADR 0055 consolidation not done in the M5 housekeeping (item 10b, only its point 4 done): amendment chains into their specs (0033 with 0048 and 0054; 0037 with 0052 and 0061; 0041 with 0051 and 0053), readings ADRs (0027, 0044, 0048, 0050, 0051, 0053) set to superseded, spec-lint's countable style checks; word counts before and after | crusader, after H1 |
 | I1 | Instancing spike at walking height, 1440p | spikes, after the reset |
 | D1 | Driver-maps design spike for M8: the first maps (physical drivers, process results such as soil depth and moisture), resolution and bake cost, how response curves combine into suitability, what materials and instances read; ends with a proposed ADR | spikes, after I1 |
