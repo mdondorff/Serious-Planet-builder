@@ -1464,7 +1464,7 @@ impl TerrainRenderer {
         let (pipeline, pipeline_cut) = (make(false), make(true));
         let path = LitPath::new(ctx, self.size);
         // The scene target, the exposure buffers, three post pipelines and the terrain pipelines (whole nodes, nodes over some quadrants).
-        self.lit_objects = 1 + 3 + 2 + 7;
+        self.lit_objects = 1 + 3 + 2 + 1;
         let refs = crate::refs::RefPass::new(ctx);
         self.lit = Some(LitGpu { path, pipeline, pipeline_cut, atmosphere_pipeline: None, atmosphere_pipeline_cut: None, refs });
     }
