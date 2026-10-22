@@ -340,6 +340,76 @@ pub fn lint(specs: &BTreeMap<String, String>, sources: &BTreeMap<PathBuf, String
     Report { errors, summary }
 }
 
+/// The most words a requirement's statement may have (ADR 0055 point 4, BUILD-024); a longer one is split, or its numbers go to a table.
+pub const STATEMENT_MAX_WORDS: usize = 120;
+
+/// The statements that were over [`STATEMENT_MAX_WORDS`] when BUILD-024 was added, one `ID words` line each (`long_statements.txt`). A
+/// listed statement may shrink but not grow; the line is deleted when the statement is rewritten to the limit. No new statement is ever
+/// listed.
+pub const LONG_STATEMENTS: &str = include_str!("long_statements.txt");
+
+/// First-person words a statement does not use (ADR 0055 point 4: no "we", no "I").
+const FIRST_PERSON: [&str; 4] = ["we", "I", "our", "my"];
+
+/// The requirements of a spec text with the words of the statement (the lines between the heading and the first metadata line or scenario)
+/// and whether the statement uses a first-person word. Requirements removed by a change delta are left out.
+pub fn statement_facts(text: &str) -> Vec<(String, usize, bool)> {
+    let mut out: Vec<(String, usize, bool)> = Vec::new();
+    let (mut removed, mut open) = (false, false);
+    for line in text.lines() {
+        if let Some(h) = line.strip_prefix("## ") {
+            removed = h.trim_start().starts_with("REMOVED");
+        }
+        if let Some(rest) = line.strip_prefix("### Requirement:") {
+            open = !removed;
+            if open {
+                out.push((rest.split_whitespace().next().unwrap_or("").to_string(), 0, false));
+            }
+        } else if open {
+            let t = line.trim();
+            if ["Verify:", "Status:", "Source:", "Review:", "#"].iter().any(|p| t.starts_with(p)) {
+                open = false;
+            } else if let Some(last) = out.last_mut() {
+                last.1 += t.split_whitespace().count();
+                last.2 |= t
+                    .split_whitespace()
+                    .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric() && c != '/'))
+                    .any(|w| FIRST_PERSON.contains(&if w == "I" { w.to_string() } else { w.to_ascii_lowercase() }.as_str()));
+            }
+        }
+    }
+    out
+}
+
+/// BUILD-024: one error per requirement statement over [`STATEMENT_MAX_WORDS`] words (or over the words it was listed with in
+/// [`LONG_STATEMENTS`]) and per statement with a first-person word. `specs` are the main specs by name.
+pub fn style_errors(specs: &BTreeMap<String, String>, long_statements: &str) -> Vec<String> {
+    let listed: BTreeMap<&str, usize> = long_statements
+        .lines()
+        .filter_map(|l| {
+            let (id, w) = l.split_once(' ')?;
+            Some((id, w.trim().parse().ok()?))
+        })
+        .collect();
+    let mut errors = Vec::new();
+    for (spec, text) in specs {
+        for (id, words, first_person) in statement_facts(text) {
+            let allowed = listed.get(id.as_str()).map_or(STATEMENT_MAX_WORDS, |w| (*w).max(STATEMENT_MAX_WORDS));
+            if words > allowed {
+                errors.push(format!(
+                    "{id} ({spec}): the statement has {words} words, over {allowed} (ADR 0055, BUILD-024): split it into requirements, or move numbers into a table"
+                ));
+            }
+            if first_person {
+                errors.push(format!(
+                    "{id} ({spec}): the statement uses \"we\", \"I\", \"our\" or \"my\" (ADR 0055, BUILD-024): write a definition"
+                ));
+            }
+        }
+    }
+    errors
+}
+
 /// The files every session reads at its start and the most bytes each may hold (ADR 0075 point 1, BUILD-023): the status file, the learnings and
 /// the spike register by size (15, 20 and 10 KiB), `CLAUDE.md` and the constitution by the size they had when the ADR was accepted. A cap changes
 /// only by a new ADR.
@@ -446,6 +516,10 @@ pub fn run(root: &Path) -> Res {
     }
     let constitution = std::fs::read_to_string(root.join("docs").join("constitution.md")).map_err(|e| e.to_string())?;
     let mut report = lint(&specs, &sources, &constitution);
+    report.errors.extend(style_errors(
+        &specs.iter().filter(|(n, _)| !n.starts_with("change:")).map(|(n, t)| (n.clone(), t.clone())).collect(),
+        LONG_STATEMENTS,
+    ));
     // BUILD-009: tracked files only (git is on every CI runner).
     let tracked = capture(root, "git", &["ls-files", "-z"])?;
     let files: Vec<(String, Vec<u8>)> =
@@ -898,5 +972,47 @@ struct S;
         // A change delta carries no Purpose and is not asked for one.
         let specs = BTreeMap::from([("change:x/coordinates".to_string(), "## ADDED Requirements\n".to_string())]);
         assert!(lint(&specs, &BTreeMap::new(), "").errors.is_empty());
+    }
+
+    fn req(id: &str, statement: &str) -> String {
+        format!("### Requirement: {id} Name\n{statement}\n\nVerify: A\nStatus: active\nSource: CON-01\n\n#### Scenario: S\n- **WHEN** a thing\n")
+    }
+
+    fn style(text: &str, listed: &str) -> Vec<String> {
+        style_errors(&BTreeMap::from([("coordinates".to_string(), text.to_string())]), listed)
+    }
+
+    // spec: BUILD-024
+    #[test]
+    fn a_statement_over_the_word_limit_fails_unless_listed_with_at_least_its_words() {
+        let words = |n: usize| vec!["word"; n].join(" ");
+        assert!(style(&req("COORD-001", &words(120)), "").is_empty(), "120 words pass");
+        let e = style(&req("COORD-001", &words(121)), "");
+        assert!(e.len() == 1 && e[0].starts_with("COORD-001 (coordinates)") && e[0].contains("121 words, over 120"), "{e:?}");
+        // The scenario and the metadata lines do not count; the lines of a long statement do.
+        assert!(style(&req("COORD-001", &format!("{}\n{}", words(100), words(30))), "")[0].contains("130 words"));
+        // A listed statement may keep its words or shrink, never grow; a list entry below the limit does not lower the limit.
+        assert!(style(&req("COORD-001", &words(200)), "COORD-001 200\n").is_empty());
+        assert!(style(&req("COORD-001", &words(150)), "COORD-001 200\n").is_empty());
+        assert!(style(&req("COORD-001", &words(201)), "COORD-001 200\n")[0].contains("201 words, over 200"));
+        assert!(style(&req("COORD-001", &words(120)), "COORD-001 50\n").is_empty());
+        // Another ID is not covered by the entry.
+        assert_eq!(style(&req("COORD-002", &words(200)), "COORD-001 200\n").len(), 1);
+    }
+
+    // spec: BUILD-024
+    #[test]
+    fn a_statement_with_a_first_person_word_fails_but_io_and_units_pass() {
+        assert!(style(&req("COORD-001", "The system SHALL read I/O and wait 52,000 us, at the user's position."), "").is_empty());
+        for bad in ["We chose the cube.", "The value is ours, we say.", "It SHALL do what I mean.", "This is my reading."] {
+            let e = style(&req("COORD-001", bad), "");
+            assert!(e.len() == 1 && e[0].contains("\"we\""), "{bad}: {e:?}");
+        }
+        // A scenario may say anything; a REMOVED requirement is not read.
+        assert!(style("### Requirement: COORD-001 N\nThe system SHALL work.\n\nVerify: A\n\n#### Scenario: S\n- **WHEN** we do\n", "")
+            .is_empty());
+        assert!(
+            style("## REMOVED Requirements\n### Requirement: COORD-009 Old\nWe removed it, and I agree: word word word.\n", "").is_empty()
+        );
     }
 }

@@ -406,3 +406,18 @@ Source: opus-planner (2026-10-21, M7 H1), ADR 0075
 #### Scenario: Over and at the cap
 - **WHEN** each hot file in turn is one byte over its cap, and when every file is at its cap
 - **THEN** the first fails naming only that file with its size and cap, the second passes, a missing or uncapped file is no error, a CRLF line end counts as one byte, and the repository's own hot files are within their caps
+
+### Requirement: BUILD-024 Requirement statements stay short and impersonal
+`cargo xtask spec-lint` SHALL fail when the statement of a requirement (its lines before the first `Verify:`, `Status:`, `Source:` or `Review:` line or scenario) has more than 120 words, or uses a first-person pronoun of the narrator's group or self (ADR 0055 point 4; the four words are `FIRST_PERSON` in `xtask/src/speclint.rs`), naming the requirement and its word count. The statements that were longer when this requirement was added are listed with their word counts in `xtask/src/long_statements.txt`: a listed statement may shrink but not grow, its line is deleted when it is rewritten to 120 words, and no statement is ever added to the list. A requirement removed by a change delta and the scenarios are not read.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-22, M7 H2), ADR 0055
+
+#### Scenario: The word limit
+- **WHEN** statements of 120, 121 and 130 words (two lines) are linted, with and without a listed entry of 200 words for the same ID
+- **THEN** only the 121- and 130-word statements fail, naming the count and the limit, a listed ID passes up to its listed words and fails above them, and another ID is not covered by the entry
+
+#### Scenario: First person
+- **WHEN** a statement says "we", "I", "our" or "my", and another says "I/O" and "52,000 us"
+- **THEN** the first fails and the second passes; a scenario or a removed requirement with the same words is not an error
