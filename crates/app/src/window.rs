@@ -565,8 +565,18 @@ impl App<'_> {
         if let Some(st) = self.state.as_mut() {
             if let Some(e) = st.edit.as_mut() {
                 if let Some(def) = e.take_changed_definition() {
+                    let (old_def, old_revision) = (self.world.definition(), self.field.item_revision());
                     match self.world.set_definition(Arc::clone(&def)) {
                         Ok(()) => {
+                            // The plan cache is told where the items changed, so that it keeps what the change cannot reach (STRM-034).
+                            if let Ok(new_field) = self.world.field() {
+                                let changes = def
+                                    .item_changes_from(&old_def)
+                                    .into_iter()
+                                    .map(|(dir, reach_m)| planet_frame::lod::ItemChange { dir, reach_m })
+                                    .collect();
+                                st.rig.managed.note_item_change(old_revision, new_field.item_revision(), changes);
+                            }
                             let resident: Vec<_> = st.rig.managed.resident().keys().copied().collect();
                             let tiles = e.refresh_tiles(&resident);
                             st.rig.managed.edit(&tiles);

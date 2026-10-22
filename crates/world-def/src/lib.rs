@@ -801,6 +801,35 @@ impl WorldDefinition {
         self.items.get(&(body, id)).map(|rec| (rec.unit(), f64::from_bits(rec.reach_bits)))
     }
 
+    /// Where the items that differ between `older` and `self` were and are, as `(unit direction, reach in metres)`: for every item that is in one
+    /// and not in the other, or is in both with another record (place, reach, layer, priority, amount or stroke), the place it had in `older` and the
+    /// place it has now. What the tiles that read the definition can have to recompute is what these places reach (STRM-034); a change of the
+    /// nodes is not among them (the base is the same for the definitions the caller compares).
+    pub fn item_changes_from(&self, older: &WorldDefinition) -> Vec<(Vec3, f64)> {
+        let mut out = Vec::new();
+        let mut push = |rec: &ItemRec| out.push((rec.unit(), f64::from_bits(rec.reach_bits)));
+        let (mut a, mut b) = (self.items.iter().peekable(), older.items.iter().peekable());
+        loop {
+            match (a.peek(), b.peek()) {
+                (None, None) => break,
+                (Some(_), None) => push(a.next().expect("peeked").1),
+                (None, Some(_)) => push(b.next().expect("peeked").1),
+                (Some((ka, _)), Some((kb, _))) => match ka.cmp(kb) {
+                    std::cmp::Ordering::Less => push(a.next().expect("peeked").1),
+                    std::cmp::Ordering::Greater => push(b.next().expect("peeked").1),
+                    std::cmp::Ordering::Equal => {
+                        let (new, old) = (a.next().expect("peeked").1, b.next().expect("peeked").1);
+                        if new != old {
+                            push(new);
+                            push(old);
+                        }
+                    }
+                },
+            }
+        }
+        out
+    }
+
     /// The layer of an item, if it exists.
     pub fn item_layer(&self, body: BodyId, id: ItemId) -> Option<String> {
         self.items.get(&(body, id)).map(|rec| rec.layer.clone())
@@ -1100,6 +1129,25 @@ impl<'a> GenContext<'a> {
         let path = footprint_query_path(body, layer, tile, halo_bits);
         self.record(path, ReadRecord::Footprint { body, layer: layer.to_string(), tile, halo_bits, items: items.clone() });
         Ok(items)
+    }
+
+    /// The reads of [`query_footprint`](GenContext::query_footprint) without its result: the records are the same. A tile coarser than the cell level
+    /// reads summary nodes, which hold what it needs, so the footprint find, whose items such a tile does not record, is not made: it built every item
+    /// of a cluster that reaches the tile's cap (SPIKE-29: 3 to 11 ms a coarse tile, and a plan asks for the keys of thousands).
+    pub fn read_footprint(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> Result<(), MissingNode> {
+        if !(halo.is_finite() && (0.0..=1.0).contains(&halo)) {
+            return Err(MissingNode(format!("a footprint halo in [0, 1] (got {halo})")));
+        }
+        self.body_radius_m(body)?;
+        if let Some(nodes) = self.def.summary_cover(body, tile, halo)? {
+            for &node in nodes.iter() {
+                let hash = self.def.summary_hash(body, layer, node)?;
+                let record = ReadRecord::SummaryNode { body, layer: layer.to_string(), node, hash };
+                self.record(record.path(), record);
+            }
+            return Ok(());
+        }
+        self.query_footprint(body, layer, tile, halo).map(|_| ())
     }
 
     /// Hash of everything read so far (WDEF-004): the definition part of a cache key.

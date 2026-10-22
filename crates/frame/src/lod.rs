@@ -455,7 +455,81 @@ pub struct SelectionCache {
     certs: IdMap<bool>,
     /// The bounds of the field over the cap of each tile that [`none_steep`] covered with (`cap_of`), valid for `certs_stamp` like `certs`.
     caps: IdMap<(f64, f64)>,
-    certs_stamp: Option<(LodParams, u64)>,
+    certs_stamp: Option<(LodParams, u64, u64)>,
+    /// The item changes the app announced between two item revisions of the field (`note_item_change`), oldest first: what lets the cache keep what
+    /// the changes cannot have touched when the revision moves (STRM-034).
+    transitions: Vec<(u64, u64, std::sync::Arc<Vec<ItemChange>>)>,
+}
+
+/// Where an authored item was or is, and how far it reaches: a change of the items between two revisions, as the footprint of what changed
+/// (STRM-034). `dir` is a unit direction on the body.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ItemChange {
+    pub dir: Vec3,
+    pub reach_m: f64,
+}
+
+/// The most announced transitions kept.
+const MAX_TRANSITIONS: usize = 32;
+
+/// Whether a change can alter the bounds over the neighbourhood of the tile `geom` (the pads of the steepness proof and the caps of `none_steep`):
+/// the angle from the tile's centre to the change is within eight radii of the tile and the change's reach (an item changes bounds over a cap only
+/// when its reach touches it, so no more is needed).
+fn change_reaches_bounds(geom: &TileGeom, change: &ItemChange, radius_m: f64) -> bool {
+    let angle = libm::atan2(geom.dir.cross(change.dir).length(), geom.dir.dot(change.dir));
+    let limit = 8.0 * geom.angular_radius + change.reach_m / radius_m + 1e-7;
+    // Not a number counts as reached (the safe side).
+    angle.is_nan() || limit.is_nan() || angle <= limit
+}
+
+/// The angle from the centre of `tile` within which an item can alter what the tile reads (`inputs_hash_for`), reach not included; infinite when the
+/// tile reads the whole body. A tile below the cell level by `SUMMARY_LEVEL_GAP` or more records the footprint of the tile and its halo (the
+/// items that touch the cap of the tile with the largest halo); a coarser one records the summary nodes that cover the tile and a margin of rings
+/// of cells (`summary::cover`), or the six faces when the margin needs more rings than the index allows. Every cell of a cover alters the hash,
+/// so the reach is the tile's own extent, the rings of cells at their widest (one and a half nominal edges, with two cells to spare), and no more.
+fn tile_reads_reach(tile: TileId, geom: &TileGeom, radius_m: f64) -> f64 {
+    let cell_level = planet_world_def::cells::cell_level(radius_m);
+    if planet_world_def::summary::is_coarse(tile, cell_level) {
+        match planet_world_def::summary::margin_rings(tile, 1.0, radius_m, cell_level) {
+            None => f64::INFINITY,
+            Some(rings) => {
+                let nominal_edge_rad = core::f64::consts::FRAC_PI_2 / f64::from(1u32 << cell_level);
+                geom.angular_radius + (f64::from(rings) + 2.0) * 1.5 * nominal_edge_rad
+            }
+        }
+    } else {
+        planet_world_def::footprint::tile_cap(&planet_core::TangentWarp, tile, 1.0).angle
+    }
+}
+
+/// Whether a change can alter what the tile reads, given the angle `reach` from [`tile_reads_reach`].
+fn change_reaches_reads(geom: &TileGeom, change: &ItemChange, reach: f64, radius_m: f64) -> bool {
+    let angle = libm::atan2(geom.dir.cross(change.dir).length(), geom.dir.dot(change.dir));
+    let limit = reach + change.reach_m / radius_m + 1e-7;
+    angle.is_nan() || limit.is_nan() || angle <= limit
+}
+
+/// The angle from the centre of `tile` within which an item (its own reach not counted) can alter what the tile reads; infinite when it reads the
+/// whole body. A hook for the tests.
+pub fn tile_reads_reach_rad(map: &dyn FaceMapping, p: &LodParams, tile: TileId) -> f64 {
+    tile_reads_reach(tile, &tile_geom(map, tile, p), p.radius_m)
+}
+
+/// Whether any announced change can alter the reads of `tile` (the test of [`SelectionCache::note_item_change`] for the tile keys): a hook for the
+/// tests that check it against the real keys.
+pub fn changes_may_alter_tile(map: &dyn FaceMapping, p: &LodParams, tile: TileId, changes: &[ItemChange]) -> bool {
+    if changes.is_empty() {
+        return false;
+    }
+    let geom = tile_geom(map, tile, p);
+    let reach = tile_reads_reach(tile, &geom, p.radius_m);
+    changes.iter().any(|c| change_reaches_reads(&geom, c, reach, p.radius_m))
+}
+
+/// The levels whose morph intervals read height bounds for a field of largest height `h` (`reads_bounds`), as a bit mask: what the certificates
+/// depend on of `h`.
+fn bounds_mask(p: &LodParams, h: f64) -> u64 {
+    (0..=p.max_level.min(63)).fold(0u64, |m, level| m | (u64::from(reads_bounds(p, level, h)) << level))
 }
 
 /// The content key of each tile the cache holds values of, for a field whose tiles read authored items: the field's hash of the tile's
@@ -513,8 +587,12 @@ impl SelectionCache {
             self.mesh_keys.remove(t);
             self.volumes.remove(t);
         }
-        self.certs.clear();
-        self.caps.clear();
+        // The certificates and cap bounds near an edit are dropped at the next plan (`keep_across`) when the change was announced, and all of them when
+        // it was not; only an edit nobody announced clears them here.
+        if self.transitions.is_empty() {
+            self.certs.clear();
+            self.caps.clear();
+        }
         dropped
     }
 
@@ -528,6 +606,72 @@ impl SelectionCache {
         self.certs.clear();
         self.caps.clear();
         self.certs_stamp = None;
+        self.transitions.clear();
+    }
+
+    /// Announce a change of the authored items: the field's item revision went from `from` to `to`, and `changes` is where the items that
+    /// differ were and are (`WorldDefinition::item_changes_from`; every item that differs, none left out). The next plan then keeps the keys,
+    /// volumes, certificates and cap bounds of the tiles those changes cannot reach, and checks the others (STRM-034). A revision that is
+    /// not announced, or whose chain of announcements is broken, starts the checks from all tiles, as before.
+    pub fn note_item_change(&mut self, from: u64, to: u64, changes: Vec<ItemChange>) {
+        if from == to || from == 0 || to == 0 {
+            return;
+        }
+        self.transitions.push((from, to, std::sync::Arc::new(changes)));
+        if self.transitions.len() > MAX_TRANSITIONS {
+            self.transitions.remove(0);
+        }
+    }
+
+    /// The announced changes that take the revision `from` to `to`, by following the transitions; `None` when the chain is broken.
+    fn changes_between(&self, from: u64, to: u64) -> Option<Vec<ItemChange>> {
+        let mut out = Vec::new();
+        let mut at = from;
+        for _ in 0..=MAX_TRANSITIONS {
+            if at == to {
+                return Some(out);
+            }
+            let (_, next, changes) = self.transitions.iter().find(|(f, ..)| *f == at)?;
+            out.extend(changes.iter().copied());
+            at = *next;
+        }
+        None
+    }
+
+    /// The revision moved from `previous` to `revision` by the announced `changes`: the tiles they cannot reach are stamped as checked at the
+    /// new revision, and the certificates and cap bounds near them are dropped, the others kept for it.
+    fn keep_across(&mut self, changes: &[ItemChange], previous: u64, revision: u64, p: &LodParams) {
+        let radius = p.radius_m;
+        let tiles = &self.tiles;
+        let mut reached: Vec<TileId> = Vec::new();
+        for (tile, seen) in self.hashes.seen.iter_mut() {
+            if seen.1 != previous {
+                continue;
+            }
+            let Some(g) = tiles.get(tile) else { continue };
+            let reach = tile_reads_reach(*tile, g, radius);
+            seen.1 = revision;
+            if changes.iter().any(|c| change_reaches_reads(g, c, reach, radius)) {
+                // A tile a change can reach is taken as changed, without the hash of its reads (the cover of a coarse tile is some 20,000 nodes):
+                // its volume, origin height and mesh key are dropped, and its hash is unknown until it is asked for (a hash of 0 differs from any).
+                seen.0 = 0;
+                reached.push(*tile);
+            }
+        }
+        for tile in reached {
+            self.volumes.remove(&tile);
+            self.hashes.stale.push(tile);
+        }
+        if matches!(&self.certs_stamp, Some((q, r, _)) if q == p && *r == previous) {
+            let keep = |tile: &TileId| tiles.get(tile).is_some_and(|g| !changes.iter().any(|c| change_reaches_bounds(g, c, radius)));
+            self.certs.retain(|tile, _| keep(tile));
+            self.caps.retain(|tile, _| keep(tile));
+            if let Some(stamp) = self.certs_stamp.as_mut() {
+                stamp.1 = revision;
+            }
+        }
+        // What was announced is used up (and what led to a revision no plan will ask for again goes with it).
+        self.transitions.retain(|(from, ..)| *from != previous);
     }
 
     /// Whether the cache tracks the items the prepared field reads (it has a revision to check): the origin heights and mesh keys of
@@ -620,7 +764,8 @@ impl SelectionCache {
                 planet_core::hash::hash_u64s(6, &[u64::from(p.min_level)]),
             ],
         );
-        self.hashes.revision = field.item_revision();
+        let (previous, revision) = (self.hashes.revision, field.item_revision());
+        self.hashes.revision = revision;
         if key != self.key
             || self.tiles.len() > Self::MAX_TILES
             || self.origin_heights.len() > Self::MAX_TILES
@@ -628,12 +773,26 @@ impl SelectionCache {
         {
             self.clear();
             self.key = key;
+        } else if previous != 0 && revision != 0 && previous != revision {
+            if let Some(changes) = self.changes_between(previous, revision) {
+                self.keep_across(&changes, previous, revision, p);
+            }
         }
-        if !matches!(&self.certs_stamp, Some((q, r)) if q == p && *r == self.hashes.revision) {
-            self.certs.clear();
-            self.caps.clear();
-            self.certs_stamp = Some((p.clone(), self.hashes.revision));
+        // The certificates depend on the field's largest height only through the levels that read bounds (`reads_bounds`): they are kept while
+        // those are the same; the cap bounds depend on the parameters and the items alone.
+        let mask = bounds_mask(p, field.max_abs_height_m());
+        match &self.certs_stamp {
+            Some((q, r, m)) if q == p && *r == revision => {
+                if *m != mask {
+                    self.certs.clear();
+                }
+            }
+            _ => {
+                self.certs.clear();
+                self.caps.clear();
+            }
         }
+        self.certs_stamp = Some((p.clone(), revision, mask));
     }
 }
 

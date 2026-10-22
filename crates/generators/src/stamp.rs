@@ -394,7 +394,7 @@ impl ItemReader for WorldDefinition {
     }
     fn tile_reads(&self, body: BodyId, layer: &str, tile: TileId, halo: f64) -> Vec<ReadRecord> {
         let ctx = GenContext::new(self);
-        ctx.query_footprint(body, layer, tile, halo).expect("a stage declares the items of a body that has a radius");
+        ctx.read_footprint(body, layer, tile, halo).expect("a stage declares the items of a body that has a radius");
         ctx.read_records()
     }
     fn revision(&self) -> u64 {
