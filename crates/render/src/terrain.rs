@@ -403,6 +403,9 @@ struct GroundDetail {
     normal: vec3<f32>,
     // The roughness of the specular term (LOOK-010), or -1 where there is none (the detail is off, or no material is there).
     rough: f32,
+    // The weights' mean of the materials' own albedo (GT: each material has its colour and value of its own, not the climate's tinted), or 0 where
+    // the detail is off.
+    tone: vec3<f32>,
 };
 
 // The detail of a fragment: the albedo multiplier (mean near 1) and the shading normal. `t`, `p`, `h`, `cs` are the temperature, the precipitation,
@@ -418,6 +421,7 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
     // Off, the normal goes through as it came (not normalised again), so the picture is what it was bit for bit.
     out.normal = normal;
     out.rough = -1.0;
+    out.tone = vec3<f32>(0.0);
     // The derivative first (uniform control flow): the footprint of a pixel in metres.
     let foot = max(abs(fwidth(local.x)), max(abs(fwidth(local.y)), abs(fwidth(local.z))));
     let strength = g.detail.x;
@@ -446,9 +450,9 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
     // results kept for per-material mixes were most of the register pressure of the pass). The octaves are unrolled with constant arguments (a
     // loop over arrays indexed by its counter puts them in local memory). Four octaves, cells of 16 m, 2 m, 25 cm and 3 cm.
     // `gd_tint(w, (rock, sand, -, soil), grass)` is the weighted albedo coefficient of one octave; `dot(w, (rock, sand, grass, soil))` the tilt's.
-    let grass_mean = vec3<f32>(0.87, 0.95, 0.735);
-    let grass_half = vec3<f32>(0.25, 0.23, 0.215);
-    var mul = gd_tint(w, vec4<f32>(0.80, 1.0, 0.0, 0.82), grass_mean);
+    let grass_mean = vec3<f32>(1.0);
+    let grass_half = vec3<f32>(0.34, 0.30, 0.30);
+    var mul = gd_tint(w, vec4<f32>(1.0, 1.0, 0.0, 1.0), grass_mean);
     var slope = vec3<f32>(0.0);
     {
         // 16 m: the patches of the ground.
@@ -468,13 +472,13 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
         // (`o.w` is faded with the octave: the crest is judged on the unfaded value.)
         let fade3 = 1.0 - smoothstep(0.06, 0.25, foot * 4.0);
         let crack = smoothstep(0.80, 1.0, 1.0 - abs(o.w / max(fade3, 1.0e-3))) * fade3;
-        mul = mul + o.w * gd_tint(w, vec4<f32>(0.22, 0.05, 0.0, 0.18), grass_half) - (0.30 * crack * w.x) * vec3<f32>(1.0, 0.98, 0.95);
+        mul = mul + o.w * gd_tint(w, vec4<f32>(0.34, 0.05, 0.0, 0.18), grass_half) - (0.55 * crack * w.x) * vec3<f32>(1.0, 0.98, 0.95);
         slope = slope + dot(w, vec4<f32>(0.20, 0.05, 0.10, 0.12)) * o.xyz;
     }
     {
         // 3 cm: the grain and the blades.
         let o = gd_octave(cell, frac, local, foot, 0u, 3u, axes);
-        mul = mul + o.w * gd_tint(w, vec4<f32>(0.0, 0.08, 0.0, 0.06), 0.14 * grass_mean);
+        mul = mul + o.w * gd_tint(w, vec4<f32>(0.10, 0.04, 0.0, 0.08), 0.30 * grass_mean);
         slope = slope + dot(w, vec4<f32>(0.10, 0.08, 0.15, 0.06)) * o.xyz;
     }
     mul = max(mul, vec3<f32>(0.2));
@@ -490,6 +494,7 @@ fn ground_detail(node_index: u32, local: vec3<f32>, normal: vec3<f32>, up: vec3<
         }
     }
     out.rough = rough;
+    out.tone = w.x * vec3<f32>(0.285, 0.275, 0.265) + w.y * vec3<f32>(0.58, 0.50, 0.36) + w.z * vec3<f32>(0.10, 0.20, 0.045) + w.w * vec3<f32>(0.12, 0.08, 0.05);
     out.mul = mix(vec3<f32>(1.0), mul, strength);
     out.normal = normalize(n - strength * (slope - dot(slope, n) * n));
     return out;
@@ -555,6 +560,20 @@ fn albedo_of(tab: array<vec4<f32>, 10>, t: f32, p: f32, cs: f32, h: f32, ramp_mi
     let shore = mix(land, tab[6].xyz, beach_w);
     let land_w = smoothstep(-max(tab[9].z, ramp_min), 0.0, h);
     return mix(tab[7].xyz, shore, land_w);
+}
+
+// The albedo multiplier of the lit view (GT): the detail's `mul`, and where the ground is land (no snow, no beach, no seabed) the albedo of the
+// materials there (`gd.tone`) in place of the climate's, by the detail strength. Off (strength 0, or the debug views) the multiplier is 1.
+fn detail_mul(gd: GroundDetail, view: u32, tab: array<vec4<f32>, 10>, t: f32, p: f32, cs: f32, h: f32, ramp_min: f32) -> vec3<f32> {
+    if (view > 1u || g.detail.x <= 0.0 || gd.rough < 0.0) {
+        return select(vec3<f32>(1.0), gd.mul, view <= 1u);
+    }
+    let snow_w = (1.0 - smoothstep(tab[8].x, tab[8].y, t)) * smoothstep(tab[8].z, tab[8].w, cs);
+    let beach_w = (1.0 - smoothstep(tab[9].x, tab[9].x + tab[9].y, h)) * (1.0 - snow_w);
+    let land_w = smoothstep(-max(tab[9].z, ramp_min), 0.0, h);
+    let k = g.detail.x * land_w * (1.0 - snow_w) * (1.0 - beach_w);
+    let base = max(albedo_of(tab, t, p, cs, h, ramp_min), vec3<f32>(0.01));
+    return gd.mul * mix(vec3<f32>(1.0), gd.tone / base, k);
 }
 
 // The ramp height at a fragment `d` metres from the camera (REND-030, `planet_frame::lod::shore_ramp_at`): `per_m * d` capped at 8 m. It
@@ -630,7 +649,7 @@ fn fs_lit_view(in: VsOut) -> vec4<f32> {
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
     let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x);
-    var rgb = shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * select(vec3<f32>(1.0), gd.mul, g.mode.x <= 1u);
+    var rgb = shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), sun, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
     // The sum is clamped like the rest of the lit radiance: the scene target is f16.
     rgb = min(rgb + vec3<f32>(ground_gloss(in.node_index, in.local, gd, sun) * g.range.z), vec3<f32>(60000.0));
     if (g.extra.y > 3.5) {

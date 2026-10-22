@@ -692,3 +692,14 @@ Source: owner (2026-10-22, via opus-planner), VIEW-050, REND-026
 #### Scenario: Depth and absence
 - **WHEN** a red cube is set half way to the ground on the view axis, then one under the ground, then none, and a debug frame is drawn with and without the cube
 - **THEN** the first frame differs from the plain one in red pixels, the second and the third equal the plain frame, and the debug frames are equal
+
+### Requirement: REND-037 The materials have their own colours
+With the ground detail on (REND-034), the lit fragment stages SHALL give land its materials' albedo in place of the climate's, by the strength: rock a neutral grey, grass a green, sand a pale yellow-brown and soil a dark brown, each times the detail's multiplier, which is 1 on average. Snow, the beach band and the seabed SHALL keep their own albedo, and the debug views and the strength 0 SHALL be unchanged. The rock's cracks and crevices SHALL be darker than its surface and the grass SHALL carry a pattern at the 3 cm octave.
+
+Verify: C
+Status: active
+Source: owner (2026-10-22, via opus-planner): "I can't really decipher rocks from grass"; REND-034
+
+#### Scenario: Each material reads as itself
+- **WHEN** a ground-level scene is drawn with one material alone at strength 1
+- **THEN** the mean colour of the grass has green above 1.3 times red and 1.5 times blue, the rock's channels stay within 12 % of each other, the sand is brighter than the soil by a factor of 2, and the soil is darker than the rock
