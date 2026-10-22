@@ -1,0 +1,19 @@
+BAKE images n=2048 cells=25165824 threads=4 | topo 0.12s sample 9.24s (1.47 us/cell/thread) flood 1.34s accumulate(MFD) 1.44s derive(slope,twi,soil) 0.70s | land 11943590 (47.5 %) seeds 48705 raised 583396 unreached 0 heap_peak 48843 | peak working set 428 MB
+BAKE-SINGLE-THREAD-EQUIV images n=2048: flood+accumulate+derive 3.49s = 138.5 ns/cell (all sequential); with sampling 40.44s
+PINE-IMAGE 2048x1024: 2.68s (1.28 us/pixel incl. the global sample)
+wrote results/images/pine-suitability-equirect.png (2048x1024, 240 KB)
+wrote results/images/driver-log-flow-accumulation.png (1024x512, 333 KB)
+wrote results/images/driver-soil-depth.png (1024x512, 219 KB)
+wrote results/images/driver-moisture-index.png (1024x512, 111 KB)
+wrote results/images/driver-slope.png (1024x512, 14 KB)
+PINE-STATS land px 849477 of 2097152, suitability > 0.5: 182210 (21.4 % of land), > 0.05: 236683 (27.9 %), total px 2097152
+CLOSE-VIEW 0: lat 17.6 lon -14.8 (equirect px 940,412)
+GLOBAL-GRID in-memory bake 2048 (for the eroded field): 9.0s, 4 threads
+REFINE-PATCH 1280x1280 cells (1638400 with halo 256) at n=16384: sample 0.57s (threads 4), flood+accumulate+derive 0.32s (198 ns/cell)
+CLOSE-STATS view 0: land cells 589824 of 589824, mean suitability refined 0.539 vs coarse 0.561, mean |difference| 0.027; Pearson r of ln(A) refined vs coarse-lookup 0.035
+wrote results/images/pine-close-view-0.png (1540x768, 367 KB)
+CLOSE-VIEW 1: lat -37.3 lon -100.5 (equirect px 452,724)
+GLOBAL-GRID in-memory bake 2048 (for the eroded field): 9.2s, 4 threads
+REFINE-PATCH 1280x1280 cells (1638400 with halo 256) at n=16384: sample 0.64s (threads 4), flood+accumulate+derive 0.34s (205 ns/cell)
+CLOSE-STATS view 1: land cells 589824 of 589824, mean suitability refined 0.710 vs coarse 0.708, mean |difference| 0.001; Pearson r of ln(A) refined vs coarse-lookup -0.069
+wrote results/images/pine-close-view-1.png (1540x768, 278 KB)
