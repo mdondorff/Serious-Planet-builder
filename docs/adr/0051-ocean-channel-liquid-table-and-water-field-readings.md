@@ -1,5 +1,5 @@
 # 0051 Ocean channel, liquid table and the water-level field: implementation readings of ADR 0041
-Status: accepted (opus-planner, 2026-10-17, under the owner's delegation; point 1 follows the owner's M5 constraint 3 and amends ADR 0041 point 3; point 6 is decided by item 7 with measurements, preferring storage that leaves the compact slot pins unchanged)
+Status: superseded by 0055 (content in specs); was accepted (opus-planner, 2026-10-17, under the owner's delegation; point 1 follows the owner's M5 constraint 3 and amends ADR 0041 point 3; point 6 is decided by item 7 with measurements, preferring storage that leaves the compact slot pins unchanged)
 Date: 2026-10-17
 Source: ADR 0041 points 1 to 3 and 7; SPIKE-08; ADR 0026, 0027, 0035, 0042 point 6, 0049; the owner's M5 constraints 1 to 3 and 5; the numerics and spec reviews of the change
 

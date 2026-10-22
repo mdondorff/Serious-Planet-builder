@@ -387,7 +387,7 @@ Golden tests SHALL check every golden of a test before failing and write every c
 
 Verify: A
 Status: active
-Source: CON-18, ADR 0009, ADR 0017, ADR 0037, ADR 0061
+Source: CON-18, ADR 0009, ADR 0017, ADR 0061
 
 #### Scenario: Owner decisions reproduced
 - **WHEN** the policy runs on the PR #43 candidates (WARP, llvmpipe, NVIDIA) with the change's declarations

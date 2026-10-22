@@ -348,6 +348,9 @@ pub const STATEMENT_MAX_WORDS: usize = 120;
 /// listed.
 pub const LONG_STATEMENTS: &str = include_str!("long_statements.txt");
 
+/// The entries `long_statements.txt` started with; it never holds more.
+pub const LONG_STATEMENTS_MAX_ENTRIES: usize = 191;
+
 /// First-person words a statement does not use (ADR 0055 point 4: no "we", no "I").
 const FIRST_PERSON: [&str; 4] = ["we", "I", "our", "my"];
 
@@ -392,8 +395,23 @@ pub fn style_errors(specs: &BTreeMap<String, String>, long_statements: &str) -> 
         })
         .collect();
     let mut errors = Vec::new();
+    if listed.len() > LONG_STATEMENTS_MAX_ENTRIES {
+        errors.push(format!(
+            "long_statements.txt lists {} statements, over the {LONG_STATEMENTS_MAX_ENTRIES} it started with (BUILD-024): the list only shrinks",
+            listed.len()
+        ));
+    }
+    let mut seen: BTreeSet<String> = BTreeSet::new();
     for (spec, text) in specs {
         for (id, words, first_person) in statement_facts(text) {
+            if let Some(&listed_words) = listed.get(id.as_str()) {
+                seen.insert(id.clone());
+                if words <= STATEMENT_MAX_WORDS {
+                    errors.push(format!("{id} ({spec}): the statement fits ({words} words) but is still in long_statements.txt (BUILD-024): delete its line"));
+                } else if words < listed_words {
+                    errors.push(format!("{id} ({spec}): the statement shrank to {words} words, listed {listed_words} (BUILD-024): lower its line in long_statements.txt"));
+                }
+            }
             let allowed = listed.get(id.as_str()).map_or(STATEMENT_MAX_WORDS, |w| (*w).max(STATEMENT_MAX_WORDS));
             if words > allowed {
                 errors.push(format!(
@@ -406,6 +424,9 @@ pub fn style_errors(specs: &BTreeMap<String, String>, long_statements: &str) -> 
                 ));
             }
         }
+    }
+    for id in listed.keys().filter(|id| !seen.contains(**id)) {
+        errors.push(format!("{id}: listed in long_statements.txt but no requirement has this ID (BUILD-024): delete its line"));
     }
     errors
 }
@@ -993,11 +1014,28 @@ struct S;
         assert!(style(&req("COORD-001", &format!("{}\n{}", words(100), words(30))), "")[0].contains("130 words"));
         // A listed statement may keep its words or shrink, never grow; a list entry below the limit does not lower the limit.
         assert!(style(&req("COORD-001", &words(200)), "COORD-001 200\n").is_empty());
-        assert!(style(&req("COORD-001", &words(150)), "COORD-001 200\n").is_empty());
         assert!(style(&req("COORD-001", &words(201)), "COORD-001 200\n")[0].contains("201 words, over 200"));
-        assert!(style(&req("COORD-001", &words(120)), "COORD-001 50\n").is_empty());
-        // Another ID is not covered by the entry.
-        assert_eq!(style(&req("COORD-002", &words(200)), "COORD-001 200\n").len(), 1);
+        // Another ID is not covered by the entry (and the entry's own requirement is gone).
+        let e = style(&req("COORD-002", &words(200)), "COORD-001 200\n");
+        assert!(e.iter().any(|m| m.starts_with("COORD-002") && m.contains("200 words, over 120")), "{e:?}");
+    }
+
+    // spec: BUILD-024
+    #[test]
+    fn the_list_of_long_statements_only_shrinks() {
+        let words = |n: usize| vec!["word"; n].join(" ");
+        // A statement that now fits, or shrank, or whose requirement is gone: the list must follow.
+        let e = style(&req("COORD-001", &words(120)), "COORD-001 200\n");
+        assert!(e.len() == 1 && e[0].contains("fits (120 words)") && e[0].contains("delete its line"), "{e:?}");
+        let e = style(&req("COORD-001", &words(150)), "COORD-001 200\n");
+        assert!(e.len() == 1 && e[0].contains("shrank to 150") && e[0].contains("listed 200"), "{e:?}");
+        let e = style(&req("COORD-001", &words(10)), "COORD-009 200\n");
+        assert!(e.len() == 1 && e[0].starts_with("COORD-009") && e[0].contains("no requirement has this ID"), "{e:?}");
+        // The list never holds more entries than it started with.
+        let many: String = (0..=LONG_STATEMENTS_MAX_ENTRIES).map(|k| format!("X-{k:03} 200\n")).collect();
+        assert!(style("", &many).iter().any(|m| m.contains("the list only shrinks")));
+        // The repository's own list is within its start and every line is a current long statement.
+        assert!(LONG_STATEMENTS.lines().count() <= LONG_STATEMENTS_MAX_ENTRIES);
     }
 
     // spec: BUILD-024

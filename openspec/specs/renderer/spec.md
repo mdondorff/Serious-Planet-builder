@@ -487,11 +487,11 @@ Source: ADR 0038 point 1, ADR 0039 points 1, 3 and 4, ADR 0035, ADR 0043, CON-11
 - **THEN** the albedo is exactly the desert, grass, forest, rock, snow, rock, beach and seabed colour, halfway through a transition it is halfway between the two colours, and the radiance is albedo/pi, zero and half
 
 ### Requirement: REND-026 Lit terrain frame
-A plan with a `LitPlan` SHALL be drawn into the `Rgba16Float` scene target with the same geometry and the same reversed-Z `Depth32Float` test as the debug path (the same pixels covered), every written value finite and within [0, 60000], and tone mapped into the renderer's colour target; the debug path of the same renderer SHALL stay byte-identical, before and after lit frames and compared with a renderer that never enabled the lit path. A lit frame at a fixed exposure SHALL be a pure function of its plan; the sun and the exposure SHALL come from the plan. Lit frames of the orbit, aerial and ground views, the EV-band view and the base shading's debug views (temperature, precipitation, albedo and lighting) SHALL match the adapter's goldens (class lit, first goldens of M5: blessed by `golden-review` under ADR 0037's policy, escalated to the owner's `/bless` otherwise). After `enable_lit` no frame SHALL create a pipeline, target or ring.
+A plan with a `LitPlan` SHALL be drawn into the `Rgba16Float` scene target with the same geometry and the same reversed-Z `Depth32Float` test as the debug path (the same pixels covered), every written value finite and within [0, 60000], and tone mapped into the renderer's colour target; the debug path of the same renderer SHALL stay byte-identical, before and after lit frames and compared with a renderer that never enabled the lit path. A lit frame at a fixed exposure SHALL be a pure function of its plan; the sun and the exposure SHALL come from the plan. Lit frames of the orbit, aerial and ground views, the EV-band view and the base shading's debug views (temperature, precipitation, albedo and lighting) SHALL match the adapter's goldens (class lit; TEST-022, TEST-036). After `enable_lit` no frame SHALL create a pipeline, target or ring.
 
 Verify: C
 Status: active
-Source: ADR 0038, ADR 0042 points 1-3, ADR 0037, ADR 0048, CON-12, CON-18, REND-017
+Source: ADR 0038, ADR 0042 points 1-3, ADR 0061, ADR 0048, CON-12, CON-18, REND-017
 
 #### Scenario: Coverage and range
 - **WHEN** the scripted views are drawn on the lit path and on the debug path
