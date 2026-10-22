@@ -36,7 +36,7 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0024 | [Clarifications to the tile pack format (ADR 0019)](0024-tile-pack-clarifications.md) | accepted |  |
 | 0025 | [Tile payload codec, node set id and what cache-verify finds](0025-tile-codec-and-cache-verify.md) | accepted |  |
 | 0026 | [Global-coarse field representation and bake layout](0026-global-coarse-representation.md) | accepted |  |
-| 0027 | [Reading the global-coarse bake, and the canonical block layout](0027-reading-the-global-bake.md) | accepted |  |
+| 0027 | [Reading the global-coarse bake, and the canonical block layout](0027-reading-the-global-bake.md) | superseded by 0055 (content in specs) |  |
 | 0028 | [The terrain field: a pure function of the direction over the global bake](0028-terrain-field-from-the-global-bake.md) | accepted |  |
 | 0029 | [Compaction and the size cap: write then delete, an injectable eviction rank](0029-compaction-and-the-size-cap.md) | accepted |  |
 | 0030 | [Erosion strategy: local filter in M3, a coarse global stream-power stage after it](0030-erosion-strategy-hybrid.md) | accepted |  |
@@ -57,12 +57,12 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0045 | [Bodies, bake resolution and the storage budget](0045-bodies-bake-resolution-and-storage-budget.md) | proposed | all but point 3: multi-body work (point 7 before the editor ships) |
 | 0046 | [Generation workers run below normal priority](0046-generation-workers-run-below-normal-priority.md) | accepted |  |
 | 0047 | [Adapter gate: a discrete GPU, chosen before the device exists](0047-adapter-gate.md) | accepted |  |
-| 0048 | [Frame-target share (amends ADR 0033's remainder) and the lit path's readings of ADR 0038 and ADR 0042](0048-frame-target-share-and-lit-path-readings.md) | accepted |  |
+| 0048 | [Frame-target share (amends ADR 0033's remainder) and the lit path's readings of ADR 0038 and ADR 0042](0048-frame-target-share-and-lit-path-readings.md) | superseded by 0055 (content in specs) |  |
 | 0049 | [The climate field's bound and storage (amends ADR 0039 point 2), and the look file's version rule](0049-climate-field-bound-and-storage.md) | accepted | climate storage amended by 0062 |
 | 0050 | [Atmosphere: implementation readings of ADR 0040](0050-atmosphere-implementation-readings.md) | accepted |  |
-| 0051 | [Ocean channel, liquid table and the water-level field: implementation readings of ADR 0041](0051-ocean-channel-liquid-table-and-water-field-readings.md) | accepted |  |
+| 0051 | [Ocean channel, liquid table and the water-level field: implementation readings of ADR 0041](0051-ocean-channel-liquid-table-and-water-field-readings.md) | superseded by 0055 (content in specs) |  |
 | 0052 | [First M5 goldens: an edge tolerance for the cross-adapter debug-view check](0052-m5-debug-view-edge-tolerance.md) | superseded by 0061 |  |
-| 0053 | [The water pass: implementation readings of ADR 0041 points 4 to 9](0053-water-pass-readings-of-adr-0041.md) | accepted | owner judges `shore_filter` at the M5 gate |
+| 0053 | [The water pass: implementation readings of ADR 0041 points 4 to 9](0053-water-pass-readings-of-adr-0041.md) | superseded by 0055 (content in specs) | owner judges `shore_filter` at the M5 gate |
 | 0054 | [Compact tiles in storage buffers instead of texture atlases (amends ADR 0033 point 3)](0054-compact-tiles-in-storage-buffers.md) | accepted | slot layout amended by 0062 |
 | 0055 | [Documentation model: specs hold current rules, ADRs record why](0055-documentation-model.md) | accepted | point 5 amended by 0075; point 6 consolidation open except its point 4 (M7 queue H2) |
 | 0056 | [Water selection: the coastal band, tile water in the tile job, a pixel-footprint wave fade](0056-coastal-band-water-selection.md) | accepted | amends 0053 points 4 and 5 |

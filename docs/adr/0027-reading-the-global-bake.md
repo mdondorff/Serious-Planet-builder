@@ -1,5 +1,5 @@
 # 0027 Reading the global-coarse bake, and the canonical block layout
-Status: accepted (owner's delegation of 2026-10-12: the architect accepts ADRs that reviewers find sound and unambiguous; accepted by opus-planner after the spec-guardian and numerics reviews and their text fixes; drafted by sonnet-explorer)
+Status: superseded by 0055 (content in specs); was accepted (owner's delegation of 2026-10-12: the architect accepts ADRs that reviewers find sound and unambiguous; accepted by opus-planner after the spec-guardian and numerics reviews and their text fixes; drafted by sonnet-explorer)
 Date: 2026-10-12
 Source: ADR 0026 (accepted in part; point 5 open), m3-global-store (STRM-012) and its numerics review; ADR 0028 (the terrain field reads the bake from a direction); ADR 0022 (one key per input field), ADR 0023 point 7, ADR 0006; constitution CON-05, CON-08, CON-14
 
