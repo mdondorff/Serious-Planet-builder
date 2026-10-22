@@ -19,7 +19,7 @@ Global authoring (A1, A3, A4, E1, overview maps) moves to M9; M8 is generation p
 | # | Step | Lane |
 |---|---|---|
 | H2 | The ADR 0055 consolidation not done in the M5 housekeeping (item 10b, only its point 4 done): amendment chains into their specs (0033 with 0048 and 0054; 0037 with 0052 and 0061; 0041 with 0051 and 0053), readings ADRs (0027, 0044, 0048, 0050, 0051, 0053) set to superseded, spec-lint's countable style checks; word counts before and after | crusader, after H1 |
-| D1 | Driver-maps design spike for M8: the first maps (physical drivers, process results such as soil depth and moisture), resolution and bake cost, how response curves combine into suitability, what materials and instances read; ends with a proposed ADR | spikes, after I1 |
+| D1 | Driver-maps design spike for M8: the first maps (physical drivers, process results such as soil depth and moisture), resolution and bake cost, how response curves combine into suitability, what materials and instances read; ends with a proposed ADR | spikes, after the spike results |
 
 Open M6 items carried over (owner test, 2026-10-20): P1-4 tile flashing (Tracked), P1-5 editing frame rate on a quiet machine (owner's retest), P2-6 colour shift after fast surface-to-orbit moves, P2-7 colour step between 95 and 100 km, P2-8 missing tiles during an edit's refresh (with P1-4).
 
