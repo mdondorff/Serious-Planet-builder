@@ -95,6 +95,15 @@ fn the_incremental_lists_equal_the_full_scans_after_every_edit_of_a_random_seque
         ids.push(s.editor_mut().put(new_item(strokes)).unwrap().0);
     }
     assert_equal_to_full_scans(&s, "30 puts");
+    // Two brushes whose strokes run 30 km (past the cells the grid files an item in: these are met by every query), over the areas above.
+    for east_m in [0.0, 100.0] {
+        let wide = ItemStroke {
+            points: vec![(deg(300.0), deg(east_m)), (deg(300.0), deg(east_m + 15_000.0)), (deg(300.0), deg(east_m + 30_000.0))],
+            ..stroke(BrushKind::Raise, 6.0, 150.0, 300.0, east_m)
+        };
+        ids.push(s.editor_mut().put(NewItem { reach_m: 31_000.0, ..new_item(vec![wide]) }).unwrap().0);
+    }
+    assert_equal_to_full_scans(&s, "two wide brushes");
     let mut steps = [0usize; 4];
     for step in 0..60 {
         // Undo may have taken an item away: the ids are those the editor has.
