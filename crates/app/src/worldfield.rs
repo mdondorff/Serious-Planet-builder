@@ -732,7 +732,7 @@ pub fn check_options(o: &Options) -> Result<(), String> {
     if o.given.contains("--seed") {
         return Err("--world and --seed both name the definition: give one".into());
     }
-    if o.scene != "terrain" && !crate::streamperf::is_stream_scene(&o.scene) {
+    if o.scene != "terrain" && !crate::streamperf::is_stream_scene(&o.scene) && !matches!(o.mode, crate::Mode::Editor) {
         return Err("--world applies to `test-render --scene terrain` (a view, --flight or --perf), not to other scenes".into());
     }
     if o.repro.is_some() {

@@ -80,7 +80,9 @@ pub struct TerrainField<'a> {
     inputs: u64,
     records: Vec<ReadRecord>,
     bake_key: [u8; 16],
-    src: &'a dyn LatticeSource,
+    src: crate::global::ScaledLattice<'a>,
+    /// The relief scale of the body (WDEF-017): the factor on the bake's elevation, which the bounds follow.
+    relief: f64,
     /// The first read error of the bake, if any: `height` cannot return a `Result`, so a failed read gives NaN (never a
     /// plausible number) and the caller checks [`TerrainField::error`] after generating (a tile build or a verify does).
     error: Mutex<Option<String>>,
@@ -99,9 +101,14 @@ impl TerrainField<'_> {
         }
     }
 
+    /// The largest height the field takes in magnitude at its relief scale (WDEF-017): the elevation clamp times the scale plus the largest detail.
+    fn max_abs_height(&self) -> f64 {
+        MAX_ELEVATION_M * self.relief + DETAIL_MAX_M
+    }
+
     /// The ground elevation of the bake at a direction, without detail.
     pub fn base_elevation(&self, dir: Vec3) -> f64 {
-        self.base_via(self.src, dir)
+        self.base_via(&self.src, dir)
     }
 
     fn base_via(&self, src: &dyn LatticeSource, dir: Vec3) -> f64 {
@@ -125,7 +132,7 @@ impl TerrainField<'_> {
 
 impl HeightField for TerrainField<'_> {
     fn height(&self, dir: Vec3) -> f64 {
-        self.height_via(self.src, dir)
+        self.height_via(&self.src, dir)
     }
 
     /// The lattice cells of the whole batch are read once, grouped by bake block (GEN-020): the same values, in the caller's order.
@@ -133,7 +140,7 @@ impl HeightField for TerrainField<'_> {
         let footprint = |g: &dyn LatticeSource, d: Vec3| {
             self.base_via(g, d);
         };
-        crate::global::eval_gathered(self.src, dirs, stop, &footprint, &|s, d| self.height_via(s, d))
+        crate::global::eval_gathered(&self.src, dirs, stop, &footprint, &|s, d| self.height_via(s, d))
     }
 
     /// [`HeightField::heights_until`] with the distinct blocks of the batch read on `threads` threads (GEN-020, LOD-009).
@@ -141,7 +148,7 @@ impl HeightField for TerrainField<'_> {
         let footprint = |g: &dyn LatticeSource, d: Vec3| {
             self.base_via(g, d);
         };
-        crate::global::eval_gathered_threads(self.src, dirs, stop, threads, &footprint, &|s, d| self.height_via(s, d))
+        crate::global::eval_gathered_threads(&self.src, dirs, stop, threads, &footprint, &|s, d| self.height_via(s, d))
     }
 
     fn seed(&self) -> u64 {
@@ -151,7 +158,7 @@ impl HeightField for TerrainField<'_> {
     /// The climate of the tile from the bake with the integer reader (ADR 0027, ADR 0039 point 2); a failed read is recorded like a
     /// height's (see [`TerrainField::error`]) and gives the zero texture.
     fn climate(&self, _map: &dyn planet_core::cube::FaceMapping, id: planet_core::TileId) -> crate::climate::ClimateTexture {
-        match crate::climate::climate_tile(self.src, id) {
+        match crate::climate::climate_tile(&self.src, id) {
             Ok(c) => c,
             Err(e) => {
                 self.fail(&e);
@@ -183,7 +190,7 @@ impl HeightField for TerrainField<'_> {
                 crate::climate::ClimateTexture::default()
             }
         };
-        crate::global::eval_gathered_with(self.src, dirs, stop, &footprint, &|s, d| self.height_via(s, d), &climate)
+        crate::global::eval_gathered_with(&self.src, dirs, stop, &footprint, &|s, d| self.height_via(s, d), &climate)
     }
 
     fn implementation_id(&self) -> &'static str {
@@ -195,7 +202,7 @@ impl HeightField for TerrainField<'_> {
     }
 
     fn max_abs_height_m(&self) -> f64 {
-        MAX_ABS_HEIGHT_M
+        self.max_abs_height()
     }
 
     fn inputs_hash(&self) -> u64 {
@@ -224,8 +231,8 @@ impl HeightField for TerrainField<'_> {
     /// widened by one cell, plus and minus the largest detail. A cap that leaves its face, or covers more than
     /// [`MAX_BOUNDS_CELLS`] cells, takes the global range.
     fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
-        let global = (-MAX_ABS_HEIGHT_M, MAX_ABS_HEIGHT_M);
-        let scan = match scan_base(self.src, centre, angular_radius) {
+        let global = (-self.max_abs_height(), self.max_abs_height());
+        let scan = match scan_base(&self.src, centre, angular_radius) {
             Ok(Some(scan)) => scan,
             Ok(None) => return global,
             Err(err) => {
@@ -373,12 +380,22 @@ impl TerrainGenerator {
     ) -> Result<TerrainField<'a>, MissingNode> {
         assert!(ctx.reads().is_empty(), "a field is built from a fresh context: its key covers the whole read set of the context");
         let seed = ctx.body_seed(body)?;
+        let relief = ctx.relief_scale(body)?;
         let records = ctx.read_records();
         let half = |b: &[u8]| u64::from_le_bytes(b.try_into().expect("8 bytes"));
         let inputs = hash_u64s(
             0x7465_7272,
             &[records_hash64(&records), half(&bake_key[..8]), half(&bake_key[8..]), u64::from(GLOBAL_VERSION), u64::from(TERRAIN_VERSION)],
         );
-        Ok(TerrainField { seed, body, inputs, records, bake_key, src: bake, error: Mutex::new(None) })
+        Ok(TerrainField {
+            seed,
+            body,
+            inputs,
+            records,
+            bake_key,
+            src: crate::global::ScaledLattice::new(bake, relief),
+            relief,
+            error: Mutex::new(None),
+        })
     }
 }

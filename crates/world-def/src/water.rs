@@ -302,7 +302,42 @@ impl WorldDefinition {
     }
 }
 
+/// The range of a body's relief scale (WDEF-017): no less than 1, because the coast band of the water code (about 64 m) is measured on the unscaled bake and covers a scaled field only upward.
+pub const RELIEF_SCALE_RANGE: (f64, f64) = (1.0, 4.0);
+
+pub fn body_relief_scale_path(body: BodyId) -> String {
+    format!("body.{}.relief_scale", body.0)
+}
+
+impl WorldDefinition {
+    /// Set the relief scale of `body` (WDEF-017).
+    pub fn set_relief_scale(&mut self, body: BodyId, scale: f64) {
+        self.set(&body_relief_scale_path(body), NodeValue::F64(scale));
+    }
+
+    /// The factor on the elevation of the global field of `body` (above and below the sea level): 1 when the definition sets none. A value
+    /// that is not a number, or outside [`RELIEF_SCALE_RANGE`], is an error naming the node.
+    pub fn relief_scale(&self, body: BodyId) -> Result<f64, MissingNode> {
+        let path = body_relief_scale_path(body);
+        match float(self, &path)? {
+            None => Ok(1.0),
+            Some(v) if (RELIEF_SCALE_RANGE.0..=RELIEF_SCALE_RANGE.1).contains(&v) => Ok(v),
+            Some(v) => Err(MissingNode(format!("{path} (a factor from {} to {}, got {v})", RELIEF_SCALE_RANGE.0, RELIEF_SCALE_RANGE.1))),
+        }
+    }
+}
+
 impl GenContext<'_> {
+    /// The relief scale of `body`, recording the node when the definition sets it (a world without it reads as before: its keys do not change).
+    pub fn relief_scale(&self, body: BodyId) -> Result<f64, MissingNode> {
+        let v = self.def.relief_scale(body)?;
+        let path = body_relief_scale_path(body);
+        if self.def.get(&path).is_some() {
+            self.record(path.clone(), crate::ReadRecord::Node { path, value: NodeValue::F64(v) });
+        }
+        Ok(v)
+    }
+
     /// The liquid table, recording every liquid node it read (none, when the world defines none and the Earth table applies:
     /// defining a table later then changes the read set).
     pub fn liquids(&self) -> Result<LiquidTable, MissingNode> {

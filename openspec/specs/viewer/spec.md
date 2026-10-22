@@ -1113,7 +1113,7 @@ Source: opus-planner (2026-10-22, SPIKE-29 fix 3: separate the shown set from th
 - **THEN** the session's answer equals the plain function's each time, and the new edit is shown at the next call
 
 ### Requirement: VIEW-052 The editor opens the production store
-The editor SHALL, when `--store`, `--world` and `--global-res` are not given and the run is not a smoke run, open the first existing directory of: the one in the `PLANET_STORE` environment variable, the one named in the pointer file `target/stores/default`, `target/stores/global16384`, `target/accept/global16384` (relative paths under the repo root). With none it SHALL open the in-memory preview bake. The window title SHALL name the source: `store <dir>`, or `preview bake <N> cells`. `cargo xtask store [--res N] [--link DIR]` builds a store of N cells per face edge (default 16384) into `target/stores/global<N>` and writes the pointer file, or with `--link` only writes the pointer file for an existing store.
+The editor SHALL, when `--store`, `--world` and `--global-res` are not given and the run is not a smoke run, open the first existing directory of: the one in the `PLANET_STORE` environment variable, the one named in the pointer file `target/stores/default`, `target/stores/global16384`, `target/accept/global16384` (relative paths under the repo root). With none it SHALL open the in-memory preview bake. The window title SHALL name the source: `store <dir>`, or `preview bake <N> cells`. `cargo xtask store [--res N] [--relief-scale S] [--link DIR]` builds a store of N cells per face edge (default 16384) into `target/stores/global<N>` and writes the pointer file, or with `--link` only writes the pointer file for an existing store.
 
 Verify: A
 Status: active

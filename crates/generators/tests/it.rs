@@ -40,6 +40,8 @@ mod ocean;
 mod pipeline;
 #[path = "region_mask.rs"]
 mod region_mask;
+#[path = "relief_scale.rs"]
+mod relief_scale;
 #[path = "stages.rs"]
 mod stages;
 #[path = "stamp_stage.rs"]

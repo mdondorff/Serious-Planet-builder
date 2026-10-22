@@ -509,6 +509,38 @@ pub trait LatticeSource: Sync {
     }
 }
 
+/// A lattice source with the elevation of every sample multiplied by the body's relief scale (WDEF-017): the exaggeration is part of the
+/// generator's input, so heights, bounds, slopes, collision and picking all read one world. The other channels (climate, continent) are
+/// the bake's own, so biomes and coasts stay where they are. The product is rounded to `f32` once; a scale of 1 passes the sample through.
+pub struct ScaledLattice<'a> {
+    inner: &'a dyn LatticeSource,
+    scale: f64,
+}
+
+impl<'a> ScaledLattice<'a> {
+    pub fn new(inner: &'a dyn LatticeSource, scale: f64) -> Self {
+        Self { inner, scale }
+    }
+}
+
+impl LatticeSource for ScaledLattice<'_> {
+    fn res(&self) -> u32 {
+        self.inner.res()
+    }
+
+    fn at(&self, face: Face, i: u32, j: u32) -> Result<GlobalSample, ReadError> {
+        let mut s = self.inner.at(face, i, j)?;
+        if self.scale != 1.0 {
+            s.elevation_m = (f64::from(s.elevation_m) * self.scale) as f32;
+        }
+        Ok(s)
+    }
+
+    fn block_cells(&self) -> u32 {
+        self.inner.block_cells()
+    }
+}
+
 /// A [`GlobalGrid`] as a lattice source.
 pub struct GridSource<'a>(pub &'a GlobalGrid);
 
