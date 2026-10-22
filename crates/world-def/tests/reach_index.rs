@@ -75,7 +75,7 @@ fn the_indexed_query_gives_the_set_the_scan_of_every_item_gives_after_every_kind
             1 => 40_000.0,
             _ => 40.0 * libm::pow(1000.0, rng.f()),
         };
-        let layer = if rng.next_u64() % 3 == 0 { "other" } else { "stamps" };
+        let layer = if rng.next_u64().is_multiple_of(3) { "other" } else { "stamps" };
         let it = spec(next_id, layer, dir, reach_m, (rng.next_u64() % 4) as i32);
         next_id += 1;
         def.put_item_spec(BodyId::PLANET, it.clone()).unwrap();
@@ -90,7 +90,7 @@ fn the_indexed_query_gives_the_set_the_scan_of_every_item_gives_after_every_kind
         let d = (centre + Vec3::new(rng.range(-0.002, 0.002), rng.range(-0.002, 0.002), rng.range(-0.002, 0.002))).normalized();
         add(&mut def, &mut items, &mut rng, Some(d));
     }
-    let mut check = |def: &WorldDefinition, items: &[ItemSpec], rng: &mut Rng, what: &str| {
+    let check = |def: &WorldDefinition, items: &[ItemSpec], rng: &mut Rng, what: &str| {
         for q in 0..40 {
             let dir = if q % 4 == 0 { centre } else { random_dir(rng) };
             let angle = match q % 5 {
@@ -124,7 +124,7 @@ fn the_indexed_query_gives_the_set_the_scan_of_every_item_gives_after_every_kind
         let id = items[(rng.next_u64() as usize) % items.len()].id;
         let dir = random_dir(&mut rng);
         let reach_m = 40.0 * libm::pow(1000.0, rng.f());
-        let replaced = spec(id, "stamps", dir, reach_m, (k % 3) as i32);
+        let replaced = spec(id, "stamps", dir, reach_m, k % 3);
         def.put_item_spec(BodyId::PLANET, replaced.clone()).unwrap();
         let at = items.iter().position(|i| i.id == id).unwrap();
         items[at] = replaced;
