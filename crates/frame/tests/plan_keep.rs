@@ -105,7 +105,7 @@ fn edit(shared: &Arc<RwLock<WorldDefinition>>, rng: &mut Rng, ids: &mut Vec<u128
     }
 }
 
-// spec: STRM-034
+// spec: STRM-034, STRM-037
 #[test]
 fn a_cache_told_where_the_items_changed_plans_what_a_fresh_one_plans_after_every_random_edit() {
     let shared = Arc::new(RwLock::new(WorldDefinition::single_planet(R, 1)));
@@ -213,7 +213,7 @@ fn a_tile_the_changes_cannot_reach_keeps_the_hash_of_its_reads() {
     assert!(spared * 3 >= sampled, "the test spares a good share of the tiles: {spared} of {sampled}");
 }
 
-// spec: STRM-034
+// spec: STRM-035
 #[test]
 fn an_item_just_beyond_the_reach_of_a_tile_leaves_the_hash_of_its_reads_alone() {
     use planet_frame::lod::tile_reads_reach_rad;

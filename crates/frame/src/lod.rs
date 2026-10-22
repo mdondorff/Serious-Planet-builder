@@ -653,7 +653,8 @@ impl SelectionCache {
             seen.1 = revision;
             if changes.iter().any(|c| change_reaches_reads(g, c, reach, radius)) {
                 // A tile a change can reach is taken as changed, without the hash of its reads (the cover of a coarse tile is some 20,000 nodes):
-                // its volume, origin height and mesh key are dropped, and its hash is unknown until it is asked for (a hash of 0 differs from any).
+                // its volume, origin height and mesh key are dropped, and its hash is not known: the hash of 0 differs from any, so the next check at a
+                // later revision takes the tile as changed once more (a recompute, never a stale value).
                 seen.0 = 0;
                 reached.push(*tile);
             }

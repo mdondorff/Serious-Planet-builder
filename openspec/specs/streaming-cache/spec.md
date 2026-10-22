@@ -959,6 +959,34 @@ Source: opus-planner (2026-10-22, SPIKE-29: the plan after an edit took 70 to 75
 - **WHEN** tiles of levels 0 to 17 round random edits (including the largest reach, cube corners and face edges) and elsewhere have their reads hashed before and after the edit
 - **THEN** every tile the test spares has the same hash before and after, and it spares at least a third of the tiles
 
+### Requirement: STRM-035 The reach of a change
+A change at direction `d` with reach `r` can alter the reads of a tile when the angle from the tile's centre to `d` is within `reach(tile) + r / R + 1e-7` rad. `reach(tile)` is the angle of the cap of the tile with halo 1 for a tile finer than the cell level by less than `SUMMARY_LEVEL_GAP`; for a coarser tile, its angular radius plus `(rings + 2) * 1.5` nominal cell edges, `rings` from `summary::margin_rings` at halo 1; infinite when the margin needs more rings than the index allows. A tile so reached SHALL be taken as changed without its hash being made. 
+Verify: A
+Status: active
+Source: opus-planner (2026-10-22, SPIKE-29), STRM-034, LOD-012
+
 #### Scenario: Just beyond the reach
 - **WHEN** an item is put just beyond the reach the cache gives a tile (by 10 micro-radians to 0.02 radians, with reaches of 1 m to 40 km, in a random direction), for tiles of levels 0 to 17 at 60 places
 - **THEN** the cache spares the tile and its read hash is the same as without the item
+
+### Requirement: STRM-036 The window announces its edits
+Every definition the editor hands to the generator (a put, a change, a delete, an undo, a redo, a load) SHALL be announced to the plan cache before the next plan, with the places of the items that differ from the definition it replaces (`WorldDefinition::item_changes_from`) and the field's item revisions before and after.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-22, SPIKE-29), STRM-028, STRM-034
+
+#### Scenario: Put, undo and redo
+- **WHEN** a stamp is put, undone and redone in the editor, and each definition it hands over is compared with the one before
+- **THEN** each gives the same one place (the stamp's), once as it was and once as it is, so the cache is told every change
+
+### Requirement: STRM-037 The reach of a change on bounds
+Certificates and cap bounds of a tile SHALL be dropped when the angle from its centre to a change is within 8 angular radii of the tile plus `r / R + 1e-7` rad. Certificates SHALL also be dropped when the set of levels that read height bounds (`reads_bounds`) differs, not when the field's largest height does. At most 32 announcements SHALL be kept.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-22, SPIKE-29), STRM-034, LOD-012
+
+#### Scenario: The oracle
+- **WHEN** the random edits of STRM-034 are planned
+- **THEN** every plan equals a fresh one, with the certificates and cap bounds kept beyond the reach of each change

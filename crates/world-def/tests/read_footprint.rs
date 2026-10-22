@@ -13,6 +13,23 @@ fn unit(lat_deg: f64, lon_deg: f64) -> Vec3 {
 
 // spec: WDEF-015
 #[test]
+fn the_memoised_hash_of_an_empty_subtree_is_the_chain_of_hashes_for_every_pair_of_levels() {
+    use planet_world_def::summary::{cell_hash128, empty_hash128, node_hash128};
+    for cell_level in 0..=12u8 {
+        for level in 0..=cell_level {
+            let mut h = cell_hash128(&[]);
+            for l in (level..cell_level).rev() {
+                h = node_hash128(l, &[h; 4]);
+            }
+            // Twice: the first call fills the memo, the second reads it.
+            assert_eq!(empty_hash128(level, cell_level), h, "level {level} of {cell_level}");
+            assert_eq!(empty_hash128(level, cell_level), h, "level {level} of {cell_level}, from the memo");
+        }
+    }
+}
+
+// spec: WDEF-015
+#[test]
 fn the_reads_without_the_result_are_the_reads_of_the_query_for_every_level_and_halo() {
     let mut def = WorldDefinition::single_planet(R, 3);
     // A cluster and some items elsewhere, in two layers.

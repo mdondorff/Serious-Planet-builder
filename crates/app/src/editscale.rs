@@ -639,9 +639,9 @@ pub fn run(o: &Options, out: &mut dyn Write) -> Result<(), String> {
                     )
                     .map_err(err)?;
                 }
-                // The plan right after one edit: a hill is placed at the view, the definition handed to the field, the certificates and cap bounds
-                // cleared (`invalidate_tiles`, which does that whatever tiles it is given; none are named here, so the content keys of the tiles find
-                // what the edit changed, STRM-027), the plan made again.
+                // The plan right after one edit: a hill is put at the view, the definition handed to the field and the change announced to the plan
+                // cache as the window does (STRM-034; `PLANET_SCALE_UNANNOUNCED` leaves it out, so every tile is checked again), no tile named
+                // (`invalidate_tiles(&[])`: the content keys of the tiles find what the edit changed, STRM-027), the plan made again.
                 if std::env::var_os("PLANET_SCALE_NOEDITPLAN").is_none() {
                     // A hill of 400 m reach put into a copy of the definition (in memory: the set's files are not touched).
                     let old_def = world.definition();
