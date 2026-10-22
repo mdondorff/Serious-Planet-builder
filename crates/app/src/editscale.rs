@@ -315,9 +315,9 @@ fn empty_place(centre: Vec3) -> Vec3 {
 /// A field that counts and times the calls the plan makes into the field under it: the attribution of a plan job (SPIKE-29).
 pub struct Timed<'a> {
     pub inner: &'a dyn HeightField,
-    /// Calls and nanoseconds of `height`, `height_bounds`, `inputs_hash_for`, `read_records_for`, `passes_through`.
-    pub calls: [AtomicU64; 5],
-    pub ns: [AtomicU64; 5],
+    /// Calls and nanoseconds of `height`, `height_bounds`, `inputs_hash_for`, `read_records_for`, `passes_through`, `max_abs_height_m`.
+    pub calls: [AtomicU64; 6],
+    pub ns: [AtomicU64; 6],
 }
 
 impl<'a> Timed<'a> {
@@ -334,7 +334,7 @@ impl<'a> Timed<'a> {
     }
 
     pub fn report(&self) -> String {
-        ["height", "height_bounds", "inputs_hash_for", "read_records_for", "passes_through"]
+        ["height", "height_bounds", "inputs_hash_for", "read_records_for", "passes_through", "max_abs_height_m"]
             .iter()
             .enumerate()
             .map(|(k, n)| format!("{n} {} calls {:.1} ms", self.calls[k].load(Relaxed), self.ns[k].load(Relaxed) as f64 / 1.0e6))
@@ -357,7 +357,7 @@ impl HeightField for Timed<'_> {
         self.inner.version()
     }
     fn max_abs_height_m(&self) -> f64 {
-        self.inner.max_abs_height_m()
+        self.timed(5, || self.inner.max_abs_height_m())
     }
     fn inputs_hash(&self) -> u64 {
         self.inner.inputs_hash()

@@ -1,0 +1,1 @@
+- 2026-10-22 **edit-health-scale** (explorer, SPIKE-29 fix 2): the steep and stacked lists, the row warnings and the problems tab follow the items incrementally (a change checks the items near it; a grid index and a change log), equal to the full scans; the work per change is tested at 5,041 items (VIEW-048).

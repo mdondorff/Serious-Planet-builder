@@ -9,6 +9,7 @@
 pub mod brush;
 pub mod commands;
 pub mod feed;
+pub mod health;
 pub mod ids;
 pub mod interaction;
 pub mod layout;

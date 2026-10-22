@@ -7,6 +7,7 @@
 
 use crate::brush::{self, BrushStroke};
 use crate::commands::{Affected, EditError, Editor, NewItem};
+use crate::health::Health;
 use crate::lists::{self, LayerGroup, Row};
 use crate::params::{self, Inspector, Unit};
 use crate::polyline::{self, GeoPoint};
@@ -182,14 +183,9 @@ pub struct Session<S: ItemStore> {
     brush_open: Vec<ItemId>,
     /// The slope the plan can draw (`LodParams::drawable_slope`), from which the brush guard takes its limit (VIEW-043).
     drawable_slope: f64,
-    /// The brush items over the limit, found for one revision of the editor (the scan reads every stroke). A `RefCell`: the session is for one
-    /// thread (it is not `Sync`).
-    steep: std::cell::RefCell<Option<(u64, f64, BTreeSet<ItemId>)>>,
-    /// The brush items listed as stacked (VIEW-047) with the depth of their stack, found for one revision of the editor.
-    stacked: std::cell::RefCell<Option<(u64, std::collections::BTreeMap<ItemId, usize>)>>,
-    /// Whether a stack of strokes can be merged in a brush item, for the items of the problems list, found for one revision of the editor (the
-    /// pairwise overlap test of the strokes is not cheap, and the list is drawn every frame).
-    mergeable: std::cell::RefCell<Option<(u64, std::collections::BTreeMap<ItemId, bool>)>>,
+    /// The edit-health lists (steep, stacked, mergeable brushes), kept up to date from the editor's change log: a change re-checks only the
+    /// items whose footprint it meets (VIEW-048). A `RefCell`: the session is for one thread (it is not `Sync`).
+    health: std::cell::RefCell<Option<Health>>,
 }
 
 impl<S: ItemStore> Session<S> {
@@ -212,9 +208,7 @@ impl<S: ItemStore> Session<S> {
             stroke: None,
             brush_open: Vec::new(),
             drawable_slope: planet_frame::LodParams::earth_1080p().drawable_slope(),
-            steep: std::cell::RefCell::new(None),
-            stacked: std::cell::RefCell::new(None),
-            mergeable: std::cell::RefCell::new(None),
+            health: std::cell::RefCell::new(None),
         }
     }
 
@@ -432,13 +426,34 @@ impl<S: ItemStore> Session<S> {
 
     /// `rows` with the warning of the brush guard set on those over the limit (VIEW-043).
     fn flagged(&self, mut rows: Vec<Row>) -> Vec<Row> {
-        let steep = self.steep_items();
-        if !steep.is_empty() {
+        let health = self.health();
+        if !health.steep().is_empty() {
             for row in &mut rows {
-                row.steep = self.is_steep(row.id, &steep);
+                row.steep = health.is_steep(row.id, self.editor.item(row.id).and_then(|i| i.group));
             }
         }
         rows
+    }
+
+    /// The edit-health lists, brought up to date with the editor: all the items the first time (or when the change log no longer reaches back,
+    /// or the drawable slope moved), the items changed since otherwise.
+    fn health(&self) -> std::cell::RefMut<'_, Health> {
+        let mut cell = self.health.borrow_mut();
+        let seq = self.editor.change_seq();
+        let h = cell.get_or_insert_with(|| Health::new(self.radius_m, self.drawable_slope));
+        if h.seq() != seq || !h.is_built() {
+            match self.editor.changes_since(h.seq()).filter(|_| h.is_built()) {
+                Some(changed) => h.apply(seq, changed, |id| self.editor.item(id)),
+                None => h.rebuild(seq, self.editor.items()),
+            }
+        }
+        std::cell::RefMut::map(cell, |c| c.as_mut().expect("just set"))
+    }
+
+    /// How many items the last refresh of the edit-health lists checked (the work the last change cost).
+    pub fn health_checked(&self) -> usize {
+        let h = self.health();
+        h.last_checked()
     }
 
     /// The search rows (VIEW-016): planet-wide, nearest to the camera first.
@@ -462,47 +477,33 @@ impl<S: ItemStore> Session<S> {
     /// Set it from the LOD parameters of the window (`LodParams::drawable_slope`).
     pub fn set_drawable_slope(&mut self, slope: f64) {
         self.drawable_slope = slope;
-        *self.steep.borrow_mut() = None;
+        *self.health.borrow_mut() = None;
     }
 
-    /// The brush items whose stacked gradient is over the limit of the guard, "too steep to draw fully" (VIEW-043). Found once per revision
-    /// of the editor.
+    /// The brush items whose stacked gradient is over the limit of the guard, "too steep to draw fully" (VIEW-043). Kept up to date as the
+    /// editor changes (VIEW-048).
     pub fn steep_items(&self) -> BTreeSet<ItemId> {
-        let revision = self.editor.revision();
-        let mut cache = self.steep.borrow_mut();
-        if let Some((r, slope, found)) = cache.as_ref() {
-            if *r == revision && *slope == self.drawable_slope {
-                return found.clone();
-            }
-        }
-        let found = slope::steep_items(self.editor.items(), slope::gradient_limit(self.drawable_slope), self.radius_m);
-        *cache = Some((revision, self.drawable_slope, found.clone()));
-        found
+        self.health().steep().clone()
     }
 
-    /// The brush items listed as stacked with the depth of their stack (VIEW-047). Found once per revision of the editor.
+    /// The brush items listed as stacked with the depth of their stack (VIEW-047). Kept up to date as the editor changes (VIEW-048).
     pub fn stacked_items(&self) -> std::collections::BTreeMap<ItemId, usize> {
-        let revision = self.editor.revision();
-        let mut cache = self.stacked.borrow_mut();
-        if let Some((r, found)) = cache.as_ref() {
-            if *r == revision {
-                return found.clone();
-            }
-        }
-        let found = problems::stacked_items(self.editor.items(), self.radius_m);
-        *cache = Some((revision, found.clone()));
-        found
+        self.health().stacked().clone()
     }
 
     /// The problems list (VIEW-047): every edit too steep to draw fully, stacked, or near tiles the plan holds back (`capped`, the edits the
     /// window found over the capped tiles of the last plan). The steepest and deepest first, then by name.
     pub fn problems(&self, capped: &[ItemId], camera_position: Vec3) -> Vec<Problem> {
-        let steep = self.steep_items();
-        let stacked = self.stacked_items();
+        let (steep, stacked) = {
+            let h = self.health();
+            (h.steep().clone(), h.stacked().clone())
+        };
         let mut ids: BTreeSet<ItemId> = steep.iter().copied().chain(stacked.keys().copied()).collect();
         ids.extend(capped.iter().copied().filter(|id| self.editor.item(*id).is_some()));
         let ids: Vec<ItemId> = ids.into_iter().collect();
-        let mut rows = self.flagged(lists::near_rows(self.editor.items(), &ids, camera_position, self.radius_m));
+        // The listed items only are looked up (not every item scanned).
+        let mut rows =
+            self.flagged(lists::near_rows(ids.iter().filter_map(|id| self.editor.item(*id)), &ids, camera_position, self.radius_m));
         let mut out: Vec<Problem> = rows
             .drain(..)
             .map(|row| {
@@ -542,15 +543,10 @@ impl<S: ItemStore> Session<S> {
         out
     }
 
-    /// Whether `strokes` (of item `id`) have a stack to merge, remembered per revision of the editor.
+    /// Whether `strokes` (of item `id`) have a stack to merge, remembered until the item changes.
     fn is_mergeable(&self, id: ItemId, strokes: &[planet_world_def::item::ItemStroke]) -> bool {
-        let revision = self.editor.revision();
-        let mut cache = self.mergeable.borrow_mut();
-        if cache.as_ref().is_none_or(|(r, _)| *r != revision) {
-            *cache = Some((revision, std::collections::BTreeMap::new()));
-        }
-        let (_, found) = cache.as_mut().expect("just set");
-        *found.entry(id).or_insert_with(|| problems::merge_stack(strokes, self.radius_m).is_some())
+        let mut h = self.health();
+        *h.mergeable.entry(id).or_insert_with(|| problems::merge_stack(strokes, self.radius_m).is_some())
     }
 
     /// Reduce the brush item `id` (VIEW-047): the strengths of its raises and lowers are cut by the largest factor that makes it no longer too
@@ -597,14 +593,6 @@ impl<S: ItemStore> Session<S> {
         Ok((merged, affected))
     }
 
-    /// Whether the brush item `id`, or any item of its group (a long drag is several linked items), is over the limit.
-    fn is_steep(&self, id: ItemId, steep: &BTreeSet<ItemId>) -> bool {
-        match self.editor.item(id).and_then(|i| i.group) {
-            Some(group) => self.editor.items().any(|i| i.group == Some(group) && steep.contains(&i.id)),
-            None => steep.contains(&id),
-        }
-    }
-
     /// Every edit in the order they apply.
     pub fn chain(&self, camera_position: Vec3) -> Vec<Row> {
         self.flagged(lists::apply_order(self.editor.items(), camera_position, self.radius_m))
@@ -618,7 +606,7 @@ impl<S: ItemStore> Session<S> {
         let place = same.iter().position(|(_, id)| *id == it.id).map_or(1, |p| p + 1);
         let mut inspector = params::inspector_of(it, (place, same.len()), lists::distance_m(camera_position, it, self.radius_m));
         inspector.region = params::region_rows(it, &self.layers());
-        if it.kind == brush::BRUSH_KIND && self.is_steep(it.id, &self.steep_items()) {
+        if it.kind == brush::BRUSH_KIND && self.health().is_steep(it.id, it.group) {
             inspector.warning = Some(slope::WARNING.to_string());
         }
         if inspector.region.is_some() {
@@ -1149,8 +1137,15 @@ impl<S: ItemStore> Session<S> {
         let mut clamped = None;
         let painted = draft.stroke.strength_m;
         {
+            // Only the strokes of the brush items whose footprint meets the circle round the new stroke can overlap it (VIEW-048).
+            let near = {
+                let points: Vec<Vec3> = draft.stroke.points.iter().map(|g| g.dir()).collect();
+                let centre = points.first().copied().unwrap_or(Vec3::new(1.0, 0.0, 0.0));
+                let spread = points.iter().map(|d| polyline::arc_m(centre, *d, self.radius_m)).fold(0.0, f64::max);
+                self.health().items_near(centre, spread + draft.stroke.radius_m)
+            };
             let existing: Vec<&planet_world_def::item::ItemStroke> =
-                self.editor.items().filter(|i| i.kind == brush::BRUSH_KIND).flat_map(|i| i.strokes.iter()).collect();
+                near.iter().filter_map(|id| self.editor.item(*id)).flat_map(|i| i.strokes.iter()).collect();
             let allowed = slope::allowed_strength(&draft.stroke, &existing, self.radius_m, slope::gradient_limit(self.drawable_slope));
             if allowed < painted {
                 if allowed < brush::STRENGTH_RANGE_M.0 {
