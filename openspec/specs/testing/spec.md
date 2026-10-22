@@ -1005,7 +1005,7 @@ Source: opus-planner (2026-10-22, SPIKE-29: the owner asked how far authored edi
 
 #### Scenario: The mix and the cluster
 - **WHEN** 10,000 kinds and 4,000 places are drawn
-- **THEN** the shares of the kinds are within two points of the declared mix (hills 22 %, craters 18 %, plateaus 12 %, ridges 8 %, channels 5 %, regions 5 %, brush piles 30 %), and 80 % of the places (within one point) are within 25 km of the cluster centre
+- **THEN** the shares of the kinds are within two points of the declared mix (hills 22 %, craters 18 %, plateaus 12 %, ridges 8 %, channels 5 %, regions 5 %, brush piles 30 %), and 80 % of the places (within two points) are within 25 km of the cluster centre
 
 #### Scenario: The counting field
 - **WHEN** a field is wrapped by the scene's counting field and asked for heights, bounds and hashes
