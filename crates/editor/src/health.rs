@@ -19,7 +19,7 @@ use crate::problems::{STACK_WARN, STROKES_WARN};
 use crate::slope::{self, Poly};
 
 /// Degrees of latitude and longitude in one cell of the grid.
-const CELL_DEG: f64 = 0.1;
+const CELL_DEG: f64 = 0.02;
 /// An item whose footprint covers more cells than this is kept apart and met by every query.
 const MAX_CELLS: usize = 400;
 
