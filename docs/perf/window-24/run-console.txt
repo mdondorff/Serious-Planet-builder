@@ -1,0 +1,7 @@
+lit off r1 exit 0
+lit natural r1 exit 0
+lit full r1 exit 0
+lit off r2 exit 0
+lit natural r2 exit 0
+lit full r2 exit 0
+lit done

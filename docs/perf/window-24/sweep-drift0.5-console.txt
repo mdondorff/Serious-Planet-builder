@@ -1,0 +1,76 @@
+planet editor: viewer (height field cpu-erosion-v1 over a 16384-cell bake)
+keys: P or Space pause, R restart the flight, L lit path (with the atmosphere) or debug path, G globe overview (drag turns it, wheel zooms, a click on a marker or the surface flies there and lands in the free camera), F3 cycles the overlay (off, tiles, mesh, regions, stale tiles; lit path), F4 coarse LOD (error bound x4), F6 ground detail (natural, full, off; the procedural detail and gloss of the ground, on at the start), F9 writes the camera path of the last minute and a repro bundle (target/review), V next debug view (debug path), T vsync on/off, C flight or free camera, H editing light (a sun fixed over your shoulder, 35 degrees up, so no slope is black; off by default), free camera: WASD move, Q/E down/up, arrows look, click captures the mouse to look (Esc releases it), Shift boost; Esc quits
+editor mode: Tab on/off (the panels, the outlines of the edits the camera shows, the planet is for editing: the pointer is free), 1 select, 2 crater, 3 hill, 4 plateau then click the planet to place it, 5 ridge, 6 channel, 7 region then click the planet to add points (Enter finishes, Backspace takes the last point back), 8 raise, 9 lower, 0 smooth, - flatten: a brush, drag on the planet to paint a stroke (the release puts it, one undo takes it back; the mouse wheel sets the brush radius and Shift+wheel its strength, both are also in the inspector), click an edit to select it (click again at the same spot to go through the edits under the cursor, smallest first; double-click in a list to fly there), drag its handles (circle: move, square: radius, light circle: height, amber dots: the points of a line or region) or type values in the inspector (Enter keeps the field, Up and Down step the value, Shift ten times as much), Shift+click on a line or region adds a point, Ctrl+click on a point removes it, Ctrl+Z undo, Ctrl+Y or Ctrl+Shift+Z redo, Delete deletes, F1 or ? lists the keys, Esc steps back (drag, draft, tool, selection) and does not quit; hold the right mouse button to look around, WASD/QE move, Shift boosts, arrows look; the viewer's keys work too: G globe overview, F3 cycles the overlay (off, tiles, mesh, regions, stale tiles), F4 coarse LOD, F6 ground detail (natural, full, off), F9 writes a repro bundle, H editing light (a sun over your shoulder, so no slope is black), L lit or debug path, V next debug view, T vsync, P or Space pause, R restart (C, flight or free camera, does nothing while the editor is on)
+view: the lit path with the atmosphere (the look's sun, adaptive exposure); L switches to the debug path
+4 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+4 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+4 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+4 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+47 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+49 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+49 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+48 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+48 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+48 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+47 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+47 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+46 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+46 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+45 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+45 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+42 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+41 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+41 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+116 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+116 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+116 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+116 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+116 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+116 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+116 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+116 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+115 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+115 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+115 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+115 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+116 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+117 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+117 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+117 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+86 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+87 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+87 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+87 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+86 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+86 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+87 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+88 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+88 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+88 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+88 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+86 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+86 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+86 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+86 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+85 tiles are held back from refinement: the ground under them is too steep to morph (ADR 0074)
+stop item kind altitude_m frames p50_ms p95_ms max_ms plans plan_p50_ms plan_p95_ms r_p50_ms r_p95_ms refused first_refusal
+0 Platonmax crater 2000 90 250.00 250.00 250.00 85 51.45 61.34 231.73 324.21 0 -
+1 Platonmax crater 200 90 64.00 250.00 250.00 15 554.89 1544.95 989.64 1168.36 0 -
+2 Platonmax crater 30 90 221.00 250.00 250.00 9 576.49 662.69 954.96 1028.46 0 -
+3 Ridge_3 ridge 2000 90 250.00 250.00 250.00 68 407.96 571.91 419.16 707.09 0 -
+4 Ridge_3 ridge 200 90 250.00 250.00 250.00 79 647.64 936.89 1029.25 1182.27 0 -
+5 Ridge_3 ridge 30 90 250.00 250.00 250.00 52 663.17 769.69 999.79 1106.54 0 -
+6 Hill_7 hill 2000 90 250.00 250.00 250.00 89 88.52 99.39 213.04 261.43 0 -
+7 Hill_7 hill 200 90 250.00 250.00 250.00 62 602.10 690.79 1014.55 1150.21 0 -
+8 Hill_7 hill 30 90 250.00 250.00 250.00 62 683.61 813.23 885.31 1002.77 0 -
+9 Hill_7 hill 2000 90 250.00 250.00 250.00 79 104.41 130.67 210.62 374.71 0 -
+10 Hill_7 hill 200 90 250.00 250.00 250.00 90 120.15 416.73 266.89 375.97 0 -
+11 Hill_7 hill 30 90 250.00 250.00 250.00 90 434.98 567.02 432.43 659.28 0 -
+[sweep ok]: 12 stops, 4 items x 3 altitudes, 0 stops with a refused plan, worst p95 250.00 ms
+
+adapter: Dx12 Microsoft Basic Render Driver (Cpu), key dx12-microsoft-basic-render-driver
+planet editor [smoke ok]: 1080 frames drawn (1080 lit, 1080 with the atmosphere, 146 with water, 0 debug, 0 with an overlay (0 the mesh), 0 coarse LOD, 0 refused, 0 stale-tile overlay, 0 editing light), 1080 presented (1080 lit, 0 debug), 880 exposure reading(s), 1 view change(s), present mode Fifo, adapter: Dx12 Microsoft Basic Render Driver (Cpu), key dx12-microsoft-basic-render-driver
+  last title: planet | 0 fps | cpu 152.62 ms | gpu 2749.29 ms | vsync on (Fifo) | lit + atmosphere | EV 16.0 (adapted) | free camera | alt 30.0 m | loading - bake 1536/1536, prefill 1920/1920, view 99% (lag 0.03) | keys - | pointer free | detail natural
+  ui: 1080 frames with the editor UI, 0.442 ms mean CPU per frame (egui run and tessellation), pointer events to the UI 0 and to the world 0
+  edit: 1080 frames in the editor mode, 0 placed, 0 selected, 0 dragged, 0 typed, 0 deleted, 0 undone, 0 redone, 0 flights, 0 refused, up to 16 edits shown, 384 tiles sent to refresh, 1 definitions handed to the generator, 1 previews set, up to 0 nodes previewed (mode on)
+  globe: 0 frames of the overview, up to 0 markers shown, 0 flights started, 0 landings

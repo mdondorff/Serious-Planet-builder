@@ -38,6 +38,8 @@ pub(crate) struct LitSetup {
     radius_m: f64,
     cache: WaterTileCache,
     pub has_water: bool,
+    /// The strength of the ground detail of every lit plan (`PLANET_GROUND_DETAIL`, 0 to 1, default 0: the scenes the baselines were measured with).
+    ground_detail: f64,
 }
 
 impl LitSetup {
@@ -56,6 +58,7 @@ impl LitSetup {
             radius_m: world.radius_m(),
             cache: WaterTileCache::with_book(world.water_book()),
             has_water: world.has_water(),
+            ground_detail: std::env::var("PLANET_GROUND_DETAIL").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0),
         })
     }
 
@@ -80,7 +83,9 @@ impl LitSetup {
     /// The plan of the throwaway frames that warm the lit path, the atmosphere and (in a world with water) the water pass before the
     /// first measured frame (REND-017).
     pub(crate) fn warm_plan(&self, camera: Camera, size: (u32, u32), cells: u32) -> Result<TerrainPlan, String> {
-        let lit = viewer_lit_plan(&self.look, self.radius_m, 0.0, true, true)?.with_water_level(self.level_m);
+        let lit = viewer_lit_plan(&self.look, self.radius_m, 0.0, true, true)?
+            .with_water_level(self.level_m)
+            .with_ground_detail(self.ground_detail);
         let mut warm = lit_warm_plan(camera, size, cells, lit);
         if self.has_water {
             warm.water = Some(empty_water_plan(&self.look.water));
@@ -99,7 +104,9 @@ impl LitSetup {
         dt_s: f32,
         reset: bool,
     ) -> Result<TerrainPlan, String> {
-        let lit = viewer_lit_plan(&self.look, self.radius_m, dt_s, reset, true)?.with_water_level(self.level_m);
+        let lit = viewer_lit_plan(&self.look, self.radius_m, dt_s, reset, true)?
+            .with_water_level(self.level_m)
+            .with_ground_detail(self.ground_detail);
         let mut plan = base.clone();
         plan.lit = Some(lit);
         let (look, liquids, lod) = (&self.look.water, &self.liquids, &self.lod);
@@ -562,6 +569,9 @@ pub fn perf_lit(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<()
     let is_sea = |d: planet_core::Vec3| carries_sea(&world, d);
     let flight_frames = if smoke && !o.given.contains("--flight-frames") { 4 } else { o.flight_frames };
     let mut views = lit_views(radius_m, aspect, field.as_ref(), setup.level_m, &is_sea, flight_frames)?;
+    if o.views.is_some() {
+        views.extend(planet_frame::litscenes::ground_views(radius_m, aspect, field.as_ref()));
+    }
     if let Some(names) = &o.views {
         for n in names {
             if !views.iter().any(|v| v.name == n) {
