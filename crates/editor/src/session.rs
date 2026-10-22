@@ -187,6 +187,9 @@ pub struct Session<S: ItemStore> {
     steep: std::cell::RefCell<Option<(u64, f64, BTreeSet<ItemId>)>>,
     /// The brush items listed as stacked (VIEW-047) with the depth of their stack, found for one revision of the editor.
     stacked: std::cell::RefCell<Option<(u64, std::collections::BTreeMap<ItemId, usize>)>>,
+    /// Whether a stack of strokes can be merged in a brush item, for the items of the problems list, found for one revision of the editor (the
+    /// pairwise overlap test of the strokes is not cheap, and the list is drawn every frame).
+    mergeable: std::cell::RefCell<Option<(u64, std::collections::BTreeMap<ItemId, bool>)>>,
 }
 
 impl<S: ItemStore> Session<S> {
@@ -211,6 +214,7 @@ impl<S: ItemStore> Session<S> {
             drawable_slope: planet_frame::LodParams::earth_1080p().drawable_slope(),
             steep: std::cell::RefCell::new(None),
             stacked: std::cell::RefCell::new(None),
+            mergeable: std::cell::RefCell::new(None),
         }
     }
 
@@ -518,7 +522,7 @@ impl<S: ItemStore> Session<S> {
                     .iter()
                     .any(|s| matches!(s.kind, planet_world_def::stamp::BrushKind::Raise | planet_world_def::stamp::BrushKind::Lower))
                     && issues.iter().any(|i| matches!(i, Issue::TooSteep | Issue::Stacked { .. }));
-                let can_merge = problems::merge_stack(strokes, self.radius_m).is_some();
+                let can_merge = self.is_mergeable(row.id, strokes);
                 Problem { row, issues, can_reduce, can_merge }
             })
             .collect();
@@ -536,6 +540,17 @@ impl<S: ItemStore> Session<S> {
             rank(a).cmp(&rank(b)).then(a.row.distance_m.total_cmp(&b.row.distance_m)).then(a.row.id.cmp(&b.row.id))
         });
         out
+    }
+
+    /// Whether `strokes` (of item `id`) have a stack to merge, remembered per revision of the editor.
+    fn is_mergeable(&self, id: ItemId, strokes: &[planet_world_def::item::ItemStroke]) -> bool {
+        let revision = self.editor.revision();
+        let mut cache = self.mergeable.borrow_mut();
+        if cache.as_ref().is_none_or(|(r, _)| *r != revision) {
+            *cache = Some((revision, std::collections::BTreeMap::new()));
+        }
+        let (_, found) = cache.as_mut().expect("just set");
+        *found.entry(id).or_insert_with(|| problems::merge_stack(strokes, self.radius_m).is_some())
     }
 
     /// Reduce the brush item `id` (VIEW-047): the strengths of its raises and lowers are cut by the largest factor that makes it no longer too
