@@ -1163,7 +1163,7 @@ mod tests {
         let field = Counted { reads: Default::default(), revision: std::sync::atomic::AtomicU64::new(7) };
         let cam = above(at, 400.0);
         let tiles = [TileId::from_direction(&TangentWarp, at, 8), cell_of(R, at)];
-        let mut frame_with = |e: &mut EditRuntime, cam: &Camera| {
+        let frame_with = |e: &mut EditRuntime, cam: &Camera| {
             let before = field.reads.load(std::sync::atomic::Ordering::Relaxed);
             e.update(cam, VIEWPORT, &tiles, &field, &limits(), Pointer { cursor: CENTRE, over_ui: true });
             field.reads.load(std::sync::atomic::Ordering::Relaxed) - before
