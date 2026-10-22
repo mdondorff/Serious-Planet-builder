@@ -1,1 +1,1 @@
-editor-default-store: the editor opens the production store when one is configured or found; the title names the source (VIEW-052); `cargo xtask store` builds or links one
+- 2026-10-22 **editor-default-store** (VIEW-052): the editor opens the production store when one is configured or found, its title names the source, and `cargo xtask store` builds or links one
