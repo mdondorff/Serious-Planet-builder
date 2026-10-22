@@ -134,6 +134,7 @@ struct Lists {
     found: Vec<Row>,
     groups: Vec<LayerGroup>,
     chain: Vec<Row>,
+    problems: Vec<planet_editor::problems::Problem>,
     hidden: Vec<ItemId>,
     inspector: Option<Inspector>,
 }
@@ -185,6 +186,9 @@ pub struct EditRuntime {
     transient_shown: bool,
     /// The edits the last [`globe_markers`](EditRuntime::globe_markers) made markers of, by marker number minus [`EDIT_MARKER_BASE`].
     marker_ids: Vec<ItemId>,
+    /// The tiles the last plan holds back (ADR 0074, `TileState::Capped`), given by the window before each update: the edits over them are
+    /// listed as problems (VIEW-047).
+    capped_tiles: Vec<TileId>,
 }
 
 /// The footprint items of the whole body, layer by layer in stack order (the order the stamp stages are stacked in, ADR 0007): what the
@@ -283,7 +287,13 @@ impl EditRuntime {
             feed,
             refresh_all: false,
             marker_ids: Vec::new(),
+            capped_tiles: Vec::new(),
         })
+    }
+
+    /// The tiles the last plan holds back, for the problems list (VIEW-047); call before [`update`](EditRuntime::update).
+    pub fn set_capped_tiles(&mut self, tiles: Vec<TileId>) {
+        self.capped_tiles = tiles;
     }
 
     pub fn edit_count(&self) -> usize {
@@ -532,7 +542,11 @@ impl EditRuntime {
         let s = &self.session;
         let q = self.panels.query.trim();
         let kind = self.panels.kind.as_deref();
+        // The edits over the tiles the plan holds back: the footprint find over those tiles.
+        let capped: Vec<ItemId> =
+            if self.capped_tiles.is_empty() { Vec::new() } else { s.items_over(&self.capped_tiles, &view).unwrap_or_default() };
         self.lists = Lists {
+            problems: s.problems(&capped, cam),
             near: s.near(&self.shown, cam),
             found: if q.is_empty() && kind.is_none() { Vec::new() } else { s.search(q, kind, cam) },
             groups: s.layer_groups(cam),
@@ -565,6 +579,7 @@ impl EditRuntime {
             found: &self.lists.found,
             groups: &self.lists.groups,
             chain: &self.lists.chain,
+            problems: &self.lists.problems,
             hidden: &self.lists.hidden,
             inspector: self.lists.inspector.as_ref(),
             can_undo: s.editor().can_undo(),
@@ -760,6 +775,24 @@ impl EditRuntime {
                     Err(e) => self.note(Err(e)),
                 },
                 Event::ToggleHidden(id) => self.session.toggle_hidden(id),
+                Event::Reduce(id) => match self.session.reduce_item(id) {
+                    Ok((_, a)) => self.affected.extend(a),
+                    Err(e) => self.note(Err(e)),
+                },
+                Event::Merge(id) => match self.session.merge_item(id) {
+                    Ok((_, a)) => self.affected.extend(a),
+                    Err(e) => self.note(Err(e)),
+                },
+                Event::DeleteItem(id) => {
+                    self.session.select(id);
+                    match self.session.delete_selected() {
+                        Ok(a) => {
+                            self.stats.deleted += 1;
+                            self.affected.extend(a);
+                        }
+                        Err(e) => self.note(Err(e)),
+                    }
+                }
                 Event::ToggleHelp => self.panels.help = !self.panels.help,
                 Event::BrushRadius(text) => {
                     let r = parse_metres(&text).and_then(|v| self.session.set_brush_radius(v).map_err(|e| e.to_string()));
@@ -1070,6 +1103,77 @@ mod tests {
         }
         assert_eq!(e.session.brush_settings().radius_m, planet_editor::brush::RADIUS_RANGE_M.1);
         assert_eq!(e.stats.refused, 0, "the wheel never asks for a value the brush refuses");
+    }
+
+    // spec: VIEW-047
+    #[test]
+    fn the_edits_over_the_capped_tiles_and_the_steep_brushes_are_the_problems_and_the_panels_events_run_the_fixes_as_commands() {
+        use planet_editor::brush::{BrushStroke, BRUSH_KIND, BRUSH_LAYER};
+        use planet_editor::polyline::GeoPoint;
+        use planet_editor::problems::Issue;
+        let at = unit(47.2, 8.55);
+        let cam = above(at, 3_000.0);
+        let mut e = runtime(None);
+        e.toggle();
+        let (hill, _) = e.session.place("hill", at).unwrap();
+        frame(&mut e, &cam, false);
+        assert!(e.panel_data("").problems.is_empty(), "no tile is held back, nothing is steep");
+        // A tile of the last plan that is held back, over the hill: the hill is listed. A tile on the far side is not.
+        e.set_capped_tiles(vec![TileId::from_direction(&TangentWarp, unit(-40.0, 100.0), 8)]);
+        frame(&mut e, &cam, false);
+        assert!(e.panel_data("").problems.is_empty(), "a capped tile elsewhere is no problem of the hill");
+        e.set_capped_tiles(vec![TileId::from_direction(&TangentWarp, at, 8)]);
+        frame(&mut e, &cam, false);
+        let listed = e.panel_data("").problems.iter().map(|p| (p.row.id, p.issues.clone())).collect::<Vec<_>>();
+        assert_eq!(listed, vec![(hill, vec![Issue::TilesCapped])]);
+        e.set_capped_tiles(Vec::new());
+        // A brush stacked too steep, filed without the guard: listed first; the panels' events reduce it, merge it and delete the hill.
+        let (lat, lon) = (47.2f64, 8.55f64);
+        let piece =
+            BrushStroke { kind: BrushKind::Raise, radius_m: 100.0, strength_m: 5.0, target_m: None, points: vec![GeoPoint::new(lat, lon)] };
+        let template = planet_editor::commands::NewItem {
+            body: BodyId::PLANET,
+            surface: planet_world_def::item::DEFAULT_SURFACE.to_string(),
+            layer: BRUSH_LAYER.to_string(),
+            priority: 0,
+            kind: BRUSH_KIND.to_string(),
+            anchor: planet_world_def::item::Anchor { latitude_deg: lat, longitude_deg: lon, height_m: 0.0, heading_deg: 0.0 },
+            reach_m: 1.0,
+            max_delta_m: 0.0,
+            params: Default::default(),
+            name: Some("Pile".into()),
+            notes: None,
+            points: Vec::new(),
+            group: None,
+            part: None,
+            mask_layer: None,
+            strokes: Vec::new(),
+        };
+        let mut open = Vec::new();
+        for _ in 0..40 {
+            let (touched, _) = e.session.editor_mut().add_stroke(template.clone(), &piece, &open).unwrap();
+            open = touched;
+        }
+        let pile = open[0];
+        frame(&mut e, &cam, false);
+        let list = &e.panel_data("").problems;
+        assert_eq!(list[0].row.id, pile);
+        assert!(list[0].issues.contains(&Issue::TooSteep) && list[0].can_reduce && list[0].can_merge);
+        let depth = e.session.editor().undo_depth();
+        e.apply(vec![Event::Reduce(pile)]);
+        assert_eq!(e.session.editor().undo_depth(), depth + 1, "one command");
+        assert!(!e.session.steep_items().contains(&pile), "no longer too steep");
+        assert!(!e.affected.is_empty(), "the places to refresh are reported");
+        e.apply(vec![Event::Merge(pile)]);
+        assert_eq!(e.session.editor().undo_depth(), depth + 2);
+        assert_eq!(e.session.editor().item(pile).unwrap().strokes.len(), 1, "the stack is one stroke");
+        e.apply(vec![Event::Merge(pile)]);
+        assert_eq!(e.session.editor().undo_depth(), depth + 2, "nothing left to merge: refused, nothing changed");
+        assert!(e.session.status().contains("overlap"), "{}", e.session.status());
+        e.apply(vec![Event::DeleteItem(hill)]);
+        assert!(e.session.editor().item(hill).is_none(), "the problem's Delete deletes that edit, not the selection");
+        e.apply(vec![Event::Undo]);
+        assert!(e.session.editor().item(hill).is_some(), "and one undo brings it back");
     }
 
     // spec: VIEW-035

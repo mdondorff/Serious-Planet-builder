@@ -45,6 +45,10 @@ pub enum Event {
     Rename(String),
     /// The checkbox of an edit in the layer list.
     ToggleHidden(ItemId),
+    /// The problems list (VIEW-047): reduce the strengths of a brush, merge its stack of strokes, delete the edit.
+    Reduce(ItemId),
+    Merge(ItemId),
+    DeleteItem(ItemId),
     /// The `?` button or the help key: show or hide the list of keys.
     ToggleHelp,
     /// The brush radius, strength or flatten height was typed (metres; the flatten height may be empty or "auto").
@@ -140,6 +144,8 @@ pub struct PanelData<'a> {
     pub found: &'a [Row],
     pub groups: &'a [LayerGroup],
     pub chain: &'a [Row],
+    /// The problems list (VIEW-047), the steepest first.
+    pub problems: &'a [planet_editor::problems::Problem],
     pub hidden: &'a [ItemId],
     pub inspector: Option<&'a Inspector>,
     pub can_undo: bool,
@@ -334,7 +340,12 @@ fn brush_section(ui: &mut egui::Ui, st: &mut PanelState, b: &planet_editor::sess
 fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
     ui.horizontal(|ui| {
         for tab in &d.layout.tabs {
-            let r = ui.selectable_value(&mut st.tab, *tab, tab.title());
+            let title = if *tab == Tab::Problems && !d.problems.is_empty() {
+                format!("{} ({})", tab.title(), d.problems.len())
+            } else {
+                tab.title().to_string()
+            };
+            let r = ui.selectable_value(&mut st.tab, *tab, title);
             st.marks.push((format!("tab:{}", tab.key()), r.rect));
         }
     });
@@ -394,6 +405,7 @@ fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
             ui.separator();
             ui.weak("Procedural base: locked, generator pinned");
         }
+        Tab::Problems => problems_tab(ui, st, d, ev),
         Tab::Graph => {
             ui.label(egui::RichText::new("Chain, top applies first").small().weak());
             ui.group(|ui| {
@@ -409,6 +421,63 @@ fn left_panel(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Ve
             });
         }
     });
+}
+
+/// The problems tab (VIEW-047): each edit the engine cannot draw fully or that costs more than it should, what is wrong, and what to do:
+/// fly there, reduce the strengths of a brush, merge its stack of strokes into one, delete it.
+fn problems_tab(ui: &mut egui::Ui, st: &mut PanelState, d: &PanelData, ev: &mut Vec<Event>) {
+    if d.problems.is_empty() {
+        ui.weak("No problem: every edit can be drawn fully.");
+        return;
+    }
+    ui.label(egui::RichText::new("Edits the engine cannot draw fully, or that cost more than they should").small().weak());
+    for p in d.problems {
+        ui.group(|ui| {
+            let row = &p.row;
+            ui.horizontal(|ui| {
+                ui.colored_label(kind_color(&row.kind), "●");
+                let r = ui.selectable_label(d.selected == Some(row.id), &row.label);
+                st.marks.push((format!("problem:{}", row.label), r.rect));
+                if r.clicked() {
+                    ev.push(Event::Select(row.id));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.weak(format_metres(row.distance_m));
+                });
+            });
+            for issue in &p.issues {
+                let r = ui.colored_label(AMBER, format!("⚠ {}", issue.text()));
+                st.marks.push((format!("issue:{}", row.label), r.rect));
+            }
+            ui.horizontal_wrapped(|ui| {
+                let mut button = |ui: &mut egui::Ui, name: &str, text: &str, enabled: bool, hover: &str, event: Event| {
+                    let r = ui.add_enabled(enabled, egui::Button::new(text)).on_hover_text(hover);
+                    st.marks.push((format!("{name}:{}", row.label), r.rect));
+                    if r.clicked() {
+                        ev.push(event);
+                    }
+                };
+                button(ui, "fly", "Fly to", true, "Put the camera where it sees this edit", Event::FlyTo(row.id));
+                button(
+                    ui,
+                    "reduce",
+                    "Reduce",
+                    p.can_reduce,
+                    "Cut the strengths of its raises and lowers so that it can be drawn fully",
+                    Event::Reduce(row.id),
+                );
+                button(
+                    ui,
+                    "merge",
+                    "Merge strokes",
+                    p.can_merge,
+                    "Replace the stack of overlapping strokes of one kind by one stroke of the summed strength along the first one's path",
+                    Event::Merge(row.id),
+                );
+                button(ui, "delete", "Delete", true, "Delete this edit (Ctrl+Z takes it back)", Event::DeleteItem(row.id));
+            });
+        });
+    }
 }
 
 fn row_button_inline(ui: &mut egui::Ui, st: &mut PanelState, ev: &mut Vec<Event>, row: &Row, selected: bool) {
@@ -837,6 +906,7 @@ mod tests {
         found: Vec<Row>,
         groups: Vec<LayerGroup>,
         chain: Vec<Row>,
+        problems: Vec<planet_editor::problems::Problem>,
         inspector: Option<Inspector>,
         selected: Option<ItemId>,
         can_undo: bool,
@@ -851,6 +921,7 @@ mod tests {
             found: f.s.search("crater", None, f.cam),
             groups: f.s.layer_groups(f.cam),
             chain: f.s.chain(f.cam),
+            problems: Vec::new(),
             inspector: f.s.inspector(f.cam),
             selected: f.s.selected(),
             can_undo: true,
@@ -868,6 +939,7 @@ mod tests {
             found: &h.found,
             groups: &h.groups,
             chain: &h.chain,
+            problems: &h.problems,
             hidden: &[],
             inspector: h.inspector.as_ref(),
             can_undo: h.can_undo,
@@ -1044,6 +1116,53 @@ mod tests {
         rig.settle(&data(&h));
         assert!(rig.st.mark(&format!("steep:{label}")).is_some(), "the row carries the warning");
         assert!(rig.st.mark("steep-warning").is_some(), "the inspector carries it");
+    }
+
+    // spec: VIEW-047
+    #[test]
+    fn the_problems_tab_lists_each_flagged_edit_with_what_is_wrong_and_asks_for_fly_to_the_fixes_and_delete() {
+        use planet_editor::problems::{Issue, Problem};
+        let f = fixture();
+        let layout = Layout::default();
+        assert!(layout.tabs.contains(&Tab::Problems), "the tab is in the default layout");
+        let mut h = held(&f, layout.clone());
+        let mut rig = Rig::new(&layout);
+        // No problem: the tab says so and has no row.
+        rig.settle(&data(&h));
+        rig.click(&data(&h), rig.mark("tab:problems"));
+        assert_eq!(rig.st.tab, Tab::Problems);
+        assert!(rig.st.marks.iter().all(|m| !m.0.starts_with("problem:")));
+        // Two problems: a brush that is steep and stacked (both fixes), an edit near capped tiles (no fix but fly to and delete).
+        let (a, b) = (h.near[0].clone(), h.near[1].clone());
+        h.problems = vec![
+            Problem {
+                row: a.clone(),
+                issues: vec![Issue::TooSteep, Issue::Stacked { depth: 9, strokes: 12 }],
+                can_reduce: true,
+                can_merge: true,
+            },
+            Problem { row: b.clone(), issues: vec![Issue::TilesCapped], can_reduce: false, can_merge: false },
+        ];
+        rig.settle(&data(&h));
+        for r in [&a, &b] {
+            for name in ["problem", "issue", "fly", "reduce", "merge", "delete"] {
+                assert!(rig.st.mark(&format!("{name}:{}", r.label)).is_some(), "{name}:{}", r.label);
+            }
+        }
+        // Each button asks for its event.
+        let ev = rig.click(&data(&h), rig.mark(&format!("fly:{}", b.label)));
+        assert_eq!(ev, vec![Event::FlyTo(b.id)]);
+        let ev = rig.click(&data(&h), rig.mark(&format!("reduce:{}", a.label)));
+        assert_eq!(ev, vec![Event::Reduce(a.id)]);
+        let ev = rig.click(&data(&h), rig.mark(&format!("merge:{}", a.label)));
+        assert_eq!(ev, vec![Event::Merge(a.id)]);
+        let ev = rig.click(&data(&h), rig.mark(&format!("delete:{}", b.label)));
+        assert_eq!(ev, vec![Event::DeleteItem(b.id)]);
+        let ev = rig.click(&data(&h), rig.mark(&format!("problem:{}", a.label)));
+        assert_eq!(ev, vec![Event::Select(a.id)]);
+        // A fix that does not apply is disabled: clicking it asks for nothing.
+        assert!(rig.click(&data(&h), rig.mark(&format!("reduce:{}", b.label))).is_empty());
+        assert!(rig.click(&data(&h), rig.mark(&format!("merge:{}", b.label))).is_empty());
     }
 
     // spec: VIEW-031

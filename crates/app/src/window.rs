@@ -754,6 +754,10 @@ impl App<'_> {
                 let wanted = st.last_wanted.clone();
                 let limits = PickLimits::new(radius, lod_max_height_m);
                 let over_ui = st.ui.as_ref().is_some_and(|u| u.ctx.is_pointer_over_egui());
+                // The tiles the plan holds back (ADR 0074): the edits over them are problems of the list (VIEW-047).
+                e.set_capped_tiles(
+                    frame.pipeline.draw.plan.nodes.iter().filter(|n| n.state == planet_frame::TileState::Capped).map(|n| n.tile).collect(),
+                );
                 e.update(&camera, viewport, &wanted, field, &limits, Pointer { cursor: st.cursor, over_ui });
             }
             st.rig.fi.retire_to(st.rig.renderer.retired_frames(ctx));

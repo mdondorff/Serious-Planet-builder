@@ -42,19 +42,19 @@ pub fn stroke_gradient(s: &ItemStroke) -> f64 {
 }
 
 /// A stroke ready for distance queries: its points as places, its radius and its gradient.
-struct Poly {
-    geo: Vec<GeoPoint>,
-    radius_m: f64,
-    gradient: f64,
+pub(crate) struct Poly {
+    pub(crate) geo: Vec<GeoPoint>,
+    pub(crate) radius_m: f64,
+    pub(crate) gradient: f64,
 }
 
 impl Poly {
-    fn of(s: &ItemStroke) -> Poly {
+    pub(crate) fn of(s: &ItemStroke) -> Poly {
         Poly { geo: s.points.iter().map(|(la, lo)| GeoPoint::new(*la, *lo)).collect(), radius_m: s.radius_m, gradient: stroke_gradient(s) }
     }
 
     /// Metres from `dir` to the polyline.
-    fn distance(&self, dir: Vec3, planet_radius_m: f64) -> f64 {
+    pub(crate) fn distance(&self, dir: Vec3, planet_radius_m: f64) -> f64 {
         match self.geo.as_slice() {
             [] => f64::INFINITY,
             [only] => polyline::arc_m(dir, only.dir(), planet_radius_m),
