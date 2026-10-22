@@ -985,6 +985,8 @@ pub struct FrameTiming {
 /// Terrain renderer with persistent resources: pipelines, uniform buffers, the pool of compact blocks and render targets are
 /// created once, so a frame only writes a few small buffers and records the draws. `execute_terrain_tiles` is the one-shot wrapper.
 pub struct TerrainRenderer {
+    /// SPIKE-32: the realism prototype's textures and uniform.
+    realism: crate::spike_realism::Gpu,
     /// The preview stamps of the edit in flight and the body's radius (REND-033), written into the globals of each frame.
     preview: (Vec<planet_frame::preview::PreviewStamp>, f64),
     /// How many of the first stamps of `preview` are the delta of an edit in flight; the rest are the transient preview (VIEW-036).
@@ -1212,17 +1214,17 @@ impl TerrainRenderer {
             ty: wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None },
             count: None,
         };
-        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("terrain-bgl"),
-            entries: &[
-                entry(0, wgpu::BufferBindingType::Uniform),
-                entry(1, wgpu::BufferBindingType::Storage { read_only: true }),
-                entry(2, wgpu::BufferBindingType::Storage { read_only: true }),
-                entry(3, wgpu::BufferBindingType::Uniform),
-            ],
-        });
+        let realism = crate::spike_realism::Gpu::new(ctx);
+        let mut bgl_entries = vec![
+            entry(0, wgpu::BufferBindingType::Uniform),
+            entry(1, wgpu::BufferBindingType::Storage { read_only: true }),
+            entry(2, wgpu::BufferBindingType::Storage { read_only: true }),
+            entry(3, wgpu::BufferBindingType::Uniform),
+        ];
+        bgl_entries.extend(crate::spike_realism::Gpu::layout_entries());
+        let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("terrain-bgl"), entries: &bgl_entries });
         let compact_gpu = Self::make_compact(ctx, &bgl, format, cells, &pool);
-        let ring = Self::make_ring(device, &bgl, node_capacity, &compact_gpu);
+        let ring = Self::make_ring(device, &bgl, node_capacity, &compact_gpu, &realism);
         let index_data = grid_indices(cells);
         let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("terrain-indices"),
@@ -1253,6 +1255,7 @@ impl TerrainRenderer {
             preview_delta_len: 0,
             regions: planet_frame::regions::RegionList::default(),
             scale_refs: Vec::new(),
+            realism,
             size,
             cells,
             bgl,
@@ -1370,7 +1373,13 @@ impl TerrainRenderer {
     }
 
     /// The ring of per-frame buffers for plans of up to `capacity` nodes.
-    fn make_ring(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, capacity: usize, compact: &CompactGpu) -> Vec<FrameSet> {
+    fn make_ring(
+        device: &wgpu::Device,
+        bgl: &wgpu::BindGroupLayout,
+        capacity: usize,
+        compact: &CompactGpu,
+        realism: &crate::spike_realism::Gpu,
+    ) -> Vec<FrameSet> {
         (0..RING)
             .map(|_| {
                 let buffer = |label, size, usage| {
@@ -1390,16 +1399,14 @@ impl TerrainRenderer {
                     planet_frame::look::water::GLOBALS_BYTES,
                     wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 );
-                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("terrain-bind"),
-                    layout: bgl,
-                    entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 1, resource: nodes.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 2, resource: water_nodes.as_entire_binding() },
-                        wgpu::BindGroupEntry { binding: 3, resource: water_globals.as_entire_binding() },
-                    ],
-                });
+                let mut bind_entries = vec![
+                    wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: nodes.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: water_nodes.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: water_globals.as_entire_binding() },
+                ];
+                bind_entries.extend(realism.bind_entries());
+                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("terrain-bind"), layout: bgl, entries: &bind_entries });
                 let refs = buffer("tile-refs", REF_BYTES * capacity as u64, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST);
                 let frame_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("compact-frame-bind"),
@@ -1607,7 +1614,7 @@ impl TerrainRenderer {
         let warm_nodes = WARM_NODES.min(self.max_nodes);
         if warm_nodes > self.node_capacity {
             self.node_capacity = warm_nodes;
-            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, &self.compact);
+            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, &self.compact, &self.realism);
             self.init.ring_builds += 1;
         }
         self.compact.block(device, 0, &mut self.init);
@@ -2105,7 +2112,7 @@ impl TerrainRenderer {
         if plan.nodes.len() > self.node_capacity {
             self.node_capacity = plan.nodes.len().next_power_of_two().min(self.max_nodes);
             // Frames in flight keep the buffers they use alive; the new ring serves the frames from here on.
-            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, &self.compact);
+            self.ring = Self::make_ring(device, &self.bgl, self.node_capacity, &self.compact, &self.realism);
             self.init.ring_builds += 1;
             self.used.ring = 0;
         }
@@ -2163,6 +2170,7 @@ impl TerrainRenderer {
         }
         let set = &self.ring[ring_index];
         ctx.queue.write_buffer(&set.globals, 0, &globals);
+        self.realism.write_frame(ctx);
         if let (Some(w), true) = (&plan.water, water_frame) {
             ctx.queue.write_buffer(&set.water_globals, 0, &crate::water::globals_bytes(w));
             ctx.queue.write_buffer(&set.water_nodes, 0, &crate::water::node_records(w, plan.nodes.len()));

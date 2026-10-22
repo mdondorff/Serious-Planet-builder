@@ -16,6 +16,7 @@ pub mod reference;
 pub(crate) mod refs;
 #[cfg(feature = "spike07")]
 pub mod spike_detail;
+pub mod spike_realism;
 pub mod terrain;
 pub mod ui;
 pub mod water;

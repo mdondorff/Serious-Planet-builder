@@ -21,6 +21,10 @@ use planet_render::{GpuContext, TerrainRenderer};
 use std::io::Write;
 use std::time::Instant;
 
+/// SPIKE-32: the realism capture.
+#[path = "realism.rs"]
+pub(crate) mod realism;
+
 /// Whether `--scene NAME` names a lit perf scene.
 pub fn is_lit_scene(name: &str) -> bool {
     name == "lit"
@@ -781,6 +785,11 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
             "the flights need the water: this world has no ocean channel (regenerate the store with `generate --global-dir`)".into()
         );
     }
+    if realism::enabled() {
+        let level = world.definition().sea(planet_world_def::BodyId::PLANET).map_err(|e| e.to_string())?.level_m;
+        let f0 = world.field()?;
+        realism::prepare(f0.as_ref(), world.radius_m(), level, &|d| carries_sea(&world, d), out)?;
+    }
     let field = world.field()?;
     let radius_m = world.radius_m();
     let size = o.size.unwrap_or((2560, 1440));
@@ -843,6 +852,9 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
     let default = setup.look.water.shore_filter;
     let first = views[0].cameras[0];
     let mut r = new_renderer(&rig, &setup, first)?;
+    if realism::enabled() {
+        return realism::run(&rig, &mut setup, &mut r, &world, &dir, out);
+    }
     for view in views.iter().filter(|v| v.kind == ViewKind::Flight) {
         for filter in [default, if default == 0.0 { 1.0 } else { 0.0 }] {
             setup.look.water.shore_filter = filter;

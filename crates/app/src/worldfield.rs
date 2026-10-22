@@ -650,7 +650,8 @@ impl WorldTerrain {
         let ctx = GenContext::new(&def);
         let built = build_field(self.kind, &ctx, BodyId::PLANET, self.src.as_ref(), self.bake_key)
             .map_err(|e| format!("the definition cannot be generated: {e}"))
-            .and_then(|base| with_stamps(base, &def));
+            .and_then(|base| with_stamps(base, &def))
+            .map(crate::litperf::realism::wrap);
         self.field_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let spent = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
         self.field_ns.fetch_add(spent, std::sync::atomic::Ordering::Relaxed);

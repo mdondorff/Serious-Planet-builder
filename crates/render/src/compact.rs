@@ -28,7 +28,7 @@ pub fn compact_terrain_shader(cells: u32) -> String {
         .replace("{CLIMATE_WORD}", &(SLOT_CLIMATE_OFFSET / 4).to_string())
         .replace("{TEXEL_WORD}", &(SLOT_TEXEL_OFFSET / 4).to_string())
         .replace("{NORMAL_SCALE}", &format!("{NORMAL_SCALE:?}"));
-    format!("{head}{vertex}{tail}")
+    format!("{head}{}{vertex}{tail}", crate::spike_realism::DECLS)
 }
 
 const COMPACT_VERTEX: &str = r#"

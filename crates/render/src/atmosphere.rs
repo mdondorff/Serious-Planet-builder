@@ -806,10 +806,22 @@ fn fs_lit_atmo_view(in: VsOut) -> vec4<f32> {
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
     let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x);
-    var rgb = atm_shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, g.range.z) * select(vec3<f32>(1.0), gd.mul, g.mode.x <= 1u);
+    let rz = rz_surface(in, sun);
+    var rgb = clamp(atm_terrain_radiance_v(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, rz.vis) * g.range.z, vec3<f32>(0.0), vec3<f32>(60000.0)) * select(vec3<f32>(1.0), gd.mul, g.mode.x <= 1u);
     let gloss = ground_gloss(in.node_index, in.local, gd, sun);
     if (gloss > 0.0) {
-        rgb = min(rgb + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z), vec3<f32>(60000.0));
+        rgb = min(rgb + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z * rz.vis), vec3<f32>(60000.0));
+    }
+    if (rz.has_mat && g.mode.x == 0u) {
+        let light = atm_terrain_lighting_vis(rz.normal, up, in.height, sun, rz.vis);
+        var c = rz.albedo * light * g.range.z;
+        let v = normalize(-(nodes[in.node_index].origin_rel.xyz + in.local));
+        let spec = ground_specular(rz.normal, v, sun, rz.rough, g.detail.y);
+        c = c + atm_sun_direct(up, in.height, sun) * (spec * rz.vis * g.range.z);
+        if (RZ.flags.y != 0u) {
+            c = rz.debug * g.range.z * 0.3;
+        }
+        rgb = mix(rgb, min(c, vec3<f32>(60000.0)), rz.w);
     }
     if (g.extra.y > 3.5) {
         rgb = stale_tint(in, rgb, g.range.z);
@@ -824,7 +836,7 @@ fn fs_lit_atmo_view(in: VsOut) -> vec4<f32> {
 
 /// The text appended to the compact terrain shader for the frames that have an atmosphere.
 pub fn terrain_atmosphere_source() -> String {
-    format!("{TERRAIN}{DECLS}{LIGHTING}{TERRAIN_MAIN}")
+    format!("{TERRAIN}{DECLS}{LIGHTING}{}{TERRAIN_MAIN}", crate::spike_realism::MAIN)
 }
 
 /// What the water shader adds to the terrain's atmosphere declarations: the ray-march helpers (the sky-view coordinates) in the
