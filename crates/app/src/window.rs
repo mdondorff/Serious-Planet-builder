@@ -81,6 +81,7 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
         KeyCode::F3 => Command::CycleOverlay,
         KeyCode::F4 => Command::ToggleCoarseLod,
         KeyCode::F6 => Command::CycleGroundDetail,
+        KeyCode::F7 => Command::ToggleScaleRefs,
         KeyCode::KeyH => Command::ToggleEditingLight,
         KeyCode::F9 => Command::SaveRepro,
         KeyCode::Escape => Command::Quit,
@@ -281,6 +282,9 @@ struct Running {
     counts: SmokeCounts,
     /// The per-tile answers of the water selection query (ADR 0051 point 6, option 1), kept for the life of the run.
     water_cache: WaterTileCache,
+    /// The scale references in the world (VIEW-050) and whether they are dropped.
+    scale_refs: Vec<planet_frame::scalerefs::RefBox>,
+    scale_refs_on: bool,
     /// The item markers of the globe overview, the ones the overview shows this frame (window pixels) and the one under the cursor.
     markers: Vec<Marker>,
     screen_markers: Vec<ScreenMarker>,
@@ -472,6 +476,8 @@ impl App<'_> {
             atmosphere: cfg.atmosphere,
             counts: SmokeCounts::default(),
             water_cache: WaterTileCache::with_book(self.world.water_book()),
+            scale_refs: Vec::new(),
+            scale_refs_on: false,
             markers: cfg.markers.clone(),
             screen_markers: Vec::new(),
             hover: None,
@@ -814,6 +820,17 @@ impl App<'_> {
             };
             let plan = lit_plan.as_ref().unwrap_or(&draw.plan);
             st.rig.renderer.set_preview_of(draw);
+            // The scale references (VIEW-050): dropped on the ground in front of the camera when the key turns them on, taken away when it turns
+            // them off; the renderer draws what it is given.
+            if st.viewer.scale_refs != st.scale_refs_on {
+                st.scale_refs_on = st.viewer.scale_refs;
+                st.scale_refs = if st.scale_refs_on {
+                    planet_frame::scalerefs::drop_references(plan.camera.position, plan.camera.forward, radius, &|d| field.height(d))
+                } else {
+                    Vec::new()
+                };
+            }
+            st.rig.renderer.set_scale_refs(&st.scale_refs);
             // The regions overlay (VIEW-030): the region items of the editor's definition nearest the camera, decided here, drawn by the renderer.
             if plan.lit.is_some_and(|l| l.overlay == planet_frame::look::Overlay::Regions) {
                 let list = st.edit.as_ref().map(|e| e.region_list(plan.camera.position.0)).unwrap_or_default();
@@ -1091,6 +1108,9 @@ fn title_text(st: &Running, now_ms: u64) -> String {
         input += " | editing light";
     }
     input += &format!(" | detail {}", st.viewer.ground_detail.name());
+    if st.viewer.scale_refs {
+        input += " | scale references";
+    }
     // The hover hint of the overview: only where a click acts (VIEW-045).
     if let Some(hint) = st.click_target.and_then(planet_frame::globe::ClickTarget::hint) {
         input += &format!(" | {hint}");
@@ -1678,6 +1698,7 @@ mod tests {
             (KeyCode::F3, "F3"),
             (KeyCode::F4, "F4"),
             (KeyCode::F6, "F6"),
+            (KeyCode::F7, "F7"),
             (KeyCode::F9, "F9"),
             (KeyCode::Escape, "Esc"),
             (KeyCode::Tab, "Tab"),
@@ -1719,7 +1740,6 @@ mod tests {
             KeyCode::KeyZ,
             KeyCode::F2,
             KeyCode::F5,
-            KeyCode::F7,
             KeyCode::F8,
             KeyCode::F10,
             KeyCode::F11,
@@ -1783,6 +1803,7 @@ mod tests {
             (KeyCode::F3, Command::CycleOverlay),
             (KeyCode::F4, Command::ToggleCoarseLod),
             (KeyCode::F6, Command::CycleGroundDetail),
+            (KeyCode::F7, Command::ToggleScaleRefs),
             (KeyCode::KeyH, Command::ToggleEditingLight),
             (KeyCode::F9, Command::SaveRepro),
             (KeyCode::KeyG, Command::ToggleGlobe),
@@ -1945,6 +1966,7 @@ mod tests {
             Command::CycleOverlay,
             Command::ToggleCoarseLod,
             Command::CycleGroundDetail,
+            Command::ToggleScaleRefs,
             Command::ToggleEditingLight,
             Command::SaveRepro,
         ] {
