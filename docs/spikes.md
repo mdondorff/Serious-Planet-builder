@@ -9,6 +9,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 ## Index of M5 spikes and explorations
 | Id | Title | Status | Results |
 |---|---|---|---|
+| SPIKE-28 | Instancing at walking height: scattered rocks and grass clumps, CPU against GPU culling (M7 I1) | closed 2026-10-22 (about 0.45 ms per million visible triangles at 1440p; the GPU cull is nearly free and equals the CPU reference; recommendation: GPU path, cells on the CPU, triangle budget with LODs, density from the suitability) | `spikes/instancing/results/` |
 | SPIKE-08 | Ocean connectivity at 16384 | closed 2026-10-16 | `spikes/ocean-connectivity/results/` |
 | SPIKE-09 | Atmosphere f32 forms | closed | `spikes/atmosphere-f32/results/` |
 | SPIKE-21 | The wet floor of ADR 0071: cost and memory of the three passes | closed 2026-10-20 (recommendation: implement option C) | `spikes/wet-floor/results/` |
