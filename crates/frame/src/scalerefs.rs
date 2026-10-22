@@ -164,8 +164,8 @@ mod tests {
         // No two boxes overlap in the ground plane (the circles round their footprints are apart).
         for (i, a) in boxes.iter().enumerate() {
             for b in boxes.iter().skip(i + 1) {
-                let ra = f64::from(a.half_m[0]).hypot(f64::from(a.half_m[1]));
-                let rb = f64::from(b.half_m[0]).hypot(f64::from(b.half_m[1]));
+                let ra = libm::hypot(f64::from(a.half_m[0]), f64::from(a.half_m[1]));
+                let rb = libm::hypot(f64::from(b.half_m[0]), f64::from(b.half_m[1]));
                 assert!((a.centre.0 - b.centre.0).length() > ra + rb, "{} and {} overlap", a.name, b.name);
             }
         }
