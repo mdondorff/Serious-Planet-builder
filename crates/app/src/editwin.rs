@@ -146,6 +146,9 @@ pub struct Pointer {
     pub over_ui: bool,
 }
 
+/// The most ground heights kept for the outlines before the cache starts over.
+const GROUND_CACHE_MAX: usize = 1 << 16;
+
 /// The editor mode.
 pub struct EditRuntime {
     pub session: Session<EditStore>,
@@ -158,6 +161,9 @@ pub struct EditRuntime {
     saved: String,
     radius_m: f64,
     shown: Vec<ItemId>,
+    /// The ground height under the outlines, by direction, for the field's item revision it was read at (a height of a field with thousands of items
+    /// costs a millisecond, and the outlines of an unchanged world are asked for every frame, VIEW-051).
+    ground: std::cell::RefCell<(u64, std::collections::HashMap<[u64; 3], f64>)>,
     overlay: Vec<OverlayItem>,
     /// The line or region being drawn, on the screen.
     draft: DraftOverlay,
@@ -270,6 +276,7 @@ impl EditRuntime {
             saved,
             radius_m,
             shown: Vec::new(),
+            ground: std::cell::RefCell::new((0, std::collections::HashMap::new())),
             overlay: Vec::new(),
             draft: DraftOverlay::default(),
             brush: BrushOverlay::default(),
@@ -522,7 +529,17 @@ impl EditRuntime {
             }
         };
         self.stats.shown_max = self.stats.shown_max.max(self.shown.len());
-        self.overlay = overlay::build(&self.session, &self.shown, &view, &|d| field.height(d));
+        // The outlines read the ground at each edit: the heights are kept while the field's items are the same.
+        let ground = |d: Vec3| -> f64 {
+            let mut cache = self.ground.borrow_mut();
+            let revision = field.item_revision();
+            if cache.0 != revision || cache.1.len() > GROUND_CACHE_MAX {
+                *cache = (revision, std::collections::HashMap::new());
+            }
+            let key = [d.x.to_bits(), d.y.to_bits(), d.z.to_bits()];
+            *cache.1.entry(key).or_insert_with(|| field.height(d))
+        };
+        self.overlay = overlay::build(&self.session, &self.shown, &view, &ground);
         self.handles = overlay::handle_pixels(&self.overlay);
         self.draft = overlay::draft(&self.session, &view, &|d| field.height(d), (!over_ui).then_some(cursor));
         let hit = if over_ui { None } else { Self::hit_at(camera, viewport, cursor, limits, field) };
@@ -1103,6 +1120,65 @@ mod tests {
         }
         assert_eq!(e.session.brush_settings().radius_m, planet_editor::brush::RADIUS_RANGE_M.1);
         assert_eq!(e.stats.refused, 0, "the wheel never asks for a value the brush refuses");
+    }
+
+    /// A field that counts its height reads and has an item revision to change.
+    struct Counted {
+        reads: std::sync::atomic::AtomicUsize,
+        revision: std::sync::atomic::AtomicU64,
+    }
+
+    impl HeightField for Counted {
+        fn height(&self, _dir: Vec3) -> f64 {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            0.0
+        }
+        fn seed(&self) -> u64 {
+            1
+        }
+        fn implementation_id(&self) -> &'static str {
+            "counted-test"
+        }
+        fn version(&self) -> u32 {
+            1
+        }
+        fn max_abs_height_m(&self) -> f64 {
+            0.0
+        }
+        fn item_revision(&self) -> u64 {
+            self.revision.load(std::sync::atomic::Ordering::Relaxed)
+        }
+    }
+
+    // spec: VIEW-051
+    #[test]
+    fn the_outlines_read_the_ground_once_while_the_fields_items_are_the_same() {
+        let mut e = runtime(None);
+        e.toggle();
+        let at = unit(30.0, 40.0);
+        for k in 0..5 {
+            e.session.place("hill", unit(30.0, 40.0 + 0.0005 * f64::from(k))).unwrap();
+        }
+        e.session.deselect();
+        let field = Counted { reads: Default::default(), revision: std::sync::atomic::AtomicU64::new(7) };
+        let cam = above(at, 400.0);
+        let tiles = [TileId::from_direction(&TangentWarp, at, 8), cell_of(R, at)];
+        let frame_with = |e: &mut EditRuntime, cam: &Camera| {
+            let before = field.reads.load(std::sync::atomic::Ordering::Relaxed);
+            e.update(cam, VIEWPORT, &tiles, &field, &limits(), Pointer { cursor: CENTRE, over_ui: true });
+            field.reads.load(std::sync::atomic::Ordering::Relaxed) - before
+        };
+        let first = frame_with(&mut e, &cam);
+        assert!(
+            e.overlay().len() >= 5 && first >= 5,
+            "the outlines read the ground at their edits: {first} reads for {} outlines",
+            e.overlay().len()
+        );
+        // The camera moves, nothing else: the same ground, no read.
+        assert_eq!(frame_with(&mut e, &above(at, 380.0)), 0, "the heights are kept");
+        // The field's items change (an edit reached it): the ground is read again.
+        field.revision.store(8, std::sync::atomic::Ordering::Relaxed);
+        assert!(frame_with(&mut e, &cam) >= 5, "a new revision reads the ground again");
     }
 
     // spec: VIEW-047
