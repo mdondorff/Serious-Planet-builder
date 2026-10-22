@@ -61,6 +61,8 @@ pub const MS_STEPS: usize = 40;
 pub const SKY_STEPS: usize = 32;
 /// Steps of the orbit ray march (uniform from the entry point).
 pub const ORBIT_STEPS: usize = 40;
+/// The band below the atmosphere's top across which a camera inside it blends towards the orbit march (P2-7, ATMO-023), in metres.
+pub const NEAR_TOP_BAND_M: f64 = 5_000.0;
 /// Most steps of an aerial-perspective texel (`2 (slice + 1)`, at most this).
 pub const AP_MAX_STEPS: usize = 64;
 /// The distance along the ray of the last aerial-perspective slice; slice `k` is at `AP_MAX_DISTANCE_M * ((k + 1) / 32)^2`.
@@ -1338,6 +1340,34 @@ impl FrameGeometry {
     pub fn camera_march_weight(&self) -> f64 {
         let t = ((self.h - CAMERA_MARCH_BLEND_FROM_M) / (CAMERA_MARCH_BLEND_TO_M - CAMERA_MARCH_BLEND_FROM_M)).clamp(0.0, 1.0);
         t * t * (3.0 - 2.0 * t)
+    }
+
+    /// The weight of the orbit-style march in a frame whose camera is inside the atmosphere: 0 up to [`NEAR_TOP_BAND_M`] below the top, 1
+    /// at the top, the smoothstep of the altitude between (P2-7: the sky table and the camera march differ a little from the orbit march the
+    /// frame uses from the top up; mixing them across the band makes the picture continuous in altitude).
+    pub fn near_top_weight(&self, atm: &Atmosphere) -> f64 {
+        let t = ((self.h - (atm.top_m() - NEAR_TOP_BAND_M)) / NEAR_TOP_BAND_M).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    }
+
+    /// The orbit march ([`ORBIT_STEPS`] uniform steps, as [`FrameGeometry::orbit_ray_cosines`]) of a ray that starts at the camera inside the
+    /// atmosphere, ending at the geometry at `t_geo` when given, else at the ground or the exit. At the top it is the orbit ray.
+    pub fn inside_orbit_style_cosines(&self, atm: &Atmosphere, luts: &StaticLuts, mu: f64, cos_vs: f64, t_geo: Option<f64>) -> OrbitRay {
+        let (mut s_end, mut reaches_ground) = self.inside_ray_end(mu);
+        if let Some(t) = t_geo {
+            if t < s_end {
+                s_end = t;
+                reaches_ground = false;
+            }
+        }
+        let big_r = atm.radius_m;
+        let o = self.origin(mu);
+        if s_end <= 0.0 {
+            return OrbitRay { radiance: [0.0; 3], transmittance: [1.0; 3], reaches_ground, ground_mu_sun: 1.0, enters: true };
+        }
+        let m = atm.march(luts, &o, cos_vs, s_end, StepLayout::Uniform(ORBIT_STEPS), Scatter::Physical { cos_gamma: cos_vs });
+        let ground_mu_sun = ((o.r_musun + s_end * cos_vs) / big_r).clamp(-1.0, 1.0);
+        OrbitRay { radiance: m.radiance, transmittance: m.transmittance, reaches_ground, ground_mu_sun, enters: true }
     }
 
     /// The steps of [`FrameGeometry::camera_ray_cosines`] in this frame (by the sun's height).
