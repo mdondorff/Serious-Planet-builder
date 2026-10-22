@@ -347,6 +347,10 @@ Source: CON-13, ADR 0009, ADR 0014
 - **WHEN** a 30-frame flight is rendered at 160x120
 - **THEN** `contact_sheet.png` holds 12 thumbnails in 4 columns, and every index row has five fields with the finest level growing from the first frame to the last
 
+#### Scenario: The pitch of the dive (ADR 0044 point 1)
+- **WHEN** the dive camera `dive_camera(t)` descends log-uniformly from 20,000 km to 1 m
+- **THEN** its pitch is linear in script time and in log altitude, 85 degrees at 20,000 km and 8 degrees at 1 m (`pitch = 85 - 77 u` with `u` the share of the descent time), and there is no look input
+
 ### Requirement: TEST-014 Real-GPU flight review
 The owner SHALL review the TEST-013 flight rendered on the reference GPU once, in the default relief view, and confirm that it shows no jitter, vertex swimming, cracks or popping beyond the LOD transitions. The 1280x720 flight review is the owner's review of the relief view at milestone gates (the relief view has no goldens: a 128x96 image is too small to show a relief defect and would change with nearly every terrain change); its automatic check is a tier-B property test of the relief view at the orbit and ground-1m cameras (no clear-colour pixel below the horizon, grid and contour lines present, REND-006).
 

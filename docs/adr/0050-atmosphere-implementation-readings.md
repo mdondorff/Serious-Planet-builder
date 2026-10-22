@@ -1,5 +1,5 @@
 # 0050 Atmosphere: implementation readings of ADR 0040
-Status: accepted (opus-planner, 2026-10-17, under the owner's delegation; point 6 on the condition, met in `atmosphere-passes`, that the GPU atmosphere holds its bound at 1 m, 2 km and 20 km and in ADR 0043's 1 m walk with the altitude-relative forms of SPIKE-09)
+Status: superseded by 0055 (content in specs); was accepted (opus-planner, 2026-10-17, under the owner's delegation; point 6 on the condition, met in `atmosphere-passes`, that the GPU atmosphere holds its bound at 1 m, 2 km and 20 km and in ADR 0043's 1 m walk with the altitude-relative forms of SPIKE-09)
 Date: 2026-10-17
 Source: ADR 0040 points 2-5; ADR 0035; ADR 0043; ADR 0048; SPIKE-09; the numerics and spec reviews of `atmosphere-reference`
 
