@@ -1,0 +1,1 @@
+- 2026-10-22 **edit-scale-scene** (explorer, SPIKE-29): `test-render --scene edit-scale --store DIR` makes seeded item sets of 100 to 20,000 edits through the editor session and measures load, field queries, the plan job, tile generation and the editor's frame on the CPU; `PLANET_EDIT_ITEMS=DIR` runs the edit-latency scene over a set (TEST-045).

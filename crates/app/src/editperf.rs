@@ -96,7 +96,7 @@ pub fn case_stamp(radius_m: f64) -> ItemSpec {
 }
 
 /// The place the scripted views look at (latitude 20, longitude 30).
-fn case_centre() -> Vec3 {
+pub(crate) fn case_centre() -> Vec3 {
     let (la, lo) = (20f64.to_radians(), 30f64.to_radians());
     Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la))
 }
@@ -851,6 +851,26 @@ pub fn perf_edit_latency(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> 
     let world = Arc::new(crate::streamperf::open_world(o, false)?);
     writeln!(out, "world opened in {:.1} s", opened.elapsed().as_secs_f64()).map_err(err)?;
     let radius_m = world.radius_m();
+    // SPIKE-29: `PLANET_EDIT_ITEMS=DIR` loads an item set (the edit-scale scene's `target/edit-scale/n<count>`) into the definition before the cases run,
+    // so the latency of one edit is measured in a world with authored edits (the cluster of the set is centred on the place the cases edit).
+    if let Some(dir) = std::env::var_os("PLANET_EDIT_ITEMS") {
+        let dir = std::path::PathBuf::from(dir);
+        let ids = planet_editor::ids::IdMaker::new(
+            Box::new(planet_editor::ids::FixedClock(1_760_000_000_000)),
+            Box::new(planet_editor::ids::SeededEntropy(9)),
+        );
+        let t = Instant::now();
+        let rt = crate::editwin::EditRuntime::with_ids(
+            (*world.definition()).clone(),
+            radius_m,
+            Some(&dir),
+            planet_editor::layout::Layout::default(),
+            ids,
+        )?;
+        world.set_definition(Arc::new(rt.session.editor().definition().clone()))?;
+        writeln!(out, "items loaded from {}: {} in {:.1} s", dir.display(), rt.session.editor().items().count(), t.elapsed().as_secs_f64())
+            .map_err(err)?;
+    }
     if !smoke {
         planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
         crate::readiness_gate(o, ctx, out)?;
