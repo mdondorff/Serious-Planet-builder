@@ -721,8 +721,8 @@ impl WorldDefinition {
 
     /// The items of `layer` whose reach touches the footprint of `tile` with a halo of `halo` tile edges (WDEF-007), in
     /// application order (priority, then id). The tile must come from the tangent-warp mapping. Candidates are the items
-    /// of the cell of the tile plus [`footprint::candidate_rings`] rings, or every item of the body for a tile coarser
-    /// than the cell level; the touch test decides, and a test checks that both ways give the same set.
+    /// of the reach index (WDEF-014) that can touch the tile's cap, or every item of the body for a cap too wide for it; the touch
+    /// test decides, and a test checks that the index and the scan of every item give the same set.
     pub fn footprint_items(
         &self,
         body: BodyId,
@@ -739,8 +739,8 @@ impl WorldDefinition {
     }
 
     /// The items of `layer` whose reach touches `cap` (WDEF-007), in application order: the footprint of a point or a bundle of points
-    /// (a stage reads its items once per batch, GEN-026). Candidates are the items of the cell of the cap's centre plus
-    /// [`footprint::candidate_rings`] rings, or every item of the body when the cap is too wide; the touch test decides.
+    /// (a stage reads its items once per batch, GEN-026). Candidates are the items of the
+    /// reach index's cells near the cap (WDEF-014), or every item of the body when the cap is too wide; the touch test decides.
     pub fn footprint_items_cap(
         &self,
         body: BodyId,

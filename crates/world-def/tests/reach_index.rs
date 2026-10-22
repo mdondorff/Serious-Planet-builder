@@ -193,3 +193,46 @@ fn a_query_looks_at_the_items_near_its_cap_not_at_all_of_them() {
     assert!(far <= 10, "{far} entries looked at over empty ground");
     assert_eq!(cell_of(R, centre).level(), planet_world_def::cells::cell_level(R));
 }
+
+// spec: WDEF-014
+#[test]
+fn a_cap_just_under_the_whole_sphere_and_a_centre_that_is_no_direction_give_the_scans_set_without_a_panic() {
+    let mut rng = Rng(11);
+    let mut def = WorldDefinition::single_planet(R, 3);
+    let mut items = Vec::new();
+    for id in 1..=200u128 {
+        let it = spec(id, "stamps", random_dir(&mut rng), 40.0 * libm::pow(1000.0, rng.f()), 0);
+        def.put_item_spec(BodyId::PLANET, it.clone()).unwrap();
+        items.push(it);
+    }
+    // Caps whose angle is within 1e-6 of the largest the touch test's margin still lets reach the far side: the items on the far side of the
+    // centre sit at an angle that is within the rounding of the squared chord of the limit.
+    let centre = unit(10.0, 20.0);
+    let far = -centre;
+    let limit_of = |angle: f64| angle * (1.0 + footprint::FOOTPRINT_REL_MARGIN) + footprint::FOOTPRINT_ABS_MARGIN_RAD;
+    for k in 0..400 {
+        let angle = core::f64::consts::PI / (1.0 + footprint::FOOTPRINT_REL_MARGIN) - 1e-6 + f64::from(k) * 2.5e-9;
+        let cap = Cap { centre, angle };
+        assert!(limit_of(angle) > 0.0);
+        let got = def.footprint_items_cap(BodyId::PLANET, "stamps", cap).unwrap();
+        assert_eq!(ids(&got), scan(&items, "stamps", cap, R), "a cap of {angle} rad");
+        // The same with items put just inside the limit on the far side.
+        let mut probe = WorldDefinition::single_planet(R, 3);
+        let east = Vec3::new(0.0, 0.0, 1.0).cross(far).normalized();
+        let delta = core::f64::consts::PI - limit_of(angle) + f64::from(k % 7) * 1e-10;
+        let at = (far * libm::cos(delta) + east * libm::sin(delta)).normalized();
+        let it = spec(1, "stamps", at, 0.0, 0);
+        probe.put_item_spec(BodyId::PLANET, it.clone()).unwrap();
+        let got = probe.footprint_items_cap(BodyId::PLANET, "stamps", cap).unwrap();
+        assert_eq!(ids(&got), scan(&[it], "stamps", cap, R), "a probe at {delta} rad from the far side, cap {angle}");
+    }
+    // A centre that is not a direction does not panic: it takes the scan's set (or is refused), whatever its size.
+    for centre in [Vec3::new(0.0, 0.0, 0.0), Vec3::new(1e-200, 0.0, 0.0), Vec3::new(1e200, 1e200, 0.0), Vec3::new(f64::NAN, 0.0, 1.0)] {
+        for angle in [0.0, 1e-3, core::f64::consts::PI] {
+            let cap = Cap { centre, angle };
+            let candidates = def.candidate_ids(BodyId::PLANET, cap, None);
+            assert_eq!(candidates.len(), items.len(), "every item is a candidate for a centre of {centre:?}");
+            let _ = def.footprint_items_cap(BodyId::PLANET, "stamps", cap);
+        }
+    }
+}

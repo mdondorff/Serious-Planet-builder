@@ -110,11 +110,14 @@ impl ReachIndex {
     /// The candidates for `cap`: every item the touch test can accept and some it does not, in no order. `visited` (if given) is set to the number
     /// of entries looked at, before the cheap check.
     pub fn candidates(&self, cap: Cap, visited: Option<&mut usize>) -> Vec<ItemId> {
-        // The chord test wants a unit centre (the angle of the touch test does not).
-        let cap = Cap { centre: cap.centre.normalized(), ..cap };
         let mut out = Vec::new();
         let mut seen = 0usize;
-        let whole_sphere = !(cap.angle.is_finite() && cap.angle < core::f64::consts::PI);
+        // The chord test wants a unit centre (the angle of the touch test does not); a centre that cannot be made one (zero, non-finite) or an angle
+        // that is not below pi takes every item, and the touch test decides.
+        let length = cap.centre.length();
+        let usable_centre = length.is_finite() && length > 1e-150;
+        let cap = if usable_centre { Cap { centre: cap.centre * (1.0 / length), ..cap } } else { cap };
+        let whole_sphere = !(usable_centre && cap.angle.is_finite() && cap.angle < core::f64::consts::PI);
         for (k, class) in self.classes.iter().enumerate() {
             if class.cells.is_empty() {
                 continue;
@@ -125,7 +128,7 @@ impl ReachIndex {
             let mut take = |items: &BTreeMap<ItemId, Entry>| {
                 for (id, e) in items {
                     seen += 1;
-                    if may_touch(cap, e, self.radius_m) {
+                    if !usable_centre || may_touch(cap, e, self.radius_m) {
                         out.push(*id);
                     }
                 }
@@ -153,7 +156,9 @@ impl ReachIndex {
 /// rejects an item the touch test accepts (the margin is far larger than the rounding of either side).
 fn may_touch(cap: Cap, e: &Entry, radius_m: f64) -> bool {
     let limit = (cap.angle + e.reach_m / radius_m) * (1.0 + FOOTPRINT_REL_MARGIN) + FOOTPRINT_ABS_MARGIN_RAD + 1e-9;
-    if limit >= core::f64::consts::PI {
+    // Near pi the chord hardly changes with the angle (its change falls below the rounding of the squared distance), so a limit that close to pi
+    // takes every item.
+    if limit.is_nan() || limit >= core::f64::consts::PI - 1e-3 {
         return true;
     }
     let chord = 2.0 * libm::sin(0.5 * limit);
