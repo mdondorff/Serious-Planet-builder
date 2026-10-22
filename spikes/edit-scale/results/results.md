@@ -79,3 +79,21 @@ None: a cost and scaling spike (no picture was made or needed).
 - The steep, stacked and problems lists follow the items incrementally (VIEW-048); the slope guard of a stroke reads only the strokes near it.
 - N = 1000 (513 brushes, 4142 strokes), `run-after-edit-health-scale-1000.txt`: the editor frame at 200 m and 30 m is 49 and 50 ms p50 (p95 50 and 51 ms); it was 55 ms p50 and 19.5 s p95 at 200 m before. At 2 km it is 73 ms p50 and 74 ms p95 (161 edits shown).
 - The plan job did not change (warm 3.6 to 4.8 s): it is not the proof. 99.8 % of it is `StampStage::max_abs_height_m()` (19,000 to 21,800 calls of 0.22 ms each per plan, O(items) each through `max_delta_sum`); the earlier diagnosis did not time that call. Next: cache the sum per item revision.
+
+## After stamp-max-delta-cache (2026-10-22, fix 1): the curve at 1k, 5k and 20k
+Sets without brushes (`PLANET_SCALE_NOBRUSH`: a brush set of 5k items takes hours to make through the editor); release build, RTX laptop machine, other sessions running (indicative). Raw: `run-after-max-delta-cache-no-brushes-1k-5k-20k.txt` (the run was cut by its 6,000 s time limit during the 20k section: the empty-ground plans at 20k and the summary table are missing).
+
+| N | plan warm p50 (cluster 2 km / 200 m / 30 m) | plan warm, empty ground 2 km / 200 m / 30 m | plan cold, cluster 2 km / 200 m / 30 m | plan cold, empty 2 km | editor frame p50 at 2 km (edits shown) | load | tile generation, cluster p50 |
+|---|---|---|---|---|---|---|---|
+| 1,000 | 3.9 / 5.6 / 7.8 ms | 4.2 / 5.1 / 6.4 ms | 2.9 / 3.2 / 3.5 s | 1.4 s | 77 ms (204) | 4.4 s | 3.9 ms |
+| 5,000 | 4.3 / 5.5 / 12.0 ms | 5.3 / 5.8 / 6.9 ms | 14.7 / 19.2 / 21.2 s | 5.8 s | 5,621 ms (3,868) | 22.6 s | 4.1 ms |
+| 20,000 | 4.3 / 5.2 / 43.6 ms | not run | 51.2 / 62.6 / 70.4 s | not run | 99,904 ms (15,440) | 98.7 s | 6.8 ms |
+
+Before the cache, the warm plan was 3.6 to 4.8 s at 1,000 items and grew linearly with the items.
+
+- **Fixed:** the warm plan job is milliseconds at every size, over the cluster and over empty ground (4 to 44 ms; `max_abs_height_m` is 22,000 calls of 1 ms in all). The lists of the editor follow the items (VIEW-048).
+- **First thing to break now: the editor frame (`EditRuntime::update`)**: 77 ms at 1k, 5.6 s at 5k, 100 s at 20k, with 204, 3,868 and 15,440 edits "shown" even at 30 m. It grows with the shown set faster than linearly (0.4, 1.5 and 6.5 ms per shown edit). It is fix 3 of the ranking (bound the shown set and the outlines); not looked at in code yet.
+- **Second: the cold plan** (a fresh selection cache: opening a world, a changed render floor) over the cluster: 3 s, 20 s, 60 s, superlinear in the items; the 20 km cap bounds cost 0.17, 1.0 and 4.8 ms at 1k, 5k and 20k and 11 to 24 tiles are capped at 5k and 20k. The edits clear `certs` and `caps` (`SelectionCache::invalidate_tiles`), so the plan after an edit recomputes the cap bounds it needs; its cost at 5k and 20k items is not measured (the edit-to-visible latency was measured at 100 items only).
+- **Load** is linear (4.4 ms, 4.5 ms and 4.9 ms per item); 523 to 558 MiB at 20k. Tile generation in the cluster stays under 7 ms.
+- The 5k and 20k sets have no brushes; brush sets are measured at 100 and 1,000 items only (editor lists), where the lists were the first break and are now incremental.
+

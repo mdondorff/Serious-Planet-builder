@@ -1,0 +1,84 @@
+edit-scale: height field cpu-erosion-v1 over a 16384-cell bake ; seed 1, counts [1000, 5000, 20000], the cluster 25 km radius at the edit-latency case centre, 80 % of the items in it
+made 1000 items for the set of 1000 in 92.4 s (this stage 92.4 s, 0 to 1000 items); the last stage's actions cost 68.23 ms per item at the end (p50 of the last 100); 119 channel, 181 crater, 221 hill, 175 plateau, 111 region, 193 ridge (0 strokes in all, at most 0 in an item)
+made 5000 items for the set of 5000 in 474.9 s (this stage 382.5 s, 1000 to 5000 items); the last stage's actions cost 57.91 ms per item at the end (p50 of the last 100); 593 channel, 930 crater, 1086 hill, 818 plateau, 595 region, 978 ridge (0 strokes in all, at most 0 in an item)
+made 20000 items for the set of 20000 in 1933.6 s (this stage 1458.7 s, 5000 to 20000 items); the last stage's actions cost 63.96 ms per item at the end (p50 of the last 100); 2392 channel, 3696 crater, 4375 hill, 3230 plateau, 2426 region, 3881 ridge (0 strokes in all, at most 0 in an item)
+
+## N = 1000 (1000 files in target/edit-scale-nb\n1000)
+load: 1000 items in 4418 ms; working set 34 MiB before, 37 MiB after (2973 B per item); 119 channel, 181 crater, 221 hill, 175 plateau, 111 region, 193 ridge (0 strokes in all, at most 0 in an item)
+editor lists (ms): steep_items 0.0 then 0.00; stacked_items 0.0 then 0.00; near(all) 0.5; layer_groups 0.5; chain 0.2; problems 0.0; search 0.5
+definition: clone 0.3 ms, set_definition 0.0 ms
+queries over the cluster: height 97.7 us; height_bounds 200 m cap 90.8 us, 2000 m cap 194.5 us, 20000 m cap 170.3 us; inputs_hash_for (level-12 tile) 111.2 us  [449891 4946980572978144916]
+queries over the empty ground: height 16.1 us; height_bounds 200 m cap 9.0 us, 2000 m cap 13.1 us, 20000 m cap 4.1 us; inputs_hash_for (level-12 tile) 7.9 us  [-6261698 15339327362627179973]
+once per plan: inputs_hash 0.00 ms; read_records (3) 0.00 ms; item_revision 0.000 ms; MeshKeyer::new 0.02 ms; key of a cluster tile 0.22 ms; read_records_for it (7) 0.11 ms  [12123160943609453309 1854111905652945313 16073937072369900900]
+  selection alone 3.9 ms (500 nodes); the whole plan right after 3.9 ms (500 nodes)
+  one more warm plan through the counting field: 5.3 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 16873 calls 1.0 ms
+plan job over the cluster at 2000 m: 500 nodes (0 capped); cold 2869.9 ms; warm p50 3.9 ms, p95 4.8 ms (12 plans)
+editor frame at 2000 m: update p50 77.11 ms, p95 78.11 ms; 204 edits shown, 0 problems
+  selection alone 4.8 ms (537 nodes); the whole plan right after 4.9 ms (537 nodes)
+  one more warm plan through the counting field: 6.4 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 19942 calls 1.1 ms
+plan job over the cluster at 200 m: 539 nodes (0 capped); cold 3194.1 ms; warm p50 5.6 ms, p95 6.6 ms (12 plans)
+editor frame at 200 m: update p50 40.37 ms, p95 41.61 ms; 51 edits shown, 0 problems
+tile generation (level 19 and one above, 24 tiles in the cluster, 24 over empty ground): cluster p50 3.93 ms, p95 4.08 ms; empty p50 2.75 ms
+  selection alone 8.6 ms (500 nodes); the whole plan right after 6.9 ms (500 nodes)
+  one more warm plan through the counting field: 7.4 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 21711 calls 1.3 ms
+plan job over the cluster at 30 m: 504 nodes (0 capped); cold 3549.4 ms; warm p50 7.8 ms, p95 10.0 ms (12 plans)
+editor frame at 30 m: update p50 33.67 ms, p95 35.17 ms; 39 edits shown, 0 problems
+  selection alone 4.0 ms (529 nodes); the whole plan right after 4.1 ms (529 nodes)
+  one more warm plan through the counting field: 5.5 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 17396 calls 1.0 ms
+plan job over the empty at 2000 m: 525 nodes (0 capped); cold 1408.4 ms; warm p50 4.2 ms, p95 4.3 ms (12 plans)
+  selection alone 5.0 ms (555 nodes); the whole plan right after 5.0 ms (555 nodes)
+  one more warm plan through the counting field: 6.6 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 20368 calls 1.1 ms
+plan job over the empty at 200 m: 561 nodes (0 capped); cold 1460.9 ms; warm p50 5.1 ms, p95 5.3 ms (12 plans)
+  selection alone 6.5 ms (536 nodes); the whole plan right after 6.3 ms (536 nodes)
+  one more warm plan through the counting field: 7.7 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 22379 calls 1.3 ms
+plan job over the empty at 30 m: 535 nodes (0 capped); cold 1512.2 ms; warm p50 6.4 ms, p95 6.6 ms (12 plans)
+
+## N = 5000 (5000 files in target/edit-scale-nb\n5000)
+load: 5000 items in 22647 ms; working set 278 MiB before, 287 MiB after (1900 B per item); 593 channel, 930 crater, 1086 hill, 818 plateau, 595 region, 978 ridge (0 strokes in all, at most 0 in an item)
+editor lists (ms): steep_items 0.1 then 0.00; stacked_items 0.0 then 0.00; near(all) 2.2; layer_groups 10.2; chain 1.3; problems 0.0; search 2.3
+definition: clone 1.1 ms, set_definition 0.1 ms
+queries over the cluster: height 530.0 us; height_bounds 200 m cap 549.8 us, 2000 m cap 566.2 us, 20000 m cap 998.7 us; inputs_hash_for (level-12 tile) 634.3 us  [450373 18279445503190184740]
+queries over the empty ground: height 4.9 us; height_bounds 200 m cap 9.4 us, 2000 m cap 13.7 us, 20000 m cap 4.7 us; inputs_hash_for (level-12 tile) 8.2 us  [-6261698 15339327362627179973]
+once per plan: inputs_hash 0.00 ms; read_records (3) 0.00 ms; item_revision 0.001 ms; MeshKeyer::new 0.00 ms; key of a cluster tile 0.85 ms; read_records_for it (7) 0.59 ms  [12123160943609453309 17624193816493246501 12425470085985027328]
+  selection alone 11.6 ms (166 nodes); the whole plan right after 4.3 ms (166 nodes)
+  one more warm plan through the counting field: 5.6 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 15999 calls 0.9 ms
+plan job over the cluster at 2000 m: 166 nodes (11 capped); cold 14743.2 ms; warm p50 4.3 ms, p95 4.4 ms (12 plans)
+editor frame at 2000 m: update p50 5620.98 ms, p95 5687.26 ms; 3868 edits shown, 0 problems
+  selection alone 5.2 ms (150 nodes); the whole plan right after 5.3 ms (150 nodes)
+  one more warm plan through the counting field: 6.9 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 20371 calls 1.2 ms
+plan job over the cluster at 200 m: 150 nodes (11 capped); cold 19164.4 ms; warm p50 5.5 ms, p95 10.3 ms (12 plans)
+editor frame at 200 m: update p50 5644.62 ms, p95 5809.15 ms; 3869 edits shown, 0 problems
+tile generation (level 8 and one above, 11 tiles in the cluster, 24 over empty ground): cluster p50 4.06 ms, p95 66.00 ms; empty p50 2.98 ms
+  selection alone 19.8 ms (150 nodes); the whole plan right after 6.2 ms (150 nodes)
+  one more warm plan through the counting field: 7.9 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 22086 calls 1.3 ms
+plan job over the cluster at 30 m: 150 nodes (11 capped); cold 21217.1 ms; warm p50 12.0 ms, p95 16.9 ms (12 plans)
+editor frame at 30 m: update p50 5638.80 ms, p95 5670.06 ms; 3870 edits shown, 0 problems
+  selection alone 5.0 ms (644 nodes); the whole plan right after 4.9 ms (644 nodes)
+  one more warm plan through the counting field: 6.8 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 19245 calls 1.3 ms
+plan job over the empty at 2000 m: 640 nodes (0 capped); cold 5813.4 ms; warm p50 5.3 ms, p95 6.1 ms (12 plans)
+  selection alone 5.6 ms (670 nodes); the whole plan right after 5.7 ms (670 nodes)
+  one more warm plan through the counting field: 7.5 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 22221 calls 1.3 ms
+plan job over the empty at 200 m: 676 nodes (0 capped); cold 5884.2 ms; warm p50 5.8 ms, p95 6.9 ms (12 plans)
+  selection alone 6.7 ms (651 nodes); the whole plan right after 6.5 ms (651 nodes)
+  one more warm plan through the counting field: 8.5 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 24232 calls 1.4 ms
+plan job over the empty at 30 m: 650 nodes (0 capped); cold 5904.2 ms; warm p50 6.9 ms, p95 7.3 ms (12 plans)
+
+## N = 20000 (20000 files in target/edit-scale-nb\n20000)
+load: 20000 items in 98668 ms; working set 523 MiB before, 558 MiB after (1835 B per item); 2392 channel, 3696 crater, 4375 hill, 3230 plateau, 2426 region, 3881 ridge (0 strokes in all, at most 0 in an item)
+editor lists (ms): steep_items 0.3 then 0.00; stacked_items 0.0 then 0.00; near(all) 10.0; layer_groups 479.7; chain 6.8; problems 0.0; search 9.2
+definition: clone 4.5 ms, set_definition 0.5 ms
+queries over the cluster: height 2364.6 us; height_bounds 200 m cap 2420.2 us, 2000 m cap 2524.2 us, 20000 m cap 4817.0 us; inputs_hash_for (level-12 tile) 3488.3 us  [449932 2758301730080198974]
+queries over the empty ground: height 5.6 us; height_bounds 200 m cap 10.0 us, 2000 m cap 14.1 us, 20000 m cap 5.9 us; inputs_hash_for (level-12 tile) 8.9 us  [-6261698 15339327362627179973]
+once per plan: inputs_hash 0.00 ms; read_records (3) 0.00 ms; item_revision 0.000 ms; MeshKeyer::new 0.00 ms; key of a cluster tile 3.52 ms; read_records_for it (7) 2.44 ms  [12123160943609453309 1024792251157418849 1962450002390106253]
+  selection alone 4.2 ms (280 nodes); the whole plan right after 4.3 ms (280 nodes)
+  one more warm plan through the counting field: 5.6 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 13882 calls 0.8 ms
+plan job over the cluster at 2000 m: 280 nodes (12 capped); cold 51171.1 ms; warm p50 4.3 ms, p95 24.8 ms (12 plans)
+editor frame at 2000 m: update p50 99904.31 ms, p95 101921.67 ms; 15440 edits shown, 0 problems
+  selection alone 5.0 ms (425 nodes); the whole plan right after 5.1 ms (425 nodes)
+  one more warm plan through the counting field: 6.3 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 16894 calls 0.9 ms
+plan job over the cluster at 200 m: 425 nodes (24 capped); cold 62566.9 ms; warm p50 5.2 ms, p95 24.7 ms (12 plans)
+editor frame at 200 m: update p50 94517.16 ms, p95 94790.95 ms; 15451 edits shown, 0 problems
+tile generation (level 7 and one above, 24 tiles in the cluster, 24 over empty ground): cluster p50 6.83 ms, p95 29.70 ms; empty p50 2.67 ms
+  selection alone 83.5 ms (246 nodes); the whole plan right after 6.2 ms (246 nodes)
+  one more warm plan through the counting field: 7.1 ms; height 0 calls 0.0 ms; height_bounds 0 calls 0.0 ms; inputs_hash_for 0 calls 0.0 ms; read_records_for 0 calls 0.0 ms; passes_through 0 calls 0.0 ms; max_abs_height_m 18219 calls 1.0 ms
+plan job over the cluster at 30 m: 246 nodes (10 capped); cold 70358.3 ms; warm p50 43.6 ms, p95 63.7 ms (12 plans)
