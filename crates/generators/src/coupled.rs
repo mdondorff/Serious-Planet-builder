@@ -233,8 +233,8 @@ pub fn receivers(lat: &Lattice, filled: &[f32], order: &[u32], p: &CoupledParams
         let c = c as usize;
         let nb = lat.neighbours(c);
         let mut best = (0.0f64, NONE, 0u8);
-        for k in 0..8 {
-            let n = nb[k] as usize;
+        for (k, &nbr) in nb.iter().enumerate() {
+            let n = nbr as usize;
             let drop = f64::from(filled[c]) - f64::from(filled[n]);
             if drop > 0.0 {
                 let s = drop / lat.spacing_m(c, k, n) * jitter_factor(p.seed, c, k, p.jitter);
