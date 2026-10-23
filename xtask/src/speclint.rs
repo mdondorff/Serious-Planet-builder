@@ -464,6 +464,87 @@ pub fn lf_size(bytes: &[u8]) -> usize {
     bytes.len() - bytes.windows(2).filter(|w| w == b"\r\n").count()
 }
 
+/// One accepted-ADR candidate for BUILD-025: `before` is the file at the merge base (`None` when the branch adds it), `after` at `HEAD`.
+pub struct AdrChange {
+    pub path: String,
+    pub before: Option<String>,
+    pub after: String,
+}
+
+/// The first `Status:` line of an ADR.
+fn adr_status(text: &str) -> Option<&str> {
+    text.lines().find(|l| l.starts_with("Status:")).map(|l| l.trim_end())
+}
+
+/// The lines of an ADR without its status line, line ends and trailing blanks normalised.
+fn adr_body(text: &str) -> Vec<&str> {
+    let status = adr_status(text);
+    let mut body: Vec<&str> = text.lines().map(str::trim_end).filter(|l| Some(*l) != status).collect();
+    while body.last() == Some(&"") {
+        body.pop();
+    }
+    body
+}
+
+/// BUILD-025: whether `line` is `Maintained: <YYYY-MM-DD>, <links|values|terms|erratum>: <what>`.
+pub fn is_maintained_line(line: &str) -> bool {
+    let Some(rest) = line.trim_end().strip_prefix("Maintained: ") else { return false };
+    let b = rest.as_bytes();
+    let date = b.len() > 10
+        && b[..10].iter().enumerate().all(|(i, c)| if i == 4 || i == 7 { *c == b'-' } else { c.is_ascii_digit() })
+        && b[10] == b',';
+    if !date {
+        return false;
+    }
+    let after_date = rest[11..].trim_start();
+    ["links", "values", "terms", "erratum"]
+        .iter()
+        .any(|k| after_date.strip_prefix(k).and_then(|r| r.strip_prefix(':')).is_some_and(|what| !what.trim().is_empty()))
+}
+
+/// BUILD-025: one error per accepted ADR (at the base) whose body changed while it gained no well-formed `Maintained:` line. An ADR new on the
+/// branch, one not accepted at the base, and one whose only change is the status line are not checked.
+pub fn adr_maintenance_errors(changes: &[AdrChange]) -> Vec<String> {
+    changes
+        .iter()
+        .filter_map(|c| {
+            let before = c.before.as_deref()?;
+            if !adr_status(before)?.trim_start_matches("Status:").trim_start().starts_with("accepted") {
+                return None;
+            }
+            if adr_body(before) == adr_body(&c.after) {
+                return None;
+            }
+            let had: Vec<&str> = before.lines().filter(|l| is_maintained_line(l)).map(str::trim_end).collect();
+            let gained = c.after.lines().any(|l| is_maintained_line(l) && !had.contains(&l.trim_end()));
+            (!gained).then(|| {
+                format!(
+                    "{}: an accepted ADR changed beyond its status line without a new `Maintained: <YYYY-MM-DD>, <links|values|terms|erratum>: <what>` line (ADR 0078 point 7)",
+                    c.path
+                )
+            })
+        })
+        .collect()
+}
+
+/// BUILD-025: the ADRs `HEAD` changes against the merge base with `origin/main`; empty without git or a base (a fresh clone).
+pub fn adr_changes_against_base(root: &Path) -> Vec<AdrChange> {
+    let Ok(base) = capture(root, "git", &["merge-base", "HEAD", "origin/main"]) else { return Vec::new() };
+    let base = base.trim();
+    let Ok(names) = capture(root, "git", &["diff", "--name-only", "--no-renames", base, "HEAD", "--", "docs/adr"]) else {
+        return Vec::new();
+    };
+    names
+        .lines()
+        .filter(|p| p.ends_with(".md") && !p.ends_with("README.md"))
+        .filter_map(|p| {
+            let after = capture(root, "git", &["show", &format!("HEAD:{p}")]).ok()?;
+            let before = capture(root, "git", &["show", &format!("{base}:{p}")]).ok();
+            Some(AdrChange { path: p.to_string(), before, after })
+        })
+        .collect()
+}
+
 /// Largest tracked file the conflict-marker scan reads (BUILD-009); bigger files are generated or binary in practice.
 const MARKER_SCAN_MAX_BYTES: usize = 2 * 1024 * 1024;
 
@@ -550,6 +631,8 @@ pub fn run(root: &Path) -> Res {
     let sizes: Vec<(String, usize)> =
         HOT_FILE_CAPS.iter().filter_map(|(path, _)| Some((path.to_string(), lf_size(&std::fs::read(root.join(path)).ok()?)))).collect();
     report.errors.extend(hot_file_errors(&sizes));
+    // BUILD-025: a changed accepted ADR gains a Maintained line (ADR 0078).
+    report.errors.extend(adr_maintenance_errors(&adr_changes_against_base(root)));
     // BUILD-010: every log fragment is one well-formed entry.
     report.errors.extend(crate::logcmd::fragment_errors(&crate::logcmd::read_fragments(root)?));
     eprint!("{}", report.summary);
@@ -601,6 +684,110 @@ mod tests {
         // A file that is missing or not capped is no error.
         assert!(hot_file_errors(&[]).is_empty());
         assert!(hot_file_errors(&[at("docs/log.md", 10_000_000)]).is_empty());
+    }
+
+    fn adr(status: &str, body: &str, tail: &str) -> String {
+        format!("# 0001 T\nStatus: {status}\nDate: 2026-10-01\n\n## Decision\n{body}\n{tail}")
+    }
+
+    fn change(before: Option<String>, after: String) -> Vec<AdrChange> {
+        vec![AdrChange { path: "docs/adr/0001-t.md".into(), before, after }]
+    }
+
+    // spec: BUILD-025
+    #[test]
+    fn an_accepted_adr_with_only_its_status_line_changed_passes() {
+        let before = adr("accepted (owner, 2026-10-01)", "1. A.", "");
+        let after = adr("superseded by 0002", "1. A.", "").replace('\n', "\r\n");
+        assert!(adr_maintenance_errors(&change(Some(before), after)).is_empty());
+    }
+
+    // spec: BUILD-025
+    #[test]
+    fn a_body_edit_with_a_new_maintained_line_passes_and_without_one_fails_naming_the_adr() {
+        let before = adr("accepted (owner, 2026-10-01)", "1. See docs/old.md.", "");
+        let edited = adr("accepted (owner, 2026-10-01)", "1. See docs/new.md.", "");
+        let ok = format!("{edited}Maintained: 2026-10-23, links: docs/old.md moved to docs/new.md\n");
+        assert!(adr_maintenance_errors(&change(Some(before.clone()), ok)).is_empty());
+        let errs = adr_maintenance_errors(&change(Some(before.clone()), edited));
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(errs[0].starts_with("docs/adr/0001-t.md:") && errs[0].contains("Maintained"), "{errs:?}");
+        // A Maintained line the ADR already had is not new.
+        let old = format!("{before}Maintained: 2026-10-22, terms: a\n");
+        let again = format!("{}Maintained: 2026-10-22, terms: a\n", adr("accepted (owner, 2026-10-01)", "1. Changed.", ""));
+        assert_eq!(adr_maintenance_errors(&change(Some(old), again)).len(), 1);
+    }
+
+    // spec: BUILD-025
+    #[test]
+    fn a_maintained_line_needs_a_date_a_kind_and_a_text() {
+        for good in [
+            "Maintained: 2026-10-23, links: x",
+            "Maintained: 2026-10-23, values: x",
+            "Maintained: 2026-10-23, terms: x",
+            "Maintained: 2026-10-23, erratum: x",
+        ] {
+            assert!(is_maintained_line(good), "{good}");
+        }
+        for bad in [
+            "Maintained: 2026-10-23, links:",
+            "Maintained: 2026-10-23, typo: x",
+            "Maintained: 23-10-2026, links: x",
+            "Maintained: 2026-10-23 links: x",
+            "Maintained 2026-10-23, links: x",
+            "maintained: 2026-10-23, links: x",
+        ] {
+            assert!(!is_maintained_line(bad), "{bad}");
+        }
+        let before = adr("accepted (owner, 2026-10-01)", "1. A.", "");
+        let after = format!("{}Maintained: 2026-10-23, typo: x\n", adr("accepted (owner, 2026-10-01)", "1. B.", ""));
+        assert_eq!(adr_maintenance_errors(&change(Some(before), after)).len(), 1);
+    }
+
+    // spec: BUILD-025
+    #[test]
+    fn a_proposed_or_new_adr_is_not_checked() {
+        let before = adr("proposed", "1. A.", "");
+        assert!(adr_maintenance_errors(&change(Some(before), adr("proposed", "1. B.", ""))).is_empty());
+        assert!(adr_maintenance_errors(&change(None, adr("accepted (owner, 2026-10-01)", "1. B.", ""))).is_empty());
+        let before = adr("proposed", "1. A.", "");
+        assert!(adr_maintenance_errors(&change(Some(before), adr("accepted (owner, 2026-10-23)", "1. B.", ""))).is_empty());
+    }
+
+    // spec: BUILD-025
+    #[test]
+    fn without_git_or_a_base_there_is_nothing_to_compare() {
+        let dir = std::env::temp_dir().join(format!("planet-adr-nobase-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(adr_changes_against_base(&dir).is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // spec: BUILD-025
+    #[test]
+    fn the_changes_are_read_from_a_real_repository_against_the_merge_base_with_origin_main() {
+        let dir = std::env::temp_dir().join(format!("planet-adr-repo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("docs/adr")).unwrap();
+        let git = |args: &[&str]| {
+            capture(&dir, "git", &[&["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"], args].concat()).unwrap();
+        };
+        git(&["init", "-q"]);
+        let file = dir.join("docs/adr/0001-t.md");
+        std::fs::write(&file, adr("accepted (owner, 2026-10-01)", "1. A.", "")).unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "base"]);
+        git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+        assert!(adr_changes_against_base(&dir).is_empty(), "nothing changed yet");
+        std::fs::write(&file, adr("accepted (owner, 2026-10-01)", "1. B.", "")).unwrap();
+        git(&["commit", "-q", "-am", "edit"]);
+        let errs = adr_maintenance_errors(&adr_changes_against_base(&dir));
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(errs[0].starts_with("docs/adr/0001-t.md:"), "{errs:?}");
+        std::fs::write(&file, adr("accepted (owner, 2026-10-01)", "1. B.", "Maintained: 2026-10-23, erratum: A was wrong\n")).unwrap();
+        git(&["commit", "-q", "-am", "trace"]);
+        assert!(adr_maintenance_errors(&adr_changes_against_base(&dir)).is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     // spec: BUILD-023
