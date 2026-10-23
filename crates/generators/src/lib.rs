@@ -6,6 +6,7 @@
 
 pub mod climate;
 pub mod compact;
+pub mod coupled;
 pub mod dump;
 pub mod erosion;
 pub mod global;
