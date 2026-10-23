@@ -9,7 +9,7 @@ Per-spike register sections of M5 and M6: `docs/archive/M6/spikes.md`. Closed sp
 ## Index of open and M8 spikes
 | Id | Title | Status | Results |
 |---|---|---|---|
-| SPIKE-34 | A block stage in the engine: streaming, cache key, plan bounds, edits and memory for a regional field per block of a fixed grid (ADR 0077; opus-planner, 2026-10-23; owner asked) | open | `spikes/block-stage/results/` |
+| SPIKE-34 | A block stage in the engine: streaming, cache key, plan bounds, edits and memory for a regional field per block of a fixed grid (ADR 0077; opus-planner, 2026-10-23; owner asked) | closed 2026-10-24 (a block field fits streaming, the cache key and the plan with a level gate, a band-limited delta and plan-side requests; blocks of 5 km at about 6 s each are the size that works; edits wait seconds, not milliseconds) | `spikes/block-stage/results/` |
 | SPIKE-33 | Landscape evolution over time: does coupled stream-power erosion and drainage (a coarse global run plus capped fine steps per fixed block) fit the stage model and beat droplet erosion and erosion noise in look and cost (M8 stage model; opus-planner, 2026-10-23; owner asked) | open | `spikes/landscape-evolution/results/` |
 
 Every exploration gets a `SPIKE-NN` entry.

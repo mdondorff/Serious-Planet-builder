@@ -1,0 +1,810 @@
+diff --git a/crates/frame/examples/block_stage.rs b/crates/frame/examples/block_stage.rs
+new file mode 100644
+index 00000000..67c348b6
+--- /dev/null
++++ b/crates/frame/examples/block_stage.rs
+@@ -0,0 +1,499 @@
++//! SPIKE-34: the block stage in the engine, measured headless. `cargo run --release -p planet-frame --example block_stage -- <seams|cost|flight|edits> [args]`
++//! Never merged; the numbers are indicative (no perf window).
++
++use planet_core::cube::{face_to_direction, FaceMapping, TangentWarp};
++use planet_core::{PlanetFixed, TileId, Vec3};
++use planet_frame::{plan_terrain_field, Camera, LodParams, TerrainRequest, TerrainView};
++use planet_generators::global::{bake, GridSource};
++use planet_generators::height::HeightField;
++use planet_generators::height_fields::{build_field, HeightFieldKind};
++use planet_generators::spike_block::{compute_block, locate, BlockField, BlockParams};
++use planet_world_def::{BodyId, GenContext, WorldDefinition};
++use std::collections::{BTreeMap, BTreeSet};
++
++const R: f64 = 6_371_000.0;
++const SIZE: (u32, u32) = (1280, 720);
++
++/// The base field: the eroded field over an in-memory 512-cell bake of seed 1 (SPIKE-32's world).
++fn base_field() -> Box<dyn HeightField> {
++    let grid: &'static _ = Box::leak(Box::new(bake(1, &TangentWarp, 512, 6).expect("bake")));
++    let src: &'static _ = Box::leak(Box::new(GridSource(grid)));
++    let def: &'static _ = Box::leak(Box::new(WorldDefinition::single_planet(R, 1)));
++    let ctx: &'static _ = Box::leak(Box::new(GenContext::new(def)));
++    build_field(HeightFieldKind::Eroded, ctx, BodyId::PLANET, src, [1; 16]).expect("field")
++}
++
++fn params(level: u8, halo: usize, steps: u32) -> BlockParams {
++    BlockParams { level, cell_m: 8.0, halo_cells: halo, steps, amp_m: 30.0, radius_m: R }
++}
++
++/// SPIKE-32's site: lat -23.882, lon -15.284.
++fn site() -> Vec3 {
++    let (lat, lon) = (-23.882f64.to_radians(), -15.284f64.to_radians());
++    Vec3::new(libm::cos(lat) * libm::cos(lon), libm::cos(lat) * libm::sin(lon), libm::sin(lat))
++}
++
++fn pct(v: &mut [f64], q: f64) -> f64 {
++    if v.is_empty() {
++        return 0.0;
++    }
++    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
++    v[((v.len() - 1) as f64 * q) as usize]
++}
++
++/// Seams (item 3): two neighbouring blocks, the height along their shared border from each side, for halos and step counts.
++fn seams() {
++    let base = base_field();
++    let dir = site();
++    println!("seams: neighbouring blocks east-west at the site, level 11 (4.9 km), 8 m cells; border heights from the two runs (m)");
++    println!("steps halo_cells | max |A-B| | p99 |A-B| | max slope step across border (m per cell) | run ms");
++    for steps in [8u32, 32] {
++        for halo in [0usize, 2, 4, 8, 16, 32, 40] {
++            let p = params(11, halo, steps);
++            let (a_id, _, _) = locate(dir, p.level);
++            let b_id = TileId::new(a_id.face(), a_id.level(), a_id.x() + 1, a_id.y()).expect("neighbour");
++            let (ga, gb) = (compute_block(base.as_ref(), &p, a_id), compute_block(base.as_ref(), &p, b_id));
++            let n = ga.cells;
++            let (mut diffs, mut slope) = (Vec::new(), 0.0f64);
++            for j in 0..=n {
++                let a = f64::from(ga.delta[j * (n + 1) + n]);
++                let b = f64::from(gb.delta[j * (n + 1)]);
++                diffs.push((a - b).abs());
++                // The step of the surface across the border against the step inside A: a kink the shading would show.
++                let a_in = f64::from(ga.delta[j * (n + 1) + n - 1]);
++                let b_in = f64::from(gb.delta[j * (n + 1) + 1]);
++                slope = slope.max(((b_in - b) - (a - a_in)).abs());
++            }
++            let mx = diffs.iter().cloned().fold(0.0, f64::max);
++            println!("{steps:>5} {halo:>10} | {mx:>9.4} | {:>9.4} | {slope:>8.4} | {:.0}", pct(&mut diffs, 0.99), ga.compute_ms);
++        }
++    }
++}
++
++/// Cost and memory per block (items 6 and 7): the stand-in's real run time and bytes at three block sizes and two cell sizes.
++fn cost() {
++    let base = base_field();
++    let dir = site();
++    println!("block size | cell m | cells | bytes per block | run ms (stand-in, one thread) | model s at 0.25 s per km2");
++    for level in [11u8, 10, 9] {
++        for cell in [8.0f64, 4.0] {
++            if level == 9 && cell < 8.0 {
++                continue;
++            }
++            let p = BlockParams { cell_m: cell, ..params(level, 40, 32) };
++            let (id, _, _) = locate(dir, level);
++            let g = compute_block(base.as_ref(), &p, id);
++            let km = p.block_edge_m() / 1000.0;
++            println!("{:>7.1} km | {cell:>6} | {:>5} | {:>12} B ({:.1} MB) | {:>9.0} | {:>7.1}", km, g.cells, g.bytes(), g.bytes() as f64 / 1e6, g.compute_ms, 0.25 * km * km);
++        }
++    }
++}
++
++fn lod_of(field: &dyn HeightField) -> LodParams {
++    LodParams {
++        cells: 32,
++        viewport_h_px: f64::from(SIZE.1),
++        tau_px: 3.3,
++        max_level: 22,
++        min_level: 3,
++        radius_m: R,
++        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
++        ..LodParams::earth_1080p()
++    }
++}
++
++#[derive(Clone, Copy)]
++enum Path {
++    /// 30 km to 1.8 m over the site in 60 s, exponential in altitude.
++    Flight,
++    /// 300 m up, 100 m/s east for 30 s.
++    Pan,
++}
++
++fn camera_at(field: &dyn HeightField, path: Path, t: f64) -> (Camera, f64) {
++    let site = site();
++    let east = Vec3::new(0.0, 0.0, 1.0).cross(site).normalized();
++    let (alt, along, pitch) = match path {
++        Path::Flight => (30_000.0 * libm::pow(1.8 / 30_000.0, (t / 60.0).min(1.0)), 0.0, if t < 40.0 { 30.0 } else { 10.0 }),
++        Path::Pan => (300.0, 100.0 * t, 15.0),
++    };
++    let dir = (site * R + east * along).normalized();
++    let ground = field.height(dir);
++    let cam = Camera::at_surface_point(
++        PlanetFixed(dir * (R + ground + alt)),
++        Vec3::new(0.0, 0.0, 1.0),
++        f64::to_radians(pitch),
++        60f64.to_radians(),
++        f64::from(SIZE.0) / f64::from(SIZE.1),
++        0.05,
++    );
++    (cam, alt)
++}
++
++fn ancestor_at(mut t: TileId, level: u8) -> TileId {
++    while t.level() > level {
++        t = t.parent().expect("a parent");
++    }
++    t
++}
++
++struct Job {
++    id: TileId,
++    asked_s: f64,
++    start_s: f64,
++    done_s: f64,
++}
++
++/// One flight (item 1, 2, 6): the plan of every tick over the block field, the blocks it asks for, workers that finish a block `cost_s`
++/// of virtual time after they start it, the blocks that land, the height change at the switch, the resident bytes.
++fn flight(level: u8, path: Path, cost_per_km2: f64, workers: usize, halo: usize) {
++    let field = BlockField::new(base_field(), params(level, halo, 32));
++    let p = field.params;
++    let km = p.block_edge_m() / 1000.0;
++    let cost_s = cost_per_km2 * km * km;
++    let apply = p.apply_level(32);
++    let mut sample_side: BTreeSet<TileId> = BTreeSet::new();
++    let mut coarse_pops: Vec<f64> = Vec::new();
++    let lod = lod_of(&field);
++    let mut cache = planet_frame::SelectionCache::new();
++    let dt = 0.1;
++    let ticks = match path {
++        Path::Flight => 650,
++        Path::Pan => 320,
++    };
++    let (mut pending, mut running): (Vec<(TileId, f64)>, Vec<Job>) = (Vec::new(), Vec::new());
++    let mut asked: BTreeSet<TileId> = BTreeSet::new();
++    let (mut latencies, mut plan_ms, mut pops, mut compute_ms) = (Vec::new(), Vec::new(), Vec::<f64>::new(), Vec::new());
++    let mut last_needed: BTreeMap<TileId, f64> = BTreeMap::new();
++    // Per altitude band: (frames, fine nodes, fine nodes drawn from the stand-in, blocks needed max, resident bytes max).
++    let mut bands: BTreeMap<&str, (u32, u64, u64, usize, usize)> = BTreeMap::new();
++    let (mut evicted, mut invalidated_tiles, mut first_block_s) = (0u64, 0u64, None);
++    for k in 0..ticks {
++        let now = f64::from(k) * dt;
++        let (camera, alt) = camera_at(&field, path, now);
++        let req = TerrainRequest { camera, size: SIZE, view: TerrainView::Level, lod: lod.clone(), face_mapping: "tangent-v1".into(), seed: 1 };
++        let started = std::time::Instant::now();
++        let plan = planet_frame::plan_terrain_cached(&req, &field, &mut cache);
++        let ms = started.elapsed().as_secs_f64() * 1000.0;
++        let Ok(plan) = plan else {
++            println!("tick {k}: plan refused: {}", plan.err().unwrap());
++            continue;
++        };
++        plan_ms.push(ms);
++        // Blocks the plan asked for (its origin heights read them) and the blocks of its fine nodes.
++        let campos = camera.position.0;
++        // Blocks that sampling asked for (any height call, whatever the tile's level): counted, not served; the plan's fine nodes ask.
++        for id in field.take_requests() {
++            sample_side.insert(id);
++        }
++        let (mut fine, mut standin) = (0u64, 0u64);
++        let mut needed: BTreeSet<TileId> = BTreeSet::new();
++        for n in &plan.nodes {
++            if n.tile.level() >= apply {
++                fine += 1;
++                let b = ancestor_at(n.tile, level);
++                needed.insert(b);
++                if field.get(b).is_none() {
++                    standin += 1;
++                    if asked.insert(b) {
++                        pending.push((b, now));
++                    }
++                }
++            }
++        }
++        for b in &needed {
++            last_needed.insert(*b, now);
++        }
++        // Workers: free ones take the pending block nearest the camera.
++        running.retain(|j| j.done_s > now);
++        while running.len() < workers && !pending.is_empty() {
++            let (bi, _) = pending
++                .iter()
++                .enumerate()
++                .map(|(i, (id, _))| (i, (id.center_direction(&TangentWarp) * R - campos).length()))
++                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
++                .unwrap();
++            let (id, asked_s) = pending.remove(bi);
++            running.push(Job { id, asked_s, start_s: now, done_s: now + cost_s });
++        }
++        // Blocks that land by the next tick: computed for real, outside the frame's timing.
++        let landing: Vec<TileId> = running.iter().filter(|j| j.done_s <= now + dt && field.get(j.id).is_none()).map(|j| j.id).collect();
++        for id in landing {
++            let g = compute_block(field.base(), &p, id);
++            compute_ms.push(g.compute_ms);
++            let j = running.iter().find(|j| j.id == id).expect("job");
++            latencies.push(j.done_s - j.asked_s);
++            let _ = j.start_s;
++            // The switch from the stand-in: the height change on the 33 x 33 vertices of every visible fine tile of this block.
++            for n in plan.nodes.iter().filter(|n| n.tile.level() >= level && ancestor_at(n.tile, level) == id) {
++                let fine_tile = n.tile.level() >= apply;
++                for l in 0..=32u32 {
++                    for kx in 0..=32u32 {
++                        let dir = n.tile.sample_direction(&TangentWarp, 32, kx, l);
++                        let (_, fs, ft) = locate(dir, level);
++                        let d = g.sample(fs, ft).abs();
++                        // A coarser tile under a field that is a function of position changes too: counted apart.
++                        if fine_tile { pops.push(d) } else { coarse_pops.push(d) }
++                    }
++                }
++            }
++            // The plan cache holds origin heights of the tiles under the block: they are stale now.
++            let under: Vec<TileId> = plan.nodes.iter().filter(|n| n.tile.level() >= apply && ancestor_at_or_self(n.tile, level) == Some(id)).map(|n| n.tile).collect();
++            invalidated_tiles += under.len() as u64;
++            cache.invalidate_tiles(&under);
++            first_block_s.get_or_insert(now);
++            field.insert(g);
++        }
++        // Eviction: a block not needed for 5 s of virtual time.
++        for id in field.ready_ids() {
++            if now - last_needed.get(&id).copied().unwrap_or(0.0) > 5.0 {
++                field.remove(id);
++                evicted += 1;
++            }
++        }
++        let bytes: usize = field.ready_ids().iter().filter_map(|id| field.get(*id)).map(|g| g.bytes()).sum();
++        let band = if alt > 5000.0 { "above 5 km" } else if alt > 300.0 { "300 m to 5 km" } else { "below 300 m" };
++        let e = bands.entry(band).or_insert((0, 0, 0, 0, 0));
++        e.0 += 1;
++        e.1 += fine;
++        e.2 += standin;
++        e.3 = e.3.max(needed.len());
++        e.4 = e.4.max(bytes);
++    }
++    let _ = first_block_s;
++    println!(
++        "== {} | blocks {:.1} km, cell {} m, halo {} cells, model cost {:.1} s per block (0.25 s per km2 x {:.1} km2), {} workers",
++        match path {
++            Path::Flight => "flight 30 km to 1.8 m",
++            Path::Pan => "pan at 300 m",
++        },
++        km,
++        p.cell_m,
++        halo,
++        cost_s,
++        km * km,
++        workers
++    );
++    println!("band | frames | fine nodes drawn from the stand-in (share) | blocks needed (max) | resident MB (max)");
++    for (b, (f, fine, st, nb, by)) in &bands {
++        println!("{b:>14} | {f:>5} | {st}/{fine} ({:.0} %) | {nb} | {:.0}", 100.0 * *st as f64 / (*fine).max(1) as f64, *by as f64 / 1e6);
++    }
++    println!(
++        "blocks asked {} landed {} evicted {} | ready latency s: p50 {:.1} p99 {:.1} max {:.1} | stand-in to block pop m: p99 {:.2} max {:.2} ({} vertices)",
++        asked.len(),
++        latencies.len(),
++        evicted,
++        pct(&mut latencies.clone(), 0.5),
++        pct(&mut latencies.clone(), 0.99),
++        pct(&mut latencies.clone(), 1.0),
++        pct(&mut pops.clone(), 0.99),
++        pct(&mut pops.clone(), 1.0),
++        pops.len()
++    );
++    println!(
++        "apply level {apply} (tile spacing at most 2 cells of {} m) | blocks asked by sampling any height {} (served: {}) | coarse tiles under landed blocks: {} vertices, change p99 {:.2} max {:.2} m (not applied by the rule)",
++        p.cell_m,
++        sample_side.len(),
++        asked.len(),
++        coarse_pops.len(),
++        pct(&mut coarse_pops.clone(), 0.99),
++        pct(&mut coarse_pops.clone(), 1.0)
++    );
++    println!(
++        "frame CPU (plan, cached) ms: p50 {:.1} p99 {:.1} max {:.1} | stand-in run real ms per block: p50 {:.0} max {:.0} | height calls {} of which coarse {} | plan-cache tiles invalidated by landings {}",
++        pct(&mut plan_ms.clone(), 0.5),
++        pct(&mut plan_ms.clone(), 0.99),
++        pct(&mut plan_ms.clone(), 1.0),
++        pct(&mut compute_ms.clone(), 0.5),
++        pct(&mut compute_ms.clone(), 1.0),
++        field.calls.load(std::sync::atomic::Ordering::Relaxed),
++        field.coarse_calls.load(std::sync::atomic::Ordering::Relaxed),
++        invalidated_tiles
++    );
++}
++
++/// Edits (item 5): the blocks a stamp invalidates (those within its reach plus the halo) and the time until they are exact again.
++fn edits() {
++    let site = site();
++    let east = Vec3::new(0.0, 0.0, 1.0).cross(site).normalized();
++    let north = site.cross(east).normalized();
++    println!("block | stamp place | reach m | halo m | blocks invalidated | time until exact s (6 workers, 0.25 s per km2) | tile-level baseline: tiles of level 15 within the reach");
++    for level in [11u8, 10, 9] {
++        let p = params(level, 40, 32);
++        let km = p.block_edge_m() / 1000.0;
++        let cost_s = 0.25 * km * km;
++        // The block under the site: find its corner and centre in metres from the site along east and north.
++        let (id, _, _) = locate(site, level);
++        let (s0, s1, t0, t1) = id.bounds();
++        let corner = face_to_direction(&TangentWarp, id.face(), s1, t1);
++        let centre = face_to_direction(&TangentWarp, id.face(), 0.5 * (s0 + s1), 0.5 * (t0 + t1));
++        let edge_pt = face_to_direction(&TangentWarp, id.face(), s1, 0.5 * (t0 + t1));
++        let half_m = 0.5 * p.block_edge_m();
++        for (place, anchor, shift_m) in [("block centre", centre, 0.0), ("30 m inside an edge", edge_pt, -30.0), ("block corner", corner, 0.0)] {
++            for reach in [400.0f64, 2000.0] {
++                let halo_m = p.halo_cells as f64 * p.cell_m;
++                let ex = (anchor * R + east * shift_m).normalized();
++                let mut hit: BTreeSet<TileId> = BTreeSet::new();
++                let rad = reach + halo_m;
++                let n = (2.0 * rad / 40.0).ceil() as i32;
++                for i in -n..=n {
++                    for j in -n..=n {
++                        let (dx, dy) = (f64::from(i) * 40.0, f64::from(j) * 40.0);
++                        if dx * dx + dy * dy <= rad * rad {
++                            let q = (ex * R + east * dx + north * dy).normalized();
++                            hit.insert(locate(q, level).0);
++                        }
++                    }
++                }
++                let hit_no_halo: BTreeSet<TileId> = {
++                    let mut s = BTreeSet::new();
++                    for i in -n..=n {
++                        for j in -n..=n {
++                            let (dx, dy) = (f64::from(i) * 40.0, f64::from(j) * 40.0);
++                            if dx * dx + dy * dy <= reach * reach {
++                                s.insert(locate((ex * R + east * dx + north * dy).normalized(), level).0);
++                            }
++                        }
++                    }
++                    s
++                };
++                let waves = (hit.len() as f64 / 6.0).ceil();
++                // Tiles of level 15 (about 150 m) that the reach covers: what the tile-level invalidation refreshes today.
++                let tile_edge = R * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << 15);
++                let tiles = ((2.0 * reach / tile_edge).ceil() + 1.0).powi(2) * core::f64::consts::FRAC_PI_4;
++                let _ = half_m;
++                println!(
++                    "{km:>4.1} km | {place:<19} | {reach:>6} | {halo_m:>5} | {} (without the halo: {}) | {:.0} | about {:.0}",
++                    hit.len(),
++                    hit_no_halo.len(),
++                    waves * cost_s,
++                    tiles
++                );
++            }
++        }
++    }
++}
++
++/// Plan and bounds (item 4): the plan over the base alone, over the block field with no block ready, and with the blocks under the camera ready.
++fn bounds() {
++    let field = BlockField::new(base_field(), params(11, 40, 32));
++    let lod = lod_of(&field);
++    println!("alt m | field | nodes | capped | refused | plan ms (cold)");
++    for alt in [30_000.0f64, 5_000.0, 300.0, 30.0, 1.8] {
++        for (name, ready) in [("base alone", None), ("block, none ready", Some(false)), ("block, all under the camera ready", Some(true))] {
++            let (camera, _) = {
++                let dir = site();
++                let ground = field.base().height(dir);
++                (
++                    Camera::at_surface_point(
++                        PlanetFixed(dir * (R + ground + alt)),
++                        Vec3::new(0.0, 0.0, 1.0),
++                        f64::to_radians(15.0),
++                        60f64.to_radians(),
++                        f64::from(SIZE.0) / f64::from(SIZE.1),
++                        0.05,
++                    ),
++                    0,
++                )
++            };
++            if ready == Some(true) {
++                let _ = field.take_requests();
++                let (b, _, _) = locate(site(), 11);
++                for (dx, dy) in [(0i64, 0i64), (1, 0), (-1, 0), (0, 1), (0, -1)] {
++                    let (x, y) = (i64::from(b.x()) + dx, i64::from(b.y()) + dy);
++                    if let Some(id) = TileId::new(b.face(), 11, x as u32, y as u32) {
++                        if field.get(id).is_none() {
++                            let g = compute_block(field.base(), &field.params, id);
++                            field.insert(g);
++                        }
++                    }
++                }
++            }
++            let req = TerrainRequest { camera, size: SIZE, view: TerrainView::Level, lod: lod.clone(), face_mapping: "tangent-v1".into(), seed: 1 };
++            let started = std::time::Instant::now();
++            let r = if ready.is_none() { plan_terrain_field(&req, field.base()) } else { plan_terrain_field(&req, &field) };
++            let ms = started.elapsed().as_secs_f64() * 1000.0;
++            match r {
++                Ok(p) => println!("{alt:>8} | {name} | {} | {} | 0 | {ms:.0}", p.nodes.len(), p.nodes.iter().filter(|n| n.capped).count()),
++                Err(e) => println!("{alt:>8} | {name} | refused: {e} | | 1 | {ms:.0}"),
++            }
++        }
++    }
++}
++
++/// The gate (items 2 and 3): the height step where block detail starts, at the apply level, between a gated tile and its ungated parent
++/// (and the ungated neighbour at a level boundary: the same vertices). A hard gate adds the block's change at the tile's even vertices (the
++/// vertices the parent has); the engine's morph takes a tile's odd vertices to the average of its own even ones, so a fully morphed tile has the
++/// tile's own even heights, not the parent's: the step stays at morph 1. A band-limited delta (a box-filtered pyramid: a tile of level l
++/// reads the level of its own vertex spacing) shrinks the step to the detail between two spacings.
++fn gate() {
++    let base = base_field();
++    let site = site();
++    println!("gate: block 4.9 km, 8 m cells, apply level 15 (vertex spacing {:.1} m), parent level 14 ({:.1} m)", 9.55, 19.1);
++    println!("amp m | hard gate: step at the parent's vertices p99 / max (m) | pyramid: step p99 / max (m) | block change p99 / max (m)");
++    for amp in [30.0f64, 8.0] {
++        let p = BlockParams { amp_m: amp, ..params(11, 40, 32) };
++        let (id, _, _) = locate(site, 11);
++        let g = compute_block(base.as_ref(), &p, id);
++        let (mut hard, mut pyr, mut all) = (Vec::new(), Vec::new(), Vec::new());
++        let (s0, s1, t0, t1) = id.bounds();
++        let _ = (s0, s1, t0, t1);
++        let filtered = |fs: f64, ft: f64, w_cells: f64| -> f64 {
++            // Mean of a 5 x 5 subsample of a square of width `w_cells` cells (a box filter).
++            let n = g.cells as f64;
++            let mut acc = 0.0;
++            for a in 0..5 {
++                for b in 0..5 {
++                    let (da, db) = ((f64::from(a) / 4.0 - 0.5) * w_cells / n, (f64::from(b) / 4.0 - 0.5) * w_cells / n);
++                    acc += g.sample((fs + da).clamp(0.0, 1.0), (ft + db).clamp(0.0, 1.0));
++                }
++            }
++            acc / 25.0
++        };
++        let (w_a, w_p) = (9.55 / 8.0, 19.1 / 8.0);
++        for tile_x in 0..16u32 {
++            for tile_y in 0..16u32 {
++                let t = TileId::new(id.face(), 15, id.x() * 16 + tile_x, id.y() * 16 + tile_y).expect("tile");
++                for l in (0..=32u32).step_by(2) {
++                    for k in (0..=32u32).step_by(2) {
++                        let dir = t.sample_direction(&TangentWarp, 32, k, l);
++                        let (_, fs, ft) = locate(dir, 11);
++                        hard.push(g.sample(fs, ft).abs());
++                        pyr.push((filtered(fs, ft, w_a) - filtered(fs, ft, w_p)).abs());
++                        all.push(g.sample(fs, ft).abs());
++                    }
++                }
++            }
++        }
++        println!(
++            "{amp:>5} | {:.2} / {:.2} | {:.2} / {:.2} | {:.2} / {:.2}",
++            pct(&mut hard.clone(), 0.99),
++            pct(&mut hard, 1.0),
++            pct(&mut pyr.clone(), 0.99),
++            pct(&mut pyr, 1.0),
++            pct(&mut all.clone(), 0.99),
++            pct(&mut all, 1.0)
++        );
++    }
++}
++
++fn ancestor_at_or_self(t: TileId, level: u8) -> Option<TileId> {
++    (t.level() >= level).then(|| ancestor_at(t, level))
++}
++
++fn main() {
++    let args: Vec<String> = std::env::args().skip(1).collect();
++    let num = |i: usize, d: f64| args.get(i).and_then(|s| s.parse().ok()).unwrap_or(d);
++    match args.first().map(String::as_str) {
++        Some("seams") => seams(),
++        Some("cost") => cost(),
++        Some("edits") => edits(),
++        Some("bounds") => bounds(),
++        Some("gate") => gate(),
++        Some("flight") => flight(num(1, 11.0) as u8, Path::Flight, num(2, 0.25), num(3, 6.0) as usize, num(4, 40.0) as usize),
++        Some("pan") => flight(num(1, 11.0) as u8, Path::Pan, num(2, 0.25), num(3, 6.0) as usize, num(4, 40.0) as usize),
++        _ => eprintln!("usage: block_stage <seams|cost|flight LEVEL COST WORKERS HALO|pan LEVEL COST WORKERS HALO>"),
++    }
++    let _ = face_to_direction;
++    let _ = &TangentWarp as &dyn FaceMapping;
++}
+diff --git a/crates/generators/src/lib.rs b/crates/generators/src/lib.rs
+index 00f0ad97..60c2c1f4 100644
+--- a/crates/generators/src/lib.rs
++++ b/crates/generators/src/lib.rs
+@@ -16,6 +16,7 @@ pub mod mesh;
+ pub mod normals;
+ pub mod ocean;
+ pub mod stage;
++pub mod spike_block;
+ pub mod stamp;
+ /// Test-only stress terrain; only test builds enable the `stress` feature (dev-dependencies).
+ #[cfg(feature = "stress")]
+diff --git a/crates/generators/src/spike_block.rs b/crates/generators/src/spike_block.rs
+new file mode 100644
+index 00000000..f3e220fd
+--- /dev/null
++++ b/crates/generators/src/spike_block.rs
+@@ -0,0 +1,287 @@
++//! SPIKE-34 prototype: a block field over a base field (ADR 0077). Never merged.
++//!
++//! A [`BlockField`] is a [`HeightField`] that adds, inside every block of a fixed grid (a tile of `level` on a cube face), the result of a
++//! per-block run: a stand-in for any regional process (erosion, drainage) that is iterative, reads the base field over the block plus a halo
++//! and keeps the halo's outer border fixed. A block that is not ready is the base field (the coarse stand-in) and is recorded as requested;
++//! `height` never waits (CON-22). The run is [`compute_block`]; its cost in the engine is the method's, here a parameter of the simulation.
++
++use crate::height::HeightField;
++use planet_core::cube::{direction_to_face, face_to_direction, TangentWarp};
++use planet_core::hash::hash_u64s;
++use planet_core::{Face, TileId, Vec3};
++use std::collections::{BTreeSet, HashMap};
++use std::sync::atomic::{AtomicU64, Ordering};
++use std::sync::{Mutex, RwLock};
++
++#[derive(Clone, Copy, Debug, PartialEq)]
++pub struct BlockParams {
++    /// The level of the tile that is the block (11: about 4.9 km, 10: 9.8 km, 9: 19.6 km at Earth's radius).
++    pub level: u8,
++    /// Grid spacing of a block's run in metres (the nominal one: the grid is whole cells of the block).
++    pub cell_m: f64,
++    /// Halo in cells of the run's grid, on every side.
++    pub halo_cells: usize,
++    /// Steps of the stand-in process (each a 3x3 relaxation: its reach is one cell per step).
++    pub steps: u32,
++    /// Amplitude of the stand-in's initial relief in metres.
++    pub amp_m: f64,
++    pub radius_m: f64,
++}
++
++impl BlockParams {
++    /// Block edge at the face centre in metres.
++    pub fn block_edge_m(&self) -> f64 {
++        self.radius_m * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << self.level)
++    }
++
++    /// The first tile level whose vertex spacing (`tile_cells` cells per edge) is at most twice the block's cell size: a coarser tile cannot show
++    /// the block's detail (Nyquist), so it is drawn from the base field whatever the block holds and never waits for it.
++    pub fn apply_level(&self, tile_cells: u32) -> u8 {
++        let mut level = self.level;
++        while self.block_edge_m() / f64::from(1u32 << (level - self.level)) / f64::from(tile_cells) > 2.0 * self.cell_m {
++            level += 1;
++        }
++        level
++    }
++
++    /// Interior cells per block edge: whole cells, a power of two is not needed.
++    pub fn cells(&self) -> usize {
++        (self.block_edge_m() / self.cell_m).round().max(2.0) as usize
++    }
++
++    fn word(&self) -> u64 {
++        hash_u64s(
++            0x626c_6f63,
++            &[
++                u64::from(self.level),
++                self.cell_m.to_bits(),
++                self.halo_cells as u64,
++                u64::from(self.steps),
++                self.amp_m.to_bits(),
++                self.radius_m.to_bits(),
++            ],
++        )
++    }
++}
++
++/// The result of one block's run: the height change against the base on the interior nodes, `(cells + 1)^2`, row-major with `s` fastest.
++pub struct BlockGrid {
++    pub id: TileId,
++    pub cells: usize,
++    pub delta: Vec<f32>,
++    pub min: f32,
++    pub max: f32,
++    pub compute_ms: f64,
++    pub content: u64,
++}
++
++impl BlockGrid {
++    pub fn bytes(&self) -> usize {
++        self.delta.len() * 4 + 64
++    }
++
++    /// Bilinear sample at the fractions `(fs, ft)` of the block.
++    pub fn sample(&self, fs: f64, ft: f64) -> f64 {
++        let n = self.cells;
++        let (x, y) = ((fs * n as f64).clamp(0.0, n as f64), (ft * n as f64).clamp(0.0, n as f64));
++        let (i, j) = ((x.floor() as usize).min(n - 1), (y.floor() as usize).min(n - 1));
++        let (wx, wy) = (x - i as f64, y - j as f64);
++        let at = |a: usize, b: usize| f64::from(self.delta[b * (n + 1) + a]);
++        at(i, j) * (1.0 - wx) * (1.0 - wy) + at(i + 1, j) * wx * (1.0 - wy) + at(i, j + 1) * (1.0 - wx) * wy + at(i + 1, j + 1) * wx * wy
++    }
++}
++
++fn lattice(seed: u64, x: i64, y: i64, z: i64) -> f64 {
++    let h = hash_u64s(seed, &[x as u64, y as u64, z as u64]);
++    (h >> 11) as f64 * (1.0 / (1u64 << 53) as f64) * 2.0 - 1.0
++}
++
++fn smooth(t: f64) -> f64 {
++    t * t * (3.0 - 2.0 * t)
++}
++
++/// Value noise in [-1, 1] on the lattice of `wavelength_m` over a position in metres.
++fn noise3(seed: u64, p: Vec3, wavelength_m: f64) -> f64 {
++    let q = p * (1.0 / wavelength_m);
++    let (fx, fy, fz) = (libm::floor(q.x), libm::floor(q.y), libm::floor(q.z));
++    let (tx, ty, tz) = (smooth(q.x - fx), smooth(q.y - fy), smooth(q.z - fz));
++    let (ix, iy, iz) = (fx as i64, fy as i64, fz as i64);
++    let mut acc = 0.0;
++    for dz in 0..2 {
++        for dy in 0..2 {
++            for dx in 0..2 {
++                let w = (if dx == 1 { tx } else { 1.0 - tx }) * (if dy == 1 { ty } else { 1.0 - ty }) * (if dz == 1 { tz } else { 1.0 - tz });
++                acc += w * lattice(seed, ix + dx, iy + dy, iz + dz);
++            }
++        }
++    }
++    acc
++}
++
++/// The stand-in's initial relief at a position: ridged noise of 800 m, 200 m and 50 m, scaled by the amplitude.
++fn relief(p: Vec3, amp_m: f64) -> f64 {
++    let mut s = 0.0;
++    for (k, w) in [(800.0, 1.0), (200.0, 0.5), (50.0, 0.25)] {
++        s += w * (1.0 - 2.0 * libm::fabs(noise3(0x5245_4c49, p, k)));
++    }
++    amp_m * s / 1.75
++}
++
++/// The block's face coordinates: `(face, s0, ds, t0, dt)`.
++fn block_frame(id: TileId) -> (Face, f64, f64, f64, f64) {
++    let (s0, s1, t0, t1) = id.bounds();
++    (id.face(), s0, s1 - s0, t0, t1 - t0)
++}
++
++/// Run the stand-in process over block `id` and its halo: initial heights are the base plus [`relief`]; `steps` relaxations of
++/// `h <- h + 0.5 (mean of the four neighbours - h)` with the outer border of the halo fixed; the result is the change against the base on the
++/// interior nodes. Deterministic: a fixed order, no threads, `libm` only. With `halo_cells >= steps` a node's value does not depend on
++/// where the halo ends, so the borders of neighbouring blocks agree bit for bit; with a smaller halo they differ.
++pub fn compute_block(base: &dyn HeightField, p: &BlockParams, id: TileId) -> BlockGrid {
++    let started = std::time::Instant::now();
++    let n = p.cells();
++    let h = p.halo_cells;
++    let w = n + 1 + 2 * h;
++    let (face, s0, ds, t0, dt) = block_frame(id);
++    let mut base_h = vec![0.0f64; w * w];
++    let mut cur = vec![0.0f64; w * w];
++    for b in 0..w {
++        for a in 0..w {
++            let (i, j) = (a as f64 - h as f64, b as f64 - h as f64);
++            let dir = face_to_direction(&TangentWarp, face, s0 + ds * i / n as f64, t0 + dt * j / n as f64);
++            let bh = base.height(dir);
++            base_h[b * w + a] = bh;
++            cur[b * w + a] = bh + relief(dir * p.radius_m, p.amp_m);
++        }
++    }
++    let mut next = cur.clone();
++    for _ in 0..p.steps {
++        for b in 1..w - 1 {
++            for a in 1..w - 1 {
++                let m = 0.25 * (cur[b * w + a - 1] + cur[b * w + a + 1] + cur[(b - 1) * w + a] + cur[(b + 1) * w + a]);
++                next[b * w + a] = cur[b * w + a] + 0.5 * (m - cur[b * w + a]);
++            }
++        }
++        std::mem::swap(&mut cur, &mut next);
++    }
++    let mut delta = Vec::with_capacity((n + 1) * (n + 1));
++    let (mut lo, mut hi, mut content) = (f32::INFINITY, f32::NEG_INFINITY, 0u64);
++    for b in 0..=n {
++        for a in 0..=n {
++            let k = (b + h) * w + a + h;
++            let d = (cur[k] - base_h[k]) as f32;
++            lo = lo.min(d);
++            hi = hi.max(d);
++            content = hash_u64s(content ^ 0x6772_6964, &[u64::from(d.to_bits())]);
++            delta.push(d);
++        }
++    }
++    BlockGrid { id, cells: n, delta, min: lo, max: hi, compute_ms: started.elapsed().as_secs_f64() * 1000.0, content }
++}
++
++/// The block of a direction and the fractions of the direction inside it.
++pub fn locate(dir: Vec3, level: u8) -> (TileId, f64, f64) {
++    let id = TileId::from_direction(&TangentWarp, dir, level);
++    let (_, s, t) = direction_to_face(&TangentWarp, dir);
++    let (_, s0, ds, t0, dt) = block_frame(id);
++    (id, (s - s0) / ds, (t - t0) / dt)
++}
++
++pub struct BlockField<'a> {
++    base: Box<dyn HeightField + 'a>,
++    pub params: BlockParams,
++    ready: RwLock<HashMap<TileId, std::sync::Arc<BlockGrid>>>,
++    requested: Mutex<BTreeSet<TileId>>,
++    pub calls: AtomicU64,
++    pub coarse_calls: AtomicU64,
++    inputs: u64,
++}
++
++impl<'a> BlockField<'a> {
++    pub fn new(base: Box<dyn HeightField + 'a>, params: BlockParams) -> Self {
++        let inputs = hash_u64s(0x626c_6b66, &[base.inputs_hash(), params.word()]);
++        Self { base, params, ready: RwLock::default(), requested: Mutex::default(), calls: AtomicU64::new(0), coarse_calls: AtomicU64::new(0), inputs }
++    }
++
++    pub fn base(&self) -> &dyn HeightField {
++        self.base.as_ref()
++    }
++
++    pub fn insert(&self, g: BlockGrid) {
++        self.ready.write().expect("blocks").insert(g.id, std::sync::Arc::new(g));
++    }
++
++    pub fn remove(&self, id: TileId) -> bool {
++        self.ready.write().expect("blocks").remove(&id).is_some()
++    }
++
++    pub fn get(&self, id: TileId) -> Option<std::sync::Arc<BlockGrid>> {
++        self.ready.read().expect("blocks").get(&id).cloned()
++    }
++
++    pub fn ready_ids(&self) -> Vec<TileId> {
++        self.ready.read().expect("blocks").keys().copied().collect()
++    }
++
++    /// The blocks asked for since the last call (a stand-in was drawn for them).
++    pub fn take_requests(&self) -> Vec<TileId> {
++        std::mem::take(&mut *self.requested.lock().expect("requests")).into_iter().collect()
++    }
++}
++
++impl HeightField for BlockField<'_> {
++    fn height(&self, dir: Vec3) -> f64 {
++        self.calls.fetch_add(1, Ordering::Relaxed);
++        let b = self.base.height(dir);
++        let (id, fs, ft) = locate(dir, self.params.level);
++        match self.ready.read().expect("blocks").get(&id) {
++            Some(g) => b + g.sample(fs, ft),
++            None => {
++                self.coarse_calls.fetch_add(1, Ordering::Relaxed);
++                self.requested.lock().expect("requests").insert(id);
++                b
++            }
++        }
++    }
++
++    fn seed(&self) -> u64 {
++        self.base.seed()
++    }
++
++    fn implementation_id(&self) -> &'static str {
++        "spike-block-v0"
++    }
++
++    fn version(&self) -> u32 {
++        1
++    }
++
++    fn max_abs_height_m(&self) -> f64 {
++        self.base.max_abs_height_m() + 2.0 * self.params.amp_m
++    }
++
++    fn inputs_hash(&self) -> u64 {
++        self.inputs
++    }
++
++    /// The key of a tile: the base's, chained with the block results the tile reads (none for a tile coarser than the block grid: it is the
++    /// base's tile, whatever the blocks hold; a block not ready is its own word, so a stand-in tile never has the key of an exact one).
++    fn inputs_hash_for(&self, tile: TileId, map: &dyn planet_core::cube::FaceMapping) -> u64 {
++        let base = self.base.inputs_hash_for(tile, map);
++        if tile.level() < self.params.level {
++            return base;
++        }
++        let mut anc = tile;
++        while anc.level() > self.params.level {
++            anc = anc.parent().expect("a parent");
++        }
++        let word = self.get(anc).map_or(0, |g| g.content | 1);
++        hash_u64s(self.inputs, &[base, word, anc.raw()])
++    }
++
++    /// Bounds: the base's, widened by the stand-in's amplitude bound (the plan does not know whether a block is ready).
++    fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
++        let (lo, hi) = self.base.height_bounds(centre, angular_radius);
++        (lo - 2.0 * self.params.amp_m, hi + 2.0 * self.params.amp_m)
++    }
++}
