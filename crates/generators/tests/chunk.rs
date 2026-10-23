@@ -82,13 +82,17 @@ fn chunk_ids_of_directions_at_face_edges_and_corners_are_tiles_of_the_grid_level
 #[test]
 fn the_apply_level_is_the_coarsest_level_whose_vertex_spacing_is_at_most_twice_the_cell() {
     assert_eq!(TILE_CELLS, 32);
-    assert_eq!(apply_level(8.0, R, TILE_CELLS), 15, "8 m cells: spacing 9.6 m at level 15, 19.1 m at 14");
-    assert_eq!(apply_level(4.0, R, TILE_CELLS), 16, "4 m cells: 4.8 m at level 16, 9.6 m at 15");
-    assert_eq!(apply_level(10.0, R, TILE_CELLS), 14, "10 m cells: spacing 19.1 m at level 14 is under 20 m");
+    assert_eq!(apply_level(8.0, R, TILE_CELLS), Some(15), "8 m cells: spacing 9.6 m at level 15, 19.1 m at 14");
+    assert_eq!(apply_level(4.0, R, TILE_CELLS), Some(16), "4 m cells: 4.8 m at level 16, 9.6 m at 15");
+    assert_eq!(apply_level(10.0, R, TILE_CELLS), Some(14), "10 m cells: spacing 19.1 m at level 14 is under 20 m");
+    assert_eq!(apply_level(1e-9, R, TILE_CELLS), Some(planet_core::tile::MAX_LEVEL), "a finer cell than any level supports clamps");
+    for (cell, radius, cells) in [(f64::NAN, R, 32), (0.0, R, 32), (-8.0, R, 32), (8.0, 0.0, 32), (8.0, f64::INFINITY, 32), (8.0, R, 0)] {
+        assert_eq!(apply_level(cell, radius, cells), None, "cell {cell} radius {radius} cells {cells}");
+    }
     // The apply level never gets coarser with a finer cell.
     let mut last = 0;
     for cell in [64.0, 32.0, 16.0, 8.0, 4.0, 2.0, 1.0] {
-        let l = apply_level(cell, R, TILE_CELLS);
+        let l = apply_level(cell, R, TILE_CELLS).unwrap();
         assert!(l >= last, "cell {cell}: level {l} after {last}");
         last = l;
     }

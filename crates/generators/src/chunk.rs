@@ -56,14 +56,18 @@ impl ChunkId {
 
 /// The apply level of a chunk field with raster cells of `cell_m` metres on a body of radius `radius_m`: the coarsest tile level whose
 /// vertex spacing (the tile edge at the face centre over `cells` intervals) is at most twice the cell. A tile above it is identity on
-/// the base field (GEN-035). 8 m cells give level 15 (spacing 9.6 m), 4 m cells level 16.
-pub fn apply_level(cell_m: f64, radius_m: f64, cells: u32) -> u8 {
+/// the base field (GEN-035). 8 m cells give level 15 (spacing 9.6 m), 4 m cells level 16; a cell finer than the finest level supports gives
+/// `MAX_LEVEL`. `None` for a cell or radius that is not a positive finite number and for zero cells.
+pub fn apply_level(cell_m: f64, radius_m: f64, cells: u32) -> Option<u8> {
+    if !(cell_m.is_finite() && cell_m > 0.0 && radius_m.is_finite() && radius_m > 0.0 && cells > 0) {
+        return None;
+    }
     let face_arc_m = radius_m * std::f64::consts::FRAC_PI_2;
     for level in 0..=MAX_LEVEL {
         let spacing = face_arc_m / f64::from(1u32 << level) / f64::from(cells);
         if spacing <= 2.0 * cell_m {
-            return level;
+            return Some(level);
         }
     }
-    MAX_LEVEL
+    Some(MAX_LEVEL)
 }
