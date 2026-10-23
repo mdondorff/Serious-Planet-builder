@@ -1,1 +1,0 @@
-- 2026-10-22 **plan-cache-keep** (explorer, SPIKE-29): the window tells the plan cache where an edit changed the items; the next plan keeps the footprint hashes, certificates and cap bounds the edit cannot reach and plans what a fresh cache plans (STRM-034, WDEF-015, WDEF-016).

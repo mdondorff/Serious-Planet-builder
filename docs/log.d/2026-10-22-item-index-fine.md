@@ -1,1 +1,0 @@
-- 2026-10-22 **item-index-fine** (explorer, SPIKE-29 fix 4): the footprint query takes its candidates from an index by reach class (cells sized for the class) instead of every item of 7 x 7 cells of 40 km, with the scan's exact result; WDEF-014.

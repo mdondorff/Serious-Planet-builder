@@ -1,1 +1,0 @@
-- 2026-10-21 **lod-capping-ui** (sonnet-explorer, opus-planner: ADR 0074 change 3 of 3): the planner sets the capped state on held-back leaves (grey in the F3 stale-tile overlay, and in the tiles and mesh overlays whatever the level); the window prints one line in 5 s with the number of capped tiles and no crash report (VIEW-044, VIEW-040).

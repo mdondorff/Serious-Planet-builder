@@ -1,26 +1,22 @@
 # Status
 
-Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`.
+Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M7's queue as executed: `docs/milestones/M7-report.md`.
 
 ## Waiting for the owner
-- **Quota (owner, 2026-10-21):** the M6 housekeeping runs this week; M7 work starts after the Sunday reset or on the owner's word.
-- **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); an F9 capture of tile flashing (Tracked); the SPIKE-27 sheets to keep in `docs/dev_screenshots/`.
+- **CON-08 reading** (ADR 0077 point 6, proposed): "regional (per tile with a halo)" read as "per block of a fixed grid with a bounded halo"; a reading or a one-sentence amendment. Decide with the SPIKE-33 and SPIKE-34 reports (2026-10-24 evening).
+- **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked).
 - **At the laptop (postponed):** the NVIDIA driver update (591.86; device losses under parallel GPU load, Tracked); excluding the repo's `target` folders from Windows Search indexing.
 
 Dormant (no near trigger; not asked now):
-- **CON-08 reading** (ADR 0022): may a field read another field of its own stage? Trigger: a regional chain that needs same-stage reads.
 - **ADR 0045** (bodies, bake resolution, storage budget): proposed. Trigger: multi-body work.
 - **Region keep-inside** (`openspec/changes/region-mode1`): soft influence for Cities, not a hard clip (owner, 2026-10-21, Q8). Trigger: Cities.
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
-## M7 queue: close-out (plan: `docs/briefings/m7-planning.md`; next week's start: `docs/briefings/week-2026-10-25.md`)
-Done in M7: GT (#566), G0, G2a-c, A5, ADR 0074, SR (F7), H1, H2, SPIKE-28 to 32, edit scaling (SPIKE-29 fixes 1-4, plan-cache-keep), editor default store, relief scale, P2-7.
-
+## M8 queue: preparation (M7 closed 2026-10-23, `docs/milestones/M7-report.md`; next week's start: `docs/briefings/week-2026-10-25.md`)
 | # | Step | Lane |
 |---|---|---|
-| AC | M7 report drafted (`docs/milestones/M7-report.md`): every exit criterion has evidence, GT merged (#566); waits for the owner's GO | owner |
-| HK | M7 housekeeping (`housekeeping` skill, README step included) | planner, then crusader |
-| M8-0 | M8 stage model: ADR 0077 (proposed: blocks of a fixed grid, a coupled process is one field; the owner rules on the CON-08 reading); SPIKE-33 landscape evolution (spikes) and SPIKE-34 block stage in the engine (explorer), reports by 2026-10-24 evening; then the M8 plan and decisions before 2026-10-25 | planner, spikes, explorer |
+| M8-0 | M8 stage model: ADR 0077 (proposed: blocks of a fixed grid, a coupled process is one field); SPIKE-33 landscape evolution (spikes) and SPIKE-34 block stage in the engine (explorer), reports by 2026-10-24 evening; then the M8 plan and decisions before 2026-10-25 | planner, spikes, explorer |
+| HK | M7 housekeeping, mechanical pass from the planner's list in `docs/milestones/M7-report.md` ("Housekeeping list") | crusader |
 
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
 

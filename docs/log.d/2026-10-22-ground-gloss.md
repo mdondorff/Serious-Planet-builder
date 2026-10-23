@@ -1,1 +1,0 @@
-- 2026-10-22 **ground-gloss** (explorer, M7 G2b): the detailed ground takes a GGX sun highlight with per-material roughness from the same weights (wet and icy ground glossier, look data), and F6 cycles the ground detail in the viewer and editor (natural 0.6 by default, full, off; the title and help name it); the goldens keep strength 0 (REND-035, LOOK-010, VIEW-046).

@@ -1,10 +1,10 @@
-# M7 Ground detail and edit health: report (DRAFT, 2026-10-23)
+# M7 Ground detail and edit health: report (2026-10-23)
 
-Drafted by opus-planner from the log (`cargo xtask log`), perf windows 24 and 25, SPIKE-28 to 32 and the GT pull request #566. No `cargo xtask accept M7` exists; the exit criteria are the owner's (2026-10-21, `docs/briefings/m7-planning.md`, "Scope reshuffle").
+Drafted by opus-planner from the log (`cargo xtask log`), perf windows 24 and 25, SPIKE-28 to 32 and the GT pull request #566. No `cargo xtask accept M7` exists; the exit criteria are the owner's (2026-10-21, `docs/archive/M7/m7-planning.md`, "Scope reshuffle").
 
-## Verdict (proposed): GO once #566 is merged
+## Verdict: GO, M7 closed (owner, 2026-10-23)
 - Every exit criterion has evidence (section 1); the ground-detail look is approved by the owner as the floor, not the target (2026-10-23): quality rises in M8.
-- Needed for the GO: #566 merged with the blessed goldens; the owner's GO.
+- #566 merged with the goldens blessed by the owner on WARP, llvmpipe and the RTX.
 - Optional: a confirming perf window after #566 (the GT pass changes albedo inputs, not the shader's work; window 25 is from before it).
 
 ## 1. Exit criteria
@@ -36,3 +36,29 @@ Drafted by opus-planner from the log (`cargo xtask log`), perf windows 24 and 25
 - The editor ran on the 256-cell in-memory bake (cells of about 39 km) until VIEW-052; the owner's flatness reports came partly from that. A test session states which world it runs on.
 - Two perf windows met a GPU budget by a rewrite (window 24 over, G2c, window 25 under).
 - Realism spikes ran cheaply (hours each) and set M8's scope before any M8 code.
+
+## Process review
+opus-planner, 2026-10-23, from recorded data (housekeeping step 9); M6 is the baseline.
+
+| Measure | M6 (2026-10-18 to 21) | M7 (2026-10-21 to 23) | Source |
+|---|---|---|---|
+| PRs merged | 247 | 77 (one main lane by the owner's quota rule) | `gh pr list --search merged:` |
+| PR lead time, median / max | 14 min / not recorded | 13 / 223 min | PR timestamps |
+| CI slowest job median | `windows (WARP)` A+B 12.1 min | `windows (WARP)` C 1/2 13.2 min (p90 15.3, within 16) | `cargo xtask ci-stats` |
+| Perf windows | 12 to 23 | 24 (over budget) and 25 (within, after G2c) | log |
+| Rework | two unsynced spec deltas | a Toksvig kernel for the sparkle reverted (no effect); the editor ran on the 256-cell bake until VIEW-052 | log, status |
+| Coordination stalls | classifier refusals | idle sessions did not read their inbox; two coder sessions vanished from the owner's list; the laptop view lagged behind Remote Control | owner, this session |
+
+Improvements, by gain against cost:
+| # | Improvement | Session | Where |
+|---|---|---|---|
+| 1 | Coder sessions run a loop line that names only `docs/status.md`, and Remote Control is on in every session | owner | practice (2026-10-23) |
+| 2 | A test or review session states which world and store it runs on (the editor title does since VIEW-052) | all | practice |
+| 3 | Spikes before a milestone's plan (SPIKE-28 to 34 cost hours each and set M8's scope) | opus-planner | practice |
+| 4 | GPU timings record the display setup (the internal panel can route through the integrated GPU) | coders | M8 perf windows |
+
+## Housekeeping list (for sonnet-crusader, queue row HK)
+1. `README.md` (housekeeping step 7b): status paragraph (M7 closed, M8 "Natural landscape" in preparation), what works today (ground detail F6, scale references F7, problems tab, `cargo xtask store`, relief scale), and the complete key lists from `key_command` (`crates/app/src/window.rs`), `HELP_KEYS` (`crates/app/src/panels.rs`) and `EDIT_KEYS_HELP` (`crates/app/src/editwin.rs`), plus the `cargo xtask` table.
+2. Stale references in specs and comments: `docs/briefings/m7-planning.md` (now `docs/archive/M7/m7-planning.md`), "proposed" for ADRs since accepted, "not yet built" for M7's built items (REND-034 to 037, VIEW-047 to 052).
+3. `openspec/changes/`: no finished change left unarchived; archived changes hold only `proposal.md` and spec deltas.
+4. `cargo xtask spec-lint` and `cargo xtask test fast`; one docs PR.

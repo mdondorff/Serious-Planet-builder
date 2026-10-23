@@ -1,6 +1,6 @@
 # Learnings
 
-Added with `/learning`. Each entry names its scope, the assumption it changes, the follow-up and when it becomes obsolete. A learning is promoted (a spec line, a `CLAUDE.md` line or a test that cites it), kept while still active and surprising, or archived with its milestone (ADR 0075). Cap: 20 KB. Archives: `docs/archive/M0-M3/learnings.md`, `docs/archive/M4/learnings.md`, `docs/archive/M6/learnings.md` (M5 and M6, and the full text of the entries below).
+Added with `/learning`. Each entry names its scope, the assumption it changes, the follow-up and when it becomes obsolete. A learning is promoted (a spec line, a `CLAUDE.md` line or a test that cites it), kept while still active and surprising, or archived with its milestone (ADR 0075). Cap: 20 KB. Archives: `docs/archive/M0-M3/learnings.md`, `docs/archive/M4/learnings.md`, `docs/archive/M6/learnings.md` (M5 and M6, and the full text of the entries below), `docs/archive/M7/learnings.md`.
 
 ## 2026-10-10 nextest rejects a filterset that matches no binary
 Scope: project (ADR 0009)
@@ -78,12 +78,6 @@ Scope: generators::stamp (GEN-026, GEN-030)
 - Summing declared maxima gave a fine tile a 10 km extent under a 5 km plateau and the plan refused it; a smooth's per-item counter re-sharpened overlapping strokes.
 - Bound a stage by the running height carried through the items in order; test rounding over a base with exact bounds; a per-point count belongs to the layer.
 - A new stamp kind needs a monotone profile or a bound rule of its own.
-
-## 2026-10-21 Plan refusals at brush stacks were real steepness, not loose bounds
-Scope: editor::slope, frame::lod (LOD-008), generators::stamp
-- SPIKE-26: 44 raise strokes of 5 m made a 73 degree spike; the bounds were exact to 1 mm, the ground was steeper than the plan can morph (`LodParams::drawable_slope`, 2.5).
-- Measure a bound against sampled heights before tightening it; guard steepness where the ground is made (the brush) and in the plan (ADR 0074).
-- Obsolete when: the plan draws ground of any slope and the guard is a warning (M7 A5).
 
 ## 2026-10-22 A plan after an edit is hashing thousands of coarse tiles, not bounds queries
 Scope: project (streaming cache, LOD, authored items; STRM-027, STRM-034)

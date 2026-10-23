@@ -1,1 +1,0 @@
-- 2026-10-22 **spec-style-lint** (sonnet-crusader, opus-planner: M7 H2 step 4; BUILD-024): spec-lint fails a requirement statement over 120 words or with a first-person word (ADR 0055 point 4); the 191 statements that were longer are listed in `xtask/src/long_statements.txt` with their words and may shrink but not grow.
