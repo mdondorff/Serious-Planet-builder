@@ -27,7 +27,7 @@ fn world(spec: CoupledSpec) -> GlobalWorld {
 }
 
 fn spec() -> CoupledSpec {
-    CoupledSpec { n: N, steps: 6, bake_res: N, params: CoupledParams::default() }
+    CoupledSpec { n: N, steps: 6, bake_res: N, params: CoupledParams::default(), inputs: 0 }
 }
 
 fn state() -> planet_generators::coupled::CoupledState {
@@ -75,6 +75,7 @@ fn a_changed_run_parameter_the_steps_or_the_base_resolution_changes_every_key() 
         CoupledSpec { params: CoupledParams { seed: 1, ..spec().params }, ..spec() },
         CoupledSpec { params: CoupledParams { min_height_m: 1.0, ..spec().params }, ..spec() },
         CoupledSpec { n: N * 2, ..spec() },
+        CoupledSpec { inputs: 1, ..spec() },
     ];
     for v in variants {
         let k = world(v).coupled_key(tile, 4);
@@ -88,7 +89,17 @@ fn block(cells: u32) -> CoupledBlock {
     let n = (cells * cells) as usize;
     CoupledBlock {
         cells,
-        z: (0..n).map(|i| f32::from_bits(0x4000_0000 ^ (i as u32) << 5)).collect(),
+        // Finite values, a signalling NaN, a negative quiet NaN, -0.0, a subnormal and infinity: the bits must survive.
+        z: (0..n)
+            .map(|i| match i {
+                1 => f32::from_bits(0x7F80_0001),
+                2 => f32::from_bits(0xFFC0_1234),
+                3 => -0.0,
+                4 => f32::from_bits(1),
+                5 => f32::INFINITY,
+                _ => f32::from_bits(0x4000_0000 ^ (i as u32) << 5),
+            })
+            .collect(),
         area_m2: (0..n).map(|i| i as f32 * 1.5e6 + 0.25).collect(),
         receiver: (0..n).map(|i| if i % 7 == 0 { u32::MAX } else { i as u32 * 3 }).collect(),
     }
@@ -100,7 +111,9 @@ fn a_block_round_trips_and_a_bad_payload_is_refused() {
     let b = block(4);
     let bytes = encode_coupled_block(&b).unwrap();
     assert_eq!(bytes[0], COUPLED_CODEC_VERSION);
-    assert_eq!(decode_coupled_block(&bytes).unwrap(), b);
+    let back = decode_coupled_block(&bytes).unwrap();
+    assert!(back.z.iter().zip(&b.z).all(|(x, y)| x.to_bits() == y.to_bits()), "the bits of z survive");
+    assert_eq!((&back.area_m2, &back.receiver, back.cells), (&b.area_m2, &b.receiver, b.cells));
     assert!(matches!(decode_coupled_block(&bytes[..5]), Err(BlockCodecError::Short)));
     let mut other = bytes.clone();
     other[0] = 9;

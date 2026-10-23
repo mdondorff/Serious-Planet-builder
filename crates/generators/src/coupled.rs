@@ -15,6 +15,10 @@ use planet_core::Vec3;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
+/// Version of the run's algorithm and arithmetic; it is part of the key of the stored result (STRM-043), so a change to the flood, the jitter
+/// or the update that changes results must bump it.
+pub const COUPLED_VERSION: u32 = 1;
+
 /// "No cell": a receiver of an outlet, a neighbour off the lattice.
 pub const NONE: u32 = u32::MAX;
 
@@ -137,6 +141,19 @@ pub struct CoupledInput {
     pub z: Vec<f32>,
     pub uplift: Vec<f32>,
     pub erodibility: Vec<f32>,
+}
+
+/// A hash of everything the run reads besides its parameters: the starting heights, the uplift, the erodibility and the planet radius. It goes
+/// into the key of the stored result (STRM-043), so two runs that differ in an input never share a key.
+pub fn inputs_hash(input: &CoupledInput, radius_m: f64) -> u64 {
+    let mut h = mix64(radius_m.to_bits());
+    for plane in [&input.z, &input.uplift, &input.erodibility] {
+        h = mix64(h ^ plane.len() as u64);
+        for v in plane.iter() {
+            h = mix64(h ^ u64::from(v.to_bits()));
+        }
+    }
+    h
 }
 
 /// What a step changed.
@@ -517,6 +534,26 @@ mod tests {
         let sea = cells.iter().position(|&z| z <= 0.0).unwrap();
         assert_eq!(am.pixel((sea % n) as u32, (sea / n) as u32), [0, 0, 60, 255], "a cell with no more than its own area is the darkest");
         assert_eq!(am, area_map(&lat, face, &state.area_m2));
+    }
+
+    // spec: STRM-043
+    #[test]
+    fn the_inputs_hash_changes_with_every_input_and_the_radius() {
+        let lat = Lattice::new(12, R);
+        let base = world(&lat);
+        let h = inputs_hash(&base, R);
+        assert_eq!(h, inputs_hash(&world(&lat), R));
+        assert_ne!(h, inputs_hash(&base, R + 1.0));
+        for plane in 0..3 {
+            let mut other = world(&lat);
+            let v = match plane {
+                0 => &mut other.z,
+                1 => &mut other.uplift,
+                _ => &mut other.erodibility,
+            };
+            v[5] = f32::from_bits(v[5].to_bits() ^ 1);
+            assert_ne!(h, inputs_hash(&other, R), "plane {plane}");
+        }
     }
 
     // spec: GEN-040

@@ -21,7 +21,7 @@ use std::time::Instant;
 use planet_core::cube::TangentWarp;
 use planet_core::hash::HASH_VERSION;
 use planet_core::{Face, FaceMapping, TileId};
-use planet_generators::coupled::{CoupledParams, CoupledState, NONE as COUPLED_NONE};
+use planet_generators::coupled::{CoupledParams, CoupledState, COUPLED_VERSION, NONE as COUPLED_NONE};
 use planet_generators::global::{
     bake_block, bake_blocks_with, check_tiled, BakeError, GlobalCoarseGenerator, GlobalSample, LatticeSource, ReadError, GLOBAL_VERSION,
     IMPLEMENTATION_ID, MAX_BATCH_BYTES, MAX_BLOCK_CELLS, MAX_TILED_RES,
@@ -517,7 +517,8 @@ pub fn stored_channel<C: TileChannel>(
     Ok(payload)
 }
 
-/// The run a coupled channel stores (STRM-043): everything its result depends on besides the definition. All of it is in every block's key.
+/// The run a coupled channel stores (STRM-043): everything its result depends on besides the definition (the parameters, and a hash of the
+/// inputs). All of it is in every block's key.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CoupledSpec {
     /// Cells per face edge of the run's lattice.
@@ -526,18 +527,20 @@ pub struct CoupledSpec {
     /// Cells per face edge of the bake the run starts from.
     pub bake_res: u32,
     pub params: CoupledParams,
+    /// [`planet_generators::coupled::inputs_hash`] of the run's inputs.
+    pub inputs: u64,
 }
 
 impl Default for CoupledSpec {
     fn default() -> Self {
-        CoupledSpec { n: 2048, steps: 80, bake_res: 2048, params: CoupledParams::default() }
+        CoupledSpec { n: 2048, steps: 80, bake_res: 2048, params: CoupledParams::default(), inputs: 0 }
     }
 }
 
 impl CoupledSpec {
     /// The canonical bytes of the spec: the integers, then the bits of the parameters, little-endian.
     fn bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(52);
+        let mut out = Vec::with_capacity(64);
         for v in [self.n, self.steps, self.bake_res] {
             out.extend_from_slice(&v.to_le_bytes());
         }
@@ -545,6 +548,8 @@ impl CoupledSpec {
             out.extend_from_slice(&v.to_bits().to_le_bytes());
         }
         out.extend_from_slice(&self.params.seed.to_le_bytes());
+        out.extend_from_slice(&self.inputs.to_le_bytes());
+        out.extend_from_slice(&COUPLED_VERSION.to_le_bytes());
         out
     }
 }
@@ -727,8 +732,10 @@ impl GlobalWorld {
     pub fn coupled_records(&self, state: &CoupledState) -> Result<Vec<Record>, BlockCodecError> {
         let n = self.coupled.n as usize;
         let (level, cells) = self.layout(self.coupled.n).map_err(|_| BlockCodecError::Grid { level: 0, cells: self.coupled.n })?;
-        if state.z.len() != 6 * n * n {
-            return Err(BlockCodecError::Samples { got: state.z.len(), expected: 6 * (n as u64) * (n as u64) });
+        for len in [state.z.len(), state.area_m2.len(), state.receiver.len()] {
+            if len != 6 * n * n {
+                return Err(BlockCodecError::Samples { got: len, expected: 6 * (n as u64) * (n as u64) });
+            }
         }
         let per_edge = 1u32 << level;
         let b = cells as usize;
