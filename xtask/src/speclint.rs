@@ -432,14 +432,14 @@ pub fn style_errors(specs: &BTreeMap<String, String>, long_statements: &str) -> 
 }
 
 /// The files every session reads at its start and the most bytes each may hold (ADR 0075 point 1, BUILD-023): the status file, the learnings and
-/// the spike register by size (15, 20 and 10 KiB), `CLAUDE.md` and the constitution by the size they had when the ADR was accepted. A cap changes
+/// the spike register by size (15, 20 and 10 KiB), `CLAUDE.md` and the constitution by the size they had when the ADR was accepted (the constitution's raised by ADR 0078). A cap changes
 /// only by a new ADR.
 pub const HOT_FILE_CAPS: [(&str, usize); 5] = [
     ("docs/status.md", 15 * 1024),
     ("docs/learnings.md", 20 * 1024),
     ("docs/spikes.md", 10 * 1024),
     ("CLAUDE.md", 7_514),
-    ("docs/constitution.md", 8_574),
+    ("docs/constitution.md", 8_804),
 ];
 
 /// BUILD-023: one error per hot file over its cap, naming the file, its size and the cap. `sizes` is `(path, bytes)` with a line end counted
@@ -596,7 +596,7 @@ mod tests {
         let cap = |name: &str| HOT_FILE_CAPS.iter().find(|(p, _)| *p == name).unwrap().1;
         assert_eq!(
             [cap("docs/status.md"), cap("docs/learnings.md"), cap("docs/spikes.md"), cap("CLAUDE.md"), cap("docs/constitution.md")],
-            [15_360, 20_480, 10_240, 7_514, 8_574]
+            [15_360, 20_480, 10_240, 7_514, 8_804]
         );
         // A file that is missing or not capped is no error.
         assert!(hot_file_errors(&[]).is_empty());

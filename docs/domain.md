@@ -158,3 +158,4 @@ Today the chain is `base field (bake + erosion creases) -> stamp stages (edits)`
 - An ADR, spec or change that adds, renames or retires a term updates this file in the same PR.
 - `Owner` names crates; the housekeeping skill checks this file at each milestone.
 - One meaning per new term; a homonym goes into section 4 until it is renamed.
+- A rename lists the former name in the term's row ("former: block"); ADRs follow it under ADR 0078.
