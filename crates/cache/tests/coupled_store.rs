@@ -61,6 +61,28 @@ fn a_stored_run_reads_back_bit_for_bit() {
 
 // spec: STRM-043
 #[test]
+fn the_block_of_a_tile_holds_the_lattice_cells_under_it() {
+    let w = world(spec());
+    let s = state();
+    let n = N as usize;
+    let records = w.coupled_records(&s).unwrap();
+    for (face, tx, ty) in [(0u8, 0u32, 0u32), (2, 1, 3), (5, 3, 0), (3, 2, 2)] {
+        let tile = TileId::new(Face(face), 2, tx, ty).unwrap();
+        let block = decode_coupled_block(&records.iter().find(|r| r.tile == tile).expect("a record per tile").payload).unwrap();
+        assert_eq!(block.cells, 4);
+        for j in 0..4usize {
+            for i in 0..4usize {
+                let cell = usize::from(face) * n * n + (ty as usize * 4 + j) * n + tx as usize * 4 + i;
+                assert_eq!(block.z[j * 4 + i].to_bits(), s.z[cell].to_bits(), "tile ({face},{tx},{ty}) cell ({i},{j})");
+                assert_eq!(block.area_m2[j * 4 + i].to_bits(), s.area_m2[cell].to_bits());
+                assert_eq!(block.receiver[j * 4 + i], s.receiver[cell]);
+            }
+        }
+    }
+}
+
+// spec: STRM-043
+#[test]
 fn a_changed_run_parameter_the_steps_or_the_base_resolution_changes_every_key() {
     let tile = TileId::new(Face(2), 2, 1, 3).unwrap();
     let base = world(spec()).coupled_key(tile, 4);
