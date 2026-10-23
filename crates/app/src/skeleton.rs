@@ -1,4 +1,4 @@
-//! The M1 walking skeleton: generator -> FramePlan -> GPU executor -> pixels, driven from all three run modes.
+//! The walking skeleton: generator -> FramePlan -> GPU executor -> pixels, driven from all three run modes (the `generate` and `test-render` modes and the shared options).
 
 use crate::worldfield::WorldTerrain;
 use crate::{err, Options};

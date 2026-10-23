@@ -52,8 +52,6 @@ const TITLE_PERIOD_MS: u64 = 500;
 /// The smoke run reports sooner, so that its short run shows a title.
 const SMOKE_TITLE_PERIOD_MS: u64 = 100;
 const GPU_SAMPLE_PERIOD: Duration = Duration::from_secs(1);
-/// The pre-fill levels the readiness report counts (ADR 0045 point 3 default).
-const READINESS_PREFILL_LEVELS: u8 = 4;
 
 /// Whether a key press is the camera's and the commands': it is when the world gets it (no text field has the focus), and always while the
 /// pointer is captured (looking around: the cursor is hidden and cannot have clicked into a field, so a focus left over from before the
@@ -1578,7 +1576,7 @@ pub fn run_window(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         .ok_or_else(|| format!("--view must be one of {}, got '{view_name}'", views.join(", ")))?;
     let (bake_done, bake_total) = world.bake_blocks();
     let (prefill_done, prefill_total) = if store.is_some() {
-        let levels = o.prefill_levels.unwrap_or(READINESS_PREFILL_LEVELS);
+        let levels = o.prefill_levels.unwrap_or(planet_cache::meshpack::DEFAULT_PREFILL_LEVELS);
         world.prefill_present(o.floor_for(o.cells), levels, o.cells, o.finest_level_for(o.cells)).map(|(p, t)| (p as u64, t as u64))?
     } else {
         (0, 0)

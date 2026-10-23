@@ -1,0 +1,30 @@
+COARSE sp35 n=2048: base sampled in 85.3s (6 threads)
+COARSE sp35 step 0: mean |dz| 37.530 m, max 936.5 m, 6889 ms, peak 1071 MB
+COARSE sp35 step 5: mean |dz| 18.625 m, max 862.2 m, 4619 ms, peak 1133 MB
+COARSE sp35 step 10: mean |dz| 11.044 m, max 701.7 m, 3878 ms, peak 1133 MB
+COARSE sp35 step 15: mean |dz| 6.119 m, max 657.9 m, 4186 ms, peak 1133 MB
+COARSE sp35 step 20: mean |dz| 3.461 m, max 605.8 m, 4635 ms, peak 1133 MB
+COARSE sp35 step 25: mean |dz| 2.429 m, max 571.7 m, 3766 ms, peak 1133 MB
+COARSE sp35 step 30: mean |dz| 1.999 m, max 459.3 m, 3745 ms, peak 1133 MB
+COARSE sp35 step 35: mean |dz| 1.724 m, max 429.0 m, 3703 ms, peak 1133 MB
+COARSE sp35 step 40: mean |dz| 1.513 m, max 412.7 m, 3810 ms, peak 1133 MB
+COARSE sp35 step 45: mean |dz| 1.355 m, max 340.9 m, 3713 ms, peak 1133 MB
+COARSE sp35 step 50: mean |dz| 1.211 m, max 440.0 m, 3933 ms, peak 1133 MB
+COARSE sp35 step 55: mean |dz| 1.085 m, max 393.2 m, 3752 ms, peak 1133 MB
+COARSE sp35 step 60: mean |dz| 0.988 m, max 403.9 m, 3737 ms, peak 1133 MB
+COARSE sp35 step 65: mean |dz| 0.897 m, max 278.5 m, 3677 ms, peak 1133 MB
+COARSE sp35 step 70: mean |dz| 0.816 m, max 358.3 m, 3739 ms, peak 1133 MB
+COARSE sp35 step 75: mean |dz| 0.758 m, max 477.3 m, 3789 ms, peak 1133 MB
+COARSE sp35 step 80: mean |dz| 0.704 m, max 355.5 m, 3765 ms, peak 1133 MB
+COARSE sp35 step 85: mean |dz| 0.652 m, max 436.5 m, 3812 ms, peak 1133 MB
+COARSE sp35 step 90: mean |dz| 0.612 m, max 404.6 m, 3681 ms, peak 1133 MB
+COARSE sp35 step 95: mean |dz| 0.571 m, max 367.8 m, 3726 ms, peak 1133 MB
+COARSE sp35 step 99: mean |dz| 0.542 m, max 457.6 m, 3740 ms, peak 1133 MB
+SITE face 0 cell (820,1542) of 2048: lat 22.536 lon -8.943, coarse relief 2368 m in 7x7 cells, z 3487 m
+BREACH c0 (NetOpts { route: D8, blend: true, protect: false, breach: true }, meander 0 m): uphill channel cells 7794 of 50133 (15.55 %); breach carved 20213 cells, mean 46.0 m, max 240 m; cycle cells 8; corridor bed below its surroundings (8 points at 160 m) p50 26.6 m p90 51.7 m over 3055 cells; 0.94 s
+BREACH c1 (NetOpts { route: D8, blend: true, protect: true, breach: true }, meander 0 m): uphill channel cells 2476 of 50133 (4.94 %); breach carved 20213 cells, mean 46.0 m, max 240 m; cycle cells 8; corridor bed below its surroundings (8 points at 160 m) p50 40.5 m p90 87.9 m over 3055 cells; 0.90 s
+BREACH c2 (NetOpts { route: D8, blend: true, protect: true, breach: true }, meander 250 m): uphill channel cells 1911 of 45738 (4.18 %); breach carved 20653 cells, mean 48.9 m, max 260 m; cycle cells 22; corridor bed below its surroundings (8 points at 160 m) p50 21.5 m p90 65.2 m over 3012 cells; 0.91 s
+BREACH c3 (NetOpts { route: D8, blend: false, protect: true, breach: true }, meander 250 m): uphill channel cells 1948 of 45675 (4.26 %); breach carved 21576 cells, mean 55.2 m, max 232 m; cycle cells 22; corridor bed below its surroundings (8 points at 160 m) p50 0.4 m p90 25.0 m over 3012 cells; 0.92 s
+BREACH natural channel cells (A > 50000 m2, over 300 m from the corridor): bed below its surroundings p50 14.6 m p90 82.7 m over 30000 cells
+wrote ../results/images/breach_sunset.png (750x250, 96 KB)
+wrote ../results/images/breach_midday.png (750x250, 88 KB)
