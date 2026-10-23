@@ -3,7 +3,6 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`.
 
 ## Waiting for the owner
-- **GT goldens (PR 566, owner approved the look 2026-10-23):** `/bless` in sonnet-explorer for `lit_ground_eye1p8m_natural_ev14p5` and `lit_ground_eye0p5m_natural_ev14p5` (first goldens on WARP, llvmpipe and the RTX; report `target/review/golden-review/report.md`). Merge after the bless and green CI.
 - **Quota (owner, 2026-10-21):** the M6 housekeeping runs this week; M7 work starts after the Sunday reset or on the owner's word.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); an F9 capture of tile flashing (Tracked); the SPIKE-27 sheets to keep in `docs/dev_screenshots/`.
 - **At the laptop (postponed):** the NVIDIA driver update (591.86; device losses under parallel GPU load, Tracked); excluding the repo's `target` folders from Windows Search indexing.
