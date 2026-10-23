@@ -543,10 +543,7 @@ pub const FINDING_SLOTS: [(&str, &str); 9] = [
         "Upload cap (ADR 0033 point 9, provisional)",
         "1 MiB per frame; upload time is a perf-window figure (p99 in the table above); is the cap right?",
     ),
-    (
-        "RAM split (ADR 0033 point 8)",
-        "terrain's proposed 3 GB of the 8 GB; the scene's own peak above; accept or amend the split",
-    ),
+    ("RAM split (ADR 0033 point 8)", "terrain's proposed 3 GB of the 8 GB; the scene's own peak above; accept or amend the split"),
     ("Prefetch look-ahead (ADR 0031 question 2)", "2 s proposed; decide from the dive and walking scenes"),
     ("Compact vs vertex GPU ratio", "GPU time is not measured in the pipelined scenes; needs the terrain scene's A/B at equal clock state"),
     ("gpu_ms in pipelined scenes", "unmeasured (no timestamp readback without a wait); tracked, not needed for the M4 exit"),
