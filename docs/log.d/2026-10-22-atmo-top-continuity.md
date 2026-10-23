@@ -1,0 +1,1 @@
+- 2026-10-22 **atmo-top-continuity** (sonnet-explorer, opus-planner; ATMO-023): the composite blends towards the orbit-style march in the 5 km below the atmosphere's top, so a climb through 100 km has no colour step (the sky table and camera march differed by up to 10/255 from the orbit march at the switch); owner item P2-7.

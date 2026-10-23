@@ -36,6 +36,20 @@ pub fn load_world(path: &Path) -> Result<WorldDefinition, String> {
     planet_world_def::toml_io::parse_definition(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The store the editor opens when `--store` is not given (VIEW-052), the first that exists: the directory in the `PLANET_STORE`
+/// environment variable, the directory named in the pointer file `target/stores/default` (written by `cargo xtask store`), then
+/// `target/stores/global16384` and `target/accept/global16384` under `root`.
+pub fn default_store(root: &Path) -> Option<std::path::PathBuf> {
+    default_store_in(root, std::env::var_os("PLANET_STORE").map(std::path::PathBuf::from))
+}
+
+/// [`default_store`] with the environment's value given.
+pub fn default_store_in(root: &Path, env: Option<std::path::PathBuf>) -> Option<std::path::PathBuf> {
+    let pointer = std::fs::read_to_string(root.join("target/stores/default")).ok().map(|t| std::path::PathBuf::from(t.trim()));
+    let found = [env, pointer, Some(root.join("target/stores/global16384")), Some(root.join("target/accept/global16384"))];
+    found.into_iter().flatten().map(|p| if p.is_relative() { root.join(p) } else { p }).find(|p| p.is_dir())
+}
+
 /// The reference field reads no bake; this stands in for one.
 struct NoBake;
 
@@ -718,7 +732,7 @@ pub fn check_options(o: &Options) -> Result<(), String> {
     if o.given.contains("--seed") {
         return Err("--world and --seed both name the definition: give one".into());
     }
-    if o.scene != "terrain" && !crate::streamperf::is_stream_scene(&o.scene) {
+    if o.scene != "terrain" && !crate::streamperf::is_stream_scene(&o.scene) && !matches!(o.mode, crate::Mode::Editor) {
         return Err("--world applies to `test-render --scene terrain` (a view, --flight or --perf), not to other scenes".into());
     }
     if o.repro.is_some() {
@@ -795,5 +809,35 @@ impl StoreCheck {
                 self.floor, self.levels, self.compact.0, self.compact.1
             ),
         ]
+    }
+}
+
+#[cfg(test)]
+mod default_store_tests {
+    use super::*;
+
+    // spec: VIEW-052
+    #[test]
+    fn the_default_store_is_the_environment_then_the_pointer_then_the_known_folders_and_none_when_nothing_exists() {
+        let root = std::env::temp_dir().join(format!("planet-default-store-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("target/stores")).unwrap();
+        assert_eq!(default_store_in(&root, None), None, "no store anywhere: the preview bake");
+        std::fs::create_dir_all(root.join("target/accept/global16384")).unwrap();
+        assert_eq!(default_store_in(&root, None), Some(root.join("target/accept/global16384")));
+        std::fs::create_dir_all(root.join("target/stores/global16384")).unwrap();
+        assert_eq!(default_store_in(&root, None), Some(root.join("target/stores/global16384")), "the stores folder wins over accept");
+        std::fs::create_dir_all(root.join("elsewhere")).unwrap();
+        std::fs::write(root.join("target/stores/default"), "elsewhere\n").unwrap();
+        assert_eq!(default_store_in(&root, None), Some(root.join("elsewhere")), "the pointer file wins over the known folders");
+        let env = root.join("from-env");
+        std::fs::create_dir_all(&env).unwrap();
+        assert_eq!(default_store_in(&root, Some(env.clone())), Some(env), "the environment wins over all");
+        assert_eq!(
+            default_store_in(&root, Some(root.join("missing"))),
+            Some(root.join("elsewhere")),
+            "a variable that names no folder falls through"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

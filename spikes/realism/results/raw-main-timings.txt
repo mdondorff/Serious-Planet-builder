@@ -1,0 +1,25 @@
+adapter: Vulkan NVIDIA GeForce RTX 3080 Ti Laptop GPU (DiscreteGpu), key vulkan-nvidia-geforce-rtx-3080-ti-laptop-gpu
+tile format: compact
+realism site: lat -23.882 lon -15.284, base height 1400 m, floor 1391 m, worst rim change 4 m
+realism: no REALISM_REGION, the baseline run (the world as main draws it)
+capture-flights: NOT a measurement (no gate, no timestamps, no log); 2560x1440, 240 cameras per flight, tile format compact, height field cpu-erosion-v1 over a 512-cell bake (in-memory bake)
+capture-flights: the one-frame stills (still-*) set the camera directly, below the viewer's 1 m ground clamp (VIEW-004): the viewer itself does not go this low
+realism: region off (baseline), steps [0], suns ["sunset", "noon"]
+valley-300m: ground 1396.9 m at (-1500, -1700), 1543 nodes, 1543 new meshes in 0.9 s
+  valley-300m_sunset_main.png: terrain pass 1.516 ms (p90 4.834), gpu span 2.072 ms
+  valley-300m_noon_main.png: terrain pass 1.273 ms (p90 1.275), gpu span 1.737 ms
+valley-30m: ground 1396.9 m at (-1500, -1700), 2031 nodes, 531 new meshes in 0.3 s
+  valley-30m_sunset_main.png: terrain pass 1.487 ms (p90 1.498), gpu span 1.946 ms
+  valley-30m_noon_main.png: terrain pass 1.363 ms (p90 1.367), gpu span 1.780 ms
+valley-1.8m: ground 1396.9 m at (-1500, -1700), 2301 nodes, 288 new meshes in 0.2 s
+  valley-1.8m_sunset_main.png: terrain pass 1.412 ms (p90 1.459), gpu span 1.834 ms
+  valley-1.8m_noon_main.png: terrain pass 1.434 ms (p90 1.466), gpu span 1.853 ms
+slope-300m: ground 1392.5 m at (300, -900), 1560 nodes, 740 new meshes in 0.5 s
+  slope-300m_sunset_main.png: terrain pass 1.302 ms (p90 1.336), gpu span 1.762 ms
+  slope-300m_noon_main.png: terrain pass 1.245 ms (p90 1.304), gpu span 1.671 ms
+slope-30m: ground 1392.5 m at (300, -900), 2045 nodes, 528 new meshes in 0.4 s
+  slope-30m_sunset_main.png: terrain pass 1.510 ms (p90 1.549), gpu span 1.951 ms
+  slope-30m_noon_main.png: terrain pass 1.492 ms (p90 1.530), gpu span 1.908 ms
+slope-1.8m: ground 1392.5 m at (300, -900), 2270 nodes, 281 new meshes in 0.2 s
+  slope-1.8m_sunset_main.png: terrain pass 1.508 ms (p90 1.571), gpu span 1.929 ms
+  slope-1.8m_noon_main.png: terrain pass 1.494 ms (p90 1.516), gpu span 1.897 ms
