@@ -4,12 +4,13 @@ A planet-scale generator, editor and real-time renderer, written in Rust with wg
 
 ## Status
 
-M0 to M6 are done; M6 (the editor) was closed by the owner on 2026-10-21. M7 (ground detail and edit health) is in progress; M8 (generation principles: driver maps) and M9 (global authoring) are planned. Current work, open owner decisions and the queue are in [docs/status.md](docs/status.md).
+M0 to M7 are done; M7 (ground detail and edit health) was closed by the owner on 2026-10-23. M8 (Natural landscape: generation principles and driver maps) is in preparation; M9 (global authoring) is planned. Current work, open owner decisions and the queue are in [docs/status.md](docs/status.md).
 
 What works today:
 - A whole planet from a global bake (16384 cells per cube face, about 0.6 km) with erosion, climate (temperature, precipitation) and an ocean connected through low ground.
-- Real-time rendering from orbit down to a crouched eye at 0.5 m: height-aware CDLOD with morphing and streaming, a Hillaire atmosphere, HDR with adaptive exposure, Gerstner-wave water with shorelines, procedural ground detail with a sun highlight.
-- An interactive editor: stamps (crater, hill, plateau), lines (ridge, channel), regions, a brush (raise, lower, smooth, flatten), handles, an inspector, layers, undo and redo, a globe overview, and a problems list for edits the engine cannot draw fully.
+- Real-time rendering from orbit down to a crouched eye at 0.5 m: height-aware CDLOD with morphing and streaming, a Hillaire atmosphere, HDR with adaptive exposure, Gerstner-wave water with shorelines, procedural ground detail with a sun highlight (F6), and scale references of known size to judge it by (F7).
+- An interactive editor: stamps (crater, hill, plateau), lines (ridge, channel), regions, a brush (raise, lower, smooth, flatten), handles, an inspector, layers, undo and redo, a globe overview, and a Problems tab for edits the engine cannot draw fully or that stack too heavily (Fly to, Reduce, Merge strokes, Delete).
+- `cargo xtask store` builds the production store once and points the editor at it; `--relief-scale S` (1 to 4) builds an exaggerated world into its own store.
 - A headless harness with golden images, repro bundles and a performance harness with a readiness gate.
 
 Not there yet: driver maps (soil, moisture) and the plants and rocks they place, instancing, the generator editor, cities.
@@ -101,6 +102,11 @@ Everything goes through `cargo xtask`:
 | `cargo xtask accept <milestone>` | milestone acceptance |
 | `cargo xtask repro <bundle>` | replay a repro bundle |
 | `cargo xtask golden-review` | classify golden candidates (ADR 0017); everything it escalates waits for the owner's `/bless` |
+| `cargo xtask store [--res N] [--relief-scale S] [--link DIR]` | build the production store (default 16384 cells) and point the editor at it; `--relief-scale` makes an exaggerated world in its own store |
+| `cargo xtask bless` | list candidate goldens; the owner's `/bless` applies what the owner approved |
+| `cargo xtask cache-verify <dir>`, `cache-compact <dir>` | check or compact a tile store |
+| `cargo xtask det-diff <a> <b>` | compare two determinism manifests (Windows against Linux in CI) |
+| `cargo xtask capture flights` | the coastal flights as PNG sequences for the owner's look review |
 | `cargo xtask ci-stats` | CI job times against the budget |
 | `cargo xtask perf` | performance harness on the reference machine; it measures readiness and refuses otherwise; runs only on the architect's go |
 
