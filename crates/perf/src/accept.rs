@@ -544,7 +544,7 @@ pub const FINDING_SLOTS: [(&str, &str); 9] = [
         "1 MiB per frame; upload time is a perf-window figure (p99 in the table above); is the cap right?",
     ),
     (
-        "RAM split (ADR 0033 point 8, proposed)",
+        "RAM split (ADR 0033 point 8)",
         "terrain's proposed 3 GB of the 8 GB; the scene's own peak above; accept or amend the split",
     ),
     ("Prefetch look-ahead (ADR 0031 question 2)", "2 s proposed; decide from the dive and walking scenes"),

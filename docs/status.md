@@ -39,7 +39,7 @@ Open owner items: the two flickers (Tracked) need a live check (editor off, debu
 - **WARP device removal with the compact format and the atmosphere**: test-only, accepted; the software smoke stays on the vertex format. Re-test when WARP, wgpu or Windows changes.
 - **Beach shading flashes on WARP** (36.8 % of shore-band pixels on the coastal descent): unchecked since REND-030; check with the next look review.
 - **ADR 0056 limits**: steep coastal ground and inlets under 4 km stay dry (fix: per-vertex sea mask); `WaterBook` is never evicted (watch its growth).
-- **ADR 0051 (proposed)**: point 1 (liquid parameters in the definition) awaits the planner's acceptance; ADR 0051 point 6 (per-tile W storage) is open.
+- **ADR 0051 (superseded by 0055)**: point 1 (liquid parameters in the definition) awaits the planner's acceptance; ADR 0051 point 6 (per-tile W storage) is open.
 - **Cold start without the pre-fill**: 384 roots in 17.76 s (indicative, software adapter); no budget set.
 - **Flight clock collapse follows run order** (windows 10, 11): the first run of a flight pair drops to P5 or P8; cause open.
 - **Editor verifier gaps** (minor): `Editor::set_line_params` skips the inspector ranges; `WidthTooLarge` at the part budget untested; the brush chain unhardened for radius 0 or NaN (unreachable); poles and antimeridian untested for the brush chain.
