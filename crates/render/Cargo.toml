@@ -44,9 +44,6 @@ libm.workspace = true
 planet-render = { workspace = true, features = ["reference-renderer"] }
 
 [features]
-# SPIKE-07 (docs/archive/M4/spikes.md): experimental shader detail term below the finest geometry level (visual only). Not part of the
-# product: off by default, never enabled by another crate's default features.
-spike07 = ["reference-renderer"]
 # The test-only reference renderer (ADR 0062 point 1, REND-031): a minimal debug-view renderer from CPU meshes, the independent reference of the
 # compact renderer's image tests. Off by default; only dev-dependencies enable it, and `cargo xtask layering` enforces that.
 reference-renderer = []

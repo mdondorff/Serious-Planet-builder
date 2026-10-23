@@ -106,3 +106,12 @@ pub(crate) fn prefill_store(o: &Options, dir: &Path, out: &mut dyn Write) -> Res
     )
     .map_err(err)
 }
+
+#[cfg(test)]
+mod tests {
+    // spec: TEST-024
+    #[test]
+    fn the_gated_prefill_depth_is_the_depth_the_pre_fill_command_and_the_readiness_report_default_to() {
+        assert_eq!(planet_perf::prefill::GATED_PREFILL_LEVELS, planet_cache::meshpack::DEFAULT_PREFILL_LEVELS);
+    }
+}

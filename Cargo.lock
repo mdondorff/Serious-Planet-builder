@@ -1458,7 +1458,6 @@ dependencies = [
  "libm",
  "planet-core",
  "planet-frame",
- "planet-render",
  "planet-world-def",
  "toml",
 ]
