@@ -388,6 +388,121 @@ impl From<SummaryError> for BlockCodecError {
     }
 }
 
+/// One per-tile channel of the global bake (R5, the architecture review): the kind byte, the key, the payload codec and the label its
+/// errors use. A channel added later is one `impl`; the record, the stored read and the "is it already stored" test below are generic over it.
+pub trait TileChannel {
+    /// The kind byte of the channel's records.
+    const KIND: u8;
+    /// What an error calls a block of the channel.
+    const LABEL: &'static str;
+    /// The decoded block.
+    type Payload;
+    /// The content key of the block of `tile` under `world`.
+    fn key(world: &GlobalWorld, tile: TileId, cells: u32) -> CacheKey;
+    /// The payload bytes of a block of `cells` per edge.
+    fn encode(cells: u32, payload: &Self::Payload) -> Result<Vec<u8>, BlockCodecError>;
+    /// The block and the cells per edge its payload says.
+    fn decode(bytes: &[u8]) -> Result<(u32, Self::Payload), BlockCodecError>;
+}
+
+/// The bake's samples: elevation, climate and continent per vertex.
+pub struct BlockChannel;
+/// The ocean-connectivity bits (ADR 0041).
+pub struct OceanChannel;
+/// The wet-floor codes (ADR 0071).
+pub struct FloorChannel;
+
+impl TileChannel for BlockChannel {
+    const KIND: u8 = KIND_GLOBAL_BLOCK;
+    const LABEL: &'static str = "block";
+    type Payload = Vec<GlobalSample>;
+    fn key(world: &GlobalWorld, tile: TileId, cells: u32) -> CacheKey {
+        world.block_key(tile, cells)
+    }
+    fn encode(cells: u32, payload: &Self::Payload) -> Result<Vec<u8>, BlockCodecError> {
+        encode_block(cells, payload)
+    }
+    fn decode(bytes: &[u8]) -> Result<(u32, Self::Payload), BlockCodecError> {
+        decode_block(bytes)
+    }
+}
+
+impl TileChannel for OceanChannel {
+    const KIND: u8 = KIND_GLOBAL_OCEAN;
+    const LABEL: &'static str = "ocean block";
+    type Payload = OceanBits;
+    fn key(world: &GlobalWorld, tile: TileId, cells: u32) -> CacheKey {
+        world.ocean_key(tile, cells)
+    }
+    fn encode(_cells: u32, payload: &Self::Payload) -> Result<Vec<u8>, BlockCodecError> {
+        encode_ocean_block(payload)
+    }
+    fn decode(bytes: &[u8]) -> Result<(u32, Self::Payload), BlockCodecError> {
+        decode_ocean_block(bytes).map(|b| (b.cells, b))
+    }
+}
+
+impl TileChannel for FloorChannel {
+    const KIND: u8 = KIND_GLOBAL_WET_FLOOR;
+    const LABEL: &'static str = "wet-floor block";
+    type Payload = Vec<u16>;
+    fn key(world: &GlobalWorld, tile: TileId, cells: u32) -> CacheKey {
+        world.floor_key(tile, cells)
+    }
+    fn encode(cells: u32, payload: &Self::Payload) -> Result<Vec<u8>, BlockCodecError> {
+        encode_floor_block(cells, payload)
+    }
+    fn decode(bytes: &[u8]) -> Result<(u32, Self::Payload), BlockCodecError> {
+        decode_floor_block(bytes)
+    }
+}
+
+/// The record of a block of channel `C`: refused when `cells` is not the canonical layout of the tile's grid (ADR 0027 point 1).
+pub fn channel_record<C: TileChannel>(
+    world: &GlobalWorld,
+    tile: TileId,
+    cells: u32,
+    payload: &C::Payload,
+) -> Result<Record, BlockCodecError> {
+    let res = grid_res(tile, cells).ok_or(BlockCodecError::Grid { level: tile.level(), cells })?;
+    if world.layout(res).ok() != Some((tile.level(), cells)) {
+        return Err(BlockCodecError::Grid { level: tile.level(), cells });
+    }
+    Ok(Record {
+        key: C::key(world, tile, cells),
+        kind: C::KIND,
+        tile,
+        generator_version: GLOBAL_VERSION,
+        hash_version: HASH_VERSION,
+        node_set_id: world.node_set_id,
+        payload: C::encode(cells, payload)?,
+    })
+}
+
+/// Whether `store` holds the block of `tile` under the current key, decoding with `cells` per edge: a payload of another `B` under the key
+/// is a wrongly written record and counts as absent.
+pub fn has_channel<C: TileChannel>(store: &TileStore, world: &GlobalWorld, tile: TileId, cells: u32) -> bool {
+    matches!(store.get(C::KIND, tile, C::key(world, tile, cells)), Ok(Some(r)) if matches!(C::decode(&r.payload), Ok((c, _)) if c == cells))
+}
+
+/// The stored block of `tile` decoded: an error naming the block when it is missing, damaged or of other cells.
+pub fn stored_channel<C: TileChannel>(
+    store: &TileStore,
+    world: &GlobalWorld,
+    tile: TileId,
+    cells: u32,
+) -> Result<C::Payload, GlobalBuildError> {
+    let key = C::key(world, tile, cells);
+    let what = |why: String| GlobalBuildError::MissingBlock(format!("{} {:#018x} key {key}: {why}", C::LABEL, tile.raw()));
+    let rec =
+        store.get(C::KIND, tile, key).map_err(|e| what(e.to_string()))?.ok_or_else(|| what("not stored under the current key".into()))?;
+    let (c, payload) = C::decode(&rec.payload).map_err(|e| what(e.to_string()))?;
+    if c != cells {
+        return Err(what(format!("its payload has {c} cells per edge, the layout says {cells}")));
+    }
+    Ok(payload)
+}
+
 /// The global-coarse bake of one body of a definition as the store sees it: its seed (through the recording context), radius,
 /// the entries of its read set and what identifies its store and its blocks.
 pub struct GlobalWorld {
@@ -594,19 +709,7 @@ impl GlobalWorld {
 
     /// The record of a block of floor codes.
     pub fn floor_record(&self, tile: TileId, cells: u32, codes: &[u16]) -> Result<Record, BlockCodecError> {
-        let res = grid_res(tile, cells).ok_or(BlockCodecError::Grid { level: tile.level(), cells })?;
-        if self.layout(res).ok() != Some((tile.level(), cells)) {
-            return Err(BlockCodecError::Grid { level: tile.level(), cells });
-        }
-        Ok(Record {
-            key: self.floor_key(tile, cells),
-            kind: KIND_GLOBAL_WET_FLOOR,
-            tile,
-            generator_version: GLOBAL_VERSION,
-            hash_version: HASH_VERSION,
-            node_set_id: self.node_set_id,
-            payload: encode_floor_block(cells, codes)?,
-        })
+        channel_record::<FloorChannel>(self, tile, cells, &codes.to_vec())
     }
 
     /// The tile the summary record is filed under (the record covers the whole bake): face 0 at level 0.
@@ -663,20 +766,7 @@ impl GlobalWorld {
 
     /// The record of a block of ocean bits.
     pub fn ocean_record(&self, tile: TileId, bits: &OceanBits) -> Result<Record, BlockCodecError> {
-        let cells = bits.cells;
-        let res = grid_res(tile, cells).ok_or(BlockCodecError::Grid { level: tile.level(), cells })?;
-        if self.layout(res).ok() != Some((tile.level(), cells)) {
-            return Err(BlockCodecError::Grid { level: tile.level(), cells });
-        }
-        Ok(Record {
-            key: self.ocean_key(tile, cells),
-            kind: KIND_GLOBAL_OCEAN,
-            tile,
-            generator_version: GLOBAL_VERSION,
-            hash_version: HASH_VERSION,
-            node_set_id: self.node_set_id,
-            payload: encode_ocean_block(bits)?,
-        })
+        channel_record::<OceanChannel>(self, tile, bits.cells, bits)
     }
 
     /// Whether a stored global block (of the bake or of its ocean channel) is still current for this world: its generator version,
@@ -691,19 +781,7 @@ impl GlobalWorld {
 
     /// The record of a block of samples.
     pub fn block_record(&self, tile: TileId, cells: u32, samples: &[GlobalSample]) -> Result<Record, BlockCodecError> {
-        let res = grid_res(tile, cells).ok_or(BlockCodecError::Grid { level: tile.level(), cells })?;
-        if self.layout(res).ok() != Some((tile.level(), cells)) {
-            return Err(BlockCodecError::Grid { level: tile.level(), cells });
-        }
-        Ok(Record {
-            key: self.block_key(tile, cells),
-            kind: KIND_GLOBAL_BLOCK,
-            tile,
-            generator_version: GLOBAL_VERSION,
-            hash_version: HASH_VERSION,
-            node_set_id: self.node_set_id,
-            payload: encode_block(cells, samples)?,
-        })
+        channel_record::<BlockChannel>(self, tile, cells, &samples.to_vec())
     }
 }
 
@@ -1095,17 +1173,7 @@ fn tile_at(level: u8, index: usize) -> TileId {
 
 /// The stored sample block of `tile`, decoded: an error naming the block when it is missing, damaged or of other cells.
 fn stored_block(store: &TileStore, world: &GlobalWorld, tile: TileId, cells: u32) -> Result<Vec<GlobalSample>, GlobalBuildError> {
-    let key = world.block_key(tile, cells);
-    let what = |why: String| GlobalBuildError::MissingBlock(format!("block {:#018x} key {key}: {why}", tile.raw()));
-    let rec = store
-        .get(KIND_GLOBAL_BLOCK, tile, key)
-        .map_err(|e| what(e.to_string()))?
-        .ok_or_else(|| what("not stored under the current key".into()))?;
-    let (c, samples) = decode_block(&rec.payload).map_err(|e| what(e.to_string()))?;
-    if c != cells {
-        return Err(what(format!("its payload has {c} cells per edge, the layout says {cells}")));
-    }
-    Ok(samples)
+    stored_channel::<BlockChannel>(store, world, tile, cells)
 }
 
 /// The reports of `tiles` (stored blocks) for the ocean merger, a batch at a time on up to `threads` threads: at most
@@ -1169,8 +1237,8 @@ pub fn build_global(
     let existing = TileStore::open(dir, world.params())?;
     // A block is kept only if it decodes with the cells the key says: a payload of another `B` under this key is a
     // wrongly written record and is written again.
-    let have = |tile: TileId| matches!(existing.get(KIND_GLOBAL_BLOCK, tile, world.block_key(tile, cells)), Ok(Some(r)) if matches!(decode_block(&r.payload), Ok((c, _)) if c == cells));
-    let have_ocean = |tile: TileId| matches!(existing.get(KIND_GLOBAL_OCEAN, tile, world.ocean_key(tile, cells)), Ok(Some(r)) if matches!(decode_ocean_block(&r.payload), Ok(b) if b.cells == cells));
+    let have = |tile: TileId| has_channel::<BlockChannel>(&existing, world, tile, cells);
+    let have_ocean = |tile: TileId| has_channel::<OceanChannel>(&existing, world, tile, cells);
     let total = 6usize << (2 * u32::from(level));
     let need_ocean = (0..total).any(|i| !have_ocean(tile_at(level, i)));
     let mut merger = if need_ocean { Some(OceanMerger::new(res, world.sea.min_area_fraction)?) } else { None };
@@ -1284,32 +1352,12 @@ pub fn build_global(
 
 /// The stored ocean block of `tile`, decoded: an error naming the block when it is missing, damaged or of other cells.
 fn stored_ocean(store: &TileStore, world: &GlobalWorld, tile: TileId, cells: u32) -> Result<OceanBits, GlobalBuildError> {
-    let key = world.ocean_key(tile, cells);
-    let what = |why: String| GlobalBuildError::MissingBlock(format!("ocean block {:#018x} key {key}: {why}", tile.raw()));
-    let rec = store
-        .get(KIND_GLOBAL_OCEAN, tile, key)
-        .map_err(|e| what(e.to_string()))?
-        .ok_or_else(|| what("not stored under the current key".into()))?;
-    let bits = decode_ocean_block(&rec.payload).map_err(|e| what(e.to_string()))?;
-    if bits.cells != cells {
-        return Err(what(format!("its payload has {} cells per edge, the layout says {cells}", bits.cells)));
-    }
-    Ok(bits)
+    stored_channel::<OceanChannel>(store, world, tile, cells)
 }
 
 /// The stored wet-floor block of `tile`, decoded: an error naming the block when it is missing, damaged or of other cells.
 fn stored_floor_codes(store: &TileStore, world: &GlobalWorld, tile: TileId, cells: u32) -> Result<Vec<u16>, GlobalBuildError> {
-    let key = world.floor_key(tile, cells);
-    let what = |why: String| GlobalBuildError::MissingBlock(format!("wet-floor block {:#018x} key {key}: {why}", tile.raw()));
-    let rec = store
-        .get(KIND_GLOBAL_WET_FLOOR, tile, key)
-        .map_err(|e| what(e.to_string()))?
-        .ok_or_else(|| what("not stored under the current key".into()))?;
-    let (c, codes) = decode_floor_block(&rec.payload).map_err(|e| what(e.to_string()))?;
-    if c != cells {
-        return Err(what(format!("its payload has {c} cells per edge, the layout says {cells}")));
-    }
-    Ok(codes)
+    stored_channel::<FloorChannel>(store, world, tile, cells)
 }
 
 /// The codes of the stored block `tile` (the ocean vertices 0, the others their elevation's code), read from the stored sample and
