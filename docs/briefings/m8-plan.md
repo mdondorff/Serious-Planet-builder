@@ -1,6 +1,6 @@
 # M8 Natural landscape: plan (opus-planner, 2026-10-23)
 
-Status: proposed; owner decisions D1 to D6 below. Inputs: SPIKE-28 to 34, ADR 0076 (driver maps), ADR 0077 (stage model), `docs/briefings/m8-driver-maps.md`.
+Status: proposed; owner decisions D1 to D6 below. Inputs: SPIKE-28 to 38 (the architecture and process review with refactors R1 to R6: `docs/briefings/m8-review.md`), ADR 0076 (driver maps), ADR 0077 (stage model), `docs/briefings/m8-driver-maps.md`.
 
 ## Goal
 The base layer, without instances, reaches the owner's Outerra reference image at sunset and midday from 300 m, 30 m and 1.8 m (owner, 2026-10-22).
@@ -18,6 +18,7 @@ The base layer, without instances, reaches the owner's Outerra reference image a
 ## Steps
 | # | Step | Depends on | Lane |
 |---|---|---|---|
+| R | Refactors R1 to R6 of `docs/briefings/m8-review.md` (R2 inside M8-2, R5 inside M8-1) | — | crusader, explorer |
 | M8-1 | Global coupled stage: stream power and drainage at 2048, 70 to 100 steps; stored heights, drainage area, receivers; debug views (ADR 0030 point 2, ADR 0077 point 1) | — | crusader |
 | M8-2 | Block field infrastructure: `Scope::Block`, key, apply level, plan-side requests, level-aware height (box-filtered pyramid), stand-in and fade, eviction; a stand-in compute (SPIKE-34) | — | explorer |
 | S35 | SPIKE-35: A-net open items: halo below 5 km, a breach rule with every receiver downhill, drainage not aligned to grid axes, real threads | — | spikes |
