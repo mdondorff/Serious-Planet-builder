@@ -1,0 +1,4 @@
+gate: block 4.9 km, 8 m cells, apply level 15 (vertex spacing 9.6 m), parent level 14 (19.1 m)
+amp m | hard gate: step at the parent's vertices p99 / max (m) | pyramid: step p99 / max (m) | block change p99 / max (m)
+   30 | 25.22 / 27.94 | 0.13 / 0.28 | 25.22 / 27.94
+    8 | 6.75 / 7.65 | 0.07 / 0.15 | 6.75 / 7.65
