@@ -4,8 +4,8 @@
 - [ ] 1.3 `cargo xtask test fast`, `cargo xtask test`; verifier
 
 ## 2. R2: split `HeightField` (about a day; PR on its own)
-- [ ] 2.1 Split into value, key and bounds traits; all 13 implementations moved; `height_at_level` defaults to `height` (spec: GEN-036)
-- [ ] 2.2 Tier-A test: every existing field returns the same height at every level (GEN-036 "level-independent default")
+- [x] 2.1 (R2a, owner and planner, 2026-10-23) `height_at_level` added with a default of `height`, forwarded by every wrapper (Bound, StampStage, WaterBounded, CancelGuarded, editscale Timed, plan_ablation Counting); the split into value, key and bounds traits (50+ impls) is deferred until after M8-2 (spec: GEN-036)
+- [x] 2.2 Tier-A tests: default equals `height` at every level; each wrapper answers as its inner field does (learning 2026-10-16)
 - [ ] 2.3 numerics-reviewer (core/generators); verifier
 
 ## 3. M8-2: chunk field infrastructure (five steps, each at most a day, each its own PR)

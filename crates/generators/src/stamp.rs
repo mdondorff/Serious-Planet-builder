@@ -506,6 +506,10 @@ impl HeightField for StampStage<'_> {
         self.heights(&[dir])[0]
     }
 
+    fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
+        self.add_stamps(&[dir], vec![self.base.height_at_level(dir, level)], &|| false)[0]
+    }
+
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         let base = self.base.heights_until(dirs, stop);
         self.add_stamps(dirs, base, stop)

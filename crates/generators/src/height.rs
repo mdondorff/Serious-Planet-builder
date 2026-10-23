@@ -235,6 +235,12 @@ pub fn eval_chunked(dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: us
 pub trait HeightField: Send + Sync {
     /// Height in metres at a unit direction.
     fn height(&self, dir: Vec3) -> f64;
+    /// Height in metres at a unit direction as drawn at tile level `level` (GEN-036): a field with level-dependent detail (a chunk field,
+    /// ADR 0077) reads the pyramid level of that tile level; every other field is level-independent, which is this default. A wrapper
+    /// forwards it to the field it wraps (a stage adds its own change on top), or the detail is lost.
+    fn height_at_level(&self, dir: Vec3, _level: u8) -> f64 {
+        self.height(dir)
+    }
     /// The heights of `dirs`, in the caller's order: element `k` is bit for bit `self.height(dirs[k])` (GEN-020). A field is free to
     /// evaluate the directions in any other order internally (one that reads a block store groups them by block) because every
     /// height is a pure function of its direction. `stop` is polled during the batch (at least every 64 samples); once it
@@ -563,6 +569,9 @@ impl<F: HeightField> HeightField for Bound<F> {
     fn height(&self, dir: Vec3) -> f64 {
         self.field.height(dir)
     }
+    fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
+        self.field.height_at_level(dir, level)
+    }
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         self.field.heights_until(dirs, stop)
     }
@@ -652,5 +661,43 @@ impl HeightGenerator for ReferenceGenerator {
     fn field(&self, ctx: &GenContext, body: BodyId) -> Result<Box<dyn HeightField>, MissingNode> {
         let seed = ctx.body_seed(body)?;
         Ok(Box::new(Bound::new(Reference(seed), ctx, body)))
+    }
+}
+
+#[cfg(test)]
+mod level_tests {
+    use super::*;
+
+    struct Leveled;
+
+    impl HeightField for Leveled {
+        fn height(&self, _: Vec3) -> f64 {
+            1.0
+        }
+        fn height_at_level(&self, _: Vec3, level: u8) -> f64 {
+            1.0 + f64::from(level)
+        }
+        fn seed(&self) -> u64 {
+            1
+        }
+        fn implementation_id(&self) -> &'static str {
+            "leveled-test"
+        }
+        fn version(&self) -> u32 {
+            1
+        }
+        fn max_abs_height_m(&self) -> f64 {
+            100.0
+        }
+    }
+
+    // spec: GEN-036
+    #[test]
+    fn the_bound_wrapper_answers_the_level_as_its_inner_field_does() {
+        let def = planet_world_def::WorldDefinition::single_planet(6_371_000.0, 7);
+        let bound = Bound::new(Leveled, &GenContext::new(&def), BodyId::PLANET);
+        for level in [0u8, 11, 15, 22] {
+            assert_eq!(bound.height_at_level(Vec3::new(1.0, 0.0, 0.0), level), 1.0 + f64::from(level));
+        }
     }
 }

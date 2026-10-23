@@ -894,6 +894,13 @@ impl planet_generators::height::HeightField for CancelGuarded<'_> {
             self.inner.height(dir)
         }
     }
+    fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
+        if self.cancel.is_cancelled() {
+            0.0
+        } else {
+            self.inner.height_at_level(dir, level)
+        }
+    }
     /// The inner field's batch (it may order the samples by block, GEN-020), stopped by the token or the caller's flag.
     // Invariant: once `stop` or the cancel flag answers true the batch returns 0.0 for the unfinished directions; whoever cancels
     // must discard the results of the batch (the plan of a cancelled job is never used or memoised).
@@ -1572,6 +1579,38 @@ mod tests {
         fn max_abs_height_m(&self) -> f64 {
             self.inner.max_abs_height_m()
         }
+    }
+
+    // spec: GEN-036
+    #[test]
+    fn the_cancel_guard_answers_the_level_as_its_inner_field_does_and_nothing_once_cancelled() {
+        use planet_generators::height::HeightField;
+        struct Leveled;
+        impl HeightField for Leveled {
+            fn height(&self, _: Vec3) -> f64 {
+                1.0
+            }
+            fn height_at_level(&self, _: Vec3, level: u8) -> f64 {
+                1.0 + f64::from(level)
+            }
+            fn seed(&self) -> u64 {
+                1
+            }
+            fn implementation_id(&self) -> &'static str {
+                "leveled-test"
+            }
+            fn version(&self) -> u32 {
+                1
+            }
+            fn max_abs_height_m(&self) -> f64 {
+                100.0
+            }
+        }
+        let (never, cancelled) = (planet_streaming::CancelToken::never(), planet_streaming::CancelToken::cancelled());
+        let (live, dead) = (CancelGuarded { inner: &Leveled, cancel: &never }, CancelGuarded { inner: &Leveled, cancel: &cancelled });
+        let d = Vec3::new(1.0, 0.0, 0.0);
+        assert_eq!(live.height_at_level(d, 15), 16.0);
+        assert_eq!(dead.height_at_level(d, 15), 0.0);
     }
 
     // spec: STRM-005
