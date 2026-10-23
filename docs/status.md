@@ -14,12 +14,12 @@ Dormant (no near trigger; not asked now):
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
 ## M8 queue (plan: `docs/briefings/m8-plan.md`; next week's start: `docs/briefings/week-2026-10-25.md`)
-Done before the reset (2026-10-23): decisions D1 to D7, constitution v1.6, ADR 0077 to 0079, R6 (#589), R4 (#591), SPIKE-35 (#590: breach rule, 3 km halo, jittered D8, bit-exact), the M8-2 proposal (#588, `openspec/changes/m8-chunk-field/`).
+Done before the reset (2026-10-23): decisions D1 to D7, R1, R2a, R5, the coupled run, constitution v1.6, ADR 0077 to 0079, R6 (#589), R4 (#591), SPIKE-35 (#590: breach rule, 3 km halo, jittered D8, bit-exact), the M8-2 proposal (#588, `openspec/changes/m8-chunk-field/`).
 
 | # | Step | Lane |
 |---|---|---|
-| R1, R2 | the field chain's home, the `HeightField` split (tasks 1 and 2 of `m8-chunk-field`) | explorer, on the planner's go after the reset |
-| M8-1 | global coupled stage with R5 | crusader, on the planner's go after the reset |
+| M8-2 | chunk field infrastructure, steps 3a to 3e of `openspec/changes/m8-chunk-field/` (R1 #595 and R2a #597 done: `generators::chain`, `height_at_level` forwarded by every wrapper; the three-trait `HeightField` split deferred until after M8-2) | explorer, on the planner's go after the reset |
+| M8-1 (c) | store heights, drainage area and receivers as `TileChannel`s, a debug view, wire into the world's sources (R5 #593 and the coupled run #596, GEN-040, done). Risk for criterion 4: about 5 s per step at 2048 serial, 6 to 8 min for 70 to 100 steps; any parallel flood must stay bit-exact | crusader, on the planner's go after the reset |
 | R4b | `GeoPoint::of_dir` and `dir` in `editor/polyline.rs` onto the core helpers | crusader, with M8-7 |
 
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
