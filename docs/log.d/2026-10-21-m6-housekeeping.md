@@ -1,1 +1,0 @@
-- 2026-10-21 **M6 housekeeping** (opus-planner; ADR 0075): status, log, learnings and briefings archived to `docs/archive/M5/` and `docs/archive/M6/`; the hot set 171 KB to 35 KB; archived OpenSpec changes deleted; LOD-012 and VIEW-034 synced into the specs; M6 process review; M7 queue with H0 (F9 with authored items), H1 (caps check), H2 (ADR 0055 consolidation).

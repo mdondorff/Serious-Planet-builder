@@ -1,1 +1,0 @@
-- 2026-10-22 **edit-frame-scale** (explorer, SPIKE-29 fix 3): the editor shows at most 400 edits, the ones that can be seen and are largest on the screen; the footprint find and the outlines' ground heights are kept while nothing changes; the editor frame at 5,000 edits went from 5.6 s to 45 ms (VIEW-051).

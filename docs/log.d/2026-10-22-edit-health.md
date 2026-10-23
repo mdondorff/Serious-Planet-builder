@@ -1,1 +1,0 @@
-- 2026-10-22 **edit-health** (explorer, M7 A5): the editor's Problems tab lists every edit too steep to draw fully, stacked (8 strokes at one place or 48 of the 64) or over a tile the plan holds back, with Fly to, Reduce (cut the strengths until it fits), Merge strokes (one stroke for a stack) and Delete, each one command with one undo (VIEW-047).

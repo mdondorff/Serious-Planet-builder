@@ -1,1 +1,0 @@
-- 2026-10-22 **spec-lint-caps** (explorer, M7 H1): spec-lint fails when status.md, learnings.md, spikes.md, CLAUDE.md or the constitution is over its ADR 0075 cap (BUILD-023); the check that a test cites a known requirement ID already existed; the mechanical pass over specs and code comments found no stale reference.

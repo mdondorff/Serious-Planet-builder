@@ -1,1 +1,0 @@
-- 2026-10-21 **sweep-drift** (explorer, opus-planner): `PLANET_SWEEP_DRIFT_M` moves the sweep's camera east by that many metres a frame so a stop is a slow flight past the item and its plans are warm ones; the Ridge 3 Tracked entry is a cold first-plan cost (211 ms cold, 8 ms flat, warm +0.3 ms), row R of the M7 queue is done.
