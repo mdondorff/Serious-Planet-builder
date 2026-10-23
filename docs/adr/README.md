@@ -86,3 +86,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0074 | [A tile too steep to morph is not refined; the plan degrades locally](0074-a-tile-too-steep-to-morph-is-not-refined.md) | accepted | amends LOD-008; extends 0016 and 0014; built (#505, #523, #524) |
 | 0075 | [Documentation budget: the hot files stay small and current](0075-documentation-budget.md) | accepted (opus-planner; owner approved) | amends 0055 point 5 |
 | 0076 | [Driver maps: physical fields decide materials, plants and shapes through suitability rules](0076-driver-maps-suitability-and-consumers.md) | proposed | owner review before M8; D1 measures costs |
+| 0077 | [Regional stages run per block of a fixed grid; a coupled process is one field](0077-regional-stages-run-per-block-and-coupled-processes-are-one-field.md) | proposed | reads CON-08 (owner ruling); extends 0022 and 0030; SPIKE-33 decides A or B |
