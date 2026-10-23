@@ -17,6 +17,8 @@ use std::fmt;
 
 use planet_core::hash::{hash_u64s, HASH_VERSION};
 use planet_core::TileId;
+
+use crate::chunk::ChunkId;
 use planet_world_def::BodyId;
 
 use crate::height::fold_str;
@@ -58,12 +60,13 @@ impl fmt::Display for Stage {
     }
 }
 
-/// What an output is for: the whole body (the global-coarse bake) or one tile (regional and local outputs). A tile id
-/// of `0` is a real tile, so the kind is part of the key, not implied by a number.
+/// What an output is for: the whole body (the global-coarse bake), one tile (regional and local outputs) or one chunk of a regional stage
+/// (ADR 0077, GEN-034). A tile id of `0` is a real tile, so the kind is part of the key, not implied by a number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
     Global,
     Tile(TileId),
+    Chunk(ChunkId),
 }
 
 impl Scope {
@@ -71,13 +74,17 @@ impl Scope {
         match self {
             Scope::Global => [0, 0],
             Scope::Tile(t) => [1, t.raw()],
+            Scope::Chunk(c) => [2, hash_u64s(6, &[c.tile().raw(), c.halo_bits(), u64::from(c.step_cap())])],
         }
     }
 }
 
 /// The scope a stage's outputs have: the global bake is per body, regional and local outputs are per tile.
 pub fn scope_fits(stage: Stage, scope: Scope) -> bool {
-    matches!((stage, scope), (Stage::GlobalCoarse, Scope::Global) | (Stage::Regional | Stage::Local, Scope::Tile(_)))
+    matches!(
+        (stage, scope),
+        (Stage::GlobalCoarse, Scope::Global) | (Stage::Regional | Stage::Local, Scope::Tile(_)) | (Stage::Regional, Scope::Chunk(_))
+    )
 }
 
 /// One field layer: what it is, which stage produces it, what it reads, and the version of its algorithm.

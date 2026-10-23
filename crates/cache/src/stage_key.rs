@@ -58,6 +58,12 @@ pub fn encode_stage_key(graph: &FieldGraph, id: &str, scope: Scope, ctx: &StageK
             out.push(1);
             out.extend_from_slice(&t.raw().to_le_bytes());
         }
+        Scope::Chunk(c) => {
+            out.push(2);
+            out.extend_from_slice(&c.tile().raw().to_le_bytes());
+            out.extend_from_slice(&c.halo_bits().to_le_bytes());
+            out.extend_from_slice(&c.step_cap().to_le_bytes());
+        }
     }
     out.extend_from_slice(&ctx.body.0.to_le_bytes());
     out.extend_from_slice(&ctx.body_params);
