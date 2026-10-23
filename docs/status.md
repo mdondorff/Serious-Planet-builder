@@ -3,6 +3,7 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M7's queue as executed: `docs/milestones/M7-report.md`.
 
 ## Waiting for the owner
+- **Before the M8 GO (owner, 2026-10-23):** the owner settles for themself why an edit's ground is eroded after the edit (D3); the planner asks for that explicit confirmation before taking the GO. First: the domain glossary (`docs/domain.md`).
 - **M8 plan decisions D1 to D6** (`docs/briefings/m8-plan.md`): accept ADR 0077 (proposed); the CON-08 reading or amendment; edits over blocks; the exit criteria; the lanes from 2026-10-25; the photo layer in M8 or M9.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked).
 - **At the laptop (postponed):** the NVIDIA driver update (591.86; device losses under parallel GPU load, Tracked); excluding the repo's `target` folders from Windows Search indexing.
