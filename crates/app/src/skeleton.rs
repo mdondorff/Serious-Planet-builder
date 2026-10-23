@@ -12,7 +12,7 @@ use std::path::Path;
 use std::time::Instant;
 
 const FRAME_SIZE: (u32, u32) = (256, 128);
-pub(crate) const RADIUS_M: f64 = 6_371_000.0;
+pub(crate) const RADIUS_M: f64 = planet_core::EARTH_RADIUS_M;
 
 /// `FACE,LEVEL,X,Y`
 pub fn parse_tile(s: &str) -> Result<TileId, String> {

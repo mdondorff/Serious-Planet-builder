@@ -51,10 +51,7 @@ const DETAIL_DOWN_M: f64 = 0.75 * AMPLITUDE_MAX_M;
 /// Largest height the field takes in magnitude: the bake's elevation clamp plus the deepest incision.
 pub const MAX_ABS_HEIGHT_M: f64 = (if MAX_ELEVATION_M > -MIN_ELEVATION_M { MAX_ELEVATION_M } else { -MIN_ELEVATION_M }) + DETAIL_DOWN_M;
 
-fn smoothstep(e0: f64, e1: f64, x: f64) -> f64 {
-    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
+use planet_core::smoothstep;
 
 /// Crease amplitude at a ground elevation (nondecreasing) and a slope factor.
 fn amplitude_m(elevation_m: f64, carve: f64) -> f64 {

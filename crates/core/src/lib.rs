@@ -5,12 +5,14 @@
 pub mod cube;
 pub mod frames;
 pub mod hash;
+pub mod math;
 pub mod surface;
 pub mod tile;
 pub mod vec3;
 
 pub use cube::{Face, FaceMapping, TangentWarp};
 pub use frames::{CameraRelative, PlanetFixed, TileLocal};
-pub use surface::{Geo, ReferenceSurface, Sphere};
+pub use math::smoothstep;
+pub use surface::{Geo, ReferenceSurface, Sphere, EARTH_RADIUS_M};
 pub use tile::{Corner, Side, TileId};
 pub use vec3::Vec3;

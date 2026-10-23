@@ -368,10 +368,7 @@ impl Default for AlbedoParams {
 }
 
 /// `smoothstep(e0, e1, x)` as WGSL defines it for `e0 < e1` (the validated tables always have an interval).
-pub fn smoothstep(e0: f64, e1: f64, x: f64) -> f64 {
-    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
+pub use planet_core::smoothstep;
 
 fn mix3(a: [f64; 3], b: [f64; 3], t: f64) -> [f64; 3] {
     [a[0] * (1.0 - t) + b[0] * t, a[1] * (1.0 - t) + b[1] * t, a[2] * (1.0 - t) + b[2] * t]

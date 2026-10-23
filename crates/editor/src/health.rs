@@ -68,7 +68,8 @@ fn cell_of(lat_deg: f64, lon_deg: f64) -> (i32, i32) {
 }
 
 fn lat_lon_deg(d: Vec3) -> (f64, f64) {
-    (libm::asin(d.z.clamp(-1.0, 1.0)).to_degrees(), libm::atan2(d.y, d.x).to_degrees())
+    let (lat, lon) = d.lat_lon();
+    (lat.to_degrees(), lon.to_degrees())
 }
 
 impl Health {
@@ -336,6 +337,30 @@ impl Health {
         for id in std::mem::take(&mut self.pending) {
             if self.entries.contains_key(&id) {
                 self.settle(id);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // spec: COORD-003
+    #[test]
+    fn the_health_cells_and_the_item_file_spelling_read_one_latitude_and_longitude_also_at_the_poles() {
+        for d in [
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::new(1e-9, 0.0, 1.0).normalized(),
+            Vec3::new(0.3, -0.4, 0.5).normalized(),
+        ] {
+            let (lat, lon) = lat_lon_deg(d);
+            let (lat_file, lon_file) = crate::shape::lat_lon_of(d);
+            assert!((lat - lat_file).abs() < 1e-9, "{d:?}: {lat} against {lat_file}");
+            // The file spelling puts a pole at longitude 0; elsewhere the two agree.
+            if lat.abs() < 90.0 - 1e-9 {
+                assert!((lon - lon_file).abs() < 1e-9, "{d:?}");
             }
         }
     }

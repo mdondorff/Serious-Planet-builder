@@ -1064,7 +1064,7 @@ pub fn parse_markers(texts: &[String]) -> Result<Vec<Marker>, String> {
                 return Err(format!("--marker '{text}': the radius {radius_m} m must be positive"));
             }
             let (la, lo) = (lat.to_radians(), lon.to_radians());
-            let dir = planet_core::Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la));
+            let dir = planet_core::Vec3::from_lat_lon(la, lo);
             Ok(Marker { id: i as u64 + 1, dir, radius_m })
         })
         .collect()

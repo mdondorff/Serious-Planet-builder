@@ -63,8 +63,7 @@ pub struct Cap {
 
 /// The angle in radians between two unit directions, stable at small angles (`atan2` of the cross and dot products).
 pub fn angle_between(a: Vec3, b: Vec3) -> f64 {
-    let cross = a.cross(b);
-    libm::atan2(cross.length(), a.dot(b))
+    a.angle_to(b)
 }
 
 /// The cap around `tile` that holds the tile and a halo of `halo` tile edges on every side. `halo` is finite and in

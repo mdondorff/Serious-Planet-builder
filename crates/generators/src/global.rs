@@ -143,10 +143,7 @@ fn fbm(seed: u64, layer: u64, p: Vec3, base_frequency: f64, octaves: u32) -> f64
     sum / norm
 }
 
-fn smoothstep(e0: f64, e1: f64, x: f64) -> f64 {
-    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
+use planet_core::smoothstep;
 
 fn gauss(x: f64, mean: f64, width: f64) -> f64 {
     let z = (x - mean) / width;
