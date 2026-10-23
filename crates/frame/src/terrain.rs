@@ -489,7 +489,7 @@ impl TerrainPlan {
 /// longitude in degrees. Shared by the scripted views and the flight.
 pub(crate) fn above_terrain(radius_m: f64, field: &dyn HeightField, lat_deg: f64, lon_deg: f64, h: f64) -> PlanetFixed {
     let (la, lo) = (lat_deg.to_radians(), lon_deg.to_radians());
-    let dir = Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la));
+    let dir = Vec3::from_lat_lon(la, lo);
     PlanetFixed(dir * (radius_m + field.height(dir) + h))
 }
 

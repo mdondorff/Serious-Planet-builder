@@ -318,7 +318,7 @@ impl ViewerState {
             ground_detail: crate::look::materials::GroundDetailMode::default(),
             scale_refs: false,
             globe: None,
-            radius_m: 6_371_000.0,
+            radius_m: planet_core::EARTH_RADIUS_M,
             exposure_reset: true,
             repro_requested: false,
             user_paused: false,

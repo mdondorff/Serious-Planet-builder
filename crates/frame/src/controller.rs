@@ -39,7 +39,7 @@ pub struct ControllerParams {
 
 /// The radius the speed limits of [`ControllerParams`] are written for: the Earth's mean radius. A body of this radius moves exactly
 /// as before the limits scaled (VIEW-004).
-pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
+pub const EARTH_RADIUS_M: f64 = planet_core::EARTH_RADIUS_M;
 
 impl Default for ControllerParams {
     fn default() -> Self {

@@ -23,7 +23,7 @@ pub struct Coast {
 }
 
 fn on_parallel(lat_rad: f64, lon_rad: f64) -> Vec3 {
-    Vec3::new(libm::cos(lat_rad) * libm::cos(lon_rad), libm::cos(lat_rad) * libm::sin(lon_rad), libm::sin(lat_rad))
+    Vec3::from_lat_lon(lat_rad, lon_rad)
 }
 
 /// The first shoreline east of `lon0_deg` on the parallels `lat_deg`, `lat_deg` plus and minus 10, 20, 30 degrees (in that order)

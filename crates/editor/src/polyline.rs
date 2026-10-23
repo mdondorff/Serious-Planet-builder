@@ -147,12 +147,12 @@ impl fmt::Display for PolylineError {
 
 /// The arc distance in metres between two unit directions on a sphere of `radius_m`.
 pub fn arc_m(a: Vec3, b: Vec3, radius_m: f64) -> f64 {
-    radius_m * libm::atan2(a.cross(b).length(), a.dot(b))
+    radius_m * a.angle_to(b)
 }
 
 /// The point at `t` (0 to 1) along the great circle from `a` to `b`.
 pub fn slerp(a: Vec3, b: Vec3, t: f64) -> Vec3 {
-    let omega = libm::atan2(a.cross(b).length(), a.dot(b));
+    let omega = a.angle_to(b);
     if omega < 1e-12 {
         return a;
     }
@@ -256,9 +256,7 @@ fn outline_fault(points: &[GeoPoint]) -> Option<PolylineError> {
         return None;
     }
     let c = centre.normalized();
-    let helper = if c.z.abs() < 0.9 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(1.0, 0.0, 0.0) };
-    let e1 = helper.cross(c).normalized();
-    let e2 = c.cross(e1);
+    let (e1, e2) = c.tangent_basis();
     let flat: Vec<(f64, f64)> = dirs
         .iter()
         .map(|d| {
@@ -340,9 +338,7 @@ pub fn contains(points: &[GeoPoint], dir: Vec3) -> bool {
     if k <= 1e-9 {
         return false;
     }
-    let helper = if c.z.abs() < 0.9 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(1.0, 0.0, 0.0) };
-    let e1 = helper.cross(c).normalized();
-    let e2 = c.cross(e1);
+    let (e1, e2) = c.tangent_basis();
     let flat = |d: Vec3| {
         let k = d.dot(c);
         (d.dot(e1) / k, d.dot(e2) / k)

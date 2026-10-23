@@ -31,9 +31,7 @@ pub fn surface_type_index(name: &str) -> Option<usize> {
 
 /// The basis `(e1, e2)` of the tangent plane at the unit vector `a`.
 pub fn basis(a: Vec3) -> (Vec3, Vec3) {
-    let helper = if a.z.abs() < 0.9 { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(1.0, 0.0, 0.0) };
-    let e1 = helper.cross(a).normalized();
-    (e1, a.cross(e1))
+    a.tangent_basis()
 }
 
 /// The gnomonic projection of `points` onto the tangent plane at `anchor`; none when a point is not in front of the plane.

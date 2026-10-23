@@ -120,11 +120,12 @@ pub fn handle_point(item: &Item, handle: Handle, radius_m: f64, ground_m: f64) -
 pub fn lat_lon_of(dir: Vec3) -> (f64, f64) {
     let d = dir.normalized();
     // `atan2` of the height over the distance from the axis keeps its precision at the poles, where `asin` loses it.
-    let lat = libm::atan2(d.z, libm::hypot(d.x, d.y)).to_degrees().clamp(-90.0, 90.0);
+    let (lat_rad, lon_rad) = d.lat_lon();
+    let lat = lat_rad.to_degrees().clamp(-90.0, 90.0);
     if lat.abs() >= 90.0 - 1e-9 {
         return (if lat > 0.0 { 90.0 } else { -90.0 }, 0.0);
     }
-    let mut lon = libm::atan2(d.y, d.x).to_degrees();
+    let mut lon = lon_rad.to_degrees();
     if lon <= -180.0 {
         lon += 360.0;
     }
@@ -151,7 +152,7 @@ fn drag_range(item: &Item, key: &str, lo: f64, hi: f64) -> (f64, f64) {
 pub fn resized(item: &Item, dir: Vec3, radius_m: f64) -> Item {
     let c = item.direction();
     let d = dir.normalized();
-    let arc = radius_m * libm::atan2(c.cross(d).length(), c.dot(d));
+    let arc = radius_m * c.angle_to(d);
     let (lo, hi) = drag_range(item, RADIUS_KEY, MIN_RADIUS_M, CELL_EDGE_M);
     let r = arc.clamp(lo, hi);
     let mut it = item.clone();

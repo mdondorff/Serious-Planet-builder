@@ -17,6 +17,8 @@ impl Geo {
     }
 }
 
+/// The Earth's mean radius in metres, the one value the reference sphere, the tools and the tests share.
+pub const EARTH_RADIUS_M: f64 = 6_371_000.0;
 pub const DEG_TO_RAD: f64 = core::f64::consts::PI / 180.0;
 pub const RAD_TO_DEG: f64 = 180.0 / core::f64::consts::PI;
 
@@ -38,7 +40,7 @@ pub struct Sphere {
 
 impl Sphere {
     /// Earth mean radius.
-    pub const EARTH: Sphere = Sphere { radius_m: 6_371_000.0 };
+    pub const EARTH: Sphere = Sphere { radius_m: EARTH_RADIUS_M };
 }
 
 impl ReferenceSurface for Sphere {

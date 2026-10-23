@@ -309,7 +309,7 @@ fn camera_over(at: Vec3, ground: &dyn Fn(Vec3) -> f64, radius_m: f64, altitude_m
 fn empty_place(centre: Vec3) -> Vec3 {
     let _ = centre;
     let (la, lo) = (-40f64.to_radians(), 100f64.to_radians());
-    Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la))
+    Vec3::from_lat_lon(la, lo)
 }
 
 /// A field that counts and times the calls the plan makes into the field under it: the attribution of a plan job (SPIKE-29).

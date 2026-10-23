@@ -493,7 +493,7 @@ impl WorldTerrain {
                 let lat = (-82.5 + 15.0 * f64::from(i)).to_radians();
                 for j in 0..24 {
                     let lon = (7.5 + 15.0 * f64::from(j)).to_radians();
-                    let d = planet_core::Vec3::new(libm::cos(lat) * libm::cos(lon), libm::cos(lat) * libm::sin(lon), libm::sin(lat));
+                    let d = planet_core::Vec3::from_lat_lon(lat, lon);
                     let w = planet_frame::water::WaterSource::water_at(field, d)
                         .map_err(|e| format!("ocean channel read at lat {:.1} lon {:.1}: {e}", lat.to_degrees(), lon.to_degrees()))?;
                     read += 1;

@@ -80,7 +80,7 @@ pub fn exact_budget_ms(radius_m: f64, altitude_m: f64) -> f64 {
 /// longitude 30), `reach_m` the radius.
 pub fn case_stamp(radius_m: f64) -> ItemSpec {
     let (la, lo) = (20f64.to_radians(), 30f64.to_radians());
-    let at = Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la));
+    let at = Vec3::from_lat_lon(la, lo);
     let height = (0.2 * radius_m).min(100.0);
     ItemSpec {
         id: 1,
@@ -98,7 +98,7 @@ pub fn case_stamp(radius_m: f64) -> ItemSpec {
 /// The place the scripted views look at (latitude 20, longitude 30).
 pub(crate) fn case_centre() -> Vec3 {
     let (la, lo) = (20f64.to_radians(), 30f64.to_radians());
-    Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la))
+    Vec3::from_lat_lon(la, lo)
 }
 
 /// The brush case of radius `radius_m` on a planet of `planet_radius_m`: one raise stroke of [`BRUSH_POINTS`] points a quarter of the radius
@@ -292,7 +292,7 @@ pub fn case_region(surface_type: f64, planet_radius_m: f64) -> (ItemSpec, Vec3) 
 
 /// The angle in radians between two unit directions.
 fn planet_frame_angle(a: Vec3, b: Vec3) -> f64 {
-    libm::atan2(a.cross(b).length(), a.dot(b))
+    a.angle_to(b)
 }
 
 /// A camera `altitude_m` above the ground at ground distance `rho_m` from `at`, looking at the stamp's centre.

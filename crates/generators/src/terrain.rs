@@ -46,10 +46,7 @@ const FACE_LIPSCHITZ: f64 = 2.0;
 /// Most lattice cells a bounds query scans before it takes the global range.
 const MAX_BOUNDS_CELLS: u64 = 4096;
 
-fn smoothstep(e0: f64, e1: f64, x: f64) -> f64 {
-    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
+use planet_core::smoothstep;
 
 /// Detail amplitude in metres at a ground elevation: small over the ocean, growing over land and with height, at most
 /// [`DETAIL_MAX_M`].

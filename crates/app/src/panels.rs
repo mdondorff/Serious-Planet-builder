@@ -839,7 +839,7 @@ mod tests {
         let mut s = Session::new(Editor::new(WorldDefinition::single_planet(R, 7), MemoryStore::new(), ids, 4, 2), BodyId::PLANET, R);
         let dir = |lat: f64, lon: f64| {
             let (la, lo) = (lat.to_radians(), lon.to_radians());
-            Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la))
+            Vec3::from_lat_lon(la, lo)
         };
         let (a, _) = s.place("hill", dir(47.2, 8.55)).unwrap();
         let (b, _) = s.place("crater", dir(47.3, 8.6)).unwrap();
@@ -1052,7 +1052,7 @@ mod tests {
         const R: f64 = 6_371_000.0;
         let unit = |lat: f64, lon: f64| {
             let (la, lo) = (lat.to_radians(), lon.to_radians());
-            Vec3::new(libm::cos(la) * libm::cos(lo), libm::cos(la) * libm::sin(lo), libm::sin(la))
+            Vec3::from_lat_lon(la, lo)
         };
         // A hill of the layer "stamps" reaches across a square region of mode 2 that names "stamps".
         let centre = unit(20.0, 30.0);
@@ -1228,7 +1228,7 @@ mod tests {
         let (la, lo) = (47.2f64.to_radians(), 8.55f64.to_radians());
         let at = |m_east: f64, m_north: f64| {
             let (dla, dlo) = (m_north / R, m_east / R / libm::cos(la));
-            Vec3::new(libm::cos(la + dla) * libm::cos(lo + dlo), libm::cos(la + dla) * libm::sin(lo + dlo), libm::sin(la + dla))
+            Vec3::from_lat_lon(la + dla, lo + dlo)
         };
         // A ridge of 150 km (split into parts), a region and a brush stroke.
         f.s.set_tool(T::Line("ridge".into()));
