@@ -8,6 +8,8 @@ mod gpu_compact_blocks;
 mod gpu_debug_views;
 #[path = "gpu_diagnostics.rs"]
 mod gpu_diagnostics;
+#[path = "gpu_ground_look.rs"]
+mod gpu_ground_look;
 #[path = "gpu_hello_triangle.rs"]
 mod gpu_hello_triangle;
 #[path = "gpu_indirect.rs"]

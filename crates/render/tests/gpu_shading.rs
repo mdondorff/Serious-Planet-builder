@@ -347,6 +347,36 @@ fn the_ground_detail_is_inert_when_off_changes_the_lit_picture_when_on_and_leave
     assert!(hdr_of(&mut scattered, &ctx, &p, detail_plan(ShadeView::Lit, 1.0)) == on, "the detail depends on where the tiles sit");
 }
 
+// spec: REND-037
+#[test]
+fn each_material_alone_reads_as_itself_in_colour_and_value() {
+    use planet_frame::look::materials::{Input, MaterialParams, INPUTS, MATERIALS};
+    let ctx = GpuContext::new(AdapterPolicy::from_env()).expect("adapter");
+    let (p, _) = plan(6);
+    let mut r = renderer(&ctx, &p);
+    let mut mean = |m: usize| {
+        let mut curves = [[[0.0, 0.0]; INPUTS]; MATERIALS];
+        curves[m][Input::SoilDepth as usize] = [-1.0, 0.0];
+        let mut l = detail_plan(ShadeView::Lit, 1.0);
+        l.materials = MaterialParams { curves };
+        let img = hdr_of(&mut r, &ctx, &p, l);
+        let px: Vec<_> = img.iter().filter(|px| px[3] > 0.0).collect();
+        let n = px.len() as f64;
+        assert!(n > 1000.0, "{n} covered pixels");
+        [0, 1, 2].map(|c| px.iter().map(|x| f64::from(x[c])).sum::<f64>() / n)
+    };
+    let rock = mean(0);
+    let sand = mean(1);
+    let grass = mean(2);
+    let soil = mean(3);
+    let lum = |c: [f64; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    assert!(grass[1] > 1.3 * grass[0] && grass[1] > 1.5 * grass[2], "grass is not green: {grass:?}");
+    let (lo, hi) = (rock.iter().cloned().fold(f64::MAX, f64::min), rock.iter().cloned().fold(0.0, f64::max));
+    assert!(hi < 1.12 * lo, "rock is not grey: {rock:?}");
+    assert!(lum(sand) > 2.0 * lum(soil), "sand {sand:?} is not twice as bright as soil {soil:?}");
+    assert!(lum(soil) < lum(rock), "soil {soil:?} is not darker than rock {rock:?}");
+}
+
 // spec: REND-035, LOOK-010
 #[test]
 fn the_sun_adds_a_highlight_to_the_detailed_ground_that_follows_the_gloss_table_and_the_detail_strength() {
