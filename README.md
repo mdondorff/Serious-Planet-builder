@@ -129,6 +129,8 @@ The renderer only executes a `FramePlan`; all decisions live in GPU-free crates.
 
 ## Where to read next
 
+[docs/README.md](docs/README.md) maps every folder: where to find what.
+
 1. [docs/constitution.md](docs/constitution.md): the non-negotiable rules.
 2. [docs/adr/](docs/adr/README.md): accepted and proposed architecture decisions.
 3. [openspec/specs/](openspec/specs/): requirements per subsystem; each test cites its requirement ID.
