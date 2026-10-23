@@ -40,7 +40,9 @@ fn a_world_without_stamps_is_its_base_field_and_the_water_bound_wraps_it_on_requ
     let chain = field_chain(HeightFieldKind::Eroded, &def, &src, [1; 16], false).unwrap();
     same(chain.as_ref(), base.as_ref());
     let bounded = field_chain(HeightFieldKind::Eroded, &def, &src, [1; 16], true).unwrap();
-    assert!(bounded.max_abs_height_m() >= chain.max_abs_height_m(), "the bound never narrows the field");
+    same(bounded.as_ref(), chain.as_ref());
+    assert_eq!(bounded.water_cull_level(), Some(def.sea(BodyId::PLANET).unwrap().level_m), "the bound reports the sea level");
+    assert_eq!(chain.water_cull_level(), base.water_cull_level(), "without the bound the base decides");
 }
 
 // spec: GEN-026
