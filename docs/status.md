@@ -14,14 +14,13 @@ Dormant (no near trigger; not asked now):
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
 ## M7 queue: close-out (plan: `docs/briefings/m7-planning.md`; next week's start: `docs/briefings/week-2026-10-25.md`)
-Done in M7: G0, G2a-c, A5, ADR 0074, SR (F7), H1, H2, SPIKE-28 to 32, edit scaling (SPIKE-29 fixes 1-4, plan-cache-keep), editor default store, relief scale, P2-7.
+Done in M7: GT (#566), G0, G2a-c, A5, ADR 0074, SR (F7), H1, H2, SPIKE-28 to 32, edit scaling (SPIKE-29 fixes 1-4, plan-cache-keep), editor default store, relief scale, P2-7.
 
 | # | Step | Lane |
 |---|---|---|
-| GT | Ground-detail look pass 2 on branch `change/ground-look-2`: waits for the owner's verdict on the stills (`target/review/ground-detail/gt_*.png` in sonnet-m4). Approved: PR, verifier, lit goldens at 1.8 m and 0.5 m to the owner's `/bless`. Not approved: merge as the improved base without goldens (owner, 2026-10-22: quality comes in M8) | explorer |
-| AC | M7 acceptance: `cargo xtask accept M7` (or the report by hand where no tool exists), `docs/milestones/M7-report.md`, owner GO | planner |
+| AC | M7 report drafted (`docs/milestones/M7-report.md`): every exit criterion has evidence, GT merged (#566); waits for the owner's GO | owner |
 | HK | M7 housekeeping (`housekeeping` skill, README step included) | planner, then crusader |
-| M8-0 | M8 plan and ADRs from SPIKE-30 to 32 (`docs/briefings/m8-driver-maps.md`, ADR 0076): the regional block stage with a halo, shadows, landform shaping and erosion, the material map, the asset cache; owner review | planner |
+| M8-0 | M8 stage model: ADR 0077 (proposed: blocks of a fixed grid, a coupled process is one field; the owner rules on the CON-08 reading); SPIKE-33 landscape evolution (spikes) and SPIKE-34 block stage in the engine (explorer), reports by 2026-10-24 evening; then the M8 plan and decisions before 2026-10-25 | planner, spikes, explorer |
 
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
 
