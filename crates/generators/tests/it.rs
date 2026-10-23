@@ -10,6 +10,8 @@ mod bounds_monotone;
 mod brush_stage;
 #[path = "cell_keys.rs"]
 mod cell_keys;
+#[path = "chain.rs"]
+mod chain;
 #[path = "climate.rs"]
 mod climate;
 #[path = "compact.rs"]
