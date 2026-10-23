@@ -33,6 +33,7 @@ fn solid(u: f64, v: f64) -> f64 {
 
 impl Lattice {
     pub fn new(n: usize, radius_m: f64) -> Lattice {
+        assert!(n > 0 && 6 * n * n < NONE as usize, "{n} cells per face edge: the cell indices must fit a u32 below NONE");
         let u: Vec<f64> = (0..=n).map(|k| libm::tan((-1.0 + 2.0 * k as f64 / n as f64) * core::f64::consts::FRAC_PI_4)).collect();
         let mut area_m2 = vec![0.0; n * n];
         for j in 0..n {
@@ -177,6 +178,12 @@ pub fn priority_flood(lat: &Lattice, z: &[f32]) -> (Vec<f32>, Vec<u32>) {
             heap.push(Reverse((u64::from(z[c].to_bits()) << 32) | c as u64));
         }
     }
+    // A world without sea has no coast to flood from: its lowest cell (ties by index) is the one outlet.
+    if heap.is_empty() && land > 0 {
+        let lowest = (0..len).min_by_key(|&c| (z[c].to_bits(), c)).expect("a lattice has cells");
+        visited[lowest] = true;
+        heap.push(Reverse((u64::from(z[lowest].to_bits()) << 32) | lowest as u64));
+    }
     let mut order: Vec<u32> = Vec::with_capacity(land);
     while let Some(Reverse(key)) = heap.pop() {
         let c = (key & 0xffff_ffff) as usize;
@@ -194,7 +201,7 @@ pub fn priority_flood(lat: &Lattice, z: &[f32]) -> (Vec<f32>, Vec<u32>) {
             heap.push(Reverse((u64::from(filled[n].to_bits()) << 32) | n as u64));
         }
     }
-    // Land the flood never reached (a one-way neighbour relation across a face edge) keeps its height and is processed first.
+    // Land the flood never reached (not expected: the neighbour relation is symmetric) keeps its height and is processed first.
     if order.len() < land {
         let mut seen = vec![false; len];
         for &c in &order {
@@ -216,26 +223,30 @@ fn jitter_factor(seed: u64, c: usize, k: usize, jitter: f64) -> f64 {
     1.0 + jitter * (2.0 * h - 1.0)
 }
 
-/// The receiver of every land cell: the neighbour with the steepest jittered slope down the filled surface; [`NONE`] when no neighbour is lower.
-pub fn receivers(lat: &Lattice, filled: &[f32], order: &[u32], p: &CoupledParams) -> Vec<u32> {
+/// The receiver of every land cell and the direction (index of [`OFFS`]) it lies in: the neighbour with the steepest jittered slope down the
+/// filled surface; [`NONE`] when no neighbour is lower.
+pub fn receivers(lat: &Lattice, filled: &[f32], order: &[u32], p: &CoupledParams) -> (Vec<u32>, Vec<u8>) {
+    assert!((0.0..1.0).contains(&p.jitter), "jitter {} is not in [0, 1)", p.jitter);
     let mut rec = vec![NONE; lat.len()];
+    let mut dir = vec![0u8; lat.len()];
     for &c in order {
         let c = c as usize;
         let nb = lat.neighbours(c);
-        let mut best = (0.0f64, NONE);
+        let mut best = (0.0f64, NONE, 0u8);
         for k in 0..8 {
             let n = nb[k] as usize;
             let drop = f64::from(filled[c]) - f64::from(filled[n]);
             if drop > 0.0 {
                 let s = drop / lat.spacing_m(c, k, n) * jitter_factor(p.seed, c, k, p.jitter);
                 if s > best.0 {
-                    best = (s, n as u32);
+                    best = (s, n as u32, k as u8);
                 }
             }
         }
         rec[c] = best.1;
+        dir[c] = best.2;
     }
-    rec
+    (rec, dir)
 }
 
 /// The drainage area in m2 by walking the pop order backwards: a cell's own area plus what its donors bring; sea receives nothing.
@@ -255,8 +266,13 @@ pub fn accumulate(lat: &Lattice, z: &[f32], order: &[u32], rec: &[u32]) -> Vec<f
 
 /// One step: the flood, the receivers, the area and the implicit update `z = (z + dt U + f z_r) / (1 + f)`, `f = K A^m dt / distance`.
 pub fn step(lat: &Lattice, input: &CoupledInput, z: &mut [f32], p: &CoupledParams) -> (Vec<u32>, Vec<f64>, StepStat) {
+    assert!(
+        z.len() == lat.len() && input.uplift.len() == lat.len() && input.erodibility.len() == lat.len(),
+        "the inputs must have one value per cell"
+    );
+    assert!(z.iter().chain(&input.uplift).chain(&input.erodibility).all(|v| v.is_finite()), "the inputs must be finite");
     let (filled, order) = priority_flood(lat, z);
-    let rec = receivers(lat, &filled, &order, p);
+    let (rec, dir) = receivers(lat, &filled, &order, p);
     let a = accumulate(lat, z, &order, &rec);
     let (mut sum, mut max) = (0.0f64, 0.0f64);
     for &c in &order {
@@ -266,8 +282,7 @@ pub fn step(lat: &Lattice, input: &CoupledInput, z: &mut [f32], p: &CoupledParam
         let (zr, f) = if r == NONE {
             (0.0, 0.0)
         } else {
-            let k = (0..8).find(|&k| lat.neighbours(c)[k] == r).expect("a receiver is a neighbour");
-            let dist = lat.spacing_m(c, k, r as usize);
+            let dist = lat.spacing_m(c, usize::from(dir[c]), r as usize);
             (f64::from(z[r as usize]).max(0.0), f64::from(input.erodibility[c]) * libm::pow(a[c], p.area_exp) * p.dt_years / dist)
         };
         let new = ((old + p.dt_years * f64::from(input.uplift[c]) + f * zr) / (1.0 + f)).max(p.min_height_m);
@@ -297,6 +312,7 @@ mod tests {
     use super::*;
 
     const R: f64 = planet_core::EARTH_RADIUS_M;
+    const PINNED_CHECKSUM: u64 = 3_741_216_821_528_484_935;
 
     /// A smooth world with about 60 % land: heights from the direction, uplift and erodibility constant.
     fn world(lat: &Lattice) -> CoupledInput {
@@ -331,7 +347,7 @@ mod tests {
         for jitter in [0.0, 0.8] {
             let p = CoupledParams { jitter, ..CoupledParams::default() };
             let (filled, order) = priority_flood(&lat, &input.z);
-            let rec = receivers(&lat, &filled, &order, &p);
+            let (rec, _) = receivers(&lat, &filled, &order, &p);
             for &c in &order {
                 let r = rec[c as usize];
                 if r != NONE {
@@ -353,7 +369,7 @@ mod tests {
         let lat = Lattice::new(12, R);
         let input = world(&lat);
         let (filled, order) = priority_flood(&lat, &input.z);
-        let rec = receivers(&lat, &filled, &order, &CoupledParams::default());
+        let (rec, _) = receivers(&lat, &filled, &order, &CoupledParams::default());
         let a = accumulate(&lat, &input.z, &order, &rec);
         let land: f64 = order.iter().map(|&c| lat.area_m2(c as usize)).sum();
         let outlets: f64 =
@@ -380,5 +396,65 @@ mod tests {
         // The jitter changes the network, not the determinism.
         let j0 = run(&lat, &input, &CoupledParams { jitter: 0.0, ..p }, 5);
         assert_ne!(j0.receiver, run(&lat, &input, &CoupledParams { jitter: 0.8, ..p }, 5).receiver);
+    }
+
+    /// FNV-1a over the bits of a run: the same on every platform and thread count, or the determinism promise is broken.
+    fn checksum(s: &CoupledState) -> u64 {
+        let mut h = 0xcbf2_9ce4_8422_2325u64;
+        let mut eat = |v: u32| {
+            for b in v.to_le_bytes() {
+                h = (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        };
+        s.z.iter().for_each(|z| eat(z.to_bits()));
+        s.area_m2.iter().for_each(|a| eat(a.to_bits()));
+        s.receiver.iter().for_each(|r| eat(*r));
+        h
+    }
+
+    // spec: GEN-040
+    #[test]
+    fn a_fixed_run_has_the_same_checksum_on_every_platform() {
+        let lat = Lattice::new(12, R);
+        let state = run(&lat, &world(&lat), &CoupledParams::default(), 30);
+        assert_eq!(checksum(&state), PINNED_CHECKSUM, "the run changed: platform, order or arithmetic");
+    }
+
+    // spec: GEN-040
+    #[test]
+    fn a_world_without_sea_drains_to_its_lowest_cell_and_every_receiver_comes_first() {
+        let lat = Lattice::new(12, R);
+        let mut input = world(&lat);
+        input.z.iter_mut().for_each(|z| *z = z.abs() + 1.0);
+        let (filled, order) = priority_flood(&lat, &input.z);
+        assert_eq!(order.len(), lat.len());
+        let (rec, _) = receivers(&lat, &filled, &order, &CoupledParams::default());
+        let mut at = vec![usize::MAX; lat.len()];
+        order.iter().enumerate().for_each(|(i, &c)| at[c as usize] = i);
+        for &c in &order {
+            let r = rec[c as usize];
+            assert!(r == NONE || at[r as usize] < at[c as usize], "cell {c} comes before its receiver {r}");
+        }
+        assert_eq!(rec.iter().filter(|&&r| r == NONE).count(), 1, "one outlet: the lowest cell");
+        let a = accumulate(&lat, &input.z, &order, &rec);
+        let total: f64 = (0..lat.len()).map(|c| lat.area_m2(c)).sum();
+        let outlet = (0..lat.len()).find(|&c| rec[c] == NONE).unwrap();
+        assert!((a[outlet] / total - 1.0).abs() < 1e-9, "{} of {total}", a[outlet]);
+    }
+
+    // spec: GEN-040
+    #[test]
+    fn with_sea_every_land_cell_has_a_receiver_that_comes_before_it() {
+        let lat = Lattice::new(12, R);
+        let input = world(&lat);
+        let (filled, order) = priority_flood(&lat, &input.z);
+        let (rec, _) = receivers(&lat, &filled, &order, &CoupledParams::default());
+        let mut at = vec![usize::MAX; lat.len()];
+        order.iter().enumerate().for_each(|(i, &c)| at[c as usize] = i);
+        for &c in &order {
+            let r = rec[c as usize];
+            assert!(r != NONE, "land cell {c} has no receiver");
+            assert!(input.z[r as usize] <= 0.0 || at[r as usize] < at[c as usize], "cell {c} comes before its receiver {r}");
+        }
     }
 }
