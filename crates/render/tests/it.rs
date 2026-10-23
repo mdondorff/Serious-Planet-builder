@@ -8,7 +8,5 @@ mod graph_water;
 mod grid_phase;
 #[path = "shader_scan.rs"]
 mod shader_scan;
-#[path = "spike07_detail.rs"]
-mod spike07_detail;
 #[path = "ui_graph.rs"]
 mod ui_graph;

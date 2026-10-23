@@ -1,4 +1,4 @@
-//! `editor`: egui editor, commands, undo, gizmos, picking. Filled in from M6.
+//! `editor`: commands and undo, selection, handles and their drags, brushes, the problems list, the lists and the layout, all as data.
 //!
 //! `commands` and `ids` are the command layer over the world definition (AUTH-004): GPU-free, no window, no renderer.
 //!
