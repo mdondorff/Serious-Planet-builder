@@ -30,6 +30,8 @@ mod global_reader;
 mod height_fields;
 #[path = "lattice_normals.rs"]
 mod lattice_normals;
+#[path = "level_height.rs"]
+mod level_height;
 #[path = "line_stage.rs"]
 mod line_stage;
 #[path = "manifest.rs"]
