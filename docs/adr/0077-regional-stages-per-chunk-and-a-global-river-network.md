@@ -1,5 +1,5 @@
 # 0077 Regional stages run per chunk of a fixed grid; the global coupled run fixes the river network
-Status: accepted (owner, 2026-10-23; point 6 decided as a reading of CON-08)
+Status: accepted (owner, 2026-10-23; point 6: CON-08 amended to name chunks, constitution v1.6)
 Date: 2026-10-23
 Source: owner, 2026-10-23 (the stage model for M8; erosion and hydrology as one simulation over time); SPIKE-31 to 34; ADR 0022, 0030, 0076; constitution CON-06, CON-08, CON-14, CON-22
 

@@ -22,7 +22,7 @@ The base layer, without instances, reaches the owner's Outerra reference image a
 | R6, R4 | Small cleanup and the core helpers (many files, short PRs) | — | crusader, day 1 |
 | R1, R2 | One home for the field chain; the `HeightField` split with the level-aware height | R4 | explorer |
 | M8-1 | Global coupled stage with R5: stream power and drainage at 2048, 70 to 100 steps; stored heights, drainage area, receivers; debug views (ADR 0030 point 2, ADR 0077 point 1) | — | crusader |
-| M8-2 | Chunk field infrastructure: `Scope::Chunk`, key, apply level, plan-side requests, box-filtered pyramid, stand-in and fade, eviction, prefetch along the direction of travel; a stand-in compute (SPIKE-34) | R1, R2 | explorer |
+| M8-2 | Chunk field infrastructure: `Scope::Chunk`, key, the chunk stage's position per layer (D3), apply level, plan-side requests, box-filtered pyramid, stand-in and fade, eviction, prefetch along the direction of travel; a stand-in compute (SPIKE-34) | R1, R2 | explorer |
 | S35 | SPIKE-35: A-net open items: halo below 5 km, a breach rule with every receiver downhill, drainage not aligned to grid axes, real threads | — | spikes |
 | M8-3 | A-net chunk stage at 4 to 10 m: incision along the global network, diffusion, slumping (SPIKE-33) | M8-1, M8-2, S35 | explorer |
 | M8-4 | Look review 1: engine renders of landforms at the fixed poses | M8-3 | owner |
@@ -42,8 +42,8 @@ The base layer, without instances, reaches the owner's Outerra reference image a
 | # | Decision | Owner, 2026-10-23 |
 |---|---|---|
 | D1 | Accept ADR 0077 (chunks of a fixed grid; the global coupled run fixes the river network) | **accepted** |
-| D2 | CON-08: a reading of "per tile with a halo" as "per chunk of a fixed grid with a bounded halo", or a one-sentence amendment | **a reading: "per tile with a halo" applies to chunks; no amendment** |
-| D3 | Edits over chunks: (1) edits apply after erosion, instant, erosion ignores them; (2) the edit shows at once, the eroded result follows within 10 s; (3) edited areas skip chunk erosion. Affects the editor only: a viewer receives a finished world | **2: the edit shows at once, the eroded result follows** |
+| D2 | CON-08: a reading of "per tile with a halo" as "per chunk of a fixed grid with a bounded halo", or a one-sentence amendment | **"per tile with a halo" applies to chunks; CON-08 amended to say so (constitution v1.6)** |
+| D3 | Edits over chunks: (1) edits apply after erosion, instant, erosion ignores them; (2) the edit shows at once, the eroded result follows within 10 s; (3) edited areas skip chunk erosion. Affects the editor only: a viewer receives a finished world | **2, provisional: the order is built as a per-layer setting (default: edits on top of the eroded ground); the owner confirms before M8-7** |
 | D4 | The exit criteria above | **accepted** |
 | D5 | Lanes from 2026-10-25 as in "Lanes and files" | **accepted** |
 | D6 | The photo layer (SPIKE-32 step 4, asset cache ADR): in M8 after criterion 1 is met, or in M9 | **later (M9 or after); M8 keeps the procedural look extensible** |
