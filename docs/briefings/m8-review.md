@@ -19,13 +19,13 @@ Owner's questions (2026-10-23): are features well compartmentalised, or do chang
 ## 2. Refactors (from SPIKE-37's ranked list)
 | # | Move | When | Lane |
 |---|---|---|---|
-| R1 | One GPU-free home for the field chain (base, block, stamps, water bound) and the world's sources, out of `app` | before M8-2 lands block fields | crusader |
+| R1 | One GPU-free home for the field chain (base, chunk, stamps, water bound) and the world's sources, out of `app` | before M8-2 lands block fields | crusader |
 | R2 | Split `HeightField` into value (with the level-aware height), key and bounds | first part of M8-2 (same code) | explorer |
-| R3 | One function for "which tiles or blocks does an edit change", used by `frame/lod.rs` and `editor/feed.rs` | before M8-7 | crusader |
+| R3 | One function for "which tiles or chunks does an edit change", used by `frame/lod.rs` and `editor/feed.rs` | before M8-7 | crusader |
 | R4 | Core vocabulary: angle, lat/lon and its pole-safe inverse, tangent basis, radius, smoothstep; replace the copies | first week | crusader |
 | R5 | A channel abstraction in `cache/global_store.rs` | first part of M8-1 (same code) | crusader |
 | R6 | XS cleanup: remove the spike code from `render`, drop `editor`'s unused `planet-render` dependency, refresh five stale crate docs, one prefill-depth constant | first day | crusader |
-Later, with a trigger: `EditRuntime` into `editor` (when M8-7 edits blocks), perf scenes out of `app` (when `app` blocks a change), splitting `frame/lod.rs` and `render/terrain.rs`, streaming's three homes.
+Later, with a trigger: `EditRuntime` into `editor` (when M8-7 edits chunks), perf scenes out of `app` (when `app` blocks a change), splitting `frame/lod.rs` and `render/terrain.rs`, streaming's three homes.
 
 ## 3. Process review
 | Finding | Data (SPIKE-38) | Change | Cost |
@@ -41,7 +41,7 @@ Later, with a trigger: `EditRuntime` into `editor` (when M8-7 edits blocks), per
 ## 4. Lanes for M8 (owner's proposal, confirmed by the data)
 | Lane | Role | First week |
 |---|---|---|
-| sonnet-explorer | main: the critical path | R2 inside M8-2 block field infrastructure, then M8-3 |
+| sonnet-explorer | main: the critical path | R2 inside M8-2 chunk field infrastructure, then M8-3 |
 | sonnet-crusader | support: refactors and off-path steps | R6, R4, R1, then R5 inside M8-1 global coupled stage; R3 before M8-7 |
 | sonnet-spikes | spikes only, on the planner's go | SPIKE-35 (A-net open items), then idle |
 | opus-planner | plan, reviews, perf windows, owner decisions | — |
