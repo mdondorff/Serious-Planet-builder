@@ -728,3 +728,14 @@ Source: opus-planner (2026-10-23, M8-1), ADR 0077, SPIKE-33, SPIKE-35
 #### Scenario: Network, area and determinism
 - **WHEN** a 12-cell lattice with a 60 % land world runs 30 steps twice, with jitter 0 and 0.8
 - **THEN** no receiver drains uphill and no chain cycles, the outlets' area equals the land area, both runs agree bit for bit, the mean change per step falls, and the jitter changes the receivers
+
+### Requirement: GEN-041 The coupled run's debug maps
+`generators::coupled` SHALL draw the heights and the drainage area of a face of the coupled run as images: heights as the grey of the height debug view (sea at or below 0 in blue), the area on a log scale from the area of one cell (dark) to the largest area on the face (bright), so the river network reads as the bright lines. The maps are a pure function of the arrays.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-23, M8-1 part c), ADR 0077
+
+#### Scenario: What the maps show
+- **WHEN** the maps of a run on a small lattice are drawn
+- **THEN** a sea cell is blue, a land cell is grey by height, the cell with the largest area is the brightest and a cell with one cell's area the darkest, and two draws are equal

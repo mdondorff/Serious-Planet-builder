@@ -2,6 +2,8 @@
 mod compact;
 #[path = "concurrent_source.rs"]
 mod concurrent_source;
+#[path = "coupled_store.rs"]
+mod coupled_store;
 #[path = "crc_reference.rs"]
 mod crc_reference;
 #[path = "global_store.rs"]
