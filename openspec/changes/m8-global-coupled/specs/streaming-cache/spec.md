@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: STRM-043 The coupled run is stored as a channel
-The result of the global coupled run (GEN-040) SHALL be stored as a `TileChannel` of kind 7 in blocks of the canonical layout of its lattice (`GlobalWorld::layout(n)`): per cell the height, the drainage area in m2 and the receiver's global cell index, one block per tile, `B x B` cells, as byte-shuffled planes in an LZ4 block. The key SHALL carry the lattice size, the steps, every run parameter, the base resolution, the algorithm version and a hash of the run's inputs, so a changed value gives every block a new key. A block read back SHALL equal what was written bit for bit; a block of another `B`, a short or damaged payload SHALL be an error naming the block.
+The result of the global coupled run (GEN-040) SHALL be stored as a `TileChannel` of kind 7 in blocks of the canonical layout of its lattice (`GlobalWorld::layout(n)`): per cell the height, the drainage area in m2 and the receiver's global cell index, one `B x B` block per tile, as byte-shuffled planes in an LZ4 block. The key SHALL carry the lattice size, the steps, every run parameter, the base resolution, the algorithm version and a hash of the run's inputs, so a changed value gives every block a new key. A block read back SHALL equal what was written bit for bit; a block of another `B`, a short or damaged payload SHALL be an error naming the block.
 
 Verify: A
 Status: active
