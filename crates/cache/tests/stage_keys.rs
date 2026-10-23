@@ -309,3 +309,26 @@ const KNOWN_LAYOUT_KEY: &str = "3fa6ad5dff9f501ab224456cabd21384";
 const KNOWN_COARSE: &str = "f7eb6786122ed161a75229e125d91653";
 const KNOWN_TERRAIN: &str = "222fb7bc04027214cfffd092d0f271f2";
 const KNOWN_DETAIL: &str = "f8be7d44cb5d0e89d9eb4b4f58754c5e";
+
+// spec: GEN-034
+#[test]
+fn a_chunk_key_covers_the_chunk_tile_the_halo_and_the_step_cap_and_differs_from_the_tile_key() {
+    use planet_generators::chunk::ChunkId;
+    let reads = seed_read();
+    let g = graph(1, 1, 0.25);
+    let c = ctx(&reads);
+    let up = BTreeMap::from([("coarse", stage_key(&g, "coarse", Scope::Global, &c, &BTreeMap::new()))]);
+    let t = TileId::new(Face(2), 11, 3, 7).unwrap();
+    let key = |t: TileId, halo: f64, cap: u32| stage_key(&g, "terrain", Scope::Chunk(ChunkId::new(t, halo, cap).unwrap()), &c, &up);
+    let base = key(t, 400.0, 64);
+    assert_eq!(base, key(t, 400.0, 64));
+    assert_ne!(base, key(t, 401.0, 64), "halo");
+    assert_ne!(base, key(t, 400.0, 65), "step cap");
+    assert_ne!(base, key(TileId::new(Face(2), 11, 4, 7).unwrap(), 400.0, 64), "position");
+    assert_ne!(base, key(TileId::new(Face(2), 10, 3, 7).unwrap(), 400.0, 64), "grid level");
+    assert_ne!(base, stage_key(&g, "terrain", Scope::Tile(t), &c, &up), "a tile with the chunk's own id");
+    let wrong = std::panic::catch_unwind(|| {
+        stage_key(&g, "coarse", Scope::Chunk(ChunkId::new(t, 400.0, 64).unwrap()), &ctx(&seed_read()), &BTreeMap::new())
+    });
+    assert!(wrong.is_err(), "a global field is refused a chunk scope");
+}

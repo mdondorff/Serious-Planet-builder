@@ -5,6 +5,7 @@
 //! bit-identical across platforms and thread counts.
 
 pub mod chain;
+pub mod chunk;
 pub mod climate;
 pub mod compact;
 pub mod coupled;

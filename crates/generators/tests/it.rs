@@ -12,6 +12,8 @@ mod brush_stage;
 mod cell_keys;
 #[path = "chain.rs"]
 mod chain;
+#[path = "chunk.rs"]
+mod chunk;
 #[path = "climate.rs"]
 mod climate;
 #[path = "compact.rs"]
