@@ -13,18 +13,17 @@ Dormant (no near trigger; not asked now):
 - **Region keep-inside** (`openspec/changes/region-mode1`): soft influence for Cities, not a hard clip (owner, 2026-10-21, Q8). Trigger: Cities.
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
-## M7 queue: ground detail and edit health (plan: `docs/briefings/m7-planning.md`; scope reshuffled by the owner, 2026-10-21)
-Global authoring (A1, A3, A4, E1, overview maps) moves to M9; M8 is generation principles (driver maps).
+## M7 queue: close-out (plan: `docs/briefings/m7-planning.md`; next week's start: `docs/briefings/week-2026-10-25.md`)
+Done in M7: G0, G2a-c, A5, ADR 0074, SR (F7), H1, H2, SPIKE-28 to 32, edit scaling (SPIKE-29 fixes 1-4, plan-cache-keep), editor default store, relief scale, P2-7.
 
 | # | Step | Lane |
 |---|---|---|
-| H2 | The ADR 0055 consolidation not done in the M5 housekeeping (item 10b, only its point 4 done): amendment chains into their specs (0033 with 0048 and 0054; 0037 with 0052 and 0061; 0041 with 0051 and 0053), readings ADRs (0027, 0044, 0048, 0050, 0051, 0053) set to superseded, spec-lint's countable style checks; word counts before and after | crusader, after H1 |
-| S1 | `edit-health-scale` (SPIKE-29 fix 2): the A5 and VIEW-043 lists incremental and lazy, work per change bounded at 5k items; then fix 1 (the LOD-012 proof local to the tile, the ceiling cached across plans) after the planner reviews its design | explorer, now |
-| SR | Scale references (owner, 2026-10-22): a debug key places a set of plain, known-size objects on the ground in front of the camera (chair 0.9 m, house 8 m, boat 10 m, a 291 m tower after the Olympiaturm, a 1 km city block of boxes) to judge scale and show z-fighting; cheap primitives, not authored items; reuse the SPIKE-28 instance path if that is cheapest | explorer, after S1 |
-| GT | Ground-detail look, second pass (owner, 2026-10-22: rock and grass are hard to tell apart; the quality target is higher; instancing will add detail on top): material separability by colour and structure, with SR in the stills; then lit goldens at 1.8 m and 0.5 m once the owner approves the look | explorer, after SR |
-| D1 | Driver-maps design spike for M8: the first maps (physical drivers, process results such as soil depth and moisture), resolution and bake cost, how response curves combine into suitability, what materials and instances read; ends with a proposed ADR | spikes, after the spike results |
+| GT | Ground-detail look pass 2 on branch `change/ground-look-2`: waits for the owner's verdict on the stills (`target/review/ground-detail/gt_*.png` in sonnet-m4). Approved: PR, verifier, lit goldens at 1.8 m and 0.5 m to the owner's `/bless`. Not approved: merge as the improved base without goldens (owner, 2026-10-22: quality comes in M8) | explorer |
+| AC | M7 acceptance: `cargo xtask accept M7` (or the report by hand where no tool exists), `docs/milestones/M7-report.md`, owner GO | planner |
+| HK | M7 housekeeping (`housekeeping` skill, README step included) | planner, then crusader |
+| M8-0 | M8 plan and ADRs from SPIKE-30 to 32 (`docs/briefings/m8-driver-maps.md`, ADR 0076): the regional block stage with a halo, shadows, landform shaping and erosion, the material map, the asset cache; owner review | planner |
 
-Open M6 items carried over (owner test, 2026-10-20): P1-4 tile flashing (Tracked), P1-5 editing frame rate on a quiet machine (owner's retest), P2-6 colour shift after fast surface-to-orbit moves, P2-7 colour step between 95 and 100 km, P2-8 missing tiles during an edit's refresh (with P1-4).
+Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
 
 ## Tracked
 - **Orbit flicker and dark-pixel flicker not reproduced** (owner, 2026-10-22; `target/review/frame-61216`): the sync-plan replay (relief, lit) is stable at the centre, a pipeline simulation with everything resident draws the ideal plan, and a sun-ahead specular test at 12 to 240 m shows no flicker (a Tokuyoshi kernel changed nothing). Needs the owner's answer: editor off, debug view, F3 overlay; or a screen recording; suspects: streaming stand-ins, hover overlay, exposure, water glint.
