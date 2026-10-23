@@ -13,10 +13,14 @@ Dormant (no near trigger; not asked now):
 - **Region keep-inside** (`openspec/changes/region-mode1`): soft influence for Cities, not a hard clip (owner, 2026-10-21, Q8). Trigger: Cities.
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
-## M8 queue: preparation (M7 closed 2026-10-23, `docs/milestones/M7-report.md`; next week's start: `docs/briefings/week-2026-10-25.md`)
+## M8 queue (plan: `docs/briefings/m8-plan.md`; next week's start: `docs/briefings/week-2026-10-25.md`)
+Done before the reset (2026-10-23): decisions D1 to D7, constitution v1.6, ADR 0077 to 0079, R6 (#589), R4 (#591), SPIKE-35 (#590: breach rule, 3 km halo, jittered D8, bit-exact), the M8-2 proposal (#588, `openspec/changes/m8-chunk-field/`).
+
 | # | Step | Lane |
 |---|---|---|
-| M8-0 | M8 plan and ADR 0077 written from SPIKE-33 and SPIKE-34 (both closed); the owner's decisions D1 to D6, then the lanes start per `docs/briefings/week-2026-10-25.md` | owner |
+| R1, R2 | the field chain's home, the `HeightField` split (tasks 1 and 2 of `m8-chunk-field`) | explorer, on the planner's go after the reset |
+| M8-1 | global coupled stage with R5 | crusader, on the planner's go after the reset |
+| R4b | `GeoPoint::of_dir` and `dir` in `editor/polyline.rs` onto the core helpers | crusader, with M8-7 |
 
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
 
