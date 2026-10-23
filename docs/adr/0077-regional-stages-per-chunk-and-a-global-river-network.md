@@ -1,5 +1,5 @@
 # 0077 Regional stages run per chunk of a fixed grid; the global coupled run fixes the river network
-Status: proposed (opus-planner, 2026-10-23, revised after SPIKE-33 and SPIKE-34; for the owner's acceptance and the ruling on the CON-08 reading)
+Status: accepted (owner, 2026-10-23; point 6 decided as a reading of CON-08)
 Date: 2026-10-23
 Source: owner, 2026-10-23 (the stage model for M8; erosion and hydrology as one simulation over time); SPIKE-31 to 34; ADR 0022, 0030, 0076; constitution CON-06, CON-08, CON-14, CON-22
 
@@ -16,7 +16,7 @@ Source: owner, 2026-10-23 (the stage model for M8; erosion and hydrology as one 
 3. **Fine steps along the frozen network.** A chunk runs a capped number of steps of incision along the global network plus local hillslope processes, with no re-routing, on one fixed-resolution raster.
 4. **Halo in metres.** A chunk field states its halo and step cap in its spec; ADR 0022's halo fraction stays for tile-scoped fields.
 5. **Engine conditions (SPIKE-34).** Chunk detail applies from the level its cell size supports; the plan requests chunks, not height samples; a tile reads the chunk's box-filtered level of its own spacing; a chunk computes in seconds.
-6. **CON-08 reading.** "Regional (per tile with a halo)" reads as "per chunk of a fixed grid with a bounded halo"; the owner rules whether this is a reading or a one-sentence amendment.
+6. **CON-08 reading (owner).** "Regional (per tile with a halo)" applies to chunks: a chunk is the tile of a regional stage, on a fixed grid, with a bounded halo. No amendment of the constitution.
 7. **Streaming and edits.** A tile whose chunk is not ready draws the coarse field (CON-22) and the chunk's change fades in; an edit invalidates the chunks within its reach plus the halo.
 
 ## Consequences

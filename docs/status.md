@@ -4,7 +4,7 @@ Forward state only (owner, 2026-10-16): open owner items, the current queue's op
 
 ## Waiting for the owner
 - **Before the M8 GO (owner, 2026-10-23):** the owner settles for themself why an edit's ground is eroded after the edit (D3); the planner asks for that explicit confirmation before taking the GO. First: the domain glossary (`docs/domain.md`).
-- **M8 plan decisions D1 to D6** (`docs/briefings/m8-plan.md`): accept ADR 0077 (proposed); the CON-08 reading or amendment; edits over chunks; the exit criteria; the lanes from 2026-10-25; the photo layer in M8 or M9.
+- **M8 GO:** decisions D1 to D7 taken (owner, 2026-10-23; `docs/briefings/m8-plan.md`); the lanes start on the GO, after the confirmation above.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked).
 - **At the laptop (postponed):** the NVIDIA driver update (591.86; device losses under parallel GPU load, Tracked); excluding the repo's `target` folders from Windows Search indexing.
 
