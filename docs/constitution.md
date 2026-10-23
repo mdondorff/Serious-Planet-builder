@@ -1,6 +1,6 @@
 # Constitution
 
-**Status:** v1.5, 2026-10-23 (CON-23: ADR maintenance; amended by the owner, ADR 0078). v1.4: 2026-10-15 (CON-11: geometry strict, presentation shading by tested bound; amended by the owner, ADR 0043). v1.3: 2026-10-15 (CON-07 and CON-14 scoped to fields; presentation data carved out; amended by the owner, ADR 0035). v1.2: 2026-10-11 (CON-18 golden approval amended by the owner, ADR 0017). v1.1: 2026-10-10 (CON-14, ADR 0010). v1: 2026-10-09. Owner: Matthias Dondorff.
+**Status:** v1.6, 2026-10-23 (CON-08: chunks; amended by the owner, ADR 0077). v1.5: 2026-10-23 (CON-23: ADR maintenance; amended by the owner, ADR 0078). v1.4: 2026-10-15 (CON-11: geometry strict, presentation shading by tested bound; amended by the owner, ADR 0043). v1.3: 2026-10-15 (CON-07 and CON-14 scoped to fields; presentation data carved out; amended by the owner, ADR 0035). v1.2: 2026-10-11 (CON-18 golden approval amended by the owner, ADR 0017). v1.1: 2026-10-10 (CON-14, ADR 0010). v1: 2026-10-09. Owner: Matthias Dondorff.
 
 This file holds the project's non-negotiable rules. Every rule has an ID and a verification tier (A pure, B CPU oracle, C pixels, D human; see `openspec/specs/testing`). Rules are deliberately short; the reasoning lives in the ADRs and in `docs/background/architecture-report.md`.
 
@@ -20,7 +20,7 @@ This file holds the project's non-negotiable rules. Every rule has an ID and a v
 - **CON-05** The WorldDefinition is the single source of truth. Every runtime representation (tiles, meshes, textures, instances) is a disposable cache that can be regenerated from it. *Verify: A* (`cache-verify`).
 - **CON-06** Generators are pure functions of `(definition read-set hash, generator_version, implementation_id, tile_id)`. They read inputs only through a read-recording context; no global state, wall-clock time or unseeded randomness. *Verify: A.*
 - **CON-07** Within one cache, each field layer is produced by exactly one implementation. The CPU implementation is the canonical reference; a GPU implementation must match it within the tolerance in CON-14. A *field* is data that a generator produces, that the cache stores or keys, or that CPU systems (collision, picking, placement, anchors) or other fields read; data the GPU derives only for display is presentation data, not a field (CON-14). *Verify: B.*
-- **CON-08** Generation is staged: global-coarse → regional (per tile with a halo) → local (per point). A stage reads only outputs of earlier stages. *Verify: A* (metamorphic tests: border agreement, partition invariance, coarse/fine agreement).
+- **CON-08** Generation is staged: global-coarse → regional (per tile or per chunk of a fixed grid, with a bounded halo) → local (per point). A stage reads only outputs of earlier stages. *Verify: A* (metamorphic tests: border agreement, partition invariance, coarse/fine agreement).
 - **CON-09** Authored content is stored separately from the procedural base, anchored in geo-coordinates, and records the `generator_version` and definition hash it was authored against. Surviving generator changes is a nice-to-have; the guaranteed options are version pinning and freeze/bake. *Verify: A.*
 - **CON-10** The WorldDefinition file format has its own schema version and tested migrations, independent of `generator_version`. *Verify: A* (fixture files from older versions load).
 
