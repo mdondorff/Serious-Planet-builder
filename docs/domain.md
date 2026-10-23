@@ -28,7 +28,7 @@ flowchart LR
   T -->|drawn as| CT["compact tile"]
   TD["TerrainDraw"] -->|draws| CT
   GC["global coupled run"] -.->|drainage, river network| GB
-  P["patch: fixed 5 km square"] -.->|reads| GC
+  P["chunk: fixed 5 km square"] -.->|reads| GC
   T -.->|samples from a minimum level| P
   classDef planned stroke-dasharray: 5 5
   class GC,P planned
@@ -45,7 +45,7 @@ flowchart TB
   end
   subgraph TILE["Per tile, on demand, on a streamer worker"]
     ST --> BF["base field"]
-    BF -.-> P["patch erosion along the river network; before or after the edits: D3, section 6"]
+    BF -.-> P["chunk erosion along the river network; before or after the edits: D3, section 6"]
     BF --> SS["stamp stages: the items"]
     P -.-> SS
     SS --> CT["compact tile"] --> PK["tile pack cache"]
@@ -85,10 +85,10 @@ The editor changes items in the WorldDefinition; the keys of the tiles those ite
 | Cube-sphere face | one of six faces; a point is `(face, s, t)` | face edge 10,008 km on Earth | fixed | everywhere (core) |
 | Tile | a square of the quadtree on a face, addressed by `TileId` (face, level, path) | edge 10,008 km / 2^level; 32 cells, 33 x 33 samples; level 3 = 1,251 km, level 22 = 2.4 m | **by LOD**: the plan picks the level per view | generated per view, cached |
 | Bake lattice cell | one interval of the global bake's grid | `res` cells per face edge: 16,384 in the store (611 m), at most 1,024 in memory | fixed per world | offline, stored |
-| Bake storage block | a tile-shaped chunk of the bake lattice, the unit the store reads and writes | up to 1,024 cells per edge | fixed | cache records |
+| Bake storage block | a tile-shaped piece of the bake lattice, the unit the store reads and writes | up to 1,024 cells per edge | fixed | cache records |
 | World-def cell | a tile at one fixed level (8 on Earth) used to index items | about 40 km | fixed | with the definition |
-| Patch (ADR 0077's "block", planned) | a fixed square of whole bake cells on which a regional process runs, with its own fine raster | 5 km, raster 4 to 10 m | fixed: never by LOD; tiles from a minimum level sample it | M8, generated on demand, cached |
-**Proposed:** ADR 0077's "block" is called a **patch**, because "block" already names the bake's storage unit (SPIKE-31 used "patch" for the same idea).
+| Chunk (planned, ADR 0077; former: block) | a fixed square of whole bake cells on which a regional process runs, with its own fine raster | 5 km, raster 4 to 10 m | fixed: never by LOD; tiles from a minimum level sample it | M8, generated on demand, cached |
+**Chunk, not tile (owner, 2026-10-23):** a tile is what the camera sees and changes with distance; a chunk is a fixed piece of the world that is generated once, with its surroundings, and that tiles read from. "Parcel" is reserved for later concepts (cities).
 
 ## 3. Terms
 | Term | Meaning | Owner | Exists |
@@ -127,12 +127,12 @@ The editor changes items in the WorldDefinition; the keys of the tiles those ite
 | material weights | per pixel shares of rock, sand, grass and soil from slope, height, climate and surface type | frame (reference), render | per pixel |
 | driver map (planned, ADR 0076) | a physical field (drainage, soil depth, wetness) that materials and plants read through suitability rules | — | M8 |
 | global coupled run (planned, ADR 0077) | erosion and drainage over time on the bake lattice; fixes heights, drainage area and the river network | — | M8, offline |
-| patch (planned, ADR 0077) | see section 2: fine erosion along the global river network on a fixed square | — | M8 |
+| chunk (planned, ADR 0077; former: block) | a fixed square of ground (the area of a level-11 tile, about 5 km) on which a regional stage, such as fine erosion, runs once with a halo of its surroundings; tiles from a minimum level read their heights from it; never by LOD | generators, cache, streaming | M8, on demand, cached |
 
 ## 4. Same word, different things
 | Word | Meanings |
 |---|---|
-| block | the bake's storage chunk (code); ADR 0077's regional square (proposed name: patch) |
+| block | the bake's storage unit in the code; ADR 0077's regional square is now the chunk |
 | cell | a bake lattice interval; a world-def index cell (about 40 km); a tile has 32 cells per edge |
 | node | a definition parameter; a summary hash node; a selected LOD node (a drawn tile) |
 | summary | the item hash tree; the bake's water summary channel; the editor's health summary |
@@ -142,17 +142,17 @@ The editor changes items in the WorldDefinition; the keys of the tiles those ite
 | When | What | Editor-off viewer |
 |---|---|---|
 | Offline, once per world | global bake and its channels, store, pre-filled coarse tiles; M8: the global coupled run | reads the results |
-| Per tile, on demand | the field chain sampled into a compact tile; M8: patches | yes |
+| Per tile, on demand | the field chain sampled into a compact tile; M8: chunks (on demand, cached; D7) | yes |
 | Per frame, CPU | LOD selection, plan, residency, streaming, water selection | yes |
 | Per frame, GPU | morph, lighting, materials, ground detail, atmosphere, water | yes |
 | Editor only | commands and undo, preview stamps, hover and drag picking, problems list, regions overlay, edit markers | no |
 
 ## 6. Where an edit sits relative to erosion (open for M8, decision D3)
-Today the chain is `base field (bake + erosion creases) -> stamp stages (edits)`: edits are added on top of an eroded ground and nothing erodes them. M8 inserts a patch stage. Its place decides D3:
+Today the chain is `base field (bake + erosion creases) -> stamp stages (edits)`: edits are added on top of an eroded ground and nothing erodes them. M8 inserts a chunk stage. Its place decides D3:
 | Order | Effect |
 |---|---|
-| `bake -> patch erosion -> edits` | an edit is a shape on top of eroded ground: instant, but never weathered |
-| `bake -> edits -> patch erosion` | an edit is weathered like the land around it: rivers cut through it; each edit re-runs its patches (seconds) |
+| `bake -> chunk erosion -> edits` | an edit is a shape on top of eroded ground: instant, but never weathered |
+| `bake -> edits -> chunk erosion` | an edit is weathered like the land around it: rivers cut through it; each edit re-runs its chunks (seconds) |
 
 ## 7. Keeping it current
 - An ADR, spec or change that adds, renames or retires a term updates this file in the same PR.
