@@ -1,11 +1,11 @@
 # M8 Natural landscape: plan (opus-planner, 2026-10-23)
 
-Status: proposed; owner decisions D1 to D6 open, D7 decided. Inputs: SPIKE-28 to 39 (the architecture and process review with refactors R1 to R6: `docs/briefings/m8-review.md`), ADR 0076 (driver maps), ADR 0077 (stage model), `docs/briefings/m8-driver-maps.md`, terms: `docs/domain.md` (chunk: ADR 0077's regional square).
+Status: decisions D1 to D7 taken (owner, 2026-10-23); the M8 GO follows the owner's confirmation in `docs/status.md`. Inputs: SPIKE-28 to 39 (the architecture and process review with refactors R1 to R6: `docs/briefings/m8-review.md`), ADR 0076 (driver maps), ADR 0077 (stage model), `docs/briefings/m8-driver-maps.md`, terms: `docs/domain.md` (chunk: ADR 0077's regional square).
 
 ## Goal
 The base layer, without instances, reaches the owner's Outerra reference image at sunset and midday from 300 m, 30 m and 1.8 m (owner, 2026-10-22).
 
-## Exit criteria (proposed)
+## Exit criteria (owner, 2026-10-23, D4)
 | # | Criterion | Tier |
 |---|---|---|
 | 1 | Owner's look review against the Outerra image at fixed poses (300 m, 30 m, 1.8 m; sunset, midday) on the 16384 store | D |
@@ -39,14 +39,14 @@ The base layer, without instances, reaches the owner's Outerra reference image a
 - R4 and R6 touch many files and run on day 1 while explorer writes the M8-2 proposal without code.
 
 ## Owner decisions
-| # | Decision | Recommendation |
+| # | Decision | Owner, 2026-10-23 |
 |---|---|---|
-| D1 | Accept ADR 0077 (chunks of a fixed grid; the global coupled run fixes the river network) | accept |
-| D2 | CON-08: a reading of "per tile with a halo" as "per chunk of a fixed grid with a bounded halo", or a one-sentence amendment | amendment: the text then says what the code does |
-| D3 | Edits over chunks: (1) edits apply after erosion, instant, erosion ignores them; (2) the edit shows at once, the eroded result follows within 10 s; (3) edited areas skip chunk erosion. Affects the editor only: a viewer receives a finished world | 2 |
-| D4 | The exit criteria above | accept |
-| D5 | Lanes from 2026-10-25 as in "Lanes and files" | accept; one main lane again if quota runs short |
-| D6 | The photo layer (SPIKE-32 step 4, asset cache ADR): in M8 after criterion 1 is met, or in M9 | M9; M8 keeps the procedural look extensible |
+| D1 | Accept ADR 0077 (chunks of a fixed grid; the global coupled run fixes the river network) | **accepted** |
+| D2 | CON-08: a reading of "per tile with a halo" as "per chunk of a fixed grid with a bounded halo", or a one-sentence amendment | **a reading: "per tile with a halo" applies to chunks; no amendment** |
+| D3 | Edits over chunks: (1) edits apply after erosion, instant, erosion ignores them; (2) the edit shows at once, the eroded result follows within 10 s; (3) edited areas skip chunk erosion. Affects the editor only: a viewer receives a finished world | **2: the edit shows at once, the eroded result follows** |
+| D4 | The exit criteria above | **accepted** |
+| D5 | Lanes from 2026-10-25 as in "Lanes and files" | **accepted** |
+| D6 | The photo layer (SPIKE-32 step 4, asset cache ADR): in M8 after criterion 1 is met, or in M9 | **later (M9 or after); M8 keeps the procedural look extensible** |
 | D7 | How the viewer gets chunks | **decided (owner, 2026-10-23): at runtime** (generated on demand, prefetched, cached on disk); pre-baking an area offline is added later if criterion 7 shows a gap worth filling |
 
 ## Risks
