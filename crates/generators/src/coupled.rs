@@ -8,6 +8,7 @@
 //! (`spikes/landscape-evolution/results/*.patch`); the base heights, the uplift and the erodibility are inputs, so the run does not know where
 //! they come from (the wiring into the world's sources waits for the field-chain refactor, R1).
 
+use crate::dump::{height_to_grey, Rgba};
 use planet_core::cube::{direction_to_face, face_to_direction, Face, TangentWarp};
 use planet_core::hash::mix64;
 use planet_core::Vec3;
@@ -110,7 +111,7 @@ impl Lattice {
 }
 
 /// The parameters of the run.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CoupledParams {
     /// The drainage-area exponent of the stream power law (the slope exponent is 1).
     pub area_exp: f64,
@@ -307,6 +308,51 @@ pub fn run(lat: &Lattice, input: &CoupledInput, p: &CoupledParams, steps: usize)
     CoupledState { z, area_m2: last.1.iter().map(|&a| a as f32).collect(), receiver: last.0, steps: log }
 }
 
+/// The colour of sea in the debug maps.
+pub const SEA_RGBA: [u8; 4] = [30, 60, 160, 255];
+
+/// The heights of `face` of a run (`n` cells per edge) as an image, row `j` at pixel row `j`: sea (`z <= 0`) blue, land the grey of the height
+/// debug view (GEN-041).
+pub fn height_map(n: usize, face: usize, z: &[f32]) -> Rgba {
+    let cells = &z[face * n * n..(face + 1) * n * n];
+    let data = cells
+        .iter()
+        .flat_map(|&h| {
+            if h <= 0.0 {
+                SEA_RGBA
+            } else {
+                {
+                    let g = height_to_grey(h);
+                    [g, g, g, 255]
+                }
+            }
+        })
+        .collect();
+    Rgba { width: n as u32, height: n as u32, data }
+}
+
+/// The drainage area of `face` as an image on a log scale from the area of a cell (dark) to the largest area on the face (bright), so the
+/// rivers read as bright lines (GEN-041).
+pub fn area_map(lat: &Lattice, face: usize, area_m2: &[f32]) -> Rgba {
+    let n = lat.n();
+    let cells = &area_m2[face * n * n..(face + 1) * n * n];
+    let max = cells.iter().fold(0.0f32, |m, &a| m.max(a));
+    let data = cells
+        .iter()
+        .enumerate()
+        .flat_map(|(i, &a)| {
+            let own = lat.area_m2(i);
+            let v = if f64::from(max) > own * (1.0 + 1e-9) {
+                (libm::log(f64::from(a).max(own) / own) / libm::log(f64::from(max) / own)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            [(200.0 * v * v) as u8, (255.0 * v) as u8, (60.0 + 195.0 * v) as u8, 255]
+        })
+        .collect();
+    Rgba { width: n as u32, height: n as u32, data }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,6 +486,37 @@ mod tests {
         let total: f64 = (0..lat.len()).map(|c| lat.area_m2(c)).sum();
         let outlet = (0..lat.len()).find(|&c| rec[c] == NONE).unwrap();
         assert!((a[outlet] / total - 1.0).abs() < 1e-9, "{} of {total}", a[outlet]);
+    }
+
+    // spec: GEN-041
+    #[test]
+    fn the_maps_show_sea_blue_land_grey_and_the_largest_area_brightest() {
+        let lat = Lattice::new(12, R);
+        let input = world(&lat);
+        let state = run(&lat, &input, &CoupledParams::default(), 10);
+        let (n, face) = (lat.n(), 1);
+        let hm = height_map(n, face, &state.z);
+        let am = area_map(&lat, face, &state.area_m2);
+        assert_eq!((hm.width, hm.height, am.width, am.height), (12, 12, 12, 12));
+        let cells = &state.z[face * n * n..(face + 1) * n * n];
+        assert!(cells.iter().any(|&z| z <= 0.0) && cells.iter().any(|&z| z > 0.0), "the face has land and sea");
+        for (i, &z) in cells.iter().enumerate() {
+            let px = hm.pixel((i % n) as u32, (i / n) as u32);
+            if z <= 0.0 {
+                assert_eq!(px, SEA_RGBA);
+            } else {
+                assert!(px[0] == px[1] && px[1] == px[2] && px[3] == 255, "land is grey: {px:?}");
+            }
+        }
+        let areas = &state.area_m2[face * n * n..(face + 1) * n * n];
+        let big = areas.iter().cloned().fold(0.0f32, f32::max);
+        assert!(big as f64 > 2.0 * lat.area_m2(0), "the face has a river");
+        let (bx, by) =
+            ((areas.iter().position(|&a| a == big).unwrap() % n) as u32, (areas.iter().position(|&a| a == big).unwrap() / n) as u32);
+        assert_eq!(am.pixel(bx, by), [200, 255, 255, 255], "the largest area is the brightest");
+        let sea = cells.iter().position(|&z| z <= 0.0).unwrap();
+        assert_eq!(am.pixel((sea % n) as u32, (sea / n) as u32), [0, 0, 60, 255], "a cell with no more than its own area is the darkest");
+        assert_eq!(am, area_map(&lat, face, &state.area_m2));
     }
 
     // spec: GEN-040

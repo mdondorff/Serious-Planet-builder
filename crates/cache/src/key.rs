@@ -80,6 +80,8 @@ pub enum Kind {
     GlobalWaterSummary = 5,
     /// A block of the wet-floor channel of the global bake (ADR 0071 point 3): one `u16` code per vertex.
     GlobalWetFloor = 6,
+    /// A block of the global coupled run (M8-1, GEN-040): height, drainage area and receiver per cell.
+    GlobalCoupled = 7,
 }
 
 /// One entry of a read set, in its 128-bit form (ADR 0018).
@@ -322,6 +324,8 @@ pub const PARAM_OCEAN_AREA_FRACTION: u8 = 7;
 /// The layer name of an authored stage (UTF-8 bytes) and its index in the stack of ADR 0007 (`u32` little endian), STRM-027.
 pub const PARAM_STAGE_LAYER: u8 = 8;
 pub const PARAM_STAGE_INDEX: u8 = 9;
+/// The run of a coupled block: lattice cells per face edge, steps, base resolution and every parameter of the run (STRM-043).
+pub const PARAM_COUPLED: u8 = 10;
 
 fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> KeyInputs {
     assert!(
