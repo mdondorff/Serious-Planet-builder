@@ -26,6 +26,8 @@ Rules:
 - If it decides an open point of an earlier ADR ("accepted in part", "point N open"), update that earlier ADR's status line in the same PR (for example "point 5 decided by NNNN").
 - Update the status index table in `docs/adr/README.md` (number, title, status, open points) in the same PR.
 - If the decision would change a constitution rule, say so in Context and name the rule ID; do not edit the constitution.
+- Use the terms of `docs/domain.md`; add a new term there first.
+- Maintenance of accepted ADRs (ADR 0078, CON-23): only links whose target moved, a spec-owned value (keep the value at decision time, add the spec reference), a term renamed in `docs/domain.md` (same concept only; quotes verbatim with the new term in brackets), or an erratum marker `[Erratum <date>: <what is wrong>; see ADR NNNN or <spec ID>]`. Never the decision, context facts or evidence. Each edit adds `Maintained: <date>, <kind>: <what>` at the end; one kind per docs-only PR.
 - Add a fragment `docs/log.d/<YYYY-MM-DD>-adr-NNNN.md` with one line: date, ADR number, title, status.
 
 Topic: $ARGUMENTS

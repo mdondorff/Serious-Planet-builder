@@ -1,6 +1,6 @@
 # Constitution
 
-**Status:** v1.4, 2026-10-15 (CON-11: geometry strict, presentation shading by tested bound; amended by the owner, ADR 0043). v1.3: 2026-10-15 (CON-07 and CON-14 scoped to fields; presentation data carved out; amended by the owner, ADR 0035). v1.2: 2026-10-11 (CON-18 golden approval amended by the owner, ADR 0017). v1.1: 2026-10-10 (CON-14, ADR 0010). v1: 2026-10-09. Owner: Matthias Dondorff.
+**Status:** v1.5, 2026-10-23 (CON-23: ADR maintenance; amended by the owner, ADR 0078). v1.4: 2026-10-15 (CON-11: geometry strict, presentation shading by tested bound; amended by the owner, ADR 0043). v1.3: 2026-10-15 (CON-07 and CON-14 scoped to fields; presentation data carved out; amended by the owner, ADR 0035). v1.2: 2026-10-11 (CON-18 golden approval amended by the owner, ADR 0017). v1.1: 2026-10-10 (CON-14, ADR 0010). v1: 2026-10-09. Owner: Matthias Dondorff.
 
 This file holds the project's non-negotiable rules. Every rule has an ID and a verification tier (A pure, B CPU oracle, C pixels, D human; see `openspec/specs/testing`). Rules are deliberately short; the reasoning lives in the ADRs and in `docs/background/architecture-report.md`.
 
@@ -47,7 +47,7 @@ This file holds the project's non-negotiable rules. Every rule has an ID and a v
 
 ## 6. Process
 
-- **CON-23** Decisions are recorded as ADRs. Accepted ADRs are never edited except for their status line; changes are new ADRs that supersede old ones.
+- **CON-23** Decisions are recorded as ADRs. An accepted ADR's decision, facts and evidence never change; a new decision is a new ADR. Maintenance that keeps the meaning is allowed and traced by a `Maintained:` line (ADR 0078): status, moved links, spec-owned values, renamed domain terms, errata markers.
 - **CON-24** OpenSpec holds the current specs; work happens as OpenSpec changes that are archived when done. Background docs are frozen and non-normative.
 - **CON-25** All build, test and tooling commands go through `cargo xtask`; no bash or PowerShell scripts in the repo.
 - **CON-26** Development is Windows-native (MSVC toolchain); Linux is covered by CI. WSL is not part of the workflow.

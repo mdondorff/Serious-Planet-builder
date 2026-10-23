@@ -87,3 +87,4 @@ Refreshed by the `adr` skill whenever an ADR is added or its status changes, and
 | 0075 | [Documentation budget: the hot files stay small and current](0075-documentation-budget.md) | accepted (opus-planner; owner approved) | amends 0055 point 5 |
 | 0076 | [Driver maps: physical fields decide materials, plants and shapes through suitability rules](0076-driver-maps-suitability-and-consumers.md) | proposed | owner review before M8; D1 measures costs |
 | 0077 | [Regional stages run per block of a fixed grid; the global coupled run fixes the river network](0077-regional-stages-per-block-and-a-global-river-network.md) | proposed | reads CON-08 (owner ruling); extends 0022 and 0030; built in M8 |
+| 0078 | [Maintenance of accepted ADRs: links, spec-owned values, domain terms, errata](0078-maintenance-of-accepted-adrs.md) | accepted (owner) | amends CON-23 (constitution v1.5); spec-lint check queued |

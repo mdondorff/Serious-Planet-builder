@@ -6,7 +6,7 @@ A planet-scale generator, editor and real-time renderer: Rust + wgpu, one binary
 ## Sources of truth (highest first)
 1. `docs/constitution.md`: non-negotiable rules. Read it at the start of every session. Never edit it; propose amendments as ADRs.
 2. `openspec/specs/`: current subsystem specs, the single home of current rules (every normative number, budget, limit and format; ADR 0055). Read only the 2–3 specs your task touches.
-3. `docs/adr/`: accepted decisions and why they were made. Never edit an accepted ADR except its status line.
+3. `docs/adr/`: accepted decisions and why they were made. Edit accepted ADRs only per ADR 0078.
 4. `docs/background/`: frozen research and setup docs. **Read only when an ADR, spec or task points at a specific section** (e.g. "background report §5"). Never treat them as requirements, never update them.
 
 Working files: `docs/status.md` (forward state only: waiting for the owner, the current queue, the current stop report, tracked items), `docs/log.md` and `docs/log.d/` (the current milestone's log; read it with `cargo xtask log`), `docs/spikes.md` (spike register), `docs/learnings.md` (findings, each with a scope). Finished milestones are archived in `docs/archive/<M>/` by the `housekeeping` skill. `docs/README.md` maps every folder.
