@@ -806,7 +806,7 @@ fn fs_lit_atmo_view(in: VsOut) -> vec4<f32> {
     let up = up_at(nodes[in.node_index].up, in.local);
     let climate = tile_climate(in);
     let gd = ground_detail(in.node_index, in.local, in.normal, up, climate.x, climate.y, in.height - g.extra.x);
-    var rgb = atm_shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, g.range.z) * select(vec3<f32>(1.0), gd.mul, g.mode.x <= 1u);
+    var rgb = atm_shade_lit(g.mode.x, g.albedo, gd.normal, up, climate.x, climate.y, in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)), in.height, sun, g.range.z) * detail_mul(gd, g.mode.x, g.albedo, climate.x, climate.y, clamp(dot(normalize(gd.normal), up), 0.0, 1.0), in.height - g.extra.x, shore_ramp_at(g.extra.z, camera_distance(nodes[in.node_index].origin_rel, in.local)));
     let gloss = ground_gloss(in.node_index, in.local, gd, sun);
     if (gloss > 0.0) {
         rgb = min(rgb + atm_sun_direct(up, in.height, sun) * (gloss * g.range.z), vec3<f32>(60000.0));
