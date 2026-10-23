@@ -4,6 +4,7 @@
 |---|---|
 | What the project is, how to run it, every key | `README.md` (repository root) |
 | The rules that never bend | `docs/constitution.md` |
+| What a term means (tile, patch, field, stage...) and the pictures of the model | `docs/domain.md` |
 | What is happening now, what waits for the owner | `docs/status.md` |
 | The current milestone's plan and this week's start brief | `docs/briefings/` |
 | What was done, newest first | `cargo xtask log` (current milestone: `docs/log.md` and `docs/log.d/`) |
