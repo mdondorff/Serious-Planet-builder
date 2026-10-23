@@ -3,7 +3,7 @@
 Forward state only (owner, 2026-10-16): open owner items, the current queue's open items, the current unanswered stop report, tracked items and quarantines. History goes to the log (`cargo xtask log`). When a change is archived the coder deletes its queue item's text (the log line is the record); when the architect answers a stop report it deletes it. A Tracked entry has at most 3 lines; a finished one is deleted (ADR 0075). Cap: 15 KB. Earlier states: `docs/archive/M4/status-at-m4-acceptance.md`, `docs/archive/M6/status-at-m6-close.md`. M7's queue as executed: `docs/milestones/M7-report.md`.
 
 ## Waiting for the owner
-- **CON-08 reading** (ADR 0077 point 6, proposed): "regional (per tile with a halo)" read as "per block of a fixed grid with a bounded halo"; a reading or a one-sentence amendment. Decide with the SPIKE-33 and SPIKE-34 reports (2026-10-24 evening).
+- **M8 plan decisions D1 to D6** (`docs/briefings/m8-plan.md`): accept ADR 0077 (proposed); the CON-08 reading or amendment; edits over blocks; the exit criteria; the lanes from 2026-10-25; the photo layer in M8 or M9.
 - **Optional, when convenient:** the M6 retest list (`docs/archive/M6/briefings/m6-owner-test-plan.md`, "Retest"); a live check of the flickers (Tracked).
 - **At the laptop (postponed):** the NVIDIA driver update (591.86; device losses under parallel GPU load, Tracked); excluding the repo's `target` folders from Windows Search indexing.
 
@@ -15,8 +15,7 @@ Dormant (no near trigger; not asked now):
 ## M8 queue: preparation (M7 closed 2026-10-23, `docs/milestones/M7-report.md`; next week's start: `docs/briefings/week-2026-10-25.md`)
 | # | Step | Lane |
 |---|---|---|
-| M8-0 | M8 stage model: ADR 0077 (proposed: blocks of a fixed grid, a coupled process is one field); SPIKE-33 landscape evolution (spikes) and SPIKE-34 block stage in the engine (explorer), reports by 2026-10-24 evening; then the M8 plan and decisions before 2026-10-25 | planner, spikes, explorer |
-| HK | M7 housekeeping, mechanical pass from the planner's list in `docs/milestones/M7-report.md` ("Housekeeping list") | crusader |
+| M8-0 | M8 plan and ADR 0077 written from SPIKE-33 and SPIKE-34 (both closed); the owner's decisions D1 to D6, then the lanes start per `docs/briefings/week-2026-10-25.md` | owner |
 
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
 
