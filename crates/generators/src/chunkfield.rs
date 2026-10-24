@@ -35,7 +35,8 @@ pub struct Cell {
 }
 
 impl Cell {
-    fn key(self) -> u64 {
+    /// The cell packed into 64 bits: face, then `i`, then `j` (ordered the way cells are compared).
+    pub fn key(self) -> u64 {
         u64::from(self.face) << 56 | u64::from(self.i) << 28 | u64::from(self.j)
     }
 }
@@ -139,6 +140,15 @@ pub struct Region {
     pub core: usize,
     /// The outermost ring's depth.
     pub halo: u16,
+    /// The position of every cell in `cells`, by the cell's key.
+    index: HashMap<u64, u32>,
+}
+
+impl Region {
+    /// The position of `cell` in [`Region::cells`], if it is in the region.
+    pub fn index_of(&self, cell: Cell) -> Option<usize> {
+        self.index.get(&cell.key()).map(|&i| i as usize)
+    }
 }
 
 /// The region of the chunk over `tile` (a tile of the chunk grid level) with `halo` rings around it.
@@ -173,7 +183,7 @@ pub fn region(lat: &ChunkLattice, tile: TileId, halo: u16) -> Region {
         at += 1;
     }
     neighbours.resize(cells.len(), [NONE; 8]);
-    Region { cells, depth, neighbours, core, halo }
+    Region { cells, depth, neighbours, core, halo, index }
 }
 
 /// A chunk stage: a process over a region of the cell graph that yields a change to the base height (ADR 0077 point 3). It states its step
