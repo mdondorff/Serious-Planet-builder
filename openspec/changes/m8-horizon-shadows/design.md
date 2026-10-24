@@ -31,7 +31,7 @@ Status: draft for the planner; the open questions need a decision or a measureme
 | `Kind::GlobalHorizon` (key kind and record kind byte) | 9 |
 | `PARAM_HORIZON` (output-parameter tag) | 12 |
 | coarse horizon codec version | 1 (`HORIZON_CODEC_VERSION`) |
-| requirement IDs | GEN-044 to GEN-046, STRM-045, STRM-048, REND-038 (STRM-046 and STRM-047 are explorer's) |
+| requirement IDs | GEN-044 to GEN-046, STRM-045, STRM-048, STRM-049, REND-038 (STRM-046 and STRM-047 are explorer's) |
 
 ## Measured (indicative, CPU only, not a gated perf run)
 | Quantity | Value |

@@ -4,6 +4,8 @@ mod chunks;
 mod dispatch_throughput;
 #[path = "floor_roots.rs"]
 mod floor_roots;
+#[path = "horizon_jobs.rs"]
+mod horizon_jobs;
 #[path = "job_log.rs"]
 mod job_log;
 #[path = "manager.rs"]

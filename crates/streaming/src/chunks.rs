@@ -261,6 +261,16 @@ impl ChunkManager {
         self.shared.lock().expect("chunk state").ready.contains_key(&key)
     }
 
+    /// The ready result of `key` (what a horizon bake reads of a chunk).
+    pub fn result(&self, key: ChunkKey) -> Option<Arc<ChunkResult>> {
+        self.shared.lock().expect("chunk state").ready.get(&key).map(|e| e.result.clone())
+    }
+
+    /// The hash of the ready result of `key`: the part of a horizon's state word that this chunk contributes.
+    pub fn result_hash(&self, key: ChunkKey) -> Option<u64> {
+        self.shared.lock().expect("chunk state").ready.get(&key).map(|e| e.result.hash())
+    }
+
     /// Jobs running or waiting for a worker.
     pub fn in_flight(&self) -> usize {
         self.shared.lock().expect("chunk state").running.len()
@@ -278,5 +288,229 @@ impl ChunkManager {
     /// The failures and notes since the last call, named.
     pub fn take_log(&self) -> Vec<String> {
         std::mem::take(&mut self.shared.lock().expect("chunk state").log)
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// The horizon job (M8-5, STRM-048): a second job per chunk that lands after its heights
+
+/// What the horizon job needs of the layers above it, injected so this crate stays GPU-free and a test runs with a fake: the chunks a horizon
+/// reads and the bake itself (the real one samples the chunk field's heights over the chunk and its halo and calls `bake_horizon`).
+pub trait HorizonBaker: Send + Sync {
+    /// The chunks the horizon of `key` reads, its own first: the changes of these (where they are ready) are in its heights.
+    fn reads(&self, key: ChunkKey) -> Vec<ChunkKey>;
+    /// The horizon map of `key`, given the ready results among [`HorizonBaker::reads`] (a chunk that is not ready contributes its base only).
+    fn bake(&self, key: ChunkKey, ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Vec<u8>;
+    /// A hash of everything that defines the march (texel, azimuths, range, version): a change re-keys every stored map.
+    fn spec_hash(&self) -> u64;
+}
+
+/// The disk side of the horizon cache: a map by its tile and its state word (the march and the results of the chunk and of the neighbours it
+/// read), so a map made against other neighbours is a miss. A failing `get` is a miss, logged.
+pub trait HorizonDisk: Send + Sync {
+    fn get(&self, tile: TileId, word: u64) -> Result<Option<Vec<u8>>, String>;
+    fn put(&self, tile: TileId, word: u64, bytes: Vec<u8>) -> Result<(), String>;
+}
+
+/// The knobs of the horizon jobs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HorizonConfig {
+    /// Jobs running at once (fewer than the chunk jobs: heights come first).
+    pub workers: usize,
+    /// A map made against a neighbourhood that has since changed is baked again only once the neighbourhood has been unchanged for this long
+    /// (milliseconds of the injected clock), so the landing of the eight neighbours one after another costs one or two bakes, not eight.
+    pub settle_ms: u64,
+}
+
+impl Default for HorizonConfig {
+    fn default() -> Self {
+        HorizonConfig { workers: 1, settle_ms: 1_000 }
+    }
+}
+
+/// What the horizon jobs did, cumulative (counts only).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HorizonStats {
+    /// Maps baked by a job.
+    pub baked: u64,
+    /// Maps read from the disk cache.
+    pub disk_hits: u64,
+    /// Landings of a chunk that already had a map (its neighbourhood had changed): the figure the coalescing keeps small.
+    pub rebaked: u64,
+    pub landed: u64,
+    pub evicted: u64,
+}
+
+/// What one [`HorizonJobs::update`] changed.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HorizonUpdate {
+    /// Maps that landed since the last update (a new map or a re-bake), in landing order.
+    pub landed: Vec<ChunkKey>,
+    /// Maps dropped because their chunk left RAM.
+    pub evicted: Vec<ChunkKey>,
+    pub started: usize,
+}
+
+struct HorizonEntry {
+    bytes: Arc<Vec<u8>>,
+    word: u64,
+}
+
+#[derive(Default)]
+struct HorizonShared {
+    ready: HashMap<ChunkKey, HorizonEntry>,
+    running: HashSet<ChunkKey>,
+    /// The state word last seen for a chunk and since when (the settle window starts at a change).
+    seen: HashMap<ChunkKey, (u64, u64)>,
+    ever_baked: HashSet<ChunkKey>,
+    landed: Vec<ChunkKey>,
+    stats: HorizonStats,
+    log: Vec<String>,
+}
+
+/// The horizon maps of the ready chunks: a map is baked once its chunk is ready, and again when the chunks it read have changed (a neighbour
+/// landed), after the neighbourhood has settled. Never waits for a job (CON-22): a tile whose map is not there reads the coarse horizon alone.
+pub struct HorizonJobs {
+    chunks: Arc<ChunkManager>,
+    baker: Arc<dyn HorizonBaker>,
+    spawner: Arc<dyn Spawner>,
+    clock: Arc<dyn Clock>,
+    disk: Option<Arc<dyn HorizonDisk>>,
+    cfg: HorizonConfig,
+    shared: Arc<Mutex<HorizonShared>>,
+}
+
+impl HorizonJobs {
+    pub fn new(
+        chunks: Arc<ChunkManager>,
+        baker: Arc<dyn HorizonBaker>,
+        spawner: Arc<dyn Spawner>,
+        clock: Arc<dyn Clock>,
+        disk: Option<Arc<dyn HorizonDisk>>,
+        cfg: HorizonConfig,
+    ) -> HorizonJobs {
+        HorizonJobs { chunks, baker, spawner, clock, disk, cfg, shared: Arc::default() }
+    }
+
+    /// The state word of the horizon of `key` now: the march, and the result of every chunk it reads (0 for one that is not ready).
+    fn word(&self, key: ChunkKey) -> u64 {
+        let mut h = planet_core::hash::mix64(self.baker.spec_hash() ^ 0x484f_5249_5a4f_4e00);
+        for r in self.baker.reads(key) {
+            h = planet_core::hash::mix64(h ^ self.chunks.result_hash(r).unwrap_or(0));
+        }
+        h
+    }
+
+    /// One frame: drop the maps of chunks that left RAM, find the wanted chunks whose map is missing or was made against another neighbourhood
+    /// (the state word is checked now, at dispatch, not on each landing), start the nearest at most `workers` at once, and report what landed.
+    pub fn update(&self, wanted: &[(ChunkKey, f64)]) -> HorizonUpdate {
+        let now = self.clock.now_ms();
+        let mut out = HorizonUpdate::default();
+        let mut starts: Vec<(ChunkKey, u64)> = Vec::new();
+        {
+            let mut sh = self.shared.lock().expect("horizon state");
+            let gone: Vec<ChunkKey> = {
+                let mut v: Vec<ChunkKey> = sh.ready.keys().filter(|k| !self.chunks.is_ready(**k)).copied().collect();
+                v.sort_unstable();
+                v
+            };
+            for k in &gone {
+                sh.ready.remove(k);
+                sh.seen.remove(k);
+                sh.ever_baked.remove(k);
+            }
+            sh.stats.evicted += gone.len() as u64;
+            out.evicted = gone;
+            out.landed = std::mem::take(&mut sh.landed);
+            let free = self.cfg.workers.saturating_sub(sh.running.len());
+            let mut candidates: Vec<(f64, ChunkKey, u64)> = Vec::new();
+            for &(k, d) in wanted {
+                if !self.chunks.is_ready(k) || sh.running.contains(&k) {
+                    continue;
+                }
+                let word = self.word(k);
+                let since = match sh.seen.get(&k) {
+                    Some(&(w, at)) if w == word => at,
+                    _ => {
+                        sh.seen.insert(k, (word, now));
+                        now
+                    }
+                };
+                match sh.ready.get(&k) {
+                    Some(e) if e.word == word => {}
+                    // A map exists for another neighbourhood: wait for the neighbourhood to settle.
+                    Some(_) if now.saturating_sub(since) < self.cfg.settle_ms => {}
+                    _ => candidates.push((d, k, word)),
+                }
+            }
+            candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            candidates.dedup_by_key(|c| c.1);
+            for (_, k, word) in candidates.into_iter().take(free) {
+                sh.running.insert(k);
+                starts.push((k, word));
+            }
+        }
+        out.started = starts.len();
+        for (key, word) in starts {
+            self.spawner.spawn(self.job(key, word));
+        }
+        out
+    }
+
+    fn job(&self, key: ChunkKey, word: u64) -> crate::Job {
+        let (chunks, baker, disk, shared) = (self.chunks.clone(), self.baker.clone(), self.disk.clone(), self.shared.clone());
+        Box::new(move || {
+            let tile = tile_of(key);
+            let mut bytes = None;
+            if let Some(disk) = &disk {
+                match disk.get(tile, word) {
+                    Ok(found) => bytes = found,
+                    Err(e) => shared.lock().expect("horizon state").log.push(format!("horizon {key:?}: disk entry refused ({e}), baking")),
+                }
+            }
+            let hit = bytes.is_some();
+            let bytes = bytes.unwrap_or_else(|| {
+                let ready: Vec<(ChunkKey, Arc<ChunkResult>)> =
+                    baker.reads(key).into_iter().filter_map(|r| chunks.result(r).map(|res| (r, res))).collect();
+                let made = baker.bake(key, &ready);
+                if let Some(disk) = &disk {
+                    if let Err(e) = disk.put(tile, word, made.clone()) {
+                        shared.lock().expect("horizon state").log.push(format!("horizon {key:?}: not stored ({e})"));
+                    }
+                }
+                made
+            });
+            let mut sh = shared.lock().expect("horizon state");
+            sh.running.remove(&key);
+            if !sh.ever_baked.insert(key) {
+                sh.stats.rebaked += 1;
+            }
+            sh.ready.insert(key, HorizonEntry { bytes: Arc::new(bytes), word });
+            sh.landed.push(key);
+            sh.stats.landed += 1;
+            if hit {
+                sh.stats.disk_hits += 1;
+            } else {
+                sh.stats.baked += 1;
+            }
+        })
+    }
+
+    /// The horizon map of `key`, if one has landed (`None`: the tile reads the coarse horizon alone).
+    pub fn horizon(&self, key: ChunkKey) -> Option<Arc<Vec<u8>>> {
+        self.shared.lock().expect("horizon state").ready.get(&key).map(|e| e.bytes.clone())
+    }
+
+    pub fn stats(&self) -> HorizonStats {
+        self.shared.lock().expect("horizon state").stats
+    }
+
+    pub fn in_flight(&self) -> usize {
+        self.shared.lock().expect("horizon state").running.len()
+    }
+
+    /// The failures and notes since the last call, named.
+    pub fn take_log(&self) -> Vec<String> {
+        std::mem::take(&mut self.shared.lock().expect("horizon state").log)
     }
 }

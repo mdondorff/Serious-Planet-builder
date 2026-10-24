@@ -12,12 +12,27 @@ Source: opus-planner (2026-10-24, M8-5), STRM-043
 - **THEN** the map is equal bit for bit, the block of a tile holds the observer cells under it, every key differs from the first one's and from the coupled run's, and a payload cut short, of another `B` or azimuth count, or missing is refused naming the block
 
 ### Requirement: STRM-048 The chunk horizon follows its chunk
-The chunk's horizon map (GEN-044) SHALL be a second job of the chunk that lands after its heights, stored on the disk cache under the chunk key plus the horizon parameters, evicted with its chunk and refreshed when its chunk lands again. A tile whose chunk horizon is not ready SHALL draw with the coarse horizon alone (CON-22) and the chunk horizon SHALL fade in when it lands; an edit that invalidates a chunk invalidates its horizon map, and an edit re-queues the horizon job of every chunk whose halo it touches (precise handling in M8-7).
+`streaming::chunks::HorizonJobs` SHALL run the horizon map of a chunk (GEN-044) as a second job that starts only once the chunk's heights are ready, on the injected spawner, at most `workers` at once, nearest first, and never waits for one (CON-22): until its map lands a tile reads the coarse horizon alone (`horizon(key)` is `None`). Each map carries a state word, the hash of the march and of the results of the chunk and of every chunk its bake reads (0 for one that is not ready). A map whose word differs from the current one is baked again, with the state word checked at dispatch and not at each landing, and only once the word has been unchanged for `settle_ms` of the injected clock, so the landing of eight neighbours one after another costs one re-bake, not eight; the number of re-bakes is in the stats. A map is dropped when its chunk leaves RAM. With a disk cache a map is looked up by its tile and its state word before it is baked, and stored after: a map made against other neighbours, or another march, is a miss, and a failing entry is a logged miss.
+
+Verify: A
+Status: active
+Source: opus-planner (2026-10-24, M8-5; coalescing added the same day), STRM-038 to STRM-041, CON-22
+
+#### Scenario: Stand-in, landing and coalescing
+- **WHEN** a chunk has its heights, then its horizon job runs, then its eight neighbours land one every 100 ms, then the jobs are asked after the settle window
+- **THEN** no job starts before the heights, the update returns with the job waiting, the tile reads no map until it lands, the neighbours' landings start no bake until the neighbourhood has settled, and then one re-bake reads all nine chunks (two bakes, one re-bake in all)
+
+#### Scenario: Eviction, the march and the disk
+- **WHEN** a chunk is evicted, the march changes, and a second world starts from the same disk cache
+- **THEN** the chunk's map is dropped with it, a map of another march is not taken for the first, the same chunk with the same neighbourhood reads its map from the disk with no bake, and one with another neighbourhood is a miss
+
+### Requirement: STRM-049 The world bakes the chunk horizon and keeps it on the pack
+The world SHALL give `HorizonJobs` a baker that samples the chunk field's heights (the base and the changes of the chunks that are ready) over the chunk and its halo on the chunk lattice and bakes the horizon (GEN-044), and a disk cache on the tile pack keyed by tile and state word; the landing of a map refreshes the tiles of its chunk (STRM-026) and the lookup of REND-038 reads it. An edit re-queues the horizon job of every chunk whose halo it touches (precise handling in M8-7).
 
 Verify: A
 Status: planned
-Source: opus-planner (2026-10-24, M8-5), STRM-038 to STRM-041, CON-22
+Source: opus-planner (2026-10-24, M8-5), STRM-048, STRM-026
 
-#### Scenario: Stand-in and landing
-- **WHEN** a plan's chunk has its heights and no horizon map yet, and then the map lands
-- **THEN** the tile reads the coarse horizon alone and the chunk's map is requested, then the chunk's map is used with a fade, and an edit in the halo re-queues the job
+#### Scenario: A flight
+- **WHEN** a scripted flight lands the chunks around the camera on a fake clock with the stand-in stage
+- **THEN** every chunk's map lands after its heights, the re-bake count stays at one or two per chunk, and a chunk read back from the pack in a second run bakes nothing
