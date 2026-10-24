@@ -65,10 +65,9 @@ fn land(m: &ChunkManager, spawner: &ManualSpawner, keys: &[ChunkKey]) {
     m.update(&wanted);
 }
 
-fn rig(
-    settle_ms: u64,
-    workers: usize,
-) -> (Arc<FakeClock>, Arc<ManualSpawner>, Arc<ManualSpawner>, Arc<ChunkManager>, Arc<FakeBaker>, HorizonJobs) {
+type Rig = (Arc<FakeClock>, Arc<ManualSpawner>, Arc<ManualSpawner>, Arc<ChunkManager>, Arc<FakeBaker>, HorizonJobs);
+
+fn rig(settle_ms: u64, workers: usize) -> Rig {
     let clock = Arc::new(FakeClock::default());
     let (cs, hs) = (Arc::new(ManualSpawner::default()), Arc::new(ManualSpawner::default()));
     let m = chunks(clock.clone(), cs.clone());
