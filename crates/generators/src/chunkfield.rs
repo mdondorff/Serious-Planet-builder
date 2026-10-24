@@ -74,6 +74,12 @@ impl ChunkLattice {
         direction_at_n(self.n, face, i, j)
     }
 
+    /// [`ChunkLattice::direction`] for a position given as signed indices, beyond the face edge read on the extended cube plane: the cell
+    /// directions of a raster that reaches over a face edge (the horizon bake's halo, M8-5).
+    pub fn direction_ext(&self, face: u8, i: i64, j: i64) -> Vec3 {
+        self.direction_at(face, i, j)
+    }
+
     /// The unit direction of the centre of `c`.
     pub fn direction(&self, c: Cell) -> Vec3 {
         self.direction_at(c.face, i64::from(c.i), i64::from(c.j))

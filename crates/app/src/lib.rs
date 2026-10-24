@@ -8,6 +8,7 @@ pub mod editscale;
 pub mod editwin;
 pub mod envelopeperf;
 pub mod globalperf;
+pub mod horizonworld;
 pub mod litperf;
 pub mod lookload;
 pub mod manifest;

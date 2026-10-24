@@ -15,7 +15,7 @@
 7. **Perf**: shadows' share of the 1.5 ms budget measured in the architect's window (criterion 5), not in a test.
 
 ## Impact
-- Specs: new GEN-044 to GEN-046 (horizon bake, coarse horizon, combination), STRM-045 (the global channel) and STRM-048 (the horizon job) and STRM-049 (the world wiring), REND-038 (the shadow term), VIEW-054 is not needed if the debug view is a lit shade view (design question 4). All status planned until each lands (deltas in this change).
+- Specs: new GEN-044 to GEN-046 (horizon bake, coarse horizon, combination), STRM-045 (the global channel) and STRM-048 (the horizon job), STRM-049 (the world wiring) and STRM-050 (the pack disk), REND-038 (the shadow term), VIEW-054 is not needed if the debug view is a lit shade view (design question 4). All status planned until each lands (deltas in this change).
 - Code: `generators` (new module beside `coupled.rs`/`chunkfield`), `cache/global_store.rs` (a channel; my lane), `render` (terrain bind group and lit shader; my lane), `frame` (shade view; small). Not touched: `generators/height*.rs`, `frame/lod.rs`, `streaming`, `app/worldfield.rs` (explorer's), except one line each where the chunk output is registered, in a small PR agreed with the planner.
 - Depends on M8-2 (chunk field, done through 3d) and for step 2 on the stored coupled run (done). The material map (M8-6) shares the texture plumbing of step 5: whichever lands first creates it.
 - Cost: bake 0.7 s per km2 at 4 m texels and 16 azimuths in SPIKE-32; a chunk of about 24 km2 plus halo would add about 17 s to a chunk job, against the chunk's 10 s landing target (criterion 3): see design question 2.

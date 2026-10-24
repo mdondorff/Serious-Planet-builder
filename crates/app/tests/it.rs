@@ -1,3 +1,5 @@
+#[path = "horizon_world.rs"]
+mod horizon_world;
 #[path = "live_definition.rs"]
 mod live_definition;
 #[path = "residency_headroom.rs"]
