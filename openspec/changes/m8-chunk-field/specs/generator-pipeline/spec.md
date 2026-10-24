@@ -12,7 +12,7 @@ Source: ADR 0077 points 2 and 4, ADR 0022, STRM-011, CON-08, CON-14
 - **THEN** exactly the keys of that field's chunks change, and the tile and the chunk never share a key
 
 ### Requirement: GEN-035 Chunk grid and apply level
-Chunks SHALL lie on a fixed grid of the tiles of level 11 (whole coarse cells, about 5 km), and a chunk field SHALL state its raster cell size; its apply level SHALL be the coarsest tile level whose vertex spacing is at most twice that cell size (level 15 for 8 m cells, level 16 for 4 m), computed from the raster and never set by hand. Tiles above the apply level SHALL be identity on the base field and key as the base (STRM-029).
+Chunks SHALL lie on a fixed grid of the tiles of level 11 (whole coarse cells, about 5 km), and a chunk field SHALL state its raster cell size; its apply level SHALL be the coarsest tile level whose vertex spacing is at most twice that cell size (level 15 for 8 m cells, level 16 for 4 m), computed from the raster and never set by hand. The chunk pyramid SHALL reach from the apply level up to a top level, by default the chunk grid level (11); a tile above the top level SHALL be identity on the base field and key as the base (STRM-029), the global run carrying the large scale. A tile between the top level and the apply level reads a box-filtered pyramid level (GEN-037).
 
 Verify: A
 Status: planned
@@ -20,7 +20,7 @@ Source: ADR 0077 point 5, SPIKE-34 (conditions 1 and 3), STRM-029
 
 #### Scenario: Apply level
 - **WHEN** a chunk field has 8 m cells, then 4 m cells
-- **THEN** its apply level is 15, then 16, and a tile of level 14 returns the base height bit for bit at every vertex with every chunk ready
+- **THEN** its apply level is 15, then 16, and a tile of level 10 returns the base height bit for bit at every vertex with every chunk ready, while a tile of level 11 to 14 reads the pyramid
 
 ### Requirement: GEN-036 Level-aware height
 The height capabilities of a field SHALL include `height_at_level(dir, level)`; for a field without chunk detail it SHALL equal `height(dir)` at every level, and for a chunk field it SHALL be the base plus the chunk change of the pyramid level whose spacing matches `level` at or above the apply level, and the base below it. `height` SHALL remain position-only and SHALL equal `height_at_level` at the field's finest level. Tile generation SHALL read `height_at_level` with its own level.
@@ -34,11 +34,11 @@ Source: SPIKE-34 section 3, ADR 0077 point 5, GEN-020
 - **THEN** each value equals `height(dir)` bit for bit
 
 #### Scenario: Chunk field
-- **WHEN** a chunk field with a ready chunk is sampled at levels 14 and 15 over the chunk
-- **THEN** level 14 equals the base and level 15 equals the base plus the chunk's level-15 pyramid change
+- **WHEN** a chunk field with a ready chunk is sampled over the chunk at levels 10, 11 and 14, and at a level that reads the raster (finer than the apply level)
+- **THEN** level 10 equals the base bit for bit, levels 11 and 14 read the box-filtered pyramid (base plus change), and the finest level equals the base plus the chunk's stored change at the cell centres
 
 ### Requirement: GEN-037 Chunk pyramid steps
-A chunk's change SHALL be stored with a pyramid down to the apply level, each level box-filtered from the level below it (never from a coarser run). A tile at or above the apply level SHALL differ from its parent, at the parent's vertices, by at most 0.25 m at p99 for the stand-in compute.
+A chunk's change SHALL be stored with a pyramid down to the apply level, each level box-filtered from the level below it (never from a coarser run). A tile at the apply level SHALL differ from its parent, at the parent's vertices, by at most 0.25 m at p99 for the stand-in compute; the steps between the coarser levels up to the pyramid's top are measured and recorded (design.md), not bounded.
 
 Verify: A
 Status: planned
@@ -56,7 +56,7 @@ Status: planned
 Source: ADR 0077 points 3 and 4, GEN-004, GEN-002, GEN-003, CON-14, M8 plan criterion 2
 
 #### Scenario: Borders
-- **WHEN** two neighbouring stand-in chunks are computed with the stated halo, in the middle of a face, across a face edge and at a pole
+- **WHEN** two neighbouring stand-in chunks are computed with the stated halo, in the middle of a face, across a face edge and at a cube corner
 - **THEN** their border rows agree to the bit, and with a halo below the rule the test reports the largest difference in metres and the chunk ids
 
 #### Scenario: Threads and systems

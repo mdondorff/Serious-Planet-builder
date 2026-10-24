@@ -13,9 +13,9 @@
 - [x] 3a.1 `Scope::Chunk(ChunkId)`, `ChunkId` on level 11, `scope_fits`, the stage key over grid, halo and step cap
 - [x] 3a.2 Tests: re-keying (grid, halo, cap), scope separation from `Tile`, chunk ids at face edges and corners
 ### 3b. Stand-in compute and the pyramid (GEN-036, GEN-037, GEN-038)
-- [ ] 3b.1 `ChunkStandIn` behind the test feature; chunk-stage interface (raster in, change raster out, halo, cap, bound)
-- [ ] 3b.2 Box-filtered pyramid; `height_at_level` for a chunk field; the apply level from the cell size
-- [ ] 3b.3 Tests: border agreement (halo rule), bit-exact across 1, 2 and 8 threads, step against the parent at most 0.25 m p99 on the stand-in; known-answer hash for CI on Windows and Linux
+- [x] 3b.1 `ChunkStandIn` behind the test feature; chunk-stage interface (raster in, change raster out, halo, cap, bound)
+- [x] 3b.2 Box-filtered pyramid; `height_at_level` for a chunk field; the apply level from the cell size
+- [x] 3b.3 Tests: border agreement (halo rule), bit-exact across 1, 2 and 8 threads, step against the parent at most 0.25 m p99 on the stand-in; known-answer hash for CI on Windows and Linux
 - [ ] 3b.4 numerics-reviewer
 ### 3c. Plan-side requests, bounds, key chaining (LOD-013, STRM-038, STRM-040)
 - [ ] 3c.1 The plan returns `B`; sampling never requests; bounds widen by the field's bound; a chunk field with no chunk ready plans identically to one with all ready
