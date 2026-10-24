@@ -192,7 +192,9 @@ impl HeightField for CoupledLensField<'_> {
         lens_climate(&self.maps, self.lens, map, id)
     }
     fn heights_and_climate(&self, map: &dyn FaceMapping, id: TileId, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> (Vec<f64>, ClimateTexture) {
-        (self.f().heights_until(dirs, stop), lens_climate(&self.maps, self.lens, map, id))
+        // The inner field's own batch for this tile, so a chunk field below reads the height at the tile's level; only the climate is the lens's.
+        let (heights, _) = self.f().heights_and_climate(map, id, dirs, stop);
+        (heights, lens_climate(&self.maps, self.lens, map, id))
     }
     fn climate_version_word(&self) -> u64 {
         mix64(self.f().climate_version_word() ^ lens_version_word(&self.maps, self.lens))

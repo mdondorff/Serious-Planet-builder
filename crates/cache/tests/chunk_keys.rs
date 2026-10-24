@@ -21,7 +21,11 @@ fn chunk(x: u32, y: u32) -> TileId {
 
 /// A chunk field over the reference terrain with the given chunks ready (16 cells per chunk).
 fn field(ready: &[TileId]) -> ChunkField<Reference> {
-    let lat = ChunkLattice::new(16).unwrap();
+    field_n(16, ready)
+}
+
+fn field_n(per: u32, ready: &[TileId]) -> ChunkField<Reference> {
+    let lat = ChunkLattice::new(per).unwrap();
     let s = stage();
     let mut f = ChunkField::new(Reference(3), lat, R, &s);
     for &t in ready {
@@ -68,7 +72,7 @@ fn a_tile_at_the_pyramid_top_keys_its_chunk_ready_or_not_and_a_coarser_tile_keys
 // spec: STRM-038
 #[test]
 fn a_neighbour_landing_re_keys_only_the_tiles_near_the_shared_border() {
-    let (only_a, both) = (field(&[chunk(1000, 1000)]), field(&[chunk(1000, 1000), chunk(1001, 1000)]));
+    let (only_a, both) = (field_n(64, &[chunk(1000, 1000)]), field_n(64, &[chunk(1000, 1000), chunk(1001, 1000)]));
     let at_border = tile_at(15, 7);
     let in_the_middle = tile_at(7, 7);
     assert_ne!(keys(&only_a, at_border).0, keys(&both, at_border).0, "the border tile reads the neighbour's cells");
@@ -83,4 +87,67 @@ fn a_neighbour_landing_re_keys_only_the_tiles_near_the_shared_border() {
     };
     assert_ne!(keys(&landed(&stage()), in_the_middle).0, keys(&landed(&other), in_the_middle).0);
     assert_eq!(other.step_cap(), 5);
+}
+
+// spec: STRM-038
+#[test]
+fn every_chunk_a_tile_reads_is_in_the_chunks_its_key_chains_even_at_a_cube_corner() {
+    use planet_generators::chunkfield::{chunks_read_by, ChunkKey, ChunkResult};
+    let lat = ChunkLattice::new(16).unwrap();
+    let s = stage();
+    let tiles: Vec<TileId> = (14..=16u8)
+        .flat_map(|level| (0..8u32).flat_map(move |x| (0..8u32).map(move |y| TileId::new(Face(2), level, x, y).unwrap())))
+        .collect();
+    // Every chunk any of the tiles could read, found with a reach far wider than the key's, plus the chunks around the corner of the faces involved.
+    let mut wide = std::collections::BTreeSet::new();
+    for &t in &tiles {
+        wide.extend(chunks_read_by(&lat, PYRAMID_TOP_LEVEL, 200, t));
+    }
+    let faces: std::collections::BTreeSet<u8> = wide.iter().map(|k| k.0).collect();
+    for &f in &faces {
+        for x in (0..4u32).chain(2044..2048) {
+            for y in (0..4u32).chain(2044..2048) {
+                wide.insert((f, x, y));
+            }
+        }
+    }
+    let results: std::collections::BTreeMap<ChunkKey, Arc<ChunkResult>> = wide
+        .iter()
+        .map(|&k| {
+            let t = TileId::new(Face(k.0), CHUNK_GRID_LEVEL, k.1, k.2).unwrap();
+            (k, Arc::new(compute_chunk(&lat, &s, R, PYRAMID_TOP_LEVEL, t, halo_rings(&s)).unwrap()))
+        })
+        .collect();
+    let build = |skip: Option<ChunkKey>| {
+        let mut f = ChunkField::new(Reference(3), lat, R, &s);
+        for (k, r) in &results {
+            if Some(*k) != skip {
+                f = f.with_ready(r.clone());
+            }
+        }
+        f
+    };
+    let all = build(None);
+    let mut checked = 0;
+    for &tile in &tiles {
+        let reads = all.chunks_read_by(tile);
+        let level = tile.level();
+        let dirs: Vec<_> = (-1..=9i64)
+            .flat_map(|l| (-1..=9i64).map(move |k| (k, l)))
+            .map(|(k, l)| tile.sample_direction_ext(&TangentWarp, 8, k.min(9), l))
+            .collect();
+        let full: Vec<f64> = dirs.iter().map(|&d| all.height_at_level(d, level)).collect();
+        for &n in results.keys().filter(|k| !reads.contains(k)) {
+            let without = build(Some(n));
+            for (d, h) in dirs.iter().zip(&full) {
+                assert_eq!(
+                    *h,
+                    without.height_at_level(*d, level),
+                    "tile {tile:?} reads chunk {n:?}, which its key does not chain ({reads:?})"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 1000, "{checked}");
 }

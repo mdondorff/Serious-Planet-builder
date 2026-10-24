@@ -433,9 +433,11 @@ pub fn chunks_read_by(lat: &ChunkLattice, top: u8, reach_cells: i64, tile: TileI
 }
 
 impl<F: HeightField> ChunkField<F> {
-    /// How far into a neighbouring chunk a read of this field reaches, in raster cells: two cells of the coarsest level it blends.
+    /// How far into a neighbouring chunk a read of this field can reach, in raster cells, with margin: the spline and the blend reach two cells of
+    /// the coarsest level it blends, and a vertex on a face edge reads through the neighbouring face, whose lattice is shifted along the edge up to
+    /// about the stencil depth near a cube corner (so three times that, and the vertex spacing).
     pub fn reach_cells(&self) -> i64 {
-        2 << pyramid_levels(&self.lat, self.radius_m, self.top)
+        3 * (2 << pyramid_levels(&self.lat, self.radius_m, self.top)) + 4
     }
 
     /// The chunks tile `tile` reads (see [`chunks_read_by`]).

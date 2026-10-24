@@ -62,6 +62,15 @@ impl HeightField for Counting<'_> {
     fn level_aware(&self) -> bool {
         self.f().level_aware()
     }
+    fn heights_and_climate(
+        &self,
+        map: &dyn FaceMapping,
+        id: TileId,
+        dirs: &[Vec3],
+        stop: &dyn Fn() -> bool,
+    ) -> (Vec<f64>, planet_generators::climate::ClimateTexture) {
+        self.f().heights_and_climate(map, id, dirs, stop)
+    }
     fn seed(&self) -> u64 {
         self.f().seed()
     }
