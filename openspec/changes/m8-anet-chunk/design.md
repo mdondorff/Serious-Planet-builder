@@ -68,19 +68,21 @@ Calibration of `K`, `dt` and `N` (how deep 30 steps of pure incision cut) is lef
 - **Guard:** a region with a halo under 2 rings runs no hillslope passes (it has no neighbour tables to read).
 
 ### 16. Step 4 measured (2026-10-24)
-- Scene: the default eroded world, bake 256 cells, its coupled run (80 steps), the chunk of the land cell with the largest drainage area (about 9.7 million km2 at the coarse cell), 8 m cells (608 per chunk edge), 3 km halo. Printed by `cargo test -p planet --release --lib anet_steps_report -- --ignored --nocapture` (and by `cargo xtask perf anet-chunk` after the timing).
-- Step of a tile of level L against its parent at the parent's vertices inside the chunk (level 11: the parent is the base):
+- Scene: the default eroded world, bake 256 cells, its coupled run (80 steps), the chunk of the land cell with the largest drainage area (about 9.7 million km2 at the coarse cell), 8 m cells (608 per chunk edge), 3 km halo. Printed by `cargo test -p planet --release --lib anet_steps_report -- --ignored --nocapture`.
+- Two quantities per tile level L, over the vertices of the tiles of level L - 1 inside the chunk: the step against the parent when the parent is the pyramid level above (`|change(L) - change(L - 1)|`, the pyramid reaching up to level 11), and the change itself at level L (`|change(L)|`, the step against a base parent, the entry step of a pyramid whose top is L):
 
-| Level | p99 (m) | max (m) | fade of the max at 0.25 m per frame, 60 fps (s) |
-|---|---|---|---|
-| 11 | 4.41 | 7.35 | 0.49 |
-| 12 | 2.66 | 5.45 | 0.36 |
-| 13 | 1.49 | 4.89 | 0.33 |
-| 14 | 0.76 | 4.31 | 0.29 |
-| 15 | 0.19 | 3.47 | 0.23 |
-| 16 | 0.03 | 1.16 | 0.08 |
+| Level | step against the pyramid parent p99 / max (m) | change itself p99 (m) |
+|---|---|---|
+| 11 | 4.41 / 7.35 | 4.41 |
+| 12 | 2.66 / 5.45 | 6.82 |
+| 13 | 1.49 / 4.89 | 5.51 |
+| 14 | 0.76 / 4.31 | 4.50 |
+| 15 | 0.19 / 3.47 | 3.90 |
+| 16 | 0.03 / 1.16 | 3.68 |
 
-- Decision: the pyramid's top level for the A-net is 15 (`ANET_TOP_LEVEL`): criterion 3 (p99 at most 0.25 m) holds from level 15; level 14 gives 0.76 m. The default of the chunk field stays 14 (GEN-053 is a parameter); the world passes its own (`enable_chunks_at`). Tiles of level 14 and coarser are the base.
-- Fade: the largest step at the top level is 3.5 m, so the stand-in fade at 0.25 m per frame needs 0.23 s; `m8-chunk-fade` takes 0.5 s as its length.
+- With the pyramid up to 15 only, the entry step (level 15 against the base at the level-14 vertices) is p99 3.90 m, max 17.55 m.
+- Finding: the A-net changes the ground by metres, so the entry step of the top level is metres at every top level (p99 3.7 to 6.8 m). Criterion 3 (p99 at most 0.25 m against the parent) holds between pyramid levels from level 15 up (0.19 m) but not at the entry from the base at any top level. The pyramid cannot hide the entry; the fade of `m8-chunk-fade` (a time fade of the change plane per node, REND-039) has to.
+- Provisional top level 15 (`ANET_TOP_LEVEL`): the steps between pyramid levels are the smallest there (0.19 m p99 at the first level above the top) and fewer pyramid levels are carried; the chunk field's own default stays 14 (GEN-053 is a parameter). The choice is open to the planner.
+- Fade: the largest entry step at level 15 is 17.5 m, so a fade at 0.25 m per frame, 60 fps needs 1.2 s (p99: 0.26 s); `m8-chunk-fade` should take 1.5 s, or decide a per-node limit.
 - A chunk edge must be a multiple of 2^k for the k pyramid levels it carries (611 cells at 8 m made `compute_chunk` refuse, a panic in a worker): `cells_per_chunk_for` rounds to multiples of 16 (608, 1216 and 496 cells at 8, 4 and 10 m).
-- Chunk time, one thread, `cargo xtask perf anet-chunk` in the planner's window: first run 8 m 9.9 s (1.84 M cells), 4 m 41.9 s (7.3 M), 10 m 6.5 s (1.2 M). The base field was read twice (2.2 s each at 8 m); one read and a frontier-based area window (same values, 2.36 s to 0.25 s) give 5.4 s at 8 m. Rest at 8 m: base field 2.2 s, incision and hillslope steps 1.6 s, cell-graph region about 0.4 s.
+- Chunk time, one thread, `cargo xtask perf anet-chunk` in the planner's window: first run 8 m 9.9 s (1.84 M cells), 4 m 41.9 s (7.3 M), 10 m 6.5 s (1.2 M). The base field was read twice (2.2 s each at 8 m); one read and a frontier-based area window (same values, 2.36 s to 0.25 s) give 5.4 s at 8 m (outside a window, indicative). Rest at 8 m: base field 2.2 s, incision and hillslope steps 1.6 s, cell-graph region about 0.4 s.

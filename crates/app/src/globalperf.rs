@@ -298,26 +298,56 @@ fn anet_steps(
             tiles = tiles.iter().flat_map(|t| t.children().expect("children")).collect();
         }
         let mut d: Vec<f64> = Vec::new();
+        let mut abs: Vec<f64> = Vec::new();
         for t in &tiles {
             for l in 0..=res {
                 for k in 0..=res {
                     let dir = t.sample_direction(map, res, k, l);
                     let own = field.change_at_level(dir, level);
+                    abs.push(own.abs());
                     let parent = if level == top { 0.0 } else { field.change_at_level(dir, level - 1) };
                     d.push((own - parent).abs());
                 }
             }
         }
         d.sort_by(f64::total_cmp);
+        abs.sort_by(f64::total_cmp);
         let (p99, max) = (d[d.len() * 99 / 100], d[d.len() - 1]);
+        let abs99 = abs[abs.len() * 99 / 100];
         writeln!(
             out,
-            "  level {level}: p99 {p99:.3} m, max {max:.3} m over {} vertices, fade of the max at 0.25 m per frame, 60 fps: {:.2} s",
+            "  level {level}: against the parent p99 {p99:.3} m, max {max:.3} m (the change itself at this level: p99 {abs99:.3} m) over {} vertices, fade of the max at 0.25 m per frame, 60 fps: {:.2} s",
             d.len(),
             max / 15.0
         )
         .map_err(err)?;
     }
+    // The entry step of the A-net's own top level: a pyramid reaching up to ANET_TOP_LEVEL only, so the parent of a tile of that level is the
+    // base (no pyramid above it): the change a tile of the top level reads, at the vertices of the tiles of the level above.
+    let entry = crate::anetworld::ANET_TOP_LEVEL;
+    let r = compute_chunk(lat, stage, radius, entry, tile, halo_rings(stage)).ok_or("the chunk for the entry step was refused")?;
+    let field = ChunkField::new(world.base_field()?, *lat, radius, stage).with_top_level(entry).with_ready(std::sync::Arc::new(r));
+    let mut tiles = vec![tile];
+    for _ in top..entry - 1 {
+        tiles = tiles.iter().flat_map(|t| t.children().expect("children")).collect();
+    }
+    let mut d: Vec<f64> = Vec::new();
+    for t in &tiles {
+        for l in 0..=res {
+            for k in 0..=res {
+                d.push(field.change_at_level(t.sample_direction(map, res, k, l), entry).abs());
+            }
+        }
+    }
+    d.sort_by(f64::total_cmp);
+    writeln!(
+        out,
+        "entry step at the A-net top level {entry} against the base (pyramid up to {entry} only): p99 {:.3} m, max {:.3} m over {} vertices",
+        d[d.len() * 99 / 100],
+        d[d.len() - 1],
+        d.len()
+    )
+    .map_err(err)?;
     Ok(())
 }
 

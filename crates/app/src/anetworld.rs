@@ -20,8 +20,8 @@ use crate::worldfield::WorldTerrain;
 
 /// The default cell size of an A-net chunk in metres (planner decision 2026-10-24; GEN-052 records 4 and 10 m beside it).
 pub const ANET_CELL_M: f64 = 8.0;
-/// The top level of the A-net chunk pyramid, the coarsest tile level that reads chunk detail: measured on a river chunk at 8 m cells, the step
-/// of a tile against its parent has p99 0.19 m at level 15 (criterion 3: at most 0.25 m) and 0.76 m at level 14 (design.md section 16).
+/// The top level of the A-net chunk pyramid, the coarsest tile level that reads chunk detail (provisional: the steps between pyramid levels are
+/// smallest from level 15; the entry step from the base is metres at every level, design.md section 16).
 pub const ANET_TOP_LEVEL: u8 = 15;
 /// The default halo of an A-net chunk in metres (GEN-049).
 pub const ANET_HALO_M: f64 = 3000.0;
