@@ -621,6 +621,28 @@ impl<F: HeightField> HeightField for ChunkField<F> {
     }
 }
 
+/// The chunk stage of a chain (GEN-039, `on-top`): the lattice and process of the stage, the pyramid's top level and the chunks ready now. A
+/// chain wraps its base in it before the stamp stages (base, chunk, stamps); the ready set is a snapshot, so a field keeps what it was built from.
+#[derive(Clone)]
+pub struct ChunkLayer {
+    pub lat: ChunkLattice,
+    pub radius_m: f64,
+    pub top: u8,
+    pub stage: Arc<dyn ChunkStage>,
+    pub ready: Vec<Arc<ChunkResult>>,
+}
+
+impl ChunkLayer {
+    /// `base` under the chunk stage with the ready chunks.
+    pub fn wrap<'a>(&self, base: Box<dyn HeightField + 'a>) -> Box<dyn HeightField + 'a> {
+        let mut field = ChunkField::new(base, self.lat, self.radius_m, &*self.stage).with_top_level(self.top);
+        for r in &self.ready {
+            field = field.with_ready(r.clone());
+        }
+        Box::new(field)
+    }
+}
+
 /// Which chunk of the grid holds `dir` (with the halo and cap the stage states), for tests and plan requests.
 pub fn chunk_id_of(dir: Vec3, halo_rings: u16, lat: &ChunkLattice, radius_m: f64, stage: &dyn ChunkStage) -> Option<ChunkId> {
     ChunkId::of_direction(&TangentWarp, dir, f64::from(halo_rings) * lat.cell_m(radius_m), stage.step_cap())

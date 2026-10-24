@@ -654,6 +654,106 @@ impl<F: HeightField> HeightField for Bound<F> {
     }
 }
 
+/// A boxed field is the field it holds: every method forwards, so a stage that wraps a field generically (the chunk stage) can wrap the
+/// chain a world builds.
+impl<T: HeightField + ?Sized> HeightField for Box<T> {
+    fn height(&self, dir: Vec3) -> f64 {
+        (**self).height(dir)
+    }
+    fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
+        (**self).height_at_level(dir, level)
+    }
+    fn level_aware(&self) -> bool {
+        (**self).level_aware()
+    }
+    fn heights_threaded_at_level(&self, dirs: &[Vec3], level: u8, threads: usize) -> Vec<f64> {
+        (**self).heights_threaded_at_level(dirs, level, threads)
+    }
+    fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
+        (**self).heights_until(dirs, stop)
+    }
+    fn heights(&self, dirs: &[Vec3]) -> Vec<f64> {
+        (**self).heights(dirs)
+    }
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
+        (**self).heights_threaded_until(dirs, stop, threads)
+    }
+    fn heights_threaded(&self, dirs: &[Vec3], threads: usize) -> Vec<f64> {
+        (**self).heights_threaded(dirs, threads)
+    }
+    fn seed(&self) -> u64 {
+        (**self).seed()
+    }
+    fn implementation_id(&self) -> &'static str {
+        (**self).implementation_id()
+    }
+    fn version(&self) -> u32 {
+        (**self).version()
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        (**self).max_abs_height_m()
+    }
+    fn inputs_hash(&self) -> u64 {
+        (**self).inputs_hash()
+    }
+    fn read_records(&self) -> Vec<ReadRecord> {
+        (**self).read_records()
+    }
+    fn read_records_for(&self, tile: TileId, map: &dyn FaceMapping) -> Vec<ReadRecord> {
+        (**self).read_records_for(tile, map)
+    }
+    fn reads_cells(&self) -> bool {
+        (**self).reads_cells()
+    }
+    fn inputs_hash_for(&self, tile: TileId, map: &dyn FaceMapping) -> u64 {
+        (**self).inputs_hash_for(tile, map)
+    }
+    fn body(&self) -> BodyId {
+        (**self).body()
+    }
+    fn source_key(&self) -> Option<[u8; 16]> {
+        (**self).source_key()
+    }
+    fn upstream(&self) -> Option<&dyn HeightField> {
+        (**self).upstream()
+    }
+    fn stage_params(&self) -> Option<(&str, u32)> {
+        (**self).stage_params()
+    }
+    fn passes_through(&self, tile: TileId, map: &dyn FaceMapping) -> bool {
+        (**self).passes_through(tile, map)
+    }
+    fn item_revision(&self) -> u64 {
+        (**self).item_revision()
+    }
+    fn surface_id(&self) -> &'static str {
+        (**self).surface_id()
+    }
+    fn climate(&self, map: &dyn FaceMapping, id: TileId) -> crate::climate::ClimateTexture {
+        (**self).climate(map, id)
+    }
+    fn heights_and_climate(
+        &self,
+        map: &dyn FaceMapping,
+        id: TileId,
+        dirs: &[Vec3],
+        stop: &dyn Fn() -> bool,
+    ) -> (Vec<f64>, crate::climate::ClimateTexture) {
+        (**self).heights_and_climate(map, id, dirs, stop)
+    }
+    fn climate_version_word(&self) -> u64 {
+        (**self).climate_version_word()
+    }
+    fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
+        (**self).height_bounds(centre, angular_radius)
+    }
+    fn bounds_monotone(&self) -> bool {
+        (**self).bounds_monotone()
+    }
+    fn water_cull_level(&self) -> Option<f64> {
+        (**self).water_cull_level()
+    }
+}
 /// A height generator (CON-06): it reads the definition only through a [`GenContext`] and returns the pure field it
 /// describes. Open a fresh context per field: the field's key covers everything that context recorded, so a reused
 /// context would key a field by what was read before it. The inner loops

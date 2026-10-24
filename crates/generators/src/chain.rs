@@ -65,11 +65,27 @@ pub fn field_chain<'a>(
     bake_key: [u8; 16],
     bound_water: bool,
 ) -> Result<Box<dyn HeightField + 'a>, String> {
+    field_chain_with(kind, def, src, bake_key, bound_water, None)
+}
+
+/// [`field_chain`] with the chunk stage of the chain (GEN-039): the base, the chunk stage over it, then the stamp stages.
+pub fn field_chain_with<'a>(
+    kind: HeightFieldKind,
+    def: &Arc<WorldDefinition>,
+    src: &'a dyn LatticeSource,
+    bake_key: [u8; 16],
+    bound_water: bool,
+    chunks: Option<&crate::chunkfield::ChunkLayer>,
+) -> Result<Box<dyn HeightField + 'a>, String> {
     // The chunk stage of every layer must be one the build supports (GEN-039): `under` is refused with the layer named.
     def.check_chunk_stages(BodyId::PLANET)?;
     let ctx = GenContext::new(def);
     let built = build_field(kind, &ctx, BodyId::PLANET, src, bake_key)
         .map_err(|e| format!("the definition cannot be generated: {e}"))
+        .map(|base| match chunks {
+            Some(c) => c.wrap(base),
+            None => base,
+        })
         .and_then(|base| with_stamps(base, def));
     match (built, bound_water) {
         (Ok(f), true) => {
