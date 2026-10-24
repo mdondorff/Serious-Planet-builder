@@ -15,7 +15,7 @@ Source: opus-planner (2026-10-24, M8-5), SPIKE-32 step 2, CON-11, CON-18
 - **WHEN** the horizon view is drawn at the fixed poses at sunset and midday
 - **THEN** the horizon elevation and the shadow mask read as the ridges that cast them, and the stills match their goldens
 
-### Requirement: REND-039 The frame's horizon data
+### Requirement: REND-041 The frame's horizon data
 `planet_frame::horizonview` SHALL decide, GPU-free, what the renderer takes for the horizon shadow: a chunk's horizon map (GEN-044: `n x n` cells of up to 16 azimuths) packed as the GPU reads it, four layers of `256 x 256` texels of four azimuth bytes (the azimuths `4 L .. 4 L + 3` in layer `L`, a missing one 0), each texel the mean of the map's cells under it and at least one; the rectangle of a tile inside the chunk it lies in (origin and size in the chunk's `[0, 1]^2`, `None` for a tile coarser than the chunk grid); the sun's azimuth and elevation at a chunk's centre in the chunk's raster frame (GEN-046, `+j` north, `+i` east); and the slots of the renderer's array: a fixed number, one per chunk in view that has a map, a re-bake uploaded again into the same slot, the least recently wanted slot given up when none is free, the nearest chunks served first, a released chunk's slot free at once. A map that does not fit is refused, never truncated.
 
 Verify: A

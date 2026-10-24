@@ -1,4 +1,4 @@
-//! What the frame decides about the horizon shadows (M8-5, REND-039): which chunk's horizon map sits in which layer of the renderer's texture
+//! What the frame decides about the horizon shadows (M8-5, REND-041): which chunk's horizon map sits in which layer of the renderer's texture
 //! array, the map packed as the GPU reads it, the rectangle of a tile inside its chunk, and the sun's azimuth in a chunk's frame. GPU-free: the
 //! renderer takes the slot, the texels and the numbers, this decides them (CON-03).
 //!
@@ -192,7 +192,7 @@ mod tests {
         (2, 1000 + x, 1000)
     }
 
-    // spec: REND-039
+    // spec: REND-041
     #[test]
     fn a_map_is_packed_to_four_layers_of_256_squared_texels_with_four_azimuths_a_texel() {
         let (n, a) = (8usize, 6usize);
@@ -210,7 +210,7 @@ mod tests {
         assert!(packed[(2 * h * h) * 4..].iter().all(|&b| b == 0), "azimuths 8 and up are absent");
     }
 
-    // spec: REND-039
+    // spec: REND-041
     #[test]
     fn a_larger_map_is_the_mean_of_the_cells_under_a_texel_and_a_bad_map_is_refused() {
         let (n, a) = (512usize, 1usize);
@@ -226,7 +226,7 @@ mod tests {
         assert!(odd.iter().all(|&b| b == 200), "a constant map packs to the same constant, 614 cells to 256 texels");
     }
 
-    // spec: REND-039
+    // spec: REND-041
     #[test]
     fn a_tile_finds_its_rectangle_inside_the_chunk_it_lies_in() {
         let chunk = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1001).unwrap();
@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(parent_key, (up.face().0, up.x(), up.y()));
     }
 
-    // spec: REND-039
+    // spec: REND-041
     #[test]
     fn the_suns_azimuth_in_a_chunks_frame_is_north_toward_plus_j_and_east_toward_plus_i() {
         let key: ChunkKey = (2, 1000, 1000);
@@ -265,7 +265,7 @@ mod tests {
         assert!((chunk_sun_elevation(&TangentWarp, key, sun(toward_j)) - 0.4).abs() < 1e-9);
     }
 
-    // spec: REND-039
+    // spec: REND-041
     #[test]
     fn slots_go_to_the_chunks_in_view_are_uploaded_again_after_a_rebake_and_the_stalest_is_given_up() {
         let mut s = HorizonSlots::new(2);
