@@ -254,9 +254,9 @@ fn anet_scene(
     let lat_c = maps.lattice();
     let rec = maps.receivers();
     let mut best: Option<(usize, f32)> = None;
-    for c in 0..lat_c.len() {
+    for (c, &r) in rec.iter().enumerate() {
         let a = maps.network_area_m2(c);
-        if maps.z(c) > 0.0 && rec[c] != planet_generators::coupled::NONE && best.map_or(true, |(_, b)| a > b) {
+        if maps.z(c) > 0.0 && r != planet_generators::coupled::NONE && best.is_none_or(|(_, b)| a > b) {
             best = Some((c, a));
         }
     }
