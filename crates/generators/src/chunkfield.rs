@@ -70,8 +70,7 @@ impl ChunkLattice {
 
     /// The unit direction of the centre of the cell at (`i`, `j`) of `face`; a position beyond the face edge is read on the extended cube plane.
     fn direction_at(&self, face: u8, i: i64, j: i64) -> Vec3 {
-        let n = self.n as f64;
-        face_to_direction(&TangentWarp, planet_core::Face(face), -1.0 + (2.0 * i as f64 + 1.0) / n, -1.0 + (2.0 * j as f64 + 1.0) / n)
+        direction_at_n(self.n, face, i, j)
     }
 
     /// The unit direction of the centre of `c`.
@@ -81,20 +80,12 @@ impl ChunkLattice {
 
     /// The cell holding the direction `d`.
     pub fn cell_at(&self, d: Vec3) -> Cell {
-        let (f, s, t) = direction_to_face(&TangentWarp, d);
-        let n = self.n;
-        let i = (((s + 1.0) * 0.5 * n as f64) as i64).clamp(0, n - 1);
-        let j = (((t + 1.0) * 0.5 * n as f64) as i64).clamp(0, n - 1);
-        Cell { face: f.0, i: i as u32, j: j as u32 }
+        cell_at_n(self.n, d)
     }
 
     /// The cell at (`i`, `j`) of `face`, where a position beyond the face edge is the cell holding the direction beyond it.
     fn canon(&self, face: u8, i: i64, j: i64) -> Cell {
-        if (0..self.n).contains(&i) && (0..self.n).contains(&j) {
-            Cell { face, i: i as u32, j: j as u32 }
-        } else {
-            self.cell_at(self.direction_at(face, i, j))
-        }
+        canon_n(self.n, face, i, j)
     }
 
     /// The eight neighbours of `c` in the order of [`OFFS`].
@@ -104,6 +95,36 @@ impl ChunkLattice {
             out[k] = self.canon(c.face, i64::from(c.i) + di, i64::from(c.j) + dj);
         }
         out
+    }
+}
+
+/// The direction of the centre of cell (`i`, `j`) of `face` on a lattice of `n` cells per face edge (beyond the edge: the extended cube plane).
+fn direction_at_n(n: i64, face: u8, i: i64, j: i64) -> Vec3 {
+    let n = n as f64;
+    face_to_direction(&TangentWarp, planet_core::Face(face), -1.0 + (2.0 * i as f64 + 1.0) / n, -1.0 + (2.0 * j as f64 + 1.0) / n)
+}
+
+/// How far past a cell boundary a position must lie to count as inside the next cell, in cells. Across a cube-face edge near a corner the centre
+/// of the cell beyond the edge lies within about 1e-9 cells of a boundary of the other face's lattice (8 m cells: 1e-12), where the rounding of
+/// the direction maths would pick the neighbour; the bias picks the upper cell whatever the rounding.
+const TIE_BIAS_CELLS: f64 = 1e-6;
+
+/// The cell of a lattice of `n` cells per face edge holding the direction `d` (a position within [`TIE_BIAS_CELLS`] below a boundary is read as
+/// above it).
+fn cell_at_n(n: i64, d: Vec3) -> Cell {
+    let (f, s, t) = direction_to_face(&TangentWarp, d);
+    let i = (((s + 1.0) * 0.5 * n as f64 + TIE_BIAS_CELLS) as i64).clamp(0, n - 1);
+    let j = (((t + 1.0) * 0.5 * n as f64 + TIE_BIAS_CELLS) as i64).clamp(0, n - 1);
+    Cell { face: f.0, i: i as u32, j: j as u32 }
+}
+
+/// The cell at (`i`, `j`) of `face` on a lattice of `n` cells per face edge, a position beyond the face edge being the cell holding the
+/// direction beyond it.
+fn canon_n(n: i64, face: u8, i: i64, j: i64) -> Cell {
+    if (0..n).contains(&i) && (0..n).contains(&j) {
+        Cell { face, i: i as u32, j: j as u32 }
+    } else {
+        cell_at_n(n, direction_at_n(n, face, i, j))
     }
 }
 
@@ -168,7 +189,7 @@ pub trait ChunkStage: Send + Sync {
     fn compute(&self, lat: &ChunkLattice, region: &Region) -> Vec<f32>;
 }
 
-/// The halo of a stage in rings: its step cap, each step reaching one ring, plus the apron ring.
+/// The halo of a stage in rings (a chunk is refused below it): its step cap, each step reaching one ring, plus the apron ring.
 pub fn halo_rings(stage: &dyn ChunkStage) -> u16 {
     (stage.step_cap() + 1).min(u32::from(u16::MAX)) as u16
 }
@@ -252,6 +273,9 @@ pub fn pyramid_position(lat: &ChunkLattice, radius_m: f64, level: u8, top: u8) -
 /// The chunk over `tile`, computed by `stage`: the region, the change, the pyramid. One thread, fixed order (CON-14). `halo` is
 /// [`halo_rings`] unless a test asks for a smaller one to see what the rule protects.
 pub fn compute_chunk(lat: &ChunkLattice, stage: &dyn ChunkStage, radius_m: f64, top: u8, tile: TileId, halo: u16) -> Option<ChunkResult> {
+    if halo < halo_rings(stage) {
+        return None;
+    }
     let reg = region(lat, tile, halo);
     let change = stage.compute(lat, &reg);
     ChunkResult::new(tile, lat.per_chunk as usize, &change[..reg.core], pyramid_levels(lat, radius_m, top))
@@ -286,6 +310,10 @@ impl<F: HeightField> ChunkField<F> {
     /// The field with `chunk` ready as well.
     pub fn with_ready(mut self, chunk: Arc<ChunkResult>) -> ChunkField<F> {
         let t = chunk.tile();
+        assert!(
+            chunk.n == self.lat.per_chunk as usize && chunk.k_max() == pyramid_levels(&self.lat, self.radius_m, self.top),
+            "a ready chunk must have the lattice and the pyramid top of the field (call with_top_level before with_ready)"
+        );
         self.ready.insert((t.face().0, t.x(), t.y()), chunk);
         self
     }
@@ -322,8 +350,10 @@ impl<F: HeightField> ChunkField<F> {
         let (i0, j0, wx, wy) = (fu as i64, fv as i64, u - fu, v - fv);
         let (ox, oy) = (i64::from(own.tile().x()) * per, i64::from(own.tile().y()) * per);
         let sample = |i: i64, j: i64| -> f64 {
-            let (i, j) = (i.clamp(0, nk - 1), j.clamp(0, nk - 1));
-            let (chunk, li, lj) = match self.ready.get(&(face, (i / per) as u32, (j / per) as u32)) {
+            // Past a face edge the cell is the one holding the direction beyond it, on the other face.
+            let c = canon_n(nk, face, i, j);
+            let (i, j) = (i64::from(c.i), i64::from(c.j));
+            let (chunk, li, lj) = match self.ready.get(&(c.face, (i / per) as u32, (j / per) as u32)) {
                 Some(c) => (&**c, (i % per) as usize, (j % per) as usize),
                 None => (own, (i.clamp(ox, ox + per - 1) - ox) as usize, (j.clamp(oy, oy + per - 1) - oy) as usize),
             };
@@ -447,7 +477,8 @@ impl ChunkStage for StandIn {
     fn compute(&self, lat: &ChunkLattice, region: &Region) -> Vec<f32> {
         let mut cur: Vec<f32> = region.cells.iter().map(|&c| self.relief(lat.direction(c))).collect();
         let mut next = cur.clone();
-        for step in 1..=self.steps.min(u32::from(region.halo)) {
+        assert!(u32::from(region.halo) >= self.steps, "a halo of {} rings is below the {} steps of the stand-in", region.halo, self.steps);
+        for step in 1..=self.steps {
             // Cells within `halo - step` rings have their neighbours' previous values; the rest are left behind.
             let reach = region.halo - step as u16;
             let end = region.depth.partition_point(|&d| d <= reach);

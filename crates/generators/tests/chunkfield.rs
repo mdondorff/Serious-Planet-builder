@@ -91,21 +91,6 @@ fn neighbouring_chunks_agree_on_the_shared_border_across_a_face_edge_and_at_a_cu
     }
 }
 
-// spec: GEN-038
-#[test]
-fn a_halo_below_the_rule_changes_the_chunk_and_the_rule_makes_it_independent_of_the_halo() {
-    let lat = ChunkLattice::new(16).unwrap();
-    let stage = stand_in(4);
-    let tile = chunk_tile(0, 2047, 2047);
-    let ruled = core_values(&lat, &stage, tile, halo_rings(&stage));
-    let more = core_values(&lat, &stage, tile, halo_rings(&stage) + 3);
-    assert!(ruled.iter().zip(&more).all(|(a, b)| a.to_bits() == b.to_bits()), "more halo than the rule changed a bit");
-    let short = core_values(&lat, &stage, tile, 2);
-    let worst = ruled.iter().zip(&short).map(|(a, b)| f64::from((a - b).abs())).fold(0.0, f64::max);
-    println!("halo 2 rings against the rule's {}: largest difference {worst} m on chunk {tile:?}", halo_rings(&stage));
-    assert!(worst > 0.0, "a halo below the rule should show");
-}
-
 /// The hashes of the chunks of `tiles`, computed on `threads` threads.
 fn hashes_on(threads: usize, tiles: &[TileId]) -> Vec<u64> {
     let lat = ChunkLattice::new(16).unwrap();
@@ -145,7 +130,7 @@ fn a_chunks_hash_is_the_same_on_one_two_and_eight_threads_and_equals_the_known_a
     assert_eq!(all, KNOWN_ANSWER, "the stand-in's chunks changed: platform, order or arithmetic ({one:?})");
 }
 
-const KNOWN_ANSWER: u64 = 12_714_410_140_094_614_054;
+const KNOWN_ANSWER: u64 = 13_816_638_891_823_402_749;
 
 fn p99(mut v: Vec<f64>) -> f64 {
     v.sort_by(f64::total_cmp);
@@ -212,7 +197,7 @@ fn a_ready_chunk_changes_levels_from_the_top_down_and_the_step_to_the_parent_is_
             worst.2
         );
         assert!(
-            p <= 0.25 || tile_l.level() != 15,
+            p <= 0.25 || tile_l.level() != 15, // GEN-037 is the step at the apply level; the coarser steps are printed (design.md section 11)
             "p99 step {p} m between level {} and {}, worst {:.3} m at vertex ({}, {}) of {parent:?}",
             tile_l.level(),
             parent.level(),
@@ -252,3 +237,65 @@ fn a_lower_top_level_leaves_the_levels_above_it_the_base_and_keeps_the_step_at_t
         .collect();
     assert!(p99(steps) <= 0.25);
 }
+
+// spec: GEN-038
+#[test]
+fn the_halo_rule_protects_the_apron_a_shorter_halo_shows_and_a_longer_one_changes_nothing() {
+    let lat = ChunkLattice::new(16).unwrap();
+    let stage = stand_in(4);
+    let tile = chunk_tile(0, 2047, 2047);
+    let rule = halo_rings(&stage);
+    assert!(compute_chunk(&lat, &stage, R, PYRAMID_TOP_LEVEL, tile, rule - 1).is_none(), "below the rule a chunk is refused");
+    let ruled = apron_values(&lat, &stage, tile, rule);
+    let more = apron_values(&lat, &stage, tile, rule + 3);
+    assert!(ruled.iter().all(|(k, v)| v.to_bits() == more[k].to_bits()), "more halo than the rule changed a bit");
+    // One ring short (the step cap itself): the chunk's own cells are still exact, the apron is not.
+    let short = apron_values(&lat, &stage, tile, rule - 1);
+    let reg = region(&lat, tile, rule);
+    let (mut own_worst, mut apron_worst) = (0.0f64, 0.0f64);
+    for (k, c) in reg.cells.iter().enumerate().filter(|(k, _)| reg.depth[*k] <= 1) {
+        let key = (c.face, c.i, c.j);
+        let d = f64::from((ruled[&key] - short[&key]).abs());
+        if reg.depth[k] == 0 {
+            own_worst = own_worst.max(d)
+        } else {
+            apron_worst = apron_worst.max(d)
+        }
+    }
+    println!(
+        "halo {} against the rule's {rule}: own cells differ by {own_worst} m, the apron by up to {apron_worst} m on chunk {tile:?}",
+        rule - 1
+    );
+    assert_eq!(own_worst, 0.0);
+    assert!(apron_worst > 0.0, "the apron should need the extra ring");
+}
+
+// spec: GEN-036
+#[test]
+fn the_change_has_no_seam_across_a_face_edge_with_both_chunks_ready() {
+    let lat = ChunkLattice::new(16).unwrap();
+    let stage = stand_in(4);
+    let edge = |s: f64, t: f64| planet_core::cube::face_to_direction(&TangentWarp, Face(0), s, t);
+    let (inside, outside) = (edge(1.0 - 1e-9, 0.1), edge(1.0 + 1e-9, 0.1));
+    let a = TileId::from_direction(&TangentWarp, inside, CHUNK_GRID_LEVEL);
+    let b = TileId::from_direction(&TangentWarp, outside, CHUNK_GRID_LEVEL);
+    assert_ne!(a.face(), b.face(), "the two points are on different faces");
+    let make = |tile| Arc::new(compute_chunk(&lat, &stage, R, PYRAMID_TOP_LEVEL, tile, halo_rings(&stage)).unwrap());
+    let field = ChunkField::new(Reference(3), lat, R, stage.bound_m()).with_ready(make(a)).with_ready(make(b));
+    for level in [11, 15, 22] {
+        let (x, y) = (field.change_at_level(inside, level), field.change_at_level(outside, level));
+        assert!((x - y).abs() <= 1e-3, "level {level}: {x} m inside, {y} m outside the face edge");
+    }
+}
+
+// spec: GEN-038
+#[test]
+fn a_corner_chunk_of_8_m_cells_keeps_its_known_answer() {
+    let lat = ChunkLattice::new(608).unwrap();
+    let stage = stand_in(8);
+    let tile = chunk_tile(0, 2047, 2047);
+    let hash = compute_chunk(&lat, &stage, R, PYRAMID_TOP_LEVEL, tile, halo_rings(&stage)).unwrap().hash();
+    assert_eq!(hash, CORNER_KNOWN_ANSWER, "the corner chunk changed: platform, order, arithmetic or the tie-break across the face edge");
+}
+
+const CORNER_KNOWN_ANSWER: u64 = 14_433_926_590_099_959_428;

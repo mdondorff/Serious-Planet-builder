@@ -64,3 +64,8 @@ Chunk demand when the pyramid reaches up to level `top` (estimate; the plan's re
 | 15 | 3 km | 1 to 2 |
 
 At the stand-in's 0.25 s per km2, 285 chunks are about 1800 s of thread time, so criterion 3 (a chunk within 10 s at a 300 m pan) and criterion 7 (speed envelope) decide the top level; the default of 11 is the decision's, a lower one is a parameter.
+
+### 12. Findings of the numerics review (step 3b), carried to 3c and 3d
+- **Keys must chain the neighbours' ready state.** A tile near a chunk border reads up to two cells of the neighbouring chunk (Catmull-Rom) when it is ready and the nearest cell of its own chunk when it is not, so its heights depend on the ready state of up to eight neighbours. The tile key of step 3c chains the ready state (content hash or word 0) of every chunk within that reach, not only the tile's own chunk, or a tile built before a neighbour lands is never refreshed and cracks against the neighbour's tiles. A test builds the field with A ready, then with A and B, and requires different heights and different keys for a tile at the border.
+- **The tie-break across a face edge.** Near a cube corner the centre of the cell beyond a face edge lies within about 1e-9 cells of a boundary of the other face's lattice (1e-12 at 8 m cells), where the rounding of the direction maths would choose the neighbour; `cell_at` reads a position within 1e-6 cells below a boundary as above it. The known answers of a 16-cell and an 8 m corner chunk pin it.
+- **The halo.** One ring more than the step cap gives the chunk's own cells and one apron ring exact; at the cap itself the own cells are exact and the apron is not (tested). A chunk is refused below the rule.

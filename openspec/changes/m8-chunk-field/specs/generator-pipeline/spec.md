@@ -38,7 +38,7 @@ Source: SPIKE-34 section 3, ADR 0077 point 5, GEN-020
 - **THEN** level 14 equals the base and level 15 equals the base plus the chunk's level-15 pyramid change
 
 ### Requirement: GEN-037 Chunk pyramid steps
-A chunk's change SHALL be stored with a pyramid down to the apply level, each level box-filtered from the level below it (never from a coarser run). A tile at or above the apply level SHALL differ from its parent, at the parent's vertices, by at most 0.25 m at p99 for the stand-in compute.
+A chunk's change SHALL be stored with a pyramid down to the apply level, each level box-filtered from the level below it (never from a coarser run). A tile at the apply level SHALL differ from its parent, at the parent's vertices, by at most 0.25 m at p99 for the stand-in compute; the steps between the coarser levels up to the pyramid's top are measured and recorded (design.md), not bounded.
 
 Verify: A
 Status: planned
