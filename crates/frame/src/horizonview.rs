@@ -183,6 +183,63 @@ impl HorizonSlots {
     }
 }
 
+/// Floats a node takes in the per-node table: two `vec4` (binding 4 of the terrain pass).
+pub const NODE_TABLE_FLOATS: usize = 8;
+
+/// What the renderer reads for one plan node: the slot of its chunk's horizon map (`-1`: none, the term is the identity), the sun's azimuth
+/// (radians from the chunk's `+j` through `+i`) and elevation at the chunk centre, the chunk fade's weight (REND-039; `1.0` until that lands,
+/// the identity) and the tile's rectangle inside the chunk, `[u0, v0, du, dv]`. A node without a slot is zero beyond the slot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HorizonNode {
+    pub slot: i32,
+    pub sun_azimuth: f32,
+    pub sun_elevation: f32,
+    pub fade: f32,
+    pub rect: [f32; 4],
+}
+
+impl HorizonNode {
+    const NONE: HorizonNode = HorizonNode { slot: -1, sun_azimuth: 0.0, sun_elevation: 0.0, fade: 0.0, rect: [0.0; 4] };
+}
+
+/// The frame's horizon data for the renderer: one [`HorizonNode`] per plan node, in the plan's order, the slots' capacity and what to upload.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HorizonFrame {
+    pub capacity: u32,
+    pub nodes: Vec<HorizonNode>,
+    pub update: SlotUpdate,
+}
+
+impl HorizonFrame {
+    /// `slots` is the state after this frame's [`HorizonSlots::update`], whose result is `update`; `tiles` are the plan's nodes in order; `sun`
+    /// is the unit direction to the sun in the planet-fixed frame. The sun's numbers are decided once per chunk.
+    pub fn build(slots: &HorizonSlots, update: SlotUpdate, tiles: &[TileId], sun: Vec3, map: &dyn FaceMapping) -> HorizonFrame {
+        let mut per_chunk: HashMap<ChunkKey, (f32, f32)> = HashMap::new();
+        let nodes = tiles
+            .iter()
+            .map(|&tile| {
+                let Some((key, rect)) = tile_in_chunk(tile) else { return HorizonNode::NONE };
+                let Some(slot) = slots.slot_of(key) else { return HorizonNode::NONE };
+                let (sun_azimuth, sun_elevation) = *per_chunk
+                    .entry(key)
+                    .or_insert_with(|| (chunk_sun_azimuth(map, key, sun) as f32, chunk_sun_elevation(map, key, sun) as f32));
+                HorizonNode { slot: slot as i32, sun_azimuth, sun_elevation, fade: 1.0, rect }
+            })
+            .collect();
+        HorizonFrame { capacity: slots.capacity(), nodes, update }
+    }
+
+    /// The table as the shader reads it: per node `[slot, azimuth, elevation, fade]` then `[u0, v0, du, dv]`.
+    pub fn table(&self) -> Vec<f32> {
+        let mut out = Vec::with_capacity(self.nodes.len() * NODE_TABLE_FLOATS);
+        for n in &self.nodes {
+            out.extend_from_slice(&[n.slot as f32, n.sun_azimuth, n.sun_elevation, n.fade]);
+            out.extend_from_slice(&n.rect);
+        }
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,6 +320,79 @@ mod tests {
         assert!((chunk_sun_azimuth(&TangentWarp, key, sun(toward_i)) - core::f64::consts::FRAC_PI_2).abs() < 1e-6);
         assert!(chunk_sun_azimuth(&TangentWarp, key, sun(toward_j)).abs() < 1e-6);
         assert!((chunk_sun_elevation(&TangentWarp, key, sun(toward_j)) - 0.4).abs() < 1e-9);
+    }
+
+    fn sun_at(key: ChunkKey, elevation: f64) -> Vec3 {
+        let tile = TileId::new(Face(key.0), CHUNK_GRID_LEVEL, key.1, key.2).unwrap();
+        let (s0, s1, t0, t1) = tile.bounds();
+        let (s, t) = (0.5 * (s0 + s1), 0.5 * (t0 + t1));
+        let up = face_to_direction(&TangentWarp, Face(key.0), s, t);
+        let toward_i = face_to_direction(&TangentWarp, Face(key.0), s + 1.0e-3, t);
+        (toward_i - up * toward_i.dot(up)).normalized() * libm::cos(elevation) + up * libm::sin(elevation)
+    }
+
+    // spec: REND-041
+    #[test]
+    fn a_node_of_a_chunk_with_a_slot_carries_its_slot_the_suns_numbers_and_its_rectangle() {
+        let k: ChunkKey = (2, 1000, 1001);
+        let mut slots = HorizonSlots::new(4);
+        let up = slots.update(&[((2, 7, 7), 1), (k, 1)], 1);
+        let sun = sun_at(k, 0.3);
+        let chunk = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1001).unwrap();
+        let deep = TileId::new(Face(2), CHUNK_GRID_LEVEL + 4, 1000 * 16 + 5, 1001 * 16 + 9).unwrap();
+        let f = HorizonFrame::build(&slots, up.clone(), &[deep, chunk], sun, &TangentWarp);
+        assert_eq!(f.nodes.len(), 2);
+        assert_eq!(f.capacity, 4);
+        assert_eq!(f.update, up, "the frame carries the uploads the slots decided");
+        let slot = slots.slot_of(k).unwrap() as i32;
+        let (az, el) = (chunk_sun_azimuth(&TangentWarp, k, sun) as f32, chunk_sun_elevation(&TangentWarp, k, sun) as f32);
+        assert_eq!(
+            f.nodes[0],
+            HorizonNode { slot, sun_azimuth: az, sun_elevation: el, fade: 1.0, rect: [5.0 / 16.0, 9.0 / 16.0, 1.0 / 16.0, 1.0 / 16.0] }
+        );
+        assert_eq!(f.nodes[1], HorizonNode { slot, sun_azimuth: az, sun_elevation: el, fade: 1.0, rect: [0.0, 0.0, 1.0, 1.0] });
+        assert!((el - 0.3).abs() < 1e-6);
+        assert!((az - core::f32::consts::FRAC_PI_2).abs() < 1e-4);
+    }
+
+    // spec: REND-041
+    #[test]
+    fn a_node_outside_a_chunk_or_whose_chunk_has_no_slot_has_slot_minus_one() {
+        let k: ChunkKey = (2, 1000, 1001);
+        let mut slots = HorizonSlots::new(1);
+        slots.update(&[(k, 1)], 1);
+        let coarse = TileId::new(Face(2), CHUNK_GRID_LEVEL - 1, 3, 3).unwrap();
+        let other = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1002, 1001).unwrap();
+        let f = HorizonFrame::build(&slots, SlotUpdate::default(), &[coarse, other], sun_at(k, 0.3), &TangentWarp);
+        for n in &f.nodes {
+            assert_eq!(n.slot, -1);
+            assert_eq!((n.sun_azimuth, n.sun_elevation, n.rect), (0.0, 0.0, [0.0; 4]), "an empty node is zero beyond the slot");
+        }
+        // A frame with no slots at all: every node reads the coarse horizon alone.
+        let none = HorizonFrame::build(&HorizonSlots::new(0), SlotUpdate::default(), &[other], sun_at(k, 0.3), &TangentWarp);
+        assert_eq!(none.nodes[0].slot, -1);
+        assert!(none.update.uploads.is_empty());
+    }
+
+    // spec: REND-041
+    #[test]
+    fn the_table_is_two_vec4_a_node_in_the_order_of_the_plan_and_the_same_frame_builds_the_same_table() {
+        let k: ChunkKey = (2, 1000, 1001);
+        let mut slots = HorizonSlots::new(2);
+        slots.update(&[(k, 1)], 1);
+        let sun = sun_at(k, 0.2);
+        let child = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1001).unwrap().children().unwrap()[3];
+        let coarse = TileId::new(Face(2), CHUNK_GRID_LEVEL - 2, 3, 3).unwrap();
+        let tiles = [coarse, child];
+        let f = HorizonFrame::build(&slots, SlotUpdate::default(), &tiles, sun, &TangentWarp);
+        let t = f.table();
+        assert_eq!(t.len(), tiles.len() * NODE_TABLE_FLOATS);
+        assert_eq!(NODE_TABLE_FLOATS, 8);
+        assert_eq!(t[0], -1.0, "node 0 is outside a chunk");
+        let n = &f.nodes[1];
+        assert_eq!(&t[8..16], &[n.slot as f32, n.sun_azimuth, n.sun_elevation, n.fade, 0.5, 0.5, 0.5, 0.5]);
+        assert_eq!(t, HorizonFrame::build(&slots, SlotUpdate::default(), &tiles, sun, &TangentWarp).table());
+        assert!(HorizonFrame::build(&slots, SlotUpdate::default(), &[], sun, &TangentWarp).table().is_empty());
     }
 
     // spec: REND-041

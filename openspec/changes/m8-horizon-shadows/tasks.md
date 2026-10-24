@@ -9,7 +9,7 @@ Step 1 landed with the first PR; the rest follows. Each step is one PR of at mos
 - [x] 3. GEN-046: the combination, the interpolation, the soft edge and the azimuth in each frame (`generators::horizon_lookup`, the CPU reference of the shader).
 - [x] 4a. STRM-048: the horizon job kind (`streaming::chunks::HorizonJobs`: a second job after the heights, state word at dispatch, settle window, eviction, disk trait), tier A with a fake baker.
 - [x] 4b. STRM-049: the world wiring (`app::horizonworld`: baker from the world's field, `enable_horizon`, `horizon_frame`, `horizon_map`), flight test with the re-bake count. The pack-backed disk is STRM-050 (planned; it needs a record kind of its own: coordinate the number with explorer).
-- [ ] 5a. REND-038 part (a): `HorizonFrame` and the per-node table builder in `frame` (design.md "Render design" point 1, 8a).
+- [x] 5a. REND-038 part (a) (REND-041): `HorizonFrame` and the per-node table builder in `frame` (`frame::horizonview`, design.md "Render design" point 1, 8a).
 - [ ] 5b. REND-038 part (b): the render plumbing, bindings 4 to 7, dummies, `set_horizon`, uploads; frames identical with an all -1 table.
 - [ ] 5c. REND-038 part (c): the shader term and its test against the CPU reference.
 - [ ] 6. REND-038 part (d), CON-18: `ShadeView::Horizon` / `Shadow`, the viewer call sites, stills at sunset and midday on the fixed poses; goldens through `golden-review`.
