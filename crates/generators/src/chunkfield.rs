@@ -146,27 +146,78 @@ pub struct Region {
     pub core: usize,
     /// The outermost ring's depth.
     pub halo: u16,
-    /// The position of every cell in `cells`, by the cell's key.
-    index: HashMap<u64, u32>,
+    /// The position of every cell in `cells`.
+    index: CellIndex,
+}
+
+/// Where each cell of a region sits in its `cells`: a hash map by the cell's key, or, for a region that lies inside one face (the common case), a
+/// dense array over its bounding box. Both answer the same lookups, so the order of the region does not depend on which one it uses.
+enum CellIndex {
+    Map(HashMap<u64, u32>),
+    Dense { face: u8, i0: i64, j0: i64, w: i64, slots: Vec<u32> },
+}
+
+impl CellIndex {
+    fn get(&self, c: Cell) -> Option<u32> {
+        match self {
+            CellIndex::Map(m) => m.get(&c.key()).copied(),
+            CellIndex::Dense { face, i0, j0, w, slots } => {
+                let (di, dj) = (i64::from(c.i) - i0, i64::from(c.j) - j0);
+                let in_box = c.face == *face && di >= 0 && dj >= 0 && di < *w && dj * w < slots.len() as i64;
+                in_box.then(|| slots[(dj * w + di) as usize]).filter(|&v| v != NONE)
+            }
+        }
+    }
+
+    /// The position of `c`, or the next free one (`next`) after recording it.
+    fn get_or_insert(&mut self, c: Cell, next: u32) -> (u32, bool) {
+        match self {
+            CellIndex::Map(m) => match m.entry(c.key()) {
+                std::collections::hash_map::Entry::Occupied(e) => (*e.get(), false),
+                std::collections::hash_map::Entry::Vacant(e) => (*e.insert(next), true),
+            },
+            CellIndex::Dense { i0, j0, w, slots, .. } => {
+                let slot = &mut slots[((i64::from(c.j) - *j0) * *w + (i64::from(c.i) - *i0)) as usize];
+                if *slot == NONE {
+                    *slot = next;
+                    (next, true)
+                } else {
+                    (*slot, false)
+                }
+            }
+        }
+    }
 }
 
 impl Region {
     /// The position of `cell` in [`Region::cells`], if it is in the region.
     pub fn index_of(&self, cell: Cell) -> Option<usize> {
-        self.index.get(&cell.key()).map(|&i| i as usize)
+        self.index.get(cell).map(|i| i as usize)
     }
 }
 
 /// The region of the chunk over `tile` (a tile of the chunk grid level) with `halo` rings around it.
 pub fn region(lat: &ChunkLattice, tile: TileId, halo: u16) -> Region {
+    region_indexed(lat, tile, halo, true)
+}
+
+/// [`region`] with the dense index allowed or not (the tests compare the two).
+pub fn region_indexed(lat: &ChunkLattice, tile: TileId, halo: u16, allow_dense: bool) -> Region {
     let n = lat.per_chunk;
     let mut cells = Vec::with_capacity((n as usize + 2 * halo as usize).pow(2));
     let mut depth = Vec::with_capacity(cells.capacity());
-    let mut index: HashMap<u64, u32> = HashMap::with_capacity(cells.capacity());
+    // A region whose box (the chunk and `halo` rings) lies inside its face is indexed densely.
+    let (i0, j0) = (i64::from(tile.x()) * i64::from(n) - i64::from(halo), i64::from(tile.y()) * i64::from(n) - i64::from(halo));
+    let w = i64::from(n) + 2 * i64::from(halo);
+    let mut index = if allow_dense && i0 >= 0 && j0 >= 0 && i0 + w <= lat.n && j0 + w <= lat.n {
+        CellIndex::Dense { face: tile.face().0, i0, j0, w, slots: vec![NONE; (w * w) as usize] }
+    } else {
+        CellIndex::Map(HashMap::with_capacity(cells.capacity()))
+    };
     for j in 0..n {
         for i in 0..n {
             let c = Cell { face: tile.face().0, i: tile.x() * n + i, j: tile.y() * n + j };
-            index.insert(c.key(), cells.len() as u32);
+            index.get_or_insert(c, cells.len() as u32);
             cells.push(c);
             depth.push(0u16);
         }
@@ -178,11 +229,11 @@ pub fn region(lat: &ChunkLattice, tile: TileId, halo: u16) -> Region {
         let d = depth[at];
         let mut row = [NONE; 8];
         for (k, nb) in lat.neighbours(cells[at]).iter().enumerate() {
-            let idx = *index.entry(nb.key()).or_insert_with(|| {
+            let (idx, new) = index.get_or_insert(*nb, cells.len() as u32);
+            if new {
                 cells.push(*nb);
                 depth.push(d + 1);
-                (cells.len() - 1) as u32
-            });
+            }
             row[k] = idx;
         }
         neighbours.push(row);

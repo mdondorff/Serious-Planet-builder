@@ -373,3 +373,23 @@ fn a_chunk_result_round_trips_through_bytes_and_a_damaged_payload_is_refused() {
     wrong[0] = 63;
     assert!(ChunkResult::from_bytes(tile, &wrong).is_none(), "a wrong size is refused");
 }
+
+// spec: GEN-038
+#[test]
+fn the_dense_index_of_an_interior_region_gives_the_region_of_the_hash_index() {
+    use planet_generators::chunkfield::region_indexed;
+    let lat = ChunkLattice::new(16).unwrap();
+    // An interior chunk (dense), one at a face edge and one at a cube corner (both through the hash map whatever is asked).
+    for tile in [chunk_tile(2, 1000, 1000), chunk_tile(2, 0, 5), chunk_tile(2, 2047, 2047)] {
+        let (a, b) = (region_indexed(&lat, tile, 9, true), region_indexed(&lat, tile, 9, false));
+        assert_eq!((a.cells.len(), a.core, a.halo), (b.cells.len(), b.core, b.halo), "{tile:?}");
+        assert!(a.cells.iter().zip(&b.cells).all(|(x, y)| x.key() == y.key()), "the cells are the same, in the same order: {tile:?}");
+        assert_eq!(a.depth, b.depth);
+        assert_eq!(a.neighbours, b.neighbours);
+        for &c in a.cells.iter().step_by(7) {
+            assert_eq!(a.index_of(c), b.index_of(c));
+        }
+        let outside = planet_generators::chunkfield::Cell { face: 5, i: 3, j: 3 };
+        assert_eq!(a.index_of(outside), b.index_of(outside));
+    }
+}
