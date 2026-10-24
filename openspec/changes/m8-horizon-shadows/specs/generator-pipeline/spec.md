@@ -12,15 +12,15 @@ Source: opus-planner (2026-10-24, M8-5), SPIKE-32 step 2, ADR 0077
 - **THEN** texels looking toward the ridge have the angle `atan(height / distance)` within the step and texel error, texels looking away from it have horizon 0, the result is equal for every thread count, a block baked from a raster that holds its halo equals the same block of a larger raster, and a raster without the halo changes the edge texels
 
 ### Requirement: GEN-045 The coarse horizon from the global run
-`generators` SHALL compute, from the stored heights of the coupled run (STRM-043), the coarse horizon of every lattice cell: per cell and per azimuth the elevation angle of the highest cell along that azimuth out to the far range (about 50 km), by marching over the lattice through directions on the sphere. The result SHALL be a pure function of the stored heights and the parameters and be stored as a global channel beside the others (STRM-045).
+`generators::coarsehorizon` SHALL compute, from the stored heights of the coupled run (STRM-043), the coarse horizon of the cells of an observer lattice of `m` cells per face edge (a divisor of the run's): per cell and per azimuth the elevation angle (the chord above the observer's horizontal plane, on the sphere) of the highest sample of the run along the great circle in that azimuth, out to the far range (default 50 km, 16 azimuths, samples one cell of the run apart, at most 256 azimuths, a range of at most a quarter of the way round the body), where each sample is the run's height at the sample's direction (so a march crosses a cube face edge without face coordinates) and sea at or below 0 counts as 0; the observer's own height is the mean over the run cells its cell covers. The angle is the byte of GEN-044. Azimuths are in the geographic frame (0 toward the pole axis, a quarter turn east), unlike GEN-044's raster frame; GEN-046 rotates the sun's azimuth into each. The result is independent of the thread count, and a wrong size, a bad `m` or parameters that are not finite and positive are refused with the cause named. The result SHALL be a pure function of the stored heights and the parameters and be stored as a global channel beside the others (STRM-045).
 
 Verify: A
-Status: planned
+Status: active
 Source: opus-planner (2026-10-24, M8-5), SPIKE-32 architecture finding 2
 
 #### Scenario: A far peak
-- **WHEN** the coarse horizon is computed on a small lattice with one high cell
-- **THEN** cells within range toward it have its elevation angle at the azimuths toward it, cells beyond the range have none, and a march across a face edge sees the cell as one on the same face does
+- **WHEN** the coarse horizon is computed on a small body with one wide plateau on a cube edge, and on a lattice of varied heights with sea
+- **THEN** cells within range see the plateau toward it at its elevation angle (between the angles of its far and near edges), cells on the other face see it across the edge, cells beyond the range see nothing, a flat body has no horizon, the result is the same for every thread count, and deeper sea changes nothing
 
 ### Requirement: GEN-046 The horizon of a point
 The horizon elevation used at a point and an azimuth SHALL be the larger of the chunk map's and the coarse map's, each interpolated linearly between the two nearest azimuths; this combination and the interpolation SHALL be one CPU function that is the reference of the shader's (CON-07), with the soft edge of the shadow term stated in the spec.
