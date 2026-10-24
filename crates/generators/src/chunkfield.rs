@@ -227,6 +227,45 @@ impl ChunkResult {
         Some(ChunkResult { tile, n, levels })
     }
 
+    /// Bytes of the raster and its levels: `n (u32) | levels above the raster (u32) | every level's values, f32 little endian`.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(8 + self.size_bytes());
+        out.extend_from_slice(&(self.n as u32).to_le_bytes());
+        out.extend_from_slice(&(self.k_max() as u32).to_le_bytes());
+        for level in &self.levels {
+            for v in level {
+                out.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        out
+    }
+
+    /// The result of `tile` from [`ChunkResult::to_bytes`]; `None` for bytes that are not exactly a pyramid of that form (a short or damaged
+    /// payload is a miss, never a partial result).
+    pub fn from_bytes(tile: TileId, bytes: &[u8]) -> Option<ChunkResult> {
+        let word = |at: usize| Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?));
+        let (n, k_max) = (word(0)? as usize, word(4)? as usize);
+        if n == 0 || n > 1 << 16 || k_max > 16 || !n.is_multiple_of(1usize << k_max) {
+            return None;
+        }
+        let count: usize = (0..=k_max).map(|k| (n >> k) * (n >> k)).sum();
+        if bytes.len() != 8 + 4 * count {
+            return None;
+        }
+        let mut at = 8;
+        let mut levels = Vec::with_capacity(k_max + 1);
+        for k in 0..=k_max {
+            let m = (n >> k) * (n >> k);
+            levels.push((0..m).map(|i| f32::from_le_bytes(bytes[at + 4 * i..at + 4 * i + 4].try_into().expect("4 bytes"))).collect());
+            at += 4 * m;
+        }
+        Some(ChunkResult { tile, n, levels })
+    }
+
+    /// The bytes the result holds in memory (counted toward the chunk pool of the RAM caps, STRM-041).
+    pub fn size_bytes(&self) -> usize {
+        self.levels.iter().map(|l| 4 * l.len()).sum()
+    }
     pub fn tile(&self) -> TileId {
         self.tile
     }
@@ -432,12 +471,19 @@ pub fn chunks_read_by(lat: &ChunkLattice, top: u8, reach_cells: i64, tile: TileI
     out
 }
 
+/// How far into a neighbouring chunk a read can reach, in raster cells, with margin: the spline and the blend reach two cells of the coarsest
+/// pyramid level, and a vertex on a face edge reads through the neighbouring face, whose lattice is shifted along the edge up to about the
+/// stencil depth near a cube corner (so three times that, and the vertex spacing).
+pub fn reach_cells(lat: &ChunkLattice, radius_m: f64, top: u8) -> i64 {
+    3 * (2 << pyramid_levels(lat, radius_m, top)) + 4
+}
+
 impl<F: HeightField> ChunkField<F> {
     /// How far into a neighbouring chunk a read of this field can reach, in raster cells, with margin: the spline and the blend reach two cells of
     /// the coarsest level it blends, and a vertex on a face edge reads through the neighbouring face, whose lattice is shifted along the edge up to
     /// about the stencil depth near a cube corner (so three times that, and the vertex spacing).
     pub fn reach_cells(&self) -> i64 {
-        3 * (2 << pyramid_levels(&self.lat, self.radius_m, self.top)) + 4
+        reach_cells(&self.lat, self.radius_m, self.top)
     }
 
     /// The chunks tile `tile` reads (see [`chunks_read_by`]).

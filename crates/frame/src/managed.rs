@@ -105,6 +105,9 @@ pub struct FrameCounts {
     /// among the logged columns of [`FrameCounts::NAMES`].
     pub prefetch: usize,
     pub cancelled_prefetch: u64,
+    /// The plan's nodes that read chunk detail and those still on the base because their chunk is not ready (STRM-039); all zero without a
+    /// chunk view. Logged under [`crate::chunkshare::CHUNK_COLUMNS`], not among [`FrameCounts::NAMES`] (the scheduler digests keep their width).
+    pub chunk: crate::chunkshare::ChunkShare,
 }
 
 impl FrameCounts {
@@ -190,6 +193,8 @@ pub struct ManagedLoop {
     class_rebuilds: u64,
     prefetch_rebuilds: u64,
     last_node_bytes: u64,
+    /// What the frame knows of the chunk field (STRM-039): set by the window that has one.
+    chunk_view: Option<Arc<dyn crate::chunkshare::ChunkView>>,
     /// The lists of `wants` that changed since the manager was last given them.
     draw_changed: bool,
     residency_changed: bool,
@@ -276,6 +281,7 @@ impl ManagedLoop {
             class_rebuilds: 0,
             prefetch_rebuilds: 0,
             last_node_bytes: 0,
+            chunk_view: None,
             draw_changed: false,
             residency_changed: false,
             prefetch_changed: false,
@@ -366,6 +372,11 @@ impl ManagedLoop {
     }
 
     /// Set the settle window of the refresh pre-emption in milliseconds of the injected clock (STRM-031, ADR 0072): a tile that edits keep
+    /// The chunk field the frame counts its stand-in share against (STRM-039); `None` counts nothing.
+    pub fn set_chunk_view(&mut self, view: Option<Arc<dyn crate::chunkshare::ChunkView>>) {
+        self.chunk_view = view;
+    }
+
     /// re-keying is refreshed once, after the last of them has been quiet for this long. 0 (the default) holds nothing.
     pub fn set_refresh_settle(&mut self, ms: u64) {
         self.manager.streamer_mut().set_refresh_settle(ms);
@@ -593,6 +604,11 @@ impl ManagedLoop {
             budget_failure,
             prefetch: self.wants.prefetch.len(),
             cancelled_prefetch: stats.cancelled_prefetch - self.last.cancelled_prefetch,
+            chunk: self
+                .chunk_view
+                .as_deref()
+                .map(|v| crate::chunkshare::ChunkShare::of(pipeline.draw.plan.nodes.iter().map(|n| n.tile), v))
+                .unwrap_or_default(),
         };
         self.last = stats;
         Ok(ManagedFrame { pipeline, counts, scheduler_ms, upload_ms })

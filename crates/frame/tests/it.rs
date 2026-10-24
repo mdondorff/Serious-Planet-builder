@@ -2,6 +2,8 @@
 mod atmosphere;
 #[path = "chunk_plan.rs"]
 mod chunk_plan;
+#[path = "chunk_share.rs"]
+mod chunk_share;
 #[path = "compact_pool.rs"]
 mod compact_pool;
 #[path = "controller.rs"]

@@ -82,6 +82,8 @@ pub enum Kind {
     GlobalWetFloor = 6,
     /// A block of the global coupled run (M8-1, GEN-040): height, drainage area and receiver per cell.
     GlobalCoupled = 7,
+    /// The result of one chunk of a chunk field (M8-2, STRM-041): the change raster and its pyramid.
+    Chunk = 8,
 }
 
 /// One entry of a read set, in its 128-bit form (ADR 0018).
@@ -336,6 +338,8 @@ pub const PARAM_STAGE_LAYER: u8 = 8;
 pub const PARAM_STAGE_INDEX: u8 = 9;
 /// The run of a coupled block: lattice cells per face edge, steps, base resolution and every parameter of the run (STRM-043).
 pub const PARAM_COUPLED: u8 = 10;
+/// The definition of a chunk field: the process hash, cells per chunk edge, pyramid top level and the radius bits (STRM-041).
+pub const PARAM_CHUNK: u8 = 11;
 
 fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> KeyInputs {
     assert!(

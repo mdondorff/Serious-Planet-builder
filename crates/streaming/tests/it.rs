@@ -1,3 +1,5 @@
+#[path = "chunks.rs"]
+mod chunks;
 #[path = "dispatch_throughput.rs"]
 mod dispatch_throughput;
 #[path = "floor_roots.rs"]
