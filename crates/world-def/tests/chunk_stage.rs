@@ -2,7 +2,7 @@
 
 use planet_world_def::{BodyId, ChunkStagePosition, WorldDefinition};
 
-// spec: GEN-039
+// spec: GEN-039, WDEF-018
 #[test]
 fn a_layer_without_the_setting_is_on_top_and_the_definition_hashes_as_it_always_did() {
     let mut d = WorldDefinition::single_planet(6_371_000.0, 7);
@@ -14,7 +14,7 @@ fn a_layer_without_the_setting_is_on_top_and_the_definition_hashes_as_it_always_
     assert_eq!(d.hash(), before);
 }
 
-// spec: GEN-039
+// spec: GEN-039, WDEF-018
 #[test]
 fn under_is_representable_changes_the_hash_and_is_refused_naming_the_layer() {
     let mut d = WorldDefinition::single_planet(6_371_000.0, 7);

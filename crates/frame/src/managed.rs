@@ -385,12 +385,17 @@ impl ManagedLoop {
         }
         let mut tiles: Vec<TileId> = self.resident.keys().copied().filter(|t| view.reads(*t).iter().any(|k| landed.contains(k))).collect();
         tiles.sort_unstable_by_key(|t| t.raw());
+        // The plan cache holds origins and mesh keys of tiles that are not resident too (the plan's nodes before their tiles arrive): drop those.
+        for &k in landed {
+            self.pipe.worker().invalidate_chunk(k, |t| view.reads(t));
+        }
         if tiles.is_empty() {
             0
         } else {
             self.edit(&tiles)
         }
     }
+
     /// Set the settle window of the refresh pre-emption in milliseconds of the injected clock (STRM-031, ADR 0072): a tile that edits keep
     /// re-keying is refreshed once, after the last of them has been quiet for this long. 0 (the default) holds nothing.
     pub fn set_refresh_settle(&mut self, ms: u64) {

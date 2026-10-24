@@ -68,7 +68,7 @@ fn the_plan_requests_the_chunks_under_its_fine_nodes_and_is_the_same_whether_the
     assert_eq!(stage().step_cap(), 4);
 }
 
-// spec: STRM-040
+// spec: STRM-040, LOD-014
 #[test]
 fn a_landing_drops_the_cached_origin_heights_of_exactly_the_tiles_that_read_the_chunk() {
     let p = params();

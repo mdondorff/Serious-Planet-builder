@@ -135,7 +135,7 @@ fn p99(mut v: Vec<f64>) -> f64 {
     v[(v.len() * 99 / 100).min(v.len() - 1)]
 }
 
-// spec: GEN-035, GEN-036
+// spec: GEN-035, GEN-036, GEN-053
 #[test]
 fn the_pyramid_starts_at_the_chunk_grid_level_and_tiles_above_it_are_the_base() {
     let lat = ChunkLattice::new(608).unwrap();
@@ -210,7 +210,7 @@ fn a_ready_chunk_changes_levels_from_the_top_down_and_the_step_to_the_parent_is_
     }
 }
 
-// spec: GEN-035, GEN-037
+// spec: GEN-035, GEN-037, GEN-053
 #[test]
 fn a_lower_top_level_leaves_the_levels_above_it_the_base_and_keeps_the_step_at_the_apply_level() {
     let lat = ChunkLattice::new(608).unwrap();
@@ -315,7 +315,7 @@ fn at_a_level_that_reads_the_raster_the_height_is_the_base_plus_the_stored_chang
     }
 }
 
-// spec: GEN-036
+// spec: GEN-036, GEN-054
 #[test]
 fn tile_generation_reads_the_height_at_its_own_level() {
     use planet_generators::height::generate_tile_field;

@@ -183,7 +183,7 @@ fn the_seed_only_world_plans_with_the_hash_of_the_direct_reference_plan() {
     assert_eq!(field.read_records(), Reference(7).read_records());
 }
 
-// spec: GEN-039, STRM-039
+// spec: GEN-039, GEN-055, STRM-039
 #[test]
 fn a_world_with_a_chunk_stage_builds_its_fields_over_the_ready_chunks_and_counts_the_stand_in_share() {
     use std::sync::Arc;
