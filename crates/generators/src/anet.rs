@@ -138,6 +138,10 @@ pub struct Network {
     pub inflow_m2: Vec<f64>,
     /// The initial fine height of each cell in metres: the run's height upsampled plus the base's detail.
     pub z0: Vec<f32>,
+    /// The height a corridor cell is held at where the coarse run fixes it (NaN elsewhere): at every quarter of a coarse segment, the run's heights
+    /// interpolated along the segment. Beds are tied to the run at these anchors, so a bed does not depend on the heights of a region's ring (the
+    /// implicit step carries a downstream height far up a channel); the stage keeps the lower of this and the base height.
+    pub anchor_z: Vec<f64>,
 }
 
 /// "No next cell."
@@ -173,6 +177,7 @@ impl Network {
 
         let len = region.cells.len();
         let (mut corridor, mut next, mut inflow_m2) = (vec![false; len], vec![NO_NEXT; len], vec![0.0f64; len]);
+        let mut anchor_z = vec![f64::NAN; len];
         let half_cell_m = 0.5 * lat.cell_m(radius_m);
         let key = |x: usize| region.cells[x].key();
         for (from, to) in segments {
@@ -201,6 +206,17 @@ impl Network {
             }
             if let Some(&last) = points.last() {
                 visit(last, &mut runs);
+            }
+            // The anchors: the quarter points of the segment, held at the run's height there.
+            for q in 0..=4usize {
+                let t = q as f64 / 4.0;
+                let p = points[(t * (points.len() - 1) as f64).round() as usize];
+                if let Some(i) = region.index_of(lat.cell_at(p)) {
+                    let h = f64::from(run.z(from)) * (1.0 - t) + f64::from(run.z(to)) * t;
+                    if anchor_z[i].is_nan() || h < anchor_z[i] {
+                        anchor_z[i] = h;
+                    }
+                }
             }
             // A river whose polyline starts outside the region enters it at its first cell in the region, carrying the coarse area it started with.
             if points.first().is_some_and(|&p| region.index_of(lat.cell_at(p)).is_none()) {
@@ -248,6 +264,279 @@ impl Network {
                 (coarse_z_at(run, d) + (base.base_height(d) - base.coarse_input(d))) as f32
             })
             .collect();
-        Network { corridor, next, inflow_m2, z0 }
+        Network { corridor, next, inflow_m2, z0, anchor_z }
     }
 }
+
+/// The parameters of the incision (SPIKE-33, SPIKE-35): stream power `K A^m S` with the implicit step, N steps along the frozen network.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ANetParams {
+    /// Erodibility `K` and the drainage-area exponent `m` (the coarse run's).
+    pub k: f64,
+    pub m: f64,
+    /// The step in years.
+    pub dt_years: f64,
+    /// The step cap `N`.
+    pub steps: u32,
+    /// The jitter of the receiver choice in `[0, 1)` and its seed (the coupled run's rule, GEN-050).
+    pub jitter: f64,
+    pub seed: u64,
+    /// Drainage area above which a cell is a channel, m2.
+    pub channel_area_m2: f64,
+    /// The halo in rings (the stage states it, GEN-049): 3 km over the cell size.
+    pub halo_rings: u16,
+    /// The least a receiver lies below its donor per metre of distance after the breach.
+    pub breach_slope: f64,
+}
+
+impl ANetParams {
+    /// The values of SPIKE-33 and SPIKE-35 with a halo of `halo_m` metres at cells of `cell_m` metres.
+    pub fn spike(halo_m: f64, cell_m: f64) -> ANetParams {
+        ANetParams {
+            k: 2.0e-5,
+            m: 0.45,
+            dt_years: 1.0e4,
+            steps: 30,
+            jitter: 0.4,
+            seed: 0,
+            channel_area_m2: 5.0e4,
+            halo_rings: (halo_m / cell_m).ceil().clamp(1.0, f64::from(u16::MAX)) as u16,
+            breach_slope: 0.002,
+        }
+    }
+}
+
+/// What a solve leaves, per cell of the region: the receiver (a region index or `u32::MAX`), the final height, the drainage area and the base
+/// height the incision started from.
+pub struct Solution {
+    pub receiver: Vec<u32>,
+    pub z: Vec<f64>,
+    pub area_m2: Vec<f64>,
+    pub z_base: Vec<f64>,
+}
+
+/// The receivers, the breach and the implicit incision on `region` (A-net, SPIKE-35 variant c4 with the corridor of GEN-047). The surface the
+/// incision starts from is the base field's: the change is what the incision does to it.
+pub fn solve(
+    net: &Network,
+    base: &dyn BaseDetail,
+    lat: &ChunkLattice,
+    region: &Region,
+    radius_m: f64,
+    cell_area: &dyn Fn(Cell) -> f64,
+    p: &ANetParams,
+) -> Solution {
+    const NONE: u32 = u32::MAX;
+    let len = region.cells.len();
+    let key = |x: usize| region.cells[x].key();
+    let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
+    let z_base: Vec<f64> = dirs.iter().map(|&d| base.base_height(d)).collect();
+    let mut z = z_base.clone();
+    for c in 0..z.len() {
+        if !net.anchor_z[c].is_nan() {
+            z[c] = z[c].min(net.anchor_z[c]);
+        }
+    }
+    let ring = |c: usize| region.depth[c] >= region.halo;
+    // A cell the incision does not move: the outer ring (the base height) and the anchors of the corridor (the lower of the run's height and the base).
+    let fixed = |c: usize| ring(c) || !net.anchor_z[c].is_nan();
+    let dist = |c: usize, r: usize| (dirs[c] - dirs[r]).length() * radius_m;
+
+    // Receivers on the initial surface: the corridor's links, else the steepest jittered neighbour down (a function of position only).
+    let mut rec = vec![NONE; len];
+    for c in 0..len {
+        if ring(c) {
+            continue;
+        }
+        if net.corridor[c] && net.next[c] != NO_NEXT {
+            rec[c] = net.next[c];
+            continue;
+        }
+        let mut best = (0.0f64, NONE);
+        for (k, &nb) in region.neighbours[c].iter().enumerate() {
+            let drop = z[c] - z[nb as usize];
+            if drop > 0.0 {
+                let s = drop / dist(c, nb as usize) * crate::coupled::jitter_of(p.seed, key(c), k, p.jitter);
+                if s > best.0 {
+                    best = (s, nb);
+                }
+            }
+        }
+        rec[c] = best.1;
+    }
+
+    // Donors before receivers: Kahn's queue, seeded in cell-key order, so the order does not depend on the region's numbering.
+    let mut donors: Vec<Vec<u32>> = vec![Vec::new(); len];
+    for c in 0..len {
+        if rec[c] != NONE {
+            donors[rec[c] as usize].push(c as u32);
+        }
+    }
+    for d in &mut donors {
+        d.sort_unstable_by_key(|&x| key(x as usize));
+    }
+    let mut indeg: Vec<u32> = donors.iter().map(|d| d.len() as u32).collect();
+    let mut order: Vec<usize> = (0..len).filter(|&c| indeg[c] == 0).collect();
+    order.sort_unstable_by_key(|&c| key(c));
+    let mut at = 0;
+    while at < order.len() {
+        let c = order[at];
+        at += 1;
+        let r = rec[c];
+        if r != NONE {
+            indeg[r as usize] -= 1;
+            if indeg[r as usize] == 0 {
+                order.push(r as usize);
+            }
+        }
+    }
+    // A cell left over lies on a cycle of corridor links that survived: it is an outlet.
+    if order.len() < len {
+        let mut seen = vec![false; len];
+        for &c in &order {
+            seen[c] = true;
+        }
+        for c in 0..len {
+            if !seen[c] {
+                rec[c] = NONE;
+            }
+        }
+        // Its donors were never ordered either; order again without the cut links.
+        donors = vec![Vec::new(); len];
+        for c in 0..len {
+            if rec[c] != NONE {
+                donors[rec[c] as usize].push(c as u32);
+            }
+        }
+        for d in &mut donors {
+            d.sort_unstable_by_key(|&x| key(x as usize));
+        }
+        indeg = donors.iter().map(|d| d.len() as u32).collect();
+        order = (0..len).filter(|&c| indeg[c] == 0).collect();
+        order.sort_unstable_by_key(|&c| key(c));
+        at = 0;
+        while at < order.len() {
+            let c = order[at];
+            at += 1;
+            let r = rec[c];
+            if r != NONE {
+                indeg[r as usize] -= 1;
+                if indeg[r as usize] == 0 {
+                    order.push(r as usize);
+                }
+            }
+        }
+    }
+
+    // The breach: a receiver is cut to at least `breach_slope` below its donor; a receiver on the ring keeps its height, and its donor becomes an
+    // outlet instead (no cascade up the channel).
+    for &c in &order {
+        let r = rec[c];
+        if r == NONE {
+            continue;
+        }
+        let r = r as usize;
+        let limit = z[c] - p.breach_slope * dist(c, r);
+        if fixed(r) {
+            if z[r] > limit {
+                rec[c] = NONE;
+            }
+        } else if z[r] > limit {
+            z[r] = limit;
+        }
+    }
+
+    // Drainage area: a cell's own area, the inflow of the corridor and its donors' in key order (so the sum is the same in every region).
+    let mut area = vec![0.0f64; len];
+    for &c in &order {
+        let mut a = cell_area(region.cells[c]) + net.inflow_m2[c];
+        for &d in &donors[c] {
+            if rec[d as usize] == c as u32 {
+                a += area[d as usize];
+            }
+        }
+        area[c] = a;
+    }
+
+    // The implicit step along the frozen network, receivers first: z = (z + f z_r) / (1 + f), f = K A^m dt / distance.
+    let coef: Vec<f64> = (0..len)
+        .map(|c| match rec[c] {
+            NONE => 0.0,
+            _ if fixed(c) => 0.0,
+            r => p.k * libm::pow(area[c], p.m) * p.dt_years / dist(c, r as usize),
+        })
+        .collect();
+    for _ in 0..p.steps {
+        for &c in order.iter().rev() {
+            let r = rec[c];
+            if r == NONE || fixed(c) {
+                continue;
+            }
+            z[c] = (z[c] + coef[c] * z[r as usize]) / (1.0 + coef[c]);
+        }
+    }
+    Solution { receiver: rec, z, area_m2: area, z_base }
+}
+
+/// The A-net chunk stage: the network of a stored coupled run, the implicit incision along it with the breach rule, jittered receivers.
+pub struct ANet {
+    pub run: std::sync::Arc<dyn CoarseRun>,
+    pub base: std::sync::Arc<dyn BaseDetail>,
+    pub radius_m: f64,
+    pub params: ANetParams,
+}
+
+impl ANet {
+    /// The solve over a region (also what the tests look at).
+    pub fn solve(&self, lat: &ChunkLattice, region: &Region) -> Solution {
+        let net = Network::build(&*self.run, &*self.base, lat, region, self.radius_m);
+        // The own area of a fine cell: the coarse cell's area over the cells it holds.
+        let per = lat.cells_per_chunk() as usize;
+        let n = self.run.lattice().n();
+        let cells = (per * per) as f64;
+        let area = |c: Cell| {
+            let coarse = usize::from(c.face) * n * n + (c.j as usize / per) * n + (c.i as usize / per);
+            self.run.lattice().area_m2(coarse) / cells
+        };
+        solve(&net, &*self.base, lat, region, self.radius_m, &area, &self.params)
+    }
+}
+
+impl crate::chunkfield::ChunkStage for ANet {
+    fn step_cap(&self) -> u32 {
+        self.params.steps
+    }
+    /// A bound on the change in metres: the breach cuts at most 250 m (SPIKE-35: 180 m maximum at the spike's site).
+    fn bound_m(&self) -> f64 {
+        300.0
+    }
+    fn halo_rings(&self) -> u16 {
+        self.params.halo_rings
+    }
+    fn compute(&self, lat: &ChunkLattice, region: &Region) -> Vec<f32> {
+        let s = self.solve(lat, region);
+        (0..region.cells.len()).map(|c| (s.z[c] - s.z_base[c]) as f32).collect()
+    }
+    fn definition_hash(&self) -> u64 {
+        let p = &self.params;
+        planet_core::hash::hash_u64s(
+            0x0061_6e65_74,
+            &[
+                p.k.to_bits(),
+                p.m.to_bits(),
+                p.dt_years.to_bits(),
+                u64::from(p.steps),
+                p.jitter.to_bits(),
+                p.seed,
+                p.channel_area_m2.to_bits(),
+                u64::from(p.halo_rings),
+                p.breach_slope.to_bits(),
+                self.radius_m.to_bits(),
+                u64::from(ANET_VERSION),
+            ],
+        )
+    }
+}
+
+/// Version of the stage's algorithm: part of its definition hash, so a change that changes results re-keys every chunk.
+pub const ANET_VERSION: u32 = 1;

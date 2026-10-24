@@ -312,10 +312,16 @@ fn prefetch<T>(v: &T) {
 
 /// The jitter factor of direction `k` at cell `c`: `1 + j (2 h - 1)`, `h` in `[0, 1)` a hash of the seed, the cell and the direction.
 fn jitter_factor(seed: u64, c: usize, k: usize, jitter: f64) -> f64 {
+    jitter_of(seed, c as u64, k, jitter)
+}
+
+/// [`jitter_factor`] for any cell identity `id` (the coupled run uses the coarse cell index, a chunk stage the fine cell's packed key): the one
+/// definition of the jitter, a function of position alone.
+pub fn jitter_of(seed: u64, id: u64, k: usize, jitter: f64) -> f64 {
     if jitter == 0.0 {
         return 1.0;
     }
-    let h = (mix64(seed ^ ((c as u64) << 3 | k as u64)) >> 11) as f64 * (1.0 / 9_007_199_254_740_992.0);
+    let h = (mix64(seed ^ (id << 3 | k as u64)) >> 11) as f64 * (1.0 / 9_007_199_254_740_992.0);
     1.0 + jitter * (2.0 * h - 1.0)
 }
 

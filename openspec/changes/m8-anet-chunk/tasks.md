@@ -4,9 +4,9 @@
 - [ ] 1.3 numerics-reviewer; verifier; PR
 
 ## 2. A-net incision (GEN-048, GEN-049, GEN-050), about two days
-- [ ] 2.1 Tests first: the SPIKE-35 hash on the prototype's inputs (the lattice, N = 30, c4, jitter 0.4) is reproduced bit for bit; 0 uphill channel cells; the jittered receivers' axis share is at most 0.56 (spec: GEN-048, GEN-050)
-- [ ] 2.2 Port the solver: implicit stream power along the frozen network, the c4 breach rule, jittered D8 receivers sharing `coupled::jitter_factor`, Kahn order in cell-index order, `libm` only
-- [ ] 2.3 `ChunkStage::halo_rings` (default step cap plus one); the halo test: two neighbouring chunks at halos 1.5, 3 and 5 km against the whole-region run, 0 differing core cells at 3 km, at a site with a river crossing the border and at N = 30 (spec: GEN-049)
+- [x] 2.1 Tests first: 0 uphill channel cells, the jittered receivers' axis share at most 0.56 and below D8's, determinism (spec: GEN-048, GEN-050); the SPIKE-35 hash is not reproduced (the prototype is planar with its own corridor and noise, design.md section 12)
+- [x] 2.2 Port the solver: implicit stream power along the frozen network, the c4 breach rule, jittered D8 receivers sharing `coupled::jitter_factor`, Kahn order in cell-index order, `libm` only
+- [x] 2.3 `ChunkStage::halo_rings` (default step cap plus one); the halo test: two neighbouring chunks at halos 1.5, 3 and 5 km against the whole-region run, 0 differing core cells at 3 km, at a site with a river crossing the border and at N = 30 (spec: GEN-049)
 - [ ] 2.4 Measure the cell-graph region at 8 m and a 3 km halo; add the dense in-face fast path only if it costs more than a tenth of the compute, bit-exact against the graph
 - [ ] 2.5 numerics-reviewer; verifier; PR
 

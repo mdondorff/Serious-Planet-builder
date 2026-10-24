@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: GEN-047 The global network in the chunk raster
-A chunk stage of the A-net kind SHALL take the river network of a chunk from the stored global coupled run: the coarse path from every coarse cell whose drainage area exceeds 100 km2 to its receiver is the chunk's corridor, displaced by a noise meander that is a function of position only and zero at the coarse cell centres, so that two neighbouring chunks find the same path through their shared border; the drainage area crossing the halo ring is injected as inflow, and the initial fine heights are the coarse heights upsampled plus the base field's detail. A chunk with no such cell SHALL have no corridor.
+A chunk stage of the A-net kind SHALL take the river network of a chunk from the stored global coupled run: the coarse path from every coarse cell whose drainage area exceeds 100 km2 to its receiver is the chunk's corridor, displaced by a noise meander that is a function of position only and zero at the coarse cell centres, so that two neighbouring chunks find the same path through their shared border; the drainage area crossing the halo ring is injected as inflow, and the initial fine heights are the coarse heights upsampled plus the base field's detail. The corridor SHALL be held at the run's height (interpolated along the segment, the lower of it and the base height) at every quarter of a coarse segment, so a channel bed does not depend on the heights at the region's ring. A chunk with no such cell SHALL have no corridor.
 
 Verify: A
 Status: planned
@@ -19,8 +19,8 @@ Status: planned
 Source: SPIKE-35 item 1 (variant c4), ADR 0077 consequences
 
 #### Scenario: Zero uphill
-- **WHEN** a chunk of the SPIKE-35 lattice runs N = 30 steps
-- **THEN** 0 channel cells have a higher receiver, and the heights and areas hash equals the prototype's recorded hash
+- **WHEN** a chunk of a terrain whose corridor runs uphill in places runs N = 30 steps
+- **THEN** 0 channel cells have a higher receiver, and two runs give the same receivers and heights, bit for bit
 
 ### Requirement: GEN-049 The halo of an A-net chunk
 An A-net chunk SHALL state its halo as 3 km (at least its step cap times its reach per step) and SHALL, with that halo, equal the same run over the whole region in every cell of its core, bit for bit, at the step cap, at a site where a river crosses the chunk border.
