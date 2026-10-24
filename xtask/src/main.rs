@@ -29,6 +29,7 @@ const USAGE: &str = "cargo xtask <command>
   accept <milestone>   run milestone acceptance, e.g. M0; M4 also judges the perf logs of a streaming window (--logs DIR, default perf/logs) and refuses without a valid one
   store [--res N] [--relief-scale S] [--link DIR]   build the production store (default 16384 cells, into target/stores/global<N>) and point the editor at it, or only link an existing one (VIEW-052); with --relief-scale S (1 to 4) an exaggerated world into its own store, and the editor command line for it (WDEF-017)
   repro <bundle>       replay a repro bundle (format arrives in M1)
+  capture stills --poses FILE [--store DIR | --allow-memory-bake --global-res N] [--out-dir DIR] [--size WxH] [--views A,B] [--smoke]   one PNG per pose of the poses file over a world with its A-net chunk stage, every tile with its chunk landed (TEST-048; default directory target/review/m8-stills)
   perf [--machine-ready]   performance harness on Rasierklinge; the harness measures readiness and refuses (ADR 0020);
                            --machine-ready is the owner's override. Only the architect session runs it
   perf stream [SCENE|all] --store DIR   the streaming scenes dive, dive-fast, teleport-1m, teleport-2km, look-1m, look-2km (ADR 0032) and dive-cold (the dive over a reader that ignores the pre-filled coarse tiles, report-only) over a stored 16384-cell bake; --allow-memory-bake runs over an in-memory bake labelled NOT the production source; `all` runs one child process per scene (the scene's own RAM peak, gate per child);

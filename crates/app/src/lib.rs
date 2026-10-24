@@ -22,6 +22,7 @@ pub mod preflightperf;
 pub mod reproworld;
 pub mod sheet;
 pub mod skeleton;
+pub mod stills;
 pub mod streamperf;
 pub mod sweep;
 pub mod ui;
@@ -73,6 +74,7 @@ modes:
     --gen-priority below-normal|normal   OS priority of the generation workers (STRM-020, ADR 0046; default below-normal: the frame thread wins a core both want; no result depends on it)
     --lit                    the streaming perf scenes on the lit path with the atmosphere and water (TEST-025): same scripts, same verdicts, logs named <scene>-lit
     --views a,b,c            only these views of the lit perf scenes (ground-1m, aerial-20km, coast-2km, coast-3m, orbit, coast-glide, coast-descent); a partial log is not a window
+    --scene capture-stills   one PNG per pose of --poses FILE (TEST-048) in --out-dir, over a world with its A-net chunk stage, every tile of the image with its chunk landed; needs --store DIR or --allow-memory-bake, takes --size WxH and --views (pose names); never a measurement
     --scene capture-flights  the two coastal flights as 1440p PNG sequences (shore_filter at the look default, 0, and then 1) in --out-dir, never a measurement (TEST-027; `cargo xtask capture flights` also makes the videos); needs --store DIR or --allow-memory-bake, takes --size WxH, --flight-frames N
     --flight-frames N        frames of each coastal flight of the lit perf scenes (default 240; --scene lit, TEST-025)
     --perf                   performance-harness skeleton (needs --adapter hardware; the readiness gate decides, ADR 0020)
@@ -180,6 +182,8 @@ pub struct Options {
     pub flight_frames: usize,
     /// `--views a,b,c`: only these views of the lit perf scenes.
     pub views: Option<Vec<String>>,
+    /// `--poses FILE`: the poses of the scene `capture-stills` (TEST-048).
+    pub poses: Option<PathBuf>,
     /// `--no-ui`: the editor window without the UI (VIEW-011).
     pub no_ui: bool,
     /// `editor --edit`: start in the editor mode (VIEW-022); Tab toggles it in the window.
@@ -317,6 +321,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         lit: false,
         flight_frames: 240,
         views: None,
+        poses: None,
         no_ui: false,
         edit: false,
         items: None,
@@ -358,6 +363,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--editor-layout" => o.editor_layout = Some(PathBuf::from(it.next().ok_or("--editor-layout needs a file")?)),
             "--marker" => o.markers.push(it.next().ok_or("--marker needs LAT,LON[,RADIUS_M]")?.clone()),
             "--calibrate" => o.calibrate = true,
+            "--poses" => o.poses = Some(PathBuf::from(it.next().ok_or("--poses needs a poses file")?)),
             "--views" => {
                 o.views = Some(it.next().ok_or("--views needs a comma-separated list")?.split(',').map(|v| v.trim().to_string()).collect())
             }
@@ -780,9 +786,19 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
     {
         return Err("--views applies to the scenes `lit` and `capture-flights`, --flight-frames to those".into());
     }
+    if o.given.contains("--poses") && !stills::is_stills_scene(&o.scene) {
+        return Err("--poses applies to the scene `capture-stills`".into());
+    }
+    if stills::is_stills_scene(&o.scene) && o.given.contains("--flight-frames") {
+        return Err("--flight-frames does not apply to `capture-stills` (one frame per pose)".into());
+    }
     streamperf::check_options(o)?;
     if litperf::is_capture_scene(&o.scene) {
-        return litperf::capture_flights(o, &ctx, out);
+        return if stills::is_stills_scene(&o.scene) {
+            stills::capture_stills(o, &ctx, out)
+        } else {
+            litperf::capture_flights(o, &ctx, out)
+        };
     }
     if o.flight.is_some() {
         return skeleton::render_flight(&ctx, o, out);

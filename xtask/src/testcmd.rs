@@ -623,38 +623,38 @@ fn perf_m5(root: &Path, args: &[String]) -> Res {
     }
 }
 
-/// The `cargo` arguments of `capture flights` (TEST-027) and the directory the frames go to: the flight capture of `test-render`
-/// (a tool beside the harness, never a measurement). `--smoke` runs it on the software adapter.
+/// The `cargo` arguments of `capture flights` (TEST-027) and `capture stills` (TEST-048) and the directory the images go to: the
+/// captures of `test-render` (tools beside the harness, never a measurement). `--smoke` runs it on the software adapter.
 fn capture_args(args: &[String]) -> Result<(Vec<String>, String), String> {
     let mut it = args.iter();
-    match it.next().map(String::as_str) {
-        Some("flights") => {}
-        other => return Err(format!("usage: cargo xtask capture flights [--store DIR | --allow-memory-bake --global-res N] [--out-dir DIR] [--size WxH] [--flight-frames N] [--views A,B] [--smoke] (got {other:?})")),
-    }
+    let (scene, mut out_dir) = match it.next().map(String::as_str) {
+        Some("flights") => ("capture-flights", "target/review/m5-flights".to_string()),
+        Some("stills") => ("capture-stills", "target/review/m8-stills".to_string()),
+        other => return Err(format!("usage: cargo xtask capture flights [--store DIR | --allow-memory-bake --global-res N] [--out-dir DIR] [--size WxH] [--flight-frames N] [--views A,B] [--smoke], or capture stills --poses FILE [the same options but --flight-frames] (got {other:?})")),
+    };
     let mut smoke = false;
-    let mut out_dir = "target/review/m5-flights".to_string();
     let mut tail: Vec<String> = Vec::new();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--smoke" => smoke = true,
             "--allow-memory-bake" => tail.push(a.clone()),
             "--out-dir" => out_dir = it.next().ok_or("--out-dir needs a directory")?.clone(),
-            "--store" | "--global-res" | "--size" | "--flight-frames" | "--views" | "--look" | "--world" | "--prefill-levels" => {
+            "--store" | "--global-res" | "--size" | "--flight-frames" | "--poses" | "--views" | "--look" | "--world" | "--prefill-levels" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());
             }
             other => {
                 return Err(format!(
-                    "unknown capture option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out-dir DIR, --size WxH, --flight-frames N, --views A,B, --look F, --world F, --smoke)"
+                    "unknown capture option '{other}' (known: --store DIR, --allow-memory-bake, --global-res, --out-dir DIR, --size WxH, --flight-frames N, --poses FILE, --views A,B, --look F, --world F, --smoke)"
                 ))
             }
         }
     }
     let mut v: Vec<String> = if smoke {
-        ["run", "-q", "-p", "planet", "--", "test-render", "--scene", "capture-flights", "--adapter", "software"]
+        ["run", "-q", "-p", "planet", "--", "test-render", "--scene", scene, "--adapter", "software"]
     } else {
-        ["run", "--release", "-p", "planet", "--", "test-render", "--scene", "capture-flights", "--adapter", "hardware"]
+        ["run", "--release", "-p", "planet", "--", "test-render", "--scene", scene, "--adapter", "hardware"]
     }
     .iter()
     .map(|s| s.to_string())
@@ -694,6 +694,10 @@ pub fn capture_cmd(root: &Path, args: &[String]) -> Res {
     let (cargo_args, out_dir) = capture_args(args)?;
     let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
     run(root, "cargo", &refs, &[])?;
+    // Stills are PNGs as they are: no video.
+    if cargo_args.iter().any(|a| a == "capture-stills") {
+        return Ok(());
+    }
     let dir = if Path::new(&out_dir).is_absolute() { Path::new(&out_dir).to_path_buf() } else { root.join(&out_dir) };
     let index = std::fs::read_to_string(dir.join("capture.txt")).map_err(|e| format!("{}: {e}", dir.join("capture.txt").display()))?;
     let have_ffmpeg = std::process::Command::new("ffmpeg").arg("-version").output().is_ok_and(|o| o.status.success());
@@ -1467,6 +1471,16 @@ mod tests {
         assert_eq!(over.last(), Some(&"--machine-ready"));
         let e = perf_cargo_args(&s(&["--force"])).unwrap_err();
         assert!(e.contains("--force") && e.contains("override"), "{e}");
+    }
+
+    // spec: TEST-048
+    #[test]
+    fn the_stills_capture_forwards_the_poses_and_writes_to_its_own_directory() {
+        let (a, dir) = capture_args(&s(&["stills", "--poses", "p.toml", "--store", "C:/bake", "--views", "300m-sunset"])).unwrap();
+        assert_eq!(dir, "target/review/m8-stills");
+        assert!(a.contains(&"capture-stills".to_string()) && a.contains(&"hardware".to_string()), "{a:?}");
+        assert_eq!(a[a.iter().position(|x| x == "--poses").unwrap() + 1], "p.toml");
+        assert!(!a.contains(&"--perf".to_string()), "a tool, not a measurement: {a:?}");
     }
 
     // spec: TEST-027
