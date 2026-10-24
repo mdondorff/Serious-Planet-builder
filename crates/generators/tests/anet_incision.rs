@@ -272,11 +272,9 @@ struct Ridge;
 
 impl BaseDetail for Ridge {
     fn base_height(&self, dir: Vec3) -> f64 {
-        let p = dir * R;
-        100.0
-            + 600.0
-                * libm::exp(-((p.x - 1000.0 * 0.0) / 1.0e9).powi(2))
-                * libm::exp(-(((lattice().cell_at(dir) % N) as f64 - 1003.0) / 0.4).powi(2))
+        // A ridge one coarse cell wide at column 1003: 600 m high.
+        let across = ((lattice().cell_at(dir) % N) as f64 - 1003.0) / 0.4;
+        100.0 + 600.0 * libm::exp(-(across * across))
     }
     fn coarse_input(&self, dir: Vec3) -> f64 {
         self.base_height(dir)
