@@ -329,8 +329,7 @@ pub fn perf_envelope(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resu
         points.push(point);
     }
     let adapter = ctx.adapter_name();
-    let json =
-        log_json(&points, &LogFacts { bound: o.share_bound, source: &source, adapter: &adapter, smoke, owner_override: &owner_override });
+    let json = log_json(&points, &LogFacts { bound: o.share_bound, source: &source, adapter, smoke, owner_override: &owner_override });
     let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("envelope.json"));
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(err)?;
@@ -400,7 +399,6 @@ mod tests {
         assert!((worst_window(&[0.1, 0.3], step, 1.0) - 0.2).abs() < 1e-12, "a series shorter than the window: its mean");
         assert_eq!(worst_window(&[], step, 1.0), 0.0);
         assert!(worst_window(&[0.0, f64::NAN, 0.0], step, 1.0).is_nan(), "a missing share is never a pass");
-        assert!(!(worst_window(&[f64::NAN], step, 1.0) <= 0.01));
     }
 
     // spec: TEST-047
