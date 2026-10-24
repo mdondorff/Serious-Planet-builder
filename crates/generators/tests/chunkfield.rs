@@ -30,11 +30,6 @@ fn apron_values(lat: &ChunkLattice, stage: &dyn ChunkStage, tile: TileId, halo: 
     reg.cells.iter().enumerate().filter(|(k, _)| reg.depth[*k] <= 1).map(|(k, c)| ((c.face, c.i, c.j), change[k])).collect()
 }
 
-fn core_values(lat: &ChunkLattice, stage: &dyn ChunkStage, tile: TileId, halo: u16) -> Vec<f32> {
-    let reg = region(lat, tile, halo);
-    stage.compute(lat, &reg)[..reg.core].to_vec()
-}
-
 // spec: GEN-038
 #[test]
 fn a_chunks_own_cells_are_the_cells_of_its_tile() {
