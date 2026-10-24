@@ -1527,7 +1527,6 @@ mod tests {
         assert!(e.contains("--force") && e.contains("known"), "{e}");
     }
 
-    // spec: GEN-014, BUILD-002
     // spec: GEN-042
     #[test]
     fn perf_coupled_runs_the_scene_under_the_gate_and_takes_the_grid_size() {
@@ -1537,6 +1536,7 @@ mod tests {
         assert!(perf_coupled_args(&s(&["--force"])).unwrap_err().contains("unknown perf coupled option"));
     }
 
+    // spec: GEN-014, BUILD-002
     #[test]
     fn perf_global_bake_runs_the_scene_under_the_gate_and_takes_the_grid_size() {
         let a = perf_global_bake_args(&s(&["--global-res", "1024", "--machine-ready"])).unwrap();
