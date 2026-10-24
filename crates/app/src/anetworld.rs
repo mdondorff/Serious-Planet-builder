@@ -8,7 +8,7 @@ use planet_core::cube::TangentWarp;
 use planet_core::hash::mix64;
 use planet_core::Vec3;
 use planet_generators::anet::{ANet, ANetParams, BaseDetail};
-use planet_generators::chunkfield::{ChunkStage, PYRAMID_TOP_LEVEL};
+use planet_generators::chunkfield::ChunkStage;
 use planet_generators::coupled::CoupledMaps;
 use planet_generators::global::read_direction;
 use planet_streaming::chunks::{ChunkConfig, ChunkDisk};
@@ -20,6 +20,9 @@ use crate::worldfield::WorldTerrain;
 
 /// The default cell size of an A-net chunk in metres (planner decision 2026-10-24; GEN-052 records 4 and 10 m beside it).
 pub const ANET_CELL_M: f64 = 8.0;
+/// The top level of the A-net chunk pyramid, the coarsest tile level that reads chunk detail: measured on a river chunk at 8 m cells, the step
+/// of a tile against its parent has p99 0.19 m at level 15 (criterion 3: at most 0.25 m) and 0.76 m at level 14 (design.md section 16).
+pub const ANET_TOP_LEVEL: u8 = 15;
 /// The default halo of an A-net chunk in metres (GEN-049).
 pub const ANET_HALO_M: f64 = 3000.0;
 
@@ -140,12 +143,12 @@ impl WorldTerrain {
                 radius_m: self.radius_m(),
                 definition: stage.definition_hash(),
                 cells_per_chunk: per,
-                top_level: PYRAMID_TOP_LEVEL,
+                top_level: ANET_TOP_LEVEL,
                 base: self.bake_key(),
             };
             Arc::new(PackChunkDisk::new(dir.to_path_buf(), spec)) as Arc<dyn ChunkDisk>
         });
-        self.enable_chunks(stage, per, spawner, clock, disk, cfg)
+        self.enable_chunks_at(stage, per, ANET_TOP_LEVEL, spawner, clock, disk, cfg)
     }
 }
 

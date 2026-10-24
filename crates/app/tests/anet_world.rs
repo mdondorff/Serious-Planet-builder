@@ -62,7 +62,7 @@ fn a_stored_channel_gives_the_world_a_chunk_stage_and_a_landed_chunk_is_read_fro
     let world = open(&store);
     assert_eq!(world.enable_anet_from_store(CELL_M, spawner.clone(), Arc::new(FakeClock::default()), cfg), Ok(true));
     let manager = world.chunk_manager().expect("the world has chunks");
-    let tile = TileId::new(Face(0), 14, 8000, 8000).unwrap();
+    let tile = TileId::new(Face(0), 15, 16000, 16000).unwrap();
     let key = manager.reads(tile)[0];
     let camera = planet_core::PlanetFixed(tile.center_direction(&planet_core::cube::TangentWarp) * R);
     world.chunk_frame(&[tile], camera, &[]);
@@ -133,11 +133,12 @@ fn a_base_that_lost_its_world_says_so_and_a_lattice_that_does_not_divide_is_refu
 // spec: STRM-046
 #[test]
 fn the_chunk_edge_of_every_cell_size_carries_the_pyramid_the_top_level_reads() {
-    use planet_generators::chunkfield::{pyramid_levels, ChunkLattice, PYRAMID_TOP_LEVEL};
+    use planet::anetworld::ANET_TOP_LEVEL;
+    use planet_generators::chunkfield::{pyramid_levels, ChunkLattice};
     for cell_m in [4.0, 8.0, 10.0, 60.0] {
         let per = planet::anetworld::cells_per_chunk_for(R, cell_m);
         let lat = ChunkLattice::new(per).unwrap();
-        let k = pyramid_levels(&lat, R, PYRAMID_TOP_LEVEL);
+        let k = pyramid_levels(&lat, R, ANET_TOP_LEVEL);
         assert_eq!(per as usize % (1 << k), 0, "{per} cells per chunk carry {k} pyramid levels at {cell_m} m");
         assert!((lat.cell_m(R) / cell_m - 1.0).abs() < 0.03, "the cell stays near {cell_m} m: {}", lat.cell_m(R));
     }

@@ -708,10 +708,24 @@ impl WorldTerrain {
         disk: Option<Arc<dyn planet_streaming::chunks::ChunkDisk>>,
         cfg: planet_streaming::chunks::ChunkConfig,
     ) -> Result<(), String> {
+        self.enable_chunks_at(stage, cells_per_chunk, planet_generators::chunkfield::PYRAMID_TOP_LEVEL, spawner, clock, disk, cfg)
+    }
+
+    /// [`WorldTerrain::enable_chunks`] with the pyramid's top level `top` (the coarsest tile level that reads chunk detail).
+    #[allow(clippy::too_many_arguments)]
+    pub fn enable_chunks_at(
+        &self,
+        stage: Arc<dyn planet_generators::chunkfield::ChunkStage>,
+        cells_per_chunk: u32,
+        top: u8,
+        spawner: Arc<dyn planet_streaming::Spawner>,
+        clock: Arc<dyn planet_streaming::Clock>,
+        disk: Option<Arc<dyn planet_streaming::chunks::ChunkDisk>>,
+        cfg: planet_streaming::chunks::ChunkConfig,
+    ) -> Result<(), String> {
         let lat = planet_generators::chunkfield::ChunkLattice::new(cells_per_chunk).ok_or_else(|| {
             format!("{cells_per_chunk} cells per chunk edge: the lattice needs at least one cell and fits 2^27 per face edge")
         })?;
-        let top = planet_generators::chunkfield::PYRAMID_TOP_LEVEL;
         let manager =
             Arc::new(planet_streaming::chunks::ChunkManager::new(lat, self.radius_m, top, stage.clone(), spawner, clock, disk, cfg));
         *self.chunks.write().expect("chunk stage") = Some(Arc::new(ChunkWorld { lat, top, stage, manager }));
