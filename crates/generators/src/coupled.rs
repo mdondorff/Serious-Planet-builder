@@ -210,7 +210,7 @@ impl MonotoneQueue {
     }
 
     fn push(&mut self, key: u64) {
-        assert!(key >= self.last, "the queue takes no key below the last one popped");
+        assert!(key >= self.last, "the queue takes no key below the last one popped (a non-finite height?)");
         let b = self.bucket(key);
         self.buckets[b].push(key);
         self.len += 1;
