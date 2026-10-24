@@ -145,7 +145,7 @@ fn eight_neighbours_landing_one_after_another_cost_one_rebake_not_eight() {
 
 // spec: STRM-048
 #[test]
-fn a_map_leaves_with_its_chunk_and_a_changed_march_bakes_again() {
+fn a_map_leaves_with_its_chunk() {
     let (clock, cs, hs, m, baker, jobs) = rig(0, 1);
     let k = key(0, 0);
     land(&m, &cs, &[k]);
@@ -161,18 +161,53 @@ fn a_map_leaves_with_its_chunk_and_a_changed_march_bakes_again() {
     assert_eq!(up.evicted, vec![k]);
     assert!(jobs.horizon(k).is_none());
     assert_eq!(jobs.stats().evicted, 1);
-    // The march of another version: the state word differs, so a map made for the first is not taken for it.
-    let other = HorizonJobs::new(
-        m.clone(),
-        Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec: 2 }),
-        Arc::new(ManualSpawner::default()),
-        clock,
-        None,
-        HorizonConfig { workers: 1, settle_ms: 0 },
-    );
-    land(&m, &cs, &[k]);
-    assert_eq!(other.update(&[(k, 1.0)]).started, 1);
     assert_eq!(baker.bakes.load(Ordering::SeqCst), 1, "the first jobs baked once");
+}
+
+// spec: STRM-048
+#[test]
+fn a_map_made_for_another_march_is_not_taken_from_the_disk_and_a_failing_entry_is_a_logged_miss() {
+    let disk = Arc::new(MemDisk::default());
+    let run = |spec: u64, disk: Arc<dyn HorizonDisk>, k: ChunkKey| {
+        let clock = Arc::new(FakeClock::default());
+        let (cs, hs) = (Arc::new(ManualSpawner::default()), Arc::new(ManualSpawner::default()));
+        let m = chunks(clock.clone(), cs.clone());
+        let baker = Arc::new(FakeBaker { bakes: AtomicU64::new(0), spec });
+        let jobs = HorizonJobs::new(m.clone(), baker.clone(), hs.clone(), clock, Some(disk), HorizonConfig::default());
+        land(&m, &cs, &[k]);
+        jobs.update(&[(k, 1.0)]);
+        hs.run(1);
+        jobs.update(&[(k, 1.0)]);
+        (baker.bakes.load(Ordering::SeqCst), jobs)
+    };
+    let k = key(2, 2);
+    let (bakes, first) = run(1, disk.clone(), k);
+    assert_eq!((bakes, first.stats().disk_hits), (1, 0));
+    // The same chunk and neighbourhood under the march of another version: a different state word, so a miss and a bake of its own.
+    let (bakes, other) = run(2, disk.clone(), k);
+    assert_eq!((bakes, other.stats().disk_hits), (1, 0), "the map of the first march is not taken for the second");
+    assert_eq!(disk.maps.lock().unwrap().len(), 2, "each march has its own entry");
+    // A disk whose reads fail: the map is baked, and the log names the chunk.
+    struct Failing;
+    impl HorizonDisk for Failing {
+        fn get(&self, _: TileId, _: u64) -> Result<Option<Vec<u8>>, String> {
+            Err("the pack is damaged".into())
+        }
+        fn put(&self, _: TileId, _: u64, _: Vec<u8>) -> Result<(), String> {
+            Err("read only".into())
+        }
+    }
+    let (bakes, broken) = run(1, Arc::new(Failing), k);
+    assert_eq!(bakes, 1, "a failing entry is a miss: the map is baked");
+    assert!(broken.horizon(k).is_some());
+    let log = broken.take_log().join("\n");
+    assert!(
+        log.contains("disk entry refused")
+            && log.contains("the pack is damaged")
+            && log.contains("not stored")
+            && log.contains(&format!("{k:?}")),
+        "{log}"
+    );
 }
 
 #[derive(Default)]
