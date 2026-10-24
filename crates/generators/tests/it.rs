@@ -18,6 +18,8 @@ mod chunk;
 mod climate;
 #[path = "compact.rs"]
 mod compact;
+#[path = "coupled_lens.rs"]
+mod coupled_lens;
 #[path = "erosion.rs"]
 mod erosion;
 #[path = "generator_contract.rs"]

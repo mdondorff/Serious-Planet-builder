@@ -7,11 +7,13 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::coupledworld::{load_or_run, Standing, COUPLED_STEPS};
 use planet_cache::global_store::{GlobalWorld, StoreSource};
 use planet_cache::meshpack::TileSpec;
 use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId};
-use planet_generators::chain::{field_chain, NoBake, OwnedBake, OwnedOcean};
+use planet_generators::chain::{field_chain, CoupledLensField, NoBake, OwnedBake, OwnedOcean};
+use planet_generators::coupled::CoupledLens;
 use planet_generators::global::{GlobalCoarseGenerator, GlobalSample, LatticeSource, ReadError};
 use planet_generators::height::{HeightField, IMPLEMENTATION_ID as REFERENCE_ID};
 use planet_generators::height_fields::{resolve, HeightFieldKind};
@@ -174,6 +176,12 @@ pub struct WorldTerrain {
     bound_water: bool,
     /// The water of the tiles the jobs loaded (ADR 0056), filled when `bound_water` (the lit path) is on.
     water_book: Arc<planet_frame::water::WaterBook>,
+    /// The global coupled run (M8-1 part c): asked for from a thread, read when drawn through the lens.
+    coupled: crate::coupledworld::CoupledSlot,
+    /// The lens the fields are built with: 0 off, 1 height, 2 drainage area (the climate views show the run, GEN-043).
+    coupled_lens: std::sync::atomic::AtomicU8,
+    /// The directory of the stored bake the coupled channel lives beside; none for an in-memory bake.
+    store_dir: Option<std::path::PathBuf>,
 }
 
 /// The ocean channel of a stored bake as the water field's lattice.
@@ -265,6 +273,9 @@ impl WorldTerrain {
             summary: summary_owned,
             bound_water: false,
             water_book: Default::default(),
+            coupled: Default::default(),
+            coupled_lens: Default::default(),
+            store_dir: None,
         })
     }
 
@@ -341,6 +352,9 @@ impl WorldTerrain {
             summary,
             bound_water: false,
             water_book: Default::default(),
+            coupled: Default::default(),
+            coupled_lens: Default::default(),
+            store_dir: Some(dir.to_path_buf()),
         })
     }
 
@@ -619,11 +633,60 @@ impl WorldTerrain {
         Ok(Some(f(&field)))
     }
 
+    /// The lens the fields are built with, if one is on.
+    pub fn coupled_lens(&self) -> Option<CoupledLens> {
+        match self.coupled_lens.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => Some(CoupledLens::Height),
+            2 => Some(CoupledLens::Area),
+            _ => None,
+        }
+    }
+
+    /// Switch the lens (GEN-043). Fields built after the call carry it; the caller refreshes the resident tiles (`ManagedLoop::edit`). A lens
+    /// asks for the coupled run, which loads or runs on a thread: until it is [`Standing::Ready`] the fields stay plain.
+    pub fn set_coupled_lens(self: &Arc<Self>, lens: Option<CoupledLens>) {
+        self.coupled_lens.store(
+            match lens {
+                None => 0,
+                Some(CoupledLens::Height) => 1,
+                Some(CoupledLens::Area) => 2,
+            },
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        if lens.is_some() {
+            self.request_coupled();
+        }
+    }
+
+    /// Where the coupled run stands.
+    pub fn coupled_standing(&self) -> Standing {
+        self.coupled.standing()
+    }
+
+    /// Start loading or running the coupled run (STRM-044) unless that was done: from the stored channel beside the bake when it holds this
+    /// run, else made (and stored there). The lattice is the bake's. No frame waits for it (CON-22).
+    pub fn request_coupled(self: &Arc<Self>) {
+        let world = Arc::clone(self);
+        self.coupled.request(move || {
+            if !world.has_bake {
+                return Err("this height field reads no bake: there is no coupled run to show".to_string());
+            }
+            load_or_run(&world.definition(), world.store_dir.as_deref(), world.src.as_ref(), world.res, COUPLED_STEPS, world.res)
+        });
+    }
+
     /// Build the field (a fresh context per field: its key covers what it read).
     pub fn field(&self) -> Result<Box<dyn HeightField + '_>, String> {
         let started = std::time::Instant::now();
         let def = self.definition();
         let built = field_chain(self.kind, &def, self.src.as_ref(), self.bake_key, self.bound_water);
+        // The lens over the whole chain (GEN-043); while the run is not ready the field is the plain one.
+        let built = match (self.coupled_lens(), self.coupled.standing()) {
+            (Some(lens), Standing::Ready(maps, _)) => {
+                built.map(|f| Box::new(CoupledLensField::new(f, maps, lens)) as Box<dyn HeightField + '_>)
+            }
+            _ => built,
+        };
         self.field_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let spent = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
         self.field_ns.fetch_add(spent, std::sync::atomic::Ordering::Relaxed);

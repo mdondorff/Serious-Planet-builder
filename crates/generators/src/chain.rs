@@ -4,9 +4,13 @@
 
 use std::sync::Arc;
 
-use planet_core::Face;
+use planet_core::cube::FaceMapping;
+use planet_core::hash::mix64;
+use planet_core::{Face, TileId, Vec3};
 use planet_world_def::{BodyId, GenContext, WorldDefinition};
 
+use crate::climate::ClimateTexture;
+use crate::coupled::{lens_climate, lens_version_word, CoupledLens, CoupledMaps};
 use crate::global::{GlobalGrid, GlobalSample, GridSource, LatticeSource, ReadError};
 use crate::height::HeightField;
 use crate::height_fields::{build_field, HeightFieldKind};
@@ -98,4 +102,105 @@ pub fn with_stamps<'a>(base: Box<dyn HeightField + 'a>, def: &Arc<WorldDefinitio
         field = Arc::new(stage(field, layer, index_of(layer))?);
     }
     Ok(Box::new(stage(field, top, index_of(top))?))
+}
+
+/// `base` seen through the coupled run (M8-1 part c, GEN-043): every height, key and reading is the base's, but the climate texture of a tile
+/// shows the run's heights or drainage area (the temperature and precipitation views), and the mesh key carries the run and the lens, so
+/// switching the lens re-keys the tiles and the streamer refreshes them (STRM-026). The debug view of the global network.
+pub struct CoupledLensField<'a> {
+    inner: Box<dyn HeightField + 'a>,
+    maps: Arc<CoupledMaps>,
+    lens: CoupledLens,
+}
+
+impl<'a> CoupledLensField<'a> {
+    pub fn new(inner: Box<dyn HeightField + 'a>, maps: Arc<CoupledMaps>, lens: CoupledLens) -> CoupledLensField<'a> {
+        CoupledLensField { inner, maps, lens }
+    }
+
+    fn f(&self) -> &dyn HeightField {
+        self.inner.as_ref()
+    }
+}
+
+impl HeightField for CoupledLensField<'_> {
+    fn height(&self, dir: Vec3) -> f64 {
+        self.f().height(dir)
+    }
+    fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
+        self.f().height_at_level(dir, level)
+    }
+    fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
+        self.f().heights_until(dirs, stop)
+    }
+    fn heights_threaded_until(&self, dirs: &[Vec3], stop: &(dyn Fn() -> bool + Sync), threads: usize) -> Vec<f64> {
+        self.f().heights_threaded_until(dirs, stop, threads)
+    }
+    fn seed(&self) -> u64 {
+        self.f().seed()
+    }
+    fn implementation_id(&self) -> &'static str {
+        self.f().implementation_id()
+    }
+    fn version(&self) -> u32 {
+        self.f().version()
+    }
+    fn max_abs_height_m(&self) -> f64 {
+        self.f().max_abs_height_m()
+    }
+    fn inputs_hash(&self) -> u64 {
+        self.f().inputs_hash()
+    }
+    fn read_records(&self) -> Vec<planet_world_def::ReadRecord> {
+        self.f().read_records()
+    }
+    fn read_records_for(&self, tile: TileId, map: &dyn FaceMapping) -> Vec<planet_world_def::ReadRecord> {
+        self.f().read_records_for(tile, map)
+    }
+    fn reads_cells(&self) -> bool {
+        self.f().reads_cells()
+    }
+    fn inputs_hash_for(&self, tile: TileId, map: &dyn FaceMapping) -> u64 {
+        self.f().inputs_hash_for(tile, map)
+    }
+    fn body(&self) -> BodyId {
+        self.f().body()
+    }
+    fn source_key(&self) -> Option<[u8; 16]> {
+        self.f().source_key()
+    }
+    fn upstream(&self) -> Option<&dyn HeightField> {
+        self.f().upstream()
+    }
+    fn stage_params(&self) -> Option<(&str, u32)> {
+        self.f().stage_params()
+    }
+    fn item_revision(&self) -> u64 {
+        self.f().item_revision()
+    }
+    // The lens changes the climate of every tile, so it is never the identity on its source: the keying walk must stop here (GEN-043).
+    fn passes_through(&self, _tile: TileId, _map: &dyn FaceMapping) -> bool {
+        false
+    }
+    fn surface_id(&self) -> &'static str {
+        self.f().surface_id()
+    }
+    fn climate(&self, map: &dyn FaceMapping, id: TileId) -> ClimateTexture {
+        lens_climate(&self.maps, self.lens, map, id)
+    }
+    fn heights_and_climate(&self, map: &dyn FaceMapping, id: TileId, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> (Vec<f64>, ClimateTexture) {
+        (self.f().heights_until(dirs, stop), lens_climate(&self.maps, self.lens, map, id))
+    }
+    fn climate_version_word(&self) -> u64 {
+        mix64(self.f().climate_version_word() ^ lens_version_word(&self.maps, self.lens))
+    }
+    fn height_bounds(&self, centre: Vec3, angular_radius: f64) -> (f64, f64) {
+        self.f().height_bounds(centre, angular_radius)
+    }
+    fn bounds_monotone(&self) -> bool {
+        self.f().bounds_monotone()
+    }
+    fn water_cull_level(&self) -> Option<f64> {
+        self.f().water_cull_level()
+    }
 }

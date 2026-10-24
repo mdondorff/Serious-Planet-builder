@@ -7,6 +7,7 @@
 //! `--smoke` is the test mode: it opens the window, drives the keys through the same command path for a few dozen frames and
 //! closes it. Where there is no display it stops with an error that starts with [`NO_DISPLAY`], which a test reports as a skip.
 
+use crate::coupledworld::Standing;
 use crate::editwin::{EditKey, EditRuntime, Pointer, EDIT_KEYS_HELP, SMOKE_EDIT_FRAMES};
 use crate::pipelined::{RendererSink, Rig};
 use crate::worldfield::WorldTerrain;
@@ -81,6 +82,7 @@ pub fn key_command(code: KeyCode) -> Option<Command> {
         KeyCode::F6 => Command::CycleGroundDetail,
         KeyCode::F7 => Command::ToggleScaleRefs,
         KeyCode::KeyH => Command::ToggleEditingLight,
+        KeyCode::KeyK => Command::CycleCoupledLens,
         KeyCode::F9 => Command::SaveRepro,
         KeyCode::Escape => Command::Quit,
         _ => return None,
@@ -286,6 +288,10 @@ struct Running {
     /// The scale references in the world (VIEW-050) and whether they are dropped.
     scale_refs: Vec<planet_frame::scalerefs::RefBox>,
     scale_refs_on: bool,
+    /// The lens the world was asked for and the one the resident tiles were last refreshed with (VIEW-053).
+    coupled_asked: Option<planet_generators::coupled::CoupledLens>,
+    coupled_shown: Option<planet_generators::coupled::CoupledLens>,
+    coupled_standing: Standing,
     /// The item markers of the globe overview, the ones the overview shows this frame (window pixels) and the one under the cursor.
     markers: Vec<Marker>,
     screen_markers: Vec<ScreenMarker>,
@@ -480,6 +486,9 @@ impl App<'_> {
             water_cache: WaterTileCache::with_book(self.world.water_book()),
             scale_refs: Vec::new(),
             scale_refs_on: false,
+            coupled_asked: None,
+            coupled_shown: None,
+            coupled_standing: Standing::Idle,
             markers: cfg.markers.clone(),
             screen_markers: Vec::new(),
             hover: None,
@@ -564,6 +573,21 @@ impl App<'_> {
         // A changed definition goes to the generator before the frame plans: the definition first, then the tiles it changed (STRM-028); the
         // field the window picks and reads the ground from is then built again from the new definition.
         let mut republished = false;
+        // The coupled lens (VIEW-053): K hands it to the world, which loads or runs the global run on a thread; the resident tiles are refreshed
+        // (re-keyed, drawn from their old version until the new one is up, STRM-026) once the run is ready, or at once when the lens goes off.
+        if let Some(st) = self.state.as_mut() {
+            if st.viewer.coupled_lens != st.coupled_asked {
+                st.coupled_asked = st.viewer.coupled_lens;
+                self.world.set_coupled_lens(st.coupled_asked);
+            }
+            let standing = self.world.coupled_standing();
+            st.coupled_standing = standing.clone();
+            if st.coupled_shown != st.coupled_asked && (st.coupled_asked.is_none() || matches!(standing, Standing::Ready(..))) {
+                st.coupled_shown = st.coupled_asked;
+                let resident: Vec<_> = st.rig.managed.resident().keys().copied().collect();
+                st.rig.managed.edit(&resident);
+            }
+        }
         if let Some(st) = self.state.as_mut() {
             if let Some(e) = st.edit.as_mut() {
                 if let Some(def) = e.take_changed_definition() {
@@ -792,6 +816,12 @@ impl App<'_> {
                     .with_water_level(cfg.water_level_m)
                     .with_overlay(st.viewer.overlay)
                     .with_ground_detail(st.viewer.ground_detail.strength());
+                // The coupled lens shows through the climate views (VIEW-053).
+                lit.view = match st.viewer.coupled_lens {
+                    Some(planet_generators::coupled::CoupledLens::Height) => planet_frame::look::shading::ShadeView::Temperature,
+                    Some(planet_generators::coupled::CoupledLens::Area) => planet_frame::look::shading::ShadeView::Precipitation,
+                    None => lit.view,
+                };
                 // The editing light (VIEW-042): one sun for the terrain shading, the atmosphere and the sky, fixed in camera space.
                 if st.viewer.editing_light {
                     lit.sun_dir = planet_frame::viewer::editing_sun_dir(&draw.plan.camera);
@@ -1123,6 +1153,9 @@ fn title_text(st: &Running, now_ms: u64) -> String {
     input += &format!(" | {}", st.world_label);
     if st.viewer.scale_refs {
         input += " | scale references";
+    }
+    if let Some(lens) = st.viewer.coupled_lens {
+        input += &format!(" | {}", crate::coupledworld::lens_status(lens, &st.coupled_standing));
     }
     // The hover hint of the overview: only where a click acts (VIEW-045).
     if let Some(hint) = st.click_target.and_then(planet_frame::globe::ClickTarget::hint) {
@@ -1736,6 +1769,7 @@ mod tests {
             (KeyCode::KeyL, "L"),
             (KeyCode::KeyG, "G"),
             (KeyCode::KeyH, "H"),
+            (KeyCode::KeyK, "K"),
             (KeyCode::KeyW, "WASD"),
             (KeyCode::KeyA, "WASD"),
             (KeyCode::KeyS, "WASD"),
@@ -1755,7 +1789,6 @@ mod tests {
             KeyCode::KeyF,
             KeyCode::KeyI,
             KeyCode::KeyJ,
-            KeyCode::KeyK,
             KeyCode::KeyM,
             KeyCode::KeyN,
             KeyCode::KeyO,
