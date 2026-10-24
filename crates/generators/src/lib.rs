@@ -6,6 +6,7 @@
 
 pub mod chain;
 pub mod chunk;
+pub mod chunkfield;
 pub mod climate;
 pub mod compact;
 pub mod coupled;

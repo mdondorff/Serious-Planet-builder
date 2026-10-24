@@ -12,7 +12,7 @@ Source: ADR 0077 points 2 and 4, ADR 0022, STRM-011, CON-08, CON-14
 - **THEN** exactly the keys of that field's chunks change, and the tile and the chunk never share a key
 
 ### Requirement: GEN-035 Chunk grid and apply level
-Chunks SHALL lie on a fixed grid of the tiles of level 11 (whole coarse cells, about 5 km), and a chunk field SHALL state its raster cell size; its apply level SHALL be the coarsest tile level whose vertex spacing is at most twice that cell size (level 15 for 8 m cells, level 16 for 4 m), computed from the raster and never set by hand. Tiles above the apply level SHALL be identity on the base field and key as the base (STRM-029).
+Chunks SHALL lie on a fixed grid of the tiles of level 11 (whole coarse cells, about 5 km), and a chunk field SHALL state its raster cell size; its apply level SHALL be the coarsest tile level whose vertex spacing is at most twice that cell size (level 15 for 8 m cells, level 16 for 4 m), computed from the raster and never set by hand. The chunk pyramid SHALL reach from the apply level up to a top level, by default the chunk grid level (11); a tile above the top level SHALL be identity on the base field and key as the base (STRM-029), the global run carrying the large scale. A tile between the top level and the apply level reads a box-filtered pyramid level (GEN-037).
 
 Verify: A
 Status: planned
@@ -20,7 +20,7 @@ Source: ADR 0077 point 5, SPIKE-34 (conditions 1 and 3), STRM-029
 
 #### Scenario: Apply level
 - **WHEN** a chunk field has 8 m cells, then 4 m cells
-- **THEN** its apply level is 15, then 16, and a tile of level 14 returns the base height bit for bit at every vertex with every chunk ready
+- **THEN** its apply level is 15, then 16, and a tile of level 10 returns the base height bit for bit at every vertex with every chunk ready, while a tile of level 11 to 14 reads the pyramid
 
 ### Requirement: GEN-036 Level-aware height
 The height capabilities of a field SHALL include `height_at_level(dir, level)`; for a field without chunk detail it SHALL equal `height(dir)` at every level, and for a chunk field it SHALL be the base plus the chunk change of the pyramid level whose spacing matches `level` at or above the apply level, and the base below it. `height` SHALL remain position-only and SHALL equal `height_at_level` at the field's finest level. Tile generation SHALL read `height_at_level` with its own level.

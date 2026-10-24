@@ -11,10 +11,10 @@ Inputs: ADR 0077, SPIKE-34 (`spikes/block-stage/results/results.md`; "block" the
 `Scope::Chunk(ChunkId)` with `words() = [2, id]`. `ChunkId` is face, level 11 and (i, j) of the tile grid, so a chunk is the area of a level-11 tile (about 5 km). The grid is part of the field's definition: the stage key covers grid level, halo in metres (as bits) and step cap (ADR 0077 points 2 and 4); a change is a new field version. `scope_fits` allows `Regional` with `Chunk`; `Regional` with `Tile` stays for tile-scoped fields (ADR 0022's halo fraction).
 
 ### 3. Apply level
-Per chunk field: the apply level is the coarsest level whose vertex spacing is at most twice the chunk's cell size, computed from the raster (8 m cells give level 15, spacing 9.6 m; 4 m cells give level 16). Tiles above the apply level are identity on the base and key as the base (STRM-029); tiles at or below read the chunk. It is not a tunable: it follows from the cell size, so changing a cell size cannot leave a pop.
+Per chunk field: the apply level is the coarsest level whose vertex spacing is at most twice the chunk's cell size, computed from the raster (8 m cells give level 15, spacing 9.6 m; 4 m cells give level 16). The apply level is where the raster itself is read unfiltered. The pyramid reaches from there up to a top level (decision of opus-planner, 2026-10-24, option a: default the chunk grid level 11, one chunk per tile at most); tiles above the top level are identity on the base and key as the base (STRM-029), the global run carrying the large scale. The apply level is not a tunable: it follows from the cell size, so changing a cell size cannot leave a pop. The top level is a parameter of the chunk field (`ChunkField::with_top_level`).
 
 ### 4. Pyramid and level-aware height
-A chunk's result is stored as a change against the base on the chunk's raster, plus a box-filtered pyramid down to the apply level (each level box-filtered from the one below, never from a coarser run: ADR 0077 consequences). `height_at_level(dir, l)` for `l >= apply_level` reads the pyramid level whose spacing matches level l and adds it to the base; for `l < apply_level` it is the base. Target (SPIKE-34 section 3): step against the parent at the parent's vertices p99 at most 0.25 m (criterion 3). A process with sharper detail than the smooth stand-in may exceed it; the test measures with the stand-in and M8-3 re-measures with A-net.
+A chunk's result is stored as a change against the base on the chunk's raster, plus a box-filtered pyramid from the raster up to the top level (each level box-filtered from the one below, never from a coarser run: ADR 0077 consequences). `height_at_level(dir, l)` for `l >= top` reads the pyramid at the continuous level log2(vertex spacing of l over the cell size), a blend of the two pyramid levels around it, Catmull-Rom across the cells, and adds it to the base; for `l < top` it is the base. A linear read of a coarse level errs by up to about 1 m on the stand-in; the spline removes it. Target (SPIKE-34 section 3): step against the parent at the parent's vertices p99 at most 0.25 m (criterion 3). A process with sharper detail than the smooth stand-in may exceed it; the test measures with the stand-in and M8-3 re-measures with A-net.
 
 ### 5. Plan-side requests and bounds
 The plan builder returns a set `B` of chunk ids: those under its nodes at or above the apply level, in plan order. Heights sampled during planning never request chunks (SPIKE-34 section 1: naive sampling asked 435 to 739 chunks for the 2 to 3 needed). Plan bounds for a chunk field widen by the field's stated bound (`chunk_bound_m`; stand-in: 2 x amplitude) whether or not a chunk is ready, so ready or not gives the same plan. A tight bound from a ready chunk's grid minimum and maximum is the last step (M8-2e) and only if it keeps the plan a pure function of the position and the world version; otherwise it is cut. The origin heights cached for tiles under a landed chunk are invalidated (`invalidate_tiles`).
@@ -39,3 +39,28 @@ A layer setting `chunk_stage` with two values, default `OnTop`: the chain is `ba
 - Face edges and poles: chunks across a face edge use the extended cube plane for the halo; a test at an edge and at a pole is part of GEN-038.
 - Memory with more channels (drainage, sediment) multiplies bytes per chunk by the channel count; the budget is revisited in M8-3.
 - The tight-bound path (section 5) is the one piece SPIKE-34 did not measure; if it complicates plan determinism it is cut and the wide bound stays.
+
+### 11. Measured with the stand-in (step 3b)
+Step between a tile level and its parent at the parent's vertices, stand-in of 30 m amplitude, 8 m cells, 8 steps (p99, `tests/chunkfield.rs`; SPIKE-34 section 3 measured 0.13 m at 15 against 14):
+
+| Levels | p99 step |
+|---|---|
+| 15 against 14 | 0.18 m (criterion 3 holds) |
+| 14 against 13 | 0.72 m |
+| 13 against 12 | 2.0 m |
+| 12 against 11 | 3.3 m |
+| 11 against 10 (the top against the base) | 21.8 m |
+
+The steps grow upward because the stand-in's 200 m and 800 m relief is wider than the coarse levels' filters and the top level enters from the base in one step. A real process should carry little at those scales (the global run does), so M8-3 re-measures with A-net; until then a top level above 14 is not shown to meet criterion 3 on the stand-in.
+
+Chunk demand when the pyramid reaches up to level `top` (estimate; the plan's request set B is step 3c): with `tau_px` 6, 1080p and 60 degrees, a node of level L is a leaf from about `spacing(L) / (6 x 1.07e-3)` to twice that; tiles at or below `top` lie within twice the leaf distance of `top`:
+
+| Top level | Radius | Chunks (5 km tiles) |
+|---|---|---|
+| 11 | 48 km | about 285 |
+| 12 | 24 km | about 70 |
+| 13 | 12 km | about 18 |
+| 14 | 6 km | about 5 |
+| 15 | 3 km | 1 to 2 |
+
+At the stand-in's 0.25 s per km2, 285 chunks are about 1800 s of thread time, so criterion 3 (a chunk within 10 s at a 300 m pan) and criterion 7 (speed envelope) decide the top level; the default of 11 is the decision's, a lower one is a parameter.

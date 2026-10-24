@@ -14,6 +14,8 @@ mod cell_keys;
 mod chain;
 #[path = "chunk.rs"]
 mod chunk;
+#[path = "chunkfield.rs"]
+mod chunkfield;
 #[path = "climate.rs"]
 mod climate;
 #[path = "compact.rs"]
