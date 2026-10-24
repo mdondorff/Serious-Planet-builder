@@ -418,6 +418,10 @@ impl<F: HeightField> HeightField for ChunkField<F> {
     fn item_revision(&self) -> u64 {
         self.base.item_revision()
     }
+    /// A tile is the base's only where the chunk detail cannot reach it: above the pyramid's top, or while no chunk is ready.
+    fn passes_through(&self, tile: TileId, map: &dyn FaceMapping) -> bool {
+        (tile.level() < self.top || self.ready.is_empty()) && self.base.passes_through(tile, map)
+    }
     fn surface_id(&self) -> &'static str {
         self.base.surface_id()
     }
