@@ -1,0 +1,16 @@
+## Why
+M8 exit criterion 3 (`docs/briefings/m8-plan.md`): "the switch fades in, with no step over 0.25 m p99 between LOD levels". M8-2 (`m8-chunk-field`) built the chunk path with the fade as a CPU quantity: `ChunkFade` gives each tile a weight that rises from 0 to 1 over `chunk_fade_ms` after its chunk lands. Nothing draws with it yet: a tile's heights are baked as base plus change, so a landing replaces the tile and the whole change appears at once. The step per frame of a fade is the weight step times the change (`max |change| / (fps x fade seconds)`): the stand-in's 30 m needs 2 s for 0.25 m per frame at 60 fps, a change of 7 m fits the 500 ms default. M8-3 (`m8-anet-chunk`) measures A-net's amplitude and so decides how long the fade must be and how it is built, not whether (planner, 2026-10-24). This change is split from `m8-chunk-field` so that M8-2 closes without the render path.
+
+## What Changes (if accepted)
+- **A per-vertex change plane** beside the compact slots: the slot keeps its layout (GEN-025) and its goldens; a tile with chunk detail carries a second plane of the change per texel in a second pool binding (allocated only when chunks are on), so a world without chunks draws with the old bytes.
+- **A weight per node**: the plan's node record gets the tile's `ChunkFade` weight (an f32, CON-11); the shader draws `base + w x change` with the base reconstructed as the texel height minus the change.
+- **The shader and its mirrors**: WGSL, the CPU mirror in `generators::compact`, the reference renderer (REND-031); normals use the faded heights' normal blend or the final normals, decided by a look test.
+- **Carrying the change out of the field chain**: a `HeightField` method that returns the chunk change at a tile's directions through the wrappers, so a compact tile builder can store it.
+- **The fade length** from M8-3's measurement (`max |change| / (0.25 m x 60 fps)`), the default `chunk_fade_ms` set from it.
+- **Golden-review** classifies the candidates: with no chunk ready the drawn image should be unchanged (rounding or nothing); stop and report only if it escalates to the owner's /bless.
+
+## Impact
+- Specs: STRM-039's fade scenario moves here as REND-039 (the draw) and STRM-047 (the weight in the node record); STRM-039 keeps jobs, the stand-in and the share.
+- Code: `generators/compact.rs`, `render` (terrain shader, pools, reference renderer), `frame/terrain.rs` (node record), `frame/chunkshare.rs`.
+- Cost: about two days, golden-review churn; risk to the render path.
+- Out of scope: normals of the faded surface beyond the choice above; fading the pyramid levels between each other (the blend is geometric, not temporal).
