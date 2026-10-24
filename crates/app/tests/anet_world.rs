@@ -62,7 +62,7 @@ fn a_stored_channel_gives_the_world_a_chunk_stage_and_a_landed_chunk_is_read_fro
     let world = open(&store);
     assert_eq!(world.enable_anet_from_store(CELL_M, spawner.clone(), Arc::new(FakeClock::default()), cfg), Ok(true));
     let manager = world.chunk_manager().expect("the world has chunks");
-    let tile = TileId::new(Face(0), 14, 8000, 8000).unwrap();
+    let tile = TileId::new(Face(0), 15, 16000, 16000).unwrap();
     let key = manager.reads(tile)[0];
     let camera = planet_core::PlanetFixed(tile.center_direction(&planet_core::cube::TangentWarp) * R);
     world.chunk_frame(&[tile], camera, &[]);
@@ -120,12 +120,26 @@ fn a_base_that_lost_its_world_says_so_and_a_lattice_that_does_not_divide_is_refu
     assert_eq!(base.base_height(dir), 0.0);
     assert!(!base.healthy(), "a result made after the world went is not to be stored");
 
-    // 611 cells per chunk make 1,251,328 per face edge: a run of 4096 cells does not cut it evenly.
+    // 608 cells per chunk make 1,245,184 per face edge: a run of 96 cells does not cut it evenly.
     let world = Arc::new(WorldTerrain::open(planet::worldfield::legacy_world(7, R), RES).unwrap());
-    let lat = Lattice::new(4096, R);
+    let lat = Lattice::new(96, R);
     let n = lat.len();
     let maps = Arc::new(CoupledMaps::new(lat, vec![1.0; n], vec![1.0; n], 1));
     let e = world.enable_anet(maps, 8.0, Arc::new(ManualSpawner::default()), Arc::new(FakeClock::default()), ChunkConfig::default());
     assert!(e.unwrap_err().contains("whole number"), "refused with the reason");
     assert!(world.chunk_manager().is_none());
+}
+
+// spec: STRM-046
+#[test]
+fn the_chunk_edge_of_every_cell_size_carries_the_pyramid_the_top_level_reads() {
+    use planet::anetworld::ANET_TOP_LEVEL;
+    use planet_generators::chunkfield::{pyramid_levels, ChunkLattice};
+    for cell_m in [4.0, 8.0, 10.0, 60.0] {
+        let per = planet::anetworld::cells_per_chunk_for(R, cell_m);
+        let lat = ChunkLattice::new(per).unwrap();
+        let k = pyramid_levels(&lat, R, ANET_TOP_LEVEL);
+        assert_eq!(per as usize % (1 << k), 0, "{per} cells per chunk carry {k} pyramid levels at {cell_m} m");
+        assert!((lat.cell_m(R) / cell_m - 1.0).abs() < 0.03, "the cell stays near {cell_m} m: {}", lat.cell_m(R));
+    }
 }

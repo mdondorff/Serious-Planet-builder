@@ -181,6 +181,8 @@ pub struct Network {
     /// The drainage area of a corridor cell in m2: the coarse areas of its segment interpolated along it (NaN off the corridor). A river's area is a
     /// function of position, not of how much of its catchment the region holds.
     pub river_area_m2: Vec<f64>,
+    /// The base field's height at each cell in metres (read once for the network and the solve).
+    pub base_z: Vec<f64>,
 }
 
 /// "No next cell."
@@ -307,7 +309,7 @@ impl Network {
         let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
         let heights = base.base_heights(&dirs);
         let z0 = dirs.iter().zip(&heights).map(|(&d, &h)| (coarse_z_at(run, d) + (h - base.coarse_input(d))) as f32).collect();
-        Network { corridor, next, inflow_m2, z0, anchor_z, river_area_m2 }
+        Network { corridor, next, inflow_m2, z0, anchor_z, river_area_m2, base_z: heights }
     }
 }
 
@@ -380,7 +382,7 @@ pub struct Solution {
 /// incision starts from is the base field's: the change is what the incision does to it.
 pub fn solve(
     net: &Network,
-    base: &dyn BaseDetail,
+    _base: &dyn BaseDetail,
     lat: &ChunkLattice,
     region: &Region,
     radius_m: f64,
@@ -391,7 +393,7 @@ pub fn solve(
     let len = region.cells.len();
     let key = |x: usize| region.cells[x].key();
     let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
-    let z_base: Vec<f64> = base.base_heights(&dirs);
+    let z_base: Vec<f64> = net.base_z.clone();
     let mut z = z_base.clone();
     for (h, &anchor) in z.iter_mut().zip(&net.anchor_z) {
         if !anchor.is_nan() {
@@ -531,26 +533,42 @@ pub fn solve(
     // agree; the corridor's rivers carry the area from further up as inflow).
     let base_area: Vec<f64> = (0..len).map(|c| cell_area(region.cells[c]) + net.inflow_m2[c]).collect();
     let mut area = base_area.clone();
-    for _ in 0..p.area_window {
-        let before = area.clone();
-        let mut changed = false;
-        for c in 0..len {
+    // Round by round from the values of the round before; only a cell with a donor that changed in the round before can change, so each round
+    // looks at the receivers of the cells that changed (the same values as a sweep over every cell, in far less time once the short catchments
+    // have settled).
+    let mut changed: Vec<usize> = (0..len).filter(|&c| rec[c] != NONE).collect();
+    let mut queued = vec![usize::MAX; len];
+    for round in 0..p.area_window as usize {
+        let mut touched: Vec<usize> = Vec::new();
+        for &d in &changed {
+            let c = rec[d];
+            if c != NONE && queued[c as usize] != round {
+                queued[c as usize] = round;
+                touched.push(c as usize);
+            }
+        }
+        let mut next: Vec<(usize, f64)> = Vec::new();
+        for &c in &touched {
             if donors[c].is_empty() {
                 continue;
             }
             let mut a = base_area[c];
             for &d in &donors[c] {
                 if rec[d as usize] == c as u32 {
-                    a += before[d as usize];
+                    a += area[d as usize];
                 }
             }
             if a != area[c] {
-                area[c] = a;
-                changed = true;
+                next.push((c, a));
             }
         }
-        if !changed {
+        if next.is_empty() {
             break;
+        }
+        changed.clear();
+        for (c, a) in next {
+            area[c] = a;
+            changed.push(c);
         }
     }
     // The corridor carries its coarse area, a function of position.

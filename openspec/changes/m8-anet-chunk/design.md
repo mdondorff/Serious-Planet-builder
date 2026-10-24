@@ -66,3 +66,23 @@ Calibration of `K`, `dt` and `N` (how deep 30 steps of pure incision cut) is lef
 - **Exactness reaches the apron only.** A cell at depth `d` gets `steps - d + 1` hillslope passes (none past depth `steps`), so the values are exact for the core and one ring of apron, not out to `halo - step_cap` as the generic `ChunkStage::compute` contract says; the doc now states that a network stage promises the apron only (the chunk keeps its core, the pyramid its core, so nothing reads further).
 - **Not asserted:** that no free cell is steeper than the repose angle after the passes (a cell beside a protected channel never slumps toward it, only diffuses; a cut of tens of metres at 8 m cells leaves a steep bank; the look review decides whether banks need their own rule); the effective diffusivity at 8 m cells is the stability cap (`cf` 0.12 against 0.78 asked: 6.5 times less), so the `diffusion` parameter stops mattering above 0.0008 m2 per year there; the effects are for the calibration in step 5.
 - **Guard:** a region with a halo under 2 rings runs no hillslope passes (it has no neighbour tables to read).
+
+### 16. Step 4 measured (2026-10-24)
+- Scene: the default eroded world, bake 256 cells, its coupled run (80 steps), the chunk of the land cell with the largest drainage area (about 9.7 million km2 at the coarse cell), 8 m cells (608 per chunk edge), 3 km halo. Printed by `cargo test -p planet --release --lib anet_steps_report -- --ignored --nocapture`.
+- Two quantities per tile level L, over the vertices of the tiles of level L - 1 inside the chunk: the step against the parent when the parent is the pyramid level above (`|change(L) - change(L - 1)|`, the pyramid reaching up to level 11), and the change itself at level L (`|change(L)|`, the step against a base parent, the entry step of a pyramid whose top is L):
+
+| Level | step against the pyramid parent p99 / max (m) | change itself p99 (m) |
+|---|---|---|
+| 11 | 4.41 / 7.35 | 4.41 |
+| 12 | 2.66 / 5.45 | 6.82 |
+| 13 | 1.49 / 4.89 | 5.51 |
+| 14 | 0.76 / 4.31 | 4.50 |
+| 15 | 0.19 / 3.47 | 3.90 |
+| 16 | 0.03 / 1.16 | 3.68 |
+
+- With the pyramid up to 15 only, the entry step (level 15 against the base at the level-14 vertices) is p99 3.90 m, max 17.55 m.
+- Finding: the A-net changes the ground by metres, so the entry step of the top level is metres at every top level (p99 3.7 to 6.8 m). Criterion 3 (p99 at most 0.25 m against the parent) holds between pyramid levels from level 15 up (0.19 m) but not at the entry from the base at any top level. The pyramid cannot hide the entry; the fade of `m8-chunk-fade` (a time fade of the change plane per node, REND-039) has to.
+- Provisional top level 15 (`ANET_TOP_LEVEL`): the steps between pyramid levels are the smallest there (0.19 m p99 at the first level above the top) and fewer pyramid levels are carried; the chunk field's own default stays 14 (GEN-053 is a parameter). The choice is open to the planner.
+- Fade: the largest entry step at level 15 is 17.5 m, so a fade at 0.25 m per frame, 60 fps needs 1.2 s (p99: 0.26 s); `m8-chunk-fade` should take 1.5 s, or decide a per-node limit.
+- A chunk edge must be a multiple of 2^k for the k pyramid levels it carries (611 cells at 8 m made `compute_chunk` refuse, a panic in a worker): `cells_per_chunk_for` rounds to multiples of 16 (608, 1216 and 496 cells at 8, 4 and 10 m).
+- Chunk time, one thread, `cargo xtask perf anet-chunk` in the planner's window: first run 8 m 9.9 s (1.84 M cells), 4 m 41.9 s (7.3 M), 10 m 6.5 s (1.2 M). The base field was read twice (2.2 s each at 8 m); one read and a frontier-based area window (same values, 2.36 s to 0.25 s) give 5.4 s at 8 m (outside a window, indicative). Rest at 8 m: base field 2.2 s, incision and hillslope steps 1.6 s, cell-graph region about 0.4 s.

@@ -748,11 +748,15 @@ fn perf_global_bake_args(args: &[String]) -> Result<Vec<String>, String> {
 
 /// The `cargo` arguments of `perf coupled` (GEN-042): the coupled-run scene under the readiness gate; the grid defaults to 2048 cells per face edge.
 fn perf_coupled_args(args: &[String]) -> Result<Vec<String>, String> {
-    let mut v: Vec<String> =
-        ["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", "coupled", "--adapter", "hardware"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+    perf_bake_scene_args("coupled", args)
+}
+
+/// The `cargo` arguments of a perf scene that takes only `--global-res` and `--machine-ready` (`coupled`, `anet-chunk`).
+fn perf_bake_scene_args(scene: &str, args: &[String]) -> Result<Vec<String>, String> {
+    let mut v: Vec<String> = ["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", scene, "--adapter", "hardware"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -1009,6 +1013,11 @@ pub fn perf(root: &Path, args: &[String]) -> Res {
     }
     if args.first().map(String::as_str) == Some("coupled") {
         let cargo_args = perf_coupled_args(&args[1..])?;
+        let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+        return run(root, "cargo", &refs, &[]);
+    }
+    if args.first().map(String::as_str) == Some("anet-chunk") {
+        let cargo_args = perf_bake_scene_args("anet-chunk", &args[1..])?;
         let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
         return run(root, "cargo", &refs, &[]);
     }
@@ -1560,6 +1569,9 @@ mod tests {
         assert!(a.contains(&"coupled".to_string()) && a.contains(&"hardware".to_string()) && a.contains(&"--machine-ready".to_string()));
         assert!(perf_coupled_args(&s(&["--global-res"])).unwrap_err().contains("needs a value"));
         assert!(perf_coupled_args(&s(&["--force"])).unwrap_err().contains("unknown perf coupled option"));
+        let chunk = perf_bake_scene_args("anet-chunk", &s(&["--global-res", "64"])).unwrap();
+        assert!(chunk.contains(&"anet-chunk".to_string()) && chunk.contains(&"hardware".to_string()) && chunk.contains(&"64".to_string()));
+        assert!(!chunk.contains(&"--machine-ready".to_string()), "the owner's override is never added by default");
     }
 
     // spec: GEN-014, BUILD-002

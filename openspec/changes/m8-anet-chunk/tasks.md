@@ -17,8 +17,8 @@
 
 ## 4. Replace the stand-in and measure (GEN-052, STRM-046), about a day
 - [x] 4.1 `ANet: ChunkStage` with its process hash; the viewer enables it for a world with a stored coupled channel (`WorldTerrain::enable_chunks`), disk cache beside the store (spec: STRM-046)
-- [ ] 4.2 The step against the parent at tile levels 11 to 14 with A-net (the table of `m8-chunk-field` design section 11); the fade time needed; top level chosen; `m8-chunk-fade` scoped from the numbers
-- [ ] 4.3 Chunk time at 8 m (default), 4 and 10 m: the perf entry (needs the planner's window; GEN-052 is Verify C)
+- [x] 4.2 The step against the parent at tile levels 11 to 14 with A-net (the table of `m8-chunk-field` design section 11); the fade time needed; top level chosen; `m8-chunk-fade` scoped from the numbers
+- [ ] 4.3 Chunk time at 8 m (default), 4 and 10 m: the perf entry (needs the planner's window; GEN-052 is Verify C) - first run 2026-10-24 (`cargo xtask perf anet-chunk`, eroded world, one thread): 8 m 9.9 s, 4 m 41.9 s, 10 m 6.5 s; the double base read and the area sweep cut 8 m to 5.4 s (base field 2.2 s, incision steps 1.6 s); a re-measure in a window is open
 - [ ] 4.4 spec-guardian; verifier; PR. Stop and report if criterion 3 fails at every top level
 
 ## 5. Renders at the fixed poses (tier D, for look review 1), half a day
