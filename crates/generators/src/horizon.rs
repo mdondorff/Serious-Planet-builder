@@ -342,7 +342,7 @@ mod tests {
     #[test]
     fn bad_input_is_refused_with_the_cause_and_the_byte_conversion_is_exact_at_its_edges() {
         let p = short(100.0);
-        let heights = vec![0.0f32; 16];
+        let heights = [0.0f32; 16];
         let e = bake_horizon(&HeightRaster { n: 4, texel_m: TEXEL, heights: &heights[..3] }, (0, 0, 1, 1), &p, 1).unwrap_err();
         assert!(e.contains("3 heights, not 4 x 4"), "{e}");
         let n = 80;
