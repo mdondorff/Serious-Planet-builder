@@ -185,6 +185,8 @@ pub struct WorldTerrain {
     /// The chunk stage of this world (M8-2, GEN-039 `on-top`): none until [`WorldTerrain::enable_chunks`]; then every field this world builds has
     /// the chunk stage over its base with the chunks ready at the time.
     chunks: std::sync::RwLock<Option<Arc<ChunkWorld>>>,
+    /// The horizon jobs of the chunks (M8-5, STRM-049): none until `enable_horizon` (in `horizonworld`).
+    pub(crate) horizon: std::sync::RwLock<Option<Arc<planet_streaming::chunks::HorizonJobs>>>,
 }
 
 /// The chunk stage of a world: the process, the lattice, the pyramid's top level and the manager that computes and holds the chunks.
@@ -286,6 +288,7 @@ impl WorldTerrain {
             water_book: Default::default(),
             coupled: Default::default(),
             chunks: Default::default(),
+            horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: None,
         })
@@ -366,6 +369,7 @@ impl WorldTerrain {
             water_book: Default::default(),
             coupled: Default::default(),
             chunks: Default::default(),
+            horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: Some(dir.to_path_buf()),
         })
@@ -708,6 +712,11 @@ impl WorldTerrain {
             Arc::new(planet_streaming::chunks::ChunkManager::new(lat, self.radius_m, top, stage.clone(), spawner, clock, disk, cfg));
         *self.chunks.write().expect("chunk stage") = Some(Arc::new(ChunkWorld { lat, top, stage, manager }));
         Ok(())
+    }
+
+    /// The lattice of this world's chunks, if it has a chunk stage.
+    pub fn chunk_lattice(&self) -> Option<planet_generators::chunkfield::ChunkLattice> {
+        self.chunks.read().expect("chunk stage").as_ref().map(|c| c.lat)
     }
 
     /// The manager of this world's chunks, if it has a chunk stage.

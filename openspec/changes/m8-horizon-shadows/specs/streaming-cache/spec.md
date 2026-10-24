@@ -26,13 +26,24 @@ Source: opus-planner (2026-10-24, M8-5; coalescing added the same day), STRM-038
 - **WHEN** a chunk is evicted, the march changes, and a second world starts from the same disk cache
 - **THEN** the chunk's map is dropped with it, a map of another march is not taken for the first, the same chunk with the same neighbourhood reads its map from the disk with no bake, and one with another neighbourhood is a miss
 
-### Requirement: STRM-049 The world bakes the chunk horizon and keeps it on the pack
-The world SHALL give `HorizonJobs` a baker that samples the chunk field's heights (the base and the changes of the chunks that are ready) over the chunk and its halo on the chunk lattice and bakes the horizon (GEN-044), and a disk cache on the tile pack keyed by tile and state word; the landing of a map refreshes the tiles of its chunk (STRM-026) and the lookup of REND-038 reads it. An edit re-queues the horizon job of every chunk whose halo it touches (precise handling in M8-7).
+### Requirement: STRM-049 The world bakes the chunk horizon
+A world with a chunk stage SHALL be able to enable the horizon jobs (`WorldTerrain::enable_horizon`, refused without the stage), with a baker that samples the world's own field (the base, the stamps and the changes of the chunks that are ready) at the cell directions of the chunk lattice over the chunk and a halo of `ceil(range / cell) + 2` cells (past a face edge on the extended cube plane), bakes the horizon of the chunk's cells (GEN-044) and reads the chunk and the chunks around it, nine in all and eight at a cube corner (STRM-048's state word), which holds only while the halo fits in one chunk edge: `enable_horizon` refuses a range whose halo is longer, and a march the bake would refuse, naming the cause (`chunk_horizon_params` gives the world's own, the range cut to a chunk edge less two cells). A world that is gone or a field that cannot be built gives a map of zeros of the right length, never a short one. `horizon_frame` SHALL run one frame of the jobs for the chunks the plan's tiles read, nearest first, and `horizon_map` SHALL return the landed map or none. The march's hash SHALL carry the lattice, the bake version and the definition's revision, so an edit bakes every map again once it has settled (a superset of the chunks whose halo it touches; the precise set is M8-7's). The same world SHALL give the same map. The cell is the chunk lattice's (8 m at the A-net default).
 
 Verify: A
-Status: planned
+Status: active
 Source: opus-planner (2026-10-24, M8-5), STRM-048, STRM-026
 
 #### Scenario: A flight
-- **WHEN** a scripted flight lands the chunks around the camera on a fake clock with the stand-in stage
-- **THEN** every chunk's map lands after its heights, the re-bake count stays at one or two per chunk, and a chunk read back from the pack in a second run bakes nothing
+- **WHEN** a world with the stand-in chunk stage and a small lattice flies 12 s on a fake clock, then stands still, then gets an edit
+- **THEN** every ready chunk has its map after its heights, the maps are one byte per azimuth per cell, the same world gives the same maps, the re-bakes stay within two per chunk, an unchanged world bakes nothing more, and the edit bakes the maps again
+
+### Requirement: STRM-050 The chunk horizon on the pack disk cache
+The chunk horizon map SHALL be stored on the tile pack under its tile, the march and its state word (the `HorizonDisk` of STRM-048), so a second run of a world reads a map made against the same neighbourhood instead of baking it. It needs a record kind of its own in the pack.
+
+Verify: A
+Status: planned
+Source: opus-planner (2026-10-24, M8-5), STRM-048
+
+#### Scenario: A second run
+- **WHEN** a world flies over the same chunks twice with a pack on disk
+- **THEN** the second run reads the maps from the pack and bakes none
