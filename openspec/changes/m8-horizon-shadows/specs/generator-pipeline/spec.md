@@ -1,15 +1,15 @@
 ## ADDED Requirements
 
 ### Requirement: GEN-044 The chunk horizon map
-`generators` SHALL bake, for a raster of heights with its halo, the horizon map of the chunk: per texel and per azimuth `k` of `A` evenly spaced azimuths from north, the elevation angle of the highest terrain along that azimuth out to the range, found by marching with steps that grow 4.5 % plus 2 m. The starting values are 4 m texels, `A` = 16 and a range of 5 km; the spec states the values that land. The bake SHALL be a pure function of the raster, the halo and the parameters, single-threaded per texel row set in a fixed order or independent of the thread count (CON-14), with `libm`, and texels shared by neighbouring chunks SHALL be identical.
+`generators` SHALL bake, for a raster of heights with its halo, the horizon map of the chunk: per texel and per azimuth `k` of `A` evenly spaced azimuths from north, the elevation angle of the highest terrain along that azimuth out to the range, found by marching with steps that grow 4.5 % plus 2 m. The defaults are 4 m texels, `A` = 16, a range of 5 km and steps of 2 m plus 4.5 % of the distance; each is a parameter. Terrain at distance `d` SHALL count `d^2 / (2 R)` lower for a body of radius `R`. The angle is stored as a byte, 90 degrees over 255 steps, 0 at or below the horizon. The bake SHALL be a pure function of the raster, the halo and the parameters, single-threaded per texel row set in a fixed order or independent of the thread count (CON-14), with `libm`, and texels shared by neighbouring chunks SHALL be identical.
 
 Verify: A
-Status: planned
+Status: active
 Source: opus-planner (2026-10-24, M8-5), SPIKE-32 step 2, ADR 0077
 
 #### Scenario: Known horizons
-- **WHEN** the map is baked on a flat raster with one ridge of known height and distance, with the ridge inside the chunk and inside the halo only
-- **THEN** the texels on the lit side of the ridge have horizon 0 toward it, the texels in its lee have the angle `atan(height / distance)` within the step law's error at the azimuths toward it, and the two cases give equal values where the chunk borders agree
+- **WHEN** the map is baked on a flat raster with one ridge of known height and distance
+- **THEN** texels looking toward the ridge have the angle `atan(height / distance)` within the step and texel error, texels looking away from it have horizon 0, the result is equal for every thread count, a block baked from a raster that holds its halo equals the same block of a larger raster, and a raster without the halo changes the edge texels
 
 ### Requirement: GEN-045 The coarse horizon from the global run
 `generators` SHALL compute, from the stored heights of the coupled run (STRM-043), the coarse horizon of every lattice cell: per cell and per azimuth the elevation angle of the highest cell along that azimuth out to the far range (about 50 km), by marching over the lattice through directions on the sphere. The result SHALL be a pure function of the stored heights and the parameters and be stored as a global channel beside the others (STRM-045).

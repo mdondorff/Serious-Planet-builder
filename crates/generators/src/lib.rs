@@ -15,6 +15,7 @@ pub mod erosion;
 pub mod global;
 pub mod height;
 pub mod height_fields;
+pub mod horizon;
 pub mod manifest;
 pub mod mesh;
 pub mod normals;

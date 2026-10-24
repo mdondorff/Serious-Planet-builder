@@ -1,9 +1,9 @@
 # Tasks: m8-horizon-shadows
 
-Not started; the planner assigns the start. Each step is one PR of at most about a day. The Rasierklinge timings are the architect's window.
+Step 1 landed with the first PR; the rest follows. Each step is one PR of at most about a day. The Rasierklinge timings are the architect's window.
 
-- [ ] 0. Decisions: design questions 1 (texture plumbing), 2 (bake cost) and 4 (debug view) with the planner; claim the requirement IDs (GEN-044 to GEN-046, STRM-045, REND-038) when the change starts, since explorer's M8-3 may use numbers in the same range.
-- [ ] 1. GEN-044: the horizon bake of a raster with halo (`generators`), tier A on synthetic terrain; indicative CPU timing on a 4 m chunk raster (answers question 2).
+- [x] 0. Decisions recorded in design.md (planner, 2026-10-24); requirement IDs GEN-044 to GEN-046, STRM-045, REND-038 are this change's.
+- [x] 1. GEN-044: the horizon bake of a raster with halo (`generators::horizon`), tier A on synthetic terrain; indicative CPU timing in design.md.
 - [ ] 2. GEN-045: the coarse horizon from the stored coupled heights; a `TileChannel` kind beside the coupled one (STRM-045 part 1); tier A and the store round trip.
 - [ ] 3. GEN-046: the combination and the interpolation twin of the shader (CPU reference, CON-07).
 - [ ] 4. STRM-045 part 2: the horizon as a chunk output (key, disk cache, eviction with the chunk, stand-in = coarse only, landing refresh); one registration line in the explorer-owned chunk path, agreed with the planner.

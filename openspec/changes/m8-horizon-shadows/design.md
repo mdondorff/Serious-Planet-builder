@@ -19,7 +19,22 @@ Status: draft for the planner; the open questions need a decision or a measureme
 | GPU | +0.06 ms at 1440p (two texture reads per fragment) |
 | soft edge | -0.35 to +0.9 degrees around the horizon |
 
-## Open questions
+## Decisions (opus-planner, 2026-10-24)
+1. **Texture plumbing:** a texture array with one layer per resident chunk slot (chunks are one size); a tile carries the slot index. The material map (M8-6) uses the same slot index in a parallel array. No atlas.
+2. **Bake cost:** the horizon map is a second job that lands after the chunk's heights. Criterion 3 is about heights. Until the horizon lands, the coarse horizon from the global run shades the tile and the chunk horizon fades in (the stand-in rule, CON-22). Texel size and azimuth count are parameters (default 4 m, 16); the change reports the bake time per chunk.
+3. **Debug view:** a lit `ShadeView` (horizon, shadow), no new key.
+4. **Edits:** shadows lag an edit by design. An edit re-queues the horizon job of every chunk whose halo it touches. Precise edit handling belongs to M8-7 (to be noted in its change).
+
+## Measured (indicative, CPU only, not a gated perf run)
+| Quantity | Value |
+|---|---|
+| bake, 16 azimuths, 5 km, 4 m texels, release build, one thread (2026-10-24, the GEN-044 bake) | 21 us per texel |
+| chunk of 4.9 km edge (1225 x 1225 texels, 24 km2) | about 32 core-seconds, about 5 s on 6 threads |
+| SPIKE-32 for comparison | 0.7 s per km2 on 6 threads (17 s for 24 km2) |
+
+The measured figure is lower than the spike's, so the bake as a second job lands in seconds after the heights; a per-chunk figure on the real chunk raster is reported when step 4 runs the job.
+
+## Questions (1, 2, 3 and 7 are decided above; kept for the reasoning)
 1. **Texture plumbing.** The terrain bind group is buffers only today. A texture array of resident chunk horizons (layer per chunk, fixed texel count per chunk) against one atlas. The material map (M8-6) needs the same. Decide with the render owner before step 5; whichever change lands first creates it.
 2. **Bake cost against the chunk landing target.** About 17 s for a 24 km2 chunk at 4 m texels and 16 azimuths exceeds the 10 s landing target (criterion 3) when added to the A-net job. Options: horizon texels at 8 m (4 times cheaper, softer shadows), horizon as a second job that lands after the heights (the chunk draws without shadows meanwhile, like the stand-in), 8 azimuths, or a coarser far part of the march. Measure on the real chunk raster in step 1 (CPU timing only, indicative, not a gated perf run).
 3. **Azimuth count.** 16 gives fans near occluders; 32 doubles storage and bake. SPIKE-32 suggests 32 or a two-component fit. Decide from the stills of step 6.
