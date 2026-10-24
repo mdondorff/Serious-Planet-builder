@@ -120,7 +120,7 @@ impl GlobalWorld {
         let (m, a) = (spec.m as usize, spec.params.azimuths as usize);
         // The observer lattice is laid over the coupled run's: its size must divide the run's, and the azimuth count must be one a block holds.
         let run_n = self.coupled_spec().n;
-        if spec.m == 0 || spec.m > run_n || run_n % spec.m != 0 {
+        if spec.m == 0 || spec.m > run_n || !run_n.is_multiple_of(spec.m) {
             return Err(BlockCodecError::Grid { level: 0, cells: spec.m });
         }
         if spec.params.azimuths == 0 || spec.params.azimuths > MAX_AZIMUTHS {
