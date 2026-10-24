@@ -50,16 +50,20 @@ pub fn lit_factor(sun_elevation: f64, horizon: f64) -> f64 {
     x * x * (3.0 - 2.0 * x)
 }
 
-/// The azimuth of `sun` (a unit direction) at a point with unit `up`, in the frame whose tangents at the point are `east` and `north`: radians
-/// from north, clockwise, in `(-pi, pi]`. A sun straight overhead has no azimuth and gives 0.
+/// The azimuth of `sun` (a unit direction) in the frame whose tangents at the point are `east` and `north` (they lie in the tangent plane, so the
+/// point's `up` does not enter): radians from north, clockwise, in `(-pi, pi]`. A sun straight overhead has no horizontal direction: its azimuth is
+/// noise and its lit factor does not depend on it unless the horizon is at the zenith. A NaN input gives NaN (out of contract).
 ///
-/// The axes need not be square: a cube face's `i` and `j` are not orthogonal where the warp shears them (up to about 25 degrees at the corners of a face),
-/// and the march of GEN-044 steps along `sin az` of `i` plus `cos az` of `j`. The sun's horizontal part is therefore split into its components
-/// along the two axes (the dual basis), not projected on each; for orthonormal axes (the geographic frame) the two are the same.
+/// The axes need not be unit or square. The march of GEN-044 steps `sin az` along the raster's `i` and `cos az` along its `j` in index space, so
+/// the direction it looks along on the ground is `sin az * a_i + cos az * a_j` with `a_i = dP/ds` and `a_j = dP/dt` at their own lengths: a cube
+/// face's `i` and `j` are sheared by up to 30 degrees at a corner and, under the tangent warp, of lengths in a ratio up to 1.41 near an edge. The
+/// sun's horizontal part `x a_i + y a_j` is therefore solved for `(x, y)` with the full 2 x 2 overlap matrix, and the azimuth is `atan2(x, y)`;
+/// for orthonormal axes (the geographic frame) that is the plain projection on each.
 pub fn azimuth_in_frame(sun: Vec3, east: Vec3, north: Vec3) -> f64 {
-    let (pe, pn, g) = (sun.dot(east), sun.dot(north), east.dot(north));
-    let det = 1.0 - g * g;
-    libm::atan2((pe - g * pn) / det, (pn - g * pe) / det)
+    let (pe, pn) = (sun.dot(east), sun.dot(north));
+    let (ee, nn, g) = (east.dot(east), north.dot(north), east.dot(north));
+    let det = ee * nn - g * g;
+    libm::atan2((pe * nn - g * pn) / det, (pn * ee - g * pe) / det)
 }
 
 /// The elevation of `sun` over the horizontal plane at a point with unit `up`, in radians.
@@ -67,15 +71,17 @@ pub fn sun_elevation(sun: Vec3, up: Vec3) -> f64 {
     libm::asin(sun.dot(up).clamp(-1.0, 1.0))
 }
 
-/// The unit `(east, north)` tangents of a cube face's raster at the face coordinates `(s, t)`: east along increasing `i` (`s`), north along
-/// increasing `j` (`t`), the frame GEN-044's azimuths are in. Taken from the mapping a quarter of a cell either side, so it is the face's own
-/// frame whatever the mapping.
+/// The `(east, north)` tangents of a cube face's raster at the face coordinates `(s, t)`: `dP/ds` along increasing `i` and `dP/dt` along
+/// increasing `j`, the frame GEN-044's azimuths are in, at their true (unequal) lengths for [`azimuth_in_frame`]. A central difference of
+/// `1e-4` face units either side (about a tenth of a level-11 chunk; the error is second order, about 1e-8 relative). The mapping must continue
+/// smoothly past a face edge, as the tangent warp does (`face_to_plane` extends onto the cube plane); a mapping that clamps would give a one-sided
+/// difference at the edge, half the step but still pointing the right way.
 pub fn face_frame(map: &dyn FaceMapping, face: Face, s: f64, t: f64) -> (Vec3, Vec3) {
     const H: f64 = 1.0e-4;
     let up = face_to_direction(map, face, s, t);
-    let along = |d: Vec3| d - up * d.dot(up);
-    let east = along(face_to_direction(map, face, s + H, t) - face_to_direction(map, face, s - H, t)).normalized();
-    let north = along(face_to_direction(map, face, s, t + H) - face_to_direction(map, face, s, t - H)).normalized();
+    let along = |d: Vec3| (d - up * d.dot(up)) * (0.5 / H);
+    let east = along(face_to_direction(map, face, s + H, t) - face_to_direction(map, face, s - H, t));
+    let north = along(face_to_direction(map, face, s, t + H) - face_to_direction(map, face, s, t - H));
     (east, north)
 }
 
@@ -171,11 +177,12 @@ mod tests {
         assert!((sun_elevation(d * -1.0, d) + core::f64::consts::FRAC_PI_2).abs() < 1e-12, "a sun behind the planet is -90 degrees");
         // A cube face's raster frame: east along increasing s, north along increasing t, for every face and a few places on it.
         for face in 0..6u8 {
-            for (s, t) in [(0.0, 0.0), (0.7, -0.4), (-0.9, 0.9)] {
+            for (s, t) in [(0.0, 0.0), (0.7, -0.4), (-0.9, 0.9), (1.0, 1.0), (-1.0, 1.0), (0.95, 0.0)] {
                 let up = face_to_direction(&TangentWarp, Face(face), s, t);
                 let (east, north) = face_frame(&TangentWarp, Face(face), s, t);
                 assert!(east.dot(up).abs() < 1e-9 && north.dot(up).abs() < 1e-9, "tangent to the sphere");
-                assert!(east.dot(north).abs() < 0.5, "the warp shears the axes by at most about 30 degrees: {}", east.dot(north));
+                let cos_shear = east.normalized().dot(north.normalized()).abs();
+                assert!(cos_shear <= 0.5 + 1e-6, "the warp shears the axes by at most 30 degrees (0.5 at a corner): {cos_shear}");
                 let ahead = face_to_direction(&TangentWarp, Face(face), s + 1.0e-3, t);
                 assert!(
                     (azimuth_in_frame(ahead, east, north) - core::f64::consts::FRAC_PI_2).abs() < 1e-6,
@@ -196,5 +203,101 @@ mod tests {
             })
             .count();
         assert!(diff >= 1, "at least one face is turned against north, so the two maps need their own azimuths");
+    }
+
+    // spec: GEN-046
+    #[test]
+    fn a_sun_half_way_between_the_raster_axes_is_at_45_degrees_in_index_space_whatever_their_lengths() {
+        // Near the middle of a face edge the tangent warp makes `i` longer than `j` by a factor 1.35 to 1.41: the ground direction that the march
+        // looks along at index azimuth 45 degrees is a_i + a_j, and the sun there must read 45 degrees, not the angle between unit axes.
+        for (s, t) in [(0.95, 0.0), (1.0, 0.0), (0.0, 0.95), (-0.9, 0.2)] {
+            let up = face_to_direction(&TangentWarp, Face(2), s, t);
+            let (a_i, a_j) = face_frame(&TangentWarp, Face(2), s, t);
+            let horizontal = (a_i + a_j).normalized();
+            let sun = (horizontal * libm::cos(0.3) + up * libm::sin(0.3)).normalized();
+            let az = azimuth_in_frame(sun, a_i, a_j);
+            assert!((az - core::f64::consts::FRAC_PI_4).abs() < 1e-9, "({s}, {t}): {:.3} degrees", az.to_degrees());
+            let unit = azimuth_in_frame(sun, a_i.normalized(), a_j.normalized());
+            if (a_i.length() / a_j.length() - 1.0).abs() > 0.1 {
+                assert!((unit - core::f64::consts::FRAC_PI_4).abs() > 0.05, "with unit axes the answer would be off at ({s}, {t})");
+            }
+        }
+    }
+
+    // spec: GEN-046
+    #[test]
+    fn the_stored_maps_cast_their_shadows_in_the_direction_the_sun_is_in() {
+        use crate::coarsehorizon::{coarse_horizon, CoarseParams};
+        use crate::coupled::Lattice;
+        use crate::horizon::{bake_horizon, halo_texels, HeightRaster, HorizonParams};
+        const R: f64 = 6_371_000.0;
+        // The chunk map: a ridge of 100 m to the raster's east, 520 m from the texel; the sun is placed on the ground toward the ridge's
+        // direction on the face (the physical direction of increasing i), a little above and below the ridge's angle.
+        let (n, texel) = (400usize, 4.0);
+        let p = HorizonParams { range_m: 600.0, ..HorizonParams::chunk(R) };
+        let heights: Vec<f32> = (0..n * n).map(|k| if (300..320).contains(&(k % n)) { 100.0 } else { 0.0 }).collect();
+        let raster = HeightRaster { n, texel_m: texel, heights: &heights };
+        assert!(halo_texels(&p, texel) < 170);
+        let block = (170usize, 170usize, 1usize, 1usize);
+        let map = bake_horizon(&raster, block, &p, 1).unwrap();
+        let bytes: Vec<u8> = (0..16).map(|k| map.at(0, 0, k)).collect();
+        let angle = libm::atan(100.0 / 520.0);
+        for (face, s, t) in [(0u8, 0.0, 0.0), (2, 0.95, 0.0), (4, -0.6, 0.5)] {
+            let up = face_to_direction(&TangentWarp, Face(face), s, t);
+            let (a_i, a_j) = face_frame(&TangentWarp, Face(face), s, t);
+            let ground = |toward: Vec3, el: f64| (toward.normalized() * libm::cos(el) + up * libm::sin(el)).normalized();
+            let lit = |sun: Vec3| {
+                let sample = HorizonSample { bytes: &bytes, sun_azimuth: azimuth_in_frame(sun, a_i, a_j) };
+                lit_factor(sun_elevation(sun, up), point_horizon(Some(sample), None))
+            };
+            assert!(
+                lit(ground(a_i, angle - 4.0f64.to_radians())) < 0.01,
+                "face {face}: a sun below the ridge's angle, toward it, is in shadow"
+            );
+            assert!(lit(ground(a_i, angle + 4.0f64.to_radians())) > 0.99, "face {face}: a sun above it is lit");
+            assert!(lit(ground(a_i * -1.0, angle - 4.0f64.to_radians())) > 0.99, "face {face}: a sun on the other side of the sky is lit");
+            assert!(lit(ground(a_j, angle - 4.0f64.to_radians())) > 0.99, "face {face}: nor does the ridge shade the north");
+        }
+        // The coarse map: a plateau toward the geographic north, seen by an observer at +x on a small body.
+        let small = 100_000.0;
+        let run = Lattice::new(64, small);
+        let c = Vec3::new(libm::cos(0.1), 0.0, libm::sin(0.1)); // 10 km north of +x
+        let z: Vec<f32> = (0..run.len())
+            .map(|k| if small * libm::acos(run.direction(k).dot(c).clamp(-1.0, 1.0)) <= 4_000.0 { 3_000.0 } else { 0.0 })
+            .collect();
+        let cp = CoarseParams { azimuths: 16, range_m: 20_000.0, step_m: 2_000.0, radius_m: small };
+        let coarse = coarse_horizon(&run, &z, 64, &cp, 2).unwrap();
+        let obs = run.cell_at(Vec3::new(1.0, 0.0, 0.0));
+        let d = run.direction(obs);
+        let (e, nrth) = geographic_frame(d);
+        let cbytes = &coarse[obs * 16..(obs + 1) * 16];
+        let elev = crate::coarsehorizon::elevation(small, 0.0, 3_000.0, 10_000.0);
+        let lit = |toward: Vec3, el: f64| {
+            let sun = (toward * libm::cos(el) + d * libm::sin(el)).normalized();
+            lit_factor(
+                sun_elevation(sun, d),
+                point_horizon(None, Some(HorizonSample { bytes: cbytes, sun_azimuth: azimuth_in_frame(sun, e, nrth) })),
+            )
+        };
+        assert!(lit(nrth, elev - 6.0f64.to_radians()) < 0.01, "a low sun toward the plateau is in shadow");
+        assert!(lit(nrth, elev + 6.0f64.to_radians()) > 0.99);
+        assert!(lit(e, elev - 6.0f64.to_radians()) > 0.99, "and a sun to the east is lit");
+        assert!(lit(nrth * -1.0, elev - 6.0f64.to_radians()) > 0.99);
+    }
+
+    // spec: GEN-046
+    #[test]
+    fn an_azimuth_just_below_zero_reads_the_first_node_and_the_sun_overhead_is_lit() {
+        let b = bytes_of(&[5.0, 9.0, 12.0, 7.0]);
+        assert_eq!(interpolate(&b, -1e-17), interpolate(&b, 0.0));
+        assert_eq!(interpolate(&b, core::f64::consts::TAU - 1e-17), interpolate(&b, 0.0));
+        // Straight overhead the azimuth is whatever the rounding gives; the lit factor does not depend on it.
+        let up = Vec3::new(1.0, 0.0, 0.0);
+        let (e, n) = geographic_frame(up);
+        let az = azimuth_in_frame(up, e, n);
+        assert!(az.is_finite());
+        let ramp = bytes_of(&[20.0, 30.0, 40.0, 25.0]);
+        let horizon = point_horizon(Some(HorizonSample { bytes: &ramp, sun_azimuth: az }), None);
+        assert!(lit_factor(sun_elevation(up, up), horizon) > 0.99);
     }
 }
