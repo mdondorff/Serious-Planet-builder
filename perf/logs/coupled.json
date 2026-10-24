@@ -1,0 +1,11 @@
+{
+  "scene": "coupled",
+  "adapter": "NVIDIA GeForce RTX 3080 Ti Laptop GPU",
+  "owner_override": [],
+  "res": 2048,
+  "steps": 100,
+  "threads": 1,
+  "seconds": 848.639,
+  "seconds_per_step": 8.4864,
+  "budget_failures": ["coupled run time 848.6 s exceeds the ten minute budget (GEN-042)"]
+}
