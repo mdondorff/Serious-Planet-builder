@@ -14,12 +14,12 @@ Dormant (no near trigger; not asked now):
 - **Coarse-first refinement of an edit** (owner, 2026-10-20): parked. Trigger: a brush case of the edit-latency scene that misses its budget.
 
 ## M8 queue (plan: `docs/briefings/m8-plan.md`; next week's start: `docs/briefings/week-2026-10-25.md`)
-Done before the reset (2026-10-23): decisions D1 to D7, R1, R2a, R5, the coupled run, constitution v1.6, ADR 0077 to 0079, R6 (#589), R4 (#591), SPIKE-35 (#590: breach rule, 3 km halo, jittered D8, bit-exact), the M8-2 proposal (#588, `openspec/changes/m8-chunk-field/`).
+Done before the reset (2026-10-23 and 24): decisions D1 to D7, R1, R2a, R5, R4, R6, the coupled run (#596), constitution v1.6, ADR 0077 to 0079, SPIKE-35 (#590), the M8-2 proposal (#588), M8-2 3a (#600) and 3b (#606), M8-1 (c) stored run (#601) and wiring with the K view (#603), the run's timing (#602) and speed-up (#604: 545 s for 100 steps at 2048, 1 thread, synthetic world; criterion 4 met with 9 % margin).
 
 | # | Step | Lane |
 |---|---|---|
-| M8-2 | chunk field infrastructure, steps 3c to 3e of `openspec/changes/m8-chunk-field/` (R1 #595, R2a #597, 3a and 3b done (decision a, 2026-10-24: the pyramid reaches from the apply level up to the top level, default 11; demand and steps in design.md section 11): `generators::chain`, `height_at_level` forwarded by every wrapper; the three-trait `HeightField` split deferred until after M8-2) | explorer, on the planner's go after the reset |
-| M8-1 (c) | store heights, drainage area and receivers as `TileChannel`s, a debug view, wire into the world's sources (R5 #593 and the coupled run #596, GEN-040, done). Risk for criterion 4: about 5 s per step at 2048 serial, 6 to 8 min for 70 to 100 steps; any parallel flood must stay bit-exact | crusader, on the planner's go after the reset |
+| M8-2 | steps 3c to 3e of `openspec/changes/m8-chunk-field/`. 3c: the tile key chains the ready state of every neighbouring chunk within reach (design.md section 12). Pyramid top level default 14, provisional (planner, 2026-10-24): 11 needs about 285 chunks per view; the step above 14 is re-measured with A-net in M8-3, the owner decides only if no top level meets criteria 3 and 7 together | explorer, on the planner's go after the reset |
+| M8-1 (c) rest | re-time the run on the world's real heights once a lattice height sampler exists (margin 55 s); the key read of about 25M bake samples even when the run is stored; uplift and erodibility constant until the driver maps (ADR 0076); the K view is coarse (climate shading), the sharp GEN-041 maps are not shown | crusader, on the planner's go after the reset |
 | R4b | `GeoPoint::of_dir` and `dir` in `editor/polyline.rs` onto the core helpers | crusader, with M8-7 |
 
 Open owner items: the two flickers (Tracked) need a live check (editor off, debug path L, or a recording or F9 at the moment); P1-5 editing frame rate on a quiet machine; P2-8 missing tiles during an edit's refresh.
