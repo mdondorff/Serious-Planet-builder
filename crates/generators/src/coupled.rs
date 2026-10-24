@@ -12,8 +12,6 @@ use crate::dump::{height_to_grey, Rgba};
 use planet_core::cube::{direction_to_face, face_to_direction, Face, TangentWarp};
 use planet_core::hash::mix64;
 use planet_core::Vec3;
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
 
 /// Version of the run's algorithm and arithmetic; it is part of the key of the stored result (STRM-043), so a change to the flood, the jitter
 /// or the update that changes results must bump it.
@@ -30,6 +28,8 @@ pub struct Lattice {
     n: usize,
     /// Area of a cell of one face in m2 (all faces are equal).
     area_m2: Vec<f64>,
+    /// The square root of `area_m2`, per cell of one face (the spacing of two cells reads it eight times per cell and step).
+    sqrt_area_m: Vec<f64>,
 }
 
 fn solid(u: f64, v: f64) -> f64 {
@@ -47,7 +47,8 @@ impl Lattice {
                 area_m2[j * n + i] = omega * radius_m * radius_m;
             }
         }
-        Lattice { n, area_m2 }
+        let sqrt_area_m = area_m2.iter().map(|&a| libm::sqrt(a)).collect();
+        Lattice { n, area_m2, sqrt_area_m }
     }
 
     /// Cells per face edge.
@@ -65,9 +66,11 @@ impl Lattice {
     }
 
     fn split(&self, c: usize) -> (usize, usize, usize) {
-        let n2 = self.n * self.n;
+        // Cell indices fit a u32 (checked in `new`), and a 32-bit division is the cheaper one.
+        let (c, n) = (c as u32, self.n as u32);
+        let n2 = n * n;
         let r = c % n2;
-        (c / n2, r % self.n, r / self.n)
+        ((c / n2) as usize, (r % n) as usize, (r / n) as usize)
     }
 
     /// The unit direction of the centre of cell `c`.
@@ -88,12 +91,17 @@ impl Lattice {
 
     /// The area of cell `c` in m2.
     pub fn area_m2(&self, c: usize) -> f64 {
-        self.area_m2[c % (self.n * self.n)]
+        self.area_m2[(c as u32 % (self.n * self.n) as u32) as usize]
     }
 
     /// The eight neighbours of `c` in the order of [`OFFS`]; across a face edge the neighbour is the cell holding the direction beyond the edge.
     pub fn neighbours(&self, c: usize) -> [u32; 8] {
         let (f, i, j) = self.split(c);
+        if i > 0 && j > 0 && i + 1 < self.n && j + 1 < self.n {
+            // Inside the face: the offsets of OFFS in index terms.
+            let (c, n) = (c as u32, self.n as u32);
+            return [c - 1, c + 1, c - n, c + n, c - n - 1, c - n + 1, c + n - 1, c + n + 1];
+        }
         let n = self.n as i64;
         let mut out = [NONE; 8];
         for (k, &(di, dj)) in OFFS.iter().enumerate() {
@@ -109,9 +117,14 @@ impl Lattice {
         out
     }
 
+    /// The square root of the area of cell `c` in metres (a 32-bit remainder: cell indices fit a u32).
+    fn sqrt_area_m(&self, c: usize) -> f64 {
+        self.sqrt_area_m[(c as u32 % (self.n * self.n) as u32) as usize]
+    }
+
     /// The distance in metres from `c` to its neighbour `nb` (index `k` of [`OFFS`]), modelled from the cell sizes.
     fn spacing_m(&self, c: usize, k: usize, nb: usize) -> f64 {
-        0.5 * (libm::sqrt(self.area_m2(c)) + libm::sqrt(self.area_m2(nb))) * if k < 4 { 1.0 } else { core::f64::consts::SQRT_2 }
+        0.5 * (self.sqrt_area_m(c) + self.sqrt_area_m(nb)) * if k < 4 { 1.0 } else { core::f64::consts::SQRT_2 }
     }
 }
 
@@ -173,6 +186,55 @@ pub struct CoupledState {
     pub steps: Vec<StepStat>,
 }
 
+/// A min-queue of `u64` keys for keys that never fall below the last one popped (the flood only pushes cells above the cell it pops): a radix
+/// heap, whose buckets are filled and emptied in sequence, where a binary heap of 14 million keys misses the cache at every level. It pops the
+/// minimum exactly like a binary heap, so the pop order does not change.
+struct MonotoneQueue {
+    /// Bucket `i` holds the keys whose highest bit that differs from `last` is bit `i - 1`; bucket 0 the keys equal to `last`.
+    buckets: Vec<Vec<u64>>,
+    last: u64,
+    len: usize,
+}
+
+impl MonotoneQueue {
+    fn new() -> MonotoneQueue {
+        MonotoneQueue { buckets: vec![Vec::new(); 65], last: 0, len: 0 }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn bucket(&self, key: u64) -> usize {
+        64 - (key ^ self.last).leading_zeros() as usize
+    }
+
+    fn push(&mut self, key: u64) {
+        assert!(key >= self.last, "the queue takes no key below the last one popped");
+        let b = self.bucket(key);
+        self.buckets[b].push(key);
+        self.len += 1;
+    }
+
+    fn pop(&mut self) -> Option<u64> {
+        if self.len == 0 {
+            return None;
+        }
+        if self.buckets[0].is_empty() {
+            let i = (1..65).find(|&i| !self.buckets[i].is_empty()).expect("a queue with keys has a bucket with keys");
+            let mut moved = core::mem::take(&mut self.buckets[i]);
+            self.last = *moved.iter().min().expect("the bucket has keys");
+            for key in moved.drain(..) {
+                let b = self.bucket(key);
+                self.buckets[b].push(key);
+            }
+            self.buckets[i] = moved;
+        }
+        self.len -= 1;
+        self.buckets[0].pop()
+    }
+}
+
 /// Priority flood with epsilon from the coast: the filled surface (a depression is raised to just above its lowest outlet) and the pop order,
 /// ascending in filled height with ties by cell index, which is the order a receiver always precedes its donors in. Sea cells (`z <= 0`) are
 /// not in the order.
@@ -180,7 +242,7 @@ pub fn priority_flood(lat: &Lattice, z: &[f32]) -> (Vec<f32>, Vec<u32>) {
     let len = lat.len();
     let mut filled = z.to_vec();
     let mut visited = vec![false; len];
-    let mut heap: BinaryHeap<Reverse<u64>> = BinaryHeap::new();
+    let mut heap = MonotoneQueue::new();
     let mut land = 0usize;
     for c in 0..len {
         if z[c] <= 0.0 {
@@ -194,17 +256,17 @@ pub fn priority_flood(lat: &Lattice, z: &[f32]) -> (Vec<f32>, Vec<u32>) {
         land += 1;
         if lat.neighbours(c).iter().any(|&n| z[n as usize] <= 0.0) {
             visited[c] = true;
-            heap.push(Reverse((u64::from(z[c].to_bits()) << 32) | c as u64));
+            heap.push((u64::from(z[c].to_bits()) << 32) | c as u64);
         }
     }
     // A world without sea has no coast to flood from: its lowest cell (ties by index) is the one outlet.
     if heap.is_empty() && land > 0 {
         let lowest = (0..len).min_by_key(|&c| (z[c].to_bits(), c)).expect("a lattice has cells");
         visited[lowest] = true;
-        heap.push(Reverse((u64::from(z[lowest].to_bits()) << 32) | lowest as u64));
+        heap.push((u64::from(z[lowest].to_bits()) << 32) | lowest as u64);
     }
     let mut order: Vec<u32> = Vec::with_capacity(land);
-    while let Some(Reverse(key)) = heap.pop() {
+    while let Some(key) = heap.pop() {
         let c = (key & 0xffff_ffff) as usize;
         order.push(c as u32);
         let fc = filled[c];
@@ -217,7 +279,7 @@ pub fn priority_flood(lat: &Lattice, z: &[f32]) -> (Vec<f32>, Vec<u32>) {
             if z[n] <= fc {
                 filled[n] = f32::from_bits(fc.to_bits() + 1);
             }
-            heap.push(Reverse((u64::from(filled[n].to_bits()) << 32) | n as u64));
+            heap.push((u64::from(filled[n].to_bits()) << 32) | n as u64);
         }
     }
     // Land the flood never reached (not expected: the neighbour relation is symmetric) keeps its height and is processed first.
@@ -231,6 +293,21 @@ pub fn priority_flood(lat: &Lattice, z: &[f32]) -> (Vec<f32>, Vec<u32>) {
         order = extra;
     }
     (filled, order)
+}
+
+/// How many cells ahead of the visiting order the loops ask the cache for: the order walks the heights, so every array is read at random.
+const AHEAD: usize = 12;
+
+/// A hint to the cache to load the line holding `*v`; it changes no value.
+#[inline(always)]
+fn prefetch<T>(v: &T) {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: SSE is part of the x86_64 baseline and a prefetch of a valid address reads and writes nothing.
+    unsafe {
+        core::arch::x86_64::_mm_prefetch::<{ core::arch::x86_64::_MM_HINT_T0 }>(core::ptr::from_ref(v).cast::<i8>());
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = v;
 }
 
 /// The jitter factor of direction `k` at cell `c`: `1 + j (2 h - 1)`, `h` in `[0, 1)` a hash of the seed, the cell and the direction.
@@ -248,15 +325,26 @@ pub fn receivers(lat: &Lattice, filled: &[f32], order: &[u32], p: &CoupledParams
     assert!((0.0..1.0).contains(&p.jitter), "jitter {} is not in [0, 1)", p.jitter);
     let mut rec = vec![NONE; lat.len()];
     let mut dir = vec![0u8; lat.len()];
-    for &c in order {
+    let n = lat.n();
+    for (i, &c) in order.iter().enumerate() {
+        if let Some(&ahead) = order.get(i + AHEAD) {
+            let ahead = ahead as usize;
+            prefetch(&filled[ahead]);
+            prefetch(&filled[ahead.saturating_sub(n)]);
+            prefetch(&filled[(ahead + n).min(filled.len() - 1)]);
+            prefetch(&rec[ahead]);
+            prefetch(&dir[ahead]);
+        }
         let c = c as usize;
         let nb = lat.neighbours(c);
         let mut best = (0.0f64, NONE, 0u8);
+        let (own, fc) = (lat.sqrt_area_m(c), f64::from(filled[c]));
         for (k, &nbr) in nb.iter().enumerate() {
             let n = nbr as usize;
-            let drop = f64::from(filled[c]) - f64::from(filled[n]);
+            let drop = fc - f64::from(filled[n]);
             if drop > 0.0 {
-                let s = drop / lat.spacing_m(c, k, n) * jitter_factor(p.seed, c, k, p.jitter);
+                let spacing = 0.5 * (own + lat.sqrt_area_m(n)) * if k < 4 { 1.0 } else { core::f64::consts::SQRT_2 };
+                let s = drop / spacing * jitter_factor(p.seed, c, k, p.jitter);
                 if s > best.0 {
                     best = (s, n as u32, k as u8);
                 }
@@ -274,7 +362,18 @@ pub fn accumulate(lat: &Lattice, z: &[f32], order: &[u32], rec: &[u32]) -> Vec<f
     for &c in order {
         a[c as usize] = lat.area_m2(c as usize);
     }
-    for &c in order.iter().rev() {
+    for (i, &c) in order.iter().enumerate().rev() {
+        if i >= AHEAD {
+            let ahead = order[i - AHEAD] as usize;
+            prefetch(&rec[ahead]);
+            prefetch(&a[ahead]);
+        }
+        if i >= AHEAD / 2 {
+            let r = rec[order[i - AHEAD / 2] as usize];
+            if r != NONE {
+                prefetch(&a[r as usize]);
+            }
+        }
         let r = rec[c as usize];
         if r != NONE && z[r as usize] > 0.0 {
             a[r as usize] += a[c as usize];
@@ -283,8 +382,32 @@ pub fn accumulate(lat: &Lattice, z: &[f32], order: &[u32], rec: &[u32]) -> Vec<f
     a
 }
 
+/// `a^m` of the area `a` of cell `c`; a cell with only its own area (`a` equal to the area of its face cell bit for bit) reads and fills `leaf_pow`.
+fn area_pow(lat: &Lattice, leaf_pow: &mut [f64], c: usize, a: f64, m: f64) -> f64 {
+    let own = c % (lat.n * lat.n);
+    if a.to_bits() != lat.area_m2[own].to_bits() {
+        return libm::pow(a, m);
+    }
+    if leaf_pow[own].is_nan() {
+        leaf_pow[own] = libm::pow(a, m);
+    }
+    leaf_pow[own]
+}
+
 /// One step: the flood, the receivers, the area and the implicit update `z = (z + dt U + f z_r) / (1 + f)`, `f = K A^m dt / distance`.
 pub fn step(lat: &Lattice, input: &CoupledInput, z: &mut [f32], p: &CoupledParams) -> (Vec<u32>, Vec<f64>, StepStat) {
+    step_with(lat, input, z, p, &mut vec![f64::NAN; lat.n * lat.n])
+}
+
+/// [`step`] with the power of a lone cell's own area kept per face cell in `leaf_pow` (NaN: not computed yet): a cell nothing drains into has
+/// `A` equal to its area, which is most of the land, and the same `pow` call gives the same bits.
+fn step_with(
+    lat: &Lattice,
+    input: &CoupledInput,
+    z: &mut [f32],
+    p: &CoupledParams,
+    leaf_pow: &mut [f64],
+) -> (Vec<u32>, Vec<f64>, StepStat) {
     assert!(
         z.len() == lat.len() && input.uplift.len() == lat.len() && input.erodibility.len() == lat.len(),
         "the inputs must have one value per cell"
@@ -294,7 +417,22 @@ pub fn step(lat: &Lattice, input: &CoupledInput, z: &mut [f32], p: &CoupledParam
     let (rec, dir) = receivers(lat, &filled, &order, p);
     let a = accumulate(lat, z, &order, &rec);
     let (mut sum, mut max) = (0.0f64, 0.0f64);
-    for &c in &order {
+    for (i, &c) in order.iter().enumerate() {
+        if let Some(&ahead) = order.get(i + AHEAD) {
+            let ahead = ahead as usize;
+            prefetch(&rec[ahead]);
+            prefetch(&dir[ahead]);
+            prefetch(&a[ahead]);
+            prefetch(&z[ahead]);
+            prefetch(&input.erodibility[ahead]);
+            prefetch(&input.uplift[ahead]);
+        }
+        if let Some(&near) = order.get(i + AHEAD / 2) {
+            let r = rec[near as usize];
+            if r != NONE {
+                prefetch(&z[r as usize]);
+            }
+        }
         let c = c as usize;
         let old = f64::from(z[c]);
         let r = rec[c];
@@ -302,7 +440,10 @@ pub fn step(lat: &Lattice, input: &CoupledInput, z: &mut [f32], p: &CoupledParam
             (0.0, 0.0)
         } else {
             let dist = lat.spacing_m(c, usize::from(dir[c]), r as usize);
-            (f64::from(z[r as usize]).max(0.0), f64::from(input.erodibility[c]) * libm::pow(a[c], p.area_exp) * p.dt_years / dist)
+            (
+                f64::from(z[r as usize]).max(0.0),
+                f64::from(input.erodibility[c]) * area_pow(lat, leaf_pow, c, a[c], p.area_exp) * p.dt_years / dist,
+            )
         };
         let new = ((old + p.dt_years * f64::from(input.uplift[c]) + f * zr) / (1.0 + f)).max(p.min_height_m);
         z[c] = new as f32;
@@ -317,9 +458,10 @@ pub fn step(lat: &Lattice, input: &CoupledInput, z: &mut [f32], p: &CoupledParam
 pub fn run(lat: &Lattice, input: &CoupledInput, p: &CoupledParams, steps: usize) -> CoupledState {
     let mut z = input.z.clone();
     let mut log = Vec::with_capacity(steps);
+    let mut leaf_pow = vec![f64::NAN; lat.n * lat.n];
     let mut last = (vec![NONE; lat.len()], vec![0.0; lat.len()]);
     for _ in 0..steps {
-        let (rec, a, stat) = step(lat, input, &mut z, p);
+        let (rec, a, stat) = step_with(lat, input, &mut z, p, &mut leaf_pow);
         log.push(stat);
         last = (rec, a);
     }
@@ -481,6 +623,8 @@ mod tests {
 
     const R: f64 = planet_core::EARTH_RADIUS_M;
     const PINNED_CHECKSUM: u64 = 3_741_216_821_528_484_935;
+    /// 40 cells per face edge, 100 steps, from the unoptimised run of 2026-10-24.
+    const PINNED_CHECKSUM_100: u64 = 8_049_833_316_363_421_743;
 
     /// A smooth world with about 60 % land: heights from the direction, uplift and erodibility constant.
     fn world(lat: &Lattice) -> CoupledInput {
@@ -578,6 +722,14 @@ mod tests {
         s.area_m2.iter().for_each(|a| eat(a.to_bits()));
         s.receiver.iter().for_each(|r| eat(*r));
         h
+    }
+
+    // spec: GEN-040, GEN-042
+    #[test]
+    fn a_hundred_step_run_across_a_face_edge_mesh_keeps_its_checksum() {
+        let lat = Lattice::new(40, R);
+        let state = run(&lat, &world(&lat), &CoupledParams::default(), 100);
+        assert_eq!(checksum(&state), PINNED_CHECKSUM_100, "the run changed: an optimisation must not change a bit");
     }
 
     // spec: GEN-040
