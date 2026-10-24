@@ -145,5 +145,5 @@ fn a_flight_over_the_chunks_lands_every_map_and_the_rebakes_stay_few_and_an_edit
     }
     let after = r.world.horizon_stats().unwrap();
     assert!(after.baked > before, "the edit bakes the maps again: {after:?}");
-    assert!(after.rebaked >= s.rebaked + 1);
+    assert!(after.rebaked > s.rebaked);
 }
