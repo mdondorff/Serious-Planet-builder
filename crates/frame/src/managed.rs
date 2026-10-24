@@ -371,12 +371,12 @@ impl ManagedLoop {
         queued
     }
 
-    /// Set the settle window of the refresh pre-emption in milliseconds of the injected clock (STRM-031, ADR 0072): a tile that edits keep
     /// The chunk field the frame counts its stand-in share against (STRM-039); `None` counts nothing.
     pub fn set_chunk_view(&mut self, view: Option<Arc<dyn crate::chunkshare::ChunkView>>) {
         self.chunk_view = view;
     }
 
+    /// Set the settle window of the refresh pre-emption in milliseconds of the injected clock (STRM-031, ADR 0072): a tile that edits keep
     /// re-keying is refreshed once, after the last of them has been quiet for this long. 0 (the default) holds nothing.
     pub fn set_refresh_settle(&mut self, ms: u64) {
         self.manager.streamer_mut().set_refresh_settle(ms);
