@@ -610,7 +610,7 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     check_floor_option(&o)?;
     if !matches!(o.mode, Mode::Generate) {
         // The global-bake perf scene takes the definition, grid size and thread count of the global commands.
-        let bake_scene = matches!(o.mode, Mode::TestRender) && o.perf && o.scene == "global-bake";
+        let bake_scene = matches!(o.mode, Mode::TestRender) && o.perf && matches!(o.scene.as_str(), "global-bake" | "coupled");
         let stream_scene = matches!(o.mode, Mode::TestRender)
             && (o.perf || o.perf_smoke || litperf::is_capture_scene(&o.scene))
             && (streamperf::is_stream_scene(&o.scene) || litperf::is_lit_scene(&o.scene) || litperf::is_capture_scene(&o.scene));
@@ -780,6 +780,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
         return match o.scene.as_str() {
             "terrain" => skeleton::perf_terrain(o, &ctx, out),
             "global-bake" => globalperf::perf_global_bake(o, &ctx, out),
+            "coupled" => globalperf::perf_coupled(o, &ctx, out),
             s if preflightperf::is_preflight_scene(s) => preflightperf::perf_preflight(o, &ctx, out),
             s if editperf::is_edit_scene(s) => editperf::perf_edit_latency(o, &ctx, out),
             s if streamperf::is_stream_scene(s) => streamperf::perf_streaming(o, &ctx, out),

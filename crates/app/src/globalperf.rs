@@ -82,9 +82,95 @@ pub fn perf_global_bake(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> R
     }
 }
 
+/// The GEN-042 budget (M8 exit criterion 4): the coupled run takes at most ten minutes. Returns the violated budgets, empty when it holds.
+pub(crate) fn coupled_budget_failures(secs: f64) -> Vec<String> {
+    if secs.is_finite() && secs <= 600.0 {
+        Vec::new()
+    } else {
+        vec![format!("coupled run time {secs:.1} s exceeds the ten minute budget (GEN-042)")]
+    }
+}
+
+/// Steps of the timed coupled run: the top of the 70 to 100 the world version is expected to take.
+pub(crate) const COUPLED_STEPS: usize = 100;
+
+/// The fixed input of the timed run: a smooth world of about 60 % land (the heights from the direction), uplift and erodibility constant.
+fn coupled_input(lat: &planet_generators::coupled::Lattice) -> planet_generators::coupled::CoupledInput {
+    let z: Vec<f32> = (0..lat.len())
+        .map(|c| {
+            let d = lat.direction(c);
+            (1200.0 * (libm::sin(3.0 * d.x + 1.0) * libm::cos(2.0 * d.y) + 0.5 * libm::sin(5.0 * d.z)) + 200.0) as f32
+        })
+        .collect();
+    planet_generators::coupled::CoupledInput { uplift: vec![1.0e-3; z.len()], erodibility: vec![2.0e-5; z.len()], z }
+}
+
+/// Run the coupled run once from the fixed input and the default parameters (seed 0): the wall seconds and the run.
+pub(crate) fn time_coupled(res: usize, steps: usize) -> (f64, planet_generators::coupled::CoupledState) {
+    use planet_generators::coupled::{run, CoupledParams, Lattice};
+    let lat = Lattice::new(res, planet_core::EARTH_RADIUS_M);
+    let input = coupled_input(&lat);
+    let start = Instant::now();
+    let state = run(&lat, &input, &CoupledParams::default(), steps);
+    (start.elapsed().as_secs_f64(), state)
+}
+
+// spec: GEN-042
+/// Time the global coupled run (GEN-040) at `--global-res` cells per face edge (default 2048) for [`COUPLED_STEPS`] steps after the ADR 0020
+/// readiness gate, and report wall time, steps, seconds per step and threads (the run is single-threaded) against the GEN-042 budget.
+pub fn perf_coupled(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
+    planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
+    let owner_override = crate::readiness_gate(o, ctx, out)?;
+    let res = if o.given.contains("--global-res") { o.global_res } else { 2048 };
+    writeln!(out, "coupled run perf: {res} cells per face edge, {COUPLED_STEPS} steps, 1 thread").map_err(err)?;
+    let (secs, state) = time_coupled(res as usize, COUPLED_STEPS);
+    let per_step = secs / COUPLED_STEPS as f64;
+    let last = state.steps.last().map_or(f64::NAN, |s| s.mean_dz_m);
+    let failures = coupled_budget_failures(secs);
+    writeln!(out, "coupled {secs:.1} s, {COUPLED_STEPS} steps, {per_step:.2} s per step, 1 thread (last step mean change {last:.4} m)")
+        .map_err(err)?;
+    let json = format!(
+        "{{\n  \"scene\": \"coupled\",\n  \"adapter\": \"{}\",\n  \"owner_override\": {:?},\n  \"res\": {res},\n  \"steps\": {COUPLED_STEPS},\n  \"threads\": 1,\n  \"seconds\": {secs:.3},\n  \"seconds_per_step\": {per_step:.4},\n  \"budget_failures\": {:?}\n}}\n",
+        ctx.adapter_name().replace('"', "'"),
+        owner_override,
+        failures
+    );
+    let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("coupled.json"));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(err)?;
+    }
+    std::fs::write(&path, json).map_err(err)?;
+    writeln!(out, "wrote {}", path.display()).map_err(err)?;
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // spec: GEN-042
+    #[test]
+    fn the_coupled_budget_is_ten_minutes_and_a_small_run_is_deterministic() {
+        assert!(coupled_budget_failures(599.9).is_empty());
+        assert_eq!(coupled_budget_failures(600.1).len(), 1);
+        assert_eq!(coupled_budget_failures(f64::NAN).len(), 1, "a missing time never passes");
+        let (secs, a) = time_coupled(8, 3);
+        let (_, b) = time_coupled(8, 3);
+        assert!(secs.is_finite() && secs >= 0.0);
+        assert_eq!(a.steps.len(), 3);
+        assert!(a.z.iter().zip(&b.z).all(|(x, y)| x.to_bits() == y.to_bits()), "the fixed input gives the same run");
+    }
+
+    // spec: GEN-042
+    #[test]
+    fn the_coupled_scene_takes_the_global_res() {
+        let ok = run_str(&["test-render", "--perf", "--scene", "coupled", "--global-res", "16", "--smoke"]);
+        assert!(ok.is_ok(), "{ok:?}");
+    }
 
     fn run_str(args: &[&str]) -> Result<String, String> {
         let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
