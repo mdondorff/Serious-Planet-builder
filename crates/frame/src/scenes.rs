@@ -189,6 +189,39 @@ pub fn build_script(scene: StreamScene, radius_m: f64, aspect: f64, field: &dyn 
     }
 }
 
+/// Degrees below the horizon the level flight of the speed-envelope scene looks (the dive's walker view).
+pub const ENVELOPE_PITCH_DEG: f64 = 8.0;
+
+/// The cameras of a level flight (the speed-envelope scene, TEST-047): `frames` cameras `altitude_m` above the field, from the place
+/// (`lat_deg`, `lon_deg`) due north along the meridian at `speed_mps`, one per [`FRAME_STEP_S`], each looking north
+/// [`ENVELOPE_PITCH_DEG`] below the horizon. Pure and deterministic.
+#[allow(clippy::too_many_arguments)]
+pub fn level_flight_cameras(
+    radius_m: f64,
+    aspect: f64,
+    field: &dyn HeightField,
+    altitude_m: f64,
+    speed_mps: f64,
+    lat_deg: f64,
+    lon_deg: f64,
+    frames: usize,
+) -> Vec<Camera> {
+    let north = Vec3::new(0.0, 0.0, 1.0);
+    (0..frames)
+        .map(|k| {
+            let lat = lat_deg + (speed_mps * SceneScript::time_s(k) / radius_m).to_degrees();
+            Camera::at_surface_point(
+                above_terrain(radius_m, field, lat, lon_deg, altitude_m),
+                north,
+                ENVELOPE_PITCH_DEG.to_radians(),
+                FOV_Y_DEG.to_radians(),
+                aspect,
+                NEAR_M,
+            )
+        })
+        .collect()
+}
+
 /// A self-contained SplitMix64 generator: identical on every platform and run, no `libm` or platform generator involved.
 #[derive(Clone, Debug)]
 pub struct ScriptRng(u64);
@@ -270,6 +303,9 @@ pub struct FrameLag {
     pub mean: f64,
     /// The largest single node's lag.
     pub worst: u8,
+    /// The share of the screen, weighted like `mean`, whose node is drawn from a coarser tile than the selection wanted or is not covered
+    /// at all (TEST-046): 0 when every node is drawn at its level or covered by finer tiles.
+    pub coarse_share: f64,
     /// Target nodes with no drawn tile at, above or below them: counted as `level + 1` levels in the mean. Each one is a blank
     /// tile (ADR 0032's hard measure: a tile, root or ancestor, for every visible node); the frame's drawing rule (a plan of another
     /// camera is drawn only where it covers the frame's view, else the cover) leaves none.
@@ -340,7 +376,7 @@ impl DrawnSet {
 /// nothing drawn at, above or below it is uncovered, counts as `level + 1` levels and is reported with its tile id. The mean is
 /// weighted by the nodes' projected pixels ([`node_weight`]). Pure: no field, no clock, no residency state.
 pub fn detail_lag(fresh: &TerrainPlan, drawn: &DrawnSet, lod: &LodParams) -> FrameLag {
-    let (mut sum, mut total, mut worst) = (0.0f64, 0.0f64, 0u8);
+    let (mut sum, mut total, mut worst, mut coarse) = (0.0f64, 0.0f64, 0u8, 0.0f64);
     let mut uncovered = Vec::new();
     for n in &fresh.nodes {
         let mut up = Some(n.tile);
@@ -363,9 +399,13 @@ pub fn detail_lag(fresh: &TerrainPlan, drawn: &DrawnSet, lod: &LodParams) -> Fra
         worst = worst.max(lag);
         let w = node_weight(&fresh.camera, lod, n);
         sum += w * f64::from(lag);
+        if lag > 0 {
+            coarse += w;
+        }
         total += w;
     }
-    FrameLag { mean: if total > 0.0 { sum / total } else { 0.0 }, worst, uncovered }
+    let share = |x: f64| if total > 0.0 { x / total } else { 0.0 };
+    FrameLag { mean: share(sum), worst, coarse_share: share(coarse), uncovered }
 }
 
 /// [`detail_lag`] of a target plan against a drawn plan (the tiles of its nodes).
@@ -659,5 +699,67 @@ mod tests {
         assert!(node_weight(&cam, &lod, &near) > node_weight(&cam, &lod, &far));
         let screen = 90.0 * 90.0 * cam.aspect;
         assert!(node_weight(&cam, &lod, &near) <= screen);
+    }
+
+    // spec: TEST-046
+    #[test]
+    fn the_coarse_share_is_the_pixel_share_of_nodes_drawn_coarser_than_wanted_or_not_at_all() {
+        let field = Reference(1);
+        let lod = LodParams::earth_1080p();
+        let camera = script(StreamScene::Dive).cameras[2300];
+        let req = TerrainRequest {
+            camera,
+            size: (1280, 720),
+            view: crate::terrain::TerrainView::Level,
+            lod: lod.clone(),
+            face_mapping: <planet_core::cube::TangentWarp as planet_core::cube::FaceMapping>::id(&planet_core::cube::TangentWarp)
+                .to_string(),
+            seed: 1,
+        };
+        let fresh = plan_terrain_cached(&req, &field, &mut SelectionCache::new()).unwrap();
+        assert!(fresh.nodes.len() >= 2 && fresh.nodes.iter().any(|n| n.tile.parent().is_some()), "a plan of several nodes");
+        let share = |drawn: &DrawnSet| detail_lag(&fresh, drawn, &lod).coarse_share;
+        // Every node drawn at its own level.
+        assert_eq!(share(&DrawnSet::of_plan(&fresh)), 0.0);
+        // Nothing drawn: every node is uncovered.
+        assert_eq!(share(&DrawnSet::default()), 1.0);
+        // One node drawn from its parent only (the others at their level): exactly that node's weight over the total.
+        let k = fresh.nodes.iter().position(|n| n.tile.parent().is_some()).unwrap();
+        let tiles: Vec<TileId> =
+            fresh.nodes.iter().enumerate().map(|(i, n)| if i == k { n.tile.parent().unwrap() } else { n.tile }).collect();
+        let total: f64 = fresh.nodes.iter().map(|n| node_weight(&fresh.camera, &lod, n)).sum();
+        let want = node_weight(&fresh.camera, &lod, &fresh.nodes[k]) / total;
+        let got = share(&DrawnSet::new(tiles));
+        assert!((got - want).abs() < 1e-12 && got > 0.0 && got < 1.0, "{got} against {want}");
+        // Finer tiles under a node cover it: no share.
+        let child = fresh.nodes[k].tile.children().unwrap()[0];
+        let covered: Vec<TileId> = fresh.nodes.iter().enumerate().map(|(i, n)| if i == k { child } else { n.tile }).collect();
+        assert_eq!(share(&DrawnSet::new(covered)), 0.0);
+        // No weight, no share.
+        let empty = TerrainPlan { nodes: Vec::new(), ..fresh.clone() };
+        assert_eq!(detail_lag(&empty, &DrawnSet::default(), &lod).coarse_share, 0.0);
+    }
+
+    // spec: TEST-047
+    #[test]
+    fn a_level_flight_moves_the_speed_times_the_step_along_the_meridian_at_the_altitude_above_the_field() {
+        let field = Reference(3);
+        let (speed, alt) = (300.0, 100.0);
+        let cams = level_flight_cameras(R, 16.0 / 9.0, &field, alt, speed, 20.0, 30.0, 120);
+        assert_eq!(cams.len(), 120);
+        for w in cams.windows(2) {
+            let step = (w[1].position.0 - w[0].position.0).length();
+            assert!((step - speed * FRAME_STEP_S).abs() < 0.05, "{step}");
+        }
+        for k in [0usize, 57, 119] {
+            let c = &cams[k];
+            let dir = c.position.0.normalized();
+            let h = c.position.0.length() - R - field.height(dir);
+            assert!((h - alt).abs() < 1e-6, "frame {k}: {h} m above the field");
+            assert!((c.forward.dot(dir) + libm::sin(ENVELOPE_PITCH_DEG.to_radians())).abs() < 1e-9, "looks 8 degrees down");
+        }
+        assert_eq!(cams, level_flight_cameras(R, 16.0 / 9.0, &field, alt, speed, 20.0, 30.0, 120), "deterministic");
+        let other = level_flight_cameras(R, 16.0 / 9.0, &field, alt, speed, 25.0, 30.0, 120);
+        assert!((other[0].position.0 - cams[119].position.0).length() > 1000.0, "another start place shares no place");
     }
 }

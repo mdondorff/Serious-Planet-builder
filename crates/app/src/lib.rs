@@ -6,6 +6,7 @@ pub mod crash;
 pub mod editperf;
 pub mod editscale;
 pub mod editwin;
+pub mod envelopeperf;
 pub mod globalperf;
 pub mod litperf;
 pub mod lookload;
@@ -169,6 +170,8 @@ pub struct Options {
     pub perf_smoke: bool,
     /// `--settle-ms N`: the refresh settle window of the `edit-latency` scene in milliseconds (ADR 0072, STRM-031); the default is the editor's.
     pub settle_ms: u64,
+    /// `--share-bound F`: the coarse share of the screen over a window the `envelope` scene accepts (TEST-047); 1 % by default.
+    pub share_bound: f64,
     /// `--lit`: the streaming perf scenes draw the lit path with the atmosphere and the water (TEST-025).
     pub lit: bool,
     /// `--flight-frames N`: frames of each coastal flight of the lit perf scenes.
@@ -308,6 +311,7 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
         frames: 300,
         perf_smoke: false,
         settle_ms: editwin::REFRESH_SETTLE_MS,
+        share_bound: envelopeperf::DEFAULT_BOUND,
         lit: false,
         flight_frames: 240,
         views: None,
@@ -341,6 +345,9 @@ pub fn parse_args(args: &[String]) -> Result<Options, String> {
             "--perf-smoke" => o.perf_smoke = true,
             "--settle-ms" => {
                 o.settle_ms = it.next().ok_or("--settle-ms needs a value")?.parse().map_err(|e| format!("--settle-ms: {e}"))?
+            }
+            "--share-bound" => {
+                o.share_bound = it.next().ok_or("--share-bound needs a value")?.parse().map_err(|e| format!("--share-bound: {e}"))?
             }
             "--lit" => o.lit = true,
             "--no-ui" => o.no_ui = true,
@@ -782,6 +789,7 @@ fn test_render(o: &Options, out: &mut dyn Write) -> Result<(), String> {
             "terrain" => skeleton::perf_terrain(o, &ctx, out),
             "global-bake" => globalperf::perf_global_bake(o, &ctx, out),
             "coupled" => globalperf::perf_coupled(o, &ctx, out),
+            s if envelopeperf::is_envelope_scene(s) => envelopeperf::perf_envelope(o, &ctx, out),
             s if preflightperf::is_preflight_scene(s) => preflightperf::perf_preflight(o, &ctx, out),
             s if editperf::is_edit_scene(s) => editperf::perf_edit_latency(o, &ctx, out),
             s if streamperf::is_stream_scene(s) => streamperf::perf_streaming(o, &ctx, out),
