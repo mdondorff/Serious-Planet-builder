@@ -183,6 +183,8 @@ pub struct Network {
     pub river_area_m2: Vec<f64>,
     /// The base field's height at each cell in metres (read once for the network and the solve).
     pub base_z: Vec<f64>,
+    /// The unit direction of each cell's centre (made once for the network and the solve).
+    pub dirs: Vec<Vec3>,
 }
 
 /// "No next cell."
@@ -309,7 +311,7 @@ impl Network {
         let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
         let heights = base.base_heights(&dirs);
         let z0 = dirs.iter().zip(&heights).map(|(&d, &h)| (coarse_z_at(run, d) + (h - base.coarse_input(d))) as f32).collect();
-        Network { corridor, next, inflow_m2, z0, anchor_z, river_area_m2, base_z: heights }
+        Network { corridor, next, inflow_m2, z0, anchor_z, river_area_m2, base_z: heights, dirs }
     }
 }
 
@@ -392,7 +394,7 @@ pub fn solve(
     const NONE: u32 = u32::MAX;
     let len = region.cells.len();
     let key = |x: usize| region.cells[x].key();
-    let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
+    let dirs: &[Vec3] = &net.dirs;
     let z_base: Vec<f64> = net.base_z.clone();
     let mut z = z_base.clone();
     for (h, &anchor) in z.iter_mut().zip(&net.anchor_z) {
@@ -602,13 +604,20 @@ pub fn solve(
         if hill { (0..inner).map(|c| core::array::from_fn(|k| dist(c, region.neighbours[c][k] as usize))).collect() } else { Vec::new() };
     let protected = |c: usize| fixed(c) || net.corridor[c] || area[c] > p.channel_area_m2;
     let cf = (p.diffusion * p.dt_years / (lat.cell_m(radius_m) * lat.cell_m(radius_m))).min(0.12);
+    // The cells the sweep moves, receivers first, as arrays read in sequence (the cell, its receiver, the coefficient and its divisor).
+    let (mut sw_cell, mut sw_rec, mut sw_f, mut sw_den) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for &c in order.iter().rev() {
+        if rec[c] != NONE && !fixed(c) {
+            sw_cell.push(c as u32);
+            sw_rec.push(rec[c]);
+            sw_f.push(coef[c]);
+            sw_den.push(1.0 + coef[c]);
+        }
+    }
     for t in 0..p.steps {
-        for &c in order.iter().rev() {
-            let r = rec[c];
-            if r == NONE || fixed(c) {
-                continue;
-            }
-            z[c] = (z[c] + coef[c] * z[r as usize]) / (1.0 + coef[c]);
+        for i in 0..sw_cell.len() {
+            let c = sw_cell[i] as usize;
+            z[c] = (z[c] + sw_f[i] * z[sw_rec[i] as usize]) / sw_den[i];
         }
         if hill {
             let cells = region.depth.partition_point(|&d| d <= (p.steps - t) as u16).min(inner);
