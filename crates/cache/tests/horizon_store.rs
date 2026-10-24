@@ -106,6 +106,10 @@ fn a_changed_march_the_observer_lattice_or_the_coupled_run_changes_every_key() {
         (coupled(), HorizonSpec { m: M * 2, ..h }),
         (CoupledSpec { steps: 7, ..coupled() }, h),
         (CoupledSpec { inputs: 1, ..coupled() }, h),
+        (CoupledSpec { n: N * 2, ..coupled() }, h),
+        (CoupledSpec { bake_res: N * 2, ..coupled() }, h),
+        (CoupledSpec { params: CoupledParams { jitter: 0.6, ..coupled().params }, ..coupled() }, h),
+        (CoupledSpec { params: CoupledParams { seed: 5, ..coupled().params }, ..coupled() }, h),
     ];
     for (c, spec) in variants {
         let k = world(c, spec).horizon_key(tile, 4);
@@ -164,5 +168,35 @@ fn a_missing_or_foreign_block_is_an_error_naming_the_block_and_a_wrong_map_is_re
     let err = load_horizon(&store, &other).err().expect("another march has no blocks here");
     assert!(err.to_string().contains("coarse horizon block"), "{err}");
     assert!(w.horizon_records(&map()[1..]).is_err(), "a map of the wrong size");
+    let _ = fs::remove_dir_all(&d);
+}
+
+// spec: STRM-045
+#[test]
+fn a_damaged_stored_block_a_wrong_lattice_and_a_default_that_follows_the_body_are_refused_or_derived() {
+    let d = dir("damaged");
+    let w = world(coupled(), horizon());
+    let m = map();
+    // An observer lattice that does not divide the run's, or an azimuth count a block cannot hold, writes nothing.
+    assert!(world(coupled(), HorizonSpec { m: 3, ..horizon() }).horizon_records(&m).is_err());
+    assert!(world(coupled(), HorizonSpec { m: N * 2, ..horizon() }).horizon_records(&m).is_err());
+    let many = HorizonSpec { params: CoarseParams { azimuths: MAX_AZIMUTHS + 1, ..horizon().params }, ..horizon() };
+    assert!(matches!(world(coupled(), many).horizon_records(&m), Err(BlockCodecError::HorizonAzimuths(_))));
+    // A block stored under the right key but cut short is an error naming the block, not a default.
+    let mut records = w.horizon_records(&m).unwrap();
+    let bad = records[0].payload.len() - 2;
+    records[0].payload.truncate(bad);
+    let mut writer = planet_cache::pack::PackWriter::open(&d, w.params(), DEFAULT_MAX_PACK_BYTES).unwrap();
+    for r in &records {
+        writer.append(r).unwrap();
+    }
+    writer.finish().unwrap();
+    let store = TileStore::open(&d, w.params()).unwrap();
+    let err = load_horizon(&store, &w).err().expect("a damaged block");
+    assert!(err.to_string().contains("coarse horizon block"), "{err}");
+    // The default march takes the body's radius (an Earth-sized default on a smaller body would key and march with the wrong one).
+    let defaulted = GlobalWorld::from_definition(&WorldDefinition::single_planet(R, 3)).unwrap().horizon_spec();
+    assert_eq!(defaulted.params.radius_m, R);
+    assert_eq!(defaulted.m, 512);
     let _ = fs::remove_dir_all(&d);
 }

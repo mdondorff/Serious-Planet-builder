@@ -118,6 +118,14 @@ impl GlobalWorld {
     pub fn horizon_records(&self, map: &[u8]) -> Result<Vec<Record>, BlockCodecError> {
         let spec = self.horizon_spec();
         let (m, a) = (spec.m as usize, spec.params.azimuths as usize);
+        // The observer lattice is laid over the coupled run's: its size must divide the run's, and the azimuth count must be one a block holds.
+        let run_n = self.coupled_spec().n;
+        if spec.m == 0 || spec.m > run_n || run_n % spec.m != 0 {
+            return Err(BlockCodecError::Grid { level: 0, cells: spec.m });
+        }
+        if spec.params.azimuths == 0 || spec.params.azimuths > MAX_AZIMUTHS {
+            return Err(BlockCodecError::HorizonAzimuths(spec.params.azimuths));
+        }
         let (level, cells) = self.layout(spec.m).map_err(|_| BlockCodecError::Grid { level: 0, cells: spec.m })?;
         let expected = 6 * (m as u64) * (m as u64) * a as u64;
         if map.len() as u64 != expected {

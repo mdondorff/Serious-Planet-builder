@@ -25,6 +25,14 @@ Status: draft for the planner; the open questions need a decision or a measureme
 3. **Debug view:** a lit `ShadeView` (horizon, shadow), no new key.
 4. **Edits:** shadows lag an edit by design. An edit re-queues the horizon job of every chunk whose halo it touches. Precise edit handling belongs to M8-7 (to be noted in its change).
 
+## Numbers claimed in the cache (no central registry)
+| What | Number |
+|---|---|
+| `Kind::GlobalHorizon` (key kind and record kind byte) | 9 |
+| `PARAM_HORIZON` (output-parameter tag) | 12 |
+| coarse horizon codec version | 1 (`HORIZON_CODEC_VERSION`) |
+| requirement IDs | GEN-044 to GEN-046, STRM-045, STRM-048, REND-038 (STRM-046 and STRM-047 are explorer's) |
+
 ## Measured (indicative, CPU only, not a gated perf run)
 | Quantity | Value |
 |---|---|

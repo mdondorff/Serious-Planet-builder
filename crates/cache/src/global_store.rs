@@ -882,7 +882,7 @@ impl GlobalWorld {
             block_limit: MAX_BLOCK_CELLS,
             sea,
             coupled: CoupledSpec::default(),
-            horizon: HorizonSpec::default(),
+            horizon: HorizonSpec { params: CoarseParams::for_lattice(2048, radius_m), ..HorizonSpec::default() },
         })
     }
 
