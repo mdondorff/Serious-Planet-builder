@@ -8,6 +8,7 @@ pub mod controller;
 pub mod draw;
 pub mod freecam;
 pub mod globe;
+pub mod horizonview;
 pub mod instances;
 pub mod litscenes;
 pub mod lod;
