@@ -33,8 +33,9 @@ pub const DEFAULT_CHUNK_TIMEOUT_S: f64 = 900.0;
 /// Where the poses look: the largest river of the world's coupled run, or a point.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Anchor {
-    /// The land cell of the coupled run with the largest drainage area that drains on (the cell of the chunk scenes).
-    LargestRiver,
+    /// The land cell of the coupled run at least this many metres high with the largest drainage area that drains on (0: the cell of the
+    /// chunk scenes, which can be a river mouth over the sea; a higher bound puts the anchor inland on the river).
+    LargestRiver { min_height_m: f64 },
     /// Latitude and longitude in degrees.
     LatLon(f64, f64),
 }
@@ -88,7 +89,9 @@ pub fn parse_config(text: &str) -> Result<StillsConfig, String> {
     let root: toml::Table = text.parse().map_err(|e| format!("the poses file: {e}"))?;
     let place = root.get("place").and_then(|v| v.as_table()).ok_or("the poses file: [place] is missing")?;
     let anchor = match (place.get("anchor"), place.get("lat"), place.get("lon")) {
-        (Some(a), None, None) if a.as_str() == Some("largest-river") => Anchor::LargestRiver,
+        (Some(a), None, None) if a.as_str() == Some("largest-river") => {
+            Anchor::LargestRiver { min_height_m: number(place, "min_height_m", "[place]")?.unwrap_or(0.0) }
+        }
         (Some(a), None, None) => {
             return Err(format!("[place]: anchor {} is unknown (known: \"largest-river\"; or give lat and lon)", show(a)))
         }
@@ -293,21 +296,28 @@ fn enable_chunks(
     Ok(maps)
 }
 
-/// The direction of the anchor.
-fn anchor_direction(anchor: Anchor, maps: &planet_generators::coupled::CoupledMaps) -> Result<Vec3, String> {
+/// The direction of the anchor and, for a river cell, the bearing of the river's flow there (degrees clockwise from north), so the poses can
+/// be given along the river.
+fn anchor_direction(anchor: Anchor, maps: &planet_generators::coupled::CoupledMaps) -> Result<(Vec3, Option<f64>), String> {
     match anchor {
-        Anchor::LatLon(lat, lon) => Ok(direction_of(lat, lon)),
-        Anchor::LargestRiver => {
+        Anchor::LatLon(lat, lon) => Ok((direction_of(lat, lon), None)),
+        Anchor::LargestRiver { min_height_m } => {
             let rec = maps.receivers();
             let mut best: Option<(usize, f32)> = None;
             for (c, &r) in rec.iter().enumerate() {
                 let a = maps.network_area_m2(c);
-                if maps.z(c) > 0.0 && r != planet_generators::coupled::NONE && best.is_none_or(|(_, b)| a > b) {
+                if f64::from(maps.z(c)) > min_height_m.max(0.0) && r != planet_generators::coupled::NONE && best.is_none_or(|(_, b)| a > b)
+                {
                     best = Some((c, a));
                 }
             }
-            let (cell, _) = best.ok_or("the coupled run has no land river")?;
-            Ok(maps.lattice().direction(cell))
+            let (cell, _) = best.ok_or_else(|| format!("the coupled run has no land river at least {min_height_m} m high"))?;
+            let lat = maps.lattice();
+            let here = lat.direction(cell);
+            let there = lat.direction(rec[cell] as usize);
+            let (north, east) = (heading_vector(here, 0.0), heading_vector(here, 90.0));
+            let bearing = libm::atan2(there.dot(east), there.dot(north)).to_degrees().rem_euclid(360.0);
+            Ok((here, Some(bearing)))
         }
     }
 }
@@ -346,9 +356,17 @@ pub fn capture_stills(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Res
     .map_err(err)?;
     let workers = o.gen_workers().workers.max(1);
     let maps = enable_chunks(&world, config.chunk_cell_m, workers, out)?;
-    let anchor = anchor_direction(config.anchor, &maps)?;
+    let (anchor, flow) = anchor_direction(config.anchor, &maps)?;
     let (lat, lon) = anchor.lat_lon();
-    writeln!(out, "anchor: latitude {:.4} longitude {:.4} degrees", lat.to_degrees(), lon.to_degrees()).map_err(err)?;
+    let ground = world.field()?.height(anchor);
+    writeln!(
+        out,
+        "anchor: latitude {:.4} longitude {:.4} degrees, ground {ground:.1} m{}",
+        lat.to_degrees(),
+        lon.to_degrees(),
+        flow.map_or(String::new(), |b| format!(", the river flows towards bearing {b:.0} degrees"))
+    )
+    .map_err(err)?;
     let level_m = world.definition().sea(planet_world_def::BodyId::PLANET).map_err(|e| format!("the sea of the definition: {e}"))?.level_m;
     std::fs::create_dir_all(&dir).map_err(err)?;
     let mut index =
@@ -484,7 +502,7 @@ sun_declination_deg = 10
     #[test]
     fn the_poses_file_is_read_with_its_defaults_and_a_bad_one_names_the_key() {
         let c = parse_config(GOOD).unwrap();
-        assert_eq!(c.anchor, Anchor::LargestRiver);
+        assert_eq!(c.anchor, Anchor::LargestRiver { min_height_m: 0.0 });
         assert_eq!(c.chunk_timeout_s, DEFAULT_CHUNK_TIMEOUT_S);
         assert_eq!(c.chunk_cell_m, 8.0);
         assert_eq!(c.poses.len(), 2);
