@@ -69,7 +69,7 @@ pub trait BaseDetail: Send + Sync {
 
 /// A value in `[-1, 1]` that is a function of the segment and the knot alone.
 fn knot(seg: u64, i: i64) -> f64 {
-    let h = mix64(mix64(seg ^ 0x6d65_616e_6465_72) ^ i as u64);
+    let h = mix64(mix64(seg ^ 0x006d_6561_6e64_6572) ^ i as u64);
     2.0 * ((h >> 11) as f64 * (1.0 / 9_007_199_254_740_992.0)) - 1.0
 }
 
