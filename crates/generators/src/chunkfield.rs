@@ -196,7 +196,7 @@ pub trait ChunkStage: Send + Sync {
     fn bound_m(&self) -> f64;
     /// The change in metres at every cell of `region`. For a stage that reaches one ring per step the values at depth at most `region.halo - step_cap`
     /// are exact; a stage along a network (A-net) promises only the chunk's own cells and one ring of apron (its halo is what the network needs). The cells further out
-    /// are what the shrinking region left behind and are not to be read).
+    /// are what the shrinking region left behind and are not to be read.
     fn compute(&self, lat: &ChunkLattice, region: &Region) -> Vec<f32>;
     /// The rings of halo the stage needs around a chunk (default: the step cap, each step reaching one ring, plus the apron ring). A stage whose
     /// reach is not one ring per step (a process along a network) states its own, in metres over the cell size.
