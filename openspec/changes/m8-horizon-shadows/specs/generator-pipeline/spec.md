@@ -23,12 +23,12 @@ Source: opus-planner (2026-10-24, M8-5), SPIKE-32 architecture finding 2
 - **THEN** cells within range see the plateau toward it at its elevation angle (between the angles of its far and near edges), cells on the other face see it across the edge, cells beyond the range see nothing, a flat body has no horizon, the result is the same for every thread count, and deeper sea changes nothing
 
 ### Requirement: GEN-046 The horizon of a point
-The horizon elevation used at a point and an azimuth SHALL be the larger of the chunk map's and the coarse map's, each interpolated linearly between the two nearest azimuths; this combination and the interpolation SHALL be one CPU function that is the reference of the shader's (CON-07), with the soft edge of the shadow term stated in the spec.
+`generators::horizon_lookup` SHALL be the CPU reference of the shader's shadow (CON-07). The horizon at an azimuth is read by linear interpolation between the two nearest stored azimuths (wrapping from the last to the first); the horizon of a point is the larger of the chunk map's and the coarse map's, a map that is not there (the chunk's has not landed) leaving the other alone and neither giving 0; the lit factor is 0 when the sun's elevation is 0.35 degrees or more below the horizon, 1 when 0.9 degrees or more above it, and a smoothstep between. The sun's azimuth SHALL be formed in each map's own frame: the geographic frame for the coarse map, the cube face's raster frame (`i` east, `j` north, which the warp shears by up to about 30 degrees) for the chunk's, where the sun's horizontal part is split into its components along the two axes. The shader SHALL equal this within the tolerance of its tests (REND-038).
 
 Verify: A
-Status: planned
+Status: active
 Source: opus-planner (2026-10-24, M8-5), CON-07
 
 #### Scenario: Combination
 - **WHEN** a point has a chunk horizon of 3 degrees and a coarse horizon of 5 degrees at an azimuth, and the sun is 4 degrees and then 6 degrees high there
-- **THEN** the point is in shadow at 4 degrees and lit at 6 degrees, and with the coarse horizon absent the chunk map decides alone
+- **THEN** the point is in shadow at 4 degrees and lit at 6 degrees, and with the coarse horizon absent the chunk map decides alone (and the coarse map alone before the chunk's lands), the ramp is monotone between its ends, the interpolation is exact at the stored azimuths and wraps, and the sun's azimuth is 0 toward north, a quarter turn toward east in both frames and differs between the two frames on a turned face
