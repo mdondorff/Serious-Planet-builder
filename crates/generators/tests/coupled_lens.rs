@@ -110,3 +110,36 @@ fn the_lens_field_changes_only_the_climate_and_the_mesh_key() {
     let other = CoupledLensField::new(Box::new(Reference(5)), m, CoupledLens::Height);
     assert_ne!(mesh_key_field(&lensed, &TangentWarp, t, 8, R), mesh_key_field(&other, &TangentWarp, t, 8, R));
 }
+
+// spec: GEN-043
+#[test]
+fn a_stamp_stage_that_passes_a_tile_through_does_not_hide_the_lens_from_the_mesh_key() {
+    use planet_generators::chain::with_stamps;
+    use planet_world_def::stamp::{Stamp, StampKind};
+    use planet_world_def::{BodyId, ItemSpec, WorldDefinition, DEFAULT_ITEM_LAYER};
+    let mut def = WorldDefinition::single_planet(R, 1);
+    let at = Vec3::new(0.0, 0.0, 1.0);
+    let item = ItemSpec {
+        id: 1,
+        layer: DEFAULT_ITEM_LAYER.into(),
+        priority: 0,
+        dir: at,
+        content_hash: 0,
+        reach_m: 800.0,
+        max_delta_m: 60.0,
+        stamp: None,
+    }
+    .with_stamp(Stamp::new(StampKind::Hill, [50.0, 0.0, 0.0]));
+    def.put_item_spec(BodyId::PLANET, item).unwrap();
+    let def = Arc::new(def);
+    let base = || with_stamps(Box::new(Reference(5)), &def).unwrap();
+    let t = tile(1, 3, 2, 5);
+    assert!(base().passes_through(t, &TangentWarp), "the stamp is far from the tile: the stage is the identity there");
+    let m = maps(3);
+    let plain = base();
+    let height = CoupledLensField::new(base(), m.clone(), CoupledLens::Height);
+    let area = CoupledLensField::new(base(), m, CoupledLens::Area);
+    let key = |f: &dyn HeightField| mesh_key_field(f, &TangentWarp, t, 8, R);
+    assert_ne!(key(plain.as_ref()), key(&height));
+    assert_ne!(key(&height), key(&area));
+}

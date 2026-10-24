@@ -7,11 +7,11 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::coupledworld::{load_or_run, Standing, COUPLED_STEPS};
 use planet_cache::global_store::{GlobalWorld, StoreSource};
 use planet_cache::meshpack::TileSpec;
 use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId};
-use crate::coupledworld::{load_or_run, Standing, COUPLED_STEPS};
 use planet_generators::chain::{field_chain, CoupledLensField, NoBake, OwnedBake, OwnedOcean};
 use planet_generators::coupled::CoupledLens;
 use planet_generators::global::{GlobalCoarseGenerator, GlobalSample, LatticeSource, ReadError};
@@ -682,7 +682,9 @@ impl WorldTerrain {
         let built = field_chain(self.kind, &def, self.src.as_ref(), self.bake_key, self.bound_water);
         // The lens over the whole chain (GEN-043); while the run is not ready the field is the plain one.
         let built = match (self.coupled_lens(), self.coupled.standing()) {
-            (Some(lens), Standing::Ready(maps, _)) => built.map(|f| Box::new(CoupledLensField::new(f, maps, lens)) as Box<dyn HeightField + '_>),
+            (Some(lens), Standing::Ready(maps, _)) => {
+                built.map(|f| Box::new(CoupledLensField::new(f, maps, lens)) as Box<dyn HeightField + '_>)
+            }
             _ => built,
         };
         self.field_builds.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

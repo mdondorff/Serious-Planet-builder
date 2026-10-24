@@ -80,7 +80,8 @@ pub fn load_or_run(
         }
     }
     let state = run(&lat, &input, &spec.params, steps as usize);
-    let store_error = dir.and_then(|d| store_coupled(d, &world, &state, DEFAULT_MAX_PACK_BYTES).err().map(|e| format!("{}: {e}", d.display())));
+    let store_error =
+        dir.and_then(|d| store_coupled(d, &world, &state, DEFAULT_MAX_PACK_BYTES).err().map(|e| format!("{}: {e}", d.display())));
     Ok(CoupledRun { maps: Arc::new(CoupledMaps::new(lat, state.z, state.area_m2, id)), origin: Origin::Ran, store_error })
 }
 
@@ -138,7 +139,6 @@ impl CoupledSlot {
             .expect("spawn the coupled run's thread");
     }
 }
-
 
 /// The words the window title carries while a lens is on (VIEW-053): what is shown and where the run stands.
 pub fn lens_status(lens: planet_generators::coupled::CoupledLens, standing: &Standing) -> String {

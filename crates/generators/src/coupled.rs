@@ -405,7 +405,7 @@ impl CoupledMaps {
 pub enum CoupledLens {
     /// The height of the run in the temperature view: sea at the cold end, land by height up to the warm end.
     Height,
-    /// The drainage area in the precipitation view, on the log scale of the area map: rivers at the wet end.
+    /// The drainage area in the precipitation view, on the log scale of the area map but with one scale for the whole sphere (no seam at the cube edges): rivers at the wet end.
     Area,
 }
 
@@ -424,8 +424,12 @@ const LENS_T_RANGE: (f32, f32) = (-30.0, 40.0);
 const LENS_P_MAX: f32 = 3000.0;
 
 /// The word the lens adds to the mesh key of a tile: the run, the lens and the run's algorithm version.
+/// Version of the lens drawing rule (the ranges, the pooling window); bump it when `lens_climate` changes what it draws.
+pub const LENS_VERSION: u32 = 1;
+
+/// The word the lens adds to the mesh key of a tile: the run, the lens, the drawing rule and the run's algorithm version.
 pub fn lens_version_word(maps: &CoupledMaps, lens: CoupledLens) -> u64 {
-    mix64(mix64(maps.id ^ (lens.tag() << 56)) ^ u64::from(COUPLED_VERSION))
+    mix64(mix64(maps.id ^ (lens.tag() << 56)) ^ (u64::from(LENS_VERSION) << 32 | u64::from(COUPLED_VERSION)))
 }
 
 /// The climate texture of `tile` that shows the run through `lens` (GEN-043): per texel the height as a temperature or the log drainage area

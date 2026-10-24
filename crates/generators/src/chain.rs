@@ -178,8 +178,9 @@ impl HeightField for CoupledLensField<'_> {
     fn item_revision(&self) -> u64 {
         self.f().item_revision()
     }
-    fn passes_through(&self, tile: TileId, map: &dyn FaceMapping) -> bool {
-        self.f().passes_through(tile, map)
+    // The lens changes the climate of every tile, so it is never the identity on its source: the keying walk must stop here (GEN-043).
+    fn passes_through(&self, _tile: TileId, _map: &dyn FaceMapping) -> bool {
+        false
     }
     fn surface_id(&self) -> &'static str {
         self.f().surface_id()
