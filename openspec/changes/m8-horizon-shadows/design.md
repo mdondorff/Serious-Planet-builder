@@ -44,6 +44,6 @@ The measured figure is lower than the spike's, so the bake as a second job lands
 7. **Edits.** An edit changes heights, so its chunk and every chunk within the horizon range could change their maps. The proposal follows the chunk invalidation rule (reach plus halo) and treats the range beyond the halo as stale until the next bake (shadows lag an edit; documented, not fixed here). Decision with R3 and M8-7.
 
 ## Risks
-- The sunset look needs shadows from terrain 20 km away; the coarse horizon at a lattice step of 2.4 km (2048 cells) can show a blocky outline near the combination. Check on stills.
+- The sunset look needs shadows from terrain 20 km away; the coarse horizon at a lattice step of 4.9 km (2048 cells) can show a blocky outline near the combination. Check on stills.
 - The texture array limits (layers per array, 2048 on common hardware) cap resident chunks; eviction is already by need.
 - Seams: two adjacent chunks must agree at their border to the texel; the shared halo makes the values identical by construction (tier A).
