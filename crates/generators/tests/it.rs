@@ -16,6 +16,8 @@ mod chain;
 mod chunk;
 #[path = "climate.rs"]
 mod climate;
+#[path = "coupled_lens.rs"]
+mod coupled_lens;
 #[path = "compact.rs"]
 mod compact;
 #[path = "erosion.rs"]

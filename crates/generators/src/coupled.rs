@@ -77,7 +77,8 @@ impl Lattice {
         face_to_direction(&TangentWarp, Face(f as u8), -1.0 + (2.0 * i as f64 + 1.0) / n, -1.0 + (2.0 * j as f64 + 1.0) / n)
     }
 
-    fn cell_of(&self, d: Vec3) -> usize {
+    /// The cell holding the direction `d`.
+    pub fn cell_at(&self, d: Vec3) -> usize {
         let (f, s, t) = direction_to_face(&TangentWarp, d);
         let n = self.n as i64;
         let i = (((s + 1.0) * 0.5 * n as f64) as i64).clamp(0, n - 1);
@@ -102,7 +103,7 @@ impl Lattice {
             } else {
                 let s = -1.0 + (2.0 * ni as f64 + 1.0) / n as f64;
                 let t = -1.0 + (2.0 * nj as f64 + 1.0) / n as f64;
-                self.cell_of(face_to_direction(&TangentWarp, Face(f as u8), s, t)) as u32
+                self.cell_at(face_to_direction(&TangentWarp, Face(f as u8), s, t)) as u32
             };
         }
         out
@@ -348,6 +349,15 @@ pub fn height_map(n: usize, face: usize, z: &[f32]) -> Rgba {
     Rgba { width: n as u32, height: n as u32, data }
 }
 
+/// The position of the drainage area `a` on the log scale of the area map: 0 at the area of one cell (`own`), 1 at `max`.
+fn area_unit(own: f64, a: f64, max: f64) -> f64 {
+    if max > own * (1.0 + 1e-9) {
+        (libm::log(a.max(own) / own) / libm::log(max / own)).clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
 /// The drainage area of `face` as an image on a log scale from the area of a cell (dark) to the largest area on the face (bright), so the
 /// rivers read as bright lines (GEN-041).
 pub fn area_map(lat: &Lattice, face: usize, area_m2: &[f32]) -> Rgba {
@@ -358,16 +368,107 @@ pub fn area_map(lat: &Lattice, face: usize, area_m2: &[f32]) -> Rgba {
         .iter()
         .enumerate()
         .flat_map(|(i, &a)| {
-            let own = lat.area_m2(i);
-            let v = if f64::from(max) > own * (1.0 + 1e-9) {
-                (libm::log(f64::from(a).max(own) / own) / libm::log(f64::from(max) / own)).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
+            let v = area_unit(lat.area_m2(i), f64::from(a), f64::from(max));
             [(200.0 * v * v) as u8, (255.0 * v) as u8, (60.0 + 195.0 * v) as u8, 255]
         })
         .collect();
     Rgba { width: n as u32, height: n as u32, data }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// The viewer's lens on the stored run (GEN-043)
+
+/// The coupled run's fields as the viewer reads them: the heights and the drainage area over the lattice, and a word that identifies the run.
+pub struct CoupledMaps {
+    lat: Lattice,
+    z: Vec<f32>,
+    area_m2: Vec<f32>,
+    max_area_m2: f32,
+    id: u64,
+}
+
+impl CoupledMaps {
+    /// The maps of a run on `lat`; `id` identifies the run (the hash of its stored key) and goes into the mesh key of every tile drawn through it.
+    pub fn new(lat: Lattice, z: Vec<f32>, area_m2: Vec<f32>, id: u64) -> CoupledMaps {
+        assert!(z.len() == lat.len() && area_m2.len() == lat.len(), "the fields cover the lattice");
+        let max_area_m2 = area_m2.iter().fold(0.0f32, |m, &a| m.max(a));
+        CoupledMaps { lat, z, area_m2, max_area_m2, id }
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
+
+/// What the climate views show in place of the climate (GEN-043).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CoupledLens {
+    /// The height of the run in the temperature view: sea at the cold end, land by height up to the warm end.
+    Height,
+    /// The drainage area in the precipitation view, on the log scale of the area map: rivers at the wet end.
+    Area,
+}
+
+impl CoupledLens {
+    fn tag(self) -> u64 {
+        match self {
+            CoupledLens::Height => 1,
+            CoupledLens::Area => 2,
+        }
+    }
+}
+
+/// Temperature range the temperature view maps to its colours, degrees C (`climate_colour` in the terrain shader).
+const LENS_T_RANGE: (f32, f32) = (-30.0, 40.0);
+/// Precipitation the precipitation view maps to its wet end, mm.
+const LENS_P_MAX: f32 = 3000.0;
+
+/// The word the lens adds to the mesh key of a tile: the run, the lens and the run's algorithm version.
+pub fn lens_version_word(maps: &CoupledMaps, lens: CoupledLens) -> u64 {
+    mix64(mix64(maps.id ^ (lens.tag() << 56)) ^ u64::from(COUPLED_VERSION))
+}
+
+/// The climate texture of `tile` that shows the run through `lens` (GEN-043): per texel the height as a temperature or the log drainage area
+/// as a precipitation, the other channel flat. The height is read at the texel's cell; the area is the largest in the cells the texel covers,
+/// so a river a coarse tile cannot resolve still shows.
+pub fn lens_climate(
+    maps: &CoupledMaps,
+    lens: CoupledLens,
+    map: &dyn planet_core::cube::FaceMapping,
+    tile: planet_core::TileId,
+) -> crate::climate::ClimateTexture {
+    use crate::climate::{CLIMATE_CELLS, CLIMATE_EDGE, CLIMATE_TEXELS};
+    let n = maps.lat.n();
+    // Cells across one texel: the lattice cells of the tile's edge over the texel count (below one: the texel is inside a cell).
+    let step = n as f64 / ((1u64 << tile.level()) as f64 * f64::from(CLIMATE_CELLS));
+    let half = (step * 0.5).floor() as i64;
+    let (mut t, mut p) = ([LENS_T_RANGE.0; CLIMATE_TEXELS], [0.0f32; CLIMATE_TEXELS]);
+    for b in 0..CLIMATE_EDGE {
+        for a in 0..CLIMATE_EDGE {
+            let cell = maps.lat.cell_at(tile.sample_direction(map, CLIMATE_CELLS, a as u32, b as u32));
+            let k = b * CLIMATE_EDGE + a;
+            match lens {
+                CoupledLens::Height => {
+                    let z = maps.z[cell];
+                    let u = if z <= 0.0 { 0.0 } else { f32::from(height_to_grey(z)) / 255.0 };
+                    t[k] = LENS_T_RANGE.0 + (LENS_T_RANGE.1 - LENS_T_RANGE.0) * u;
+                }
+                CoupledLens::Area => {
+                    let (face, rest) = (cell / (n * n), cell % (n * n));
+                    let (ci, cj, n_i) = ((rest % n) as i64, (rest / n) as i64, n as i64);
+                    let mut best = 0.0f32;
+                    for j in (cj - half).max(0)..=(cj + half).min(n_i - 1) {
+                        for i in (ci - half).max(0)..=(ci + half).min(n_i - 1) {
+                            best = best.max(maps.area_m2[face * n * n + j as usize * n + i as usize]);
+                        }
+                    }
+                    let v = area_unit(maps.lat.area_m2(cell), f64::from(best), f64::from(maps.max_area_m2));
+                    p[k] = LENS_P_MAX * v as f32;
+                }
+            }
+        }
+    }
+    crate::climate::ClimateTexture::from_f32(&t, &p)
 }
 
 #[cfg(test)]
