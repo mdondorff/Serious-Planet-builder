@@ -17,6 +17,7 @@ pub mod global;
 pub mod height;
 pub mod height_fields;
 pub mod horizon;
+pub mod horizon_lookup;
 pub mod manifest;
 pub mod mesh;
 pub mod normals;

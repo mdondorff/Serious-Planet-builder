@@ -41,14 +41,19 @@ impl CoarseParams {
 /// The unit tangent at `d` pointing along azimuth `az` (radians from north, clockwise): north is the projection of the pole axis on the
 /// tangent plane, east the pole axis crossed with `d`. At a pole (`d` parallel to the pole axis) the y axis stands in for it: east is then +x and north +y at the north pole. The azimuths are in the geographic frame (north toward +z), unlike GEN-044's, which are in a chunk raster's face frame.
 fn tangent(d: Vec3, az: f64) -> Vec3 {
+    let (east, north) = geographic_frame(d);
+    north * libm::cos(az) + east * libm::sin(az)
+}
+
+/// The unit `(east, north)` tangents at the unit direction `d` in the geographic frame the coarse horizon's azimuths are in (see [`tangent`]).
+pub fn geographic_frame(d: Vec3) -> (Vec3, Vec3) {
     let pole = Vec3::new(0.0, 0.0, 1.0);
     let mut east = pole.cross(d);
     if east.length() < 1e-9 {
         east = Vec3::new(0.0, 1.0, 0.0).cross(d);
     }
     let east = east.normalized();
-    let north = d.cross(east).normalized();
-    north * libm::cos(az) + east * libm::sin(az)
+    (east, d.cross(east).normalized())
 }
 
 /// The elevation angle, from the observer at height `h0` on a sphere of radius `r`, of the point at height `h` an arc `s` along the ground:
