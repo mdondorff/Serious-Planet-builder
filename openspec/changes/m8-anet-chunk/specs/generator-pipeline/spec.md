@@ -45,7 +45,7 @@ Source: SPIKE-35 item 3, GEN-040
 - **THEN** the axis share with jitter is at most 0.56 and below the share without, and two runs give the same receivers
 
 ### Requirement: GEN-051 Diffusion and slumping
-After the incision a chunk SHALL apply hillslope diffusion and thermal slumping to its non-channel cells in a fixed order with `libm` only: diffusion within its stability bound, slumping moving the excess over the angle of repose to the lowest neighbour for a fixed number of passes. Channel cells SHALL be unchanged by both, and the result SHALL be bit-identical for 1, 2 and 8 threads.
+After the incision a chunk SHALL apply hillslope diffusion and thermal slumping to its non-channel cells in a fixed order with `libm` only: diffusion within its stability bound, slumping moving the excess over the angle of repose to the lower neighbours for a fixed number of passes. Channel cells SHALL be unchanged by both, and the result SHALL be bit-identical for 1, 2 and 8 threads.
 
 Verify: A
 Status: planned

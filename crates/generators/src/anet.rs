@@ -556,7 +556,7 @@ pub fn solve(
     // `t`), so they do not depend on the halo; channels, the corridor and fixed cells are exempt.
     let hill = p.diffusion > 0.0 || p.slump_rate > 0.0;
     let reach0 = (p.steps as u16).min(region.halo.saturating_sub(2));
-    let inner = region.depth.partition_point(|&d| d <= reach0);
+    let inner = if region.halo < 2 { 0 } else { region.depth.partition_point(|&d| d <= reach0) };
     let nd: Vec<[f64; 8]> =
         if hill { (0..inner).map(|c| core::array::from_fn(|k| dist(c, region.neighbours[c][k] as usize))).collect() } else { Vec::new() };
     let protected = |c: usize| fixed(c) || net.corridor[c] || area[c] > p.channel_area_m2;
@@ -575,7 +575,7 @@ pub fn solve(
                 z = diffuse(&z, &region.neighbours, cells, cf, &protected);
             }
             if p.slump_rate > 0.0 {
-                let delta = slump_deltas(&z, &region.neighbours, &nd, cells, p.talus, p.slump_rate, &protected);
+                let delta = slump_deltas(&z, &region.neighbours, &nd, cells, p.talus, p.slump_rate, &protected, &key);
                 for c in 0..cells {
                     z[c] += delta[c];
                 }
@@ -684,10 +684,12 @@ impl crate::chunkfield::ChunkStage for ANet {
 pub const ANET_VERSION: u32 = 1;
 
 /// The change of height each cell takes in one pass of thermal slumping (GEN-051): a cell steeper than `talus` over a neighbour gives that
-/// neighbour `rate x (slope - talus) x distance`, and takes the same from a neighbour steeper over it. `dist[c][k]` is the distance to the
-/// `k`-th neighbour of `c` (the order of the region's neighbour table); a pair is skipped when either cell is `protected`. Every cell sums its
-/// own eight pairs in the table's order, so the result does not depend on how the region numbers its cells, and the deltas of the cells it covers
-/// sum to zero (a pair is counted once from each side with opposite signs). `cells` limits the pass to the first `cells` entries of `z`.
+/// neighbour `rate x (slope - talus) x distance`. `dist[c][k]` is the distance to the `k`-th neighbour of `c` (the order of the region's neighbour
+/// table); a pair is skipped when either cell is `protected`. What a cell gives is added to the neighbour it goes to, so the sum of the deltas of the
+/// cells the pass covers is zero whatever the neighbour table looks like (near a cube corner it is not symmetric), as far as the neighbour is
+/// covered too. Every sum is in a fixed order, a cell's own gifts in table order and what it takes in order of the giver's `key`, so the result does
+/// not depend on how the region numbers its cells. `cells` limits the pass to the first `cells` entries of `z`.
+#[allow(clippy::too_many_arguments)]
 pub fn slump_deltas(
     z: &[f64],
     neighbours: &[[u32; 8]],
@@ -696,13 +698,16 @@ pub fn slump_deltas(
     talus: f64,
     rate: f64,
     protected: &dyn Fn(usize) -> bool,
+    key: &dyn Fn(usize) -> u64,
 ) -> Vec<f64> {
     let mut delta = vec![0.0f64; z.len()];
+    // (receiver, giver's key, amount), sorted before they are added.
+    let mut gifts: Vec<(usize, u64, f64)> = Vec::new();
     for c in 0..cells {
         if protected(c) {
             continue;
         }
-        let mut d = 0.0;
+        let mut given = 0.0;
         for k in 0..8 {
             let q = neighbours[c][k] as usize;
             if protected(q) {
@@ -710,12 +715,16 @@ pub fn slump_deltas(
             }
             let slope = (z[c] - z[q]) / dist[c][k];
             if slope > talus {
-                d -= rate * (slope - talus) * dist[c][k];
-            } else if -slope > talus {
-                d += rate * (-slope - talus) * dist[c][k];
+                let m = rate * (slope - talus) * dist[c][k];
+                given += m;
+                gifts.push((q, key(c), m));
             }
         }
-        delta[c] = d;
+        delta[c] = -given;
+    }
+    gifts.sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)).then(a.2.total_cmp(&b.2)));
+    for (q, _, m) in gifts {
+        delta[q] += m;
     }
     delta
 }
