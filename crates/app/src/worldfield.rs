@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::coupledworld::{load_or_run, Standing, COUPLED_STEPS};
+use crate::coupledworld::{load_or_run, run_cells, Standing, COUPLED_STEPS};
 use planet_cache::global_store::{GlobalWorld, StoreSource};
 use planet_cache::meshpack::TileSpec;
 use planet_core::cube::TangentWarp;
@@ -692,7 +692,7 @@ impl WorldTerrain {
             if !world.has_bake {
                 return Err("this height field reads no bake: there is no coupled run to show".to_string());
             }
-            load_or_run(&world.definition(), world.store_dir.as_deref(), world.src.as_ref(), world.res, COUPLED_STEPS, world.res)
+            load_or_run(&world.definition(), world.store_dir.as_deref(), world.src.as_ref(), run_cells(world.res), COUPLED_STEPS)
         });
     }
 

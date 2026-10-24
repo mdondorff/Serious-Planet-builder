@@ -7,14 +7,17 @@ use std::sync::{Arc, Mutex};
 
 use planet_cache::global_store::{load_coupled, store_coupled, CoupledSpec, GlobalWorld};
 use planet_cache::pack::{TileStore, DEFAULT_MAX_PACK_BYTES};
-use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId};
-use planet_generators::coupled::{inputs_hash, run, CoupledInput, CoupledMaps, CoupledParams, Lattice};
-use planet_generators::global::{read_direction, LatticeSource};
+use planet_generators::coupled::{run, CoupledInput, CoupledMaps, CoupledParams, Lattice};
+use planet_generators::coupledinput::{declared_inputs_hash, reduce_bake};
+use planet_generators::global::LatticeSource;
 use planet_world_def::{BodyId, GenContext, WorldDefinition};
 
 /// Steps of the run a world version takes (the middle of the 70 to 100 of the plan).
 pub const COUPLED_STEPS: u32 = 80;
+
+/// Cells per face edge of the run on a bake that has at least that many (see [`run_cells`]).
+pub const COUPLED_CELLS: u32 = 2048;
 
 /// Uplift of every cell in m per year, and the erodibility of the stream power law: placeholders until the driver maps give the run its own
 /// (ADR 0076). They are inputs, so the hash in the key covers them.
@@ -38,38 +41,44 @@ pub struct CoupledRun {
     pub store_error: Option<String>,
 }
 
-/// The input of the run from the bake `src` on the lattice `lat`: the bake's elevation at every cell centre, the constant uplift and
-/// erodibility. A read error names the cell.
+/// Cells per face edge of the run's lattice on a bake of `bake_res` cells: the run is capped at 2048 (its cost grows with the cells), and a
+/// smaller bake is run at its own resolution. Both are powers of two, so the result divides the bake (GEN-056).
+pub fn run_cells(bake_res: u32) -> u32 {
+    bake_res.min(COUPLED_CELLS)
+}
+
+/// Threads the reduction of a bake onto the run's lattice uses; the result does not depend on it (CON-14).
+fn reduce_threads() -> usize {
+    std::thread::available_parallelism().map_or(1, |n| n.get()).min(8)
+}
+
+/// The input of the run on the lattice `lat` from the bake `src` (a finer lattice whose cells nest in the run's): the bake's elevation reduced
+/// by the box filter of GEN-056, the constant uplift and erodibility. A read error names the vertex.
 pub fn bake_input(src: &dyn LatticeSource, lat: &Lattice) -> Result<CoupledInput, String> {
-    let mut z = Vec::with_capacity(lat.len());
-    for c in 0..lat.len() {
-        let s = read_direction(src, &TangentWarp, lat.direction(c)).map_err(|e| format!("the bake at cell {c}: {e}"))?;
-        z.push(s.elevation_m);
-    }
+    let z = reduce_bake(src, lat.n() as u32, reduce_threads()).map_err(|e| e.to_string())?;
     Ok(CoupledInput { uplift: vec![UPLIFT_M_PER_YEAR; z.len()], erodibility: vec![ERODIBILITY; z.len()], z })
 }
 
-/// The key of the stored channel of the run of `def` and the maps read from it when the store in `dir` holds this run (same parameters and
-/// inputs); `None` when it does not. The run is not made: this is the viewer's test for a world that has a channel (STRM-046).
+/// The maps read from the stored channel when the store in `dir` holds the run of `def` on `n` cells per face edge from the bake `src` (same
+/// parameters, same bake); `None` when it does not. The run is not made and the bake is not read: this is the viewer's test for a world that
+/// has a channel (STRM-046).
 pub fn load_stored(
     def: &WorldDefinition,
     dir: Option<&Path>,
     src: &dyn LatticeSource,
     n: u32,
     steps: u32,
-    bake_res: u32,
 ) -> Result<Option<CoupledRun>, String> {
-    // Without a directory there is no channel: the bake is not read for nothing.
+    // Without a directory there is no channel.
     if dir.is_none() {
         return Ok(None);
     }
-    Ok(prepare(def, src, n, steps, bake_res)?.load(dir))
+    Ok(prepare(def, src, n, steps)?.load(dir))
 }
 
-/// What a run of `def` needs: the lattice, the input, the spec of the channel and the world that keys it.
+/// What a run of `def` needs: the lattice, the spec of the channel and the world that keys it. The bake is read only when the run is made.
 struct Prepared {
     lat: Lattice,
-    input: CoupledInput,
     spec: CoupledSpec,
     world: GlobalWorld,
     n: u32,
@@ -78,16 +87,31 @@ struct Prepared {
     id: u64,
 }
 
-fn prepare(def: &WorldDefinition, src: &dyn LatticeSource, n: u32, steps: u32, bake_res: u32) -> Result<Prepared, String> {
+/// The key of the run: `n` and the bake's resolution (`src.res()`, never a number the caller states) are in the spec, the bake's stage key is
+/// the source of every block's key, and the inputs enter by their declared identity (STRM-043), so the key is made without reading the bake.
+/// `src` must be the unscaled bake of `def` at its own resolution: the key names that bake, it does not check what `src` holds (a source with
+/// the relief scale of WDEF-017 applied would be stored under the key of the unscaled one).
+fn prepare(def: &WorldDefinition, src: &dyn LatticeSource, n: u32, steps: u32) -> Result<Prepared, String> {
+    let bake_res = src.res();
+    if n == 0 || bake_res < n || !bake_res.is_multiple_of(n) || !(bake_res / n).is_power_of_two() {
+        return Err(format!(
+            "a coupled run of {n} cells per face edge cannot start from a bake of {bake_res} cells: the run must divide the bake by a power of two"
+        ));
+    }
     let radius_m = GenContext::new(def).body_radius_m(BodyId::PLANET).map_err(|e| format!("the definition cannot be generated: {e}"))?;
     let lat = Lattice::new(n as usize, radius_m);
-    let input = bake_input(src, &lat)?;
-    let spec = CoupledSpec { n, steps, bake_res, params: CoupledParams::default(), inputs: inputs_hash(&input, radius_m) };
+    let spec = CoupledSpec {
+        n,
+        steps,
+        bake_res,
+        params: CoupledParams::default(),
+        inputs: declared_inputs_hash(radius_m, UPLIFT_M_PER_YEAR, ERODIBILITY),
+    };
     let world = GlobalWorld::from_definition(def).map_err(|e| format!("the definition cannot be generated: {e}"))?.with_coupled(spec);
     let (level, cells) = world.layout(n).map_err(|e| format!("a coupled run of {n} cells: {e:?}"))?;
     let key = world.coupled_key(TileId::new(Face(0), level, 0, 0).expect("tile of the layout"), cells).0;
     let id = u64::from_le_bytes(key[..8].try_into().expect("8 bytes"));
-    Ok(Prepared { lat, input, spec, world, n, steps, radius_m, id })
+    Ok(Prepared { lat, spec, world, n, steps, radius_m, id })
 }
 
 impl Prepared {
@@ -105,20 +129,14 @@ impl Prepared {
 }
 
 /// The maps of the run of `def` on `n` cells per face edge, from the stored channel in `dir` when it holds this run (same parameters and
-/// inputs), else from the run, which is then written to `dir`. `src` is the bake of `bake_res` cells the run starts from.
-pub fn load_or_run(
-    def: &WorldDefinition,
-    dir: Option<&Path>,
-    src: &dyn LatticeSource,
-    n: u32,
-    steps: u32,
-    bake_res: u32,
-) -> Result<CoupledRun, String> {
-    let p = prepare(def, src, n, steps, bake_res)?;
+/// inputs), else from the run, which is then written to `dir`. `src` is the bake the run starts from, at any resolution `n` divides (GEN-056).
+pub fn load_or_run(def: &WorldDefinition, dir: Option<&Path>, src: &dyn LatticeSource, n: u32, steps: u32) -> Result<CoupledRun, String> {
+    let p = prepare(def, src, n, steps)?;
     if let Some(r) = p.load(dir) {
         return Ok(r);
     }
-    let state = run(&p.lat, &p.input, &p.spec.params, p.steps as usize);
+    let input = bake_input(src, &p.lat)?;
+    let state = run(&p.lat, &input, &p.spec.params, p.steps as usize);
     let store_error =
         dir.and_then(|d| store_coupled(d, &p.world, &state, DEFAULT_MAX_PACK_BYTES).err().map(|e| format!("{}: {e}", d.display())));
     Ok(CoupledRun { maps: Arc::new(CoupledMaps::new(p.lat, state.z, state.area_m2, p.id)), origin: Origin::Ran, store_error })
@@ -197,6 +215,7 @@ pub fn lens_status(lens: planet_generators::coupled::CoupledLens, standing: &Sta
 #[cfg(test)]
 mod tests {
     use super::*;
+    use planet_core::cube::TangentWarp;
     use planet_generators::chain::OwnedBake;
     use planet_generators::coupled::{lens_climate, CoupledLens};
     use planet_generators::global::GlobalCoarseGenerator;
@@ -224,9 +243,9 @@ mod tests {
     fn a_run_is_made_once_stored_and_then_loaded_bit_for_bit() {
         let (d, src) = (def(), bake(&def()));
         let dir = tmp("once");
-        let first = load_or_run(&d, Some(&dir), &src, RES, 4, RES).unwrap();
+        let first = load_or_run(&d, Some(&dir), &src, RES, 4).unwrap();
         assert_eq!((first.origin, first.store_error.as_deref()), (Origin::Ran, None), "nothing stored yet: it runs and writes");
-        let second = load_or_run(&d, Some(&dir), &src, RES, 4, RES).unwrap();
+        let second = load_or_run(&d, Some(&dir), &src, RES, 4).unwrap();
         assert_eq!(second.origin, Origin::Stored, "the same run is read, not made again");
         assert_eq!(second.maps.id(), first.maps.id());
         let probe = |m: &CoupledMaps| {
@@ -236,7 +255,7 @@ mod tests {
         let (a, b) = (probe(&first.maps), probe(&second.maps));
         assert_eq!(a, b, "the stored run reads back as the run made");
         // Another step count is another run: its key differs, so the stored one is not taken for it.
-        let third = load_or_run(&d, Some(&dir), &src, RES, 5, RES).unwrap();
+        let third = load_or_run(&d, Some(&dir), &src, RES, 5).unwrap();
         assert_eq!(third.origin, Origin::Ran);
         assert_ne!(third.maps.id(), first.maps.id());
         let _ = std::fs::remove_dir_all(&dir);
@@ -278,11 +297,81 @@ mod tests {
         assert_eq!(off.climate_version_word(), want_word);
     }
 
+    fn bake_of(def: &WorldDefinition, res: u32) -> OwnedBake {
+        let field = GlobalCoarseGenerator.field(&GenContext::new(def), BodyId::PLANET).expect("the field");
+        OwnedBake(field.bake(&TangentWarp, res, 2).expect("the bake"))
+    }
+
+    /// A bake that must not be read: only its resolution is known.
+    struct Unread(u32);
+
+    impl LatticeSource for Unread {
+        fn res(&self) -> u32 {
+            self.0
+        }
+        fn at(&self, _: Face, _: u32, _: u32) -> Result<planet_generators::global::GlobalSample, planet_generators::global::ReadError> {
+            panic!("a stored run is found without reading the bake");
+        }
+    }
+
+    // spec: GEN-056
+    #[test]
+    fn the_run_covers_at_most_2048_cells_and_a_smaller_bake_is_run_at_its_own_resolution() {
+        assert_eq!([16384, 8192, 4096, 2048, 1024, 16].map(run_cells), [2048, 2048, 2048, 2048, 1024, 16]);
+        for bake in [16384u32, 4096, 1024] {
+            assert_eq!(bake % run_cells(bake), 0, "the run divides the bake");
+        }
+    }
+
+    // spec: GEN-056
+    // spec: STRM-043
+    #[test]
+    fn a_run_from_a_finer_bake_is_stored_under_its_own_key_and_loaded_without_reading_the_bake() {
+        let d = def();
+        let (fine, coarse) = (bake_of(&d, 4 * RES), bake_of(&d, RES));
+        let (n, dir) = (RES / 2, tmp("finer"));
+        let made = load_or_run(&d, Some(&dir), &fine, n, 3).unwrap();
+        assert_eq!((made.origin, made.store_error.as_deref()), (Origin::Ran, None));
+        assert_eq!(made.maps.lattice().n(), n as usize, "the run is on its own lattice, not the bake's");
+        // Found again without a single read of the bake.
+        let again = load_or_run(&d, Some(&dir), &Unread(4 * RES), n, 3).unwrap();
+        assert_eq!(again.origin, Origin::Stored);
+        assert_eq!(again.maps.id(), made.maps.id());
+        assert!(load_stored(&d, Some(&dir), &Unread(4 * RES), n, 3).unwrap().is_some());
+        // The same run on another bake resolution, or another lattice on this bake, or another step count: not this key, nothing is taken for it.
+        assert!(load_stored(&d, Some(&dir), &Unread(2 * RES), n, 3).unwrap().is_none(), "another bake resolution");
+        assert!(load_stored(&d, Some(&dir), &Unread(4 * RES), RES, 3).unwrap().is_none(), "another lattice");
+        assert!(load_stored(&d, Some(&dir), &Unread(4 * RES), n, 4).unwrap().is_none(), "another step count");
+        let other_bake = load_or_run(&d, Some(&dir), &coarse, n, 3).unwrap();
+        assert_eq!(other_bake.origin, Origin::Ran, "the stored run of the finer bake is not read for the coarser one");
+        assert_ne!(other_bake.maps.id(), made.maps.id());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // spec: STRM-043
+    #[test]
+    fn another_world_over_the_same_resolutions_has_another_key() {
+        let (a, b) = (def(), WorldDefinition::single_planet(planet_core::EARTH_RADIUS_M, 12));
+        let (ka, kb) = (prepare(&a, &Unread(4 * RES), RES / 2, 3).unwrap(), prepare(&b, &Unread(4 * RES), RES / 2, 3).unwrap());
+        assert_eq!(ka.id, prepare(&a, &Unread(4 * RES), RES / 2, 3).unwrap().id, "the key is a function of the run and the bake");
+        assert_ne!(ka.id, kb.id, "another seed is another bake");
+        let small = WorldDefinition::single_planet(planet_core::EARTH_RADIUS_M / 2.0, 11);
+        assert_ne!(ka.id, prepare(&small, &Unread(4 * RES), RES / 2, 3).unwrap().id, "another radius is another run");
+    }
+
+    // spec: GEN-056
+    #[test]
+    fn a_run_that_does_not_divide_the_bake_is_refused_before_anything_is_read() {
+        let e = load_or_run(&def(), None, &Unread(RES), 3, 2).err().expect("refused");
+        assert!(e.contains("must divide the bake"), "{e}");
+        assert!(load_or_run(&def(), None, &Unread(RES), 2 * RES, 2).is_err(), "a run finer than the bake");
+    }
+
     // spec: STRM-044
     #[test]
     fn a_world_without_a_store_runs_in_memory() {
         let (d, src) = (def(), bake(&def()));
-        let r = load_or_run(&d, None, &src, RES, 3, RES).unwrap();
+        let r = load_or_run(&d, None, &src, RES, 3).unwrap();
         assert_eq!((r.origin, r.store_error), (Origin::Ran, None));
     }
 
@@ -292,7 +381,7 @@ mod tests {
         let slot = CoupledSlot::default();
         assert!(matches!(slot.standing(), Standing::Idle));
         let (d, src) = (def(), bake(&def()));
-        slot.request(move || load_or_run(&d, None, &src, RES, 2, RES));
+        slot.request(move || load_or_run(&d, None, &src, RES, 2));
         // A second request while it works or after it ended starts nothing.
         slot.request(|| Err("must not run".into()));
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);

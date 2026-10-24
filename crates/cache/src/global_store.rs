@@ -539,7 +539,7 @@ pub struct CoupledSpec {
     /// Cells per face edge of the bake the run starts from.
     pub bake_res: u32,
     pub params: CoupledParams,
-    /// [`planet_generators::coupled::inputs_hash`] of the run's inputs.
+    /// [`planet_generators::coupledinput::declared_inputs_hash`]: the declared identity of the run's inputs.
     pub inputs: u64,
 }
 

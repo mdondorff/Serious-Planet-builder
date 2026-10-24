@@ -15,7 +15,7 @@ use planet_streaming::chunks::{ChunkConfig, ChunkDisk};
 use planet_streaming::{Clock, Spawner};
 use planet_world_def::BodyId;
 
-use crate::coupledworld::COUPLED_STEPS;
+use crate::coupledworld::{run_cells, COUPLED_STEPS};
 use crate::worldfield::WorldTerrain;
 
 /// The default cell size of an A-net chunk in metres (planner decision 2026-10-24; GEN-052 records 4 and 10 m beside it).
@@ -185,9 +185,8 @@ impl WorldTerrain {
             &self.definition(),
             self.store_dir(),
             self.lattice_source(),
-            self.res(),
+            run_cells(self.res()),
             COUPLED_STEPS,
-            self.res(),
         )?;
         let Some(run) = run else { return Ok(false) };
         self.enable_anet(run.maps, cell_m, spawner, clock, cfg)?;
