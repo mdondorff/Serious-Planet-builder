@@ -23,9 +23,9 @@ Source: SPIKE-35 item 1 (variant c4), ADR 0077 consequences
 - **THEN** 0 channel cells have a higher receiver, and two runs give the same receivers and heights, bit for bit
 
 ### Requirement: GEN-049 The halo of an A-net chunk
-An A-net chunk SHALL state its halo as 3 km (at least its step cap times its reach per step) and SHALL, with that halo, equal the same run over the whole region in every cell of its core, bit for bit, at the step cap, at a site where a river crosses the chunk border.
+An A-net chunk SHALL state its halo (3 km by default) and SHALL, with it, equal the same run over a wider halo in every cell of its core: bit for bit where every channel chain meets a fixed cell (an anchor) inside the halo and every catchment lies within the area window, and to within 2 cm on a gentle valley where a stream runs a long way to the river. The reaches that bound this (breach window, area window, tributary step cap) are parameters of the stage and part of its definition.
 
-Verify: B
+Verify: A, B
 Status: planned
 Source: SPIKE-35 item 2, ADR 0077 point 4, GEN-038
 

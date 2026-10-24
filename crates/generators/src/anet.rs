@@ -32,6 +32,8 @@ pub trait CoarseRun: Send + Sync {
     fn area_m2(&self, c: usize) -> f32;
     /// The receiver of `c` ([`crate::coupled::NONE`] for an outlet).
     fn receiver(&self, c: usize) -> u32;
+    /// A hash of what the run is (its key): part of the stage's definition hash, so a new run re-keys every chunk.
+    fn identity(&self) -> u64;
 }
 
 /// The arrays of a finished or stored run.
@@ -40,6 +42,8 @@ pub struct StoredRun {
     pub z: Vec<f32>,
     pub area_m2: Vec<f32>,
     pub receiver: Vec<u32>,
+    /// The key of the stored run (its coupled-channel key), part of the stage's definition hash.
+    pub identity: u64,
 }
 
 impl CoarseRun for StoredRun {
@@ -55,6 +59,9 @@ impl CoarseRun for StoredRun {
     fn receiver(&self, c: usize) -> u32 {
         self.receiver[c]
     }
+    fn identity(&self) -> u64 {
+        self.identity
+    }
 }
 
 /// What the initial fine heights need besides the run: the base field the chunk stage changes, and the field the run's input was sampled from.
@@ -65,6 +72,8 @@ pub trait BaseDetail: Send + Sync {
     fn base_height(&self, dir: Vec3) -> f64;
     /// What the coupled run's input held at the direction (the bake's elevation read there), metres.
     fn coarse_input(&self, dir: Vec3) -> f64;
+    /// A hash of the base field and the input the run started from (their keys): part of the stage's definition hash.
+    fn identity(&self) -> u64;
 }
 
 /// A value in `[-1, 1]` that is a function of the segment and the knot alone.
@@ -142,6 +151,9 @@ pub struct Network {
     /// interpolated along the segment. Beds are tied to the run at these anchors, so a bed does not depend on the heights of a region's ring (the
     /// implicit step carries a downstream height far up a channel); the stage keeps the lower of this and the base height.
     pub anchor_z: Vec<f64>,
+    /// The drainage area of a corridor cell in m2: the coarse areas of its segment interpolated along it (NaN off the corridor). A river's area is a
+    /// function of position, not of how much of its catchment the region holds.
+    pub river_area_m2: Vec<f64>,
 }
 
 /// "No next cell."
@@ -178,6 +190,7 @@ impl Network {
         let len = region.cells.len();
         let (mut corridor, mut next, mut inflow_m2) = (vec![false; len], vec![NO_NEXT; len], vec![0.0f64; len]);
         let mut anchor_z = vec![f64::NAN; len];
+        let mut river_area_m2 = vec![f64::NAN; len];
         let half_cell_m = 0.5 * lat.cell_m(radius_m);
         let key = |x: usize| region.cells[x].key();
         for (from, to) in segments {
@@ -185,8 +198,14 @@ impl Network {
             // The cells along the polyline in runs: a run ends where the polyline leaves the region, and a cell is visited once per run (a
             // meander that turns back within a cell must not make a loop of links).
             let mut runs: Vec<Vec<usize>> = vec![Vec::new()];
-            let visit = |p: Vec3, runs: &mut Vec<Vec<usize>>| match region.index_of(lat.cell_at(p)) {
+            let (area_from, area_to) = (f64::from(run.area_m2(from)), f64::from(run.area_m2(to)));
+            let mut visit = |p: Vec3, t: f64, runs: &mut Vec<Vec<usize>>| match region.index_of(lat.cell_at(p)) {
                 Some(i) => {
+                    // The river's area at a cell is the coarse areas interpolated along the segment: a function of position alone.
+                    let a = area_from + (area_to - area_from) * t;
+                    if river_area_m2[i].is_nan() || a > river_area_m2[i] {
+                        river_area_m2[i] = a;
+                    }
                     let run = runs.last_mut().expect("a run");
                     if run.last() != Some(&i) && !run.contains(&i) {
                         run.push(i);
@@ -198,14 +217,15 @@ impl Network {
                     }
                 }
             };
-            for w in points.windows(2) {
+            for (k, w) in points.windows(2).enumerate() {
                 let steps = (((w[1] - w[0]).length() * radius_m / half_cell_m).ceil() as usize).max(1);
                 for s in 0..steps {
-                    visit((w[0] * (1.0 - s as f64 / steps as f64) + w[1] * (s as f64 / steps as f64)).normalized(), &mut runs);
+                    let u = s as f64 / steps as f64;
+                    visit((w[0] * (1.0 - u) + w[1] * u).normalized(), (k as f64 + u) / (points.len() - 1) as f64, &mut runs);
                 }
             }
             if let Some(&last) = points.last() {
-                visit(last, &mut runs);
+                visit(last, 1.0, &mut runs);
             }
             // The anchors: the quarter points of the segment, held at the run's height there.
             for q in 0..=4usize {
@@ -264,7 +284,7 @@ impl Network {
                 (coarse_z_at(run, d) + (base.base_height(d) - base.coarse_input(d))) as f32
             })
             .collect();
-        Network { corridor, next, inflow_m2, z0, anchor_z }
+        Network { corridor, next, inflow_m2, z0, anchor_z, river_area_m2 }
     }
 }
 
@@ -287,6 +307,13 @@ pub struct ANetParams {
     pub halo_rings: u16,
     /// The least a receiver lies below its donor per metre of distance after the breach.
     pub breach_slope: f64,
+    /// How many links up the corridor the breach and how many links up a catchment the drainage area reach (bounded, so a chunk does not depend on
+    /// where its region ends).
+    pub breach_window: u16,
+    pub area_window: u16,
+    /// The most a cell off the corridor takes of the step (`f` is capped here): a tributary that took all of it would collapse to its outlet level
+    /// along its whole length and depend on the height at the ring. The corridor, held at its anchors, is not capped.
+    pub tributary_f_max: f64,
 }
 
 impl ANetParams {
@@ -302,6 +329,9 @@ impl ANetParams {
             channel_area_m2: 5.0e4,
             halo_rings: (halo_m / cell_m).ceil().clamp(1.0, f64::from(u16::MAX)) as u16,
             breach_slope: 0.002,
+            breach_window: ((halo_m / cell_m).ceil() - 2.0).clamp(1.0, 64.0) as u16,
+            area_window: ((halo_m / cell_m).ceil() - 2.0).clamp(1.0, 128.0) as u16,
+            tributary_f_max: 0.5,
         }
     }
 }
@@ -428,34 +458,75 @@ pub fn solve(
         }
     }
 
-    // The breach: a receiver is cut to at least `breach_slope` below its donor; a receiver on the ring keeps its height, and its donor becomes an
-    // outlet instead (no cascade up the channel).
-    for &c in &order {
-        let r = rec[c];
-        if r == NONE {
-            continue;
-        }
-        let r = r as usize;
-        let limit = z[c] - p.breach_slope * dist(c, r);
-        if fixed(r) {
-            if z[r] > limit {
-                rec[c] = NONE;
+    // The breach, local: along the corridor's links a cell is cut to at least `breach_slope` below the donors within `breach_window` links
+    // upstream of it (a running minimum over a bounded reach, not over the whole chain, so it does not depend on where the region ends). A link to
+    // a fixed cell is never cut: the donor settles up to it in the implicit step (a flat, not a pit); a link to a ring cell that the donor lies
+    // below is the one cut, the donor becoming an outlet (no cascade up the channel).
+    let corridor_link = |d: usize| net.corridor[d] && rec[d] != NONE && rec[d] == net.next[d];
+    let linked: Vec<usize> = (0..len).filter(|&c| corridor_link(c)).collect();
+    let mut is_link = vec![false; len];
+    for &c in &linked {
+        is_link[c] = true;
+    }
+    let mut cut = z.clone();
+    for _ in 0..p.breach_window {
+        let before = cut.clone();
+        let mut changed = false;
+        for &d in &linked {
+            let x = rec[d] as usize;
+            if fixed(x) {
+                continue;
             }
-        } else if z[r] > limit {
-            z[r] = limit;
+            let candidate = before[d] - p.breach_slope * dist(d, x);
+            if candidate < cut[x] {
+                cut[x] = candidate;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    z = cut;
+    for &d in &linked {
+        let r = rec[d] as usize;
+        if ring(r) && z[r] > z[d] - p.breach_slope * dist(d, r) {
+            rec[d] = NONE;
         }
     }
 
-    // Drainage area: a cell's own area, the inflow of the corridor and its donors' in key order (so the sum is the same in every region).
-    let mut area = vec![0.0f64; len];
-    for &c in &order {
-        let mut a = cell_area(region.cells[c]) + net.inflow_m2[c];
-        for &d in &donors[c] {
-            if rec[d as usize] == c as u32 {
-                a += area[d as usize];
+    // Drainage area: a cell's own area, the inflow of the corridor and the area of its donors in key order, over the upstream cells within
+    // `area_window` links (a bounded reach: a catchment longer than the window is cut at the same distance whatever the region, so two chunks
+    // agree; the corridor's rivers carry the area from further up as inflow).
+    let base_area: Vec<f64> = (0..len).map(|c| cell_area(region.cells[c]) + net.inflow_m2[c]).collect();
+    let mut area = base_area.clone();
+    for _ in 0..p.area_window {
+        let before = area.clone();
+        let mut changed = false;
+        for c in 0..len {
+            if donors[c].is_empty() {
+                continue;
+            }
+            let mut a = base_area[c];
+            for &d in &donors[c] {
+                if rec[d as usize] == c as u32 {
+                    a += before[d as usize];
+                }
+            }
+            if a != area[c] {
+                area[c] = a;
+                changed = true;
             }
         }
-        area[c] = a;
+        if !changed {
+            break;
+        }
+    }
+    // The corridor carries its coarse area, a function of position.
+    for c in 0..len {
+        if !net.river_area_m2[c].is_nan() {
+            area[c] = net.river_area_m2[c].max(base_area[c]);
+        }
     }
 
     // The implicit step along the frozen network, receivers first: z = (z + f z_r) / (1 + f), f = K A^m dt / distance.
@@ -463,7 +534,14 @@ pub fn solve(
         .map(|c| match rec[c] {
             NONE => 0.0,
             _ if fixed(c) => 0.0,
-            r => p.k * libm::pow(area[c], p.m) * p.dt_years / dist(c, r as usize),
+            r => {
+                let f = p.k * libm::pow(area[c], p.m) * p.dt_years / dist(c, r as usize);
+                if net.river_area_m2[c].is_nan() {
+                    f.min(p.tributary_f_max)
+                } else {
+                    f
+                }
+            }
         })
         .collect();
     for _ in 0..p.steps {
@@ -473,6 +551,31 @@ pub fn solve(
                 continue;
             }
             z[c] = (z[c] + coef[c] * z[r as usize]) / (1.0 + coef[c]);
+        }
+    }
+    // No channel cell drains uphill (GEN-048). A corridor donor below a fixed receiver is lifted to it, a flat (the bed behind a dam fills up to it),
+    // receivers first; a free corridor receiver above its donor is cut down to the donor, donors first (it ends at the next anchor); a link that
+    // joins two fixed cells the wrong way, or a donor off the corridor, becomes an outlet. Each rule reaches the cell and the corridor next to it.
+    let channel = |c: usize, area: &[f64]| area[c] > p.channel_area_m2;
+    for &c in order.iter().rev() {
+        let r = rec[c];
+        if r != NONE && !fixed(c) && channel(c, &area) && z[c] < z[r as usize] {
+            if is_link[c] {
+                z[c] = z[r as usize];
+            } else {
+                rec[c] = NONE;
+            }
+        }
+    }
+    for &c in &order {
+        let r = rec[c];
+        if r == NONE || !channel(c, &area) || z[r as usize] <= z[c] {
+            continue;
+        }
+        if !fixed(r as usize) {
+            z[r as usize] = z[c];
+        } else {
+            rec[c] = NONE;
         }
     }
     Solution { receiver: rec, z, area_m2: area, z_base }
@@ -515,7 +618,9 @@ impl crate::chunkfield::ChunkStage for ANet {
     }
     fn compute(&self, lat: &ChunkLattice, region: &Region) -> Vec<f32> {
         let s = self.solve(lat, region);
-        (0..region.cells.len()).map(|c| (s.z[c] - s.z_base[c]) as f32).collect()
+        // The stage's own bound is a promise to the plan's bounds (GEN-039): a change beyond it is cut to it.
+        let bound = self.bound_m();
+        (0..region.cells.len()).map(|c| (s.z[c] - s.z_base[c]).clamp(-bound, bound) as f32).collect()
     }
     fn definition_hash(&self) -> u64 {
         let p = &self.params;
@@ -531,6 +636,11 @@ impl crate::chunkfield::ChunkStage for ANet {
                 p.channel_area_m2.to_bits(),
                 u64::from(p.halo_rings),
                 p.breach_slope.to_bits(),
+                u64::from(p.breach_window),
+                u64::from(p.area_window),
+                p.tributary_f_max.to_bits(),
+                self.run.identity(),
+                self.base.identity(),
                 self.radius_m.to_bits(),
                 u64::from(ANET_VERSION),
             ],

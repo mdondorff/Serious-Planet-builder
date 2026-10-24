@@ -37,6 +37,9 @@ impl CoarseRun for River {
     fn area_m2(&self, c: usize) -> f32 {
         on_river(c).map_or(1.0e6, |i| 2.0e8 * (1 + i - 995) as f32)
     }
+    fn identity(&self) -> u64 {
+        7
+    }
     fn receiver(&self, c: usize) -> u32 {
         match on_river(c) {
             Some(i) if i < 1010 => (c + 1) as u32,
@@ -56,6 +59,9 @@ impl BaseDetail for Hills {
             + 40.0 * libm::cos(p.y / 1_700.0 - p.z / 2_300.0)
             + 35.0 * libm::sin((p.x + p.z) / 3_100.0)
             + 6.0 * libm::sin(p.x / 230.0 + p.y / 310.0) * libm::cos(p.z / 270.0)
+    }
+    fn identity(&self) -> u64 {
+        11
     }
     fn coarse_input(&self, dir: Vec3) -> f64 {
         self.base_height(dir)
@@ -225,4 +231,134 @@ fn a_chunk_of_the_synthetic_scene_keeps_its_known_answer() {
     assert_eq!(fnv(&core_change(1003, 40)), KNOWN_ANSWER, "the stage changed: platform, order or arithmetic");
 }
 
-const KNOWN_ANSWER: u64 = 3_806_011_463_830_262_098;
+const KNOWN_ANSWER: u64 = 314_346_189_879_054_882;
+
+/// A gentle valley along the river (slope 0.001, below the breach slope) plus a little noise: every stream runs to the river.
+struct Plane;
+
+impl BaseDetail for Plane {
+    fn base_height(&self, dir: Vec3) -> f64 {
+        let p = dir * R;
+        let (_, _, t) = planet_core::cube::direction_to_face(&planet_core::cube::TangentWarp, dir);
+        let axis = -1.0 + (2.0 * 1000.5) / N as f64;
+        300.0 + 0.001 * (t - axis).abs() * R * core::f64::consts::FRAC_PI_4 + 2.0 * libm::sin(p.y / 140.0) * libm::cos(p.z / 170.0)
+    }
+    fn coarse_input(&self, dir: Vec3) -> f64 {
+        self.base_height(dir)
+    }
+    fn identity(&self) -> u64 {
+        13
+    }
+}
+
+/// The base is the run plus 50 m: smooth, so anchors are the run's heights and the base is above them.
+struct AboveRun;
+
+impl BaseDetail for AboveRun {
+    fn base_height(&self, dir: Vec3) -> f64 {
+        let c = lattice().cell_at(dir);
+        f64::from(River.z(c)) + 50.0
+    }
+    fn coarse_input(&self, dir: Vec3) -> f64 {
+        self.base_height(dir)
+    }
+    fn identity(&self) -> u64 {
+        17
+    }
+}
+
+/// A 600 m ridge across the river's path.
+struct Ridge;
+
+impl BaseDetail for Ridge {
+    fn base_height(&self, dir: Vec3) -> f64 {
+        let p = dir * R;
+        100.0
+            + 600.0
+                * libm::exp(-((p.x - 1000.0 * 0.0) / 1.0e9).powi(2))
+                * libm::exp(-(((lattice().cell_at(dir) % N) as f64 - 1003.0) / 0.4).powi(2))
+    }
+    fn coarse_input(&self, dir: Vec3) -> f64 {
+        self.base_height(dir)
+    }
+    fn identity(&self) -> u64 {
+        19
+    }
+}
+
+fn stage_over(base: Arc<dyn BaseDetail>, halo_rings: u16) -> ANet {
+    let lat = ChunkLattice::new(PER).unwrap();
+    let mut params = ANetParams::spike(3_000.0, lat.cell_m(R));
+    params.halo_rings = halo_rings;
+    ANet { run: Arc::new(River), base, radius_m: R, params }
+}
+
+fn max_difference(a: &ANet, b: &ANet, x: u32, ha: u16, hb: u16) -> f64 {
+    let lat = ChunkLattice::new(PER).unwrap();
+    let (ra, rb) = (region(&lat, chunk(x), ha), region(&lat, chunk(x), hb));
+    let (ca, cb) = (a.compute(&lat, &ra), b.compute(&lat, &rb));
+    ca[..ra.core].iter().zip(&cb[..rb.core]).map(|(p, q)| f64::from((p - q).abs())).fold(0.0, f64::max)
+}
+
+// spec: GEN-049
+#[test]
+fn gentle_terrain_below_the_breach_slope_does_not_make_a_core_depend_on_how_far_the_region_reaches() {
+    let a = stage_over(Arc::new(Plane), 20);
+    let b = stage_over(Arc::new(Plane), 40);
+    let worst = max_difference(&a, &b, 1003, 20, 40);
+    assert!(worst <= 0.02, "halo 20 against 40 on a valley: {worst} m");
+}
+
+// spec: GEN-048
+#[test]
+fn a_river_over_a_smooth_base_keeps_its_links_and_its_area_flows_on_past_the_anchors() {
+    let lat = ChunkLattice::new(PER).unwrap();
+    let a = stage_over(Arc::new(AboveRun), 40);
+    let r = region(&lat, chunk(1003), 40);
+    let net = planet_generators::anet::Network::build(&River, &AboveRun, &lat, &r, R);
+    let s = a.solve(&lat, &r);
+    let mut with_link = 0;
+    let mut prev_area = 0.0f64;
+    for (c, &on) in net.corridor.iter().enumerate() {
+        if on && r.depth[c] < r.halo - 1 && net.next[c] != u32::MAX && s.receiver[c] != u32::MAX {
+            with_link += 1;
+        } else if on && r.depth[c] + 2 < r.halo && net.next[c] != u32::MAX {
+            panic!("corridor cell {:?} lost its receiver (a pit)", r.cells[c]);
+        }
+    }
+    // The area along the corridor never falls downstream (a link joins a cell to the next one on the path), and it reaches the river's size.
+    let mut max_area = 0.0f64;
+    for c in 0..r.cells.len() {
+        if net.corridor[c] && net.next[c] != u32::MAX && r.depth[c] + 2 < r.halo {
+            let next = net.next[c] as usize;
+            assert!(
+                s.area_m2[next] >= s.area_m2[c] * 0.99,
+                "area fell from {} to {} between {:?} and {:?}",
+                s.area_m2[c],
+                s.area_m2[next],
+                r.cells[c],
+                r.cells[next]
+            );
+            max_area = max_area.max(s.area_m2[c]);
+        }
+    }
+    let prev_area = max_area;
+    assert!(with_link > 100, "{with_link} corridor cells with a link");
+    assert!(prev_area > 1.0e8, "the river's area {prev_area} m2 reaches the downstream end");
+}
+
+// spec: GEN-039, GEN-048
+#[test]
+fn the_change_never_exceeds_the_stages_stated_bound_even_across_a_high_ridge() {
+    let a = stage_over(Arc::new(Ridge), 30);
+    let lat = ChunkLattice::new(PER).unwrap();
+    let r = region(&lat, chunk(1003), 30);
+    let change = a.compute(&lat, &r);
+    let bound = a.bound_m() as f32;
+    assert!(change.iter().all(|c| c.abs() <= bound), "a change beyond {bound} m");
+    assert!(
+        change.iter().any(|c| c.abs() > 50.0),
+        "the ridge is cut: the largest change is {}",
+        change.iter().fold(0.0f32, |m, c| m.max(c.abs()))
+    );
+}
