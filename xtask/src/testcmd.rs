@@ -746,6 +746,30 @@ fn perf_global_bake_args(args: &[String]) -> Result<Vec<String>, String> {
     Ok(v)
 }
 
+/// The `cargo` arguments of `perf coupled` (GEN-042): the coupled-run scene under the readiness gate; the grid defaults to 2048 cells per face edge.
+fn perf_coupled_args(args: &[String]) -> Result<Vec<String>, String> {
+    let mut v: Vec<String> = ["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", "coupled", "--adapter", "hardware"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--machine-ready" => v.push(a.clone()),
+            "--global-res" => {
+                v.push(a.clone());
+                v.push(it.next().ok_or_else(|| format!("{a} needs a value"))?.clone());
+            }
+            other => {
+                return Err(format!(
+                    "unknown perf coupled option '{other}' (known: --global-res, --machine-ready, the owner's override of a failed readiness gate)"
+                ))
+            }
+        }
+    }
+    Ok(v)
+}
+
 /// The streaming scenes of `perf stream` (ADR 0032 point 8 and `dive-cold`, ADR 0045 point 3); `all` runs the seven, one child process each.
 /// The edit-to-visible scene (SPIKE-13, M6 exit): run by name under the same gate and options, never part of `all`.
 const EDIT_SCENE: &str = "edit-latency";
@@ -969,6 +993,11 @@ pub fn perf(root: &Path, args: &[String]) -> Res {
     }
     if args.first().map(String::as_str) == Some("global-bake") {
         let cargo_args = perf_global_bake_args(&args[1..])?;
+        let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+        return run(root, "cargo", &refs, &[]);
+    }
+    if args.first().map(String::as_str) == Some("coupled") {
+        let cargo_args = perf_coupled_args(&args[1..])?;
         let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
         return run(root, "cargo", &refs, &[]);
     }
@@ -1498,6 +1527,15 @@ mod tests {
     }
 
     // spec: GEN-014, BUILD-002
+    // spec: GEN-042
+    #[test]
+    fn perf_coupled_runs_the_scene_under_the_gate_and_takes_the_grid_size() {
+        let a = perf_coupled_args(&s(&["--global-res", "64", "--machine-ready"])).unwrap();
+        assert!(a.contains(&"coupled".to_string()) && a.contains(&"hardware".to_string()) && a.contains(&"--machine-ready".to_string()));
+        assert!(perf_coupled_args(&s(&["--global-res"])).unwrap_err().contains("needs a value"));
+        assert!(perf_coupled_args(&s(&["--force"])).unwrap_err().contains("unknown perf coupled option"));
+    }
+
     #[test]
     fn perf_global_bake_runs_the_scene_under_the_gate_and_takes_the_grid_size() {
         let a = perf_global_bake_args(&s(&["--global-res", "1024", "--machine-ready"])).unwrap();
