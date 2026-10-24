@@ -165,7 +165,7 @@ fn a_missing_or_foreign_block_is_an_error_naming_the_block_and_a_wrong_map_is_re
     let store = TileStore::open(&d, w.params()).unwrap();
     // The same store read under another march's key: nothing is stored under it.
     let other = world(coupled(), HorizonSpec { params: CoarseParams { range_m: 40_000.0, ..horizon().params }, ..horizon() });
-    let err = load_horizon(&store, &other).err().expect("another march has no blocks here");
+    let err = load_horizon(&store, &other).expect_err("another march has no blocks here");
     assert!(err.to_string().contains("coarse horizon block"), "{err}");
     assert!(w.horizon_records(&map()[1..]).is_err(), "a map of the wrong size");
     let _ = fs::remove_dir_all(&d);
@@ -192,7 +192,7 @@ fn a_damaged_stored_block_a_wrong_lattice_and_a_default_that_follows_the_body_ar
     }
     writer.finish().unwrap();
     let store = TileStore::open(&d, w.params()).unwrap();
-    let err = load_horizon(&store, &w).err().expect("a damaged block");
+    let err = load_horizon(&store, &w).expect_err("a damaged block");
     assert!(err.to_string().contains("coarse horizon block"), "{err}");
     // The default march takes the body's radius (an Earth-sized default on a smaller body would key and march with the wrong one).
     let defaulted = GlobalWorld::from_definition(&WorldDefinition::single_planet(R, 3)).unwrap().horizon_spec();
