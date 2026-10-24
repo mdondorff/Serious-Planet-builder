@@ -118,3 +118,32 @@ impl ChunkView for ManagerView {
         self.0.is_ready(key)
     }
 }
+
+/// The chunks to prefetch (STRM-042): the chunk one chunk edge ahead of the camera along its travel over the ground, and the chunk the
+/// predicted position is in, when they are not the chunk under the camera; empty when the camera is not predicted to travel (`predicted` is
+/// `None`: it is stationary, has just teleported, or only rotates, which the estimator never sees), or only dives. The first is the one the
+/// camera needs next, requested a chunk's travel time before it is wanted (at 100 m/s through a 5 km chunk, about 49 s).
+pub fn prefetch_chunks(position: planet_core::PlanetFixed, predicted: Option<planet_core::PlanetFixed>, radius_m: f64) -> Vec<ChunkKey> {
+    use planet_core::cube::TangentWarp;
+    let Some(predicted) = predicted else { return Vec::new() };
+    let key_of = |p: planet_core::Vec3| {
+        let t = TileId::from_direction(&TangentWarp, p.normalized(), planet_generators::chunk::CHUNK_GRID_LEVEL);
+        (t.face().0, t.x(), t.y())
+    };
+    let up = position.0.normalized();
+    let travel = predicted.0 - position.0;
+    let along = travel - up * travel.dot(up);
+    if along.length() < 1e-6 {
+        return Vec::new();
+    }
+    let edge_m = radius_m * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << planet_generators::chunk::CHUNK_GRID_LEVEL);
+    let own = key_of(position.0);
+    let mut out = Vec::new();
+    for p in [position.0 + along.normalized() * edge_m, predicted.0] {
+        let k = key_of(p);
+        if k != own && !out.contains(&k) {
+            out.push(k);
+        }
+    }
+    out
+}

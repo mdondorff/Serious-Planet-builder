@@ -73,3 +73,18 @@ fn a_stamped_world_is_the_stamp_stage_over_the_base_field() {
     same(chain.as_ref(), &by_hand);
     assert_ne!(chain.height(at).to_bits(), base.height(at).to_bits(), "the stamp acts at its centre");
 }
+
+// spec: GEN-039
+#[test]
+fn a_chain_over_a_layer_with_the_chunk_stage_under_is_refused_naming_the_layer_and_on_top_builds_as_before() {
+    let src = OwnedBake(bake(7, &TangentWarp, 16, 2).unwrap());
+    let mut def = WorldDefinition::single_planet(R, 7);
+    let plain = field_chain(HeightFieldKind::Eroded, &Arc::new(def.clone()), &src, [1; 16], false).unwrap();
+    // `on-top` is the default: setting it explicitly builds the same field.
+    def.set_chunk_stage(BodyId::PLANET, "stamps", planet_world_def::ChunkStagePosition::OnTop);
+    let on_top = field_chain(HeightFieldKind::Eroded, &Arc::new(def.clone()), &src, [1; 16], false).unwrap();
+    same(plain.as_ref(), on_top.as_ref());
+    def.set_chunk_stage(BodyId::PLANET, "placed", planet_world_def::ChunkStagePosition::Under);
+    let e = field_chain(HeightFieldKind::Eroded, &Arc::new(def), &src, [1; 16], false).err().expect("refused");
+    assert!(e.contains("layer 'placed'"), "{e}");
+}

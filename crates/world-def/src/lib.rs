@@ -375,10 +375,32 @@ pub struct WorldDefinition {
     /// The implementation id of the height field the world names (GEN-018), if it names one. Not a node (nodes are
     /// numbers); it enters the base hash only when set, so a definition that names none hashes as it always did.
     height_field: Option<String>,
+    /// The `chunk_stage` setting of the layers that have one (GEN-039); a layer without an entry is [`ChunkStagePosition::OnTop`]. It enters the
+    /// hash only when an entry exists, so a definition without any hashes as it always did.
+    chunk_stages: BTreeMap<(BodyId, String), ChunkStagePosition>,
     /// Changes to this instance (STRM-027); not part of the content.
     revision: revision::Revision,
 }
 
+/// Where a layer's chunk stage sits in the chain (GEN-039, M8 plan D3, provisional): `OnTop` is base, chunk, stamps (an edit never invalidates a
+/// chunk); `Under` is base, stamps, chunk (the chunks would read the edits, and an edit would invalidate the chunks it reaches). `Under` is
+/// representable here and in the key, and refused by [`WorldDefinition::check_chunk_stages`] until the editor supports it (M8-7, after the
+/// owner confirms D3).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ChunkStagePosition {
+    #[default]
+    OnTop,
+    Under,
+}
+
+impl ChunkStagePosition {
+    pub fn name(self) -> &'static str {
+        match self {
+            ChunkStagePosition::OnTop => "on-top",
+            ChunkStagePosition::Under => "under",
+        }
+    }
+}
 /// The layers of the stack of ADR 0007, lowest first. A layer with another name stacks above them, by name.
 pub const LAYER_STACK: [&str; 7] = ["base", "imported", "intent", "stamps", "splines", "placed", "frozen"];
 
@@ -413,6 +435,7 @@ impl WorldDefinition {
             reach: BTreeMap::new(),
             summaries: BTreeMap::new(),
             height_field: None,
+            chunk_stages: BTreeMap::new(),
             revision: revision::Revision::new(),
         }
     }
@@ -451,6 +474,35 @@ impl WorldDefinition {
         self.height_field = Some(id.to_string());
     }
 
+    /// Set the `chunk_stage` of `layer` of `body` (GEN-039).
+    pub fn set_chunk_stage(&mut self, body: BodyId, layer: &str, position: ChunkStagePosition) {
+        self.revision.bump();
+        // The default is not stored, so a layer set back to it hashes as one that never had a setting.
+        if position == ChunkStagePosition::default() {
+            self.chunk_stages.remove(&(body, layer.to_string()));
+        } else {
+            self.chunk_stages.insert((body, layer.to_string()), position);
+        }
+    }
+
+    /// The `chunk_stage` of `layer` of `body`: `OnTop` unless set.
+    pub fn chunk_stage(&self, body: BodyId, layer: &str) -> ChunkStagePosition {
+        self.chunk_stages.get(&(body, layer.to_string())).copied().unwrap_or_default()
+    }
+
+    /// Whether every layer of `body` has a `chunk_stage` the build supports: `Under` is refused with an error naming the layer (GEN-039).
+    pub fn check_chunk_stages(&self, body: BodyId) -> Result<(), String> {
+        for ((b, layer), position) in &self.chunk_stages {
+            if *b == body && *position == ChunkStagePosition::Under {
+                return Err(format!(
+                    "layer '{layer}' sets chunk_stage to '{}': the chunk stage under the stamps is not supported yet (it arrives with the editor over chunks, M8-7); use 'on-top'",
+                    position.name()
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// The height field the world names, if any.
     pub fn height_field(&self) -> Option<&str> {
         self.height_field.as_deref()
@@ -485,13 +537,20 @@ impl WorldDefinition {
     /// nodes do.
     pub fn hash(&self) -> u64 {
         let base = self.base_hash();
-        if self.items.is_empty() {
+        if self.items.is_empty() && self.chunk_stages.is_empty() {
             return base;
         }
         let mut v = vec![u64::from(HASH_VERSION), base, self.items.len() as u64];
         for ((body, id), rec) in &self.items {
             v.extend([u64::from(body.0), item_id::lo(*id), item_id::lo(rec.content), rec.dir[0], rec.dir[1], rec.dir[2]]);
             v.extend([rec.reach_bits, rec.max_delta_bits, u64::from(rec.priority as u32), hash_u64s(3, &path_words(&rec.layer))]);
+        }
+        // The chunk stage settings, only when there are some (a definition without any hashes as before).
+        if !self.chunk_stages.is_empty() {
+            v.extend([0x0063_6873, self.chunk_stages.len() as u64]);
+            for ((body, layer), position) in &self.chunk_stages {
+                v.extend([u64::from(body.0), hash_u64s(3, &path_words(layer)), *position as u64]);
+            }
         }
         // Ids and content hashes above 64 bits: their high words after the rows (empty for the 64-bit values of before).
         v.extend(item_id::wide_tail(self.items.iter().map(|((_, id), rec)| (*id, rec.content))));

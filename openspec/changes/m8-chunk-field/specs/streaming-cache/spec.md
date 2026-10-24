@@ -14,7 +14,7 @@ Source: SPIKE-34 section 6, STRM-027, STRM-029, ADR 0022
 ### Requirement: STRM-039 Chunk jobs never block a frame
 Chunk jobs SHALL run on the injected spawner (CON-04), ordered by distance to the camera, at most `chunk_workers` at once, and no frame SHALL wait for one. A tile whose chunk is not ready SHALL draw the base; on landing, the chunk's change SHALL fade in per tile over `chunk_fade_ms` (default 500) on the injected clock, through a plain f32 weight (CON-11). The per-frame log SHALL count the plan's nodes that read chunk detail (at or finer than the pyramid's top level, column `chunk_nodes`) and those among them whose own chunk is not ready (column `chunk_stand_in`): the stand-in share, for the speed-envelope scene.
 
-Verify: A, C
+Verify: A, B, C
 Status: planned
 Source: ADR 0077 point 7, CON-22, CON-04, CON-11, M8 plan criteria 3 and 7
 
@@ -51,7 +51,7 @@ Source: ADR 0077, D7 (runtime generation, disk cache), CON-05, STRM-033
 ### Requirement: STRM-042 Chunk prefetch along travel
 The chunks needed by the camera predicted by STRM-018's velocity, one chunk ahead along the direction of travel, SHALL be requested below the wanted set in priority, and a camera that only rotates SHALL prefetch no chunk.
 
-Verify: A
+Verify: A, B
 Status: planned
 Source: STRM-018, SPIKE-34 section 7, D7
 

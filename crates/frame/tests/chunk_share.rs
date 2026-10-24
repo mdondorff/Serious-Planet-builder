@@ -96,3 +96,87 @@ fn a_landed_chunks_change_fades_in_linearly_over_the_fade_time_with_a_bounded_st
     assert!((fade.weight(key, true, 5_250) - 0.5).abs() < 1e-6);
     assert_eq!(ChunkFade::new(0).weight(key, true, 0), 1.0, "no fade: the change is there at once");
 }
+
+// spec: STRM-042
+#[test]
+fn travel_prefetches_the_next_chunk_before_it_is_wanted_and_rotation_prefetches_nothing() {
+    use planet_frame::chunkshare::prefetch_chunks;
+    use planet_frame::prefetch::{PrefetchConfig, TravelEstimator};
+    let lat = ChunkLattice::new(16).unwrap();
+    let field = ChunkField::new(Reference(3), lat, R, &stage(30.0));
+    let centre = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
+    let (s0, s1, t0, t1) = centre.bounds();
+    // Low over the west part of chunk (1000, 1000), flying east along +s at 100 m/s.
+    let at = |s: f64| {
+        let d = planet_core::cube::face_to_direction(&TangentWarp, Face(2), s, 0.5 * (t0 + t1));
+        PlanetFixed(d * (R + 300.0))
+    };
+    let s_of = |t_s: f64| s0 + (s1 - s0) * 0.1 + 100.0 * t_s / (R * std::f64::consts::FRAC_PI_2) * 2.0;
+    let mut est = TravelEstimator::new(PrefetchConfig::default(), R);
+    let mut first_wanted_ms = None;
+    let mut first_prefetched_ms = None;
+    let next = (2u8, 1001u32, 1000u32);
+    for frame in 0..600u64 {
+        let (t_ms, pos) = (frame * 100, at(s_of(frame as f64 * 0.1)));
+        est.observe(t_ms, pos);
+        let predicted = est.predict();
+        // The wanted set every second of the travel (the selection is the expensive part of this test).
+        let wanted: Vec<(u8, u32, u32)> = if frame % 10 == 0 {
+            select_nodes_field_cached(&TangentWarp, pos, &field, &params(), &mut SelectionCache::new())
+                .chunk_requests(PYRAMID_TOP_LEVEL)
+                .iter()
+                .map(|c| (c.face().0, c.x(), c.y()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let ahead = prefetch_chunks(pos, predicted, R);
+        let in_first = TileId::from_direction(&TangentWarp, pos.0.normalized(), CHUNK_GRID_LEVEL) == centre;
+        if frame > 5 && in_first {
+            assert!(!ahead.is_empty());
+            assert_eq!(ahead[0], next, "one chunk ahead along the travel, at frame {frame}");
+        }
+        if ahead.contains(&next) && first_prefetched_ms.is_none() {
+            first_prefetched_ms = Some(t_ms);
+        }
+        if wanted.contains(&next) && first_wanted_ms.is_none() {
+            first_wanted_ms = Some(t_ms);
+        }
+    }
+    let (p, w) = (first_prefetched_ms.expect("prefetched"), first_wanted_ms.expect("wanted at last"));
+    assert!(p + 5_000 <= w, "the next chunk was asked for at {p} ms and wanted at {w} ms: it must be requested well before");
+    // Only rotating: the position does not change, the estimator predicts nothing, nothing is prefetched.
+    let mut est = TravelEstimator::new(PrefetchConfig::default(), R);
+    let here = at(s_of(0.0));
+    for frame in 0..100u64 {
+        est.observe(frame * 100, here);
+        assert!(prefetch_chunks(here, est.predict(), R).is_empty(), "a camera that only turns prefetches no chunk");
+    }
+}
+
+// spec: STRM-042
+#[test]
+fn a_prefetched_chunk_takes_only_the_workers_the_wanted_chunks_leave_and_is_not_evicted_before_use() {
+    use planet_generators::chunkfield::ChunkKey;
+    let (spawner, clock) = (Arc::new(ManualSpawner::default()), Arc::new(FakeClock::default()));
+    let m = ChunkManager::new(
+        ChunkLattice::new(16).unwrap(),
+        R,
+        PYRAMID_TOP_LEVEL,
+        Arc::new(stage(30.0)),
+        spawner.clone(),
+        clock.clone(),
+        None,
+        ChunkConfig { workers: 2, ..ChunkConfig::default() },
+    );
+    let (here, next, further): (ChunkKey, ChunkKey, ChunkKey) = ((2, 1000, 1000), (2, 1001, 1000), (2, 1002, 1000));
+    let up = m.update_with(&[(here, 10.0)], &[next, further]);
+    assert_eq!(up.started, 2, "the wanted chunk and the first prefetched one");
+    spawner.run(2);
+    assert_eq!(m.update_with(&[(here, 10.0)], &[next]).landed, vec![here, next]);
+    // The prefetched chunk is kept while it stays on the prefetch list, past the evict time, and goes once it is on none.
+    clock.advance(6_000);
+    assert!(m.update_with(&[(here, 10.0)], &[next]).evicted.is_empty());
+    clock.advance(6_000);
+    assert_eq!(m.update_with(&[(here, 10.0)], &[]).evicted, vec![next]);
+}

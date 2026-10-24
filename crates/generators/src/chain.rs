@@ -65,6 +65,8 @@ pub fn field_chain<'a>(
     bake_key: [u8; 16],
     bound_water: bool,
 ) -> Result<Box<dyn HeightField + 'a>, String> {
+    // The chunk stage of every layer must be one the build supports (GEN-039): `under` is refused with the layer named.
+    def.check_chunk_stages(BodyId::PLANET)?;
     let ctx = GenContext::new(def);
     let built = build_field(kind, &ctx, BodyId::PLANET, src, bake_key)
         .map_err(|e| format!("the definition cannot be generated: {e}"))

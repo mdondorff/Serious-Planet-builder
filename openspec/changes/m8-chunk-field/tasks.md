@@ -27,10 +27,10 @@
 - [x] 3d.3 Fade weight (CPU weight, `ChunkFade`) and the stand-in share in the per-frame counts (`chunk_nodes`, `chunk_stand_in`, for M8-V); the shader hookup of the weight is its own PR after 3e (planner, 2026-10-24)
 - [x] 3d.4 Eviction by need; disk cache in the pack store with verification
 ### 3e. Prefetch, layer setting, tight bound (STRM-042, GEN-039)
-- [ ] 3e.1 Chunk prefetch along the direction of travel; rotation prefetches nothing
-- [ ] 3e.2 `chunk_stage` layer setting in the world definition; `Under` refused with an error naming the layer
-- [ ] 3e.3 Tight bound from a ready chunk's grid, only if the plan stays a pure function of position and world version; otherwise cut and note in the PR
-- [ ] 3e.4 Flight and pan scenes on the software adapter (SPIKE-34's flight 30 km to 1.8 m and a 300 m pan) as tier-B/C checks; spec-guardian; verifier
+- [x] 3e.1 Chunk prefetch along the direction of travel; rotation prefetches nothing
+- [x] 3e.2 `chunk_stage` layer setting in the world definition; `Under` refused with an error naming the layer
+- [x] 3e.3 Tight bound from a ready chunk's grid: cut (it makes the plan depend on the ready set, against LOD-013; design.md section 15)
+- [x] 3e.4 The flight 30 km to 1.8 m and a 300 m pan as a tier-B check (plan, chunk manager, prefetch, share on the fake clock); the rendered flight on the software adapter comes with the shader hookup; spec-guardian; verifier
 
 ## 4. Close
 - [ ] 4.1 All requirements pass: statuses `planned` to `active`, spec-guardian, verifier, archive, one line in `docs/status.md` via the planner
