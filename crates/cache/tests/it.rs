@@ -12,6 +12,8 @@ mod crc_reference;
 mod global_store;
 #[path = "hilbert_crc.rs"]
 mod hilbert_crc;
+#[path = "horizon_store.rs"]
+mod horizon_store;
 #[path = "keys.rs"]
 mod keys;
 #[path = "keys_footprint.rs"]
