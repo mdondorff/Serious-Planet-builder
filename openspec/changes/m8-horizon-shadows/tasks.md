@@ -5,9 +5,9 @@ Step 1 landed with the first PR; the rest follows. Each step is one PR of at mos
 - [x] 0. Decisions recorded in design.md (planner, 2026-10-24); requirement IDs GEN-044 to GEN-046, STRM-045, REND-038 are this change's.
 - [x] 1. GEN-044: the horizon bake of a raster with halo (`generators::horizon`), tier A on synthetic terrain; indicative CPU timing in design.md.
 - [x] 2a. GEN-045: the coarse horizon from the coupled heights (`generators::coarsehorizon`), tier A on a small body.
-- [ ] 2b. STRM-045 part 1: the coarse horizon as a `TileChannel` kind beside the coupled one (key with the horizon parameters, round trip, loaded or made with the world).
+- [x] 2b. STRM-045: the coarse horizon as a `TileChannel` of kind 9 beside the coupled one (`cache::horizon_store`: codec, key with the march and the coupled run, round trip). Loaded or made with the world: with the chunk wiring (step 4).
 - [ ] 3. GEN-046: the combination and the interpolation twin of the shader (CPU reference, CON-07).
-- [ ] 4. STRM-045 part 2: the horizon as a chunk output (key, disk cache, eviction with the chunk, stand-in = coarse only, landing refresh); one registration line in the explorer-owned chunk path, agreed with the planner.
+- [ ] 4. STRM-048: the horizon as a chunk output (key, disk cache, eviction with the chunk, stand-in = coarse only, landing refresh); one registration line in the explorer-owned chunk path, agreed with the planner.
 - [ ] 5. REND-038: the horizon textures in the terrain bind group and the shadow term in the lit fragment stage; the shader against the CPU twin (tier C).
 - [ ] 6. CON-18: the horizon debug view and stills at sunset and midday on the fixed poses; goldens through `golden-review`.
 - [ ] 7. Perf (architect's window): the shadow term's GPU time at 1440p, the chunk job time with the bake; judged against criterion 5 together with M8-6.

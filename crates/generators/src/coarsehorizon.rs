@@ -14,6 +14,9 @@ use planet_core::Vec3;
 /// The most azimuths a map may hold (the map is `6 m^2` cells of that many bytes).
 pub const MAX_AZIMUTHS: u32 = 256;
 
+/// Version of the march and the byte it stores; it is part of the key of the stored map (STRM-045), so a change to what the march gives must bump it.
+pub const COARSE_HORIZON_VERSION: u32 = 1;
+
 /// How the coarse horizon is marched.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CoarseParams {

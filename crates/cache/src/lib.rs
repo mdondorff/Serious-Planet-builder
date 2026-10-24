@@ -5,6 +5,7 @@ pub mod codec;
 pub mod crc32c;
 pub mod global_store;
 pub mod hilbert;
+pub mod horizon_store;
 pub mod key;
 pub mod meshpack;
 pub mod pack;

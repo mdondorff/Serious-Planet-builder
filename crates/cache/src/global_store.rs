@@ -21,6 +21,7 @@ use std::time::Instant;
 use planet_core::cube::TangentWarp;
 use planet_core::hash::HASH_VERSION;
 use planet_core::{Face, FaceMapping, TileId};
+use planet_generators::coarsehorizon::{CoarseParams, COARSE_HORIZON_VERSION, MAX_AZIMUTHS};
 use planet_generators::coupled::{CoupledParams, CoupledState, COUPLED_VERSION, NONE as COUPLED_NONE};
 use planet_generators::global::{
     bake_block, bake_blocks_with, check_tiled, BakeError, GlobalCoarseGenerator, GlobalSample, LatticeSource, ReadError, GLOBAL_VERSION,
@@ -41,7 +42,7 @@ use planet_world_def::{
 
 use crate::codec::shuffle;
 use crate::key::{
-    body_params_hash128, cache_key, read_entry, CacheKey, KeyInputs, Kind, ReadEntry, PARAM_COUPLED, PARAM_GRID_RES,
+    body_params_hash128, cache_key, read_entry, CacheKey, KeyInputs, Kind, ReadEntry, PARAM_COUPLED, PARAM_GRID_RES, PARAM_HORIZON,
     PARAM_OCEAN_AREA_FRACTION, PARAM_RESOLUTION,
 };
 use crate::pack::{PackError, PackWriter, Record, StoreParams, TileStore};
@@ -83,6 +84,9 @@ pub const COUPLED_CODEC_VERSION: u8 = 1;
 /// The implementation id of the coupled channel's keys.
 pub const COUPLED_IMPLEMENTATION_ID: &str = "coupled-v1";
 
+/// The implementation id of the coarse-horizon channel's keys.
+pub const HORIZON_IMPLEMENTATION_ID: &str = "horizon-v1";
+
 const HEADER_LEN: usize = 9;
 /// `codec version (u8) | resolution (u32 LE) | cells per block edge (u32 LE) | raw length (u32 LE)`.
 const SUMMARY_HEADER_LEN: usize = 13;
@@ -120,6 +124,10 @@ pub enum BlockCodecError {
     FloorVersion(u8),
     /// A coupled block of another codec version.
     CoupledVersion(u8),
+    /// A coarse-horizon block of another codec version.
+    HorizonVersion(u8),
+    /// A coarse-horizon block whose azimuth count is zero or above the limit.
+    HorizonAzimuths(u32),
     /// A water summary of another codec version.
     SummaryVersion(u8),
     /// A water summary that makes no grid, or whose cells are not what this version writes.
@@ -143,6 +151,10 @@ impl std::fmt::Display for BlockCodecError {
             BlockCodecError::OceanVersion(v) => write!(f, "ocean block codec version {v}, this build reads {OCEAN_CODEC_VERSION}"),
             BlockCodecError::FloorVersion(v) => write!(f, "floor block codec version {v}, this build reads {FLOOR_CODEC_VERSION}"),
             BlockCodecError::CoupledVersion(v) => write!(f, "coupled block codec version {v}, this build reads {COUPLED_CODEC_VERSION}"),
+            BlockCodecError::HorizonVersion(v) => {
+                write!(f, "coarse horizon block codec version {v}, this build reads {}", crate::horizon_store::HORIZON_CODEC_VERSION)
+            }
+            BlockCodecError::HorizonAzimuths(a) => write!(f, "{a} azimuths in a coarse horizon block: 1 to {MAX_AZIMUTHS}"),
             BlockCodecError::SummaryVersion(v) => write!(f, "water summary codec version {v}, this build reads {SUMMARY_CODEC_VERSION}"),
             BlockCodecError::Summary(why) => write!(f, "the water summary is not valid: {why}"),
         }
@@ -554,6 +566,34 @@ impl CoupledSpec {
     }
 }
 
+/// The coarse horizon a channel stores (STRM-045): the observer lattice and the march. All of it is in every block's key.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HorizonSpec {
+    /// Observer cells per face edge (a divisor of the coupled run's lattice).
+    pub m: u32,
+    pub params: CoarseParams,
+}
+
+impl Default for HorizonSpec {
+    fn default() -> Self {
+        HorizonSpec { m: 512, params: CoarseParams::for_lattice(2048, planet_core::EARTH_RADIUS_M) }
+    }
+}
+
+impl HorizonSpec {
+    /// The canonical bytes of the spec: the integers, then the bits of the parameters, little-endian, then the version of the march.
+    fn bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(48);
+        out.extend_from_slice(&self.m.to_le_bytes());
+        out.extend_from_slice(&self.params.azimuths.to_le_bytes());
+        for v in [self.params.range_m, self.params.step_m, self.params.radius_m] {
+            out.extend_from_slice(&v.to_bits().to_le_bytes());
+        }
+        out.extend_from_slice(&COARSE_HORIZON_VERSION.to_le_bytes());
+        out
+    }
+}
+
 /// A block of the coupled run: `cells x cells` values of each field, row-major (x fastest).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CoupledBlock {
@@ -661,6 +701,8 @@ pub struct GlobalWorld {
     sea: SeaParams,
     /// The coupled run its channel stores (STRM-043).
     coupled: CoupledSpec,
+    /// The coarse horizon its channel stores (STRM-045): observer lattice and march, over the coupled run above.
+    horizon: HorizonSpec,
 }
 
 impl GlobalWorld {
@@ -726,6 +768,32 @@ impl GlobalWorld {
 
     pub fn coupled_key(&self, tile: TileId, cells: u32) -> CacheKey {
         cache_key(&self.coupled_key_inputs(tile, cells))
+    }
+
+    /// The coarse horizon this world's channel stores.
+    pub fn with_horizon(mut self, spec: HorizonSpec) -> GlobalWorld {
+        self.horizon = spec;
+        self
+    }
+
+    pub fn horizon_spec(&self) -> HorizonSpec {
+        self.horizon
+    }
+
+    /// The inputs of the content key of one coarse-horizon block: kind 9, the tile of the observer lattice's layout, the bake's stage key at the
+    /// run's base resolution as the source, `B` under tag 1, the observer lattice size under tag 4, the whole coupled run under tag 10 (the
+    /// horizon is a function of its heights) and the march under tag 12.
+    pub fn horizon_key_inputs(&self, tile: TileId, cells: u32) -> KeyInputs {
+        let mut inputs = self.coupled_key_inputs(tile, cells);
+        inputs.kind = Kind::GlobalHorizon;
+        inputs.implementation_id = HORIZON_IMPLEMENTATION_ID.to_string();
+        inputs.output_params.insert(PARAM_GRID_RES, self.horizon.m.to_le_bytes().to_vec());
+        inputs.output_params.insert(PARAM_HORIZON, self.horizon.bytes());
+        inputs
+    }
+
+    pub fn horizon_key(&self, tile: TileId, cells: u32) -> CacheKey {
+        cache_key(&self.horizon_key_inputs(tile, cells))
     }
 
     /// The records of a finished run: one per tile of the canonical layout of the run's lattice. The state must be the spec's lattice.
@@ -814,6 +882,7 @@ impl GlobalWorld {
             block_limit: MAX_BLOCK_CELLS,
             sea,
             coupled: CoupledSpec::default(),
+            horizon: HorizonSpec { params: CoarseParams::for_lattice(2048, radius_m), ..HorizonSpec::default() },
         })
     }
 

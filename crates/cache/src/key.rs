@@ -84,6 +84,8 @@ pub enum Kind {
     GlobalCoupled = 7,
     /// The result of one chunk of a chunk field (M8-2, STRM-041): the change raster and its pyramid.
     Chunk = 8,
+    /// A block of the coarse horizon of the global run (M8-5, GEN-045): per observer cell and azimuth one byte.
+    GlobalHorizon = 9,
 }
 
 /// One entry of a read set, in its 128-bit form (ADR 0018).
@@ -340,6 +342,8 @@ pub const PARAM_STAGE_INDEX: u8 = 9;
 pub const PARAM_COUPLED: u8 = 10;
 /// The definition of a chunk field: the process hash, cells per chunk edge, pyramid top level and the radius bits (STRM-041).
 pub const PARAM_CHUNK: u8 = 11;
+/// The coarse horizon of a block: observer cells per face edge, azimuths, range, step, radius and the version of the march (STRM-045).
+pub const PARAM_HORIZON: u8 = 12;
 
 fn field_inputs(kind: Kind, field: &dyn HeightField, map: &dyn FaceMapping, tile: TileId, radius_m: f64) -> KeyInputs {
     assert!(
