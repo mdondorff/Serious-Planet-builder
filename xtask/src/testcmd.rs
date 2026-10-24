@@ -748,10 +748,11 @@ fn perf_global_bake_args(args: &[String]) -> Result<Vec<String>, String> {
 
 /// The `cargo` arguments of `perf coupled` (GEN-042): the coupled-run scene under the readiness gate; the grid defaults to 2048 cells per face edge.
 fn perf_coupled_args(args: &[String]) -> Result<Vec<String>, String> {
-    let mut v: Vec<String> = ["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", "coupled", "--adapter", "hardware"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let mut v: Vec<String> =
+        ["run", "--release", "-p", "planet", "--", "test-render", "--perf", "--scene", "coupled", "--adapter", "hardware"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
