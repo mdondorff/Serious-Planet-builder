@@ -212,12 +212,25 @@ fn origin_heights(
     if missing.is_empty() {
         return heights;
     }
-    let dirs: Vec<planet_core::Vec3> = missing.iter().map(|&i| selection.nodes[i].tile.center_direction(map)).collect();
-    // Invariant: a batch that was stopped (`heights_until`, `heights_threaded_until`) returns 0.0 for the directions it did not
-    // finish, so a caller that can cancel MUST discard the results of a stopped batch (never memoise them). This call has no stop
-    // flag, so its batch is complete; a field whose wrapper cancels is checked by the plan worker before it uses the plan.
-    for (&i, h) in missing.iter().zip(field.heights_threaded(&dirs, threads.max(1))) {
-        heights[i] = if reuse { cache.origin_height(selection.nodes[i].tile, || h) } else { h };
+    // The origin of a tile is its centre at the height the tile draws it at (GEN-036): for a field with chunk detail one batch per tile level, as
+    // `heights_and_climate` reads it; every other field keeps its one batch for the whole plan (LOD-009, GEN-020).
+    let mut levels: Vec<Option<u8>> = missing.iter().map(|&i| field.level_aware().then(|| selection.nodes[i].tile.level())).collect();
+    levels.sort_unstable();
+    levels.dedup();
+    for level in levels {
+        let of_level: Vec<usize> =
+            missing.iter().copied().filter(|&i| level.is_none_or(|l| selection.nodes[i].tile.level() == l)).collect();
+        let dirs: Vec<planet_core::Vec3> = of_level.iter().map(|&i| selection.nodes[i].tile.center_direction(map)).collect();
+        // Invariant: a batch that was stopped (`heights_until`, `heights_threaded_until`) returns 0.0 for the directions it did not
+        // finish, so a caller that can cancel MUST discard the results of a stopped batch (never memoise them). This call has no stop
+        // flag, so its batch is complete; a field whose wrapper cancels is checked by the plan worker before it uses the plan.
+        let batch = match level {
+            Some(l) => field.heights_threaded_at_level(&dirs, l, threads.max(1)),
+            None => field.heights_threaded(&dirs, threads.max(1)),
+        };
+        for (&i, h) in of_level.iter().zip(batch) {
+            heights[i] = if reuse { cache.origin_height(selection.nodes[i].tile, || h) } else { h };
+        }
     }
     heights
 }

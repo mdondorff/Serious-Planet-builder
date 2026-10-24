@@ -971,6 +971,8 @@ pub enum ReadRecord {
     Footprint { body: BodyId, layer: String, tile: TileId, halo_bits: u64, items: Vec<footprint::FootprintItem> },
     /// One node of the region summary tree a coarse tile reads (query kind 4, WDEF-008) and its hash.
     SummaryNode { body: BodyId, layer: String, node: TileId, hash: [u8; 16] },
+    /// The state of one chunk of a chunk field a tile reads (STRM-038): 0 when the chunk is not ready, else a content hash of its result.
+    Chunk { body: BodyId, chunk: TileId, state: u64 },
 }
 
 impl ReadRecord {
@@ -982,6 +984,7 @@ impl ReadRecord {
             ReadRecord::Body { body, .. } => cell_query_all_path(*body),
             ReadRecord::Footprint { body, layer, tile, halo_bits, .. } => footprint_query_path(*body, layer, *tile, *halo_bits),
             ReadRecord::SummaryNode { body, layer, node, .. } => summary_node_path(*body, layer, *node),
+            ReadRecord::Chunk { body, chunk, .. } => format!("derived.chunk.{}.{}.{:016x}", body.0, chunk.level(), chunk.raw()),
         }
     }
 
@@ -991,6 +994,7 @@ impl ReadRecord {
             ReadRecord::Node { path, value } => node_hash(path, *value),
             ReadRecord::Cell { items, .. } | ReadRecord::Body { items, .. } => cells::cell_hash(items),
             ReadRecord::Footprint { items, .. } => footprint_hash(items),
+            ReadRecord::Chunk { state, .. } => hash_u64s(0x0063_686b, &[u64::from(HASH_VERSION), *state]),
             ReadRecord::SummaryNode { hash, .. } => {
                 let words = [
                     u64::from_le_bytes(hash[..8].try_into().expect("8 bytes")),

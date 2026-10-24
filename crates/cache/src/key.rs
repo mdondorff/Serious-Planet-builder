@@ -101,6 +101,8 @@ pub const QUERY_FOOTPRINT: u8 = 3;
 /// One node of the region summary tree a coarse tile reads (WDEF-008, ADR 0066 point 3): a key carrying one has
 /// [`KEY_FORMAT_TAG_FOOTPRINT`] too.
 pub const QUERY_SUMMARY: u8 = 4;
+/// The state of one chunk of a chunk field a tile reads (STRM-038): body, chunk tile and the state word (0: not ready).
+pub const QUERY_CHUNK: u8 = 5;
 
 /// Everything a key covers (ADR 0018).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -237,6 +239,14 @@ pub fn read_entry(record: &ReadRecord) -> ReadEntry {
         }
         ReadRecord::Body { body, items } => {
             ReadEntry::Query { kind: QUERY_BODY, params: body.0.to_le_bytes().to_vec(), result: query_result_hash128(items) }
+        }
+        ReadRecord::Chunk { body, chunk, state } => {
+            let mut params = Vec::with_capacity(12);
+            params.extend_from_slice(&body.0.to_le_bytes());
+            params.extend_from_slice(&chunk.raw().to_le_bytes());
+            let mut result = [0u8; 16];
+            result[..8].copy_from_slice(&state.to_le_bytes());
+            ReadEntry::Query { kind: QUERY_CHUNK, params, result }
         }
         ReadRecord::SummaryNode { body, layer, node, hash } => {
             ReadEntry::Query { kind: QUERY_SUMMARY, params: summary_params(*body, layer, *node), result: *hash }

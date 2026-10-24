@@ -24,3 +24,6 @@ planet-world-def.workspace = true
 planet-generators.workspace = true
 blake3.workspace = true
 lz4_flex.workspace = true
+
+[dev-dependencies]
+planet-generators = { workspace = true, features = ["stress"] }
