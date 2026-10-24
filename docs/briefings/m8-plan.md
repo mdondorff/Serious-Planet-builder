@@ -10,7 +10,7 @@ The base layer, without instances, reaches the owner's Outerra reference image a
 |---|---|---|
 | 1 | Owner's look review against the Outerra image at fixed poses (300 m, 30 m, 1.8 m; sunset, midday) on the 16384 store | D |
 | 2 | Chunk fields: identical values at chunk borders; CPU results bit-exact across threads and operating systems | A |
-| 3 | No frame waits for a chunk (CON-22); a chunk lands within 10 s at a 300 m pan; the switch fades in, with no step over 0.25 m p99 between LOD levels | A, C |
+| 3 | No frame waits for a chunk (CON-22); a chunk lands within 10 s at a 300 m pan; a landing chunk's change fades in over about 1.5 s; at the level where the chunk change enters (base to base + change) the step is at most about 0.5 px p99 on screen, with blending; between levels inside the chunk range no step over 0.25 m p99 (amended by the owner, 2026-10-24: the entry step is metres at every top level, `openspec/changes/m8-anet-chunk/design.md` section 16) | A, C |
 | 4 | Global coupled run at most 10 min on Rasierklinge per world version | perf |
 | 5 | Shadows and the material map together at most 1.5 ms of terrain-pass GPU time at 1440p | perf |
 | 6 | An edit over a chunk shows within the M6 budgets, and its eroded result within 10 s | A, perf |
