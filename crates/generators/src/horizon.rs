@@ -98,15 +98,26 @@ fn horizon_at(r: &HeightRaster<'_>, p: &HorizonParams, x: usize, y: usize, dir: 
     }
 }
 
-/// The unit direction of azimuth `k` of `a` as `(east, north)`.
+/// The unit direction of azimuth `k` of `a` as `(east, north)` in the raster's frame (`i` east, `j` north). Components that are only the
+/// rounding of an exact zero (the cosine of a quarter turn is 6e-17) are snapped to 0, so a cardinal azimuth marches along a row or a column
+/// exactly and reads no neighbouring row with a weight of 1e-16.
 fn azimuth_dir(k: u32, a: u32) -> (f64, f64) {
     let az = core::f64::consts::TAU * f64::from(k) / f64::from(a);
-    (libm::sin(az), libm::cos(az))
+    let snap = |c: f64| if c.abs() < 1e-12 { 0.0 } else { c };
+    (snap(libm::sin(az)), snap(libm::cos(az)))
+}
+
+/// Texels of raster the march of `p` can reach beyond a texel on every side: the last sample is at most `range / texel` texels away, the
+/// bilinear sample reads one texel further, and a sample on the far edge needs its neighbour (one more). A block closer to the raster's edge
+/// than this has a horizon cut short.
+pub fn halo_texels(p: &HorizonParams, texel_m: f64) -> usize {
+    ((p.range_m / texel_m).ceil() as usize).saturating_add(2)
 }
 
 /// The horizon map of the block `[x0, x0 + w) x [y0, y0 + h)` of `raster` (the texels whose value the caller keeps; the rest of the raster is
-/// the halo), on `threads` threads (rows are independent: the result does not depend on the count, CON-14). A block outside the raster is an
-/// error naming it.
+/// the halo), on `threads` threads (rows are independent: the result does not depend on the count, CON-14). Refused with the cause named: a
+/// raster whose size does not match, a block outside it, a block with less than [`halo_texels`] of raster on any side (the horizon of its
+/// edge texels would be cut short, and two chunks would disagree at their border), and parameters that are not finite, positive and sensible.
 pub fn bake_horizon(
     raster: &HeightRaster<'_>,
     block: (usize, usize, usize, usize),
@@ -114,14 +125,37 @@ pub fn bake_horizon(
     threads: usize,
 ) -> Result<HorizonMap, String> {
     let (x0, y0, w, h) = block;
-    if raster.heights.len() != raster.n * raster.n || raster.n == 0 {
-        return Err(format!("the raster holds {} heights, not {0} x {0}", raster.heights.len()).replace("{0}", &raster.n.to_string()));
+    let n = raster.n;
+    if n == 0 || n.checked_mul(n) != Some(raster.heights.len()) {
+        return Err(format!("the raster holds {} heights, not {n} x {n}", raster.heights.len()));
     }
-    if w == 0 || h == 0 || x0 + w > raster.n || y0 + h > raster.n {
-        return Err(format!("the block {w} x {h} at ({x0}, {y0}) is not inside the {} x {} raster", raster.n, raster.n));
+    let inside = |o: usize, len: usize| o.checked_add(len).is_some_and(|e| e <= n);
+    if w == 0 || h == 0 || !inside(x0, w) || !inside(y0, h) {
+        return Err(format!("the block {w} x {h} at ({x0}, {y0}) is not inside the {n} x {n} raster"));
     }
-    if p.azimuths == 0 || !(p.range_m > 0.0) || !(p.step_min_m > 0.0) || !(p.step_growth >= 0.0) || !(raster.texel_m > 0.0) {
-        return Err(format!("bad horizon parameters {p:?} / texel {} m", raster.texel_m));
+    let finite_positive = |v: f64| v.is_finite() && v > 0.0;
+    if p.azimuths == 0
+        || !finite_positive(p.range_m)
+        || !finite_positive(p.step_min_m)
+        || !finite_positive(p.radius_m)
+        || !(p.step_growth.is_finite() && p.step_growth >= 0.0)
+        || !finite_positive(raster.texel_m)
+        || p.step_min_m < 1e-3 * raster.texel_m
+        || p.range_m > 1.0e7
+        || p.range_m / raster.texel_m > 1.0e6
+    {
+        return Err(format!(
+            "bad horizon parameters {p:?} / texel {} m: finite and positive, a step of at least a thousandth of a texel, a range of at most 10,000 km and a million texels",
+            raster.texel_m
+        ));
+    }
+    let halo = halo_texels(p, raster.texel_m);
+    let (west, south, east, north) = (x0, y0, n - x0 - w, n - y0 - h);
+    if west.min(south).min(east).min(north) < halo {
+        return Err(format!(
+            "the block {w} x {h} at ({x0}, {y0}) has {west} / {south} / {east} / {north} texels of halo (west / south / east / north) in the {n} x {n} raster, but a range of {} m at {} m texels needs {halo}",
+            p.range_m, raster.texel_m
+        ));
     }
     let a = p.azimuths as usize;
     let dirs: Vec<(f64, f64)> = (0..p.azimuths).map(|k| azimuth_dir(k, p.azimuths)).collect();
@@ -153,98 +187,191 @@ mod tests {
     const R: f64 = 6_371_000.0;
     const TEXEL: f64 = 4.0;
 
-    /// A flat raster of `n x n` texels with a ridge of `height` metres, `width` texels wide, from column `col`.
-    fn ridge(n: usize, col: usize, width: usize, height: f32) -> Vec<f32> {
-        (0..n * n).map(|k| if (col..col + width).contains(&(k % n)) { height } else { 0.0 }).collect()
+    fn short(range_m: f64) -> HorizonParams {
+        HorizonParams { range_m, ..HorizonParams::chunk(R) }
     }
 
-    fn params(range_m: f64) -> HorizonParams {
-        HorizonParams { range_m, ..HorizonParams::chunk(R) }
+    /// A flat raster with a band of `height` metres: columns `[at, at + width)` when `columns`, else rows.
+    fn band(n: usize, at: usize, width: usize, height: f32, columns: bool) -> Vec<f32> {
+        (0..n * n)
+            .map(|k| {
+                let c = if columns { k % n } else { k / n };
+                if (at..at + width).contains(&c) {
+                    height
+                } else {
+                    0.0
+                }
+            })
+            .collect()
+    }
+
+    /// The bounds the byte at distance `d` from the face of a ridge of `height` must lie in: the first sample on the ridge is at most one step
+    /// and one texel (the bilinear ramp) past its face.
+    fn bounds(p: &HorizonParams, height: f32, d: f64) -> (u8, u8) {
+        let step = p.step_min_m + p.step_growth * d;
+        let curvature = d * d / (2.0 * p.radius_m);
+        let lo = quantize(libm::atan((f64::from(height) - curvature) / (d + step + TEXEL)));
+        let hi = quantize(libm::atan(f64::from(height) / (d - TEXEL)));
+        (lo.saturating_sub(1), hi.saturating_add(1))
     }
 
     // spec: GEN-044
     #[test]
     fn a_ridge_casts_the_angle_of_its_height_over_its_distance_toward_it_and_none_away_from_it() {
-        let (n, col, width, height) = (128usize, 80usize, 4usize, 100.0f32);
-        let heights = ridge(n, col, width, height);
+        let (n, at, width, height) = (300usize, 150usize, 8usize, 100.0f32);
+        let p = short(200.0);
+        let (east, west, north, south) = (4usize, 12usize, 0usize, 8usize);
+        // A ridge to the east (along columns): texels west of it see it toward the east and nothing toward the west.
+        let heights = band(n, at, width, height, true);
         let raster = HeightRaster { n, texel_m: TEXEL, heights: &heights };
-        let p = params(2_000.0);
-        let map = bake_horizon(&raster, (0, 60, 100, 8), &p, 2).unwrap();
-        let east = (p.azimuths / 4) as usize;
-        let west = (3 * p.azimuths / 4) as usize;
-        for x in [0usize, 20, 50, 70] {
-            let d = (col - x) as f64 * TEXEL;
-            let step = p.step_min_m + p.step_growth * d;
-            let toward = f64::from(map.at(x, 3, east));
-            // The sample that first meets the ridge lies at most a step (and the ramp of one texel) beyond its face.
-            let lo = quantize(libm::atan(f64::from(height) / (d + step + TEXEL) - d * d / (2.0 * R) / d));
-            let hi = quantize(libm::atan(f64::from(height) / (d - TEXEL)));
-            assert!(toward >= f64::from(lo) - 1.0 && toward <= f64::from(hi) + 1.0, "x {x}: {toward} not in [{lo}, {hi}]");
-            assert_eq!(map.at(x, 3, west), 0, "x {x}: nothing rises to the west of a flat plain");
+        let map = bake_horizon(&raster, (60, 100, 100, 8), &p, 2).unwrap();
+        for x in [104usize, 130, 146] {
+            let d = (at - x) as f64 * TEXEL;
+            let (lo, hi) = bounds(&p, height, d);
+            let q = map.at(x - 60, 3, east);
+            assert!((lo..=hi).contains(&q), "x {x}: {q} not in [{lo}, {hi}]");
+            assert_eq!(map.at(x - 60, 3, west), 0, "x {x}: flat plain to the west");
+            assert_eq!((map.at(x - 60, 3, north), map.at(x - 60, 3, south)), (0, 0), "x {x}: nothing north or south of a column ridge");
         }
-        // Texels east of the ridge look away from it: no horizon toward the east, the ridge to the west.
-        assert_eq!(map.at(99, 3, east), 0);
-        assert!(map.at(99, 3, west) > 0 || col + width + 99 > n, "the ridge is to the west of a texel east of it");
+        // A texel just east of the ridge looks away from it: nothing eastward, a steep wall westward.
+        let after = at + width + 1 - 60;
+        assert_eq!(map.at(after, 3, east), 0);
+        assert!(map.at(after, 3, west) > 200, "the wall beside it is steeper than 70 degrees: {}", map.at(after, 3, west));
+        // A ridge to the north (along rows) is seen toward k = 0 and not toward k = 8: j grows north.
+        let heights = band(n, at, width, height, false);
+        let raster = HeightRaster { n, texel_m: TEXEL, heights: &heights };
+        let map = bake_horizon(&raster, (100, 60, 8, 100), &p, 2).unwrap();
+        for y in [104usize, 130, 146] {
+            let d = (at - y) as f64 * TEXEL;
+            let (lo, hi) = bounds(&p, height, d);
+            let q = map.at(3, y - 60, north);
+            assert!((lo..=hi).contains(&q), "y {y}: {q} not in [{lo}, {hi}]");
+            assert_eq!(map.at(3, y - 60, south), 0, "y {y}: nothing to the south");
+            assert_eq!((map.at(3, y - 60, east), map.at(3, y - 60, west)), (0, 0));
+        }
     }
 
     // spec: GEN-044
     #[test]
     fn the_result_does_not_depend_on_the_thread_count_and_is_a_pure_function() {
-        let n = 96;
+        let n = 200;
         let heights: Vec<f32> =
             (0..n * n).map(|k| 30.0 * libm::sin(0.13 * (k % n) as f64) as f32 * libm::cos(0.07 * (k / n) as f64) as f32 + 5.0).collect();
         let raster = HeightRaster { n, texel_m: TEXEL, heights: &heights };
-        let p = params(300.0);
-        let one = bake_horizon(&raster, (10, 10, 40, 37), &p, 1).unwrap();
+        let p = short(100.0);
+        let one = bake_horizon(&raster, (40, 40, 60, 50), &p, 1).unwrap();
+        assert!(one.data.iter().any(|&q| q > 0), "the terrain shades something");
         for threads in [2, 3, 7, 64] {
-            assert_eq!(bake_horizon(&raster, (10, 10, 40, 37), &p, threads).unwrap(), one, "{threads} threads");
+            assert_eq!(bake_horizon(&raster, (40, 40, 60, 50), &p, threads).unwrap(), one, "{threads} threads");
         }
-        assert_eq!(bake_horizon(&raster, (10, 10, 40, 37), &p, 1).unwrap(), one);
+        assert_eq!(bake_horizon(&raster, (40, 40, 60, 50), &p, 1).unwrap(), one);
     }
 
     // spec: GEN-044
     #[test]
-    fn texels_shared_by_two_chunks_agree_when_both_rasters_hold_the_halo_and_the_halo_is_needed() {
-        let n = 160usize;
+    fn texels_shared_by_two_chunks_agree_when_both_rasters_hold_the_halo_and_a_short_halo_is_refused() {
+        let n = 260usize;
         let heights: Vec<f32> =
             (0..n * n).map(|k| 40.0 * (libm::sin(0.09 * (k % n) as f64) + libm::cos(0.11 * (k / n) as f64)) as f32).collect();
         let big = HeightRaster { n, texel_m: TEXEL, heights: &heights };
-        let p = params(200.0); // 50 texels
-        let halo = 50usize;
-        // The block [60, 100) x [60, 100) from the whole raster, and from the sub-raster [10, 150)^2 that holds exactly its halo.
-        let want = bake_horizon(&big, (60, 60, 40, 40), &p, 2).unwrap();
-        let m = 140usize;
-        let sub: Vec<f32> = (0..m * m).map(|k| heights[(10 + k / m) * n + 10 + k % m]).collect();
+        let p = short(100.0);
+        let halo = halo_texels(&p, TEXEL);
+        assert_eq!(halo, 27, "25 texels of range, one for the bilinear sample, one for the sample on the edge");
+        let want = bake_horizon(&big, (80, 80, 40, 40), &p, 2).unwrap();
+        // The sub-raster that holds exactly the halo around the block gives the same texels bit for bit...
+        let m = 40 + 2 * halo;
+        let origin = 80 - halo;
+        let sub: Vec<f32> = (0..m * m).map(|k| heights[(origin + k / m) * n + origin + k % m]).collect();
         let small = HeightRaster { n: m, texel_m: TEXEL, heights: &sub };
-        let got = bake_horizon(&small, (60 - 10, 60 - 10, 40, 40), &p, 3).unwrap();
-        assert_eq!(got, want, "a chunk with its halo gives the values of the whole raster");
-        // Without the halo the march stops at the raster's edge and the edge texels lose what lay beyond it.
-        let tight: Vec<f32> = (0..40 * 40).map(|k| heights[(60 + k / 40) * n + 60 + k % 40]).collect();
-        let bare = bake_horizon(&HeightRaster { n: 40, texel_m: TEXEL, heights: &tight }, (0, 0, 39, 39), &p, 1).unwrap();
-        let differs = (0..39).any(|i| (0..16).any(|k| bare.at(i, 0, k) != want.at(i, 0, k)));
-        assert!(differs, "the halo changes the horizon of the edge texels (halo {halo} texels)");
+        assert_eq!(bake_horizon(&small, (halo, halo, 40, 40), &p, 3).unwrap(), want);
+        // ...and one texel less of it on any side is refused, naming the shortfall.
+        for (x0, y0, w, h) in [(halo - 1, halo, 40, 40), (halo, halo - 1, 40, 40), (halo, halo, 41, 40), (halo, halo, 40, 41)] {
+            let e = bake_horizon(&small, (x0, y0, w, h), &p, 1).unwrap_err();
+            assert!(e.contains("halo") && e.contains(&format!("needs {halo}")), "{e}");
+        }
     }
 
     // spec: GEN-044
     #[test]
-    fn the_curvature_of_the_body_lowers_distant_terrain_and_bad_input_is_refused() {
-        // On a small body (radius 20 km) the terrain 1 km away is 25 m lower than the plane: a ridge of 12.5 m there is below the horizon.
-        let (n, col) = (400usize, 300usize);
+    fn the_curvature_of_the_body_lowers_distant_terrain_by_d_squared_over_two_r() {
+        // A body of radius 20 km: terrain 1 km away is 25 m lower than the plane through the observer.
         let small = 20_000.0f64;
-        let drop = (1_000.0f64 * 1_000.0 / (2.0 * small)) as f32;
-        let heights = ridge(n, col, 40, drop * 0.5);
-        let raster = HeightRaster { n, texel_m: TEXEL, heights: &heights };
         let p = HorizonParams { range_m: 1_500.0, ..HorizonParams::chunk(small) };
-        let east = (p.azimuths / 4) as usize;
-        let map = bake_horizon(&raster, (50, 200, 1, 1), &p, 1).unwrap();
-        assert_eq!(map.at(0, 0, east), 0, "a ridge lower than the curvature drop is below the horizon");
-        let flat_body = HorizonParams { radius_m: 1.0e18, ..p };
-        assert!(bake_horizon(&raster, (50, 200, 1, 1), &flat_body, 1).unwrap().at(0, 0, east) > 0, "on a flat body it rises");
-        assert!(bake_horizon(&raster, (390, 0, 20, 1), &p, 1).unwrap_err().contains("not inside"));
-        assert!(bake_horizon(&raster, (0, 0, 1, 1), &HorizonParams { azimuths: 0, ..p }, 1).unwrap_err().contains("bad horizon"));
-        assert!(bake_horizon(&HeightRaster { n: 4, texel_m: TEXEL, heights: &[0.0; 3] }, (0, 0, 1, 1), &p, 1).is_err());
-        assert_eq!(quantize(-0.3), 0);
-        assert_eq!(quantize(core::f64::consts::FRAC_PI_2), 255);
-        assert!((dequantize(quantize(0.2)) - 0.2).abs() <= DEGREES_PER_STEP.to_radians() / 2.0 + 1e-12);
+        let halo = halo_texels(&p, TEXEL);
+        let n = 2 * halo + 1 + 300;
+        let (x, y) = (halo, halo);
+        let ridge_at = x + 250; // 1 km east
+        let drop = 1_000.0f64 * 1_000.0 / (2.0 * small);
+        for factor in [0.8f64, 2.0] {
+            let hr = (drop * factor) as f32;
+            let heights = band(n, ridge_at, 40, hr, true);
+            let raster = HeightRaster { n, texel_m: TEXEL, heights: &heights };
+            let got = bake_horizon(&raster, (x, y, 1, 1), &p, 1).unwrap().at(0, 0, 4);
+            // The same march by hand over the ridge's profile along the row (a one-texel ramp up and down).
+            let profile = |sx: f64| -> f64 {
+                let c = sx + x as f64 - ridge_at as f64;
+                let w = if c < 0.0 {
+                    0.0
+                } else if c < 1.0 {
+                    c
+                } else if c < 39.0 {
+                    1.0
+                } else if c < 40.0 {
+                    40.0 - c
+                } else {
+                    0.0
+                };
+                f64::from(hr) * w
+            };
+            let (mut best, mut d) = (f64::NEG_INFINITY, TEXEL);
+            while d <= p.range_m {
+                best = best.max((profile(d / TEXEL) - d * d / (2.0 * small)) / d);
+                d += p.step_min_m + p.step_growth * d;
+            }
+            let want = quantize(libm::atan(best));
+            assert!(got.abs_diff(want) <= 1, "ridge at {factor} x the drop: {got} against {want}");
+            if factor < 1.0 {
+                assert_eq!(got, 0, "a ridge lower than the curvature drop is below the horizon");
+            } else {
+                assert!(got >= 3, "twice the drop rises 1.4 degrees: {got}");
+            }
+        }
+    }
+
+    // spec: GEN-044
+    #[test]
+    fn bad_input_is_refused_with_the_cause_and_the_byte_conversion_is_exact_at_its_edges() {
+        let p = short(100.0);
+        let heights = vec![0.0f32; 16];
+        let e = bake_horizon(&HeightRaster { n: 4, texel_m: TEXEL, heights: &heights[..3] }, (0, 0, 1, 1), &p, 1).unwrap_err();
+        assert!(e.contains("3 heights, not 4 x 4"), "{e}");
+        let n = 80;
+        let flat = vec![0.0f32; n * n];
+        let r = HeightRaster { n, texel_m: TEXEL, heights: &flat };
+        let block = (30, 30, 20, 20);
+        assert!(bake_horizon(&r, (usize::MAX, 0, 1, 1), &p, 1).unwrap_err().contains("not inside"));
+        assert!(bake_horizon(&r, (0, 0, 0, 1), &p, 1).unwrap_err().contains("not inside"));
+        for bad in [
+            HorizonParams { azimuths: 0, ..p },
+            HorizonParams { range_m: f64::INFINITY, ..p },
+            HorizonParams { range_m: f64::NAN, ..p },
+            HorizonParams { step_min_m: 1e-20, step_growth: 0.0, ..p },
+            HorizonParams { step_growth: f64::NAN, ..p },
+            HorizonParams { radius_m: 0.0, ..p },
+            HorizonParams { radius_m: -1.0, ..p },
+            HorizonParams { radius_m: f64::NAN, ..p },
+        ] {
+            assert!(bake_horizon(&r, block, &bad, 1).unwrap_err().contains("bad horizon parameters"), "{bad:?}");
+        }
+        for texel in [f64::INFINITY, 0.0, f64::NAN, 1e-30] {
+            let r = HeightRaster { n, texel_m: texel, heights: &flat };
+            assert!(bake_horizon(&r, block, &p, 1).is_err(), "texel {texel}");
+        }
+        assert_eq!(bake_horizon(&r, block, &p, 1).unwrap().data.len(), 20 * 20 * 16);
+        // The byte: 0 at and below the horizon (and for a missing angle), 255 at the zenith, a round trip on every byte, rounding at the half step.
+        assert_eq!((quantize(-0.3), quantize(0.0), quantize(f64::NAN), quantize(core::f64::consts::FRAC_PI_2)), (0, 0, 0, 255));
+        assert!((0..=255u8).all(|q| quantize(dequantize(q)) == q));
+        let half = (DEGREES_PER_STEP * 0.5).to_radians();
+        assert_eq!((quantize(half * 0.999), quantize(half * 1.001)), (0, 1));
     }
 }
