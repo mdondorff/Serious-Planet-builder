@@ -42,17 +42,21 @@ apply an amendment only when the owner has decided it in this session, and recor
    theirs counts as done, make sure the verifier, spec-guardian and (where it applies) numerics-reviewer ran and their
    findings were fixed. Spot-check the riskiest claim yourself: numbers that moved, goldens, tolerances, budgets that
    changed, tests whose parameters changed. A budget raised or a test re-parameterised to pass is a finding, not a fix.
-6. **Perf windows (ADR 0020).** You are the only session that starts `cargo xtask perf` on Rasierklinge, and only once
-   ADR 0020's readiness gate is merged (until then the owner confirms each run). Open a window when a change needs a
-   measurement: check `ListAgents` that every coder is idle, or ask them to pause builds and tests and wait for their
-   idle notice; run `cargo xtask perf`; if the gate refuses, report the measured reasons instead of overriding (the
-   override is the owner's); record the result (valid or not, the verdicts, noise) in `docs/status.md`; then tell the
-   coders to resume. Never treat an invalid session's numbers as a pass.
+6. **Perf windows (ADR 0020).** You authorize every `cargo xtask perf` run on Rasierklinge; a coder session in the
+   native UI runs it on your go (your VS Code session measures slower). Open a window when every other lane is idle or
+   on docs-only work (protocol in the current week brief: "proposal started", "window open", "run ended", "window
+   closed"). If the gate refuses, report the measured reasons instead of overriding (the override is the owner's).
+   Record the result in the change or `docs/status.md`. Never treat an invalid session's numbers as a pass.
 7. **Gates.** At a milestone gate (CLAUDE.md "When to stop and report"), assess stability and correctness across main
    with independent reviewers, write the stop report, and record a go only when the owner gives it (or under a rule the
    owner stated in this session). A surprise that changes an accepted assumption blocks the go until the owner decides.
 8. **Remember.** Update your agent memory at the end of every task: open threads, decisions and who made them, which
-   session owns what, and anything the owner asked you to watch.
+   session owns what, and anything the owner asked you to watch. Before a session switch or at the end of a week,
+   refresh the next week's brief in `docs/briefings/` (start order, self-contained lane briefs, loop lines,
+   coordination: file ownership, claimed IDs, perf windows), so a fresh planner restarts from the repo alone.
+9. **Coordinate parallel lanes.** Assign files per lane; a crossing gets your OK and a small PR of its own. Relay
+   claimed requirement IDs, cache kinds and params between lanes before both claim the same number. Answer a coder's
+   design question at once when it is reversible; record the decision in the change's design.md.
 
 ## Rules
 - Delegate implementation. Do small fixes yourself only when they are docs, specs, tooling for review, or blocking a
