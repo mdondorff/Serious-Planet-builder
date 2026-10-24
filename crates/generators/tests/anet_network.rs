@@ -39,6 +39,9 @@ impl CoarseRun for River {
     fn area_m2(&self, c: usize) -> f32 {
         on_river(self.0, c).map_or(1.0e6, |i| 2.0e8 * (1 + i - 995) as f32)
     }
+    fn identity(&self) -> u64 {
+        7
+    }
     fn receiver(&self, c: usize) -> u32 {
         match on_river(self.0, c) {
             Some(i) if i < 1010 => (c + 1) as u32,
@@ -53,6 +56,9 @@ struct Detail(f64);
 impl BaseDetail for Detail {
     fn base_height(&self, dir: Vec3) -> f64 {
         self.coarse_input(dir) + self.0
+    }
+    fn identity(&self) -> u64 {
+        11
     }
     fn coarse_input(&self, dir: Vec3) -> f64 {
         100.0 + 3.0 * dir.x
@@ -153,6 +159,9 @@ fn the_initial_heights_are_the_runs_upsampled_plus_the_base_detail() {
 struct Smooth;
 
 impl CoarseRun for Smooth {
+    fn identity(&self) -> u64 {
+        5
+    }
     fn lattice(&self) -> &Lattice {
         lattice()
     }

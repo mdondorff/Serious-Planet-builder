@@ -197,13 +197,18 @@ pub trait ChunkStage: Send + Sync {
     /// The change in metres at every cell of `region`; the values at depth at most `region.halo - step_cap` are exact (the cells further out
     /// are what the shrinking region left behind and are not to be read).
     fn compute(&self, lat: &ChunkLattice, region: &Region) -> Vec<f32>;
+    /// The rings of halo the stage needs around a chunk (default: the step cap, each step reaching one ring, plus the apron ring). A stage whose
+    /// reach is not one ring per step (a process along a network) states its own, in metres over the cell size.
+    fn halo_rings(&self) -> u16 {
+        (self.step_cap() + 1).min(u32::from(u16::MAX)) as u16
+    }
     /// A hash of everything that defines the process (seed, parameters, version): a change re-keys every tile a chunk of it can reach.
     fn definition_hash(&self) -> u64;
 }
 
 /// The halo of a stage in rings (a chunk is refused below it): its step cap, each step reaching one ring, plus the apron ring.
 pub fn halo_rings(stage: &dyn ChunkStage) -> u16 {
-    (stage.step_cap() + 1).min(u32::from(u16::MAX)) as u16
+    stage.halo_rings()
 }
 
 /// The change raster of one chunk and its box-filtered pyramid (GEN-037): `levels[k]` is `(n >> k)^2` cells, row-major with `j` outer, each

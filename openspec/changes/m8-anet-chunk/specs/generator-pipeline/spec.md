@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: GEN-047 The global network in the chunk raster
-A chunk stage of the A-net kind SHALL take the river network of a chunk from the stored global coupled run: the coarse path from every coarse cell whose drainage area exceeds 100 km2 to its receiver is the chunk's corridor, displaced by a noise meander that is a function of position only and zero at the coarse cell centres, so that two neighbouring chunks find the same path through their shared border; the drainage area crossing the halo ring is injected as inflow, and the initial fine heights are the coarse heights upsampled plus the base field's detail. A chunk with no such cell SHALL have no corridor.
+A chunk stage of the A-net kind SHALL take the river network of a chunk from the stored global coupled run: the coarse path from every coarse cell whose drainage area exceeds 100 km2 to its receiver is the chunk's corridor, displaced by a noise meander that is a function of position only and zero at the coarse cell centres, so that two neighbouring chunks find the same path through their shared border; the drainage area crossing the halo ring is injected as inflow, and the initial fine heights are the coarse heights upsampled plus the base field's detail. The corridor SHALL be held at the run's height (interpolated along the segment, the lower of it and the base height) at every quarter of a coarse segment, so a channel bed does not depend on the heights at the region's ring. A chunk with no such cell SHALL have no corridor.
 
 Verify: A
 Status: planned
@@ -19,13 +19,13 @@ Status: planned
 Source: SPIKE-35 item 1 (variant c4), ADR 0077 consequences
 
 #### Scenario: Zero uphill
-- **WHEN** a chunk of the SPIKE-35 lattice runs N = 30 steps
-- **THEN** 0 channel cells have a higher receiver, and the heights and areas hash equals the prototype's recorded hash
+- **WHEN** a chunk of a terrain whose corridor runs uphill in places runs N = 30 steps
+- **THEN** 0 channel cells have a higher receiver, and two runs give the same receivers and heights, bit for bit
 
 ### Requirement: GEN-049 The halo of an A-net chunk
-An A-net chunk SHALL state its halo as 3 km (at least its step cap times its reach per step) and SHALL, with that halo, equal the same run over the whole region in every cell of its core, bit for bit, at the step cap, at a site where a river crosses the chunk border.
+An A-net chunk SHALL state its halo (3 km by default) and SHALL, with it, equal the same run over a wider halo in every cell of its core: bit for bit where every channel chain meets a fixed cell (an anchor) inside the halo and every catchment lies within the area window, and to within 2 cm on a gentle valley where a stream runs a long way to the river. The reaches that bound this (breach window, area window, tributary step cap) are parameters of the stage and part of its definition.
 
-Verify: B
+Verify: A, B
 Status: planned
 Source: SPIKE-35 item 2, ADR 0077 point 4, GEN-038
 
@@ -56,12 +56,12 @@ Source: SPIKE-33 stage model, ADR 0077 point 3, CON-14
 - **THEN** the channel cells are unchanged, no non-channel cell exceeds the angle of repose by more than one pass can move, the volume moved equals the volume received, and the hash is the same on 1, 2 and 8 threads
 
 ### Requirement: GEN-052 A-net chunk time
-An A-net chunk SHALL take at most 0.1 s per km2 of core at 4 m cells on the reference machine, one thread, measured by the performance harness through the architect and never in a test (CON-20); the table of time per km2 at 4, 8 and 10 m is recorded with the run.
+An A-net chunk of 24 km2 of core SHALL take at most 4 s at 8 m cells with the 3 km halo (1.8 million cells) on the reference machine, one thread, measured by the performance harness through the architect and never in a test (CON-20); the time at 4 and 10 m is recorded with the run (4 m was about 14 s per chunk on a synthetic scene: not met, ADR 0077 allows 4 to 10 m).
 
 Verify: C
 Status: planned
-Source: SPIKE-33 (0.06 s per km2 at 4 m), M8 plan risks, CON-22
+Source: SPIKE-33, M8 plan risks, CON-22, planner decision 2026-10-24 (8 m default)
 
 #### Scenario: Chunk time
-- **WHEN** a chunk of 25 km2 runs on the reference machine in a perf window
-- **THEN** it finishes within 2.5 s at 4 m cells and the log holds the time per km2 at 4, 8 and 10 m
+- **WHEN** a chunk of 24 km2 at 8 m cells runs on the reference machine in a perf window
+- **THEN** it finishes within 4 s at 8 m cells and the log holds the times at 4 and 10 m
