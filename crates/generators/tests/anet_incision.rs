@@ -231,7 +231,7 @@ fn a_chunk_of_the_synthetic_scene_keeps_its_known_answer() {
     assert_eq!(fnv(&core_change(1003, 40)), KNOWN_ANSWER, "the stage changed: platform, order or arithmetic");
 }
 
-const KNOWN_ANSWER: u64 = 314_346_189_879_054_882;
+const KNOWN_ANSWER: u64 = 2_924_459_866_857_506_201;
 
 /// A gentle valley along the river (slope 0.001, below the breach slope) plus a little noise: every stream runs to the river.
 struct Plane;
@@ -358,4 +358,116 @@ fn the_change_never_exceeds_the_stages_stated_bound_even_across_a_high_ridge() {
         "the ridge is cut: the largest change is {}",
         change.iter().fold(0.0f32, |m, c| m.max(c.abs()))
     );
+}
+
+// spec: GEN-051
+#[test]
+fn slumping_moves_the_excess_to_the_lower_neighbours_and_conserves_what_it_moves() {
+    let lat = ChunkLattice::new(PER).unwrap();
+    let r = region(&lat, chunk(1003), 6);
+    let (z0, dist) = (vec![0.0f64; r.cells.len()], vec![[1.0f64; 8]; r.cells.len()]);
+    // A spike of 50 over a unit grid is far over the angle of repose (0.9).
+    let spike = r.index_of(planet_generators::chunkfield::Cell { face: 2, i: 32110, j: 32010 }).unwrap();
+    let mut z = z0.clone();
+    z[spike] = 50.0;
+    let cells = r.cells.len().min(r.depth.partition_point(|&d| d <= 4));
+    let delta = planet_generators::anet::slump_deltas(&z, &r.neighbours, &dist, cells, 0.9, 0.09, &|_| false, &|c| c as u64);
+    assert!(delta[spike] < 0.0, "the spike gives");
+    for k in 0..8 {
+        assert!(delta[r.neighbours[spike][k] as usize] > 0.0, "neighbour {k} takes");
+    }
+    assert!(delta.iter().sum::<f64>().abs() < 1e-9, "what one cell gives the others take: {}", delta.iter().sum::<f64>());
+    // A protected neighbour takes nothing, and the pair with it is skipped for the spike too.
+    let q = r.neighbours[spike][2] as usize;
+    let delta = planet_generators::anet::slump_deltas(&z, &r.neighbours, &dist, cells, 0.9, 0.09, &|c| c == q, &|c| c as u64);
+    assert_eq!(delta[q], 0.0);
+    assert!(delta.iter().sum::<f64>().abs() < 1e-9);
+    // Below the angle of repose nothing moves.
+    z[spike] = 0.5;
+    assert!(planet_generators::anet::slump_deltas(&z, &r.neighbours, &dist, cells, 0.9, 0.09, &|_| false, &|c| c as u64)
+        .iter()
+        .all(|d| *d == 0.0));
+}
+
+// spec: GEN-051
+#[test]
+fn channels_the_corridor_and_fixed_cells_are_untouched_by_the_hillslope_processes_and_the_slopes_are_not() {
+    let lat = ChunkLattice::new(PER).unwrap();
+    let r = region(&lat, chunk(1003), 40);
+    let with = stage(0.4, 40);
+    let mut off = stage(0.4, 40);
+    off.params.diffusion = 0.0;
+    off.params.slump_rate = 0.0;
+    let (a, b) = (with.solve(&lat, &r), off.solve(&lat, &r));
+    let net = planet_generators::anet::Network::build(&River, &Hills, &lat, &r, R);
+    let (mut changed, mut kept) = (0, 0);
+    for c in 0..r.cells.len() {
+        if r.depth[c] > 30 {
+            continue;
+        }
+        let exempt = net.corridor[c] || !net.anchor_z[c].is_nan() || a.area_m2[c] > with.params.channel_area_m2;
+        if exempt {
+            assert_eq!(a.z[c].to_bits(), b.z[c].to_bits(), "an exempt cell {:?} moved", r.cells[c]);
+            kept += 1;
+        } else if a.z[c] != b.z[c] {
+            changed += 1;
+        }
+    }
+    assert!(kept > 100 && changed > 100, "{kept} cells kept, {changed} slopes smoothed");
+}
+
+// spec: GEN-051
+#[test]
+fn slumping_conserves_what_it_moves_next_to_a_cube_corner_where_the_neighbour_table_is_not_symmetric() {
+    let lat = ChunkLattice::new(PER).unwrap();
+    let r = region(&lat, TileId::new(Face(0), CHUNK_GRID_LEVEL, 0, 0).unwrap(), 6);
+    let (mut z, dist) = (vec![0.0f64; r.cells.len()], vec![[1.0f64; 8]; r.cells.len()]);
+    z[0] = 50.0;
+    let cells = r.depth.partition_point(|&d| d <= 4);
+    let delta = planet_generators::anet::slump_deltas(&z, &r.neighbours, &dist, cells, 0.9, 0.09, &|_| false, &|c| r.cells[c].key());
+    assert!(delta[0] < 0.0 && delta.iter().sum::<f64>().abs() < 1e-9, "sum {}", delta.iter().sum::<f64>());
+}
+
+// spec: GEN-051
+#[test]
+fn a_chunk_with_no_halo_does_not_index_a_missing_neighbour() {
+    let lat = ChunkLattice::new(PER).unwrap();
+    for halo in [0u16, 1] {
+        let r = region(&lat, chunk(1003), halo);
+        let s = stage(0.4, halo.max(1)).solve(&lat, &r);
+        assert_eq!(s.z.len(), r.cells.len());
+    }
+}
+
+/// The hashes of the changes of `tiles`, computed on `threads` threads.
+fn hashes_on(threads: usize, tiles: &[TileId]) -> Vec<u64> {
+    let lat = ChunkLattice::new(PER).unwrap();
+    let per = tiles.len().div_ceil(threads);
+    let mut out = vec![0u64; tiles.len()];
+    std::thread::scope(|s| {
+        for (lane, slot) in out.chunks_mut(per).enumerate() {
+            s.spawn(move || {
+                let a = stage(0.4, 24);
+                for (k, h) in slot.iter_mut().enumerate() {
+                    let r = region(&lat, tiles[lane * per + k], 24);
+                    let change = a.compute(&lat, &r);
+                    *h = change[..r.core]
+                        .iter()
+                        .flat_map(|x| x.to_bits().to_le_bytes())
+                        .fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3));
+                }
+            });
+        }
+    });
+    out
+}
+
+// spec: GEN-051, GEN-038
+#[test]
+fn the_changes_of_eight_chunks_are_the_same_on_one_two_and_eight_threads() {
+    let tiles: Vec<TileId> = (1000..1008).map(chunk).collect();
+    let one = hashes_on(1, &tiles);
+    assert_eq!(one, hashes_on(2, &tiles), "1 against 2 threads");
+    assert_eq!(one, hashes_on(8, &tiles), "1 against 8 threads");
+    assert!(one.windows(2).any(|w| w[0] != w[1]), "the chunks differ");
 }
