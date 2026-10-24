@@ -37,13 +37,14 @@ pub struct ChunkConfig {
     pub workers: usize,
     /// A chunk not wanted for this long leaves RAM (`chunk_evict_s` 5, in milliseconds).
     pub evict_ms: u64,
-    /// The bytes the ready chunks may hold (their own pool of the RAM caps, STRM-033): the least recently wanted leave first beyond it.
+    /// The bytes the ready chunks may hold (their own pool of the RAM caps, STRM-041; 512 MiB by default, about 250 chunks of 8 m cells): the least
+    /// recently wanted leave first beyond it.
     pub cap_bytes: u64,
 }
 
 impl Default for ChunkConfig {
     fn default() -> Self {
-        ChunkConfig { workers: 3, evict_ms: 5_000, cap_bytes: u64::MAX }
+        ChunkConfig { workers: 3, evict_ms: 5_000, cap_bytes: 512 << 20 }
     }
 }
 

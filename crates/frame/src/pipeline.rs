@@ -583,6 +583,12 @@ impl PlanWorker {
         }
     }
 
+    /// Forget what the plan cache holds of every tile that reads the chunk `landed` (STRM-040), resident or not: `reads` decides the chunks a
+    /// tile reads. Returns how many origin heights were dropped.
+    pub fn invalidate_chunk(&self, landed: (u8, u32, u32), reads: impl Fn(TileId) -> Vec<(u8, u32, u32)>) -> usize {
+        self.cache.lock().expect("selection cache").invalidate_chunk(landed, reads)
+    }
+
     /// Announce a change of the authored items to the plan cache: the field's item revision went from `from` to `to`, and `changes` is where the
     /// items that differ were and are (STRM-034). Call it before [`PlanWorker::invalidate_cache`] for the same edit and before the next plan.
     pub fn note_item_change(&self, from: u64, to: u64, changes: Vec<crate::lod::ItemChange>) {

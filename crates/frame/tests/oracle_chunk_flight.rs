@@ -39,13 +39,14 @@ fn a_flight_from_30_km_to_1_8_m_and_a_pan_never_wait_for_a_chunk_plan_the_same_r
     let view = ManagerView(manager.clone());
     let none = ChunkField::new(Reference(3), lat, R, &*stage);
     let chunk0 = TileId::new(Face(2), CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
-    let (s0, s1, t0, t1) = chunk0.bounds();
+    let (_, s1, t0, t1) = chunk0.bounds();
     let ground = |s: f64| planet_core::cube::face_to_direction(&TangentWarp, Face(2), s, 0.5 * (t0 + t1));
     let p = params();
     let mut est = TravelEstimator::new(PrefetchConfig::default(), R);
     let (mut cache, mut shares) = (SelectionCache::new(), Vec::new());
-    let (mut pan_start_ms, mut first_after_pan_ms) = (None, None);
-    let mut pan_chunk: Option<ChunkKey> = None;
+    let mut pan_start_ms = None;
+    // When each chunk first landed on the fake clock.
+    let mut landed_at: std::collections::HashMap<ChunkKey, u64> = std::collections::HashMap::new();
     // 500 ms frames: 0 to 60 s descent through 30 km, 3 km, 300 m, 30 m to 1.8 m; hold to 100 s; then a 300 m pan east in 3 s and hold.
     let mut plain_cache = SelectionCache::new();
     // 500 ms frames in the descent, 5 s steps in the holds (a plan near the ground is the expensive part of this tier-B check), 500 ms for the pan.
@@ -57,7 +58,8 @@ fn a_flight_from_30_km_to_1_8_m_and_a_pan_never_wait_for_a_chunk_plan_the_same_r
 
         let along = if t_ms < 100_000 { 0.0 } else { (((t_ms - 100_000) as f64 / 3_000.0).min(1.0)) * 300.0 };
         let altitude = if t_ms >= 60_000 { 1.8 } else { 30_000.0 * libm::pow(1.8f64 / 30_000.0, t_ms as f64 / 60_000.0) };
-        let s = s0 + 0.5 * (s1 - s0) + along / (R * std::f64::consts::FRAC_PI_2) * 2.0;
+        // The ground point is 150 m west of the border to the next chunk, so the 300 m pan crosses it.
+        let s = s1 - 150.0 / (R * std::f64::consts::FRAC_PI_2) * 2.0 + along / (R * std::f64::consts::FRAC_PI_2) * 2.0;
         let pos = PlanetFixed(ground(s) * (R + altitude));
         if along > 0.0 && pan_start_ms.is_none() {
             pan_start_ms = Some(t_ms);
@@ -89,18 +91,11 @@ fn a_flight_from_30_km_to_1_8_m_and_a_pan_never_wait_for_a_chunk_plan_the_same_r
         let ahead = prefetch_chunks(pos, est.predict(), R);
         let up = manager.update_with(&wanted, &ahead);
         assert!(manager.in_flight() <= 6, "frame {frame}: never more than the workers' jobs");
-        if let (Some(start), None) = (pan_start_ms, first_after_pan_ms) {
-            if up.landed.iter().any(|k| pan_chunk.is_some_and(|c| c == *k)) {
-                first_after_pan_ms = Some(t_ms - start);
-            }
-        }
-        if t_ms == 100_000 {
-            // The chunk under the camera after the pan is the one the pan needs; at 300 m it is the same chunk, so the pan asks for none:
-            // the prefetch of the travel had it (or it was wanted all along).
-            pan_chunk = Some((2, 1000, 1000));
+        for k in &up.landed {
+            landed_at.entry(*k).or_insert(t_ms);
         }
         shares.push(ChunkShare::of(sel.nodes.iter().map(|n| n.tile), &view));
-        let dt_ms = if (60_000..100_000).contains(&t_ms) || t_ms >= 106_000 { 5_000 } else { 500 };
+        let dt_ms = if (45_000..100_000).contains(&t_ms) || t_ms >= 106_000 { 5_000 } else { 500 };
         clock.advance(dt_ms);
         spawner.advance(dt_ms * 1000);
         t_ms += dt_ms;
@@ -116,5 +111,10 @@ fn a_flight_from_30_km_to_1_8_m_and_a_pan_never_wait_for_a_chunk_plan_the_same_r
     let last = shares.last().unwrap();
     assert!(last.chunk_nodes > 0 && last.chunk_stand_in == 0, "the stand-in share ends at zero: {last:?}");
     assert!(manager.stats().landed > 0 && manager.in_flight() == 0, "{:?}", manager.stats());
-    assert!(first_after_pan_ms.is_none() || first_after_pan_ms.unwrap() <= 10_000);
+    // The chunk the pan crosses into landed before the pan or within 10 s of its start, and the chunk the camera was over landed.
+    let next: ChunkKey = (2, 1001, 1000);
+    let pan_start = pan_start_ms.expect("the pan started");
+    let at = landed_at.get(&next).copied().expect("the chunk across the border landed");
+    assert!(at <= pan_start + 10_000, "the chunk across the border landed at {at} ms, the pan started at {pan_start} ms");
+    assert!(landed_at.contains_key(&(2, 1000, 1000)));
 }
