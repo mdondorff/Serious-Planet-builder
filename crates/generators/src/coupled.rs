@@ -533,6 +533,8 @@ pub struct CoupledMaps {
     area_m2: Vec<f32>,
     max_area_m2: f32,
     id: u64,
+    /// The receivers of the stored heights, made on first use ([`CoupledMaps::receivers`]).
+    derived: std::sync::OnceLock<(Vec<u32>, Vec<f32>)>,
 }
 
 impl CoupledMaps {
@@ -540,11 +542,44 @@ impl CoupledMaps {
     pub fn new(lat: Lattice, z: Vec<f32>, area_m2: Vec<f32>, id: u64) -> CoupledMaps {
         assert!(z.len() == lat.len() && area_m2.len() == lat.len(), "the fields cover the lattice");
         let max_area_m2 = area_m2.iter().fold(0.0f32, |m, &a| m.max(a));
-        CoupledMaps { lat, z, area_m2, max_area_m2, id }
+        CoupledMaps { lat, z, area_m2, max_area_m2, id, derived: std::sync::OnceLock::new() }
     }
 
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    pub fn lattice(&self) -> &Lattice {
+        &self.lat
+    }
+
+    pub fn z(&self, c: usize) -> f32 {
+        self.z[c]
+    }
+
+    pub fn area_m2(&self, c: usize) -> f32 {
+        self.area_m2[c]
+    }
+
+    /// The receiver of every cell on the stored heights and the drainage area that follows from them (m2): the flood, the jittered steepest
+    /// descent of the run's own parameters and the accumulation, made together once so the area grows along every receiver (the channel stores
+    /// the heights of the last step after its update, the receivers and area from before it, so they are made again here).
+    fn derived(&self) -> &(Vec<u32>, Vec<f32>) {
+        self.derived.get_or_init(|| {
+            let (filled, order) = priority_flood(&self.lat, &self.z);
+            let (rec, _) = receivers(&self.lat, &filled, &order, &CoupledParams::default());
+            let area = accumulate(&self.lat, &self.z, &order, &rec).into_iter().map(|a| a as f32).collect();
+            (rec, area)
+        })
+    }
+
+    pub fn receivers(&self) -> &[u32] {
+        &self.derived().0
+    }
+
+    /// The drainage area of the receivers of [`CoupledMaps::receivers`] in m2.
+    pub fn network_area_m2(&self, c: usize) -> f32 {
+        self.derived().1[c]
     }
 }
 
@@ -833,5 +868,28 @@ mod tests {
             assert!(r != NONE, "land cell {c} has no receiver");
             assert!(input.z[r as usize] <= 0.0 || at[r as usize] < at[c as usize], "cell {c} comes before its receiver {r}");
         }
+    }
+}
+
+#[cfg(test)]
+mod maps_tests {
+    use super::*;
+
+    // spec: GEN-047
+    #[test]
+    fn the_receivers_of_stored_heights_carry_a_growing_area_and_are_made_once() {
+        let lat = Lattice::new(12, 6.0e6);
+        let z: Vec<f32> = (0..lat.len()).map(|c| 50.0 + (lat.direction(c).z * 400.0) as f32 + ((c * 7919) % 13) as f32).collect();
+        let input = CoupledInput { uplift: vec![1.0e-3; z.len()], erodibility: vec![2.0e-5; z.len()], z };
+        let state = run(&lat, &input, &CoupledParams::default(), 6);
+        let maps = CoupledMaps::new(lat, state.z, state.area_m2, 1);
+        let rec = maps.receivers();
+        for (c, &r) in rec.iter().enumerate() {
+            // The sea receives nothing.
+            if r != NONE && maps.z(r as usize) > 0.0 {
+                assert!(maps.network_area_m2(r as usize) >= maps.network_area_m2(c), "the area grows from cell {c} to its receiver {r}");
+            }
+        }
+        assert!(std::ptr::eq(rec, maps.receivers()), "made once");
     }
 }

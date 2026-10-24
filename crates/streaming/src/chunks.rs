@@ -217,7 +217,7 @@ impl ChunkManager {
                 None => {
                     let r =
                         compute_chunk(&lat, &*stage, radius_m, top, tile, halo_rings(&*stage)).expect("the stage's own halo is accepted");
-                    if let Some(disk) = &disk {
+                    if let Some(disk) = disk.as_ref().filter(|_| stage.healthy()) {
                         if let Err(e) = disk.put(tile, r.to_bytes()) {
                             shared.lock().expect("chunk state").log.push(format!("chunk {key:?}: not stored ({e})"));
                         }

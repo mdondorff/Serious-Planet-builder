@@ -49,6 +49,61 @@ pub fn bake_input(src: &dyn LatticeSource, lat: &Lattice) -> Result<CoupledInput
     Ok(CoupledInput { uplift: vec![UPLIFT_M_PER_YEAR; z.len()], erodibility: vec![ERODIBILITY; z.len()], z })
 }
 
+/// The key of the stored channel of the run of `def` and the maps read from it when the store in `dir` holds this run (same parameters and
+/// inputs); `None` when it does not. The run is not made: this is the viewer's test for a world that has a channel (STRM-046).
+pub fn load_stored(
+    def: &WorldDefinition,
+    dir: Option<&Path>,
+    src: &dyn LatticeSource,
+    n: u32,
+    steps: u32,
+    bake_res: u32,
+) -> Result<Option<CoupledRun>, String> {
+    // Without a directory there is no channel: the bake is not read for nothing.
+    if dir.is_none() {
+        return Ok(None);
+    }
+    Ok(prepare(def, src, n, steps, bake_res)?.load(dir))
+}
+
+/// What a run of `def` needs: the lattice, the input, the spec of the channel and the world that keys it.
+struct Prepared {
+    lat: Lattice,
+    input: CoupledInput,
+    spec: CoupledSpec,
+    world: GlobalWorld,
+    n: u32,
+    steps: u32,
+    radius_m: f64,
+    id: u64,
+}
+
+fn prepare(def: &WorldDefinition, src: &dyn LatticeSource, n: u32, steps: u32, bake_res: u32) -> Result<Prepared, String> {
+    let radius_m = GenContext::new(def).body_radius_m(BodyId::PLANET).map_err(|e| format!("the definition cannot be generated: {e}"))?;
+    let lat = Lattice::new(n as usize, radius_m);
+    let input = bake_input(src, &lat)?;
+    let spec = CoupledSpec { n, steps, bake_res, params: CoupledParams::default(), inputs: inputs_hash(&input, radius_m) };
+    let world = GlobalWorld::from_definition(def).map_err(|e| format!("the definition cannot be generated: {e}"))?.with_coupled(spec);
+    let (level, cells) = world.layout(n).map_err(|e| format!("a coupled run of {n} cells: {e:?}"))?;
+    let key = world.coupled_key(TileId::new(Face(0), level, 0, 0).expect("tile of the layout"), cells).0;
+    let id = u64::from_le_bytes(key[..8].try_into().expect("8 bytes"));
+    Ok(Prepared { lat, input, spec, world, n, steps, radius_m, id })
+}
+
+impl Prepared {
+    fn load(&self, dir: Option<&Path>) -> Option<CoupledRun> {
+        let dir = dir?;
+        // A fresh store each time: blocks written by an earlier run of this process are not in an index opened before them.
+        let store = TileStore::open(dir, self.world.params()).ok()?;
+        let stored = load_coupled(&store, &self.world).ok()?;
+        Some(CoupledRun {
+            maps: Arc::new(CoupledMaps::new(Lattice::new(self.n as usize, self.radius_m), stored.z, stored.area_m2, self.id)),
+            origin: Origin::Stored,
+            store_error: None,
+        })
+    }
+}
+
 /// The maps of the run of `def` on `n` cells per face edge, from the stored channel in `dir` when it holds this run (same parameters and
 /// inputs), else from the run, which is then written to `dir`. `src` is the bake of `bake_res` cells the run starts from.
 pub fn load_or_run(
@@ -59,30 +114,14 @@ pub fn load_or_run(
     steps: u32,
     bake_res: u32,
 ) -> Result<CoupledRun, String> {
-    let radius_m = GenContext::new(def).body_radius_m(BodyId::PLANET).map_err(|e| format!("the definition cannot be generated: {e}"))?;
-    let lat = Lattice::new(n as usize, radius_m);
-    let input = bake_input(src, &lat)?;
-    let spec = CoupledSpec { n, steps, bake_res, params: CoupledParams::default(), inputs: inputs_hash(&input, radius_m) };
-    let world = GlobalWorld::from_definition(def).map_err(|e| format!("the definition cannot be generated: {e}"))?.with_coupled(spec);
-    let (level, cells) = world.layout(n).map_err(|e| format!("a coupled run of {n} cells: {e:?}"))?;
-    let key = world.coupled_key(TileId::new(Face(0), level, 0, 0).expect("tile of the layout"), cells).0;
-    let id = u64::from_le_bytes(key[..8].try_into().expect("8 bytes"));
-    if let Some(dir) = dir {
-        // A fresh store each time: blocks written by an earlier run of this process are not in an index opened before them.
-        if let Ok(store) = TileStore::open(dir, world.params()) {
-            if let Ok(stored) = load_coupled(&store, &world) {
-                return Ok(CoupledRun {
-                    maps: Arc::new(CoupledMaps::new(lat, stored.z, stored.area_m2, id)),
-                    origin: Origin::Stored,
-                    store_error: None,
-                });
-            }
-        }
+    let p = prepare(def, src, n, steps, bake_res)?;
+    if let Some(r) = p.load(dir) {
+        return Ok(r);
     }
-    let state = run(&lat, &input, &spec.params, steps as usize);
+    let state = run(&p.lat, &p.input, &p.spec.params, p.steps as usize);
     let store_error =
-        dir.and_then(|d| store_coupled(d, &world, &state, DEFAULT_MAX_PACK_BYTES).err().map(|e| format!("{}: {e}", d.display())));
-    Ok(CoupledRun { maps: Arc::new(CoupledMaps::new(lat, state.z, state.area_m2, id)), origin: Origin::Ran, store_error })
+        dir.and_then(|d| store_coupled(d, &p.world, &state, DEFAULT_MAX_PACK_BYTES).err().map(|e| format!("{}: {e}", d.display())));
+    Ok(CoupledRun { maps: Arc::new(CoupledMaps::new(p.lat, state.z, state.area_m2, p.id)), origin: Origin::Ran, store_error })
 }
 
 /// Where a world's coupled run stands.

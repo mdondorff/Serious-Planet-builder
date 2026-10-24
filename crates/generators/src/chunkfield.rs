@@ -211,6 +211,10 @@ pub trait ChunkStage: Send + Sync {
     }
     /// A hash of everything that defines the process (seed, parameters, version): a change re-keys every tile a chunk of it can reach.
     fn definition_hash(&self) -> u64;
+    /// Whether the result just computed is a good one to store: a stage that read a source which had gone answers `false` (default `true`).
+    fn healthy(&self) -> bool {
+        true
+    }
 }
 
 /// The halo of a stage in rings (a chunk is refused below it): its step cap, each step reaching one ring, plus the apron ring.

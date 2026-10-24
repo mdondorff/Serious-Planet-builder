@@ -182,3 +182,59 @@ fn an_evicted_chunk_wanted_again_comes_back_from_disk_without_computing_and_a_co
     assert_eq!(m.snapshot()[0].hash(), first, "the same result");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// A stage whose source is gone: it computes, and says the result is not good.
+struct Unhealthy(StandIn);
+
+impl planet_generators::chunkfield::ChunkStage for Unhealthy {
+    fn step_cap(&self) -> u32 {
+        self.0.step_cap()
+    }
+    fn bound_m(&self) -> f64 {
+        self.0.bound_m()
+    }
+    fn definition_hash(&self) -> u64 {
+        self.0.definition_hash()
+    }
+    fn compute(&self, lat: &ChunkLattice, region: &planet_generators::chunkfield::Region) -> Vec<f32> {
+        self.0.compute(lat, region)
+    }
+    fn healthy(&self) -> bool {
+        false
+    }
+}
+
+// spec: STRM-046
+#[test]
+fn a_result_of_a_stage_that_lost_its_source_lands_but_is_not_written_to_disk() {
+    use planet_generators::chunkfield::ChunkStage;
+    let spec = ChunkSpec {
+        body: BodyId::PLANET,
+        seed: 7,
+        radius_m: R,
+        definition: stage().definition_hash(),
+        cells_per_chunk: 16,
+        top_level: PYRAMID_TOP_LEVEL,
+        base: [0; 16],
+    };
+    let d = dir("unhealthy");
+    let disk = Arc::new(PackChunkDisk::new(d.clone(), spec));
+    let (spawner, clock) = (Arc::new(ManualSpawner::default()), Arc::new(FakeClock::default()));
+    let m = ChunkManager::new(
+        ChunkLattice::new(16).unwrap(),
+        R,
+        PYRAMID_TOP_LEVEL,
+        Arc::new(Unhealthy(stage())),
+        spawner.clone(),
+        clock,
+        Some(disk.clone() as Arc<dyn ChunkDisk>),
+        ChunkConfig::default(),
+    );
+    let want = [(key(0, 0), 1.0)];
+    m.update(&want);
+    spawner.run(1);
+    m.update(&want);
+    assert_eq!(m.stats().landed, 1, "the chunk is in memory for this session");
+    let tile = planet_core::TileId::new(planet_core::Face(2), planet_generators::chunk::CHUNK_GRID_LEVEL, 1000, 1000).unwrap();
+    assert_eq!(disk.get(tile), Ok(None), "nothing was written for a later session to read");
+}
