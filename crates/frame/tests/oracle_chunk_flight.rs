@@ -56,7 +56,7 @@ fn a_flight_from_30_km_to_1_8_m_and_a_pan_never_wait_for_a_chunk_plan_the_same_r
         }
 
         let along = if t_ms < 100_000 { 0.0 } else { (((t_ms - 100_000) as f64 / 3_000.0).min(1.0)) * 300.0 };
-        let altitude = if t_ms >= 60_000 { 1.8 } else { 30_000.0 * (1.8f64 / 30_000.0).powf(t_ms as f64 / 60_000.0) };
+        let altitude = if t_ms >= 60_000 { 1.8 } else { 30_000.0 * libm::pow(1.8f64 / 30_000.0, t_ms as f64 / 60_000.0) };
         let s = s0 + 0.5 * (s1 - s0) + along / (R * std::f64::consts::FRAC_PI_2) * 2.0;
         let pos = PlanetFixed(ground(s) * (R + altitude));
         if along > 0.0 && pan_start_ms.is_none() {
