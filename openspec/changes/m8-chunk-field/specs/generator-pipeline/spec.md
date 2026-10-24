@@ -34,8 +34,8 @@ Source: SPIKE-34 section 3, ADR 0077 point 5, GEN-020
 - **THEN** each value equals `height(dir)` bit for bit
 
 #### Scenario: Chunk field
-- **WHEN** a chunk field with a ready chunk is sampled at levels 14 and 15 over the chunk
-- **THEN** level 14 equals the base and level 15 equals the base plus the chunk's level-15 pyramid change
+- **WHEN** a chunk field with a ready chunk is sampled over the chunk at levels 10, 11 and 14, and at a level that reads the raster (finer than the apply level)
+- **THEN** level 10 equals the base bit for bit, levels 11 and 14 read the box-filtered pyramid (base plus change), and the finest level equals the base plus the chunk's stored change at the cell centres
 
 ### Requirement: GEN-037 Chunk pyramid steps
 A chunk's change SHALL be stored with a pyramid down to the apply level, each level box-filtered from the level below it (never from a coarser run). A tile at the apply level SHALL differ from its parent, at the parent's vertices, by at most 0.25 m at p99 for the stand-in compute; the steps between the coarser levels up to the pyramid's top are measured and recorded (design.md), not bounded.
@@ -56,7 +56,7 @@ Status: planned
 Source: ADR 0077 points 3 and 4, GEN-004, GEN-002, GEN-003, CON-14, M8 plan criterion 2
 
 #### Scenario: Borders
-- **WHEN** two neighbouring stand-in chunks are computed with the stated halo, in the middle of a face, across a face edge and at a pole
+- **WHEN** two neighbouring stand-in chunks are computed with the stated halo, in the middle of a face, across a face edge and at a cube corner
 - **THEN** their border rows agree to the bit, and with a halo below the rule the test reports the largest difference in metres and the chunk ids
 
 #### Scenario: Threads and systems

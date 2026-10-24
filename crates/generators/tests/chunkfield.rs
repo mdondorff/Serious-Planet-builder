@@ -294,3 +294,20 @@ fn a_corner_chunk_of_8_m_cells_keeps_its_known_answer() {
 }
 
 const CORNER_KNOWN_ANSWER: u64 = 14_433_926_590_099_959_428;
+
+// spec: GEN-036
+#[test]
+fn at_a_level_that_reads_the_raster_the_height_is_the_base_plus_the_stored_change() {
+    let lat = ChunkLattice::new(16).unwrap();
+    let stage = stand_in(4);
+    let tile = chunk_tile(2, 1000, 1000);
+    let result = Arc::new(compute_chunk(&lat, &stage, R, PYRAMID_TOP_LEVEL, tile, halo_rings(&stage)).unwrap());
+    let field = ChunkField::new(Reference(3), lat, R, stage.bound_m()).with_ready(result.clone());
+    for (i, j) in [(0u32, 0u32), (7, 9), (15, 15), (3, 12)] {
+        let cell = planet_generators::chunkfield::Cell { face: 2, i: 1000 * 16 + i, j: 1000 * 16 + j };
+        let d = lat.direction(cell);
+        let stored = f64::from(result.at(0, i as usize, j as usize));
+        let got = field.height_at_level(d, 22) - Reference(3).height(d);
+        assert!((got - stored).abs() <= 1e-6, "cell ({i}, {j}): {got} m against the stored {stored} m");
+    }
+}
