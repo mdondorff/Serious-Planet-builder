@@ -75,6 +75,68 @@ fn the_horizon_jobs_need_the_chunk_stage_and_a_world_without_them_does_nothing()
 
 // spec: STRM-049
 #[test]
+fn a_horizon_reads_the_three_by_three_chunks_around_it_across_face_edges_too() {
+    use planet::horizonworld::ChunkHorizonBaker;
+    use planet_streaming::chunks::HorizonBaker;
+    let r = rig();
+    let lat = r.world.chunk_lattice().unwrap();
+    let baker = ChunkHorizonBaker::new(&r.world, lat, params(), 1);
+    let last = (1u32 << CHUNK_GRID_LEVEL) - 1;
+    for key in [(2u8, 1000u32, 1000u32), (2, 0, 0), (2, last, 3), (4, 0, last)] {
+        let reads = baker.reads(key);
+        assert_eq!(reads[0], key, "its own chunk first");
+        let mut sorted = reads.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        // A chunk at a corner of the cube has eight neighbours (three faces meet there), every other chunk nine in all.
+        let corner = (key.1 == 0 || key.1 == last) && (key.2 == 0 || key.2 == last);
+        assert_eq!(sorted.len(), if corner { 8 } else { 9 }, "{key:?}: the chunk and its neighbours, no two the same: {reads:?}");
+    }
+}
+
+// spec: STRM-049
+#[test]
+fn a_march_the_chunks_cannot_hold_or_the_bake_refuses_is_turned_down_at_once_and_a_gone_world_gives_a_map_of_zeros() {
+    use planet::horizonworld::{chunk_horizon_params, max_range_m, ChunkHorizonBaker};
+    use planet_streaming::chunks::HorizonBaker;
+    let r = rig();
+    let spawn = |r: &Rig| -> (Arc<ManualSpawner>, Arc<FakeClock>) { (r.horizon_jobs.clone(), r.clock.clone()) };
+    let (s, c) = spawn(&r);
+    let lat = r.world.chunk_lattice().unwrap();
+    // A range whose halo does not fit in a chunk edge: refused, with the longest range that does.
+    let long = HorizonParams { range_m: 3.0 * max_range_m(&lat, R), ..params() };
+    let e = r.world.enable_horizon(long, s.clone(), c.clone(), HorizonConfig::default(), 1).unwrap_err();
+    assert!(e.contains("halo") && e.contains("chunk edge") && e.contains("at most"), "{e}");
+    // Parameters the bake would refuse never reach a worker.
+    for bad in [
+        HorizonParams { azimuths: 0, ..params() },
+        HorizonParams { step_min_m: 1e-20, ..params() },
+        HorizonParams { radius_m: f64::NAN, ..params() },
+    ] {
+        let e = r.world.enable_horizon(bad, s.clone(), c.clone(), HorizonConfig::default(), 1);
+        assert!(e.is_err(), "{bad:?}");
+    }
+    assert!(
+        r.world.enable_horizon(chunk_horizon_params(&lat, R), s, c, HorizonConfig::default(), 1).is_ok(),
+        "the world's own march is accepted"
+    );
+    assert!(chunk_horizon_params(&lat, R).range_m <= max_range_m(&lat, R));
+    // The default march on the 8 m lattice of the A-net default keeps the range inside a chunk edge.
+    let a_net = planet_generators::chunkfield::ChunkLattice::new(614).unwrap();
+    let p = chunk_horizon_params(&a_net, R);
+    assert!(p.range_m < 5_000.0 && p.range_m > 4_700.0, "{} m", p.range_m);
+    // A world that is gone gives a map of the right length, all zeros, not a short one.
+    let gone = {
+        let r2 = rig();
+        ChunkHorizonBaker::new(&r2.world, r2.world.chunk_lattice().unwrap(), params(), 1)
+    };
+    let map = gone.bake((2, 1000, 1000), &[]);
+    assert_eq!(map.len(), (CELLS * CELLS * 8) as usize);
+    assert!(map.iter().all(|&b| b == 0));
+}
+
+// spec: STRM-049
+#[test]
 fn a_chunk_gets_its_horizon_map_after_its_heights_from_the_worlds_own_field_and_deterministically() {
     let key: ChunkKey = (2, 1000, 1000);
     let maps: Vec<Vec<u8>> = (0..2)

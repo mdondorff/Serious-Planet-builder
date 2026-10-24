@@ -43,29 +43,30 @@ impl HorizonBaker for ChunkHorizonBaker {
     fn reads(&self, key: ChunkKey) -> Vec<ChunkKey> {
         let tile =
             TileId::new(Face(key.0), planet_generators::chunk::CHUNK_GRID_LEVEL, key.1, key.2).expect("a chunk of the grid is a tile");
+        use planet_core::Side::{East, North, South, West};
+        let map = &planet_core::cube::TangentWarp;
+        let k_of = |t: TileId| (t.face().0, t.x(), t.y());
         let mut out = vec![key];
-        for side in planet_core::Side::ALL {
-            let n = tile.neighbor(&planet_core::cube::TangentWarp, side);
-            out.push((n.face().0, n.x(), n.y()));
+        for side in [East, West, North, South] {
+            out.push(k_of(tile.neighbor(map, side)));
         }
-        // The diagonals: the neighbours of the side neighbours that are not already in.
-        for side in planet_core::Side::ALL {
-            let n = tile.neighbor(&planet_core::cube::TangentWarp, side);
-            for other in planet_core::Side::ALL {
-                let d = n.neighbor(&planet_core::cube::TangentWarp, other);
-                let k = (d.face().0, d.x(), d.y());
-                if !out.contains(&k) {
-                    out.push(k);
-                }
+        // The four diagonals: a side neighbour's neighbour in the other axis (not its own axis, which would reach two chunks away).
+        for (a, b) in [(East, North), (East, South), (West, North), (West, South)] {
+            let k = k_of(tile.neighbor(map, a).neighbor(map, b));
+            if !out.contains(&k) {
+                out.push(k);
             }
         }
         out
     }
 
+    /// The map of `key`; a world that is gone or a field that cannot be built gives a map of zeros of the right length (no shadow), never a
+    /// short one, so a consumer indexing by cell and azimuth stays inside it.
     fn bake(&self, key: ChunkKey, _ready: &[(ChunkKey, Arc<ChunkResult>)]) -> Vec<u8> {
-        let Some(world) = self.world.upgrade() else { return Vec::new() };
-        let Ok(field) = world.field() else { return Vec::new() };
         let n = self.lat.cells_per_chunk() as usize;
+        let none = || vec![0u8; n * n * self.params.azimuths as usize];
+        let Some(world) = self.world.upgrade() else { return none() };
+        let Ok(field) = world.field() else { return none() };
         let halo = self.halo_cells();
         let side = n + 2 * halo;
         let (x0, y0) = (i64::from(key.1) * n as i64 - halo as i64, i64::from(key.2) * n as i64 - halo as i64);
@@ -77,7 +78,7 @@ impl HorizonBaker for ChunkHorizonBaker {
         }
         let heights: Vec<f32> = field.heights_threaded_until(&dirs, &|| false, self.threads).into_iter().map(|h| h as f32).collect();
         let raster = HeightRaster { n: side, texel_m: self.lat.cell_m(self.params.radius_m), heights: &heights };
-        bake_horizon(&raster, (halo, halo, n, n), &self.params, self.threads).expect("the halo is the march's own").data
+        bake_horizon(&raster, (halo, halo, n, n), &self.params, self.threads).map_or_else(|_| none(), |m| m.data)
     }
 
     /// The march, the lattice, the bake and the world's edits: an edit changes every map's word, so every map is baked again once the edit has
@@ -97,6 +98,18 @@ impl HorizonBaker for ChunkHorizonBaker {
     }
 }
 
+/// The longest range whose halo (`ceil(range / cell) + 2` cells) fits in one chunk edge: the 3 x 3 chunks a horizon reads then cover it.
+pub fn max_range_m(lat: &ChunkLattice, radius_m: f64) -> f64 {
+    (f64::from(lat.cells_per_chunk()) - 2.0).max(0.0) * lat.cell_m(radius_m)
+}
+
+/// The march of a world's chunk horizons: SPIKE-32's 16 azimuths and 5 km, the range cut to what a chunk edge allows (4.8 km at the 8 m lattice
+/// of the A-net default; a 5 km range would need 627 cells of halo against a chunk of 614).
+pub fn chunk_horizon_params(lat: &ChunkLattice, radius_m: f64) -> HorizonParams {
+    let base = HorizonParams::chunk(radius_m);
+    HorizonParams { range_m: base.range_m.min(max_range_m(lat, radius_m)), ..base }
+}
+
 impl WorldTerrain {
     /// Give a world that has a chunk stage the horizon jobs (STRM-049): a second job per ready chunk on `spawner`, `clock` for the settle window,
     /// `params` the march (its cell is the chunk lattice's). Errors without a chunk stage. A second call replaces the first.
@@ -111,6 +124,20 @@ impl WorldTerrain {
         let chunks = self.chunk_manager().ok_or("the horizon jobs need the world's chunk stage: enable_chunks first")?;
         let lat = self.chunk_lattice().ok_or("the world has no chunk lattice")?;
         let baker = Arc::new(ChunkHorizonBaker::new(self, lat, params, threads));
+        // The march must be one the bake accepts, and its halo must fit in the ring of neighbours the state word reads (a chunk edge): refused
+        // here, not as a panic in a worker.
+        let halo = baker.halo_cells();
+        if halo > lat.cells_per_chunk() as usize {
+            return Err(format!(
+                "a range of {} m needs {halo} cells of halo, more than the {} cells of a chunk edge: use a range of at most {:.0} m (see `chunk_horizon_params`)",
+                params.range_m,
+                lat.cells_per_chunk(),
+                max_range_m(&lat, params.radius_m)
+            ));
+        }
+        let flat = vec![0.0f32; (2 * halo + 1) * (2 * halo + 1)];
+        let trial = HeightRaster { n: 2 * halo + 1, texel_m: lat.cell_m(params.radius_m), heights: &flat };
+        bake_horizon(&trial, (halo, halo, 1, 1), &params, 1).map_err(|e| format!("the horizon march is refused: {e}"))?;
         *self.horizon.write().expect("horizon jobs") = Some(Arc::new(HorizonJobs::new(chunks, baker, spawner, clock, None, cfg)));
         Ok(())
     }
