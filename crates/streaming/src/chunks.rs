@@ -120,11 +120,17 @@ impl ChunkManager {
     /// the byte cap), start jobs for the nearest wanted chunks that are neither ready nor running (`wanted` is `(chunk, distance to the
     /// camera in metres)`), and report what landed since the last call. Never waits for a job.
     pub fn update(&self, wanted: &[(ChunkKey, f64)]) -> ChunkUpdate {
+        self.update_with(wanted, &[])
+    }
+
+    /// [`ChunkManager::update`] with chunks to prefetch (STRM-042): they are started only on workers no wanted chunk needs (below the wanted set
+    /// in priority, in the order given), and they count as wanted for eviction, so a prefetched chunk is still there when the camera arrives.
+    pub fn update_with(&self, wanted: &[(ChunkKey, f64)], prefetch: &[ChunkKey]) -> ChunkUpdate {
         let now = self.clock.now_ms();
         let mut out = ChunkUpdate::default();
         let to_start: Vec<ChunkKey> = {
             let mut sh = self.shared.lock().expect("chunk state");
-            for (key, _) in wanted {
+            for key in wanted.iter().map(|w| &w.0).chain(prefetch) {
                 if let Some(e) = sh.ready.get_mut(key) {
                     e.last_wanted_ms = now;
                 }
@@ -159,7 +165,16 @@ impl ChunkManager {
                 wanted.iter().filter(|(k, _)| !sh.ready.contains_key(k) && !sh.running.contains(k)).map(|&(k, d)| (d, k)).collect();
             candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
             candidates.dedup_by_key(|c| c.1);
-            let chosen: Vec<ChunkKey> = candidates.into_iter().take(free).map(|(_, k)| k).collect();
+            let mut chosen: Vec<ChunkKey> = candidates.into_iter().take(free).map(|(_, k)| k).collect();
+            // What is left of the workers goes to the prefetch, in the order given (wanted chunks never wait for it).
+            for k in prefetch {
+                if chosen.len() >= free {
+                    break;
+                }
+                if !sh.ready.contains_key(k) && !sh.running.contains(k) && !chosen.contains(k) {
+                    chosen.push(*k);
+                }
+            }
             for k in &chosen {
                 sh.running.insert(*k);
             }
