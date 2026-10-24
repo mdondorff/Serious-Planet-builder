@@ -774,6 +774,8 @@ fn perf_coupled_args(args: &[String]) -> Result<Vec<String>, String> {
 /// The streaming scenes of `perf stream` (ADR 0032 point 8 and `dive-cold`, ADR 0045 point 3); `all` runs the seven, one child process each.
 /// The edit-to-visible scene (SPIKE-13, M6 exit): run by name under the same gate and options, never part of `all`.
 const EDIT_SCENE: &str = "edit-latency";
+/// The speed-envelope scene (TEST-047): run by name (`perf envelope`), not part of `perf stream all`.
+const ENVELOPE_SCENE: &str = "envelope";
 
 const STREAM_SCENES: [&str; 7] = ["dive", "dive-fast", "teleport-1m", "teleport-2km", "look-1m", "look-2km", "dive-cold"];
 
@@ -786,10 +788,13 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
     if let Some(first) = args.first().filter(|a| !a.starts_with("--")) {
         if first == "all" {
             scene = "streaming".into();
-        } else if STREAM_SCENES.contains(&first.as_str()) || first == EDIT_SCENE {
+        } else if STREAM_SCENES.contains(&first.as_str()) || first == EDIT_SCENE || first == ENVELOPE_SCENE {
             scene = first.clone();
         } else {
-            return Err(format!("unknown streaming scene '{first}' (known: {}, {EDIT_SCENE}, all)", STREAM_SCENES.join(", ")));
+            return Err(format!(
+                "unknown streaming scene '{first}' (known: {}, {EDIT_SCENE}, {ENVELOPE_SCENE}, all)",
+                STREAM_SCENES.join(", ")
+            ));
         }
         rest = &args[1..];
     }
@@ -800,7 +805,7 @@ fn perf_stream_args(args: &[String]) -> Result<Vec<String>, String> {
         match a.as_str() {
             "--smoke" => smoke = true,
             "--machine-ready" | "--allow-memory-bake" | "--lit" => tail.push(a.clone()),
-            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" => {
+            "--store" | "--global-res" | "--out" | "--upload" | "--prefill-levels" | "--gen-workers" | "--gen-ahead" | "--gen-reserve" | "--gen-priority" | "--settle-ms" | "--share-bound" => {
                 let value = it.next().ok_or_else(|| format!("{a} needs a value"))?;
                 tail.push(a.clone());
                 tail.push(value.clone());
@@ -997,6 +1002,11 @@ pub fn perf(root: &Path, args: &[String]) -> Res {
         let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
         return run(root, "cargo", &refs, &[]);
     }
+    if args.first().map(String::as_str) == Some(ENVELOPE_SCENE) {
+        let cargo_args = perf_stream_args(args)?;
+        let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
+        return run(root, "cargo", &refs, &[]);
+    }
     if args.first().map(String::as_str) == Some("coupled") {
         let cargo_args = perf_coupled_args(&args[1..])?;
         let refs: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
@@ -1039,6 +1049,22 @@ mod tests {
         let smoke = perf_stream_args(&s(&["edit-latency", "--smoke"])).unwrap();
         assert!(smoke.contains(&"--perf-smoke".to_string()) && smoke.contains(&"software".to_string()));
         assert!(!STREAM_SCENES.contains(&EDIT_SCENE), "`perf stream all` does not run it");
+    }
+
+    // spec: TEST-047
+    #[test]
+    fn the_envelope_scene_runs_by_name_with_the_stream_options_and_its_bound_and_is_not_part_of_all() {
+        let a =
+            perf_stream_args(&s(&["envelope", "--store", "D:/bake", "--share-bound", "0.02", "--out", "perf/logs/envelope.json"])).unwrap();
+        let at = a.iter().position(|x| x == "--scene").unwrap();
+        assert_eq!(a[at + 1], "envelope");
+        let at = a.iter().position(|x| x == "--share-bound").unwrap();
+        assert_eq!(a[at + 1], "0.02");
+        assert!(a.contains(&"--perf".to_string()) && a.contains(&"hardware".to_string()) && a.contains(&"D:/bake".to_string()));
+        let smoke = perf_stream_args(&s(&["envelope", "--smoke"])).unwrap();
+        assert!(smoke.contains(&"--perf-smoke".to_string()) && smoke.contains(&"software".to_string()));
+        assert!(!STREAM_SCENES.contains(&ENVELOPE_SCENE), "`perf stream all` does not run it");
+        assert!(perf_stream_args(&s(&["envelope", "--share-bound"])).unwrap_err().contains("needs a value"));
     }
 
     // spec: TEST-040

@@ -37,6 +37,7 @@ const USAGE: &str = "cargo xtask <command>
   perf lit [--store DIR] [--out PATH] [--frames N] [--flight-frames N] [--views a,b,c] [--smoke] [--machine-ready]   the M5 lit perf scenes (TEST-025): per-pass GPU time over the viewer's views and the coastal flights
   perf m5 --store DIR [--out DIR] [--machine-ready]   the first M5 window in order: lit and the seven streaming scenes with --lit (one child per streaming scene); `cargo xtask accept M5` judges the logs
   perf preflight [--out DIR] [--smoke] [--machine-ready]   the check before a perf window (about 70 s): the readiness gate, three CPU calibrations, the top 5 CPU processes, AC state and power plan; refuses with the causes (TEST-040)
+  perf envelope [--store DIR | --allow-memory-bake --global-res N] [--share-bound F] [--out FILE] [--smoke] [--machine-ready]   the M8 speed envelope (TEST-047): the highest level-flight speed per altitude (30 m, 100 m, 300 m, 1 km) at which the coarse share of the screen stays within the bound (default 0.01) over every 1 s window, written to perf/logs/envelope.json; the architect authorizes the window
   perf coupled [--global-res N] [--machine-ready]   the GEN-042 coupled run (default 2048 cells per face edge, 100 steps) under the same gate
   perf global-bake [--global-res N] [--threads N] [--machine-ready]   the GEN-014 global bake (default 16384 cells per face edge) under the same gate
   cache-verify <dir> [--world <file>|--seed N] [--sample N] [--allow-stale]   regenerate a sample of a tile store from the definition and compare (STRM-004)
