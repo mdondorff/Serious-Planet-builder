@@ -185,6 +185,8 @@ pub(crate) struct Tick {
     pub(crate) settled: bool,
     /// The tiles of the plan this frame drew (resident and drawn): what the lag post-pass needs besides the camera.
     pub(crate) drawn: Vec<TileId>,
+    /// The frame's chunk stand-in share (STRM-039): all zero without a chunk view.
+    pub(crate) chunk: planet_frame::chunkshare::ChunkShare,
 }
 
 /// The rig and the pacing of one case.
@@ -204,6 +206,11 @@ impl<'a> Driver<'a> {
     /// A driver of the debug path (no lit plan) over `rig`, paced from now.
     pub(crate) fn plain(ctx: &'a GpuContext, rig: Rig) -> Driver<'a> {
         Driver { ctx, rig, next_deadline: Instant::now(), lit: None, cut_field: None, ticks: 0 }
+    }
+
+    /// The chunk field the frames count their stand-in share against (STRM-039); `None` counts nothing.
+    pub(crate) fn set_chunk_view(&mut self, view: Option<Arc<dyn planet_frame::chunkshare::ChunkView>>) {
+        self.rig.managed.set_chunk_view(view);
     }
 
     /// Restart the pacing: the next iteration is due now.
@@ -291,7 +298,7 @@ impl Driver<'_> {
             lit_plan_ms,
         };
         self.pace();
-        Ok(Tick { record, settled, drawn })
+        Ok(Tick { record, settled, drawn, chunk: c.chunk })
     }
 
     /// Hold the loop to the frame step of script time: the next iteration starts one step after this one was due (a late frame
