@@ -185,6 +185,8 @@ pub struct WorldTerrain {
     /// The chunk stage of this world (M8-2, GEN-039 `on-top`): none until [`WorldTerrain::enable_chunks`]; then every field this world builds has
     /// the chunk stage over its base with the chunks ready at the time.
     chunks: std::sync::RwLock<Option<Arc<ChunkWorld>>>,
+    /// Whether the A-net stage was asked for ([`WorldTerrain::request_anet`]).
+    pub(crate) anet_asked: std::sync::atomic::AtomicBool,
     /// The horizon jobs of the chunks (M8-5, STRM-049): none until `enable_horizon` (in `horizonworld`).
     pub(crate) horizon: std::sync::RwLock<Option<Arc<planet_streaming::chunks::HorizonJobs>>>,
 }
@@ -288,6 +290,7 @@ impl WorldTerrain {
             water_book: Default::default(),
             coupled: Default::default(),
             chunks: Default::default(),
+            anet_asked: Default::default(),
             horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: None,
@@ -369,6 +372,7 @@ impl WorldTerrain {
             water_book: Default::default(),
             coupled: Default::default(),
             chunks: Default::default(),
+            anet_asked: Default::default(),
             horizon: Default::default(),
             coupled_lens: Default::default(),
             store_dir: Some(dir.to_path_buf()),
@@ -712,6 +716,39 @@ impl WorldTerrain {
             Arc::new(planet_streaming::chunks::ChunkManager::new(lat, self.radius_m, top, stage.clone(), spawner, clock, disk, cfg));
         *self.chunks.write().expect("chunk stage") = Some(Arc::new(ChunkWorld { lat, top, stage, manager }));
         Ok(())
+    }
+
+    /// The key of the bake behind the world (zeros without one).
+    pub fn has_bake(&self) -> bool {
+        self.has_bake
+    }
+
+    pub(crate) fn bake_key(&self) -> [u8; 16] {
+        self.bake_key
+    }
+
+    pub(crate) fn res(&self) -> u32 {
+        self.res
+    }
+
+    pub(crate) fn store_dir(&self) -> Option<&Path> {
+        self.store_dir.as_deref()
+    }
+
+    pub(crate) fn lattice_source(&self) -> &dyn LatticeSource {
+        self.src.as_ref()
+    }
+
+    /// The seed of the planet body (it goes into the chunk cache's keys).
+    pub(crate) fn base_seed(&self) -> u64 {
+        GenContext::new(&self.definition()).body_seed(BodyId::PLANET).unwrap_or(0)
+    }
+
+    /// The field below the chunk stage and the stamps: what the A-net starts from.
+    pub(crate) fn base_field(&self) -> Result<Box<dyn HeightField + '_>, String> {
+        let def = self.definition();
+        planet_generators::height_fields::build_field(self.kind, &GenContext::new(&def), BodyId::PLANET, self.src.as_ref(), self.bake_key)
+            .map_err(|e| format!("the definition cannot be generated: {e}"))
     }
 
     /// The lattice of this world's chunks, if it has a chunk stage.

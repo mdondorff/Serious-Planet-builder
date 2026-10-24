@@ -6,7 +6,7 @@
 //! alone (the coarse segment, the distance along it, the direction), so two neighbouring chunks find the same path; `libm` only, fixed order
 //! (CON-14).
 //!
-//! The coarse lattice is the chunk grid: the coupled run's 2048 cells per face edge and the level-11 tiles are the same squares, so a
+//! The coarse lattice is the chunk grid in production: the coupled run's 2048 cells per face edge and the level-11 tiles are the same squares (a coarser run cuts them into larger squares), so a
 //! fine cell `(face, i, j)` of a lattice of `cells_per_chunk` per chunk lies in the coarse cell `(face, i / cells_per_chunk, j / cells_per_chunk)`.
 
 use crate::chunkfield::{Cell, ChunkLattice, Region};
@@ -34,6 +34,24 @@ pub trait CoarseRun: Send + Sync {
     fn receiver(&self, c: usize) -> u32;
     /// A hash of what the run is (its key): part of the stage's definition hash, so a new run re-keys every chunk.
     fn identity(&self) -> u64;
+}
+
+impl CoarseRun for crate::coupled::CoupledMaps {
+    fn lattice(&self) -> &Lattice {
+        crate::coupled::CoupledMaps::lattice(self)
+    }
+    fn z(&self, c: usize) -> f32 {
+        crate::coupled::CoupledMaps::z(self, c)
+    }
+    fn area_m2(&self, c: usize) -> f32 {
+        self.network_area_m2(c)
+    }
+    fn receiver(&self, c: usize) -> u32 {
+        self.receivers()[c]
+    }
+    fn identity(&self) -> u64 {
+        self.id()
+    }
 }
 
 /// The arrays of a finished or stored run.
@@ -70,10 +88,19 @@ impl CoarseRun for StoredRun {
 pub trait BaseDetail: Send + Sync {
     /// The height of the base field at a unit direction, metres.
     fn base_height(&self, dir: Vec3) -> f64;
+    /// [`BaseDetail::base_height`] at every direction of `dirs`, in order: a base that builds a field per call answers a region in one build.
+    fn base_heights(&self, dirs: &[Vec3]) -> Vec<f64> {
+        dirs.iter().map(|&d| self.base_height(d)).collect()
+    }
     /// What the coupled run's input held at the direction (the bake's elevation read there), metres.
     fn coarse_input(&self, dir: Vec3) -> f64;
     /// A hash of the base field and the input the run started from (their keys): part of the stage's definition hash.
     fn identity(&self) -> u64;
+    /// Whether every answer so far was a real one (a base that lost its source answers zeros and says so here): a result made while it is not
+    /// healthy is not to be stored.
+    fn healthy(&self) -> bool {
+        true
+    }
 }
 
 /// A value in `[-1, 1]` that is a function of the segment and the knot alone.
@@ -162,11 +189,12 @@ pub const NO_NEXT: u32 = u32::MAX;
 impl Network {
     /// The network of `region` (a region of `lat`) from the run `run` of the coarse lattice, on a body of radius `radius_m`.
     pub fn build(run: &dyn CoarseRun, base: &dyn BaseDetail, lat: &ChunkLattice, region: &Region, radius_m: f64) -> Network {
-        let per = lat.cells_per_chunk() as usize;
         let coarse = run.lattice();
         let n_coarse = coarse.n();
-        assert_eq!(n_coarse * per, lat.n() as usize, "the fine lattice must be the coarse lattice cut into chunks of {per} cells");
-        let coarse_of = |c: Cell| usize::from(c.face) * n_coarse * n_coarse + (c.j as usize / per) * n_coarse + (c.i as usize / per);
+        // Fine cells per coarse cell along an edge: the chunk lattice cut by the coarse one (the production run is the chunk grid, 2048 cells).
+        let ratio = lat.n() as usize / n_coarse.max(1);
+        assert_eq!(n_coarse * ratio, lat.n() as usize, "the fine lattice must be the coarse lattice cut into squares of {ratio} cells");
+        let coarse_of = |c: Cell| usize::from(c.face) * n_coarse * n_coarse + (c.j as usize / ratio) * n_coarse + (c.i as usize / ratio);
 
         // The coarse cells the region touches, and the segments of rivers through them (and into them from outside).
         let inside: BTreeSet<usize> = region.cells.iter().map(|&c| coarse_of(c)).collect();
@@ -276,14 +304,9 @@ impl Network {
             }
         }
 
-        let z0 = region
-            .cells
-            .iter()
-            .map(|&c| {
-                let d = lat.direction(c);
-                (coarse_z_at(run, d) + (base.base_height(d) - base.coarse_input(d))) as f32
-            })
-            .collect();
+        let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
+        let heights = base.base_heights(&dirs);
+        let z0 = dirs.iter().zip(&heights).map(|(&d, &h)| (coarse_z_at(run, d) + (h - base.coarse_input(d))) as f32).collect();
         Network { corridor, next, inflow_m2, z0, anchor_z, river_area_m2 }
     }
 }
@@ -368,7 +391,7 @@ pub fn solve(
     let len = region.cells.len();
     let key = |x: usize| region.cells[x].key();
     let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
-    let z_base: Vec<f64> = dirs.iter().map(|&d| base.base_height(d)).collect();
+    let z_base: Vec<f64> = base.base_heights(&dirs);
     let mut z = z_base.clone();
     for (h, &anchor) in z.iter_mut().zip(&net.anchor_z) {
         if !anchor.is_nan() {
@@ -623,8 +646,8 @@ impl ANet {
     pub fn solve(&self, lat: &ChunkLattice, region: &Region) -> Solution {
         let net = Network::build(&*self.run, &*self.base, lat, region, self.radius_m);
         // The own area of a fine cell: the coarse cell's area over the cells it holds.
-        let per = lat.cells_per_chunk() as usize;
         let n = self.run.lattice().n();
+        let per = lat.n() as usize / n.max(1);
         let cells = (per * per) as f64;
         let area = |c: Cell| {
             let coarse = usize::from(c.face) * n * n + (c.j as usize / per) * n + (c.i as usize / per);
@@ -644,6 +667,9 @@ impl crate::chunkfield::ChunkStage for ANet {
     }
     fn halo_rings(&self) -> u16 {
         self.params.halo_rings
+    }
+    fn healthy(&self) -> bool {
+        self.base.healthy()
     }
     fn compute(&self, lat: &ChunkLattice, region: &Region) -> Vec<f32> {
         let s = self.solve(lat, region);

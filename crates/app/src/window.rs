@@ -291,6 +291,8 @@ struct Running {
     /// The lens the world was asked for and the one the resident tiles were last refreshed with (VIEW-053).
     coupled_asked: Option<planet_generators::coupled::CoupledLens>,
     coupled_shown: Option<planet_generators::coupled::CoupledLens>,
+    /// Whether the frame loop counts the world's chunk stage (STRM-039): set once the world has one.
+    chunks_on: bool,
     coupled_standing: Standing,
     /// The item markers of the globe overview, the ones the overview shows this frame (window pixels) and the one under the cursor.
     markers: Vec<Marker>,
@@ -421,6 +423,12 @@ impl App<'_> {
         let mut rig = Rig::new_with_progress(&ctx, self.world, &first, cfg.gen, &mut |done, total| {
             window.set_title(&planet_frame::viewer::roots_title(done, total));
         })?;
+        // A world with a stored coupled channel gets the A-net chunk stage on a thread (STRM-046); the jobs run on a pool of half the generation workers' size.
+        if self.world.has_bake() && !cfg.smoke {
+            let workers = (cfg.gen.workers / 2).max(1);
+            let pool = planet_streaming::GenWorkers::new(workers).with_priority(cfg.gen.priority).pool();
+            self.world.request_anet(pool, self.clock.clone(), planet_streaming::chunks::ChunkConfig { workers, ..Default::default() });
+        }
         // `enable_lit` is not part of `warm_up`: the lit and atmosphere passes are enabled and used once per ring set here, before the
         // first measured frame, whether the window starts lit or on the debug path (REND-017, VIEW-007).
         let warm_lit = viewer_lit_plan(&cfg.look, cfg.radius_m, 0.0, true, cfg.atmosphere)?.with_water_level(cfg.water_level_m);
@@ -488,6 +496,7 @@ impl App<'_> {
             scale_refs_on: false,
             coupled_asked: None,
             coupled_shown: None,
+            chunks_on: false,
             coupled_standing: Standing::Idle,
             markers: cfg.markers.clone(),
             screen_markers: Vec::new(),
@@ -717,6 +726,16 @@ impl App<'_> {
                     st.rig.managed.begin_frame(&req, &mut RendererSink { ctx, renderer: &mut st.rig.renderer })
                 })?;
             st.counts.coarse_lod_frames += u64::from(st.viewer.coarse_lod);
+            // The chunks the plan's tiles read, nearest first; the tiles that read a landed one are refreshed (STRM-039, STRM-040).
+            if !st.chunks_on && self.world.chunk_manager().is_some() {
+                st.chunks_on = true;
+                st.rig.managed.set_chunk_view(self.world.chunk_view());
+            }
+            if st.chunks_on {
+                let tiles: Vec<TileId> = frame.pipeline.draw.plan.nodes.iter().map(|n| n.tile).collect();
+                let update = self.world.chunk_frame(&tiles, camera.position, &[]);
+                st.rig.managed.chunk_landed(&update.landed);
+            }
             // A refusal of the plan for the base parameters degrades the frame (it draws the newest plan in hand); it is said once, never fatal.
             // One line, one report file and one title notice per cause (kind and level) in 5 s; the title counts all of them.
             let refusal = st.rig.managed.take_plan_refusal();
