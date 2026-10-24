@@ -27,7 +27,7 @@ pub fn is_lit_scene(name: &str) -> bool {
 }
 
 /// Waves move with the clock: a flight's frame k is drawn at `WATER_T0 + k / 60` s.
-const WATER_T0: f64 = 100.0;
+pub(crate) const WATER_T0: f64 = 100.0;
 
 /// What the lit frames of a run share: the look, the sea of the world, the liquids and the water plan cache.
 pub(crate) struct LitSetup {
@@ -140,18 +140,18 @@ struct ViewResult {
 }
 
 /// The settings every view of a run shares.
-struct Rig<'a> {
-    ctx: &'a GpuContext,
-    world: &'a WorldTerrain,
-    field: &'a dyn planet_generators::height::HeightField,
-    lod: &'a LodParams,
-    size: (u32, u32),
-    smoke: bool,
+pub(crate) struct Rig<'a> {
+    pub(crate) ctx: &'a GpuContext,
+    pub(crate) world: &'a WorldTerrain,
+    pub(crate) field: &'a dyn planet_generators::height::HeightField,
+    pub(crate) lod: &'a LodParams,
+    pub(crate) size: (u32, u32),
+    pub(crate) smoke: bool,
     /// Measure the CPU calibration in a smoke run too (`--calibrate`, TEST-039).
-    calibrate: bool,
-    frames: usize,
-    cells: u32,
-    radius_m: f64,
+    pub(crate) calibrate: bool,
+    pub(crate) frames: usize,
+    pub(crate) cells: u32,
+    pub(crate) radius_m: f64,
 }
 
 fn frame_of(t: &planet_render::FrameTiming) -> LitFrame {
@@ -162,7 +162,7 @@ fn frame_of(t: &planet_render::FrameTiming) -> LitFrame {
     LitFrame { total_ms: t.total_ms, cpu_ms: t.cpu_ms, pass_ms, scene_copy_ms: t.passes.scene_copy_ms, span_ms: t.passes.span_ms }
 }
 
-fn request(rig: &Rig<'_>, camera: Camera) -> TerrainRequest {
+pub(crate) fn request(rig: &Rig<'_>, camera: Camera) -> TerrainRequest {
     TerrainRequest {
         camera,
         size: rig.size,
@@ -174,7 +174,7 @@ fn request(rig: &Rig<'_>, camera: Camera) -> TerrainRequest {
 }
 
 /// A renderer for the run, with the pools of the tier and the lit path warmed before the first measured frame.
-fn new_renderer(rig: &Rig<'_>, setup: &LitSetup, camera: Camera) -> Result<TerrainRenderer, String> {
+pub(crate) fn new_renderer(rig: &Rig<'_>, setup: &LitSetup, camera: Camera) -> Result<TerrainRenderer, String> {
     let mut r = TerrainRenderer::with_frames_in_flight(rig.ctx, rig.size, rig.cells, 1);
     r.warm_up(rig.ctx);
     r.warm_up_lit(rig.ctx, &setup.warm_plan(camera, rig.size, rig.cells)?).map_err(|e| format!("warming the lit path: {e}"))?;
@@ -762,9 +762,32 @@ pub fn carries_sea(world: &WorldTerrain, dir: planet_core::Vec3) -> bool {
         .unwrap_or(false)
 }
 
+/// The LOD parameters of a capture at `size`: the production tolerance at 1440p, a smaller frame keeping the plan's
+/// viewport-to-tolerance ratio above its minimum; the height bound is the field's.
+pub(crate) fn capture_lod(
+    o: &Options,
+    size: (u32, u32),
+    radius_m: f64,
+    field: &dyn planet_generators::height::HeightField,
+) -> Result<LodParams, String> {
+    let tau = if size.1 >= 1440 { o.tau } else { o.tau.min(f64::from(size.1) / 72.0) };
+    let lod = LodParams {
+        cells: o.cells,
+        viewport_h_px: f64::from(size.1),
+        tau_px: tau,
+        max_level: o.finest_level_for(o.cells),
+        min_level: o.min_level(),
+        radius_m,
+        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
+        ..LodParams::earth_1080p()
+    };
+    lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
+    Ok(lod)
+}
+
 /// Whether `--scene NAME` names the flight capture (a tool, never a measurement).
 pub fn is_capture_scene(name: &str) -> bool {
-    name == "capture-flights"
+    matches!(name, "capture-flights" | "capture-stills")
 }
 
 /// `test-render --scene capture-flights --out-dir DIR [--store DIR | --allow-memory-bake --global-res N] [--size WxH] [--flight-frames N]`
@@ -784,20 +807,7 @@ pub fn capture_flights(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Re
     let field = world.field()?;
     let radius_m = world.radius_m();
     let size = o.size.unwrap_or((2560, 1440));
-    let max_level = o.finest_level_for(o.cells);
-    // The production tolerance at 1440p; a smaller frame keeps the plan's viewport-to-tolerance ratio above its minimum.
-    let tau = if size.1 >= 1440 { o.tau } else { o.tau.min(f64::from(size.1) / 72.0) };
-    let lod = LodParams {
-        cells: o.cells,
-        viewport_h_px: f64::from(size.1),
-        tau_px: tau,
-        max_level,
-        min_level: o.min_level(),
-        radius_m,
-        max_height_m: LodParams::earth_1080p().max_height_m.max(field.max_abs_height_m()),
-        ..LodParams::earth_1080p()
-    };
-    lod.validate().map_err(|e| format!("--cells {} --tau {}: {e}", o.cells, tau))?;
+    let lod = capture_lod(o, size, radius_m, field.as_ref())?;
     let aspect = f64::from(size.0) / f64::from(size.1);
     let mut setup = LitSetup::new(o, &world, &lod)?;
     let is_sea = |d: planet_core::Vec3| carries_sea(&world, d);

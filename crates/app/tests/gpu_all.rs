@@ -10,6 +10,8 @@ mod gpu_modes;
 mod gpu_preflight;
 #[path = "gpu_skeleton.rs"]
 mod gpu_skeleton;
+#[path = "gpu_stills.rs"]
+mod gpu_stills;
 #[path = "gpu_stream_perf.rs"]
 mod gpu_stream_perf;
 #[path = "gpu_water_coverage.rs"]
