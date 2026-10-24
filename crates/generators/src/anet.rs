@@ -332,9 +332,9 @@ pub fn solve(
     let dirs: Vec<Vec3> = region.cells.iter().map(|&c| lat.direction(c)).collect();
     let z_base: Vec<f64> = dirs.iter().map(|&d| base.base_height(d)).collect();
     let mut z = z_base.clone();
-    for c in 0..z.len() {
-        if !net.anchor_z[c].is_nan() {
-            z[c] = z[c].min(net.anchor_z[c]);
+    for (h, &anchor) in z.iter_mut().zip(&net.anchor_z) {
+        if !anchor.is_nan() {
+            *h = h.min(anchor);
         }
     }
     let ring = |c: usize| region.depth[c] >= region.halo;
@@ -520,7 +520,7 @@ impl crate::chunkfield::ChunkStage for ANet {
     fn definition_hash(&self) -> u64 {
         let p = &self.params;
         planet_core::hash::hash_u64s(
-            0x0061_6e65_74,
+            0x0000_616e_6574,
             &[
                 p.k.to_bits(),
                 p.m.to_bits(),
