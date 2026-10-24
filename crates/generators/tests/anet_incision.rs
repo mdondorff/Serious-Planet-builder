@@ -318,7 +318,6 @@ fn a_river_over_a_smooth_base_keeps_its_links_and_its_area_flows_on_past_the_anc
     let net = planet_generators::anet::Network::build(&River, &AboveRun, &lat, &r, R);
     let s = a.solve(&lat, &r);
     let mut with_link = 0;
-    let mut prev_area = 0.0f64;
     for (c, &on) in net.corridor.iter().enumerate() {
         if on && r.depth[c] < r.halo - 1 && net.next[c] != u32::MAX && s.receiver[c] != u32::MAX {
             with_link += 1;
