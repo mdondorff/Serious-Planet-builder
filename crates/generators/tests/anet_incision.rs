@@ -213,3 +213,16 @@ fn the_cost_of_a_chunk_at_8_m_cells_and_a_3_km_halo() {
     );
     assert_eq!(change.len(), r.cells.len());
 }
+
+// spec: GEN-048, GEN-049
+#[test]
+fn a_chunk_of_the_synthetic_scene_keeps_its_known_answer() {
+    let fnv = |v: &[f32]| {
+        v.iter()
+            .flat_map(|x| x.to_bits().to_le_bytes())
+            .fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3))
+    };
+    assert_eq!(fnv(&core_change(1003, 40)), KNOWN_ANSWER, "the stage changed: platform, order or arithmetic");
+}
+
+const KNOWN_ANSWER: u64 = 3_806_011_463_830_262_098;

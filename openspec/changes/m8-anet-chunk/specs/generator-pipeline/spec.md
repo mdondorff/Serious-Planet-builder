@@ -56,12 +56,12 @@ Source: SPIKE-33 stage model, ADR 0077 point 3, CON-14
 - **THEN** the channel cells are unchanged, no non-channel cell exceeds the angle of repose by more than one pass can move, the volume moved equals the volume received, and the hash is the same on 1, 2 and 8 threads
 
 ### Requirement: GEN-052 A-net chunk time
-An A-net chunk SHALL take at most 0.1 s per km2 of core at 4 m cells on the reference machine, one thread, measured by the performance harness through the architect and never in a test (CON-20); the table of time per km2 at 4, 8 and 10 m is recorded with the run.
+An A-net chunk of 24 km2 of core SHALL take at most 4 s at 8 m cells with the 3 km halo (1.8 million cells) on the reference machine, one thread, measured by the performance harness through the architect and never in a test (CON-20); the time at 4 and 10 m is recorded with the run (4 m was about 14 s per chunk on a synthetic scene: not met, ADR 0077 allows 4 to 10 m).
 
 Verify: C
 Status: planned
-Source: SPIKE-33 (0.06 s per km2 at 4 m), M8 plan risks, CON-22
+Source: SPIKE-33, M8 plan risks, CON-22, planner decision 2026-10-24 (8 m default)
 
 #### Scenario: Chunk time
-- **WHEN** a chunk of 25 km2 runs on the reference machine in a perf window
-- **THEN** it finishes within 2.5 s at 4 m cells and the log holds the time per km2 at 4, 8 and 10 m
+- **WHEN** a chunk of 24 km2 at 8 m cells runs on the reference machine in a perf window
+- **THEN** it finishes within 4 s at 8 m cells and the log holds the times at 4 and 10 m
