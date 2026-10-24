@@ -29,6 +29,8 @@ pub struct WorldBase {
     identity: u64,
     /// Set when an answer was a stand-in (the world gone, the field not buildable): nothing made after it is stored.
     failed: std::sync::atomic::AtomicBool,
+    /// Threads a batch of base heights uses.
+    threads: usize,
 }
 
 impl WorldBase {
@@ -47,7 +49,7 @@ impl WorldBase {
             h = mix64(h ^ fold(f.implementation_id()));
             h = mix64(h ^ u64::from(f.version()));
         }
-        WorldBase { world: Arc::downgrade(world), identity: h, failed: Default::default() }
+        WorldBase { world: Arc::downgrade(world), identity: h, failed: Default::default(), threads: 4 }
     }
 }
 
@@ -60,7 +62,7 @@ impl BaseDetail for WorldBase {
     fn base_heights(&self, dirs: &[Vec3]) -> Vec<f64> {
         let Some(world) = self.world.upgrade() else { return self.lost(dirs.len()) };
         let Ok(field) = world.base_field() else { return self.lost(dirs.len()) };
-        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(4);
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(self.threads);
         field.heights_threaded_until(dirs, &|| false, threads)
     }
 
@@ -79,6 +81,12 @@ impl BaseDetail for WorldBase {
 }
 
 impl WorldBase {
+    /// The same base reading its heights on `threads` threads (the perf scene measures with one).
+    pub fn with_threads(mut self, threads: usize) -> WorldBase {
+        self.threads = threads.max(1);
+        self
+    }
+
     /// Stand-in answers for a base that lost its source; the failure is remembered.
     fn lost(&self, n: usize) -> Vec<f64> {
         self.failed.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -91,10 +99,11 @@ fn fold(s: &str) -> u64 {
     s.bytes().fold(0x0000_666f_6c64, |h, b| mix64(h ^ u64::from(b)))
 }
 
-/// Cells per chunk edge for chunks of about `cell_m` metres on a body of `radius_m`.
+/// Cells per chunk edge for chunks of about `cell_m` metres on a body of `radius_m` (608 at 8 m, 1216 at 4 m, 496 at 10 m on Earth).
 pub fn cells_per_chunk_for(radius_m: f64, cell_m: f64) -> u32 {
     let edge = radius_m * core::f64::consts::FRAC_PI_2 / f64::from(1u32 << planet_generators::chunk::CHUNK_GRID_LEVEL);
-    (edge / cell_m).round().max(1.0) as u32
+    // A multiple of 16: the chunk's pyramid halves the edge once per level it carries (up to 4 levels, cells down to about 1.2 m).
+    ((edge / cell_m / 16.0).round().max(1.0) as u32) * 16
 }
 
 impl WorldTerrain {

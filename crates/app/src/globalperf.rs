@@ -148,6 +148,111 @@ pub fn perf_coupled(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Resul
     }
 }
 
+/// The GEN-052 budget: an A-net chunk of 24 km2 takes at most 4 s at 8 m cells (one thread).
+pub(crate) fn anet_chunk_budget_failures(cell_m: f64, secs: f64) -> Vec<String> {
+    if cell_m == 8.0 && !(secs.is_finite() && secs <= 4.0) {
+        vec![format!("A-net chunk time {secs:.2} s at 8 m exceeds 4 s (GEN-052)")]
+    } else {
+        Vec::new()
+    }
+}
+
+// spec: GEN-052
+/// Time one A-net chunk (the chunk of the coupled run's largest land river) at 8, 4 and 10 m with the 3 km halo on one thread after the ADR 0020
+/// readiness gate. The world is the default eroded one over a bake of `--global-res` cells (default 256) and its coupled run; the chunk time
+/// does not depend on the run's resolution, only on the cells of the chunk and its rivers.
+pub fn perf_anet_chunk(o: &Options, ctx: &GpuContext, out: &mut dyn Write) -> Result<(), String> {
+    use crate::anetworld::{cells_per_chunk_for, WorldBase, ANET_HALO_M};
+    use crate::coupledworld::Standing;
+    use crate::worldfield::WorldTerrain;
+    use planet_generators::anet::{ANet, ANetParams};
+    use planet_generators::chunkfield::{compute_chunk, halo_rings, ChunkLattice, PYRAMID_TOP_LEVEL};
+    use std::sync::Arc;
+    planet_perf::check_reference_adapter(&crate::facts(ctx)).map_err(|r| r.to_string())?;
+    let owner_override = crate::readiness_gate(o, ctx, out)?;
+    let res = if o.given.contains("--global-res") { o.global_res } else { 256 };
+    let def = planet_world_def::WorldDefinition::single_planet(planet_core::EARTH_RADIUS_M, o.seed);
+    let world = Arc::new(WorldTerrain::open(def, res)?);
+    let radius = world.radius_m();
+    writeln!(out, "A-net chunk perf: bake {res} cells per face edge, coupled run {} steps, 1 thread", crate::coupledworld::COUPLED_STEPS)
+        .map_err(err)?;
+    world.request_coupled();
+    let maps = loop {
+        match world.coupled_standing() {
+            Standing::Ready(m, _) => break m,
+            Standing::Failed(e) => return Err(e),
+            _ => std::thread::sleep(std::time::Duration::from_millis(50)),
+        }
+    };
+    // The chunk of the land cell with the largest drainage area that drains on.
+    let lat_c = maps.lattice();
+    let rec = maps.receivers();
+    let mut best: Option<(usize, f32)> = None;
+    for c in 0..lat_c.len() {
+        let a = maps.network_area_m2(c);
+        if maps.z(c) > 0.0 && rec[c] != planet_generators::coupled::NONE && best.map_or(true, |(_, b)| a > b) {
+            best = Some((c, a));
+        }
+    }
+    let (cell, area) = best.ok_or("the coupled run has no land river")?;
+    let tile = planet_core::TileId::from_direction(
+        &planet_core::cube::TangentWarp,
+        lat_c.direction(cell),
+        planet_generators::chunk::CHUNK_GRID_LEVEL,
+    );
+    writeln!(out, "chunk {:#018x} (face {}), the river of {:.0} km2 at its coarse cell", tile.raw(), tile.face().0, f64::from(area) / 1e6)
+        .map_err(err)?;
+    let mut failures = Vec::new();
+    let mut rows = Vec::new();
+    for cell_m in [8.0, 4.0, 10.0] {
+        let per = cells_per_chunk_for(radius, cell_m);
+        let lat = ChunkLattice::new(per).ok_or("no lattice")?;
+        let stage = ANet {
+            run: maps.clone(),
+            base: Arc::new(WorldBase::new(&world).with_threads(1)),
+            radius_m: radius,
+            params: ANetParams::spike(ANET_HALO_M, lat.cell_m(radius)),
+        };
+        let halo = halo_rings(&stage);
+        // The share of the base field: its heights over the region, one thread.
+        let reg = planet_generators::chunkfield::region(&lat, tile, halo);
+        let dirs: Vec<planet_core::Vec3> = reg.cells.iter().map(|&c| lat.direction(c)).collect();
+        let t0 = Instant::now();
+        let _ = planet_generators::anet::BaseDetail::base_heights(&*stage.base, &dirs);
+        let base_secs = t0.elapsed().as_secs_f64();
+        let start = Instant::now();
+        let r = compute_chunk(&lat, &stage, radius, PYRAMID_TOP_LEVEL, tile, halo).ok_or("the chunk was refused")?;
+        let secs = start.elapsed().as_secs_f64();
+        let cells = (per as usize + 2 * halo as usize).pow(2);
+        writeln!(
+            out,
+            "{cell_m} m: {per} cells per chunk, halo {halo} rings, about {cells} cells with the halo: {secs:.2} s, the base field of it {base_secs:.2} s (hash {:016x})",
+            r.hash()
+        )
+        .map_err(err)?;
+        failures.extend(anet_chunk_budget_failures(cell_m, secs));
+        rows.push(format!("{{\"cell_m\": {cell_m}, \"cells_per_chunk\": {per}, \"halo_rings\": {halo}, \"seconds\": {secs:.3}}}"));
+    }
+    let json = format!(
+        "{{\n  \"scene\": \"anet-chunk\",\n  \"adapter\": \"{}\",\n  \"owner_override\": {:?},\n  \"res\": {res},\n  \"threads\": 1,\n  \"chunks\": [{}],\n  \"budget_failures\": {:?}\n}}\n",
+        ctx.adapter_name().replace('"', "'"),
+        owner_override,
+        rows.join(", "),
+        failures
+    );
+    let path = o.out.clone().unwrap_or_else(|| Path::new("perf").join("logs").join("anet-chunk.json"));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(err)?;
+    }
+    std::fs::write(&path, json).map_err(err)?;
+    writeln!(out, "wrote {}", path.display()).map_err(err)?;
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,6 +268,15 @@ mod tests {
         assert!(secs.is_finite() && secs >= 0.0);
         assert_eq!(a.steps.len(), 3);
         assert!(a.z.iter().zip(&b.z).all(|(x, y)| x.to_bits() == y.to_bits()), "the fixed input gives the same run");
+    }
+
+    // spec: GEN-052
+    #[test]
+    fn the_chunk_budget_is_four_seconds_at_8_m_and_a_missing_time_never_passes() {
+        assert!(anet_chunk_budget_failures(8.0, 3.9).is_empty());
+        assert_eq!(anet_chunk_budget_failures(8.0, 4.1).len(), 1);
+        assert_eq!(anet_chunk_budget_failures(8.0, f64::NAN).len(), 1);
+        assert!(anet_chunk_budget_failures(4.0, 41.0).is_empty(), "the times at 4 and 10 m are recorded, not budgeted");
     }
 
     // spec: GEN-042

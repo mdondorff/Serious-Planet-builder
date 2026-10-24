@@ -824,7 +824,7 @@ impl WorldTerrain {
 /// is refused here with the known ids.
 pub fn check_options(o: &Options) -> Result<(), String> {
     // The global-bake perf scene takes the --world and --global-res of the global commands (its own checks).
-    if o.perf && matches!(o.scene.as_str(), "global-bake" | "coupled") {
+    if o.perf && matches!(o.scene.as_str(), "global-bake" | "coupled" | "anet-chunk") {
         return Ok(());
     }
     let perf_terrain = (o.perf || o.perf_smoke)
