@@ -12,7 +12,7 @@ Source: SPIKE-34 section 6, STRM-027, STRM-029, ADR 0022
 - **THEN** the first two keys differ, the two keys of the coarser tile are equal and equal the base's, and the border tile's keys differ while a tile in the middle of the chunk keeps its key
 
 ### Requirement: STRM-039 Chunk jobs never block a frame
-Chunk jobs SHALL run on the injected spawner (CON-04), ordered by distance to the camera, at most `chunk_workers` at once, and no frame SHALL wait for one. A tile whose chunk is not ready SHALL draw the base; on landing, the chunk's change SHALL fade in per tile over `chunk_fade_ms` (default 500) on the injected clock, through a plain f32 weight (CON-11). The per-frame log SHALL count the plan's nodes at the apply level whose chunk is not ready and the plan's nodes at the apply level (the stand-in share, for the speed-envelope scene).
+Chunk jobs SHALL run on the injected spawner (CON-04), ordered by distance to the camera, at most `chunk_workers` at once, and no frame SHALL wait for one. A tile whose chunk is not ready SHALL draw the base; on landing, the chunk's change SHALL fade in per tile over `chunk_fade_ms` (default 500) on the injected clock, through a plain f32 weight (CON-11). The per-frame log SHALL count the plan's nodes that read chunk detail (at or finer than the pyramid's top level, column `chunk_nodes`) and those among them whose own chunk is not ready (column `chunk_stand_in`): the stand-in share, for the speed-envelope scene.
 
 Verify: A, C
 Status: planned
@@ -24,7 +24,7 @@ Source: ADR 0077 point 7, CON-22, CON-04, CON-11, M8 plan criteria 3 and 7
 
 #### Scenario: Fade
 - **WHEN** a chunk lands under visible tiles
-- **THEN** each tile's weight rises from 0 to 1 over `chunk_fade_ms` with no step in the drawn height over 0.25 m p99 per frame at 60 frames per second on the software adapter
+- **THEN** each tile's weight rises linearly from 0 to 1 over `chunk_fade_ms`, so the drawn height `base + w x change` steps by at most the weight step times the change per frame; for a change of at most 7 m that is within 0.25 m per frame at 60 frames per second over 500 ms, and a change of 30 m needs 2 s
 
 ### Requirement: STRM-040 Landing refreshes and invalidates
 When a chunk lands, tiles under it SHALL be refreshed through the stale-tile machinery (the old tile keeps drawing while the refresh runs, REND-032), and the origin heights the plan cache holds for them SHALL be invalidated. Heights sampled by the plan SHALL never request a chunk.

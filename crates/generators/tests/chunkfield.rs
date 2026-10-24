@@ -349,3 +349,27 @@ fn tile_generation_reads_the_height_at_its_own_level() {
         generate_tile_field(&Reference(3), &TangentWarp, coarse, 8).heights
     );
 }
+
+// spec: STRM-041
+#[test]
+fn a_chunk_result_round_trips_through_bytes_and_a_damaged_payload_is_refused() {
+    use planet_generators::chunkfield::ChunkResult;
+    let lat = ChunkLattice::new(64).unwrap();
+    let stage = stand_in(4);
+    let tile = chunk_tile(2, 1000, 1000);
+    let result = compute_chunk(&lat, &stage, R, 11, tile, halo_rings(&stage)).unwrap();
+    assert!(result.k_max() >= 1, "the 64-cell chunk carries pyramid levels");
+    let bytes = result.to_bytes();
+    let back = ChunkResult::from_bytes(tile, &bytes).unwrap();
+    assert_eq!(back.hash(), result.hash());
+    assert_eq!(back.size_bytes(), result.size_bytes());
+    for cut in [0usize, 3, 8, bytes.len() - 1] {
+        assert!(ChunkResult::from_bytes(tile, &bytes[..cut]).is_none(), "{cut} bytes");
+    }
+    let mut longer = bytes.clone();
+    longer.push(0);
+    assert!(ChunkResult::from_bytes(tile, &longer).is_none());
+    let mut wrong = bytes;
+    wrong[0] = 63;
+    assert!(ChunkResult::from_bytes(tile, &wrong).is_none(), "a wrong size is refused");
+}

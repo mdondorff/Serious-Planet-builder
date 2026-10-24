@@ -1769,3 +1769,43 @@ fn a_run_without_a_refusal_is_not_invalid() {
         rig.finish();
     }
 }
+
+/// A chunk view whose tiles of level 6 and finer read one chunk each (their ancestor at level 6), ready all at once when `ready` is set.
+struct StubView {
+    ready: std::sync::atomic::AtomicBool,
+}
+
+impl planet_frame::chunkshare::ChunkView for StubView {
+    fn top_level(&self) -> u8 {
+        6
+    }
+    fn reads(&self, tile: TileId) -> Vec<planet_generators::chunkfield::ChunkKey> {
+        if tile.level() < 6 {
+            return Vec::new();
+        }
+        let shift = tile.level() - 6;
+        vec![(tile.face().0, tile.x() >> shift, tile.y() >> shift)]
+    }
+    fn is_ready(&self, _key: planet_generators::chunkfield::ChunkKey) -> bool {
+        self.ready.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+// spec: STRM-039
+#[test]
+fn the_loops_frame_counts_carry_the_stand_in_share_of_its_plan() {
+    let mut rig = Rig::new(1_000_000);
+    let req = request(here(), 0.0, -0.4);
+    rig.settle(&req);
+    assert_eq!(rig.step(&req).counts.chunk, planet_frame::chunkshare::ChunkShare::default(), "without a chunk view nothing is counted");
+    let view = Arc::new(StubView { ready: std::sync::atomic::AtomicBool::new(false) });
+    rig.lp.set_chunk_view(Some(view.clone()));
+    let f = rig.step(&req);
+    let fine = f.pipeline.draw.plan.nodes.iter().filter(|n| n.tile.level() >= 6).count();
+    assert!(fine > 0, "the view sees nodes that read chunk detail");
+    assert_eq!((f.counts.chunk.chunk_nodes, f.counts.chunk.chunk_stand_in), (fine, fine), "nothing ready: all of them are the stand-in");
+    view.ready.store(true, std::sync::atomic::Ordering::SeqCst);
+    let f = rig.step(&req);
+    assert_eq!((f.counts.chunk.chunk_nodes, f.counts.chunk.chunk_stand_in), (fine, 0));
+    assert_eq!(f.counts.chunk.values(), [fine as u64, 0]);
+}

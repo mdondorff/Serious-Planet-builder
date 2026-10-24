@@ -18,6 +18,7 @@
 //! the pool before they get here.
 
 pub mod budget;
+pub mod chunks;
 mod layer;
 pub mod manager;
 pub mod priority;
