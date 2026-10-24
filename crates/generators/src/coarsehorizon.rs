@@ -63,7 +63,7 @@ pub fn coarse_horizon(run: &Lattice, z: &[f32], m: usize, p: &CoarseParams, thre
     if z.len() != run.len() {
         return Err(format!("the run holds {} heights, not the {} of a lattice of {n} cells per face edge", z.len(), run.len()));
     }
-    if m == 0 || m > n || n % m != 0 {
+    if m == 0 || m > n || !n.is_multiple_of(m) {
         return Err(format!("{m} observer cells per face edge: a divisor of the run's {n}"));
     }
     let finite_positive = |v: f64| v.is_finite() && v > 0.0;
