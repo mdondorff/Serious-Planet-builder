@@ -59,6 +59,9 @@ impl HeightField for Counting<'_> {
         self.height.fetch_add(1, Relaxed);
         self.f().height_at_level(d, level)
     }
+    fn level_aware(&self) -> bool {
+        self.f().level_aware()
+    }
     fn seed(&self) -> u64 {
         self.f().seed()
     }

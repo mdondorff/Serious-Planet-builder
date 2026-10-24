@@ -318,6 +318,37 @@ pub struct NodeSelection {
     pub ceiling: std::sync::Arc<Ceiling>,
 }
 
+impl NodeSelection {
+    /// The chunks under the selected nodes at or finer than tile level `top` (LOD-013), each once, in the order of the nodes: the chunk of the
+    /// grid (level 11) that holds the node. Sampling heights never asks for a chunk; this is the only request a plan makes.
+    pub fn chunk_requests(&self, top: u8) -> Vec<TileId> {
+        self.chunk_requests_with(|tile| {
+            let (level, shift) = (tile.level(), tile.level().saturating_sub(planet_generators::chunk::CHUNK_GRID_LEVEL));
+            if level < top.max(planet_generators::chunk::CHUNK_GRID_LEVEL) {
+                return Vec::new();
+            }
+            vec![(tile.face().0, tile.x() >> shift, tile.y() >> shift)]
+        })
+    }
+
+    /// [`NodeSelection::chunk_requests`] with the chunks each node reads decided by `reads` (a chunk field's `chunks_read_by`, which adds the
+    /// neighbours a node near a border reads): the union in the order of the nodes, each chunk once.
+    pub fn chunk_requests_with(&self, reads: impl Fn(TileId) -> Vec<(u8, u32, u32)>) -> Vec<TileId> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for node in &self.nodes {
+            for key in reads(node.tile) {
+                if seen.insert(key) {
+                    out.push(
+                        TileId::new(planet_core::Face(key.0), planet_generators::chunk::CHUNK_GRID_LEVEL, key.1, key.2)
+                            .expect("a chunk of the grid is a tile"),
+                    );
+                }
+            }
+        }
+        out
+    }
+}
 /// The test a morph interval `[start, end]` must pass to leave a crack-free morph (LOD-008): finite, and starting within `0.95 - margin` of
 /// its end. One predicate for [`LodParams::validate`], the selection's morphable test and the plan's backstop.
 pub fn morph_room(start: f64, end: f64, margin: f64) -> bool {
@@ -605,6 +636,16 @@ impl SelectionCache {
         dropped
     }
 
+    /// Forget what is cached of the tiles a chunk that has just landed can change (STRM-040): those whose reads, decided by `reads` (a chunk
+    /// field's `chunks_read_by`), include it. Returns how many origin heights were dropped.
+    pub fn invalidate_chunk(&mut self, landed: (u8, u32, u32), reads: impl Fn(TileId) -> Vec<(u8, u32, u32)>) -> usize {
+        let mut tiles: Vec<TileId> = self.origin_heights.keys().chain(self.mesh_keys.keys()).chain(self.volumes.keys()).copied().collect();
+        tiles.sort_unstable_by_key(|t| t.raw());
+        tiles.dedup();
+        tiles.retain(|&t| reads(t).contains(&landed));
+        self.invalidate_tiles(&tiles)
+    }
+
     pub fn clear(&mut self) {
         self.tiles.clear();
         self.volumes.clear();
@@ -709,6 +750,12 @@ impl SelectionCache {
             self.origin_heights.remove(&t);
             self.mesh_keys.remove(&t);
         }
+    }
+
+    /// Store an origin height as the plan builder does; for tests of what a landing drops.
+    #[doc(hidden)]
+    pub fn origin_height_for_test(&mut self, tile: TileId, height_m: f64) {
+        self.origin_heights.insert(tile, height_m);
     }
 
     /// Field height at the centre of `tile` (the plan's tile origin): `compute` runs only the first time a tile is asked

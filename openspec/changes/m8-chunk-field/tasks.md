@@ -18,9 +18,9 @@
 - [x] 3b.3 Tests: border agreement (halo rule), bit-exact across 1, 2 and 8 threads, step against the parent at most 0.25 m p99 on the stand-in; known-answer hash for CI on Windows and Linux
 - [ ] 3b.4 numerics-reviewer
 ### 3c. Plan-side requests, bounds, key chaining (LOD-013, STRM-038, STRM-040)
-- [ ] 3c.1 The plan returns `B`; sampling never requests; bounds widen by the field's bound; a chunk field with no chunk ready plans identically to one with all ready
-- [ ] 3c.2 Tile keys chain the chunk's content hash (word 0 when not ready); tiles above the apply level key as the base
-- [ ] 3c.3 Invalidate origin heights of tiles under a landed chunk
+- [x] 3c.1 The plan returns `B`; sampling never requests; bounds widen by the field's bound; a chunk field with no chunk ready plans identically to one with all ready
+- [x] 3c.2 Tile keys chain the chunk's content hash (word 0 when not ready); tiles above the apply level key as the base
+- [x] 3c.3 Invalidate origin heights of tiles under a landed chunk
 ### 3d. Jobs, landing, stand-in and fade (STRM-039, STRM-041)
 - [ ] 3d.1 Chunk job class on the injected spawner; distance priority; `chunk_workers`; fake-clock latency model
 - [ ] 3d.2 Landing refreshes tiles through the stale-tile machinery; CON-22 test over a scripted flight (no frame waits)

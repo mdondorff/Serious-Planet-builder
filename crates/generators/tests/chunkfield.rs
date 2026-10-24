@@ -15,6 +15,9 @@ const R: f64 = 6_371_000.0;
 
 type Key = (u8, u32, u32);
 
+/// The top level of the first design (the chunk grid level), where the steps between the levels were measured.
+const TOP11: u8 = 11;
+
 fn stand_in(steps: u32) -> StandIn {
     StandIn { seed: 7, radius_m: R, amplitude_m: 30.0, steps }
 }
@@ -137,8 +140,8 @@ fn p99(mut v: Vec<f64>) -> f64 {
 fn the_pyramid_starts_at_the_chunk_grid_level_and_tiles_above_it_are_the_base() {
     let lat = ChunkLattice::new(608).unwrap();
     assert_eq!(apply_level(lat.cell_m(R), R, 32), Some(15), "8 m cells");
-    assert_eq!(pyramid_position(&lat, R, PYRAMID_TOP_LEVEL - 1, PYRAMID_TOP_LEVEL), None);
-    let ks: Vec<f64> = (PYRAMID_TOP_LEVEL..=18).map(|l| pyramid_position(&lat, R, l, PYRAMID_TOP_LEVEL).unwrap()).collect();
+    assert_eq!(pyramid_position(&lat, R, TOP11 - 1, TOP11), None);
+    let ks: Vec<f64> = (TOP11..=18).map(|l| pyramid_position(&lat, R, l, TOP11).unwrap()).collect();
     assert!(ks.windows(2).all(|w| w[0] >= w[1]), "finer tiles read finer pyramid levels: {ks:?}");
     assert!(ks[0] > 4.0 && ks[0] < 5.0 && ks.last().unwrap().abs() < 1e-12, "{ks:?}");
 }
@@ -149,16 +152,16 @@ fn a_ready_chunk_changes_levels_from_the_top_down_and_the_step_to_the_parent_is_
     let lat = ChunkLattice::new(608).unwrap();
     let stage = stand_in(8);
     let tile = chunk_tile(2, 1000, 1000);
-    let result = Arc::new(compute_chunk(&lat, &stage, R, PYRAMID_TOP_LEVEL, tile, halo_rings(&stage)).unwrap());
-    let none = ChunkField::new(Reference(3), lat, R, stage.bound_m());
-    let field = ChunkField::new(Reference(3), lat, R, stage.bound_m()).with_ready(result);
+    let result = Arc::new(compute_chunk(&lat, &stage, R, TOP11, tile, halo_rings(&stage)).unwrap());
+    let none = ChunkField::new(Reference(3), lat, R, &stage).with_top_level(TOP11);
+    let field = ChunkField::new(Reference(3), lat, R, &stage).with_top_level(TOP11).with_ready(result);
 
     // Over the chunk's centre: levels above the top are the base, the others carry the change.
     let centre = tile.center_direction(&TangentWarp);
-    for level in 0..PYRAMID_TOP_LEVEL {
+    for level in 0..TOP11 {
         assert_eq!(field.height_at_level(centre, level).to_bits(), Reference(3).height(centre).to_bits(), "level {level}");
     }
-    let changed = (PYRAMID_TOP_LEVEL..=16).filter(|&l| field.height_at_level(centre, l) != Reference(3).height(centre)).count();
+    let changed = (TOP11..=16).filter(|&l| field.height_at_level(centre, l) != Reference(3).height(centre)).count();
     assert!(changed >= 5, "levels 11 to 16 should read the change, {changed} did");
     assert_eq!(field.height(centre).to_bits(), field.height_at_level(centre, planet_core::tile::MAX_LEVEL).to_bits());
     // Without a ready chunk nothing differs from the base, at any level.
@@ -169,7 +172,7 @@ fn a_ready_chunk_changes_levels_from_the_top_down_and_the_step_to_the_parent_is_
     // The step between each level and its parent, at the parent's vertices, over a level-15 tile and the tiles on the way up.
     let mut tile_l = TileId::new(Face(2), 15, 16 * 1000 + 5, 16 * 1000 + 7).unwrap();
     assert_eq!(TileId::from_direction(&TangentWarp, tile_l.center_direction(&TangentWarp), CHUNK_GRID_LEVEL), tile);
-    while tile_l.level() >= PYRAMID_TOP_LEVEL {
+    while tile_l.level() >= TOP11 {
         let parent = tile_l.parent().unwrap();
         let (mut steps, mut worst) = (Vec::new(), (0.0f64, 0u32, 0u32));
         for l in 0..=32u32 {
@@ -201,7 +204,7 @@ fn a_ready_chunk_changes_levels_from_the_top_down_and_the_step_to_the_parent_is_
             worst.2
         );
         tile_l = parent;
-        if parent.level() < PYRAMID_TOP_LEVEL - 1 {
+        if parent.level() < TOP11 - 1 {
             break;
         }
     }
@@ -215,7 +218,7 @@ fn a_lower_top_level_leaves_the_levels_above_it_the_base_and_keeps_the_step_at_t
     let tile = chunk_tile(2, 1000, 1000);
     let top = 14;
     let result = Arc::new(compute_chunk(&lat, &stage, R, top, tile, halo_rings(&stage)).unwrap());
-    let field = ChunkField::new(Reference(3), lat, R, stage.bound_m()).with_top_level(top).with_ready(result);
+    let field = ChunkField::new(Reference(3), lat, R, &stage).with_top_level(top).with_ready(result);
     let centre = tile.center_direction(&TangentWarp);
     for level in 0..top {
         assert_eq!(field.height_at_level(centre, level).to_bits(), Reference(3).height(centre).to_bits(), "level {level}");
@@ -276,7 +279,7 @@ fn the_change_has_no_seam_across_a_face_edge_with_both_chunks_ready() {
     let b = TileId::from_direction(&TangentWarp, outside, CHUNK_GRID_LEVEL);
     assert_ne!(a.face(), b.face(), "the two points are on different faces");
     let make = |tile| Arc::new(compute_chunk(&lat, &stage, R, PYRAMID_TOP_LEVEL, tile, halo_rings(&stage)).unwrap());
-    let field = ChunkField::new(Reference(3), lat, R, stage.bound_m()).with_ready(make(a)).with_ready(make(b));
+    let field = ChunkField::new(Reference(3), lat, R, &stage).with_ready(make(a)).with_ready(make(b));
     for level in [11, 15, 22] {
         let (x, y) = (field.change_at_level(inside, level), field.change_at_level(outside, level));
         assert!((x - y).abs() <= 1e-3, "level {level}: {x} m inside, {y} m outside the face edge");
@@ -293,7 +296,7 @@ fn a_corner_chunk_of_8_m_cells_keeps_its_known_answer() {
     assert_eq!(hash, CORNER_KNOWN_ANSWER, "the corner chunk changed: platform, order, arithmetic or the tie-break across the face edge");
 }
 
-const CORNER_KNOWN_ANSWER: u64 = 14_433_926_590_099_959_428;
+const CORNER_KNOWN_ANSWER: u64 = 5_129_282_273_553_867_978;
 
 // spec: GEN-036
 #[test]
@@ -302,7 +305,7 @@ fn at_a_level_that_reads_the_raster_the_height_is_the_base_plus_the_stored_chang
     let stage = stand_in(4);
     let tile = chunk_tile(2, 1000, 1000);
     let result = Arc::new(compute_chunk(&lat, &stage, R, PYRAMID_TOP_LEVEL, tile, halo_rings(&stage)).unwrap());
-    let field = ChunkField::new(Reference(3), lat, R, stage.bound_m()).with_ready(result.clone());
+    let field = ChunkField::new(Reference(3), lat, R, &stage).with_ready(result.clone());
     for (i, j) in [(0u32, 0u32), (7, 9), (15, 15), (3, 12)] {
         let cell = planet_generators::chunkfield::Cell { face: 2, i: 1000 * 16 + i, j: 1000 * 16 + j };
         let d = lat.direction(cell);
@@ -310,4 +313,39 @@ fn at_a_level_that_reads_the_raster_the_height_is_the_base_plus_the_stored_chang
         let got = field.height_at_level(d, 22) - Reference(3).height(d);
         assert!((got - stored).abs() <= 1e-6, "cell ({i}, {j}): {got} m against the stored {stored} m");
     }
+}
+
+// spec: GEN-036
+#[test]
+fn tile_generation_reads_the_height_at_its_own_level() {
+    use planet_generators::height::generate_tile_field;
+    use planet_generators::mesh::tile_mesh_field;
+    let lat = ChunkLattice::new(16).unwrap();
+    let stage = stand_in(4);
+    let tile = chunk_tile(2, 1000, 1000);
+    let result = Arc::new(compute_chunk(&lat, &stage, R, PYRAMID_TOP_LEVEL, tile, halo_rings(&stage)).unwrap());
+    let field = ChunkField::new(Reference(3), lat, R, &stage).with_ready(result);
+    // A tile of level 15 over the chunk: its stored heights are the field's heights at level 15, and differ from the base's.
+    let fine = TileId::new(Face(2), 15, 16 * 1000 + 7, 16 * 1000 + 9).unwrap();
+    let data = generate_tile_field(&field, &TangentWarp, fine, 8);
+    let base = generate_tile_field(&Reference(3), &TangentWarp, fine, 8);
+    let mut changed = 0;
+    for l in 0..=8 {
+        for k in 0..=8 {
+            let d = fine.sample_direction(&TangentWarp, 8, k, l);
+            assert_eq!(data.at(k, l), field.height_at_level(d, 15) as f32);
+            changed += usize::from(data.at(k, l) != base.at(k, l));
+        }
+    }
+    assert!(changed > 40, "the chunk's change is in the tile ({changed} of 81 samples)");
+    // The mesh reads the same heights: its origin sits at the tile centre at the level's height, and a coarser tile is the base's tile bit for bit.
+    let mesh = tile_mesh_field(&field, &TangentWarp, fine, 8, R);
+    let centre = fine.center_direction(&TangentWarp);
+    let expected = (R + field.height_at_level(centre, 15)) * centre.length();
+    assert!((mesh.origin.0.length() - expected).abs() < 1e-6, "origin {} against {}", mesh.origin.0.length(), expected);
+    let coarse = TileId::new(Face(2), 13, 4 * 1000 + 1, 4 * 1000 + 1).unwrap();
+    assert_eq!(
+        generate_tile_field(&field, &TangentWarp, coarse, 8).heights,
+        generate_tile_field(&Reference(3), &TangentWarp, coarse, 8).heights
+    );
 }

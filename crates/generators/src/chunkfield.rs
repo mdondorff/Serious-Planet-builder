@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 /// The coarsest tile level whose tiles read the chunk pyramid (GEN-035): tiles above it are the base, where the global run carries the large
 /// scale. The chunk grid level, so a tile reads one chunk at most.
-pub const PYRAMID_TOP_LEVEL: u8 = CHUNK_GRID_LEVEL;
+pub const PYRAMID_TOP_LEVEL: u8 = 14;
 
 /// The eight neighbours of a cell, in order: the four edge neighbours, then the four diagonals.
 const OFFS: [(i64, i64); 8] = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)];
@@ -187,6 +187,8 @@ pub trait ChunkStage: Send + Sync {
     /// The change in metres at every cell of `region`; the values at depth at most `region.halo - step_cap` are exact (the cells further out
     /// are what the shrinking region left behind and are not to be read).
     fn compute(&self, lat: &ChunkLattice, region: &Region) -> Vec<f32>;
+    /// A hash of everything that defines the process (seed, parameters, version): a change re-keys every tile a chunk of it can reach.
+    fn definition_hash(&self) -> u64;
 }
 
 /// The halo of a stage in rings (a chunk is refused below it): its step cap, each step reaching one ring, plus the apron ring.
@@ -240,6 +242,11 @@ impl ChunkResult {
     }
 
     /// A hash of every value of every level (FNV-1a over the bits): the known answer CI compares on Windows and Linux.
+    /// The state word of this result in a tile key (STRM-038): its hash with the low bit set, so it is never the 0 of a chunk that is not ready.
+    pub fn state_word(&self) -> u64 {
+        self.hash() | 1
+    }
+
     pub fn hash(&self) -> u64 {
         let mut h = 0xcbf2_9ce4_8422_2325u64;
         for level in &self.levels {
@@ -292,12 +299,21 @@ pub struct ChunkField<F: HeightField> {
     radius_m: f64,
     bound_m: f64,
     top: u8,
+    definition: u64,
     ready: HashMap<(u8, u32, u32), Arc<ChunkResult>>,
 }
 
 impl<F: HeightField> ChunkField<F> {
-    pub fn new(base: F, lat: ChunkLattice, radius_m: f64, bound_m: f64) -> ChunkField<F> {
-        ChunkField { base, lat, radius_m, bound_m, top: PYRAMID_TOP_LEVEL, ready: HashMap::new() }
+    pub fn new(base: F, lat: ChunkLattice, radius_m: f64, stage: &dyn ChunkStage) -> ChunkField<F> {
+        ChunkField {
+            base,
+            lat,
+            radius_m,
+            bound_m: stage.bound_m(),
+            top: PYRAMID_TOP_LEVEL,
+            definition: stage.definition_hash(),
+            ready: HashMap::new(),
+        }
     }
 
     /// The field whose pyramid reaches up to tile level `top` instead of the default [`PYRAMID_TOP_LEVEL`]; the chunks it is given must have been
@@ -378,6 +394,73 @@ fn catmull_rom_weights(f: f64) -> [f64; 4] {
     [0.5 * (-f3 + 2.0 * f2 - f), 0.5 * (3.0 * f3 - 5.0 * f2 + 2.0), 0.5 * (-3.0 * f3 + 4.0 * f2 + f), 0.5 * (f3 - f2)]
 }
 
+/// The implementation id and version of the chunk stage in a tile key (STRM-038).
+pub const CHUNK_STAGE_ID: &str = "chunk-stage";
+pub const CHUNK_STAGE_VERSION: u32 = 1;
+
+/// A chunk's place on the grid: face and tile position at the chunk grid level.
+pub type ChunkKey = (u8, u32, u32);
+
+/// The chunks a tile reads, own chunk first and the neighbours that its reads can reach after it, in a fixed order; empty for a tile above the
+/// pyramid's top (the base). A tile reads cells of the neighbouring chunk within `reach_cells` of its edge (the spline and the blend of two
+/// pyramid levels); a neighbour out of that reach is not listed, so a landing re-keys only the tiles it can change.
+pub fn chunks_read_by(lat: &ChunkLattice, top: u8, reach_cells: i64, tile: TileId) -> Vec<ChunkKey> {
+    if tile.level() < top || tile.level() < CHUNK_GRID_LEVEL {
+        return Vec::new();
+    }
+    let (n, per) = (lat.n(), i64::from(lat.cells_per_chunk()));
+    let shift = u32::from(tile.level());
+    let range = |index: u32| -> (i64, i64) {
+        let lo = ((u64::from(index) * n as u64) >> shift) as i64;
+        let hi = (((u64::from(index) + 1) * n as u64 + (1u64 << shift) - 1) >> shift) as i64 - 1;
+        (lo, hi)
+    };
+    let ((i0, i1), (j0, j1)) = (range(tile.x()), range(tile.y()));
+    let own = (tile.face().0, (i0 / per) as u32, (j0 / per) as u32);
+    let mut out = vec![own];
+    let mut others = std::collections::BTreeSet::new();
+    for a in [i0 - reach_cells, (i0 + i1) / 2, i1 + reach_cells] {
+        for b in [j0 - reach_cells, (j0 + j1) / 2, j1 + reach_cells] {
+            let c = canon_n(n, tile.face().0, a, b);
+            let key = (c.face, (i64::from(c.i) / per) as u32, (i64::from(c.j) / per) as u32);
+            if key != own {
+                others.insert(key);
+            }
+        }
+    }
+    out.extend(others);
+    out
+}
+
+impl<F: HeightField> ChunkField<F> {
+    /// How far into a neighbouring chunk a read of this field reaches, in raster cells: two cells of the coarsest level it blends.
+    pub fn reach_cells(&self) -> i64 {
+        2 << pyramid_levels(&self.lat, self.radius_m, self.top)
+    }
+
+    /// The chunks tile `tile` reads (see [`chunks_read_by`]).
+    pub fn chunks_read_by(&self, tile: TileId) -> Vec<ChunkKey> {
+        chunks_read_by(&self.lat, self.top, self.reach_cells(), tile)
+    }
+
+    /// The state word of a chunk: 0 while it is not ready, else the content hash of its result (never 0).
+    pub fn chunk_state(&self, key: ChunkKey) -> u64 {
+        self.ready.get(&key).map_or(0, |c| c.state_word())
+    }
+
+    /// The records of the chunks `tile` reads, with their state words (STRM-038).
+    fn chunk_records(&self, tile: TileId) -> Vec<ReadRecord> {
+        self.chunks_read_by(tile)
+            .into_iter()
+            .map(|k| ReadRecord::Chunk {
+                body: self.base.body(),
+                chunk: TileId::new(planet_core::Face(k.0), CHUNK_GRID_LEVEL, k.1, k.2).expect("a chunk of the grid is a tile"),
+                state: self.chunk_state(k),
+            })
+            .collect()
+    }
+}
+
 impl<F: HeightField> HeightField for ChunkField<F> {
     fn height(&self, dir: Vec3) -> f64 {
         self.height_at_level(dir, planet_core::tile::MAX_LEVEL)
@@ -385,42 +468,92 @@ impl<F: HeightField> HeightField for ChunkField<F> {
     fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
         self.base.height_at_level(dir, level) + self.change_at_level(dir, level)
     }
+    fn level_aware(&self) -> bool {
+        true
+    }
+    /// The tile's heights as drawn at its own level (GEN-036): the base's batch plus the change of the pyramid level the tile reads. The base is
+    /// read as the field below the chunk stage reads it (level-independent: the global run and the layers under the chunks).
+    fn heights_and_climate(
+        &self,
+        map: &dyn FaceMapping,
+        id: TileId,
+        dirs: &[Vec3],
+        stop: &dyn Fn() -> bool,
+    ) -> (Vec<f64>, crate::climate::ClimateTexture) {
+        let (mut heights, climate) = self.base.heights_and_climate(map, id, dirs, stop);
+        for (h, &d) in heights.iter_mut().zip(dirs) {
+            if stop() {
+                break;
+            }
+            *h += self.change_at_level(d, id.level());
+        }
+        (heights, climate)
+    }
     fn seed(&self) -> u64 {
         self.base.seed()
     }
     fn implementation_id(&self) -> &'static str {
-        self.base.implementation_id()
+        CHUNK_STAGE_ID
     }
     fn version(&self) -> u32 {
-        self.base.version()
+        CHUNK_STAGE_VERSION
     }
     fn max_abs_height_m(&self) -> f64 {
         self.base.max_abs_height_m() + self.bound_m
     }
+    /// The stage's own definition (the process, the grid, the top level and its bound): a change re-keys every tile it reads.
     fn inputs_hash(&self) -> u64 {
-        self.base.inputs_hash()
+        planet_core::hash::hash_u64s(
+            0x0063_6866,
+            &[self.definition, u64::from(self.lat.cells_per_chunk()), u64::from(self.top), self.bound_m.to_bits(), self.radius_m.to_bits()],
+        )
     }
     fn read_records(&self) -> Vec<ReadRecord> {
         self.base.read_records()
     }
+    fn read_records_for(&self, tile: TileId, map: &dyn FaceMapping) -> Vec<ReadRecord> {
+        let mut reads = self.base.read_records_for(tile, map);
+        reads.extend(self.chunk_records(tile));
+        reads
+    }
+    fn reads_cells(&self) -> bool {
+        true
+    }
+    /// The base's hash for the tile, its version, implementation and bake key and the state of the chunks the tile reads (a chunk's state is the hash of its result, so another process gives another state once it has landed; while none has, the tile is the base)
+    /// (STRM-038): the 64-bit in-memory keys chain the stage below as the 128-bit ones do.
+    fn inputs_hash_for(&self, tile: TileId, map: &dyn FaceMapping) -> u64 {
+        let source = self
+            .base
+            .source_key()
+            .map_or([0u64; 2], |k| [u64::from_le_bytes(k[..8].try_into().unwrap()), u64::from_le_bytes(k[8..].try_into().unwrap())]);
+        let id: Vec<u64> = self.base.implementation_id().bytes().map(u64::from).collect();
+        planet_core::hash::hash_u64s(
+            0x0063_6873,
+            &[
+                self.base.inputs_hash_for(tile, map),
+                u64::from(self.base.version()),
+                planet_core::hash::hash_u64s(4, &id),
+                source[0],
+                source[1],
+                planet_world_def::records_hash64(&self.chunk_records(tile)),
+            ],
+        )
+    }
     fn body(&self) -> BodyId {
         self.base.body()
     }
-    fn source_key(&self) -> Option<[u8; 16]> {
-        self.base.source_key()
-    }
     fn upstream(&self) -> Option<&dyn HeightField> {
-        self.base.upstream()
+        Some(&self.base)
     }
     fn stage_params(&self) -> Option<(&str, u32)> {
-        self.base.stage_params()
+        Some(("chunk", 0))
     }
     fn item_revision(&self) -> u64 {
         self.base.item_revision()
     }
-    /// A tile is the base's only where the chunk detail cannot reach it: above the pyramid's top, or while no chunk is ready.
-    fn passes_through(&self, tile: TileId, map: &dyn FaceMapping) -> bool {
-        (tile.level() < self.top || self.ready.is_empty()) && self.base.passes_through(tile, map)
+    /// A tile is the base's where the chunk detail cannot reach it: above the pyramid's top (STRM-029).
+    fn passes_through(&self, tile: TileId, _map: &dyn FaceMapping) -> bool {
+        tile.level() < self.top
     }
     fn surface_id(&self) -> &'static str {
         self.base.surface_id()
@@ -477,6 +610,9 @@ impl ChunkStage for StandIn {
     }
     fn bound_m(&self) -> f64 {
         2.0 * self.amplitude_m
+    }
+    fn definition_hash(&self) -> u64 {
+        planet_core::hash::hash_u64s(0x0073_7461, &[self.seed, self.radius_m.to_bits(), self.amplitude_m.to_bits(), u64::from(self.steps)])
     }
     fn compute(&self, lat: &ChunkLattice, region: &Region) -> Vec<f32> {
         let mut cur: Vec<f32> = region.cells.iter().map(|&c| self.relief(lat.direction(c))).collect();

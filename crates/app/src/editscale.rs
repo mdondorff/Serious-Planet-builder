@@ -367,6 +367,9 @@ impl HeightField for Timed<'_> {
     fn height_at_level(&self, d: Vec3, level: u8) -> f64 {
         self.timed(0, || self.inner.height_at_level(d, level))
     }
+    fn level_aware(&self) -> bool {
+        self.inner.level_aware()
+    }
     fn seed(&self) -> u64 {
         self.inner.seed()
     }

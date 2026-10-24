@@ -241,6 +241,20 @@ pub trait HeightField: Send + Sync {
     fn height_at_level(&self, dir: Vec3, _level: u8) -> f64 {
         self.height(dir)
     }
+    /// Whether [`height_at_level`](HeightField::height_at_level) can differ from `height`: false for every field without chunk detail, so the
+    /// batch forms that ignore the level stay the fast path for them. A wrapper forwards it with `height_at_level`.
+    fn level_aware(&self) -> bool {
+        false
+    }
+    /// [`heights_threaded`](HeightField::heights_threaded) as drawn at tile level `level` (the plan's origin heights, GEN-036): the same values as
+    /// `height_at_level` per direction in the caller's order for every `threads`; a field that is not level-aware takes its batch path.
+    fn heights_threaded_at_level(&self, dirs: &[Vec3], level: u8, threads: usize) -> Vec<f64> {
+        if self.level_aware() {
+            eval_chunked(dirs, &|| false, threads, &|d| self.height_at_level(d, level))
+        } else {
+            self.heights_threaded(dirs, threads)
+        }
+    }
     /// The heights of `dirs`, in the caller's order: element `k` is bit for bit `self.height(dirs[k])` (GEN-020). A field is free to
     /// evaluate the directions in any other order internally (one that reads a block store groups them by block) because every
     /// height is a pure function of its direction. `stop` is polled during the batch (at least every 64 samples); once it
@@ -477,7 +491,7 @@ pub fn generate_tile_field(field: &dyn HeightField, map: &dyn FaceMapping, id: T
     let mut heights = Vec::with_capacity(((res + 1) * (res + 1)) as usize);
     for l in 0..=res {
         for k in 0..=res {
-            heights.push(field.height(id.sample_direction(map, res, k, l)) as f32);
+            heights.push(field.height_at_level(id.sample_direction(map, res, k, l), id.level()) as f32);
         }
     }
     TileData { id, res, heights }
@@ -571,6 +585,9 @@ impl<F: HeightField> HeightField for Bound<F> {
     }
     fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
         self.field.height_at_level(dir, level)
+    }
+    fn level_aware(&self) -> bool {
+        self.field.level_aware()
     }
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         self.field.heights_until(dirs, stop)

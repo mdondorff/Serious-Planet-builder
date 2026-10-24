@@ -1,5 +1,7 @@
 #[path = "atmosphere.rs"]
 mod atmosphere;
+#[path = "chunk_plan.rs"]
+mod chunk_plan;
 #[path = "compact_pool.rs"]
 mod compact_pool;
 #[path = "controller.rs"]

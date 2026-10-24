@@ -901,6 +901,9 @@ impl planet_generators::height::HeightField for CancelGuarded<'_> {
             self.inner.height_at_level(dir, level)
         }
     }
+    fn level_aware(&self) -> bool {
+        self.inner.level_aware()
+    }
     /// The inner field's batch (it may order the samples by block, GEN-020), stopped by the token or the caller's flag.
     // Invariant: once `stop` or the cancel flag answers true the batch returns 0.0 for the unfinished directions; whoever cancels
     // must discard the results of the batch (the plan of a cancelled job is never used or memoised).

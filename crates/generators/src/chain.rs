@@ -130,6 +130,9 @@ impl HeightField for CoupledLensField<'_> {
     fn height_at_level(&self, dir: Vec3, level: u8) -> f64 {
         self.f().height_at_level(dir, level)
     }
+    fn level_aware(&self) -> bool {
+        self.f().level_aware()
+    }
     fn heights_until(&self, dirs: &[Vec3], stop: &dyn Fn() -> bool) -> Vec<f64> {
         self.f().heights_until(dirs, stop)
     }

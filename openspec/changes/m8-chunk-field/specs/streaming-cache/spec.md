@@ -1,15 +1,15 @@
 ## ADDED Requirements
 
 ### Requirement: STRM-038 Chunk results in tile keys
-A tile key SHALL chain the content hash of the chunk result the tile reads; a tile whose chunk is not ready SHALL chain word 0, so a stand-in tile and an exact tile never share a key, and a tile above the apply level SHALL have the base's key whatever the chunks hold.
+A tile key SHALL chain the content hash of the chunk results the tile reads, its own chunk and every neighbouring chunk within its read reach (a tile near a chunk border reads cells of the neighbour); a chunk that is not ready SHALL chain word 0, so a stand-in tile and an exact tile never share a key and a neighbour landing re-keys exactly the tiles it can change, and a tile above the pyramid's top level SHALL have the base's key whatever the chunks hold.
 
 Verify: A
 Status: planned
 Source: SPIKE-34 section 6, STRM-027, STRM-029, ADR 0022
 
 #### Scenario: Keys
-- **WHEN** a tile at the apply level is keyed with its chunk not ready, then ready, and a tile one level above it in both states
-- **THEN** the first two keys differ, and the two keys of the coarser tile are equal and equal the base's
+- **WHEN** a tile at the pyramid top is keyed with its chunk not ready, then ready, a tile one level above the top in both states, and a tile at the chunk border with its neighbour not ready, then ready
+- **THEN** the first two keys differ, the two keys of the coarser tile are equal and equal the base's, and the border tile's keys differ while a tile in the middle of the chunk keeps its key
 
 ### Requirement: STRM-039 Chunk jobs never block a frame
 Chunk jobs SHALL run on the injected spawner (CON-04), ordered by distance to the camera, at most `chunk_workers` at once, and no frame SHALL wait for one. A tile whose chunk is not ready SHALL draw the base; on landing, the chunk's change SHALL fade in per tile over `chunk_fade_ms` (default 500) on the injected clock, through a plain f32 weight (CON-11). The per-frame log SHALL count the plan's nodes at the apply level whose chunk is not ready and the plan's nodes at the apply level (the stand-in share, for the speed-envelope scene).
