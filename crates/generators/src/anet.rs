@@ -314,6 +314,11 @@ pub struct ANetParams {
     /// The most a cell off the corridor takes of the step (`f` is capped here): a tributary that took all of it would collapse to its outlet level
     /// along its whole length and depend on the height at the ring. The corridor, held at its anchors, is not capped.
     pub tributary_f_max: f64,
+    /// Hillslope processes (GEN-051): diffusivity in m2 per year, the angle of repose as a slope, the share of the excess slumped per pass; `diffusion`
+    /// zero and `slump_rate` zero switch them off.
+    pub diffusion: f64,
+    pub talus: f64,
+    pub slump_rate: f64,
 }
 
 impl ANetParams {
@@ -332,6 +337,9 @@ impl ANetParams {
             breach_window: ((halo_m / cell_m).ceil() - 2.0).clamp(1.0, 64.0) as u16,
             area_window: ((halo_m / cell_m).ceil() - 2.0).clamp(1.0, 128.0) as u16,
             tributary_f_max: 0.5,
+            diffusion: 0.005,
+            talus: 0.9,
+            slump_rate: 0.09,
         }
     }
 }
@@ -544,13 +552,34 @@ pub fn solve(
             }
         })
         .collect();
-    for _ in 0..p.steps {
+    // Hillslope processes (GEN-051) after each incision sweep, on the cells within `steps - t` rings of the chunk (the reach left to a core cell at step
+    // `t`), so they do not depend on the halo; channels, the corridor and fixed cells are exempt.
+    let hill = p.diffusion > 0.0 || p.slump_rate > 0.0;
+    let reach0 = (p.steps as u16).min(region.halo.saturating_sub(2));
+    let inner = region.depth.partition_point(|&d| d <= reach0);
+    let nd: Vec<[f64; 8]> =
+        if hill { (0..inner).map(|c| core::array::from_fn(|k| dist(c, region.neighbours[c][k] as usize))).collect() } else { Vec::new() };
+    let protected = |c: usize| fixed(c) || net.corridor[c] || area[c] > p.channel_area_m2;
+    let cf = (p.diffusion * p.dt_years / (lat.cell_m(radius_m) * lat.cell_m(radius_m))).min(0.12);
+    for t in 0..p.steps {
         for &c in order.iter().rev() {
             let r = rec[c];
             if r == NONE || fixed(c) {
                 continue;
             }
             z[c] = (z[c] + coef[c] * z[r as usize]) / (1.0 + coef[c]);
+        }
+        if hill {
+            let cells = region.depth.partition_point(|&d| d <= (p.steps - t) as u16).min(inner);
+            if p.diffusion > 0.0 {
+                z = diffuse(&z, &region.neighbours, cells, cf, &protected);
+            }
+            if p.slump_rate > 0.0 {
+                let delta = slump_deltas(&z, &region.neighbours, &nd, cells, p.talus, p.slump_rate, &protected);
+                for c in 0..cells {
+                    z[c] += delta[c];
+                }
+            }
         }
     }
     // No channel cell drains uphill (GEN-048). A corridor donor below a fixed receiver is lifted to it, a flat (the bed behind a dam fills up to it),
@@ -639,6 +668,9 @@ impl crate::chunkfield::ChunkStage for ANet {
                 u64::from(p.breach_window),
                 u64::from(p.area_window),
                 p.tributary_f_max.to_bits(),
+                p.diffusion.to_bits(),
+                p.talus.to_bits(),
+                p.slump_rate.to_bits(),
                 self.run.identity(),
                 self.base.identity(),
                 self.radius_m.to_bits(),
@@ -650,3 +682,53 @@ impl crate::chunkfield::ChunkStage for ANet {
 
 /// Version of the stage's algorithm: part of its definition hash, so a change that changes results re-keys every chunk.
 pub const ANET_VERSION: u32 = 1;
+
+/// The change of height each cell takes in one pass of thermal slumping (GEN-051): a cell steeper than `talus` over a neighbour gives that
+/// neighbour `rate x (slope - talus) x distance`, and takes the same from a neighbour steeper over it. `dist[c][k]` is the distance to the
+/// `k`-th neighbour of `c` (the order of the region's neighbour table); a pair is skipped when either cell is `protected`. Every cell sums its
+/// own eight pairs in the table's order, so the result does not depend on how the region numbers its cells, and the deltas of the cells it covers
+/// sum to zero (a pair is counted once from each side with opposite signs). `cells` limits the pass to the first `cells` entries of `z`.
+pub fn slump_deltas(
+    z: &[f64],
+    neighbours: &[[u32; 8]],
+    dist: &[[f64; 8]],
+    cells: usize,
+    talus: f64,
+    rate: f64,
+    protected: &dyn Fn(usize) -> bool,
+) -> Vec<f64> {
+    let mut delta = vec![0.0f64; z.len()];
+    for c in 0..cells {
+        if protected(c) {
+            continue;
+        }
+        let mut d = 0.0;
+        for k in 0..8 {
+            let q = neighbours[c][k] as usize;
+            if protected(q) {
+                continue;
+            }
+            let slope = (z[c] - z[q]) / dist[c][k];
+            if slope > talus {
+                d -= rate * (slope - talus) * dist[c][k];
+            } else if -slope > talus {
+                d += rate * (-slope - talus) * dist[c][k];
+            }
+        }
+        delta[c] = d;
+    }
+    delta
+}
+
+/// One pass of diffusion on the first `cells` cells: `z + cf (sum of the four edge neighbours - 4 z)`, from the heights before the pass.
+pub fn diffuse(z: &[f64], neighbours: &[[u32; 8]], cells: usize, cf: f64, skip: &dyn Fn(usize) -> bool) -> Vec<f64> {
+    let mut out = z.to_vec();
+    for c in 0..cells {
+        if skip(c) {
+            continue;
+        }
+        let n = &neighbours[c];
+        out[c] = z[c] + cf * (z[n[0] as usize] + z[n[1] as usize] + z[n[2] as usize] + z[n[3] as usize] - 4.0 * z[c]);
+    }
+    out
+}

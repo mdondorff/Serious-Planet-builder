@@ -11,8 +11,8 @@
 - [ ] 2.5 numerics-reviewer; verifier; PR
 
 ## 3. Diffusion and slumping (GEN-051), about a day
-- [ ] 3.1 Tests first: after the processes no non-channel cell is steeper than the angle of repose by more than the pass count allows, channel cells are untouched by them, mass moves only between neighbours, 1, 2 and 8 threads give one hash (spec: GEN-051, GEN-038)
-- [ ] 3.2 Diffusion and thermal slumping on non-channel cells, fixed order
+- [x] 3.1 Tests first: after the processes no non-channel cell is steeper than the angle of repose by more than the pass count allows, channel cells are untouched by them, mass moves only between neighbours, 1, 2 and 8 threads give one hash (spec: GEN-051, GEN-038)
+- [x] 3.2 Diffusion and thermal slumping on non-channel cells, fixed order
 - [ ] 3.3 numerics-reviewer; verifier; PR
 
 ## 4. Replace the stand-in and measure (GEN-052, STRM-046), about a day
