@@ -311,8 +311,8 @@ fn fly(
 
 /// The chunk field the scene counts its stand-in share against (STRM-039): the world's, `None` while the app builds no chunk manager for a
 /// world. The one place to give the scene a [`ManagerView`] when a world gets a chunk field; the log says it had none.
-fn chunk_view_of(_world: &WorldTerrain) -> Option<Arc<dyn ChunkView>> {
-    None
+fn chunk_view_of(world: &WorldTerrain) -> Option<Arc<dyn ChunkView>> {
+    world.chunk_view()
 }
 
 /// The measure of a flight from the per-frame coarse shares and, with a chunk field, the per-frame chunk shares: each judged as its worst

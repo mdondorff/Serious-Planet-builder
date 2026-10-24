@@ -12,7 +12,7 @@ use planet_cache::global_store::{GlobalWorld, StoreSource};
 use planet_cache::meshpack::TileSpec;
 use planet_core::cube::TangentWarp;
 use planet_core::{Face, TileId};
-use planet_generators::chain::{field_chain, CoupledLensField, NoBake, OwnedBake, OwnedOcean};
+use planet_generators::chain::{field_chain_with, CoupledLensField, NoBake, OwnedBake, OwnedOcean};
 use planet_generators::coupled::CoupledLens;
 use planet_generators::global::{GlobalCoarseGenerator, GlobalSample, LatticeSource, ReadError};
 use planet_generators::height::{HeightField, IMPLEMENTATION_ID as REFERENCE_ID};
@@ -182,6 +182,17 @@ pub struct WorldTerrain {
     coupled_lens: std::sync::atomic::AtomicU8,
     /// The directory of the stored bake the coupled channel lives beside; none for an in-memory bake.
     store_dir: Option<std::path::PathBuf>,
+    /// The chunk stage of this world (M8-2, GEN-039 `on-top`): none until [`WorldTerrain::enable_chunks`]; then every field this world builds has
+    /// the chunk stage over its base with the chunks ready at the time.
+    chunks: std::sync::RwLock<Option<Arc<ChunkWorld>>>,
+}
+
+/// The chunk stage of a world: the process, the lattice, the pyramid's top level and the manager that computes and holds the chunks.
+struct ChunkWorld {
+    lat: planet_generators::chunkfield::ChunkLattice,
+    top: u8,
+    stage: Arc<dyn planet_generators::chunkfield::ChunkStage>,
+    manager: Arc<planet_streaming::chunks::ChunkManager>,
 }
 
 /// The ocean channel of a stored bake as the water field's lattice.
@@ -274,6 +285,7 @@ impl WorldTerrain {
             bound_water: false,
             water_book: Default::default(),
             coupled: Default::default(),
+            chunks: Default::default(),
             coupled_lens: Default::default(),
             store_dir: None,
         })
@@ -353,6 +365,7 @@ impl WorldTerrain {
             bound_water: false,
             water_book: Default::default(),
             coupled: Default::default(),
+            chunks: Default::default(),
             coupled_lens: Default::default(),
             store_dir: Some(dir.to_path_buf()),
         })
@@ -675,11 +688,75 @@ impl WorldTerrain {
         });
     }
 
+    /// Give this world a chunk stage (GEN-039 `on-top`): the process `stage` over a lattice of `cells_per_chunk` cells per chunk edge, its jobs
+    /// on `spawner` and its eviction on `clock` (CON-04), `disk` the cache of landed chunks. From now on every field the world builds is the
+    /// base, the chunk stage over it with the chunks ready at that moment, then the stamps. A second call replaces the first.
+    pub fn enable_chunks(
+        &self,
+        stage: Arc<dyn planet_generators::chunkfield::ChunkStage>,
+        cells_per_chunk: u32,
+        spawner: Arc<dyn planet_streaming::Spawner>,
+        clock: Arc<dyn planet_streaming::Clock>,
+        disk: Option<Arc<dyn planet_streaming::chunks::ChunkDisk>>,
+        cfg: planet_streaming::chunks::ChunkConfig,
+    ) -> Result<(), String> {
+        let lat = planet_generators::chunkfield::ChunkLattice::new(cells_per_chunk).ok_or_else(|| {
+            format!("{cells_per_chunk} cells per chunk edge: the lattice needs at least one cell and fits 2^27 per face edge")
+        })?;
+        let top = planet_generators::chunkfield::PYRAMID_TOP_LEVEL;
+        let manager =
+            Arc::new(planet_streaming::chunks::ChunkManager::new(lat, self.radius_m, top, stage.clone(), spawner, clock, disk, cfg));
+        *self.chunks.write().expect("chunk stage") = Some(Arc::new(ChunkWorld { lat, top, stage, manager }));
+        Ok(())
+    }
+
+    /// The manager of this world's chunks, if it has a chunk stage.
+    pub fn chunk_manager(&self) -> Option<Arc<planet_streaming::chunks::ChunkManager>> {
+        self.chunks.read().expect("chunk stage").as_ref().map(|c| c.manager.clone())
+    }
+
+    /// The view a frame counts its stand-in share against (STRM-039): the world's chunks, `None` without a chunk stage.
+    pub fn chunk_view(&self) -> Option<Arc<dyn planet_frame::chunkshare::ChunkView>> {
+        self.chunk_manager().map(|m| Arc::new(planet_frame::chunkshare::ManagerView(m)) as Arc<dyn planet_frame::chunkshare::ChunkView>)
+    }
+
+    /// One frame of the chunk jobs (STRM-039, STRM-042): the chunks the plan's `tiles` read, nearest to `camera` first, and the chunks to
+    /// prefetch. Returns what landed (the tiles that read it want a refresh: [`planet_frame::ManagedLoop::chunk_landed`]) and what was
+    /// evicted; without a chunk stage nothing happens. Never waits for a job.
+    pub fn chunk_frame(
+        &self,
+        tiles: &[TileId],
+        camera: planet_core::PlanetFixed,
+        prefetch: &[planet_generators::chunkfield::ChunkKey],
+    ) -> planet_streaming::chunks::ChunkUpdate {
+        let Some(m) = self.chunk_manager() else { return Default::default() };
+        let mut wanted: Vec<(planet_generators::chunkfield::ChunkKey, f64)> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for &t in tiles {
+            for k in m.reads(t) {
+                if seen.insert(k) {
+                    let tile = TileId::new(Face(k.0), planet_generators::chunk::CHUNK_GRID_LEVEL, k.1, k.2)
+                        .expect("a chunk of the grid is a tile");
+                    let d = (tile.center_direction(&planet_core::cube::TangentWarp) * self.radius_m - camera.0).length();
+                    wanted.push((k, d));
+                }
+            }
+        }
+        m.update_with(&wanted, prefetch)
+    }
+
     /// Build the field (a fresh context per field: its key covers what it read).
     pub fn field(&self) -> Result<Box<dyn HeightField + '_>, String> {
         let started = std::time::Instant::now();
         let def = self.definition();
-        let built = field_chain(self.kind, &def, self.src.as_ref(), self.bake_key, self.bound_water);
+        let layer = self.chunks.read().expect("chunk stage").as_ref().map(|c| planet_generators::chunkfield::ChunkLayer {
+            lat: c.lat,
+            radius_m: self.radius_m,
+            top: c.top,
+            stage: c.stage.clone(),
+            ready: c.manager.snapshot(),
+        });
+        let built = field_chain_with(self.kind, &def, self.src.as_ref(), self.bake_key, self.bound_water, layer.as_ref());
         // The lens over the whole chain (GEN-043); while the run is not ready the field is the plain one.
         let built = match (self.coupled_lens(), self.coupled.standing()) {
             (Some(lens), Standing::Ready(maps, _)) => {
